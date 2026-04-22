@@ -1,0 +1,15 @@
+{
+  "name": "@estacoda/v2",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "dev": "$npm_execpath src/index.ts",
+    "smoke": "$npm_execpath src/smoke.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "typescript": "^5.8.0"
+  }
+}

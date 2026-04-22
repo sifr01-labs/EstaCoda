@@ -1,0 +1,234 @@
+import type { ChannelKind } from "./channel.js";
+import type { ContextReference } from "./context.js";
+import type { IntentRoute } from "./intent.js";
+import type { ProviderErrorClass } from "./provider.js";
+import type { PromptBudgetReport } from "./prompt.js";
+import type { ArtifactRecord } from "./artifact.js";
+import type { SkillOutcome } from "./memory.js";
+import type { SecurityDecision } from "./security.js";
+import type { ToolResult, ToolRiskClass } from "./tool.js";
+import type { ToolCallPlan } from "./tool-plan.js";
+import type { SkillWorkflowPlan } from "./skill.js";
+
+export type SessionRole = "user" | "agent" | "system" | "tool";
+
+export type SessionRecord = {
+  id: string;
+  profileId: string;
+  title?: string;
+  createdAt: string;
+  updatedAt: string;
+  parentSessionId?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type SessionMessage = {
+  id: string;
+  sessionId: string;
+  role: SessionRole;
+  content: string;
+  createdAt: string;
+  channel?: ChannelKind;
+  metadata?: Record<string, unknown>;
+};
+
+export type SessionEvent =
+  | {
+      kind: "intent-routed";
+      route: IntentRoute;
+    }
+  | {
+      kind: "skill-selected";
+      skill: string;
+    }
+  | {
+      kind: "skill-workflow-planned";
+      plan: SkillWorkflowPlan;
+    }
+  | {
+      kind: "skill-workflow-step";
+      skill: string;
+      stepId: string;
+      description: string;
+      status: "tool-executed" | "no-tool" | "blocked" | "skipped";
+      toolsets: string[];
+      tool?: string;
+      reason?: string;
+    }
+  | {
+      kind: "security-decided";
+      decision: SecurityDecision;
+      description: string;
+    }
+  | {
+      kind: "trajectory-linked";
+      trajectoryId: string;
+    }
+  | {
+      kind: "context-expanded";
+      references: ContextReference[];
+      blocks: Array<{
+        source: string;
+        status: string;
+        bytes: number;
+        warnings: string[];
+      }>;
+      warnings: string[];
+    }
+  | {
+      kind: "delegation-started";
+      childSessionId: string;
+      task: string;
+      allowedToolsets: string[];
+      allowedTools?: string[];
+    }
+  | {
+      kind: "delegation-finished";
+      childSessionId: string;
+      summary: string;
+      status: "completed" | "blocked" | "failed";
+    }
+  | {
+      kind: "tool-called";
+      tool: string;
+      input: Record<string, unknown>;
+    }
+  | {
+      kind: "tool-gated";
+      tool: string;
+      decision: SecurityDecision;
+      riskClass: ToolRiskClass;
+    }
+  | {
+      kind: "tool-result";
+      tool: string;
+      result: ToolResult;
+    }
+  | {
+      kind: "artifact-created";
+      artifact: ArtifactRecord;
+      tool?: string;
+    }
+  | {
+      kind: "provider-completion";
+      iteration?: number;
+      ok: boolean;
+      attempts: Array<{
+        provider: string;
+        model: string;
+        credentialId?: string;
+        ok: boolean;
+        errorClass?: ProviderErrorClass | string;
+      }>;
+      fallbackUsed: boolean;
+      usage?: {
+        inputTokens?: number;
+        outputTokens?: number;
+        totalTokens?: number;
+      };
+    }
+  | {
+      kind: "provider-continuation";
+      iteration?: number;
+      ok: boolean;
+      attempts: Array<{
+        provider: string;
+        model: string;
+        credentialId?: string;
+        ok: boolean;
+        errorClass?: ProviderErrorClass | string;
+      }>;
+      toolPlans: Array<{
+        id: string;
+        tool: string;
+        status: string;
+      }>;
+      usage?: {
+        inputTokens?: number;
+        outputTokens?: number;
+        totalTokens?: number;
+      };
+    }
+  | {
+      kind: "provider-iteration";
+      iteration: number;
+      phase: "initial" | "continuation";
+      ok: boolean;
+      toolCalls: number;
+      executedTools: number;
+      exhausted: boolean;
+    }
+  | {
+      kind: "prompt-assembled";
+      budget: PromptBudgetReport;
+    }
+  | {
+      kind: "session-history-packed";
+      sourceMessageCount: number;
+      summarizedMessageCount: number;
+      protectedMessageCount: number;
+      protectedToolPairCount?: number;
+      estimatedTokens: number;
+      summary?: string;
+    }
+  | {
+      kind: "provider-budget-exhausted";
+      budget: string;
+      limit: number;
+      observed: number;
+      reason: string;
+    }
+  | {
+      kind: "agent-cancelled";
+      reason: string;
+      resumeNote?: string;
+      activeSkill?: string;
+      activeToolPlans?: Array<{
+        id: string;
+        tool: string;
+        status: string;
+      }>;
+    }
+  | {
+      kind: "tool-plan";
+      plan: ToolCallPlan;
+    }
+  | {
+      kind: "memory-write";
+      provider: string;
+      outcome: SkillOutcome;
+    };
+
+export type SessionSearchResult = {
+  session: SessionRecord;
+  message: SessionMessage;
+  score: number;
+};
+
+export type CreateSessionInput = {
+  id?: string;
+  profileId: string;
+  title?: string;
+  parentSessionId?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type AppendMessageInput = {
+  id?: string;
+  sessionId: string;
+  role: SessionRole;
+  content: string;
+  channel?: ChannelKind;
+  metadata?: Record<string, unknown>;
+};
+
+export type SessionDB = {
+  createSession(input: CreateSessionInput): Promise<SessionRecord>;
+  getSession(id: string): Promise<SessionRecord | undefined>;
+  listSessions(profileId?: string): Promise<SessionRecord[]>;
+  appendMessage(input: AppendMessageInput): Promise<SessionMessage>;
+  appendEvent(sessionId: string, event: SessionEvent): Promise<void>;
+  listMessages(sessionId: string): Promise<SessionMessage[]>;
+  listEvents(sessionId: string): Promise<SessionEvent[]>;
+  search(query: string, options?: { profileId?: string; limit?: number }): Promise<SessionSearchResult[]>;
+};
