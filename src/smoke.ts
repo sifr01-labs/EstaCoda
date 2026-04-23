@@ -3272,6 +3272,15 @@ assert(
     multiStepEvents.some((event) => event.kind === "tool-result" && event.tool === "file.read" && event.ok === true),
   "expected multi-step provider E2E to emit write and read tool-result events"
 );
+const multiStepExecutionOrder = multiStepEvents
+  .filter((event) => event.kind === "tool-result")
+  .map((event) => event.tool);
+assert(
+  multiStepExecutionOrder.indexOf("file.write") !== -1 &&
+    multiStepExecutionOrder.indexOf("file.read") !== -1 &&
+    multiStepExecutionOrder.indexOf("file.write") < multiStepExecutionOrder.indexOf("file.read"),
+  "expected multi-step provider E2E to execute file.write before dependent file.read"
+);
 
 const compressionWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-compression-"));
 await mkdir(join(compressionWorkspace, "src"));

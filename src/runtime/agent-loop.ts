@@ -795,11 +795,22 @@ export class AgentLoop {
       });
     }
 
-    const safePlans = pending.filter((entry) => isConcurrentSafeTool(entry.definition));
-    const sequentialPlans = pending.filter((entry) => !isConcurrentSafeTool(entry.definition));
+    for (const group of groupProviderToolPlans(pending, this.#budgets.maxConcurrentSafeTools)) {
+      if (group.concurrent) {
+        const groupExecutions = await Promise.all(group.entries.map(async ({ plan }) =>
+          this.#executeProviderToolPlan({
+            plan,
+            trustedWorkspace: input.trustedWorkspace,
+            signal: input.signal,
+            onEvent: input.onEvent
+          })
+        ));
 
-    for (const chunk of chunkArray(safePlans, this.#budgets.maxConcurrentSafeTools)) {
-      await Promise.all(chunk.map(async ({ plan }) => {
+        executions.push(...groupExecutions.filter((execution) => execution !== undefined));
+        continue;
+      }
+
+      for (const { plan } of group.entries) {
         const execution = await this.#executeProviderToolPlan({
           plan,
           trustedWorkspace: input.trustedWorkspace,
@@ -809,18 +820,6 @@ export class AgentLoop {
         if (execution !== undefined) {
           executions.push(execution);
         }
-      }));
-    }
-
-    for (const { plan } of sequentialPlans) {
-      const execution = await this.#executeProviderToolPlan({
-        plan,
-        trustedWorkspace: input.trustedWorkspace,
-        signal: input.signal,
-        onEvent: input.onEvent
-      });
-      if (execution !== undefined) {
-        executions.push(execution);
       }
     }
 
@@ -1830,15 +1829,45 @@ function isConcurrentSafeTool(tool: ToolDefinition | undefined): boolean {
     tool.name !== "process.start";
 }
 
-function chunkArray<T>(items: T[], size: number): T[][] {
-  const safeSize = Math.max(1, size);
-  const chunks: T[][] = [];
+type ProviderToolPlanEntry = {
+  plan: ToolCallPlan;
+  definition: ToolDefinition | undefined;
+};
 
-  for (let index = 0; index < items.length; index += safeSize) {
-    chunks.push(items.slice(index, index + safeSize));
+function groupProviderToolPlans(
+  entries: ProviderToolPlanEntry[],
+  maxConcurrentSafeTools: number
+): Array<{ concurrent: boolean; entries: ProviderToolPlanEntry[] }> {
+  const groups: Array<{ concurrent: boolean; entries: ProviderToolPlanEntry[] }> = [];
+  const safeSize = Math.max(1, maxConcurrentSafeTools);
+  let safeBatch: ProviderToolPlanEntry[] = [];
+
+  const flushSafeBatch = () => {
+    for (let index = 0; index < safeBatch.length; index += safeSize) {
+      groups.push({
+        concurrent: true,
+        entries: safeBatch.slice(index, index + safeSize)
+      });
+    }
+    safeBatch = [];
+  };
+
+  for (const entry of entries) {
+    if (isConcurrentSafeTool(entry.definition)) {
+      safeBatch.push(entry);
+      continue;
+    }
+
+    flushSafeBatch();
+    groups.push({
+      concurrent: false,
+      entries: [entry]
+    });
   }
 
-  return chunks;
+  flushSafeBatch();
+
+  return groups;
 }
 
 function normalizeProviderRequest(request: Omit<ProviderRequest, "model"> & { model?: string }): Omit<ProviderRequest, "model"> & { model?: string } {
