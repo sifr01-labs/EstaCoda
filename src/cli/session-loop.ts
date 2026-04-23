@@ -7,6 +7,7 @@ import { ToolActivityRenderer, toolIcon } from "./tool-activity-renderer.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
+  refreshRuntime?: () => Promise<Runtime>;
   input?: NodeJS.ReadableStream;
   output?: NodeJS.WritableStream;
   prompt?: (question: string) => Promise<string>;
@@ -15,8 +16,9 @@ export type SessionLoopOptions = {
 
 export async function runSessionLoop(options: SessionLoopOptions): Promise<void> {
   const output = options.output ?? defaultOutput;
-  const activityRenderer = new ToolActivityRenderer({
-    tools: options.runtime.tools()
+  let runtime = options.runtime;
+  let activityRenderer = new ToolActivityRenderer({
+    tools: runtime.tools()
   });
   let readline: Interface | undefined;
   let activeTurn: AbortController | undefined;
@@ -43,7 +45,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   process.once("SIGINT", onSigint);
 
   try {
-    output.write(`${options.runtime.describe()}\n\n`);
+    output.write(`${runtime.describe()}\n\n`);
     output.write("Type a message. Use /help for commands or /exit to leave.\n\n");
 
     while (true) {
@@ -61,9 +63,25 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       if (text.startsWith("/")) {
         const shouldExit = await handleSlashCommand({
           text,
-          runtime: options.runtime,
-          output
+          runtime,
+          output,
+          refreshRuntime: options.refreshRuntime
         });
+
+        if (typeof shouldExit !== "boolean") {
+          runtime = shouldExit.runtime;
+          activityRenderer = new ToolActivityRenderer({
+            tools: runtime.tools()
+          });
+          output.write([
+            `Started fresh session ${runtime.sessionId}.`,
+            "Skills and config were refreshed for this new session.",
+            "",
+            runtime.describe(),
+            ""
+          ].join("\n"));
+          continue;
+        }
 
         if (shouldExit) {
           return;
@@ -74,7 +92,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 
       output.write("\n");
       activeTurn = new AbortController();
-      const response = await options.runtime.handle({
+      const response = await runtime.handle({
           text,
           channel: "cli",
           signal: activeTurn.signal,
@@ -101,8 +119,9 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 async function handleSlashCommand(input: {
   text: string;
   runtime: Runtime;
+  refreshRuntime?: () => Promise<Runtime>;
   output: NodeJS.WritableStream;
-}): Promise<boolean> {
+}): Promise<boolean | { runtime: Runtime }> {
   const [command = "", ...args] = input.text.slice(1).trim().split(/\s+/u);
 
   switch (command) {
@@ -116,6 +135,16 @@ async function handleSlashCommand(input: {
     case "model":
       input.output.write(`${input.runtime.describe()}\n\n`);
       return false;
+    case "reset":
+    case "new":
+      if (input.refreshRuntime === undefined) {
+        input.output.write("This session cannot reset itself here. Start a new EstaCoda session to refresh skills and config.\n\n");
+        return false;
+      }
+
+      return {
+        runtime: await input.refreshRuntime()
+      };
     case "tools":
       input.output.write(`${renderToolsMenu(input.runtime, args.join(" "))}\n\n`);
       return false;

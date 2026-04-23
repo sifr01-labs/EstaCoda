@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { loadRuntimeConfig, type LoadedRuntimeConfig } from "./config/runtime-config.js";
 import { runCliCommand } from "./cli/cli.js";
+import type { SessionDB } from "./contracts/session.js";
 import { canRunInteractive, runInteractiveOnboarding } from "./onboarding/interactive-onboarding.js";
 import { getOnboardingStatus } from "./onboarding/onboarding-flow.js";
 import { createRuntime } from "./runtime/create-runtime.js";
@@ -36,17 +38,30 @@ if (argv.length === 0 && canRunInteractive()) {
   }
 }
 
-const runtime = await createRuntime({
-  theme: kemetBlueTheme,
-  model: config.model,
-  workspaceRoot,
-  providerRegistry: config.providerRegistry,
-  credentialPools: config.credentialPools,
-  auxiliaryProviders: config.auxiliaryProviders,
-  browser: config.browser,
-  enableWebNetwork: config.web.enableNetwork,
-  webMaxContentChars: config.web.maxContentChars
-});
+async function buildRuntime(input: {
+  sessionId?: string;
+  sessionDb?: SessionDB;
+} = {}) {
+  const latestConfig = await loadRuntimeConfig({
+    workspaceRoot
+  });
+
+  return createRuntime({
+    theme: kemetBlueTheme,
+    model: latestConfig.model,
+    workspaceRoot,
+    sessionId: input.sessionId,
+    sessionDb: input.sessionDb,
+    providerRegistry: latestConfig.providerRegistry,
+    credentialPools: latestConfig.credentialPools,
+    auxiliaryProviders: latestConfig.auxiliaryProviders,
+    browser: latestConfig.browser,
+    enableWebNetwork: latestConfig.web.enableNetwork,
+    webMaxContentChars: latestConfig.web.maxContentChars
+  });
+}
+
+const runtime = await buildRuntime();
 
 const command = await runCliCommand({
   argv,
@@ -61,7 +76,13 @@ if (command.handled) {
 }
 
 if (argv.length === 0 && canRunInteractive()) {
-  await runSessionLoop({ runtime });
+  await runSessionLoop({
+    runtime,
+    refreshRuntime: async () => buildRuntime({
+      sessionId: randomUUID(),
+      sessionDb: runtime.sessionDb
+    })
+  });
   process.exit(0);
 }
 

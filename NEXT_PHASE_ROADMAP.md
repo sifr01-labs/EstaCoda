@@ -50,6 +50,7 @@ Next acceptance checks:
 - Provider-backed sessions execute selected skills through the normal tool loop instead of deterministic pre-runs.
 - Deterministic skill execution remains available as the no-provider fallback path.
 - Installed/imported skills become provider-visible on session refresh or a new session, not by silent mid-session mutation.
+- CLI exposes `/reset` as the explicit session refresh boundary for new skill/config snapshots.
 - Skill steps can request files/context/tools without bespoke code.
 - Skill outcomes are recorded to memory.
 - Skill creation/import immediately updates slash menus and tool-visible catalog.

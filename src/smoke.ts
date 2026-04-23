@@ -2679,6 +2679,71 @@ await runSessionLoop({
   }
 });
 const renderedSessionLoop = sessionLoopOutput.join("");
+
+const resetSkillWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-reset-session-"));
+const resetSkillProjectRoot = join(resetSkillWorkspace, ".estacoda", "skills", "reset-proof-skill");
+const resetTrustStorePath = join(await mkdtemp(join(tmpdir(), "estacoda-v2-reset-session-trust-")), "trust.json");
+let resetSessionCounter = 0;
+let resetLoopPromptIndex = 0;
+const resetLoopOutput: string[] = [];
+const resetRuntimeFactory = async (sessionId: string) => createRuntime({
+  theme: kemetBlueTheme,
+  sessionDb,
+  sessionId,
+  profileId: "smoke",
+  workspaceRoot: resetSkillWorkspace,
+  trustStorePath: resetTrustStorePath,
+  model: {
+    id: "smoke-model",
+    provider: "unconfigured",
+    contextWindowTokens: 0,
+    supportsTools: false,
+    supportsVision: false,
+    supportsStructuredOutput: false
+  }
+});
+const resetRuntime = await resetRuntimeFactory("reset-session-before");
+await runSessionLoop({
+  runtime: resetRuntime,
+  refreshRuntime: async () => resetRuntimeFactory(`reset-session-after-${++resetSessionCounter}`),
+  output: {
+    write(chunk: string | Uint8Array): boolean {
+      resetLoopOutput.push(String(chunk));
+      return true;
+    }
+  } as NodeJS.WritableStream,
+  prompt: async () => {
+    const value = [
+      "/skills reset-proof-skill",
+      "__install_reset_skill__",
+      "/skills reset-proof-skill",
+      "/reset",
+      "/skills reset-proof-skill",
+      "/exit"
+    ][resetLoopPromptIndex++] ?? "/exit";
+
+    if (value === "__install_reset_skill__") {
+      await mkdir(resetSkillProjectRoot, { recursive: true });
+      await writeFile(join(resetSkillProjectRoot, "SKILL.md"), `---
+name: reset-proof-skill
+description: Prove that /reset refreshes the session skill snapshot.
+version: 0.1.0
+category: general
+required_toolsets:
+  - core
+permission_expectations:
+  - auto-read
+---
+This skill exists to prove Hermes-style session refresh semantics.
+`, "utf8");
+      return "/skills reset-proof-skill";
+    }
+
+    return value;
+  },
+  close: () => {}
+});
+const renderedResetSessionLoop = resetLoopOutput.join("");
 const cdpToolRegistry = new ToolRegistry();
 for (const tool of createWebTools({
   browserBackend: createLocalCdpBrowserBackend({
@@ -2844,6 +2909,22 @@ assert(
   "expected cancelled runtime event to include resume note"
 );
 assert(renderedSessionLoop.includes("Latest interrupted turn"), "expected /resume to show latest interrupted turn");
+assert(
+  renderedResetSessionLoop.includes('No slash commands or skills match "/reset-proof-skill".'),
+  "expected skill installed mid-session to stay hidden before /reset"
+);
+assert(
+  renderedResetSessionLoop.includes("Started fresh session reset-session-after-1."),
+  "expected /reset to start a fresh session"
+);
+assert(
+  renderedResetSessionLoop.includes("Skills and config were refreshed for this new session."),
+  "expected /reset to explain the session refresh boundary"
+);
+assert(
+  renderedResetSessionLoop.includes("/reset-proof-skill"),
+  "expected refreshed session to expose the newly installed skill"
+);
 assert(
   (await sessionDb.listMessages(runtime.sessionId)).some(
     (message) => message.role === "tool" && message.content.includes("Prepared workflow")
