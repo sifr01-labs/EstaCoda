@@ -78,6 +78,9 @@ export function assembleProviderContinuationPrompt(input: ProviderContinuationPr
     layers: baseLayers
   });
   const executedPlans = input.toolPlans.filter((plan) => plan.status === "executed");
+  const unresolvedPlans = input.toolPlans.filter((plan) =>
+    plan.status === "invalid" || plan.status === "unavailable" || plan.status === "blocked"
+  );
   const toolResults = executedPlans
     .map((plan) => [
       `Tool: ${plan.tool}`,
@@ -89,11 +92,24 @@ export function assembleProviderContinuationPrompt(input: ProviderContinuationPr
       }))
     ].join("\n"))
     .join("\n\n");
+  const toolPlanFeedback = unresolvedPlans
+    .map((plan) => [
+      `Tool call failed: ${plan.tool || "unknown"}`,
+      `Call id: ${plan.id}`,
+      `Status: ${plan.status}`,
+      `Error: ${plan.error ?? "No error details were provided."}`,
+      "Use the available tool schemas and try again if another tool call is needed."
+    ].join("\n"))
+    .join("\n\n");
   const continuationContent = [
-    "EstaCoda executed the requested tools. Use these results to produce the final answer now.",
+    unresolvedPlans.length > 0
+      ? "EstaCoda could not execute one or more requested tool calls. Use the feedback below to correct the tool call or choose an available tool."
+      : "EstaCoda executed the requested tools. Use these results to produce the final answer now.",
     "Do not ask the user to run these tools again.",
     "",
-    `Executed tool results:\n${toolResults || "No executed tool results were available."}`
+    `Executed tool results:\n${toolResults || "No executed tool results were available."}`,
+    "",
+    `Tool call feedback:\n${toolPlanFeedback || "No tool-call errors were recorded."}`
   ].join("\n");
   const continuationLayer = layer({
     name: "provider-continuation",

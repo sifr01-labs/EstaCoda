@@ -7,6 +7,8 @@ This phase turns the first working provider-backed agent loop into a reliable He
 - Live provider inference works with Kimi.
 - Live provider tool-calling works for `file.read`.
 - Live multi-step provider workflows work for `file.write` -> `file.read` -> final verification.
+- Local smoke coverage verifies `file.read` -> `file.replace` -> `file.read` edit workflows.
+- Malformed provider tool calls produce corrective feedback and can recover on the next provider turn.
 - Provider-safe tool aliases work, for example `file_read` maps to `file.read`.
 - Trusted workspace execution works without repeated permission prompts.
 - Tool results are packetized into continuation prompts.
@@ -25,16 +27,17 @@ This phase turns the first working provider-backed agent loop into a reliable He
 
 ### 1. Multi-Step Agent Tasks
 
-Status: core write/read loop works, edit/replace and recovery behavior need hardening.
+Status: core write/read, edit/replace, and malformed tool-call recovery loops work in smoke coverage.
 
 Next acceptance checks:
 - Done: provider can write a file with `file.write`.
 - Done: provider can read it back with `file.read`.
 - Done: provider can verify final state from tool results.
-- Provider can edit a file with `file.replace`.
-- Provider can read the edited file back with `file.read`.
-- Provider can verify the edit from tool results.
-- Failed or malformed tool calls produce recoverable feedback.
+- Done: provider can edit a file with `file.replace`.
+- Done: provider can read the edited file back with `file.read`.
+- Done: provider can verify the edit from tool results.
+- Done: malformed tool calls produce recoverable feedback.
+- Unavailable tool calls produce recoverable feedback.
 - Terminal activity shows each tool step clearly.
 
 ### 2. Executable Skills
@@ -79,14 +82,13 @@ Next acceptance checks:
 
 ## Immediate Next Step
 
-Harden a normal file edit provider workflow:
+Harden unavailable-tool recovery through the normal provider loop:
 
-1. Provider requests `file.read`.
-2. EstaCoda reads the original file.
-3. Provider requests `file.replace`.
-4. EstaCoda applies an exact replacement in the trusted workspace.
-5. Provider requests `file.read`.
-6. EstaCoda returns the edited content.
-7. Provider produces a final verification answer from the read result.
+1. Provider requests an unavailable or legacy tool name.
+2. EstaCoda records the failed tool plan with the mapped status and error.
+3. EstaCoda sends the failure back through provider continuation with available schemas.
+4. Provider corrects the call to an available tool.
+5. EstaCoda executes the corrected tool and returns results.
+6. Provider produces a final answer based on the corrected result.
 
-This should run through the normal agent loop, not a special doctor command.
+This should mirror the malformed-call recovery path and keep live Kimi/OpenRouter tests batched at the end of the workstream.

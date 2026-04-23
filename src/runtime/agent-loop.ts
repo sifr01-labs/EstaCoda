@@ -1016,6 +1016,7 @@ export class AgentLoop {
       previousProviderExecution = execution;
 
       const beforeExecutions = providerToolExecutions.length;
+      const beforePlans = input.toolPlans.length;
       const loopToolExecutions = await this.#executeProviderToolPlans({
         providerExecution: execution,
         toolPlans: input.toolPlans,
@@ -1025,6 +1026,8 @@ export class AgentLoop {
         onEvent: input.onEvent
       });
       providerToolExecutions.push(...loopToolExecutions);
+      const currentPlans = input.toolPlans.slice(beforePlans);
+      const hasRecoverableToolFeedback = currentPlans.some((plan) => isRecoverableToolPlanStatus(plan.status));
       const repeatedFailureBudgetExceeded = this.#recordRepeatedToolFailures(loopToolExecutions, repeatedFailures);
       if (repeatedFailureBudgetExceeded !== undefined) {
         await this.#recordProviderBudgetExhausted({
@@ -1052,7 +1055,7 @@ export class AgentLoop {
       if (
         execution.ok !== true ||
         execution.toolCalls.length === 0 ||
-        loopToolExecutions.length === 0 ||
+        (loopToolExecutions.length === 0 && !hasRecoverableToolFeedback) ||
         exhausted
       ) {
         break;
@@ -1309,7 +1312,7 @@ export class AgentLoop {
       this.#model.provider === "unconfigured" ||
       input.providerExecution?.ok !== true ||
       input.providerExecution.toolCalls.length === 0 ||
-      !input.toolPlans.some((plan) => plan.status === "executed")
+      !input.toolPlans.some((plan) => plan.status === "executed" || isRecoverableToolPlanStatus(plan.status))
     ) {
       return undefined;
     }
@@ -1827,6 +1830,10 @@ function isConcurrentSafeTool(tool: ToolDefinition | undefined): boolean {
   return (tool.riskClass === "read-only-local" || tool.riskClass === "read-only-network") &&
     tool.name !== "terminal.run" &&
     tool.name !== "process.start";
+}
+
+function isRecoverableToolPlanStatus(status: ToolCallPlan["status"]): boolean {
+  return status === "invalid" || status === "unavailable" || status === "blocked";
 }
 
 type ProviderToolPlanEntry = {

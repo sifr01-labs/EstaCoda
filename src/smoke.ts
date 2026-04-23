@@ -3486,6 +3486,151 @@ assert(
   "expected edit workflow to execute read, replace, and read-back in order"
 );
 
+const recoveryProviderRegistry = new ProviderRegistry();
+const recoveryProviderRequests: ProviderRequest[] = [];
+recoveryProviderRegistry.register({
+  id: "deepseek",
+  name: "Tool recovery provider",
+  health: () => ({ available: true }),
+  listModels: () => [
+    {
+      id: "deepseek-chat",
+      provider: "deepseek",
+      contextWindowTokens: 128_000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    }
+  ],
+  stream: async function* (request) {
+    recoveryProviderRequests.push(request);
+    yield {
+      kind: "start",
+      provider: "deepseek",
+      model: request.model
+    };
+
+    if (recoveryProviderRequests.length === 1) {
+      yield {
+        kind: "tool-call",
+        provider: "deepseek",
+        model: request.model,
+        id: "recovery-bad-json",
+        name: "file_read",
+        argumentsText: "{not-json"
+      };
+      yield {
+        kind: "done",
+        provider: "deepseek",
+        model: request.model,
+        response: {
+          ok: true,
+          content: "",
+          model: request.model,
+          provider: "deepseek"
+        }
+      };
+      return;
+    }
+
+    if (recoveryProviderRequests.length === 2) {
+      yield {
+        kind: "tool-call",
+        provider: "deepseek",
+        model: request.model,
+        id: "recovery-corrected-read",
+        name: "file_read",
+        argumentsText: JSON.stringify({
+          path: editWorkflowPath
+        })
+      };
+      yield {
+        kind: "done",
+        provider: "deepseek",
+        model: request.model,
+        response: {
+          ok: true,
+          content: "",
+          model: request.model,
+          provider: "deepseek"
+        }
+      };
+      return;
+    }
+
+    yield {
+      kind: "token",
+      provider: "deepseek",
+      model: request.model,
+      text: "Recovered from malformed tool arguments and read the file."
+    };
+    yield {
+      kind: "done",
+      provider: "deepseek",
+      model: request.model,
+      response: {
+        ok: true,
+        content: "",
+        model: request.model,
+        provider: "deepseek"
+      }
+    };
+  },
+  complete: async (request) => {
+    recoveryProviderRequests.push(request);
+    return {
+      ok: true,
+      content: "Recovered from malformed tool arguments and read the file.",
+      model: request.model,
+      provider: "deepseek"
+    };
+  }
+} satisfies ProviderAdapter);
+const recoveryRuntime = await createRuntime({
+  theme: kemetBlueTheme,
+  sessionDb,
+  sessionId: "tool-recovery-provider-smoke",
+  profileId: "smoke",
+  workspaceRoot: contextWorkspace,
+  providerRegistry: recoveryProviderRegistry,
+  model: {
+    id: "deepseek-chat",
+    provider: "deepseek",
+    contextWindowTokens: 128_000,
+    supportsTools: true,
+    supportsVision: false,
+    supportsStructuredOutput: true
+  }
+});
+const recoveryResponse = await recoveryRuntime.handle({
+  text: "Read agent-edit-proof.md and recover if the first tool call is malformed.",
+  channel: "cli",
+  trustedWorkspace: true
+});
+
+assert(recoveryProviderRequests.length === 3, "expected malformed tool call recovery to continue after feedback");
+assert(
+  recoveryProviderRequests[1]?.messages.some((message) =>
+    message.content.includes("Tool call failed: file.read") &&
+    message.content.includes("Status: invalid") &&
+    message.content.includes("Use the available tool schemas")
+  ),
+  "expected malformed tool call recovery prompt to include corrective feedback"
+);
+assert(
+  recoveryProviderRequests[2]?.messages.some((message) => message.content.includes(editUpdatedContent.trim())),
+  "expected malformed tool call recovery final turn to include corrected file.read result"
+);
+assert(
+  recoveryResponse.toolPlans.some((plan) => plan.status === "invalid" && plan.tool === "file.read") &&
+    recoveryResponse.toolPlans.some((plan) => plan.status === "executed" && plan.tool === "file.read"),
+  "expected malformed tool call recovery to record invalid and executed file.read plans"
+);
+assert(
+  recoveryResponse.text.includes("Recovered from malformed tool arguments"),
+  "expected malformed tool call recovery final answer"
+);
+
 const compressionWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-compression-"));
 await mkdir(join(compressionWorkspace, "src"));
 await writeFile(join(compressionWorkspace, "src", "large.txt"), "compress me\n".repeat(1200), "utf8");
