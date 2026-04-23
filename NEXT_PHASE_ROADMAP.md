@@ -43,12 +43,13 @@ Next acceptance checks:
 
 ### 2. Executable Skills
 
-Status: loading, routing, slash menu, import/export/create, workflow planning, outcome memory, and provider-backed skill handoff exist.
+Status: loading, routing, slash menu, import/export/create, workflow planning, outcome memory, provider-backed skill handoff, and Hermes-style session-stable skill visibility exist.
 
 Next acceptance checks:
 - Done: a selected skill loads `SKILL.md` into the provider prompt with workflow context.
 - Provider-backed sessions execute selected skills through the normal tool loop instead of deterministic pre-runs.
 - Deterministic skill execution remains available as the no-provider fallback path.
+- Installed/imported skills become provider-visible on session refresh or a new session, not by silent mid-session mutation.
 - Skill steps can request files/context/tools without bespoke code.
 - Skill outcomes are recorded to memory.
 - Skill creation/import immediately updates slash menus and tool-visible catalog.
@@ -91,7 +92,8 @@ Harden executable skill workflows end to end:
 2. Compile the skill workflow into concrete plan context for the provider.
 3. Let the provider execute the workflow through normal tool calls and continuations.
 4. Keep deterministic workflow execution as the fallback path when no provider is configured.
-5. Record skill outcomes to memory and trajectory logs.
-6. Ensure new or imported skills immediately appear in slash menus and the provider-visible skill index.
+5. Preserve Hermes-style session-stable skill visibility; require refresh/new session for provider-visible skill updates.
+6. Record skill outcomes to memory and trajectory logs.
+7. Ensure refreshed sessions pick up newly installed/imported skills in slash menus and provider-visible skill indexes.
 
 Keep live Kimi/OpenRouter/Ollama tests batched at the end of the workstream so provider-specific quirks are debugged together.

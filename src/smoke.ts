@@ -2072,6 +2072,249 @@ assert(
   youtubeMatches.some((skill) => skill.name === "youtube-knowledge-base"),
   "expected youtube-knowledge-base to match prompt"
 );
+
+const liveSkillWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-live-skill-"));
+const liveSkillProjectSkillsRoot = join(liveSkillWorkspace, ".estacoda", "skills");
+await mkdir(join(liveSkillProjectSkillsRoot, "provider-file-proof"), { recursive: true });
+const providerFileProofSkillPath = join(liveSkillProjectSkillsRoot, "provider-file-proof", "SKILL.md");
+const providerFileProofSkillContent = `---
+name: provider-file-proof
+description: Create and verify a proof file through the normal tool loop.
+version: 0.1.0
+category: coding
+required_toolsets:
+  - files
+  - core
+workflow:
+  - id: create-proof
+    description: Create the proof file in the workspace.
+    toolsets:
+      - files
+  - id: verify-proof
+    description: Read the proof file back and confirm the exact contents.
+    toolsets:
+      - files
+permission_expectations:
+  - auto-read
+  - ask-before-write
+---
+Use the normal EstaCoda tool loop to create a proof file named runtime-skill-proof.md, then read it back and verify the exact contents before answering.
+`;
+const liveSkillProviderRequests: ProviderRequest[] = [];
+const liveSkillProviderRegistry = new ProviderRegistry();
+liveSkillProviderRegistry.register({
+  id: "deepseek",
+  name: "Live skill provider",
+  health: () => ({ available: true }),
+  listModels: () => [
+    {
+      id: "deepseek-chat",
+      provider: "deepseek",
+      contextWindowTokens: 128_000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    }
+  ],
+  stream: async function* (request) {
+    liveSkillProviderRequests.push(request);
+    yield {
+      kind: "start",
+      provider: "deepseek",
+      model: request.model
+    };
+
+    if (liveSkillProviderRequests.length === 1) {
+      yield {
+        kind: "tool-call",
+        provider: "deepseek",
+        model: request.model,
+        id: "live-skill-write",
+        name: "file_write",
+        argumentsText: JSON.stringify({
+          path: "runtime-skill-proof.md",
+          content: "EstaCoda provider-backed skills can create and verify files."
+        })
+      };
+      yield {
+        kind: "done",
+        provider: "deepseek",
+        model: request.model,
+        response: {
+          ok: true,
+          content: "",
+          model: request.model,
+          provider: "deepseek"
+        }
+      };
+      return;
+    }
+
+    if (liveSkillProviderRequests.length === 2) {
+      yield {
+        kind: "tool-call",
+        provider: "deepseek",
+        model: request.model,
+        id: "live-skill-read",
+        name: "file_read",
+        argumentsText: JSON.stringify({
+          path: "runtime-skill-proof.md"
+        })
+      };
+      yield {
+        kind: "done",
+        provider: "deepseek",
+        model: request.model,
+        response: {
+          ok: true,
+          content: "",
+          model: request.model,
+          provider: "deepseek"
+        }
+      };
+      return;
+    }
+
+    yield {
+      kind: "token",
+      provider: "deepseek",
+      model: request.model,
+      text: "Provider-backed skill completed and verified runtime-skill-proof.md."
+    };
+    yield {
+      kind: "done",
+      provider: "deepseek",
+      model: request.model,
+      response: {
+        ok: true,
+        content: "",
+        model: request.model,
+        provider: "deepseek"
+      }
+    };
+  },
+  complete: async (request) => {
+    liveSkillProviderRequests.push(request);
+    return {
+      ok: true,
+      content: "Provider-backed skill completed and verified runtime-skill-proof.md.",
+      model: request.model,
+      provider: "deepseek"
+    };
+  }
+} satisfies ProviderAdapter);
+const liveSkillRuntime = await createRuntime({
+  theme: kemetBlueTheme,
+  sessionDb,
+  sessionId: "provider-session-stable-skill-smoke",
+  profileId: "smoke",
+  workspaceRoot: liveSkillWorkspace,
+  personalSkillsRoot: join(liveSkillWorkspace, "personal-skills"),
+  projectMemoryRoot: join(liveSkillWorkspace, ".estacoda", "memory"),
+  providerRegistry: liveSkillProviderRegistry,
+  model: {
+    id: "deepseek-chat",
+    provider: "deepseek",
+    contextWindowTokens: 128_000,
+    supportsTools: true,
+    supportsVision: false,
+    supportsStructuredOutput: true
+  }
+});
+assert(
+  renderSlashMenu(liveSkillRuntime).includes("/provider-file-proof") === false,
+  "expected current session slash menu to remain stable before explicit refresh"
+);
+await writeFile(providerFileProofSkillPath, providerFileProofSkillContent, "utf8");
+assert(
+  renderSlashMenu(liveSkillRuntime).includes("/provider-file-proof") === false,
+  "expected current session slash menu to remain stable after mid-session skill install"
+);
+const refreshedSkillRuntime = await createRuntime({
+  theme: kemetBlueTheme,
+  sessionDb,
+  sessionId: "provider-session-refreshed-skill-smoke",
+  profileId: "smoke",
+  workspaceRoot: liveSkillWorkspace,
+  personalSkillsRoot: join(liveSkillWorkspace, "personal-skills"),
+  projectMemoryRoot: join(liveSkillWorkspace, ".estacoda", "memory"),
+  providerRegistry: liveSkillProviderRegistry,
+  model: {
+    id: "deepseek-chat",
+    provider: "deepseek",
+    contextWindowTokens: 128_000,
+    supportsTools: true,
+    supportsVision: false,
+    supportsStructuredOutput: true
+  }
+});
+assert(
+  renderSlashMenu(refreshedSkillRuntime).includes("/provider-file-proof"),
+  "expected new session slash menu to include installed skill after refresh"
+);
+const liveSkillResponse = await refreshedSkillRuntime.handle({
+  text: "/provider-file-proof Create and verify the runtime proof file.",
+  channel: "cli",
+  trustedWorkspace: true
+});
+const liveSkillEvents = await sessionDb.listEvents(refreshedSkillRuntime.sessionId);
+const liveSkillMemory = await readFile(join(liveSkillWorkspace, ".estacoda", "memory", "MEMORY.md"), "utf8");
+
+assert(liveSkillProviderRequests.length === 3, "expected provider-backed skill smoke to use multiple provider iterations");
+assert(
+  liveSkillProviderRequests[0]?.messages.some((message) =>
+    message.content.includes("Compact skills index:") &&
+    message.content.includes("provider-file-proof (files,core)")
+  ),
+  "expected installed skill to appear in the provider-visible skills index after session refresh"
+);
+assert(
+  liveSkillProviderRequests[0]?.messages.some((message) =>
+    message.content.includes("Skill instructions:") &&
+    message.content.includes("create a proof file named runtime-skill-proof.md")
+  ),
+  "expected provider-backed skill smoke to load imported SKILL.md instructions"
+);
+assert(
+  liveSkillProviderRequests[0]?.messages.some((message) => message.content.includes("Skill workflow plan: provider-file-proof")),
+  "expected provider-backed skill smoke to include the imported workflow plan"
+);
+assert(
+  liveSkillProviderRequests[1]?.messages.some((message) =>
+    message.content.includes("runtime-skill-proof.md") &&
+    message.content.includes("Tool: file.write")
+  ),
+  "expected first provider-backed skill continuation to include file.write results"
+);
+assert(
+  liveSkillProviderRequests[2]?.messages.some((message) =>
+    message.content.includes("runtime-skill-proof.md") &&
+    message.content.includes("EstaCoda provider-backed skills can create and verify files.") &&
+    message.content.includes("Tool: file.read")
+  ),
+  "expected second provider-backed skill continuation to include file.read verification results"
+);
+assert(
+  liveSkillResponse.toolPlans.filter((plan) => plan.status === "executed").map((plan) => plan.tool).join(",") === "file.write,file.read",
+  "expected provider-backed skill smoke to execute file.write then file.read"
+);
+assert(
+  liveSkillResponse.skillOutcomes.some((outcome) => outcome.skill === "provider-file-proof" && outcome.status === "succeeded"),
+  "expected provider-backed skill smoke to record a successful skill outcome"
+);
+assert(
+  liveSkillEvents.some((event) => event.kind === "memory-write" && event.outcome.skill === "provider-file-proof"),
+  "expected provider-backed skill smoke to emit memory-write for the imported skill"
+);
+assert(
+  liveSkillMemory.includes("skill:provider-file-proof") &&
+    liveSkillMemory.includes("file.write,file.read"),
+  "expected provider-backed skill smoke to persist outcome details to MEMORY.md"
+);
+assert(
+  liveSkillResponse.text.includes("Provider-backed skill completed and verified runtime-skill-proof.md."),
+  "expected provider-backed skill smoke final response"
+);
 assert(
   !youtubeMatches.some((skill) => skill.name === "ascii-video"),
   "expected generic video wording not to match ascii-video"

@@ -168,6 +168,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       skillRegistry.register(skill);
     }
   }
+  const sessionSkillRegistry = new SkillRegistry();
+  for (const skill of skillRegistry.list()) {
+    sessionSkillRegistry.register(skill);
+  }
+  const sessionSkillCatalog = sessionSkillRegistry.catalog();
 
   for (const tool of builtinTools) {
     toolRegistry.register(tool);
@@ -250,7 +255,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     trajectoryId: trajectoryRecorder.snapshot().id
   });
 
-  const intentRouter = new IntentRouter({ skillRegistry });
+  const intentRouter = new IntentRouter({ skillRegistry: sessionSkillRegistry });
   const providerExecutor = new ProviderExecutor({
     registry: providerRegistry,
     credentialPools: options.credentialPools
@@ -315,7 +320,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       user: frozenMemorySnapshot.files.get("USER.md"),
       memory: frozenMemorySnapshot.files.get("MEMORY.md")
     },
-    skillsIndex: skillRegistry.catalog()
+    skillsIndex: sessionSkillCatalog
   });
 
   return {
@@ -325,7 +330,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       return toolRegistry.list();
     },
     skills() {
-      return skillRegistry.catalog();
+      return sessionSkillCatalog;
     },
     async latestResumeNote() {
       const events = await sessionDb.listEvents(sessionId);

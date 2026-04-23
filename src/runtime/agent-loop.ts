@@ -884,25 +884,36 @@ export class AgentLoop {
     toolExecutions: ToolExecutionRecord[];
     toolPlans: ToolCallPlan[];
   }): Promise<SkillOutcome[]> {
-    if (this.#memoryProvider === undefined || input.selectedSkill === undefined || input.toolExecutions.length === 0) {
+    if (
+      this.#memoryProvider === undefined ||
+      input.selectedSkill === undefined ||
+      (input.toolExecutions.length === 0 && input.toolPlans.length === 0)
+    ) {
       return [];
     }
 
     const succeeded = input.toolExecutions.filter((execution) => execution.result?.ok === true);
     const failed = input.toolExecutions.filter((execution) => execution.result?.ok === false);
     const blocked = input.toolExecutions.filter((execution) => execution.decision !== "allow");
-    const status: SkillOutcome["status"] = blocked.length > 0
-      ? "blocked"
-      : failed.length > 0 && succeeded.length > 0
-        ? "partial"
-        : failed.length > 0
-          ? "failed"
-          : "succeeded";
+    const executedPlans = input.toolPlans.filter((plan) => plan.status === "executed");
+    const blockedPlans = input.toolPlans.filter((plan) => plan.status === "blocked");
+    const failedPlans = input.toolPlans.filter((plan) => plan.status === "invalid" || plan.status === "unavailable");
+    const status: SkillOutcome["status"] =
+      blocked.length > 0 || blockedPlans.length > 0
+        ? "blocked"
+        : (failed.length > 0 || failedPlans.length > 0) && (succeeded.length > 0 || executedPlans.length > 0)
+          ? "partial"
+          : failed.length > 0 || failedPlans.length > 0
+            ? "failed"
+            : "succeeded";
     const outcome: SkillOutcome = {
       skill: input.selectedSkill.name,
       summary: summarizeSkillOutcome(input.selectedSkill.name, input.toolExecutions, input.toolPlans),
       status,
-      tools: input.toolExecutions.map((execution) => execution.tool.name),
+      tools: [...new Set([
+        ...input.toolExecutions.map((execution) => execution.tool.name),
+        ...input.toolPlans.map((plan) => plan.tool).filter((tool) => tool.length > 0)
+      ])],
       memoryTargets: ["MEMORY.md"],
       metadata: {
         plannedTools: input.toolPlans.map((plan) => ({
@@ -1772,12 +1783,25 @@ function summarizeSkillOutcome(
   const successfulTools = executions
     .filter((execution) => execution.result?.ok === true)
     .map((execution) => execution.tool.name);
-  const plannedTools = plans
+  const executedPlannedTools = plans
     .filter((plan) => plan.status === "executed")
     .map((plan) => plan.tool);
-  const tools = [...new Set([...successfulTools, ...plannedTools])];
+  const attemptedTools = plans
+    .map((plan) => plan.tool)
+    .filter((tool) => tool.length > 0);
+  const failedTools = plans
+    .filter((plan) => plan.status === "invalid" || plan.status === "unavailable" || plan.status === "blocked")
+    .map((plan) => plan.tool)
+    .filter((tool) => tool.length > 0);
+  const successful = [...new Set([...successfulTools, ...executedPlannedTools])];
+  const attempted = [...new Set([...attemptedTools, ...executions.map((execution) => execution.tool.name)])];
+  const failed = [...new Set(failedTools)];
 
-  return `${skill} completed with ${tools.length === 0 ? "no successful tools" : tools.join(", ")}.`;
+  return [
+    `${skill} completed with ${successful.length === 0 ? "no successful tools" : successful.join(", ")}.`,
+    attempted.length === 0 ? undefined : `Attempted: ${attempted.join(", ")}.`,
+    failed.length === 0 ? undefined : `Failed: ${failed.join(", ")}.`
+  ].filter((line) => line !== undefined).join(" ");
 }
 
 function toolResultStats(execution: ToolExecutionRecord): {
