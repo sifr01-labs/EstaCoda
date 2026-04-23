@@ -9,6 +9,7 @@ This phase turns the first working provider-backed agent loop into a reliable He
 - Live multi-step provider workflows work for `file.write` -> `file.read` -> final verification.
 - Local smoke coverage verifies `file.read` -> `file.replace` -> `file.read` edit workflows.
 - Malformed provider tool calls produce corrective feedback and can recover on the next provider turn.
+- Unavailable or legacy provider tool names produce corrective feedback and can recover with an exposed provider schema.
 - Provider-safe tool aliases work, for example `file_read` maps to `file.read`.
 - Trusted workspace execution works without repeated permission prompts.
 - Tool results are packetized into continuation prompts.
@@ -27,7 +28,7 @@ This phase turns the first working provider-backed agent loop into a reliable He
 
 ### 1. Multi-Step Agent Tasks
 
-Status: core write/read, edit/replace, and malformed tool-call recovery loops work in smoke coverage.
+Status: core write/read, edit/replace, malformed tool-call recovery, and unavailable-tool recovery loops work in smoke coverage.
 
 Next acceptance checks:
 - Done: provider can write a file with `file.write`.
@@ -37,7 +38,7 @@ Next acceptance checks:
 - Done: provider can read the edited file back with `file.read`.
 - Done: provider can verify the edit from tool results.
 - Done: malformed tool calls produce recoverable feedback.
-- Unavailable tool calls produce recoverable feedback.
+- Done: unavailable tool calls produce recoverable feedback.
 - Terminal activity shows each tool step clearly.
 
 ### 2. Executable Skills
@@ -82,13 +83,12 @@ Next acceptance checks:
 
 ## Immediate Next Step
 
-Harden unavailable-tool recovery through the normal provider loop:
+Move from provider/tool reliability into executable skill workflows:
 
-1. Provider requests an unavailable or legacy tool name.
-2. EstaCoda records the failed tool plan with the mapped status and error.
-3. EstaCoda sends the failure back through provider continuation with available schemas.
-4. Provider corrects the call to an available tool.
-5. EstaCoda executes the corrected tool and returns results.
-6. Provider produces a final answer based on the corrected result.
+1. Load a selected `SKILL.md` into the active prompt as operating instructions.
+2. Compile the skill workflow into concrete multi-tool steps.
+3. Let the provider execute the workflow through normal tool calls.
+4. Record skill outcomes to memory and trajectory logs.
+5. Ensure new or imported skills immediately appear in slash menus and the provider-visible skill index.
 
-This should mirror the malformed-call recovery path and keep live Kimi/OpenRouter tests batched at the end of the workstream.
+Keep live Kimi/OpenRouter/Ollama tests batched at the end of the workstream so provider-specific quirks are debugged together.

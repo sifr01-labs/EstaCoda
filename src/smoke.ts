@@ -56,6 +56,7 @@ import { createMediaTools } from "./tools/media-tools.js";
 import { createPythonTools } from "./tools/python-tools.js";
 import { ToolExecutor } from "./tools/tool-executor.js";
 import { ToolRegistry } from "./tools/tool-registry.js";
+import type { OpenAICompatibleToolSchema } from "./tools/tool-schema.js";
 import { createWebTools } from "./tools/web-tools.js";
 import { createWorkspaceTools } from "./tools/workspace-tools.js";
 import { TrajectoryRecorder } from "./trajectory/trajectory-recorder.js";
@@ -3629,6 +3630,157 @@ assert(
 assert(
   recoveryResponse.text.includes("Recovered from malformed tool arguments"),
   "expected malformed tool call recovery final answer"
+);
+
+const unavailableToolProviderRegistry = new ProviderRegistry();
+const unavailableToolProviderRequests: ProviderRequest[] = [];
+unavailableToolProviderRegistry.register({
+  id: "deepseek",
+  name: "Unavailable tool recovery provider",
+  health: () => ({ available: true }),
+  listModels: () => [
+    {
+      id: "deepseek-chat",
+      provider: "deepseek",
+      contextWindowTokens: 128_000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    }
+  ],
+  stream: async function* (request) {
+    unavailableToolProviderRequests.push(request);
+    yield {
+      kind: "start",
+      provider: "deepseek",
+      model: request.model
+    };
+
+    if (unavailableToolProviderRequests.length === 1) {
+      yield {
+        kind: "tool-call",
+        provider: "deepseek",
+        model: request.model,
+        id: "legacy-read-file",
+        name: "read_file",
+        argumentsText: JSON.stringify({
+          path: editWorkflowPath
+        })
+      };
+      yield {
+        kind: "done",
+        provider: "deepseek",
+        model: request.model,
+        response: {
+          ok: true,
+          content: "",
+          model: request.model,
+          provider: "deepseek"
+        }
+      };
+      return;
+    }
+
+    if (unavailableToolProviderRequests.length === 2) {
+      yield {
+        kind: "tool-call",
+        provider: "deepseek",
+        model: request.model,
+        id: "corrected-provider-read",
+        name: "file_read",
+        argumentsText: JSON.stringify({
+          path: editWorkflowPath
+        })
+      };
+      yield {
+        kind: "done",
+        provider: "deepseek",
+        model: request.model,
+        response: {
+          ok: true,
+          content: "",
+          model: request.model,
+          provider: "deepseek"
+        }
+      };
+      return;
+    }
+
+    yield {
+      kind: "token",
+      provider: "deepseek",
+      model: request.model,
+      text: "Recovered from the unavailable read_file tool by using file_read."
+    };
+    yield {
+      kind: "done",
+      provider: "deepseek",
+      model: request.model,
+      response: {
+        ok: true,
+        content: "",
+        model: request.model,
+        provider: "deepseek"
+      }
+    };
+  },
+  complete: async (request) => {
+    unavailableToolProviderRequests.push(request);
+    return {
+      ok: true,
+      content: "Recovered from the unavailable read_file tool by using file_read.",
+      model: request.model,
+      provider: "deepseek"
+    };
+  }
+} satisfies ProviderAdapter);
+const unavailableToolRuntime = await createRuntime({
+  theme: kemetBlueTheme,
+  sessionDb,
+  sessionId: "unavailable-tool-provider-smoke",
+  profileId: "smoke",
+  workspaceRoot: contextWorkspace,
+  providerRegistry: unavailableToolProviderRegistry,
+  model: {
+    id: "deepseek-chat",
+    provider: "deepseek",
+    contextWindowTokens: 128_000,
+    supportsTools: true,
+    supportsVision: false,
+    supportsStructuredOutput: true
+  }
+});
+const unavailableToolResponse = await unavailableToolRuntime.handle({
+  text: "Read agent-edit-proof.md and recover if the first tool name is unavailable.",
+  channel: "cli",
+  trustedWorkspace: true
+});
+
+assert(unavailableToolProviderRequests.length === 3, "expected unavailable tool recovery to continue after feedback");
+assert(
+  unavailableToolProviderRequests[1]?.messages.some((message) =>
+    message.content.includes("Tool call failed: read_file") &&
+    message.content.includes("Status: unavailable")
+  ),
+  "expected unavailable tool recovery prompt to include corrective feedback"
+);
+assert(
+  (unavailableToolProviderRequests[1]?.tools as OpenAICompatibleToolSchema[] | undefined)
+    ?.some((tool) => tool.function.name === "file_read") === true,
+  "expected unavailable tool recovery continuation to expose available provider schemas"
+);
+assert(
+  unavailableToolProviderRequests[2]?.messages.some((message) => message.content.includes(editUpdatedContent.trim())),
+  "expected unavailable tool recovery final turn to include corrected file.read result"
+);
+assert(
+  unavailableToolResponse.toolPlans.some((plan) => plan.status === "unavailable" && plan.tool === "read_file") &&
+    unavailableToolResponse.toolPlans.some((plan) => plan.status === "executed" && plan.tool === "file.read"),
+  "expected unavailable tool recovery to record unavailable legacy plan and executed corrected plan"
+);
+assert(
+  unavailableToolResponse.text.includes("Recovered from the unavailable read_file tool"),
+  "expected unavailable tool recovery final answer"
 );
 
 const compressionWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-compression-"));
