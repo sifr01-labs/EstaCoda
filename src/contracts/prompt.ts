@@ -7,6 +7,7 @@ export type PromptLayerName =
   | "user-message"
   | "intent"
   | "skill"
+  | "skill-resources"
   | "context-references"
   | "memory"
   | "native-tools"

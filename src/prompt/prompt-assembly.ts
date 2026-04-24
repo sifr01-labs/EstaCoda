@@ -5,7 +5,7 @@ import type { MemoryProviderContext } from "../contracts/memory.js";
 import type { PromptBudgetReport, PromptLayerName, PromptLayerReport } from "../contracts/prompt.js";
 import type { ModelProfile, ProviderMessage } from "../contracts/provider.js";
 import type { SecurityDecision } from "../contracts/security.js";
-import type { LoadedSkill, SkillCatalogEntry, SkillDefinition } from "../contracts/skill.js";
+import type { LoadedSkill, SkillCatalogEntry, SkillDefinition, SkillResourceEntry } from "../contracts/skill.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
 import { compileSkillWorkflowPlan, renderSkillWorkflowPlan } from "../skills/skill-workflow-planner.js";
@@ -33,6 +33,7 @@ export type ProviderPromptInput = {
   routedText: string;
   selectedSkill: LoadedSkill | SkillDefinition | undefined;
   selectedSkillInstructions: string | undefined;
+  selectedSkillResources?: SkillResourceEntry[];
   intent: IntentRoute;
   securityDecision: SecurityDecision;
   toolExecutions: ToolExecutionRecord[];
@@ -178,6 +179,7 @@ function buildBaseLayers(input: ProviderPromptInput): InternalPromptLayer[] {
   const skillInstructions = input.selectedSkillInstructions === undefined
     ? "No skill instruction body was loaded."
     : truncate(input.selectedSkillInstructions, 4_000);
+  const skillResources = renderSkillResources(input.selectedSkillResources);
   const skillWorkflowPlan = input.selectedSkill === undefined
     ? "No skill workflow plan was selected."
     : renderSkillWorkflowPlan(compileSkillWorkflowPlan(input.selectedSkill));
@@ -254,6 +256,12 @@ function buildBaseLayers(input: ProviderPromptInput): InternalPromptLayer[] {
       truncated: input.selectedSkillInstructions !== undefined && input.selectedSkillInstructions.length > skillInstructions.length
     }),
     layer({
+      name: "skill-resources",
+      cacheable: true,
+      priority: 3,
+      content: `Skill resources:\n${skillResources}`
+    }),
+    layer({
       name: "context-references",
       cacheable: false,
       priority: 5,
@@ -304,6 +312,39 @@ function buildBaseLayers(input: ProviderPromptInput): InternalPromptLayer[] {
       content: `Deterministic fallback response if model cannot improve it:\n${input.fallbackText}`
     })
   ];
+}
+
+function renderSkillResources(resources: SkillResourceEntry[] | undefined): string {
+  if (resources === undefined || resources.length === 0) {
+    return "No additional skill-local references, templates, scripts, or assets were indexed.";
+  }
+
+  const grouped = new Map<string, SkillResourceEntry[]>();
+  for (const resource of resources) {
+    const bucket = grouped.get(resource.kind) ?? [];
+    bucket.push(resource);
+    grouped.set(resource.kind, bucket);
+  }
+
+  const sections = [...grouped.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([kind, entries]) => [
+      `${kind}:`,
+      ...entries.map((entry) => {
+        const labels = [
+          entry.path,
+          entry.bytes === undefined ? undefined : `${entry.bytes} bytes`,
+          entry.declared === true ? "declared" : undefined
+        ].filter((value) => value !== undefined);
+        return `- ${labels.join(" · ")}`;
+      })
+    ].join("\n"));
+
+  return [
+    ...sections,
+    "",
+    "Load only the file you need with the skill.view tool using the selected skill name and a specific path."
+  ].join("\n");
 }
 
 function renderBaseMessages(layers: InternalPromptLayer[]): ProviderMessage[] {

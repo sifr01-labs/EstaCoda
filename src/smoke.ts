@@ -1536,8 +1536,8 @@ const reopenedSqliteSearch = await reopenedSqliteDb.search("sqlite session", { p
 const reopenedSqliteEvents = await reopenedSqliteDb.listEvents("sqlite-smoke");
 reopenedSqliteDb.close();
 
-assert(tools.list().length === 40, "expected 40 registered tools");
-assert(availableTools.length === 38, "expected 38 registered tools before execute_code bridge registration");
+assert(tools.list().length === 45, "expected 45 registered tools");
+assert(availableTools.length === 43, "expected 43 registered tools before execute_code bridge registration");
 assert(mediaProbe?.result?.content.includes("ffmpeg:") === true, "expected media probe to report ffmpeg status");
 assert(mediaInspect?.result?.ok === true, "expected media inspect to succeed for workspace media");
 assert(mediaInspect.result.content.includes("Kind: video"), "expected media inspect to infer video kind");
@@ -2036,6 +2036,95 @@ const skillInspectCreatedExecution = await toolExecutor.executeTool({
   trustedWorkspace: true,
   sessionId: directSession.id
 });
+const skillWriteFileExecution = await toolExecutor.executeTool({
+  tool: "skill.write_file",
+  input: {
+    name: "sample-personal-skill",
+    file_path: "references/notes.md",
+    file_content: "Supporting notes for sample-personal-skill."
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const skillPatchExecution = await toolExecutor.executeTool({
+  tool: "skill.patch",
+  input: {
+    name: "sample-personal-skill",
+    old_string: "Use this skill only in smoke tests.",
+    new_string: "Use this skill only in patched smoke tests."
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const skillEditExecution = await toolExecutor.executeTool({
+  tool: "skill.edit",
+  input: {
+    name: "sample-personal-skill",
+    content: [
+      "---",
+      "name: sample-personal-skill",
+      "description: Exercise the personal skill creation flow.",
+      "version: 0.2.0",
+      "category: testing",
+      "whenToUse: [\"edited smoke skill\"]",
+      "requiredToolsets: [\"core\"]",
+      "workflow:",
+      "  - id: run",
+      "    description: Edited smoke workflow.",
+      "    toolsets: [\"core\"]",
+      "permissionExpectations: [\"auto-read\"]",
+      "examples: []",
+      "evaluations: []",
+      "---",
+      "Edited skill body for smoke tests."
+    ].join("\n")
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const skillRemoveFileExecution = await toolExecutor.executeTool({
+  tool: "skill.remove_file",
+  input: {
+    name: "sample-personal-skill",
+    file_path: "references/notes.md"
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const deletableSkillCreateExecution = await toolExecutor.executeTool({
+  tool: "skill.create",
+  input: {
+    name: "temporary-delete-skill",
+    content: [
+      "---",
+      "name: temporary-delete-skill",
+      "description: Temporary skill for delete smoke coverage.",
+      "version: 0.1.0",
+      "category: testing",
+      "whenToUse: [\"delete smoke\"]",
+      "requiredToolsets: [\"core\"]",
+      "workflow:",
+      "  - id: run",
+      "    description: Temporary workflow.",
+      "    toolsets: [\"core\"]",
+      "permissionExpectations: [\"auto-read\"]",
+      "examples: []",
+      "evaluations: []",
+      "---",
+      "Delete me."
+    ].join("\n")
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const skillDeleteExecution = await toolExecutor.executeTool({
+  tool: "skill.delete",
+  input: {
+    name: "temporary-delete-skill"
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
 const importSkillRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-import-skills-"));
 await mkdir(join(importSkillRoot, "imported"));
 await writeFile(
@@ -2060,10 +2149,27 @@ await writeFile(
   "utf8"
 );
 await mkdir(join(importSkillRoot, "hermes-style", "references"), { recursive: true });
+await mkdir(join(importSkillRoot, "hermes-style", "templates"), { recursive: true });
+await mkdir(join(importSkillRoot, "hermes-style", "scripts"), { recursive: true });
+await mkdir(join(importSkillRoot, "hermes-style", "assets"), { recursive: true });
 await writeFile(
   join(importSkillRoot, "hermes-style", "references", "workflow.md"),
   "Hermes-style Level 2 reference file for focused workflow details.",
   "utf8"
+);
+await writeFile(
+  join(importSkillRoot, "hermes-style", "templates", "summary.md"),
+  "# Summary template\n\n- Goal\n- Evidence",
+  "utf8"
+);
+await writeFile(
+  join(importSkillRoot, "hermes-style", "scripts", "prep.py"),
+  "print('prepare hermes-style skill')\n",
+  "utf8"
+);
+await writeFile(
+  join(importSkillRoot, "hermes-style", "assets", "sample.bin"),
+  Buffer.from([0, 159, 146, 150])
 );
 await writeFile(
   join(importSkillRoot, "hermes-style", "SKILL.md"),
@@ -2100,12 +2206,39 @@ const hermesStyleReferenceExecution = await toolExecutor.executeTool({
   trustedWorkspace: true,
   sessionId: directSession.id
 });
+const hermesStyleAssetExecution = await toolExecutor.executeTool({
+  tool: "skill.view",
+  input: {
+    name: "hermes-style-skill",
+    path: "assets/sample.bin"
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const hermesStyleInspectExecution = await toolExecutor.executeTool({
+  tool: "skill.inspect",
+  input: {
+    name: "hermes-style-skill"
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
 const skillExportDir = await mkdtemp(join(tmpdir(), "estacoda-v2-export-skills-"));
 const skillExportExecution = await toolExecutor.executeTool({
   tool: "skill.export",
   input: {
     name: "imported-skill",
     destination: skillExportDir
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const externalSkillPatchExecution = await toolExecutor.executeTool({
+  tool: "skill.patch",
+  input: {
+    name: "imported-skill",
+    old_string: "Imported instructions.",
+    new_string: "Should not edit external skills."
   },
   trustedWorkspace: true,
   sessionId: directSession.id
@@ -2124,6 +2257,12 @@ assert(
   skillInspectCreatedExecution.result.content.includes("sample-personal-skill"),
   "expected skill.inspect to find created skill"
 );
+assert(skillWriteFileExecution?.result?.ok === true, "expected skill.write_file to succeed");
+assert(skillPatchExecution?.result?.ok === true, "expected skill.patch to succeed");
+assert(skillEditExecution?.result?.ok === true, "expected skill.edit to succeed");
+assert(skillRemoveFileExecution?.result?.ok === true, "expected skill.remove_file to succeed");
+assert(deletableSkillCreateExecution?.result?.ok === true, "expected temporary skill create to succeed");
+assert(skillDeleteExecution?.result?.ok === true, "expected skill.delete to succeed");
 assert(skillImportExecution?.result?.ok === true, "expected skill.import to succeed");
 assert(skills.get("imported-skill") !== undefined, "expected imported skill registry entry");
 assert(skills.get("hermes-style-skill") !== undefined, "expected Hermes-style YAML skill registry entry");
@@ -2133,7 +2272,39 @@ assert(
   hermesStyleReferenceExecution?.result?.content.includes("Level 2 reference file") === true,
   "expected skill.view Level 2 reference loading"
 );
+assert(
+  hermesStyleAssetExecution?.result?.metadata?.text === false,
+  "expected skill.view to treat binary assets as non-text resources"
+);
+assert(hermesStyleInspectExecution?.result !== undefined, "expected hermes-style skill.inspect result");
+assert(
+  hermesStyleInspectExecution.result.content.includes("\"resources\"") === true,
+  "expected skill.inspect metadata to include skill resources"
+);
+assert(
+  JSON.stringify(skills.get("hermes-style-skill")).includes("templates/summary.md"),
+  "expected imported skill to index template resources"
+);
+assert(
+  JSON.stringify(skills.get("hermes-style-skill")).includes("scripts/prep.py"),
+  "expected imported skill to index script resources"
+);
+assert(
+  JSON.stringify(skills.get("hermes-style-skill")).includes("assets/sample.bin"),
+  "expected imported skill to index asset resources"
+);
 assert(skillExportExecution?.result?.ok === true, "expected skill.export to succeed");
+assert(externalSkillPatchExecution?.result?.ok === false, "expected external skill patch to fail");
+const createdSkillSourcePath = join(personalSkillRoot, "sample-personal-skill", "SKILL.md");
+const createdSkillSource = await readFile(createdSkillSourcePath, "utf8");
+assert(createdSkillSource.includes("Edited skill body for smoke tests."), "expected skill.edit to replace SKILL.md content");
+const createdSupportPath = join(personalSkillRoot, "sample-personal-skill", "references", "notes.md");
+const removedSupportFile = await stat(createdSupportPath).catch(() => undefined);
+assert(removedSupportFile === undefined, "expected skill.remove_file to delete supporting file");
+const deletedSkillDir = join(personalSkillRoot, "temporary-delete-skill");
+const deletedSkill = await stat(deletedSkillDir).catch(() => undefined);
+assert(deletedSkill === undefined, "expected skill.delete to remove skill directory");
+assert(skills.get("temporary-delete-skill") === undefined, "expected deleted skill to be removed from registry");
 const dynamicMenuRuntime = {
   describe: () => "smoke runtime",
   tools: () => tools.list(),
@@ -2168,12 +2339,18 @@ assert(
 const liveSkillWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-live-skill-"));
 const liveSkillProjectSkillsRoot = join(liveSkillWorkspace, ".estacoda", "skills");
 await mkdir(join(liveSkillProjectSkillsRoot, "provider-file-proof"), { recursive: true });
+await mkdir(join(liveSkillProjectSkillsRoot, "provider-file-proof", "references"), { recursive: true });
+await mkdir(join(liveSkillProjectSkillsRoot, "provider-file-proof", "templates"), { recursive: true });
+await mkdir(join(liveSkillProjectSkillsRoot, "provider-file-proof", "scripts"), { recursive: true });
+await mkdir(join(liveSkillProjectSkillsRoot, "provider-file-proof", "assets"), { recursive: true });
 const providerFileProofSkillPath = join(liveSkillProjectSkillsRoot, "provider-file-proof", "SKILL.md");
 const providerFileProofSkillContent = `---
 name: provider-file-proof
 description: Create and verify a proof file through the normal tool loop.
 version: 0.1.0
 category: coding
+references:
+  - references/spec.md
 required_toolsets:
   - files
   - core
@@ -2192,6 +2369,25 @@ permission_expectations:
 ---
 Use the normal EstaCoda tool loop to create a proof file named runtime-skill-proof.md, then read it back and verify the exact contents before answering.
 `;
+await writeFile(
+  join(liveSkillProjectSkillsRoot, "provider-file-proof", "references", "spec.md"),
+  "Proof spec: create runtime-skill-proof.md and verify the exact sentence after writing.",
+  "utf8"
+);
+await writeFile(
+  join(liveSkillProjectSkillsRoot, "provider-file-proof", "templates", "proof-template.md"),
+  "This file proves provider-backed skill resource loading.\n",
+  "utf8"
+);
+await writeFile(
+  join(liveSkillProjectSkillsRoot, "provider-file-proof", "scripts", "verify.py"),
+  "print('verify runtime-skill-proof.md')\n",
+  "utf8"
+);
+await writeFile(
+  join(liveSkillProjectSkillsRoot, "provider-file-proof", "assets", "icon.bin"),
+  Buffer.from([1, 2, 3, 4])
+);
 const liveSkillProviderRequests: ProviderRequest[] = [];
 const liveSkillProviderRegistry = new ProviderRegistry();
 liveSkillProviderRegistry.register({
@@ -2370,6 +2566,16 @@ assert(
 assert(
   liveSkillProviderRequests[0]?.messages.some((message) => message.content.includes("Skill workflow plan: provider-file-proof")),
   "expected provider-backed skill smoke to include the imported workflow plan"
+);
+assert(
+  liveSkillProviderRequests[0]?.messages.some((message) =>
+    message.content.includes("Skill resources:") &&
+    message.content.includes("references/spec.md") &&
+    message.content.includes("templates/proof-template.md") &&
+    message.content.includes("scripts/verify.py") &&
+    message.content.includes("assets/icon.bin")
+  ),
+  "expected provider-backed skill smoke to include indexed skill resources"
 );
 assert(
   liveSkillProviderRequests[1]?.messages.some((message) =>

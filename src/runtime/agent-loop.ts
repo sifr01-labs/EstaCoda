@@ -253,6 +253,9 @@ export class AgentLoop {
     const selectedSkillInstructions = selectedSkill === undefined || !isLoadedSkill(selectedSkill)
       ? undefined
       : selectedSkill.instructions;
+    const selectedSkillResources = selectedSkill === undefined || !isLoadedSkill(selectedSkill)
+      ? undefined
+      : selectedSkill.resources;
 
     await this.#sessionDb.appendEvent(this.#sessionId, {
       kind: "intent-routed",
@@ -349,6 +352,7 @@ export class AgentLoop {
       routedText,
       selectedSkill,
       selectedSkillInstructions,
+      selectedSkillResources,
       intent,
       securityDecision,
       toolExecutions,
@@ -956,6 +960,7 @@ export class AgentLoop {
     routedText: string;
     selectedSkill: LoadedSkill | SkillDefinition | undefined;
     selectedSkillInstructions: string | undefined;
+    selectedSkillResources: LoadedSkill["resources"] | undefined;
     intent: IntentRoute;
     securityDecision: SecurityDecision;
     toolExecutions: ToolExecutionRecord[];
@@ -1221,8 +1226,9 @@ export class AgentLoop {
   async #completeWithProvider(input: {
     userText: string;
     routedText: string;
-    selectedSkill: LoadedSkill | SkillDefinition | undefined;
-    selectedSkillInstructions: string | undefined;
+      selectedSkill: LoadedSkill | SkillDefinition | undefined;
+      selectedSkillInstructions: string | undefined;
+      selectedSkillResources: LoadedSkill["resources"] | undefined;
     intent: IntentRoute;
     securityDecision: SecurityDecision;
     toolExecutions: ToolExecutionRecord[];
@@ -1248,7 +1254,8 @@ export class AgentLoop {
       sessionHistory,
       soul: this.#soul,
       frozenMemory: this.#frozenMemory,
-      skillsIndex: this.#skillsIndex
+      skillsIndex: this.#skillsIndex,
+      selectedSkillResources: input.selectedSkillResources
     });
     await this.#recordPromptAssembly(prompt.budget);
 
@@ -1311,6 +1318,7 @@ export class AgentLoop {
     routedText: string;
     selectedSkill: LoadedSkill | SkillDefinition | undefined;
     selectedSkillInstructions: string | undefined;
+    selectedSkillResources: LoadedSkill["resources"] | undefined;
     intent: IntentRoute;
     securityDecision: SecurityDecision;
     toolExecutions: ToolExecutionRecord[];
@@ -1343,7 +1351,8 @@ export class AgentLoop {
       sessionHistory,
       soul: this.#soul,
       frozenMemory: this.#frozenMemory,
-      skillsIndex: this.#skillsIndex
+      skillsIndex: this.#skillsIndex,
+      selectedSkillResources: input.selectedSkillResources
     });
     await this.#recordPromptAssembly(prompt.budget);
 

@@ -1,9 +1,11 @@
-import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { readdir, readFile, stat } from "node:fs/promises";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import type {
   LoadedSkill,
   SkillDefinition,
   SkillPermissionExpectation,
+  SkillResourceEntry,
+  SkillResourceKind,
   SkillSourceKind,
   SkillVisibilityRules
 } from "../contracts/skill.js";
@@ -31,10 +33,11 @@ export async function loadSkillsFromDirectory(root: string, options: SkillLoadOp
 
   for (const path of skillFiles) {
     try {
-      skills.push(parseSkillFile(path, await readFile(path, "utf8"), {
+      const parsed = parseSkillFile(path, await readFile(path, "utf8"), {
         sourceKind: options.sourceKind ?? "external",
         sourceRoot: options.sourceRoot ?? root
-      }));
+      });
+      skills.push(await hydrateSkillResources(parsed));
     } catch (error) {
       errors.push({
         path,
@@ -66,6 +69,13 @@ export function parseSkillFile(
     sourceKind: options.sourceKind ?? "external",
     sourceRoot: options.sourceRoot ?? sourcePath,
     instructions: match.groups.instructions.trim()
+  };
+}
+
+export async function hydrateSkillResources(skill: LoadedSkill): Promise<LoadedSkill> {
+  return {
+    ...skill,
+    resources: await loadSkillResourceIndex(skill)
   };
 }
 
@@ -398,4 +408,81 @@ function stripYamlQuotes(value: string): string {
 
 function camelize(value: string): string {
   return value.replace(/_([a-z])/gu, (_, char: string) => char.toUpperCase());
+}
+
+async function loadSkillResourceIndex(skill: LoadedSkill): Promise<SkillResourceEntry[]> {
+  const skillRoot = dirname(skill.sourcePath);
+  const resources = new Map<string, SkillResourceEntry>();
+
+  for (const declaredReference of skill.references ?? []) {
+    const normalized = normalizeRelativeSkillPath(skillRoot, declaredReference);
+    if (normalized === undefined || normalized === "SKILL.md") {
+      continue;
+    }
+
+    const fullPath = resolve(skillRoot, normalized);
+    const bytes = await stat(fullPath).then((entry) => entry.size).catch(() => undefined);
+    resources.set(`reference:${normalized}`, {
+      kind: "reference",
+      path: normalized,
+      bytes,
+      declared: true
+    });
+  }
+
+  await collectResourceDirectory(skillRoot, "references", "reference", resources);
+  await collectResourceDirectory(skillRoot, "templates", "template", resources);
+  await collectResourceDirectory(skillRoot, "scripts", "script", resources);
+  await collectResourceDirectory(skillRoot, "assets", "asset", resources);
+
+  return [...resources.values()].sort((left, right) =>
+    left.kind.localeCompare(right.kind) || left.path.localeCompare(right.path)
+  );
+}
+
+async function collectResourceDirectory(
+  skillRoot: string,
+  directoryName: string,
+  kind: SkillResourceKind,
+  resources: Map<string, SkillResourceEntry>
+): Promise<void> {
+  const root = join(skillRoot, directoryName);
+  const files = await walkFiles(root).catch(() => []);
+
+  for (const filePath of files) {
+    const relativePath = relative(skillRoot, filePath);
+    resources.set(`${kind}:${relativePath}`, {
+      kind,
+      path: relativePath,
+      bytes: await stat(filePath).then((entry) => entry.size).catch(() => undefined),
+      declared: kind === "reference" ? resources.get(`reference:${relativePath}`)?.declared === true : undefined
+    });
+  }
+}
+
+async function walkFiles(root: string): Promise<string[]> {
+  const entries = await readdir(root, { withFileTypes: true });
+  const files: string[] = [];
+
+  for (const entry of entries) {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await walkFiles(path)));
+      continue;
+    }
+    if (entry.isFile()) {
+      files.push(path);
+    }
+  }
+
+  return files.sort();
+}
+
+function normalizeRelativeSkillPath(skillRoot: string, path: string): string | undefined {
+  const candidate = resolve(skillRoot, path);
+  const relativePath = relative(skillRoot, candidate);
+  if (relativePath.length === 0 || relativePath.startsWith("..") || relativePath.startsWith("/")) {
+    return undefined;
+  }
+  return relativePath;
 }

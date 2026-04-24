@@ -59,6 +59,15 @@ export type SkillVisibilityRules = {
   fallbackForTools?: string[];
 };
 
+export type SkillResourceKind = "reference" | "template" | "script" | "asset";
+
+export type SkillResourceEntry = {
+  kind: SkillResourceKind;
+  path: string;
+  bytes?: number;
+  declared?: boolean;
+};
+
 export type SkillDefinition = {
   name: string;
   description: string;
@@ -85,6 +94,7 @@ export type LoadedSkill = SkillDefinition & {
   sourceKind: SkillSourceKind;
   sourceRoot: string;
   instructions: string;
+  resources?: SkillResourceEntry[];
 };
 
 export type SkillCatalogEntry = {
