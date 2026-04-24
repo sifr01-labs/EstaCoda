@@ -203,7 +203,7 @@ export function normalizeOpenAICompatibleRequest(request: ProviderRequest, provi
   const normalized: ProviderRequest = {
     ...request,
     messages,
-    temperature: normalizeTemperature(request.temperature, provider),
+    temperature: normalizeTemperature(request.temperature, provider, request.model),
     tools: supportsTools ? request.tools : undefined,
     responseFormat: supportsResponseFormat ? request.responseFormat : undefined
   };
@@ -307,19 +307,35 @@ export async function* streamOpenAICompatibleRequest(input: {
     }
 
     if (response.body === undefined || response.body === null) {
+      const payload = await response.json();
       const parsed = parseOpenAICompatibleResponse({
         provider: input.provider,
         model: input.model,
-        payload: await response.json()
+        payload
       });
+      const toolCalls = extractOpenAICompatibleToolCalls(payload);
 
       if (parsed.ok) {
-        yield {
-          kind: "token",
-          provider: input.provider,
-          model: input.model,
-          text: parsed.content
-        };
+        for (const toolCall of toolCalls) {
+          yield {
+            kind: "tool-call",
+            provider: input.provider,
+            model: input.model,
+            index: toolCall.index,
+            id: toolCall.id,
+            name: toolCall.name,
+            argumentsText: toolCall.argumentsText,
+            raw: toolCall.raw
+          };
+        }
+        if (parsed.content.length > 0) {
+          yield {
+            kind: "token",
+            provider: input.provider,
+            model: input.model,
+            text: parsed.content
+          };
+        }
         yield {
           kind: "done",
           provider: input.provider,
@@ -398,6 +414,13 @@ export function parseOpenAICompatibleResponse(input: {
     choices?: Array<{
       message?: {
         content?: string | Array<{ type?: string; text?: string }>;
+        tool_calls?: Array<{
+          id?: string;
+          function?: {
+            name?: string;
+            arguments?: string;
+          };
+        }>;
       };
       text?: string;
     }>;
@@ -426,8 +449,9 @@ export function parseOpenAICompatibleResponse(input: {
 
   const firstChoice = payload.choices?.[0];
   const content = normalizeContent(firstChoice?.message?.content) ?? firstChoice?.text;
+  const hasToolCalls = (firstChoice?.message?.tool_calls?.length ?? 0) > 0;
 
-  if (content === undefined) {
+  if (content === undefined && !hasToolCalls) {
     return {
       ok: false,
       content: "Provider response did not include assistant content.",
@@ -440,7 +464,7 @@ export function parseOpenAICompatibleResponse(input: {
 
   return {
     ok: true,
-    content,
+    content: content ?? "",
     model: input.model,
     provider: input.provider,
     usage: {
@@ -472,7 +496,7 @@ function classifyProviderError(code: string | undefined) {
   return "unknown";
 }
 
-function normalizeTemperature(temperature: number | undefined, provider: ProviderId): number | undefined {
+function normalizeTemperature(temperature: number | undefined, provider: ProviderId, model: string): number | undefined {
   if (temperature === undefined) {
     return undefined;
   }
@@ -481,11 +505,15 @@ function normalizeTemperature(temperature: number | undefined, provider: Provide
     return 1;
   }
 
+  if (looksReasoningModel(model)) {
+    return undefined;
+  }
+
   if (provider === "local") {
     return clamp(temperature, 0, 2);
   }
 
-  return temperature;
+  return clamp(temperature, 0, 2);
 }
 
 function providerHeaders(provider: ProviderId): Record<string, string> {
@@ -501,6 +529,10 @@ function providerHeaders(provider: ProviderId): Record<string, string> {
 
 function modelLikelySupportsLocalTools(model: string): boolean {
   return /tool|function|hermes|qwen|llama-3\.1|llama-3\.2|llama-3\.3/i.test(model);
+}
+
+function looksReasoningModel(model: string): boolean {
+  return /reasoner|reasoning|thinking|r1|o1|o3|o4/i.test(model);
 }
 
 function createTimeoutSignal(timeoutMs: number, parentSignal: AbortSignal | undefined): {
@@ -711,4 +743,34 @@ function normalizeContent(content: string | Array<{ type?: string; text?: string
   }
 
   return undefined;
+}
+
+function extractOpenAICompatibleToolCalls(payload: unknown): Array<{
+  index?: number;
+  id?: string;
+  name?: string;
+  argumentsText?: string;
+  raw?: unknown;
+}> {
+  const typed = payload as {
+    choices?: Array<{
+      message?: {
+        tool_calls?: Array<{
+          id?: string;
+          function?: {
+            name?: string;
+            arguments?: string;
+          };
+        }>;
+      };
+    }>;
+  };
+
+  return (typed.choices?.[0]?.message?.tool_calls ?? []).map((toolCall, index) => ({
+    index,
+    id: toolCall.id,
+    name: toolCall.function?.name,
+    argumentsText: toolCall.function?.arguments,
+    raw: toolCall
+  }));
 }

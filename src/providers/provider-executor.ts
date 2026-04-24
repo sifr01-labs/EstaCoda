@@ -215,6 +215,20 @@ export class ProviderExecutor {
           this.#credentialPools?.reportSuccess(model.provider, credential.id);
         }
 
+        for (const toolCall of extractToolCallsFromProviderResponse(response.raw)) {
+          toolCalls.push(toolCall);
+          await options.onEvent?.({
+            kind: "provider-tool-call",
+            provider: model.provider,
+            model: model.id,
+            index: toolCall.index,
+            id: toolCall.id,
+            name: toolCall.name,
+            argumentsText: toolCall.argumentsText,
+            raw: toolCall.raw
+          });
+        }
+
         return {
           ok: true,
           response,
@@ -358,4 +372,32 @@ function shouldFallback(response: ProviderResponse, _model: ModelProfile): boole
     response.errorClass === "network" ||
     response.errorClass === "server" ||
     response.errorClass === "model-unavailable";
+}
+
+function extractToolCallsFromProviderResponse(raw: unknown): ProviderExecutionResult["toolCalls"] {
+  if (raw === undefined || raw === null || typeof raw !== "object") {
+    return [];
+  }
+
+  const payload = raw as {
+    choices?: Array<{
+      message?: {
+        tool_calls?: Array<{
+          id?: string;
+          function?: {
+            name?: string;
+            arguments?: string;
+          };
+        }>;
+      };
+    }>;
+  };
+
+  return (payload.choices?.[0]?.message?.tool_calls ?? []).map((toolCall, index) => ({
+    index,
+    id: toolCall.id,
+    name: toolCall.function?.name,
+    argumentsText: toolCall.function?.arguments,
+    raw: toolCall
+  }));
 }

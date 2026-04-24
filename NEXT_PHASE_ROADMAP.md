@@ -15,6 +15,12 @@ This phase turns the first working provider-backed agent loop into a reliable He
 - Tool results are packetized into continuation prompts.
 - CLI tool activity is visible in one-shot and interactive sessions.
 - `doctor --live-tools` can verify provider tool-calling against the configured model.
+- Hermes-aligned skill visibility now uses session-stable snapshots plus explicit refresh via `/reset`.
+- Hermes-aligned external skill directories now support `~` and `${VAR}` expansion, read-only discovery, silent skip for missing paths, and local precedence over external skills.
+- Hermes-style skill mutation actions exist: create, patch, edit, delete, write supporting file, remove supporting file.
+- Skill packages now index `references/`, `templates/`, `scripts/`, and standards-compatible `assets/`.
+- Skill load-time setup now resolves required environment variables, credential-file presence, and `metadata.hermes.config` fields without exposing secrets.
+- Provider-backed skill smokes now cover templates, scripts, progressive disclosure, package refresh, and a composed reference + template + script workflow.
 
 ## Phase Goals
 
@@ -28,7 +34,7 @@ This phase turns the first working provider-backed agent loop into a reliable He
 
 ### 1. Multi-Step Agent Tasks
 
-Status: core write/read, edit/replace, malformed tool-call recovery, and unavailable-tool recovery loops work in smoke coverage.
+Status: core write/read, edit/replace, malformed tool-call recovery, unavailable-tool recovery, provider-safe tool aliases, and visible tool activity all work in smoke coverage.
 
 Next acceptance checks:
 - Done: provider can write a file with `file.write`.
@@ -39,25 +45,37 @@ Next acceptance checks:
 - Done: provider can verify the edit from tool results.
 - Done: malformed tool calls produce recoverable feedback.
 - Done: unavailable tool calls produce recoverable feedback.
-- Terminal activity shows each tool step clearly.
+- Done: terminal activity shows each tool step clearly.
+
+Remaining hardening:
+- Run live provider batches across Kimi/OpenRouter/Ollama/DeepSeek and resolve provider-specific quirks together.
+- Expand normal-task live testing beyond smoke fixtures into more realistic multi-tool tasks.
 
 ### 2. Executable Skills
 
-Status: loading, routing, slash menu, import/export/create, workflow planning, outcome memory, provider-backed skill handoff, and Hermes-style session-stable skill visibility exist.
+Status: Hermes-aligned skill loading, routing, slash menu, import/export/create/edit/patch/delete, workflow planning, outcome memory, provider-backed execution, session-stable visibility, external skill dirs, runtime visibility filtering, skill package indexing, and load-time setup context all exist.
 
 Next acceptance checks:
 - Done: a selected skill loads `SKILL.md` into the provider prompt with workflow context.
-- Provider-backed sessions execute selected skills through the normal tool loop instead of deterministic pre-runs.
-- Deterministic skill execution remains available as the no-provider fallback path.
-- Installed/imported skills become provider-visible on session refresh or a new session, not by silent mid-session mutation.
-- CLI exposes `/reset` as the explicit session refresh boundary for new skill/config snapshots.
-- Skill steps can request files/context/tools without bespoke code.
-- Skill outcomes are recorded to memory.
-- Skill creation/import immediately updates slash menus and tool-visible catalog.
+- Done: provider-backed sessions execute selected skills through the normal tool loop instead of deterministic pre-runs.
+- Done: deterministic skill execution remains available as the no-provider fallback path.
+- Done: installed/imported skills become provider-visible on session refresh or a new session, not by silent mid-session mutation.
+- Done: CLI exposes `/reset` as the explicit session refresh boundary for new skill/config snapshots.
+- Done: skill steps can request files/context/tools without bespoke code.
+- Done: skill outcomes are recorded to memory.
+- Done: skill creation/import updates slash menus and tool-visible catalog under Hermes-style session semantics.
+- Done: provider-backed template workflows execute through `skill.view` -> file tool continuations.
+- Done: provider-backed script workflows execute through `skill.view` -> `terminal.run` / `execute_code` continuations.
+- Done: progressive disclosure is enforced in smoke coverage.
+- Done: skill package contents stay session-stable until refresh/new session.
+
+Remaining hardening:
+- Make env/credential-backed script execution conventions more operational in live provider runs.
+- Add Skills Hub / distribution layer later without changing the runtime skill model.
 
 ### 3. Memory And Sessions
 
-Status: `SOUL.md`, `USER.md`, `MEMORY.md`, `AGENTS.md`, memory provider, session DB, SQLite session store, history packing, and prompt cache exist.
+Status: `SOUL.md`, `USER.md`, `MEMORY.md`, `AGENTS.md`, memory provider, session DB, SQLite session store, history packing, prompt cache, and skill outcome persistence exist.
 
 Next acceptance checks:
 - Repeated user preferences are promoted into `USER.md`.
@@ -87,14 +105,16 @@ Next acceptance checks:
 
 ## Immediate Next Step
 
-Harden executable skill workflows end to end:
+Move from strong smoke coverage to end-to-end product hardening:
 
-1. Load a selected `SKILL.md` into the active prompt as operating instructions.
-2. Compile the skill workflow into concrete plan context for the provider.
-3. Let the provider execute the workflow through normal tool calls and continuations.
-4. Keep deterministic workflow execution as the fallback path when no provider is configured.
-5. Preserve Hermes-style session-stable skill visibility; require refresh/new session for provider-visible skill updates.
-6. Record skill outcomes to memory and trajectory logs.
-7. Ensure refreshed sessions pick up newly installed/imported skills in slash menus and provider-visible skill indexes.
+1. Harden live provider execution in a batched pass across Kimi/OpenRouter/Ollama/DeepSeek.
+2. Promote repeated preferences into `USER.md` and repeated workflows into `MEMORY.md` or skill suggestions.
+3. Run Telegram against the real v2 provider/tool loop and harden attachment-aware skill execution.
+4. Tighten gateway UX, approval/denial flows, and channel-session behavior.
+5. Finish first-run install/onboarding polish and define the external distribution path.
 
-Keep live Kimi/OpenRouter/Ollama tests batched at the end of the workstream so provider-specific quirks are debugged together.
+Keep Hermes alignment as the default rule:
+- session-stable snapshots over silent mutation
+- progressive disclosure over eager expansion
+- skill execution through the normal agent loop and tool system
+- secrets never injected into provider prompts

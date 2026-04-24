@@ -884,6 +884,32 @@ const localToolProviderRequest = buildOpenAICompatibleRequest(
   undefined,
   "local"
 );
+const deepseekReasonerProviderRequest = buildOpenAICompatibleRequest(
+  {
+    baseUrl: "https://api.deepseek.com/v1",
+    apiKey: { kind: "literal", value: "deepseek-key" }
+  },
+  {
+    model: "deepseek-reasoner",
+    messages: [{ role: "user", content: "hello" }],
+    temperature: 0.2
+  },
+  undefined,
+  "deepseek"
+);
+const clampedDeepseekProviderRequest = buildOpenAICompatibleRequest(
+  {
+    baseUrl: "https://api.deepseek.com/v1",
+    apiKey: { kind: "literal", value: "deepseek-key" }
+  },
+  {
+    model: "deepseek-chat",
+    messages: [{ role: "user", content: "hello" }],
+    temperature: 4
+  },
+  undefined,
+  "deepseek"
+);
 const normalizedAdjacentMessages = normalizeOpenAICompatibleRequest({
   model: "deepseek-chat",
   messages: [
@@ -1117,6 +1143,42 @@ const openAIStreamEvents = await collectAsync(streamingOpenAIProvider.stream?.({
   messages: [{ role: "user", content: "hello" }],
   stream: true
 }) ?? []);
+const noBodyToolCallProvider = createOpenAICompatibleProvider({
+  id: "deepseek",
+  endpoint: {
+    baseUrl: "https://api.deepseek.example/v1",
+    apiKey: {
+      kind: "none"
+    }
+  },
+  models: ["deepseek-chat"],
+  enableNetwork: true,
+  fetch: async () => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    body: null,
+    json: async () => ({
+      choices: [{
+        message: {
+          tool_calls: [{
+            id: "nobody-tool-call",
+            function: {
+              name: "file_read",
+              arguments: "{\"path\":\"README.md\"}"
+            }
+          }]
+        }
+      }]
+    }),
+    text: async () => ""
+  })
+});
+const noBodyToolCallEvents = await collectAsync(noBodyToolCallProvider.stream?.({
+  model: "deepseek-chat",
+  messages: [{ role: "user", content: "tool only" }],
+  stream: true
+}) ?? []);
 const strategyPool = new CredentialPool({
   provider: "kimi",
   strategy: "round_robin",
@@ -1192,6 +1254,74 @@ const cancelledProviderResponse = await cancellableProvider.complete({
 }, {
   signal: providerAbortController.signal
 });
+const nonStreamingToolCallProvider = createOpenAICompatibleProvider({
+  id: "deepseek",
+  endpoint: {
+    baseUrl: "https://api.deepseek.com/v1",
+    apiKey: { kind: "literal", value: "test-key" }
+  },
+  models: ["deepseek-chat"],
+  enableNetwork: true,
+  fetch: async () => fakeFetchResponse(200, {
+    choices: [{
+      message: {
+        tool_calls: [{
+          id: "nonstream-tool-call",
+          function: {
+            name: "file_read",
+            arguments: "{\"path\":\"README.md\"}"
+          }
+        }]
+      }
+    }]
+  })
+});
+const nonStreamingToolCallResponse = await nonStreamingToolCallProvider.complete({
+  model: "deepseek-chat",
+  messages: [{ role: "user", content: "read README with a tool" }]
+});
+const nonStreamingToolCallRegistry = new ProviderRegistry();
+nonStreamingToolCallRegistry.register(fakeProvider({
+  id: "deepseek",
+  models: [inferModelProfile({ provider: "deepseek", model: "deepseek-chat" })],
+  responses: [{
+    ok: true,
+    content: "",
+    model: "deepseek-chat",
+    provider: "deepseek",
+    raw: {
+      choices: [{
+        message: {
+          tool_calls: [{
+            id: "executor-nonstream-tool-call",
+            function: {
+              name: "file_read",
+              arguments: "{\"path\":\"README.md\"}"
+            }
+          }]
+        }
+      }]
+    }
+  }]
+}));
+const nonStreamingToolEvents: string[] = [];
+const nonStreamingToolExecution = await new ProviderExecutor({
+  registry: nonStreamingToolCallRegistry
+}).complete(
+  {
+    messages: [{ role: "user", content: "tool only response" }]
+  },
+  {
+    providerOrder: ["deepseek"]
+  },
+  {
+    onEvent: (event) => {
+      if (event.kind === "provider-tool-call") {
+        nonStreamingToolEvents.push(event.name ?? "");
+      }
+    }
+  }
+);
 const pythonProbe = await runPythonWorker({
   tool: "python.probe",
   input: {
@@ -1793,6 +1923,8 @@ assert(
 );
 assert(kimiProviderRequest.body.temperature === 1, "expected Kimi temperature normalization");
 assert(kimiProviderRequest.body.tools !== undefined, "expected Kimi tools to be preserved");
+assert(deepseekReasonerProviderRequest.body.temperature === undefined, "expected reasoning-model request to omit temperature");
+assert(clampedDeepseekProviderRequest.body.temperature === 2, "expected hosted provider temperature clamp");
 assert(
   openRouterProviderRequest.headers["HTTP-Referer"] === "https://kemetresearch.com",
   "expected OpenRouter referer header"
@@ -1856,6 +1988,14 @@ assert(
   openAIStreamEvents.some((event) => event.kind === "done" && event.response.usage?.totalTokens === 6),
   "expected OpenAI-compatible stream usage"
 );
+assert(
+  noBodyToolCallEvents.some((event) => event.kind === "tool-call" && event.name === "file_read"),
+  "expected OpenAI-compatible no-body stream branch to emit tool calls"
+);
+assert(
+  noBodyToolCallEvents.some((event) => event.kind === "done" && event.response.ok),
+  "expected OpenAI-compatible no-body stream branch to finish successfully"
+);
 assert(strategyResolutionA?.id === "kimi-a", "expected round-robin first credential");
 assert(strategyResolutionB?.id === "kimi-b", "expected round-robin second credential");
 assert(
@@ -1869,6 +2009,11 @@ assert(
 assert(liveLikeResponse.ok, "expected live-like provider response to succeed");
 assert(liveLikeResponse.content === "live transport success", "expected parsed live-like content");
 assert(liveLikeResponse.usage?.totalTokens === 7, "expected parsed token usage");
+assert(nonStreamingToolCallResponse.ok, "expected non-stream tool-call response to parse successfully");
+assert(nonStreamingToolCallResponse.content === "", "expected tool-only non-stream response to return empty content");
+assert(nonStreamingToolExecution.ok, "expected provider executor non-stream tool-call execution to succeed");
+assert(nonStreamingToolExecution.toolCalls[0]?.name === "file_read", "expected provider executor to extract non-stream tool call metadata");
+assert(nonStreamingToolEvents[0] === "file_read", "expected provider executor to emit non-stream tool-call event");
 assert(rateLimitedResponse.errorClass === "rate-limit", "expected rate-limit classification");
 assert(providerAbortSignalSeen, "expected provider fetch to receive aborted signal");
 assert(cancelledProviderResponse.errorClass === "timeout", "expected cancelled provider response to classify as timeout");
