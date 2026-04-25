@@ -7,6 +7,7 @@ import { ChannelApprovalStore } from "./channels/channel-approval-store.js";
 import { ChannelGateway, InMemoryChannelSessionStore } from "./channels/channel-gateway.js";
 import { MockChannelAdapter } from "./channels/mock-channel-adapter.js";
 import { TelegramAdapter, updateToChannelMessage } from "./channels/telegram-adapter.js";
+import { formatTelegramReply } from "./channels/telegram-format.js";
 import { createConfigTools } from "./config/config-tools.js";
 import { runCliCommand } from "./cli/cli.js";
 import { runOneShotPrompt } from "./cli/one-shot.js";
@@ -6696,6 +6697,18 @@ await telegramAdapter.delivery.sendText({
 await telegramAdapter.delivery.sendText({
   platform: "telegram",
   chatId: "1254738091"
+}, [
+  "## What It Is",
+  "",
+  "- **Framework-agnostic**: Pure React.",
+  "",
+  "```tsx",
+  "<SigilLogin />",
+  "```"
+].join("\n"));
+await telegramAdapter.delivery.sendText({
+  platform: "telegram",
+  chatId: "1254738091"
 }, "<b>Command Approval Required</b>", {
   format: "html",
   actions: [
@@ -6775,8 +6788,14 @@ assert((await stat(telegramDownloadedPaths[0])).size > 0, "expected downloaded T
 assert(telegramRequests.some((request) => request.url.endsWith("/getUpdates")), "expected Telegram getUpdates request");
 assert(telegramRequests.some((request) => request.url.endsWith("/getFile")), "expected Telegram getFile request");
 assert(
-  telegramRequests.some((request) => request.url.endsWith("/sendMessage") && request.body.text === "Hello from EstaCoda"),
-  "expected Telegram sendMessage text request"
+  telegramRequests.some((request) =>
+    request.url.endsWith("/sendMessage") &&
+      request.body.parse_mode === "HTML" &&
+      String(request.body.text).includes("<b>What It Is</b>") &&
+      String(request.body.text).includes("<b>Framework-agnostic</b>") &&
+      String(request.body.text).includes("<pre>&lt;SigilLogin /&gt;</pre>")
+  ),
+  "expected Telegram final replies to render structured markdown-like content as HTML"
 );
 assert(
   telegramRequests.some((request) =>
@@ -6858,6 +6877,18 @@ assert(
   ),
   "expected Arabic Telegram progress to use localized file-read label"
 );
+const telegramFormattedReply = formatTelegramReply([
+  "Validation",
+  "",
+  "- **All checks passed**",
+  "",
+  "```bash",
+  "pnpm run build",
+  "```"
+].join("\n"));
+assert(telegramFormattedReply.format === "html", "expected Telegram formatter to default to HTML");
+assert(telegramFormattedReply.text.includes("<b>Validation</b>"), "expected standalone section headings to render as bold");
+assert(telegramFormattedReply.text.includes("<pre>pnpm run build</pre>"), "expected fenced code blocks to render as preformatted blocks");
 const telegramCallbackRequests: Array<{
   url: string;
   body: Record<string, unknown>;

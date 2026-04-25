@@ -21,6 +21,9 @@ This phase turns the first working provider-backed agent loop into a reliable He
 - Skill packages now index `references/`, `templates/`, `scripts/`, and standards-compatible `assets/`.
 - Skill load-time setup now resolves required environment variables, credential-file presence, and `metadata.hermes.config` fields without exposing secrets.
 - Provider-backed skill smokes now cover templates, scripts, progressive disclosure, package refresh, and a composed reference + template + script workflow.
+- Telegram now runs through the real v2 provider/tool loop with attachment manifests, attachment-aware inspection, approval persistence, inline approval buttons, compact progress updates, and shared bilingual activity labels.
+- Gateway startup/status diagnostics now expose adapter readiness, security mode, token/env presence, model route, state paths, and command-sync status.
+- An internal alpha harness and runbook now exist for repeatable operator testing across CLI, Telegram, providers, approvals, and reset/rollback flow.
 
 ## Phase Goals
 
@@ -85,13 +88,19 @@ Next acceptance checks:
 
 ### 4. Channels
 
-Status: generic channel contracts, Telegram adapter, pairing, allowlists, media download, and gateway smoke tests exist.
+Status: generic channel contracts, Telegram adapter, pairing, allowlists, media download, real provider-backed Telegram text flow, attachment execution E2E, approval persistence/revocation, inline Telegram approval UX, gateway diagnostics, and compact bilingual progress updates all exist.
 
 Next acceptance checks:
-- Telegram runs against the v2 provider/tool loop in a real session.
-- Telegram media triggers attachment-aware skills.
-- Gateway status and startup UX are clear.
-- Channel approval/denial flows work for gated actions.
+- Done: Telegram runs against the v2 provider/tool loop in a real session.
+- Done: Telegram media triggers attachment-aware skills through attachment manifests and normal inspection tools.
+- Done: gateway status and startup UX are clear enough for operator testing.
+- Done: channel approval/denial flows work for gated actions, including persistent approvals and revocation.
+
+Remaining hardening:
+- Polish Telegram final reply formatting so answers feel chat-native rather than terminal-native.
+- Run and tighten live Telegram attachment/operator passes in the alpha harness, including unsupported-type and failure-path UX.
+- Add channel-level verbosity/profile controls so progress/detail level can vary by surface without exposing raw tool names by default.
+- Expand beyond Telegram to the next launch channels after Telegram feels production-stable.
 
 ### 5. Installer And Onboarding
 
@@ -103,15 +112,28 @@ Next acceptance checks:
 - Config errors produce actionable fixes.
 - Packaging path is defined for binary/npm/homebrew-style distribution.
 
+### 6. Internal Alpha Operations
+
+Status: a repeatable internal alpha runbook and harness exist, with generated notes/commands/log folders and reset instructions for real operator passes.
+
+Next acceptance checks:
+- Done: one operator can run preflight, CLI, provider, and Telegram checks from a repeatable harness.
+- Failures are recorded in a single run folder with logs, notes, and artifacts.
+- Reset/rollback instructions are easy enough to follow between runs.
+
+Remaining hardening:
+- Turn the harness from “repeatable manual run” into a stronger release gate with clearer pass/fail checkpoints.
+- Add more guided live checks for Telegram attachments, approval cards, and provider-route comparison.
+
 ## Immediate Next Step
 
-Move from strong smoke coverage to end-to-end product hardening:
+Move from strong internal alpha behavior to MVP launch hardening:
 
-1. Harden live provider execution in a batched pass across Kimi/OpenRouter/Ollama/DeepSeek.
-2. Promote repeated preferences into `USER.md` and repeated workflows into `MEMORY.md` or skill suggestions.
-3. Run Telegram against the real v2 provider/tool loop and harden attachment-aware skill execution.
-4. Tighten gateway UX, approval/denial flows, and channel-session behavior.
-5. Finish first-run install/onboarding polish and define the external distribution path.
+1. Polish Telegram final reply formatting and complete a full live attachment/operator pass in the alpha harness.
+2. Harden live provider execution in a batched pass across Kimi/OpenRouter/Ollama/DeepSeek.
+3. Promote repeated preferences into `USER.md` and repeated workflows into `MEMORY.md` or skill suggestions.
+4. Finish first-run install/onboarding polish and define the external distribution path.
+5. Expand from Telegram to the next launch channels only after the Telegram path feels stable.
 
 Keep Hermes alignment as the default rule:
 - session-stable snapshots over silent mutation

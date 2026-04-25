@@ -11,6 +11,7 @@ import type {
 } from "../contracts/channel.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import { renderChannelProgressLabel, type ActivityLabelLocale } from "./activity-labels.js";
+import { formatTelegramReply } from "./telegram-format.js";
 
 export type TelegramFetch = (url: string, init?: {
   method?: string;
@@ -147,7 +148,11 @@ export class TelegramAdapter implements ChannelAdapter {
   readonly delivery = {
     sendText: async (sessionKey: ChannelSessionKey, text: string, options?: ChannelTextOptions) => {
       this.#progressByChat.delete(sessionKey.chatId);
-      await this.#sendMessage(sessionKey.chatId, text, options);
+      const formatted = formatTelegramReply(text, options);
+      await this.#sendMessage(sessionKey.chatId, formatted.text, {
+        ...options,
+        format: formatted.format
+      });
     },
     sendProgress: async (sessionKey: ChannelSessionKey, event: RuntimeEvent) => {
       if (event.kind === "agent-start" || event.kind === "provider-attempt") {
