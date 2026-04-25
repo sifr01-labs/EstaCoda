@@ -201,6 +201,10 @@ function isChannelMediaReference(normalized: string, attachments: ChannelAttachm
   const mediaSignals = ["image", "photo", "pdf", "document", "file", "audio", "video", "voice note", "attachment"];
 
   if ((attachments ?? []).some((attachment) =>
+    attachment.status !== undefined &&
+    attachment.status !== "ready"
+      ? false
+      :
     attachment.kind === "image" ||
     attachment.kind === "document" ||
     attachment.kind === "file" ||

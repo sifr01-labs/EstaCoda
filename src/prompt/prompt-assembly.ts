@@ -349,15 +349,21 @@ function renderChannelAttachments(attachments: ChannelAttachment[] | undefined):
   }
 
   return attachments.map((attachment) => {
+    const suggestedTools = attachment.status !== undefined && attachment.status !== "ready"
+      ? []
+      : suggestedToolsForAttachment(attachment);
     const parts = [
       `id=${attachment.id}`,
       `kind=${attachment.kind}`,
+      attachment.status === undefined ? undefined : `status=${attachment.status}`,
       attachment.originalName ?? attachment.name,
       attachment.mimeType === undefined ? undefined : `mime=${attachment.mimeType}`,
       attachment.bytes === undefined ? undefined : `bytes=${attachment.bytes}`,
       attachment.localPath === undefined && attachment.path === undefined ? undefined : `local_ref=${attachment.localPath ?? attachment.path}`,
       attachment.remoteUrl === undefined && attachment.url === undefined ? undefined : `remote_ref=${attachment.remoteUrl ?? attachment.url}`,
-      `suggested_tools=${suggestedToolsForAttachment(attachment).join(", ")}`
+      attachment.failureCode === undefined ? undefined : `failure=${attachment.failureCode}`,
+      attachment.failureMessage === undefined ? undefined : `note=${attachment.failureMessage}`,
+      suggestedTools.length === 0 ? undefined : `suggested_tools=${suggestedTools.join(", ")}`
     ].filter((value) => value !== undefined && value !== "");
     return `- ${parts.join(" · ")}`;
   }).join("\n");

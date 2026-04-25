@@ -59,6 +59,7 @@ export type TelegramChannelConfig = {
   allowedUserIds?: string[];
   allowedChatIds?: string[];
   pollTimeoutSeconds?: number;
+  maxAttachmentBytes?: number;
   pairing?: {
     code?: string;
     createdAt?: string;

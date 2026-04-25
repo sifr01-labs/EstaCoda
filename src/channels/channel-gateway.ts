@@ -232,8 +232,17 @@ export class ChannelGateway {
     }
 
     if (pendingApproval !== undefined) {
-      const approvalPrompt = renderApprovalPrompt(pendingApproval);
-      await adapter.delivery?.sendText(message.sessionKey, approvalPrompt);
+      const approvalPrompt = renderApprovalPrompt(pendingApproval, adapter.kind === "telegram" ? "html" : "plain");
+      await adapter.delivery?.sendText(
+        message.sessionKey,
+        approvalPrompt,
+        adapter.kind === "telegram"
+          ? {
+              format: "html",
+              actions: approvalActions()
+            }
+          : undefined
+      );
       await adapter.send?.({
         conversationId: message.sessionKey.chatId,
         sessionKey: message.sessionKey,
@@ -375,7 +384,11 @@ export class ChannelGateway {
       const pending = this.#pendingApprovals.get(key);
       const text = pending === undefined
         ? "There is no pending approval request for this chat."
-        : `Denied ${pending.toolName}. EstaCoda will not run that action until it is requested again.`;
+        : [
+            "❌ Approval denied",
+            `Tool: ${pending.toolName}`,
+            "EstaCoda will not run that action unless it is requested again."
+          ].join("\n");
       this.#pendingApprovals.delete(key);
       await adapter.delivery?.sendText(message.sessionKey, text);
 
@@ -464,8 +477,18 @@ export class ChannelGateway {
     }
 
     const approvalText = scope === "always"
-      ? `Approved ${pending.toolName} persistently for this chat scope. Resuming the blocked request now.`
-      : `Approved ${pending.toolName} for ${scope}. Resuming the blocked request now.`;
+      ? [
+          "✅ Approval granted",
+          `Tool: ${pending.toolName}`,
+          "Scope: persistent for this chat",
+          "EstaCoda is resuming the blocked request now."
+        ].join("\n")
+      : [
+          "✅ Approval granted",
+          `Tool: ${pending.toolName}`,
+          `Scope: ${scope}`,
+          "EstaCoda is resuming the blocked request now."
+        ].join("\n");
     await adapter.delivery?.sendText(message.sessionKey, approvalText);
 
     const resumed = await this.receive({
@@ -494,7 +517,7 @@ export class ChannelGateway {
       "Approval status",
       pending === undefined
         ? "Pending: none"
-        : `Pending: ${pending.toolName} (${pending.riskClass}${pending.targetSummary === undefined ? "" : ` -> ${pending.targetSummary}`})`,
+        : formatPendingApproval(pending),
       "",
       "Session approvals:",
       ...(sessionScoped.length === 0
@@ -696,19 +719,35 @@ function firstPendingApproval(
   };
 }
 
-function renderApprovalPrompt(input: PendingApproval): string {
+function renderApprovalPrompt(input: PendingApproval, format: "plain" | "html" = "plain"): string {
+  const reason = deriveApprovalReason(input);
+  const preview = truncateForApprovalPreview(input.targetSummary ?? input.toolName, 320);
+
+  if (format === "html") {
+    return [
+      "<b>⚠️ Command Approval Required</b>",
+      `<b>${escapeHtml(formatApprovalToolLabel(input.toolName))}</b>`,
+      `<pre>${escapeHtml(preview)}</pre>`,
+      `<b>Reason:</b> ${escapeHtml(reason)}`,
+      `<b>Risk:</b> ${escapeHtml(formatRiskLabel(input.riskClass))}`
+    ].join("\n");
+  }
+
   return [
-    "Command approval required",
-    `Tool: ${input.toolName}`,
-    `Risk: ${input.riskClass}`,
-    input.targetSummary === undefined ? undefined : `Target: ${input.targetSummary}`,
+    "⚠️ Command approval required",
+    `Tool: ${formatApprovalToolLabel(input.toolName)}`,
+    `Preview: ${preview}`,
+    `Reason: ${reason}`,
+    `Risk: ${formatRiskLabel(input.riskClass)}`,
     "",
-    "Reply with one of:",
-    "/approve once",
-    "/approve session",
-    "/approve always",
-    "/deny"
-  ].filter(Boolean).join("\n");
+    "Choose one:",
+    "• /approve once - allow this exact action one time",
+    "• /approve session - allow matching actions for the current session",
+    "• /approve always - persist approval for this chat and matching target",
+    "• /deny - keep it blocked",
+    "",
+    "Use /approvals to review current trust state."
+  ].join("\n");
 }
 
 function parseApprovalScope(text: string): ApprovalScope {
@@ -757,6 +796,108 @@ function formatPersistentApproval(grant: PersistedApprovalGrant): string {
     grant.targetSummary === undefined ? undefined : `target=${grant.targetSummary}`,
     grant.chatId === undefined ? undefined : `chat=${grant.chatId}`
   ].filter(Boolean).join(" · ");
+}
+
+function formatPendingApproval(pending: PendingApproval): string {
+  return [
+    "Pending approval:",
+    `Tool: ${pending.toolName}`,
+    `Risk: ${formatRiskLabel(pending.riskClass)}`,
+    pending.targetSummary === undefined ? undefined : `Target: ${pending.targetSummary}`
+  ].filter(Boolean).join("\n");
+}
+
+function approvalActions() {
+  return [
+    [
+      { label: "✅ Allow Once", value: "/approve once" },
+      { label: "✅ Session", value: "/approve session" }
+    ],
+    [
+      { label: "✅ Always", value: "/approve always" },
+      { label: "❌ Deny", value: "/deny" }
+    ]
+  ];
+}
+
+function deriveApprovalReason(input: PendingApproval): string {
+  const summary = (input.targetSummary ?? "").toLowerCase();
+
+  if (input.toolName === "terminal.run") {
+    if (/\brm\b/.test(summary) && / -r| -rf| --recursive/.test(summary)) {
+      return "recursive delete";
+    }
+
+    if (/\bcurl\b|\bwget\b/.test(summary)) {
+      return "network fetch";
+    }
+
+    if (/\bchmod\b|\bchown\b/.test(summary)) {
+      return "permission change";
+    }
+  }
+
+  if (input.toolName === "file.write" || input.toolName === "file.replace") {
+    return "file modification";
+  }
+
+  if (input.toolName === "process.start" || input.toolName === "process.stop") {
+    return "process control";
+  }
+
+  return formatRiskLabel(input.riskClass);
+}
+
+function formatApprovalToolLabel(toolName: string): string {
+  if (toolName === "terminal.run") {
+    return "Shell";
+  }
+
+  if (toolName.startsWith("file.")) {
+    return "File";
+  }
+
+  if (toolName.startsWith("process.")) {
+    return "Process";
+  }
+
+  return toolName;
+}
+
+function truncateForApprovalPreview(value: string, maxChars: number): string {
+  return value.length <= maxChars ? value : `${value.slice(0, maxChars - 1)}…`;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function formatRiskLabel(riskClass: string): string {
+  switch (riskClass) {
+    case "destructive-local":
+      return "destructive local action";
+    case "workspace-write":
+      return "workspace write";
+    case "shared-state-mutation":
+      return "shared state change";
+    case "credential-access":
+      return "credential access";
+    case "external-side-effect":
+      return "external side effect";
+    case "sandbox-escape":
+      return "sandbox escape";
+    case "spend-money":
+      return "spend money";
+    case "read-only-network":
+      return "read-only network";
+    case "read-only-local":
+      return "read-only local";
+    default:
+      return riskClass;
+  }
 }
 
 function matchesPersistentApproval(grant: PersistedApprovalGrant, request: SecurityRequest): boolean {

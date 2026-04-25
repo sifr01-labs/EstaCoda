@@ -4,8 +4,10 @@ import type { ArtifactRecord } from "../contracts/artifact.js";
 import type {
   ChannelAdapter,
   ChannelAttachment,
+  ChannelAttachmentStatus,
   ChannelMessage,
-  ChannelSessionKey
+  ChannelSessionKey,
+  ChannelTextOptions
 } from "../contracts/channel.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 
@@ -26,6 +28,7 @@ export type TelegramAdapterOptions = {
   botToken: string;
   defaultChatId?: string;
   pollTimeoutSeconds?: number;
+  maxAttachmentBytes?: number;
   mediaRoot?: string;
   fetch?: TelegramFetch;
   now?: () => Date;
@@ -53,6 +56,19 @@ type TelegramUpdate = {
   update_id: number;
   message?: TelegramMessage;
   edited_message?: TelegramMessage;
+  callback_query?: TelegramCallbackQuery;
+};
+
+type TelegramCallbackQuery = {
+  id: string;
+  data?: string;
+  from?: {
+    id: number | string;
+    first_name?: string;
+    last_name?: string;
+    username?: string;
+  };
+  message?: TelegramMessage;
 };
 
 type TelegramMessage = {
@@ -93,12 +109,15 @@ type TelegramFile = {
   file_size?: number;
 };
 
+const DEFAULT_MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
 export class TelegramAdapter implements ChannelAdapter {
   readonly id = "telegram";
   readonly kind = "telegram";
   readonly #botToken: string;
   readonly #defaultChatId: string | undefined;
   readonly #pollTimeoutSeconds: number;
+  readonly #maxAttachmentBytes: number;
   readonly #mediaRoot: string | undefined;
   readonly #fetch: TelegramFetch;
   readonly #now: () => Date;
@@ -107,8 +126,8 @@ export class TelegramAdapter implements ChannelAdapter {
   #running = false;
 
   readonly delivery = {
-    sendText: async (sessionKey: ChannelSessionKey, text: string) => {
-      await this.#sendMessage(sessionKey.chatId, text);
+    sendText: async (sessionKey: ChannelSessionKey, text: string, options?: ChannelTextOptions) => {
+      await this.#sendMessage(sessionKey.chatId, text, options);
     },
     sendProgress: async (sessionKey: ChannelSessionKey, event: RuntimeEvent) => {
       if (event.kind === "agent-start" || event.kind === "provider-attempt") {
@@ -131,6 +150,7 @@ export class TelegramAdapter implements ChannelAdapter {
     this.#botToken = options.botToken;
     this.#defaultChatId = options.defaultChatId;
     this.#pollTimeoutSeconds = options.pollTimeoutSeconds ?? 25;
+    this.#maxAttachmentBytes = options.maxAttachmentBytes ?? DEFAULT_MAX_ATTACHMENT_BYTES;
     this.#mediaRoot = options.mediaRoot;
     this.#fetch = options.fetch ?? fetchJson;
     this.#now = options.now ?? (() => new Date());
@@ -153,7 +173,7 @@ export class TelegramAdapter implements ChannelAdapter {
     const response = await this.#call<TelegramUpdate[]>("getUpdates", {
       offset: this.#offset,
       timeout: this.#pollTimeoutSeconds,
-      allowed_updates: ["message", "edited_message"]
+      allowed_updates: ["message", "edited_message", "callback_query"]
     });
     let count = 0;
 
@@ -169,7 +189,13 @@ export class TelegramAdapter implements ChannelAdapter {
         message.attachments = await this.#downloadAttachments(message);
       }
 
-      await this.#handler(message);
+      try {
+        await this.#handler(message);
+      } finally {
+        if (update.callback_query?.id !== undefined) {
+          await this.#answerCallbackQuery(update.callback_query.id);
+        }
+      }
       count += 1;
     }
 
@@ -180,11 +206,22 @@ export class TelegramAdapter implements ChannelAdapter {
     return this.#running;
   }
 
-  async #sendMessage(chatId: string, text: string): Promise<void> {
+  async #sendMessage(chatId: string, text: string, options?: ChannelTextOptions): Promise<void> {
     await this.#call("sendMessage", {
       chat_id: chatId,
       text,
-      disable_web_page_preview: true
+      disable_web_page_preview: true,
+      parse_mode: options?.format === "html" ? "HTML" : undefined,
+      reply_markup: options?.actions === undefined
+        ? undefined
+        : {
+            inline_keyboard: options.actions.map((row) =>
+              row.map((action) => ({
+                text: action.label,
+                callback_data: action.value
+              }))
+            )
+          }
     });
   }
 
@@ -204,39 +241,108 @@ export class TelegramAdapter implements ChannelAdapter {
     });
   }
 
+  async #answerCallbackQuery(callbackQueryId: string): Promise<void> {
+    await this.#call("answerCallbackQuery", {
+      callback_query_id: callbackQueryId
+    });
+  }
+
   async #downloadAttachments(message: ChannelMessage): Promise<ChannelAttachment[]> {
     const downloaded: ChannelAttachment[] = [];
 
     for (const attachment of message.attachments ?? []) {
-      const fileId = typeof attachment.metadata?.telegramFileId === "string"
-        ? attachment.metadata.telegramFileId
-        : attachment.id;
-      const info = await this.#call<TelegramFileInfo>("getFile", {
-        file_id: fileId
-      });
-
-      if (info.file_path === undefined) {
-        downloaded.push(attachment);
+      const unsupportedReason = classifyUnsupportedAttachment(attachment);
+      if (unsupportedReason !== undefined) {
+        downloaded.push(markAttachmentFailure(attachment, "unsupported", "unsupported-type", unsupportedReason));
         continue;
       }
 
-      const localPath = await this.#downloadFile({
-        filePath: info.file_path,
-        attachment,
-        message
-      });
+      if ((attachment.bytes ?? 0) > this.#maxAttachmentBytes) {
+        downloaded.push(markAttachmentFailure(
+          attachment,
+          "too-large",
+          "attachment-too-large",
+          `This attachment is too large to inspect in Telegram right now. The current limit is ${formatBytes(this.#maxAttachmentBytes)}.`
+        ));
+        continue;
+      }
 
-      downloaded.push({
-        ...attachment,
-        localPath,
-        path: localPath,
-        remoteUrl: `telegram://file/${info.file_path}`,
-        metadata: {
-          ...(attachment.metadata ?? {}),
-          telegramFilePath: info.file_path,
-          downloadedAt: this.#now().toISOString()
-        }
-      });
+      const fileId = typeof attachment.metadata?.telegramFileId === "string"
+        ? attachment.metadata.telegramFileId
+        : attachment.id;
+
+      let info: TelegramFileInfo;
+      try {
+        info = await this.#call<TelegramFileInfo>("getFile", {
+          file_id: fileId
+        });
+      } catch {
+        downloaded.push(markAttachmentFailure(
+          attachment,
+          "download-failed",
+          "attachment-download-failed",
+          "I couldn't fetch that Telegram attachment just now. Please resend it and I'll try again."
+        ));
+        continue;
+      }
+
+      if ((info.file_size ?? attachment.bytes ?? 0) > this.#maxAttachmentBytes) {
+        downloaded.push(markAttachmentFailure(
+          {
+            ...attachment,
+            bytes: info.file_size ?? attachment.bytes
+          },
+          "too-large",
+          "attachment-too-large",
+          `This attachment is too large to inspect in Telegram right now. The current limit is ${formatBytes(this.#maxAttachmentBytes)}.`
+        ));
+        continue;
+      }
+
+      if (info.file_path === undefined) {
+        downloaded.push(markAttachmentFailure(
+          attachment,
+          "download-failed",
+          "attachment-download-failed",
+          "I couldn't access the attachment file path from Telegram. Please resend it and I'll try again."
+        ));
+        continue;
+      }
+
+      try {
+        const localPath = await this.#downloadFile({
+          filePath: info.file_path,
+          attachment,
+          message
+        });
+
+        downloaded.push({
+          ...attachment,
+          status: "ready",
+          failureCode: undefined,
+          failureMessage: undefined,
+          bytes: info.file_size ?? attachment.bytes,
+          localPath,
+          path: localPath,
+          remoteUrl: `telegram://file/${info.file_path}`,
+          metadata: {
+            ...(attachment.metadata ?? {}),
+            telegramFilePath: info.file_path,
+            downloadedAt: this.#now().toISOString()
+          }
+        });
+      } catch {
+        downloaded.push(markAttachmentFailure(
+          {
+            ...attachment,
+            bytes: info.file_size ?? attachment.bytes,
+            remoteUrl: `telegram://file/${info.file_path}`
+          },
+          "download-failed",
+          "attachment-download-failed",
+          "I couldn't download that attachment just now. Please resend it and I'll try again."
+        ));
+      }
     }
 
     return downloaded;
@@ -294,6 +400,10 @@ export class TelegramAdapter implements ChannelAdapter {
 }
 
 export function updateToChannelMessage(update: TelegramUpdate, now: () => Date = () => new Date()): ChannelMessage | undefined {
+  if (update.callback_query !== undefined) {
+    return callbackQueryToChannelMessage(update, now);
+  }
+
   const message = update.message ?? update.edited_message;
 
   if (message === undefined) {
@@ -325,6 +435,46 @@ export function updateToChannelMessage(update: TelegramUpdate, now: () => Date =
       telegram: {
         updateId: update.update_id,
         messageId: message.message_id,
+        chatType: message.chat.type
+      }
+    }
+  };
+}
+
+function callbackQueryToChannelMessage(update: TelegramUpdate, now: () => Date): ChannelMessage | undefined {
+  const callback = update.callback_query;
+  const message = callback?.message;
+
+  if (callback === undefined || message === undefined || typeof callback.data !== "string" || callback.data.length === 0) {
+    return undefined;
+  }
+
+  const chatId = String(message.chat.id);
+  const senderId = String(callback.from?.id ?? message.from?.id ?? message.chat.id);
+  const displayName = [callback.from?.first_name, callback.from?.last_name].filter(Boolean).join(" ");
+
+  return {
+    id: `telegram-callback-${update.update_id}-${callback.id}`,
+    channel: "telegram",
+    sessionKey: {
+      platform: "telegram",
+      accountId: "telegram",
+      chatId,
+      userId: senderId
+    },
+    text: callback.data,
+    sender: {
+      id: senderId,
+      displayName: displayName.length > 0 ? displayName : message.chat.title,
+      username: callback.from?.username ?? message.from?.username ?? message.chat.username
+    },
+    attachments: [],
+    receivedAt: message.date === undefined ? now().toISOString() : new Date(message.date * 1000).toISOString(),
+    metadata: {
+      telegram: {
+        updateId: update.update_id,
+        messageId: message.message_id,
+        callbackQueryId: callback.id,
         chatType: message.chat.type
       }
     }
@@ -434,4 +584,71 @@ function extensionForAttachment(attachment: ChannelAttachment): string {
   }
 
   return ".bin";
+}
+
+function classifyUnsupportedAttachment(attachment: ChannelAttachment): string | undefined {
+  if (attachment.kind === "image" || attachment.kind === "video" || attachment.kind === "audio" || attachment.kind === "voice") {
+    return undefined;
+  }
+
+  if (attachment.kind === "document") {
+    const normalizedMime = attachment.mimeType?.toLowerCase();
+    const normalizedName = (attachment.originalName ?? attachment.name ?? "").toLowerCase();
+
+    if (normalizedMime === undefined) {
+      return normalizedName.length === 0 || /\.(txt|md|markdown|pdf|json|xml|csv)$/i.test(normalizedName)
+        ? undefined
+        : "I can't inspect this attachment type yet in Telegram. Try sending an image, PDF, or text-like document.";
+    }
+
+    if (
+      normalizedMime.startsWith("text/") ||
+      normalizedMime === "application/pdf" ||
+      normalizedMime === "application/json" ||
+      normalizedMime === "application/xml" ||
+      normalizedMime === "text/xml" ||
+      normalizedMime === "text/markdown"
+    ) {
+      return undefined;
+    }
+
+    if (/\.(txt|md|markdown|pdf|json|xml|csv)$/i.test(normalizedName)) {
+      return undefined;
+    }
+
+    return "I can't inspect this attachment type yet in Telegram. Try sending an image, PDF, or text-like document.";
+  }
+
+  return "I can't inspect this attachment type yet in Telegram. Try sending an image, PDF, audio, video, or text-like document.";
+}
+
+function markAttachmentFailure(
+  attachment: ChannelAttachment,
+  status: Exclude<ChannelAttachmentStatus, "ready">,
+  failureCode: string,
+  failureMessage: string
+): ChannelAttachment {
+  return {
+    ...attachment,
+    status,
+    failureCode,
+    failureMessage,
+    metadata: {
+      ...(attachment.metadata ?? {}),
+      attachmentStatus: status,
+      attachmentFailureCode: failureCode
+    }
+  };
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  if (bytes >= 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+
+  return `${bytes} B`;
 }

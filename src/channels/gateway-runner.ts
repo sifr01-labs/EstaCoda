@@ -65,6 +65,7 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
     botToken,
     defaultChatId: telegram.defaultChatId,
     pollTimeoutSeconds: telegram.pollTimeoutSeconds,
+    maxAttachmentBytes: telegram.maxAttachmentBytes,
     mediaRoot,
     fetch: options.telegramFetch
   });

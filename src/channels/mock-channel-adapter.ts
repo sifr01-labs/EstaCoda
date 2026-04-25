@@ -4,7 +4,8 @@ import type {
   ChannelKind,
   ChannelMessage,
   ChannelReply,
-  ChannelSessionKey
+  ChannelSessionKey,
+  ChannelTextOptions
 } from "../contracts/channel.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 
@@ -12,6 +13,7 @@ export type MockChannelDelivery = {
   type: "text" | "progress" | "artifact" | "legacy-reply";
   sessionKey: ChannelSessionKey;
   text?: string;
+  options?: ChannelTextOptions;
   event?: RuntimeEvent;
   artifact?: ArtifactRecord;
   reply?: ChannelReply;
@@ -24,8 +26,8 @@ export class MockChannelAdapter implements ChannelAdapter {
   #handler: ((message: ChannelMessage) => Promise<void>) | undefined;
 
   readonly delivery = {
-    sendText: async (sessionKey: ChannelSessionKey, text: string) => {
-      this.deliveries.push({ type: "text", sessionKey, text });
+    sendText: async (sessionKey: ChannelSessionKey, text: string, options?: ChannelTextOptions) => {
+      this.deliveries.push({ type: "text", sessionKey, text, options });
     },
     sendProgress: async (sessionKey: ChannelSessionKey, event: RuntimeEvent) => {
       this.deliveries.push({ type: "progress", sessionKey, event });

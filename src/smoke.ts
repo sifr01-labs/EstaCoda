@@ -6414,10 +6414,21 @@ const approvalAfterReset = await approvalGateway.receive({
 
 assert(approvalInitial.replyText.includes("needs approval"), "expected approval gateway first response to block");
 assert(
-  approvalMockChannel.deliveries.some((delivery) => delivery.type === "text" && delivery.text?.includes(`Target: ${destructiveTargetSummary}`)),
+  approvalMockChannel.deliveries.some((delivery) =>
+    delivery.type === "text" &&
+      delivery.text?.includes("Command Approval Required") &&
+      delivery.text?.includes("<pre>") &&
+      delivery.text?.includes("Reason:") &&
+      delivery.options?.actions?.[0]?.[0]?.value === "/approve once" &&
+      delivery.options?.actions?.[1]?.[1]?.value === "/deny"
+  ),
   "expected approval prompt delivery"
 );
-assert(approvalApprove.replyText.includes("persistently"), "expected /approve always confirmation");
+assert(
+  approvalApprove.replyText.includes("✅ Approval granted") &&
+    approvalApprove.replyText.includes("Scope: persistent for this chat"),
+  "expected /approve always confirmation"
+);
 assert(approvalStatus.replyText.includes("Persistent approvals:"), "expected /approvals response");
 assert(approvalStatus.replyText.includes(destructiveTargetSummary), "expected /approvals target summary");
 assert(approvalStatus.replyText.includes("Session approvals:"), "expected /approvals session heading");
@@ -6511,7 +6522,7 @@ const differentChat = await restartedGateway.receive({
 });
 
 assert(restartInitial.replyText.includes("needs approval"), "expected restart approval initial block");
-assert(restartApprove.replyText.includes("persistently"), "expected restart persistent approval confirmation");
+assert(restartApprove.replyText.includes("Scope: persistent for this chat"), "expected restart persistent approval confirmation");
 assert(restartStatus.replyText.includes(`match=${destructiveTargetKey}`), "expected /approvals to show strict match key");
 assert(afterRestart.replyText.includes("Dangerous command completed"), "expected persistent approval to survive restart");
 assert(afterRestartNew.replyText.includes("Started a fresh EstaCoda session"), "expected /new after restart");
@@ -6666,6 +6677,16 @@ await telegramAdapter.delivery.sendText({
   platform: "telegram",
   chatId: "1254738091"
 }, "Hello from EstaCoda");
+await telegramAdapter.delivery.sendText({
+  platform: "telegram",
+  chatId: "1254738091"
+}, "<b>Command Approval Required</b>", {
+  format: "html",
+  actions: [
+    [{ label: "✅ Allow Once", value: "/approve once" }],
+    [{ label: "❌ Deny", value: "/deny" }]
+  ]
+});
 await telegramAdapter.setCommands([
   { command: "/help", description: "Show help" },
   { command: "/status", description: "Show status" }
@@ -6725,6 +6746,15 @@ assert(
   "expected Telegram sendMessage text request"
 );
 assert(
+  telegramRequests.some((request) =>
+    request.url.endsWith("/sendMessage") &&
+      request.body.text === "<b>Command Approval Required</b>" &&
+      request.body.parse_mode === "HTML" &&
+      JSON.stringify(request.body.reply_markup).includes("/approve once")
+  ),
+  "expected Telegram approval card message to include HTML formatting and inline buttons"
+);
+assert(
   telegramRequests.some((request) => request.url.endsWith("/sendChatAction") && request.body.action === "typing"),
   "expected Telegram typing action"
 );
@@ -6742,6 +6772,63 @@ assert(
 );
 assert(convertedTelegramMessage?.attachments?.[0]?.kind === "document", "expected Telegram document attachment conversion");
 assert(convertedTelegramMessage.attachments[0]?.originalName === "brief.pdf", "expected Telegram document file name");
+const telegramCallbackRequests: Array<{
+  url: string;
+  body: Record<string, unknown>;
+}> = [];
+const telegramCallbackAdapter = new TelegramAdapter({
+  botToken: "telegram-callback-token",
+  fetch: async (url, init) => {
+    const body = JSON.parse(init?.body ?? "{}") as Record<string, unknown>;
+    telegramCallbackRequests.push({ url, body });
+
+    if (url.endsWith("/getUpdates")) {
+      return fakeTelegramResponse([{
+        update_id: 44,
+        callback_query: {
+          id: "telegram-callback-approve-session",
+          data: "/approve session",
+          from: {
+            id: 1254738091,
+            first_name: "Smoke",
+            username: "smoke-user"
+          },
+          message: {
+            message_id: 10,
+            date: 1_776_000_030,
+            chat: {
+              id: 1254738091,
+              type: "private",
+              username: "smoke-chat"
+            },
+            from: {
+              id: 1254738091,
+              first_name: "Smoke",
+              username: "smoke-user"
+            }
+          }
+        }
+      }]);
+    }
+
+    return fakeTelegramResponse({ ok: true });
+  }
+});
+const telegramCallbackMessages: string[] = [];
+await telegramCallbackAdapter.start(async (message) => {
+  telegramCallbackMessages.push(message.text);
+});
+const telegramCallbackPollCount = await telegramCallbackAdapter.pollOnce();
+await telegramCallbackAdapter.stop();
+assert(telegramCallbackPollCount === 1, "expected Telegram callback query poll to process one update");
+assert(telegramCallbackMessages[0] === "/approve session", "expected Telegram callback query to become a command message");
+assert(
+  telegramCallbackRequests.some((request) =>
+    request.url.endsWith("/answerCallbackQuery") &&
+      request.body.callback_query_id === "telegram-callback-approve-session"
+  ),
+  "expected Telegram callback query acknowledgement"
+);
 
 const telegramAttachmentSessionDb = new InMemorySessionDB({
   id: sequenceId(),
@@ -7113,6 +7200,217 @@ assert(
       String(request.body.text).includes("Document attachment inspected successfully through telegram-media-analysis.")
   ),
   "expected Telegram document attachment reply to be sent back to chat"
+);
+
+const telegramAttachmentFailureSessionDb = new InMemorySessionDB({
+  id: sequenceId(),
+  now: () => new Date("2026-04-25T00:00:00.000Z")
+});
+const telegramAttachmentFailureHome = await mkdtemp(join(tmpdir(), "estacoda-v2-telegram-attachment-failure-home-"));
+const telegramAttachmentFailureWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-telegram-attachment-failure-workspace-"));
+const telegramAttachmentFailureRequests: Array<{
+  url: string;
+  body: Record<string, unknown>;
+}> = [];
+const telegramAttachmentFailureProviderRegistry = new ProviderRegistry();
+let telegramAttachmentFailureUpdateIndex = 0;
+const telegramAttachmentFailureAdapter = new TelegramAdapter({
+  botToken: "telegram-attachment-failure-token",
+  mediaRoot: join(telegramAttachmentFailureHome, ".estacoda", "channel-media"),
+  maxAttachmentBytes: 16,
+  fetch: async (url, init) => {
+    const body = init?.body === undefined ? {} : JSON.parse(init.body);
+    telegramAttachmentFailureRequests.push({ url, body });
+
+    if (url.endsWith("/getUpdates")) {
+      telegramAttachmentFailureUpdateIndex += 1;
+
+      if (telegramAttachmentFailureUpdateIndex === 1) {
+        return fakeTelegramResponse([{
+          update_id: 300,
+          message: {
+            message_id: 31,
+            date: 1_776_000_200,
+            caption: "Can you inspect this installer?",
+            chat: {
+              id: 1254738091,
+              type: "private",
+              username: "telegram-failure-chat"
+            },
+            from: {
+              id: 1254738091,
+              first_name: "Ahn",
+              username: "telegram-failure-user"
+            },
+            document: {
+              file_id: "tg-unsupported-doc",
+              file_name: "installer.exe",
+              mime_type: "application/x-msdownload",
+              file_size: 12
+            }
+          }
+        }]);
+      }
+
+      if (telegramAttachmentFailureUpdateIndex === 2) {
+        return fakeTelegramResponse([{
+          update_id: 301,
+          message: {
+            message_id: 32,
+            date: 1_776_000_260,
+            caption: "Please inspect this big image.",
+            chat: {
+              id: 1254738091,
+              type: "private",
+              username: "telegram-failure-chat"
+            },
+            from: {
+              id: 1254738091,
+              first_name: "Ahn",
+              username: "telegram-failure-user"
+            },
+            photo: [{
+              file_id: "tg-huge-image",
+              file_unique_id: "tg-huge-image-unique",
+              file_size: 50,
+              width: 200,
+              height: 200
+            }]
+          }
+        }]);
+      }
+
+      return fakeTelegramResponse([]);
+    }
+
+    if (url.endsWith("/sendMessage")) {
+      return fakeTelegramResponse({ message_id: 301 });
+    }
+
+    if (url.endsWith("/sendChatAction") || url.endsWith("/setMyCommands")) {
+      return fakeTelegramResponse({ ok: true });
+    }
+
+    if (url.endsWith("/getFile")) {
+      throw new Error("getFile should not be called for unsupported or oversized Telegram attachment failures");
+    }
+
+    throw new Error(`Unhandled Telegram failure smoke URL: ${url}`);
+  }
+});
+const telegramAttachmentFailureGateway = new ChannelGateway({
+  adapters: [telegramAttachmentFailureAdapter],
+  approvalStore: new ChannelApprovalStore({
+    path: join(await mkdtemp(join(tmpdir(), "estacoda-v2-telegram-attachment-failure-approvals-")), "approvals.json"),
+    idFactory: sequenceId()
+  }),
+  authPolicy: {
+    mode: "allowlist",
+    allowedUserIds: ["1254738091"],
+    allowedChatIds: ["1254738091"]
+  },
+  trustedWorkspace: true,
+  runtimeForSession: async ({ sessionId, securityPolicy }) => createRuntime({
+    theme: kemetBlueTheme,
+    sessionDb: telegramAttachmentFailureSessionDb,
+    sessionId,
+    profileId: "smoke",
+    workspaceRoot: telegramAttachmentFailureWorkspace,
+    homeDir: telegramAttachmentFailureHome,
+    providerRegistry: telegramAttachmentFailureProviderRegistry,
+    securityPolicy,
+    telegramReady: true,
+    model: {
+      id: "unconfigured",
+      provider: "unconfigured",
+      contextWindowTokens: 128_000,
+      supportsTools: false,
+      supportsVision: false,
+      supportsStructuredOutput: false
+    }
+  })
+});
+await telegramAttachmentFailureGateway.start();
+const telegramUnsupportedPollCount = await telegramAttachmentFailureAdapter.pollOnce();
+const telegramOversizedPollCount = await telegramAttachmentFailureAdapter.pollOnce();
+const missingAttachmentResponse = await telegramAttachmentFailureGateway.receive({
+  id: "telegram-missing-attachment",
+  channel: "telegram",
+  sessionKey: {
+    platform: "telegram",
+    accountId: "telegram",
+    chatId: "1254738091",
+    userId: "1254738091"
+  },
+  text: "Please inspect the missing attachment.",
+  sender: {
+    id: "1254738091",
+    displayName: "Ahn"
+  },
+  attachments: [{
+    id: "missing-local-file",
+    kind: "document",
+    status: "ready",
+    mimeType: "text/plain",
+    originalName: "missing.txt",
+    localPath: join(telegramAttachmentFailureHome, ".estacoda", "channel-media", "telegram", "1254738091", "missing.txt"),
+    path: join(telegramAttachmentFailureHome, ".estacoda", "channel-media", "telegram", "1254738091", "missing.txt"),
+    bytes: 5
+  }],
+  receivedAt: new Date("2026-04-25T00:00:00.000Z").toISOString()
+});
+await telegramAttachmentFailureGateway.stop();
+const telegramAttachmentFailureSessionId = "channel-telegram-telegram-1254738091-main";
+const telegramAttachmentFailureMessages = await telegramAttachmentFailureSessionDb.listMessages(telegramAttachmentFailureSessionId);
+assert(telegramUnsupportedPollCount === 1, "expected unsupported Telegram attachment update to process");
+assert(telegramOversizedPollCount === 1, "expected oversized Telegram attachment update to process");
+assert(
+  telegramAttachmentFailureRequests.some((request) =>
+    request.url.endsWith("/sendMessage") &&
+      String(request.body.text).includes("can't inspect this attachment type yet")
+  ),
+  "expected unsupported Telegram attachment to return a clean unsupported-type reply"
+);
+assert(
+  telegramAttachmentFailureRequests.some((request) =>
+    request.url.endsWith("/sendMessage") &&
+      String(request.body.text).includes("too large")
+  ),
+  "expected oversized Telegram attachment to return a clean size-limit reply"
+);
+assert(
+  missingAttachmentResponse.replyText.includes("couldn't access the downloaded attachment anymore"),
+  "expected missing Telegram attachment to return a clean missing-file reply"
+);
+assert(
+  telegramAttachmentFailureRequests.every((request) =>
+    !request.url.endsWith("/getFile")
+  ),
+  "expected unsupported and oversized Telegram attachment failures to short-circuit before getFile"
+);
+assert(
+  telegramAttachmentFailureMessages.some((message) =>
+    message.role === "user" &&
+      message.metadata?.attachments !== undefined &&
+      JSON.stringify(message.metadata.attachments).includes("\"status\":\"unsupported\"")
+  ),
+  "expected unsupported Telegram attachment metadata to be recorded in session state"
+);
+assert(
+  telegramAttachmentFailureMessages.some((message) =>
+    message.role === "user" &&
+      message.metadata?.attachments !== undefined &&
+      JSON.stringify(message.metadata.attachments).includes("\"status\":\"too-large\"")
+  ),
+  "expected oversized Telegram attachment metadata to be recorded in session state"
+);
+assert(
+  telegramAttachmentFailureMessages.some((message) =>
+    message.role === "user" &&
+      message.metadata?.attachments !== undefined &&
+      JSON.stringify(message.metadata.attachments).includes("\"status\":\"missing-file\"")
+  ),
+  "expected missing Telegram attachment metadata to be recorded in session state"
 );
 
 console.log("v2 smoke passed");

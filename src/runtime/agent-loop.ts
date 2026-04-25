@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, isAbsolute } from "node:path";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { ChannelAttachment, ChannelKind } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
@@ -9,6 +9,7 @@ import type { PromptBudgetReport } from "../contracts/prompt.js";
 import type { ModelProfile, ProviderMessage, ProviderRequest, ProviderRoutePreferences } from "../contracts/provider.js";
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SecurityDecision, SecurityPolicy } from "../contracts/security.js";
+import { capabilityFirstDefaults } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
 import type {
   LoadedSkill,
@@ -210,6 +211,7 @@ export class AgentLoop {
       ? expandedContext
       : undefined;
     const routedText = context?.expandedText ?? effectiveText;
+    const attachments = normalizeAttachments(input.attachments);
 
     await this.#sessionDb.appendMessage({
       sessionId: this.#sessionId,
@@ -217,7 +219,7 @@ export class AgentLoop {
       content: effectiveText,
       channel: input.channel,
       metadata: {
-        attachments: summarizeAttachments(input.attachments),
+        attachments: summarizeAttachments(attachments),
         contextReferences: context?.references.map((reference) => reference.raw) ?? [],
         projectContextFiles: this.#projectContext?.files.map((file) => file.source) ?? []
       }
@@ -226,7 +228,7 @@ export class AgentLoop {
     this.#trajectoryRecorder.record("user-input", {
       text: effectiveText,
       channel: input.channel,
-      attachments: summarizeAttachments(input.attachments),
+      attachments: summarizeAttachments(attachments),
       contextReferences: context?.references.map((reference) => reference.raw) ?? []
     });
 
@@ -255,6 +257,7 @@ export class AgentLoop {
     }
 
     const trustedWorkspace = input.trustedWorkspace ?? false;
+    const attachmentFailureResponse = buildAttachmentFailureResponse(attachments);
     if (isAborted(input.signal)) {
       const resumeNote = buildResumeNote({
         stage: "context expansion",
@@ -272,9 +275,81 @@ export class AgentLoop {
         resumeNote
       });
     }
-    const intent = this.#intentRouter.route(routedText, {
-      attachments: input.attachments
-    });
+    const intent = attachmentFailureResponse === undefined
+      ? this.#intentRouter.route(routedText, {
+        attachments
+      })
+      : directAttachmentFailureIntent();
+    if (attachmentFailureResponse !== undefined) {
+      await this.#sessionDb.appendEvent(this.#sessionId, {
+        kind: "intent-routed",
+        route: intent
+      });
+      const attachmentFailureSecurityDecision = capabilityFirstDefaults.decide({
+        riskClass: "read-only-local",
+        description: "respond to attachment failure",
+        context: {
+          trustedWorkspace,
+          activeChannel: input.channel,
+          targetChannel: input.channel,
+          targetConversationIsActive: true
+        }
+      });
+      await this.#sessionDb.appendEvent(this.#sessionId, {
+        kind: "security-decided",
+        decision: attachmentFailureSecurityDecision,
+        description: "respond to attachment failure"
+      });
+      this.#trajectoryRecorder.record("progress", {
+        message: "attachment preflight failed",
+        labels: intent.labels,
+        confidence: intent.confidence
+      });
+      this.#trajectoryRecorder.record("assistant-output", {
+        text: attachmentFailureResponse,
+        matchedSkills: [],
+        intentLabels: intent.labels,
+        securityDecision: attachmentFailureSecurityDecision,
+        contextReferences: context?.references.map((reference) => reference.raw) ?? [],
+        toolExecutions: [],
+        artifacts: []
+      });
+      await this.#sessionDb.appendMessage({
+        sessionId: this.#sessionId,
+        role: "agent",
+        content: attachmentFailureResponse,
+        channel: input.channel,
+        metadata: {
+          matchedSkills: [],
+          intentLabels: intent.labels,
+          attachmentFailure: summarizeAttachments(attachments)
+        }
+      });
+      await emit(input.onEvent, {
+        kind: "agent-final",
+        text: attachmentFailureResponse
+      });
+
+      return {
+        label: this.#responseLabel,
+        text: attachmentFailureResponse,
+        matchedSkills: [],
+        intent,
+        securityDecision: attachmentFailureSecurityDecision,
+        toolExecutions: [],
+        toolPlans: [],
+        skillOutcomes: [],
+        artifacts: [],
+        context,
+        projectContext: this.#projectContext,
+        progress: [
+          "attachment preflight failed",
+          ...(attachments ?? [])
+            .filter((attachment) => attachment.status !== undefined && attachment.status !== "ready")
+            .map((attachment) => `attachment: ${attachment.id} (${attachment.status})`)
+        ]
+      };
+    }
     await emit(input.onEvent, {
       kind: "intent",
       labels: intent.labels,
@@ -393,7 +468,7 @@ export class AgentLoop {
       toolExecutions,
       context,
       projectContext: this.#projectContext,
-      attachments: input.attachments,
+      attachments,
       memoryContext: this.#memoryContext,
       providerTools,
       fallbackText: fallbackResponse.text,
@@ -1730,12 +1805,91 @@ function summarizeAttachments(attachments: ChannelAttachment[] | undefined): Arr
   return (attachments ?? []).map((attachment) => ({
     id: attachment.id,
     kind: attachment.kind,
+    status: attachment.status ?? inferAttachmentStatus(attachment),
     name: attachment.originalName ?? attachment.name,
     path: attachment.localPath ?? attachment.path,
     remoteUrl: attachment.remoteUrl ?? attachment.url,
     mimeType: attachment.mimeType,
-    bytes: attachment.bytes
+    bytes: attachment.bytes,
+    failureCode: attachment.failureCode,
+    failureMessage: attachment.failureMessage
   }));
+}
+
+function normalizeAttachments(attachments: ChannelAttachment[] | undefined): ChannelAttachment[] | undefined {
+  if (attachments === undefined || attachments.length === 0) {
+    return attachments;
+  }
+
+  return attachments.map((attachment) => {
+    const inferredStatus = inferAttachmentStatus(attachment);
+    if (inferredStatus !== "ready") {
+      return {
+        ...attachment,
+        status: inferredStatus
+      };
+    }
+
+    const localPath = attachment.localPath ?? attachment.path;
+    if (typeof localPath === "string" && localPath.length > 0 && isAbsolute(localPath) && !existsSync(localPath)) {
+      return {
+        ...attachment,
+        status: "missing-file",
+        failureCode: attachment.failureCode ?? "attachment-missing-file",
+        failureMessage: attachment.failureMessage ?? "I couldn't access the downloaded attachment anymore. Please resend it and I'll inspect it again."
+      };
+    }
+
+    return {
+      ...attachment,
+      status: "ready"
+    };
+  });
+}
+
+function buildAttachmentFailureResponse(attachments: ChannelAttachment[] | undefined): string | undefined {
+  if (attachments === undefined || attachments.length === 0) {
+    return undefined;
+  }
+
+  const failed = attachments.filter((attachment) => inferAttachmentStatus(attachment) !== "ready");
+  const ready = attachments.filter((attachment) => inferAttachmentStatus(attachment) === "ready");
+  if (failed.length === 0 || ready.length > 0) {
+    return undefined;
+  }
+
+  const statuses = new Set(failed.map((attachment) => inferAttachmentStatus(attachment)));
+  if (statuses.size === 1) {
+    const status = failed[0] === undefined ? "download-failed" : inferAttachmentStatus(failed[0]);
+    if (status === "unsupported") {
+      return failed[0]?.failureMessage ?? "I can't inspect this attachment type yet in Telegram. Try sending an image, PDF, or text-like document.";
+    }
+
+    if (status === "too-large") {
+      return failed[0]?.failureMessage ?? "That attachment is too large for this Telegram workflow right now. Please send a smaller file and try again.";
+    }
+
+    if (status === "missing-file") {
+      return "I couldn't access the downloaded attachment anymore. Please resend it and I'll inspect it again.";
+    }
+  }
+
+  return "I couldn't inspect the attachment that came through Telegram. Please resend it as an image, PDF, or smaller supported document and I'll try again.";
+}
+
+function inferAttachmentStatus(attachment: ChannelAttachment): NonNullable<ChannelAttachment["status"]> {
+  return attachment.status ?? "ready";
+}
+
+function directAttachmentFailureIntent(): IntentRoute {
+  return {
+    labels: ["general"],
+    confidence: 1,
+    suggestedToolsets: [],
+    suggestedSkills: [],
+    confirmationRequired: false,
+    rationale: "EstaCoda handled a channel attachment failure before provider/tool execution."
+  };
 }
 
 function truncate(value: string, maxChars: number): string {

@@ -25,9 +25,19 @@ export type ChannelAttachmentKind =
   | "link"
   | "unknown";
 
+export type ChannelAttachmentStatus =
+  | "ready"
+  | "unsupported"
+  | "too-large"
+  | "download-failed"
+  | "missing-file";
+
 export type ChannelAttachment = {
   id: string;
   kind: ChannelAttachmentKind;
+  status?: ChannelAttachmentStatus;
+  failureCode?: string;
+  failureMessage?: string;
   mimeType?: string;
   originalName?: string;
   name?: string;
@@ -45,6 +55,16 @@ export type ChannelSessionKey = {
   accountId?: string;
   threadId?: string;
   userId?: string;
+};
+
+export type ChannelTextAction = {
+  label: string;
+  value: string;
+};
+
+export type ChannelTextOptions = {
+  format?: "plain" | "html";
+  actions?: ChannelTextAction[][];
 };
 
 export type ChannelSender = {
@@ -85,7 +105,7 @@ export type ChannelReply = {
 };
 
 export type ChannelDelivery = {
-  sendText(sessionKey: ChannelSessionKey, text: string): Promise<void>;
+  sendText(sessionKey: ChannelSessionKey, text: string, options?: ChannelTextOptions): Promise<void>;
   sendProgress?(sessionKey: ChannelSessionKey, event: RuntimeEvent): Promise<void>;
   sendArtifact?(sessionKey: ChannelSessionKey, artifact: ArtifactRecord): Promise<void>;
 };
