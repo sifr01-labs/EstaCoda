@@ -371,7 +371,7 @@ function renderChannelAttachments(attachments: ChannelAttachment[] | undefined):
 
 function suggestedToolsForAttachment(attachment: ChannelAttachment): string[] {
   if (attachment.kind === "image") {
-    return ["media.inspect"];
+    return ["vision.analyze", "media.inspect"];
   }
 
   if (attachment.kind === "document") {

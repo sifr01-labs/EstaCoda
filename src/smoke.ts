@@ -6957,7 +6957,11 @@ const telegramAttachmentRequests: Array<{
   url: string;
   body: Record<string, unknown>;
 }> = [];
-const telegramAttachmentProviderRequests: ProviderRequest[] = [];
+const telegramAttachmentProviderRequests: Array<{
+  model: string;
+  messages: Array<{ role: string; content: unknown }>;
+}> = [];
+let telegramAttachmentDeepseekCalls = 0;
 const telegramAttachmentProviderRegistry = new ProviderRegistry();
 telegramAttachmentProviderRegistry.register({
   id: "deepseek",
@@ -6974,8 +6978,9 @@ telegramAttachmentProviderRegistry.register({
     }
   ],
   stream: async function* (request) {
-    telegramAttachmentProviderRequests.push(request);
-    const promptText = request.messages.map((message) => message.content).join("\n\n");
+    telegramAttachmentProviderRequests.push(request as any);
+    telegramAttachmentDeepseekCalls += 1;
+    const promptText = request.messages.map((message) => flattenProviderMessageContent(message.content)).join("\n\n");
     const localRef = extractAttachmentLocalRef(promptText);
 
     yield {
@@ -6984,15 +6989,16 @@ telegramAttachmentProviderRegistry.register({
       model: request.model
     };
 
-    if (telegramAttachmentProviderRequests.length === 1) {
+    if (telegramAttachmentDeepseekCalls === 1) {
       yield {
         kind: "tool-call",
         provider: "deepseek",
         model: request.model,
-        id: "telegram-image-inspect",
-        name: "media_inspect",
+        id: "telegram-image-vision",
+        name: "vision_analyze",
         argumentsText: JSON.stringify({
-          path: localRef
+          path: localRef,
+          prompt: "Describe this Telegram image so I can answer the user."
         })
       };
       yield {
@@ -7009,7 +7015,7 @@ telegramAttachmentProviderRegistry.register({
       return;
     }
 
-    if (telegramAttachmentProviderRequests.length === 2) {
+    if (telegramAttachmentDeepseekCalls === 2) {
       yield {
         kind: "token",
         provider: "deepseek",
@@ -7030,7 +7036,7 @@ telegramAttachmentProviderRegistry.register({
       return;
     }
 
-    if (telegramAttachmentProviderRequests.length === 3) {
+    if (telegramAttachmentDeepseekCalls === 3) {
       yield {
         kind: "tool-call",
         provider: "deepseek",
@@ -7080,6 +7086,34 @@ telegramAttachmentProviderRegistry.register({
       content: "Telegram attachment inspection complete.",
       model: request.model,
       provider: "deepseek"
+    };
+  }
+} satisfies ProviderAdapter);
+telegramAttachmentProviderRegistry.register({
+  id: "openai",
+  name: "Telegram attachment vision smoke provider",
+  health: () => ({ available: true }),
+  endpoint: {
+    baseUrl: "https://api.openai.example/v1",
+    apiKey: { kind: "none" }
+  },
+  listModels: () => [
+    {
+      id: "gpt-4o",
+      provider: "openai",
+      contextWindowTokens: 128_000,
+      supportsTools: true,
+      supportsVision: true,
+      supportsStructuredOutput: true
+    }
+  ],
+  complete: async (request) => {
+    telegramAttachmentProviderRequests.push(request as any);
+    return {
+      ok: true,
+      content: "A plush bunny toy sitting on patterned fabric and holding a note card.",
+      model: request.model,
+      provider: "openai"
     };
   }
 } satisfies ProviderAdapter);
@@ -7252,36 +7286,42 @@ assert(
 );
 assert((await readFile(telegramAttachmentImagePath, "utf8")) === "pretend-image-bytes", "expected Telegram attachment image download");
 assert((await readFile(telegramAttachmentDocumentPath, "utf8")) === "EstaCoda document attachment smoke content.", "expected Telegram attachment document download");
-assert(telegramAttachmentProviderRequests.length === 4, "expected Telegram attachment E2E to use four provider iterations");
+assert(telegramAttachmentProviderRequests.length === 5, "expected Telegram attachment E2E to use five provider iterations");
 assert(
   telegramAttachmentProviderRequests[0]?.messages.some((message) =>
-    message.content.includes("Channel attachments:") &&
-    message.content.includes("kind=image") &&
-    message.content.includes("local_ref=") &&
-    message.content.includes("suggested_tools=media.inspect")
+    flattenProviderMessageContent(message.content).includes("Channel attachments:") &&
+    flattenProviderMessageContent(message.content).includes("kind=image") &&
+    flattenProviderMessageContent(message.content).includes("local_ref=") &&
+    flattenProviderMessageContent(message.content).includes("suggested_tools=vision.analyze, media.inspect")
   ),
   "expected Telegram image prompt to expose attachment manifest and suggested media tools"
 );
 assert(
   telegramAttachmentProviderRequests[0]?.messages.some((message) =>
-    message.content.includes("telegram-media-analysis")
+    flattenProviderMessageContent(message.content).includes("telegram-media-analysis")
   ),
   "expected Telegram image prompt to select telegram-media-analysis"
 );
 assert(
-  telegramAttachmentProviderRequests[1]?.messages.some((message) =>
-    message.content.includes("Tool: media.inspect") &&
-    message.content.includes("Media:") &&
-    message.content.includes("telegram-image.jpg")
-  ),
-  "expected Telegram image continuation to include media.inspect results"
+  telegramAttachmentProviderRequests.some((request) => request.messages.some((message) =>
+    flattenProviderMessageContent(message.content).includes("Describe this Telegram image") &&
+    Array.isArray(message.content)
+  )),
+  "expected Telegram image vision request to include structured vision content"
 );
 assert(
-  telegramAttachmentProviderRequests[2]?.messages.some((message) =>
-    message.content.includes("Channel attachments:") &&
-    message.content.includes("kind=document") &&
-    message.content.includes("suggested_tools=document.probe")
-  ),
+  telegramAttachmentProviderRequests.some((request) => request.messages.some((message) =>
+    flattenProviderMessageContent(message.content).includes("Tool: vision.analyze") &&
+    flattenProviderMessageContent(message.content).includes("plush bunny toy")
+  )),
+  "expected Telegram image continuation to include vision.analyze results"
+);
+assert(
+  telegramAttachmentProviderRequests.some((request) => request.messages.some((message) =>
+    flattenProviderMessageContent(message.content).includes("Channel attachments:") &&
+    flattenProviderMessageContent(message.content).includes("kind=document") &&
+    flattenProviderMessageContent(message.content).includes("suggested_tools=document.probe")
+  )),
   "expected Telegram document prompt to expose attachment manifest and suggested document tools"
 );
 assert(
@@ -7297,8 +7337,8 @@ assert(
   "expected Telegram attachment flow to select telegram-media-analysis"
 );
 assert(
-  telegramAttachmentEvents.some((event) => event.kind === "tool-plan" && event.plan.tool === "media.inspect" && event.plan.status === "executed"),
-  "expected Telegram image attachment flow to execute media.inspect"
+  telegramAttachmentEvents.some((event) => event.kind === "tool-plan" && event.plan.tool === "vision.analyze" && event.plan.status === "executed"),
+  "expected Telegram image attachment flow to execute vision.analyze"
 );
 assert(
   telegramAttachmentEvents.some((event) => event.kind === "tool-plan" && event.plan.tool === "document.probe" && event.plan.status === "executed"),
@@ -7690,6 +7730,30 @@ function fakeTelegramFileResponse(content: string) {
     }),
     text: async () => content
   };
+}
+
+function flattenProviderMessageContent(content: unknown): string {
+  if (typeof content === "string") {
+    return content;
+  }
+
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === "object" && part !== null && "text" in part && typeof (part as { text?: unknown }).text === "string") {
+          return (part as { text: string }).text;
+        }
+
+        if (typeof part === "object" && part !== null && "image_url" in part) {
+          return "[image]";
+        }
+
+        return "[content]";
+      })
+      .join("\n");
+  }
+
+  return String(content);
 }
 
 function extractAttachmentLocalRef(promptText: string): string {

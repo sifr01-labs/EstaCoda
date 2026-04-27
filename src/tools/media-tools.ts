@@ -356,7 +356,7 @@ function inferArtifactKind(path: string): ArtifactKind {
   return "other";
 }
 
-function inferMimeType(path: string): string {
+export function inferMimeType(path: string): string {
   const ext = extname(path).toLowerCase();
   const mimeTypes: Record<string, string> = {
     ".mp4": "video/mp4",

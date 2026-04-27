@@ -97,6 +97,7 @@ export function activityKeyForTool(tool: string): ActivityLabelKey {
   }
   if (tool === "skill.view" || tool === "workflow.plan" || tool === "skill.inspect") return "load_skill";
   if (tool === "media.inspect" || tool === "media.extract-frame") return "inspect_media";
+  if (tool === "vision.analyze") return "inspect_media";
   if (tool === "document.probe") return "process_attachment";
   if (tool === "web.extract" || tool === "browser.navigate" || tool === "browser.status") return "web_action";
   if (tool === "delegate_task") return "route_task";

@@ -41,6 +41,7 @@ import { builtinTools } from "../tools/builtin-tools.js";
 import { createExecuteCodeTool } from "../tools/execute-code-tool.js";
 import { createPythonTools } from "../tools/python-tools.js";
 import { createMediaTools } from "../tools/media-tools.js";
+import { createVisionTools } from "../tools/vision-tools.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
 import { ToolRegistry } from "../tools/tool-registry.js";
 import { createWebTools, type FetchLike as WebFetchLike } from "../tools/web-tools.js";
@@ -209,6 +210,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     workspaceRoot,
     artifactStore,
     allowedRoots: [channelMediaRoot]
+  })) {
+    toolRegistry.register(tool);
+  }
+  for (const tool of createVisionTools({
+    workspaceRoot,
+    allowedRoots: [channelMediaRoot],
+    providerRegistry,
+    credentialPools: options.credentialPools,
+    routePreferences: auxiliaryProviderRouter.resolve("vision").preferences
   })) {
     toolRegistry.register(tool);
   }
