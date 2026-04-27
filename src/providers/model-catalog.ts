@@ -3,7 +3,7 @@ import type { ModelProfile, ProviderId } from "../contracts/provider.js";
 export const knownModelProfiles: readonly ModelProfile[] = [
   model("deepseek", "deepseek-chat", 64000, { tools: true, structured: true, open: false }),
   model("deepseek", "deepseek-reasoner", 64000, { tools: true, structured: true, reasoning: true, open: false }),
-  model("kimi", "kimi-k2.5", 262144, { tools: true, structured: true, reasoning: true, open: false }),
+  model("kimi", "kimi-k2.5", 262144, { tools: true, vision: true, structured: true, reasoning: true, open: false }),
   model("kimi", "kimi-k2-turbo-preview", 131072, { tools: true, structured: true, reasoning: true, open: false }),
   model("openai", "gpt-4.1", 1047576, { tools: true, vision: true, structured: true }),
   model("openai", "gpt-4.1-mini", 1047576, { tools: true, vision: true, structured: true }),
@@ -107,7 +107,7 @@ function inferTools(modelId: string, provider: ProviderId): boolean {
 }
 
 function inferVision(modelId: string): boolean {
-  return /vision|vl|gpt-4o|gemini|claude|llava/i.test(modelId);
+  return /vision|vl|gpt-4o|gemini|claude|llava|kimi-k2(\.5)?/i.test(modelId);
 }
 
 function inferStructuredOutput(modelId: string, provider: ProviderId): boolean {

@@ -297,7 +297,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     trajectoryId: trajectoryRecorder.snapshot().id
   });
 
-  const intentRouter = new IntentRouter({ skillRegistry: sessionSkillRegistry });
+  const intentRouter = new IntentRouter({ skillRegistry: sessionSkillRegistry, model: options.model });
   const providerExecutor = new ProviderExecutor({
     registry: providerRegistry,
     credentialPools: options.credentialPools

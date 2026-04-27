@@ -1,15 +1,17 @@
+import { readFileSync } from "node:fs";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { ChannelAttachment } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { MemoryProviderContext } from "../contracts/memory.js";
 import type { PromptBudgetReport, PromptLayerName, PromptLayerReport } from "../contracts/prompt.js";
-import type { ModelProfile, ProviderMessage } from "../contracts/provider.js";
+import type { ModelProfile, ProviderMessage, ProviderMessageContentPart } from "../contracts/provider.js";
 import type { SecurityDecision } from "../contracts/security.js";
 import type { LoadedSkill, SkillCatalogEntry, SkillDefinition, SkillResourceEntry } from "../contracts/skill.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
 import { compileSkillWorkflowPlan, renderSkillWorkflowPlan } from "../skills/skill-workflow-planner.js";
+import { inferMimeType } from "../tools/media-tools.js";
 import { packetizeToolExecution, packetizeToolResult, renderToolResultPacket } from "../tools/tool-result-packet.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
@@ -67,7 +69,7 @@ export function assembleProviderPrompt(input: ProviderPromptInput): ProviderProm
   const contextWindowTokens = input.model?.contextWindowTokens ?? 128_000;
   const budgetTarget = Math.max(4_000, Math.floor(contextWindowTokens * 0.65));
   const layers = applyCache(input.cache, fitLayersToBudget(buildBaseLayers(input), budgetTarget));
-  const messages = renderBaseMessages(layers);
+  const messages = renderBaseMessages(layers, input);
   const budget = buildBudgetReport({
     model: input.model?.id ?? "unconfigured",
     contextWindowTokens,
@@ -85,7 +87,7 @@ export function assembleProviderContinuationPrompt(input: ProviderContinuationPr
   const contextWindowTokens = input.model?.contextWindowTokens ?? 128_000;
   const budgetTarget = Math.max(4_000, Math.floor(contextWindowTokens * 0.65));
   const baseLayers = applyCache(input.cache, fitLayersToBudget(buildBaseLayers(input), Math.floor(budgetTarget * 0.85)));
-  const baseMessages = renderBaseMessages(baseLayers);
+  const baseMessages = renderBaseMessages(baseLayers, input);
   const baseBudget = buildBudgetReport({
     model: input.model?.id ?? "unconfigured",
     contextWindowTokens,
@@ -479,7 +481,7 @@ function renderSkillSetup(input: ProviderPromptInput["selectedSkillSetup"]): str
   ].join("\n");
 }
 
-function renderBaseMessages(layers: InternalPromptLayer[]): ProviderMessage[] {
+function renderBaseMessages(layers: InternalPromptLayer[], input: ProviderPromptInput): ProviderMessage[] {
   const identity = layers.find((candidate) => candidate.name === "identity");
   const cachedSystemLayers = layers.filter((candidate) =>
     candidate.name !== "identity" &&
@@ -490,6 +492,11 @@ function renderBaseMessages(layers: InternalPromptLayer[]): ProviderMessage[] {
     candidate.name !== "identity" &&
     !cachedSystemLayers.some((cached) => cached.name === candidate.name)
   );
+  const ephemeralText = [
+    "§ EPHEMERAL REQUEST CONTEXT",
+    ...ephemeralLayers.map((candidate) => candidate.content)
+  ].join("\n\n");
+  const nativeVisionContent = buildNativeVisionUserContent(input.model, input.attachments, ephemeralText);
 
   return [
     {
@@ -504,12 +511,61 @@ function renderBaseMessages(layers: InternalPromptLayer[]): ProviderMessage[] {
     },
     {
       role: "user",
-      content: [
-        "§ EPHEMERAL REQUEST CONTEXT",
-        ...ephemeralLayers.map((candidate) => candidate.content)
-      ].join("\n\n")
+      content: nativeVisionContent
     }
   ];
+}
+
+function buildNativeVisionUserContent(
+  model: ModelProfile | undefined,
+  attachments: ChannelAttachment[] | undefined,
+  ephemeralText: string
+): ProviderMessage["content"] {
+  if (model?.supportsVision !== true) {
+    return ephemeralText;
+  }
+
+  const imageParts = (attachments ?? [])
+    .filter((attachment) => attachment.kind === "image" && (attachment.status === undefined || attachment.status === "ready"))
+    .map((attachment) => attachment.localPath ?? attachment.path)
+    .filter((path): path is string => typeof path === "string" && path.length > 0)
+    .map(toImageContentPart)
+    .filter((part): part is NonNullable<ReturnType<typeof toImageContentPart>> => part !== undefined);
+
+  if (imageParts.length === 0) {
+    return ephemeralText;
+  }
+
+  return [
+    {
+      type: "text",
+      text: [
+        ephemeralText,
+        "",
+        "Native image attachments are included below. Prefer analyzing them directly in-context before resorting to a vision tool."
+      ].join("\n")
+    },
+    ...imageParts
+  ];
+}
+
+function toImageContentPart(path: string): ProviderMessageContentPart | undefined {
+  try {
+    const mimeType = inferMimeType(path);
+    if (!mimeType.startsWith("image/")) {
+      return undefined;
+    }
+
+    const bytes = readFileSync(path);
+    return {
+      type: "image_url",
+      image_url: {
+        url: `data:${mimeType};base64,${bytes.toString("base64")}`
+      }
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 function layer(input: {
@@ -747,8 +803,28 @@ function renderSessionHistory(messages: Array<Pick<ProviderMessage, "role" | "co
 
   return [
     "Session history:",
-    ...messages.slice(-8).map((message) => `${message.role}: ${truncate(message.content, 900)}`)
+    ...messages.slice(-8).map((message) => `${message.role}: ${truncate(stringifyProviderMessageContent(message.content), 900)}`)
   ].join("\n");
+}
+
+function stringifyProviderMessageContent(content: ProviderMessage["content"]): string {
+  if (typeof content === "string") {
+    return content;
+  }
+
+  return content
+    .map((part: ProviderMessageContentPart) => {
+      if (part.type === "text") {
+        return part.text;
+      }
+
+      if (part.type === "image_url") {
+        return "[image]";
+      }
+
+      return "[content]";
+    })
+    .join("\n");
 }
 
 function truncate(value: string, maxChars: number): string {

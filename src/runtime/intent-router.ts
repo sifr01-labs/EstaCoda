@@ -1,18 +1,22 @@
 import type { IntentLabel, IntentRoute } from "../contracts/intent.js";
 import type { ChannelAttachment } from "../contracts/channel.js";
+import type { ModelProfile } from "../contracts/provider.js";
 import type { LoadedSkill, SkillDefinition } from "../contracts/skill.js";
 import type { ToolsetName } from "../contracts/tool.js";
 import type { SkillRegistry } from "../skills/skill-registry.js";
 
 export type IntentRouterOptions = {
   skillRegistry: SkillRegistry;
+  model?: ModelProfile;
 };
 
 export class IntentRouter {
   readonly #skillRegistry: SkillRegistry;
+  readonly #model: ModelProfile | undefined;
 
   constructor(options: IntentRouterOptions) {
     this.#skillRegistry = options.skillRegistry;
+    this.#model = options.model;
   }
 
   route(prompt: string, options: { attachments?: ChannelAttachment[] } = {}): IntentRoute {
@@ -45,7 +49,8 @@ export class IntentRouter {
     const intentMatchedSkills = this.#skillRegistry
       .list()
       .filter((skill) => skillMatchesIntent(skill, labels));
-    const suggestedSkills = dedupeSkills([...intentMatchedSkills, ...promptMatchedSkills]);
+    const suggestedSkills = dedupeSkills([...intentMatchedSkills, ...promptMatchedSkills])
+      .filter((skill) => shouldSuggestSkill(skill, normalized, options.attachments, this.#model));
 
     return {
       labels: labels.length === 0 ? ["general"] : labels,
@@ -158,6 +163,37 @@ function skillMatchesIntent(skill: SkillDefinition, labels: IntentLabel[]): bool
   }
 
   return false;
+}
+
+function shouldSuggestSkill(
+  skill: LoadedSkill | SkillDefinition,
+  normalized: string,
+  attachments: ChannelAttachment[] | undefined,
+  model: ModelProfile | undefined
+): boolean {
+  if (skill.name !== "telegram-media-analysis") {
+    return true;
+  }
+
+  const readyAttachments = (attachments ?? []).filter((attachment) =>
+    attachment.status === undefined || attachment.status === "ready"
+  );
+  const imageOnly = readyAttachments.length > 0 && readyAttachments.every((attachment) => attachment.kind === "image");
+  const simpleVisionAsk = hasAny(normalized, [
+    "inspect this image",
+    "what do you see",
+    "what is in this image",
+    "include any visible text",
+    "extract any visible text",
+    "summarize what the image is showing",
+    "tell me exactly what you see"
+  ]);
+
+  if (imageOnly && model?.supportsVision === true && simpleVisionAsk) {
+    return false;
+  }
+
+  return true;
 }
 
 function confidenceFor(labels: IntentLabel[], skills: Array<LoadedSkill | SkillDefinition>): number {

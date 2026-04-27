@@ -56,9 +56,26 @@ export type ProviderHealth = {
   reason?: string;
 };
 
+export type ProviderMessageContentPart =
+  | {
+      type: "text";
+      text: string;
+    }
+  | {
+      type: "image_url";
+      image_url: {
+        url: string;
+      };
+    };
+
+export type ProviderMessageContent = string | ProviderMessageContentPart[];
+
 export type ProviderMessage = {
   role: "system" | "user" | "assistant" | "tool";
-  content: string;
+  // Intentionally loose at the boundary because providers can accept
+  // heterogeneous multimodal payloads and the runtime still has some
+  // string-oriented paths that are being hardened incrementally.
+  content: any;
   name?: string;
 };
 

@@ -42,6 +42,7 @@ import { ProviderExecutor } from "./providers/provider-executor.js";
 import { normalizeProviderMessagesStrict } from "./providers/provider-message-normalizer.js";
 import { ProviderRegistry } from "./providers/provider-registry.js";
 import { buildFallbackChain, routeProvider } from "./providers/provider-router.js";
+import { assembleProviderPrompt } from "./prompt/prompt-assembly.js";
 import { createRuntime, type Runtime } from "./runtime/create-runtime.js";
 import { IntentRouter } from "./runtime/intent-router.js";
 import { WorkspaceTrustStore } from "./security/workspace-trust-store.js";
@@ -265,8 +266,28 @@ const savedMemory = await readFile(join(memorySaveDir, "MEMORY.md"), "utf8");
 
 const youtubeMatches = skills.matchPrompt("Build a knowledge base from this YouTube URL.");
 const intentRouter = new IntentRouter({ skillRegistry: skills });
+const visionAwareIntentRouter = new IntentRouter({
+  skillRegistry: skills,
+  model: {
+    id: "kimi-k2.5",
+    provider: "kimi",
+    contextWindowTokens: 262_144,
+    supportsTools: true,
+    supportsVision: true,
+    supportsStructuredOutput: true,
+    supportsReasoning: true
+  }
+});
 const generalRoute = intentRouter.route("Say hello as EstaCoda and summarize what you can do in one short paragraph.");
 const telegramMediaRoute = intentRouter.route("I sent the image in Telegram chat, can you inspect it?");
+const nativeVisionTelegramRoute = visionAwareIntentRouter.route("Please inspect this image and include any visible text.", {
+  attachments: [{
+    id: "telegram-image",
+    kind: "image",
+    status: "ready",
+    localPath: "media/sample.png"
+  }]
+});
 const asciiVideoRoute = intentRouter.route("Create a 10 second ASCII logo animation.");
 const genericKnowledgeRoute = intentRouter.route("Build a knowledge base from this folder.");
 const availableTools = await tools.listAvailable();
@@ -1960,7 +1981,7 @@ assert(localProviderRequest.body.response_format === undefined, "expected local 
 assert(localToolProviderRequest.body.tools !== undefined, "expected local tool-capable model to preserve tools");
 assert(normalizedAdjacentMessages.messages[0]?.role === "system", "expected provider request system identity");
 assert(
-  normalizedAdjacentMessages.messages[0]?.content.includes("Describe yourself as an agent"),
+  flattenProviderMessageContent(normalizedAdjacentMessages.messages[0]?.content).includes("Describe yourself as an agent"),
   "expected provider request identity to prefer agent self-description"
 );
 assert(
@@ -3679,6 +3700,10 @@ assert(generalRoute.suggestedSkills.length === 0, "expected hello prompt to avoi
 assert(
   telegramMediaRoute.suggestedSkills.some((skill) => skill.name === "telegram-media-analysis"),
   "expected Telegram media prompt to route to media analysis skill"
+);
+assert(
+  nativeVisionTelegramRoute.suggestedSkills.every((skill) => skill.name !== "telegram-media-analysis"),
+  "expected simple native-vision image inspection to avoid telegram-media-analysis over-selection"
 );
 assert(
   asciiVideoRoute.suggestedSkills.some((skill) => skill.name === "ascii-video"),
@@ -7323,6 +7348,55 @@ assert(
     flattenProviderMessageContent(message.content).includes("suggested_tools=document.probe")
   )),
   "expected Telegram document prompt to expose attachment manifest and suggested document tools"
+);
+
+const nativeVisionPromptWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-native-vision-prompt-"));
+const nativeVisionImagePath = join(nativeVisionPromptWorkspace, "native-vision.png");
+await writeFile(nativeVisionImagePath, "native-vision-bytes");
+const nativeVisionPrompt = assembleProviderPrompt({
+  model: {
+    id: "openai-gpt-vision",
+    provider: "openai",
+    contextWindowTokens: 128_000,
+    supportsTools: true,
+    supportsVision: true,
+    supportsStructuredOutput: true
+  },
+  userText: "Tell me what is in this image.",
+  routedText: "Tell me what is in this image.",
+  selectedSkill: undefined,
+  selectedSkillInstructions: undefined,
+  attachments: [{
+    id: "native-vision-image",
+    kind: "image",
+    status: "ready",
+    localPath: nativeVisionImagePath,
+    mimeType: "image/png",
+    bytes: 18
+  }],
+  intent: {
+    labels: ["general"],
+    confidence: 0.9,
+    suggestedToolsets: ["research"],
+    suggestedSkills: [],
+    confirmationRequired: false,
+    rationale: "smoke"
+  },
+  securityDecision: "allow",
+  toolExecutions: [],
+  context: undefined,
+  projectContext: undefined,
+  memoryContext: undefined,
+  providerTools: [],
+  fallbackText: "fallback"
+});
+assert(
+  nativeVisionPrompt.messages.some((message) =>
+    message.role === "user" &&
+    Array.isArray(message.content) &&
+    message.content.some((part) => typeof part === "object" && part !== null && "type" in part && part.type === "image_url")
+  ),
+  "expected native vision-capable prompt path to include image content directly in the main provider message"
 );
 assert(
   telegramAttachmentMessages.some((message) =>
