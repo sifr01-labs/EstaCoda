@@ -241,6 +241,7 @@ At a high level:
 - CLI approval scopes plus persistent workspace approval storage/revocation
 - security approval mode persistence and behavior (`strict` / `adaptive` / `open`)
 - adaptive assessor success, malformed-output fallback, and hard-floor bypass behavior
+- expanded hard-floor coverage for secret reads, pipe-to-interpreter installs, and force-push patterns
 - Telegram progress compaction
 - Telegram approvals and callbacks
 - Telegram attachment flows

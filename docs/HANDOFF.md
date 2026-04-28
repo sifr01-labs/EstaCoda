@@ -225,7 +225,7 @@ Project-local overlays live under `<workspace>/.estacoda/` and can override or e
   Network transport for OpenAI-compatible providers.
 
 - [src/providers/auxiliary-provider-router.ts](/Users/ahnwy/estacoda-v2/src/providers/auxiliary-provider-router.ts)
-  Defines auxiliary routes including `vision`.
+  Defines auxiliary routes including `vision` and the dedicated `approval` assessor lane.
 
 - [src/config/runtime-config.ts](/Users/ahnwy/estacoda-v2/src/config/runtime-config.ts)
   Config schema, merging, provider registry construction, channel config, and setup helpers.
@@ -387,6 +387,7 @@ For Telegram:
   Public approval modes are now `strict`, `adaptive`, and `open`, with `adaptive` as the default.
   `adaptive` now supports an optional auxiliary assessor after deterministic triage, while the dangerous-command floor remains non-overridable.
   Channel and CLI approval scopes now both support `once`, `session`, and `always`, while ACP remains narrower because of editor permission-card constraints.
+  The hard floor now explicitly covers broad destructive deletes, disk-destructive commands, system power commands, fork-bomb or kill-all patterns, explicit secret reads, pipe-to-interpreter installs, and git force-pushes.
 
 - **Local-first skill mutation**
   External skill roots are read-only. Agent-authored or edited skills write into the local personal skill home.

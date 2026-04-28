@@ -1,4 +1,5 @@
 import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
+import { assessCommandSafety } from "../security/command-safety.js";
 import type { ProcessManager } from "./process-manager.js";
 
 export type ProcessToolOptions = {
@@ -152,14 +153,13 @@ export function createProcessTools(options: ProcessToolOptions): readonly Regist
 }
 
 function explainCommandBlock(command: string): string | undefined {
-  if (/\brm\s+-rf\b|\bsudo\b|\bchmod\s+-R\b|\bchown\s+-R\b/.test(command)) {
+  const assessment = assessCommandSafety(command);
+  if (assessment.hardBlock !== undefined) {
+    return assessment.hardBlock.reason;
+  }
+  if (assessment.riskClass === "destructive-local") {
     return "command matches a destructive or privilege-escalating pattern";
   }
-
-  if (command.includes(">/dev/sda") || command.includes("mkfs.")) {
-    return "command matches a disk-destructive pattern";
-  }
-
   return undefined;
 }
 

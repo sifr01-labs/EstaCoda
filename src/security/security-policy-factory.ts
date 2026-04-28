@@ -8,6 +8,7 @@ import {
   type SecurityRequest
 } from "../contracts/security.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
+import { assessCommandSafety, normalizeCommandForSafety } from "./command-safety.js";
 
 export function normalizeSecurityApprovalMode(mode: string | undefined): SecurityApprovalMode {
   switch (mode) {
@@ -70,6 +71,17 @@ export type SecurityAssessorRuntimeConfig = SecurityAssessorConfig & {
 };
 
 function assessStrict(request: SecurityRequest): SecurityAssessment {
+  const hardBlock = hardBlockFor(request);
+  if (hardBlock !== undefined) {
+    return {
+      decision: "deny",
+      mode: "strict",
+      reason: hardBlock.reason,
+      risk: "high",
+      deterministicRule: hardBlock.code
+    };
+  }
+
   const decision = capabilityFirstDefaults.decide(request);
   return {
     decision,
@@ -112,13 +124,14 @@ async function assessAdaptive(
 }
 
 function assessOpen(request: SecurityRequest): SecurityAssessment {
-  if (isUnconditionallyDangerous(request)) {
+  const hardBlock = hardBlockFor(request);
+  if (hardBlock !== undefined) {
     return {
       decision: "deny",
       mode: "open",
-      reason: "The command was blocked by EstaCoda's safety policy because it matches a destructive pattern.",
+      reason: hardBlock.reason,
       risk: "high",
-      deterministicRule: "dangerous-command-floor"
+      deterministicRule: hardBlock.code
     };
   }
 
@@ -132,6 +145,17 @@ function assessOpen(request: SecurityRequest): SecurityAssessment {
 }
 
 function assessAdaptiveDeterministic(request: SecurityRequest): SecurityAssessment {
+  const hardBlock = hardBlockFor(request);
+  if (hardBlock !== undefined) {
+    return {
+      decision: "deny",
+      mode: "adaptive",
+      reason: hardBlock.reason,
+      risk: "high",
+      deterministicRule: hardBlock.code
+    };
+  }
+
   if (
     request.riskClass === "credential-access" ||
     request.riskClass === "sandbox-escape" ||
@@ -157,16 +181,6 @@ function assessAdaptiveDeterministic(request: SecurityRequest): SecurityAssessme
     };
   }
 
-  if (isUnconditionallyDangerous(request)) {
-    return {
-      decision: "deny",
-      mode: "adaptive",
-      reason: "The command was blocked by EstaCoda's safety policy because it matches a destructive pattern.",
-      risk: "high",
-      deterministicRule: "dangerous-command-floor"
-    };
-  }
-
   if (request.command !== undefined && isLikelyFalsePositive(request.command)) {
     return {
       decision: "allow",
@@ -187,26 +201,17 @@ function assessAdaptiveDeterministic(request: SecurityRequest): SecurityAssessme
 }
 
 function isLikelyFalsePositive(command: string): boolean {
-  const normalized = normalizeCommand(command);
+  const normalized = normalizeCommandForSafety(command);
   return /\b(?:echo|printf|python\s+-c|node\s+-e|bun\s+-e)\b/u.test(normalized) &&
     !/\b(?:rm\s+-rf|sudo|chmod\s+-R|chown\s+-R|mkfs\.|dd\b|shutdown|reboot|halt|poweroff|kill\s+-1)\b/u.test(normalized);
 }
 
-function isUnconditionallyDangerous(request: SecurityRequest): boolean {
+function hardBlockFor(request: SecurityRequest): {
+  code: string;
+  reason: string;
+} | undefined {
   const command = request.command ?? request.targetSummary ?? "";
-  const normalized = normalizeCommand(command);
-  const compact = normalized.replace(/\s+/gu, "");
-
-  return /\brm\s+-rf\s+\/(?:\s|$)/u.test(normalized) ||
-    /\bmkfs\./u.test(normalized) ||
-    /\bdd\b.*\bof=\/dev\/(?:sd[a-z]|disk\d|nvme\d+n\d+)/u.test(normalized) ||
-    /\b(?:shutdown|reboot|halt|poweroff)\b/u.test(normalized) ||
-    compact.includes(":(){:|:&};:") ||
-    /\bkill\s+-1\b/u.test(normalized);
-}
-
-function normalizeCommand(value: string): string {
-  return value.trim().replace(/\s+/gu, " ");
+  return assessCommandSafety(command).hardBlock;
 }
 
 async function assessWithAuxiliaryProvider(

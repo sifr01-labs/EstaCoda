@@ -162,6 +162,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const auxiliaryRoutes = options.model.provider === "unconfigured"
     ? []
     : auxiliaryProviderRouter.resolveAll();
+  const approvalAuxiliaryRoute = options.model.provider === "unconfigured"
+    ? undefined
+    : auxiliaryProviderRouter.resolve("approval");
   const providerRoute = options.model.provider === "unconfigured"
     ? undefined
     : routeProvider(providerModels, {
@@ -364,12 +367,19 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     registry: providerRegistry,
     credentialPools: options.credentialPools
   });
+  const effectiveSecurityAssessor = options.securityAssessor === undefined
+    ? undefined
+    : {
+      ...options.securityAssessor,
+      provider: options.securityAssessor.provider ?? approvalAuxiliaryRoute?.route?.primary.provider,
+      model: options.securityAssessor.model ?? approvalAuxiliaryRoute?.route?.primary.id
+    };
   const baseSecurityPolicy = options.securityPolicy ?? createSecurityPolicyForMode(options.securityMode ?? "adaptive", {
-    assessor: options.securityAssessor === undefined
+    assessor: effectiveSecurityAssessor === undefined
       ? undefined
       : {
-        ...options.securityAssessor,
-        providerExecutor: options.securityAssessor.providerExecutor ?? providerExecutor,
+        ...effectiveSecurityAssessor,
+        providerExecutor: effectiveSecurityAssessor.providerExecutor ?? providerExecutor,
         sessionId
       }
   });

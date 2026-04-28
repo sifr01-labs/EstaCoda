@@ -357,6 +357,8 @@ Important traits:
 - persistent approvals match on normalized `targetKey` values, including operation type and normalized targets where supported
 - channel approvals use `once`, `session`, and `always`
 - CLI approvals now use the same `once`, `session`, and `always` scope model through runtime-backed grants and a workspace approval store
+- the unconditional hard floor now covers broad/root-like recursive deletes, destructive disk operations, shutdown/reboot commands, fork-bomb or kill-all patterns, explicit secret reads, pipe-to-interpreter installs, and git force-pushes
+- adaptive assessment now defaults to an auxiliary `approval` route when an assessor is enabled without an explicit provider/model override
 
 ## Persistence Model
 

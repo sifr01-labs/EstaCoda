@@ -11,6 +11,7 @@ export const auxiliaryProviderTasks: readonly AuxiliaryProviderTask[] = [
   "main",
   "vision",
   "compression",
+  "approval",
   "web_extract",
   "session_search",
   "skills_hub",
@@ -29,6 +30,10 @@ export const defaultAuxiliaryProviderPreferences: Record<AuxiliaryProviderTask, 
     preferFreeOrOpenWeights: true
   },
   compression: {
+    requireStructuredOutput: true,
+    preferFreeOrOpenWeights: true
+  },
+  approval: {
     requireStructuredOutput: true,
     preferFreeOrOpenWeights: true
   },

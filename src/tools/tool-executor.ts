@@ -3,6 +3,7 @@ import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { assessSecurityPolicy, type SecurityDecision, type SecurityPolicy } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
 import type { ToolDefinition, ToolResult, ToolRiskClass, ToolsetName } from "../contracts/tool.js";
+import { assessCommandSafety } from "../security/command-safety.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { ToolRegistry } from "./tool-registry.js";
 
@@ -255,25 +256,13 @@ export class ToolExecutor {
 
 function classifyEffectiveRisk(tool: ToolDefinition, input: Record<string, unknown>): ToolRiskClass {
   if ((tool.name === "terminal.run" || tool.name === "process.start") && typeof input.command === "string") {
-    if (looksCredentialSeeking(input.command)) {
-      return "credential-access";
-    }
-
-    if (looksDestructive(input.command)) {
-      return "destructive-local";
+    const assessment = assessCommandSafety(input.command);
+    if (assessment.riskClass !== undefined) {
+      return assessment.riskClass;
     }
   }
 
   return tool.riskClass;
-}
-
-function looksDestructive(command: string): boolean {
-  return /\brm\s+-rf\b|\bsudo\b|\bchmod\s+-R\b|\bchown\s+-R\b|\bmkfs\.|\bdd\b.+\bof=|>\/dev\/sd[a-z]/u.test(command);
-}
-
-function looksCredentialSeeking(command: string): boolean {
-  return /\b(printenv|env|security\s+find|op\s+read)\b/u.test(command) ||
-    /(\.env|\.ssh|\.aws|\.gnupg|id_rsa|id_ed25519|token|secret|api[_-]?key)/iu.test(command);
 }
 
 function toDefinition(tool: ToolDefinition): ToolDefinition {

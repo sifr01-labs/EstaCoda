@@ -239,6 +239,8 @@ State: partially built.
 - security approval modes now exist across CLI/runtime/channel/ACP: `strict`, `adaptive`, `open` `smoke-tested`
 - adaptive assessor path now exists with structured fallback-to-ask behavior `smoke-tested`
 - CLI approval scopes and persistent workspace approval revocation now exist `smoke-tested`
+- hard safety floor now covers broader destructive, secret-read, pipe-to-interpreter, and force-push cases `smoke-tested`
+- adaptive assessor now defaults to a dedicated `approval` auxiliary route when enabled without an explicit provider/model override `smoke-tested`
 - fully polished pairing UX is `implemented but not live-proven`
 
 What remains:

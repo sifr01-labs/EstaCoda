@@ -179,6 +179,7 @@ export type AuxiliaryProviderTask =
   | "main"
   | "vision"
   | "compression"
+  | "approval"
   | "web_extract"
   | "session_search"
   | "skills_hub"
