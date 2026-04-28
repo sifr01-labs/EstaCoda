@@ -9,7 +9,7 @@ import type { PromptBudgetReport } from "../contracts/prompt.js";
 import type { ModelProfile, ProviderMessage, ProviderRequest, ProviderRoutePreferences } from "../contracts/provider.js";
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SecurityDecision, SecurityPolicy } from "../contracts/security.js";
-import { capabilityFirstDefaults } from "../contracts/security.js";
+import { assessSecurityPolicy, capabilityFirstDefaults } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
 import type {
   LoadedSkill,
@@ -294,7 +294,7 @@ export class AgentLoop {
         kind: "intent-routed",
         route: intent
       });
-      const attachmentFailureSecurityDecision = capabilityFirstDefaults.decide({
+      const attachmentFailureSecurityAssessment = await assessSecurityPolicy(capabilityFirstDefaults, {
         riskClass: "read-only-local",
         description: "respond to attachment failure",
         context: {
@@ -303,11 +303,13 @@ export class AgentLoop {
           targetChannel: input.channel,
           targetConversationIsActive: true
         }
-      });
+      }, "strict");
       await this.#sessionDb.appendEvent(this.#sessionId, {
         kind: "security-decided",
-        decision: attachmentFailureSecurityDecision,
-        description: "respond to attachment failure"
+        decision: attachmentFailureSecurityAssessment.decision,
+        description: "respond to attachment failure",
+        mode: attachmentFailureSecurityAssessment.mode,
+        reason: attachmentFailureSecurityAssessment.reason
       });
       this.#trajectoryRecorder.record("progress", {
         message: "attachment preflight failed",
@@ -318,7 +320,7 @@ export class AgentLoop {
         text: attachmentFailureResponse,
         matchedSkills: [],
         intentLabels: intent.labels,
-        securityDecision: attachmentFailureSecurityDecision,
+        securityDecision: attachmentFailureSecurityAssessment.decision,
         contextReferences: context?.references.map((reference) => reference.raw) ?? [],
         toolExecutions: [],
         artifacts: []
@@ -344,7 +346,7 @@ export class AgentLoop {
         text: attachmentFailureResponse,
         matchedSkills: [],
         intent,
-        securityDecision: attachmentFailureSecurityDecision,
+        securityDecision: attachmentFailureSecurityAssessment.decision,
         toolExecutions: [],
         toolPlans: [],
         skillOutcomes: [],
@@ -408,7 +410,7 @@ export class AgentLoop {
       });
     }
 
-    const securityDecision = this.#securityPolicy.decide({
+    const securityAssessment = await assessSecurityPolicy(this.#securityPolicy, {
       riskClass: inferInitialRiskClass(selectedSkill),
       description: selectedSkill === undefined ? "respond to user prompt" : `run skill ${selectedSkill.name}`,
       context: {
@@ -418,11 +420,14 @@ export class AgentLoop {
         targetConversationIsActive: true
       }
     });
+    const securityDecision = securityAssessment.decision;
 
     await this.#sessionDb.appendEvent(this.#sessionId, {
       kind: "security-decided",
       decision: securityDecision,
-      description: selectedSkill === undefined ? "respond to user prompt" : `run skill ${selectedSkill.name}`
+      description: selectedSkill === undefined ? "respond to user prompt" : `run skill ${selectedSkill.name}`,
+      mode: securityAssessment.mode,
+      reason: securityAssessment.reason
     });
 
     this.#trajectoryRecorder.record("progress", {

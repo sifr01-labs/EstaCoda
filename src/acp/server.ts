@@ -3,7 +3,8 @@ import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, relative, resolve, sep } from "node:path";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
-import { type SecurityApprovalMode, type SecurityDecision, type SecurityPolicy, type SecurityRequest } from "../contracts/security.js";
+import { assessSecurityPolicy, type SecurityApprovalMode, type SecurityDecision, type SecurityPolicy, type SecurityRequest } from "../contracts/security.js";
+import { ProviderExecutor } from "../providers/provider-executor.js";
 import type { SessionDB } from "../contracts/session.js";
 import type { SessionMessage } from "../contracts/session.js";
 import type { Runtime, RuntimeOptions } from "../runtime/create-runtime.js";
@@ -774,7 +775,15 @@ export class AcpServer {
       webMaxContentChars: config.web.maxContentChars,
       securityPolicy: createAcpSecurityPolicy(options.grants, {
         allowEditorRead: this.#clientFsReadText,
-        mode: config.security.approvalMode
+        mode: config.security.approvalMode,
+        assessor: {
+          ...config.security.assessor,
+          providerExecutor: new ProviderExecutor({
+            registry: config.providerRegistry,
+            credentialPools: config.credentialPools
+          }),
+          sessionId: options.sessionId
+        }
       }),
       workspaceFsAdapter: this.#clientFsReadText === true
         ? createAcpWorkspaceFsAdapter({
@@ -1476,10 +1485,58 @@ function createAcpSecurityPolicy(
   options: {
     allowEditorRead: boolean;
     mode?: SecurityApprovalMode;
+    assessor?: import("../security/security-policy-factory.js").SecurityAssessorRuntimeConfig;
   }
 ): SecurityPolicy {
-  const basePolicy = createSecurityPolicyForMode(options.mode ?? "adaptive");
+  const basePolicy = createSecurityPolicyForMode(options.mode ?? "adaptive", {
+    assessor: options.assessor
+  });
+  const assess = async (request: SecurityRequest) => {
+    const targetKey = request.targetKey;
+    if (
+      options.allowEditorRead === true &&
+      request.toolName === "file.read" &&
+      request.riskClass === "read-only-local"
+    ) {
+      return {
+        decision: "allow" as const,
+        mode: options.mode ?? "adaptive",
+        reason: "Allowed by the ACP editor file bridge.",
+        risk: "low" as const
+      };
+    }
+    if (targetKey !== undefined) {
+      if (grants.rejectAlways.has(targetKey)) {
+        return {
+          decision: "deny" as const,
+          mode: options.mode ?? "adaptive",
+          reason: "Denied by a persistent ACP rejection.",
+          risk: "high" as const
+        };
+      }
+      if (grants.allowAlways.has(targetKey)) {
+        return {
+          decision: "allow" as const,
+          mode: options.mode ?? "adaptive",
+          reason: "Allowed by a persistent ACP approval.",
+          risk: "high" as const
+        };
+      }
+      if (grants.allowOnce.delete(targetKey)) {
+        return {
+          decision: "allow" as const,
+          mode: options.mode ?? "adaptive",
+          reason: "Allowed once by an ACP approval grant.",
+          risk: "high" as const
+        };
+      }
+    }
+    return await assessSecurityPolicy(basePolicy, request, options.mode ?? "adaptive");
+  };
   return {
+    assess(request: SecurityRequest) {
+      return assess(request);
+    },
     decide(request: SecurityRequest): SecurityDecision {
       const targetKey = request.targetKey;
       if (
@@ -1493,10 +1550,7 @@ function createAcpSecurityPolicy(
         if (grants.rejectAlways.has(targetKey)) {
           return "deny";
         }
-        if (grants.allowAlways.has(targetKey)) {
-          return "allow";
-        }
-        if (grants.allowOnce.delete(targetKey)) {
+        if (grants.allowAlways.has(targetKey) || grants.allowOnce.has(targetKey)) {
           return "allow";
         }
       }

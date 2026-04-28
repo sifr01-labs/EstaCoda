@@ -73,7 +73,7 @@ import { createWebTools } from "./tools/web-tools.js";
 import { createWorkspaceTools } from "./tools/workspace-tools.js";
 import { TrajectoryRecorder } from "./trajectory/trajectory-recorder.js";
 import { runPythonWorker } from "./workers/python-worker.js";
-import { capabilityFirstDefaults, type SecurityDecision, type SecurityPolicy } from "./contracts/security.js";
+import { assessSecurityPolicy, capabilityFirstDefaults, type SecurityDecision, type SecurityPolicy } from "./contracts/security.js";
 
 const tools = new ToolRegistry();
 const skills = new SkillRegistry();
@@ -579,6 +579,10 @@ const securitySetup = await setupSecurityConfig({
   homeDir: cliHome,
   input: {
     mode: "adaptive",
+    assessorEnabled: true,
+    assessorProvider: "kimi",
+    assessorModel: "kimi-k2.5",
+    assessorTimeoutMs: 4_500,
     scope: "project"
   }
 });
@@ -3085,9 +3089,19 @@ assert(cliSetup.output.includes("Configured deepseek/deepseek-chat"), "expected 
 assert(cliSetup.output.includes("Setup check"), "expected CLI setup provider diagnostic");
 assert(securitySetup.config.security?.approvalMode === "adaptive", "expected security setup to persist adaptive mode");
 assert(cliSecurityStatusBefore.output.includes("Approval mode: adaptive"), "expected CLI security status to report adaptive mode");
+assert(cliSecurityStatusBefore.output.includes("Assessor: enabled"), "expected CLI security status to report enabled assessor");
+assert(cliSecurityStatusBefore.output.includes("Assessor provider: kimi"), "expected CLI security status to report assessor provider");
+assert(cliSecurityStatusBefore.output.includes("Assessor model: kimi-k2.5"), "expected CLI security status to report assessor model");
+assert(cliSecurityStatusBefore.output.includes("Assessor timeout ms: 4500"), "expected CLI security status to report assessor timeout");
 assert(cliSecuritySetup.output.includes("Approval mode: open."), "expected CLI security setup output");
+assert(cliSecuritySetup.output.includes("Assessor: enabled."), "expected CLI security setup to preserve assessor state");
 assert(cliSecurityStatusAfter.output.includes("Approval mode: open"), "expected CLI security status to report updated open mode");
+assert(cliSecurityStatusAfter.output.includes("Assessor: enabled"), "expected CLI security status to keep assessor enabled");
 assert(loadedSecurityConfig.security.approvalMode === "open", "expected runtime config to load updated approval mode");
+assert(loadedSecurityConfig.security.assessor.enabled === true, "expected runtime config to preserve assessor enabled state");
+assert(loadedSecurityConfig.security.assessor.provider === "kimi", "expected runtime config to preserve assessor provider");
+assert(loadedSecurityConfig.security.assessor.model === "kimi-k2.5", "expected runtime config to preserve assessor model");
+assert(loadedSecurityConfig.security.assessor.timeoutMs === 4500, "expected runtime config to preserve assessor timeout");
 assert(
   strictPolicy.decide({
     riskClass: "destructive-local",
@@ -3148,6 +3162,80 @@ assert(
   }) === "deny",
   "expected open mode to preserve the unconditional dangerous-command floor"
 );
+const assessorRegistry = new ProviderRegistry();
+assessorRegistry.register(fakeProvider({
+  id: "kimi",
+  models: [inferModelProfile({ provider: "kimi", model: "kimi-k2.5" })],
+  responses: [
+    {
+      ok: true,
+      content: "{\"decision\":\"allow\",\"risk\":\"low\",\"reason\":\"recursive delete in temp workspace dir\",\"confidence\":0.82}",
+      model: "kimi-k2.5",
+      provider: "kimi"
+    }
+  ]
+}));
+const assessorPolicy = createSecurityPolicyForMode("adaptive", {
+  assessor: {
+    enabled: true,
+    provider: "kimi",
+    model: "kimi-k2.5",
+    timeoutMs: 500,
+    providerExecutor: new ProviderExecutor({ registry: assessorRegistry }),
+    sessionId: "security-assessor-smoke"
+  }
+});
+const assessorAssessment = await assessSecurityPolicy(assessorPolicy, {
+  riskClass: "destructive-local",
+  description: "remove temporary workspace cache",
+  command: "rm -rf tmp/build-cache",
+  targetSummary: "rm -rf tmp/build-cache",
+  context: { trustedWorkspace: true }
+});
+assert(assessorAssessment.decision === "allow", "expected assessor to resolve ambiguous destructive command");
+assert(assessorAssessment.assessor?.used === true && assessorAssessment.assessor.status === "ok", "expected assessor metadata to be recorded");
+assert(assessorAssessment.assessor?.confidence === 0.82, "expected assessor confidence to be preserved");
+const malformedAssessorRegistry = new ProviderRegistry();
+malformedAssessorRegistry.register(fakeProvider({
+  id: "kimi",
+  models: [inferModelProfile({ provider: "kimi", model: "kimi-k2.5" })],
+  responses: [
+    {
+      ok: true,
+      content: "not-json",
+      model: "kimi-k2.5",
+      provider: "kimi"
+    }
+  ]
+}));
+const malformedAssessorPolicy = createSecurityPolicyForMode("adaptive", {
+  assessor: {
+    enabled: true,
+    provider: "kimi",
+    model: "kimi-k2.5",
+    timeoutMs: 500,
+    providerExecutor: new ProviderExecutor({ registry: malformedAssessorRegistry }),
+    sessionId: "security-assessor-malformed-smoke"
+  }
+});
+const malformedAssessorAssessment = await assessSecurityPolicy(malformedAssessorPolicy, {
+  riskClass: "destructive-local",
+  description: "remove temporary workspace cache",
+  command: "rm -rf tmp/build-cache",
+  targetSummary: "rm -rf tmp/build-cache",
+  context: { trustedWorkspace: true }
+});
+assert(malformedAssessorAssessment.decision === "ask", "expected malformed assessor output to fall back to ask");
+assert(malformedAssessorAssessment.assessor?.status === "malformed", "expected malformed assessor status");
+const floorAssessment = await assessSecurityPolicy(assessorPolicy, {
+  riskClass: "destructive-local",
+  description: "remove filesystem root",
+  command: "rm -rf /",
+  targetSummary: "rm -rf /",
+  context: { trustedWorkspace: true }
+});
+assert(floorAssessment.decision === "deny", "expected destructive floor to deny before assessor override");
+assert(floorAssessment.assessor === undefined, "expected hard floor to bypass assessor entirely");
 assert(cliMissingProviderSetup.output.includes("Missing API key environment variable ESTACODA_SMOKE_MISSING_KEY"), "expected missing key setup warning");
 assert(cliMissingProviderDoctor.exitCode === 1, "expected missing key doctor to fail");
 assert(cliMissingProviderDoctor.output.includes("Missing API key environment variable ESTACODA_SMOKE_MISSING_KEY"), "expected missing key doctor warning");

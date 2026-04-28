@@ -96,6 +96,7 @@ export type RuntimeOptions = {
   webMaxContentChars?: number;
   securityPolicy?: SecurityPolicy;
   securityMode?: import("../contracts/security.js").SecurityApprovalMode;
+  securityAssessor?: import("../security/security-policy-factory.js").SecurityAssessorRuntimeConfig;
   workspaceFsAdapter?: WorkspaceFsAdapter;
 };
 
@@ -343,7 +344,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     registry: providerRegistry,
     credentialPools: options.credentialPools
   });
-  const securityPolicy = options.securityPolicy ?? createSecurityPolicyForMode(options.securityMode ?? "adaptive");
+  const securityPolicy = options.securityPolicy ?? createSecurityPolicyForMode(options.securityMode ?? "adaptive", {
+    assessor: options.securityAssessor === undefined
+      ? undefined
+      : {
+        ...options.securityAssessor,
+        providerExecutor: options.securityAssessor.providerExecutor ?? providerExecutor,
+        sessionId
+      }
+  });
   const toolExecutor = new ToolExecutor({
     registry: toolRegistry,
     securityPolicy,

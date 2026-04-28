@@ -385,6 +385,7 @@ For Telegram:
 - **Capability-first security**
   Trust and approval behavior are tied to tool/risk/target rather than raw text.
   Public approval modes are now `strict`, `adaptive`, and `open`, with `adaptive` as the default.
+  `adaptive` now supports an optional auxiliary assessor after deterministic triage, while the dangerous-command floor remains non-overridable.
 
 - **Local-first skill mutation**
   External skill roots are read-only. Agent-authored or edited skills write into the local personal skill home.

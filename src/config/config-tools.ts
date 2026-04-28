@@ -82,8 +82,12 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           content: [
             "EstaCoda security",
             `Approval mode: ${loaded.security.approvalMode}`,
+            `Assessor: ${loaded.security.assessor.enabled ? "enabled" : "disabled"}`,
+            loaded.security.assessor.provider === undefined ? undefined : `Assessor provider: ${loaded.security.assessor.provider}`,
+            loaded.security.assessor.model === undefined ? undefined : `Assessor model: ${loaded.security.assessor.model}`,
+            `Assessor timeout ms: ${loaded.security.assessor.timeoutMs}`,
             `Config sources: ${loaded.sources.join(", ") || "none"}`
-          ].join("\n"),
+          ].filter((line) => line !== undefined).join("\n"),
           metadata: {
             sources: loaded.sources,
             security: loaded.security
@@ -98,6 +102,10 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
         type: "object",
         properties: {
           mode: { type: "string", enum: ["strict", "adaptive", "open", "manual", "smart", "off"] },
+          assessorEnabled: { type: "boolean" },
+          assessorProvider: { type: "string" },
+          assessorModel: { type: "string" },
+          assessorTimeoutMs: { type: "number" },
           scope: { type: "string", enum: ["user", "project"] }
         }
       },
@@ -116,6 +124,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           ok: true,
           content: [
             `Approval mode: ${result.config.security?.approvalMode ?? "adaptive"}.`,
+            `Assessor: ${result.config.security?.assessor?.enabled === true ? "enabled" : "disabled"}.`,
             `Wrote ${result.path}.`
           ].join("\n"),
           metadata: {

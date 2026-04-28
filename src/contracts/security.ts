@@ -1,7 +1,9 @@
 import type { ChannelKind } from "./channel.js";
+import type { ProviderId } from "./provider.js";
 import type { ToolRiskClass } from "./tool.js";
 
 export type SecurityDecision = "allow" | "ask" | "deny";
+export type SecurityRiskLevel = "low" | "medium" | "high";
 
 export type SecurityContext = {
   trustedWorkspace: boolean;
@@ -11,6 +13,13 @@ export type SecurityContext = {
 };
 
 export type SecurityApprovalMode = "strict" | "adaptive" | "open";
+
+export type SecurityAssessorConfig = {
+  enabled?: boolean;
+  provider?: ProviderId;
+  model?: string;
+  timeoutMs?: number;
+};
 
 export type SecurityRequest = {
   riskClass: ToolRiskClass;
@@ -22,9 +31,59 @@ export type SecurityRequest = {
   context: SecurityContext;
 };
 
+export type SecurityAssessment = {
+  decision: SecurityDecision;
+  mode: SecurityApprovalMode;
+  reason: string;
+  risk: SecurityRiskLevel;
+  deterministicRule?: string;
+  assessor?: {
+    used: boolean;
+    decision?: SecurityDecision;
+    risk?: SecurityRiskLevel;
+    reason?: string;
+    confidence?: number;
+    provider?: string;
+    model?: string;
+    status?: "ok" | "timeout" | "malformed" | "unavailable" | "disabled";
+  };
+};
+
 export type SecurityPolicy = {
   decide(request: SecurityRequest): SecurityDecision;
+  assess?(request: SecurityRequest): SecurityAssessment | Promise<SecurityAssessment>;
 };
+
+export async function assessSecurityPolicy(
+  policy: SecurityPolicy,
+  request: SecurityRequest,
+  fallbackMode: SecurityApprovalMode = "strict"
+): Promise<SecurityAssessment> {
+  if (policy.assess !== undefined) {
+    return await policy.assess(request);
+  }
+
+  const decision = policy.decide(request);
+  return {
+    decision,
+    mode: fallbackMode,
+    reason: decision === "allow"
+      ? "Allowed by security policy."
+      : decision === "deny"
+        ? "Denied by security policy."
+        : "Approval required by security policy.",
+    risk: request.riskClass === "destructive-local" ||
+      request.riskClass === "credential-access" ||
+      request.riskClass === "sandbox-escape" ||
+      request.riskClass === "spend-money"
+      ? "high"
+      : request.riskClass === "workspace-write" ||
+          request.riskClass === "external-side-effect" ||
+          request.riskClass === "shared-state-mutation"
+        ? "medium"
+        : "low"
+  };
+}
 
 export const capabilityFirstDefaults: SecurityPolicy = {
   decide(request) {

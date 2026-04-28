@@ -17,7 +17,7 @@ import type { MCPServerTransport } from "../mcp/mcp-client.js";
 import type { SkillAutonomy } from "../skills/skill-learning.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
 import { normalizeSecurityApprovalMode } from "../security/security-policy-factory.js";
-import type { SecurityApprovalMode } from "../contracts/security.js";
+import type { SecurityApprovalMode, SecurityAssessorConfig } from "../contracts/security.js";
 
 export type MCPServerTrust = "conservative" | "read-only-network" | "read-only-local";
 
@@ -90,6 +90,7 @@ export type EstaCodaConfig = {
   };
   security?: {
     approvalMode?: SecurityApprovalMode | "manual" | "smart" | "off";
+    assessor?: SecurityAssessorConfig;
     approvals?: {
       mode?: SecurityApprovalMode | "manual" | "smart" | "off";
     };
@@ -145,6 +146,12 @@ export type LoadedRuntimeConfig = {
   };
   security: {
     approvalMode: SecurityApprovalMode;
+    assessor: {
+      enabled: boolean;
+      provider?: ProviderId;
+      model?: string;
+      timeoutMs: number;
+    };
   };
   channels: {
     telegram: TelegramChannelConfig & {
@@ -223,6 +230,10 @@ export type TelegramPairingInput = {
 
 export type SecuritySetupInput = {
   mode?: SecurityApprovalMode | "manual" | "smart" | "off";
+  assessorEnabled?: boolean;
+  assessorProvider?: ProviderId;
+  assessorModel?: string;
+  assessorTimeoutMs?: number;
   scope?: "user" | "project";
 };
 
@@ -279,7 +290,13 @@ export async function loadRuntimeConfig(options: {
       config: normalizeSkillConfig(config.skills?.config)
     },
     security: {
-      approvalMode: normalizeSecurityApprovalMode(config.security?.approvalMode ?? config.security?.approvals?.mode)
+      approvalMode: normalizeSecurityApprovalMode(config.security?.approvalMode ?? config.security?.approvals?.mode),
+      assessor: {
+        enabled: config.security?.assessor?.enabled === true,
+        provider: config.security?.assessor?.provider,
+        model: config.security?.assessor?.model,
+        timeoutMs: config.security?.assessor?.timeoutMs ?? 8_000
+      }
     },
     channels: {
       telegram: {
@@ -335,6 +352,10 @@ export function mergeConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
     security: {
       ...(merged.security ?? {}),
       approvalMode: config.security?.approvalMode ?? merged.security?.approvalMode,
+      assessor: {
+        ...(merged.security?.assessor ?? {}),
+        ...(config.security?.assessor ?? {})
+      },
       approvals: {
         ...(merged.security?.approvals ?? {}),
         ...(config.security?.approvals ?? {})
@@ -673,9 +694,21 @@ export async function setupSecurityConfig(options: {
     ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
     : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
   const existing = await readConfig(targetPath);
+  const assessorPatch = options.input.assessorEnabled !== undefined ||
+    options.input.assessorProvider !== undefined ||
+    options.input.assessorModel !== undefined ||
+    options.input.assessorTimeoutMs !== undefined
+    ? {
+      enabled: options.input.assessorEnabled,
+      provider: options.input.assessorProvider,
+      model: options.input.assessorModel,
+      timeoutMs: options.input.assessorTimeoutMs
+    }
+    : undefined;
   const config = mergeConfig(existing.config, {
     security: {
-      approvalMode: normalizeSecurityApprovalMode(options.input.mode)
+      approvalMode: normalizeSecurityApprovalMode(options.input.mode),
+      assessor: assessorPatch
     }
   });
 

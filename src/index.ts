@@ -65,7 +65,8 @@ async function buildRuntime(input: {
     telegramReady: latestConfig.channels.telegram.ready,
     enableWebNetwork: latestConfig.web.enableNetwork,
     webMaxContentChars: latestConfig.web.maxContentChars,
-    securityMode: latestConfig.security.approvalMode
+    securityMode: latestConfig.security.approvalMode,
+    securityAssessor: latestConfig.security.assessor
   });
 }
 

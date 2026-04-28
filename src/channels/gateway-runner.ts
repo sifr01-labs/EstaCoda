@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { consumeTelegramPairingCode, loadRuntimeConfig } from "../config/runtime-config.js";
 import type { ChannelAuthPolicy } from "../contracts/channel.js";
+import { ProviderExecutor } from "../providers/provider-executor.js";
 import { createRuntime } from "../runtime/create-runtime.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { kemetBlueTheme } from "../theme/kemet-blue.js";
@@ -188,6 +189,13 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
   const gateway = new ChannelGateway({
     adapters: [adapter],
     securityMode: config.security.approvalMode,
+    securityAssessor: {
+      ...config.security.assessor,
+      providerExecutor: new ProviderExecutor({
+        registry: config.providerRegistry,
+        credentialPools: config.credentialPools
+      })
+    },
     sessionStore: new PersistentChannelSessionStore({ path: sessionContextPath, policy: sessionPolicy }),
     approvalStore,
     authPolicy,

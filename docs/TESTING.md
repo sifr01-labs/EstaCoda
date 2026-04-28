@@ -239,6 +239,7 @@ At a high level:
 - session-stable skill visibility
 - approvals and strict target-key matching
 - security approval mode persistence and behavior (`strict` / `adaptive` / `open`)
+- adaptive assessor success, malformed-output fallback, and hard-floor bypass behavior
 - Telegram progress compaction
 - Telegram approvals and callbacks
 - Telegram attachment flows

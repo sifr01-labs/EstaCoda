@@ -5,8 +5,9 @@ import type {
   ChannelMessage,
   ChannelSessionKey
 } from "../contracts/channel.js";
-import { type SecurityApprovalMode, type SecurityDecision, type SecurityPolicy, type SecurityRequest } from "../contracts/security.js";
+import { assessSecurityPolicy, type SecurityApprovalMode, type SecurityDecision, type SecurityPolicy, type SecurityRequest } from "../contracts/security.js";
 import type { Runtime } from "../runtime/create-runtime.js";
+import type { SecurityAssessorRuntimeConfig } from "../security/security-policy-factory.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { ChannelApprovalStore, type PersistedApprovalGrant } from "./channel-approval-store.js";
 import { buildBaseSessionId, normalizeSessionKey, type ChannelSessionPolicy, shouldAutoResetSession, stableSessionKey } from "./channel-session-store.js";
@@ -36,6 +37,7 @@ export type ChannelGatewayOptions = {
   approvalStore?: ChannelApprovalStore;
   sessionPolicy?: ChannelSessionPolicy;
   securityMode?: SecurityApprovalMode;
+  securityAssessor?: SecurityAssessorRuntimeConfig;
 };
 
 type ApprovalScope = "once" | "session" | "always";
@@ -140,6 +142,7 @@ export class ChannelGateway {
   readonly #approvalStore: ChannelApprovalStore;
   readonly #sessionPolicy: ChannelSessionPolicy;
   readonly #securityMode: SecurityApprovalMode;
+  readonly #securityAssessor: SecurityAssessorRuntimeConfig | undefined;
   readonly #activeTurns = new Map<string, AbortController>();
   readonly #pendingApprovals = new Map<string, PendingApproval>();
   readonly #approvalGrants = new Map<string, ApprovalGrant[]>();
@@ -154,6 +157,7 @@ export class ChannelGateway {
     this.#approvalStore = options.approvalStore ?? new ChannelApprovalStore();
     this.#sessionPolicy = options.sessionPolicy ?? {};
     this.#securityMode = options.securityMode ?? "adaptive";
+    this.#securityAssessor = options.securityAssessor;
 
     for (const adapter of options.adapters) {
       this.#adapters.set(adapter.id ?? adapter.kind, adapter);
@@ -946,37 +950,85 @@ export class ChannelGateway {
     persistentApprovals: PersistedApprovalGrant[]
   ): SecurityPolicy {
     const key = stableSessionKey(sessionKey, this.#sessionPolicy);
+    const securityMode = this.#securityMode;
+    const securityAssessor = this.#securityAssessor;
+    const approvalGrants = this.#approvalGrants;
+
+    const assess = async (request: SecurityRequest) => {
+      const basePolicy = createSecurityPolicyForMode(securityMode, {
+        assessor: securityAssessor === undefined
+          ? undefined
+          : {
+            ...securityAssessor,
+            sessionId
+          }
+      });
+      const grants = approvalGrants.get(key) ?? [];
+      const grantIndex = grants.findIndex((grant) =>
+        grant.toolName === request.toolName &&
+        grant.riskClass === request.riskClass &&
+        grant.targetKey === request.targetKey &&
+        (grant.scope !== "session" || grant.sessionId === sessionId)
+      );
+
+      if (grantIndex >= 0) {
+        const grant = grants[grantIndex];
+
+        if (grant?.scope === "once") {
+          grants.splice(grantIndex, 1);
+
+          if (grants.length === 0) {
+            approvalGrants.delete(key);
+          } else {
+            approvalGrants.set(key, grants);
+          }
+        }
+
+          return {
+            decision: "allow" as const,
+            mode: securityMode,
+            reason: "Allowed by a session approval grant.",
+            risk: request.riskClass === "destructive-local" ||
+              request.riskClass === "credential-access" ||
+              request.riskClass === "sandbox-escape" ||
+              request.riskClass === "spend-money"
+              ? "high"
+              : "medium"
+          } as const;
+        }
+        if (persistentApprovals.some((grant) => matchesPersistentApproval(grant, request))) {
+          return {
+            decision: "allow" as const,
+            mode: securityMode,
+          reason: "Allowed by a persisted approval grant.",
+          risk: request.riskClass === "destructive-local" ||
+              request.riskClass === "credential-access" ||
+              request.riskClass === "sandbox-escape" ||
+              request.riskClass === "spend-money"
+              ? "high"
+              : "medium"
+          } as const;
+        }
+
+      return await assessSecurityPolicy(basePolicy, request, securityMode);
+    };
 
     return {
-      decide: (request: SecurityRequest): SecurityDecision => {
-        const basePolicy = createSecurityPolicyForMode(this.#securityMode);
-        const grants = this.#approvalGrants.get(key) ?? [];
+      assess(request: SecurityRequest) {
+        return assess(request);
+      },
+      decide(request: SecurityRequest): SecurityDecision {
+        const basePolicy = createSecurityPolicyForMode(securityMode);
+        const grants = approvalGrants.get(key) ?? [];
         const grantIndex = grants.findIndex((grant) =>
           grant.toolName === request.toolName &&
           grant.riskClass === request.riskClass &&
           grant.targetKey === request.targetKey &&
           (grant.scope !== "session" || grant.sessionId === sessionId)
         );
-
-        if (grantIndex >= 0) {
-          const grant = grants[grantIndex];
-
-          if (grant?.scope === "once") {
-            grants.splice(grantIndex, 1);
-
-            if (grants.length === 0) {
-              this.#approvalGrants.delete(key);
-            } else {
-              this.#approvalGrants.set(key, grants);
-            }
-          }
-
+        if (grantIndex >= 0 || persistentApprovals.some((grant) => matchesPersistentApproval(grant, request))) {
           return "allow";
         }
-        if (persistentApprovals.some((grant) => matchesPersistentApproval(grant, request))) {
-          return "allow";
-        }
-
         return basePolicy.decide(request);
       }
     };

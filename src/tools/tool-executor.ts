@@ -1,6 +1,6 @@
 import { realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
-import type { SecurityDecision, SecurityPolicy } from "../contracts/security.js";
+import { assessSecurityPolicy, type SecurityDecision, type SecurityPolicy } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
 import type { ToolDefinition, ToolResult, ToolRiskClass, ToolsetName } from "../contracts/tool.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
@@ -83,7 +83,7 @@ export class ToolExecutor {
     const riskClass = classifyEffectiveRisk(tool, request.input);
     const targetKey = await this.#buildSecurityTargetKey(tool.name, request.input);
     const targetSummary = summarizeSecurityTarget(tool.name, request.input);
-    const decision = this.#securityPolicy.decide({
+    const securityRequest = {
       riskClass,
       toolName: tool.name,
       targetKey,
@@ -94,6 +94,25 @@ export class ToolExecutor {
         trustedWorkspace: request.trustedWorkspace,
         targetConversationIsActive: true
       }
+    };
+    const assessment = await assessSecurityPolicy(this.#securityPolicy, securityRequest);
+    const decision = assessment.decision;
+
+    await this.#sessionDb.appendEvent(request.sessionId, {
+      kind: "security-assessed",
+      tool: tool.name,
+      riskClass,
+      targetKey,
+      targetSummary,
+      assessment
+    });
+    this.#trajectoryRecorder.record("progress", {
+      message: `security assessed for ${tool.name}`,
+      tool: tool.name,
+      decision: assessment.decision,
+      mode: assessment.mode,
+      reason: assessment.reason,
+      riskClass
     });
 
     if (decision !== "allow") {

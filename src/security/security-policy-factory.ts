@@ -1,10 +1,13 @@
 import {
   capabilityFirstDefaults,
+  type SecurityAssessment,
   type SecurityApprovalMode,
+  type SecurityAssessorConfig,
   type SecurityDecision,
   type SecurityPolicy,
   type SecurityRequest
 } from "../contracts/security.js";
+import { ProviderExecutor } from "../providers/provider-executor.js";
 
 export function normalizeSecurityApprovalMode(mode: string | undefined): SecurityApprovalMode {
   switch (mode) {
@@ -22,55 +25,165 @@ export function normalizeSecurityApprovalMode(mode: string | undefined): Securit
   }
 }
 
-export function createSecurityPolicyForMode(mode: SecurityApprovalMode): SecurityPolicy {
+export function createSecurityPolicyForMode(
+  mode: SecurityApprovalMode,
+  options: {
+    assessor?: SecurityAssessorRuntimeConfig;
+  } = {}
+): SecurityPolicy {
+  const assessor = options.assessor;
   switch (mode) {
     case "open":
       return {
+        async assess(request) {
+          return assessOpen(request);
+        },
         decide(request) {
-          if (isUnconditionallyDangerous(request)) {
-            return "deny";
-          }
-          return "allow";
+          return assessOpen(request).decision;
         }
       };
     case "adaptive":
       return {
+        async assess(request) {
+          return await assessAdaptive(request, assessor);
+        },
         decide(request) {
-          const baseline = capabilityFirstDefaults.decide(request);
-          if (baseline !== "ask") {
-            return baseline;
-          }
-          return smartAssess(request);
+          return assessAdaptiveDeterministic(request).decision;
         }
       };
     case "strict":
     default:
-      return capabilityFirstDefaults;
+      return {
+        async assess(request) {
+          return assessStrict(request);
+        },
+        decide(request) {
+          return capabilityFirstDefaults.decide(request);
+        }
+      };
   }
 }
 
-function smartAssess(request: SecurityRequest): SecurityDecision {
+export type SecurityAssessorRuntimeConfig = SecurityAssessorConfig & {
+  providerExecutor?: ProviderExecutor;
+  sessionId?: string;
+};
+
+function assessStrict(request: SecurityRequest): SecurityAssessment {
+  const decision = capabilityFirstDefaults.decide(request);
+  return {
+    decision,
+    mode: "strict",
+    reason: deterministicReason(request, decision, "capability-first"),
+    risk: inferRiskLevel(request),
+    deterministicRule: "capability-first"
+  };
+}
+
+async function assessAdaptive(
+  request: SecurityRequest,
+  assessor: SecurityAssessorRuntimeConfig | undefined
+): Promise<SecurityAssessment> {
+  const deterministic = assessAdaptiveDeterministic(request);
+
+  if (deterministic.decision !== "ask") {
+    return deterministic;
+  }
+
+  if (
+    assessor?.enabled !== true ||
+    assessor.providerExecutor === undefined ||
+    assessor.provider === undefined ||
+    assessor.model === undefined
+  ) {
+    return {
+      ...deterministic,
+      assessor: {
+        used: false,
+        status: assessor?.enabled === true ? "unavailable" : "disabled"
+      }
+    };
+  }
+
+  const assessed = await assessWithAuxiliaryProvider(request, assessor as Required<
+    Pick<SecurityAssessorRuntimeConfig, "provider" | "model" | "providerExecutor">
+  > & SecurityAssessorRuntimeConfig, deterministic);
+  return assessed;
+}
+
+function assessOpen(request: SecurityRequest): SecurityAssessment {
+  if (isUnconditionallyDangerous(request)) {
+    return {
+      decision: "deny",
+      mode: "open",
+      reason: "The command was blocked by EstaCoda's safety policy because it matches a destructive pattern.",
+      risk: "high",
+      deterministicRule: "dangerous-command-floor"
+    };
+  }
+
+  return {
+    decision: "allow",
+    mode: "open",
+    reason: "Open mode allows this action because it does not match the hard dangerous-command floor.",
+    risk: inferRiskLevel(request),
+    deterministicRule: "open-default-allow"
+  };
+}
+
+function assessAdaptiveDeterministic(request: SecurityRequest): SecurityAssessment {
   if (
     request.riskClass === "credential-access" ||
     request.riskClass === "sandbox-escape" ||
     request.riskClass === "spend-money"
   ) {
-    return "deny";
+    return {
+      decision: "deny",
+      mode: "adaptive",
+      reason: deterministicReason(request, "deny", "hard-risk-class"),
+      risk: "high",
+      deterministicRule: "hard-risk-class"
+    };
   }
 
   if (request.riskClass !== "destructive-local") {
-    return "ask";
+    const baseline = capabilityFirstDefaults.decide(request);
+    return {
+      decision: baseline,
+      mode: "adaptive",
+      reason: deterministicReason(request, baseline, "capability-first"),
+      risk: inferRiskLevel(request),
+      deterministicRule: "capability-first"
+    };
   }
 
   if (isUnconditionallyDangerous(request)) {
-    return "deny";
+    return {
+      decision: "deny",
+      mode: "adaptive",
+      reason: "The command was blocked by EstaCoda's safety policy because it matches a destructive pattern.",
+      risk: "high",
+      deterministicRule: "dangerous-command-floor"
+    };
   }
 
   if (request.command !== undefined && isLikelyFalsePositive(request.command)) {
-    return "allow";
+    return {
+      decision: "allow",
+      mode: "adaptive",
+      reason: "Adaptive mode auto-approved this command because it matches a known benign false-positive pattern.",
+      risk: "low",
+      deterministicRule: "benign-false-positive"
+    };
   }
 
-  return "ask";
+  return {
+    decision: "ask",
+    mode: "adaptive",
+    reason: "Adaptive mode could not classify this action confidently from deterministic rules alone.",
+    risk: inferRiskLevel(request),
+    deterministicRule: "ambiguous-destructive-action"
+  };
 }
 
 function isLikelyFalsePositive(command: string): boolean {
@@ -94,4 +207,190 @@ function isUnconditionallyDangerous(request: SecurityRequest): boolean {
 
 function normalizeCommand(value: string): string {
   return value.trim().replace(/\s+/gu, " ");
+}
+
+async function assessWithAuxiliaryProvider(
+  request: SecurityRequest,
+  assessor: Required<Pick<SecurityAssessorRuntimeConfig, "provider" | "model" | "providerExecutor">> &
+    SecurityAssessorRuntimeConfig,
+  deterministic: SecurityAssessment
+): Promise<SecurityAssessment> {
+  const controller = new AbortController();
+  const timeoutMs = assessor.timeoutMs ?? 8_000;
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const execution = await assessor.providerExecutor.complete({
+      model: assessor.model,
+      messages: [
+        {
+          role: "system",
+          content: [
+            "You are EstaCoda's security assessor.",
+            "Return JSON only.",
+            "Schema:",
+            "{\"decision\":\"allow|ask|deny\",\"risk\":\"low|medium|high\",\"reason\":\"...\",\"confidence\":0.0}",
+            "Never override a hard destructive-command floor."
+          ].join("\n")
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            riskClass: request.riskClass,
+            toolName: request.toolName,
+            targetKey: request.targetKey,
+            targetSummary: request.targetSummary,
+            command: request.command,
+            trustedWorkspace: request.context.trustedWorkspace,
+            activeChannel: request.context.activeChannel,
+            targetChannel: request.context.targetChannel,
+            targetConversationIsActive: request.context.targetConversationIsActive
+          })
+        }
+      ],
+      temperature: 0,
+      maxTokens: 200,
+      responseFormat: { type: "json_object" }
+    }, {
+      requireStructuredOutput: true,
+      providerOrder: [assessor.provider]
+    }, {
+      sessionId: assessor.sessionId === undefined ? undefined : `${assessor.sessionId}:security-assessor`,
+      signal: controller.signal
+    });
+
+    if (!execution.ok || execution.response === undefined) {
+      return {
+        ...deterministic,
+        assessor: {
+          used: true,
+          provider: assessor.provider,
+          model: assessor.model,
+          status: "unavailable"
+        }
+      };
+    }
+
+    const parsed = parseAssessorResponse(execution.response.content);
+    if (parsed === undefined) {
+      return {
+        ...deterministic,
+        assessor: {
+          used: true,
+          provider: execution.response.provider,
+          model: execution.response.model,
+          status: "malformed"
+        }
+      };
+    }
+
+    return {
+      decision: parsed.decision,
+      mode: "adaptive",
+      reason: parsed.reason,
+      risk: parsed.risk,
+      deterministicRule: deterministic.deterministicRule,
+      assessor: {
+        used: true,
+        decision: parsed.decision,
+        risk: parsed.risk,
+        reason: parsed.reason,
+        confidence: parsed.confidence,
+        provider: execution.response.provider,
+        model: execution.response.model,
+        status: "ok"
+      }
+    };
+  } catch {
+    return {
+      ...deterministic,
+      assessor: {
+        used: true,
+        provider: assessor.provider,
+        model: assessor.model,
+        status: "timeout"
+      }
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function parseAssessorResponse(content: string): {
+  decision: SecurityDecision;
+  risk: "low" | "medium" | "high";
+  reason: string;
+  confidence?: number;
+} | undefined {
+  const match = content.match(/\{[\s\S]*\}/u);
+  if (match === null) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(match[0]) as Record<string, unknown>;
+    const decision = parsed.decision;
+    const risk = parsed.risk;
+    const reason = parsed.reason;
+    const confidence = parsed.confidence;
+
+    if (
+      (decision !== "allow" && decision !== "ask" && decision !== "deny") ||
+      (risk !== "low" && risk !== "medium" && risk !== "high") ||
+      typeof reason !== "string"
+    ) {
+      return undefined;
+    }
+
+    return {
+      decision,
+      risk,
+      reason,
+      confidence: typeof confidence === "number" ? confidence : undefined
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function inferRiskLevel(request: SecurityRequest): "low" | "medium" | "high" {
+  if (
+    request.riskClass === "destructive-local" ||
+    request.riskClass === "credential-access" ||
+    request.riskClass === "sandbox-escape" ||
+    request.riskClass === "spend-money"
+  ) {
+    return "high";
+  }
+
+  if (
+    request.riskClass === "workspace-write" ||
+    request.riskClass === "shared-state-mutation" ||
+    request.riskClass === "external-side-effect"
+  ) {
+    return "medium";
+  }
+
+  return "low";
+}
+
+function deterministicReason(
+  request: SecurityRequest,
+  decision: SecurityDecision,
+  rule: string
+): string {
+  if (rule === "hard-risk-class") {
+    return "Adaptive mode denied this action because it falls into a non-overridable high-risk category.";
+  }
+  if (rule === "capability-first") {
+    if (decision === "allow") {
+      return "Allowed by capability-first policy for this tool and workspace state.";
+    }
+    if (decision === "deny") {
+      return "Denied by capability-first policy.";
+    }
+    return "Approval required by capability-first policy.";
+  }
+
+  return `Security decision recorded by ${rule}.`;
 }

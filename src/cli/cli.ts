@@ -447,7 +447,8 @@ async function security(options: CliOptions, args: string[]): Promise<CliCommand
         "  estacoda security status",
         "  estacoda security setup --mode strict",
         "  estacoda security setup --mode adaptive",
-        "  estacoda security setup --mode open"
+        "  estacoda security setup --mode open",
+        "  estacoda security setup --assessor-enabled --assessor-provider kimi --assessor-model kimi-k2.5"
       ].join("\n")
     };
   }
@@ -460,8 +461,12 @@ async function security(options: CliOptions, args: string[]): Promise<CliCommand
       output: [
         "EstaCoda security",
         `Approval mode: ${config.security.approvalMode}`,
+        `Assessor: ${config.security.assessor.enabled ? "enabled" : "disabled"}`,
+        config.security.assessor.provider === undefined ? undefined : `Assessor provider: ${config.security.assessor.provider}`,
+        config.security.assessor.model === undefined ? undefined : `Assessor model: ${config.security.assessor.model}`,
+        `Assessor timeout ms: ${config.security.assessor.timeoutMs}`,
         `Config sources: ${config.sources.join(", ") || "none"}`
-      ].join("\n")
+      ].filter((line) => line !== undefined).join("\n")
     };
   }
 
@@ -476,6 +481,7 @@ async function security(options: CliOptions, args: string[]): Promise<CliCommand
     exitCode: 0,
     output: [
       `Approval mode: ${result.config.security?.approvalMode ?? "adaptive"}.`,
+      `Assessor: ${result.config.security?.assessor?.enabled === true ? "enabled" : "disabled"}.`,
       `Config: ${result.path}`
     ].join("\n")
   };
@@ -1031,6 +1037,19 @@ function parseSecuritySetupArgs(args: string[]): SecuritySetupInput {
     if (arg === "--mode") {
       parsed.mode = next as SecuritySetupInput["mode"] | undefined;
       index += 1;
+    } else if (arg === "--assessor-enabled") {
+      parsed.assessorEnabled = true;
+    } else if (arg === "--no-assessor") {
+      parsed.assessorEnabled = false;
+    } else if (arg === "--assessor-provider") {
+      parsed.assessorProvider = next as SecuritySetupInput["assessorProvider"] | undefined;
+      index += 1;
+    } else if (arg === "--assessor-model") {
+      parsed.assessorModel = next;
+      index += 1;
+    } else if (arg === "--assessor-timeout-ms") {
+      parsed.assessorTimeoutMs = next === undefined ? undefined : Number(next);
+      index += 1;
     } else if (arg === "--project") {
       parsed.scope = "project";
     } else if (arg === "--user") {
@@ -1048,6 +1067,9 @@ function parseSecuritySetupArgs(args: string[]): SecuritySetupInput {
     parsed.mode !== "off"
   ) {
     throw new Error("Expected --mode strict, adaptive, or open");
+  }
+  if (parsed.assessorTimeoutMs !== undefined && !Number.isFinite(parsed.assessorTimeoutMs)) {
+    throw new Error("Expected --assessor-timeout-ms to be a number");
   }
 
   return parsed;

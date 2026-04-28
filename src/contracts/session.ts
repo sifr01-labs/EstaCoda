@@ -5,7 +5,7 @@ import type { ProviderErrorClass } from "./provider.js";
 import type { PromptBudgetReport } from "./prompt.js";
 import type { ArtifactRecord } from "./artifact.js";
 import type { MemoryConclusion, SkillOutcome } from "./memory.js";
-import type { SecurityDecision } from "./security.js";
+import type { SecurityAssessment, SecurityDecision } from "./security.js";
 import type { ToolResult, ToolRiskClass } from "./tool.js";
 import type { ToolCallPlan } from "./tool-plan.js";
 import type { SkillWorkflowPlan } from "./skill.js";
@@ -59,6 +59,16 @@ export type SessionEvent =
       kind: "security-decided";
       decision: SecurityDecision;
       description: string;
+      mode?: string;
+      reason?: string;
+    }
+  | {
+      kind: "security-assessed";
+      tool: string;
+      riskClass: ToolRiskClass;
+      targetKey?: string;
+      targetSummary?: string;
+      assessment: SecurityAssessment;
     }
   | {
       kind: "trajectory-linked";
