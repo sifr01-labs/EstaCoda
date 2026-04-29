@@ -127,6 +127,7 @@ Next acceptance checks:
 - Done: browser setup/test aliases exist for the local-CDP browser foundation.
 - Done: profile/UI settings separate interface language, aesthetic flavor, activity-label locale, behavior mode, and response language.
 - Done: security-mode and skill-autonomy labels/descriptions localize from `ui.language` while config values remain stable English keys.
+- Done: setup/verify/settings copy now shows clearer recommended paths, post-setup commands, and recovery next actions.
 - Local model setup is supported cleanly.
 - Config errors produce actionable fixes.
 - Migration detection/import is implemented.

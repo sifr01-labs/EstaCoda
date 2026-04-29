@@ -10,7 +10,13 @@ import type { SecurityApprovalMode } from "../contracts/security.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import type { SkillAutonomy } from "../skills/skill-learning.js";
 import { kemetBlueTheme } from "../theme/kemet-blue.js";
-import { renderSecurityModeOption, renderSkillAutonomyOption, type Locale } from "../ui/settings-labels.js";
+import {
+  formatSecurityMode,
+  formatSkillAutonomy,
+  renderSecurityModeOption,
+  renderSkillAutonomyOption,
+  type Locale
+} from "../ui/settings-labels.js";
 import { completeOnboarding, defaultOnboardingSteps, getOnboardingStatus, type OnboardingOptions } from "./onboarding-flow.js";
 import { runSetupVerification } from "./verification.js";
 
@@ -136,22 +142,25 @@ export async function runInteractiveOnboarding(options: OnboardingOptions & {
     const loaded = await loadRuntimeConfig({ ...options, workspaceRoot });
     const diagnostic = await diagnoseProviderConfig(loaded);
     const verification = await runSetupVerification({ ...options, workspaceRoot });
+    const security = formatSecurityMode(securityMode, locale);
+    const autonomy = formatSkillAutonomy(skillAutonomy, locale);
     const sessionLine = options.continueToSession === true
       ? "Starting your first EstaCoda agent session now."
-      : "Next: run estacoda";
+      : "Next: run estacoda, or run estacoda verify any time to re-check setup.";
 
     return {
       completed: !result.needed,
       exitCode: result.needed ? 1 : 0,
       output: [
         "Setup complete.",
+        "EstaCoda is ready to use this workspace configuration.",
         `Configured: ${formatProviderModel(selected.provider, selected.model)}`,
         `Config: ${result.configPath}`,
         secretPath === undefined ? undefined : `Secret store: ${secretPath}`,
         normalizedEnvName === undefined ? undefined : `Using credential from ${normalizedEnvName}.`,
         `Workspace trust: ${trustWorkspace ? "trusted" : "not trusted"}`,
-        `Security mode: ${securityMode}`,
-        `Skill autonomy: ${skillAutonomy}`,
+        `Security mode: ${security.label} (${security.value})`,
+        `Skill autonomy: ${autonomy.label} (${autonomy.value})`,
         "",
         "Setup check",
         renderProviderDiagnostic(diagnostic),

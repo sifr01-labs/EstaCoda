@@ -3287,7 +3287,10 @@ assert(
 assert(mcpRuntimeExitMarker.includes("stopped"), "expected runtime-owned MCP server to stop on dispose");
 assert(mcpDirectExitMarkerContent.includes("stopped"), "expected directly loaded MCP server to stop");
 assert(cliSetupPrompt.output.includes("Provider options"), "expected CLI setup prompt");
+assert(cliSetupPrompt.output.includes("Recommended path"), "expected CLI setup prompt to show the recommended path");
+assert(cliSetupPrompt.output.includes("After setup"), "expected CLI setup prompt to show post-setup commands");
 assert(cliInteractiveSetup.output.includes("Configured: kimi/kimi-k2.5"), "expected interactive CLI setup output");
+assert(cliInteractiveSetup.output.includes("EstaCoda is ready to use this workspace configuration."), "expected interactive setup to explain readiness");
 assert(cliInteractiveSetup.output.includes("Secret store:"), "expected interactive setup secret store output");
 assert(cliInteractiveSetup.output.includes("Setup check"), "expected interactive setup diagnostics");
 assert(cliInteractiveSetup.output.includes("EstaCoda verify"), "expected interactive setup verification output");
@@ -3298,7 +3301,10 @@ assert(cliInteractiveConfig.skills.autonomy === "suggest", "expected interactive
 assert(cliInteractiveEnv.includes("KIMI_API_KEY=\"TEST_KIMI_SECRET\""), "expected interactive setup to write local env secret");
 assert(cliInteractiveEnvMode === 0o600, "expected interactive setup env secret mode 0600");
 assert(cliVerify.output.includes("EstaCoda verify"), "expected CLI verify output");
+assert(cliVerify.output.includes("Checks your local setup"), "expected CLI verify output to explain what it checks");
+assert(cliVerify.output.includes("Next:"), "expected CLI verify output to include next action guidance");
 assert(cliSettings.output.includes("EstaCoda settings"), "expected CLI settings output");
+assert(cliSettings.output.includes("Common changes"), "expected CLI settings output to include common change commands");
 assert(cliSkillSettings.output.includes("Skill autonomy: proactive."), "expected CLI skill autonomy settings output");
 assert(cliProfileSet.output.includes("Profile: operator."), "expected CLI profile set output");
 assert(cliProfileLanguage.output.includes("Response language: match-user."), "expected CLI profile language output");

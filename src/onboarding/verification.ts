@@ -81,6 +81,8 @@ export async function runSetupVerification(options: OnboardingOptions & {
     ok: warnings.length === 0,
     output: [
       "EstaCoda verify",
+      "Checks your local setup, provider route, credential store, workspace trust, and basic tool readiness.",
+      "",
       `State directory: ${stateWritable ? "writable" : "blocked"}`,
       `Secret store: ${envMode}`,
       `Workspace trust: ${workspaceTrusted ? "trusted" : "not trusted"}`,
@@ -91,7 +93,52 @@ export async function runSetupVerification(options: OnboardingOptions & {
       "",
       renderProviderDiagnostic(provider),
       "",
-      warnings.length === 0 ? "Status: ready" : `Warnings:\n${[...new Set(warnings)].map((warning) => `- ${warning}`).join("\n")}`
+      warnings.length === 0
+        ? "Status: ready\nNext: run estacoda, or configure optional channels with estacoda telegram setup / estacoda browser setup."
+        : [
+            `Warnings:\n${[...new Set(warnings)].map((warning) => `- ${warning}`).join("\n")}`,
+            "",
+            renderVerificationNextSteps(warnings)
+          ].join("\n")
     ].join("\n")
   };
+}
+
+function renderVerificationNextSteps(warnings: string[]): string {
+  const steps = new Set<string>();
+  for (const warning of warnings) {
+    if (/Provider setup is incomplete/u.test(warning)) {
+      steps.add("Run estacoda setup to choose a provider/model.");
+    }
+    if (/Missing API key environment variable ([A-Z0-9_]+)/u.test(warning)) {
+      const envName = /Missing API key environment variable ([A-Z0-9_]+)/u.exec(warning)?.[1];
+      steps.add(envName === undefined
+        ? "Export the missing provider API key, or rerun estacoda setup to store it locally."
+        : `Export ${envName}, or rerun estacoda setup and choose local secret storage.`);
+    }
+    if (/No credential pool is configured/u.test(warning)) {
+      steps.add("Run estacoda setup --advanced --provider <provider> --model <model> --api-key-env <ENV_NAME>.");
+    }
+    if (/Network inference is disabled/u.test(warning)) {
+      steps.add("Enable network inference for the selected hosted provider with estacoda setup --advanced.");
+    }
+    if (/Workspace is not trusted/u.test(warning)) {
+      steps.add("Run /workspace.trust.grant in an interactive session, or rerun estacoda setup and trust this workspace.");
+    }
+    if (/Secret store permissions/u.test(warning)) {
+      steps.add("Run chmod 600 ~/.estacoda/.env to restrict local secret-store permissions.");
+    }
+    if (/State directory is not writable/u.test(warning)) {
+      steps.add("Check write permissions for ~/.estacoda.");
+    }
+    if (/Read-only file tool check/u.test(warning)) {
+      steps.add("Start an interactive session after fixing provider/trust warnings, then retry estacoda verify.");
+    }
+  }
+
+  if (steps.size === 0) {
+    steps.add("Fix the warnings above, then rerun estacoda verify.");
+  }
+
+  return `Next actions:\n${Array.from(steps).map((step) => `- ${step}`).join("\n")}`;
 }

@@ -148,11 +148,13 @@ async function setup(options: CliOptions, args: string[]): Promise<CliCommandRes
         advanced ? "EstaCoda advanced setup" : "EstaCoda setup",
         onboarding.reason,
         "",
-        "Run:",
+        "Recommended path:",
         "  estacoda setup",
+        "",
+        "Advanced path:",
         "  estacoda setup --advanced --provider deepseek --model deepseek-chat --api-key-env DEEPSEEK_API_KEY",
         "",
-        "Advanced provider setup:",
+        "Direct provider example:",
         "  estacoda setup --provider deepseek --model deepseek-chat --api-key-env DEEPSEEK_API_KEY",
         "",
         "Provider options:",
@@ -160,7 +162,11 @@ async function setup(options: CliOptions, args: string[]): Promise<CliCommandRes
           step.id === "provider"
             ? step.options.map((option) => `  ${formatProviderModel(option.provider, option.model)} - ${option.label}`)
             : []
-        )
+        ),
+        "",
+        "After setup:",
+        "  estacoda verify",
+        "  estacoda"
       ].join("\n")
     };
   }
@@ -182,7 +188,9 @@ async function setup(options: CliOptions, args: string[]): Promise<CliCommandRes
       "",
       "Setup check",
       renderProviderDiagnostic(diagnostic),
-      diagnostic.status === "ready" ? "Ready: start EstaCoda and send your first prompt." : "Next: fix the warnings above, then run estacoda doctor."
+      diagnostic.status === "ready"
+        ? "Ready: run estacoda and send your first prompt."
+        : "Next: fix the warnings above, then run estacoda verify."
     ].filter((line) => line !== undefined).join("\n")
   };
 }
@@ -271,7 +279,7 @@ async function settings(options: CliOptions, args: string[]): Promise<CliCommand
         `Autonomy: ${current.label} (${current.value})`,
         `Description: ${current.description}`,
         `External dirs: ${config.skills.externalDirs.join(", ") || "none"}`,
-        "Change with: estacoda settings skills --autonomy suggest"
+        "Change with: estacoda settings skills --autonomy none|suggest|proactive|autonomous"
       ].join("\n")
     };
   }
@@ -287,7 +295,7 @@ async function settings(options: CliOptions, args: string[]): Promise<CliCommand
         `Approval mode: ${current.label} (${current.value})`,
         `Description: ${current.description}`,
         `Assessor: ${config.security.assessor.enabled ? "enabled" : "disabled"}`,
-        "Change with: estacoda security setup --mode adaptive"
+        "Change with: estacoda security setup --mode strict|adaptive|open"
       ].join("\n")
     };
   }
@@ -316,7 +324,9 @@ async function settings(options: CliOptions, args: string[]): Promise<CliCommand
         config.channels.telegram.botTokenEnv === undefined ? undefined : `Bot token env: ${config.channels.telegram.botTokenEnv}`,
         `Allowed users: ${(config.channels.telegram.allowedUserIds ?? []).join(", ") || "none"}`,
         `Allowed chats: ${(config.channels.telegram.allowedChatIds ?? []).join(", ") || "none"}`,
-        "Change with: estacoda telegram setup"
+        config.channels.telegram.ready
+          ? "Next: start the gateway with estacoda gateway run."
+          : "Change with: estacoda telegram setup"
       ].filter((line) => line !== undefined).join("\n")
     };
   }
@@ -330,7 +340,9 @@ async function settings(options: CliOptions, args: string[]): Promise<CliCommand
         "EstaCoda settings: provider",
         `Model: ${config.model.provider}/${config.model.id}`,
         renderProviderDiagnostic(diagnostic),
-        "Change with: estacoda setup --advanced --provider <provider> --model <model>"
+        diagnostic.status === "ready"
+          ? "Next: run estacoda, or estacoda verify for a full readiness check."
+          : "Change with: estacoda setup --advanced --provider <provider> --model <model>"
       ].join("\n")
     };
   }
@@ -380,7 +392,12 @@ async function settings(options: CliOptions, args: string[]): Promise<CliCommand
       "  estacoda settings skills",
       "  estacoda settings browser",
       "  estacoda settings telegram",
-      "  estacoda settings skills --autonomy suggest"
+      "",
+      "Common changes:",
+      "  estacoda setup --advanced --provider <provider> --model <model>",
+      "  estacoda security setup --mode adaptive",
+      "  estacoda settings skills --autonomy suggest",
+      "  estacoda verify"
     ].join("\n")
   };
 }
