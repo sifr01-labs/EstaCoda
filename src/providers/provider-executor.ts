@@ -341,7 +341,7 @@ function mergeToolCallFragment(
   fragments: Map<string, ProviderExecutionResult["toolCalls"][number]>,
   event: Extract<ProviderStreamEvent, { kind: "tool-call" }>
 ): void {
-  const key = (event.index === undefined ? undefined : `index:${event.index}`) ?? event.id ?? event.name ?? `anonymous:${fragments.size}`;
+  const key = stableToolCallFragmentKey(fragments, event);
   const current = fragments.get(key);
 
   if (current === undefined) {
@@ -362,6 +362,30 @@ function mergeToolCallFragment(
     argumentsText: `${current.argumentsText ?? ""}${event.argumentsText ?? ""}`,
     raw: event.raw ?? current.raw
   });
+}
+
+function stableToolCallFragmentKey(
+  fragments: Map<string, ProviderExecutionResult["toolCalls"][number]>,
+  event: Extract<ProviderStreamEvent, { kind: "tool-call" }>
+): string {
+  if (event.index !== undefined) {
+    return `index:${event.index}`;
+  }
+
+  if (event.id !== undefined) {
+    return `id:${event.id}`;
+  }
+
+  if (event.name !== undefined) {
+    return `name:${event.name}`;
+  }
+
+  if (fragments.size === 1) {
+    const [existingKey] = fragments.keys();
+    return existingKey;
+  }
+
+  return `anonymous:${fragments.size}`;
 }
 
 function shouldFallback(response: ProviderResponse, _model: ModelProfile): boolean {

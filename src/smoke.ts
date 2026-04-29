@@ -1546,6 +1546,53 @@ const fragmentedToolCallExecution = await new ProviderExecutor({
     }
   }
 );
+const anonymousFragmentedToolCallRegistry = new ProviderRegistry();
+anonymousFragmentedToolCallRegistry.register(fakeProvider({
+  id: "openai",
+  models: [inferModelProfile({ provider: "openai", model: "gpt-4.1-mini" })],
+  responses: [{
+    ok: true,
+    content: "unused anonymous fragmented complete response",
+    model: "gpt-4.1-mini",
+    provider: "openai"
+  }],
+  streamEvents: [
+    { kind: "start", provider: "openai", model: "gpt-4.1-mini" },
+    {
+      kind: "tool-call",
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      id: "openai-image-tool-call",
+      name: "image_generate",
+      argumentsText: "{\"prompt\":\"blue lotus"
+    },
+    {
+      kind: "tool-call",
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      argumentsText: " observatory\",\"aspectRatio\":\"landscape\"}"
+    },
+    { kind: "done", provider: "openai", model: "gpt-4.1-mini", response: {
+      ok: true,
+      content: "",
+      model: "gpt-4.1-mini",
+      provider: "openai"
+    } }
+  ]
+}));
+const anonymousFragmentedToolCallExecution = await new ProviderExecutor({
+  registry: anonymousFragmentedToolCallRegistry
+}).complete(
+  {
+    messages: [{ role: "user", content: "generate image" }]
+  },
+  {
+    providerOrder: ["openai"]
+  },
+  {
+    stream: true
+  }
+);
 const streamResponse = new Response([
   "data: {\"choices\":[{\"delta\":{\"content\":\"hello \"}}]}\n\n",
   "data: {\"choices\":[{\"delta\":{\"content\":\"stream\"}}]}\n\n",
@@ -4426,6 +4473,13 @@ assert(
   "expected fragmented tool-call arguments to be joined"
 );
 assert(fragmentedToolCallEvents.length === 1, "expected one emitted provider tool-call after aggregation");
+assert(anonymousFragmentedToolCallExecution.ok, "expected anonymous fragmented OpenAI tool-call execution to succeed");
+assert(anonymousFragmentedToolCallExecution.toolCalls.length === 1, "expected anonymous OpenAI chunks to merge into one call");
+assert(anonymousFragmentedToolCallExecution.toolCalls[0]?.name === "image_generate", "expected OpenAI image tool-call name to survive argument-only chunks");
+assert(
+  anonymousFragmentedToolCallExecution.toolCalls[0]?.argumentsText === "{\"prompt\":\"blue lotus observatory\",\"aspectRatio\":\"landscape\"}",
+  "expected anonymous OpenAI image tool-call arguments to merge"
+);
 assert(
   openAIStreamEvents.some((event) => event.kind === "token" && event.text === "hello "),
   "expected OpenAI-compatible stream token event"
@@ -7995,6 +8049,10 @@ assert(providerRuntimeStreamEvents.some((event) => event.kind === "intent"), "ex
 assert(providerRuntimeStreamEvents.some((event) => event.kind === "provider-attempt"), "expected runtime provider-attempt event");
 assert(providerRuntimeStreamEvents.some((event) => event.kind === "provider-token"), "expected runtime provider-token event");
 assert(providerRuntimeStreamEvents.some((event) => event.kind === "provider-tool-call"), "expected runtime provider-tool-call event");
+assert(
+  providerRuntimeStreamEvents.every((event) => event.kind !== "provider-tool-call" || event.name !== undefined),
+  "expected emitted provider tool-call events to keep names after fragmented streaming chunks"
+);
 assert(providerRuntimeStreamEvents.some((event) => event.kind === "provider-result"), "expected runtime provider-result event");
 assert(
   providerRuntimeStreamEvents.some((event) => event.kind === "tool-result" && event.chars !== undefined && event.sentChars !== undefined),

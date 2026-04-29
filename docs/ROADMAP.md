@@ -365,6 +365,7 @@ State: Hermes-aligned first foundation exists.
 - missing image credentials return structured `setup_needed` metadata with provider options, required secret env, suggested command/tool, and `resumeIntent: image.generate` `smoke-tested`
 - image setup now uses the shared capability secret-storage primitive, ready to generalize to voice/search/browser credentials `smoke-tested`
 - CLI runtime intercepts image `setup_needed`, captures the API key with masked input outside the provider loop, stores it in `.estacoda/.env`, verifies setup, and resumes the original `image.generate` call `smoke-tested`
+- OpenAI-style fragmented streaming tool calls preserve their function name across argument-only chunks, so provider-safe `image_generate` maps back to `image.generate` instead of `unknown` `smoke-tested`
 
 What remains:
 
