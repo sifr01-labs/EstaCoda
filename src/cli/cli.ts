@@ -902,7 +902,8 @@ async function image(options: CliOptions, args: string[]): Promise<CliCommandRes
   if (subcommand === "verify") {
     const config = await loadRuntimeConfig(options);
     const verification = await verifyImageGeneration({
-      config,
+      imageGen: config.imageGen,
+      telegramReady: config.channels.telegram.ready,
       homeDir: options.homeDir,
       workspaceRoot: options.workspaceRoot,
       fetch: options.imageGenerationFetch,

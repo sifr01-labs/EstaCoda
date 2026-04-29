@@ -364,12 +364,12 @@ State: Hermes-aligned first foundation exists.
 - `estacoda image verify` checks provider config, key-env presence, cache path, Telegram delivery readiness, and a safe provider capability probe `smoke-tested`
 - missing image credentials return structured `setup_needed` metadata with provider options, required secret env, suggested command/tool, and `resumeIntent: image.generate` `smoke-tested`
 - image setup now uses the shared capability secret-storage primitive, ready to generalize to voice/search/browser credentials `smoke-tested`
+- CLI runtime intercepts image `setup_needed`, captures the API key with masked input outside the provider loop, stores it in `.estacoda/.env`, verifies setup, and resumes the original `image.generate` call `smoke-tested`
 
 What remains:
 
-- protected credential capture so a pasted key bypasses model context
-- automatic retry/resume of the original image request after setup verification succeeds
 - live provider proof with real FAL and BytePlus credentials
+- Telegram/channel protected credential capture and resume UX
 - richer model picker UX similar to Hermes' `hermes tools`
 - Nous gateway/proxy path
 - FAL Clarity upscaler policy

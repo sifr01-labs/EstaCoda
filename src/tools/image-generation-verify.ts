@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
+import type { ImageGenerationProvider, LoadedRuntimeConfig } from "../config/runtime-config.js";
 import type { ImageGenerationFetchLike } from "./image-generation-tools.js";
 
 export type ImageGenerationVerification = {
@@ -15,20 +15,21 @@ export type ImageGenerationVerification = {
 };
 
 export async function verifyImageGeneration(options: {
-  config: LoadedRuntimeConfig;
+  imageGen: LoadedRuntimeConfig["imageGen"];
+  telegramReady?: boolean;
   homeDir?: string;
   workspaceRoot: string;
   fetch?: ImageGenerationFetchLike;
   checkProvider?: boolean;
 }): Promise<ImageGenerationVerification> {
-  const provider = options.config.imageGen.provider;
-  const model = options.config.imageGen.model;
+  const provider = options.imageGen.provider;
+  const model = options.imageGen.model;
   const apiKeyEnv = provider === "byteplus"
-    ? options.config.imageGen.byteplus?.apiKeyEnv ?? "BYTEPLUS_ARK_API_KEY"
-    : options.config.imageGen.fal?.apiKeyEnv ?? "FAL_KEY";
+    ? options.imageGen.byteplus?.apiKeyEnv ?? "BYTEPLUS_ARK_API_KEY"
+    : options.imageGen.fal?.apiKeyEnv ?? "FAL_KEY";
   const apiKeyPresent = (process.env[apiKeyEnv] ?? "").length > 0;
   const cachePath = join(options.homeDir ?? process.env.HOME ?? options.workspaceRoot, ".estacoda", "image-cache");
-  const telegramDelivery = options.config.channels.telegram.ready ? "ready" : "not-configured";
+  const telegramDelivery = options.telegramReady === true ? "ready" : "not-configured";
 
   if (!apiKeyPresent) {
     return {
@@ -60,8 +61,8 @@ export async function verifyImageGeneration(options: {
 
   const fetcher = options.fetch ?? globalImageVerifyFetch;
   const result = await (provider === "byteplus"
-    ? verifyBytePlus(options.config, fetcher)
-    : verifyFal(options.config, fetcher));
+    ? verifyBytePlus(options.imageGen, fetcher)
+    : verifyFal(options.imageGen, fetcher));
   return {
     ok: result.ok,
     provider,
@@ -75,11 +76,11 @@ export async function verifyImageGeneration(options: {
   };
 }
 
-async function verifyFal(config: LoadedRuntimeConfig, fetcher: ImageGenerationFetchLike): Promise<{ ok: boolean; message: string }> {
-  const apiKeyEnv = config.imageGen.fal?.apiKeyEnv ?? "FAL_KEY";
+async function verifyFal(imageGen: LoadedRuntimeConfig["imageGen"], fetcher: ImageGenerationFetchLike): Promise<{ ok: boolean; message: string }> {
+  const apiKeyEnv = imageGen.fal?.apiKeyEnv ?? "FAL_KEY";
   const apiKey = process.env[apiKeyEnv] ?? "";
-  const baseUrl = (config.imageGen.fal?.baseUrl ?? config.imageGen.baseUrl ?? "https://fal.run").replace(/\/$/, "");
-  const response = await fetcher(`${baseUrl}/${config.imageGen.model}`, {
+  const baseUrl = (imageGen.fal?.baseUrl ?? imageGen.baseUrl ?? "https://fal.run").replace(/\/$/, "");
+  const response = await fetcher(`${baseUrl}/${imageGen.model}`, {
     method: "GET",
     headers: {
       authorization: `Key ${apiKey}`
@@ -89,10 +90,10 @@ async function verifyFal(config: LoadedRuntimeConfig, fetcher: ImageGenerationFe
   return interpretSafeProviderProbe(response);
 }
 
-async function verifyBytePlus(config: LoadedRuntimeConfig, fetcher: ImageGenerationFetchLike): Promise<{ ok: boolean; message: string }> {
-  const apiKeyEnv = config.imageGen.byteplus?.apiKeyEnv ?? "BYTEPLUS_ARK_API_KEY";
+async function verifyBytePlus(imageGen: LoadedRuntimeConfig["imageGen"], fetcher: ImageGenerationFetchLike): Promise<{ ok: boolean; message: string }> {
+  const apiKeyEnv = imageGen.byteplus?.apiKeyEnv ?? "BYTEPLUS_ARK_API_KEY";
   const apiKey = process.env[apiKeyEnv] ?? "";
-  const baseUrl = (config.imageGen.byteplus?.baseUrl ?? config.imageGen.baseUrl ?? "https://ark.ap-southeast.bytepluses.com/api/v3").replace(/\/$/, "");
+  const baseUrl = (imageGen.byteplus?.baseUrl ?? imageGen.baseUrl ?? "https://ark.ap-southeast.bytepluses.com/api/v3").replace(/\/$/, "");
   const response = await fetcher(`${baseUrl}/models`, {
     method: "GET",
     headers: {
@@ -101,6 +102,25 @@ async function verifyBytePlus(config: LoadedRuntimeConfig, fetcher: ImageGenerat
   });
 
   return interpretSafeProviderProbe(response);
+}
+
+export function defaultImageGenerationConfig(input?: {
+  provider?: ImageGenerationProvider;
+  model?: string;
+  apiKeyEnv?: string;
+}): LoadedRuntimeConfig["imageGen"] {
+  const provider = input?.provider ?? "fal";
+  const model = input?.model ?? (provider === "byteplus" ? "seedream-4-0-250828" : "fal-ai/flux-2/klein/9b");
+  const apiKeyEnv = input?.apiKeyEnv ?? (provider === "byteplus" ? "BYTEPLUS_ARK_API_KEY" : "FAL_KEY");
+  return {
+    provider,
+    model,
+    useGateway: false,
+    [provider]: {
+      model,
+      apiKeyEnv
+    }
+  };
 }
 
 function interpretSafeProviderProbe(response: Awaited<ReturnType<ImageGenerationFetchLike>>): { ok: boolean; message: string } {

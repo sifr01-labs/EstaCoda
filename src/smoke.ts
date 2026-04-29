@@ -6649,6 +6649,152 @@ await runSessionLoop({
 });
 const renderedSessionLoop = sessionLoopOutput.join("");
 
+const imageSetupLoopHome = await mkdtemp(join(tmpdir(), "estacoda-v2-image-setup-loop-home-"));
+const imageSetupLoopOutput: string[] = [];
+const imageSetupPromptSecrets: boolean[] = [];
+let imageSetupPromptIndex = 0;
+let imageSetupConfigInput: Record<string, unknown> | undefined;
+let imageSetupVerifiedBeforeResume = false;
+let imageSetupResumed = false;
+delete process.env.FAL_RUNTIME_SETUP_KEY;
+const imageSetupTool = {
+  name: "image.generate",
+  description: "Generate an image",
+  inputSchema: {},
+  riskClass: "external-side-effect" as const,
+  toolsets: ["media" as const],
+  progressLabel: "generating image",
+  maxResultSizeChars: 4000
+};
+const imageSetupLoopRuntime: Runtime = {
+  describe: () => "image setup runtime",
+  tools: () => [imageSetupTool],
+  skills: () => [],
+  latestResumeNote: async () => undefined,
+  inspectMemoryPromotions: async () => [],
+  inspectMcpServers: () => [],
+  sessionDb,
+  sessionId: "image-setup-loop",
+  handle: async () => ({
+    label: "EstaCoda",
+    text: "Image generation is not configured yet.",
+    matchedSkills: [],
+    intent: {
+      labels: ["media-generation"],
+      confidence: 0.95,
+      suggestedToolsets: ["media"],
+      suggestedSkills: [],
+      confirmationRequired: false,
+      rationale: "image request"
+    },
+    securityDecision: "allow",
+    toolExecutions: [{
+      tool: imageSetupTool,
+      input: {
+        prompt: "A blue lotus over a desert observatory.",
+        aspectRatio: "landscape"
+      },
+      decision: "allow",
+      riskClass: "external-side-effect",
+      result: {
+        ok: false,
+        content: "Image generation is not configured yet.",
+        metadata: {
+          kind: "setup_needed",
+          capability: "image_generation",
+          providerOptions: ["fal", "byteplus"],
+          requiredSecret: "FAL_RUNTIME_SETUP_KEY",
+          resumeIntent: "image.generate",
+          suggestedCommand: "estacoda image setup --provider fal --api-key-env FAL_RUNTIME_SETUP_KEY",
+          suggestedTool: "config.image.setup",
+          provider: "fal",
+          model: "fal-ai/flux-2/klein/9b"
+        }
+      }
+    }],
+    toolPlans: [],
+    skillOutcomes: [],
+    artifacts: [],
+    context: undefined,
+    projectContext: undefined,
+    progress: []
+  }),
+  executeTool: async ({ tool, toolInput }) => {
+    if (tool === "config.image.setup") {
+      imageSetupConfigInput = toolInput;
+      return {
+        tool: {
+          name: "config.image.setup",
+          description: "Configure image generation",
+          inputSchema: {},
+          riskClass: "shared-state-mutation",
+          toolsets: ["core"],
+          progressLabel: "configuring image generation",
+          maxResultSizeChars: 4000
+        },
+        input: toolInput,
+        decision: "allow",
+        riskClass: "shared-state-mutation",
+        result: {
+          ok: true,
+          content: "Configured EstaCoda image generation."
+        }
+      };
+    }
+
+    imageSetupResumed = tool === "image.generate";
+    return {
+      tool: imageSetupTool,
+      input: toolInput,
+      decision: "allow",
+      riskClass: "external-side-effect",
+      result: {
+        ok: true,
+        content: "Generated image: /tmp/estacoda-image.png"
+      }
+    };
+  },
+  verifyImageGeneration: async () => {
+    imageSetupVerifiedBeforeResume = imageSetupResumed === false;
+    return {
+      ok: process.env.FAL_RUNTIME_SETUP_KEY === "TEST_RUNTIME_IMAGE_SECRET",
+      provider: "fal",
+      model: "fal-ai/flux-2/klein/9b",
+      apiKeyEnv: "FAL_RUNTIME_SETUP_KEY",
+      apiKeyPresent: process.env.FAL_RUNTIME_SETUP_KEY === "TEST_RUNTIME_IMAGE_SECRET",
+      check: "request",
+      message: "Provider capability check passed.",
+      cachePath: join(imageSetupLoopHome, ".estacoda", "image-cache"),
+      telegramDelivery: "not-configured"
+    };
+  },
+  trustWorkspace: async () => {},
+  isWorkspaceTrusted: async () => true,
+  revokeWorkspaceTrust: async () => true,
+  dispose: async () => {}
+};
+await runSessionLoop({
+  runtime: imageSetupLoopRuntime,
+  homeDir: imageSetupLoopHome,
+  output: {
+    write(chunk: string | Uint8Array): boolean {
+      imageSetupLoopOutput.push(String(chunk));
+      return true;
+    }
+  } as NodeJS.WritableStream,
+  prompt: Object.assign(
+    async (_question: string, options?: { secret?: boolean }) => {
+      imageSetupPromptSecrets.push(options?.secret === true);
+      const value = ["Create a cinematic blue lotus image.", "TEST_RUNTIME_IMAGE_SECRET", "/exit"][imageSetupPromptIndex++] ?? "/exit";
+      return value;
+    },
+    { close: () => {} }
+  ),
+  close: () => {}
+});
+const renderedImageSetupLoop = imageSetupLoopOutput.join("");
+const imageSetupLoopEnv = await readFile(join(imageSetupLoopHome, ".estacoda", ".env"), "utf8");
+
 const resetSkillWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-reset-session-"));
 const resetSkillProjectRoot = join(resetSkillWorkspace, ".estacoda", "skills", "reset-proof-skill");
 const resetTrustStorePath = join(await mkdtemp(join(tmpdir(), "estacoda-v2-reset-session-trust-")), "trust.json");
@@ -7184,6 +7330,15 @@ assert(
   "expected session tool icon rendering"
 );
 assert(renderedSessionLoop.includes("Ending EstaCoda session."), "expected session loop exit rendering");
+assert(imageSetupPromptSecrets.includes(true), "expected image setup loop to request masked secret input");
+assert(imageSetupLoopEnv.includes("FAL_RUNTIME_SETUP_KEY=\"TEST_RUNTIME_IMAGE_SECRET\""), "expected protected image setup to store secret in local env");
+assert(!renderedImageSetupLoop.includes("TEST_RUNTIME_IMAGE_SECRET"), "expected protected image secret to stay out of CLI output");
+assert(imageSetupConfigInput?.apiKey === undefined, "expected image config setup retry not to pass raw API key through tool input");
+assert(imageSetupConfigInput?.apiKeyEnv === "FAL_RUNTIME_SETUP_KEY", "expected image setup to configure the env reference");
+assert(imageSetupVerifiedBeforeResume, "expected image setup to verify before resuming image generation");
+assert(imageSetupResumed, "expected image setup to resume original image.generate call");
+assert(renderedImageSetupLoop.includes("Image setup verified. Resuming the original image request"), "expected image setup resume message");
+assert(renderedImageSetupLoop.includes("Generated image:"), "expected resumed image generation output");
 const slashResponse = await runtime.handle({
   text: "/youtube-knowledge-base https://youtu.be/example",
   channel: "cli",

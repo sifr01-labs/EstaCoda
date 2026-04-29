@@ -261,6 +261,7 @@ At a high level:
 - FAL-compatible `image.generate` execution with mocked image URL, aspect-ratio mapping, image-cache write, and artifact recording
 - BytePlus/ModelArk Seedream `image.generate` execution with mocked image URL, seed support, image-cache write, and artifact recording
 - missing image-generation credentials returning structured `setup_needed` metadata before any provider request
+- CLI runtime-owned image setup flow with masked credential prompt, local secret storage, no secret leakage to output, verification before retry, and automatic resume of the original `image.generate` call
 - image prompt intent routing to native media generation without mandatory skill selection
 - image status/setup/verify CLI config persistence, local secret-store write for pasted API keys, missing-key verification failure, and ready-state provider capability probe
 - agent-facing image config status/setup tools

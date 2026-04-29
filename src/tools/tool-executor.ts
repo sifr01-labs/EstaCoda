@@ -26,6 +26,7 @@ export type NamedToolExecutionRequest = {
 
 export type ToolExecutionRecord = {
   tool: ToolDefinition;
+  input?: Record<string, unknown>;
   decision: SecurityDecision;
   riskClass: ToolRiskClass;
   targetKey?: string;
@@ -131,6 +132,7 @@ export class ToolExecutor {
 
       return {
         tool: toDefinition(tool),
+        input: request.input,
         decision,
         riskClass,
         targetKey,
@@ -181,6 +183,7 @@ export class ToolExecutor {
 
     return {
       tool: toDefinition(tool),
+      input: request.input,
       decision,
       riskClass,
       targetKey,

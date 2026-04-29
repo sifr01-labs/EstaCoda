@@ -1,12 +1,14 @@
-import { createInterface, type Interface } from "node:readline/promises";
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
 import type { Runtime } from "../runtime/create-runtime.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { SecurityAssessment } from "../contracts/security.js";
 import type { SessionEvent } from "../contracts/session.js";
+import type { ToolResult } from "../contracts/tool.js";
 import { runCronCommand } from "../cron/cron-command.js";
 import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
 import { CronStore } from "../cron/cron-store.js";
+import { storeCapabilitySecret, type SetupNeededMetadata } from "../capabilities/capability-setup.js";
+import { createReadlinePrompt, type Prompt } from "../onboarding/interactive-onboarding.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { renderSlashMenu, renderToolsMenu, SESSION_COMMANDS } from "./slash-menu.js";
 import { ToolActivityRenderer, toolIcon } from "./tool-activity-renderer.js";
@@ -17,9 +19,10 @@ export type SessionLoopOptions = {
   switchRuntime?: (sessionId: string) => Promise<Runtime>;
   input?: NodeJS.ReadableStream;
   output?: NodeJS.WritableStream;
-  prompt?: (question: string) => Promise<string>;
+  prompt?: Prompt;
   close?: () => void;
   workspaceRoot?: string;
+  homeDir?: string;
 };
 
 export async function runSessionLoop(options: SessionLoopOptions): Promise<void> {
@@ -28,17 +31,9 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   let activityRenderer = new ToolActivityRenderer({
     tools: runtime.tools()
   });
-  let readline: Interface | undefined;
   let activeTurn: AbortController | undefined;
-  const prompt = options.prompt ?? (() => {
-    readline = createInterface({
-      input: options.input ?? defaultInput,
-      output
-    });
-
-    return (question: string) => readline!.question(question);
-  })();
-  const close = options.close ?? (() => readline?.close());
+  const prompt = options.prompt ?? createReadlinePrompt(options.input as NodeJS.ReadStream | undefined ?? defaultInput, output as NodeJS.WriteStream);
+  const close = options.close ?? (() => prompt.close?.());
   const onSigint = () => {
     if (activeTurn !== undefined) {
       activeTurn.abort("SIGINT");
@@ -113,6 +108,20 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 
         if (response.progress.length > 0) {
           output.write(`progress: ${response.progress.join(" -> ")}\n`);
+        }
+
+        const setupResolution = await maybeHandleSetupNeeded({
+          runtime,
+          prompt,
+          output,
+          homeDir: options.homeDir,
+          execution: response.toolExecutions.find(hasSetupNeededResult)
+        });
+
+        if (setupResolution.handled) {
+          output.write(`${setupResolution.message}\n\n`);
+          retryText = undefined;
+          continue;
         }
 
         const approvalResolution = await maybeHandleApprovalGate({
@@ -476,6 +485,139 @@ async function maybeHandleApprovalGate(input: {
         : `Approval granted (${scope}). Retrying now.`
     };
   }
+}
+
+async function maybeHandleSetupNeeded(input: {
+  runtime: Runtime;
+  prompt: Prompt;
+  output: NodeJS.WritableStream;
+  homeDir?: string;
+  execution: ToolExecutionRecord | undefined;
+}): Promise<{
+  handled: boolean;
+  message: string;
+}> {
+  const execution = input.execution;
+  const setup = setupNeededMetadata(execution?.result);
+  if (execution === undefined || setup === undefined) {
+    return {
+      handled: false,
+      message: ""
+    };
+  }
+
+  if (setup.capability !== "image_generation" || execution.tool.name !== "image.generate") {
+    return {
+      handled: true,
+      message: `Setup is required for ${setup.capability}. This CLI session cannot complete that setup flow yet.`
+    };
+  }
+
+  const provider = setup.provider === "byteplus" ? "byteplus" : "fal";
+  const model = typeof setup.model === "string" && setup.model.length > 0
+    ? setup.model
+    : provider === "byteplus" ? "seedream-4-0-250828" : "fal-ai/flux-2/klein/9b";
+  const requiredSecret = setup.requiredSecret;
+  input.output.write([
+    "",
+    "Image generation needs one protected credential before I can continue.",
+    `Provider: ${provider}`,
+    `Model: ${model}`,
+    `Secret env: ${requiredSecret}`,
+    "The key is captured by the CLI and is not sent to the model or written to the transcript.",
+    ""
+  ].join("\n"));
+
+  const secret = await input.prompt(`Paste ${requiredSecret} (or type cancel): `, { secret: true });
+  if (secret.trim().length === 0 || ["cancel", "c", "no", "n"].includes(secret.trim().toLowerCase())) {
+    return {
+      handled: true,
+      message: "Image setup cancelled. The original image request was not retried."
+    };
+  }
+
+  const stored = await storeCapabilitySecret({
+    homeDir: input.homeDir,
+    envName: requiredSecret,
+    secret
+  });
+  const setupExecution = await input.runtime.executeTool?.({
+    tool: "config.image.setup",
+    toolInput: {
+      provider,
+      model,
+      apiKeyEnv: stored.envName
+    }
+  });
+  if (setupExecution?.result?.ok !== true) {
+    return {
+      handled: true,
+      message: [
+        "Image setup could not be saved.",
+        setupExecution?.result?.content ?? "No setup result was returned.",
+        "The original image request was not retried."
+      ].join("\n")
+    };
+  }
+
+  const verification = await input.runtime.verifyImageGeneration?.();
+  if (verification?.ok !== true) {
+    return {
+      handled: true,
+      message: [
+        "Image setup was saved, but verification did not pass.",
+        verification?.message ?? "Image verification is unavailable in this runtime.",
+        "The original image request was not retried."
+      ].join("\n")
+    };
+  }
+
+  input.output.write("Image setup verified. Resuming the original image request...\n");
+  await renderManualToolExecution(input.output, input.runtime, {
+    tool: execution.tool.name,
+    toolInput: execution.input ?? {}
+  });
+
+  return {
+    handled: true,
+    message: "Image generation resumed after setup."
+  };
+}
+
+async function renderManualToolExecution(
+  output: NodeJS.WritableStream,
+  runtime: Runtime,
+  input: {
+    tool: string;
+    toolInput: Record<string, unknown>;
+  }
+): Promise<void> {
+  output.write(`${toolIcon(input.tool)} calling ${input.tool}\n`);
+  const execution = await runtime.executeTool?.(input);
+  if (execution === undefined) {
+    output.write(`${toolIcon(input.tool)} ${input.tool} unavailable\n`);
+    return;
+  }
+
+  output.write(`${toolIcon(input.tool)} ${input.tool} ${execution.result?.ok === true ? "done" : "failed"}\n`);
+  if (execution.result?.content !== undefined && execution.result.content.length > 0) {
+    output.write(`${execution.result.content}\n`);
+  }
+}
+
+function hasSetupNeededResult(execution: ToolExecutionRecord): boolean {
+  return setupNeededMetadata(execution.result) !== undefined;
+}
+
+function setupNeededMetadata(result: ToolResult | undefined): SetupNeededMetadata | undefined {
+  const metadata = result?.metadata;
+  if (metadata?.kind !== "setup_needed") {
+    return undefined;
+  }
+  if (typeof metadata.capability !== "string" || typeof metadata.requiredSecret !== "string") {
+    return undefined;
+  }
+  return metadata as SetupNeededMetadata;
 }
 
 function renderApprovalPrompt(execution: ToolExecutionRecord): string {

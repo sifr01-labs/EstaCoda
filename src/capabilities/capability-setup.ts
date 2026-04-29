@@ -33,6 +33,7 @@ export async function storeCapabilitySecret(options: {
     key: options.envName,
     value: options.secret
   });
+  process.env[result.key] = options.secret;
 
   return {
     envName: result.key,

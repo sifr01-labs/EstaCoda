@@ -49,6 +49,7 @@ import { createExecuteCodeTool } from "../tools/execute-code-tool.js";
 import { createPythonTools } from "../tools/python-tools.js";
 import { createMediaTools } from "../tools/media-tools.js";
 import { createImageGenerationTools, type ImageGenerationFetchLike } from "../tools/image-generation-tools.js";
+import { defaultImageGenerationConfig, verifyImageGeneration, type ImageGenerationVerification } from "../tools/image-generation-verify.js";
 import { createVoiceTools, type VoiceFetchLike } from "../tools/voice-tools.js";
 import { analyzeImageWithVision, createVisionTools } from "../tools/vision-tools.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
@@ -135,6 +136,9 @@ export type Runtime = {
     toolInput: Record<string, unknown>;
     signal?: AbortSignal;
   }): Promise<import("../tools/tool-executor.js").ToolExecutionRecord | undefined>;
+  verifyImageGeneration?(options?: {
+    checkProvider?: boolean;
+  }): Promise<ImageGenerationVerification>;
   grantApproval?(input: {
     toolName: string;
     riskClass: import("../contracts/tool.js").ToolRiskClass;
@@ -575,6 +579,16 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         trustedWorkspace,
         sessionId,
         signal: input.signal
+      });
+    },
+    async verifyImageGeneration(input = {}) {
+      return await verifyImageGeneration({
+        imageGen: options.imageGen ?? defaultImageGenerationConfig(),
+        telegramReady: options.telegramReady,
+        homeDir: options.homeDir,
+        workspaceRoot,
+        fetch: options.imageGenerationFetch,
+        checkProvider: input.checkProvider
       });
     },
     async grantApproval(input) {
