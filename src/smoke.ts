@@ -514,6 +514,59 @@ const mergedConfig = mergeConfig(
   { model: { provider: "deepseek", id: "deepseek-chat" } },
   { model: { provider: "kimi", id: "kimi-k2.5" } }
 );
+const deepMergedConfig = mergeConfig(
+  {
+    providers: {
+      openai: {
+        apiKeyEnv: "OPENAI_API_KEY",
+        models: ["gpt-4.1-mini"],
+        enableNetwork: true
+      }
+    },
+    credentialPools: {
+      openai: {
+        strategy: "fill_first",
+        entries: [{ id: "primary", source: { kind: "env", name: "OPENAI_API_KEY" }, priority: 1 }]
+      }
+    },
+    auxiliaryProviders: {
+      delegation: {
+        providerOrder: ["openai"],
+        requireTools: true
+      }
+    },
+    mcpServers: {
+      filesystem: {
+        command: "npx",
+        args: ["-y", "@modelcontextprotocol/server-filesystem"],
+        tools: { include: ["read_file"], resources: true }
+      }
+    }
+  },
+  {
+    providers: {
+      openai: {
+        baseUrl: "https://custom.example/v1"
+      }
+    },
+    credentialPools: {
+      openai: {
+        strategy: "round_robin"
+      }
+    },
+    auxiliaryProviders: {
+      delegation: {
+        providerOrder: ["kimi"]
+      }
+    },
+    mcpServers: {
+      filesystem: {
+        timeoutMs: 30_000,
+        tools: { prompts: true }
+      }
+    }
+  }
+);
 const loadedRuntimeConfig = await loadRuntimeConfig({
   workspaceRoot: configWorkspace,
   homeDir: configHome
@@ -2751,6 +2804,17 @@ assert(renderedActivityResult.includes("1.5s"), "expected tool activity duration
 assert(renderedActivityResult.includes("4.2k captured / 900 sent / compressed"), "expected tool activity compression summary");
 assert(renderedGatedActivity.includes("credential or secret access"), "expected gated tool activity risk copy");
 assert(mergedConfig.model?.provider === "kimi", "expected config merge to prefer later model");
+assert(deepMergedConfig.providers?.openai?.apiKeyEnv === "OPENAI_API_KEY", "expected provider api key env to survive partial project override");
+assert(deepMergedConfig.providers?.openai?.baseUrl === "https://custom.example/v1", "expected provider base URL override");
+assert(deepMergedConfig.providers?.openai?.models?.[0] === "gpt-4.1-mini", "expected provider models to survive partial override");
+assert(deepMergedConfig.credentialPools?.openai?.strategy === "round_robin", "expected credential pool strategy override");
+assert(deepMergedConfig.credentialPools?.openai?.entries?.[0]?.id === "primary", "expected credential pool entries to survive partial override");
+assert(deepMergedConfig.auxiliaryProviders?.delegation?.requireTools === true, "expected auxiliary provider fields to survive partial override");
+assert(deepMergedConfig.auxiliaryProviders?.delegation?.providerOrder?.[0] === "kimi", "expected auxiliary provider route override");
+assert(deepMergedConfig.mcpServers?.filesystem?.command === "npx", "expected MCP command to survive partial server override");
+assert(deepMergedConfig.mcpServers?.filesystem?.timeoutMs === 30_000, "expected MCP timeout override");
+assert(deepMergedConfig.mcpServers?.filesystem?.tools?.include?.[0] === "read_file", "expected MCP nested tools include to survive partial override");
+assert(deepMergedConfig.mcpServers?.filesystem?.tools?.prompts === true, "expected MCP nested tools prompt override");
 assert(loadedRuntimeConfig.sources.length === 2, "expected user and project config sources");
 assert(loadedRuntimeConfig.model.provider === "kimi", "expected project config model override");
 assert((await loadedRuntimeConfig.providerRegistry.listModels()).length === 2, "expected configured provider models");
@@ -4490,9 +4554,9 @@ assert(cliBrowserStatus.output.includes("CDP URL: http://127.0.0.1:9333"), "expe
 assert(cliBrowserTest.output.includes("EstaCoda browser test"), "expected CLI browser test output");
 assert(cliBrowserTest.output.includes("Status: configured"), "expected CLI browser test configured status");
 assert(cliTelegramConfigure.output.includes("Telegram channel configured"), "expected CLI Telegram configure output");
-assert(cliTelegramConfigure.output.includes("Shell export:"), "expected CLI Telegram shell export output");
-assert(cliTelegramStatusMissing.exitCode === 1, "expected Telegram status to fail with missing token");
-assert(cliTelegramStatusMissing.output.includes("Missing: ESTACODA_TELEGRAM_BOT_TOKEN"), "expected Telegram missing token output");
+assert(cliTelegramConfigure.output.includes("Secret store:"), "expected CLI Telegram configure to store pasted token");
+assert(cliTelegramStatusMissing.exitCode === 0, "expected Telegram status to use stored token from configure");
+assert(cliTelegramStatusMissing.output.includes("Status: ready"), "expected Telegram status to be ready after stored token configure");
 assert(cliTelegramStatusReady.exitCode === 0, "expected Telegram status to pass with token");
 assert(cliTelegramStatusReady.output.includes("Status: ready"), "expected Telegram ready status output");
 assert(cliTelegramSetup.output.includes("Telegram setup complete."), "expected Telegram guided setup output");
@@ -4770,7 +4834,7 @@ assert(
   "expected fresh onboarding status"
 );
 assert(onboardingComplete?.result?.ok === true, "expected onboarding completion to succeed");
-assert(onboardingComplete.result.content.includes("Shell export:"), "expected onboarding shell export guidance");
+assert(onboardingComplete.result.content.includes("Secret store:"), "expected onboarding provider setup to store pasted secret");
 assert(pythonProbe.ok, "expected python worker probe to succeed");
 assert(pythonProbe.content.includes("Python worker bridge is ready"), "expected python worker content");
 assert(documentProbe.ok, "expected document probe to succeed");
@@ -9652,16 +9716,21 @@ assert(
 
 const configuredProviderWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-configured-provider-workspace-"));
 const configuredProviderHome = await mkdtemp(join(tmpdir(), "estacoda-v2-configured-provider-home-"));
-await setupProviderConfig({
+const configuredProviderSetup = await setupProviderConfig({
   workspaceRoot: configuredProviderWorkspace,
   homeDir: configuredProviderHome,
   input: {
     provider: "deepseek",
     model: "deepseek-chat",
     apiKeyEnv: "DEEPSEEK_API_KEY",
+    apiKey: "configured-smoke-key",
     enableNetwork: true
   }
 });
+const configuredProviderEnv = await readFile(join(configuredProviderHome, ".estacoda", ".env"), "utf8");
+assert(configuredProviderSetup.secretPath?.endsWith(".env") === true, "expected provider setup to store pasted secret");
+assert(configuredProviderEnv.includes("DEEPSEEK_API_KEY="), "expected provider setup to write env secret");
+assert(!JSON.stringify(configuredProviderSetup.config).includes("configured-smoke-key"), "expected provider config not to persist raw secret");
 const previousDeepseekApiKey = process.env.DEEPSEEK_API_KEY;
 process.env.DEEPSEEK_API_KEY = "configured-smoke-key";
 let configuredProviderUrl: string | undefined;

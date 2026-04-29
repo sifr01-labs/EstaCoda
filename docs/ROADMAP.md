@@ -121,6 +121,7 @@ Done:
 - advanced flag setup via `estacoda setup --advanced ...` `smoke-tested`
 - first-launch prompt asks `Run setup now? [Y/n]` instead of silently entering setup `implemented`
 - local secret store at `~/.estacoda/.env` with `0600` permissions and config env-var references `smoke-tested`
+- user/project config overlays deep-merge provider, credential-pool, auxiliary-provider, and MCP server entries so project overrides do not erase user credentials/models `smoke-tested`
 - setup prompts for workspace trust, provider/model, credential storage, security mode, and skill autonomy `smoke-tested`
 - `estacoda verify` readiness check `smoke-tested`
 - `estacoda settings` category overview and skill-autonomy mutation `smoke-tested`

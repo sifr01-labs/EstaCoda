@@ -281,7 +281,21 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           toolPrefix: { anyOf: [{ type: "string" }, { type: "boolean" }] },
           timeoutMs: { type: "number" },
           connectTimeoutMs: { type: "number" },
+          env: { type: "object", additionalProperties: { type: "string" } },
+          headers: { type: "object", additionalProperties: { type: "string" } },
           trust: { type: "string", enum: ["conservative", "read-only-network", "read-only-local"] },
+          toolRiskClass: {
+            type: "string",
+            enum: ["read-only-local", "read-only-network", "workspace-write", "external-side-effect", "credential-access", "destructive-local", "shared-state-mutation", "spend-money", "sandbox-escape"]
+          },
+          resourceReadRiskClass: {
+            type: "string",
+            enum: ["read-only-local", "read-only-network", "workspace-write", "external-side-effect", "credential-access", "destructive-local", "shared-state-mutation", "spend-money", "sandbox-escape"]
+          },
+          promptGetRiskClass: {
+            type: "string",
+            enum: ["read-only-local", "read-only-network", "workspace-write", "external-side-effect", "credential-access", "destructive-local", "shared-state-mutation", "spend-money", "sandbox-escape"]
+          },
           enabled: { type: "boolean" },
           scope: { type: "string", enum: ["user", "project"] }
         },
@@ -348,17 +362,16 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
             `Telegram channel ${input.enabled === false ? "disabled" : "configured"}.`,
             `Wrote ${result.path}.`,
             `Bot token env: ${result.config.channels?.telegram?.botTokenEnv ?? "not set"}`,
+            result.secretPath === undefined ? undefined : `Secret store: ${result.secretPath}`,
             result.config.channels?.telegram?.defaultChatId === undefined
               ? undefined
               : `Default chat: ${result.config.channels.telegram.defaultChatId}`,
-            result.envExport === undefined
-              ? "API key source: environment variable."
-              : `Add this to your shell config:\n${result.envExport}`
+            result.secretPath === undefined ? "API key source: environment variable." : undefined
           ].filter((line) => line !== undefined).join("\n"),
           metadata: {
             path: result.path,
             telegram: result.config.channels?.telegram,
-            envExport: result.envExport
+            secretPath: result.secretPath
           }
         };
       }
@@ -466,9 +479,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           content: [
             `Configured ${input.provider}/${input.model}.`,
             `Wrote ${result.path}.`,
-            result.envExport === undefined
-              ? "API key source: environment variable."
-              : `Add this to your shell config:\n${result.envExport}`,
+            result.secretPath === undefined ? "API key source: environment variable." : `Secret store: ${result.secretPath}`,
             "",
             renderProviderDiagnostic(diagnostic)
           ].filter((line) => line !== undefined).join("\n"),
@@ -476,7 +487,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
             path: result.path,
             provider: input.provider,
             model: input.model,
-            envExport: result.envExport,
+            secretPath: result.secretPath,
             providerDiagnostic: diagnostic
           }
         };
@@ -530,16 +541,13 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
             `Provider: ${loaded.imageGen.provider}`,
             `Model: ${loaded.imageGen.model}`,
             `Wrote ${result.path}.`,
-            secretPath === undefined ? undefined : `Secret store: ${secretPath}`,
-            result.envExport === undefined
-              ? "API key source: environment variable."
-              : `Add this to your shell config:\n${result.envExport}`
+            secretPath === undefined && result.secretPath === undefined ? undefined : `Secret store: ${secretPath ?? result.secretPath}`,
+            secretPath === undefined && result.secretPath === undefined ? "API key source: environment variable." : undefined
           ].filter((line) => line !== undefined).join("\n"),
           metadata: {
             path: result.path,
             imageGen: loaded.imageGen,
-            secretPath,
-            envExport: result.envExport
+            secretPath: secretPath ?? result.secretPath
           }
         };
       }

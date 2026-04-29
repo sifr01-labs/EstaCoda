@@ -63,7 +63,7 @@ export async function completeOnboarding(options: OnboardingOptions & {
   input: ProviderSetupInput;
 }): Promise<OnboardingStatus & {
   configPath: string;
-  envExport?: string;
+  secretPath?: string;
 }> {
   const result = await setupProviderConfig({
     ...options,
@@ -78,7 +78,7 @@ export async function completeOnboarding(options: OnboardingOptions & {
   return {
     ...status,
     configPath: result.path,
-    envExport: result.envExport
+    secretPath: result.secretPath
   };
 }
 

@@ -10,7 +10,7 @@ import type {
   ProviderId
 } from "../contracts/provider.js";
 import { CredentialPool, CredentialPoolRegistry } from "../providers/credential-pool.js";
-import { loadDotEnvSecrets } from "./env-secret-store.js";
+import { loadDotEnvSecrets, writeEnvSecret } from "./env-secret-store.js";
 import { inferModelProfile } from "../providers/model-catalog.js";
 import { createOpenAICompatibleProvider, type FetchLike as ProviderFetchLike } from "../providers/openai-compatible-provider.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
@@ -355,10 +355,12 @@ export type VoiceSetupInput = {
   ttsVoice?: string;
   ttsModel?: string;
   ttsApiKeyEnv?: string;
+  ttsApiKey?: string;
   sttProvider?: SttProvider;
   sttModel?: string;
   sttCommand?: string;
   sttApiKeyEnv?: string;
+  sttApiKey?: string;
   scope?: "user" | "project";
 };
 
@@ -520,23 +522,14 @@ export async function loadRuntimeConfig(options: {
 }
 
 export function mergeConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
-  return configs.reduce<EstaCodaConfig>((merged, config) => ({
+  return compactConfig(configs.reduce<EstaCodaConfig>((merged, config) => ({
     model: {
       ...(merged.model ?? {}),
       ...(config.model ?? {})
     },
-    providers: {
-      ...(merged.providers ?? {}),
-      ...(config.providers ?? {})
-    },
-    credentialPools: {
-      ...(merged.credentialPools ?? {}),
-      ...(config.credentialPools ?? {})
-    },
-    auxiliaryProviders: {
-      ...(merged.auxiliaryProviders ?? {}),
-      ...(config.auxiliaryProviders ?? {})
-    },
+    providers: mergeRecordEntries(merged.providers, config.providers),
+    credentialPools: mergeRecordEntries(merged.credentialPools, config.credentialPools),
+    auxiliaryProviders: mergeRecordEntries(merged.auxiliaryProviders, config.auxiliaryProviders),
     web: {
       ...(merged.web ?? {}),
       ...(config.web ?? {})
@@ -548,12 +541,10 @@ export function mergeConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
     imageGen: mergeImageGenerationConfig(merged.imageGen ?? merged.image_gen, config.imageGen ?? config.image_gen),
     tts: mergeTtsConfig(merged.tts, config.tts),
     stt: mergeSttConfig(merged.stt, config.stt),
-    mcpServers: {
-      ...(merged.mcpServers ?? {}),
-      ...(merged.mcp_servers ?? {}),
-      ...(config.mcpServers ?? {}),
-      ...(config.mcp_servers ?? {})
-    },
+    mcpServers: mergeRecordEntries(
+      mergeRecordEntries(merged.mcpServers, merged.mcp_servers),
+      mergeRecordEntries(config.mcpServers, config.mcp_servers)
+    ),
     skills: {
       ...(merged.skills ?? {}),
       externalDirs: config.skills?.externalDirs ?? merged.skills?.externalDirs,
@@ -591,7 +582,60 @@ export function mergeConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
         ...(config.channels?.telegram ?? {})
       }
     }
-  }), {});
+  }), {}));
+}
+
+function mergeRecordEntries<T extends Record<string, unknown> | undefined>(
+  left: T,
+  right: T
+): T {
+  if (left === undefined && right === undefined) {
+    return undefined as T;
+  }
+  const merged: Record<string, unknown> = { ...(left ?? {}) };
+  for (const [key, value] of Object.entries(right ?? {})) {
+    const existing = merged[key];
+    merged[key] = isPlainRecord(existing) && isPlainRecord(value)
+      ? deepMergeRecord(existing, value)
+      : value;
+  }
+  return merged as T;
+}
+
+function deepMergeRecord(left: Record<string, unknown>, right: Record<string, unknown>): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...left };
+  for (const [key, value] of Object.entries(right)) {
+    const existing = merged[key];
+    merged[key] = isPlainRecord(existing) && isPlainRecord(value)
+      ? deepMergeRecord(existing, value)
+      : value;
+  }
+  return merged;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function compactConfig(config: EstaCodaConfig): EstaCodaConfig {
+  return (compactValue(config) ?? {}) as EstaCodaConfig;
+}
+
+function compactValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(compactValue).filter((item) => item !== undefined);
+  }
+  if (!isPlainRecord(value)) {
+    return value;
+  }
+
+  const compacted = Object.fromEntries(
+    Object.entries(value)
+      .map(([key, child]) => [key, compactValue(child)] as const)
+      .filter(([, child]) => child !== undefined && !(isPlainRecord(child) && Object.keys(child).length === 0))
+  );
+
+  return Object.keys(compacted).length === 0 ? undefined : compacted;
 }
 
 function normalizeSkillConfig(value: unknown): Record<string, Record<string, unknown>> {
@@ -721,6 +765,9 @@ function normalizeImageGenerationConfig(value: EstaCodaConfig["imageGen"]): Load
 }
 
 function mergeImageGenerationConfig(left: EstaCodaConfig["imageGen"], right: EstaCodaConfig["imageGen"]): EstaCodaConfig["imageGen"] {
+  if (left === undefined && right === undefined) {
+    return undefined;
+  }
   return {
     ...(left ?? {}),
     ...(right ?? {}),
@@ -753,7 +800,10 @@ function normalizeSttConfig(value: EstaCodaConfig["stt"]): LoadedRuntimeConfig["
   };
 }
 
-function mergeTtsConfig(left: TtsConfig | undefined, right: TtsConfig | undefined): TtsConfig {
+function mergeTtsConfig(left: TtsConfig | undefined, right: TtsConfig | undefined): TtsConfig | undefined {
+  if (left === undefined && right === undefined) {
+    return undefined;
+  }
   return {
     ...(left ?? {}),
     ...(right ?? {}),
@@ -769,7 +819,10 @@ function mergeTtsConfig(left: TtsConfig | undefined, right: TtsConfig | undefine
   };
 }
 
-function mergeSttConfig(left: SttConfig | undefined, right: SttConfig | undefined): SttConfig {
+function mergeSttConfig(left: SttConfig | undefined, right: SttConfig | undefined): SttConfig | undefined {
+  if (left === undefined && right === undefined) {
+    return undefined;
+  }
   return {
     ...(left ?? {}),
     ...(right ?? {}),
@@ -929,17 +982,25 @@ export async function setupProviderConfig(options: {
 }): Promise<{
   path: string;
   config: EstaCodaConfig;
-  envExport?: string;
+  secretPath?: string;
 }> {
+  validateProviderSetupInput(options.input);
   const targetPath = options.input.scope === "project"
     ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
     : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
   const existing = await readConfig(targetPath);
   const requiresCredential = options.input.provider !== "local" || options.input.apiKeyEnv !== undefined || options.input.apiKey !== undefined;
   const envName = requiresCredential ? options.input.apiKeyEnv ?? defaultEnvKey(options.input.provider) : undefined;
-  const envExport = options.input.apiKey === undefined
-    ? undefined
-    : `export ${envName ?? defaultEnvKey(options.input.provider)}=${shellQuote(options.input.apiKey)}`;
+  let secretPath: string | undefined;
+  if (options.input.apiKey !== undefined && options.input.apiKey.trim().length > 0 && envName !== undefined) {
+    const secret = await writeEnvSecret({
+      homeDir: options.homeDir,
+      key: envName,
+      value: options.input.apiKey
+    });
+    process.env[secret.key] = options.input.apiKey;
+    secretPath = secret.path;
+  }
   const providerConfig = {
     kind: "openai-compatible" as const,
     baseUrl: options.input.baseUrl ?? defaultBaseUrl(options.input.provider),
@@ -976,7 +1037,7 @@ export async function setupProviderConfig(options: {
   return {
     path: targetPath,
     config,
-    envExport
+    secretPath
   };
 }
 
@@ -990,6 +1051,7 @@ export async function setupWebConfig(options: {
   path: string;
   config: EstaCodaConfig;
 }> {
+  validateWebSetupInput(options.input);
   const targetPath = options.input.scope === "project"
     ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
     : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
@@ -1019,6 +1081,7 @@ export async function setupBrowserConfig(options: {
   path: string;
   config: EstaCodaConfig;
 }> {
+  validateBrowserSetupInput(options.input);
   const targetPath = options.input.scope === "project"
     ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
     : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
@@ -1049,7 +1112,9 @@ export async function setupVoiceConfig(options: {
 }): Promise<{
   path: string;
   config: EstaCodaConfig;
+  secretPaths: string[];
 }> {
+  validateVoiceSetupInput(options.input);
   const targetPath = options.input.scope === "project"
     ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
     : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
@@ -1058,6 +1123,29 @@ export async function setupVoiceConfig(options: {
   const previousStt = normalizeSttConfig(existing.config.stt);
   const ttsProvider = options.input.ttsProvider ?? previousTts.provider;
   const sttProvider = options.input.sttProvider ?? previousStt.provider;
+  const ttsApiKeyEnv = options.input.ttsApiKeyEnv ?? ttsDefaultApiKeyEnv(ttsProvider);
+  const sttApiKeyEnv = options.input.sttApiKeyEnv ?? sttDefaultApiKeyEnv(sttProvider);
+  const secretPaths: string[] = [];
+
+  if (options.input.ttsApiKey !== undefined && options.input.ttsApiKey.trim().length > 0 && ttsApiKeyEnv !== undefined) {
+    const secret = await writeEnvSecret({
+      homeDir: options.homeDir,
+      key: ttsApiKeyEnv,
+      value: options.input.ttsApiKey
+    });
+    process.env[secret.key] = options.input.ttsApiKey;
+    secretPaths.push(secret.path);
+  }
+  if (options.input.sttApiKey !== undefined && options.input.sttApiKey.trim().length > 0 && sttApiKeyEnv !== undefined) {
+    const secret = await writeEnvSecret({
+      homeDir: options.homeDir,
+      key: sttApiKeyEnv,
+      value: options.input.sttApiKey
+    });
+    process.env[secret.key] = options.input.sttApiKey;
+    secretPaths.push(secret.path);
+  }
+
   const config = mergeConfig(existing.config, {
     tts: {
       provider: ttsProvider,
@@ -1066,7 +1154,7 @@ export async function setupVoiceConfig(options: {
         model: options.input.ttsModel,
         voice: options.input.ttsVoice,
         voiceId: options.input.ttsVoice,
-        apiKeyEnv: options.input.ttsApiKeyEnv
+        apiKeyEnv: ttsApiKeyEnv
       }
     },
     stt: {
@@ -1074,7 +1162,7 @@ export async function setupVoiceConfig(options: {
       [sttProvider]: {
         model: options.input.sttModel,
         command: options.input.sttCommand,
-        apiKeyEnv: options.input.sttApiKeyEnv
+        apiKeyEnv: sttApiKeyEnv
       }
     }
   });
@@ -1083,7 +1171,8 @@ export async function setupVoiceConfig(options: {
 
   return {
     path: targetPath,
-    config
+    config,
+    secretPaths: [...new Set(secretPaths)]
   };
 }
 
@@ -1096,8 +1185,9 @@ export async function setupImageGenerationConfig(options: {
 }): Promise<{
   path: string;
   config: EstaCodaConfig;
-  envExport?: string;
+  secretPath?: string;
 }> {
+  validateImageGenerationSetupInput(options.input);
   const targetPath = options.input.scope === "project"
     ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
     : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
@@ -1106,7 +1196,16 @@ export async function setupImageGenerationConfig(options: {
   const provider = options.input.provider ?? previous.provider;
   const providerExplicit = options.input.provider !== undefined;
   const apiKeyEnv = options.input.apiKeyEnv ?? previous[provider]?.apiKeyEnv ?? defaultImageApiKeyEnv(provider);
-  const envExport = options.input.apiKey === undefined ? undefined : `export ${apiKeyEnv}=${shellQuote(options.input.apiKey)}`;
+  let secretPath: string | undefined;
+  if (options.input.apiKey !== undefined && options.input.apiKey.trim().length > 0) {
+    const secret = await writeEnvSecret({
+      homeDir: options.homeDir,
+      key: apiKeyEnv,
+      value: options.input.apiKey
+    });
+    process.env[secret.key] = options.input.apiKey;
+    secretPath = secret.path;
+  }
   const requestedModel = options.input.model ?? resolveImageModel(provider, options.input.modelVersion);
   const model = requestedModel ?? (providerExplicit ? defaultImageModel(provider) : previous[provider]?.model ?? previous.model ?? defaultImageModel(provider));
   const baseUrl = options.input.baseUrl ?? previous[provider]?.baseUrl;
@@ -1130,7 +1229,7 @@ export async function setupImageGenerationConfig(options: {
   return {
     path: targetPath,
     config,
-    envExport
+    secretPath
   };
 }
 
@@ -1144,6 +1243,7 @@ export async function setupMcpConfig(options: {
   path: string;
   config: EstaCodaConfig;
 }> {
+  validateMcpSetupInput(options.input);
   const targetPath = options.input.scope === "project"
     ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
     : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
@@ -1200,6 +1300,7 @@ export async function setupSecurityConfig(options: {
   path: string;
   config: EstaCodaConfig;
 }> {
+  validateSecuritySetupInput(options.input);
   const targetPath = options.input.scope === "project"
     ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
     : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
@@ -1239,6 +1340,7 @@ export async function setupSkillConfig(options: {
   path: string;
   config: EstaCodaConfig;
 }> {
+  validateSkillSetupInput(options.input);
   const targetPath = options.input.scope === "project"
     ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
     : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
@@ -1266,6 +1368,7 @@ export async function setupUiConfig(options: {
   path: string;
   config: EstaCodaConfig;
 }> {
+  validateUiSetupInput(options.input);
   const targetPath = options.input.scope === "project"
     ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
     : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
@@ -1297,6 +1400,7 @@ export async function setupProfileConfig(options: {
   path: string;
   config: EstaCodaConfig;
 }> {
+  validateProfileSetupInput(options.input);
   const targetPath = options.input.scope === "project"
     ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
     : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
@@ -1337,16 +1441,24 @@ export async function setupTelegramConfig(options: {
 }): Promise<{
   path: string;
   config: EstaCodaConfig;
-  envExport?: string;
+  secretPath?: string;
 }> {
+  validateTelegramSetupInput(options.input);
   const targetPath = options.input.scope === "project"
     ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
     : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
   const existing = await readConfig(targetPath);
   const envName = options.input.botTokenEnv ?? "ESTACODA_TELEGRAM_BOT_TOKEN";
-  const envExport = options.input.botToken === undefined
-    ? undefined
-    : `export ${envName}=${shellQuote(options.input.botToken)}`;
+  let secretPath: string | undefined;
+  if (options.input.botToken !== undefined && options.input.botToken.trim().length > 0) {
+    const secret = await writeEnvSecret({
+      homeDir: options.homeDir,
+      key: envName,
+      value: options.input.botToken
+    });
+    process.env[secret.key] = options.input.botToken;
+    secretPath = secret.path;
+  }
   const telegramPatch: TelegramChannelConfig = {
     ...(existing.config.channels?.telegram ?? {}),
     enabled: options.input.enabled ?? true,
@@ -1377,7 +1489,7 @@ export async function setupTelegramConfig(options: {
   return {
     path: targetPath,
     config,
-    envExport
+    secretPath
   };
 }
 
@@ -1515,6 +1627,222 @@ async function readConfig(path: string): Promise<{ path: string; loaded: boolean
   }
 }
 
+function validateProviderSetupInput(input: ProviderSetupInput): void {
+  requireNonEmpty(input.provider, "provider");
+  requireNonEmpty(input.model, "model");
+  validateScope(input.scope);
+  validateOptionalUrl(input.baseUrl, "baseUrl");
+  validateOptionalEnvName(input.apiKeyEnv, "apiKeyEnv");
+  if (input.credentialPoolStrategy !== undefined && input.credentialPoolStrategy !== "fill_first" && input.credentialPoolStrategy !== "round_robin") {
+    throw new Error("Expected credentialPoolStrategy fill_first or round_robin");
+  }
+}
+
+function validateWebSetupInput(input: WebSetupInput): void {
+  validateScope(input.scope);
+  if (input.maxContentChars !== undefined && (!Number.isInteger(input.maxContentChars) || input.maxContentChars <= 0)) {
+    throw new Error("Expected maxContentChars to be a positive integer");
+  }
+}
+
+function validateBrowserSetupInput(input: BrowserSetupInput): void {
+  validateScope(input.scope);
+  if (input.backend !== undefined && !isBrowserBackend(input.backend)) {
+    throw new Error("Expected browser backend local-cdp, browserbase, firecrawl, camofox, mock, or unconfigured");
+  }
+  validateOptionalUrl(input.cdpUrl, "cdpUrl");
+}
+
+function validateVoiceSetupInput(input: VoiceSetupInput): void {
+  validateScope(input.scope);
+  if (input.ttsProvider !== undefined && !isTtsProvider(input.ttsProvider)) {
+    throw new Error("Expected a supported TTS provider");
+  }
+  if (input.sttProvider !== undefined && !isSttProvider(input.sttProvider)) {
+    throw new Error("Expected a supported STT provider");
+  }
+  if (input.ttsSpeed !== undefined && (!Number.isFinite(input.ttsSpeed) || input.ttsSpeed <= 0)) {
+    throw new Error("Expected ttsSpeed to be a positive number");
+  }
+  validateOptionalEnvName(input.ttsApiKeyEnv, "ttsApiKeyEnv");
+  validateOptionalEnvName(input.sttApiKeyEnv, "sttApiKeyEnv");
+}
+
+function validateImageGenerationSetupInput(input: ImageGenerationSetupInput): void {
+  validateScope(input.scope);
+  if (input.provider !== undefined && input.provider !== "fal" && input.provider !== "byteplus") {
+    throw new Error("Expected image provider fal or byteplus");
+  }
+  if (input.model !== undefined) {
+    requireNonEmpty(input.model, "model");
+  }
+  if (input.modelVersion !== undefined) {
+    requireNonEmpty(input.modelVersion, "modelVersion");
+  }
+  validateOptionalEnvName(input.apiKeyEnv, "apiKeyEnv");
+  validateOptionalUrl(input.baseUrl, "baseUrl");
+}
+
+function validateMcpSetupInput(input: MCPSetupInput): void {
+  requireNonEmpty(input.name, "name");
+  validateScope(input.scope);
+  if (input.transport !== undefined && input.transport !== "stdio" && input.transport !== "http") {
+    throw new Error("Expected MCP transport stdio or http");
+  }
+  if (input.trust !== undefined && input.trust !== "conservative" && input.trust !== "read-only-network" && input.trust !== "read-only-local") {
+    throw new Error("Expected MCP trust conservative, read-only-network, or read-only-local");
+  }
+  validateOptionalUrl(input.url, "url");
+  validateRiskClass(input.toolRiskClass, "toolRiskClass");
+  validateRiskClass(input.resourceReadRiskClass, "resourceReadRiskClass");
+  validateRiskClass(input.promptGetRiskClass, "promptGetRiskClass");
+  if (input.timeoutMs !== undefined && (!Number.isInteger(input.timeoutMs) || input.timeoutMs <= 0)) {
+    throw new Error("Expected timeoutMs to be a positive integer");
+  }
+  if (input.connectTimeoutMs !== undefined && (!Number.isInteger(input.connectTimeoutMs) || input.connectTimeoutMs <= 0)) {
+    throw new Error("Expected connectTimeoutMs to be a positive integer");
+  }
+}
+
+function validateSecuritySetupInput(input: SecuritySetupInput): void {
+  validateScope(input.scope);
+  if (input.mode !== undefined) {
+    normalizeSecurityApprovalMode(input.mode);
+  }
+  requireOptionalNonEmpty(input.assessorProvider, "assessorProvider");
+  requireOptionalNonEmpty(input.assessorModel, "assessorModel");
+  if (input.assessorTimeoutMs !== undefined && (!Number.isInteger(input.assessorTimeoutMs) || input.assessorTimeoutMs <= 0)) {
+    throw new Error("Expected assessorTimeoutMs to be a positive integer");
+  }
+}
+
+function validateSkillSetupInput(input: SkillSetupInput): void {
+  validateScope(input.scope);
+  if (input.autonomy !== undefined && input.autonomy !== "none" && input.autonomy !== "suggest" && input.autonomy !== "proactive" && input.autonomy !== "autonomous") {
+    throw new Error("Expected skill autonomy none, suggest, proactive, or autonomous");
+  }
+}
+
+function validateUiSetupInput(input: UiSetupInput): void {
+  validateScope(input.scope);
+  if (input.language !== undefined && input.language !== "en" && input.language !== "ar") {
+    throw new Error("Expected UI language en or ar");
+  }
+  if (input.flavor !== undefined && input.flavor !== "standard" && input.flavor !== "arabic-light" && input.flavor !== "kemet-full") {
+    throw new Error("Expected UI flavor standard, arabic-light, or kemet-full");
+  }
+  if (input.activityLabels !== undefined && input.activityLabels !== "en" && input.activityLabels !== "ar") {
+    throw new Error("Expected activityLabels en or ar");
+  }
+}
+
+function validateProfileSetupInput(input: ProfileSetupInput): void {
+  validateScope(input.scope);
+  if (input.mode !== undefined && input.mode !== "focused" && input.mode !== "operator" && input.mode !== "builder" && input.mode !== "research") {
+    throw new Error("Expected profile mode focused, operator, builder, or research");
+  }
+  if (input.responseLanguage !== undefined && input.responseLanguage !== "en" && input.responseLanguage !== "ar" && input.responseLanguage !== "match-user") {
+    throw new Error("Expected responseLanguage en, ar, or match-user");
+  }
+}
+
+function validateTelegramSetupInput(input: TelegramSetupInput): void {
+  validateScope(input.scope);
+  validateOptionalEnvName(input.botTokenEnv, "botTokenEnv");
+  if (input.pollTimeoutSeconds !== undefined && (!Number.isInteger(input.pollTimeoutSeconds) || input.pollTimeoutSeconds <= 0)) {
+    throw new Error("Expected pollTimeoutSeconds to be a positive integer");
+  }
+}
+
+function validateScope(scope: "user" | "project" | undefined): void {
+  if (scope !== undefined && scope !== "user" && scope !== "project") {
+    throw new Error("Expected scope user or project");
+  }
+}
+
+function validateRiskClass(value: ToolRiskClass | undefined, field: string): void {
+  if (value !== undefined && !isToolRiskClass(value)) {
+    throw new Error(`Expected ${field} to be a supported tool risk class`);
+  }
+}
+
+function validateOptionalUrl(value: string | undefined, field: string): void {
+  if (value === undefined) {
+    return;
+  }
+  requireNonEmpty(value, field);
+  try {
+    new URL(value);
+  } catch {
+    throw new Error(`Expected ${field} to be a valid URL`);
+  }
+}
+
+function validateOptionalEnvName(value: string | undefined, field: string): void {
+  if (value === undefined) {
+    return;
+  }
+  requireNonEmpty(value, field);
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(value.trim())) {
+    throw new Error(`Expected ${field} to be a valid environment variable name`);
+  }
+}
+
+function requireOptionalNonEmpty(value: string | undefined, field: string): void {
+  if (value !== undefined) {
+    requireNonEmpty(value, field);
+  }
+}
+
+function requireNonEmpty(value: string | undefined, field: string): void {
+  if (value === undefined || value.trim().length === 0) {
+    throw new Error(`Expected ${field} to be non-empty`);
+  }
+}
+
+function isBrowserBackend(value: string): value is BrowserBackendKind {
+  return value === "local-cdp" ||
+    value === "browserbase" ||
+    value === "firecrawl" ||
+    value === "camofox" ||
+    value === "mock" ||
+    value === "unconfigured";
+}
+
+function ttsDefaultApiKeyEnv(provider: TtsProvider): string | undefined {
+  switch (provider) {
+    case "edge":
+    case "neutts":
+    case "kittentts":
+      return undefined;
+    case "elevenlabs":
+      return "ELEVENLABS_API_KEY";
+    case "openai":
+      return "VOICE_TOOLS_OPENAI_KEY";
+    case "minimax":
+      return "MINIMAX_API_KEY";
+    case "mistral":
+      return "MISTRAL_API_KEY";
+    case "gemini":
+      return "GEMINI_API_KEY";
+    case "xai":
+      return "XAI_API_KEY";
+  }
+}
+
+function sttDefaultApiKeyEnv(provider: SttProvider): string | undefined {
+  switch (provider) {
+    case "local":
+      return undefined;
+    case "groq":
+      return "GROQ_API_KEY";
+    case "openai":
+      return "VOICE_TOOLS_OPENAI_KEY";
+    case "mistral":
+      return "MISTRAL_API_KEY";
+  }
+}
+
 function defaultBaseUrl(provider: ProviderId): string {
   switch (provider) {
     case "openai":
@@ -1578,10 +1906,6 @@ function expandConfiguredPath(path: string, homeDir?: string): string {
   }
 
   return envExpanded;
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 function randomPairingCode(): string {

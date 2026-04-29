@@ -59,7 +59,7 @@ export function createOnboardingTools(options: OnboardingOptions): RegisteredToo
           content: [
             result.reason,
             `Config: ${result.configPath}`,
-            result.envExport === undefined ? undefined : `Shell export:\n${result.envExport}`
+            result.secretPath === undefined ? undefined : `Secret store: ${result.secretPath}`
           ].filter((line) => line !== undefined).join("\n"),
           metadata: result
         };

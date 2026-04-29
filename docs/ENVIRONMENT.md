@@ -85,6 +85,8 @@ Rules:
 - do not hardcode secrets in repo files
 - do not commit real keys
 - prefer config to reference env var names, not secret values
+- default setup flows store pasted secrets in `~/.estacoda/.env` with `0600` permissions
+- advanced setup can reference an existing environment variable instead of storing a new secret
 
 ## Config File Locations
 
@@ -96,7 +98,7 @@ Project-level config:
 
 - `<workspace>/.estacoda/config.json`
 
-These merge, with project-level config acting as a local overlay.
+These deep-merge, with project-level config acting as a local overlay. Nested provider, credential-pool, auxiliary-provider, and MCP server entries preserve user-level fields unless the project config explicitly overrides them.
 
 ## Runtime State Paths
 

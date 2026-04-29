@@ -556,7 +556,8 @@ Important runtime state paths:
 Credential placeholders:
 
 - Never hardcode real provider keys into config.
-- Prefer provider env names in config and shell exports in the local environment.
+- Prefer provider env names in config and local secret storage in `~/.estacoda/.env` with `0600` permissions.
+- Advanced/operator paths may reference pre-existing shell environment variables instead of storing a new secret.
 - Do not commit secret-bearing shell history or screenshots.
 
 ## 12. Next Milestone

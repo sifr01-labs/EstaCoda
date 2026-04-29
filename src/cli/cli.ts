@@ -207,7 +207,7 @@ async function setup(options: CliOptions, args: string[]): Promise<CliCommandRes
     output: [
       `Configured ${parsed.provider}/${parsed.model}.`,
       `Config: ${result.path}`,
-      result.envExport === undefined ? undefined : `Shell export:\n${result.envExport}`,
+      result.secretPath === undefined ? undefined : `Secret store: ${result.secretPath}`,
       "",
       "Setup check",
       renderProviderDiagnostic(diagnostic),
@@ -868,8 +868,9 @@ async function voice(options: CliOptions, args: string[]): Promise<CliCommandRes
         "Configured EstaCoda voice.",
         renderVoiceStatus(loaded),
         `Config: ${result.path}`,
+        result.secretPaths.length === 0 ? undefined : `Secret store: ${result.secretPaths.join(", ")}`,
         "Next: voice.speak and voice.transcribe will use this config in runtime sessions."
-      ].join("\n")
+      ].filter((line) => line !== undefined).join("\n")
     };
   }
 
@@ -1396,8 +1397,8 @@ async function telegram(options: CliOptions, args: string[]): Promise<CliCommand
       `Telegram channel ${parsed.enabled === false ? "disabled" : "configured"}.`,
       `Config: ${result.path}`,
       result.config.channels?.telegram?.botTokenEnv === undefined ? undefined : `Bot token env: ${result.config.channels.telegram.botTokenEnv}`,
+      result.secretPath === undefined ? undefined : `Secret store: ${result.secretPath}`,
       result.config.channels?.telegram?.defaultChatId === undefined ? undefined : `Default chat: ${result.config.channels.telegram.defaultChatId}`,
-      result.envExport === undefined ? undefined : `Shell export:\n${result.envExport}`,
       parsed.enabled === false ? undefined : "Next: run estacoda telegram status, then start the gateway when channel runtime is enabled."
     ].filter((line) => line !== undefined).join("\n")
   };
@@ -1900,6 +1901,9 @@ function parseVoiceArgs(args: string[]): VoiceSetupInput {
     } else if (arg === "--tts-api-key-env") {
       parsed.ttsApiKeyEnv = next;
       index += 1;
+    } else if (arg === "--tts-api-key") {
+      parsed.ttsApiKey = next;
+      index += 1;
     } else if (arg === "--stt-provider") {
       parsed.sttProvider = parseSttProvider(next);
       index += 1;
@@ -1911,6 +1915,9 @@ function parseVoiceArgs(args: string[]): VoiceSetupInput {
       index += 1;
     } else if (arg === "--stt-api-key-env") {
       parsed.sttApiKeyEnv = next;
+      index += 1;
+    } else if (arg === "--stt-api-key") {
+      parsed.sttApiKey = next;
       index += 1;
     } else if (arg === "--project") {
       parsed.scope = "project";
@@ -2326,6 +2333,21 @@ function parseMcpArgs(args: string[]): Partial<MCPSetupInput> {
     } else if (arg === "--trust") {
       parsed.trust = next as MCPSetupInput["trust"];
       index += 1;
+    } else if (arg === "--env") {
+      parsed.env = parseKeyValueList(next ?? "");
+      index += 1;
+    } else if (arg === "--header" || arg === "--headers") {
+      parsed.headers = parseKeyValueList(next ?? "");
+      index += 1;
+    } else if (arg === "--tool-risk-class") {
+      parsed.toolRiskClass = next as MCPSetupInput["toolRiskClass"];
+      index += 1;
+    } else if (arg === "--resource-read-risk-class") {
+      parsed.resourceReadRiskClass = next as MCPSetupInput["resourceReadRiskClass"];
+      index += 1;
+    } else if (arg === "--prompt-get-risk-class") {
+      parsed.promptGetRiskClass = next as MCPSetupInput["promptGetRiskClass"];
+      index += 1;
     } else if (arg === "--include-tools") {
       parsed.includeTools = (next ?? "").split(",").map((value) => value.trim()).filter((value) => value.length > 0);
       index += 1;
@@ -2380,6 +2402,27 @@ function parseSkillAutonomyArg(value: string | undefined): SkillAutonomy {
     return value;
   }
   throw new Error("Expected --autonomy none, suggest, proactive, or autonomous");
+}
+
+function parseKeyValueList(value: string): Record<string, string> {
+  const parsed: Record<string, string> = {};
+  for (const pair of value.split(",")) {
+    const trimmed = pair.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+    const separator = trimmed.indexOf("=");
+    if (separator <= 0) {
+      throw new Error("Expected key=value pairs separated by commas");
+    }
+    const key = trimmed.slice(0, separator).trim();
+    const entryValue = trimmed.slice(separator + 1).trim();
+    if (key.length === 0) {
+      throw new Error("Expected key=value pairs separated by commas");
+    }
+    parsed[key] = entryValue;
+  }
+  return parsed;
 }
 
 function localeForConfig(config: { ui: { language: string } }): Locale {
