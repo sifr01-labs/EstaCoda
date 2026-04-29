@@ -41,7 +41,21 @@ export type BrowserActionInput = {
   key?: string;
   direction?: "up" | "down";
   amount?: number;
+  clear?: boolean;
+  method?: string;
+  params?: Record<string, unknown>;
   signal?: AbortSignal;
+};
+
+export type BrowserConsoleEntry = {
+  level: string;
+  text: string;
+  timestamp?: string;
+};
+
+export type BrowserScreenshotResult = {
+  mimeType: "image/png" | "image/jpeg";
+  base64: string;
 };
 
 export type BrowserNavigateInput = {
@@ -79,4 +93,7 @@ export type BrowserBackend = {
     src: string;
     alt?: string;
   }>>;
+  console?(input?: BrowserActionInput): Promise<BrowserConsoleEntry[]>;
+  cdp?(input: BrowserActionInput): Promise<unknown>;
+  screenshot?(input?: BrowserActionInput): Promise<BrowserScreenshotResult>;
 };

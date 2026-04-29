@@ -182,6 +182,14 @@ async function handleSlashCommand(input: {
     case "tools":
       input.output.write(`${renderToolsMenu(input.runtime, args.join(" "))}\n\n`);
       return false;
+    case "browser": {
+      const result = await handleBrowserCommand(input, args);
+      if (typeof result === "string") {
+        input.output.write(`${result}\n\n`);
+        return false;
+      }
+      return result;
+    }
     case "memory":
       input.output.write(`${await renderMemoryPromotions(input.runtime)}\n\n`);
       return false;
@@ -531,6 +539,78 @@ async function renderRuntimeDoctor(runtime: Runtime): Promise<string> {
     `Has file tools: ${tools.some((tool) => tool.toolsets.includes("files")) ? "yes" : "no"}`,
     `Has process tools: ${tools.some((tool) => tool.toolsets.includes("shell-write")) ? "yes" : "no"}`,
     trusted ? "Status: ready for proactive local work" : "Status: trust this workspace with /trust for proactive local work"
+  ].join("\n");
+}
+
+async function handleBrowserCommand(input: {
+  runtime: Runtime;
+  refreshRuntime?: (options?: { preserveSession?: boolean }) => Promise<Runtime>;
+}, args: string[]): Promise<string | { runtime: Runtime; notice: (runtime: Runtime) => string }> {
+  const [subcommand = "status", value] = args;
+
+  if (subcommand === "status") {
+    const execution = await input.runtime.executeTool?.({
+      tool: "browser.status",
+      toolInput: {}
+    });
+    return execution?.result?.content ?? "Browser status is not available in this session.";
+  }
+
+  if (subcommand === "connect") {
+    const cdpUrl = value ?? "http://127.0.0.1:9222";
+    const execution = await input.runtime.executeTool?.({
+      tool: "config.browser.setup",
+      toolInput: {
+        backend: "local-cdp",
+        cdpUrl
+      }
+    });
+    if (execution?.result?.ok !== true) {
+      return execution?.result?.content ?? "Could not configure local CDP browser backend.";
+    }
+    if (input.refreshRuntime === undefined) {
+      return `${execution.result.content}\nRestart this EstaCoda session to use the new browser backend.`;
+    }
+    return {
+      runtime: await input.refreshRuntime({ preserveSession: true }),
+      notice: (runtime) => [
+        `Connected browser backend to ${cdpUrl}.`,
+        "Refreshed this session so browser tools use the new CDP endpoint.",
+        "",
+        runtime.describe()
+      ].join("\n")
+    };
+  }
+
+  if (subcommand === "disconnect") {
+    const execution = await input.runtime.executeTool?.({
+      tool: "config.browser.setup",
+      toolInput: {
+        backend: "unconfigured"
+      }
+    });
+    if (execution?.result?.ok !== true) {
+      return execution?.result?.content ?? "Could not disconnect browser backend.";
+    }
+    if (input.refreshRuntime === undefined) {
+      return `${execution.result.content}\nRestart this EstaCoda session to use the updated browser backend.`;
+    }
+    return {
+      runtime: await input.refreshRuntime({ preserveSession: true }),
+      notice: (runtime) => [
+        "Disconnected browser backend for this profile.",
+        "",
+        runtime.describe()
+      ].join("\n")
+    };
+  }
+
+  return [
+    "EstaCoda browser",
+    "  /browser status",
+    "  /browser connect",
+    "  /browser connect http://127.0.0.1:9222",
+    "  /browser disconnect"
   ].join("\n");
 }
 

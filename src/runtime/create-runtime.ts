@@ -254,7 +254,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     fetch: options.webFetch,
     browserBackend,
     enableNetwork: options.enableWebNetwork,
-    maxContentChars: options.webMaxContentChars
+    maxContentChars: options.webMaxContentChars,
+    workspaceRoot
   })) {
     toolRegistry.register(tool);
   }

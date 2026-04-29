@@ -71,9 +71,9 @@ Evidence note:
 ### Browser
 
 - [src/browser/browser-backend.ts](/Users/ahnwy/estacoda-v2/src/browser/browser-backend.ts)
-  Browser backend abstraction with mock and local Chrome CDP backends. Local CDP supports navigation, snapshots with `@eN` element refs, click/type/scroll/press/back actions, and image listing. Cloud backends are recognized in config but remain follow-up implementation work.
+  Browser backend abstraction with mock and local Chrome CDP backends. Local CDP supports navigation, snapshots with `@eN` element refs, click/type/scroll/press/back actions, image listing, page-local console capture, raw CDP passthrough, and screenshots. Cloud backends are recognized in config but remain follow-up implementation work.
 - [src/tools/web-tools.ts](/Users/ahnwy/estacoda-v2/src/tools/web-tools.ts)
-  Web extraction plus Hermes-shaped browser tools: `browser.status`, `browser.navigate`, `browser.snapshot`, `browser.click`, `browser.type`, `browser.scroll`, `browser.press`, `browser.back`, and `browser.get_images`. Provider tool schemas are built from available tools only so unconfigured browser backends do not displace core/skill tools.
+  Web extraction plus Hermes-shaped browser tools: `browser.status`, `browser.navigate`, `browser.snapshot`, `browser.click`, `browser.type`, `browser.scroll`, `browser.press`, `browser.back`, `browser.get_images`, `browser.console`, `browser.cdp`, and `browser.screenshot`. Provider tool schemas are built from available tools only so unconfigured browser backends do not displace core/skill tools.
 
 ### Cron
 

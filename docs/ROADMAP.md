@@ -244,7 +244,7 @@ State: partially built.
 - CLI security audit/debug views now exist for recent decisions `smoke-tested`
 - `/yolo` session-scoped open-mode toggles now exist in CLI and gateway `smoke-tested`
 - cron foundation now exists: `cronjob`, `estacoda cron`, `/cron`, persistent jobs, prompt scanning, bounded workspace-local script-backed jobs, tick locking, local output, origin/Telegram delivery hooks, and gateway ticks `smoke-tested`
-- browser automation now has a Hermes-shaped local-CDP core: navigate, snapshot refs, click/type/scroll/press/back, image listing, and config/status `smoke-tested`
+- browser automation now has a Hermes-shaped local-CDP core: navigate, snapshot refs, click/type/scroll/press/back, image listing, console capture, raw CDP, screenshots, `/browser`, and config/status `smoke-tested`
 - fully polished pairing UX is `implemented but not live-proven`
 
 What remains:

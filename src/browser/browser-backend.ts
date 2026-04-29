@@ -1,4 +1,4 @@
-import type { BrowserActionInput, BrowserBackend, BrowserBackendStatus, BrowserNavigateInput, BrowserNavigateResult, BrowserSnapshot } from "../contracts/browser.js";
+import type { BrowserActionInput, BrowserBackend, BrowserBackendStatus, BrowserConsoleEntry, BrowserNavigateInput, BrowserNavigateResult, BrowserScreenshotResult, BrowserSnapshot } from "../contracts/browser.js";
 
 export type UnconfiguredBrowserBackendOptions = {
   reason?: string;
@@ -58,7 +58,13 @@ export function createMockBrowserBackend(input: {
     scroll: async () => snapshot(),
     press: async () => snapshot(),
     back: async () => snapshot(),
-    getImages: async () => [{ src: "https://example.com/mock.png", alt: "Mock image" }]
+    getImages: async () => [{ src: "https://example.com/mock.png", alt: "Mock image" }],
+    console: async () => [{ level: "log", text: "Mock console entry", timestamp: "2026-04-18T00:00:00.000Z" }],
+    cdp: async (request) => ({ method: request.method ?? "Mock.method", params: request.params ?? {} }),
+    screenshot: async () => ({
+      mimeType: "image/png",
+      base64: "iVBORw0KGgo="
+    })
   };
 }
 
@@ -206,6 +212,55 @@ export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOpti
         }) as { result?: { value?: unknown } };
         return parseJsonArray(evaluated.result?.value);
       }
+    }),
+    console: (input = {}) => runCdpSessionAction({
+      sessions,
+      latestSessionId,
+      input,
+      webSocketFactory: options.webSocketFactory,
+      action: async (client) => {
+        await ensureConsoleCapture(client);
+        const evaluated = await client.send("Runtime.evaluate", {
+          expression: `(() => {
+            const logs = Array.isArray(window.__estacodaConsoleLogs) ? window.__estacodaConsoleLogs : [];
+            ${input.clear === true ? "window.__estacodaConsoleLogs = [];" : ""}
+            return JSON.stringify(logs.slice(-200));
+          })()`,
+          returnByValue: true
+        }) as { result?: { value?: unknown } };
+        return parseConsoleEntries(evaluated.result?.value);
+      }
+    }),
+    cdp: (input) => runCdpSessionAction({
+      sessions,
+      latestSessionId,
+      input,
+      webSocketFactory: options.webSocketFactory,
+      action: async (client) => {
+        if (input.method === undefined || input.method.trim().length === 0) {
+          throw new Error("browser.cdp requires a CDP method.");
+        }
+        return await client.send(input.method, input.params);
+      }
+    }),
+    screenshot: (input = {}) => runCdpSessionAction({
+      sessions,
+      latestSessionId,
+      input,
+      webSocketFactory: options.webSocketFactory,
+      action: async (client) => {
+        const result = await client.send("Page.captureScreenshot", {
+          format: "png",
+          captureBeyondViewport: true
+        }) as { data?: unknown };
+        if (typeof result.data !== "string") {
+          throw new Error("CDP screenshot did not return image data.");
+        }
+        return {
+          mimeType: "image/png",
+          base64: result.data
+        } satisfies BrowserScreenshotResult;
+      }
     })
   };
 }
@@ -232,6 +287,7 @@ async function runCdpSessionAction<T>(input: {
   try {
     await client.send("Page.enable");
     await client.send("Runtime.enable");
+    await ensureConsoleCapture(client);
     return await input.action(client, session.id);
   } finally {
     client.close();
@@ -262,6 +318,35 @@ function snapshotExpression(): string {
       }))
     });
   })()`;
+}
+
+async function ensureConsoleCapture(client: CdpClient): Promise<void> {
+  await client.send("Runtime.evaluate", {
+    expression: `(() => {
+      if (window.__estacodaConsoleInstalled) return 'already-installed';
+      window.__estacodaConsoleInstalled = true;
+      window.__estacodaConsoleLogs = window.__estacodaConsoleLogs || [];
+      for (const level of ['log', 'info', 'warn', 'error', 'debug']) {
+        const original = console[level]?.bind(console);
+        if (!original) continue;
+        console[level] = (...args) => {
+          try {
+            window.__estacodaConsoleLogs.push({
+              level,
+              text: args.map((arg) => {
+                if (typeof arg === 'string') return arg;
+                try { return JSON.stringify(arg); } catch { return String(arg); }
+              }).join(' '),
+              timestamp: new Date().toISOString()
+            });
+          } catch {}
+          return original(...args);
+        };
+      }
+      return 'installed';
+    })()`,
+    returnByValue: true
+  });
 }
 
 function refActionExpression(ref: string | undefined, action: "click" | "type", text = ""): string {
@@ -308,6 +393,20 @@ function parseJsonArray(value: unknown): Array<{ src: string; alt?: string }> {
   }
 }
 
+function parseConsoleEntries(value: unknown): BrowserConsoleEntry[] {
+  if (typeof value !== "string") return [];
+  try {
+    const parsed = JSON.parse(value) as Array<Partial<BrowserConsoleEntry>>;
+    return parsed.map((entry) => ({
+      level: entry.level ?? "log",
+      text: entry.text ?? "",
+      timestamp: entry.timestamp
+    }));
+  } catch {
+    return [];
+  }
+}
+
 async function navigateWithLocalCdp(input: {
   endpoint: string | undefined;
   input: BrowserNavigateInput;
@@ -333,6 +432,7 @@ async function navigateWithLocalCdp(input: {
   try {
     await client.send("Page.enable");
     await client.send("Runtime.enable");
+    await ensureConsoleCapture(client);
     await client.send("Page.navigate", {
       url: input.input.url
     });

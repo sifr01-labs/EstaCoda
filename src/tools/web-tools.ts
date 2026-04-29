@@ -1,3 +1,5 @@
+import { mkdir, stat, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import type { RegisteredTool } from "../contracts/tool.js";
 import type { BrowserActionInput, BrowserBackend, BrowserSnapshot, WebExtractionResult } from "../contracts/browser.js";
 import { createUnconfiguredBrowserBackend } from "../browser/browser-backend.js";
@@ -7,6 +9,7 @@ export type WebToolOptions = {
   browserBackend?: BrowserBackend;
   enableNetwork?: boolean;
   maxContentChars?: number;
+  workspaceRoot?: string;
 };
 
 export type FetchLike = (url: string, init?: {
@@ -213,6 +216,120 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             ? "No images found on the current browser page."
             : images.map((image, index) => `${index + 1}. ${image.src}${image.alt === undefined ? "" : ` — ${image.alt}`}`).join("\n"),
           metadata: { backend: browserBackend.kind, images }
+        };
+      }
+    },
+    {
+      name: "browser.console",
+      description: "Get captured browser console output for the current page. Use clear=true to clear after reading.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          sessionId: { type: "string" },
+          clear: { type: "boolean" }
+        }
+      },
+      riskClass: "read-only-network",
+      toolsets: ["browser", "web", "research"],
+      progressLabel: "reading browser console",
+      maxResultSizeChars: 8000,
+      isAvailable: () => browserBackend.isAvailable(),
+      run: async (input: BrowserActionInput) => {
+        if (browserBackend.console === undefined) {
+          return unsupportedBrowserTool(browserBackend, "browser.console");
+        }
+        const entries = await browserBackend.console(input).catch((error: unknown) => ({ error }));
+        if ("error" in entries) {
+          return {
+            ok: false,
+            content: entries.error instanceof Error ? entries.error.message : "Browser console read failed.",
+            metadata: { backend: browserBackend.kind }
+          };
+        }
+        return {
+          ok: true,
+          content: entries.length === 0
+            ? "No captured browser console entries."
+            : entries.map((entry) => `${entry.timestamp ?? ""} [${entry.level}] ${entry.text}`.trim()).join("\n"),
+          metadata: { backend: browserBackend.kind, entries }
+        };
+      }
+    },
+    {
+      name: "browser.cdp",
+      description: "Run a raw Chrome DevTools Protocol method against the active local-CDP browser session.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          sessionId: { type: "string" },
+          method: { type: "string" },
+          params: { type: "object" }
+        },
+        required: ["method"]
+      },
+      riskClass: "read-only-network",
+      toolsets: ["browser", "web", "research"],
+      progressLabel: "running browser CDP command",
+      maxResultSizeChars: 8000,
+      isAvailable: () => browserBackend.isAvailable(),
+      run: async (input: BrowserActionInput) => {
+        if (browserBackend.cdp === undefined) {
+          return unsupportedBrowserTool(browserBackend, "browser.cdp");
+        }
+        const result = await browserBackend.cdp(input).catch((error: unknown) => ({ error }));
+        if (typeof result === "object" && result !== null && "error" in result) {
+          return {
+            ok: false,
+            content: result.error instanceof Error ? result.error.message : "Browser CDP command failed.",
+            metadata: { backend: browserBackend.kind }
+          };
+        }
+        return {
+          ok: true,
+          content: JSON.stringify(result, null, 2),
+          metadata: { backend: browserBackend.kind, result: result as Record<string, unknown> }
+        };
+      }
+    },
+    {
+      name: "browser.screenshot",
+      description: "Capture a screenshot of the active browser page and save it under .estacoda/browser/screenshots.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          sessionId: { type: "string" }
+        }
+      },
+      riskClass: "read-only-network",
+      toolsets: ["browser", "web", "research"],
+      progressLabel: "capturing browser screenshot",
+      maxResultSizeChars: 3000,
+      isAvailable: () => browserBackend.isAvailable(),
+      run: async (input: BrowserActionInput) => {
+        if (browserBackend.screenshot === undefined) {
+          return unsupportedBrowserTool(browserBackend, "browser.screenshot");
+        }
+        const screenshot = await browserBackend.screenshot(input).catch((error: unknown) => ({ error }));
+        if ("error" in screenshot) {
+          return {
+            ok: false,
+            content: screenshot.error instanceof Error ? screenshot.error.message : "Browser screenshot failed.",
+            metadata: { backend: browserBackend.kind }
+          };
+        }
+        const root = options.workspaceRoot ?? process.cwd();
+        const path = join(root, ".estacoda", "browser", "screenshots", `browser-${Date.now()}.png`);
+        await mkdir(dirname(path), { recursive: true });
+        await writeFile(path, Buffer.from(screenshot.base64, "base64"));
+        const file = await stat(path);
+        return {
+          ok: true,
+          content: [
+            `Screenshot: ${path}`,
+            `MIME: ${screenshot.mimeType}`,
+            `Bytes: ${file.size}`
+          ].join("\n"),
+          metadata: { backend: browserBackend.kind, path, mimeType: screenshot.mimeType, bytes: file.size }
         };
       }
     },

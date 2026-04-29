@@ -15,6 +15,7 @@ export const SESSION_COMMANDS: readonly SlashMenuCommand[] = [
   { name: "reset", description: "Start a fresh session and refresh the skill/config snapshot", aliases: ["new"] },
   { name: "memory", description: "Inspect promoted memory conclusions" },
   { name: "tools", description: "Browse available tools grouped by capability" },
+  { name: "browser", description: "Manage local browser/CDP connection", aliases: ["browser status", "browser connect"] },
   { name: "skills", description: "Browse commands and available skills" },
   { name: "reload-mcp", description: "Reload MCP config and refresh MCP tools for this session" },
   { name: "resume", description: "Show the latest interrupted-turn resume note" },

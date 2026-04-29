@@ -61,7 +61,7 @@ What has been achieved:
 - A Hermes-shaped MCP client foundation now exists for stdio and HTTP servers, with config-driven discovery, trust metadata, reload semantics, and live proof against a real stdio MCP filesystem server.
 - An ACP foundation now exists as a stdio JSON-RPC server with session lifecycle methods, streaming session updates, a registry manifest, editor-backed file reads, and a live-proven JetBrains approval flow.
 - A cron foundation now exists with persistent jobs, prompt safety scanning, tick locking, bounded workspace-local script-backed jobs, the `cronjob` tool, `estacoda cron`, `/cron`, local output files, origin/Telegram delivery hooks, and gateway scheduler ticks. It is `smoke-tested`; broader channel delivery remains follow-up work.
-- Browser automation now has a Hermes-shaped local-CDP core: status/config, navigate, snapshot, click, type, scroll, press, back, and image listing. It is `smoke-tested`; Browserbase, Browser Use, Firecrawl, Camofox, vision screenshots, console capture, CDP passthrough, dialog handling, and `/browser connect` polish remain follow-up work.
+- Browser automation now has a Hermes-shaped local-CDP core: status/config, `/browser status|connect|disconnect`, navigate, snapshot, click, type, scroll, press, back, image listing, page-local console capture, raw CDP passthrough, and screenshot capture. It is `smoke-tested`; Browserbase, Browser Use, Firecrawl, Camofox, vision screenshot analysis, and dialog handling remain follow-up work.
 
 Evidence:
 

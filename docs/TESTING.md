@@ -236,7 +236,7 @@ At a high level:
 - provider normalization and routing
 - tool-call recovery and continuation logic
 - provider tool-call extraction
-- browser backend basics plus local-CDP navigation, snapshot, scroll, and mock click/image-list automation tools
+- browser backend basics plus local-CDP navigation, snapshot, scroll, console, raw CDP, screenshot, and mock click/image-list automation tools
 - context expansion
 - skill execution and package behavior
 - session-stable skill visibility

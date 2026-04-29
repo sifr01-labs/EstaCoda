@@ -123,6 +123,9 @@ class FakeCdpWebSocket implements CdpWebSocketLike {
     const message = JSON.parse(data) as {
       id: number;
       method: string;
+      params?: {
+        expression?: string;
+      };
     };
 
     if (message.method === "Page.navigate") {
@@ -145,6 +148,20 @@ class FakeCdpWebSocket implements CdpWebSocketLike {
     }
 
     if (message.method === "Runtime.evaluate") {
+      if (message.params?.expression?.includes("__estacodaConsoleLogs") === true) {
+        this.#dispatch("message", {
+          data: JSON.stringify({
+            id: message.id,
+            result: {
+              result: {
+                value: JSON.stringify([{ level: "log", text: "CDP console smoke", timestamp: "2026-04-18T00:00:00.000Z" }])
+              }
+            }
+          })
+        });
+        return;
+      }
+
       this.#dispatch("message", {
         data: JSON.stringify({
           id: message.id,
@@ -152,6 +169,18 @@ class FakeCdpWebSocket implements CdpWebSocketLike {
             result: {
               value: JSON.stringify(this.page)
             }
+          }
+        })
+      });
+      return;
+    }
+
+    if (message.method === "Page.captureScreenshot") {
+      this.#dispatch("message", {
+        data: JSON.stringify({
+          id: message.id,
+          result: {
+            data: "iVBORw0KGgo="
           }
         })
       });
@@ -5877,6 +5906,7 @@ await runSessionLoop({
       "/help",
       "/skills ascii",
       "/tools",
+      "/browser status",
       "/tools media",
       "/doctor",
       "/memory",
@@ -6234,6 +6264,7 @@ const riskyRecords = await skillLearningRisky.inspect();
 const riskySkillFile = await readFile(join(skillLearningProjectRoot, "post-release-note-externally-workflow", "SKILL.md"), "utf8").catch(() => "");
 const cdpToolRegistry = new ToolRegistry();
 for (const tool of createWebTools({
+  workspaceRoot: contextWorkspace,
   browserBackend: createLocalCdpBrowserBackend({
     cdpUrl: "http://127.0.0.1:9222",
     fetch: async (url, init) => ({
@@ -6306,6 +6337,30 @@ const cdpBrowserScroll = await cdpToolExecutor.executeTool({
   trustedWorkspace: true,
   sessionId: directSession.id
 });
+const cdpBrowserConsole = await cdpToolExecutor.executeTool({
+  tool: "browser.console",
+  input: {},
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const cdpBrowserRaw = await cdpToolExecutor.executeTool({
+  tool: "browser.cdp",
+  input: {
+    method: "Runtime.evaluate",
+    params: {
+      expression: "document.title",
+      returnByValue: true
+    }
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+const cdpBrowserScreenshot = await cdpToolExecutor.executeTool({
+  tool: "browser.screenshot",
+  input: {},
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
 
 assert(
   response.matchedSkills.includes("youtube-knowledge-base"),
@@ -6333,6 +6388,12 @@ assert(cdpBrowserNavigate.result.content.includes("CDP browser navigation text."
 assert(cdpBrowserSnapshot?.result?.ok === true, "expected CDP browser.snapshot to succeed");
 assert(cdpBrowserSnapshot.result.content.includes("CDP browser navigation text."), "expected CDP snapshot text");
 assert(cdpBrowserScroll?.result?.ok === true, "expected CDP browser.scroll to succeed");
+assert(cdpBrowserConsole?.result?.ok === true, "expected CDP browser.console to succeed");
+assert(cdpBrowserConsole.result.content.includes("CDP console smoke"), "expected CDP console output");
+assert(cdpBrowserRaw?.result?.ok === true, "expected CDP browser.cdp to succeed");
+assert(cdpBrowserRaw.result.content.includes("CDP Smoke Page"), "expected CDP raw output");
+assert(cdpBrowserScreenshot?.result?.ok === true, "expected CDP browser.screenshot to succeed");
+assert(cdpBrowserScreenshot.result.content.includes(".estacoda/browser/screenshots/"), "expected browser screenshot path");
 assert(response.securityDecision === "allow", "expected runtime to auto-allow safe initial workflow");
 assert(
   response.toolExecutions.some((execution) => execution.tool.name === "workflow.plan" && execution.result?.ok),
@@ -6350,6 +6411,7 @@ assert(sessionLoopClosed, "expected session loop to close");
 assert(renderedSessionLoop.includes("Type a message"), "expected session loop instructions");
 assert(renderedSessionLoop.includes("EstaCoda session commands"), "expected session /help output");
 assert(renderedSessionLoop.includes("Tools:"), "expected session /tools output");
+assert(renderedSessionLoop.includes("Browser backend: mock"), "expected session /browser status output");
 assert(renderedSessionLoop.includes("Commands"), "expected session slash menu commands");
 assert(renderedSessionLoop.includes("Skills"), "expected session slash menu skills");
 assert(renderedSessionLoop.includes("/ascii-video"), "expected session slash menu to show ascii-video");

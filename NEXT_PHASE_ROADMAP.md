@@ -30,7 +30,7 @@ This phase turns the first working provider-backed agent loop into a reliable He
 - CLI sessions now include `/security` and `/security debug` for recent decision auditability.
 - `/yolo` now works in CLI and gateway sessions as a session-scoped open-mode toggle with the hard floor still enforced.
 - Cron foundation now exists with persistent `jobs.json`, schedule parsing, prompt safety scanning, bounded workspace-local script-backed jobs, tick locking, `cronjob` tool, `estacoda cron`, `/cron`, local output files, origin/Telegram delivery hooks, and gateway scheduler ticks.
-- Browser automation now has a Hermes-shaped local-CDP core with navigate, snapshot refs, click/type/scroll/press/back, image listing, and config/status. Cloud browser backends, vision screenshots, console capture, CDP passthrough, dialogs, and `/browser connect` remain follow-up work.
+- Browser automation now has a Hermes-shaped local-CDP core with navigate, snapshot refs, click/type/scroll/press/back, image listing, page-local console capture, raw CDP, screenshot capture, `/browser`, and config/status. Cloud browser backends, vision screenshot analysis, and dialogs remain follow-up work.
 - An internal alpha harness and runbook now exist for repeatable operator testing across CLI, Telegram, providers, approvals, and reset/rollback flow.
 
 ## Phase Goals
