@@ -12,7 +12,7 @@ import { WorkspaceApprovalController } from "./security/workspace-approval-contr
 import { kemetBlueTheme } from "./theme/kemet-blue.js";
 
 const argv = process.argv.slice(2);
-const workspaceRoot = process.cwd();
+let workspaceRoot = process.cwd();
 const cliSessionStore = new PersistentCliSessionStore();
 const cliApprovalController = new WorkspaceApprovalController();
 let config: LoadedRuntimeConfig = await loadRuntimeConfig({
@@ -41,6 +41,10 @@ if (argv.length === 0 && canRunInteractive()) {
 
     if (result.exitCode !== 0) {
       process.exit(result.exitCode);
+    }
+
+    if (result.workspaceRoot !== undefined) {
+      workspaceRoot = result.workspaceRoot;
     }
 
     config = await loadRuntimeConfig({

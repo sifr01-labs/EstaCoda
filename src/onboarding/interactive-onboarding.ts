@@ -1,5 +1,7 @@
 import { createInterface as createPromptInterface } from "node:readline/promises";
 import { createInterface as createCallbackInterface } from "node:readline";
+import { mkdir, stat } from "node:fs/promises";
+import { resolve } from "node:path";
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
 import type { Writable, Readable } from "node:stream";
 import { parseChoiceIndex, selectOption, type SelectPromptInput } from "../cli/interactive-select.js";
@@ -93,6 +95,7 @@ export type InteractiveOnboardingResult = {
   completed: boolean;
   output: string;
   exitCode: number;
+  workspaceRoot?: string;
 };
 
 export async function runInteractiveOnboarding(options: OnboardingOptions & {
@@ -131,8 +134,7 @@ export async function runInteractiveOnboarding(options: OnboardingOptions & {
     locale = interfaceLanguage.language === "ar" ? "ar" : "en";
     copy = onboardingCopy(locale);
     const interfaceStyle = await selectInterfaceStyle(prompt, interfaceLanguage.language, copy);
-    const workspaceRaw = await prompt(copy.workspace.rootPrompt(options.workspaceRoot));
-    const workspaceRoot = workspaceRaw.trim().length === 0 ? options.workspaceRoot : workspaceRaw.trim();
+    const workspaceRoot = await promptForWorkspaceRoot(prompt, copy, options.workspaceRoot, options.homeDir);
     const trustRaw = await prompt(copy.workspace.trustPrompt);
     const trustWorkspace = parseYesNo(trustRaw, true);
     const provider = await selectProvider(prompt, copy);
@@ -267,10 +269,50 @@ export async function runInteractiveOnboarding(options: OnboardingOptions & {
         "",
         setupCheck,
         sessionLine
-      ].filter((line) => line !== undefined).join("\n")
+      ].filter((line) => line !== undefined).join("\n"),
+      workspaceRoot
     };
   } finally {
     prompt.close?.();
+  }
+}
+
+async function promptForWorkspaceRoot(
+  prompt: Prompt,
+  copy: OnboardingCopy,
+  defaultRoot: string,
+  homeDir?: string
+): Promise<string> {
+  while (true) {
+    const raw = await prompt(copy.workspace.rootPrompt(defaultRoot));
+    const root = normalizeWorkspaceRoot(raw.trim().length === 0 ? defaultRoot : raw.trim(), homeDir);
+    const result = await ensureWorkspaceDirectory(root);
+    if (result.ok) {
+      return root;
+    }
+    await prompt(`${copy.workspace.createFailed(root, result.reason)}\n${copy.common.pressEnterToContinue} `);
+  }
+}
+
+function normalizeWorkspaceRoot(input: string, homeDir?: string): string {
+  const expanded = input === "~"
+    ? homeDir ?? process.env.HOME ?? input
+    : input.startsWith("~/")
+      ? `${homeDir ?? process.env.HOME ?? "~"}${input.slice(1)}`
+      : input;
+  return resolve(expanded);
+}
+
+async function ensureWorkspaceDirectory(root: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+  try {
+    await mkdir(root, { recursive: true });
+    const stats = await stat(root);
+    if (!stats.isDirectory()) {
+      return { ok: false, reason: "path exists but is not a directory" };
+    }
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
   }
 }
 

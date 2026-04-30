@@ -638,6 +638,22 @@ const cliInteractiveConfig = await loadRuntimeConfig({
 const cliInteractiveEnvPath = join(cliInteractiveHome, ".estacoda", ".env");
 const cliInteractiveEnv = await readFile(cliInteractiveEnvPath, "utf8");
 const cliInteractiveEnvMode = (await stat(cliInteractiveEnvPath)).mode & 0o777;
+const cliMissingWorkspaceHome = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-missing-workspace-home-"));
+const cliMissingWorkspaceBase = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-missing-workspace-base-"));
+const cliMissingWorkspace = join(cliMissingWorkspaceBase, "dogfood-workspace");
+const cliMissingWorkspaceAnswers = ["", "", "", cliMissingWorkspace, "", "2", "", "TEST_MISSING_WORKSPACE_KIMI_SECRET", "", "", "", "", ""];
+const cliMissingWorkspaceSetup = await runCliCommand({
+  argv: ["setup", "-i"],
+  workspaceRoot: cliInteractiveWorkspace,
+  homeDir: cliMissingWorkspaceHome,
+  prompt: Object.assign(
+    async () => cliMissingWorkspaceAnswers.shift() ?? "",
+    {
+      close: () => undefined
+    }
+  )
+});
+const cliMissingWorkspaceStats = await stat(cliMissingWorkspace);
 const cliProjectOverridePrompts: string[] = [];
 const cliProjectOverridePromptSecrets: boolean[] = [];
 const cliProjectOverrideAnswers = ["", "", "", "", "", "2", "", "TEST_PROJECT_KIMI_SECRET", "", "", "", "", ""];
@@ -4203,6 +4219,8 @@ assert(cliInteractiveConfig.security.approvalMode === "adaptive", "expected inte
 assert(cliInteractiveConfig.skills.autonomy === "suggest", "expected interactive setup to save default skill autonomy");
 assert(cliInteractiveEnv.includes("KIMI_API_KEY=\"TEST_KIMI_SECRET\""), "expected interactive setup to write local env secret");
 assert(cliInteractiveEnvMode === 0o600, "expected interactive setup env secret mode 0600");
+assert(cliMissingWorkspaceSetup.output.includes("Configured: kimi/kimi-k2.5"), "expected interactive setup to finish with a missing chosen workspace");
+assert(cliMissingWorkspaceStats.isDirectory(), "expected interactive setup to create the chosen missing workspace");
 assert(cliProjectOverrideSetup.output.includes("Configured: kimi/kimi-k2.5"), "expected project override setup output");
 assert(cliProjectOverrideConfig.model.provider === "kimi", "expected onboarding to override blocking project provider route");
 assert(cliProjectOverridePromptSecrets.some(Boolean), "expected project override setup API key prompt to be masked");

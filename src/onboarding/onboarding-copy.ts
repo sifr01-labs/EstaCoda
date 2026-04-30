@@ -43,6 +43,7 @@ export type OnboardingCopy = {
   workspace: {
     rootPrompt: (root: string) => string;
     trustPrompt: string;
+    createFailed: (root: string, reason: string) => string;
   };
   providers: {
     title: string;
@@ -301,7 +302,8 @@ export const onboardingCopyEn: OnboardingCopy = {
   },
   workspace: {
     rootPrompt: (root) => `Workspace root [${root}]: `,
-    trustPrompt: "Trust this workspace so EstaCoda can read files, edit files, and run approved terminal commands here? [Y/n]: "
+    trustPrompt: "Trust this workspace so EstaCoda can read files, edit files, and run approved terminal commands here? [Y/n]: ",
+    createFailed: (root, reason) => `Could not create or use workspace ${root}: ${reason}`
   },
   providers: {
     title: "Choose primary provider",
@@ -638,7 +640,8 @@ export const onboardingCopyAr: OnboardingCopy = {
   },
   workspace: {
     rootPrompt: (root) => `مجلد العمل [${root}]: `,
-    trustPrompt: `هل تثق بهذا المجلد حتى تتمكن ${ltr("EstaCoda")} من قراءة الملفات وتعديلها وتشغيل أوامر الطرفية الموافق عليها هنا؟ [Y/n]: `
+    trustPrompt: `هل تثق بهذا المجلد حتى تتمكن ${ltr("EstaCoda")} من قراءة الملفات وتعديلها وتشغيل أوامر الطرفية الموافق عليها هنا؟ [Y/n]: `,
+    createFailed: (root, reason) => `تعذر إنشاء أو استخدام مجلد العمل ${ltr(root)}: ${reason}`
   },
   providers: {
     ...onboardingCopyEn.providers,
