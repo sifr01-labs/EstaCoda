@@ -615,7 +615,7 @@ const cliInteractiveWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-in
 const cliInteractiveHome = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-interactive-home-"));
 const cliInteractivePrompts: string[] = [];
 const cliInteractivePromptSecrets: boolean[] = [];
-const cliInteractiveAnswers = ["", "", "", "", "", "2", "", "", "TEST_KIMI_SECRET", "", "", "", ""];
+const cliInteractiveAnswers = ["", "", "", "", "", "2", "", "TEST_KIMI_SECRET", "", "", "", "", ""];
 const cliInteractiveSetup = await runCliCommand({
   argv: ["setup", "-i"],
   workspaceRoot: cliInteractiveWorkspace,
@@ -640,7 +640,7 @@ const cliInteractiveEnv = await readFile(cliInteractiveEnvPath, "utf8");
 const cliInteractiveEnvMode = (await stat(cliInteractiveEnvPath)).mode & 0o777;
 const cliProjectOverridePrompts: string[] = [];
 const cliProjectOverridePromptSecrets: boolean[] = [];
-const cliProjectOverrideAnswers = ["", "", "", "", "", "2", "", "", "TEST_PROJECT_KIMI_SECRET", "", "", "", ""];
+const cliProjectOverrideAnswers = ["", "", "", "", "", "2", "", "TEST_PROJECT_KIMI_SECRET", "", "", "", "", ""];
 const cliProjectOverrideSetup = await runCliCommand({
   argv: ["setup", "-i"],
   workspaceRoot: firstRunProjectConfigWorkspace,
@@ -659,6 +659,68 @@ const cliProjectOverrideSetup = await runCliCommand({
 const cliProjectOverrideConfig = await loadRuntimeConfig({
   workspaceRoot: firstRunProjectConfigWorkspace,
   homeDir: firstRunProjectConfigHome
+});
+const cliArabicInteractiveWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-arabic-workspace-"));
+const cliArabicInteractiveHome = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-arabic-home-"));
+const cliArabicInteractivePrompts: string[] = [];
+const cliArabicInteractiveAnswers = ["", "2", "", "", "", "2", "", "TEST_ARABIC_KIMI_SECRET", "", "", "", ""];
+const cliArabicInteractiveSetup = await runCliCommand({
+  argv: ["setup", "-i"],
+  workspaceRoot: cliArabicInteractiveWorkspace,
+  homeDir: cliArabicInteractiveHome,
+  prompt: Object.assign(
+    async (question: string, options?: { secret?: boolean }) => {
+      void options;
+      cliArabicInteractivePrompts.push(question);
+      return cliArabicInteractiveAnswers.shift() ?? "";
+    },
+    {
+      close: () => undefined
+    }
+  )
+});
+const cliArabicInteractiveConfig = await loadRuntimeConfig({
+  workspaceRoot: cliArabicInteractiveWorkspace,
+  homeDir: cliArabicInteractiveHome
+});
+const cliEmptySecretWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-empty-secret-workspace-"));
+const cliEmptySecretHome = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-empty-secret-home-"));
+const cliEmptySecretPrompts: string[] = [];
+const cliEmptySecretPromptSecrets: boolean[] = [];
+const cliEmptySecretAnswers = ["", "", "", "", "", "2", "", "", "TEST_KIMI_SECRET_RETRY", "", "", "", "", ""];
+const cliEmptySecretSetup = await runCliCommand({
+  argv: ["setup", "-i"],
+  workspaceRoot: cliEmptySecretWorkspace,
+  homeDir: cliEmptySecretHome,
+  prompt: Object.assign(
+    async (question: string, options?: { secret?: boolean }) => {
+      cliEmptySecretPrompts.push(question);
+      cliEmptySecretPromptSecrets.push(options?.secret === true);
+      return cliEmptySecretAnswers.shift() ?? "";
+    },
+    {
+      close: () => undefined
+    }
+  )
+});
+const cliOptionalDoneWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-optional-done-workspace-"));
+const cliOptionalDoneHome = await mkdtemp(join(tmpdir(), "estacoda-v2-cli-optional-done-home-"));
+const cliOptionalDonePrompts: string[] = [];
+const cliOptionalDoneAnswers = ["", "", "", "", "", "2", "", "TEST_OPTIONAL_KIMI_SECRET", "", "", "", "5", "2", "", ""];
+const cliOptionalDoneSetup = await runCliCommand({
+  argv: ["setup", "-i"],
+  workspaceRoot: cliOptionalDoneWorkspace,
+  homeDir: cliOptionalDoneHome,
+  prompt: Object.assign(
+    async (question: string, options?: { secret?: boolean }) => {
+      void options;
+      cliOptionalDonePrompts.push(question);
+      return cliOptionalDoneAnswers.shift() ?? "";
+    },
+    {
+      close: () => undefined
+    }
+  )
 });
 const cliVerify = await runCliCommand({
   argv: ["verify"],
@@ -4144,12 +4206,22 @@ assert(cliInteractiveEnvMode === 0o600, "expected interactive setup env secret m
 assert(cliProjectOverrideSetup.output.includes("Configured: kimi/kimi-k2.5"), "expected project override setup output");
 assert(cliProjectOverrideConfig.model.provider === "kimi", "expected onboarding to override blocking project provider route");
 assert(cliProjectOverridePromptSecrets.some(Boolean), "expected project override setup API key prompt to be masked");
+assert(cliArabicInteractiveSetup.output.includes("اكتمل الإعداد."), "expected Arabic onboarding final output");
+assert(cliArabicInteractiveConfig.ui.language === "ar", "expected Arabic onboarding to persist Arabic UI language");
+assert(cliArabicInteractivePrompts.some((prompt) => prompt.includes("Choose interface language")), "expected onboarding to ask for interface language before locale is selected");
+assert(cliArabicInteractivePrompts.some((prompt) => prompt.includes("اختر نموذج Kimi")), "expected Arabic onboarding model prompt");
+assert(cliEmptySecretSetup.output.includes("Configured: kimi/kimi-k2.5"), "expected setup to recover after empty API key retry");
+assert(cliEmptySecretPromptSecrets.filter(Boolean).length >= 2, "expected empty API key to be rejected and re-prompted as secret");
+assert(cliEmptySecretPrompts.some((prompt) => prompt.includes("cannot be empty")), "expected empty API key validation message");
+assert(cliOptionalDoneSetup.output.includes("Optional capabilities: Browser"), "expected optional browser setup to be summarized");
+assert(cliOptionalDonePrompts.some((prompt) => prompt.includes("Done")), "expected optional capabilities to offer Done after a selection");
+assert(!cliOptionalDonePrompts.some((prompt) => prompt.includes("Choose voice mode")), "expected first-run onboarding not to offer unpersisted voice mode");
 assert(cliVerify.output.includes("EstaCoda verify"), "expected CLI verify output");
 assert(cliVerify.output.includes("Checks your local setup"), "expected CLI verify output to explain what it checks");
 assert(cliVerify.output.includes("Next:"), "expected CLI verify output to include next action guidance");
 assert(cliSettings.output.includes("EstaCoda settings"), "expected CLI settings output");
 assert(cliSettings.output.includes("Common changes"), "expected CLI settings output to include common change commands");
-assert(cliSkillSettings.output.includes("Skill autonomy: proactive."), "expected CLI skill autonomy settings output");
+assert(cliSkillSettings.output.includes("Workflow learning: proactive."), "expected CLI workflow learning settings output");
 assert(cliProfileSet.output.includes("Profile: operator."), "expected CLI profile set output");
 assert(cliProfileLanguage.output.includes("Response language: match-user."), "expected CLI profile language output");
 assert(cliProfileStatus.output.includes("Mode: operator"), "expected CLI profile status output");

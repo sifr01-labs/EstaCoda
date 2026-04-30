@@ -14,9 +14,7 @@ import {
   setupTelegramConfig,
   setupUiConfig,
   setupVoiceConfig,
-  type ActivityLabelsLocale,
   type ImageGenerationProvider,
-  type UiFlavor,
   type UiLanguage
 } from "../config/runtime-config.js";
 import { diagnoseProviderConfig, renderProviderDiagnostic } from "../config/provider-diagnostics.js";
@@ -34,39 +32,23 @@ import {
   renderSkillAutonomyOption,
   type Locale
 } from "../ui/settings-labels.js";
+import { onboardingCopy, type OnboardingCopy } from "./onboarding-copy.js";
+import {
+  formatProviderModel,
+  interfaceLanguageChoices,
+  interfaceStyleChoices,
+  providerChoices,
+  type InterfaceChoice,
+  type InterfaceStyleChoice,
+  type ModelChoice,
+  type ProviderChoice
+} from "./onboarding-provider-catalog.js";
 import { completeOnboarding, defaultOnboardingSteps, getOnboardingStatus, type OnboardingOptions } from "./onboarding-flow.js";
 import { runSetupVerification } from "./verification.js";
 
 export type Prompt = ((question: string, options?: { secret?: boolean }) => Promise<string>) & {
   select?: <T>(input: SelectPromptInput<T>) => Promise<T>;
   close?: () => void;
-};
-
-type ModelChoice = {
-  provider: ProviderId;
-  model: string;
-  label: string;
-  description?: string;
-};
-
-type ProviderChoice = {
-  provider: ProviderId;
-  label: string;
-  description: string;
-  models: ModelChoice[];
-};
-
-type InterfaceChoice = {
-  language: UiLanguage;
-  label: string;
-  description: string;
-};
-
-type InterfaceStyleChoice = {
-  flavor: UiFlavor;
-  activityLabels: ActivityLabelsLocale;
-  label: string;
-  description: string;
 };
 
 type BackupRouteChoice = {
@@ -79,11 +61,10 @@ type BackupRouteChoice = {
 type TelegramSetupDraft = {
   botToken: string;
   allowedUserId: string;
-  runTest: boolean;
+  verifyAfterSave: boolean;
 };
 
 type VoiceSetupDraft = {
-  mode: "push-to-talk" | "continuous";
   sttProvider?: "local" | "openai";
   sttApiKeyEnv?: string;
   sttApiKey?: string;
@@ -93,12 +74,12 @@ type VoiceSetupDraft = {
 };
 
 type VisionSetupDraft = {
-  runInputCheck: boolean;
+  verifyInputAfterSave: boolean;
   imageProvider?: ImageGenerationProvider;
   imageModel?: string;
   imageApiKeyEnv?: string;
   imageApiKey?: string;
-  runImageTest: boolean;
+  verifyImageAfterSave: boolean;
 };
 
 type OptionalCapabilityDraft = {
@@ -122,62 +103,64 @@ export async function runInteractiveOnboarding(options: OnboardingOptions & {
   const status = await getOnboardingStatus(options);
   const loadedConfig = await loadRuntimeConfig(options);
   let locale: Locale = loadedConfig.ui.language === "ar" ? "ar" : "en";
+  let copy = onboardingCopy(locale);
   const theme = options.theme ?? kemetBlueTheme;
 
   if (!status.needed) {
     return {
       completed: true,
       exitCode: 0,
-      output: `EstaCoda is already configured for ${status.configuredModel}.`
+      output: copy.final.alreadyConfigured(status.configuredModel ?? copy.final.configuredModelFallback)
     };
   }
 
   const prompt = options.prompt ?? createReadlinePrompt();
   const providerStep = defaultOnboardingSteps().find((step) => step.id === "provider");
-  const welcomeStep = defaultOnboardingSteps().find((step) => step.id === "welcome");
 
   if (providerStep === undefined) {
     return {
       completed: false,
       exitCode: 1,
-      output: "Onboarding provider step is unavailable."
+      output: copy.final.providerStepUnavailable
     };
   }
 
   try {
-    await prompt(`${renderWelcome({ theme, body: welcomeStep?.body ?? providerStep.body })}\nPress Enter to begin... `);
-    const interfaceLanguage = await selectInterfaceLanguage(prompt);
+    await prompt(`${renderWelcome({ theme, copy })}\n${copy.common.pressEnterToBegin} `);
+    const interfaceLanguage = await selectInterfaceLanguage(prompt, copy);
     locale = interfaceLanguage.language === "ar" ? "ar" : "en";
-    const interfaceStyle = await selectInterfaceStyle(prompt, interfaceLanguage.language);
-    const workspaceRaw = await prompt(`Workspace root [${options.workspaceRoot}]: `);
+    copy = onboardingCopy(locale);
+    const interfaceStyle = await selectInterfaceStyle(prompt, interfaceLanguage.language, copy);
+    const workspaceRaw = await prompt(copy.workspace.rootPrompt(options.workspaceRoot));
     const workspaceRoot = workspaceRaw.trim().length === 0 ? options.workspaceRoot : workspaceRaw.trim();
-    const trustRaw = await prompt("Trust this workspace for normal local file and terminal work? [Y/n]: ");
+    const trustRaw = await prompt(copy.workspace.trustPrompt);
     const trustWorkspace = parseYesNo(trustRaw, true);
-    const provider = await selectProvider(prompt);
-    const selected = await selectModel(prompt, provider);
-    const backup = await selectBackupRoute(prompt, selected.provider);
+    const provider = await selectProvider(prompt, copy);
+    const selected = await selectModel(prompt, provider, copy);
     const defaultApiKeyEnv = selected.provider === "local" ? undefined : defaultEnvKey(selected.provider);
     const normalizedEnvName = defaultApiKeyEnv;
-    const apiKey = selected.provider === "local"
+    const apiKey = selected.provider === "local" || normalizedEnvName === undefined
       ? undefined
-      : await prompt(`Paste ${selected.label} API key to store as ${normalizedEnvName}: `, { secret: true });
-    const securityMode = await selectSecurityMode(prompt, locale);
-    const skillAutonomy = await selectSkillAutonomy(prompt, locale);
-    const optionalCapabilities = await collectOptionalCapabilities(prompt);
+      : await promptForRequiredSecret(prompt, copy.providers.apiKeyPrompt(selected.label, normalizedEnvName), `${selected.label} API key`, copy);
+    const backup = await selectBackupRoute(prompt, selected.provider, copy);
+    const securityMode = await selectSecurityMode(prompt, locale, copy);
+    const skillAutonomy = await selectSkillAutonomy(prompt, locale, copy);
+    const optionalCapabilities = await collectOptionalCapabilities(prompt, copy);
     const reviewLines = renderReview({
+      copy,
       interfaceLabel: `${interfaceLanguage.label} / ${interfaceStyle.label}`,
       provider: selected.provider,
       model: selected.model,
-      backup: backup === undefined ? "skipped" : formatProviderModel(backup.model.provider, backup.model.model),
+      backup: backup === undefined ? copy.review.backupSkipped : formatProviderModel(backup.model.provider, backup.model.model),
       credential: normalizedEnvName === undefined
-        ? "local provider, no hosted API key"
-        : `save to ~/.estacoda/.env as ${normalizedEnvName}`,
-      trust: trustWorkspace ? workspaceRoot : "not trusted",
-      securityMode,
-      skillAutonomy,
-      capabilities: summarizeCapabilities(optionalCapabilities)
+        ? copy.review.noHostedKey
+        : copy.review.credentialLine(normalizedEnvName),
+      trust: trustWorkspace ? workspaceRoot : copy.review.notTrusted,
+      securityMode: formatSecurityMode(securityMode, locale).label,
+      workflowLearning: formatSkillAutonomy(skillAutonomy, locale).label,
+      capabilities: summarizeCapabilities(optionalCapabilities, copy)
     });
-    await prompt(`${reviewLines}\nPress Enter to save this setup... `);
+    await prompt(`${reviewLines}\n${copy.common.pressEnterToSave} `);
     await setupUiConfig({
       ...options,
       workspaceRoot,
@@ -248,39 +231,39 @@ export async function runInteractiveOnboarding(options: OnboardingOptions & {
     const security = formatSecurityMode(securityMode, locale);
     const autonomy = formatSkillAutonomy(skillAutonomy, locale);
     const setupCheck = diagnostic.status === "ready" && verification.ok
-      ? [
-          "Setup check: ready",
-          `Provider: ${formatProviderModel(loaded.model.provider, loaded.model.id)}`,
-          `Workspace: ${trustWorkspace ? "trusted" : "not trusted"}`,
-          `Security: ${security.label}`,
-          `Skills: ${autonomy.label}`
+        ? [
+          copy.setupCheck.ready,
+          `${copy.setupCheck.provider}: ${formatProviderModel(loaded.model.provider, loaded.model.id)}`,
+          `${copy.setupCheck.workspace}: ${trustWorkspace ? copy.setupCheck.trusted : copy.setupCheck.notTrusted}`,
+          `${copy.setupCheck.security}: ${security.label}`,
+          `${copy.setupCheck.workflow}: ${autonomy.label}`
         ].join("\n")
       : [
-          "Setup check",
+          copy.setupCheck.title,
           renderProviderDiagnostic(diagnostic),
           "",
           verification.output
         ].join("\n");
     const sessionLine = options.continueToSession === true
-      ? "Starting your first EstaCoda agent session now."
-      : "Next: run estacoda, or run estacoda verify any time to re-check setup.";
+      ? copy.final.startSession
+      : copy.final.nextNoSession;
 
     return {
       completed: !result.needed,
       exitCode: result.needed ? 1 : 0,
       output: [
-        "Setup complete.",
-        "EstaCoda is ready to use this workspace configuration.",
-        `Configured: ${formatProviderModel(selected.provider, selected.model)}`,
-        backup === undefined ? undefined : `Backup route: ${formatProviderModel(backup.model.provider, backup.model.model)}`,
-        `Config: ${result.configPath}`,
-        result.secretPath === undefined ? undefined : `Secret store: ${result.secretPath}`,
-        normalizedEnvName === undefined ? undefined : `Using credential from ${normalizedEnvName}.`,
-        `Interface: ${interfaceLanguage.label} / ${interfaceStyle.label}`,
-        `Workspace trust: ${trustWorkspace ? "trusted" : "not trusted"}`,
-        `Security mode: ${security.label} (${security.value})`,
-        `Skill autonomy: ${autonomy.label} (${autonomy.value})`,
-        `Optional capabilities: ${summarizeCapabilities(optionalCapabilities)}`,
+        copy.final.complete,
+        copy.final.ready,
+        `${copy.final.configured}: ${formatProviderModel(selected.provider, selected.model)}`,
+        backup === undefined ? undefined : `${copy.final.backupRoute}: ${formatProviderModel(backup.model.provider, backup.model.model)}`,
+        `${copy.final.config}: ${result.configPath}`,
+        result.secretPath === undefined ? undefined : `${copy.final.secretStore}: ${result.secretPath}`,
+        normalizedEnvName === undefined ? undefined : `${copy.final.usingCredential} ${normalizedEnvName}.`,
+        `${copy.final.interface}: ${interfaceLanguage.label} / ${interfaceStyle.label}`,
+        `${copy.final.workspaceTrust}: ${trustWorkspace ? copy.setupCheck.trusted : copy.setupCheck.notTrusted}`,
+        `${copy.final.securityMode}: ${security.label} (${security.value})`,
+        `${copy.final.workflowLearning}: ${autonomy.label} (${autonomy.value})`,
+        `${copy.final.optionalCapabilities}: ${summarizeCapabilities(optionalCapabilities, copy)}`,
         "",
         setupCheck,
         sessionLine
@@ -310,208 +293,111 @@ export function canRunInteractive(input: NodeJS.ReadStream = defaultInput): bool
   return input.isTTY === true;
 }
 
-function formatProviderModel(provider: string, model: string): string {
-  return model.startsWith(`${provider}/`) ? model : `${provider}/${model}`;
-}
-
-function providerChoices(): ProviderChoice[] {
-  return [
-    {
-      provider: "openai",
-      label: "OpenAI",
-      description: "Broad tool-use and multimodal support.",
-      models: [
-        { provider: "openai", model: "gpt-4.1-mini", label: "GPT-4.1 Mini", description: "Fast, capable default route." }
-      ]
-    },
-    {
-      provider: "kimi",
-      label: "Kimi",
-      description: "Strong general and coding route.",
-      models: [
-        { provider: "kimi", model: "kimi-k2.5", label: "Kimi K2.5", description: "Recommended balanced model." },
-        { provider: "kimi", model: "kimi-k2-turbo-preview", label: "Kimi K2 Turbo Preview", description: "Faster preview route." }
-      ]
-    },
-    {
-      provider: "deepseek",
-      label: "DeepSeek",
-      description: "Hosted coding-capable route.",
-      models: [
-        { provider: "deepseek", model: "deepseek-chat", label: "DeepSeek Chat", description: "General chat and coding route." }
-      ]
-    },
-    {
-      provider: "openrouter",
-      label: "OpenRouter",
-      description: "Use models through an OpenRouter account.",
-      models: [
-        { provider: "openrouter", model: "qwen/qwen3.6-plus", label: "Qwen 3.6 Plus", description: "General high-context route via OpenRouter." }
-      ]
-    },
-    {
-      provider: "local",
-      label: "Local",
-      description: "Use an OpenAI-compatible local runtime.",
-      models: [
-        { provider: "local", model: "ollama/auto", label: "Ollama-compatible auto", description: "No hosted API key required." }
-      ]
-    }
-  ];
-}
-
-function interfaceLanguageChoices(): InterfaceChoice[] {
-  return [
-    {
-      language: "en",
-      label: "English",
-      description: "Use English across the CLI."
-    },
-    {
-      language: "ar",
-      label: "Arabic",
-      description: "Use Arabic across the CLI."
-    }
-  ];
-}
-
-function interfaceStyleChoices(language: UiLanguage): InterfaceStyleChoice[] {
-  if (language === "ar") {
-    return [
-      {
-        flavor: "arabic-light",
-        activityLabels: "ar",
-        label: "Arabic-light",
-        description: "Use Arabic labels with light regional phrasing."
-      },
-      {
-        flavor: "standard",
-        activityLabels: "ar",
-        label: "Standard",
-        description: "Use clear Arabic labels with neutral status text."
-      }
-    ];
-  }
-
-  return [
-    {
-      flavor: "standard",
-      activityLabels: "en",
-      label: "Standard",
-      description: "Clear, neutral CLI language."
-    },
-    {
-      flavor: "arabic-light",
-      activityLabels: "en",
-      label: "Arabic-light",
-      description: "Adds light Arabic identity to status and activity messages."
-    }
-  ];
-}
-
-async function selectInterfaceLanguage(prompt: Prompt): Promise<InterfaceChoice> {
-  const choices = interfaceLanguageChoices();
+async function selectInterfaceLanguage(prompt: Prompt, copy: OnboardingCopy): Promise<InterfaceChoice> {
+  const choices = interfaceLanguageChoices(copy);
   if (prompt.select !== undefined) {
     return await prompt.select({
-      title: "Choose interface language",
-      body: "This controls setup text, status messages, and CLI labels.",
+      title: copy.interfaceLanguage.title,
+      body: copy.interfaceLanguage.body,
       defaultIndex: 0,
       options: choices.map((choice) => ({
         value: choice,
         label: choice.label,
         description: choice.description
       })),
-      fallbackPrompt: `${renderNumberedChoices("Choose interface language", "This controls setup text, status messages, and CLI labels.", choices)}\nEnter choice number [default: 1 English]: `
+      fallbackPrompt: `${renderNumberedChoices(copy.interfaceLanguage.title, copy.interfaceLanguage.body, choices)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`
     });
   }
 
-  const selectedRaw = await prompt(`${renderNumberedChoices("Choose interface language", "This controls setup text, status messages, and CLI labels.", choices)}\nEnter choice number [default: 1 English]: `);
+  const selectedRaw = await prompt(`${renderNumberedChoices(copy.interfaceLanguage.title, copy.interfaceLanguage.body, choices)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`);
   const selectedIndex = parseChoiceIndex(selectedRaw, choices.length, 0);
   return choices[selectedIndex] ?? choices[0]!;
 }
 
-async function selectInterfaceStyle(prompt: Prompt, language: UiLanguage): Promise<InterfaceStyleChoice> {
-  const choices = interfaceStyleChoices(language);
+async function selectInterfaceStyle(prompt: Prompt, language: UiLanguage, copy: OnboardingCopy): Promise<InterfaceStyleChoice> {
+  const choices = interfaceStyleChoices(language, copy);
   if (prompt.select !== undefined) {
     return await prompt.select({
-      title: "Choose expression style",
-      body: "This controls how much regional language appears in status messages.",
+      title: copy.interfaceStyle.title,
+      body: copy.interfaceStyle.body,
       defaultIndex: 0,
       options: choices.map((choice) => ({
         value: choice,
         label: choice.label,
         description: choice.description
       })),
-      fallbackPrompt: `${renderNumberedChoices("Choose expression style", "This controls how much regional language appears in status messages.", choices)}\nEnter choice number [default: 1 ${choices[0]?.label ?? "Standard"}]: `
+      fallbackPrompt: `${renderNumberedChoices(copy.interfaceStyle.title, copy.interfaceStyle.body, choices)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`
     });
   }
 
-  const selectedRaw = await prompt(`${renderNumberedChoices("Choose expression style", "This controls how much regional language appears in status messages.", choices)}\nEnter choice number [default: 1 ${choices[0]?.label ?? "Standard"}]: `);
+  const selectedRaw = await prompt(`${renderNumberedChoices(copy.interfaceStyle.title, copy.interfaceStyle.body, choices)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`);
   const selectedIndex = parseChoiceIndex(selectedRaw, choices.length, 0);
   return choices[selectedIndex] ?? choices[0]!;
 }
 
 async function selectProvider(
-  prompt: Prompt
+  prompt: Prompt,
+  copy: OnboardingCopy
 ): Promise<ProviderChoice> {
+  const choices = providerChoices(copy);
   const defaultIndex = 0;
   if (prompt.select !== undefined) {
     return await prompt.select({
-      title: "Choose a provider",
-      body: "Pick the account you want EstaCoda to use first.",
+      title: copy.providers.title,
+      body: copy.providers.body,
       defaultIndex,
-      options: providerChoices().map((option) => ({
+      options: choices.map((option) => ({
         value: option,
         label: option.label,
         description: option.description
       })),
-      fallbackPrompt: `${renderProviderPicker()}\nEnter choice number [default: 1 ${providerChoices()[0]?.label ?? "first option"}]: `
+      fallbackPrompt: `${renderProviderPicker(copy, choices)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`
     });
   }
 
-  const selectedRaw = await prompt(`${renderProviderPicker()}\nEnter choice number [default: 1 ${providerChoices()[0]?.label ?? "first option"}]: `);
+  const selectedRaw = await prompt(`${renderProviderPicker(copy, choices)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`);
   const parsedIndex = Number.parseInt(selectedRaw, 10) - 1;
   const selectedIndex = Number.isFinite(parsedIndex) && parsedIndex >= 0 ? parsedIndex : defaultIndex;
-  return providerChoices()[selectedIndex] ?? providerChoices()[defaultIndex] ?? providerChoices()[0]!;
+  return choices[selectedIndex] ?? choices[defaultIndex] ?? choices[0]!;
 }
 
-async function selectBackupRoute(prompt: Prompt, primaryProvider: ProviderId): Promise<BackupRouteChoice | undefined> {
+async function selectBackupRoute(prompt: Prompt, primaryProvider: ProviderId, copy: OnboardingCopy): Promise<BackupRouteChoice | undefined> {
   const choices = [
     {
       value: "skip" as const,
-      label: "Skip for now",
-      description: "Use only the primary model."
+      label: copy.backup.skipLabel,
+      description: copy.backup.skipDescription
     },
     {
       value: "add" as const,
-      label: "Add backup model",
-      description: "Choose another provider and model."
+      label: copy.backup.addLabel,
+      description: copy.backup.addDescription
     }
   ];
   const decision = prompt.select === undefined
-    ? choices[parseChoiceIndex(await prompt(`${renderNumberedChoices("Choose backup model", "EstaCoda can use this if the primary provider fails.", choices)}\nEnter choice number [default: 1 Skip for now]: `), choices.length, 0)]?.value ?? "skip"
+    ? choices[parseChoiceIndex(await prompt(`${renderNumberedChoices(copy.backup.title, copy.backup.body, choices)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`), choices.length, 0)]?.value ?? "skip"
     : await prompt.select({
-      title: "Choose backup model",
-      body: "EstaCoda can use this if the primary provider fails.",
+      title: copy.backup.title,
+      body: copy.backup.body,
       defaultIndex: 0,
       options: choices,
-      fallbackPrompt: `${renderNumberedChoices("Choose backup model", "EstaCoda can use this if the primary provider fails.", choices)}\nEnter choice number [default: 1 Skip for now]: `
+      fallbackPrompt: `${renderNumberedChoices(copy.backup.title, copy.backup.body, choices)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`
     });
 
   if (decision === "skip") {
     return undefined;
   }
 
-  const backupProviders = providerChoices().filter((provider) => provider.provider !== primaryProvider);
+  const backupProviders = providerChoices(copy).filter((provider) => provider.provider !== primaryProvider);
   const provider = await selectProviderFromChoices(prompt, backupProviders, {
-    title: "Choose backup provider",
-    body: "Pick the account EstaCoda should try if the primary provider fails."
-  });
-  const model = await selectModel(prompt, provider);
+    title: copy.backup.providerTitle,
+    body: copy.backup.providerBody
+  }, copy);
+  const model = await selectModel(prompt, provider, copy);
   const apiKeyEnv = model.provider === "local" ? undefined : defaultEnvKey(model.provider);
-  const apiKey = model.provider === "local"
+  const apiKey = model.provider === "local" || apiKeyEnv === undefined
     ? undefined
-    : await prompt(`Paste ${model.label} API key to store as ${apiKeyEnv}: `, { secret: true });
+    : await promptForRequiredSecret(prompt, copy.providers.apiKeyPrompt(model.label, apiKeyEnv), `${model.label} API key`, copy);
 
   return {
     provider,
@@ -524,7 +410,8 @@ async function selectBackupRoute(prompt: Prompt, primaryProvider: ProviderId): P
 async function selectProviderFromChoices(
   prompt: Prompt,
   choices: ProviderChoice[],
-  input: { title: string; body: string }
+  input: { title: string; body: string },
+  copy: OnboardingCopy
 ): Promise<ProviderChoice> {
   if (prompt.select !== undefined) {
     return await prompt.select({
@@ -536,46 +423,46 @@ async function selectProviderFromChoices(
         label: choice.label,
         description: choice.description
       })),
-      fallbackPrompt: `${renderProviderPicker(choices, input.title, input.body)}\nEnter choice number [default: 1 ${choices[0]?.label ?? "first option"}]: `
+      fallbackPrompt: `${renderProviderPicker(copy, choices, input.title, input.body)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`
     });
   }
 
-  const selectedRaw = await prompt(`${renderProviderPicker(choices, input.title, input.body)}\nEnter choice number [default: 1 ${choices[0]?.label ?? "first option"}]: `);
+  const selectedRaw = await prompt(`${renderProviderPicker(copy, choices, input.title, input.body)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`);
   const selectedIndex = parseChoiceIndex(selectedRaw, choices.length, 0);
   return choices[selectedIndex] ?? choices[0]!;
 }
 
-async function selectModel(prompt: Prompt, provider: ProviderChoice): Promise<ModelChoice> {
+async function selectModel(prompt: Prompt, provider: ProviderChoice, copy: OnboardingCopy): Promise<ModelChoice> {
   const defaultIndex = 0;
   if (provider.models.length === 1) {
     return provider.models[0]!;
   }
   if (prompt.select !== undefined) {
     return await prompt.select({
-      title: `Choose ${provider.label} model`,
-      body: "Pick the model EstaCoda should use for this workspace.",
+      title: copy.providers.modelTitle(provider.label),
+      body: copy.providers.modelBody,
       defaultIndex,
       options: provider.models.map((model) => ({
         value: model,
         label: model.label,
         description: model.description
       })),
-      fallbackPrompt: `${renderModelPicker(provider)}\nEnter choice number [default: 1 ${provider.models[0]?.label ?? "first option"}]: `
+      fallbackPrompt: `${renderModelPicker(provider, copy)}\n${renderFallbackChoicePrompt(copy, 0, provider.models)}`
     });
   }
 
-  const selectedRaw = await prompt(`${renderModelPicker(provider)}\nEnter choice number [default: 1 ${provider.models[0]?.label ?? "first option"}]: `);
+  const selectedRaw = await prompt(`${renderModelPicker(provider, copy)}\n${renderFallbackChoicePrompt(copy, 0, provider.models)}`);
   const selectedIndex = parseChoiceIndex(selectedRaw, provider.models.length, defaultIndex);
   return provider.models[selectedIndex] ?? provider.models[defaultIndex] ?? provider.models[0]!;
 }
 
-async function selectSecurityMode(prompt: Prompt, locale: Locale): Promise<SecurityApprovalMode> {
+async function selectSecurityMode(prompt: Prompt, locale: Locale, copy: OnboardingCopy): Promise<SecurityApprovalMode> {
   const options: SecurityApprovalMode[] = ["strict", "adaptive", "open"];
   const defaultIndex = 1;
   if (prompt.select !== undefined) {
     return await prompt.select({
-      title: locale === "ar" ? "اختر وضع الأمان" : "Choose security mode",
-      body: locale === "ar" ? "يمكنك تغييره لاحقاً من الإعدادات." : "You can change this later from settings.",
+      title: copy.security.title,
+      body: copy.security.body,
       defaultIndex,
       options: options.map((mode) => {
         const formatted = formatSecurityMode(mode, locale);
@@ -585,20 +472,20 @@ async function selectSecurityMode(prompt: Prompt, locale: Locale): Promise<Secur
           description: formatted.description
         };
       }),
-      fallbackPrompt: renderSecurityModePrompt(locale)
+      fallbackPrompt: renderSecurityModePrompt(locale, copy)
     });
   }
 
-  return parseSecurityMode(await prompt(renderSecurityModePrompt(locale)));
+  return parseSecurityMode(await prompt(renderSecurityModePrompt(locale, copy)));
 }
 
-async function selectSkillAutonomy(prompt: Prompt, locale: Locale): Promise<SkillAutonomy> {
+async function selectSkillAutonomy(prompt: Prompt, locale: Locale, copy: OnboardingCopy): Promise<SkillAutonomy> {
   const options: SkillAutonomy[] = ["none", "suggest", "proactive", "autonomous"];
   const defaultIndex = 1;
   if (prompt.select !== undefined) {
     return await prompt.select({
-      title: locale === "ar" ? "اختر مستوى تعلّم المهارات" : "Choose skill autonomy",
-      body: locale === "ar" ? "هذا يحدد مدى استباقية EstaCoda في إنشاء المهارات." : "This controls how proactive EstaCoda is about reusable workflows.",
+      title: copy.workflowLearning.title,
+      body: copy.workflowLearning.body,
       defaultIndex,
       options: options.map((mode) => {
         const formatted = formatSkillAutonomy(mode, locale);
@@ -608,186 +495,163 @@ async function selectSkillAutonomy(prompt: Prompt, locale: Locale): Promise<Skil
           description: formatted.description
         };
       }),
-      fallbackPrompt: renderSkillAutonomyPrompt(locale)
+      fallbackPrompt: renderSkillAutonomyPrompt(locale, copy)
     });
   }
 
-  return parseSkillAutonomy(await prompt(renderSkillAutonomyPrompt(locale)));
+  return parseSkillAutonomy(await prompt(renderSkillAutonomyPrompt(locale, copy)));
 }
 
-async function collectOptionalCapabilities(prompt: Prompt): Promise<OptionalCapabilityDraft> {
+async function collectOptionalCapabilities(prompt: Prompt, copy: OnboardingCopy): Promise<OptionalCapabilityDraft> {
   const draft: OptionalCapabilityDraft = {};
   while (true) {
-    const choice = await selectOptionalCapability(prompt);
-    if (choice === "skip") {
+    const hasConfigured = summarizeCapabilities(draft, copy) !== copy.review.optionalSkipped;
+    const choice = await selectOptionalCapability(prompt, hasConfigured, copy);
+    if (choice === "skip" || choice === "done") {
       return draft;
     }
     if (choice === "channels") {
-      const channel = await selectChannel(prompt);
+      const channel = await selectChannel(prompt, copy);
       if (channel === "telegram") {
-        draft.telegram = await collectTelegramSetup(prompt);
+        draft.telegram = await collectTelegramSetup(prompt, copy);
       }
     }
     if (choice === "voice") {
-      const voice = await collectVoiceSetup(prompt);
+      const voice = await collectVoiceSetup(prompt, copy);
       if (voice !== undefined) {
         draft.voice = voice;
       }
     }
     if (choice === "vision") {
-      const vision = await collectVisionSetup(prompt);
+      const vision = await collectVisionSetup(prompt, copy);
       if (vision !== undefined) {
         draft.vision = vision;
       }
     }
     if (choice === "browser") {
-      draft.browser = await collectBrowserSetup(prompt);
+      draft.browser = await collectBrowserSetup(prompt, copy);
     }
   }
 }
 
-async function selectOptionalCapability(prompt: Prompt): Promise<"skip" | "channels" | "voice" | "vision" | "browser"> {
+async function selectOptionalCapability(prompt: Prompt, hasConfigured: boolean, copy: OnboardingCopy): Promise<"skip" | "done" | "channels" | "voice" | "vision" | "browser"> {
   const choices = [
-    { value: "skip" as const, label: "Skip for now", description: "Start with the core terminal agent." },
-    { value: "channels" as const, label: "Channels", description: "Connect Telegram for remote messages and updates." },
-    { value: "voice" as const, label: "Voice", description: "Configure speech input and spoken replies." },
-    { value: "vision" as const, label: "Vision", description: "Check image understanding and image generation support." },
-    { value: "browser" as const, label: "Browser", description: "Configure browser automation." }
+    hasConfigured
+      ? { value: "done" as const, label: copy.common.done, description: copy.optional.doneDescription }
+      : { value: "skip" as const, label: copy.common.skipForNow, description: copy.optional.skipDescription },
+    { value: "channels" as const, label: copy.optional.channels.label, description: copy.optional.channels.description },
+    { value: "voice" as const, label: copy.optional.voice.label, description: copy.optional.voice.description },
+    { value: "vision" as const, label: copy.optional.vision.label, description: copy.optional.vision.description },
+    { value: "browser" as const, label: copy.optional.browser.label, description: copy.optional.browser.description }
   ];
+  const body = hasConfigured ? copy.optional.bodyAfterSelection : copy.optional.body;
   if (prompt.select !== undefined) {
     return await prompt.select({
-      title: "Optional capabilities",
-      body: "Set up extra capabilities now or skip them for later.",
+      title: copy.optional.title,
+      body,
       defaultIndex: 0,
       options: choices,
-      fallbackPrompt: `${renderNumberedChoices("Optional capabilities", "Set up extra capabilities now or skip them for later.", choices)}\nEnter choice number [default: 1 Skip for now]: `
+      fallbackPrompt: `${renderNumberedChoices(copy.optional.title, body, choices)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`
     });
   }
-  const selectedRaw = await prompt(`${renderNumberedChoices("Optional capabilities", "Set up extra capabilities now or skip them for later.", choices)}\nEnter choice number [default: 1 Skip for now]: `);
+  const selectedRaw = await prompt(`${renderNumberedChoices(copy.optional.title, body, choices)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`);
   return choices[parseChoiceIndex(selectedRaw, choices.length, 0)]?.value ?? "skip";
 }
 
-async function selectChannel(prompt: Prompt): Promise<"skip" | "telegram"> {
+async function selectChannel(prompt: Prompt, copy: OnboardingCopy): Promise<"skip" | "telegram"> {
   const choices = [
-    { value: "skip" as const, label: "Skip for now", description: "Do not connect a messaging channel." },
-    { value: "telegram" as const, label: "Telegram", description: "Connect a Telegram bot." }
+    { value: "skip" as const, label: copy.common.skipForNow, description: copy.channels.skipDescription },
+    { value: "telegram" as const, label: copy.channels.telegramLabel, description: copy.channels.telegramDescription }
   ];
   if (prompt.select !== undefined) {
     return await prompt.select({
-      title: "Set up channels",
-      body: "Channels let EstaCoda receive messages and send updates outside this terminal.\nCurrent channel: Telegram",
+      title: copy.channels.title,
+      body: copy.channels.body,
       defaultIndex: 0,
       options: choices,
-      fallbackPrompt: `${renderNumberedChoices("Set up channels", "Channels let EstaCoda receive messages and send updates outside this terminal.\nCurrent channel: Telegram", choices)}\nEnter choice number [default: 1 Skip for now]: `
+      fallbackPrompt: `${renderNumberedChoices(copy.channels.title, copy.channels.body, choices)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`
     });
   }
-  const selectedRaw = await prompt(`${renderNumberedChoices("Set up channels", "Channels let EstaCoda receive messages and send updates outside this terminal.\nCurrent channel: Telegram", choices)}\nEnter choice number [default: 1 Skip for now]: `);
+  const selectedRaw = await prompt(`${renderNumberedChoices(copy.channels.title, copy.channels.body, choices)}\n${renderFallbackChoicePrompt(copy, 0, choices)}`);
   return choices[parseChoiceIndex(selectedRaw, choices.length, 0)]?.value ?? "skip";
 }
 
-async function collectTelegramSetup(prompt: Prompt): Promise<TelegramSetupDraft> {
-  await prompt([
-    "Telegram setup",
-    "Connect a Telegram bot so EstaCoda can receive remote messages and send updates.",
-    "You need:",
-    "1. A bot token from BotFather.",
-    "2. Your numeric Telegram user ID.",
-    "Only the allowed user ID can control this agent.",
-    "Press Enter to continue."
-  ].join("\n"));
-  await prompt([
-    "Get a bot token",
-    "1. Open Telegram.",
-    "2. Search for BotFather.",
-    "3. Open the verified BotFather chat.",
-    "4. Send /newbot.",
-    "5. Choose a display name for the bot.",
-    "6. Choose a username ending in bot.",
-    "7. Copy the API token BotFather gives you.",
-    "Keep this token private. Anyone with the token can control the bot.",
-    "Press Enter when you have the token."
-  ].join("\n"));
+async function collectTelegramSetup(prompt: Prompt, copy: OnboardingCopy): Promise<TelegramSetupDraft> {
+  await prompt(copy.telegram.intro.join("\n"));
   const botToken = await promptForValidatedSecret(
     prompt,
-    "Paste Telegram bot token\nStored locally as ESTACODA_TELEGRAM_BOT_TOKEN in ~/.estacoda/.env: ",
+    copy.telegram.tokenPrompt.join("\n"),
     (value) => /^\d+:[A-Za-z0-9_-]+$/u.test(value.trim()),
-    "Invalid Telegram bot token. Expected format: 123456789:ABC..."
+    copy.telegram.tokenInvalid
   );
-  await prompt([
-    "Get your Telegram user ID",
-    "1. Open Telegram.",
-    "2. Search for userinfobot.",
-    "3. Start the chat.",
-    "4. Copy the numeric ID it sends back.",
-    "Use the numeric ID only, not your @username.",
-    "Press Enter when you have the user ID."
-  ].join("\n"));
   const allowedUserId = await promptForValidatedText(
     prompt,
-    "Paste allowed Telegram user ID\nOnly this Telegram user can send commands to EstaCoda: ",
+    [...copy.telegram.tokenSaved, "", ...copy.telegram.userIdPrompt].join("\n"),
     (value) => /^\d+$/u.test(value.trim()),
-    "Invalid Telegram user ID. Use the numeric ID only."
+    copy.telegram.userIdInvalid
   );
-  const runTest = await selectRunSkip(prompt, {
-    title: "Test Telegram connection",
-    body: "EstaCoda will verify the bot token and allowed user configuration.",
-    runLabel: "Run test",
-    runDescription: "Verify the bot connection now.",
-    skipDescription: "Save settings without testing."
+  const verifyAfterSave = await selectRunSkip(prompt, {
+    title: copy.telegram.verifyTitle,
+    body: copy.telegram.verifyBody,
+    runLabel: copy.telegram.verifyLabel,
+    runDescription: copy.telegram.verifyDescription,
+    skipDescription: copy.telegram.verifySkipDescription,
+    copy
   });
-  if (runTest) {
+  if (verifyAfterSave) {
     // Full network verification is handled by `estacoda telegram status/test`; first-run keeps the setup local and deterministic.
-    await prompt("Telegram settings will be verified after they are saved. Press Enter to continue.");
+    await prompt(copy.telegram.verifyAfterSaveNotice);
   }
   return {
     botToken,
     allowedUserId,
-    runTest
+    verifyAfterSave
   };
 }
 
-async function collectVoiceSetup(prompt: Prompt): Promise<VoiceSetupDraft | undefined> {
+async function collectVoiceSetup(prompt: Prompt, copy: OnboardingCopy): Promise<VoiceSetupDraft | undefined> {
   const setup = await selectBinarySetup(prompt, {
-    title: "Voice setup",
-    body: "Configure speech input and spoken replies.",
-    skipLabel: "Skip for now",
-    skipDescription: "Keep text-only interaction.",
-    setupLabel: "Set up voice",
-    setupDescription: "Configure speech-to-text and text-to-speech."
+    title: copy.voice.title,
+    body: copy.voice.body,
+    skipLabel: copy.common.skipForNow,
+    skipDescription: copy.voice.skipDescription,
+    setupLabel: copy.voice.setupLabel,
+    setupDescription: copy.voice.setupDescription,
+    copy
   });
   if (!setup) {
     return undefined;
   }
-  const mode = await selectVoiceMode(prompt);
   const sttChoice = await selectSimpleChoice(prompt, {
-    title: "Speech-to-text",
-    body: "Choose how spoken input becomes text.",
+    title: copy.voice.sttTitle,
+    body: copy.voice.sttBody,
     defaultIndex: 0,
     choices: [
-      { value: "skip" as const, label: "Skip for now", description: "Do not enable speech input." },
-      { value: "local" as const, label: "Local", description: "Use a local transcription backend." },
-      { value: "hosted" as const, label: "Hosted", description: "Use a hosted transcription provider." }
-    ]
+      { value: "skip" as const, label: copy.common.skipForNow, description: copy.voice.sttSkipDescription },
+      { value: "local" as const, label: copy.voice.sttLocalLabel, description: copy.voice.sttLocalDescription },
+      { value: "hosted" as const, label: copy.voice.sttHostedLabel, description: copy.voice.sttHostedDescription }
+    ],
+    copy
   });
   const ttsChoice = await selectSimpleChoice(prompt, {
-    title: "Text-to-speech",
-    body: "Choose how EstaCoda speaks responses.",
+    title: copy.voice.ttsTitle,
+    body: copy.voice.ttsBody,
     defaultIndex: 0,
     choices: [
-      { value: "skip" as const, label: "Skip for now", description: "Do not enable spoken replies." },
-      { value: "local" as const, label: "Local", description: "Use a local speech backend." },
-      { value: "hosted" as const, label: "Hosted", description: "Use a hosted speech provider." }
-    ]
+      { value: "skip" as const, label: copy.common.skipForNow, description: copy.voice.ttsSkipDescription },
+      { value: "local" as const, label: copy.voice.ttsLocalLabel, description: copy.voice.ttsLocalDescription },
+      { value: "hosted" as const, label: copy.voice.ttsHostedLabel, description: copy.voice.ttsHostedDescription }
+    ],
+    copy
   });
   const sttApiKey = sttChoice === "hosted"
-    ? await prompt("Paste hosted speech-to-text API key to store as OPENAI_API_KEY: ", { secret: true })
+    ? await promptForRequiredSecret(prompt, copy.voice.sttKeyPrompt, "hosted speech-to-text API key", copy)
     : undefined;
   const ttsApiKey = ttsChoice === "hosted"
-    ? await prompt("Paste hosted text-to-speech API key to store as OPENAI_API_KEY: ", { secret: true })
+    ? await promptForRequiredSecret(prompt, copy.voice.ttsKeyPrompt, "hosted text-to-speech API key", copy)
     : undefined;
 
   return {
-    mode,
     sttProvider: sttChoice === "local" ? "local" : sttChoice === "hosted" ? "openai" : undefined,
     sttApiKeyEnv: sttChoice === "hosted" ? "OPENAI_API_KEY" : undefined,
     sttApiKey,
@@ -797,81 +661,74 @@ async function collectVoiceSetup(prompt: Prompt): Promise<VoiceSetupDraft | unde
   };
 }
 
-async function collectVisionSetup(prompt: Prompt): Promise<VisionSetupDraft | undefined> {
+async function collectVisionSetup(prompt: Prompt, copy: OnboardingCopy): Promise<VisionSetupDraft | undefined> {
   const setup = await selectBinarySetup(prompt, {
-    title: "Vision setup",
-    body: "Check image understanding and image generation support.",
-    skipLabel: "Skip for now",
-    skipDescription: "Keep text and code workflows only.",
-    setupLabel: "Set up vision",
-    setupDescription: "Check image input and image generation."
+    title: copy.vision.title,
+    body: copy.vision.body,
+    skipLabel: copy.common.skipForNow,
+    skipDescription: copy.vision.skipDescription,
+    setupLabel: copy.vision.setupLabel,
+    setupDescription: copy.vision.setupDescription,
+    copy
   });
   if (!setup) {
     return undefined;
   }
-  const runInputCheck = await selectRunSkip(prompt, {
-    title: "Vision readiness",
-    body: "EstaCoda will check whether the selected model can read images.",
-    runLabel: "Run check",
-    runDescription: "Verify image input support.",
-    skipDescription: "Save settings without testing."
+  const verifyInputAfterSave = await selectRunSkip(prompt, {
+    title: copy.vision.inputTitle,
+    body: copy.vision.inputBody,
+    runLabel: copy.vision.inputVerifyLabel,
+    runDescription: copy.vision.inputVerifyDescription,
+    skipDescription: copy.vision.inputSkipDescription,
+    copy
   });
   const imageChoice = await selectSimpleChoice(prompt, {
-    title: "Image generation",
-    body: "Choose whether EstaCoda can create images.",
+    title: copy.vision.imageTitle,
+    body: copy.vision.imageBody,
     defaultIndex: 0,
     choices: [
-      { value: "skip" as const, label: "Skip for now", description: "Do not enable image generation." },
-      { value: "byteplus" as const, label: "BytePlus Seedream", description: "Use BytePlus ModelArk image generation." },
-      { value: "fal" as const, label: "FAL", description: "Use a hosted FAL image generation route." }
-    ]
+      { value: "skip" as const, label: copy.common.skipForNow, description: copy.vision.imageSkipDescription },
+      { value: "byteplus" as const, label: copy.vision.providerLabels.byteplus.label, description: copy.vision.providerLabels.byteplus.description },
+      { value: "fal" as const, label: copy.vision.providerLabels.fal.label, description: copy.vision.providerLabels.fal.description }
+    ],
+    copy
   });
   if (imageChoice === "skip") {
     return {
-      runInputCheck,
-      runImageTest: false
+      verifyInputAfterSave,
+      verifyImageAfterSave: false
     };
   }
   const imageApiKeyEnv = defaultImageApiKeyEnv(imageChoice);
   const imageModel = defaultImageModel(imageChoice);
-  const imageApiKey = await prompt(`Paste image generation API key to store as ${imageApiKeyEnv}: `, { secret: true });
-  const runImageTest = await selectRunSkip(prompt, {
-    title: "Test image generation",
-    body: "EstaCoda will verify the image provider configuration.",
-    runLabel: "Run test",
-    runDescription: "Verify image generation now.",
-    skipDescription: "Save settings without testing."
+  const imageApiKey = await promptForRequiredSecret(prompt, copy.vision.imageKeyPrompt(imageApiKeyEnv), "image generation API key", copy);
+  const verifyImageAfterSave = await selectRunSkip(prompt, {
+    title: copy.vision.imageVerifyTitle,
+    body: copy.vision.imageVerifyBody,
+    runLabel: copy.vision.imageVerifyLabel,
+    runDescription: copy.vision.imageVerifyDescription,
+    skipDescription: copy.vision.imageVerifySkipDescription,
+    copy
   });
   return {
-    runInputCheck,
+    verifyInputAfterSave,
     imageProvider: imageChoice,
     imageModel,
     imageApiKeyEnv,
     imageApiKey,
-    runImageTest
+    verifyImageAfterSave
   };
 }
 
-async function collectBrowserSetup(prompt: Prompt): Promise<boolean> {
+async function collectBrowserSetup(prompt: Prompt, copy: OnboardingCopy): Promise<boolean> {
   return await selectBinarySetup(prompt, {
-    title: "Browser setup",
-    body: "Configure browser automation for web pages.",
-    skipLabel: "Skip for now",
-    skipDescription: "Do not configure browser automation.",
-    setupLabel: "Set up browser",
-    setupDescription: "Use a local Chrome DevTools-compatible browser."
-  });
-}
-
-async function selectVoiceMode(prompt: Prompt): Promise<"push-to-talk" | "continuous"> {
-  return await selectSimpleChoice(prompt, {
-    title: "Choose voice mode",
-    body: "This controls how EstaCoda listens.",
-    defaultIndex: 0,
-    choices: [
-      { value: "push-to-talk" as const, label: "Push to talk", description: "Start and stop recording manually." },
-      { value: "continuous" as const, label: "Continuous", description: "Listen until speech ends." }
-    ]
+    title: copy.browser.title,
+    body: copy.browser.body,
+    skipLabel: copy.common.skipForNow,
+    skipDescription: copy.browser.skipDescription,
+    setupLabel: copy.browser.setupLabel,
+    setupDescription: copy.browser.setupDescription,
+    copy
   });
 }
 
@@ -881,6 +738,7 @@ async function selectRunSkip(prompt: Prompt, input: {
   runLabel: string;
   runDescription: string;
   skipDescription: string;
+  copy: OnboardingCopy;
 }): Promise<boolean> {
   const value = await selectSimpleChoice(prompt, {
     title: input.title,
@@ -888,8 +746,9 @@ async function selectRunSkip(prompt: Prompt, input: {
     defaultIndex: 0,
     choices: [
       { value: "run" as const, label: input.runLabel, description: input.runDescription },
-      { value: "skip" as const, label: "Skip test", description: input.skipDescription }
-    ]
+      { value: "skip" as const, label: input.copy.verifyChoice.skipLabel, description: input.skipDescription }
+    ],
+    copy: input.copy
   });
   return value === "run";
 }
@@ -901,6 +760,7 @@ async function selectBinarySetup(prompt: Prompt, input: {
   skipDescription: string;
   setupLabel: string;
   setupDescription: string;
+  copy: OnboardingCopy;
 }): Promise<boolean> {
   const value = await selectSimpleChoice(prompt, {
     title: input.title,
@@ -909,7 +769,8 @@ async function selectBinarySetup(prompt: Prompt, input: {
     choices: [
       { value: "skip" as const, label: input.skipLabel, description: input.skipDescription },
       { value: "setup" as const, label: input.setupLabel, description: input.setupDescription }
-    ]
+    ],
+    copy: input.copy
   });
   return value === "setup";
 }
@@ -919,6 +780,7 @@ async function selectSimpleChoice<T extends string>(prompt: Prompt, input: {
   body: string;
   defaultIndex: number;
   choices: Array<{ value: T; label: string; description: string }>;
+  copy: OnboardingCopy;
 }): Promise<T> {
   if (prompt.select !== undefined) {
     return await prompt.select({
@@ -926,11 +788,11 @@ async function selectSimpleChoice<T extends string>(prompt: Prompt, input: {
       body: input.body,
       defaultIndex: input.defaultIndex,
       options: input.choices,
-      fallbackPrompt: `${renderNumberedChoices(input.title, input.body, input.choices)}\nEnter choice number [default: ${input.defaultIndex + 1} ${input.choices[input.defaultIndex]?.label ?? "first option"}]: `
+      fallbackPrompt: `${renderNumberedChoices(input.title, input.body, input.choices)}\n${renderFallbackChoicePrompt(input.copy, input.defaultIndex, input.choices)}`
     });
   }
 
-  const selectedRaw = await prompt(`${renderNumberedChoices(input.title, input.body, input.choices)}\nEnter choice number [default: ${input.defaultIndex + 1} ${input.choices[input.defaultIndex]?.label ?? "first option"}]: `);
+  const selectedRaw = await prompt(`${renderNumberedChoices(input.title, input.body, input.choices)}\n${renderFallbackChoicePrompt(input.copy, input.defaultIndex, input.choices)}`);
   return input.choices[parseChoiceIndex(selectedRaw, input.choices.length, input.defaultIndex)]?.value ?? input.choices[input.defaultIndex]!.value;
 }
 
@@ -940,12 +802,13 @@ async function promptForValidatedText(
   isValid: (value: string) => boolean,
   failure: string
 ): Promise<string> {
+  let retryNotice = "";
   while (true) {
-    const value = await prompt(question);
+    const value = await prompt(`${retryNotice}${question}`);
     if (isValid(value)) {
       return value.trim();
     }
-    await prompt(`${failure}\nPress Enter to try again.`);
+    retryNotice = `${failure}\n\n`;
   }
 }
 
@@ -955,49 +818,57 @@ async function promptForValidatedSecret(
   isValid: (value: string) => boolean,
   failure: string
 ): Promise<string> {
+  let retryNotice = "";
   while (true) {
-    const value = await prompt(question, { secret: true });
+    const value = await prompt(`${retryNotice}${question}`, { secret: true });
     if (isValid(value)) {
       return value.trim();
     }
-    await prompt(`${failure}\nPress Enter to try again.`);
+    retryNotice = `${failure}\n\n`;
   }
+}
+
+async function promptForRequiredSecret(prompt: Prompt, question: string, label: string, copy: OnboardingCopy): Promise<string> {
+  return await promptForValidatedSecret(
+    prompt,
+    question,
+    (value) => value.trim().length > 0,
+    copy.providers.requiredSecretError(label)
+  );
 }
 
 function renderWelcome(input: {
   theme: ThemeDefinition;
-  body: string;
+  copy: OnboardingCopy;
 }): string {
   const brand = input.theme.branding;
   const rule = "─".repeat(64);
 
   return [
-    `${brand.responseLabel} first-run setup`,
+    `${brand.responseLabel} ${input.copy.welcome.titleSuffix}`,
     brand.taglinePrimary,
     brand.taglineSecondary,
     rule,
     "",
-    "Welcome. We’ll get three things in place:",
-    "1. Trust the active workspace, if you want normal local work here.",
-    "2. Pick the first model route and save its API key locally.",
-    "3. Choose security and skill-learning defaults.",
-    "4. Verify the setup before entering the agent session.",
+    input.copy.welcome.intro,
+    ...input.copy.welcome.steps.map((step, index) => `${index + 1}. ${step}`),
     "",
-    input.body
+    input.copy.welcome.outro
   ].join("\n");
 }
 
 function renderProviderPicker(
-  choices: ProviderChoice[] = providerChoices(),
-  title = "Choose a provider",
-  body = "Pick the account you want EstaCoda to use first."
+  copy: OnboardingCopy,
+  choices: ProviderChoice[] = providerChoices(copy),
+  title = copy.providers.title,
+  body = copy.providers.body
 ): string {
   return [
     title,
     body,
     "",
     ...choices.map((option, index) => {
-      const credential = option.provider === "local" ? "no API key" : `${defaultEnvKey(option.provider)}`;
+      const credential = option.provider === "local" ? copy.common.localProviderNoKey : `${defaultEnvKey(option.provider)}`;
       return `${index + 1}. ${option.label.padEnd(14)} ${option.description} (${credential})`;
     })
   ].join("\n");
@@ -1016,10 +887,14 @@ function renderNumberedChoices(
   ].join("\n");
 }
 
-function renderModelPicker(provider: ProviderChoice): string {
+function renderFallbackChoicePrompt(copy: OnboardingCopy, defaultIndex: number, choices: Array<{ label: string }>): string {
+  return copy.common.choicePrompt(defaultIndex + 1, choices[defaultIndex]?.label ?? copy.common.firstOption);
+}
+
+function renderModelPicker(provider: ProviderChoice, copy: OnboardingCopy): string {
   return [
-    `Choose ${provider.label} model`,
-    "Pick the model EstaCoda should use for this workspace.",
+    copy.providers.modelTitle(provider.label),
+    copy.providers.modelBody,
     "",
     ...provider.models.map((option, index) => `${index + 1}. ${option.label.padEnd(24)} ${option.description ?? formatProviderModel(option.provider, option.model)}`)
   ].join("\n");
@@ -1082,82 +957,63 @@ async function applyOptionalCapabilities(options: OnboardingOptions & {
   }
 }
 
-function summarizeCapabilities(input: OptionalCapabilityDraft): string {
+function summarizeCapabilities(input: OptionalCapabilityDraft, copy: OnboardingCopy): string {
   const capabilities = [
-    input.telegram === undefined ? undefined : "Telegram",
-    input.voice === undefined ? undefined : "Voice",
-    input.vision === undefined ? undefined : "Vision",
-    input.browser === true ? "Browser" : undefined
+    input.telegram === undefined ? undefined : copy.channels.telegramLabel,
+    input.voice === undefined ? undefined : copy.optional.voice.label,
+    input.vision === undefined ? undefined : copy.optional.vision.label,
+    input.browser === true ? copy.optional.browser.label : undefined
   ].filter((value): value is string => value !== undefined);
-  return capabilities.length === 0 ? "skipped" : capabilities.join(", ");
+  return capabilities.length === 0 ? copy.review.optionalSkipped : capabilities.join(", ");
 }
 
 function renderReview(input: {
+  copy: OnboardingCopy;
   interfaceLabel: string;
   provider: string;
   model: string;
   backup: string;
   credential: string;
   trust: string;
-  securityMode: SecurityApprovalMode;
-  skillAutonomy: SkillAutonomy;
+  securityMode: string;
+  workflowLearning: string;
   capabilities: string;
 }): string {
+  const labels = input.copy.review.labels;
   return [
-    "Review setup",
-    `Interface:  ${input.interfaceLabel}`,
-    `Provider:   ${input.provider}`,
-    `Model:      ${input.model}`,
-    `Backup:     ${input.backup}`,
-    `Credential: ${input.credential}`,
-    `Workspace:  ${input.trust}`,
-    `Security:   ${input.securityMode}`,
-    `Skills:     ${input.skillAutonomy}`,
-    `Optional:   ${input.capabilities}`,
+    input.copy.review.title,
+    `${labels.interface}:  ${input.interfaceLabel}`,
+    `${labels.provider}:   ${input.provider}`,
+    `${labels.model}:      ${input.model}`,
+    `${labels.backup}:     ${input.backup}`,
+    `${labels.credential}: ${input.credential}`,
+    `${labels.workspace}:  ${input.trust}`,
+    `${labels.security}:   ${input.securityMode}`,
+    `${labels.workflow}:   ${input.workflowLearning}`,
+    `${labels.optional}:   ${input.capabilities}`,
     "",
-    "EstaCoda stores configuration and credential references. Raw hosted keys go only into ~/.estacoda/.env."
+    input.copy.review.note
   ].join("\n");
 }
 
-function renderSecurityModePrompt(locale: Locale): string {
-  if (locale === "ar") {
-    return [
-      "اختر وضع الأمان:",
-      renderSecurityModeOption(1, "strict", locale),
-      renderSecurityModeOption(2, "adaptive", locale),
-      renderSecurityModeOption(3, "open", locale),
-      "اختر وضع الأمان [الافتراضي: 2 متوازن]: "
-    ].join("\n");
-  }
-
+function renderSecurityModePrompt(locale: Locale, copy: OnboardingCopy): string {
   return [
-    "Choose security mode:",
+    copy.security.fallbackTitle,
     renderSecurityModeOption(1, "strict", locale),
     renderSecurityModeOption(2, "adaptive", locale),
     renderSecurityModeOption(3, "open", locale),
-    "Choose security mode [default: 2 Adaptive]: "
+    copy.security.fallbackPrompt
   ].join("\n");
 }
 
-function renderSkillAutonomyPrompt(locale: Locale): string {
-  if (locale === "ar") {
-    return [
-      "اختر مستوى تعلّم المهارات:",
-      renderSkillAutonomyOption(1, "none", locale),
-      renderSkillAutonomyOption(2, "suggest", locale),
-      renderSkillAutonomyOption(3, "proactive", locale),
-      renderSkillAutonomyOption(4, "autonomous", locale),
-      "اختر مستوى تعلّم المهارات [الافتراضي: 2 اقتراح]: "
-    ].join("\n");
-  }
-
+function renderSkillAutonomyPrompt(locale: Locale, copy: OnboardingCopy): string {
   return [
-    "Choose skill autonomy:",
+    copy.workflowLearning.fallbackTitle,
     renderSkillAutonomyOption(1, "none", locale),
     renderSkillAutonomyOption(2, "suggest", locale),
     renderSkillAutonomyOption(3, "proactive", locale),
     renderSkillAutonomyOption(4, "autonomous", locale),
-    "Choose skill autonomy [default: 2 Suggest]: "
+    copy.workflowLearning.fallbackPrompt
   ].join("\n");
 }
 

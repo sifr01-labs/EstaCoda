@@ -286,7 +286,7 @@ async function settings(options: CliOptions, args: string[]): Promise<CliCommand
       handled: true,
       exitCode: 0,
       output: [
-        `Skill autonomy: ${result.config.skills?.autonomy ?? parsed}.`,
+        `Workflow learning: ${result.config.skills?.autonomy ?? parsed}.`,
         `Config: ${result.path}`
       ].join("\n")
     };
@@ -299,8 +299,8 @@ async function settings(options: CliOptions, args: string[]): Promise<CliCommand
       handled: true,
       exitCode: 0,
       output: [
-        "EstaCoda settings: skills",
-        `Autonomy: ${current.label} (${current.value})`,
+        "EstaCoda settings: workflow learning",
+        `Mode: ${current.label} (${current.value})`,
         `Description: ${current.description}`,
         `External dirs: ${config.skills.externalDirs.join(", ") || "none"}`,
         "Change with: estacoda settings skills --autonomy none|suggest|proactive|autonomous"
@@ -418,7 +418,7 @@ async function settings(options: CliOptions, args: string[]): Promise<CliCommand
       `Security: ${config.security.approvalMode}`,
       `Profile: ${config.profile.mode} (${config.profile.responseLanguage})`,
       `UI: ${config.ui.language} / ${config.ui.flavor} / labels:${config.ui.activityLabels}`,
-      `Skill autonomy: ${config.skills.autonomy}`,
+      `Workflow learning: ${config.skills.autonomy}`,
       `Voice: TTS ${config.tts.provider}, STT ${config.stt.provider}`,
       `Web extraction: ${config.web.enableNetwork ? "enabled" : "disabled"}`,
       `Browser backend: ${config.browser.backend}`,

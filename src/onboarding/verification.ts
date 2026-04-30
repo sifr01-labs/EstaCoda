@@ -7,6 +7,7 @@ import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { formatSecurityMode, formatSkillAutonomy } from "../ui/settings-labels.js";
 import type { Runtime } from "../runtime/create-runtime.js";
 import type { OnboardingOptions } from "./onboarding-flow.js";
+import { onboardingCopy, type OnboardingCopy } from "./onboarding-copy.js";
 
 export type SetupVerificationResult = {
   ok: boolean;
@@ -19,6 +20,7 @@ export async function runSetupVerification(options: OnboardingOptions & {
 }): Promise<SetupVerificationResult> {
   const config = await loadRuntimeConfig(options);
   const locale = config.ui.language === "ar" ? "ar" : "en";
+  const copy = onboardingCopy(locale);
   const security = formatSecurityMode(config.security.approvalMode, locale);
   const autonomy = formatSkillAutonomy(config.skills.autonomy, locale);
   const provider = await diagnoseProviderConfig(config);
@@ -30,7 +32,7 @@ export async function runSetupVerification(options: OnboardingOptions & {
   const verifyFile = join(stateRoot, ".verify");
   const envPath = defaultEnvPath(options.homeDir);
   let stateWritable = false;
-  let envMode = "not present";
+  let envMode = copy.verification.notPresent;
   let toolStatus = "skipped";
   const warnings: string[] = [];
 
@@ -39,17 +41,17 @@ export async function runSetupVerification(options: OnboardingOptions & {
     await writeFile(verifyFile, "ok\n", "utf8");
     stateWritable = true;
   } catch {
-    warnings.push("State directory is not writable.");
+    warnings.push(copy.verification.stateNotWritableWarning);
   }
 
   try {
     const envStat = await stat(envPath);
-    envMode = `present (${(envStat.mode & 0o777).toString(8).padStart(3, "0")})`;
+    envMode = copy.verification.presentMode((envStat.mode & 0o777).toString(8).padStart(3, "0"));
     if ((envStat.mode & 0o777) !== 0o600) {
-      warnings.push("Secret store permissions should be 0600.");
+      warnings.push(copy.verification.secretModeWarning);
     }
   } catch {
-    envMode = "not present";
+    envMode = copy.verification.notPresent;
   }
 
   if (provider.status !== "ready") {
@@ -57,7 +59,7 @@ export async function runSetupVerification(options: OnboardingOptions & {
   }
 
   if (!workspaceTrusted) {
-    warnings.push("Workspace is not trusted yet; local write/terminal actions will ask first.");
+    warnings.push(copy.verification.notTrustedWarning);
   }
 
   if (options.runtime?.executeTool !== undefined) {
@@ -70,75 +72,73 @@ export async function runSetupVerification(options: OnboardingOptions & {
       });
       toolStatus = response?.result?.ok === true ? "ready" : "blocked";
       if (response?.result?.ok !== true) {
-        warnings.push("Read-only file tool check did not complete.");
+        warnings.push(copy.verification.readOnlyToolWarning);
       }
     } catch {
-      toolStatus = "skipped (no package.json)";
+      toolStatus = copy.verification.skippedNoPackageJson;
     }
   }
 
   return {
     ok: warnings.length === 0,
     output: [
-      "EstaCoda verify",
-      "Checks your local setup, provider route, credential store, workspace trust, and basic tool readiness.",
+      copy.verification.title,
+      copy.verification.body,
       "",
-      `State directory: ${stateWritable ? "writable" : "blocked"}`,
-      `Secret store: ${envMode}`,
-      `Workspace trust: ${workspaceTrusted ? "trusted" : "not trusted"}`,
-      `Security mode: ${security.label} (${security.value})`,
-      `Skill autonomy: ${autonomy.label} (${autonomy.value})`,
-      `Read-only tool check: ${toolStatus}`,
-      `Config sources: ${config.sources.join(", ") || "none"}`,
+      `${copy.verification.stateDirectory}: ${stateWritable ? copy.verification.writable : copy.verification.blocked}`,
+      `${copy.verification.secretStore}: ${envMode}`,
+      `${copy.verification.workspaceTrust}: ${workspaceTrusted ? copy.setupCheck.trusted : copy.setupCheck.notTrusted}`,
+      `${copy.verification.securityMode}: ${security.label} (${security.value})`,
+      `${copy.verification.workflowLearning}: ${autonomy.label} (${autonomy.value})`,
+      `${copy.verification.readOnlyToolCheck}: ${toolStatus}`,
+      `${copy.verification.configSources}: ${config.sources.join(", ") || "none"}`,
       "",
       renderProviderDiagnostic(provider),
       "",
       warnings.length === 0
-        ? "Status: ready\nNext: run estacoda, or configure optional channels with estacoda telegram setup / estacoda browser setup."
+        ? `${copy.verification.statusReady}\n${copy.verification.nextReady}`
         : [
-            `Warnings:\n${[...new Set(warnings)].map((warning) => `- ${warning}`).join("\n")}`,
+            `${copy.verification.warningsTitle}\n${[...new Set(warnings)].map((warning) => `- ${warning}`).join("\n")}`,
             "",
-            renderVerificationNextSteps(warnings)
+            renderVerificationNextSteps(warnings, copy)
           ].join("\n")
     ].join("\n")
   };
 }
 
-function renderVerificationNextSteps(warnings: string[]): string {
+function renderVerificationNextSteps(warnings: string[], copy: OnboardingCopy): string {
   const steps = new Set<string>();
   for (const warning of warnings) {
     if (/Provider setup is incomplete/u.test(warning)) {
-      steps.add("Run estacoda setup to choose a provider/model.");
+      steps.add(copy.verification.actions.providerIncomplete);
     }
     if (/Missing API key environment variable ([A-Z0-9_]+)/u.test(warning)) {
       const envName = /Missing API key environment variable ([A-Z0-9_]+)/u.exec(warning)?.[1];
-      steps.add(envName === undefined
-        ? "Export the missing provider API key, or rerun estacoda setup to store it locally."
-        : `Export ${envName}, or rerun estacoda setup and choose local secret storage.`);
+      steps.add(copy.verification.actions.missingApiKey(envName));
     }
     if (/No credential pool is configured/u.test(warning)) {
-      steps.add("Run estacoda setup --advanced --provider <provider> --model <model> --api-key-env <ENV_NAME>.");
+      steps.add(copy.verification.actions.noCredentialPool);
     }
     if (/Network inference is disabled/u.test(warning)) {
-      steps.add("Enable network inference for the selected hosted provider with estacoda setup --advanced.");
+      steps.add(copy.verification.actions.networkDisabled);
     }
-    if (/Workspace is not trusted/u.test(warning)) {
-      steps.add("Run /workspace.trust.grant in an interactive session, or rerun estacoda setup and trust this workspace.");
+    if (/Workspace is not trusted|مجلد العمل غير موثوق/u.test(warning)) {
+      steps.add(copy.verification.actions.workspaceNotTrusted);
     }
-    if (/Secret store permissions/u.test(warning)) {
-      steps.add("Run chmod 600 ~/.estacoda/.env to restrict local secret-store permissions.");
+    if (/Secret store permissions|صلاحيات مخزن المفاتيح/u.test(warning)) {
+      steps.add(copy.verification.actions.secretPermissions);
     }
-    if (/State directory is not writable/u.test(warning)) {
-      steps.add("Check write permissions for ~/.estacoda.");
+    if (/State directory is not writable|مجلد الحالة غير قابل للكتابة/u.test(warning)) {
+      steps.add(copy.verification.actions.stateNotWritable);
     }
-    if (/Read-only file tool check/u.test(warning)) {
-      steps.add("Start an interactive session after fixing provider/trust warnings, then retry estacoda verify.");
+    if (/Read-only file tool check|فحص أداة قراءة الملفات/u.test(warning)) {
+      steps.add(copy.verification.actions.readOnlyTool);
     }
   }
 
   if (steps.size === 0) {
-    steps.add("Fix the warnings above, then rerun estacoda verify.");
+    steps.add(copy.verification.fallbackNextAction);
   }
 
-  return `Next actions:\n${Array.from(steps).map((step) => `- ${step}`).join("\n")}`;
+  return `${copy.verification.nextActionsTitle}\n${Array.from(steps).map((step) => `- ${step}`).join("\n")}`;
 }
