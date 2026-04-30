@@ -133,7 +133,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           ].join("\n"),
           metadata: {
             path: result.path,
-            requested: input,
+            requested: redactConfigToolInput(input),
             security: loaded.security
           }
         };
@@ -374,7 +374,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           ].filter((line) => line !== undefined).join("\n"),
           metadata: {
             path: result.path,
-            requested: input,
+            requested: redactConfigToolInput(input),
             telegram,
             secretPath: result.secretPath
           }
@@ -493,7 +493,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           ].filter((line) => line !== undefined).join("\n"),
           metadata: {
             path: result.path,
-            requested: input,
+            requested: redactConfigToolInput(input),
             effective: loaded.model,
             secretPath: result.secretPath,
             providerDiagnostic: diagnostic
@@ -543,7 +543,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           ].filter((line) => line !== undefined).join("\n"),
           metadata: {
             path: result.path,
-            requested: input,
+            requested: redactConfigToolInput(input),
             imageGen: loaded.imageGen,
             secretPath: result.secretPath
           }
@@ -551,4 +551,14 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
       }
     }
   ];
+}
+
+function redactConfigToolInput<T extends Record<string, unknown>>(input: T): T {
+  const redacted: Record<string, unknown> = { ...input };
+  for (const key of ["apiKey", "botToken", "ttsApiKey", "sttApiKey"]) {
+    if (typeof redacted[key] === "string" && redacted[key].length > 0) {
+      redacted[key] = "[redacted]";
+    }
+  }
+  return redacted as T;
 }

@@ -3013,6 +3013,7 @@ const telegramConfigExecution = await toolExecutor.executeTool({
   tool: "config.telegram.setup",
   input: {
     botTokenEnv: "ESTACODA_TELEGRAM_BOT_TOKEN",
+    botToken: "telegram-config-secret",
     defaultChatId: "1254738091",
     allowedUserIds: ["1254738091"]
   },
@@ -5249,6 +5250,14 @@ assert(
 );
 assert(configSetupExecution.result.content.includes("Requested: deepseek/deepseek-chat"), "expected config setup requested route output");
 assert(configSetupExecution.result.content.includes("Effective: deepseek/deepseek-chat"), "expected config setup effective route output");
+assert(
+  JSON.stringify(configSetupExecution.result.metadata).includes("\"apiKey\":\"[redacted]\""),
+  "expected provider setup metadata to redact API key"
+);
+assert(
+  !JSON.stringify(configSetupExecution.result.metadata).includes("test-secret"),
+  "expected provider setup metadata not to expose raw API key"
+);
 assert(configStatusExecution?.result?.ok === true, "expected config.provider.status to succeed");
 assert(
   configStatusExecution.result.content.includes("deepseek/deepseek-chat"),
@@ -5269,6 +5278,14 @@ assert(telegramConfigExecution?.result?.ok === true, "expected config.telegram.s
 assert(telegramConfigExecution.result.content.includes("Telegram channel configured"), "expected Telegram config output");
 assert(telegramConfigExecution.result.content.includes("Effective status:"), "expected Telegram setup effective status output");
 assert(telegramConfigExecution.result.content.includes("Effective bot token env: ESTACODA_TELEGRAM_BOT_TOKEN"), "expected Telegram setup effective token env output");
+assert(
+  JSON.stringify(telegramConfigExecution.result.metadata).includes("\"botToken\":\"[redacted]\""),
+  "expected Telegram setup metadata to redact bot token"
+);
+assert(
+  !JSON.stringify(telegramConfigExecution.result.metadata).includes("telegram-config-secret"),
+  "expected Telegram setup metadata not to expose raw bot token"
+);
 assert(telegramStatusExecution?.result?.ok === true, "expected config.telegram.status to succeed");
 assert(telegramStatusExecution.result.content.includes("Telegram channel"), "expected Telegram status output");
 assert(imageConfigExecution?.result?.ok === true, "expected config.image.setup to succeed");
@@ -5276,6 +5293,14 @@ assert(imageConfigExecution.result.content.includes("Configured EstaCoda image g
 assert(imageConfigExecution.result.content.includes("Effective provider: byteplus"), "expected image setup effective provider output");
 assert(imageConfigExecution.result.content.includes("Effective API key env: BYTEPLUS_ARK_API_KEY"), "expected image setup effective key env output");
 assert(imageConfigExecution.result.content.includes("Secret store:"), "expected image setup to delegate secret persistence");
+assert(
+  JSON.stringify(imageConfigExecution.result.metadata).includes("\"apiKey\":\"[redacted]\""),
+  "expected image setup metadata to redact API key"
+);
+assert(
+  !JSON.stringify(imageConfigExecution.result.metadata).includes("image-secret"),
+  "expected image setup metadata not to expose raw API key"
+);
 assert(imageStatusExecution?.result?.ok === true, "expected config.image.status to succeed");
 assert(imageStatusExecution.result.content.includes("API key env: BYTEPLUS_ARK_API_KEY"), "expected image status effective API key env output");
 assert(imageStatusExecution.result.content.includes("Base URL:"), "expected image status base URL output");
