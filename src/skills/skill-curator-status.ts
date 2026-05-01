@@ -22,8 +22,8 @@ export type SkillCuratorStatus = {
 
 export function summarizeSkillCuratorStatus(records: SkillUsageRecord[]): SkillCuratorStatus[] {
   return records
-    .map((record) => summarizeUsageRecord(record))
-    .sort((left, right) =>
+    .map((record: SkillUsageRecord) => summarizeUsageRecord(record))
+    .sort((left: SkillCuratorStatus, right: SkillCuratorStatus) =>
       priorityForRecommendation(left.recommendation) - priorityForRecommendation(right.recommendation) ||
       left.skillName.localeCompare(right.skillName)
     );

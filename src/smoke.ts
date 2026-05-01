@@ -92,7 +92,7 @@ import { createWorkspaceTrustTools } from "./security/workspace-trust-tools.js";
 import { InMemorySessionDB } from "./session/in-memory-session-db.js";
 import { SQLiteSessionDB } from "./session/sqlite-session-db.js";
 import { loadSkillsFromDirectory } from "./skills/skill-loader.js";
-import { MAX_SKILL_MD_BYTES, MAX_SKILL_RESOURCE_FILES } from "./skills/skill-limits.js";
+import { MAX_SKILL_MD_BYTES, MAX_SKILL_RESOURCE_BYTES, MAX_SKILL_RESOURCE_FILES } from "./skills/skill-limits.js";
 import { hashSkillDirectory, resetBundledSkill, syncBundledSkills } from "./skills/skill-bundled-sync.js";
 import { SkillEvolutionStore } from "./skills/skill-evolution.js";
 import { SkillLearningManager } from "./skills/skill-learning.js";
@@ -287,6 +287,7 @@ const skillEvolutionStore = new SkillEvolutionStore({
   usagePath: join(skillEvolutionRoot, "skill-usage.json"),
   evolutionRoot: join(skillEvolutionRoot, "skill-evolution")
 });
+await runCorruptSkillUsageSmoke();
 const configToolsWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-config-tools-workspace-"));
 const configToolsHome = await mkdtemp(join(tmpdir(), "estacoda-v2-config-tools-home-"));
 for (const tool of builtinTools) {
@@ -5840,6 +5841,11 @@ const skillWriteReservedExecution = await toolExecutor.executeTool({
   trustedWorkspace: true,
   sessionId: directSession.id
 });
+await runSkillPathAndMutationRegressionSmoke({
+  toolExecutor,
+  sessionId: directSession.id,
+  personalSkillRoot
+});
 const skillPatchExecution = await toolExecutor.executeTool({
   tool: "skill.patch",
   input: {
@@ -6024,6 +6030,11 @@ const hermesStyleInspectExecution = await toolExecutor.executeTool({
   trustedWorkspace: true,
   sessionId: directSession.id
 });
+await runLargeSkillReferenceSmoke({
+  toolExecutor,
+  sessionId: directSession.id,
+  personalSkillRoot
+});
 const skillExportDir = await mkdtemp(join(tmpdir(), "estacoda-v2-export-skills-"));
 const skillExportExecution = await toolExecutor.executeTool({
   tool: "skill.export",
@@ -6060,6 +6071,10 @@ assert(
 );
 assert(skillWriteFileExecution?.result?.ok === true, "expected skill.write_file to succeed");
 assert(skillWriteEscapeExecution?.result?.ok === false, "expected skill.write_file to reject path escape");
+assert(
+  (await stat(join(personalSkillRoot, "escape.md")).catch(() => undefined)) === undefined,
+  "expected skill.write_file path escape rejection not to create escaped target"
+);
 assert(skillWriteReservedExecution?.result?.ok === false, "expected skill.write_file to reject reserved metadata paths");
 assert(skillPatchExecution?.result?.ok === true, "expected skill.patch to succeed");
 assert(skillEditExecution?.result?.ok === true, "expected skill.edit to succeed");
@@ -6393,6 +6408,11 @@ await skillEvolutionStore.recordSkillRouteTelemetry(createSkillRouteTelemetry({
   evidence: ["smoke route evidence"],
   prompt: "smoke skill route"
 }));
+const usedSmokeSkill = skills.get("sample-personal-skill");
+assert(usedSmokeSkill !== undefined, "expected sample skill to record direct usage");
+await skillEvolutionStore.recordSkillUsed({
+  skill: usedSmokeSkill
+});
 await skillEvolutionStore.pinSkill("sample-personal-skill", "local");
 const pinnedArchiveAttempt = await skillEvolutionStore.archiveSkill("sample-personal-skill", "local");
 await skillEvolutionStore.unpinSkill("sample-personal-skill", "local");
@@ -6422,6 +6442,7 @@ assert(
 );
 const updatedSkillUsage = await skillEvolutionStore.getUsage("sample-personal-skill");
 assert((updatedSkillUsage?.viewCount ?? 0) >= 1, "expected skill view counter to update");
+assert((updatedSkillUsage?.useCount ?? 0) >= 1, "expected skill use counter to update separately from route selection");
 assert((updatedSkillUsage?.routeMatchCount ?? 0) >= 1, "expected skill route match counter to update");
 assert((updatedSkillUsage?.routeSelectedCount ?? 0) >= 1, "expected skill route selected counter to update");
 assert(pinnedArchiveAttempt.state !== "archived", "expected pinned skill to block archive transition");
@@ -13397,6 +13418,113 @@ assert(
 
 console.log("v2 smoke passed");
 
+async function runSkillPathAndMutationRegressionSmoke(options: {
+  toolExecutor: ToolExecutor;
+  sessionId: string;
+  personalSkillRoot: string;
+}): Promise<void> {
+  const skillSymlinkTarget = join(options.personalSkillRoot, "sample-personal-skill", "references", "linked.md");
+  const skillSymlinkOutsideFile = join(await mkdtemp(join(tmpdir(), "estacoda-v2-skill-symlink-outside-")), "outside.md");
+  await writeFile(skillSymlinkOutsideFile, "outside skill root", "utf8");
+  await symlink(skillSymlinkOutsideFile, skillSymlinkTarget);
+  const skillWriteSymlinkExecution = await options.toolExecutor.executeTool({
+    tool: "skill.write_file",
+    input: {
+      name: "sample-personal-skill",
+      file_path: "references/linked.md",
+      file_content: "This should not follow a symlink outside the skill root."
+    },
+    trustedWorkspace: true,
+    sessionId: options.sessionId
+  });
+  const skillInvalidPatchExecution = await options.toolExecutor.executeTool({
+    tool: "skill.patch",
+    input: {
+      name: "sample-personal-skill",
+      old_string: "\"description\": \"Exercise the personal skill creation flow.\"",
+      new_string: "\"description\": "
+    },
+    trustedWorkspace: true,
+    sessionId: options.sessionId
+  });
+  const skillAuthorityExpansionEditExecution = await options.toolExecutor.executeTool({
+    tool: "skill.edit",
+    input: {
+      name: "sample-personal-skill",
+      content: [
+        "---",
+        JSON.stringify({
+          name: "sample-personal-skill",
+          description: "Exercise the personal skill creation flow.",
+          version: "0.1.1",
+          category: "testing",
+          whenToUse: ["authority expansion smoke"],
+          requiredToolsets: ["core", "browser"],
+          requiredEnvironmentVariables: ["SMOKE_SECRET_TOKEN"],
+          workflow: [{ id: "run", description: "Expanded workflow.", toolsets: ["core", "browser"] }],
+          permissionExpectations: ["auto-read", "ask-before-credential-access"],
+          examples: [],
+          evaluations: []
+        }, null, 2),
+        "---",
+        "Expanded authority body."
+      ].join("\n")
+    },
+    trustedWorkspace: true,
+    sessionId: options.sessionId
+  });
+
+  assert(skillWriteSymlinkExecution?.result?.ok === false, "expected skill.write_file to reject existing symlink targets");
+  assert(skillInvalidPatchExecution?.result?.ok === false, "expected skill.patch to reject invalid SKILL.md before writing");
+  assert(
+    !(await readFile(join(options.personalSkillRoot, "sample-personal-skill", "SKILL.md"), "utf8")).includes("\"description\": \n"),
+    "expected invalid skill.patch not to write malformed SKILL.md"
+  );
+  assert(skillAuthorityExpansionEditExecution?.result?.ok === false, "expected skill.edit to refuse authority expansion");
+}
+
+async function runLargeSkillReferenceSmoke(options: {
+  toolExecutor: ToolExecutor;
+  sessionId: string;
+  personalSkillRoot: string;
+}): Promise<void> {
+  await writeFile(
+    join(options.personalSkillRoot, "hermes-style-skill", "references", "huge.md"),
+    "x".repeat(MAX_SKILL_RESOURCE_BYTES + 1),
+    "utf8"
+  );
+  const hermesStyleHugeReferenceExecution = await options.toolExecutor.executeTool({
+    tool: "skill.view",
+    input: {
+      name: "hermes-style-skill",
+      path: "references/huge.md"
+    },
+    trustedWorkspace: true,
+    sessionId: options.sessionId
+  });
+
+  assert(
+    hermesStyleHugeReferenceExecution?.result?.ok === false,
+    "expected large skill reference to be refused before reading into context"
+  );
+}
+
+async function runCorruptSkillUsageSmoke(): Promise<void> {
+  const corruptSkillUsageRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-corrupt-skill-usage-"));
+  const corruptSkillUsagePath = join(corruptSkillUsageRoot, ".usage.json");
+  await writeFile(corruptSkillUsagePath, "{not-json", "utf8");
+  const corruptSkillUsageStore = new SkillEvolutionStore({
+    usagePath: corruptSkillUsagePath,
+    evolutionRoot: join(corruptSkillUsageRoot, "evolution")
+  });
+
+  assert((await corruptSkillUsageStore.usage()).length === 0, "expected corrupt skill usage sidecar to start fresh");
+  assert(
+    (await readdir(corruptSkillUsageRoot)).some((entry: string) => entry.startsWith(".usage.json.corrupt-")),
+    "expected corrupt skill usage sidecar to be moved aside"
+  );
+}
+
 async function runBundledSkillSyncSmoke(): Promise<void> {
   const bundledSyncRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-bundled-sync-"));
   const bundledSyncLocalRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-bundled-local-"));
@@ -13474,6 +13602,36 @@ async function runBundledSkillSyncSmoke(): Promise<void> {
   });
   assert(restoreResult.ok, "expected bundled restore reset to succeed");
   assert((await readFile(join(bundledLocalSkillDir, "SKILL.md"), "utf8")).includes("Bundled instructions v3."), "expected bundled restore to replace local copy with bundled baseline");
+  const ambiguousBundledRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-bundled-ambiguous-"));
+  const ambiguousLocalRoot = await mkdtemp(join(tmpdir(), "estacoda-v2-bundled-ambiguous-local-"));
+  for (const relativeDir of ["alpha/duplicate", "beta/duplicate"]) {
+    const skillDir = join(ambiguousBundledRoot, relativeDir);
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(join(skillDir, "SKILL.md"), buildSkillFileContent({
+      name: "duplicate-reset-skill",
+      description: "Duplicate bundled reset smoke skill.",
+      category: "testing",
+      whenToUse: ["when proving ambiguous bundled reset names"],
+      requiredToolsets: ["core"],
+      instructions: `Duplicate bundled reset instructions from ${relativeDir}.`
+    }), "utf8");
+  }
+  await syncBundledSkills({
+    bundledSkillsDir: ambiguousBundledRoot,
+    localSkillsRoot: ambiguousLocalRoot
+  });
+  const ambiguousResetResult = await resetBundledSkill({
+    name: "duplicate-reset-skill",
+    mode: "restore",
+    bundledSkillsDir: ambiguousBundledRoot,
+    localSkillsRoot: ambiguousLocalRoot
+  });
+  assert(!ambiguousResetResult.ok, "expected ambiguous skill.reset name to fail");
+  assert(
+    ambiguousResetResult.message.includes("alpha/duplicate") &&
+      ambiguousResetResult.message.includes("beta/duplicate"),
+    "expected ambiguous skill.reset error to include matching bundled paths"
+  );
   await rm(bundledLocalSkillDir, { recursive: true, force: true });
   const bundledSyncDeletedLocal = await syncBundledSkills({
     bundledSkillsDir: bundledSyncRoot,
