@@ -839,11 +839,17 @@ export class AcpServer {
         text: "I couldn't execute the requested command because terminal.run is unavailable.",
         matchedSkills: [],
         intent: {
+          nativeIntent: "general",
           labels: ["general"],
           confidence: 0.5,
           suggestedToolsets: [],
           suggestedSkills: [],
           confirmationRequired: false,
+          evidence: [{
+            kind: "native-intent",
+            detail: "ACP explicit shell fallback.",
+            weight: 0.5
+          }],
           rationale: "ACP explicit shell fallback"
         },
         securityDecision: "deny",
@@ -867,11 +873,17 @@ export class AcpServer {
       text,
       matchedSkills: [],
       intent: {
+        nativeIntent: "general",
         labels: ["general"],
         confidence: 0.9,
         suggestedToolsets: ["shell-write"],
         suggestedSkills: [],
         confirmationRequired: execution.decision !== "allow",
+        evidence: [{
+          kind: "toolset-derived",
+          detail: "ACP explicit shell fallback uses terminal.run.",
+          weight: 0.9
+        }],
         rationale: "ACP explicit shell fallback"
       },
       securityDecision: execution.decision,

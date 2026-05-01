@@ -3,7 +3,18 @@
   "name": "youtube-knowledge-base",
   "description": "Extract video content and build a reusable knowledge base from a YouTube URL.",
   "version": "0.1.0",
-  "intentLabels": ["youtube-video"],
+  "routing": {
+    "labels": ["web-video", "knowledge-base"],
+    "triggerPatterns": [
+      { "type": "contains", "value": "youtube.com" },
+      { "type": "contains", "value": "youtu.be" },
+      { "type": "contains", "value": "transcript" }
+    ],
+    "requiredToolsets": ["web", "browser", "research", "files"],
+    "confirmation": "policy",
+    "priority": 60
+  },
+  "intentLabels": ["web-video", "knowledge-base"],
   "triggerPatterns": ["youtube\\.com", "youtu\\.be", "transcript"],
   "whenToUse": [
     "The user sends a YouTube URL and asks to summarize, archive, extract, or build a knowledge base.",

@@ -1,3 +1,4 @@
+import type { NativeIntent } from "./intent.js";
 import type { ToolsetName } from "./tool.js";
 
 export type SkillPermissionExpectation =
@@ -61,6 +62,37 @@ export type SkillVisibilityRules = {
   fallbackForTools?: string[];
 };
 
+export type SkillPattern =
+  | { type: "contains"; value: string }
+  | { type: "regex"; value: string }
+  | { type: "attachment-kind"; value: "image" | "document" | "file" | "audio" | "video" | "voice" }
+  | { type: "native-intent"; value: NativeIntent };
+
+export type SkillConfirmationPolicy =
+  | "never"
+  | "ask"
+  | "policy";
+
+export type SkillDeferRule = {
+  when: {
+    nativeIntent?: NativeIntent;
+    modelSupportsVision?: boolean;
+    attachmentKinds?: Array<"image" | "document" | "file" | "audio" | "video" | "voice">;
+    promptMatches?: SkillPattern[];
+  };
+  reason: string;
+};
+
+export type SkillRouting = {
+  labels?: string[];
+  triggerPatterns?: SkillPattern[];
+  negativePatterns?: SkillPattern[];
+  requiredToolsets?: ToolsetName[];
+  confirmation?: SkillConfirmationPolicy;
+  deferWhen?: SkillDeferRule[];
+  priority?: number;
+};
+
 export type SkillResourceKind = "reference" | "template" | "script" | "asset";
 
 export type SkillResourceEntry = {
@@ -85,6 +117,7 @@ export type SkillDefinition = {
   platforms?: string[];
   references?: string[];
   metadata?: Record<string, unknown>;
+  routing?: SkillRouting;
   intentLabels?: string[];
   triggerPatterns?: string[];
   negativePatterns?: string[];

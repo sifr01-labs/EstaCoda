@@ -1,13 +1,49 @@
-import type { IntentLabel, IntentRoute } from "../contracts/intent.js";
-import type { ChannelAttachment } from "../contracts/channel.js";
+import type { ChannelAttachment, ChannelAttachmentKind, ChannelKind } from "../contracts/channel.js";
+import type { IntentLabel, IntentRoute, IntentRouteEvidence, NativeIntent } from "../contracts/intent.js";
 import type { ModelProfile } from "../contracts/provider.js";
-import type { LoadedSkill, SkillDefinition } from "../contracts/skill.js";
+import type { LoadedSkill, SkillDefinition, SkillDeferRule, SkillPattern } from "../contracts/skill.js";
 import type { ToolsetName } from "../contracts/tool.js";
 import type { SkillRegistry } from "../skills/skill-registry.js";
 
 export type IntentRouterOptions = {
   skillRegistry: SkillRegistry;
   model?: ModelProfile;
+};
+
+export type IntentRouteOptions = {
+  attachments?: ChannelAttachment[];
+  channel?: ChannelKind;
+  surface?: ChannelKind;
+  model?: ModelProfile;
+  trustedWorkspace?: boolean;
+};
+
+type SlashInvocationMatch =
+  | {
+      kind: "known";
+      skill: LoadedSkill | SkillDefinition;
+      args: string;
+    }
+  | {
+      kind: "unknown";
+      name: string;
+      args: string;
+    };
+
+type SkillMatch = {
+  skill: LoadedSkill | SkillDefinition;
+  evidence: IntentRouteEvidence[];
+  score: number;
+  deferred: boolean;
+  deferReason?: string;
+};
+
+const NATIVE_INTENT_TOOLSETS: Record<NativeIntent, ToolsetName[]> = {
+  "image-generation": ["media", "files"],
+  "voice-transcription": ["media", "files"],
+  "speech-generation": ["media", "files"],
+  "attachment-analysis": ["media", "files"],
+  "general": []
 };
 
 export class IntentRouter {
@@ -19,300 +55,440 @@ export class IntentRouter {
     this.#model = options.model;
   }
 
-  route(prompt: string, options: { attachments?: ChannelAttachment[] } = {}): IntentRoute {
+  route(prompt: string, options: IntentRouteOptions = {}): IntentRoute {
+    const model = options.model ?? this.#model;
+    const normalized = normalize(prompt);
     const slashInvocation = parseSlashInvocation(prompt, this.#skillRegistry);
 
-    if (slashInvocation !== undefined) {
+    if (slashInvocation?.kind === "known") {
+      const nativeIntent = nativeIntentFromSkill(slashInvocation.skill) ?? "general";
+      const evidence: IntentRouteEvidence[] = [{
+        kind: "slash-invocation",
+        source: slashInvocation.skill.name,
+        detail: `Explicit slash skill invocation for ${slashInvocation.skill.name}.`,
+        weight: 1
+      }];
+      const labels = dedupe([
+        "skill-invocation",
+        ...routingLabels(slashInvocation.skill)
+      ]);
+      const suggestedToolsets = dedupe([
+        ...routingToolsets(slashInvocation.skill),
+        ...slashInvocation.skill.requiredToolsets
+      ]);
+
       return {
-        labels: ["skill-invocation"],
-        confidence: 1,
-        suggestedToolsets: slashInvocation.skill.requiredToolsets,
+        nativeIntent,
+        labels,
+        confidence: confidenceFromEvidence(evidence),
+        suggestedToolsets,
         suggestedSkills: [slashInvocation.skill],
         invocation: {
           name: slashInvocation.skill.name,
           args: slashInvocation.args,
           explicit: true
         },
-        confirmationRequired: false,
+        confirmationRequired: confirmationForSkills([slashInvocation.skill], evidence),
+        evidence,
         rationale: `Explicit slash skill invocation for ${slashInvocation.skill.name}.`
       };
     }
 
-    const normalized = normalize(prompt);
-    const labels = detectLabels(normalized, options.attachments);
-    const suggestedToolsets = toolsetsFor(labels);
-    const promptMatchedSkills = labels.length === 0
-      ? []
-      : this.#skillRegistry
-        .matchPrompt(prompt)
-        .filter((skill) => skillMatchesIntent(skill, labels, normalized));
-    const intentMatchedSkills = this.#skillRegistry
+    if (slashInvocation?.kind === "unknown") {
+      const evidence: IntentRouteEvidence[] = [{
+        kind: "slash-invocation",
+        source: slashInvocation.name,
+        detail: `Unknown slash invocation: /${slashInvocation.name}.`,
+        weight: 1
+      }];
+
+      return {
+        nativeIntent: "general",
+        labels: ["skill-invocation"],
+        confidence: confidenceFromEvidence(evidence),
+        suggestedToolsets: [],
+        suggestedSkills: [],
+        invocation: {
+          name: slashInvocation.name,
+          args: slashInvocation.args,
+          explicit: true
+        },
+        confirmationRequired: false,
+        evidence,
+        rationale: `Unknown slash invocation /${slashInvocation.name}; no skill was selected.`
+      };
+    }
+
+    const native = detectNativeIntent(normalized, options.attachments);
+    const labels = dedupe([
+      native.nativeIntent,
+      ...native.labels
+    ].filter((label) => label !== "general"));
+    const skillMatches = this.#skillRegistry
       .list()
-      .filter((skill) => skillMatchesIntent(skill, labels, normalized));
-    const suggestedSkills = dedupeSkills([...intentMatchedSkills, ...promptMatchedSkills])
-      .filter((skill) => shouldSuggestSkill(skill, normalized, options.attachments, this.#model));
+      .map((skill) => matchSkill(skill, {
+        prompt,
+        normalized,
+        nativeIntent: native.nativeIntent,
+        labels,
+        attachments: options.attachments,
+        model
+      }))
+      .filter((match): match is SkillMatch => match !== undefined)
+      .filter((match) => !match.deferred)
+      .sort(compareSkillMatches);
+    const suggestedSkills = skillMatches.map((match) => match.skill);
+    const evidence = [
+      ...native.evidence,
+      ...skillMatches.flatMap((match) => match.evidence),
+      ...toolsetEvidence(native.nativeIntent, suggestedSkills)
+    ];
+    const suggestedToolsets = dedupe([
+      ...NATIVE_INTENT_TOOLSETS[native.nativeIntent],
+      ...suggestedSkills.flatMap((skill) => routingToolsets(skill))
+    ]);
+    const confirmationRequired = confirmationForSkills(suggestedSkills, evidence);
 
     return {
+      nativeIntent: native.nativeIntent,
       labels: labels.length === 0 ? ["general"] : labels,
-      confidence: confidenceFor(labels, suggestedSkills),
+      confidence: confidenceFromEvidence(evidence),
       suggestedToolsets,
       suggestedSkills,
-      confirmationRequired: requiresConfirmation(labels),
-      rationale: rationaleFor(labels, suggestedSkills)
+      confirmationRequired,
+      evidence,
+      rationale: rationaleFor(native.nativeIntent, labels, suggestedSkills, evidence)
     };
   }
 }
 
-function detectLabels(normalized: string, attachments: ChannelAttachment[] | undefined): IntentLabel[] {
-  const labels: IntentLabel[] = [];
+function detectNativeIntent(normalized: string, attachments: ChannelAttachment[] | undefined): {
+  nativeIntent: NativeIntent;
+  labels: IntentLabel[];
+  evidence: IntentRouteEvidence[];
+} {
+  const readyAttachments = readyRoutableAttachments(attachments);
 
-  if (hasAny(normalized, ["youtube.com", "youtu.be", "youtube", "transcript"])) {
-    labels.push("youtube-video");
+  if (readyAttachments.length > 0) {
+    return {
+      nativeIntent: "attachment-analysis",
+      labels: ["attachment-analysis"],
+      evidence: [{
+        kind: "attachment",
+        detail: `Ready attachment context: ${readyAttachments.map((attachment) => attachment.kind).join(", ")}.`,
+        weight: 0.8
+      }]
+    };
   }
 
-  if (hasAny(normalized, ["knowledge base", "kb", "durable notes", "archive", "everything discussed"])) {
-    labels.push("knowledge-base");
+  if (matchesImageGeneration(normalized)) {
+    return {
+      nativeIntent: "image-generation",
+      labels: ["image-generation"],
+      evidence: [{
+        kind: "native-intent",
+        detail: "Prompt explicitly asks to create or generate an image.",
+        weight: 0.95
+      }]
+    };
   }
 
-  if (hasAny(normalized, ["ascii", "terminal-style animation", "logo animation", "animated logo", "generate an image", "create an image", "make an image"])) {
-    labels.push("media-generation");
+  if (matchesVoiceTranscription(normalized)) {
+    return {
+      nativeIntent: "voice-transcription",
+      labels: ["voice-transcription"],
+      evidence: [{
+        kind: "native-intent",
+        detail: "Prompt explicitly asks to transcribe or read audio.",
+        weight: 0.9
+      }]
+    };
   }
 
-  if (isChannelMediaReference(normalized, attachments)) {
-    labels.push("telegram-media");
+  if (matchesSpeechGeneration(normalized)) {
+    return {
+      nativeIntent: "speech-generation",
+      labels: ["speech-generation"],
+      evidence: [{
+        kind: "native-intent",
+        detail: "Prompt explicitly asks for speech or read-aloud output.",
+        weight: 0.9
+      }]
+    };
   }
 
-  if (hasAny(normalized, [".pdf", "pdf", "document"])) {
-    labels.push("pdf-document");
-  }
-
-  if (hasAny(normalized, ["fix", "codebase", "test", "bug", "typescript", "python", "repo"])) {
-    labels.push("codebase-task");
-  }
-
-  if (hasAny(normalized, ["research", "look up", "search", "sources", "compare"])) {
-    labels.push("web-research");
-  }
-
-  if (hasAny(normalized, ["create skill", "make this reusable", "turn this into a skill", "skill from"])) {
-    labels.push("skill-creation");
-  }
-
-  if (hasAny(normalized, ["remember", "from now on", "my preference", "i prefer"])) {
-    labels.push("memory-update");
-  }
-
-  return dedupe(labels);
+  return {
+    nativeIntent: "general",
+    labels: [],
+    evidence: [{
+      kind: "native-intent",
+      detail: "No narrow native intent matched.",
+      weight: 0.35
+    }]
+  };
 }
 
-function toolsetsFor(labels: IntentLabel[]): ToolsetName[] {
-  const toolsets: ToolsetName[] = [];
+function matchSkill(skill: LoadedSkill | SkillDefinition, input: {
+  prompt: string;
+  normalized: string;
+  nativeIntent: NativeIntent;
+  labels: IntentLabel[];
+  attachments?: ChannelAttachment[];
+  model?: ModelProfile;
+}): SkillMatch | undefined {
+  const routing = skill.routing;
+  if (routing === undefined) {
+    return undefined;
+  }
 
-  for (const label of labels) {
-    if (label === "youtube-video") {
-      toolsets.push("web", "browser", "research");
-    }
+  const negative = firstMatchingPattern(routing.negativePatterns, input);
+  if (negative !== undefined) {
+    return {
+      skill,
+      evidence: [{
+        kind: "skill-negative-pattern",
+        source: skill.name,
+        detail: `Negative pattern matched: ${describePattern(negative)}.`,
+        weight: -1
+      }],
+      score: -1,
+      deferred: true,
+      deferReason: "Negative routing pattern matched."
+    };
+  }
 
-    if (label === "knowledge-base") {
-      toolsets.push("research", "files", "memory");
-    }
+  const evidence: IntentRouteEvidence[] = [];
 
-    if (label === "telegram-media") {
-      toolsets.push("telegram", "media", "files");
-    }
-
-    if (label === "media-generation") {
-      toolsets.push("media", "files", "shell-write", "web", "browser", "research");
-    }
-
-    if (label === "pdf-document") {
-      toolsets.push("media", "files", "research");
-    }
-
-    if (label === "codebase-task") {
-      toolsets.push("coding", "files", "shell-readonly");
-    }
-
-    if (label === "web-research") {
-      toolsets.push("web", "browser", "research");
-    }
-
-    if (label === "skill-creation") {
-      toolsets.push("research", "files", "memory");
-    }
-
-    if (label === "memory-update") {
-      toolsets.push("memory");
+  for (const pattern of routing.triggerPatterns ?? []) {
+    if (patternMatches(pattern, input)) {
+      evidence.push({
+        kind: pattern.type === "native-intent"
+          ? "native-intent"
+          : pattern.type === "attachment-kind"
+            ? "attachment"
+            : "skill-trigger-pattern",
+        source: skill.name,
+        detail: `Matched ${describePattern(pattern)}.`,
+        weight: pattern.type === "regex" ? 0.75 : 0.7
+      });
     }
   }
 
-  return dedupe(toolsets);
+  const labelMatches = (routing.labels ?? []).filter((label) => input.labels.includes(label));
+  for (const label of labelMatches) {
+    evidence.push({
+      kind: "skill-routing-label",
+      source: skill.name,
+      detail: `Skill routing label matched: ${label}.`,
+      weight: 0.7
+    });
+  }
+
+  const deferred = firstMatchingDeferRule(routing.deferWhen, input);
+  if (deferred !== undefined) {
+    evidence.push({
+      kind: "skill-defer-rule",
+      source: skill.name,
+      detail: deferred.reason,
+      weight: 0
+    });
+    return {
+      skill,
+      evidence,
+      score: 0,
+      deferred: true,
+      deferReason: deferred.reason
+    };
+  }
+
+  if (evidence.length === 0) {
+    return undefined;
+  }
+
+  return {
+    skill,
+    evidence,
+    score: Math.max(...evidence.map((entry) => entry.weight ?? 0)) + ((routing.priority ?? 0) / 1_000),
+    deferred: false
+  };
 }
 
-function skillMatchesIntent(skill: SkillDefinition, labels: IntentLabel[], normalized: string): boolean {
-  if (matchesDeclaredPattern(skill.negativePatterns, normalized)) {
-    return false;
-  }
-
-  if ((skill.intentLabels ?? []).some((label) => labels.includes(label as IntentLabel))) {
-    return true;
-  }
-
-  if (matchesDeclaredPattern(skill.triggerPatterns, normalized)) {
-    return true;
-  }
-
-  if (skill.name === "youtube-knowledge-base") {
-    return labels.includes("youtube-video");
-  }
-
-  if (skill.name === "telegram-media-analysis") {
-    return labels.includes("telegram-media");
-  }
-
-  if (skill.name === "ascii-video") {
-    return labels.includes("media-generation") && hasAny(normalized, ["ascii", "terminal-style animation", "logo animation", "animated logo"]);
-  }
-
-  return false;
+function firstMatchingPattern(patterns: SkillPattern[] | undefined, input: Parameters<typeof patternMatches>[1]): SkillPattern | undefined {
+  return (patterns ?? []).find((pattern) => patternMatches(pattern, input));
 }
 
-function matchesDeclaredPattern(patterns: string[] | undefined, normalized: string): boolean {
-  if (patterns === undefined) {
-    return false;
-  }
-
-  return patterns.some((pattern) => {
-    const trimmed = pattern.trim();
-    if (trimmed.length === 0) {
+function firstMatchingDeferRule(rules: SkillDeferRule[] | undefined, input: {
+  prompt: string;
+  normalized: string;
+  nativeIntent: NativeIntent;
+  attachments?: ChannelAttachment[];
+  model?: ModelProfile;
+}): SkillDeferRule | undefined {
+  return (rules ?? []).find((rule) => {
+    if (rule.when.nativeIntent !== undefined && rule.when.nativeIntent !== input.nativeIntent) {
       return false;
     }
-    try {
-      return new RegExp(trimmed, "iu").test(normalized);
-    } catch {
-      return normalized.includes(trimmed.toLowerCase());
+    if (rule.when.modelSupportsVision !== undefined && rule.when.modelSupportsVision !== (input.model?.supportsVision === true)) {
+      return false;
     }
+    const attachmentKinds = rule.when.attachmentKinds ?? [];
+    if (attachmentKinds.length > 0) {
+      const kinds = new Set(readyRoutableAttachments(input.attachments).map((attachment) => attachment.kind));
+      if (!attachmentKinds.some((kind) => kinds.has(kind))) {
+        return false;
+      }
+    }
+    const promptMatches = rule.when.promptMatches ?? [];
+    if (promptMatches.length > 0 && !promptMatches.some((pattern) => patternMatches(pattern, input))) {
+      return false;
+    }
+
+    return true;
   });
 }
 
-function shouldSuggestSkill(
-  skill: LoadedSkill | SkillDefinition,
-  normalized: string,
-  attachments: ChannelAttachment[] | undefined,
-  model: ModelProfile | undefined
-): boolean {
-  if (skill.name !== "telegram-media-analysis") {
-    return true;
+function patternMatches(pattern: SkillPattern, input: {
+  normalized: string;
+  nativeIntent: NativeIntent;
+  attachments?: ChannelAttachment[];
+}): boolean {
+  switch (pattern.type) {
+    case "contains":
+      return input.normalized.includes(normalize(pattern.value));
+    case "regex":
+      try {
+        return new RegExp(pattern.value, "iu").test(input.normalized);
+      } catch {
+        return input.normalized.includes(normalize(pattern.value));
+      }
+    case "attachment-kind":
+      return readyRoutableAttachments(input.attachments).some((attachment) => attachment.kind === pattern.value);
+    case "native-intent":
+      return input.nativeIntent === pattern.value;
   }
+}
 
-  const readyAttachments = (attachments ?? []).filter((attachment) =>
-    attachment.status === undefined || attachment.status === "ready"
+function readyRoutableAttachments(attachments: ChannelAttachment[] | undefined): Array<ChannelAttachment & { kind: Exclude<ChannelAttachmentKind, "link" | "unknown"> }> {
+  return (attachments ?? []).filter((attachment): attachment is ChannelAttachment & { kind: Exclude<ChannelAttachmentKind, "link" | "unknown"> } =>
+    (attachment.status === undefined || attachment.status === "ready") &&
+    isRoutableAttachmentKind(attachment.kind)
   );
-  const imageOnly = readyAttachments.length > 0 && readyAttachments.every((attachment) => attachment.kind === "image");
-  const simpleVisionAsk = hasAny(normalized, [
-    "inspect this image",
-    "what do you see",
-    "what is in this image",
-    "include any visible text",
-    "extract any visible text",
-    "summarize what the image is showing",
-    "tell me exactly what you see"
-  ]);
-
-  if (imageOnly && model?.supportsVision === true && simpleVisionAsk) {
-    return false;
-  }
-
-  return true;
 }
 
-function confidenceFor(labels: IntentLabel[], skills: Array<LoadedSkill | SkillDefinition>): number {
-  if (skills.length > 0 && labels.length >= 2) {
-    return 0.9;
+function matchesImageGeneration(normalized: string): boolean {
+  return /\b(generate|create|make|draw|render)\b.{0,80}\b(image|picture|illustration|icon|poster|logo|visual|artwork)\b/iu.test(normalized) ||
+    /\b(image|picture|illustration|icon|poster|logo|visual|artwork)\b.{0,80}\b(generate|create|make|draw|render)\b/iu.test(normalized);
+}
+
+function matchesVoiceTranscription(normalized: string): boolean {
+  return /\b(transcribe|transcription|read|summarize)\b.{0,80}\b(audio|voice|voice note|recording|speech)\b/iu.test(normalized);
+}
+
+function matchesSpeechGeneration(normalized: string): boolean {
+  return /\b(text to speech|tts|read aloud|speak this|say this|spoken reply|generate speech)\b/iu.test(normalized);
+}
+
+function routingLabels(skill: LoadedSkill | SkillDefinition): string[] {
+  return skill.routing?.labels ?? [];
+}
+
+function routingToolsets(skill: LoadedSkill | SkillDefinition): ToolsetName[] {
+  return skill.routing?.requiredToolsets ?? skill.requiredToolsets;
+}
+
+function nativeIntentFromSkill(skill: LoadedSkill | SkillDefinition): NativeIntent | undefined {
+  return skill.routing?.triggerPatterns?.find((pattern): pattern is SkillPattern & { type: "native-intent" } =>
+    pattern.type === "native-intent"
+  )?.value;
+}
+
+function confirmationForSkills(skills: Array<LoadedSkill | SkillDefinition>, evidence: IntentRouteEvidence[]): boolean {
+  const requested = skills.some((skill) => skill.routing?.confirmation === "ask");
+  if (requested) {
+    evidence.push({
+      kind: "confirmation-policy",
+      detail: "Skill routing metadata requests confirmation.",
+      weight: 0
+    });
   }
 
+  return requested;
+}
+
+function toolsetEvidence(nativeIntent: NativeIntent, skills: Array<LoadedSkill | SkillDefinition>): IntentRouteEvidence[] {
+  const evidence: IntentRouteEvidence[] = [];
+  const nativeToolsets = NATIVE_INTENT_TOOLSETS[nativeIntent];
+  if (nativeToolsets.length > 0) {
+    evidence.push({
+      kind: "toolset-derived",
+      detail: `Native intent ${nativeIntent} suggests ${nativeToolsets.join(", ")}.`,
+      weight: 0
+    });
+  }
+  for (const skill of skills) {
+    const toolsets = routingToolsets(skill);
+    if (toolsets.length > 0) {
+      evidence.push({
+        kind: "toolset-derived",
+        source: skill.name,
+        detail: `Skill metadata suggests ${toolsets.join(", ")}.`,
+        weight: 0
+      });
+    }
+  }
+
+  return evidence;
+}
+
+function confidenceFromEvidence(evidence: IntentRouteEvidence[]): number {
+  return Math.max(0.35, ...evidence.map((entry) => entry.weight ?? 0));
+}
+
+function compareSkillMatches(left: SkillMatch, right: SkillMatch): number {
+  return right.score - left.score ||
+    (right.skill.routing?.priority ?? 0) - (left.skill.routing?.priority ?? 0) ||
+    left.skill.name.localeCompare(right.skill.name);
+}
+
+function rationaleFor(nativeIntent: NativeIntent, labels: string[], skills: Array<LoadedSkill | SkillDefinition>, evidence: IntentRouteEvidence[]): string {
   if (skills.length > 0) {
-    return 0.8;
+    return `Matched ${skills.map((skill) => skill.name).join(", ")} via ${evidence.map((entry) => entry.kind).join(", ")}.`;
   }
-
+  if (nativeIntent !== "general") {
+    return `Detected native intent ${nativeIntent}.`;
+  }
   if (labels.length > 0) {
-    return 0.65;
-  }
-
-  return 0.35;
-}
-
-function requiresConfirmation(labels: IntentLabel[]): boolean {
-  return labels.includes("memory-update") || labels.includes("skill-creation");
-}
-
-function rationaleFor(labels: IntentLabel[], skills: Array<LoadedSkill | SkillDefinition>): string {
-  if (skills.length > 0) {
-    return `Matched ${skills.map((skill) => skill.name).join(", ")} from intent labels ${labels.join(", ")}.`;
-  }
-
-  if (labels.length > 0) {
-    return `Detected intent labels ${labels.join(", ")} but no skill matched yet.`;
+    return `Detected route labels ${labels.join(", ")}.`;
   }
 
   return "No specialized intent detected.";
 }
 
-function hasAny(value: string, needles: string[]): boolean {
-  return needles.some((needle) => value.includes(needle));
-}
-
-function isChannelMediaReference(normalized: string, attachments: ChannelAttachment[] | undefined): boolean {
-  const channelSignals = ["telegram", "channel", "chat", "uploaded", "sent it", "sent the", "shared here"];
-  const mediaSignals = ["image", "photo", "pdf", "document", "file", "audio", "video", "voice note", "attachment"];
-
-  if ((attachments ?? []).some((attachment) =>
-    attachment.status !== undefined &&
-    attachment.status !== "ready"
-      ? false
-      :
-    attachment.kind === "image" ||
-    attachment.kind === "document" ||
-    attachment.kind === "file" ||
-    attachment.kind === "audio" ||
-    attachment.kind === "video" ||
-    attachment.kind === "voice"
-  )) {
-    return true;
-  }
-
-  return hasAny(normalized, ["voice note"]) ||
-    (hasAny(normalized, channelSignals) && hasAny(normalized, mediaSignals));
+function describePattern(pattern: SkillPattern): string {
+  return `${pattern.type}:${pattern.value}`;
 }
 
 function normalize(value: string): string {
-  return value.toLowerCase().replace(/\s+/g, " ").trim();
+  return value.toLowerCase().replace(/\s+/gu, " ").trim();
 }
 
 function dedupe<T>(values: T[]): T[] {
   return [...new Set(values)];
 }
 
-function dedupeSkills(skills: Array<LoadedSkill | SkillDefinition>): Array<LoadedSkill | SkillDefinition> {
-  const seen = new Set<string>();
-  const result: Array<LoadedSkill | SkillDefinition> = [];
-
-  for (const skill of skills) {
-    if (seen.has(skill.name)) {
-      continue;
-    }
-
-    seen.add(skill.name);
-    result.push(skill);
-  }
-
-  return result;
+function isRoutableAttachmentKind(kind: ChannelAttachmentKind): kind is Exclude<ChannelAttachmentKind, "link" | "unknown"> {
+  return kind === "image" ||
+    kind === "document" ||
+    kind === "file" ||
+    kind === "audio" ||
+    kind === "video" ||
+    kind === "voice";
 }
 
 function parseSlashInvocation(
   prompt: string,
   registry: SkillRegistry
-): { skill: LoadedSkill | SkillDefinition; args: string } | undefined {
+): SlashInvocationMatch | undefined {
   const trimmed = prompt.trim();
   const match = /^\/([a-zA-Z0-9][a-zA-Z0-9._-]*)(?:\s+(?<args>[\s\S]*))?$/u.exec(trimmed);
 
@@ -320,15 +496,11 @@ function parseSlashInvocation(
     return undefined;
   }
 
-  const skillName = match[1];
-  const skill = registry.get(skillName);
+  const name = match[1];
+  const args = match.groups?.args ?? "";
+  const skill = registry.get(name);
 
-  if (skill === undefined) {
-    return undefined;
-  }
-
-  return {
-    skill,
-    args: match.groups?.args ?? ""
-  };
+  return skill === undefined
+    ? { kind: "unknown", name, args }
+    : { kind: "known", skill, args };
 }

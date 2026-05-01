@@ -4,8 +4,22 @@
   "description": "Create ASCII art videos, animated logo treatments, and generative terminal-style motion pieces.",
   "version": "0.1.0",
   "category": "media",
-  "intentLabels": ["ascii-video"],
-  "triggerPatterns": ["ascii", "terminal-style animation", "logo animation", "animated logo"],
+  "routing": {
+    "labels": ["ascii-animation"],
+    "triggerPatterns": [
+      { "type": "contains", "value": "ascii animation" },
+      { "type": "contains", "value": "terminal-style animation" },
+      { "type": "contains", "value": "animated terminal logo" },
+      { "type": "contains", "value": "ascii logo" },
+      { "type": "contains", "value": "ascii video" },
+      { "type": "contains", "value": "animated logo" }
+    ],
+    "requiredToolsets": ["files", "shell-write"],
+    "confirmation": "policy",
+    "priority": 40
+  },
+  "intentLabels": ["ascii-animation"],
+  "triggerPatterns": ["ascii animation", "terminal-style animation", "animated terminal logo", "ascii logo", "ascii video", "animated logo"],
   "whenToUse": [
     "The user invokes /ascii-video.",
     "The user asks for an ASCII art animation, ASCII video, logo animation, or terminal-style motion piece.",

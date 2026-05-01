@@ -66,6 +66,12 @@ export type RuntimeEvent =
       reason: string;
     }
   | {
+      kind: "security-risk-escalated";
+      from: string;
+      to: string;
+      reason: string;
+    }
+  | {
       kind: "agent-cancelled";
       reason: string;
       resumeNote?: string;

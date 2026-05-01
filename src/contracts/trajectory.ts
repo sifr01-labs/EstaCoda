@@ -18,6 +18,8 @@ export type TrajectoryEventKind =
   | "provider-continuation"
   | "provider-iteration"
   | "provider-budget-exhausted"
+  | "skill-route-usage"
+  | "security-risk-escalated"
   | "agent-cancelled"
   | "prompt-assembled"
   | "session-history-packed"

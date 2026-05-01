@@ -88,6 +88,8 @@ export class SkillRegistry {
       const searchable = [
         skill.name,
         skill.description,
+        ...(skill.routing?.labels ?? []),
+        ...(skill.routing?.triggerPatterns?.map((pattern) => pattern.value) ?? []),
         ...(skill.intentLabels ?? []),
         ...(skill.triggerPatterns ?? []),
         ...skill.whenToUse,

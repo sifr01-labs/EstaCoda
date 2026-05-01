@@ -189,6 +189,26 @@ export type SessionEvent =
       reason: string;
     }
   | {
+      kind: "skill-route-usage";
+      timestamp: string;
+      skillName?: string;
+      nativeIntent: string;
+      labels: string[];
+      selected: boolean;
+      invoked: boolean;
+      deferred: boolean;
+      deferReason?: string;
+      confidence: number;
+      evidenceKinds: string[];
+      surface?: string;
+    }
+  | {
+      kind: "security-risk-escalated";
+      from: ToolRiskClass;
+      to: ToolRiskClass;
+      reason: string;
+    }
+  | {
       kind: "agent-cancelled";
       reason: string;
       resumeNote?: string;

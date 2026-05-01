@@ -21,7 +21,7 @@ import type {
   SkillWorkflowStep
 } from "../contracts/skill.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
-import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
+import type { ToolDefinition, ToolRiskClass, ToolsetName } from "../contracts/tool.js";
 import type { AgentProfileMode, AgentResponseLanguage, UiFlavor, UiLanguage } from "../config/runtime-config.js";
 import type { ContextReferenceExpander } from "../context/context-reference-expander.js";
 import type { ProviderExecutionResult, ProviderExecutor, ProviderRuntimeEvent } from "../providers/provider-executor.js";
@@ -302,7 +302,11 @@ export class AgentLoop {
     }
     const intent = attachmentFailureResponse === undefined
       ? this.#intentRouter.route(routedText, {
-        attachments
+        attachments,
+        channel: input.channel,
+        surface: input.channel,
+        model: this.#model,
+        trustedWorkspace
       })
       : directAttachmentFailureIntent();
     if (attachmentFailureResponse !== undefined) {
@@ -400,10 +404,16 @@ export class AgentLoop {
 
     this.#trajectoryRecorder.record("progress", {
       message: "intent routed",
+      nativeIntent: intent.nativeIntent,
       labels: intent.labels,
       confidence: intent.confidence,
       confirmationRequired: intent.confirmationRequired,
       suggestedToolsets: intent.suggestedToolsets
+    });
+    await this.#recordRouteUsage({
+      intent,
+      selectedSkill,
+      channel: input.channel
     });
 
     if (selectedSkill !== undefined) {
@@ -943,10 +953,7 @@ export class AgentLoop {
     signal?: AbortSignal;
     onEvent?: RuntimeEventSink;
   }): Promise<{ executions: ToolExecutionRecord[]; plans: ToolCallPlan[] }> {
-    if (
-      !input.intent.labels.includes("media-generation") ||
-      input.intent.suggestedSkills.some((skill) => skill.name === "ascii-video")
-    ) {
+    if (input.intent.nativeIntent !== "image-generation") {
       return { executions: [], plans: [] };
     }
 
@@ -1032,7 +1039,18 @@ export class AgentLoop {
       });
     }
 
+    let maxObservedRisk: ToolRiskClass = "read-only-local";
     for (const group of groupProviderToolPlans(pending, this.#budgets.maxConcurrentSafeTools)) {
+      const nextRisk = maxRiskClass(group.entries.map((entry) => entry.definition?.riskClass));
+      if (riskRank(nextRisk) > riskRank(maxObservedRisk)) {
+        await this.#recordSecurityRiskEscalation({
+          from: maxObservedRisk,
+          to: nextRisk,
+          onEvent: input.onEvent
+        });
+        maxObservedRisk = nextRisk;
+      }
+
       if (group.concurrent) {
         const groupExecutions = await Promise.all(group.entries.map(async ({ plan }) =>
           this.#executeProviderToolPlan({
@@ -1515,6 +1533,54 @@ export class AgentLoop {
     this.#trajectoryRecorder.record("provider-iteration", input);
   }
 
+  async #recordRouteUsage(input: {
+    intent: IntentRoute;
+    selectedSkill: LoadedSkill | SkillDefinition | undefined;
+    channel: ChannelKind;
+  }): Promise<void> {
+    const event = {
+      kind: "skill-route-usage" as const,
+      timestamp: new Date().toISOString(),
+      skillName: input.selectedSkill?.name,
+      nativeIntent: input.intent.nativeIntent,
+      labels: input.intent.labels,
+      selected: input.selectedSkill !== undefined,
+      invoked: input.intent.invocation?.explicit === true,
+      deferred: input.intent.evidence.some((entry) => entry.kind === "skill-defer-rule"),
+      deferReason: input.intent.evidence.find((entry) => entry.kind === "skill-defer-rule")?.detail,
+      confidence: input.intent.confidence,
+      evidenceKinds: input.intent.evidence.map((entry) => entry.kind),
+      surface: input.channel
+    };
+    await this.#sessionDb.appendEvent(this.#sessionId, event);
+    this.#trajectoryRecorder.record("skill-route-usage", event);
+  }
+
+  async #recordSecurityRiskEscalation(input: {
+    from: ToolRiskClass;
+    to: ToolRiskClass;
+    onEvent?: RuntimeEventSink;
+  }): Promise<void> {
+    const reason = "provider proposed higher-risk tool call than initial turn posture";
+    await this.#sessionDb.appendEvent(this.#sessionId, {
+      kind: "security-risk-escalated",
+      from: input.from,
+      to: input.to,
+      reason
+    });
+    this.#trajectoryRecorder.record("security-risk-escalated", {
+      from: input.from,
+      to: input.to,
+      reason
+    });
+    await emit(input.onEvent, {
+      kind: "security-risk-escalated",
+      from: input.from,
+      to: input.to,
+      reason
+    });
+  }
+
   async #completeWithProvider(input: {
     userText: string;
     routedText: string;
@@ -1949,11 +2015,17 @@ function cancelledResponse(input: {
     ].join("\n"),
     matchedSkills: input.selectedSkill === undefined ? [] : [input.selectedSkill.name],
     intent: input.intent ?? {
+      nativeIntent: "general",
       labels: ["general"],
       confidence: 1,
       suggestedSkills: [],
       suggestedToolsets: [],
       confirmationRequired: false,
+      evidence: [{
+        kind: "native-intent",
+        detail: "The active turn was cancelled before completion.",
+        weight: 1
+      }],
       rationale: "The active turn was cancelled before completion."
     },
     securityDecision: input.securityDecision ?? "allow",
@@ -2073,11 +2145,11 @@ function buildAttachmentFailureResponse(attachments: ChannelAttachment[] | undef
   if (statuses.size === 1) {
     const status = failed[0] === undefined ? "download-failed" : inferAttachmentStatus(failed[0]);
     if (status === "unsupported") {
-      return failed[0]?.failureMessage ?? "I can't inspect this attachment type yet in Telegram. Try sending an image, PDF, or text-like document.";
+      return failed[0]?.failureMessage ?? "I can't inspect this attachment type yet. Try sending an image, PDF, or text-like document.";
     }
 
     if (status === "too-large") {
-      return failed[0]?.failureMessage ?? "That attachment is too large for this Telegram workflow right now. Please send a smaller file and try again.";
+      return failed[0]?.failureMessage ?? "That attachment is too large for this workflow right now. Please send a smaller file and try again.";
     }
 
     if (status === "missing-file") {
@@ -2085,7 +2157,7 @@ function buildAttachmentFailureResponse(attachments: ChannelAttachment[] | undef
     }
   }
 
-  return "I couldn't inspect the attachment that came through Telegram. Please resend it as an image, PDF, or smaller supported document and I'll try again.";
+  return "I couldn't inspect the attachment. Please resend it as an image, PDF, or smaller supported document and I'll try again.";
 }
 
 function inferAttachmentStatus(attachment: ChannelAttachment): NonNullable<ChannelAttachment["status"]> {
@@ -2094,11 +2166,17 @@ function inferAttachmentStatus(attachment: ChannelAttachment): NonNullable<Chann
 
 function directAttachmentFailureIntent(): IntentRoute {
   return {
+    nativeIntent: "general",
     labels: ["general"],
     confidence: 1,
     suggestedToolsets: [],
     suggestedSkills: [],
     confirmationRequired: false,
+    evidence: [{
+      kind: "attachment",
+      detail: "Attachment preflight failed before routing.",
+      weight: 1
+    }],
     rationale: "EstaCoda handled a channel attachment failure before provider/tool execution."
   };
 }
@@ -2140,6 +2218,34 @@ function appendArtifactSummary(text: string, artifacts: ArtifactRecord[]): strin
 
 function suppressImageGenerationTools(tools: OpenAICompatibleToolSchema[]): OpenAICompatibleToolSchema[] {
   return tools.filter((tool) => tool.function.name !== "image_generate" && tool.function.name !== "image.generate");
+}
+
+function maxRiskClass(values: Array<ToolRiskClass | undefined>): ToolRiskClass {
+  return values.reduce<ToolRiskClass>((max, value) =>
+    value === undefined || riskRank(value) <= riskRank(max) ? max : value, "read-only-local");
+}
+
+function riskRank(value: ToolRiskClass): number {
+  switch (value) {
+    case "read-only-local":
+      return 1;
+    case "read-only-network":
+      return 2;
+    case "workspace-write":
+      return 3;
+    case "shared-state-mutation":
+      return 4;
+    case "external-side-effect":
+      return 5;
+    case "credential-access":
+      return 6;
+    case "destructive-local":
+      return 7;
+    case "spend-money":
+      return 8;
+    case "sandbox-escape":
+      return 9;
+  }
 }
 
 function renderArtifactSummary(artifacts: ArtifactRecord[]): string {

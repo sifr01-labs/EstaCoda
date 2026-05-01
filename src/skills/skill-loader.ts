@@ -5,13 +5,16 @@ import type {
   SkillConfigField,
   SkillDefinition,
   SkillEvaluation,
+  SkillPattern,
   SkillPermissionExpectation,
+  SkillRouting,
   SkillResourceEntry,
   SkillResourceKind,
   SkillSourceKind,
   SkillVisibilityRules,
   SkillWorkflowStep
 } from "../contracts/skill.js";
+import type { NativeIntent } from "../contracts/intent.js";
 import type { ToolsetName } from "../contracts/tool.js";
 
 const MAX_SKILL_SCAN_DEPTH = 8;
@@ -159,6 +162,7 @@ function validateSkillDefinition(value: unknown): SkillDefinition {
     negative_patterns?: string[];
     optional_toolsets?: string[];
     visibility?: Record<string, unknown>;
+    routing?: unknown;
   };
   const inferredVisibility = mergeVisibilityRules(
     parseVisibilityRules(definition.visibility),
@@ -168,6 +172,17 @@ function validateSkillDefinition(value: unknown): SkillDefinition {
 
   assertString(definition.name, "name");
   assertString(definition.description, "description");
+
+  const legacyIntentLabels = stringArrayOrEmpty(definition.intentLabels ?? definition.intent_labels);
+  const legacyTriggerPatterns = legacyPatternArray(definition.triggerPatterns ?? definition.trigger_patterns);
+  const legacyNegativePatterns = legacyPatternArray(definition.negativePatterns ?? definition.negative_patterns);
+  const requiredToolsets = stringArrayOrDefault(definition.requiredToolsets ?? definition.required_toolsets ?? definition.toolsets ?? definition.tools, ["core"]);
+  const routing = normalizeSkillRouting(definition.routing, {
+    labels: legacyIntentLabels,
+    triggerPatterns: legacyTriggerPatterns,
+    negativePatterns: legacyNegativePatterns,
+    requiredToolsets
+  });
 
   const normalized: SkillDefinition = {
     name: definition.name,
@@ -180,11 +195,12 @@ function validateSkillDefinition(value: unknown): SkillDefinition {
       ...stringArrayOrEmpty(definition.additional_files)
     ],
     metadata: definition.metadata,
-    intentLabels: stringArrayOrEmpty(definition.intentLabels ?? definition.intent_labels),
-    triggerPatterns: stringArrayOrEmpty(definition.triggerPatterns ?? definition.trigger_patterns),
-    negativePatterns: stringArrayOrEmpty(definition.negativePatterns ?? definition.negative_patterns),
+    routing,
+    intentLabels: legacyIntentLabels,
+    triggerPatterns: legacyTriggerPatterns.map(patternToLegacyString),
+    negativePatterns: legacyNegativePatterns.map(patternToLegacyString),
     whenToUse: stringArrayOrDefault(definition.whenToUse ?? definition.when_to_use, [definition.description]),
-    requiredToolsets: stringArrayOrDefault(definition.requiredToolsets ?? definition.required_toolsets ?? definition.toolsets ?? definition.tools, ["core"]),
+    requiredToolsets,
     optionalToolsets: stringArrayOrEmpty(definition.optionalToolsets ?? definition.optional_toolsets),
     requiredEnvironmentVariables: stringArrayOrEmpty(definition.requiredEnvironmentVariables ?? definition.required_environment_variables),
     requiredCredentialFiles: stringArrayOrEmpty(definition.requiredCredentialFiles ?? definition.required_credential_files),
@@ -195,7 +211,7 @@ function validateSkillDefinition(value: unknown): SkillDefinition {
     workflow: normalizeWorkflow(definition.workflow, {
       id: "run",
       description: definition.description,
-      toolsets: stringArrayOrDefault(definition.requiredToolsets ?? definition.required_toolsets ?? definition.toolsets ?? definition.tools, ["core"])
+      toolsets: requiredToolsets
     }),
     permissionExpectations: skillPermissionExpectations(definition.permissionExpectations ?? definition.permission_expectations),
     examples: stringArrayOrDefault(definition.examples, []),
@@ -203,6 +219,160 @@ function validateSkillDefinition(value: unknown): SkillDefinition {
   };
 
   return normalized;
+}
+
+function normalizeSkillRouting(value: unknown, legacy: Required<Pick<SkillRouting, "labels" | "triggerPatterns" | "negativePatterns" | "requiredToolsets">>): SkillRouting {
+  const explicit = isRecord(value) ? value : {};
+  const labels = dedupeStrings([
+    ...normalizeStringList(explicit.labels),
+    ...legacy.labels
+  ]);
+  const triggerPatterns = dedupePatterns([
+    ...normalizeSkillPatterns(explicit.triggerPatterns),
+    ...legacy.triggerPatterns
+  ]);
+  const negativePatterns = dedupePatterns([
+    ...normalizeSkillPatterns(explicit.negativePatterns),
+    ...legacy.negativePatterns
+  ]);
+  const requiredToolsets = dedupeStrings([
+    ...normalizeStringList(explicit.requiredToolsets),
+    ...legacy.requiredToolsets
+  ]) as ToolsetName[];
+  const confirmation = normalizeConfirmation(explicit.confirmation);
+  const deferWhen = normalizeDeferRules(explicit.deferWhen);
+  const priority = typeof explicit.priority === "number" && Number.isFinite(explicit.priority)
+    ? explicit.priority
+    : undefined;
+
+  return {
+    labels,
+    triggerPatterns,
+    negativePatterns,
+    requiredToolsets,
+    confirmation,
+    deferWhen,
+    priority
+  };
+}
+
+function legacyPatternArray(value: unknown): SkillPattern[] {
+  return normalizeStringList(value).map((pattern) => ({
+    type: "regex",
+    value: pattern
+  }));
+}
+
+function normalizeSkillPatterns(value: unknown): SkillPattern[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const patterns: SkillPattern[] = [];
+  for (const entry of value) {
+    const pattern = normalizeSkillPattern(entry);
+    if (pattern !== undefined) {
+      patterns.push(pattern);
+    }
+  }
+
+  return patterns;
+}
+
+function normalizeSkillPattern(value: unknown): SkillPattern | undefined {
+  if (typeof value === "string") {
+    return { type: "regex", value };
+  }
+
+  if (!isRecord(value) || typeof value.type !== "string" || typeof value.value !== "string") {
+    return undefined;
+  }
+
+  if (value.type === "contains" || value.type === "regex") {
+    return { type: value.type, value: value.value };
+  }
+
+  if (value.type === "attachment-kind" && isRoutableAttachmentKind(value.value)) {
+    return { type: "attachment-kind", value: value.value };
+  }
+
+  if (value.type === "native-intent" && isNativeIntent(value.value)) {
+    return { type: "native-intent", value: value.value };
+  }
+
+  return undefined;
+}
+
+function normalizeDeferRules(value: unknown): NonNullable<SkillRouting["deferWhen"]> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter(isRecord)
+    .map((entry) => {
+      const when = isRecord(entry.when) ? entry.when : {};
+      return {
+        when: {
+          nativeIntent: typeof when.nativeIntent === "string" && isNativeIntent(when.nativeIntent) ? when.nativeIntent : undefined,
+          modelSupportsVision: typeof when.modelSupportsVision === "boolean" ? when.modelSupportsVision : undefined,
+          attachmentKinds: normalizeStringList(when.attachmentKinds).filter(isRoutableAttachmentKind),
+          promptMatches: normalizeSkillPatterns(when.promptMatches)
+        },
+        reason: isNonEmptyString(entry.reason) ? entry.reason : "Routing metadata requested deferral."
+      };
+    });
+}
+
+function normalizeConfirmation(value: unknown): SkillRouting["confirmation"] {
+  return value === "never" || value === "ask" || value === "policy" ? value : undefined;
+}
+
+function normalizeStringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0).map((entry) => entry.trim())
+    : [];
+}
+
+function dedupeStrings<T extends string>(values: T[]): T[] {
+  return [...new Set(values)];
+}
+
+function dedupePatterns(patterns: SkillPattern[]): SkillPattern[] {
+  const seen = new Set<string>();
+  const unique: SkillPattern[] = [];
+
+  for (const pattern of patterns) {
+    const key = `${pattern.type}:${pattern.value}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    unique.push(pattern);
+  }
+
+  return unique;
+}
+
+function patternToLegacyString(pattern: SkillPattern): string {
+  return pattern.value;
+}
+
+function isRoutableAttachmentKind(value: string): value is "image" | "document" | "file" | "audio" | "video" | "voice" {
+  return value === "image" ||
+    value === "document" ||
+    value === "file" ||
+    value === "audio" ||
+    value === "video" ||
+    value === "voice";
+}
+
+function isNativeIntent(value: string): value is NativeIntent {
+  return value === "image-generation" ||
+    value === "voice-transcription" ||
+    value === "speech-generation" ||
+    value === "attachment-analysis" ||
+    value === "general";
 }
 
 function normalizeWorkflow(value: unknown, fallback: SkillWorkflowStep): SkillWorkflowStep[] {

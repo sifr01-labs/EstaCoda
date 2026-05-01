@@ -3,8 +3,32 @@
   "name": "telegram-media-analysis",
   "description": "Analyze media sent through a channel without asking the user for a local file path.",
   "version": "0.1.0",
-  "intentLabels": ["telegram-media"],
-  "triggerPatterns": ["telegram", "sent.*(image|file|pdf|document|voice note|video)", "uploaded here"],
+  "routing": {
+    "labels": ["attachment-analysis"],
+    "triggerPatterns": [
+      { "type": "attachment-kind", "value": "image" },
+      { "type": "attachment-kind", "value": "document" },
+      { "type": "attachment-kind", "value": "file" },
+      { "type": "attachment-kind", "value": "audio" },
+      { "type": "attachment-kind", "value": "video" },
+      { "type": "attachment-kind", "value": "voice" }
+    ],
+    "requiredToolsets": ["files", "media"],
+    "confirmation": "policy",
+    "deferWhen": [
+      {
+        "when": {
+          "nativeIntent": "attachment-analysis",
+          "modelSupportsVision": true,
+          "attachmentKinds": ["image"]
+        },
+        "reason": "Vision-capable model can inspect simple image attachments directly."
+      }
+    ],
+    "priority": 50
+  },
+  "intentLabels": ["attachment-analysis"],
+  "triggerPatterns": ["uploaded here"],
   "whenToUse": [
     "The user references an image, PDF, audio, video, or document sent through Telegram or another channel.",
     "The user says they sent a file in chat and asks the agent to inspect it."

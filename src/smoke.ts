@@ -83,6 +83,7 @@ import { packSessionHistory } from "./prompt/history-packer.js";
 import { assembleProviderPrompt } from "./prompt/prompt-assembly.js";
 import { createRuntime, type Runtime } from "./runtime/create-runtime.js";
 import { IntentRouter } from "./runtime/intent-router.js";
+import type { IntentRoute } from "./contracts/intent.js";
 import { assessCommandSafety } from "./security/command-safety.js";
 import { createSecurityPolicyForMode } from "./security/security-policy-factory.js";
 import { WorkspaceApprovalController, WorkspaceApprovalStore } from "./security/workspace-approval-controller.js";
@@ -136,6 +137,18 @@ const trajectory = new TrajectoryRecorder({
   id: sequenceId(),
   now: () => new Date("2026-04-16T00:00:00.000Z")
 });
+
+function routeFixture(input: Omit<IntentRoute, "nativeIntent" | "evidence"> & Partial<Pick<IntentRoute, "nativeIntent" | "evidence">>): IntentRoute {
+  return {
+    nativeIntent: input.nativeIntent ?? "general",
+    evidence: input.evidence ?? [{
+      kind: "native-intent",
+      detail: input.rationale,
+      weight: input.confidence
+    }],
+    ...input
+  };
+}
 
 class FakeCdpWebSocket implements CdpWebSocketLike {
   readyState = 0;
@@ -360,7 +373,14 @@ const visionAwareIntentRouter = new IntentRouter({
   }
 });
 const generalRoute = intentRouter.route("Say hello as EstaCoda and summarize what you can do in one short paragraph.");
-const telegramMediaRoute = intentRouter.route("I sent the image in Telegram chat, can you inspect it?");
+const telegramMediaRoute = intentRouter.route("I sent the image in Telegram chat, can you inspect it?", {
+  attachments: [{
+    id: "telegram-image-basic",
+    kind: "image",
+    status: "ready",
+    localPath: "media/basic.png"
+  }]
+});
 const nativeVisionTelegramRoute = visionAwareIntentRouter.route("Please inspect this image and include any visible text.", {
   attachments: [{
     id: "telegram-image",
@@ -1244,14 +1264,14 @@ const cliReadyProviderLiveToolDoctor = await runCliCommand({
         label: "𓂀 EstaCoda",
         text: "The exported constant is estacodaDoctorToolSmoke with value live-tool-ok.",
         matchedSkills: [],
-        intent: {
+        intent: routeFixture({
           labels: ["general"],
           confidence: 0.35,
           suggestedToolsets: [],
           suggestedSkills: [],
           confirmationRequired: false,
           rationale: "doctor smoke"
-        },
+        }),
         securityDecision: "allow",
         toolExecutions: [
           {
@@ -3935,14 +3955,14 @@ const acpServer = new AcpServer({
           label: "EstaCoda",
           text: "ACP says hello.",
           matchedSkills: [],
-          intent: {
+          intent: routeFixture({
             labels: ["general"],
             confidence: 0.5,
             suggestedToolsets: [],
             suggestedSkills: [],
             confirmationRequired: false,
             rationale: "ACP smoke runtime"
-          },
+          }),
           securityDecision: "allow",
           toolExecutions: [],
           toolPlans: [],
@@ -4030,14 +4050,14 @@ const acpEditorReadServer = new AcpServer({
           label: "EstaCoda",
           text: "Read through ACP editor fs.",
           matchedSkills: [],
-          intent: {
+          intent: routeFixture({
             labels: ["general"],
             confidence: 0.5,
             suggestedToolsets: [],
             suggestedSkills: [],
             confirmationRequired: false,
             rationale: "ACP editor file bridge smoke"
-          },
+          }),
           securityDecision: "allow",
           toolExecutions: [],
           toolPlans: [],
@@ -4177,14 +4197,14 @@ const acpAllowServer = new AcpServer({
             label: "EstaCoda",
             text: "Permission required.",
             matchedSkills: [],
-            intent: {
+            intent: routeFixture({
               labels: ["general"],
               confidence: 0.5,
               suggestedToolsets: [],
               suggestedSkills: [],
               confirmationRequired: true,
               rationale: "ACP permission test"
-            },
+            }),
             securityDecision: decision,
             toolExecutions: [{
               tool: acpPermissionTool,
@@ -4216,14 +4236,14 @@ const acpAllowServer = new AcpServer({
           label: "EstaCoda",
           text: "Allowed after permission.",
           matchedSkills: [],
-          intent: {
+          intent: routeFixture({
             labels: ["general"],
             confidence: 0.5,
             suggestedToolsets: [],
             suggestedSkills: [],
             confirmationRequired: false,
             rationale: "ACP permission test"
-          },
+          }),
           securityDecision: "allow",
           toolExecutions: [],
           toolPlans: [],
@@ -4350,14 +4370,14 @@ const acpDenyServer = new AcpServer({
           label: "EstaCoda",
           text: "Permission required.",
           matchedSkills: [],
-          intent: {
+          intent: routeFixture({
             labels: ["general"],
             confidence: 0.5,
             suggestedToolsets: [],
             suggestedSkills: [],
             confirmationRequired: true,
             rationale: "ACP permission deny"
-          },
+          }),
           securityDecision: decision,
           toolExecutions: [{
             tool: acpPermissionTool,
@@ -4479,14 +4499,14 @@ const acpTimeoutServer = new AcpServer({
           label: "EstaCoda",
           text: "Permission required.",
           matchedSkills: [],
-          intent: {
+          intent: routeFixture({
             labels: ["general"],
             confidence: 0.5,
             suggestedToolsets: [],
             suggestedSkills: [],
             confirmationRequired: true,
             rationale: "ACP permission timeout"
-          },
+          }),
           securityDecision: decision,
           toolExecutions: [{
             tool: acpPermissionTool,
@@ -4932,14 +4952,14 @@ const cronRuns = await tickCron({
         label: "EstaCoda",
         text: `cron handled: ${input.text.includes("Check build status") ? "yes" : "no"}`,
         matchedSkills: [],
-        intent: {
+        intent: routeFixture({
           labels: ["general"],
           confidence: 1,
           suggestedSkills: [],
           suggestedToolsets: [],
           confirmationRequired: false,
           rationale: "cron smoke"
-        },
+        }),
         securityDecision: "allow",
         toolExecutions: [],
         toolPlans: [],
@@ -4978,14 +4998,14 @@ const cronScriptRuns = await tickCron({
         label: "EstaCoda",
         text: `script cron handled: ${input.text.includes("script-backed-ok") ? "yes" : "no"}`,
         matchedSkills: [],
-        intent: {
+        intent: routeFixture({
           labels: ["general"],
           confidence: 1,
           suggestedSkills: [],
           suggestedToolsets: [],
           confirmationRequired: false,
           rationale: "cron script smoke"
-        },
+        }),
         securityDecision: "allow",
         toolExecutions: [],
         toolPlans: [],
@@ -5061,14 +5081,14 @@ const cronDeliveryRuns = await tickCron({
         label: "EstaCoda",
         text: "origin delivery ok",
         matchedSkills: [],
-        intent: {
+        intent: routeFixture({
           labels: ["general"],
           confidence: 1,
           suggestedSkills: [],
           suggestedToolsets: [],
           confirmationRequired: false,
           rationale: "cron delivery smoke"
-        },
+        }),
         securityDecision: "allow",
         toolExecutions: [],
         toolPlans: [],
@@ -7422,7 +7442,7 @@ assert(
   asciiVideoRoute.suggestedSkills.some((skill) => skill.name === "ascii-video"),
   "expected ASCII animation prompt to route to ascii-video skill"
 );
-assert(imageGenerationRoute.labels.includes("media-generation"), "expected image generation prompt to route as media-generation intent");
+assert(imageGenerationRoute.nativeIntent === "image-generation", "expected image generation prompt to route as image-generation native intent");
 assert(
   imageGenerationRoute.suggestedSkills.length === 0,
   "expected image generation prompt to use native image.generate rather than requiring a skill"
@@ -8097,14 +8117,15 @@ const imageSetupLoopRuntime: Runtime = {
     label: "EstaCoda",
     text: "Image generation is not configured yet.",
     matchedSkills: [],
-    intent: {
-      labels: ["media-generation"],
+    intent: routeFixture({
+      nativeIntent: "image-generation",
+      labels: ["image-generation"],
       confidence: 0.95,
       suggestedToolsets: ["media"],
       suggestedSkills: [],
       confirmationRequired: false,
       rationale: "image request"
-    },
+    }),
     securityDecision: "allow",
     toolExecutions: [{
       tool: imageSetupTool,
@@ -8669,8 +8690,10 @@ assert(
   response.matchedSkills.includes("youtube-knowledge-base"),
   "expected runtime to select youtube-knowledge-base"
 );
-assert(response.intent.labels.includes("youtube-video"), "expected youtube-video intent");
-assert(response.intent.labels.includes("knowledge-base"), "expected knowledge-base intent");
+assert(
+  response.intent.evidence.some((entry) => entry.source === "youtube-knowledge-base"),
+  "expected youtube skill routing evidence"
+);
 assert(response.context !== undefined, "expected runtime context result");
 assert(response.context.blocks.some((block) => block.source === "src/sample.ts"), "expected runtime context");
 assert(response.projectContext !== undefined, "expected runtime project context result");
@@ -8679,7 +8702,7 @@ assert(
   "expected runtime project context"
 );
 assert(response.intent.suggestedToolsets.includes("browser"), "expected browser toolset suggestion");
-assert(response.intent.confidence >= 0.8, "expected high confidence route");
+assert(response.intent.confidence >= 0.7, "expected confident metadata route");
 assert(cdpBrowserStatus?.result?.ok === true, "expected CDP browser.status to succeed");
 assert(cdpBrowserStatus.result.content.includes("Browser backend: local-cdp"), "expected CDP status backend");
 assert(cdpBrowserStatus.result.content.includes("Available: yes"), "expected CDP status available");
@@ -9389,7 +9412,7 @@ const imageIntentResponse = await imageIntentRuntime.handle({
 });
 assert(
   imageIntentResponse.toolExecutions.some((execution) => execution.tool.name === "image.generate" && execution.result?.ok === true),
-  "expected media-generation intent to execute image.generate deterministically"
+  "expected image-generation native intent to execute image.generate deterministically"
 );
 assert(imageIntentResponse.text.includes("Artifacts:"), "expected deterministic image generation response to include artifact summary");
 assert(
@@ -9398,7 +9421,7 @@ assert(
 );
 assert(
   imageIntentResponse.toolExecutions.filter((execution) => execution.tool.name === "image.generate").length === 1,
-  "expected media-generation intent to execute image.generate exactly once"
+  "expected image-generation native intent to execute image.generate exactly once"
 );
 assert(imageIntentProviderCalls === 1, "expected deterministic image intent to call provider once for agentic response wrap");
 assert(imageIntentResponse.text.includes("Here is the image"), "expected deterministic image generation response to include provider wrap text");
@@ -10760,14 +10783,14 @@ const channelGateway = new ChannelGateway({
           label: "EstaCoda",
           text: replyText,
           matchedSkills: [],
-          intent: {
+          intent: routeFixture({
             labels: ["general"],
             confidence: 0.8,
             suggestedToolsets: [],
             suggestedSkills: [],
             confirmationRequired: false,
             rationale: "channel smoke"
-          },
+          }),
           securityDecision: "allow",
           toolExecutions: [],
           toolPlans: [],
@@ -10917,14 +10940,14 @@ const cancelGateway = new ChannelGateway({
         label: "EstaCoda",
         text: input.signal?.aborted === true ? "Cancelled by channel" : "not cancelled",
         matchedSkills: [],
-        intent: {
+        intent: routeFixture({
           labels: ["general"],
           confidence: 0,
           suggestedSkills: [],
           suggestedToolsets: [],
           confirmationRequired: false,
           rationale: "smoke cancellation"
-        },
+        }),
         securityDecision: "allow",
         toolExecutions: [],
         toolPlans: [],
@@ -11105,14 +11128,14 @@ const createApprovalRuntimeFor = (rationale: string) =>
         label: "EstaCoda",
         text: approvalReplyFor(decision),
         matchedSkills: [],
-        intent: {
+        intent: routeFixture({
           labels: ["general"],
           confidence: 0.9,
           suggestedSkills: [],
           suggestedToolsets: ["shell-write"],
           confirmationRequired: false,
           rationale
-        },
+        }),
         securityDecision: decision,
         toolExecutions: [approvalToolExecutionFor(decision, text, key)],
         toolPlans: [],
@@ -11151,14 +11174,14 @@ const approvalGateway = new ChannelGateway({
         label: "EstaCoda",
         text: decision === "allow" ? "Dangerous command completed." : "This action needs approval before I can continue.",
         matchedSkills: [],
-        intent: {
+        intent: routeFixture({
           labels: ["general"],
           confidence: 0.9,
           suggestedSkills: [],
           suggestedToolsets: ["shell-write"],
           confirmationRequired: false,
           rationale: "approval smoke"
-        },
+        }),
         securityDecision: decision,
         toolExecutions: [approvalToolExecutionFor(decision, destructiveTargetSummary, destructiveTargetKey)],
         toolPlans: [],
@@ -11364,14 +11387,14 @@ const createPersistentSessionGateway = () => new ChannelGateway({
         label: "EstaCoda",
         text: `Persistent session reply for ${input.text}`,
         matchedSkills: [],
-        intent: {
+        intent: routeFixture({
           labels: ["general"],
           confidence: 0.8,
           suggestedSkills: [],
           suggestedToolsets: [],
           confirmationRequired: false,
           rationale: "persistent session smoke"
-        },
+        }),
         securityDecision: "allow",
         toolExecutions: [],
         toolPlans: [],
@@ -11539,14 +11562,14 @@ const sessionApprovalGateway = new ChannelGateway({
         label: "EstaCoda",
         text: approvalReplyFor(decision),
         matchedSkills: [],
-        intent: {
+        intent: routeFixture({
           labels: ["general"],
           confidence: 0.9,
           suggestedSkills: [],
           suggestedToolsets: ["shell-write"],
           confirmationRequired: false,
           rationale: "approval session smoke"
-        },
+        }),
         securityDecision: decision,
         toolExecutions: [approvalToolExecutionFor(decision, destructiveTargetSummary, destructiveTargetKey)],
         toolPlans: [],
@@ -12390,14 +12413,14 @@ const nativeVisionPrompt = assembleProviderPrompt({
     mimeType: "image/png",
     bytes: 18
   }],
-  intent: {
+  intent: routeFixture({
     labels: ["general"],
     confidence: 0.9,
     suggestedToolsets: ["research"],
     suggestedSkills: [],
     confirmationRequired: false,
     rationale: "smoke"
-  },
+  }),
   securityDecision: "allow",
   toolExecutions: [],
   context: undefined,

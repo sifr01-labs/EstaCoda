@@ -24,7 +24,7 @@ import { ProcessManager } from "../process/process-manager.js";
 import { createProcessTools } from "../process/process-tools.js";
 import { AuxiliaryProviderRouter } from "../providers/auxiliary-provider-router.js";
 import { createCatalogProvider } from "../providers/catalog-provider.js";
-import { inferModelProfile, knownModelProfiles } from "../providers/model-catalog.js";
+import { fallbackKnownModelProfiles, inferModelProfile } from "../providers/model-catalog.js";
 import { createOpenAICompatibleProvider } from "../providers/openai-compatible-provider.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
 import { capabilityFirstDefaults } from "../contracts/security.js";
@@ -184,7 +184,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const auxiliaryProviderRouter = new AuxiliaryProviderRouter({
     models: providerModels,
     config: options.auxiliaryProviders,
-    primaryProvider: options.model.provider === "unconfigured" ? undefined : options.model.provider
+    primaryProvider: options.model.provider
   });
   const approvalAuxiliaryRoute = options.model.provider === "unconfigured"
     ? undefined
@@ -507,8 +507,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     memoryContext,
     model: options.model,
     providerPreferences: {
-      providerOrder: [options.model.provider],
-      preferFreeOrOpenWeights: true
+      providerOrder: [options.model.provider]
     },
     contextReferenceExpander,
     projectContext,
@@ -729,7 +728,7 @@ function createDefaultProviderRegistry(selectedModel: ModelProfile): ProviderReg
       model: selectedModel.id,
       contextWindowTokens: selectedModel.contextWindowTokens
     }),
-    ...knownModelProfiles
+    ...fallbackKnownModelProfiles
   ]);
 
   for (const provider of new Set(catalogModels.map((model) => model.provider))) {
