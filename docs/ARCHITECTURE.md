@@ -182,7 +182,7 @@ Native intent routing handles the product-owned paths before normal provider pla
 There are two layers:
 
 1. **Registry / routing**
-   - model catalog
+   - offline-first model catalog
    - provider registry
    - route selection by capability and preference
 
@@ -195,8 +195,10 @@ There are two layers:
 
 Auxiliary routes exist for:
 
+- `main`
 - `vision`
 - `compression`
+- `approval`
 - `web_extract`
 - `session_search`
 - `skills_hub`
@@ -208,6 +210,11 @@ These are preferences/routing constructs, not separate runtimes.
 
 Important current distinction:
 
+- the model catalog is enriched from the models.dev metadata registry when cached/bundled data is available, with local fallback profiles retained as a safety net
+- runtime config loads catalog metadata with network refresh disabled by default; network-backed refresh is metadata infrastructure, not part of provider execution
+- provider execution keeps credential lookup, base URLs, fallback, and endpoint behavior in the existing provider runtime
+- explicit `{ provider, model }` requests are supported by `ProviderExecutor` and used by the agent loop to keep the selected main route stable
+- auxiliary routing is seeded with the selected primary provider before falling back to configured/default provider order
 - chat-capable providers can be live inference routes
 - some catalog providers are discovery-only and must not be treated as full runtime adapters
 - vision routing is implemented in code, but live success depends on actual provider capability plus working credentials

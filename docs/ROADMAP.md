@@ -127,6 +127,7 @@ Done:
 - first-launch prompt asks `Run setup now? [Y/n]` instead of silently entering setup `implemented`
 - local secret store at `~/.estacoda/.env` with `0600` permissions and config env-var references `smoke-tested`
 - user/project config overlays deep-merge provider, credential-pool, auxiliary-provider, and MCP server entries so project overrides do not erase user credentials/models `smoke-tested`
+- provider catalog hardening keeps models.dev metadata as an offline-first enrichment layer around the existing resolver, treats catalog-only providers as discovery adapters, preserves credential/base-URL execution in the provider runtime, and supports explicit provider/model execution for selected routes `smoke-tested`
 - setup prompts for workspace trust, provider/model, local credential capture, security mode, workflow learning, optional capabilities, and compact readiness verification `smoke-tested`
 - `estacoda verify` readiness check and first-run setup check `smoke-tested`
 - `estacoda settings` category overview and skill-autonomy mutation `smoke-tested`

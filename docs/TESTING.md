@@ -286,6 +286,10 @@ Evidence level:
 At a high level:
 
 - provider normalization and routing
+- models.dev-backed catalog enrichment with fallback profiles and runtime config loading with network disabled by default
+- explicit provider/model execution through the provider executor
+- catalog-only provider registration without treating discovery-only providers as inference adapters
+- primary-provider-aware auxiliary routing
 - tool-call recovery and continuation logic
 - provider tool-call extraction
 - browser backend basics plus local-CDP navigation, snapshot, scroll, console, raw CDP, screenshot, screenshot vision, dialog response, and mock click/image-list automation tools

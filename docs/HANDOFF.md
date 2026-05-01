@@ -67,6 +67,7 @@ Evidence:
 - Phase 2C/2D profile/UI foundation now separates interface language, aesthetic flavor, activity-label locale, agent behavior mode, and response-language policy. `smoke-tested`
 - Security-mode and skill-autonomy settings now render localized English/Arabic labels from `ui.language` while preserving English config values. `smoke-tested`
 - Setup, verify, and settings now include clearer recommended paths, post-setup commands, and recovery next actions. `smoke-tested`
+- Provider hardening now has models.dev-backed metadata infrastructure wrapped around the existing model catalog resolver, explicit provider/model execution, catalog-only discovery adapters, primary-provider-aware auxiliary routing, credential-pool-preserving provider execution, and runtime config catalog resolution that defaults to `allowNetwork: false`. `smoke-tested`
 - Local model setup now has `estacoda local setup/status/test`, aligned with Hermes' local Ollama/custom endpoint path: OpenAI-compatible base URL, no API key, `/models` discovery, and 64K context guidance. `smoke-tested`
 - Voice configuration foundation now has Hermes-aligned `tts`/`stt` config plus `estacoda voice status/setup` and `settings voice`; OpenAI-compatible `voice.speak` writes audio-cache artifacts, local custom-command plus OpenAI/Groq-style `voice.transcribe` writes transcript artifacts, Telegram injects voice transcripts before the agent turn, and Telegram uploads Opus/Ogg as `sendVoice` voice bubbles with `sendAudio` fallback. `smoke-tested`
 - Image generation foundation now has Hermes-aligned `image_gen` config, FAL default model support, BytePlus/ModelArk Seedream support with Seedream 5 as the default plus `image models`/`--model-version` aliases for provider-specific versions, `image.generate`, image-cache artifact recording, Telegram `sendPhoto` delivery, CLI setup/status/models/verify, local API-key secret storage through the shared capability secret primitive, structured `setup_needed` metadata for missing image credentials, CLI protected credential capture with verification-before-retry, auto-resume of the original `image.generate` call, native `image-generation` routing with attachment-aware precedence, exactly-once deterministic `image.generate` execution, OpenAI-style fragmented tool-call name preservation for `image_generate`, and agent-facing image config tools that no longer advertise raw API-key fields. `smoke-tested`
@@ -435,7 +436,7 @@ cd /Users/ahnwy/estacoda-v2
 
 What smoke currently covers at a high level:
 
-- provider routing and fallback behavior
+- provider routing, explicit provider/model execution, metadata catalog fallback, and fallback behavior
 - tool-call recovery behavior
 - runtime prompt assembly invariants
 - skill loading, visibility, mutation, resources, and package behavior
