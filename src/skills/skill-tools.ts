@@ -1048,12 +1048,11 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
     },
     {
       name: "skill.import",
-      description: "Import skills from an existing directory containing SKILL.md files.",
+      description: "Import skills from an existing directory by copying them into the local writable skills root.",
       inputSchema: {
         type: "object",
         properties: {
-          path: { type: "string" },
-          sourceKind: { type: "string" }
+          path: { type: "string" }
         },
         required: ["path"]
       },
@@ -1062,30 +1061,60 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
       progressLabel: "importing skills",
       maxResultSizeChars: 8000,
       isAvailable: () => true,
-      run: async (input: { path?: string; sourceKind?: "local" | "external" | "bundled" }) => {
+      run: async (input: { path?: string }) => {
         if (!isNonEmptyString(input.path)) {
           return errorResult("skill.import requires path");
         }
 
         const root = resolve(input.path);
         const loaded = await loadSkillsFromDirectory(root, {
-          sourceKind: input.sourceKind ?? "external",
+          sourceKind: "external",
           sourceRoot: root
         });
 
-        for (const skill of loaded.skills) {
-          options.registry.register(skill);
+        if (loaded.errors.length > 0) {
+          return {
+            ok: false,
+            content: [
+              `Import from ${root} found ${loaded.errors.length} error(s); no skills were copied.`,
+              ...loaded.errors.map((error) => `Error ${error.path}: ${error.message}`)
+            ].join("\n"),
+            metadata: {
+              errors: loaded.errors
+            }
+          };
+        }
+
+        const preflight = await planLocalSkillImport(options, loaded.skills);
+        if (!("skills" in preflight)) {
+          return preflight;
+        }
+
+        const imported: LoadedSkill[] = [];
+        for (const item of preflight.skills) {
+          await cp(dirname(item.skill.sourcePath), item.targetDir, { recursive: true });
+          imported.push(await reloadLocalSkill(options, join(item.targetDir, "SKILL.md")));
+        }
+
+        for (const skill of imported) {
+          await options.skillEvolutionStore?.recordMutation({
+            skillName: skill.name,
+            source: skill.sourceKind,
+            provenanceKind: skill.provenance?.kind,
+            kind: "created"
+          });
         }
 
         return {
-          ok: loaded.errors.length === 0,
+          ok: true,
           content: [
-            `Imported ${loaded.skills.length} skill(s) from ${root}.`,
-            ...loaded.errors.map((error) => `Error ${error.path}: ${error.message}`)
+            `Imported ${imported.length} skill(s) from ${root} into ${options.localSkillsRoot}.`,
+            "Imported skills are registered as local working copies; the source directory was not modified."
           ].join("\n"),
           metadata: {
-            imported: loaded.skills.map(toSkillMetadata),
-            errors: loaded.errors
+            imported: imported.map(toSkillMetadata),
+            sourceRoot: root,
+            localSkillsRoot: options.localSkillsRoot
           }
         };
       }
@@ -1810,6 +1839,56 @@ async function createLocalWorkingCopy(
     skillDir,
     skillPath: localSkillPath,
     skill: loaded
+  };
+}
+
+async function planLocalSkillImport(
+  options: SkillToolsOptions,
+  skills: LoadedSkill[]
+): Promise<{ ok: true; skills: Array<{ skill: LoadedSkill; targetDir: string }> } | ToolResult> {
+  if (skills.length === 0) {
+    return errorResult("No SKILL.md files found to import.");
+  }
+
+  await mkdir(options.localSkillsRoot, { recursive: true });
+  const seenNames = new Set<string>();
+  const seenTargets = new Set<string>();
+  const planned: Array<{ skill: LoadedSkill; targetDir: string }> = [];
+
+  for (const skill of skills) {
+    if (seenNames.has(skill.name)) {
+      return errorResult(`skill.import found duplicate skill name ${skill.name}; import would be ambiguous.`);
+    }
+    seenNames.add(skill.name);
+
+    const existing = options.registry.get(skill.name);
+    if (existing !== undefined) {
+      return errorResult(`skill.import refused ${skill.name}; a skill with that name is already registered.`);
+    }
+
+    const contained = await ensureContainedDirectory(options.localSkillsRoot, slugifySkillName(skill.name));
+    if (!contained.ok) {
+      return errorResult(contained.reason);
+    }
+    const targetDir = contained.path;
+    if (seenTargets.has(targetDir)) {
+      return errorResult(`skill.import refused ${skill.name}; multiple imported skills would target ${targetDir}.`);
+    }
+    seenTargets.add(targetDir);
+
+    if (await stat(targetDir).catch(() => undefined) !== undefined) {
+      return errorResult(`skill.import refused ${skill.name}; local target already exists at ${targetDir}.`);
+    }
+
+    planned.push({
+      skill,
+      targetDir
+    });
+  }
+
+  return {
+    ok: true,
+    skills: planned
   };
 }
 

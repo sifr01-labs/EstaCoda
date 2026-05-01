@@ -6069,6 +6069,14 @@ assert(skillDeleteExecution?.result?.ok === true, "expected skill.delete to succ
 assert(skillImportExecution?.result?.ok === true, "expected skill.import to succeed");
 assert(skills.get("imported-skill") !== undefined, "expected imported skill registry entry");
 assert(skills.get("hermes-style-skill") !== undefined, "expected Hermes-style YAML skill registry entry");
+assert(
+  (skills.get("imported-skill") as { sourceKind?: string } | undefined)?.sourceKind === "local",
+  "expected imported skill to register as local"
+);
+assert(
+  (skills.get("hermes-style-skill") as { sourceKind?: string } | undefined)?.sourceKind === "local",
+  "expected Hermes-style imported skill to register as local"
+);
 assert(skills.get("hermes-style-skill")?.category === "research", "expected Hermes metadata category mapping");
 assert(skills.get("hermes-style-skill")?.requiredToolsets.includes("web") === true, "expected Hermes tools mapping");
 assert(
@@ -6109,16 +6117,16 @@ assert(
   "expected imported skill to index asset resources"
 );
 assert(skillExportExecution?.result?.ok === true, "expected skill.export to succeed");
-assert(externalSkillPatchExecution?.result?.ok === true, "expected external skill patch to create a local working copy");
+assert(externalSkillPatchExecution?.result?.ok === true, "expected imported local skill patch to succeed");
 const importedExternalSource = await readFile(join(importSkillRoot, "imported", "SKILL.md"), "utf8");
 const importedLocalOverlay = await readFile(join(personalSkillRoot, "imported-skill", "SKILL.md"), "utf8");
 assert(
   importedExternalSource.includes("Imported instructions."),
-  "expected external skill source to remain read-only after local overlay patch"
+  "expected skill.import source directory to remain read-only after local patch"
 );
 assert(
   importedLocalOverlay.includes("Should not edit external skills."),
-  "expected external skill patch to write a local overlay"
+  "expected imported skill patch to write to the local copy"
 );
 const skillPatchSnapshotPath = (skillPatchExecution.result.metadata as { snapshotPath?: string } | undefined)?.snapshotPath;
 assert(skillPatchSnapshotPath !== undefined, "expected skill.patch to record a snapshot");
