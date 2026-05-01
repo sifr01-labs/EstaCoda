@@ -6,7 +6,7 @@ import { SkillEvolutionStore, type SkillEvalRunRecord, type SkillObservationReco
 import { resetBundledSkill } from "./skill-bundled-sync.js";
 import { MAX_SKILL_RESOURCE_BYTES, MAX_SKILL_RESOURCE_CHARS } from "./skill-limits.js";
 import { hydrateSkillResources, loadSkillsFromDirectory, parseSkillFile, truncateContextDocument } from "./skill-loader.js";
-import { assertSkillMutable } from "./skill-mutation-policy.js";
+import { assertSkillContentMutationAllowed, assertSkillMutable } from "./skill-mutation-policy.js";
 import { ensureContainedDirectory, isSafeRelativeSkillPath } from "./skill-path-safety.js";
 import type { SkillRegistry } from "./skill-registry.js";
 
@@ -696,12 +696,24 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
           return errorResult(`skill.patch matched ${occurrences} occurrences. Pass replace_all=true to patch all occurrences, or use a more specific old_string.`);
         }
 
-        const snapshotPath = await snapshotLocalSkillTarget(options, target, input.name);
         const next = replaceAll
           ? current.split(oldString).join(newString)
           : current.replace(oldString, newString);
+        const validation = await validateSkillContentMutation({
+          options,
+          current: target.skill,
+          skillPath: target.skillPath,
+          next,
+          expectedName: input.name,
+          action: "patch"
+        });
+        if (!("sourcePath" in validation)) {
+          return validation;
+        }
+        const loaded = validation;
+        const snapshotPath = await snapshotLocalSkillTarget(options, target, input.name);
         await writeFile(target.skillPath, next, "utf8");
-        const loaded = await reloadLocalSkill(options, target.skillPath);
+        options.registry.register(loaded);
         await options.skillEvolutionStore?.recordMutation({
           skillName: loaded.name,
           source: loaded.sourceKind,
@@ -745,13 +757,18 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
           return target;
         }
 
-        const loaded = await hydrateSkillResources(parseSkillFile(target.skillPath, input.content, {
-          sourceKind: "local",
-          sourceRoot: options.localSkillsRoot
-        }));
-        if (loaded.name !== input.name) {
-          return errorResult(`skill.edit content name mismatch: expected ${input.name}, found ${loaded.name}`);
+        const validation = await validateSkillContentMutation({
+          options,
+          current: target.skill,
+          skillPath: target.skillPath,
+          next: input.content,
+          expectedName: input.name,
+          action: "edit"
+        });
+        if (!("sourcePath" in validation)) {
+          return validation;
         }
+        const loaded = validation;
         const snapshotPath = await snapshotLocalSkillTarget(options, target, input.name);
         await writeFile(target.skillPath, input.content, "utf8");
         options.registry.register(loaded);
@@ -1809,6 +1826,52 @@ async function reloadLocalSkill(options: SkillToolsOptions, skillPath: string): 
     sourceRoot: options.localSkillsRoot
   }));
   options.registry.register(loaded);
+  return loaded;
+}
+
+async function validateSkillContentMutation(input: {
+  options: SkillToolsOptions;
+  current: LoadedSkill;
+  skillPath: string;
+  next: string;
+  expectedName: string;
+  action: "patch" | "edit";
+}): Promise<LoadedSkill | ToolResult> {
+  let loaded: LoadedSkill;
+  try {
+    loaded = await hydrateSkillResources(parseSkillFile(input.skillPath, input.next, {
+      sourceKind: "local",
+      sourceRoot: input.options.localSkillsRoot
+    }));
+  } catch (error) {
+    return errorResult(error instanceof Error ? error.message : String(error));
+  }
+
+  if (loaded.name !== input.expectedName) {
+    return errorResult(`skill.${input.action} content name mismatch: expected ${input.expectedName}, found ${loaded.name}`);
+  }
+
+  const authority = await assertSkillContentMutationAllowed({
+    current: input.current,
+    next: loaded,
+    action: input.action,
+    store: input.options.skillEvolutionStore
+  });
+  if (!authority.ok) {
+    return errorResult(authority.reason);
+  }
+
+  const evalGate = await runSkillEvalGate(loaded);
+  if (evalGate.status === "failed") {
+    if (input.options.skillEvolutionStore !== undefined) {
+      await recordSkillEvalRuns(input.options.skillEvolutionStore, loaded.name, evalGate);
+    }
+    return errorResult(`skill.${input.action} failed eval gate: ${evalGate.failures.join("; ")}`);
+  }
+  if (evalGate.status === "passed" && input.options.skillEvolutionStore !== undefined) {
+    await recordSkillEvalRuns(input.options.skillEvolutionStore, loaded.name, evalGate);
+  }
+
   return loaded;
 }
 
