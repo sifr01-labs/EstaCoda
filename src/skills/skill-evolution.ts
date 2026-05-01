@@ -2,20 +2,35 @@ import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { SkillOutcome } from "../contracts/memory.js";
-import type { LoadedSkill, SkillDefinition, SkillSourceKind } from "../contracts/skill.js";
+import type {
+  LoadedSkill,
+  SkillDefinition,
+  SkillLifecycleState,
+  SkillProvenanceKind,
+  SkillRouteTelemetry,
+  SkillSourceKind
+} from "../contracts/skill.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
-
-export type SkillLifecycleState = "active" | "inactive";
 
 export type SkillUsageRecord = {
   skillName: string;
   source?: SkillSourceKind;
+  provenanceKind?: SkillProvenanceKind;
   useCount: number;
+  viewCount: number;
   successCount: number;
   failureCount: number;
+  routeMatchCount: number;
+  routeSelectedCount: number;
+  routeRejectedCount: number;
   lastUsedAt?: string;
+  lastViewedAt?: string;
+  lastMatchedAt?: string;
+  lastSelectedAt?: string;
   lastSucceededAt?: string;
   lastFailedAt?: string;
+  lastPatchedAt?: string;
+  archivedAt?: string;
   patchCount: number;
   rollbackCount: number;
   pinned: boolean;
@@ -212,21 +227,92 @@ export class SkillEvolutionStore {
     return observation;
   }
 
+  async recordSkillViewed(input: {
+    skillName: string;
+    source?: SkillSourceKind;
+    provenanceKind?: SkillProvenanceKind;
+  }): Promise<SkillUsageRecord> {
+    const now = this.#nowIso();
+    return await this.#updateUsage(input.skillName, input.source, (record) => {
+      record.provenanceKind = input.provenanceKind ?? record.provenanceKind;
+      record.viewCount += 1;
+      record.lastViewedAt = now;
+    });
+  }
+
+  async recordSkillRouteTelemetry(input: SkillRouteTelemetry): Promise<SkillUsageRecord> {
+    return await this.#updateUsage(input.skillName, input.sourceKind, (record) => {
+      record.routeMatchCount += 1;
+      record.lastMatchedAt = input.matchedAt;
+      if (input.selected) {
+        record.routeSelectedCount += 1;
+        record.lastSelectedAt = input.matchedAt;
+      } else {
+        record.routeRejectedCount += 1;
+      }
+    });
+  }
+
   async recordMutation(input: {
     skillName: string;
     source?: SkillSourceKind;
+    provenanceKind?: SkillProvenanceKind;
     kind: "created" | "patched" | "edited" | "deleted" | "rolled-back" | "promoted";
   }): Promise<SkillUsageRecord> {
     const now = this.#nowIso();
     return await this.#updateUsage(input.skillName, input.source, (record) => {
+      record.provenanceKind = input.provenanceKind ?? record.provenanceKind;
       record.lastUsedAt = now;
       if (input.kind === "patched" || input.kind === "edited" || input.kind === "promoted") {
         record.patchCount += 1;
+        record.lastPatchedAt = now;
       }
       if (input.kind === "rolled-back") {
         record.rollbackCount += 1;
       }
-      record.state = input.kind === "deleted" ? "inactive" : "active";
+      if (record.pinned) {
+        return;
+      }
+      if (input.kind === "deleted") {
+        record.state = "archived";
+        record.archivedAt = now;
+      } else {
+        record.state = "active";
+        record.archivedAt = undefined;
+      }
+    });
+  }
+
+  async pinSkill(skillName: string, source?: SkillSourceKind): Promise<SkillUsageRecord> {
+    return await this.#updateUsage(skillName, source, (record) => {
+      record.pinned = true;
+    });
+  }
+
+  async unpinSkill(skillName: string, source?: SkillSourceKind): Promise<SkillUsageRecord> {
+    return await this.#updateUsage(skillName, source, (record) => {
+      record.pinned = false;
+    });
+  }
+
+  async archiveSkill(skillName: string, source?: SkillSourceKind): Promise<SkillUsageRecord> {
+    const now = this.#nowIso();
+    return await this.#updateUsage(skillName, source, (record) => {
+      if (record.pinned) {
+        return;
+      }
+      record.state = "archived";
+      record.archivedAt = now;
+    });
+  }
+
+  async restoreSkill(skillName: string, source?: SkillSourceKind): Promise<SkillUsageRecord> {
+    return await this.#updateUsage(skillName, source, (record) => {
+      if (record.pinned) {
+        return;
+      }
+      record.state = "active";
+      record.archivedAt = undefined;
     });
   }
 
@@ -482,7 +568,13 @@ export class SkillEvolutionStore {
       .split(/\r?\n/u)
       .map((line) => line.trim())
       .filter((line) => line.length > 0)
-      .map((line) => JSON.parse(line) as T);
+      .flatMap((line) => {
+        try {
+          return [JSON.parse(line) as T];
+        } catch {
+          return [];
+        }
+      });
   }
 
   async #writeJsonl(file: string, values: unknown[]): Promise<void> {
@@ -500,8 +592,12 @@ function defaultUsageRecord(skillName: string, source: SkillSourceKind | undefin
     skillName,
     source,
     useCount: 0,
+    viewCount: 0,
     successCount: 0,
     failureCount: 0,
+    routeMatchCount: 0,
+    routeSelectedCount: 0,
+    routeRejectedCount: 0,
     patchCount: 0,
     rollbackCount: 0,
     pinned: false,

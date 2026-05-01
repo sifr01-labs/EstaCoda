@@ -71,6 +71,11 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
           return skill;
         }
         const foundSkill = skill.skill;
+        await options.skillEvolutionStore?.recordSkillViewed({
+          skillName: foundSkill.name,
+          source: isLoadedSkill(foundSkill) ? foundSkill.sourceKind : undefined,
+          provenanceKind: "provenance" in foundSkill ? foundSkill.provenance?.kind : undefined
+        });
 
         if (isLoadedSkill(foundSkill) && isNonEmptyString(input.path)) {
           return readSkillReference(foundSkill, input.path);
@@ -106,6 +111,11 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
           return skill;
         }
         const foundSkill = skill.skill;
+        await options.skillEvolutionStore?.recordSkillViewed({
+          skillName: foundSkill.name,
+          source: isLoadedSkill(foundSkill) ? foundSkill.sourceKind : undefined,
+          provenanceKind: "provenance" in foundSkill ? foundSkill.provenance?.kind : undefined
+        });
 
         return {
           ok: true,
@@ -1166,6 +1176,8 @@ export function buildSkillFileContent(input: {
   instructions?: string;
   whenToUse?: string[];
   requiredToolsets?: string[];
+  metadata?: Record<string, unknown>;
+  evaluations?: SkillEvaluation[];
 }): string {
   if (!isNonEmptyString(input.name) || !isNonEmptyString(input.description) || !isNonEmptyString(input.instructions)) {
     throw new Error("skill.create requires either content or description plus instructions");
@@ -1178,6 +1190,12 @@ export function buildSkillFileContent(input: {
     whenToUse: input.whenToUse,
     requiredToolsets: input.requiredToolsets
   });
+  if (input.metadata !== undefined) {
+    definition.metadata = input.metadata;
+  }
+  if (input.evaluations !== undefined) {
+    definition.evaluations = input.evaluations;
+  }
   return renderSkillFile(definition, input.instructions);
 }
 

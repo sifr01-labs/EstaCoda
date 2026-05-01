@@ -97,6 +97,7 @@ import { SkillEvolutionStore } from "./skills/skill-evolution.js";
 import { SkillLearningManager } from "./skills/skill-learning.js";
 import { SkillRegistry } from "./skills/skill-registry.js";
 import { createSkillTools } from "./skills/skill-tools.js";
+import { createSkillRouteTelemetry } from "./skills/skill-usage-telemetry.js";
 import { kemetBlueTheme } from "./theme/kemet-blue.js";
 import { builtinTools } from "./tools/builtin-tools.js";
 import { createExecuteCodeTool } from "./tools/execute-code-tool.js";
@@ -6334,6 +6335,28 @@ const skillUsageExecution = await toolExecutor.executeTool({
   trustedWorkspace: true,
   sessionId: directSession.id
 });
+const skillUsageViewExecution = await toolExecutor.executeTool({
+  tool: "skill.view",
+  input: {
+    name: "sample-personal-skill"
+  },
+  trustedWorkspace: true,
+  sessionId: directSession.id
+});
+await skillEvolutionStore.recordSkillRouteTelemetry(createSkillRouteTelemetry({
+  skillName: "sample-personal-skill",
+  sourceKind: "local",
+  selected: true,
+  confidence: 0.87,
+  labels: ["smoke"],
+  evidence: ["smoke route evidence"],
+  prompt: "smoke skill route"
+}));
+await skillEvolutionStore.pinSkill("sample-personal-skill", "local");
+const pinnedArchiveAttempt = await skillEvolutionStore.archiveSkill("sample-personal-skill", "local");
+await skillEvolutionStore.unpinSkill("sample-personal-skill", "local");
+const archivedUsage = await skillEvolutionStore.archiveSkill("sample-personal-skill", "local");
+const restoredUsage = await skillEvolutionStore.restoreSkill("sample-personal-skill", "local");
 const promotedProposalListExecution = await toolExecutor.executeTool({
   tool: "skill.list_proposals",
   input: {
@@ -6350,10 +6373,18 @@ assert(skillMediumRiskPromoteBeforeApprovalExecution?.result?.ok === false, "exp
 assert(skillApprovePatchExecution?.result?.ok === true, "expected skill.approve_patch to approve proposal");
 assert(skillRejectPatchExecution?.result?.ok === true, "expected skill.reject_patch to reject proposal");
 assert(skillUsageExecution?.result?.ok === true, "expected skill.usage to inspect usage");
+assert(skillUsageViewExecution?.result?.ok === true, "expected skill.view to record usage visibility");
 assert(
   JSON.stringify(skillUsageExecution.result.metadata).includes("\"patchCount\""),
   "expected skill usage metadata to include patch counters"
 );
+const updatedSkillUsage = await skillEvolutionStore.getUsage("sample-personal-skill");
+assert((updatedSkillUsage?.viewCount ?? 0) >= 1, "expected skill view counter to update");
+assert((updatedSkillUsage?.routeMatchCount ?? 0) >= 1, "expected skill route match counter to update");
+assert((updatedSkillUsage?.routeSelectedCount ?? 0) >= 1, "expected skill route selected counter to update");
+assert(pinnedArchiveAttempt.state !== "archived", "expected pinned skill to block archive transition");
+assert(archivedUsage.state === "archived", "expected unpinned skill to archive");
+assert(restoredUsage.state === "active", "expected archived skill to restore");
 assert(
   promotedProposalListExecution?.result?.content.includes(proposedPatchId) === true,
   "expected promoted proposal to appear in proposal list"
@@ -8559,7 +8590,7 @@ await projectFactRuntimeThree.handle({
 const projectMemoryAfterRepeatedFacts = await readFile(join(promotionProjectMemoryRoot, "MEMORY.md"), "utf8");
 const projectFactPromotions = await projectFactRuntimeThree.inspectMemoryPromotions();
 const skillLearningWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-skill-learning-"));
-const skillLearningProjectRoot = join(skillLearningWorkspace, ".estacoda", "skills");
+const skillLearningLocalRoot = join(skillLearningWorkspace, ".estacoda", "skills");
 const skillLearningStorePath = join(skillLearningWorkspace, ".estacoda", "skill-learning.json");
 const skillLearningSessionDb = new InMemorySessionDB({
   id: sequenceId(),
@@ -8625,7 +8656,7 @@ const riskySkillLearningExecutions: ToolExecutionRecord[] = [
 const makeSkillLearningManager = (autonomy: "none" | "suggest" | "proactive" | "autonomous") => new SkillLearningManager({
   autonomy,
   registry: skillLearningRegistry,
-  projectSkillsRoot: skillLearningProjectRoot,
+  localSkillsRoot: skillLearningLocalRoot,
   storePath: skillLearningStorePath,
   sessionDb: skillLearningSessionDb
 });
@@ -8666,7 +8697,7 @@ const suggestSecond = await skillLearningSuggest.observeTurn({
   toolExecutions: skillLearningExecutions
 });
 const suggestRecords = await skillLearningSuggest.inspect();
-const skillLearningProjectFileAfterSuggest = await readFile(join(skillLearningProjectRoot, "validate-telegram-attachment-flow-end-workflow", "SKILL.md"), "utf8").catch(() => "");
+const skillLearningLocalFileAfterSuggest = await readFile(join(skillLearningLocalRoot, "validate-telegram-attachment-flow-end-workflow", "SKILL.md"), "utf8").catch(() => "");
 await skillLearningSessionDb.createSession({
   id: "skill-learning-proactive-1",
   profileId: "smoke"
@@ -8690,7 +8721,7 @@ const proactiveSecond = await skillLearningProactive.observeTurn({
   selectedSkill: undefined,
   toolExecutions: skillLearningExecutions
 });
-const proactiveSkillPath = join(skillLearningProjectRoot, "build-provider-hardening-acceptance-matrix-workflow", "SKILL.md");
+const proactiveSkillPath = join(skillLearningLocalRoot, "build-provider-hardening-acceptance-matrix-workflow", "SKILL.md");
 const proactiveSkillFile = await readFile(proactiveSkillPath, "utf8");
 await skillLearningSessionDb.createSession({
   id: "skill-learning-autonomous-1",
@@ -8704,7 +8735,7 @@ const autonomousFirst = await skillLearningAutonomous.observeTurn({
   selectedSkill: undefined,
   toolExecutions: skillLearningExecutions
 });
-const autonomousSkillFile = await readFile(join(skillLearningProjectRoot, "inspect-release-screenshot-extract-visible-workflow", "SKILL.md"), "utf8");
+const autonomousSkillFile = await readFile(join(skillLearningLocalRoot, "inspect-release-screenshot-extract-visible-workflow", "SKILL.md"), "utf8");
 await skillLearningSessionDb.createSession({
   id: "skill-learning-risky-1",
   profileId: "smoke"
@@ -8729,7 +8760,31 @@ const riskySecond = await skillLearningRisky.observeTurn({
   toolExecutions: riskySkillLearningExecutions
 });
 const riskyRecords = await skillLearningRisky.inspect();
-const riskySkillFile = await readFile(join(skillLearningProjectRoot, "post-release-note-externally-workflow", "SKILL.md"), "utf8").catch(() => "");
+const riskySkillFile = await readFile(join(skillLearningLocalRoot, "post-release-note-externally-workflow", "SKILL.md"), "utf8").catch(() => "");
+await skillLearningSessionDb.createSession({
+  id: "skill-learning-sensitive-1",
+  profileId: "smoke"
+});
+await skillLearningSessionDb.createSession({
+  id: "skill-learning-sensitive-2",
+  profileId: "smoke"
+});
+const skillLearningSensitive = makeSkillLearningManager("autonomous");
+await skillLearningSensitive.observeTurn({
+  profileId: "smoke",
+  sessionId: "skill-learning-sensitive-1",
+  userText: "Use OPENAI_API_KEY from .env to configure provider",
+  selectedSkill: undefined,
+  toolExecutions: skillLearningExecutions
+});
+const sensitiveSecond = await skillLearningSensitive.observeTurn({
+  profileId: "smoke",
+  sessionId: "skill-learning-sensitive-2",
+  userText: "Use OPENAI_API_KEY from .env to configure provider",
+  selectedSkill: undefined,
+  toolExecutions: skillLearningExecutions
+});
+const sensitiveRecords = await skillLearningSensitive.inspect();
 const cdpToolRegistry = new ToolRegistry();
 for (const tool of createWebTools({
   workspaceRoot: contextWorkspace,
@@ -9029,18 +9084,30 @@ assert(
   suggestRecords.some((record) => record.status === "candidate" && record.content.includes("Validate telegram attachment flow end to end")),
   "expected suggest mode to persist a workflow candidate"
 );
-assert(skillLearningProjectFileAfterSuggest.length === 0, "expected suggest mode not to auto-create a project skill");
+assert(skillLearningLocalFileAfterSuggest.length === 0, "expected suggest mode not to auto-create a local skill");
 assert(proactiveSecond?.action === "created", "expected proactive mode to auto-create a bounded repeated workflow skill");
-assert(proactiveSkillFile.includes("Build provider hardening acceptance matrix"), "expected proactive mode to create the learned project skill");
+assert(proactiveSkillFile.includes("Build provider hardening acceptance matrix"), "expected proactive mode to create the learned local skill");
 assert(proactiveSkillFile.includes("Run `file.read`."), "expected learned skill to include the observed tool workflow");
 assert(autonomousFirst?.action === "created", "expected autonomous mode to create a bounded workflow skill after one success");
 assert(autonomousSkillFile.includes("Inspect release screenshot and extract visible text"), "expected autonomous skill content");
+assert(autonomousSkillFile.includes('"provenance"'), "expected autonomous generated skill to include provenance metadata");
+assert(autonomousSkillFile.includes('"evaluations"'), "expected autonomous generated skill to include eval metadata");
 assert(riskySecond?.action === "candidate", "expected risky workflow to stay a candidate even in autonomous mode");
 assert(
   riskyRecords.some((record) => record.status === "candidate" && record.bounded === false),
   "expected risky workflow inspection to show an unbounded candidate"
 );
-assert(riskySkillFile.length === 0, "expected risky workflows not to auto-create project skills");
+assert(riskySkillFile.length === 0, "expected risky workflows not to auto-create local skills");
+assert(sensitiveSecond?.action === "candidate", "expected credential-bearing workflow to stay a candidate even in autonomous mode");
+assert(
+  sensitiveRecords.some((record) =>
+    record.status === "candidate" &&
+    record.bounded === false &&
+    /secrets|environment/u.test(record.boundedReason ?? "") &&
+    !record.content.includes("OPENAI_API_KEY")
+  ),
+  "expected sensitive workflow to be redacted and blocked from autonomous creation"
+);
 assert(!projectMemoryAfterRepeatedFacts.includes("Validate telegram attachment flow"), "expected workflows to stay out of MEMORY.md");
 assert(
   runtimeEvents.some((event) => event.kind === "skill-workflow-step" && event.stepId === "structure-knowledge" && event.status === "tool-executed"),

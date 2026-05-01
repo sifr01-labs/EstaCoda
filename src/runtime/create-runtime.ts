@@ -385,7 +385,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const skillLearningManager = new SkillLearningManager({
     autonomy: options.skillAutonomy ?? "suggest",
     registry: skillRegistry,
-    projectSkillsRoot,
+    localSkillsRoot: personalSkillsRoot,
     storePath: skillLearningStorePath,
     sessionDb
   });

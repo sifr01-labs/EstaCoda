@@ -19,6 +19,7 @@ export type SkillLearningRecord = {
   tools: string[];
   requiredToolsets: ToolsetName[];
   bounded: boolean;
+  boundedReason?: string;
   status: "observed" | "candidate" | "created";
   createdSkillName?: string;
   createdSkillPath?: string;
@@ -45,20 +46,20 @@ export type SkillLearningObservation =
 export class SkillLearningManager {
   readonly #autonomy: SkillAutonomy;
   readonly #registry: SkillRegistry;
-  readonly #projectSkillsRoot: string;
+  readonly #localSkillsRoot: string;
   readonly #store: SkillLearningStore;
   readonly #sessionDb: SessionDB;
 
   constructor(options: {
     autonomy: SkillAutonomy;
     registry: SkillRegistry;
-    projectSkillsRoot: string;
+    localSkillsRoot: string;
     storePath: string;
     sessionDb: SessionDB;
   }) {
     this.#autonomy = options.autonomy;
     this.#registry = options.registry;
-    this.#projectSkillsRoot = options.projectSkillsRoot;
+    this.#localSkillsRoot = options.localSkillsRoot;
     this.#store = new SkillLearningStore({
       path: options.storePath
     });
@@ -95,7 +96,8 @@ export class SkillLearningManager {
       sessionId: input.sessionId,
       tools: workflow.tools,
       requiredToolsets: workflow.requiredToolsets,
-      bounded: workflow.bounded
+      bounded: workflow.bounded,
+      boundedReason: workflow.boundedReason
     });
     const threshold = this.#autonomy === "autonomous" ? 1 : 2;
 
@@ -104,7 +106,7 @@ export class SkillLearningManager {
     }
 
     if (workflow.bounded && shouldCreateSkill(this.#autonomy, record.occurrences, threshold)) {
-      const created = await this.#createProjectSkill(record);
+      const created = await this.#createLocalSkill(record);
       const updated = await this.#store.markCreated(record.key, {
         createdSkillName: created.name,
         createdSkillPath: created.path
@@ -150,9 +152,9 @@ export class SkillLearningManager {
     return this.#store.list();
   }
 
-  async #createProjectSkill(record: SkillLearningRecord): Promise<{ name: string; path: string }> {
+  async #createLocalSkill(record: SkillLearningRecord): Promise<{ name: string; path: string }> {
     const name = ensureUniqueSkillName(this.#registry, record.name);
-    const skillDir = join(this.#projectSkillsRoot, slugifySkillName(name));
+    const skillDir = join(this.#localSkillsRoot, slugifySkillName(name));
     const skillPath = join(skillDir, "SKILL.md");
     const description = record.content.replace(/^Reusable workflow:\s*/u, "");
     const instructions = [
@@ -174,6 +176,29 @@ export class SkillLearningManager {
       category: "workflow",
       whenToUse: [description],
       requiredToolsets: record.requiredToolsets,
+      metadata: {
+        estacoda: {
+          provenance: {
+            kind: "agent-created",
+            createdBy: "agent",
+            sourceSessionId: record.sourceSessionIds.at(-1),
+            sourceSessionIds: record.sourceSessionIds
+          },
+          learning: {
+            occurrences: record.occurrences,
+            bounded: record.bounded,
+            boundedReason: record.boundedReason,
+            tools: record.tools
+          }
+        }
+      },
+      evaluations: [
+        {
+          input: description,
+          shouldUseToolsets: record.requiredToolsets,
+          expectedOutcome: "Skill should select the learned workflow and use the observed tool sequence where applicable."
+        }
+      ],
       instructions
     });
 
@@ -181,7 +206,7 @@ export class SkillLearningManager {
     await writeFile(skillPath, content, "utf8");
     const loaded = await hydrateSkillResources(parseSkillFile(skillPath, content, {
       sourceKind: "local" satisfies SkillSourceKind,
-      sourceRoot: this.#projectSkillsRoot
+      sourceRoot: this.#localSkillsRoot
     }));
     this.#registry.register(loaded);
 
@@ -211,6 +236,7 @@ class SkillLearningStore {
     tools: string[];
     requiredToolsets: ToolsetName[];
     bounded: boolean;
+    boundedReason?: string;
   }): Promise<SkillLearningRecord> {
     await this.#ensureLoaded();
     const now = this.#now().toISOString();
@@ -227,6 +253,7 @@ class SkillLearningStore {
       tools: existing === undefined ? input.tools : mergeOrdered(existing.tools, input.tools),
       requiredToolsets: existing === undefined ? input.requiredToolsets : mergeOrdered(existing.requiredToolsets, input.requiredToolsets),
       bounded: existing?.bounded === false ? false : input.bounded,
+      boundedReason: existing?.boundedReason ?? input.boundedReason,
       status: existing?.status ?? "observed",
       createdSkillName: existing?.createdSkillName,
       createdSkillPath: existing?.createdSkillPath,
@@ -316,6 +343,7 @@ function detectWorkflow(input: {
   tools: string[];
   requiredToolsets: ToolsetName[];
   bounded: boolean;
+  boundedReason?: string;
 } | undefined {
   const successful = input.toolExecutions.filter((execution) => execution.result?.ok === true);
   if (successful.length < 2) {
@@ -327,25 +355,30 @@ function detectWorkflow(input: {
     return undefined;
   }
 
-  const normalizedPrompt = normalizePrompt(input.userText);
+  const redactedPrompt = redactLearningText(input.userText);
+  const normalizedPrompt = normalizePrompt(redactedPrompt);
   if (normalizedPrompt.length === 0) {
     return undefined;
   }
 
-  const bounded = successful.every((execution) => isBoundedRisk(execution.riskClass));
+  const secretReason = sensitiveWorkflowReason(input.userText);
+  const boundedByRisk = successful.every((execution) => isBoundedRisk(execution.riskClass));
+  const bounded = boundedByRisk && secretReason === undefined;
+  const boundedReason = secretReason ?? (boundedByRisk ? "bounded-local-workflow" : "unbounded-tool-risk");
   const requiredToolsets = mergeOrdered(
     [],
     successful.flatMap((execution) => execution.tool.toolsets)
   );
-  const label = humanizePrompt(input.userText);
+  const label = humanizePrompt(redactedPrompt);
 
   return {
     key: `${normalizedPrompt}::${tools.join(">")}`,
-    name: `${summarizePrompt(input.userText)} workflow`,
+    name: `${summarizePrompt(redactedPrompt)} workflow`,
     content: `Reusable workflow: ${label}`,
     tools,
     requiredToolsets,
-    bounded
+    bounded,
+    boundedReason
   };
 }
 
@@ -408,6 +441,33 @@ function humanizePrompt(value: string): string {
     return "repeated local task";
   }
   return trimmed.replace(/[.?!]+$/u, "");
+}
+
+function sensitiveWorkflowReason(value: string): string | undefined {
+  if (/\b(api[_-]?key|token|secret|password|credential|bearer)\b/iu.test(value)) {
+    return "prompt references secrets or credentials";
+  }
+  if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/u.test(value)) {
+    return "prompt references a private key";
+  }
+  if (/(^|[\\/\s])\.env(?:$|[\\/\s])/u.test(value)) {
+    return "prompt references an environment file";
+  }
+  if (/(^|\/)\.ssh\/(?:id_[a-z0-9_]+|config|known_hosts)\b/iu.test(value)) {
+    return "prompt references SSH credential material";
+  }
+  if (/\b(cookies?|sessionid|auth[_-]?token)\b/iu.test(value)) {
+    return "prompt references browser or session credentials";
+  }
+  return undefined;
+}
+
+function redactLearningText(value: string): string {
+  return value
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/gu, "[redacted private key]")
+    .replace(/\b(?:sk|rk|pk|xox[baprs]|gh[pousr])-[A-Za-z0-9_-]{12,}\b/gu, "[redacted secret]")
+    .replace(/\b[A-Za-z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD)[A-Za-z0-9_]*\b/gu, "[redacted secret name]")
+    .replace(/(?:^|\s)(?:\/Users\/[^\s]+|\/home\/[^\s]+|\/private\/[^\s]+)/gu, " [local path]");
 }
 
 function isBoundedRisk(riskClass: ToolRiskClass): boolean {
