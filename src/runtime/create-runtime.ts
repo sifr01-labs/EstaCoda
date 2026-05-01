@@ -343,6 +343,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     usagePath: join(workspaceRoot, ".estacoda", "skill-usage.json"),
     evolutionRoot: join(workspaceRoot, ".estacoda", "skill-evolution")
   });
+  const skillUsageByName = new Map((await skillEvolutionStore.usage()).map((record) => [record.skillName, record]));
   const skillVisibilityContext = createSkillVisibilityContext({
     availableTools: toolAvailability.available,
     browserAvailable,
@@ -352,7 +353,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   });
   const sessionSkillRegistry = new SkillRegistry();
   for (const skill of skillRegistry.list()) {
-    if (evaluateSkillVisibility(skill, skillVisibilityContext).visible) {
+    if (evaluateSkillVisibility(skill, {
+      ...skillVisibilityContext,
+      lifecycleState: skillUsageByName.get(skill.name)?.state
+    }).visible) {
       sessionSkillRegistry.register(skill);
     }
   }

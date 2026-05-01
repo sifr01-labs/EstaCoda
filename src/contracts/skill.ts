@@ -46,6 +46,7 @@ export type SkillWorkflowPlanStep = {
 export type SkillWorkflowPlan = {
   skill: string;
   steps: SkillWorkflowPlanStep[];
+  warnings?: string[];
 };
 
 export type SkillEvaluation = {

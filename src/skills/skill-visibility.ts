@@ -1,10 +1,13 @@
-import type { LoadedSkill, SkillDefinition } from "../contracts/skill.js";
+import type { LoadedSkill, SkillDefinition, SkillLifecycleState } from "../contracts/skill.js";
 import type { ToolsetName } from "../contracts/tool.js";
 
 export type SkillVisibilityContext = {
   platform: string;
   availableToolsets: Set<ToolsetName>;
   availableTools: Set<string>;
+  lifecycleState?: SkillLifecycleState;
+  explicitInvocation?: boolean;
+  routeConfidence?: number;
 };
 
 export type SkillVisibilityResult = {
@@ -17,6 +20,20 @@ export function evaluateSkillVisibility(
   context: SkillVisibilityContext
 ): SkillVisibilityResult {
   const reasons: string[] = [];
+  const lifecycleState = context.lifecycleState ?? ("lifecycleState" in skill ? skill.lifecycleState : undefined);
+
+  if (lifecycleState === "archived" && context.explicitInvocation !== true) {
+    reasons.push("archived");
+  }
+
+  if (
+    lifecycleState === "stale" &&
+    context.explicitInvocation !== true &&
+    (context.routeConfidence ?? 0) < 0.85
+  ) {
+    reasons.push("stale-weak-match");
+  }
+
   const platform = normalizePlatform(context.platform);
   const skillPlatforms = (skill.platforms ?? []).map(normalizePlatform).filter((entry) => entry.length > 0);
 
