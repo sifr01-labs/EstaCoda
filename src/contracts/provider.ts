@@ -16,6 +16,7 @@ export type ModelProfile = {
   id: string;
   provider: ProviderId;
   contextWindowTokens: number;
+  status?: "stable" | "alpha" | "beta" | "deprecated" | "unknown";
   supportsTools: boolean;
   supportsVision: boolean;
   supportsStructuredOutput: boolean;

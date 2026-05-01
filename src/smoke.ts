@@ -57,7 +57,17 @@ import type { ProviderAdapter, ProviderRequest, ProviderResponse, ProviderStream
 import type { RuntimeEvent } from "./contracts/runtime-event.js";
 import { CredentialPool, CredentialPoolRegistry } from "./providers/credential-pool.js";
 import { AuxiliaryProviderRouter, summarizeAuxiliaryRoutes } from "./providers/auxiliary-provider-router.js";
-import { inferModelProfile } from "./providers/model-catalog.js";
+import {
+  inferModelProfile,
+  resolveModelProfileFromCatalog,
+  resolveModelProfilesFromCatalog,
+  resolveProviderModelsFromCatalog
+} from "./providers/model-catalog.js";
+import {
+  modelsDevSnapshotToProfiles,
+  resetModelsDevRegistryForTest,
+  resolveModelsDevSnapshot
+} from "./model-catalog/models-dev-registry.js";
 import {
   buildOpenAICompatibleRequest,
   classifyHttpError,
@@ -602,6 +612,70 @@ const catalogProviderConfig = await loadRuntimeConfig({
   workspaceRoot: catalogProviderWorkspace,
   homeDir: catalogProviderHome
 });
+resetModelsDevRegistryForTest();
+const offlineModelsSnapshot = await resolveModelsDevSnapshot({
+  homeDir: await mkdtemp(join(tmpdir(), "estacoda-v2-models-dev-offline-home-")),
+  allowNetwork: false,
+  fetchImpl: async () => {
+    throw new Error("models.dev should not be fetched when allowNetwork is false");
+  }
+});
+const offlineModelProfiles = modelsDevSnapshotToProfiles(offlineModelsSnapshot);
+const metadataHome = await mkdtemp(join(tmpdir(), "estacoda-v2-models-dev-home-"));
+const metadataCachePath = join(metadataHome, "models-dev-cache.json");
+await writeFile(metadataCachePath, JSON.stringify({
+  fetchedAt: "2026-04-30T01:00:00.000Z",
+  moonshot: {
+    name: "Moonshot",
+    models: {
+      "kimi-metadata-test": {
+        contextWindow: 123456,
+        maxOutput: 4096,
+        toolCall: true,
+        structuredOutput: true,
+        inputModalities: ["text", "image"],
+        outputModalities: ["text"]
+      },
+      "kimi-old": {
+        status: "deprecated",
+        contextWindow: 1000,
+        maxOutput: 1000,
+        inputModalities: ["text"],
+        outputModalities: ["text"]
+      }
+    }
+  }
+}), "utf8");
+resetModelsDevRegistryForTest();
+const diskModelsSnapshot = await resolveModelsDevSnapshot({
+  cachePath: metadataCachePath,
+  bundledSnapshotPath: join(metadataHome, "missing-bundled.json"),
+  allowNetwork: false
+});
+const diskModelProfiles = modelsDevSnapshotToProfiles(diskModelsSnapshot);
+const enrichedKimiProfile = await resolveModelProfileFromCatalog({
+  provider: "kimi",
+  model: "kimi-metadata-test",
+  cachePath: metadataCachePath,
+  bundledSnapshotPath: join(metadataHome, "missing-bundled.json"),
+  allowNetwork: false
+});
+const providerModelsFromCatalog = await resolveProviderModelsFromCatalog({
+  provider: "kimi",
+  cachePath: metadataCachePath,
+  bundledSnapshotPath: join(metadataHome, "missing-bundled.json"),
+  allowNetwork: false
+});
+resetModelsDevRegistryForTest();
+const emptyModelsSnapshot = await resolveModelsDevSnapshot({
+  cachePath: join(metadataHome, "missing-cache.json"),
+  bundledSnapshotPath: join(metadataHome, "missing-bundled.json"),
+  allowNetwork: false,
+  fetchImpl: async () => {
+    throw new Error("models.dev empty offline fallback should not fetch");
+  }
+});
+resetModelsDevRegistryForTest();
 const imageBaseUrlWorkspace = await mkdtemp(join(tmpdir(), "estacoda-v2-image-base-url-workspace-"));
 const imageBaseUrlHome = await mkdtemp(join(tmpdir(), "estacoda-v2-image-base-url-home-"));
 await mkdir(join(imageBaseUrlHome, ".estacoda"));
@@ -3311,6 +3385,27 @@ assert(
   (await catalogProviderConfig.providerRegistry.listModels()).some((model) => model.provider === "anthropic" && model.id === "claude-sonnet-4.5"),
   "expected catalog provider config to register discovery models"
 );
+assert(offlineModelsSnapshot.source === "bundled", "expected bundled models.dev snapshot to load offline");
+assert(
+  offlineModelProfiles.some((model) => model.provider === "kimi" && model.id === "kimi-k2.5" && model.supportsVision),
+  "expected bundled models.dev metadata to normalize Kimi/Moonshot model capabilities"
+);
+assert(diskModelsSnapshot.source === "disk", "expected disk models.dev cache to win when newer local metadata exists");
+assert(
+  diskModelProfiles.some((model) => model.provider === "kimi" && model.id === "kimi-metadata-test" && model.supportsVision),
+  "expected models.dev disk cache to normalize provider-keyed model metadata"
+);
+assert(
+  !diskModelProfiles.some((model) => model.id === "kimi-old"),
+  "expected deprecated models.dev models to be excluded from default profiles"
+);
+assert(enrichedKimiProfile.contextWindowTokens === 123456, "expected catalog resolver to enrich configured model metadata");
+assert(
+  providerModelsFromCatalog.some((model) => model.provider === "kimi" && model.id === "kimi-metadata-test") &&
+  !providerModelsFromCatalog.some((model) => model.id === "kimi-old"),
+  "expected provider catalog resolver to include usable models and exclude deprecated models"
+);
+assert(emptyModelsSnapshot.source === "empty", "expected offline models.dev resolver to return empty snapshot without local metadata");
 assert(imageBaseUrlConfig.imageGen.baseUrl === "https://byteplus.example/api/v3", "expected image config to expose provider-specific base URL as effective base URL");
 assert(defaultImageBaseUrlConfig.imageGen.baseUrl === "https://fal.run", "expected image config to expose provider default base URL");
 assert(explicitImageSetupConfig.imageGen.baseUrl === "https://top-level-image.example/api/v3", "expected explicit top-level image base URL to win");

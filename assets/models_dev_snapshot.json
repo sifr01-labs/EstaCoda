@@ -1,0 +1,197 @@
+{
+  "fetchedAt": "2026-04-30T00:00:00.000Z",
+  "deepseek": {
+    "id": "deepseek",
+    "name": "DeepSeek",
+    "baseUrl": "https://api.deepseek.com/v1",
+    "envVars": ["DEEPSEEK_API_KEY"],
+    "models": {
+      "deepseek-chat": {
+        "contextWindow": 64000,
+        "maxOutput": 8192,
+        "toolCall": true,
+        "structuredOutput": true,
+        "inputModalities": ["text"],
+        "outputModalities": ["text"]
+      },
+      "deepseek-reasoner": {
+        "contextWindow": 64000,
+        "maxOutput": 8192,
+        "reasoning": true,
+        "toolCall": true,
+        "structuredOutput": true,
+        "inputModalities": ["text"],
+        "outputModalities": ["text"]
+      }
+    }
+  },
+  "moonshot": {
+    "id": "moonshot",
+    "name": "Kimi",
+    "baseUrl": "https://api.moonshot.ai/v1",
+    "envVars": ["KIMI_API_KEY"],
+    "models": {
+      "kimi-k2.5": {
+        "contextWindow": 262144,
+        "maxOutput": 8192,
+        "reasoning": true,
+        "toolCall": true,
+        "structuredOutput": true,
+        "inputModalities": ["text", "image"],
+        "outputModalities": ["text"]
+      },
+      "kimi-k2-turbo-preview": {
+        "status": "beta",
+        "contextWindow": 131072,
+        "maxOutput": 8192,
+        "reasoning": true,
+        "toolCall": true,
+        "structuredOutput": true,
+        "inputModalities": ["text"],
+        "outputModalities": ["text"]
+      }
+    }
+  },
+  "openai": {
+    "id": "openai",
+    "name": "OpenAI",
+    "baseUrl": "https://api.openai.com/v1",
+    "envVars": ["OPENAI_API_KEY"],
+    "models": {
+      "gpt-4.1": {
+        "contextWindow": 1047576,
+        "maxOutput": 32768,
+        "toolCall": true,
+        "structuredOutput": true,
+        "inputModalities": ["text", "image"],
+        "outputModalities": ["text"]
+      },
+      "gpt-4.1-mini": {
+        "contextWindow": 1047576,
+        "maxOutput": 32768,
+        "toolCall": true,
+        "structuredOutput": true,
+        "inputModalities": ["text", "image"],
+        "outputModalities": ["text"]
+      },
+      "gpt-4o": {
+        "contextWindow": 128000,
+        "maxOutput": 16384,
+        "toolCall": true,
+        "structuredOutput": true,
+        "inputModalities": ["text", "image"],
+        "outputModalities": ["text"]
+      }
+    }
+  },
+  "openrouter": {
+    "id": "openrouter",
+    "name": "OpenRouter",
+    "baseUrl": "https://openrouter.ai/api/v1",
+    "envVars": ["OPENROUTER_API_KEY"],
+    "models": {
+      "openrouter/auto": {
+        "contextWindow": 128000,
+        "maxOutput": 8192,
+        "toolCall": true,
+        "structuredOutput": true,
+        "inputModalities": ["text", "image"],
+        "outputModalities": ["text"]
+      },
+      "qwen/qwen3.6-plus": {
+        "contextWindow": 256000,
+        "maxOutput": 8192,
+        "reasoning": true,
+        "toolCall": true,
+        "structuredOutput": true,
+        "inputModalities": ["text", "image"],
+        "outputModalities": ["text"]
+      }
+    }
+  },
+  "google": {
+    "id": "google",
+    "name": "Google",
+    "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "envVars": ["GOOGLE_API_KEY"],
+    "models": {
+      "gemini-2.5-pro": {
+        "contextWindow": 1048576,
+        "maxOutput": 32768,
+        "reasoning": true,
+        "toolCall": true,
+        "structuredOutput": true,
+        "inputModalities": ["text", "image"],
+        "outputModalities": ["text"]
+      },
+      "gemini-2.5-flash": {
+        "contextWindow": 1048576,
+        "maxOutput": 32768,
+        "reasoning": true,
+        "toolCall": true,
+        "structuredOutput": true,
+        "inputModalities": ["text", "image"],
+        "outputModalities": ["text"]
+      }
+    }
+  },
+  "anthropic": {
+    "id": "anthropic",
+    "name": "Anthropic",
+    "envVars": ["ANTHROPIC_API_KEY"],
+    "models": {
+      "claude-sonnet-4.5": {
+        "contextWindow": 200000,
+        "maxOutput": 8192,
+        "toolCall": true,
+        "inputModalities": ["text", "image"],
+        "outputModalities": ["text"]
+      },
+      "claude-opus-4.1": {
+        "contextWindow": 200000,
+        "maxOutput": 8192,
+        "reasoning": true,
+        "toolCall": true,
+        "inputModalities": ["text", "image"],
+        "outputModalities": ["text"]
+      }
+    }
+  },
+  "nous": {
+    "id": "nous",
+    "name": "Nous Research",
+    "envVars": ["NOUS_API_KEY"],
+    "models": {
+      "hermes-4": {
+        "contextWindow": 128000,
+        "maxOutput": 8192,
+        "reasoning": true,
+        "toolCall": true,
+        "structuredOutput": true,
+        "openWeights": true,
+        "inputModalities": ["text"],
+        "outputModalities": ["text"]
+      }
+    }
+  },
+  "ollama": {
+    "id": "ollama",
+    "name": "Local Ollama",
+    "models": {
+      "ollama/auto": {
+        "contextWindow": 8192,
+        "maxOutput": 4096,
+        "openWeights": true,
+        "inputModalities": ["text"],
+        "outputModalities": ["text"]
+      },
+      "llama.cpp/auto": {
+        "contextWindow": 8192,
+        "maxOutput": 4096,
+        "openWeights": true,
+        "inputModalities": ["text"],
+        "outputModalities": ["text"]
+      }
+    }
+  }
+}

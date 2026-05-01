@@ -12,7 +12,12 @@ import type {
 } from "../contracts/provider.js";
 import { CredentialPool, CredentialPoolRegistry } from "../providers/credential-pool.js";
 import { loadDotEnvSecrets, writeEnvSecret } from "./env-secret-store.js";
-import { inferModelProfile } from "../providers/model-catalog.js";
+import {
+  enrichModelProfiles,
+  inferModelProfile,
+  resolveModelProfileFromCatalog,
+  resolveModelProfilesFromCatalog
+} from "../providers/model-catalog.js";
 import { createCatalogProvider } from "../providers/catalog-provider.js";
 import { createOpenAICompatibleProvider, type FetchLike as ProviderFetchLike } from "../providers/openai-compatible-provider.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
@@ -464,13 +469,20 @@ export async function loadRuntimeConfig(options: {
   ];
   const loaded = await Promise.all(sources.map((path) => readConfig(path)));
   const config = mergeConfig(...loaded.map((entry) => entry.config));
-  const model = inferModelProfile({
+  const catalogProfiles = await resolveModelProfilesFromCatalog({
+    homeDir: options.homeDir,
+    allowNetwork: false
+  });
+  const model = await resolveModelProfileFromCatalog({
     provider: config.model?.provider ?? "unconfigured",
     model: config.model?.id ?? "unconfigured",
-    contextWindowTokens: config.model?.contextWindowTokens
+    contextWindowTokens: config.model?.contextWindowTokens,
+    homeDir: options.homeDir,
+    allowNetwork: false
   });
   const providerRegistry = buildProviderRegistry(config, {
-    fetch: options.providerFetch
+    fetch: options.providerFetch,
+    catalogProfiles
   });
   const credentialPools = buildCredentialPools(config);
   const telegram = config.channels?.telegram ?? {};
@@ -939,6 +951,7 @@ function normalizeMcpServers(
 
 export function buildProviderRegistry(config: EstaCodaConfig, options: {
   fetch?: ProviderFetchLike;
+  catalogProfiles?: readonly ModelProfile[];
 } = {}): ProviderRegistry {
   const registry = new ProviderRegistry();
 
@@ -957,7 +970,11 @@ export function buildProviderRegistry(config: EstaCodaConfig, options: {
             : { kind: "env", name: providerConfig.apiKeyEnv },
           headers: providerConfig.headers
         } satisfies ProviderEndpoint,
-        models,
+        models: enrichModelProfiles({
+          provider: providerId,
+          models,
+          catalogProfiles: options.catalogProfiles
+        }),
         enableNetwork: providerConfig.enableNetwork ?? false,
         fetch: options.fetch
       }));
@@ -965,9 +982,21 @@ export function buildProviderRegistry(config: EstaCodaConfig, options: {
     }
 
     if (kind === "catalog") {
+      const catalogModels = models.length > 0
+        ? enrichModelProfiles({
+            provider: providerId,
+            models,
+            catalogProfiles: options.catalogProfiles
+          })
+        : options.catalogProfiles?.filter((model) =>
+            model.provider === providerId &&
+            model.status !== "deprecated" &&
+            model.status !== "alpha" &&
+            model.status !== "beta"
+          ) ?? [];
       registry.register(createCatalogProvider({
         id: providerId,
-        models: models.map((model) => inferModelProfile({ provider: providerId, model }))
+        models: catalogModels.length > 0 ? catalogModels : models.map((model) => inferModelProfile({ provider: providerId, model }))
       }));
       continue;
     }
