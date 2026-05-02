@@ -1,4 +1,4 @@
-import { realpath } from "node:fs/promises";
+import { lstat, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 
 export type PathSafetyResult =
@@ -11,6 +11,10 @@ export function isSafeRelativeSkillPath(path: string): boolean {
     !normalized.startsWith("/") &&
     !normalized.split(/[\\/]+/u).some((part) => part === "" || part === "." || part === "..") &&
     normalized !== "SKILL.md" &&
+    normalized !== ".snapshots" &&
+    normalized !== ".archive" &&
+    normalized !== ".usage.json" &&
+    normalized !== ".bundled_manifest.json" &&
     !normalized.startsWith(".snapshots/") &&
     !normalized.startsWith(".archive/") &&
     !normalized.startsWith(".bundled_manifest.json");
@@ -36,6 +40,11 @@ export async function resolveContainedPath(root: string, requestedPath: string):
   const relativePath = relative(rootReal, targetParent);
   if (relativePath.startsWith("..") || relativePath.startsWith("/")) {
     return { ok: false, reason: "Skill path must stay inside the local skills root." };
+  }
+
+  const targetEntry = await lstat(target).catch(() => undefined);
+  if (targetEntry?.isSymbolicLink() === true) {
+    return { ok: false, reason: "Skill path cannot target an existing symlink." };
   }
 
   return { ok: true, path: target };
