@@ -16,19 +16,41 @@ Run these before and after most changes:
 ```bash
 bun run typecheck
 bun run smoke
+bun run scripts/run-eval-fixtures.ts
 ```
 
-| Check | Evidence Level |
-|-------|---------------|
-| `typecheck` | Compile guard only |
-| `smoke` | `smoke-tested` |
+**Check** | **Evidence Level**
+`typecheck` | Compile guard only
+`smoke` | `smoke-tested`
+`eval fixtures` | Deterministic regression detection (12 cases)
 
 ## Smoke Tests
 
-**File:** `src/smoke.ts`
-**Size:** ~14,000 lines
-**Imports:** 89
+**Entrypoint:** `src/smoke.ts` (thin wrapper)
+**Runner:** `src/smoke/smoke-runner.ts`
+**Legacy baseline:** `src/smoke/cases/legacy-monolith.ts` (~14,000 lines, all assertions preserved)
+**Extracted cases:** `src/smoke/cases/*.ts`
 **Eval fixtures:** 12 (3 base + 4 memory + 5 code-graph)
+
+### Running Smoke Cases
+
+```bash
+# All cases
+bun run smoke
+
+# By tag
+bun run smoke --tag skills
+bun run smoke --tag memory
+
+# By case ID
+bun run smoke --id corrupt-skill-usage
+
+# List cases
+bun run smoke --list
+
+# Fail fast + JSON
+bun run smoke --fail-fast --json
+```
 
 ### What Smoke Covers
 
@@ -64,11 +86,10 @@ bun run smoke
 
 ### Smoke Limitations
 
-- All tests in one ~14k-line file
-- No formal test framework
-- No granular failure isolation
-- Adding a test means editing a monolith
-- `// @ts-nocheck` applied due to TypeScript control-flow analysis limits
+- Legacy monolith still contains most assertions in one file
+- No formal test framework (assertions are manual `throw`/`assert`)
+- `// @ts-nocheck` on legacy monolith due to TypeScript control-flow analysis limits
+- New extracted cases use full type-checking
 
 ## Diagnostic CLI Tools
 

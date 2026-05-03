@@ -1,5 +1,5 @@
-import { runSmokeCases, parseSmokeArgs } from "./smoke/smoke-runner.js";
-import { allSmokeCases } from "./smoke/cases/index.js";
+import { runSmokeCases, parseSmokeArgs } from "./smoke-runner.js";
+import { allSmokeCases } from "./cases/index.js";
 
 const options = parseSmokeArgs(process.argv.slice(2));
 const report = await runSmokeCases(allSmokeCases, options);
