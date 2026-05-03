@@ -1,23 +1,22 @@
 ---
 title: "Subsystems"
-description: "Per-subsystem deep dives for skills, memory, security, providers, channels, tools, CLI, trajectory, cron, browser, MCP, and ACP."
+description: "Per-subsystem deep dives for the EstaCoda agent runtime."
 ---
 
 # Subsystems
 
-Each document in this section describes one subsystem as it exists today. All claims are evidence-labeled.
-
-| Subsystem | Doc | Evidence Level |
-|-----------|-----|---------------|
-| Skills | [skills.md](./skills.md) | Strong |
-| Memory | [memory.md](./memory.md) | Partial |
-| Security | [security.md](./security.md) | Strong |
-| Providers | [providers.md](./providers.md) | Strong |
-| Channels | [channels.md](./channels.md) | Partial |
-| Tools | [tools.md](./tools.md) | Strong |
-| CLI & Onboarding | [cli.md](./cli.md) | Strong |
-| Trajectory & Observability | [trajectory.md](./trajectory.md) | Weak |
-| Cron & Automation | [cron.md](./cron.md) | Medium |
-| Browser Automation | [browser.md](./browser.md) | Medium |
-| MCP Integration | [mcp.md](./mcp.md) | Medium |
-| ACP (IDE) | [acp.md](./acp.md) | Medium |
+| Doc | Scope |
+|-----|-------|
+| [CLI & Onboarding](./cli.md) | Commands, interactive session, trace/eval inspection, first-run setup |
+| [Skills](./skills.md) | Skill loading, registry, tools, learning, evolution, proposals |
+| [Memory](./memory.md) | Stores, promotion, rendering, persistence |
+| [Tools](./tools.md) | Tool schemas, registry, executor, planners |
+| [Traces](./traces.md) | Trajectory recording, event kinds, persistence |
+| [Evals](./evals.md) | Eval runner, deterministic fixtures, regression detection |
+| [Security](./security.md) | Capability-first security, approval modes, hard floor |
+| [Providers](./providers.md) | Provider registry, executor, adapters, model catalog |
+| [Channels](./channels.md) | Telegram gateway, session mapping, approvals |
+| [Cron](./cron.md) | Scheduled tasks, tick locking, persistence |
+| [Browser](./browser.md) | Chrome DevTools Protocol automation |
+| [MCP](./mcp.md) | MCP client for stdio and HTTP servers |
+| [ACP](./acp.md) | ACP stdio server foundation for editor clients |

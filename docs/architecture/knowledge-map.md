@@ -18,9 +18,22 @@ graph TB
     end
 
     subgraph Runtime["Agent Runtime (src/runtime/)"]
-        AL["AgentLoop<br/>Monolithic Orchestrator"]
+        AL["AgentLoop<br/>Decomposed Orchestrator"]
         IR["IntentRouter<br/>Intent Classification"]
         CRT["createRuntime()<br/>Factory"]
+        PTL["ProviderTurnLoop<br/>Streaming Loop"]
+        TPR["ToolPlanRunner<br/>Plan Execution"]
+        RR["RunRecorder<br/>Trajectory Capture"]
+        SWE["SkillWorkflowExecutor<br/>Skill Execution"]
+        NTE["NativeToolExecutor<br/>Deterministic Intents"]
+    end
+
+    subgraph Evolution["Evolution Layer (src/skills/ + src/evolution/)"]
+        SPS["SkillProposalService<br/>Proposal & Manifest Logic"]
+        SEVO["SkillEvolutionStore<br/>Telemetry & Proposals"]
+        CM["ChangeManifest<br/>Evidence-Backed Changes"]
+        CUR["Curator<br/>Status & Recommendations"]
+        EXFMT["OptimizationDataset<br/>DSPy/GEPA Export"]
     end
 
     subgraph Security["Security Layer (src/security/)"]
@@ -75,12 +88,17 @@ graph TB
         PCACHE["PromptCache<br/>Cache Prompts"]
     end
 
-    subgraph Trajectory["Trajectory Layer (src/trajectory/) — THIN"]
-        TREC["TrajectoryRecorder<br/>97 lines"]
+    subgraph Trajectory["Trajectory Layer (src/trajectory/)"]
+        TREC["TrajectoryRecorder<br/>101 lines"]
     end
 
-    subgraph Artifacts["Artifact Layer (src/artifacts/) — THIN"]
+    subgraph Artifacts["Artifact Layer (src/artifacts/)"]
         ASTORE["ArtifactStore<br/>56 lines"]
+    end
+
+    subgraph Eval["Eval Layer (src/eval/)"]
+        ERUN["EvalRunner<br/>Deterministic Fixtures"]
+        EFIX["EvalFixtures<br/>18 Cases"]
     end
 
     subgraph MCP["MCP Layer (src/mcp/)"]
@@ -120,6 +138,9 @@ graph TB
     AL --> TEXEC
     AL --> TPLAN
     AL --> PEXEC
+    AL --> PTL
+    AL --> TPR
+    AL --> RR
     AL --> MPROV
     AL --> PASSEM
     AL --> TREC
@@ -138,6 +159,10 @@ graph TB
     SLEARN --> SREG
     STOOLS --> TEXEC
     SWPLAN --> TPLAN
+    SPS --> SEVO
+    SPS --> SREG
+    SPS --> CM
+    CUR --> SPS
 
     TEXEC --> TREG
     TEXEC --> TBUILTIN
@@ -162,6 +187,7 @@ graph TB
 
     TREC --> AL
     ASTORE --> AL
+    RR --> AL
 
     CRT --> AL
     CRT --> IR
@@ -169,6 +195,8 @@ graph TB
     CRT --> SLOAD
     CRT --> SREG
     CRT --> STOOLS
+    CRT --> SEVO
+    CRT --> SPS
     CRT --> TEXEC
     CRT --> TREG
     CRT --> PEXEC
@@ -179,6 +207,11 @@ graph TB
     CRT --> CGATE
     CRT --> CRUN
     CRT --> MCPCL
+    CRT --> ERUN
+
+    ERUN --> EFIX
+    EFIX --> SPS
+    CM --> SPS
 
     %% Durable state
     MSTORE -.->|"Durable"| DISK1[("~/.estacoda/memory/")]
@@ -198,22 +231,31 @@ graph TB
 
 | Entity | Responsibility | File |
 |--------|---------------|------|
-| `AgentLoop` | Core turn orchestration | `src/runtime/agent-loop.ts` |
+| `AgentLoop` | Core turn orchestration (decomposed) | `src/runtime/agent-loop.ts` |
 | `createRuntime` | Composition root | `src/runtime/create-runtime.ts` |
 | `IntentRouter` | Native intent classification | `src/runtime/intent-router.ts` |
+| `ProviderTurnLoop` | Streaming provider execution | `src/runtime/provider-turn-loop.ts` |
+| `ToolPlanRunner` | Tool plan execution | `src/runtime/tool-plan-runner.ts` |
+| `RunRecorder` | Run recording and trajectory | `src/runtime/run-recorder.ts` |
+| `SkillWorkflowExecutor` | Skill workflow execution | `src/runtime/skill-workflow-executor.ts` |
+| `NativeToolExecutor` | Deterministic native intent execution | `src/runtime/native-tool-executor.ts` |
 | `ProviderExecutor` | Streaming provider execution | `src/providers/provider-executor.ts` |
 | `ToolExecutor` | Concrete tool execution | `src/tools/tool-executor.ts` |
 | `ToolCallPlanner` | Plan conversion | `src/tools/tool-call-planner.ts` |
 | `SkillRegistry` | Skill storage and visibility | `src/skills/skill-registry.ts` |
+| `SkillProposalService` | Proposal and manifest logic | `src/skills/skill-proposal-service.ts` |
+| `SkillEvolutionStore` | Telemetry and proposals | `src/skills/skill-evolution.ts` |
 | `MemoryStore` | Bounded memory files | `src/memory/memory-store.ts` |
 | `LocalMemoryProvider` | Memory read/write | `src/memory/local-memory-provider.ts` |
 | `TrajectoryRecorder` | Event recording | `src/trajectory/trajectory-recorder.ts` |
 | `ArtifactStore` | Artifact collection | `src/artifacts/artifact-store.ts` |
 | `ChannelGateway` | Generic channel bridge | `src/channels/channel-gateway.ts` |
 | `TelegramAdapter` | Telegram specifics | `src/channels/telegram-adapter.ts` |
-| `SecurityPolicy` | Policy evaluation | `src/contracts/security.ts` |
+| `SecurityPolicy` | Policy evaluation | `src/security/security-policy-factory.ts` |
 | `WorkspaceTrustStore` | Trust grants | `src/security/workspace-trust-store.ts` |
+| `EvalRunner` | Deterministic fixture runner | `src/eval/eval-runner.ts` |
 
 ## Generated
 
-This graph was generated from static analysis of `src/runtime/agent-loop.ts` and `src/runtime/create-runtime.ts` on 2026-05-02.
+This graph was generated from static analysis of `src/**/*.ts` on 2026-05-03.
+**Previous version:** 2026-05-02 (stale decomposition status, missing evolution layer, missing eval layer).

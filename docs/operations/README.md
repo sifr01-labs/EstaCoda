@@ -1,13 +1,15 @@
 ---
 title: "Operations"
-description: "Environment setup, testing, known issues, and internal alpha procedures."
+description: "How to set up, test, maintain, and hand off work on EstaCoda."
 ---
 
 # Operations
 
 | Doc | Purpose |
 |-----|---------|
-| [environment.md](./environment.md) | Development setup, dependencies, env vars, state paths |
-| [testing.md](./testing.md) | Testing strategy, smoke tests, validation commands |
-| [known-issues.md](./known-issues.md) | Blunt accounting of current limitations |
-| [internal-alpha.md](./internal-alpha.md) | Repeatable operator testing runbook |
+| [Testing](./testing.md) | Smoke tests, eval fixtures, and verification commands |
+| [Environment](./environment.md) | Development environment setup |
+| [Known Issues](./known-issues.md) | Blunt accounting of current limitations |
+| [Maintenance](./maintenance.md) | Documentation governance rules |
+| [Prelaunch Milestones](./prelaunch-milestones.md) | What landed in v0.4–v0.7 and baseline before v0.8 |
+| [Agent Handoff](./agent-handoff.md) | Short operational note for incoming coding agents |

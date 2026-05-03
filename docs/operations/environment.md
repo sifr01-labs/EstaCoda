@@ -101,4 +101,4 @@ EstaCoda uses Bun-specific features:
 
 **Impact:** Smoke tests and runtime execution require Bun. Node execution fails on `bun:` imports.
 
-**Mitigation target:** v0.4 will abstract SQLite behind a session DB interface.
+**Mitigation:** SQLite is already behind a session DB interface (`src/session/`). Full Node compatibility remains deferred until post-MVP.

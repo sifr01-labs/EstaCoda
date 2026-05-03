@@ -80,4 +80,32 @@ Project overlays live under `<workspace>/.estacoda/`.
 - [Architecture](docs/architecture/)
 - [Subsystems](docs/subsystems/)
 - [Operations](docs/operations/)
-- [Roadmap](docs/ROADMAP.md)
+- [Roadmap](ROADMAP.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security](SECURITY.md)
+
+## Onboarding
+
+EstaCoda starts with a guided first-run setup when no usable configuration is found:
+
+```bash
+bun run dev
+```
+
+The setup flow walks through:
+
+1. Interface language and expression style.
+2. Workspace trust.
+3. Primary provider and model.
+4. Optional backup provider and model.
+5. Protected API key capture into `~/.estacoda/.env`.
+6. Security mode (`strict`, `adaptive`, or `open`).
+7. Workflow learning mode (`none`, `suggest`, `proactive`, or `autonomous`).
+8. Optional capabilities: Telegram, voice, vision, image generation, browser automation.
+9. Readiness check before the first agent session.
+
+Credentials are stored locally with restrictive permissions. Advanced users can point EstaCoda at existing environment variables instead of pasting keys during setup.
+
+Workspace trust is path-scoped. A trusted workspace allows normal local file and terminal work under the configured security policy.
+
+`open` mode is not "security off"; the hard safety floor remains active.
