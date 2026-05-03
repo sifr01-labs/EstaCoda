@@ -1,0 +1,30 @@
+{
+  "id": "golden-provider-text-response",
+  "name": "Provider text response",
+  "description": "A clean single-turn provider completion with no tool calls.",
+  "tags": ["provider", "golden"],
+  "createdAt": "2025-05-03T00:00:00.000Z",
+  "trajectory": {
+    "id": "traj-golden-001",
+    "profileId": "default",
+    "sessionId": "sess-golden-001",
+    "modelId": "fake-model",
+    "events": [
+      { "id": "e1", "kind": "session-start", "timestamp": "2025-05-03T00:00:00.000Z", "data": {} },
+      { "id": "e2", "kind": "user-input", "timestamp": "2025-05-03T00:00:01.000Z", "data": { "content": "hello" } },
+      { "id": "e3", "kind": "provider-completion", "timestamp": "2025-05-03T00:00:02.000Z", "data": { "provider": "fake", "model": "fake-model", "ok": true } },
+      { "id": "e4", "kind": "assistant-output", "timestamp": "2025-05-03T00:00:03.000Z", "data": { "content": "hello back from fake provider" } },
+      { "id": "e5", "kind": "session-end", "timestamp": "2025-05-03T00:00:04.000Z", "data": {} }
+    ],
+    "outcome": {
+      "success": true,
+      "summary": "Clean text response"
+    }
+  },
+  "assertions": [
+    { "kind": "outcome-success", "expected": true },
+    { "kind": "event-kind-present", "eventKind": "provider-completion" },
+    { "kind": "event-kind-absent", "eventKind": "tool-call" },
+    { "kind": "summary-contains", "substring": "Clean" }
+  ]
+}

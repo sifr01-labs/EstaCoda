@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { PassThrough } from "node:stream";
 import { AcpServer } from "./acp/server.js";
@@ -17,6 +18,8 @@ import { createConfigTools } from "./config/config-tools.js";
 import { runCliCommand } from "./cli/cli.js";
 import { PersistentCliSessionStore } from "./cli/cli-session-store.js";
 import { ChangeManifestStore } from "./skills/change-manifest-store.js";
+import { loadGoldenFlow } from "./eval/golden-flow-loader.js";
+import { compareToGoldenFlow } from "./eval/golden-flow-compare.js";
 import { runOneShotPrompt } from "./cli/one-shot.js";
 import { renderSlashMenu } from "./cli/slash-menu.js";
 import { runSessionLoop } from "./cli/session-loop.js";
@@ -13451,6 +13454,27 @@ await changeManifestStore.updateStatus(manifest.id, "approved", { promotedBy: "s
 const approved = await changeManifestStore.find(manifest.id);
 assert(approved?.status === "approved", "expected manifest status to be approved");
 assert(approved?.updatedAt !== undefined, "expected manifest to have updatedAt");
+
+const goldenFlowPath = (name: string) => fileURLToPath(new URL(`../evals/golden-flows/${name}`, import.meta.url));
+const goldenText = await loadGoldenFlow(goldenFlowPath("provider-text-response.json"));
+assert(goldenText.id === "golden-provider-text-response", "expected golden flow id to match");
+assert(goldenText.assertions.length > 0, "expected golden flow to have assertions");
+
+const matchingTrajectory = goldenText.trajectory;
+const matchResult = compareToGoldenFlow(matchingTrajectory, goldenText);
+assert(matchResult.passed, `expected golden flow comparison to pass: ${matchResult.assertions.filter((a) => !a.passed).map((a) => a.name).join(", ")}`);
+
+const deviatingTrajectory = {
+  ...goldenText.trajectory,
+  events: goldenText.trajectory.events.filter((e) => e.kind !== "provider-completion"),
+  outcome: { success: false, summary: "Provider failed" }
+};
+const failResult = compareToGoldenFlow(deviatingTrajectory, goldenText);
+assert(!failResult.passed, "expected deviating trajectory to fail golden flow comparison");
+
+const goldenSecurity = await loadGoldenFlow(goldenFlowPath("tool-security-block.json"));
+const securityMatch = compareToGoldenFlow(goldenSecurity.trajectory, goldenSecurity);
+assert(securityMatch.passed, `expected security golden flow to pass: ${securityMatch.assertions.filter((a) => !a.passed).map((a) => a.name).join(", ")}`);
 
 const evalReport = await runEvalCases(defaultEvalFixtures);
 assert(evalReport.failed === 0, `eval smoke failed: ${evalReport.results.filter((r) => !r.passed).map((r) => r.name).join(", ")}`);
