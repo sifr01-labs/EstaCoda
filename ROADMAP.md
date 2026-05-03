@@ -53,7 +53,7 @@ MVP means EstaCoda can execute meaningful agentic work through a visible, recove
 - Security model and known limitations are documented.
 - Contributor documentation exists.
 
-## 3. Near-Term Roadmap (v0.4–v0.6)
+## 3. Near-Term Roadmap (v0.4–v0.7)
 
 ### Runtime reliability (v0.4)
 
@@ -66,6 +66,17 @@ Every run produces a structured, persisted record. Tool calls are timestamped an
 ### Skill system maturity and safety (v0.6)
 
 Memory gains provenance, inspection, and deletion flows. Project and user memory are scoped separately. Memory rendering becomes selective rather than dump-based. Dependency graph output supports agent planning. Policy changes are treated as reviewable proposals, not invisible drift.
+
+### Governed skill evolution (v0.7)
+
+Self-improvement becomes evidence-backed and reviewable. The governed loop is: observe → propose → review → approve/reject → promote → rollback. Every proposal carries a `ChangeManifest` with hypothesis, predicted impact, risk level, eval plan, constraint gates, and rollback plan. High-risk or untrusted proposals require explicit approval. Promotion runs eval gates; failing gates block the promotion. No silent mutation. Tool-description and routing-metadata proposals are representable as manifest targets. A clean JSON export format (`OptimizationDataset`) is available for future DSPy/GEPA consumption.
+
+**v0.7 deferred to post-MVP:**
+- `estacoda skill` namespace CLI (`list`, `inspect`, `usage`, `eval`)
+- In-session slash commands for skill review
+- Auto-proposal generation from observations (threshold-based)
+- Full DSPy/GEPA pipeline integration (JSON export skeleton only)
+- Tool-description and routing-metadata auto-application
 
 ## 4. Mid-Term Direction (v0.7–v0.10)
 

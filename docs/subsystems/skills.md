@@ -66,26 +66,61 @@ The agent can perform these operations via `skill-tools.ts`:
 
 ## Evolution
 
-Skill evolution allows the system to improve skills based on usage and failure evidence.
+Skill evolution is **governed, not autonomous**. The system improves skills through an evidence-backed, reviewable, reversible pipeline.
+
+**Governed loop:**
+
+```
+observe → propose → review → approve/reject → promote → rollback (if needed)
+```
 
 **Current capabilities:**
 
 | Capability | Status |
 |------------|--------|
 | Usage telemetry (`skill-usage-telemetry.ts`) | `smoke-tested` |
+| Observe with `candidateImprovement` → auto-create ChangeManifest | `smoke-tested` |
 | Propose patches (`skill-evolution.ts`) | `smoke-tested` |
-| Review proposals | `smoke-tested` |
-| Approve/reject/promote | `smoke-tested` |
+| Review proposals with trust/risk scoring | `smoke-tested` |
+| Approve/reject/promote via agent tools and CLI | `smoke-tested` |
+| Eval-gated promotion (failing eval blocks promotion) | `smoke-tested` |
 | Promotion gates (untrusted-source blocking) | `smoke-tested` |
 | Eval deltas in promotion records | `smoke-tested` |
-| Rollback tool | `smoke-tested` |
+| Rollback tool (`skill.rollback`) | `smoke-tested` |
+| ChangeManifestStore wired into runtime (no longer orphaned) | `smoke-tested` |
+| Tool-description proposal skeleton (`target: "tool_description"`) | `smoke-tested` |
+| Routing-metadata proposal skeleton (`target: "routing_metadata"`) | `smoke-tested` |
+| DSPy/GEPA-compatible export (`estacoda evolution export`) | `smoke-tested` |
+
+**What "governed" means:**
+
+- Proposed changes carry a `ChangeManifest` with hypothesis, predicted impact, risk level, eval plan, constraint gates, and rollback plan.
+- High-risk or untrusted proposals require explicit approval before promotion.
+- Promotion runs eval gates; failing gates block the promotion.
+- No silent mutation — every change is logged, reviewable, and reversible.
+- Bundled skills evolve only through local working copies.
+- External skills remain read-only.
 
 **Limitations:**
 
 - Skill evals are metadata/workflow-scoring only. No real task fixture execution yet.
-- Tool-description improvement proposals are not supported.
-- Routing-metadata improvement proposals are not supported.
-- Autonomous workflow learning creates new project skills but does not intelligently patch existing ones.
+- Tool-description and routing-metadata proposals are representable as manifest targets but not auto-applied.
+- No autonomous proposal generation from observations (observations create lightweight manifests; full proposals require explicit `skill.propose_patch`).
+- `skill` namespace CLI (`estacoda skill list`, `estacoda skill inspect`) is deferred to post-v0.7.
+
+**CLI surface:**
+
+```bash
+estacoda proposal list [--skill <name>] [--status <s>]
+estacoda proposal inspect <id>
+estacoda proposal approve <id>
+estacoda proposal reject <id>
+estacoda proposal promote <id>
+estacoda manifest list [--target <t>] [--status <s>]
+estacoda manifest inspect <id>
+estacoda curator status
+estacoda evolution export --dataset <path> [--since <date>] [--skill <name>]
+```
 
 ## Learning
 

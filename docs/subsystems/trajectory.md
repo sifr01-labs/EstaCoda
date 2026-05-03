@@ -42,6 +42,17 @@ The contract defines 32 event kinds:
 | Progress | `progress`, `fallback`, `assistant-output`, `user-correction` |
 | Cancel | `agent-cancelled` |
 
+### User Corrections
+
+`user-correction` is a structured trajectory event kind introduced in v0.7. When the user provides corrective feedback (e.g., "no, do it this way"), the runtime records:
+
+- `correctionText`: what the user said
+- `skillName`: the skill that produced the incorrect behavior (if identified)
+- `reason`: why the correction was triggered
+- `sourceTrajectoryId` / `sourceEventId`: provenance linking back to the original event
+
+User corrections flow into the evidence corpus and can be referenced in `ChangeManifest` proposals.
+
 ## TrajectoryRecorder
 
 ```typescript

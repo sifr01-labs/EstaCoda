@@ -22,7 +22,7 @@ bun run scripts/run-eval-fixtures.ts
 **Check** | **Evidence Level**
 `typecheck` | Compile guard only
 `smoke` | `smoke-tested`
-`eval fixtures` | Deterministic regression detection (12 cases)
+`eval fixtures` | Deterministic regression detection (18 cases)
 
 ## Smoke Tests
 
@@ -31,7 +31,7 @@ bun run scripts/run-eval-fixtures.ts
 **Legacy baseline:** `src/smoke/_legacy.ts` (~14,000 lines, all assertions preserved)
 **Legacy wrapper case:** `src/smoke/cases/legacy-monolith.ts` (thin 9-line wrapper)
 **Extracted cases:** `src/smoke/cases/*.ts`
-**Eval fixtures:** 12 (3 base + 4 memory + 5 code-graph)
+**Eval fixtures:** 18 (3 base + 4 memory + 5 code-graph + 6 evolution)
 
 ### Running Smoke Cases
 
@@ -72,10 +72,11 @@ bun run smoke --fail-fast --json
 - Onboarding copy and settings
 - Trajectory persistence and failure classification
 - Trace CLI commands
-- Eval runner and fixtures (12 deterministic evals)
+- Eval runner and fixtures (18 deterministic evals)
 - Golden flow comparison
 - Change manifest state transitions
 - Code dependency graph: forward/reverse/affected lookup, summary, cache invalidation
+- **Evolution:** manifest creation, proposal bridge, user-correction capture, tool-description/routing-metadata skeletons, export shape
 
 ### What Smoke Does Not Cover
 
