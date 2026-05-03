@@ -42,6 +42,7 @@ import { type ApprovalScope, type PersistedWorkspaceApprovalGrant, type Workspac
 import { loadSkillsFromDirectory } from "../skills/skill-loader.js";
 import { SkillRegistry } from "../skills/skill-registry.js";
 import { SkillEvolutionStore } from "../skills/skill-evolution.js";
+import { ChangeManifestStore } from "../skills/change-manifest-store.js";
 import { SkillLearningManager, type SkillAutonomy } from "../skills/skill-learning.js";
 import { syncBundledSkills } from "../skills/skill-bundled-sync.js";
 import { evaluateSkillVisibility } from "../skills/skill-visibility.js";
@@ -351,6 +352,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     usagePath: join(localSkillsRoot, ".usage.json"),
     evolutionRoot: join(localSkillsRoot, ".evolution")
   });
+  const changeManifestStore = new ChangeManifestStore({
+    root: join(localSkillsRoot, ".evolution", "manifests")
+  });
   const skillUsageByName = new Map((await skillEvolutionStore.usage()).map((record) => [record.skillName, record]));
   const skillVisibilityContext = createSkillVisibilityContext({
     availableTools: toolAvailability.available,
@@ -374,7 +378,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     visibleRegistry: sessionSkillRegistry,
     localSkillsRoot,
     bundledSkillsRoot: bundledSkillsDir,
-    skillEvolutionStore
+    skillEvolutionStore,
+    changeManifestStore
   })) {
     toolRegistry.register(tool);
   }

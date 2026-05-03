@@ -269,6 +269,12 @@ export type SessionEvent =
         createdSkillPath?: string;
         updatedAt: string;
       };
+    }
+  | {
+      kind: "user-correction";
+      correctionText: string;
+      skillName?: string;
+      reason?: string;
     };
 
 export type SessionSearchResult = {

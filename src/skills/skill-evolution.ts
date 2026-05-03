@@ -376,6 +376,7 @@ export class SkillEvolutionStore {
     mayPromoteAutomatically?: boolean;
     requiresHumanApproval?: boolean;
     patch: SkillPatchOperation;
+    changeManifestId?: string;
   }): Promise<SkillPatchProposal> {
     const sourceTrust = input.sourceTrust ?? "user_direct";
     const proposal: SkillPatchProposal = {
@@ -394,7 +395,8 @@ export class SkillEvolutionStore {
       mayPromoteAutomatically: input.mayPromoteAutomatically ?? sourceTrustAllowsAutomaticPromotion(sourceTrust),
       requiresHumanApproval: input.requiresHumanApproval ?? !sourceTrustAllowsAutomaticPromotion(sourceTrust),
       patch: input.patch,
-      status: "proposed"
+      status: "proposed",
+      changeManifestId: input.changeManifestId
     };
     await this.#appendJsonl("proposed-patches.jsonl", proposal);
     return proposal;

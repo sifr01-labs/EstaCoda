@@ -9,6 +9,7 @@ import { hydrateSkillResources, loadSkillsFromDirectory, parseSkillFile, truncat
 import { assertSkillContentMutationAllowed, assertSkillMutable } from "./skill-mutation-policy.js";
 import { ensureContainedDirectory, isSafeRelativeSkillPath } from "./skill-path-safety.js";
 import type { SkillRegistry } from "./skill-registry.js";
+import { ChangeManifestStore } from "./change-manifest-store.js";
 
 export type SkillToolsOptions = {
   registry: SkillRegistry;
@@ -16,6 +17,7 @@ export type SkillToolsOptions = {
   localSkillsRoot: string;
   bundledSkillsRoot?: string;
   skillEvolutionStore?: SkillEvolutionStore;
+  changeManifestStore?: ChangeManifestStore;
 };
 
 export function createSkillTools(options: SkillToolsOptions): readonly RegisteredTool[] {
@@ -239,6 +241,27 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
           candidateImprovement: input.candidateImprovement,
           ...deriveToolObservationTrust()
         });
+        if (isNonEmptyString(input.candidateImprovement) && options.changeManifestStore !== undefined) {
+          const manifest = await options.changeManifestStore.propose({
+            target: "skill",
+            filesChanged: skill !== undefined && isLoadedSkill(skill) ? [skill.sourcePath] : [],
+            evidence: {
+              traces: [],
+              failures: [],
+              evalCases: [],
+              userCorrections: []
+            },
+            hypothesis: input.lesson,
+            predictedImpact: input.candidateImprovement,
+            riskLevel: observation.sourceTrust === "developer" || observation.sourceTrust === "runtime_internal" ? "low" : "medium",
+            evalCommand: `bun run smoke --tag skills`,
+            constraintGates: ["typecheck", "smoke"],
+            rollbackPlan: `Revert skill file using skill.rollback or restore from snapshot.`
+          });
+          await options.changeManifestStore.linkEvidence(manifest.id, {
+            traces: [observation.id]
+          });
+        }
         return {
           ok: true,
           content: `Recorded skill observation ${observation.id} for ${observation.skillName}.`,
@@ -283,17 +306,45 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
           return errorResult("skill.propose_patch requires name, reason, and patch");
         }
         const skill = options.registry.get(input.name);
+        const source = skill !== undefined && isLoadedSkill(skill) ? skill.sourceKind : undefined;
+        const riskLevel = classifyPatchRisk(input.patch);
+        let changeManifestId: string | undefined;
+        if (options.changeManifestStore !== undefined) {
+          const manifest = await options.changeManifestStore.propose({
+            target: "skill",
+            filesChanged: skill !== undefined && isLoadedSkill(skill) ? [skill.sourcePath] : [],
+            evidence: {
+              traces: [],
+              failures: [],
+              evalCases: [],
+              userCorrections: []
+            },
+            hypothesis: input.reason,
+            predictedImpact: `Apply ${input.patch.type} to skill ${input.name}`,
+            riskLevel,
+            evalCommand: `bun run smoke --tag skills`,
+            constraintGates: ["typecheck", "smoke"],
+            rollbackPlan: `Revert skill file using skill.rollback or restore from snapshot.`
+          });
+          changeManifestId = manifest.id;
+        }
         const proposal = await options.skillEvolutionStore.proposePatch({
           skillName: input.name,
-          source: skill !== undefined && isLoadedSkill(skill) ? skill.sourceKind : undefined,
+          source,
           reason: input.reason,
           confidence: input.confidence,
           observationIds: input.observationIds,
           successes: input.successes,
           failures: input.failures,
           ...deriveToolProposalTrust(),
-          patch: input.patch
+          patch: input.patch,
+          changeManifestId
         });
+        if (changeManifestId !== undefined && options.changeManifestStore !== undefined && input.observationIds !== undefined && input.observationIds.length > 0) {
+          await options.changeManifestStore.linkEvidence(changeManifestId, {
+            traces: input.observationIds
+          });
+        }
         return {
           ok: true,
           content: `Proposed skill patch ${proposal.id} for ${proposal.skillName}.`,
@@ -530,6 +581,13 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
         }
         const evalGate = await runSkillEvalGate(loaded);
         await recordSkillEvalRuns(options.skillEvolutionStore, loaded.name, evalGate);
+        if (proposal.changeManifestId !== undefined && options.changeManifestStore !== undefined) {
+          if (evalGate.status === "failed") {
+            await options.changeManifestStore.updateStatus(proposal.changeManifestId, "rejected");
+          } else {
+            await options.changeManifestStore.updateStatus(proposal.changeManifestId, "testing");
+          }
+        }
         if (evalGate.status === "failed") {
           return errorResult(`Skill patch proposal ${proposal.id} failed eval gate: ${evalGate.failures.join("; ")}`);
         }
@@ -549,6 +607,9 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
             evals: evalGate.status
           }
         });
+        if (proposal.changeManifestId !== undefined && options.changeManifestStore !== undefined) {
+          await options.changeManifestStore.updateStatus(proposal.changeManifestId, "promoted", { promotedBy: "skill.promote_patch" });
+        }
         return {
           ok: true,
           content: `Promoted skill patch ${proposal.id} into ${proposal.skillName}. Evals: ${evalGate.status}; smoke validation is recorded as not-run for this minimal gate.`,

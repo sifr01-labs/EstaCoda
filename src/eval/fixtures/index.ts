@@ -10,6 +10,9 @@ import { knowledgeReverseDepsCase } from "./knowledge-reverse-deps.js";
 import { knowledgeAffectedFilesCase } from "./knowledge-affected-files.js";
 import { knowledgeGraphSummaryCase } from "./knowledge-graph-summary.js";
 import { knowledgeCacheInvalidatesCase } from "./knowledge-cache-invalidates.js";
+import { manifestCreationFromObservationCase } from "./manifest-creation-from-observation.js";
+import { skillProposalManifestBridgeCase } from "./skill-proposal-manifest-bridge.js";
+import { userCorrectionRecordingCase } from "./user-correction-recording.js";
 
 export const defaultEvalFixtures = [
   providerTextResponseCase,
@@ -23,5 +26,8 @@ export const defaultEvalFixtures = [
   knowledgeReverseDepsCase,
   knowledgeAffectedFilesCase,
   knowledgeGraphSummaryCase,
-  knowledgeCacheInvalidatesCase
+  knowledgeCacheInvalidatesCase,
+  manifestCreationFromObservationCase,
+  skillProposalManifestBridgeCase,
+  userCorrectionRecordingCase
 ];

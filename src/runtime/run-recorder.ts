@@ -435,6 +435,34 @@ export class RunRecorder {
 
     await this.#sessionDb.saveFailure(record);
   }
+
+  async recordUserCorrection(input: {
+    correctionText: string;
+    skillName?: string;
+    reason?: string;
+  }): Promise<void> {
+    this.#trajectoryRecorder.record("user-correction", {
+      correctionText: input.correctionText,
+      skillName: input.skillName,
+      reason: input.reason
+    });
+    await this.#sessionDb.appendEvent(this.#sessionId, {
+      kind: "user-correction",
+      correctionText: input.correctionText,
+      skillName: input.skillName,
+      reason: input.reason
+    });
+    if (input.skillName !== undefined && this.#skillEvolutionStore !== undefined) {
+      await this.#skillEvolutionStore.appendObservation({
+        skillName: input.skillName,
+        type: "note",
+        lesson: input.correctionText,
+        sourceTrust: "user_direct",
+        mayPromoteAutomatically: false,
+        requiresHumanApproval: true
+      });
+    }
+  }
 }
 
 function isLoadedSkill(skill: LoadedSkill | SkillDefinition): skill is LoadedSkill {
