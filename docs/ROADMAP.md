@@ -71,7 +71,7 @@ Next:
 
 ### 3. Memory and sessions
 
-State: partial.
+State: **v0.6 complete** — memory trust layer and code structure awareness now active.
 
 Done:
 
@@ -84,6 +84,22 @@ Done:
 - prompt cache `smoke-tested`
 - skill outcome persistence `smoke-tested`
 - repeated preference/project-fact promotion now runs after the response path and uses bounded session search instead of full session/message scans `smoke-tested`
+- **v0.6 Track A — Memory Trust Layer:**
+  - provenance metadata (`sourceTrajectoryId`, `sourceEventId`, `createdAt`) on all new promotions `smoke-tested`
+  - selective renderer with query relevance + 3-entry recent fallback, never full-dump `smoke-tested`
+  - memory inspector with list, inspect, deactivate (no hard delete) `smoke-tested`
+  - CLI surface: `estacoda knowledge memory list|inspect|deactivate` `live-proven`
+  - agent tools: `knowledge.memory.inspect`, `knowledge.memory.deactivate` `smoke-tested`
+  - safety file protection: `SOUL.md`/`AGENTS.md` always rendered, cannot deactivate `smoke-tested`
+  - legacy entry compatibility for pre-v0.6 promotions `smoke-tested`
+- **v0.6 Track B — Code Structure Awareness:**
+  - regex-based TS/JS import/export parser `smoke-tested`
+  - forward/reverse dependency lookup `smoke-tested`
+  - transitive affected-files lookup (maxDepth=5) `smoke-tested`
+  - graph summary with isolated/highly-connected detection `smoke-tested`
+  - cache at `.estacoda/code-dependency-graph.json` with mtime hash invalidation `smoke-tested`
+  - CLI surface: `estacoda knowledge code deps|rdeps|affected|summary|refresh` `live-proven`
+  - agent tool: `knowledge.code.query` `smoke-tested`
 
 Next:
 

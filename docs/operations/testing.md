@@ -28,6 +28,7 @@ bun run smoke
 **File:** `src/smoke.ts`
 **Size:** ~14,000 lines
 **Imports:** 89
+**Eval fixtures:** 12 (3 base + 4 memory + 5 code-graph)
 
 ### What Smoke Covers
 
@@ -38,7 +39,7 @@ bun run smoke
 - Voice (TTS, STT)
 - Telegram progress, approvals, attachments, session lifecycle
 - Skill execution, mutation, evolution
-- Memory promotion
+- Memory promotion, provenance, selective rendering, deactivation, safety-file protection
 - Security policy and hard floor
 - Cron create/list/edit/tick
 - MCP discovery and reload
@@ -48,9 +49,10 @@ bun run smoke
 - Onboarding copy and settings
 - Trajectory persistence and failure classification
 - Trace CLI commands
-- Eval runner and fixtures
+- Eval runner and fixtures (12 deterministic evals)
 - Golden flow comparison
 - Change manifest state transitions
+- Code dependency graph: forward/reverse/affected lookup, summary, cache invalidation
 
 ### What Smoke Does Not Cover
 
@@ -92,9 +94,9 @@ These are runtime inspection and validation tools, not a replacement for unit te
 
 ## Future Testing
 
-**Target:** Post-v0.6
+**Target:** Post-v0.7
 
-- Introduce Vitest (Bun-compatible) — deferred from v0.4–v0.5 to avoid blocking feature delivery
+- Introduce Vitest (Bun-compatible) — deferred from v0.4–v0.6 to avoid blocking feature delivery
 - Extract unit tests for Router, Planner, Executor, Recorder
 - Keep smoke.ts as integration layer only
 - Add per-subsystem test suites
