@@ -8,6 +8,7 @@
 
 ```
 src/smoke/
+├── _legacy.ts                 # legacy implementation (~14K lines, exportable)
 ├── smoke.ts                  # thin entrypoint (imports runner + cases)
 ├── smoke-case.ts             # SmokeCase & SmokeContext interfaces
 ├── smoke-runner.ts           # runSmokeCases, filtering, structured reporting
@@ -15,7 +16,7 @@ src/smoke/
 │   └── shared-setup.ts       # fresh factories per case
 ├── cases/
 │   ├── index.ts              # case registry (allSmokeCases)
-│   ├── legacy-monolith.ts    # original ~14K-line smoke (all assertions preserved)
+│   ├── legacy-monolith.ts    # thin wrapper calling runLegacySmoke from _legacy.ts
 │   ├── corrupt-skill-usage.ts
 │   └── bundled-skill-sync.ts
 └── SMOKE_DECOMPOSITION_MAP.md
@@ -25,7 +26,7 @@ src/smoke/
 
 | Case | Tags | Source | Notes |
 |------|------|--------|-------|
-| `legacy-monolith` | `legacy`, `all` | Original `src/smoke.ts` | Preserves all ~1,315 assertions. Comprehensive integration baseline. |
+| `legacy-monolith` | `legacy`, `all` | Original `src/smoke.ts`, now in `_legacy.ts` | Thin wrapper. Preserves all ~1,315 assertions via `runLegacySmoke()`. Comprehensive integration baseline. |
 | `corrupt-skill-usage` | `skills`, `evolution`, `resilience` | Extracted from legacy monolith line 305 | Self-contained. Tests SkillEvolutionStore corrupt-file recovery. |
 | `bundled-skill-sync` | `skills`, `bundled`, `sync` | Extracted from legacy monolith line 3690 | Self-contained. Tests syncBundledSkills, resetBundledSkill, hashSkillDirectory. |
 
@@ -55,7 +56,9 @@ bun run smoke --json
 
 ## Legacy Monolith Sections
 
-The legacy monolith (`cases/legacy-monolith.ts`) covers the following subsystems inline. Future sprints should extract these into focused cases:
+The legacy implementation lives in `_legacy.ts` (~14,000 lines). The `legacy-monolith` case is a thin wrapper that calls `runLegacySmoke()` from that file. Future sprints should extract subsystems from `_legacy.ts` into focused cases under `cases/`.
+
+The following subsystems are covered inline in `_legacy.ts`:
 
 | Section | Approx Lines | Subsystem |
 |---------|-------------|-----------|

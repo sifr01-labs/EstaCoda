@@ -28,7 +28,8 @@ bun run scripts/run-eval-fixtures.ts
 
 **Entrypoint:** `src/smoke.ts` (thin wrapper)
 **Runner:** `src/smoke/smoke-runner.ts`
-**Legacy baseline:** `src/smoke/cases/legacy-monolith.ts` (~14,000 lines, all assertions preserved)
+**Legacy baseline:** `src/smoke/_legacy.ts` (~14,000 lines, all assertions preserved)
+**Legacy wrapper case:** `src/smoke/cases/legacy-monolith.ts` (thin 9-line wrapper)
 **Extracted cases:** `src/smoke/cases/*.ts`
 **Eval fixtures:** 12 (3 base + 4 memory + 5 code-graph)
 
