@@ -13486,6 +13486,13 @@ assert(evalReport.results.some((r) => r.id === "memory-deactivate-suppresses" &&
 assert(evalReport.results.some((r) => r.id === "memory-selective-renders" && r.passed), "expected memory selective renders eval to pass");
 assert(evalReport.results.some((r) => r.id === "memory-safety-files-protected" && r.passed), "expected memory safety files protected eval to pass");
 
+// v0.6 Track B: Code Structure Awareness smoke checks
+assert(evalReport.results.some((r) => r.id === "knowledge-forward-deps" && r.passed), "expected knowledge forward deps eval to pass");
+assert(evalReport.results.some((r) => r.id === "knowledge-reverse-deps" && r.passed), "expected knowledge reverse deps eval to pass");
+assert(evalReport.results.some((r) => r.id === "knowledge-affected-files" && r.passed), "expected knowledge affected files eval to pass");
+assert(evalReport.results.some((r) => r.id === "knowledge-graph-summary" && r.passed), "expected knowledge graph summary eval to pass");
+assert(evalReport.results.some((r) => r.id === "knowledge-cache-invalidates" && r.passed), "expected knowledge cache invalidates eval to pass");
+
 console.log("v2 smoke passed");
 
 async function runSkillPathAndMutationRegressionSmoke(options: {
