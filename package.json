@@ -16,5 +16,8 @@
     "@types/node": "^25.6.0",
     "typescript": "^5.8.0",
     "vitest": "^4.1.5"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^7.0.0-rc.9"
   }
 }
