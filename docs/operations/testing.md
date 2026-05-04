@@ -16,13 +16,13 @@ Run these before and after most changes:
 ```bash
 bun run typecheck
 bun run smoke
-bun run scripts/run-eval-fixtures.ts
+bun run scripts/run-eval.ts
 ```
 
 **Check** | **Evidence Level**
 `typecheck` | Compile guard only
 `smoke` | `smoke-tested`
-`eval fixtures` | Deterministic regression detection (18 cases)
+`eval fixtures` | Deterministic regression detection (27 cases)
 
 ## Smoke Tests
 
@@ -31,7 +31,7 @@ bun run scripts/run-eval-fixtures.ts
 **Legacy baseline:** `src/smoke/_legacy.ts` (~14,000 lines, all assertions preserved)
 **Legacy wrapper case:** `src/smoke/cases/legacy-monolith.ts` (thin 9-line wrapper)
 **Extracted cases:** `src/smoke/cases/*.ts`
-**Eval fixtures:** 18 (3 base + 4 memory + 5 code-graph + 6 evolution)
+**Eval fixtures:** 27 deterministic evals (see below)
 
 ### Running Smoke Cases
 
@@ -72,11 +72,61 @@ bun run smoke --fail-fast --json
 - Onboarding copy and settings
 - Trajectory persistence and failure classification
 - Trace CLI commands
-- Eval runner and fixtures (18 deterministic evals)
+- Eval runner and fixtures (27 deterministic evals)
 - Golden flow comparison
 - Change manifest state transitions
 - Code dependency graph: forward/reverse/affected lookup, summary, cache invalidation
 - **Evolution:** manifest creation, proposal bridge, user-correction capture, tool-description/routing-metadata skeletons, export shape
+- **TaskFlow:** state transitions, locking, migration, atomicity, engine lifecycle, restart recovery, operator control plane, compaction, runtime integration
+
+### Eval Fixtures
+
+Run with `bun run scripts/run-eval.ts` or `bun run scripts/run-eval.ts --id <fixture-id>`.
+
+**Base runtime (3):**
+- `provider-text-response` — Provider returns text without tool calls
+- `tool-security-block` — Dangerous command is blocked by security policy
+- `missing-tool-failure` — Unregistered tool returns undefined and classifies as not-found
+
+**Memory (4):**
+- `memory-promotion-provenance` — Memory promotion carries provenance metadata
+- `memory-deactivate-suppresses` — Deactivated memory is suppressed from rendered context
+- `memory-selective-renders` — Selective renderer returns relevant entries and respects fallback rules
+- `memory-safety-files-protected` — Safety file entries cannot be deactivated
+
+**Code dependency graph (5):**
+- `knowledge-forward-deps` — Forward dependency lookup returns correct direct imports
+- `knowledge-reverse-deps` — Reverse dependency lookup returns correct direct importers
+- `knowledge-affected-files` — Affected-file lookup returns correct transitive dependents
+- `knowledge-graph-summary` — Graph summary reports correct node and edge counts
+- `knowledge-cache-invalidates` — Cache invalidates when source files change
+
+**Evolution (6):**
+- `manifest-creation-from-observation` — Observation with candidateImprovement creates a ChangeManifest
+- `skill-proposal-manifest-bridge` — skill.propose_patch creates a ChangeManifest and links it
+- `user-correction-recording` — recordUserCorrection writes user-correction event
+- `tool-description-proposal` — Tool description proposal manifest can be created and inspected
+- `routing-metadata-proposal` — Routing metadata proposal manifest can be created and inspected
+- `evolution-export-shape` — Evolution export dataset matches OptimizationDataset schema
+
+**TaskFlow foundation (5):**
+- `taskflow-state-transitions` — Flow and step state transitions are validated correctly
+- `taskflow-locking` — Flow lock acquire, release, heartbeat, and stale recovery
+- `taskflow-migration` — v0.8 schema migration creates tables and sets version
+- `taskflow-atomicity` — SQLiteTaskFlowStore atomic transitions and round-trip integrity
+- `taskflow-engine-lifecycle` — TaskFlowEngine flow and step lifecycle methods
+
+**TaskFlow engine (1):**
+- `taskflow-restart-recovery` — FlowRestartRecovery marks running flows/steps interrupted and releases stale locks
+
+**Operator control plane (1):**
+- `operator-control-plane` — OperatorCommandDispatcher routes and validates all slash commands
+
+**Compaction (1):**
+- `flow-compaction` — Flow-Safe Compaction: manual, automatic, boundary safety, preservation
+
+**Track 5 integration (1):**
+- `track5-integration` — Track 5 System Integration: adapter, CLI bridge, runtime wiring, compaction, linkage
 
 ### What Smoke Does Not Cover
 

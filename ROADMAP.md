@@ -1,6 +1,6 @@
 # Roadmap
 
-## 1. Current State (v0.3)
+## 1. Current State (v0.8)
 
 ### What works today
 
@@ -17,13 +17,15 @@
 - Cron jobs: persistent store, prompt scanning, script-backed execution, and tick locking.
 - Voice/TTS/STT configuration foundation and audio artifact pipeline.
 - Image generation: FAL and BytePlus/Seedream providers, aspect-ratio mapping, cache, and artifact recording.
+- **Durable TaskFlow execution (v0.8):** multi-step flows with explicit state machine, operator controls (`/flow` slash and `estacoda flow` CLI), pause/resume/interrupt/cancel, step-level approval gates, `/steer` guidance, safe-boundary compaction, process ownership, restart recovery, and run/artifact linkage.
 - Smoke test suite (`bun run smoke`).
+- Eval fixture suite (`bun run scripts/run-eval.ts`) with 27 deterministic cases.
 
 ### What is unstable or incomplete
 
 - Agent loop decomposition is complete (809 lines, down from ~2,700). Six components extracted and testable independently.
 - Run recording persists to SQLite via `SQLiteSessionDB`. CLI inspection (`estacoda trace`) is available.
-- The only automated safety net is a 14,000-line smoke file. There are no focused unit tests.
+- The only automated safety net is a 14,000-line smoke file plus 27 eval fixtures. There are no focused unit tests.
 - The runtime requires Bun (`bun:sqlite` prevents Node execution).
 - Memory rendering is not ranked or freshness-aware.
 - OpenRouter tool-call exactness is inconsistent.
@@ -34,6 +36,13 @@
 - Runtime CLI Arabic localization is incomplete beyond onboarding.
 - Evaluation substrate runs automated fixtures with pass/fail scoring (`estacoda eval`). Focused benchmarks (golden flows, regression detection) exist but the corpus is small.
 - Packaging, distribution, and update lifecycle are undecided.
+- **TaskFlow v0.8 limitations:**
+  - Checkpoints are recorded but not restorable.
+  - Flows are scoped to a single session; no cross-session resumption.
+  - Lock service is single-process SQLite only.
+  - Auto-compaction is disabled by default.
+  - No automatic retry without operator invocation.
+  - No visual workflow builder or marketplace.
 
 ## 2. MVP Definition
 
@@ -53,7 +62,7 @@ MVP means EstaCoda can execute meaningful agentic work through a visible, recove
 - Security model and known limitations are documented.
 - Contributor documentation exists.
 
-## 3. Near-Term Roadmap (v0.4–v0.7)
+## 3. Near-Term Roadmap (v0.4–v0.8)
 
 ### Runtime reliability (v0.4)
 
@@ -71,14 +80,16 @@ Memory gains provenance, inspection, and deletion flows. Project and user memory
 
 Self-improvement becomes evidence-backed and reviewable. The governed loop is: observe → propose → review → approve/reject → promote → rollback. Every proposal carries a `ChangeManifest` with hypothesis, predicted impact, risk level, eval plan, constraint gates, and rollback plan. High-risk or untrusted proposals require explicit approval. Promotion runs eval gates; failing gates block the promotion. No silent mutation. Tool-description and routing-metadata proposals are representable as manifest targets. A clean JSON export format (`OptimizationDataset`) is available for future DSPy/GEPA consumption.
 
-**v0.7 deferred to post-MVP:**
-- `estacoda skill` namespace CLI (`list`, `inspect`, `usage`, `eval`)
-- In-session slash commands for skill review
-- Auto-proposal generation from observations (threshold-based)
-- Full DSPy/GEPA pipeline integration (JSON export skeleton only)
-- Tool-description and routing-metadata auto-application
+### Durable TaskFlow execution (v0.8)
 
-## 4. Mid-Term Direction (v0.7–v0.10)
+Multi-step agent work becomes durable and operator-controllable. Flows survive restarts. Steps have explicit lifecycle states with strict transition rules. Operator can pause, resume, interrupt, cancel, steer, approve, reject, retry, and skip. Process ownership ensures external processes are cleaned up on interrupt/cancel. Safe-boundary compaction preserves audit trails. Restart recovery runs automatically. CLI and slash command surfaces expose all operations.
+
+**v0.8 completion notes:**
+- Tracks 1–5 implemented and committed.
+- Track 6 (docs, smokes, evals, hardening) is the final v0.8 pass.
+- No new major runtime features added in Track 6.
+
+## 4. Mid-Term Direction (v0.9+)
 
 ### Stronger autonomy
 
@@ -86,7 +97,7 @@ Skills improve from usage and failure evidence through governed proposals that i
 
 ### Better recovery
 
-Long-running tasks survive process restarts. Step states, wait/resume/cancel semantics, and human approval gates are explicit. Flows report step-level status and link to run records.
+Checkpoint rollback. Cross-session flow resumption. Distributed lock considerations for multi-process deployments.
 
 ### Improved extensibility
 
@@ -104,6 +115,8 @@ The following are out of scope for the v0.4–v0.10 phase:
 - Unbounded background autonomy without policy gates.
 - Prompt-only optimization as the primary improvement strategy.
 - Runtime code evolution without PR review.
+- Channels beyond Telegram (Discord, email, calendar integration deferred).
+- Background automation without explicit scheduling.
 
 ## 6. For Contributors
 
@@ -118,8 +131,8 @@ The following are out of scope for the v0.4–v0.10 phase:
 
 ### What not to touch
 
-- Agent loop structure (v0.4 decomposition is active).
-- Memory redesign (reserved for v0.6).
+- Agent loop structure (v0.4 decomposition is complete).
+- Memory redesign (reserved for v0.6+).
 - Security policy changes without prior discussion.
 - Major refactors unrelated to the current roadmap milestone.
 

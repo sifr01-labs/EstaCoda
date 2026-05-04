@@ -2,7 +2,7 @@
 
 EstaCoda is a TypeScript agent runtime for local terminal work, channel-based operation, editor integration, workflow learning, and media-capable agent tooling.
 
-The project is currently an **MVP candidate for private/internal use**. The core CLI agent, onboarding, provider setup, security modes, workflow-learning controls, Telegram image delivery, MCP client, ACP foundation, browser tools, voice/TTS foundation, cron, skills, memory, and artifact paths are implemented and covered by smoke tests or live operator proof. It is not yet packaged as a public release.
+The project is currently an **MVP candidate for private/internal use**. The core CLI agent, onboarding, provider setup, security modes, workflow-learning controls, Telegram image delivery, MCP client, ACP foundation, browser tools, voice/TTS foundation, cron, skills, memory, artifact paths, and **durable TaskFlow execution** are implemented and covered by smoke tests or live operator proof. It is not yet packaged as a public release.
 
 ## Quick Start
 
@@ -38,6 +38,21 @@ On first launch, EstaCoda runs an interactive setup flow:
 - Voice/TTS/STT configuration foundation and audio artifacts.
 - Image generation with FAL and BytePlus/ModelArk Seedream provider support.
 - English and Arabic first-run onboarding, with localized setup labels and supported status copy.
+- **Durable TaskFlow execution** (v0.8): multi-step flows with pause/resume/interrupt/cancel, step-level status, operator steer, approval gates, safe-boundary compaction, and restart recovery.
+
+## TaskFlow (v0.8)
+
+TaskFlow adds durable, observable multi-step execution:
+
+- **Flows** represent high-level objectives; **steps** represent discrete actions.
+- State is persisted to SQLite alongside session data.
+- Operator controls: `/flow` slash commands and `estacoda flow` CLI commands.
+- `/steer` injects explicit operator guidance into the next turn.
+- Safe-boundary compaction preserves the full audit trail.
+- Restart recovery marks interrupted flows/steps on startup.
+- Requires SQLite session persistence; not available with in-memory sessions.
+
+See [TaskFlow Architecture](docs/architecture/taskflow.md) and [Operator Controls](docs/operations/operator-controls.md) for details.
 
 ## Checks
 
@@ -47,6 +62,7 @@ Run these before pushing changes:
 cd /path/to/EstaCoda
 bun run typecheck
 bun run smoke
+bun run scripts/run-eval.ts
 ```
 
 For a clean first-run onboarding check:

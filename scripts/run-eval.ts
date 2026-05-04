@@ -15,7 +15,7 @@ for (const result of report.results) {
   }
 }
 
-console.log(`\nTotal: ${report.total} | Passed: ${report.passed} | Failed: ${report.failed} | Duration: ${report.durationMs}ms`);
+console.log(`\nTotal: ${report.results.length} | Passed: ${report.passed} | Failed: ${report.failed} | Duration: ${report.durationMs}ms`);
 
 if (report.failed > 0) {
   process.exit(1);
