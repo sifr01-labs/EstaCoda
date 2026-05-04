@@ -44,6 +44,11 @@ export class ChannelApprovalStore {
     return file.grants.filter((grant) => matchesSessionScope(grant, sessionKey));
   }
 
+  async listAll(): Promise<PersistedApprovalGrant[]> {
+    const file = await this.#read();
+    return file.grants;
+  }
+
   async grant(input: {
     sessionKey: ChannelSessionKey;
     toolName: string;

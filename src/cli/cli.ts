@@ -56,7 +56,7 @@ import {
   renderProviderDiagnostic,
   renderProviderLiveDiagnostic
 } from "../config/provider-diagnostics.js";
-import { getTelegramGatewayDiagnostics, runTelegramGateway } from "../channels/gateway-runner.js";
+import { runTelegramGateway } from "../channels/gateway-runner.js";
 import type { TelegramFetch } from "../channels/telegram-adapter.js";
 import type { Runtime } from "../runtime/create-runtime.js";
 import { runAcpServer } from "../acp/server.js";
@@ -77,6 +77,12 @@ import {
   renderSkillAutonomyOption,
   type Locale
 } from "../ui/settings-labels.js";
+import {
+  runGatewayStatus,
+  runGatewayDiagnose,
+  runChannelsList,
+  runChannelsStatus
+} from "./gateway-commands.js";
 
 export type CliCommandResult = {
   handled: boolean;
@@ -159,6 +165,8 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
       return handoff(options, args);
     case "sessions":
       return sessions(options, args);
+    case "channels":
+      return channels(options, args);
     case "help":
     case "--help":
     case "-h":
@@ -1744,74 +1752,48 @@ async function mcp(options: CliOptions, args: string[]): Promise<CliCommandResul
 async function gateway(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const [subcommand, ...rest] = args;
 
-  if (subcommand !== "start" && subcommand !== "status") {
-    return {
-      handled: true,
-      exitCode: 0,
-      output: [
-        "EstaCoda gateway",
-        "  estacoda gateway status",
-        "  estacoda gateway start --telegram",
-        "  estacoda gateway start --telegram --once"
-      ].join("\n")
-    };
-  }
-
   if (subcommand === "status") {
-    const diagnostics = await getTelegramGatewayDiagnostics(options);
+    const result = await runGatewayStatus(options);
+    return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
+  }
+
+  if (subcommand === "diagnose") {
+    const result = await runGatewayDiagnose(options);
+    return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
+  }
+
+  if (subcommand === "start") {
+    if (!hasFlag(rest, "--telegram")) {
+      return {
+        handled: true,
+        exitCode: 1,
+        output: "Choose a channel: estacoda gateway start --telegram"
+      };
+    }
+
+    const result = await runTelegramGateway({
+      ...options,
+      once: hasFlag(rest, "--once"),
+      telegramFetch: options.telegramFetch
+    });
 
     return {
       handled: true,
-      exitCode: diagnostics.ready ? 0 : 1,
-      output: [
-        "EstaCoda gateway status",
-        `Gateway process: ${diagnostics.processMode}`,
-        `Active adapters: ${diagnostics.enabled ? diagnostics.adapter : "none"}`,
-        `Telegram: ${diagnostics.statusLabel}`,
-        `Model route: ${diagnostics.modelRoute}`,
-        `Context window: ${diagnostics.contextWindowTokens} tokens`,
-        `Telegram security: ${diagnostics.securityLabel}`,
-        `Allowed users: ${diagnostics.allowedUserIds.join(", ") || "none"}`,
-        `Allowed chats: ${diagnostics.allowedChatIds.join(", ") || "none"}`,
-        `Group sessions per user: ${diagnostics.groupSessionsPerUser ? "yes" : "no"}`,
-        `Thread sessions per user: ${diagnostics.threadSessionsPerUser ? "yes" : "no"}`,
-        `Session reset policy: ${diagnostics.sessionResetPolicy}`,
-        diagnostics.sessionIdleResetMinutes === undefined ? undefined : `Session idle reset: ${diagnostics.sessionIdleResetMinutes} min`,
-        diagnostics.botTokenEnv === undefined ? undefined : `Telegram token env: ${diagnostics.botTokenEnv}`,
-        `Telegram token present: ${diagnostics.botTokenPresent ? "yes" : "no"}`,
-        diagnostics.defaultChatId === undefined ? undefined : `Default chat: ${diagnostics.defaultChatId}`,
-        diagnostics.pollTimeoutSeconds === undefined ? undefined : `Poll timeout: ${diagnostics.pollTimeoutSeconds}s`,
-        diagnostics.maxAttachmentBytes === undefined ? undefined : `Max attachment size: ${diagnostics.maxAttachmentBytes} bytes`,
-        diagnostics.pairingExpiresAt === undefined ? undefined : `Pairing code active until: ${diagnostics.pairingExpiresAt}`,
-        `Session DB: ${diagnostics.sessionDbPath}`,
-        `Channel media: ${diagnostics.mediaRoot}`,
-        `Approval store: ${diagnostics.approvalStorePath}`,
-        `Session context: ${diagnostics.sessionContextPath}`,
-        `Logs: ${diagnostics.logsLocation}`,
-        `Config sources: ${diagnostics.configSources.join(", ") || "none"}`,
-        diagnostics.missing.length === 0 ? undefined : `Missing: ${diagnostics.missing.join(", ")}`
-      ].filter((line) => line !== undefined).join("\n")
+      exitCode: result.ok ? 0 : 1,
+      output: result.output
     };
   }
-
-  if (!hasFlag(rest, "--telegram")) {
-    return {
-      handled: true,
-      exitCode: 1,
-      output: "Choose a channel: estacoda gateway start --telegram"
-    };
-  }
-
-  const result = await runTelegramGateway({
-    ...options,
-    once: hasFlag(rest, "--once"),
-    telegramFetch: options.telegramFetch
-  });
 
   return {
     handled: true,
-    exitCode: result.ok ? 0 : 1,
-    output: result.output
+    exitCode: 0,
+    output: [
+      "EstaCoda gateway",
+      "  estacoda gateway status",
+      "  estacoda gateway diagnose",
+      "  estacoda gateway start --telegram",
+      "  estacoda gateway start --telegram --once"
+    ].join("\n")
   };
 }
 
@@ -2648,18 +2630,23 @@ async function handoff(options: CliOptions, args: string[]): Promise<CliCommandR
 }
 
 async function sessions(options: CliOptions, args: string[]): Promise<CliCommandResult> {
-  const [subcommand] = args;
+  const [subcommand, ...rest] = args;
   const homeDir = options.homeDir ?? process.env.HOME ?? ".estacoda";
   const dbPath = join(homeDir, ".estacoda", "sessions.sqlite");
 
   if (subcommand === "list" || subcommand === undefined) {
     const { SQLiteSessionDB } = await import("../session/sqlite-session-db.js");
     const db = new SQLiteSessionDB({ path: dbPath });
+    const { FileSurfacePointerStore } = await import("../channels/surface-pointer-store.js");
+    const pointerStore = new FileSurfacePointerStore({ path: join(homeDir, ".estacoda", "surface-pointers.json") });
     try {
       const sessions = await db.listSessions("default");
+      const pointers = await pointerStore.listPointers();
       const lines = sessions.slice(0, 20).map((s) => {
         const updated = s.updatedAt ? `updated ${s.updatedAt}` : "no activity";
-        return `${s.id} — ${s.title ?? "(no title)"} — ${updated}`;
+        const attached = pointers.filter((p) => p.record.sessionId === s.id).map((p) => `${p.surfaceType}:${p.surfaceId}`).join(", ");
+        const attachment = attached.length > 0 ? ` [${attached}]` : "";
+        return `${s.id} — ${s.title ?? "(no title)"} — ${updated}${attachment}`;
       });
       return {
         handled: true,
@@ -2674,12 +2661,128 @@ async function sessions(options: CliOptions, args: string[]): Promise<CliCommand
     }
   }
 
+  if (subcommand === "show") {
+    const sessionId = rest[0];
+    if (sessionId === undefined) {
+      return { handled: true, exitCode: 1, output: "Usage: estacoda sessions show <session-id>" };
+    }
+    const { SQLiteSessionDB } = await import("../session/sqlite-session-db.js");
+    const db = new SQLiteSessionDB({ path: dbPath });
+    const { FileSurfacePointerStore } = await import("../channels/surface-pointer-store.js");
+    const pointerStore = new FileSurfacePointerStore({ path: join(homeDir, ".estacoda", "surface-pointers.json") });
+    try {
+      const session = await db.getSession(sessionId);
+      if (session === undefined) {
+        return { handled: true, exitCode: 1, output: `Session not found: ${sessionId}` };
+      }
+      const messages = await db.listMessages(sessionId);
+      const pointers = (await pointerStore.listPointers()).filter((p) => p.record.sessionId === sessionId);
+      const lines = [
+        `Session: ${session.id}`,
+        `Title: ${session.title ?? "(no title)"}`,
+        `Profile: ${session.profileId}`,
+        `Created: ${session.createdAt}`,
+        `Updated: ${session.updatedAt ?? "no activity"}`,
+        `Messages: ${messages.length}`,
+        "",
+        "Surface pointers",
+        ...pointers.map((p) => `  ${p.surfaceType}:${p.surfaceId} (since ${p.record.attachedAt})${p.record.homeDelivery !== undefined ? ` home=${p.record.homeDelivery}` : ""}`),
+        pointers.length === 0 ? "  none" : undefined,
+      ].filter((line) => line !== undefined);
+      return { handled: true, exitCode: 0, output: lines.join("\n") };
+    } finally {
+      await db.close();
+    }
+  }
+
+  if (subcommand === "current") {
+    const runtime = options.runtime;
+    if (runtime === undefined) {
+      return { handled: true, exitCode: 1, output: "No active session in this shell." };
+    }
+    const { FileSurfacePointerStore } = await import("../channels/surface-pointer-store.js");
+    const pointerStore = new FileSurfacePointerStore({ path: join(homeDir, ".estacoda", "surface-pointers.json") });
+    const pointers = (await pointerStore.listPointers()).filter((p) => p.record.sessionId === runtime.sessionId);
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        `Current session: ${runtime.sessionId}`,
+        "",
+        "Surface pointers",
+        ...pointers.map((p) => `  ${p.surfaceType}:${p.surfaceId} (since ${p.record.attachedAt})`),
+        pointers.length === 0 ? "  none" : undefined,
+      ].filter((line) => line !== undefined).join("\n")
+    };
+  }
+
+  if (subcommand === "attach") {
+    const [surface, surfaceId, sessionId] = rest;
+    if (surface === undefined || surfaceId === undefined || sessionId === undefined) {
+      return { handled: true, exitCode: 1, output: "Usage: estacoda sessions attach <surface> <surface-id> <session-id>" };
+    }
+    const { FileSurfacePointerStore } = await import("../channels/surface-pointer-store.js");
+    const pointerStore = new FileSurfacePointerStore({ path: join(homeDir, ".estacoda", "surface-pointers.json") });
+    const validSurfaces = ["cli", "telegram", "discord", "whatsapp", "email"] as const;
+    if (!validSurfaces.includes(surface as typeof validSurfaces[number])) {
+      return { handled: true, exitCode: 1, output: `Invalid surface: ${surface}. Valid: ${validSurfaces.join(", ")}` };
+    }
+    await pointerStore.setPointer(surface as typeof validSurfaces[number], surfaceId, {
+      sessionId,
+      attachedAt: new Date().toISOString()
+    });
+    return { handled: true, exitCode: 0, output: `Attached ${surface}:${surfaceId} to session ${sessionId}.` };
+  }
+
+  if (subcommand === "detach") {
+    const [surface, surfaceId] = rest;
+    if (surface === undefined || surfaceId === undefined) {
+      return { handled: true, exitCode: 1, output: "Usage: estacoda sessions detach <surface> <surface-id>" };
+    }
+    const { FileSurfacePointerStore } = await import("../channels/surface-pointer-store.js");
+    const pointerStore = new FileSurfacePointerStore({ path: join(homeDir, ".estacoda", "surface-pointers.json") });
+    const validSurfaces = ["cli", "telegram", "discord", "whatsapp", "email"] as const;
+    if (!validSurfaces.includes(surface as typeof validSurfaces[number])) {
+      return { handled: true, exitCode: 1, output: `Invalid surface: ${surface}. Valid: ${validSurfaces.join(", ")}` };
+    }
+    await pointerStore.removePointer(surface as typeof validSurfaces[number], surfaceId);
+    return { handled: true, exitCode: 0, output: `Detached ${surface}:${surfaceId}.` };
+  }
+
   return {
     handled: true,
     exitCode: 0,
     output: [
       "EstaCoda sessions",
-      "  estacoda sessions list  List recent sessions"
+      "  estacoda sessions list                      List recent sessions",
+      "  estacoda sessions show <session-id>         Show session details",
+      "  estacoda sessions current                   Show current session",
+      "  estacoda sessions attach <surface> <id> <session-id>  Attach surface to session",
+      "  estacoda sessions detach <surface> <id>     Detach surface from session"
+    ].join("\n")
+  };
+}
+
+async function channels(options: CliOptions, args: string[]): Promise<CliCommandResult> {
+  const [subcommand, ...rest] = args;
+
+  if (subcommand === "list" || subcommand === undefined) {
+    const result = await runChannelsList(options);
+    return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
+  }
+
+  if (subcommand === "status") {
+    const result = await runChannelsStatus({ ...options, channel: rest[0] });
+    return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
+  }
+
+  return {
+    handled: true,
+    exitCode: 0,
+    output: [
+      "EstaCoda channels",
+      "  estacoda channels list              List configured channels",
+      "  estacoda channels status [channel]  Show channel status"
     ].join("\n")
   };
 }
@@ -2704,6 +2807,8 @@ function help(): string {
     "  estacoda telegram pair Pair a Telegram chat",
     "  estacoda handoff telegram Generate a handoff code for Telegram",
     "  estacoda gateway Start channel gateway",
+    "  estacoda channels List and inspect channels",
+    "  estacoda sessions List and manage sessions",
     "  estacoda model   Show current model",
     "  estacoda tools   Show available tools by toolset",
     "  estacoda doctor  Check setup health",
