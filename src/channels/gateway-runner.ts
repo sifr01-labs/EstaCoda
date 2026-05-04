@@ -15,6 +15,8 @@ import { ChannelApprovalStore } from "./channel-approval-store.js";
 import { ChannelGateway, telegramGatewayCommands } from "./channel-gateway.js";
 import { PersistentChannelSessionStore } from "./channel-session-store.js";
 import { DeliveryRouter } from "./delivery-router.js";
+import { FileHandoffStore } from "./handoff-store.js";
+import { FileSurfacePointerStore } from "./surface-pointer-store.js";
 import { TelegramAdapter, type TelegramFetch } from "./telegram-adapter.js";
 import { injectVoiceTranscripts } from "./voice-transcription.js";
 
@@ -191,6 +193,8 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
     idleResetMinutes: telegram.sessionIdleResetMinutes,
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
   };
+  const handoffStore = new FileHandoffStore({ path: join(diagnostics.stateRoot, "handoff-codes.json") });
+  const surfacePointerStore = new FileSurfacePointerStore({ path: join(diagnostics.stateRoot, "surface-pointers.json") });
   const adapter = new TelegramAdapter({
     botToken,
     defaultChatId: telegram.defaultChatId,
@@ -213,11 +217,13 @@ export async function runTelegramGateway(options: GatewayRunOptions): Promise<Ga
         credentialPools: config.credentialPools
       })
     },
-    sessionStore: new PersistentChannelSessionStore({ path: sessionContextPath, policy: sessionPolicy }),
+    sessionStore: new PersistentChannelSessionStore({ path: sessionContextPath, policy: sessionPolicy, surfacePointerStore }),
     approvalStore,
     authPolicy,
     trustedWorkspace: true,
     sessionPolicy,
+    handoffStore,
+    surfacePointerStore,
     preprocessMessage: async (message) => {
       const latestConfig = await loadRuntimeConfig(options);
       return injectVoiceTranscripts(message, {

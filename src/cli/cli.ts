@@ -155,6 +155,10 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
       return evolutionCommand(options, args);
     case "knowledge":
       return knowledge(options, args);
+    case "handoff":
+      return handoff(options, args);
+    case "sessions":
+      return sessions(options, args);
     case "help":
     case "--help":
     case "-h":
@@ -2577,6 +2581,109 @@ function parseSecuritySetupArgs(args: string[]): SecuritySetupInput {
   return parsed;
 }
 
+async function handoff(options: CliOptions, args: string[]): Promise<CliCommandResult> {
+  const [subcommand, ...rest] = args;
+
+  if (subcommand === "telegram") {
+    const runtime = options.runtime;
+    if (runtime === undefined) {
+      return {
+        handled: true,
+        exitCode: 1,
+        output: "No active session. Start an interactive session first, then run: estacoda handoff telegram"
+      };
+    }
+
+    const { FileHandoffStore } = await import("../channels/handoff-store.js");
+    const homeDir = options.homeDir ?? process.env.HOME ?? ".estacoda";
+    const store = new FileHandoffStore({ path: join(homeDir, ".estacoda", "handoff-codes.json") });
+    const handoff = await store.create({
+      sessionId: runtime.sessionId,
+      surfaceType: "telegram",
+      ttlMinutes: 10
+    });
+
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        `Handoff code for Telegram: ${handoff.code}`,
+        `Session: ${runtime.sessionId}`,
+        `Expires: ${handoff.expiresAt}`,
+        "",
+        "To attach a Telegram chat to this session, send the following in Telegram:",
+        `  /attach ${handoff.code}`,
+        "",
+        "This code is single-use and expires in 10 minutes."
+      ].join("\n")
+    };
+  }
+
+  if (subcommand === "list") {
+    const { FileHandoffStore } = await import("../channels/handoff-store.js");
+    const homeDir = options.homeDir ?? process.env.HOME ?? ".estacoda";
+    const store = new FileHandoffStore({ path: join(homeDir, ".estacoda", "handoff-codes.json") });
+    const codes = await store.list();
+    const active = codes.filter((c) => !c.redeemed && new Date(c.expiresAt).getTime() > Date.now());
+
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        `Active handoff codes: ${active.length}`,
+        ...active.map((c) => `${c.code} → ${c.sessionId} (expires ${c.expiresAt})`)
+      ].join("\n") || "No active handoff codes."
+    };
+  }
+
+  return {
+    handled: true,
+    exitCode: 0,
+    output: [
+      "EstaCoda handoff",
+      "  estacoda handoff telegram  Generate a handoff code for Telegram",
+      "  estacoda handoff list      List active handoff codes"
+    ].join("\n")
+  };
+}
+
+async function sessions(options: CliOptions, args: string[]): Promise<CliCommandResult> {
+  const [subcommand] = args;
+  const homeDir = options.homeDir ?? process.env.HOME ?? ".estacoda";
+  const dbPath = join(homeDir, ".estacoda", "sessions.sqlite");
+
+  if (subcommand === "list" || subcommand === undefined) {
+    const { SQLiteSessionDB } = await import("../session/sqlite-session-db.js");
+    const db = new SQLiteSessionDB({ path: dbPath });
+    try {
+      const sessions = await db.listSessions("default");
+      const lines = sessions.slice(0, 20).map((s) => {
+        const updated = s.updatedAt ? `updated ${s.updatedAt}` : "no activity";
+        return `${s.id} — ${s.title ?? "(no title)"} — ${updated}`;
+      });
+      return {
+        handled: true,
+        exitCode: 0,
+        output: [
+          `Sessions: ${sessions.length}`,
+          ...lines
+        ].join("\n")
+      };
+    } finally {
+      await db.close();
+    }
+  }
+
+  return {
+    handled: true,
+    exitCode: 0,
+    output: [
+      "EstaCoda sessions",
+      "  estacoda sessions list  List recent sessions"
+    ].join("\n")
+  };
+}
+
 function help(): string {
   return [
     "EstaCoda commands",
@@ -2595,6 +2702,7 @@ function help(): string {
     "  estacoda acp     Start the ACP stdio server",
     "  estacoda telegram Configure Telegram channel",
     "  estacoda telegram pair Pair a Telegram chat",
+    "  estacoda handoff telegram Generate a handoff code for Telegram",
     "  estacoda gateway Start channel gateway",
     "  estacoda model   Show current model",
     "  estacoda tools   Show available tools by toolset",

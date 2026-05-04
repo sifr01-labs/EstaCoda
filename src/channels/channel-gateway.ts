@@ -15,6 +15,9 @@ import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { ChannelApprovalStore, type PersistedApprovalGrant } from "./channel-approval-store.js";
 import { buildBaseSessionId, normalizeSessionKey, type ChannelSessionPolicy, shouldAutoResetSession, stableSessionKey } from "./channel-session-store.js";
 import { createSecurityPolicyForMode } from "../security/security-policy-factory.js";
+import type { HandoffStore } from "./handoff-store.js";
+import type { SurfacePointerStore } from "./surface-pointer-store.js";
+import type { SurfaceType } from "./surface-pointer.js";
 
 export type ChannelRuntimeFactory = (input: {
   sessionId: string;
@@ -42,6 +45,8 @@ export type ChannelGatewayOptions = {
   securityMode?: SecurityApprovalMode;
   securityAssessor?: SecurityAssessorRuntimeConfig;
   preprocessMessage?: (message: ChannelMessage) => Promise<ChannelMessage>;
+  handoffStore?: HandoffStore;
+  surfacePointerStore?: SurfacePointerStore;
 };
 
 type ApprovalScope = "once" | "session" | "always";
@@ -148,6 +153,8 @@ export class ChannelGateway {
   readonly #securityMode: SecurityApprovalMode;
   readonly #securityAssessor: SecurityAssessorRuntimeConfig | undefined;
   readonly #preprocessMessage: ChannelGatewayOptions["preprocessMessage"];
+  readonly #handoffStore: HandoffStore | undefined;
+  readonly #surfacePointerStore: SurfacePointerStore | undefined;
   readonly #activeTurns = new Map<string, AbortController>();
   readonly #pendingApprovals = new Map<string, PendingApproval>();
   readonly #approvalGrants = new Map<string, ApprovalGrant[]>();
@@ -165,6 +172,8 @@ export class ChannelGateway {
     this.#securityMode = options.securityMode ?? "adaptive";
     this.#securityAssessor = options.securityAssessor;
     this.#preprocessMessage = options.preprocessMessage;
+    this.#handoffStore = options.handoffStore;
+    this.#surfacePointerStore = options.surfacePointerStore;
 
     for (const adapter of options.adapters) {
       this.#adapters.set(adapter.id ?? adapter.kind, adapter);
@@ -349,6 +358,8 @@ export class ChannelGateway {
         "/deny - deny the pending gated action",
         "/approvals - inspect current approval state",
         "/revoke <approval-id> - revoke a persistent approval",
+        "/attach <code> - attach this chat to a CLI session via handoff code",
+        "/detach - detach this chat from the linked CLI session",
         "/stop - stop the foreground gateway process"
       ].join("\n");
       await adapter.delivery?.sendText(message.sessionKey, text);
@@ -363,11 +374,15 @@ export class ChannelGateway {
 
     if (command === "/status") {
       const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
+      const pointer = this.#surfacePointerStore !== undefined
+        ? await this.#surfacePointerStore.getPointer(message.sessionKey.platform as SurfaceType, message.sessionKey.chatId)
+        : undefined;
       const text = [
         "EstaCoda channel status",
         `Channel: ${message.channel}`,
         `Chat: ${message.sessionKey.chatId}`,
         `Session: ${sessionId}`,
+        pointer !== undefined ? `Attached to: ${pointer.sessionId} (since ${pointer.attachedAt})` : "Session: independent",
         `YOLO mode: ${this.#isYoloEnabled(message.sessionKey, sessionId) ? "on" : "off"}`
       ].join("\n");
       await adapter.delivery?.sendText(message.sessionKey, text);
@@ -390,6 +405,112 @@ export class ChannelGateway {
 
       return {
         sessionId,
+        replyText: text,
+        artifactCount: 0,
+        progressCount: 0
+      };
+    }
+
+    if (command === "/attach") {
+      const code = message.text.trim().split(/\s+/u)[1];
+      if (code === undefined || code.length === 0) {
+        const text = "Usage: /attach <handoff-code>";
+        await adapter.delivery?.sendText(message.sessionKey, text);
+        return {
+          sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt }),
+          replyText: text,
+          artifactCount: 0,
+          progressCount: 0
+        };
+      }
+
+      if (this.#handoffStore === undefined || this.#surfacePointerStore === undefined) {
+        const text = "Handoff is not configured on this gateway.";
+        await adapter.delivery?.sendText(message.sessionKey, text);
+        return {
+          sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt }),
+          replyText: text,
+          artifactCount: 0,
+          progressCount: 0
+        };
+      }
+
+      const result = await this.#handoffStore.redeem({
+        code,
+        surfaceType: message.sessionKey.platform,
+        surfaceId: message.sessionKey.chatId
+      });
+
+      if (!result.ok) {
+        const text = `Attach failed: ${result.reason}`;
+        await adapter.delivery?.sendText(message.sessionKey, text);
+        return {
+          sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt }),
+          replyText: text,
+          artifactCount: 0,
+          progressCount: 0
+        };
+      }
+
+      await this.#surfacePointerStore.setPointer(
+        message.sessionKey.platform as SurfaceType,
+        message.sessionKey.chatId,
+        { sessionId: result.handoff.sessionId, attachedAt: new Date().toISOString() }
+      );
+
+      const text = [
+        "Attached this chat to session.",
+        `Session: ${result.handoff.sessionId}`,
+        "This chat now shares context with that session. Use /detach to return to an independent session."
+      ].join("\n");
+      await adapter.delivery?.sendText(message.sessionKey, text);
+
+      return {
+        sessionId: result.handoff.sessionId,
+        replyText: text,
+        artifactCount: 0,
+        progressCount: 0
+      };
+    }
+
+    if (command === "/detach") {
+      if (this.#surfacePointerStore === undefined) {
+        const text = "Handoff is not configured on this gateway.";
+        await adapter.delivery?.sendText(message.sessionKey, text);
+        return {
+          sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt }),
+          replyText: text,
+          artifactCount: 0,
+          progressCount: 0
+        };
+      }
+
+      const pointer = await this.#surfacePointerStore.getPointer(message.sessionKey.platform as SurfaceType, message.sessionKey.chatId);
+      if (pointer === undefined) {
+        const text = "This chat is not attached to any session.";
+        await adapter.delivery?.sendText(message.sessionKey, text);
+        return {
+          sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt }),
+          replyText: text,
+          artifactCount: 0,
+          progressCount: 0
+        };
+      }
+
+      await this.#surfacePointerStore.removePointer(message.sessionKey.platform as SurfaceType, message.sessionKey.chatId);
+
+      // After detach, get the new independent session id
+      const newSessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
+      const text = [
+        "Detached this chat from the linked session.",
+        `Previous session: ${pointer.sessionId}`,
+        `Current session: ${newSessionId}`,
+        "This chat now operates independently."
+      ].join("\n");
+      await adapter.delivery?.sendText(message.sessionKey, text);
+
+      return {
+        sessionId: newSessionId,
         replyText: text,
         artifactCount: 0,
         progressCount: 0
@@ -1147,7 +1268,7 @@ export function authorizeChannelMessage(message: ChannelMessage, policy: Channel
   };
 }
 
-function parseGatewayCommand(text: string): "/help" | "/status" | "/memory" | "/sessions" | "/switch" | "/search" | "/new" | "/reset" | "/reload-mcp" | "/resume" | "/stop" | "/approve" | "/deny" | "/commands" | "/approvals" | "/revoke" | "/trust" | "/untrust" | "/workspace.trust.grant" | "/workspace.trust.revoke" | "/workspace.trust.status" | "/yolo" | "/cron" | undefined {
+function parseGatewayCommand(text: string): "/help" | "/status" | "/memory" | "/sessions" | "/switch" | "/search" | "/new" | "/reset" | "/reload-mcp" | "/resume" | "/stop" | "/approve" | "/deny" | "/commands" | "/approvals" | "/revoke" | "/trust" | "/untrust" | "/workspace.trust.grant" | "/workspace.trust.revoke" | "/workspace.trust.status" | "/yolo" | "/cron" | "/attach" | "/detach" | undefined {
   const token = text.trim().split(/\s+/u)[0]?.toLowerCase();
 
   if (
@@ -1173,7 +1294,9 @@ function parseGatewayCommand(text: string): "/help" | "/status" | "/memory" | "/
     token === "/deny" ||
     token === "/commands" ||
     token === "/approvals" ||
-    token === "/revoke"
+    token === "/revoke" ||
+    token === "/attach" ||
+    token === "/detach"
   ) {
     return token;
   }

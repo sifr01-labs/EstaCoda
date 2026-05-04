@@ -3,6 +3,8 @@ import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import type { ChannelSessionKey } from "../contracts/channel.js";
 import type { ChannelSessionStore } from "./channel-gateway.js";
+import type { SurfacePointerStore } from "./surface-pointer-store.js";
+import type { SurfaceType } from "./surface-pointer.js";
 
 export type ChannelSessionPolicy = {
   groupSessionsPerUser?: boolean;
@@ -56,12 +58,14 @@ export class PersistentChannelSessionStore implements ChannelSessionStore {
   readonly #path: string;
   readonly #entries = new Map<string, ChannelSessionEntry>();
   readonly #policy: ChannelSessionPolicy;
+  readonly #surfacePointerStore?: SurfacePointerStore;
   #sequence = 0;
   #loaded = false;
 
-  constructor(options: { path?: string; policy?: ChannelSessionPolicy } = {}) {
+  constructor(options: { path?: string; policy?: ChannelSessionPolicy; surfacePointerStore?: SurfacePointerStore } = {}) {
     this.#path = options.path ?? join(homedir(), ".estacoda", "channel-sessions.json");
     this.#policy = options.policy ?? {};
+    this.#surfacePointerStore = options.surfacePointerStore;
   }
 
   get path(): string {
@@ -71,6 +75,18 @@ export class PersistentChannelSessionStore implements ChannelSessionStore {
   async getOrCreateSessionId(sessionKey: ChannelSessionKey, options?: { receivedAt?: string }): Promise<string> {
     await this.#ensureLoaded();
     const key = stableSessionKey(sessionKey, this.#policy);
+
+    // Check surface pointer first. If a surface is explicitly attached to a
+    // session, that takes precedence over the channel-local session mapping.
+    if (this.#surfacePointerStore !== undefined) {
+      const surfaceType = sessionKey.platform as SurfaceType;
+      const surfaceId = sessionKey.chatId;
+      const pointer = await this.#surfacePointerStore.getPointer(surfaceType, surfaceId);
+      if (pointer !== undefined) {
+        return pointer.sessionId;
+      }
+    }
+
     const existing = this.#entries.get(key);
 
     if (existing !== undefined) {

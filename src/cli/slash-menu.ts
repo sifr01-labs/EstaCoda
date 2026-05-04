@@ -29,6 +29,7 @@ export const SESSION_COMMANDS: readonly SlashMenuCommand[] = [
   { name: "workspace.trust.status", description: "Show whether the current workspace is trusted" },
   { name: "doctor", description: "Run a quick in-session health check" },
   { name: "flow", description: "TaskFlow operator commands (status, pause, resume, steer, trace, etc.)" },
+  { name: "handoff", description: "Generate a handoff code to share this session with Telegram" },
   { name: "clear", description: "Clear the terminal" },
   { name: "exit", description: "End the session", aliases: ["quit"] }
 ];

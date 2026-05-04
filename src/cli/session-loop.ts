@@ -344,6 +344,31 @@ async function handleSlashCommand(input: {
       input.output.write(`${result}\n\n`);
       return false;
     }
+    case "handoff": {
+      const surface = args[0] ?? "telegram";
+      if (surface !== "telegram") {
+        input.output.write(`Unsupported surface: ${surface}. Currently only 'telegram' is supported.\n\n`);
+        return false;
+      }
+      const { FileHandoffStore } = await import("../channels/handoff-store.js");
+      const { join } = await import("node:path");
+      const { homedir } = await import("node:os");
+      const store = new FileHandoffStore({ path: join(homedir(), ".estacoda", "handoff-codes.json") });
+      const handoff = await store.create({
+        sessionId: input.runtime.sessionId,
+        surfaceType: surface,
+        ttlMinutes: 10
+      });
+      input.output.write([
+        `Handoff code for Telegram: ${handoff.code}`,
+        `Session: ${input.runtime.sessionId}`,
+        `Expires: ${handoff.expiresAt}`,
+        "",
+        `To attach, send in Telegram: /attach ${handoff.code}`,
+        ""
+      ].join("\n"));
+      return false;
+    }
     case "clear":
       input.output.write("\x1Bc");
       return false;
