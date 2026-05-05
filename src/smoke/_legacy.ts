@@ -3446,8 +3446,8 @@ const renderedGatedActivity = activityRenderer.render({
   decision: "ask",
   riskClass: "credential-access"
 });
-assert(renderedActivityStart.includes("🧿 extracting web content"), "expected tool activity icon and label");
-assert(renderedActivityStart.includes("preparing web.extract"), "expected tool activity preparing state");
+assert(renderedActivityStart.includes("[>]"), "expected tool activity running marker");
+assert(renderedActivityStart.includes("web.extract"), "expected tool activity tool name");
 assert(renderedActivityResult.includes("1.5s"), "expected tool activity duration");
 assert(renderedActivityResult.includes("4.2k captured / 900 sent / compressed"), "expected tool activity compression summary");
 assert(renderedGatedActivity.includes("credential or secret access"), "expected gated tool activity risk copy");

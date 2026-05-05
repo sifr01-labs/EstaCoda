@@ -44,6 +44,20 @@ export class StandardRenderer {
   }
 
   // ──────────────────────────────────────
+  // Spinner / animation primitives
+  // ──────────────────────────────────────
+
+  /** Returns a time-based spinner frame when animation is supported, otherwise the first frame. */
+  #spinnerFrame(frames: readonly string[]): string {
+    if (frames.length === 0) return "";
+    if (!this.#capabilities.supportsAnimation) {
+      return frames[0] ?? "";
+    }
+    const index = Math.floor(Date.now() / 80) % frames.length;
+    return frames[index] ?? "";
+  }
+
+  // ──────────────────────────────────────
   // ──────────────────────────────────────
 
   render(vm: ViewModel): string {
@@ -448,7 +462,7 @@ export class StandardRenderer {
       case "pending":
         return this.#dim("○");
       case "running":
-        return this.#action("●");
+        return this.#action(this.#spinnerFrame(this.#tokens.contract.glyph.spinner.waiting));
       case "done":
         return this.#severity("✓", "ok");
       case "failed":
@@ -503,7 +517,7 @@ export class StandardRenderer {
       case "pending":
         return this.#dim("○");
       case "active":
-        return this.#action("●");
+        return this.#action(this.#spinnerFrame(this.#tokens.contract.glyph.spinner.waiting));
       case "done":
         return this.#severity("✓", "ok");
       case "failed":

@@ -19,7 +19,7 @@ export class ToolActivityRenderer {
   render(event: Extract<RuntimeEvent, { kind: "tool-start" | "tool-result" }>): string {
     if (event.kind === "tool-start") {
       this.#pushStart(event.tool);
-      return `${toolIcon(event.tool)} ${toolAction(event.tool, this.#tools.get(event.tool))} · preparing ${event.tool}${event.stepId === undefined ? "" : ` · ${event.stepId}`}`;
+      return `[>] ${toolIcon(event.tool)} ${toolAction(event.tool, this.#tools.get(event.tool))} · preparing ${event.tool}${event.stepId === undefined ? "" : ` · ${event.stepId}`}`;
     }
 
     const elapsed = this.#popElapsed(event.tool);
