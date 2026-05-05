@@ -1,9 +1,8 @@
 // Placeholder UI contract types for v0.95 rendering pipeline.
 // Expanded in Phases 3-6.
 
-export type UiMode = "plain" | "standard";
-export type UiTheme = "light" | "dark";
-export type SkinName = "kemetBlue";
+export type { UiMode, UiTheme, SkinName } from "./ui-tokens.js";
+export type { UiTokenContract, ResolvedTokens } from "./ui-tokens.js";
 
 export interface TerminalCapabilities {
   isTTY: boolean;
@@ -17,17 +16,10 @@ export interface TerminalCapabilities {
   supportsAnimation: boolean;
 }
 
-export interface ResolvedTokens {
-  // To be defined in Phase 3.
-  mode: UiMode;
-  theme: UiTheme;
-  skin: SkinName;
-}
-
 export interface Renderer {
   // To be defined in Phase 5-6.
   readonly capabilities: TerminalCapabilities;
-  readonly tokens: ResolvedTokens;
+  readonly tokens: import("./ui-tokens.js").ResolvedTokens;
 }
 
 export interface SurfaceAdapter {

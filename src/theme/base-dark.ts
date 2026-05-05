@@ -1,0 +1,82 @@
+import type { UiTokenContract } from "../contracts/ui-tokens.js";
+
+export const darkTheme: UiTokenContract = {
+  palette: {
+    brand: "#5AACFF",
+    action: "#00E5C9",
+    caution: "#FFB300",
+  },
+  severity: {
+    ok: "#4CAF50",
+    error: "#EF5350",
+    warn: "#FFA726",
+    info: "#5AACFF",
+  },
+  surface: {
+    bg: "#1A1A1A",
+    bgElevated: "#252525",
+    bgInset: "#111111",
+    border: "#333333",
+    borderSubtle: "#2A2A2A",
+  },
+  text: {
+    primary: "#E8E8E8",
+    secondary: "#B0B0B0",
+    muted: "#707070",
+    inverse: "#1A1A1A",
+  },
+  interactive: {
+    primary: "#5AACFF",
+    primaryHover: "#7BBFFF",
+    selected: "#5AACFF",
+    selectedBg: "#1A3A5C",
+  },
+  glyph: {
+    prompt: "›",
+    toolPrefix: "│",
+    continuation: "…",
+    bullet: "•",
+    check: "✓",
+    cross: "✗",
+    arrow: "→",
+    spinner: {
+      waiting: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
+      thinking: ["◐", "◓", "◑", "◒"],
+    },
+    progress: {
+      filled: "█",
+      empty: "░",
+      thumb: "▌",
+    },
+  },
+  toolIcon: {
+    terminal: "$",
+    webSearch: "◎",
+    readFile: "◰",
+    writeFile: "◆",
+    searchFiles: "◇",
+    executeCode: "⌬",
+    browserNavigate: "☞",
+    delegateTask: "☷",
+    mixtureOfAgents: "☵",
+    memory: "☥",
+    clarify: "?",
+    cronjob: "◷",
+    process: "⌁",
+    todo: "□",
+    telegram: "✉",
+    media: "◉",
+  },
+  branding: {
+    agentName: "EstaCoda",
+    responseLabel: "EstaCoda",
+    helpHeader: "Available Commands",
+    taglinePrimary: "",
+    taglineSecondary: "",
+  },
+  behavior: {
+    allowEmoji: false,
+    allowAnimation: true,
+    allowAnsiColor: true,
+  },
+};
