@@ -27,14 +27,14 @@ describe("createCommandRegistry", () => {
   it("resolves a command by alias", () => {
     registry.register({
       name: "status",
-      aliases: ["model", "st"],
+      aliases: ["st", "info"],
       category: "Info",
       description: "Show status",
       visibility: "public",
       scope: "slash",
     });
-    expect(registry.resolve("model")?.name).toBe("status");
     expect(registry.resolve("st")?.name).toBe("status");
+    expect(registry.resolve("info")?.name).toBe("status");
   });
 
   it("returns undefined for unknown commands", () => {
@@ -44,14 +44,14 @@ describe("createCommandRegistry", () => {
   it("is case-insensitive in resolution", () => {
     registry.register({
       name: "Status",
-      aliases: ["Model"],
+      aliases: ["Info"],
       category: "Info",
       description: "Show status",
       visibility: "public",
       scope: "slash",
     });
     expect(registry.resolve("status")?.name).toBe("Status");
-    expect(registry.resolve("model")?.name).toBe("Status");
+    expect(registry.resolve("info")?.name).toBe("Status");
   });
 
   it("lists all registered commands", () => {
@@ -194,14 +194,14 @@ describe("createCommandRegistry", () => {
   it("filters by text filter matching alias", () => {
     registry.register({
       name: "status",
-      aliases: ["model"],
+      aliases: ["st"],
       category: "Info",
       description: "Show status",
       visibility: "public",
       scope: "slash",
     });
 
-    const filtered = registry.list({ filter: "model" });
+    const filtered = registry.list({ filter: "st" });
     expect(filtered).toHaveLength(1);
     expect(filtered[0].name).toBe("status");
   });
@@ -320,8 +320,8 @@ describe("global commandRegistry", () => {
   it("has slash commands pre-registered", () => {
     expect(commandRegistry.resolve("help")?.scope).toBe("both");
     expect(commandRegistry.resolve("status")?.scope).toBe("slash");
+    expect(commandRegistry.resolve("model")?.scope).toBe("both");
     expect(commandRegistry.resolve("exit")?.scope).toBe("slash");
-    expect(commandRegistry.resolve("model")?.name).toBe("status"); // alias
   });
 
   it("has CLI commands pre-registered", () => {
@@ -342,6 +342,7 @@ describe("global commandRegistry", () => {
     const names = slash.map((c) => c.name);
     expect(names).toContain("help");
     expect(names).toContain("status");
+    expect(names).toContain("model");
     expect(names).toContain("exit");
     expect(names).toContain("yolo");
     expect(names).toContain("cron");

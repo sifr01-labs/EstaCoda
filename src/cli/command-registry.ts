@@ -82,11 +82,19 @@ function registerAll(): void {
   });
   commandRegistry.register({
     name: "status",
-    aliases: ["model"],
+    aliases: [],
     category: "Info",
     description: "Show runtime, model, context, trust, memory, and skill status",
     visibility: "public",
     scope: "slash",
+  });
+  commandRegistry.register({
+    name: "model",
+    aliases: [],
+    category: "Info",
+    description: "Show or switch the active model and provider",
+    visibility: "public",
+    scope: "both",
   });
   commandRegistry.register({
     name: "sessions",
@@ -351,14 +359,6 @@ function registerAll(): void {
     aliases: [],
     category: "Channels",
     description: "Start channel gateway",
-    visibility: "public",
-    scope: "cli",
-  });
-  commandRegistry.register({
-    name: "model",
-    aliases: [],
-    category: "Info",
-    description: "Show current model",
     visibility: "public",
     scope: "cli",
   });
