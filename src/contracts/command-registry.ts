@@ -8,15 +8,18 @@ export interface CommandRegistration {
   readonly description: string;
   readonly visibility: CommandVisibility;
   readonly scope: CommandScope;
+  readonly parent?: string;
 }
 
 export interface CommandRegistry {
   register(command: CommandRegistration): void;
   resolve(name: string): CommandRegistration | undefined;
+  resolveSubcommand(parent: string, name: string): CommandRegistration | undefined;
   list(options?: {
     scope?: CommandScope;
     visibility?: CommandVisibility;
     filter?: string;
+    parent?: string | null;
   }): readonly CommandRegistration[];
   getCategories(scope?: CommandScope): readonly string[];
 }

@@ -60,7 +60,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         continue;
       }
 
-      if (text === "/exit" || text === "/quit") {
+      if (text === "/exit") {
         output.write("Ending EstaCoda session.\n");
         return;
       }
@@ -162,8 +162,10 @@ async function handleSlashCommand(input: {
   workspaceRoot?: string;
 }): Promise<boolean | { runtime: Runtime; notice: (runtime: Runtime) => string }> {
   const [command = "", ...args] = input.text.slice(1).trim().split(/\s+/u);
+  const resolved = commandRegistry.resolve(command);
+  const canonical = resolved?.name ?? command;
 
-  switch (command) {
+  switch (canonical) {
     case "":
       input.output.write(`${renderSlashMenu(input.runtime)}\n\n`);
       return false;
@@ -171,11 +173,14 @@ async function handleSlashCommand(input: {
       input.output.write(`${renderSessionHelp()}\n\n`);
       return false;
     case "status":
+      // TODO(phase-7): migrate to StatusViewModel + renderer
+      input.output.write(`${input.runtime.describe()}\n\n`);
+      return false;
     case "model":
+      // TODO(phase-7): migrate to ModelViewModel + renderer
       input.output.write(`${input.runtime.describe()}\n\n`);
       return false;
     case "reset":
-    case "new":
       if (input.refreshRuntime === undefined) {
         input.output.write("This session cannot reset itself here. Start a new EstaCoda session to refresh skills and config.\n\n");
         return false;
@@ -323,12 +328,10 @@ async function handleSlashCommand(input: {
       };
     }
     case "trust":
-    case "workspace.trust.grant":
       await input.runtime.trustWorkspace();
       input.output.write("Workspace trusted. EstaCoda will proceed with normal local work here.\n\n");
       return false;
     case "untrust":
-    case "workspace.trust.revoke":
       await input.runtime.revokeWorkspaceTrust();
       input.output.write("Workspace trust revoked. EstaCoda will ask before workspace writes here.\n\n");
       return false;
@@ -374,7 +377,6 @@ async function handleSlashCommand(input: {
       input.output.write("\x1Bc");
       return false;
     case "exit":
-    case "quit":
       input.output.write("Ending EstaCoda session.\n");
       return true;
     default:

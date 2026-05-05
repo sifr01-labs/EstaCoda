@@ -8,13 +8,32 @@ import type {
 class InMemoryCommandRegistry implements CommandRegistry {
   private readonly commands = new Map<string, CommandRegistration>();
 
+  private key(cmd: CommandRegistration): string {
+    return cmd.parent !== undefined ? `${cmd.parent}.${cmd.name}` : cmd.name;
+  }
+
+  private keyName(name: string, parent?: string): string {
+    return parent !== undefined ? `${parent}.${name}` : name;
+  }
+
   register(command: CommandRegistration): void {
-    this.commands.set(command.name, command);
+    this.commands.set(this.key(command), command);
   }
 
   resolve(name: string): CommandRegistration | undefined {
     const normalized = name.toLowerCase();
     for (const cmd of this.commands.values()) {
+      if (cmd.parent !== undefined) continue;
+      if (cmd.name.toLowerCase() === normalized) return cmd;
+      if (cmd.aliases.some((a) => a.toLowerCase() === normalized)) return cmd;
+    }
+    return undefined;
+  }
+
+  resolveSubcommand(parent: string, name: string): CommandRegistration | undefined {
+    const normalized = name.toLowerCase();
+    for (const cmd of this.commands.values()) {
+      if (cmd.parent !== parent) continue;
       if (cmd.name.toLowerCase() === normalized) return cmd;
       if (cmd.aliases.some((a) => a.toLowerCase() === normalized)) return cmd;
     }
@@ -25,8 +44,20 @@ class InMemoryCommandRegistry implements CommandRegistry {
     scope?: CommandScope;
     visibility?: CommandVisibility;
     filter?: string;
+    parent?: string | null;
   }): readonly CommandRegistration[] {
     let results = Array.from(this.commands.values());
+
+    if (options?.parent !== undefined) {
+      if (options.parent === null) {
+        results = results.filter((cmd) => cmd.parent === undefined);
+      } else {
+        results = results.filter((cmd) => cmd.parent === options.parent);
+      }
+    } else {
+      // Default: exclude parented commands from top-level listings
+      results = results.filter((cmd) => cmd.parent === undefined);
+    }
 
     if (options?.scope) {
       results = results.filter(
@@ -55,9 +86,13 @@ class InMemoryCommandRegistry implements CommandRegistry {
   getCategories(scope?: CommandScope): readonly string[] {
     const cmds = scope
       ? Array.from(this.commands.values()).filter(
-          (cmd) => cmd.scope === scope || cmd.scope === "both"
+          (cmd) =>
+            (cmd.scope === scope || cmd.scope === "both") &&
+            cmd.parent === undefined
         )
-      : Array.from(this.commands.values());
+      : Array.from(this.commands.values()).filter(
+          (cmd) => cmd.parent === undefined
+        );
     return [...new Set(cmds.map((cmd) => cmd.category))].sort();
   }
 }
@@ -71,7 +106,7 @@ export const commandRegistry = createCommandRegistry();
 
 // Register all known commands. Called once at module load.
 function registerAll(): void {
-  // ── Slash commands (migrated from SESSION_COMMANDS in slash-menu.ts) ──
+  // ── Slash commands ──
   commandRegistry.register({
     name: "help",
     aliases: ["--help", "-h"],
@@ -114,7 +149,7 @@ function registerAll(): void {
   });
   commandRegistry.register({
     name: "search",
-    aliases: [],
+    aliases: ["find"],
     category: "Session",
     description: "Search session history",
     visibility: "public",
@@ -146,7 +181,7 @@ function registerAll(): void {
   });
   commandRegistry.register({
     name: "browser",
-    aliases: ["browser status", "browser connect"],
+    aliases: [],
     category: "Tools",
     description: "Manage local browser/CDP connection",
     visibility: "public",
@@ -170,7 +205,7 @@ function registerAll(): void {
   });
   commandRegistry.register({
     name: "resume",
-    aliases: [],
+    aliases: ["continue"],
     category: "Info",
     description: "Show the latest interrupted-turn resume note",
     visibility: "public",
@@ -194,7 +229,7 @@ function registerAll(): void {
   });
   commandRegistry.register({
     name: "security",
-    aliases: ["security debug"],
+    aliases: [],
     category: "Security",
     description: "Inspect recent security decisions",
     visibility: "public",
@@ -266,7 +301,7 @@ function registerAll(): void {
   });
   commandRegistry.register({
     name: "clear",
-    aliases: [],
+    aliases: ["cls"],
     category: "System",
     description: "Clear the terminal",
     visibility: "public",
@@ -281,7 +316,7 @@ function registerAll(): void {
     scope: "slash",
   });
 
-  // ── CLI-only commands (from cli.ts help()) ──
+  // ── CLI-only commands ──
   commandRegistry.register({
     name: "setup",
     aliases: [],
@@ -459,10 +494,11 @@ function registerAll(): void {
     scope: "cli",
   });
 
-  // ── Cron subcommands (from cron-command.ts) ──
+  // ── Cron subcommands (namespaced under "cron") ──
   commandRegistry.register({
     name: "add",
     aliases: ["create"],
+    parent: "cron",
     category: "Cron",
     description: "Add a scheduled job",
     visibility: "public",
@@ -470,7 +506,8 @@ function registerAll(): void {
   });
   commandRegistry.register({
     name: "list",
-    aliases: ["status"],
+    aliases: [],
+    parent: "cron",
     category: "Cron",
     description: "List scheduled jobs",
     visibility: "public",
@@ -479,6 +516,7 @@ function registerAll(): void {
   commandRegistry.register({
     name: "show",
     aliases: [],
+    parent: "cron",
     category: "Cron",
     description: "Show job detail with execution history",
     visibility: "public",
@@ -487,6 +525,7 @@ function registerAll(): void {
   commandRegistry.register({
     name: "history",
     aliases: [],
+    parent: "cron",
     category: "Cron",
     description: "Show execution history",
     visibility: "public",
@@ -495,6 +534,7 @@ function registerAll(): void {
   commandRegistry.register({
     name: "tick",
     aliases: [],
+    parent: "cron",
     category: "Cron",
     description: "Trigger a cron tick manually",
     visibility: "public",
@@ -503,6 +543,7 @@ function registerAll(): void {
   commandRegistry.register({
     name: "edit",
     aliases: ["update"],
+    parent: "cron",
     category: "Cron",
     description: "Edit an existing job",
     visibility: "public",
@@ -511,6 +552,7 @@ function registerAll(): void {
   commandRegistry.register({
     name: "pause",
     aliases: [],
+    parent: "cron",
     category: "Cron",
     description: "Pause a job",
     visibility: "public",
@@ -519,6 +561,7 @@ function registerAll(): void {
   commandRegistry.register({
     name: "resume",
     aliases: [],
+    parent: "cron",
     category: "Cron",
     description: "Resume a paused job",
     visibility: "public",
@@ -527,6 +570,7 @@ function registerAll(): void {
   commandRegistry.register({
     name: "run",
     aliases: [],
+    parent: "cron",
     category: "Cron",
     description: "Request a manual run of a job",
     visibility: "public",
@@ -535,6 +579,7 @@ function registerAll(): void {
   commandRegistry.register({
     name: "remove",
     aliases: ["delete"],
+    parent: "cron",
     category: "Cron",
     description: "Remove a job",
     visibility: "public",

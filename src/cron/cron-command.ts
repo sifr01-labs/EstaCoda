@@ -12,10 +12,11 @@ export async function runCronCommand(input: {
   defaultDelivery?: string;
 }): Promise<{ ok: boolean; output: string }> {
   const [command, ...rest] = input.args;
+  const resolved = command !== undefined ? commandRegistry.resolveSubcommand("cron", command) : undefined;
+  const canonical = resolved?.name ?? command;
 
-  if (command === undefined || command === "help") {
-    const subcommands = commandRegistry.list({ scope: "both" });
-    const cronCommands = subcommands.filter((cmd) => cmd.category === "Cron");
+  if (command === undefined || canonical === "help") {
+    const cronCommands = commandRegistry.list({ scope: "both", parent: "cron" });
     const maxWidth = Math.max(...cronCommands.map((c) => c.name.length), 6);
     return {
       ok: true,
@@ -28,7 +29,7 @@ export async function runCronCommand(input: {
     };
   }
 
-  if (command === "add" || command === "create") {
+  if (canonical === "add") {
     const parsed = parseCronAddArgs(rest);
     if (parsed.schedule === undefined || parsed.prompt === undefined) {
       return { ok: false, output: "Usage: cron add <schedule> \"<prompt>\" [--name name] [--skill skill]" };
@@ -45,11 +46,11 @@ export async function runCronCommand(input: {
     return { ok: true, output: renderCreated(job) };
   }
 
-  if (command === "list" || command === "status") {
+  if (canonical === "list") {
     return { ok: true, output: renderCronJobs(await input.store.list()) };
   }
 
-  if (command === "show") {
+  if (canonical === "show") {
     const id = rest[0];
     if (id === undefined) {
       return { ok: false, output: "Usage: cron show <job-id>" };
@@ -64,7 +65,7 @@ export async function runCronCommand(input: {
     return { ok: true, output: renderJobDetail(job, executions) };
   }
 
-  if (command === "history") {
+  if (canonical === "history") {
     const limit = parseHistoryLimit(rest);
     const jobId = rest.find((arg) => !arg.startsWith("--"));
     const executions = input.executionStore !== undefined
@@ -73,7 +74,7 @@ export async function runCronCommand(input: {
     return { ok: true, output: renderExecutionHistory(executions, jobId) };
   }
 
-  if (command === "tick") {
+  if (canonical === "tick") {
     return { ok: true, output: input.tick === undefined ? "Cron tick requires a runtime." : await input.tick() };
   }
 
@@ -82,7 +83,7 @@ export async function runCronCommand(input: {
     return { ok: false, output: `Usage: cron ${command} <job-id>` };
   }
 
-  if (command === "edit" || command === "update") {
+  if (canonical === "edit") {
     const existing = await input.store.get(id);
     if (existing === undefined) {
       return { ok: false, output: `Cron job not found: ${id}` };
@@ -94,10 +95,10 @@ export async function runCronCommand(input: {
       : { ok: true, output: `Updated cron job ${job.id}: ${job.name}` };
   }
 
-  if (command === "pause") return renderMaybe("Paused", await input.store.pause(id), id);
-  if (command === "resume") return renderMaybe("Resumed", await input.store.resume(id), id);
-  if (command === "run") return renderMaybe("Queued", await input.store.requestRun(id), id);
-  if (command === "remove" || command === "delete") {
+  if (canonical === "pause") return renderMaybe("Paused", await input.store.pause(id), id);
+  if (canonical === "resume") return renderMaybe("Resumed", await input.store.resume(id), id);
+  if (canonical === "run") return renderMaybe("Queued", await input.store.requestRun(id), id);
+  if (canonical === "remove") {
     const removed = await input.store.remove(id);
     return removed
       ? { ok: true, output: `Removed cron job ${id}.` }

@@ -54,7 +54,37 @@ describe("createCommandRegistry", () => {
     expect(registry.resolve("info")?.name).toBe("Status");
   });
 
-  it("lists all registered commands", () => {
+  it("does not resolve subcommands via top-level resolve", () => {
+    registry.register({
+      name: "add",
+      aliases: ["create"],
+      parent: "cron",
+      category: "Cron",
+      description: "Add a job",
+      visibility: "public",
+      scope: "both",
+    });
+    expect(registry.resolve("add")).toBeUndefined();
+    expect(registry.resolve("create")).toBeUndefined();
+  });
+
+  it("resolves subcommands via resolveSubcommand", () => {
+    registry.register({
+      name: "add",
+      aliases: ["create"],
+      parent: "cron",
+      category: "Cron",
+      description: "Add a job",
+      visibility: "public",
+      scope: "both",
+    });
+    expect(registry.resolveSubcommand("cron", "add")?.name).toBe("add");
+    expect(registry.resolveSubcommand("cron", "create")?.name).toBe("add");
+    expect(registry.resolveSubcommand("cron", "unknown")).toBeUndefined();
+    expect(registry.resolveSubcommand("other", "add")).toBeUndefined();
+  });
+
+  it("lists all registered commands excluding subcommands by default", () => {
     registry.register({
       name: "a",
       aliases: [],
@@ -71,10 +101,35 @@ describe("createCommandRegistry", () => {
       visibility: "public",
       scope: "slash",
     });
+    registry.register({
+      name: "sub",
+      aliases: [],
+      parent: "parent",
+      category: "Z",
+      description: "desc sub",
+      visibility: "public",
+      scope: "both",
+    });
     const all = registry.list();
     expect(all).toHaveLength(2);
     expect(all.map((c) => c.name)).toContain("a");
     expect(all.map((c) => c.name)).toContain("b");
+    expect(all.map((c) => c.name)).not.toContain("sub");
+  });
+
+  it("lists subcommands when parent is specified", () => {
+    registry.register({
+      name: "sub",
+      aliases: [],
+      parent: "parent",
+      category: "Z",
+      description: "desc sub",
+      visibility: "public",
+      scope: "both",
+    });
+    const subs = registry.list({ parent: "parent" });
+    expect(subs).toHaveLength(1);
+    expect(subs[0].name).toBe("sub");
   });
 
   it("filters by scope", () => {
@@ -252,7 +307,7 @@ describe("createCommandRegistry", () => {
     expect(filtered[0].name).toBe("status");
   });
 
-  it("returns categories", () => {
+  it("returns categories excluding subcommands", () => {
     registry.register({
       name: "a",
       aliases: [],
@@ -265,6 +320,15 @@ describe("createCommandRegistry", () => {
       name: "b",
       aliases: [],
       category: "A",
+      description: "desc",
+      visibility: "public",
+      scope: "cli",
+    });
+    registry.register({
+      name: "sub",
+      aliases: [],
+      parent: "p",
+      category: "Sub",
       description: "desc",
       visibility: "public",
       scope: "cli",
@@ -330,11 +394,62 @@ describe("global commandRegistry", () => {
     expect(commandRegistry.resolve("tools")?.scope).toBe("both");
   });
 
+  it("has approved aliases pre-registered", () => {
+    expect(commandRegistry.resolve("find")?.name).toBe("search");
+    expect(commandRegistry.resolve("continue")?.name).toBe("resume");
+    expect(commandRegistry.resolve("cls")?.name).toBe("clear");
+    expect(commandRegistry.resolve("quit")?.name).toBe("exit");
+    expect(commandRegistry.resolve("new")?.name).toBe("reset");
+  });
+
+  it("has deprecated backward-compat aliases that resolve", () => {
+    expect(commandRegistry.resolve("workspace.trust.grant")?.name).toBe("trust");
+    expect(commandRegistry.resolve("workspace.trust.revoke")?.name).toBe("untrust");
+  });
+
+  it("does not resolve removed aliases", () => {
+    expect(commandRegistry.resolve("load")).toBeUndefined();
+    expect(commandRegistry.resolve("status")?.name).toBe("status");
+    expect(commandRegistry.resolve("model")?.name).toBe("model");
+  });
+
+  it("has cron subcommands namespaced under cron", () => {
+    expect(commandRegistry.resolveSubcommand("cron", "add")?.name).toBe("add");
+    expect(commandRegistry.resolveSubcommand("cron", "create")?.name).toBe("add");
+    expect(commandRegistry.resolveSubcommand("cron", "list")?.name).toBe("list");
+    expect(commandRegistry.resolveSubcommand("cron", "remove")?.name).toBe("remove");
+    expect(commandRegistry.resolveSubcommand("cron", "delete")?.name).toBe("remove");
+    // status is no longer a cron alias
+    expect(commandRegistry.resolveSubcommand("cron", "status")).toBeUndefined();
+  });
+
+  it("does not expose cron subcommands as top-level commands", () => {
+    expect(commandRegistry.resolve("add")).toBeUndefined();
+    expect(commandRegistry.resolve("list")).toBeUndefined();
+    expect(commandRegistry.resolve("remove")).toBeUndefined();
+  });
+
+  it("does not include cron subcommands in default list", () => {
+    const all = commandRegistry.list();
+    const names = all.map((c) => c.name);
+    expect(names).not.toContain("add");
+    expect(names).not.toContain("list");
+    expect(names).not.toContain("remove");
+  });
+
+  it("lists cron subcommands when parent is specified", () => {
+    const cron = commandRegistry.list({ parent: "cron" });
+    const names = cron.map((c) => c.name);
+    expect(names).toContain("add");
+    expect(names).toContain("list");
+    expect(names).toContain("remove");
+  });
+
   it("has cron subcommands pre-registered", () => {
-    expect(commandRegistry.resolve("add")?.category).toBe("Cron");
-    expect(commandRegistry.resolve("create")?.name).toBe("add"); // alias
-    expect(commandRegistry.resolve("list")?.category).toBe("Cron");
-    expect(commandRegistry.resolve("pause")?.category).toBe("Cron");
+    expect(commandRegistry.resolveSubcommand("cron", "add")?.category).toBe("Cron");
+    expect(commandRegistry.resolveSubcommand("cron", "create")?.name).toBe("add");
+    expect(commandRegistry.resolveSubcommand("cron", "list")?.category).toBe("Cron");
+    expect(commandRegistry.resolveSubcommand("cron", "pause")?.category).toBe("Cron");
   });
 
   it("lists all slash commands", () => {
@@ -346,6 +461,8 @@ describe("global commandRegistry", () => {
     expect(names).toContain("exit");
     expect(names).toContain("yolo");
     expect(names).toContain("cron");
+    expect(names).not.toContain("add");
+    expect(names).not.toContain("list");
   });
 
   it("lists all CLI commands", () => {
