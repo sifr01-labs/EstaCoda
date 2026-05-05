@@ -7,6 +7,7 @@ import { createFakeTelegramAdapter } from "../test/fakes/fake-telegram-adapter.j
 import { createFakeDiscordAdapter } from "../test/fakes/fake-discord-adapter.js";
 import { createFakeEmailAdapter } from "../test/fakes/fake-email-adapter.js";
 import { createFakeWhatsAppAdapter } from "../test/fakes/fake-whatsapp-adapter.js";
+import { PlainLogSurfaceAdapter } from "./surface-adapters/plain-log-surface-adapter.js";
 import type { ChannelAdapter, ChannelSessionKey } from "../contracts/channel.js";
 import type { FakeDeliveryRecord } from "../test/fakes/fake-channel-adapter.js";
 
@@ -330,6 +331,74 @@ describe("DeliveryRouter", () => {
       const router = new DeliveryRouter({ homeDir: tmpDir });
       const errors = await router.getRecentErrors(10);
       expect(errors).toEqual([]);
+    });
+  });
+
+  describe("surface adapter compatibility", () => {
+    it("can set and get a surface adapter", () => {
+      const router = new DeliveryRouter({ homeDir: tmpDir });
+      const adapter = new PlainLogSurfaceAdapter();
+      router.setSurfaceAdapter(adapter);
+      expect(router.surfaceAdapter).toBe(adapter);
+    });
+
+    it("can unset a surface adapter", () => {
+      const router = new DeliveryRouter({ homeDir: tmpDir });
+      const adapter = new PlainLogSurfaceAdapter();
+      router.setSurfaceAdapter(adapter);
+      router.setSurfaceAdapter(undefined);
+      expect(router.surfaceAdapter).toBeUndefined();
+    });
+
+    it("deliverViewModel uses surface adapter when configured", async () => {
+      const router = new DeliveryRouter({ homeDir: tmpDir });
+      const telegram = createFakeTelegramAdapter() as FakeAdapter;
+      router.registerAdapter(telegram);
+
+      const adapter = new PlainLogSurfaceAdapter();
+      router.setSurfaceAdapter(adapter);
+
+      const vm = {
+        kind: "plainFallback" as const,
+        lines: ["hello from vm"],
+      };
+      const targets = router.parseTarget("telegram:123", baseSessionKey);
+      const results = await router.deliverViewModel(targets, vm);
+
+      expect(results.get("telegram:123")?.success).toBe(true);
+      expect(telegram.records).toHaveLength(1);
+      expect(telegram.records[0].text).toContain("hello from vm");
+    });
+
+    it("deliverViewModel falls back to plain renderer when no surface adapter", async () => {
+      const router = new DeliveryRouter({ homeDir: tmpDir });
+      const telegram = createFakeTelegramAdapter() as FakeAdapter;
+      router.registerAdapter(telegram);
+
+      const vm = {
+        kind: "plainFallback" as const,
+        lines: ["fallback plain"],
+      };
+      const targets = router.parseTarget("telegram:123", baseSessionKey);
+      const results = await router.deliverViewModel(targets, vm);
+
+      expect(results.get("telegram:123")?.success).toBe(true);
+      expect(telegram.records).toHaveLength(1);
+      expect(telegram.records[0].text).toBe("fallback plain");
+    });
+
+    it("deliverViewModel preserves existing routing behavior", async () => {
+      const router = new DeliveryRouter({ homeDir: tmpDir });
+      const telegram = createFakeTelegramAdapter() as FakeAdapter;
+      router.registerAdapter(telegram);
+
+      router.setSurfaceAdapter(new PlainLogSurfaceAdapter());
+
+      const targets = router.parseTarget("telegram:123", baseSessionKey);
+      const results = await router.deliverText(targets, "Direct text");
+
+      expect(results.get("telegram:123")?.success).toBe(true);
+      expect(telegram.records[0].text).toBe("Direct text");
     });
   });
 });

@@ -9,6 +9,9 @@ import type {
   ChannelTextOptions
 } from "../contracts/channel.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
+import type { SurfaceAdapter } from "../contracts/surface-adapter.js";
+import type { ViewModel } from "../contracts/view-model.js";
+import { renderPlain } from "../ui/renderers/plain-renderer.js";
 
 export type DeliveryTarget =
   | { kind: "origin"; originalSessionKey: ChannelSessionKey }
@@ -36,6 +39,7 @@ export class DeliveryRouter {
   readonly #homeDir: string;
   readonly #maxOutputChars: number;
   readonly #now: () => Date;
+  #surfaceAdapter?: SurfaceAdapter;
 
   constructor(options: DeliveryRouterOptions = {}) {
     this.#homeDir = options.homeDir ?? process.env.HOME ?? process.cwd();
@@ -49,6 +53,14 @@ export class DeliveryRouter {
 
   unregisterAdapter(kind: ChannelKind): void {
     this.#adapters.delete(kind);
+  }
+
+  setSurfaceAdapter(adapter: SurfaceAdapter | undefined): void {
+    this.#surfaceAdapter = adapter;
+  }
+
+  get surfaceAdapter(): SurfaceAdapter | undefined {
+    return this.#surfaceAdapter;
   }
 
   parseTarget(target: string, originalSessionKey: ChannelSessionKey): DeliveryTarget[] {
@@ -126,6 +138,17 @@ export class DeliveryRouter {
     }
 
     return results;
+  }
+
+  async deliverViewModel(
+    targets: DeliveryTarget[],
+    viewModel: ViewModel,
+    options?: ChannelTextOptions
+  ): Promise<Map<string, { success: boolean; error?: string }>> {
+    const text = this.#surfaceAdapter
+      ? this.#surfaceAdapter.render(viewModel)
+      : renderPlain(viewModel);
+    return this.deliverText(targets, text, options);
   }
 
   async #deliverSingleText(
