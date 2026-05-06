@@ -665,6 +665,64 @@ function registerAll(): void {
     visibility: "public",
     scope: "both",
   });
+
+  // ── Evolution subcommands ──
+  commandRegistry.register({
+    name: "test",
+    aliases: [],
+    parent: "evolution",
+    category: "Development",
+    description: "Run constraint gates for a manifest",
+    visibility: "public",
+    scope: "cli",
+  });
+  commandRegistry.register({
+    name: "approve",
+    aliases: [],
+    parent: "evolution",
+    category: "Development",
+    description: "Approve a tested manifest",
+    visibility: "public",
+    scope: "cli",
+  });
+  commandRegistry.register({
+    name: "reject",
+    aliases: [],
+    parent: "evolution",
+    category: "Development",
+    description: "Reject a manifest",
+    visibility: "public",
+    scope: "cli",
+  });
+  commandRegistry.register({
+    name: "promote",
+    aliases: [],
+    parent: "evolution",
+    category: "Development",
+    description: "Promote an approved manifest",
+    visibility: "public",
+    scope: "cli",
+  });
+  commandRegistry.register({
+    name: "rollback",
+    aliases: [],
+    parent: "evolution",
+    category: "Development",
+    description: "Rollback a promoted manifest",
+    visibility: "public",
+    scope: "cli",
+  });
+
+  // ── Manifest subcommands ──
+  commandRegistry.register({
+    name: "diff",
+    aliases: [],
+    parent: "manifest",
+    category: "Development",
+    description: "Show read-only diff of manifest filesChanged",
+    visibility: "public",
+    scope: "cli",
+  });
 }
 
 registerAll();

@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { readFile, stat } from "node:fs/promises";
 import type { CliCommandResult, CliOptions } from "./cli.js";
 import { SkillRegistry } from "../skills/skill-registry.js";
 import { loadSkillsFromDirectory } from "../skills/skill-loader.js";
@@ -47,6 +48,8 @@ export async function manifestCommand(options: CliOptions, args: string[]): Prom
       return manifestList(service, restArgs);
     case "inspect":
       return manifestInspect(service, restArgs);
+    case "diff":
+      return manifestDiff(service, options, restArgs);
     case undefined:
     case "help":
     case "--help":
@@ -70,7 +73,8 @@ function manifestHelp(): string {
     "EstaCoda manifest commands",
     "  estacoda manifest list                 List all evolution change manifests",
     "  estacoda manifest list --status <s>    Filter by status",
-    "  estacoda manifest inspect <id>         Show manifest details"
+    "  estacoda manifest inspect <id>         Show manifest details",
+    "  estacoda manifest diff <id>            Show read-only diff of filesChanged"
   ].join("\n");
 }
 
@@ -120,6 +124,76 @@ async function manifestInspect(service: SkillProposalService, args: string[]): P
     handled: true,
     exitCode: 0,
     output: JSON.stringify(manifest, null, 2)
+  };
+}
+
+async function manifestDiff(
+  service: SkillProposalService,
+  options: CliOptions,
+  args: string[]
+): Promise<CliCommandResult> {
+  const id = args[0];
+  if (id === undefined) {
+    return {
+      handled: true,
+      exitCode: 1,
+      output: "Usage: estacoda manifest diff <manifest-id>"
+    };
+  }
+
+  const manifest = await service.findManifest(id);
+  if (manifest === undefined) {
+    return {
+      handled: true,
+      exitCode: 1,
+      output: `Manifest not found: ${id}`
+    };
+  }
+
+  const home = resolveHome(options);
+  const skillEvolutionStore = new SkillEvolutionStore({
+    usagePath: join(home, ".estacoda", "skills", ".usage.json"),
+    evolutionRoot: join(home, ".estacoda", "skills", ".evolution")
+  });
+  const proposals = await skillEvolutionStore.listProposals({});
+  const linkedProposal = proposals.find((p) => p.changeManifestId === id);
+
+  const lines: string[] = [`Manifest: ${id}`, `Target: ${manifest.target}`, `Status: ${manifest.status}`, ""];
+
+  for (const filePath of manifest.filesChanged) {
+    const fileStat = await stat(filePath).catch(() => undefined);
+    if (fileStat === undefined) {
+      lines.push(`--- ${filePath}`);
+      lines.push("file does not exist (would be created)");
+      lines.push("");
+      continue;
+    }
+
+    const currentContent = await readFile(filePath, "utf8").catch(() => undefined);
+    lines.push(`--- ${filePath}`);
+    lines.push(`file exists (${fileStat.size} bytes)`);
+
+    if (linkedProposal !== undefined && linkedProposal.patch.type === "text_patch") {
+      lines.push("");
+      lines.push("Proposed patch:");
+      lines.push(`- ${linkedProposal.patch.oldString.replace(/\n/gu, "\\n")}`);
+      lines.push(`+ ${linkedProposal.patch.newString.replace(/\n/gu, "\\n")}`);
+    } else if (linkedProposal !== undefined && linkedProposal.patch.type === "json_frontmatter_patch") {
+      lines.push("");
+      lines.push(`Proposed JSON patch: ${linkedProposal.patch.path}`);
+      lines.push(`+ ${JSON.stringify(linkedProposal.patch.value)}`);
+    }
+    lines.push("");
+  }
+
+  if (manifest.filesChanged.length === 0) {
+    lines.push("No filesChanged listed in manifest.");
+  }
+
+  return {
+    handled: true,
+    exitCode: 0,
+    output: lines.join("\n")
   };
 }
 

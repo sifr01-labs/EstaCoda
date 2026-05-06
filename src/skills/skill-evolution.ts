@@ -512,6 +512,18 @@ export class SkillEvolutionStore {
     return runs.filter((r) => r.skillName === filter.skillName);
   }
 
+  async listPromotions(filter?: { skillName?: string; proposalId?: string }): Promise<SkillPromotionRecord[]> {
+    const promotions = await this.#readJsonl<SkillPromotionRecord>("promotions.jsonl");
+    return promotions.filter((p) =>
+      (filter?.skillName === undefined || p.skillName === filter.skillName) &&
+      (filter?.proposalId === undefined || p.proposalId === filter.proposalId)
+    );
+  }
+
+  async findPromotion(id: string): Promise<SkillPromotionRecord | undefined> {
+    return (await this.listPromotions()).find((p) => p.id === id);
+  }
+
   async rejectProposal(id: string): Promise<SkillPatchProposal | undefined> {
     return await this.#rewriteProposal(id, (proposal) => ({
       ...proposal,
