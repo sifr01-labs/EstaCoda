@@ -18,6 +18,8 @@ export type ActiveTurn = {
   abortController?: AbortController;
   stuckCheckCount: number;
   busyAckSentAt?: number;
+  /** Optional metadata attached by the caller (e.g. sessionId). */
+  metadata?: Record<string, unknown>;
 };
 
 export type StartTurnResult =
@@ -80,7 +82,7 @@ export class ActiveTurnRegistry {
 
   /** Attempt to start a turn for key.
    *  Returns busy if key already has an active turn. */
-  startTurn(key: string, abortController?: AbortController): StartTurnResult {
+  startTurn(key: string, abortController?: AbortController, metadata?: Record<string, unknown>): StartTurnResult {
     const existing = this.#activeTurns.get(key);
     if (existing !== undefined) {
       return { ok: false, reason: "busy", currentTurnId: existing.turnId };
@@ -93,10 +95,24 @@ export class ActiveTurnRegistry {
       startedAt: Date.now(),
       abortController,
       stuckCheckCount: 0,
+      metadata,
     };
     this.#activeTurns.set(key, turn);
     this.#totalStarted++;
     return { ok: true, turnId };
+  }
+
+  /** Update metadata for an active turn. No-op if turn not found or turnId mismatched. */
+  updateTurn(key: string, turnId: string, metadata: Record<string, unknown>): void {
+    const turn = this.#activeTurns.get(key);
+    if (turn === undefined) return;
+    if (turn.turnId !== turnId) {
+      this.#logWarning?.(
+        `ActiveTurnRegistry updateTurn turnId mismatch: key=${key} expected=${turnId} actual=${turn.turnId}`
+      );
+      return;
+    }
+    turn.metadata = { ...turn.metadata, ...metadata };
   }
 
   /** End a turn. Must match turnId. Idempotent if already ended. */
@@ -190,6 +206,22 @@ export class ActiveTurnRegistry {
     }
 
     return repeat;
+  }
+
+  /** Atomically check and record a busy ack for this key.
+   *  Returns true if an ack should be sent (no ack yet, or cooldown elapsed).
+   *  Returns false if there is no active turn or cooldown hasn't elapsed.
+   *  This is the preferred API for production callers; it replaces the
+   *  non-atomic shouldSendBusyAck + recordBusyAck pair. */
+  consumeBusyAck(key: string): boolean {
+    const turn = this.#activeTurns.get(key);
+    if (turn === undefined) return false;
+    const now = Date.now();
+    if (turn.busyAckSentAt === undefined || now - turn.busyAckSentAt > this.#busyAckCooldownMs) {
+      turn.busyAckSentAt = now;
+      return true;
+    }
+    return false;
   }
 
   /** Record that a busy ack was sent for this key. */

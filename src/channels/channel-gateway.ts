@@ -17,6 +17,9 @@ import type { ArtifactRecord } from "../contracts/artifact.js";
 import { ChannelApprovalStore, type PersistedApprovalGrant } from "./channel-approval-store.js";
 import { buildBaseSessionId, normalizeSessionKey, type ChannelSessionPolicy, shouldAutoResetSession, stableSessionKey } from "./channel-session-store.js";
 import { createSecurityPolicyForMode } from "../security/security-policy-factory.js";
+import type { RuntimeCache } from "../runtime/runtime-cache.js";
+import type { RuntimeFingerprint } from "../runtime/runtime-fingerprint.js";
+import type { ActiveTurnRegistry } from "../gateway/active-turn-registry.js";
 import type { HandoffStore } from "./handoff-store.js";
 import type { SurfacePointerStore } from "./surface-pointer-store.js";
 import type { SurfaceType } from "./surface-pointer.js";
@@ -53,6 +56,14 @@ export type ChannelGatewayOptions = {
   surfacePointerStore?: SurfacePointerStore;
   diagnostics?: () => Promise<string>;
   deliveryRouter?: DeliveryRouter;
+
+  // Stage 5D additions (all optional)
+  /** Active turn registry for busy protection and abort tracking. */
+  activeTurnRegistry?: ActiveTurnRegistry;
+  /** Runtime cache for reusing Runtime instances across turns. */
+  runtimeCache?: RuntimeCache;
+  /** Static fingerprint for cache key comparison. Required when runtimeCache is provided. */
+  runtimeFingerprint?: RuntimeFingerprint;
 };
 
 type ApprovalScope = "once" | "session" | "always";
@@ -168,6 +179,13 @@ export class ChannelGateway {
   readonly #approvalGrants = new Map<string, ApprovalGrant[]>();
   readonly #yoloSessions = new Map<string, boolean>();
 
+  // Stage 5D additions
+  readonly #activeTurnRegistry: ActiveTurnRegistry | undefined;
+  readonly #runtimeCache: RuntimeCache | undefined;
+  readonly #runtimeFingerprint: RuntimeFingerprint | undefined;
+  readonly #sessionIdByTurnKey = new Map<string, string>();
+  readonly #logWarning?: (message: string) => void;
+
   constructor(options: ChannelGatewayOptions) {
     this.#runtimeForSession = options.runtimeForSession;
     this.#sessionStore = options.sessionStore ?? new InMemoryChannelSessionStore();
@@ -184,6 +202,11 @@ export class ChannelGateway {
     this.#surfacePointerStore = options.surfacePointerStore;
     this.#diagnostics = options.diagnostics;
     this.#deliveryRouter = options.deliveryRouter;
+
+    // Stage 5D
+    this.#activeTurnRegistry = options.activeTurnRegistry;
+    this.#runtimeCache = options.runtimeCache;
+    this.#runtimeFingerprint = options.runtimeFingerprint;
 
     for (const adapter of options.adapters) {
       this.#adapters.set(adapter.id ?? adapter.kind, adapter);
@@ -286,66 +309,99 @@ export class ChannelGateway {
     }
 
     const processedMessage = await this.#preprocessMessage?.(message) ?? message;
-
-    const sessionId = await this.#sessionStore.getOrCreateSessionId(processedMessage.sessionKey, {
-      receivedAt: processedMessage.receivedAt
-    });
-    const normalizedSessionKey = normalizeSessionKey(processedMessage.sessionKey, this.#sessionPolicy);
-    const securityPolicy = this.#securityPolicyFor(
-      normalizedSessionKey,
-      sessionId,
-      await this.#approvalStore.listForSession(normalizedSessionKey)
-    );
-    const runtime = await this.#runtimeForSession({
-      sessionId,
-      sessionKey: normalizedSessionKey,
-      channel: message.channel,
-      securityPolicy,
-      metadata: {
-        surfaceType: message.sessionKey.platform,
-        chatId: message.sessionKey.chatId,
-        userId: message.sender.id,
-        sessionId,
-        origin: message.text.startsWith("/") ? "command" : "message"
-      }
-    });
-    let progressCount = 0;
     const activeTurnKey = stableSessionKey(processedMessage.sessionKey, this.#sessionPolicy);
-    const controller = new AbortController();
-    this.#activeTurns.set(activeTurnKey, controller);
-    const trustedWorkspace = typeof this.#trustedWorkspace === "function"
-      ? await this.#trustedWorkspace(message)
-      : this.#trustedWorkspace;
-    const response = await runtime.handle({
-      text: processedMessage.text,
-      attachments: processedMessage.attachments,
-      channel: processedMessage.channel,
-      trustedWorkspace,
-      signal: controller.signal,
-      inputMetadata: {
-        surfaceType: message.sessionKey.platform,
-        chatId: message.sessionKey.chatId,
-        userId: message.sender.id,
-        origin: message.text.startsWith("/") ? "command" : "message"
-      },
-      onEvent: async (event) => {
-        progressCount += 1;
-        await this.#deliverProgress(adapter, normalizedSessionKey, event);
-      }
-    }).finally(() => {
-      if (this.#activeTurns.get(activeTurnKey) === controller) {
-        this.#activeTurns.delete(activeTurnKey);
-      }
-    });
+    const normalizedSessionKey = normalizeSessionKey(processedMessage.sessionKey, this.#sessionPolicy);
 
-    const pendingApproval = firstPendingApproval(response.toolExecutions, message, sessionId);
-    if (pendingApproval !== undefined) {
-      this.#pendingApprovals.set(activeTurnKey, pendingApproval);
+    // --- Busy check (early, before any expensive work) ---
+    const controller = new AbortController();
+    let turnId: string | undefined;
+
+    if (this.#activeTurnRegistry !== undefined) {
+      const startResult = this.#activeTurnRegistry.startTurn(activeTurnKey, controller);
+      if (!startResult.ok) {
+        if (this.#activeTurnRegistry.consumeBusyAck(activeTurnKey)) {
+          const busyText = "EstaCoda is busy with another request in this chat. Please wait.";
+          await this.#deliverText(adapter, normalizedSessionKey, busyText);
+        }
+        return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+      }
+      turnId = startResult.turnId;
     } else {
-      this.#pendingApprovals.delete(activeTurnKey);
+      if (this.#activeTurns.has(activeTurnKey)) {
+        return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+      }
+      this.#activeTurns.set(activeTurnKey, controller);
     }
 
+    // --- Single try/finally: every path after startTurn must endTurn ---
+    let runtime: Runtime | undefined;
+    let sessionId = "";
+    let progressCount = 0;
     try {
+      // Session resolution
+      sessionId = await this.#sessionStore.getOrCreateSessionId(processedMessage.sessionKey, {
+        receivedAt: processedMessage.receivedAt
+      });
+
+      // Update turn metadata with sessionId (for Stage 5E stuck-loop mapping)
+      if (this.#activeTurnRegistry !== undefined && turnId !== undefined) {
+        this.#activeTurnRegistry.updateTurn(activeTurnKey, turnId, { sessionId });
+      }
+
+      // Cache invalidation on session change
+      const previousSessionId = this.#sessionIdByTurnKey.get(activeTurnKey);
+      if (previousSessionId !== undefined && previousSessionId !== sessionId) {
+        if (this.#runtimeCache !== undefined) {
+          try {
+            await this.#runtimeCache.invalidate(previousSessionId);
+          } catch (invalidateErr) {
+            this.#logWarning?.(
+              `Session reset cache invalidate failed for ${previousSessionId}: ${invalidateErr instanceof Error ? invalidateErr.message : String(invalidateErr)}`
+            );
+          }
+        }
+      }
+      this.#sessionIdByTurnKey.set(activeTurnKey, sessionId);
+
+      const securityPolicy = this.#securityPolicyFor(
+        normalizedSessionKey,
+        sessionId,
+        await this.#approvalStore.listForSession(normalizedSessionKey)
+      );
+
+      // Runtime acquisition
+      runtime = await this.#acquireRuntime(sessionId, securityPolicy, processedMessage, normalizedSessionKey);
+
+      const trustedWorkspace = typeof this.#trustedWorkspace === "function"
+        ? await this.#trustedWorkspace(message)
+        : this.#trustedWorkspace;
+
+      // Handle the turn
+      const response = await runtime.handle({
+        text: processedMessage.text,
+        attachments: processedMessage.attachments,
+        channel: processedMessage.channel,
+        trustedWorkspace,
+        signal: controller.signal,
+        inputMetadata: {
+          surfaceType: message.sessionKey.platform,
+          chatId: message.sessionKey.chatId,
+          userId: message.sender.id,
+          origin: message.text.startsWith("/") ? "command" : "message"
+        },
+        onEvent: async (event) => {
+          progressCount += 1;
+          await this.#deliverProgress(adapter, normalizedSessionKey, event);
+        }
+      });
+
+      const pendingApproval = firstPendingApproval(response.toolExecutions, message, sessionId);
+      if (pendingApproval !== undefined) {
+        this.#pendingApprovals.set(activeTurnKey, pendingApproval);
+      } else {
+        this.#pendingApprovals.delete(activeTurnKey);
+      }
+
       await this.#deliverText(adapter, normalizedSessionKey, response.text);
       await adapter.send?.({
         conversationId: message.sessionKey.chatId,
@@ -360,7 +416,7 @@ export class ChannelGateway {
 
       if (pendingApproval !== undefined) {
         const approvalPrompt = renderApprovalPrompt(pendingApproval, adapter.kind === "telegram" ? "html" : "plain");
-        await this.#deliverText(adapter, 
+        await this.#deliverText(adapter,
           normalizedSessionKey,
           approvalPrompt,
           adapter.kind === "telegram"
@@ -377,15 +433,102 @@ export class ChannelGateway {
         });
       }
 
-      return {
-        sessionId,
-        replyText: response.text,
-        artifactCount: response.artifacts.length,
-        progressCount
-      };
+      return { sessionId, replyText: response.text, artifactCount: response.artifacts.length, progressCount };
+    } catch (turnErr) {
+      // Classify abort vs runtime error
+      const isAbort = controller.signal.aborted || this.#isAbortError(turnErr);
+
+      if (!isAbort && this.#runtimeCache !== undefined && runtime !== undefined) {
+        try {
+          await this.#runtimeCache.suspend(sessionId, "runtime-error");
+        } catch (suspendErr) {
+          this.#logWarning?.(
+            `Runtime suspend failed for ${sessionId}: ${suspendErr instanceof Error ? suspendErr.message : String(suspendErr)}`
+          );
+        }
+      }
+
+      const errorText = turnErr instanceof Error
+        ? `EstaCoda encountered an error: ${turnErr.message}`
+        : "EstaCoda encountered an unexpected error.";
+
+      try {
+        await this.#deliverText(adapter, normalizedSessionKey, errorText);
+      } catch {
+        // Delivery failure is secondary; already in error path
+      }
+
+      return { sessionId, replyText: errorText, artifactCount: 0, progressCount: 0 };
     } finally {
-      await runtime.dispose();
+      // End the active turn — always, every path
+      if (this.#activeTurnRegistry !== undefined && turnId !== undefined) {
+        this.#activeTurnRegistry.endTurn(activeTurnKey, turnId);
+      } else {
+        if (this.#activeTurns.get(activeTurnKey) === controller) {
+          this.#activeTurns.delete(activeTurnKey);
+        }
+      }
+
+      // Release runtime only if it was successfully acquired
+      if (runtime !== undefined) {
+        try {
+          await runtime.dispose();
+        } catch (disposeErr) {
+          this.#logWarning?.(
+            `Runtime dispose failed: ${disposeErr instanceof Error ? disposeErr.message : String(disposeErr)}`
+          );
+        }
+      }
     }
+  }
+
+  async #acquireRuntime(
+    sessionId: string,
+    securityPolicy: SecurityPolicy,
+    message: ChannelMessage,
+    normalizedSessionKey: ChannelSessionKey
+  ): Promise<Runtime> {
+    if (this.#runtimeCache !== undefined && this.#runtimeFingerprint !== undefined) {
+      return this.#runtimeCache.get(
+        sessionId,
+        this.#runtimeFingerprint,
+        securityPolicy,
+        {
+          surfaceType: message.sessionKey.platform,
+          chatId: message.sessionKey.chatId,
+          userId: message.sender.id,
+          sessionId,
+          origin: message.text.startsWith("/") ? "command" : "message"
+        }
+      );
+    }
+
+    if (this.#runtimeCache !== undefined && this.#runtimeFingerprint === undefined) {
+      this.#logWarning?.("runtimeCache provided without runtimeFingerprint; falling back to runtimeForSession");
+    }
+
+    return this.#runtimeForSession({
+      sessionId,
+      sessionKey: normalizedSessionKey,
+      channel: message.channel,
+      securityPolicy,
+      metadata: {
+        surfaceType: message.sessionKey.platform,
+        chatId: message.sessionKey.chatId,
+        userId: message.sender.id,
+        sessionId,
+        origin: message.text.startsWith("/") ? "command" : "message"
+      }
+    });
+  }
+
+  #isAbortError(err: unknown): boolean {
+    if (err instanceof Error) {
+      return err.name === "AbortError" ||
+             err.message.includes("aborted") ||
+             err.message.includes("cancel");
+    }
+    return false;
   }
 
   async #handleCommand(message: ChannelMessage, adapter: ChannelAdapter): Promise<ChannelGatewayResult | undefined> {
@@ -564,6 +707,16 @@ export class ChannelGateway {
 
       // After detach, get the new independent session id
       const newSessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
+      const key = stableSessionKey(message.sessionKey, this.#sessionPolicy);
+      const previousSessionId = this.#sessionIdByTurnKey.get(key);
+      if (previousSessionId !== undefined && previousSessionId !== newSessionId) {
+        try {
+          await this.#runtimeCache?.invalidate(previousSessionId);
+        } catch (err) {
+          this.#logWarning?.(`Session detach cache invalidate failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      this.#sessionIdByTurnKey.set(key, newSessionId);
       const text = [
         "Detached this chat from the linked session.",
         `Previous session: ${pointer.sessionId}`,
@@ -841,10 +994,19 @@ export class ChannelGateway {
     }
 
     if (command === "/new" || command === "/reset") {
-      const sessionId = await this.#resetSession(message.sessionKey, message.receivedAt);
       const key = stableSessionKey(message.sessionKey, this.#sessionPolicy);
+      const previousSessionId = this.#sessionIdByTurnKey.get(key);
+      if (previousSessionId !== undefined) {
+        try {
+          await this.#runtimeCache?.invalidate(previousSessionId);
+        } catch (err) {
+          this.#logWarning?.(`Session reset cache invalidate failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      this.#sessionIdByTurnKey.delete(key);
       this.#pendingApprovals.delete(key);
       this.#approvalGrants.delete(key);
+      const sessionId = await this.#resetSession(message.sessionKey, message.receivedAt);
       const text = [
         "Started a fresh EstaCoda session for this chat.",
         `Session: ${sessionId}`
@@ -946,6 +1108,15 @@ export class ChannelGateway {
 
         await this.#sessionStore.setSessionId?.(message.sessionKey, targetSessionId, { receivedAt: message.receivedAt });
         const key = stableSessionKey(message.sessionKey, this.#sessionPolicy);
+        const previousSessionId = this.#sessionIdByTurnKey.get(key);
+        if (previousSessionId !== undefined && previousSessionId !== targetSessionId) {
+          try {
+            await this.#runtimeCache?.invalidate(previousSessionId);
+          } catch (err) {
+            this.#logWarning?.(`Session switch cache invalidate failed: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+        this.#sessionIdByTurnKey.set(key, targetSessionId);
         this.#pendingApprovals.delete(key);
         this.#approvalGrants.delete(key);
         const text = [
@@ -1048,18 +1219,22 @@ export class ChannelGateway {
 
     if (command === "/stop") {
       const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
-      const activeTurn = this.#activeTurns.get(stableSessionKey(message.sessionKey, this.#sessionPolicy));
-      if (activeTurn !== undefined) {
-        activeTurn.abort("channel-stop");
-        const text = "Cancelled the active EstaCoda turn for this chat.";
-        await this.#deliverText(adapter, message.sessionKey, text);
-
-        return {
-          sessionId,
-          replyText: text,
-          artifactCount: 0,
-          progressCount: 0
-        };
+      const key = stableSessionKey(message.sessionKey, this.#sessionPolicy);
+      if (this.#activeTurnRegistry !== undefined) {
+        const result = this.#activeTurnRegistry.abortTurn(key, "channel-stop");
+        if (result.ok) {
+          const text = "Cancelled the active EstaCoda turn for this chat.";
+          await this.#deliverText(adapter, message.sessionKey, text);
+          return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+        }
+      } else {
+        const activeTurn = this.#activeTurns.get(key);
+        if (activeTurn !== undefined) {
+          activeTurn.abort("channel-stop");
+          const text = "Cancelled the active EstaCoda turn for this chat.";
+          await this.#deliverText(adapter, message.sessionKey, text);
+          return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+        }
       }
 
       const text = "Stopping the EstaCoda gateway after this update.";

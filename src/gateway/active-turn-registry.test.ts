@@ -476,8 +476,75 @@ describe("ActiveTurnRegistry", () => {
     expect(stuck.length).toBe(2);
   });
 
-  // Bonus: getRepeatStuckTurns returns empty when no turns are active
+  // Bonus: getRepeatStuckTurns returns empty when registry is empty
   it("getRepeatStuckTurns returns empty when registry is empty", () => {
     expect(registry.getRepeatStuckTurns()).toHaveLength(0);
+  });
+
+  // Stage 5D extension tests
+  it("startTurn accepts optional metadata", () => {
+    const result = registry.startTurn("k1", new AbortController(), { sessionId: "sess-1" });
+    expect(result.ok).toBe(true);
+    const turn = registry.getTurn("k1");
+    expect(turn?.metadata).toEqual({ sessionId: "sess-1" });
+  });
+
+  it("updateTurn merges metadata for existing turn", () => {
+    registry.startTurn("k1", new AbortController(), { sessionId: "sess-1" });
+    const turnId = registry.getTurn("k1")!.turnId;
+    registry.updateTurn("k1", turnId, { extra: "value" });
+    expect(registry.getTurn("k1")?.metadata).toEqual({ sessionId: "sess-1", extra: "value" });
+  });
+
+  it("updateTurn no-op for missing turn", () => {
+    registry.updateTurn("missing", "turn-1", { sessionId: "sess-1" });
+    expect(registry.getTurn("missing")).toBeUndefined();
+    expect(warnings).toHaveLength(0);
+  });
+
+  it("updateTurn warns on turnId mismatch", () => {
+    registry.startTurn("k1", new AbortController(), { sessionId: "sess-1" });
+    registry.updateTurn("k1", "wrong-id", { extra: "value" });
+    expect(warnings.length).toBe(1);
+    expect(warnings[0]).toContain("updateTurn turnId mismatch");
+    expect(registry.getTurn("k1")?.metadata).toEqual({ sessionId: "sess-1" });
+  });
+
+  it("metadata preserved in listStuckTurns result", () => {
+    registry.startTurn("k1", new AbortController(), { sessionId: "sess-1" });
+    vi.advanceTimersByTime(300_001);
+    const stuck = registry.listStuckTurns();
+    expect(stuck).toHaveLength(1);
+    expect(stuck[0].metadata).toEqual({ sessionId: "sess-1" });
+  });
+
+  // consumeBusyAck atomic tests
+  it("consumeBusyAck first call returns true", () => {
+    registry.startTurn("k1", new AbortController());
+    expect(registry.consumeBusyAck("k1")).toBe(true);
+  });
+
+  it("consumeBusyAck second call within cooldown returns false", () => {
+    registry.startTurn("k1", new AbortController());
+    expect(registry.consumeBusyAck("k1")).toBe(true);
+    expect(registry.consumeBusyAck("k1")).toBe(false);
+  });
+
+  it("consumeBusyAck after cooldown returns true", () => {
+    registry.startTurn("k1", new AbortController());
+    expect(registry.consumeBusyAck("k1")).toBe(true);
+    vi.advanceTimersByTime(30_001);
+    expect(registry.consumeBusyAck("k1")).toBe(true);
+  });
+
+  it("consumeBusyAck returns false when key is not busy", () => {
+    expect(registry.consumeBusyAck("unknown")).toBe(false);
+  });
+
+  it("consumeBusyAck resets after endTurn", () => {
+    const result = registry.startTurn("k1", new AbortController());
+    expect(registry.consumeBusyAck("k1")).toBe(true);
+    registry.endTurn("k1", result.ok ? result.turnId : "");
+    expect(registry.consumeBusyAck("k1")).toBe(false);
   });
 });
