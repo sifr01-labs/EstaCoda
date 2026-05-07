@@ -1,14 +1,18 @@
-import { mkdir } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
+import { mkdir, unlink } from "node:fs/promises";
+import { randomUUID, createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { loadRuntimeConfig, consumeTelegramPairingCode } from "../config/runtime-config.js";
+import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import type { ChannelAdapter, ChannelAuthPolicy, ChannelKind } from "../contracts/channel.js";
+import type { SecurityPolicy } from "../contracts/security.js";
 import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
 import { CronStore } from "../cron/cron-store.js";
 import { CronExecutionStore } from "../cron/cron-execution-store.js";
 import { createFileCronJobLock } from "../cron/cron-lock.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
-import { createRuntime } from "../runtime/create-runtime.js";
+import { createRuntime, type Runtime } from "../runtime/create-runtime.js";
+import { RuntimeCache } from "../runtime/runtime-cache.js";
+import { computeRuntimeFingerprint, stableJsonHash, type RuntimeFingerprint } from "../runtime/runtime-fingerprint.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { kemetBlueTheme } from "../theme/kemet-blue.js";
 import { ChannelApprovalStore } from "../channels/channel-approval-store.js";
@@ -41,6 +45,12 @@ import { getPackageVersion } from "../cli/version-command.js";
 import type { GatewayRunOptions, GatewayRunResult } from "../channels/gateway-runner.js";
 import { AdapterResilienceSupervisor } from "./adapter-resilience.js";
 import { writeAdapterRuntimeState, RUNTIME_STATE_HEARTBEAT_MS } from "./adapter-runtime-state.js";
+import {
+  runtimeCacheStatePath,
+  writeRuntimeCacheState,
+  type RuntimeCacheState,
+} from "./runtime-cache-state.js";
+import { ActiveTurnRegistry } from "./active-turn-registry.js";
 
 export type { GatewayRunOptions, GatewayRunResult };
 
@@ -66,7 +76,7 @@ type AcquiredIdentityLock = {
   hash: string;
 };
 
-type SupervisorInternalState = {
+export type SupervisorInternalState = {
   homeDir: string;
   gatewayLockAcquired: boolean;
   acquiredIdentityLocks: AcquiredIdentityLock[];
@@ -77,6 +87,17 @@ type SupervisorInternalState = {
   shutdownStarted: boolean;
   running: boolean;
   exit: (code: number) => void;
+  activeTurnRegistry?: ActiveTurnRegistry;
+  runtimeCache?: RuntimeCache;
+  runtimeFingerprint?: RuntimeFingerprint;
+  pruneTimer?: ReturnType<typeof setInterval>;
+  stuckScanTimer?: ReturnType<typeof setInterval>;
+  lastRuntimeCacheStateWrite: number;
+  runtimeCacheStatePath: string;
+  supervisorStartedAt: string;
+  stuckAbortSent: Set<string>;
+  stuckEventRecorded: Set<string>;
+  stuckEventsBySession: Map<string, number[]>;
 };
 
 function logInfo(message: string): void {
@@ -87,11 +108,15 @@ function logWarning(message: string): void {
   console.warn(message);
 }
 
+function logDebug(message: string): void {
+  console.debug(message);
+}
+
 async function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function createInitialState(homeDir: string, exitFn: (code: number) => void): SupervisorInternalState {
+function createInitialState(homeDir: string, exitFn: (code: number) => void, supervisorStartedAt: string): SupervisorInternalState {
   return {
     homeDir,
     gatewayLockAcquired: false,
@@ -103,21 +128,58 @@ function createInitialState(homeDir: string, exitFn: (code: number) => void): Su
     shutdownStarted: false,
     running: true,
     exit: exitFn,
+    activeTurnRegistry: undefined,
+    runtimeCache: undefined,
+    runtimeFingerprint: undefined,
+    pruneTimer: undefined,
+    stuckScanTimer: undefined,
+    lastRuntimeCacheStateWrite: 0,
+    runtimeCacheStatePath: runtimeCacheStatePath(homeDir),
+    supervisorStartedAt,
+    stuckAbortSent: new Set(),
+    stuckEventRecorded: new Set(),
+    stuckEventsBySession: new Map(),
   };
 }
 
 async function cleanupSupervisorStartupResources(state: SupervisorInternalState): Promise<void> {
-  // 1. Stop ChannelGateway if it was started
+  // 1. Clear timers
+  if (state.pruneTimer !== undefined) {
+    clearInterval(state.pruneTimer);
+    state.pruneTimer = undefined;
+  }
+  if (state.stuckScanTimer !== undefined) {
+    clearInterval(state.stuckScanTimer);
+    state.stuckScanTimer = undefined;
+  }
+
+  // 2. Stop ChannelGateway if it was started
   if (state.channelGateway !== undefined) {
     try { await state.channelGateway.stop(); } catch { /* ignore */ }
   }
 
-  // 2. Close session DB if opened
+  // 3. Final runtime-cache-state write (best-effort)
+  if (state.runtimeCache !== undefined && state.runtimeFingerprint !== undefined && state.activeTurnRegistry !== undefined) {
+    try {
+      const stateObject = buildRuntimeCacheState(state);
+      await writeRuntimeCacheState(state.runtimeCacheStatePath, stateObject);
+    } catch (err) {
+      logWarning(`Final runtime-cache-state write failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  // 4. Dispose cached runtimes
+  if (state.runtimeCache !== undefined) {
+    try { await state.runtimeCache.disposeAll(); } catch { /* ignore */ }
+    state.runtimeCache = undefined;
+  }
+
+  // 5. Close session DB if opened
   if (state.sessionDb !== undefined) {
     try { state.sessionDb.close(); } catch { /* ignore */ }
   }
 
-  // 3. Release identity locks in reverse acquisition order
+  // 6. Release identity locks in reverse acquisition order
   for (let i = state.acquiredIdentityLocks.length - 1; i >= 0; i--) {
     const { kind, hash } = state.acquiredIdentityLocks[i];
     try {
@@ -128,16 +190,20 @@ async function cleanupSupervisorStartupResources(state: SupervisorInternalState)
     } catch { /* ignore */ }
   }
 
-  // 4. Remove PID and state files
+  // 7. Remove PID, state, and adapter runtime state files (runtime-cache-state.json is KEPT)
   try { await removeGatewayPid(state.homeDir); } catch { /* ignore */ }
   try { await removeGatewayState(state.homeDir); } catch { /* ignore */ }
+  try {
+    const adapterRuntimeStatePath = join(state.homeDir, ".estacoda", "gateway", "adapter-runtime-state.json");
+    await unlink(adapterRuntimeStatePath);
+  } catch { /* ignore */ }
 
-  // 5. Release gateway lock ONLY if we acquired it
+  // 8. Release gateway lock ONLY if we acquired it
   if (state.gatewayLockAcquired) {
     try { await releaseGatewayLock(state.homeDir); } catch { /* ignore */ }
   }
 
-  // 6. Remove signal handlers so they do not accumulate across tests or invocations
+  // 9. Remove signal handlers so they do not accumulate across tests or invocations
   if (state.onSigint !== undefined) {
     try { process.off("SIGINT", state.onSigint); } catch { /* ignore */ }
   }
@@ -147,12 +213,29 @@ async function cleanupSupervisorStartupResources(state: SupervisorInternalState)
 }
 
 export async function runGatewaySupervisor(options: GatewaySupervisorOptions): Promise<GatewayRunResult> {
+  const startedAt = new Date().toISOString();
   const config = await loadRuntimeConfig(options);
   const version = await getPackageVersion();
   const homeDir = options.homeDir ?? process.env.HOME ?? process.cwd();
   const stateRoot = join(homeDir, ".estacoda");
+  const trustStorePath = join(homeDir, ".estacoda", "trust.json");
 
-  const state = createInitialState(homeDir, options.factories?.exit ?? ((code: number) => process.exit(code)));
+  const runtimeFingerprint = computeRuntimeFingerprint(config, {
+    profileId: "default",
+    workspaceRoot: options.workspaceRoot,
+    homeDir,
+    localSkillsRoot: join(homeDir, ".estacoda", "skills"),
+    trustStorePath,
+    userConfigPath: options.userConfigPath,
+    projectConfigPath: options.projectConfigPath,
+    disabledToolsets: [],
+    disableCronTools: false,
+    approvalControllerPresent: false,
+    explicitSecurityPolicyPresent: true,
+    currentPlatform: process.platform,
+  });
+
+  const state = createInitialState(homeDir, options.factories?.exit ?? ((code: number) => process.exit(code)), startedAt);
 
   // 1. Stale state cleanup
   const staleCleanup = await cleanupStaleGatewayState(homeDir);
@@ -173,7 +256,6 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
   state.gatewayLockAcquired = true;
 
   // 3. PID / state write
-  const startedAt = new Date().toISOString();
   await writeGatewayPid(homeDir, { pid: process.pid, startedAt, version });
   await writeGatewayState(homeDir, { lifecycle: "running", startedAt, pid: process.pid, version });
 
@@ -196,6 +278,49 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
   state.onSigterm = () => shutdown("SIGTERM");
   process.on("SIGINT", state.onSigint);
   process.on("SIGTERM", state.onSigterm);
+
+  const createGatewayRuntime = (
+    latestConfig: LoadedRuntimeConfig,
+    db: SQLiteSessionDB,
+    hd: string,
+    tsp: string,
+    input: {
+      sessionId: string;
+      securityPolicy: SecurityPolicy;
+      metadata?: Record<string, unknown>;
+    }
+  ): Promise<Runtime> => {
+    return createRuntime({
+      theme: kemetBlueTheme,
+      model: latestConfig.model,
+      workspaceRoot: options.workspaceRoot,
+      homeDir: hd,
+      userConfigPath: options.userConfigPath,
+      projectConfigPath: options.projectConfigPath,
+      sessionId: input.sessionId,
+      profileId: "default",
+      sessionDb: db,
+      sessionMetadata: input.metadata,
+      externalSkillRoots: latestConfig.skills.externalDirs,
+      skillAutonomy: latestConfig.skills.autonomy,
+      skillConfig: latestConfig.skills.config,
+      ui: latestConfig.ui,
+      agentProfile: latestConfig.profile,
+      providerRegistry: latestConfig.providerRegistry,
+      credentialPools: latestConfig.credentialPools,
+      auxiliaryProviders: latestConfig.auxiliaryProviders,
+      mcpServers: latestConfig.mcp.servers,
+      securityPolicy: input.securityPolicy,
+      browser: latestConfig.browser,
+      imageGen: latestConfig.imageGen,
+      tts: latestConfig.tts,
+      stt: latestConfig.stt,
+      telegramReady: latestConfig.channels.telegram.ready,
+      enableWebNetwork: latestConfig.web.enableNetwork,
+      webMaxContentChars: latestConfig.web.maxContentChars,
+      trustStorePath: tsp,
+    });
+  };
 
   try {
     // 5. Adapter capability scan
@@ -260,6 +385,24 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     const sessionDb = new SQLiteSessionDB({ path: sessionDbPath });
     state.sessionDb = sessionDb;
 
+    const activeTurnRegistry = new ActiveTurnRegistry({
+      stuckThresholdMs: 300_000,
+      maxStuckChecks: 3,
+      busyAckCooldownMs: 30_000,
+      historySize: 50,
+    });
+    state.activeTurnRegistry = activeTurnRegistry;
+
+    const runtimeCache = new RuntimeCache({
+      createRuntime: (input) =>
+        createGatewayRuntime(config, sessionDb, homeDir, trustStorePath, input),
+      maxEntries: 50,
+      idleTtlMs: 1_800_000,
+      logWarning,
+    });
+    state.runtimeCache = runtimeCache;
+    state.runtimeFingerprint = runtimeFingerprint;
+
     const cronStore = new CronStore({ homeDir });
     const cronExecutionStore = new CronExecutionStore(sessionDb.db);
     const cronJobLock = createFileCronJobLock({
@@ -274,8 +417,8 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     // 8. Adapter instantiation
     const adapters: ChannelAdapter[] = [];
     const router = options.factories?.createDeliveryRouter
-      ? options.factories.createDeliveryRouter({ homeDir: options.homeDir })
-      : new DeliveryRouter({ homeDir: options.homeDir });
+      ? options.factories.createDeliveryRouter({ homeDir })
+      : new DeliveryRouter({ homeDir });
 
     for (const cap of configured) {
       let adapter: ChannelAdapter;
@@ -496,7 +639,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           pair: async (message) => {
             const result = await consumeTelegramPairingCode({
               workspaceRoot: options.workspaceRoot,
-              homeDir: options.homeDir,
+              homeDir,
               userConfigPath: options.userConfigPath,
               projectConfigPath: options.projectConfigPath,
               code: message.text,
@@ -506,36 +649,22 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
             if (!result.paired) return undefined;
             return "Telegram paired. This chat can now talk to EstaCoda.";
           },
+          securityMode: config.security.approvalMode,
+          securityAssessor: {
+            ...config.security.assessor,
+            providerExecutor: new ProviderExecutor({
+              registry: config.providerRegistry,
+              credentialPools: config.credentialPools,
+            }),
+          },
+          activeTurnRegistry,
+          runtimeCache,
+          runtimeFingerprint,
           runtimeForSession: async ({ sessionId, securityPolicy, metadata }) => {
-            const latestConfig = await loadRuntimeConfig(options);
-            return createRuntime({
-              theme: kemetBlueTheme,
-              model: latestConfig.model,
-              workspaceRoot: options.workspaceRoot,
-              homeDir: options.homeDir,
-              userConfigPath: options.userConfigPath,
-              projectConfigPath: options.projectConfigPath,
+            return createGatewayRuntime(config, sessionDb, homeDir, trustStorePath, {
               sessionId,
-              profileId: "default",
-              sessionDb,
-              sessionMetadata: metadata,
-              externalSkillRoots: latestConfig.skills.externalDirs,
-              skillAutonomy: latestConfig.skills.autonomy,
-              skillConfig: latestConfig.skills.config,
-              ui: latestConfig.ui,
-              agentProfile: latestConfig.profile,
-              providerRegistry: latestConfig.providerRegistry,
-              credentialPools: latestConfig.credentialPools,
-              auxiliaryProviders: latestConfig.auxiliaryProviders,
-              mcpServers: latestConfig.mcp.servers,
               securityPolicy,
-              browser: latestConfig.browser,
-              imageGen: latestConfig.imageGen,
-              tts: latestConfig.tts,
-              stt: latestConfig.stt,
-              telegramReady: latestConfig.channels.telegram.ready,
-              enableWebNetwork: latestConfig.web.enableNetwork,
-              webMaxContentChars: latestConfig.web.maxContentChars,
+              metadata,
             });
           },
         })
@@ -556,7 +685,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           pair: async (message) => {
             const result = await consumeTelegramPairingCode({
               workspaceRoot: options.workspaceRoot,
-              homeDir: options.homeDir,
+              homeDir,
               userConfigPath: options.userConfigPath,
               projectConfigPath: options.projectConfigPath,
               code: message.text,
@@ -566,36 +695,22 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
             if (!result.paired) return undefined;
             return "Telegram paired. This chat can now talk to EstaCoda.";
           },
+          securityMode: config.security.approvalMode,
+          securityAssessor: {
+            ...config.security.assessor,
+            providerExecutor: new ProviderExecutor({
+              registry: config.providerRegistry,
+              credentialPools: config.credentialPools,
+            }),
+          },
+          activeTurnRegistry,
+          runtimeCache,
+          runtimeFingerprint,
           runtimeForSession: async ({ sessionId, securityPolicy, metadata }) => {
-            const latestConfig = await loadRuntimeConfig(options);
-            return createRuntime({
-              theme: kemetBlueTheme,
-              model: latestConfig.model,
-              workspaceRoot: options.workspaceRoot,
-              homeDir: options.homeDir,
-              userConfigPath: options.userConfigPath,
-              projectConfigPath: options.projectConfigPath,
+            return createGatewayRuntime(config, sessionDb, homeDir, trustStorePath, {
               sessionId,
-              profileId: "default",
-              sessionDb,
-              sessionMetadata: metadata,
-              externalSkillRoots: latestConfig.skills.externalDirs,
-              skillAutonomy: latestConfig.skills.autonomy,
-              skillConfig: latestConfig.skills.config,
-              ui: latestConfig.ui,
-              agentProfile: latestConfig.profile,
-              providerRegistry: latestConfig.providerRegistry,
-              credentialPools: latestConfig.credentialPools,
-              auxiliaryProviders: latestConfig.auxiliaryProviders,
-              mcpServers: latestConfig.mcp.servers,
               securityPolicy,
-              browser: latestConfig.browser,
-              imageGen: latestConfig.imageGen,
-              tts: latestConfig.tts,
-              stt: latestConfig.stt,
-              telegramReady: latestConfig.channels.telegram.ready,
-              enableWebNetwork: latestConfig.web.enableNetwork,
-              webMaxContentChars: latestConfig.web.maxContentChars,
+              metadata,
             });
           },
         });
@@ -608,6 +723,27 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     if (configured.length > 0) {
       logInfo(`Started ${configured.length} adapter(s): ${configured.map((c) => c.kind).join(", ")}`);
     }
+
+    // 12a. Start background timers
+    const PRUNE_INTERVAL_MS = 60_000;
+    const STUCK_SCAN_INTERVAL_MS = 60_000;
+    const RUNTIME_CACHE_STATE_HEARTBEAT_MS = 60_000;
+
+    const pruneGuard = { running: false };
+    state.pruneTimer = setInterval(() => {
+      runPrune(state, pruneGuard).catch((err) => {
+        logWarning(`Prune timer error: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    }, PRUNE_INTERVAL_MS);
+
+    const stuckScanGuard = { running: false };
+    state.stuckScanTimer = setInterval(() => {
+      runStuckScanGuarded(state, stuckScanGuard).catch((err) => {
+        logWarning(`Stuck scan timer error: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    }, STUCK_SCAN_INTERVAL_MS);
+
+    const runtimeCacheStateWriteGuard = { running: false };
 
     // 13. Main loop
     let polls = 0;
@@ -651,7 +787,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
               theme: kemetBlueTheme,
               model: latestConfig.model,
               workspaceRoot: options.workspaceRoot,
-              homeDir: options.homeDir,
+              homeDir,
               userConfigPath: options.userConfigPath,
               projectConfigPath: options.projectConfigPath,
               sessionId: `cron-${job.id}-${randomUUID()}`,
@@ -706,6 +842,10 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
         await writeRuntimeState();
       }
 
+      if (now - state.lastRuntimeCacheStateWrite >= RUNTIME_CACHE_STATE_HEARTBEAT_MS) {
+        await runRuntimeCacheStateHeartbeat(state, runtimeCacheStateWriteGuard);
+      }
+
       polls += 1;
 
       if (options.once === true) {
@@ -740,4 +880,154 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       processed: 0,
     };
   }
+}
+
+const STUCK_EVENT_WINDOW_MS = 600_000;
+const STUCK_EVENTS_BEFORE_SUSPEND = 3;
+
+export async function runPrune(state: SupervisorInternalState, guard: { running: boolean }): Promise<void> {
+  if (guard.running) {
+    logDebug("Prune skipped: previous run still active");
+    return;
+  }
+  guard.running = true;
+  try {
+    await state.runtimeCache!.prune();
+  } catch (err) {
+    logWarning(`Runtime cache prune error: ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    guard.running = false;
+  }
+}
+
+export async function runStuckScanGuarded(state: SupervisorInternalState, guard: { running: boolean }): Promise<void> {
+  if (guard.running) {
+    logDebug("Stuck scan skipped: previous run still active");
+    return;
+  }
+  guard.running = true;
+  try {
+    await runStuckScan(state);
+  } catch (err) {
+    logWarning(`Stuck scan error: ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    guard.running = false;
+  }
+}
+
+export async function runStuckScan(state: SupervisorInternalState): Promise<void> {
+  if (state.activeTurnRegistry === undefined || state.runtimeCache === undefined) return;
+
+  const now = Date.now();
+  const stuck = state.activeTurnRegistry.listStuckTurns();
+
+  for (const turn of stuck) {
+    // 1. One abort per stuck turn
+    if (!state.stuckAbortSent.has(turn.turnId)) {
+      state.activeTurnRegistry.abortTurn(turn.key, "stuck-loop");
+      state.stuckAbortSent.add(turn.turnId);
+    }
+
+    // 2. Record stuck event only once per unique turnId
+    const sessionId = turn.metadata?.sessionId as string | undefined;
+    if (sessionId !== undefined && !state.stuckEventRecorded.has(turn.turnId)) {
+      state.stuckEventRecorded.add(turn.turnId);
+      const events = state.stuckEventsBySession.get(sessionId) ?? [];
+      const pruned = events.filter((t) => now - t < STUCK_EVENT_WINDOW_MS);
+      pruned.push(now);
+      state.stuckEventsBySession.set(sessionId, pruned);
+
+      // 3. Suspend if threshold reached
+      if (pruned.length >= STUCK_EVENTS_BEFORE_SUSPEND) {
+        state.runtimeCache.suspend(sessionId, "stuck-loop").catch((err) => {
+          logWarning(`Suspend failed for ${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+        });
+      }
+    }
+  }
+
+  // 4. Cleanup old session entries
+  for (const [sessionId, events] of state.stuckEventsBySession) {
+    const pruned = events.filter((t) => now - t < STUCK_EVENT_WINDOW_MS);
+    if (pruned.length === 0) {
+      state.stuckEventsBySession.delete(sessionId);
+    } else {
+      state.stuckEventsBySession.set(sessionId, pruned);
+    }
+  }
+
+  // 5. Cleanup old abort-sent / event-recorded entries for ended turns
+  const activeTurnIds = new Set(stuck.map((t) => t.turnId));
+  for (const turnId of Array.from(state.stuckAbortSent)) {
+    if (!activeTurnIds.has(turnId)) {
+      state.stuckAbortSent.delete(turnId);
+      state.stuckEventRecorded.delete(turnId);
+    }
+  }
+}
+
+export async function runRuntimeCacheStateHeartbeat(state: SupervisorInternalState, guard: { running: boolean }): Promise<void> {
+  if (guard.running) {
+    logDebug("Runtime cache state write skipped: previous write still active");
+    return;
+  }
+  guard.running = true;
+  try {
+    const stateObject = buildRuntimeCacheState(state);
+    await writeRuntimeCacheState(state.runtimeCacheStatePath, stateObject);
+    state.lastRuntimeCacheStateWrite = Date.now();
+  } catch (err) {
+    logWarning(`Runtime cache state write error: ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    guard.running = false;
+  }
+}
+
+export function buildRuntimeCacheState(state: SupervisorInternalState): RuntimeCacheState {
+  const now = new Date();
+  const cacheStats = state.runtimeCache!.stats();
+  const suspendedSummary = state.runtimeCache!.suspendedSummary();
+  const registryStats = state.activeTurnRegistry!.stats();
+  const stuckHistory = state.activeTurnRegistry!.stuckTurnHistory();
+
+  const MAX_SUSPENDED = 100;
+  const MAX_HISTORY = 100;
+
+  return {
+    version: 1,
+    writtenAt: now.toISOString(),
+    supervisorPid: process.pid,
+    supervisorStartedAt: state.supervisorStartedAt,
+    cacheStats: {
+      totalEntries: cacheStats.totalEntries,
+      activeBorrows: cacheStats.activeBorrows,
+      suspendedEntries: cacheStats.suspendedEntries,
+      totalCreated: cacheStats.totalCreated,
+      totalReused: cacheStats.totalReused,
+      totalDisposed: cacheStats.totalDisposed,
+      totalInvalidated: cacheStats.totalInvalidated,
+    },
+    suspendedSummary: suspendedSummary.slice(0, MAX_SUSPENDED).map((e) => ({
+      sessionId: e.sessionId,
+      reason: e.reason,
+      suspendedAt: e.suspendedAt,
+    })),
+    registryStats: {
+      activeTurnCount: registryStats.activeTurnCount,
+      totalStarted: registryStats.totalStarted,
+      totalEnded: registryStats.totalEnded,
+      totalAborted: registryStats.totalAborted,
+      stuckTurnCount: registryStats.stuckTurnCount,
+      repeatStuckCount: registryStats.repeatStuckCount,
+    },
+    stuckTurnHistory: stuckHistory.slice(-MAX_HISTORY).map((h) => ({
+      turnId: h.turnId,
+      keyHash: createHash("sha256").update(h.key).digest("hex").slice(0, 16),
+      startedAt: new Date(h.startedAt).toISOString(),
+      endedAt: new Date(h.endedAt).toISOString(),
+      durationMs: h.durationMs,
+      wasAborted: h.wasAborted,
+    })),
+    fingerprintHash: stableJsonHash(state.runtimeFingerprint!),
+  };
 }

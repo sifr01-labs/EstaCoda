@@ -1,12 +1,23 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runGatewaySupervisor } from "./supervisor.js";
+import {
+  runGatewaySupervisor,
+  runPrune,
+  runStuckScan,
+  runStuckScanGuarded,
+  runRuntimeCacheStateHeartbeat,
+  buildRuntimeCacheState,
+  type SupervisorInternalState,
+} from "./supervisor.js";
 import { readGatewayPid } from "./pid-file.js";
 import { readGatewayState } from "./supervisor-state.js";
 import { isAdapterIdentityLocked } from "./identity-lock.js";
 import { readGatewayLockContent } from "./gateway-lock.js";
+import { ActiveTurnRegistry } from "./active-turn-registry.js";
+import { RuntimeCache } from "../runtime/runtime-cache.js";
+import { runtimeCacheStatePath, readRuntimeCacheState } from "./runtime-cache-state.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-supervisor-test-"));
@@ -470,5 +481,434 @@ describe("runGatewaySupervisor", () => {
     expect(result.ok).toBe(true);
     expect(result.processed).toBe(3);
     expect(pollOnceCalls).toBe(1);
+  });
+
+  it("ChannelGateway receives runtimeCache, activeTurnRegistry, runtimeFingerprint, securityMode, securityAssessor", async () => {
+    let capturedOpts: any;
+    const gateway = { start: async () => {}, stop: async () => {} };
+
+    await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        createChannelGateway: (opts: any) => {
+          capturedOpts = opts;
+          return gateway as any;
+        },
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+      },
+    });
+
+    expect(capturedOpts).toBeDefined();
+    expect(capturedOpts.runtimeCache).toBeInstanceOf(RuntimeCache);
+    expect(capturedOpts.activeTurnRegistry).toBeInstanceOf(ActiveTurnRegistry);
+    expect(capturedOpts.runtimeFingerprint).toBeDefined();
+    expect(typeof capturedOpts.runtimeForSession).toBe("function");
+    expect(capturedOpts.securityMode).toBe("adaptive");
+    expect(capturedOpts.securityAssessor).toBeDefined();
+    expect(capturedOpts.securityAssessor.providerExecutor).toBeDefined();
+  });
+
+  it("runtimeForSession is wired as a function in ChannelGateway options", async () => {
+    let capturedOpts: any;
+    const gateway = { start: async () => {}, stop: async () => {} };
+
+    await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        createChannelGateway: (opts: any) => {
+          capturedOpts = opts;
+          return gateway as any;
+        },
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+      },
+    });
+
+    expect(typeof capturedOpts.runtimeForSession).toBe("function");
+  });
+
+  it("retains runtime-cache-state.json after shutdown in once mode", async () => {
+    await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        createChannelGateway: () => fakeChannelGateway() as any,
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+      },
+    });
+
+    const path = runtimeCacheStatePath(tmpDir);
+    const content = await readFile(path, "utf8").catch(() => null);
+    expect(content).not.toBeNull();
+    const parsed = JSON.parse(content!);
+    expect(parsed.version).toBe(1);
+    expect(parsed.supervisorPid).toBe(process.pid);
+  });
+});
+
+describe("supervisor 5E internals", () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await makeTempDir();
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  function createMockSupervisorState(
+    overrides?: Partial<SupervisorInternalState>
+  ): SupervisorInternalState {
+    return {
+      homeDir: tmpDir,
+      gatewayLockAcquired: false,
+      acquiredIdentityLocks: [],
+      channelGateway: undefined,
+      sessionDb: undefined,
+      onSigint: undefined,
+      onSigterm: undefined,
+      shutdownStarted: false,
+      running: true,
+      exit: () => {},
+      activeTurnRegistry: undefined,
+      runtimeCache: undefined,
+      runtimeFingerprint: undefined,
+      lastRuntimeCacheStateWrite: 0,
+      runtimeCacheStatePath: join(tmpDir, "rcs.json"),
+      supervisorStartedAt: new Date().toISOString(),
+      stuckAbortSent: new Set(),
+      stuckEventRecorded: new Set(),
+      stuckEventsBySession: new Map(),
+      ...overrides,
+    } as SupervisorInternalState;
+  }
+
+  function mockRuntimeCache(overrides?: Partial<RuntimeCache>): RuntimeCache {
+    return {
+      prune: async () => {},
+      suspend: async () => {},
+      stats: () => ({
+        totalEntries: 0,
+        activeBorrows: 0,
+        suspendedEntries: 0,
+        totalCreated: 0,
+        totalReused: 0,
+        totalDisposed: 0,
+        totalInvalidated: 0,
+      }),
+      suspendedSummary: () => [],
+      ...overrides,
+    } as unknown as RuntimeCache;
+  }
+
+  describe("runPrune", () => {
+    it("calls prune on runtimeCache", async () => {
+      let pruned = false;
+      const state = createMockSupervisorState({
+        runtimeCache: mockRuntimeCache({
+          prune: async () => {
+            pruned = true;
+          },
+        }),
+      });
+      const guard = { running: false };
+      await runPrune(state, guard);
+      expect(pruned).toBe(true);
+    });
+
+    it("skips when guard is already running", async () => {
+      let pruned = false;
+      const state = createMockSupervisorState({
+        runtimeCache: mockRuntimeCache({
+          prune: async () => {
+            pruned = true;
+          },
+        }),
+      });
+      const guard = { running: true };
+      await runPrune(state, guard);
+      expect(pruned).toBe(false);
+    });
+
+    it("prevents concurrent execution", async () => {
+      let pruneCalls = 0;
+      const state = createMockSupervisorState({
+        runtimeCache: mockRuntimeCache({
+          prune: async () => {
+            pruneCalls++;
+          },
+        }),
+      });
+      const guard = { running: false };
+      const p1 = runPrune(state, guard);
+      const p2 = runPrune(state, guard);
+      await Promise.all([p1, p2]);
+      expect(pruneCalls).toBe(1);
+    });
+  });
+
+  describe("runStuckScan", () => {
+    it("aborts a stuck turn once", async () => {
+      const registry = new ActiveTurnRegistry({ stuckThresholdMs: -1 });
+      const ac = new AbortController();
+      registry.startTurn("key1", ac, { sessionId: "sessionA" });
+
+      const state = createMockSupervisorState({
+        activeTurnRegistry: registry,
+        runtimeCache: mockRuntimeCache(),
+      });
+
+      expect(ac.signal.aborted).toBe(false);
+      await runStuckScan(state);
+      expect(ac.signal.aborted).toBe(true);
+
+      // Second scan should not call abortTurn again
+      let abortCalls = 0;
+      const originalAbort = registry.abortTurn.bind(registry);
+      registry.abortTurn = (key: string, reason: string) => {
+        abortCalls++;
+        return originalAbort(key, reason);
+      };
+      await runStuckScan(state);
+      expect(abortCalls).toBe(0);
+    });
+
+    it("records only one event per unique turnId", async () => {
+      const registry = new ActiveTurnRegistry({ stuckThresholdMs: -1 });
+      registry.startTurn("key1", new AbortController(), { sessionId: "sessionA" });
+
+      const state = createMockSupervisorState({
+        activeTurnRegistry: registry,
+        runtimeCache: mockRuntimeCache(),
+      });
+
+      await runStuckScan(state);
+      expect(state.stuckEventsBySession.get("sessionA")?.length).toBe(1);
+
+      await runStuckScan(state);
+      await runStuckScan(state);
+      expect(state.stuckEventsBySession.get("sessionA")?.length).toBe(1);
+    });
+
+    it("suspends after 3 distinct stuck turns for same session", async () => {
+      const registry = new ActiveTurnRegistry({ stuckThresholdMs: -1 });
+      const suspensions: Array<{ sessionId: string; reason: string }> = [];
+
+      const state = createMockSupervisorState({
+        activeTurnRegistry: registry,
+        runtimeCache: mockRuntimeCache({
+          suspend: async (sid: string, reason: string) => {
+            suspensions.push({ sessionId: sid, reason });
+          },
+        }),
+      });
+
+      // Turn 1
+      registry.startTurn("k1", new AbortController(), { sessionId: "s1" });
+      await runStuckScan(state);
+      expect(suspensions).toHaveLength(0);
+
+      registry.endTurn("k1", registry.getTurn("k1")!.turnId);
+      registry.startTurn("k2", new AbortController(), { sessionId: "s1" });
+      await runStuckScan(state);
+      expect(suspensions).toHaveLength(0);
+
+      registry.endTurn("k2", registry.getTurn("k2")!.turnId);
+      registry.startTurn("k3", new AbortController(), { sessionId: "s1" });
+      await runStuckScan(state);
+      expect(suspensions).toHaveLength(1);
+      expect(suspensions[0].sessionId).toBe("s1");
+      expect(suspensions[0].reason).toBe("stuck-loop");
+    });
+
+    it("does not combine events across sessions", async () => {
+      const registry = new ActiveTurnRegistry({ stuckThresholdMs: -1 });
+      registry.startTurn("k1", new AbortController(), { sessionId: "s1" });
+      registry.startTurn("k2", new AbortController(), { sessionId: "s2" });
+
+      const suspensions: Array<{ sessionId: string }> = [];
+      const state = createMockSupervisorState({
+        activeTurnRegistry: registry,
+        runtimeCache: mockRuntimeCache({
+          suspend: async (sid: string) => {
+            suspensions.push({ sessionId: sid });
+          },
+        }),
+      });
+
+      await runStuckScan(state);
+      expect(suspensions).toHaveLength(0);
+    });
+
+    it("skips suspension when metadata.sessionId is missing but still aborts", async () => {
+      const registry = new ActiveTurnRegistry({ stuckThresholdMs: -1 });
+      const ac = new AbortController();
+      registry.startTurn("k1", ac); // no metadata
+
+      const state = createMockSupervisorState({
+        activeTurnRegistry: registry,
+        runtimeCache: mockRuntimeCache(),
+      });
+
+      await runStuckScan(state);
+      expect(ac.signal.aborted).toBe(true);
+      expect(state.stuckEventsBySession.size).toBe(0);
+    });
+
+    it("cleans up old session entries outside the window", async () => {
+      const registry = new ActiveTurnRegistry({ stuckThresholdMs: -1 });
+      registry.startTurn("k1", new AbortController(), { sessionId: "s1" });
+
+      const state = createMockSupervisorState({
+        activeTurnRegistry: registry,
+        runtimeCache: mockRuntimeCache(),
+      });
+
+      await runStuckScan(state);
+      expect(state.stuckEventsBySession.has("s1")).toBe(true);
+
+      // Artificially age the event beyond the 10-minute window
+      const oldEvents = state.stuckEventsBySession.get("s1")!;
+      state.stuckEventsBySession.set("s1", oldEvents.map(() => Date.now() - 601_000));
+
+      // No active turns anymore, so cleanup will remove the session entry
+      registry.endTurn("k1", registry.getTurn("k1")!.turnId);
+      await runStuckScan(state);
+      expect(state.stuckEventsBySession.has("s1")).toBe(false);
+    });
+  });
+
+  describe("runStuckScanGuarded", () => {
+    it("prevents concurrent execution", async () => {
+      const registry = new ActiveTurnRegistry({ stuckThresholdMs: -1 });
+      registry.startTurn("k1", new AbortController(), { sessionId: "s1" });
+
+      let abortCalls = 0;
+      const originalAbort = registry.abortTurn.bind(registry);
+      registry.abortTurn = (key: string, reason: string) => {
+        abortCalls++;
+        return originalAbort(key, reason);
+      };
+
+      const state = createMockSupervisorState({
+        activeTurnRegistry: registry,
+        runtimeCache: mockRuntimeCache(),
+      });
+
+      const guard = { running: false };
+      const p1 = runStuckScanGuarded(state, guard);
+      const p2 = runStuckScanGuarded(state, guard);
+      await Promise.all([p1, p2]);
+
+      expect(abortCalls).toBe(1);
+    });
+  });
+
+  describe("runRuntimeCacheStateHeartbeat", () => {
+    it("writes runtime cache state and updates lastRuntimeCacheStateWrite", async () => {
+      const registry = new ActiveTurnRegistry();
+      const cache = new RuntimeCache({
+        createRuntime: async () => ({}) as any,
+        maxEntries: 50,
+        idleTtlMs: 1_800_000,
+        logWarning: () => {},
+      });
+
+      const path = join(tmpDir, "heartbeat.json");
+      const state = createMockSupervisorState({
+        activeTurnRegistry: registry,
+        runtimeCache: cache,
+        runtimeFingerprint: { model: "test" } as any,
+        runtimeCacheStatePath: path,
+        lastRuntimeCacheStateWrite: 0,
+      });
+
+      const guard = { running: false };
+      await runRuntimeCacheStateHeartbeat(state, guard);
+      expect(state.lastRuntimeCacheStateWrite).toBeGreaterThan(0);
+
+      const written = await readRuntimeCacheState(path);
+      expect(written).toBeDefined();
+      expect(written!.version).toBe(1);
+      expect(written!.supervisorPid).toBe(process.pid);
+    });
+
+    it("skips when guard is already running", async () => {
+      const state = createMockSupervisorState({
+        activeTurnRegistry: new ActiveTurnRegistry(),
+        runtimeCache: mockRuntimeCache(),
+        runtimeFingerprint: { model: "test" } as any,
+      });
+      const guard = { running: true };
+      await runRuntimeCacheStateHeartbeat(state, guard);
+      expect(state.lastRuntimeCacheStateWrite).toBe(0);
+    });
+
+    it("prevents concurrent execution", async () => {
+      const registry = new ActiveTurnRegistry();
+      const cache = new RuntimeCache({
+        createRuntime: async () => ({}) as any,
+        maxEntries: 50,
+        idleTtlMs: 1_800_000,
+        logWarning: () => {},
+      });
+
+      const path = join(tmpDir, "concurrent-heartbeat.json");
+      const state = createMockSupervisorState({
+        activeTurnRegistry: registry,
+        runtimeCache: cache,
+        runtimeFingerprint: { model: "test" } as any,
+        runtimeCacheStatePath: path,
+        lastRuntimeCacheStateWrite: 0,
+      });
+
+      const guard = { running: false };
+      const p1 = runRuntimeCacheStateHeartbeat(state, guard);
+      const p2 = runRuntimeCacheStateHeartbeat(state, guard);
+      await Promise.all([p1, p2]);
+
+      // Only one write should have succeeded
+      const written = await readRuntimeCacheState(path);
+      expect(written).toBeDefined();
+      expect(written!.version).toBe(1);
+    });
+  });
+
+  describe("buildRuntimeCacheState", () => {
+    it("produces a valid RuntimeCacheState with privacy protections", () => {
+      const registry = new ActiveTurnRegistry();
+      const cache = new RuntimeCache({
+        createRuntime: async () => ({}) as any,
+        maxEntries: 50,
+        idleTtlMs: 1_800_000,
+        logWarning: () => {},
+      });
+
+      const state = createMockSupervisorState({
+        activeTurnRegistry: registry,
+        runtimeCache: cache,
+        runtimeFingerprint: { model: "test-model" } as any,
+        supervisorStartedAt: new Date().toISOString(),
+      });
+
+      const rcs = buildRuntimeCacheState(state);
+      expect(rcs.version).toBe(1);
+      expect(typeof rcs.writtenAt).toBe("string");
+      expect(rcs.supervisorPid).toBe(process.pid);
+      expect(typeof rcs.fingerprintHash).toBe("string");
+
+      // No sensitive data
+      const json = JSON.stringify(rcs);
+      expect(json).not.toContain("message");
+      expect(json).not.toContain("prompt");
+      expect(json).not.toContain("token");
+      expect(json).not.toContain("transcript");
+      expect(json).not.toContain("approval");
+    });
   });
 });
