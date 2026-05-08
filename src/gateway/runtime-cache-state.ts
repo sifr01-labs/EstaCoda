@@ -1,4 +1,4 @@
-import { mkdir, writeFile, readFile } from "node:fs/promises";
+import { chmod, mkdir, writeFile, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 export type RuntimeCacheState = {
@@ -48,7 +48,8 @@ export async function writeRuntimeCacheState(
   state: RuntimeCacheState
 ): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, JSON.stringify(state, null, 2) + "\n", "utf8");
+  await writeFile(path, JSON.stringify(state, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
+  await chmod(path, 0o600);
 }
 
 export async function readRuntimeCacheState(

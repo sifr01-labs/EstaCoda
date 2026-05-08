@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
+import { chmod, mkdtemp, rm, stat, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
@@ -377,6 +377,40 @@ describe("supervisor-lifecycle", () => {
     it("isCleanShutdownTrustworthy returns false when stale marker (>5min)", async () => {
       const marker = { stoppedAt: new Date(Date.now() - 6 * 60 * 1000).toISOString(), pid: 12345, version: "1.0.0", reason: "drain" as const };
       expect(await isCleanShutdownTrustworthy(tmpDir, marker)).toBe(false);
+    });
+
+    it("clean-shutdown marker is created with 0o600 permissions", async () => {
+      if (process.platform === "win32") {
+        console.log("Skipping permission test on Windows");
+        return;
+      }
+      if (typeof process.getuid === "function" && process.getuid() === 0) {
+        console.log("Skipping permission test when running as root");
+        return;
+      }
+      const marker = { stoppedAt: new Date().toISOString(), pid: 12345, version: "1.0.0", reason: "drain" as const };
+      await writeCleanShutdownMarker(tmpDir, marker);
+      const stats = await stat(join(tmpDir, ".estacoda", "gateway", ".clean_shutdown"));
+      expect(stats.mode & 0o777).toBe(0o600);
+    });
+
+    it("clean-shutdown marker corrects existing 0o644 permissions to 0o600", async () => {
+      if (process.platform === "win32") {
+        console.log("Skipping permission test on Windows");
+        return;
+      }
+      if (typeof process.getuid === "function" && process.getuid() === 0) {
+        console.log("Skipping permission test when running as root");
+        return;
+      }
+      const path = join(tmpDir, ".estacoda", "gateway", ".clean_shutdown");
+      await mkdir(join(tmpDir, ".estacoda", "gateway"), { recursive: true });
+      await writeFile(path, JSON.stringify({ stoppedAt: new Date().toISOString(), pid: 12345, version: "1.0.0", reason: "drain" }), { encoding: "utf8", mode: 0o644 });
+      await chmod(path, 0o644);
+      const marker = { stoppedAt: new Date().toISOString(), pid: 12345, version: "1.0.0", reason: "drain" as const };
+      await writeCleanShutdownMarker(tmpDir, marker);
+      const stats = await stat(path);
+      expect(stats.mode & 0o777).toBe(0o600);
     });
   });
 });

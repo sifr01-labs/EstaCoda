@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdtemp, rm, stat, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -82,6 +82,38 @@ describe("gateway state primitives", () => {
       await writeGatewayPid(tmpDir, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.1" });
       expect(await isStalePid(tmpDir)).toBe(false);
     });
+
+    it("PID file is created with 0o600 permissions", async () => {
+      if (process.platform === "win32") {
+        console.log("Skipping permission test on Windows");
+        return;
+      }
+      if (typeof process.getuid === "function" && process.getuid() === 0) {
+        console.log("Skipping permission test when running as root");
+        return;
+      }
+      await writeGatewayPid(tmpDir, { pid: 12345, startedAt: new Date().toISOString(), version: "0.0.1" });
+      const stats = await stat(join(tmpDir, ".estacoda", "gateway", "gateway.pid"));
+      expect(stats.mode & 0o777).toBe(0o600);
+    });
+
+    it("PID file corrects existing 0o644 permissions to 0o600", async () => {
+      if (process.platform === "win32") {
+        console.log("Skipping permission test on Windows");
+        return;
+      }
+      if (typeof process.getuid === "function" && process.getuid() === 0) {
+        console.log("Skipping permission test when running as root");
+        return;
+      }
+      const path = join(tmpDir, ".estacoda", "gateway", "gateway.pid");
+      await mkdir(join(tmpDir, ".estacoda", "gateway"), { recursive: true });
+      await writeFile(path, JSON.stringify({ pid: 12345, startedAt: new Date().toISOString(), version: "0.0.1" }), { encoding: "utf8", mode: 0o644 });
+      await chmod(path, 0o644);
+      await writeGatewayPid(tmpDir, { pid: 12345, startedAt: new Date().toISOString(), version: "0.0.1" });
+      const stats = await stat(path);
+      expect(stats.mode & 0o777).toBe(0o600);
+    });
   });
 
   // ─────────────────────────────────────────────────────────────
@@ -106,6 +138,38 @@ describe("gateway state primitives", () => {
       await removeGatewayState(tmpDir);
       const read = await readGatewayState(tmpDir);
       expect(read).toBeUndefined();
+    });
+
+    it("state file is created with 0o600 permissions", async () => {
+      if (process.platform === "win32") {
+        console.log("Skipping permission test on Windows");
+        return;
+      }
+      if (typeof process.getuid === "function" && process.getuid() === 0) {
+        console.log("Skipping permission test when running as root");
+        return;
+      }
+      await writeGatewayState(tmpDir, { lifecycle: "running", startedAt: new Date().toISOString(), pid: 12345, version: "0.0.1" });
+      const stats = await stat(join(tmpDir, ".estacoda", "gateway", "gateway-state.json"));
+      expect(stats.mode & 0o777).toBe(0o600);
+    });
+
+    it("state file corrects existing 0o644 permissions to 0o600", async () => {
+      if (process.platform === "win32") {
+        console.log("Skipping permission test on Windows");
+        return;
+      }
+      if (typeof process.getuid === "function" && process.getuid() === 0) {
+        console.log("Skipping permission test when running as root");
+        return;
+      }
+      const path = join(tmpDir, ".estacoda", "gateway", "gateway-state.json");
+      await mkdir(join(tmpDir, ".estacoda", "gateway"), { recursive: true });
+      await writeFile(path, JSON.stringify({ lifecycle: "running", startedAt: new Date().toISOString(), pid: 12345, version: "0.0.1" }), { encoding: "utf8", mode: 0o644 });
+      await chmod(path, 0o644);
+      await writeGatewayState(tmpDir, { lifecycle: "running", startedAt: new Date().toISOString(), pid: 12345, version: "0.0.1" });
+      const stats = await stat(path);
+      expect(stats.mode & 0o777).toBe(0o600);
     });
   });
 
@@ -174,6 +238,42 @@ describe("gateway state primitives", () => {
       const result = await acquireGatewayLock(tmpDir);
       expect(result.acquired).toBe(true);
       expect(result.stale).toBe(true);
+    });
+
+    it("lock file is created with 0o600 permissions", async () => {
+      if (process.platform === "win32") {
+        console.log("Skipping permission test on Windows");
+        return;
+      }
+      if (typeof process.getuid === "function" && process.getuid() === 0) {
+        console.log("Skipping permission test when running as root");
+        return;
+      }
+      await acquireGatewayLock(tmpDir);
+      const stats = await stat(join(tmpDir, ".estacoda", "gateway", "gateway.lock"));
+      expect(stats.mode & 0o777).toBe(0o600);
+      await releaseGatewayLock(tmpDir);
+    });
+
+    it("lock file corrects existing 0o644 permissions to 0o600 on reclaim", async () => {
+      if (process.platform === "win32") {
+        console.log("Skipping permission test on Windows");
+        return;
+      }
+      if (typeof process.getuid === "function" && process.getuid() === 0) {
+        console.log("Skipping permission test when running as root");
+        return;
+      }
+      const path = join(tmpDir, ".estacoda", "gateway", "gateway.lock");
+      await mkdir(join(tmpDir, ".estacoda", "gateway"), { recursive: true });
+      await writeFile(path, JSON.stringify({ pid: 99999, startedAt: new Date(Date.now() - 60_000).toISOString() }), { encoding: "utf8", mode: 0o644 });
+      await chmod(path, 0o644);
+      const result = await acquireGatewayLock(tmpDir);
+      expect(result.acquired).toBe(true);
+      expect(result.stale).toBe(true);
+      const stats = await stat(path);
+      expect(stats.mode & 0o777).toBe(0o600);
+      await releaseGatewayLock(tmpDir);
     });
   });
 

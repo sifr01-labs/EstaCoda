@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 export type GatewayPidContent = {
@@ -44,7 +44,9 @@ export async function readGatewayPid(homeDir: string): Promise<GatewayPidContent
 
 export async function writeGatewayPid(homeDir: string, content: GatewayPidContent): Promise<void> {
   await mkdir(gatewayDir(homeDir), { recursive: true });
-  await writeFile(pidPath(homeDir), JSON.stringify(content, null, 2) + "\n", "utf8");
+  const path = pidPath(homeDir);
+  await writeFile(path, JSON.stringify(content, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
+  await chmod(path, 0o600);
 }
 
 export async function removeGatewayPid(homeDir: string): Promise<void> {

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
+import { chmod, mkdtemp, rm, stat, writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -89,6 +89,38 @@ describe("writeRuntimeCacheState", () => {
     expect(parsed.version).toBe(1);
     expect(parsed.cacheStats.totalEntries).toBe(3);
     expect(parsed.fingerprintHash).toBe("abcd1234abcd1234");
+  });
+
+  it("runtime cache state file is created with 0o600 permissions", async () => {
+    if (process.platform === "win32") {
+      console.log("Skipping permission test on Windows");
+      return;
+    }
+    if (typeof process.getuid === "function" && process.getuid() === 0) {
+      console.log("Skipping permission test when running as root");
+      return;
+    }
+    const path = join(tmpDir, "state.json");
+    await writeRuntimeCacheState(path, makeValidState());
+    const stats = await stat(path);
+    expect(stats.mode & 0o777).toBe(0o600);
+  });
+
+  it("runtime cache state file corrects existing 0o644 permissions to 0o600", async () => {
+    if (process.platform === "win32") {
+      console.log("Skipping permission test on Windows");
+      return;
+    }
+    if (typeof process.getuid === "function" && process.getuid() === 0) {
+      console.log("Skipping permission test when running as root");
+      return;
+    }
+    const path = join(tmpDir, "state.json");
+    await writeFile(path, JSON.stringify(makeValidState()), { encoding: "utf8", mode: 0o644 });
+    await chmod(path, 0o644);
+    await writeRuntimeCacheState(path, makeValidState());
+    const stats = await stat(path);
+    expect(stats.mode & 0o777).toBe(0o600);
   });
 });
 

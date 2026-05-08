@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { readGatewayPid, removeGatewayPid, isStalePid } from "./pid-file.js";
 import { releaseGatewayLock, isStaleLock } from "./gateway-lock.js";
@@ -43,7 +43,9 @@ export async function readGatewayState(homeDir: string): Promise<SupervisorState
 
 export async function writeGatewayState(homeDir: string, state: SupervisorState): Promise<void> {
   await mkdir(gatewayDir(homeDir), { recursive: true });
-  await writeFile(statePath(homeDir), JSON.stringify(state, null, 2) + "\n", "utf8");
+  const path = statePath(homeDir);
+  await writeFile(path, JSON.stringify(state, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
+  await chmod(path, 0o600);
 }
 
 export async function removeGatewayState(homeDir: string): Promise<void> {

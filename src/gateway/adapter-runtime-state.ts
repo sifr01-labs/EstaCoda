@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ChannelKind } from "../contracts/channel.js";
 
@@ -50,7 +50,8 @@ export async function writeAdapterRuntimeState(
 ): Promise<void> {
   const path = statePath(homeDir);
   await mkdir(join(path, ".."), { recursive: true });
-  await writeFile(path, JSON.stringify(state, null, 2));
+  await writeFile(path, JSON.stringify(state, null, 2), { encoding: "utf8", mode: 0o600 });
+  await chmod(path, 0o600);
 }
 
 export async function readAdapterRuntimeState(

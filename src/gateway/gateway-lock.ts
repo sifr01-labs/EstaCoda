@@ -1,4 +1,4 @@
-import { mkdir, open, readFile, rm, stat } from "node:fs/promises";
+import { chmod, mkdir, open, readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { isPidAlive } from "./pid-file.js";
 
@@ -48,10 +48,11 @@ export async function acquireGatewayLock(
 
   try {
     // Try to create the lock file exclusively (atomic)
-    const handle = await open(path, "wx");
+    const handle = await open(path, "wx", 0o600);
     const content: LockFileContent = { pid: process.pid, startedAt: new Date().toISOString() };
     await handle.writeFile(JSON.stringify(content), "utf8");
     await handle.close();
+    await chmod(path, 0o600);
     return { acquired: true, stale: false };
   } catch (error) {
     const code = error instanceof Error && "code" in error ? String((error as { code?: unknown }).code) : "";
@@ -64,10 +65,11 @@ export async function acquireGatewayLock(
     if (lock === undefined) {
       // Corrupt lock file - treat as stale and reclaim
       await rm(path, { force: true });
-      const handle = await open(path, "wx");
+      const handle = await open(path, "wx", 0o600);
       const content: LockFileContent = { pid: process.pid, startedAt: new Date().toISOString() };
       await handle.writeFile(JSON.stringify(content), "utf8");
       await handle.close();
+      await chmod(path, 0o600);
       return { acquired: true, stale: true };
     }
 
@@ -77,10 +79,11 @@ export async function acquireGatewayLock(
     if (elapsed > staleTimeoutMs || pidDead) {
       // Stale lock - reclaim
       await rm(path, { force: true });
-      const handle = await open(path, "wx");
+      const handle = await open(path, "wx", 0o600);
       const content: LockFileContent = { pid: process.pid, startedAt: new Date().toISOString() };
       await handle.writeFile(JSON.stringify(content), "utf8");
       await handle.close();
+      await chmod(path, 0o600);
       return { acquired: true, stale: true };
     }
 

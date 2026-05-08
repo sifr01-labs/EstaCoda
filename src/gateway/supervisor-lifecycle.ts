@@ -1,4 +1,4 @@
-import { rm, readFile, writeFile, mkdir } from "node:fs/promises";
+import { chmod, rm, readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import {
   readGatewayPid,
@@ -22,7 +22,9 @@ export const CLEAN_SHUTDOWN_FILE_NAME = ".clean_shutdown";
 export async function writeCleanShutdownMarker(homeDir: string, marker: CleanShutdownMarker): Promise<void> {
   const dir = join(homeDir, ".estacoda", "gateway");
   await mkdir(dir, { recursive: true });
-  await writeFile(join(dir, CLEAN_SHUTDOWN_FILE_NAME), JSON.stringify(marker) + "\n", "utf8");
+  const path = join(dir, CLEAN_SHUTDOWN_FILE_NAME);
+  await writeFile(path, JSON.stringify(marker) + "\n", { encoding: "utf8", mode: 0o600 });
+  await chmod(path, 0o600);
 }
 
 export async function readCleanShutdownMarker(homeDir: string): Promise<CleanShutdownMarker | undefined> {
