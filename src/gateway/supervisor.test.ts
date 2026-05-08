@@ -893,6 +893,8 @@ describe("supervisor 5E internals", () => {
       stuckAbortSent: new Set(),
       stuckEventRecorded: new Set(),
       stuckEventsBySession: new Map(),
+      startupComplete: false,
+      drainCancelled: false,
       ...overrides,
     } as SupervisorInternalState;
   }
@@ -1270,5 +1272,440 @@ describe("supervisor 5E internals", () => {
         HookRegistry.prototype.emit = originalEmit;
       }
     });
+  });
+});
+
+describe("supervisor lifecycle hooks", () => {
+  let tmpDir: string;
+  let stateRoot: string;
+
+  beforeEach(async () => {
+    tmpDir = await makeTempDir();
+    stateRoot = join(tmpDir, ".estacoda");
+    await mkdir(stateRoot, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("supervisor:start emitted on successful startup", async () => {
+    const captured: Array<{ name: string; payload: unknown }> = [];
+    const originalEmit = HookRegistry.prototype.emit;
+    HookRegistry.prototype.emit = async function (name: any, payload: any): Promise<void> {
+      captured.push({ name, payload });
+      return originalEmit.call(this, name, payload);
+    };
+
+    try {
+      const configPath = join(tmpDir, ".estacoda", "config.json");
+      await mkdir(join(tmpDir, ".estacoda"), { recursive: true });
+      await writeFile(configPath, JSON.stringify({
+        channels: {
+          telegram: {
+            enabled: true,
+            botTokenEnv: "TEST_BOT_TOKEN",
+            defaultChatId: "123",
+          },
+        },
+      }));
+      process.env.TEST_BOT_TOKEN = "fake";
+
+      const result = await runGatewaySupervisor({
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        once: true,
+        factories: {
+          createChannelGateway: () => fakeChannelGateway() as any,
+          createDeliveryRouter: () => fakeDeliveryRouter() as any,
+          createTelegramAdapter: () => fakeAdapter("telegram") as any,
+        },
+      });
+
+      delete process.env.TEST_BOT_TOKEN;
+
+      expect(result.ok).toBe(true);
+      const starts = captured.filter((e) => e.name === "supervisor:start");
+      expect(starts).toHaveLength(1);
+      const payload = starts[0].payload as any;
+      expect(payload.pid).toBe(process.pid);
+      expect(typeof payload.startedAt).toBe("string");
+      expect(typeof payload.version).toBe("string");
+      expect(payload.adapterKinds).toEqual(["telegram"]);
+      expect(payload.mode).toBe("adapters");
+    } finally {
+      HookRegistry.prototype.emit = originalEmit;
+    }
+  });
+
+  it("supervisor:start NOT emitted when gateway lock is held, and no supervisor:crash either", async () => {
+    const captured: Array<{ name: string; payload: unknown }> = [];
+    const originalEmit = HookRegistry.prototype.emit;
+    HookRegistry.prototype.emit = async function (name: any, payload: any): Promise<void> {
+      captured.push({ name, payload });
+      return originalEmit.call(this, name, payload);
+    };
+
+    try {
+      const lockFile = join(stateRoot, "gateway", "gateway.lock");
+      await mkdir(join(stateRoot, "gateway"), { recursive: true });
+      await writeFile(lockFile, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
+
+      const result = await runGatewaySupervisor({
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        once: true,
+        factories: {
+          createChannelGateway: () => fakeChannelGateway() as any,
+          createDeliveryRouter: () => fakeDeliveryRouter() as any,
+        },
+      });
+
+      expect(result.ok).toBe(false);
+      expect(captured.some((e) => e.name === "supervisor:start")).toBe(false);
+      expect(captured.some((e) => e.name === "supervisor:crash")).toBe(false);
+    } finally {
+      HookRegistry.prototype.emit = originalEmit;
+    }
+  });
+
+  it("supervisor:start NOT emitted and supervisor:crash phase=startup when createChannelGateway throws after lock acquisition", async () => {
+    const captured: Array<{ name: string; payload: unknown }> = [];
+    const originalEmit = HookRegistry.prototype.emit;
+    HookRegistry.prototype.emit = async function (name: any, payload: any): Promise<void> {
+      captured.push({ name, payload });
+      return originalEmit.call(this, name, payload);
+    };
+
+    try {
+      const result = await runGatewaySupervisor({
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        once: true,
+        factories: {
+          createChannelGateway: () => {
+            throw new Error("boom");
+          },
+          createDeliveryRouter: () => fakeDeliveryRouter() as any,
+          createTelegramAdapter: () => fakeAdapter("telegram") as any,
+        },
+      });
+
+      expect(result.ok).toBe(false);
+      expect(captured.some((e) => e.name === "supervisor:start")).toBe(false);
+      const crashes = captured.filter((e) => e.name === "supervisor:crash");
+      expect(crashes).toHaveLength(1);
+      expect((crashes[0].payload as any).phase).toBe("startup");
+      expect((crashes[0].payload as any).errorClass).toBe("Error");
+      expect((crashes[0].payload as any).errorMessage).toBe("boom");
+      expect(captured.some((e) => e.name === "supervisor:stop")).toBe(false);
+    } finally {
+      HookRegistry.prototype.emit = originalEmit;
+    }
+  });
+
+  it("supervisor:stop emitted on once mode exit with clean=true reason=once", async () => {
+    const captured: Array<{ name: string; payload: unknown }> = [];
+    const originalEmit = HookRegistry.prototype.emit;
+    HookRegistry.prototype.emit = async function (name: any, payload: any): Promise<void> {
+      captured.push({ name, payload });
+      return originalEmit.call(this, name, payload);
+    };
+
+    try {
+      const result = await runGatewaySupervisor({
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        once: true,
+        factories: {
+          createChannelGateway: () => fakeChannelGateway() as any,
+          createDeliveryRouter: () => fakeDeliveryRouter() as any,
+        },
+      });
+
+      expect(result.ok).toBe(true);
+      const stops = captured.filter((e) => e.name === "supervisor:stop");
+      expect(stops).toHaveLength(1);
+      expect((stops[0].payload as any).clean).toBe(true);
+      expect((stops[0].payload as any).reason).toBe("once");
+
+      const starts = captured.filter((e) => e.name === "supervisor:start");
+      expect(starts).toHaveLength(1);
+      const startIndex = captured.findIndex((e) => e.name === "supervisor:start");
+      const stopIndex = captured.findIndex((e) => e.name === "supervisor:stop");
+      expect(stopIndex).toBeGreaterThan(startIndex);
+    } finally {
+      HookRegistry.prototype.emit = originalEmit;
+    }
+  });
+
+  it("supervisor:drain:start and supervisor:drain:complete emitted on SIGTERM with successful drain", async () => {
+    const captured: Array<{ name: string; payload: unknown }> = [];
+    const originalEmit = HookRegistry.prototype.emit;
+    HookRegistry.prototype.emit = async function (name: any, payload: any): Promise<void> {
+      captured.push({ name, payload });
+      return originalEmit.call(this, name, payload);
+    };
+
+    try {
+      const exited = fakeExit();
+      const gateway = fakeChannelGateway();
+
+      const promise = runGatewaySupervisor({
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        once: false,
+        factories: {
+          createChannelGateway: () => gateway as any,
+          createDeliveryRouter: () => fakeDeliveryRouter() as any,
+          exit: exited.exit,
+        },
+      });
+
+      await new Promise((r) => setTimeout(r, 50));
+      process.emit("SIGTERM");
+      await promise;
+
+      const drainStarts = captured.filter((e) => e.name === "supervisor:drain:start");
+      expect(drainStarts).toHaveLength(1);
+      const drainStartPayload = drainStarts[0].payload as any;
+      expect(drainStartPayload.reason).toBe("SIGTERM");
+      expect(drainStartPayload.activeTurnCount).toBe(0);
+      expect(drainStartPayload.timeoutMs).toBe(30000);
+
+      const drainCompletes = captured.filter((e) => e.name === "supervisor:drain:complete");
+      expect(drainCompletes).toHaveLength(1);
+      const drainCompletePayload = drainCompletes[0].payload as any;
+      expect(drainCompletePayload.completed).toBe(true);
+      expect(drainCompletePayload.timedOut).toBe(false);
+      expect(drainCompletePayload.abortedTurnCount).toBe(0);
+      expect(typeof drainCompletePayload.durationMs).toBe("number");
+
+      const stops = captured.filter((e) => e.name === "supervisor:stop");
+      expect(stops).toHaveLength(1);
+      expect(stops[0].payload).toMatchObject({ clean: true, reason: "drain" });
+
+      const drainStartIndex = captured.findIndex((e) => e.name === "supervisor:drain:start");
+      const drainCompleteIndex = captured.findIndex((e) => e.name === "supervisor:drain:complete");
+      const stopIndex = captured.findIndex((e) => e.name === "supervisor:stop");
+      expect(drainStartIndex).toBeLessThan(drainCompleteIndex);
+      expect(drainCompleteIndex).toBeLessThan(stopIndex);
+    } finally {
+      HookRegistry.prototype.emit = originalEmit;
+    }
+  });
+
+  it("supervisor:drain:complete with timedOut=true on drain timeout", async () => {
+    const captured: Array<{ name: string; payload: unknown }> = [];
+    const originalEmit = HookRegistry.prototype.emit;
+    HookRegistry.prototype.emit = async function (name: any, payload: any): Promise<void> {
+      captured.push({ name, payload });
+      return originalEmit.call(this, name, payload);
+    };
+
+    try {
+      const exited = fakeExit();
+      let capturedRegistry: ActiveTurnRegistry | undefined;
+      const gateway = {
+        start: async () => {},
+        stop: async () => {},
+        hasPendingWork: () => (capturedRegistry?.stats().activeTurnCount ?? 0) > 0,
+      };
+
+      const promise = runGatewaySupervisor({
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        once: false,
+        drainTimeoutMs: 100,
+        factories: {
+          createChannelGateway: (opts: any) => {
+            capturedRegistry = opts.activeTurnRegistry;
+            return gateway as any;
+          },
+          createDeliveryRouter: () => fakeDeliveryRouter() as any,
+          exit: exited.exit,
+        },
+      });
+
+      await new Promise((r) => setTimeout(r, 50));
+      const ac = new AbortController();
+      capturedRegistry?.startTurn("test-key", ac);
+
+      process.emit("SIGTERM");
+      await promise;
+      await new Promise((r) => setTimeout(r, 800));
+
+      const drainCompletes = captured.filter((e) => e.name === "supervisor:drain:complete");
+      expect(drainCompletes).toHaveLength(1);
+      const payload = drainCompletes[0].payload as any;
+      expect(payload.completed).toBe(false);
+      expect(payload.timedOut).toBe(true);
+      expect(payload.abortedTurnCount).toBe(1);
+
+      const stops = captured.filter((e) => e.name === "supervisor:stop");
+      expect(stops).toHaveLength(1);
+      expect(stops[0].payload).toMatchObject({ clean: false, reason: "drain-timeout" });
+    } finally {
+      HookRegistry.prototype.emit = originalEmit;
+    }
+  });
+
+  it("double signal sets supervisor:stop clean=false reason=forced-signal and prevents drain:complete overwrite", async () => {
+    const captured: Array<{ name: string; payload: unknown }> = [];
+    const originalEmit = HookRegistry.prototype.emit;
+    HookRegistry.prototype.emit = async function (name: any, payload: any): Promise<void> {
+      captured.push({ name, payload });
+      return originalEmit.call(this, name, payload);
+    };
+
+    try {
+      const exited = fakeExit();
+      let capturedRegistry: ActiveTurnRegistry | undefined;
+      const gateway = {
+        start: async () => {},
+        stop: async () => {},
+        hasPendingWork: () => (capturedRegistry?.stats().activeTurnCount ?? 0) > 0,
+      };
+
+      const promise = runGatewaySupervisor({
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        once: false,
+        drainTimeoutMs: 5_000,
+        factories: {
+          createChannelGateway: (opts: any) => {
+            capturedRegistry = opts.activeTurnRegistry;
+            return gateway as any;
+          },
+          createDeliveryRouter: () => fakeDeliveryRouter() as any,
+          exit: exited.exit,
+        },
+      });
+
+      await new Promise((r) => setTimeout(r, 50));
+      const ac = new AbortController();
+      capturedRegistry?.startTurn("test-key", ac);
+
+      process.emit("SIGTERM");
+      await new Promise((r) => setTimeout(r, 100));
+      process.emit("SIGTERM");
+
+      await promise;
+      await new Promise((r) => setTimeout(r, 200));
+
+      const stops = captured.filter((e) => e.name === "supervisor:stop");
+      expect(stops).toHaveLength(1);
+      expect(stops[0].payload).toMatchObject({ clean: false, reason: "forced-signal" });
+
+      expect(captured.some((e) => e.name === "supervisor:drain:complete")).toBe(false);
+    } finally {
+      HookRegistry.prototype.emit = originalEmit;
+    }
+  });
+
+  it("supervisor:crash emitted on startup failure with phase=startup", async () => {
+    const captured: Array<{ name: string; payload: unknown }> = [];
+    const originalEmit = HookRegistry.prototype.emit;
+    HookRegistry.prototype.emit = async function (name: any, payload: any): Promise<void> {
+      captured.push({ name, payload });
+      return originalEmit.call(this, name, payload);
+    };
+
+    try {
+      const result = await runGatewaySupervisor({
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        once: true,
+        factories: {
+          createChannelGateway: () => {
+            throw new Error("boom");
+          },
+          createDeliveryRouter: () => fakeDeliveryRouter() as any,
+          createTelegramAdapter: () => fakeAdapter("telegram") as any,
+        },
+      });
+
+      expect(result.ok).toBe(false);
+      const crashes = captured.filter((e) => e.name === "supervisor:crash");
+      expect(crashes).toHaveLength(1);
+      const payload = crashes[0].payload as any;
+      expect(payload.phase).toBe("startup");
+      expect(payload.errorClass).toBe("Error");
+      expect(payload.errorMessage).toBe("boom");
+      expect(captured.some((e) => e.name === "supervisor:start")).toBe(false);
+      expect(captured.some((e) => e.name === "supervisor:stop")).toBe(false);
+    } finally {
+      HookRegistry.prototype.emit = originalEmit;
+    }
+  });
+
+  it("supervisor:crash emitted on main-loop failure with phase=main-loop and supervisor:stop clean=false reason=crash", async () => {
+    const captured: Array<{ name: string; payload: unknown }> = [];
+    const originalEmit = HookRegistry.prototype.emit;
+    HookRegistry.prototype.emit = async function (name: any, payload: any): Promise<void> {
+      captured.push({ name, payload });
+      return originalEmit.call(this, name, payload);
+    };
+
+    try {
+      const result = await runGatewaySupervisor({
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        once: false,
+        factories: {
+          tickCron: async () => {
+            throw new Error("tick boom");
+          },
+          createChannelGateway: () => fakeChannelGateway() as any,
+          createDeliveryRouter: () => fakeDeliveryRouter() as any,
+        },
+      });
+
+      expect(result.ok).toBe(false);
+      expect(captured.some((e) => e.name === "supervisor:start")).toBe(true);
+
+      const crashes = captured.filter((e) => e.name === "supervisor:crash");
+      expect(crashes).toHaveLength(1);
+      const crashPayload = crashes[0].payload as any;
+      expect(crashPayload.phase).toBe("main-loop");
+
+      const stops = captured.filter((e) => e.name === "supervisor:stop");
+      expect(stops).toHaveLength(1);
+      const stopPayload = stops[0].payload as any;
+      expect(stopPayload.clean).toBe(false);
+      expect(stopPayload.reason).toBe("crash");
+    } finally {
+      HookRegistry.prototype.emit = originalEmit;
+    }
+  });
+
+  it("hook failures do not affect supervisor shutdown", async () => {
+    const originalEmit = HookRegistry.prototype.emit;
+    HookRegistry.prototype.emit = async function (name: any, payload: any): Promise<void> {
+      if (name === "supervisor:stop") {
+        throw new Error("hook explosion");
+      }
+      return originalEmit.call(this, name, payload);
+    };
+
+    try {
+      const result = await runGatewaySupervisor({
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        once: true,
+        factories: {
+          createChannelGateway: () => fakeChannelGateway() as any,
+          createDeliveryRouter: () => fakeDeliveryRouter() as any,
+        },
+      });
+
+      expect(result.ok).toBe(true);
+      const pid = await readGatewayPid(tmpDir);
+      expect(pid).toBeUndefined();
+      const lock = await readGatewayLockContent(tmpDir);
+      expect(lock).toBeUndefined();
+    } finally {
+      HookRegistry.prototype.emit = originalEmit;
+    }
   });
 });

@@ -51,7 +51,12 @@ import {
   type RuntimeCacheState,
 } from "./runtime-cache-state.js";
 import { ActiveTurnRegistry } from "./active-turn-registry.js";
-import { HookRegistry } from "./hook-registry.js";
+import {
+  HookRegistry,
+  type GatewayHookEventName,
+  type GatewayHookPayloadByName,
+  sanitizeHookError,
+} from "./hook-registry.js";
 import {
   writeCleanShutdownMarker,
   readCleanShutdownMarker,
@@ -108,6 +113,11 @@ export type SupervisorInternalState = {
   stuckAbortSent: Set<string>;
   stuckEventRecorded: Set<string>;
   stuckEventsBySession: Map<string, number[]>;
+  startupComplete: boolean;
+  shutdownClean?: boolean;
+  shutdownReason?: string;
+  drainCancelled: boolean;
+  hookRegistry?: HookRegistry;
 };
 
 function logInfo(message: string): void {
@@ -120,6 +130,21 @@ function logWarning(message: string): void {
 
 function logDebug(message: string): void {
   console.debug(message);
+}
+
+function emitSupervisorHook<N extends GatewayHookEventName>(
+  hookRegistry: HookRegistry | undefined,
+  name: N,
+  payload: GatewayHookPayloadByName[N],
+): void {
+  try {
+    const p = hookRegistry?.emit(name, payload);
+    if (p) {
+      p.catch(() => {});
+    }
+  } catch {
+    // HookRegistry.emit threw synchronously — ignore
+  }
 }
 
 async function sleep(ms: number): Promise<void> {
@@ -151,12 +176,23 @@ function createInitialState(homeDir: string, exitFn: (code: number) => void, sup
     stuckEventRecorded: new Set(),
     stuckEventsBySession: new Map(),
     cleanupDone: false,
+    startupComplete: false,
+    drainCancelled: false,
   };
 }
 
 async function cleanupSupervisorStartupResources(state: SupervisorInternalState): Promise<void> {
   if (state.cleanupDone) return;
   state.cleanupDone = true;
+
+  // Emit supervisor:stop only when startup completed
+  if (state.startupComplete) {
+    emitSupervisorHook(state.hookRegistry, "supervisor:stop", {
+      pid: process.pid,
+      clean: state.shutdownClean ?? false,
+      reason: state.shutdownReason ?? "unknown",
+    });
+  }
 
   // 1. Clear timers
   if (state.pruneTimer !== undefined) {
@@ -295,6 +331,9 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
   const shutdown = (signalName?: string) => {
     if (state.shutdownStarted) {
       logWarning("Forced exit on second signal");
+      state.drainCancelled = true;
+      state.shutdownClean = false;
+      state.shutdownReason = "forced-signal";
       state.running = false;
       cleanupSupervisorStartupResources(state).then(() => {
         state.exit(1);
@@ -309,6 +348,14 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       await writeGatewayState(homeDir, { lifecycle: "draining", startedAt, pid: process.pid, version });
       logInfo("Draining, waiting for active turns...");
 
+      emitSupervisorHook(state.hookRegistry, "supervisor:drain:start", {
+        pid: process.pid,
+        reason: signalName ?? "unknown",
+        activeTurnCount: state.activeTurnRegistry?.stats().activeTurnCount ?? 0,
+        timeoutMs: options.drainTimeoutMs ?? 30_000,
+      });
+
+      const drainStartMs = Date.now();
       const drainTimeoutMs = options.drainTimeoutMs ?? 30_000;
       const pollIntervalMs = 500;
       const deadline = Date.now() + drainTimeoutMs;
@@ -323,6 +370,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
         await sleep(pollIntervalMs);
       }
 
+      let abortedTurnCount = 0;
       if (drained) {
         logInfo("Drain complete");
         await writeCleanShutdownMarker(homeDir, {
@@ -331,13 +379,29 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           version,
           reason: "drain",
         });
+        state.shutdownClean = true;
+        state.shutdownReason = "drain";
       } else {
         logWarning("Drain timeout, aborting remaining turns");
-        const abortedCount = state.activeTurnRegistry?.abortAllTurns("drain-timeout") ?? 0;
-        logWarning(`Aborted ${abortedCount} turn(s)`);
+        abortedTurnCount = state.activeTurnRegistry?.abortAllTurns("drain-timeout") ?? 0;
+        logWarning(`Aborted ${abortedTurnCount} turn(s)`);
         // Brief grace for aborts to propagate before cleanup
         await sleep(500);
+        state.shutdownClean = false;
+        state.shutdownReason = "drain-timeout";
       }
+
+      if (state.drainCancelled || state.cleanupDone) {
+        return;
+      }
+
+      emitSupervisorHook(state.hookRegistry, "supervisor:drain:complete", {
+        pid: process.pid,
+        completed: drained,
+        timedOut: !drained,
+        abortedTurnCount,
+        durationMs: Date.now() - drainStartMs,
+      });
 
       state.running = false;
       await cleanupSupervisorStartupResources(state);
@@ -465,6 +529,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     state.activeTurnRegistry = activeTurnRegistry;
 
     const hookRegistry = new HookRegistry({ logWarning });
+    state.hookRegistry = hookRegistry;
 
     const runtimeCache = new RuntimeCache({
       createRuntime: (input) =>
@@ -815,10 +880,19 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
 
     // 12. Start adapters through ChannelGateway (wrappers swallow errors)
     await gateway.start();
+    state.startupComplete = true;
 
     if (configured.length > 0) {
       logInfo(`Started ${configured.length} adapter(s): ${configured.map((c) => c.kind).join(", ")}`);
     }
+
+    emitSupervisorHook(state.hookRegistry, "supervisor:start", {
+      pid: process.pid,
+      startedAt,
+      version,
+      adapterKinds: configured.map((c) => c.kind),
+      mode: configured.length === 0 ? "cron-only" : "adapters",
+    });
 
     // 12a. Start background timers
     const PRUNE_INTERVAL_MS = 60_000;
@@ -956,6 +1030,9 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       }
     } while (state.running);
 
+    state.shutdownClean = true;
+    state.shutdownReason = "once";
+
     // Write final runtime state before shutdown
     await writeRuntimeState();
 
@@ -969,6 +1046,20 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       processed,
     };
   } catch (error) {
+    const { errorClass, errorMessage } = sanitizeHookError(error);
+    const phase = state.startupComplete ? "main-loop" : "startup";
+    emitSupervisorHook(state.hookRegistry, "supervisor:crash", {
+      pid: process.pid,
+      phase,
+      errorClass,
+      errorMessage,
+    });
+
+    if (state.startupComplete) {
+      state.shutdownClean = false;
+      state.shutdownReason = "crash";
+    }
+
     const message = error instanceof Error ? error.message : String(error);
     await cleanupSupervisorStartupResources(state);
     return {
