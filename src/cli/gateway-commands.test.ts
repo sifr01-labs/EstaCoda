@@ -27,6 +27,8 @@ import * as lifecycleModule from "../gateway/supervisor-lifecycle.js";
 import { acquireAdapterIdentityLock, listAdapterIdentityLocks } from "../gateway/identity-lock.js";
 import { writeRuntimeCacheState, runtimeCacheStatePath } from "../gateway/runtime-cache-state.js";
 import type { RuntimeCacheState } from "../gateway/runtime-cache-state.js";
+import { writeAdapterRuntimeState, RUNTIME_STATE_FILE } from "../gateway/adapter-runtime-state.js";
+import type { PersistedRuntimeState, AdapterRuntimeState } from "../gateway/adapter-runtime-state.js";
 
 function fakeRuntimeCacheState(overrides?: Partial<RuntimeCacheState>): RuntimeCacheState {
   return {
@@ -56,6 +58,47 @@ function fakeRuntimeCacheState(overrides?: Partial<RuntimeCacheState>): RuntimeC
     fingerprintHash: "abc123def4567890",
     ...overrides,
   };
+}
+
+function fakeAdapterRuntimeState(
+  kind: "telegram" | "discord" | "email" | "whatsapp",
+  overrides?: Partial<PersistedRuntimeState>,
+  adapterOverrides?: Partial<AdapterRuntimeState>
+): PersistedRuntimeState {
+  return {
+    supervisorPid: process.pid,
+    supervisorStartedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    adapters: [
+      {
+        kind,
+        state: "healthy",
+        pollsTotal: 5,
+        pollsFailed: 0,
+        pollMessagesProcessed: 3,
+        ...adapterOverrides,
+      },
+    ],
+    ...overrides,
+  };
+}
+
+async function writeUserConfig(homeDir: string, config: unknown): Promise<void> {
+  const configPath = join(homeDir, ".estacoda", "config.json");
+  await mkdir(dirname(configPath), { recursive: true });
+  await writeFile(configPath, JSON.stringify(config), "utf8");
+}
+
+async function writeRawAdapterRuntimeState(homeDir: string, content: string): Promise<void> {
+  const path = join(homeDir, ".estacoda", "gateway", RUNTIME_STATE_FILE);
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, content, "utf8");
+}
+
+async function writeStaleLock(homeDir: string, kind: string, content: string): Promise<void> {
+  const locksDir = join(homeDir, ".estacoda", "gateway", "locks");
+  await mkdir(locksDir, { recursive: true });
+  await writeFile(join(locksDir, `identity-${kind}-deadbeef.lock`), content, "utf8");
 }
 
 async function makeTempDir(): Promise<string> {
@@ -433,6 +476,10 @@ describe("gateway commands", () => {
       expect(result.ok).toBe(true);
       expect(result.output).toContain("Telegram channel status");
       expect(result.output).toContain("Enabled:");
+      expect(result.output).toContain("Runtime state: unavailable (supervisor not running)");
+      expect(result.output).toContain("Identity lock: unlocked");
+      expect(result.output).toContain("Busy policy: reject");
+      expect(result.output).toContain("Queue depth: 3");
     });
 
     it("returns discord status", async () => {
@@ -461,6 +508,130 @@ describe("gateway commands", () => {
       expect(result.ok).toBe(false);
       expect(result.output).toContain("Unknown channel");
     });
+
+    describe("telegram runtime extension", () => {
+      it("shows adapter runtime state when supervisor is live and state is trustworthy", async () => {
+        await writeGatewayPid(tmpDir, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
+        await writeAdapterRuntimeState(tmpDir, fakeAdapterRuntimeState("telegram"));
+
+        const result = await runChannelsStatus({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+        expect(result.output).toContain("State: healthy");
+        expect(result.output).toContain("Polls: 5");
+        expect(result.output).toContain("Processed: 3");
+        expect(result.output).toContain("Failed: 0");
+      });
+
+      it("shows unavailable when supervisor is not live", async () => {
+        await writeAdapterRuntimeState(tmpDir, fakeAdapterRuntimeState("telegram"));
+
+        const result = await runChannelsStatus({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+        expect(result.output).toContain("Runtime state: unavailable (supervisor not running)");
+        expect(result.output).not.toContain("Polls: 5");
+      });
+
+      it("shows unavailable when runtime state file is missing", async () => {
+        await writeGatewayPid(tmpDir, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
+
+        const result = await runChannelsStatus({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+        expect(result.output).toContain("Runtime state: unavailable (adapter runtime state not found)");
+      });
+
+      it("shows unavailable when runtime state file is corrupt", async () => {
+        await writeGatewayPid(tmpDir, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
+        await writeRawAdapterRuntimeState(tmpDir, "{ not json");
+
+        const result = await runChannelsStatus({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+        expect(result.output).toContain("Runtime state: unavailable (adapter runtime state unreadable)");
+      });
+
+      it("shows stale warning when runtime state is old", async () => {
+        await writeGatewayPid(tmpDir, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
+        await writeAdapterRuntimeState(tmpDir, fakeAdapterRuntimeState("telegram", { updatedAt: new Date(Date.now() - 6 * 60 * 1000).toISOString() }));
+
+        const result = await runChannelsStatus({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+        expect(result.output).toContain("Runtime state: stale (last update >5min ago)");
+      });
+
+      it("shows stale warning when runtime state PID mismatches", async () => {
+        await writeGatewayPid(tmpDir, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
+        await writeAdapterRuntimeState(tmpDir, fakeAdapterRuntimeState("telegram", { supervisorPid: 99999 }));
+
+        const result = await runChannelsStatus({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+        expect(result.output).toContain("Runtime state: stale (supervisor restarted since last update)");
+      });
+
+      it("shows not-registered when adapter entry is missing", async () => {
+        await writeGatewayPid(tmpDir, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
+        await writeAdapterRuntimeState(tmpDir, { ...fakeAdapterRuntimeState("discord"), adapters: [] });
+
+        const result = await runChannelsStatus({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+        expect(result.output).toContain("Adapter: not registered in runtime state");
+      });
+
+      it("shows identity lock status when locked", async () => {
+        await acquireAdapterIdentityLock(tmpDir, "telegram", "a".repeat(64));
+
+        const result = await runChannelsStatus({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+        expect(result.output).toContain(`Identity lock: locked (pid ${process.pid})`);
+      });
+
+      it("shows identity lock status when stale", async () => {
+        await writeStaleLock(tmpDir, "telegram", JSON.stringify({ pid: 99999, startedAt: new Date().toISOString() }));
+
+        const result = await runChannelsStatus({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+        expect(result.output).toContain("Identity lock: stale (pid 99999, dead)");
+      });
+
+      it("shows identity lock status when corrupt", async () => {
+        await writeStaleLock(tmpDir, "telegram", "not json");
+
+        const result = await runChannelsStatus({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+        expect(result.output).toContain("Identity lock: corrupt");
+      });
+
+      it("shows identity lock status when unlocked", async () => {
+        const result = await runChannelsStatus({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+        expect(result.output).toContain("Identity lock: unlocked");
+      });
+
+      it("shows busy policy and queue depth from config", async () => {
+        await writeUserConfig(tmpDir, { channels: { telegram: { enabled: true, busyPolicy: "queue", queueDepth: 7 } } });
+
+        const result = await runChannelsStatus({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+        expect(result.output).toContain("Busy policy: queue");
+        expect(result.output).toContain("Queue depth: 7");
+      });
+
+      it("shows default busy policy and queue depth when not configured", async () => {
+        await writeUserConfig(tmpDir, { channels: { telegram: { enabled: true } } });
+
+        const result = await runChannelsStatus({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+        expect(result.output).toContain("Busy policy: reject");
+        expect(result.output).toContain("Queue depth: 3");
+      });
+
+      it("shows busy policy interrupt when configured", async () => {
+        await writeUserConfig(tmpDir, { channels: { telegram: { enabled: true, busyPolicy: "interrupt" } } });
+
+        const result = await runChannelsStatus({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: "telegram" });
+        expect(result.output).toContain("Busy policy: interrupt");
+        expect(result.output).not.toContain("drop");
+      });
+    });
+
+    for (const channel of ["discord", "email", "whatsapp"] as const) {
+      it(`shows runtime state, identity lock, and busy policy for ${channel}`, async () => {
+        await writeGatewayPid(tmpDir, { pid: process.pid, startedAt: new Date().toISOString(), version: "0.0.5" });
+        await writeAdapterRuntimeState(tmpDir, fakeAdapterRuntimeState(channel));
+        await acquireAdapterIdentityLock(tmpDir, channel, "b".repeat(64));
+
+        const result = await runChannelsStatus({ workspaceRoot: tmpDir, homeDir: tmpDir, channel });
+        expect(result.output).toContain("State: healthy");
+        expect(result.output).toContain("Identity lock:");
+        expect(result.output).toContain("Busy policy:");
+        expect(result.output).toContain("Queue depth:");
+      });
+    }
   });
 
   describe("runGatewayStop", () => {

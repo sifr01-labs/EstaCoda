@@ -573,6 +573,10 @@ Allowed chats: none
 Group sessions per user: yes
 Thread sessions per user: no
 Session reset policy: none
+Busy policy: reject
+Queue depth: 3
+Identity lock: unlocked
+Runtime state: unavailable (supervisor not running)
 
 Capabilities
 Enabled: no
@@ -606,6 +610,10 @@ Allowed chats: none
 Group sessions per user: yes
 Thread sessions per user: no
 Session reset policy: none
+Busy policy: reject
+Queue depth: 3
+Identity lock: unlocked
+Runtime state: unavailable (supervisor not running)
 
 \x1B[1mCapabilities\x1B[0m
 Enabled: no
@@ -639,6 +647,10 @@ Allowed chats: none
 Group sessions per user: yes
 Thread sessions per user: no
 Session reset policy: none
+Busy policy: reject
+Queue depth: 3
+Identity lock: unlocked
+Runtime state: unavailable (supervisor not running)
 
 \x1B[1mCapabilities\x1B[0m
 Enabled: no
@@ -672,6 +684,10 @@ Allowed chats: none
 Group sessions per user: yes
 Thread sessions per user: no
 Session reset policy: none
+Busy policy: reject
+Queue depth: 3
+Identity lock: unlocked
+Runtime state: unavailable (supervisor not running)
 
 Capabilities
 Enabled: no
@@ -705,6 +721,10 @@ Allowed chats: none
 Group sessions per user: yes
 Thread sessions per user: no
 Session reset policy: none
+Busy policy: reject
+Queue depth: 3
+Identity lock: unlocked
+Runtime state: unavailable (supervisor not running)
 
 \x1B[1mCapabilities\x1B[0m
 Enabled: no
@@ -738,6 +758,10 @@ Allowed chats: none
 Group sessions per user: yes
 Thread sessions per user: no
 Session reset policy: none
+Busy policy: reject
+Queue depth: 3
+Identity lock: unlocked
+Runtime state: unavailable (supervisor not running)
 
 \x1B[1mCapabilities\x1B[0m
 Enabled: no

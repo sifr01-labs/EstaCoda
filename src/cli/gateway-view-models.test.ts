@@ -4,8 +4,9 @@ import {
   buildGatewayStatusViewModel,
   buildGatewayDiagnoseViewModel,
   buildChannelsListViewModel,
+  buildChannelsStatusViewModel,
 } from "./gateway-view-models.js";
-import type { GatewayStatusData, GatewayDiagnoseData } from "./gateway-view-models.js";
+import type { GatewayStatusData, GatewayDiagnoseData, ChannelsStatusData } from "./gateway-view-models.js";
 
 function baseStatusData(): GatewayStatusData {
   return {
@@ -79,6 +80,47 @@ function baseDiagnoseData(note?: GatewayDiagnoseData["runtimeStateNote"], cacheN
     approvalCount: 0,
     recentDeliveryErrors: [],
     channels: baseStatusData().channels,
+  };
+}
+
+function baseChannelsStatusData(overrides?: Partial<NonNullable<ChannelsStatusData["telegram"]>>): ChannelsStatusData {
+  return {
+    channel: "telegram",
+    telegram: {
+      diag: {
+        adapter: "telegram",
+        enabled: true,
+        ready: true,
+        statusLabel: "ready",
+        modelRoute: "openai/gpt-4",
+        contextWindowTokens: 8192,
+        securityLabel: "allowlist",
+        allowedUserIds: [],
+        allowedChatIds: [],
+        groupSessionsPerUser: true,
+        threadSessionsPerUser: false,
+        sessionResetPolicy: "none",
+        botTokenEnv: "BOT_TOKEN",
+        botTokenPresent: true,
+        defaultChatId: "123",
+        missing: [],
+        processMode: "foreground",
+        logsLocation: "stdout",
+        stateRoot: "/tmp/.estacoda",
+        sessionDbPath: "/tmp/.estacoda/sessions.sqlite",
+        mediaRoot: "/tmp/.estacoda/channel-media",
+        approvalStorePath: "/tmp/.estacoda/channel-approvals.json",
+        sessionContextPath: "/tmp/.estacoda/channel-sessions.json",
+        configSources: [],
+      },
+      pointers: [],
+      capability: { kind: "telegram", enabled: true, configured: true, inboundMode: "websocket", outboundMode: "push", supportsAttachments: true, supportsThreads: true, supportsApprovals: false, supportsProgressStreaming: false, experimental: false, implementationStatus: "live_proven", missingConfig: undefined },
+      runtimeStateNote: "unavailable (supervisor not running)",
+      identityLock: undefined,
+      busyPolicy: "reject",
+      queueDepth: 3,
+      ...overrides,
+    },
   };
 }
 
@@ -253,6 +295,78 @@ describe("buildGatewayDiagnoseViewModel", () => {
     const vm = buildGatewayDiagnoseViewModel(data);
     const rendered = renderPlain(vm);
     expect(rendered).toContain("[INFO] Channels: telegram queue depth is 7 (potential memory pressure)");
+  });
+});
+
+describe("buildChannelsStatusViewModel runtime extension", () => {
+  it("renders busy policy and queue depth", () => {
+    const rendered = renderPlain(buildChannelsStatusViewModel(baseChannelsStatusData({ busyPolicy: "queue", queueDepth: 7 })));
+    expect(rendered).toContain("Busy policy: queue");
+    expect(rendered).toContain("Queue depth: 7");
+  });
+
+  it("renders default busy policy and queue depth", () => {
+    const rendered = renderPlain(buildChannelsStatusViewModel(baseChannelsStatusData()));
+    expect(rendered).toContain("Busy policy: reject");
+    expect(rendered).toContain("Queue depth: 3");
+  });
+
+  it("renders busy policy interrupt", () => {
+    const rendered = renderPlain(buildChannelsStatusViewModel(baseChannelsStatusData({ busyPolicy: "interrupt" })));
+    expect(rendered).toContain("Busy policy: interrupt");
+    expect(rendered).not.toContain("drop");
+  });
+
+  it("renders identity lock locked", () => {
+    const rendered = renderPlain(buildChannelsStatusViewModel(baseChannelsStatusData({ identityLock: { kind: "telegram", state: "locked", pid: 12345 } })));
+    expect(rendered).toContain("Identity lock: locked (pid 12345)");
+  });
+
+  it("renders identity lock stale", () => {
+    const rendered = renderPlain(buildChannelsStatusViewModel(baseChannelsStatusData({ identityLock: { kind: "telegram", state: "stale", pid: 99999 } })));
+    expect(rendered).toContain("Identity lock: stale (pid 99999, dead)");
+  });
+
+  it("renders identity lock corrupt", () => {
+    const rendered = renderPlain(buildChannelsStatusViewModel(baseChannelsStatusData({ identityLock: { kind: "telegram", state: "stale", pid: -1 } })));
+    expect(rendered).toContain("Identity lock: corrupt");
+  });
+
+  it("renders identity lock unlocked", () => {
+    const rendered = renderPlain(buildChannelsStatusViewModel(baseChannelsStatusData({ identityLock: undefined })));
+    expect(rendered).toContain("Identity lock: unlocked");
+  });
+
+  it("renders runtime state unavailable when supervisor not running", () => {
+    const rendered = renderPlain(buildChannelsStatusViewModel(baseChannelsStatusData({ runtimeStateNote: "unavailable (supervisor not running)" })));
+    expect(rendered).toContain("Runtime state: unavailable (supervisor not running)");
+  });
+
+  it("renders runtime state stale when old", () => {
+    const rendered = renderPlain(buildChannelsStatusViewModel(baseChannelsStatusData({ runtimeStateNote: "stale (last update >5min ago)" })));
+    expect(rendered).toContain("Runtime state: stale (last update >5min ago)");
+  });
+
+  it("renders adapter runtime details when trusted", () => {
+    const rendered = renderPlain(buildChannelsStatusViewModel(baseChannelsStatusData({
+      runtimeStateNote: undefined,
+      adapterRuntime: {
+        kind: "telegram",
+        state: "healthy",
+        pollsTotal: 5,
+        pollMessagesProcessed: 3,
+        pollsFailed: 0,
+      },
+    })));
+    expect(rendered).toContain("State: healthy");
+    expect(rendered).toContain("Polls: 5");
+    expect(rendered).toContain("Processed: 3");
+    expect(rendered).toContain("Failed: 0");
+  });
+
+  it("renders not-registered when adapter entry missing", () => {
+    const rendered = renderPlain(buildChannelsStatusViewModel(baseChannelsStatusData({ runtimeStateNote: undefined, adapterRuntime: undefined })));
+    expect(rendered).toContain("Adapter: not registered in runtime state");
   });
 });
 

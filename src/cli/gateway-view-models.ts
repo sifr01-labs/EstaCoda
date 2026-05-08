@@ -14,7 +14,7 @@ import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import type { TelegramGatewayDiagnostics } from "../channels/gateway-runner.js";
 import type { WhatsAppGatewayDiagnostics } from "../channels/whatsapp-diagnostics.js";
 import type { DeliveryErrorRecord } from "../channels/delivery-router.js";
-import type { PersistedRuntimeState } from "../gateway/adapter-runtime-state.js";
+import type { PersistedRuntimeState, AdapterRuntimeState } from "../gateway/adapter-runtime-state.js";
 import type { RuntimeCacheState } from "../gateway/runtime-cache-state.js";
 import {
   buildCommandResultViewModel,
@@ -655,28 +655,85 @@ export type ChannelsStatusData = {
     readonly diag: TelegramGatewayDiagnostics;
     readonly pointers: GatewayStatusData["surfacePointers"];
     readonly capability: AdapterCapability;
+    readonly runtimeStateNote?: string;
+    readonly adapterRuntime?: AdapterRuntimeState;
+    readonly identityLock?: IdentityLockStatus;
+    readonly busyPolicy: string;
+    readonly queueDepth: number;
   };
   readonly discord?: {
     readonly config: LoadedRuntimeConfig["channels"]["discord"];
     readonly pointers: GatewayStatusData["surfacePointers"];
     readonly capability: AdapterCapability;
+    readonly runtimeStateNote?: string;
+    readonly adapterRuntime?: AdapterRuntimeState;
+    readonly identityLock?: IdentityLockStatus;
+    readonly busyPolicy: string;
+    readonly queueDepth: number;
   };
   readonly email?: {
     readonly config: LoadedRuntimeConfig["channels"]["email"];
     readonly pointers: GatewayStatusData["surfacePointers"];
     readonly capability: AdapterCapability;
+    readonly runtimeStateNote?: string;
+    readonly adapterRuntime?: AdapterRuntimeState;
+    readonly identityLock?: IdentityLockStatus;
+    readonly busyPolicy: string;
+    readonly queueDepth: number;
   };
   readonly whatsapp?: {
     readonly diag: WhatsAppGatewayDiagnostics;
     readonly config: LoadedRuntimeConfig["channels"]["whatsapp"];
     readonly pointers: GatewayStatusData["surfacePointers"];
     readonly capability: AdapterCapability;
+    readonly runtimeStateNote?: string;
+    readonly adapterRuntime?: AdapterRuntimeState;
+    readonly identityLock?: IdentityLockStatus;
+    readonly busyPolicy: string;
+    readonly queueDepth: number;
   };
 };
 
+function channelLockLabel(lock: IdentityLockStatus | undefined): string {
+  if (lock === undefined) return "unlocked";
+  if (lock.state === "locked") return `locked (pid ${lock.pid})`;
+  if (lock.state === "stale" && lock.pid === -1) return "corrupt";
+  if (lock.state === "stale") return `stale (pid ${lock.pid}, dead)`;
+  return lock.state;
+}
+
+function buildChannelRuntimeEntries(
+  runtimeStateNote: string | undefined,
+  adapterRuntime: AdapterRuntimeState | undefined
+): KeyValueEntry[] {
+  if (runtimeStateNote !== undefined) {
+    return [kv("Runtime state", runtimeStateNote)];
+  }
+  if (adapterRuntime === undefined) {
+    return [kv("Adapter", "not registered in runtime state")];
+  }
+  const entries: KeyValueEntry[] = [kv("State", adapterRuntime.state)];
+  if (adapterRuntime.pendingOperation !== undefined) {
+    entries.push(kv("Pending", adapterRuntime.pendingOperation));
+  }
+  if (adapterRuntime.lastError !== undefined) {
+    entries.push(kv("Last error", `${adapterRuntime.lastError.message} (x${adapterRuntime.lastError.count})`));
+  }
+  if (adapterRuntime.retry !== undefined) {
+    entries.push(kv("Retry", `${adapterRuntime.retry.attempt}/${adapterRuntime.retry.maxAttempts} at ${adapterRuntime.retry.nextRetryAt}`));
+  }
+  entries.push(kv("Polls", String(adapterRuntime.pollsTotal)));
+  entries.push(kv("Processed", String(adapterRuntime.pollMessagesProcessed)));
+  entries.push(kv("Failed", String(adapterRuntime.pollsFailed)));
+  if (adapterRuntime.startedAt !== undefined) {
+    entries.push(kv("Started", adapterRuntime.startedAt));
+  }
+  return entries;
+}
+
 export function buildChannelsStatusViewModel(data: ChannelsStatusData): CommandResultViewModel | PlainFallbackViewModel {
   if (data.channel === "telegram" && data.telegram !== undefined) {
-    const { diag, pointers, capability } = data.telegram;
+    const { diag, pointers, capability, runtimeStateNote, adapterRuntime, identityLock, busyPolicy, queueDepth } = data.telegram;
     const entries: KeyValueEntry[] = [
       kv("Enabled", diag.enabled ? "yes" : "no"),
       kv("Ready", diag.ready ? "yes" : "no"),
@@ -690,6 +747,10 @@ export function buildChannelsStatusViewModel(data: ChannelsStatusData): CommandR
       kv("Group sessions per user", diag.groupSessionsPerUser ? "yes" : "no"),
       kv("Thread sessions per user", diag.threadSessionsPerUser ? "yes" : "no"),
       kv("Session reset policy", diag.sessionResetPolicy),
+      kv("Busy policy", busyPolicy),
+      kv("Queue depth", String(queueDepth)),
+      kv("Identity lock", channelLockLabel(identityLock)),
+      ...buildChannelRuntimeEntries(runtimeStateNote, adapterRuntime),
     ];
     if (diag.sessionIdleResetMinutes !== undefined) {
       entries.push(kv("Session idle reset", `${diag.sessionIdleResetMinutes} min`));
@@ -706,7 +767,7 @@ export function buildChannelsStatusViewModel(data: ChannelsStatusData): CommandR
   }
 
   if (data.channel === "discord" && data.discord !== undefined) {
-    const { config, pointers, capability } = data.discord;
+    const { config, pointers, capability, runtimeStateNote, adapterRuntime, identityLock, busyPolicy, queueDepth } = data.discord;
     const tokenPresent = config.botTokenEnv !== undefined && process.env[config.botTokenEnv] !== undefined;
     return buildCommandResultViewModel({
       ok: true,
@@ -721,6 +782,10 @@ export function buildChannelsStatusViewModel(data: ChannelsStatusData): CommandR
             kv("Allowed users", (config.allowedUsers ?? []).join(", ") || "none"),
             kv("Allowed guilds", (config.allowedGuilds ?? []).join(", ") || "none"),
             kv("Allowed channels", (config.allowedChannels ?? []).join(", ") || "none"),
+            kv("Busy policy", busyPolicy),
+            kv("Queue depth", String(queueDepth)),
+            kv("Identity lock", channelLockLabel(identityLock)),
+            ...buildChannelRuntimeEntries(runtimeStateNote, adapterRuntime),
           ],
         }),
         buildCapabilitiesBlock(capability),
@@ -730,7 +795,7 @@ export function buildChannelsStatusViewModel(data: ChannelsStatusData): CommandR
   }
 
   if (data.channel === "email" && data.email !== undefined) {
-    const { config, pointers, capability } = data.email;
+    const { config, pointers, capability, runtimeStateNote, adapterRuntime, identityLock, busyPolicy, queueDepth } = data.email;
     const passwordPresent = config.passwordEnv !== undefined && process.env[config.passwordEnv] !== undefined;
     return buildCommandResultViewModel({
       ok: true,
@@ -748,6 +813,10 @@ export function buildChannelsStatusViewModel(data: ChannelsStatusData): CommandR
             kv("Home address", config.homeAddress ?? "(unset)"),
             kv("Allowed senders", (config.allowedSenders ?? []).join(", ") || "none"),
             kv("Allow all users", config.allowAllUsers ? "yes" : "no"),
+            kv("Busy policy", busyPolicy),
+            kv("Queue depth", String(queueDepth)),
+            kv("Identity lock", channelLockLabel(identityLock)),
+            ...buildChannelRuntimeEntries(runtimeStateNote, adapterRuntime),
           ],
         }),
         buildCapabilitiesBlock(capability),
@@ -757,7 +826,7 @@ export function buildChannelsStatusViewModel(data: ChannelsStatusData): CommandR
   }
 
   if (data.channel === "whatsapp" && data.whatsapp !== undefined) {
-    const { diag, config, pointers, capability } = data.whatsapp;
+    const { diag, config, pointers, capability, runtimeStateNote, adapterRuntime, identityLock, busyPolicy, queueDepth } = data.whatsapp;
     return buildCommandResultViewModel({
       ok: true,
       title: "WhatsApp channel status",
@@ -773,6 +842,10 @@ export function buildChannelsStatusViewModel(data: ChannelsStatusData): CommandR
             kv("Auth dir writable", diag.authDirWritable ? "yes" : "no"),
             kv("Allowed users", (config.allowedUsers ?? []).join(", ") || "none"),
             kv("Pairing mode", config.pairingMode ?? "qr"),
+            kv("Busy policy", busyPolicy),
+            kv("Queue depth", String(queueDepth)),
+            kv("Identity lock", channelLockLabel(identityLock)),
+            ...buildChannelRuntimeEntries(runtimeStateNote, adapterRuntime),
           ],
         }),
         buildCapabilitiesBlock(capability),

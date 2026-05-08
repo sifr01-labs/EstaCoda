@@ -1,5 +1,5 @@
 import { join, dirname } from "node:path";
-import { access, constants, readFile, writeFile, mkdir, rm, rename } from "node:fs/promises";
+import { access, constants, readFile, writeFile, mkdir, rm, rename, stat } from "node:fs/promises";
 import { Database } from "bun:sqlite";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
 import { getTelegramGatewayDiagnostics } from "../channels/gateway-runner.js";
@@ -42,7 +42,7 @@ import {
   deriveWhatsAppIdentityHash,
 } from "../channels/adapter-identity.js";
 import type { IdentityLockStatus } from "./gateway-view-models.js";
-import { readAdapterRuntimeState, isRuntimeStateFresh, isRuntimeStatePidMatch } from "../gateway/adapter-runtime-state.js";
+import { readAdapterRuntimeState, isRuntimeStateFresh, isRuntimeStatePidMatch, RUNTIME_STATE_FILE } from "../gateway/adapter-runtime-state.js";
 import type { PersistedRuntimeState } from "../gateway/adapter-runtime-state.js";
 import {
   runtimeCacheStatePath,
@@ -338,6 +338,77 @@ export async function runChannelsList(
 // Channels Status
 // ─────────────────────────────────────────────────────────────
 
+async function detectRuntimeStatePresence(homeDir: string): Promise<"missing" | "unreadable" | "present"> {
+  const path = join(homeDir, ".estacoda", "gateway", RUNTIME_STATE_FILE);
+  try {
+    await stat(path);
+  } catch (error) {
+    const code = error instanceof Error && "code" in error ? String((error as { code?: unknown }).code) : "";
+    if (code === "ENOENT") return "missing";
+    return "unreadable";
+  }
+
+  const state = await readAdapterRuntimeState(homeDir);
+  return state === undefined ? "unreadable" : "present";
+}
+
+type ChannelRuntimeStatus = {
+  readonly runtimeStateNote?: string;
+  readonly runtimeState?: PersistedRuntimeState;
+};
+
+async function buildChannelRuntimeStatus(homeDir: string): Promise<ChannelRuntimeStatus> {
+  const pidRecord = await readGatewayPid(homeDir);
+  if (pidRecord === undefined || await isStalePid(homeDir)) {
+    return { runtimeStateNote: "unavailable (supervisor not running)" };
+  }
+
+  const presence = await detectRuntimeStatePresence(homeDir);
+  if (presence === "missing") {
+    return { runtimeStateNote: "unavailable (adapter runtime state not found)" };
+  }
+  if (presence === "unreadable") {
+    return { runtimeStateNote: "unavailable (adapter runtime state unreadable)" };
+  }
+
+  const runtimeState = await readAdapterRuntimeState(homeDir);
+  if (runtimeState === undefined) {
+    return { runtimeStateNote: "unavailable (adapter runtime state unreadable)" };
+  }
+  if (!isRuntimeStateFresh(runtimeState)) {
+    return { runtimeStateNote: "stale (last update >5min ago)" };
+  }
+  if (!isRuntimeStatePidMatch(runtimeState, pidRecord.pid)) {
+    return { runtimeStateNote: "stale (supervisor restarted since last update)" };
+  }
+
+  return { runtimeState };
+}
+
+function selectIdentityLockStatus(
+  locks: Awaited<ReturnType<typeof listAdapterIdentityLocks>>,
+  kind: string
+): IdentityLockStatus | undefined {
+  const lock = locks.find((l) => l.kind === kind);
+  if (lock === undefined) return undefined;
+  return { kind: lock.kind, state: lock.stale ? "stale" : "locked", pid: lock.pid };
+}
+
+function runtimeFieldsForChannel(
+  kind: "telegram" | "discord" | "email" | "whatsapp",
+  runtimeStatus: ChannelRuntimeStatus,
+  locks: Awaited<ReturnType<typeof listAdapterIdentityLocks>>,
+  channel: { busyPolicy?: string; queueDepth?: number }
+): Pick<NonNullable<ChannelsStatusData[typeof kind]>, "runtimeStateNote" | "adapterRuntime" | "identityLock" | "busyPolicy" | "queueDepth"> {
+  return {
+    runtimeStateNote: runtimeStatus.runtimeStateNote,
+    adapterRuntime: runtimeStatus.runtimeState?.adapters.find((a) => a.kind === kind),
+    identityLock: selectIdentityLockStatus(locks, kind),
+    busyPolicy: channel.busyPolicy ?? "reject",
+    queueDepth: channel.queueDepth ?? 3,
+  };
+}
+
 export async function runChannelsStatus(
   options: GatewayCommandOptions & { channel?: string },
   renderer: GatewayRenderer = renderPlain
@@ -350,6 +421,8 @@ export async function runChannelsStatus(
   const surfacePointers = await surfacePointerStore.listPointers();
 
   const registry = new AdapterRegistry(config.channels);
+  const runtimeStatus = await buildChannelRuntimeStatus(homeDir);
+  const identityLocks = await listAdapterIdentityLocks(homeDir);
 
   const channel = options.channel?.toLowerCase();
 
@@ -359,7 +432,12 @@ export async function runChannelsStatus(
 
     const data: ChannelsStatusData = {
       channel: "telegram",
-      telegram: { diag: tgDiag, pointers: tgPointers, capability: registry.get("telegram")! },
+      telegram: {
+        diag: tgDiag,
+        pointers: tgPointers,
+        capability: registry.get("telegram")!,
+        ...runtimeFieldsForChannel("telegram", runtimeStatus, identityLocks, config.channels.telegram),
+      },
     };
     const viewModel = buildChannelsStatusViewModel(data);
     return { ok: viewModel.kind !== "plainFallback", output: renderer(viewModel) };
@@ -370,7 +448,12 @@ export async function runChannelsStatus(
 
     const data: ChannelsStatusData = {
       channel: "discord",
-      discord: { config: config.channels.discord, pointers: dcPointers, capability: registry.get("discord")! },
+      discord: {
+        config: config.channels.discord,
+        pointers: dcPointers,
+        capability: registry.get("discord")!,
+        ...runtimeFieldsForChannel("discord", runtimeStatus, identityLocks, config.channels.discord),
+      },
     };
     const viewModel = buildChannelsStatusViewModel(data);
     return { ok: true, output: renderer(viewModel) };
@@ -381,7 +464,12 @@ export async function runChannelsStatus(
 
     const data: ChannelsStatusData = {
       channel: "email",
-      email: { config: config.channels.email, pointers: emPointers, capability: registry.get("email")! },
+      email: {
+        config: config.channels.email,
+        pointers: emPointers,
+        capability: registry.get("email")!,
+        ...runtimeFieldsForChannel("email", runtimeStatus, identityLocks, config.channels.email),
+      },
     };
     const viewModel = buildChannelsStatusViewModel(data);
     return { ok: true, output: renderer(viewModel) };
@@ -393,7 +481,13 @@ export async function runChannelsStatus(
 
     const data: ChannelsStatusData = {
       channel: "whatsapp",
-      whatsapp: { diag: waDiag, config: config.channels.whatsapp, pointers: waPointers, capability: registry.get("whatsapp")! },
+      whatsapp: {
+        diag: waDiag,
+        config: config.channels.whatsapp,
+        pointers: waPointers,
+        capability: registry.get("whatsapp")!,
+        ...runtimeFieldsForChannel("whatsapp", runtimeStatus, identityLocks, config.channels.whatsapp),
+      },
     };
     const viewModel = buildChannelsStatusViewModel(data);
     return { ok: true, output: renderer(viewModel) };

@@ -259,6 +259,10 @@ function fakeChannelsStatusData(): ChannelsStatusData {
         { surfaceType: "telegram", surfaceId: "chat-1", record: { sessionId: "sess-1", attachedAt: "2024-01-01T00:00:00Z" } },
       ],
       capability: fakeCapabilities()[0],
+      runtimeStateNote: "unavailable (supervisor not running)",
+      identityLock: undefined,
+      busyPolicy: "reject",
+      queueDepth: 3,
     },
   };
 }
