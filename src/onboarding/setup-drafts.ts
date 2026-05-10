@@ -12,6 +12,11 @@ export type SetupDraftSource =
       readonly kind: "setup-editor";
       readonly sectionId: SetupEditorSectionId;
       readonly actionId: SetupEditorActionId;
+    }
+  | {
+      readonly kind: "setup-module";
+      readonly moduleId: string;
+      readonly actionId: string;
     };
 
 export type SetupDraftKind =
@@ -100,7 +105,10 @@ export type SetupDraft = {
   readonly warnings: readonly string[];
 };
 
-export type SetupDraftBundleSourceKind = "first-run-plan-session" | "setup-editor-plan-session";
+export type SetupDraftBundleSourceKind =
+  | "first-run-plan-session"
+  | "setup-editor-plan-session"
+  | "setup-module-session";
 
 export type SetupDraftBundle = {
   readonly kind: "setup-draft-bundle";

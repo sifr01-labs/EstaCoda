@@ -179,6 +179,28 @@ Credential drafts expose environment variable names only and do not include raw 
 
 Fallback setup is still not reintroduced as `backupForMain`; future fallback representation remains limited to a shared `model.fallbacks` intent.
 
+## O5 Status
+
+`setup-modules.ts` now defines modular setup capability contracts that plug into the O4.5 setup draft boundary. Each module exposes structured `detect()`, `configure()`, `review()`, `toDrafts()`, and read-only `verify()` behavior without terminal rendering or direct mutation.
+
+The initial module set covers:
+
+- primary provider/model route
+- credential references
+- workspace trust
+- security mode
+- workflow learning
+- Telegram
+- voice
+- vision/image generation
+- browser
+
+Modules produce `SetupDraft` objects with a `setup-module` source and can be grouped into a `setup-module-session` draft bundle. Provider setup remains separate from optional capabilities, local providers skip hosted credential drafts, hosted providers require credential environment-variable references, and workspace trust remains separate from provider readiness.
+
+Optional modules are independently skippable. Telegram exposes remote-control identity constraints without printing bot token values. Browser setup records that auto-launch may be requested but does not launch anything during setup planning. Voice and vision/image generation expose provider, model, and environment-variable references without raw hosted secrets. Verification remains read-only.
+
+Broken config contexts produce diagnostic blocker drafts instead of normal config patch drafts. Fallback setup is still not represented as `backupForMain`; future fallback setup remains limited to the shared `model.fallbacks` intent.
+
 ## Next Step
 
-After review, choose the next phase label and scope. A likely next checkpoint is O5: setup modules for capabilities, or a narrowly scoped dry-run review surface if maintainers want to inspect draft bundles before module work. Defer user-facing cutover until first-run, existing-user, partial-config, repair, verify, and launch behavior are all covered by the new architecture.
+After review, the likely next checkpoint is O6: a review manifest or review surface that assembles first-run, guided editor, and setup-module draft bundles for user inspection before any apply/save implementation. Defer user-facing cutover until first-run, existing-user, partial-config, repair, verify, launch, review, and apply behavior are all covered by the new architecture.
