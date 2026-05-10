@@ -6,6 +6,7 @@ export default defineConfig({
     environment: "node",
     include: ["src/**/*.test.ts"],
     exclude: ["node_modules", "dist"],
+    setupFiles: ["src/test/vitest-setup.ts"],
     reporters: ["verbose"],
     coverage: {
       provider: "v8",

@@ -15,6 +15,7 @@ export default defineConfig({
       "src/cron/cron-execution-store.test.ts",
       "src/cron/cron-runner.test.ts",
     ],
+    setupFiles: ["src/test/vitest-setup.ts"],
     reporters: ["verbose"],
   },
   resolve: {

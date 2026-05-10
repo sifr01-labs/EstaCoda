@@ -1,5 +1,6 @@
 import type { SmokeCase, SmokeContext } from "./smoke-case.js";
 import { createSmokeContext } from "./fixtures/shared-setup.js";
+import { installIsolatedStateHome } from "../test/state-home.js";
 
 export type SmokeRunOptions = {
   tag?: string;
@@ -46,35 +47,45 @@ export async function runSmokeCases(
 
   const results: SmokeResult[] = [];
   const startedAt = Date.now();
+  const previousHome = process.env.HOME;
+  installIsolatedStateHome("estacoda-smoke-home-");
 
-  for (const c of filtered) {
-    const caseStart = Date.now();
-    let context: SmokeContext | undefined;
-    try {
-      context = await createSmokeContext();
-      await c.run(context);
-      results.push({
-        id: c.id,
-        name: c.name,
-        passed: true,
-        durationMs: Date.now() - caseStart
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      results.push({
-        id: c.id,
-        name: c.name,
-        passed: false,
-        durationMs: Date.now() - caseStart,
-        error: message
-      });
-      if (options.failFast) {
-        break;
+  try {
+    for (const c of filtered) {
+      const caseStart = Date.now();
+      let context: SmokeContext | undefined;
+      try {
+        context = await createSmokeContext();
+        await c.run(context);
+        results.push({
+          id: c.id,
+          name: c.name,
+          passed: true,
+          durationMs: Date.now() - caseStart
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        results.push({
+          id: c.id,
+          name: c.name,
+          passed: false,
+          durationMs: Date.now() - caseStart,
+          error: message
+        });
+        if (options.failFast) {
+          break;
+        }
+      } finally {
+        if (context?.sqliteDb) {
+          try { context.sqliteDb.close(); } catch { /* ignore */ }
+        }
       }
-    } finally {
-      if (context?.sqliteDb) {
-        try { context.sqliteDb.close(); } catch { /* ignore */ }
-      }
+    }
+  } finally {
+    if (previousHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = previousHome;
     }
   }
 
