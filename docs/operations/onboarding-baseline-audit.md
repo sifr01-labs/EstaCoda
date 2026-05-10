@@ -226,6 +226,34 @@ Manifest creation is pure. It does not write config, trust stores, or state file
 
 Broken config bundles produce blocker manifest lines and suppress unsafe normal config write lines. Verification remains read-only. Skipped optional capabilities are omitted from the main review unless a later renderer needs explicit skipped items. `backupForMain` remains absent; future fallback setup remains limited to the shared `model.fallbacks` intent.
 
+## O7 Status
+
+`planSetupApply()` now defines the structured post-review save, verify, and launch handoff architecture. It consumes approved, cancelled, or blocked review decisions and produces either a dry-run save/apply plan or a terminal setup end state without parsing rendered text.
+
+The O7 apply plan models:
+
+- scoped config patch operations
+- credential-reference operations
+- explicit workspace trust grant operations
+- post-save verification requests
+- launch handoff intents
+- apply eligibility blockers and repair intents
+
+The plan layer remains pure. It describes future work but does not write config files, trust stores, secrets, or state files. All operations are marked dry-run, preserve unrelated config where scoped config changes are involved, and keep raw secret values out of review metadata. Workspace trust can only appear as an explicit approved operation.
+
+Apply eligibility now blocks normal apply for broken config or unsafe diagnostic-only states, routes missing credentials to credential repair, and keeps review cancellation from producing any apply plan. Degraded verification remains distinct from ready verification and requires an explicit continue or limited-mode decision before launch. Save failure and blocked verification stop the flow before verify or launch handoff.
+
+The represented end states are:
+
+- `verified-ready`
+- `verified-degraded`
+- `blocked`
+- `cancelled`
+- `saved-not-launched`
+- `launched`
+
+`executeSetupApplyPlan()` provides a narrow future apply interface for tests and later implementation. It can consume structured verification reports, classify ready/degraded/blocked results, and produce launch handoff only for verified-ready or explicitly accepted degraded setup.
+
 ## Next Step
 
-After review, the likely next checkpoint is O7: define the dry-run apply/save planner that consumes approved manifest/draft data and prepares write plans without yet cutting over user-facing setup. Defer user-facing cutover until first-run, existing-user, partial-config, repair, verify, launch, review, and apply behavior are all covered by the new architecture.
+After review, the likely next checkpoint is O8 for the copy, bidi, and prompt-card-facing contracts that can render these structured plans without making them the user-facing setup path yet. Defer user-facing cutover until first-run, existing-user, partial-config, repair, verify, launch, review, and apply behavior are all covered by the new architecture and reviewed together.
