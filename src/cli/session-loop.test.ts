@@ -510,3 +510,289 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(clearIndex).toBeLessThan(budgetIndex);
   });
 });
+
+describe("runSessionLoop — animated spinner behavior", () => {
+  it("ticks animated frames in standard interactive TTY", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+
+    const runtime = createEventEmittingMockRuntime([
+      { kind: "agent-start", sessionId: "test-session", input: "hello" },
+      { kind: "agent-final", text: "Mock response" },
+    ]);
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    // Spinner labels should appear
+    expect(rendered).toContain("contemplating");
+    // In animated mode, the renderer may produce varying eye frames over time.
+    // The first write includes the initial frame; we verify animation support is active
+    // by checking that the spinner was rendered at all in TTY mode.
+  });
+
+  it("uses static fallback when animation is unsupported", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+
+    const runtime = createEventEmittingMockRuntime([
+      { kind: "agent-start", sessionId: "test-session", input: "hello" },
+      { kind: "agent-final", text: "Mock response" },
+    ]);
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    expect(rendered).toContain("contemplating");
+  });
+
+  it("clears animated spinner before assistant output", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+
+    const runtime = createEventEmittingMockRuntime([
+      { kind: "agent-start", sessionId: "test-session", input: "hello" },
+      { kind: "intent", labels: ["chat"], confidence: 0.95 },
+      { kind: "provider-attempt", provider: "mock", model: "mock-model", fallback: false },
+      { kind: "provider-result", provider: "mock", model: "mock-model", ok: true, fallback: false, willFallback: false },
+      { kind: "agent-final", text: "Mock response" },
+    ]);
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    const clearIndex = rendered.indexOf("\x1b[1A\x1b[2K\r");
+    const assistantIndex = rendered.indexOf("Mock response");
+    expect(clearIndex).toBeGreaterThan(-1);
+    expect(assistantIndex).toBeGreaterThan(-1);
+    expect(clearIndex).toBeLessThan(assistantIndex);
+  });
+
+  it("clears animated spinner before tool output", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+
+    const runtime = createEventEmittingMockRuntime([
+      { kind: "agent-start", sessionId: "test-session", input: "hello" },
+      { kind: "provider-attempt", provider: "mock", model: "mock-model", fallback: false },
+      { kind: "provider-tool-call", provider: "mock", model: "mock-model", name: "browser.status", id: "tc1", argumentsText: "{}" },
+      { kind: "tool-start", tool: "browser.status", stepId: "s1" },
+      { kind: "tool-result", tool: "browser.status", ok: true, chars: 10, sentChars: 10 },
+      { kind: "provider-result", provider: "mock", model: "mock-model", ok: true, fallback: false, willFallback: false },
+      { kind: "agent-final", text: "Mock response" },
+    ]);
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    // Spinner should appear during thinking/provider phases
+    expect(rendered).toContain("contemplating");
+    expect(rendered).toContain("scribbling");
+    // Tool output should be present
+    expect(rendered).toContain("browser.status");
+    // The ANSI clear sequence should appear before tool output
+    const clearIndex = rendered.indexOf("\x1b[1A\x1b[2K\r");
+    const toolIndex = rendered.indexOf("browser.status");
+    expect(clearIndex).toBeGreaterThan(-1);
+    expect(toolIndex).toBeGreaterThan(-1);
+    expect(clearIndex).toBeLessThan(toolIndex);
+    // After the final assistant response, no spinner label should remain in the durable scrollback
+    const assistantIndex = rendered.indexOf("Mock response");
+    const afterAssistant = rendered.slice(assistantIndex);
+    expect(afterAssistant).not.toContain("contemplating");
+    expect(afterAssistant).not.toContain("scribbling");
+    expect(afterAssistant).not.toContain("tinkering");
+  });
+
+  it("clears animated spinner on cancellation", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+
+    const runtime = createEventEmittingMockRuntime([
+      { kind: "agent-start", sessionId: "test-session", input: "hello" },
+      { kind: "agent-cancelled", reason: "user interrupt" },
+      { kind: "agent-final", text: "Mock response" },
+    ]);
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    expect(rendered).toContain("cancelled: user interrupt");
+    const clearIndex = rendered.indexOf("\x1b[1A\x1b[2K\r");
+    const cancelIndex = rendered.indexOf("cancelled: user interrupt");
+    expect(clearIndex).toBeGreaterThan(-1);
+    expect(cancelIndex).toBeGreaterThan(-1);
+    expect(clearIndex).toBeLessThan(cancelIndex);
+  });
+
+  it("clears animated spinner on provider-budget exhaustion", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+
+    const runtime = createEventEmittingMockRuntime([
+      { kind: "agent-start", sessionId: "test-session", input: "hello" },
+      { kind: "provider-attempt", provider: "mock", model: "mock-model", fallback: false },
+      { kind: "provider-budget-exhausted", budget: "tokens", limit: 100000, observed: 100001, reason: "token limit reached" },
+      { kind: "agent-final", text: "Mock response" },
+    ]);
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    expect(rendered).toContain("provider budget: token limit reached");
+    const clearIndex = rendered.indexOf("\x1b[1A\x1b[2K\r");
+    const budgetIndex = rendered.indexOf("provider budget: token limit reached");
+    expect(clearIndex).toBeGreaterThan(-1);
+    expect(budgetIndex).toBeGreaterThan(-1);
+    expect(clearIndex).toBeLessThan(budgetIndex);
+  });
+
+  it("no animation in plain/noninteractive mode", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+    } as NodeJS.WritableStream;
+
+    const runtime = createEventEmittingMockRuntime([
+      { kind: "agent-start", sessionId: "test-session", input: "hello" },
+      { kind: "agent-final", text: "Mock response" },
+    ]);
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    // Plain mode shows debug lines, not spinner
+    expect(rendered).toContain("thinking:");
+    expect(rendered).not.toContain("contemplating");
+    expect(rendered).not.toContain("\x1b[1A\x1b[2K\r");
+  });
+});

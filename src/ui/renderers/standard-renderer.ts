@@ -895,7 +895,10 @@ export class StandardRenderer {
   }
 
   renderActiveTurnSpinner(vm: ActiveTurnSpinnerViewModel): string {
-    const eye = this.#useUnicode ? "\uD80C\uDDE0" : "*";
+    const eyeFrames = this.#useUnicode
+      ? ["\uD80C\uDDE0", "\uD80C\uDDE0\u00B7", "\uD80C\uDDE0\u00B7\u00B7", "\uD80C\uDDE0\u00B7\u00B7\u00B7", "\uD80C\uDDE0\u00B7\u00B7", "\uD80C\uDDE0\u00B7"]
+      : ["*", "*.", "*..", "*...", "*..", "*."];
+    const eye = this.#spinnerFrame(eyeFrames);
     const label = vm.label ?? (vm.phase !== undefined ? ((this.#copy as unknown) as Record<string, string>)[vm.phase] : undefined);
     if (label !== undefined) {
       return `${this.#brand(eye)} ${this.#action(label)}`;

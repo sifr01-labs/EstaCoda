@@ -36,14 +36,22 @@ export class PromptChromeController {
   readonly #capabilities: TerminalCapabilities;
   readonly #renderViewModel: (vm: ViewModel) => string;
   readonly #enabled: boolean;
+  readonly #supportsAnimation: boolean;
+  readonly #tickMs: number;
   #active: boolean;
   #activeLineCount: number;
+  #inlineTimer?: ReturnType<typeof setInterval>;
+  #inlinePhase?: string;
+  #inlineRender?: (phase: string) => string;
+  #inlineActive = false;
 
   constructor(options: PromptChromeControllerOptions) {
     this.#output = options.output;
     this.#capabilities = options.capabilities;
     this.#renderViewModel = options.renderViewModel;
     this.#enabled = options.enabled ?? detectEnabled(options.capabilities);
+    this.#supportsAnimation = options.capabilities.supportsAnimation;
+    this.#tickMs = 200;
     this.#active = false;
     this.#activeLineCount = 0;
   }
@@ -98,9 +106,67 @@ export class PromptChromeController {
     this.clearChrome();
   }
 
-  /** Final cleanup — clear any active chrome. */
+  /** Final cleanup — clear any active chrome and inline spinner. */
   dispose(): void {
     this.clearChrome();
+    this.clearInlineSpinner();
+  }
+
+  /** Render an inline spinner line for the active turn.
+   *  In animated terminals, starts a timer that re-renders the line.
+   *  In static terminals, writes the line once. */
+  renderInlineSpinner(phase: string, render: (phase: string) => string): void {
+    if (!this.#enabled) return;
+
+    if (this.#inlineActive && this.#inlinePhase !== phase) {
+      this.#output.write(`\x1b[1A\x1b[2K\r`);
+      this.#inlineActive = false;
+    }
+
+    this.#inlinePhase = phase;
+    this.#inlineRender = render;
+
+    if (this.#supportsAnimation) {
+      if (this.#inlineTimer === undefined) {
+        this.#inlineTimer = setInterval(() => this.#tickInlineSpinner(), this.#tickMs);
+      }
+      this.#tickInlineSpinner();
+    } else {
+      this.#writeInlineSpinner();
+    }
+  }
+
+  /** Clear the inline spinner line and stop any animation timer. */
+  clearInlineSpinner(): void {
+    this.#stopInlineAnimation();
+    if (this.#inlineActive) {
+      this.#output.write(`\x1b[1A\x1b[2K\r`);
+      this.#inlineActive = false;
+    }
+    this.#inlinePhase = undefined;
+    this.#inlineRender = undefined;
+  }
+
+  #stopInlineAnimation(): void {
+    if (this.#inlineTimer !== undefined) {
+      clearInterval(this.#inlineTimer);
+      this.#inlineTimer = undefined;
+    }
+  }
+
+  #tickInlineSpinner(): void {
+    if (this.#inlinePhase === undefined || this.#inlineRender === undefined) return;
+    if (this.#inlineActive) {
+      this.#output.write(`\x1b[1A\x1b[2K\r`);
+    }
+    this.#writeInlineSpinner();
+  }
+
+  #writeInlineSpinner(): void {
+    if (this.#inlinePhase === undefined || this.#inlineRender === undefined) return;
+    const text = this.#inlineRender(this.#inlinePhase);
+    this.#output.write(`${text}\n`);
+    this.#inlineActive = true;
   }
 
   #renderChromeLines(state: PromptChromeState): string[] {

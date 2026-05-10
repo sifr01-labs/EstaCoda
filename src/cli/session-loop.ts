@@ -63,6 +63,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     enabled: renderer.capabilities.isTTY && !renderer.capabilities.isCI && !renderer.capabilities.isDumb && renderer.capabilities.supportsColor && renderer.tokens.contract.behavior.allowAnsiColor,
   });
   const onSigint = () => {
+    chrome.clearInlineSpinner();
     chrome.clearChrome();
     if (activeTurn !== undefined) {
       activeTurn.abort("SIGINT");
@@ -160,28 +161,26 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         const streamState = { lastWriteEndedWithNewline: true };
         const turnOutput = { spinnerPhase: undefined as string | undefined, hasOutput: false, lastOutputWasSpinner: false };
 
-        const writeSpinner = (phase: string) => {
-          if (turnOutput.spinnerPhase === phase) return;
-          if (turnOutput.spinnerPhase !== undefined && turnOutput.lastOutputWasSpinner) {
-            output.write(`\x1b[1A\x1b[2K\r`);
+        const renderSpinner = (phase: string) => {
+          if (chrome.enabled) {
+            chrome.renderInlineSpinner(phase, (p) => renderer.render(buildActiveTurnSpinnerViewModel({ phase: p })));
           }
-          const vm = buildActiveTurnSpinnerViewModel({ phase });
-          const spinnerText = renderer.render(vm);
-          output.write(`${spinnerText}\n`);
-          turnOutput.spinnerPhase = phase;
-          turnOutput.lastOutputWasSpinner = true;
         };
 
         const clearSpinner = () => {
-          if (turnOutput.spinnerPhase !== undefined && turnOutput.lastOutputWasSpinner) {
-            output.write(`\x1b[1A\x1b[2K\r`);
+          if (chrome.enabled) {
+            chrome.clearInlineSpinner();
+          } else {
+            if (turnOutput.spinnerPhase !== undefined && turnOutput.lastOutputWasSpinner) {
+              output.write(`\x1b[1A\x1b[2K\r`);
+            }
           }
           turnOutput.spinnerPhase = undefined;
           turnOutput.lastOutputWasSpinner = false;
         };
 
         if (chrome.enabled) {
-          writeSpinner("thinking");
+          renderSpinner("thinking");
         }
 
         const response = await runtime.handle({
@@ -189,9 +188,9 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             channel: "cli",
             signal: activeTurn.signal,
             onEvent: (event) => {
-              const newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, chrome.enabled, turnOutput);
+              const newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, chrome, turnOutput);
               if (newPhase !== undefined && chrome.enabled) {
-                writeSpinner(newPhase);
+                renderSpinner(newPhase);
               }
             }
           })
@@ -1100,7 +1099,7 @@ function renderRuntimeEvent(
   activityBuilder: ToolActivityViewModelBuilder,
   renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string },
   streamState: { lastWriteEndedWithNewline: boolean },
-  chromeEnabled: boolean,
+  chrome: PromptChromeController | undefined,
   turnOutput: { spinnerPhase?: string; hasOutput: boolean; lastOutputWasSpinner: boolean }
 ): string | undefined {
   function safeWrite(text: string): void {
@@ -1120,27 +1119,31 @@ function renderRuntimeEvent(
   }
 
   function clearActiveSpinnerLine(): void {
-    if (chromeEnabled && turnOutput.spinnerPhase !== undefined && turnOutput.lastOutputWasSpinner) {
-      output.write(`\x1b[1A\x1b[2K\r`);
-      turnOutput.spinnerPhase = undefined;
-      turnOutput.lastOutputWasSpinner = false;
+    if (chrome?.enabled) {
+      chrome.clearInlineSpinner();
+      return;
     }
+    if (turnOutput.spinnerPhase !== undefined && turnOutput.lastOutputWasSpinner) {
+      output.write(`\x1b[1A\x1b[2K\r`);
+    }
+    turnOutput.spinnerPhase = undefined;
+    turnOutput.lastOutputWasSpinner = false;
   }
 
   switch (event.kind) {
     case "agent-start":
-      if (!chromeEnabled) {
+      if (!chrome?.enabled) {
         safeWrite(`thinking: ${event.input}\n`);
       }
       return "thinking";
     case "intent":
-      if (!chromeEnabled) {
+      if (!chrome?.enabled) {
         safeWrite(`intent: ${event.labels.join(", ")} (${Math.round(event.confidence * 100)}%)\n`);
       }
       return "routing";
     case "skill":
-      if (!chromeEnabled) {
-        safeWrite(`☥ skill: ${event.name}\n`);
+      if (!chrome?.enabled) {
+        safeWrite(`\u2625 skill: ${event.name}\n`);
       }
       return undefined;
     case "tool-start": {
@@ -1156,14 +1159,14 @@ function renderRuntimeEvent(
       return "tool";
     }
     case "provider-attempt":
-      if (!chromeEnabled) {
+      if (!chrome?.enabled) {
         safeWrite(event.fallback
           ? `provider: switching to ${event.provider}/${event.model}\n`
           : `provider: using ${event.provider}/${event.model}\n`);
       }
       return "provider";
     case "provider-token": {
-      if (!chromeEnabled) {
+      if (!chrome?.enabled) {
         // Provider tokens stream directly; never inject newlines here.
         output.write(event.text);
         if (event.text.length > 0) {
@@ -1179,7 +1182,7 @@ function renderRuntimeEvent(
       safeWrite(`\n${toolIcon(event.name ?? "")} provider requested ${event.name ?? "unknown"}\n`);
       return "tool";
     case "provider-result":
-      if (!chromeEnabled) {
+      if (!chrome?.enabled) {
         if (event.ok) {
           safeWrite(`\nprovider: ${event.provider}/${event.model} ready\n`);
         } else {

@@ -240,3 +240,62 @@ describe("PromptChromeController — scrollback safety", () => {
     expect(joined).toContain("\x1b[2A\x1b[2K\x1b[2B");
   });
 });
+
+describe("PromptChromeController — inline spinner", () => {
+  it("renders static inline spinner when animation is unsupported", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream, makeCaps({ supportsAnimation: false }));
+    ctrl.renderInlineSpinner("thinking", (phase) => `* ${phase}`);
+    expect(chunks).toEqual(["* thinking\n"]);
+  });
+
+  it("starts timer and writes animated inline spinner when supported", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream, makeCaps({ supportsAnimation: true }));
+    ctrl.renderInlineSpinner("thinking", (phase) => `* ${phase}`);
+    expect(chunks.length).toBeGreaterThanOrEqual(1);
+    expect(chunks[0]).toBe("* thinking\n");
+  });
+
+  it("clears previous line when phase changes", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream, makeCaps({ supportsAnimation: false }));
+    ctrl.renderInlineSpinner("thinking", (phase) => `* ${phase}`);
+    chunks.length = 0;
+    ctrl.renderInlineSpinner("routing", (phase) => `* ${phase}`);
+    expect(chunks[0]).toBe("\x1b[1A\x1b[2K\r");
+    expect(chunks[1]).toBe("* routing\n");
+  });
+
+  it("clearInlineSpinner stops timer and clears line", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream, makeCaps({ supportsAnimation: true }));
+    ctrl.renderInlineSpinner("thinking", (phase) => `* ${phase}`);
+    chunks.length = 0;
+    ctrl.clearInlineSpinner();
+    expect(chunks).toContain("\x1b[1A\x1b[2K\r");
+  });
+
+  it("clearInlineSpinner is a no-op when no inline spinner is active", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.clearInlineSpinner();
+    expect(chunks).toEqual([]);
+  });
+
+  it("dispose clears both chrome and inline spinner", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.renderInlineSpinner("thinking", (phase) => `* ${phase}`);
+    chunks.length = 0;
+    ctrl.dispose();
+    expect(chunks).toContain("\x1b[1A\x1b[2K\r");
+  });
+
+  it("inline spinner is a no-op when disabled", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream, makeCaps({ isTTY: false }));
+    ctrl.renderInlineSpinner("thinking", (phase) => `* ${phase}`);
+    expect(chunks).toEqual([]);
+  });
+});
