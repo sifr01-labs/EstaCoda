@@ -667,12 +667,15 @@ export class StandardRenderer {
     if (event.status === "gated") {
       return this.#useUnicode ? this.#caution("⚠") : "[?]";
     }
+    if (event.status === "running") {
+      const frames = this.#useUnicode
+        ? ["\uD80C\uDDE0", "\uD80C\uDDE0\u00B7", "\uD80C\uDDE0\u00B7\u00B7", "\uD80C\uDDE0\u00B7\u00B7\u00B7", "\uD80C\uDDE0\u00B7\u00B7", "\uD80C\uDDE0\u00B7"]
+        : ["[>]", "[>.]", "[>..]", "[>...]", "[>..]", "[>.]"];
+      return this.#brand(this.#spinnerFrame(frames));
+    }
     const icon = this.#tokens.contract.toolIcon[event.tool];
     if (icon) {
       return this.#useUnicode ? icon : this.#asciiToolIcon(event.tool, icon);
-    }
-    if (event.status === "running") {
-      return this.#useUnicode ? this.#dim("○") : "[>]";
     }
     if (event.status === "done") {
       return this.#useUnicode ? this.#severity("✓", "ok") : "[x]";

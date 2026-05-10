@@ -33,6 +33,7 @@ import type { ResolvedTokens } from "../contracts/ui-tokens.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
 import { PromptChromeController } from "./prompt-chrome-controller.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
+import type { ToolActivityRailEvent } from "../contracts/view-model.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -47,6 +48,92 @@ export type SessionLoopOptions = {
   locale?: import("../contracts/ui.js").UiLocale;
 };
 
+export class ToolActivityAnimator {
+  readonly #output: NodeJS.WritableStream;
+  readonly #renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string };
+  readonly #streamState: { lastWriteEndedWithNewline: boolean };
+  readonly #enabled: boolean;
+  readonly #tickMs = 200;
+  #timer?: ReturnType<typeof setInterval>;
+  #activeEvent?: ToolActivityRailEvent;
+  #lastRowWasActive = false;
+
+  constructor(options: {
+    output: NodeJS.WritableStream;
+    renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string };
+    streamState: { lastWriteEndedWithNewline: boolean };
+    enabled: boolean;
+  }) {
+    this.#output = options.output;
+    this.#renderer = options.renderer;
+    this.#streamState = options.streamState;
+    this.#enabled = options.enabled;
+  }
+
+  start(event: ToolActivityRailEvent): void {
+    if (this.#activeEvent !== undefined && this.#enabled && this.#lastRowWasActive) {
+      this.#rewriteRow(this.#activeEvent);
+    }
+    this.#stopTimer();
+    this.#activeEvent = event;
+    this.#lastRowWasActive = false;
+    this.#writeRow(event);
+    if (this.#enabled) {
+      this.#lastRowWasActive = true;
+      this.#timer = setInterval(() => this.#tick(), this.#tickMs);
+    }
+  }
+
+  complete(event: ToolActivityRailEvent): void {
+    this.#stopTimer();
+    this.#activeEvent = undefined;
+    if (this.#enabled && this.#lastRowWasActive) {
+      this.#rewriteRow(event);
+      this.#lastRowWasActive = false;
+    } else {
+      this.#writeRow(event);
+    }
+  }
+
+  cancel(): void {
+    this.#stopTimer();
+    this.#activeEvent = undefined;
+    if (this.#enabled && this.#lastRowWasActive) {
+      this.#output.write(`\x1b[1A\x1b[2K\r`);
+      this.#lastRowWasActive = false;
+    }
+  }
+
+  dispose(): void {
+    this.#stopTimer();
+    this.#activeEvent = undefined;
+    this.#lastRowWasActive = false;
+  }
+
+  #tick(): void {
+    if (this.#activeEvent === undefined || !this.#lastRowWasActive) return;
+    this.#rewriteRow(this.#activeEvent);
+  }
+
+  #rewriteRow(event: ToolActivityRailEvent): void {
+    this.#output.write(`\x1b[1A\x1b[2K\r`);
+    this.#writeRow(event);
+  }
+
+  #writeRow(event: ToolActivityRailEvent): void {
+    const vm = buildToolActivityRailViewModel({ events: [event] });
+    this.#output.write(`${this.#renderer.render(vm)}\n`);
+    this.#streamState.lastWriteEndedWithNewline = true;
+  }
+
+  #stopTimer(): void {
+    if (this.#timer !== undefined) {
+      clearInterval(this.#timer);
+      this.#timer = undefined;
+    }
+  }
+}
+
 export async function runSessionLoop(options: SessionLoopOptions): Promise<void> {
   const output = options.output ?? defaultOutput;
   const renderer = createSessionRenderer({ output, locale: options.locale });
@@ -55,6 +142,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     tools: runtime.tools()
   });
   let activeTurn: AbortController | undefined;
+  let currentAnimator: ToolActivityAnimator | undefined;
   const prompt = options.prompt ?? createReadlinePrompt(options.input as NodeJS.ReadStream | undefined ?? defaultInput, output as NodeJS.WriteStream);
   const close = options.close ?? (() => prompt.close?.());
   const chrome = new PromptChromeController({
@@ -64,6 +152,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     enabled: renderer.capabilities.isTTY && !renderer.capabilities.isCI && !renderer.capabilities.isDumb && renderer.capabilities.supportsColor && renderer.tokens.contract.behavior.allowAnsiColor,
   });
   const onSigint = () => {
+    currentAnimator?.cancel();
     chrome.clearInlineSpinner();
     chrome.clearChrome();
     if (activeTurn !== undefined) {
@@ -162,6 +251,13 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         const streamState = { lastWriteEndedWithNewline: true };
         const turnOutput = { spinnerPhase: undefined as string | undefined, hasOutput: false, lastOutputWasSpinner: false };
 
+        currentAnimator = new ToolActivityAnimator({
+          output,
+          renderer,
+          streamState,
+          enabled: renderer.capabilities.isTTY && renderer.capabilities.supportsAnimation && !renderer.capabilities.isCI && !renderer.capabilities.isDumb,
+        });
+
         const renderSpinner = (phase: string) => {
           if (chrome.enabled) {
             chrome.renderInlineSpinner(phase, (p) => renderer.render(buildActiveTurnSpinnerViewModel({ phase: p })));
@@ -189,7 +285,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             channel: "cli",
             signal: activeTurn.signal,
             onEvent: (event) => {
-              const newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, chrome, turnOutput);
+              const newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, chrome, turnOutput, currentAnimator);
               if (newPhase !== undefined && chrome.enabled) {
                 renderSpinner(newPhase);
               }
@@ -197,9 +293,9 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           })
           .finally(() => {
             activeTurn = undefined;
-          })
-          .finally(() => {
             clearSpinner();
+            currentAnimator?.dispose();
+            currentAnimator = undefined;
           });
 
         const assistantVm = buildAssistantResponseViewModel({
@@ -1121,7 +1217,8 @@ export function renderRuntimeEvent(
   renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string },
   streamState: { lastWriteEndedWithNewline: boolean },
   chrome: PromptChromeController | undefined,
-  turnOutput: { spinnerPhase?: string; hasOutput: boolean; lastOutputWasSpinner: boolean }
+  turnOutput: { spinnerPhase?: string; hasOutput: boolean; lastOutputWasSpinner: boolean },
+  animator?: ToolActivityAnimator
 ): string | undefined {
   function safeWrite(text: string): void {
     const endsWithNewline = text.endsWith("\n");
@@ -1170,15 +1267,23 @@ export function renderRuntimeEvent(
     case "tool-start": {
       clearActiveSpinnerLine();
       const railEvent = activityBuilder.buildToolActivityRailEvent(event);
-      const railVm = buildToolActivityRailViewModel({ events: [railEvent] });
-      safeWrite(`${renderer.render(railVm)}\n`);
+      if (animator !== undefined) {
+        animator.start(railEvent);
+      } else {
+        const railVm = buildToolActivityRailViewModel({ events: [railEvent] });
+        safeWrite(`${renderer.render(railVm)}\n`);
+      }
       return "tool";
     }
     case "tool-result": {
       clearActiveSpinnerLine();
       const railEvent = activityBuilder.buildToolActivityRailEvent(event);
-      const railVm = buildToolActivityRailViewModel({ events: [railEvent] });
-      safeWrite(`${renderer.render(railVm)}\n`);
+      if (animator !== undefined) {
+        animator.complete(railEvent);
+      } else {
+        const railVm = buildToolActivityRailViewModel({ events: [railEvent] });
+        safeWrite(`${renderer.render(railVm)}\n`);
+      }
       return "tool";
     }
     case "provider-attempt":
@@ -1203,8 +1308,12 @@ export function renderRuntimeEvent(
     case "provider-tool-call":
       clearActiveSpinnerLine();
       const providerRailEvent = activityBuilder.buildToolActivityRailEvent(event);
-      const providerRailVm = buildToolActivityRailViewModel({ events: [providerRailEvent] });
-      safeWrite(`${renderer.render(providerRailVm)}\n`);
+      if (animator !== undefined) {
+        animator.start(providerRailEvent);
+      } else {
+        const providerRailVm = buildToolActivityRailViewModel({ events: [providerRailEvent] });
+        safeWrite(`${renderer.render(providerRailVm)}\n`);
+      }
       return "tool";
     case "provider-result":
       if (!chrome?.enabled) {
@@ -1216,16 +1325,22 @@ export function renderRuntimeEvent(
             : `\nprovider: ${humanProviderIssue(event.errorClass)} on ${event.provider}/${event.model}\n`);
         }
       }
+      if (!event.ok && !event.willFallback) {
+        animator?.cancel();
+      }
       return event.ok || !event.willFallback ? "finalizing" : "provider";
     case "provider-budget-exhausted":
+      animator?.cancel();
       clearActiveSpinnerLine();
       safeWrite(`\nprovider budget: ${event.reason}\n`);
       return undefined;
     case "agent-cancelled":
+      animator?.cancel();
       clearActiveSpinnerLine();
       safeWrite(`\ncancelled: ${event.reason}\n`);
       return undefined;
     case "agent-final":
+      animator?.dispose();
       return undefined;
   }
 }

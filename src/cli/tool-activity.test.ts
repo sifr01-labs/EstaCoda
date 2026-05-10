@@ -22,7 +22,7 @@ import {
   toolActivityRailEvent,
 } from "../ui/view-models/builders.js";
 import { ToolActivityRenderer } from "./tool-activity-renderer.js";
-import { renderRuntimeEvent } from "./session-loop.js";
+import { renderRuntimeEvent, ToolActivityAnimator } from "./session-loop.js";
 
 // ──────────────────────────────────────
 // Global deterministic timer for animated snapshots
@@ -711,6 +711,213 @@ describe("Backward-compatible string wrappers", () => {
     const event: RuntimeEvent = { kind: "tool-start", tool: "test", stepId: "1" };
     const output = renderer.render(event);
     expect(typeof output).toBe("string");
+  });
+});
+
+// ──────────────────────────────────────
+// ToolActivityAnimator
+// ──────────────────────────────────────
+
+describe("ToolActivityAnimator", () => {
+  function makeMockOutput(): NodeJS.WritableStream & { write: ReturnType<typeof vi.fn> } {
+    return { write: vi.fn() } as unknown as NodeJS.WritableStream & { write: ReturnType<typeof vi.fn> };
+  }
+
+  function makeMockRenderer(): { render(viewModel: ViewModel): string } {
+    return {
+      render: (vm: ViewModel) => {
+        if (vm.kind === "toolActivityRail") {
+          const event = vm.events[0];
+          const glyph = event.status === "running" ? "[>]" : "[x]";
+          return `| ${glyph} ${event.label ?? event.tool}`;
+        }
+        return "";
+      },
+    };
+  }
+
+  let intervalCallback: (() => void) | undefined;
+  let setIntervalSpy: ReturnType<typeof vi.spyOn>;
+  let clearIntervalSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    intervalCallback = undefined;
+    setIntervalSpy = vi.spyOn(global, "setInterval").mockImplementation((callback) => {
+      intervalCallback = callback as () => void;
+      return 123 as unknown as ReturnType<typeof setInterval>;
+    });
+    clearIntervalSpy = vi.spyOn(global, "clearInterval").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    setIntervalSpy.mockRestore();
+    clearIntervalSpy.mockRestore();
+  });
+
+  it("start writes active row and starts timer when enabled", () => {
+    const output = makeMockOutput();
+    const renderer = makeMockRenderer();
+    const streamState = { lastWriteEndedWithNewline: true };
+    const animator = new ToolActivityAnimator({ output, renderer, streamState, enabled: true });
+
+    animator.start(toolActivityRailEvent("readFile", "running", { label: "preparing" }));
+    expect(output.write).toHaveBeenCalledWith("| [>] preparing\n");
+    expect(streamState.lastWriteEndedWithNewline).toBe(true);
+    expect(setIntervalSpy).toHaveBeenCalled();
+
+    intervalCallback?.();
+    expect(output.write).toHaveBeenCalledTimes(3);
+  });
+
+  it("complete rewrites active row with settled glyph and stops timer", () => {
+    const output = makeMockOutput();
+    const renderer = makeMockRenderer();
+    const streamState = { lastWriteEndedWithNewline: true };
+    const animator = new ToolActivityAnimator({ output, renderer, streamState, enabled: true });
+
+    animator.start(toolActivityRailEvent("readFile", "running", { label: "preparing" }));
+    output.write.mockClear();
+
+    animator.complete(toolActivityRailEvent("readFile", "done", { label: "read" }));
+    const calls = output.write.mock.calls.map((c: unknown[]) => c[0]).join("");
+    expect(calls).toContain("| [x] read");
+    expect(clearIntervalSpy).toHaveBeenCalled();
+
+    output.write.mockClear();
+    intervalCallback?.();
+    expect(output.write).not.toHaveBeenCalled();
+  });
+
+  it("cancel clears active row and stops timer", () => {
+    const output = makeMockOutput();
+    const renderer = makeMockRenderer();
+    const streamState = { lastWriteEndedWithNewline: true };
+    const animator = new ToolActivityAnimator({ output, renderer, streamState, enabled: true });
+
+    animator.start(toolActivityRailEvent("readFile", "running", { label: "preparing" }));
+    output.write.mockClear();
+
+    animator.cancel();
+    expect(output.write).toHaveBeenCalledWith("\x1b[1A\x1b[2K\r");
+    expect(clearIntervalSpy).toHaveBeenCalled();
+
+    output.write.mockClear();
+    intervalCallback?.();
+    expect(output.write).not.toHaveBeenCalled();
+  });
+
+  it("dispose stops timer without writing", () => {
+    const output = makeMockOutput();
+    const renderer = makeMockRenderer();
+    const streamState = { lastWriteEndedWithNewline: true };
+    const animator = new ToolActivityAnimator({ output, renderer, streamState, enabled: true });
+
+    animator.start(toolActivityRailEvent("readFile", "running", { label: "preparing" }));
+    output.write.mockClear();
+
+    animator.dispose();
+    expect(output.write).not.toHaveBeenCalled();
+    expect(clearIntervalSpy).toHaveBeenCalled();
+
+    output.write.mockClear();
+    intervalCallback?.();
+    expect(output.write).not.toHaveBeenCalled();
+  });
+
+  it("start with disabled writes static row and does not start timer", () => {
+    const output = makeMockOutput();
+    const renderer = makeMockRenderer();
+    const streamState = { lastWriteEndedWithNewline: true };
+    const animator = new ToolActivityAnimator({ output, renderer, streamState, enabled: false });
+
+    animator.start(toolActivityRailEvent("readFile", "running", { label: "preparing" }));
+    expect(output.write).toHaveBeenCalledWith("| [>] preparing\n");
+    expect(setIntervalSpy).not.toHaveBeenCalled();
+  });
+
+  it("complete after disabled writes new static row", () => {
+    const output = makeMockOutput();
+    const renderer = makeMockRenderer();
+    const streamState = { lastWriteEndedWithNewline: true };
+    const animator = new ToolActivityAnimator({ output, renderer, streamState, enabled: false });
+
+    animator.start(toolActivityRailEvent("readFile", "running", { label: "preparing" }));
+    output.write.mockClear();
+
+    animator.complete(toolActivityRailEvent("readFile", "done", { label: "read" }));
+    expect(output.write).toHaveBeenCalledWith("| [x] read\n");
+  });
+
+  it("spinner moves to next active tool", () => {
+    const output = makeMockOutput();
+    const renderer = makeMockRenderer();
+    const streamState = { lastWriteEndedWithNewline: true };
+    const animator = new ToolActivityAnimator({ output, renderer, streamState, enabled: true });
+
+    animator.start(toolActivityRailEvent("readFile", "running", { label: "preparing" }));
+    output.write.mockClear();
+
+    animator.start(toolActivityRailEvent("writeFile", "running", { label: "writing" }));
+    const calls = output.write.mock.calls.map((c: unknown[]) => c[0]).join("");
+    expect(calls).toContain("| [>] preparing");
+    expect(calls).toContain("| [>] writing");
+  });
+});
+
+// ──────────────────────────────────────
+// renderRuntimeEvent with animator
+// ──────────────────────────────────────
+
+describe("renderRuntimeEvent with animator", () => {
+  function mockAnimator() {
+    return { start: vi.fn(), complete: vi.fn(), cancel: vi.fn(), dispose: vi.fn() };
+  }
+
+  function runEvent(event: RuntimeEvent, animator?: ReturnType<typeof mockAnimator>) {
+    const output = { write: vi.fn() } as unknown as NodeJS.WritableStream;
+    const renderer = standardDarkRenderer();
+    const builder = new ToolActivityViewModelBuilder({ tools: [] });
+    const streamState = { lastWriteEndedWithNewline: true };
+    const turnOutput = { hasOutput: false, lastOutputWasSpinner: false };
+    renderRuntimeEvent(output, event, builder, renderer, streamState, undefined, turnOutput, animator as unknown as ToolActivityAnimator);
+    return { output, animator };
+  }
+
+  it("delegates tool-start to animator.start", () => {
+    const animator = mockAnimator();
+    runEvent({ kind: "tool-start", tool: "readFile", stepId: "1" }, animator);
+    expect(animator.start).toHaveBeenCalled();
+    expect(animator.complete).not.toHaveBeenCalled();
+  });
+
+  it("delegates tool-result to animator.complete", () => {
+    const animator = mockAnimator();
+    runEvent({ kind: "tool-result", tool: "readFile", ok: true }, animator);
+    expect(animator.complete).toHaveBeenCalled();
+  });
+
+  it("delegates provider-tool-call to animator.start", () => {
+    const animator = mockAnimator();
+    runEvent({ kind: "provider-tool-call", provider: "openai", model: "gpt-4", name: "readFile", argumentsText: '{}' }, animator);
+    expect(animator.start).toHaveBeenCalled();
+  });
+
+  it("calls animator.cancel on agent-cancelled", () => {
+    const animator = mockAnimator();
+    runEvent({ kind: "agent-cancelled", reason: "user" }, animator);
+    expect(animator.cancel).toHaveBeenCalled();
+  });
+
+  it("calls animator.cancel on provider-budget-exhausted", () => {
+    const animator = mockAnimator();
+    runEvent({ kind: "provider-budget-exhausted", budget: "tokens", limit: 1000, observed: 1001, reason: "limit" }, animator);
+    expect(animator.cancel).toHaveBeenCalled();
+  });
+
+  it("calls animator.dispose on agent-final", () => {
+    const animator = mockAnimator();
+    runEvent({ kind: "agent-final", text: "done" }, animator);
+    expect(animator.dispose).toHaveBeenCalled();
   });
 });
 

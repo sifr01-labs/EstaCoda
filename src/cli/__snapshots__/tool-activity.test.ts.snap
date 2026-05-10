@@ -1,39 +1,102 @@
-// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
 
-exports[`tool-activity > Approval prompt > renders in narrow width > approval-narrow width 1`] = `
-"╭──────────────────────────────────────╮
-│ [38;2;255;180;84m[1m⚠ Permission required[0m[0m               │
-│   [2mTool  [0m  [38;2;64;224;208m⁦workspace.write⁩[0m          │
-│   [2mRisk  [0m  [38;2;255;180;84m⁦destructive-local⁩[0m        │
-│   [2mTarget[0m  ⁦src/index.ts⁩             │
-│                                      │
-│   [38;2;64;224;208m[1mAllow once[0m[0m    [38;2;64;224;208m[1mAllow for this session[0m[0m    [38;2;64;224;208m[1mAlways allow[0m[0m    [38;2;239;83;80m[1mDeny[0m[0m │
-╰──────────────────────────────────────╯"
+exports[`tool-activity Tool activity timeline renders empty in plain: timeline-empty-plain 1`] = `"No activity."`;
+
+exports[`tool-activity Tool activity timeline renders single running in plain: timeline-running-plain 1`] = `"[>] artifact.store"`;
+
+exports[`tool-activity Tool activity timeline renders single done in plain: timeline-done-plain 1`] = `"[x] artifact.store | 120ms | 1.2k captured / 1.0k sent"`;
+
+exports[`tool-activity Tool activity timeline renders single failed in plain: timeline-failed-plain 1`] = `"[-] terminal.exec | 500ms"`;
+
+exports[`tool-activity Tool activity timeline renders single gated in plain: timeline-gated-plain 1`] = `"[?] workspace.write | 50ms | decision: ask | risk: destructive-local"`;
+
+exports[`tool-activity Tool activity timeline renders multiple mixed in plain: timeline-mixed-plain 1`] = `
+"[x] web.extract | 800ms
+[>] memory.write
+[-] terminal.exec | 300ms"
 `;
 
-exports[`tool-activity > Approval prompt > renders in no Unicode > approval-no Unicode 1`] = `
-"+----------------------------------------------------------------+
-| [38;2;255;180;84m[1m! Permission required[0m[0m                                          |
-|   [2mTool  [0m  [38;2;64;224;208m⁦workspace.write⁩[0m                                    |
-|   [2mRisk  [0m  [38;2;255;180;84m⁦destructive-local⁩[0m                                  |
-|   [2mTarget[0m  ⁦src/index.ts⁩                                       |
-|                                                                |
-|   [38;2;64;224;208m[1mAllow once[0m[0m    [38;2;64;224;208m[1mAllow for this session[0m[0m    [38;2;64;224;208m[1mAlways allow[0m[0m    [38;2;239;83;80m[1mDeny[0m[0m |
-+----------------------------------------------------------------+"
+exports[`tool-activity Tool activity timeline renders empty in standard dark: timeline-empty-standard dark 1`] = `"\x1B[2mNo activity.\x1B[0m"`;
+
+exports[`tool-activity Tool activity timeline renders single running in standard dark: timeline-running-standard dark 1`] = `"\x1B[38;2;64;224;208m(⌦)\x1B[0m \x1B[1martifact.store\x1B[0m"`;
+
+exports[`tool-activity Tool activity timeline renders single done in standard dark: timeline-done-standard dark 1`] = `"\x1B[38;2;76;175;80m✓\x1B[0m \x1B[1martifact.store\x1B[0m \x1B[2m| 120ms\x1B[0m \x1B[2m| 1.2k captured / 1.0k sent\x1B[0m"`;
+
+exports[`tool-activity Tool activity timeline renders single failed in standard dark: timeline-failed-standard dark 1`] = `"\x1B[38;2;239;83;80m✗\x1B[0m \x1B[1mterminal.exec\x1B[0m \x1B[2m| 500ms\x1B[0m"`;
+
+exports[`tool-activity Tool activity timeline renders single gated in standard dark: timeline-gated-standard dark 1`] = `"\x1B[38;2;255;180;84m⚠\x1B[0m \x1B[1mworkspace.write\x1B[0m \x1B[2m| 50ms\x1B[0m \x1B[38;2;255;180;84m| decision: ask\x1B[0m \x1B[38;2;255;180;84m| risk: destructive-local\x1B[0m"`;
+
+exports[`tool-activity Tool activity timeline renders multiple mixed in standard dark: timeline-mixed-standard dark 1`] = `
+"\x1B[38;2;76;175;80m✓\x1B[0m \x1B[1mweb.extract\x1B[0m \x1B[2m| 800ms\x1B[0m
+\x1B[38;2;64;224;208m(⌦)\x1B[0m \x1B[1mmemory.write\x1B[0m
+\x1B[38;2;239;83;80m✗\x1B[0m \x1B[1mterminal.exec\x1B[0m \x1B[2m| 300ms\x1B[0m"
 `;
 
-exports[`tool-activity > Approval prompt > renders in no color > approval-no color 1`] = `
-"╭────────────────────────────────────────────────────────────────╮
-│ ⚠ Permission required                                         │
-│   Tool    ⁦workspace.write⁩                                    │
-│   Risk    ⁦destructive-local⁩                                  │
-│   Target  ⁦src/index.ts⁩                                       │
-│                                                                │
-│   Allow once    Allow for this session    Always allow    Deny │
-╰────────────────────────────────────────────────────────────────╯"
+exports[`tool-activity Tool activity timeline renders empty in standard light: timeline-empty-standard light 1`] = `"\x1B[2mNo activity.\x1B[0m"`;
+
+exports[`tool-activity Tool activity timeline renders single running in standard light: timeline-running-standard light 1`] = `"\x1B[38;2;0;140;149m(⌦)\x1B[0m \x1B[1martifact.store\x1B[0m"`;
+
+exports[`tool-activity Tool activity timeline renders single done in standard light: timeline-done-standard light 1`] = `"\x1B[38;2;46;125;50m✓\x1B[0m \x1B[1martifact.store\x1B[0m \x1B[2m| 120ms\x1B[0m \x1B[2m| 1.2k captured / 1.0k sent\x1B[0m"`;
+
+exports[`tool-activity Tool activity timeline renders single failed in standard light: timeline-failed-standard light 1`] = `"\x1B[38;2;198;40;40m✗\x1B[0m \x1B[1mterminal.exec\x1B[0m \x1B[2m| 500ms\x1B[0m"`;
+
+exports[`tool-activity Tool activity timeline renders single gated in standard light: timeline-gated-standard light 1`] = `"\x1B[38;2;180;83;9m⚠\x1B[0m \x1B[1mworkspace.write\x1B[0m \x1B[2m| 50ms\x1B[0m \x1B[38;2;180;83;9m| decision: ask\x1B[0m \x1B[38;2;180;83;9m| risk: destructive-local\x1B[0m"`;
+
+exports[`tool-activity Tool activity timeline renders multiple mixed in standard light: timeline-mixed-standard light 1`] = `
+"\x1B[38;2;46;125;50m✓\x1B[0m \x1B[1mweb.extract\x1B[0m \x1B[2m| 800ms\x1B[0m
+\x1B[38;2;0;140;149m(⌦)\x1B[0m \x1B[1mmemory.write\x1B[0m
+\x1B[38;2;198;40;40m✗\x1B[0m \x1B[1mterminal.exec\x1B[0m \x1B[2m| 300ms\x1B[0m"
 `;
 
-exports[`tool-activity > Approval prompt > renders in plain > approval-plain 1`] = `
+exports[`tool-activity Tool activity timeline renders empty in no color: timeline-empty-no color 1`] = `"No activity."`;
+
+exports[`tool-activity Tool activity timeline renders single running in no color: timeline-running-no color 1`] = `"(⌦) artifact.store"`;
+
+exports[`tool-activity Tool activity timeline renders single done in no color: timeline-done-no color 1`] = `"✓ artifact.store | 120ms | 1.2k captured / 1.0k sent"`;
+
+exports[`tool-activity Tool activity timeline renders single failed in no color: timeline-failed-no color 1`] = `"✗ terminal.exec | 500ms"`;
+
+exports[`tool-activity Tool activity timeline renders single gated in no color: timeline-gated-no color 1`] = `"⚠ workspace.write | 50ms | decision: ask | risk: destructive-local"`;
+
+exports[`tool-activity Tool activity timeline renders multiple mixed in no color: timeline-mixed-no color 1`] = `
+"✓ web.extract | 800ms
+(⌦) memory.write
+✗ terminal.exec | 300ms"
+`;
+
+exports[`tool-activity Tool activity timeline renders empty in no Unicode: timeline-empty-no Unicode 1`] = `"\x1B[2mNo activity.\x1B[0m"`;
+
+exports[`tool-activity Tool activity timeline renders single running in no Unicode: timeline-running-no Unicode 1`] = `"[>] \x1B[1martifact.store\x1B[0m"`;
+
+exports[`tool-activity Tool activity timeline renders single done in no Unicode: timeline-done-no Unicode 1`] = `"[x] \x1B[1martifact.store\x1B[0m \x1B[2m| 120ms\x1B[0m \x1B[2m| 1.2k captured / 1.0k sent\x1B[0m"`;
+
+exports[`tool-activity Tool activity timeline renders single failed in no Unicode: timeline-failed-no Unicode 1`] = `"[-] \x1B[1mterminal.exec\x1B[0m \x1B[2m| 500ms\x1B[0m"`;
+
+exports[`tool-activity Tool activity timeline renders single gated in no Unicode: timeline-gated-no Unicode 1`] = `"[?] \x1B[1mworkspace.write\x1B[0m \x1B[2m| 50ms\x1B[0m \x1B[38;2;255;180;84m| decision: ask\x1B[0m \x1B[38;2;255;180;84m| risk: destructive-local\x1B[0m"`;
+
+exports[`tool-activity Tool activity timeline renders multiple mixed in no Unicode: timeline-mixed-no Unicode 1`] = `
+"[x] \x1B[1mweb.extract\x1B[0m \x1B[2m| 800ms\x1B[0m
+[>] \x1B[1mmemory.write\x1B[0m
+[-] \x1B[1mterminal.exec\x1B[0m \x1B[2m| 300ms\x1B[0m"
+`;
+
+exports[`tool-activity Tool activity timeline renders empty in narrow width: timeline-empty-narrow width 1`] = `"\x1B[2mNo activity.\x1B[0m"`;
+
+exports[`tool-activity Tool activity timeline renders single running in narrow width: timeline-running-narrow width 1`] = `"\x1B[38;2;64;224;208m(⌦)\x1B[0m \x1B[1martifact.store\x1B[0m"`;
+
+exports[`tool-activity Tool activity timeline renders single done in narrow width: timeline-done-narrow width 1`] = `"\x1B[38;2;76;175;80m✓\x1B[0m \x1B[1martifact.store\x1B[0m \x1B[2m| 120ms\x1B[0m \x1B[2m| 1.2k captured / 1.0k sent\x1B[0m"`;
+
+exports[`tool-activity Tool activity timeline renders single failed in narrow width: timeline-failed-narrow width 1`] = `"\x1B[38;2;239;83;80m✗\x1B[0m \x1B[1mterminal.exec\x1B[0m \x1B[2m| 500ms\x1B[0m"`;
+
+exports[`tool-activity Tool activity timeline renders single gated in narrow width: timeline-gated-narrow width 1`] = `"\x1B[38;2;255;180;84m⚠\x1B[0m \x1B[1mworkspace.write\x1B[0m \x1B[2m| 50ms\x1B[0m \x1B[38;2;255;180;84m| decision: ask\x1B[0m \x1B[38;2;255;180;84m| risk: destructive-local\x1B[0m"`;
+
+exports[`tool-activity Tool activity timeline renders multiple mixed in narrow width: timeline-mixed-narrow width 1`] = `
+"\x1B[38;2;76;175;80m✓\x1B[0m \x1B[1mweb.extract\x1B[0m \x1B[2m| 800ms\x1B[0m
+\x1B[38;2;64;224;208m(⌦)\x1B[0m \x1B[1mmemory.write\x1B[0m
+\x1B[38;2;239;83;80m✗\x1B[0m \x1B[1mterminal.exec\x1B[0m \x1B[2m| 300ms\x1B[0m"
+`;
+
+exports[`tool-activity Approval prompt renders in plain: approval-plain 1`] = `
 "[WARN] Approval required: workspace.write
 Target: src/index.ts
 Risk: destructive-local
@@ -46,183 +109,395 @@ Actions:
   deny) [ERROR] Deny"
 `;
 
-exports[`tool-activity > Approval prompt > renders in standard dark > approval-standard dark 1`] = `
+exports[`tool-activity Approval prompt renders in standard dark: approval-standard dark 1`] = `
 "╭────────────────────────────────────────────────────────────────╮
-│ [38;2;255;180;84m[1m⚠ Permission required[0m[0m                                         │
-│   [2mTool  [0m  [38;2;64;224;208m⁦workspace.write⁩[0m                                    │
-│   [2mRisk  [0m  [38;2;255;180;84m⁦destructive-local⁩[0m                                  │
-│   [2mTarget[0m  ⁦src/index.ts⁩                                       │
+│ \x1B[38;2;255;180;84m\x1B[1m⚠ Permission required\x1B[0m\x1B[0m                                         │
+│   \x1B[2mTool  \x1B[0m  \x1B[38;2;64;224;208m⁦workspace.write⁩\x1B[0m                                    │
+│   \x1B[2mRisk  \x1B[0m  \x1B[38;2;255;180;84m⁦destructive-local⁩\x1B[0m                                  │
+│   \x1B[2mTarget\x1B[0m  ⁦src/index.ts⁩                                       │
 │                                                                │
-│   [38;2;64;224;208m[1mAllow once[0m[0m    [38;2;64;224;208m[1mAllow for this session[0m[0m    [38;2;64;224;208m[1mAlways allow[0m[0m    [38;2;239;83;80m[1mDeny[0m[0m │
+│   \x1B[38;2;64;224;208m\x1B[1mAllow once\x1B[0m\x1B[0m    \x1B[38;2;64;224;208m\x1B[1mAllow for this session\x1B[0m\x1B[0m    \x1B[38;2;64;224;208m\x1B[1mAlways allow\x1B[0m\x1B[0m    \x1B[38;2;239;83;80m\x1B[1mDeny\x1B[0m\x1B[0m │
 ╰────────────────────────────────────────────────────────────────╯"
 `;
 
-exports[`tool-activity > Approval prompt > renders in standard light > approval-standard light 1`] = `
+exports[`tool-activity Approval prompt renders in standard light: approval-standard light 1`] = `
 "╭────────────────────────────────────────────────────────────────╮
-│ [38;2;180;83;9m[1m⚠ Permission required[0m[0m                                         │
-│   [2mTool  [0m  [38;2;0;140;149m⁦workspace.write⁩[0m                                    │
-│   [2mRisk  [0m  [38;2;180;83;9m⁦destructive-local⁩[0m                                  │
-│   [2mTarget[0m  ⁦src/index.ts⁩                                       │
+│ \x1B[38;2;180;83;9m\x1B[1m⚠ Permission required\x1B[0m\x1B[0m                                         │
+│   \x1B[2mTool  \x1B[0m  \x1B[38;2;0;140;149m⁦workspace.write⁩\x1B[0m                                    │
+│   \x1B[2mRisk  \x1B[0m  \x1B[38;2;180;83;9m⁦destructive-local⁩\x1B[0m                                  │
+│   \x1B[2mTarget\x1B[0m  ⁦src/index.ts⁩                                       │
 │                                                                │
-│   [38;2;0;140;149m[1mAllow once[0m[0m    [38;2;0;140;149m[1mAllow for this session[0m[0m    [38;2;0;140;149m[1mAlways allow[0m[0m    [38;2;198;40;40m[1mDeny[0m[0m │
+│   \x1B[38;2;0;140;149m\x1B[1mAllow once\x1B[0m\x1B[0m    \x1B[38;2;0;140;149m\x1B[1mAllow for this session\x1B[0m\x1B[0m    \x1B[38;2;0;140;149m\x1B[1mAlways allow\x1B[0m\x1B[0m    \x1B[38;2;198;40;40m\x1B[1mDeny\x1B[0m\x1B[0m │
 ╰────────────────────────────────────────────────────────────────╯"
 `;
 
-exports[`tool-activity > Progress context rail > renders active in narrow width > rail-active-narrow width 1`] = `
-"[1mTurn progress[0m
-[38;2;76;175;80m✓[0m [2mweb.extract[0m
-[38;2;64;224;208m(⌦)[0m [38;2;64;224;208mmemory.write[0m
-[2m○[0m terminal.exec"
+exports[`tool-activity Approval prompt renders in no color: approval-no color 1`] = `
+"╭────────────────────────────────────────────────────────────────╮
+│ ⚠ Permission required                                         │
+│   Tool    ⁦workspace.write⁩                                    │
+│   Risk    ⁦destructive-local⁩                                  │
+│   Target  ⁦src/index.ts⁩                                       │
+│                                                                │
+│   Allow once    Allow for this session    Always allow    Deny │
+╰────────────────────────────────────────────────────────────────╯"
 `;
 
-exports[`tool-activity > Progress context rail > renders active in no Unicode > rail-active-no Unicode 1`] = `
-"[1mTurn progress[0m
-[x] [2mweb.extract[0m
-[>] [38;2;64;224;208mmemory.write[0m
-[ ] terminal.exec"
+exports[`tool-activity Approval prompt renders in no Unicode: approval-no Unicode 1`] = `
+"+----------------------------------------------------------------+
+| \x1B[38;2;255;180;84m\x1B[1m! Permission required\x1B[0m\x1B[0m                                          |
+|   \x1B[2mTool  \x1B[0m  \x1B[38;2;64;224;208m⁦workspace.write⁩\x1B[0m                                    |
+|   \x1B[2mRisk  \x1B[0m  \x1B[38;2;255;180;84m⁦destructive-local⁩\x1B[0m                                  |
+|   \x1B[2mTarget\x1B[0m  ⁦src/index.ts⁩                                       |
+|                                                                |
+|   \x1B[38;2;64;224;208m\x1B[1mAllow once\x1B[0m\x1B[0m    \x1B[38;2;64;224;208m\x1B[1mAllow for this session\x1B[0m\x1B[0m    \x1B[38;2;64;224;208m\x1B[1mAlways allow\x1B[0m\x1B[0m    \x1B[38;2;239;83;80m\x1B[1mDeny\x1B[0m\x1B[0m |
++----------------------------------------------------------------+"
 `;
 
-exports[`tool-activity > Progress context rail > renders active in no color > rail-active-no color 1`] = `
+exports[`tool-activity Approval prompt renders in narrow width: approval-narrow width 1`] = `
+"╭──────────────────────────────────────╮
+│ \x1B[38;2;255;180;84m\x1B[1m⚠ Permission required\x1B[0m\x1B[0m               │
+│   \x1B[2mTool  \x1B[0m  \x1B[38;2;64;224;208m⁦workspace.write⁩\x1B[0m          │
+│   \x1B[2mRisk  \x1B[0m  \x1B[38;2;255;180;84m⁦destructive-local⁩\x1B[0m        │
+│   \x1B[2mTarget\x1B[0m  ⁦src/index.ts⁩             │
+│                                      │
+│   \x1B[38;2;64;224;208m\x1B[1mAllow once\x1B[0m\x1B[0m    \x1B[38;2;64;224;208m\x1B[1mAllow for this session\x1B[0m\x1B[0m    \x1B[38;2;64;224;208m\x1B[1mAlways allow\x1B[0m\x1B[0m    \x1B[38;2;239;83;80m\x1B[1mDeny\x1B[0m\x1B[0m │
+╰──────────────────────────────────────╯"
+`;
+
+exports[`tool-activity Security audit renders empty in plain: security-empty-plain 1`] = `"[INFO] Security audit: No tool security decisions have been recorded for this session yet."`;
+
+exports[`tool-activity Security audit renders compact in plain: security-compact-plain 1`] = `
+"[OK] Security audit
+
+- workspace.write -> allow: risk=destructive-local rule=trusted-workspace
+- terminal.exec -> ask: risk=external-side-effect rule=policy"
+`;
+
+exports[`tool-activity Security audit renders debug in plain: security-debug-plain 1`] = `
+"[OK] Security audit
+
+[INFO] workspace.write -> allow: risk=destructive-local rule=trusted-workspace
+  mode: adaptive
+  risk: low
+  risk class: destructive-local
+  deterministic rule: trusted-workspace
+  reason: Workspace is trusted
+  assessor: not used (disabled)"
+`;
+
+exports[`tool-activity Security audit renders empty in standard dark: security-empty-standard dark 1`] = `"\x1B[38;2;90;172;255m[INFO]\x1B[0m \x1B[1mSecurity audit\x1B[0m: No tool security decisions have been recorded for this session yet."`;
+
+exports[`tool-activity Security audit renders compact in standard dark: security-compact-standard dark 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mSecurity audit\x1B[0m
+
+• workspace.write -> allow: risk=destructive-local rule=trusted-workspace
+• terminal.exec -> ask: risk=external-side-effect rule=policy"
+`;
+
+exports[`tool-activity Security audit renders debug in standard dark: security-debug-standard dark 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mSecurity audit\x1B[0m
+
+\x1B[38;2;90;172;255m[INFO]\x1B[0m \x1B[1mworkspace.write -> allow\x1B[0m: risk=destructive-local rule=trusted-workspace
+\x1B[2m  mode: adaptive\x1B[0m
+\x1B[2m  risk: low\x1B[0m
+\x1B[2m  risk class: destructive-local\x1B[0m
+\x1B[2m  deterministic rule: trusted-workspace\x1B[0m
+\x1B[2m  reason: Workspace is trusted\x1B[0m
+\x1B[2m  assessor: not used (disabled)\x1B[0m"
+`;
+
+exports[`tool-activity Security audit renders empty in standard light: security-empty-standard light 1`] = `"\x1B[38;2;0;87;217m[INFO]\x1B[0m \x1B[1mSecurity audit\x1B[0m: No tool security decisions have been recorded for this session yet."`;
+
+exports[`tool-activity Security audit renders compact in standard light: security-compact-standard light 1`] = `
+"\x1B[38;2;46;125;50m[OK]\x1B[0m \x1B[1mSecurity audit\x1B[0m
+
+• workspace.write -> allow: risk=destructive-local rule=trusted-workspace
+• terminal.exec -> ask: risk=external-side-effect rule=policy"
+`;
+
+exports[`tool-activity Security audit renders debug in standard light: security-debug-standard light 1`] = `
+"\x1B[38;2;46;125;50m[OK]\x1B[0m \x1B[1mSecurity audit\x1B[0m
+
+\x1B[38;2;0;87;217m[INFO]\x1B[0m \x1B[1mworkspace.write -> allow\x1B[0m: risk=destructive-local rule=trusted-workspace
+\x1B[2m  mode: adaptive\x1B[0m
+\x1B[2m  risk: low\x1B[0m
+\x1B[2m  risk class: destructive-local\x1B[0m
+\x1B[2m  deterministic rule: trusted-workspace\x1B[0m
+\x1B[2m  reason: Workspace is trusted\x1B[0m
+\x1B[2m  assessor: not used (disabled)\x1B[0m"
+`;
+
+exports[`tool-activity Security audit renders empty in no color: security-empty-no color 1`] = `"[INFO] Security audit: No tool security decisions have been recorded for this session yet."`;
+
+exports[`tool-activity Security audit renders compact in no color: security-compact-no color 1`] = `
+"[OK] Security audit
+
+• workspace.write -> allow: risk=destructive-local rule=trusted-workspace
+• terminal.exec -> ask: risk=external-side-effect rule=policy"
+`;
+
+exports[`tool-activity Security audit renders debug in no color: security-debug-no color 1`] = `
+"[OK] Security audit
+
+[INFO] workspace.write -> allow: risk=destructive-local rule=trusted-workspace
+  mode: adaptive
+  risk: low
+  risk class: destructive-local
+  deterministic rule: trusted-workspace
+  reason: Workspace is trusted
+  assessor: not used (disabled)"
+`;
+
+exports[`tool-activity Security audit renders empty in no Unicode: security-empty-no Unicode 1`] = `"\x1B[38;2;90;172;255m[INFO]\x1B[0m \x1B[1mSecurity audit\x1B[0m: No tool security decisions have been recorded for this session yet."`;
+
+exports[`tool-activity Security audit renders compact in no Unicode: security-compact-no Unicode 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mSecurity audit\x1B[0m
+
+- workspace.write -> allow: risk=destructive-local rule=trusted-workspace
+- terminal.exec -> ask: risk=external-side-effect rule=policy"
+`;
+
+exports[`tool-activity Security audit renders debug in no Unicode: security-debug-no Unicode 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mSecurity audit\x1B[0m
+
+\x1B[38;2;90;172;255m[INFO]\x1B[0m \x1B[1mworkspace.write -> allow\x1B[0m: risk=destructive-local rule=trusted-workspace
+\x1B[2m  mode: adaptive\x1B[0m
+\x1B[2m  risk: low\x1B[0m
+\x1B[2m  risk class: destructive-local\x1B[0m
+\x1B[2m  deterministic rule: trusted-workspace\x1B[0m
+\x1B[2m  reason: Workspace is trusted\x1B[0m
+\x1B[2m  assessor: not used (disabled)\x1B[0m"
+`;
+
+exports[`tool-activity Security audit renders empty in narrow width: security-empty-narrow width 1`] = `"\x1B[38;2;90;172;255m[INFO]\x1B[0m \x1B[1mSecurity audit\x1B[0m: No tool security decisions have been recorded for this session yet."`;
+
+exports[`tool-activity Security audit renders compact in narrow width: security-compact-narrow width 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mSecurity audit\x1B[0m
+
+• workspace.write -> allow: risk=destructive-local rule=trusted-workspace
+• terminal.exec -> ask: risk=external-side-effect rule=policy"
+`;
+
+exports[`tool-activity Security audit renders debug in narrow width: security-debug-narrow width 1`] = `
+"\x1B[38;2;76;175;80m[OK]\x1B[0m \x1B[1mSecurity audit\x1B[0m
+
+\x1B[38;2;90;172;255m[INFO]\x1B[0m \x1B[1mworkspace.write -> allow\x1B[0m: risk=destructive-local rule=trusted-workspace
+\x1B[2m  mode: adaptive\x1B[0m
+\x1B[2m  risk: low\x1B[0m
+\x1B[2m  risk class: destructive-local\x1B[0m
+\x1B[2m  deterministic rule: trusted-workspace\x1B[0m
+\x1B[2m  reason: Workspace is trusted\x1B[0m
+\x1B[2m  assessor: not used (disabled)\x1B[0m"
+`;
+
+exports[`tool-activity Setup needed renders image generation in plain: setup-image-plain 1`] = `
+"[WARN] Setup required: image_generation needs one protected credential before I can continue.
+  Provider: fal
+  Model: fal-ai/flux/dev
+  Secret env: FAL_KEY
+  The key is captured by the CLI and is not sent to the model or written to the transcript."
+`;
+
+exports[`tool-activity Setup needed renders other capability in plain: setup-other-plain 1`] = `
+"[WARN] Setup required: tts needs one protected credential before I can continue.
+  Provider: default
+  Model: default
+  Secret env: ELEVENLABS_API_KEY
+  The key is captured by the CLI and is not sent to the model or written to the transcript."
+`;
+
+exports[`tool-activity Setup needed renders image generation in standard dark: setup-image-standard dark 1`] = `
+"\x1B[38;2;255;167;38m[WARN]\x1B[0m \x1B[1mSetup required\x1B[0m: image_generation needs one protected credential before I can continue.
+\x1B[2m  Provider: fal\x1B[0m
+\x1B[2m  Model: fal-ai/flux/dev\x1B[0m
+\x1B[2m  Secret env: FAL_KEY\x1B[0m
+\x1B[2m  The key is captured by the CLI and is not sent to the model or written to the transcript.\x1B[0m"
+`;
+
+exports[`tool-activity Setup needed renders other capability in standard dark: setup-other-standard dark 1`] = `
+"\x1B[38;2;255;167;38m[WARN]\x1B[0m \x1B[1mSetup required\x1B[0m: tts needs one protected credential before I can continue.
+\x1B[2m  Provider: default\x1B[0m
+\x1B[2m  Model: default\x1B[0m
+\x1B[2m  Secret env: ELEVENLABS_API_KEY\x1B[0m
+\x1B[2m  The key is captured by the CLI and is not sent to the model or written to the transcript.\x1B[0m"
+`;
+
+exports[`tool-activity Setup needed renders image generation in standard light: setup-image-standard light 1`] = `
+"\x1B[38;2;239;108;0m[WARN]\x1B[0m \x1B[1mSetup required\x1B[0m: image_generation needs one protected credential before I can continue.
+\x1B[2m  Provider: fal\x1B[0m
+\x1B[2m  Model: fal-ai/flux/dev\x1B[0m
+\x1B[2m  Secret env: FAL_KEY\x1B[0m
+\x1B[2m  The key is captured by the CLI and is not sent to the model or written to the transcript.\x1B[0m"
+`;
+
+exports[`tool-activity Setup needed renders other capability in standard light: setup-other-standard light 1`] = `
+"\x1B[38;2;239;108;0m[WARN]\x1B[0m \x1B[1mSetup required\x1B[0m: tts needs one protected credential before I can continue.
+\x1B[2m  Provider: default\x1B[0m
+\x1B[2m  Model: default\x1B[0m
+\x1B[2m  Secret env: ELEVENLABS_API_KEY\x1B[0m
+\x1B[2m  The key is captured by the CLI and is not sent to the model or written to the transcript.\x1B[0m"
+`;
+
+exports[`tool-activity Setup needed renders image generation in no color: setup-image-no color 1`] = `
+"[WARN] Setup required: image_generation needs one protected credential before I can continue.
+  Provider: fal
+  Model: fal-ai/flux/dev
+  Secret env: FAL_KEY
+  The key is captured by the CLI and is not sent to the model or written to the transcript."
+`;
+
+exports[`tool-activity Setup needed renders other capability in no color: setup-other-no color 1`] = `
+"[WARN] Setup required: tts needs one protected credential before I can continue.
+  Provider: default
+  Model: default
+  Secret env: ELEVENLABS_API_KEY
+  The key is captured by the CLI and is not sent to the model or written to the transcript."
+`;
+
+exports[`tool-activity Setup needed renders image generation in no Unicode: setup-image-no Unicode 1`] = `
+"\x1B[38;2;255;167;38m[WARN]\x1B[0m \x1B[1mSetup required\x1B[0m: image_generation needs one protected credential before I can continue.
+\x1B[2m  Provider: fal\x1B[0m
+\x1B[2m  Model: fal-ai/flux/dev\x1B[0m
+\x1B[2m  Secret env: FAL_KEY\x1B[0m
+\x1B[2m  The key is captured by the CLI and is not sent to the model or written to the transcript.\x1B[0m"
+`;
+
+exports[`tool-activity Setup needed renders other capability in no Unicode: setup-other-no Unicode 1`] = `
+"\x1B[38;2;255;167;38m[WARN]\x1B[0m \x1B[1mSetup required\x1B[0m: tts needs one protected credential before I can continue.
+\x1B[2m  Provider: default\x1B[0m
+\x1B[2m  Model: default\x1B[0m
+\x1B[2m  Secret env: ELEVENLABS_API_KEY\x1B[0m
+\x1B[2m  The key is captured by the CLI and is not sent to the model or written to the transcript.\x1B[0m"
+`;
+
+exports[`tool-activity Setup needed renders image generation in narrow width: setup-image-narrow width 1`] = `
+"\x1B[38;2;255;167;38m[WARN]\x1B[0m \x1B[1mSetup required\x1B[0m: image_generation needs one protected credential before I can continue.
+\x1B[2m  Provider: fal\x1B[0m
+\x1B[2m  Model: fal-ai/flux/dev\x1B[0m
+\x1B[2m  Secret env: FAL_KEY\x1B[0m
+\x1B[2m  The key is captured by the CLI and is not sent to the model or written to the transcript.\x1B[0m"
+`;
+
+exports[`tool-activity Setup needed renders other capability in narrow width: setup-other-narrow width 1`] = `
+"\x1B[38;2;255;167;38m[WARN]\x1B[0m \x1B[1mSetup required\x1B[0m: tts needs one protected credential before I can continue.
+\x1B[2m  Provider: default\x1B[0m
+\x1B[2m  Model: default\x1B[0m
+\x1B[2m  Secret env: ELEVENLABS_API_KEY\x1B[0m
+\x1B[2m  The key is captured by the CLI and is not sent to the model or written to the transcript.\x1B[0m"
+`;
+
+exports[`tool-activity Progress context rail renders empty in plain: rail-empty-plain 1`] = `
 "Turn progress
-✓ web.extract
-(⌦) memory.write
-○ terminal.exec"
+No steps."
 `;
 
-exports[`tool-activity > Progress context rail > renders active in plain > rail-active-plain 1`] = `
+exports[`tool-activity Progress context rail renders active in plain: rail-active-plain 1`] = `
 "Turn progress
 [x] web.extract
 [>] memory.write
 [ ] terminal.exec"
 `;
 
-exports[`tool-activity > Progress context rail > renders active in standard dark > rail-active-standard dark 1`] = `
-"[1mTurn progress[0m
-[38;2;76;175;80m✓[0m [2mweb.extract[0m
-[38;2;64;224;208m(⌦)[0m [38;2;64;224;208mmemory.write[0m
-[2m○[0m terminal.exec"
-`;
-
-exports[`tool-activity > Progress context rail > renders active in standard light > rail-active-standard light 1`] = `
-"[1mTurn progress[0m
-[38;2;46;125;50m✓[0m [2mweb.extract[0m
-[38;2;0;140;149m(⌦)[0m [38;2;0;140;149mmemory.write[0m
-[2m○[0m terminal.exec"
-`;
-
-exports[`tool-activity > Progress context rail > renders empty in narrow width > rail-empty-narrow width 1`] = `
-"[1mTurn progress[0m
-[2mNo steps.[0m"
-`;
-
-exports[`tool-activity > Progress context rail > renders empty in no Unicode > rail-empty-no Unicode 1`] = `
-"[1mTurn progress[0m
-[2mNo steps.[0m"
-`;
-
-exports[`tool-activity > Progress context rail > renders empty in no color > rail-empty-no color 1`] = `
-"Turn progress
-No steps."
-`;
-
-exports[`tool-activity > Progress context rail > renders empty in plain > rail-empty-plain 1`] = `
-"Turn progress
-No steps."
-`;
-
-exports[`tool-activity > Progress context rail > renders empty in standard dark > rail-empty-standard dark 1`] = `
-"[1mTurn progress[0m
-[2mNo steps.[0m"
-`;
-
-exports[`tool-activity > Progress context rail > renders empty in standard light > rail-empty-standard light 1`] = `
-"[1mTurn progress[0m
-[2mNo steps.[0m"
-`;
-
-exports[`tool-activity > Progress context rail > renders failed in narrow width > rail-failed-narrow width 1`] = `
-"[1mTurn progress[0m
-[38;2;76;175;80m✓[0m [2mweb.extract[0m
-[38;2;239;83;80m✗[0m [38;2;239;83;80mterminal.exec[0m"
-`;
-
-exports[`tool-activity > Progress context rail > renders failed in no Unicode > rail-failed-no Unicode 1`] = `
-"[1mTurn progress[0m
-[x] [2mweb.extract[0m
-[-] [38;2;239;83;80mterminal.exec[0m"
-`;
-
-exports[`tool-activity > Progress context rail > renders failed in no color > rail-failed-no color 1`] = `
-"Turn progress
-✓ web.extract
-✗ terminal.exec"
-`;
-
-exports[`tool-activity > Progress context rail > renders failed in plain > rail-failed-plain 1`] = `
+exports[`tool-activity Progress context rail renders failed in plain: rail-failed-plain 1`] = `
 "Turn progress
 [x] web.extract
 [-] terminal.exec"
 `;
 
-exports[`tool-activity > Progress context rail > renders failed in standard dark > rail-failed-standard dark 1`] = `
-"[1mTurn progress[0m
-[38;2;76;175;80m✓[0m [2mweb.extract[0m
-[38;2;239;83;80m✗[0m [38;2;239;83;80mterminal.exec[0m"
-`;
-
-exports[`tool-activity > Progress context rail > renders failed in standard light > rail-failed-standard light 1`] = `
-"[1mTurn progress[0m
-[38;2;46;125;50m✓[0m [2mweb.extract[0m
-[38;2;198;40;40m✗[0m [38;2;198;40;40mterminal.exec[0m"
-`;
-
-exports[`tool-activity > Progress context rail > renders idle in narrow width > rail-idle-narrow width 1`] = `
-"[1mTurn progress[0m
-◷ 120s  ⧖ idle"
-`;
-
-exports[`tool-activity > Progress context rail > renders idle in no Unicode > rail-idle-no Unicode 1`] = `
-"[1mTurn progress[0m
-sess 120s  task idle"
-`;
-
-exports[`tool-activity > Progress context rail > renders idle in no color > rail-idle-no color 1`] = `
+exports[`tool-activity Progress context rail renders timers in plain: rail-timer-plain 1`] = `
 "Turn progress
-◷ 120s  ⧖ idle"
-`;
-
-exports[`tool-activity > Progress context rail > renders idle in plain > rail-idle-plain 1`] = `
-"Turn progress
-sess 120s  task idle"
-`;
-
-exports[`tool-activity > Progress context rail > renders idle in standard dark > rail-idle-standard dark 1`] = `
-"[1mTurn progress[0m
-◷ 120s  ⧖ idle"
-`;
-
-exports[`tool-activity > Progress context rail > renders idle in standard light > rail-idle-standard light 1`] = `
-"[1mTurn progress[0m
-◷ 120s  ⧖ idle"
-`;
-
-exports[`tool-activity > Progress context rail > renders timers in narrow width > rail-timer-narrow width 1`] = `
-"[1mTurn progress[0m
-[38;2;76;175;80m✓[0m [2mweb.extract[0m
-[38;2;64;224;208m(⌦)[0m [38;2;64;224;208mmemory.write[0m
-[2m○[0m terminal.exec
-◷ 58s  ⧖ 16s"
-`;
-
-exports[`tool-activity > Progress context rail > renders timers in no Unicode > rail-timer-no Unicode 1`] = `
-"[1mTurn progress[0m
-[x] [2mweb.extract[0m
-[>] [38;2;64;224;208mmemory.write[0m
+[x] web.extract
+[>] memory.write
 [ ] terminal.exec
 sess 58s  task 16s"
 `;
 
-exports[`tool-activity > Progress context rail > renders timers in no color > rail-timer-no color 1`] = `
+exports[`tool-activity Progress context rail renders idle in plain: rail-idle-plain 1`] = `
+"Turn progress
+sess 120s  task idle"
+`;
+
+exports[`tool-activity Progress context rail renders empty in standard dark: rail-empty-standard dark 1`] = `
+"\x1B[1mTurn progress\x1B[0m
+\x1B[2mNo steps.\x1B[0m"
+`;
+
+exports[`tool-activity Progress context rail renders active in standard dark: rail-active-standard dark 1`] = `
+"\x1B[1mTurn progress\x1B[0m
+\x1B[38;2;76;175;80m✓\x1B[0m \x1B[2mweb.extract\x1B[0m
+\x1B[38;2;64;224;208m(⌦)\x1B[0m \x1B[38;2;64;224;208mmemory.write\x1B[0m
+\x1B[2m○\x1B[0m terminal.exec"
+`;
+
+exports[`tool-activity Progress context rail renders failed in standard dark: rail-failed-standard dark 1`] = `
+"\x1B[1mTurn progress\x1B[0m
+\x1B[38;2;76;175;80m✓\x1B[0m \x1B[2mweb.extract\x1B[0m
+\x1B[38;2;239;83;80m✗\x1B[0m \x1B[38;2;239;83;80mterminal.exec\x1B[0m"
+`;
+
+exports[`tool-activity Progress context rail renders timers in standard dark: rail-timer-standard dark 1`] = `
+"\x1B[1mTurn progress\x1B[0m
+\x1B[38;2;76;175;80m✓\x1B[0m \x1B[2mweb.extract\x1B[0m
+\x1B[38;2;64;224;208m(⌦)\x1B[0m \x1B[38;2;64;224;208mmemory.write\x1B[0m
+\x1B[2m○\x1B[0m terminal.exec
+◷ 58s  ⧖ 16s"
+`;
+
+exports[`tool-activity Progress context rail renders idle in standard dark: rail-idle-standard dark 1`] = `
+"\x1B[1mTurn progress\x1B[0m
+◷ 120s  ⧖ idle"
+`;
+
+exports[`tool-activity Progress context rail renders empty in standard light: rail-empty-standard light 1`] = `
+"\x1B[1mTurn progress\x1B[0m
+\x1B[2mNo steps.\x1B[0m"
+`;
+
+exports[`tool-activity Progress context rail renders active in standard light: rail-active-standard light 1`] = `
+"\x1B[1mTurn progress\x1B[0m
+\x1B[38;2;46;125;50m✓\x1B[0m \x1B[2mweb.extract\x1B[0m
+\x1B[38;2;0;140;149m(⌦)\x1B[0m \x1B[38;2;0;140;149mmemory.write\x1B[0m
+\x1B[2m○\x1B[0m terminal.exec"
+`;
+
+exports[`tool-activity Progress context rail renders failed in standard light: rail-failed-standard light 1`] = `
+"\x1B[1mTurn progress\x1B[0m
+\x1B[38;2;46;125;50m✓\x1B[0m \x1B[2mweb.extract\x1B[0m
+\x1B[38;2;198;40;40m✗\x1B[0m \x1B[38;2;198;40;40mterminal.exec\x1B[0m"
+`;
+
+exports[`tool-activity Progress context rail renders timers in standard light: rail-timer-standard light 1`] = `
+"\x1B[1mTurn progress\x1B[0m
+\x1B[38;2;46;125;50m✓\x1B[0m \x1B[2mweb.extract\x1B[0m
+\x1B[38;2;0;140;149m(⌦)\x1B[0m \x1B[38;2;0;140;149mmemory.write\x1B[0m
+\x1B[2m○\x1B[0m terminal.exec
+◷ 58s  ⧖ 16s"
+`;
+
+exports[`tool-activity Progress context rail renders idle in standard light: rail-idle-standard light 1`] = `
+"\x1B[1mTurn progress\x1B[0m
+◷ 120s  ⧖ idle"
+`;
+
+exports[`tool-activity Progress context rail renders empty in no color: rail-empty-no color 1`] = `
+"Turn progress
+No steps."
+`;
+
+exports[`tool-activity Progress context rail renders active in no color: rail-active-no color 1`] = `
+"Turn progress
+✓ web.extract
+(⌦) memory.write
+○ terminal.exec"
+`;
+
+exports[`tool-activity Progress context rail renders failed in no color: rail-failed-no color 1`] = `
+"Turn progress
+✓ web.extract
+✗ terminal.exec"
+`;
+
+exports[`tool-activity Progress context rail renders timers in no color: rail-timer-no color 1`] = `
 "Turn progress
 ✓ web.extract
 (⌦) memory.write
@@ -230,462 +505,187 @@ exports[`tool-activity > Progress context rail > renders timers in no color > ra
 ◷ 58s  ⧖ 16s"
 `;
 
-exports[`tool-activity > Progress context rail > renders timers in plain > rail-timer-plain 1`] = `
+exports[`tool-activity Progress context rail renders idle in no color: rail-idle-no color 1`] = `
 "Turn progress
-[x] web.extract
-[>] memory.write
+◷ 120s  ⧖ idle"
+`;
+
+exports[`tool-activity Progress context rail renders empty in no Unicode: rail-empty-no Unicode 1`] = `
+"\x1B[1mTurn progress\x1B[0m
+\x1B[2mNo steps.\x1B[0m"
+`;
+
+exports[`tool-activity Progress context rail renders active in no Unicode: rail-active-no Unicode 1`] = `
+"\x1B[1mTurn progress\x1B[0m
+[x] \x1B[2mweb.extract\x1B[0m
+[>] \x1B[38;2;64;224;208mmemory.write\x1B[0m
+[ ] terminal.exec"
+`;
+
+exports[`tool-activity Progress context rail renders failed in no Unicode: rail-failed-no Unicode 1`] = `
+"\x1B[1mTurn progress\x1B[0m
+[x] \x1B[2mweb.extract\x1B[0m
+[-] \x1B[38;2;239;83;80mterminal.exec\x1B[0m"
+`;
+
+exports[`tool-activity Progress context rail renders timers in no Unicode: rail-timer-no Unicode 1`] = `
+"\x1B[1mTurn progress\x1B[0m
+[x] \x1B[2mweb.extract\x1B[0m
+[>] \x1B[38;2;64;224;208mmemory.write\x1B[0m
 [ ] terminal.exec
 sess 58s  task 16s"
 `;
 
-exports[`tool-activity > Progress context rail > renders timers in standard dark > rail-timer-standard dark 1`] = `
-"[1mTurn progress[0m
-[38;2;76;175;80m✓[0m [2mweb.extract[0m
-[38;2;64;224;208m(⌦)[0m [38;2;64;224;208mmemory.write[0m
-[2m○[0m terminal.exec
+exports[`tool-activity Progress context rail renders idle in no Unicode: rail-idle-no Unicode 1`] = `
+"\x1B[1mTurn progress\x1B[0m
+sess 120s  task idle"
+`;
+
+exports[`tool-activity Progress context rail renders empty in narrow width: rail-empty-narrow width 1`] = `
+"\x1B[1mTurn progress\x1B[0m
+\x1B[2mNo steps.\x1B[0m"
+`;
+
+exports[`tool-activity Progress context rail renders active in narrow width: rail-active-narrow width 1`] = `
+"\x1B[1mTurn progress\x1B[0m
+\x1B[38;2;76;175;80m✓\x1B[0m \x1B[2mweb.extract\x1B[0m
+\x1B[38;2;64;224;208m(⌦)\x1B[0m \x1B[38;2;64;224;208mmemory.write\x1B[0m
+\x1B[2m○\x1B[0m terminal.exec"
+`;
+
+exports[`tool-activity Progress context rail renders failed in narrow width: rail-failed-narrow width 1`] = `
+"\x1B[1mTurn progress\x1B[0m
+\x1B[38;2;76;175;80m✓\x1B[0m \x1B[2mweb.extract\x1B[0m
+\x1B[38;2;239;83;80m✗\x1B[0m \x1B[38;2;239;83;80mterminal.exec\x1B[0m"
+`;
+
+exports[`tool-activity Progress context rail renders timers in narrow width: rail-timer-narrow width 1`] = `
+"\x1B[1mTurn progress\x1B[0m
+\x1B[38;2;76;175;80m✓\x1B[0m \x1B[2mweb.extract\x1B[0m
+\x1B[38;2;64;224;208m(⌦)\x1B[0m \x1B[38;2;64;224;208mmemory.write\x1B[0m
+\x1B[2m○\x1B[0m terminal.exec
 ◷ 58s  ⧖ 16s"
 `;
 
-exports[`tool-activity > Progress context rail > renders timers in standard light > rail-timer-standard light 1`] = `
-"[1mTurn progress[0m
-[38;2;46;125;50m✓[0m [2mweb.extract[0m
-[38;2;0;140;149m(⌦)[0m [38;2;0;140;149mmemory.write[0m
-[2m○[0m terminal.exec
-◷ 58s  ⧖ 16s"
+exports[`tool-activity Progress context rail renders idle in narrow width: rail-idle-narrow width 1`] = `
+"\x1B[1mTurn progress\x1B[0m
+◷ 120s  ⧖ idle"
 `;
 
-exports[`tool-activity > Security audit > renders compact in narrow width > security-compact-narrow width 1`] = `
-"[38;2;76;175;80m[OK][0m [1mSecurity audit[0m
+exports[`tool-activity Tool activity rail renders empty in plain: tool-rail-empty-plain 1`] = `"No activity."`;
 
-• workspace.write -> allow: risk=destructive-local rule=trusted-workspace
-• terminal.exec -> ask: risk=external-side-effect rule=policy"
-`;
+exports[`tool-activity Tool activity rail renders single running in plain: tool-rail-running-plain 1`] = `"| [>] preparing  /workspace/Stage-9B-plan.md"`;
 
-exports[`tool-activity > Security audit > renders compact in no Unicode > security-compact-no Unicode 1`] = `
-"[38;2;76;175;80m[OK][0m [1mSecurity audit[0m
+exports[`tool-activity Tool activity rail renders single done in plain: tool-rail-done-plain 1`] = `"| [x] read  /workspace/Stage-9B-plan.md  1.4s"`;
 
-- workspace.write -> allow: risk=destructive-local rule=trusted-workspace
-- terminal.exec -> ask: risk=external-side-effect rule=policy"
-`;
+exports[`tool-activity Tool activity rail renders single failed in plain: tool-rail-failed-plain 1`] = `"| [-] run  npm test  500ms"`;
 
-exports[`tool-activity > Security audit > renders compact in no color > security-compact-no color 1`] = `
-"[OK] Security audit
+exports[`tool-activity Tool activity rail renders single gated in plain: tool-rail-gated-plain 1`] = `"| [?] write  src/index.ts  50ms"`;
 
-• workspace.write -> allow: risk=destructive-local rule=trusted-workspace
-• terminal.exec -> ask: risk=external-side-effect rule=policy"
-`;
-
-exports[`tool-activity > Security audit > renders compact in plain > security-compact-plain 1`] = `
-"[OK] Security audit
-
-- workspace.write -> allow: risk=destructive-local rule=trusted-workspace
-- terminal.exec -> ask: risk=external-side-effect rule=policy"
-`;
-
-exports[`tool-activity > Security audit > renders compact in standard dark > security-compact-standard dark 1`] = `
-"[38;2;76;175;80m[OK][0m [1mSecurity audit[0m
-
-• workspace.write -> allow: risk=destructive-local rule=trusted-workspace
-• terminal.exec -> ask: risk=external-side-effect rule=policy"
-`;
-
-exports[`tool-activity > Security audit > renders compact in standard light > security-compact-standard light 1`] = `
-"[38;2;46;125;50m[OK][0m [1mSecurity audit[0m
-
-• workspace.write -> allow: risk=destructive-local rule=trusted-workspace
-• terminal.exec -> ask: risk=external-side-effect rule=policy"
-`;
-
-exports[`tool-activity > Security audit > renders debug in narrow width > security-debug-narrow width 1`] = `
-"[38;2;76;175;80m[OK][0m [1mSecurity audit[0m
-
-[38;2;90;172;255m[INFO][0m [1mworkspace.write -> allow[0m: risk=destructive-local rule=trusted-workspace
-[2m  mode: adaptive[0m
-[2m  risk: low[0m
-[2m  risk class: destructive-local[0m
-[2m  deterministic rule: trusted-workspace[0m
-[2m  reason: Workspace is trusted[0m
-[2m  assessor: not used (disabled)[0m"
-`;
-
-exports[`tool-activity > Security audit > renders debug in no Unicode > security-debug-no Unicode 1`] = `
-"[38;2;76;175;80m[OK][0m [1mSecurity audit[0m
-
-[38;2;90;172;255m[INFO][0m [1mworkspace.write -> allow[0m: risk=destructive-local rule=trusted-workspace
-[2m  mode: adaptive[0m
-[2m  risk: low[0m
-[2m  risk class: destructive-local[0m
-[2m  deterministic rule: trusted-workspace[0m
-[2m  reason: Workspace is trusted[0m
-[2m  assessor: not used (disabled)[0m"
-`;
-
-exports[`tool-activity > Security audit > renders debug in no color > security-debug-no color 1`] = `
-"[OK] Security audit
-
-[INFO] workspace.write -> allow: risk=destructive-local rule=trusted-workspace
-  mode: adaptive
-  risk: low
-  risk class: destructive-local
-  deterministic rule: trusted-workspace
-  reason: Workspace is trusted
-  assessor: not used (disabled)"
-`;
-
-exports[`tool-activity > Security audit > renders debug in plain > security-debug-plain 1`] = `
-"[OK] Security audit
-
-[INFO] workspace.write -> allow: risk=destructive-local rule=trusted-workspace
-  mode: adaptive
-  risk: low
-  risk class: destructive-local
-  deterministic rule: trusted-workspace
-  reason: Workspace is trusted
-  assessor: not used (disabled)"
-`;
-
-exports[`tool-activity > Security audit > renders debug in standard dark > security-debug-standard dark 1`] = `
-"[38;2;76;175;80m[OK][0m [1mSecurity audit[0m
-
-[38;2;90;172;255m[INFO][0m [1mworkspace.write -> allow[0m: risk=destructive-local rule=trusted-workspace
-[2m  mode: adaptive[0m
-[2m  risk: low[0m
-[2m  risk class: destructive-local[0m
-[2m  deterministic rule: trusted-workspace[0m
-[2m  reason: Workspace is trusted[0m
-[2m  assessor: not used (disabled)[0m"
-`;
-
-exports[`tool-activity > Security audit > renders debug in standard light > security-debug-standard light 1`] = `
-"[38;2;46;125;50m[OK][0m [1mSecurity audit[0m
-
-[38;2;0;87;217m[INFO][0m [1mworkspace.write -> allow[0m: risk=destructive-local rule=trusted-workspace
-[2m  mode: adaptive[0m
-[2m  risk: low[0m
-[2m  risk class: destructive-local[0m
-[2m  deterministic rule: trusted-workspace[0m
-[2m  reason: Workspace is trusted[0m
-[2m  assessor: not used (disabled)[0m"
-`;
-
-exports[`tool-activity > Security audit > renders empty in narrow width > security-empty-narrow width 1`] = `"[38;2;90;172;255m[INFO][0m [1mSecurity audit[0m: No tool security decisions have been recorded for this session yet."`;
-
-exports[`tool-activity > Security audit > renders empty in no Unicode > security-empty-no Unicode 1`] = `"[38;2;90;172;255m[INFO][0m [1mSecurity audit[0m: No tool security decisions have been recorded for this session yet."`;
-
-exports[`tool-activity > Security audit > renders empty in no color > security-empty-no color 1`] = `"[INFO] Security audit: No tool security decisions have been recorded for this session yet."`;
-
-exports[`tool-activity > Security audit > renders empty in plain > security-empty-plain 1`] = `"[INFO] Security audit: No tool security decisions have been recorded for this session yet."`;
-
-exports[`tool-activity > Security audit > renders empty in standard dark > security-empty-standard dark 1`] = `"[38;2;90;172;255m[INFO][0m [1mSecurity audit[0m: No tool security decisions have been recorded for this session yet."`;
-
-exports[`tool-activity > Security audit > renders empty in standard light > security-empty-standard light 1`] = `"[38;2;0;87;217m[INFO][0m [1mSecurity audit[0m: No tool security decisions have been recorded for this session yet."`;
-
-exports[`tool-activity > Setup needed > renders image generation in narrow width > setup-image-narrow width 1`] = `
-"[38;2;255;167;38m[WARN][0m [1mSetup required[0m: image_generation needs one protected credential before I can continue.
-[2m  Provider: fal[0m
-[2m  Model: fal-ai/flux/dev[0m
-[2m  Secret env: FAL_KEY[0m
-[2m  The key is captured by the CLI and is not sent to the model or written to the transcript.[0m"
-`;
-
-exports[`tool-activity > Setup needed > renders image generation in no Unicode > setup-image-no Unicode 1`] = `
-"[38;2;255;167;38m[WARN][0m [1mSetup required[0m: image_generation needs one protected credential before I can continue.
-[2m  Provider: fal[0m
-[2m  Model: fal-ai/flux/dev[0m
-[2m  Secret env: FAL_KEY[0m
-[2m  The key is captured by the CLI and is not sent to the model or written to the transcript.[0m"
-`;
-
-exports[`tool-activity > Setup needed > renders image generation in no color > setup-image-no color 1`] = `
-"[WARN] Setup required: image_generation needs one protected credential before I can continue.
-  Provider: fal
-  Model: fal-ai/flux/dev
-  Secret env: FAL_KEY
-  The key is captured by the CLI and is not sent to the model or written to the transcript."
-`;
-
-exports[`tool-activity > Setup needed > renders image generation in plain > setup-image-plain 1`] = `
-"[WARN] Setup required: image_generation needs one protected credential before I can continue.
-  Provider: fal
-  Model: fal-ai/flux/dev
-  Secret env: FAL_KEY
-  The key is captured by the CLI and is not sent to the model or written to the transcript."
-`;
-
-exports[`tool-activity > Setup needed > renders image generation in standard dark > setup-image-standard dark 1`] = `
-"[38;2;255;167;38m[WARN][0m [1mSetup required[0m: image_generation needs one protected credential before I can continue.
-[2m  Provider: fal[0m
-[2m  Model: fal-ai/flux/dev[0m
-[2m  Secret env: FAL_KEY[0m
-[2m  The key is captured by the CLI and is not sent to the model or written to the transcript.[0m"
-`;
-
-exports[`tool-activity > Setup needed > renders image generation in standard light > setup-image-standard light 1`] = `
-"[38;2;239;108;0m[WARN][0m [1mSetup required[0m: image_generation needs one protected credential before I can continue.
-[2m  Provider: fal[0m
-[2m  Model: fal-ai/flux/dev[0m
-[2m  Secret env: FAL_KEY[0m
-[2m  The key is captured by the CLI and is not sent to the model or written to the transcript.[0m"
-`;
-
-exports[`tool-activity > Setup needed > renders other capability in narrow width > setup-other-narrow width 1`] = `
-"[38;2;255;167;38m[WARN][0m [1mSetup required[0m: tts needs one protected credential before I can continue.
-[2m  Provider: default[0m
-[2m  Model: default[0m
-[2m  Secret env: ELEVENLABS_API_KEY[0m
-[2m  The key is captured by the CLI and is not sent to the model or written to the transcript.[0m"
-`;
-
-exports[`tool-activity > Setup needed > renders other capability in no Unicode > setup-other-no Unicode 1`] = `
-"[38;2;255;167;38m[WARN][0m [1mSetup required[0m: tts needs one protected credential before I can continue.
-[2m  Provider: default[0m
-[2m  Model: default[0m
-[2m  Secret env: ELEVENLABS_API_KEY[0m
-[2m  The key is captured by the CLI and is not sent to the model or written to the transcript.[0m"
-`;
-
-exports[`tool-activity > Setup needed > renders other capability in no color > setup-other-no color 1`] = `
-"[WARN] Setup required: tts needs one protected credential before I can continue.
-  Provider: default
-  Model: default
-  Secret env: ELEVENLABS_API_KEY
-  The key is captured by the CLI and is not sent to the model or written to the transcript."
-`;
-
-exports[`tool-activity > Setup needed > renders other capability in plain > setup-other-plain 1`] = `
-"[WARN] Setup required: tts needs one protected credential before I can continue.
-  Provider: default
-  Model: default
-  Secret env: ELEVENLABS_API_KEY
-  The key is captured by the CLI and is not sent to the model or written to the transcript."
-`;
-
-exports[`tool-activity > Setup needed > renders other capability in standard dark > setup-other-standard dark 1`] = `
-"[38;2;255;167;38m[WARN][0m [1mSetup required[0m: tts needs one protected credential before I can continue.
-[2m  Provider: default[0m
-[2m  Model: default[0m
-[2m  Secret env: ELEVENLABS_API_KEY[0m
-[2m  The key is captured by the CLI and is not sent to the model or written to the transcript.[0m"
-`;
-
-exports[`tool-activity > Setup needed > renders other capability in standard light > setup-other-standard light 1`] = `
-"[38;2;239;108;0m[WARN][0m [1mSetup required[0m: tts needs one protected credential before I can continue.
-[2m  Provider: default[0m
-[2m  Model: default[0m
-[2m  Secret env: ELEVENLABS_API_KEY[0m
-[2m  The key is captured by the CLI and is not sent to the model or written to the transcript.[0m"
-`;
-
-exports[`tool-activity > Tool activity rail > renders Arabic in plain mode with LTR-isolated tokens > tool-rail-arabic-plain 1`] = `"| [x] كتابة  ⁦/workspace/Stage-9B-plan.md⁩  1.2s"`;
-
-exports[`tool-activity > Tool activity rail > renders Arabic labels with LTR-isolated technical tokens > tool-rail-arabic-standard 1`] = `"│ ◆  كتابة  ⁦/workspace/Stage-9B-plan.md⁩  [2m1.2s[0m"`;
-
-exports[`tool-activity > Tool activity rail > renders empty in narrow width > tool-rail-empty-narrow width 1`] = `"[2mNo activity.[0m"`;
-
-exports[`tool-activity > Tool activity rail > renders empty in no Unicode > tool-rail-empty-no Unicode 1`] = `"[2mNo activity.[0m"`;
-
-exports[`tool-activity > Tool activity rail > renders empty in no color > tool-rail-empty-no color 1`] = `"No activity."`;
-
-exports[`tool-activity > Tool activity rail > renders empty in plain > tool-rail-empty-plain 1`] = `"No activity."`;
-
-exports[`tool-activity > Tool activity rail > renders empty in standard dark > tool-rail-empty-standard dark 1`] = `"[2mNo activity.[0m"`;
-
-exports[`tool-activity > Tool activity rail > renders empty in standard light > tool-rail-empty-standard light 1`] = `"[2mNo activity.[0m"`;
-
-exports[`tool-activity > Tool activity rail > renders long path truncated in narrow width > tool-rail-long-path-narrow width 1`] = `"│ ◰  read  /workspace/very/long/path/..."`;
-
-exports[`tool-activity > Tool activity rail > renders long path truncated in no Unicode > tool-rail-long-path-no Unicode 1`] = `"| R  read  /workspace/very/long/path/to/the/file/that/exceeds/terminal/width/limit.md  [2m1.4s[0m"`;
-
-exports[`tool-activity > Tool activity rail > renders long path truncated in no color > tool-rail-long-path-no color 1`] = `"│ ◰  read  /workspace/very/long/path/to/the/file/that/exceeds/terminal/width/limit.md  1.4s"`;
-
-exports[`tool-activity > Tool activity rail > renders long path truncated in plain > tool-rail-long-path-plain 1`] = `"| [x] read  /workspace/very/long/path/to/the/file/that/exceeds/terminal/width/limit.md  1.4s"`;
-
-exports[`tool-activity > Tool activity rail > renders long path truncated in standard dark > tool-rail-long-path-standard dark 1`] = `"│ ◰  read  /workspace/very/long/path/to/the/file/that/exceeds/terminal/width/limit.md  [2m1.4s[0m"`;
-
-exports[`tool-activity > Tool activity rail > renders long path truncated in standard light > tool-rail-long-path-standard light 1`] = `"│ ◰  read  /workspace/very/long/path/to/the/file/that/exceeds/terminal/width/limit.md  [2m1.4s[0m"`;
-
-exports[`tool-activity > Tool activity rail > renders multiple mixed in narrow width > tool-rail-mixed-narrow width 1`] = `
-"│ ◰  read  /workspace/Stage-9B-plan.m...
-│ ◆  preparing  /workspace/Stage-9B-p...
-│ [38;2;239;83;80m✗[0m  run  npm test  [2m500ms[0m
-│ ◇  review  diff  [2m1.2s[0m"
-`;
-
-exports[`tool-activity > Tool activity rail > renders multiple mixed in no Unicode > tool-rail-mixed-no Unicode 1`] = `
-"| R  read  /workspace/Stage-9B-plan.md  [2m1.4s[0m
-| W  preparing  /workspace/Stage-9B-plan.md
-| [-]  run  npm test  [2m500ms[0m
-| S  review  diff  [2m1.2s[0m"
-`;
-
-exports[`tool-activity > Tool activity rail > renders multiple mixed in no color > tool-rail-mixed-no color 1`] = `
-"│ ◰  read  /workspace/Stage-9B-plan.md  1.4s
-│ ◆  preparing  /workspace/Stage-9B-plan.md
-│ ✗  run  npm test  500ms
-│ ◇  review  diff  1.2s"
-`;
-
-exports[`tool-activity > Tool activity rail > renders multiple mixed in plain > tool-rail-mixed-plain 1`] = `
+exports[`tool-activity Tool activity rail renders multiple mixed in plain: tool-rail-mixed-plain 1`] = `
 "| [x] read  /workspace/Stage-9B-plan.md  1.4s
 | [>] preparing  /workspace/Stage-9B-plan.md
 | [-] run  npm test  500ms
 | [x] review  diff  1.2s"
 `;
 
-exports[`tool-activity > Tool activity rail > renders multiple mixed in standard dark > tool-rail-mixed-standard dark 1`] = `
-"│ ◰  read  /workspace/Stage-9B-plan.md  [2m1.4s[0m
-│ ◆  preparing  /workspace/Stage-9B-plan.md
-│ [38;2;239;83;80m✗[0m  run  npm test  [2m500ms[0m
-│ ◇  review  diff  [2m1.2s[0m"
+exports[`tool-activity Tool activity rail renders long path truncated in plain: tool-rail-long-path-plain 1`] = `"| [x] read  /workspace/very/long/path/to/the/file/that/exceeds/terminal/width/limit.md  1.4s"`;
+
+exports[`tool-activity Tool activity rail renders empty in standard dark: tool-rail-empty-standard dark 1`] = `"\x1B[2mNo activity.\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders single running in standard dark: tool-rail-running-standard dark 1`] = `"│ \x1B[38;2;90;172;255m𓇠\x1B[0m  preparing  /workspace/Stage-9B-plan.md"`;
+
+exports[`tool-activity Tool activity rail renders single done in standard dark: tool-rail-done-standard dark 1`] = `"│ ◰  read  /workspace/Stage-9B-plan.md  \x1B[2m1.4s\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders single failed in standard dark: tool-rail-failed-standard dark 1`] = `"│ \x1B[38;2;239;83;80m✗\x1B[0m  run  npm test  \x1B[2m500ms\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders single gated in standard dark: tool-rail-gated-standard dark 1`] = `"│ \x1B[38;2;255;180;84m⚠\x1B[0m  write  src/index.ts  \x1B[2m50ms\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders multiple mixed in standard dark: tool-rail-mixed-standard dark 1`] = `
+"│ ◰  read  /workspace/Stage-9B-plan.md  \x1B[2m1.4s\x1B[0m
+│ \x1B[38;2;90;172;255m𓇠\x1B[0m  preparing  /workspace/Stage-9B-plan.md
+│ \x1B[38;2;239;83;80m✗\x1B[0m  run  npm test  \x1B[2m500ms\x1B[0m
+│ ◇  review  diff  \x1B[2m1.2s\x1B[0m"
 `;
 
-exports[`tool-activity > Tool activity rail > renders multiple mixed in standard light > tool-rail-mixed-standard light 1`] = `
-"│ ◰  read  /workspace/Stage-9B-plan.md  [2m1.4s[0m
-│ ◆  preparing  /workspace/Stage-9B-plan.md
-│ [38;2;198;40;40m✗[0m  run  npm test  [2m500ms[0m
-│ ◇  review  diff  [2m1.2s[0m"
+exports[`tool-activity Tool activity rail renders long path truncated in standard dark: tool-rail-long-path-standard dark 1`] = `"│ ◰  read  /workspace/very/long/path/to/the/file/that/exceeds/terminal/width/limit.md  \x1B[2m1.4s\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders empty in standard light: tool-rail-empty-standard light 1`] = `"\x1B[2mNo activity.\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders single running in standard light: tool-rail-running-standard light 1`] = `"│ \x1B[38;2;0;87;217m𓇠\x1B[0m  preparing  /workspace/Stage-9B-plan.md"`;
+
+exports[`tool-activity Tool activity rail renders single done in standard light: tool-rail-done-standard light 1`] = `"│ ◰  read  /workspace/Stage-9B-plan.md  \x1B[2m1.4s\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders single failed in standard light: tool-rail-failed-standard light 1`] = `"│ \x1B[38;2;198;40;40m✗\x1B[0m  run  npm test  \x1B[2m500ms\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders single gated in standard light: tool-rail-gated-standard light 1`] = `"│ \x1B[38;2;180;83;9m⚠\x1B[0m  write  src/index.ts  \x1B[2m50ms\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders multiple mixed in standard light: tool-rail-mixed-standard light 1`] = `
+"│ ◰  read  /workspace/Stage-9B-plan.md  \x1B[2m1.4s\x1B[0m
+│ \x1B[38;2;0;87;217m𓇠\x1B[0m  preparing  /workspace/Stage-9B-plan.md
+│ \x1B[38;2;198;40;40m✗\x1B[0m  run  npm test  \x1B[2m500ms\x1B[0m
+│ ◇  review  diff  \x1B[2m1.2s\x1B[0m"
 `;
 
-exports[`tool-activity > Tool activity rail > renders single done in narrow width > tool-rail-done-narrow width 1`] = `"│ ◰  read  /workspace/Stage-9B-plan.m..."`;
+exports[`tool-activity Tool activity rail renders long path truncated in standard light: tool-rail-long-path-standard light 1`] = `"│ ◰  read  /workspace/very/long/path/to/the/file/that/exceeds/terminal/width/limit.md  \x1B[2m1.4s\x1B[0m"`;
 
-exports[`tool-activity > Tool activity rail > renders single done in no Unicode > tool-rail-done-no Unicode 1`] = `"| R  read  /workspace/Stage-9B-plan.md  [2m1.4s[0m"`;
+exports[`tool-activity Tool activity rail renders empty in no color: tool-rail-empty-no color 1`] = `"No activity."`;
 
-exports[`tool-activity > Tool activity rail > renders single done in no color > tool-rail-done-no color 1`] = `"│ ◰  read  /workspace/Stage-9B-plan.md  1.4s"`;
+exports[`tool-activity Tool activity rail renders single running in no color: tool-rail-running-no color 1`] = `"│ 𓇠  preparing  /workspace/Stage-9B-plan.md"`;
 
-exports[`tool-activity > Tool activity rail > renders single done in plain > tool-rail-done-plain 1`] = `"| [x] read  /workspace/Stage-9B-plan.md  1.4s"`;
+exports[`tool-activity Tool activity rail renders single done in no color: tool-rail-done-no color 1`] = `"│ ◰  read  /workspace/Stage-9B-plan.md  1.4s"`;
 
-exports[`tool-activity > Tool activity rail > renders single done in standard dark > tool-rail-done-standard dark 1`] = `"│ ◰  read  /workspace/Stage-9B-plan.md  [2m1.4s[0m"`;
+exports[`tool-activity Tool activity rail renders single failed in no color: tool-rail-failed-no color 1`] = `"│ ✗  run  npm test  500ms"`;
 
-exports[`tool-activity > Tool activity rail > renders single done in standard light > tool-rail-done-standard light 1`] = `"│ ◰  read  /workspace/Stage-9B-plan.md  [2m1.4s[0m"`;
+exports[`tool-activity Tool activity rail renders single gated in no color: tool-rail-gated-no color 1`] = `"│ ⚠  write  src/index.ts  50ms"`;
 
-exports[`tool-activity > Tool activity rail > renders single failed in narrow width > tool-rail-failed-narrow width 1`] = `"│ [38;2;239;83;80m✗[0m  run  npm test  [2m500ms[0m"`;
-
-exports[`tool-activity > Tool activity rail > renders single failed in no Unicode > tool-rail-failed-no Unicode 1`] = `"| [-]  run  npm test  [2m500ms[0m"`;
-
-exports[`tool-activity > Tool activity rail > renders single failed in no color > tool-rail-failed-no color 1`] = `"│ ✗  run  npm test  500ms"`;
-
-exports[`tool-activity > Tool activity rail > renders single failed in plain > tool-rail-failed-plain 1`] = `"| [-] run  npm test  500ms"`;
-
-exports[`tool-activity > Tool activity rail > renders single failed in standard dark > tool-rail-failed-standard dark 1`] = `"│ [38;2;239;83;80m✗[0m  run  npm test  [2m500ms[0m"`;
-
-exports[`tool-activity > Tool activity rail > renders single failed in standard light > tool-rail-failed-standard light 1`] = `"│ [38;2;198;40;40m✗[0m  run  npm test  [2m500ms[0m"`;
-
-exports[`tool-activity > Tool activity rail > renders single gated in narrow width > tool-rail-gated-narrow width 1`] = `"│ [38;2;255;180;84m⚠[0m  write  src/index.ts  [2m50ms[0m"`;
-
-exports[`tool-activity > Tool activity rail > renders single gated in no Unicode > tool-rail-gated-no Unicode 1`] = `"| [?]  write  src/index.ts  [2m50ms[0m"`;
-
-exports[`tool-activity > Tool activity rail > renders single gated in no color > tool-rail-gated-no color 1`] = `"│ ⚠  write  src/index.ts  50ms"`;
-
-exports[`tool-activity > Tool activity rail > renders single gated in plain > tool-rail-gated-plain 1`] = `"| [?] write  src/index.ts  50ms"`;
-
-exports[`tool-activity > Tool activity rail > renders single gated in standard dark > tool-rail-gated-standard dark 1`] = `"│ [38;2;255;180;84m⚠[0m  write  src/index.ts  [2m50ms[0m"`;
-
-exports[`tool-activity > Tool activity rail > renders single gated in standard light > tool-rail-gated-standard light 1`] = `"│ [38;2;180;83;9m⚠[0m  write  src/index.ts  [2m50ms[0m"`;
-
-exports[`tool-activity > Tool activity rail > renders single running in narrow width > tool-rail-running-narrow width 1`] = `"│ ◰  preparing  /workspace/Stage-9B-p..."`;
-
-exports[`tool-activity > Tool activity rail > renders single running in no Unicode > tool-rail-running-no Unicode 1`] = `"| R  preparing  /workspace/Stage-9B-plan.md"`;
-
-exports[`tool-activity > Tool activity rail > renders single running in no color > tool-rail-running-no color 1`] = `"│ ◰  preparing  /workspace/Stage-9B-plan.md"`;
-
-exports[`tool-activity > Tool activity rail > renders single running in plain > tool-rail-running-plain 1`] = `"| [>] preparing  /workspace/Stage-9B-plan.md"`;
-
-exports[`tool-activity > Tool activity rail > renders single running in standard dark > tool-rail-running-standard dark 1`] = `"│ ◰  preparing  /workspace/Stage-9B-plan.md"`;
-
-exports[`tool-activity > Tool activity rail > renders single running in standard light > tool-rail-running-standard light 1`] = `"│ ◰  preparing  /workspace/Stage-9B-plan.md"`;
-
-exports[`tool-activity > Tool activity timeline > renders empty in narrow width > timeline-empty-narrow width 1`] = `"[2mNo activity.[0m"`;
-
-exports[`tool-activity > Tool activity timeline > renders empty in no Unicode > timeline-empty-no Unicode 1`] = `"[2mNo activity.[0m"`;
-
-exports[`tool-activity > Tool activity timeline > renders empty in no color > timeline-empty-no color 1`] = `"No activity."`;
-
-exports[`tool-activity > Tool activity timeline > renders empty in plain > timeline-empty-plain 1`] = `"No activity."`;
-
-exports[`tool-activity > Tool activity timeline > renders empty in standard dark > timeline-empty-standard dark 1`] = `"[2mNo activity.[0m"`;
-
-exports[`tool-activity > Tool activity timeline > renders empty in standard light > timeline-empty-standard light 1`] = `"[2mNo activity.[0m"`;
-
-exports[`tool-activity > Tool activity timeline > renders multiple mixed in narrow width > timeline-mixed-narrow width 1`] = `
-"[38;2;76;175;80m✓[0m [1mweb.extract[0m [2m| 800ms[0m
-[38;2;64;224;208m(⌦)[0m [1mmemory.write[0m
-[38;2;239;83;80m✗[0m [1mterminal.exec[0m [2m| 300ms[0m"
+exports[`tool-activity Tool activity rail renders multiple mixed in no color: tool-rail-mixed-no color 1`] = `
+"│ ◰  read  /workspace/Stage-9B-plan.md  1.4s
+│ 𓇠  preparing  /workspace/Stage-9B-plan.md
+│ ✗  run  npm test  500ms
+│ ◇  review  diff  1.2s"
 `;
 
-exports[`tool-activity > Tool activity timeline > renders multiple mixed in no Unicode > timeline-mixed-no Unicode 1`] = `
-"[x] [1mweb.extract[0m [2m| 800ms[0m
-[>] [1mmemory.write[0m
-[-] [1mterminal.exec[0m [2m| 300ms[0m"
+exports[`tool-activity Tool activity rail renders long path truncated in no color: tool-rail-long-path-no color 1`] = `"│ ◰  read  /workspace/very/long/path/to/the/file/that/exceeds/terminal/width/limit.md  1.4s"`;
+
+exports[`tool-activity Tool activity rail renders empty in no Unicode: tool-rail-empty-no Unicode 1`] = `"\x1B[2mNo activity.\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders single running in no Unicode: tool-rail-running-no Unicode 1`] = `"| \x1B[38;2;90;172;255m[>]\x1B[0m  preparing  /workspace/Stage-9B-plan.md"`;
+
+exports[`tool-activity Tool activity rail renders single done in no Unicode: tool-rail-done-no Unicode 1`] = `"| R  read  /workspace/Stage-9B-plan.md  \x1B[2m1.4s\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders single failed in no Unicode: tool-rail-failed-no Unicode 1`] = `"| [-]  run  npm test  \x1B[2m500ms\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders single gated in no Unicode: tool-rail-gated-no Unicode 1`] = `"| [?]  write  src/index.ts  \x1B[2m50ms\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders multiple mixed in no Unicode: tool-rail-mixed-no Unicode 1`] = `
+"| R  read  /workspace/Stage-9B-plan.md  \x1B[2m1.4s\x1B[0m
+| \x1B[38;2;90;172;255m[>]\x1B[0m  preparing  /workspace/Stage-9B-plan.md
+| [-]  run  npm test  \x1B[2m500ms\x1B[0m
+| S  review  diff  \x1B[2m1.2s\x1B[0m"
 `;
 
-exports[`tool-activity > Tool activity timeline > renders multiple mixed in no color > timeline-mixed-no color 1`] = `
-"✓ web.extract | 800ms
-(⌦) memory.write
-✗ terminal.exec | 300ms"
+exports[`tool-activity Tool activity rail renders long path truncated in no Unicode: tool-rail-long-path-no Unicode 1`] = `"| R  read  /workspace/very/long/path/to/the/file/that/exceeds/terminal/width/limit.md  \x1B[2m1.4s\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders empty in narrow width: tool-rail-empty-narrow width 1`] = `"\x1B[2mNo activity.\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders single running in narrow width: tool-rail-running-narrow width 1`] = `"│ \x1B[38;2;90;172;255m𓇠\x1B[0m  preparing  /workspace/Stage-9B-p..."`;
+
+exports[`tool-activity Tool activity rail renders single done in narrow width: tool-rail-done-narrow width 1`] = `"│ ◰  read  /workspace/Stage-9B-plan.m..."`;
+
+exports[`tool-activity Tool activity rail renders single failed in narrow width: tool-rail-failed-narrow width 1`] = `"│ \x1B[38;2;239;83;80m✗\x1B[0m  run  npm test  \x1B[2m500ms\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders single gated in narrow width: tool-rail-gated-narrow width 1`] = `"│ \x1B[38;2;255;180;84m⚠\x1B[0m  write  src/index.ts  \x1B[2m50ms\x1B[0m"`;
+
+exports[`tool-activity Tool activity rail renders multiple mixed in narrow width: tool-rail-mixed-narrow width 1`] = `
+"│ ◰  read  /workspace/Stage-9B-plan.m...
+│ \x1B[38;2;90;172;255m𓇠\x1B[0m  preparing  /workspace/Stage-9B-p...
+│ \x1B[38;2;239;83;80m✗\x1B[0m  run  npm test  \x1B[2m500ms\x1B[0m
+│ ◇  review  diff  \x1B[2m1.2s\x1B[0m"
 `;
 
-exports[`tool-activity > Tool activity timeline > renders multiple mixed in plain > timeline-mixed-plain 1`] = `
-"[x] web.extract | 800ms
-[>] memory.write
-[-] terminal.exec | 300ms"
-`;
+exports[`tool-activity Tool activity rail renders long path truncated in narrow width: tool-rail-long-path-narrow width 1`] = `"│ ◰  read  /workspace/very/long/path/..."`;
 
-exports[`tool-activity > Tool activity timeline > renders multiple mixed in standard dark > timeline-mixed-standard dark 1`] = `
-"[38;2;76;175;80m✓[0m [1mweb.extract[0m [2m| 800ms[0m
-[38;2;64;224;208m(⌦)[0m [1mmemory.write[0m
-[38;2;239;83;80m✗[0m [1mterminal.exec[0m [2m| 300ms[0m"
-`;
+exports[`tool-activity Tool activity rail renders Arabic labels with LTR-isolated technical tokens: tool-rail-arabic-standard 1`] = `"│ ◆  كتابة  ⁦/workspace/Stage-9B-plan.md⁩  \x1B[2m1.2s\x1B[0m"`;
 
-exports[`tool-activity > Tool activity timeline > renders multiple mixed in standard light > timeline-mixed-standard light 1`] = `
-"[38;2;46;125;50m✓[0m [1mweb.extract[0m [2m| 800ms[0m
-[38;2;0;140;149m(⌦)[0m [1mmemory.write[0m
-[38;2;198;40;40m✗[0m [1mterminal.exec[0m [2m| 300ms[0m"
-`;
-
-exports[`tool-activity > Tool activity timeline > renders single done in narrow width > timeline-done-narrow width 1`] = `"[38;2;76;175;80m✓[0m [1martifact.store[0m [2m| 120ms[0m [2m| 1.2k captured / 1.0k sent[0m"`;
-
-exports[`tool-activity > Tool activity timeline > renders single done in no Unicode > timeline-done-no Unicode 1`] = `"[x] [1martifact.store[0m [2m| 120ms[0m [2m| 1.2k captured / 1.0k sent[0m"`;
-
-exports[`tool-activity > Tool activity timeline > renders single done in no color > timeline-done-no color 1`] = `"✓ artifact.store | 120ms | 1.2k captured / 1.0k sent"`;
-
-exports[`tool-activity > Tool activity timeline > renders single done in plain > timeline-done-plain 1`] = `"[x] artifact.store | 120ms | 1.2k captured / 1.0k sent"`;
-
-exports[`tool-activity > Tool activity timeline > renders single done in standard dark > timeline-done-standard dark 1`] = `"[38;2;76;175;80m✓[0m [1martifact.store[0m [2m| 120ms[0m [2m| 1.2k captured / 1.0k sent[0m"`;
-
-exports[`tool-activity > Tool activity timeline > renders single done in standard light > timeline-done-standard light 1`] = `"[38;2;46;125;50m✓[0m [1martifact.store[0m [2m| 120ms[0m [2m| 1.2k captured / 1.0k sent[0m"`;
-
-exports[`tool-activity > Tool activity timeline > renders single failed in narrow width > timeline-failed-narrow width 1`] = `"[38;2;239;83;80m✗[0m [1mterminal.exec[0m [2m| 500ms[0m"`;
-
-exports[`tool-activity > Tool activity timeline > renders single failed in no Unicode > timeline-failed-no Unicode 1`] = `"[-] [1mterminal.exec[0m [2m| 500ms[0m"`;
-
-exports[`tool-activity > Tool activity timeline > renders single failed in no color > timeline-failed-no color 1`] = `"✗ terminal.exec | 500ms"`;
-
-exports[`tool-activity > Tool activity timeline > renders single failed in plain > timeline-failed-plain 1`] = `"[-] terminal.exec | 500ms"`;
-
-exports[`tool-activity > Tool activity timeline > renders single failed in standard dark > timeline-failed-standard dark 1`] = `"[38;2;239;83;80m✗[0m [1mterminal.exec[0m [2m| 500ms[0m"`;
-
-exports[`tool-activity > Tool activity timeline > renders single failed in standard light > timeline-failed-standard light 1`] = `"[38;2;198;40;40m✗[0m [1mterminal.exec[0m [2m| 500ms[0m"`;
-
-exports[`tool-activity > Tool activity timeline > renders single gated in narrow width > timeline-gated-narrow width 1`] = `"[38;2;255;180;84m⚠[0m [1mworkspace.write[0m [2m| 50ms[0m [38;2;255;180;84m| decision: ask[0m [38;2;255;180;84m| risk: destructive-local[0m"`;
-
-exports[`tool-activity > Tool activity timeline > renders single gated in no Unicode > timeline-gated-no Unicode 1`] = `"[?] [1mworkspace.write[0m [2m| 50ms[0m [38;2;255;180;84m| decision: ask[0m [38;2;255;180;84m| risk: destructive-local[0m"`;
-
-exports[`tool-activity > Tool activity timeline > renders single gated in no color > timeline-gated-no color 1`] = `"⚠ workspace.write | 50ms | decision: ask | risk: destructive-local"`;
-
-exports[`tool-activity > Tool activity timeline > renders single gated in plain > timeline-gated-plain 1`] = `"[?] workspace.write | 50ms | decision: ask | risk: destructive-local"`;
-
-exports[`tool-activity > Tool activity timeline > renders single gated in standard dark > timeline-gated-standard dark 1`] = `"[38;2;255;180;84m⚠[0m [1mworkspace.write[0m [2m| 50ms[0m [38;2;255;180;84m| decision: ask[0m [38;2;255;180;84m| risk: destructive-local[0m"`;
-
-exports[`tool-activity > Tool activity timeline > renders single gated in standard light > timeline-gated-standard light 1`] = `"[38;2;180;83;9m⚠[0m [1mworkspace.write[0m [2m| 50ms[0m [38;2;180;83;9m| decision: ask[0m [38;2;180;83;9m| risk: destructive-local[0m"`;
-
-exports[`tool-activity > Tool activity timeline > renders single running in narrow width > timeline-running-narrow width 1`] = `"[38;2;64;224;208m(⌦)[0m [1martifact.store[0m"`;
-
-exports[`tool-activity > Tool activity timeline > renders single running in no Unicode > timeline-running-no Unicode 1`] = `"[>] [1martifact.store[0m"`;
-
-exports[`tool-activity > Tool activity timeline > renders single running in no color > timeline-running-no color 1`] = `"(⌦) artifact.store"`;
-
-exports[`tool-activity > Tool activity timeline > renders single running in plain > timeline-running-plain 1`] = `"[>] artifact.store"`;
-
-exports[`tool-activity > Tool activity timeline > renders single running in standard dark > timeline-running-standard dark 1`] = `"[38;2;64;224;208m(⌦)[0m [1martifact.store[0m"`;
-
-exports[`tool-activity > Tool activity timeline > renders single running in standard light > timeline-running-standard light 1`] = `"[38;2;0;140;149m(⌦)[0m [1martifact.store[0m"`;
+exports[`tool-activity Tool activity rail renders Arabic in plain mode with LTR-isolated tokens: tool-rail-arabic-plain 1`] = `"| [x] كتابة  ⁦/workspace/Stage-9B-plan.md⁩  1.2s"`;
