@@ -158,6 +158,27 @@ O4 action objects are declarative drafts only. They do not write config, each sc
 
 Optional capabilities are represented as independent placeholders, workspace trust remains separate from provider readiness, and fallback setup is not reintroduced as `backupForMain`. If fallback setup is represented later, it should continue to use the shared `model.fallbacks` primitive.
 
+## O4.5 Status
+
+`buildFirstRunDraftBundle()` and `buildSetupEditorDraftBundle()` now define the save/apply boundary for setup drafts. They convert first-run plan sessions and guided setup editor sessions into reviewable setup draft bundles without writing config, trust stores, or state files.
+
+Drafts cover:
+
+- provider/model route changes
+- credential reference and repair intents
+- security mode changes
+- workflow-learning changes
+- workspace trust grants/repairs
+- optional capability enable/disable/configure intents
+- read-only verification requests
+- launch handoff preference
+
+Each draft has a stable id, kind, source step or section/action id, risk surface, target path or config scope where applicable, redacted review metadata, dry-run apply intent metadata, review requirement, and blockers/warnings. Scoped config drafts declare `preserveUnrelatedConfig`.
+
+Credential drafts expose environment variable names only and do not include raw secret values. Workspace trust drafts include the exact workspace root and trust store path but do not grant trust. Verification drafts remain read-only. Broken config produces diagnostic blocker drafts instead of unsafe normal config patch drafts.
+
+Fallback setup is still not reintroduced as `backupForMain`; future fallback representation remains limited to a shared `model.fallbacks` intent.
+
 ## Next Step
 
-After review, choose the next phase label and scope. The likely next checkpoint is O4.5: Save/apply boundary for setup drafts. Defer user-facing cutover until first-run, existing-user, partial-config, repair, verify, and launch behavior are all covered by the new architecture.
+After review, choose the next phase label and scope. A likely next checkpoint is O5: setup modules for capabilities, or a narrowly scoped dry-run review surface if maintainers want to inspect draft bundles before module work. Defer user-facing cutover until first-run, existing-user, partial-config, repair, verify, and launch behavior are all covered by the new architecture.
