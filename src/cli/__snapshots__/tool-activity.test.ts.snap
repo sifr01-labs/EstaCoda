@@ -110,83 +110,58 @@ Actions:
 `;
 
 exports[`tool-activity Approval prompt renders in standard dark: approval-standard dark 1`] = `
-"┌─────────────────────────────────────────┐
-│ \x1B[1m\x1B[38;2;255;167;38mWARN\x1B[0m Approval required: workspace.write\x1B[0m │
-│─────────────────────────────────────────│
-│ Target: src/index.ts                    │
-│ Risk: \x1B[38;2;255;180;84mdestructive-local\x1B[0m                 │
-│ \x1B[2mTarget: src/index.ts\x1B[0m                    │
-│                                         │
-│ \x1B[1mActions:\x1B[0m                                │
-│   once) Allow once                      │
-│   session) Allow for this session       │
-│   always) Always allow                  │
-│   deny) \x1B[38;2;239;83;80m✗\x1B[0m Deny                         │
-└─────────────────────────────────────────┘"
+"╭────────────────────────────────────────────────────────────────╮
+│ \x1B[38;2;255;180;84m\x1B[1m⚠ Permission required\x1B[0m\x1B[0m                                         │
+│   \x1B[2mTool  \x1B[0m  \x1B[38;2;64;224;208m⁦workspace.write⁩\x1B[0m                                    │
+│   \x1B[2mRisk  \x1B[0m  \x1B[38;2;255;180;84m⁦destructive-local⁩\x1B[0m                                  │
+│   \x1B[2mTarget\x1B[0m  ⁦src/index.ts⁩                                       │
+│                                                                │
+│   \x1B[38;2;64;224;208m\x1B[1mAllow once\x1B[0m\x1B[0m    \x1B[38;2;64;224;208m\x1B[1mAllow for this session\x1B[0m\x1B[0m    \x1B[38;2;64;224;208m\x1B[1mAlways allow\x1B[0m\x1B[0m    \x1B[38;2;239;83;80m\x1B[1mDeny\x1B[0m\x1B[0m │
+╰────────────────────────────────────────────────────────────────╯"
 `;
 
 exports[`tool-activity Approval prompt renders in standard light: approval-standard light 1`] = `
-"┌─────────────────────────────────────────┐
-│ \x1B[1m\x1B[38;2;239;108;0mWARN\x1B[0m Approval required: workspace.write\x1B[0m │
-│─────────────────────────────────────────│
-│ Target: src/index.ts                    │
-│ Risk: \x1B[38;2;180;83;9mdestructive-local\x1B[0m                 │
-│ \x1B[2mTarget: src/index.ts\x1B[0m                    │
-│                                         │
-│ \x1B[1mActions:\x1B[0m                                │
-│   once) Allow once                      │
-│   session) Allow for this session       │
-│   always) Always allow                  │
-│   deny) \x1B[38;2;198;40;40m✗\x1B[0m Deny                         │
-└─────────────────────────────────────────┘"
+"╭────────────────────────────────────────────────────────────────╮
+│ \x1B[38;2;180;83;9m\x1B[1m⚠ Permission required\x1B[0m\x1B[0m                                         │
+│   \x1B[2mTool  \x1B[0m  \x1B[38;2;0;140;149m⁦workspace.write⁩\x1B[0m                                    │
+│   \x1B[2mRisk  \x1B[0m  \x1B[38;2;180;83;9m⁦destructive-local⁩\x1B[0m                                  │
+│   \x1B[2mTarget\x1B[0m  ⁦src/index.ts⁩                                       │
+│                                                                │
+│   \x1B[38;2;0;140;149m\x1B[1mAllow once\x1B[0m\x1B[0m    \x1B[38;2;0;140;149m\x1B[1mAllow for this session\x1B[0m\x1B[0m    \x1B[38;2;0;140;149m\x1B[1mAlways allow\x1B[0m\x1B[0m    \x1B[38;2;198;40;40m\x1B[1mDeny\x1B[0m\x1B[0m │
+╰────────────────────────────────────────────────────────────────╯"
 `;
 
 exports[`tool-activity Approval prompt renders in no color: approval-no color 1`] = `
-"┌─────────────────────────────────────────┐
-│ WARN Approval required: workspace.write │
-│─────────────────────────────────────────│
-│ Target: src/index.ts                    │
-│ Risk: destructive-local                 │
-│ Target: src/index.ts                    │
-│                                         │
-│ Actions:                                │
-│   once) Allow once                      │
-│   session) Allow for this session       │
-│   always) Always allow                  │
-│   deny) ✗ Deny                         │
-└─────────────────────────────────────────┘"
+"╭────────────────────────────────────────────────────────────────╮
+│ ⚠ Permission required                                         │
+│   Tool    ⁦workspace.write⁩                                    │
+│   Risk    ⁦destructive-local⁩                                  │
+│   Target  ⁦src/index.ts⁩                                       │
+│                                                                │
+│   Allow once    Allow for this session    Always allow    Deny │
+╰────────────────────────────────────────────────────────────────╯"
 `;
 
 exports[`tool-activity Approval prompt renders in no Unicode: approval-no Unicode 1`] = `
-"+-----------------------------------------+
-| \x1B[1m\x1B[38;2;255;167;38mWARN\x1B[0m Approval required: workspace.write\x1B[0m |
-|-----------------------------------------|
-| Target: src/index.ts                    |
-| Risk: \x1B[38;2;255;180;84mdestructive-local\x1B[0m                 |
-| \x1B[2mTarget: src/index.ts\x1B[0m                    |
-|                                         |
-| \x1B[1mActions:\x1B[0m                                |
-|   once) Allow once                      |
-|   session) Allow for this session       |
-|   always) Always allow                  |
-|   deny) \x1B[38;2;239;83;80m[X]\x1B[0m Deny                        |
-+-----------------------------------------+"
+"+----------------------------------------------------------------+
+| \x1B[38;2;255;180;84m\x1B[1m! Permission required\x1B[0m\x1B[0m                                          |
+|   \x1B[2mTool  \x1B[0m  \x1B[38;2;64;224;208m⁦workspace.write⁩\x1B[0m                                    |
+|   \x1B[2mRisk  \x1B[0m  \x1B[38;2;255;180;84m⁦destructive-local⁩\x1B[0m                                  |
+|   \x1B[2mTarget\x1B[0m  ⁦src/index.ts⁩                                       |
+|                                                                |
+|   \x1B[38;2;64;224;208m\x1B[1mAllow once\x1B[0m\x1B[0m    \x1B[38;2;64;224;208m\x1B[1mAllow for this session\x1B[0m\x1B[0m    \x1B[38;2;64;224;208m\x1B[1mAlways allow\x1B[0m\x1B[0m    \x1B[38;2;239;83;80m\x1B[1mDeny\x1B[0m\x1B[0m |
++----------------------------------------------------------------+"
 `;
 
 exports[`tool-activity Approval prompt renders in narrow width: approval-narrow width 1`] = `
-"┌──────────────────────────────────────┐
-│ \x1B[1m\x1B[38;2;255;167;38mWARN\x1B[0m Approval required: workspace.write\x1B[0m │
-│──────────────────────────────────────│
-│ Target: src/index.ts                 │
-│ Risk: \x1B[38;2;255;180;84mdestructive-local\x1B[0m              │
-│ \x1B[2mTarget: src/index.ts\x1B[0m                 │
+"╭──────────────────────────────────────╮
+│ \x1B[38;2;255;180;84m\x1B[1m⚠ Permission required\x1B[0m\x1B[0m               │
+│   \x1B[2mTool  \x1B[0m  \x1B[38;2;64;224;208m⁦workspace.write⁩\x1B[0m          │
+│   \x1B[2mRisk  \x1B[0m  \x1B[38;2;255;180;84m⁦destructive-local⁩\x1B[0m        │
+│   \x1B[2mTarget\x1B[0m  ⁦src/index.ts⁩             │
 │                                      │
-│ \x1B[1mActions:\x1B[0m                             │
-│   once) Allow once                   │
-│   session) Allow for this session    │
-│   always) Always allow               │
-│   deny) \x1B[38;2;239;83;80m✗\x1B[0m Deny                      │
-└──────────────────────────────────────┘"
+│   \x1B[38;2;64;224;208m\x1B[1mAllow once\x1B[0m\x1B[0m    \x1B[38;2;64;224;208m\x1B[1mAllow for this session\x1B[0m\x1B[0m    \x1B[38;2;64;224;208m\x1B[1mAlways allow\x1B[0m\x1B[0m    \x1B[38;2;239;83;80m\x1B[1mDeny\x1B[0m\x1B[0m │
+╰──────────────────────────────────────╯"
 `;
 
 exports[`tool-activity Security audit renders empty in plain: security-empty-plain 1`] = `"[INFO] Security audit: No tool security decisions have been recorded for this session yet."`;

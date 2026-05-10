@@ -33,6 +33,13 @@ export interface CliUiChromeCopy {
 
   // Permission card (Pass 10+)
   readonly permissionRequired: string;
+  readonly cardTool: string;
+  readonly cardRisk: string;
+  readonly cardTarget: string;
+  readonly allowOnce: string;
+  readonly allowSession: string;
+  readonly allowAlways: string;
+  readonly deny: string;
 
   // Slash menu (Pass 13+)
   readonly commands: string;
@@ -61,6 +68,13 @@ const en: CliUiChromeCopy = {
   finalizing: "polishing",
 
   permissionRequired: "Permission required",
+  cardTool: "Tool",
+  cardRisk: "Risk",
+  cardTarget: "Target",
+  allowOnce: "Allow once",
+  allowSession: "Allow session",
+  allowAlways: "Always allow",
+  deny: "Deny",
 
   commands: "Commands",
   typeToFilter: "Type / then a command. Keep typing to filter.",
@@ -89,6 +103,13 @@ const ar: CliUiChromeCopy = {
   finalizing: "بخلص",
 
   permissionRequired: "مطلوب إذن",
+  cardTool: "الأداة",
+  cardRisk: "المخاطرة",
+  cardTarget: "الهدف",
+  allowOnce: "السماح مرة واحدة",
+  allowSession: "السماح لهذه الجلسة",
+  allowAlways: "السماح دائماً",
+  deny: "رفض",
 
   commands: "الأوامر",
   typeToFilter: "اكتب / ثم أمر. استمر في الكتابة للتصفية.",

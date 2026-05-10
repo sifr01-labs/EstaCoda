@@ -3,6 +3,7 @@ import { resolveTokens } from "../theme/token-resolver.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { ViewModel } from "../contracts/view-model.js";
+import type { ToolDefinition } from "../contracts/tool.js";
 import { StandardRenderer } from "../ui/renderers/standard-renderer.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
 import {
@@ -393,6 +394,49 @@ describe("Approval prompt", () => {
       expect(output).toMatchSnapshot(`approval-${ctx.name}`);
     });
   }
+
+  it("includes 'Always allow' when allowPersistentApproval is omitted", () => {
+    const vm = approvalPromptVm() as Extract<ViewModel, { kind: "approval" }>;
+    const actionIds = vm.actions.map((a) => a.id);
+    expect(actionIds).toContain("always");
+    expect(actionIds).toContain("once");
+    expect(actionIds).toContain("session");
+    expect(actionIds).toContain("deny");
+  });
+
+  it("includes 'Always allow' when allowPersistentApproval is true", () => {
+    const vm = buildApprovalPromptViewModel(
+      {
+        tool: { name: "terminal.run" } as ToolDefinition,
+        riskClass: "destructive-local",
+        targetSummary: "rm -rf /",
+        decision: "ask",
+      },
+      { allowPersistentApproval: true }
+    );
+    const actionIds = vm.actions.map((a) => a.id);
+    expect(actionIds).toContain("always");
+    expect(actionIds).toContain("once");
+    expect(actionIds).toContain("session");
+    expect(actionIds).toContain("deny");
+  });
+
+  it("omits 'Always allow' when allowPersistentApproval is false", () => {
+    const vm = buildApprovalPromptViewModel(
+      {
+        tool: { name: "terminal.run" } as ToolDefinition,
+        riskClass: "destructive-local",
+        targetSummary: "rm -rf /",
+        decision: "ask",
+      },
+      { allowPersistentApproval: false }
+    );
+    const actionIds = vm.actions.map((a) => a.id);
+    expect(actionIds).not.toContain("always");
+    expect(actionIds).toContain("once");
+    expect(actionIds).toContain("session");
+    expect(actionIds).toContain("deny");
+  });
 });
 
 describe("Security audit", () => {

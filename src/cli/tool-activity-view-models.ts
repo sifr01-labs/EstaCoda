@@ -9,6 +9,7 @@ import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
 import type {
   ActivityTimelineViewModel,
+  ApprovalAction,
   ApprovalSecurityViewModel,
   CommandResultViewModel,
   ListViewModel,
@@ -315,23 +316,30 @@ function renderAssessorDebug(assessment: { assessor?: { used?: boolean; status?:
 // Approval Prompt ViewModel Builder
 // ─────────────────────────────────────────────────────────────
 
-export function buildApprovalPromptViewModel(execution: ToolExecutionRecord): ApprovalSecurityViewModel {
+export function buildApprovalPromptViewModel(
+  execution: ToolExecutionRecord,
+  options?: { allowPersistentApproval?: boolean }
+): ApprovalSecurityViewModel {
   const details: string[] = [];
   if (execution.targetSummary !== undefined) {
     details.push(`Target: ${execution.targetSummary}`);
   }
+
+  const actions: ApprovalAction[] = [
+    { id: "once", label: "Allow once" },
+    { id: "session", label: "Allow for this session" },
+  ];
+  if (options?.allowPersistentApproval !== false) {
+    actions.push({ id: "always", label: "Always allow" });
+  }
+  actions.push({ id: "deny", label: "Deny", severity: "error" });
 
   return buildApprovalSecurityViewModel({
     toolName: execution.tool.name,
     riskClass: execution.riskClass,
     targetSummary: execution.targetSummary ?? execution.targetKey ?? execution.tool.name,
     severity: "warn",
-    actions: [
-      { id: "once", label: "Allow once" },
-      { id: "session", label: "Allow for this session" },
-      { id: "always", label: "Always allow" },
-      { id: "deny", label: "Deny", severity: "error" },
-    ],
+    actions,
     details,
   });
 }

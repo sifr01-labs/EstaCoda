@@ -420,31 +420,67 @@ export class StandardRenderer {
   // ──────────────────────────────────────
 
   renderApprovalSecurity(vm: ApprovalSecurityViewModel): string {
-    const contentLines: string[] = [
-      `Target: ${vm.targetSummary}`,
-    ];
+    const copy = this.#copy;
+    const horiz = this.#useUnicode ? "─" : "-";
+    const topLeft = this.#useUnicode ? "╭" : "+";
+    const topRight = this.#useUnicode ? "╮" : "+";
+    const bottomLeft = this.#useUnicode ? "╰" : "+";
+    const bottomRight = this.#useUnicode ? "╯" : "+";
+    const vert = this.#useUnicode ? "│" : "|";
+    const warningSymbol = this.#useUnicode ? "⚠" : "!";
 
+    const titleText = `${warningSymbol} ${copy.permissionRequired}`;
+    const titleLine = `${topLeft}${horiz} ${this.#caution(this.#bold(titleText))} ${horiz.repeat(Math.max(0, this.#capabilities.terminalWidth - measureVisibleWidth(titleText) - 5))}${topRight}`;
+
+    // Key-value rows
+    const kvLines: string[] = [];
+    const labelWidth = Math.max(
+      measureVisibleWidth(copy.cardTool),
+      measureVisibleWidth(copy.cardRisk),
+      measureVisibleWidth(copy.cardTarget)
+    );
+
+    kvLines.push(`  ${this.#dim(padVisibleEnd(copy.cardTool, labelWidth))}  ${this.#action(isolateLtr(vm.toolName))}`);
     if (vm.riskClass !== undefined) {
-      contentLines.push(`Risk: ${this.#caution(vm.riskClass)}`);
+      const riskColor = vm.severity === "error" ? (text: string) => this.#severity(text, "error") : this.#caution.bind(this);
+      kvLines.push(`  ${this.#dim(padVisibleEnd(copy.cardRisk, labelWidth))}  ${riskColor(isolateLtr(vm.riskClass))}`);
     }
+    kvLines.push(`  ${this.#dim(padVisibleEnd(copy.cardTarget, labelWidth))}  ${isolateLtr(vm.targetSummary)}`);
 
-    if (vm.details !== undefined && vm.details.length > 0) {
-      for (const detail of vm.details) {
-        contentLines.push(this.#dim(detail));
-      }
-    }
-
-    contentLines.push("");
-    contentLines.push(this.#bold("Actions:"));
+    // Action row
+    const actionParts: string[] = [];
     for (const action of vm.actions) {
-      const tag = action.severity !== undefined
-        ? `${this.#inlineSignal(action.severity)} `
-        : "";
-      contentLines.push(`  ${action.id}) ${tag}${action.label}`);
+      const style = action.severity === "error"
+        ? (text: string) => this.#severity(text, "error")
+        : action.id === "deny"
+          ? (text: string) => this.#severity(text, "error")
+          : this.#action.bind(this);
+      actionParts.push(style(this.#bold(action.label)));
     }
+    const actionRow = `  ${actionParts.join(`    `)}`;
 
-    const title = `${this.#severity(vm.severity.toUpperCase(), vm.severity)} Approval required: ${vm.toolName}`;
-    return this.#framedPanel(title, contentLines);
+    // Compute width
+    const allContentLines = [
+      ...kvLines,
+      "",
+      actionRow
+    ];
+    const maxContentWidth = Math.max(0, ...allContentLines.map((l) => measureVisibleWidth(l)));
+    const width = Math.min(
+      this.#capabilities.terminalWidth,
+      Math.max(measureVisibleWidth(titleText) + 6, maxContentWidth + 4)
+    );
+
+    // Build frame
+    const lines: string[] = [];
+    lines.push(`${topLeft}${horiz.repeat(width - 2)}${topRight}`);
+    lines.push(`${vert} ${padVisibleEnd(this.#caution(this.#bold(titleText)), width - 4)} ${vert}`);
+    for (const line of allContentLines) {
+      lines.push(`${vert} ${padVisibleEnd(line, width - 4)} ${vert}`);
+    }
+    lines.push(`${bottomLeft}${horiz.repeat(width - 2)}${bottomRight}`);
+
+    return lines.join("\n");
   }
 
   // ──────────────────────────────────────

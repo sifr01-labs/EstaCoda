@@ -338,6 +338,34 @@ describe("PlainRenderer — renderApprovalSecurity", () => {
     expect(out).toContain("[INFO] Approval required: web.search");
     expect(out).not.toContain("Risk:");
   });
+
+  it("renders deterministically with all required fields visible in non-TTY mode", () => {
+    const vm = buildApprovalSecurityViewModel({
+      toolName: "terminal.run",
+      riskClass: "destructive-local",
+      targetSummary: "rm -rf /home/user/project",
+      severity: "warn",
+      actions: [
+        approvalAction("once", "Allow once"),
+        approvalAction("session", "Allow session"),
+        approvalAction("always", "Always allow"),
+        approvalAction("deny", "Deny", "error"),
+      ],
+      details: ["This action cannot be undone"],
+    });
+    const out = renderApprovalSecurity(vm);
+    assertNoAnsi(out);
+    assertAsciiSafe(out);
+    expect(out).not.toContain("⚠");
+    expect(out).not.toMatch(/[\u250c\u2510\u2514\u2518\u256d\u256e\u2570\u256f]/);
+    expect(out).toContain("terminal.run");
+    expect(out).toContain("destructive-local");
+    expect(out).toContain("rm -rf /home/user/project");
+    expect(out).toContain("Allow once");
+    expect(out).toContain("Allow session");
+    expect(out).toContain("Always allow");
+    expect(out).toContain("Deny");
+  });
 });
 
 // ──────────────────────────────────────────────────

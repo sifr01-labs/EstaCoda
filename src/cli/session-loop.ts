@@ -228,6 +228,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           runtime,
           prompt,
           output,
+          renderer,
+          chrome,
           execution: response.toolExecutions.find((execution) => execution.decision === "ask")
         });
 
@@ -719,6 +721,8 @@ async function maybeHandleApprovalGate(input: {
   runtime: Runtime;
   prompt: (question: string) => Promise<string>;
   output: NodeJS.WritableStream;
+  renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string };
+  chrome: PromptChromeController;
   execution: ToolExecutionRecord | undefined;
 }): Promise<{
   retry: boolean;
@@ -732,7 +736,8 @@ async function maybeHandleApprovalGate(input: {
   }
 
   while (true) {
-    const answer = (await input.prompt(renderApprovalPrompt(execution))).trim().toLowerCase();
+    const allowPersistentApproval = input.runtime.revokeApproval !== undefined;
+    const answer = (await input.prompt(await renderApprovalPrompt(execution, input.renderer, input.chrome, input.output, allowPersistentApproval))).trim().toLowerCase();
     if (answer === "deny" || answer === "reject" || answer === "no" || answer === "n") {
       return {
         retry: false,
@@ -903,9 +908,24 @@ function setupNeededMetadata(result: ToolResult | undefined): SetupNeededMetadat
   return metadata as SetupNeededMetadata;
 }
 
-function renderApprovalPrompt(execution: ToolExecutionRecord): string {
-  const vm = buildApprovalPromptViewModel(execution);
-  return `${renderPlain(vm)}\napproval > `;
+async function renderApprovalPrompt(
+  execution: ToolExecutionRecord,
+  renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string },
+  chrome: PromptChromeController,
+  output: NodeJS.WritableStream,
+  allowPersistentApproval: boolean
+): Promise<string> {
+  const vm = buildApprovalPromptViewModel(execution, { allowPersistentApproval });
+  chrome.clearInlineSpinner();
+  const cardText = renderer.render(vm);
+  if (chrome.enabled) {
+    await chrome.suspendChromeForTranscript(() => {
+      output.write(`${cardText}\n`);
+    });
+  } else {
+    output.write(`${cardText}\n`);
+  }
+  return "approval > ";
 }
 
 function normalizeApprovalScope(value: string): "once" | "session" | "always" | undefined {

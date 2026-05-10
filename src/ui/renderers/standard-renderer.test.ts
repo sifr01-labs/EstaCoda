@@ -205,18 +205,121 @@ describe("StandardRenderer — dark theme", () => {
     expect(hasAnsi(out)).toBe(true);
   });
 
-  it("renders approval in framed panel", () => {
+  it("renders approval as permission card with caution title", () => {
     const r = renderer("dark", fullCaps());
     const vm = buildApprovalSecurityViewModel({
-      toolName: "terminal",
-      riskClass: "destructive-local",
-      targetSummary: "rm -rf /",
+      toolName: "terminal.run",
+      riskClass: "workspace write",
+      targetSummary: "bun run smoke",
       severity: "warn",
-      actions: [approvalAction("allow", "Allow")],
+      actions: [
+        approvalAction("once", "Allow once"),
+        approvalAction("session", "Allow session"),
+        approvalAction("deny", "Deny", "error"),
+      ],
     });
     const out = r.renderApprovalSecurity(vm);
-    expect(out).toContain("Approval required: terminal");
+    // Rounded corners for permission card (not square like framed panel)
+    expect(out).toContain("╭");
+    expect(out).toContain("╮");
+    expect(out).toContain("╰");
+    expect(out).toContain("╯");
+    // Caution title, not brand title
+    expect(out).toContain("⚠ Permission required");
+    expect(out).not.toContain("𓂀 EstaCoda");
+    expect(out).not.toContain("Approval required: terminal.run");
+    // Key-value rows
+    expect(out).toContain("Tool");
+    expect(out).toContain("terminal.run");
+    expect(out).toContain("Risk");
+    expect(out).toContain("workspace write");
+    expect(out).toContain("Target");
+    expect(out).toContain("bun run smoke");
+    // Inline actions
+    expect(out).toContain("Allow once");
+    expect(out).toContain("Allow session");
+    expect(out).toContain("Deny");
+    expect(hasAnsi(out)).toBe(true);
+  });
+
+  it("renders high-risk permission card with error severity", () => {
+    const r = renderer("dark", fullCaps());
+    const vm = buildApprovalSecurityViewModel({
+      toolName: "terminal.run",
+      riskClass: "destructive-local",
+      targetSummary: "rm -rf /",
+      severity: "error",
+      actions: [
+        approvalAction("once", "Allow once"),
+        approvalAction("deny", "Deny", "error"),
+      ],
+    });
+    const out = r.renderApprovalSecurity(vm);
+    expect(out).toContain("⚠ Permission required");
+    expect(out).toContain("destructive-local");
     expect(out).toContain("rm -rf /");
+    expect(hasAnsi(out)).toBe(true);
+  });
+
+  it("renders permission card with no ANSI when color disabled", () => {
+    const r = renderer("dark", noColorCaps());
+    const vm = buildApprovalSecurityViewModel({
+      toolName: "terminal.run",
+      riskClass: "workspace write",
+      targetSummary: "bun run smoke",
+      severity: "warn",
+      actions: [
+        approvalAction("once", "Allow once"),
+        approvalAction("deny", "Deny", "error"),
+      ],
+    });
+    const out = r.renderApprovalSecurity(vm);
+    assertNoAnsi(out);
+    expect(out).toContain("Permission required");
+    expect(out).toContain("terminal.run");
+  });
+
+  it("renders permission card with ASCII fallback in no-Unicode mode", () => {
+    const r = renderer("dark", noUnicodeCaps());
+    const vm = buildApprovalSecurityViewModel({
+      toolName: "terminal.run",
+      riskClass: "workspace write",
+      targetSummary: "bun run smoke",
+      severity: "warn",
+      actions: [
+        approvalAction("once", "Allow once"),
+        approvalAction("deny", "Deny", "error"),
+      ],
+    });
+    const out = r.renderApprovalSecurity(vm);
+    expect(out).toContain("+"); // ASCII corners
+    expect(out).not.toContain("╭");
+    expect(out).not.toContain("╰");
+    expect(out).not.toContain("⚠"); // no Unicode warning symbol
+    expect(out).toContain("! Permission required"); // ASCII warning symbol
+    expect(out).toContain("terminal.run");
+  });
+
+  it("renders permission card with Arabic locale and LTR-isolated tool IDs", () => {
+    const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: fullCaps(), locale: "ar" });
+    const vm = buildApprovalSecurityViewModel({
+      toolName: "terminal.run",
+      riskClass: "workspace write",
+      targetSummary: "bun run smoke",
+      severity: "warn",
+      actions: [
+        approvalAction("once", "Allow once"),
+        approvalAction("deny", "Deny", "error"),
+      ],
+    });
+    const out = r.renderApprovalSecurity(vm);
+    // Arabic labels
+    expect(out).toContain("\u0645\u0637\u0644\u0648\u0628 \u0625\u0630\u0646"); // "مطلوب إذن"
+    expect(out).toContain("\u0627\u0644\u0623\u062f\u0627\u0629"); // "الأداة"
+    expect(out).toContain("\u0627\u0644\u0645\u062e\u0627\u0637\u0631\u0629"); // "المخاطرة"
+    expect(out).toContain("\u0627\u0644\u0647\u062f\u0641"); // "الهدف"
+    // Tool ID should be LTR-isolated
+    expect(out).toContain("\u2066terminal.run\u2069");
     expect(hasAnsi(out)).toBe(true);
   });
 
@@ -517,21 +620,23 @@ describe("StandardRenderer — visual primitives", () => {
     expect(out).toContain("error");
   });
 
-  it("renders framed focus panel for approval", () => {
+  it("renders permission card with rounded corners", () => {
     const r = renderer("dark", fullCaps());
     const vm = buildApprovalSecurityViewModel({
-      toolName: "terminal",
+      toolName: "terminal.run",
+      riskClass: "workspace write",
       targetSummary: "rm -rf /",
       severity: "warn",
       actions: [approvalAction("allow", "Allow")],
     });
     const out = r.renderApprovalSecurity(vm);
-    // Box drawing chars
-    expect(out).toContain("┌");
-    expect(out).toContain("┐");
-    expect(out).toContain("└");
-    expect(out).toContain("┘");
+    // Permission card uses rounded corners (not square like framed panel)
+    expect(out).toContain("╭");
+    expect(out).toContain("╮");
+    expect(out).toContain("╰");
+    expect(out).toContain("╯");
     expect(out).toContain("│");
+    expect(out).toContain("⚠ Permission required");
   });
 
   it("renders hero panel for startup", () => {
