@@ -22,9 +22,11 @@ import {
   buildSetupNeededViewModel,
 } from "./tool-activity-view-models.js";
 import { buildAssistantResponseViewModel } from "../ui/view-models/builders.js";
-import { createSessionRenderer } from "./session-renderer.js";
+import { createSessionRenderer, type SessionRenderer } from "./session-renderer.js";
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
+import { PromptChromeController } from "./prompt-chrome-controller.js";
+import { chromeCopy } from "../ui/cli-ui-copy.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -48,7 +50,13 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   let activeTurn: AbortController | undefined;
   const prompt = options.prompt ?? createReadlinePrompt(options.input as NodeJS.ReadStream | undefined ?? defaultInput, output as NodeJS.WriteStream);
   const close = options.close ?? (() => prompt.close?.());
+  const chrome = new PromptChromeController({
+    output,
+    capabilities: renderer.capabilities,
+    enabled: renderer.capabilities.isTTY && !renderer.capabilities.isCI && !renderer.capabilities.isDumb && renderer.capabilities.supportsColor && renderer.tokens.contract.behavior.allowAnsiColor,
+  });
   const onSigint = () => {
+    chrome.clearChrome();
     if (activeTurn !== undefined) {
       activeTurn.abort("SIGINT");
       output.write("\nCancelling current turn. Press Ctrl+C again or type /exit to leave.\n");
@@ -73,10 +81,21 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     const termWidth = renderer.capabilities.terminalWidth;
 
     while (true) {
-      const topRule = renderHorizontalRule(renderer.tokens, useColor, useUnicode, termWidth);
-      output.write(`${topRule}\n`);
+      if (chrome.enabled) {
+        chrome.renderChrome({ statusRail: buildMinimalStatusRail(runtime, renderer) });
+      } else {
+        const topRule = renderHorizontalRule(renderer.tokens, useColor, useUnicode, termWidth);
+        output.write(`${topRule}\n`);
+      }
+
       const text = (await prompt(colorPromptPrefix(promptPrefix, renderer.tokens, useColor))).trim();
-      output.write(`${topRule}\n`);
+
+      if (chrome.enabled) {
+        chrome.clearChrome();
+      } else {
+        const topRule = renderHorizontalRule(renderer.tokens, useColor, useUnicode, termWidth);
+        output.write(`${topRule}\n`);
+      }
 
       if (text.length === 0) {
         continue;
@@ -176,6 +195,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     }
   } finally {
     process.removeListener("SIGINT", onSigint);
+    chrome.dispose();
     await runtime.dispose();
     close();
   }
@@ -1125,6 +1145,24 @@ function humanProviderIssue(errorClass: string | undefined): string {
     default:
       return errorClass;
   }
+}
+
+function buildMinimalStatusRail(runtime: Runtime, renderer: SessionRenderer): string {
+  const modelInfo = typeof runtime.getModelInfo === "function" ? runtime.getModelInfo() : undefined;
+  const modelId = modelInfo?.kind === "kv"
+    ? String(modelInfo.entries.find((e) => e.key === "model")?.value ?? "unknown")
+    : "unknown";
+  const useUnicode = renderer.capabilities.supportsUnicode;
+  const copy = chromeCopy(renderer.locale);
+  const eye = useUnicode ? "\uD80C\uDDE0" : "*";
+  const idleLabel = copy.idle;
+
+  if (!renderer.capabilities.supportsColor || !renderer.tokens.contract.behavior.allowAnsiColor) {
+    return `${eye} ${modelId} | ${idleLabel}`;
+  }
+
+  const { r, g, b } = hexToRgb(renderer.tokens.contract.palette.brand);
+  return `\x1B[38;2;${r};${g};${b}m${eye}\x1B[0m ${modelId} | ${idleLabel}`;
 }
 
 export function renderHorizontalRule(tokens: ResolvedTokens, useColor: boolean, useUnicode: boolean, width: number): string {
