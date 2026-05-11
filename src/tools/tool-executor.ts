@@ -173,17 +173,36 @@ export class ToolExecutor {
       input: request.input
     });
 
-    const result = request.signal?.aborted === true
-      ? {
-          ok: false,
-          content: "Tool execution cancelled.",
-          metadata: {
-            reason: "cancelled"
-          }
-        }
-      : await tool.run(request.input, {
+    let result: ToolResult;
+
+    if (request.signal?.aborted === true) {
+      result = {
+        ok: false,
+        content: "Tool execution cancelled.",
+        metadata: { reason: "cancelled" }
+      };
+    } else {
+      try {
+        result = await tool.run(request.input, {
           signal: request.signal
         });
+      } catch (error) {
+        if (request.signal?.aborted) {
+          result = {
+            ok: false,
+            content: "Tool execution cancelled.",
+            metadata: { reason: "cancelled" }
+          };
+        } else {
+          const message = error instanceof Error ? error.message : "Unknown error";
+          result = {
+            ok: false,
+            content: `Tool execution failed: ${message}`,
+            metadata: { reason: "error" }
+          };
+        }
+      }
+    }
 
     const storedResult = truncateToolResultForStorage(result);
     await this.#sessionDb.appendEvent(request.sessionId, {

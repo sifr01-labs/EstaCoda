@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
-import { mkdir, readdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { lstat, mkdir, readdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { platform } from "node:os";
 import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
 import type { FileChangePreviewViewModel } from "../contracts/view-model.js";
@@ -104,7 +104,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
         }
 
         const canonicalRoot = await realpath(root);
-        const path = await resolveWorkspacePath(canonicalRoot, input.path, { allowMissingLeaf: true });
+        const path = await resolveWorkspacePath(canonicalRoot, input.path, { allowMissingLeaf: true, forbidSymlinks: true });
         if (!path.ok) {
           return path;
         }
@@ -118,7 +118,10 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
             content: input.content
           });
         } else {
-          await mkdir(dirname(path.path), { recursive: true });
+          const ensureResult = await ensureSafeParentDirectories(path.path, canonicalRoot);
+          if (ensureResult !== undefined) {
+            return ensureResult;
+          }
           await writeFile(path.path, input.content, "utf8");
         }
 
@@ -302,14 +305,22 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
 async function resolveWorkspacePath(
   root: string,
   path: string | undefined,
-  options: { allowMissingLeaf?: boolean; allowDirectory?: boolean } = {}
+  options: { allowMissingLeaf?: boolean; allowDirectory?: boolean; forbidSymlinks?: boolean } = {}
 ): Promise<ResolvedWorkspacePath> {
   if (typeof path !== "string" || path.length === 0) {
     return pathError("path must be a non-empty string");
   }
 
+  // Step 1: Resolve target lexically under workspaceRoot
   const candidate = resolve(root, path);
-  let canonical = candidate;
+
+  // Step 2: Reject traversal before filesystem mutation
+  const blockedReason = explainPathBlock(root, candidate);
+  if (blockedReason !== undefined) {
+    return pathError(blockedReason);
+  }
+
+  let canonical: string;
 
   try {
     canonical = await realpath(candidate);
@@ -318,13 +329,58 @@ async function resolveWorkspacePath(
       return pathError(error instanceof Error ? error.message : "path does not exist");
     }
 
-    const parent = await realpath(dirname(candidate));
-    canonical = join(parent, basename(candidate));
+    // Step 3: Find nearest existing ancestor
+    const ancestor = await findNearestExistingAncestor(candidate);
+    if (ancestor === undefined) {
+      return pathError("unable to resolve parent directory");
+    }
+
+    // Step 4: realpath nearest existing ancestor
+    let resolvedAncestor: string;
+    try {
+      resolvedAncestor = await realpath(ancestor);
+    } catch {
+      return pathError("unable to resolve parent directory");
+    }
+
+    // Reject symlinks in existing parent segments when required
+    if (options.forbidSymlinks === true) {
+      const symlinkCheck = await checkParentSegmentsForSymlinks(root, path);
+      if (symlinkCheck !== undefined) {
+        return pathError(symlinkCheck);
+      }
+    }
+
+    // Step 5: realpath workspaceRoot
+    let resolvedRoot: string;
+    try {
+      resolvedRoot = await realpath(root);
+    } catch {
+      resolvedRoot = root;
+    }
+
+    // Step 6: Verify ancestor realpath is inside workspaceRoot realpath
+    const ancestorRelative = relative(resolvedRoot, resolvedAncestor);
+    if (ancestorRelative.startsWith("..") || isAbsolute(ancestorRelative)) {
+      return pathError("path is outside the trusted workspace");
+    }
+
+    // Step 7 & 8: Build canonical from resolved ancestor + missing descendants
+    const missingSuffix = relative(ancestor, candidate);
+    canonical = resolve(resolvedAncestor, missingSuffix);
+
+    // Final containment verification
+    const finalRelative = relative(resolvedRoot, canonical);
+    if (finalRelative.startsWith("..") || isAbsolute(finalRelative)) {
+      return pathError("path is outside the trusted workspace");
+    }
   }
 
-  const blockedReason = explainPathBlock(root, canonical);
-  if (blockedReason !== undefined) {
-    return pathError(blockedReason);
+  // Additional containment check for success path (symlinks may have resolved outside)
+  const resolvedRoot = await realpath(root).catch(() => root);
+  const canonicalRelative = relative(resolvedRoot, canonical);
+  if (canonicalRelative.startsWith("..") || isAbsolute(canonicalRelative)) {
+    return pathError("path is outside the trusted workspace");
   }
 
   const targetStat = await stat(canonical).catch(() => undefined);
@@ -337,6 +393,135 @@ async function resolveWorkspacePath(
     content: "",
     path: canonical
   };
+}
+
+async function findNearestExistingAncestor(candidate: string): Promise<string | undefined> {
+  let current = dirname(candidate);
+  while (true) {
+    const statResult = await stat(current).catch(() => undefined);
+    if (statResult !== undefined) {
+      return current;
+    }
+    const parent = dirname(current);
+    if (parent === current) {
+      return undefined;
+    }
+    current = parent;
+  }
+}
+
+async function checkParentSegmentsForSymlinks(
+  root: string,
+  rawPath: string
+): Promise<string | undefined> {
+  const resolvedRoot = await realpath(root).catch(() => root);
+  const candidate = resolve(resolvedRoot, rawPath);
+  let current = dirname(candidate);
+
+  while (current !== resolvedRoot && current !== dirname(current)) {
+    try {
+      const statResult = await lstat(current);
+      if (statResult.isSymbolicLink()) {
+        return "path contains a symlink in parent directories";
+      }
+    } catch (error) {
+      if (!isNodeError(error) || error.code !== "ENOENT") {
+        return error instanceof Error ? error.message : "failed to inspect path segment";
+      }
+      // Segment does not exist; continue upward
+    }
+    current = dirname(current);
+  }
+
+  return undefined;
+}
+
+async function ensureSafeParentDirectories(
+  targetPath: string,
+  workspaceRoot: string
+): Promise<ToolResult | undefined> {
+  const parent = dirname(targetPath);
+
+  // Walk up to find deepest existing directory and collect missing segments
+  const missingSegments: string[] = [];
+  let current = parent;
+
+  while (true) {
+    try {
+      const statResult = await lstat(current);
+      if (statResult.isSymbolicLink()) {
+        return errorResult("path contains a symlink in parent directories");
+      }
+      if (!statResult.isDirectory()) {
+        return errorResult("path parent contains a non-directory segment");
+      }
+      break;
+    } catch (error) {
+      if (!isNodeError(error) || error.code !== "ENOENT") {
+        return errorResult(error instanceof Error ? error.message : "failed to inspect path segment");
+      }
+      missingSegments.unshift(basename(current));
+      const next = dirname(current);
+      if (next === current) {
+        return errorResult("unable to resolve parent directory");
+      }
+      current = next;
+    }
+  }
+
+  // Verify deepest existing directory is inside workspace
+  let resolvedCurrent: string;
+  try {
+    resolvedCurrent = await realpath(current);
+  } catch {
+    return errorResult("unable to resolve parent directory");
+  }
+
+  const resolvedRoot = await realpath(workspaceRoot).catch(() => workspaceRoot);
+  const currentRel = relative(resolvedRoot, resolvedCurrent);
+  if (currentRel.startsWith("..") || isAbsolute(currentRel)) {
+    return errorResult("path is outside the trusted workspace");
+  }
+
+  // Create missing segments one by one
+  for (const segment of missingSegments) {
+    const nextPath = resolve(resolvedCurrent, segment);
+
+    // Check again in case a symlink was created concurrently
+    try {
+      const nextStat = await lstat(nextPath);
+      if (nextStat.isSymbolicLink()) {
+        return errorResult("path contains a symlink in parent directories");
+      }
+      if (!nextStat.isDirectory()) {
+        return errorResult("path parent contains a non-directory segment");
+      }
+      resolvedCurrent = await realpath(nextPath);
+    } catch (error) {
+      if (!isNodeError(error) || error.code !== "ENOENT") {
+        return errorResult(error instanceof Error ? error.message : "failed to inspect path segment");
+      }
+
+      await mkdir(nextPath);
+
+      // Verify containment after creation
+      const resolvedNext = await realpath(nextPath);
+      const nextRel = relative(resolvedRoot, resolvedNext);
+      if (nextRel.startsWith("..") || isAbsolute(nextRel)) {
+        return errorResult("path is outside the trusted workspace");
+      }
+      resolvedCurrent = resolvedNext;
+    }
+  }
+
+  // Final parent verification
+  const finalParent = await realpath(parent);
+  const finalRel = relative(resolvedRoot, finalParent);
+  if (finalRel.startsWith("..") || isAbsolute(finalRel)) {
+    return errorResult("path is outside the trusted workspace");
+  }
+
+  return undefined;
 }
 
 async function readWorkspaceFile(

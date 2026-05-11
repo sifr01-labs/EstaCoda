@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -64,5 +64,108 @@ describe("workspace file change preview metadata", () => {
     const preview = result?.metadata?.fileChangePreview as { diff?: string } | undefined;
     expect(preview?.diff).toContain("- const value = 1;");
     expect(preview?.diff).toContain("+ const value = 2;");
+  });
+});
+
+describe("safe nested file.write", () => {
+  it("creates a/b/c/d.txt when no parent exists", async () => {
+    const root = await makeTempDir();
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const write = tools.find((tool) => tool.name === "file.write");
+
+    const result = await write?.run({
+      path: "a/b/c/d.txt",
+      content: "nested content",
+    });
+
+    expect(result?.ok).toBe(true);
+    expect(result?.metadata?.path).toBe("a/b/c/d.txt");
+  });
+
+  it("rejects ../outside.txt", async () => {
+    const root = await makeTempDir();
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const write = tools.find((tool) => tool.name === "file.write");
+
+    const result = await write?.run({
+      path: "../outside.txt",
+      content: "escaped",
+    });
+
+    expect(result?.ok).toBe(false);
+    expect(result?.content).toContain("outside the trusted workspace");
+  });
+
+  it("rejects symlink escape through parent directories", async () => {
+    const root = await makeTempDir();
+    const outsideDir = await mkdtemp(join(tmpdir(), "estacoda-outside-"));
+    await symlink(outsideDir, join(root, "escape"), "dir");
+
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const write = tools.find((tool) => tool.name === "file.write");
+
+    const result = await write?.run({
+      path: "escape/sub/file.txt",
+      content: "escaped",
+    });
+
+    expect(result?.ok).toBe(false);
+    expect(result?.content).toContain("symlink");
+
+    await rm(outsideDir, { recursive: true, force: true });
+  });
+
+  it("rejects when an intermediate existing parent is a symlink to outside workspace", async () => {
+    const root = await makeTempDir();
+    const outsideDir = await mkdtemp(join(tmpdir(), "estacoda-outside-"));
+    await mkdir(join(root, "a"));
+    await symlink(outsideDir, join(root, "a", "b"), "dir");
+
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const write = tools.find((tool) => tool.name === "file.write");
+
+    const result = await write?.run({
+      path: "a/b/c/d.txt",
+      content: "escaped",
+    });
+
+    expect(result?.ok).toBe(false);
+    expect(result?.content).toContain("symlink");
+
+    await rm(outsideDir, { recursive: true, force: true });
+  });
+
+  it("does not create outside directories through a symlinked intermediate parent", async () => {
+    const root = await makeTempDir();
+    const outsideDir = await mkdtemp(join(tmpdir(), "estacoda-outside-"));
+    await mkdir(join(root, "a"));
+    await symlink(outsideDir, join(root, "a", "b"), "dir");
+
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const write = tools.find((tool) => tool.name === "file.write");
+
+    await write?.run({
+      path: "a/b/c/d.txt",
+      content: "escaped",
+    });
+
+    await expect(access(join(outsideDir, "c"))).rejects.toBeDefined();
+
+    await rm(outsideDir, { recursive: true, force: true });
+  });
+
+  it("verifies final parent containment after creating missing directories", async () => {
+    const root = await makeTempDir();
+    await mkdir(join(root, "a"));
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const write = tools.find((tool) => tool.name === "file.write");
+
+    const result = await write?.run({
+      path: "a/b/c/d.txt",
+      content: "nested content",
+    });
+
+    expect(result?.ok).toBe(true);
+    expect(result?.metadata?.path).toBe("a/b/c/d.txt");
   });
 });
