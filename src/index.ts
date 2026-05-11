@@ -103,7 +103,8 @@ async function buildRuntime(input: {
     webMaxContentChars: latestConfig.web.maxContentChars,
     securityMode: latestConfig.security.approvalMode,
     securityAssessor: latestConfig.security.assessor,
-    approvalController: cliApprovalController
+    approvalController: cliApprovalController,
+    projectConfigTrust: nowTrusted ? "trusted" : "untrusted"
   });
 }
 

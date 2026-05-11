@@ -551,7 +551,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
   const sources: string[] = [
     options.userConfigPath ?? stateHome.configPath
   ];
-  if (options.projectConfigTrust !== "untrusted") {
+  if (options.projectConfigTrust === "trusted") {
     sources.push(options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json"));
   }
   const loaded = await Promise.all(sources.map((path) => readConfig(path)));

@@ -75,7 +75,8 @@ describe("loadRuntimeConfig auxiliaryModels", () => {
 
     const loaded = await loadRuntimeConfig({
       workspaceRoot: workspace,
-      userConfigPath: join(workspace, "nonexistent-user-config.json")
+      userConfigPath: join(workspace, "nonexistent-user-config.json"),
+      projectConfigTrust: "trusted"
     });
 
     expect(loaded.auxiliaryModels).toBeDefined();
@@ -94,7 +95,8 @@ describe("loadRuntimeConfig auxiliaryModels", () => {
 
     const loaded = await loadRuntimeConfig({
       workspaceRoot: workspace,
-      userConfigPath: join(workspace, "nonexistent-user-config.json")
+      userConfigPath: join(workspace, "nonexistent-user-config.json"),
+      projectConfigTrust: "trusted"
     });
 
     // auxiliaryProviders is not migrated into auxiliaryModels
@@ -118,7 +120,7 @@ describe("loadRuntimeConfig channel readiness", () => {
       channels: { discord: { enabled: true, botTokenEnv: "DISCORD_BOT_TOKEN" } }
     }));
 
-    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, userConfigPath: join(workspace, "nonexistent-user-config.json") });
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, userConfigPath: join(workspace, "nonexistent-user-config.json"), projectConfigTrust: "trusted" });
     expect(loaded.channels.discord.ready).toBe(true);
     expect(loaded.channels.discord.missing).toBeUndefined();
     await rm(workspace, { recursive: true, force: true });
@@ -133,7 +135,7 @@ describe("loadRuntimeConfig channel readiness", () => {
       channels: { discord: { enabled: true } }
     }));
 
-    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, userConfigPath: join(workspace, "nonexistent-user-config.json") });
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, userConfigPath: join(workspace, "nonexistent-user-config.json"), projectConfigTrust: "trusted" });
     expect(loaded.channels.discord.ready).toBe(false);
     expect(loaded.channels.discord.missing).toContain("botTokenEnv");
     await rm(workspace, { recursive: true, force: true });
@@ -157,7 +159,7 @@ describe("loadRuntimeConfig channel readiness", () => {
       }
     }));
 
-    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, userConfigPath: join(workspace, "nonexistent-user-config.json") });
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, userConfigPath: join(workspace, "nonexistent-user-config.json"), projectConfigTrust: "trusted" });
     expect(loaded.channels.email.ready).toBe(true);
     expect(loaded.channels.email.missing).toBeUndefined();
     await rm(workspace, { recursive: true, force: true });
@@ -172,7 +174,7 @@ describe("loadRuntimeConfig channel readiness", () => {
       channels: { email: { enabled: true } }
     }));
 
-    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, userConfigPath: join(workspace, "nonexistent-user-config.json") });
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, userConfigPath: join(workspace, "nonexistent-user-config.json"), projectConfigTrust: "trusted" });
     expect(loaded.channels.email.ready).toBe(false);
     expect(loaded.channels.email.missing).toEqual(["imapHost", "smtpHost", "username", "passwordEnv", "ownAddress"]);
     await rm(workspace, { recursive: true, force: true });
@@ -187,7 +189,7 @@ describe("loadRuntimeConfig channel readiness", () => {
       channels: { whatsapp: { enabled: true, experimental: true } }
     }));
 
-    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, userConfigPath: join(workspace, "nonexistent-user-config.json") });
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, userConfigPath: join(workspace, "nonexistent-user-config.json"), projectConfigTrust: "trusted" });
     expect(loaded.channels.whatsapp.ready).toBe(true);
     expect(loaded.channels.whatsapp.missing).toBeUndefined();
     await rm(workspace, { recursive: true, force: true });
@@ -202,7 +204,7 @@ describe("loadRuntimeConfig channel readiness", () => {
       channels: { whatsapp: { enabled: true, experimental: false } }
     }));
 
-    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, userConfigPath: join(workspace, "nonexistent-user-config.json") });
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, userConfigPath: join(workspace, "nonexistent-user-config.json"), projectConfigTrust: "trusted" });
     expect(loaded.channels.whatsapp.ready).toBe(false);
     expect(loaded.channels.whatsapp.missing).toContain("experimental");
     await rm(workspace, { recursive: true, force: true });
@@ -237,7 +239,8 @@ describe("loadRuntimeConfig modelFallbackRoutes resolution", () => {
 
     const loaded = await loadRuntimeConfig({
       workspaceRoot: workspace,
-      userConfigPath: join(workspace, "nonexistent-user-config.json")
+      userConfigPath: join(workspace, "nonexistent-user-config.json"),
+      projectConfigTrust: "trusted"
     });
 
     expect(loaded.modelFallbackRoutes.length).toBe(2);
@@ -276,7 +279,8 @@ describe("loadRuntimeConfig modelFallbackRoutes resolution", () => {
 
     const loaded = await loadRuntimeConfig({
       workspaceRoot: workspace,
-      userConfigPath: join(workspace, "nonexistent-user-config.json")
+      userConfigPath: join(workspace, "nonexistent-user-config.json"),
+      projectConfigTrust: "trusted"
     });
 
     expect(loaded.modelFallbackRoutes).toEqual([]);
@@ -302,7 +306,8 @@ describe("loadRuntimeConfig modelFallbackRoutes resolution", () => {
 
     const loaded = await loadRuntimeConfig({
       workspaceRoot: workspace,
-      userConfigPath: join(workspace, "nonexistent-user-config.json")
+      userConfigPath: join(workspace, "nonexistent-user-config.json"),
+      projectConfigTrust: "trusted"
     });
 
     expect(loaded.modelFallbackRoutes.length).toBe(1);
@@ -403,13 +408,70 @@ describe("loadTrustedRuntimeConfig trust inclusion", () => {
   });
 });
 
+describe("loadRuntimeConfig fail-closed behavior", () => {
+  it("does not load project config when projectConfigTrust is omitted", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    const projectConfigPath = join(workspace, ".estacoda", "config.json");
+    await writeFile(projectConfigPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      userConfigPath: join(workspace, "nonexistent-user-config.json")
+    });
+
+    // Project config should be skipped when trust is omitted
+    expect(loaded.model.provider).toBe("unconfigured");
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("does not load project config when projectConfigTrust is 'untrusted'", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    const projectConfigPath = join(workspace, ".estacoda", "config.json");
+    await writeFile(projectConfigPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      userConfigPath: join(workspace, "nonexistent-user-config.json"),
+      projectConfigTrust: "untrusted"
+    });
+
+    expect(loaded.model.provider).toBe("unconfigured");
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("loads project config when projectConfigTrust is 'trusted'", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    const projectConfigPath = join(workspace, ".estacoda", "config.json");
+    await writeFile(projectConfigPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      userConfigPath: join(workspace, "nonexistent-user-config.json"),
+      projectConfigTrust: "trusted"
+    });
+
+    expect(loaded.model.provider).toBe("openai");
+    expect(loaded.model.id).toBe("gpt-4o");
+    await rm(workspace, { recursive: true, force: true });
+  });
+});
+
 describe("production loadRuntimeConfig callsite safety", () => {
   it("has no production loadRuntimeConfig calls that omit projectConfigTrust and are not wrappers", async () => {
     const { execSync } = await import("node:child_process");
-    const srcRoot = new URL("..", import.meta.url).pathname;
+    const repoRoot = new URL("../..", import.meta.url).pathname;
     const output = execSync(
-      `rg "loadRuntimeConfig\\(" src --type ts -n | grep -v "\\.test\\." | grep -v "_legacy" | grep -v "src/config/runtime-config.ts:" || true`,
-      { cwd: srcRoot, encoding: "utf8" }
+      `rg "loadRuntimeConfig\\(" src --type ts -n | grep -v "\\.test\\." | grep -v "_legacy" | grep -v "src/config/runtime-config.ts:"`,
+      { cwd: repoRoot, encoding: "utf8" }
     );
     const lines = output.trim().split("\n").filter((line) => line.length > 0);
 
