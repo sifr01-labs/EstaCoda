@@ -17,14 +17,7 @@ export function routeProvider(models: ModelProfile[], preferences: ProviderRoute
   };
 }
 
-export function buildFallbackChain(models: ModelProfile[], primary: ModelProfile, preferences: ProviderRoutePreferences = {}): ModelProfile[] {
-  return models
-    .filter((model) => model.id !== primary.id || model.provider !== primary.provider)
-    .filter((model) => matchesPreferences(model, preferences))
-    .sort((left, right) => compareModels(left, right, preferences));
-}
-
-function matchesPreferences(model: ModelProfile, preferences: ProviderRoutePreferences): boolean {
+export function matchesPreferences(model: ModelProfile, preferences: ProviderRoutePreferences): boolean {
   if (preferences.providerAllowlist !== undefined && !preferences.providerAllowlist.includes(model.provider)) {
     return false;
   }
@@ -49,7 +42,7 @@ function matchesPreferences(model: ModelProfile, preferences: ProviderRoutePrefe
   return true;
 }
 
-function compareModels(left: ModelProfile, right: ModelProfile, preferences: ProviderRoutePreferences): number {
+export function compareModels(left: ModelProfile, right: ModelProfile, preferences: ProviderRoutePreferences): number {
   const providerOrderScore = scoreProviderOrder(left.provider, preferences.providerOrder) -
     scoreProviderOrder(right.provider, preferences.providerOrder);
 

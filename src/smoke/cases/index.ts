@@ -1,4 +1,3 @@
-import { legacy_monolith_case } from "./legacy-monolith.js";
 import { corrupt_skill_usage_case } from "./corrupt-skill-usage.js";
 import { bundled_skill_sync_case } from "./bundled-skill-sync.js";
 import { init_lifecycle_case } from "./init-lifecycle.js";
@@ -10,7 +9,6 @@ import { evolution_lifecycle_case } from "./evolution-lifecycle.js";
 import { gateway_stop_case } from "./gateway-stop.js";
 
 export const allSmokeCases = [
-  legacy_monolith_case,
   corrupt_skill_usage_case,
   bundled_skill_sync_case,
   init_lifecycle_case,

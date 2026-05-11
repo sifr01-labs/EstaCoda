@@ -19,3 +19,4 @@ live-tool-smoke.ts
 !.env.example
 
 .estacoda/
+tsconfig.tsbuildinfo

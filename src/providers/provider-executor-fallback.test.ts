@@ -19,6 +19,7 @@ type MockCall = {
 function createMockAdapter(options: {
   id: string;
   completeResponse?: ProviderResponse;
+  completeHandler?: (request: ProviderRequest, completionOptions?: ProviderCompletionOptions) => ProviderResponse;
   streamEvents?: ProviderStreamEvent[];
   models?: ModelProfile[];
   delayMs?: number;
@@ -38,6 +39,9 @@ function createMockAdapter(options: {
       calls.push({ request, options: completionOptions });
       if (options.delayMs !== undefined && options.delayMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, options.delayMs));
+      }
+      if (options.completeHandler !== undefined) {
+        return options.completeHandler(request, completionOptions);
       }
       return options.completeResponse ?? {
         ok: true,
@@ -230,7 +234,7 @@ describe("ProviderExecutor fallback behavior", () => {
     ["server", true],
     ["model-unavailable", true],
     ["unknown", true],
-    ["timeout", false],
+    ["timeout", true],
     ["incomplete-stream", false],
     ["unsupported", false]
   ])("eligible failure class %s triggers fallback: %s", async (errorClass, shouldTrigger) => {
@@ -364,5 +368,162 @@ describe("ProviderExecutor fallback behavior", () => {
     expect(result.ok).toBe(false);
     expect(primary.calls.length).toBe(1);
     expect(fallback.calls.length).toBe(0);
+  });
+
+  it("registry caller fallback when primary fails", async () => {
+    const primary = createMockAdapter({
+      id: "openai",
+      completeResponse: { ok: false, content: "rate limited", model: "gpt-4o", provider: "openai", errorClass: "rate-limit" },
+      models: [
+        {
+          id: "gpt-4o",
+          provider: "openai",
+          contextWindowTokens: 128_000,
+          supportsTools: true,
+          supportsVision: true,
+          supportsStructuredOutput: true
+        }
+      ]
+    });
+    const fallback = createMockAdapter({
+      id: "kimi",
+      completeResponse: { ok: true, content: "kimi ok", model: "kimi-k2.5", provider: "kimi" },
+      models: [
+        {
+          id: "kimi-k2.5",
+          provider: "kimi",
+          contextWindowTokens: 128_000,
+          supportsTools: true,
+          supportsVision: true,
+          supportsStructuredOutput: true
+        }
+      ]
+    });
+    registry.register(primary);
+    registry.register(fallback);
+
+    const executor = new ProviderExecutor({ registry });
+    const result = await executor.complete({
+      provider: "openai",
+      model: "gpt-4o",
+      messages: []
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.fallbackUsed).toBe(true);
+    expect(result.attempts.length).toBe(2);
+    expect(result.attempts[0].provider).toBe("openai");
+    expect(result.attempts[1].provider).toBe("kimi");
+  });
+
+  it("blocks auth fallback when same provider and same apiKeyEnv", async () => {
+    process.env.OPENAI_KEY = "valid-key";
+    const adapter = createMockAdapter({
+      id: "openai",
+      completeHandler: (request) => ({ ok: false, content: "auth fail", model: request.model, provider: "openai", errorClass: "auth" })
+    });
+    registry.register(adapter);
+
+    const executor = new ProviderExecutor({ registry });
+    const result = await executor.complete(
+      { messages: [] },
+      {},
+      {
+        primaryRoute: createRoute("openai", "gpt-4o", { apiKeyEnv: "OPENAI_KEY" }),
+        fallbackChain: [createRoute("openai", "gpt-4o-mini", { apiKeyEnv: "OPENAI_KEY" })]
+      }
+    );
+
+    delete process.env.OPENAI_KEY;
+    expect(result.ok).toBe(false);
+    expect(result.attempts.length).toBe(1);
+    expect(adapter.calls.length).toBe(1);
+  });
+
+  it("blocks auth fallback when same provider and both use pool", async () => {
+    const adapter = createMockAdapter({
+      id: "openai",
+      completeHandler: (request) => ({ ok: false, content: "auth fail", model: request.model, provider: "openai", errorClass: "auth" })
+    });
+    registry.register(adapter);
+
+    const executor = new ProviderExecutor({ registry });
+    const result = await executor.complete(
+      { messages: [] },
+      {},
+      {
+        primaryRoute: createRoute("openai", "gpt-4o"),
+        fallbackChain: [createRoute("openai", "gpt-4o-mini")]
+      }
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.attempts.length).toBe(1);
+    expect(adapter.calls.length).toBe(1);
+  });
+
+  it("allows auth fallback when same provider but different apiKeyEnv", async () => {
+    process.env.OPENAI_KEY_A = "valid-key-a";
+    process.env.OPENAI_KEY_B = "valid-key-b";
+    const adapter = createMockAdapter({
+      id: "openai",
+      completeHandler: (request) =>
+        request.model === "gpt-4o"
+          ? { ok: false, content: "auth fail", model: request.model, provider: "openai", errorClass: "auth" }
+          : { ok: true, content: "ok", model: request.model, provider: "openai" }
+    });
+    registry.register(adapter);
+
+    const executor = new ProviderExecutor({ registry });
+    const result = await executor.complete(
+      { messages: [] },
+      {},
+      {
+        primaryRoute: createRoute("openai", "gpt-4o", { apiKeyEnv: "OPENAI_KEY_A" }),
+        fallbackChain: [createRoute("openai", "gpt-4o-mini", { apiKeyEnv: "OPENAI_KEY_B" })]
+      }
+    );
+
+    delete process.env.OPENAI_KEY_A;
+    delete process.env.OPENAI_KEY_B;
+    expect(result.ok).toBe(true);
+    expect(result.attempts.length).toBe(2);
+    expect(adapter.calls.length).toBe(2);
+  });
+
+  it("all fallbacks fail -> attempts length is complete and final error is clear", async () => {
+    const primary = createMockAdapter({
+      id: "openai",
+      completeResponse: { ok: false, content: "primary fail", model: "gpt-4o", provider: "openai", errorClass: "rate-limit" }
+    });
+    const fallback1 = createMockAdapter({
+      id: "kimi",
+      completeResponse: { ok: false, content: "fallback1 fail", model: "kimi-k2.5", provider: "kimi", errorClass: "server" }
+    });
+    const fallback2 = createMockAdapter({
+      id: "deepseek",
+      completeResponse: { ok: false, content: "fallback2 fail", model: "ds", provider: "deepseek", errorClass: "network" }
+    });
+    registry.register(primary);
+    registry.register(fallback1);
+    registry.register(fallback2);
+
+    const executor = new ProviderExecutor({ registry });
+    const result = await executor.complete(
+      { messages: [] },
+      {},
+      {
+        primaryRoute: createRoute("openai", "gpt-4o"),
+        fallbackChain: [createRoute("kimi", "kimi-k2.5"), createRoute("deepseek", "ds")]
+      }
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.attempts.length).toBe(3);
+    expect(result.attempts[0].provider).toBe("openai");
+    expect(result.attempts[1].provider).toBe("kimi");
+    expect(result.attempts[2].provider).toBe("deepseek");
+    expect(result.attempts[2].errorClass).toBe("network");
+    expect(result.attempts[2].content).toBe("fallback2 fail");
   });
 });

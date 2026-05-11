@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit --incremental",
     "dev": "$npm_execpath src/index.ts",
     "smoke": "$npm_execpath src/smoke.ts",
     "test": "bun ./node_modules/vitest/vitest.mjs run",

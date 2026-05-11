@@ -11,7 +11,7 @@ import type {
 } from "../contracts/provider.js";
 import { CredentialPoolRegistry } from "./credential-pool.js";
 import { ProviderRegistry } from "./provider-registry.js";
-import { buildFallbackChain, routeProvider } from "./provider-router.js";
+import { compareModels, matchesPreferences, routeProvider } from "./provider-router.js";
 
 export type ProviderAttempt = {
   provider: string;
@@ -100,152 +100,76 @@ export class ProviderExecutor {
     preferences: ProviderRoutePreferences = {},
     options: ProviderExecutionOptions = {}
   ): Promise<ProviderExecutionResult> {
-    if (options.primaryRoute !== undefined) {
-      return this.#executeRouteChain(request, options);
-    }
+    let primaryRoute = options.primaryRoute;
+    let fallbackChain = options.fallbackChain;
 
-    const models = await this.#registry.listModels();
-    const route = resolveProviderExecutionRoute(models, request, preferences);
-
-    if (route === undefined) {
-      return {
-        ok: false,
-        fallbackUsed: false,
-        attempts: [],
-        toolCalls: []
-      };
-    }
-
-    const attempts: ProviderAttempt[] = [];
-    const toolCalls: ProviderExecutionResult["toolCalls"] = [];
-    const chain = [route.primary];
-
-    for (let index = 0; index < chain.length; index++) {
-      if (options.signal?.aborted === true) {
+    if (primaryRoute === undefined) {
+      const resolved = await this.#resolveRoutesFromRegistry(request, preferences);
+      if (resolved === undefined) {
         return {
           ok: false,
-          route,
-          fallbackUsed: attempts.length > 1,
-          attempts,
-          toolCalls
+          fallbackUsed: false,
+          attempts: [],
+          toolCalls: []
         };
       }
-      const model = chain[index];
-      const provider = this.#registry.get(model.provider);
+      primaryRoute = resolved.primaryRoute;
+      fallbackChain = resolved.fallbackChain;
+    }
 
-      if (provider === undefined) {
-        continue;
+    return this.#executeRouteChain(request, {
+      ...options,
+      primaryRoute,
+      fallbackChain
+    });
+  }
+
+  async #resolveRoutesFromRegistry(
+    request: Omit<ProviderRequest, "model"> & { model?: string },
+    preferences: ProviderRoutePreferences
+  ): Promise<{ primaryRoute: ResolvedModelRoute; fallbackChain: ResolvedModelRoute[] } | undefined> {
+    const models = await this.#registry.listModels();
+    let primary: ModelProfile | undefined;
+    let fallbackModels: ModelProfile[] = [];
+
+    if (request.provider !== undefined && request.model !== undefined) {
+      primary = models.find((model) => model.provider === request.provider && model.id === request.model);
+      if (primary === undefined) {
+        return undefined;
       }
-
-      const credential = this.#credentialPools?.resolve(model.provider);
-      await options.onEvent?.({
-        kind: "provider-attempt-start",
-        provider: model.provider,
-        model: model.id,
-        credentialId: credential?.id,
-        fallback: index > 0
-      });
-      const response = options.stream === true && provider.stream !== undefined
-        ? await collectProviderStream({
-            provider: model.provider,
-            model: model.id,
-            stream: provider.stream({
-              ...request,
-              provider: model.provider,
-              model: model.id,
-              stream: true
-            }, {
-              credential: credential === undefined
-                ? undefined
-                : {
-                  id: credential.id,
-                  value: credential.value
-                },
-              signal: options.signal
-            }),
-            onEvent: options.onEvent,
-            toolCalls,
-            signal: options.signal
-      })
-        : await provider.complete({
-            ...request,
-            provider: model.provider,
-            model: model.id
-          }, {
-            credential: credential === undefined
-              ? undefined
-              : {
-                id: credential.id,
-                value: credential.value
-              },
-            signal: options.signal
-          });
-
-      attempts.push({
-        provider: model.provider,
-        model: model.id,
-        credentialId: credential?.id,
-        ok: response.ok,
-        errorClass: response.errorClass,
-        content: response.content
-      });
-      const willFallback = !response.ok && shouldFallback(response, model) && index < chain.length - 1;
-
-      await options.onEvent?.({
-        kind: "provider-attempt-end",
-        provider: model.provider,
-        model: model.id,
-        credentialId: credential?.id,
-        ok: response.ok,
-        errorClass: response.errorClass,
-        fallback: index > 0,
-        willFallback
-      });
-
-      if (response.ok) {
-        if (credential !== undefined) {
-          this.#credentialPools?.reportSuccess(model.provider, credential.id);
-        }
-
-        for (const toolCall of extractToolCallsFromProviderResponse(response.raw)) {
-          toolCalls.push(toolCall);
-          await options.onEvent?.({
-            kind: "provider-tool-call",
-            provider: model.provider,
-            model: model.id,
-            index: toolCall.index,
-            id: toolCall.id,
-            name: toolCall.name,
-            argumentsText: toolCall.argumentsText,
-            raw: toolCall.raw
-          });
-        }
-
-        return {
-          ok: true,
-          response,
-          route,
-          fallbackUsed: index > 0,
-          attempts,
-          toolCalls
-        };
+      fallbackModels = models
+        .filter((model) => model.id !== primary!.id || model.provider !== primary!.provider)
+        .filter((model) => matchesPreferences(model, preferences))
+        .sort((left, right) => compareModels(left, right, preferences));
+    } else if (request.model !== undefined) {
+      primary = models.find((model) => model.id === request.model);
+      if (primary === undefined) {
+        return undefined;
       }
-
-      if (credential !== undefined) {
-        this.#credentialPools?.reportFailure(model.provider, credential.id, response.errorClass ?? "unknown");
+      fallbackModels = models
+        .filter((model) => model.id !== primary!.id || model.provider !== primary!.provider)
+        .filter((model) => matchesPreferences(model, preferences))
+        .sort((left, right) => compareModels(left, right, preferences));
+    } else {
+      const route = routeProvider(models, preferences);
+      if (route === undefined) {
+        return undefined;
       }
-
-      if (!willFallback) {
-        break;
-      }
+      primary = route.primary;
+      fallbackModels = route.fallbacks;
     }
 
     return {
-      ok: false,
-      route,
-      fallbackUsed: attempts.length > 1,
-      attempts,
-      toolCalls
+      primaryRoute: this.#modelToResolvedRoute(primary),
+      fallbackChain: fallbackModels.map((model) => this.#modelToResolvedRoute(model))
+    };
+  }
+
+  #modelToResolvedRoute(model: ModelProfile): ResolvedModelRoute {
+    return {
+      provider: model.provider,
+      id: model.id,
+      profile: model
     };
   }
 
@@ -380,7 +304,9 @@ export class ProviderExecutor {
         errorClass: response.errorClass,
         content: response.content
       });
-      const willFallback = !response.ok && shouldFallback(response, route.profile) && index < chain.length - 1;
+
+      const nextRoute = chain[index + 1];
+      const willFallback = !response.ok && shouldFallback(response, route, nextRoute);
 
       await options.onEvent?.({
         kind: "provider-attempt-end",
@@ -437,42 +363,6 @@ export class ProviderExecutor {
       toolCalls
     };
   }
-}
-
-function resolveProviderExecutionRoute(
-  models: ModelProfile[],
-  request: Omit<ProviderRequest, "model"> & { model?: string },
-  preferences: ProviderRoutePreferences
-): ProviderRoute | undefined {
-  if (request.provider !== undefined && request.model !== undefined) {
-    const explicit = models.find((model) => model.provider === request.provider && model.id === request.model);
-
-    if (explicit === undefined) {
-      return undefined;
-    }
-
-    return {
-      primary: explicit,
-      fallbacks: buildFallbackChain(models, explicit, preferences),
-      reason: `explicit provider/model ${explicit.provider}/${explicit.id}`
-    };
-  }
-
-  if (request.model !== undefined) {
-    const explicit = models.find((model) => model.id === request.model);
-
-    if (explicit === undefined) {
-      return undefined;
-    }
-
-    return {
-      primary: explicit,
-      fallbacks: buildFallbackChain(models, explicit, preferences),
-      reason: `explicit model ${explicit.provider}/${explicit.id}`
-    };
-  }
-
-  return routeProvider(models, preferences);
 }
 
 async function collectProviderStream(input: {
@@ -612,15 +502,43 @@ function stableToolCallFragmentKey(
   return `anonymous:${fragments.size}`;
 }
 
-function shouldFallback(response: ProviderResponse, _model: ModelProfile): boolean {
-  return response.errorClass === undefined ||
-    response.errorClass === "unknown" ||
-    response.errorClass === "auth" ||
-    response.errorClass === "rate-limit" ||
-    response.errorClass === "quota" ||
-    response.errorClass === "network" ||
-    response.errorClass === "server" ||
-    response.errorClass === "model-unavailable";
+function shouldFallback(
+  response: ProviderResponse,
+  currentRoute: ResolvedModelRoute,
+  nextRoute: ResolvedModelRoute | undefined
+): boolean {
+  if (response.errorClass === undefined ||
+      response.errorClass === "unknown" ||
+      response.errorClass === "rate-limit" ||
+      response.errorClass === "quota" ||
+      response.errorClass === "network" ||
+      response.errorClass === "server" ||
+      response.errorClass === "model-unavailable" ||
+      response.errorClass === "timeout") {
+    return true;
+  }
+
+  if (response.errorClass === "auth") {
+    if (nextRoute === undefined) {
+      return false;
+    }
+    return isCredentialIndependent(currentRoute, nextRoute);
+  }
+
+  return false;
+}
+
+function isCredentialIndependent(a: ResolvedModelRoute, b: ResolvedModelRoute): boolean {
+  if (a.provider !== b.provider) {
+    return true;
+  }
+  if (a.apiKeyEnv !== undefined && a.apiKeyEnv === b.apiKeyEnv) {
+    return false;
+  }
+  if (a.apiKeyEnv === undefined && b.apiKeyEnv === undefined) {
+    return false;
+  }
+  return true;
 }
 
 function extractToolCallsFromProviderResponse(raw: unknown): ProviderExecutionResult["toolCalls"] {
