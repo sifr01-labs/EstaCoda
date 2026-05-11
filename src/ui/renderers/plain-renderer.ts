@@ -14,6 +14,7 @@ import type {
   ConversationMessageViewModel,
   KeyValueBlockViewModel,
   ListViewModel,
+  OnboardingPromptCardViewModel,
   PlainFallbackViewModel,
   PickerViewModel,
   ProgressContextRailViewModel,
@@ -58,6 +59,8 @@ export function renderPlain(viewModel: ViewModel, locale?: UiLocale): string {
       return renderProgressRail(viewModel);
     case "picker":
       return renderPicker(viewModel);
+    case "onboardingPromptCard":
+      return renderOnboardingPromptCard(viewModel, locale);
     case "startup":
       return renderStartup(viewModel, locale);
     case "startupDashboard":
@@ -472,6 +475,44 @@ export function renderPicker(vm: PickerViewModel): string {
     if (opt.description !== undefined) {
       lines.push(`     ${opt.description}`);
     }
+  }
+
+  return lines.join("\n");
+}
+
+// ──────────────────────────────────────
+// Onboarding Prompt Card
+// ──────────────────────────────────────
+
+export function renderOnboardingPromptCard(
+  vm: OnboardingPromptCardViewModel,
+  locale: UiLocale = "en"
+): string {
+  const effectiveLocale = vm.locale ?? locale;
+  const lines: string[] = [vm.title];
+
+  for (const bodyLine of vm.bodyLines) {
+    lines.push(bodyLine);
+  }
+
+  for (const technicalLine of vm.technicalLines ?? []) {
+    lines.push(effectiveLocale === "ar" ? isolateLtr(technicalLine) : technicalLine);
+  }
+
+  for (let i = 0; i < vm.options.length; i++) {
+    const option = vm.options[i];
+    const marker = i === vm.selectedOptionIndex ? ">" : " ";
+    const label = option.technical === true && effectiveLocale === "ar"
+      ? isolateLtr(option.label)
+      : option.label;
+    lines.push(`${marker} ${label}`);
+    if (option.description !== undefined) {
+      lines.push(`  ${option.description}`);
+    }
+  }
+
+  if (vm.hint !== undefined && vm.hint.length > 0) {
+    lines.push(vm.hint);
   }
 
   return lines.join("\n");

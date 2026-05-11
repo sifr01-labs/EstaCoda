@@ -1,8 +1,9 @@
 import { emitKeypressEvents } from "node:readline";
 import { createInterface as createPromptInterface } from "node:readline/promises";
 import type { Readable, Writable } from "node:stream";
-import { buildPickerViewModel } from "../ui/view-models/builders.js";
-import type { PickerOption } from "../contracts/view-model.js";
+import { buildOnboardingPromptCardViewModel, buildPickerViewModel } from "../ui/view-models/builders.js";
+import type { OnboardingPromptOption, PickerOption, ViewModel } from "../contracts/view-model.js";
+import type { UiLocale } from "../contracts/ui.js";
 import { createSessionRenderer } from "./session-renderer.js";
 
 export type SelectPromptInput<T> = {
@@ -17,6 +18,10 @@ export type SelectPromptInput<T> = {
   }>;
   defaultIndex?: number;
   fallbackPrompt: string;
+  surface?: "onboarding";
+  locale?: UiLocale;
+  direction?: "ltr" | "rtl";
+  technicalLines?: readonly string[];
 };
 
 export async function selectOption<T>(input: Readable, output: Writable, selection: SelectPromptInput<T>): Promise<T> {
@@ -30,14 +35,12 @@ export async function selectOption<T>(input: Readable, output: Writable, selecti
 }
 
 async function plainFallback<T>(input: Readable, output: Writable, selection: SelectPromptInput<T>): Promise<T> {
-  const renderer = createSessionRenderer({ output: output as NodeJS.WritableStream, mode: "plain" });
-  const options: PickerOption[] = selection.options.map((opt, i) => ({
-    id: String(i),
-    label: opt.label,
-    description: opt.description,
-    selected: i === (selection.defaultIndex ?? 0),
-  }));
-  const vm = buildPickerViewModel({ title: selection.title, options });
+  const renderer = createSessionRenderer({
+    output: output as NodeJS.WritableStream,
+    mode: "plain",
+    locale: selection.locale,
+  });
+  const vm = buildSelectionViewModel(selection, selection.defaultIndex ?? 0);
   output.write(renderer.render(vm) + "\n");
   const raw = await plainQuestion(input, output, selection.fallbackPrompt);
   const selectedIndex = parseChoiceIndex(raw, selection.options.length, selection.defaultIndex ?? 0);
@@ -54,29 +57,11 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
     const restoreCursor = "\x1B8";
     const clearDown = "\x1B[J";
 
-    const renderer = createSessionRenderer({ output: output as NodeJS.WriteStream });
-
-    const buildOptions = (): PickerOption[] =>
-      selection.options.map((opt, i) => ({
-        id: String(i),
-        label: opt.label,
-        description: opt.description,
-        selected: i === selectedIndex,
-      }));
+    const renderer = createSessionRenderer({ output: output as NodeJS.WriteStream, locale: selection.locale });
 
     const render = () => {
-      const vm = buildPickerViewModel({ title: selection.title, options: buildOptions() });
-      let text = renderer.render(vm);
-
-      const lines: string[] = [];
-      if (selection.body) lines.push(selection.body);
-      if (selection.instruction) {
-        const useColor = renderer.tokens.contract.behavior.allowAnsiColor;
-        lines.push(useColor ? `\x1B[2m${selection.instruction}\x1B[0m` : selection.instruction);
-      }
-      if (lines.length > 0) {
-        text = lines.join("\n") + "\n" + text;
-      }
+      const vm = buildSelectionViewModel(selection, selectedIndex);
+      const text = renderer.render(vm);
 
       output.write(`${restoreCursor}${clearDown}`);
       output.write(text);
@@ -127,19 +112,50 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
     ttyInput.setRawMode(true);
     ttyInput.resume();
 
-    const vm = buildPickerViewModel({ title: selection.title, options: buildOptions() });
-    let initialText = renderer.render(vm);
-    if (selection.body) initialText = selection.body + "\n" + initialText;
-    if (selection.instruction) {
-      const useColor = renderer.tokens.contract.behavior.allowAnsiColor;
-      initialText = (useColor ? `\x1B[2m${selection.instruction}\x1B[0m` : selection.instruction) + "\n" + initialText;
-    }
+    const vm = buildSelectionViewModel(selection, selectedIndex);
+    const initialText = renderer.render(vm);
     const reserveLines = Math.max(1, initialText.split("\n").length - 1);
     output.write("\n".repeat(reserveLines));
     output.write(`\x1B[${reserveLines}A`);
     output.write(`\x1B[?25l${saveCursor}`);
     render();
   });
+}
+
+function buildSelectionViewModel<T>(selection: SelectPromptInput<T>, selectedIndex: number): ViewModel {
+  if (selection.surface === "onboarding") {
+    const options: OnboardingPromptOption[] = selection.options.map((opt, i) => ({
+      id: String(i),
+      label: opt.label,
+      description: opt.description,
+      technical: false,
+    }));
+    return buildOnboardingPromptCardViewModel({
+      title: selection.title,
+      bodyLines: splitBodyLines(selection.body),
+      technicalLines: selection.technicalLines,
+      options,
+      selectedOptionIndex: selectedIndex,
+      hint: selection.instruction,
+      locale: selection.locale,
+      direction: selection.direction,
+    });
+  }
+
+  const options: PickerOption[] = selection.options.map((opt, i) => ({
+    id: String(i),
+    label: opt.label,
+    description: opt.description,
+    selected: i === selectedIndex,
+  }));
+  return buildPickerViewModel({ title: selection.title, options });
+}
+
+function splitBodyLines(body: string | undefined): string[] {
+  if (body === undefined || body.length === 0) {
+    return [];
+  }
+  return body.split("\n");
 }
 
 export function parseChoiceIndex(value: string, optionCount: number, defaultIndex: number): number {

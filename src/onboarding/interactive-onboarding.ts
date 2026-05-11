@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
 import type { Writable, Readable } from "node:stream";
 import { parseChoiceIndex, selectOption, type SelectPromptInput } from "../cli/interactive-select.js";
+import { createSessionRenderer } from "../cli/session-renderer.js";
 import {
   defaultEnvKey,
   loadRuntimeConfig,
@@ -25,6 +26,7 @@ import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import type { SkillAutonomy } from "../skills/skill-learning.js";
 import { kemetBlueTheme } from "../theme/kemet-blue.js";
 import { defaultImageApiKeyEnv, defaultImageModel } from "../contracts/image-generation.js";
+import { buildOnboardingPromptCardViewModel, type BuildOnboardingPromptCardInput } from "../ui/view-models/builders.js";
 import {
   formatSecurityMode,
   formatSkillAutonomy,
@@ -48,6 +50,7 @@ import { runSetupVerification } from "./verification.js";
 
 export type Prompt = ((question: string, options?: { secret?: boolean }) => Promise<string>) & {
   select?: <T>(input: SelectPromptInput<T>) => Promise<T>;
+  onboardingCard?: (input: BuildOnboardingPromptCardInput) => Promise<void> | void;
   close?: () => void;
 };
 
@@ -120,12 +123,32 @@ export async function runInteractiveOnboarding(options: OnboardingOptions & {
   }
 
   try {
-    await prompt(`${renderWelcome({ theme, copy })}\n${copy.common.pressEnterToBegin} `);
+    const welcomeRendered = await showOnboardingCard(prompt, copy, {
+      title: copy.welcome.titleSuffix,
+      bodyLines: [
+        copy.welcome.intro,
+        ...copy.welcome.steps.map((step, index) => `${index + 1}. ${step}`),
+        copy.welcome.outro
+      ],
+      options: [{ id: "begin", label: stripPromptSuffix(copy.common.pressEnterToBegin) }],
+      selectedOptionIndex: 0
+    });
+    await prompt(welcomeRendered ? `${copy.common.pressEnterToBegin} ` : `${renderWelcome({ theme, copy })}\n${copy.common.pressEnterToBegin} `);
     const interfaceLanguage = await selectInterfaceLanguage(prompt, copy);
     locale = interfaceLanguage.language === "ar" ? "ar" : "en";
     copy = onboardingCopy(locale);
     const interfaceStyle = await selectInterfaceStyle(prompt, interfaceLanguage.language, copy);
     const workspaceRoot = await promptForWorkspaceRoot(prompt, copy, options.workspaceRoot, options.homeDir);
+    await showOnboardingCard(prompt, copy, {
+      title: onboardingStepTitle(copy, "workspaceTrust"),
+      bodyLines: [onboardingContextLine(copy, "workspaceTrust")],
+      technicalLines: [workspaceRoot],
+      options: [
+        { id: "trust", label: onboardingChoiceLabel(copy, "trustWorkspace") },
+        { id: "not-now", label: onboardingChoiceLabel(copy, "notNow") }
+      ],
+      selectedOptionIndex: 0
+    });
     const trustRaw = await prompt(copy.workspace.trustPrompt);
     const trustWorkspace = parseYesNo(trustRaw, true);
     const provider = await selectProvider(prompt, copy);
@@ -134,7 +157,17 @@ export async function runInteractiveOnboarding(options: OnboardingOptions & {
     const normalizedEnvName = defaultApiKeyEnv;
     const apiKey = selected.provider === "local" || normalizedEnvName === undefined
       ? undefined
-      : await promptForRequiredSecret(prompt, copy.providers.apiKeyPrompt(selected.label, normalizedEnvName), `${selected.label} API key`, copy);
+      : await promptForRequiredSecret(
+          prompt,
+          copy.providers.apiKeyPrompt(selected.label, normalizedEnvName),
+          `${selected.label} API key`,
+          copy,
+          {
+            title: onboardingStepTitle(copy, "credential"),
+            bodyLines: [onboardingContextLine(copy, "credential")],
+            technicalLines: [normalizedEnvName, selected.provider, selected.model]
+          }
+        );
     const securityMode = await selectSecurityMode(prompt, locale, copy);
     const skillAutonomy = await selectSkillAutonomy(prompt, locale, copy);
     const optionalCapabilities = await collectOptionalCapabilities(prompt, copy);
@@ -151,7 +184,13 @@ export async function runInteractiveOnboarding(options: OnboardingOptions & {
       workflowLearning: formatSkillAutonomy(skillAutonomy, locale).label,
       capabilities: summarizeCapabilities(optionalCapabilities, copy)
     });
-    await prompt(`${reviewLines}\n${copy.common.pressEnterToSave} `);
+    const reviewRendered = await showOnboardingCard(prompt, copy, {
+      title: copy.review.title,
+      bodyLines: reviewLines.split("\n").filter((line) => line.length > 0 && line !== copy.review.title),
+      options: [{ id: "save", label: stripPromptSuffix(copy.common.pressEnterToSave) }],
+      selectedOptionIndex: 0
+    });
+    await prompt(reviewRendered ? `${copy.common.pressEnterToSave} ` : `${reviewLines}\n${copy.common.pressEnterToSave} `);
     await setupUiConfig({
       ...options,
       workspaceRoot,
@@ -256,6 +295,13 @@ async function promptForWorkspaceRoot(
   homeDir?: string
 ): Promise<string> {
   while (true) {
+    await showOnboardingCard(prompt, copy, {
+      title: onboardingStepTitle(copy, "workspaceRoot"),
+      bodyLines: [onboardingContextLine(copy, "workspaceRoot")],
+      technicalLines: [defaultRoot],
+      options: [],
+      selectedOptionIndex: 0
+    });
     const raw = await prompt(copy.workspace.rootPrompt(defaultRoot));
     const root = normalizeWorkspaceRoot(raw.trim().length === 0 ? defaultRoot : raw.trim(), homeDir);
     const result = await ensureWorkspaceDirectory(root);
@@ -298,6 +344,13 @@ export function createReadlinePrompt(input: Readable = defaultInput, output: Wri
     },
     {
       select: async <T>(selection: SelectPromptInput<T>) => selectOption(input, output, selection),
+      onboardingCard: (card: BuildOnboardingPromptCardInput) => {
+        const renderer = createSessionRenderer({
+          output: output as NodeJS.WritableStream,
+          locale: card.locale,
+        });
+        output.write(`${renderer.render(buildOnboardingPromptCardViewModel(card))}\n`);
+      },
       close: () => undefined
     }
   );
@@ -308,11 +361,94 @@ export function canRunInteractive(input: NodeJS.ReadStream = defaultInput): bool
 }
 
 function withSelectChrome<T>(copy: OnboardingCopy, input: SelectPromptInput<T>): SelectPromptInput<T> {
+  const locale = onboardingLocale(copy);
   return {
     ...input,
+    surface: "onboarding",
+    locale,
+    direction: locale === "ar" ? "rtl" : "ltr",
     instruction: input.instruction ?? copy.common.selectInstruction,
     selectedLabel: input.selectedLabel ?? copy.common.selectedLabel
   };
+}
+
+async function showOnboardingCard(prompt: Prompt, copy: OnboardingCopy, input: Omit<BuildOnboardingPromptCardInput, "locale" | "direction">): Promise<boolean> {
+  if (prompt.onboardingCard === undefined) {
+    return false;
+  }
+  const locale = onboardingLocale(copy);
+  await prompt.onboardingCard({
+    ...input,
+    locale,
+    direction: locale === "ar" ? "rtl" : "ltr"
+  });
+  return true;
+}
+
+function onboardingLocale(copy: OnboardingCopy): "en" | "ar" {
+  return copy.common.selectedLabel === "تم الاختيار" ? "ar" : "en";
+}
+
+function onboardingStepTitle(copy: OnboardingCopy, step: "workspaceRoot" | "workspaceTrust" | "credential"): string {
+  const locale = onboardingLocale(copy);
+  if (locale === "ar") {
+    switch (step) {
+      case "workspaceRoot":
+        return "مجلد العمل";
+      case "workspaceTrust":
+        return "الثقة بمجلد العمل";
+      case "credential":
+        return "بيانات اعتماد النموذج";
+    }
+  }
+
+  switch (step) {
+    case "workspaceRoot":
+      return "Workspace root";
+    case "workspaceTrust":
+      return "Workspace trust";
+    case "credential":
+      return "Model credential";
+  }
+}
+
+function onboardingChoiceLabel(copy: OnboardingCopy, choice: "trustWorkspace" | "notNow"): string {
+  const locale = onboardingLocale(copy);
+  if (locale === "ar") {
+    return choice === "trustWorkspace" ? "ثق بمجلد العمل" : "ليس الآن";
+  }
+  return choice === "trustWorkspace" ? "Trust workspace" : "Not now";
+}
+
+function onboardingContextLine(copy: OnboardingCopy, step: "workspaceRoot" | "workspaceTrust" | "credential"): string {
+  const locale = onboardingLocale(copy);
+  if (locale === "ar") {
+    switch (step) {
+      case "workspaceRoot":
+        return `اختر مجلد العمل الذي ستقوم ${ltr("EstaCoda")} بإعداده.`;
+      case "workspaceTrust":
+        return `يمكن لـ ${ltr("EstaCoda")} قراءة ملفات المشروع وطلب الموافقة قبل الإجراءات الخطرة.`;
+      case "credential":
+        return "سيتم حفظ مرجع بيانات الاعتماد محلياً بدون عرض قيمة المفتاح.";
+    }
+  }
+
+  switch (step) {
+    case "workspaceRoot":
+      return "Choose the workspace EstaCoda should configure.";
+    case "workspaceTrust":
+      return "EstaCoda can read project files and request approval before risky actions.";
+    case "credential":
+      return "The credential reference will be saved locally without showing the key value.";
+  }
+}
+
+function stripPromptSuffix(input: string): string {
+  return input
+    .replace(/\s*\[[^\]]+\]\s*:\s*$/u, "")
+    .replace(/\s*:\s*$/u, "")
+    .replace(/\s*\.\s*$/u, "")
+    .trim();
 }
 
 function technical(copy: OnboardingCopy, value: string): string {
@@ -783,13 +919,40 @@ async function promptForValidatedSecret(
   }
 }
 
-async function promptForRequiredSecret(prompt: Prompt, question: string, label: string, copy: OnboardingCopy): Promise<string> {
-  return await promptForValidatedSecret(
-    prompt,
-    question,
-    (value) => value.trim().length > 0,
-    copy.providers.requiredSecretError(label)
-  );
+async function promptForRequiredSecret(
+  prompt: Prompt,
+  question: string,
+  label: string,
+  copy: OnboardingCopy,
+  card?: {
+    title: string;
+    bodyLines: readonly string[];
+    technicalLines?: readonly string[];
+  }
+): Promise<string> {
+  if (card === undefined || prompt.onboardingCard === undefined) {
+    return await promptForValidatedSecret(
+      prompt,
+      question,
+      (value) => value.trim().length > 0,
+      copy.providers.requiredSecretError(label)
+    );
+  }
+
+  let retryNotice = "";
+  while (true) {
+    await showOnboardingCard(prompt, copy, {
+      ...card,
+      bodyLines: retryNotice.length > 0 ? [retryNotice, ...card.bodyLines] : card.bodyLines,
+      options: [],
+      selectedOptionIndex: 0
+    });
+    const value = await prompt(question, { secret: true });
+    if (value.trim().length > 0) {
+      return value.trim();
+    }
+    retryNotice = copy.providers.requiredSecretError(label);
+  }
 }
 
 function renderWelcome(input: {

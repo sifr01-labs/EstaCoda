@@ -169,6 +169,36 @@ describe("routeSetupEntryState", () => {
     expect(routeSetupEntryState(state("new-user"), { selection: "verify" }).firstRunPlanSession).toBeUndefined();
   });
 
+  it("offers existing configured users launch, review/edit, re-run, verify, or exit without forcing first-run", () => {
+    const decision = routeSetupEntryState(state("configured-ready"));
+
+    expect(decision.kind).toBe("configured-menu");
+    expect(decision.firstRunPlanSession).toBeUndefined();
+    expect(decision.actions.map((action) => action.id)).toEqual([
+      "launch-agent",
+      "review-edit-config",
+      "run-guided-onboarding",
+      "verify-setup",
+      "exit",
+    ]);
+    expect(decision.actions.find((action) => action.id === "launch-agent")?.mutatesConfig).toBe(false);
+    expect(decision.actions.find((action) => action.id === "verify-setup")?.mutatesConfig).toBe(false);
+    expect(decision.actions.find((action) => action.id === "exit")?.mutatesConfig).toBe(false);
+  });
+
+  it("does not offer automatic launch for repair-first states", () => {
+    for (const kind of ["partial-provider", "missing-secret", "broken-config", "state-not-writable"] as const) {
+      const decision = routeSetupEntryState(state(kind));
+      const actionIds = decision.actions.map((action) => action.id);
+
+      expect(decision.kind).toBe("repair-first-menu");
+      expect(actionIds).toContain("repair-setup");
+      expect(actionIds).toContain("show-diagnostics");
+      expect(actionIds).toContain("verify-setup");
+      expect(actionIds).not.toContain("launch-agent");
+    }
+  });
+
   it("attaches setup editor sessions to configured, degraded, and repair routes", () => {
     const routeKinds: SetupEntryStateKind[] = [
       "configured-ready",

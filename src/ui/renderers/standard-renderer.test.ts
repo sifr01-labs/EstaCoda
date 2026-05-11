@@ -7,6 +7,7 @@ import {
   buildCommandResultViewModel,
   buildKeyValueBlockViewModel,
   buildListViewModel,
+  buildOnboardingPromptCardViewModel,
   buildPickerViewModel,
   buildPlainFallbackViewModel,
   buildProgressContextRailViewModel,
@@ -36,6 +37,7 @@ import {
 } from "../view-models/builders.js";
 import { StandardRenderer } from "./standard-renderer.js";
 import { isolateLtr } from "../bidi.js";
+import { measureVisibleWidth, stripAnsi } from "./layout.js";
 
 function fullCaps(): TerminalCapabilities {
   return {
@@ -110,6 +112,28 @@ function hexToRgbForTest(hex: string): { r: number; g: number; b: number } {
   };
 }
 
+function ansiFgForHex(hex: string): string {
+  const { r, g, b } = hexToRgbForTest(hex);
+  return `\x1b[38;2;${r};${g};${b}m`;
+}
+
+function onboardingTrustCard(overrides: Partial<Parameters<typeof buildOnboardingPromptCardViewModel>[0]> = {}) {
+  return buildOnboardingPromptCardViewModel({
+    title: "Workspace trust",
+    bodyLines: [
+      "Trust this workspace?",
+      "EstaCoda can read project files and request approval before risky actions.",
+    ],
+    technicalLines: ["/workspace"],
+    options: [
+      { id: "trust", label: "Trust workspace" },
+      { id: "skip", label: "Not now" },
+    ],
+    selectedOptionIndex: 0,
+    ...overrides,
+  });
+}
+
 describe("StandardRenderer — dispatch", () => {
   it("renders all ViewModel kinds without throwing", () => {
     const r = renderer("dark", fullCaps());
@@ -137,6 +161,12 @@ describe("StandardRenderer — dispatch", () => {
       buildActivityTimelineViewModel({ events: [] }),
       buildProgressContextRailViewModel({ steps: [] }),
       buildPickerViewModel({ title: "T", options: [] }),
+      buildOnboardingPromptCardViewModel({
+        title: "T",
+        bodyLines: ["Question?"],
+        options: [{ id: "yes", label: "Yes" }],
+        selectedOptionIndex: 0,
+      }),
       buildStartupViewModel({
         agentName: "A",
         taglines: [],
@@ -301,6 +331,131 @@ describe("StandardRenderer — dark theme", () => {
     expect(out).toContain("destructive-local");
     expect(out).toContain("rm -rf /");
     expect(hasAnsi(out)).toBe(true);
+  });
+
+  it("renders English onboarding prompt card as setup wizard chrome", () => {
+    const r = renderer("dark", fullCaps());
+    const out = r.renderOnboardingPromptCard(onboardingTrustCard());
+    const plain = stripAnsi(out);
+
+    expect(plain).toContain("╭──── 𓂀 Workspace trust");
+    expect(plain).toContain("Trust this workspace?");
+    expect(plain).toContain("/workspace");
+    expect(plain).toContain("▸ Trust workspace");
+    expect(plain).toContain("  Not now");
+    expect(plain).not.toContain("𓂀 EstaCoda · Workspace trust");
+    expect(plain).not.toContain("Assistant");
+    expect(plain).not.toContain("EstaCoda\n");
+    expect(hasAnsi(out)).toBe(true);
+  });
+
+  it("renders English onboarding prompt card in standard light theme", () => {
+    const r = renderer("light", fullCaps());
+    const out = r.renderOnboardingPromptCard(onboardingTrustCard());
+    const plain = stripAnsi(out);
+
+    expect(plain).toContain("╭──── 𓂀 Workspace trust");
+    expect(plain).toContain("▸ Trust workspace");
+    expect(plain).not.toContain("Assistant");
+    expect(hasAnsi(out)).toBe(true);
+  });
+
+  it("uses brand/action tokens for onboarding title and selection while border stays neutral", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const r = new StandardRenderer({ tokens, capabilities: fullCaps() });
+    const out = r.renderOnboardingPromptCard(onboardingTrustCard());
+
+    expect(out).toContain(`${ansiFgForHex(tokens.contract.palette.brand)}\x1b[1m𓂀 Workspace trust`);
+    expect(out).toContain(`${ansiFgForHex(tokens.contract.palette.action)}▸`);
+    expect(out).toContain(`${ansiFgForHex(tokens.contract.surface.border)}╭──── `);
+    expect(out).not.toContain(`${ansiFgForHex(tokens.contract.palette.brand)}╭`);
+  });
+
+  it("renders English onboarding prompt card at narrow widths without overflow", () => {
+    const r = renderer("dark", narrowCaps());
+    const out = r.renderOnboardingPromptCard(onboardingTrustCard({
+      technicalLines: ["/Users/example/projects/this/is/a/very/long/workspace/path"],
+    }));
+    const plain = stripAnsi(out);
+
+    expect(plain).toContain("╭──── 𓂀 Workspace trust");
+    expect(plain).toContain("...");
+    for (const line of plain.split("\n")) {
+      expect(measureVisibleWidth(line)).toBeLessThanOrEqual(narrowCaps().terminalWidth);
+    }
+  });
+
+  it("renders English onboarding card with no ANSI when color is disabled", () => {
+    const r = renderer("dark", noColorCaps());
+    const out = r.renderOnboardingPromptCard(onboardingTrustCard());
+    assertNoAnsi(out);
+    expect(out).toContain("𓂀 Workspace trust");
+    expect(out).toContain("▸ Trust workspace");
+  });
+
+  it("renders no-color onboarding card with tokens removed cleanly", () => {
+    const r = renderer("dark", noColorCaps());
+    const out = r.renderOnboardingPromptCard(onboardingTrustCard());
+    expect(out).toMatchInlineSnapshot(`
+      "╭──── 𓂀 Workspace trust ─────────────────────────────────────────────────────╮
+        Trust this workspace?
+        EstaCoda can read project files and request approval before risky actions.
+        /workspace
+        ▸ Trust workspace
+          Not now
+      ╰────────────────────────────────────────────────────────────────────────────╯"
+    `);
+  });
+
+  it("renders English onboarding card with stable no-Unicode fallback", () => {
+    const r = renderer("dark", noUnicodeCaps());
+    const out = stripAnsi(r.renderOnboardingPromptCard(onboardingTrustCard()));
+    expect(out).toContain("+---- * Workspace trust");
+    expect(out).toContain("> Trust workspace");
+    expect(out).not.toContain("𓂀");
+    expect(out).not.toContain("▸");
+  });
+
+  it("renders selected option marker at the selected option index", () => {
+    const r = renderer("dark", noColorCaps());
+    const out = r.renderOnboardingPromptCard(onboardingTrustCard({ selectedOptionIndex: 1 }));
+    expect(out).toContain("  Trust workspace");
+    expect(out).toContain("▸ Not now");
+  });
+
+  it("truncates long technical paths safely inside onboarding cards", () => {
+    const r = renderer("dark", narrowCaps());
+    const longPath = "/Users/example/projects/this/is/a/very/long/workspace/path/that/keeps/going";
+    const out = stripAnsi(r.renderOnboardingPromptCard(onboardingTrustCard({ technicalLines: [longPath] })));
+
+    expect(out).toContain("/Users/example");
+    expect(out).toContain("...");
+    expect(out).not.toContain(longPath);
+    for (const line of out.split("\n")) {
+      expect(measureVisibleWidth(line)).toBeLessThanOrEqual(narrowCaps().terminalWidth);
+    }
+  });
+
+  it("renders Arabic onboarding card and isolates technical tokens", () => {
+    const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: fullCaps(), locale: "ar" });
+    const out = r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "الثقة بمساحة العمل",
+      bodyLines: ["هل تثق بمساحة العمل هذه؟", "يمكن لـ EstaCoda قراءة ملفات المشروع وطلب الموافقة قبل الإجراءات الخطرة."],
+      technicalLines: ["/workspace", "KIMI_API_KEY", "kimi-k2", "openrouter"],
+      options: [
+        { id: "trust", label: "ثق بمساحة العمل" },
+        { id: "skip", label: "ليس الآن" },
+      ],
+      selectedOptionIndex: 0,
+      locale: "ar",
+      direction: "rtl",
+    }));
+
+    expect(stripAnsi(out)).toContain("𓂀 الثقة بمساحة العمل");
+    expect(out).toContain(isolateLtr("/workspace"));
+    expect(out).toContain(isolateLtr("KIMI_API_KEY"));
+    expect(out).toContain(isolateLtr("kimi-k2"));
+    expect(out).toContain(isolateLtr("openrouter"));
   });
 
   it("renders permission card with no ANSI when color disabled", () => {
@@ -910,6 +1065,33 @@ describe("StandardRenderer — startup dashboard", () => {
     expect(out).not.toContain("استعرض أدوات التشغيل");
     expect(out).not.toContain(isolateLtr("/tools"));
   });
+
+  it("does not invent readiness, active provider state, version status, or command fallbacks", () => {
+    const r = renderer("dark", fullCaps());
+    const vm = buildStartupDashboardViewModel({
+      agentName: "EstaCoda",
+      taglines: [],
+      version: "",
+      model: { provider: "openrouter", id: "deepseek-reasoner" },
+      workspaceTrust: "unknown",
+      workspaceVerification: "unknown",
+      workspaceDirectory: "/workspace",
+      securityMode: "open",
+      providerReadiness: "unknown",
+      versionStatus: "unknown",
+      availableCommands: [{ name: "/status", description: "Show session status" }],
+      warnings: [],
+    });
+    const out = stripAnsi(r.renderStartupDashboard(vm));
+    expect(out).toContain("unknown");
+    expect(out).toContain("deepseek-reasoner");
+    expect(out).toContain("/status");
+    expect(out).toContain("Show session status");
+    expect(out).not.toContain("ready");
+    expect(out).not.toContain("active provider");
+    expect(out).not.toContain("/tools");
+    expect(out).not.toContain("Browse runtime tools");
+  });
 });
 
 describe("StandardRenderer — empty and edge states", () => {
@@ -1120,6 +1302,39 @@ describe("StandardRenderer — prompt chrome rails", () => {
     expect(out).toContain("◷ 58s");
     expect(out).toContain("idle");
     expect(out.split("\n")).toHaveLength(1);
+  });
+
+  it("renders status and shortcut rails in standard light theme", () => {
+    const r = renderer("light", fullCaps());
+    const status = r.render(buildSessionStatusRailViewModel({ modelLabel: "deepseek-reasoner", turnState: "idle" }));
+    const shortcuts = r.render(buildShortcutHintRailViewModel({ hints: [] }));
+
+    expect(status).toContain("deepseek-reasoner");
+    expect(status).toContain("idle");
+    expect(status.split("\n")).toHaveLength(1);
+    expect(shortcuts).toContain("/help · /tools · /model · /status · Ctrl+C exit");
+    expect(shortcuts.split("\n")).toHaveLength(1);
+    expect(hasAnsi(status)).toBe(true);
+    expect(hasAnsi(shortcuts)).toBe(true);
+  });
+
+  it("keeps narrow status and shortcut rails bounded to one line", () => {
+    const r = renderer("dark", narrowCaps());
+    const status = stripAnsi(r.render(buildSessionStatusRailViewModel({
+      modelLabel: "openrouter/deepseek-reasoner-with-a-very-long-route-name",
+      turnState: "running",
+      contextUsage: { filled: 98765, total: 128000 },
+      sessionElapsedMs: 125000,
+    })));
+    const shortcuts = stripAnsi(r.render(buildShortcutHintRailViewModel({ hints: [] })));
+
+    for (const out of [status, shortcuts]) {
+      const lines = out.split("\n");
+      expect(lines).toHaveLength(1);
+      expect(measureVisibleWidth(lines[0] ?? "")).toBeLessThanOrEqual(40);
+    }
+    expect(status).toContain("...");
+    expect(shortcuts).toContain("...");
   });
 
   it("renders shortcut hint rail with chrome copy", () => {

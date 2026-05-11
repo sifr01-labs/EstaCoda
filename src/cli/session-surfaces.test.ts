@@ -269,6 +269,17 @@ describe("Session surfaces — slash completion list", () => {
     expect(labels).not.toContain("/packs");
   });
 
+  it("caps slash completion rows without changing priority order", () => {
+    const vm = buildSlashCompletionViewModel(fakeRuntime, "/", { limit: 3 });
+    expect(vm.options.map((option) => option.label)).toEqual(["/help", "/status", "/model"]);
+
+    const output = standardDarkRenderer().render(vm);
+    expect(output).toContain("/help");
+    expect(output).toContain("/status");
+    expect(output).toContain("/model");
+    expect(output).not.toContain("/tools");
+  });
+
   it("keeps /tools as its own command behavior", () => {
     const completion = renderPlain(buildSlashCompletionViewModel(fakeRuntime, "/tools"));
     const toolsOutput = renderPlain(buildToolsMenuViewModel(fakeRuntime, ""));

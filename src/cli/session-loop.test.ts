@@ -101,6 +101,39 @@ function createMockRuntime(): Runtime {
 }
 
 describe("runSessionLoop — user prompt rail behavior", () => {
+  it("defaults startup and session chrome to English when no locale is provided", async () => {
+    const outputChunks: string[] = [];
+    const runtime = createMockRuntime();
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps(),
+      prompt: Object.assign(
+        async () => {
+          const values = ["/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    expect(rendered).toContain("Type a message.");
+    expect(rendered).toContain("/help");
+    expect(rendered).toContain("/exit");
+    expect(rendered).not.toContain("اكتب رسالة.");
+  });
+
   it("renders the startup hint in Arabic with isolated slash commands", async () => {
     const outputChunks: string[] = [];
     const runtime = createMockRuntime();
@@ -129,6 +162,89 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     expect(rendered).toContain("اكتب رسالة.");
     expect(rendered).toContain(isolateLtr("/help"));
     expect(rendered).toContain(isolateLtr("/exit"));
+  });
+
+  it("keeps Arabic launch chrome readable in no-color plain fallback", async () => {
+    const outputChunks: string[] = [];
+    const runtime = createMockRuntime();
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+      } as NodeJS.WritableStream,
+      locale: "ar",
+      capabilities: {
+        ...interactiveCaps(),
+        isTTY: false,
+        supportsColor: false,
+        supportsTrueColor: false,
+        supportsUnicode: false,
+        supportsEmoji: false,
+        supportsAnimation: false,
+      },
+      prompt: Object.assign(
+        async () => {
+          const values = ["/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    expect(rendered).toContain("اكتب رسالة.");
+    expect(rendered).toContain(isolateLtr("/help"));
+    expect(rendered).toContain(isolateLtr("/exit"));
+    expect(rendered).not.toMatch(/\x1b\[/u);
+    expect(rendered).not.toContain("𓂀");
+    expect(rendered).not.toContain("╭");
+  });
+
+  it("keeps Arabic no-Unicode session chrome on ASCII structural fallback", async () => {
+    const outputChunks: string[] = [];
+    const runtime = createMockRuntime();
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 80,
+      } as unknown as NodeJS.WritableStream,
+      locale: "ar",
+      capabilities: interactiveCaps({
+        supportsUnicode: false,
+        supportsEmoji: false,
+        supportsAnimation: false,
+        terminalWidth: 80,
+      }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    expect(rendered).toContain("اكتب رسالة.");
+    expect(rendered).toContain(isolateLtr("/help"));
+    expect(rendered).toContain(isolateLtr("/exit"));
+    expect(rendered).not.toContain("𓂀");
+    expect(rendered).not.toContain("╭");
+    expect(rendered).toContain("*");
   });
 
   it("renders a user prompt rail for normal non-slash input", async () => {
@@ -608,6 +724,89 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(afterAssistant).not.toContain("contemplating");
     expect(afterAssistant).not.toContain("scribbling");
     expect(afterAssistant).not.toContain("tinkering");
+  });
+
+  it("clears active chrome before rendering a permission card", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+
+    const baseRuntime = createMockRuntime();
+    const runtime = {
+      ...baseRuntime,
+      grantApproval: async () => {},
+      handle: async (): Promise<AgentLoopResponse> => ({
+        label: "EstaCoda",
+        text: "I need permission before writing.",
+        matchedSkills: [],
+        intent: {
+          nativeIntent: "general",
+          labels: ["chat"],
+          confidence: 1,
+          suggestedToolsets: [],
+          suggestedSkills: [],
+          evidence: [{ kind: "native-intent" as const, detail: "mock" }],
+          confirmationRequired: false,
+          rationale: "mock",
+        },
+        securityDecision: "ask",
+        toolExecutions: [
+          {
+            tool: {
+              name: "workspace.write",
+              description: "Write a workspace file",
+              inputSchema: {},
+              riskClass: "workspace-write",
+              toolsets: ["files"],
+              progressLabel: "writing",
+              maxResultSizeChars: 1000,
+            },
+            decision: "ask",
+            riskClass: "workspace-write",
+            targetKey: "src/app.ts",
+            targetSummary: "src/app.ts",
+          },
+        ],
+        toolPlans: [],
+        skillOutcomes: [],
+        artifacts: [],
+        context: undefined,
+        projectContext: undefined,
+        progress: [],
+      }),
+    } as Runtime;
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      capabilities: interactiveCaps(),
+      prompt: Object.assign(
+        async () => {
+          const values = ["write file", "deny", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    const clearIndex = rendered.indexOf("\x1b[1A\x1b[2K\r");
+    const permissionIndex = rendered.indexOf("Permission required");
+    expect(clearIndex).toBeGreaterThan(-1);
+    expect(permissionIndex).toBeGreaterThan(-1);
+    expect(clearIndex).toBeLessThan(permissionIndex);
+    expect(rendered).toContain("workspace.write");
+    expect(rendered).toContain("src/app.ts");
+    expect(rendered).toContain("Permission denied.");
+    expect(rendered.slice(permissionIndex)).not.toContain("contemplating");
   });
 
   it("renders agent-cancelled as durable message in chrome mode", async () => {

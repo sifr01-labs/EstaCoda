@@ -15,6 +15,8 @@ import type {
   KeyValueEntry,
   ListItem,
   ListViewModel,
+  OnboardingPromptCardViewModel,
+  OnboardingPromptOption,
   PlainFallbackViewModel,
   PickerOption,
   PickerViewModel,
@@ -240,6 +242,37 @@ export function buildPickerViewModel(input: BuildPickerInput): PickerViewModel {
     kind: "picker",
     title: input.title,
     options: input.options,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Onboarding Prompt Card
+// ─────────────────────────────────────────────────────────────
+
+export interface BuildOnboardingPromptCardInput {
+  readonly title: string;
+  readonly bodyLines: readonly string[];
+  readonly technicalLines?: readonly string[];
+  readonly options: readonly OnboardingPromptOption[];
+  readonly selectedOptionIndex: number;
+  readonly hint?: string;
+  readonly locale?: "en" | "ar";
+  readonly direction?: "ltr" | "rtl";
+}
+
+export function buildOnboardingPromptCardViewModel(
+  input: BuildOnboardingPromptCardInput
+): OnboardingPromptCardViewModel {
+  return {
+    kind: "onboardingPromptCard",
+    title: input.title,
+    bodyLines: input.bodyLines,
+    technicalLines: input.technicalLines,
+    options: input.options,
+    selectedOptionIndex: input.selectedOptionIndex,
+    hint: input.hint,
+    locale: input.locale,
+    direction: input.direction,
   };
 }
 

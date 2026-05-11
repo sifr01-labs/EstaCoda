@@ -13,6 +13,7 @@ import { kemetBlueTheme } from "./theme/kemet-blue.js";
 import { launchInteractiveSession } from "./cli/interactive-launcher.js";
 import { getPackageVersion } from "./cli/version-command.js";
 import { renderPlain } from "./ui/renderers/plain-renderer.js";
+import type { UiLocale } from "./contracts/ui.js";
 
 const argv = process.argv.slice(2);
 
@@ -26,6 +27,7 @@ if (argv.includes("--version") || argv.includes("-v")) {
 let workspaceRoot = process.cwd();
 const cliSessionStore = new PersistentCliSessionStore();
 const cliApprovalController = new WorkspaceApprovalController();
+let launchLocale: UiLocale | undefined;
 let config: LoadedRuntimeConfig = await loadRuntimeConfig({
   workspaceRoot
 });
@@ -44,6 +46,7 @@ if (argv.length === 0 && canRunInteractive()) {
   if (launchResult.workspaceRoot !== undefined) {
     workspaceRoot = launchResult.workspaceRoot;
   }
+  launchLocale = launchResult.locale;
 
   if (launchResult.onboardingTriggered) {
     config = await loadRuntimeConfig({ workspaceRoot });
@@ -124,7 +127,7 @@ if (argv.length === 0 && canRunInteractive()) {
   await runSessionLoop({
     runtime,
     workspaceRoot,
-    locale: config.ui.language === "ar" ? "ar" : "en",
+    locale: launchLocale ?? (config.ui.language === "ar" ? "ar" : "en"),
     refreshRuntime: async (options) => {
       const nextRuntime = await buildRuntime({
         sessionId: options?.preserveSession === true ? runtime.sessionId : randomUUID(),

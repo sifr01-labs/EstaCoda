@@ -5,6 +5,7 @@ import {
   buildCommandResultViewModel,
   buildKeyValueBlockViewModel,
   buildListViewModel,
+  buildOnboardingPromptCardViewModel,
   buildPickerViewModel,
   buildPlainFallbackViewModel,
   buildProgressContextRailViewModel,
@@ -38,6 +39,7 @@ import {
   renderWarningError,
   renderKeyValueBlock,
   renderList,
+  renderOnboardingPromptCard,
   renderTable,
   renderApprovalSecurity,
   renderActivityTimeline,
@@ -67,6 +69,23 @@ function assertAsciiSafe(text: string): void {
   }
 }
 
+function onboardingTrustCard(overrides: Partial<Parameters<typeof buildOnboardingPromptCardViewModel>[0]> = {}) {
+  return buildOnboardingPromptCardViewModel({
+    title: "Workspace trust",
+    bodyLines: [
+      "Trust this workspace?",
+      "EstaCoda can read project files and request approval before risky actions.",
+    ],
+    technicalLines: ["/workspace"],
+    options: [
+      { id: "trust", label: "Trust workspace" },
+      { id: "skip", label: "Not now" },
+    ],
+    selectedOptionIndex: 0,
+    ...overrides,
+  });
+}
+
 // ──────────────────────────────────────────────────
 describe("PlainRenderer — renderPlainFallback", () => {
   it("renders lines joined by newline", () => {
@@ -79,6 +98,44 @@ describe("PlainRenderer — renderPlainFallback", () => {
   it("renders empty lines as empty string", () => {
     const vm = buildPlainFallbackViewModel({ lines: [] });
     expect(renderPlainFallback(vm)).toBe("");
+  });
+});
+
+describe("PlainRenderer — renderOnboardingPromptCard", () => {
+  it("renders deterministic readable onboarding output", () => {
+    const out = renderOnboardingPromptCard(onboardingTrustCard());
+    expect(out).toBe([
+      "Workspace trust",
+      "Trust this workspace?",
+      "EstaCoda can read project files and request approval before risky actions.",
+      "/workspace",
+      "> Trust workspace",
+      "  Not now",
+    ].join("\n"));
+    assertNoAnsi(out);
+    assertAsciiSafe(out);
+  });
+
+  it("renders selected option marker at the selected index", () => {
+    const out = renderOnboardingPromptCard(onboardingTrustCard({ selectedOptionIndex: 1 }));
+    expect(out).toContain("  Trust workspace");
+    expect(out).toContain("> Not now");
+  });
+
+  it("isolates Arabic technical lines", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "الثقة بمساحة العمل",
+      bodyLines: ["هل تثق بمساحة العمل هذه؟"],
+      technicalLines: ["/workspace", "KIMI_API_KEY", "kimi-k2", "openrouter"],
+      options: [{ id: "trust", label: "ثق بمساحة العمل" }],
+      selectedOptionIndex: 0,
+      locale: "ar",
+      direction: "rtl",
+    }), "ar");
+    expect(out).toContain(isolateLtr("/workspace"));
+    expect(out).toContain(isolateLtr("KIMI_API_KEY"));
+    expect(out).toContain(isolateLtr("kimi-k2"));
+    expect(out).toContain(isolateLtr("openrouter"));
   });
 });
 
@@ -806,6 +863,12 @@ describe("PlainRenderer — renderPlain dispatcher", () => {
       buildActivityTimelineViewModel({ events: [] }),
       buildProgressContextRailViewModel({ steps: [] }),
       buildPickerViewModel({ title: "T", options: [] }),
+      buildOnboardingPromptCardViewModel({
+        title: "T",
+        bodyLines: ["Question?"],
+        options: [{ id: "yes", label: "Yes" }],
+        selectedOptionIndex: 0,
+      }),
       buildStartupViewModel({
         agentName: "A",
         taglines: [],

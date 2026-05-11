@@ -6,6 +6,7 @@ import {
   buildCommandResultViewModel,
   buildKeyValueBlockViewModel,
   buildListViewModel,
+  buildOnboardingPromptCardViewModel,
   buildPickerViewModel,
   buildPlainFallbackViewModel,
   buildProgressContextRailViewModel,
@@ -258,6 +259,33 @@ describe("ViewModel builders", () => {
       label: "GPT-4o",
       description: "Fast and capable",
     });
+    expect(Object.getPrototypeOf(vm)).toBe(Object.prototype);
+  });
+
+  it("buildOnboardingPromptCardViewModel produces plain structured object", () => {
+    const vm = buildOnboardingPromptCardViewModel({
+      title: "Workspace trust",
+      bodyLines: ["Trust this workspace?"],
+      technicalLines: ["/workspace"],
+      options: [
+        { id: "trust", label: "Trust workspace" },
+        { id: "skip", label: "Not now" },
+      ],
+      selectedOptionIndex: 0,
+      hint: "Use arrow keys to choose.",
+      locale: "en",
+      direction: "ltr",
+    });
+
+    expect(vm.kind).toBe("onboardingPromptCard");
+    expect(vm.title).toBe("Workspace trust");
+    expect(vm.bodyLines).toEqual(["Trust this workspace?"]);
+    expect(vm.technicalLines).toEqual(["/workspace"]);
+    expect(vm.options).toHaveLength(2);
+    expect(vm.selectedOptionIndex).toBe(0);
+    expect(vm.hint).toBe("Use arrow keys to choose.");
+    expect(vm.locale).toBe("en");
+    expect(vm.direction).toBe("ltr");
     expect(Object.getPrototypeOf(vm)).toBe(Object.prototype);
   });
 

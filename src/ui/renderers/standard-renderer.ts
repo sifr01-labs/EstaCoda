@@ -11,6 +11,7 @@ import type {
   ConversationMessageViewModel,
   KeyValueBlockViewModel,
   ListViewModel,
+  OnboardingPromptCardViewModel,
   PlainFallbackViewModel,
   PickerViewModel,
   ProgressContextRailViewModel,
@@ -98,6 +99,8 @@ export class StandardRenderer {
         return this.renderProgressRail(vm);
       case "picker":
         return this.renderPicker(vm);
+      case "onboardingPromptCard":
+        return this.renderOnboardingPromptCard(vm);
       case "startup":
         return this.renderStartup(vm);
       case "startupDashboard":
@@ -191,6 +194,10 @@ export class StandardRenderer {
     return this.#color(text, this.#tokens.contract.palette.caution);
   }
 
+  #surfaceBorder(text: string): string {
+    return this.#color(text, this.#tokens.contract.surface.border);
+  }
+
   #severity(text: string, sev: ViewModelSeverity): string {
     const hex = this.#tokens.contract.severity[sev];
     return this.#color(text, hex);
@@ -271,6 +278,16 @@ export class StandardRenderer {
   /** Open focus panel (unbordered, indented). */
   #openPanel(contentLines: readonly string[]): string {
     return contentLines.map((l) => `  ${l}`).join("\n");
+  }
+
+  #onboardingTitle(title: string, maxWidth: number): string {
+    const symbol = this.#useUnicode ? "𓂀" : "*";
+    return truncateVisible(`${symbol} ${title}`, maxWidth);
+  }
+
+  #localizedTechnical(value: string, locale: UiLocale, maxWidth: number): string {
+    const truncated = truncateVisible(value, maxWidth);
+    return locale === "ar" ? isolateLtr(truncated) : truncated;
   }
 
   /** Hero panel for startup screen. */
@@ -497,6 +514,76 @@ export class StandardRenderer {
     }
     lines.push(`${bottomLeft}${horiz.repeat(width - 2)}${bottomRight}`);
 
+    return lines.join("\n");
+  }
+
+  // ──────────────────────────────────────
+  // Onboarding Prompt Card
+  // ──────────────────────────────────────
+
+  renderOnboardingPromptCard(vm: OnboardingPromptCardViewModel): string {
+    const locale = vm.locale ?? this.#locale;
+    const horiz = this.#useUnicode ? "─" : "-";
+    const topLeft = this.#useUnicode ? "╭" : "+";
+    const topRight = this.#useUnicode ? "╮" : "+";
+    const bottomLeft = this.#useUnicode ? "╰" : "+";
+    const bottomRight = this.#useUnicode ? "╯" : "+";
+    const selectedMarker = this.#useUnicode ? "▸" : ">";
+
+    const rawContentLines: string[] = [
+      ...vm.bodyLines,
+      ...(vm.technicalLines ?? []),
+      ...vm.options.flatMap((option) => [option.label, option.description ?? ""]),
+      vm.hint ?? "",
+    ].filter((line) => line.length > 0);
+    const maxRawContent = Math.max(0, ...rawContentLines.map((line) => measureVisibleWidth(line)));
+    const requestedWidth = Math.max(24, this.#capabilities.terminalWidth);
+    const naturalWidth = Math.max(40, maxRawContent + 4, measureVisibleWidth(vm.title) + 12);
+    const width = Math.min(requestedWidth, naturalWidth);
+    const contentWidth = Math.max(8, width - 4);
+    const innerWidth = Math.max(8, width - 2);
+    const leftTitleRule = `${horiz.repeat(Math.min(4, Math.max(1, innerWidth - 4)))} `;
+    const titleRaw = this.#onboardingTitle(vm.title, Math.max(1, innerWidth - measureVisibleWidth(leftTitleRule) - 2));
+    const rightRuleWidth = Math.max(
+      0,
+      innerWidth - measureVisibleWidth(leftTitleRule) - measureVisibleWidth(titleRaw) - 1
+    );
+    const top = [
+      this.#surfaceBorder(`${topLeft}${leftTitleRule}`),
+      this.#brand(this.#bold(titleRaw)),
+      this.#surfaceBorder(` ${horiz.repeat(rightRuleWidth)}${topRight}`),
+    ].join("");
+    const bottom = this.#surfaceBorder(`${bottomLeft}${horiz.repeat(width - 2)}${bottomRight}`);
+
+    const lines: string[] = [top];
+
+    for (let i = 0; i < vm.bodyLines.length; i++) {
+      const text = truncateVisible(vm.bodyLines[i], contentWidth);
+      lines.push(`  ${i === 0 ? this.#primary(text) : this.#secondary(text)}`);
+    }
+
+    for (const technicalLine of vm.technicalLines ?? []) {
+      lines.push(`  ${this.#primary(this.#localizedTechnical(technicalLine, locale, contentWidth))}`);
+    }
+
+    for (let i = 0; i < vm.options.length; i++) {
+      const option = vm.options[i];
+      const isSelected = i === vm.selectedOptionIndex;
+      const marker = isSelected ? this.#action(selectedMarker) : " ";
+      const optionText = option.technical === true
+        ? this.#localizedTechnical(option.label, locale, Math.max(1, contentWidth - 2))
+        : truncateVisible(option.label, Math.max(1, contentWidth - 2));
+      lines.push(`  ${marker} ${this.#primary(optionText)}`);
+      if (option.description !== undefined) {
+        lines.push(`    ${this.#muted(truncateVisible(option.description, Math.max(1, contentWidth - 4)))}`);
+      }
+    }
+
+    if (vm.hint !== undefined && vm.hint.length > 0) {
+      lines.push(`  ${this.#muted(truncateVisible(vm.hint, contentWidth))}`);
+    }
+
+    lines.push(bottom);
     return lines.join("\n");
   }
 

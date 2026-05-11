@@ -173,6 +173,29 @@ export interface PickerViewModel {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Onboarding Prompt Card
+// ─────────────────────────────────────────────────────────────
+
+export interface OnboardingPromptOption {
+  readonly id: string;
+  readonly label: string;
+  readonly description?: string;
+  readonly technical?: boolean;
+}
+
+export interface OnboardingPromptCardViewModel {
+  readonly kind: "onboardingPromptCard";
+  readonly title: string;
+  readonly bodyLines: readonly string[];
+  readonly technicalLines?: readonly string[];
+  readonly options: readonly OnboardingPromptOption[];
+  readonly selectedOptionIndex: number;
+  readonly hint?: string;
+  readonly locale?: "en" | "ar";
+  readonly direction?: "ltr" | "rtl";
+}
+
+// ─────────────────────────────────────────────────────────────
 // Startup
 // ─────────────────────────────────────────────────────────────
 
@@ -395,6 +418,7 @@ export type ViewModel =
   | ActivityTimelineViewModel
   | ProgressContextRailViewModel
   | PickerViewModel
+  | OnboardingPromptCardViewModel
   | StartupViewModel
   | CommandResultViewModel
   | PlainFallbackViewModel

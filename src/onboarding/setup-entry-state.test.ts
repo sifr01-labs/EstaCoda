@@ -111,6 +111,8 @@ describe("collectSetupEntryState", () => {
 
     expect(state.kind).toBe("missing-secret");
     expect(state.recommendedAction).toBe("add-missing-secret");
+    expect(state.providerReadiness).toBe("missing-config");
+    expect(state.setupVerification.providerDiagnostic.status).toBe("blocked");
     expect(state.missingCredentials.envVars).toEqual(["OPENAI_API_KEY"]);
     expect(state.blockers).toContain("Missing credential environment variable OPENAI_API_KEY.");
   });
@@ -152,6 +154,22 @@ describe("collectSetupEntryState", () => {
     expect(state.recommendedAction).toBe("trust-workspace");
     expect(state.workspaceTrust).toBe("untrusted");
     expect(state.blockers).toContain("Workspace is not trusted.");
+  });
+
+  it("keeps workspace trust separate from verification and provider readiness", async () => {
+    const { homeDir, workspaceRoot } = await makeHomeAndWorkspace();
+    await writeUserConfig(homeDir, localReadyConfig());
+
+    const state = await collectSetupEntryState({ homeDir, workspaceRoot });
+
+    expect(state.kind).toBe("untrusted-workspace");
+    expect(state.workspaceTrust).toBe("untrusted");
+    expect(state.workspaceVerification).toBe("unverified");
+    expect(state.providerReadiness).toBe("ready");
+    expect(state.setupVerification.workspaceTrusted).toBe(false);
+    expect(state.setupVerification.providerDiagnostic.status).toBe("ready");
+    expect(state.blockers).toContain("Workspace is not trusted.");
+    expect(state.blockers).not.toContain("Provider setup is incomplete.");
   });
 
   it("classifies a non-writable state directory as state-not-writable", async () => {
