@@ -16,6 +16,7 @@ import { launchInteractiveSession } from "./cli/interactive-launcher.js";
 import { getPackageVersion } from "./cli/version-command.js";
 import { renderPlain } from "./ui/renderers/plain-renderer.js";
 import type { UiLocale } from "./contracts/ui.js";
+import { createSQLiteSessionDB } from "./session/session-setup.js";
 
 const argv = process.argv.slice(2);
 
@@ -121,8 +122,11 @@ if (argv[0] === "acp") {
   }
 }
 
+const sessionDb = await createSQLiteSessionDB({ path: stateHome.sessionsSqlitePath });
+
 const runtime = await buildRuntime({
-  sessionId: await cliSessionStore.getSessionId(workspaceRoot)
+  sessionId: await cliSessionStore.getSessionId(workspaceRoot),
+  sessionDb
 });
 await cliSessionStore.setSessionId(workspaceRoot, runtime.sessionId);
 

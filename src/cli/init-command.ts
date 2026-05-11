@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
+import { resolveStateHome } from "../config/state-home.js";
 
 export type InitOptions = {
   homeDir?: string;
@@ -31,7 +32,8 @@ export async function bootstrapStateDirectories(homeDir: string): Promise<void> 
 }
 
 export async function runInitCommand(options: InitOptions): Promise<InitResult> {
-  const homeDir = options.homeDir ?? process.env.HOME ?? "";
+  const stateHome = resolveStateHome({ homeDir: options.homeDir });
+  const homeDir = stateHome.homeDir;
   if (homeDir.length === 0) {
     return {
       ok: false,
@@ -40,12 +42,12 @@ export async function runInitCommand(options: InitOptions): Promise<InitResult> 
     };
   }
 
-  const root = join(homeDir, ".estacoda");
+  const root = stateHome.stateRoot;
 
   try {
     await bootstrapStateDirectories(homeDir);
 
-    const configPath = join(root, "config.json");
+    const configPath = stateHome.configPath;
     if (!existsSync(configPath)) {
       const defaultConfig = {
         model: {
@@ -68,14 +70,9 @@ export async function runInitCommand(options: InitOptions): Promise<InitResult> 
       await writeFile(configPath, `${JSON.stringify(defaultConfig, null, 2)}\n`, "utf8");
     }
 
-    const trustPath = join(root, "trust.json");
+    const trustPath = stateHome.trustJsonPath;
     if (!existsSync(trustPath)) {
       await writeFile(trustPath, "{}\n", "utf8");
-    }
-
-    const sessionsPath = join(root, "sessions.sqlite");
-    if (!existsSync(sessionsPath)) {
-      await writeFile(sessionsPath, "", "utf8");
     }
 
     return {
@@ -87,7 +84,6 @@ export async function runInitCommand(options: InitOptions): Promise<InitResult> 
         ...DEFAULT_STATE_DIRS.map((d) => `  ${d}/`),
         "  config.json",
         "  trust.json",
-        "  sessions.sqlite",
         "",
         "Next: run `estacoda` to start interactive setup, or `estacoda verify` to check readiness."
       ].join("\n"),

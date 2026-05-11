@@ -50,6 +50,22 @@ function createEchoTool(name: string): RegisteredTool {
   };
 }
 
+function createSensitiveEchoTool(name: string): RegisteredTool {
+  return {
+    name,
+    description: "echoes input back for redaction testing",
+    inputSchema: { type: "object", properties: {} },
+    riskClass: "read-only-local",
+    toolsets: ["core"],
+    progressLabel: "echoing",
+    maxResultSizeChars: 1000,
+    isAvailable: () => true,
+    run: async (input): Promise<ToolResult> => {
+      return { ok: true, content: JSON.stringify(input) };
+    }
+  };
+}
+
 async function setupExecutor(options: {
   policy?: SecurityPolicy;
   tools?: RegisteredTool[];
@@ -155,5 +171,98 @@ describe("ToolExecutor exception containment", () => {
     expect(record?.result?.ok).toBe(false);
     expect(record?.result?.content).toBe("Tool execution cancelled.");
     expect(record?.result?.metadata).toMatchObject({ reason: "cancelled" });
+  });
+});
+
+describe("ToolExecutor input redaction", () => {
+  it("redacts sensitive keys in session events", async () => {
+    const { executor, sessionDb } = await setupExecutor({
+      tools: [createSensitiveEchoTool("setup")]
+    });
+
+    const input = {
+      provider: "openai",
+      apiKey: "sk-secret123",
+      api_key: "sk-secret456",
+      password: "hunter2",
+      token: "tok-abc",
+      secret: "shh",
+      credential: "creds",
+      nested: {
+        apiKey: "nested-secret"
+      }
+    };
+
+    await executor.executeTool({
+      tool: "setup",
+      input,
+      trustedWorkspace: true,
+      sessionId: "test-session"
+    });
+
+    const events = await sessionDb.listEvents("test-session");
+    const toolCalled = events.find((e) => e.kind === "tool-called");
+    expect(toolCalled).toBeDefined();
+    expect(toolCalled?.kind === "tool-called" ? toolCalled.input : undefined).toMatchObject({
+      provider: "openai",
+      apiKey: "[REDACTED]",
+      api_key: "[REDACTED]",
+      password: "[REDACTED]",
+      token: "[REDACTED]",
+      secret: "[REDACTED]",
+      credential: "[REDACTED]",
+      nested: {
+        apiKey: "[REDACTED]"
+      }
+    });
+  });
+
+  it("does not mutate the original input passed to tool.run", async () => {
+    const { executor } = await setupExecutor({
+      tools: [createSensitiveEchoTool("setup")]
+    });
+
+    const input = {
+      provider: "openai",
+      apiKey: "sk-secret123"
+    };
+
+    const record = await executor.executeTool({
+      tool: "setup",
+      input,
+      trustedWorkspace: true,
+      sessionId: "test-session"
+    });
+
+    expect(record?.result?.ok).toBe(true);
+    expect(record?.result?.content).toContain("sk-secret123");
+    expect(input.apiKey).toBe("sk-secret123");
+  });
+
+  it("redacts sensitive keys in trajectory records", async () => {
+    const { executor, trajectoryRecorder } = await setupExecutor({
+      tools: [createSensitiveEchoTool("setup")]
+    });
+
+    const input = {
+      apiKey: "sk-secret123"
+    };
+
+    await executor.executeTool({
+      tool: "setup",
+      input,
+      trustedWorkspace: true,
+      sessionId: "test-session"
+    });
+
+    const trajectory = trajectoryRecorder.snapshot();
+    const toolCallEvent = trajectory.events.find((e) => e.kind === "tool-call");
+    expect(toolCallEvent).toBeDefined();
+    expect(toolCallEvent?.data).toMatchObject({
+      tool: "setup",
+      input: {
+        apiKey: "[REDACTED]"
+      }
+    });
   });
 });

@@ -26,7 +26,7 @@ This file is intentionally blunt. It is for engineering continuity, not marketin
 
 ## Telegram / Channels
 
-- Telegram is the only real launch channel.
+- Telegram is the most mature launch channel; CLI now uses SQLite-backed persistence.
 - On non-vision providers, image analysis degrades to metadata-only. `live-proven`
 - Native-vision routing is preferred for simple image prompts, but broader multi-provider proof is missing. `smoke-tested`
 - Telegram final formatting is improved but not full parity. `smoke-tested`

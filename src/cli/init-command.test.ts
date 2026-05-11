@@ -49,16 +49,8 @@ describe("runInitCommand", () => {
     expect(existsSync(join(tempHome, ".estacoda", "trust.json"))).toBe(true);
   });
 
-  it("creates sessions.sqlite", async () => {
-    await runInitCommand({ homeDir: tempHome });
-    expect(existsSync(join(tempHome, ".estacoda", "sessions.sqlite"))).toBe(true);
-  });
-
-  it("fails when homeDir is empty and HOME is unset", async () => {
-    const originalHome = process.env.HOME;
-    delete process.env.HOME;
-    const result = await runInitCommand({});
+  it("fails when homeDir is empty and state root cannot be resolved", async () => {
+    const result = await runInitCommand({ homeDir: "" });
     expect(result.exitCode).toBe(1);
-    process.env.HOME = originalHome;
   });
 });

@@ -8,6 +8,7 @@ import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { ToolRegistry } from "./tool-registry.js";
 
 const MAX_STORED_TOOL_RESULT_CHARS = 12_000;
+const SENSITIVE_KEY_RE = /apiKey|api[_-]?key|password|token|secret|credential/i;
 
 export type ToolExecutionRequest = {
   toolset: ToolsetName;
@@ -166,11 +167,11 @@ export class ToolExecutor {
     await this.#sessionDb.appendEvent(request.sessionId, {
       kind: "tool-called",
       tool: tool.name,
-      input: request.input
+      input: redactSensitiveFields(request.input)
     });
     this.#trajectoryRecorder.record("tool-call", {
       tool: tool.name,
-      input: request.input
+      input: redactSensitiveFields(request.input)
     });
 
     let result: ToolResult;
@@ -417,6 +418,30 @@ function summarizeSecurityTarget(toolName: string, input: Record<string, unknown
   }
 
   return undefined;
+}
+
+function redactSensitiveFields(input: Record<string, unknown>): Record<string, unknown> {
+  return redactValue(input) as Record<string, unknown>;
+}
+
+function redactValue(value: unknown): unknown {
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map(redactValue);
+  }
+  const result: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(value)) {
+    if (SENSITIVE_KEY_RE.test(key)) {
+      result[key] = "[REDACTED]";
+    } else if (typeof val === "object" && val !== null) {
+      result[key] = redactValue(val);
+    } else {
+      result[key] = val;
+    }
+  }
+  return result;
 }
 
 function truncateSecuritySummary(value: string): string {
