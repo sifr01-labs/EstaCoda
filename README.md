@@ -16,11 +16,11 @@ On first launch, EstaCoda runs an interactive setup flow:
 
 - choose interface language and expression style
 - trust the active workspace
-- choose primary and optional backup model routes
+- choose a primary model route
 - store hosted-provider keys locally in `~/.estacoda/.env` with `0600` permissions
 - choose security mode: `strict`, `adaptive`, or `open`
 - choose workflow-learning mode: `none`, `suggest`, `proactive`, or `autonomous`
-- optionally configure Telegram, Discord, Email, WhatsApp, voice, vision/image generation, and browser support
+- optionally configure Telegram, voice, vision/image generation, and browser support
 - verify readiness, then start the first agent session
 
 ## Core Capabilities
@@ -135,12 +135,11 @@ The setup flow walks through:
 1. Interface language and expression style.
 2. Workspace trust.
 3. Primary provider and model.
-4. Optional backup provider and model.
-5. Protected API key capture into `~/.estacoda/.env`.
-6. Security mode (`strict`, `adaptive`, or `open`).
-7. Workflow learning mode (`none`, `suggest`, `proactive`, or `autonomous`).
-8. Optional capabilities: Telegram, Discord, Email, WhatsApp, voice, vision, image generation, browser automation.
-9. Readiness check before the first agent agent session.
+4. Protected API key capture into `~/.estacoda/.env`.
+5. Security mode (`strict`, `adaptive`, or `open`).
+6. Workflow learning mode (`none`, `suggest`, `proactive`, or `autonomous`).
+7. Optional capabilities: Telegram, voice, vision, image generation, browser automation.
+8. Readiness check before the first agent session.
 
 Credentials are stored locally with restrictive permissions. Advanced users can point EstaCoda at existing environment variables instead of pasting keys during setup.
 

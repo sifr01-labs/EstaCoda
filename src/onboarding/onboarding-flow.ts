@@ -104,7 +104,7 @@ export function defaultOnboardingSteps(): OnboardingStep[] {
     {
       id: "provider",
       title: "Choose a provider",
-      body: "Pick the provider/model you want EstaCoda to use first. You can add fallback providers later.",
+      body: "Pick the provider/model you want EstaCoda to use first.",
       options: [
         { provider: "openai", model: "gpt-4.1-mini", label: "OpenAI GPT-4.1 Mini" },
         { provider: "deepseek", model: "deepseek-chat", label: "DeepSeek Chat" },

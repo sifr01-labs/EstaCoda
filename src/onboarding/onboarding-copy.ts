@@ -275,8 +275,8 @@ export const onboardingCopyEn: OnboardingCopy = {
     title: "Choose interface language",
     body: "This controls setup text, status messages, and CLI labels.",
     options: {
-      en: { label: "English", description: "Use English across the CLI." },
-      ar: { label: "Arabic", description: "Use Arabic across the CLI." }
+      en: { label: "English", description: "Use English for supported setup and interactive chrome." },
+      ar: { label: "Arabic", description: "Use Arabic for supported setup and interactive chrome." }
     }
   },
   interfaceStyle: {
@@ -589,9 +589,8 @@ export const onboardingCopyAr: OnboardingCopy = {
       "اختيار لغة الواجهة وأسلوب التعبير.",
       "منح الثقة لهذا المجلد لأعمال الملفات والطرفية المحلية.",
       "اختيار مزوّد النموذج الأساسي.",
-      "إضافة نموذج احتياطي، أو تخطي ذلك الآن.",
       "تحديد إعدادات الأمان وتعلّم سير العمل.",
-      "إضافة إمكانات اختيارية: Telegram أو الصوت أو الرؤية أو المتصفح، أو تخطيها الآن.",
+      `إضافة إمكانات اختيارية: ${ltr("Telegram")} أو الصوت أو الرؤية أو المتصفح، أو تخطيها الآن.`,
       "التحقق من الإعداد قبل بدء جلسة الوكيل."
     ],
     outro: "سنربط مزوّد نموذج واحداً، ونحفظ مرجع المفتاح، ثم نبدأ أول جلسة للوكيل."
@@ -607,13 +606,13 @@ export const onboardingCopyAr: OnboardingCopy = {
   interfaceStyle: {
     title: "اختر أسلوب التعبير",
     body: "يتحكم هذا في مقدار الحضور اللغوي المحلي في رسائل الحالة.",
-    standard: { label: "قياسي", description: "لغة CLI واضحة ومحايدة." },
+    standard: { label: "قياسي", description: `لغة ${ltr("CLI")} واضحة ومحايدة.` },
     arabicTouch: { label: "لمسة عربية", description: "تضيف هوية عربية خفيفة إلى رسائل الحالة والنشاط." },
     arabicStandard: { label: "قياسي", description: "تسميات عربية واضحة مع نص حالة محايد." }
   },
   workspace: {
-    rootPrompt: (root) => `مجلد العمل [${root}]: `,
-    trustPrompt: `هل تثق بهذا المجلد حتى تتمكن ${ltr("EstaCoda")} من قراءة الملفات وتعديلها وتشغيل أوامر الطرفية الموافق عليها هنا؟ [Y/n]: `,
+    rootPrompt: (root) => `مجلد العمل [${ltr(root)}]: `,
+    trustPrompt: `هل تثق بهذا المجلد حتى تتمكن ${ltr("EstaCoda")} من قراءة الملفات وتعديلها وتشغيل أوامر الطرفية الموافق عليها هنا؟ [${ltr("Y/n")}]: `,
     createFailed: (root, reason) => `تعذر إنشاء أو استخدام مجلد العمل ${ltr(root)}: ${reason}`
   },
   providers: {
@@ -841,7 +840,7 @@ export const onboardingCopyAr: OnboardingCopy = {
       workflow: "تعلّم سير العمل",
       optional: "الإمكانات الاختيارية"
     },
-    noHostedKey: "مزوّد محلي، لا يحتاج مفتاح API مستضافاً",
+    noHostedKey: `مزوّد محلي، لا يحتاج مفتاح ${ltr("API")} مستضافاً`,
     notTrusted: "غير موثوق",
     optionalSkipped: "تم التخطي",
     credentialLine: (envName) => `حفظ في ${ltr("~/.estacoda/.env")} باسم ${ltr(envName)}`,
@@ -874,14 +873,14 @@ export const onboardingCopyAr: OnboardingCopy = {
     ready: "جاهز",
     notTrustedWarning: "مجلد العمل غير موثوق بعد؛ إجراءات الكتابة والطرفية المحلية ستطلب الموافقة أولاً.",
     stateNotWritableWarning: "مجلد الحالة غير قابل للكتابة.",
-    secretModeWarning: "يجب أن تكون صلاحيات مخزن المفاتيح 0600.",
+    secretModeWarning: `يجب أن تكون صلاحيات مخزن المفاتيح ${ltr("0600")}.`,
     readOnlyToolWarning: "لم يكتمل فحص أداة قراءة الملفات.",
-    skippedNoPackageJson: "تم التخطي (لا يوجد package.json)",
+    skippedNoPackageJson: `تم التخطي (لا يوجد ${ltr("package.json")})`,
     warningsTitle: "تحذيرات:",
     nextActionsTitle: "الخطوات التالية:",
     statusReady: "الحالة: جاهز",
     nextReady: `التالي: شغّل ${ltr("estacoda")}، أو اضبط القنوات الاختيارية عبر ${ltr("estacoda telegram setup")} / ${ltr("estacoda browser setup")}.`,
-    fallbackNextAction: "أصلح التحذيرات أعلاه، ثم أعد تشغيل estacoda verify.",
+    fallbackNextAction: `أصلح التحذيرات أعلاه، ثم أعد تشغيل ${ltr("estacoda verify")}.`,
     actions: {
       providerIncomplete: `شغّل ${ltr("estacoda setup")} لاختيار مزوّد ونموذج.`,
       missingApiKey: (envName) => envName === undefined

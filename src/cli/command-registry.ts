@@ -127,7 +127,7 @@ function registerAll(): void {
     name: "model",
     aliases: [],
     category: "Info",
-    description: "Show or switch the active model and provider",
+    description: "Show the active model and provider without changing saved setup state.",
     visibility: "public",
     scope: "both",
   });

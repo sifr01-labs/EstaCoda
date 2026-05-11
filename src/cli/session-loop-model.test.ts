@@ -98,7 +98,8 @@ describe("session-loop /model", () => {
     expect(result).toBe(false);
     const text = outputChunks.join("");
     expect(text).toContain("Session-scoped model switching is not supported");
-    expect(text).toContain("estacoda model set");
+    expect(text).toContain("Persistent `estacoda model set` is deprecated and disabled");
+    expect(text).toContain("estacoda model setup local");
   });
 
   it("/model set does not write provider config", async () => {

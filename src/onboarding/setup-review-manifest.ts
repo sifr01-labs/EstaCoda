@@ -226,8 +226,6 @@ function linesForDraft(draft: SetupDraft): SetupReviewManifestLine[] {
         readOnly: true,
       }));
       break;
-    case "future-model-fallback":
-      break;
   }
 
   return lines;

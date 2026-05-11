@@ -111,16 +111,10 @@ describe("first-run onboarding plan", () => {
 
   it("does not reintroduce the removed backupForMain path", () => {
     const defaultPlan = buildFirstRunOnboardingPlan();
-    const fallbackPlan = buildFirstRunOnboardingPlan({ includeFutureFallbackPrimitive: true });
 
     expect(JSON.stringify(defaultPlan)).not.toContain("backupForMain");
     expect(JSON.stringify(defaultPlan)).not.toContain("backup-provider");
-    expect(fallbackPlan.fallbackSetup).toEqual({
-      kind: "model.fallbacks",
-      status: "future-shared-primitive",
-      copyKey: "onboarding.modelFallbacks.future",
-    });
-    expect(JSON.stringify(fallbackPlan)).not.toContain("backupForMain");
+    expect(JSON.stringify(defaultPlan)).not.toContain("model.fallbacks");
   });
 
   it("keeps the plan layer free of terminal rendering fields", () => {

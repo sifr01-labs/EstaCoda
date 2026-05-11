@@ -28,7 +28,6 @@ export type SetupDraftKind =
   | "optional-capability"
   | "verification"
   | "launch-handoff"
-  | "future-model-fallback"
   | "diagnostic-blocker"
   | "exit";
 

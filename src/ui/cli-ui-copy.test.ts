@@ -66,7 +66,7 @@ describe("chromeCopy — ar", () => {
     const copy = chromeCopy("ar");
     expect(copy.startupVersion).toBe("\u0627\u0644\u0625\u0635\u062f\u0627\u0631");
     expect(copy.startupWorkspaceVerification).toBe("\u062d\u0627\u0644\u0629 \u062a\u062d\u0642\u0642 \u0645\u0633\u0627\u062d\u0629 \u0627\u0644\u0639\u0645\u0644");
-    expect(copy.startupCommandModel).toBe("\u0627\u0639\u0631\u0636 \u0627\u0644\u0646\u0645\u0648\u0630\u062c \u0623\u0648 \u063a\u064a\u0651\u0631\u0647");
+    expect(copy.startupCommandModel).toBe("\u0627\u0639\u0631\u0636 \u0627\u0644\u0646\u0645\u0648\u0630\u062c \u0627\u0644\u0646\u0634\u0637");
     expect(copy.startupPromptHint).toContain(isolateLtr("/help"));
     expect(copy.startupPromptHint).toContain(isolateLtr("/exit"));
   });

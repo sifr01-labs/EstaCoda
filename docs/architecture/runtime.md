@@ -69,7 +69,7 @@ The composition root. Every subsystem is instantiated here with explicit constru
 2. `WorkspaceApprovalController`
 3. `ProviderRegistry`
 4. `CredentialPoolRegistry`
-5. `AuxiliaryProviderRouter`
+5. Auxiliary model route resolver
 6. `BrowserBackend` (mock or real CDP)
 7. `ContextReferenceExpander`
 8. `ProjectContextLoader`

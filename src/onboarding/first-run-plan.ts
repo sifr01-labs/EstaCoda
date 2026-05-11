@@ -156,12 +156,6 @@ export type FirstRunCredentialReference =
       readonly name: string;
     };
 
-export type FirstRunFallbackPrimitive = {
-  readonly kind: "model.fallbacks";
-  readonly status: "future-shared-primitive";
-  readonly copyKey: "onboarding.modelFallbacks.future";
-};
-
 export type FirstRunOnboardingSelections = {
   readonly language?: UiLanguage;
   readonly interfaceFlavor?: UiFlavor;
@@ -192,13 +186,11 @@ export type FirstRunOnboardingPlan = {
   readonly currentStepId: FirstRunOnboardingStepId;
   readonly selections: FirstRunOnboardingSelections;
   readonly steps: readonly FirstRunOnboardingStep[];
-  readonly fallbackSetup?: FirstRunFallbackPrimitive;
 };
 
 export type BuildFirstRunOnboardingPlanOptions = {
   readonly currentStepId?: FirstRunOnboardingStepId;
   readonly selections?: FirstRunOnboardingSelections;
-  readonly includeFutureFallbackPrimitive?: boolean;
 };
 
 export function createFirstRunOnboardingState(
@@ -234,15 +226,6 @@ export function buildFirstRunOnboardingPlan(
     currentStepId: options.currentStepId ?? "welcome",
     selections,
     steps,
-    ...(options.includeFutureFallbackPrimitive === true
-      ? {
-          fallbackSetup: {
-            kind: "model.fallbacks",
-            status: "future-shared-primitive",
-            copyKey: "onboarding.modelFallbacks.future",
-          },
-        }
-      : {}),
   };
 }
 

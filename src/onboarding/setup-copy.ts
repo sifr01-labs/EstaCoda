@@ -39,7 +39,6 @@ const TECHNICAL_TOKENS = [
   "EstaCoda",
   "Telegram",
   "API",
-  "model.fallbacks",
 ] as const;
 
 export const SETUP_COPY_ENTRIES = [
@@ -73,8 +72,6 @@ export const SETUP_COPY_ENTRIES = [
   copy("onboarding.verification.validation.selected", "Choose whether to verify setup.", "اختر هل تريد التحقق من الإعداد.", [], "setup-verification"),
   copy("onboarding.launch", "Launch only after verified-ready, or after explicitly accepting limited mode.", "ابدأ التشغيل فقط بعد جاهزية مؤكدة، أو بعد قبول الوضع المحدود صراحةً.", [], "agent-launch"),
   copy("onboarding.launch.validation.explicit", "Choose whether to launch after setup.", "اختر هل تريد التشغيل بعد الإعداد.", [], "agent-launch"),
-  copy("onboarding.modelFallbacks.future", "Fallback models will use the shared model.fallbacks setup later.", "ستستخدم النماذج الاحتياطية لاحقًا إعداد model.fallbacks المشترك.", [], "provider-selection", false),
-
   copy("setupEditor.summary.configuredReady", "Setup is configured and ready. Review or change the parts worth checking.", "الإعداد مهيأ وجاهز. راجع أو عدّل الأجزاء التي تستحق التدقيق.", [], "config-summary"),
   copy("setupEditor.summary.configuredDegraded", "Setup works with warnings. Review warnings before launch.", "الإعداد يعمل مع تحذيرات. راجع التحذيرات قبل التشغيل.", [], "config-summary"),
   copy("setupEditor.summary.repairFirst", "Repair required setup items before normal editing. No polishing helps a setup that does not work.", "يجب إصلاح عناصر الإعداد المطلوبة قبل التحرير العادي. لا جدوى من تلميع إعداد لا يعمل.", [], "config-repair"),
@@ -100,8 +97,6 @@ export const SETUP_COPY_ENTRIES = [
   copy("setupEditor.actions.repairBrokenConfig", "Inspect broken config before normal editing.", "افحص ملف الإعداد المعطّل قبل التحرير العادي.", [], "config-repair"),
   copy("setupEditor.actions.repairStateDirectory", "Repair state directory permissions.", "أصلح أذونات مجلد الحالة.", [], "config-repair"),
   copy("setupEditor.actions.cancelSetupEditor", "Cancel setup editor. No changes are applied.", "ألغِ محرر الإعداد. لن يتم تطبيق أي تغييرات.", [], "none"),
-  copy("setupEditor.modelFallbacks.future", "Fallback model editing will use model.fallbacks later.", "سيستخدم تحرير النماذج الاحتياطية لاحقًا model.fallbacks.", [], "provider-selection", false),
-
   copy("setupModules.provider.title", "Provider", "المزوّد", [], "provider-selection"),
   copy("setupModules.provider.review", "Provider {providerId} with model {modelId}.", "المزوّد {providerId} مع النموذج {modelId}.", ["{providerId}", "{modelId}"], "provider-selection"),
   copy("setupModules.provider.draft", "Draft provider/model route update.", "مسودة تحديث مسار المزوّد/النموذج.", [], "provider-selection"),

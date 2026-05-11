@@ -368,7 +368,7 @@ describe("runSessionLoop — user prompt rail behavior", () => {
 
     const rendered = outputChunks.join("");
     expect(rendered).toContain("/model");
-    expect(rendered).toContain("Show or switch model");
+    expect(rendered).toContain("Show active model");
     expect(rendered).not.toContain("Show command help");
   });
 

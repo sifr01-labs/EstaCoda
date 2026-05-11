@@ -112,7 +112,7 @@ exports[`Session surfaces — /help renders in plain: help-plain 1`] = `
 "EstaCoda session commands
 - /help: Show command help
 - /status: Show runtime, model, context, trust, memory, and skill status
-- /model: Show or switch the active model and provider
+- /model: Show the active model and provider without changing saved setup state.
 - /switch: Switch to an existing session
 - /search: Search session history
 - /reset: Start a fresh session and refresh the skill/config snapshot
@@ -142,7 +142,7 @@ exports[`Session surfaces — /help renders in standard dark: help-standard dark
 "\x1B[1mEstaCoda session commands\x1B[0m
 • /help: Show command help
 • /status: Show runtime, model, context, trust, memory, and skill status
-• /model: Show or switch the active model and provider
+• /model: Show the active model and provider without changing saved setup state.
 • /switch: Switch to an existing session
 • /search: Search session history
 • /reset: Start a fresh session and refresh the skill/config snapshot
@@ -172,7 +172,7 @@ exports[`Session surfaces — /help renders in standard light: help-standard lig
 "\x1B[1mEstaCoda session commands\x1B[0m
 • /help: Show command help
 • /status: Show runtime, model, context, trust, memory, and skill status
-• /model: Show or switch the active model and provider
+• /model: Show the active model and provider without changing saved setup state.
 • /switch: Switch to an existing session
 • /search: Search session history
 • /reset: Start a fresh session and refresh the skill/config snapshot
@@ -202,7 +202,7 @@ exports[`Session surfaces — /help renders in no color: help-no color 1`] = `
 "EstaCoda session commands
 • /help: Show command help
 • /status: Show runtime, model, context, trust, memory, and skill status
-• /model: Show or switch the active model and provider
+• /model: Show the active model and provider without changing saved setup state.
 • /switch: Switch to an existing session
 • /search: Search session history
 • /reset: Start a fresh session and refresh the skill/config snapshot
@@ -232,7 +232,7 @@ exports[`Session surfaces — /help renders in no Unicode: help-no Unicode 1`] =
 "\x1B[1mEstaCoda session commands\x1B[0m
 - /help: Show command help
 - /status: Show runtime, model, context, trust, memory, and skill status
-- /model: Show or switch the active model and provider
+- /model: Show the active model and provider without changing saved setup state.
 - /switch: Switch to an existing session
 - /search: Search session history
 - /reset: Start a fresh session and refresh the skill/config snapshot
@@ -262,7 +262,7 @@ exports[`Session surfaces — /help renders in narrow width: help-narrow width 1
 "\x1B[1mEstaCoda session commands\x1B[0m
 • /help: Show command help
 • /status: Show runtime, model, context, trust, memory, and skill status
-• /model: Show or switch the active model and provider
+• /model: Show the active model and provider without changing saved setup state.
 • /switch: Switch to an existing session
 • /search: Search session history
 • /reset: Start a fresh session and refresh the skill/config snapshot
@@ -308,7 +308,7 @@ Name                     Description
 -----------------------  ----------------------------------------------------------------------
 /help                    Show command help                                                     
 /status                  Show runtime, model, context, trust, memory, and skill status         
-/model                   Show or switch the active model and provider                          
+/model                   Show the active model and provider without changing saved setup state.
 /switch                  Switch to an existing session                                         
 /search                  Search session history                                                
 /reset                   Start a fresh session and refresh the skill/config snapshot           
@@ -342,7 +342,7 @@ exports[`Session surfaces — slash menu renders in standard dark: slash-menu-st
 \x1B[2m───────────────────────  ──────────────────────────────────────────────────────────────────────\x1B[0m
 /help                    Show command help                                                     
 /status                  Show runtime, model, context, trust, memory, and skill status         
-/model                   Show or switch the active model and provider                          
+/model                   Show the active model and provider without changing saved setup state.
 /switch                  Switch to an existing session                                         
 /search                  Search session history                                                
 /reset                   Start a fresh session and refresh the skill/config snapshot           
@@ -376,7 +376,7 @@ exports[`Session surfaces — slash menu renders in standard light: slash-menu-s
 \x1B[2m───────────────────────  ──────────────────────────────────────────────────────────────────────\x1B[0m
 /help                    Show command help                                                     
 /status                  Show runtime, model, context, trust, memory, and skill status         
-/model                   Show or switch the active model and provider                          
+/model                   Show the active model and provider without changing saved setup state.
 /switch                  Switch to an existing session                                         
 /search                  Search session history                                                
 /reset                   Start a fresh session and refresh the skill/config snapshot           
@@ -410,7 +410,7 @@ Name                     Description
 ───────────────────────  ──────────────────────────────────────────────────────────────────────
 /help                    Show command help                                                     
 /status                  Show runtime, model, context, trust, memory, and skill status         
-/model                   Show or switch the active model and provider                          
+/model                   Show the active model and provider without changing saved setup state.
 /switch                  Switch to an existing session                                         
 /search                  Search session history                                                
 /reset                   Start a fresh session and refresh the skill/config snapshot           
@@ -444,7 +444,7 @@ exports[`Session surfaces — slash menu renders in no Unicode: slash-menu-no Un
 \x1B[2m-----------------------  ----------------------------------------------------------------------\x1B[0m
 /help                    Show command help                                                     
 /status                  Show runtime, model, context, trust, memory, and skill status         
-/model                   Show or switch the active model and provider                          
+/model                   Show the active model and provider without changing saved setup state.
 /switch                  Switch to an existing session                                         
 /search                  Search session history                                                
 /reset                   Start a fresh session and refresh the skill/config snapshot           
@@ -478,7 +478,7 @@ exports[`Session surfaces — slash menu renders in narrow width: slash-menu-nar
 \x1B[2m───────────────────────  ──────────────────────────────────────────────────────────────────────\x1B[0m
 /help                    Show command help                                                     
 /status                  Show runtime, model, context, trust, memory, and skill status         
-/model                   Show or switch the active model and provider                          
+/model                   Show the active model and provider without changing saved setup state.
 /switch                  Switch to an existing session                                         
 /search                  Search session history                                                
 /reset                   Start a fresh session and refresh the skill/config snapshot           
@@ -597,7 +597,7 @@ version status: unknown
 Interactive commands:
   /tools   Browse runtime tools
   /skills  Browse skills
-  /model   Show or switch model
+  /model   Show active model
   /status  Show session status"
 `;
 
@@ -616,7 +616,7 @@ Workspace Trust        :  trusted         \x1B[1mInteractive Commands:\x1B[0m
 Workspace Verification :  verified        
 Workspace Directory    :  /workspace      \x1B[38;2;64;224;208m/tools\x1B[0m   \x1B[2mBrowse runtime tools\x1B[0m
 User Security Mode     :  high            \x1B[38;2;64;224;208m/skills\x1B[0m   \x1B[2mBrowse skills\x1B[0m
-User Skill Autonomy    :  autonomous      \x1B[38;2;64;224;208m/model\x1B[0m   \x1B[2mShow or switch model\x1B[0m
+User Skill Autonomy    :  autonomous      \x1B[38;2;64;224;208m/model\x1B[0m   \x1B[2mShow active model\x1B[0m
 Version Status         :  unknown         \x1B[38;2;64;224;208m/status\x1B[0m   \x1B[2mShow session status\x1B[0m"
 `;
 
@@ -635,7 +635,7 @@ Workspace Trust        :  trusted         \x1B[1mInteractive Commands:\x1B[0m
 Workspace Verification :  verified        
 Workspace Directory    :  /workspace      \x1B[38;2;0;140;149m/tools\x1B[0m   \x1B[2mBrowse runtime tools\x1B[0m
 User Security Mode     :  high            \x1B[38;2;0;140;149m/skills\x1B[0m   \x1B[2mBrowse skills\x1B[0m
-User Skill Autonomy    :  autonomous      \x1B[38;2;0;140;149m/model\x1B[0m   \x1B[2mShow or switch model\x1B[0m
+User Skill Autonomy    :  autonomous      \x1B[38;2;0;140;149m/model\x1B[0m   \x1B[2mShow active model\x1B[0m
 Version Status         :  unknown         \x1B[38;2;0;140;149m/status\x1B[0m   \x1B[2mShow session status\x1B[0m"
 `;
 
@@ -654,7 +654,7 @@ Workspace Trust        :  trusted         Interactive Commands:
 Workspace Verification :  verified        
 Workspace Directory    :  /workspace      /tools   Browse runtime tools
 User Security Mode     :  high            /skills   Browse skills
-User Skill Autonomy    :  autonomous      /model   Show or switch model
+User Skill Autonomy    :  autonomous      /model   Show active model
 Version Status         :  unknown         /status   Show session status"
 `;
 
@@ -673,7 +673,7 @@ Workspace Trust        :  trusted         \x1B[1mInteractive Commands:\x1B[0m
 Workspace Verification :  verified        
 Workspace Directory    :  /workspace      \x1B[38;2;64;224;208m/tools\x1B[0m   \x1B[2mBrowse runtime tools\x1B[0m
 User Security Mode     :  high            \x1B[38;2;64;224;208m/skills\x1B[0m   \x1B[2mBrowse skills\x1B[0m
-User Skill Autonomy    :  autonomous      \x1B[38;2;64;224;208m/model\x1B[0m   \x1B[2mShow or switch model\x1B[0m
+User Skill Autonomy    :  autonomous      \x1B[38;2;64;224;208m/model\x1B[0m   \x1B[2mShow active model\x1B[0m
 Version Status         :  unknown         \x1B[38;2;64;224;208m/status\x1B[0m   \x1B[2mShow session status\x1B[0m"
 `;
 
@@ -699,7 +699,7 @@ Version Status         :  unknown
 
 \x1B[38;2;64;224;208m/tools\x1B[0m   \x1B[2mBrowse runtime tools\x1B[0m
 \x1B[38;2;64;224;208m/skills\x1B[0m   \x1B[2mBrowse skills\x1B[0m
-\x1B[38;2;64;224;208m/model\x1B[0m   \x1B[2mShow or switch model\x1B[0m
+\x1B[38;2;64;224;208m/model\x1B[0m   \x1B[2mShow active model\x1B[0m
 \x1B[38;2;64;224;208m/status\x1B[0m   \x1B[2mShow session status\x1B[0m"
 `;
 

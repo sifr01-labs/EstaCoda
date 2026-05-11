@@ -67,21 +67,9 @@ export type SetupEditorPlan = {
   readonly blockers: readonly string[];
   readonly sections: readonly SetupEditorSection[];
   readonly actions: readonly SetupEditorActionDraft[];
-  readonly fallbackSetup?: {
-    readonly kind: "model.fallbacks";
-    readonly status: "future-shared-primitive";
-    readonly copyKey: "setupEditor.modelFallbacks.future";
-  };
 };
 
-export type BuildSetupEditorPlanOptions = {
-  readonly includeFutureFallbackPrimitive?: boolean;
-};
-
-export function buildSetupEditorPlan(
-  state: SetupEntryState,
-  options: BuildSetupEditorPlanOptions = {}
-): SetupEditorPlan {
+export function buildSetupEditorPlan(state: SetupEntryState): SetupEditorPlan {
   const mode = editorModeFor(state);
   const safeForNormalConfigEditing = state.kind !== "broken-config";
   const sections = safeForNormalConfigEditing
@@ -109,15 +97,6 @@ export function buildSetupEditorPlan(
     blockers: state.blockers,
     sections,
     actions,
-    ...(options.includeFutureFallbackPrimitive === true
-      ? {
-          fallbackSetup: {
-            kind: "model.fallbacks",
-            status: "future-shared-primitive",
-            copyKey: "setupEditor.modelFallbacks.future",
-          },
-        }
-      : {}),
   };
 }
 

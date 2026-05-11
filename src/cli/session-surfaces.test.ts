@@ -251,7 +251,7 @@ describe("Session surfaces — slash completion list", () => {
     const vm = buildSlashCompletionViewModel(fakeRuntime, "/mo");
     const output = renderPlain(vm);
     expect(output).toContain("/model");
-    expect(output).toContain("Show or switch model");
+    expect(output).toContain("Show active model");
     expect(output).not.toContain("/help");
   });
 

@@ -41,7 +41,6 @@ const FIRST_RUN_KEYS = [
   "onboarding.verification.validation.selected",
   "onboarding.launch",
   "onboarding.launch.validation.explicit",
-  "onboarding.modelFallbacks.future",
 ] as const;
 
 const SETUP_EDITOR_KEYS = [
@@ -70,7 +69,6 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.actions.repairBrokenConfig",
   "setupEditor.actions.repairStateDirectory",
   "setupEditor.actions.cancelSetupEditor",
-  "setupEditor.modelFallbacks.future",
 ] as const;
 
 const SETUP_MODULE_KEYS = [
@@ -198,7 +196,6 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupApply.operations.configPatch")).toContain(isolateLtr("{configPath}"));
     expect(resolveSetupCopy("ar", "setupModules.telegram.title")).toBe(isolateLtr("Telegram"));
     expect(resolveSetupCopy("ar", "onboarding.providers.primaryCredential.localProviderSkip")).toContain(isolateLtr("API"));
-    expect(resolveSetupCopy("ar", "setupEditor.modelFallbacks.future")).toContain(isolateLtr("model.fallbacks"));
   });
 
   it("can return raw Arabic source copy without isolation for review tooling", () => {

@@ -683,7 +683,7 @@ describe("PlainRenderer — renderStartupDashboard", () => {
     });
     const out = renderStartupDashboard(vm);
     expect(out).toBe(
-      "EstaCoda\n\nversion: v0.0.1\nmodel: i - unknown\nworkspace trust: unknown\nworkspace verification: unknown\nsecurity: open\n\nInteractive commands:\n  /tools   Browse runtime tools\n  /skills  Browse skills\n  /model   Show or switch model\n  /status  Show session status"
+      "EstaCoda\n\nversion: v0.0.1\nmodel: i - unknown\nworkspace trust: unknown\nworkspace verification: unknown\nsecurity: open\n\nInteractive commands:\n  /tools   Browse runtime tools\n  /skills  Browse skills\n  /model   Show active model\n  /status  Show session status"
     );
   });
 

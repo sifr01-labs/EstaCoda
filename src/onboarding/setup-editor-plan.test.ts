@@ -214,15 +214,11 @@ describe("buildSetupEditorPlan", () => {
     expect(capabilities.actions[0]?.patch?.fields).toEqual(["channels", "voice", "vision", "browser"]);
   });
 
-  it("does not reintroduce backupForMain and only models future fallbacks as model.fallbacks", () => {
-    const plan = buildSetupEditorPlan(state("configured-ready"), { includeFutureFallbackPrimitive: true });
+  it("does not reintroduce backupForMain or future fallback placeholders", () => {
+    const plan = buildSetupEditorPlan(state("configured-ready"));
 
-    expect(plan.fallbackSetup).toEqual({
-      kind: "model.fallbacks",
-      status: "future-shared-primitive",
-      copyKey: "setupEditor.modelFallbacks.future",
-    });
     expect(JSON.stringify(plan)).not.toContain("backupForMain");
+    expect(JSON.stringify(plan)).not.toContain("model.fallbacks");
   });
 
   it("keeps the setup editor plan free of terminal rendering fields", () => {

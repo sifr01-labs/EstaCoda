@@ -66,7 +66,7 @@ graph TB
         PEXEC["ProviderExecutor<br/>Call LLM"]
         PROUT["ProviderRouter<br/>Route to Provider"]
         OPEAI["OpenAICompatibleProvider<br/>Adapter"]
-        AUXP["AuxiliaryProviderRouter<br/>Backup Routing"]
+        AUXP["Auxiliary Model Resolver<br/>Task Routes"]
         CPOOL["CredentialPool<br/>Key Management"]
     end
 
