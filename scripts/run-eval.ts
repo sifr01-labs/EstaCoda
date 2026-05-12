@@ -1,5 +1,8 @@
 import { runEvalCases } from "../src/eval/eval-runner.js";
 import { defaultEvalFixtures } from "../src/eval/fixtures/index.js";
+import { installIsolatedStateHome } from "../src/test/state-home.js";
+
+installIsolatedStateHome("estacoda-eval-home-");
 
 const report = await runEvalCases(defaultEvalFixtures);
 

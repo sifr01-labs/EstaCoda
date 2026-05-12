@@ -1,5 +1,6 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 
 type EvalTask = {
   id: string;
@@ -26,7 +27,9 @@ const commandsPath = join(runRoot, "commands.md");
 const manifestPath = join(runRoot, "manifest.json");
 const resultsPath = join(runRoot, "results.json");
 
-const taskFiles = Array.from(new Bun.Glob("*.json").scanSync({ cwd: tasksDir })).sort();
+const taskFiles = (await readdir(tasksDir))
+  .filter((file) => file.endsWith(".json"))
+  .sort();
 const tasks = await Promise.all(taskFiles.map(async (file) => parseTask(await readFile(join(tasksDir, file), "utf8"), file)));
 
 await mkdir(logsDir, { recursive: true });
@@ -76,16 +79,16 @@ console.log([
 ].join("\n"));
 
 async function git(args: string): Promise<string> {
-  const result = Bun.spawnSync(["git", "-C", workspaceRoot, ...args.split(" ")], {
-    stdout: "pipe",
-    stderr: "pipe"
+  const result = spawnSync("git", ["-C", workspaceRoot, ...args.split(" ")], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"]
   });
 
-  if (result.exitCode !== 0) {
-    throw new Error(`git ${args} failed: ${new TextDecoder().decode(result.stderr).trim()}`);
+  if (result.status !== 0) {
+    throw new Error(`git ${args} failed: ${(result.stderr ?? "").trim()}`);
   }
 
-  return new TextDecoder().decode(result.stdout).trim();
+  return (result.stdout ?? "").trim();
 }
 
 function parseTask(raw: string, file: string): EvalTask {
@@ -179,9 +182,9 @@ function renderCommands(
     "",
     "```bash",
     `cd ${environment.workspaceRoot}`,
-    "bun run typecheck",
-    "bun run smoke",
-    "bun run dev -- doctor --live",
+    "pnpm run typecheck",
+    "pnpm run smoke",
+    "pnpm run dev -- doctor --live",
     "```",
     ""
   ];

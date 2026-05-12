@@ -235,7 +235,7 @@ export class SkillProposalService {
       hypothesis: options.lesson,
       predictedImpact: options.candidateImprovement,
       riskLevel: options.sourceTrust === "developer" || options.sourceTrust === "runtime_internal" ? "low" : "medium",
-      evalCommand: `bun run smoke --tag skills`,
+      evalCommand: `pnpm run smoke -- --tag skills`,
       constraintGates: ["typecheck", "smoke"],
       rollbackPlan: `Revert skill file using skill.rollback or restore from snapshot.`
     });
@@ -267,7 +267,7 @@ export class SkillProposalService {
       hypothesis: options.reason,
       predictedImpact: `Apply ${options.patch.type} to skill ${options.skillName}`,
       riskLevel,
-      evalCommand: `bun run smoke --tag skills`,
+      evalCommand: `pnpm run smoke -- --tag skills`,
       constraintGates: ["typecheck", "smoke"],
       rollbackPlan: `Revert skill file using skill.rollback or restore from snapshot.`
     });
@@ -296,7 +296,7 @@ export class SkillProposalService {
       hypothesis: options.hypothesis,
       predictedImpact: options.predictedImpact,
       riskLevel: "low",
-      evalCommand: `bun run smoke`,
+      evalCommand: `pnpm run smoke`,
       constraintGates: ["typecheck", "smoke"],
       rollbackPlan: `Revert tool description to previous version via manifest store.`
     });
@@ -326,7 +326,7 @@ export class SkillProposalService {
       hypothesis: options.hypothesis,
       predictedImpact: options.predictedImpact,
       riskLevel: "medium",
-      evalCommand: `bun run smoke --tag skills`,
+      evalCommand: `pnpm run smoke -- --tag skills`,
       constraintGates: ["typecheck", "smoke"],
       rollbackPlan: `Revert routing metadata to previous version via manifest store.`
     });

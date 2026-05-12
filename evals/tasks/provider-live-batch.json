@@ -9,7 +9,7 @@
     "Relevant credentials exported"
   ],
   "steps": [
-    "Run `bun run provider:hardening` from a shell where the provider credentials are already exported.",
+    "Run `pnpm run provider:hardening` from a shell where the provider credentials are already exported.",
     "Review `.estacoda/provider-hardening-runs/<timestamp>/summary.json` and per-provider logs.",
     "Record latency, correctness, and any tool-call quirks in the results file."
   ],

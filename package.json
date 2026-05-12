@@ -25,6 +25,7 @@
     "alpha:harness:bun": "bun scripts/internal-alpha.ts",
     "eval:substrate": "node --import tsx scripts/eval-substrate.ts",
     "eval:substrate:bun": "bun scripts/eval-substrate.ts",
+    "eval:fixtures": "node --import tsx scripts/run-eval-fixtures.ts",
     "provider:hardening": "node --import tsx scripts/provider-hardening.ts",
     "provider:hardening:bun": "bun scripts/provider-hardening.ts"
   },

@@ -10,7 +10,7 @@
     "Provider credentials exported in the same shell"
   ],
   "steps": [
-    "Run `bun run dev` in the workspace.",
+    "Run `pnpm run dev` in the workspace.",
     "Use `/trust` if needed.",
     "Send the suggested prompt.",
     "Confirm `file.write` and `file.read` were used and the response matches the file contents."

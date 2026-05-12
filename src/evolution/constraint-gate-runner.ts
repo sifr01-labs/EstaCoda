@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { join } from "node:path";
 
 export type GateResult = {
   gate: string;
@@ -12,13 +13,15 @@ export type GateResult = {
 };
 
 export const ALLOWED_GATES: Readonly<Record<string, readonly string[]>> = {
-  "bun run typecheck": ["bun", "run", "typecheck"],
-  "bun test": ["bun", "test"],
-  "bun run smoke": ["bun", "run", "smoke"],
-  "bun run scripts/run-eval-fixtures.ts": ["bun", "run", "scripts/run-eval-fixtures.ts"],
+  "pnpm run typecheck": ["pnpm", "run", "typecheck"],
+  "pnpm run test": ["pnpm", "run", "test"],
+  "pnpm run smoke": ["pnpm", "run", "smoke"],
+  "pnpm run eval:fixtures": ["pnpm", "run", "eval:fixtures"],
 };
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+const INHERITED_COREPACK_HOME = process.env.COREPACK_HOME ??
+  (process.env.HOME === undefined ? undefined : join(process.env.HOME, ".cache", "node", "corepack"));
 
 export function normalizeCommand(value: string): string {
   return value.trim().replace(/\s+/gu, " ");
@@ -66,6 +69,9 @@ function runSingleGate(
 
     const child = spawn(argv[0], argv.slice(1), {
       cwd: options.cwd,
+      env: INHERITED_COREPACK_HOME === undefined
+        ? process.env
+        : { ...process.env, COREPACK_HOME: process.env.COREPACK_HOME ?? INHERITED_COREPACK_HOME },
       stdio: ["ignore", "pipe", "pipe"],
     });
 

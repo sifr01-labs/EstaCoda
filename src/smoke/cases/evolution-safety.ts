@@ -45,8 +45,8 @@ export const evolution_safety_case: SmokeCase = {
         filesChanged: [],
         evidence: { traces: [], failures: [], evalCases: [] },
         rollbackPlan: "none",
-        evalCommand: "bun run typecheck",
-        constraintGates: ["bun run typecheck"]
+        evalCommand: "pnpm run typecheck",
+        constraintGates: ["pnpm run typecheck"]
       });
       await manifestStore.updateStatus(runtimeManifest.id, "approved");
       const runtimeResult = await evolutionCommand(cliOptions(tempHome), ["promote", runtimeManifest.id]);
@@ -63,7 +63,7 @@ export const evolution_safety_case: SmokeCase = {
         filesChanged: [],
         evidence: { traces: [], failures: [], evalCases: [] },
         rollbackPlan: "none",
-        evalCommand: "bun run typecheck",
+        evalCommand: "pnpm run typecheck",
         constraintGates: ["cat /etc/passwd"]
       });
       const disallowedResult = await evolutionCommand(cliOptions(tempHome), ["test", disallowedManifest.id]);
@@ -97,8 +97,8 @@ export const evolution_safety_case: SmokeCase = {
         filesChanged: [],
         evidence: { traces: [], failures: [], evalCases: [] },
         rollbackPlan: "restore previous version",
-        evalCommand: "bun run typecheck",
-        constraintGates: ["bun run typecheck"]
+        evalCommand: "pnpm run typecheck",
+        constraintGates: ["pnpm run typecheck"]
       });
       const proposal = await skillEvolutionStore.proposePatch({
         skillName: "missing-snapshot-skill",
@@ -126,8 +126,8 @@ export const evolution_safety_case: SmokeCase = {
         filesChanged: [],
         evidence: { traces: [], failures: [], evalCases: [] },
         rollbackPlan: "none",
-        evalCommand: "bun run typecheck",
-        constraintGates: ["bun run typecheck"]
+        evalCommand: "pnpm run typecheck",
+        constraintGates: ["pnpm run typecheck"]
       });
       await manifestStore.updateStatus(toolDescManifest.id, "approved");
       const toolDescResult = await evolutionCommand(cliOptions(tempHome), ["promote", toolDescManifest.id]);

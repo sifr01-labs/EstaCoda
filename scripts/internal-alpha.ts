@@ -1,4 +1,5 @@
 import { chmod, mkdir, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
 
 const workspaceRoot = process.cwd();
@@ -45,16 +46,16 @@ console.log([
 ].join("\n"));
 
 async function git(args: string): Promise<string> {
-  const result = Bun.spawnSync(["git", "-C", workspaceRoot, ...args.split(" ")], {
-    stdout: "pipe",
-    stderr: "pipe"
+  const result = spawnSync("git", ["-C", workspaceRoot, ...args.split(" ")], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"]
   });
 
-  if (result.exitCode !== 0) {
-    throw new Error(`git ${args} failed: ${new TextDecoder().decode(result.stderr).trim()}`);
+  if (result.status !== 0) {
+    throw new Error(`git ${args} failed: ${(result.stderr ?? "").trim()}`);
   }
 
-  return new TextDecoder().decode(result.stdout).trim();
+  return (result.stdout ?? "").trim();
 }
 
 function renderNotes(input: {
@@ -75,7 +76,7 @@ function renderNotes(input: {
     "",
     "## Checklist",
     "",
-    "- [ ] Preflight: `bun run typecheck`, `bun run smoke`, `bun run dev -- doctor --live`",
+    "- [ ] Preflight: `pnpm run typecheck`, `pnpm run smoke`, `pnpm run dev -- doctor --live`",
     "- [ ] CLI session with file edits",
     "- [ ] Selected skill execution",
     "- [ ] Approval-gated terminal task",
@@ -130,10 +131,10 @@ function renderCommands(input: {
     "",
     "```bash",
     `cd ${root}`,
-    "bun run typecheck",
-    "bun run smoke",
-    "bun run dev -- doctor --live",
-    "bun run dev -- gateway status",
+    "pnpm run typecheck",
+    "pnpm run smoke",
+    "pnpm run dev -- doctor --live",
+    "pnpm run dev -- gateway status",
     "```",
     "",
     "## CLI Session With File Edits",
@@ -141,7 +142,7 @@ function renderCommands(input: {
     "```bash",
     `cd ${root}`,
     `script ${logFile}`,
-    "bun run dev",
+    "pnpm run dev",
     "# inside session:",
     "/trust",
     "Create a file called alpha-proof.md with one sentence proving EstaCoda can edit files through tools, then read it back and confirm the exact contents.",
@@ -154,14 +155,14 @@ function renderCommands(input: {
     "",
     "```bash",
     `cd ${root}`,
-    "bun run dev -- --trust \"/ascii-video Tell me what inputs you need to generate a short ASCII logo animation for EstaCoda.\"",
+    "pnpm run dev -- --trust \"/ascii-video Tell me what inputs you need to generate a short ASCII logo animation for EstaCoda.\"",
     "```",
     "",
     "## Approval-Gated Terminal Task",
     "",
     "```bash",
     `cd ${root}`,
-    "bun run dev",
+    "pnpm run dev",
     "# inside session:",
     "Use terminal.run to list the current directory and create a temp folder named alpha-gated-check, then tell me what approval was requested and why.",
     "```",
@@ -170,8 +171,8 @@ function renderCommands(input: {
     "",
     "```bash",
     `cd ${root}`,
-    "bun run dev -- gateway status",
-    "bun run dev -- gateway start --telegram",
+    "pnpm run dev -- gateway status",
+    "pnpm run dev -- gateway start --telegram",
     "# then from Telegram:",
     "# 1. send a plain text task",
     "# 2. send an image or document",
@@ -184,8 +185,8 @@ function renderCommands(input: {
     "",
     "```bash",
     `cd ${root}`,
-    "bun run dev -- doctor --live",
-    "bun run dev -- --trust \"Say hello as EstaCoda and summarize what you can do in one short paragraph.\"",
+    "pnpm run dev -- doctor --live",
+    "pnpm run dev -- --trust \"Say hello as EstaCoda and summarize what you can do in one short paragraph.\"",
     "```",
     "",
     "## Failure Capture",

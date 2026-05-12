@@ -20,7 +20,7 @@ export type EvolutionChangeManifest = {
   hypothesis: string;
   predictedImpact: string;
   riskLevel: "low" | "medium" | "high";
-  evalCommand: string;       // e.g., "bun run eval:run -- --task ..."
+  evalCommand: string;       // e.g., "pnpm run eval:run -- --task ..."
   constraintGates: string[]; // e.g., ["typecheck", "smoke", "golden-flows"]
   rollbackPlan: string;      // description or command
   status:

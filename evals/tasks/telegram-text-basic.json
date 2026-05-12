@@ -7,7 +7,7 @@
   "prompt": "Read the files in the current workspace and tell me what kind of project this is.",
   "prerequisites": [
     "Telegram bot token exported in the same shell as the gateway",
-    "Gateway started with `bun run dev -- gateway start --telegram`"
+    "Gateway started with `pnpm run dev -- gateway start --telegram`"
   ],
   "steps": [
     "Send the suggested prompt to the Telegram bot.",

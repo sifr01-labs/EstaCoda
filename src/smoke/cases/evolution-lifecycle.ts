@@ -76,8 +76,8 @@ export const evolution_lifecycle_case: SmokeCase = {
         filesChanged: [join(skillDir, "SKILL.md")],
         evidence: { traces: [], failures: [], evalCases: [] },
         rollbackPlan: "restore previous version",
-        evalCommand: "bun run typecheck",
-        constraintGates: ["bun run typecheck"]
+        evalCommand: "pnpm run typecheck",
+        constraintGates: ["pnpm run typecheck"]
       });
 
       const proposal = await skillEvolutionStore.proposePatch({
