@@ -58,7 +58,9 @@ import { runCronCommand } from "../cron/cron-command.js";
 import { createRuntimeCronRunner, tickCron } from "../cron/cron-runner.js";
 import { CronStore } from "../cron/cron-store.js";
 import { CronExecutionStore } from "../cron/cron-execution-store.js";
-import { openDefaultSQLiteDatabase } from "../storage/factory.js";
+import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
+import { createSQLiteSessionDB } from "../session/session-setup.js";
+import { resolveStateHome } from "../config/state-home.js";
 import { runSessionsCommand } from "./session-commands.js";
 import { runHandoffCommand } from "./handoff-commands.js";
 import { createFileCronJobLock } from "../cron/cron-lock.js";
@@ -1914,48 +1916,64 @@ async function security(options: CliOptions, args: string[]): Promise<CliCommand
 
 async function cron(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const store = new CronStore({ homeDir: options.homeDir });
-  const executionStore = tryCreateExecutionStore(options);
-  const result = await runCronCommand({
-    args,
-    store,
-    executionStore: executionStore ?? undefined,
-    tick: options.runtime === undefined
-      ? undefined
-      : async () => {
-        const lockDir = join(options.homeDir ?? ".estacoda", "cron", "locks");
-        const results = await tickCron({
-          store,
-          runner: createRuntimeCronRunner({
-            runtimeFactory: async () => options.runtime!,
-            wrapResponse: true,
-            disposeRuntime: false,
-            workspaceRoot: options.workspaceRoot
-          }),
-          executionStore: executionStore ?? undefined,
-          jobLock: createFileCronJobLock({ lockDir }),
-          now: new Date()
-        });
-        return results.length === 0
-          ? "Cron tick complete. No due jobs."
-          : [
-              `Cron tick complete. Ran ${results.length} job(s).`,
-              ...results.map((entry) => `${entry.job.id}: ${entry.ok ? "succeeded" : "failed"}`)
-            ].join("\n");
-      }
-  });
+  const executionStoreHandle = await tryCreateExecutionStore(options);
+  const executionStore = executionStoreHandle?.store;
+  try {
+    const result = await runCronCommand({
+      args,
+      store,
+      executionStore: executionStore ?? undefined,
+      tick: options.runtime === undefined
+        ? undefined
+        : async () => {
+          const stateHome = resolveStateHome({ homeDir: options.homeDir });
+          const lockDir = join(stateHome.stateRoot, "cron", "locks");
+          const results = await tickCron({
+            store,
+            runner: createRuntimeCronRunner({
+              runtimeFactory: async () => options.runtime!,
+              wrapResponse: true,
+              disposeRuntime: false,
+              workspaceRoot: options.workspaceRoot
+            }),
+            executionStore: executionStore ?? undefined,
+            jobLock: createFileCronJobLock({ lockDir }),
+            now: new Date()
+          });
+          return results.length === 0
+            ? "Cron tick complete. No due jobs."
+            : [
+                `Cron tick complete. Ran ${results.length} job(s).`,
+                ...results.map((entry) => `${entry.job.id}: ${entry.ok ? "succeeded" : "failed"}`)
+              ].join("\n");
+        }
+    });
 
-  return {
-    handled: true,
-    exitCode: result.ok ? 0 : 1,
-    output: result.output
-  };
+    return {
+      handled: true,
+      exitCode: result.ok ? 0 : 1,
+      output: result.output
+    };
+  } finally {
+    executionStoreHandle?.close();
+  }
 }
 
-function tryCreateExecutionStore(options: CliOptions): CronExecutionStore | undefined {
+async function tryCreateExecutionStore(options: CliOptions): Promise<{ store: CronExecutionStore; close: () => void } | undefined> {
   try {
-    const dbPath = join(options.homeDir ?? ".estacoda", "sessions.sqlite");
-    const db = openDefaultSQLiteDatabase({ path: dbPath });
-    return new CronExecutionStore({ db });
+    if (options.runtime?.sessionDb instanceof SQLiteSessionDB) {
+      return {
+        store: new CronExecutionStore({ db: options.runtime.sessionDb.db }),
+        close: () => undefined
+      };
+    }
+
+    const stateHome = resolveStateHome({ homeDir: options.homeDir });
+    const db = await createSQLiteSessionDB({ path: stateHome.sessionsSqlitePath });
+    return {
+      store: new CronExecutionStore({ db: db.db }),
+      close: () => db.close()
+    };
   } catch {
     return undefined;
   }

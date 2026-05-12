@@ -16,6 +16,7 @@ import { createRuntime, type Runtime, type RuntimeOptions } from "../runtime/cre
 import { RuntimeCache } from "../runtime/runtime-cache.js";
 import { computeRuntimeFingerprint, stableJsonHash, type RuntimeFingerprint } from "../runtime/runtime-fingerprint.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
+import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { kemetBlueTheme } from "../theme/kemet-blue.js";
 import { ChannelApprovalStore } from "../channels/channel-approval-store.js";
 import { ChannelGateway, telegramGatewayCommands } from "../channels/channel-gateway.js";
@@ -501,6 +502,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       sessionId: input.sessionId,
       profileId: "default",
       sessionDb: db,
+      closeSessionDbOnDispose: false,
       sessionMetadata: input.metadata,
       externalSkillRoots: latestConfig.skills.externalDirs,
       skillAutonomy: latestConfig.skills.autonomy,
@@ -583,7 +585,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     const approvalStorePath = join(stateRoot, "channel-approvals.json");
     const sessionContextPath = join(stateRoot, "channel-sessions.json");
     await mkdir(dirname(sessionDbPath), { recursive: true });
-    const sessionDb = new SQLiteSessionDB({ path: sessionDbPath });
+    const sessionDb = await createSQLiteSessionDB({ path: sessionDbPath });
     state.sessionDb = sessionDb;
 
     const activeTurnRegistry = new ActiveTurnRegistry({

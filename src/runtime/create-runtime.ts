@@ -94,6 +94,7 @@ export type RuntimeOptions = {
   profileId?: string;
   sessionId?: string;
   sessionDb?: SessionDB;
+  closeSessionDbOnDispose?: boolean;
   workspaceRoot?: string;
   localSkillsRoot?: string;
   externalSkillRoots?: string[];
@@ -223,6 +224,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const profileId = options.profileId ?? "default";
   const sessionId = options.sessionId ?? "scaffold";
   const sessionDb = options.sessionDb ?? new InMemorySessionDB();
+  const closeSessionDbOnDispose = options.closeSessionDbOnDispose ?? true;
   const workspaceRoot = options.workspaceRoot ?? process.cwd();
   const localSkillsRoot = options.localSkillsRoot ?? `${options.homeDir ?? process.env.HOME ?? ""}/.estacoda/skills`;
   const trustStore = options.trustStore ?? new WorkspaceTrustStore({ path: options.trustStorePath });
@@ -919,8 +921,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
       disposed = true;
       await Promise.all(loadedMcpServers.map((server) => server.stop().catch(() => undefined)));
-      const closeSessionDb = (sessionDb as { close?: () => void | Promise<void> }).close;
-      if (typeof closeSessionDb === "function") {
+      const closeSessionDb = closeSessionDbOnDispose
+        ? (sessionDb as { close?: () => void | Promise<void> }).close
+        : undefined;
+      if (closeSessionDbOnDispose && typeof closeSessionDb === "function") {
         await closeSessionDb.call(sessionDb);
       }
     },

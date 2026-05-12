@@ -1,6 +1,7 @@
 import { join, dirname } from "node:path";
 import { access, constants, readFile, writeFile, mkdir, rm, rename, stat } from "node:fs/promises";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
+import { resolveStateHome } from "../config/state-home.js";
 import { getTelegramGatewayDiagnostics } from "../channels/gateway-runner.js";
 import { getWhatsAppGatewayDiagnostics } from "../channels/whatsapp-diagnostics.js";
 import { CronStore } from "../cron/cron-store.js";
@@ -72,15 +73,17 @@ export async function runGatewayStatus(
 ): Promise<{ ok: boolean; output: string }> {
   const config = await loadRuntimeConfig(options);
   const homeDir = options.homeDir ?? process.env.HOME ?? ".estacoda";
-  const stateRoot = join(homeDir, ".estacoda");
+  const stateHome = resolveStateHome({ homeDir });
+  const stateRoot = stateHome.stateRoot;
 
   const cronStore = new CronStore({ homeDir });
   const cronJobs = await cronStore.list();
 
   let executionStore: CronExecutionStore | undefined;
+  let executionDb: { close(): void } | undefined;
   try {
-    const dbPath = join(stateRoot, "sessions.sqlite");
-    const db = openDefaultSQLiteDatabase({ path: dbPath });
+    const db = openDefaultSQLiteDatabase({ path: stateHome.sessionsSqlitePath });
+    executionDb = db;
     executionStore = new CronExecutionStore({ db });
   } catch { /* ignore */ }
 
@@ -90,6 +93,7 @@ export async function runGatewayStatus(
       recentCronFailures = await executionStore.recentFailures(5);
     } catch { /* table may not exist */ }
   }
+  try { executionDb?.close(); } catch { /* ignore */ }
 
   const deliveryRouter = new DeliveryRouter({ homeDir });
   const recentDeliveryErrors = await deliveryRouter.getRecentErrors(5);

@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, relative, resolve, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { loadUserRuntimeConfig, loadTrustedRuntimeConfig } from "../config/runtime-config.js";
 import { resolveStateHome } from "../config/state-home.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
@@ -122,7 +123,7 @@ export class AcpServer {
 
   constructor(options: AcpServerOptions) {
     this.#workspaceRoot = options.workspaceRoot;
-    this.#homeDir = options.homeDir ?? join(homedir(), ".estacoda");
+    this.#homeDir = options.homeDir ?? homedir();
     this.#userConfigPath = options.userConfigPath;
     this.#projectConfigPath = options.projectConfigPath;
     this.#input = options.input ?? process.stdin;
@@ -133,15 +134,17 @@ export class AcpServer {
       this.#sessionDb = options.sessionDb;
       this.#closeSessionDb = false;
     } else {
+      const stateHome = resolveStateHome({ homeDir: this.#homeDir });
+      prepareSessionDbFileSync(stateHome.sessionsSqlitePath);
       this.#sessionDb = new SQLiteSessionDB({
-        path: join(this.#homeDir, "sessions.sqlite")
+        path: stateHome.sessionsSqlitePath
       });
       this.#closeSessionDb = true;
     }
   }
 
   async run(): Promise<void> {
-    await mkdir(this.#homeDir, { recursive: true });
+    await mkdir(resolveStateHome({ homeDir: this.#homeDir }).stateRoot, { recursive: true });
     this.#input.setEncoding?.("utf8");
 
     await new Promise<void>((resolve) => {
@@ -776,6 +779,7 @@ export class AcpServer {
       workspaceRoot: options.workspaceRoot,
       sessionId: options.sessionId,
       sessionDb: this.#sessionDb,
+      closeSessionDbOnDispose: false,
       externalSkillRoots: config.skills.externalDirs,
       skillAutonomy: config.skills.autonomy,
       skillConfig: config.skills.config,
@@ -1297,6 +1301,19 @@ export class AcpServer {
 
   #write(message: JsonRpcSuccess | JsonRpcError | JsonRpcNotification): void {
     this.#output.write(`${JSON.stringify(message)}\n`, "utf8");
+  }
+}
+
+function prepareSessionDbFileSync(path: string): void {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  if (!existsSync(path)) {
+    writeFileSync(path, "", { mode: 0o600 });
+  } else {
+    try {
+      chmodSync(path, 0o600);
+    } catch {
+      // Best-effort permission tightening, matching session setup behavior.
+    }
   }
 }
 

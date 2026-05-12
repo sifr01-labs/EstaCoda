@@ -225,4 +225,16 @@ describe("createRuntime SQLite session lifecycle", () => {
     await expect(sessionDb.listSessions()).rejects.toThrow(/closed|open/iu);
     await expect(runtime.dispose()).resolves.toBeUndefined();
   });
+
+  it("leaves shared SQLite session DB open when disposal ownership is disabled", async () => {
+    const options = await minimalRuntimeOptions();
+    const sessionDb = await createSQLiteSessionDB({
+      path: join(options.workspaceRoot, ".estacoda", "sessions.sqlite")
+    });
+    const runtime = await createRuntime({ ...options, sessionDb, closeSessionDbOnDispose: false });
+
+    await runtime.dispose();
+    await expect(sessionDb.listSessions()).resolves.toEqual(expect.any(Array));
+    sessionDb.close();
+  });
 });

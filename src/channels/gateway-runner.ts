@@ -1,4 +1,5 @@
 import { loadRuntimeConfig } from "../config/runtime-config.js";
+import { resolveStateHome } from "../config/state-home.js";
 import type { ChannelAuthPolicies } from "../contracts/channel.js";
 import { getWhatsAppGatewayDiagnostics } from "./whatsapp-diagnostics.js";
 
@@ -54,9 +55,10 @@ export type TelegramGatewayDiagnostics = {
 export async function getTelegramGatewayDiagnostics(options: GatewayRunOptions): Promise<TelegramGatewayDiagnostics> {
   const config = await loadRuntimeConfig(options);
   const telegram = config.channels.telegram;
-  const stateRoot = `${options.homeDir ?? process.env.HOME ?? options.workspaceRoot}/.estacoda`;
-  const sessionDbPath = `${stateRoot}/sessions.sqlite`;
-  const mediaRoot = `${stateRoot}/channel-media`;
+  const stateHome = resolveStateHome({ homeDir: options.homeDir ?? process.env.HOME ?? options.workspaceRoot });
+  const stateRoot = stateHome.stateRoot;
+  const sessionDbPath = stateHome.sessionsSqlitePath;
+  const mediaRoot = stateHome.channelMediaPath;
   const approvalStorePath = `${stateRoot}/channel-approvals.json`;
   const sessionContextPath = `${stateRoot}/channel-sessions.json`;
   const authPolicy = telegramAuthPolicy(telegram.allowedUserIds ?? [], telegram.allowedChatIds ?? []);

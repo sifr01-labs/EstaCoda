@@ -141,6 +141,16 @@ describe("gateway commands", () => {
       expect(result.output).toContain("Jobs: 1 total, 1 active");
     });
 
+    it("handles unreadable cron execution DB gracefully", async () => {
+      await mkdir(join(stateRoot, "sessions.sqlite"), { recursive: true });
+
+      const result = await runGatewayStatus({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      expect(result.ok).toBe(true);
+      expect(result.output).toContain("EstaCoda gateway status");
+      expect(result.output).toContain("Recent cron failures");
+      expect(result.output).toContain("- none");
+    });
+
     it("shows recent cron failures", async () => {
       const dbPath = join(stateRoot, "sessions.sqlite");
       const db = openDefaultSQLiteDatabase({ path: dbPath });
