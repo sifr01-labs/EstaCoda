@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { launchInteractiveSession } from "./interactive-launcher.js";
 import { runCliCommand } from "./cli.js";
-import { loadRuntimeConfig, setupProviderConfig, setupUiConfig } from "../config/runtime-config.js";
-import type { Prompt } from "../onboarding/interactive-onboarding.js";
-import type { SelectPromptInput } from "./interactive-select.js";
+import { setupProviderConfig, setupUiConfig } from "../config/runtime-config.js";
+import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
+import type { Prompt } from "./readline-prompt.js";
 
 describe("launchInteractiveSession", () => {
   const originalIsTTY = process.stdin.isTTY;
@@ -58,28 +58,47 @@ describe("launchInteractiveSession", () => {
     expect(result.locale).toBe("en");
   });
 
-  it("returns Arabic launch locale after first-run onboarding selects Arabic", async () => {
+  it("offers canonical setup command instead of running setup from bare launch", async () => {
     Object.defineProperty(process.stdin, "isTTY", {
       value: true,
       configurable: true
     });
     const workspaceRoot = join(tempDir, "workspace");
-    const prompt = makeOnboardingPrompt({ language: "ar", provider: "local" });
+    await mkdir(workspaceRoot, { recursive: true });
 
     const result = await launchInteractiveSession({
       workspaceRoot,
       homeDir: tempDir,
-      prompt
+      prompt: confirmationPrompt("y")
     });
-    const config = await loadRuntimeConfig({ workspaceRoot, homeDir: tempDir });
-    const rawConfig = await readFile(join(tempDir, ".estacoda", "config.json"), "utf8");
 
-    expect(result.launched).toBe(true);
-    expect(result.onboardingTriggered).toBe(true);
-    expect(result.locale).toBe("ar");
-    expect(config.ui.language).toBe("ar");
-    expect(JSON.parse(rawConfig).ui.language).toBe("ar");
-    expect(result.output).toContain("اكتمل الإعداد.");
+    expect(result.launched).toBe(false);
+    expect(result.onboardingTriggered).toBe(false);
+    expect(result.exitCode).toBe(0);
+    expect(result.locale).toBe("en");
+    expect(result.output).toContain("estacoda setup --interactive");
+  });
+
+  it("routes broken config to setup instead of throwing during launch locale loading", async () => {
+    Object.defineProperty(process.stdin, "isTTY", {
+      value: true,
+      configurable: true
+    });
+    const workspaceRoot = join(tempDir, "workspace");
+    await mkdir(join(tempDir, ".estacoda"), { recursive: true });
+    await mkdir(workspaceRoot, { recursive: true });
+    await writeFile(join(tempDir, ".estacoda", "config.json"), "{not-json", "utf8");
+
+    const result = await launchInteractiveSession({
+      workspaceRoot,
+      homeDir: tempDir,
+      prompt: confirmationPrompt("y")
+    });
+
+    expect(result.launched).toBe(false);
+    expect(result.onboardingTriggered).toBe(false);
+    expect(result.locale).toBe("en");
+    expect(result.output).toContain("estacoda setup --interactive");
   });
 
   it("returns persisted Arabic locale on later normal launches", async () => {
@@ -107,8 +126,9 @@ describe("launchInteractiveSession", () => {
         language: "ar"
       }
     });
+    await trustWorkspace(workspaceRoot, tempDir);
 
-    const result = await launchInteractiveSession({ workspaceRoot, homeDir: tempDir });
+    const result = await launchInteractiveSession({ workspaceRoot, homeDir: tempDir, prompt: confirmationPrompt("y") });
 
     expect(result.launched).toBe(true);
     expect(result.onboardingTriggered).toBe(false);
@@ -140,46 +160,56 @@ describe("launchInteractiveSession", () => {
         language: "ar"
       }
     });
+    await trustWorkspace(workspaceRoot, tempDir);
 
     const settings = await runCliCommand({
       argv: ["settings", "ui", "--language", "en"],
       workspaceRoot,
       homeDir: tempDir
     });
-    const result = await launchInteractiveSession({ workspaceRoot, homeDir: tempDir });
+    const result = await launchInteractiveSession({ workspaceRoot, homeDir: tempDir, prompt: confirmationPrompt("y") });
 
     expect(settings.exitCode).toBe(0);
     expect(settings.output).toContain("UI language: en.");
     expect(result.launched).toBe(true);
     expect(result.locale).toBe("en");
   });
+
+  it("does not launch a configured provider in an untrusted workspace", async () => {
+    Object.defineProperty(process.stdin, "isTTY", {
+      value: true,
+      configurable: true
+    });
+    const workspaceRoot = join(tempDir, "workspace");
+    await mkdir(workspaceRoot, { recursive: true });
+    await setupProviderConfig({
+      workspaceRoot,
+      homeDir: tempDir,
+      input: {
+        scope: "user",
+        provider: "local",
+        model: "ollama/auto",
+        enableNetwork: false
+      }
+    });
+
+    const result = await launchInteractiveSession({ workspaceRoot, homeDir: tempDir });
+
+    expect(result.launched).toBe(false);
+    expect(result.onboardingTriggered).toBe(false);
+    expect(result.output).toContain("Workspace trust is required");
+  });
 });
 
-type PromptControls = {
-  readonly language: "en" | "ar";
-  readonly provider: string;
-};
+async function trustWorkspace(workspaceRoot: string, homeDir: string): Promise<void> {
+  await new WorkspaceTrustStore({ path: join(homeDir, ".estacoda", "trust.json") }).grant(workspaceRoot, {
+    label: "test"
+  });
+}
 
-function makeOnboardingPrompt(controls: PromptControls): Prompt {
-  const prompt = (async () => "") as Prompt;
-  prompt.select = async <T>(selection: SelectPromptInput<T>): Promise<T> => {
-    if (/interface language/i.test(selection.title)) {
-      return selection.options.find((option) =>
-        typeof option.value === "object" &&
-        option.value !== null &&
-        (option.value as { language?: string }).language === controls.language
-      )?.value ?? selection.options[0]!.value;
-    }
-    if (/provider|مزوّد/iu.test(selection.title)) {
-      return selection.options.find((option) =>
-        typeof option.value === "object" &&
-        option.value !== null &&
-        Object.values(option.value as Record<string, unknown>).includes(controls.provider)
-      )?.value ?? selection.options[0]!.value;
-    }
-    return selection.options[selection.defaultIndex ?? 0]?.value ?? selection.options[0]!.value;
-  };
-  prompt.onboardingCard = () => undefined;
-  prompt.close = () => undefined;
-  return prompt;
+function confirmationPrompt(answer: string): Prompt {
+  return Object.assign(
+    async () => answer,
+    { close: () => undefined }
+  ) as Prompt;
 }

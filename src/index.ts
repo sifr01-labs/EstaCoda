@@ -4,8 +4,7 @@ import { resolveStateHome } from "./config/state-home.js";
 import { PersistentCliSessionStore } from "./cli/cli-session-store.js";
 import { runCliCommand } from "./cli/cli.js";
 import type { SessionDB } from "./contracts/session.js";
-import { canRunInteractive, createReadlinePrompt, runInteractiveOnboarding } from "./onboarding/interactive-onboarding.js";
-import { getOnboardingStatus } from "./onboarding/onboarding-flow.js";
+import { canRunInteractive } from "./cli/readline-prompt.js";
 import { createRuntime } from "./runtime/create-runtime.js";
 import { runSessionLoop, handleSlashCommand } from "./cli/session-loop.js";
 import { runOneShotPrompt } from "./cli/one-shot.js";
@@ -40,9 +39,20 @@ if (!workspaceTrusted) {
   console.warn("[trust] Workspace is not trusted. Project config is ignored until this workspace is trusted.");
 }
 
-let config: LoadedRuntimeConfig = workspaceTrusted
-  ? await loadTrustedRuntimeConfig({ workspaceRoot })
-  : await loadUserRuntimeConfig({ workspaceRoot });
+if (argv[0] === "setup") {
+  const setupCommand = await runCliCommand({
+    argv,
+    workspaceRoot,
+    projectConfigTrust: workspaceTrusted ? "trusted" : "untrusted"
+  });
+
+  if (setupCommand.handled) {
+    if (setupCommand.output.length > 0) {
+      console.log(setupCommand.output);
+    }
+    process.exit(setupCommand.exitCode);
+  }
+}
 
 // Bare launch: use interactive launcher for onboarding/session routing
 if (argv.length === 0 && canRunInteractive()) {
@@ -62,10 +72,31 @@ if (argv.length === 0 && canRunInteractive()) {
 
   if (launchResult.onboardingTriggered) {
     workspaceTrusted = await trustStore.isTrusted(workspaceRoot);
-    config = workspaceTrusted
-      ? await loadTrustedRuntimeConfig({ workspaceRoot })
-      : await loadUserRuntimeConfig({ workspaceRoot });
   }
+}
+
+let config: LoadedRuntimeConfig;
+try {
+  config = workspaceTrusted
+    ? await loadTrustedRuntimeConfig({ workspaceRoot })
+    : await loadUserRuntimeConfig({ workspaceRoot });
+} catch (error) {
+  if (argv[0] === "doctor" || argv[0] === "verify") {
+    const diagnosticCommand = await runCliCommand({
+      argv,
+      workspaceRoot,
+      projectConfigTrust: workspaceTrusted ? "trusted" : "untrusted"
+    });
+
+    if (diagnosticCommand.handled) {
+      if (diagnosticCommand.output.length > 0) {
+        console.log(diagnosticCommand.output);
+      }
+      process.exit(diagnosticCommand.exitCode);
+    }
+  }
+
+  throw error;
 }
 
 async function buildRuntime(input: {

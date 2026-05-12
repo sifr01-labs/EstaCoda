@@ -35,8 +35,12 @@ import {
   type VoiceSetupInput,
   type WebSetupInput
 } from "../config/runtime-config.js";
-import { canRunInteractive, createReadlinePrompt, runInteractiveOnboarding, type Prompt } from "../onboarding/interactive-onboarding.js";
-import { getOnboardingStatus } from "../onboarding/onboarding-flow.js";
+import { canRunInteractive, createReadlinePrompt, type Prompt } from "./readline-prompt.js";
+import { runFirstRunSetup } from "../onboarding/first-run/runner.js";
+import { createReviewedSetupApplyExecutor } from "../onboarding/review/apply-executor.js";
+import { collectSetupEntryState } from "../onboarding/setup-entry-state.js";
+import { collectSetupRoute } from "../onboarding/setup-router.js";
+import { renderSetupRouteSummary } from "../onboarding/setup-state-renderer.js";
 import { runSetupVerification } from "../onboarding/verification.js";
 import type { ToolDefinition } from "../contracts/tool.js";
 import type { FetchLike as ProviderFetchLike } from "../providers/openai-compatible-provider.js";
@@ -248,48 +252,18 @@ async function setup(options: CliOptions, args: string[]): Promise<CliCommandRes
   const allowInteractive = options.interactive !== false;
 
   if (hasFlag(args, "--interactive", "-i") || (allowInteractive && args.length === 0 && (options.prompt !== undefined || canRunInteractive()))) {
-    const result = await runInteractiveOnboarding({
-      ...options,
-      prompt: options.prompt
+    return interactiveSetup(options, {
+      advanced: hasFlag(args, "--advanced")
     });
-
-    return {
-      handled: true,
-      exitCode: result.exitCode,
-      output: result.output
-    };
   }
 
   const advanced = hasFlag(args, "--advanced");
   if (parsed.provider === undefined || parsed.model === undefined) {
-    const onboarding = await getOnboardingStatus(options);
+    const decision = await collectSetupRoute(options);
     return {
       handled: true,
       exitCode: 0,
-      output: [
-        advanced ? "EstaCoda advanced setup" : "EstaCoda setup",
-        onboarding.reason,
-        "",
-        "Recommended path:",
-        "  estacoda setup",
-        "",
-        "Advanced path:",
-        "  estacoda setup --advanced --provider deepseek --model deepseek-chat --api-key-env DEEPSEEK_API_KEY",
-        "",
-        "Direct provider example:",
-        "  estacoda setup --provider deepseek --model deepseek-chat --api-key-env DEEPSEEK_API_KEY",
-        "",
-        "Provider options:",
-        ...onboarding.steps.flatMap((step) =>
-          step.id === "provider"
-            ? step.options.map((option) => `  ${formatProviderModel(option.provider, option.model)} - ${option.label}`)
-            : []
-        ),
-        "",
-        "After setup:",
-        "  estacoda verify",
-        "  estacoda"
-      ].join("\n")
+      output: renderSetupRouteSummary({ decision, advanced })
     };
   }
 
@@ -315,6 +289,41 @@ async function setup(options: CliOptions, args: string[]): Promise<CliCommandRes
         : "Next: fix the warnings above, then run estacoda verify."
     ].filter((line) => line !== undefined).join("\n")
   };
+}
+
+async function interactiveSetup(options: CliOptions, input: { readonly advanced: boolean }): Promise<CliCommandResult> {
+  const prompt = options.prompt ?? createReadlinePrompt();
+  try {
+    const decision = await collectSetupRoute(options);
+    if (decision.kind === "first-run-onboarding") {
+      const result = await runFirstRunSetup({
+        ...options,
+        prompt,
+        applyExecutor: createReviewedSetupApplyExecutor({
+          workspaceRoot: options.workspaceRoot,
+          homeDir: options.homeDir,
+          userConfigPath: options.userConfigPath,
+          projectConfigPath: options.projectConfigPath,
+        }),
+      });
+
+      return {
+        handled: true,
+        exitCode: result.exitCode,
+        output: result.output,
+      };
+    }
+
+    return {
+      handled: true,
+      exitCode: 0,
+      output: renderSetupRouteSummary({ decision, advanced: input.advanced }),
+    };
+  } finally {
+    if (options.prompt === undefined) {
+      prompt.close?.();
+    }
+  }
 }
 
 async function verify(options: CliOptions): Promise<CliCommandResult> {
@@ -1162,10 +1171,20 @@ async function tools(options: CliOptions): Promise<CliCommandResult> {
 }
 
 async function doctor(options: CliOptions, args: string[] = []): Promise<CliCommandResult> {
-  const config = await loadRuntimeConfig(options);
-  const onboarding = await getOnboardingStatus(options);
-  const providerDiagnostic = await diagnoseProviderConfig(config);
-  const liveProviderDiagnostic = hasFlag(args, "--live")
+  const setupState = await collectSetupEntryState(options);
+  let config: Awaited<ReturnType<typeof loadRuntimeConfig>> | undefined;
+  let configSyntaxError: string | undefined;
+
+  try {
+    config = await loadRuntimeConfig(options);
+  } catch (error) {
+    configSyntaxError = error instanceof Error ? error.message : String(error);
+  }
+
+  const providerDiagnostic = config === undefined
+    ? setupState.setupVerification.providerDiagnostic
+    : await diagnoseProviderConfig(config);
+  const liveProviderDiagnostic = config !== undefined && hasFlag(args, "--live")
     ? await diagnoseProviderLive(config)
     : undefined;
   const liveToolDiagnostic = hasFlag(args, "--live-tools", "--live-tool")
@@ -1177,24 +1196,20 @@ async function doctor(options: CliOptions, args: string[] = []): Promise<CliComm
   const warnings: string[] = [];
   const notes: string[] = [];
 
-  if (config.model.contextWindowTokens > 0 && config.model.contextWindowTokens < 64_000) {
+  if (config !== undefined && config.model.contextWindowTokens > 0 && config.model.contextWindowTokens < 64_000) {
     warnings.push("Configured model context window is below 64K tokens.");
   }
 
-  if (onboarding.needed) {
-    warnings.push("Provider setup is incomplete.");
+  if (setupState.kind !== "configured-ready" && setupState.kind !== "configured-degraded") {
+    warnings.push(...setupState.blockers);
   }
 
   warnings.push(...providerDiagnostic.warnings);
   warnings.push(...(liveProviderDiagnostic?.warnings ?? []));
   warnings.push(...(liveToolDiagnostic?.warnings ?? []));
 
-  // Config syntax validity
-  try {
-    await loadRuntimeConfig(options);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    warnings.push(`Config syntax error: ${message}`);
+  if (configSyntaxError !== undefined) {
+    warnings.push(`Config syntax error: ${configSyntaxError}`);
   }
 
   // State directory backup integrity
@@ -1230,11 +1245,11 @@ async function doctor(options: CliOptions, args: string[] = []): Promise<CliComm
       : 1,
     output: [
       "EstaCoda doctor",
-      `Model: ${config.model.provider}/${config.model.id}`,
-      `Web extraction: ${config.web.enableNetwork ? "enabled" : "disabled"}`,
-      `Browser backend: ${config.browser.backend}`,
-      `Config sources: ${config.sources.join(", ") || "none"}`,
-      `Credential pools: ${config.credentialPools.snapshots().map((snapshot) => `${snapshot.provider}:${snapshot.entries.length}`).join(", ") || "none"}`,
+      `Model: ${config === undefined ? "unknown/unknown" : `${config.model.provider}/${config.model.id}`}`,
+      `Web extraction: ${config === undefined ? "unknown" : config.web.enableNetwork ? "enabled" : "disabled"}`,
+      `Browser backend: ${config?.browser.backend ?? "unknown"}`,
+      `Config sources: ${(config?.sources ?? setupState.configSources).join(", ") || "none"}`,
+      `Credential pools: ${config?.credentialPools.snapshots().map((snapshot) => `${snapshot.provider}:${snapshot.entries.length}`).join(", ") || "none"}`,
       "",
       renderProviderDiagnostic(providerDiagnostic),
       liveProviderDiagnostic === undefined ? undefined : "",

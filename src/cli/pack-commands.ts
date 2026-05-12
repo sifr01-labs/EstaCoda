@@ -6,7 +6,7 @@ import {
   uninstallPack
 } from "../packs/pack-installer.js";
 import type { CliOptions, CliCommandResult } from "./cli.js";
-import { createReadlinePrompt } from "../onboarding/interactive-onboarding.js";
+import { createReadlinePrompt } from "./readline-prompt.js";
 
 export async function packCommand(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const subcommand = args[0];

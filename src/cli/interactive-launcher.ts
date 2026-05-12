@@ -1,8 +1,7 @@
-import { getOnboardingStatus } from "../onboarding/onboarding-flow.js";
-import { loadUserRuntimeConfig } from "../config/runtime-config.js";
-import { runInteractiveOnboarding, canRunInteractive, createReadlinePrompt, type Prompt } from "../onboarding/interactive-onboarding.js";
-import { kemetBlueTheme } from "../theme/kemet-blue.js";
+import { loadRuntimeConfig } from "../config/runtime-config.js";
+import { canRunInteractive, createReadlinePrompt, type Prompt } from "./readline-prompt.js";
 import type { UiLocale } from "../contracts/ui.js";
+import { collectSetupRoute, type SetupRouteDecision } from "../onboarding/setup-router.js";
 
 export type LaunchOptions = {
   workspaceRoot: string;
@@ -30,16 +29,51 @@ export async function launchInteractiveSession(options: LaunchOptions): Promise<
     };
   }
 
-  const onboarding = await getOnboardingStatus({
+  const setupRoute = await collectSetupRoute({
     workspaceRoot: options.workspaceRoot,
     homeDir: options.homeDir,
     projectConfigTrust: options.projectConfigTrust
   });
   const currentLocale = await loadLaunchLocale(options);
 
-  if (onboarding.needed) {
+  if (setupRoute.state.kind === "configured-degraded") {
     const prompt = options.prompt ?? createReadlinePrompt();
-    const answer = await prompt(`${onboarding.reason}\nRun setup now? [Y/n]: `);
+    const answer = await prompt(`${setupRoute.summary}\nContinue in limited mode? [y/N]: `);
+    if (options.prompt === undefined) {
+      prompt.close?.();
+    }
+    if (!["y", "yes"].includes(answer.trim().toLowerCase())) {
+      return {
+        launched: false,
+        onboardingTriggered: false,
+        output: "Launch skipped. Run `estacoda setup --interactive` to review or repair setup.",
+        exitCode: 0,
+        locale: currentLocale
+      };
+    }
+
+    return {
+      launched: true,
+      onboardingTriggered: false,
+      output: "",
+      exitCode: 0,
+      locale: currentLocale
+    };
+  }
+
+  if (setupRoute.state.kind === "untrusted-workspace") {
+    return {
+      launched: false,
+      onboardingTriggered: false,
+      output: "Workspace trust is required before launch. Run `estacoda setup --interactive` to review trust repair.",
+      exitCode: 1,
+      locale: currentLocale
+    };
+  }
+
+  if (!canLaunchWithoutSetup(setupRoute)) {
+    const prompt = options.prompt ?? createReadlinePrompt();
+    const answer = await prompt(`${setupRoute.summary}\nRun setup now? [Y/n]: `);
     if (options.prompt === undefined) {
       prompt.close?.();
     }
@@ -53,23 +87,12 @@ export async function launchInteractiveSession(options: LaunchOptions): Promise<
       };
     }
 
-    const result = await runInteractiveOnboarding({
-      workspaceRoot: options.workspaceRoot,
-      homeDir: options.homeDir,
-      prompt: options.prompt,
-      theme: kemetBlueTheme,
-      continueToSession: true,
-      projectConfigTrust: options.projectConfigTrust
-    });
-    const workspaceRoot = result.workspaceRoot ?? options.workspaceRoot;
-
     return {
-      launched: result.exitCode === 0,
-      onboardingTriggered: true,
-      output: result.output,
-      exitCode: result.exitCode,
-      workspaceRoot: result.workspaceRoot,
-      locale: await loadLaunchLocale({ ...options, workspaceRoot })
+      launched: false,
+      onboardingTriggered: false,
+      output: "Setup is incomplete. Run `estacoda setup --interactive` to review, apply, verify, and then launch.",
+      exitCode: 0,
+      locale: currentLocale
     };
   }
 
@@ -82,10 +105,19 @@ export async function launchInteractiveSession(options: LaunchOptions): Promise<
   };
 }
 
+function canLaunchWithoutSetup(decision: SetupRouteDecision): boolean {
+  return decision.state.kind === "configured-ready";
+}
+
 async function loadLaunchLocale(options: LaunchOptions): Promise<UiLocale> {
-  const config = await loadUserRuntimeConfig({
-    workspaceRoot: options.workspaceRoot,
-    homeDir: options.homeDir
-  });
-  return config.ui.language === "ar" ? "ar" : "en";
+  try {
+    const config = await loadRuntimeConfig({
+      workspaceRoot: options.workspaceRoot,
+      homeDir: options.homeDir,
+      projectConfigTrust: options.projectConfigTrust
+    });
+    return config.ui.language === "ar" ? "ar" : "en";
+  } catch {
+    return "en";
+  }
 }

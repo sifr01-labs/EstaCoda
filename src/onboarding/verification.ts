@@ -67,7 +67,7 @@ export async function collectSetupVerificationReport(
   const trustStore = new WorkspaceTrustStore({
     path: options.trustStorePath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "trust.json")
   });
-  const workspaceTrusted = await trustStore.isTrusted(options.workspaceRoot);
+  const workspaceTrusted = await isWorkspaceTrusted(trustStore, options.workspaceRoot);
   const stateRoot = join(options.homeDir ?? process.env.HOME ?? "", ".estacoda");
   const verifyFile = join(stateRoot, ".verify");
   const envPath = defaultEnvPath(options.homeDir);
@@ -147,6 +147,14 @@ export async function collectSetupVerificationReport(
     warnings,
     issueCodes,
   };
+}
+
+async function isWorkspaceTrusted(store: WorkspaceTrustStore, workspaceRoot: string): Promise<boolean> {
+  try {
+    return await store.isTrusted(workspaceRoot);
+  } catch {
+    return false;
+  }
 }
 
 export function renderSetupVerificationReport(

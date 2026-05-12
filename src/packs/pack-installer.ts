@@ -8,7 +8,7 @@ import { validatePackManifest } from "./pack-validator.js";
 import { classifyPackRisk } from "./pack-risk-classifier.js";
 import { renderPackReview } from "./pack-install-renderer.js";
 import { writePackForceAuditRecord } from "./pack-force-audit-log.js";
-import type { Prompt } from "../onboarding/interactive-onboarding.js";
+import type { Prompt } from "../cli/readline-prompt.js";
 
 export type InstallPackOptions = {
   homeDir: string;

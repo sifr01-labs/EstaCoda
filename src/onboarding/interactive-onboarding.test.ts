@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { buildOnboardingPromptCardViewModel, type BuildOnboardingPromptCardInput } from "../ui/view-models/builders.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
 import { isolateLtr } from "../ui/bidi.js";
-import { runInteractiveOnboarding, type Prompt } from "./interactive-onboarding.js";
+import type { Prompt } from "../cli/readline-prompt.js";
+import { runInteractiveOnboarding } from "./interactive-onboarding.js";
 import type { SelectPromptInput } from "../cli/interactive-select.js";
 
 describe("interactive onboarding prompt-card integration", () => {

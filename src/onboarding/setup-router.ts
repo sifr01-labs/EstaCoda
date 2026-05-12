@@ -251,19 +251,32 @@ function repairFirstDecision(state: SetupEntryState): SetupRouteDecision {
     title: "Setup needs repair",
     summary: repairSummary(state),
     state,
-    actions: [
-      action("repair-setup", "Repair setup", "Start the guided repair path for the current blockers.", true),
-      action("review-edit-config", "Open config editor", "Inspect or edit guided configuration sections.", true),
-      action("run-guided-onboarding", "Run full onboarding", "Restart the guided setup flow from the beginning.", true),
-      action("show-diagnostics", "Show diagnostics", "Show structured blockers and warnings without changing config.", false),
-      action("verify-setup", "Verify setup", "Run read-only setup verification again.", false),
-      action("exit", "Exit", "Leave setup without changing config.", false),
-    ],
+    actions: repairFirstActions(state),
     warnings: state.warnings,
     blockers: state.blockers,
     readOnly: true,
     setupEditorPlanSession: createSetupEditorPlanSession(state),
   };
+}
+
+function repairFirstActions(state: SetupEntryState): SetupRouteAction[] {
+  if (state.kind === "broken-config" || state.kind === "state-not-writable") {
+    return [
+      action("repair-setup", "Repair setup", "Start the guided diagnostic repair path for the current blockers.", true),
+      action("show-diagnostics", "Show diagnostics", "Show structured blockers and warnings without changing config.", false),
+      action("verify-setup", "Verify setup", "Run read-only setup verification again.", false),
+      action("exit", "Exit", "Leave setup without changing config.", false),
+    ];
+  }
+
+  return [
+    action("repair-setup", "Repair setup", "Start the guided repair path for the current blockers.", true),
+    action("review-edit-config", "Open config editor", "Inspect or edit guided configuration sections.", true),
+    action("run-guided-onboarding", "Run full onboarding", "Restart the guided setup flow from the beginning.", true),
+    action("show-diagnostics", "Show diagnostics", "Show structured blockers and warnings without changing config.", false),
+    action("verify-setup", "Verify setup", "Run read-only setup verification again.", false),
+    action("exit", "Exit", "Leave setup without changing config.", false),
+  ];
 }
 
 function untrustedConfiguredDecision(state: SetupEntryState): SetupRouteDecision {

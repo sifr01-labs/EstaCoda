@@ -14,14 +14,15 @@ This is the O0 audit for replacing the current onboarding proof of concept with 
 
 ## Current Entrypoints
 
-- `estacoda setup` with no args enters the current interactive onboarding wizard when interactive input is available.
+- `estacoda setup` is the canonical setup entrypoint. When interactive input is available and setup state is `new-user`, it runs the new first-run setup runner through reviewed manifest approval, apply execution, verification, and launch-handoff end-state handling.
+- `estacoda setup` for configured, degraded, repair, missing-secret, broken-config, untrusted-workspace, and state-not-writable states renders the new setup-route decision instead of entering the legacy wizard.
 - `estacoda setup --provider <provider> --model <model>` writes provider config through `setupProviderConfig()`.
-- bare `estacoda` checks `getOnboardingStatus()` and offers to run the current wizard when setup is missing.
+- bare `estacoda` checks `collectSetupRoute()`. It may offer setup when setup is incomplete, but it points users to `estacoda setup --interactive` instead of running setup inline.
 - `estacoda init` bootstraps state directories and writes an unconfigured default config.
 - `estacoda verify` renders a structured verification report plus extra CLI diagnostics.
-- `estacoda doctor` still uses `getOnboardingStatus()` for provider setup warnings.
+- `estacoda doctor` uses `collectSetupEntryState()` so broken config can be classified and reported before normal config loading.
 
-These paths must keep working until the setup-entry router has covered first-run, configured-ready, degraded, partial, repair, verify, and launch choices.
+These paths must keep working through the setup-entry router coverage for first-run, configured-ready, degraded, partial, repair, verify, and launch choices.
 
 ## Reusable Pieces
 
@@ -46,7 +47,7 @@ Replace rather than extend:
 Moved or preserved until replacements exist:
 
 - `Prompt` and `createReadlinePrompt()` are shared CLI utilities today and must move to a neutral CLI module before deleting `interactive-onboarding.ts`.
-- `getOnboardingStatus()` is still used by setup, bare launch, doctor, and smoke coverage. Replace it with `collectSetupEntryState()` before removing it.
+- `getOnboardingStatus()` remains only on legacy onboarding/tool surfaces. Live CLI setup, bare launch, and doctor decisions now use `collectSetupEntryState()` and `collectSetupRoute()`.
 
 ## Removed In O0
 
@@ -262,6 +263,19 @@ The approved screenshot Arabic is treated as the O8 source of truth wherever it 
 
 O8 does not add prompt-card rendering, terminal layout changes, user-facing setup cutover, or full CLI localization claims. It only establishes the structured copy boundary needed by later rendering work.
 
+## Phase 5 Status
+
+Live CLI setup and bare-launch setup handling are now cut over to the new setup-entry architecture.
+
+- `estacoda setup --interactive` runs the new first-run setup runner for `new-user` routes and uses reviewed manifest approval before apply.
+- The first-run runner can execute the reviewed apply executor, then uses structured verification and setup end states for ready, degraded, blocked, cancelled, saved-not-launched, and launch-handoff outcomes.
+- Configured-ready, configured-degraded, partial-provider, missing-secret, broken-config, untrusted-workspace, and state-not-writable setup states render the new setup-route summary and actions instead of entering the legacy wizard.
+- bare `estacoda` uses `collectSetupRoute()` for launch gating. It may offer setup when incomplete, but setup itself remains under `estacoda setup --interactive`.
+- `estacoda doctor` uses `collectSetupEntryState()` before normal config loading so broken config is diagnostic instead of an uncaught setup failure.
+- Direct advanced setup flags such as `estacoda setup --provider deepseek --model deepseek-chat --api-key-env DEEPSEEK_API_KEY` remain supported.
+
+Legacy onboarding files and runtime onboarding tools still exist for later removal review. They are not the live CLI setup path after Phase 5.
+
 ## Next Step
 
-After review, the likely next checkpoint is O9 for prompt-card-facing rendering contracts that can consume structured setup copy and plans without making them the user-facing setup path yet. Defer user-facing cutover until first-run, existing-user, partial-config, repair, verify, launch, review, apply, copy, bidi, and rendering behavior are all covered by the new architecture and reviewed together.
+After review, the next checkpoint is Phase 6 runtime onboarding tool removal. Do not remove legacy runtime tools or legacy files until that review is explicitly approved.

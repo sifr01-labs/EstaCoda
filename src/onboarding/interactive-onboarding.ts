@@ -1,11 +1,7 @@
-import { createInterface as createPromptInterface } from "node:readline/promises";
-import { createInterface as createCallbackInterface } from "node:readline";
 import { mkdir, stat } from "node:fs/promises";
 import { resolve } from "node:path";
-import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
-import type { Writable, Readable } from "node:stream";
-import { parseChoiceIndex, selectOption, type SelectPromptInput } from "../cli/interactive-select.js";
-import { createSessionRenderer } from "../cli/session-renderer.js";
+import { parseChoiceIndex, type SelectPromptInput } from "../cli/interactive-select.js";
+import { createReadlinePrompt, type Prompt } from "../cli/readline-prompt.js";
 import {
   defaultEnvKey,
   loadRuntimeConfig,
@@ -27,7 +23,7 @@ import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import type { SkillAutonomy } from "../skills/skill-learning.js";
 import { kemetBlueTheme } from "../theme/kemet-blue.js";
 import { defaultImageApiKeyEnv, defaultImageModel } from "../contracts/image-generation.js";
-import { buildOnboardingPromptCardViewModel, type BuildOnboardingPromptCardInput } from "../ui/view-models/builders.js";
+import type { BuildOnboardingPromptCardInput } from "../ui/view-models/builders.js";
 import {
   formatSecurityMode,
   formatSkillAutonomy,
@@ -48,12 +44,6 @@ import {
 } from "./onboarding-provider-catalog.js";
 import { completeOnboarding, defaultOnboardingSteps, getOnboardingStatus, type OnboardingOptions } from "./onboarding-flow.js";
 import { runSetupVerification } from "./verification.js";
-
-export type Prompt = ((question: string, options?: { secret?: boolean }) => Promise<string>) & {
-  select?: <T>(input: SelectPromptInput<T>) => Promise<T>;
-  onboardingCard?: (input: BuildOnboardingPromptCardInput) => Promise<void> | void;
-  close?: () => void;
-};
 
 type TelegramSetupDraft = {
   botToken: string;
@@ -339,32 +329,6 @@ async function ensureWorkspaceDirectory(root: string): Promise<{ ok: true } | { 
   } catch (error) {
     return { ok: false, reason: error instanceof Error ? error.message : String(error) };
   }
-}
-
-export function createReadlinePrompt(input: Readable = defaultInput, output: Writable = defaultOutput): Prompt {
-  return Object.assign(
-    async (question: string, options?: { secret?: boolean }) => {
-      if (options?.secret === true) {
-        return hiddenQuestion(input, output, question);
-      }
-      return plainQuestion(input, output, question);
-    },
-    {
-      select: async <T>(selection: SelectPromptInput<T>) => selectOption(input, output, selection),
-      onboardingCard: (card: BuildOnboardingPromptCardInput) => {
-        const renderer = createSessionRenderer({
-          output: output as NodeJS.WritableStream,
-          locale: card.locale,
-        });
-        output.write(`${renderer.render(buildOnboardingPromptCardViewModel(card))}\n`);
-      },
-      close: () => undefined
-    }
-  );
-}
-
-export function canRunInteractive(input: NodeJS.ReadStream = defaultInput): boolean {
-  return input.isTTY === true;
 }
 
 function withSelectChrome<T>(copy: OnboardingCopy, input: SelectPromptInput<T>): SelectPromptInput<T> {
@@ -1180,46 +1144,4 @@ function parseYesNo(value: string, defaultValue: boolean): boolean {
     return defaultValue;
   }
   return normalized === "y" || normalized === "yes";
-}
-
-async function plainQuestion(input: Readable, output: Writable, question: string): Promise<string> {
-  const readline = createPromptInterface({ input, output });
-  try {
-    return await readline.question(question);
-  } finally {
-    readline.close();
-  }
-}
-
-async function hiddenQuestion(input: Readable, output: Writable, question: string): Promise<string> {
-  const isTty = Boolean((input as NodeJS.ReadStream).isTTY && (output as NodeJS.WriteStream).isTTY);
-  if (!isTty) {
-    const readline = createPromptInterface({ input, output });
-    try {
-      return await readline.question(question);
-    } finally {
-      readline.close();
-    }
-  }
-
-  return await new Promise<string>((resolve) => {
-    const readline = createCallbackInterface({ input, output, terminal: true });
-    const mutable = readline as unknown as { _writeToOutput?: (value: string) => void; stdoutMuted?: boolean };
-    const originalWrite = mutable._writeToOutput?.bind(readline);
-    output.write(`${question}\n`);
-    mutable.stdoutMuted = true;
-    mutable._writeToOutput = (value: string) => {
-      if (mutable.stdoutMuted === true) {
-        output.write(value.replace(/[^\r\n]/gu, "*"));
-      } else {
-        originalWrite?.(value);
-      }
-    };
-    readline.question("", (answer) => {
-      mutable.stdoutMuted = false;
-      output.write("\n");
-      readline.close();
-      resolve(answer);
-    });
-  });
 }
