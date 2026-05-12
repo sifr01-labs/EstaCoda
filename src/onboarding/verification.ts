@@ -6,12 +6,21 @@ import { diagnoseProviderConfig, renderProviderDiagnostic, type ProviderDiagnost
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { formatSecurityMode, formatSkillAutonomy } from "../ui/settings-labels.js";
 import type { Runtime } from "../runtime/create-runtime.js";
-import type { OnboardingOptions } from "./onboarding-flow.js";
 import { setupVerificationCopy, type SetupVerificationCopy } from "./setup-verification-copy.js";
 
 export type SetupVerificationResult = {
   ok: boolean;
   output: string;
+};
+
+export type SetupVerificationOptions = {
+  workspaceRoot: string;
+  homeDir?: string;
+  userConfigPath?: string;
+  projectConfigPath?: string;
+  projectConfigTrust?: "trusted" | "untrusted";
+  runtime?: Runtime;
+  trustStorePath?: string;
 };
 
 export type SetupVerificationIssueCode =
@@ -60,10 +69,7 @@ export type SetupVerificationReport = {
 };
 
 export async function collectSetupVerificationReport(
-  options: OnboardingOptions & {
-    runtime?: Runtime;
-    trustStorePath?: string;
-  }
+  options: SetupVerificationOptions
 ): Promise<SetupVerificationReport> {
   const config = await loadRuntimeConfig(options);
   const locale = config.ui.language === "ar" ? "ar" : "en";
@@ -197,10 +203,7 @@ export function renderSetupVerificationReport(
   return lines.join("\n");
 }
 
-export async function runSetupVerification(options: OnboardingOptions & {
-  runtime?: Runtime;
-  trustStorePath?: string;
-}): Promise<SetupVerificationResult> {
+export async function runSetupVerification(options: SetupVerificationOptions): Promise<SetupVerificationResult> {
   const report = await collectSetupVerificationReport(options);
   const config = await loadRuntimeConfig(options);
   const locale = config.ui.language === "ar" ? "ar" : "en";

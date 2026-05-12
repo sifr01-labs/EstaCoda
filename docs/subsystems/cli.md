@@ -17,9 +17,12 @@ description: "CLI commands, interactive session loop, trace/eval inspection, and
 | `src/cli/tool-activity-renderer.ts` | ~160 | Tool activity display |
 | `src/cli/trace-commands.ts` | ~275 | `estacoda trace` commands |
 | `src/cli/eval-commands.ts` | ~100 | `estacoda eval` commands |
-| `src/onboarding/interactive-onboarding.ts` | 1,155 | First-run setup wizard |
-| `src/onboarding/onboarding-copy.ts` | 956 | Localized onboarding text |
-| `src/onboarding/onboarding-flow.ts` | ~280 | Onboarding state machine |
+| `src/onboarding/setup-entry-state.ts` | 283 | Setup readiness classifier |
+| `src/onboarding/setup-router.ts` | 364 | Setup route planner |
+| `src/onboarding/first-run/runner.ts` | 718 | Reviewed first-run setup runner |
+| `src/onboarding/review/apply-executor.ts` | 483 | Reviewed setup apply executor |
+| `src/onboarding/setup-copy.ts` | 372 | Token-based setup copy registry |
+| `src/onboarding/setup-verification-copy.ts` | 111 | Setup verification labels and actions |
 
 ## Commands
 
