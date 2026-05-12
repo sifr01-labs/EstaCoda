@@ -4,12 +4,23 @@ EstaCoda is a TypeScript agent runtime for local terminal work, channel-based op
 
 The project is currently an **MVP candidate for private/internal use**. The core CLI agent, onboarding, provider setup, security modes, workflow-learning controls, multi-channel gateway, MCP client, ACP foundation, browser tools, voice/TTS foundation, cron with execution history, skills, memory, artifact paths, and **durable TaskFlow execution** are implemented and covered by smoke tests or live operator proof. It is not yet packaged as a public release.
 
+Runtime contract: Node.js >= 22.18.0, pnpm via Corepack, and compiled `dist/` for production execution. Local source-mode development uses `pnpm run dev`; Bun is optional and informational only.
+
 ## Quick Start
 
 ```bash
 cd /path/to/EstaCoda
-bun install
-bun run dev
+corepack enable
+pnpm install
+pnpm run dev
+```
+
+Build and run the production target:
+
+```bash
+pnpm run build
+pnpm run start
+# equivalent: node dist/index.js
 ```
 
 `estacoda setup` is the canonical setup entrypoint. A bare `estacoda` launch checks setup state and may point you to setup when configuration is incomplete; the setup product flow itself lives under `estacoda setup`.
@@ -90,10 +101,17 @@ Run these before pushing changes:
 
 ```bash
 cd /path/to/EstaCoda
-bun run test        # unit tests (authoritative gate)
-bun run typecheck   # TypeScript compilation
-bun run smoke       # runtime integration smoke tests
-bun run scripts/run-eval-fixtures.ts
+node --version
+pnpm --version
+pnpm install --frozen-lockfile
+pnpm run typecheck
+pnpm run test
+pnpm run smoke
+pnpm run build
+pnpm run audit:runtime-imports
+pnpm run audit:esm
+pnpm run smoke:dist
+git diff --check
 ```
 
 For a clean first-run onboarding check:
@@ -101,7 +119,7 @@ For a clean first-run onboarding check:
 ```bash
 rm -rf /tmp/estacoda-e2e-home
 mkdir -p /tmp/estacoda-e2e-home
-HOME=/tmp/estacoda-e2e-home bun run dev -- setup
+HOME=/tmp/estacoda-e2e-home pnpm run dev -- setup
 ```
 
 ## State
@@ -136,10 +154,10 @@ Project overlays live under `<workspace>/.estacoda/`.
 EstaCoda starts with a guided first-run setup when no usable configuration is found:
 
 ```bash
-bun run dev -- setup
+pnpm run dev -- setup
 ```
 
-A bare `bun run dev` launch uses setup-route decisions when setup is incomplete, but setup changes are handled by the setup command.
+A bare `pnpm run dev` launch uses setup-route decisions when setup is incomplete, but setup changes are handled by the setup command.
 
 The setup flow walks through:
 

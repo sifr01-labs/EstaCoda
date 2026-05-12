@@ -110,10 +110,10 @@ async #flush(): Promise<void> {
 
 | Command | Result |
 |---------|--------|
-| `bun run typecheck` | **PASS** (0 errors) |
-| `bun test` | **PASS** (133/133 tests, 0 failures) |
-| `bun run smoke` | **PASS** (3/3 cases) |
-| `bun run eval:substrate` | **PASS** (initialized successfully) |
+| `pnpm run typecheck` | **PASS** (0 errors) |
+| `pnpm exec vitest run` | **PASS** (133/133 tests, 0 failures) |
+| `pnpm run smoke` | **PASS** (3/3 cases) |
+| `pnpm run eval:substrate` | **PASS** (initialized successfully) |
 
 ---
 

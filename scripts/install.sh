@@ -19,15 +19,25 @@ PLATFORM="${OS}-${ARCH}"
 echo "EstaCoda installer"
 echo "Platform: $PLATFORM"
 
-# Check for Bun
-if ! command -v bun >/dev/null 2>&1; then
-  echo "Bun is required but not found."
-  echo "Install Bun: https://bun.sh/docs/installation"
+# Check for Node
+if ! command -v node >/dev/null 2>&1; then
+  echo "Node.js >= 22.18.0 is required but not found."
+  echo "Install Node.js: https://nodejs.org/"
   exit 1
 fi
 
-BUN_VERSION="$(bun --version 2>/dev/null || echo "0.0.0")"
-echo "Bun: $BUN_VERSION"
+NODE_VERSION="$(node --version 2>/dev/null || echo "v0.0.0")"
+if ! node -e 'const [major, minor, patch] = process.versions.node.split(".").map(Number); process.exit(major > 22 || (major === 22 && (minor > 18 || (minor === 18 && patch >= 0))) ? 0 : 1);' >/dev/null 2>&1; then
+  echo "Node.js >= 22.18.0 is required. Found: $NODE_VERSION"
+  exit 1
+fi
+echo "Node: $NODE_VERSION"
+
+if ! command -v corepack >/dev/null 2>&1; then
+  echo "Corepack is required to activate pnpm."
+  echo "Install a Node.js distribution that includes Corepack, or install pnpm manually."
+  exit 1
+fi
 
 mkdir -p "$ESTACODA_BIN"
 
@@ -50,18 +60,37 @@ if [ -n "$ARTIFACT_URL" ]; then
   chmod +x "$ESTACODA_BIN/estacoda"
 else
   echo "No prebuilt binary found for $PLATFORM."
-  echo "Installing Bun-backed wrapper (dev fallback for v0.1.0)..."
+  echo "Building dist/ and installing Node wrapper..."
 
   # Determine repo root relative to this script
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+  (
+    cd "$REPO_ROOT"
+    if ! corepack enable; then
+      if ! command -v pnpm >/dev/null 2>&1; then
+        echo "Corepack failed to enable pnpm, and pnpm is not available on PATH." >&2
+        exit 1
+      fi
+      echo "Corepack enable failed; using existing pnpm from PATH."
+    fi
+    CI=true pnpm install --frozen-lockfile
+    pnpm run build
+  )
 
   cat > "$ESTACODA_BIN/estacoda" <<'WRAPPER'
 #!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="REPO_ROOT_PLACEHOLDER"
-exec bun run "$REPO_ROOT/src/index.ts" "$@"
+ENTRYPOINT="$REPO_ROOT/dist/index.js"
+if [ ! -f "$ENTRYPOINT" ]; then
+  echo "EstaCoda dist entrypoint not found: $ENTRYPOINT" >&2
+  echo "Run: cd \"$REPO_ROOT\" && pnpm install && pnpm run build" >&2
+  exit 1
+fi
+exec node "$ENTRYPOINT" "$@"
 WRAPPER
 
   sed -i.bak "s|REPO_ROOT_PLACEHOLDER|$REPO_ROOT|g" "$ESTACODA_BIN/estacoda"
@@ -97,7 +126,11 @@ add_to_path() {
   fi
 }
 
-add_to_path
+if [ "${ESTACODA_SKIP_PATH_UPDATE:-0}" = "1" ]; then
+  echo "Skipping shell PATH update because ESTACODA_SKIP_PATH_UPDATE=1"
+else
+  add_to_path
+fi
 
 echo ""
 echo "EstaCoda installed to $ESTACODA_BIN/estacoda"

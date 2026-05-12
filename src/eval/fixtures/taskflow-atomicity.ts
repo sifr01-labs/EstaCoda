@@ -48,8 +48,7 @@ export const taskflowAtomicityCase: EvalCase = {
       }
       assertions.push(assertTrue("atomic transition throws on error", threw));
 
-      // Since we're using Bun SQLite transaction() which auto-rolls back,
-      // flow-2 should not exist
+      // The adapter-backed transaction should roll back completely, so flow-2 should not exist.
       const flow2 = await store.getFlow("flow-2");
       assertions.push(assertTrue("flow rolled back on atomic failure", flow2 === null));
 

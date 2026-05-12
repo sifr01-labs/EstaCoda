@@ -65,8 +65,8 @@ Browser tools exposed to the agent:
 ## Configuration
 
 ```bash
-bun run dev -- browser setup --backend local-cdp --cdp-url http://127.0.0.1:9222
-bun run dev -- browser test
+pnpm run dev -- browser setup --backend local-cdp --cdp-url http://127.0.0.1:9222
+pnpm run dev -- browser test
 ```
 
 ## Limitations

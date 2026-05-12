@@ -53,7 +53,7 @@ Runs deterministic fixtures with pass/fail assertions. As of v0.7, **18 fixtures
 ### Eval Substrate Scaffold
 
 ```bash
-bun run eval:substrate
+pnpm run eval:substrate
 ```
 
 Creates under `.estacoda/eval-runs/<timestamp>/`:
@@ -66,7 +66,7 @@ Creates under `.estacoda/eval-runs/<timestamp>/`:
 ### Running All Fixtures
 
 ```bash
-bun run scripts/run-eval-fixtures.ts
+pnpm run eval:fixtures
 ```
 
 ## Evidence Levels

@@ -8,7 +8,7 @@ curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash
 
 This will:
 - Detect your OS and architecture
-- Check for Bun (required)
+- Check for Node.js >= 22.18.0 and Corepack
 - Install the `estacoda` binary into `~/.estacoda/bin/`
 - Add `~/.estacoda/bin` to your shell PATH
 
@@ -21,7 +21,8 @@ export PATH="$HOME/.estacoda/bin:$PATH"
 ## Manual install
 
 ### Prerequisites
-- Bun >= 1.0
+- Node.js >= 22.18.0
+- Corepack / pnpm
 
 ### Steps
 
@@ -31,12 +32,19 @@ export PATH="$HOME/.estacoda/bin:$PATH"
    cd estacoda
    ```
 
-2. Run the install script:
+2. Install dependencies and build:
+   ```bash
+   corepack enable
+   pnpm install
+   pnpm run build
+   ```
+
+3. Run the install script:
    ```bash
    bash scripts/install.sh
    ```
 
-3. Or use the wrapper directly:
+4. Or use the wrapper directly:
    ```bash
    bash scripts/estacoda-wrapper.sh --version
    ```
@@ -65,6 +73,8 @@ estacoda update --apply  # Apply update (requires ESTACODA_UPDATE_ARTIFACT)
 
 ## Troubleshooting
 
-**Bun not found**: Install Bun from https://bun.sh/docs/installation
+**Node too old**: Install Node.js >= 22.18.0.
 
-**No prebuilt binary**: The v0.1.0 installer falls back to a Bun-backed wrapper. This is expected.
+**pnpm not found**: Run `corepack enable`, then retry.
+
+**No prebuilt binary**: The v0.1.0 installer builds `dist/` from the local checkout and installs a Node-backed wrapper. This is expected until release artifacts are published.

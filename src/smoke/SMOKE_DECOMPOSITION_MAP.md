@@ -34,24 +34,24 @@ src/smoke/
 
 ```bash
 # All cases
-bun run smoke
+pnpm run smoke
 
 # Filter by tag
-bun run smoke --tag skills
-bun run smoke --tag bundled
-bun run smoke --tag legacy
+pnpm run smoke --tag skills
+pnpm run smoke --tag bundled
+pnpm run smoke --tag legacy
 
 # Filter by case ID
-bun run smoke --id corrupt-skill-usage
+pnpm run smoke --id corrupt-skill-usage
 
 # List available cases
-bun run smoke --list
+pnpm run smoke --list
 
 # Fail fast (stop on first failure)
-bun run smoke --fail-fast
+pnpm run smoke --fail-fast
 
 # JSON output
-bun run smoke --json
+pnpm run smoke --json
 ```
 
 ## Legacy Monolith Sections

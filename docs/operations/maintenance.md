@@ -50,4 +50,4 @@ When changing code:
 2. Update the canonical doc, do not create a new one.
 3. If the change is a durable architectural decision, consider an ADR.
 4. If the change is internal planning detail, keep it in the private workspace.
-5. Run `bun run typecheck` and `bun run smoke` before committing doc changes that reference code.
+5. Run `pnpm run typecheck` and `pnpm run smoke` before committing doc changes that reference code.

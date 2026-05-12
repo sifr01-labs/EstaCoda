@@ -7,32 +7,40 @@ description: "Development environment, dependencies, and runtime state paths."
 
 ## Prerequisites
 
-- [Bun](https://bun.sh) — EstaCoda is built and run with Bun
-- Node.js 22+ — available as fallback for typechecking
+- Node.js >= 22.18.0 — production runtime target
+- Corepack / pnpm — source package-manager and script runner
+- Bun — optional dev-speed lane only
 
 ## Install
 
 ```bash
 cd /path/to/EstaCoda
-bun install
+corepack enable
+pnpm install
 ```
 
 This installs:
 - `typescript`
 - `@types/node`
+- `tsx`
+- `better-sqlite3`
+- runtime channel dependencies
 
-There are **zero production dependencies**.
+Production dependencies are installed through pnpm. SQLite state uses `better-sqlite3` behind EstaCoda's internal storage adapter.
 
 ## Core Commands
 
 | Command | Purpose |
 |---------|---------|
-| `bun run typecheck` | TypeScript type check (`tsc --noEmit`) |
-| `bun run smoke` | Run smoke tests |
-| `bun run dev` | Start interactive CLI |
-| `bun run alpha:harness` | Generate internal alpha run folder |
-| `bun run eval:substrate` | Generate eval run scaffold |
-| `bun run provider:hardening` | Live provider acceptance sweep |
+| `pnpm run typecheck` | TypeScript type check (`tsc --noEmit`) |
+| `pnpm run test` | Authoritative Node/Vitest test lane |
+| `pnpm run smoke` | Run source-mode smoke tests |
+| `pnpm run build` | Compile production `dist/` output |
+| `pnpm run start` | Run `dist/index.js` under Node |
+| `pnpm run smoke:dist` | Run smoke checks from built `dist/` |
+| `pnpm run alpha:harness` | Generate internal alpha run folder |
+| `pnpm run eval:substrate` | Generate eval run scaffold |
+| `pnpm run provider:hardening` | Live provider acceptance sweep |
 
 ## Environment Variables
 
@@ -93,12 +101,14 @@ Default root: `~/.estacoda/`
 | `<workspace>/.estacoda/skill-learning.json` | Workflow learning state |
 | `<workspace>/.estacoda/config.json` | Project config |
 
-## Bun Lock-in
+## Runtime Contract
 
-EstaCoda uses Bun-specific features:
-- `bun:sqlite` for session database
-- `bun` shebang and execpath in package.json scripts
+EstaCoda's public runtime contract is:
 
-**Impact:** Smoke tests and runtime execution require Bun. Node execution fails on `bun:` imports.
+- Node.js >= 22.18.0
+- pnpm via Corepack
+- compiled `dist/` for production execution
+- `better-sqlite3` behind the internal SQLite adapter
+- Bun optional for explicitly named `*:bun` scripts only
 
-**Mitigation:** SQLite is already behind a session DB interface (`src/session/`). Full Node compatibility remains deferred until post-MVP.
+Do not add new foundational runtime dependencies on Bun. If Bun is used locally, keep it informational and isolated behind clearly named optional scripts.

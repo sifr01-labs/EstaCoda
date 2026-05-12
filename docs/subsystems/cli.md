@@ -27,13 +27,13 @@ description: "CLI commands, interactive session loop, trace/eval inspection, and
 ## Commands
 
 ```bash
-bun run dev                    # Interactive CLI
-bun run dev -- setup           # Canonical reviewed setup entrypoint
-bun run dev -- verify          # Verify configuration
-bun run dev -- settings        # Show current settings
-bun run dev -- doctor --live   # Live provider check
-bun run dev -- telegram setup  # Configure Telegram
-bun run dev -- gateway start      # Start gateway (channels must be enabled first)
+pnpm run dev                    # Interactive CLI
+pnpm run dev -- setup           # Canonical reviewed setup entrypoint
+pnpm run dev -- verify          # Verify configuration
+pnpm run dev -- settings        # Show current settings
+pnpm run dev -- doctor --live   # Live provider check
+pnpm run dev -- telegram setup  # Configure Telegram
+pnpm run dev -- gateway start   # Start gateway (channels must be enabled first)
 ```
 
 ## Trace Commands

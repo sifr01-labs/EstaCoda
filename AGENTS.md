@@ -54,15 +54,23 @@ After editing:
 Use the commands that exist in the repo. As of the MVP track, the default validation set is:
 
 ```bash
-bun run typecheck
-bun run smoke
+node --version
+pnpm --version
+pnpm install --frozen-lockfile
+pnpm run typecheck
+pnpm run test
+pnpm run smoke
+pnpm run build
+pnpm run audit:runtime-imports
+pnpm run audit:esm
+pnpm run smoke:dist
 git diff --check
 ```
 
 When tests exist for the touched area, run them too:
 
 ```bash
-bun test
+pnpm exec vitest run <path>
 ```
 
 If the repo adds a stronger wrapper later, use the wrapper instead of raw test commands. The wrapper should become the CI-parity entry point.
@@ -119,7 +127,7 @@ If the actual tree differs, follow the actual tree and update this file only whe
 
 ## Architecture overview
 
-EstaCoda is a TypeScript-first agent runtime with Bun-based development commands.
+EstaCoda is a TypeScript-first agent runtime with Node.js as the production runtime, pnpm/Corepack as the source package-manager default, compiled `dist/` as the release target, and Bun as an optional dev-speed lane only.
 
 The main architectural surfaces are:
 
@@ -296,7 +304,7 @@ Examples of technical tokens that should remain stable:
 KIMI_API_KEY
 Telegram
 ~/.estacoda/config.json
-bun run smoke
+pnpm run smoke
 kimi-k2
 GPT-5.5
 ```

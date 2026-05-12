@@ -181,10 +181,10 @@ Update imports so no non-legacy file imports `Prompt`, `createReadlinePrompt()`,
 Run:
 
 ```bash
-bun test src/cli/session-loop.test.ts
-bun test src/cli/interactive-launcher.test.ts
-bun test src/cli/pack-commands.test.ts
-bun run typecheck
+pnpm exec vitest run src/cli/session-loop.test.ts
+pnpm exec vitest run src/cli/interactive-launcher.test.ts
+pnpm exec vitest run src/cli/pack-commands.test.ts
+pnpm run typecheck
 ```
 
 ### Exit Criteria
@@ -246,11 +246,11 @@ Bare `estacoda` should:
 Run:
 
 ```bash
-bun test src/onboarding/setup-state.test.ts
-bun test src/onboarding/setup-router.test.ts
-bun test src/cli/setup-command.test.ts
-bun test src/cli/interactive-launcher.test.ts
-bun run typecheck
+pnpm exec vitest run src/onboarding/setup-state.test.ts
+pnpm exec vitest run src/onboarding/setup-router.test.ts
+pnpm exec vitest run src/cli/setup-command.test.ts
+pnpm exec vitest run src/cli/interactive-launcher.test.ts
+pnpm run typecheck
 ```
 
 ### Exit Criteria
@@ -377,12 +377,12 @@ Add tests for:
 Run:
 
 ```bash
-bun test src/onboarding/first-run/flow.test.ts
-bun test src/onboarding/setup-router.test.ts
-bun test src/onboarding/review/change-drafts.test.ts
-bun test src/onboarding/review/manifest.test.ts
-bun test src/ui/renderers/standard-renderer.test.ts
-bun test src/ui/renderers/plain-renderer.test.ts
+pnpm exec vitest run src/onboarding/first-run/flow.test.ts
+pnpm exec vitest run src/onboarding/setup-router.test.ts
+pnpm exec vitest run src/onboarding/review/change-drafts.test.ts
+pnpm exec vitest run src/onboarding/review/manifest.test.ts
+pnpm exec vitest run src/ui/renderers/standard-renderer.test.ts
+pnpm exec vitest run src/ui/renderers/plain-renderer.test.ts
 ```
 
 ### Exit Criteria
@@ -461,11 +461,11 @@ Add tests for:
 Run:
 
 ```bash
-bun test src/onboarding/review/apply-plan.test.ts
-bun test src/onboarding/review/apply-executor.test.ts
-bun test src/config/runtime-config.test.ts
-bun test src/security/workspace-trust-store.test.ts
-bun run typecheck
+pnpm exec vitest run src/onboarding/review/apply-plan.test.ts
+pnpm exec vitest run src/onboarding/review/apply-executor.test.ts
+pnpm exec vitest run src/config/runtime-config.test.ts
+pnpm exec vitest run src/security/workspace-trust-store.test.ts
+pnpm run typecheck
 ```
 
 ### Exit Criteria
@@ -523,11 +523,11 @@ Bare `estacoda` may ask whether to run setup when setup is incomplete, but the s
 Run:
 
 ```bash
-bun test src/cli/setup-command.test.ts
-bun test src/cli/init-command.test.ts
-bun test src/cli/interactive-launcher.test.ts
-bun test src/cli/cli-model.test.ts
-bun run typecheck
+pnpm exec vitest run src/cli/setup-command.test.ts
+pnpm exec vitest run src/cli/init-command.test.ts
+pnpm exec vitest run src/cli/interactive-launcher.test.ts
+pnpm exec vitest run src/cli/cli-model.test.ts
+pnpm run typecheck
 ```
 
 ### Exit Criteria
@@ -571,9 +571,9 @@ Do not add a mutating runtime setup tool unless it uses the new review/apply arc
 Run:
 
 ```bash
-bun test src/runtime
-bun test src/tools
-bun run smoke
+pnpm exec vitest run src/runtime
+pnpm exec vitest run src/tools
+pnpm run smoke
 ```
 
 ### Exit Criteria
@@ -615,8 +615,8 @@ Keep Arabic technical tokens isolated.
 Run:
 
 ```bash
-bun test src/onboarding/setup-verification.test.ts
-bun test src/onboarding/setup-copy.test.ts
+pnpm exec vitest run src/onboarding/setup-verification.test.ts
+pnpm exec vitest run src/onboarding/setup-copy.test.ts
 ```
 
 ### Exit Criteria
@@ -668,9 +668,9 @@ Replace legacy wizard coverage with tests for:
 Run:
 
 ```bash
-bun test src/onboarding
-bun test src/cli
-bun run typecheck
+pnpm exec vitest run src/onboarding
+pnpm exec vitest run src/cli
+pnpm run typecheck
 ```
 
 ### Exit Criteria
@@ -705,21 +705,21 @@ Do not document planned behavior as current behavior until the cutover lands.
 Run the standard validation set:
 
 ```bash
-bun run typecheck
-bun run smoke
+pnpm run typecheck
+pnpm run smoke
 git diff --check
 ```
 
 Run focused area tests:
 
 ```bash
-bun test src/onboarding
-bun test src/cli/setup-command.test.ts
-bun test src/cli/interactive-launcher.test.ts
-bun test src/runtime/startup-readiness.test.ts
-bun test src/ui/renderers
-bun test src/ui/cli-ui-copy.test.ts
-bun test src/ui/bidi.test.ts
+pnpm exec vitest run src/onboarding
+pnpm exec vitest run src/cli/setup-command.test.ts
+pnpm exec vitest run src/cli/interactive-launcher.test.ts
+pnpm exec vitest run src/runtime/startup-readiness.test.ts
+pnpm exec vitest run src/ui/renderers
+pnpm exec vitest run src/ui/cli-ui-copy.test.ts
+pnpm exec vitest run src/ui/bidi.test.ts
 ```
 
 ## Manual QA Matrix
@@ -761,7 +761,7 @@ The migration is complete when:
 - Arabic prompt cards and technical token isolation are covered by tests;
 - fallback setup remains on `model.fallbacks`;
 - onboarding modules use the target human-readable directory layout;
-- `bun run typecheck`, `bun run smoke`, and `git diff --check` pass.
+- `pnpm run typecheck`, `pnpm run smoke`, and `git diff --check` pass.
 
 ## Suggested Commit Slices
 

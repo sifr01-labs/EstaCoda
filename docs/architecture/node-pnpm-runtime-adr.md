@@ -5,15 +5,15 @@ description: "Decision record and PR 0 baseline for moving EstaCoda from Bun as 
 
 # Node and pnpm Runtime Migration ADR
 
-Status: mitigation in progress
+Status: implemented
 
 Date: 2026-05-12
 
-This ADR records the public runtime direction for EstaCoda and the PR 0 baseline before implementation work begins. PR 0 is documentation and baseline only; it does not change runtime behavior, package scripts, storage code, installer behavior, AGENTS.md, or durable install docs.
+This ADR records the public runtime direction for EstaCoda and the PR 0 baseline before implementation work began.
 
 ## Decision
 
-EstaCoda will migrate to the following runtime model:
+EstaCoda uses the following runtime model:
 
 - Runtime floor: Node >= 22.18.0.
 - Package manager: pnpm via Corepack as the source and package-manager default.
@@ -22,6 +22,19 @@ EstaCoda will migrate to the following runtime model:
 - MVP Node SQLite adapter: `better-sqlite3`.
 - Deferred SQLite adapter: `node:sqlite` may be added later behind the same internal SQLite interface once it is stable and feature-compatible.
 - PR 3 gate: the `better-sqlite3` verification gate is blocking before any storage-class rewiring proceeds.
+
+## Current Implementation Status
+
+As of the PR 8 migration cleanup, the Node/pnpm contract is implemented as the default path:
+
+- `package.json` declares Node >= 22.18.0 and pnpm via Corepack.
+- Source-mode commands run through pnpm and `tsx`.
+- Production execution targets compiled `dist/` under Node via `pnpm run start` or `node dist/index.js`.
+- SQLite runtime state uses `better-sqlite3` behind the internal adapter.
+- `node:sqlite` remains deferred.
+- Bun remains available only through explicitly named optional `*:bun` scripts and adapter compatibility tests.
+
+The PR 0 baseline below is retained as historical evidence from before the migration phases landed.
 
 ## Rationale
 

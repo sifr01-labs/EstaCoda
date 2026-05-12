@@ -44,8 +44,8 @@ description: "MCP client transport, discovery, and trust metadata."
 ## Commands
 
 ```bash
-bun run dev -- mcp status
-bun run dev -- mcp reload
+pnpm run dev -- mcp status
+pnpm run dev -- mcp reload
 ```
 
 ## Limitations

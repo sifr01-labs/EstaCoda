@@ -9,8 +9,8 @@ description: "Identified architecture risks, severity, and mitigations."
 |----|------|----------|------------|--------|--------|------------|
 | R01 | **AgentLoop monolith** | Critical | High | High | **Resolved** | Decomposed from ~2,700 → 829 lines. Router, planner, executor, recorder extracted. |
 | R02 | **create-runtime god factory** | High | High | Medium | **Accepted** | 916 lines, 72 imports. Builder/DI deferred to post-MVP. |
-| R03 | **No unit tests** | Critical | High | High | **Accepted** | Smoke + 18 eval fixtures are the safety net. Vitest deferred to post-MVP. |
-| R04 | **Bun lock-in prevents Node deployment** | High | Medium | Medium | **Mitigation in progress** | Node/pnpm runtime migration ADR recorded. MVP adapter target is `better-sqlite3`; PR 3 verification gate is blocking before storage rewiring. |
+| R03 | **No unit tests** | Critical | High | High | **Resolved** | Node/Vitest is the authoritative unit-test lane, with smoke and eval fixtures as integration/regression coverage. |
+| R04 | **Bun lock-in prevents Node deployment** | High | Medium | Medium | **Resolved** | Node >= 22.18.0, pnpm/Corepack, compiled `dist/`, and `better-sqlite3` adapter are now the default runtime path. Bun is optional only. |
 | R05 | **Trajectory/Artifact persistence** | Medium | High | Medium | **Partial** | Trajectory persisted to SQLite. ArtifactStore still thin (56 lines). |
 | R06 | **Smoke monolith at 14k lines** | Medium | High | Low | **Resolved** | Deduplicated in v0.6.1. `src/smoke.ts` is now a 9-line dispatcher. |
 | R07 | **Capability trust is a stub** | Medium | Low | High | **Accepted** | Manifest schema designed. Full implementation targeted v0.9–v0.10. |
@@ -30,14 +30,14 @@ description: "Identified architecture risks, severity, and mitigations."
 
 | | Low Likelihood | Medium Likelihood | High Likelihood |
 |---|----------------|-------------------|-----------------|
-| **Critical Severity** | — | — | R03 |
-| **High Severity** | R04 | — | R02 |
+| **Critical Severity** | — | — | — |
+| **High Severity** | — | — | R02 |
 | **Medium Severity** | R07, R12 | R15 | R05 |
 | **Low Severity** | R16, R17 | R13, R18 | R10 |
 
 ## Summary
 
-- **Resolved (6):** R01, R06, R08, R09, R11, R14
+- **Resolved (8):** R01, R03, R04, R06, R08, R09, R11, R14
 - **Partially resolved (2):** R05, R10
-- **Mitigation in progress (1):** R04
-- **Accepted (9):** R02, R03, R07, R12, R13, R15, R16, R17, R18
+- **Mitigation in progress (0):** —
+- **Accepted (8):** R02, R07, R12, R13, R15, R16, R17, R18

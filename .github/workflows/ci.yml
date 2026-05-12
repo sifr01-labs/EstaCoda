@@ -39,28 +39,42 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Set up Node
+        uses: actions/setup-node@v4
         with:
-          bun-version: latest
+          node-version: 22.18.0
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Show tool versions
+        run: |
+          node --version
+          pnpm --version
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Check whitespace and patch hygiene
         run: git diff --check
 
       - name: Typecheck
-        run: bun run typecheck
+        run: pnpm run typecheck
+
+      - name: Run unit tests
+        run: pnpm run test
 
       - name: Run smoke tests
-        run: bun run smoke
+        run: pnpm run smoke
 
-      - name: Run unit tests when configured
-        shell: bash
-        run: |
-          if bun run 2>/dev/null | grep -qE '^\s*test\b'; then
-            bun run test
-          else
-            echo "No package.json test script configured; skipping unit tests."
-          fi
+      - name: Build dist output
+        run: pnpm run build
+
+      - name: Audit runtime imports
+        run: pnpm run audit:runtime-imports
+
+      - name: Audit emitted ESM
+        run: pnpm run audit:esm
+
+      - name: Smoke built dist
+        run: pnpm run smoke:dist

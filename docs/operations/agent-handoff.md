@@ -14,9 +14,10 @@ description: "Short operational note for incoming coding agents."
 ## Standard Validation
 
 ```bash
-bun run typecheck
-bun run smoke
-bun run scripts/run-eval-fixtures.ts
+pnpm run typecheck
+pnpm run test
+pnpm run smoke
+pnpm run eval:fixtures
 ```
 
 ## Security-Sensitive Areas

@@ -226,14 +226,14 @@ export function handleMyCommand(runtime, args) {
 ### Step 6: Run Tests
 
 ```bash
-bun run test
-bun run typecheck
+pnpm run test
+pnpm run typecheck
 ```
 
 Update snapshots if needed:
 
 ```bash
-bun run test -- --update
+pnpm run test -- --update
 ```
 
 ---

@@ -22,5 +22,5 @@
 # Documentation and package metadata.
 /docs/ @0xaly
 /package.json @0xaly
-/bun.lock @0xaly
+/pnpm-lock.yaml @0xaly
 /tsconfig.json @0xaly

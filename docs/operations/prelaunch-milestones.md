@@ -83,10 +83,10 @@ description: "What landed in v0.4 through v0.7, known gaps, and baseline before 
 
 **Status:** Complete.
 
-## Known Gaps Before v0.8
+## Historical Gaps Before v0.8
 
-1. **No unit tests** — Smoke and eval fixtures are the only safety net.
-2. **Bun lock-in** — `bun:sqlite` prevents Node execution.
+1. **No unit tests** — Resolved later by the authoritative Node/Vitest test lane.
+2. **Bun lock-in** — Resolved later by the Node/pnpm migration and `better-sqlite3` adapter.
 3. **Artifact persistence** — `ArtifactStore` is still thin.
 4. **Auto-proposal pipeline** — Threshold-based generation not built.
 5. **Memory policy evolution** — Excluded from v0.7.

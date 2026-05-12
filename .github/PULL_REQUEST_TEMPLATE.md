@@ -85,8 +85,16 @@ Security notes:
 Commands run:
 
 ```bash
-bun run typecheck
-bun run smoke
+node --version
+pnpm --version
+pnpm install --frozen-lockfile
+pnpm run typecheck
+pnpm run test
+pnpm run smoke
+pnpm run build
+pnpm run audit:runtime-imports
+pnpm run audit:esm
+pnpm run smoke:dist
 git diff --check
 ```
 
@@ -98,8 +106,13 @@ Additional tests, if any:
 
 Results:
 
+- [ ] Node and pnpm versions match the supported runtime contract
+- [ ] Frozen pnpm install passed
 - [ ] Typecheck passed
-- [ ] Smoke checks passed
+- [ ] Unit tests passed
+- [ ] Source smoke checks passed
+- [ ] Build and dist smoke checks passed
+- [ ] Runtime import and emitted ESM audits passed
 - [ ] Whitespace/diff check passed
 - [ ] Tests were added or updated where needed
 - [ ] No real provider API calls are required for tests

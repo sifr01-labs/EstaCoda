@@ -7,16 +7,18 @@ description: "Testing strategy, smoke tests, and validation commands."
 
 ## Philosophy
 
-EstaCoda currently has **broad smoke coverage and no unit tests**. The smoke test file is the primary safety net.
+EstaCoda uses an authoritative Node/Vitest unit-test lane plus source and built-output smoke checks. Smoke remains the integration safety net for cross-subsystem behavior.
 
 ## Fast Regression Checks
 
 Run these before and after most changes:
 
 ```bash
-bun run typecheck
-bun run smoke
-bun run scripts/run-eval.ts
+pnpm run typecheck
+pnpm run test
+pnpm run smoke
+pnpm run smoke:dist
+pnpm run eval:fixtures
 ```
 
 **Check** | **Evidence Level**
@@ -37,20 +39,20 @@ bun run scripts/run-eval.ts
 
 ```bash
 # All cases
-bun run smoke
+pnpm run smoke
 
 # By tag
-bun run smoke --tag skills
-bun run smoke --tag memory
+pnpm run smoke --tag skills
+pnpm run smoke --tag memory
 
 # By case ID
-bun run smoke --id corrupt-skill-usage
+pnpm run smoke --id corrupt-skill-usage
 
 # List cases
-bun run smoke --list
+pnpm run smoke --list
 
 # Fail fast + JSON
-bun run smoke --fail-fast --json
+pnpm run smoke --fail-fast --json
 ```
 
 ### What Smoke Covers
@@ -81,7 +83,7 @@ bun run smoke --fail-fast --json
 
 ### Eval Fixtures
 
-Run with `bun run scripts/run-eval.ts` or `bun run scripts/run-eval.ts --id <fixture-id>`.
+Run with `pnpm run eval:fixtures` or `pnpm run dev -- eval <fixture-id>`.
 
 **Base runtime (3):**
 - `provider-text-response` — Provider returns text without tool calls
@@ -139,7 +141,7 @@ Run with `bun run scripts/run-eval.ts` or `bun run scripts/run-eval.ts --id <fix
 ### Smoke Limitations
 
 - Legacy monolith still contains most assertions in one file
-- No formal test framework (assertions are manual `throw`/`assert`)
+- Smoke assertions are manual `throw`/`assert`; unit tests run through Vitest.
 - `// @ts-nocheck` on legacy monolith due to TypeScript control-flow analysis limits
 - New extracted cases use full type-checking
 
@@ -160,8 +162,8 @@ These are runtime inspection and validation tools, not a replacement for unit te
 
 ## Recommended Test Practices
 
-1. Run `bun run typecheck` first.
-2. Run `bun run smoke` before declaring success.
+1. Run `pnpm run typecheck` first.
+2. Run `pnpm run test`, `pnpm run smoke`, and `pnpm run smoke:dist` before declaring success.
 3. For live behavior, run the internal alpha harness.
 4. Capture failures with screenshots, logs, and reproduction steps.
 
@@ -169,8 +171,7 @@ These are runtime inspection and validation tools, not a replacement for unit te
 
 **Target:** Post-v0.7
 
-- Introduce Vitest (Bun-compatible) — deferred from v0.4–v0.6 to avoid blocking feature delivery
-- Extract unit tests for Router, Planner, Executor, Recorder
+- Keep expanding subsystem unit tests for Router, Planner, Executor, Recorder
 - Keep smoke.ts as integration layer only
 - Add per-subsystem test suites
 - Expand eval fixture corpus for regression detection

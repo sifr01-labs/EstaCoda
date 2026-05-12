@@ -11,7 +11,7 @@ const driverRules = new Map([
 ]);
 
 const legacyBunSQLiteFiles = new Set([
-  // Transitional allowlist. Keep empty when storage/runtime classes do not import bun:sqlite.
+  // Transitional allowlist. Keep empty in the Node/pnpm runtime contract.
 ]);
 
 async function collectSourceFiles(directory) {
@@ -54,7 +54,7 @@ for (const file of await collectSourceFiles(sourceRoot)) {
     }
 
     if (specifier === "bun:sqlite" && legacyBunSQLiteFiles.has(relativeFile)) {
-      legacyWarnings.push(`${relativeFile}: legacy bun:sqlite import must be removed in PR 4/5`);
+      legacyWarnings.push(`${relativeFile}: legacy bun:sqlite import must be removed from runtime code`);
     } else if (!allowedFiles.has(relativeFile)) {
       failures.push(`${relativeFile}: ${specifier} is only allowed in ${[...allowedFiles].join(", ") || "no MVP runtime files"}`);
     }

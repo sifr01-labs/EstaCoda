@@ -75,7 +75,7 @@ Auxiliary routes are preference/routing constructs, not separate runtimes:
 Run the live acceptance sweep:
 
 ```bash
-bun run provider:hardening
+pnpm run provider:hardening
 ```
 
 This rotates the project-level provider route across the acceptance set, runs live diagnostics, captures results, and restores the original config.

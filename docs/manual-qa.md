@@ -9,7 +9,7 @@
 Run these checks after every test run:
 
 ```bash
-bun run test
+pnpm run test
 ```
 
 ### 1.1 ANSI Leak Check
@@ -125,7 +125,7 @@ else:
 ### 2.1 NO_COLOR=1
 
 ```bash
-NO_COLOR=1 bun run dev
+NO_COLOR=1 pnpm run dev
 ```
 
 **Verify:**
@@ -137,7 +137,7 @@ NO_COLOR=1 bun run dev
 ### 2.2 TERM=dumb
 
 ```bash
-TERM=dumb bun run dev
+TERM=dumb pnpm run dev
 ```
 
 **Verify:**
@@ -148,7 +148,7 @@ TERM=dumb bun run dev
 ### 2.3 Non-TTY Fallback
 
 ```bash
-bun run dev | cat
+pnpm run dev | cat
 ```
 
 **Verify:**
@@ -159,7 +159,7 @@ bun run dev | cat
 ### 2.4 Narrow Terminal
 
 ```bash
-COLUMNS=40 bun run dev
+COLUMNS=40 pnpm run dev
 ```
 
 **Verify:**
@@ -175,7 +175,7 @@ COLUMNS=40 bun run dev
 
 1. Start an interactive session in a wide TTY:
    ```bash
-   bun run dev
+   pnpm run dev
    ```
 
 2. Send a prompt that triggers a long streaming response while tools execute:
@@ -202,7 +202,7 @@ The `session-surfaces.test.ts` includes a test proving `createSessionRenderer` w
 ### 4.1 Startup Screen
 
 ```bash
-bun run dev
+pnpm run dev
 ```
 
 **Verify standard mode:**
@@ -213,7 +213,7 @@ bun run dev
 
 **Verify plain mode:**
 ```bash
-NO_COLOR=1 bun run dev
+NO_COLOR=1 pnpm run dev
 ```
 - Simple text block: `EstaCoda`, taglines, `model: ...`, `readiness: ready`.
 - No ANSI, no box frames.
@@ -232,7 +232,7 @@ In an interactive session:
 
 **Verify non-TTY:**
 ```bash
-echo "1" | bun run dev
+echo "1" | pnpm run dev
 ```
 - Numbered list prints without cursor controls.
 - Selection is read from stdin.
@@ -244,7 +244,7 @@ echo "1" | bun run dev
 ### 5.1 Standard Mode
 
 ```bash
-bun run dev
+pnpm run dev
 ```
 
 Send any message. Between turns, verify:
@@ -255,7 +255,7 @@ Send any message. Between turns, verify:
 ### 5.2 Plain Mode
 
 ```bash
-NO_COLOR=1 bun run dev
+NO_COLOR=1 pnpm run dev
 ```
 
 Verify:
@@ -299,7 +299,7 @@ Send any prompt that produces a response.
 ## 8. Command Registry QA
 
 ```bash
-bun run dev
+pnpm run dev
 /help
 ```
 
@@ -336,7 +336,7 @@ Use an isolated home so no real credentials or trust state are touched:
 ```bash
 rm -rf /tmp/estacoda-setup-qa-home
 mkdir -p /tmp/estacoda-setup-qa-home
-HOME=/tmp/estacoda-setup-qa-home bun run dev -- setup
+HOME=/tmp/estacoda-setup-qa-home pnpm run dev -- setup
 ```
 
 **Verify:**
@@ -353,7 +353,7 @@ HOME=/tmp/estacoda-setup-qa-home bun run dev -- setup
 Arabic setup spot check:
 
 ```bash
-HOME=/tmp/estacoda-setup-qa-home-ar bun run dev -- setup
+HOME=/tmp/estacoda-setup-qa-home-ar pnpm run dev -- setup
 ```
 
 Choose Arabic and verify that commands, provider names, paths, and env vars remain readable with LTR isolation. This checks onboarding-owned setup surfaces only; full runtime CLI localization is not complete.
@@ -365,9 +365,9 @@ Choose Arabic and verify that commands, provider names, paths, and env vars rema
 Before any commit that touches rendering code, run:
 
 ```bash
-bun run test
-bun run typecheck
-bun run smoke
+pnpm run test
+pnpm run typecheck
+pnpm run smoke
 ```
 
 All three must pass. Snapshot changes must be reviewed for unexpected ANSI/emoji/box-drawing leaks.

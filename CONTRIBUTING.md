@@ -186,8 +186,9 @@ These changes require extra review and must not be bundled with unrelated refact
 | Requirement | Notes |
 | --- | --- |
 | Git | Required for all contribution workflows. |
-| Node.js | Use the version declared by the repo if present. Node.js 22 is recommended for current local development. |
-| Bun | Primary package manager and script runner for EstaCoda. |
+| Node.js | Node >= 22.18.0 is the production runtime contract. |
+| Corepack / pnpm | Use Corepack to activate the pnpm version declared in `package.json`. |
+| Bun | Optional dev-speed lane only; not required for normal development or production runtime. |
 | Python 3.11+ | Optional for Python-based skills, scripts, and compatibility checks. |
 
 ### Clone and install
@@ -195,7 +196,8 @@ These changes require extra review and must not be bundled with unrelated refact
 ```bash
 git clone git@github.com:KemetResearch/estacoda.git
 cd estacoda
-bun install
+corepack enable
+pnpm install
 ```
 
 If you are contributing from a fork:
@@ -204,7 +206,8 @@ If you are contributing from a fork:
 git clone git@github.com:<your-username>/estacoda.git
 cd estacoda
 git remote add upstream git@github.com:KemetResearch/estacoda.git
-bun install
+corepack enable
+pnpm install
 ```
 
 ### Local environment
@@ -232,17 +235,17 @@ Run the checks that apply to your change.
 Minimum local verification:
 
 ```bash
-bun run typecheck
-bun run smoke
+pnpm run typecheck
+pnpm run smoke
 git diff --check
 ```
 
 If the repo exposes additional scripts, run the relevant ones:
 
 ```bash
-bun test
-bun run lint
-bun run format:check
+pnpm run test
+pnpm run build
+pnpm run smoke:dist
 ```
 
 If your change touches provider tool-calling, run the relevant live or mocked provider check documented by the repo.
@@ -405,8 +408,8 @@ Before submitting, inspect:
 git diff
 git status
 git diff --check
-bun run typecheck
-bun run smoke
+pnpm run typecheck
+pnpm run smoke
 ```
 
 Do not submit an agent change only because the agent said checks passed. Run the checks yourself or show the CI result.
@@ -511,8 +514,8 @@ git checkout main
 git pull upstream main
 git checkout -b fix/short-description
 # make changes
-bun run typecheck
-bun run smoke
+pnpm run typecheck
+pnpm run smoke
 git diff --check
 git status
 git diff
@@ -559,7 +562,8 @@ A good bug report includes:
 - Operating system
 - Shell
 - Node.js version
-- Bun version
+- pnpm version
+- Bun version, only if using an optional Bun lane
 - EstaCoda version or commit
 - Install method
 - Command run
@@ -572,7 +576,7 @@ For setup issues, include:
 
 ```bash
 node --version
-bun --version
+pnpm --version
 git --version
 ```
 

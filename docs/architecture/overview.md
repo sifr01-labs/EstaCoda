@@ -5,7 +5,7 @@ description: "High-level system map, entrypoints, runtime composition, and data 
 
 # Architecture Overview
 
-EstaCoda is a TypeScript-first agent runtime built on Bun. It executes provider-backed agent sessions through CLI and multiple channels (Telegram, Discord, Email, WhatsApp), with skills, tools, memory, and security policy as first-class surfaces.
+EstaCoda is a TypeScript-first agent runtime built for Node.js >= 22.18.0, pnpm/Corepack source workflows, and compiled `dist/` production execution. It executes provider-backed agent sessions through CLI and multiple channels (Telegram, Discord, Email, WhatsApp), with skills, tools, memory, and security policy as first-class surfaces. Bun is optional for explicitly named dev-speed lanes only.
 
 ## Entrypoints
 
@@ -401,7 +401,7 @@ The primary end-to-end path:
 1. **AgentLoop monolith** — Was 2,714 lines, now 809 lines. Core orchestration remains but provider loop, tool execution, skill workflows, and native intents are extracted. Remaining coupling: prompt assembly, memory context injection, cross-component coordination.
 2. **create-runtime.ts god factory** — 901 lines, 69 imports, 36 constructor calls, no DI boundary. Assessment in `docs/planning/v0.4-builder-assessment.md` recommends deferring a builder pattern.
 3. **Trajectory/Artifact skeletons** — 97 and 56 lines, in-memory only.
-4. **Bun lock-in** — `bun:sqlite` prevents Node execution.
+4. **Native SQLite distribution** — `better-sqlite3` provides stable synchronous SQLite semantics behind the internal adapter, but native bindings require install and packaging validation on supported platforms.
 5. **Gateway liveness** — readiness-focused, not daemon-tracking.
 6. **Remaining cross-component state** — `AgentLoop` constructor still receives 20+ dependencies. Some (e.g., `memoryContext`, `projectContext`) are only used for prompt assembly and could move to a dedicated `PromptAssembler`.
 7. **Discord slash commands** — deferred to v0.9.1.

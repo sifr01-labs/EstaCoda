@@ -32,11 +32,16 @@ This directory is the **source of truth** for the EstaCoda codebase as it exists
 
 | Command | Purpose |
 |---------|---------|
-| `bun install` | Install dependencies |
-| `bun run typecheck` | TypeScript type check |
-| `bun run smoke` | Run smoke tests |
-| `bun run dev` | Start interactive CLI |
-| `bun run eval:substrate` | Generate eval run scaffold |
+| `corepack enable` | Activate package-manager shims |
+| `pnpm install` | Install dependencies |
+| `pnpm run typecheck` | TypeScript type check |
+| `pnpm run test` | Run the authoritative Node/Vitest test lane |
+| `pnpm run smoke` | Run source-mode smoke tests |
+| `pnpm run dev` | Start interactive CLI from source |
+| `pnpm run build` | Compile production `dist/` output |
+| `pnpm run start` | Run the built CLI with Node |
+| `pnpm run smoke:dist` | Run smoke tests from `dist/` |
+| `pnpm run eval:substrate` | Generate eval run scaffold |
 | `estacoda trace list` | List recent trajectories |
 | `estacoda trace dump <id>` | Inspect a trajectory (redacted) |
 | `estacoda trace timeline <id>` | Chronological event view |
