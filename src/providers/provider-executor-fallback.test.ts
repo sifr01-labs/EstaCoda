@@ -238,7 +238,7 @@ describe("ProviderExecutor fallback behavior", () => {
     ["timeout", true],
     ["incomplete-stream", false],
     ["unsupported", false]
-  ])("eligible failure class %s triggers fallback: %s", async (errorClass, shouldTrigger) => {
+  ])("eligible failure class %s triggers fallback: %s", async (errorClass: string, shouldTrigger: boolean) => {
     const primary = createMockAdapter({
       id: "openai",
       completeResponse: {

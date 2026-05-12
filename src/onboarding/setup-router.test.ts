@@ -104,7 +104,7 @@ describe("routeSetupEntryState", () => {
     { kind: "untrusted-workspace", route: "configured-menu", firstAction: "trust-workspace" },
   ];
 
-  it.each(cases)("routes $kind to $route", ({ kind, route, firstAction }) => {
+  it.each(cases)("routes $kind to $route", ({ kind, route, firstAction }: (typeof cases)[number]) => {
     const decision = routeSetupEntryState(state(kind));
 
     expect(decision.kind).toBe(route);
