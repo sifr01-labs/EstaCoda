@@ -370,24 +370,42 @@ export function resolveCustomProviderMetadata(
 }
 
 /**
- * Native media providers (STT/TTS/image-generation) are NOT runnable
- * LLM providers. They belong to their own config surfaces
+ * Providers that are currently routed through their own native config surfaces
  * (SttProvider, TtsProvider, ImageGenerationProvider) and must not be
- * absorbed into the LLM provider metadata registry.
+ * absorbed into the LLM provider metadata registry in the current codebase.
+ *
+ * IMPORTANT: This is a CURRENT-STATE registry exclusion list, NOT a permanent
+ * capability claim. If a provider listed here (e.g. groq) is later added to the
+ * STATIC_REGISTRY as a real LLM provider, remove it from this set. The function
+ * is intentionally named as an exclusion guard rather than a capability
+ * assertion to avoid implying that these providers can never support LLM
+ * routing in the future.
+ *
+ * Usage: use this only to decide whether a provider ID should be treated as
+ * a runnable LLM provider. Do not use it to gate UI features that could
+ * legitimately apply to a future LLM-registered instance of the same name.
  */
 const MEDIA_ONLY_PROVIDERS = new Set<string>([
-  // Image generation
+  // Image generation (native surfaces: ImageGenerationProvider)
   "fal",
   "byteplus",
-  // TTS
+  // TTS (native surfaces: TtsProvider)
   "edge",
   "elevenlabs",
   "neutts",
   "kittentts",
-  // STT (hosted)
+  // STT (native surfaces: SttProvider)
   "groq"
 ]);
 
+/**
+ * Returns true if the provider is currently excluded from the LLM provider
+ * metadata registry because it is handled by a dedicated native config surface.
+ *
+ * This is NOT a claim that the provider can never support LLM chat routing.
+ * If a provider graduates to the STATIC_REGISTRY, remove it from the
+ * MEDIA_ONLY_PROVIDERS set above.
+ */
 export function isProviderMediaOnly(providerId: ProviderId): boolean {
   return MEDIA_ONLY_PROVIDERS.has(providerId);
 }
