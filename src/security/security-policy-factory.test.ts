@@ -46,9 +46,15 @@ describe("security policy factory", () => {
       await policy.assess!(baseRequest);
 
       expect(executor.complete).toHaveBeenCalledTimes(1);
-      const [request, preferences] = (executor.complete as any).mock.calls[0];
+      const [request, preferences, executionOptions] = (executor.complete as any).mock.calls[0];
       expect(request.model).toBe("gpt-4o");
-      expect(preferences!.providerOrder).toEqual(["openai"]);
+      expect(preferences!.providerOrder).toBeUndefined();
+      expect(executionOptions!.primaryRoute).toBeDefined();
+      expect(executionOptions!.primaryRoute.provider).toBe("openai");
+      expect(executionOptions!.primaryRoute.id).toBe("gpt-4o");
+      expect(executionOptions!.primaryRoute.apiMode).toBe("openai_chat_completions");
+      expect(executionOptions!.primaryRoute.baseUrl).toBe("https://api.openai.com/v1");
+      expect(executionOptions!.primaryRoute.apiKeyEnv).toBe("OPENAI_API_KEY");
     });
 
     it("uses full auxiliaryModels.approval resolved route when override absent", async () => {

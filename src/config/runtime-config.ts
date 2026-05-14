@@ -25,7 +25,8 @@ import { createOpenAICompatibleProvider, type FetchLike as ProviderFetchLike } f
 import { ProviderRegistry } from "../providers/provider-registry.js";
 import {
   getDefaultBaseUrl,
-  getDefaultApiKeyEnv
+  getDefaultApiKeyEnv,
+  buildResolvedModelRoute
 } from "../providers/provider-metadata.js";
 import type { MCPServerTransport } from "../mcp/mcp-client.js";
 import type { SkillAutonomy } from "../skills/skill-learning.js";
@@ -610,14 +611,14 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
       console.warn(`[config] ${warning}`);
     }
   }
-  const primaryModelRoute: ResolvedModelRoute = {
+  const primaryModelRoute = buildResolvedModelRoute({
     provider: config.model?.provider ?? "unconfigured",
-    id: config.model?.id ?? "unconfigured",
+    model: config.model?.id ?? "unconfigured",
     profile: model,
     baseUrl: config.providers?.[config.model?.provider ?? ""]?.baseUrl,
     apiKeyEnv: config.providers?.[config.model?.provider ?? ""]?.apiKeyEnv,
     contextWindowTokens: config.model?.contextWindowTokens
-  };
+  });
 
   const modelFallbackRoutes: ResolvedModelRoute[] = [];
   for (const fallback of normalizedFallbacks.fallbacks) {
@@ -630,14 +631,14 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
       ...options.modelsDevOptions
     });
     const fallbackProviderConfig = config.providers?.[fallback.provider];
-    modelFallbackRoutes.push({
+    modelFallbackRoutes.push(buildResolvedModelRoute({
       provider: fallback.provider,
-      id: fallback.id,
+      model: fallback.id,
       profile: fallbackProfile,
       baseUrl: fallback.baseUrl ?? fallbackProviderConfig?.baseUrl,
       apiKeyEnv: fallback.apiKeyEnv ?? fallbackProviderConfig?.apiKeyEnv,
       contextWindowTokens: fallback.contextWindowTokens
-    });
+    }));
   }
 
   return {

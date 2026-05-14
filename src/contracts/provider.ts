@@ -111,6 +111,7 @@ export type ResolvedModelRoute = {
   baseUrl?: string;
   apiKeyEnv?: string;
   contextWindowTokens?: number;
+  apiMode?: ProviderApiMode;
 };
 
 export type AuxiliaryModelProvider = ProviderId | "auto" | "main";

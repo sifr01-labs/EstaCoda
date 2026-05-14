@@ -124,6 +124,16 @@ export class ProviderExecutor {
     });
   }
 
+  /**
+   * LEGACY / SCAFFOLD ONLY — Do not rely on this in production.
+   *
+   * This fallback path resolves routes from the provider registry when no
+   * explicit primaryRoute is supplied. It exists for backward compatibility
+   * and for tests that have not yet been migrated to pass explicit routes.
+   *
+   * PR7 owns migrating/quarantining the legacy no-route tests and making
+   * production route-only behavior strict. Do not expand this path.
+   */
   async #resolveRoutesFromRegistry(
     request: Omit<ProviderRequest, "model"> & { model?: string },
     preferences: ProviderRoutePreferences

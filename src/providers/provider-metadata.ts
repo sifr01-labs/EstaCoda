@@ -1,7 +1,9 @@
 import type {
   ProviderId,
   ProviderAuthMethod,
-  ProviderApiMode
+  ProviderApiMode,
+  ResolvedModelRoute,
+  ModelProfile
 } from "../contracts/provider.js";
 
 export type ProviderVisibility = {
@@ -366,6 +368,34 @@ export function resolveCustomProviderMetadata(
     defaultAuthMethod: "api_key",
     allowsCustomBaseUrl: true,
     requiresModelSelection: true
+  };
+}
+
+/**
+ * Build an explicit ResolvedModelRoute from config or caller-supplied fields,
+ * enriching with apiMode from provider metadata when not already provided.
+ *
+ * This is the single shared helper for constructing normalized runtime routes.
+ * Callers should prefer this over hand-rolling route objects in multiple places.
+ */
+export function buildResolvedModelRoute(options: {
+  provider: ProviderId;
+  model: string;
+  profile: ModelProfile;
+  baseUrl?: string;
+  apiKeyEnv?: string;
+  contextWindowTokens?: number;
+  apiMode?: ProviderApiMode;
+}): ResolvedModelRoute {
+  const metadata = getProviderMetadata(options.provider);
+  return {
+    provider: options.provider,
+    id: options.model,
+    profile: options.profile,
+    baseUrl: options.baseUrl,
+    apiKeyEnv: options.apiKeyEnv,
+    contextWindowTokens: options.contextWindowTokens,
+    apiMode: options.apiMode ?? metadata.apiMode
   };
 }
 

@@ -9,7 +9,8 @@ import {
   listProvidersVisibleInModelPicker,
   listCatalogKnownProviders,
   isProviderMediaOnly,
-  resolveCustomProviderMetadata
+  resolveCustomProviderMetadata,
+  buildResolvedModelRoute
 } from "./provider-metadata.js";
 import type { ProviderId } from "../contracts/provider.js";
 
@@ -201,6 +202,103 @@ describe("provider-metadata", () => {
       expect(known).toContain("minimax");
       expect(known).toContain("nous");
       expect(known).not.toContain("unconfigured");
+    });
+  });
+
+  describe("buildResolvedModelRoute", () => {
+    it("constructs a ResolvedModelRoute with provider-derived apiMode", () => {
+      const route = buildResolvedModelRoute({
+        provider: "openai",
+        model: "gpt-4o",
+        profile: {
+          id: "gpt-4o",
+          provider: "openai",
+          contextWindowTokens: 128000,
+          supportsTools: true,
+          supportsVision: true,
+          supportsStructuredOutput: true
+        }
+      });
+
+      expect(route.provider).toBe("openai");
+      expect(route.id).toBe("gpt-4o");
+      expect(route.apiMode).toBe("openai_chat_completions");
+      expect(route.baseUrl).toBeUndefined();
+      expect(route.apiKeyEnv).toBeUndefined();
+    });
+
+    it("preserves explicit apiMode when provided", () => {
+      const route = buildResolvedModelRoute({
+        provider: "openai",
+        model: "gpt-4o",
+        profile: {
+          id: "gpt-4o",
+          provider: "openai",
+          contextWindowTokens: 128000,
+          supportsTools: true,
+          supportsVision: true,
+          supportsStructuredOutput: true
+        },
+        apiMode: "openai_responses"
+      });
+
+      expect(route.apiMode).toBe("openai_responses");
+    });
+
+    it("carries baseUrl and apiKeyEnv when provided", () => {
+      const route = buildResolvedModelRoute({
+        provider: "deepseek",
+        model: "deepseek-chat",
+        profile: {
+          id: "deepseek-chat",
+          provider: "deepseek",
+          contextWindowTokens: 128000,
+          supportsTools: true,
+          supportsVision: false,
+          supportsStructuredOutput: true
+        },
+        baseUrl: "https://custom.deepseek.com/v1",
+        apiKeyEnv: "DEEPSEEK_KEY"
+      });
+
+      expect(route.baseUrl).toBe("https://custom.deepseek.com/v1");
+      expect(route.apiKeyEnv).toBe("DEEPSEEK_KEY");
+      expect(route.apiMode).toBe("openai_chat_completions");
+    });
+
+    it("defaults unknown providers to custom_openai_compatible apiMode", () => {
+      const route = buildResolvedModelRoute({
+        provider: "unknown-corp" as ProviderId,
+        model: "custom-model",
+        profile: {
+          id: "custom-model",
+          provider: "unknown-corp" as ProviderId,
+          contextWindowTokens: 128000,
+          supportsTools: true,
+          supportsVision: false,
+          supportsStructuredOutput: true
+        }
+      });
+
+      expect(route.apiMode).toBe("custom_openai_compatible");
+    });
+
+    it("does not include raw secrets in the route", () => {
+      const route = buildResolvedModelRoute({
+        provider: "openai",
+        model: "gpt-4o",
+        profile: {
+          id: "gpt-4o",
+          provider: "openai",
+          contextWindowTokens: 128000,
+          supportsTools: true,
+          supportsVision: true,
+          supportsStructuredOutput: true
+        }
+      });
+
+      expect(route).not.toHaveProperty("apiKey");
+      expect(route).not.toHaveProperty("credential");
     });
   });
 });

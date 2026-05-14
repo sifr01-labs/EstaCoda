@@ -8,6 +8,7 @@ import {
   type SecurityRequest
 } from "../contracts/security.js";
 import type { ResolvedModelRoute } from "../contracts/provider.js";
+import { buildResolvedModelRoute, getDefaultBaseUrl, getDefaultApiKeyEnv } from "../providers/provider-metadata.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { assessCommandSafety, normalizeCommandForSafety } from "./command-safety.js";
 
@@ -241,6 +242,21 @@ async function assessWithAuxiliaryProvider(
 
     if (assessor.route !== undefined) {
       executionOptions.primaryRoute = assessor.route;
+    } else if (assessor.provider !== undefined && assessor.model !== undefined) {
+      executionOptions.primaryRoute = buildResolvedModelRoute({
+        provider: assessor.provider,
+        model: assessor.model,
+        profile: {
+          id: assessor.model,
+          provider: assessor.provider,
+          contextWindowTokens: 128_000,
+          supportsTools: true,
+          supportsVision: false,
+          supportsStructuredOutput: true
+        },
+        baseUrl: getDefaultBaseUrl(assessor.provider),
+        apiKeyEnv: getDefaultApiKeyEnv(assessor.provider)
+      });
     }
 
     const execution = await assessor.providerExecutor.complete({
@@ -276,7 +292,7 @@ async function assessWithAuxiliaryProvider(
       responseFormat: { type: "json_object" }
     }, {
       requireStructuredOutput: true,
-      providerOrder: assessor.route === undefined ? [assessor.provider] : undefined
+      providerOrder: undefined
     }, executionOptions);
 
     if (!execution.ok || execution.response === undefined) {

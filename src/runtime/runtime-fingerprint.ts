@@ -139,6 +139,7 @@ function fingerprintRoute(route: ResolvedModelRoute): Record<string, unknown> {
     id: route.id,
     baseUrl: route.baseUrl,
     apiKeyEnv: route.apiKeyEnv,
+    apiMode: route.apiMode,
     contextWindowTokens: route.contextWindowTokens,
   };
 }
