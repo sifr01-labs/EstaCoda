@@ -1334,6 +1334,8 @@ export async function setupProviderConfig(options: {
   const forceCredential = options.input.requiresCredential !== false && options.input.provider !== "local";
   const requiresCredential = explicitlyProvidesCredential || forceCredential;
   const envName = requiresCredential ? options.input.apiKeyEnv ?? getDefaultApiKeyEnv(options.input.provider) : undefined;
+
+  // Write raw secret to .env boundary, never into config JSON
   let secretPath: string | undefined;
   if (options.input.apiKey !== undefined && options.input.apiKey.trim().length > 0 && envName !== undefined) {
     const secret = await writeEnvSecret({
@@ -1344,19 +1346,24 @@ export async function setupProviderConfig(options: {
     process.env[secret.key] = options.input.apiKey;
     secretPath = secret.path;
   }
-  const previousModels = existing.config.providers?.[options.input.provider]?.models ?? [];
+
+  // Preserve unrelated provider fields by spreading the existing block first
+  const existingProvider = existing.config.providers?.[options.input.provider] ?? {};
+  const previousModels = existingProvider.models ?? [];
   const nextModels = uniqueStrings([
     ...previousModels,
     ...(options.input.models ?? []),
     options.input.model
   ]);
   const providerConfig = {
+    ...existingProvider,
     kind: "openai-compatible" as const,
     baseUrl: options.input.baseUrl ?? getDefaultBaseUrl(options.input.provider),
     apiKeyEnv: envName,
     models: nextModels,
     enableNetwork: options.input.enableNetwork ?? true
   };
+
   const contextWindowPatch = options.input.contextWindowTokens !== undefined
     ? { contextWindowTokens: options.input.contextWindowTokens }
     : {};
@@ -1369,25 +1376,34 @@ export async function setupProviderConfig(options: {
         ...contextWindowPatch
       }
     };
-  const config = mergeConfig(existing.config, {
-    ...primaryModelPatch,
-    providers: {
-      [options.input.provider]: providerConfig
-    },
-    credentialPools: envName === undefined
-      ? {}
-      : {
+
+  // Only configure credential pools when explicit rotation is requested.
+  // Normal API-key storage is provider/route env reference + .env, not pool.
+  const credentialPoolPatch =
+    options.input.credentialPoolStrategy !== undefined && envName !== undefined
+      ? {
+        credentialPools: {
           [options.input.provider]: {
-            strategy: options.input.credentialPoolStrategy ?? "fill_first",
+            strategy: options.input.credentialPoolStrategy,
             entries: [
               {
                 id: `${options.input.provider}-${envName}`,
-                source: { kind: "env", name: envName },
+                source: { kind: "env" as const, name: envName },
                 priority: 1
               }
             ]
           }
         }
+      }
+      : {};
+
+  // Single read, single merge, single save — no multi-write partial states
+  const config = mergeConfig(existing.config, {
+    ...primaryModelPatch,
+    providers: {
+      [options.input.provider]: providerConfig
+    },
+    ...credentialPoolPatch
   });
 
   await saveRuntimeConfig(targetPath, config);
