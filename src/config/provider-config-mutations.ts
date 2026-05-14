@@ -42,6 +42,8 @@ export type RegisterProviderModelInput = {
 export type SetPreferredModelRouteInput = {
   provider: ProviderId;
   model: string;
+  baseUrl?: string;
+  apiKeyEnv?: string;
   contextWindowTokens?: number;
 };
 
@@ -51,19 +53,6 @@ export type AddFallbackRouteInput = {
   baseUrl?: string;
   apiKeyEnv?: string;
   contextWindowTokens?: number;
-};
-
-/**
- * Session model overrides are not persistent config writes in PR6.
- * This is a type-only placeholder for future session-scoped route overrides.
- * The apply function is intentionally a no-op for persistent config.
- */
-export type SessionModelOverride = {
-  provider: ProviderId;
-  model: string;
-  contextWindowTokens?: number;
-  baseUrl?: string;
-  apiKeyEnv?: string;
 };
 
 // ── Pure config mutators (no I/O) ────────────────────────────────────────────
@@ -77,7 +66,8 @@ export function applyRegisterProviderConfig(
   existing: EstaCodaConfig,
   input: RegisterProviderConfigInput
 ): EstaCodaConfig {
-  const existingProvider = existing.providers?.[input.provider] ?? {};
+  const providers = existing.providers;
+  const existingProvider = providers !== undefined ? providers[input.provider] ?? {} : {};
   const providerConfig: Record<string, unknown> = { ...existingProvider };
 
   if (input.kind !== undefined) providerConfig.kind = input.kind;
@@ -107,7 +97,8 @@ export function applyStoreProviderCredential(
   existing: EstaCodaConfig,
   input: StoreProviderCredentialInput
 ): { config: EstaCodaConfig; wroteCredentialPool: boolean } {
-  const existingProvider = existing.providers?.[input.provider] ?? {};
+  const providers = existing.providers;
+  const existingProvider = providers !== undefined ? providers[input.provider] ?? {} : {};
   const providerConfig = {
     ...existingProvider,
     apiKeyEnv: input.apiKeyEnv
@@ -124,7 +115,7 @@ export function applyStoreProviderCredential(
         entries: [
           {
             id: `${input.provider}-${input.apiKeyEnv}`,
-            source: { kind: "env", name: input.apiKeyEnv },
+            source: { kind: "env" as const, name: input.apiKeyEnv },
             priority: 1
           }
         ]
@@ -153,9 +144,10 @@ export function applyRegisterProviderModel(
   existing: EstaCodaConfig,
   input: RegisterProviderModelInput
 ): EstaCodaConfig {
-  const previousModels = existing.providers?.[input.provider]?.models ?? [];
+  const providers = existing.providers;
+  const previousModels = providers !== undefined ? providers[input.provider]?.models ?? [] : [];
   const nextModels = uniqueStrings([...previousModels, ...input.models]);
-  const existingProvider = existing.providers?.[input.provider] ?? {};
+  const existingProvider = providers !== undefined ? providers[input.provider] ?? {} : {};
 
   return mergeConfig(existing, {
     providers: {
@@ -164,34 +156,49 @@ export function applyRegisterProviderModel(
         models: nextModels
       }
     }
-  });
+  } as EstaCodaConfig);
 }
 
 /**
  * Set the preferred model route.
  * This switches the primary model.
+ * Explicit baseUrl and apiKeyEnv are stored on the provider block so that
+ * the runtime config loader can resolve a complete ResolvedModelRoute.
  */
 export function applySetPreferredModelRoute(
   existing: EstaCodaConfig,
   input: SetPreferredModelRouteInput
 ): EstaCodaConfig {
-  const contextWindowPatch =
-    input.contextWindowTokens !== undefined
-      ? { contextWindowTokens: input.contextWindowTokens }
-      : {};
+  const providers = existing.providers;
+  const existingProvider = providers !== undefined ? providers[input.provider] ?? {} : {};
+  const providerPatch: Record<string, unknown> = { ...existingProvider };
 
-  return mergeConfig(existing, {
-    model: {
-      provider: input.provider,
-      id: input.model,
-      ...contextWindowPatch
+  if (input.baseUrl !== undefined) providerPatch.baseUrl = input.baseUrl;
+  if (input.apiKeyEnv !== undefined) providerPatch.apiKeyEnv = input.apiKeyEnv;
+
+  const modelPatch: Record<string, unknown> = {
+    provider: input.provider,
+    id: input.model
+  };
+  if (input.contextWindowTokens !== undefined) {
+    modelPatch.contextWindowTokens = input.contextWindowTokens;
+  }
+
+  const patch: EstaCodaConfig = {
+    model: modelPatch as EstaCodaConfig["model"],
+    providers: {
+      [input.provider]: providerPatch as NonNullable<EstaCodaConfig["providers"]>[string]
     }
-  });
+  };
+  return mergeConfig(existing, patch);
 }
 
 /**
  * Append one fallback route and normalize.
  * Preserves fallback order and dedupes against primary / duplicates.
+ * Identity key is provider/id/baseUrl, so routes that differ only by
+ * apiKeyEnv or contextWindowTokens on the same endpoint are deduped
+ * (first one wins).
  */
 export function applyAddFallbackRoute(
   existing: EstaCodaConfig,
@@ -222,17 +229,6 @@ export function applyAddFallbackRoute(
       fallbacks: normalized.fallbacks
     }
   };
-}
-
-/**
- * Intentionally a no-op for persistent config.
- * Session overrides will be stored in session metadata, not config JSON.
- */
-export function applySessionModelOverride(
-  existing: EstaCodaConfig,
-  _input: SessionModelOverride
-): EstaCodaConfig {
-  return existing;
 }
 
 // ── Load/save wrappers ───────────────────────────────────────────────────────
@@ -297,16 +293,6 @@ export async function addFallbackRoute(
   const targetPath = await resolveTargetPath(options);
   const existing = await readConfig(targetPath);
   const config = applyAddFallbackRoute(existing.config, options.input);
-  await saveRuntimeConfig(targetPath, config);
-  return { path: targetPath, config };
-}
-
-export async function setSessionModelOverride(
-  options: MutationOptions & { input: SessionModelOverride }
-): Promise<{ path: string; config: EstaCodaConfig }> {
-  const targetPath = await resolveTargetPath(options);
-  const existing = await readConfig(targetPath);
-  const config = applySessionModelOverride(existing.config, options.input);
   await saveRuntimeConfig(targetPath, config);
   return { path: targetPath, config };
 }

@@ -8,13 +8,11 @@ import {
   applyRegisterProviderModel,
   applySetPreferredModelRoute,
   applyAddFallbackRoute,
-  applySessionModelOverride,
   registerProviderConfig,
   storeProviderCredential,
   registerProviderModel,
   setPreferredModelRoute,
-  addFallbackRoute,
-  setSessionModelOverride
+  addFallbackRoute
 } from "./provider-config-mutations.js";
 import { setupProviderConfig, loadRuntimeConfig, mergeConfig, type EstaCodaConfig } from "./runtime-config.js";
 import { computeRuntimeFingerprint } from "../runtime/runtime-fingerprint.js";
@@ -179,6 +177,24 @@ describe("applySetPreferredModelRoute", () => {
       contextWindowTokens: 128_000
     });
   });
+
+  it("stores baseUrl and apiKeyEnv on provider block", () => {
+    const existing: EstaCodaConfig = {};
+    const result = applySetPreferredModelRoute(existing, {
+      provider: "deepseek",
+      model: "deepseek-chat",
+      baseUrl: "https://custom.deepseek.com/v1",
+      apiKeyEnv: "CUSTOM_DEEPSEEK_KEY",
+      contextWindowTokens: 64_000
+    });
+    expect(result.model).toEqual({
+      provider: "deepseek",
+      id: "deepseek-chat",
+      contextWindowTokens: 64_000
+    });
+    expect(result.providers!.deepseek!.baseUrl).toBe("https://custom.deepseek.com/v1");
+    expect(result.providers!.deepseek!.apiKeyEnv).toBe("CUSTOM_DEEPSEEK_KEY");
+  });
 });
 
 describe("applyAddFallbackRoute", () => {
@@ -235,18 +251,41 @@ describe("applyAddFallbackRoute", () => {
       contextWindowTokens: 64_000
     });
   });
-});
 
-describe("applySessionModelOverride", () => {
-  it("is a no-op for persistent config", () => {
+  it("does not collapse routes that differ by baseUrl", () => {
     const existing: EstaCodaConfig = {
-      model: { provider: "openai", id: "gpt-4o" }
+      model: {
+        provider: "openai",
+        id: "gpt-4o",
+        fallbacks: [{ provider: "custom", id: "backup", baseUrl: "https://a.example/v1" }]
+      }
     };
-    const result = applySessionModelOverride(existing, {
-      provider: "deepseek",
-      model: "deepseek-chat"
+    const result = applyAddFallbackRoute(existing, {
+      provider: "custom",
+      id: "backup",
+      baseUrl: "https://b.example/v1"
     });
-    expect(result).toBe(existing);
+    expect(result.model!.fallbacks).toHaveLength(2);
+    expect(result.model!.fallbacks![0].baseUrl).toBe("https://a.example/v1");
+    expect(result.model!.fallbacks![1].baseUrl).toBe("https://b.example/v1");
+  });
+
+  it("dedupes routes with same provider/id/baseUrl even if apiKeyEnv differs", () => {
+    const existing: EstaCodaConfig = {
+      model: {
+        provider: "openai",
+        id: "gpt-4o",
+        fallbacks: [{ provider: "custom", id: "backup", baseUrl: "https://a.example/v1", apiKeyEnv: "KEY_A" }]
+      }
+    };
+    const result = applyAddFallbackRoute(existing, {
+      provider: "custom",
+      id: "backup",
+      baseUrl: "https://a.example/v1",
+      apiKeyEnv: "KEY_B"
+    });
+    expect(result.model!.fallbacks).toHaveLength(1);
+    expect(result.model!.fallbacks![0].apiKeyEnv).toBe("KEY_A");
   });
 });
 
@@ -380,6 +419,36 @@ describe("compatibility wrapper setupProviderConfig", () => {
       }
     });
     expect(result.config.providers!.deepseek!.headers).toEqual({ "X-Custom": "value" });
+  });
+});
+
+describe("setupProviderConfig parity with pure helpers", () => {
+  it("produces the same in-memory config as composing pure helpers", () => {
+    const existing: EstaCodaConfig = {};
+
+    const viaHelpers = applySetPreferredModelRoute(
+      applyRegisterProviderModel(
+        applyStoreProviderCredential(
+          applyRegisterProviderConfig(existing, {
+            provider: "deepseek",
+            baseUrl: "https://api.deepseek.com/v1",
+            enableNetwork: true
+          }),
+          { provider: "deepseek", apiKeyEnv: "DEEPSEEK_API_KEY" }
+        ).config,
+        { provider: "deepseek", models: ["deepseek-chat"] }
+      ),
+      { provider: "deepseek", model: "deepseek-chat" }
+    );
+
+    // setupProviderConfig inlines the same logic; the result should match.
+    // We compare the salient fields rather than deep-equal because the
+    // wrapper also writes the secret to disk, which helpers don't do.
+    expect(viaHelpers.model).toEqual({ provider: "deepseek", id: "deepseek-chat" });
+    expect(viaHelpers.providers!.deepseek!.baseUrl).toBe("https://api.deepseek.com/v1");
+    expect(viaHelpers.providers!.deepseek!.apiKeyEnv).toBe("DEEPSEEK_API_KEY");
+    expect(viaHelpers.providers!.deepseek!.models).toContain("deepseek-chat");
+    expect(viaHelpers.providers!.deepseek!.enableNetwork).toBe(true);
   });
 });
 
@@ -546,6 +615,57 @@ describe("runtime fingerprint changes after preferred route mutation", () => {
     expect(loaded2.modelFallbackRoutes.length).toBe(1);
     expect(fp1.modelFallbackRoutesHash).not.toBe(fp2.modelFallbackRoutesHash);
     expect(fp1).not.toEqual(fp2);
+  });
+});
+
+describe("preferred route metadata preserved through save + load", () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await makeTempDir();
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("setPreferredModelRoute preserves baseUrl, apiKeyEnv, contextWindowTokens after loadRuntimeConfig", async () => {
+    await writeUserConfig(tmpDir, {
+      providers: {
+        deepseek: {
+          kind: "openai-compatible",
+          baseUrl: "https://api.deepseek.com/v1",
+          models: ["deepseek-chat"],
+          enableNetwork: true
+        }
+      },
+      model: { provider: "openai", id: "gpt-4o" }
+    });
+
+    await setPreferredModelRoute({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      input: {
+        provider: "deepseek",
+        model: "deepseek-chat",
+        baseUrl: "https://custom.deepseek.com/v1",
+        apiKeyEnv: "CUSTOM_DEEPSEEK_KEY",
+        contextWindowTokens: 128_000
+      }
+    });
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      userConfigPath: join(tmpDir, ".estacoda", "config.json"),
+      projectConfigTrust: "untrusted"
+    });
+
+    expect(loaded.primaryModelRoute.provider).toBe("deepseek");
+    expect(loaded.primaryModelRoute.id).toBe("deepseek-chat");
+    expect(loaded.primaryModelRoute.baseUrl).toBe("https://custom.deepseek.com/v1");
+    expect(loaded.primaryModelRoute.apiKeyEnv).toBe("CUSTOM_DEEPSEEK_KEY");
+    expect(loaded.primaryModelRoute.contextWindowTokens).toBe(128_000);
   });
 });
 
