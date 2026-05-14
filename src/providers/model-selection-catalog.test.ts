@@ -659,3 +659,168 @@ describe("ModelSelectionCatalog cache invalidation", () => {
     expect(report.cacheChanged).toBe(true);
   }));
 });
+
+describe("ModelSelectionCatalog provider metadata integration", () => {
+  beforeEach(() => {
+    resetModelsDevRegistryForTest();
+  });
+
+  it("uses canonical display names from metadata for known providers", withFixture(async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath));
+    const providers = await catalog.listProviders();
+    const openai = providers.find((p) => p.id === "openai");
+    expect(openai).toBeDefined();
+    expect(openai!.name).toBe("OpenAI");
+  }));
+
+  it("infers setupMode from metadata auth methods (local with baseUrl = base-url)", withFixture(async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      config: {
+        providers: {
+          local: {
+            kind: "openai-compatible",
+            baseUrl: "http://localhost:11434/v1",
+            models: ["llama3"]
+          }
+        }
+      }
+    }));
+
+    const providers = await catalog.listProviders();
+    const local = providers.find((p) => p.id === "local");
+    expect(local).toBeDefined();
+    expect(local!.setupMode).toBe("base-url");
+  }));
+
+  it("infers setupMode = none for local without explicit baseUrl or apiKey", withFixture(async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath));
+    const providers = await catalog.listProviders();
+    const local = providers.find((p) => p.id === "local");
+    expect(local).toBeDefined();
+    expect(local!.setupMode).toBe("none");
+  }));
+
+  it("infers setupMode = api-key for hosted providers without explicit config", withFixture(async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath));
+    const providers = await catalog.listProviders();
+    const deepseek = providers.find((p) => p.id === "deepseek");
+    expect(deepseek).toBeDefined();
+    expect(deepseek!.setupMode).toBe("api-key");
+  }));
+
+  it("marks catalog-only providers as not configured and not runnable", withFixture(async (fixturePath, cachePath) => {
+    const registry = new ProviderRegistry();
+    registry.register(createCatalogProvider({
+      id: "anthropic" as ProviderId,
+      models: []
+    }));
+
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      config: {
+        providers: {
+          anthropic: {
+            kind: "catalog",
+            models: ["claude-3-opus"]
+          }
+        }
+      },
+      registry
+    }));
+
+    const providers = await catalog.listProviders();
+    const anthropic = providers.find((p) => p.id === "anthropic");
+    expect(anthropic).toBeDefined();
+    expect(anthropic!.catalogOnly).toBe(true);
+    expect(anthropic!.configured).toBe(true);
+    expect(anthropic!.executable).toBe(false);
+  }));
+
+  it("catalog-only providers are excluded when includeCatalogOnly is false", withFixture(async (fixturePath, cachePath) => {
+    const registry = new ProviderRegistry();
+    registry.register(createCatalogProvider({
+      id: "anthropic" as ProviderId,
+      models: []
+    }));
+
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      config: {
+        providers: {
+          anthropic: {
+            kind: "catalog",
+            models: ["claude-3-opus"]
+          }
+        }
+      },
+      registry
+    }));
+
+    const allProviders = await catalog.listProviders();
+    const filteredProviders = await catalog.listProviders({ includeCatalogOnly: false });
+
+    expect(allProviders.some((p) => p.id === "anthropic")).toBe(true);
+    expect(filteredProviders.some((p) => p.id === "anthropic")).toBe(false);
+  }));
+
+  it("infers endpointType from metadata apiMode (anthropic -> anthropic)", withFixture(async (fixturePath, cachePath) => {
+    const registry = new ProviderRegistry();
+    registry.register(createCatalogProvider({
+      id: "anthropic" as ProviderId,
+      models: []
+    }));
+
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      config: {
+        providers: {
+          anthropic: {
+            kind: "catalog",
+            models: ["claude-3-opus"]
+          }
+        }
+      },
+      registry
+    }));
+
+    const models = await catalog.listModels();
+    const opus = models.find((m) => m.id === "claude-3-opus" && m.provider === "anthropic");
+    expect(opus).toBeDefined();
+    expect(opus!.endpointType).toBe("anthropic");
+  }));
+
+  it("infers endpointType = custom for non-default baseUrl", withFixture(async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      config: {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            baseUrl: "https://custom.openai.com/v1",
+            models: ["gpt-4o"]
+          }
+        }
+      }
+    }));
+
+    const models = await catalog.listModels();
+    const gpt4o = models.find((m) => m.id === "gpt-4o" && m.provider === "openai");
+    expect(gpt4o).toBeDefined();
+    expect(gpt4o!.endpointType).toBe("custom");
+  }));
+
+  it("infers endpointType = openai for default baseUrl", withFixture(async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      config: {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            baseUrl: "https://api.openai.com/v1",
+            models: ["gpt-4o"]
+          }
+        }
+      }
+    }));
+
+    const models = await catalog.listModels();
+    const gpt4o = models.find((m) => m.id === "gpt-4o" && m.provider === "openai");
+    expect(gpt4o).toBeDefined();
+    expect(gpt4o!.endpointType).toBe("openai");
+  }));
+});

@@ -272,3 +272,17 @@ export type CredentialPoolSnapshot = {
     usageCount: number;
   }>;
 };
+
+export type ProviderAuthMethod =
+  | "none"
+  | "api_key"
+  | "oauth_device"
+  | "oauth_device_pkce"
+  | "oauth_pkce_poll"
+  | "oauth_external";
+
+export type ProviderApiMode =
+  | "openai_chat_completions"
+  | "openai_responses"
+  | "anthropic_messages"
+  | "custom_openai_compatible";

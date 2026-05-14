@@ -23,6 +23,10 @@ import {
 import { createCatalogProvider } from "../providers/catalog-provider.js";
 import { createOpenAICompatibleProvider, type FetchLike as ProviderFetchLike } from "../providers/openai-compatible-provider.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
+import {
+  getDefaultBaseUrl,
+  getDefaultApiKeyEnv
+} from "../providers/provider-metadata.js";
 import type { MCPServerTransport } from "../mcp/mcp-client.js";
 import type { SkillAutonomy } from "../skills/skill-learning.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
@@ -1247,7 +1251,7 @@ export function buildProviderRegistry(config: EstaCodaConfig, options: {
       registry.register(createOpenAICompatibleProvider({
         id: providerId,
         endpoint: {
-          baseUrl: providerConfig.baseUrl ?? defaultBaseUrl(providerId),
+          baseUrl: providerConfig.baseUrl ?? getDefaultBaseUrl(providerId),
           apiKey: providerConfig.apiKeyEnv === undefined
             ? { kind: "none" }
             : { kind: "env", name: providerConfig.apiKeyEnv },
@@ -1328,7 +1332,7 @@ export async function setupProviderConfig(options: {
   const explicitlyProvidesCredential = options.input.apiKeyEnv !== undefined || options.input.apiKey !== undefined;
   const forceCredential = options.input.requiresCredential !== false && options.input.provider !== "local";
   const requiresCredential = explicitlyProvidesCredential || forceCredential;
-  const envName = requiresCredential ? options.input.apiKeyEnv ?? defaultEnvKey(options.input.provider) : undefined;
+  const envName = requiresCredential ? options.input.apiKeyEnv ?? getDefaultApiKeyEnv(options.input.provider) : undefined;
   let secretPath: string | undefined;
   if (options.input.apiKey !== undefined && options.input.apiKey.trim().length > 0 && envName !== undefined) {
     const secret = await writeEnvSecret({
@@ -1347,7 +1351,7 @@ export async function setupProviderConfig(options: {
   ]);
   const providerConfig = {
     kind: "openai-compatible" as const,
-    baseUrl: options.input.baseUrl ?? defaultBaseUrl(options.input.provider),
+    baseUrl: options.input.baseUrl ?? getDefaultBaseUrl(options.input.provider),
     apiKeyEnv: envName,
     models: nextModels,
     enableNetwork: options.input.enableNetwork ?? true
@@ -2405,40 +2409,8 @@ function sttProviderApiKeyEnv(config: LoadedRuntimeConfig["stt"], provider: SttP
   }
 }
 
-function defaultBaseUrl(provider: ProviderId): string {
-  switch (provider) {
-    case "openai":
-      return "https://api.openai.com/v1";
-    case "deepseek":
-      return "https://api.deepseek.com/v1";
-    case "kimi":
-      return "https://api.moonshot.ai/v1";
-    case "google":
-      return "https://generativelanguage.googleapis.com/v1beta/openai";
-    case "openrouter":
-      return "https://openrouter.ai/api/v1";
-    case "local":
-      return "http://localhost:11434/v1";
-    default:
-      return "https://example.invalid/v1";
-  }
-}
-
 export function defaultEnvKey(provider: ProviderId): string {
-  switch (provider) {
-    case "openai":
-      return "OPENAI_API_KEY";
-    case "deepseek":
-      return "DEEPSEEK_API_KEY";
-    case "kimi":
-      return "KIMI_API_KEY";
-    case "google":
-      return "GOOGLE_API_KEY";
-    case "openrouter":
-      return "OPENROUTER_API_KEY";
-    default:
-      return "OPENAI_COMPATIBLE_API_KEY";
-  }
+  return getDefaultApiKeyEnv(provider);
 }
 
 function expandConfiguredPaths(paths: string[], homeDir?: string): string[] {
