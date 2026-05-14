@@ -11,6 +11,7 @@ import type {
 import { CredentialPoolRegistry } from "./credential-pool.js";
 import { ProviderRegistry } from "./provider-registry.js";
 import { compareModels, matchesPreferences, routeProvider } from "./provider-router.js";
+import { resolveRuntimeCredential } from "./runtime-credential-resolver.js";
 
 export type ProviderAttempt = {
   provider: string;
@@ -218,37 +219,36 @@ export class ProviderExecutor {
       }
 
       // Credential resolution: route.apiKeyEnv takes precedence over pool
-      let credential: { id: string; value?: string } | undefined;
-      if (route.apiKeyEnv !== undefined) {
-        const value = process.env[route.apiKeyEnv];
-        if (value === undefined) {
-          const errorContent = `Missing env var ${route.apiKeyEnv}`;
-          attempts.push({
-            provider: route.provider,
-            model: route.id,
-            ok: false,
-            errorClass: "auth",
-            content: errorContent
-          });
-          await options.onEvent?.({
-            kind: "provider-attempt-end",
-            provider: route.provider,
-            model: route.id,
-            ok: false,
-            errorClass: "auth",
-            fallback: index > 0,
-            willFallback: index < chain.length - 1
-          });
-          continue;
-        }
-        credential = { id: route.apiKeyEnv, value };
-      } else {
-        const poolCredential = this.#credentialPools?.resolve(route.provider);
-        credential = poolCredential === undefined ? undefined : {
-          id: poolCredential.id,
-          value: poolCredential.value
-        };
+      const resolution = resolveRuntimeCredential({
+        providerId: route.provider,
+        route: { apiKeyEnv: route.apiKeyEnv },
+        credentialPools: this.#credentialPools,
+      });
+
+      if (!resolution.diagnostic.ok) {
+        const errorContent = resolution.diagnostic.message ?? `Missing credential for ${route.provider}`;
+        attempts.push({
+          provider: route.provider,
+          model: route.id,
+          ok: false,
+          errorClass: "auth",
+          content: errorContent
+        });
+        await options.onEvent?.({
+          kind: "provider-attempt-end",
+          provider: route.provider,
+          model: route.id,
+          ok: false,
+          errorClass: "auth",
+          fallback: index > 0,
+          willFallback: index < chain.length - 1
+        });
+        continue;
       }
+
+      const credential = resolution.credential?.kind === "bearer"
+        ? { id: resolution.credential.id, value: resolution.credential.value }
+        : undefined;
 
       await options.onEvent?.({
         kind: "provider-attempt-start",
