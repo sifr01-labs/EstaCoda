@@ -614,7 +614,8 @@ function providerDisplayName(providerId: ProviderId, snapshot: ModelsDevSnapshot
 function isCredentialReady(providerId: ProviderId, apiKeyEnv?: string): boolean {
   const meta = getProviderMetadata(providerId);
   if (meta.defaultAuthMethod === "none" && apiKeyEnv === undefined) return true;
-  if (apiKeyEnv !== undefined) return process.env[apiKeyEnv] !== undefined;
+  const envKey = apiKeyEnv ?? meta.defaultApiKeyEnv;
+  if (envKey !== undefined) return process.env[envKey] !== undefined;
   return false;
 }
 
