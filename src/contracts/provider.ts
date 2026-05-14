@@ -221,6 +221,7 @@ export type ProviderErrorClass =
   | "incomplete-stream"
   | "model-unavailable"
   | "unsupported"
+  | "missing-route"
   | "unknown";
 
 export type ProviderRoutePreferences = {

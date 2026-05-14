@@ -371,52 +371,6 @@ describe("ProviderExecutor fallback behavior", () => {
     expect(fallback.calls.length).toBe(0);
   });
 
-  it("registry caller fallback when primary fails", async () => {
-    const primary = createMockAdapter({
-      id: "test-primary",
-      completeResponse: { ok: false, content: "rate limited", model: "m1", provider: "test-primary", errorClass: "rate-limit" },
-      models: [
-        {
-          id: "m1",
-          provider: "test-primary",
-          contextWindowTokens: 128_000,
-          supportsTools: true,
-          supportsVision: true,
-          supportsStructuredOutput: true
-        }
-      ]
-    });
-    const fallback = createMockAdapter({
-      id: "test-fallback",
-      completeResponse: { ok: true, content: "fallback ok", model: "m2", provider: "test-fallback" },
-      models: [
-        {
-          id: "m2",
-          provider: "test-fallback",
-          contextWindowTokens: 128_000,
-          supportsTools: true,
-          supportsVision: true,
-          supportsStructuredOutput: true
-        }
-      ]
-    });
-    registry.register(primary);
-    registry.register(fallback);
-
-    const executor = new ProviderExecutor({ registry });
-    const result = await executor.complete({
-      provider: "test-primary",
-      model: "m1",
-      messages: []
-    });
-
-    expect(result.ok).toBe(true);
-    expect(result.fallbackUsed).toBe(true);
-    expect(result.attempts.length).toBe(2);
-    expect(result.attempts[0].provider).toBe("test-primary");
-    expect(result.attempts[1].provider).toBe("test-fallback");
-  });
-
   it("blocks auth fallback when same provider and same apiKeyEnv", async () => {
     process.env.OPENAI_KEY = "valid-key";
     const adapter = createMockAdapter({

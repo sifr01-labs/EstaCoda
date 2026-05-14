@@ -21,7 +21,21 @@ export const providerTextResponseCase: EvalCase = {
         model: "fake-model",
         messages: [{ role: "user", content: "hello" }]
       },
-      { providerOrder: ["fake"] }
+      { providerOrder: ["fake"] },
+      {
+        primaryRoute: {
+          provider: "fake",
+          id: "fake-model",
+          profile: {
+            id: "fake-model",
+            provider: "fake",
+            contextWindowTokens: 4096,
+            supportsTools: false,
+            supportsVision: false,
+            supportsStructuredOutput: false
+          }
+        }
+      }
     );
 
     const assertions = [

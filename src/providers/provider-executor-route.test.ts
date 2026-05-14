@@ -219,12 +219,12 @@ describe("ProviderExecutor route-based execution", () => {
     }
   });
 
-  it("still works with existing provider execution without primaryRoute", async () => {
+  it("fails clearly without primaryRoute", async () => {
     const adapter = createMockAdapter({
       id: "test-provider",
       completeResponse: {
         ok: true,
-        content: "legacy-response",
+        content: "should not be called",
         model: "legacy-model",
         provider: "test-provider"
       },
@@ -247,9 +247,11 @@ describe("ProviderExecutor route-based execution", () => {
       messages: []
     });
 
-    expect(result.ok).toBe(true);
-    expect(result.response?.content).toBe("legacy-response");
-    expect(adapter.calls.length).toBe(1);
+    expect(result.ok).toBe(false);
+    expect(result.attempts.length).toBe(1);
+    expect(result.attempts[0].errorClass).toBe("missing-route");
+    expect(result.attempts[0].content).toContain("No explicit primary route");
+    expect(adapter.calls.length).toBe(0);
   });
 
   it("fails early with clear not-executable error for catalog-only providers", async () => {

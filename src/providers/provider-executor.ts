@@ -1,5 +1,4 @@
 import type {
-  ModelProfile,
   ProviderEndpoint,
   ProviderRequest,
   ProviderResponse,
@@ -10,7 +9,6 @@ import type {
 } from "../contracts/provider.js";
 import { CredentialPoolRegistry } from "./credential-pool.js";
 import { ProviderRegistry } from "./provider-registry.js";
-import { compareModels, matchesPreferences, routeProvider } from "./provider-router.js";
 import { resolveRuntimeCredential } from "./runtime-credential-resolver.js";
 import { getProviderMetadata } from "./provider-metadata.js";
 
@@ -97,90 +95,29 @@ export class ProviderExecutor {
 
   async complete(
     request: Omit<ProviderRequest, "model"> & { model?: string },
-    preferences: ProviderRoutePreferences = {},
+    _preferences: ProviderRoutePreferences = {},
     options: ProviderExecutionOptions = {}
   ): Promise<ProviderExecutionResult> {
-    let primaryRoute = options.primaryRoute;
-    let fallbackChain = options.fallbackChain;
+    const primaryRoute = options.primaryRoute;
 
     if (primaryRoute === undefined) {
-      const resolved = await this.#resolveRoutesFromRegistry(request, preferences);
-      if (resolved === undefined) {
-        return {
-          ok: false,
-          fallbackUsed: false,
-          attempts: [],
-          toolCalls: []
-        };
-      }
-      primaryRoute = resolved.primaryRoute;
-      fallbackChain = resolved.fallbackChain;
+      return {
+        ok: false,
+        fallbackUsed: false,
+        attempts: [
+          {
+            provider: request.provider ?? "none",
+            model: request.model ?? "none",
+            ok: false,
+            errorClass: "missing-route",
+            content: "No explicit primary route is available. Production execution requires a resolved model route."
+          }
+        ],
+        toolCalls: []
+      };
     }
 
-    return this.#executeRouteChain(request, {
-      ...options,
-      primaryRoute,
-      fallbackChain
-    });
-  }
-
-  /**
-   * LEGACY / SCAFFOLD ONLY — Do not rely on this in production.
-   *
-   * This fallback path resolves routes from the provider registry when no
-   * explicit primaryRoute is supplied. It exists for backward compatibility
-   * and for tests that have not yet been migrated to pass explicit routes.
-   *
-   * PR7 owns migrating/quarantining the legacy no-route tests and making
-   * production route-only behavior strict. Do not expand this path.
-   */
-  async #resolveRoutesFromRegistry(
-    request: Omit<ProviderRequest, "model"> & { model?: string },
-    preferences: ProviderRoutePreferences
-  ): Promise<{ primaryRoute: ResolvedModelRoute; fallbackChain: ResolvedModelRoute[] } | undefined> {
-    const models = await this.#registry.listModels();
-    let primary: ModelProfile | undefined;
-    let fallbackModels: ModelProfile[] = [];
-
-    if (request.provider !== undefined && request.model !== undefined) {
-      primary = models.find((model) => model.provider === request.provider && model.id === request.model);
-      if (primary === undefined) {
-        return undefined;
-      }
-      fallbackModels = models
-        .filter((model) => model.id !== primary!.id || model.provider !== primary!.provider)
-        .filter((model) => matchesPreferences(model, preferences))
-        .sort((left, right) => compareModels(left, right, preferences));
-    } else if (request.model !== undefined) {
-      primary = models.find((model) => model.id === request.model);
-      if (primary === undefined) {
-        return undefined;
-      }
-      fallbackModels = models
-        .filter((model) => model.id !== primary!.id || model.provider !== primary!.provider)
-        .filter((model) => matchesPreferences(model, preferences))
-        .sort((left, right) => compareModels(left, right, preferences));
-    } else {
-      const route = routeProvider(models, preferences);
-      if (route === undefined) {
-        return undefined;
-      }
-      primary = route.primary;
-      fallbackModels = route.fallbacks;
-    }
-
-    return {
-      primaryRoute: this.#modelToResolvedRoute(primary),
-      fallbackChain: fallbackModels.map((model) => this.#modelToResolvedRoute(model))
-    };
-  }
-
-  #modelToResolvedRoute(model: ModelProfile): ResolvedModelRoute {
-    return {
-      provider: model.provider,
-      id: model.id,
-      profile: model
-    };
+    return this.#executeRouteChain(request, options);
   }
 
   async #executeRouteChain(
