@@ -179,3 +179,5 @@ function normalizePr4ActionId(id: SetupEditorActionId | SetupRouteActionId): str
 function write(options: ConfigEditorRunnerOptions, value: string): void {
   options.output?.write(value);
 }
+
+export const runConfigEditorSetup = runConfigEditor;

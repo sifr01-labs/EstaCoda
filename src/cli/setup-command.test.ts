@@ -65,6 +65,26 @@ describe("cli setup command", () => {
     expect(config.providers?.local?.models).toContain("hermes-local");
   });
 
+  it("preserves direct advanced provider setup flags", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    const result = await runCliCommand({
+      argv: ["setup", "--advanced", "--provider", "local", "--model", "advanced-local", "--offline", "--user"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+    const config = JSON.parse(await readFile(join(tempDir, ".estacoda", "config.json"), "utf8")) as {
+      model?: { provider?: string; id?: string };
+      providers?: Record<string, { enableNetwork?: boolean; models?: string[] }>;
+    };
+
+    expect(result.handled).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("Configured local/advanced-local.");
+    expect(config.model).toEqual({ provider: "local", id: "advanced-local" });
+    expect(config.providers?.local?.enableNetwork).toBe(false);
+  });
+
   it("routes first-run interactive setup through the reviewed runner and apply executor", async () => {
     const workspaceRoot = join(tempDir, "workspace");
     const result = await runCliCommand({
@@ -122,7 +142,7 @@ describe("cli setup command", () => {
     expect(result.stderr).not.toContain("Warning: Detected unsettled");
   });
 
-  it("renders configured-ready setup through the new setup route", async () => {
+  it("routes configured-ready interactive setup through the guided editor shell", async () => {
     const workspaceRoot = join(tempDir, "workspace");
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
@@ -136,13 +156,17 @@ describe("cli setup command", () => {
 
     expect(result.handled).toBe(true);
     expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("EstaCoda guided setup editor");
     expect(result.output).toContain("EstaCoda is already configured");
-    expect(result.output).toContain("launch-agent - Launch agent");
-    expect(result.output).toContain("review-edit-config - Review/edit config");
+    expect(result.output).toContain("kind: configured-ready");
     expect(result.output).toContain("verify-setup - Verify setup");
+    expect(result.output).toContain("show-diagnostics - Show diagnostics");
+    expect(result.output).toContain("exit - Exit");
+    expect(result.output).not.toContain("review-edit-config - Review/edit config");
+    expect(result.output).not.toContain("launch-agent - Launch agent");
   });
 
-  it("renders configured-degraded setup through repair and limited-mode route actions", async () => {
+  it("routes configured-degraded interactive setup through the guided editor shell", async () => {
     const workspaceRoot = join(tempDir, "workspace");
     await writeUserConfig(tempDir, localReadyConfig("ollama/auto"));
     await trustWorkspace(tempDir, workspaceRoot);
@@ -156,10 +180,12 @@ describe("cli setup command", () => {
 
     expect(result.handled).toBe(true);
     expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("EstaCoda guided setup editor");
     expect(result.output).toContain("kind: configured-degraded");
-    expect(result.output).toContain("repair-setup - Fix now");
-    expect(result.output).toContain("launch-agent - Continue in limited mode");
-    expect(result.output).toContain("review-edit-config - Review/edit config");
+    expect(result.output).toContain("show-diagnostics - Show diagnostics");
+    expect(result.output).not.toContain("repair-setup - Fix now");
+    expect(result.output).not.toContain("launch-agent - Continue in limited mode");
+    expect(result.output).not.toContain("review-edit-config - Review/edit config");
   });
 
   it("routes missing-secret setup to credential repair without exposing secrets", async () => {
@@ -189,9 +215,10 @@ describe("cli setup command", () => {
       });
 
       expect(result.handled).toBe(true);
+      expect(result.output).toContain("EstaCoda guided setup editor");
       expect(result.output).toContain("kind: missing-secret");
-      expect(result.output).toContain("repair-setup - Repair setup");
       expect(result.output).toContain("OPENAI_API_KEY");
+      expect(result.output).not.toContain("repair-setup - Repair setup");
       expect(result.output).not.toContain("sk-");
     } finally {
       if (originalOpenAiKey === undefined) {
@@ -216,9 +243,10 @@ describe("cli setup command", () => {
 
     expect(result.handled).toBe(true);
     expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("EstaCoda guided setup editor");
     expect(result.output).toContain("kind: broken-config");
-    expect(result.output).toContain("repair-setup - Repair setup");
-    expect(result.output).toContain("Recommended path:");
+    expect(result.output).toContain("show-diagnostics - Show diagnostics");
+    expect(result.output).not.toContain("repair-setup - Repair setup");
     expect(result.output).not.toContain("review-edit-config - Open config editor");
   });
 
@@ -234,9 +262,10 @@ describe("cli setup command", () => {
     });
 
     expect(result.handled).toBe(true);
+    expect(result.output).toContain("EstaCoda guided setup editor");
     expect(result.output).toContain("kind: untrusted-workspace");
-    expect(result.output).toContain("trust-workspace - Trust workspace");
-    expect(result.output).toContain("estacoda setup --interactive");
+    expect(result.output).toContain("workspace-trust");
+    expect(result.output).not.toContain("trust-workspace - Trust workspace");
   });
 
   it("routes non-writable setup state to state repair guidance", async () => {
@@ -253,9 +282,10 @@ describe("cli setup command", () => {
     });
 
     expect(result.handled).toBe(true);
+    expect(result.output).toContain("EstaCoda guided setup editor");
     expect(result.output).toContain("kind: state-not-writable");
-    expect(result.output).toContain("repair-setup - Repair setup");
     expect(result.output).toContain("fix-state-directory");
+    expect(result.output).not.toContain("repair-setup - Repair setup");
     expect(result.output).not.toContain("review-edit-config - Open config editor");
   });
 

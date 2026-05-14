@@ -37,6 +37,7 @@ import {
 } from "../config/runtime-config.js";
 import { canRunInteractive, createReadlinePrompt, type Prompt } from "./readline-prompt.js";
 import { runFirstRunSetup } from "../onboarding/first-run/runner.js";
+import { runConfigEditorSetup } from "../onboarding/config-editor/runner.js";
 import { createReviewedSetupApplyExecutor } from "../onboarding/review/apply-executor.js";
 import { collectSetupEntryState } from "../onboarding/setup-entry-state.js";
 import { collectSetupRoute } from "../onboarding/setup-router.js";
@@ -313,6 +314,33 @@ async function interactiveSetup(options: CliOptions, input: { readonly advanced:
         handled: true,
         exitCode: result.exitCode,
         output: result.output,
+      };
+    }
+
+    if (
+      decision.kind === "configured-menu" ||
+      decision.kind === "configured-degraded-menu" ||
+      decision.kind === "repair-first-menu"
+    ) {
+      const chunks: string[] = [];
+      const result = await runConfigEditorSetup({
+        ...options,
+        prompt,
+        applyExecutor: createReviewedSetupApplyExecutor({
+          workspaceRoot: options.workspaceRoot,
+          homeDir: options.homeDir,
+          userConfigPath: options.userConfigPath,
+          projectConfigPath: options.projectConfigPath,
+        }),
+        output: {
+          write: (value) => chunks.push(value),
+        },
+      });
+
+      return {
+        handled: true,
+        exitCode: result.exitCode,
+        output: chunks.length > 0 ? chunks.join("") : result.output,
       };
     }
 
