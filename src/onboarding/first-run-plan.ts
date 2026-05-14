@@ -1,5 +1,4 @@
 import type { ActivityLabelsLocale, UiFlavor, UiLanguage } from "../config/runtime-config.js";
-import { getDefaultApiKeyEnv } from "../providers/provider-metadata.js";
 import type { ProviderId, ProviderApiMode, ProviderAuthMethod } from "../contracts/provider.js";
 import type { SecurityApprovalMode } from "../contracts/security.js";
 import type { SkillAutonomy } from "../skills/skill-learning.js";
@@ -279,7 +278,7 @@ export function getRequiredCredentialReference(
   if (selections.primaryProvider === undefined || selections.primaryProvider === "local") {
     return undefined;
   }
-  return selections.primaryCredential ?? { kind: "env", name: getDefaultApiKeyEnv(selections.primaryProvider) };
+  return selections.primaryCredential;
 }
 
 function normalizeSelections(selections: FirstRunOnboardingSelections): FirstRunOnboardingSelections {

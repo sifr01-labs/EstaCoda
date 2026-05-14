@@ -8,7 +8,7 @@ import type { ProviderId, ProviderApiMode, ProviderAuthMethod } from "../../cont
 import { resolveSetupCopy } from "../setup-copy.js";
 import { createReviewedSetupApplyExecutor } from "../review/apply-executor.js";
 import { runFirstRunSetup } from "./runner.js";
-import type { FlowEngine } from "../../providers/provider-model-selection-flow.js";
+import type { FlowEngine, ProviderCandidate } from "../../providers/provider-model-selection-flow.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-first-run-runner-"));
@@ -18,10 +18,13 @@ function flowEngine(overrides: {
   credentialAction?: "collect" | "reuse" | "none";
   baseUrl?: string;
   contextWindowTokens?: number;
+  envVarName?: string;
+  providerCandidates?: ProviderCandidate[];
 } = {}): FlowEngine {
   const action = overrides.credentialAction ?? "collect";
+  const envVarName = overrides.envVarName ?? "OPENAI_API_KEY";
   return {
-    listProviderCandidates: async () => [
+    listProviderCandidates: async () => overrides.providerCandidates ?? [
       {
         id: "local" as ProviderId,
         displayName: "Local",
@@ -105,7 +108,7 @@ function flowEngine(overrides: {
           baseUrl: overrides.baseUrl ?? "https://api.openai.com/v1",
           apiMode: "custom_openai_compatible" as ProviderApiMode,
           authMethod: "api_key" as ProviderAuthMethod,
-          credentialAction: { kind: "reuse" as const, reference: "env:OPENAI_API_KEY" },
+          credentialAction: { kind: "reuse" as const, reference: `env:${envVarName}` as `env:${string}` },
           profile: {
             id: modelId,
             provider: providerId,
@@ -124,7 +127,7 @@ function flowEngine(overrides: {
         baseUrl: overrides.baseUrl ?? "https://api.openai.com/v1",
         apiMode: "custom_openai_compatible" as ProviderApiMode,
         authMethod: "api_key" as ProviderAuthMethod,
-        credentialAction: { kind: "collect" as const, envVarName: "OPENAI_API_KEY" },
+        credentialAction: { kind: "collect" as const, envVarName },
         profile: {
           id: modelId,
           provider: providerId,
@@ -139,7 +142,10 @@ function flowEngine(overrides: {
   };
 }
 
-function fakePrompt(overrides: Record<string, string | boolean> = {}): Prompt {
+function fakePrompt(
+  overrides: Record<string, string | boolean> = {},
+  seenOptions: Record<string, readonly string[]> = {}
+): Prompt {
   const prompt = Object.assign(
     async (_question: string, options?: { secret?: boolean }) => {
       if (options?.secret === true) {
@@ -149,6 +155,7 @@ function fakePrompt(overrides: Record<string, string | boolean> = {}): Prompt {
     },
     {
       select: async <T>(input: SelectPromptInput<T>): Promise<T> => {
+        seenOptions[input.title] = input.options.map((option) => option.label);
         const requested = overrides[input.title];
         const byLabel = typeof requested === "string"
           ? input.options.find((option) => option.label === requested)
@@ -255,6 +262,74 @@ describe("runFirstRunSetup", () => {
     if (result.applyPlanningResult.kind === "apply-plan-ready") {
       expect(result.applyPlanningResult.applyPlan.metadata.credentialOperationCount).toBe(1);
     }
+  });
+
+  it("uses the shared flow credential action instead of first-run default env policy", async () => {
+    const outputLines: string[] = [];
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ "Primary provider": "OpenAI", __secret: "" }),
+      flowEngine: flowEngine({ envVarName: "SHARED_FLOW_OPENAI_KEY" }),
+      output: { write: (value) => outputLines.push(value) },
+    });
+
+    expect(result.selections.primaryProvider).toBe("openai");
+    expect(result.selections.primaryCredential).toEqual({ kind: "env", name: "SHARED_FLOW_OPENAI_KEY" });
+    expect(JSON.stringify(result.reviewManifest)).toContain("SHARED_FLOW_OPENAI_KEY");
+    expect(JSON.stringify(result.reviewManifest)).not.toContain("OPENAI_API_KEY");
+    expect(outputLines.join("")).toContain("Config will expect SHARED_FLOW_OPENAI_KEY to be available externally");
+  });
+
+  it("does not re-add Codex, catalog-only, or media providers filtered out by the shared flow", async () => {
+    const seenOptions: Record<string, readonly string[]> = {};
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        "Primary provider": "OpenAI",
+        Voice: true,
+        "Vision and Image Generation": true,
+      }, seenOptions),
+      flowEngine: flowEngine({
+        credentialAction: "reuse",
+        providerCandidates: [{
+          id: "openai" as ProviderId,
+          displayName: "OpenAI",
+          catalogOnly: false,
+          configurable: true,
+          runnable: true,
+          modelsCount: 5,
+          credentialReady: true,
+          baseUrl: "https://api.openai.com/v1",
+        }],
+      }),
+      defaultSelections: {
+        primaryProvider: "codex" as ProviderId,
+        primaryModel: "codex-catalog-only",
+      },
+    });
+
+    expect(seenOptions["Primary provider"]).toEqual(["OpenAI"]);
+    expect(seenOptions["Primary provider"]).not.toEqual(expect.arrayContaining([
+      "Codex",
+      "FAL",
+      "BytePlus",
+      "Voice",
+      "Vision and Image Generation",
+    ]));
+    expect(result.selections.primaryProvider).toBe("openai");
+    expect(result.selections.primaryModel).toBe("gpt-5.5");
+    expect(result.selections.optionalCapabilities).toEqual(["voice", "vision"]);
+
+    const providerDraft = result.draftBundle.drafts.find((draft) => draft.kind === "provider-model-route");
+    const optionalDraft = result.draftBundle.drafts.find((draft) => draft.kind === "optional-capability");
+    expect(providerDraft?.review.values.provider).toBe("openai");
+    expect(providerDraft?.review.values.model).toBe("gpt-5.5");
+    expect(providerDraft?.review.values.provider).not.toBe("codex");
+    expect(optionalDraft?.review.values.capabilities).toEqual(["voice", "vision"]);
+    expect(result.reviewManifest.sections["provider-model-network"]).toHaveLength(1);
+    expect(result.reviewManifest.sections["enabled-optional-capabilities"]).toHaveLength(1);
   });
 
   it("cancels cleanly after review without preparing an apply plan", async () => {

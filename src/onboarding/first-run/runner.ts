@@ -9,8 +9,6 @@ import { writeEnvSecret } from "../../config/env-secret-store.js";
 import type { ProviderId } from "../../contracts/provider.js";
 import type { Prompt } from "../../cli/readline-prompt.js";
 import { promptForApiKeyInput } from "../../cli/secret-prompt.js";
-
-import type { SelectPromptInput } from "../../cli/interactive-select.js";
 import {
   createProviderModelSelectionFlow,
   type FlowEngine,
@@ -84,10 +82,8 @@ type InterfaceStyleChoice = SetupChoice<{
 };
 
 type PendingCredentialWrite = {
-  readonly providerId: ProviderId;
   readonly envVarName: string;
   readonly value: string;
-  readonly source: "first-run-review";
 };
 
 const OPTIONAL_CAPABILITY_COPY_KEYS: Record<OptionalCapabilityId, {
@@ -267,10 +263,8 @@ export async function runFirstRunSetup(
         write(options, `Config will expect ${envVarName} to be available externally.\n`);
       } else {
         pendingCredentialWrite = {
-          providerId: primaryProvider,
           envVarName: promptResult.envVarName,
           value: promptResult.value,
-          source: "first-run-review",
         };
       }
       break;
