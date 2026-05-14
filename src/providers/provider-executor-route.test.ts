@@ -372,4 +372,116 @@ describe("ProviderExecutor route-based execution", () => {
     expect(adapter.calls.length).toBe(1);
     expect(adapter.calls[0].options?.endpoint?.baseUrl).toBe("https://stream.example.com/v1");
   });
+
+  it("registered adapter for codex does not execute", async () => {
+    const codexAdapter = createMockAdapter({ id: "codex" });
+    registry.register(codexAdapter);
+
+    const route: ResolvedModelRoute = {
+      provider: "codex",
+      id: "codex-model",
+      profile: {
+        id: "codex-model",
+        provider: "codex",
+        contextWindowTokens: 128_000,
+        supportsTools: true,
+        supportsVision: false,
+        supportsStructuredOutput: true
+      }
+    };
+
+    const result = await executor.complete({ messages: [] }, {}, { primaryRoute: route });
+
+    expect(result.ok).toBe(false);
+    expect(result.attempts.length).toBe(1);
+    expect(result.attempts[0].errorClass).toBe("unsupported");
+    expect(result.attempts[0].content).toContain("not runnable");
+    expect(codexAdapter.calls.length).toBe(0);
+  });
+
+  it("registered adapter for anthropic does not execute while metadata says non-runnable / unsupported mode", async () => {
+    const anthropicAdapter = createMockAdapter({ id: "anthropic" });
+    registry.register(anthropicAdapter);
+
+    const route: ResolvedModelRoute = {
+      provider: "anthropic",
+      id: "claude-3-opus",
+      profile: {
+        id: "claude-3-opus",
+        provider: "anthropic",
+        contextWindowTokens: 200_000,
+        supportsTools: true,
+        supportsVision: true,
+        supportsStructuredOutput: true
+      }
+    };
+
+    const result = await executor.complete({ messages: [] }, {}, { primaryRoute: route });
+
+    expect(result.ok).toBe(false);
+    expect(result.attempts.length).toBe(1);
+    expect(result.attempts[0].errorClass).toBe("unsupported");
+    expect(anthropicAdapter.calls.length).toBe(0);
+  });
+
+  it("route with apiMode: openai_responses is rejected before adapter call", async () => {
+    const mockAdapter = createMockAdapter({ id: "openai" });
+    registry.register(mockAdapter);
+
+    const route = createDefaultRoute({ apiMode: "openai_responses" });
+    const result = await executor.complete({ messages: [] }, {}, { primaryRoute: route });
+
+    expect(result.ok).toBe(false);
+    expect(result.attempts.length).toBe(1);
+    expect(result.attempts[0].errorClass).toBe("unsupported");
+    expect(result.attempts[0].content).toContain("unsupported API mode");
+    expect(mockAdapter.calls.length).toBe(0);
+  });
+
+  it("legitimate runnable OpenAI-compatible providers still execute", async () => {
+    const openaiAdapter = createMockAdapter({ id: "openai" });
+    registry.register(openaiAdapter);
+    process.env.OPENAI_API_KEY = "sk-test";
+
+    try {
+      const route = createDefaultRoute({ apiMode: "openai_chat_completions", apiKeyEnv: "OPENAI_API_KEY" });
+      const result = await executor.complete({ messages: [] }, {}, { primaryRoute: route });
+
+      expect(result.ok).toBe(true);
+      expect(openaiAdapter.calls.length).toBe(1);
+    } finally {
+      delete process.env.OPENAI_API_KEY;
+    }
+  });
+
+  it("custom route with explicit base URL and executable API mode still works", async () => {
+    process.env.CUSTOM_API_KEY = "custom-secret";
+    const customAdapter = createMockAdapter({ id: "custom-provider" });
+    registry.register(customAdapter);
+
+    try {
+      const route: ResolvedModelRoute = {
+        provider: "custom-provider",
+        id: "custom-model",
+        profile: {
+          id: "custom-model",
+          provider: "custom-provider",
+          contextWindowTokens: 128_000,
+          supportsTools: false,
+          supportsVision: false,
+          supportsStructuredOutput: false
+        },
+        baseUrl: "https://custom.example.com/v1",
+        apiMode: "custom_openai_compatible"
+      };
+
+      const result = await executor.complete({ messages: [] }, {}, { primaryRoute: route });
+
+      expect(result.ok).toBe(true);
+      expect(customAdapter.calls.length).toBe(1);
+      expect(customAdapter.calls[0].options?.endpoint?.baseUrl).toBe("https://custom.example.com/v1");
+    } finally {
+      delete process.env.CUSTOM_API_KEY;
+    }
+  });
 });

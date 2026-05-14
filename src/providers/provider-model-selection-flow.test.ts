@@ -8,7 +8,7 @@ import { createCatalogProvider } from "./catalog-provider.js";
 import { resetModelsDevRegistryForTest } from "../model-catalog/models-dev-registry.js";
 import type { ProviderId, ProviderEndpoint } from "../contracts/provider.js";
 import type { EstaCodaConfig } from "../config/runtime-config.js";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -844,6 +844,199 @@ describe("provider-model-selection-flow", () => {
         const providers = await flow.listProviderCandidates();
         // Should still return results from the bundled fixture
         expect(providers.length).toBeGreaterThanOrEqual(0);
+      })
+    );
+  });
+
+  describe(".env credential readiness", () => {
+    it(
+      ".estacoda/.env with OPENAI_API_KEY makes OpenAI credential-ready when homeDir is passed",
+      withFixture(async (fixturePath, cachePath) => {
+        delete process.env.OPENAI_API_KEY;
+        const homeDir = mkdtempSync(join(tmpdir(), "estacoda-home-"));
+        const estacodaDir = join(homeDir, ".estacoda");
+        mkdirSync(estacodaDir, { recursive: true });
+        writeFileSync(join(estacodaDir, ".env"), "OPENAI_API_KEY=sk-from-dotenv\n", "utf8");
+
+        const registry = new ProviderRegistry();
+        registry.register(openaiAdapter());
+
+        try {
+          const flow = await createProviderModelSelectionFlow({
+            ...buildOptions(fixturePath, cachePath, {
+              registry,
+              mode: "normal",
+              config: {
+                providers: {
+                  openai: {
+                    kind: "openai-compatible",
+                    models: ["gpt-4o"]
+                  }
+                }
+              }
+            }),
+            homeDir
+          });
+
+          const providers = await flow.listProviderCandidates();
+          const openai = providers.find((p) => p.id === "openai");
+          expect(openai).toBeDefined();
+          expect(openai!.credentialReady).toBe(true);
+        } finally {
+          rmSync(homeDir, { recursive: true, force: true });
+        }
+      })
+    );
+
+    it(
+      "resolveSelection returns credentialAction.kind === reuse when .env has the key",
+      withFixture(async (fixturePath, cachePath) => {
+        delete process.env.OPENAI_API_KEY;
+        const homeDir = mkdtempSync(join(tmpdir(), "estacoda-home-"));
+        const estacodaDir = join(homeDir, ".estacoda");
+        mkdirSync(estacodaDir, { recursive: true });
+        writeFileSync(join(estacodaDir, ".env"), "OPENAI_API_KEY=sk-from-dotenv\n", "utf8");
+
+        const registry = new ProviderRegistry();
+        registry.register(openaiAdapter());
+
+        try {
+          const flow = await createProviderModelSelectionFlow({
+            ...buildOptions(fixturePath, cachePath, {
+              registry,
+              mode: "normal",
+              config: {
+                providers: {
+                  openai: {
+                    kind: "openai-compatible",
+                    models: ["gpt-4o"]
+                  }
+                }
+              }
+            }),
+            homeDir
+          });
+
+          const result = flow.resolveSelection("openai", "gpt-4o");
+          if (result.kind !== "selected") return;
+          expect(result.credentialAction.kind).toBe("reuse");
+        } finally {
+          rmSync(homeDir, { recursive: true, force: true });
+        }
+      })
+    );
+
+    it(
+      "shell env is not overwritten by .env when override is false",
+      withFixture(async (fixturePath, cachePath) => {
+        process.env.OPENAI_API_KEY = "sk-shell";
+        const homeDir = mkdtempSync(join(tmpdir(), "estacoda-home-"));
+        const estacodaDir = join(homeDir, ".estacoda");
+        mkdirSync(estacodaDir, { recursive: true });
+        writeFileSync(join(estacodaDir, ".env"), "OPENAI_API_KEY=sk-from-dotenv\n", "utf8");
+
+        const registry = new ProviderRegistry();
+        registry.register(openaiAdapter());
+
+        try {
+          const flow = await createProviderModelSelectionFlow({
+            ...buildOptions(fixturePath, cachePath, {
+              registry,
+              mode: "normal",
+              config: {
+                providers: {
+                  openai: {
+                    kind: "openai-compatible",
+                    models: ["gpt-4o"]
+                  }
+                }
+              }
+            }),
+            homeDir
+          });
+
+          const providers = await flow.listProviderCandidates();
+          const openai = providers.find((p) => p.id === "openai");
+          expect(openai).toBeDefined();
+          expect(openai!.credentialReady).toBe(true);
+          expect(process.env.OPENAI_API_KEY).toBe("sk-shell");
+        } finally {
+          rmSync(homeDir, { recursive: true, force: true });
+        }
+      })
+    );
+
+    it(
+      "result JSON does not contain the loaded secret value",
+      withFixture(async (fixturePath, cachePath) => {
+        delete process.env.OPENAI_API_KEY;
+        const homeDir = mkdtempSync(join(tmpdir(), "estacoda-home-"));
+        const estacodaDir = join(homeDir, ".estacoda");
+        mkdirSync(estacodaDir, { recursive: true });
+        writeFileSync(join(estacodaDir, ".env"), "OPENAI_API_KEY=sk-secret-value\n", "utf8");
+
+        const registry = new ProviderRegistry();
+        registry.register(openaiAdapter());
+
+        try {
+          const flow = await createProviderModelSelectionFlow({
+            ...buildOptions(fixturePath, cachePath, {
+              registry,
+              mode: "normal",
+              config: {
+                providers: {
+                  openai: {
+                    kind: "openai-compatible",
+                    models: ["gpt-4o"]
+                  }
+                }
+              }
+            }),
+            homeDir
+          });
+
+          const result = flow.resolveSelection("openai", "gpt-4o");
+          if (result.kind !== "selected") return;
+          const serialized = JSON.stringify(result);
+          expect(serialized).not.toContain("sk-secret-value");
+        } finally {
+          rmSync(homeDir, { recursive: true, force: true });
+        }
+      })
+    );
+
+    it(
+      "without .env or shell env, setup mode returns collect",
+      withFixture(async (fixturePath, cachePath) => {
+        delete process.env.OPENAI_API_KEY;
+        const homeDir = mkdtempSync(join(tmpdir(), "estacoda-home-"));
+
+        const registry = new ProviderRegistry();
+        registry.register(openaiAdapter());
+
+        try {
+          const flow = await createProviderModelSelectionFlow({
+            ...buildOptions(fixturePath, cachePath, {
+              registry,
+              mode: "setup",
+              config: {
+                providers: {
+                  openai: {
+                    kind: "openai-compatible",
+                    models: ["gpt-4o"]
+                  }
+                }
+              }
+            }),
+            homeDir
+          });
+
+          const result = flow.resolveSelection("openai", "gpt-4o");
+          if (result.kind !== "selected") return;
+          expect(result.credentialAction.kind).toBe("collect");
+        } finally {
+          rmSync(homeDir, { recursive: true, force: true });
+        }
       })
     );
   });

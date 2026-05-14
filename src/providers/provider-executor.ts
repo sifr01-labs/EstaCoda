@@ -5,7 +5,8 @@ import type {
   ProviderRoutePreferences,
   ProviderStreamEvent,
   ProviderId,
-  ResolvedModelRoute
+  ResolvedModelRoute,
+  ProviderApiMode
 } from "../contracts/provider.js";
 import { CredentialPoolRegistry } from "./credential-pool.js";
 import { ProviderRegistry } from "./provider-registry.js";
@@ -160,6 +161,54 @@ export class ProviderExecutor {
           model: route.id,
           ok: false,
           errorClass: provider === undefined ? undefined : "unsupported",
+          fallback: index > 0,
+          willFallback: index < chain.length - 1
+        });
+        continue;
+      }
+
+      const metadata = getProviderMetadata(route.provider);
+
+      // Metadata runnable gate: non-runnable providers must not execute
+      if (!metadata.runnable) {
+        const reason = `Provider ${route.provider} is not runnable.`;
+        attempts.push({
+          provider: route.provider,
+          model: route.id,
+          ok: false,
+          errorClass: "unsupported",
+          content: reason
+        });
+        await options.onEvent?.({
+          kind: "provider-attempt-end",
+          provider: route.provider,
+          model: route.id,
+          ok: false,
+          errorClass: "unsupported",
+          fallback: index > 0,
+          willFallback: index < chain.length - 1
+        });
+        continue;
+      }
+
+      // Effective API mode gate: only executable modes are allowed
+      const apiMode = route.apiMode ?? metadata.apiMode;
+      const executableModes: ProviderApiMode[] = ["openai_chat_completions", "custom_openai_compatible"];
+      if (!executableModes.includes(apiMode)) {
+        const reason = `Provider ${route.provider} uses unsupported API mode ${apiMode}.`;
+        attempts.push({
+          provider: route.provider,
+          model: route.id,
+          ok: false,
+          errorClass: "unsupported",
+          content: reason
+        });
+        await options.onEvent?.({
+          kind: "provider-attempt-end",
+          provider: route.provider,
+          model: route.id,
+          ok: false,
+          errorClass: "unsupported",
           fallback: index > 0,
           willFallback: index < chain.length - 1
         });

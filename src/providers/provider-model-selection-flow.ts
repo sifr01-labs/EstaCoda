@@ -5,6 +5,7 @@ import type {
   ModelProfile
 } from "../contracts/provider.js";
 import type { EstaCodaConfig } from "../config/runtime-config.js";
+import { loadDotEnvSecrets } from "../config/env-secret-store.js";
 import { ProviderRegistry } from "./provider-registry.js";
 import {
   createModelSelectionCatalog,
@@ -102,6 +103,11 @@ export async function createProviderModelSelectionFlow(
   options: ProviderModelSelectionFlowOptions
 ): Promise<FlowEngine> {
   const mode = options.mode ?? "normal";
+
+  // Load the protected .env boundary so credential readiness checks
+  // reflect secrets stored in ~/.estacoda/.env, not just shell env.
+  await loadDotEnvSecrets({ homeDir: options.homeDir });
+
   const catalog = await createModelSelectionCatalog({
     config: options.config,
     providerRegistry: options.providerRegistry,

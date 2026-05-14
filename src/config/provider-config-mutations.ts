@@ -12,7 +12,7 @@ import {
   type EstaCodaConfig,
   type ModelFallbackConfig
 } from "./runtime-config.js";
-import { getDefaultBaseUrl, getDefaultApiKeyEnv } from "../providers/provider-metadata.js";
+import { getProviderMetadata } from "../providers/provider-metadata.js";
 import { writeEnvSecret } from "./env-secret-store.js";
 
 // ── Input types ──────────────────────────────────────────────────────────────
@@ -71,10 +71,11 @@ export function applyRegisterProviderConfig(
   const providerConfig: Record<string, unknown> = { ...existingProvider };
 
   if (input.kind !== undefined) providerConfig.kind = input.kind;
+  const meta = getProviderMetadata(input.provider);
   if (input.baseUrl !== undefined) {
     providerConfig.baseUrl = input.baseUrl;
-  } else if (existingProvider.baseUrl === undefined) {
-    providerConfig.baseUrl = getDefaultBaseUrl(input.provider);
+  } else if (existingProvider.baseUrl === undefined && meta.defaultBaseUrl !== undefined) {
+    providerConfig.baseUrl = meta.defaultBaseUrl;
   }
   if (input.apiKeyEnv !== undefined) providerConfig.apiKeyEnv = input.apiKeyEnv;
   if (input.enableNetwork !== undefined) providerConfig.enableNetwork = input.enableNetwork;

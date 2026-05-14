@@ -73,6 +73,28 @@ describe("applyRegisterProviderConfig", () => {
     const result = applyRegisterProviderConfig(existing, { provider: "openai" });
     expect(result.providers!.openai!.baseUrl).toBe("https://api.openai.com/v1");
   });
+
+  it("known provider without baseUrl gets canonical default", () => {
+    const existing: EstaCodaConfig = {};
+    const result = applyRegisterProviderConfig(existing, { provider: "deepseek" });
+    expect(result.providers!.deepseek!.baseUrl).toBe("https://api.deepseek.com/v1");
+  });
+
+  it("unknown/custom provider without baseUrl does not get placeholder", () => {
+    const existing: EstaCodaConfig = {};
+    const result = applyRegisterProviderConfig(existing, { provider: "my-custom-provider", kind: "openai-compatible" });
+    expect(result.providers!["my-custom-provider"]?.baseUrl).toBeUndefined();
+    expect(result.providers!["my-custom-provider"]).not.toHaveProperty("baseUrl");
+  });
+
+  it("custom provider with explicit baseUrl stores that URL", () => {
+    const existing: EstaCodaConfig = {};
+    const result = applyRegisterProviderConfig(existing, {
+      provider: "my-custom-provider",
+      baseUrl: "https://custom.example.com/v1"
+    });
+    expect(result.providers!["my-custom-provider"]!.baseUrl).toBe("https://custom.example.com/v1");
+  });
 });
 
 describe("applyStoreProviderCredential", () => {
@@ -194,6 +216,19 @@ describe("applySetPreferredModelRoute", () => {
     });
     expect(result.providers!.deepseek!.baseUrl).toBe("https://custom.deepseek.com/v1");
     expect(result.providers!.deepseek!.apiKeyEnv).toBe("CUSTOM_DEEPSEEK_KEY");
+  });
+
+  it("does not synthesize placeholder base URL for custom providers", () => {
+    const existing: EstaCodaConfig = {};
+    const result = applySetPreferredModelRoute(existing, {
+      provider: "my-custom",
+      model: "custom-model"
+    });
+    expect(result.model).toEqual({
+      provider: "my-custom",
+      id: "custom-model"
+    });
+    expect(result.providers?.["my-custom"]?.baseUrl).toBeUndefined();
   });
 });
 
@@ -334,6 +369,18 @@ describe("load/save wrappers", () => {
     const config = await readUserConfig(tmpDir);
     expect(config.model!.fallbacks).toHaveLength(1);
     expect(config.model!.fallbacks![0].provider).toBe("deepseek");
+  });
+
+  it("load/save preserves missing base URL as missing for custom providers", async () => {
+    await registerProviderConfig({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      input: { provider: "my-custom-provider", kind: "openai-compatible" }
+    });
+    const config = await readUserConfig(tmpDir);
+    expect(config.providers!["my-custom-provider"]).toBeDefined();
+    expect(config.providers!["my-custom-provider"]?.baseUrl).toBeUndefined();
+    expect(config.providers!["my-custom-provider"]).not.toHaveProperty("baseUrl");
   });
 });
 
