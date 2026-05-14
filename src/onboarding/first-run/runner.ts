@@ -1,11 +1,11 @@
 import { resolveStateHome } from "../../config/state-home.js";
 import {
-  defaultEnvKey,
   loadRuntimeConfig,
   type ActivityLabelsLocale,
   type UiFlavor,
   type UiLanguage,
 } from "../../config/runtime-config.js";
+import { getDefaultApiKeyEnv } from "../../providers/provider-metadata.js";
 import type { ProviderId } from "../../contracts/provider.js";
 import type { Prompt } from "../../cli/readline-prompt.js";
 import type { SelectPromptInput } from "../../cli/interactive-select.js";
@@ -242,10 +242,10 @@ export async function runFirstRunSetup(
         kind: "env" as const,
         name: await askWithDefault(
           prompt,
-          `${copy(language, "onboarding.providers.primaryCredential")} [${defaultEnvKey(primaryProvider)}]: `,
+          `${copy(language, "onboarding.providers.primaryCredential")} [${getDefaultApiKeyEnv(primaryProvider)}]: `,
           options.defaultSelections?.primaryCredential?.kind === "env"
             ? options.defaultSelections.primaryCredential.name
-            : defaultEnvKey(primaryProvider)
+            : getDefaultApiKeyEnv(primaryProvider)
         ),
       }
     : { kind: "none" as const };

@@ -28,6 +28,7 @@ import { createCatalogProvider } from "../providers/catalog-provider.js";
 import { fallbackKnownModelProfiles, inferModelProfile } from "../providers/model-catalog.js";
 import { createOpenAICompatibleProvider } from "../providers/openai-compatible-provider.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
+import { getDefaultBaseUrl, getDefaultApiKeyEnv } from "../providers/provider-metadata.js";
 import { capabilityFirstDefaults } from "../contracts/security.js";
 import type { SecurityApprovalMode, SecurityPolicy, SecurityRequest } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
@@ -1101,10 +1102,10 @@ function createDefaultProviderRegistry(selectedModel: ModelProfile): ProviderReg
       registry.register(createOpenAICompatibleProvider({
         id: provider,
         endpoint: {
-          baseUrl: defaultBaseUrl(provider),
+          baseUrl: getDefaultBaseUrl(provider),
           apiKey: provider === "local"
             ? { kind: "none" }
-            : { kind: "env", name: defaultEnvKey(provider) }
+            : { kind: "env", name: getDefaultApiKeyEnv(provider) }
         },
         models
       }));
@@ -1146,44 +1147,4 @@ function uniqueModels(models: ModelProfile[]): ModelProfile[] {
   }
 
   return unique;
-}
-
-function defaultBaseUrl(provider: string): string {
-  switch (provider) {
-    case "openai":
-      return "https://api.openai.com/v1";
-    case "anthropic":
-      return "https://api.anthropic.com/v1";
-    case "google":
-      return "https://generativelanguage.googleapis.com/v1beta/openai";
-    case "deepseek":
-      return "https://api.deepseek.com/v1";
-    case "kimi":
-      return "https://api.moonshot.ai/v1";
-    case "openrouter":
-      return "https://openrouter.ai/api/v1";
-    case "local":
-      return "http://localhost:11434/v1";
-    default:
-      return "https://example.invalid/v1";
-  }
-}
-
-function defaultEnvKey(provider: string): string {
-  switch (provider) {
-    case "openai":
-      return "OPENAI_API_KEY";
-    case "anthropic":
-      return "ANTHROPIC_API_KEY";
-    case "google":
-      return "GOOGLE_API_KEY";
-    case "deepseek":
-      return "DEEPSEEK_API_KEY";
-    case "kimi":
-      return "KIMI_API_KEY";
-    case "openrouter":
-      return "OPENROUTER_API_KEY";
-    default:
-      return "OPENAI_COMPATIBLE_API_KEY";
-  }
 }
