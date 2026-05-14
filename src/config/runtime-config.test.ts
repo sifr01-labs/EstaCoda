@@ -640,6 +640,124 @@ describe("production loadRuntimeConfig callsite safety", () => {
   });
 });
 
+describe("buildProviderRegistry custom provider baseUrl behavior", () => {
+  it("custom provider without baseUrl does not register an executable OpenAI-compatible adapter", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    await writeFile(join(workspace, ".estacoda", "config.json"), JSON.stringify({
+      providers: {
+        "custom-corp": {
+          kind: "openai-compatible",
+          models: ["custom-model"]
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      userConfigPath: join(workspace, ".estacoda", "config.json"),
+      projectConfigTrust: "untrusted"
+    });
+
+    const adapter = loaded.providerRegistry.get("custom-corp");
+    expect(adapter).toBeUndefined();
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("custom provider with explicit baseUrl registers executable adapter", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    await writeFile(join(workspace, ".estacoda", "config.json"), JSON.stringify({
+      providers: {
+        "custom-corp": {
+          kind: "openai-compatible",
+          baseUrl: "https://custom.corp.com/v1",
+          models: ["custom-model"]
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      userConfigPath: join(workspace, ".estacoda", "config.json"),
+      projectConfigTrust: "untrusted"
+    });
+
+    const adapter = loaded.providerRegistry.get("custom-corp");
+    expect(adapter).toBeDefined();
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("known provider without explicit baseUrl registers executable adapter with metadata default", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    await writeFile(join(workspace, ".estacoda", "config.json"), JSON.stringify({
+      providers: {
+        openai: {
+          kind: "openai-compatible",
+          models: ["gpt-4o"]
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      userConfigPath: join(workspace, ".estacoda", "config.json"),
+      projectConfigTrust: "untrusted"
+    });
+
+    const adapter = loaded.providerRegistry.get("openai");
+    expect(adapter).toBeDefined();
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("loadRuntimeConfig primary route for custom provider without baseUrl has baseUrl === undefined", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    await writeFile(join(workspace, ".estacoda", "config.json"), JSON.stringify({
+      model: { provider: "custom-corp", id: "custom-model" },
+      providers: {
+        "custom-corp": {
+          kind: "openai-compatible",
+          models: ["custom-model"]
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      userConfigPath: join(workspace, ".estacoda", "config.json"),
+      projectConfigTrust: "untrusted"
+    });
+
+    expect(loaded.primaryModelRoute.baseUrl).toBeUndefined();
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("no placeholder endpoint is used for runtime execution", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    await writeFile(join(workspace, ".estacoda", "config.json"), JSON.stringify({
+      providers: {
+        "custom-corp": {
+          kind: "openai-compatible",
+          models: ["custom-model"]
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      userConfigPath: join(workspace, ".estacoda", "config.json"),
+      projectConfigTrust: "untrusted"
+    });
+
+    const json = JSON.stringify(loaded);
+    expect(json).not.toContain("https://example.invalid/v1");
+    await rm(workspace, { recursive: true, force: true });
+  });
+});
+
 async function findProductionTypeScriptFiles(repoRoot: string): Promise<string[]> {
   const files: string[] = [];
 

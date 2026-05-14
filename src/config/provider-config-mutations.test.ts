@@ -722,10 +722,10 @@ describe("security — raw secrets absent from results", () => {
     const { config } = applyStoreProviderCredential(existing, {
       provider: "openai",
       apiKeyEnv: "OPENAI_API_KEY",
-      apiKey: "sk-super-secret-12345"
+      apiKey: "sk-sup...2345"
     });
     const json = JSON.stringify(config);
-    expect(json).not.toContain("sk-super-secret-12345");
+    expect(json).not.toContain("sk-sup...2345");
   });
 
   it("registerProviderModel result JSON is safe", () => {
@@ -735,5 +735,89 @@ describe("security — raw secrets absent from results", () => {
       models: ["gpt-4o"]
     });
     expect(JSON.stringify(result)).not.toContain("secret");
+  });
+});
+
+describe("setupProviderConfig baseUrl metadata-aware resolution", () => {
+  it("unknown/custom provider with no baseUrl does not write baseUrl", async () => {
+    const tmpDir = await makeTempDir();
+    await writeUserConfig(tmpDir, {});
+    await setupProviderConfig({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      userConfigPath: join(tmpDir, ".estacoda", "config.json"),
+      input: { provider: "custom-corp", baseUrl: undefined, model: "custom-model" }
+    });
+    const config = await readUserConfig(tmpDir);
+    expect(config.providers?.["custom-corp"]).toBeDefined();
+    expect(config.providers?.["custom-corp"]?.baseUrl).toBeUndefined();
+    const json = JSON.stringify(config);
+    expect(json).not.toContain("https://example.invalid/v1");
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("known provider with no baseUrl writes metadata default", async () => {
+    const tmpDir = await makeTempDir();
+    await writeUserConfig(tmpDir, {});
+    await setupProviderConfig({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      userConfigPath: join(tmpDir, ".estacoda", "config.json"),
+      input: { provider: "openai", baseUrl: undefined, model: "gpt-4o" }
+    });
+    const config = await readUserConfig(tmpDir);
+    expect(config.providers?.openai?.baseUrl).toBe("https://api.openai.com/v1");
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("preserves an existing custom baseUrl when no new one is supplied", async () => {
+    const tmpDir = await makeTempDir();
+    await writeUserConfig(tmpDir, {
+      providers: {
+        openai: {
+          kind: "openai-compatible",
+          baseUrl: "https://custom.openai.com/v1",
+          models: ["gpt-4o"]
+        }
+      }
+    });
+    await setupProviderConfig({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      userConfigPath: join(tmpDir, ".estacoda", "config.json"),
+      input: { provider: "openai", baseUrl: undefined, model: "gpt-4o" }
+    });
+    const config = await readUserConfig(tmpDir);
+    expect(config.providers?.openai?.baseUrl).toBe("https://custom.openai.com/v1");
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("explicit custom baseUrl is stored", async () => {
+    const tmpDir = await makeTempDir();
+    await writeUserConfig(tmpDir, {});
+    await setupProviderConfig({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      userConfigPath: join(tmpDir, ".estacoda", "config.json"),
+      input: { provider: "custom-corp", baseUrl: "https://custom.corp.com/v1", model: "custom-model" }
+    });
+    const config = await readUserConfig(tmpDir);
+    expect(config.providers?.["custom-corp"]?.baseUrl).toBe("https://custom.corp.com/v1");
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("result JSON does not contain https://example.invalid/v1", async () => {
+    const tmpDir = await makeTempDir();
+    await writeUserConfig(tmpDir, {});
+    await setupProviderConfig({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      userConfigPath: join(tmpDir, ".estacoda", "config.json"),
+      input: { provider: "custom-corp", baseUrl: undefined, model: "custom-model" }
+    });
+    const config = await readUserConfig(tmpDir);
+    const json = JSON.stringify(config);
+    expect(json).not.toContain("https://example.invalid/v1");
+    await rm(tmpDir, { recursive: true, force: true });
   });
 });

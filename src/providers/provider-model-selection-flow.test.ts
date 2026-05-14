@@ -18,6 +18,9 @@ function createMockSnapshot(): Record<string, unknown> {
       { id: "openai", name: "OpenAI" },
       { id: "anthropic", name: "Anthropic" },
       { id: "deepseek", name: "DeepSeek" },
+      { id: "kimi", name: "Kimi For Coding" },
+      { id: "google", name: "Google" },
+      { id: "openrouter", name: "OpenRouter" },
       { id: "local", name: "Local" },
       { id: "codex", name: "OpenAI Codex" },
       { id: "fal", name: "Fal" }
@@ -538,7 +541,7 @@ describe("provider-model-selection-flow", () => {
           })
         );
 
-        const result = flow.resolveSelection("local", "llama3");
+        const result = await flow.resolveSelection("local", "llama3");
         expect(result.kind).toBe("selected");
         if (result.kind !== "selected") return;
         expect(result.credentialAction.kind).toBe("none");
@@ -563,7 +566,7 @@ describe("provider-model-selection-flow", () => {
           })
         );
 
-        const result = flow.resolveSelection("openai", "gpt-4o");
+        const result = await flow.resolveSelection("openai", "gpt-4o");
         expect(result.kind).toBe("selected");
         if (result.kind !== "selected") return;
         expect(result.credentialAction.kind).toBe("reuse");
@@ -589,7 +592,7 @@ describe("provider-model-selection-flow", () => {
           })
         );
 
-        const result = flow.resolveSelection("openai", "gpt-4o");
+        const result = await flow.resolveSelection("openai", "gpt-4o");
         expect(result.kind).toBe("selected");
         if (result.kind !== "selected") return;
         expect(result.credentialAction.kind).toBe("collect");
@@ -615,7 +618,7 @@ describe("provider-model-selection-flow", () => {
           })
         );
 
-        const result = flow.resolveSelection("openai", "gpt-4o");
+        const result = await flow.resolveSelection("openai", "gpt-4o");
         expect(result.kind).toBe("selected");
         if (result.kind !== "selected") return;
         expect(result.credentialAction.kind).toBe("collect");
@@ -634,7 +637,7 @@ describe("provider-model-selection-flow", () => {
           })
         );
 
-        const result = flow.resolveSelection("codex", "codex-model");
+        const result = await flow.resolveSelection("codex", "codex-model");
         expect(result.kind).toBe("diagnostic");
         if (result.kind !== "diagnostic") return;
         expect(result.reason).toContain("not runnable");
@@ -650,7 +653,7 @@ describe("provider-model-selection-flow", () => {
           })
         );
 
-        const result = flow.resolveSelection("codex", "codex-model");
+        const result = await flow.resolveSelection("codex", "codex-model");
         expect(result.kind).toBe("diagnostic");
         if (result.kind !== "diagnostic") return;
         expect(result.reason).toContain("not runnable");
@@ -666,7 +669,7 @@ describe("provider-model-selection-flow", () => {
           })
         );
 
-        const result = flow.resolveSelection("fal" as ProviderId, "fal-model");
+        const result = await flow.resolveSelection("fal" as ProviderId, "fal-model");
         expect(result.kind).toBe("diagnostic");
         if (result.kind !== "diagnostic") return;
         expect(result.reason).toContain("not a runnable LLM provider");
@@ -682,7 +685,7 @@ describe("provider-model-selection-flow", () => {
           })
         );
 
-        const result = flow.resolveSelection("custom-corp" as ProviderId, "custom-model");
+        const result = await flow.resolveSelection("custom-corp" as ProviderId, "custom-model");
         expect(result.kind).toBe("diagnostic");
         if (result.kind !== "diagnostic") return;
         expect(result.reason).toContain("requires an explicit base URL");
@@ -709,7 +712,7 @@ describe("provider-model-selection-flow", () => {
           })
         );
 
-        const result = flow.resolveSelection("openai", "gpt-4o");
+        const result = await flow.resolveSelection("openai", "gpt-4o");
         const serialized = JSON.stringify(result);
         expect(serialized).not.toContain("super-secret-api-key-12345");
       })
@@ -733,7 +736,7 @@ describe("provider-model-selection-flow", () => {
           })
         );
 
-        const result = flow.resolveSelection("openai", "gpt-4o");
+        const result = await flow.resolveSelection("openai", "gpt-4o");
         expect(result).not.toHaveProperty("credential.value");
         expect(result).not.toHaveProperty("apiKey");
         expect(result).not.toHaveProperty("apiKeyValue");
@@ -760,7 +763,7 @@ describe("provider-model-selection-flow", () => {
           })
         );
 
-        const result = flow.resolveSelection("openai", "gpt-4o");
+        const result = await flow.resolveSelection("openai", "gpt-4o");
         if (result.kind !== "selected") return;
         expect(result.credentialAction.kind).toBe("collect");
         const serialized = JSON.stringify(result.credentialAction);
@@ -781,7 +784,7 @@ describe("provider-model-selection-flow", () => {
         );
 
         // resolveSelection is synchronous and has no I/O
-        const result = flow.resolveSelection("openai", "gpt-4o");
+        const result = await flow.resolveSelection("openai", "gpt-4o");
         expect(result).toBeDefined();
       })
     );
@@ -917,7 +920,7 @@ describe("provider-model-selection-flow", () => {
             homeDir
           });
 
-          const result = flow.resolveSelection("openai", "gpt-4o");
+          const result = await flow.resolveSelection("openai", "gpt-4o");
           if (result.kind !== "selected") return;
           expect(result.credentialAction.kind).toBe("reuse");
         } finally {
@@ -995,7 +998,7 @@ describe("provider-model-selection-flow", () => {
             homeDir
           });
 
-          const result = flow.resolveSelection("openai", "gpt-4o");
+          const result = await flow.resolveSelection("openai", "gpt-4o");
           if (result.kind !== "selected") return;
           const serialized = JSON.stringify(result);
           expect(serialized).not.toContain("sk-secret-value");
@@ -1031,12 +1034,205 @@ describe("provider-model-selection-flow", () => {
             homeDir
           });
 
-          const result = flow.resolveSelection("openai", "gpt-4o");
+          const result = await flow.resolveSelection("openai", "gpt-4o");
           if (result.kind !== "selected") return;
           expect(result.credentialAction.kind).toBe("collect");
         } finally {
           rmSync(homeDir, { recursive: true, force: true });
         }
+      })
+    );
+  });
+
+  describe("setup mode metadata-driven discovery", () => {
+    it(
+      "setup mode with empty config and empty registry includes configurable runnable providers",
+      withFixture(async (fixturePath, cachePath) => {
+        delete process.env.OPENAI_API_KEY;
+        delete process.env.DEEPSEEK_API_KEY;
+        delete process.env.KIMI_API_KEY;
+        delete process.env.GOOGLE_API_KEY;
+        delete process.env.OPENROUTER_API_KEY;
+
+        const flow = await createProviderModelSelectionFlow(
+          buildOptions(fixturePath, cachePath, {
+            mode: "setup"
+          })
+        );
+
+        const providers = await flow.listProviderCandidates();
+        const ids = providers.map((p) => p.id);
+        expect(ids).toContain("openai");
+        expect(ids).toContain("deepseek");
+        expect(ids).toContain("kimi");
+        expect(ids).toContain("google");
+        expect(ids).toContain("openrouter");
+        expect(ids).toContain("local");
+      })
+    );
+
+    it(
+      "setup mode excludes codex and media-only providers",
+      withFixture(async (fixturePath, cachePath) => {
+        const flow = await createProviderModelSelectionFlow(
+          buildOptions(fixturePath, cachePath, {
+            mode: "setup"
+          })
+        );
+
+        const providers = await flow.listProviderCandidates();
+        const ids = providers.map((p) => p.id);
+        expect(ids).not.toContain("codex");
+        expect(ids).not.toContain("fal");
+        expect(ids).not.toContain("anthropic");
+      })
+    );
+
+    it(
+      "setup mode includes hosted providers even when credentials are missing",
+      withFixture(async (fixturePath, cachePath) => {
+        delete process.env.OPENAI_API_KEY;
+
+        const flow = await createProviderModelSelectionFlow(
+          buildOptions(fixturePath, cachePath, {
+            mode: "setup"
+          })
+        );
+
+        const providers = await flow.listProviderCandidates();
+        const openai = providers.find((p) => p.id === "openai");
+        expect(openai).toBeDefined();
+        expect(openai!.credentialReady).toBe(false);
+      })
+    );
+  });
+
+  describe("resolveSelection catalog profile preservation", () => {
+    it(
+      "resolving openai/gpt-4o returns profile.supportsVision from catalog fixture",
+      withFixture(async (fixturePath, cachePath) => {
+        process.env.OPENAI_API_KEY = "sk-test";
+        const flow = await createProviderModelSelectionFlow(
+          buildOptions(fixturePath, cachePath, {
+            mode: "normal",
+            config: {
+              providers: {
+                openai: {
+                  kind: "openai-compatible",
+                  models: ["gpt-4o"]
+                }
+              }
+            }
+          })
+        );
+
+        const result = await flow.resolveSelection("openai", "gpt-4o");
+        expect(result.kind).toBe("selected");
+        if (result.kind !== "selected") return;
+        expect(result.profile.supportsVision).toBe(true);
+      })
+    );
+
+    it(
+      "returns real contextWindowTokens from catalog fixture",
+      withFixture(async (fixturePath, cachePath) => {
+        process.env.OPENAI_API_KEY = "sk-test";
+        const flow = await createProviderModelSelectionFlow(
+          buildOptions(fixturePath, cachePath, {
+            mode: "normal",
+            config: {
+              providers: {
+                openai: {
+                  kind: "openai-compatible",
+                  models: ["gpt-4o"]
+                }
+              }
+            }
+          })
+        );
+
+        const result = await flow.resolveSelection("openai", "gpt-4o");
+        expect(result.kind).toBe("selected");
+        if (result.kind !== "selected") return;
+        expect(result.profile.contextWindowTokens).toBe(128_000);
+      })
+    );
+
+    it(
+      "returns supportsTools and supportsStructuredOutput from catalog fixture",
+      withFixture(async (fixturePath, cachePath) => {
+        process.env.OPENAI_API_KEY = "sk-test";
+        const flow = await createProviderModelSelectionFlow(
+          buildOptions(fixturePath, cachePath, {
+            mode: "normal",
+            config: {
+              providers: {
+                openai: {
+                  kind: "openai-compatible",
+                  models: ["gpt-4o"]
+                }
+              }
+            }
+          })
+        );
+
+        const result = await flow.resolveSelection("openai", "gpt-4o");
+        expect(result.kind).toBe("selected");
+        if (result.kind !== "selected") return;
+        expect(result.profile.supportsTools).toBe(true);
+        expect(result.profile.supportsStructuredOutput).toBe(true);
+      })
+    );
+
+    it(
+      "configured/manual model missing from catalog falls back to inferred profile",
+      withFixture(async (fixturePath, cachePath) => {
+        process.env.OPENAI_API_KEY = "sk-test";
+        const flow = await createProviderModelSelectionFlow(
+          buildOptions(fixturePath, cachePath, {
+            mode: "normal",
+            config: {
+              providers: {
+                openai: {
+                  kind: "openai-compatible",
+                  models: ["gpt-4o"]
+                }
+              }
+            }
+          })
+        );
+
+        const result = await flow.resolveSelection("openai", "manual-model-not-in-catalog");
+        expect(result.kind).toBe("selected");
+        if (result.kind !== "selected") return;
+        expect(result.profile.id).toBe("manual-model-not-in-catalog");
+        expect(result.profile.provider).toBe("openai");
+      })
+    );
+
+    it(
+      "selected route/model ID remains exact",
+      withFixture(async (fixturePath, cachePath) => {
+        process.env.OPENAI_API_KEY = "sk-test";
+        const flow = await createProviderModelSelectionFlow(
+          buildOptions(fixturePath, cachePath, {
+            mode: "normal",
+            config: {
+              providers: {
+                openai: {
+                  kind: "openai-compatible",
+                  models: ["gpt-4o"]
+                }
+              }
+            }
+          })
+        );
+
+        const result = await flow.resolveSelection("openai", "gpt-4o");
+        expect(result.kind).toBe("selected");
+        if (result.kind !== "selected") return;
+        expect(result.provider).toBe("openai");
+        expect(result.model).toBe("gpt-4o");
       })
     );
   });

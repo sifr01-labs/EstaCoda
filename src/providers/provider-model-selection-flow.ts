@@ -18,6 +18,7 @@ import {
   isProviderRunnable,
   type ProviderMetadata
 } from "./provider-metadata.js";
+import { inferModelProfile } from "./model-catalog.js";
 import { resolveRuntimeCredential } from "./runtime-credential-resolver.js";
 
 export type ProviderModelSelectionFlowMode =
@@ -84,7 +85,7 @@ export type FlowEngine = {
   resolveSelection(
     providerId: ProviderId,
     modelId: string
-  ): ProviderModelSelectionResult | ProviderSelectionDiagnostic;
+  ): Promise<ProviderModelSelectionResult | ProviderSelectionDiagnostic>;
 };
 
 /**
@@ -119,7 +120,7 @@ export async function createProviderModelSelectionFlow(
   return {
     listProviderCandidates: () => listProviderCandidatesImpl(options, catalog, mode),
     listModelCandidates: (providerId) => listModelCandidatesImpl(options, catalog, providerId, mode),
-    resolveSelection: (providerId, modelId) =>
+    resolveSelection: async (providerId, modelId) =>
       resolveSelectionImpl(options, catalog, mode, providerId, modelId)
   };
 }
@@ -133,7 +134,7 @@ async function listProviderCandidatesImpl(
 ): Promise<ProviderCandidate[]> {
   const config = options.config;
   const catalogProviders = await catalog.listProviders({
-    includeCatalogOnly: mode === "catalog-explore"
+    includeCatalogOnly: mode === "catalog-explore" || mode === "setup"
   });
 
   const candidates: ProviderCandidate[] = [];
@@ -231,13 +232,13 @@ async function listModelCandidatesImpl(
 
 // ── Selection resolution ─────────────────────────────────────────────────────
 
-function resolveSelectionImpl(
+async function resolveSelectionImpl(
   options: ProviderModelSelectionFlowOptions,
-  _catalog: ModelSelectionCatalog,
+  catalog: ModelSelectionCatalog,
   mode: ProviderModelSelectionFlowMode,
   providerId: ProviderId,
   modelId: string
-): ProviderModelSelectionResult | ProviderSelectionDiagnostic {
+): Promise<ProviderModelSelectionResult | ProviderSelectionDiagnostic> {
   const config = options.config;
   const meta = getProviderMetadata(providerId);
 
@@ -273,15 +274,30 @@ function resolveSelectionImpl(
     };
   }
 
-  // Build profile (minimal; callers may enrich from catalog)
-  const profile: ModelProfile = {
-    id: modelId,
-    provider: providerId,
-    contextWindowTokens: config.model?.contextWindowTokens ?? 128_000,
-    supportsTools: false,
-    supportsVision: false,
-    supportsStructuredOutput: false
-  };
+  // In normal mode, catalog-only/non-executable models return a diagnostic
+  if (mode === "normal") {
+    const models = await listModelCandidatesImpl(options, catalog, providerId, mode);
+    const selected = models.find((m) => m.id === modelId);
+    if (selected !== undefined && !selected.executable) {
+      return {
+        kind: "diagnostic",
+        provider: providerId,
+        model: modelId,
+        reason: `Model ${modelId} on provider ${meta.displayName} is not executable.`
+      };
+    }
+  }
+
+  // Preserve real catalog profile when available
+  const models = await listModelCandidatesImpl(options, catalog, providerId, mode);
+  const selected = models.find((m) => m.id === modelId);
+  const profile =
+    selected?.profile ??
+    inferModelProfile({
+      provider: providerId,
+      model: modelId,
+      contextWindowTokens: config.model?.contextWindowTokens
+    });
 
   const apiKeyEnv = config.providers?.[providerId]?.apiKeyEnv ?? meta.defaultApiKeyEnv;
 

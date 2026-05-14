@@ -26,6 +26,7 @@ import { ProviderRegistry } from "../providers/provider-registry.js";
 import {
   getDefaultBaseUrl,
   getDefaultApiKeyEnv,
+  getProviderMetadata,
   buildResolvedModelRoute
 } from "../providers/provider-metadata.js";
 import type { MCPServerTransport } from "../mcp/mcp-client.js";
@@ -1249,10 +1250,17 @@ export function buildProviderRegistry(config: EstaCodaConfig, options: {
 
     const kind = providerConfig.kind ?? "openai-compatible";
     if (kind === "openai-compatible") {
+      const metadata = getProviderMetadata(providerId);
+      const resolvedBaseUrl = providerConfig.baseUrl ?? metadata.defaultBaseUrl;
+      if (resolvedBaseUrl === undefined) {
+        // Skip registering an executable adapter for custom providers
+        // missing an explicit base URL.
+        continue;
+      }
       registry.register(createOpenAICompatibleProvider({
         id: providerId,
         endpoint: {
-          baseUrl: providerConfig.baseUrl ?? getDefaultBaseUrl(providerId),
+          baseUrl: resolvedBaseUrl,
           apiKey: providerConfig.apiKeyEnv === undefined
             ? { kind: "none" }
             : { kind: "env", name: providerConfig.apiKeyEnv },
@@ -1355,14 +1363,22 @@ export async function setupProviderConfig(options: {
     ...(options.input.models ?? []),
     options.input.model
   ]);
-  const providerConfig = {
+  const providerMetadata = getProviderMetadata(options.input.provider);
+  const resolvedBaseUrl =
+    options.input.baseUrl ??
+    existingProvider.baseUrl ??
+    providerMetadata.defaultBaseUrl;
+
+  const providerConfig: Record<string, unknown> = {
     ...existingProvider,
     kind: "openai-compatible" as const,
-    baseUrl: options.input.baseUrl ?? getDefaultBaseUrl(options.input.provider),
     apiKeyEnv: envName,
     models: nextModels,
     enableNetwork: options.input.enableNetwork ?? true
   };
+  if (resolvedBaseUrl !== undefined) {
+    providerConfig.baseUrl = resolvedBaseUrl;
+  }
 
   const contextWindowPatch = options.input.contextWindowTokens !== undefined
     ? { contextWindowTokens: options.input.contextWindowTokens }
