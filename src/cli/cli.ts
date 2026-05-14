@@ -90,13 +90,23 @@ import { flowCommand } from "./flow-commands.js";
 import { packCommand } from "./pack-commands.js";
 import { skillsCommand } from "./skill-commands.js";
 import { commandRegistry } from "./command-registry.js";
+import { promptForApiKey } from "./secret-prompt.js";
+import { createProviderModelSelectionFlow } from "../providers/provider-model-selection-flow.js";
+import { readConfig, saveRuntimeConfig } from "../config/runtime-config.js";
+import {
+  applyRegisterProviderConfig,
+  applyRegisterProviderModel,
+  applySetPreferredModelRoute
+} from "../config/provider-config-mutations.js";
 import {
   renderModelList,
   renderModelSearchResults,
   renderProviderList,
-  renderRefreshReport
+  renderRefreshReport,
+  renderModelPickerSuccess,
+  renderModelPickerCancellation
 } from "./model-renderers.js";
-import { toModelRow, toProviderRow } from "./model-view-models.js";
+import { toModelRow, toProviderRow, toPickerSuccessSummary } from "./model-view-models.js";
 import {
   formatSecurityMode,
   formatSkillAutonomy,
@@ -850,10 +860,216 @@ async function model(options: CliOptions, args: string[]): Promise<CliCommandRes
     };
   }
 
+  return runBareModelPickerOrOverview(options, config);
+}
+
+async function runBareModelPickerOrOverview(
+  options: CliOptions,
+  config: Awaited<ReturnType<typeof loadRuntimeConfig>>
+): Promise<CliCommandResult> {
+  const allowInteractive = options.interactive !== false;
+  const hasPrompt = options.prompt !== undefined;
+  const isTty = canRunInteractive();
+
+  if (!allowInteractive || (!isTty && !hasPrompt)) {
+    return {
+      handled: true,
+      exitCode: 0,
+      output: renderModelOverview(config)
+    };
+  }
+
+  return runBareModelPicker(options, config);
+}
+
+async function runBareModelPicker(
+  options: CliOptions,
+  config: Awaited<ReturnType<typeof loadRuntimeConfig>>
+): Promise<CliCommandResult> {
+  // Use "setup" mode so the picker behaves as a configuration surface:
+  // it shows configurable runnable providers even when credentials are missing,
+  // and allows credential collection inline. This is NOT onboarding setup;
+  // it is a terminal configuration picker that reuses setup-mode filtering.
+  const flow = await createProviderModelSelectionFlow({
+    config: config.config,
+    providerRegistry: config.providerRegistry,
+    homeDir: options.homeDir,
+    modelsDevOptions: options.modelsDevOptions,
+    allowNetwork: false,
+    mode: "setup"
+  });
+
+  const prompt = options.prompt!;
+
+  // ── Provider selection ──
+  const providerCandidates = await flow.listProviderCandidates();
+  if (providerCandidates.length === 0) {
+    return {
+      handled: true,
+      exitCode: 1,
+      output: "No configurable providers available."
+    };
+  }
+
+  const providerOptions = providerCandidates.map((p) => ({
+    value: p.id,
+    label: p.displayName,
+    description: `${p.modelsCount} model(s)`
+  }));
+  providerOptions.push({
+    value: "__cancel__",
+    label: "Cancel",
+    description: "Exit without changing model"
+  });
+
+  const selectedProviderId = await prompt.select!({
+    title: "Select a provider:",
+    options: providerOptions,
+    fallbackPrompt: "Choose: "
+  });
+  if (selectedProviderId === "__cancel__") {
+    return { handled: true, exitCode: 0, output: renderModelPickerCancellation() };
+  }
+
+  // ── Model selection ──
+  const modelCandidates = await flow.listModelCandidates(selectedProviderId);
+  if (modelCandidates.length === 0) {
+    return {
+      handled: true,
+      exitCode: 1,
+      output: `No models available for provider ${selectedProviderId}.`
+    };
+  }
+
+  const modelOptions = modelCandidates.map((m) => {
+    const badges: string[] = [];
+    if (m.supportsVision) badges.push("vision");
+    if (m.profile.supportsTools) badges.push("tools");
+    if (m.profile.supportsReasoning) badges.push("reasoning");
+    return {
+      value: m.id,
+      label: m.id,
+      description: badges.join(", ") || undefined
+    };
+  });
+  modelOptions.push({
+    value: "__back__",
+    label: "Back",
+    description: "Return to provider list"
+  });
+  modelOptions.push({
+    value: "__cancel__",
+    label: "Cancel",
+    description: "Exit without changing model"
+  });
+
+  const selectedModelId = await prompt.select!({
+    title: "Select a model:",
+    options: modelOptions,
+    fallbackPrompt: "Choose: "
+  });
+  if (selectedModelId === "__cancel__") {
+    return { handled: true, exitCode: 0, output: renderModelPickerCancellation() };
+  }
+  if (selectedModelId === "__back__") {
+    // Re-run provider selection. In a real TUI this would loop; for the CLI
+    // we simply recurse back to the provider step by calling the picker again.
+    return runBareModelPicker(options, config);
+  }
+
+  // ── Resolve selection ──
+  const resolution = await flow.resolveSelection(selectedProviderId, selectedModelId);
+  if (resolution.kind === "diagnostic") {
+    return { handled: true, exitCode: 1, output: `Selection failed: ${resolution.reason}` };
+  }
+
+  // ── Credential handling ──
+  let envVarName: string | undefined;
+  let credentialStored = false;
+  let credentialSkipped = false;
+
+  switch (resolution.credentialAction.kind) {
+    case "none": {
+      // Local provider: no credential needed
+      break;
+    }
+    case "reuse": {
+      const ref = resolution.credentialAction.reference;
+      if (!ref.startsWith("env:")) {
+        return {
+          handled: true,
+          exitCode: 1,
+          output: `Invalid credential reference: ${ref}`
+        };
+      }
+      envVarName = ref.slice(4);
+      break;
+    }
+    case "collect": {
+      envVarName = resolution.credentialAction.envVarName;
+      const promptResult = await promptForApiKey({
+        prompt,
+        providerId: resolution.provider,
+        envVarName,
+        homeDir: options.homeDir,
+        question: `Enter API key for ${resolution.provider} [${envVarName}]: `
+      });
+
+      if (promptResult.kind === "stored") {
+        credentialStored = true;
+      } else {
+        credentialSkipped = true;
+      }
+      break;
+    }
+  }
+
+  // ── Config mutation (pure, in-memory) ──
+  let mutated = applyRegisterProviderConfig(config.config, {
+    provider: resolution.provider,
+    baseUrl: resolution.baseUrl,
+    apiKeyEnv: envVarName
+  });
+
+  mutated = applyRegisterProviderModel(mutated, {
+    provider: resolution.provider,
+    models: [resolution.model]
+  });
+
+  mutated = applySetPreferredModelRoute(mutated, {
+    provider: resolution.provider,
+    model: resolution.model,
+    baseUrl: resolution.baseUrl,
+    apiKeyEnv: envVarName,
+    contextWindowTokens: resolution.profile.contextWindowTokens
+  });
+
+  // ── Persist config ──
+  const targetPath = options.userConfigPath ?? resolveStateHome({ homeDir: options.homeDir }).configPath;
+  try {
+    await saveRuntimeConfig(targetPath, mutated);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      handled: true,
+      exitCode: 1,
+      output: credentialStored
+        ? `Credential stored, but config save failed: ${message}`
+        : `Config save failed: ${message}`
+    };
+  }
+
+  // ── Render success ──
+  const summary = toPickerSuccessSummary(resolution, targetPath, {
+    credentialStored,
+    credentialSkipped,
+    envVarName
+  });
+
   return {
     handled: true,
     exitCode: 0,
-    output: renderModelOverview(config)
+    output: renderModelPickerSuccess(summary)
   };
 }
 

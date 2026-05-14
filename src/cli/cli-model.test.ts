@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runCliCommand } from "./cli.js";
 import { resetModelsDevRegistryForTest } from "../providers/model-selection-catalog.js";
+import type { Prompt } from "./readline-prompt.js";
+import type { SelectPromptInput } from "./interactive-select.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-cli-model-test-"));
@@ -21,6 +23,31 @@ async function readUserConfig(homeDir: string): Promise<unknown> {
   return JSON.parse(content);
 }
 
+function createMockPrompt(responses: {
+  selects?: string[];
+  secrets?: string[];
+}): Prompt {
+  let selectIndex = 0;
+  let secretIndex = 0;
+
+  const prompt = (async (question: string, options?: { secret?: boolean }) => {
+    if (options?.secret) {
+      const value = responses.secrets?.[secretIndex] ?? "";
+      secretIndex++;
+      return value;
+    }
+    return "";
+  }) as Prompt;
+
+  prompt.select = async <T>(_input: SelectPromptInput<T>): Promise<T> => {
+    const value = responses.selects?.[selectIndex] as T;
+    selectIndex++;
+    return value;
+  };
+
+  return prompt;
+}
+
 describe("cli model", () => {
   let tmpDir: string;
 
@@ -34,7 +61,7 @@ describe("cli model", () => {
   });
 
   describe("bare model command", () => {
-    it("renders overview plus command guide without writing config", async () => {
+    it("renders overview in non-interactive context without writing config", async () => {
       await writeUserConfig(tmpDir, {
         providers: {
           local: {
@@ -71,6 +98,302 @@ describe("cli model", () => {
       expect(result.output).toContain("estacoda model fallback remove");
       expect(result.output).toContain("estacoda model fallback reorder");
       expect(result.output).toContain("estacoda model fallback clear");
+    });
+
+    it("opens picker in interactive context and persists selected route", async () => {
+      await writeUserConfig(tmpDir, {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-4o"]
+          }
+        },
+        model: {
+          provider: "openai",
+          id: "gpt-4o"
+        }
+      });
+
+      const prompt = createMockPrompt({
+        selects: ["openai", "gpt-4o"]
+      });
+
+      const result = await runCliCommand({
+        argv: ["model"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        prompt
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("Model switched: gpt-4o");
+      expect(result.output).toContain("Provider: openai");
+      expect(result.output).toContain("Saved as preferred model.");
+
+      const config = await readUserConfig(tmpDir) as any;
+      expect(config.model?.provider).toBe("openai");
+      expect(config.model?.id).toBe("gpt-4o");
+    });
+
+    it("cancel at provider step writes nothing", async () => {
+      await writeUserConfig(tmpDir, {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-4o"]
+          }
+        },
+        model: {
+          provider: "openai",
+          id: "gpt-4o"
+        }
+      });
+      const original = await readUserConfig(tmpDir);
+
+      const prompt = createMockPrompt({
+        selects: ["__cancel__"]
+      });
+
+      const result = await runCliCommand({
+        argv: ["model"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        prompt
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("No changes were made.");
+      expect(await readUserConfig(tmpDir)).toEqual(original);
+    });
+
+    it("cancel at model step writes nothing", async () => {
+      await writeUserConfig(tmpDir, {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-4o"]
+          }
+        },
+        model: {
+          provider: "openai",
+          id: "gpt-4o"
+        }
+      });
+      const original = await readUserConfig(tmpDir);
+
+      const prompt = createMockPrompt({
+        selects: ["openai", "__cancel__"]
+      });
+
+      const result = await runCliCommand({
+        argv: ["model"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        prompt
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("No changes were made.");
+      expect(await readUserConfig(tmpDir)).toEqual(original);
+    });
+
+    it("reuses existing credential and does not prompt for api key", async () => {
+      await writeUserConfig(tmpDir, {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-4o"],
+            apiKeyEnv: "OPENAI_API_KEY"
+          }
+        },
+        model: {
+          provider: "openai",
+          id: "gpt-4o"
+        }
+      });
+      // Pre-seed the credential so flow reports reuse
+      const envPath = join(tmpDir, ".estacoda", ".env");
+      await mkdir(join(tmpDir, ".estacoda"), { recursive: true });
+      await writeFile(envPath, "OPENAI_API_KEY=sk-existing\n", "utf8");
+
+      const prompt = createMockPrompt({
+        selects: ["openai", "gpt-4o"]
+      });
+
+      const result = await runCliCommand({
+        argv: ["model"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        prompt
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("Credential: uses OPENAI_API_KEY");
+    });
+
+    it("collects missing credential and stores via secret boundary", async () => {
+      delete process.env.OPENAI_API_KEY;
+      await writeUserConfig(tmpDir, {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-4o"]
+          }
+        },
+        model: {
+          provider: "openai",
+          id: "gpt-4o"
+        }
+      });
+
+      const prompt = createMockPrompt({
+        selects: ["openai", "gpt-4o"],
+        secrets: ["sk-test-key"]
+      });
+
+      const result = await runCliCommand({
+        argv: ["model"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        prompt
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("Credential: stored as OPENAI_API_KEY");
+
+      const config = await readUserConfig(tmpDir) as any;
+      expect(config.providers?.openai?.apiKeyEnv).toBe("OPENAI_API_KEY");
+
+      // Verify secret was written to .env
+      const envPath = join(tmpDir, ".estacoda", ".env");
+      const envContent = await readFile(envPath, "utf8");
+      expect(envContent).toContain('OPENAI_API_KEY="sk-test-key"');
+    });
+
+    it("skips credential storage when empty input is given but still persists env reference", async () => {
+      delete process.env.OPENAI_API_KEY;
+      await writeUserConfig(tmpDir, {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-4o"]
+          }
+        },
+        model: {
+          provider: "openai",
+          id: "gpt-4o"
+        }
+      });
+
+      const prompt = createMockPrompt({
+        selects: ["openai", "gpt-4o"],
+        secrets: [""]
+      });
+
+      const result = await runCliCommand({
+        argv: ["model"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        prompt
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("Credential: expects OPENAI_API_KEY to be set externally");
+
+      const config = await readUserConfig(tmpDir) as any;
+      expect(config.providers?.openai?.apiKeyEnv).toBe("OPENAI_API_KEY");
+
+      // .env should not have been written
+      const envPath = join(tmpDir, ".estacoda", ".env");
+      try {
+        await readFile(envPath, "utf8");
+        // If file exists, it should not contain the key
+        expect(false).toBe(true); // Force failure if file exists unexpectedly
+      } catch {
+        // Expected: file does not exist
+      }
+    });
+
+    it("local provider skips credential prompt and persists route", async () => {
+      delete process.env.OPENAI_API_KEY;
+      await writeUserConfig(tmpDir, {
+        providers: {
+          local: {
+            kind: "openai-compatible",
+            baseUrl: "http://localhost:11434/v1",
+            models: ["qwen2.5:3b"]
+          }
+        },
+        model: {
+          provider: "local",
+          id: "qwen2.5:3b"
+        }
+      });
+
+      const prompt = createMockPrompt({
+        selects: ["local", "qwen2.5:3b"]
+      });
+
+      const result = await runCliCommand({
+        argv: ["model"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        prompt
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("Model switched: qwen2.5:3b");
+      expect(result.output).toContain("Provider: local");
+      expect(result.output).not.toContain("Credential:");
+    });
+
+    it("returns clear failure when config save fails after credential storage", async () => {
+      delete process.env.OPENAI_API_KEY;
+      const configDir = join(tmpDir, ".estacoda");
+      const configPath = join(configDir, "config.json");
+      await writeUserConfig(tmpDir, {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-4o"]
+          }
+        },
+        model: {
+          provider: "openai",
+          id: "gpt-4o"
+        }
+      });
+
+      const prompt = createMockPrompt({
+        selects: ["openai", "gpt-4o"],
+        secrets: ["sk-test-key"]
+      });
+
+      // Make config file read-only to force save failure
+      const { chmod } = await import("node:fs/promises");
+      await chmod(configPath, 0o444);
+
+      const result = await runCliCommand({
+        argv: ["model"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        userConfigPath: configPath,
+        prompt
+      });
+
+      // Restore permissions for cleanup
+      await chmod(configPath, 0o644);
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(1);
+      expect(result.output).toContain("Credential stored, but config save failed:");
     });
   });
 

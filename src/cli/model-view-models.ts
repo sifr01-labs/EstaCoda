@@ -12,6 +12,7 @@ import type {
   ModelRouteDiagnostic,
   ModelSetupReview
 } from "../reports/model-reports.js";
+import type { ProviderModelSelectionResult } from "../providers/provider-model-selection-flow.js";
 
 export type CapabilityBadge = {
   kind: "tools" | "vision" | "structured" | "reasoning" | "streaming" | "open-weights";
@@ -76,6 +77,17 @@ export type SetupReviewSummary = {
   endpointVisible: string;
   credentialVisible: string;
   warnings: string[];
+};
+
+export type PickerSuccessSummary = {
+  provider: ProviderId;
+  model: string;
+  contextWindowTokens: number;
+  baseUrl?: string;
+  envVarName?: string;
+  credentialStored: boolean;
+  credentialSkipped: boolean;
+  configPath: string;
 };
 
 function capabilityBadgesFromProfile(
@@ -224,5 +236,26 @@ export function toSetupReviewSummary(review: ModelSetupReview): SetupReviewSumma
       ? (route.apiKeyEnv ? `env:${route.apiKeyEnv}` : "Configured")
       : "Not configured",
     warnings: review.warnings
+  };
+}
+
+export function toPickerSuccessSummary(
+  result: ProviderModelSelectionResult,
+  configPath: string,
+  options: {
+    credentialStored: boolean;
+    credentialSkipped: boolean;
+    envVarName?: string;
+  }
+): PickerSuccessSummary {
+  return {
+    provider: result.provider,
+    model: result.model,
+    contextWindowTokens: result.profile.contextWindowTokens ?? 0,
+    baseUrl: result.baseUrl,
+    envVarName: options.envVarName,
+    credentialStored: options.credentialStored,
+    credentialSkipped: options.credentialSkipped,
+    configPath
   };
 }

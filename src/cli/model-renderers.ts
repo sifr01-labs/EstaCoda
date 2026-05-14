@@ -123,3 +123,30 @@ export function renderRefreshReport(report: ModelRefreshReport): string {
   ];
   return lines.join("\n");
 }
+
+export function renderModelPickerSuccess(summary: import("./model-view-models.js").PickerSuccessSummary): string {
+  const lines = [
+    `Model switched: ${summary.model}`,
+    `Provider: ${summary.provider}`,
+    `Context: ${summary.contextWindowTokens.toLocaleString()} tokens`
+  ];
+  if (summary.baseUrl !== undefined) {
+    lines.push(`Endpoint: ${summary.baseUrl}`);
+  }
+  if (summary.envVarName !== undefined) {
+    if (summary.credentialStored) {
+      lines.push(`Credential: stored as ${summary.envVarName}`);
+    } else if (summary.credentialSkipped) {
+      lines.push(`Credential: expects ${summary.envVarName} to be set externally`);
+    } else {
+      lines.push(`Credential: uses ${summary.envVarName}`);
+    }
+  }
+  lines.push("Saved as preferred model.");
+  lines.push(`Config: ${summary.configPath}`);
+  return lines.join("\n");
+}
+
+export function renderModelPickerCancellation(): string {
+  return "No changes were made.";
+}
