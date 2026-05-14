@@ -63,7 +63,7 @@ describe("first-run onboarding plan", () => {
     expect(plan.selections.primaryCredential).toEqual({ kind: "none" });
   });
 
-  it("requires a credential reference for hosted provider", () => {
+  it("requires hosted provider credentials but does not invent env-var policy locally", () => {
     const plan = buildFirstRunOnboardingPlan({
       selections: { primaryProvider: "openai", primaryModel: "gpt-4.1-mini" },
     });
@@ -77,7 +77,11 @@ describe("first-run onboarding plan", () => {
       required: true,
       copyKey: "onboarding.providers.primaryCredential.validation.reference",
     });
-    expect(getRequiredCredentialReference(plan.selections)).toEqual({ kind: "env", name: "OPENAI_API_KEY" });
+    expect(getRequiredCredentialReference(plan.selections)).toBeUndefined();
+    expect(getRequiredCredentialReference({
+      ...plan.selections,
+      primaryCredential: { kind: "env", name: "SHARED_FLOW_KEY" },
+    })).toEqual({ kind: "env", name: "SHARED_FLOW_KEY" });
   });
 
   it("keeps workspace trust explicit", () => {
