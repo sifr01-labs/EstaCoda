@@ -438,7 +438,7 @@ async function listModelsImpl(
     result = result.filter((m) => m.profile.supportsTools);
   }
   if (listOpts?.requireVision) {
-    result = result.filter((m) => m.profile.supportsVision);
+    result = result.filter((m) => m.executable && m.profile.supportsVision);
   }
   if (listOpts?.requireStructuredOutput) {
     result = result.filter((m) => m.profile.supportsStructuredOutput);
@@ -558,6 +558,11 @@ function inferEndpointType(provider: ProviderId, baseUrl?: string): "openai" | "
 }
 
 function isExecutable(providerId: ProviderId, registry: ProviderRegistry): boolean {
+  const meta = getProviderMetadata(providerId);
+  // Metadata runnable is the primary gate. A provider marked non-runnable
+  // must never be treated as executable, regardless of registry state.
+  if (!meta.runnable) return false;
+
   const adapter = registry.get(providerId);
   return adapter !== undefined && adapter.executable !== false;
 }
