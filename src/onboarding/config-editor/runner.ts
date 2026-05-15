@@ -21,8 +21,10 @@ import type {
   SetupApplyExecutor,
   SetupApplyFlowOptions,
   SetupApplyPlanningResult,
+  SetupLaunchHandoffIntent,
 } from "../setup-apply-plan.js";
 import {
+  classifySetupVerificationReport,
   executeSetupApplyPlan,
   planSetupApply,
 } from "../setup-apply-plan.js";
@@ -44,6 +46,7 @@ import {
   type SetupRouteActionId,
   type SetupRouteDecision,
 } from "../setup-router.js";
+import type { SetupVerificationReport } from "../verification.js";
 import {
   renderSetupApplyEndState,
   renderSetupApplyPlanningResult,
@@ -54,6 +57,7 @@ import {
   promptConfigEditorReviewApproval,
   promptBrowserCapability,
   promptModelCandidate,
+  promptConfigEditorPostApplyAction,
   promptOptionalCapabilityAction,
   promptProviderCandidate,
   promptSecurityMode,
@@ -62,6 +66,7 @@ import {
   promptVoiceCapability,
   promptWorkflowLearning,
   promptWorkspaceTrustConfirmation,
+  type ConfigEditorPostApplyActionId,
   type OptionalCapabilityPromptId,
 } from "./prompts.js";
 import {
@@ -88,6 +93,9 @@ export type ConfigEditorRunnerResult = {
   readonly initialDecision: SetupRouteDecision;
   readonly finalDecision?: SetupRouteDecision;
   readonly selectedActionId?: string;
+  readonly nextActionId?: ConfigEditorPostApplyActionId;
+  readonly postApplyRouteDecision?: SetupRouteDecision;
+  readonly limitedModeAccepted?: boolean;
   readonly reviewManifest?: SetupReviewManifest;
   readonly applyPlanningResult?: SetupApplyPlanningResult;
   readonly applyEndState?: SetupApplyEndState;
@@ -106,6 +114,15 @@ type OptionalCapabilityPromptContext = {
   readonly configured: boolean;
 };
 
+type RunOnceResult = ConfigEditorRunnerResult & {
+  readonly repairAgainDecision?: SetupRouteDecision;
+};
+
+type LaunchableApplyEndState = {
+  readonly verification: SetupVerificationReport;
+  readonly launchHandoffIntent?: SetupLaunchHandoffIntent;
+};
+
 const OPTIONAL_CAPABILITY_MODULES: readonly OptionalCapabilityModule[] = [
   telegramSetupModule,
   voiceSetupModule,
@@ -118,7 +135,32 @@ type LoadedConfig = Awaited<ReturnType<typeof loadRuntimeConfig>>["config"];
 export async function runConfigEditor(
   options: ConfigEditorRunnerOptions
 ): Promise<ConfigEditorRunnerResult> {
-  const initialDecision = await collectSetupRoute(options);
+  let initialDecision = await collectSetupRoute(options);
+  for (let loopIndex = 0; loopIndex < 2; loopIndex += 1) {
+    const result = await runConfigEditorOnce(options, initialDecision, loopIndex === 0 ? options.defaultActionId : undefined);
+    if (result.nextActionId === "repair-again" && result.repairAgainDecision !== undefined && loopIndex === 0) {
+      initialDecision = result.repairAgainDecision;
+      continue;
+    }
+    return result;
+  }
+
+  const output = "Repair-again loop stopped after a bounded setup re-entry.";
+  write(options, `${output}\n`);
+  return {
+    completed: false,
+    exitCode: 1,
+    output,
+    initialDecision,
+    selectedActionId: "repair-again",
+  };
+}
+
+async function runConfigEditorOnce(
+  options: ConfigEditorRunnerOptions,
+  initialDecision: SetupRouteDecision,
+  defaultActionId: SetupEditorActionId | SetupRouteActionId | undefined
+): Promise<RunOnceResult> {
   const session = initialDecision.setupEditorPlanSession;
 
   if (session === undefined) {
@@ -136,7 +178,7 @@ export async function runConfigEditor(
   const rendered = renderConfigEditor({ decision: initialDecision, session, actions });
   write(options, `${rendered}\n`);
 
-  const selectedAction = await selectAction(options, actions);
+  const selectedAction = await selectAction(options, actions, defaultActionId);
   if (selectedAction === undefined) {
     const output = "No setup editor actions are available.";
     write(options, `${output}\n`);
@@ -170,10 +212,11 @@ export async function runConfigEditor(
 
 async function selectAction(
   options: ConfigEditorRunnerOptions,
-  actions: readonly ConfigEditorRenderedAction[]
+  actions: readonly ConfigEditorRenderedAction[],
+  defaultActionId: SetupEditorActionId | SetupRouteActionId | undefined
 ): Promise<ConfigEditorRenderedAction | { readonly id: string } | undefined> {
-  if (options.defaultActionId !== undefined) {
-    const normalizedActionId = normalizeConfigEditorActionId(options.defaultActionId);
+  if (defaultActionId !== undefined) {
+    const normalizedActionId = normalizeConfigEditorActionId(defaultActionId);
     return actions.find((action) => action.id === normalizedActionId) ?? { id: normalizedActionId };
   }
 
@@ -478,26 +521,289 @@ async function reviewAndApplyManifest(
   const applyPlanningResult = planSetupApply(reviewAccepted
     ? { kind: "approved-review-result", manifest: reviewManifest }
     : { kind: "cancelled-review-result", manifest: reviewManifest, reason: "User cancelled review." });
+  return finalizeReviewedApply({
+    options,
+    initialDecision,
+    selectedActionId,
+    reviewManifest,
+    applyPlanningResult,
+  });
+}
+
+async function finalizeReviewedApply(input: {
+  readonly options: ConfigEditorRunnerOptions;
+  readonly initialDecision: SetupRouteDecision;
+  readonly selectedActionId: string;
+  readonly reviewManifest: SetupReviewManifest;
+  readonly applyPlanningResult: SetupApplyPlanningResult;
+}): Promise<RunOnceResult> {
+  const { options, initialDecision, selectedActionId, reviewManifest, applyPlanningResult } = input;
   const applyEndState = applyPlanningResult.kind === "apply-plan-ready" && options.applyExecutor !== undefined
-    ? await executeSetupApplyPlan(applyPlanningResult.applyPlan, options.applyExecutor, options.applyFlowOptions)
+    ? await executeSetupApplyPlan(applyPlanningResult.applyPlan, options.applyExecutor, {
+        ...options.applyFlowOptions,
+        allowAutomaticLaunch: false,
+      })
     : undefined;
   const output = applyEndState === undefined
     ? renderSetupApplyPlanningResult(applyPlanningResult, "en")
     : renderSetupApplyEndState(applyEndState, "en");
   write(options, `${output}\n`);
-  const completed = applyEndState === undefined
-    ? applyPlanningResult.kind === "apply-plan-ready"
-    : applyEndState.kind !== "blocked" && applyEndState.kind !== "cancelled";
 
-  return {
-    completed,
-    exitCode: completed ? 0 : 1,
-    output,
+  if (applyEndState === undefined) {
+    const completed = applyPlanningResult.kind === "apply-plan-ready";
+    return {
+      completed,
+      exitCode: completed ? 0 : 1,
+      output,
+      initialDecision,
+      selectedActionId,
+      reviewManifest,
+      applyPlanningResult,
+      applyEndState,
+    };
+  }
+
+  const postApply = await handlePostApplyHandoff({
+    options,
     initialDecision,
     selectedActionId,
     reviewManifest,
     applyPlanningResult,
     applyEndState,
+    renderedApplyOutput: output,
+  });
+  return postApply;
+}
+
+async function handlePostApplyHandoff(input: {
+  readonly options: ConfigEditorRunnerOptions;
+  readonly initialDecision: SetupRouteDecision;
+  readonly selectedActionId: string;
+  readonly reviewManifest: SetupReviewManifest;
+  readonly applyPlanningResult: SetupApplyPlanningResult;
+  readonly applyEndState: SetupApplyEndState;
+  readonly renderedApplyOutput: string;
+}): Promise<RunOnceResult> {
+  const {
+    options,
+    initialDecision,
+    selectedActionId,
+    reviewManifest,
+    applyPlanningResult,
+    applyEndState,
+    renderedApplyOutput,
+  } = input;
+  const completedWithoutPrompt = applyEndState.kind === "cancelled";
+  if (completedWithoutPrompt) {
+    return {
+      completed: false,
+      exitCode: 1,
+      output: renderedApplyOutput,
+      initialDecision,
+      selectedActionId,
+      reviewManifest,
+      applyPlanningResult,
+      applyEndState,
+    };
+  }
+
+  const postApplyRouteDecision = await collectSetupRoute(options);
+  const handoffState = postApplyHandoffState(applyEndState, postApplyRouteDecision);
+  const handoffWarningOutput = handoffState === "degraded"
+    ? renderConcreteVerificationWarnings(applyEndState)
+    : undefined;
+  if (handoffWarningOutput !== undefined) {
+    write(options, `${handoffWarningOutput}\n`);
+  }
+  const nextActionId = await promptConfigEditorPostApplyAction(options.prompt, {
+    state: handoffState,
+    launchEligible: handoffState === "ready",
+    limitedModeEligible: handoffState === "degraded",
+  });
+
+  if (nextActionId === "repair-again") {
+    const output = [
+      renderedApplyOutput,
+      handoffWarningOutput,
+      "Repair again selected. Re-entering guided setup editor.",
+    ].filter((line): line is string => line !== undefined).join("\n");
+    write(options, "Repair again selected. Re-entering guided setup editor.\n");
+    return {
+      completed: true,
+      exitCode: 0,
+      output,
+      initialDecision,
+      finalDecision: postApplyRouteDecision,
+      postApplyRouteDecision,
+      repairAgainDecision: postApplyRouteDecision,
+      selectedActionId,
+      nextActionId,
+      reviewManifest,
+      applyPlanningResult,
+      applyEndState,
+    };
+  }
+
+  if (nextActionId === "launch" && handoffState === "ready") {
+    const launchableEndState = launchableApplyEndState(applyEndState);
+    if (launchableEndState === undefined) {
+      throw new Error("Ready launch handoff requires a verified apply end state.");
+    }
+    const launchedEndState: SetupApplyEndState = {
+      kind: "launched",
+      verification: launchableEndState.verification,
+      launchHandoffIntent: launchHandoffIntentForApplyEndState(launchableEndState),
+      acceptedDegraded: false,
+    };
+    const launchOutput = renderSetupApplyEndState(launchedEndState, "en");
+    write(options, `${launchOutput}\n`);
+    return {
+      completed: true,
+      exitCode: 0,
+      output: [
+        renderedApplyOutput,
+        handoffWarningOutput,
+        launchOutput,
+      ].filter((line): line is string => line !== undefined).join("\n"),
+      initialDecision,
+      finalDecision: postApplyRouteDecision,
+      postApplyRouteDecision,
+      selectedActionId,
+      nextActionId,
+      limitedModeAccepted: false,
+      reviewManifest,
+      applyPlanningResult,
+      applyEndState: launchedEndState,
+    };
+  }
+
+  if (nextActionId === "accept-limited-mode" && handoffState === "degraded") {
+    const launchableEndState = launchableApplyEndState(applyEndState);
+    if (launchableEndState === undefined) {
+      throw new Error("Limited-mode launch handoff requires a verified apply end state.");
+    }
+    const launchedEndState: SetupApplyEndState = {
+      kind: "launched",
+      verification: launchableEndState.verification,
+      launchHandoffIntent: launchHandoffIntentForApplyEndState(launchableEndState),
+      acceptedDegraded: true,
+    };
+    const launchOutput = renderSetupApplyEndState(launchedEndState, "en");
+    write(options, `${launchOutput}\n`);
+    return {
+      completed: true,
+      exitCode: 0,
+      output: [
+        renderedApplyOutput,
+        handoffWarningOutput,
+        launchOutput,
+      ].filter((line): line is string => line !== undefined).join("\n"),
+      initialDecision,
+      finalDecision: postApplyRouteDecision,
+      postApplyRouteDecision,
+      selectedActionId,
+      nextActionId,
+      limitedModeAccepted: true,
+      reviewManifest,
+      applyPlanningResult,
+      applyEndState: launchedEndState,
+    };
+  }
+
+  const exitOutput = [
+    renderedApplyOutput,
+    handoffWarningOutput,
+    "Exited after setup apply without launching.",
+  ].filter((line): line is string => line !== undefined).join("\n");
+  write(options, "Exited after setup apply without launching.\n");
+  return {
+    completed: applyEndState.kind !== "blocked",
+    exitCode: applyEndState.kind === "blocked" ? 1 : 0,
+    output: exitOutput,
+    initialDecision,
+    finalDecision: postApplyRouteDecision,
+    postApplyRouteDecision,
+    selectedActionId,
+    nextActionId: "exit",
+    reviewManifest,
+    applyPlanningResult,
+    applyEndState,
+  };
+}
+
+function renderConcreteVerificationWarnings(endState: SetupApplyEndState): string | undefined {
+  const launchableEndState = launchableApplyEndState(endState);
+  if (launchableEndState === undefined) return undefined;
+  const warnings = [
+    ...launchableEndState.verification.warnings,
+    ...launchableEndState.verification.providerDiagnostic.warnings,
+  ].filter((warning, index, allWarnings) => warning.trim().length > 0 && allWarnings.indexOf(warning) === index);
+  if (warnings.length === 0) return undefined;
+  return [
+    "Verification warnings:",
+    ...warnings.map((warning) => `- ${warning}`),
+  ].join("\n");
+}
+
+function postApplyHandoffState(
+  applyEndState: SetupApplyEndState,
+  postApplyRouteDecision: SetupRouteDecision
+): "ready" | "degraded" | "blocked" {
+  if (applyEndState.kind === "verified-ready" && routeAllowsLaunch(postApplyRouteDecision)) {
+    return "ready";
+  }
+  if (applyEndState.kind === "verified-degraded" && !routeBlocksLaunch(postApplyRouteDecision)) {
+    return "degraded";
+  }
+  if (
+    applyEndState.kind === "saved-not-launched" &&
+    applyEndState.verification !== undefined &&
+    classifySetupVerificationReport(applyEndState.verification) === "ready" &&
+    routeAllowsLaunch(postApplyRouteDecision)
+  ) {
+    return "ready";
+  }
+  return "blocked";
+}
+
+function routeAllowsLaunch(decision: SetupRouteDecision): boolean {
+  return decision.kind === "configured-menu" && decision.state.kind === "configured-ready";
+}
+
+function routeBlocksLaunch(decision: SetupRouteDecision): boolean {
+  return decision.state.kind === "broken-config" ||
+    decision.state.kind === "missing-secret" ||
+    decision.state.kind === "state-not-writable" ||
+    decision.state.kind === "untrusted-workspace" ||
+    decision.state.kind === "partial-provider";
+}
+
+function launchableApplyEndState(endState: SetupApplyEndState): LaunchableApplyEndState | undefined {
+  if (
+    endState.kind === "verified-ready" ||
+    endState.kind === "verified-degraded" ||
+    endState.kind === "saved-not-launched" ||
+    endState.kind === "launched"
+  ) {
+    return endState.verification === undefined
+      ? undefined
+      : {
+          verification: endState.verification,
+          launchHandoffIntent: endState.launchHandoffIntent,
+        };
+  }
+  return undefined;
+}
+
+function launchHandoffIntentForApplyEndState(endState: LaunchableApplyEndState): SetupLaunchHandoffIntent {
+  if ("launchHandoffIntent" in endState && endState.launchHandoffIntent !== undefined) {
+    return endState.launchHandoffIntent;
+  }
+  return {
+    kind: "launch-handoff-intent",
+    sourceLineIds: [],
+    preference: "offer-after-verify",
+    requiresVerifiedReadyOrAcceptedDegraded: true,
   };
 }
 
@@ -720,28 +1026,13 @@ async function reviewAndApplyResolvedRoute(
       value: credentialResult.pendingCredentialWrite.value,
     });
   }
-
-  const applyEndState = applyPlanningResult.kind === "apply-plan-ready" && options.applyExecutor !== undefined
-    ? await executeSetupApplyPlan(applyPlanningResult.applyPlan, options.applyExecutor, options.applyFlowOptions)
-    : undefined;
-  const output = applyEndState === undefined
-    ? renderSetupApplyPlanningResult(applyPlanningResult, "en")
-    : renderSetupApplyEndState(applyEndState, "en");
-  write(options, `${output}\n`);
-  const completed = applyEndState === undefined
-    ? applyPlanningResult.kind === "apply-plan-ready"
-    : applyEndState.kind !== "blocked" && applyEndState.kind !== "cancelled";
-
-  return {
-    completed,
-    exitCode: completed ? 0 : 1,
-    output,
+  return finalizeReviewedApply({
+    options,
     initialDecision,
     selectedActionId: editorAction.id,
     reviewManifest,
     applyPlanningResult,
-    applyEndState,
-  };
+  });
 }
 
 async function selectResolvedProviderRoute(

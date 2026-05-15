@@ -130,6 +130,7 @@ export type SetupApplyExecutor = {
 
 export type SetupApplyFlowOptions = {
   readonly acceptDegraded?: boolean;
+  readonly allowAutomaticLaunch?: boolean;
 };
 
 export type SetupVerificationClassification = "ready" | "degraded" | "blocked";
@@ -292,6 +293,7 @@ export async function executeSetupApplyPlan(
   executor: SetupApplyExecutor,
   options: SetupApplyFlowOptions = {}
 ): Promise<SetupApplyEndState> {
+  const allowAutomaticLaunch = options.allowAutomaticLaunch !== false;
   const saveResult = await executor.apply(plan);
   if (!saveResult.ok) {
     return {
@@ -331,7 +333,11 @@ export async function executeSetupApplyPlan(
   }
 
   if (classification === "degraded") {
-    if (options.acceptDegraded === true && plan.launchHandoffIntent?.preference === "offer-after-verify") {
+    if (
+      allowAutomaticLaunch &&
+      options.acceptDegraded === true &&
+      plan.launchHandoffIntent?.preference === "offer-after-verify"
+    ) {
       return {
         kind: "launched",
         verification,
@@ -339,7 +345,7 @@ export async function executeSetupApplyPlan(
         acceptedDegraded: true,
       };
     }
-    if (options.acceptDegraded === true) {
+    if (allowAutomaticLaunch && options.acceptDegraded === true) {
       return {
         kind: "saved-not-launched",
         verification,
@@ -353,7 +359,7 @@ export async function executeSetupApplyPlan(
     };
   }
 
-  if (plan.launchHandoffIntent?.preference === "offer-after-verify") {
+  if (allowAutomaticLaunch && plan.launchHandoffIntent?.preference === "offer-after-verify") {
     return {
       kind: "launched",
       verification,
@@ -373,6 +379,7 @@ export async function executeSetupApplyPlan(
   return {
     kind: "verified-ready",
     verification,
+    launchHandoffIntent: plan.launchHandoffIntent,
   };
 }
 

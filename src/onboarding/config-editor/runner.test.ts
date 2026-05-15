@@ -200,6 +200,188 @@ describe("runConfigEditor", () => {
     expect(config.skills?.externalDirs).toEqual(["/tmp/estacoda-skills"]);
   });
 
+  it("launches only after reviewed apply, verification, route re-collection, and explicit launch choice", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ values: ["strict", true, "launch"] }),
+      defaultActionId: "edit-security-mode",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+        collectVerification: () => readyVerification(join(tempDir, ".estacoda", "config.json")),
+      }),
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("edit-security-mode");
+    expect(result.nextActionId).toBe("launch");
+    expect(result.postApplyRouteDecision?.kind).toBe("configured-menu");
+    expect(result.applyEndState?.kind).toBe("launched");
+    if (result.applyEndState?.kind !== "launched") throw new Error("expected launch");
+    expect(result.applyEndState.acceptedDegraded).toBe(false);
+    expect(result.limitedModeAccepted).toBe(false);
+    expect(result.output).toContain("Verification passed. Setup is ready.");
+    expect(result.output).toContain("Launch handoff accepted");
+  });
+
+  it("requires explicit limited-mode acceptance before degraded launch handoff", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ values: ["proactive", true, "accept-limited-mode"] }),
+      defaultActionId: "edit-workflow-learning",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+        collectVerification: () => degradedVerification(join(tempDir, ".estacoda", "config.json")),
+      }),
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.nextActionId).toBe("accept-limited-mode");
+    expect(result.postApplyRouteDecision).toBeDefined();
+    expect(result.applyEndState?.kind).toBe("launched");
+    if (result.applyEndState?.kind !== "launched") throw new Error("expected degraded launch");
+    expect(result.applyEndState.acceptedDegraded).toBe(true);
+    expect(result.limitedModeAccepted).toBe(true);
+    expect(result.output).toContain("Verification completed with warnings");
+    expect(result.output).toContain("Verification warnings:");
+    expect(result.output).toContain("Network inference is disabled for the selected hosted provider.");
+    expect(result.output).toContain("Configured model context window is below 64K tokens.");
+    expect(result.output).toContain("Limited mode accepted for launch");
+    expect(result.output.indexOf("Network inference is disabled")).toBeLessThan(
+      result.output.indexOf("Limited mode accepted for launch")
+    );
+  });
+
+  it("does not expose launch after blocked verification", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const postApplyOptionLabels: string[][] = [];
+    const prompt = fakePrompt({ values: ["strict", true, "exit"] });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      if (input.title === "Setup next action") {
+        postApplyOptionLabels.push(input.options.map((option) => option.label));
+      }
+      return baseSelect(input);
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "edit-security-mode",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+        collectVerification: () => blockedVerification(join(tempDir, ".estacoda", "config.json")),
+      }),
+    });
+
+    expect(result.completed).toBe(false);
+    expect(result.exitCode).toBe(1);
+    expect(result.nextActionId).toBe("exit");
+    expect(result.applyEndState?.kind).toBe("blocked");
+    expect(postApplyOptionLabels).toEqual([["Repair again", "Exit"]]);
+    expect(result.output).toContain("Verification blocked");
+    expect(result.output).toContain("Exited after setup apply without launching");
+  });
+
+  it("does not expose launch when post-apply verification cannot run", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const postApplyOptionLabels: string[][] = [];
+    const prompt = fakePrompt({ values: ["strict", true, "exit"] });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      if (input.title === "Setup next action") {
+        postApplyOptionLabels.push(input.options.map((option) => option.label));
+      }
+      return baseSelect(input);
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "edit-security-mode",
+      applyExecutor: {
+        apply: () => ({ ok: true, appliedOperationIds: [] }),
+      },
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.nextActionId).toBe("exit");
+    expect(result.applyEndState?.kind).toBe("saved-not-launched");
+    expect(postApplyOptionLabels).toEqual([["Repair again", "Exit"]]);
+    expect(result.output).toContain("Setup prepared without launch handoff");
+    expect(result.output).toContain("Exited after setup apply without launching");
+  });
+
+  it("does not expose launch when the fresh post-apply route is still unsafe", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    const postApplyOptionLabels: string[][] = [];
+    const prompt = fakePrompt({ values: [true, true, "exit"] });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      if (input.title === "Setup next action") {
+        postApplyOptionLabels.push(input.options.map((option) => option.label));
+      }
+      return baseSelect(input);
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "trust-workspace",
+      applyExecutor: {
+        apply: () => ({ ok: true, appliedOperationIds: [] }),
+        verify: () => readyVerification(join(tempDir, ".estacoda", "config.json")),
+      },
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.initialDecision.state.kind).toBe("untrusted-workspace");
+    expect(result.postApplyRouteDecision?.state.kind).toBe("untrusted-workspace");
+    expect(result.nextActionId).toBe("exit");
+    expect(result.applyEndState?.kind).toBe("verified-ready");
+    expect(postApplyOptionLabels).toEqual([["Repair again", "Exit"]]);
+  });
+
+  it("repair-again re-enters the editor with a fresh route without bypassing review/apply", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const output: string[] = [];
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ values: ["proactive", true, "repair-again", "exit"] }),
+      defaultActionId: "edit-workflow-learning",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+        collectVerification: () => degradedVerification(join(tempDir, ".estacoda", "config.json")),
+      }),
+      output: { write: (value) => output.push(value) },
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("exit");
+    expect(result.reviewManifest).toBeUndefined();
+    expect(output.join("").match(/EstaCoda guided setup editor/g)).toHaveLength(2);
+    expect(output.join("")).toContain("Repair again selected. Re-entering guided setup editor.");
+  });
+
   it("applies guided provider route repair through the shared flow and reviewed executor", async () => {
     await writeUserConfig(tempDir, {
       ...localReadyConfig(),
@@ -810,6 +992,32 @@ function readyVerification(configPath: string) {
     configSources: [configPath],
     warnings: [],
     issueCodes: [],
+  };
+}
+
+function degradedVerification(configPath: string) {
+  return {
+    ...readyVerification(configPath),
+    providerDiagnostic: {
+      status: "warning" as const,
+      lines: ["Provider status: warning"],
+      warnings: ["Configured model context window is below 64K tokens."],
+    },
+    warnings: ["Network inference is disabled for the selected hosted provider."],
+    issueCodes: ["network-disabled"],
+  };
+}
+
+function blockedVerification(configPath: string) {
+  return {
+    ...readyVerification(configPath),
+    providerDiagnostic: {
+      status: "blocked" as const,
+      lines: ["Provider status: blocked"],
+      warnings: ["Missing API key for OPENAI_API_KEY."],
+    },
+    warnings: ["Missing API key for OPENAI_API_KEY."],
+    issueCodes: ["missing-api-key"],
   };
 }
 
