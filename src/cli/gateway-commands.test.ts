@@ -25,6 +25,7 @@ import {
   runChannelsDisable,
   runGatewayStop,
   runGatewayRestart,
+  runGatewayStartDryRun,
 } from "./gateway-commands.js";
 import * as supervisorModule from "../gateway/supervisor.js";
 import { CronStore } from "../cron/cron-store.js";
@@ -683,6 +684,76 @@ describe("gateway commands", () => {
       expect(result.output).toBe("Gateway is not running (live operation lock exists)");
 
       await releaseGatewayLock(tmpDir);
+    });
+  });
+
+  describe("runGatewayStartDryRun", () => {
+    it("passes in cron-only mode when no adapters are enabled", async () => {
+      const result = await runGatewayStartDryRun({ workspaceRoot: tmpDir, homeDir: tmpDir });
+
+      expect(result.ok).toBe(true);
+      expect(result.output).toContain("Adapters: none");
+      expect(result.output).toContain("Mode: cron-only");
+      expect(result.output).toContain("Adapter identities: none");
+      expect(result.output).toContain("Gateway lock: no active owner detected");
+    });
+
+    it("passes when an enabled adapter has locally derivable identity", async () => {
+      const tokenEnv = "ESTACODA_TEST_TELEGRAM_TOKEN";
+      process.env[tokenEnv] = "telegram-token";
+      try {
+        await writeUserConfig(tmpDir, {
+          channels: {
+            telegram: {
+              enabled: true,
+              botTokenEnv: tokenEnv,
+            },
+          },
+        });
+
+        const result = await runGatewayStartDryRun({ workspaceRoot: tmpDir, homeDir: tmpDir });
+
+        expect(result.ok).toBe(true);
+        expect(result.output).toContain("Adapters: telegram");
+        expect(result.output).toContain("Adapter identities: telegram locally valid");
+        await expect(readFile(join(tmpDir, ".estacoda", "gateway", "identity-lock-key"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+      } finally {
+        delete process.env[tokenEnv];
+      }
+    });
+
+    it("fails when Telegram is enabled without a usable token", async () => {
+      const tokenEnv = "ESTACODA_TEST_MISSING_TELEGRAM_TOKEN";
+      delete process.env[tokenEnv];
+      await writeUserConfig(tmpDir, {
+        channels: {
+          telegram: {
+            enabled: true,
+            botTokenEnv: tokenEnv,
+          },
+        },
+      });
+
+      const result = await runGatewayStartDryRun({ workspaceRoot: tmpDir, homeDir: tmpDir });
+
+      expect(result.ok).toBe(false);
+      expect(result.output).toContain("telegram: configured but no derivable identity");
+    });
+
+    it("fails when WhatsApp is enabled without a derivable auth identity", async () => {
+      await writeUserConfig(tmpDir, {
+        channels: {
+          whatsapp: {
+            enabled: true,
+            experimental: true,
+          },
+        },
+      });
+
+      const result = await runGatewayStartDryRun({ workspaceRoot: tmpDir, homeDir: tmpDir });
+
+      expect(result.ok).toBe(false);
+      expect(result.output).toContain("whatsapp: configured but no derivable identity");
     });
   });
 

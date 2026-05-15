@@ -29,7 +29,7 @@ import type { TelegramGatewayDiagnostics } from "../channels/gateway-runner.js";
 import type { WhatsAppGatewayDiagnostics } from "../channels/whatsapp-diagnostics.js";
 import { readGatewayPid, isStalePid } from "../gateway/pid-file.js";
 import { readGatewayState } from "../gateway/supervisor-state.js";
-import { isStaleLock } from "../gateway/gateway-lock.js";
+import { inspectGatewayLockState, isStaleLock, type GatewayLockInspection } from "../gateway/gateway-lock.js";
 import {
   stopGateway,
   signalGateway,
@@ -41,6 +41,10 @@ import {
   deriveDiscordIdentityHash,
   deriveEmailIdentityHash,
   deriveWhatsAppIdentityHash,
+  resolveTelegramIdentityMaterial,
+  resolveDiscordIdentityMaterial,
+  resolveEmailIdentityMaterial,
+  resolveWhatsAppIdentityMaterial,
 } from "../channels/adapter-identity.js";
 import type { IdentityLockStatus } from "./gateway-view-models.js";
 import { readAdapterRuntimeState, isRuntimeStateFresh, isRuntimeStatePidMatch, RUNTIME_STATE_FILE } from "../gateway/adapter-runtime-state.js";
@@ -248,6 +252,64 @@ export async function runGatewayDiagnose(
 
   const viewModel = buildGatewayDiagnoseViewModel(data);
   return { ok: viewModel.ok, output: renderer(viewModel) };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Gateway Start Dry Run
+// ─────────────────────────────────────────────────────────────
+
+export async function runGatewayStartDryRun(
+  options: GatewayCommandOptions
+): Promise<{ ok: boolean; output: string }> {
+  const config = await loadRuntimeConfig(options);
+  const homeDir = options.homeDir ?? process.env.HOME ?? ".estacoda";
+  const stateHome = resolveStateHome({ homeDir });
+  const stateRoot = stateHome.stateRoot;
+  const registry = new AdapterRegistry(config.channels);
+  const configured = registry.configured();
+  const enabled = registry.enabled();
+  const identityReadiness = inspectAdapterIdentityReadiness(config.channels);
+  const lock = await inspectGatewayLockState(stateHome);
+  const cronOutputWritable = await isWritable(join(stateRoot, "cron", "output"));
+  const cronLocksWritable = await isWritable(join(stateRoot, "cron", "locks"));
+  const logsWritable = await isWritable(join(stateRoot, "logs"));
+
+  const stateDirsReady = cronOutputWritable && cronLocksWritable && logsWritable;
+  const lockSummary = summarizeGatewayLockInspection(lock);
+  const adapters = enabled.length > 0
+    ? enabled.map((cap) => cap.kind).join(", ")
+    : "none";
+  const mode = enabled.length > 0 ? "adapters" : "cron-only";
+  const warnings: string[] = [];
+
+  if (enabled.length > configured.length) {
+    const misconfigured = registry.misconfigured();
+    for (const cap of misconfigured) {
+      warnings.push(`${cap.kind}: missing ${cap.missingConfig?.join(", ") ?? "configuration"}`);
+    }
+  }
+  for (const error of identityReadiness.errors) {
+    warnings.push(error);
+  }
+  if (!stateDirsReady) {
+    warnings.push("State dirs: run estacoda init to create cron output, cron locks, and logs directories");
+  }
+  if (lockSummary.severity !== "ok") {
+    warnings.push(`Gateway lock: ${lockSummary.detail}`);
+  }
+
+  return {
+    ok: lockSummary.severity === "ok" && identityReadiness.errors.length === 0,
+    output: [
+      `Adapters: ${adapters}`,
+      `Mode: ${mode}`,
+      "Config: valid",
+      `Adapter identities: ${identityReadiness.valid.length > 0 ? `${identityReadiness.valid.join(", ")} locally valid` : "none"}`,
+      `State dirs: ${stateDirsReady ? "ready" : "not initialized"}`,
+      `Gateway lock: ${lockSummary.label}`,
+      ...warnings.map((warning) => `Warning: ${warning}`),
+    ].join("\n"),
+  };
 }
 
 // ───────────────────────────────────────────────────────────
@@ -722,6 +784,46 @@ export async function runChannelsDisable(
 // ─────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────
+
+function summarizeGatewayLockInspection(lock: GatewayLockInspection): { severity: "ok" | "error"; label: string; detail?: string } {
+  switch (lock.state) {
+    case "missing":
+      return { severity: "ok", label: "no active owner detected" };
+    case "active":
+      return { severity: "error", label: `active owner detected (PID ${lock.pid})`, detail: `active owner detected (PID ${lock.pid})` };
+    case "stale":
+      return { severity: "error", label: `stale lock suspected (PID ${lock.pid})`, detail: `stale lock suspected (${lock.reason}, PID ${lock.pid})` };
+    case "malformed":
+      return { severity: "error", label: "malformed lock file", detail: `malformed lock file (${lock.error})` };
+    case "inaccessible":
+      return { severity: "error", label: "lock path inaccessible", detail: `lock path inaccessible (${lock.error})` };
+    default:
+      return { severity: "error", label: "unknown lock state", detail: "unknown lock state" };
+  }
+}
+
+function inspectAdapterIdentityReadiness(channels: LoadedRuntimeConfig["channels"]): { valid: string[]; errors: string[] } {
+  const valid: string[] = [];
+  const errors: string[] = [];
+
+  const checks = [
+    { kind: "telegram", enabled: channels.telegram.enabled === true, material: resolveTelegramIdentityMaterial(channels.telegram) },
+    { kind: "discord", enabled: channels.discord.enabled === true, material: resolveDiscordIdentityMaterial(channels.discord) },
+    { kind: "email", enabled: channels.email.enabled === true, material: resolveEmailIdentityMaterial(channels.email) },
+    { kind: "whatsapp", enabled: channels.whatsapp.enabled === true, material: resolveWhatsAppIdentityMaterial(channels.whatsapp) },
+  ];
+
+  for (const check of checks) {
+    if (!check.enabled) continue;
+    if (check.material === undefined) {
+      errors.push(`${check.kind}: configured but no derivable identity. Check local identity settings.`);
+    } else {
+      valid.push(check.kind);
+    }
+  }
+
+  return { valid, errors };
+}
 
 async function isReadable(path: string): Promise<boolean> {
   try {

@@ -73,6 +73,28 @@ describe("cli gateway start", () => {
     expect(result.output).toContain("estacoda gateway restart --graceful");
   });
 
+  it("runs --dry-run without entering the foreground supervisor or writing PID/lock state", async () => {
+    const tmpDir = await makeTempDir();
+    try {
+      const result = await runCliCommand({
+        argv: ["gateway", "start", "--dry-run"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("Adapters:");
+      expect(result.output).toContain("Mode:");
+      expect(result.output).toContain("Gateway lock: no active owner detected");
+      expect(result.output).not.toContain("Gateway lock: available");
+      expect(supervisorSpy).not.toHaveBeenCalled();
+      await expect(readFile(join(tmpDir, ".estacoda", "gateway", "gateway.pid"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(readFile(join(tmpDir, ".estacoda", "gateway", "gateway.lock"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it("parses gateway restart subcommand", async () => {
     const result = await runCliCommand({
       argv: ["gateway", "restart"],

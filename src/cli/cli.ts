@@ -125,6 +125,7 @@ import {
   runChannelsDisable,
   runGatewayStop,
   runGatewayRestart,
+  runGatewayStartDryRun,
 } from "./gateway-commands.js";
 import {
   renderSettingsOverview,
@@ -2870,6 +2871,15 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
           "To start the gateway:",
           "  estacoda gateway start",
         ].join("\n"),
+      };
+    }
+
+    if (hasFlag(rest, "--dry-run")) {
+      const result = await runGatewayStartDryRun(options);
+      return {
+        handled: true,
+        exitCode: result.ok ? 0 : 1,
+        output: result.output,
       };
     }
 

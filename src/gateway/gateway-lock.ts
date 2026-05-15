@@ -7,6 +7,13 @@ export type GatewayLockResult = {
   stale?: boolean;
 };
 
+export type GatewayLockInspection =
+  | { state: "missing" }
+  | { state: "active"; pid: number; startedAt: string }
+  | { state: "stale"; pid: number; startedAt: string; reason: "expired" | "pid-dead" }
+  | { state: "malformed"; error: string }
+  | { state: "inaccessible"; error: string };
+
 const DEFAULT_STALE_TIMEOUT_MS = 30_000; // 30 seconds
 
 type LockFileContent = {
@@ -95,6 +102,51 @@ export async function acquireGatewayLock(
 export async function readGatewayLockContent(homeDir: string): Promise<LockFileContent | undefined> {
   const lock = await readLock(homeDir);
   return lock?.content;
+}
+
+export async function inspectGatewayLockState(
+  stateHome: { gatewayStatePath: string },
+  staleTimeoutMs: number = DEFAULT_STALE_TIMEOUT_MS
+): Promise<GatewayLockInspection> {
+  const path = join(stateHome.gatewayStatePath, "gateway.lock");
+  let raw: string;
+  try {
+    raw = await readFile(path, "utf8");
+  } catch (error) {
+    const code = error instanceof Error && "code" in error ? String((error as { code?: unknown }).code) : "";
+    if (code === "ENOENT") return { state: "missing" };
+    const message = error instanceof Error ? error.message : String(error);
+    return { state: "inaccessible", error: message };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw.trim());
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { state: "malformed", error: message };
+  }
+
+  const content = parsed as Partial<LockFileContent>;
+  if (typeof content.pid !== "number" || typeof content.startedAt !== "string") {
+    return { state: "malformed", error: "missing pid or startedAt" };
+  }
+
+  const lockedAt = Date.parse(content.startedAt);
+  if (Number.isNaN(lockedAt)) {
+    return { state: "malformed", error: "invalid startedAt" };
+  }
+
+  const elapsed = Date.now() - lockedAt;
+  if (elapsed > staleTimeoutMs) {
+    return { state: "stale", pid: content.pid, startedAt: content.startedAt, reason: "expired" };
+  }
+
+  if (!isPidAlive(content.pid)) {
+    return { state: "stale", pid: content.pid, startedAt: content.startedAt, reason: "pid-dead" };
+  }
+
+  return { state: "active", pid: content.pid, startedAt: content.startedAt };
 }
 
 export async function releaseGatewayLock(homeDir: string): Promise<void> {

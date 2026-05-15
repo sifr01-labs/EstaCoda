@@ -17,6 +17,7 @@ import {
 } from "./supervisor-state.js";
 import {
   acquireGatewayLock,
+  inspectGatewayLockState,
   releaseGatewayLock,
   isStaleLock,
 } from "./gateway-lock.js";
@@ -178,6 +179,10 @@ describe("gateway state primitives", () => {
   // ─────────────────────────────────────────────────────────────
 
   describe("Lock file", () => {
+    function stateHome(): { gatewayStatePath: string } {
+      return { gatewayStatePath: join(tmpDir, ".estacoda", "gateway") };
+    }
+
     it("acquire returns true when no lock exists", async () => {
       const result = await acquireGatewayLock(tmpDir);
       expect(result.acquired).toBe(true);
@@ -198,6 +203,38 @@ describe("gateway state primitives", () => {
 
     it("isStaleLock returns false when no lock", async () => {
       expect(await isStaleLock(tmpDir)).toBe(false);
+    });
+
+    it("inspectGatewayLockState reports no lock file found", async () => {
+      await expect(inspectGatewayLockState(stateHome())).resolves.toEqual({ state: "missing" });
+    });
+
+    it("inspectGatewayLockState reports active gateway lock found", async () => {
+      await acquireGatewayLock(tmpDir);
+      const result = await inspectGatewayLockState(stateHome());
+      expect(result).toMatchObject({ state: "active", pid: process.pid });
+    });
+
+    it("inspectGatewayLockState reports stale lock suspected", async () => {
+      const dir = join(tmpDir, ".estacoda", "gateway");
+      await mkdir(dir, { recursive: true });
+      await writeFile(
+        join(dir, "gateway.lock"),
+        JSON.stringify({ pid: 99999, startedAt: new Date().toISOString() }),
+        "utf8"
+      );
+
+      const result = await inspectGatewayLockState(stateHome());
+      expect(result).toMatchObject({ state: "stale", pid: 99999, reason: "pid-dead" });
+    });
+
+    it("inspectGatewayLockState reports malformed lock file", async () => {
+      const dir = join(tmpDir, ".estacoda", "gateway");
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, "gateway.lock"), "not-json", "utf8");
+
+      const result = await inspectGatewayLockState(stateHome());
+      expect(result).toMatchObject({ state: "malformed" });
     });
 
     it("isStaleLock returns false for live lock holder", async () => {
