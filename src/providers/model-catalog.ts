@@ -5,7 +5,8 @@ import {
   modelsDevSnapshotToProfiles,
   normalizeProviderIdForEstaCoda,
   resolveModelsDevSnapshot,
-  type ModelsDevRegistryOptions
+  type ModelsDevRegistryOptions,
+  type ModelsDevSnapshot
 } from "../model-catalog/models-dev-registry.js";
 
 export const fallbackKnownModelProfiles: readonly ModelProfile[] = [
@@ -29,6 +30,53 @@ export const fallbackKnownModelProfiles: readonly ModelProfile[] = [
 ];
 
 export const knownModelProfiles = fallbackKnownModelProfiles;
+
+export type ProfileResolutionSource = "models-dev" | "fallback-known" | "inferred";
+
+export type ProfileResolutionContext = {
+  snapshotProfiles: ReadonlyMap<string, ModelProfile>;
+  fallbackProfiles: readonly ModelProfile[];
+};
+
+export function buildProfileResolutionContext(
+  snapshot: ModelsDevSnapshot
+): ProfileResolutionContext {
+  const snapshotProfiles = new Map<string, ModelProfile>();
+  for (const profile of modelsDevSnapshotToProfiles(snapshot, {
+    includeAlpha: true,
+    includeBeta: true,
+    includeDeprecated: true
+  })) {
+    snapshotProfiles.set(`${profile.provider}:${profile.id}`, profile);
+  }
+  return {
+    snapshotProfiles,
+    fallbackProfiles: fallbackKnownModelProfiles
+  };
+}
+
+export function resolveModelProfile(
+  provider: ProviderId,
+  modelId: string,
+  context: ProfileResolutionContext
+): { profile: ModelProfile; source: ProfileResolutionSource } {
+  const snapshotProfile = context.snapshotProfiles.get(`${provider}:${modelId}`);
+  if (snapshotProfile !== undefined) {
+    return { profile: snapshotProfile, source: "models-dev" };
+  }
+
+  const fallbackProfile = context.fallbackProfiles.find(
+    (p) => p.provider === provider && p.id === modelId
+  );
+  if (fallbackProfile !== undefined) {
+    return { profile: fallbackProfile, source: "fallback-known" };
+  }
+
+  return {
+    profile: inferModelProfile({ provider, model: modelId }),
+    source: "inferred"
+  };
+}
 
 export function inferModelProfile(input: {
   provider?: ProviderId;

@@ -9,8 +9,9 @@ import type { EstaCodaConfig } from "../config/runtime-config.js";
 import { ProviderRegistry } from "./provider-registry.js";
 import {
   fallbackKnownModelProfiles,
-  inferModelProfile,
-  resolveModelProfilesFromCatalog
+  buildProfileResolutionContext,
+  resolveModelProfile,
+  type ProfileResolutionContext
 } from "./model-catalog.js";
 import {
   getProviderMetadata,
@@ -116,11 +117,13 @@ export async function createModelSelectionCatalog(
     snapshotProviderMap.set(provider.id, provider);
   }
 
+  const profileContext = buildProfileResolutionContext(snapshot);
+
   return {
     listProviders: async (listOpts) => listProvidersImpl(options, snapshot, listOpts),
-    listModels: async (listOpts) => listModelsImpl(options, snapshot, snapshotModelMap, snapshotInfoMap, snapshotProviderMap, listOpts),
+    listModels: async (listOpts) => listModelsImpl(options, snapshot, snapshotModelMap, snapshotInfoMap, snapshotProviderMap, profileContext, listOpts),
     searchModels: async (query, listOpts) => {
-      const all = await listModelsImpl(options, snapshot, snapshotModelMap, snapshotInfoMap, snapshotProviderMap, listOpts);
+      const all = await listModelsImpl(options, snapshot, snapshotModelMap, snapshotInfoMap, snapshotProviderMap, profileContext, listOpts);
       const normalized = normalizeLookupKey(query);
       return all.filter((model) =>
         normalizeLookupKey(model.id).includes(normalized) ||
@@ -129,7 +132,7 @@ export async function createModelSelectionCatalog(
       );
     },
     resolveModel: async (provider, id, baseUrl) => {
-      const all = await listModelsImpl(options, snapshot, snapshotModelMap, snapshotInfoMap, snapshotProviderMap);
+      const all = await listModelsImpl(options, snapshot, snapshotModelMap, snapshotInfoMap, snapshotProviderMap, profileContext);
       const key = routeKey(provider, id, baseUrl);
       return all.find((model) => model.routeKey === key);
     },
@@ -241,6 +244,7 @@ async function listModelsImpl(
   snapshotModelMap: Map<string, ModelProfile>,
   snapshotInfoMap: Map<string, ModelInfo>,
   snapshotProviderMap: Map<string, ProviderInfo>,
+  profileContext: ProfileResolutionContext,
   listOpts?: CatalogListOptions
 ): Promise<SelectableModel[]> {
   const config = options.config;
@@ -268,7 +272,7 @@ async function listModelsImpl(
       continue;
     }
 
-    const profile = snapshotModelMap.get(routeKey(provider, id)) ?? inferModelProfile({ provider, model: id });
+    const { profile } = resolveModelProfile(provider, id, profileContext);
     const apiKeyEnv = config.providers?.[provider]?.apiKeyEnv;
     const executable = isExecutable(provider, registry);
 
@@ -342,10 +346,7 @@ async function listModelsImpl(
         continue;
       }
 
-      // Resolve profile: snapshot > fallback-known > inferred
-      const snapshotProfile = snapshotModelMap.get(routeKey(provider, modelId));
-      const fallbackProfile = fallbackKnownModelProfiles.find((p) => p.provider === provider && p.id === modelId);
-      const profile = snapshotProfile ?? fallbackProfile ?? inferModelProfile({ provider, model: modelId });
+      const { profile } = resolveModelProfile(provider, modelId, profileContext);
 
       if (!shouldIncludeStatus(profile.status ?? "", { includeAlpha, includeBeta, includeDeprecated })) {
         continue;
@@ -400,11 +401,7 @@ async function listModelsImpl(
       continue;
     }
 
-    const snapshotProfile = snapshotModelMap.get(routeKey(route.provider, route.id));
-    const fallbackProfile = fallbackKnownModelProfiles.find(
-      (p) => p.provider === route.provider && p.id === route.id
-    );
-    const profile = snapshotProfile ?? fallbackProfile ?? inferModelProfile({ provider: route.provider, model: route.id });
+    const { profile } = resolveModelProfile(route.provider, route.id, profileContext);
     const executable = isExecutable(route.provider, registry);
 
     if (!shouldIncludeStatus(profile.status ?? "", { includeAlpha, includeBeta, includeDeprecated })) {
