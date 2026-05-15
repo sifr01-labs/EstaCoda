@@ -201,38 +201,49 @@ describe("cli model", () => {
     });
 
     it("reuses existing credential and does not prompt for api key", async () => {
-      await writeUserConfig(tmpDir, {
-        providers: {
-          openai: {
-            kind: "openai-compatible",
-            models: ["gpt-4o"],
-            apiKeyEnv: "OPENAI_API_KEY"
+      const originalOpenAiKey = process.env.OPENAI_API_KEY;
+      process.env.OPENAI_API_KEY = "sk-existing";
+
+      try {
+        await writeUserConfig(tmpDir, {
+          providers: {
+            openai: {
+              kind: "openai-compatible",
+              models: ["gpt-4o"],
+              apiKeyEnv: "OPENAI_API_KEY"
+            }
+          },
+          model: {
+            provider: "openai",
+            id: "gpt-4o"
           }
-        },
-        model: {
-          provider: "openai",
-          id: "gpt-4o"
+        });
+        // Seed both the process env and isolated .env so credential reuse is deterministic in CI.
+        const envPath = join(tmpDir, ".estacoda", ".env");
+        await mkdir(join(tmpDir, ".estacoda"), { recursive: true });
+        await writeFile(envPath, "OPENAI_API_KEY=sk-existing\n", "utf8");
+
+        const prompt = createMockPrompt({
+          selects: ["openai", "gpt-4o"]
+        });
+
+        const result = await runCliCommand({
+          argv: ["model"],
+          workspaceRoot: tmpDir,
+          homeDir: tmpDir,
+          prompt
+        });
+
+        expect(result.handled).toBe(true);
+        expect(result.exitCode).toBe(0);
+        expect(result.output).toContain("Credential: uses OPENAI_API_KEY");
+      } finally {
+        if (originalOpenAiKey === undefined) {
+          delete process.env.OPENAI_API_KEY;
+        } else {
+          process.env.OPENAI_API_KEY = originalOpenAiKey;
         }
-      });
-      // Pre-seed the credential so flow reports reuse
-      const envPath = join(tmpDir, ".estacoda", ".env");
-      await mkdir(join(tmpDir, ".estacoda"), { recursive: true });
-      await writeFile(envPath, "OPENAI_API_KEY=sk-existing\n", "utf8");
-
-      const prompt = createMockPrompt({
-        selects: ["openai", "gpt-4o"]
-      });
-
-      const result = await runCliCommand({
-        argv: ["model"],
-        workspaceRoot: tmpDir,
-        homeDir: tmpDir,
-        prompt
-      });
-
-      expect(result.handled).toBe(true);
-      expect(result.exitCode).toBe(0);
-      expect(result.output).toContain("Credential: uses OPENAI_API_KEY");
+      }
     });
 
     it("collects missing credential and stores via secret boundary", async () => {
@@ -1545,35 +1556,46 @@ describe("cli model", () => {
     });
 
     it("estacoda model openai/gpt-4o reuses existing env credential without prompt", async () => {
-      await writeUserConfig(tmpDir, {
-        providers: {
-          openai: {
-            kind: "openai-compatible",
-            models: ["gpt-4o"],
-            apiKeyEnv: "OPENAI_API_KEY"
+      const originalOpenAiKey = process.env.OPENAI_API_KEY;
+      process.env.OPENAI_API_KEY = "sk-existing";
+
+      try {
+        await writeUserConfig(tmpDir, {
+          providers: {
+            openai: {
+              kind: "openai-compatible",
+              models: ["gpt-4o"],
+              apiKeyEnv: "OPENAI_API_KEY"
+            }
+          },
+          model: {
+            provider: "local",
+            id: "qwen2.5:3b"
           }
-        },
-        model: {
-          provider: "local",
-          id: "qwen2.5:3b"
+        });
+        await mkdir(join(tmpDir, ".estacoda"), { recursive: true });
+        await writeFile(join(tmpDir, ".estacoda", ".env"), "OPENAI_API_KEY=sk-existing\n", "utf8");
+
+        const result = await runCliCommand({
+          argv: ["model", "openai/gpt-4o"],
+          workspaceRoot: tmpDir,
+          homeDir: tmpDir
+        });
+
+        expect(result.handled).toBe(true);
+        expect(result.exitCode).toBe(0);
+        expect(result.output).toContain("Credential: uses OPENAI_API_KEY");
+
+        const config = await readUserConfig(tmpDir) as any;
+        expect(config.model?.provider).toBe("openai");
+        expect(config.model?.id).toBe("gpt-4o");
+      } finally {
+        if (originalOpenAiKey === undefined) {
+          delete process.env.OPENAI_API_KEY;
+        } else {
+          process.env.OPENAI_API_KEY = originalOpenAiKey;
         }
-      });
-      await mkdir(join(tmpDir, ".estacoda"), { recursive: true });
-      await writeFile(join(tmpDir, ".estacoda", ".env"), "OPENAI_API_KEY=sk-existing\n", "utf8");
-
-      const result = await runCliCommand({
-        argv: ["model", "openai/gpt-4o"],
-        workspaceRoot: tmpDir,
-        homeDir: tmpDir
-      });
-
-      expect(result.handled).toBe(true);
-      expect(result.exitCode).toBe(0);
-      expect(result.output).toContain("Credential: uses OPENAI_API_KEY");
-
-      const config = await readUserConfig(tmpDir) as any;
-      expect(config.model?.provider).toBe("openai");
-      expect(config.model?.id).toBe("gpt-4o");
+      }
     });
 
     it("estacoda model anthropic/claude-opus fails while Anthropic is non-runnable", async () => {
