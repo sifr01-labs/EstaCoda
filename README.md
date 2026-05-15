@@ -37,11 +37,29 @@ Interactive setup uses a reviewed setup flow:
 - review the proposed setup before anything is applied
 - apply approved setup writes, run structured verification, then choose launch handoff behavior
 
+`estacoda setup --interactive` routes current setup state through the same reviewed setup system:
+
+| Setup state | Interactive behavior |
+|-------------|----------------------|
+| First-run / no usable config | Runs first-run setup for language, workspace trust, primary provider/model, security, workflow learning, optional capabilities, review, apply, verification, and launch handoff. |
+| Configured ready | Opens the guided setup editor so you can launch after verification, review setup, run read-only verification, or exit. |
+| Configured degraded | Shows warnings and lets you repair setup, verify again, or continue only after explicitly accepting limited mode. |
+| Partial provider or broken route | Uses provider/model repair through the shared provider/model flow before launch. |
+| Missing credential | Repairs the credential reference for the active route; review shows env var references, not raw secrets. |
+| Broken config | Shows config paths and parse/load diagnostics. Normal setup edits stay blocked until the config parses. |
+| Untrusted workspace | Offers explicit workspace trust review before local file or terminal work. |
+| State not writable | Shows state/config path guidance and blocks normal writes until permissions are restored. |
+
+Verification is read-only. Review cancellation causes no setup mutation, including no config write, trust grant, or `.env` write. Launch never bypasses verification: it requires verified-ready setup, or a degraded state with warnings shown and limited mode explicitly accepted.
+
 Advanced users can still use direct provider/model setup flags:
 
 ```bash
 estacoda setup --provider deepseek --model deepseek-chat --api-key-env DEEPSEEK_API_KEY
+estacoda setup --advanced --provider deepseek --model deepseek-chat --api-key-env DEEPSEEK_API_KEY
 ```
+
+These direct flags are advanced compatibility paths. Guided setup and repair use the shared provider/model flow and reviewed apply path.
 
 ## Core Capabilities
 
@@ -173,6 +191,8 @@ The setup flow walks through:
 10. Launch handoff when verification is ready, or an explicit degraded state is accepted.
 
 Credentials are stored locally with restrictive permissions. Advanced/direct setup can point EstaCoda at existing environment variables instead of pasting keys during setup.
+
+Optional capabilities are separate from the primary LLM provider/model route. Telegram/channel setup is a remote-control surface and must be restricted to allowed user or chat identities. Voice, vision/image generation, and browser support are optional/native capability surfaces; skipping them does not make core setup invalid. Browser setup records references only and does not launch a browser during setup planning.
 
 Workspace trust is path-scoped. A trusted workspace allows normal local file and terminal work under the configured security policy.
 

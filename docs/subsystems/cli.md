@@ -112,11 +112,56 @@ Interactive setup uses the reviewed setup architecture:
 10. Structured read-only verification after apply
 11. Launch handoff for verified-ready setup, or explicit accepted degraded state
 
+### Setup Routes
+
+`estacoda setup --interactive` routes the current setup state through a deterministic setup decision:
+
+| State | Route behavior |
+|-------|----------------|
+| `first-run` / no usable config | Runs first-run setup and review/apply. |
+| configured ready | Opens the guided setup editor with launch, review, verification, and exit choices. |
+| configured degraded | Shows verification warnings; repair or explicit limited-mode acceptance is required before launch. |
+| partial provider / broken route | Runs guided provider/model repair through the shared provider/model selection flow. |
+| missing credential | Repairs the active route credential reference; review shows env var references only. |
+| broken config | Shows config paths and parse/load diagnostics; normal config edits remain blocked until parsing is safe. |
+| untrusted workspace | Offers an explicit workspace trust grant through reviewed apply. |
+| state-not-writable | Shows state/config path permission guidance and blocks normal writes until state is writable. |
+
+Configured, degraded, untrusted, and repair states use the guided setup editor. First-run setup uses the first-run runner. Read-only verification remains a separate route and does not write config, trust, state, or `.env`.
+
+### Review, Apply, And Launch Safety
+
+- Setup builds a review manifest before apply.
+- Cancelling review produces no apply plan and no mutation.
+- Raw secrets are not displayed in review metadata or apply planning output.
+- Credential repair stores route/auth references and env var names, not raw key values.
+- Verification after apply is read-only.
+- Launch requires verified-ready setup, or explicit limited-mode acceptance after degraded warnings are shown.
+- Broken config, missing credential, untrusted workspace, state-not-writable, failed verification, and blocked verification do not expose a launch path.
+
+### Provider And Optional Capability Boundaries
+
+Primary provider/model setup and repair use the shared provider/model flow. That flow applies provider visibility, runnable/configurable gates, and credential boundaries owned by the provider layer.
+
+Optional capabilities stay separate from the primary LLM route:
+
+| Optional capability | Setup behavior |
+|---------------------|----------------|
+| Telegram/channels | Remote-control surface. Setup requires token env var reference plus allowed user or chat identities before enable can apply. |
+| Voice | Optional/native voice configuration. It does not change the primary provider/model route. |
+| Vision/image generation | Optional/native image capability configuration. It does not change the primary provider/model route. |
+| Browser | Records backend, URL, or command references. Setup planning does not auto-launch a browser or open a CDP connection. |
+
+Skipping optional capabilities keeps core setup valid.
+
 Direct provider/model flags remain as an advanced setup path:
 
 ```bash
 estacoda setup --provider deepseek --model deepseek-chat --api-key-env DEEPSEEK_API_KEY
+estacoda setup --advanced --provider deepseek --model deepseek-chat --api-key-env DEEPSEEK_API_KEY
 ```
+
+These flags are compatibility/direct paths. They are not the preferred guided repair path for existing users.
 
 Runtime mutating onboarding tools are removed. The runtime no longer exposes `onboarding.status` or `onboarding.complete`; setup mutation stays behind reviewed CLI setup/apply.
 

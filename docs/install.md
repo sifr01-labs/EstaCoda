@@ -54,15 +54,23 @@ export PATH="$HOME/.estacoda/bin:$PATH"
 ```bash
 estacoda init       # Bootstrap state directories
 estacoda setup      # Reviewed setup flow for provider, trust, security, workflow, and optional capabilities
+estacoda setup --interactive
 estacoda verify     # Check readiness
 estacoda            # Start interactive session
 ```
+
+`estacoda setup --interactive` uses the guided setup router. It runs first-run setup for new users, opens the guided editor for configured or degraded setup, and shows repair-first diagnostics for missing credentials, broken provider routes, broken config, untrusted workspaces, and state paths that are not writable.
+
+Setup review appears before apply. Cancelling review does not write config, trust, state, or `.env`. Verification is read-only, and launch requires verified-ready setup or an explicit limited-mode choice after warnings are shown.
 
 Advanced/direct provider setup can reference an existing environment variable:
 
 ```bash
 estacoda setup --provider deepseek --model deepseek-chat --api-key-env DEEPSEEK_API_KEY
+estacoda setup --advanced --provider deepseek --model deepseek-chat --api-key-env DEEPSEEK_API_KEY
 ```
+
+Direct setup flags are advanced compatibility paths. Guided repair uses reviewed setup instead.
 
 ## Update
 

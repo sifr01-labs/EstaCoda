@@ -220,10 +220,7 @@ NO_COLOR=1 pnpm run dev
 
 ### 4.2 Picker
 
-In an interactive session:
-```
-/model
-```
+In any supported flow that opens the shared interactive picker, such as setup language selection or a command menu:
 
 **Verify TTY:**
 - Numbered list with `>` cursor indicator.
@@ -329,14 +326,14 @@ const output = adapter.render(/* any ViewModel */);
 
 ---
 
-## 10. Reviewed Setup QA
+## 10. Reviewed Setup And Guided Repair QA
 
 Use an isolated home so no real credentials or trust state are touched:
 
 ```bash
 rm -rf /tmp/estacoda-setup-qa-home
 mkdir -p /tmp/estacoda-setup-qa-home
-HOME=/tmp/estacoda-setup-qa-home pnpm run dev -- setup
+HOME=/tmp/estacoda-setup-qa-home pnpm run dev -- setup --interactive
 ```
 
 **Verify:**
@@ -350,10 +347,177 @@ HOME=/tmp/estacoda-setup-qa-home pnpm run dev -- setup
 - Verification runs after approved apply and reports structured readiness.
 - Launch handoff happens only after verified-ready or explicitly accepted degraded setup.
 
+### 10.1 First-Run Setup
+
+```bash
+rm -rf /tmp/estacoda-qa-first-run
+mkdir -p /tmp/estacoda-qa-first-run
+HOME=/tmp/estacoda-qa-first-run pnpm run dev -- setup --interactive
+```
+
+**Verify:**
+- First-run setup starts because no usable config exists.
+- Primary provider/model setup uses the shared provider/model picker.
+- Hosted provider credential input is masked.
+- Review shows env var references, not raw key values.
+- Cancelling review leaves no config, trust, state, or `.env` mutation from the cancelled plan.
+
+### 10.2 Configured Ready
+
+Use a disposable home with a known-good local or hosted config.
+
+```bash
+HOME=/tmp/estacoda-qa-ready pnpm run dev -- setup --interactive
+```
+
+**Verify:**
+- The guided setup editor opens instead of first-run setup.
+- Available actions include review/edit, read-only verification, launch after verification, and exit.
+- Exiting writes nothing.
+- Running verification is read-only.
+
+### 10.3 Configured Degraded
+
+Use a disposable config that verifies with warnings, such as a low context-window model or another known non-blocking warning.
+
+```bash
+HOME=/tmp/estacoda-qa-degraded pnpm run dev -- setup --interactive
+```
+
+**Verify:**
+- Concrete verification warnings are shown.
+- Launch is not automatic.
+- Limited mode requires explicit acceptance after warnings are visible.
+- Choosing repair re-enters the guided setup editor.
+
+### 10.4 Partial Provider / Broken Route
+
+Use a disposable config whose primary provider/model route is incomplete or points at a non-runnable setup-visible route.
+
+```bash
+HOME=/tmp/estacoda-qa-partial-provider pnpm run dev -- setup --interactive
+```
+
+**Verify:**
+- Setup opens repair-first guided editor behavior.
+- Provider/model repair uses the shared provider/model flow.
+- Review/apply drafts route/auth-shaped config changes.
+- Direct setup compatibility is not presented as the preferred repair path.
+
+### 10.5 Missing Credential
+
+Use a disposable config with a hosted provider route and a missing credential env var.
+
+```bash
+HOME=/tmp/estacoda-qa-missing-credential pnpm run dev -- setup --interactive
+```
+
+**Verify:**
+- Credential repair targets the active route only.
+- Review displays env var references only.
+- The raw API key is not printed in review, diagnostics, logs, output, or final result text.
+- Cancelling review writes no `.env`.
+- Approving review writes only after approval.
+
+### 10.6 Broken Config
+
+```bash
+rm -rf /tmp/estacoda-qa-broken-config
+mkdir -p /tmp/estacoda-qa-broken-config/.estacoda
+printf '{not-json' > /tmp/estacoda-qa-broken-config/.estacoda/config.json
+HOME=/tmp/estacoda-qa-broken-config pnpm run dev -- setup --interactive
+```
+
+**Verify:**
+- Output shows config path(s) and parse/load error.
+- Normal provider/model/security/workflow edits are not offered.
+- Only diagnostics, read-only verification, manual repair guidance, and exit are available.
+- No normal config patch is drafted while config is unsafe.
+
+### 10.7 Untrusted Workspace
+
+Use a disposable home and workspace that is not in the trust store.
+
+```bash
+HOME=/tmp/estacoda-qa-untrusted pnpm run dev -- setup --interactive
+```
+
+**Verify:**
+- Workspace trust is shown as separate from provider/model readiness.
+- Trust grant requires explicit confirmation.
+- Review appears before trust is applied.
+- Cancelling review does not update the trust store.
+
+### 10.8 State Not Writable
+
+```bash
+rm -rf /tmp/estacoda-qa-state
+mkdir -p /tmp/estacoda-qa-state/.estacoda
+chmod 500 /tmp/estacoda-qa-state/.estacoda
+HOME=/tmp/estacoda-qa-state pnpm run dev -- setup --interactive
+chmod 700 /tmp/estacoda-qa-state/.estacoda
+```
+
+**Verify:**
+- Output explains that the state/config path is not writable.
+- Normal writes are blocked until state writability is restored.
+- Permission guidance is shown.
+- Verification retry and exit are available; launch is not.
+
+### 10.9 Optional Capability Editor
+
+From a configured disposable setup:
+
+```bash
+HOME=/tmp/estacoda-qa-ready pnpm run dev -- setup --interactive
+```
+
+**Verify:**
+- Optional capabilities are presented independently from the primary provider/model route.
+- `Leave unchanged` writes nothing.
+- `Skip` keeps core setup valid and non-blocking.
+- `Enable/configure` produces reviewed drafts for only the selected capability.
+- Telegram/channels shows remote-control risk and requires allowed user or chat identities.
+- Telegram token is an env var reference only.
+- Voice setup remains a native optional capability and does not change the primary LLM route.
+- Vision/image generation remains a native optional capability and does not change the primary LLM route.
+- Browser setup records references only and does not auto-launch a browser during planning.
+
+### 10.10 Review, Cancel, And Raw Secret Safety
+
+For any setup path that collects credentials:
+
+1. Enter a fake secret value such as `sk-manual-qa-do-not-store`.
+2. Continue to review.
+3. Cancel review.
+
+**Verify:**
+- Review does not show `sk-manual-qa-do-not-store`.
+- Terminal output does not show `sk-manual-qa-do-not-store`.
+- `.env` is not created or changed by the cancelled review.
+- Config and trust store are not changed by the cancelled review.
+- Re-running setup still treats the credential as missing.
+
+Then repeat and approve review.
+
+**Verify:**
+- `.env` is written only after approval.
+- Review and final output still do not print the raw secret.
+- Verification is read-only after apply.
+
+### 10.11 Blocked Launch Denial
+
+Use a missing credential, broken config, untrusted workspace, state-not-writable home, or failed verification state.
+
+**Verify:**
+- Launch is not offered from unsafe states.
+- Failed or blocked verification does not launch.
+- The next action is repair again or exit.
+
 Arabic setup spot check:
 
 ```bash
-HOME=/tmp/estacoda-setup-qa-home-ar pnpm run dev -- setup
+HOME=/tmp/estacoda-setup-qa-home-ar pnpm run dev -- setup --interactive
 ```
 
 Choose Arabic and verify that commands, provider names, paths, and env vars remain readable with LTR isolation. This checks onboarding-owned setup surfaces only; full runtime CLI localization is not complete.
