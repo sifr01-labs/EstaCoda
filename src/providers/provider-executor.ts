@@ -12,6 +12,9 @@ import { CredentialPoolRegistry } from "./credential-pool.js";
 import { ProviderRegistry } from "./provider-registry.js";
 import { resolveRuntimeCredential } from "./runtime-credential-resolver.js";
 import { getProviderMetadata } from "./provider-metadata.js";
+import { isOAuthAuthMethod } from "./oauth/oauth-types.js";
+import { loadOAuthStore } from "./oauth/oauth-store.js";
+import { refreshOAuthToken } from "./oauth/oauth-refresh.js";
 
 export type ProviderAttempt = {
   provider: string;
@@ -83,15 +86,18 @@ export type ProviderExecutionOptions = {
 export type ProviderExecutorOptions = {
   registry: ProviderRegistry;
   credentialPools?: CredentialPoolRegistry;
+  homeDir?: string;
 };
 
 export class ProviderExecutor {
   readonly #registry: ProviderRegistry;
   readonly #credentialPools: CredentialPoolRegistry | undefined;
+  readonly #homeDir: string | undefined;
 
   constructor(options: ProviderExecutorOptions) {
     this.#registry = options.registry;
     this.#credentialPools = options.credentialPools;
+    this.#homeDir = options.homeDir;
   }
 
   async complete(
@@ -225,6 +231,7 @@ export class ProviderExecutor {
         route: { apiKeyEnv: route.apiKeyEnv, authMethod: route.authMethod },
         credentialPools: this.#credentialPools,
         metadata: getProviderMetadata(route.provider),
+        homeDir: this.#homeDir,
       });
 
       if (!resolution.diagnostic.ok) {
@@ -248,76 +255,145 @@ export class ProviderExecutor {
         continue;
       }
 
-      const credential = resolution.credential?.kind === "bearer"
+      let credential = resolution.credential?.kind === "bearer"
         ? { id: resolution.credential.id, value: resolution.credential.value }
         : undefined;
+      const credentialSource = resolution.credential?.kind === "bearer"
+        ? resolution.credential.source
+        : undefined;
 
-      await options.onEvent?.({
-        kind: "provider-attempt-start",
-        provider: route.provider,
-        model: route.id,
-        credentialId: credential?.id,
-        fallback: index > 0
-      });
+      let response: ProviderResponse | undefined;
+      let routeAttemptCount = 0;
+      const maxRouteAttempts = 2;
+      const effectiveAuthMethod = route.authMethod ?? metadata.defaultAuthMethod;
 
-      const completionOptions: {
-        credential?: { id: string; value?: string };
-        endpoint?: ProviderEndpoint;
-        signal?: AbortSignal;
-      } = {
-        credential,
-        signal: options.signal
-      };
+      while (routeAttemptCount < maxRouteAttempts) {
+        routeAttemptCount++;
 
-      if (route.baseUrl !== undefined) {
-        completionOptions.endpoint = {
-          baseUrl: route.baseUrl,
-          apiKey: route.apiKeyEnv !== undefined ? { kind: "env", name: route.apiKeyEnv } : undefined
+        await options.onEvent?.({
+          kind: "provider-attempt-start",
+          provider: route.provider,
+          model: route.id,
+          credentialId: credential?.id,
+          fallback: index > 0
+        });
+
+        const completionOptions: {
+          credential?: { id: string; value?: string };
+          endpoint?: ProviderEndpoint;
+          signal?: AbortSignal;
+        } = {
+          credential,
+          signal: options.signal
+        };
+
+        if (route.baseUrl !== undefined) {
+          completionOptions.endpoint = {
+            baseUrl: route.baseUrl,
+            apiKey: route.apiKeyEnv !== undefined ? { kind: "env", name: route.apiKeyEnv } : undefined
+          };
+        }
+
+        const callResponse = options.stream === true && provider.stream !== undefined
+          ? await collectProviderStream({
+              provider: route.provider,
+              model: route.id,
+              stream: provider.stream({
+                ...request,
+                provider: route.provider,
+                model: route.id,
+                stream: true
+              }, completionOptions),
+              onEvent: options.onEvent,
+              toolCalls,
+              signal: options.signal
+            })
+          : await provider.complete({
+              ...request,
+              provider: route.provider,
+              model: route.id
+            }, completionOptions);
+
+        const nextRoute = chain[index + 1];
+        const callWillFallback = !callResponse.ok && shouldFallback(callResponse, route, nextRoute);
+
+        attempts.push({
+          provider: route.provider,
+          model: route.id,
+          credentialId: credential?.id,
+          ok: callResponse.ok,
+          errorClass: callResponse.errorClass,
+          content: callResponse.content
+        });
+
+        await options.onEvent?.({
+          kind: "provider-attempt-end",
+          provider: route.provider,
+          model: route.id,
+          credentialId: credential?.id,
+          ok: callResponse.ok,
+          errorClass: callResponse.errorClass,
+          fallback: index > 0,
+          willFallback: callWillFallback
+        });
+
+        if (callResponse.ok) {
+          response = callResponse;
+          break;
+        }
+
+        const canRetry =
+          callResponse.errorClass === "auth" &&
+          routeAttemptCount < maxRouteAttempts &&
+          effectiveAuthMethod !== undefined &&
+          isOAuthAuthMethod(effectiveAuthMethod) &&
+          credentialSource === "oauth";
+
+        if (!canRetry) {
+          response = callResponse;
+          break;
+        }
+
+        const refreshResult = await this.#tryRefreshOAuthToken(route.provider);
+        if (refreshResult.kind === "error") {
+          const diagnostic = this.#buildAuthDiagnostic(route.provider, maxRouteAttempts);
+          response = {
+            ok: false,
+            content: diagnostic,
+            model: route.id,
+            provider: route.provider,
+            errorClass: "auth"
+          };
+          attempts[attempts.length - 1] = {
+            ...attempts[attempts.length - 1],
+            ok: false,
+            content: diagnostic,
+            errorClass: "auth"
+          };
+          break;
+        }
+
+        credential = { id: `${route.provider}:oauth`, value: refreshResult.accessToken };
+      }
+
+      if (response === undefined) {
+        throw new Error("Invariant violated: route response was never assigned");
+      }
+
+      if (!response.ok && response.errorClass === "auth" && routeAttemptCount >= maxRouteAttempts) {
+        const diagnostic = this.#buildAuthDiagnostic(route.provider, routeAttemptCount);
+        response = {
+          ...response,
+          content: diagnostic
+        };
+        attempts[attempts.length - 1] = {
+          ...attempts[attempts.length - 1],
+          content: diagnostic
         };
       }
 
-      const response = options.stream === true && provider.stream !== undefined
-        ? await collectProviderStream({
-            provider: route.provider,
-            model: route.id,
-            stream: provider.stream({
-              ...request,
-              provider: route.provider,
-              model: route.id,
-              stream: true
-            }, completionOptions),
-            onEvent: options.onEvent,
-            toolCalls,
-            signal: options.signal
-          })
-        : await provider.complete({
-            ...request,
-            provider: route.provider,
-            model: route.id
-          }, completionOptions);
-
-      attempts.push({
-        provider: route.provider,
-        model: route.id,
-        credentialId: credential?.id,
-        ok: response.ok,
-        errorClass: response.errorClass,
-        content: response.content
-      });
-
       const nextRoute = chain[index + 1];
       const willFallback = !response.ok && shouldFallback(response, route, nextRoute);
-
-      await options.onEvent?.({
-        kind: "provider-attempt-end",
-        provider: route.provider,
-        model: route.id,
-        credentialId: credential?.id,
-        ok: response.ok,
-        errorClass: response.errorClass,
-        fallback: index > 0,
-        willFallback
-      });
 
       if (response.ok) {
         if (credential !== undefined && this.#credentialPools !== undefined && route.apiKeyEnv === undefined) {
@@ -362,6 +438,40 @@ export class ProviderExecutor {
       attempts,
       toolCalls
     };
+  }
+
+  async #tryRefreshOAuthToken(providerId: string): Promise<
+    | { kind: "success"; accessToken: string }
+    | { kind: "error"; reason: string }
+  > {
+    const oauthResult = await loadOAuthStore({ homeDir: this.#homeDir });
+    const record = oauthResult.store.providers[providerId];
+    if (record === undefined) {
+      return {
+        kind: "error",
+        reason: `OAuth token for ${providerId} is missing.`
+      };
+    }
+    const refreshResult = await refreshOAuthToken({
+      providerId,
+      record,
+      homeDir: this.#homeDir
+    });
+    if (refreshResult.kind === "error") {
+      return {
+        kind: "error",
+        reason: refreshResult.reason
+      };
+    }
+    return {
+      kind: "success",
+      accessToken: refreshResult.accessToken
+    };
+  }
+
+  #buildAuthDiagnostic(providerId: string, attempts: number): string {
+    const providerLabel = providerId === "codex" ? "Codex" : providerId;
+    return `${providerLabel} authentication failed after ${attempts} attempt(s). Token may be expired or revoked. Run "estacoda model setup ${providerId}" to re-authenticate.`;
   }
 }
 
