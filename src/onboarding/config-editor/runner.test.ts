@@ -62,6 +62,7 @@ describe("runConfigEditor", () => {
     expect(output.join("")).toContain("Available setup actions:");
     expect(output.join("")).toContain("edit-security-mode");
     expect(output.join("")).toContain("edit-workflow-learning");
+    expect(output.join("")).toContain("review-optional-capabilities");
     expect(output.join("")).toContain("verify-setup - Verify setup");
     expect(output.join("")).toContain("show-diagnostics - Show diagnostics");
     expect(output.join("")).toContain("exit - Exit");
@@ -454,6 +455,169 @@ describe("runConfigEditor", () => {
     await expect(store.isTrusted(workspaceRoot)).resolves.toBe(false);
   });
 
+  it("leaves optional capabilities unchanged without drafting or applying changes", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const before = await readFile(join(tempDir, ".estacoda", "config.json"), "utf8");
+    let applyCalled = false;
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt(),
+      defaultActionId: "review-optional-capabilities",
+      applyExecutor: {
+        apply: () => {
+          applyCalled = true;
+          return { ok: true, appliedOperationIds: [] };
+        },
+      },
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("review-optional-capabilities");
+    expect(result.output).toContain("Optional capabilities left unchanged");
+    expect(result.reviewManifest).toBeUndefined();
+    expect(result.applyPlanningResult).toBeUndefined();
+    expect(applyCalled).toBe(false);
+    await expect(readFile(join(tempDir, ".estacoda", "config.json"), "utf8")).resolves.toBe(before);
+  });
+
+  it("blocks Telegram optional capability apply without allowed remote-control identities", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const before = await readFile(join(tempDir, ".estacoda", "config.json"), "utf8");
+    let applyCalled = false;
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["enable", "TELEGRAM_BOT_TOKEN", "", "", "unchanged", "unchanged", "unchanged", true],
+      }),
+      defaultActionId: "review-optional-capabilities",
+      applyExecutor: {
+        apply: () => {
+          applyCalled = true;
+          return { ok: true, appliedOperationIds: [] };
+        },
+      },
+    });
+
+    expect(result.completed).toBe(false);
+    expect(result.reviewManifest?.sections["remote-control-surfaces"]).toHaveLength(1);
+    expect(result.reviewManifest?.sections.blockers[0]?.blockers).toContain("Telegram remote control requires allowed user or chat identities.");
+    expect(result.applyPlanningResult?.kind).toBe("blocked");
+    expect(applyCalled).toBe(false);
+    expect(JSON.stringify(result)).not.toContain("123456:");
+    await expect(readFile(join(tempDir, ".estacoda", "config.json"), "utf8")).resolves.toBe(before);
+  });
+
+  it("applies reviewed Telegram optional capability with env ref and allowlisted identities", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["enable", "TELEGRAM_BOT_TOKEN", "42", "-100", "unchanged", "unchanged", "unchanged", true],
+      }),
+      defaultActionId: "review-optional-capabilities",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const rawConfig = await readFile(join(tempDir, ".estacoda", "config.json"), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      channels?: { telegram?: { enabled?: boolean; botTokenEnv?: string; allowedUserIds?: string[]; allowedChatIds?: string[] } };
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.reviewManifest?.sections["enabled-optional-capabilities"]).toHaveLength(1);
+    expect(result.reviewManifest?.sections["remote-control-surfaces"]).toHaveLength(1);
+    expect(result.reviewManifest?.sections["remote-control-surfaces"][0]?.review.values.remoteControlIdentityConstraint).toBe("allowed-user-or-chat-id");
+    expect(config.channels?.telegram).toEqual(expect.objectContaining({
+      enabled: true,
+      botTokenEnv: "TELEGRAM_BOT_TOKEN",
+      allowedUserIds: ["42"],
+      allowedChatIds: ["-100"],
+    }));
+    expect(rawConfig).not.toContain("123456:");
+    expect(JSON.stringify(result)).not.toContain("123456:");
+  });
+
+  it("applies voice, vision, and browser optional capability refs without raw secrets or browser launch", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: [
+          "skip",
+          "enable",
+          "openai",
+          "gpt-4o-mini-tts",
+          "VOICE_TTS_KEY",
+          "openai",
+          "gpt-4o-mini-transcribe",
+          "VOICE_STT_KEY",
+          "enable",
+          "fal",
+          "fal-ai/imagen4/preview",
+          "FAL_KEY",
+          false,
+          "enable",
+          "local-cdp",
+          "http://127.0.0.1:1",
+          "google-chrome --remote-debugging-port=9222",
+          true,
+        ],
+      }),
+      defaultActionId: "review-optional-capabilities",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const rawConfig = await readFile(join(tempDir, ".estacoda", "config.json"), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      tts?: { provider?: string; openai?: { model?: string; apiKeyEnv?: string } };
+      stt?: { provider?: string; openai?: { model?: string; apiKeyEnv?: string } };
+      imageGen?: { provider?: string; model?: string; fal?: { apiKeyEnv?: string } };
+      browser?: { backend?: string; cdpUrl?: string; launchCommand?: string; autoLaunch?: boolean };
+    };
+    const browserLine = result.reviewManifest?.sections["enabled-optional-capabilities"]
+      .find((line) => line.sourceDraftIds.includes("setup-module.browser.capability"));
+
+    expect(result.completed).toBe(true);
+    expect(result.reviewManifest?.sections["enabled-optional-capabilities"].map((line) => line.sourceDraftIds[0])).toEqual(expect.arrayContaining([
+      "setup-module.voice.capability",
+      "setup-module.vision.capability",
+      "setup-module.browser.capability",
+    ]));
+    expect(result.reviewManifest?.sections["enabled-optional-capabilities"].map((line) => line.sourceDraftIds[0])).not.toContain("setup-module.telegram.capability");
+    expect(browserLine?.review.values.autoLaunchRequested).toBe(false);
+    expect(browserLine?.review.values.autoLaunchWillRunNow).toBe(false);
+    expect(config.tts?.provider).toBe("openai");
+    expect(config.tts?.openai?.apiKeyEnv).toBe("VOICE_TTS_KEY");
+    expect(config.stt?.provider).toBe("openai");
+    expect(config.stt?.openai?.apiKeyEnv).toBe("VOICE_STT_KEY");
+    expect(config.imageGen?.provider).toBe("fal");
+    expect(config.imageGen?.fal?.apiKeyEnv).toBe("FAL_KEY");
+    expect(config.browser).toEqual({
+      backend: "local-cdp",
+      cdpUrl: "http://127.0.0.1:1",
+      launchCommand: "google-chrome --remote-debugging-port=9222",
+      autoLaunch: false,
+    });
+    expect(rawConfig).not.toContain("sk-");
+    expect(JSON.stringify(result)).not.toContain("sk-");
+  });
+
   it("renders broken config as a repair-first diagnostic surface", async () => {
     await mkdir(join(tempDir, ".estacoda"), { recursive: true });
     await writeFile(join(tempDir, ".estacoda", "config.json"), "{not-json", "utf8");
@@ -521,8 +685,11 @@ describe("runConfigEditor", () => {
 
 function fakePrompt(options: { readonly values?: readonly unknown[]; readonly secret?: string } = {}): Prompt {
   const values = [...(options.values ?? [])];
-  const prompt = (async (_question: string, promptOptions?: { secret?: boolean }) =>
-    promptOptions?.secret === true ? options.secret ?? "" : "") as Prompt;
+  const prompt = (async (_question: string, promptOptions?: { secret?: boolean }) => {
+    if (promptOptions?.secret === true) return options.secret ?? "";
+    const next = values.shift();
+    return next === undefined ? "" : String(next);
+  }) as Prompt;
   prompt.select = async (input) => {
     const next = values.shift();
     if (next !== undefined) {

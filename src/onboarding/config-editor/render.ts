@@ -20,6 +20,7 @@ const PR6_EDITOR_ACTION_ORDER: readonly SetupEditorActionId[] = [
   "repair-workspace-trust",
   "edit-security-mode",
   "edit-workflow-learning",
+  "review-optional-capabilities",
 ];
 
 export function renderConfigEditor(input: {
@@ -211,6 +212,8 @@ function editorActionDescription(action: SetupEditorActionDraft): string {
       return "Choose strict, adaptive, or open approval mode and review the scoped config patch.";
     case "edit-workflow-learning":
       return "Choose workflow learning behavior and review the scoped config patch.";
+    case "review-optional-capabilities":
+      return "Review Telegram, voice, vision/image generation, and browser capability settings independently.";
     case "repair-primary-provider":
       return "Repair the primary provider/model route through the shared setup flow.";
     case "edit-primary-model-route":

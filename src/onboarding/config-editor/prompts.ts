@@ -1,12 +1,19 @@
 import type { Prompt } from "../../cli/readline-prompt.js";
+import type { BrowserBackendKind } from "../../contracts/browser.js";
 import type { SecurityApprovalMode } from "../../contracts/security.js";
+import type { ImageGenerationProvider, SttProvider, TtsProvider } from "../../config/runtime-config.js";
 import type { ModelCandidate, ProviderCandidate } from "../../providers/provider-model-selection-flow.js";
 import type { SkillAutonomy } from "../../skills/skill-learning.js";
 import {
   promptSetupChoice,
+  promptSetupStringWithDefault,
   setupCopyText,
 } from "../setup-prompts.js";
 import type { ConfigEditorRenderedAction } from "./render.js";
+
+export type OptionalCapabilityPromptAction = "unchanged" | "skip" | "enable";
+
+export type OptionalCapabilityPromptId = "telegram" | "voice" | "vision" | "browser";
 
 export async function promptConfigEditorAction(
   prompt: Prompt,
@@ -202,4 +209,219 @@ export async function promptConfigEditorReviewApproval(
     ],
     defaultValue: true,
   });
+}
+
+export async function promptOptionalCapabilityAction(
+  prompt: Prompt,
+  input: {
+    readonly id: OptionalCapabilityPromptId;
+    readonly title: string;
+    readonly configured: boolean;
+  }
+): Promise<OptionalCapabilityPromptAction> {
+  return promptSetupChoice(prompt, {
+    title: input.title,
+    message: `${input.title}\n`,
+    choices: [
+      {
+        id: `${input.id}-unchanged`,
+        label: "Leave unchanged",
+        description: input.configured
+          ? "Keep the current optional capability config exactly as-is."
+          : "Do not configure this optional capability now.",
+        value: "unchanged" as const,
+      },
+      {
+        id: `${input.id}-skip`,
+        label: "Skip",
+        description: "Keep this optional capability non-blocking for core setup.",
+        value: "skip" as const,
+      },
+      {
+        id: `${input.id}-enable`,
+        label: "Enable/configure",
+        description: "Draft reviewed config references for this optional capability.",
+        value: "enable" as const,
+      },
+    ],
+    defaultValue: "unchanged" as const,
+  });
+}
+
+export async function promptTelegramCapability(
+  prompt: Prompt,
+  current: {
+    readonly botTokenEnv?: string;
+    readonly allowedUserIds?: readonly string[];
+    readonly allowedChatIds?: readonly string[];
+  }
+): Promise<{
+  readonly botTokenEnv: string;
+  readonly allowedUserIds: readonly string[];
+  readonly allowedChatIds: readonly string[];
+}> {
+  const botTokenEnv = await promptSetupStringWithDefault(
+    prompt,
+    "Telegram bot token environment variable [ESTACODA_TELEGRAM_BOT_TOKEN]: ",
+    current.botTokenEnv ?? "ESTACODA_TELEGRAM_BOT_TOKEN"
+  );
+  const allowedUserIds = splitCsv(await promptSetupStringWithDefault(
+    prompt,
+    "Allowed Telegram user IDs, comma-separated: ",
+    (current.allowedUserIds ?? []).join(",")
+  ));
+  const allowedChatIds = splitCsv(await promptSetupStringWithDefault(
+    prompt,
+    "Allowed Telegram chat IDs, comma-separated: ",
+    (current.allowedChatIds ?? []).join(",")
+  ));
+
+  return {
+    botTokenEnv,
+    allowedUserIds,
+    allowedChatIds,
+  };
+}
+
+export async function promptVoiceCapability(
+  prompt: Prompt,
+  current: {
+    readonly ttsProvider?: TtsProvider;
+    readonly ttsModel?: string;
+    readonly ttsApiKeyEnv?: string;
+    readonly sttProvider?: SttProvider;
+    readonly sttModel?: string;
+    readonly sttApiKeyEnv?: string;
+  }
+): Promise<{
+  readonly ttsProvider: TtsProvider;
+  readonly ttsModel: string;
+  readonly ttsApiKeyEnv: string;
+  readonly sttProvider: SttProvider;
+  readonly sttModel: string;
+  readonly sttApiKeyEnv: string;
+}> {
+  const ttsProvider = await promptSetupChoice(prompt, {
+    title: setupCopyText("en", "setupModules.voice.title"),
+    message: "Choose a TTS provider.\n",
+    choices: ttsProviders.map((provider) => ({
+      id: `tts-${provider}`,
+      label: provider,
+      value: provider,
+    })),
+    defaultValue: current.ttsProvider ?? "openai",
+  });
+  const ttsModel = await promptSetupStringWithDefault(prompt, "TTS model: ", current.ttsModel ?? "gpt-4o-mini-tts");
+  const ttsApiKeyEnv = await promptSetupStringWithDefault(prompt, "TTS API key environment variable: ", current.ttsApiKeyEnv ?? "OPENAI_API_KEY");
+  const sttProvider = await promptSetupChoice(prompt, {
+    title: setupCopyText("en", "setupModules.voice.title"),
+    message: "Choose an STT provider.\n",
+    choices: sttProviders.map((provider) => ({
+      id: `stt-${provider}`,
+      label: provider,
+      value: provider,
+    })),
+    defaultValue: current.sttProvider ?? "openai",
+  });
+  const sttModel = await promptSetupStringWithDefault(prompt, "STT model: ", current.sttModel ?? "gpt-4o-mini-transcribe");
+  const sttApiKeyEnv = await promptSetupStringWithDefault(prompt, "STT API key environment variable: ", current.sttApiKeyEnv ?? "OPENAI_API_KEY");
+
+  return {
+    ttsProvider,
+    ttsModel,
+    ttsApiKeyEnv,
+    sttProvider,
+    sttModel,
+    sttApiKeyEnv,
+  };
+}
+
+export async function promptVisionCapability(
+  prompt: Prompt,
+  current: {
+    readonly provider?: ImageGenerationProvider;
+    readonly model?: string;
+    readonly apiKeyEnv?: string;
+    readonly useGateway?: boolean;
+  }
+): Promise<{
+  readonly provider: ImageGenerationProvider;
+  readonly model: string;
+  readonly apiKeyEnv: string;
+  readonly useGateway: boolean;
+}> {
+  const provider = await promptSetupChoice(prompt, {
+    title: setupCopyText("en", "setupModules.vision.title"),
+    message: "Choose an image generation provider.\n",
+    choices: imageProviders.map((candidate) => ({
+      id: candidate,
+      label: candidate,
+      value: candidate,
+    })),
+    defaultValue: current.provider ?? "fal",
+  });
+  const model = await promptSetupStringWithDefault(prompt, "Image generation model: ", current.model ?? "fal-ai/imagen4/preview");
+  const apiKeyEnv = await promptSetupStringWithDefault(prompt, "Image API key environment variable: ", current.apiKeyEnv ?? "FAL_KEY");
+  const useGateway = await promptSetupChoice(prompt, {
+    title: setupCopyText("en", "setupModules.vision.title"),
+    message: "Use image gateway if configured?\n",
+    choices: [
+      { id: "gateway-no", label: "No", value: false },
+      { id: "gateway-yes", label: "Yes", value: true },
+    ],
+    defaultValue: current.useGateway ?? false,
+  });
+
+  return {
+    provider,
+    model,
+    apiKeyEnv,
+    useGateway,
+  };
+}
+
+export async function promptBrowserCapability(
+  prompt: Prompt,
+  current: {
+    readonly backend?: BrowserBackendKind;
+    readonly cdpUrl?: string;
+    readonly launchCommand?: string;
+  }
+): Promise<{
+  readonly backend: BrowserBackendKind;
+  readonly cdpUrl: string;
+  readonly launchCommand: string;
+  readonly autoLaunch: false;
+}> {
+  const backend = await promptSetupChoice(prompt, {
+    title: setupCopyText("en", "setupModules.browser.title"),
+    message: "Choose a browser backend. Browser setup will not launch a browser during planning.\n",
+    choices: browserBackends.map((candidate) => ({
+      id: candidate,
+      label: candidate,
+      value: candidate,
+    })),
+    defaultValue: current.backend ?? "local-cdp",
+  });
+  const cdpUrl = await promptSetupStringWithDefault(prompt, "Browser CDP URL: ", current.cdpUrl ?? "http://127.0.0.1:9222");
+  const launchCommand = await promptSetupStringWithDefault(prompt, "Browser launch command reference: ", current.launchCommand ?? "");
+
+  return {
+    backend,
+    cdpUrl,
+    launchCommand,
+    autoLaunch: false,
+  };
+}
+
+const ttsProviders: readonly TtsProvider[] = ["edge", "elevenlabs", "openai", "minimax", "mistral", "gemini", "xai", "neutts", "kittentts"];
+const sttProviders: readonly SttProvider[] = ["local", "groq", "openai", "mistral"];
+const imageProviders: readonly ImageGenerationProvider[] = ["fal", "byteplus"];
+const browserBackends: readonly BrowserBackendKind[] = ["local-cdp", "browserbase", "firecrawl", "camofox", "mock"];
+
+function splitCsv(value: string): string[] {
+  return value
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
 }
