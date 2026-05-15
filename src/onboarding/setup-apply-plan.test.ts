@@ -241,6 +241,21 @@ describe("setup apply plan", () => {
     expect(result.eligibility.repairIntents.map((intent) => intent.kind)).toContain("config-repair");
   });
 
+  it("state-not-writable diagnostic repair blocks normal apply", () => {
+    const manifest = buildSetupReviewManifest([
+      diagnosticBundle("EstaCoda state directory is not writable."),
+    ]);
+    const result = planSetupApply({
+      kind: "approved-review-result",
+      manifest,
+    });
+
+    expect(result.kind).toBe("blocked");
+    expect(result.applyPlan).toBeUndefined();
+    expect(result.eligibility.blockers).toContain("Unsafe diagnostic-only config repair blocks normal apply planning.");
+    expect(result.eligibility.blockers).toContain("EstaCoda state directory is not writable.");
+  });
+
   it("workspace trust is not granted on cancellation", () => {
     const result = planSetupApply({
       kind: "cancelled-review-result",

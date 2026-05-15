@@ -395,6 +395,21 @@ describe("setup draft bundles", () => {
     expect(bundle.drafts.some((draft) => draft.target.kind === "config-scope")).toBe(false);
   });
 
+  it("blocks unsafe normal apply drafts for state-not-writable", () => {
+    const decision = routeSetupEntryState(state("state-not-writable"));
+    if (decision.setupEditorPlanSession === undefined) {
+      throw new Error("Expected setup editor plan session");
+    }
+    const bundle = buildSetupEditorDraftBundle(decision.setupEditorPlanSession, {
+      configPath: "/tmp/home/.estacoda/config.json",
+    });
+
+    expect(bundle.safeToApplyLater).toBe(false);
+    expect(bundle.drafts.map((draft) => draft.id)).toContain("setup-editor.config-safety.repair-state-directory");
+    expect(bundle.drafts.some((draft) => draft.kind === "provider-model-route")).toBe(false);
+    expect(bundle.drafts.some((draft) => draft.target.kind === "config-scope")).toBe(false);
+  });
+
   it("does not reintroduce backupForMain", () => {
     expect(JSON.stringify(firstRunBundle())).not.toContain("backupForMain");
   });

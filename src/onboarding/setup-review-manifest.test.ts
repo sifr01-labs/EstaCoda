@@ -230,6 +230,20 @@ describe("setup review manifest", () => {
     expect(manifest.safeToReviewForApply).toBe(false);
   });
 
+  it("state-not-writable diagnostic repair produces blockers without normal write lines", () => {
+    const manifest = buildSetupReviewManifest([stateDirectoryDiagnosticBundle()]);
+
+    expect(manifest.blockers.map((line) => line.blockers).flat()).toContain("EstaCoda state directory is not writable.");
+    expect(manifest.sections["files-to-write-update"]).toEqual([]);
+    expect(manifest.lines.some((line) => line.target?.kind === "config-scope")).toBe(false);
+    expect(manifest.suppressedNormalWrites).toEqual([{
+      bundleId: "setup-editor:state-not-writable",
+      reason: "unsafe-diagnostic-only",
+    }]);
+    expect(manifest.safeToReviewForApply).toBe(false);
+  });
+
+
   it("missing-secret repairable blocker still shows normal proposed write lines plus credential repair lines", () => {
     const bundle = repairableBlockedBundle(buildSetupModuleDraftBundle(moduleContext({
       provider: {
@@ -367,6 +381,50 @@ function diagnosticBundle(): SetupDraftBundle {
     drafts: [draft],
     blockers: ["Provider setup is incomplete."],
     warnings: ["Configured model context window is below 64K tokens."],
+    safeToApplyLater: false,
+    metadata: {
+      draftCount: 1,
+      requiresReviewCount: 1,
+      readOnlyCount: 1,
+    },
+  };
+}
+
+function stateDirectoryDiagnosticBundle(): SetupDraftBundle {
+  return {
+    kind: "setup-draft-bundle",
+    sourceKind: "setup-editor-plan-session",
+    sourceId: "setup-editor:state-not-writable",
+    drafts: [{
+      id: "setup-editor.config-safety.repair-state-directory",
+      kind: "diagnostic-blocker",
+      source: {
+        kind: "setup-editor",
+        sectionId: "config-safety",
+        actionId: "repair-state-directory",
+      },
+      riskSurface: "config-repair",
+      target: { kind: "diagnostic-only" },
+      review: {
+        copyKey: "setupDrafts.review",
+        summaryKey: "setupDrafts.stateDirectory.summary",
+        redacted: true,
+        values: {},
+      },
+      applyIntent: {
+        kind: "dry-run-apply-intent",
+        effect: "diagnostic-only",
+        dryRunOnly: true,
+        writesConfig: false,
+        writesTrustStore: false,
+      },
+      requiresReview: true,
+      readOnly: true,
+      blockers: ["EstaCoda state directory is not writable."],
+      warnings: [],
+    }],
+    blockers: ["EstaCoda state directory is not writable."],
+    warnings: [],
     safeToApplyLater: false,
     metadata: {
       draftCount: 1,

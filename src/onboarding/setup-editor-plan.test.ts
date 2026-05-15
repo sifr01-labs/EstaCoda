@@ -176,6 +176,25 @@ describe("buildSetupEditorPlan", () => {
     expect(section(plan, "config-safety").actions[0]?.id).toBe("repair-broken-config");
   });
 
+  it("does not build normal editor sections for state-not-writable", () => {
+    const plan = buildSetupEditorPlan(state("state-not-writable"));
+
+    expect(plan.safeForNormalConfigEditing).toBe(false);
+    expect(sectionIds(plan)).toEqual(["config-summary", "config-safety", "verification", "exit"]);
+    expect(plan.actions.some((action) => action.patch !== undefined)).toBe(false);
+    expect(plan.actions.map((action) => action.id)).toEqual([
+      "repair-state-directory",
+      "run-readonly-verification",
+      "cancel-setup-editor",
+    ]);
+    expect(section(plan, "config-safety").copyKey).toBe("setupEditor.sections.stateSafety");
+    expect(section(plan, "config-safety").actions[0]).toEqual(expect.objectContaining({
+      id: "repair-state-directory",
+      effect: "diagnostic-only",
+      readOnly: true,
+    }));
+  });
+
   it("keeps verification read-only", () => {
     const verify = section(buildSetupEditorPlan(state("configured-ready")), "verification").actions[0];
 

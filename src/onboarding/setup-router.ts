@@ -262,7 +262,6 @@ function repairFirstDecision(state: SetupEntryState): SetupRouteDecision {
 function repairFirstActions(state: SetupEntryState): SetupRouteAction[] {
   if (state.kind === "broken-config" || state.kind === "state-not-writable") {
     return [
-      action("repair-setup", "Repair setup", "Start the guided diagnostic repair path for the current blockers.", true),
       action("show-diagnostics", "Show diagnostics", "Show structured blockers and warnings without changing config.", false),
       action("verify-setup", "Verify setup", "Run read-only setup verification again.", false),
       action("exit", "Exit", "Leave setup without changing config.", false),

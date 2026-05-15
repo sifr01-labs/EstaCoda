@@ -182,6 +182,7 @@ export const SETUP_COPY_ENTRIES = [
   copy("setupEditor.summary.repairFirst", "Repair required setup items before normal editing. No polishing helps a setup that does not work.", "يجب إصلاح عناصر الإعداد المطلوبة قبل التحرير العادي. لا جدوى من تلميع إعداد لا يعمل.", [], "config-repair"),
   copy("setupEditor.sections.configSummary", "Current setup sources and readiness.", "مصادر الإعداد الحالية وحالة الجاهزية.", [], "config-summary"),
   copy("setupEditor.sections.configSafety", "Config cannot be edited normally until it can be parsed safely.", "لا يمكن تحرير الإعدادات بشكل عادي حتى يمكن قراءتها بأمان.", [], "config-repair"),
+  copy("setupEditor.sections.stateSafety", "State/config path is not writable. Normal writes are blocked until state write permissions are restored.", "مسار الحالة/الإعداد غير قابل للكتابة. الكتابة العادية محظورة حتى تُستعاد أذونات كتابة الحالة.", [], "config-repair"),
   copy("setupEditor.sections.modelRoute", "Primary provider and model route.", "مسار المزوّد والنموذج الأساسي.", [], "provider-selection"),
   copy("setupEditor.sections.credentials", "Credential references and secret-store status. Secret values stay hidden.", "مراجع بيانات الاعتماد وحالة مخزن الأسرار. تبقى قيم الأسرار مخفية.", [], "credential-reference"),
   copy("setupEditor.sections.securityMode", "Command and tool approval mode.", "وضع موافقات الأوامر والأدوات.", [], "security-policy"),
@@ -260,6 +261,7 @@ export const SETUP_COPY_ENTRIES = [
   copy("setupDrafts.launch.summary", "Launch preference: {launchPreference}.", "تفضيل التشغيل: {launchPreference}.", ["{launchPreference}"], "agent-launch"),
   copy("setupDrafts.exit.summary", "Exit without applying setup changes.", "اخرج دون تطبيق تغييرات الإعداد.", [], "none"),
   copy("setupDrafts.brokenConfig.summary", "Normal editing is blocked until config is repaired.", "التحرير العادي محظور حتى يتم إصلاح الإعدادات.", [], "config-repair"),
+  copy("setupDrafts.stateDirectory.summary", "Normal editing is blocked until the state directory is writable.", "التحرير العادي محظور حتى يصبح مجلد الحالة قابلًا للكتابة.", [], "config-repair"),
 
   copy("setupApply.review.approved", "Review approved. An apply plan can be prepared without executing it.", "تمت الموافقة على المراجعة. يمكن تجهيز خطة تطبيق دون تنفيذ.", [], "setup-review"),
   copy("setupApply.review.cancelled", "Review cancelled. No apply plan, config write, or trust grant will be created.", "أُلغيت المراجعة. لن تُنشأ خطة تطبيق أو كتابة إعدادات أو منح ثقة.", [], "none"),

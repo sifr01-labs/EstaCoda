@@ -71,10 +71,10 @@ export type SetupEditorPlan = {
 
 export function buildSetupEditorPlan(state: SetupEntryState): SetupEditorPlan {
   const mode = editorModeFor(state);
-  const safeForNormalConfigEditing = state.kind !== "broken-config";
+  const safeForNormalConfigEditing = !isUnsafeDiagnosticOnlyState(state);
   const sections = safeForNormalConfigEditing
     ? normalSections(state, mode)
-    : brokenConfigSections(state);
+    : unsafeDiagnosticSections(state);
   const actions = sections.flatMap((section) => section.actions);
 
   return {
@@ -130,25 +130,31 @@ function normalSections(state: SetupEntryState, mode: SetupEditorPlanMode): Setu
   ];
 }
 
-function brokenConfigSections(state: SetupEntryState): SetupEditorSection[] {
+function unsafeDiagnosticSections(state: SetupEntryState): SetupEditorSection[] {
   return [
     configSummarySection(state),
     section({
       id: "config-safety",
-      copyKey: "setupEditor.sections.configSafety",
+      copyKey: state.kind === "state-not-writable"
+        ? "setupEditor.sections.stateSafety"
+        : "setupEditor.sections.configSafety",
       required: true,
       sensitiveSurface: "config-repair",
       status: "repair-required",
       data: {
         safeForNormalConfigEditing: false,
         error: state.error,
+        configPaths: state.configPaths,
+        stateDirectoryWritable: state.stateDirectoryWritable,
       },
       warnings: state.warnings,
       blockers: state.blockers,
       actions: [
         setupEditorAction({
-          id: "repair-broken-config",
-          copyKey: "setupEditor.actions.repairBrokenConfig",
+          id: state.kind === "state-not-writable" ? "repair-state-directory" : "repair-broken-config",
+          copyKey: state.kind === "state-not-writable"
+            ? "setupEditor.actions.repairStateDirectory"
+            : "setupEditor.actions.repairBrokenConfig",
           sectionId: "config-safety",
           effect: "diagnostic-only",
           readOnly: true,
@@ -162,12 +168,13 @@ function brokenConfigSections(state: SetupEntryState): SetupEditorSection[] {
 }
 
 function configSummarySection(state: SetupEntryState): SetupEditorSection {
+  const unsafe = isUnsafeDiagnosticOnlyState(state);
   return section({
     id: "config-summary",
     copyKey: "setupEditor.sections.configSummary",
     required: true,
     sensitiveSurface: "config-summary",
-    status: state.kind === "broken-config" ? "blocked" : "ready",
+    status: unsafe ? "blocked" : "ready",
     data: {
       configSources: state.configSources,
       configPaths: state.configPaths,
@@ -177,8 +184,8 @@ function configSummarySection(state: SetupEntryState): SetupEditorSection {
       workspaceVerification: state.workspaceVerification,
       stateDirectoryWritable: state.stateDirectoryWritable,
     },
-    warnings: state.kind === "broken-config" ? state.warnings : [],
-    blockers: state.kind === "broken-config" ? state.blockers : [],
+    warnings: unsafe ? state.warnings : [],
+    blockers: unsafe ? state.blockers : [],
     actions: [],
   });
 }
@@ -440,6 +447,10 @@ function credentialRefs(state: SetupEntryState): NonNullable<SetupEditorActionDr
     ...state.missingCredentials.envVars.map((name) => ({ kind: "env" as const, name, value: "not-included" as const })),
     ...state.missingCredentials.providers.map((provider) => ({ kind: "env" as const, name: `${provider.toUpperCase()}_API_KEY`, value: "not-included" as const })),
   ].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function isUnsafeDiagnosticOnlyState(state: SetupEntryState): boolean {
+  return state.kind === "broken-config" || state.kind === "state-not-writable";
 }
 
 function section(input: SetupEditorSection): SetupEditorSection {

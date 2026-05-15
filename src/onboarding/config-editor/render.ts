@@ -44,6 +44,15 @@ export function renderConfigEditor(input: {
     lines.push(`  model: ${decision.state.model.provider}/${decision.state.model.id}`);
   }
 
+  lines.push(
+    `  user config: ${decision.state.configPaths.user}`,
+    `  project config: ${decision.state.configPaths.project}`
+  );
+
+  if (decision.state.kind === "state-not-writable") {
+    lines.push(`  state writable: ${decision.state.stateDirectoryWritable ? "yes" : "no"}`);
+  }
+
   if (decision.blockers.length > 0) {
     lines.push("", "Blockers:", ...decision.blockers.map((blocker) => `  - ${blocker}`));
   }
@@ -51,6 +60,8 @@ export function renderConfigEditor(input: {
   if (decision.warnings.length > 0) {
     lines.push("", "Warnings:", ...decision.warnings.map((warning) => `  - ${warning}`));
   }
+
+  appendUnsafeStateGuidance(lines, decision);
 
   lines.push("", "Sections:");
   for (const section of session.activeSections) {
@@ -83,6 +94,8 @@ export function renderConfigEditorDiagnostics(decision: SetupRouteDecision): str
     `State: ${decision.state.kind}`,
     `Route: ${decision.kind}`,
     `Recommended: ${decision.state.recommendedAction}`,
+    `User config: ${decision.state.configPaths.user}`,
+    `Project config: ${decision.state.configPaths.project}`,
   ];
 
   if (decision.blockers.length > 0) {
@@ -96,6 +109,8 @@ export function renderConfigEditorDiagnostics(decision: SetupRouteDecision): str
   if (decision.state.error !== undefined) {
     lines.push("", `Error: ${decision.state.error}`);
   }
+
+  appendUnsafeStateGuidance(lines, decision);
 
   return lines.join("\n");
 }
@@ -206,5 +221,28 @@ function editorActionDescription(action: SetupEditorActionDraft): string {
       return "Choose a primary provider credential reference through the shared setup flow.";
     default:
       return setupCopyText("en", action.copyKey);
+  }
+}
+
+function appendUnsafeStateGuidance(lines: string[], decision: SetupRouteDecision): void {
+  if (decision.state.kind === "broken-config") {
+    lines.push(
+      "",
+      "Manual repair guidance:",
+      "- Normal config edits are blocked until the config file can be parsed.",
+      "- Open the listed config path, fix the parse/load error, then run read-only verification again.",
+      "- Only diagnostics, verification, and exit are available from this state."
+    );
+  }
+
+  if (decision.state.kind === "state-not-writable") {
+    lines.push(
+      "",
+      "Manual repair guidance:",
+      "- EstaCoda cannot safely apply setup changes while its state/config path is not writable.",
+      "- Normal writes are blocked until state write permissions are restored.",
+      "- Restore write permission for the state/config path above, then run read-only verification again.",
+      "- Only diagnostics, verification, and exit are available from this state."
+    );
   }
 }

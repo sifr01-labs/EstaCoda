@@ -99,8 +99,8 @@ describe("routeSetupEntryState", () => {
     { kind: "configured-degraded", route: "configured-degraded-menu", firstAction: "repair-setup" },
     { kind: "partial-provider", route: "repair-first-menu", firstAction: "repair-setup" },
     { kind: "missing-secret", route: "repair-first-menu", firstAction: "repair-setup" },
-    { kind: "broken-config", route: "repair-first-menu", firstAction: "repair-setup" },
-    { kind: "state-not-writable", route: "repair-first-menu", firstAction: "repair-setup" },
+    { kind: "broken-config", route: "repair-first-menu", firstAction: "show-diagnostics" },
+    { kind: "state-not-writable", route: "repair-first-menu", firstAction: "show-diagnostics" },
     { kind: "untrusted-workspace", route: "configured-menu", firstAction: "trust-workspace" },
   ];
 
@@ -192,7 +192,11 @@ describe("routeSetupEntryState", () => {
       const actionIds = decision.actions.map((action) => action.id);
 
       expect(decision.kind).toBe("repair-first-menu");
-      expect(actionIds).toContain("repair-setup");
+      if (kind === "broken-config" || kind === "state-not-writable") {
+        expect(actionIds).not.toContain("repair-setup");
+      } else {
+        expect(actionIds).toContain("repair-setup");
+      }
       expect(actionIds).toContain("show-diagnostics");
       expect(actionIds).toContain("verify-setup");
       expect(actionIds).not.toContain("launch-agent");

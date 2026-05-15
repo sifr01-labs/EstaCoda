@@ -50,6 +50,7 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.summary.repairFirst",
   "setupEditor.sections.configSummary",
   "setupEditor.sections.configSafety",
+  "setupEditor.sections.stateSafety",
   "setupEditor.sections.modelRoute",
   "setupEditor.sections.credentials",
   "setupEditor.sections.securityMode",
@@ -217,6 +218,15 @@ describe("setup copy", () => {
     expect(copy["onboarding.welcome"]).toContain(isolateLtr("EstaCoda"));
     expect(copy["setupEditor.summary.repairFirst"]).toContain("لا جدوى من تلميع إعداد لا يعمل");
     expect(copy["setupModules.telegram.review"]).toContain("التحكم عن بعد لا يستجيب إلا للقائمة المسموح بها");
+  });
+
+  it("keeps broken-config and state-not-writable safety copy distinct", () => {
+    expect(rawSetupCopy("en", "setupEditor.sections.configSafety")).toContain("parsed safely");
+    expect(rawSetupCopy("en", "setupEditor.sections.stateSafety")).toContain("not writable");
+    expect(rawSetupCopy("en", "setupEditor.sections.stateSafety")).toContain("write permissions");
+    expect(rawSetupCopy("en", "setupEditor.sections.stateSafety")).not.toContain("parsed safely");
+    expect(rawSetupCopy("en", "setupEditor.sections.stateSafety")).not.toContain("parse safety");
+    expect(rawSetupCopy("en", "setupEditor.sections.stateSafety")).not.toContain("parse failure");
   });
 
   it("preserves placeholders exactly in English and Arabic source copy", () => {

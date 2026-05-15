@@ -474,7 +474,15 @@ describe("runConfigEditor", () => {
     expect(result.initialDecision.setupEditorPlanSession?.metadata.mode).toBe("repair-first");
     expect(result.output).toContain("Setup diagnostics");
     expect(result.output).toContain("State: broken-config");
-    expect(output.join("")).not.toContain("repair-broken-config");
+    expect(result.output).toContain(join(tempDir, ".estacoda", "config.json"));
+    expect(result.output).toContain("Error:");
+    expect(result.output).toContain("Normal config edits are blocked until the config file can be parsed.");
+    expect(result.output).toContain("Only diagnostics, verification, and exit are available");
+    expect(output.join("")).toContain("verify-setup - Verify setup");
+    expect(output.join("")).toContain("show-diagnostics - Show diagnostics");
+    expect(output.join("")).toContain("exit - Exit");
+    expect(output.join("")).not.toContain("edit-primary-model-route");
+    expect(output.join("")).not.toContain("edit-security-mode");
     expect(output.join("")).not.toContain("repair-state-directory");
   });
 
@@ -496,6 +504,18 @@ describe("runConfigEditor", () => {
     expect(result.initialDecision.state.kind).toBe("state-not-writable");
     expect(result.initialDecision.setupEditorPlanSession?.metadata.mode).toBe("repair-first");
     expect(result.output).toContain("State: state-not-writable");
+    expect(result.output).toContain(join(tempDir, ".estacoda", "config.json"));
+    expect(result.output).toContain("not writable");
+    expect(result.output).toContain("write permission");
+    expect(result.output).toContain("Restore write permission");
+    expect(result.output).toContain("read-only verification again");
+    expect(result.output).toContain("Normal writes are blocked until state write permissions are restored.");
+    expect(result.output).toContain("Only diagnostics, verification, and exit are available");
+    expect(result.output).not.toContain("Config cannot be edited normally until it can be parsed safely");
+    expect(result.output).not.toContain("parse safety");
+    expect(result.output).not.toContain("config parse failure");
+    expect(result.initialDecision.setupEditorPlanSession?.plan.safeForNormalConfigEditing).toBe(false);
+    expect(result.initialDecision.setupEditorPlanSession?.plan.actions.some((action) => action.patch !== undefined)).toBe(false);
   });
 });
 

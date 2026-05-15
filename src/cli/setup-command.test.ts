@@ -231,8 +231,9 @@ describe("cli setup command", () => {
 
   it("routes broken config to diagnostic repair instead of normal editing", async () => {
     const workspaceRoot = join(tempDir, "workspace");
+    const configPath = join(tempDir, ".estacoda", "config.json");
     await mkdir(join(tempDir, ".estacoda"), { recursive: true });
-    await writeFile(join(tempDir, ".estacoda", "config.json"), "{not-json", "utf8");
+    await writeFile(configPath, "{not-json", "utf8");
 
     const result = await runCliCommand({
       argv: ["setup", "--interactive"],
@@ -245,9 +246,14 @@ describe("cli setup command", () => {
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain("EstaCoda guided setup editor");
     expect(result.output).toContain("kind: broken-config");
+    expect(result.output).toContain(configPath);
+    expect(result.output).toContain("Normal config edits are blocked until the config file can be parsed.");
+    expect(result.output).toContain("Only diagnostics, verification, and exit are available");
     expect(result.output).toContain("show-diagnostics - Show diagnostics");
     expect(result.output).not.toContain("repair-setup - Repair setup");
     expect(result.output).not.toContain("review-edit-config - Open config editor");
+    expect(result.output).not.toContain("edit-primary-model-route");
+    expect(result.output).not.toContain("edit-security-mode");
   });
 
   it("routes untrusted workspaces to explicit trust repair", async () => {
@@ -284,9 +290,14 @@ describe("cli setup command", () => {
     expect(result.handled).toBe(true);
     expect(result.output).toContain("EstaCoda guided setup editor");
     expect(result.output).toContain("kind: state-not-writable");
+    expect(result.output).toContain(join(tempDir, ".estacoda", "config.json"));
     expect(result.output).toContain("fix-state-directory");
+    expect(result.output).toContain("Restore write permission");
+    expect(result.output).toContain("Only diagnostics, verification, and exit are available");
     expect(result.output).not.toContain("repair-setup - Repair setup");
     expect(result.output).not.toContain("review-edit-config - Open config editor");
+    expect(result.output).not.toContain("edit-primary-model-route");
+    expect(result.output).not.toContain("edit-security-mode");
   });
 
   it("doctor reports broken config through setup state instead of throwing", async () => {

@@ -383,18 +383,22 @@ function draftFromEditorAction(
     };
   }
 
-  if (action.id === "repair-broken-config") {
+  if (action.id === "repair-broken-config" || action.id === "repair-state-directory") {
     return {
       id: editorDraftId(action),
       kind: "diagnostic-blocker",
       source,
       riskSurface: "config-repair",
       target: { kind: "diagnostic-only" },
-      review: review("setupDrafts.brokenConfig.summary", {}),
+      review: review(action.id === "repair-state-directory"
+        ? "setupDrafts.stateDirectory.summary"
+        : "setupDrafts.brokenConfig.summary", {}),
       applyIntent: intent("diagnostic-only"),
       requiresReview: true,
       readOnly: true,
-      blockers: ["Normal config editing is blocked until config can be parsed."],
+      blockers: [action.id === "repair-state-directory"
+        ? "Normal config editing is blocked until the EstaCoda state directory is writable."
+        : "Normal config editing is blocked until config can be parsed."],
       warnings: [],
     };
   }
