@@ -824,3 +824,129 @@ describe("ModelSelectionCatalog provider metadata integration", () => {
     expect(gpt4o!.endpointType).toBe("openai");
   }));
 });
+
+describe("ModelSelectionCatalog source labels after dedupe", () => {
+  beforeEach(() => {
+    resetModelsDevRegistryForTest();
+  });
+
+  it("configured model that exists in snapshot gets source=configured", withFixture(async (fixturePath, cachePath) => {
+    const registry = new ProviderRegistry();
+    registry.register(createCatalogProvider({
+      id: "openai" as ProviderId,
+      models: []
+    }));
+
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      config: {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-4o"]
+          }
+        }
+      },
+      registry
+    }));
+
+    const models = await catalog.listModels();
+    const gpt4o = models.find((m) => m.id === "gpt-4o" && m.provider === "openai");
+    expect(gpt4o).toBeDefined();
+    expect(gpt4o!.configured).toBe(true);
+    expect(gpt4o!.source).toBe("configured");
+  }));
+
+  it("manual model that exists in snapshot gets source=manual", withFixture(async (fixturePath, cachePath) => {
+    const registry = new ProviderRegistry();
+    registry.register(createCatalogProvider({
+      id: "openai" as ProviderId,
+      models: []
+    }));
+
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      config: {
+        model: {
+          provider: "openai" as ProviderId,
+          id: "gpt-4o"
+        }
+      },
+      registry
+    }));
+
+    const models = await catalog.listModels();
+    const gpt4o = models.find((m) => m.id === "gpt-4o" && m.provider === "openai");
+    expect(gpt4o).toBeDefined();
+    expect(gpt4o!.source).toBe("manual");
+  }));
+
+  it("fallback-known model not in snapshot gets source=fallback-known", withFixture(async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath));
+    const models = await catalog.listModels();
+    const kimi = models.find((m) => m.provider === "kimi" && m.id === "kimi-k2.5");
+    expect(kimi).toBeDefined();
+    expect(kimi!.source).toBe("fallback-known");
+  }));
+
+  it("configured custom unknown model gets source=configured with inferred profile", withFixture(async (fixturePath, cachePath) => {
+    const registry = new ProviderRegistry();
+    registry.register(createCatalogProvider({
+      id: "openai" as ProviderId,
+      models: []
+    }));
+
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      config: {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["unknown-custom-model"]
+          }
+        }
+      },
+      registry
+    }));
+
+    const models = await catalog.listModels();
+    const custom = models.find((m) => m.id === "unknown-custom-model");
+    expect(custom).toBeDefined();
+    expect(custom!.configured).toBe(true);
+    expect(custom!.source).toBe("configured");
+    expect(custom!.profile.status).toBe("unknown");
+  }));
+
+  it("manual route unknown model gets source=manual with inferred profile", withFixture(async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      config: {
+        model: {
+          provider: "openai" as ProviderId,
+          id: "manual-unknown-model"
+        }
+      }
+    }));
+
+    const models = await catalog.listModels();
+    const manual = models.find((m) => m.id === "manual-unknown-model");
+    expect(manual).toBeDefined();
+    expect(manual!.source).toBe("manual");
+    expect(manual!.profile.status).toBe("unknown");
+  }));
+
+  it("preserves exact model IDs through profile resolution", withFixture(async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      config: {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-4o"]
+          }
+        }
+      }
+    }));
+
+    const models = await catalog.listModels();
+    const gpt4o = models.find((m) => m.provider === "openai" && m.id === "gpt-4o");
+    expect(gpt4o).toBeDefined();
+    expect(gpt4o!.id).toBe("gpt-4o");
+    expect(gpt4o!.routeKey).toBe(JSON.stringify(["openai", "gpt-4o", ""]));
+  }));
+});
