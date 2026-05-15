@@ -528,7 +528,8 @@ describe("provider-model-selection-flow", () => {
           })
         );
 
-        await expect(flow.listModelCandidates("codex" as ProviderId)).resolves.toEqual([]);
+        const codexModels = await flow.listModelCandidates("codex" as ProviderId);
+        expect(codexModels.length).toBeGreaterThan(0);
         await expect(flow.listModelCandidates("anthropic" as ProviderId)).resolves.toEqual([]);
       })
     );
@@ -709,7 +710,7 @@ describe("provider-model-selection-flow", () => {
           })
         );
 
-        const result = await flow.resolveSelection("codex", "codex-model");
+        const result = await flow.resolveSelection("anthropic", "claude-3-opus");
         expect(result.kind).toBe("diagnostic");
         if (result.kind !== "diagnostic") return;
         expect(result.reason).toContain("not runnable");
@@ -725,7 +726,7 @@ describe("provider-model-selection-flow", () => {
           })
         );
 
-        const result = await flow.resolveSelection("codex", "codex-model");
+        const result = await flow.resolveSelection("anthropic", "claude-3-opus");
         expect(result.kind).toBe("diagnostic");
         if (result.kind !== "diagnostic") return;
         expect(result.reason).toContain("not runnable");
@@ -1144,7 +1145,7 @@ describe("provider-model-selection-flow", () => {
     );
 
     it(
-      "setup mode excludes codex and media-only providers",
+      "setup mode excludes media-only and non-setup-visible providers",
       withFixture(async (fixturePath, cachePath) => {
         const flow = await createProviderModelSelectionFlow(
           buildOptions(fixturePath, cachePath, {
@@ -1154,7 +1155,7 @@ describe("provider-model-selection-flow", () => {
 
         const providers = await flow.listProviderCandidates();
         const ids = providers.map((p) => p.id);
-        expect(ids).not.toContain("codex");
+        expect(ids).toContain("codex");
         expect(ids).not.toContain("fal");
         expect(ids).not.toContain("anthropic");
       })

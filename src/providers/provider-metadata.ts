@@ -166,17 +166,17 @@ const BUILT_IN_METADATA: Record<string, ProviderMetadata> = {
     id: "codex",
     displayName: "OpenAI Codex",
     catalogKnown: true,
-    configurable: false,
-    runnable: false,
+    configurable: true,
+    runnable: true,
     visibility: {
-      modelPicker: false,
-      setup: false,
+      modelPicker: true,
+      setup: true,
       catalogExplore: true
     },
     apiMode: "openai_responses",
     defaultBaseUrl: "https://chatgpt.com/backend-api/codex",
     defaultApiKeyEnv: undefined,
-    authMethods: ["oauth_device_pkce", "oauth_external"],
+    authMethods: ["oauth_device_pkce"],
     defaultAuthMethod: "oauth_device_pkce",
     allowsCustomBaseUrl: false,
     requiresModelSelection: true

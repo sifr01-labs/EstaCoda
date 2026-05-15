@@ -24,7 +24,7 @@ describe("provider-metadata", () => {
       ["openrouter", "OpenRouter", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY", true, true, "api_key", "openai_chat_completions"],
       ["local", "Local", "http://localhost:11434/v1", undefined, true, true, "none", "custom_openai_compatible"],
       ["anthropic", "Anthropic", "https://api.anthropic.com/v1", "ANTHROPIC_API_KEY", true, false, "api_key", "anthropic_messages"],
-      ["codex", "OpenAI Codex", "https://chatgpt.com/backend-api/codex", undefined, true, false, "oauth_device_pkce", "openai_responses"],
+      ["codex", "OpenAI Codex", "https://chatgpt.com/backend-api/codex", undefined, true, true, "oauth_device_pkce", "openai_responses"],
       ["minimax", "MiniMax", undefined, undefined, true, false, "api_key", "openai_chat_completions"],
       ["nous", "Nous", undefined, undefined, true, false, "api_key", "custom_openai_compatible"],
       ["unconfigured", "Unconfigured", undefined, undefined, false, false, "none", "custom_openai_compatible"],
@@ -86,6 +86,7 @@ describe("provider-metadata", () => {
       expect(setupVisible).toContain("google");
       expect(setupVisible).toContain("openrouter");
       expect(setupVisible).toContain("local");
+      expect(setupVisible).toContain("codex");
 
       expect(pickerVisible).toContain("openai");
       expect(pickerVisible).toContain("deepseek");
@@ -93,37 +94,35 @@ describe("provider-metadata", () => {
       expect(pickerVisible).toContain("google");
       expect(pickerVisible).toContain("openrouter");
       expect(pickerVisible).toContain("local");
+      expect(pickerVisible).toContain("codex");
     });
 
     it("catalog-only providers are not setup or model-picker visible", () => {
       const setupVisible = listProvidersVisibleInSetup().map((m) => m.id);
       const pickerVisible = listProvidersVisibleInModelPicker().map((m) => m.id);
 
-      expect(setupVisible).not.toContain("codex");
       expect(setupVisible).not.toContain("anthropic");
       expect(setupVisible).not.toContain("minimax");
       expect(setupVisible).not.toContain("nous");
 
-      expect(pickerVisible).not.toContain("codex");
       expect(pickerVisible).not.toContain("anthropic");
       expect(pickerVisible).not.toContain("minimax");
       expect(pickerVisible).not.toContain("nous");
     });
 
-    it("codex is catalog-known but hidden from setup/model-picker", () => {
+    it("codex is catalog-known and visible in setup and model picker", () => {
       const meta = getProviderMetadata("codex");
       expect(meta.catalogKnown).toBe(true);
-      expect(meta.visibility.setup).toBe(false);
-      expect(meta.visibility.modelPicker).toBe(false);
+      expect(meta.visibility.setup).toBe(true);
+      expect(meta.visibility.modelPicker).toBe(true);
       expect(meta.visibility.catalogExplore).toBe(true);
-      expect(meta.configurable).toBe(false);
-      expect(meta.runnable).toBe(false);
+      expect(meta.configurable).toBe(true);
+      expect(meta.runnable).toBe(true);
     });
   });
 
   describe("runnable boundary", () => {
     it("catalog-only providers are not runnable", () => {
-      expect(isProviderRunnable("codex")).toBe(false);
       expect(isProviderRunnable("anthropic")).toBe(false);
       expect(isProviderRunnable("minimax")).toBe(false);
       expect(isProviderRunnable("nous")).toBe(false);
@@ -137,6 +136,7 @@ describe("provider-metadata", () => {
       expect(isProviderRunnable("google")).toBe(true);
       expect(isProviderRunnable("openrouter")).toBe(true);
       expect(isProviderRunnable("local")).toBe(true);
+      expect(isProviderRunnable("codex")).toBe(true);
     });
   });
 

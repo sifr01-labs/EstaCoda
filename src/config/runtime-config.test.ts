@@ -805,7 +805,7 @@ describe("buildProviderRegistry custom provider baseUrl behavior", () => {
     await rm(workspace, { recursive: true, force: true });
   });
 
-  it("setup-generated Codex config round-trips to Responses adapter while runnable=false", async () => {
+  it("setup-generated Codex config round-trips to Responses adapter", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(join(workspace, ".estacoda"), { recursive: true });
     // Exact shape emitted by model-setup-codex.ts (no kind field)
@@ -830,12 +830,12 @@ describe("buildProviderRegistry custom provider baseUrl behavior", () => {
     expect(adapter).toBeDefined();
     expect(adapter?.name).toContain("Responses");
 
-    // 2. Codex remains non-runnable in metadata
+    // 2. Codex is runnable in metadata after Stage 6 flip
     const { getProviderMetadata } = await import("../providers/provider-metadata.js");
     const metadata = getProviderMetadata("codex");
-    expect(metadata.runnable).toBe(false);
+    expect(metadata.runnable).toBe(true);
 
-    // 3. Executor rejects before adapter invocation
+    // 3. Without OAuth credential, executor rejects with auth error (not unsupported)
     const { ProviderExecutor } = await import("../providers/provider-executor.js");
     const executor = new ProviderExecutor({
       registry: loaded.providerRegistry
@@ -847,8 +847,8 @@ describe("buildProviderRegistry custom provider baseUrl behavior", () => {
     const result = await executor.complete({ messages: [] }, {}, { primaryRoute: route });
     expect(result.ok).toBe(false);
     expect(result.attempts.length).toBe(1);
-    expect(result.attempts[0].errorClass).toBe("unsupported");
-    expect(result.attempts[0].content).toContain("not runnable");
+    expect(result.attempts[0].errorClass).toBe("auth");
+    expect(result.attempts[0].content).toContain("requires OAuth authentication");
 
     await rm(workspace, { recursive: true, force: true });
   });

@@ -53,15 +53,21 @@ describe("provider architecture invariants", () => {
   });
 
   describe("apiMode invariants", () => {
-    it("unsupported apiMode cannot be runnable", () => {
+    it("unsupported apiMode cannot be runnable except codex openai_responses", () => {
       const knownProviders = [
         "openai", "deepseek", "kimi", "google", "openrouter",
         "local", "anthropic", "codex", "minimax", "nous"
       ] as ProviderId[];
       for (const id of knownProviders) {
         const meta = getProviderMetadata(id);
-        if (meta.apiMode === "anthropic_messages" || meta.apiMode === "openai_responses") {
+        if (meta.apiMode === "anthropic_messages") {
           expect(meta.runnable).toBe(false);
+        }
+        if (meta.apiMode === "openai_responses") {
+          // Only codex is currently runnable with openai_responses
+          if (meta.runnable) {
+            expect(id).toBe("codex");
+          }
         }
       }
     });
@@ -76,26 +82,25 @@ describe("provider architecture invariants", () => {
   });
 
   describe("Codex invariants", () => {
-    it("Codex is catalog-known but hidden from setup and model picker", () => {
+    it("Codex is catalog-known and visible in setup and model picker", () => {
       const meta = getProviderMetadata("codex");
       expect(meta.catalogKnown).toBe(true);
-      expect(meta.runnable).toBe(false);
-      expect(meta.configurable).toBe(false);
-      expect(meta.visibility.setup).toBe(false);
-      expect(meta.visibility.modelPicker).toBe(false);
+      expect(meta.runnable).toBe(true);
+      expect(meta.configurable).toBe(true);
+      expect(meta.visibility.setup).toBe(true);
+      expect(meta.visibility.modelPicker).toBe(true);
       expect(meta.visibility.catalogExplore).toBe(true);
     });
 
-    it("Codex is excluded from setup-visible and picker-visible lists", () => {
+    it("Codex is included in setup-visible and picker-visible lists", () => {
       const setupIds = listProvidersVisibleInSetup().map((m) => m.id);
       const pickerIds = listProvidersVisibleInModelPicker().map((m) => m.id);
-      expect(setupIds).not.toContain("codex");
-      expect(pickerIds).not.toContain("codex");
+      expect(setupIds).toContain("codex");
+      expect(pickerIds).toContain("codex");
     });
 
-    it("Codex adapter registration does not bypass runnable=false in catalog", async () => {
+    it("Codex adapter registration makes provider executable when runnable=true", async () => {
       const registry = new ProviderRegistry();
-      // Register a Codex-like openai_responses adapter (same as runtime does)
       registry.register({
         id: "codex" as ProviderId,
         name: "OpenAI Codex",
@@ -123,13 +128,26 @@ describe("provider architecture invariants", () => {
       const models = await catalog.listModels();
       const codex = models.find((m) => m.provider === "codex" && m.id === "o3");
       expect(codex).toBeDefined();
-      // Adapter is registered, but metadata runnable=false overrides
-      expect(codex!.executable).toBe(false);
-      expect(codex!.catalogOnly).toBe(true);
+      expect(codex!.executable).toBe(true);
+      expect(codex!.catalogOnly).toBe(false);
     });
 
-    it("no hidden or development picker option exposes Codex", async () => {
+    it("Codex is exposed through normal picker flows", async () => {
       const registry = new ProviderRegistry();
+      registry.register({
+        id: "codex" as ProviderId,
+        name: "OpenAI Codex",
+        executable: true,
+        health() {
+          return { available: true };
+        },
+        listModels() {
+          return [];
+        },
+        async complete() {
+          return { ok: true, content: "", model: "", provider: "codex" };
+        }
+      });
       const catalog = await makeCatalog({
         providers: {
           codex: {
@@ -139,23 +157,26 @@ describe("provider architecture invariants", () => {
         }
       }, registry);
 
-      // listProviders with includeCatalogOnly=false is what pickers use
       const providers = await catalog.listProviders({ includeCatalogOnly: false });
-      expect(providers.some((p) => p.id === "codex")).toBe(false);
-
-      // Even with network-allowed dev options, Codex stays hidden
-      const devCatalog = await createModelSelectionCatalog({
-        config: EMPTY_CONFIG,
-        providerRegistry: registry,
-        homeDir: "/tmp",
-        modelsDevOptions: { allowNetwork: true }
-      });
-      const devProviders = await devCatalog.listProviders({ includeCatalogOnly: false });
-      expect(devProviders.some((p) => p.id === "codex")).toBe(false);
+      expect(providers.some((p) => p.id === "codex")).toBe(true);
     });
 
-    it("Codex cannot be selected through normal model/setup picker flows", async () => {
+    it("Codex can be selected through normal model/setup picker flows", async () => {
       const registry = new ProviderRegistry();
+      registry.register({
+        id: "codex" as ProviderId,
+        name: "OpenAI Codex",
+        executable: true,
+        health() {
+          return { available: true };
+        },
+        listModels() {
+          return [];
+        },
+        async complete() {
+          return { ok: true, content: "", model: "", provider: "codex" };
+        }
+      });
       const catalog = await makeCatalog({
         providers: {
           codex: {
@@ -167,15 +188,13 @@ describe("provider architecture invariants", () => {
 
       const models = await catalog.listModels();
       const codexModel = models.find((m) => m.provider === "codex" && m.id === "o3");
-      // Codex model may appear in catalog list, but is never executable
       if (codexModel !== undefined) {
-        expect(codexModel.executable).toBe(false);
-        expect(codexModel.catalogOnly).toBe(true);
+        expect(codexModel.executable).toBe(true);
+        expect(codexModel.catalogOnly).toBe(false);
       }
 
-      // Setup-visible and picker-visible lists exclude Codex
-      expect(listProvidersVisibleInSetup().some((m) => m.id === "codex")).toBe(false);
-      expect(listProvidersVisibleInModelPicker().some((m) => m.id === "codex")).toBe(false);
+      expect(listProvidersVisibleInSetup().some((m) => m.id === "codex")).toBe(true);
+      expect(listProvidersVisibleInModelPicker().some((m) => m.id === "codex")).toBe(true);
     });
   });
 
