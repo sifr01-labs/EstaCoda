@@ -91,9 +91,9 @@ These direct flags are advanced compatibility paths. Guided setup and repair use
 - Image generation with FAL and BytePlus/ModelArk Seedream provider support.
 - English and Arabic first-run onboarding, with localized setup labels, supported status copy, and LTR isolation for technical tokens in onboarding-owned surfaces.
 - **Durable TaskFlow execution** (v0.8): multi-step flows with pause/resume/interrupt/cancel, step-level status, operator steer, approval gates, safe-boundary compaction, and restart recovery.
-- **Operator surface (v0.9):** CLI commands for gateway status/diagnose/stop/restart, channels enable/disable/list/status, cron list/show/history/run/pause/resume/remove, sessions list/show/current/attach/detach.
+- **Operator surface (v0.9):** CLI commands for gateway status/diagnose/start/stop/restart, channels enable/disable/list/status, cron list/show/history/run/pause/resume/remove, sessions list/show/current/attach/detach.
 - **Cross-surface sessions (v0.9):** explicit attach/detach via surface pointers; CLI↔Telegram handoff with short-lived single-use codes.
-- **Gateway restart and drain:** `estacoda gateway stop` sends SIGTERM and waits up to 10s; `estacoda gateway stop --force` forces termination; `estacoda gateway restart` restarts the supervisor; `estacoda gateway restart --graceful` drains active turns (up to 30s) before restart. A `.clean_shutdown` marker is written after a successful graceful drain, allowing the next startup to skip crash recovery.
+- **Gateway startup and restart:** `estacoda gateway start` runs the supervisor in the foreground; `estacoda gateway start --dry-run` performs local readiness checks without acquiring the gateway lock or writing PID/lock state; `estacoda gateway start --background` starts the gateway in the background and writes stdout/stderr to `~/.estacoda/logs/gateway.log`. `estacoda gateway stop` sends SIGTERM and waits up to 10s; `estacoda gateway stop --force` forces termination. `estacoda gateway restart` stops the old gateway, background-starts a new gateway, and returns; `estacoda gateway restart --graceful` is an alias for `restart` in v0.1.0.
 - **Per-channel busy policy:** configure `busyPolicy` (`reject`, `queue`, `interrupt`) and `queueDepth` (clamped to `[1, 10]`, default `3`) independently per channel.
 
 ## UI / CLI Rendering (v0.95)

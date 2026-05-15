@@ -81,16 +81,26 @@ Returns exit code 1 if any warnings exist.
 ### Gateway Stop and Restart
 
 ```bash
+estacoda gateway start          # Run gateway supervisor in the foreground
+estacoda gateway start --dry-run      # Local readiness check; no lock/PID writes
+estacoda gateway start --background   # Start gateway in background and return
+
 estacoda gateway stop           # Send SIGTERM and wait for shutdown
 estacoda gateway stop --force   # Force termination if graceful stop is not desired or fails
 
-estacoda gateway restart              # Primitive restart (may interrupt active turns)
-estacoda gateway restart --graceful   # Drain active turns, then restart
+estacoda gateway restart              # Stop, background-start, and return
+estacoda gateway restart --graceful   # Alias for restart in v0.1.0
 ```
+
+`start` runs the gateway supervisor in the foreground. Use it when you want logs in the current terminal and want the command to stay attached.
+
+`start --dry-run` performs local readiness checks without starting adapters, polling remote APIs, entering the supervisor loop, acquiring the gateway lock, or writing PID/lock state. It reports adapter readiness, state directory readiness, and gateway lock state.
+
+`start --background` starts the gateway in a detached background process and returns after spawning. Background stdout/stderr are appended to `~/.estacoda/logs/gateway.log`.
 
 `stop` reads the PID from `gateway.pid`, sends SIGTERM, waits up to 10s for exit, then removes PID/state/lock files. If the process does not exit within the graceful timeout, `--force` sends SIGKILL and cleans up.
 
-`restart` calls `stop` then `start`. Without `--graceful`, this is a primitive restart — active turns may be interrupted. With `--graceful`, the supervisor sets lifecycle to `draining`, rejects new turns, waits for active turns to complete (up to 30s), then stops and starts. A `.clean_shutdown` marker is written after a successful graceful drain.
+`restart` calls `stop`, then performs `start --background`, then returns. In v0.1.0, `restart --graceful` is an alias for `restart`; it does not add a separate drain behavior.
 
 ### Channel Commands
 

@@ -87,6 +87,8 @@ describe("cli gateway start", () => {
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain("estacoda gateway start");
     expect(result.output).not.toContain("--telegram");
+    expect(result.output).toContain("estacoda gateway start --dry-run");
+    expect(result.output).toContain("estacoda gateway start --background");
     expect(result.output).toContain("estacoda gateway restart");
     expect(result.output).toContain("estacoda gateway restart --graceful");
   });

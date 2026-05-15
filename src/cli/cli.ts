@@ -2918,6 +2918,8 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
       "  estacoda gateway restart",
       "  estacoda gateway restart --graceful",
       "  estacoda gateway start",
+      "  estacoda gateway start --dry-run",
+      "  estacoda gateway start --background",
       "  estacoda gateway start --once",
     ].join("\n"),
   };
