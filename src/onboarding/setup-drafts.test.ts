@@ -271,6 +271,95 @@ describe("setup draft bundles", () => {
     expect(bundle.drafts[1]?.review.values.workflowLearning).toBe("autonomous");
   });
 
+  it("builds guided provider repair drafts with route-shaped scopes", () => {
+    const decision = routeSetupEntryState(state("configured-degraded"));
+    if (decision.setupEditorPlanSession === undefined) {
+      throw new Error("Expected setup editor plan session");
+    }
+    const action = decision.setupEditorPlanSession.plan.actions.find((candidate) => candidate.id === "repair-primary-provider");
+    if (action === undefined) {
+      throw new Error("Expected provider repair action");
+    }
+
+    const bundle = buildSetupEditorActionDraftBundle(decision.setupEditorPlanSession, [{
+      ...action,
+      reviewValues: {
+        provider: "openai",
+        model: "gpt-5.5",
+        baseUrl: "https://api.openai.com/v1",
+        apiKeyEnv: "OPENAI_API_KEY",
+        contextWindowTokens: 128000,
+        apiMode: "custom_openai_compatible",
+        authMethod: "api_key",
+      },
+    }], {
+      configPath: "/tmp/home/.estacoda/config.json",
+    });
+    const draft = bundle.drafts[0];
+
+    expect(draft?.kind).toBe("provider-model-route");
+    expect(draft?.target).toEqual({
+      kind: "config-scope",
+      scope: ["provider.route"],
+      path: "/tmp/home/.estacoda/config.json",
+      preserveUnrelatedConfig: true,
+    });
+    expect(draft?.review.values).toEqual(expect.objectContaining({
+      provider: "openai",
+      model: "gpt-5.5",
+      baseUrl: "https://api.openai.com/v1",
+      apiKeyEnv: "OPENAI_API_KEY",
+      contextWindowTokens: 128000,
+      apiMode: "custom_openai_compatible",
+      authMethod: "api_key",
+    }));
+    expect(JSON.stringify(draft)).not.toContain("model.provider");
+    expect(JSON.stringify(draft)).not.toContain("model.id");
+    expect(JSON.stringify(draft)).not.toContain("providers.*.apiKeyEnv");
+  });
+
+  it("builds guided credential repair drafts with env refs only and route context", () => {
+    const decision = routeSetupEntryState(state("missing-secret"));
+    if (decision.setupEditorPlanSession === undefined) {
+      throw new Error("Expected setup editor plan session");
+    }
+    const action = decision.setupEditorPlanSession.plan.actions.find((candidate) => candidate.id === "repair-missing-credential");
+    if (action === undefined) {
+      throw new Error("Expected credential repair action");
+    }
+
+    const bundle = buildSetupEditorActionDraftBundle(decision.setupEditorPlanSession, [{
+      ...action,
+      reviewValues: {
+        provider: "openai",
+        model: "gpt-5.5",
+        apiKeyEnv: "OPENAI_API_KEY",
+      },
+    }], {
+      configPath: "/tmp/home/.estacoda/config.json",
+    });
+    const draft = bundle.drafts[0];
+    const json = JSON.stringify(draft);
+
+    expect(draft?.kind).toBe("credential-reference");
+    expect(draft?.target).toEqual({
+      kind: "config-scope",
+      scope: ["provider.credentialReference"],
+      path: "/tmp/home/.estacoda/config.json",
+      preserveUnrelatedConfig: true,
+    });
+    expect(draft?.review.values).toEqual(expect.objectContaining({
+      provider: "openai",
+      model: "gpt-5.5",
+      envVars: ["OPENAI_API_KEY"],
+      credentialValuesIncluded: false,
+    }));
+    expect(json).not.toContain("sk-");
+    expect(json).not.toContain("raw");
+    expect(json).not.toContain("secretValue");
+    expect(json).not.toContain("providers.*.apiKeyEnv");
+  });
+
   it("keeps optional capability drafts independent and skippable", () => {
     const draft = firstRunBundle().drafts.find((candidate) => candidate.kind === "optional-capability");
 

@@ -1,6 +1,14 @@
 import { resolveStateHome } from "../../config/state-home.js";
+import { writeEnvSecret } from "../../config/env-secret-store.js";
+import { loadRuntimeConfig } from "../../config/runtime-config.js";
 import type { SecurityApprovalMode } from "../../contracts/security.js";
 import type { Prompt } from "../../cli/readline-prompt.js";
+import { promptForApiKeyInput } from "../../cli/secret-prompt.js";
+import {
+  createProviderModelSelectionFlow,
+  type FlowEngine,
+  type ProviderModelSelectionResult,
+} from "../../providers/provider-model-selection-flow.js";
 import type { SkillAutonomy } from "../../skills/skill-learning.js";
 import type {
   SetupApplyEndState,
@@ -30,6 +38,8 @@ import {
 import {
   promptConfigEditorAction,
   promptConfigEditorReviewApproval,
+  promptModelCandidate,
+  promptProviderCandidate,
   promptSecurityMode,
   promptWorkflowLearning,
   promptWorkspaceTrustConfirmation,
@@ -48,6 +58,7 @@ export type ConfigEditorRunnerOptions = CollectSetupRouteOptions & {
   readonly output?: { readonly write: (value: string) => void };
   readonly defaultActionId?: SetupEditorActionId | SetupRouteActionId;
   readonly applyFlowOptions?: SetupApplyFlowOptions;
+  readonly flowEngine?: FlowEngine;
 };
 
 export type ConfigEditorRunnerResult = {
@@ -60,6 +71,11 @@ export type ConfigEditorRunnerResult = {
   readonly reviewManifest?: SetupReviewManifest;
   readonly applyPlanningResult?: SetupApplyPlanningResult;
   readonly applyEndState?: SetupApplyEndState;
+};
+
+type PendingCredentialWrite = {
+  readonly envVarName: string;
+  readonly value: string;
 };
 
 export async function runConfigEditor(
@@ -175,6 +191,12 @@ async function handleAction(
       return handleSecurityModeAction(options, initialDecision, session, action);
     case "edit-workflow-learning":
       return handleWorkflowLearningAction(options, initialDecision, session, action);
+    case "edit-primary-model-route":
+    case "repair-primary-provider":
+      return handleProviderRouteAction(options, initialDecision, session, action);
+    case "edit-primary-credential-reference":
+    case "repair-missing-credential":
+      return handleCredentialAction(options, initialDecision, session, action);
     default: {
       const output = `Action ${action.id} is not implemented in the guided setup editor.`;
       write(options, `${output}\n`);
@@ -261,6 +283,38 @@ async function handleWorkflowLearningAction(
   });
 }
 
+async function handleProviderRouteAction(
+  options: ConfigEditorRunnerOptions,
+  initialDecision: SetupRouteDecision,
+  session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
+  action: ConfigEditorRenderedAction
+): Promise<ConfigEditorRunnerResult> {
+  const editorAction = requireEditorAction(action);
+  const resolved = await selectResolvedProviderRoute(options, initialDecision);
+  if (resolved.kind === "diagnostic") {
+    return diagnosticResult(options, initialDecision, action.id, resolved.output);
+  }
+
+  return reviewAndApplyResolvedRoute(options, initialDecision, session, editorAction, resolved.selection);
+}
+
+async function handleCredentialAction(
+  options: ConfigEditorRunnerOptions,
+  initialDecision: SetupRouteDecision,
+  session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
+  action: ConfigEditorRenderedAction
+): Promise<ConfigEditorRunnerResult> {
+  const editorAction = requireEditorAction(action);
+  const resolved = await resolveActiveProviderRoute(options, initialDecision);
+  if (resolved.kind === "diagnostic") {
+    return diagnosticResult(options, initialDecision, action.id, resolved.output);
+  }
+
+  return reviewAndApplyResolvedRoute(options, initialDecision, session, editorAction, resolved.selection, {
+    credentialOnly: true,
+  });
+}
+
 async function reviewAndApplyAction(
   options: ConfigEditorRunnerOptions,
   initialDecision: SetupRouteDecision,
@@ -310,6 +364,260 @@ async function reviewAndApplyAction(
   };
 }
 
+async function reviewAndApplyResolvedRoute(
+  options: ConfigEditorRunnerOptions,
+  initialDecision: SetupRouteDecision,
+  session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
+  editorAction: SetupEditorActionDraft,
+  resolution: ProviderModelSelectionResult,
+  behavior: {
+    readonly credentialOnly?: boolean;
+  } = {}
+): Promise<ConfigEditorRunnerResult> {
+  const credentialResult = await resolveCredentialForReview(options, resolution);
+  if (credentialResult.kind === "diagnostic") {
+    return diagnosticResult(options, initialDecision, editorAction.id, credentialResult.output);
+  }
+
+  const reviewValues = {
+    ...editorAction.reviewValues,
+    provider: resolution.provider,
+    model: resolution.model,
+    baseUrl: resolution.baseUrl,
+    apiKeyEnv: credentialResult.envVarName,
+    contextWindowTokens: resolution.profile.contextWindowTokens,
+    apiMode: resolution.apiMode,
+    authMethod: resolution.authMethod,
+  };
+  const selectedAction: SetupEditorActionDraft = {
+    ...editorAction,
+    reviewValues,
+  };
+  const verificationAction = session.plan.actions.find((candidate) => candidate.id === "run-readonly-verification");
+  const draftActions = [
+    selectedAction,
+    ...(behavior.credentialOnly === true ? [] : credentialResult.credentialAction === undefined ? [] : [credentialResult.credentialAction]),
+    ...(verificationAction === undefined ? [] : [verificationAction]),
+  ];
+  const stateHome = resolveStateHome({ homeDir: options.homeDir });
+  const draftBundle = buildSetupEditorActionDraftBundle(session, draftActions, {
+    configPath: options.userConfigPath ?? initialDecision.state.configSources[0] ?? stateHome.configPath,
+    workspaceRoot: options.workspaceRoot,
+    trustStorePath: options.trustStorePath ?? stateHome.trustJsonPath,
+  });
+  const reviewManifest = buildSetupReviewManifest([draftBundle]);
+  const reviewText = renderSetupReviewManifest(reviewManifest, "en");
+  write(options, `${reviewText}\n`);
+  const reviewAccepted = await promptConfigEditorReviewApproval(options.prompt);
+  const applyPlanningResult = planSetupApply(reviewAccepted
+    ? { kind: "approved-review-result", manifest: reviewManifest }
+    : { kind: "cancelled-review-result", manifest: reviewManifest, reason: "User cancelled review." });
+
+  if (
+    credentialResult.pendingCredentialWrite !== undefined &&
+    applyPlanningResult.kind === "apply-plan-ready" &&
+    options.applyExecutor !== undefined
+  ) {
+    await writeEnvSecret({
+      homeDir: options.homeDir,
+      key: credentialResult.pendingCredentialWrite.envVarName,
+      value: credentialResult.pendingCredentialWrite.value,
+    });
+  }
+
+  const applyEndState = applyPlanningResult.kind === "apply-plan-ready" && options.applyExecutor !== undefined
+    ? await executeSetupApplyPlan(applyPlanningResult.applyPlan, options.applyExecutor, options.applyFlowOptions)
+    : undefined;
+  const output = applyEndState === undefined
+    ? renderSetupApplyPlanningResult(applyPlanningResult, "en")
+    : renderSetupApplyEndState(applyEndState, "en");
+  write(options, `${output}\n`);
+  const completed = applyEndState === undefined
+    ? applyPlanningResult.kind === "apply-plan-ready"
+    : applyEndState.kind !== "blocked" && applyEndState.kind !== "cancelled";
+
+  return {
+    completed,
+    exitCode: completed ? 0 : 1,
+    output,
+    initialDecision,
+    selectedActionId: editorAction.id,
+    reviewManifest,
+    applyPlanningResult,
+    applyEndState,
+  };
+}
+
+async function selectResolvedProviderRoute(
+  options: ConfigEditorRunnerOptions,
+  initialDecision: SetupRouteDecision
+): Promise<
+  | { readonly kind: "selected"; readonly selection: ProviderModelSelectionResult }
+  | { readonly kind: "diagnostic"; readonly output: string }
+> {
+  const flowEngine = options.flowEngine ?? await createDefaultFlowEngine(options);
+  const providers = await flowEngine.listProviderCandidates();
+  if (providers.length === 0) {
+    return { kind: "diagnostic", output: "No setup-visible provider candidates are available." };
+  }
+
+  const provider = await promptProviderCandidate(options.prompt, {
+    candidates: providers,
+    currentProviderId: initialDecision.state.model?.provider,
+  });
+  const models = await flowEngine.listModelCandidates(provider.id);
+  if (models.length === 0) {
+    return { kind: "diagnostic", output: `No setup-visible models are available for ${provider.displayName}.` };
+  }
+
+  const model = await promptModelCandidate(options.prompt, {
+    providerId: provider.id,
+    candidates: models,
+    currentModelId: initialDecision.state.model?.provider === provider.id ? initialDecision.state.model.id : undefined,
+  });
+  const resolved = await flowEngine.resolveSelection(provider.id, model.id);
+  if (resolved.kind === "diagnostic") {
+    return { kind: "diagnostic", output: `Provider/model selection failed: ${resolved.reason}` };
+  }
+
+  return { kind: "selected", selection: resolved };
+}
+
+async function resolveActiveProviderRoute(
+  options: ConfigEditorRunnerOptions,
+  initialDecision: SetupRouteDecision
+): Promise<
+  | { readonly kind: "selected"; readonly selection: ProviderModelSelectionResult }
+  | { readonly kind: "diagnostic"; readonly output: string }
+> {
+  const activeRoute = initialDecision.state.model;
+  if (activeRoute === undefined) {
+    return {
+      kind: "diagnostic",
+      output: "No active provider/model route is configured. Use provider/model repair to choose a setup-visible route.",
+    };
+  }
+
+  const flowEngine = options.flowEngine ?? await createDefaultFlowEngine(options);
+  const providers = await flowEngine.listProviderCandidates();
+  const provider = providers.find((candidate) => candidate.id === activeRoute.provider);
+  if (provider === undefined) {
+    return {
+      kind: "diagnostic",
+      output: `The active provider/model route ${activeRoute.provider}/${activeRoute.id} is not available for credential repair. Use provider/model repair to choose a setup-visible route.`,
+    };
+  }
+
+  const models = await flowEngine.listModelCandidates(provider.id);
+  const model = models.find((candidate) => candidate.id === activeRoute.id);
+  if (model === undefined) {
+    return {
+      kind: "diagnostic",
+      output: `The active provider/model route ${activeRoute.provider}/${activeRoute.id} is not available for credential repair. Use provider/model repair to choose a setup-visible route.`,
+    };
+  }
+
+  const resolved = await flowEngine.resolveSelection(provider.id, model.id);
+  if (resolved.kind === "diagnostic") {
+    return {
+      kind: "diagnostic",
+      output: `The active provider/model route ${activeRoute.provider}/${activeRoute.id} cannot be repaired through credential-only setup: ${resolved.reason}. Use provider/model repair to choose a setup-visible route.`,
+    };
+  }
+
+  return { kind: "selected", selection: resolved };
+}
+
+async function resolveCredentialForReview(
+  options: ConfigEditorRunnerOptions,
+  resolution: ProviderModelSelectionResult
+): Promise<
+  | {
+      readonly kind: "ready";
+      readonly envVarName?: string;
+      readonly credentialAction?: SetupEditorActionDraft;
+      readonly pendingCredentialWrite?: PendingCredentialWrite;
+    }
+  | { readonly kind: "diagnostic"; readonly output: string }
+> {
+  switch (resolution.credentialAction.kind) {
+    case "none":
+      return { kind: "ready" };
+    case "reuse": {
+      const ref = resolution.credentialAction.reference;
+      if (!ref.startsWith("env:")) {
+        return { kind: "diagnostic", output: `Malformed reuse credential reference: ${ref}` };
+      }
+      const envVarName = ref.slice(4);
+      return {
+        kind: "ready",
+        envVarName,
+        credentialAction: credentialReferenceAction(resolution, envVarName),
+      };
+    }
+    case "collect": {
+      const envVarName = resolution.credentialAction.envVarName;
+      const promptResult = await promptForApiKeyInput({
+        prompt: options.prompt,
+        providerId: resolution.provider,
+        envVarName,
+      });
+      return {
+        kind: "ready",
+        envVarName,
+        credentialAction: credentialReferenceAction(resolution, envVarName),
+        pendingCredentialWrite: promptResult.kind === "entered"
+          ? { envVarName: promptResult.envVarName, value: promptResult.value }
+          : undefined,
+      };
+    }
+  }
+}
+
+function credentialReferenceAction(
+  resolution: ProviderModelSelectionResult,
+  envVarName: string
+): SetupEditorActionDraft {
+  return {
+    kind: "setup-editor-action-draft",
+    id: "edit-primary-credential-reference",
+    copyKey: "setupEditor.actions.editPrimaryCredentialReference",
+    sectionId: "credentials",
+    effect: "draft-config-patch",
+    readOnly: false,
+    mutatesConfig: false,
+    requiresExplicitApply: true,
+    preservesUnrelatedConfig: true,
+    patch: {
+      kind: "scoped-config-patch-intent",
+      fields: ["provider.credentialReference"],
+      preserveUnrelatedConfig: true,
+    },
+    credentialRefs: [{ kind: "env", name: envVarName, value: "not-included" }],
+    reviewValues: {
+      provider: resolution.provider,
+      model: resolution.model,
+      apiKeyEnv: envVarName,
+    },
+  };
+}
+
+function diagnosticResult(
+  options: ConfigEditorRunnerOptions,
+  initialDecision: SetupRouteDecision,
+  selectedActionId: string,
+  output: string
+): ConfigEditorRunnerResult {
+  write(options, `${output}\n`);
+  return {
+    completed: false,
+    exitCode: 1,
+    output,
+    initialDecision,
+    selectedActionId,
+  };
+}
+
 function requireEditorAction(action: ConfigEditorRenderedAction): SetupEditorActionDraft {
   if (action.editorAction === undefined) {
     throw new Error(`Setup editor action ${action.id} has no draft metadata.`);
@@ -335,6 +643,17 @@ function normalizeConfigEditorActionId(id: SetupEditorActionId | SetupRouteActio
 
 function write(options: ConfigEditorRunnerOptions, value: string): void {
   options.output?.write(value);
+}
+
+async function createDefaultFlowEngine(options: CollectSetupRouteOptions): Promise<FlowEngine> {
+  const loaded = await loadRuntimeConfig(options);
+  return createProviderModelSelectionFlow({
+    config: loaded.config,
+    providerRegistry: loaded.providerRegistry,
+    homeDir: options.homeDir,
+    allowNetwork: false,
+    mode: "setup",
+  });
 }
 
 function securityModeValue(value: unknown): SecurityApprovalMode {

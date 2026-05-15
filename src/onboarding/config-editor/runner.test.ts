@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Prompt } from "../../cli/readline-prompt.js";
 import { WorkspaceTrustStore } from "../../security/workspace-trust-store.js";
+import type { ProviderId, ProviderApiMode, ProviderAuthMethod } from "../../contracts/provider.js";
+import type { FlowEngine } from "../../providers/provider-model-selection-flow.js";
 import { createReviewedSetupApplyExecutor } from "../review/apply-executor.js";
 import { runConfigEditor } from "./runner.js";
 
@@ -197,6 +199,208 @@ describe("runConfigEditor", () => {
     expect(config.skills?.externalDirs).toEqual(["/tmp/estacoda-skills"]);
   });
 
+  it("applies guided provider route repair through the shared flow and reviewed executor", async () => {
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig(),
+      security: {
+        approvalMode: "adaptive",
+        assessor: { enabled: true },
+      },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ values: ["OpenAI", "gpt-5.5", true], secret: "sk-pr8-provider-route" }),
+      defaultActionId: "edit-primary-model-route",
+      flowEngine: flowEngine({ credentialAction: "collect", envVarName: "PR8_OPENAI_KEY" }),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+        collectVerification: () => readyVerification(join(tempDir, ".estacoda", "config.json")),
+      }),
+    });
+    const rawConfig = await readFile(join(tempDir, ".estacoda", "config.json"), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      model?: { provider?: string; id?: string; contextWindowTokens?: number; apiMode?: string; authMethod?: string };
+      providers?: Record<string, { apiKeyEnv?: string; baseUrl?: string; models?: string[]; apiMode?: string; authMethod?: string }>;
+      security?: { approvalMode?: string; assessor?: { enabled?: boolean } };
+    };
+    const envFile = await readFile(join(tempDir, ".estacoda", ".env"), "utf8");
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("edit-primary-model-route");
+    expect(result.reviewManifest?.sections["provider-model-network"]).toHaveLength(1);
+    expect(result.reviewManifest?.sections["secret-refs-to-store"]).toHaveLength(1);
+    expect(result.reviewManifest?.sections["files-to-write-update"][0]?.target).toEqual(expect.objectContaining({
+      kind: "config-scope",
+      scope: ["provider.route"],
+    }));
+    expect(config.model).toEqual({ provider: "openai", id: "gpt-5.5", contextWindowTokens: 128000 });
+    expect(config.providers?.openai).toEqual(expect.objectContaining({
+      baseUrl: "https://api.openai.com/v1",
+      apiKeyEnv: "PR8_OPENAI_KEY",
+    }));
+    expect(config.providers?.openai?.models).toContain("gpt-5.5");
+    expect(config.model?.apiMode).toBeUndefined();
+    expect(config.model?.authMethod).toBeUndefined();
+    expect(config.providers?.openai?.apiMode).toBeUndefined();
+    expect(config.providers?.openai?.authMethod).toBeUndefined();
+    expect(config.security?.assessor?.enabled).toBe(true);
+    expect(envFile).toContain("PR8_OPENAI_KEY=");
+    expect(rawConfig).not.toContain("sk-pr8-provider-route");
+    expect(JSON.stringify(result)).not.toContain("sk-pr8-provider-route");
+  });
+
+  it("cancels guided credential repair without writing config or .env", async () => {
+    delete process.env.PR8_CANCELLED_KEY;
+    await writeUserConfig(tempDir, hostedMissingCredentialConfig("PR8_CANCELLED_KEY"));
+    await trustWorkspace(tempDir, workspaceRoot);
+    const before = await readFile(join(tempDir, ".estacoda", "config.json"), "utf8");
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ values: [false], secret: "sk-pr8-cancelled" }),
+      defaultActionId: "repair-missing-credential",
+      flowEngine: flowEngine({ credentialAction: "collect", envVarName: "PR8_CANCELLED_KEY" }),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+
+    expect(result.completed).toBe(false);
+    expect(result.applyPlanningResult?.kind).toBe("cancelled");
+    await expect(readFile(join(tempDir, ".estacoda", "config.json"), "utf8")).resolves.toBe(before);
+    await expect(readFile(join(tempDir, ".estacoda", ".env"), "utf8")).rejects.toThrow();
+    expect(JSON.stringify(result)).not.toContain("sk-pr8-cancelled");
+    expect(JSON.stringify(result.reviewManifest)).not.toContain("sk-pr8-cancelled");
+    expect(JSON.stringify(result.applyPlanningResult)).not.toContain("sk-pr8-cancelled");
+  });
+
+  it("repairs the active OpenAI credential ref without mutating other available providers", async () => {
+    delete process.env.PR8_REPAIRED_KEY;
+    await writeUserConfig(tempDir, {
+      ...hostedMissingCredentialConfig("PR8_REPAIRED_KEY"),
+      providers: {
+        openai: {
+          kind: "openai-compatible",
+          baseUrl: "https://api.openai.com/v1",
+          apiKeyEnv: "PR8_REPAIRED_KEY",
+          models: ["gpt-5.5"],
+          enableNetwork: true,
+        },
+        anthropic: {
+          kind: "openai-compatible",
+          baseUrl: "https://api.anthropic.com/v1",
+          apiKeyEnv: "ANTHROPIC_API_KEY",
+          models: ["claude-sonnet-4-5"],
+          enableNetwork: true,
+        },
+      },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ values: [true], secret: "sk-pr8-repaired" }),
+      defaultActionId: "repair-missing-credential",
+      flowEngine: flowEngine({
+        credentialAction: "collect",
+        envVarName: "PR8_REPAIRED_KEY",
+        providers: ["anthropic", "openai"],
+      }),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+        collectVerification: () => readyVerification(join(tempDir, ".estacoda", "config.json")),
+      }),
+    });
+    const rawConfig = await readFile(join(tempDir, ".estacoda", "config.json"), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      model?: { provider?: string; id?: string };
+      providers?: Record<string, { apiKeyEnv?: string; models?: string[] }>;
+    };
+    const envFile = await readFile(join(tempDir, ".estacoda", ".env"), "utf8");
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("repair-missing-credential");
+    expect(result.reviewManifest?.sections["provider-model-network"]).toHaveLength(0);
+    expect(result.reviewManifest?.sections["secret-refs-to-store"]).toHaveLength(1);
+    expect(result.reviewManifest?.sections["files-to-write-update"][0]?.target).toEqual(expect.objectContaining({
+      kind: "config-scope",
+      scope: ["provider.credentialReference"],
+    }));
+    expect(config.model).toEqual({ provider: "openai", id: "gpt-5.5" });
+    expect(config.providers?.openai?.apiKeyEnv).toBe("PR8_REPAIRED_KEY");
+    expect(config.providers?.anthropic?.apiKeyEnv).toBe("ANTHROPIC_API_KEY");
+    expect(config.providers?.anthropic?.models).toEqual(["claude-sonnet-4-5"]);
+    expect(envFile).toContain("PR8_REPAIRED_KEY=");
+    expect(rawConfig).not.toContain("sk-pr8-repaired");
+    expect(JSON.stringify(result)).not.toContain("sk-pr8-repaired");
+    expect(JSON.stringify(result.reviewManifest)).not.toContain("sk-pr8-repaired");
+    expect(JSON.stringify(result.applyPlanningResult)).not.toContain("sk-pr8-repaired");
+  });
+
+  it("returns diagnostics and writes nothing when active credential route is unavailable", async () => {
+    delete process.env.PR8_UNAVAILABLE_KEY;
+    await writeUserConfig(tempDir, hostedMissingCredentialConfig("PR8_UNAVAILABLE_KEY"));
+    await trustWorkspace(tempDir, workspaceRoot);
+    const before = await readFile(join(tempDir, ".estacoda", "config.json"), "utf8");
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ values: [true], secret: "sk-pr8-unavailable" }),
+      defaultActionId: "repair-missing-credential",
+      flowEngine: flowEngine({
+        credentialAction: "collect",
+        envVarName: "PR8_UNAVAILABLE_KEY",
+        providers: ["anthropic"],
+      }),
+      applyExecutor: {
+        apply: () => {
+          throw new Error("apply should not run for unavailable active route");
+        },
+      },
+    });
+
+    expect(result.completed).toBe(false);
+    expect(result.reviewManifest).toBeUndefined();
+    expect(result.applyPlanningResult).toBeUndefined();
+    expect(result.output).toContain("Use provider/model repair");
+    await expect(readFile(join(tempDir, ".estacoda", "config.json"), "utf8")).resolves.toBe(before);
+    await expect(readFile(join(tempDir, ".estacoda", ".env"), "utf8")).rejects.toThrow();
+    expect(JSON.stringify(result)).not.toContain("sk-pr8-unavailable");
+  });
+
+  it("treats shared-flow diagnostics as non-mutating editor output", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const before = await readFile(join(tempDir, ".estacoda", "config.json"), "utf8");
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ values: ["OpenAI", "gpt-5.5"] }),
+      defaultActionId: "edit-primary-model-route",
+      flowEngine: flowEngine({ diagnostic: "Provider OpenAI is not runnable." }),
+      applyExecutor: {
+        apply: () => {
+          throw new Error("apply should not run for diagnostics");
+        },
+      },
+    });
+
+    expect(result.completed).toBe(false);
+    expect(result.output).toContain("Provider/model selection failed: Provider OpenAI is not runnable.");
+    expect(result.reviewManifest).toBeUndefined();
+    await expect(readFile(join(tempDir, ".estacoda", "config.json"), "utf8")).resolves.toBe(before);
+  });
+
   it("grants workspace trust only after explicit confirmation and reviewed approval", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     const trustStorePath = join(tempDir, ".estacoda", "trust.json");
@@ -295,13 +499,18 @@ describe("runConfigEditor", () => {
   });
 });
 
-function fakePrompt(options: { readonly values?: readonly unknown[] } = {}): Prompt {
+function fakePrompt(options: { readonly values?: readonly unknown[]; readonly secret?: string } = {}): Prompt {
   const values = [...(options.values ?? [])];
-  const prompt = (async () => "") as Prompt;
+  const prompt = (async (_question: string, promptOptions?: { secret?: boolean }) =>
+    promptOptions?.secret === true ? options.secret ?? "" : "") as Prompt;
   prompt.select = async (input) => {
     const next = values.shift();
     if (next !== undefined) {
-      const match = input.options.find((option) => Object.is(option.value, next));
+      const match = input.options.find((option) =>
+        Object.is(option.value, next) ||
+        option.label === next ||
+        (typeof option.value === "object" && option.value !== null && "id" in option.value && option.value.id === next)
+      );
       if (match !== undefined) return match.value;
     }
     return input.options[input.defaultIndex ?? 0]?.value ?? input.options[0]!.value;
@@ -335,6 +544,139 @@ function localReadyConfig(modelId = "hermes-local"): Record<string, unknown> {
         models: [modelId],
         enableNetwork: true,
       },
+    },
+  };
+}
+
+function hostedMissingCredentialConfig(envVarName: string): Record<string, unknown> {
+  return {
+    model: {
+      provider: "openai",
+      id: "gpt-5.5",
+    },
+    providers: {
+      openai: {
+        kind: "openai-compatible",
+        baseUrl: "https://api.openai.com/v1",
+        apiKeyEnv: envVarName,
+        models: ["gpt-5.5"],
+        enableNetwork: true,
+      },
+    },
+  };
+}
+
+function readyVerification(configPath: string) {
+  return {
+    stateWritable: true,
+    envFilePresent: true,
+    envFileSecure: true,
+    workspaceTrusted: true,
+    securityModeLabel: "Adaptive",
+    securityModeValue: "adaptive",
+    skillAutonomyLabel: "Suggest",
+    skillAutonomyValue: "suggest",
+    providerDiagnostic: {
+      status: "ready" as const,
+      lines: ["Provider status: ready"],
+      warnings: [],
+    },
+    toolStatus: "skipped" as const,
+    configSources: [configPath],
+    warnings: [],
+    issueCodes: [],
+  };
+}
+
+function flowEngine(options: {
+  readonly credentialAction?: "none" | "reuse" | "collect";
+  readonly envVarName?: string;
+  readonly diagnostic?: string;
+  readonly providers?: readonly ProviderId[];
+} = {}): FlowEngine {
+  const envVarName = options.envVarName ?? "OPENAI_API_KEY";
+  const providers = options.providers ?? (["openai"] as const);
+  return {
+    listProviderCandidates: async () => providers.map((providerId) => ({
+      id: providerId,
+      displayName: displayNameForProvider(providerId),
+      catalogOnly: false,
+      configurable: true,
+      runnable: true,
+      modelsCount: 1,
+      credentialReady: options.credentialAction === "reuse",
+      baseUrl: baseUrlForProvider(providerId),
+    })),
+    listModelCandidates: async (providerId) => [modelCandidateForProvider(providerId)],
+    resolveSelection: async (providerId, modelId) => {
+      if (options.diagnostic !== undefined) {
+        return {
+          kind: "diagnostic" as const,
+          provider: providerId,
+          model: modelId,
+          reason: options.diagnostic,
+        };
+      }
+      const action = options.credentialAction ?? "collect";
+      return {
+        kind: "selected" as const,
+        provider: providerId,
+        model: modelId,
+        baseUrl: baseUrlForProvider(providerId),
+        apiMode: "custom_openai_compatible" as ProviderApiMode,
+        authMethod: "api_key" as ProviderAuthMethod,
+        credentialAction: action === "none"
+          ? { kind: "none" as const }
+          : action === "reuse"
+            ? { kind: "reuse" as const, reference: `env:${envVarName}` as `env:${string}` }
+            : { kind: "collect" as const, envVarName },
+        profile: {
+          id: modelId,
+          provider: providerId,
+          contextWindowTokens: 128000,
+          supportsTools: true,
+          supportsVision: true,
+          supportsReasoning: true,
+          supportsStructuredOutput: true,
+          status: "stable",
+        },
+      };
+    },
+  };
+}
+
+function displayNameForProvider(providerId: ProviderId): string {
+  return providerId === "anthropic" ? "Anthropic" : providerId === "kimi" ? "Kimi" : "OpenAI";
+}
+
+function baseUrlForProvider(providerId: ProviderId): string {
+  if (providerId === "anthropic") return "https://api.anthropic.com/v1";
+  if (providerId === "kimi") return "https://api.moonshot.ai/v1";
+  return "https://api.openai.com/v1";
+}
+
+function modelCandidateForProvider(providerId: ProviderId) {
+  const id = providerId === "anthropic"
+    ? "claude-sonnet-4-5"
+    : providerId === "kimi"
+      ? "kimi-k2"
+      : "gpt-5.5";
+  return {
+    id,
+    provider: providerId,
+    configured: true,
+    executable: true,
+    catalogOnly: false,
+    supportsVision: true,
+    profile: {
+      id,
+      provider: providerId,
+      contextWindowTokens: 128000,
+      supportsTools: true,
+      supportsVision: true,
+      supportsReasoning: true,
+      supportsStructuredOutput: true,
+      status: "stable" as const,
     },
   };
 }

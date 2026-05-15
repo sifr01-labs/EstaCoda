@@ -354,6 +354,19 @@ function draftFromEditorAction(
     });
   }
 
+  if (action.id === "edit-primary-model-route" || action.id === "repair-primary-provider") {
+    return configDraft({
+      id: editorDraftId(action),
+      kind: "provider-model-route",
+      source,
+      riskSurface: "provider-selection",
+      scope: action.patch?.fields ?? ["provider.route"],
+      configPath: options.configPath,
+      summaryKey: "setupDrafts.providerModelRoute.summary",
+      values: action.reviewValues ?? {},
+    });
+  }
+
   if (action.id === "cancel-setup-editor") {
     return {
       id: editorDraftId(action),
@@ -387,11 +400,16 @@ function draftFromEditorAction(
   }
 
   if (action.credentialRefs !== undefined || action.id === "edit-primary-credential-reference" || action.id === "repair-missing-credential") {
+    const envVar = stringReviewValue(action.reviewValues?.apiKeyEnv);
+    const credentialRefs = action.credentialRefs?.map((ref) => ref.name) ?? [];
     return credentialDraft({
       id: editorDraftId(action),
       source,
       configPath: options.configPath,
-      envVars: action.credentialRefs?.map((ref) => ref.name) ?? [],
+      scope: action.patch?.fields ?? ["provider.credentialReference"],
+      envVars: envVar === undefined ? credentialRefs : [envVar],
+      provider: stringReviewValue(action.reviewValues?.provider),
+      model: stringReviewValue(action.reviewValues?.model),
     });
   }
 
@@ -443,7 +461,10 @@ function credentialDraft(input: {
   readonly id: string;
   readonly source: SetupDraftSource;
   readonly configPath?: string;
+  readonly scope?: readonly SetupEditorPatchField[];
   readonly envVars: readonly string[];
+  readonly provider?: string;
+  readonly model?: string;
 }): SetupDraft {
   return {
     id: input.id,
@@ -452,13 +473,15 @@ function credentialDraft(input: {
     riskSurface: "credential-reference",
     target: {
       kind: "config-scope",
-      scope: ["providers.*.apiKeyEnv"],
+      scope: input.scope ?? ["providers.*.apiKeyEnv"],
       path: input.configPath,
       preserveUnrelatedConfig: true,
     },
     review: review("setupDrafts.credentialReference.summary", {
       envVars: [...new Set(input.envVars)].sort(),
       credentialValuesIncluded: false,
+      provider: input.provider,
+      model: input.model,
     }),
     applyIntent: intent("credential-reference"),
     preserveUnrelatedConfig: true,
@@ -467,6 +490,10 @@ function credentialDraft(input: {
     blockers: [],
     warnings: [],
   };
+}
+
+function stringReviewValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
 }
 
 function workspaceTrustDraft(input: {

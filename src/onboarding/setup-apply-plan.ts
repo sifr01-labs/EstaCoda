@@ -255,13 +255,21 @@ export function evaluateSetupApplyEligibility(manifest: SetupReviewManifest): Se
   for (const line of manifest.blockers) {
     const lineBlockers = line.blockers.length > 0 ? line.blockers : [line.summaryKey];
     if (line.section === "blockers") {
+      const unresolvedLineBlockers: string[] = [];
       for (const blocker of lineBlockers) {
         if (isWorkspaceTrustBlocker(blocker) && hasWorkspaceTrustGrant(manifest)) {
           continue;
         }
+        if (isCredentialBlocker(blocker) && hasCredentialReferenceForBlocker(manifest, line, blocker)) {
+          continue;
+        }
         blockers.add(blocker);
+        unresolvedLineBlockers.push(blocker);
       }
-      const intent = repairIntentForLine(line);
+      const intent = unresolvedLineBlockers.length === 0 ? undefined : repairIntentForLine({
+        ...line,
+        blockers: unresolvedLineBlockers,
+      });
       if (intent !== undefined) {
         repairIntents.push(intent);
       }
@@ -481,8 +489,58 @@ function hasWorkspaceTrustGrant(manifest: SetupReviewManifest): boolean {
   return manifest.sections["workspace-trust-grants"].length > 0;
 }
 
+type CredentialReferenceForApply = {
+  readonly envVar: string;
+  readonly provider?: string;
+};
+
+function hasCredentialReferenceForBlocker(
+  manifest: SetupReviewManifest,
+  blockerLine: SetupReviewManifestLine,
+  blocker: string
+): boolean {
+  const blockerEnvVars = credentialEnvVarsFromText(blocker);
+  if (blockerEnvVars.length === 0) return false;
+
+  const blockerProvider = stringReviewValue(blockerLine.review.values.provider ?? blockerLine.review.values.providerId);
+  const references = credentialReferencesFromManifest(manifest);
+  if (references.length === 0) return false;
+
+  return blockerEnvVars.every((envVar) =>
+    references.some((reference) =>
+      reference.envVar === envVar &&
+      (blockerProvider === undefined || reference.provider === blockerProvider)
+    )
+  );
+}
+
+function credentialReferencesFromManifest(manifest: SetupReviewManifest): CredentialReferenceForApply[] {
+  return manifest.sections["secret-refs-to-store"].flatMap((line) => {
+    const provider = stringReviewValue(line.review.values.provider ?? line.review.values.providerId);
+    return stringArrayReviewValue(line.review.values.envVars)
+      .map((envVar) => ({ envVar, provider }));
+  });
+}
+
+function credentialEnvVarsFromText(value: string): string[] {
+  return [...new Set(value.match(/\b[A-Z][A-Z0-9]*_[A-Z0-9_]*\b/gu) ?? [])];
+}
+
 function isWorkspaceTrustBlocker(blocker: string): boolean {
   return /workspace.*trust|not trusted/i.test(blocker);
+}
+
+function isCredentialBlocker(blocker: string): boolean {
+  return /credential|api key|env|credential pool/i.test(blocker);
+}
+
+function stringReviewValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function stringArrayReviewValue(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
 }
 
 function redactedReviewForApply(review: SetupDraftReviewMetadata): SetupDraftReviewMetadata {

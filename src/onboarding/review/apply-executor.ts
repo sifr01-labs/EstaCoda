@@ -14,9 +14,8 @@ import {
   type SetupPostSaveVerificationRequest,
 } from "../setup-apply-plan.js";
 import {
-  setupBrowserConfig,
   setupImageGenerationConfig,
-  setupProviderConfig,
+  setupBrowserConfig,
   setupSecurityConfig,
   setupSkillConfig,
   setupTelegramConfig,
@@ -29,6 +28,12 @@ import {
   type UiFlavor,
   type UiLanguage,
 } from "../../config/runtime-config.js";
+import {
+  registerProviderConfig,
+  registerProviderModel,
+  setPreferredModelRoute,
+  storeProviderCredential,
+} from "../../config/provider-config-mutations.js";
 import type { BrowserBackendKind } from "../../contracts/browser.js";
 import type { ProviderId } from "../../contracts/provider.js";
 import type { SecurityApprovalMode } from "../../contracts/security.js";
@@ -165,7 +170,7 @@ async function applyConfigPatch(
       return;
     case "setupDrafts.credentialReference.summary":
     case "setupModules.credentials.draft":
-      ensureCredentialReferenceCanApply(operation, context);
+      await applyCredentialReference(operation, context, options);
       return;
     case "setupDrafts.securityMode.summary":
     case "setupModules.security-mode.draft":
@@ -208,16 +213,60 @@ async function applyProviderRoute(
   const baseUrl = stringValue(operation.review.values.baseUrl);
   const contextWindowTokens = numberValue(operation.review.values.contextWindowTokens);
   const target = configApplyTarget(operation, options);
-  await setupProviderConfig({
+  await registerProviderConfig({
+    ...target,
+    input: {
+      provider,
+      baseUrl,
+      kind: "openai-compatible",
+      enableNetwork: true,
+    },
+  });
+  if (context.credentialEnv !== undefined) {
+    await storeProviderCredential({
+      ...target,
+      input: {
+        provider,
+        apiKeyEnv: context.credentialEnv,
+      },
+    });
+  }
+  await registerProviderModel({
+    ...target,
+    input: {
+      provider,
+      models: [model],
+    },
+  });
+  await setPreferredModelRoute({
     ...target,
     input: {
       provider,
       model,
       baseUrl,
-      contextWindowTokens,
       apiKeyEnv: context.credentialEnv,
-      requiresCredential: provider !== "local",
-      scope: target.scope,
+      contextWindowTokens,
+    },
+  });
+}
+
+async function applyCredentialReference(
+  operation: SetupApplyOperation,
+  context: PlanContext,
+  options: ReviewedSetupApplyExecutorOptions
+): Promise<void> {
+  ensureCredentialReferenceCanApply(operation, context);
+  const provider = providerIdValue(operation.review.values.provider) ?? context.provider;
+  const envVar = arrayValue(operation.review.values.envVars)[0] ?? stringValue(operation.review.values.envVar) ?? context.credentialEnv;
+  if (provider === undefined || envVar === undefined) {
+    throw new Error("Credential reference apply requires provider and env-var review values.");
+  }
+  const target = configApplyTarget(operation, options);
+  await storeProviderCredential({
+    ...target,
+    input: {
+      provider,
+      apiKeyEnv: envVar,
     },
   });
 }
@@ -397,8 +446,16 @@ function planContext(plan: SetupApplyPlan): PlanContext {
   );
   const credentialOperation = plan.operations.find((operation) => operation.kind === "credential-reference");
   return {
-    provider: providerIdValue(providerOperation?.review.values.provider ?? providerOperation?.review.values.providerId),
-    model: stringValue(providerOperation?.review.values.model ?? providerOperation?.review.values.modelId),
+    provider: providerIdValue(
+      providerOperation?.review.values.provider ??
+      providerOperation?.review.values.providerId ??
+      credentialOperation?.review.values.provider
+    ),
+    model: stringValue(
+      providerOperation?.review.values.model ??
+      providerOperation?.review.values.modelId ??
+      credentialOperation?.review.values.model
+    ),
     credentialEnv: arrayValue(credentialOperation?.review.values.envVars)[0] ??
       stringValue(credentialOperation?.review.values.envVar),
   };

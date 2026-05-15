@@ -209,7 +209,7 @@ function modelRouteSection(state: SetupEntryState, mode: SetupEditorPlanMode): S
               effect: "draft-config-patch",
               readOnly: false,
               requiresExplicitApply: true,
-              patch: scopedPatch(["model.provider", "model.id"]),
+              patch: scopedPatch(["provider.route"]),
             }),
           ]
         : []),
@@ -220,7 +220,7 @@ function modelRouteSection(state: SetupEntryState, mode: SetupEditorPlanMode): S
         effect: "draft-config-patch",
         readOnly: false,
         requiresExplicitApply: true,
-        patch: scopedPatch(["model.provider", "model.id"]),
+        patch: scopedPatch(["provider.route"]),
       }),
     ],
   });
@@ -252,7 +252,7 @@ function credentialsSection(state: SetupEntryState): SetupEditorSection {
               effect: "draft-config-patch",
               readOnly: false,
               requiresExplicitApply: true,
-              patch: scopedPatch(["providers.*.apiKeyEnv"]),
+              patch: scopedPatch(["provider.credentialReference"]),
               credentialRefs: missingCredentialRefs,
             }),
           ]
@@ -264,7 +264,7 @@ function credentialsSection(state: SetupEntryState): SetupEditorSection {
         effect: "draft-config-patch",
         readOnly: false,
         requiresExplicitApply: true,
-        patch: scopedPatch(["providers.*.apiKeyEnv"]),
+        patch: scopedPatch(["provider.credentialReference"]),
         credentialRefs: missingCredentialRefs,
       }),
     ],

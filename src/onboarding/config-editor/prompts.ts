@@ -1,5 +1,6 @@
 import type { Prompt } from "../../cli/readline-prompt.js";
 import type { SecurityApprovalMode } from "../../contracts/security.js";
+import type { ModelCandidate, ProviderCandidate } from "../../providers/provider-model-selection-flow.js";
 import type { SkillAutonomy } from "../../skills/skill-learning.js";
 import {
   promptSetupChoice,
@@ -128,6 +129,54 @@ export async function promptWorkspaceTrustConfirmation(
       },
     ],
     defaultValue: false,
+  });
+}
+
+export async function promptProviderCandidate(
+  prompt: Prompt,
+  input: {
+    readonly candidates: readonly ProviderCandidate[];
+    readonly currentProviderId?: string;
+  }
+): Promise<ProviderCandidate> {
+  return promptSetupChoice(prompt, {
+    title: setupCopyText("en", "onboarding.providers.primary.title"),
+    message: `${setupCopyText("en", "onboarding.providers.primary")}\n`,
+    choices: input.candidates.map((candidate) => ({
+      id: candidate.id,
+      label: candidate.displayName,
+      description: candidate.baseUrl
+        ? `${candidate.baseUrl} (${candidate.modelsCount} models)`
+        : `${candidate.modelsCount} models`,
+      value: candidate,
+    })),
+    defaultValue: input.candidates.find((candidate) => candidate.id === input.currentProviderId) ?? input.candidates[0],
+  });
+}
+
+export async function promptModelCandidate(
+  prompt: Prompt,
+  input: {
+    readonly providerId: string;
+    readonly candidates: readonly ModelCandidate[];
+    readonly currentModelId?: string;
+  }
+): Promise<ModelCandidate> {
+  return promptSetupChoice(prompt, {
+    title: setupCopyText("en", "onboarding.providers.primaryModel.title"),
+    message: `${setupCopyText("en", "onboarding.providers.primaryModel").replace("{providerId}", input.providerId)}\n`,
+    choices: input.candidates.map((candidate) => ({
+      id: candidate.id,
+      label: candidate.id,
+      description: [
+        candidate.profile.supportsTools ? setupCopyText("en", "onboarding.catalog.model.features.tools") : undefined,
+        candidate.profile.supportsVision ? setupCopyText("en", "onboarding.catalog.model.features.vision") : undefined,
+        candidate.profile.supportsReasoning ? setupCopyText("en", "onboarding.catalog.model.features.reasoning") : undefined,
+        candidate.profile.status,
+      ].filter((part): part is string => part !== undefined).join(", "),
+      value: candidate,
+    })),
+    defaultValue: input.candidates.find((candidate) => candidate.id === input.currentModelId) ?? input.candidates[0],
   });
 }
 

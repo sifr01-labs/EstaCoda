@@ -125,6 +125,7 @@ describe("buildSetupEditorPlan", () => {
     expect(plan.warnings).toContain("Configured model context window is below 64K tokens.");
     expect(route.status).toBe("warning");
     expect(route.actions[0]?.id).toBe("repair-primary-provider");
+    expect(route.actions[0]?.patch?.fields).toEqual(["provider.route"]);
     expect(plan.actions.some((action) => action.id === "edit-primary-model-route")).toBe(true);
     expect(section(plan, "verification").actions[0]?.id).toBe("run-readonly-verification");
   });
@@ -136,6 +137,7 @@ describe("buildSetupEditorPlan", () => {
     expect(plan.mode).toBe("repair-first");
     expect(route.status).toBe("repair-required");
     expect(route.actions[0]?.id).toBe("repair-primary-provider");
+    expect(route.actions[0]?.patch?.fields).toEqual(["provider.route"]);
     expect(route.actions[0]?.patch?.preserveUnrelatedConfig).toBe(true);
   });
 
@@ -145,9 +147,11 @@ describe("buildSetupEditorPlan", () => {
     const repair = credentials.actions.find((action) => action.id === "repair-missing-credential");
 
     expect(credentials.status).toBe("repair-required");
+    expect(repair?.patch?.fields).toEqual(["provider.credentialReference"]);
     expect(repair?.credentialRefs).toContainEqual({ kind: "env", name: "OPENAI_API_KEY", value: "not-included" });
     expect(JSON.stringify(repair)).not.toContain("sk-");
     expect(JSON.stringify(repair)).not.toContain("secretValue");
+    expect(JSON.stringify(repair)).not.toContain("providers.*.apiKeyEnv");
   });
 
   it("keeps workspace trust separate and repairable", () => {

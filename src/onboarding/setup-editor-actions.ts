@@ -16,6 +16,8 @@ export type SetupEditorPatchField =
   | "model.provider"
   | "model.id"
   | "providers.*.apiKeyEnv"
+  | "provider.route"
+  | "provider.credentialReference"
   | "security.approvalMode"
   | "skills.autonomy"
   | "workspaceTrust"
@@ -62,7 +64,7 @@ export type SetupEditorActionDraft = {
     readonly name: string;
     readonly value: "not-included";
   }[];
-  readonly reviewValues?: Record<string, string | readonly string[] | boolean | undefined>;
+  readonly reviewValues?: Record<string, string | readonly string[] | boolean | number | undefined>;
 };
 
 export function setupEditorAction(input: Omit<SetupEditorActionDraft, "kind" | "mutatesConfig" | "preservesUnrelatedConfig">): SetupEditorActionDraft {

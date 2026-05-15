@@ -13,6 +13,10 @@ export type ConfigEditorRenderedAction = {
 
 const PR4_ACTION_ORDER: readonly SetupRouteActionId[] = ["verify-setup", "show-diagnostics", "exit"];
 const PR6_EDITOR_ACTION_ORDER: readonly SetupEditorActionId[] = [
+  "repair-primary-provider",
+  "edit-primary-model-route",
+  "repair-missing-credential",
+  "edit-primary-credential-reference",
   "repair-workspace-trust",
   "edit-security-mode",
   "edit-workflow-learning",
@@ -192,6 +196,14 @@ function editorActionDescription(action: SetupEditorActionDraft): string {
       return "Choose strict, adaptive, or open approval mode and review the scoped config patch.";
     case "edit-workflow-learning":
       return "Choose workflow learning behavior and review the scoped config patch.";
+    case "repair-primary-provider":
+      return "Repair the primary provider/model route through the shared setup flow.";
+    case "edit-primary-model-route":
+      return "Choose a primary provider/model route through the shared setup flow.";
+    case "repair-missing-credential":
+      return "Repair the primary provider credential reference through the shared setup flow.";
+    case "edit-primary-credential-reference":
+      return "Choose a primary provider credential reference through the shared setup flow.";
     default:
       return setupCopyText("en", action.copyKey);
   }
