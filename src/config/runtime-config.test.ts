@@ -835,6 +835,32 @@ describe("modelAliases normalization", () => {
   });
 });
 
+describe("OAuth store config boundary", () => {
+  it("saveRuntimeConfig output never contains raw OAuth token fields", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-oauth-boundary-test-"));
+    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    const configPath = join(workspace, ".estacoda", "config.json");
+
+    const config = {
+      model: { provider: "openai", id: "gpt-4o" },
+      providers: {
+        openai: {
+          kind: "openai-compatible" as const,
+          apiKeyEnv: "OPENAI_API_KEY"
+        }
+      }
+    };
+
+    await saveRuntimeConfig(configPath, config);
+    const raw = await readFile(configPath, "utf8");
+
+    expect(raw).not.toContain("accessToken");
+    expect(raw).not.toContain("refreshToken");
+    expect(raw).not.toContain("auth.json");
+    await rm(workspace, { recursive: true, force: true });
+  });
+});
+
 async function findProductionTypeScriptFiles(repoRoot: string): Promise<string[]> {
   const files: string[] = [];
 

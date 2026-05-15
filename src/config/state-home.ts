@@ -14,6 +14,7 @@ export type StateHomePaths = {
   imageCachePath: string;
   gatewayStatePath: string;
   tempPath: string;
+  authJsonPath: string;
 };
 
 export function resolveStateHome(options?: { homeDir?: string }): StateHomePaths {
@@ -31,6 +32,7 @@ export function resolveStateHome(options?: { homeDir?: string }): StateHomePaths
     audioCachePath: join(stateRoot, "audio-cache"),
     imageCachePath: join(stateRoot, "image-cache"),
     gatewayStatePath: join(stateRoot, "gateway"),
-    tempPath: join(stateRoot, "temp")
+    tempPath: join(stateRoot, "temp"),
+    authJsonPath: join(stateRoot, "auth.json")
   };
 }
