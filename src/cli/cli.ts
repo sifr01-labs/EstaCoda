@@ -126,6 +126,7 @@ import {
   runGatewayStop,
   runGatewayRestart,
   runGatewayStartDryRun,
+  runGatewayStartBackground,
 } from "./gateway-commands.js";
 import {
   renderSettingsOverview,
@@ -2876,6 +2877,15 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
 
     if (hasFlag(rest, "--dry-run")) {
       const result = await runGatewayStartDryRun(options);
+      return {
+        handled: true,
+        exitCode: result.ok ? 0 : 1,
+        output: result.output,
+      };
+    }
+
+    if (hasFlag(rest, "--background")) {
+      const result = await runGatewayStartBackground(options);
       return {
         handled: true,
         exitCode: result.ok ? 0 : 1,

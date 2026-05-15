@@ -2,6 +2,19 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, writeFile, readFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+
+const childProcessMock = vi.hoisted(() => ({
+  spawn: vi.fn(),
+}));
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return {
+    ...actual,
+    spawn: childProcessMock.spawn,
+  };
+});
+
 import { runCliCommand } from "./cli.js";
 import * as supervisorModule from "../gateway/supervisor.js";
 
@@ -13,6 +26,11 @@ describe("cli gateway start", () => {
   let supervisorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
+    childProcessMock.spawn.mockReset();
+    childProcessMock.spawn.mockReturnValue({
+      pid: 12346,
+      unref: vi.fn(),
+    });
     supervisorSpy = vi.spyOn(supervisorModule, "runGatewaySupervisor").mockResolvedValue({
       ok: true,
       output: "Gateway started",
@@ -90,6 +108,29 @@ describe("cli gateway start", () => {
       expect(supervisorSpy).not.toHaveBeenCalled();
       await expect(readFile(join(tmpDir, ".estacoda", "gateway", "gateway.pid"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
       await expect(readFile(join(tmpDir, ".estacoda", "gateway", "gateway.lock"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("runs --background without entering the foreground supervisor", async () => {
+    const tmpDir = await makeTempDir();
+    try {
+      const result = await runCliCommand({
+        argv: ["gateway", "start", "--background"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("Gateway started (PID 12346)");
+      expect(result.output).toContain(join(tmpDir, ".estacoda", "logs", "gateway.log"));
+      expect(supervisorSpy).not.toHaveBeenCalled();
+      expect(childProcessMock.spawn).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.arrayContaining(["gateway", "start"]),
+        expect.objectContaining({ detached: true })
+      );
     } finally {
       await rm(tmpDir, { recursive: true, force: true });
     }

@@ -1,3 +1,5 @@
+import { spawn } from "node:child_process";
+import { closeSync, openSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { access, constants, readFile, writeFile, mkdir, rm, rename, stat } from "node:fs/promises";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
@@ -34,7 +36,6 @@ import {
   stopGateway,
   signalGateway,
 } from "../gateway/supervisor-lifecycle.js";
-import { runGatewaySupervisor } from "../gateway/supervisor.js";
 import { listAdapterIdentityLocks } from "../gateway/identity-lock.js";
 import {
   deriveTelegramIdentityHash,
@@ -312,6 +313,52 @@ export async function runGatewayStartDryRun(
   };
 }
 
+// ─────────────────────────────────────────────────────────────
+// Gateway Start Background
+// ─────────────────────────────────────────────────────────────
+
+export async function runGatewayStartBackground(
+  options: GatewayCommandOptions
+): Promise<{ ok: boolean; output: string }> {
+  const homeDir = options.homeDir ?? process.env.HOME ?? ".estacoda";
+  const stateHome = resolveStateHome({ homeDir });
+  const logPath = join(stateHome.logsPath, "gateway.log");
+  await mkdir(stateHome.logsPath, { recursive: true });
+
+  let logFd: number | undefined;
+  try {
+    logFd = openSync(logPath, "a", 0o600);
+    const child = spawn(process.execPath, resolveBackgroundGatewayStartArgs(), {
+      cwd: options.workspaceRoot,
+      detached: true,
+      env: {
+        ...process.env,
+        HOME: homeDir,
+      },
+      stdio: ["ignore", logFd, logFd],
+    });
+
+    child.unref();
+
+    return {
+      ok: true,
+      output: [
+        `Gateway started (PID ${child.pid ?? "unknown"})`,
+        `Logs: ${logPath}`,
+      ].join("\n"),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      output: `Failed to start gateway in background: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  } finally {
+    if (logFd !== undefined) {
+      closeSync(logFd);
+    }
+  }
+}
+
 // ───────────────────────────────────────────────────────────
 // Gateway Stop
 // ───────────────────────────────────────────────────────────
@@ -374,11 +421,7 @@ export async function runGatewayRestart(
     return { ok: false, output: `Failed to stop gateway: ${stopResult.error}` };
   }
 
-  // Start new gateway in foreground
-  const startResult = await runGatewaySupervisor({
-    ...options,
-    once: false,
-  });
+  const startResult = await runGatewayStartBackground(options);
 
   return {
     ok: startResult.ok,
@@ -823,6 +866,16 @@ function inspectAdapterIdentityReadiness(channels: LoadedRuntimeConfig["channels
   }
 
   return { valid, errors };
+}
+
+function resolveBackgroundGatewayStartArgs(): string[] {
+  const entrypoint = process.argv[1];
+  return [
+    ...process.execArgv,
+    ...(entrypoint === undefined ? [] : [entrypoint]),
+    "gateway",
+    "start",
+  ];
 }
 
 async function isReadable(path: string): Promise<boolean> {

@@ -7,12 +7,24 @@ const fsPromisesMock = vi.hoisted(() => ({
   rename: vi.fn(),
 }));
 
+const childProcessMock = vi.hoisted(() => ({
+  spawn: vi.fn(),
+}));
+
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   fsPromisesMock.rename.mockImplementation(actual.rename);
   return {
     ...actual,
     rename: fsPromisesMock.rename,
+  };
+});
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return {
+    ...actual,
+    spawn: childProcessMock.spawn,
   };
 });
 
@@ -26,8 +38,8 @@ import {
   runGatewayStop,
   runGatewayRestart,
   runGatewayStartDryRun,
+  runGatewayStartBackground,
 } from "./gateway-commands.js";
-import * as supervisorModule from "../gateway/supervisor.js";
 import { CronStore } from "../cron/cron-store.js";
 import { CronExecutionStore } from "../cron/cron-execution-store.js";
 import { ChannelApprovalStore } from "../channels/channel-approval-store.js";
@@ -129,6 +141,7 @@ describe("gateway commands", () => {
     stateRoot = join(tmpDir, ".estacoda");
     await mkdir(stateRoot, { recursive: true });
     fsPromisesMock.rename.mockClear();
+    childProcessMock.spawn.mockReset();
   });
 
   afterEach(async () => {
@@ -758,15 +771,14 @@ describe("gateway commands", () => {
   });
 
   describe("runGatewayRestart", () => {
-    let supervisorSpy: ReturnType<typeof vi.spyOn>;
     let stopGatewaySpy: ReturnType<typeof vi.spyOn>;
+    let unrefSpy: ReturnType<typeof vi.fn>;
 
     beforeEach(() => {
-      supervisorSpy = vi.spyOn(supervisorModule, "runGatewaySupervisor").mockResolvedValue({
-        ok: true,
-        output: "Gateway started",
-        polls: 0,
-        processed: 0,
+      unrefSpy = vi.fn();
+      childProcessMock.spawn.mockReturnValue({
+        pid: 12346,
+        unref: unrefSpy,
       });
       stopGatewaySpy = vi.spyOn(lifecycleModule, "stopGateway").mockResolvedValue({
         ok: true,
@@ -775,30 +787,67 @@ describe("gateway commands", () => {
     });
 
     afterEach(() => {
-      supervisorSpy.mockRestore();
       stopGatewaySpy.mockRestore();
     });
 
-    it("reports not running and starts when no PID exists", async () => {
-      const result = await runGatewayRestart({ workspaceRoot: tmpDir, homeDir: tmpDir });
-      expect(result.output).toContain("Gateway was not running");
-      expect(result.output).toContain("Gateway started");
-      expect(supervisorSpy).toHaveBeenCalledWith(expect.objectContaining({ once: false }));
+    it("starts gateway in the background and reports the child PID", async () => {
+      const result = await runGatewayStartBackground({ workspaceRoot: tmpDir, homeDir: tmpDir });
+
+      expect(result.ok).toBe(true);
+      expect(result.output).toContain("Gateway started (PID 12346)");
+      expect(result.output).toContain(join(tmpDir, ".estacoda", "logs", "gateway.log"));
+      expect(childProcessMock.spawn).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.arrayContaining(["gateway", "start"]),
+        expect.objectContaining({ detached: true })
+      );
+      expect(childProcessMock.spawn.mock.calls[0]?.[2]?.stdio).toEqual([
+        "ignore",
+        expect.any(Number),
+        expect.any(Number),
+      ]);
+      expect(unrefSpy).toHaveBeenCalled();
     });
 
-    it("stops stale PID then starts", async () => {
+    it("preserves Node exec args before the entrypoint and does not recurse background mode", async () => {
+      const originalExecArgv = [...process.execArgv];
+      process.execArgv.splice(0, process.execArgv.length, "--import", "tsx");
+      try {
+        await runGatewayStartBackground({ workspaceRoot: tmpDir, homeDir: tmpDir });
+
+        const childArgs = childProcessMock.spawn.mock.calls[0]?.[1] as string[];
+        expect(childArgs.slice(0, 2)).toEqual(["--import", "tsx"]);
+        expect(childArgs[2]).toBe(process.argv[1]);
+        expect(childArgs.slice(-2)).toEqual(["gateway", "start"]);
+        expect(childArgs).not.toContain("--background");
+      } finally {
+        process.execArgv.splice(0, process.execArgv.length, ...originalExecArgv);
+      }
+    });
+
+    it("reports not running and background-starts when no PID exists", async () => {
+      const result = await runGatewayRestart({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      expect(result.output).toContain("Gateway was not running");
+      expect(result.output).toContain("Gateway started (PID 12346)");
+      expect(childProcessMock.spawn).toHaveBeenCalledOnce();
+    });
+
+    it("stops stale PID then background-starts", async () => {
       await writeGatewayPid(tmpDir, { pid: 99999, startedAt: new Date().toISOString(), version: "0.0.1" });
 
       const result = await runGatewayRestart({ workspaceRoot: tmpDir, homeDir: tmpDir });
       expect(result.output).toContain("Gateway was not running");
-      expect(result.output).toContain("Gateway started");
+      expect(result.output).toContain("Gateway started (PID 12346)");
+      expect(childProcessMock.spawn).toHaveBeenCalledOnce();
     });
 
-    it("passes graceful flag to stop", async () => {
-      // No PID, so just checks the flag is accepted
-      const result = await runGatewayRestart({ workspaceRoot: tmpDir, homeDir: tmpDir, graceful: true });
-      expect(result.output).toContain("Gateway was not running");
-      expect(result.output).toContain("Gateway started");
+    it("treats --graceful as a v0.1.0 alias for restart", async () => {
+      const plain = await runGatewayRestart({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      const graceful = await runGatewayRestart({ workspaceRoot: tmpDir, homeDir: tmpDir, graceful: true });
+
+      expect(plain.output).toContain("Gateway started (PID 12346)");
+      expect(graceful.output).toContain("Gateway started (PID 12346)");
+      expect(childProcessMock.spawn).toHaveBeenCalledTimes(2);
     });
 
     it("does not force-kill on plain restart", async () => {
