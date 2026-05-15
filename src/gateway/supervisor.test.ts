@@ -148,6 +148,15 @@ function fakeExit() {
   };
 }
 
+async function waitForCondition(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Timed out waiting for test condition");
+}
+
 describe("runGatewaySupervisor", () => {
   let tmpDir: string;
   let stateRoot: string;
@@ -731,17 +740,18 @@ describe("runGatewaySupervisor", () => {
       },
     });
 
-    await new Promise((r) => setTimeout(r, 50));
+    await waitForCondition(() => capturedRegistry !== undefined);
 
     const ac = new AbortController();
-    capturedRegistry?.startTurn("test-key", ac);
+    const start = capturedRegistry!.startTurn("test-key", ac);
+    expect(start.ok).toBe(true);
+    expect(capturedRegistry!.stats().activeTurnCount).toBe(1);
 
     process.emit("SIGTERM");
-    await new Promise((r) => setTimeout(r, 100));
     process.emit("SIGTERM");
 
     await promise;
-    await new Promise((r) => setTimeout(r, 200));
+    await waitForCondition(() => exited.codes().includes(1));
 
     expect(exited.codes()).toContain(1);
     expect(await readCleanShutdownMarker(tmpDir)).toBeUndefined();
