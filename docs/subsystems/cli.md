@@ -36,6 +36,24 @@ pnpm run dev -- telegram setup  # Configure Telegram
 pnpm run dev -- gateway start   # Start gateway (channels must be enabled first)
 ```
 
+## Installability
+
+Local source checkouts validate the compiled entrypoint directly:
+
+```bash
+pnpm run build
+node dist/index.js --version
+node dist/index.js --help
+```
+
+Packed binary behavior is validated from a tarball installed into a temporary prefix:
+
+```bash
+scripts/verify-package-bin.sh
+```
+
+The npm package metadata exposes `bin.estacoda` for packed installs, but public npm publication remains blocked with `private: true`. The current local/manual installer is `bash scripts/install.sh`; the hosted curl installer is the planned launch direction and should not be described as live until release validation proves it. Do not claim `npm install -g estacoda` or `npx estacoda` works before publication.
+
 ## Trace Commands
 
 ```bash

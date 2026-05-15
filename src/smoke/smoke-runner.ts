@@ -1,6 +1,6 @@
 import type { SmokeCase, SmokeContext } from "./smoke-case.js";
 import { createSmokeContext } from "./fixtures/shared-setup.js";
-import { installIsolatedStateHome } from "../test/state-home.js";
+import { installIsolatedStateHome } from "./fixtures/state-home.js";
 
 export type SmokeRunOptions = {
   tag?: string;

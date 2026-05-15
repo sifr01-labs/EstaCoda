@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { randomUUID } from "node:crypto";
 import { loadUserRuntimeConfig, loadTrustedRuntimeConfig, type LoadedRuntimeConfig } from "./config/runtime-config.js";
 import { resolveStateHome } from "./config/state-home.js";

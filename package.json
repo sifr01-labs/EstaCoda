@@ -1,5 +1,5 @@
 {
-  "name": "@estacoda/v2",
+  "name": "estacoda",
   "version": "0.0.6",
   "private": true,
   "type": "module",
@@ -7,9 +7,31 @@
   "engines": {
     "node": ">=22.18.0"
   },
+  "files": [
+    "dist",
+    "skills",
+    "assets",
+    "workers",
+    "memory/default",
+    "acp_registry",
+    "scripts/install.sh",
+    "scripts/estacoda-wrapper.sh",
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+    "CHANGELOG.md",
+    "package.json"
+  ],
+  "bin": {
+    "estacoda": "./dist/index.js"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "tsc -p tsconfig.build.json",
+    "clean:dist": "node scripts/clean-dist.mjs",
+    "build": "pnpm run clean:dist && tsc -p tsconfig.build.json",
+    "verify:local-bin": "pnpm run build && head -n 1 dist/index.js && node dist/index.js --version && node dist/index.js --help",
+    "pack:dry-run": "pnpm run build && npm pack --dry-run",
+    "verify:package-bin": "scripts/verify-package-bin.sh",
     "start": "node dist/index.js",
     "dev": "node --import tsx src/index.ts",
     "dev:bun": "bun src/index.ts",

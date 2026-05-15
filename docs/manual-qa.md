@@ -524,7 +524,27 @@ Choose Arabic and verify that commands, provider names, paths, and env vars rema
 
 ---
 
-## 11. Regression Gate
+## 11. Package Installability QA
+
+Run this from a clean checkout after dependency install:
+
+```bash
+pnpm run build
+head -n 1 dist/index.js
+node dist/index.js --version
+node dist/index.js --help
+npm pack --dry-run
+scripts/verify-package-bin.sh
+```
+
+**Verify:**
+- `dist/index.js` starts with `#!/usr/bin/env node`.
+- Local compiled `--version` and `--help` exit successfully.
+- `npm pack --dry-run` includes `dist/index.js`, `skills/`, `assets/`, `workers/`, `memory/default/`, and `acp_registry/`.
+- `scripts/verify-package-bin.sh` installs the packed tarball into a temporary prefix and runs that installed `estacoda` binary.
+- Public `npm install -g estacoda`, `npx estacoda`, and hosted curl install are not claimed until release validation proves them.
+
+## 12. Regression Gate
 
 Before any commit that touches rendering code, run:
 
