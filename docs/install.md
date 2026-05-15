@@ -1,55 +1,77 @@
 # Install EstaCoda
 
-## One-line install (recommended)
+EstaCoda is not published as a public npm package yet. Keep install docs clear about which paths work now and which paths are planned.
+
+## Local Developer Path
+
+Use this inside a source checkout:
 
 ```bash
-curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash
+cd /path/to/EstaCoda
+corepack enable
+pnpm install
+pnpm run build
+node dist/index.js --help
+node dist/index.js --version
 ```
 
-This will:
-- Detect your OS and architecture
-- Check for Node.js >= 22.18.0 and Corepack
-- Install the `estacoda` binary into `~/.estacoda/bin/`
-- Add `~/.estacoda/bin` to your shell PATH
+For packaging regression checks:
 
-After install, restart your shell or run:
+```bash
+pnpm run verify:local-bin
+scripts/verify-package-bin.sh
+```
+
+`scripts/verify-package-bin.sh` builds the project, captures the tarball filename from `npm pack --json`, installs that tarball into a temporary prefix, runs the installed `estacoda` binary, and cleans up after itself.
+
+## Local Manual Installer
+
+Use this from a local checkout when you want an `estacoda` command on your PATH:
+
+```bash
+bash scripts/install.sh
+```
+
+The script checks Node.js >= 22.18.0 and Corepack, builds `dist/`, writes a Node-backed wrapper to `~/.estacoda/bin/estacoda`, and updates PATH where possible.
+
+You can also run the wrapper directly from the checkout:
+
+```bash
+bash scripts/estacoda-wrapper.sh --version
+```
+
+After local manual install, restart your shell or run:
 
 ```bash
 export PATH="$HOME/.estacoda/bin:$PATH"
 ```
 
-## Manual install
+## Planned Launch Installer
 
-### Prerequisites
-- Node.js >= 22.18.0
-- Corepack / pnpm
+The intended launch install direction is the hosted curl installer:
 
-### Steps
+```bash
+curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash
+```
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/kemetresearch/estacoda.git
-   cd estacoda
-   ```
+Do not treat this as a verified public path until the hosted installer is live and release validation has passed.
 
-2. Install dependencies and build:
-   ```bash
-   corepack enable
-   pnpm install
-   pnpm run build
-   ```
+## Optional Future Npm Path
 
-3. Run the install script:
-   ```bash
-   bash scripts/install.sh
-   ```
+The package has local installability metadata for tarball validation, but public npm publication remains blocked with `private: true`.
 
-4. Or use the wrapper directly:
-   ```bash
-   bash scripts/estacoda-wrapper.sh --version
-   ```
+Do not claim these work until the package is actually published:
 
-## Post-install
+```bash
+npm install -g estacoda
+npx estacoda --help
+```
+
+If npm publication stays in the release strategy, update this document only after `npm publish --dry-run`, real publication, and installed binary validation pass.
+
+## Post-Install
+
+For any path that gives you an `estacoda` command:
 
 ```bash
 estacoda init       # Bootstrap state directories
@@ -85,4 +107,4 @@ estacoda update --apply  # Apply update (requires ESTACODA_UPDATE_ARTIFACT)
 
 **pnpm not found**: Run `corepack enable`, then retry.
 
-**No prebuilt binary**: The v0.1.0 installer builds `dist/` from the local checkout and installs a Node-backed wrapper. This is expected until release artifacts are published.
+**No prebuilt binary**: The current local installer builds `dist/` from the local checkout and installs a Node-backed wrapper. This is expected until release artifacts are published.

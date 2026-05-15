@@ -23,6 +23,15 @@ pnpm run start
 # equivalent: node dist/index.js
 ```
 
+Local installability checks use the compiled Node entrypoint, not a published package:
+
+```bash
+pnpm run verify:local-bin
+scripts/verify-package-bin.sh
+```
+
+The package metadata now exposes an `estacoda` bin for packed installs, while public npm publication remains disabled with `private: true`. Do not use or document `npm install -g estacoda` or `npx estacoda` as supported until a release explicitly publishes the package. The hosted curl installer remains the intended launch direction.
+
 `estacoda setup` is the canonical setup entrypoint. A bare `estacoda` launch checks setup state and may point you to setup when configuration is incomplete; the setup product flow itself lives under `estacoda setup`.
 
 Interactive setup uses a reviewed setup flow:
