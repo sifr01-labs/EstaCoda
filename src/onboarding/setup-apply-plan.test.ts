@@ -308,6 +308,24 @@ describe("setup apply plan", () => {
     expect(endState.launchHandoffIntent.preference).toBe("offer-after-verify");
   });
 
+  it("verified-ready can defer launch handoff for an explicit editor choice", async () => {
+    const planned = planSetupApply({
+      kind: "approved-review-result",
+      manifest: firstRunManifest(),
+    });
+    if (planned.kind !== "apply-plan-ready") throw new Error("expected apply plan");
+
+    const endState = await executeSetupApplyPlan(
+      planned.applyPlan,
+      executorWithVerification(verificationReport()),
+      { allowAutomaticLaunch: false }
+    );
+
+    expect(endState.kind).toBe("verified-ready");
+    if (endState.kind !== "verified-ready") throw new Error("expected verified ready");
+    expect(endState.launchHandoffIntent?.preference).toBe("offer-after-verify");
+  });
+
   it("verified-degraded requires explicit continue or limited-mode decision", async () => {
     const planned = planSetupApply({
       kind: "approved-review-result",
@@ -355,6 +373,31 @@ describe("setup apply plan", () => {
     expect(endState.kind).toBe("launched");
     if (endState.kind !== "launched") throw new Error("expected launch");
     expect(endState.acceptedDegraded).toBe(true);
+  });
+
+  it("degraded verification does not launch when automatic handoff is disabled", async () => {
+    const planned = planSetupApply({
+      kind: "approved-review-result",
+      manifest: firstRunManifest(),
+    });
+    if (planned.kind !== "apply-plan-ready") throw new Error("expected apply plan");
+    const endState = await executeSetupApplyPlan(
+      planned.applyPlan,
+      executorWithVerification(verificationReport({
+        providerDiagnostic: {
+          status: "warning",
+          lines: ["Provider status: warning"],
+          warnings: ["Network inference is disabled for the selected hosted provider."],
+        },
+        warnings: ["Network inference is disabled for the selected hosted provider."],
+        issueCodes: ["network-disabled"],
+      })),
+      { acceptDegraded: true, allowAutomaticLaunch: false }
+    );
+
+    expect(endState.kind).toBe("verified-degraded");
+    if (endState.kind !== "verified-degraded") throw new Error("expected degraded");
+    expect(endState.launchHandoffIntent).toBeUndefined();
   });
 
   it("blocked verification prevents automatic launch", async () => {

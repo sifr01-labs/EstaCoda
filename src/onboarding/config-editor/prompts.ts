@@ -15,6 +15,12 @@ export type OptionalCapabilityPromptAction = "unchanged" | "skip" | "enable";
 
 export type OptionalCapabilityPromptId = "telegram" | "voice" | "vision" | "browser";
 
+export type ConfigEditorPostApplyActionId =
+  | "launch"
+  | "accept-limited-mode"
+  | "repair-again"
+  | "exit";
+
 export async function promptConfigEditorAction(
   prompt: Prompt,
   actions: readonly ConfigEditorRenderedAction[],
@@ -208,6 +214,57 @@ export async function promptConfigEditorReviewApproval(
       },
     ],
     defaultValue: true,
+  });
+}
+
+export async function promptConfigEditorPostApplyAction(
+  prompt: Prompt,
+  input: {
+    readonly state: "ready" | "degraded" | "blocked";
+    readonly launchEligible: boolean;
+    readonly limitedModeEligible: boolean;
+  }
+): Promise<ConfigEditorPostApplyActionId> {
+  const launchChoices = input.launchEligible
+    ? [{
+        id: "launch",
+        label: "Launch",
+        description: "Start the interactive session after verified-ready setup.",
+        value: "launch" as const,
+      }]
+    : [];
+  const limitedChoices = input.limitedModeEligible
+    ? [{
+        id: "accept-limited-mode",
+        label: "Accept limited mode",
+        description: "Launch with the verified warnings shown above.",
+        value: "accept-limited-mode" as const,
+      }]
+    : [];
+  const repairChoices = input.state === "ready"
+    ? []
+    : [{
+        id: "repair-again",
+        label: "Repair again",
+        description: "Re-check setup and return to the guided repair editor.",
+        value: "repair-again" as const,
+      }];
+
+  return promptSetupChoice(prompt, {
+    title: "Setup next action",
+    message: "Choose what to do after setup apply.\n",
+    choices: [
+      ...launchChoices,
+      ...limitedChoices,
+      ...repairChoices,
+      {
+        id: "exit",
+        label: "Exit",
+        description: "Leave setup without launching.",
+        value: "exit" as const,
+      },
+    ],
+    defaultValue: "exit" as const,
   });
 }
 
