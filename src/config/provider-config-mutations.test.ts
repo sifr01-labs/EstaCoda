@@ -14,7 +14,7 @@ import {
   setPreferredModelRoute,
   addFallbackRoute
 } from "./provider-config-mutations.js";
-import { setupProviderConfig, loadRuntimeConfig, mergeConfig, type EstaCodaConfig } from "./runtime-config.js";
+import { setupProviderConfig, loadRuntimeConfig, type EstaCodaConfig } from "./runtime-config.js";
 import { computeRuntimeFingerprint } from "../runtime/runtime-fingerprint.js";
 import { resolveProfileStateHome } from "./profile-home.js";
 
@@ -137,14 +137,6 @@ describe("applyStoreProviderCredential", () => {
     expect(json).not.toContain("sk-secret-value");
   });
 
-  it("does not write credential pool", () => {
-    const existing: EstaCodaConfig = {};
-    const config = applyStoreProviderCredential(existing, {
-      provider: "openai",
-      apiKeyEnv: "OPENAI_API_KEY"
-    });
-    expect(JSON.stringify(config)).not.toContain("credentialPools");
-  });
 });
 
 describe("applyRegisterProviderModel", () => {
@@ -401,7 +393,6 @@ describe("compatibility wrapper setupProviderConfig", () => {
       workspaceRoot: tmpDir,
       homeDir: tmpDir,
       input: {
-        scope: "user",
         provider: "deepseek",
         model: "deepseek-chat",
         apiKeyEnv: "DEEPSEEK_API_KEY"
@@ -410,20 +401,6 @@ describe("compatibility wrapper setupProviderConfig", () => {
     expect(result.config.model!.provider).toBe("deepseek");
     expect(result.config.model!.id).toBe("deepseek-chat");
     expect(result.config.providers!.deepseek!.apiKeyEnv).toBe("DEEPSEEK_API_KEY");
-  });
-
-  it("does not write credential pool", async () => {
-    const result = await setupProviderConfig({
-      workspaceRoot: tmpDir,
-      homeDir: tmpDir,
-      input: {
-        scope: "user",
-        provider: "deepseek",
-        model: "deepseek-chat",
-        apiKeyEnv: "DEEPSEEK_API_KEY"
-      }
-    });
-    expect(JSON.stringify(result.config)).not.toContain("credentialPools");
   });
 
   it("preserves existing provider fields like headers", async () => {
@@ -444,7 +421,6 @@ describe("compatibility wrapper setupProviderConfig", () => {
       workspaceRoot: tmpDir,
       homeDir: tmpDir,
       input: {
-        scope: "user",
         provider: "deepseek",
         model: "deepseek-coder",
         apiKeyEnv: "DEEPSEEK_API_KEY"
@@ -516,7 +492,6 @@ describe("media boundary — voice and image-gen untouched", () => {
       workspaceRoot: tmpDir,
       homeDir: tmpDir,
       input: {
-        scope: "user",
         provider: "deepseek",
         model: "deepseek-chat",
         apiKeyEnv: "DEEPSEEK_API_KEY"

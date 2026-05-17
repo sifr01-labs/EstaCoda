@@ -67,7 +67,6 @@ graph TB
         PROUT["ProviderRouter<br/>Route to Provider"]
         OPEAI["OpenAICompatibleProvider<br/>Adapter"]
         AUXP["Auxiliary Model Resolver<br/>Task Routes"]
-        CPOOL["CredentialPool<br/>Key Management"]
     end
 
     subgraph Memory["Memory Layer (src/memory/)"]

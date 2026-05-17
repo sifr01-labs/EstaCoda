@@ -257,7 +257,7 @@ const SETUP_VERIFICATION_KEYS = [
   "setupVerification.actions.providerIncomplete",
   "setupVerification.actions.missingApiKey.generic",
   "setupVerification.actions.missingApiKey.env",
-  "setupVerification.actions.noCredentialPool",
+  "setupVerification.actions.missingCredentialReference",
   "setupVerification.actions.networkDisabled",
   "setupVerification.actions.workspaceNotTrusted",
   "setupVerification.actions.secretPermissions",

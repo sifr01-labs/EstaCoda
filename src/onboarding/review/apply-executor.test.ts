@@ -150,7 +150,6 @@ describe("reviewed setup apply executor", () => {
     const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
     const config = JSON.parse(rawConfig) as {
       providers?: Record<string, { apiKeyEnv?: string }>;
-      credentialPools?: Record<string, { entries?: Array<{ source?: { kind?: string; name?: string } }> }>;
     };
 
     expect(config.providers?.openai?.apiKeyEnv).toBe("OPENAI_API_KEY");
@@ -315,38 +314,8 @@ describe("reviewed setup apply executor", () => {
     expect(endState.verification?.providerDiagnostic.status).toBe("ready");
   });
 
-  describe("verifyReviewedSetup projectConfigTrust threading", () => {
-    it("ignores project config when projectConfigTrust is trusted", async () => {
-      await mkdir(join(workspaceRoot, ".estacoda"), { recursive: true });
-      await writeFile(
-        join(workspaceRoot, ".estacoda", "config.json"),
-        JSON.stringify({ model: { provider: "openai", id: "gpt-4o" } })
-      );
-      const executor = createReviewedSetupApplyExecutor({
-        homeDir: tempDir,
-        workspaceRoot,
-        projectConfigTrust: "trusted",
-      });
-      const report = await executor.verify!({ kind: "post-save-verification-request", sourceLineIds: [], readOnly: true });
-      expect(report.configSources.some((s) => s.includes(join(workspaceRoot, ".estacoda", "config.json")))).toBe(false);
-    });
-
-    it("skips project config when projectConfigTrust is untrusted", async () => {
-      await mkdir(join(workspaceRoot, ".estacoda"), { recursive: true });
-      await writeFile(
-        join(workspaceRoot, ".estacoda", "config.json"),
-        JSON.stringify({ model: { provider: "openai", id: "gpt-4o" } })
-      );
-      const executor = createReviewedSetupApplyExecutor({
-        homeDir: tempDir,
-        workspaceRoot,
-        projectConfigTrust: "untrusted",
-      });
-      const report = await executor.verify!({ kind: "post-save-verification-request", sourceLineIds: [], readOnly: true });
-      expect(report.configSources.some((s) => s.includes(join(workspaceRoot, ".estacoda", "config.json")))).toBe(false);
-    });
-
-    it("remains fail-closed when projectConfigTrust is omitted", async () => {
+  describe("verifyReviewedSetup profile config loading", () => {
+    it("ignores workspace-local config files", async () => {
       await mkdir(join(workspaceRoot, ".estacoda"), { recursive: true });
       await writeFile(
         join(workspaceRoot, ".estacoda", "config.json"),

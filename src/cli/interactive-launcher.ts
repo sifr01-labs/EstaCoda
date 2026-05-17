@@ -7,7 +7,6 @@ export type LaunchOptions = {
   workspaceRoot: string;
   homeDir?: string;
   prompt?: Prompt;
-  projectConfigTrust?: "trusted" | "untrusted";
 };
 
 export type LaunchResult = {
@@ -31,8 +30,7 @@ export async function launchInteractiveSession(options: LaunchOptions): Promise<
 
   const setupRoute = await collectSetupRoute({
     workspaceRoot: options.workspaceRoot,
-    homeDir: options.homeDir,
-    projectConfigTrust: options.projectConfigTrust
+    homeDir: options.homeDir
   });
   const currentLocale = await loadLaunchLocale(options);
 

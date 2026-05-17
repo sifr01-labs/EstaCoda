@@ -4,6 +4,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runInitCommand, bootstrapStateDirectories } from "./init-command.js";
 
+function defaultProfileConfigPath(homeDir: string): string {
+  return join(homeDir, ".estacoda", "profiles", "default", "config.json");
+}
+
 describe("bootstrapStateDirectories", () => {
   let tempHome: string;
 
@@ -44,7 +48,7 @@ describe("runInitCommand", () => {
     const result = await runInitCommand({ homeDir: tempHome });
     expect(result.exitCode).toBe(0);
     expect(result.ok).toBe(true);
-    expect(existsSync(join(tempHome, ".estacoda", "config.json"))).toBe(true);
+    expect(existsSync(defaultProfileConfigPath(tempHome))).toBe(true);
   });
 
   it("creates trust.json", async () => {
@@ -58,7 +62,7 @@ describe("runInitCommand", () => {
     );
 
     expect(results.map((result) => result.exitCode)).toEqual(Array.from({ length: 16 }, () => 0));
-    expect(() => JSON.parse(readFileSync(join(tempHome, ".estacoda", "config.json"), "utf8"))).not.toThrow();
+    expect(() => JSON.parse(readFileSync(defaultProfileConfigPath(tempHome), "utf8"))).not.toThrow();
     expect(() => JSON.parse(readFileSync(join(tempHome, ".estacoda", "trust.json"), "utf8"))).not.toThrow();
     expect(existsSync(join(tempHome, ".estacoda", "cron", "output"))).toBe(true);
     expect(existsSync(join(tempHome, ".estacoda", "cron", "locks"))).toBe(true);
@@ -71,7 +75,7 @@ describe("runInitCommand", () => {
 
     expect(first.exitCode).toBe(0);
     expect(second.exitCode).toBe(0);
-    expect(() => JSON.parse(readFileSync(join(tempHome, ".estacoda", "config.json"), "utf8"))).not.toThrow();
+    expect(() => JSON.parse(readFileSync(defaultProfileConfigPath(tempHome), "utf8"))).not.toThrow();
     expect(() => JSON.parse(readFileSync(join(tempHome, ".estacoda", "trust.json"), "utf8"))).not.toThrow();
   });
 

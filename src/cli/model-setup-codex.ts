@@ -15,8 +15,6 @@ const CODEX_DEFAULT_BASE_URL = "https://chatgpt.com/backend-api/codex";
 export type ModelSetupCodexOptions = {
   homeDir?: string;
   workspaceRoot: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
   prompt?: Prompt;
   fetchLike?: FetchLike;
   signal?: AbortSignal;

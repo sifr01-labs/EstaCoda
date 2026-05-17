@@ -46,6 +46,7 @@ describe("profile home paths", () => {
       authJsonPath: join(profileRoot, "auth.json"),
       soulMdPath: join(profileRoot, "SOUL.md"),
       memoryMdPath: join(profileRoot, "MEMORY.md"),
+      userMdPath: join(profileRoot, "USER.md"),
       skillsPath: join(profileRoot, "skills"),
       logsPath: join(profileRoot, "logs"),
       channelMediaPath: join(profileRoot, "channel-media"),
@@ -62,6 +63,15 @@ describe("profile home paths", () => {
 
     expect(paths.trustJsonPath).toBe(join(tempDir, ".estacoda", "trust.json"));
     expect(paths.sessionsSqlitePath).toBe(join(tempDir, ".estacoda", "sessions.sqlite"));
+  });
+
+  it("keeps USER.md profile-local and shared memory global", () => {
+    const globalPaths = resolveGlobalStateHome({ homeDir: tempDir });
+    const profilePaths = resolveProfileStateHome({ homeDir: tempDir, profileId: "research" });
+
+    expect("userMdPath" in globalPaths).toBe(false);
+    expect(profilePaths.userMdPath).toBe(join(tempDir, ".estacoda", "profiles", "research", "USER.md"));
+    expect(globalPaths.sharedMemoryPath).toBe(join(tempDir, ".estacoda", "memory", "shared"));
   });
 
   it("round-trips active-profile.json", async () => {

@@ -383,7 +383,7 @@ export async function runFirstRunSetup(
 
   const profileId = readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
   const draftBundle = buildFirstRunDraftBundle(routeDecision.firstRunPlanSession, {
-    configPath: options.userConfigPath ?? resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath,
+    configPath: resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath,
     workspaceRoot,
     trustStorePath: stateHome.trustJsonPath,
   });

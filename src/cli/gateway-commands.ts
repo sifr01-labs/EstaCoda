@@ -62,9 +62,6 @@ import {
 export type GatewayCommandOptions = {
   homeDir?: string;
   workspaceRoot: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
-  projectConfigTrust?: "trusted" | "untrusted";
 };
 
 export type GatewayRenderer = (viewModel: ViewModel) => string;
@@ -714,7 +711,7 @@ function validateChannel(
 
 function resolveUserConfigPath(options: GatewayCommandOptions): string {
   const profileId = readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
-  return options.userConfigPath ?? resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
+  return resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
 }
 
 async function readUserConfigRaw(path: string): Promise<Record<string, unknown> | undefined> {

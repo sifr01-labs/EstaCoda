@@ -6,9 +6,6 @@ import { getWhatsAppGatewayDiagnostics } from "./whatsapp-diagnostics.js";
 export type GatewayRunOptions = {
   workspaceRoot: string;
   homeDir?: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
-  projectConfigTrust?: "trusted" | "untrusted";
   profileId?: string;
   telegramFetch?: import("./telegram-adapter.js").TelegramFetch;
   once?: boolean;

@@ -16,9 +16,6 @@ export type SetupVerificationResult = {
 export type SetupVerificationOptions = {
   workspaceRoot: string;
   homeDir?: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
-  projectConfigTrust?: "trusted" | "untrusted";
   runtime?: Runtime;
   trustStorePath?: string;
 };
@@ -26,7 +23,7 @@ export type SetupVerificationOptions = {
 export type SetupVerificationIssueCode =
   | "provider-incomplete"
   | "missing-api-key"
-  | "no-credential-pool"
+  | "missing-credential-reference"
   | "network-disabled"
   | "workspace-not-trusted"
   | "secret-permissions"
@@ -37,7 +34,6 @@ export type SetupVerificationIssueCode =
   | "provider-health-blocked"
   | "model-not-registered"
   | "small-context-window"
-  | "no-available-credential"
   | string;
 
 export type SetupVerificationIssue = {
@@ -240,11 +236,8 @@ function renderVerificationNextSteps(issueCodes: readonly SetupVerificationIssue
       case "missing-api-key":
         steps.add(copy.verification.actions.missingApiKey());
         break;
-      case "no-credential-pool":
-        steps.add(copy.verification.actions.noCredentialPool);
-        break;
-      case "no-available-credential":
-        steps.add(copy.verification.actions.noCredentialPool);
+      case "missing-credential-reference":
+        steps.add(copy.verification.actions.missingCredentialReference);
         break;
       case "network-disabled":
         steps.add(copy.verification.actions.networkDisabled);
@@ -284,11 +277,8 @@ function mapProviderWarningToCodes(warning: string): SetupVerificationIssueCode[
   if (/Missing env var ([A-Z0-9_]+)/u.test(warning)) {
     codes.push("missing-api-key");
   }
-  if (/No credential pool is configured/u.test(warning)) {
-    codes.push("no-credential-pool");
-  }
-  if (/No available credential is configured/u.test(warning)) {
-    codes.push("no-available-credential");
+  if (/No apiKeyEnv is configured/u.test(warning)) {
+    codes.push("missing-credential-reference");
   }
   if (/Network inference is disabled/u.test(warning)) {
     codes.push("network-disabled");

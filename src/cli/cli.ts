@@ -167,8 +167,6 @@ export type CliOptions = {
   workspaceRoot: string;
   homeDir?: string;
   interactive?: boolean;
-  userConfigPath?: string;
-  projectConfigPath?: string;
   tools?: ToolDefinition[];
   prompt?: Prompt;
   telegramFetch?: TelegramFetch;
@@ -176,7 +174,6 @@ export type CliOptions = {
   imageGenerationFetch?: ImageGenerationFetchLike;
   runtime?: Runtime;
   modelsDevOptions?: ModelsDevRegistryOptions;
-  projectConfigTrust?: "trusted" | "untrusted";
 };
 
 export async function runCliCommand(options: CliOptions): Promise<CliCommandResult> {
@@ -321,8 +318,6 @@ async function interactiveSetup(options: CliOptions, input: { readonly advanced:
         applyExecutor: createReviewedSetupApplyExecutor({
           workspaceRoot: options.workspaceRoot,
           homeDir: options.homeDir,
-          userConfigPath: options.userConfigPath,
-          projectConfigPath: options.projectConfigPath,
         }),
       });
 
@@ -345,8 +340,6 @@ async function interactiveSetup(options: CliOptions, input: { readonly advanced:
         applyExecutor: createReviewedSetupApplyExecutor({
           workspaceRoot: options.workspaceRoot,
           homeDir: options.homeDir,
-          userConfigPath: options.userConfigPath,
-          projectConfigPath: options.projectConfigPath,
         }),
         output: {
           write: (value) => chunks.push(value),
@@ -766,8 +759,6 @@ async function model(options: CliOptions, args: string[]): Promise<CliCommandRes
       return runModelSetupCodex({
         homeDir: options.homeDir,
         workspaceRoot: options.workspaceRoot,
-        userConfigPath: options.userConfigPath,
-        projectConfigPath: options.projectConfigPath,
         prompt: options.prompt,
         fetchLike: options.providerFetch
       });
@@ -1048,7 +1039,7 @@ async function persistModelSelection(
 
   // ── Persist config ──
   const profileId = readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
-  const targetPath = options.userConfigPath ?? resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
+  const targetPath = resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
   try {
     await saveRuntimeConfig(targetPath, mutated);
   } catch (err) {
@@ -1259,7 +1250,7 @@ async function runBareModelPicker(
 
   // ── Persist config ──
   const profileId = readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
-  const targetPath = options.userConfigPath ?? resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
+  const targetPath = resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
   try {
     await saveRuntimeConfig(targetPath, mutated);
   } catch (err) {
@@ -1405,7 +1396,6 @@ async function modelFallback(
 
     const baseUrl = valueAfter(args, "--base-url");
     const apiKeyEnv = valueAfter(args, "--api-key-env");
-    const scope = hasFlag(args, "--project") ? "project" : hasFlag(args, "--user") ? "user" : undefined;
 
     const fallback: ModelFallbackConfig = {
       provider: parsed.provider,
@@ -1418,8 +1408,7 @@ async function modelFallback(
     const result = await setupModelFallbackConfig({
       ...options,
       input: {
-        fallbacks: [...existing, fallback],
-        scope
+        fallbacks: [...existing, fallback]
       }
     });
 
@@ -1449,15 +1438,13 @@ async function modelFallback(
     }
 
     const baseUrl = valueAfter(args, "--base-url");
-    const scope = hasFlag(args, "--project") ? "project" : hasFlag(args, "--user") ? "user" : undefined;
 
     const result = await removeModelFallbackConfig({
       ...options,
       input: {
         provider: parsed.provider,
         id: parsed.id,
-        ...(baseUrl !== undefined ? { baseUrl } : {}),
-        scope
+        ...(baseUrl !== undefined ? { baseUrl } : {})
       }
     });
 
@@ -1486,13 +1473,10 @@ async function modelFallback(
       };
     }
 
-    const scope = hasFlag(args, "--project") ? "project" : hasFlag(args, "--user") ? "user" : undefined;
-
     const result = await reorderModelFallbackConfig({
       ...options,
       input: {
-        order: order.map((o) => ({ provider: o.provider, id: o.id, ...(o.baseUrl !== undefined ? { baseUrl: o.baseUrl } : {}) })),
-        scope
+        order: order.map((o) => ({ provider: o.provider, id: o.id, ...(o.baseUrl !== undefined ? { baseUrl: o.baseUrl } : {}) }))
       }
     });
 
@@ -1521,12 +1505,9 @@ async function modelFallback(
       };
     }
 
-    const scope = hasFlag(args, "--project") ? "project" : hasFlag(args, "--user") ? "user" : undefined;
-
     const result = await clearModelFallbackConfig({
-      ...options,
-      scope
-    });
+      ...options
+      });
 
     return {
       handled: true,
@@ -2743,7 +2724,7 @@ async function mcp(options: CliOptions, args: string[]): Promise<CliCommandResul
         "  estacoda mcp reload",
         "  estacoda mcp setup --name docs --command npx --args @modelcontextprotocol/server-filesystem,/path",
         "  estacoda mcp setup --name docs --command uvx --args mcp-server-fetch",
-        "  estacoda mcp setup --name remote --transport http --url http://127.0.0.1:3000/mcp --trust read-only-network"
+        "  estacoda mcp setup --name remote --transport http --url http://127.0.0.1:3000/mcp --server-trust read-only-network"
       ].join("\n")
     };
   }
@@ -2946,9 +2927,7 @@ async function acp(options: CliOptions, args: string[]): Promise<CliCommandResul
   if (subcommand === undefined || subcommand === "serve") {
     await runAcpServer({
       workspaceRoot: options.workspaceRoot,
-      homeDir: options.homeDir,
-      userConfigPath: options.userConfigPath,
-      projectConfigPath: options.projectConfigPath
+      homeDir: options.homeDir
     });
     return {
       handled: true,
@@ -3071,10 +3050,6 @@ function parseVoiceArgs(args: string[]): VoiceSetupInput {
     } else if (arg === "--stt-api-key") {
       parsed.sttApiKey = next;
       index += 1;
-    } else if (arg === "--project") {
-      parsed.scope = "project";
-    } else if (arg === "--user") {
-      parsed.scope = "user";
     }
   }
 
@@ -3117,10 +3092,6 @@ function parseImageArgs(args: string[]): ImageGenerationSetupInput {
       parsed.useGateway = true;
     } else if (arg === "--direct") {
       parsed.useGateway = false;
-    } else if (arg === "--project") {
-      parsed.scope = "project";
-    } else if (arg === "--user") {
-      parsed.scope = "user";
     }
   }
 
@@ -3197,10 +3168,6 @@ function parseSetupArgs(args: string[]): Partial<ProviderSetupInput> {
     } else if (arg === "--api-key") {
       parsed.apiKey = next;
       index += 1;
-    } else if (arg === "--project") {
-      parsed.scope = "project";
-    } else if (arg === "--user") {
-      parsed.scope = "user";
     } else if (arg === "--offline") {
       parsed.enableNetwork = false;
     }
@@ -3219,10 +3186,6 @@ function parseWebArgs(args: string[]): Partial<WebSetupInput> {
     if (arg === "--max-content-chars") {
       parsed.maxContentChars = Number.parseInt(next ?? "", 10);
       index += 1;
-    } else if (arg === "--project") {
-      parsed.scope = "project";
-    } else if (arg === "--user") {
-      parsed.scope = "user";
     }
   }
 
@@ -3253,10 +3216,6 @@ function parseBrowserArgs(args: string[]): Partial<BrowserSetupInput> {
       index += 1;
     } else if (arg === "--auto-launch") {
       parsed.autoLaunch = true;
-    } else if (arg === "--project") {
-      parsed.scope = "project";
-    } else if (arg === "--user") {
-      parsed.scope = "user";
     }
   }
 
@@ -3290,10 +3249,6 @@ function parseTelegramArgs(args: string[]): TelegramSetupInput {
     } else if (arg === "--poll-timeout-seconds") {
       parsed.pollTimeoutSeconds = Number.parseInt(next ?? "", 10);
       index += 1;
-    } else if (arg === "--project") {
-      parsed.scope = "project";
-    } else if (arg === "--user") {
-      parsed.scope = "user";
     }
   }
 
@@ -3307,12 +3262,10 @@ function parseTelegramArgs(args: string[]): TelegramSetupInput {
 function parseTelegramPairArgs(args: string[]): {
   code?: string;
   ttlMinutes?: number;
-  scope?: "user" | "project";
 } {
   const parsed: {
     code?: string;
     ttlMinutes?: number;
-    scope?: "user" | "project";
   } = {};
 
   for (let index = 0; index < args.length; index++) {
@@ -3325,10 +3278,6 @@ function parseTelegramPairArgs(args: string[]): {
     } else if (arg === "--ttl-minutes") {
       parsed.ttlMinutes = Number.parseInt(next ?? "", 10);
       index += 1;
-    } else if (arg === "--project") {
-      parsed.scope = "project";
-    } else if (arg === "--user") {
-      parsed.scope = "user";
     }
   }
 
@@ -3367,7 +3316,7 @@ function parseMcpArgs(args: string[]): Partial<MCPSetupInput> {
     } else if (arg === "--url") {
       parsed.url = next;
       index += 1;
-    } else if (arg === "--trust") {
+    } else if (arg === "--server-trust") {
       parsed.trust = next as MCPSetupInput["trust"];
       index += 1;
     } else if (arg === "--env") {
@@ -3408,10 +3357,6 @@ function parseMcpArgs(args: string[]): Partial<MCPSetupInput> {
     } else if (arg === "--connect-timeout-ms") {
       parsed.connectTimeoutMs = Number.parseInt(next ?? "", 10);
       index += 1;
-    } else if (arg === "--project") {
-      parsed.scope = "project";
-    } else if (arg === "--user") {
-      parsed.scope = "user";
     }
   }
 
@@ -3568,10 +3513,6 @@ function parseSecuritySetupArgs(args: string[]): SecuritySetupInput {
     } else if (arg === "--assessor-timeout-ms") {
       parsed.assessorTimeoutMs = next === undefined ? undefined : Number(next);
       index += 1;
-    } else if (arg === "--project") {
-      parsed.scope = "project";
-    } else if (arg === "--user") {
-      parsed.scope = "user";
     }
   }
 

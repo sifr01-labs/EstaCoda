@@ -992,26 +992,6 @@ describe("gateway commands", () => {
       expect(parsed.channels.telegram.enabled).toBe(true);
     });
 
-    it("writes to userConfigPath when overridden", async () => {
-      const customPath = join(tmpDir, "custom-config.json");
-      const result = await runChannelsEnable({ workspaceRoot: tmpDir, homeDir: tmpDir, userConfigPath: customPath, channel: "telegram" });
-      expect(result.ok).toBe(true);
-
-      const parsed = JSON.parse(await readFile(customPath, "utf8"));
-      expect(parsed.channels.telegram.enabled).toBe(true);
-    });
-
-    it("does not write to projectConfigPath", async () => {
-      const projectPath = join(tmpDir, "project-config.json");
-      await writeFile(projectPath, JSON.stringify({ channels: { telegram: { enabled: false } } }), "utf8");
-
-      const result = await runChannelsEnable({ workspaceRoot: tmpDir, homeDir: tmpDir, projectConfigPath: projectPath, channel: "telegram" });
-      expect(result.ok).toBe(true);
-
-      const parsed = JSON.parse(await readFile(projectPath, "utf8"));
-      expect(parsed.channels.telegram.enabled).toBe(false);
-    });
-
     it("fails on invalid JSON without overwriting", async () => {
       const configPath = defaultProfileConfigPath(tmpDir);
       await mkdir(dirname(configPath), { recursive: true });

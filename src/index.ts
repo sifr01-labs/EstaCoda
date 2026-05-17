@@ -40,15 +40,10 @@ async function main(): Promise<void> {
   const trustStore = new WorkspaceTrustStore({ path: stateHome.trustJsonPath });
   let workspaceTrusted = await trustStore.isTrusted(workspaceRoot);
 
-  if (!workspaceTrusted) {
-    console.warn("[trust] Workspace is not trusted. Project config is ignored until this workspace is trusted.");
-  }
-
   if (argv[0] === "setup") {
     const setupCommand = await runCliCommand({
       argv,
-      workspaceRoot,
-      projectConfigTrust: workspaceTrusted ? "trusted" : "untrusted"
+      workspaceRoot
     });
 
     if (setupCommand.handled) {
@@ -62,8 +57,7 @@ async function main(): Promise<void> {
   if (argv[0] === "help" || argv[0] === "--help" || argv[0] === "-h") {
     const helpCommand = await runCliCommand({
       argv,
-      workspaceRoot,
-      projectConfigTrust: workspaceTrusted ? "trusted" : "untrusted"
+      workspaceRoot
     });
 
     if (helpCommand.handled) {
@@ -76,7 +70,7 @@ async function main(): Promise<void> {
 
   // Bare launch: use interactive launcher for onboarding/session routing
   if (argv.length === 0 && canRunInteractive()) {
-    const launchResult = await launchInteractiveSession({ workspaceRoot, projectConfigTrust: workspaceTrusted ? "trusted" : "untrusted" });
+    const launchResult = await launchInteractiveSession({ workspaceRoot });
 
     if (!launchResult.launched) {
       if (launchResult.output.length > 0) {
@@ -102,8 +96,7 @@ async function main(): Promise<void> {
     if (argv[0] === "doctor" || argv[0] === "verify") {
       const diagnosticCommand = await runCliCommand({
         argv,
-        workspaceRoot,
-        projectConfigTrust: workspaceTrusted ? "trusted" : "untrusted"
+        workspaceRoot
       });
 
       if (diagnosticCommand.handled) {
@@ -151,7 +144,7 @@ async function main(): Promise<void> {
       securityMode: latestConfig.security.approvalMode,
       securityAssessor: latestConfig.security.assessor,
       approvalController: cliApprovalController,
-      projectConfigTrust: nowTrusted ? "trusted" : "untrusted"
+      workspaceTrusted: nowTrusted
     });
   }
 
@@ -162,8 +155,7 @@ async function main(): Promise<void> {
   if (argv[0] === "acp") {
     const acpCommand = await runCliCommand({
       argv,
-      workspaceRoot,
-      projectConfigTrust: workspaceTrusted ? "trusted" : "untrusted"
+      workspaceRoot
     });
 
     if (acpCommand.handled) {
@@ -186,8 +178,7 @@ async function main(): Promise<void> {
     argv,
     workspaceRoot,
     tools: runtime.tools(),
-    runtime,
-    projectConfigTrust: workspaceTrusted ? "trusted" : "untrusted"
+    runtime
   });
 
   if (command.handled) {

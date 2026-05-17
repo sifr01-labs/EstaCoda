@@ -68,16 +68,15 @@ The composition root. Every subsystem is instantiated here with explicit constru
 1. `WorkspaceTrustStore`
 2. `WorkspaceApprovalController`
 3. `ProviderRegistry`
-4. `CredentialPoolRegistry`
-5. Auxiliary model route resolver
-6. `BrowserBackend` (mock or real CDP)
-7. `ContextReferenceExpander`
-8. `ProjectContextLoader`
-9. `MemoryStore`
-10. `LocalMemoryProvider`
-11. `CronStore`
-12. `SessionDB`
-13. `ArtifactStore`
+4. Auxiliary model route resolver
+5. `BrowserBackend` (mock or real CDP)
+6. `ContextReferenceExpander`
+7. `ProjectContextLoader`
+8. `MemoryStore`
+9. `LocalMemoryProvider`
+10. `CronStore`
+11. `SessionDB`
+12. `ArtifactStore`
 14. `ProcessManager`
 15. `ToolRegistry`
 16. `ToolExecutor`

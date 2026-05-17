@@ -53,8 +53,6 @@ type JsonRpcNotification = {
 type AcpServerOptions = {
   workspaceRoot: string;
   homeDir?: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
   input?: NodeJS.ReadableStream;
   output?: NodeJS.WritableStream;
   sessionDb?: SessionDB;
@@ -62,8 +60,6 @@ type AcpServerOptions = {
     workspaceRoot: string;
     sessionId: string;
     homeDir: string;
-    userConfigPath?: string;
-    projectConfigPath?: string;
     sessionDb: SessionDB;
     securityPolicy: SecurityPolicy;
   }) => Promise<Runtime>;
@@ -102,8 +98,6 @@ export async function runAcpServer(options: AcpServerOptions): Promise<void> {
 export class AcpServer {
   readonly #workspaceRoot: string;
   readonly #homeDir: string;
-  readonly #userConfigPath: string | undefined;
-  readonly #projectConfigPath: string | undefined;
   readonly #profileId: string;
   readonly #input: NodeJS.ReadableStream;
   readonly #output: NodeJS.WritableStream;
@@ -125,8 +119,6 @@ export class AcpServer {
   constructor(options: AcpServerOptions) {
     this.#workspaceRoot = options.workspaceRoot;
     this.#homeDir = options.homeDir ?? homedir();
-    this.#userConfigPath = options.userConfigPath;
-    this.#projectConfigPath = options.projectConfigPath;
     this.#profileId = readActiveProfile({ homeDir: this.#homeDir })?.profileId ?? defaultProfileId();
     this.#input = options.input ?? process.stdin;
     this.#output = options.output ?? process.stdout;
@@ -747,8 +739,6 @@ export class AcpServer {
         workspaceRoot: options.workspaceRoot,
         sessionId: options.sessionId,
         homeDir: this.#homeDir,
-        userConfigPath: this.#userConfigPath,
-        projectConfigPath: this.#projectConfigPath,
         sessionDb: this.#sessionDb,
         securityPolicy: createAcpSecurityPolicy(options.grants, {
           allowEditorRead: this.#clientFsReadText
@@ -806,9 +796,7 @@ export class AcpServer {
             })
           })
         : undefined,
-      homeDir: this.#homeDir,
-      userConfigPath: this.#userConfigPath,
-      projectConfigPath: this.#projectConfigPath
+      homeDir: this.#homeDir
     };
 
     return await createRuntime(runtimeOptions);

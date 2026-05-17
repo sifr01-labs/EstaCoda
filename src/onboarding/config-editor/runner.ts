@@ -479,7 +479,7 @@ async function reviewAndApplyAction(
   const stateHome = resolveStateHome({ homeDir: options.homeDir });
   const profileConfigPath = activeProfileConfigPath(options);
   const draftBundle = buildSetupEditorActionDraftBundle(session, draftActions, {
-    configPath: options.userConfigPath ?? initialDecision.state.configSources[0] ?? profileConfigPath,
+    configPath: profileConfigPath,
     workspaceRoot: options.workspaceRoot,
     trustStorePath: overrides.trustStorePath ?? options.trustStorePath ?? stateHome.trustJsonPath,
   });
@@ -497,7 +497,7 @@ function verificationDraftBundle(
   if (verificationAction === undefined) return undefined;
   const profileConfigPath = activeProfileConfigPath(options);
   return buildSetupEditorActionDraftBundle(session, [verificationAction], {
-    configPath: options.userConfigPath ?? initialDecision.state.configSources[0] ?? profileConfigPath,
+    configPath: profileConfigPath,
     workspaceRoot: options.workspaceRoot,
     trustStorePath: options.trustStorePath ?? stateHome.trustJsonPath,
   });
@@ -828,7 +828,7 @@ function setupModuleContextFromConfig(
   const vision = visionContext(config);
 
   return {
-    configPath: options.userConfigPath ?? initialDecision.state.configSources[0] ?? activeProfileConfigPath(options),
+    configPath: activeProfileConfigPath(options),
     workspaceRoot: options.workspaceRoot,
     trustStorePath: options.trustStorePath ?? stateHome.trustJsonPath,
     provider: {
@@ -1013,7 +1013,7 @@ async function reviewAndApplyResolvedRoute(
   const stateHome = resolveStateHome({ homeDir: options.homeDir });
   const profileConfigPath = activeProfileConfigPath(options);
   const draftBundle = buildSetupEditorActionDraftBundle(session, draftActions, {
-    configPath: options.userConfigPath ?? initialDecision.state.configSources[0] ?? profileConfigPath,
+    configPath: profileConfigPath,
     workspaceRoot: options.workspaceRoot,
     trustStorePath: options.trustStorePath ?? stateHome.trustJsonPath,
   });

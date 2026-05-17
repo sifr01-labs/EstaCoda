@@ -207,8 +207,6 @@ describe("runGatewaySupervisor", () => {
       latestConfig,
       workspaceRoot: tmpDir,
       homeDir: tmpDir,
-      userConfigPath: join(tmpDir, ".estacoda", "config.json"),
-      projectConfigPath: join(tmpDir, ".estacoda", "project-config.json"),
       profileId: "default",
       sessionDb,
       sessionId: "cron-test",

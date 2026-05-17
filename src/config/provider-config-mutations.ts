@@ -4,7 +4,6 @@ import type {
   ProviderAuthMethod
 } from "../contracts/provider.js";
 import {
-  mergeConfig,
   normalizeModelFallbacks,
   readConfig,
   saveRuntimeConfig,
@@ -87,7 +86,7 @@ export function applyRegisterProviderConfig(
       [input.provider]: providerConfig as NonNullable<EstaCodaConfig["providers"]>[string]
     }
   };
-  return mergeConfig(existing, patch);
+  return patchConfig(existing, patch);
 }
 
 /**
@@ -105,7 +104,7 @@ export function applyStoreProviderCredential(
     apiKeyEnv: input.apiKeyEnv
   };
 
-  return mergeConfig(existing, {
+  return patchConfig(existing, {
     providers: {
       [input.provider]: providerConfig
     }
@@ -126,7 +125,7 @@ export function applyRegisterProviderModel(
   const nextModels = uniqueStrings([...previousModels, ...input.models]);
   const existingProvider = providers !== undefined ? providers[input.provider] ?? {} : {};
 
-  return mergeConfig(existing, {
+  return patchConfig(existing, {
     providers: {
       [input.provider]: {
         ...existingProvider,
@@ -167,7 +166,7 @@ export function applySetPreferredModelRoute(
       [input.provider]: providerPatch as NonNullable<EstaCodaConfig["providers"]>[string]
     }
   };
-  return mergeConfig(existing, patch);
+  return patchConfig(existing, patch);
 }
 
 /**
@@ -192,7 +191,7 @@ export function applyAddFallbackRoute(
       : {})
   };
 
-  const merged = mergeConfig(existing, {
+  const merged = patchConfig(existing, {
     model: {
       fallbacks: [...existingFallbacks, newFallback]
     }
@@ -272,6 +271,25 @@ export async function addFallbackRoute(
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
+
+function patchConfig(existing: EstaCodaConfig, patch: EstaCodaConfig): EstaCodaConfig {
+  return {
+    ...existing,
+    ...patch,
+    model: patch.model === undefined
+      ? existing.model
+      : {
+        ...(existing.model ?? {}),
+        ...patch.model
+      },
+    providers: patch.providers === undefined
+      ? existing.providers
+      : {
+        ...(existing.providers ?? {}),
+        ...patch.providers
+      }
+  };
+}
 
 function uniqueStrings(values: string[]): string[] {
   return Array.from(new Set(values.filter((value) => value.length > 0)));

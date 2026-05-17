@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, readdir, readFile, writeFile, rm } from "node:fs/promises";
 import { dirname, join, relative, sep } from "node:path";
 import { tmpdir } from "node:os";
-import { loadRuntimeConfig, loadUserRuntimeConfig, loadTrustedRuntimeConfig, mergeConfig, normalizeAuxiliaryModels, saveRuntimeConfig } from "./runtime-config.js";
+import { loadRuntimeConfig, normalizeAuxiliaryModels, saveRuntimeConfig } from "./runtime-config.js";
 import { resolveProfileStateHome } from "./profile-home.js";
 
 function profileConfigPath(homeDir: string): string {
@@ -32,41 +32,6 @@ describe("normalizeAuxiliaryModels", () => {
       vision: { provider: "auto", enabled: true },
     });
     expect(Object.keys(result.vision!)).toEqual(["provider", "enabled"]);
-  });
-});
-
-describe("mergeConfig auxiliaryModels", () => {
-  it("deep-merges auxiliaryModels by task key", () => {
-    const merged = mergeConfig(
-      { auxiliaryModels: { vision: { provider: "openai", id: "gpt-4o" } } },
-      { auxiliaryModels: { vision: { enabled: false } } }
-    );
-    expect(merged.auxiliaryModels?.vision).toEqual({ provider: "openai", id: "gpt-4o", enabled: false });
-  });
-
-  it("adds tasks from both configs", () => {
-    const merged = mergeConfig(
-      { auxiliaryModels: { vision: { provider: "openai" } } },
-      { auxiliaryModels: { approval: { provider: "main" } } }
-    );
-    expect(merged.auxiliaryModels?.vision).toEqual({ provider: "openai" });
-    expect(merged.auxiliaryModels?.approval).toEqual({ provider: "main" });
-  });
-
-  it("strips default-only auxiliary slots after merge", () => {
-    const merged = mergeConfig(
-      { auxiliaryModels: {} },
-      { auxiliaryModels: {} }
-    );
-    expect(merged.auxiliaryModels).toBeUndefined();
-  });
-
-  it("preserves non-default slots after merge", () => {
-    const merged = mergeConfig(
-      { auxiliaryModels: { vision: { provider: "openai", id: "gpt-4o" } } },
-      { auxiliaryModels: {} }
-    );
-    expect(merged.auxiliaryModels?.vision).toEqual({ provider: "openai", id: "gpt-4o" });
   });
 });
 
@@ -509,23 +474,6 @@ describe("loadRuntimeConfig profile loading", () => {
     await rm(workspace, { recursive: true, force: true });
   });
 
-  it("legacy trust wrappers load the same selected profile config", async () => {
-    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda", "profiles", "default"), { recursive: true });
-    await writeFile(profileConfigPath(workspace), JSON.stringify({
-      model: { provider: "openai", id: "gpt-4o" }
-    }));
-
-    const userLoaded = await loadUserRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
-    const trustedLoaded = await loadTrustedRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
-
-    expect(userLoaded.sources).toEqual([profileConfigPath(workspace)]);
-    expect(trustedLoaded.sources).toEqual([profileConfigPath(workspace)]);
-    expect(userLoaded.model.provider).toBe("openai");
-    expect(trustedLoaded.model.provider).toBe("openai");
-    await rm(workspace, { recursive: true, force: true });
-  });
-
   it("ignores invalid workspace project config", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(join(workspace, ".estacoda", "profiles", "default"), { recursive: true });
@@ -726,18 +674,6 @@ describe("buildProviderRegistry custom provider baseUrl behavior", () => {
 });
 
 describe("modelAliases normalization", () => {
-  it("merges model_aliases into canonical modelAliases", async () => {
-    const { mergeConfig } = await import("./runtime-config.js");
-    const merged = mergeConfig(
-      { model_aliases: { qwen: { provider: "local", model: "qwen2.5" } } },
-      { modelAliases: { gpt4: { provider: "openai", model: "gpt-4o" } } }
-    );
-    expect(merged.modelAliases).toBeDefined();
-    expect(merged.modelAliases?.qwen).toEqual({ provider: "local", model: "qwen2.5" });
-    expect(merged.modelAliases?.gpt4).toEqual({ provider: "openai", model: "gpt-4o" });
-    expect(merged.model_aliases).toBeUndefined();
-  });
-
   it("loads model_aliases input into canonical modelAliases", async () => {
     const { loadRuntimeConfig } = await import("./runtime-config.js");
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-alias-test-"));

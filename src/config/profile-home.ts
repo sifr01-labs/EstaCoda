@@ -12,7 +12,6 @@ export type GlobalStatePaths = {
   trustJsonPath: string;
   workspaceApprovalsPath: string;
   sessionsSqlitePath: string;
-  userMdPath: string;
   sharedMemoryPath: string;
   binPath: string;
   packsPath: string;
@@ -26,6 +25,7 @@ export type ProfileStatePaths = {
   authJsonPath: string;
   soulMdPath: string;
   memoryMdPath: string;
+  userMdPath: string;
   skillsPath: string;
   logsPath: string;
   channelMediaPath: string;
@@ -53,7 +53,6 @@ export function resolveGlobalStateHome(options?: { homeDir?: string }): GlobalSt
     trustJsonPath: join(stateRoot, "trust.json"),
     workspaceApprovalsPath: join(stateRoot, "workspace-approvals.json"),
     sessionsSqlitePath: join(stateRoot, "sessions.sqlite"),
-    userMdPath: join(stateRoot, "USER.md"),
     sharedMemoryPath: join(stateRoot, "memory", "shared"),
     binPath: join(stateRoot, "bin"),
     packsPath: join(stateRoot, "packs")
@@ -72,6 +71,7 @@ export function resolveProfileStateHome(options: { homeDir?: string; profileId: 
     authJsonPath: join(profileRoot, "auth.json"),
     soulMdPath: join(profileRoot, "SOUL.md"),
     memoryMdPath: join(profileRoot, "MEMORY.md"),
+    userMdPath: join(profileRoot, "USER.md"),
     skillsPath: join(profileRoot, "skills"),
     logsPath: join(profileRoot, "logs"),
     channelMediaPath: join(profileRoot, "channel-media"),

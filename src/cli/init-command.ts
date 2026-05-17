@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 import { resolveStateHome } from "../config/state-home.js";
 
 export type InitOptions = {
@@ -49,6 +50,8 @@ async function writeFileIfAbsent(path: string, contents: string): Promise<void> 
 
 export async function runInitCommand(options: InitOptions): Promise<InitResult> {
   const stateHome = resolveStateHome({ homeDir: options.homeDir });
+  const profileId = readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+  const profileHome = resolveProfileStateHome({ homeDir: options.homeDir, profileId });
   const homeDir = stateHome.homeDir;
   if (homeDir.length === 0) {
     return {
@@ -81,7 +84,8 @@ export async function runInitCommand(options: InitOptions): Promise<InitResult> 
         approvalMode: "confirm"
       }
     };
-    await writeFileIfAbsent(stateHome.configPath, `${JSON.stringify(defaultConfig, null, 2)}\n`);
+    await mkdir(profileHome.profileRoot, { recursive: true });
+    await writeFileIfAbsent(profileHome.configPath, `${JSON.stringify(defaultConfig, null, 2)}\n`);
     await writeFileIfAbsent(stateHome.trustJsonPath, "{}\n");
 
     return {
@@ -91,7 +95,7 @@ export async function runInitCommand(options: InitOptions): Promise<InitResult> 
         `Home: ${root}`,
         "Created:",
         ...DEFAULT_STATE_DIRS.map((d) => `  ${d}/`),
-        "  config.json",
+        `  profiles/${profileId}/config.json`,
         "  trust.json",
         "",
         "Next: run `estacoda` to start interactive setup, or `estacoda verify` to check readiness."

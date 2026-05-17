@@ -35,7 +35,7 @@ export type SetupVerificationCopy = {
     readonly actions: {
       readonly providerIncomplete: string;
       readonly missingApiKey: (envName?: string) => string;
-      readonly noCredentialPool: string;
+      readonly missingCredentialReference: string;
       readonly networkDisabled: string;
       readonly workspaceNotTrusted: string;
       readonly secretPermissions: string;
@@ -82,7 +82,7 @@ export function setupVerificationCopy(locale: SetupCopyLocale | string): SetupVe
         missingApiKey: (envName) => envName === undefined
           ? copy(locale, "setupVerification.actions.missingApiKey.generic")
           : format(locale, "setupVerification.actions.missingApiKey.env", { envVar: envName }),
-        noCredentialPool: copy(locale, "setupVerification.actions.noCredentialPool"),
+        missingCredentialReference: copy(locale, "setupVerification.actions.missingCredentialReference"),
         networkDisabled: copy(locale, "setupVerification.actions.networkDisabled"),
         workspaceNotTrusted: copy(locale, "setupVerification.actions.workspaceNotTrusted"),
         secretPermissions: copy(locale, "setupVerification.actions.secretPermissions"),

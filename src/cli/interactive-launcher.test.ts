@@ -112,7 +112,6 @@ describe("launchInteractiveSession", () => {
       workspaceRoot,
       homeDir: tempDir,
       input: {
-        scope: "user",
         provider: "local",
         model: "ollama/auto",
         enableNetwork: false
@@ -122,7 +121,6 @@ describe("launchInteractiveSession", () => {
       workspaceRoot,
       homeDir: tempDir,
       input: {
-        scope: "user",
         language: "ar"
       }
     });
@@ -146,7 +144,6 @@ describe("launchInteractiveSession", () => {
       workspaceRoot,
       homeDir: tempDir,
       input: {
-        scope: "user",
         provider: "local",
         model: "ollama/auto",
         enableNetwork: false
@@ -156,7 +153,6 @@ describe("launchInteractiveSession", () => {
       workspaceRoot,
       homeDir: tempDir,
       input: {
-        scope: "user",
         language: "ar"
       }
     });
@@ -186,7 +182,6 @@ describe("launchInteractiveSession", () => {
       workspaceRoot,
       homeDir: tempDir,
       input: {
-        scope: "user",
         provider: "local",
         model: "ollama/auto",
         enableNetwork: false

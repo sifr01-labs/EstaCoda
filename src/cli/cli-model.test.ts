@@ -404,7 +404,6 @@ describe("cli model", () => {
         argv: ["model"],
         workspaceRoot: tmpDir,
         homeDir: tmpDir,
-        userConfigPath: configPath,
         prompt
       });
 
@@ -427,18 +426,6 @@ describe("cli model", () => {
             apiKeyEnv: "CUSTOM_API_KEY",
             models: ["main", "backup"],
             enableNetwork: true
-          }
-        },
-        credentialPools: {
-          custom: {
-            strategy: "fill_first",
-            entries: [
-              {
-                id: "custom-CUSTOM_API_KEY",
-                source: { kind: "env", name: "CUSTOM_API_KEY" },
-                priority: 1
-              }
-            ]
           }
         },
         model: {
@@ -1425,43 +1412,6 @@ describe("cli model", () => {
       }
     });
 
-    it("does not load project-defined providers when workspace is untrusted", async () => {
-      const fixturePath = await writeBundledSnapshot(tmpDir, mockSnapshot());
-      await writeUserConfig(tmpDir, {
-        providers: { openai: { kind: "openai-compatible", models: ["gpt-4o"] } },
-        model: { provider: "openai", id: "gpt-4o" }
-      });
-      // Write a project config with a custom provider to a separate path
-      const projectConfigPath = join(tmpDir, "project-config.json");
-      await writeFile(projectConfigPath, JSON.stringify({
-        providers: { custom: { kind: "openai-compatible", baseUrl: "https://custom.example/v1", models: ["custom-model"] } }
-      }), "utf8");
-
-      const listResult = await runCliCommand({
-        argv: ["model", "list", "--live"],
-        workspaceRoot: tmpDir,
-        homeDir: tmpDir,
-        projectConfigPath,
-        projectConfigTrust: "untrusted",
-        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false }
-      });
-      expect(listResult.handled).toBe(true);
-      expect(listResult.exitCode).toBe(0);
-      expect(listResult.output).not.toContain("custom-model");
-      expect(listResult.output).not.toContain("custom.example");
-
-      const searchResult = await runCliCommand({
-        argv: ["model", "search", "custom", "--live"],
-        workspaceRoot: tmpDir,
-        homeDir: tmpDir,
-        projectConfigPath,
-        projectConfigTrust: "untrusted",
-        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false }
-      });
-      expect(searchResult.handled).toBe(true);
-      expect(searchResult.exitCode).toBe(0);
-      expect(searchResult.output).not.toContain("custom-model");
-    });
   });
 
   describe("model diagnose structured output", () => {

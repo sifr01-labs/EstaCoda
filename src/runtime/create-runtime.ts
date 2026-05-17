@@ -110,9 +110,7 @@ export type RuntimeOptions = {
   projectMemoryRoot?: string;
   auxiliaryModels?: AuxiliaryModelConfig;
   homeDir?: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
-  projectConfigTrust?: "trusted" | "untrusted";
+  workspaceTrusted?: boolean;
   webFetch?: WebFetchLike;
   cdpFetch?: CdpFetchLike;
   cdpWebSocketFactory?: CdpWebSocketFactory;
@@ -280,7 +278,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     localSkillsRoot
   });
   const skillLoadWarnings = [...bundledSync.warnings];
-  const effectiveMcpServers = options.projectConfigTrust === "trusted" ? (options.mcpServers ?? {}) : {};
+  const effectiveMcpServers = options.workspaceTrusted === true ? (options.mcpServers ?? {}) : {};
   const loadedMcpServers = await loadMcpServers({
     servers: effectiveMcpServers
   });
@@ -426,10 +424,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   }
   for (const tool of createConfigTools({
     workspaceRoot,
-    homeDir: options.homeDir,
-    userConfigPath: options.userConfigPath,
-    projectConfigPath: options.projectConfigPath,
-    projectConfigTrust: options.projectConfigTrust
+    homeDir: options.homeDir
   })) {
     toolRegistry.register(tool);
   }
@@ -985,11 +980,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       const verificationReport = await collectSetupVerificationReport({
         workspaceRoot,
         homeDir: options.homeDir,
-        userConfigPath: options.userConfigPath,
-        projectConfigPath: options.projectConfigPath,
         trustStorePath: options.trustStorePath,
         runtime: this as Runtime,
-        projectConfigTrust: options.projectConfigTrust,
       });
       const versionStatus = options.homeDir !== undefined
         ? await readCachedUpdateStatus(options.homeDir)

@@ -179,7 +179,7 @@ describe("collectSetupVerificationReport", () => {
     expect(report.warnings.some((w) => w.includes("permissions"))).toBe(true);
   });
 
-  it("ignores project config source when projectConfigTrust is trusted", async () => {
+  it("ignores workspace-local config sources", async () => {
     const tempHome = await mkdtemp(join(tmpdir(), "estacoda-verify-test-"));
     const workspaceRoot = join(tempHome, "workspace");
     await mkdir(workspaceRoot, { recursive: true });
@@ -188,21 +188,6 @@ describe("collectSetupVerificationReport", () => {
     const report = await collectSetupVerificationReport({
       workspaceRoot,
       homeDir: tempHome,
-      projectConfigTrust: "trusted",
-    });
-    expect(report.configSources.some((s) => s.includes(join(workspaceRoot, ".estacoda", "config.json")))).toBe(false);
-  });
-
-  it("excludes project config source when projectConfigTrust is untrusted", async () => {
-    const tempHome = await mkdtemp(join(tmpdir(), "estacoda-verify-test-"));
-    const workspaceRoot = join(tempHome, "workspace");
-    await mkdir(workspaceRoot, { recursive: true });
-    await mkdir(join(workspaceRoot, ".estacoda"), { recursive: true });
-    await writeFile(join(workspaceRoot, ".estacoda", "config.json"), JSON.stringify({ model: { provider: "openai", id: "gpt-4o" } }));
-    const report = await collectSetupVerificationReport({
-      workspaceRoot,
-      homeDir: tempHome,
-      projectConfigTrust: "untrusted",
     });
     expect(report.configSources.some((s) => s.includes(join(workspaceRoot, ".estacoda", "config.json")))).toBe(false);
   });

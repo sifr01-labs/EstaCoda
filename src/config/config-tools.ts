@@ -21,9 +21,6 @@ import { diagnoseProviderConfig, renderProviderDiagnostic } from "./provider-dia
 export type ConfigToolsOptions = {
   workspaceRoot: string;
   homeDir?: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
-  projectConfigTrust?: "trusted" | "untrusted";
 };
 
 export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[] {
@@ -107,7 +104,6 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           assessorProvider: { type: "string" },
           assessorModel: { type: "string" },
           assessorTimeoutMs: { type: "number" },
-          scope: { type: "string", enum: ["user", "project"] }
         }
       },
       riskClass: "shared-state-mutation",
@@ -146,7 +142,6 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
         properties: {
           enableNetwork: { type: "boolean" },
           maxContentChars: { type: "number" },
-          scope: { type: "string", enum: ["user", "project"] }
         }
       },
       riskClass: "shared-state-mutation",
@@ -186,7 +181,6 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           cdpUrl: { type: "string" },
           launchCommand: { type: "string" },
           autoLaunch: { type: "boolean" },
-          scope: { type: "string", enum: ["user", "project"] }
         }
       },
       riskClass: "shared-state-mutation",
@@ -297,7 +291,6 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
             enum: ["read-only-local", "read-only-network", "workspace-write", "external-side-effect", "credential-access", "destructive-local", "shared-state-mutation", "spend-money", "sandbox-escape"]
           },
           enabled: { type: "boolean" },
-          scope: { type: "string", enum: ["user", "project"] }
         },
         required: ["name"]
       },
@@ -342,7 +335,6 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           allowedChatIds: { type: "array", items: { type: "string" } },
           pollTimeoutSeconds: { type: "number" },
           enabled: { type: "boolean" },
-          scope: { type: "string", enum: ["user", "project"] }
         }
       },
       riskClass: "shared-state-mutation",
@@ -459,7 +451,6 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           apiKeyEnv: { type: "string" },
           apiKey: { type: "string" },
           enableNetwork: { type: "boolean" },
-          scope: { type: "string", enum: ["user", "project"] },
           primary: { type: "boolean" }
         },
         required: ["provider", "model"]
@@ -511,7 +502,6 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           apiKey: { type: "string" },
           baseUrl: { type: "string" },
           useGateway: { type: "boolean" },
-          scope: { type: "string", enum: ["user", "project"] }
         }
       },
       riskClass: "shared-state-mutation",

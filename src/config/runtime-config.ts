@@ -426,7 +426,6 @@ export type ProviderSetupInput = {
   apiKeyEnv?: string;
   apiKey?: string;
   enableNetwork?: boolean;
-  scope?: "user" | "project";
   primary?: boolean;
   contextWindowTokens?: number;
   requiresCredential?: boolean;
@@ -435,7 +434,6 @@ export type ProviderSetupInput = {
 export type WebSetupInput = {
   enableNetwork?: boolean;
   maxContentChars?: number;
-  scope?: "user" | "project";
 };
 
 export type BrowserSetupInput = {
@@ -443,7 +441,6 @@ export type BrowserSetupInput = {
   cdpUrl?: string;
   launchCommand?: string;
   autoLaunch?: boolean;
-  scope?: "user" | "project";
 };
 
 export type VoiceSetupInput = {
@@ -458,7 +455,6 @@ export type VoiceSetupInput = {
   sttCommand?: string;
   sttApiKeyEnv?: string;
   sttApiKey?: string;
-  scope?: "user" | "project";
 };
 
 export type ImageGenerationSetupInput = {
@@ -469,7 +465,6 @@ export type ImageGenerationSetupInput = {
   apiKey?: string;
   baseUrl?: string;
   useGateway?: boolean;
-  scope?: "user" | "project";
 };
 
 export type MCPSetupInput = {
@@ -494,7 +489,6 @@ export type MCPSetupInput = {
   toolRiskClass?: ToolRiskClass;
   resourceReadRiskClass?: ToolRiskClass;
   promptGetRiskClass?: ToolRiskClass;
-  scope?: "user" | "project";
 };
 
 export type TelegramSetupInput = {
@@ -505,13 +499,11 @@ export type TelegramSetupInput = {
   allowedChatIds?: string[];
   pollTimeoutSeconds?: number;
   enabled?: boolean;
-  scope?: "user" | "project";
 };
 
 export type TelegramPairingInput = {
   code?: string;
   ttlMinutes?: number;
-  scope?: "user" | "project";
 };
 
 export type SecuritySetupInput = {
@@ -520,30 +512,25 @@ export type SecuritySetupInput = {
   assessorProvider?: ProviderId;
   assessorModel?: string;
   assessorTimeoutMs?: number;
-  scope?: "user" | "project";
 };
 
 export type ModelFallbackSetupInput = {
   fallbacks: ModelFallbackConfig[];
-  scope?: "user" | "project";
 };
 
 export type SkillSetupInput = {
   autonomy?: SkillAutonomy;
-  scope?: "user" | "project";
 };
 
 export type UiSetupInput = {
   language?: UiLanguage;
   flavor?: UiFlavor;
   activityLabels?: ActivityLabelsLocale;
-  scope?: "user" | "project";
 };
 
 export type ProfileSetupInput = {
   mode?: AgentProfileMode;
   responseLanguage?: AgentResponseLanguage;
-  scope?: "user" | "project";
 };
 
 export type LoadRuntimeConfigOptions = {
@@ -559,7 +546,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
   await loadDotEnvSecrets({ homeDir: options.homeDir, profileId });
   const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId });
   const loadedConfig = await readConfig(profilePaths.configPath);
-  const config = mergeConfig(loadedConfig.config);
+  const config = patchConfig(loadedConfig.config);
   const catalogProfiles = await resolveModelProfilesFromCatalog({
     homeDir: options.homeDir,
     allowNetwork: false,
@@ -714,21 +701,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
   };
 }
 
-export type LegacyLoadRuntimeConfigOptions = LoadRuntimeConfigOptions & {
-  userConfigPath?: string;
-  projectConfigPath?: string;
-  projectConfigTrust?: "trusted" | "untrusted";
-};
-
-export async function loadUserRuntimeConfig(options: LegacyLoadRuntimeConfigOptions): Promise<LoadedRuntimeConfig> {
-  return loadRuntimeConfig(options);
-}
-
-export async function loadTrustedRuntimeConfig(options: LegacyLoadRuntimeConfigOptions): Promise<LoadedRuntimeConfig> {
-  return loadRuntimeConfig(options);
-}
-
-export function mergeConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
+function patchConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
   return compactConfig(configs.reduce<EstaCodaConfig>((merged, config) => ({
     model: {
       ...(merged.model ?? {}),
@@ -1372,8 +1345,6 @@ function resolveConfigMutationPath(options: { homeDir?: string; profileId?: stri
 export async function setupProviderConfig(options: {
   workspaceRoot: string;
   homeDir?: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
   input: ProviderSetupInput;
 }): Promise<{
   path: string;
@@ -1441,7 +1412,7 @@ export async function setupProviderConfig(options: {
     };
 
   // Single read, single merge, single save — no multi-write partial states
-  const config = mergeConfig(existing.config, {
+  const config = patchConfig(existing.config, {
     ...primaryModelPatch,
     providers: {
       [options.input.provider]: providerConfig
@@ -1460,8 +1431,6 @@ export async function setupProviderConfig(options: {
 export async function setupModelFallbackConfig(options: {
   workspaceRoot: string;
   homeDir?: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
   input: ModelFallbackSetupInput;
 }): Promise<{
   path: string;
@@ -1470,7 +1439,7 @@ export async function setupModelFallbackConfig(options: {
   validateModelFallbackSetupInput(options.input);
   const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
-  const merged = mergeConfig(existing.config, {
+  const merged = patchConfig(existing.config, {
     model: {
       fallbacks: options.input.fallbacks
     }
@@ -1495,13 +1464,10 @@ export async function setupModelFallbackConfig(options: {
 export async function removeModelFallbackConfig(options: {
   workspaceRoot: string;
   homeDir?: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
   input: {
     provider: ProviderId;
     id: string;
     baseUrl?: string;
-    scope?: "user" | "project";
   };
 }): Promise<{
   path: string;
@@ -1513,7 +1479,7 @@ export async function removeModelFallbackConfig(options: {
   const remaining = (existing.config.model?.fallbacks ?? []).filter((fb) => {
     return `${fb.provider}/${fb.id}/${fb.baseUrl ?? ""}` !== targetKey;
   });
-  const config = mergeConfig(existing.config, {
+  const config = patchConfig(existing.config, {
     model: {
       fallbacks: remaining.length === 0 ? undefined : remaining
     }
@@ -1530,11 +1496,8 @@ export async function removeModelFallbackConfig(options: {
 export async function reorderModelFallbackConfig(options: {
   workspaceRoot: string;
   homeDir?: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
   input: {
     order: Array<{ provider: ProviderId; id: string; baseUrl?: string }>;
-    scope?: "user" | "project";
   };
 }): Promise<{
   path: string;
@@ -1548,7 +1511,7 @@ export async function reorderModelFallbackConfig(options: {
     return current.find((fb) => `${fb.provider}/${fb.id}/${fb.baseUrl ?? ""}` === `${o.provider}/${o.id}/${o.baseUrl ?? ""}`);
   }).filter((fb): fb is ModelFallbackConfig => fb !== undefined);
   const tail = current.filter((fb) => !orderKeys.has(`${fb.provider}/${fb.id}/${fb.baseUrl ?? ""}`));
-  const config = mergeConfig(existing.config, {
+  const config = patchConfig(existing.config, {
     model: {
       fallbacks: [...ordered, ...tail]
     }
@@ -1565,16 +1528,13 @@ export async function reorderModelFallbackConfig(options: {
 export async function clearModelFallbackConfig(options: {
   workspaceRoot: string;
   homeDir?: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
-  scope?: "user" | "project";
 }): Promise<{
   path: string;
   config: EstaCodaConfig;
 }> {
   const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
-  const config = mergeConfig(existing.config, {
+  const config = patchConfig(existing.config, {
     model: {
       fallbacks: undefined
     }
@@ -1591,8 +1551,6 @@ export async function clearModelFallbackConfig(options: {
 export async function setupWebConfig(options: {
   workspaceRoot: string;
   homeDir?: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
   input: WebSetupInput;
 }): Promise<{
   path: string;
@@ -1601,7 +1559,7 @@ export async function setupWebConfig(options: {
   validateWebSetupInput(options.input);
   const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
-  const config = mergeConfig(existing.config, {
+  const config = patchConfig(existing.config, {
     web: {
       enableNetwork: options.input.enableNetwork ?? true,
       maxContentChars: options.input.maxContentChars
@@ -1619,8 +1577,6 @@ export async function setupWebConfig(options: {
 export async function setupBrowserConfig(options: {
   workspaceRoot: string;
   homeDir?: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
   input: BrowserSetupInput;
 }): Promise<{
   path: string;
@@ -1629,7 +1585,7 @@ export async function setupBrowserConfig(options: {
   validateBrowserSetupInput(options.input);
   const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
-  const config = mergeConfig(existing.config, {
+  const config = patchConfig(existing.config, {
     browser: {
       backend: options.input.backend ?? "local-cdp",
       cdpUrl: options.input.cdpUrl,
@@ -1649,8 +1605,6 @@ export async function setupBrowserConfig(options: {
 export async function setupVoiceConfig(options: {
   workspaceRoot: string;
   homeDir?: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
   input: VoiceSetupInput;
 }): Promise<{
   path: string;
@@ -1693,7 +1647,7 @@ export async function setupVoiceConfig(options: {
     secretPaths.push(secret.path);
   }
 
-  const config = mergeConfig(existing.config, {
+  const config = patchConfig(existing.config, {
     tts: {
       provider: ttsProvider,
       speed: options.input.ttsSpeed ?? previousTts.speed,
@@ -1726,8 +1680,6 @@ export async function setupVoiceConfig(options: {
 export async function setupImageGenerationConfig(options: {
   workspaceRoot: string;
   homeDir?: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
   input: ImageGenerationSetupInput;
 }): Promise<{
   path: string;
@@ -1755,7 +1707,7 @@ export async function setupImageGenerationConfig(options: {
   const requestedModel = options.input.model ?? resolveImageModel(provider, options.input.modelVersion);
   const model = requestedModel ?? (providerExplicit ? defaultImageModel(provider) : previous[provider]?.model ?? previous.model ?? defaultImageModel(provider));
   const baseUrl = options.input.baseUrl ?? previous[provider]?.baseUrl;
-  const config = mergeConfig(existing.config, {
+  const config = patchConfig(existing.config, {
     imageGen: {
       provider,
       model,
@@ -1782,8 +1734,6 @@ export async function setupImageGenerationConfig(options: {
 export async function setupMcpConfig(options: {
   workspaceRoot: string;
   homeDir?: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
   input: MCPSetupInput;
 }): Promise<{
   path: string;
@@ -1822,7 +1772,7 @@ export async function setupMcpConfig(options: {
     resourceReadRiskClass: options.input.resourceReadRiskClass,
     promptGetRiskClass: options.input.promptGetRiskClass
   };
-  const config = mergeConfig(existing.config, {
+  const config = patchConfig(existing.config, {
     mcpServers: servers
   });
   delete config.mcp_servers;
@@ -1837,8 +1787,6 @@ export async function setupMcpConfig(options: {
 export async function setupSecurityConfig(options: {
   workspaceRoot: string;
   homeDir?: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
   input: SecuritySetupInput;
 }): Promise<{
   path: string;
@@ -1864,7 +1812,7 @@ export async function setupSecurityConfig(options: {
   if (options.input.mode !== undefined) {
     securityPatch.approvalMode = normalizeSecurityApprovalMode(options.input.mode);
   }
-  const config = mergeConfig(existing.config, {
+  const config = patchConfig(existing.config, {
     security: {
       ...securityPatch
     }
@@ -1880,8 +1828,6 @@ export async function setupSecurityConfig(options: {
 export async function setupSkillConfig(options: {
   workspaceRoot: string;
   homeDir?: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
   input: SkillSetupInput;
 }): Promise<{
   path: string;
@@ -1890,7 +1836,7 @@ export async function setupSkillConfig(options: {
   validateSkillSetupInput(options.input);
   const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
-  const config = mergeConfig(existing.config, {
+  const config = patchConfig(existing.config, {
     skills: {
       autonomy: options.input.autonomy ?? "suggest"
     }
@@ -1906,8 +1852,6 @@ export async function setupSkillConfig(options: {
 export async function setupUiConfig(options: {
   workspaceRoot: string;
   homeDir?: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
   input: UiSetupInput;
 }): Promise<{
   path: string;
@@ -1919,7 +1863,7 @@ export async function setupUiConfig(options: {
   const previous = normalizeUiConfig(existing.config.ui);
   const nextLanguage = options.input.language ?? previous.language;
   const languageChangedTo = options.input.language;
-  const config = mergeConfig(existing.config, {
+  const config = patchConfig(existing.config, {
     ui: {
       language: nextLanguage,
       flavor: options.input.flavor ?? (
@@ -1945,8 +1889,6 @@ export async function setupUiConfig(options: {
 export async function setupProfileConfig(options: {
   workspaceRoot: string;
   homeDir?: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
   input: ProfileSetupInput;
 }): Promise<{
   path: string;
@@ -1956,7 +1898,7 @@ export async function setupProfileConfig(options: {
   const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
   const previous = normalizeProfileConfig(existing.config.profile);
-  const config = mergeConfig(existing.config, {
+  const config = patchConfig(existing.config, {
     profile: {
       mode: options.input.mode ?? previous.mode,
       responseLanguage: options.input.responseLanguage ?? previous.responseLanguage
@@ -1985,8 +1927,6 @@ function isToolRiskClass(value: unknown): value is ToolRiskClass {
 export async function setupTelegramConfig(options: {
   workspaceRoot: string;
   homeDir?: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
   input: TelegramSetupInput;
 }): Promise<{
   path: string;
@@ -2027,7 +1967,7 @@ export async function setupTelegramConfig(options: {
     telegramPatch.pollTimeoutSeconds = options.input.pollTimeoutSeconds;
   }
 
-  const config = mergeConfig(existing.config, {
+  const config = patchConfig(existing.config, {
     channels: {
       telegram: telegramPatch
     }
@@ -2045,8 +1985,6 @@ export async function setupTelegramConfig(options: {
 export async function createTelegramPairingCode(options: {
   workspaceRoot: string;
   homeDir?: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
   input?: TelegramPairingInput;
   now?: () => Date;
   code?: () => string;
@@ -2057,16 +1995,13 @@ export async function createTelegramPairingCode(options: {
   expiresAt: string;
 }> {
   const input = options.input ?? {};
-  if (input.scope === "project") {
-    throw new Error("Telegram pairing codes are user-scoped for MVP.");
-  }
   const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
   const now = options.now?.() ?? new Date();
   const ttlMinutes = input.ttlMinutes ?? 10;
   const expiresAt = new Date(now.getTime() + ttlMinutes * 60_000).toISOString();
   const code = input.code ?? options.code?.() ?? randomPairingCode();
-  const config = mergeConfig(existing.config, {
+  const config = patchConfig(existing.config, {
     channels: {
       telegram: {
         ...(existing.config.channels?.telegram ?? {}),
@@ -2092,8 +2027,6 @@ export async function createTelegramPairingCode(options: {
 export async function consumeTelegramPairingCode(options: {
   workspaceRoot: string;
   homeDir?: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
   code: string;
   userId: string;
   chatId: string;
@@ -2137,7 +2070,7 @@ export async function consumeTelegramPairingCode(options: {
   }
 
   const telegram = existing.config.channels?.telegram ?? {};
-  const config = mergeConfig(existing.config, {
+  const config = patchConfig(existing.config, {
     channels: {
       telegram: {
         ...telegram,
@@ -2180,13 +2113,11 @@ export async function readConfig(path: string): Promise<{ path: string; loaded: 
 function validateProviderSetupInput(input: ProviderSetupInput): void {
   requireNonEmpty(input.provider, "provider");
   requireNonEmpty(input.model, "model");
-  validateScope(input.scope);
   validateOptionalUrl(input.baseUrl, "baseUrl");
   validateOptionalEnvName(input.apiKeyEnv, "apiKeyEnv");
 }
 
 function validateModelFallbackSetupInput(input: ModelFallbackSetupInput): void {
-  validateScope(input.scope);
   if (!Array.isArray(input.fallbacks)) {
     throw new Error("Expected fallbacks to be an array");
   }
@@ -2203,14 +2134,12 @@ function validateModelFallbackSetupInput(input: ModelFallbackSetupInput): void {
 }
 
 function validateWebSetupInput(input: WebSetupInput): void {
-  validateScope(input.scope);
   if (input.maxContentChars !== undefined && (!Number.isInteger(input.maxContentChars) || input.maxContentChars <= 0)) {
     throw new Error("Expected maxContentChars to be a positive integer");
   }
 }
 
 function validateBrowserSetupInput(input: BrowserSetupInput): void {
-  validateScope(input.scope);
   if (input.backend !== undefined && !isBrowserBackend(input.backend)) {
     throw new Error("Expected browser backend local-cdp, browserbase, firecrawl, camofox, mock, or unconfigured");
   }
@@ -2218,7 +2147,6 @@ function validateBrowserSetupInput(input: BrowserSetupInput): void {
 }
 
 function validateVoiceSetupInput(input: VoiceSetupInput): void {
-  validateScope(input.scope);
   if (input.ttsProvider !== undefined && !isTtsProvider(input.ttsProvider)) {
     throw new Error("Expected a supported TTS provider");
   }
@@ -2233,7 +2161,6 @@ function validateVoiceSetupInput(input: VoiceSetupInput): void {
 }
 
 function validateImageGenerationSetupInput(input: ImageGenerationSetupInput): void {
-  validateScope(input.scope);
   if (input.provider !== undefined && input.provider !== "fal" && input.provider !== "byteplus") {
     throw new Error("Expected image provider fal or byteplus");
   }
@@ -2249,7 +2176,6 @@ function validateImageGenerationSetupInput(input: ImageGenerationSetupInput): vo
 
 function validateMcpSetupInput(input: MCPSetupInput): void {
   requireNonEmpty(input.name, "name");
-  validateScope(input.scope);
   if (input.transport !== undefined && input.transport !== "stdio" && input.transport !== "http") {
     throw new Error("Expected MCP transport stdio or http");
   }
@@ -2269,7 +2195,6 @@ function validateMcpSetupInput(input: MCPSetupInput): void {
 }
 
 function validateSecuritySetupInput(input: SecuritySetupInput): void {
-  validateScope(input.scope);
   if (input.mode !== undefined) {
     normalizeSecurityApprovalMode(input.mode);
   }
@@ -2281,14 +2206,12 @@ function validateSecuritySetupInput(input: SecuritySetupInput): void {
 }
 
 function validateSkillSetupInput(input: SkillSetupInput): void {
-  validateScope(input.scope);
   if (input.autonomy !== undefined && input.autonomy !== "none" && input.autonomy !== "suggest" && input.autonomy !== "proactive" && input.autonomy !== "autonomous") {
     throw new Error("Expected skill autonomy none, suggest, proactive, or autonomous");
   }
 }
 
 function validateUiSetupInput(input: UiSetupInput): void {
-  validateScope(input.scope);
   if (input.language !== undefined && input.language !== "en" && input.language !== "ar") {
     throw new Error("Expected UI language en or ar");
   }
@@ -2301,7 +2224,6 @@ function validateUiSetupInput(input: UiSetupInput): void {
 }
 
 function validateProfileSetupInput(input: ProfileSetupInput): void {
-  validateScope(input.scope);
   if (input.mode !== undefined && input.mode !== "focused" && input.mode !== "operator" && input.mode !== "builder" && input.mode !== "research") {
     throw new Error("Expected profile mode focused, operator, builder, or research");
   }
@@ -2311,16 +2233,9 @@ function validateProfileSetupInput(input: ProfileSetupInput): void {
 }
 
 function validateTelegramSetupInput(input: TelegramSetupInput): void {
-  validateScope(input.scope);
   validateOptionalEnvName(input.botTokenEnv, "botTokenEnv");
   if (input.pollTimeoutSeconds !== undefined && (!Number.isInteger(input.pollTimeoutSeconds) || input.pollTimeoutSeconds <= 0)) {
     throw new Error("Expected pollTimeoutSeconds to be a positive integer");
-  }
-}
-
-function validateScope(scope: "user" | "project" | undefined): void {
-  if (scope !== undefined && scope !== "user" && scope !== "project") {
-    throw new Error("Expected scope user or project");
   }
 }
 

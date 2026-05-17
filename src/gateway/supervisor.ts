@@ -92,8 +92,6 @@ export function buildGatewayCronRuntimeOptions(input: {
   latestConfig: LoadedRuntimeConfig;
   workspaceRoot: string;
   homeDir: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
   profileId: string;
   sessionDb: SQLiteSessionDB;
   sessionId: string;
@@ -106,8 +104,6 @@ export function buildGatewayCronRuntimeOptions(input: {
     modelFallbackRoutes: latestConfig.modelFallbackRoutes,
     workspaceRoot: input.workspaceRoot,
     homeDir: input.homeDir,
-    userConfigPath: input.userConfigPath,
-    projectConfigPath: input.projectConfigPath,
     sessionId: input.sessionId,
     profileId: input.profileId,
     sessionDb: input.sessionDb,
@@ -340,8 +336,6 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     homeDir,
     localSkillsRoot: profilePaths.skillsPath,
     trustStorePath,
-    userConfigPath: options.userConfigPath,
-    projectConfigPath: options.projectConfigPath,
     disabledToolsets: [],
     disableCronTools: false,
     approvalControllerPresent: false,
@@ -495,8 +489,6 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       modelFallbackRoutes: latestConfig.modelFallbackRoutes,
       workspaceRoot: options.workspaceRoot,
       homeDir: hd,
-      userConfigPath: options.userConfigPath,
-      projectConfigPath: options.projectConfigPath,
       sessionId: input.sessionId,
       profileId,
       sessionDb: db,
@@ -850,8 +842,6 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
             const result = await consumeTelegramPairingCode({
               workspaceRoot: options.workspaceRoot,
               homeDir,
-              userConfigPath: options.userConfigPath,
-              projectConfigPath: options.projectConfigPath,
               code: message.text,
               userId: message.sender.id,
               chatId: message.sessionKey.chatId,
@@ -906,8 +896,6 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
             const result = await consumeTelegramPairingCode({
               workspaceRoot: options.workspaceRoot,
               homeDir,
-              userConfigPath: options.userConfigPath,
-              projectConfigPath: options.projectConfigPath,
               code: message.text,
               userId: message.sender.id,
               chatId: message.sessionKey.chatId,
@@ -1028,8 +1016,6 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
               latestConfig,
               workspaceRoot: options.workspaceRoot,
               homeDir,
-              userConfigPath: options.userConfigPath,
-              projectConfigPath: options.projectConfigPath,
               profileId,
               sessionDb,
               sessionId: `cron-${job.id}-${randomUUID()}`,

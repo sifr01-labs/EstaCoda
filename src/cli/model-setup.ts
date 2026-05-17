@@ -133,7 +133,6 @@ export type ModelSetupLocalArgs = {
   baseUrl?: string;
   model?: string;
   contextWindow?: number;
-  scope?: "user" | "project";
 };
 
 export type ModelSetupCustomArgs = {
@@ -142,7 +141,6 @@ export type ModelSetupCustomArgs = {
   model?: string;
   apiKeyEnv?: string;
   contextWindow?: number;
-  scope?: "user" | "project";
 };
 
 export function parseModelSetupLocalArgs(args: string[]): ModelSetupLocalArgs {
@@ -159,10 +157,6 @@ export function parseModelSetupLocalArgs(args: string[]): ModelSetupLocalArgs {
     } else if (arg === "--context-window") {
       parsed.contextWindow = Number(next);
       i += 1;
-    } else if (arg === "--project") {
-      parsed.scope = "project";
-    } else if (arg === "--user") {
-      parsed.scope = "user";
     }
   }
   return parsed;
@@ -188,10 +182,6 @@ export function parseModelSetupCustomArgs(args: string[]): ModelSetupCustomArgs 
     } else if (arg === "--context-window") {
       parsed.contextWindow = Number(next);
       i += 1;
-    } else if (arg === "--project") {
-      parsed.scope = "project";
-    } else if (arg === "--user") {
-      parsed.scope = "user";
     }
   }
   return parsed;
@@ -251,7 +241,6 @@ export async function runModelSetupLocal(options: CliOptions, args: string[]): P
     models: probe.models,
     baseUrl,
     enableNetwork: true,
-    scope: parsed.scope,
     requiresCredential: false,
     contextWindowTokens: parsed.contextWindow
   };
@@ -410,7 +399,6 @@ export async function runModelSetupCustom(options: CliOptions, args: string[]): 
     baseUrl,
     apiKeyEnv: parsed.apiKeyEnv,
     enableNetwork: true,
-    scope: parsed.scope,
     requiresCredential: parsed.apiKeyEnv !== undefined,
     contextWindowTokens: parsed.contextWindow
   };
