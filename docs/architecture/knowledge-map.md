@@ -173,8 +173,6 @@ graph TB
     PEXEC --> PROUT
     PEXEC --> OPEAI
     PEXEC --> AUXP
-    PEXEC --> CPOOL
-
     MPROV --> MSTORE
     MPROV --> MRENDER
     MPROV --> MPROMO
@@ -213,11 +211,11 @@ graph TB
     CM --> SPS
 
     %% Durable state
-    MSTORE -.->|"Durable"| DISK1[("~/.estacoda/memory/")]
-    SDB -.->|"Durable"| DISK2[("SQLite / In-Memory")]
-    SREG -.->|"Durable"| DISK3[("~/.estacoda/skills/")]
-    CSTOR -.->|"Durable"| DISK4[("~/.estacoda/cron/")]
-    WTRUST -.->|"Durable"| DISK5[("~/.estacoda/workspace-trust.json")]
+    MSTORE -.->|"Durable"| DISK1[("profiles/<id>/USER.md + SOUL.md + MEMORY.md")]
+    SDB -.->|"Durable"| DISK2[("~/.estacoda/sessions.sqlite + profile_id")]
+    SREG -.->|"Durable"| DISK3[("profiles/<id>/skills/")]
+    CSTOR -.->|"Durable"| DISK4[("profiles/<id>/cron/")]
+    WTRUST -.->|"Durable"| DISK5[("~/.estacoda/trust.json")]
     SLEARN -.->|"Durable"| DISK6[("~/.estacoda/skill-learning.json")]
 
     style AL fill:#ff9999,stroke:#cc0000,stroke-width:2px

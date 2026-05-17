@@ -36,7 +36,7 @@ Construction order:
 
 Key composition rules:
 
-- Official skills load first. Personal/project/external skills load next.
+- Official skills load first. Profile-installed and configured external skills load next.
 - Visible skill catalog is filtered per session using runtime conditions.
 - `vision.analyze` is registered as a real tool and uses auxiliary `vision` provider route preferences.
 - Channel media directory is treated as an additional allowed root for relevant tools.
@@ -98,7 +98,7 @@ Two layers:
 **1. Registry / routing**
 - Offline-first model catalog (`src/model-catalog/models-dev-registry.ts`)
 - Provider registry with route selection by capability and preference
-- Credential pool for key rotation
+- Direct credential lookup from provider `apiKeyEnv` to `process.env`
 
 **2. Execution**
 - `ProviderExecutor` — streaming token collection, tool-call fragment assembly, fallback handling
@@ -147,8 +147,7 @@ Skill sources:
 | Source | Location | Mutability |
 |--------|----------|------------|
 | `official` | Bundled in repo | Read-only (local working copies for evolution) |
-| `personal` | `~/.estacoda/skills/` | Mutable |
-| `project` | `<workspace>/.estacoda/skills/` | Mutable |
+| `profile` | `~/.estacoda/profiles/<id>/skills/` | Mutable |
 | `external` | Configured external roots | Read-only |
 
 Visibility is session-stable, filtered by runtime conditions, and refreshed on `/reset` or new session.
@@ -250,7 +249,7 @@ Explicit attach/detach is required:
 - `/attach <code>` in Telegram (redeems a handoff code)
 - `/detach` in Telegram (creates a new independent session)
 
-Surface pointers are stored in `FileSurfacePointerStore` (`~/.estacoda/surface-pointers.json`). Each pointer records:
+Surface pointers are stored in `FileSurfacePointerStore` under the bound profile gateway state. Each pointer records:
 - `sessionId`: the SQLite session
 - `attachedAt`: ISO timestamp
 - `homeDelivery`: optional delivery target (e.g., `local`, `telegram:<chatId>`)
@@ -259,7 +258,7 @@ Surface pointers are stored in `FileSurfacePointerStore` (`~/.estacoda/surface-p
 
 Handoff uses short-lived, single-use codes:
 1. Operator runs `estacoda handoff telegram` → generates a 6-character code (Crockford base-32, `crypto.randomInt`).
-2. Code is written to `~/.estacoda/handoff-codes.json` with TTL (default 10 minutes).
+2. Code is written under the bound profile gateway state with TTL (default 10 minutes).
 3. User sends `/attach <code>` in Telegram.
 4. `HandoffStore.redeem()` validates: code exists, not used, not expired, surface type matches.
 5. On success, the Telegram surface pointer is updated to point to the CLI session.
@@ -277,7 +276,7 @@ Security properties:
 
 | Store | Persistence | Role |
 |-------|-------------|------|
-| `CronStore` | `~/.estacoda/cron/jobs.json` | Job definitions, schedule, status, next run |
+| `CronStore` | `~/.estacoda/profiles/<id>/cron/jobs.json` | Job definitions, schedule, status, next run |
 | `CronExecutionStore` | SQLite (`sessions.sqlite`) | Execution records: start, end, status, output summary, failure class/message |
 
 ### Runner
@@ -307,7 +306,7 @@ Capability-first security boundary.
 - `/yolo` is a session-scoped CLI/gateway toggle for `open` mode; cannot bypass the hard floor
 - Tool risk classes drive gating: `safe`, `caution`, `external-side-effect`, `irreversible`
 - Structured `targetKey` values are the approval boundary; display summaries are not
-- Workspace trust allows normal local work to proceed proactively
+- Workspace trust allows normal local work in that directory to proceed proactively; it does not control config loading
 - Persistent approvals match on normalized `targetKey`
 - Channel approvals: `once`, `session`, `always`
 - CLI approvals: same scope model through runtime-backed grants
@@ -356,28 +355,31 @@ Capability-first security boundary.
 ### Session persistence
 
 - Interactive/session state written to session DB
-- SQLite for gateway path; in-memory for smoke/scaffolding
+- Global SQLite session DB at `~/.estacoda/sessions.sqlite`, with rows scoped by `profile_id`
 - CLI session context persisted in `.estacoda/cli-sessions.json`
-- Channel session context persisted in `channel-sessions.json` via `ChannelSessionStore`
-- Cross-surface pointers in `.estacoda/surface-pointers.json`
+- Channel session context persisted under the bound profile gateway state via `ChannelSessionStore`
+- Cross-surface pointers under the bound profile gateway state
 - Channel session identity includes explicit chat/thread policy
 
 ### Memory persistence
 
-- `SOUL.md`, `USER.md`, `MEMORY.md`, `AGENTS.md` in `~/.estacoda/`
+- Global shared memory in `~/.estacoda/memory/shared/`
+- Profile-local `USER.md`, `SOUL.md`, `MEMORY.md`, and `promotions.json` under `~/.estacoda/profiles/<id>/`
+- Workspace `AGENTS.md` is context/instruction input, not profile memory
 - Bounded budgets enforced by `MemoryStore`
 - `LocalMemoryProvider` persists: manual conclusions, promoted user preferences, promoted project facts/conventions, skill outcomes
 - Contradiction/forget/inspection for promoted user preferences
 - Workflow learning separated from memory files:
-  - Facts/conventions → `MEMORY.md`
-  - User preferences → `USER.md`
-  - Reusable procedures → project skills
-  - Workflow learning state → `<workspace>/.estacoda/skill-learning.json`
+  - Facts/conventions → profile-local `MEMORY.md`
+  - User preferences → profile-local `USER.md`
+  - Persona/identity → profile-local `SOUL.md`
+  - Reusable procedures → profile skills
+  - Promotion metadata → profile-local `promotions.json`
 - `skills.autonomy`: `none` | `suggest` | `proactive` | `autonomous`
 
 ### Trajectory persistence
 
-- Trajectories are persisted to `~/.estacoda/sessions.sqlite` via `SQLiteSessionDB`
+- Trajectories are persisted to global `~/.estacoda/sessions.sqlite` via `SQLiteSessionDB` and scoped by profile
 - Table `trajectories` stores event arrays, outcomes, and metadata
 - Table `trajectory_failures` stores classified failure records
 - `TrajectoryRecorder` remains in-memory for the active session; persistence happens at completion

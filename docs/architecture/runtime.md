@@ -63,6 +63,15 @@ description: "Breakdown of EstaCoda's runtime: AgentLoop, createRuntime, registr
 
 The composition root. Every subsystem is instantiated here with explicit constructor arguments. After v0.4, it also constructs six extracted runtime components before passing them to `AgentLoop`.
 
+Runtime config is loaded from exactly one selected profile: an explicit `profileId`, the active profile, or `default`. There is no user/project config merge. Workspace trust is only a behavioral gating input for local actions and MCP startup; it does not change which config file is loaded.
+
+State ownership after the C2 profile overhaul:
+
+- Profile config, secrets, OAuth auth, identity memory, skills, cron state, gateway state, logs, caches, and channel media live under `~/.estacoda/profiles/<id>/`.
+- The session database is global at `~/.estacoda/sessions.sqlite`, with rows scoped by `profile_id`.
+- Workspace trust and workspace approvals are global directory-owned state in `trust.json` and `workspace-approvals.json`.
+- Global shared memory lives only under `~/.estacoda/memory/shared/`.
+
 ### Created subsystems
 
 1. `WorkspaceTrustStore`
@@ -156,7 +165,7 @@ The composition root. Every subsystem is instantiated here with explicit constru
 ### ProviderExecutor
 
 **File:** `src/providers/provider-executor.ts`
-**Role:** Streaming execution, token collection, tool-call fragment assembly, fallback handling, credential-pool integration.
+**Role:** Streaming execution, token collection, tool-call fragment assembly, fallback handling, and direct `apiKeyEnv` credential resolution.
 
 ### ToolExecutor
 

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import type { SmokeCase } from "../smoke-case.js";
 import { runInitCommand } from "../../cli/init-command.js";
 import { runSetupVerification } from "../../onboarding/verification.js";
+import { resolveGlobalStateHome, resolveProfileStateHome } from "../../config/profile-home.js";
 
 export const init_lifecycle_case: SmokeCase = {
   id: "init-lifecycle",
@@ -18,29 +19,38 @@ export const init_lifecycle_case: SmokeCase = {
         throw new Error(`init failed: ${initResult.output}`);
       }
 
+      const globalPaths = resolveGlobalStateHome({ homeDir: tempHome });
+      const profilePaths = resolveProfileStateHome({ homeDir: tempHome, profileId: "default" });
       const expectedDirs = [
-        "memory",
-        "skills",
-        "skills/local",
-        "skills/.evolution",
-        "packs",
-        "cron",
-        ".backups"
+        globalPaths.sharedMemoryPath,
+        globalPaths.packsPath,
+        profilePaths.skillsPath,
+        join(profilePaths.skillsPath, ".evolution"),
+        profilePaths.cronPath,
+        profilePaths.logsPath,
+        profilePaths.gatewayStatePath,
+        profilePaths.channelMediaPath,
+        profilePaths.audioCachePath,
+        profilePaths.imageCachePath,
+        profilePaths.tempPath
       ];
 
-      for (const dir of expectedDirs) {
-        const path = join(tempHome, ".estacoda", dir);
+      for (const path of expectedDirs) {
         if (!existsSync(path)) {
-          throw new Error(`Expected directory missing: ${dir}`);
+          throw new Error(`Expected directory missing: ${path}`);
         }
       }
 
-      if (!existsSync(join(tempHome, ".estacoda", "config.json"))) {
+      if (!existsSync(profilePaths.configPath)) {
         throw new Error("config.json was not created");
       }
 
-      if (!existsSync(join(tempHome, ".estacoda", "trust.json"))) {
+      if (!existsSync(globalPaths.trustJsonPath)) {
         throw new Error("trust.json was not created");
+      }
+
+      if (!existsSync(globalPaths.activeProfilePath)) {
+        throw new Error("active-profile.json was not created");
       }
 
       const verifyResult = await runSetupVerification({

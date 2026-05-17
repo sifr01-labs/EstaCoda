@@ -205,7 +205,7 @@ Explicit attach/detach is required:
 - `/attach <code>` in Telegram (redeems a handoff code)
 - `/detach` in Telegram (creates a new independent session)
 
-Surface pointers are stored in `FileSurfacePointerStore` (`~/.estacoda/surface-pointers.json`).
+Surface pointers are stored in `FileSurfacePointerStore` under the bound profile gateway state.
 
 ## Busy Policy
 
@@ -219,7 +219,14 @@ See [Channel Configuration](../operations/channel-configuration.md) for config s
 
 ## Gateway Runtime
 
-Gateway turns rebuild runtimes from fresh config snapshots. This helps MCP reload semantics but means adapter-level settings are established at gateway start.
+Gateway processes are bound to the profile selected at gateway start time. Changing `active-profile.json` does not mutate an already-running gateway. Runtime state is profile-local:
+
+- channel approvals, channel sessions, surface pointers, and handoff codes live under the bound profile `gateway/` state
+- delivery logs live under the bound profile log state
+- channel media and WhatsApp auth state live under the bound profile state paths
+- gateway process registry entries are profile-tagged
+
+Gateway turns rebuild runtimes from fresh selected-profile config snapshots. This helps MCP reload semantics, but the supervisor remains bound to the profile chosen at start.
 
 ```bash
 # Enable channels before starting
@@ -228,6 +235,7 @@ estacoda channels enable discord
 
 # Start gateway
 estacoda gateway start
+estacoda gateway start --profile work
 
 # Check status
 estacoda gateway status
@@ -261,3 +269,4 @@ Channel-specific commands available in gateway:
 - Email live smoke is optional/manual.
 - Gateway status reports readiness, not background-process liveness.
 - Channel-specific safety rules are partial — general safety policy applies to all channels equally.
+- Gateway approval queue hardening and richer inline button flows are planned for Part 2; do not treat them as complete beyond the currently implemented channel approval prompts.

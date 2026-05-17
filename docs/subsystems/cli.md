@@ -32,9 +32,19 @@ pnpm run dev -- setup           # Canonical reviewed setup entrypoint
 pnpm run dev -- verify          # Verify configuration
 pnpm run dev -- settings        # Show current settings
 pnpm run dev -- doctor --live   # Live provider check
+pnpm run dev -- profile list    # Advanced profile management
 pnpm run dev -- telegram setup  # Configure Telegram
 pnpm run dev -- gateway start   # Start gateway (channels must be enabled first)
 ```
+
+Global command option:
+
+```bash
+estacoda --profile work model status
+estacoda -p work doctor
+```
+
+`--profile` / `-p` selects a profile for the current command only. It does not change `active-profile.json`; only `estacoda profile use <name>` changes the active profile.
 
 ## Installability
 
@@ -121,7 +131,7 @@ Interactive setup uses the reviewed setup architecture:
 1. Interface language and expression style
 2. Workspace trust prompt
 3. Primary provider and model selection
-4. Hosted-provider API key capture (masked input, saved to `~/.estacoda/.env` with `0600`)
+4. Hosted-provider API key capture (masked input, saved to the selected profile `.env` with `0600`)
 5. Security mode selection
 6. Workflow-learning mode selection
 7. Optional capabilities (Telegram, voice, vision, browser)
@@ -129,6 +139,8 @@ Interactive setup uses the reviewed setup architecture:
 9. Reviewed apply operations perform config, credential-reference, and trust writes
 10. Structured read-only verification after apply
 11. Launch handoff for verified-ready setup, or explicit accepted degraded state
+
+First-run setup silently creates and selects the default profile before writing configuration. Normal day-one onboarding copy should not require users to know profiles exist; profile commands are an advanced surface for multi-context setups.
 
 ### Setup Routes
 
@@ -190,9 +202,32 @@ Backup/fallback routes are managed through `estacoda model fallback ...`; first-
 - Technical tokens (provider names, paths, env vars, commands) remain in English with LTR isolation
 - Full runtime CLI localization is **not** complete
 
-## Profile / UI Foundation
+## Profile Commands
 
-Global config supports:
+Profiles isolate configuration, secrets, identity memory, skills, cron state, gateway state, logs, caches, and channel media under `~/.estacoda/profiles/<id>/`.
+
+```bash
+estacoda profile create <name>
+estacoda profile list
+estacoda profile use <name>
+estacoda profile show [name]
+estacoda profile delete <name>
+estacoda profile rename <old> <new>
+```
+
+Behavior:
+
+- `profile create <name>` creates the full profile skeleton. By default it copies `USER.md` and `MEMORY.md` from the active profile and creates a fresh empty `SOUL.md`.
+- `profile create <name> --blank` creates empty memory files.
+- `profile create <name> --from <profile> --files user,memory,soul` copies selected memory files from another profile.
+- `profile use <name>` is the only normal command that updates `active-profile.json`.
+- `profile show [name]` reports paths and model summary while redacting secret values.
+- `profile delete <name>` refuses active or non-empty profiles unless `--force` is provided.
+- `profile rename <old> <new>` updates the active profile record when the renamed profile was active.
+
+## Settings / UI Foundation
+
+Selected profile config supports:
 
 | Setting | Values |
 |---------|--------|

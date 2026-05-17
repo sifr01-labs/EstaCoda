@@ -76,6 +76,21 @@ async function main(): Promise<void> {
     }
   }
 
+  if (canDispatchBeforeRuntime(argv)) {
+    const command = await runCliCommand({
+      argv,
+      workspaceRoot,
+      profileId
+    });
+
+    if (command.handled) {
+      if (command.output.length > 0) {
+        console.log(command.output);
+      }
+      process.exit(command.exitCode);
+    }
+  }
+
   // Bare launch: use interactive launcher for onboarding/session routing
   if (argv.length === 0 && canRunInteractive()) {
     const launchResult = await launchInteractiveSession({ workspaceRoot, profileId });
@@ -279,6 +294,43 @@ async function main(): Promise<void> {
   console.log(runtime.describe());
   console.log(`config sources: ${config.sources.join(", ") || "none"}`);
   await runtime.dispose();
+}
+
+function canDispatchBeforeRuntime(argv: readonly string[]): boolean {
+  const command = argv[0];
+  if (command === undefined || command.startsWith("/")) {
+    return false;
+  }
+  return new Set([
+    "browser",
+    "channels",
+    "curator",
+    "doctor",
+    "eval",
+    "evolution",
+    "flow",
+    "gateway",
+    "handoff",
+    "image",
+    "init",
+    "knowledge",
+    "local",
+    "manifest",
+    "mcp",
+    "model",
+    "profile",
+    "proposal",
+    "security",
+    "sessions",
+    "settings",
+    "skills",
+    "telegram",
+    "trace",
+    "update",
+    "verify",
+    "voice",
+    "web"
+  ]).has(command);
 }
 
 void main().catch((error) => {

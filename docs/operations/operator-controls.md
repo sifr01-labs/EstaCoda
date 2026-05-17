@@ -84,6 +84,7 @@ Returns exit code 1 if any warnings exist.
 estacoda gateway start          # Run gateway supervisor in the foreground
 estacoda gateway start --dry-run      # Local readiness check; no lock/PID writes
 estacoda gateway start --background   # Start gateway in background and return
+estacoda gateway start --profile work # Start gateway bound to a selected profile
 
 estacoda gateway stop           # Send SIGTERM and wait for shutdown
 estacoda gateway stop --force   # Force termination if graceful stop is not desired or fails
@@ -96,7 +97,9 @@ estacoda gateway restart --graceful   # Alias for restart in v0.1.0
 
 `start --dry-run` performs local readiness checks without starting adapters, polling remote APIs, entering the supervisor loop, acquiring the gateway lock, or writing PID/lock state. It reports adapter readiness, state directory readiness, and gateway lock state.
 
-`start --background` starts the gateway in a detached background process and returns after spawning. Background stdout/stderr are appended to `~/.estacoda/logs/gateway.log`.
+`start --background` starts the gateway in a detached background process and returns after spawning. Background stdout/stderr are appended to the bound profile `logs/gateway.log`.
+
+Gateway processes are bound to the profile selected at start time. Changing `active-profile.json` does not mutate a running gateway.
 
 `stop` reads the PID from `gateway.pid`, sends SIGTERM, waits up to 10s for exit, then removes PID/state/lock files. If the process does not exit within the graceful timeout, `--force` sends SIGKILL and cleans up.
 
@@ -126,7 +129,7 @@ estacoda channels disable email      # Disable Email adapter
 estacoda channels disable whatsapp   # Disable WhatsApp adapter
 ```
 
-`enable` sets `enabled: true` in `config.json` for the named channel. `disable` sets `enabled: false`.
+`enable` sets `enabled: true` in the selected profile `config.json` for the named channel. `disable` sets `enabled: false`.
 Both commands are idempotent. Both preserve all other channel fields (tokens, allowlists, busy policy, queue depth).
 
 Valid channel names: `telegram`, `discord`, `email`, `whatsapp` (case-insensitive).
@@ -264,7 +267,7 @@ When a user sends input while the agent is already processing a turn, the busy p
 | `queue` | Buffer the message and process it after the current turn completes. |
 | `interrupt` | Abort the current turn and start a new one immediately. |
 
-Configure per-channel in `config.json`:
+Configure per-channel in the selected profile `config.json`:
 
 ```json
 {

@@ -18,7 +18,7 @@ description: "Scheduled tasks, cron runner, job storage, execution history, and 
 
 ## Cron Store
 
-- Persistent storage at `~/.estacoda/cron/jobs.json`
+- Persistent storage at `~/.estacoda/profiles/<id>/cron/jobs.json`
 - Atomic writes
 - Schedule parsing: relative delays, intervals, cron expressions, ISO timestamps
 - Prompt safety scanning
@@ -79,7 +79,7 @@ Failures are persisted in `CronExecutionStore` and visible via:
 ## Delivery Routing
 
 Cron jobs use `DeliveryRouter` for output delivery. Supported targets:
-- `local` — write to `~/.estacoda/cron/output/`
+- `local` — write to the selected profile cron output directory
 - `origin` — deliver to the channel that scheduled the job
 - `silent` — no delivery
 - `telegram:<chatId>` — Telegram DM or channel

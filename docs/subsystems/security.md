@@ -64,9 +64,10 @@ Persistent approvals match on normalized `targetKey` values, including operation
 
 ## Workspace Trust
 
-- Trusted workspaces allow normal local work to proceed proactively.
+- Trusted workspaces allow normal local work in that directory to proceed proactively.
 - Obvious risk classes still trigger approval logic.
-- Trust is persisted per workspace root.
+- Trust is global directory-owned state persisted per workspace root in `~/.estacoda/trust.json`.
+- Trust does not control config loading. Runtime config always comes from the selected profile.
 
 ## Channel Security Model
 
@@ -104,7 +105,7 @@ See [Handoff Preflight Report](../security/handoff-preflight-report-v0.9.md) for
 
 ### Surface Pointer Behavior
 
-- Surface pointers are stored in `~/.estacoda/surface-pointers.json`.
+- Surface pointers are stored under the bound profile gateway state.
 - They link a surface (e.g., `telegram:chat-1`) to a SQLite session ID.
 - **No automatic context merge:** attaching a Telegram surface to a CLI session does not merge histories or messages. It only means future Telegram messages go to that session.
 - Detaching creates a new independent session for that surface.

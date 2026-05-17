@@ -6,7 +6,7 @@ This is the historical audit log for replacing the onboarding proof of concept w
 
 - `new or unconfigured`: `getOnboardingStatus()` reports onboarding needed when the effective model provider or id is `unconfigured`.
 - `configured-ready`: `getOnboardingStatus()` reports no onboarding needed when a configured model exists and provider diagnostics are not blocked.
-- `partial-provider`: a provider/model route can exist while diagnostics are blocked because credentials, credential pools, network access, adapter support, or model registration are incomplete.
+- `partial-provider`: a provider/model route can exist while diagnostics are blocked because credentials, network access, adapter support, or model registration are incomplete.
 - `untrusted-workspace`: `collectSetupVerificationReport()` reports workspace trust independently from provider readiness.
 - `state-not-writable`: setup verification attempts to write `~/.estacoda/.verify` and records a blocker if state cannot be written.
 - `secret-permissions`: setup verification reports an existing `.env` secret store as unsafe unless it is mode `0600`.

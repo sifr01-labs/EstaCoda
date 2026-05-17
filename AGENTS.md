@@ -240,13 +240,30 @@ Expected pattern:
 
 ```text
 ~/.estacoda/
-├── config.json
-├── .env
+├── active-profile.json
+├── trust.json
+├── workspace-approvals.json
+├── sessions.sqlite
 ├── memory/
-├── sessions/
-├── skills/
-├── logs/
-└── skill-learning.json
+│   └── shared/
+├── packs/
+└── profiles/
+    └── <profile-id>/
+        ├── config.json
+        ├── .env
+        ├── auth.json
+        ├── USER.md
+        ├── SOUL.md
+        ├── MEMORY.md
+        ├── promotions.json
+        ├── skills/
+        ├── cron/
+        ├── logs/
+        ├── gateway/
+        ├── channel-media/
+        ├── audio-cache/
+        ├── image-cache/
+        └── temp/
 ```
 
 Rules:
@@ -256,6 +273,10 @@ Rules:
 3. Use temp directories in tests.
 4. Keep project-local fixtures inside the repo.
 5. Keep user runtime state outside the repo.
+6. Runtime config loads exactly one selected profile config; do not reintroduce user/project config merging.
+7. Provider credentials resolve from direct `apiKeyEnv` environment variables; do not reintroduce credential pools.
+8. Workspace trust is global directory action trust only. It gates behavior, not config loading.
+9. `USER.md`, `SOUL.md`, `MEMORY.md`, and `promotions.json` are profile-local. Global shared memory is only `~/.estacoda/memory/shared/`.
 
 ## CLI and onboarding rules
 
@@ -273,16 +294,19 @@ When changing CLI or onboarding code:
 8. Keep provider setup separate from optional capability setup.
 9. Do not imply that skipped optional features are required.
 10. Do not claim full runtime localization unless it exists.
+11. Keep first-run profile handling silent: onboarding may create/select the default profile behind the scenes, but normal first-run copy should not require profile awareness.
+12. Route setup/config edits to the selected profile config and selected profile `.env`.
 
 Current onboarding sequence should remain conceptually close to:
 
 1. Choose interface language and style.
 2. Trust this workspace.
 3. Choose a primary model provider.
-4. Add a backup model.
-5. Set security and workflow-learning defaults.
-6. Connect optional capabilities such as Telegram, voice, and vision.
-7. Verify setup.
+4. Set security and workflow-learning defaults.
+5. Connect optional capabilities such as Telegram, voice, and vision.
+6. Verify setup.
+
+Profiles are an advanced CLI concept. `estacoda profile use <id>` is the command that changes the active profile. A global `--profile <id>` or `-p <id>` flag must be command-local and must not mutate `active-profile.json`.
 
 Changing this sequence requires docs updates and smoke coverage.
 
@@ -303,7 +327,7 @@ Examples of technical tokens that should remain stable:
 ```text
 KIMI_API_KEY
 Telegram
-~/.estacoda/config.json
+~/.estacoda/profiles/default/config.json
 pnpm run smoke
 kimi-k2
 GPT-5.5

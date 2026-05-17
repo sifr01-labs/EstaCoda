@@ -12,6 +12,8 @@ Runtime contract: Node.js >= 22.18.0, pnpm via Corepack, and compiled `dist/` fo
 cd /path/to/EstaCoda
 corepack enable
 pnpm install
+pnpm run dev -- init
+pnpm run dev -- setup
 pnpm run dev
 ```
 
@@ -39,12 +41,14 @@ Interactive setup uses a reviewed setup flow:
 - choose interface language and expression style
 - trust the active workspace
 - choose a primary model route
-- store hosted-provider keys locally in `~/.estacoda/.env` with `0600` permissions
+- store hosted-provider keys locally in the selected profile `.env` with `0600` permissions
 - choose security mode: `strict`, `adaptive`, or `open`
 - choose workflow-learning mode: `none`, `suggest`, `proactive`, or `autonomous`
 - optionally configure Telegram, voice, vision/image generation, and browser support
 - review the proposed setup before anything is applied
 - apply approved setup writes, run structured verification, then choose launch handoff behavior
+
+First-run setup silently creates and selects the default profile behind the scenes. Day-one setup remains the simple path: run `estacoda init`, run `estacoda setup`, then use EstaCoda. Profiles are available later for advanced multi-context use, but they are not required setup knowledge.
 
 `estacoda setup --interactive` routes current setup state through the same reviewed setup system:
 
@@ -74,8 +78,8 @@ These direct flags are advanced compatibility paths. Guided setup and repair use
 
 - Provider-backed CLI agent loop with real tool execution.
 - Capability-first security with approval modes, hard safety floor, `/yolo`, and audit/debug views.
-- Local and project config overlays with local secret storage.
-- Bounded memory through `MEMORY.md`, `USER.md`, `SOUL.md`, and `AGENTS.md`.
+- Profile-first configuration with local secret storage; the selected profile config defines the agent.
+- Bounded memory through profile-local `USER.md`, `SOUL.md`, `MEMORY.md`, global shared memory, and workspace `AGENTS.md`.
 - Skill system with visibility, usage telemetry, evolution overlays, gated proposals, snapshots, rollback, and scored eval fixtures.
 - **Multi-channel gateway (v0.9):**
   - **Telegram** — live-proven: allowlists, approvals, sessions, attachments, voice transcription hooks, generated-image delivery, pairing codes.
@@ -93,7 +97,7 @@ These direct flags are advanced compatibility paths. Guided setup and repair use
 - **Durable TaskFlow execution** (v0.8): multi-step flows with pause/resume/interrupt/cancel, step-level status, operator steer, approval gates, safe-boundary compaction, and restart recovery.
 - **Operator surface (v0.9):** CLI commands for gateway status/diagnose/start/stop/restart, channels enable/disable/list/status, cron list/show/history/run/pause/resume/remove, sessions list/show/current/attach/detach.
 - **Cross-surface sessions (v0.9):** explicit attach/detach via surface pointers; CLI↔Telegram handoff with short-lived single-use codes.
-- **Gateway startup and restart:** `estacoda gateway start` runs the supervisor in the foreground; `estacoda gateway start --dry-run` performs local readiness checks without acquiring the gateway lock or writing PID/lock state; `estacoda gateway start --background` starts the gateway in the background and writes stdout/stderr to `~/.estacoda/logs/gateway.log`. `estacoda gateway stop` sends SIGTERM and waits up to 10s; `estacoda gateway stop --force` forces termination. `estacoda gateway restart` stops the old gateway, background-starts a new gateway, and returns; `estacoda gateway restart --graceful` is an alias for `restart` in v0.1.0.
+- **Gateway startup and restart:** `estacoda gateway start` runs the supervisor in the foreground; `estacoda gateway start --dry-run` performs local readiness checks without acquiring the gateway lock or writing PID/lock state; `estacoda gateway start --background` starts the gateway in the background and writes stdout/stderr to the selected profile `logs/gateway.log`. `estacoda gateway start --profile <id>` starts a gateway bound to that profile. `estacoda gateway stop` sends SIGTERM and waits up to 10s; `estacoda gateway stop --force` forces termination. `estacoda gateway restart` stops the old gateway, background-starts a new gateway, and returns; `estacoda gateway restart --graceful` is an alias for `restart` in v0.1.0.
 - **Per-channel busy policy:** configure `busyPolicy` (`reject`, `queue`, `interrupt`) and `queueDepth` (clamped to `[1, 10]`, default `3`) independently per channel.
 
 ## UI / CLI Rendering (v0.95)
@@ -153,18 +157,34 @@ HOME=/tmp/estacoda-e2e-home pnpm run dev -- setup
 
 By default, user-level state lives under `~/.estacoda/`:
 
+Global state:
+
+- `active-profile.json`
+- `trust.json`
+- `workspace-approvals.json`
+- `sessions.sqlite`
+- `memory/shared/`
+- `packs/`
+
+Profile state lives under `~/.estacoda/profiles/<id>/`:
+
 - `config.json`
 - `.env`
-- `trust.json`
-- `sessions.sqlite`
-- `memory/`
+- `auth.json`
+- `USER.md`
+- `SOUL.md`
+- `MEMORY.md`
+- `promotions.json`
 - `skills/`
 - `cron/`
-- `image-cache/`
-- `audio-cache/`
+- `logs/`
+- `gateway/`
 - `channel-media/`
+- `audio-cache/`
+- `image-cache/`
+- `temp/`
 
-Project overlays live under `<workspace>/.estacoda/`.
+There is no user/project config merge. Workspace trust is directory action trust only; it does not control config loading.
 
 ## Docs
 
@@ -191,7 +211,7 @@ The setup flow walks through:
 1. Interface language and expression style.
 2. Workspace trust.
 3. Primary provider and model.
-4. Protected API key capture into `~/.estacoda/.env`.
+4. Protected API key capture into the selected profile `.env`.
 5. Security mode (`strict`, `adaptive`, or `open`).
 6. Workflow learning mode (`none`, `suggest`, `proactive`, or `autonomous`).
 7. Optional capabilities: Telegram, voice, vision, image generation, browser automation.
@@ -203,7 +223,20 @@ Credentials are stored locally with restrictive permissions. Advanced/direct set
 
 Optional capabilities are separate from the primary LLM provider/model route. Telegram/channel setup is a remote-control surface and must be restricted to allowed user or chat identities. Voice, vision/image generation, and browser support are optional/native capability surfaces; skipping them does not make core setup invalid. Browser setup records references only and does not launch a browser during setup planning.
 
-Workspace trust is path-scoped. A trusted workspace allows normal local file and terminal work under the configured security policy.
+Workspace trust is path-scoped. A trusted workspace allows normal local file and terminal work under the configured security policy. It does not enable project config loading or change which profile config is used.
+
+Advanced profile commands are available for multi-context setups:
+
+```bash
+estacoda profile create work
+estacoda profile list
+estacoda profile use work
+estacoda profile show
+estacoda profile delete old-work
+estacoda profile rename work client-work
+```
+
+Use `--profile <id>` or `-p <id>` to select a profile for one command without changing the active profile. Only `estacoda profile use <id>` changes `active-profile.json`.
 
 `open` mode is not "security off"; the hard safety floor remains active.
 
