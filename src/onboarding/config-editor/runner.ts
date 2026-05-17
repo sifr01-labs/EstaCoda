@@ -1,5 +1,6 @@
 import { resolveStateHome } from "../../config/state-home.js";
 import { writeEnvSecret } from "../../config/env-secret-store.js";
+import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../../config/profile-home.js";
 import {
   loadRuntimeConfig,
   type ImageGenerationProvider,
@@ -476,8 +477,9 @@ async function reviewAndApplyAction(
     ? [editorAction]
     : [editorAction, verificationAction];
   const stateHome = resolveStateHome({ homeDir: options.homeDir });
+  const profileConfigPath = activeProfileConfigPath(options);
   const draftBundle = buildSetupEditorActionDraftBundle(session, draftActions, {
-    configPath: options.userConfigPath ?? initialDecision.state.configSources[0] ?? stateHome.configPath,
+    configPath: profileConfigPath,
     workspaceRoot: options.workspaceRoot,
     trustStorePath: overrides.trustStorePath ?? options.trustStorePath ?? stateHome.trustJsonPath,
   });
@@ -493,8 +495,9 @@ function verificationDraftBundle(
 ): SetupDraftBundle | undefined {
   const verificationAction = session.plan.actions.find((candidate) => candidate.id === "run-readonly-verification");
   if (verificationAction === undefined) return undefined;
+  const profileConfigPath = activeProfileConfigPath(options);
   return buildSetupEditorActionDraftBundle(session, [verificationAction], {
-    configPath: options.userConfigPath ?? initialDecision.state.configSources[0] ?? stateHome.configPath,
+    configPath: profileConfigPath,
     workspaceRoot: options.workspaceRoot,
     trustStorePath: options.trustStorePath ?? stateHome.trustJsonPath,
   });
@@ -808,6 +811,11 @@ function launchHandoffIntentForApplyEndState(endState: LaunchableApplyEndState):
   };
 }
 
+function activeProfileConfigPath(options: Pick<ConfigEditorRunnerOptions, "homeDir" | "profileId">): string {
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+  return resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
+}
+
 function setupModuleContextFromConfig(
   options: ConfigEditorRunnerOptions,
   initialDecision: SetupRouteDecision,
@@ -820,7 +828,7 @@ function setupModuleContextFromConfig(
   const vision = visionContext(config);
 
   return {
-    configPath: options.userConfigPath ?? initialDecision.state.configSources[0] ?? stateHome.configPath,
+    configPath: activeProfileConfigPath(options),
     workspaceRoot: options.workspaceRoot,
     trustStorePath: options.trustStorePath ?? stateHome.trustJsonPath,
     provider: {
@@ -1003,8 +1011,9 @@ async function reviewAndApplyResolvedRoute(
     ...(verificationAction === undefined ? [] : [verificationAction]),
   ];
   const stateHome = resolveStateHome({ homeDir: options.homeDir });
+  const profileConfigPath = activeProfileConfigPath(options);
   const draftBundle = buildSetupEditorActionDraftBundle(session, draftActions, {
-    configPath: options.userConfigPath ?? initialDecision.state.configSources[0] ?? stateHome.configPath,
+    configPath: profileConfigPath,
     workspaceRoot: options.workspaceRoot,
     trustStorePath: options.trustStorePath ?? stateHome.trustJsonPath,
   });
@@ -1023,6 +1032,7 @@ async function reviewAndApplyResolvedRoute(
   ) {
     await writeEnvSecret({
       homeDir: options.homeDir,
+      profileId: options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId(),
       key: credentialResult.pendingCredentialWrite.envVarName,
       value: credentialResult.pendingCredentialWrite.value,
     });

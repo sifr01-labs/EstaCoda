@@ -1,12 +1,9 @@
-import { dirname, join } from "node:path";
 import type {
   ProviderId,
   ProviderApiMode,
-  ProviderAuthMethod,
-  CredentialRotationStrategy
+  ProviderAuthMethod
 } from "../contracts/provider.js";
 import {
-  mergeConfig,
   normalizeModelFallbacks,
   readConfig,
   saveRuntimeConfig,
@@ -14,7 +11,7 @@ import {
   type ModelFallbackConfig
 } from "./runtime-config.js";
 import { getProviderMetadata } from "../providers/provider-metadata.js";
-import { writeEnvSecret } from "./env-secret-store.js";
+import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "./profile-home.js";
 
 // ── Input types ──────────────────────────────────────────────────────────────
 
@@ -33,8 +30,6 @@ export type StoreProviderCredentialInput = {
   provider: ProviderId;
   apiKeyEnv: string;
   apiKey?: string;
-  writeCredentialPool?: boolean;
-  credentialPoolStrategy?: CredentialRotationStrategy;
 };
 
 export type RegisterProviderModelInput = {
@@ -91,18 +86,17 @@ export function applyRegisterProviderConfig(
       [input.provider]: providerConfig as NonNullable<EstaCodaConfig["providers"]>[string]
     }
   };
-  return mergeConfig(existing, patch);
+  return patchConfig(existing, patch);
 }
 
 /**
  * Store a credential reference on the provider block.
- * Optionally writes a credential pool entry if writeCredentialPool is true.
  * Never stores the raw apiKey value in config.
  */
 export function applyStoreProviderCredential(
   existing: EstaCodaConfig,
   input: StoreProviderCredentialInput
-): { config: EstaCodaConfig; wroteCredentialPool: boolean } {
+): EstaCodaConfig {
   const providers = existing.providers;
   const existingProvider = providers !== undefined ? providers[input.provider] ?? {} : {};
   const providerConfig = {
@@ -110,35 +104,11 @@ export function applyStoreProviderCredential(
     apiKeyEnv: input.apiKeyEnv
   };
 
-  let wroteCredentialPool = false;
-  let credentialPoolsPatch: Record<string, unknown> | undefined;
-
-  if (input.writeCredentialPool) {
-    wroteCredentialPool = true;
-    credentialPoolsPatch = {
-      [input.provider]: {
-        strategy: input.credentialPoolStrategy ?? "fill_first",
-        entries: [
-          {
-            id: `${input.provider}-${input.apiKeyEnv}`,
-            source: { kind: "env" as const, name: input.apiKeyEnv },
-            priority: 1
-          }
-        ]
-      }
-    };
-  }
-
-  const config = mergeConfig(existing, {
+  return patchConfig(existing, {
     providers: {
       [input.provider]: providerConfig
-    },
-    ...(credentialPoolsPatch !== undefined
-      ? { credentialPools: credentialPoolsPatch as EstaCodaConfig["credentialPools"] }
-      : {})
+    }
   } as EstaCodaConfig);
-
-  return { config, wroteCredentialPool };
 }
 
 /**
@@ -155,7 +125,7 @@ export function applyRegisterProviderModel(
   const nextModels = uniqueStrings([...previousModels, ...input.models]);
   const existingProvider = providers !== undefined ? providers[input.provider] ?? {} : {};
 
-  return mergeConfig(existing, {
+  return patchConfig(existing, {
     providers: {
       [input.provider]: {
         ...existingProvider,
@@ -196,7 +166,7 @@ export function applySetPreferredModelRoute(
       [input.provider]: providerPatch as NonNullable<EstaCodaConfig["providers"]>[string]
     }
   };
-  return mergeConfig(existing, patch);
+  return patchConfig(existing, patch);
 }
 
 /**
@@ -221,7 +191,7 @@ export function applyAddFallbackRoute(
       : {})
   };
 
-  const merged = mergeConfig(existing, {
+  const merged = patchConfig(existing, {
     model: {
       fallbacks: [...existingFallbacks, newFallback]
     }
@@ -242,15 +212,12 @@ export function applyAddFallbackRoute(
 export type MutationOptions = {
   workspaceRoot: string;
   homeDir?: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
-  scope?: "user" | "project";
+  profileId?: string;
 };
 
 async function resolveTargetPath(options: MutationOptions): Promise<string> {
-  return options.scope === "project"
-    ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
-    : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir })?.profileId ?? defaultProfileId();
+  return resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
 }
 
 export async function registerProviderConfig(
@@ -265,12 +232,12 @@ export async function registerProviderConfig(
 
 export async function storeProviderCredential(
   options: MutationOptions & { input: StoreProviderCredentialInput }
-): Promise<{ path: string; config: EstaCodaConfig; wroteCredentialPool: boolean }> {
+): Promise<{ path: string; config: EstaCodaConfig }> {
   const targetPath = await resolveTargetPath(options);
   const existing = await readConfig(targetPath);
-  const { config, wroteCredentialPool } = applyStoreProviderCredential(existing.config, options.input);
+  const config = applyStoreProviderCredential(existing.config, options.input);
   await saveRuntimeConfig(targetPath, config);
-  return { path: targetPath, config, wroteCredentialPool };
+  return { path: targetPath, config };
 }
 
 export async function registerProviderModel(
@@ -304,6 +271,25 @@ export async function addFallbackRoute(
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
+
+function patchConfig(existing: EstaCodaConfig, patch: EstaCodaConfig): EstaCodaConfig {
+  return {
+    ...existing,
+    ...patch,
+    model: patch.model === undefined
+      ? existing.model
+      : {
+        ...(existing.model ?? {}),
+        ...patch.model
+      },
+    providers: patch.providers === undefined
+      ? existing.providers
+      : {
+        ...(existing.providers ?? {}),
+        ...patch.providers
+      }
+  };
+}
 
 function uniqueStrings(values: string[]): string[] {
   return Array.from(new Set(values.filter((value) => value.length > 0)));

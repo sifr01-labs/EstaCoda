@@ -8,6 +8,8 @@ import { deriveIdentityHash } from "../gateway/identity-lock.js";
 import { resolve } from "node:path";
 import type { ChannelKind } from "../contracts/channel.js";
 
+type GatewayStateHome = string | { gatewayStatePath: string };
+
 export type AdapterIdentityMaterial = {
   kind: ChannelKind;
   value: string;
@@ -54,37 +56,37 @@ export function resolveWhatsAppIdentityMaterial(config: WhatsAppChannelConfig): 
 }
 
 export async function deriveTelegramIdentityHash(
-  homeDir: string,
+  stateHome: GatewayStateHome,
   config: TelegramChannelConfig
 ): Promise<string | undefined> {
   const material = resolveTelegramIdentityMaterial(config);
   if (material === undefined) return undefined;
-  return deriveIdentityHash(homeDir, material.kind, material.value);
+  return deriveIdentityHash(stateHome, material.kind, material.value);
 }
 
 export async function deriveDiscordIdentityHash(
-  homeDir: string,
+  stateHome: GatewayStateHome,
   config: DiscordChannelConfig
 ): Promise<string | undefined> {
   const material = resolveDiscordIdentityMaterial(config);
   if (material === undefined) return undefined;
-  return deriveIdentityHash(homeDir, material.kind, material.value);
+  return deriveIdentityHash(stateHome, material.kind, material.value);
 }
 
 export async function deriveEmailIdentityHash(
-  homeDir: string,
+  stateHome: GatewayStateHome,
   config: EmailChannelConfig
 ): Promise<string | undefined> {
   const material = resolveEmailIdentityMaterial(config);
   if (material === undefined) return undefined;
-  return deriveIdentityHash(homeDir, material.kind, material.value);
+  return deriveIdentityHash(stateHome, material.kind, material.value);
 }
 
 export async function deriveWhatsAppIdentityHash(
-  homeDir: string,
+  stateHome: GatewayStateHome,
   config: WhatsAppChannelConfig
 ): Promise<string | undefined> {
   const material = resolveWhatsAppIdentityMaterial(config);
   if (material === undefined) return undefined;
-  return deriveIdentityHash(homeDir, material.kind, material.value);
+  return deriveIdentityHash(stateHome, material.kind, material.value);
 }

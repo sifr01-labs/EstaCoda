@@ -21,17 +21,19 @@ type LockFileContent = {
   startedAt: string;
 };
 
-function gatewayDir(homeDir: string): string {
-  return join(homeDir, ".estacoda", "gateway");
+type GatewayStateHome = string | { gatewayStatePath: string };
+
+function gatewayDir(stateHome: GatewayStateHome): string {
+  return typeof stateHome === "string" ? join(stateHome, ".estacoda", "gateway") : stateHome.gatewayStatePath;
 }
 
-function lockPath(homeDir: string): string {
-  return join(gatewayDir(homeDir), "gateway.lock");
+function lockPath(stateHome: GatewayStateHome): string {
+  return join(gatewayDir(stateHome), "gateway.lock");
 }
 
-async function readLock(homeDir: string): Promise<{ content: LockFileContent; lockedAt: Date } | undefined> {
+async function readLock(stateHome: GatewayStateHome): Promise<{ content: LockFileContent; lockedAt: Date } | undefined> {
   try {
-    const raw = await readFile(lockPath(homeDir), "utf8");
+    const raw = await readFile(lockPath(stateHome), "utf8");
     const trimmed = raw.trim();
     const parsed = JSON.parse(trimmed) as Partial<LockFileContent>;
     if (typeof parsed.pid === "number" && typeof parsed.startedAt === "string") {
@@ -47,11 +49,11 @@ async function readLock(homeDir: string): Promise<{ content: LockFileContent; lo
 }
 
 export async function acquireGatewayLock(
-  homeDir: string,
+  stateHome: GatewayStateHome,
   staleTimeoutMs: number = DEFAULT_STALE_TIMEOUT_MS
 ): Promise<GatewayLockResult> {
-  const path = lockPath(homeDir);
-  await mkdir(gatewayDir(homeDir), { recursive: true });
+  const path = lockPath(stateHome);
+  await mkdir(gatewayDir(stateHome), { recursive: true });
 
   try {
     // Try to create the lock file exclusively (atomic)
@@ -68,7 +70,7 @@ export async function acquireGatewayLock(
     }
 
     // Lock exists - check if stale
-    const lock = await readLock(homeDir);
+    const lock = await readLock(stateHome);
     if (lock === undefined) {
       // Corrupt lock file - treat as stale and reclaim
       await rm(path, { force: true });
@@ -99,8 +101,8 @@ export async function acquireGatewayLock(
   }
 }
 
-export async function readGatewayLockContent(homeDir: string): Promise<LockFileContent | undefined> {
-  const lock = await readLock(homeDir);
+export async function readGatewayLockContent(stateHome: GatewayStateHome): Promise<LockFileContent | undefined> {
+  const lock = await readLock(stateHome);
   return lock?.content;
 }
 
@@ -149,18 +151,18 @@ export async function inspectGatewayLockState(
   return { state: "active", pid: content.pid, startedAt: content.startedAt };
 }
 
-export async function releaseGatewayLock(homeDir: string): Promise<void> {
-  await rm(lockPath(homeDir), { force: true });
+export async function releaseGatewayLock(stateHome: GatewayStateHome): Promise<void> {
+  await rm(lockPath(stateHome), { force: true });
 }
 
-export async function isStaleLock(homeDir: string, staleTimeoutMs: number = DEFAULT_STALE_TIMEOUT_MS): Promise<boolean> {
+export async function isStaleLock(stateHome: GatewayStateHome, staleTimeoutMs: number = DEFAULT_STALE_TIMEOUT_MS): Promise<boolean> {
   try {
-    await stat(lockPath(homeDir));
+    await stat(lockPath(stateHome));
   } catch {
     return false;
   }
 
-  const lock = await readLock(homeDir);
+  const lock = await readLock(stateHome);
   if (lock === undefined) return true; // corrupt = stale
 
   const elapsed = Date.now() - lock.lockedAt.getTime();

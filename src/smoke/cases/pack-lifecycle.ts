@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import type { SmokeCase } from "../smoke-case.js";
 import { packCommand } from "../../cli/pack-commands.js";
 import type { PackManifest } from "../../contracts/pack.js";
+import { resolveProfileStateHome } from "../../config/profile-home.js";
 
 function makeManifest(overrides?: Partial<PackManifest>): PackManifest {
   return {
@@ -61,7 +62,7 @@ export const pack_lifecycle_case: SmokeCase = {
         throw new Error("Pack was not copied to packs/");
       }
 
-      const skillsDest = join(tempHome, ".estacoda", "skills", "packs", "smoke-sp");
+      const skillsDest = join(resolveProfileStateHome({ homeDir: tempHome, profileId: "default" }).skillsPath, "packs", "smoke-sp");
       if (!existsSync(skillsDest)) {
         throw new Error("Skills were not copied to skills/packs/ on install for local origin");
       }

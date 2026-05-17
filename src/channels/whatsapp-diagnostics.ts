@@ -16,11 +16,11 @@ export type WhatsAppGatewayDiagnostics = {
 };
 
 export async function getWhatsAppGatewayDiagnostics(
-  options: { homeDir?: string } = {}
+  options: { homeDir?: string; gatewayStatePath?: string } = {}
 ): Promise<WhatsAppGatewayDiagnostics> {
   const missing: string[] = [];
   const homeDir = options.homeDir ?? join(homedir(), ".estacoda");
-  const authDir = join(homeDir, "whatsapp-auth");
+  const authDir = join(options.gatewayStatePath ?? homeDir, "whatsapp-auth");
 
   let baileysAvailable = false;
   try {

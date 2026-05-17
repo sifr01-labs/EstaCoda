@@ -1,13 +1,12 @@
 import type { ProviderId, ProviderAuthMethod } from "../contracts/provider.js";
 import type { ProviderMetadata } from "./provider-metadata.js";
-import type { CredentialPoolRegistry } from "./credential-pool.js";
 import { loadOAuthStore, writeOAuthStore } from "./oauth/oauth-store.js";
 import { refreshOAuthToken, shouldRefreshToken } from "./oauth/oauth-refresh.js";
 import { isOAuthAuthMethod } from "./oauth/oauth-types.js";
 
 export type RuntimeCredential =
   | { kind: "none"; id: string }
-  | { kind: "bearer"; id: string; value: string; source: "env" | "pool" | "oauth" };
+  | { kind: "bearer"; id: string; value: string; source: "env" | "oauth" };
 
 export type RuntimeCredentialResolverOptions = {
   providerId: ProviderId;
@@ -19,7 +18,6 @@ export type RuntimeCredentialResolverOptions = {
     apiKeyEnv?: string;
     authMethod?: ProviderAuthMethod;
   };
-  credentialPools?: CredentialPoolRegistry;
   metadata?: ProviderMetadata;
   homeDir?: string;
 };
@@ -87,23 +85,7 @@ export async function resolveRuntimeCredential(
     };
   }
 
-  // 3. credential pool, if provider explicitly opts into rotation
-  if (options.credentialPools !== undefined) {
-    const poolCredential = options.credentialPools.resolve(options.providerId);
-    if (poolCredential !== undefined && poolCredential.value !== undefined) {
-      return {
-        credential: {
-          kind: "bearer",
-          id: poolCredential.id,
-          value: poolCredential.value,
-          source: "pool",
-        },
-        diagnostic: { ok: true },
-      };
-    }
-  }
-
-  // 4. none if provider auth method is none
+  // 3. none if provider auth method is none
   if (options.metadata?.authMethods.includes("none")) {
     return {
       credential: { kind: "none", id: `${options.providerId}:none` },

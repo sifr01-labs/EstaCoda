@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, writeFile, readFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { runCliCommand } from "./cli.js";
 import { resetModelsDevRegistryForTest } from "../providers/model-selection-catalog.js";
+import { resolveProfileStateHome } from "../config/profile-home.js";
 import type { Prompt } from "./readline-prompt.js";
 import type { SelectPromptInput } from "./interactive-select.js";
 
@@ -12,15 +13,23 @@ async function makeTempDir(): Promise<string> {
 }
 
 async function writeUserConfig(homeDir: string, config: unknown): Promise<void> {
-  const configPath = join(homeDir, ".estacoda", "config.json");
-  await mkdir(join(homeDir, ".estacoda"), { recursive: true });
+  const configPath = profileConfigPath(homeDir);
+  await mkdir(dirname(configPath), { recursive: true });
   await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", "utf8");
 }
 
 async function readUserConfig(homeDir: string): Promise<unknown> {
-  const configPath = join(homeDir, ".estacoda", "config.json");
+  const configPath = profileConfigPath(homeDir);
   const content = await readFile(configPath, "utf8");
   return JSON.parse(content);
+}
+
+function profileConfigPath(homeDir: string): string {
+  return resolveProfileStateHome({ homeDir, profileId: "default" }).configPath;
+}
+
+function profileEnvPath(homeDir: string): string {
+  return resolveProfileStateHome({ homeDir, profileId: "default" }).envPath;
 }
 
 function createMockPrompt(responses: {
@@ -219,7 +228,7 @@ describe("cli model", () => {
           }
         });
         // Seed both the process env and isolated .env so credential reuse is deterministic in CI.
-        const envPath = join(tmpDir, ".estacoda", ".env");
+        const envPath = profileEnvPath(tmpDir);
         await mkdir(join(tmpDir, ".estacoda"), { recursive: true });
         await writeFile(envPath, "OPENAI_API_KEY=sk-existing\n", "utf8");
 
@@ -281,7 +290,7 @@ describe("cli model", () => {
       expect(config.providers?.openai?.apiKeyEnv).toBe("OPENAI_API_KEY");
 
       // Verify secret was written to .env
-      const envPath = join(tmpDir, ".estacoda", ".env");
+      const envPath = profileEnvPath(tmpDir);
       const envContent = await readFile(envPath, "utf8");
       expect(envContent).toContain('OPENAI_API_KEY="sk-test-key"');
     });
@@ -321,7 +330,7 @@ describe("cli model", () => {
       expect(config.providers?.openai?.apiKeyEnv).toBe("OPENAI_API_KEY");
 
       // .env should not have been written
-      const envPath = join(tmpDir, ".estacoda", ".env");
+      const envPath = profileEnvPath(tmpDir);
       try {
         await readFile(envPath, "utf8");
         // If file exists, it should not contain the key
@@ -367,8 +376,8 @@ describe("cli model", () => {
 
     it("returns clear failure when config save fails after credential storage", async () => {
       delete process.env.OPENAI_API_KEY;
-      const configDir = join(tmpDir, ".estacoda");
-      const configPath = join(configDir, "config.json");
+      const configPath = profileConfigPath(tmpDir);
+      const configDir = dirname(configPath);
       await writeUserConfig(tmpDir, {
         providers: {
           openai: {
@@ -395,7 +404,6 @@ describe("cli model", () => {
         argv: ["model"],
         workspaceRoot: tmpDir,
         homeDir: tmpDir,
-        userConfigPath: configPath,
         prompt
       });
 
@@ -418,18 +426,6 @@ describe("cli model", () => {
             apiKeyEnv: "CUSTOM_API_KEY",
             models: ["main", "backup"],
             enableNetwork: true
-          }
-        },
-        credentialPools: {
-          custom: {
-            strategy: "fill_first",
-            entries: [
-              {
-                id: "custom-CUSTOM_API_KEY",
-                source: { kind: "env", name: "CUSTOM_API_KEY" },
-                priority: 1
-              }
-            ]
           }
         },
         model: {
@@ -1416,43 +1412,6 @@ describe("cli model", () => {
       }
     });
 
-    it("does not load project-defined providers when workspace is untrusted", async () => {
-      const fixturePath = await writeBundledSnapshot(tmpDir, mockSnapshot());
-      await writeUserConfig(tmpDir, {
-        providers: { openai: { kind: "openai-compatible", models: ["gpt-4o"] } },
-        model: { provider: "openai", id: "gpt-4o" }
-      });
-      // Write a project config with a custom provider to a separate path
-      const projectConfigPath = join(tmpDir, "project-config.json");
-      await writeFile(projectConfigPath, JSON.stringify({
-        providers: { custom: { kind: "openai-compatible", baseUrl: "https://custom.example/v1", models: ["custom-model"] } }
-      }), "utf8");
-
-      const listResult = await runCliCommand({
-        argv: ["model", "list", "--live"],
-        workspaceRoot: tmpDir,
-        homeDir: tmpDir,
-        projectConfigPath,
-        projectConfigTrust: "untrusted",
-        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false }
-      });
-      expect(listResult.handled).toBe(true);
-      expect(listResult.exitCode).toBe(0);
-      expect(listResult.output).not.toContain("custom-model");
-      expect(listResult.output).not.toContain("custom.example");
-
-      const searchResult = await runCliCommand({
-        argv: ["model", "search", "custom", "--live"],
-        workspaceRoot: tmpDir,
-        homeDir: tmpDir,
-        projectConfigPath,
-        projectConfigTrust: "untrusted",
-        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false }
-      });
-      expect(searchResult.handled).toBe(true);
-      expect(searchResult.exitCode).toBe(0);
-      expect(searchResult.output).not.toContain("custom-model");
-    });
   });
 
   describe("model diagnose structured output", () => {
@@ -1521,7 +1480,7 @@ describe("cli model", () => {
       expect(config.model?.provider).toBe("openai");
       expect(config.model?.id).toBe("gpt-4o");
 
-      const envContent = await readFile(join(tmpDir, ".estacoda", ".env"), "utf8");
+      const envContent = await readFile(profileEnvPath(tmpDir), "utf8");
       expect(envContent).toContain('OPENAI_API_KEY="sk-test"');
     });
 
@@ -1552,7 +1511,7 @@ describe("cli model", () => {
       expect(result.output).toContain("OPENAI_API_KEY");
       expect(result.output).toContain("rerun interactive");
       expect(await readUserConfig(tmpDir)).toEqual(original);
-      await expect(readFile(join(tmpDir, ".estacoda", ".env"), "utf8")).rejects.toThrow();
+      await expect(readFile(profileEnvPath(tmpDir), "utf8")).rejects.toThrow();
     });
 
     it("estacoda model openai/gpt-4o reuses existing env credential without prompt", async () => {
@@ -1574,7 +1533,7 @@ describe("cli model", () => {
           }
         });
         await mkdir(join(tmpDir, ".estacoda"), { recursive: true });
-        await writeFile(join(tmpDir, ".estacoda", ".env"), "OPENAI_API_KEY=sk-existing\n", "utf8");
+        await writeFile(profileEnvPath(tmpDir), "OPENAI_API_KEY=sk-existing\n", "utf8");
 
         const result = await runCliCommand({
           argv: ["model", "openai/gpt-4o"],
@@ -1838,7 +1797,7 @@ describe("cli model", () => {
       expect(result.exitCode).toBe(1);
       expect(result.output).toContain("unsupported API mode totally_unsupported_api_mode");
       expect(await readUserConfig(tmpDir)).toEqual(original);
-      await expect(readFile(join(tmpDir, ".estacoda", ".env"), "utf8")).rejects.toThrow();
+      await expect(readFile(profileEnvPath(tmpDir), "utf8")).rejects.toThrow();
     });
   });
 

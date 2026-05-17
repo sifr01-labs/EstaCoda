@@ -1,4 +1,3 @@
-import { join } from "node:path";
 import {
   collectSetupVerificationReport,
   type SetupVerificationReport,
@@ -43,21 +42,15 @@ import type { SkillAutonomy } from "../../skills/skill-learning.js";
 export type ReviewedSetupApplyExecutorOptions = {
   readonly workspaceRoot: string;
   readonly homeDir?: string;
-  readonly userConfigPath?: string;
-  readonly projectConfigPath?: string;
-  readonly projectConfigTrust?: "trusted" | "untrusted";
+  readonly profileId?: string;
   readonly trustStorePath?: string;
   readonly collectVerification?: (options: ReviewedSetupApplyExecutorOptions) => Promise<SetupVerificationReport> | SetupVerificationReport;
 };
 
-type ConfigScope = "user" | "project";
-
 type ConfigApplyTarget = {
   readonly workspaceRoot: string;
   readonly homeDir?: string;
-  readonly userConfigPath?: string;
-  readonly projectConfigPath?: string;
-  readonly scope: ConfigScope;
+  readonly profileId?: string;
 };
 
 type PlanContext = {
@@ -151,9 +144,7 @@ async function verifyReviewedSetup(
   return collectSetupVerificationReport({
     workspaceRoot: options.workspaceRoot,
     homeDir: options.homeDir,
-    userConfigPath: options.userConfigPath,
-    projectConfigPath: options.projectConfigPath,
-    projectConfigTrust: options.projectConfigTrust,
+    profileId: options.profileId,
     trustStorePath: options.trustStorePath,
   });
 }
@@ -284,7 +275,6 @@ async function applySecurityMode(
     ...target,
     input: {
       mode,
-      scope: target.scope,
     },
   });
 }
@@ -302,7 +292,6 @@ async function applyWorkflowLearning(
     ...target,
     input: {
       autonomy,
-      scope: target.scope,
     },
   });
 }
@@ -353,7 +342,6 @@ async function applyTelegramCapability(
       botTokenEnv,
       allowedUserIds,
       allowedChatIds,
-      scope: target.scope,
     },
   });
 }
@@ -372,7 +360,6 @@ async function applyVoiceCapability(
       sttProvider: sttProviderValue(operation.review.values.sttProvider),
       sttModel: stringValue(operation.review.values.sttModel),
       sttApiKeyEnv: stringValue(operation.review.values.sttApiKeyEnv),
-      scope: target.scope,
     },
   });
 }
@@ -389,7 +376,6 @@ async function applyVisionCapability(
       model: stringValue(operation.review.values.model ?? operation.review.values.modelId),
       apiKeyEnv: stringValue(operation.review.values.apiKeyEnv ?? operation.review.values.envVar),
       useGateway: booleanValue(operation.review.values.useGateway),
-      scope: target.scope,
     },
   });
 }
@@ -406,7 +392,6 @@ async function applyBrowserCapability(
       cdpUrl: stringValue(operation.review.values.cdpUrl),
       launchCommand: stringValue(operation.review.values.launchCommand),
       autoLaunch: false,
-      scope: target.scope,
     },
   });
 }
@@ -462,25 +447,13 @@ function planContext(plan: SetupApplyPlan): PlanContext {
 }
 
 function configApplyTarget(
-  operation: SetupApplyOperation,
+  _operation: SetupApplyOperation,
   options: ReviewedSetupApplyExecutorOptions
 ): ConfigApplyTarget {
-  const targetPath = operation.target?.kind === "config-scope" ? operation.target.path : undefined;
-  const projectConfigPath = options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json");
-  if (targetPath !== undefined && targetPath === projectConfigPath) {
-    return {
-      workspaceRoot: options.workspaceRoot,
-      homeDir: options.homeDir,
-      projectConfigPath: targetPath,
-      scope: "project",
-    };
-  }
   return {
     workspaceRoot: options.workspaceRoot,
     homeDir: options.homeDir,
-    userConfigPath: targetPath ?? options.userConfigPath,
-    projectConfigPath: options.projectConfigPath,
-    scope: "user",
+    profileId: options.profileId,
   };
 }
 
@@ -537,14 +510,11 @@ export async function applyReviewedUiPreferences(
     readonly language?: UiLanguage;
     readonly flavor?: UiFlavor;
     readonly activityLabels?: ActivityLabelsLocale;
-    readonly scope?: ConfigScope;
   }
 ): Promise<void> {
   await setupUiConfig({
     workspaceRoot: options.workspaceRoot,
     homeDir: options.homeDir,
-    userConfigPath: options.userConfigPath,
-    projectConfigPath: options.projectConfigPath,
     input,
   });
 }

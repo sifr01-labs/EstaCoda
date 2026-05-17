@@ -1,4 +1,4 @@
-export type MemoryFileKind = "MEMORY.md" | "USER.md" | "SOUL.md" | "AGENTS.md";
+export type MemoryFileKind = "SHARED.md" | "MEMORY.md" | "USER.md" | "SOUL.md" | "AGENTS.md";
 
 export type MemoryBudget = {
   kind: MemoryFileKind;

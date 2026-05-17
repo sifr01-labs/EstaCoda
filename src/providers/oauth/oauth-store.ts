@@ -1,6 +1,6 @@
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { resolveStateHome } from "../../config/state-home.js";
+import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../../config/profile-home.js";
 import type { ProviderAuthMethod } from "../../contracts/provider.js";
 import {
   CURRENT_OAUTH_STORE_VERSION,
@@ -14,15 +14,17 @@ import type {
   OAuthTokenRecord
 } from "./oauth-types.js";
 
-export function defaultOAuthStorePath(homeDir?: string): string {
-  return resolveStateHome({ homeDir }).authJsonPath;
+export function defaultOAuthStorePath(homeDir?: string, profileId?: string): string {
+  const resolvedProfileId = profileId ?? readActiveProfile({ homeDir })?.profileId ?? defaultProfileId();
+  return resolveProfileStateHome({ homeDir, profileId: resolvedProfileId }).authJsonPath;
 }
 
 export async function loadOAuthStore(options?: {
   homeDir?: string;
+  profileId?: string;
   path?: string;
 }): Promise<OAuthStoreLoadResult> {
-  const path = options?.path ?? defaultOAuthStorePath(options?.homeDir);
+  const path = options?.path ?? defaultOAuthStorePath(options?.homeDir, options?.profileId);
   let content: string;
   try {
     content = await readFile(path, "utf8");
@@ -148,9 +150,9 @@ export function validateOAuthStore(data: unknown): OAuthStoreLoadResult {
 
 export async function writeOAuthStore(
   store: OAuthAuthStore,
-  options?: { homeDir?: string; path?: string }
+  options?: { homeDir?: string; profileId?: string; path?: string }
 ): Promise<OAuthStoreWriteResult> {
-  const path = options?.path ?? defaultOAuthStorePath(options?.homeDir);
+  const path = options?.path ?? defaultOAuthStorePath(options?.homeDir, options?.profileId);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(store, null, 2)}\n`, "utf8");
 

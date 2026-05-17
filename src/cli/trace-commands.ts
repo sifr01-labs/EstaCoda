@@ -2,6 +2,7 @@ import type { CliCommandResult, CliOptions } from "./cli.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { resolveStateHome } from "../config/state-home.js";
+import { defaultProfileId, readActiveProfile } from "../config/profile-home.js";
 import type { Trajectory, TrajectoryEvent } from "../contracts/trajectory.js";
 import { redactObject, redactJson } from "../utils/redaction.js";
 
@@ -10,17 +11,18 @@ export async function trace(options: CliOptions, args: string[]): Promise<CliCom
 
   const openedDb = await openTraceDb(options);
   const db = openedDb.db;
+  const profileId = selectedProfileId(options.homeDir);
 
   try {
     switch (subcommand) {
       case "list":
-        return traceList(db, restArgs);
+        return traceList(db, profileId, restArgs);
       case "dump":
-        return traceDump(db, restArgs);
+        return traceDump(db, profileId, restArgs);
       case "timeline":
-        return traceTimeline(db, restArgs);
+        return traceTimeline(db, profileId, restArgs);
       case "failures":
-        return traceFailures(db, restArgs);
+        return traceFailures(db, profileId, restArgs);
       case undefined:
       case "help":
       case "--help":
@@ -40,6 +42,10 @@ export async function trace(options: CliOptions, args: string[]): Promise<CliCom
   } finally {
     await openedDb.close();
   }
+}
+
+function selectedProfileId(homeDir?: string): string {
+  return readActiveProfile({ homeDir }).profileId ?? defaultProfileId();
 }
 
 async function openTraceDb(options: CliOptions): Promise<{ db: SQLiteSessionDB; close: () => void }> {
@@ -67,17 +73,15 @@ function traceHelp(): string {
   ].join("\n");
 }
 
-async function traceList(db: SQLiteSessionDB, args: string[]): Promise<CliCommandResult> {
+async function traceList(db: SQLiteSessionDB, profileId: string, args: string[]): Promise<CliCommandResult> {
   const sessionId = valueAfter(args, "--session");
   const limit = parseInt(valueAfter(args, "--limit") ?? "20", 10);
 
   let trajectories: Trajectory[];
 
   if (sessionId !== undefined) {
-    trajectories = await db.listTrajectoriesForSession(sessionId);
+    trajectories = await db.listTrajectoriesForSession(sessionId, { profileId });
   } else {
-    // Default profile for CLI is typically "default"
-    const profileId = "default";
     trajectories = await db.listTrajectoriesForProfile(profileId, { limit });
   }
 
@@ -102,7 +106,7 @@ async function traceList(db: SQLiteSessionDB, args: string[]): Promise<CliComman
   };
 }
 
-async function traceDump(db: SQLiteSessionDB, args: string[]): Promise<CliCommandResult> {
+async function traceDump(db: SQLiteSessionDB, profileId: string, args: string[]): Promise<CliCommandResult> {
   const id = args[0];
   const raw = args.includes("--raw");
 
@@ -114,7 +118,7 @@ async function traceDump(db: SQLiteSessionDB, args: string[]): Promise<CliComman
     };
   }
 
-  const trajectory = await db.loadTrajectory(id);
+  const trajectory = await db.loadTrajectoryForProfile(id, profileId);
 
   if (trajectory === undefined) {
     return {
@@ -133,7 +137,7 @@ async function traceDump(db: SQLiteSessionDB, args: string[]): Promise<CliComman
   };
 }
 
-async function traceTimeline(db: SQLiteSessionDB, args: string[]): Promise<CliCommandResult> {
+async function traceTimeline(db: SQLiteSessionDB, profileId: string, args: string[]): Promise<CliCommandResult> {
   const id = args[0];
   const raw = args.includes("--raw");
 
@@ -145,7 +149,7 @@ async function traceTimeline(db: SQLiteSessionDB, args: string[]): Promise<CliCo
     };
   }
 
-  const trajectory = await db.loadTrajectory(id);
+  const trajectory = await db.loadTrajectoryForProfile(id, profileId);
 
   if (trajectory === undefined) {
     return {
@@ -184,7 +188,7 @@ async function traceTimeline(db: SQLiteSessionDB, args: string[]): Promise<CliCo
   };
 }
 
-async function traceFailures(db: SQLiteSessionDB, args: string[]): Promise<CliCommandResult> {
+async function traceFailures(db: SQLiteSessionDB, profileId: string, args: string[]): Promise<CliCommandResult> {
   const id = args[0];
 
   if (id === undefined) {
@@ -192,6 +196,16 @@ async function traceFailures(db: SQLiteSessionDB, args: string[]): Promise<CliCo
       handled: true,
       exitCode: 1,
       output: "Usage: estacoda trace failures <id>"
+    };
+  }
+
+  const trajectory = await db.loadTrajectoryForProfile(id, profileId);
+
+  if (trajectory === undefined) {
+    return {
+      handled: true,
+      exitCode: 1,
+      output: `Trajectory not found: ${id}`
     };
   }
 

@@ -248,34 +248,6 @@ export type ProviderAdapter = {
   stream?(request: ProviderRequest, options?: ProviderCompletionOptions): AsyncIterable<ProviderStreamEvent>;
 };
 
-export type CredentialPoolEntry = {
-  id: string;
-  source: ProviderCredentialSource;
-  priority?: number;
-  cooldownUntil?: string;
-  failureCount?: number;
-  usageCount?: number;
-};
-
-export type CredentialRotationStrategy =
-  | "fill_first"
-  | "round_robin"
-  | "least_used"
-  | "random";
-
-export type CredentialPoolSnapshot = {
-  provider: ProviderId;
-  strategy: CredentialRotationStrategy;
-  entries: Array<{
-    id: string;
-    priority: number;
-    available: boolean;
-    cooldownUntil?: string;
-    failureCount: number;
-    usageCount: number;
-  }>;
-};
-
 export type ProviderAuthMethod =
   | "none"
   | "api_key"

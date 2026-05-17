@@ -4,6 +4,9 @@ import type { CliCommandResult, CliOptions } from "./cli.js";
 import { MemoryStore } from "../memory/memory-store.js";
 import { MemoryPromotionStore } from "../memory/memory-promotion-store.js";
 import { MemoryInspector } from "../memory/memory-inspector.js";
+import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
+import { loadIdentityContext } from "../memory/identity-loader.js";
+import { listSharedMemory, type SharedMemoryEntry } from "../memory/shared-memory.js";
 import { KnowledgeCache } from "../knowledge/knowledge-cache.js";
 import { forwardDeps, reverseDeps, affectedFiles, graphSummary } from "../knowledge/code-dependency-graph.js";
 
@@ -210,29 +213,39 @@ async function memoryDeactivate(
 
 async function openMemoryInspector(options: CliOptions): Promise<MemoryInspector | undefined> {
   const homeDir = options.homeDir ?? process.env.HOME ?? homedir();
-  const workspaceRoot = options.workspaceRoot;
-  const userMemoryRoot = `${homeDir}/.estacoda/memory/default`;
-  const projectMemoryRoot = join(workspaceRoot, ".estacoda", "memory");
-  const promotionStorePath = join(userMemoryRoot, "promotions.json");
+  const profileId = readActiveProfile({ homeDir }).profileId ?? defaultProfileId();
+  const profilePaths = resolveProfileStateHome({ homeDir, profileId });
+  const identityContext = await loadIdentityContext({ profilePaths });
+  const sharedMemoryContent = renderSharedMemory(await listSharedMemory({ homeDir }));
 
   const memoryStore = new MemoryStore();
-  try {
-    await memoryStore.loadFromDirectory(userMemoryRoot);
-  } catch {
-    // User memory may not exist yet
+  if (sharedMemoryContent !== undefined) {
+    memoryStore.write("SHARED.md", sharedMemoryContent);
   }
-  try {
-    await memoryStore.loadFromDirectory(projectMemoryRoot);
-  } catch {
-    // Project memory may not exist yet
+  if (identityContext.user !== undefined) {
+    memoryStore.write("USER.md", identityContext.user);
+  }
+  if (identityContext.soul !== undefined) {
+    memoryStore.write("SOUL.md", identityContext.soul);
+  }
+  if (identityContext.memory !== undefined) {
+    memoryStore.write("MEMORY.md", identityContext.memory);
   }
 
-  const promotionStore = new MemoryPromotionStore({ path: promotionStorePath });
+  const promotionStore = new MemoryPromotionStore({ path: profilePaths.promotionsPath });
 
   return new MemoryInspector({
     promotionStore,
     memoryStore
   });
+}
+
+function renderSharedMemory(entries: SharedMemoryEntry[]): string | undefined {
+  const sections = entries
+    .filter((entry) => entry.content.trim().length > 0)
+    .map((entry) => `## ${entry.key}\n${entry.content.trim()}`);
+
+  return sections.length === 0 ? undefined : sections.join("\n\n");
 }
 
 function hasFlag(args: string[], ...flags: string[]): boolean {

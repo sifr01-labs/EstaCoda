@@ -6,6 +6,7 @@ import type { SmokeCase } from "../smoke-case.js";
 import { runGatewayStop } from "../../cli/gateway-commands.js";
 import { writeGatewayPid } from "../../gateway/pid-file.js";
 import { writeGatewayState } from "../../gateway/supervisor-state.js";
+import { resolveProfileStateHome } from "../../config/profile-home.js";
 
 function spawnDecoy(script: string, interpreter?: string[]): ReturnType<typeof spawn> {
   const args = interpreter ?? [process.execPath, "-e"];
@@ -44,17 +45,18 @@ export const gateway_stop_case: SmokeCase = {
   tags: ["lifecycle", "gateway", "stop"],
   run: async () => {
     const tempHome = mkdtempSync(join(tmpdir(), "estacoda-smoke-stop-"));
+    const profilePaths = resolveProfileStateHome({ homeDir: tempHome, profileId: "default" });
 
-    const pidPath = join(tempHome, ".estacoda", "gateway", "gateway.pid");
-    const statePath = join(tempHome, ".estacoda", "gateway", "gateway-state.json");
+    const pidPath = join(profilePaths.gatewayStatePath, "gateway.pid");
+    const statePath = join(profilePaths.gatewayStatePath, "gateway-state.json");
 
     try {
       // Test 1: Graceful stop (process exits on SIGTERM)
       const child1 = spawnDecoy("process.on('SIGTERM', () => process.exit(0)); setInterval(() => {}, 1000);");
       const pid1 = await waitForPid(child1);
 
-      await writeGatewayPid(tempHome, { pid: pid1, startedAt: new Date().toISOString(), version: "0.0.1" });
-      await writeGatewayState(tempHome, { lifecycle: "running", startedAt: new Date().toISOString(), pid: pid1, version: "0.0.1" });
+      await writeGatewayPid(profilePaths, { pid: pid1, startedAt: new Date().toISOString(), version: "0.0.1", profileId: "default" });
+      await writeGatewayState(profilePaths, { lifecycle: "running", startedAt: new Date().toISOString(), pid: pid1, version: "0.0.1", profileId: "default" });
 
       const result1 = await runGatewayStop({ workspaceRoot: tempHome, homeDir: tempHome });
       if (!result1.ok) {
@@ -82,8 +84,8 @@ export const gateway_stop_case: SmokeCase = {
       // Allow Python to fully initialize signal handler
       await new Promise((r) => setTimeout(r, 150));
 
-      await writeGatewayPid(tempHome, { pid: pid2, startedAt: new Date().toISOString(), version: "0.0.1" });
-      await writeGatewayState(tempHome, { lifecycle: "running", startedAt: new Date().toISOString(), pid: pid2, version: "0.0.1" });
+      await writeGatewayPid(profilePaths, { pid: pid2, startedAt: new Date().toISOString(), version: "0.0.1", profileId: "default" });
+      await writeGatewayState(profilePaths, { lifecycle: "running", startedAt: new Date().toISOString(), pid: pid2, version: "0.0.1", profileId: "default" });
 
       const result2 = await runGatewayStop({ workspaceRoot: tempHome, homeDir: tempHome, force: true });
       if (!result2.ok) {

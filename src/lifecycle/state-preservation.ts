@@ -10,15 +10,13 @@ export type ProtectedPath = {
 export function getProtectedPaths(homeDir: string, workspaceRoot?: string): ProtectedPath[] {
   const root = join(homeDir, ".estacoda");
   const paths: ProtectedPath[] = [
-    { source: join(root, "config.json"), label: "user config" },
+    { source: join(root, "active-profile.json"), label: "active profile pointer" },
+    { source: join(root, "profiles"), label: "profile state directories" },
     { source: join(root, "trust.json"), label: "trust store" },
-    { source: join(root, ".env"), label: "secret store" },
+    { source: join(root, "workspace-approvals.json"), label: "workspace approvals" },
     { source: join(root, "sessions.sqlite"), label: "session database" },
-    { source: join(root, "memory"), label: "memory directory" },
-    { source: join(root, "skills", "local"), label: "local skills" },
-    { source: join(root, "skills", ".evolution"), label: "skill evolution" },
-    { source: join(root, "packs", "registry.jsonl"), label: "pack registry" },
-    { source: join(root, "cron"), label: "cron directory" }
+    { source: join(root, "memory", "shared"), label: "shared memory directory" },
+    { source: join(root, "packs", "registry.jsonl"), label: "pack registry" }
   ];
 
   if (workspaceRoot !== undefined) {

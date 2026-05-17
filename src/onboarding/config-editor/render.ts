@@ -46,8 +46,7 @@ export function renderConfigEditor(input: {
   }
 
   lines.push(
-    `  ${setupCopyText("en", "setupEditor.shell.labels.userConfig")}: ${decision.state.configPaths.user}`,
-    `  ${setupCopyText("en", "setupEditor.shell.labels.projectConfig")}: ${decision.state.configPaths.project}`
+    `  Configuration: ${decision.state.configPaths.profile}`
   );
 
   if (decision.state.kind === "state-not-writable") {
@@ -95,8 +94,7 @@ export function renderConfigEditorDiagnostics(decision: SetupRouteDecision): str
     `State: ${decision.state.kind}`,
     `Route: ${decision.kind}`,
     `Recommended: ${decision.state.recommendedAction}`,
-    `User config: ${decision.state.configPaths.user}`,
-    `Project config: ${decision.state.configPaths.project}`,
+    `Configuration: ${decision.state.configPaths.profile}`,
   ];
 
   if (decision.blockers.length > 0) {

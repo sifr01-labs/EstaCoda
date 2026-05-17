@@ -3,7 +3,6 @@ import type { WorkspaceTrustStore } from "./workspace-trust-store.js";
 
 export type WorkspaceTrustToolOptions = {
   workspaceRoot: string;
-  profileId: string;
   trustStore: WorkspaceTrustStore;
 };
 
@@ -11,7 +10,7 @@ export function createWorkspaceTrustTools(options: WorkspaceTrustToolOptions): r
   return [
     {
       name: "workspace.trust.status",
-      description: "Report whether the active workspace is trusted for proactive EstaCoda operation.",
+      description: "Report whether the active workspace directory is trusted for proactive EstaCoda operation.",
       inputSchema: {
         type: "object",
         properties: {}
@@ -22,9 +21,7 @@ export function createWorkspaceTrustTools(options: WorkspaceTrustToolOptions): r
       maxResultSizeChars: 2000,
       isAvailable: () => true,
       run: async () => {
-        const trusted = await options.trustStore.isTrusted(options.workspaceRoot, {
-          profileId: options.profileId
-        });
+        const trusted = await options.trustStore.isTrusted(options.workspaceRoot);
 
         return {
           ok: true,
@@ -33,15 +30,14 @@ export function createWorkspaceTrustTools(options: WorkspaceTrustToolOptions): r
             : `Workspace is not trusted yet: ${options.workspaceRoot}`,
           metadata: {
             trusted,
-            workspaceRoot: options.workspaceRoot,
-            profileId: options.profileId
+            workspaceRoot: options.workspaceRoot
           }
         };
       }
     },
     {
       name: "workspace.trust.grant",
-      description: "Trust the active workspace so normal file and terminal operations do not repeatedly ask.",
+      description: "Trust the active workspace directory for behavioral safety checks without changing config loading.",
       inputSchema: {
         type: "object",
         properties: {
@@ -55,13 +51,12 @@ export function createWorkspaceTrustTools(options: WorkspaceTrustToolOptions): r
       isAvailable: () => true,
       run: async (input: { label?: string }) => {
         const grant = await options.trustStore.grant(options.workspaceRoot, {
-          profileId: options.profileId,
           label: input.label ?? "EstaCoda workspace"
         });
 
         return {
           ok: true,
-          content: `Trusted workspace ${grant.root} for profile ${grant.profileId}.`,
+          content: `Trusted workspace directory ${grant.root}.`,
           metadata: {
             grant
           }
@@ -81,9 +76,7 @@ export function createWorkspaceTrustTools(options: WorkspaceTrustToolOptions): r
       maxResultSizeChars: 2000,
       isAvailable: () => true,
       run: async () => {
-        const revoked = await options.trustStore.revoke(options.workspaceRoot, {
-          profileId: options.profileId
-        });
+        const revoked = await options.trustStore.revoke(options.workspaceRoot);
 
         return {
           ok: true,
@@ -92,8 +85,7 @@ export function createWorkspaceTrustTools(options: WorkspaceTrustToolOptions): r
             : `No workspace trust grant existed for ${options.workspaceRoot}.`,
           metadata: {
             revoked,
-            workspaceRoot: options.workspaceRoot,
-            profileId: options.profileId
+            workspaceRoot: options.workspaceRoot
           }
         };
       }

@@ -5,12 +5,13 @@ import type { SmokeCase } from "../smoke-case.js";
 import { evolutionCommand } from "../../cli/evolution-commands.js";
 import { ChangeManifestStore } from "../../skills/change-manifest-store.js";
 import { SkillEvolutionStore } from "../../skills/skill-evolution.js";
+import { resolveProfileStateHome } from "../../config/profile-home.js";
 
 async function setupTempHome(): Promise<string> {
   const tempHome = mkdtempSync(join(tmpdir(), "estacoda-smoke-safety-"));
   const estacodaRoot = join(tempHome, ".estacoda");
-  const skillsRoot = join(estacodaRoot, "skills");
-  mkdirSync(join(skillsRoot, "local"), { recursive: true });
+  const skillsRoot = resolveProfileStateHome({ homeDir: tempHome, profileId: "default" }).skillsPath;
+  mkdirSync(skillsRoot, { recursive: true });
   mkdirSync(join(skillsRoot, ".evolution"), { recursive: true });
   writeFileSync(join(estacodaRoot, "sessions.sqlite"), "", "utf8");
   return tempHome;
@@ -28,12 +29,13 @@ export const evolution_safety_case: SmokeCase = {
     const tempHome = await setupTempHome();
 
     try {
+      const skillsRoot = resolveProfileStateHome({ homeDir: tempHome, profileId: "default" }).skillsPath;
       const manifestStore = new ChangeManifestStore({
-        root: join(tempHome, ".estacoda", "skills", ".evolution", "manifests")
+        root: join(skillsRoot, ".evolution", "manifests")
       });
       const skillEvolutionStore = new SkillEvolutionStore({
-        usagePath: join(tempHome, ".estacoda", "skills", ".usage.json"),
-        evolutionRoot: join(tempHome, ".estacoda", "skills", ".evolution")
+        usagePath: join(skillsRoot, ".usage.json"),
+        evolutionRoot: join(skillsRoot, ".evolution")
       });
 
       // ── 1. runtime_code target is blocked from promotion ──

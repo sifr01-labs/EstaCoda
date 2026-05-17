@@ -16,14 +16,13 @@ import {
   type TelegramSetupInput,
   type WebSetupInput
 } from "./runtime-config.js";
+import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "./profile-home.js";
 import { diagnoseProviderConfig, renderProviderDiagnostic } from "./provider-diagnostics.js";
 
 export type ConfigToolsOptions = {
   workspaceRoot: string;
   homeDir?: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
-  projectConfigTrust?: "trusted" | "untrusted";
+  profileId?: string;
 };
 
 export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[] {
@@ -51,7 +50,6 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
             `Web extraction: ${loaded.web.enableNetwork ? "enabled" : "disabled"}`,
             `Browser backend: ${loaded.browser.backend}`,
             `Config sources: ${loaded.sources.join(", ") || "none"}`,
-            `Credential pools: ${loaded.credentialPools.snapshots().map((snapshot) => `${snapshot.provider}:${snapshot.entries.length}`).join(", ") || "none"}`,
             "",
             renderProviderDiagnostic(diagnostic)
           ].join("\n"),
@@ -60,7 +58,6 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
             model: loaded.model,
             web: loaded.web,
             browser: loaded.browser,
-            credentialPools: loaded.credentialPools.snapshots(),
             providerDiagnostic: diagnostic
           }
         };
@@ -109,7 +106,6 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           assessorProvider: { type: "string" },
           assessorModel: { type: "string" },
           assessorTimeoutMs: { type: "number" },
-          scope: { type: "string", enum: ["user", "project"] }
         }
       },
       riskClass: "shared-state-mutation",
@@ -148,7 +144,6 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
         properties: {
           enableNetwork: { type: "boolean" },
           maxContentChars: { type: "number" },
-          scope: { type: "string", enum: ["user", "project"] }
         }
       },
       riskClass: "shared-state-mutation",
@@ -188,7 +183,6 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           cdpUrl: { type: "string" },
           launchCommand: { type: "string" },
           autoLaunch: { type: "boolean" },
-          scope: { type: "string", enum: ["user", "project"] }
         }
       },
       riskClass: "shared-state-mutation",
@@ -299,7 +293,6 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
             enum: ["read-only-local", "read-only-network", "workspace-write", "external-side-effect", "credential-access", "destructive-local", "shared-state-mutation", "spend-money", "sandbox-escape"]
           },
           enabled: { type: "boolean" },
-          scope: { type: "string", enum: ["user", "project"] }
         },
         required: ["name"]
       },
@@ -344,7 +337,6 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           allowedChatIds: { type: "array", items: { type: "string" } },
           pollTimeoutSeconds: { type: "number" },
           enabled: { type: "boolean" },
-          scope: { type: "string", enum: ["user", "project"] }
         }
       },
       riskClass: "shared-state-mutation",
@@ -430,6 +422,8 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
       isAvailable: () => true,
       run: async () => {
         const loaded = await loadRuntimeConfig(options);
+        const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+        const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId });
         const key = loaded.imageGen.apiKeyEnv;
         return {
           ok: true,
@@ -440,7 +434,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
             `Gateway: ${loaded.imageGen.useGateway ? "yes" : "no"}`,
             `API key env: ${key}`,
             `Base URL: ${loaded.imageGen.baseUrl}`,
-            "Cache: ~/.estacoda/image-cache/"
+            `Cache: ${profilePaths.imageCachePath}`
           ].join("\n"),
           metadata: {
             imageGen: loaded.imageGen,
@@ -451,7 +445,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
     },
     {
       name: "config.provider.setup",
-      description: "Configure EstaCoda's model provider, API key environment variable, credential pool, and endpoint.",
+      description: "Configure EstaCoda's model provider, API key environment variable, and endpoint.",
       inputSchema: {
         type: "object",
         properties: {
@@ -461,8 +455,6 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           apiKeyEnv: { type: "string" },
           apiKey: { type: "string" },
           enableNetwork: { type: "boolean" },
-          scope: { type: "string", enum: ["user", "project"] },
-          credentialPoolStrategy: { type: "string" },
           primary: { type: "boolean" }
         },
         required: ["provider", "model"]
@@ -514,7 +506,6 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           apiKey: { type: "string" },
           baseUrl: { type: "string" },
           useGateway: { type: "boolean" },
-          scope: { type: "string", enum: ["user", "project"] }
         }
       },
       riskClass: "shared-state-mutation",

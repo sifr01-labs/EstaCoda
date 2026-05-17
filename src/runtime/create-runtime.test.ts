@@ -76,7 +76,7 @@ function createMockProviderRegistry(): ProviderRegistry {
 }
 
 async function minimalRuntimeOptions(overrides: {
-  projectConfigTrust?: "trusted" | "untrusted";
+  workspaceTrusted?: boolean;
   mcpServers?: Record<string, { command: string; args?: string[] }>;
 } = {}) {
   const workspaceRoot = await mkdtemp(join(tmpdir(), "estacoda-runtime-test-"));
@@ -104,7 +104,7 @@ describe("createRuntime MCP trust gating", () => {
     }
   });
 
-  it("does not start/register MCP when projectConfigTrust is omitted", async () => {
+  it("does not start/register MCP when workspaceTrusted is omitted", async () => {
     const options = await minimalRuntimeOptions({
       mcpServers: { echo: { command: "echo", args: ["hello"] } }
     });
@@ -113,20 +113,20 @@ describe("createRuntime MCP trust gating", () => {
     expect(servers).toEqual([]);
   });
 
-  it("does not start/register MCP when projectConfigTrust is 'untrusted'", async () => {
+  it("does not start/register MCP when workspaceTrusted is false", async () => {
     const options = await minimalRuntimeOptions({
       mcpServers: { echo: { command: "echo", args: ["hello"] } },
-      projectConfigTrust: "untrusted"
+      workspaceTrusted: false
     });
     const runtime = await createRuntime(options);
     const servers = runtime.inspectMcpServers();
     expect(servers).toEqual([]);
   });
 
-  it("attempts to start/register MCP when projectConfigTrust is 'trusted'", async () => {
+  it("attempts to start/register MCP when workspaceTrusted is true", async () => {
     const options = await minimalRuntimeOptions({
       mcpServers: { echo: { command: "echo", args: ["hello"] } },
-      projectConfigTrust: "trusted"
+      workspaceTrusted: true
     });
     const runtime = await createRuntime(options);
     const servers = runtime.inspectMcpServers();
@@ -210,8 +210,8 @@ describe("createRuntime getStartupReadiness trust threading", () => {
     }
   });
 
-  it("loads project config in verification when projectConfigTrust is trusted", async () => {
-    const options = await minimalRuntimeOptions({ projectConfigTrust: "trusted" });
+  it("ignores project config in verification when workspaceTrusted is trusted", async () => {
+    const options = await minimalRuntimeOptions({ workspaceTrusted: true });
     await mkdir(join(options.workspaceRoot, ".estacoda"), { recursive: true });
     await writeFile(
       join(options.workspaceRoot, ".estacoda", "config.json"),
@@ -230,19 +230,19 @@ describe("createRuntime getStartupReadiness trust threading", () => {
     );
     const trustStorePath = join(options.workspaceRoot, ".estacoda", "trust.json");
     const trustStore = new WorkspaceTrustStore({ path: trustStorePath });
-    await trustStore.grant(options.workspaceRoot, { profileId: "default" });
+    await trustStore.grant(options.workspaceRoot);
     const runtime = await createRuntime({ ...options, trustStore, trustStorePath });
     try {
       const readiness = await runtime.getStartupReadiness();
-      expect(readiness.providerReadiness).toBe("ready");
-      expect(readiness.workspaceVerification).toBe("verified");
+      expect(readiness.providerReadiness).toBe("missing-config");
+      expect(readiness.workspaceVerification).toBe("unverified");
     } finally {
       await runtime.dispose();
     }
   });
 
-  it("skips project config in verification when projectConfigTrust is untrusted", async () => {
-    const options = await minimalRuntimeOptions({ projectConfigTrust: "untrusted" });
+  it("skips project config in verification when workspaceTrusted is untrusted", async () => {
+    const options = await minimalRuntimeOptions({ workspaceTrusted: false });
     await mkdir(join(options.workspaceRoot, ".estacoda"), { recursive: true });
     await writeFile(
       join(options.workspaceRoot, ".estacoda", "config.json"),
@@ -261,7 +261,7 @@ describe("createRuntime getStartupReadiness trust threading", () => {
     );
     const trustStorePath = join(options.workspaceRoot, ".estacoda", "trust.json");
     const trustStore = new WorkspaceTrustStore({ path: trustStorePath });
-    await trustStore.grant(options.workspaceRoot, { profileId: "default" });
+    await trustStore.grant(options.workspaceRoot);
     const runtime = await createRuntime({ ...options, trustStore, trustStorePath });
     try {
       const readiness = await runtime.getStartupReadiness();

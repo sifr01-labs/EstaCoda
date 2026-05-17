@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, readdir, readFile, writeFile, rm } from "node:fs/promises";
-import { join, relative, sep } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { tmpdir } from "node:os";
-import { loadRuntimeConfig, loadUserRuntimeConfig, loadTrustedRuntimeConfig, mergeConfig, normalizeAuxiliaryModels, saveRuntimeConfig } from "./runtime-config.js";
+import { loadRuntimeConfig, normalizeAuxiliaryModels, saveRuntimeConfig } from "./runtime-config.js";
+import { resolveProfileStateHome } from "./profile-home.js";
+
+function profileConfigPath(homeDir: string): string {
+  return resolveProfileStateHome({ homeDir, profileId: "default" }).configPath;
+}
 
 describe("normalizeAuxiliaryModels", () => {
   it("fills missing tasks with auto/enabled defaults", () => {
@@ -30,52 +35,16 @@ describe("normalizeAuxiliaryModels", () => {
   });
 });
 
-describe("mergeConfig auxiliaryModels", () => {
-  it("deep-merges auxiliaryModels by task key", () => {
-    const merged = mergeConfig(
-      { auxiliaryModels: { vision: { provider: "openai", id: "gpt-4o" } } },
-      { auxiliaryModels: { vision: { enabled: false } } }
-    );
-    expect(merged.auxiliaryModels?.vision).toEqual({ provider: "openai", id: "gpt-4o", enabled: false });
-  });
-
-  it("adds tasks from both configs", () => {
-    const merged = mergeConfig(
-      { auxiliaryModels: { vision: { provider: "openai" } } },
-      { auxiliaryModels: { approval: { provider: "main" } } }
-    );
-    expect(merged.auxiliaryModels?.vision).toEqual({ provider: "openai" });
-    expect(merged.auxiliaryModels?.approval).toEqual({ provider: "main" });
-  });
-
-  it("strips default-only auxiliary slots after merge", () => {
-    const merged = mergeConfig(
-      { auxiliaryModels: {} },
-      { auxiliaryModels: {} }
-    );
-    expect(merged.auxiliaryModels).toBeUndefined();
-  });
-
-  it("preserves non-default slots after merge", () => {
-    const merged = mergeConfig(
-      { auxiliaryModels: { vision: { provider: "openai", id: "gpt-4o" } } },
-      { auxiliaryModels: {} }
-    );
-    expect(merged.auxiliaryModels?.vision).toEqual({ provider: "openai", id: "gpt-4o" });
-  });
-});
-
 describe("loadRuntimeConfig auxiliaryModels", () => {
   it("normalizes missing tasks to auto/enabled at load time", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    const configPath = join(workspace, ".estacoda", "config.json");
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
     await writeFile(configPath, JSON.stringify({ model: { provider: "openai", id: "gpt-4o" } }));
 
     const loaded = await loadRuntimeConfig({
       workspaceRoot: workspace,
-      userConfigPath: join(workspace, "nonexistent-user-config.json"),
-      projectConfigTrust: "trusted"
+      homeDir: workspace
     });
 
     expect(loaded.auxiliaryModels).toBeDefined();
@@ -85,8 +54,8 @@ describe("loadRuntimeConfig auxiliaryModels", () => {
 
   it("ignores deprecated auxiliaryProviders without migrating and strips on save", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    const configPath = join(workspace, ".estacoda", "config.json");
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
     await writeFile(configPath, JSON.stringify({
       model: { provider: "openai", id: "gpt-4o" },
       auxiliaryProviders: { vision: { requireVision: true } }
@@ -94,8 +63,7 @@ describe("loadRuntimeConfig auxiliaryModels", () => {
 
     const loaded = await loadRuntimeConfig({
       workspaceRoot: workspace,
-      userConfigPath: join(workspace, "nonexistent-user-config.json"),
-      projectConfigTrust: "trusted"
+      homeDir: workspace
     });
 
     // auxiliaryProviders is not migrated into auxiliaryModels
@@ -112,14 +80,14 @@ describe("loadRuntimeConfig auxiliaryModels", () => {
 describe("loadRuntimeConfig channel readiness", () => {
   it("discord ready = enabled && botTokenEnv present", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    const configPath = join(workspace, ".estacoda", "config.json");
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
     await writeFile(configPath, JSON.stringify({
       model: { provider: "openai", id: "gpt-4o" },
       channels: { discord: { enabled: true, botTokenEnv: "DISCORD_BOT_TOKEN" } }
     }));
 
-    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, userConfigPath: join(workspace, "nonexistent-user-config.json"), projectConfigTrust: "trusted" });
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
     expect(loaded.channels.discord.ready).toBe(true);
     expect(loaded.channels.discord.missing).toBeUndefined();
     await rm(workspace, { recursive: true, force: true });
@@ -127,14 +95,14 @@ describe("loadRuntimeConfig channel readiness", () => {
 
   it("discord not ready when enabled but botTokenEnv missing", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    const configPath = join(workspace, ".estacoda", "config.json");
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
     await writeFile(configPath, JSON.stringify({
       model: { provider: "openai", id: "gpt-4o" },
       channels: { discord: { enabled: true } }
     }));
 
-    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, userConfigPath: join(workspace, "nonexistent-user-config.json"), projectConfigTrust: "trusted" });
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
     expect(loaded.channels.discord.ready).toBe(false);
     expect(loaded.channels.discord.missing).toContain("botTokenEnv");
     await rm(workspace, { recursive: true, force: true });
@@ -142,8 +110,8 @@ describe("loadRuntimeConfig channel readiness", () => {
 
   it("email ready = enabled && required config present", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    const configPath = join(workspace, ".estacoda", "config.json");
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
     await writeFile(configPath, JSON.stringify({
       model: { provider: "openai", id: "gpt-4o" },
       channels: {
@@ -158,7 +126,7 @@ describe("loadRuntimeConfig channel readiness", () => {
       }
     }));
 
-    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, userConfigPath: join(workspace, "nonexistent-user-config.json"), projectConfigTrust: "trusted" });
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
     expect(loaded.channels.email.ready).toBe(true);
     expect(loaded.channels.email.missing).toBeUndefined();
     await rm(workspace, { recursive: true, force: true });
@@ -166,14 +134,14 @@ describe("loadRuntimeConfig channel readiness", () => {
 
   it("email not ready when enabled but required config missing", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    const configPath = join(workspace, ".estacoda", "config.json");
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
     await writeFile(configPath, JSON.stringify({
       model: { provider: "openai", id: "gpt-4o" },
       channels: { email: { enabled: true } }
     }));
 
-    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, userConfigPath: join(workspace, "nonexistent-user-config.json"), projectConfigTrust: "trusted" });
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
     expect(loaded.channels.email.ready).toBe(false);
     expect(loaded.channels.email.missing).toEqual(["imapHost", "smtpHost", "username", "passwordEnv", "ownAddress"]);
     await rm(workspace, { recursive: true, force: true });
@@ -181,14 +149,14 @@ describe("loadRuntimeConfig channel readiness", () => {
 
   it("whatsapp ready = enabled && experimental true", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    const configPath = join(workspace, ".estacoda", "config.json");
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
     await writeFile(configPath, JSON.stringify({
       model: { provider: "openai", id: "gpt-4o" },
       channels: { whatsapp: { enabled: true, experimental: true } }
     }));
 
-    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, userConfigPath: join(workspace, "nonexistent-user-config.json"), projectConfigTrust: "trusted" });
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
     expect(loaded.channels.whatsapp.ready).toBe(true);
     expect(loaded.channels.whatsapp.missing).toBeUndefined();
     await rm(workspace, { recursive: true, force: true });
@@ -196,14 +164,14 @@ describe("loadRuntimeConfig channel readiness", () => {
 
   it("whatsapp not ready when enabled but experimental false", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    const configPath = join(workspace, ".estacoda", "config.json");
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
     await writeFile(configPath, JSON.stringify({
       model: { provider: "openai", id: "gpt-4o" },
       channels: { whatsapp: { enabled: true, experimental: false } }
     }));
 
-    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, userConfigPath: join(workspace, "nonexistent-user-config.json"), projectConfigTrust: "trusted" });
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
     expect(loaded.channels.whatsapp.ready).toBe(false);
     expect(loaded.channels.whatsapp.missing).toContain("experimental");
     await rm(workspace, { recursive: true, force: true });
@@ -213,8 +181,8 @@ describe("loadRuntimeConfig channel readiness", () => {
 describe("loadRuntimeConfig modelFallbackRoutes resolution", () => {
   it("resolves explicit fallback routes with provider defaults and overrides", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    const configPath = join(workspace, ".estacoda", "config.json");
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
 
     const config = {
       model: {
@@ -238,8 +206,7 @@ describe("loadRuntimeConfig modelFallbackRoutes resolution", () => {
 
     const loaded = await loadRuntimeConfig({
       workspaceRoot: workspace,
-      userConfigPath: join(workspace, "nonexistent-user-config.json"),
-      projectConfigTrust: "trusted"
+      homeDir: workspace
     });
 
     expect(loaded.modelFallbackRoutes.length).toBe(2);
@@ -264,8 +231,8 @@ describe("loadRuntimeConfig modelFallbackRoutes resolution", () => {
 
   it("returns empty modelFallbackRoutes when no fallbacks are configured", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    const configPath = join(workspace, ".estacoda", "config.json");
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
 
     const config = {
       model: {
@@ -278,8 +245,7 @@ describe("loadRuntimeConfig modelFallbackRoutes resolution", () => {
 
     const loaded = await loadRuntimeConfig({
       workspaceRoot: workspace,
-      userConfigPath: join(workspace, "nonexistent-user-config.json"),
-      projectConfigTrust: "trusted"
+      homeDir: workspace
     });
 
     expect(loaded.modelFallbackRoutes).toEqual([]);
@@ -287,8 +253,8 @@ describe("loadRuntimeConfig modelFallbackRoutes resolution", () => {
 
   it("deduplicates fallback routes that match the primary route", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    const configPath = join(workspace, ".estacoda", "config.json");
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
 
     const config = {
       model: {
@@ -305,8 +271,7 @@ describe("loadRuntimeConfig modelFallbackRoutes resolution", () => {
 
     const loaded = await loadRuntimeConfig({
       workspaceRoot: workspace,
-      userConfigPath: join(workspace, "nonexistent-user-config.json"),
-      projectConfigTrust: "trusted"
+      homeDir: workspace
     });
 
     expect(loaded.modelFallbackRoutes.length).toBe(1);
@@ -315,8 +280,8 @@ describe("loadRuntimeConfig modelFallbackRoutes resolution", () => {
 
   it("enriches primaryModelRoute with apiMode from provider metadata", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    const configPath = join(workspace, ".estacoda", "config.json");
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
 
     await writeFile(configPath, JSON.stringify({
       model: { provider: "openai", id: "gpt-4o" }
@@ -324,8 +289,7 @@ describe("loadRuntimeConfig modelFallbackRoutes resolution", () => {
 
     const loaded = await loadRuntimeConfig({
       workspaceRoot: workspace,
-      userConfigPath: join(workspace, "nonexistent-user-config.json"),
-      projectConfigTrust: "trusted"
+      homeDir: workspace
     });
 
     expect(loaded.primaryModelRoute.apiMode).toBe("openai_chat_completions");
@@ -333,8 +297,8 @@ describe("loadRuntimeConfig modelFallbackRoutes resolution", () => {
 
   it("preserves provider-configured apiMode on primaryModelRoute", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    const configPath = join(workspace, ".estacoda", "config.json");
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
 
     await writeFile(configPath, JSON.stringify({
       providers: {
@@ -348,8 +312,7 @@ describe("loadRuntimeConfig modelFallbackRoutes resolution", () => {
 
     const loaded = await loadRuntimeConfig({
       workspaceRoot: workspace,
-      userConfigPath: join(workspace, "nonexistent-user-config.json"),
-      projectConfigTrust: "trusted"
+      homeDir: workspace
     });
 
     expect(loaded.primaryModelRoute.apiMode).toBe("custom_openai_compatible");
@@ -357,8 +320,8 @@ describe("loadRuntimeConfig modelFallbackRoutes resolution", () => {
 
   it("enriches each modelFallbackRoute with apiMode from provider metadata", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    const configPath = join(workspace, ".estacoda", "config.json");
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
 
     await writeFile(configPath, JSON.stringify({
       model: {
@@ -373,8 +336,7 @@ describe("loadRuntimeConfig modelFallbackRoutes resolution", () => {
 
     const loaded = await loadRuntimeConfig({
       workspaceRoot: workspace,
-      userConfigPath: join(workspace, "nonexistent-user-config.json"),
-      projectConfigTrust: "trusted"
+      homeDir: workspace
     });
 
     expect(loaded.modelFallbackRoutes.length).toBe(2);
@@ -384,8 +346,8 @@ describe("loadRuntimeConfig modelFallbackRoutes resolution", () => {
 
   it("preserves explicit apiMode on a route and does not overwrite it", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    const configPath = join(workspace, ".estacoda", "config.json");
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
 
     // This test uses a synthetic scenario where the runtime already has an
     // explicit apiMode set on the route object (e.g. from a future caller).
@@ -410,8 +372,8 @@ describe("loadRuntimeConfig modelFallbackRoutes resolution", () => {
 
   it("does not expose raw secrets during route normalization", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    const configPath = join(workspace, ".estacoda", "config.json");
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
 
     await writeFile(configPath, JSON.stringify({
       model: { provider: "openai", id: "gpt-4o" },
@@ -426,8 +388,7 @@ describe("loadRuntimeConfig modelFallbackRoutes resolution", () => {
 
     const loaded = await loadRuntimeConfig({
       workspaceRoot: workspace,
-      userConfigPath: join(workspace, "nonexistent-user-config.json"),
-      projectConfigTrust: "trusted"
+      homeDir: workspace
     });
 
     // apiKeyEnv is a reference name, not the secret value
@@ -441,8 +402,8 @@ describe("loadRuntimeConfig modelFallbackRoutes resolution", () => {
 describe("loadRuntimeConfig media boundary", () => {
   it("keeps voice and image-generation config separate from LLM route normalization", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    const configPath = join(workspace, ".estacoda", "config.json");
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
 
     await writeFile(configPath, JSON.stringify({
       model: { provider: "openai", id: "gpt-4o" },
@@ -465,8 +426,7 @@ describe("loadRuntimeConfig media boundary", () => {
 
     const loaded = await loadRuntimeConfig({
       workspaceRoot: workspace,
-      userConfigPath: join(workspace, "nonexistent-user-config.json"),
-      projectConfigTrust: "trusted"
+      homeDir: workspace
     });
 
     // LLM route should not absorb media config
@@ -492,183 +452,49 @@ describe("loadRuntimeConfig media boundary", () => {
   });
 });
 
-describe("loadUserRuntimeConfig trust isolation", () => {
-  it("excludes project-defined MCP servers when untrusted", async () => {
+describe("loadRuntimeConfig profile loading", () => {
+  it("loads exactly the selected profile config", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    const projectConfigPath = join(workspace, ".estacoda", "config.json");
-    await writeFile(projectConfigPath, JSON.stringify({
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "project", id: "project-model" }
+    }));
+    await mkdir(join(workspace, ".estacoda", "profiles", "default"), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
       model: { provider: "openai", id: "gpt-4o" },
       mcpServers: { test: { command: "echo", args: ["hello"] } }
     }));
 
-    const loaded = await loadUserRuntimeConfig({ workspaceRoot: workspace });
-    expect(loaded.mcp.servers).toEqual({});
-    await rm(workspace, { recursive: true, force: true });
-  });
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
 
-  it("excludes project-defined custom providers when untrusted", async () => {
-    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    const projectConfigPath = join(workspace, ".estacoda", "config.json");
-    await writeFile(projectConfigPath, JSON.stringify({
-      model: { provider: "openai", id: "gpt-4o" },
-      providers: { custom: { kind: "openai-compatible", baseUrl: "https://custom.example.com/v1" } }
-    }));
-
-    const loaded = await loadUserRuntimeConfig({ workspaceRoot: workspace });
-    expect(loaded.providerRegistry.get("custom")).toBeUndefined();
-    await rm(workspace, { recursive: true, force: true });
-  });
-
-  it("does not throw when project config is invalid JSON", async () => {
-    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    const projectConfigPath = join(workspace, ".estacoda", "config.json");
-    await writeFile(projectConfigPath, "this is not json");
-
-    const loaded = await loadUserRuntimeConfig({ workspaceRoot: workspace });
-    expect(loaded.model.provider).toBe("unconfigured");
-    await rm(workspace, { recursive: true, force: true });
-  });
-
-  it("excludes project MCP servers so runtime cannot spawn them", async () => {
-    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    const markerPath = join(workspace, "marker.txt");
-    const projectConfigPath = join(workspace, ".estacoda", "config.json");
-    await writeFile(projectConfigPath, JSON.stringify({
-      model: { provider: "openai", id: "gpt-4o" },
-      mcpServers: {
-        marker: {
-          command: "sh",
-          args: ["-c", `touch "${markerPath}"`]
-        }
-      }
-    }));
-
-    const loaded = await loadUserRuntimeConfig({ workspaceRoot: workspace });
-    expect(Object.keys(loaded.mcp.servers)).toEqual([]);
-    await rm(workspace, { recursive: true, force: true });
-  });
-});
-
-describe("loadTrustedRuntimeConfig trust inclusion", () => {
-  it("includes project-defined MCP servers when trusted", async () => {
-    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    const projectConfigPath = join(workspace, ".estacoda", "config.json");
-    await writeFile(projectConfigPath, JSON.stringify({
-      model: { provider: "openai", id: "gpt-4o" },
-      mcpServers: { test: { command: "echo", args: ["hello"] } }
-    }));
-
-    const loaded = await loadTrustedRuntimeConfig({ workspaceRoot: workspace });
-    expect(loaded.mcp.servers).toHaveProperty("test");
-    expect(loaded.mcp.servers.test.command).toBe("echo");
-    await rm(workspace, { recursive: true, force: true });
-  });
-
-  it("includes project-defined custom providers when trusted", async () => {
-    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    const projectConfigPath = join(workspace, ".estacoda", "config.json");
-    await writeFile(projectConfigPath, JSON.stringify({
-      model: { provider: "openai", id: "gpt-4o" },
-      providers: { custom: { kind: "openai-compatible", baseUrl: "https://custom.example.com/v1" } }
-    }));
-
-    const loaded = await loadTrustedRuntimeConfig({ workspaceRoot: workspace });
-    const resolved = loaded.providerRegistry.get("custom");
-    expect(resolved).toBeDefined();
-    await rm(workspace, { recursive: true, force: true });
-  });
-});
-
-describe("loadRuntimeConfig fail-closed behavior", () => {
-  it("does not load project config when projectConfigTrust is omitted", async () => {
-    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    const projectConfigPath = join(workspace, ".estacoda", "config.json");
-    await writeFile(projectConfigPath, JSON.stringify({
-      model: { provider: "openai", id: "gpt-4o" }
-    }));
-
-    const loaded = await loadRuntimeConfig({
-      workspaceRoot: workspace,
-      userConfigPath: join(workspace, "nonexistent-user-config.json")
-    });
-
-    // Project config should be skipped when trust is omitted
-    expect(loaded.model.provider).toBe("unconfigured");
-    await rm(workspace, { recursive: true, force: true });
-  });
-
-  it("does not load project config when projectConfigTrust is 'untrusted'", async () => {
-    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    const projectConfigPath = join(workspace, ".estacoda", "config.json");
-    await writeFile(projectConfigPath, JSON.stringify({
-      model: { provider: "openai", id: "gpt-4o" }
-    }));
-
-    const loaded = await loadRuntimeConfig({
-      workspaceRoot: workspace,
-      userConfigPath: join(workspace, "nonexistent-user-config.json"),
-      projectConfigTrust: "untrusted"
-    });
-
-    expect(loaded.model.provider).toBe("unconfigured");
-    await rm(workspace, { recursive: true, force: true });
-  });
-
-  it("loads project config when projectConfigTrust is 'trusted'", async () => {
-    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    const projectConfigPath = join(workspace, ".estacoda", "config.json");
-    await writeFile(projectConfigPath, JSON.stringify({
-      model: { provider: "openai", id: "gpt-4o" }
-    }));
-
-    const loaded = await loadRuntimeConfig({
-      workspaceRoot: workspace,
-      userConfigPath: join(workspace, "nonexistent-user-config.json"),
-      projectConfigTrust: "trusted"
-    });
-
+    expect(loaded.sources).toEqual([profileConfigPath(workspace)]);
     expect(loaded.model.provider).toBe("openai");
     expect(loaded.model.id).toBe("gpt-4o");
+    expect(loaded.mcp.servers).toHaveProperty("test");
     await rm(workspace, { recursive: true, force: true });
   });
-});
 
-describe("production loadRuntimeConfig callsite safety", () => {
-  it("has no production loadRuntimeConfig calls that omit projectConfigTrust and are not wrappers", async () => {
-    const repoRoot = new URL("../..", import.meta.url).pathname;
-    const files = await findProductionTypeScriptFiles(repoRoot);
-    const unsafe: string[] = [];
+  it("ignores invalid workspace project config", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(join(workspace, ".estacoda", "profiles", "default"), { recursive: true });
+    await writeFile(profileConfigPath(workspace), "this is not json");
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" }
+    }));
 
-    for (const file of files) {
-      const source = await readFile(join(repoRoot, file), "utf8");
-      for (const callsite of collectLoadRuntimeConfigCalls(source)) {
-        const call = callsite.call;
-        // Allow calls that pass 'options' (types carry projectConfigTrust)
-        if (/^loadRuntimeConfig\s*\(\s*options\s*\)$/.test(call)) continue;
-        // All other production callsites must explicitly pass projectConfigTrust.
-        if (call.includes("projectConfigTrust")) continue;
-        unsafe.push(`${file}:${lineNumberAt(source, callsite.start)}:${call.split("\n")[0].trim()}`);
-      }
-    }
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
 
-    expect(unsafe).toEqual([]);
+    expect(loaded.model.provider).toBe("openai");
+    expect(loaded.sources).toEqual([profileConfigPath(workspace)]);
+    await rm(workspace, { recursive: true, force: true });
   });
 });
 
 describe("buildProviderRegistry custom provider baseUrl behavior", () => {
   it("custom provider without baseUrl does not register an executable OpenAI-compatible adapter", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    await writeFile(join(workspace, ".estacoda", "config.json"), JSON.stringify({
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
       providers: {
         "custom-corp": {
           kind: "openai-compatible",
@@ -679,8 +505,7 @@ describe("buildProviderRegistry custom provider baseUrl behavior", () => {
 
     const loaded = await loadRuntimeConfig({
       workspaceRoot: workspace,
-      userConfigPath: join(workspace, ".estacoda", "config.json"),
-      projectConfigTrust: "untrusted"
+      homeDir: workspace
     });
 
     const adapter = loaded.providerRegistry.get("custom-corp");
@@ -690,8 +515,8 @@ describe("buildProviderRegistry custom provider baseUrl behavior", () => {
 
   it("custom provider with explicit baseUrl registers executable adapter", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    await writeFile(join(workspace, ".estacoda", "config.json"), JSON.stringify({
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
       providers: {
         "custom-corp": {
           kind: "openai-compatible",
@@ -703,8 +528,7 @@ describe("buildProviderRegistry custom provider baseUrl behavior", () => {
 
     const loaded = await loadRuntimeConfig({
       workspaceRoot: workspace,
-      userConfigPath: join(workspace, ".estacoda", "config.json"),
-      projectConfigTrust: "untrusted"
+      homeDir: workspace
     });
 
     const adapter = loaded.providerRegistry.get("custom-corp");
@@ -714,8 +538,8 @@ describe("buildProviderRegistry custom provider baseUrl behavior", () => {
 
   it("known provider without explicit baseUrl registers executable adapter with metadata default", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    await writeFile(join(workspace, ".estacoda", "config.json"), JSON.stringify({
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
       providers: {
         openai: {
           kind: "openai-compatible",
@@ -726,8 +550,7 @@ describe("buildProviderRegistry custom provider baseUrl behavior", () => {
 
     const loaded = await loadRuntimeConfig({
       workspaceRoot: workspace,
-      userConfigPath: join(workspace, ".estacoda", "config.json"),
-      projectConfigTrust: "untrusted"
+      homeDir: workspace
     });
 
     const adapter = loaded.providerRegistry.get("openai");
@@ -737,8 +560,8 @@ describe("buildProviderRegistry custom provider baseUrl behavior", () => {
 
   it("loadRuntimeConfig primary route for custom provider without baseUrl has baseUrl === undefined", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    await writeFile(join(workspace, ".estacoda", "config.json"), JSON.stringify({
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
       model: { provider: "custom-corp", id: "custom-model" },
       providers: {
         "custom-corp": {
@@ -750,8 +573,7 @@ describe("buildProviderRegistry custom provider baseUrl behavior", () => {
 
     const loaded = await loadRuntimeConfig({
       workspaceRoot: workspace,
-      userConfigPath: join(workspace, ".estacoda", "config.json"),
-      projectConfigTrust: "untrusted"
+      homeDir: workspace
     });
 
     expect(loaded.primaryModelRoute.baseUrl).toBeUndefined();
@@ -760,8 +582,8 @@ describe("buildProviderRegistry custom provider baseUrl behavior", () => {
 
   it("no placeholder endpoint is used for runtime execution", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    await writeFile(join(workspace, ".estacoda", "config.json"), JSON.stringify({
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
       providers: {
         "custom-corp": {
           kind: "openai-compatible",
@@ -772,8 +594,7 @@ describe("buildProviderRegistry custom provider baseUrl behavior", () => {
 
     const loaded = await loadRuntimeConfig({
       workspaceRoot: workspace,
-      userConfigPath: join(workspace, ".estacoda", "config.json"),
-      projectConfigTrust: "untrusted"
+      homeDir: workspace
     });
 
     const json = JSON.stringify(loaded);
@@ -783,8 +604,8 @@ describe("buildProviderRegistry custom provider baseUrl behavior", () => {
 
   it("openai_responses adapter is registered for providers with matching metadata apiMode", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    await writeFile(join(workspace, ".estacoda", "config.json"), JSON.stringify({
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
       providers: {
         codex: {
           kind: "openai-compatible",
@@ -795,8 +616,7 @@ describe("buildProviderRegistry custom provider baseUrl behavior", () => {
 
     const loaded = await loadRuntimeConfig({
       workspaceRoot: workspace,
-      userConfigPath: join(workspace, ".estacoda", "config.json"),
-      projectConfigTrust: "untrusted"
+      homeDir: workspace
     });
 
     const adapter = loaded.providerRegistry.get("codex");
@@ -807,9 +627,9 @@ describe("buildProviderRegistry custom provider baseUrl behavior", () => {
 
   it("setup-generated Codex config round-trips to Responses adapter", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
     // Exact shape emitted by model-setup-codex.ts (no kind field)
-    await writeFile(join(workspace, ".estacoda", "config.json"), JSON.stringify({
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
       model: { provider: "codex", id: "o3" },
       providers: {
         codex: {
@@ -821,8 +641,7 @@ describe("buildProviderRegistry custom provider baseUrl behavior", () => {
 
     const loaded = await loadRuntimeConfig({
       workspaceRoot: workspace,
-      userConfigPath: join(workspace, ".estacoda", "config.json"),
-      projectConfigTrust: "untrusted"
+      homeDir: workspace
     });
 
     // 1. Adapter is registered
@@ -855,23 +674,11 @@ describe("buildProviderRegistry custom provider baseUrl behavior", () => {
 });
 
 describe("modelAliases normalization", () => {
-  it("merges model_aliases into canonical modelAliases", async () => {
-    const { mergeConfig } = await import("./runtime-config.js");
-    const merged = mergeConfig(
-      { model_aliases: { qwen: { provider: "local", model: "qwen2.5" } } },
-      { modelAliases: { gpt4: { provider: "openai", model: "gpt-4o" } } }
-    );
-    expect(merged.modelAliases).toBeDefined();
-    expect(merged.modelAliases?.qwen).toEqual({ provider: "local", model: "qwen2.5" });
-    expect(merged.modelAliases?.gpt4).toEqual({ provider: "openai", model: "gpt-4o" });
-    expect(merged.model_aliases).toBeUndefined();
-  });
-
   it("loads model_aliases input into canonical modelAliases", async () => {
     const { loadRuntimeConfig } = await import("./runtime-config.js");
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-alias-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    await writeFile(join(workspace, ".estacoda", "config.json"), JSON.stringify({
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
       model_aliases: {
         myllm: { provider: "local", model: "llama3" }
       }
@@ -879,8 +686,7 @@ describe("modelAliases normalization", () => {
 
     const loaded = await loadRuntimeConfig({
       workspaceRoot: workspace,
-      userConfigPath: join(workspace, ".estacoda", "config.json"),
-      projectConfigTrust: "untrusted"
+      homeDir: workspace
     });
 
     expect(loaded.config.modelAliases?.myllm).toEqual({ provider: "local", model: "llama3" });
@@ -890,8 +696,8 @@ describe("modelAliases normalization", () => {
   it("saves config with canonical modelAliases, not model_aliases", async () => {
     const { saveRuntimeConfig } = await import("./runtime-config.js");
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-save-alias-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    const configPath = join(workspace, ".estacoda", "config.json");
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
 
     await saveRuntimeConfig(configPath, {
       modelAliases: {
@@ -910,8 +716,8 @@ describe("modelAliases normalization", () => {
 describe("OAuth store config boundary", () => {
   it("saveRuntimeConfig output never contains raw OAuth token fields", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-oauth-boundary-test-"));
-    await mkdir(join(workspace, ".estacoda"), { recursive: true });
-    const configPath = join(workspace, ".estacoda", "config.json");
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
 
     const config = {
       model: { provider: "openai", id: "gpt-4o" },

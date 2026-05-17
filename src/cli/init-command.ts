@@ -1,6 +1,8 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { defaultProfileId, readActiveProfile } from "../config/profile-home.js";
 import { resolveStateHome } from "../config/state-home.js";
+import { ensureDefaultProfileState } from "./profile-state.js";
 
 export type InitOptions = {
   homeDir?: string;
@@ -14,15 +16,8 @@ export type InitResult = {
 };
 
 export const DEFAULT_STATE_DIRS = [
-  "memory",
-  "skills",
-  "skills/local",
-  "skills/.evolution",
+  "memory/shared",
   "packs",
-  "cron",
-  "cron/output",
-  "cron/locks",
-  "logs",
   ".backups"
 ];
 
@@ -49,6 +44,7 @@ async function writeFileIfAbsent(path: string, contents: string): Promise<void> 
 
 export async function runInitCommand(options: InitOptions): Promise<InitResult> {
   const stateHome = resolveStateHome({ homeDir: options.homeDir });
+  const profileId = readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
   const homeDir = stateHome.homeDir;
   if (homeDir.length === 0) {
     return {
@@ -63,25 +59,7 @@ export async function runInitCommand(options: InitOptions): Promise<InitResult> 
   try {
     await bootstrapStateDirectories(homeDir);
 
-    const defaultConfig = {
-      model: {
-        provider: "unconfigured",
-        id: "unconfigured"
-      },
-      providers: {},
-      skills: {
-        autonomy: "suggest"
-      },
-      ui: {
-        language: "en",
-        flavor: "standard",
-        activityLabels: "en"
-      },
-      security: {
-        approvalMode: "confirm"
-      }
-    };
-    await writeFileIfAbsent(stateHome.configPath, `${JSON.stringify(defaultConfig, null, 2)}\n`);
+    await ensureDefaultProfileState({ homeDir: options.homeDir, profileId });
     await writeFileIfAbsent(stateHome.trustJsonPath, "{}\n");
 
     return {
@@ -92,6 +70,16 @@ export async function runInitCommand(options: InitOptions): Promise<InitResult> 
         "Created:",
         ...DEFAULT_STATE_DIRS.map((d) => `  ${d}/`),
         "  config.json",
+        "  .env",
+        "  auth.json",
+        "  USER.md",
+        "  SOUL.md",
+        "  MEMORY.md",
+        "  promotions.json",
+        "  skills/",
+        "  cron/",
+        "  logs/",
+        "  gateway/",
         "  trust.json",
         "",
         "Next: run `estacoda` to start interactive setup, or `estacoda verify` to check readiness."

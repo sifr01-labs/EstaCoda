@@ -333,12 +333,13 @@ export class StandardRenderer {
     const lines: string[] = [
       this.#brand(`${vm.agentName} is ready`),
       this.#rail(`model: ${this.#dim(`${vm.model.provider}/${vm.model.id}`)}`),
+      vm.profileId === undefined ? undefined : this.#rail(`profile: ${this.#dim(vm.profileId)}`),
       this.#rail(`security: ${this.#severity(vm.securityMode, vm.securityMode === "open" ? "warn" : "ok")}`),
       this.#rail(`skills: ${vm.skillCount}${vm.skillAutonomy !== undefined ? ` (${vm.skillAutonomy})` : ""}`),
       this.#rail(`tools: ${vm.toolCount}`),
       this.#rail(`mcp: ${vm.mcp.active}/${vm.mcp.total}`),
       this.#rail(`taskflow: ${vm.taskflowActive ? this.#severity("active", "ok") : this.#dim("inactive")}`),
-    ];
+    ].filter((line): line is string => line !== undefined);
 
     for (const warning of vm.warnings) {
       lines.push(this.renderWarningError(warning));

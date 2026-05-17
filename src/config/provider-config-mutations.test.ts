@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, writeFile, mkdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   applyRegisterProviderConfig,
@@ -14,23 +14,28 @@ import {
   setPreferredModelRoute,
   addFallbackRoute
 } from "./provider-config-mutations.js";
-import { setupProviderConfig, loadRuntimeConfig, mergeConfig, type EstaCodaConfig } from "./runtime-config.js";
+import { setupProviderConfig, loadRuntimeConfig, type EstaCodaConfig } from "./runtime-config.js";
 import { computeRuntimeFingerprint } from "../runtime/runtime-fingerprint.js";
+import { resolveProfileStateHome } from "./profile-home.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-mutation-test-"));
 }
 
 async function writeUserConfig(homeDir: string, config: unknown): Promise<void> {
-  const configPath = join(homeDir, ".estacoda", "config.json");
-  await mkdir(join(homeDir, ".estacoda"), { recursive: true });
+  const configPath = profileConfigPath(homeDir);
+  await mkdir(dirname(configPath), { recursive: true });
   await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", "utf8");
 }
 
 async function readUserConfig(homeDir: string): Promise<EstaCodaConfig> {
-  const configPath = join(homeDir, ".estacoda", "config.json");
+  const configPath = profileConfigPath(homeDir);
   const content = await readFile(configPath, "utf8");
   return JSON.parse(content) as EstaCodaConfig;
+}
+
+function profileConfigPath(homeDir: string): string {
+  return resolveProfileStateHome({ homeDir, profileId: "default" }).configPath;
 }
 
 describe("applyRegisterProviderConfig", () => {
@@ -113,7 +118,7 @@ describe("applyStoreProviderCredential", () => {
     const existing: EstaCodaConfig = {
       model: { provider: "openai", id: "gpt-4o" }
     };
-    const { config } = applyStoreProviderCredential(existing, {
+    const config = applyStoreProviderCredential(existing, {
       provider: "openai",
       apiKeyEnv: "OPENAI_API_KEY"
     });
@@ -122,7 +127,7 @@ describe("applyStoreProviderCredential", () => {
 
   it("stores credential reference but not raw key in config", () => {
     const existing: EstaCodaConfig = {};
-    const { config, wroteCredentialPool } = applyStoreProviderCredential(existing, {
+    const config = applyStoreProviderCredential(existing, {
       provider: "openai",
       apiKeyEnv: "OPENAI_API_KEY",
       apiKey: "sk-secret-value"
@@ -130,31 +135,8 @@ describe("applyStoreProviderCredential", () => {
     expect(config.providers!.openai!.apiKeyEnv).toBe("OPENAI_API_KEY");
     const json = JSON.stringify(config);
     expect(json).not.toContain("sk-secret-value");
-    expect(wroteCredentialPool).toBe(false);
   });
 
-  it("does not write credential pool by default", () => {
-    const existing: EstaCodaConfig = {};
-    const { config, wroteCredentialPool } = applyStoreProviderCredential(existing, {
-      provider: "openai",
-      apiKeyEnv: "OPENAI_API_KEY"
-    });
-    expect(config.credentialPools).toBeUndefined();
-    expect(wroteCredentialPool).toBe(false);
-  });
-
-  it("writes credential pool only when writeCredentialPool is true", () => {
-    const existing: EstaCodaConfig = {};
-    const { config, wroteCredentialPool } = applyStoreProviderCredential(existing, {
-      provider: "openai",
-      apiKeyEnv: "OPENAI_API_KEY",
-      writeCredentialPool: true,
-      credentialPoolStrategy: "round_robin"
-    });
-    expect(wroteCredentialPool).toBe(true);
-    expect(config.credentialPools).toBeDefined();
-    expect(config.credentialPools!.openai!.strategy).toBe("round_robin");
-  });
 });
 
 describe("applyRegisterProviderModel", () => {
@@ -411,7 +393,6 @@ describe("compatibility wrapper setupProviderConfig", () => {
       workspaceRoot: tmpDir,
       homeDir: tmpDir,
       input: {
-        scope: "user",
         provider: "deepseek",
         model: "deepseek-chat",
         apiKeyEnv: "DEEPSEEK_API_KEY"
@@ -420,36 +401,6 @@ describe("compatibility wrapper setupProviderConfig", () => {
     expect(result.config.model!.provider).toBe("deepseek");
     expect(result.config.model!.id).toBe("deepseek-chat");
     expect(result.config.providers!.deepseek!.apiKeyEnv).toBe("DEEPSEEK_API_KEY");
-  });
-
-  it("does not write credential pool when strategy is omitted", async () => {
-    const result = await setupProviderConfig({
-      workspaceRoot: tmpDir,
-      homeDir: tmpDir,
-      input: {
-        scope: "user",
-        provider: "deepseek",
-        model: "deepseek-chat",
-        apiKeyEnv: "DEEPSEEK_API_KEY"
-      }
-    });
-    expect(result.config.credentialPools).toBeUndefined();
-  });
-
-  it("writes credential pool when strategy is explicitly provided", async () => {
-    const result = await setupProviderConfig({
-      workspaceRoot: tmpDir,
-      homeDir: tmpDir,
-      input: {
-        scope: "user",
-        provider: "deepseek",
-        model: "deepseek-chat",
-        apiKeyEnv: "DEEPSEEK_API_KEY",
-        credentialPoolStrategy: "round_robin"
-      }
-    });
-    expect(result.config.credentialPools).toBeDefined();
-    expect(result.config.credentialPools!.deepseek!.strategy).toBe("round_robin");
   });
 
   it("preserves existing provider fields like headers", async () => {
@@ -470,7 +421,6 @@ describe("compatibility wrapper setupProviderConfig", () => {
       workspaceRoot: tmpDir,
       homeDir: tmpDir,
       input: {
-        scope: "user",
         provider: "deepseek",
         model: "deepseek-coder",
         apiKeyEnv: "DEEPSEEK_API_KEY"
@@ -493,7 +443,7 @@ describe("setupProviderConfig parity with pure helpers", () => {
             enableNetwork: true
           }),
           { provider: "deepseek", apiKeyEnv: "DEEPSEEK_API_KEY" }
-        ).config,
+        ),
         { provider: "deepseek", models: ["deepseek-chat"] }
       ),
       { provider: "deepseek", model: "deepseek-chat" }
@@ -542,7 +492,6 @@ describe("media boundary — voice and image-gen untouched", () => {
       workspaceRoot: tmpDir,
       homeDir: tmpDir,
       input: {
-        scope: "user",
         provider: "deepseek",
         model: "deepseek-chat",
         apiKeyEnv: "DEEPSEEK_API_KEY"
@@ -580,9 +529,7 @@ describe("runtime fingerprint changes after preferred route mutation", () => {
   it("changing preferred route changes loaded runtime fingerprint inputs", async () => {
     const loaded1 = await loadRuntimeConfig({
       workspaceRoot: tmpDir,
-      homeDir: tmpDir,
-      userConfigPath: join(tmpDir, ".estacoda", "config.json"),
-      projectConfigTrust: "untrusted"
+      homeDir: tmpDir
     });
 
     await setPreferredModelRoute({
@@ -593,9 +540,7 @@ describe("runtime fingerprint changes after preferred route mutation", () => {
 
     const loaded2 = await loadRuntimeConfig({
       workspaceRoot: tmpDir,
-      homeDir: tmpDir,
-      userConfigPath: join(tmpDir, ".estacoda", "config.json"),
-      projectConfigTrust: "untrusted"
+      homeDir: tmpDir
     });
 
     const fp1 = computeRuntimeFingerprint(loaded1, {
@@ -629,9 +574,7 @@ describe("runtime fingerprint changes after preferred route mutation", () => {
   it("adding fallback route changes loaded runtime fingerprint inputs", async () => {
     const loaded1 = await loadRuntimeConfig({
       workspaceRoot: tmpDir,
-      homeDir: tmpDir,
-      userConfigPath: join(tmpDir, ".estacoda", "config.json"),
-      projectConfigTrust: "untrusted"
+      homeDir: tmpDir
     });
 
     await addFallbackRoute({
@@ -642,9 +585,7 @@ describe("runtime fingerprint changes after preferred route mutation", () => {
 
     const loaded2 = await loadRuntimeConfig({
       workspaceRoot: tmpDir,
-      homeDir: tmpDir,
-      userConfigPath: join(tmpDir, ".estacoda", "config.json"),
-      projectConfigTrust: "untrusted"
+      homeDir: tmpDir
     });
 
     const fp1 = computeRuntimeFingerprint(loaded1, {
@@ -714,9 +655,7 @@ describe("preferred route metadata preserved through save + load", () => {
 
     const loaded = await loadRuntimeConfig({
       workspaceRoot: tmpDir,
-      homeDir: tmpDir,
-      userConfigPath: join(tmpDir, ".estacoda", "config.json"),
-      projectConfigTrust: "untrusted"
+      homeDir: tmpDir
     });
 
     expect(loaded.primaryModelRoute.provider).toBe("deepseek");
@@ -730,7 +669,7 @@ describe("preferred route metadata preserved through save + load", () => {
 describe("security — raw secrets absent from results", () => {
   it("storeProviderCredential result JSON never contains raw apiKey", () => {
     const existing: EstaCodaConfig = {};
-    const { config } = applyStoreProviderCredential(existing, {
+    const config = applyStoreProviderCredential(existing, {
       provider: "openai",
       apiKeyEnv: "OPENAI_API_KEY",
       apiKey: "sk-sup...2345"
@@ -756,7 +695,6 @@ describe("setupProviderConfig baseUrl metadata-aware resolution", () => {
     await setupProviderConfig({
       workspaceRoot: tmpDir,
       homeDir: tmpDir,
-      userConfigPath: join(tmpDir, ".estacoda", "config.json"),
       input: { provider: "custom-corp", baseUrl: undefined, model: "custom-model" }
     });
     const config = await readUserConfig(tmpDir);
@@ -773,7 +711,6 @@ describe("setupProviderConfig baseUrl metadata-aware resolution", () => {
     await setupProviderConfig({
       workspaceRoot: tmpDir,
       homeDir: tmpDir,
-      userConfigPath: join(tmpDir, ".estacoda", "config.json"),
       input: { provider: "openai", baseUrl: undefined, model: "gpt-4o" }
     });
     const config = await readUserConfig(tmpDir);
@@ -795,7 +732,6 @@ describe("setupProviderConfig baseUrl metadata-aware resolution", () => {
     await setupProviderConfig({
       workspaceRoot: tmpDir,
       homeDir: tmpDir,
-      userConfigPath: join(tmpDir, ".estacoda", "config.json"),
       input: { provider: "openai", baseUrl: undefined, model: "gpt-4o" }
     });
     const config = await readUserConfig(tmpDir);
@@ -809,7 +745,6 @@ describe("setupProviderConfig baseUrl metadata-aware resolution", () => {
     await setupProviderConfig({
       workspaceRoot: tmpDir,
       homeDir: tmpDir,
-      userConfigPath: join(tmpDir, ".estacoda", "config.json"),
       input: { provider: "custom-corp", baseUrl: "https://custom.corp.com/v1", model: "custom-model" }
     });
     const config = await readUserConfig(tmpDir);
@@ -823,7 +758,6 @@ describe("setupProviderConfig baseUrl metadata-aware resolution", () => {
     await setupProviderConfig({
       workspaceRoot: tmpDir,
       homeDir: tmpDir,
-      userConfigPath: join(tmpDir, ".estacoda", "config.json"),
       input: { provider: "custom-corp", baseUrl: undefined, model: "custom-model" }
     });
     const config = await readUserConfig(tmpDir);

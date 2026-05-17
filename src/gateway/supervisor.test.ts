@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   runGatewaySupervisor,
@@ -21,9 +21,14 @@ import { RuntimeCache } from "../runtime/runtime-cache.js";
 import { runtimeCacheStatePath, readRuntimeCacheState } from "./runtime-cache-state.js";
 import { readCleanShutdownMarker, writeCleanShutdownMarker } from "./supervisor-lifecycle.js";
 import { HookRegistry } from "./hook-registry.js";
+import { resolveProfileStateHome, type ProfileStatePaths } from "../config/profile-home.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-supervisor-test-"));
+}
+
+function profileConfigPath(homeDir: string): string {
+  return resolveProfileStateHome({ homeDir, profileId: "default" }).configPath;
 }
 
 function createFakeConfig(tmpDir: string, channels: Record<string, unknown>) {
@@ -113,7 +118,6 @@ function fakeLoadedRuntimeConfig(overrides: Record<string, unknown> = {}) {
       },
     ],
     providerRegistry: {},
-    credentialPools: {},
     auxiliaryModels: {},
     mcp: { servers: {} },
     skills: { externalDirs: [], autonomy: "suggest", config: {} },
@@ -160,10 +164,12 @@ async function waitForCondition(predicate: () => boolean, timeoutMs = 1_000): Pr
 describe("runGatewaySupervisor", () => {
   let tmpDir: string;
   let stateRoot: string;
+  let profilePaths: ProfileStatePaths;
 
   beforeEach(async () => {
     tmpDir = await makeTempDir();
     stateRoot = join(tmpDir, ".estacoda");
+    profilePaths = resolveProfileStateHome({ homeDir: tmpDir, profileId: "default" });
     await mkdir(stateRoot, { recursive: true });
   });
 
@@ -191,7 +197,7 @@ describe("runGatewaySupervisor", () => {
     expect(tick.calls()).toBe(1);
     expect(sleeper.durations()).toHaveLength(0);
 
-    const pid = await readGatewayPid(tmpDir);
+    const pid = await readGatewayPid(profilePaths);
     expect(pid).toBeUndefined();
   });
 
@@ -203,8 +209,7 @@ describe("runGatewaySupervisor", () => {
       latestConfig,
       workspaceRoot: tmpDir,
       homeDir: tmpDir,
-      userConfigPath: join(tmpDir, ".estacoda", "config.json"),
-      projectConfigPath: join(tmpDir, ".estacoda", "project-config.json"),
+      profileId: "default",
       sessionDb,
       sessionId: "cron-test",
     });
@@ -213,7 +218,7 @@ describe("runGatewaySupervisor", () => {
     expect(options.modelFallbackRoutes).toEqual(latestConfig.modelFallbackRoutes);
     expect(options.model).toEqual(latestConfig.model);
     expect(options.providerRegistry).toBe(latestConfig.providerRegistry);
-    expect(options.credentialPools).toBe(latestConfig.credentialPools);
+    expect(options.profileId).toBe("default");
     expect(options.disableCronTools).toBe(true);
     expect(options.disabledToolsets).toEqual(["cron", "messaging", "clarify"]);
   });
@@ -240,13 +245,13 @@ describe("runGatewaySupervisor", () => {
     expect(result.ok).toBe(true);
     expect(tick.calls()).toBe(1);
 
-    const pid = await readGatewayPid(tmpDir);
+    const pid = await readGatewayPid(profilePaths);
     expect(pid).toBeUndefined();
   });
 
   it("startup fails when gateway lock held", async () => {
-    const lockFile = join(stateRoot, "gateway", "gateway.lock");
-    await mkdir(join(stateRoot, "gateway"), { recursive: true });
+    const lockFile = join(profilePaths.gatewayStatePath, "gateway.lock");
+    await mkdir(profilePaths.gatewayStatePath, { recursive: true });
     await writeFile(lockFile, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
 
     const result = await runGatewaySupervisor({
@@ -262,7 +267,7 @@ describe("runGatewaySupervisor", () => {
     expect(result.ok).toBe(false);
     expect(result.output).toContain("already running");
 
-    const pid = await readGatewayPid(tmpDir);
+    const pid = await readGatewayPid(profilePaths);
     expect(pid).toBeUndefined();
   });
 
@@ -305,7 +310,7 @@ describe("runGatewaySupervisor", () => {
     expect(result.ok).toBe(false);
     expect(result.output).toContain("Startup failed");
 
-    const pid = await readGatewayPid(tmpDir);
+    const pid = await readGatewayPid(profilePaths);
     expect(pid).toBeUndefined();
   });
 
@@ -337,7 +342,7 @@ describe("runGatewaySupervisor", () => {
     expect(process.listenerCount("SIGINT")).toBe(beforeSigint);
     expect(process.listenerCount("SIGTERM")).toBe(beforeSigterm);
 
-    const pid = await readGatewayPid(tmpDir);
+    const pid = await readGatewayPid(profilePaths);
     expect(pid).toBeUndefined();
   });
 
@@ -431,13 +436,13 @@ describe("runGatewaySupervisor", () => {
 
     expect(result.ok).toBe(true);
 
-    const pid = await readGatewayPid(tmpDir);
+    const pid = await readGatewayPid(profilePaths);
     expect(pid).toBeUndefined();
 
-    const state = await readGatewayState(tmpDir);
+    const state = await readGatewayState(profilePaths);
     expect(state).toBeUndefined();
 
-    const lock = await readGatewayLockContent(tmpDir);
+    const lock = await readGatewayLockContent(profilePaths);
     expect(lock).toBeUndefined();
   });
 
@@ -480,8 +485,8 @@ describe("runGatewaySupervisor", () => {
   });
 
   it("pollOnce error is caught by wrapper, supervisor continues", async () => {
-    const configPath = join(tmpDir, ".estacoda", "config.json");
-    await mkdir(join(tmpDir, ".estacoda"), { recursive: true });
+    const configPath = profileConfigPath(tmpDir);
+    await mkdir(dirname(configPath), { recursive: true });
     await writeFile(configPath, JSON.stringify({
       channels: {
         telegram: {
@@ -522,8 +527,8 @@ describe("runGatewaySupervisor", () => {
   });
 
   it("supervisor loop calls wrapper poll exactly once per adapter per iteration", async () => {
-    const configPath = join(tmpDir, ".estacoda", "config.json");
-    await mkdir(join(tmpDir, ".estacoda"), { recursive: true });
+    const configPath = profileConfigPath(tmpDir);
+    await mkdir(dirname(configPath), { recursive: true });
     await writeFile(configPath, JSON.stringify({
       channels: {
         telegram: {
@@ -627,7 +632,7 @@ describe("runGatewaySupervisor", () => {
       },
     });
 
-    const path = runtimeCacheStatePath(tmpDir);
+    const path = runtimeCacheStatePath(profilePaths);
     const content = await readFile(path, "utf8").catch(() => null);
     expect(content).not.toBeNull();
     const parsed = JSON.parse(content!);
@@ -672,7 +677,7 @@ describe("runGatewaySupervisor", () => {
     await new Promise((r) => setTimeout(r, 600));
 
     expect(exited.codes()).toContain(0);
-    const marker = await readCleanShutdownMarker(tmpDir);
+    const marker = await readCleanShutdownMarker(profilePaths);
     expect(marker).toBeDefined();
     expect(marker?.reason).toBe("drain");
   });
@@ -713,7 +718,7 @@ describe("runGatewaySupervisor", () => {
 
     expect(exited.codes()).toContain(0);
     expect(ac.signal.aborted).toBe(true);
-    expect(await readCleanShutdownMarker(tmpDir)).toBeUndefined();
+    expect(await readCleanShutdownMarker(profilePaths)).toBeUndefined();
   });
 
   it("second signal during drain forces immediate exit without clean marker", async () => {
@@ -754,7 +759,7 @@ describe("runGatewaySupervisor", () => {
     await waitForCondition(() => exited.codes().includes(1));
 
     expect(exited.codes()).toContain(1);
-    expect(await readCleanShutdownMarker(tmpDir)).toBeUndefined();
+    expect(await readCleanShutdownMarker(profilePaths)).toBeUndefined();
   });
 
   it("startup consumes clean-shutdown marker when PID/state/lock are clean", async () => {
@@ -764,7 +769,7 @@ describe("runGatewaySupervisor", () => {
       version: "1.0.0",
       reason: "drain" as const,
     };
-    await writeCleanShutdownMarker(tmpDir, marker);
+    await writeCleanShutdownMarker(profilePaths, marker);
 
     const result = await runGatewaySupervisor({
       workspaceRoot: tmpDir,
@@ -777,7 +782,7 @@ describe("runGatewaySupervisor", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(await readCleanShutdownMarker(tmpDir)).toBeUndefined();
+    expect(await readCleanShutdownMarker(profilePaths)).toBeUndefined();
   });
 
   it("startup ignores clean-shutdown marker when any PID/state/lock file remains, removes marker, runs normal cleanup", async () => {
@@ -787,10 +792,10 @@ describe("runGatewaySupervisor", () => {
       version: "1.0.0",
       reason: "drain" as const,
     };
-    await writeCleanShutdownMarker(tmpDir, marker);
+    await writeCleanShutdownMarker(profilePaths, marker);
     const { writeFile: wf, mkdir: md } = await import("node:fs/promises");
-    await md(join(tmpDir, ".estacoda", "gateway"), { recursive: true });
-    await wf(join(tmpDir, ".estacoda", "gateway", "gateway.pid"), JSON.stringify({ pid: 99999, startedAt: new Date().toISOString(), version: "0.0.1" }));
+    await md(profilePaths.gatewayStatePath, { recursive: true });
+    await wf(join(profilePaths.gatewayStatePath, "gateway.pid"), JSON.stringify({ pid: 99999, startedAt: new Date().toISOString(), version: "0.0.1" }));
 
     const result = await runGatewaySupervisor({
       workspaceRoot: tmpDir,
@@ -803,7 +808,7 @@ describe("runGatewaySupervisor", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(await readCleanShutdownMarker(tmpDir)).toBeUndefined();
+    expect(await readCleanShutdownMarker(profilePaths)).toBeUndefined();
   });
 
   it("startup ignores stale clean-shutdown marker (>5min), removes marker", async () => {
@@ -813,7 +818,7 @@ describe("runGatewaySupervisor", () => {
       version: "1.0.0",
       reason: "drain" as const,
     };
-    await writeCleanShutdownMarker(tmpDir, marker);
+    await writeCleanShutdownMarker(profilePaths, marker);
 
     const result = await runGatewaySupervisor({
       workspaceRoot: tmpDir,
@@ -826,7 +831,7 @@ describe("runGatewaySupervisor", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(await readCleanShutdownMarker(tmpDir)).toBeUndefined();
+    expect(await readCleanShutdownMarker(profilePaths)).toBeUndefined();
   });
 
   it("cron tick is skipped while draining", async () => {
@@ -904,8 +909,8 @@ describe("runGatewaySupervisor", () => {
     let capturedOpts: any;
     const gateway = { start: async () => {}, stop: async () => {}, hasPendingWork: () => false };
 
-    const configPath = join(tmpDir, ".estacoda", "config.json");
-    await mkdir(join(tmpDir, ".estacoda"), { recursive: true });
+    const configPath = profileConfigPath(tmpDir);
+    await mkdir(dirname(configPath), { recursive: true });
     await writeFile(configPath, JSON.stringify({
       channels: {
         telegram: {
@@ -960,6 +965,7 @@ describe("supervisor 5E internals", () => {
   ): SupervisorInternalState {
     return {
       homeDir: tmpDir,
+      stateHome: resolveProfileStateHome({ homeDir: tmpDir, profileId: "default" }),
       gatewayLockAcquired: false,
       acquiredIdentityLocks: [],
       channelGateway: undefined,
@@ -1327,8 +1333,8 @@ describe("supervisor 5E internals", () => {
         await mkdir(sessionDir, { recursive: true });
 
         // Write config to enable telegram adapter
-        const configPath = join(tmpDir, ".estacoda", "config.json");
-        await mkdir(join(tmpDir, ".estacoda"), { recursive: true });
+        const configPath = profileConfigPath(tmpDir);
+    await mkdir(dirname(configPath), { recursive: true });
         await writeFile(configPath, JSON.stringify({
           channels: {
             telegram: {
@@ -1387,10 +1393,12 @@ describe("supervisor 5E internals", () => {
 describe("supervisor lifecycle hooks", () => {
   let tmpDir: string;
   let stateRoot: string;
+  let profilePaths: ProfileStatePaths;
 
   beforeEach(async () => {
     tmpDir = await makeTempDir();
     stateRoot = join(tmpDir, ".estacoda");
+    profilePaths = resolveProfileStateHome({ homeDir: tmpDir, profileId: "default" });
     await mkdir(stateRoot, { recursive: true });
   });
 
@@ -1407,8 +1415,8 @@ describe("supervisor lifecycle hooks", () => {
     };
 
     try {
-      const configPath = join(tmpDir, ".estacoda", "config.json");
-      await mkdir(join(tmpDir, ".estacoda"), { recursive: true });
+      const configPath = profileConfigPath(tmpDir);
+    await mkdir(dirname(configPath), { recursive: true });
       await writeFile(configPath, JSON.stringify({
         channels: {
           telegram: {
@@ -1456,8 +1464,8 @@ describe("supervisor lifecycle hooks", () => {
     };
 
     try {
-      const lockFile = join(stateRoot, "gateway", "gateway.lock");
-      await mkdir(join(stateRoot, "gateway"), { recursive: true });
+      const lockFile = join(profilePaths.gatewayStatePath, "gateway.lock");
+      await mkdir(profilePaths.gatewayStatePath, { recursive: true });
       await writeFile(lockFile, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
 
       const result = await runGatewaySupervisor({
@@ -1852,9 +1860,9 @@ describe("supervisor lifecycle hooks", () => {
       });
 
       expect(result.ok).toBe(true);
-      const pid = await readGatewayPid(tmpDir);
+      const pid = await readGatewayPid(profilePaths);
       expect(pid).toBeUndefined();
-      const lock = await readGatewayLockContent(tmpDir);
+      const lock = await readGatewayLockContent(profilePaths);
       expect(lock).toBeUndefined();
     } finally {
       HookRegistry.prototype.emit = originalEmit;

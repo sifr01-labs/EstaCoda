@@ -138,12 +138,13 @@ export function renderStatus(vm: StatusViewModel): string {
   const lines: string[] = [
     `${vm.agentName} is ready`,
     `model: ${vm.model.provider}/${vm.model.id}`,
+    vm.profileId === undefined ? undefined : `profile: ${vm.profileId}`,
     `security: ${vm.securityMode}`,
     `skills: ${vm.skillCount}${vm.skillAutonomy !== undefined ? ` (${vm.skillAutonomy})` : ""}`,
     `tools: ${vm.toolCount}`,
     `mcp: ${vm.mcp.active}/${vm.mcp.total}`,
     `taskflow: ${vm.taskflowActive ? "active" : "inactive"}`,
-  ];
+  ].filter((line): line is string => line !== undefined);
 
   for (const warning of vm.warnings) {
     lines.push(renderWarningError(warning));

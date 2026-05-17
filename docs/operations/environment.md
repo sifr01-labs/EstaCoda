@@ -64,15 +64,14 @@ Telegram:
 Rules:
 - Do not hardcode secrets in repo files.
 - Do not commit real keys.
-- Default setup stores pasted secrets in `~/.estacoda/.env` with `0600` permissions.
+- Default setup stores pasted secrets in the selected profile `.env` with `0600` permissions.
 - Advanced setup can reference an existing environment variable.
 
 ## Config Files
 
-**User-level:** `~/.estacoda/config.json`
-**Project-level:** `<workspace>/.estacoda/config.json`
+**Selected profile:** `~/.estacoda/profiles/<id>/config.json`
 
-These deep-merge, with project-level config as a local overlay. Nested provider, credential-pool, auxiliary-provider, and MCP server entries preserve user-level fields unless explicitly overridden.
+Runtime config loads exactly one selected profile config: an explicit `--profile`/`profileId`, the active profile, or `default`. There is no user/project config merge and no credential-pool config surface.
 
 ## Runtime State Paths
 
@@ -80,26 +79,41 @@ Default root: `~/.estacoda/`
 
 | Path | Purpose |
 |------|---------|
-| `config.json` | User configuration |
-| `.env` | Secrets |
+| `active-profile.json` | Active profile pointer |
 | `trust.json` | Workspace trust grants |
-| `sessions.sqlite` | Gateway session database |
-| `channel-media/` | Downloaded channel attachments |
-| `channel-approvals.json` | Persisted channel approvals |
-| `skills/` | Personal skills |
-| `SOUL.md` | Agent identity |
-| `USER.md` | User preferences |
-| `MEMORY.md` | Agent notes |
-| `cron/jobs.json` | Scheduled tasks |
-| `cron/output/` | Task output files |
+| `workspace-approvals.json` | Workspace approval grants |
+| `sessions.sqlite` | Global session database with `profile_id` scoping |
+| `memory/shared/` | Global shared memory |
+| `packs/` | Global pack cache |
+
+Profile root: `~/.estacoda/profiles/<id>/`
+
+| Path | Purpose |
+|------|---------|
+| `config.json` | Selected profile configuration |
+| `.env` | Selected profile secrets |
+| `auth.json` | Selected profile OAuth auth state |
+| `USER.md` | Profile user preferences |
+| `SOUL.md` | Profile identity/persona |
+| `MEMORY.md` | Profile learned facts |
+| `promotions.json` | Profile memory promotion metadata |
+| `skills/` | Profile-installed skills |
+| `cron/` | Profile cron/flow state |
+| `logs/` | Profile logs |
+| `gateway/` | Profile gateway state |
+| `channel-media/` | Profile channel attachments |
+| `audio-cache/` | Profile audio cache |
+| `image-cache/` | Profile image cache |
+| `temp/` | Profile temporary files |
 
 **Project-local overlays:**
 
 | Path | Purpose |
 |------|---------|
-| `<workspace>/.estacoda/skills/` | Project skills |
-| `<workspace>/.estacoda/skill-learning.json` | Workflow learning state |
-| `<workspace>/.estacoda/config.json` | Project config |
+| `AGENTS.md` | Workspace instructions |
+| `<workspace>/.estacoda/` | Workspace-local operational artifacts, when a specific subsystem uses them |
+
+Workspace trust is directory action trust only. It does not enable config loading from `<workspace>/.estacoda/config.json`.
 
 ## Runtime Contract
 

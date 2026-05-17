@@ -40,25 +40,28 @@ export const RUNTIME_STATE_FILE = "adapter-runtime-state.json";
 export const RUNTIME_STATE_STALE_MS = 5 * 60 * 1000;
 export const RUNTIME_STATE_HEARTBEAT_MS = 60 * 1000;
 
-function statePath(homeDir: string): string {
-  return join(homeDir, ".estacoda", "gateway", RUNTIME_STATE_FILE);
+type GatewayStateHome = string | { gatewayStatePath: string };
+
+function statePath(stateHome: GatewayStateHome): string {
+  const gatewayStatePath = typeof stateHome === "string" ? join(stateHome, ".estacoda", "gateway") : stateHome.gatewayStatePath;
+  return join(gatewayStatePath, RUNTIME_STATE_FILE);
 }
 
 export async function writeAdapterRuntimeState(
-  homeDir: string,
+  stateHome: GatewayStateHome,
   state: PersistedRuntimeState
 ): Promise<void> {
-  const path = statePath(homeDir);
+  const path = statePath(stateHome);
   await mkdir(join(path, ".."), { recursive: true });
   await writeFile(path, JSON.stringify(state, null, 2), { encoding: "utf8", mode: 0o600 });
   await chmod(path, 0o600);
 }
 
 export async function readAdapterRuntimeState(
-  homeDir: string
+  stateHome: GatewayStateHome
 ): Promise<PersistedRuntimeState | undefined> {
   try {
-    const path = statePath(homeDir);
+    const path = statePath(stateHome);
     const raw = await readFile(path, "utf-8");
     const parsed = JSON.parse(raw) as PersistedRuntimeState;
     if (

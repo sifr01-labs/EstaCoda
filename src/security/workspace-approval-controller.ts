@@ -17,7 +17,6 @@ export type EphemeralApprovalGrant = {
 export type PersistedWorkspaceApprovalGrant = {
   id: string;
   workspaceRoot: string;
-  profileId?: string;
   toolName: string;
   riskClass: ToolRiskClass;
   targetKey?: string;
@@ -55,18 +54,14 @@ export class WorkspaceApprovalStore {
     return this.#path;
   }
 
-  async listForWorkspace(workspaceRoot: string, profileId?: string): Promise<PersistedWorkspaceApprovalGrant[]> {
+  async listForWorkspace(workspaceRoot: string): Promise<PersistedWorkspaceApprovalGrant[]> {
     const normalizedWorkspaceRoot = resolve(workspaceRoot);
     const file = await this.#read();
-    return file.grants.filter((grant) =>
-      grant.workspaceRoot === normalizedWorkspaceRoot &&
-      grant.profileId === profileId
-    );
+    return file.grants.filter((grant) => grant.workspaceRoot === normalizedWorkspaceRoot);
   }
 
   async grant(input: {
     workspaceRoot: string;
-    profileId?: string;
     toolName: string;
     riskClass: ToolRiskClass;
     targetKey?: string;
@@ -76,7 +71,6 @@ export class WorkspaceApprovalStore {
     const file = await this.#read();
     const existing = file.grants.find((grant) =>
       grant.workspaceRoot === normalizedWorkspaceRoot &&
-      grant.profileId === input.profileId &&
       grant.toolName === input.toolName &&
       grant.riskClass === input.riskClass &&
       grant.targetKey === input.targetKey &&
@@ -90,7 +84,6 @@ export class WorkspaceApprovalStore {
     const grant: PersistedWorkspaceApprovalGrant = {
       id: this.#idFactory(),
       workspaceRoot: normalizedWorkspaceRoot,
-      profileId: input.profileId,
       toolName: input.toolName,
       riskClass: input.riskClass,
       targetKey: input.targetKey,
@@ -105,12 +98,12 @@ export class WorkspaceApprovalStore {
     return grant;
   }
 
-  async revoke(id: string, workspaceRoot: string, profileId?: string): Promise<boolean> {
+  async revoke(id: string, workspaceRoot: string): Promise<boolean> {
     const normalizedWorkspaceRoot = resolve(workspaceRoot);
     const file = await this.#read();
     const before = file.grants.length;
     file.grants = file.grants.filter((grant) =>
-      !(grant.id === id && grant.workspaceRoot === normalizedWorkspaceRoot && grant.profileId === profileId)
+      !(grant.id === id && grant.workspaceRoot === normalizedWorkspaceRoot)
     );
 
     if (file.grants.length === before) {
@@ -161,7 +154,6 @@ export class WorkspaceApprovalController {
     request: SecurityRequest,
     options: {
       workspaceRoot: string;
-      profileId?: string;
       sessionId: string;
       mode: SecurityApprovalMode;
     }
@@ -206,7 +198,6 @@ export class WorkspaceApprovalController {
 
   async grant(input: {
     workspaceRoot: string;
-    profileId?: string;
     sessionId: string;
     toolName: string;
     riskClass: ToolRiskClass;
@@ -217,7 +208,6 @@ export class WorkspaceApprovalController {
     if (input.scope === "always") {
       await this.#store.grant({
         workspaceRoot: input.workspaceRoot,
-        profileId: input.profileId,
         toolName: input.toolName,
         riskClass: input.riskClass,
         targetKey: input.targetKey,
@@ -242,7 +232,6 @@ export class WorkspaceApprovalController {
 
   async inspect(input: {
     workspaceRoot: string;
-    profileId?: string;
     sessionId: string;
   }): Promise<{
     session: EphemeralApprovalGrant[];
@@ -250,23 +239,21 @@ export class WorkspaceApprovalController {
   }> {
     return {
       session: [...(this.#sessionGrants.get(input.sessionId) ?? [])],
-      persistent: await this.#store.listForWorkspace(input.workspaceRoot, input.profileId)
+      persistent: await this.#store.listForWorkspace(input.workspaceRoot)
     };
   }
 
   async revokePersistent(input: {
     id: string;
     workspaceRoot: string;
-    profileId?: string;
   }): Promise<boolean> {
-    return await this.#store.revoke(input.id, input.workspaceRoot, input.profileId);
+    return await this.#store.revoke(input.id, input.workspaceRoot);
   }
 
   async #findMatchingGrant(
     request: SecurityRequest,
     options: {
       workspaceRoot: string;
-      profileId?: string;
       sessionId: string;
     }
   ): Promise<MatchingGrant | undefined> {
@@ -283,7 +270,7 @@ export class WorkspaceApprovalController {
       }
     }
 
-    const persistent = await this.#store.listForWorkspace(options.workspaceRoot, options.profileId);
+    const persistent = await this.#store.listForWorkspace(options.workspaceRoot);
     const persistentGrant = persistent.find((grant) => matchesRequest(grant, request));
     if (persistentGrant !== undefined) {
       return {

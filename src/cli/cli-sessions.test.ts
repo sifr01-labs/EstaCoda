@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { runCliCommand } from "./cli.js";
 import { FileSurfacePointerStore } from "../channels/surface-pointer-store.js";
 import { openDefaultSQLiteDatabase } from "../storage/factory.js";
+import { resolveProfileStateHome } from "../config/profile-home.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-cli-sess-test-"));
@@ -14,11 +15,13 @@ describe("CLI session commands", () => {
   let tmpDir: string;
   let stateRoot: string;
   let dbPath: string;
+  let surfacePointerPath: string;
 
   beforeEach(async () => {
     tmpDir = await makeTempDir();
     stateRoot = join(tmpDir, ".estacoda");
     await mkdir(stateRoot, { recursive: true });
+    surfacePointerPath = join(resolveProfileStateHome({ homeDir: tmpDir, profileId: "default" }).gatewayStatePath, "surface-pointers.json");
     dbPath = join(stateRoot, "sessions.sqlite");
     const db = openDefaultSQLiteDatabase({ path: dbPath });
     db.exec(`
@@ -104,7 +107,7 @@ describe("CLI session commands", () => {
         .run("sess-1", "default", "Test Session", "2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z");
       db.close();
 
-      const pointerStore = new FileSurfacePointerStore({ path: join(stateRoot, "surface-pointers.json") });
+      const pointerStore = new FileSurfacePointerStore({ path: surfacePointerPath });
       await pointerStore.setPointer("telegram", "chat-1", { sessionId: "sess-1", attachedAt: "2024-01-01T00:00:00Z" });
 
       const result = await runCliCommand({
@@ -154,7 +157,7 @@ describe("CLI session commands", () => {
         .run("sess-1", "default", "Test Session", "2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z");
       db.close();
 
-      const pointerStore = new FileSurfacePointerStore({ path: join(stateRoot, "surface-pointers.json") });
+      const pointerStore = new FileSurfacePointerStore({ path: surfacePointerPath });
       await pointerStore.setPointer("telegram", "chat-1", { sessionId: "sess-1", attachedAt: "2024-01-01T00:00:00Z" });
 
       const result = await runCliCommand({
@@ -194,6 +197,11 @@ describe("CLI session commands", () => {
 
   describe("sessions attach", () => {
     it("attaches surface to session", async () => {
+      const db = openDefaultSQLiteDatabase({ path: dbPath });
+      db.query("insert into sessions (id, profile_id, title, created_at, updated_at) values (?, ?, ?, ?, ?)")
+        .run("sess-1", "default", "Test Session", "2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z");
+      db.close();
+
       const result = await runCliCommand({
         argv: ["sessions", "attach", "telegram", "chat-1", "sess-1"],
         workspaceRoot: tmpDir,
@@ -202,7 +210,7 @@ describe("CLI session commands", () => {
       expect(result.handled).toBe(true);
       expect(result.output).toContain("Attached telegram:chat-1 to session sess-1");
 
-      const pointerStore = new FileSurfacePointerStore({ path: join(stateRoot, "surface-pointers.json") });
+      const pointerStore = new FileSurfacePointerStore({ path: surfacePointerPath });
       const pointer = await pointerStore.getPointer("telegram", "chat-1");
       expect(pointer?.sessionId).toBe("sess-1");
     });
@@ -232,7 +240,7 @@ describe("CLI session commands", () => {
 
   describe("sessions detach", () => {
     it("detaches surface from session", async () => {
-      const pointerStore = new FileSurfacePointerStore({ path: join(stateRoot, "surface-pointers.json") });
+      const pointerStore = new FileSurfacePointerStore({ path: surfacePointerPath });
       await pointerStore.setPointer("telegram", "chat-1", { sessionId: "sess-1", attachedAt: "2024-01-01T00:00:00Z" });
 
       const result = await runCliCommand({
@@ -243,7 +251,7 @@ describe("CLI session commands", () => {
       expect(result.handled).toBe(true);
       expect(result.output).toContain("Detached telegram:chat-1");
 
-      const pointerStore2 = new FileSurfacePointerStore({ path: join(stateRoot, "surface-pointers.json") });
+      const pointerStore2 = new FileSurfacePointerStore({ path: surfacePointerPath });
       const pointer = await pointerStore2.getPointer("telegram", "chat-1");
       expect(pointer).toBeUndefined();
     });

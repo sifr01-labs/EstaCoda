@@ -43,6 +43,8 @@ export type DeliveryTarget =
 
 export type DeliveryRouterOptions = {
   homeDir?: string;
+  deliveryRoot?: string;
+  deliveryErrorLogPath?: string;
   maxOutputChars?: number;
   now?: () => Date;
   hookRegistry?: HookRegistry;
@@ -60,6 +62,8 @@ const DEFAULT_MAX_OUTPUT = 4000;
 export class DeliveryRouter {
   readonly #adapters = new Map<ChannelKind, ChannelAdapter>();
   readonly #homeDir: string;
+  readonly #deliveryRoot: string;
+  readonly #deliveryErrorLogPath: string;
   readonly #maxOutputChars: number;
   readonly #now: () => Date;
   #surfaceAdapter?: SurfaceAdapter;
@@ -67,6 +71,8 @@ export class DeliveryRouter {
 
   constructor(options: DeliveryRouterOptions = {}) {
     this.#homeDir = options.homeDir ?? process.env.HOME ?? process.cwd();
+    this.#deliveryRoot = options.deliveryRoot ?? join(this.#homeDir, ".estacoda", "delivery");
+    this.#deliveryErrorLogPath = options.deliveryErrorLogPath ?? join(this.#homeDir, ".estacoda", "gateway", "delivery-errors.jsonl");
     this.#maxOutputChars = options.maxOutputChars ?? DEFAULT_MAX_OUTPUT;
     this.#now = options.now ?? (() => new Date());
     this.#hookRegistry = options.hookRegistry;
@@ -200,7 +206,7 @@ export class DeliveryRouter {
     }
 
     if (target.kind === "local") {
-      const path = target.path ?? join(this.#homeDir, ".estacoda", "delivery", `${this.#now().toISOString()}.md`);
+      const path = target.path ?? join(this.#deliveryRoot, `${this.#now().toISOString()}.md`);
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, text, "utf-8");
       return {};
@@ -343,7 +349,7 @@ export class DeliveryRouter {
     }
 
     const truncated = text.slice(0, this.#maxOutputChars) + "\n\n[Output truncated. Full response saved to disk.]";
-    const fullPath = join(this.#homeDir, ".estacoda", "delivery", "truncated", `${this.#now().toISOString()}_${platform}.md`);
+    const fullPath = join(this.#deliveryRoot, "truncated", `${this.#now().toISOString()}_${platform}.md`);
 
     // Fire-and-forget save of full output
     mkdir(dirname(fullPath), { recursive: true })
@@ -381,7 +387,7 @@ export class DeliveryRouter {
       retryCount: 0
     };
 
-    const path = join(this.#homeDir, ".estacoda", "gateway", "delivery-errors.jsonl");
+    const path = this.#deliveryErrorLogPath;
     try {
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, JSON.stringify(record) + "\n", { flag: "a" });
@@ -395,7 +401,7 @@ export class DeliveryRouter {
   }
 
   async getRecentErrors(limit = 20): Promise<DeliveryErrorRecord[]> {
-    const path = join(this.#homeDir, ".estacoda", "gateway", "delivery-errors.jsonl");
+    const path = this.#deliveryErrorLogPath;
     try {
       const content = await readFile(path, "utf8");
       const lines = content.trim().split("\n").filter(Boolean);

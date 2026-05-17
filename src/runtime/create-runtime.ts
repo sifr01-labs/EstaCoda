@@ -8,6 +8,7 @@ import { ArtifactStore } from "../artifacts/artifact-store.js";
 import { createBrowserBackendFromConfig, type CdpFetchLike, type CdpWebSocketFactory } from "../browser/browser-backend.js";
 import type { ThemeDefinition } from "../contracts/theme.js";
 import { createConfigTools } from "../config/config-tools.js";
+import { resolveProfileStateHome } from "../config/profile-home.js";
 import { ContextReferenceExpander } from "../context/context-reference-expander.js";
 import { ProjectContextLoader, renderProjectContext } from "../context/project-context-loader.js";
 import { CronStore } from "../cron/cron-store.js";
@@ -18,6 +19,8 @@ import { createMemoryTool } from "../memory/memory-tool.js";
 import { createKnowledgeMemoryTools } from "../memory/knowledge-memory-tools.js";
 import { createKnowledgeCodeTools } from "../knowledge/knowledge-code-tools.js";
 import { MemoryStore } from "../memory/memory-store.js";
+import { loadIdentityContext } from "../memory/identity-loader.js";
+import { listSharedMemory, type SharedMemoryEntry } from "../memory/shared-memory.js";
 import { LocalMemoryProvider } from "../memory/local-memory-provider.js";
 import type { AgentProfileMode, AgentResponseLanguage, LoadedRuntimeConfig, MCPServerConfig, UiFlavor, UiLanguage } from "../config/runtime-config.js";
 import { loadMcpServers, type MCPServerSnapshot } from "../mcp/mcp-tools.js";
@@ -35,7 +38,6 @@ import type { SecurityApprovalMode, SecurityPolicy, SecurityRequest } from "../c
 import type { SessionDB } from "../contracts/session.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
-import { CredentialPoolRegistry } from "../providers/credential-pool.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { createWorkspaceTrustTools } from "../security/workspace-trust-tools.js";
@@ -46,7 +48,6 @@ import { SkillRegistry } from "../skills/skill-registry.js";
 import { SkillEvolutionStore } from "../skills/skill-evolution.js";
 import { ChangeManifestStore } from "../skills/change-manifest-store.js";
 import { SkillLearningManager, type SkillAutonomy } from "../skills/skill-learning.js";
-import { syncBundledSkills } from "../skills/skill-bundled-sync.js";
 import { evaluateSkillVisibility } from "../skills/skill-visibility.js";
 import { createSkillTools } from "../skills/skill-tools.js";
 
@@ -106,15 +107,12 @@ export type RuntimeOptions = {
   trustStore?: WorkspaceTrustStore;
   trustStorePath?: string;
   providerRegistry?: ProviderRegistry;
-  credentialPools?: CredentialPoolRegistry;
   memoryProvider?: MemoryProvider;
   userMemoryRoot?: string;
   projectMemoryRoot?: string;
   auxiliaryModels?: AuxiliaryModelConfig;
   homeDir?: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
-  projectConfigTrust?: "trusted" | "untrusted";
+  workspaceTrusted?: boolean;
   webFetch?: WebFetchLike;
   cdpFetch?: CdpFetchLike;
   cdpWebSocketFactory?: CdpWebSocketFactory;
@@ -224,13 +222,17 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const memoryStore = new MemoryStore();
   const artifactStore = new ArtifactStore();
   const profileId = options.profileId ?? "default";
+  const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId });
   const sessionId = options.sessionId ?? "scaffold";
   const sessionDb = options.sessionDb ?? new InMemorySessionDB();
   const closeSessionDbOnDispose = options.closeSessionDbOnDispose ?? true;
   const workspaceRoot = options.workspaceRoot ?? process.cwd();
-  const localSkillsRoot = options.localSkillsRoot ?? `${options.homeDir ?? process.env.HOME ?? ""}/.estacoda/skills`;
+  const localSkillsRoot = options.localSkillsRoot ?? profilePaths.skillsPath;
   const trustStore = options.trustStore ?? new WorkspaceTrustStore({ path: options.trustStorePath });
-  const cronStore = options.cronStore ?? new CronStore({ homeDir: options.homeDir });
+  const cronStore = options.cronStore ?? new CronStore({
+    path: join(profilePaths.cronPath, "jobs.json"),
+    outputRoot: join(profilePaths.cronPath, "output"),
+  });
   const providerRegistry = options.providerRegistry ?? createDefaultProviderRegistry(options.model);
   const providerModels = await providerRegistry.listModels();
   const mainRoute: ResolvedModelRoute = options.primaryModelRoute ?? {
@@ -254,12 +256,16 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       providerModels
     });
   const processManager = new ProcessManager({ workspaceRoot });
-  const channelMediaRoot = join(options.homeDir ?? process.env.HOME ?? workspaceRoot, ".estacoda", "channel-media");
-  const audioCacheRoot = join(options.homeDir ?? process.env.HOME ?? workspaceRoot, ".estacoda", "audio-cache");
-  const imageCacheRoot = join(options.homeDir ?? process.env.HOME ?? workspaceRoot, ".estacoda", "image-cache");
+  const channelMediaRoot = profilePaths.channelMediaPath;
+  const audioCacheRoot = profilePaths.audioCachePath;
+  const imageCacheRoot = profilePaths.imageCachePath;
   let activeTrustedWorkspace = false;
   let disposed = false;
   const existingSession = await sessionDb.getSession(sessionId);
+
+  if (existingSession !== undefined && existingSession.profileId !== profileId) {
+    throw new Error(`Session ${sessionId} belongs to profile ${existingSession.profileId}, not ${profileId}.`);
+  }
 
   if (existingSession === undefined) {
     await sessionDb.createSession({
@@ -277,12 +283,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   });
 
   const bundledSkillsDir = new URL("../../skills/official", import.meta.url).pathname;
-  const bundledSync = await syncBundledSkills({
-    bundledSkillsDir,
-    localSkillsRoot
-  });
-  const skillLoadWarnings = [...bundledSync.warnings];
-  const effectiveMcpServers = options.projectConfigTrust === "trusted" ? (options.mcpServers ?? {}) : {};
+  const skillLoadWarnings: string[] = [];
+  const effectiveMcpServers = options.workspaceTrusted === true ? (options.mcpServers ?? {}) : {};
   const loadedMcpServers = await loadMcpServers({
     servers: effectiveMcpServers
   });
@@ -292,11 +294,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       toolRegistry.register(tool);
     }
   }
-  // Load skills from three sources with explicit priority:
-  // 1. local/        -> sourceKind: "local"    (highest priority)
-  // 2. packs/        -> sourceKind: "external"  (lowest priority)
-  // 3. everything else -> sourceKind: "bundled" (middle priority)
-  const localUserRoot = join(localSkillsRoot, "local");
+  // Load skills from explicit profile-local and package sources:
+  // 1. packs/ under the selected profile (external, lowest priority)
+  // 2. package bundled skills (middle priority)
+  // 3. profiles/<id>/skills/ direct directories (local, highest priority)
   const packsRoot = join(localSkillsRoot, "packs");
 
   // external: pack-materialized skills
@@ -309,21 +310,21 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     skillRegistry.register(skill);
   }
 
-  // bundled: synced built-in skills (excluding local/ and packs/)
-  const bundledLoaded = await loadSkillsFromDirectory(localSkillsRoot, {
+  // bundled: built-in package skills
+  const bundledLoaded = await loadSkillsFromDirectory(bundledSkillsDir, {
     sourceKind: "bundled",
-    sourceRoot: localSkillsRoot,
-    exclude: ["local", "packs"]
+    sourceRoot: bundledSkillsDir
   }).catch(() => ({ skills: [], errors: [] }));
   skillLoadWarnings.push(...bundledLoaded.errors.map((error) => error.message));
   for (const skill of bundledLoaded.skills) {
     skillRegistry.register(skill);
   }
 
-  // local: user-local skills (highest priority, loaded last to win conflicts)
-  const localLoaded = await loadSkillsFromDirectory(localUserRoot, {
+  // local: selected profile skills (highest priority, loaded last to win conflicts)
+  const localLoaded = await loadSkillsFromDirectory(localSkillsRoot, {
     sourceKind: "local",
-    sourceRoot: localUserRoot
+    sourceRoot: localSkillsRoot,
+    exclude: ["packs"]
   }).catch(() => ({ skills: [], errors: [] }));
   skillLoadWarnings.push(...localLoaded.errors.map((error) => error.message));
   for (const skill of localLoaded.skills) {
@@ -370,8 +371,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       mainRoute,
       fallbackToMain: visionRoute?.fallbackToMain,
       providerExecutor: new ProviderExecutor({
-        registry: providerRegistry,
-        credentialPools: options.credentialPools
+        registry: providerRegistry
       })
     }, input, signal)
   })) {
@@ -416,8 +416,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     mainRoute,
     fallbackToMain: visionRoute?.fallbackToMain,
     providerExecutor: new ProviderExecutor({
-      registry: providerRegistry,
-      credentialPools: options.credentialPools
+      registry: providerRegistry
     })
   })) {
     toolRegistry.register(tool);
@@ -425,15 +424,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   for (const tool of createProcessTools({ processManager })) {
     toolRegistry.register(tool);
   }
-  for (const tool of createWorkspaceTrustTools({ workspaceRoot, profileId, trustStore })) {
+  for (const tool of createWorkspaceTrustTools({ workspaceRoot, trustStore })) {
     toolRegistry.register(tool);
   }
   for (const tool of createConfigTools({
     workspaceRoot,
     homeDir: options.homeDir,
-    userConfigPath: options.userConfigPath,
-    projectConfigPath: options.projectConfigPath,
-    projectConfigTrust: options.projectConfigTrust
+    profileId: options.profileId
   })) {
     toolRegistry.register(tool);
   }
@@ -481,21 +478,30 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     toolRegistry.register(tool);
   }
 
-  const userMemoryRoot = options.userMemoryRoot ?? `${options.homeDir ?? process.env.HOME ?? ""}/.estacoda/memory/default`;
-  const projectMemoryRoot = options.projectMemoryRoot ?? `${workspaceRoot}/.estacoda/memory`;
+  const profileMemoryRoot = profilePaths.profileRoot;
+  const identityContext = await loadIdentityContext({ profilePaths });
+  const sharedMemoryContent = renderSharedMemory(await listSharedMemory({ homeDir: options.homeDir }));
   const skillLearningStorePath = join(workspaceRoot, ".estacoda", "skill-learning.json");
-  await memoryStore.loadFromDirectory(new URL("../../memory/default", import.meta.url).pathname);
-  await memoryStore.loadFromDirectory(userMemoryRoot);
-  await memoryStore.loadFromDirectory(projectMemoryRoot);
+  if (sharedMemoryContent !== undefined) {
+    memoryStore.write("SHARED.md", sharedMemoryContent);
+  }
+  if (identityContext.user !== undefined) {
+    memoryStore.write("USER.md", identityContext.user);
+  }
+  if (identityContext.soul !== undefined) {
+    memoryStore.write("SOUL.md", identityContext.soul);
+  }
+  if (identityContext.memory !== undefined) {
+    memoryStore.write("MEMORY.md", identityContext.memory);
+  }
   const memoryProvider = options.memoryProvider ?? new LocalMemoryProvider({
     store: memoryStore,
     saveRoots: {
-      "USER.md": userMemoryRoot,
-      "MEMORY.md": projectMemoryRoot,
-      "SOUL.md": projectMemoryRoot,
-      "AGENTS.md": projectMemoryRoot
+      "USER.md": profileMemoryRoot,
+      "MEMORY.md": profileMemoryRoot,
+      "SOUL.md": profileMemoryRoot
     },
-    promotionStorePath: join(userMemoryRoot, "promotions.json")
+    promotionStorePath: profilePaths.promotionsPath
   });
   for (const tool of createKnowledgeMemoryTools(
     memoryProvider instanceof LocalMemoryProvider ? memoryProvider.inspector : undefined
@@ -532,8 +538,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
 
   const intentRouter = new IntentRouter({ skillRegistry: sessionSkillRegistry, model: options.model });
   const providerExecutor = new ProviderExecutor({
-    registry: providerRegistry,
-    credentialPools: options.credentialPools
+    registry: providerRegistry
   });
   const configuredSecurityMode = options.securityMode ?? "adaptive";
   let activeSecurityMode: SecurityApprovalMode = configuredSecurityMode;
@@ -572,7 +577,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
 
       return await options.approvalController.assess(basePolicy, request, {
           workspaceRoot,
-          profileId,
           sessionId,
           mode: activeSecurityMode
         });
@@ -594,7 +598,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     manager: delegationManager,
     parentSessionId: sessionId,
     profileId,
-    trustedWorkspace: async () => activeTrustedWorkspace || await trustStore.isTrusted(workspaceRoot, { profileId })
+    trustedWorkspace: async () => activeTrustedWorkspace || await trustStore.isTrusted(workspaceRoot)
   })) {
     toolRegistry.register(tool);
   }
@@ -604,7 +608,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     sessionDb,
     trajectoryRecorder,
     sessionId,
-    trustedWorkspace: async () => activeTrustedWorkspace || await trustStore.isTrusted(workspaceRoot, { profileId })
+    trustedWorkspace: async () => activeTrustedWorkspace || await trustStore.isTrusted(workspaceRoot)
   }));
   const providerToolAvailability = await toolRegistry.snapshot();
 
@@ -656,9 +660,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     trajectoryRecorder,
     runRecorder,
     toolPlanRunner,
-    soul: frozenMemorySnapshot.files.get("SOUL.md"),
+    soul: undefined,
     frozenMemory: {
+      shared: frozenMemorySnapshot.files.get("SHARED.md"),
       user: frozenMemorySnapshot.files.get("USER.md"),
+      soul: frozenMemorySnapshot.files.get("SOUL.md"),
       memory: frozenMemorySnapshot.files.get("MEMORY.md")
     },
     skillsIndex: sessionSkillCatalog,
@@ -712,9 +718,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     contextReferenceExpander,
     projectContext,
     providerTools: providerToolSchemaCatalog.tools,
-    soul: frozenMemorySnapshot.files.get("SOUL.md"),
+    soul: undefined,
     frozenMemory: {
+      shared: frozenMemorySnapshot.files.get("SHARED.md"),
       user: frozenMemorySnapshot.files.get("USER.md"),
+      soul: frozenMemorySnapshot.files.get("SOUL.md"),
       memory: frozenMemorySnapshot.files.get("MEMORY.md")
     },
     skillsIndex: sessionSkillCatalog,
@@ -731,7 +739,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   // Only wire TaskFlow when using SQLiteSessionDB (real persistence required)
   try {
     if (sessionDb instanceof SQLiteSessionDB) {
-      const taskflowStore = new SQLiteTaskFlowStore({ db: sessionDb.db });
+      const taskflowStore = new SQLiteTaskFlowStore({ db: sessionDb.db, profileId });
       const lockService = new FlowLockService({ store: taskflowStore });
       const taskflowEngine = new TaskFlowEngine({ store: taskflowStore, lockService, ownerId: "runtime" });
       const processRegistry = new FlowProcessRegistry({ store: taskflowStore });
@@ -814,7 +822,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       return loadedMcpServers.map((server) => structuredClone(server.snapshot));
     },
     async handle(input) {
-      const trustedWorkspace = input.trustedWorkspace ?? await trustStore.isTrusted(workspaceRoot, { profileId });
+      const trustedWorkspace = input.trustedWorkspace ?? await trustStore.isTrusted(workspaceRoot);
       activeTrustedWorkspace = trustedWorkspace;
 
       // If an active TaskFlow is set, route through the adapter
@@ -841,7 +849,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       });
     },
     async executeTool(input) {
-      const trustedWorkspace = await trustStore.isTrusted(workspaceRoot, { profileId });
+      const trustedWorkspace = await trustStore.isTrusted(workspaceRoot);
       activeTrustedWorkspace = trustedWorkspace;
       return await toolExecutor.executeTool({
         tool: input.tool,
@@ -856,6 +864,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         imageGen: options.imageGen ?? defaultImageGenerationConfig(),
         telegramReady: options.telegramReady,
         homeDir: options.homeDir,
+        imageCachePath: profilePaths.imageCachePath,
         workspaceRoot,
         fetch: options.imageGenerationFetch,
         checkProvider: input.checkProvider
@@ -864,7 +873,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     async grantApproval(input) {
       await options.approvalController?.grant({
         workspaceRoot,
-        profileId,
         sessionId,
         toolName: input.toolName,
         riskClass: input.riskClass,
@@ -876,7 +884,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     async inspectApprovals() {
       return await options.approvalController?.inspect({
         workspaceRoot,
-        profileId,
         sessionId
       }) ?? {
         session: [],
@@ -886,8 +893,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     async revokeApproval(id) {
       return await options.approvalController?.revokePersistent({
         id,
-        workspaceRoot,
-        profileId
+        workspaceRoot
       }) ?? false;
     },
     securityMode() {
@@ -906,15 +912,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     },
     async trustWorkspace() {
       await trustStore.grant(workspaceRoot, {
-        profileId,
         label: "EstaCoda workspace"
       });
     },
     isWorkspaceTrusted() {
-      return trustStore.isTrusted(workspaceRoot, { profileId });
+      return trustStore.isTrusted(workspaceRoot);
     },
     revokeWorkspaceTrust() {
-      return trustStore.revoke(workspaceRoot, { profileId });
+      return trustStore.revoke(workspaceRoot);
     },
     async dispose() {
       if (disposed) {
@@ -933,6 +938,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       return [
         `${options.theme.branding.responseLabel} is ready`,
         `model: ${options.model.provider}/${options.model.id}`,
+        `profile: ${options.profileId}`,
         `security: ${activeSecurityMode}${activeSecurityMode === "open" ? " (YOLO)" : ""}`,
         `skills: ${sessionSkillCatalog.length} (${options.skillAutonomy ?? "suggest"})`,
         `tools: ${toolRegistry.list().length}`,
@@ -946,6 +952,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       return buildStatusViewModel({
         agentName: options.theme.branding.responseLabel,
         model: { provider: options.model.provider, id: options.model.id },
+        profileId: options.profileId,
         securityMode: `${activeSecurityMode}${activeSecurityMode === "open" ? " (YOLO)" : ""}`,
         skillCount: sessionSkillCatalog.length,
         skillAutonomy: options.skillAutonomy ?? "suggest",
@@ -986,15 +993,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       });
     },
     async getStartupReadiness() {
-      const workspaceTrusted = await trustStore.isTrusted(workspaceRoot, { profileId });
+      const workspaceTrusted = await trustStore.isTrusted(workspaceRoot);
       const verificationReport = await collectSetupVerificationReport({
         workspaceRoot,
         homeDir: options.homeDir,
-        userConfigPath: options.userConfigPath,
-        projectConfigPath: options.projectConfigPath,
+        profileId: options.profileId,
         trustStorePath: options.trustStorePath,
         runtime: this as Runtime,
-        projectConfigTrust: options.projectConfigTrust,
       });
       const versionStatus = options.homeDir !== undefined
         ? await readCachedUpdateStatus(options.homeDir)
@@ -1166,6 +1171,14 @@ function isOpenAICompatibleProvider(provider: string): boolean {
     "openrouter",
     "nous"
   ].includes(provider);
+}
+
+function renderSharedMemory(entries: SharedMemoryEntry[]): string | undefined {
+  const sections = entries
+    .filter((entry) => entry.content.trim().length > 0)
+    .map((entry) => `## ${entry.key}\n${entry.content.trim()}`);
+
+  return sections.length === 0 ? undefined : sections.join("\n\n");
 }
 
 function uniqueModels(models: ModelProfile[]): ModelProfile[] {

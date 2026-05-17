@@ -16,7 +16,6 @@ function fakeLoadedRuntimeConfig(overrides?: Partial<LoadedRuntimeConfig>): Load
       supportsStructuredOutput: true,
     },
     providerRegistry: {} as unknown as LoadedRuntimeConfig["providerRegistry"],
-    credentialPools: {} as unknown as LoadedRuntimeConfig["credentialPools"],
     web: { enableNetwork: true, maxContentChars: 5000 },
     browser: { backend: "unconfigured", autoLaunch: false },
     imageGen: { provider: "fal", model: "test", useGateway: false },
@@ -54,9 +53,7 @@ function fakeOptions(overrides?: Partial<{
   approvalControllerPresent: boolean;
   explicitSecurityPolicyPresent: boolean;
   currentPlatform: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
-}>): Required<Omit<Parameters<typeof computeRuntimeFingerprint>[1], "userMemoryRoot" | "projectMemoryRoot" | "trustStorePath" | "userConfigPath" | "projectConfigPath">> & Partial<Pick<Parameters<typeof computeRuntimeFingerprint>[1], "userMemoryRoot" | "projectMemoryRoot" | "trustStorePath" | "userConfigPath" | "projectConfigPath">> {
+}>): Required<Omit<Parameters<typeof computeRuntimeFingerprint>[1], "userMemoryRoot" | "projectMemoryRoot" | "trustStorePath">> & Partial<Pick<Parameters<typeof computeRuntimeFingerprint>[1], "userMemoryRoot" | "projectMemoryRoot" | "trustStorePath">> {
   return {
     profileId: "default",
     workspaceRoot: "/workspace",
@@ -695,30 +692,6 @@ describe("computeRuntimeFingerprint", () => {
       opts
     );
     expect(fp2.auxiliaryModelsHash).not.toBe(fp1.auxiliaryModelsHash);
-    expect(fp1).not.toEqual(fp2);
-  });
-
-  it("user config path change changes fingerprint", () => {
-    const base = fakeLoadedRuntimeConfig();
-    const opts = fakeOptions();
-    const fp1 = computeRuntimeFingerprint(base, opts);
-    const fp2 = computeRuntimeFingerprint(
-      base,
-      fakeOptions({ userConfigPath: "/other/user.config.js" })
-    );
-    expect(fp2.userConfigPath).toBe("/other/user.config.js");
-    expect(fp1).not.toEqual(fp2);
-  });
-
-  it("project config path change changes fingerprint", () => {
-    const base = fakeLoadedRuntimeConfig();
-    const opts = fakeOptions();
-    const fp1 = computeRuntimeFingerprint(base, opts);
-    const fp2 = computeRuntimeFingerprint(
-      base,
-      fakeOptions({ projectConfigPath: "/other/project.config.js" })
-    );
-    expect(fp2.projectConfigPath).toBe("/other/project.config.js");
     expect(fp1).not.toEqual(fp2);
   });
 

@@ -116,6 +116,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
   async createSession(input: CreateSessionInput): Promise<SessionRecord> {
     const now = this.#now().toISOString();
     const id = input.id ?? this.#id();
+    const profileId = input.profileId ?? "default";
 
     this.#db
       .query(
@@ -131,7 +132,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
       )
       .run(
         id,
-        input.profileId,
+        profileId,
         input.title ?? null,
         now,
         now,
@@ -139,7 +140,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
         stringifyJson(input.metadata)
       );
 
-    const session = await this.getSession(id);
+    const session = await this.getSessionForProfile(id, profileId);
 
     if (session === undefined) {
       throw new Error(`Failed to create session: ${id}`);
@@ -150,6 +151,13 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
 
   async getSession(id: string): Promise<SessionRecord | undefined> {
     const row = this.#db.query<SessionRow>("select * from sessions where id = ?").get(id);
+    return row === null ? undefined : rowToSession(row);
+  }
+
+  async getSessionForProfile(id: string, profileId: string): Promise<SessionRecord | undefined> {
+    const row = this.#db
+      .query<SessionRow>("select * from sessions where profile_id = ? and id = ?")
+      .get(profileId, id);
     return row === null ? undefined : rowToSession(row);
   }
 
@@ -233,10 +241,36 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
       .map(rowToMessage);
   }
 
+  async listMessagesForProfile(sessionId: string, profileId: string): Promise<SessionMessage[]> {
+    return this.#db
+      .query<MessageRow>(
+        `select m.*
+        from messages m
+        join sessions s on s.id = m.session_id
+        where s.profile_id = ? and m.session_id = ?
+        order by m.created_at asc`
+      )
+      .all(profileId, sessionId)
+      .map(rowToMessage);
+  }
+
   async listEvents(sessionId: string): Promise<SessionEvent[]> {
     return this.#db
       .query<EventRow>("select event_json from session_events where session_id = ? order by created_at asc")
       .all(sessionId)
+      .map((row) => JSON.parse(row.event_json) as SessionEvent);
+  }
+
+  async listEventsForProfile(sessionId: string, profileId: string): Promise<SessionEvent[]> {
+    return this.#db
+      .query<EventRow>(
+        `select e.event_json
+        from session_events e
+        join sessions s on s.id = e.session_id
+        where s.profile_id = ? and e.session_id = ?
+        order by e.created_at asc`
+      )
+      .all(profileId, sessionId)
       .map((row) => JSON.parse(row.event_json) as SessionEvent);
   }
 
@@ -339,10 +373,21 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     return row === null ? undefined : rowToTrajectory(row);
   }
 
-  async listTrajectoriesForSession(sessionId: string): Promise<Trajectory[]> {
-    const rows = this.#db
-      .query<TrajectoryRow>("select * from trajectories where session_id = ? order by created_at asc")
-      .all(sessionId);
+  async loadTrajectoryForProfile(id: string, profileId: string): Promise<Trajectory | undefined> {
+    const row = this.#db
+      .query<TrajectoryRow>("select * from trajectories where profile_id = ? and id = ?")
+      .get(profileId, id);
+    return row === null ? undefined : rowToTrajectory(row);
+  }
+
+  async listTrajectoriesForSession(sessionId: string, options: { profileId?: string } = {}): Promise<Trajectory[]> {
+    const rows = options.profileId === undefined
+      ? this.#db
+          .query<TrajectoryRow>("select * from trajectories where session_id = ? order by created_at asc")
+          .all(sessionId)
+      : this.#db
+          .query<TrajectoryRow>("select * from trajectories where profile_id = ? and session_id = ? order by created_at asc")
+          .all(options.profileId, sessionId);
     return rows.map(rowToTrajectory);
   }
 
@@ -433,7 +478,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
       this.#db.exec(`
         create table if not exists sessions (
           id text primary key,
-          profile_id text not null,
+          profile_id text not null default 'default',
           title text,
           created_at text not null,
           updated_at text not null,
@@ -465,6 +510,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
         );
 
         create index if not exists idx_sessions_profile_updated on sessions(profile_id, updated_at);
+        create index if not exists idx_sessions_profile_id on sessions(profile_id, id);
         create index if not exists idx_messages_session_created on messages(session_id, created_at);
         create index if not exists idx_events_session_created on session_events(session_id, created_at);
 

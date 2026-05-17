@@ -14,7 +14,7 @@ export type SelectiveRenderResult = {
   renderMode: "selective" | "full";
 };
 
-const SAFETY_FILES: readonly MemoryFileKind[] = ["SOUL.md", "AGENTS.md"];
+const SAFETY_FILES: readonly MemoryFileKind[] = ["SHARED.md", "SOUL.md", "AGENTS.md"];
 const SELECTIVE_FILES: readonly MemoryFileKind[] = ["USER.md", "MEMORY.md"];
 const DEFAULT_FALLBACK_COUNT = 3;
 
@@ -35,7 +35,7 @@ export function renderSelective(
   let totalEntries = 0;
   let includedEntries = 0;
 
-  for (const kind of ["SOUL.md", "AGENTS.md", "USER.md", "MEMORY.md"] as const) {
+  for (const kind of ["SHARED.md", "USER.md", "SOUL.md", "MEMORY.md", "AGENTS.md"] as const) {
     const content = snapshot.files.get(kind) ?? "";
     const budget = snapshot.budgets.find((b) => b.kind === kind);
 

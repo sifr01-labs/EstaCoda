@@ -1,5 +1,5 @@
-import { join } from "node:path";
 import { readConfig, saveRuntimeConfig } from "../config/runtime-config.js";
+import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 import {
   loadOAuthStore,
   writeOAuthStore
@@ -14,9 +14,8 @@ const CODEX_DEFAULT_BASE_URL = "https://chatgpt.com/backend-api/codex";
 
 export type ModelSetupCodexOptions = {
   homeDir?: string;
+  profileId?: string;
   workspaceRoot: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
   prompt?: Prompt;
   fetchLike?: FetchLike;
   signal?: AbortSignal;
@@ -245,7 +244,8 @@ async function handleNewAuthentication(
 async function configureCodexRoute(
   options: ModelSetupCodexOptions
 ): Promise<{ ok: true } | { ok: false; message: string }> {
-  const targetPath = join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+  const targetPath = resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
 
   try {
     const existing = await readConfig(targetPath);

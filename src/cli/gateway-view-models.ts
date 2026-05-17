@@ -36,6 +36,7 @@ export type SupervisorSnapshot = {
   readonly lifecycle?: string;
   readonly startedAt?: string;
   readonly version?: string;
+  readonly profileId?: string;
 };
 
 export type IdentityLockStatus = {
@@ -152,6 +153,10 @@ function buildSupervisorBlock(supervisor: GatewayStatusData["supervisor"]): View
     kv("PID", supervisor.pid),
     kv("State", supervisor.lifecycle ?? "unknown"),
   ];
+
+  if (supervisor.profileId !== undefined) {
+    entries.push(kv("Profile", supervisor.profileId));
+  }
 
   if (supervisor.startedAt !== undefined) {
     const started = new Date(supervisor.startedAt);

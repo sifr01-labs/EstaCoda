@@ -17,6 +17,7 @@ vi.mock("node:child_process", async (importOriginal) => {
 
 import { runCliCommand } from "./cli.js";
 import * as supervisorModule from "../gateway/supervisor.js";
+import { resolveProfileStateHome } from "../config/profile-home.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-cli-gateway-test-"));
@@ -126,7 +127,7 @@ describe("cli gateway start", () => {
 
       expect(result.exitCode).toBe(0);
       expect(result.output).toContain("Gateway started (PID 12346)");
-      expect(result.output).toContain(join(tmpDir, ".estacoda", "logs", "gateway.log"));
+      expect(result.output).toContain(join(resolveProfileStateHome({ homeDir: tmpDir, profileId: "default" }).logsPath, "gateway.log"));
       expect(supervisorSpy).not.toHaveBeenCalled();
       expect(childProcessMock.spawn).toHaveBeenCalledWith(
         expect.any(String),

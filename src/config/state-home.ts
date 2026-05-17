@@ -4,7 +4,6 @@ import { join } from "node:path";
 export type StateHomePaths = {
   homeDir: string;
   stateRoot: string;
-  configPath: string;
   trustJsonPath: string;
   sessionsSqlitePath: string;
   skillsPath: string;
@@ -14,16 +13,16 @@ export type StateHomePaths = {
   imageCachePath: string;
   gatewayStatePath: string;
   tempPath: string;
-  authJsonPath: string;
 };
 
+// Returns global state paths only. Profile-scoped config/auth/env/runtime
+// paths live in profile-home.ts.
 export function resolveStateHome(options?: { homeDir?: string }): StateHomePaths {
   const homeDir = options?.homeDir ?? process.env.HOME ?? homedir() ?? "";
   const stateRoot = join(homeDir, ".estacoda");
   return {
     homeDir,
     stateRoot,
-    configPath: join(stateRoot, "config.json"),
     trustJsonPath: join(stateRoot, "trust.json"),
     sessionsSqlitePath: join(stateRoot, "sessions.sqlite"),
     skillsPath: join(stateRoot, "skills"),
@@ -32,7 +31,6 @@ export function resolveStateHome(options?: { homeDir?: string }): StateHomePaths
     audioCachePath: join(stateRoot, "audio-cache"),
     imageCachePath: join(stateRoot, "image-cache"),
     gatewayStatePath: join(stateRoot, "gateway"),
-    tempPath: join(stateRoot, "temp"),
-    authJsonPath: join(stateRoot, "auth.json")
+    tempPath: join(stateRoot, "temp")
   };
 }

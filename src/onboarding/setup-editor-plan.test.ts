@@ -45,8 +45,7 @@ function state(kind: SetupEntryStateKind, overrides: Partial<SetupEntryState> = 
     recommendedAction: recommendedAction(kind),
     configSources: kind === "new-user" ? [] : ["/tmp/home/.estacoda/config.json"],
     configPaths: {
-      user: "/tmp/home/.estacoda/config.json",
-      project: "/tmp/workspace/.estacoda/config.json",
+      profile: "/tmp/home/.estacoda/profiles/default/config.json",
     },
     providerReadiness: kind === "configured-ready" || kind === "untrusted-workspace" ? "ready" : kind === "configured-degraded" ? "degraded" : "missing-config",
     workspaceTrust: kind === "untrusted-workspace" ? "untrusted" : "trusted",

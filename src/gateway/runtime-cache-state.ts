@@ -39,8 +39,11 @@ export type RuntimeCacheState = {
   fingerprintHash: string;
 };
 
-export function runtimeCacheStatePath(homeDir: string): string {
-  return join(homeDir, ".estacoda", "gateway", "runtime-cache-state.json");
+type GatewayStateHome = string | { gatewayStatePath: string };
+
+export function runtimeCacheStatePath(stateHome: GatewayStateHome): string {
+  const gatewayStatePath = typeof stateHome === "string" ? join(stateHome, ".estacoda", "gateway") : stateHome.gatewayStatePath;
+  return join(gatewayStatePath, "runtime-cache-state.json");
 }
 
 export async function writeRuntimeCacheState(

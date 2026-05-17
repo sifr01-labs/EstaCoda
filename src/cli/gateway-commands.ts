@@ -1,9 +1,9 @@
 import { spawn } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { access, constants, readFile, writeFile, mkdir, rm, rename, stat } from "node:fs/promises";
+import { access, constants, readFile, writeFile, mkdir, rm, rename, stat, readdir } from "node:fs/promises";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
-import { resolveStateHome } from "../config/state-home.js";
+import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome, type ProfileStatePaths } from "../config/profile-home.js";
 import { getTelegramGatewayDiagnostics } from "../channels/gateway-runner.js";
 import { getWhatsAppGatewayDiagnostics } from "../channels/whatsapp-diagnostics.js";
 import { CronStore } from "../cron/cron-store.js";
@@ -61,12 +61,77 @@ import {
 export type GatewayCommandOptions = {
   homeDir?: string;
   workspaceRoot: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
-  projectConfigTrust?: "trusted" | "untrusted";
+  profileId?: string;
 };
 
 export type GatewayRenderer = (viewModel: ViewModel) => string;
+
+type SelectedGatewayProfile = {
+  homeDir: string;
+  profileId: string;
+  paths: ProfileStatePaths;
+};
+
+function cronStoreFor(paths: ProfileStatePaths): CronStore {
+  return new CronStore({
+    path: join(paths.cronPath, "jobs.json"),
+    outputRoot: join(paths.cronPath, "output"),
+  });
+}
+
+function deliveryRouterFor(homeDir: string, paths: ProfileStatePaths): DeliveryRouter {
+  return new DeliveryRouter({
+    homeDir,
+    deliveryRoot: join(paths.gatewayStatePath, "delivery"),
+    deliveryErrorLogPath: join(paths.gatewayStatePath, "logs", "delivery-errors.jsonl"),
+  });
+}
+
+async function discoverRunningGatewayProfile(homeDir: string): Promise<string | undefined> {
+  const profilesRoot = join(homeDir, ".estacoda", "profiles");
+  let entries: string[] = [];
+  try {
+    entries = (await readdir(profilesRoot, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+  } catch {
+    entries = [];
+  }
+  const candidates = Array.from(new Set([
+    readActiveProfile({ homeDir }).profileId ?? defaultProfileId(),
+    defaultProfileId(),
+    ...entries,
+  ]));
+
+  for (const profileId of candidates) {
+    const paths = resolveProfileStateHome({ homeDir, profileId });
+    const pidContent = await readGatewayPid(paths);
+    if (pidContent !== undefined && !(await isStalePid(paths))) {
+      return pidContent.profileId ?? profileId;
+    }
+    const state = await readGatewayState(paths);
+    if (state !== undefined) {
+      return state.profileId ?? profileId;
+    }
+  }
+  return undefined;
+}
+
+async function resolveGatewayProfile(
+  options: GatewayCommandOptions,
+  behavior: { preferRunning?: boolean } = {}
+): Promise<SelectedGatewayProfile> {
+  const homeDir = options.homeDir ?? process.env.HOME ?? ".estacoda";
+  const profileId = options.profileId
+    ?? (behavior.preferRunning ? await discoverRunningGatewayProfile(homeDir) : undefined)
+    ?? readActiveProfile({ homeDir }).profileId
+    ?? defaultProfileId();
+  return {
+    homeDir,
+    profileId,
+    paths: resolveProfileStateHome({ homeDir, profileId }),
+  };
+}
 
 // ─────────────────────────────────────────────────────────────
 // Gateway Status
@@ -76,18 +141,18 @@ export async function runGatewayStatus(
   options: GatewayCommandOptions,
   renderer: GatewayRenderer = renderPlain
 ): Promise<{ ok: boolean; output: string }> {
-  const config = await loadRuntimeConfig(options);
-  const homeDir = options.homeDir ?? process.env.HOME ?? ".estacoda";
-  const stateHome = resolveStateHome({ homeDir });
-  const stateRoot = stateHome.stateRoot;
+  const selected = await resolveGatewayProfile(options, { preferRunning: true });
+  const config = await loadRuntimeConfig({ ...options, profileId: selected.profileId });
+  const homeDir = selected.homeDir;
+  const globalPaths = resolveGlobalStateHome({ homeDir });
 
-  const cronStore = new CronStore({ homeDir });
+  const cronStore = cronStoreFor(selected.paths);
   const cronJobs = await cronStore.list();
 
   let executionStore: CronExecutionStore | undefined;
   let executionDb: { close(): void } | undefined;
   try {
-    const db = openDefaultSQLiteDatabase({ path: stateHome.sessionsSqlitePath });
+    const db = openDefaultSQLiteDatabase({ path: globalPaths.sessionsSqlitePath });
     executionDb = db;
     executionStore = new CronExecutionStore({ db });
   } catch { /* ignore */ }
@@ -100,13 +165,13 @@ export async function runGatewayStatus(
   }
   try { executionDb?.close(); } catch { /* ignore */ }
 
-  const deliveryRouter = new DeliveryRouter({ homeDir });
+  const deliveryRouter = deliveryRouterFor(homeDir, selected.paths);
   const recentDeliveryErrors = await deliveryRouter.getRecentErrors(5);
 
-  const surfacePointerStore = new FileSurfacePointerStore({ path: join(stateRoot, "surface-pointers.json") });
+  const surfacePointerStore = new FileSurfacePointerStore({ path: join(selected.paths.gatewayStatePath, "surface-pointers.json") });
   const surfacePointers = await surfacePointerStore.listPointers();
 
-  const approvalStore = new ChannelApprovalStore({ path: join(stateRoot, "channel-approvals.json") });
+  const approvalStore = new ChannelApprovalStore({ path: join(selected.paths.gatewayStatePath, "channel-approvals.json") });
   const allApprovals = await approvalStore.listAll();
 
   const missingConfig: { channel: string; item: string }[] = [];
@@ -123,20 +188,20 @@ export async function runGatewayStatus(
     missingConfig.push(...config.channels.whatsapp.missing.map((m) => ({ channel: "whatsapp", item: m })));
   }
 
-  const state = await readGatewayState(homeDir);
-  const pidContent = await readGatewayPid(homeDir);
+  const state = await readGatewayState(selected.paths);
+  const pidContent = await readGatewayPid(selected.paths);
 
-  const identityLocks = await buildIdentityLockStatuses(homeDir, config.channels);
+  const identityLocks = await buildIdentityLockStatuses(selected.paths, config.channels);
 
-  const runtimeState = await readAdapterRuntimeState(homeDir);
-  const supervisorLive = pidContent !== undefined && !(await isStalePid(homeDir));
+  const runtimeState = await readAdapterRuntimeState(selected.paths);
+  const supervisorLive = pidContent !== undefined && !(await isStalePid(selected.paths));
   const runtimeStateValid = runtimeState !== undefined
     && isRuntimeStateFresh(runtimeState)
     && isRuntimeStatePidMatch(runtimeState, pidContent?.pid ?? -1)
     && supervisorLive;
 
   // Trust model: only show runtime-cache-state in status when trustworthy
-  const rawRuntimeCacheState = await readRuntimeCacheState(runtimeCacheStatePath(homeDir));
+  const rawRuntimeCacheState = await readRuntimeCacheState(runtimeCacheStatePath(selected.paths));
   const runtimeCacheStateTrustworthy = rawRuntimeCacheState !== undefined
     && isRuntimeCacheStateFresh(rawRuntimeCacheState)
     && isRuntimeCacheStatePidMatch(rawRuntimeCacheState, pidContent?.pid ?? -1)
@@ -158,12 +223,14 @@ export async function runGatewayStatus(
             lifecycle: state.lifecycle,
             startedAt: state.startedAt,
             version: state.version,
+            profileId: state.profileId ?? selected.profileId,
           }
         : pidContent !== undefined
           ? {
               pid: pidContent.pid,
               startedAt: pidContent.startedAt,
               version: pidContent.version,
+              profileId: pidContent.profileId ?? selected.profileId,
             }
           : undefined,
     identityLocks,
@@ -183,22 +250,22 @@ export async function runGatewayDiagnose(
   options: GatewayCommandOptions,
   renderer: GatewayRenderer = renderPlain
 ): Promise<{ ok: boolean; output: string }> {
-  const config = await loadRuntimeConfig(options);
-  const homeDir = options.homeDir ?? process.env.HOME ?? ".estacoda";
-  const stateRoot = join(homeDir, ".estacoda");
+  const selected = await resolveGatewayProfile(options, { preferRunning: true });
+  const config = await loadRuntimeConfig({ ...options, profileId: selected.profileId });
+  const homeDir = selected.homeDir;
 
-  const tgDiag = await getTelegramGatewayDiagnostics(options);
-  const waDiag = await getWhatsAppGatewayDiagnostics({ homeDir });
+  const tgDiag = await getTelegramGatewayDiagnostics({ ...options, profileId: selected.profileId });
+  const waDiag = await getWhatsAppGatewayDiagnostics({ homeDir, gatewayStatePath: selected.paths.gatewayStatePath });
 
-  const cronStore = new CronStore({ homeDir });
+  const cronStore = cronStoreFor(selected.paths);
   const cronJobs = await cronStore.list();
   const jobsFileReadable = await isReadable(cronStore.path);
-  const outputDirWritable = await isWritable(join(stateRoot, "cron", "output"));
-  const lockDirWritable = await isWritable(join(stateRoot, "cron", "locks"));
+  const outputDirWritable = await isWritable(join(selected.paths.cronPath, "output"));
+  const lockDirWritable = await isWritable(join(selected.paths.cronPath, "locks"));
 
-  const runtimeState = await readAdapterRuntimeState(homeDir);
-  const pidContent = await readGatewayPid(homeDir);
-  const supervisorLive = pidContent !== undefined && !(await isStalePid(homeDir));
+  const runtimeState = await readAdapterRuntimeState(selected.paths);
+  const pidContent = await readGatewayPid(selected.paths);
+  const supervisorLive = pidContent !== undefined && !(await isStalePid(selected.paths));
   const runtimeStateNote = runtimeState === undefined
     ? undefined
     : !isRuntimeStateFresh(runtimeState)
@@ -210,7 +277,7 @@ export async function runGatewayDiagnose(
           : undefined;
 
   // Diagnose always reads runtime-cache-state; may display with warnings
-  const rawRuntimeCacheState = await readRuntimeCacheState(runtimeCacheStatePath(homeDir));
+  const rawRuntimeCacheState = await readRuntimeCacheState(runtimeCacheStatePath(selected.paths));
   const runtimeCacheStateNote = rawRuntimeCacheState === undefined
     ? undefined
     : !isRuntimeCacheStateFresh(rawRuntimeCacheState)
@@ -221,10 +288,10 @@ export async function runGatewayDiagnose(
           ? "supervisor-not-live"
           : undefined;
 
-  const deliveryRouter = new DeliveryRouter({ homeDir });
+  const deliveryRouter = deliveryRouterFor(homeDir, selected.paths);
   const recentDeliveryErrors = await deliveryRouter.getRecentErrors(5);
 
-  const approvalStore = new ChannelApprovalStore({ path: join(stateRoot, "channel-approvals.json") });
+  const approvalStore = new ChannelApprovalStore({ path: join(selected.paths.gatewayStatePath, "channel-approvals.json") });
   const allApprovals = await approvalStore.listAll();
 
   const data: GatewayDiagnoseData = {
@@ -238,10 +305,10 @@ export async function runGatewayDiagnose(
     outputDirWritable,
     lockDirWritable,
     supervisor: {
-      pidHealthy: !(await isStalePid(homeDir)),
-      lockHealthy: !(await isStaleLock(homeDir)),
+      pidHealthy: !(await isStalePid(selected.paths)),
+      lockHealthy: !(await isStaleLock(selected.paths)),
     },
-    identityLockHealth: await buildIdentityLockHealth(homeDir, config.channels),
+    identityLockHealth: await buildIdentityLockHealth(selected.paths, config.channels),
     runtimeState: runtimeState ?? undefined,
     runtimeStateNote,
     runtimeCacheState: rawRuntimeCacheState ?? undefined,
@@ -262,18 +329,16 @@ export async function runGatewayDiagnose(
 export async function runGatewayStartDryRun(
   options: GatewayCommandOptions
 ): Promise<{ ok: boolean; output: string }> {
-  const config = await loadRuntimeConfig(options);
-  const homeDir = options.homeDir ?? process.env.HOME ?? ".estacoda";
-  const stateHome = resolveStateHome({ homeDir });
-  const stateRoot = stateHome.stateRoot;
+  const selected = await resolveGatewayProfile(options);
+  const config = await loadRuntimeConfig({ ...options, profileId: selected.profileId });
   const registry = new AdapterRegistry(config.channels);
   const configured = registry.configured();
   const enabled = registry.enabled();
   const identityReadiness = inspectAdapterIdentityReadiness(config.channels);
-  const lock = await inspectGatewayLockState(stateHome);
-  const cronOutputWritable = await isWritable(join(stateRoot, "cron", "output"));
-  const cronLocksWritable = await isWritable(join(stateRoot, "cron", "locks"));
-  const logsWritable = await isWritable(join(stateRoot, "logs"));
+  const lock = await inspectGatewayLockState(selected.paths);
+  const cronOutputWritable = await isWritable(join(selected.paths.cronPath, "output"));
+  const cronLocksWritable = await isWritable(join(selected.paths.cronPath, "locks"));
+  const logsWritable = await isWritable(selected.paths.logsPath);
 
   const stateDirsReady = cronOutputWritable && cronLocksWritable && logsWritable;
   const lockSummary = summarizeGatewayLockInspection(lock);
@@ -320,20 +385,19 @@ export async function runGatewayStartDryRun(
 export async function runGatewayStartBackground(
   options: GatewayCommandOptions
 ): Promise<{ ok: boolean; output: string }> {
-  const homeDir = options.homeDir ?? process.env.HOME ?? ".estacoda";
-  const stateHome = resolveStateHome({ homeDir });
-  const logPath = join(stateHome.logsPath, "gateway.log");
-  await mkdir(stateHome.logsPath, { recursive: true });
+  const selected = await resolveGatewayProfile(options);
+  const logPath = join(selected.paths.logsPath, "gateway.log");
+  await mkdir(selected.paths.logsPath, { recursive: true });
 
   let logFd: number | undefined;
   try {
     logFd = openSync(logPath, "a", 0o600);
-    const child = spawn(process.execPath, resolveBackgroundGatewayStartArgs(), {
+    const child = spawn(process.execPath, resolveBackgroundGatewayStartArgs(selected.profileId), {
       cwd: options.workspaceRoot,
       detached: true,
       env: {
         ...process.env,
-        HOME: homeDir,
+        HOME: selected.homeDir,
       },
       stdio: ["ignore", logFd, logFd],
     });
@@ -366,8 +430,8 @@ export async function runGatewayStartBackground(
 export async function runGatewayStop(
   options: GatewayCommandOptions & { force?: boolean }
 ): Promise<{ ok: boolean; output: string }> {
-  const homeDir = options.homeDir ?? process.env.HOME ?? ".estacoda";
-  const result = await stopGateway(homeDir, { force: options.force });
+  const selected = await resolveGatewayProfile(options, { preferRunning: true });
+  const result = await stopGateway(selected.paths, { force: options.force });
 
   if (result.ok) {
     if (result.action === "was_not_running") {
@@ -403,10 +467,10 @@ export async function runGatewayStop(
 export async function runGatewayRestart(
   options: GatewayCommandOptions & { graceful?: boolean }
 ): Promise<{ ok: boolean; output: string }> {
-  const homeDir = options.homeDir ?? process.env.HOME ?? ".estacoda";
+  const selected = await resolveGatewayProfile(options, { preferRunning: true });
 
   // Stop existing gateway (always graceful — plain restart should not force-kill)
-  const stopResult = await stopGateway(homeDir, { force: false });
+  const stopResult = await stopGateway(selected.paths, { force: false });
 
   let stopOutput: string;
   if (stopResult.ok) {
@@ -448,8 +512,8 @@ export async function runChannelsList(
 // Channels Status
 // ─────────────────────────────────────────────────────────────
 
-async function detectRuntimeStatePresence(homeDir: string): Promise<"missing" | "unreadable" | "present"> {
-  const path = join(homeDir, ".estacoda", "gateway", RUNTIME_STATE_FILE);
+async function detectRuntimeStatePresence(stateHome: ProfileStatePaths): Promise<"missing" | "unreadable" | "present"> {
+  const path = join(stateHome.gatewayStatePath, RUNTIME_STATE_FILE);
   try {
     await stat(path);
   } catch (error) {
@@ -458,7 +522,7 @@ async function detectRuntimeStatePresence(homeDir: string): Promise<"missing" | 
     return "unreadable";
   }
 
-  const state = await readAdapterRuntimeState(homeDir);
+  const state = await readAdapterRuntimeState(stateHome);
   return state === undefined ? "unreadable" : "present";
 }
 
@@ -467,13 +531,13 @@ type ChannelRuntimeStatus = {
   readonly runtimeState?: PersistedRuntimeState;
 };
 
-async function buildChannelRuntimeStatus(homeDir: string): Promise<ChannelRuntimeStatus> {
-  const pidRecord = await readGatewayPid(homeDir);
-  if (pidRecord === undefined || await isStalePid(homeDir)) {
+async function buildChannelRuntimeStatus(stateHome: ProfileStatePaths): Promise<ChannelRuntimeStatus> {
+  const pidRecord = await readGatewayPid(stateHome);
+  if (pidRecord === undefined || await isStalePid(stateHome)) {
     return { runtimeStateNote: "unavailable (supervisor not running)" };
   }
 
-  const presence = await detectRuntimeStatePresence(homeDir);
+  const presence = await detectRuntimeStatePresence(stateHome);
   if (presence === "missing") {
     return { runtimeStateNote: "unavailable (adapter runtime state not found)" };
   }
@@ -481,7 +545,7 @@ async function buildChannelRuntimeStatus(homeDir: string): Promise<ChannelRuntim
     return { runtimeStateNote: "unavailable (adapter runtime state unreadable)" };
   }
 
-  const runtimeState = await readAdapterRuntimeState(homeDir);
+  const runtimeState = await readAdapterRuntimeState(stateHome);
   if (runtimeState === undefined) {
     return { runtimeStateNote: "unavailable (adapter runtime state unreadable)" };
   }
@@ -523,21 +587,20 @@ export async function runChannelsStatus(
   options: GatewayCommandOptions & { channel?: string },
   renderer: GatewayRenderer = renderPlain
 ): Promise<{ ok: boolean; output: string }> {
-  const config = await loadRuntimeConfig(options);
-  const homeDir = options.homeDir ?? process.env.HOME ?? ".estacoda";
-  const stateRoot = join(homeDir, ".estacoda");
+  const selected = await resolveGatewayProfile(options, { preferRunning: true });
+  const config = await loadRuntimeConfig({ ...options, profileId: selected.profileId });
 
-  const surfacePointerStore = new FileSurfacePointerStore({ path: join(stateRoot, "surface-pointers.json") });
+  const surfacePointerStore = new FileSurfacePointerStore({ path: join(selected.paths.gatewayStatePath, "surface-pointers.json") });
   const surfacePointers = await surfacePointerStore.listPointers();
 
   const registry = new AdapterRegistry(config.channels);
-  const runtimeStatus = await buildChannelRuntimeStatus(homeDir);
-  const identityLocks = await listAdapterIdentityLocks(homeDir);
+  const runtimeStatus = await buildChannelRuntimeStatus(selected.paths);
+  const identityLocks = await listAdapterIdentityLocks(selected.paths);
 
   const channel = options.channel?.toLowerCase();
 
   if (channel === undefined || channel === "telegram") {
-    const tgDiag = await getTelegramGatewayDiagnostics(options);
+    const tgDiag = await getTelegramGatewayDiagnostics({ ...options, profileId: selected.profileId });
     const tgPointers = surfacePointers.filter((p) => p.surfaceType === "telegram");
 
     const data: ChannelsStatusData = {
@@ -586,7 +649,7 @@ export async function runChannelsStatus(
   }
 
   if (channel === "whatsapp") {
-    const waDiag = await getWhatsAppGatewayDiagnostics({ homeDir });
+    const waDiag = await getWhatsAppGatewayDiagnostics({ homeDir: selected.homeDir, gatewayStatePath: selected.paths.gatewayStatePath });
     const waPointers = surfacePointers.filter((p) => p.surfaceType === "whatsapp");
 
     const data: ChannelsStatusData = {
@@ -612,10 +675,10 @@ export async function runChannelsStatus(
 // ─────────────────────────────────────────────────────────────
 
 async function buildIdentityLockStatuses(
-  homeDir: string,
+  stateHome: ProfileStatePaths,
   _channels: LoadedRuntimeConfig["channels"]
 ): Promise<IdentityLockStatus[]> {
-  const locks = await listAdapterIdentityLocks(homeDir);
+  const locks = await listAdapterIdentityLocks(stateHome);
   const staleLocks = locks.filter((l) => l.stale);
 
   // Deduplicate by kind; status only surfaces actionable problems
@@ -631,7 +694,7 @@ async function buildIdentityLockStatuses(
 }
 
 async function buildIdentityLockHealth(
-  homeDir: string,
+  stateHome: ProfileStatePaths,
   channels: LoadedRuntimeConfig["channels"]
 ): Promise<{
   staleLocks: { kind: string; pid: number }[];
@@ -639,13 +702,13 @@ async function buildIdentityLockHealth(
   missingLocks: string[];
 }> {
   const [tgHash, dcHash, emHash, waHash] = await Promise.all([
-    deriveTelegramIdentityHash(homeDir, channels.telegram),
-    deriveDiscordIdentityHash(homeDir, channels.discord),
-    deriveEmailIdentityHash(homeDir, channels.email),
-    deriveWhatsAppIdentityHash(homeDir, channels.whatsapp),
+    deriveTelegramIdentityHash(stateHome, channels.telegram),
+    deriveDiscordIdentityHash(stateHome, channels.discord),
+    deriveEmailIdentityHash(stateHome, channels.email),
+    deriveWhatsAppIdentityHash(stateHome, channels.whatsapp),
   ]);
 
-  const locks = await listAdapterIdentityLocks(homeDir);
+  const locks = await listAdapterIdentityLocks(stateHome);
 
   const staleLocks = locks
     .filter((l) => l.stale)
@@ -712,7 +775,8 @@ function validateChannel(
 }
 
 function resolveUserConfigPath(options: GatewayCommandOptions): string {
-  return options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+  return resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
 }
 
 async function readUserConfigRaw(path: string): Promise<Record<string, unknown> | undefined> {
@@ -868,13 +932,14 @@ function inspectAdapterIdentityReadiness(channels: LoadedRuntimeConfig["channels
   return { valid, errors };
 }
 
-function resolveBackgroundGatewayStartArgs(): string[] {
+function resolveBackgroundGatewayStartArgs(profileId?: string): string[] {
   const entrypoint = process.argv[1];
   return [
     ...process.execArgv,
     ...(entrypoint === undefined ? [] : [entrypoint]),
     "gateway",
     "start",
+    ...(profileId === undefined ? [] : ["--profile", profileId]),
   ];
 }
 

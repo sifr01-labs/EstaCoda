@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
 import type { ViewModel } from "../contracts/view-model.js";
 import {
@@ -21,6 +22,8 @@ export async function runHandoffCommand(
   renderer: HandoffRenderer = renderPlain
 ): Promise<{ ok: boolean; output: string }> {
   const [subcommand, ...rest] = input.args;
+  const profileId = readActiveProfile({ homeDir: input.homeDir }).profileId ?? defaultProfileId();
+  const handoffPath = join(resolveProfileStateHome({ homeDir: input.homeDir, profileId }).gatewayStatePath, "handoff-codes.json");
 
   if (subcommand === "telegram") {
     const runtime = input.runtime;
@@ -32,8 +35,7 @@ export async function runHandoffCommand(
     }
 
     const { FileHandoffStore } = await import("../channels/handoff-store.js");
-    const homeDir = input.homeDir;
-    const store = new FileHandoffStore({ path: join(homeDir, ".estacoda", "handoff-codes.json") });
+    const store = new FileHandoffStore({ path: handoffPath });
     const handoff = await store.create({
       sessionId: runtime.sessionId,
       surfaceType: "telegram",
@@ -51,8 +53,7 @@ export async function runHandoffCommand(
 
   if (subcommand === "list") {
     const { FileHandoffStore } = await import("../channels/handoff-store.js");
-    const homeDir = input.homeDir;
-    const store = new FileHandoffStore({ path: join(homeDir, ".estacoda", "handoff-codes.json") });
+    const store = new FileHandoffStore({ path: handoffPath });
     const codes = await store.list();
     const active = codes.filter((c) => !c.redeemed && new Date(c.expiresAt).getTime() > Date.now());
     const viewModel = buildHandoffListViewModel({ activeCodes: active });

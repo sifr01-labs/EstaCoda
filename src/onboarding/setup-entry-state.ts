@@ -1,6 +1,6 @@
-import { join } from "node:path";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
+import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 import type { ProviderDiagnostic } from "../config/provider-diagnostics.js";
 import type { StartupReadinessSnapshot } from "../runtime/startup-readiness.js";
 import { collectStartupReadinessSnapshot } from "../runtime/startup-readiness.js";
@@ -40,8 +40,7 @@ export type SetupEntryState = {
   readonly recommendedAction: SetupEntryRecommendedAction;
   readonly configSources: readonly string[];
   readonly configPaths: {
-    readonly user: string;
-    readonly project: string;
+    readonly profile: string;
   };
   readonly providerReadiness: StartupReadinessSnapshot["providerReadiness"];
   readonly workspaceTrust: StartupReadinessSnapshot["workspaceTrust"];
@@ -61,13 +60,11 @@ export type SetupEntryState = {
 export type CollectSetupEntryStateOptions = {
   readonly workspaceRoot: string;
   readonly homeDir?: string;
-  readonly userConfigPath?: string;
-  readonly projectConfigPath?: string;
+  readonly profileId?: string;
   readonly providerFetch?: ProviderFetchLike;
   readonly modelsDevOptions?: ModelsDevRegistryOptions;
   readonly runtime?: Runtime;
   readonly trustStorePath?: string;
-  readonly projectConfigTrust?: "trusted" | "untrusted";
 };
 
 export async function collectSetupEntryState(
@@ -100,11 +97,9 @@ export async function collectSetupEntryState(
   const verificationReport = await collectSetupVerificationReport({
     workspaceRoot: options.workspaceRoot,
     homeDir: options.homeDir,
-    userConfigPath: options.userConfigPath,
-    projectConfigPath: options.projectConfigPath,
+    profileId: options.profileId,
     runtime: options.runtime,
     trustStorePath: options.trustStorePath,
-    projectConfigTrust: options.projectConfigTrust,
   });
   const startup = collectStartupReadinessSnapshot({
     workspaceRoot: options.workspaceRoot,
@@ -255,9 +250,9 @@ function collectBlockers(
 }
 
 function setupConfigPaths(options: CollectSetupEntryStateOptions): SetupEntryState["configPaths"] {
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
   return {
-    user: options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json"),
-    project: options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json"),
+    profile: resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath,
   };
 }
 

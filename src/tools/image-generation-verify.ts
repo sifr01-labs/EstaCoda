@@ -1,5 +1,5 @@
-import { join } from "node:path";
 import type { ImageGenerationProvider, LoadedRuntimeConfig } from "../config/runtime-config.js";
+import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 import { defaultImageApiKeyEnv, defaultImageBaseUrl, defaultImageModel } from "../contracts/image-generation.js";
 import type { ImageGenerationFetchLike } from "./image-generation-tools.js";
 
@@ -19,6 +19,7 @@ export async function verifyImageGeneration(options: {
   imageGen: LoadedRuntimeConfig["imageGen"];
   telegramReady?: boolean;
   homeDir?: string;
+  imageCachePath?: string;
   workspaceRoot: string;
   fetch?: ImageGenerationFetchLike;
   checkProvider?: boolean;
@@ -29,7 +30,9 @@ export async function verifyImageGeneration(options: {
     ? options.imageGen.byteplus?.apiKeyEnv ?? defaultImageApiKeyEnv("byteplus")
     : options.imageGen.fal?.apiKeyEnv ?? defaultImageApiKeyEnv("fal");
   const apiKeyPresent = (process.env[apiKeyEnv] ?? "").length > 0;
-  const cachePath = join(options.homeDir ?? process.env.HOME ?? options.workspaceRoot, ".estacoda", "image-cache");
+  const homeDir = options.homeDir ?? process.env.HOME ?? options.workspaceRoot;
+  const profileId = readActiveProfile({ homeDir }).profileId ?? defaultProfileId();
+  const cachePath = options.imageCachePath ?? resolveProfileStateHome({ homeDir, profileId }).imageCachePath;
   const telegramDelivery = options.telegramReady === true ? "ready" : "not-configured";
 
   if (!apiKeyPresent) {

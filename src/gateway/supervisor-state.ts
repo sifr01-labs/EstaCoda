@@ -8,19 +8,22 @@ export type SupervisorState = {
   startedAt: string;
   pid: number;
   version: string;
+  profileId?: string;
 };
 
-function gatewayDir(homeDir: string): string {
-  return join(homeDir, ".estacoda", "gateway");
+type GatewayStateHome = string | { gatewayStatePath: string };
+
+function gatewayDir(stateHome: GatewayStateHome): string {
+  return typeof stateHome === "string" ? join(stateHome, ".estacoda", "gateway") : stateHome.gatewayStatePath;
 }
 
-function statePath(homeDir: string): string {
-  return join(gatewayDir(homeDir), "gateway-state.json");
+function statePath(stateHome: GatewayStateHome): string {
+  return join(gatewayDir(stateHome), "gateway-state.json");
 }
 
-export async function readGatewayState(homeDir: string): Promise<SupervisorState | undefined> {
+export async function readGatewayState(stateHome: GatewayStateHome): Promise<SupervisorState | undefined> {
   try {
-    const raw = await readFile(statePath(homeDir), "utf8");
+    const raw = await readFile(statePath(stateHome), "utf8");
     const parsed = JSON.parse(raw) as Partial<SupervisorState>;
     if (
       typeof parsed.lifecycle === "string" &&
@@ -33,6 +36,7 @@ export async function readGatewayState(homeDir: string): Promise<SupervisorState
         startedAt: parsed.startedAt,
         pid: parsed.pid,
         version: parsed.version,
+        profileId: parsed.profileId,
       };
     }
     return undefined;
@@ -41,20 +45,20 @@ export async function readGatewayState(homeDir: string): Promise<SupervisorState
   }
 }
 
-export async function writeGatewayState(homeDir: string, state: SupervisorState): Promise<void> {
-  await mkdir(gatewayDir(homeDir), { recursive: true });
-  const path = statePath(homeDir);
+export async function writeGatewayState(stateHome: GatewayStateHome, state: SupervisorState): Promise<void> {
+  await mkdir(gatewayDir(stateHome), { recursive: true });
+  const path = statePath(stateHome);
   await writeFile(path, JSON.stringify(state, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
   await chmod(path, 0o600);
 }
 
-export async function removeGatewayState(homeDir: string): Promise<void> {
-  await rm(statePath(homeDir), { force: true });
+export async function removeGatewayState(stateHome: GatewayStateHome): Promise<void> {
+  await rm(statePath(stateHome), { force: true });
 }
 
-export async function cleanupStaleGatewayState(homeDir: string): Promise<{ cleaned: boolean; reason?: string }> {
-  const stalePid = await isStalePid(homeDir);
-  const staleLock = await isStaleLock(homeDir);
+export async function cleanupStaleGatewayState(stateHome: GatewayStateHome): Promise<{ cleaned: boolean; reason?: string }> {
+  const stalePid = await isStalePid(stateHome);
+  const staleLock = await isStaleLock(stateHome);
 
   if (!stalePid && !staleLock) {
     return { cleaned: false };
@@ -64,10 +68,10 @@ export async function cleanupStaleGatewayState(homeDir: string): Promise<{ clean
   if (stalePid) reasons.push("stale PID");
   if (staleLock) reasons.push("stale lock");
 
-  await removeGatewayPid(homeDir);
-  await removeGatewayState(homeDir);
+  await removeGatewayPid(stateHome);
+  await removeGatewayState(stateHome);
   if (staleLock) {
-    await releaseGatewayLock(homeDir);
+    await releaseGatewayLock(stateHome);
   }
 
   return { cleaned: true, reason: reasons.join(", ") };

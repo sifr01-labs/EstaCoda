@@ -9,7 +9,7 @@ import { ChangeManifestStore } from "../skills/change-manifest-store.js";
 import { SkillProposalService, slugifySkillName } from "../skills/skill-proposal-service.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
-import { resolveStateHome } from "../config/state-home.js";
+import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
 import { runConstraintGates } from "../evolution/constraint-gate-runner.js";
 import { canTransition } from "../evolution/candidate-lifecycle.js";
 import { populateTraces } from "../evolution/export-format.js";
@@ -21,8 +21,10 @@ function resolveHome(options: CliOptions): string {
 
 async function openStores(options: CliOptions, storeOptions: { includeSessionDb?: boolean } = {}) {
   const home = resolveHome(options);
-  const stateHome = resolveStateHome({ homeDir: home });
-  const localSkillsRoot = stateHome.skillsPath;
+  const globalPaths = resolveGlobalStateHome({ homeDir: home });
+  const profileId = readActiveProfile({ homeDir: home }).profileId ?? defaultProfileId();
+  const profilePaths = resolveProfileStateHome({ homeDir: home, profileId });
+  const localSkillsRoot = profilePaths.skillsPath;
   const registry = new SkillRegistry();
   const loaded = await loadSkillsFromDirectory(localSkillsRoot, {
     sourceKind: "local",
@@ -47,7 +49,7 @@ async function openStores(options: CliOptions, storeOptions: { includeSessionDb?
   let sessionDb: SQLiteSessionDB | undefined;
   if (storeOptions.includeSessionDb === true) {
     try {
-      sessionDb = await createSQLiteSessionDB({ path: stateHome.sessionsSqlitePath });
+      sessionDb = await createSQLiteSessionDB({ path: globalPaths.sessionsSqlitePath });
     } catch {
       sessionDb = undefined;
     }

@@ -12,9 +12,18 @@ import {
   createReviewedSetupApplyExecutor,
   executeReviewedSetupApplyPlan,
 } from "./apply-executor.js";
+import { resolveProfileStateHome } from "../../config/profile-home.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-reviewed-apply-"));
+}
+
+function profileConfigPath(homeDir: string): string {
+  return resolveProfileStateHome({ homeDir, profileId: "default" }).configPath;
+}
+
+function profileEnvPath(homeDir: string): string {
+  return resolveProfileStateHome({ homeDir, profileId: "default" }).envPath;
 }
 
 function firstRunPlan(input: {
@@ -108,7 +117,7 @@ describe("reviewed setup apply executor", () => {
 
     expect(result.ok).toBe(true);
     expect(result.appliedOperationIds.length).toBeGreaterThan(0);
-    const config = JSON.parse(await readFile(join(tempDir, ".estacoda", "config.json"), "utf8")) as {
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
       model?: { provider?: string; id?: string };
       security?: { approvalMode?: string };
       skills?: { autonomy?: string };
@@ -138,10 +147,9 @@ describe("reviewed setup apply executor", () => {
     });
 
     expect(result.ok).toBe(true);
-    const rawConfig = await readFile(join(tempDir, ".estacoda", "config.json"), "utf8");
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
     const config = JSON.parse(rawConfig) as {
       providers?: Record<string, { apiKeyEnv?: string }>;
-      credentialPools?: Record<string, { entries?: Array<{ source?: { kind?: string; name?: string } }> }>;
     };
 
     expect(config.providers?.openai?.apiKeyEnv).toBe("OPENAI_API_KEY");
@@ -165,7 +173,7 @@ describe("reviewed setup apply executor", () => {
     });
 
     expect(result.ok).toBe(true);
-    const config = JSON.parse(await readFile(join(tempDir, ".estacoda", "config.json"), "utf8")) as {
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
       model?: { provider?: string; id?: string; contextWindowTokens?: number };
       providers?: Record<string, { baseUrl?: string; apiKeyEnv?: string }>;
     };
@@ -182,7 +190,7 @@ describe("reviewed setup apply executor", () => {
 
   it("applies reviewed browser capability without enabling auto-launch", async () => {
     const plan = modulePlan({
-      configPath: join(tempDir, ".estacoda", "config.json"),
+      configPath: profileConfigPath(tempDir),
       workspaceRoot,
       trustStorePath: join(tempDir, ".estacoda", "trust.json"),
       provider: { id: "local", model: "hermes-local" },
@@ -203,7 +211,7 @@ describe("reviewed setup apply executor", () => {
     });
 
     expect(result.ok).toBe(true);
-    const config = JSON.parse(await readFile(join(tempDir, ".estacoda", "config.json"), "utf8")) as {
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
       browser?: { backend?: string; cdpUrl?: string; autoLaunch?: boolean };
     };
 
@@ -295,7 +303,7 @@ describe("reviewed setup apply executor", () => {
           warnings: [],
         },
         toolStatus: "skipped",
-        configSources: [join(tempDir, ".estacoda", "config.json")],
+        configSources: [profileConfigPath(tempDir)],
         warnings: [],
         issueCodes: [],
       }),
@@ -306,38 +314,8 @@ describe("reviewed setup apply executor", () => {
     expect(endState.verification?.providerDiagnostic.status).toBe("ready");
   });
 
-  describe("verifyReviewedSetup projectConfigTrust threading", () => {
-    it("includes project config when projectConfigTrust is trusted", async () => {
-      await mkdir(join(workspaceRoot, ".estacoda"), { recursive: true });
-      await writeFile(
-        join(workspaceRoot, ".estacoda", "config.json"),
-        JSON.stringify({ model: { provider: "openai", id: "gpt-4o" } })
-      );
-      const executor = createReviewedSetupApplyExecutor({
-        homeDir: tempDir,
-        workspaceRoot,
-        projectConfigTrust: "trusted",
-      });
-      const report = await executor.verify!({ kind: "post-save-verification-request", sourceLineIds: [], readOnly: true });
-      expect(report.configSources.some((s) => s.includes(join(workspaceRoot, ".estacoda", "config.json")))).toBe(true);
-    });
-
-    it("skips project config when projectConfigTrust is untrusted", async () => {
-      await mkdir(join(workspaceRoot, ".estacoda"), { recursive: true });
-      await writeFile(
-        join(workspaceRoot, ".estacoda", "config.json"),
-        JSON.stringify({ model: { provider: "openai", id: "gpt-4o" } })
-      );
-      const executor = createReviewedSetupApplyExecutor({
-        homeDir: tempDir,
-        workspaceRoot,
-        projectConfigTrust: "untrusted",
-      });
-      const report = await executor.verify!({ kind: "post-save-verification-request", sourceLineIds: [], readOnly: true });
-      expect(report.configSources.some((s) => s.includes(join(workspaceRoot, ".estacoda", "config.json")))).toBe(false);
-    });
-
-    it("remains fail-closed when projectConfigTrust is omitted", async () => {
+  describe("verifyReviewedSetup profile config loading", () => {
+    it("ignores workspace-local config files", async () => {
       await mkdir(join(workspaceRoot, ".estacoda"), { recursive: true });
       await writeFile(
         join(workspaceRoot, ".estacoda", "config.json"),

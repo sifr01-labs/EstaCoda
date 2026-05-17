@@ -6,7 +6,7 @@ import type {
 } from "../contracts/memory.js";
 import type { MemorySnapshot } from "./memory-store.js";
 
-const RENDER_ORDER: readonly MemoryFileKind[] = ["SOUL.md", "USER.md", "MEMORY.md", "AGENTS.md"];
+const RENDER_ORDER: readonly MemoryFileKind[] = ["SHARED.md", "USER.md", "SOUL.md", "MEMORY.md", "AGENTS.md"];
 
 export function renderMemorySnapshot(snapshot: MemorySnapshot): RenderedMemorySnapshot {
   const usage = renderUsage(snapshot);

@@ -2,6 +2,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { diagnoseProviderConfig, diagnoseProviderLive } from "../src/config/provider-diagnostics.js";
 import { loadRuntimeConfig, setupProviderConfig, type LoadedRuntimeConfig } from "../src/config/runtime-config.js";
+import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../src/config/profile-home.js";
 import type { ProviderId } from "../src/contracts/provider.js";
 import type { RuntimeEvent } from "../src/contracts/runtime-event.js";
 import { createRuntime } from "../src/runtime/create-runtime.js";
@@ -37,7 +38,8 @@ type PromptExecution = {
 };
 
 const workspaceRoot = process.cwd();
-const projectConfigPath = join(workspaceRoot, ".estacoda", "config.json");
+const profileId = readActiveProfile().profileId ?? defaultProfileId();
+const profileConfigPath = resolveProfileStateHome({ profileId }).configPath;
 const timestamp = formatTimestamp(new Date());
 const runRoot = join(workspaceRoot, ".estacoda", "provider-hardening-runs", timestamp);
 const logsDir = join(runRoot, "logs");
@@ -53,7 +55,7 @@ const providers: ProviderSpec[] = [
   { provider: "local", model: "ollama/auto", optional: true }
 ];
 
-const originalProjectConfig = await readOptional(projectConfigPath);
+const originalProfileConfig = await readOptional(profileConfigPath);
 
 await mkdir(logsDir, { recursive: true });
 await mkdir(artifactsDir, { recursive: true });
@@ -65,7 +67,7 @@ try {
     results.push(await runProvider(spec));
   }
 } finally {
-  await restoreProjectConfig(originalProjectConfig);
+  await restoreProfileConfig(originalProfileConfig);
 }
 
 await writeFile(summaryPath, `${JSON.stringify({
@@ -122,7 +124,7 @@ async function runProvider(spec: ProviderSpec): Promise<ProviderResult> {
   });
   result.configured = true;
 
-  const config = await loadRuntimeConfig({ workspaceRoot, projectConfigTrust: "trusted" });
+  const config = await loadRuntimeConfig({ workspaceRoot, profileId });
   const providerDiagnostic = await diagnoseProviderConfig(config);
   const liveDiagnostic = await diagnoseProviderLive(config);
   result.doctorStatus = providerDiagnostic.status;
@@ -191,7 +193,6 @@ async function buildRuntime(config: LoadedRuntimeConfig) {
     externalSkillRoots: config.skills.externalDirs,
     skillConfig: config.skills.config,
     providerRegistry: config.providerRegistry,
-    credentialPools: config.credentialPools,
     auxiliaryProviders: config.auxiliaryProviders,
     browser: config.browser,
     telegramReady: config.channels.telegram.ready,
@@ -233,13 +234,13 @@ async function writeProviderLog(provider: string, payload: unknown): Promise<voi
   await writeFile(join(logsDir, `${provider}.json`), `${JSON.stringify(payload, null, 2)}\n`, "utf8");
 }
 
-async function restoreProjectConfig(original: string | undefined): Promise<void> {
+async function restoreProfileConfig(original: string | undefined): Promise<void> {
   if (original === undefined) {
-    await rm(projectConfigPath, { force: true });
+    await rm(profileConfigPath, { force: true });
     return;
   }
 
-  await writeFile(projectConfigPath, original, "utf8");
+  await writeFile(profileConfigPath, original, "utf8");
 }
 
 async function readOptional(path: string): Promise<string | undefined> {

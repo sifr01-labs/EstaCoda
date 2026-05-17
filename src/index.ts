@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto";
-import { loadUserRuntimeConfig, loadTrustedRuntimeConfig, type LoadedRuntimeConfig } from "./config/runtime-config.js";
+import { loadRuntimeConfig, type LoadedRuntimeConfig } from "./config/runtime-config.js";
 import { resolveStateHome } from "./config/state-home.js";
+import { defaultProfileId, readActiveProfile } from "./config/profile-home.js";
 import { PersistentCliSessionStore } from "./cli/cli-session-store.js";
-import { runCliCommand } from "./cli/cli.js";
+import { parseGlobalCliOptions, runCliCommand } from "./cli/cli.js";
 import type { SessionDB } from "./contracts/session.js";
 import { canRunInteractive } from "./cli/readline-prompt.js";
 import { createRuntime } from "./runtime/create-runtime.js";
@@ -20,7 +21,13 @@ import { createSQLiteSessionDB } from "./session/session-setup.js";
 
 async function main(): Promise<void> {
   const rawArgv = process.argv.slice(2);
-  const argv = rawArgv[0] === "--" ? rawArgv.slice(1) : rawArgv;
+  const initialArgv = rawArgv[0] === "--" ? rawArgv.slice(1) : rawArgv;
+  const parsedGlobalOptions = parseGlobalCliOptions(initialArgv);
+  if (!parsedGlobalOptions.ok) {
+    console.error(parsedGlobalOptions.error);
+    process.exit(1);
+  }
+  const argv = parsedGlobalOptions.argv;
 
   // Handle --version / -v immediately, before any async init
   if (argv.includes("--version") || argv.includes("-v")) {
@@ -35,18 +42,15 @@ async function main(): Promise<void> {
   let launchLocale: UiLocale | undefined;
 
   const stateHome = resolveStateHome();
+  const profileId = parsedGlobalOptions.profileId ?? readActiveProfile()?.profileId ?? defaultProfileId();
   const trustStore = new WorkspaceTrustStore({ path: stateHome.trustJsonPath });
   let workspaceTrusted = await trustStore.isTrusted(workspaceRoot);
-
-  if (!workspaceTrusted) {
-    console.warn("[trust] Workspace is not trusted. Project config is ignored until this workspace is trusted.");
-  }
 
   if (argv[0] === "setup") {
     const setupCommand = await runCliCommand({
       argv,
       workspaceRoot,
-      projectConfigTrust: workspaceTrusted ? "trusted" : "untrusted"
+      profileId
     });
 
     if (setupCommand.handled) {
@@ -61,7 +65,7 @@ async function main(): Promise<void> {
     const helpCommand = await runCliCommand({
       argv,
       workspaceRoot,
-      projectConfigTrust: workspaceTrusted ? "trusted" : "untrusted"
+      profileId
     });
 
     if (helpCommand.handled) {
@@ -72,9 +76,24 @@ async function main(): Promise<void> {
     }
   }
 
+  if (canDispatchBeforeRuntime(argv)) {
+    const command = await runCliCommand({
+      argv,
+      workspaceRoot,
+      profileId
+    });
+
+    if (command.handled) {
+      if (command.output.length > 0) {
+        console.log(command.output);
+      }
+      process.exit(command.exitCode);
+    }
+  }
+
   // Bare launch: use interactive launcher for onboarding/session routing
   if (argv.length === 0 && canRunInteractive()) {
-    const launchResult = await launchInteractiveSession({ workspaceRoot, projectConfigTrust: workspaceTrusted ? "trusted" : "untrusted" });
+    const launchResult = await launchInteractiveSession({ workspaceRoot, profileId });
 
     if (!launchResult.launched) {
       if (launchResult.output.length > 0) {
@@ -95,15 +114,13 @@ async function main(): Promise<void> {
 
   let config: LoadedRuntimeConfig;
   try {
-    config = workspaceTrusted
-      ? await loadTrustedRuntimeConfig({ workspaceRoot })
-      : await loadUserRuntimeConfig({ workspaceRoot });
+    config = await loadRuntimeConfig({ workspaceRoot, profileId });
   } catch (error) {
     if (argv[0] === "doctor" || argv[0] === "verify") {
       const diagnosticCommand = await runCliCommand({
         argv,
         workspaceRoot,
-        projectConfigTrust: workspaceTrusted ? "trusted" : "untrusted"
+        profileId
       });
 
       if (diagnosticCommand.handled) {
@@ -122,15 +139,14 @@ async function main(): Promise<void> {
     sessionDb?: SessionDB;
   } = {}) {
     const nowTrusted = await trustStore.isTrusted(workspaceRoot);
-    const latestConfig = nowTrusted
-      ? await loadTrustedRuntimeConfig({ workspaceRoot })
-      : await loadUserRuntimeConfig({ workspaceRoot });
+    const latestConfig = await loadRuntimeConfig({ workspaceRoot, profileId });
 
     return createRuntime({
       theme: kemetBlueTheme,
       model: latestConfig.model,
       primaryModelRoute: latestConfig.primaryModelRoute,
       modelFallbackRoutes: latestConfig.modelFallbackRoutes,
+      profileId,
       workspaceRoot,
       sessionId: input.sessionId,
       sessionDb: input.sessionDb,
@@ -140,7 +156,6 @@ async function main(): Promise<void> {
       ui: latestConfig.ui,
       agentProfile: latestConfig.profile,
       providerRegistry: latestConfig.providerRegistry,
-      credentialPools: latestConfig.credentialPools,
       auxiliaryModels: latestConfig.auxiliaryModels,
       mcpServers: latestConfig.mcp.servers,
       browser: latestConfig.browser,
@@ -153,7 +168,7 @@ async function main(): Promise<void> {
       securityMode: latestConfig.security.approvalMode,
       securityAssessor: latestConfig.security.assessor,
       approvalController: cliApprovalController,
-      projectConfigTrust: nowTrusted ? "trusted" : "untrusted"
+      workspaceTrusted: nowTrusted
     });
   }
 
@@ -165,7 +180,7 @@ async function main(): Promise<void> {
     const acpCommand = await runCliCommand({
       argv,
       workspaceRoot,
-      projectConfigTrust: workspaceTrusted ? "trusted" : "untrusted"
+      profileId
     });
 
     if (acpCommand.handled) {
@@ -187,9 +202,9 @@ async function main(): Promise<void> {
   const command = await runCliCommand({
     argv,
     workspaceRoot,
+    profileId,
     tools: runtime.tools(),
-    runtime,
-    projectConfigTrust: workspaceTrusted ? "trusted" : "untrusted"
+    runtime
   });
 
   if (command.handled) {
@@ -279,6 +294,43 @@ async function main(): Promise<void> {
   console.log(runtime.describe());
   console.log(`config sources: ${config.sources.join(", ") || "none"}`);
   await runtime.dispose();
+}
+
+function canDispatchBeforeRuntime(argv: readonly string[]): boolean {
+  const command = argv[0];
+  if (command === undefined || command.startsWith("/")) {
+    return false;
+  }
+  return new Set([
+    "browser",
+    "channels",
+    "curator",
+    "doctor",
+    "eval",
+    "evolution",
+    "flow",
+    "gateway",
+    "handoff",
+    "image",
+    "init",
+    "knowledge",
+    "local",
+    "manifest",
+    "mcp",
+    "model",
+    "profile",
+    "proposal",
+    "security",
+    "sessions",
+    "settings",
+    "skills",
+    "telegram",
+    "trace",
+    "update",
+    "verify",
+    "voice",
+    "web"
+  ]).has(command);
 }
 
 void main().catch((error) => {

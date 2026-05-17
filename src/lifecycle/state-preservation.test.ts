@@ -17,10 +17,11 @@ describe("getProtectedPaths", () => {
   it("includes core user paths", () => {
     const paths = getProtectedPaths("/home/test");
     const labels = paths.map((p) => p.label);
-    expect(labels).toContain("user config");
+    expect(labels).toContain("active profile pointer");
+    expect(labels).toContain("profile state directories");
     expect(labels).toContain("trust store");
     expect(labels).toContain("session database");
-    expect(labels).toContain("memory directory");
+    expect(labels).toContain("shared memory directory");
   });
 
   it("includes project config when workspaceRoot is given", () => {
@@ -35,9 +36,11 @@ describe("backupState and restoreState", () => {
 
   beforeEach(() => {
     tempHome = mkdtempSync(join(tmpdir(), "estacoda-backup-test-"));
-    mkdirSync(join(tempHome, ".estacoda", "memory"), { recursive: true });
-    writeFileSync(join(tempHome, ".estacoda", "config.json"), "{}", "utf8");
-    writeFileSync(join(tempHome, ".estacoda", "memory", "note.txt"), "hello", "utf8");
+    mkdirSync(join(tempHome, ".estacoda", "profiles", "default"), { recursive: true });
+    mkdirSync(join(tempHome, ".estacoda", "memory", "shared"), { recursive: true });
+    writeFileSync(join(tempHome, ".estacoda", "active-profile.json"), JSON.stringify({ profileId: "default" }), "utf8");
+    writeFileSync(join(tempHome, ".estacoda", "profiles", "default", "config.json"), "{}", "utf8");
+    writeFileSync(join(tempHome, ".estacoda", "memory", "shared", "note.txt"), "hello", "utf8");
   });
 
   afterEach(() => {
@@ -54,12 +57,12 @@ describe("backupState and restoreState", () => {
     const backup = await backupState({ homeDir: tempHome });
 
     // Modify original
-    writeFileSync(join(tempHome, ".estacoda", "config.json"), "{\"changed\":true}", "utf8");
+    writeFileSync(join(tempHome, ".estacoda", "profiles", "default", "config.json"), "{\"changed\":true}", "utf8");
 
     const restore = await restoreState(backup.backupPath);
     expect(restore.restored.length).toBeGreaterThan(0);
 
-    const restoredContent = readFileSync(join(tempHome, ".estacoda", "config.json"), "utf8");
+    const restoredContent = readFileSync(join(tempHome, ".estacoda", "profiles", "default", "config.json"), "utf8");
     expect(restoredContent).toBe("{}");
   });
 });

@@ -26,10 +26,6 @@ export async function runOneShotPrompt(options: OneShotPromptOptions): Promise<O
     };
   }
 
-  if (parsed.trustWorkspace) {
-    await options.runtime.trustWorkspace();
-  }
-
   const activityBuilder = new ToolActivityViewModelBuilder({
     tools: options.runtime.tools()
   });
@@ -38,7 +34,6 @@ export async function runOneShotPrompt(options: OneShotPromptOptions): Promise<O
   const response = await options.runtime.handle({
     text: parsed.prompt,
     channel: "cli",
-    trustedWorkspace: parsed.trustWorkspace ? true : undefined,
     onEvent: (event) => {
       const rendered = renderOneShotEvent(event, activityBuilder, streamState);
 
@@ -52,7 +47,6 @@ export async function runOneShotPrompt(options: OneShotPromptOptions): Promise<O
     handled: true,
     exitCode: 0,
     output: [
-      parsed.trustWorkspace ? "Workspace trusted for this run." : undefined,
       ...eventLines,
       "",
       `${response.label}: ${response.text}`,
@@ -71,28 +65,15 @@ export async function runOneShotPrompt(options: OneShotPromptOptions): Promise<O
 
 function parseOneShotArgs(argv: string[]): {
   prompt: string;
-  trustWorkspace: boolean;
 } {
   const promptParts: string[] = [];
-  let trustWorkspace = false;
 
   for (const arg of argv) {
-    if (arg === "--trust" || arg === "--trusted") {
-      trustWorkspace = true;
-      continue;
-    }
-
-    if (arg === "--no-trust") {
-      trustWorkspace = false;
-      continue;
-    }
-
     promptParts.push(arg);
   }
 
   return {
     prompt: promptParts.join(" ").trim(),
-    trustWorkspace
   };
 }
 

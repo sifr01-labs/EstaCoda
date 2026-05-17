@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   collectSetupVerificationReport,
@@ -10,6 +10,7 @@ import {
 } from "./verification.js";
 import { setupVerificationCopyEn } from "./setup-verification-copy.js";
 import type { ProviderDiagnostic } from "../config/provider-diagnostics.js";
+import { resolveProfileStateHome } from "../config/profile-home.js";
 
 function makeProviderDiagnostic(status: ProviderDiagnostic["status"], warnings: string[] = []): ProviderDiagnostic {
   return {
@@ -17,6 +18,10 @@ function makeProviderDiagnostic(status: ProviderDiagnostic["status"], warnings: 
     lines: ["Selected route: test/test"],
     warnings,
   };
+}
+
+function profileEnvPath(homeDir: string): string {
+  return resolveProfileStateHome({ homeDir, profileId: "default" }).envPath;
 }
 
 function makeReport(overrides: Partial<SetupVerificationReport> = {}): SetupVerificationReport {
@@ -162,8 +167,9 @@ describe("collectSetupVerificationReport", () => {
     const tempHome = await mkdtemp(join(tmpdir(), "estacoda-verify-test-"));
     const workspaceRoot = join(tempHome, "workspace");
     await mkdir(workspaceRoot, { recursive: true });
-    await mkdir(join(tempHome, ".estacoda"), { recursive: true });
-    await writeFile(join(tempHome, ".estacoda", ".env"), "KEY=value\n", { mode: 0o644 });
+    const envPath = profileEnvPath(tempHome);
+    await mkdir(dirname(envPath), { recursive: true });
+    await writeFile(envPath, "KEY=value\n", { mode: 0o644 });
     const report = await collectSetupVerificationReport({
       workspaceRoot,
       homeDir: tempHome,
@@ -173,7 +179,7 @@ describe("collectSetupVerificationReport", () => {
     expect(report.warnings.some((w) => w.includes("permissions"))).toBe(true);
   });
 
-  it("includes project config source when projectConfigTrust is trusted", async () => {
+  it("ignores workspace-local config sources", async () => {
     const tempHome = await mkdtemp(join(tmpdir(), "estacoda-verify-test-"));
     const workspaceRoot = join(tempHome, "workspace");
     await mkdir(workspaceRoot, { recursive: true });
@@ -182,21 +188,6 @@ describe("collectSetupVerificationReport", () => {
     const report = await collectSetupVerificationReport({
       workspaceRoot,
       homeDir: tempHome,
-      projectConfigTrust: "trusted",
-    });
-    expect(report.configSources.some((s) => s.includes(join(workspaceRoot, ".estacoda", "config.json")))).toBe(true);
-  });
-
-  it("excludes project config source when projectConfigTrust is untrusted", async () => {
-    const tempHome = await mkdtemp(join(tmpdir(), "estacoda-verify-test-"));
-    const workspaceRoot = join(tempHome, "workspace");
-    await mkdir(workspaceRoot, { recursive: true });
-    await mkdir(join(workspaceRoot, ".estacoda"), { recursive: true });
-    await writeFile(join(workspaceRoot, ".estacoda", "config.json"), JSON.stringify({ model: { provider: "openai", id: "gpt-4o" } }));
-    const report = await collectSetupVerificationReport({
-      workspaceRoot,
-      homeDir: tempHome,
-      projectConfigTrust: "untrusted",
     });
     expect(report.configSources.some((s) => s.includes(join(workspaceRoot, ".estacoda", "config.json")))).toBe(false);
   });

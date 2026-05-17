@@ -3,8 +3,8 @@ import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { resolveRuntimeCredential } from "./runtime-credential-resolver.js";
-import { CredentialPool, CredentialPoolRegistry } from "./credential-pool.js";
 import type { ProviderMetadata } from "./provider-metadata.js";
+import { resolveProfileStateHome } from "../config/profile-home.js";
 
 function hostedMetadata(): ProviderMetadata {
   return {
@@ -77,8 +77,8 @@ async function makeTempDir(): Promise<string> {
 }
 
 async function writeAuthJson(homeDir: string, store: unknown): Promise<void> {
-  const path = join(homeDir, ".estacoda", "auth.json");
-  await mkdir(join(homeDir, ".estacoda"), { recursive: true });
+  const path = resolveProfileStateHome({ homeDir, profileId: "default" }).authJsonPath;
+  await mkdir(join(homeDir, ".estacoda", "profiles", "default"), { recursive: true });
   await writeFile(path, JSON.stringify(store, null, 2) + "\n", "utf8");
 }
 
@@ -132,60 +132,6 @@ describe("resolveRuntimeCredential", () => {
 
     expect(result.diagnostic.ok).toBe(true);
     expect(result.credential?.id).toBe("PROVIDER_KEY");
-  });
-
-  it("falls back to credential pool when no env reference", async () => {
-    const poolRegistry = new CredentialPoolRegistry();
-    poolRegistry.register(
-      new CredentialPool({
-        provider: "openai",
-        entries: [
-          {
-            id: "pool-1",
-            source: { kind: "literal", value: "pool-secret" },
-            priority: 1,
-          },
-        ],
-      })
-    );
-
-    const result = await resolveRuntimeCredential({
-      providerId: "openai",
-      credentialPools: poolRegistry,
-      metadata: hostedMetadata(),
-    });
-
-    expect(result.diagnostic.ok).toBe(true);
-    expect(result.credential?.kind).toBe("bearer");
-    expect(result.credential?.id).toBe("pool-1");
-    expect((result.credential as { source: string }).source).toBe("pool");
-  });
-
-  it("env reference beats pool even when pool is configured", async () => {
-    process.env.ENV_KEY = "env-secret";
-    const poolRegistry = new CredentialPoolRegistry();
-    poolRegistry.register(
-      new CredentialPool({
-        provider: "openai",
-        entries: [
-          {
-            id: "pool-1",
-            source: { kind: "literal", value: "pool-secret" },
-            priority: 1,
-          },
-        ],
-      })
-    );
-
-    const result = await resolveRuntimeCredential({
-      providerId: "openai",
-      route: { apiKeyEnv: "ENV_KEY" },
-      credentialPools: poolRegistry,
-      metadata: hostedMetadata(),
-    });
-
-    expect(result.credential?.id).toBe("ENV_KEY");
-    expect((result.credential as { source: string }).source).toBe("env");
   });
 
   it("returns none for local provider with no auth", async () => {
@@ -248,48 +194,6 @@ describe("resolveRuntimeCredential", () => {
       "Provider openai requires api_key credentials but no credential reference is configured."
     );
     expect(result.credential).toBeUndefined();
-  });
-
-  it("returns clear auth diagnostic for hosted api_key provider with empty pool", async () => {
-    const poolRegistry = new CredentialPoolRegistry();
-    poolRegistry.register(
-      new CredentialPool({
-        provider: "openai",
-        entries: [],
-      })
-    );
-
-    const result = await resolveRuntimeCredential({
-      providerId: "openai",
-      credentialPools: poolRegistry,
-      metadata: hostedMetadata(),
-    });
-
-    expect(result.diagnostic.ok).toBe(false);
-    expect(result.diagnostic.message).toBe(
-      "Provider openai requires api_key credentials but no credential reference is configured."
-    );
-    expect(result.credential).toBeUndefined();
-  });
-
-  it("returns none for no-auth provider even when pool is empty", async () => {
-    const poolRegistry = new CredentialPoolRegistry();
-    poolRegistry.register(
-      new CredentialPool({
-        provider: "local",
-        entries: [],
-      })
-    );
-
-    const result = await resolveRuntimeCredential({
-      providerId: "local",
-      credentialPools: poolRegistry,
-      metadata: localMetadata(),
-    });
-
-    expect(result.diagnostic.ok).toBe(true);
-    expect(result.credential?.kind).toBe("none");
-    expect(result.credential?.id).toBe("local:none");
   });
 
   it("never returns raw secret in diagnostic", async () => {

@@ -133,7 +133,6 @@ export async function registerStandardTools(tools: ToolRegistry, options: {
   }
   for (const tool of createWorkspaceTrustTools({
     workspaceRoot: ws,
-    profileId: "smoke",
     trustStore: new WorkspaceTrustStore({
       path: join(await makeTempDir("estacoda-global-trust-"), "trust.json")
     })
@@ -245,7 +244,6 @@ export async function createSmokeContext(): Promise<SmokeContext> {
   }
   for (const tool of createWorkspaceTrustTools({
     workspaceRoot: process.cwd(),
-    profileId: "smoke",
     trustStore: new WorkspaceTrustStore({
       path: join(await makeTempDir("estacoda-global-trust-"), "trust.json")
     })
@@ -260,7 +258,6 @@ export async function createSmokeContext(): Promise<SmokeContext> {
   }
   tools.register(createMemoryTool(memory));
 
-  await memory.loadFromDirectory(new URL("../../memory/default", import.meta.url).pathname);
   memory.apply({
     kind: "append",
     file: "MEMORY.md",

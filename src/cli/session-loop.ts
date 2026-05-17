@@ -1,4 +1,5 @@
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
+import { homedir } from "node:os";
 import type { Runtime } from "../runtime/create-runtime.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { SessionEvent } from "../contracts/session.js";
@@ -33,6 +34,7 @@ import { PromptChromeController } from "./prompt-chrome-controller.js";
 import type { SlashMenuViewModel, ToolActivityRailEvent } from "../contracts/view-model.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
+import { resolveProfileStateHome } from "../config/profile-home.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -552,6 +554,11 @@ export async function handleSlashCommand(input: {
         input.output.write(`Session not found: ${target}\n\n`);
         return false;
       }
+      const activeProfileId = await runtimeProfileId(input.runtime);
+      if (targetSession.profileId !== activeProfileId) {
+        input.output.write(`Session not found in active profile: ${target}\n\n`);
+        return false;
+      }
       return {
         runtime: await input.switchRuntime(target),
         notice: (runtime) => [
@@ -591,8 +598,9 @@ export async function handleSlashCommand(input: {
       }
       const { FileHandoffStore } = await import("../channels/handoff-store.js");
       const { join } = await import("node:path");
-      const { homedir } = await import("node:os");
-      const store = new FileHandoffStore({ path: join(homedir(), ".estacoda", "handoff-codes.json") });
+      const profileId = await runtimeProfileId(input.runtime);
+      const profilePaths = resolveProfileStateHome({ homeDir: input.homeDir ?? homedir(), profileId });
+      const store = new FileHandoffStore({ path: join(profilePaths.gatewayStatePath, "handoff-codes.json") });
       const handoff = await store.create({
         sessionId: input.runtime.sessionId,
         surfaceType: surface,
@@ -1188,7 +1196,8 @@ async function renderLatestResume(runtime: Runtime): Promise<string> {
 }
 
 async function renderSessionList(runtime: Runtime): Promise<string> {
-  const sessions = (await runtime.sessionDb.listSessions("default")).slice(0, 10);
+  const profileId = await runtimeProfileId(runtime);
+  const sessions = (await runtime.sessionDb.listSessions(profileId)).slice(0, 10);
   if (sessions.length === 0) {
     return "No sessions found.";
   }
@@ -1207,8 +1216,9 @@ async function renderSessionSearch(runtime: Runtime, query: string): Promise<str
     return "Usage: /search <query>";
   }
 
+  const profileId = await runtimeProfileId(runtime);
   const matches = await runtime.sessionDb.search(normalizedQuery, {
-    profileId: "default",
+    profileId,
     limit: 5
   });
   if (matches.length === 0) {
@@ -1221,6 +1231,10 @@ async function renderSessionSearch(runtime: Runtime, query: string): Promise<str
       `${index + 1}. [${result.session.id}] ${result.message.role}: ${truncateSingleLine(result.message.content, 100)}`
     )
   ].join("\n");
+}
+
+async function runtimeProfileId(runtime: Runtime): Promise<string> {
+  return (await runtime.sessionDb.getSession(runtime.sessionId))?.profileId ?? "default";
 }
 
 async function renderMemoryPromotions(runtime: Runtime): Promise<string> {

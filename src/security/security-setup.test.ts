@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { setupSecurityConfig, loadRuntimeConfig } from "../config/runtime-config.js";
+import { resolveProfileStateHome } from "../config/profile-home.js";
 
 describe("security setup", () => {
   let tempHome: string;
@@ -36,7 +37,7 @@ describe("security setup", () => {
 
     expect(result.config.security?.assessor?.enabled).toBe(false);
 
-    const configPath = join(tempHome, ".estacoda", "config.json");
+    const configPath = resolveProfileStateHome({ homeDir: tempHome, profileId: "default" }).configPath;
     const raw = JSON.parse(readFileSync(configPath, "utf8"));
     expect(raw.security?.assessor?.enabled).toBe(false);
   });

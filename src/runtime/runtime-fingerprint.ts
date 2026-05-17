@@ -57,10 +57,6 @@ export type RuntimeFingerprint = {
   sttHash: string;
   telegramReady: boolean;
   currentPlatform: string;
-
-  // ── Optional overrides ──
-  userConfigPath?: string;
-  projectConfigPath?: string;
 };
 
 export function computeRuntimeFingerprint(
@@ -78,8 +74,6 @@ export function computeRuntimeFingerprint(
     approvalControllerPresent: boolean;
     explicitSecurityPolicyPresent: boolean;
     currentPlatform: string;
-    userConfigPath?: string;
-    projectConfigPath?: string;
   }
 ): RuntimeFingerprint {
   return {
@@ -127,9 +121,7 @@ export function computeRuntimeFingerprint(
     ttsHash: stableJsonHash(config.tts),
     sttHash: stableJsonHash(config.stt),
     telegramReady: config.channels.telegram.ready,
-    currentPlatform: options.currentPlatform,
-    userConfigPath: options.userConfigPath,
-    projectConfigPath: options.projectConfigPath,
+    currentPlatform: options.currentPlatform
   };
 }
 

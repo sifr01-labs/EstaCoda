@@ -9,6 +9,7 @@ import {
   uninstallPack
 } from "./pack-installer.js";
 import { PackRegistry } from "./pack-registry.js";
+import { resolveProfileStateHome, writeActiveProfile } from "../config/profile-home.js";
 import type { PackManifest } from "../contracts/pack.js";
 
 function makeManifest(overrides?: Partial<PackManifest>): PackManifest {
@@ -48,6 +49,10 @@ function writePack(dir: string, manifest: PackManifest): void {
   writeFileSync(join(dir, "SKILL.md"), "# Test Skill\n", "utf8");
 }
 
+function packSkillsPath(homeDir: string, packId: string): string {
+  return join(resolveProfileStateHome({ homeDir, profileId: "default" }).skillsPath, "packs", packId);
+}
+
 describe("pack-installer", () => {
   let tmpDir: string;
   let sourceDir: string;
@@ -76,7 +81,7 @@ describe("pack-installer", () => {
     expect(result.output).toContain("Installed pack: Test pack (test-sp)");
     expect(result.output).toContain("Status: enabled");
 
-    const skillsDest = join(tmpDir, ".estacoda", "skills", "packs", "test-sp");
+    const skillsDest = packSkillsPath(tmpDir, "test-sp");
     expect(existsSync(skillsDest)).toBe(true);
     expect(existsSync(join(skillsDest, "SKILL.md"))).toBe(true);
 
@@ -84,6 +89,24 @@ describe("pack-installer", () => {
     const entry = await registry.find("test-sp");
     expect(entry).toBeDefined();
     expect(entry!.status).toBe("enabled");
+  });
+
+  it("installs enabled pack skills into the selected profile", async () => {
+    const manifest = makeManifest();
+    writePack(sourceDir, manifest);
+    writeActiveProfile("research", { homeDir: tmpDir });
+
+    const result = await installPack({
+      homeDir: tmpDir,
+      sourcePath: sourceDir,
+      actor: "test-user"
+    });
+
+    expect(result.ok).toBe(true);
+    const selectedProfileDest = join(resolveProfileStateHome({ homeDir: tmpDir, profileId: "research" }).skillsPath, "packs", "test-sp");
+    const defaultProfileDest = packSkillsPath(tmpDir, "test-sp");
+    expect(existsSync(join(selectedProfileDest, "SKILL.md"))).toBe(true);
+    expect(existsSync(defaultProfileDest)).toBe(false);
   });
 
   it("installs an external pack as disabled", async () => {
@@ -105,7 +128,7 @@ describe("pack-installer", () => {
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain("Status: disabled");
 
-    const skillsDest = join(tmpDir, ".estacoda", "skills", "packs", "test-sp");
+    const skillsDest = packSkillsPath(tmpDir, "test-sp");
     expect(existsSync(skillsDest)).toBe(false);
 
     const registry = new PackRegistry({ homeDir: tmpDir });
@@ -170,7 +193,7 @@ describe("pack-installer", () => {
     expect(result.output).toContain("Status: disabled");
     expect(result.output).toContain("Risk: medium");
 
-    const skillsDest = join(tmpDir, ".estacoda", "skills", "packs", "test-sp");
+    const skillsDest = packSkillsPath(tmpDir, "test-sp");
     expect(existsSync(skillsDest)).toBe(false);
 
     const registry = new PackRegistry({ homeDir: tmpDir });
@@ -213,7 +236,7 @@ describe("pack-installer", () => {
     expect(result.output).toContain("Status: disabled");
     expect(result.output).toContain("Risk: high");
 
-    const skillsDest = join(tmpDir, ".estacoda", "skills", "packs", "test-sp");
+    const skillsDest = packSkillsPath(tmpDir, "test-sp");
     expect(existsSync(skillsDest)).toBe(false);
 
     const registry = new PackRegistry({ homeDir: tmpDir });
@@ -365,7 +388,7 @@ describe("pack-installer", () => {
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain("Enabled pack");
 
-    const skillsDest = join(tmpDir, ".estacoda", "skills", "packs", "test-sp");
+    const skillsDest = packSkillsPath(tmpDir, "test-sp");
     expect(existsSync(skillsDest)).toBe(true);
     expect(existsSync(join(skillsDest, "SKILL.md"))).toBe(true);
 
@@ -393,7 +416,7 @@ describe("pack-installer", () => {
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain("Disabled pack");
 
-    const skillsDest = join(tmpDir, ".estacoda", "skills", "packs", "test-sp");
+    const skillsDest = packSkillsPath(tmpDir, "test-sp");
     expect(existsSync(skillsDest)).toBe(false);
 
     const registry = new PackRegistry({ homeDir: tmpDir });

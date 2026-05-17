@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   createTelegramPairingCode,
@@ -62,6 +62,7 @@ import { CronExecutionStore } from "../cron/cron-execution-store.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { resolveStateHome } from "../config/state-home.js";
+import { defaultProfileId, normalizeProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 import { runSessionsCommand } from "./session-commands.js";
 import { runHandoffCommand } from "./handoff-commands.js";
 import { createFileCronJobLock } from "../cron/cron-lock.js";
@@ -154,6 +155,8 @@ import {
   type OpenAIModelProbe
 } from "./model-setup.js";
 import { runModelSetupCodex } from "./model-setup-codex.js";
+import { profileCommand } from "./profile-commands.js";
+import type { ProfileContextualizer } from "./profile-state.js";
 
 export type CliCommandResult = {
   handled: boolean;
@@ -165,9 +168,8 @@ export type CliOptions = {
   argv: string[];
   workspaceRoot: string;
   homeDir?: string;
+  profileId?: string;
   interactive?: boolean;
-  userConfigPath?: string;
-  projectConfigPath?: string;
   tools?: ToolDefinition[];
   prompt?: Prompt;
   telegramFetch?: TelegramFetch;
@@ -175,10 +177,63 @@ export type CliOptions = {
   imageGenerationFetch?: ImageGenerationFetchLike;
   runtime?: Runtime;
   modelsDevOptions?: ModelsDevRegistryOptions;
-  projectConfigTrust?: "trusted" | "untrusted";
+  profileContextualizer?: ProfileContextualizer;
 };
 
+export type ParsedGlobalCliOptions =
+  | { ok: true; argv: string[]; profileId?: string }
+  | { ok: false; error: string };
+
+export function parseGlobalCliOptions(argv: readonly string[]): ParsedGlobalCliOptions {
+  const nextArgv: string[] = [];
+  let profileId: string | undefined;
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--profile" || arg === "-p") {
+      const value = argv[i + 1];
+      if (value === undefined || value.startsWith("-")) {
+        return { ok: false, error: `${arg} requires a profile id.` };
+      }
+      try {
+        profileId = normalizeProfileId(value);
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      }
+      i++;
+      continue;
+    }
+    if (arg.startsWith("--profile=")) {
+      const value = arg.slice("--profile=".length);
+      try {
+        profileId = normalizeProfileId(value);
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      }
+      continue;
+    }
+    nextArgv.push(arg);
+  }
+
+  return profileId === undefined
+    ? { ok: true, argv: nextArgv }
+    : { ok: true, argv: nextArgv, profileId };
+}
+
 export async function runCliCommand(options: CliOptions): Promise<CliCommandResult> {
+  const parsedGlobalOptions = parseGlobalCliOptions(options.argv);
+  if (!parsedGlobalOptions.ok) {
+    return {
+      handled: true,
+      exitCode: 1,
+      output: parsedGlobalOptions.error
+    };
+  }
+  options = {
+    ...options,
+    argv: parsedGlobalOptions.argv,
+    profileId: parsedGlobalOptions.profileId ?? options.profileId
+  };
   const [command, ...args] = options.argv;
 
   switch (command) {
@@ -217,7 +272,7 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
     case "settings":
       return settings(options, args);
     case "profile":
-      return profile(options, args);
+      return profileCommand(options, args);
     case "trace":
       return trace(options, args);
     case "flow":
@@ -320,8 +375,7 @@ async function interactiveSetup(options: CliOptions, input: { readonly advanced:
         applyExecutor: createReviewedSetupApplyExecutor({
           workspaceRoot: options.workspaceRoot,
           homeDir: options.homeDir,
-          userConfigPath: options.userConfigPath,
-          projectConfigPath: options.projectConfigPath,
+          profileId: options.profileId,
         }),
       });
 
@@ -344,8 +398,7 @@ async function interactiveSetup(options: CliOptions, input: { readonly advanced:
         applyExecutor: createReviewedSetupApplyExecutor({
           workspaceRoot: options.workspaceRoot,
           homeDir: options.homeDir,
-          userConfigPath: options.userConfigPath,
-          projectConfigPath: options.projectConfigPath,
+          profileId: options.profileId,
         }),
         output: {
           write: (value) => chunks.push(value),
@@ -621,56 +674,8 @@ function formatProviderModel(provider: string, model: string): string {
   return model.startsWith(`${provider}/`) ? model : `${provider}/${model}`;
 }
 
-async function profile(options: CliOptions, args: string[]): Promise<CliCommandResult> {
-  const [subcommand, value] = args;
-
-  if (subcommand === "set") {
-    const mode = parseProfileMode(value, false);
-    const result = await setupProfileConfig({
-      ...options,
-      input: { mode }
-    });
-    return {
-      handled: true,
-      exitCode: 0,
-      output: [
-        `Profile: ${result.config.profile?.mode ?? mode}.`,
-        `Config: ${result.path}`
-      ].join("\n")
-    };
-  }
-
-  if (subcommand === "language") {
-    const responseLanguage = parseResponseLanguage(value, false);
-    const result = await setupProfileConfig({
-      ...options,
-      input: { responseLanguage }
-    });
-    return {
-      handled: true,
-      exitCode: 0,
-      output: [
-        `Response language: ${result.config.profile?.responseLanguage ?? responseLanguage}.`,
-        `Config: ${result.path}`
-      ].join("\n")
-    };
-  }
-
-  const config = await loadRuntimeConfig(options);
-  return {
-    handled: true,
-    exitCode: 0,
-    output: [
-      renderProfileStatus(config.profile.mode, config.profile.responseLanguage),
-      "",
-      "Commands:",
-      "  estacoda profile set focused",
-      "  estacoda profile set operator",
-      "  estacoda profile set builder",
-      "  estacoda profile set research",
-      "  estacoda profile language match-user"
-    ].join("\n")
-  };
+function selectedProfileId(options: { homeDir?: string; profileId?: string }): string {
+  return options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
 }
 
 async function model(options: CliOptions, args: string[]): Promise<CliCommandResult> {
@@ -680,7 +685,7 @@ async function model(options: CliOptions, args: string[]): Promise<CliCommandRes
     return {
       handled: true,
       exitCode: 0,
-      output: renderModelStatus(config)
+      output: renderModelStatus(config, options)
     };
   }
 
@@ -765,8 +770,6 @@ async function model(options: CliOptions, args: string[]): Promise<CliCommandRes
       return runModelSetupCodex({
         homeDir: options.homeDir,
         workspaceRoot: options.workspaceRoot,
-        userConfigPath: options.userConfigPath,
-        projectConfigPath: options.projectConfigPath,
         prompt: options.prompt,
         fetchLike: options.providerFetch
       });
@@ -1012,6 +1015,7 @@ async function persistModelSelection(
         providerId: resolution.provider,
         envVarName,
         homeDir: options.homeDir,
+        profileId: options.profileId,
         question: `Enter API key for ${resolution.provider} [${envVarName}]: `
       });
 
@@ -1046,7 +1050,8 @@ async function persistModelSelection(
   });
 
   // ── Persist config ──
-  const targetPath = options.userConfigPath ?? resolveStateHome({ homeDir: options.homeDir }).configPath;
+  const profileId = selectedProfileId(options);
+  const targetPath = resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
   try {
     await saveRuntimeConfig(targetPath, mutated);
   } catch (err) {
@@ -1223,6 +1228,7 @@ async function runBareModelPicker(
         providerId: resolution.provider,
         envVarName,
         homeDir: options.homeDir,
+        profileId: options.profileId,
         question: `Enter API key for ${resolution.provider} [${envVarName}]: `
       });
 
@@ -1256,7 +1262,8 @@ async function runBareModelPicker(
   });
 
   // ── Persist config ──
-  const targetPath = options.userConfigPath ?? resolveStateHome({ homeDir: options.homeDir }).configPath;
+  const profileId = selectedProfileId(options);
+  const targetPath = resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
   try {
     await saveRuntimeConfig(targetPath, mutated);
   } catch (err) {
@@ -1321,9 +1328,13 @@ function renderModelOverview(config: Awaited<ReturnType<typeof loadRuntimeConfig
   return diagnosticLines.join("\n");
 }
 
-function renderModelStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string {
+function renderModelStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>, options: CliOptions): string {
   const route = config.primaryModelRoute;
+  const profileId = selectedProfileId(options);
+  const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId });
   const lines: string[] = [
+    `Profile: ${profileId}`,
+    `Config: ${profilePaths.configPath}`,
     `Primary: ${route.provider}/${route.id}`,
     `Context window: ${formatCount(config.model.contextWindowTokens)} tokens`,
     `Tools: ${config.model.supportsTools ? "yes" : "no"}`,
@@ -1402,7 +1413,6 @@ async function modelFallback(
 
     const baseUrl = valueAfter(args, "--base-url");
     const apiKeyEnv = valueAfter(args, "--api-key-env");
-    const scope = hasFlag(args, "--project") ? "project" : hasFlag(args, "--user") ? "user" : undefined;
 
     const fallback: ModelFallbackConfig = {
       provider: parsed.provider,
@@ -1415,8 +1425,7 @@ async function modelFallback(
     const result = await setupModelFallbackConfig({
       ...options,
       input: {
-        fallbacks: [...existing, fallback],
-        scope
+        fallbacks: [...existing, fallback]
       }
     });
 
@@ -1446,15 +1455,13 @@ async function modelFallback(
     }
 
     const baseUrl = valueAfter(args, "--base-url");
-    const scope = hasFlag(args, "--project") ? "project" : hasFlag(args, "--user") ? "user" : undefined;
 
     const result = await removeModelFallbackConfig({
       ...options,
       input: {
         provider: parsed.provider,
         id: parsed.id,
-        ...(baseUrl !== undefined ? { baseUrl } : {}),
-        scope
+        ...(baseUrl !== undefined ? { baseUrl } : {})
       }
     });
 
@@ -1483,13 +1490,10 @@ async function modelFallback(
       };
     }
 
-    const scope = hasFlag(args, "--project") ? "project" : hasFlag(args, "--user") ? "user" : undefined;
-
     const result = await reorderModelFallbackConfig({
       ...options,
       input: {
-        order: order.map((o) => ({ provider: o.provider, id: o.id, ...(o.baseUrl !== undefined ? { baseUrl: o.baseUrl } : {}) })),
-        scope
+        order: order.map((o) => ({ provider: o.provider, id: o.id, ...(o.baseUrl !== undefined ? { baseUrl: o.baseUrl } : {}) }))
       }
     });
 
@@ -1518,12 +1522,9 @@ async function modelFallback(
       };
     }
 
-    const scope = hasFlag(args, "--project") ? "project" : hasFlag(args, "--user") ? "user" : undefined;
-
     const result = await clearModelFallbackConfig({
-      ...options,
-      scope
-    });
+      ...options
+      });
 
     return {
       handled: true,
@@ -1632,6 +1633,11 @@ async function doctor(options: CliOptions, args: string[] = []): Promise<CliComm
   const setupState = await collectSetupEntryState(options);
   let config: Awaited<ReturnType<typeof loadRuntimeConfig>> | undefined;
   let configSyntaxError: string | undefined;
+  const activeProfileId = readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+  const selectedProfile = selectedProfileId(options);
+  const selectedProfilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId: selectedProfile });
+  const activeProfilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId: activeProfileId });
+  const stateHome = resolveStateHome({ homeDir: options.homeDir });
 
   try {
     config = await loadRuntimeConfig(options);
@@ -1654,6 +1660,16 @@ async function doctor(options: CliOptions, args: string[] = []): Promise<CliComm
   const warnings: string[] = [];
   const notes: string[] = [];
 
+  if (!await pathExists(activeProfilePaths.profileRoot)) {
+    warnings.push(`Active profile is missing: ${activeProfileId}`);
+  }
+  if (!await pathExists(selectedProfilePaths.configPath)) {
+    warnings.push(`Selected profile config is missing: ${selectedProfilePaths.configPath}`);
+  }
+  if (!await trustStoreHealthy(stateHome.trustJsonPath)) {
+    warnings.push(`Global trust store is not valid JSON: ${stateHome.trustJsonPath}`);
+  }
+
   if (config !== undefined && config.model.contextWindowTokens > 0 && config.model.contextWindowTokens < 64_000) {
     warnings.push("Configured model context window is below 64K tokens.");
   }
@@ -1668,6 +1684,13 @@ async function doctor(options: CliOptions, args: string[] = []): Promise<CliComm
 
   if (configSyntaxError !== undefined) {
     warnings.push(`Config syntax error: ${configSyntaxError}`);
+  }
+
+  if (config !== undefined) {
+    const missingProfileEnv = collectMissingProfileEnv(config);
+    if (missingProfileEnv.length > 0) {
+      warnings.push(`Selected profile .env is missing required values: ${missingProfileEnv.join(", ")}`);
+    }
   }
 
   // State directory backup integrity
@@ -1703,11 +1726,14 @@ async function doctor(options: CliOptions, args: string[] = []): Promise<CliComm
       : 1,
     output: [
       "EstaCoda doctor",
+      `Profile: ${selectedProfile}`,
+      `Profile config: ${selectedProfilePaths.configPath}`,
+      `Profile secrets: ${selectedProfilePaths.envPath}`,
+      `Global trust: ${stateHome.trustJsonPath}`,
       `Model: ${config === undefined ? "unknown/unknown" : `${config.model.provider}/${config.model.id}`}`,
       `Web extraction: ${config === undefined ? "unknown" : config.web.enableNetwork ? "enabled" : "disabled"}`,
       `Browser backend: ${config?.browser.backend ?? "unknown"}`,
       `Config sources: ${(config?.sources ?? setupState.configSources).join(", ") || "none"}`,
-      `Credential pools: ${config?.credentialPools.snapshots().map((snapshot) => `${snapshot.provider}:${snapshot.entries.length}`).join(", ") || "none"}`,
       "",
       renderProviderDiagnostic(providerDiagnostic),
       liveProviderDiagnostic === undefined ? undefined : "",
@@ -1801,6 +1827,46 @@ function renderLiveToolDiagnostic(diagnostic: LiveToolDiagnostic): string {
       ? "Live tool status: ready"
       : `Live tool warnings:\n${diagnostic.warnings.map((warning) => `- ${warning}`).join("\n")}`
   ].join("\n");
+}
+
+function collectMissingProfileEnv(config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string[] {
+  const envVars = new Set<string>();
+  if (config.primaryModelRoute.apiKeyEnv !== undefined) {
+    envVars.add(config.primaryModelRoute.apiKeyEnv);
+  }
+  for (const route of config.modelFallbackRoutes) {
+    if (route.apiKeyEnv !== undefined) {
+      envVars.add(route.apiKeyEnv);
+    }
+  }
+  for (const missing of config.channels.telegram.missing ?? []) {
+    envVars.add(missing);
+  }
+  return [...envVars].filter((envVar) => process.env[envVar] === undefined).sort();
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function trustStoreHealthy(path: string): Promise<boolean> {
+  try {
+    JSON.parse(await readFile(path, "utf8"));
+    return true;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return true;
+    }
+    return false;
+  }
 }
 
 async function browser(options: CliOptions, args: string[]): Promise<CliCommandResult> {
@@ -1935,7 +2001,7 @@ async function voice(options: CliOptions, args: string[]): Promise<CliCommandRes
         "Defaults:",
         "  TTS: edge, no API key",
         "  STT: local Whisper, model base",
-        "  CLI audio target: ~/.estacoda/audio-cache/ for generated speech and transcripts"
+        "  CLI audio target: selected profile audio-cache/ for generated speech and transcripts"
       ].join("\n")
     };
   }
@@ -1989,7 +2055,7 @@ async function image(options: CliOptions, args: string[]): Promise<CliCommandRes
         "Defaults:",
         "  Provider: fal",
         "  Model: fal-ai/flux-2/klein/9b",
-        "  Cache: ~/.estacoda/image-cache/"
+        "  Cache: selected profile image-cache/"
       ].join("\n")
     };
   }
@@ -2005,10 +2071,13 @@ async function image(options: CliOptions, args: string[]): Promise<CliCommandRes
 
   if (subcommand === "verify") {
     const config = await loadRuntimeConfig(options);
+    const profileId = selectedProfileId(options);
+    const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId });
     const verification = await verifyImageGeneration({
       imageGen: config.imageGen,
       telegramReady: config.channels.telegram.ready,
       homeDir: options.homeDir,
+      imageCachePath: profilePaths.imageCachePath,
       workspaceRoot: options.workspaceRoot,
       fetch: options.imageGenerationFetch,
       checkProvider: !hasFlag(args, "--skip-provider-check")
@@ -2110,7 +2179,7 @@ function renderImageStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>
     extra,
     `Gateway: ${config.imageGen.useGateway ? "yes" : "no"}`,
     `API key: ${key}`,
-    `Cache: ~/.estacoda/image-cache/`,
+    "Cache: selected profile image-cache/",
     "Agent tool: image.generate",
     "Telegram delivery: generated images upload as photos when available."
   ].filter((line) => line !== undefined).join("\n");
@@ -2741,7 +2810,7 @@ async function mcp(options: CliOptions, args: string[]): Promise<CliCommandResul
         "  estacoda mcp reload",
         "  estacoda mcp setup --name docs --command npx --args @modelcontextprotocol/server-filesystem,/path",
         "  estacoda mcp setup --name docs --command uvx --args mcp-server-fetch",
-        "  estacoda mcp setup --name remote --transport http --url http://127.0.0.1:3000/mcp --trust read-only-network"
+        "  estacoda mcp setup --name remote --transport http --url http://127.0.0.1:3000/mcp --server-trust read-only-network"
       ].join("\n")
     };
   }
@@ -2841,32 +2910,37 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
   const [subcommand, ...rest] = args;
 
   if (subcommand === "status") {
-    const result = await runGatewayStatus(options);
+    const result = await runGatewayStatus({ ...options, profileId: parseGatewayProfileFlag(rest) });
     return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
   }
 
   if (subcommand === "diagnose") {
-    const result = await runGatewayDiagnose(options);
+    const result = await runGatewayDiagnose({ ...options, profileId: parseGatewayProfileFlag(rest) });
     return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
   }
 
   if (subcommand === "stop") {
+    const profileId = parseGatewayProfileFlag(rest);
     const result = await runGatewayStop({
       ...options,
+      profileId,
       force: hasFlag(rest, "--force")
     });
     return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
   }
 
   if (subcommand === "restart") {
+    const profileId = parseGatewayProfileFlag(rest);
     const result = await runGatewayRestart({
       ...options,
+      profileId,
       graceful: hasFlag(rest, "--graceful"),
     });
     return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
   }
 
   if (subcommand === "start") {
+    const profileId = parseGatewayProfileFlag(rest);
     const deprecatedFlags = ["--telegram", "--discord", "--email", "--whatsapp"];
     const foundDeprecated = deprecatedFlags.find((f) => hasFlag(rest, f));
     if (foundDeprecated !== undefined) {
@@ -2889,7 +2963,7 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
     }
 
     if (hasFlag(rest, "--dry-run")) {
-      const result = await runGatewayStartDryRun(options);
+      const result = await runGatewayStartDryRun({ ...options, profileId });
       return {
         handled: true,
         exitCode: result.ok ? 0 : 1,
@@ -2898,7 +2972,7 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
     }
 
     if (hasFlag(rest, "--background")) {
-      const result = await runGatewayStartBackground(options);
+      const result = await runGatewayStartBackground({ ...options, profileId });
       return {
         handled: true,
         exitCode: result.ok ? 0 : 1,
@@ -2908,6 +2982,7 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
 
     const result = await runGatewaySupervisor({
       ...options,
+      profileId,
       once: hasFlag(rest, "--once"),
       telegramFetch: options.telegramFetch,
     });
@@ -2934,6 +3009,7 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
       "  estacoda gateway start --dry-run",
       "  estacoda gateway start --background",
       "  estacoda gateway start --once",
+      "  estacoda gateway start --profile <id>",
     ].join("\n"),
   };
 }
@@ -2944,9 +3020,7 @@ async function acp(options: CliOptions, args: string[]): Promise<CliCommandResul
   if (subcommand === undefined || subcommand === "serve") {
     await runAcpServer({
       workspaceRoot: options.workspaceRoot,
-      homeDir: options.homeDir,
-      userConfigPath: options.userConfigPath,
-      projectConfigPath: options.projectConfigPath
+      homeDir: options.homeDir
     });
     return {
       handled: true,
@@ -3069,10 +3143,6 @@ function parseVoiceArgs(args: string[]): VoiceSetupInput {
     } else if (arg === "--stt-api-key") {
       parsed.sttApiKey = next;
       index += 1;
-    } else if (arg === "--project") {
-      parsed.scope = "project";
-    } else if (arg === "--user") {
-      parsed.scope = "user";
     }
   }
 
@@ -3115,10 +3185,6 @@ function parseImageArgs(args: string[]): ImageGenerationSetupInput {
       parsed.useGateway = true;
     } else if (arg === "--direct") {
       parsed.useGateway = false;
-    } else if (arg === "--project") {
-      parsed.scope = "project";
-    } else if (arg === "--user") {
-      parsed.scope = "user";
     }
   }
 
@@ -3195,15 +3261,8 @@ function parseSetupArgs(args: string[]): Partial<ProviderSetupInput> {
     } else if (arg === "--api-key") {
       parsed.apiKey = next;
       index += 1;
-    } else if (arg === "--project") {
-      parsed.scope = "project";
-    } else if (arg === "--user") {
-      parsed.scope = "user";
     } else if (arg === "--offline") {
       parsed.enableNetwork = false;
-    } else if (arg === "--strategy") {
-      parsed.credentialPoolStrategy = next as ProviderSetupInput["credentialPoolStrategy"];
-      index += 1;
     }
   }
 
@@ -3220,10 +3279,6 @@ function parseWebArgs(args: string[]): Partial<WebSetupInput> {
     if (arg === "--max-content-chars") {
       parsed.maxContentChars = Number.parseInt(next ?? "", 10);
       index += 1;
-    } else if (arg === "--project") {
-      parsed.scope = "project";
-    } else if (arg === "--user") {
-      parsed.scope = "user";
     }
   }
 
@@ -3254,10 +3309,6 @@ function parseBrowserArgs(args: string[]): Partial<BrowserSetupInput> {
       index += 1;
     } else if (arg === "--auto-launch") {
       parsed.autoLaunch = true;
-    } else if (arg === "--project") {
-      parsed.scope = "project";
-    } else if (arg === "--user") {
-      parsed.scope = "user";
     }
   }
 
@@ -3291,10 +3342,6 @@ function parseTelegramArgs(args: string[]): TelegramSetupInput {
     } else if (arg === "--poll-timeout-seconds") {
       parsed.pollTimeoutSeconds = Number.parseInt(next ?? "", 10);
       index += 1;
-    } else if (arg === "--project") {
-      parsed.scope = "project";
-    } else if (arg === "--user") {
-      parsed.scope = "user";
     }
   }
 
@@ -3308,12 +3355,10 @@ function parseTelegramArgs(args: string[]): TelegramSetupInput {
 function parseTelegramPairArgs(args: string[]): {
   code?: string;
   ttlMinutes?: number;
-  scope?: "user" | "project";
 } {
   const parsed: {
     code?: string;
     ttlMinutes?: number;
-    scope?: "user" | "project";
   } = {};
 
   for (let index = 0; index < args.length; index++) {
@@ -3326,10 +3371,6 @@ function parseTelegramPairArgs(args: string[]): {
     } else if (arg === "--ttl-minutes") {
       parsed.ttlMinutes = Number.parseInt(next ?? "", 10);
       index += 1;
-    } else if (arg === "--project") {
-      parsed.scope = "project";
-    } else if (arg === "--user") {
-      parsed.scope = "user";
     }
   }
 
@@ -3368,7 +3409,7 @@ function parseMcpArgs(args: string[]): Partial<MCPSetupInput> {
     } else if (arg === "--url") {
       parsed.url = next;
       index += 1;
-    } else if (arg === "--trust") {
+    } else if (arg === "--server-trust") {
       parsed.trust = next as MCPSetupInput["trust"];
       index += 1;
     } else if (arg === "--env") {
@@ -3409,10 +3450,6 @@ function parseMcpArgs(args: string[]): Partial<MCPSetupInput> {
     } else if (arg === "--connect-timeout-ms") {
       parsed.connectTimeoutMs = Number.parseInt(next ?? "", 10);
       index += 1;
-    } else if (arg === "--project") {
-      parsed.scope = "project";
-    } else if (arg === "--user") {
-      parsed.scope = "user";
     }
   }
 
@@ -3433,6 +3470,11 @@ function hasFlag(args: string[], ...flags: string[]): boolean {
 function valueAfter(args: string[], flag: string): string | undefined {
   const index = args.indexOf(flag);
   return index < 0 ? undefined : args[index + 1];
+}
+
+function parseGatewayProfileFlag(args: string[]): string | undefined {
+  const raw = valueAfter(args, "--profile");
+  return raw === undefined ? undefined : normalizeProfileId(raw);
 }
 
 function parseSkillAutonomyArg(value: string | undefined): SkillAutonomy {
@@ -3569,10 +3611,6 @@ function parseSecuritySetupArgs(args: string[]): SecuritySetupInput {
     } else if (arg === "--assessor-timeout-ms") {
       parsed.assessorTimeoutMs = next === undefined ? undefined : Number(next);
       index += 1;
-    } else if (arg === "--project") {
-      parsed.scope = "project";
-    } else if (arg === "--user") {
-      parsed.scope = "user";
     }
   }
 

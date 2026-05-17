@@ -94,7 +94,9 @@ export type AgentLoopOptions = {
   providerTools?: OpenAICompatibleToolSchema[];
   soul?: string;
   frozenMemory?: {
+    shared?: string;
     user?: string;
+    soul?: string;
     memory?: string;
   };
   skillsIndex?: SkillCatalogEntry[];
@@ -165,7 +167,7 @@ export class AgentLoop {
   readonly #skillWorkflowExecutor: SkillWorkflowExecutor;
   readonly #nativeToolExecutor: NativeToolExecutor;
   readonly #soul: string | undefined;
-  readonly #frozenMemory: { user?: string; memory?: string } | undefined;
+  readonly #frozenMemory: { shared?: string; user?: string; soul?: string; memory?: string } | undefined;
   readonly #skillsIndex: SkillCatalogEntry[];
   readonly #skillConfig: Record<string, Record<string, unknown>>;
   readonly #skillLearningManager: SkillLearningManager | undefined;

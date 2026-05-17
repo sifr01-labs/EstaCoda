@@ -29,7 +29,9 @@ export type ProviderPromptInput = {
   sessionHistory?: Array<Pick<ProviderMessage, "role" | "content">>;
   soul?: string;
   frozenMemory?: {
+    shared?: string;
     user?: string;
+    soul?: string;
     memory?: string;
   };
   skillsIndex?: SkillCatalogEntry[];
@@ -777,16 +779,20 @@ function defaultIdentity(): string {
 }
 
 function renderFrozenMemory(memory: ProviderPromptInput["frozenMemory"]): string {
+  const shared = memory?.shared?.trim();
   const user = memory?.user?.trim();
+  const soul = memory?.soul?.trim();
   const project = memory?.memory?.trim();
 
-  if (!user && !project) {
-    return "Frozen memory snapshot: no USER.md or MEMORY.md content loaded for this session.";
+  if (!shared && !user && !soul && !project) {
+    return "Frozen memory snapshot: no shared memory, USER.md, SOUL.md, or MEMORY.md content loaded for this session.";
   }
 
   return [
     "Frozen memory snapshot:",
+    shared ? `§ memory/shared\n${truncate(shared, 3_000)}` : undefined,
     user ? `§ USER.md\n${truncate(user, 2_000)}` : undefined,
+    soul ? `§ SOUL.md\n${truncate(soul, 2_000)}` : undefined,
     project ? `§ MEMORY.md\n${truncate(project, 3_000)}` : undefined
   ].filter((line) => line !== undefined).join("\n\n");
 }

@@ -31,12 +31,18 @@ mv ~/.estacoda-backup-YYYYMMDD ~/.estacoda
 
 The following paths are preserved during updates and should be backed up before uninstall:
 
-- `~/.estacoda/config.json`
 - `~/.estacoda/trust.json`
-- `~/.estacoda/.env`
+- `~/.estacoda/active-profile.json`
+- `~/.estacoda/workspace-approvals.json`
 - `~/.estacoda/sessions.sqlite`
-- `~/.estacoda/memory/`
-- `~/.estacoda/skills/local/`
-- `~/.estacoda/skills/.evolution/`
-- `~/.estacoda/cron/`
-- `PROJECT_ROOT/.estacoda/config.json`
+- `~/.estacoda/memory/shared/`
+- `~/.estacoda/packs/`
+- `~/.estacoda/profiles/<id>/config.json`
+- `~/.estacoda/profiles/<id>/.env`
+- `~/.estacoda/profiles/<id>/auth.json`
+- `~/.estacoda/profiles/<id>/USER.md`
+- `~/.estacoda/profiles/<id>/SOUL.md`
+- `~/.estacoda/profiles/<id>/MEMORY.md`
+- `~/.estacoda/profiles/<id>/promotions.json`
+- `~/.estacoda/profiles/<id>/skills/`
+- `~/.estacoda/profiles/<id>/cron/`

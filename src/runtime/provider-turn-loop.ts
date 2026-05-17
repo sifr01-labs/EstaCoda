@@ -45,7 +45,7 @@ export type ProviderTurnLoopOptions = {
   runRecorder: RunRecorder;
   toolPlanRunner: ToolPlanRunner;
   soul: string | undefined;
-  frozenMemory: { user?: string; memory?: string } | undefined;
+  frozenMemory: { shared?: string; user?: string; soul?: string; memory?: string } | undefined;
   skillsIndex: SkillCatalogEntry[];
   ui: {
     language: UiLanguage;
@@ -72,7 +72,7 @@ export class ProviderTurnLoop {
   readonly #toolPlanRunner: ToolPlanRunner;
   readonly #promptCache: PromptCache;
   readonly #soul: string | undefined;
-  readonly #frozenMemory: { user?: string; memory?: string } | undefined;
+  readonly #frozenMemory: { shared?: string; user?: string; soul?: string; memory?: string } | undefined;
   readonly #skillsIndex: SkillCatalogEntry[];
   readonly #ui: ProviderTurnLoopOptions["ui"];
   readonly #agentProfile: ProviderTurnLoopOptions["agentProfile"];

@@ -1,26 +1,31 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, writeFile, readFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { runCliCommand } from "./cli.js";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
 import { resetModelsDevRegistryForTest } from "../providers/model-selection-catalog.js";
 import type { FetchLike } from "../providers/openai-compatible-provider.js";
+import { resolveProfileStateHome } from "../config/profile-home.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-model-setup-test-"));
 }
 
 async function writeUserConfig(homeDir: string, config: unknown): Promise<void> {
-  const configPath = join(homeDir, ".estacoda", "config.json");
-  await mkdir(join(homeDir, ".estacoda"), { recursive: true });
+  const configPath = profileConfigPath(homeDir);
+  await mkdir(dirname(configPath), { recursive: true });
   await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", "utf8");
 }
 
 async function readUserConfig(homeDir: string): Promise<unknown> {
-  const configPath = join(homeDir, ".estacoda", "config.json");
+  const configPath = profileConfigPath(homeDir);
   const content = await readFile(configPath, "utf8");
   return JSON.parse(content);
+}
+
+function profileConfigPath(homeDir: string): string {
+  return resolveProfileStateHome({ homeDir, profileId: "default" }).configPath;
 }
 
 function mockFetchForModels(models: string[] | "fail" | "empty"): FetchLike {
@@ -123,7 +128,7 @@ describe("model setup local", () => {
     expect(result.output).toContain("model-b");
     expect(result.output).toContain("--model");
 
-    const configPath = join(tmpDir, ".estacoda", "config.json");
+    const configPath = profileConfigPath(tmpDir);
     const fileExists = await readFile(configPath, "utf8").then(() => true).catch(() => false);
     // Config may or may not be written; the important thing is the user-facing failure
     expect(fileExists).toBe(false);

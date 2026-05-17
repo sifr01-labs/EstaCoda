@@ -9,8 +9,9 @@ import type {
 import { ProviderExecutor, type ProviderExecutionOptions, type ProviderRuntimeEvent } from "./provider-executor.js";
 import { ProviderRegistry } from "./provider-registry.js";
 import { mkdtemp, rm, writeFile, mkdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
+import { resolveProfileStateHome } from "../config/profile-home.js";
 
 type MockCall = {
   request: ProviderRequest;
@@ -53,15 +54,19 @@ async function makeTempDir(): Promise<string> {
 }
 
 async function writeAuthJson(homeDir: string, store: unknown): Promise<void> {
-  const path = join(homeDir, ".estacoda", "auth.json");
-  await mkdir(join(homeDir, ".estacoda"), { recursive: true });
+  const path = profileAuthPath(homeDir);
+  await mkdir(dirname(path), { recursive: true });
   await writeFile(path, JSON.stringify(store, null, 2) + "\n", "utf8");
 }
 
 async function readAuthJson(homeDir: string): Promise<unknown> {
-  const path = join(homeDir, ".estacoda", "auth.json");
+  const path = profileAuthPath(homeDir);
   const content = await readFile(path, "utf8");
   return JSON.parse(content);
+}
+
+function profileAuthPath(homeDir: string): string {
+  return resolveProfileStateHome({ homeDir, profileId: "default" }).authJsonPath;
 }
 
 function createOAuthRoute(overrides?: Partial<ResolvedModelRoute>): ResolvedModelRoute {

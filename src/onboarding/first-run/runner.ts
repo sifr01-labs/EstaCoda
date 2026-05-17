@@ -6,6 +6,8 @@ import {
   type UiLanguage,
 } from "../../config/runtime-config.js";
 import { writeEnvSecret } from "../../config/env-secret-store.js";
+import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../../config/profile-home.js";
+import { ensureDefaultProfileState } from "../../cli/profile-state.js";
 import type { ProviderId } from "../../contracts/provider.js";
 import type { Prompt } from "../../cli/readline-prompt.js";
 import { promptForApiKeyInput } from "../../cli/secret-prompt.js";
@@ -110,6 +112,7 @@ export async function runFirstRunSetup(
 ): Promise<FirstRunSetupRunnerResult> {
   const prompt = options.prompt;
   const state = await collectSetupEntryState(options);
+  await ensureDefaultProfileState({ homeDir: options.homeDir, profileId: options.profileId ?? defaultProfileId() });
   const stateHome = resolveStateHome({ homeDir: options.homeDir });
   const flowEngine = options.flowEngine ?? await createDefaultFlowEngine(options);
   const initialLocale = options.defaultSelections?.language ?? "en";
@@ -380,8 +383,9 @@ export async function runFirstRunSetup(
     throw new Error("Setup router did not produce a first-run plan session.");
   }
 
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
   const draftBundle = buildFirstRunDraftBundle(routeDecision.firstRunPlanSession, {
-    configPath: options.userConfigPath ?? stateHome.configPath,
+    configPath: resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath,
     workspaceRoot,
     trustStorePath: stateHome.trustJsonPath,
   });
@@ -424,6 +428,7 @@ export async function runFirstRunSetup(
   ) {
     await writeEnvSecret({
       homeDir: options.homeDir,
+      profileId: options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId(),
       key: pendingCredentialWrite.envVarName,
       value: pendingCredentialWrite.value,
     });

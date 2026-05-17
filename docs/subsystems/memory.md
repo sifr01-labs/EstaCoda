@@ -5,7 +5,7 @@ description: "Memory system: stores, promotion, rendering, and persistence."
 
 # Memory
 
-EstaCoda uses bounded, curated memory files that persist across sessions. The system distinguishes between user preferences, project facts, and agent identity.
+EstaCoda uses bounded, curated memory files that persist across sessions. The system distinguishes between global shared knowledge, profile user preferences, profile identity, and profile learned facts.
 
 ## Files
 
@@ -21,9 +21,18 @@ EstaCoda uses bounded, curated memory files that persist across sessions. The sy
 
 | File | Purpose | Char Limit | Location |
 |------|---------|------------|----------|
-| `USER.md` | User preferences, communication style | 1,375 (~500 tokens) | `~/.estacoda/` |
-| `MEMORY.md` | Environment facts, conventions, lessons | 2,200 (~800 tokens) | `~/.estacoda/` |
-| `SOUL.md` | Agent identity and personality | Configurable | `~/.estacoda/` |
+| `memory/shared/` | Global shared memory snippets | Bounded by renderer | `~/.estacoda/memory/shared/` |
+| `USER.md` | Profile user preferences and communication style | 1,375 (~500 tokens) | `~/.estacoda/profiles/<id>/USER.md` |
+| `SOUL.md` | Profile agent identity and personality | Configurable | `~/.estacoda/profiles/<id>/SOUL.md` |
+| `MEMORY.md` | Profile facts, conventions, and lessons | 2,200 (~800 tokens) | `~/.estacoda/profiles/<id>/MEMORY.md` |
+
+`profiles/<id>/promotions.json` stores promotion metadata for that profile. There is no global `USER.md`, no global promotion store, and no `memory/default` path.
+
+Render order:
+
+```text
+memory/shared/ -> USER.md -> SOUL.md -> MEMORY.md
+```
 
 ## Frozen Snapshot Pattern
 
@@ -69,10 +78,12 @@ Workflow learning is separated from memory files:
 
 | Content Type | Destination |
 |--------------|-------------|
-| Facts/conventions | `MEMORY.md` |
-| User preferences | `USER.md` |
-| Reusable procedures | Project skills (`<workspace>/.estacoda/skills/`) |
-| Workflow learning state | `<workspace>/.estacoda/skill-learning.json` |
+| Facts/conventions | Profile-local `MEMORY.md` |
+| User preferences | Profile-local `USER.md` |
+| Persona/identity | Profile-local `SOUL.md` |
+| Shared cross-profile knowledge | Global `~/.estacoda/memory/shared/` |
+| Reusable procedures | Built-in skills plus profile-local `skills/` |
+| Promotion metadata | Profile-local `promotions.json` |
 
 ## Limitations
 

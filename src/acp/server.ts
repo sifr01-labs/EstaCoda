@@ -3,9 +3,9 @@ import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
-import { loadUserRuntimeConfig, loadTrustedRuntimeConfig } from "../config/runtime-config.js";
+import { loadRuntimeConfig } from "../config/runtime-config.js";
 import { resolveStateHome } from "../config/state-home.js";
-import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
+import { defaultProfileId, readActiveProfile } from "../config/profile-home.js";
 import { assessSecurityPolicy, type SecurityApprovalMode, type SecurityDecision, type SecurityPolicy, type SecurityRequest } from "../contracts/security.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import type { SessionDB } from "../contracts/session.js";
@@ -53,8 +53,6 @@ type JsonRpcNotification = {
 type AcpServerOptions = {
   workspaceRoot: string;
   homeDir?: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
   input?: NodeJS.ReadableStream;
   output?: NodeJS.WritableStream;
   sessionDb?: SessionDB;
@@ -62,8 +60,6 @@ type AcpServerOptions = {
     workspaceRoot: string;
     sessionId: string;
     homeDir: string;
-    userConfigPath?: string;
-    projectConfigPath?: string;
     sessionDb: SessionDB;
     securityPolicy: SecurityPolicy;
   }) => Promise<Runtime>;
@@ -102,8 +98,7 @@ export async function runAcpServer(options: AcpServerOptions): Promise<void> {
 export class AcpServer {
   readonly #workspaceRoot: string;
   readonly #homeDir: string;
-  readonly #userConfigPath: string | undefined;
-  readonly #projectConfigPath: string | undefined;
+  readonly #profileId: string;
   readonly #input: NodeJS.ReadableStream;
   readonly #output: NodeJS.WritableStream;
   readonly #sessionDb: SessionDB;
@@ -124,8 +119,7 @@ export class AcpServer {
   constructor(options: AcpServerOptions) {
     this.#workspaceRoot = options.workspaceRoot;
     this.#homeDir = options.homeDir ?? homedir();
-    this.#userConfigPath = options.userConfigPath;
-    this.#projectConfigPath = options.projectConfigPath;
+    this.#profileId = readActiveProfile({ homeDir: this.#homeDir })?.profileId ?? defaultProfileId();
     this.#input = options.input ?? process.stdin;
     this.#output = options.output ?? process.stdout;
     this.#runtimeFactory = options.runtimeFactory;
@@ -745,8 +739,6 @@ export class AcpServer {
         workspaceRoot: options.workspaceRoot,
         sessionId: options.sessionId,
         homeDir: this.#homeDir,
-        userConfigPath: this.#userConfigPath,
-        projectConfigPath: this.#projectConfigPath,
         sessionDb: this.#sessionDb,
         securityPolicy: createAcpSecurityPolicy(options.grants, {
           allowEditorRead: this.#clientFsReadText
@@ -754,28 +746,18 @@ export class AcpServer {
       });
     }
 
-    const stateHome = resolveStateHome({ homeDir: this.#homeDir });
-    const trustStore = new WorkspaceTrustStore({ path: stateHome.trustJsonPath });
-    const workspaceTrusted = await trustStore.isTrusted(options.workspaceRoot);
-    const config = workspaceTrusted
-      ? await loadTrustedRuntimeConfig({
-          workspaceRoot: options.workspaceRoot,
-          homeDir: this.#homeDir,
-          userConfigPath: this.#userConfigPath,
-          projectConfigPath: this.#projectConfigPath
-        })
-      : await loadUserRuntimeConfig({
-          workspaceRoot: options.workspaceRoot,
-          homeDir: this.#homeDir,
-          userConfigPath: this.#userConfigPath,
-          projectConfigPath: this.#projectConfigPath
-        });
+    const config = await loadRuntimeConfig({
+      workspaceRoot: options.workspaceRoot,
+      homeDir: this.#homeDir,
+      profileId: this.#profileId
+    });
 
     const runtimeOptions: RuntimeOptions = {
       theme: kemetBlueTheme,
       model: config.model,
       primaryModelRoute: config.primaryModelRoute,
       modelFallbackRoutes: config.modelFallbackRoutes,
+      profileId: this.#profileId,
       workspaceRoot: options.workspaceRoot,
       sessionId: options.sessionId,
       sessionDb: this.#sessionDb,
@@ -786,7 +768,6 @@ export class AcpServer {
       ui: config.ui,
       agentProfile: config.profile,
       providerRegistry: config.providerRegistry,
-      credentialPools: config.credentialPools,
       auxiliaryModels: config.auxiliaryModels,
       mcpServers: config.mcp.servers,
       browser: config.browser,
@@ -802,8 +783,7 @@ export class AcpServer {
         assessor: {
           ...config.security.assessor,
           providerExecutor: new ProviderExecutor({
-            registry: config.providerRegistry,
-            credentialPools: config.credentialPools
+            registry: config.providerRegistry
           }),
           sessionId: options.sessionId
         }
@@ -816,9 +796,7 @@ export class AcpServer {
             })
           })
         : undefined,
-      homeDir: this.#homeDir,
-      userConfigPath: this.#userConfigPath,
-      projectConfigPath: this.#projectConfigPath
+      homeDir: this.#homeDir
     };
 
     return await createRuntime(runtimeOptions);

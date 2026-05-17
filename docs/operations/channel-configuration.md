@@ -5,7 +5,7 @@ description: "Config schema, fields, and examples for all four channels."
 
 # Channel Configuration
 
-Channel configuration lives in `~/.estacoda/config.json` (or a project overlay). All four channels share a common base structure with adapter-specific fields.
+Channel configuration lives in the selected profile config: `~/.estacoda/profiles/<id>/config.json`. All four channels share a common base structure with adapter-specific fields.
 
 ## Common Fields
 
@@ -93,7 +93,7 @@ Every channel object supports:
     "whatsapp": {
       "enabled": true,
       "experimental": true,
-      "authDir": "~/.estacoda/whatsapp-auth",
+      "authDir": "~/.estacoda/profiles/<id>/gateway/whatsapp-auth",
       "allowedUsers": ["1234567890"],
       "pairingMode": "qr",
       "pairingCodePhoneNumber": "+1234567890",

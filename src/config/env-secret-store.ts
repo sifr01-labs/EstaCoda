@@ -1,5 +1,6 @@
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { resolveProfileStateHome } from "./profile-home.js";
 
 export type EnvSecretWriteResult = {
   path: string;
@@ -13,10 +14,13 @@ export function defaultEnvPath(homeDir?: string): string {
 export async function writeEnvSecret(options: {
   homeDir?: string;
   path?: string;
+  profileId?: string;
   key: string;
   value: string;
 }): Promise<EnvSecretWriteResult> {
-  const path = options.path ?? defaultEnvPath(options.homeDir);
+  const path = options.path ?? (options.profileId === undefined
+    ? defaultEnvPath(options.homeDir)
+    : resolveProfileStateHome({ homeDir: options.homeDir, profileId: options.profileId }).envPath);
   const key = normalizeEnvKey(options.key);
   const nextLine = `${key}=${quoteDotEnvValue(options.value)}`;
   const existing = await readEnvFile(path);
@@ -44,9 +48,12 @@ export async function writeEnvSecret(options: {
 export async function loadDotEnvSecrets(options: {
   homeDir?: string;
   path?: string;
+  profileId?: string;
   override?: boolean;
 }): Promise<string[]> {
-  const path = options.path ?? defaultEnvPath(options.homeDir);
+  const path = options.path ?? (options.profileId === undefined
+    ? defaultEnvPath(options.homeDir)
+    : resolveProfileStateHome({ homeDir: options.homeDir, profileId: options.profileId }).envPath);
   const content = await readEnvFile(path);
   const loaded: string[] = [];
 

@@ -1,15 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { spawn } from "node:child_process";
-import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { runCliCommand } from "./cli.js";
 import type { Prompt } from "./readline-prompt.js";
 import type { SelectPromptInput } from "./interactive-select.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
+import { resolveProfileStateHome } from "../config/profile-home.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-cli-setup-test-"));
+}
+
+function profileConfigPath(homeDir: string): string {
+  return resolveProfileStateHome({ homeDir, profileId: "default" }).configPath;
 }
 
 describe("cli setup command", () => {
@@ -52,7 +57,7 @@ describe("cli setup command", () => {
       homeDir: tempDir,
       interactive: false,
     });
-    const config = JSON.parse(await readFile(join(tempDir, ".estacoda", "config.json"), "utf8")) as {
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
       model?: { provider?: string; id?: string };
       providers?: Record<string, { enableNetwork?: boolean; models?: string[] }>;
     };
@@ -73,7 +78,7 @@ describe("cli setup command", () => {
       homeDir: tempDir,
       interactive: false,
     });
-    const config = JSON.parse(await readFile(join(tempDir, ".estacoda", "config.json"), "utf8")) as {
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
       model?: { provider?: string; id?: string };
       providers?: Record<string, { enableNetwork?: boolean; models?: string[] }>;
     };
@@ -93,7 +98,7 @@ describe("cli setup command", () => {
       homeDir: tempDir,
       prompt: firstRunPrompt({ reviewAccepted: true }),
     });
-    const config = JSON.parse(await readFile(join(tempDir, ".estacoda", "config.json"), "utf8")) as {
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
       model?: { provider?: string; id?: string };
       providers?: Record<string, { apiKeyEnv?: string }>;
     };
@@ -109,7 +114,7 @@ describe("cli setup command", () => {
     expect(result.output).not.toContain("Dry-run apply plan");
   });
 
-  it("cancels reviewed setup without writing config or trust", async () => {
+  it("cancels reviewed setup without applying config changes or trust", async () => {
     const workspaceRoot = join(tempDir, "workspace");
     const result = await runCliCommand({
       argv: ["setup", "--interactive"],
@@ -121,7 +126,7 @@ describe("cli setup command", () => {
     expect(result.handled).toBe(true);
     expect(result.exitCode).toBe(1);
     expect(result.output).toContain("Review cancelled");
-    await expect(access(join(tempDir, ".estacoda", "config.json"))).rejects.toThrow();
+    await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toContain("\"provider\": \"unconfigured\"");
     expect(await new WorkspaceTrustStore({
       path: join(tempDir, ".estacoda", "trust.json"),
     }).isTrusted(workspaceRoot)).toBe(false);
@@ -237,8 +242,8 @@ describe("cli setup command", () => {
 
   it("routes broken config to diagnostic repair instead of normal editing", async () => {
     const workspaceRoot = join(tempDir, "workspace");
-    const configPath = join(tempDir, ".estacoda", "config.json");
-    await mkdir(join(tempDir, ".estacoda"), { recursive: true });
+    const configPath = profileConfigPath(tempDir);
+    await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
     await writeFile(configPath, "{not-json", "utf8");
 
     const result = await runCliCommand({
@@ -304,7 +309,7 @@ describe("cli setup command", () => {
     expect(result.output).toContain("Route: repair-first-menu");
     expect(result.output).toContain("state writable: no");
     expect(result.output).toContain("status: blocked");
-    expect(result.output).toContain(join(tempDir, ".estacoda", "config.json"));
+    expect(result.output).toContain(profileConfigPath(tempDir));
     expect(result.output).toContain("fix-state-directory");
     expect(result.output).toContain("Restore write permission");
     expect(result.output).toContain("Only diagnostics, verification, and exit are available");
@@ -316,8 +321,8 @@ describe("cli setup command", () => {
 
   it("doctor reports broken config through setup state instead of throwing", async () => {
     const workspaceRoot = join(tempDir, "workspace");
-    const configPath = join(tempDir, ".estacoda", "config.json");
-    await mkdir(join(tempDir, ".estacoda"), { recursive: true });
+    const configPath = profileConfigPath(tempDir);
+    await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
     await writeFile(configPath, "{not-json", "utf8");
 
     const result = await runCliCommand({
@@ -440,8 +445,8 @@ function runEntrypoint(input: {
 }
 
 async function writeUserConfig(homeDir: string, config: unknown): Promise<void> {
-  await mkdir(join(homeDir, ".estacoda"), { recursive: true });
-  await writeFile(join(homeDir, ".estacoda", "config.json"), `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  await mkdir(dirname(profileConfigPath(homeDir)), { recursive: true });
+  await writeFile(profileConfigPath(homeDir), `${JSON.stringify(config, null, 2)}\n`, "utf8");
 }
 
 async function trustWorkspace(homeDir: string, workspaceRoot: string): Promise<void> {

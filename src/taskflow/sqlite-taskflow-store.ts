@@ -25,17 +25,20 @@ import type { SQLiteDatabase } from "../storage/sqlite.js";
 
 export type SQLiteTaskFlowStoreOptions = {
   db: SQLiteDatabase;
+  profileId?: string;
   now?: () => Date;
   id?: () => string;
 };
 
 export class SQLiteTaskFlowStore implements TaskFlowStore {
   readonly #db: SQLiteDatabase;
+  readonly #profileId: string | undefined;
   readonly #now: () => Date;
   readonly #id: () => string;
 
   constructor(options: SQLiteTaskFlowStoreOptions) {
     this.#db = options.db;
+    this.#profileId = options.profileId;
     this.#now = options.now ?? (() => new Date());
     this.#id = options.id ?? (() => crypto.randomUUID());
   }
@@ -43,6 +46,7 @@ export class SQLiteTaskFlowStore implements TaskFlowStore {
   // ─── Flow ───
 
   async createFlow(flow: Flow): Promise<void> {
+    this.#assertSessionInProfile(flow.sessionId);
     this.#db
       .query(
         `insert into flows (
@@ -80,6 +84,7 @@ export class SQLiteTaskFlowStore implements TaskFlowStore {
   }
 
   async updateFlow(flow: Flow): Promise<void> {
+    this.#assertSessionInProfile(flow.sessionId);
     this.#db
       .query(
         `update flows set
@@ -115,29 +120,70 @@ export class SQLiteTaskFlowStore implements TaskFlowStore {
   }
 
   async getFlow(id: FlowId): Promise<Flow | null> {
-    const row = this.#db
-      .query<FlowRow>("select * from flows where id = ?")
-      .get(id);
+    const row =
+      this.#profileId === undefined
+        ? this.#db.query<FlowRow>("select * from flows where id = ?").get(id)
+        : this.#db
+            .query<FlowRow>(
+              `select f.*
+               from flows f
+               join sessions s on s.id = f.session_id
+               where f.id = ? and s.profile_id = ?`
+            )
+            .get(id, this.#profileId);
     return row ? rowToFlow(row) : null;
   }
 
   async listFlows(sessionId?: string): Promise<Flow[]> {
-    const rows = sessionId
-      ? this.#db.query<FlowRow>("select * from flows where session_id = ? order by created_at desc").all(sessionId)
-      : this.#db.query<FlowRow>("select * from flows order by created_at desc").all();
+    const rows =
+      this.#profileId === undefined
+        ? sessionId
+          ? this.#db.query<FlowRow>("select * from flows where session_id = ? order by created_at desc").all(sessionId)
+          : this.#db.query<FlowRow>("select * from flows order by created_at desc").all()
+        : sessionId
+          ? this.#db
+              .query<FlowRow>(
+                `select f.*
+                 from flows f
+                 join sessions s on s.id = f.session_id
+                 where f.session_id = ? and s.profile_id = ?
+                 order by f.created_at desc`
+              )
+              .all(sessionId, this.#profileId)
+          : this.#db
+              .query<FlowRow>(
+                `select f.*
+                 from flows f
+                 join sessions s on s.id = f.session_id
+                 where s.profile_id = ?
+                 order by f.created_at desc`
+              )
+              .all(this.#profileId);
     return rows.map(rowToFlow);
   }
 
   async listActiveFlows(): Promise<Flow[]> {
-    const rows = this.#db
-      .query<FlowRow>(`select * from flows where status in ('pending','running','paused','waiting','interrupted') order by updated_at desc`)
-      .all();
+    const rows =
+      this.#profileId === undefined
+        ? this.#db
+            .query<FlowRow>(`select * from flows where status in ('pending','running','paused','waiting','interrupted') order by updated_at desc`)
+            .all()
+        : this.#db
+            .query<FlowRow>(
+              `select f.*
+               from flows f
+               join sessions s on s.id = f.session_id
+               where s.profile_id = ? and f.status in ('pending','running','paused','waiting','interrupted')
+               order by f.updated_at desc`
+            )
+            .all(this.#profileId);
     return rows.map(rowToFlow);
   }
 
   // ─── Step ───
 
   async createStep(step: FlowStep): Promise<void> {
+    this.#assertFlowInProfile(step.flowId);
     this.#db
       .query(
         `insert into flow_steps (
@@ -184,6 +230,7 @@ export class SQLiteTaskFlowStore implements TaskFlowStore {
   }
 
   async updateStep(step: FlowStep): Promise<void> {
+    this.#assertFlowInProfile(step.flowId);
     this.#db
       .query(
         `update flow_steps set
@@ -229,16 +276,35 @@ export class SQLiteTaskFlowStore implements TaskFlowStore {
   }
 
   async getStep(id: StepId): Promise<FlowStep | null> {
-    const row = this.#db
-      .query<StepRow>("select * from flow_steps where id = ?")
-      .get(id);
+    const row =
+      this.#profileId === undefined
+        ? this.#db.query<StepRow>("select * from flow_steps where id = ?").get(id)
+        : this.#db
+            .query<StepRow>(
+              `select fs.*
+               from flow_steps fs
+               join flows f on f.id = fs.flow_id
+               join sessions s on s.id = f.session_id
+               where fs.id = ? and s.profile_id = ?`
+            )
+            .get(id, this.#profileId);
     return row ? rowToStep(row) : null;
   }
 
   async listSteps(flowId: FlowId): Promise<FlowStep[]> {
-    const rows = this.#db
-      .query<StepRow>("select * from flow_steps where flow_id = ? order by step_index, created_at")
-      .all(flowId);
+    const rows =
+      this.#profileId === undefined
+        ? this.#db.query<StepRow>("select * from flow_steps where flow_id = ? order by step_index, created_at").all(flowId)
+        : this.#db
+            .query<StepRow>(
+              `select fs.*
+               from flow_steps fs
+               join flows f on f.id = fs.flow_id
+               join sessions s on s.id = f.session_id
+               where fs.flow_id = ? and s.profile_id = ?
+               order by fs.step_index, fs.created_at`
+            )
+            .all(flowId, this.#profileId);
     return rows.map(rowToStep);
   }
 
@@ -440,7 +506,18 @@ export class SQLiteTaskFlowStore implements TaskFlowStore {
   }
 
   async getApprovalGate(id: string): Promise<ApprovalGate | null> {
-    const row = this.#db.query<ApprovalRow>("select * from approval_gates where id = ?").get(id);
+    const row =
+      this.#profileId === undefined
+        ? this.#db.query<ApprovalRow>("select * from approval_gates where id = ?").get(id)
+        : this.#db
+            .query<ApprovalRow>(
+              `select ag.*
+               from approval_gates ag
+               join flows f on f.id = ag.flow_id
+               join sessions s on s.id = f.session_id
+               where ag.id = ? and s.profile_id = ?`
+            )
+            .get(id, this.#profileId);
     return row ? rowToApprovalGate(row) : null;
   }
 
@@ -625,6 +702,7 @@ export class SQLiteTaskFlowStore implements TaskFlowStore {
     try {
       const txStore = new SQLiteTaskFlowStore({
         db: this.#db,
+        profileId: this.#profileId,
         now: this.#now,
         id: this.#id
       });
@@ -634,6 +712,35 @@ export class SQLiteTaskFlowStore implements TaskFlowStore {
     } catch (error) {
       this.#db.exec("rollback");
       throw error;
+    }
+  }
+
+  #assertSessionInProfile(sessionId: string): void {
+    if (this.#profileId === undefined) {
+      return;
+    }
+
+    const row = this.#db.query<{ id: string }>("select id from sessions where id = ? and profile_id = ?").get(sessionId, this.#profileId);
+    if (row === null) {
+      throw new Error(`Session ${sessionId} does not belong to profile ${this.#profileId}.`);
+    }
+  }
+
+  #assertFlowInProfile(flowId: FlowId): void {
+    if (this.#profileId === undefined) {
+      return;
+    }
+
+    const row = this.#db
+      .query<{ id: string }>(
+        `select f.id
+         from flows f
+         join sessions s on s.id = f.session_id
+         where f.id = ? and s.profile_id = ?`
+      )
+      .get(flowId, this.#profileId);
+    if (row === null) {
+      throw new Error(`Flow ${flowId} does not belong to profile ${this.#profileId}.`);
     }
   }
 }

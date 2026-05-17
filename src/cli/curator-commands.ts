@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { CliCommandResult, CliOptions } from "./cli.js";
+import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 import { SkillRegistry } from "../skills/skill-registry.js";
 import { loadSkillsFromDirectory } from "../skills/skill-loader.js";
 import { SkillEvolutionStore } from "../skills/skill-evolution.js";
@@ -13,7 +14,8 @@ function resolveHome(options: CliOptions): string {
 
 async function openCuratorService(options: CliOptions): Promise<SkillProposalService> {
   const home = resolveHome(options);
-  const localSkillsRoot = join(home, ".estacoda", "skills");
+  const profileId = readActiveProfile({ homeDir: home }).profileId ?? defaultProfileId();
+  const localSkillsRoot = resolveProfileStateHome({ homeDir: home, profileId }).skillsPath;
   const registry = new SkillRegistry();
   const loaded = await loadSkillsFromDirectory(localSkillsRoot, {
     sourceKind: "local",

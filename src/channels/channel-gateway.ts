@@ -70,6 +70,7 @@ export type ChannelGatewayOptions = {
   surfacePointerStore?: SurfacePointerStore;
   diagnostics?: () => Promise<string>;
   deliveryRouter?: DeliveryRouter;
+  profileId?: string;
 
   // Stage 5D additions (all optional)
   /** Active turn registry for busy protection and abort tracking. */
@@ -194,6 +195,7 @@ export class ChannelGateway {
   readonly #surfacePointerStore: SurfacePointerStore | undefined;
   readonly #diagnostics: (() => Promise<string>) | undefined;
   readonly #deliveryRouter: DeliveryRouter | undefined;
+  readonly #profileId: string;
   readonly #activeTurns = new Map<string, AbortController>();
   readonly #pendingApprovals = new Map<string, PendingApproval>();
   readonly #approvalGrants = new Map<string, ApprovalGrant[]>();
@@ -234,6 +236,7 @@ export class ChannelGateway {
     this.#surfacePointerStore = options.surfacePointerStore;
     this.#diagnostics = options.diagnostics;
     this.#deliveryRouter = options.deliveryRouter;
+    this.#profileId = options.profileId ?? "default";
 
     // Stage 5D
     this.#activeTurnRegistry = options.activeTurnRegistry;
@@ -1413,7 +1416,7 @@ export class ChannelGateway {
       });
       try {
         const prefix = buildBaseSessionId(message.sessionKey, this.#sessionPolicy);
-        const matches = (await runtime.sessionDb.search(query, { profileId: "default", limit: 20 }))
+        const matches = (await runtime.sessionDb.search(query, { profileId: this.#profileId, limit: 20 }))
           .filter((result) => result.session.id.startsWith(prefix))
           .slice(0, 5);
         const text = matches.length === 0

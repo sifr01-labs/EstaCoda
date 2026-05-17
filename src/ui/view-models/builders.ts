@@ -50,6 +50,7 @@ import type {
 export interface BuildStatusInput {
   readonly agentName: string;
   readonly model: { readonly provider: string; readonly id: string };
+  readonly profileId?: string;
   readonly securityMode: string;
   readonly skillCount: number;
   readonly skillAutonomy?: string;
@@ -66,6 +67,7 @@ export function buildStatusViewModel(input: BuildStatusInput): StatusViewModel {
     kind: "status",
     agentName: input.agentName,
     model: input.model,
+    profileId: input.profileId,
     securityMode: input.securityMode,
     skillCount: input.skillCount,
     skillAutonomy: input.skillAutonomy,

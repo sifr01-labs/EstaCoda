@@ -4,13 +4,12 @@ import { dirname, join, relative, resolve } from "node:path";
 
 export type WorkspaceTrustGrant = {
   root: string;
-  profileId: string;
   grantedAt: string;
   label?: string;
 };
 
 export type WorkspaceTrustFile = {
-  version: 1;
+  version: 2;
   grants: WorkspaceTrustGrant[];
 };
 
@@ -32,24 +31,17 @@ export class WorkspaceTrustStore {
     return this.#path;
   }
 
-  async isTrusted(workspaceRoot: string, options: { profileId?: string } = {}): Promise<boolean> {
+  async isTrusted(workspaceRoot: string): Promise<boolean> {
     const canonicalRoot = await canonicalizeExistingPath(workspaceRoot);
     const trustFile = await this.#read();
 
-    return trustFile.grants.some((grant) => {
-      if (options.profileId !== undefined && grant.profileId !== "global" && grant.profileId !== options.profileId) {
-        return false;
-      }
-
-      return isSameOrChildPath(grant.root, canonicalRoot);
-    });
+    return trustFile.grants.some((grant) => isSameOrChildPath(grant.root, canonicalRoot));
   }
 
-  async grant(workspaceRoot: string, options: { profileId?: string; label?: string } = {}): Promise<WorkspaceTrustGrant> {
+  async grant(workspaceRoot: string, options: { label?: string } = {}): Promise<WorkspaceTrustGrant> {
     const canonicalRoot = await canonicalizeExistingPath(workspaceRoot);
-    const profileId = options.profileId ?? "global";
     const trustFile = await this.#read();
-    const existing = trustFile.grants.find((grant) => grant.root === canonicalRoot && grant.profileId === profileId);
+    const existing = trustFile.grants.find((grant) => grant.root === canonicalRoot);
 
     if (existing !== undefined) {
       return existing;
@@ -57,31 +49,23 @@ export class WorkspaceTrustStore {
 
     const grant: WorkspaceTrustGrant = {
       root: canonicalRoot,
-      profileId,
       grantedAt: this.#now().toISOString(),
       label: options.label
     };
 
     trustFile.grants.push(grant);
-    trustFile.grants.sort((left, right) => left.root.localeCompare(right.root) || left.profileId.localeCompare(right.profileId));
+    trustFile.grants.sort((left, right) => left.root.localeCompare(right.root));
     await this.#write(trustFile);
 
     return grant;
   }
 
-  async revoke(workspaceRoot: string, options: { profileId?: string } = {}): Promise<boolean> {
+  async revoke(workspaceRoot: string): Promise<boolean> {
     const canonicalRoot = await canonicalizeExistingPath(workspaceRoot);
-    const profileId = options.profileId;
     const trustFile = await this.#read();
     const before = trustFile.grants.length;
 
-    trustFile.grants = trustFile.grants.filter((grant) => {
-      if (grant.root !== canonicalRoot) {
-        return true;
-      }
-
-      return profileId !== undefined && grant.profileId !== profileId;
-    });
+    trustFile.grants = trustFile.grants.filter((grant) => grant.root !== canonicalRoot);
 
     if (trustFile.grants.length === before) {
       return false;
@@ -100,12 +84,14 @@ export class WorkspaceTrustStore {
       const parsed = JSON.parse(await readFile(this.#path, "utf8")) as Partial<WorkspaceTrustFile>;
 
       return {
-        version: 1,
-        grants: Array.isArray(parsed.grants) ? parsed.grants.filter(isGrant) : []
+        version: 2,
+        grants: parsed.version === 2 && Array.isArray(parsed.grants)
+          ? parsed.grants.filter(isGrant)
+          : []
       };
     } catch {
       return {
-        version: 1,
+        version: 2,
         grants: []
       };
     }
@@ -134,6 +120,5 @@ function isGrant(value: unknown): value is WorkspaceTrustGrant {
   const candidate = value as Partial<WorkspaceTrustGrant>;
 
   return typeof candidate.root === "string" &&
-    typeof candidate.profileId === "string" &&
     typeof candidate.grantedAt === "string";
 }

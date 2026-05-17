@@ -2,6 +2,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { CliOptions, CliCommandResult } from "./cli.js";
+import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 
 export async function skillsCommand(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const subcommand = args[0];
@@ -89,7 +90,7 @@ function parseSkillFrontmatter(content: string): Record<string, string> {
 }
 
 async function listSkills(homeDir: string, _args: string[]): Promise<CliCommandResult> {
-  const skillsRoot = join(homeDir, ".estacoda", "skills");
+  const skillsRoot = resolveSkillsRoot(homeDir);
   const skills = await scanSkills(skillsRoot);
 
   if (skills.length === 0) {
@@ -118,7 +119,7 @@ async function inspectSkill(homeDir: string, args: string[]): Promise<CliCommand
     return { handled: true, exitCode: 1, output: "Usage: estacoda skills inspect <skill>" };
   }
 
-  const skillsRoot = join(homeDir, ".estacoda", "skills");
+  const skillsRoot = resolveSkillsRoot(homeDir);
   const skills = await scanSkills(skillsRoot);
   const skill = skills.find((s) => s.name === id);
 
@@ -145,7 +146,7 @@ async function viewSkill(homeDir: string, args: string[]): Promise<CliCommandRes
     return { handled: true, exitCode: 1, output: "Usage: estacoda skills view <skill>" };
   }
 
-  const skillsRoot = join(homeDir, ".estacoda", "skills");
+  const skillsRoot = resolveSkillsRoot(homeDir);
   const skills = await scanSkills(skillsRoot);
   const skill = skills.find((s) => s.name === id);
 
@@ -163,4 +164,9 @@ async function viewSkill(homeDir: string, args: string[]): Promise<CliCommandRes
   } catch {
     return { handled: true, exitCode: 1, output: `Could not read skill file: ${skill.path}` };
   }
+}
+
+function resolveSkillsRoot(homeDir: string): string {
+  const profileId = readActiveProfile({ homeDir }).profileId ?? defaultProfileId();
+  return resolveProfileStateHome({ homeDir, profileId }).skillsPath;
 }

@@ -8,12 +8,14 @@ import { ChangeManifestStore } from "../../skills/change-manifest-store.js";
 import { SkillEvolutionStore } from "../../skills/skill-evolution.js";
 import { SkillRegistry } from "../../skills/skill-registry.js";
 import { loadSkillsFromDirectory } from "../../skills/skill-loader.js";
+import { resolveProfileStateHome } from "../../config/profile-home.js";
 
 async function setupTempHome(): Promise<string> {
   const tempHome = mkdtempSync(join(tmpdir(), "estacoda-smoke-lifecycle-"));
   const estacodaRoot = join(tempHome, ".estacoda");
-  const skillsRoot = join(estacodaRoot, "skills");
-  mkdirSync(join(skillsRoot, "local"), { recursive: true });
+  const profilePaths = resolveProfileStateHome({ homeDir: tempHome, profileId: "default" });
+  const skillsRoot = profilePaths.skillsPath;
+  mkdirSync(skillsRoot, { recursive: true });
   mkdirSync(join(skillsRoot, ".evolution"), { recursive: true });
   writeFileSync(join(estacodaRoot, "sessions.sqlite"), "", "utf8");
   return tempHome;
@@ -44,14 +46,14 @@ export const evolution_lifecycle_case: SmokeCase = {
     const tempHome = await setupTempHome();
 
     try {
-      const localSkillsRoot = join(tempHome, ".estacoda", "skills");
-      const skillDir = join(localSkillsRoot, "local", "test-smoke-skill");
+      const localSkillsRoot = resolveProfileStateHome({ homeDir: tempHome, profileId: "default" }).skillsPath;
+      const skillDir = join(localSkillsRoot, "test-smoke-skill");
       mkdirSync(skillDir, { recursive: true });
       writeFileSync(join(skillDir, "SKILL.md"), makeSkillMd("test-smoke-skill", "A smoke test skill"), "utf8");
 
       // Pre-load skills so proposal service can resolve the skill path
       const registry = new SkillRegistry();
-      const loaded = await loadSkillsFromDirectory(join(localSkillsRoot, "local"), {
+      const loaded = await loadSkillsFromDirectory(localSkillsRoot, {
         sourceKind: "local",
         sourceRoot: localSkillsRoot
       });

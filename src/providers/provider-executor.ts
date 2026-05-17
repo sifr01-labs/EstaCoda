@@ -8,7 +8,6 @@ import type {
   ResolvedModelRoute,
   ProviderApiMode
 } from "../contracts/provider.js";
-import { CredentialPoolRegistry } from "./credential-pool.js";
 import { ProviderRegistry } from "./provider-registry.js";
 import { resolveRuntimeCredential } from "./runtime-credential-resolver.js";
 import { getProviderMetadata } from "./provider-metadata.js";
@@ -85,18 +84,15 @@ export type ProviderExecutionOptions = {
 
 export type ProviderExecutorOptions = {
   registry: ProviderRegistry;
-  credentialPools?: CredentialPoolRegistry;
   homeDir?: string;
 };
 
 export class ProviderExecutor {
   readonly #registry: ProviderRegistry;
-  readonly #credentialPools: CredentialPoolRegistry | undefined;
   readonly #homeDir: string | undefined;
 
   constructor(options: ProviderExecutorOptions) {
     this.#registry = options.registry;
-    this.#credentialPools = options.credentialPools;
     this.#homeDir = options.homeDir;
   }
 
@@ -229,7 +225,6 @@ export class ProviderExecutor {
       const resolution = await resolveRuntimeCredential({
         providerId: route.provider,
         route: { apiKeyEnv: route.apiKeyEnv, authMethod: route.authMethod },
-        credentialPools: this.#credentialPools,
         metadata: getProviderMetadata(route.provider),
         homeDir: this.#homeDir,
       });
@@ -396,10 +391,6 @@ export class ProviderExecutor {
       const willFallback = !response.ok && shouldFallback(response, route, nextRoute);
 
       if (response.ok) {
-        if (credential !== undefined && this.#credentialPools !== undefined && route.apiKeyEnv === undefined) {
-          this.#credentialPools.reportSuccess(route.provider, credential.id);
-        }
-
         for (const toolCall of extractToolCallsFromProviderResponse(response.raw)) {
           toolCalls.push(toolCall);
           await options.onEvent?.({
@@ -421,10 +412,6 @@ export class ProviderExecutor {
           attempts,
           toolCalls
         };
-      }
-
-      if (credential !== undefined && this.#credentialPools !== undefined && route.apiKeyEnv === undefined) {
-        this.#credentialPools.reportFailure(route.provider, credential.id, response.errorClass ?? "unknown");
       }
 
       if (!willFallback) {

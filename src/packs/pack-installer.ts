@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { join, dirname, relative } from "node:path";
 import { createHash } from "node:crypto";
 import type { PackManifest, PackStatus } from "../contracts/pack.js";
+import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 import { PackRegistry } from "./pack-registry.js";
 import { validatePackManifest } from "./pack-validator.js";
 import { classifyPackRisk } from "./pack-risk-classifier.js";
@@ -101,6 +102,12 @@ async function materializePackSkills(packPath: string, destRoot: string): Promis
     await mkdir(dirname(dest), { recursive: true });
     await cp(skillDir, dest, { recursive: true, force: true });
   }
+}
+
+function resolvePackSkillsDest(homeDir: string, packId: string): string {
+  const profileId = readActiveProfile({ homeDir }).profileId ?? defaultProfileId();
+  const profilePaths = resolveProfileStateHome({ homeDir, profileId });
+  return join(profilePaths.skillsPath, "packs", packId);
 }
 
 async function runForceOverrideFlow(
@@ -223,7 +230,7 @@ export async function installPack(
   }
 
   const status = installResult.entry.status;
-  const skillsDest = join(homeDir, ".estacoda", "skills", "packs", manifest.id);
+  const skillsDest = resolvePackSkillsDest(homeDir, manifest.id);
   if (status === "enabled" && !existsSync(skillsDest)) {
     await materializePackSkills(destPath, skillsDest);
   }
@@ -286,7 +293,7 @@ export async function enablePack(
     }
   }
 
-  const skillsDest = join(homeDir, ".estacoda", "skills", "packs", id);
+  const skillsDest = resolvePackSkillsDest(homeDir, id);
   if (existsSync(skillsDest)) {
     const backupsDir = join(homeDir, ".estacoda", "packs", "backups");
     await createBackup(skillsDest, backupsDir, id);
@@ -317,7 +324,7 @@ export async function disablePack(
     return { ok: false, exitCode: 1, output: `pack not found: ${id}` };
   }
 
-  const skillsDest = join(homeDir, ".estacoda", "skills", "packs", id);
+  const skillsDest = resolvePackSkillsDest(homeDir, id);
   if (existsSync(skillsDest)) {
     await rm(skillsDest, { recursive: true, force: true });
   }
@@ -343,7 +350,7 @@ export async function uninstallPack(
   }
 
   const packPath = join(homeDir, ".estacoda", "packs", id);
-  const skillsDest = join(homeDir, ".estacoda", "skills", "packs", id);
+  const skillsDest = resolvePackSkillsDest(homeDir, id);
 
   if (existsSync(packPath)) {
     const backupsDir = join(homeDir, ".estacoda", "packs", "backups");

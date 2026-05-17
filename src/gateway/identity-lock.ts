@@ -34,28 +34,30 @@ const LOCK_FILE_PREFIX = "identity-";
 const LOCK_FILE_SUFFIX = ".lock";
 const KEY_PERMISSIONS = 0o600;
 
-function gatewayDir(homeDir: string): string {
-  return join(homeDir, ".estacoda", "gateway");
+type GatewayStateHome = string | { gatewayStatePath: string };
+
+function gatewayDir(stateHome: GatewayStateHome): string {
+  return typeof stateHome === "string" ? join(stateHome, ".estacoda", "gateway") : stateHome.gatewayStatePath;
 }
 
-function keyPath(homeDir: string): string {
-  return join(gatewayDir(homeDir), KEY_FILE_NAME);
+function keyPath(stateHome: GatewayStateHome): string {
+  return join(gatewayDir(stateHome), KEY_FILE_NAME);
 }
 
-function locksDir(homeDir: string): string {
-  return join(gatewayDir(homeDir), LOCKS_DIR_NAME);
+function locksDir(stateHome: GatewayStateHome): string {
+  return join(gatewayDir(stateHome), LOCKS_DIR_NAME);
 }
 
 export function identityLockPath(
-  homeDir: string,
+  stateHome: GatewayStateHome,
   kind: ChannelKind,
   identityHash: string
 ): string {
-  return join(locksDir(homeDir), `${LOCK_FILE_PREFIX}${kind}-${identityHash}${LOCK_FILE_SUFFIX}`);
+  return join(locksDir(stateHome), `${LOCK_FILE_PREFIX}${kind}-${identityHash}${LOCK_FILE_SUFFIX}`);
 }
 
-async function ensureHmacKey(homeDir: string): Promise<Buffer> {
-  const path = keyPath(homeDir);
+async function ensureHmacKey(stateHome: GatewayStateHome): Promise<Buffer> {
+  const path = keyPath(stateHome);
 
   try {
     const stats = await stat(path);
@@ -74,7 +76,7 @@ async function ensureHmacKey(homeDir: string): Promise<Buffer> {
     const code = error instanceof Error && "code" in error ? String((error as { code?: unknown }).code) : "";
     if (code === "ENOENT") {
       // Create new key
-      await mkdir(gatewayDir(homeDir), { recursive: true });
+      await mkdir(gatewayDir(stateHome), { recursive: true });
       const key = randomBytes(32);
       await writeFile(path, key.toString("base64") + "\n", { mode: KEY_PERMISSIONS, encoding: "utf8" });
       return key;
@@ -84,11 +86,11 @@ async function ensureHmacKey(homeDir: string): Promise<Buffer> {
 }
 
 export async function deriveIdentityHash(
-  homeDir: string,
+  stateHome: GatewayStateHome,
   kind: ChannelKind,
   identityString: string
 ): Promise<string> {
-  const key = await ensureHmacKey(homeDir);
+  const key = await ensureHmacKey(stateHome);
   const hmac = createHmac("sha256", key);
   hmac.update(`${kind}:${identityString}`);
   return hmac.digest("hex");
@@ -117,12 +119,12 @@ function isLockStale(lock: { content: LockFileContent } | undefined): boolean {
 }
 
 export async function acquireAdapterIdentityLock(
-  homeDir: string,
+  stateHome: GatewayStateHome,
   kind: ChannelKind,
   identityHash: string
 ): Promise<IdentityLockResult> {
-  const path = identityLockPath(homeDir, kind, identityHash);
-  await mkdir(locksDir(homeDir), { recursive: true });
+  const path = identityLockPath(stateHome, kind, identityHash);
+  await mkdir(locksDir(stateHome), { recursive: true });
 
   try {
     const handle = await open(path, "wx");
@@ -156,12 +158,12 @@ export async function acquireAdapterIdentityLock(
 }
 
 export async function releaseAdapterIdentityLock(
-  homeDir: string,
+  stateHome: GatewayStateHome,
   kind: ChannelKind,
   identityHash: string,
   expectedPid: number = process.pid
 ): Promise<IdentityLockReleaseResult> {
-  const path = identityLockPath(homeDir, kind, identityHash);
+  const path = identityLockPath(stateHome, kind, identityHash);
 
   let fileExists: boolean;
   try {
@@ -189,11 +191,11 @@ export async function releaseAdapterIdentityLock(
 }
 
 export async function isAdapterIdentityLocked(
-  homeDir: string,
+  stateHome: GatewayStateHome,
   kind: ChannelKind,
   identityHash: string
 ): Promise<boolean> {
-  const path = identityLockPath(homeDir, kind, identityHash);
+  const path = identityLockPath(stateHome, kind, identityHash);
   try {
     await stat(path);
     return true;
@@ -203,11 +205,11 @@ export async function isAdapterIdentityLocked(
 }
 
 export async function reclaimStaleAdapterIdentityLock(
-  homeDir: string,
+  stateHome: GatewayStateHome,
   kind: ChannelKind,
   identityHash: string
 ): Promise<IdentityLockResult> {
-  const path = identityLockPath(homeDir, kind, identityHash);
+  const path = identityLockPath(stateHome, kind, identityHash);
 
   let existing: Awaited<ReturnType<typeof readLockFile>>;
   try {
@@ -248,9 +250,9 @@ export async function reclaimStaleAdapterIdentityLock(
 }
 
 export async function listAdapterIdentityLocks(
-  homeDir: string
+  stateHome: GatewayStateHome
 ): Promise<IdentityLockInfo[]> {
-  const dir = locksDir(homeDir);
+  const dir = locksDir(stateHome);
   let files: string[];
   try {
     files = await readdir(dir);

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { packCommand } from "./pack-commands.js";
 import { installPack } from "../packs/pack-installer.js";
+import { resolveProfileStateHome } from "../config/profile-home.js";
 import type { PackManifest } from "../contracts/pack.js";
 
 function makeManifest(overrides?: Partial<PackManifest>): PackManifest {
@@ -37,6 +38,10 @@ function makeManifest(overrides?: Partial<PackManifest>): PackManifest {
 function writePack(dir: string, manifest: PackManifest): void {
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "pack.json"), JSON.stringify(manifest, null, 2), "utf8");
+}
+
+function packSkillsPath(homeDir: string, packId: string): string {
+  return join(resolveProfileStateHome({ homeDir, profileId: "default" }).skillsPath, "packs", packId);
 }
 
 describe("packCommand", () => {
@@ -161,7 +166,7 @@ describe("packCommand", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain("Disabled pack");
-    expect(existsSync(join(tmpDir, ".estacoda", "skills", "packs", "cli-sp"))).toBe(false);
+    expect(existsSync(packSkillsPath(tmpDir, "cli-sp"))).toBe(false);
   });
 
   it("uninstalls a pack", async () => {
@@ -176,7 +181,7 @@ describe("packCommand", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain("Uninstalled pack");
-    expect(existsSync(join(tmpDir, ".estacoda", "skills", "packs", "cli-sp"))).toBe(false);
+    expect(existsSync(packSkillsPath(tmpDir, "cli-sp"))).toBe(false);
   });
 
   it("uninstall with --keep-files preserves files", async () => {

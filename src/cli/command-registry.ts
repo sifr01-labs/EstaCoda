@@ -449,7 +449,7 @@ function registerAll(): void {
     name: "profile",
     aliases: [],
     category: "Setup",
-    description: "View or set agent profile",
+    description: "Manage configuration profiles",
     visibility: "public",
     scope: "cli",
   });
@@ -581,6 +581,26 @@ function registerAll(): void {
     visibility: "public",
     scope: "cli",
   });
+
+  // ── profile subcommands (namespaced under "profile") ──
+  for (const command of [
+    ["create", "Create a profile"],
+    ["list", "List profiles"],
+    ["use", "Switch active profile"],
+    ["show", "Show profile details"],
+    ["delete", "Delete a profile"],
+    ["rename", "Rename a profile"],
+  ] as const) {
+    commandRegistry.register({
+      name: command[0],
+      aliases: [],
+      parent: "profile",
+      category: "Setup",
+      description: command[1],
+      visibility: "public",
+      scope: "cli",
+    });
+  }
 
   // ── skill subcommands (namespaced under "skills") ──
   commandRegistry.register({

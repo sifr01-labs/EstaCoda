@@ -32,7 +32,6 @@ describe("package installability metadata", () => {
       "skills",
       "assets",
       "workers",
-      "memory/default",
       "acp_registry",
       "scripts/install.sh",
       "scripts/estacoda-wrapper.sh",

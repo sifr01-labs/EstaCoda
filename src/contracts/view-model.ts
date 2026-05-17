@@ -15,6 +15,7 @@ export interface StatusViewModel {
     readonly provider: string;
     readonly id: string;
   };
+  readonly profileId?: string;
   readonly securityMode: string;
   readonly skillCount: number;
   readonly skillAutonomy?: string;

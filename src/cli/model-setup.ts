@@ -9,6 +9,7 @@ import {
 import type { ProviderId } from "../contracts/provider.js";
 import type { FetchLike } from "../providers/openai-compatible-provider.js";
 import type { CliOptions, CliCommandResult } from "./cli.js";
+import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 
 export type OpenAIModelProbe = {
   ok: boolean;
@@ -93,6 +94,10 @@ function extractOpenAIModelIds(value: unknown): string[] {
   return [];
 }
 
+function selectedProfileId(options: Pick<CliOptions, "homeDir" | "profileId">): string {
+  return options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+}
+
 function uniqueStrings(values: string[]): string[] {
   return [...new Set(values.filter((v) => v.length > 0))];
 }
@@ -132,7 +137,6 @@ export type ModelSetupLocalArgs = {
   baseUrl?: string;
   model?: string;
   contextWindow?: number;
-  scope?: "user" | "project";
 };
 
 export type ModelSetupCustomArgs = {
@@ -141,7 +145,6 @@ export type ModelSetupCustomArgs = {
   model?: string;
   apiKeyEnv?: string;
   contextWindow?: number;
-  scope?: "user" | "project";
 };
 
 export function parseModelSetupLocalArgs(args: string[]): ModelSetupLocalArgs {
@@ -158,10 +161,6 @@ export function parseModelSetupLocalArgs(args: string[]): ModelSetupLocalArgs {
     } else if (arg === "--context-window") {
       parsed.contextWindow = Number(next);
       i += 1;
-    } else if (arg === "--project") {
-      parsed.scope = "project";
-    } else if (arg === "--user") {
-      parsed.scope = "user";
     }
   }
   return parsed;
@@ -187,10 +186,6 @@ export function parseModelSetupCustomArgs(args: string[]): ModelSetupCustomArgs 
     } else if (arg === "--context-window") {
       parsed.contextWindow = Number(next);
       i += 1;
-    } else if (arg === "--project") {
-      parsed.scope = "project";
-    } else if (arg === "--user") {
-      parsed.scope = "user";
     }
   }
   return parsed;
@@ -250,7 +245,6 @@ export async function runModelSetupLocal(options: CliOptions, args: string[]): P
     models: probe.models,
     baseUrl,
     enableNetwork: true,
-    scope: parsed.scope,
     requiresCredential: false,
     contextWindowTokens: parsed.contextWindow
   };
@@ -333,9 +327,8 @@ export async function runModelSetupCustom(options: CliOptions, args: string[]): 
     };
   }
 
-  const targetPath = parsed.scope === "project"
-    ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
-    : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const profileId = selectedProfileId(options);
+  const targetPath = resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
 
   const existing = await readConfig(targetPath);
   const conflict = validateCustomProviderId(existing.config, providerId as ProviderId, baseUrl);
@@ -410,7 +403,6 @@ export async function runModelSetupCustom(options: CliOptions, args: string[]): 
     baseUrl,
     apiKeyEnv: parsed.apiKeyEnv,
     enableNetwork: true,
-    scope: parsed.scope,
     requiresCredential: parsed.apiKeyEnv !== undefined,
     contextWindowTokens: parsed.contextWindow
   };

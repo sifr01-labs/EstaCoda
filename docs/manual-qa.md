@@ -423,8 +423,9 @@ HOME=/tmp/estacoda-qa-missing-credential pnpm run dev -- setup --interactive
 
 ```bash
 rm -rf /tmp/estacoda-qa-broken-config
-mkdir -p /tmp/estacoda-qa-broken-config/.estacoda
-printf '{not-json' > /tmp/estacoda-qa-broken-config/.estacoda/config.json
+mkdir -p /tmp/estacoda-qa-broken-config/.estacoda/profiles/default
+printf '{"profileId":"default"}' > /tmp/estacoda-qa-broken-config/.estacoda/active-profile.json
+printf '{not-json' > /tmp/estacoda-qa-broken-config/.estacoda/profiles/default/config.json
 HOME=/tmp/estacoda-qa-broken-config pnpm run dev -- setup --interactive
 ```
 
@@ -540,7 +541,7 @@ scripts/verify-package-bin.sh
 **Verify:**
 - `dist/index.js` starts with `#!/usr/bin/env node`.
 - Local compiled `--version` and `--help` exit successfully.
-- `npm pack --dry-run` includes `dist/index.js`, `skills/`, `assets/`, `workers/`, `memory/default/`, and `acp_registry/`.
+- `npm pack --dry-run` includes `dist/index.js`, `skills/`, `assets/`, `workers/`, and `acp_registry/`.
 - `scripts/verify-package-bin.sh` installs the packed tarball into a temporary prefix and runs that installed `estacoda` binary.
 - Public `npm install -g estacoda`, `npx estacoda`, and hosted curl install are not claimed until release validation proves them.
 

@@ -2,13 +2,11 @@ import { describe, it, expect } from "vitest";
 import { produceModelStatusReport } from "./model-diagnostics.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
-import { CredentialPoolRegistry } from "../providers/credential-pool.js";
 import type { ProviderId } from "../contracts/provider.js";
 import type { ProviderEndpoint } from "../contracts/provider.js";
 
 function makeMinimalConfig(overrides?: Partial<LoadedRuntimeConfig>): LoadedRuntimeConfig {
   const registry = new ProviderRegistry();
-  const credentialPools = new CredentialPoolRegistry();
   return {
     config: {},
     sources: [],
@@ -34,7 +32,6 @@ function makeMinimalConfig(overrides?: Partial<LoadedRuntimeConfig>): LoadedRunt
     },
     modelFallbackRoutes: [],
     providerRegistry: registry,
-    credentialPools,
     auxiliaryModels: {},
     web: { enableNetwork: false },
     browser: { backend: "unconfigured", autoLaunch: false },
