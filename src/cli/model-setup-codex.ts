@@ -12,6 +12,10 @@ import type { CliOptions, CliCommandResult } from "./cli.js";
 const CODEX_DEFAULT_MODEL = "o3";
 const CODEX_DEFAULT_BASE_URL = "https://chatgpt.com/backend-api/codex";
 
+type OutputSink = {
+  write(chunk: string): void;
+};
+
 export type ModelSetupCodexOptions = {
   homeDir?: string;
   profileId?: string;
@@ -19,6 +23,7 @@ export type ModelSetupCodexOptions = {
   prompt?: Prompt;
   fetchLike?: FetchLike;
   signal?: AbortSignal;
+  output?: OutputSink;
 };
 
 export async function runModelSetupCodex(
@@ -81,13 +86,7 @@ async function handleExistingCredentials(
   }
 
   // Reauthenticate
-  const flowResult = await runCodexOAuthFlow({
-    fetchLike: options.fetchLike,
-    signal: options.signal,
-    onDeviceCode: (info) => {
-      // In non-interactive tests this is a no-op; in real TTY it prints the URL/code
-    }
-  });
+  const { flowResult, deviceCodeShown } = await runCodexOAuthFlowWithDeviceCodeNotice(options);
 
   if (flowResult.kind === "cancelled") {
     return cancelResult();
@@ -97,7 +96,7 @@ async function handleExistingCredentials(
     return {
       handled: true,
       exitCode: 1,
-      output: `Authentication timed out: ${flowResult.reason}`
+      output: formatOAuthFailure("timeout", flowResult.reason, deviceCodeShown)
     };
   }
 
@@ -105,7 +104,7 @@ async function handleExistingCredentials(
     return {
       handled: true,
       exitCode: 1,
-      output: `Authentication failed: ${flowResult.reason}`
+      output: formatOAuthFailure("error", flowResult.reason, deviceCodeShown)
     };
   }
 
@@ -169,13 +168,7 @@ async function handleNewAuthentication(
     return cancelResult();
   }
 
-  const flowResult = await runCodexOAuthFlow({
-    fetchLike: options.fetchLike,
-    signal: options.signal,
-    onDeviceCode: (info) => {
-      // Print device code info for the user
-    }
-  });
+  const { flowResult, deviceCodeShown } = await runCodexOAuthFlowWithDeviceCodeNotice(options);
 
   if (flowResult.kind === "cancelled") {
     return cancelResult();
@@ -185,7 +178,7 @@ async function handleNewAuthentication(
     return {
       handled: true,
       exitCode: 1,
-      output: `Authentication timed out: ${flowResult.reason}`
+      output: formatOAuthFailure("timeout", flowResult.reason, deviceCodeShown)
     };
   }
 
@@ -193,7 +186,7 @@ async function handleNewAuthentication(
     return {
       handled: true,
       exitCode: 1,
-      output: `Authentication failed: ${flowResult.reason}`
+      output: formatOAuthFailure("error", flowResult.reason, deviceCodeShown)
     };
   }
 
@@ -239,6 +232,50 @@ async function handleNewAuthentication(
       `  Model: ${CODEX_DEFAULT_MODEL}`
     ].join("\n")
   };
+}
+
+async function runCodexOAuthFlowWithDeviceCodeNotice(
+  options: ModelSetupCodexOptions
+): Promise<{
+  flowResult: Awaited<ReturnType<typeof runCodexOAuthFlow>>;
+  deviceCodeShown: boolean;
+}> {
+  let deviceCodeShown = false;
+  const flowResult = await runCodexOAuthFlow({
+    fetchLike: options.fetchLike,
+    signal: options.signal,
+    onDeviceCode: (info) => {
+      deviceCodeShown = true;
+      options.output?.write(renderDeviceCodeNotice(info));
+    }
+  });
+  return { flowResult, deviceCodeShown };
+}
+
+function renderDeviceCodeNotice(info: {
+  userCode: string;
+  verificationUri: string;
+  verificationUriComplete?: string;
+}): string {
+  return [
+    "Codex OAuth device authorization",
+    `Open: ${info.verificationUriComplete ?? info.verificationUri}`,
+    `Code: ${info.userCode}`,
+    "Waiting for authorization. This may take up to 15 minutes.",
+    ""
+  ].join("\n");
+}
+
+function formatOAuthFailure(kind: "timeout" | "error", reason: string, deviceCodeShown: boolean): string {
+  if (!deviceCodeShown) {
+    return kind === "timeout"
+      ? `Authentication timed out: ${reason}`
+      : `Authentication failed: ${reason}`;
+  }
+
+  return kind === "timeout"
+    ? `Authentication timed out while waiting for authorization: ${reason}`
+    : `Authentication failed while waiting for authorization: ${reason}`;
 }
 
 async function configureCodexRoute(

@@ -178,6 +178,7 @@ export type CliOptions = {
   runtime?: Runtime;
   modelsDevOptions?: ModelsDevRegistryOptions;
   profileContextualizer?: ProfileContextualizer;
+  output?: { write(chunk: string): void };
 };
 
 export type ParsedGlobalCliOptions =
@@ -787,9 +788,11 @@ async function model(options: CliOptions, args: string[]): Promise<CliCommandRes
     if (args[1] === "codex") {
       return runModelSetupCodex({
         homeDir: options.homeDir,
+        profileId: options.profileId,
         workspaceRoot: options.workspaceRoot,
         prompt: options.prompt,
-        fetchLike: options.providerFetch
+        fetchLike: options.providerFetch,
+        output: options.output
       });
     }
     return {

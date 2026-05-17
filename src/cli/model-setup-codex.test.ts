@@ -2,9 +2,10 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, writeFile, readFile, mkdir, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
+import { runCliCommand } from "./cli.js";
 import { runModelSetupCodex, type ModelSetupCodexOptions } from "./model-setup-codex.js";
 import type { Prompt } from "./readline-prompt.js";
-import type { FetchLike } from "../providers/oauth/codex-oauth.js";
+import type { FetchLike } from "../providers/openai-compatible-provider.js";
 import { loadOAuthStore } from "../providers/oauth/oauth-store.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 
@@ -12,14 +13,14 @@ async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-codex-setup-test-"));
 }
 
-async function writeUserConfig(homeDir: string, config: unknown): Promise<void> {
-  const configPath = profileConfigPath(homeDir);
+async function writeUserConfig(homeDir: string, config: unknown, profileId = "default"): Promise<void> {
+  const configPath = profileConfigPath(homeDir, profileId);
   await mkdir(dirname(configPath), { recursive: true });
   await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", "utf8");
 }
 
-async function readUserConfig(homeDir: string): Promise<unknown> {
-  const configPath = profileConfigPath(homeDir);
+async function readUserConfig(homeDir: string, profileId = "default"): Promise<unknown> {
+  const configPath = profileConfigPath(homeDir, profileId);
   const content = await readFile(configPath, "utf8");
   return JSON.parse(content);
 }
@@ -36,8 +37,8 @@ async function readAuthJson(homeDir: string): Promise<unknown> {
   return JSON.parse(content);
 }
 
-function profileConfigPath(homeDir: string): string {
-  return resolveProfileStateHome({ homeDir, profileId: "default" }).configPath;
+function profileConfigPath(homeDir: string, profileId = "default"): string {
+  return resolveProfileStateHome({ homeDir, profileId }).configPath;
 }
 
 function profileAuthPath(homeDir: string): string {
@@ -57,6 +58,20 @@ function createMockPrompt(responses: string[]): Prompt {
   return prompt as Prompt;
 }
 
+function createOutputCapture(): { output: { write(chunk: string): void }; chunks: string[] } {
+  const chunks: string[] = [];
+  return {
+    output: {
+      write: (chunk) => chunks.push(chunk)
+    },
+    chunks
+  };
+}
+
+function joinedOutput(chunks: string[]): string {
+  return chunks.join("");
+}
+
 function createMockFetch(scenarios: {
   authorize?: () => { ok: boolean; status: number; statusText: string; json: unknown };
   tokenPolls?: Array<() => { ok: boolean; status: number; statusText: string; json: unknown }>;
@@ -72,7 +87,9 @@ function createMockFetch(scenarios: {
         ok: result.ok,
         status: result.status,
         statusText: result.statusText,
-        json: async () => result.json
+        json: async () => result.json,
+        text: async () => JSON.stringify(result.json),
+        body: null
       };
     }
 
@@ -84,7 +101,9 @@ function createMockFetch(scenarios: {
         ok: result.ok,
         status: result.status,
         statusText: result.statusText,
-        json: async () => result.json
+        json: async () => result.json,
+        text: async () => JSON.stringify(result.json),
+        body: null
       };
     }
 
@@ -92,7 +111,9 @@ function createMockFetch(scenarios: {
       ok: false,
       status: 404,
       statusText: "Not Found",
-      json: async () => ({})
+      json: async () => ({}),
+      text: async () => "{}",
+      body: null
     };
   };
 }
@@ -118,6 +139,7 @@ describe("model setup codex", () => {
 
   describe("new authentication", () => {
     it("completes device flow and writes auth.json + config.json", async () => {
+      const capture = createOutputCapture();
       const fetchLike = createMockFetch({
         authorize: () => ({
           ok: true,
@@ -127,6 +149,7 @@ describe("model setup codex", () => {
             device_code: "dev-123",
             user_code: "ABC-DEF",
             verification_uri: "https://auth.openai.com/verify",
+            verification_uri_complete: "https://auth.openai.com/verify?user_code=ABC-DEF",
             expires_in: 60,
             interval: 1
           }
@@ -148,9 +171,15 @@ describe("model setup codex", () => {
 
       const result = await runModelSetupCodex(baseOptions({
         prompt: createMockPrompt(["1"]), // "Sign in with device code"
-        fetchLike
+        fetchLike,
+        output: capture.output
       }));
 
+      const streamed = joinedOutput(capture.chunks);
+      expect(streamed).toContain("Codex OAuth device authorization");
+      expect(streamed).toContain("Open: https://auth.openai.com/verify?user_code=ABC-DEF");
+      expect(streamed).toContain("Code: ABC-DEF");
+      expect(streamed).toContain("Waiting for authorization. This may take up to 15 minutes.");
       expect(result.handled).toBe(true);
       expect(result.exitCode).toBe(0);
       expect(result.output).toContain("Codex route configured");
@@ -211,13 +240,16 @@ describe("model setup codex", () => {
     });
 
     it("cancel at initial prompt prints cancellation message", async () => {
+      const capture = createOutputCapture();
       const result = await runModelSetupCodex(baseOptions({
-        prompt: createMockPrompt(["2"]) // "Cancel"
+        prompt: createMockPrompt(["2"]), // "Cancel"
+        output: capture.output
       }));
 
       expect(result.handled).toBe(true);
       expect(result.exitCode).toBe(0);
       expect(result.output).toBe("Cancelled. No changes were made.");
+      expect(joinedOutput(capture.chunks)).toBe("");
     });
 
     it("empty/invalid choice at prompt is treated as cancel", async () => {
@@ -230,7 +262,8 @@ describe("model setup codex", () => {
       expect(result.output).toBe("Cancelled. No changes were made.");
     });
 
-    it("timeout during polling returns exit code 1 with timed out message", async () => {
+    it("timeout after device-code emission reports that authorization was pending", async () => {
+      const capture = createOutputCapture();
       const fetchLike = createMockFetch({
         authorize: () => ({
           ok: true,
@@ -249,12 +282,50 @@ describe("model setup codex", () => {
 
       const result = await runModelSetupCodex(baseOptions({
         prompt: createMockPrompt(["1"]),
-        fetchLike
+        fetchLike,
+        output: capture.output
       }));
 
+      const streamed = joinedOutput(capture.chunks);
+      expect(streamed).toContain("Open: https://auth.openai.com/verify");
+      expect(streamed).toContain("Code: ABC-DEF");
       expect(result.handled).toBe(true);
       expect(result.exitCode).toBe(1);
-      expect(result.output).toContain("Authentication timed out");
+      expect(result.output).toContain("Authentication timed out while waiting for authorization");
+    });
+
+    it("error after device-code emission reports that authorization was pending", async () => {
+      const capture = createOutputCapture();
+      const fetchLike = createMockFetch({
+        authorize: () => ({
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: {
+            device_code: "dev-123",
+            user_code: "ABC-DEF",
+            verification_uri: "https://auth.openai.com/verify",
+            expires_in: 60,
+            interval: 0
+          }
+        }),
+        tokenPolls: [
+          () => ({ ok: false, status: 500, statusText: "Server Error", json: { error_description: "server unavailable" } })
+        ]
+      });
+
+      const result = await runModelSetupCodex(baseOptions({
+        prompt: createMockPrompt(["1"]),
+        fetchLike,
+        output: capture.output
+      }));
+
+      const streamed = joinedOutput(capture.chunks);
+      expect(streamed).toContain("Waiting for authorization. This may take up to 15 minutes.");
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(1);
+      expect(result.output).toContain("Authentication failed while waiting for authorization");
+      expect(result.output).toContain("Token poll failed");
     });
 
     it("writes auth.json with 0600 permissions through existing store behavior", async () => {
@@ -296,6 +367,67 @@ describe("model setup codex", () => {
         expect(mode).toBe(0o600);
       }
     });
+
+    it("writes route config to the selected non-default profile", async () => {
+      await writeUserConfig(tmpDir, {
+        model: { provider: "local", id: "untouched-default" },
+        providers: {
+          local: {
+            kind: "openai-compatible",
+            baseUrl: "http://localhost:11434/v1",
+            models: ["untouched-default"]
+          }
+        }
+      });
+
+      const fetchLike = createMockFetch({
+        authorize: () => ({
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: {
+            device_code: "dev-123",
+            user_code: "ABC-DEF",
+            verification_uri: "https://auth.openai.com/verify",
+            expires_in: 60,
+            interval: 1
+          }
+        }),
+        tokenPolls: [
+          () => ({
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            json: {
+              access_token: "selected-profile-token",
+              expires_in: 3600
+            }
+          })
+        ]
+      });
+
+      const result = await runCliCommand({
+        argv: ["model", "setup", "codex"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        profileId: "work",
+        prompt: createMockPrompt(["1"]),
+        providerFetch: fetchLike
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+
+      const selectedConfig = await readUserConfig(tmpDir, "work") as any;
+      expect(selectedConfig.model.provider).toBe("codex");
+      expect(selectedConfig.model.id).toBe("o3");
+      expect(selectedConfig.providers.codex.authMethod).toBe("oauth_device_pkce");
+
+      const defaultConfig = await readUserConfig(tmpDir) as any;
+      expect(defaultConfig.model.provider).toBe("local");
+      expect(defaultConfig.model.id).toBe("untouched-default");
+      expect(defaultConfig.providers.codex).toBeUndefined();
+    });
   });
 
   describe("existing credentials", () => {
@@ -335,6 +467,7 @@ describe("model setup codex", () => {
     });
 
     it("reauthenticate overwrites existing tokens", async () => {
+      const capture = createOutputCapture();
       await writeAuthJson(tmpDir, {
         version: 1,
         providers: {
@@ -356,6 +489,7 @@ describe("model setup codex", () => {
             device_code: "dev-123",
             user_code: "ABC-DEF",
             verification_uri: "https://auth.openai.com/verify",
+            verification_uri_complete: "https://auth.openai.com/verify?user_code=ABC-DEF",
             expires_in: 60,
             interval: 1
           }
@@ -375,9 +509,15 @@ describe("model setup codex", () => {
 
       const result = await runModelSetupCodex(baseOptions({
         prompt: createMockPrompt(["2"]), // "Reauthenticate"
-        fetchLike
+        fetchLike,
+        output: capture.output
       }));
 
+      const streamed = joinedOutput(capture.chunks);
+      expect(streamed).toContain("Codex OAuth device authorization");
+      expect(streamed).toContain("Open: https://auth.openai.com/verify?user_code=ABC-DEF");
+      expect(streamed).toContain("Code: ABC-DEF");
+      expect(streamed).toContain("Waiting for authorization. This may take up to 15 minutes.");
       expect(result.handled).toBe(true);
       expect(result.exitCode).toBe(0);
 
@@ -519,6 +659,7 @@ describe("model setup codex", () => {
 
   describe("redaction", () => {
     it("CLI output never contains raw token values", async () => {
+      const capture = createOutputCapture();
       const fetchLike = createMockFetch({
         authorize: () => ({
           ok: true,
@@ -548,11 +689,22 @@ describe("model setup codex", () => {
 
       const result = await runModelSetupCodex(baseOptions({
         prompt: createMockPrompt(["1"]),
-        fetchLike
+        fetchLike,
+        output: capture.output
       }));
 
+      const streamed = joinedOutput(capture.chunks);
+      expect(streamed).not.toContain("eyJfake.codex.token.12345");
+      expect(streamed).not.toContain("def502.fake.refresh.token.67890");
+      expect(streamed).not.toContain("fake.codex");
+      expect(streamed).not.toContain("fake.refresh");
+      expect(streamed).not.toContain("accessToken");
+      expect(streamed).not.toContain("refreshToken");
+      expect(streamed).not.toContain("Bearer");
       expect(result.output).not.toContain("eyJfake.codex.token.12345");
       expect(result.output).not.toContain("def502.fake.refresh.token.67890");
+      expect(result.output).not.toContain("fake.codex");
+      expect(result.output).not.toContain("fake.refresh");
       expect(result.output).not.toContain("accessToken");
       expect(result.output).not.toContain("refreshToken");
       expect(result.output).not.toContain("Bearer");
@@ -693,6 +845,27 @@ describe("model setup codex", () => {
 
       const auth = await readAuthJson(tmpDir) as any;
       expect(auth.providers.codex.accessToken).toBe("new-token");
+    });
+  });
+
+  describe("help", () => {
+    it("model setup codex --help remains help-only", async () => {
+      await mkdir(dirname(profileConfigPath(tmpDir)), { recursive: true });
+      await writeFile(profileConfigPath(tmpDir), "{not-json", "utf8");
+
+      const result = await runCliCommand({
+        argv: ["model", "setup", "codex", "--help"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("EstaCoda Codex model setup");
+      expect(result.output).toContain("OAuth device-code authentication");
+      expect(result.output).not.toContain("Codex OAuth device authorization");
+      expect(result.output).not.toContain("Cancelled. No changes were made.");
+      expect(result.output).not.toContain("Unexpected token");
     });
   });
 });

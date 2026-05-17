@@ -96,7 +96,10 @@ async function main(): Promise<void> {
     const command = await runCliCommand({
       argv,
       workspaceRoot,
-      profileId
+      profileId,
+      output: {
+        write: (chunk) => process.stdout.write(chunk)
+      }
     });
 
     if (command.handled) {
