@@ -329,7 +329,7 @@ function registerAll(): void {
     name: "setup",
     aliases: [],
     category: "Setup",
-    description: "Run the guided setup wizard",
+    description: "Open reviewed setup, repair, and onboarding",
     visibility: "public",
     scope: "cli",
   });

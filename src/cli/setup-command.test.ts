@@ -49,6 +49,24 @@ describe("cli setup command", () => {
     expect(first.output).toContain("Direct provider example:");
   });
 
+  it("renders setup help without collecting setup state", async () => {
+    const result = await runCliCommand({
+      argv: ["setup", "--help"],
+      workspaceRoot: join(tempDir, "workspace"),
+      homeDir: tempDir,
+      interactive: false,
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("Usage:");
+    expect(result.output).toContain("estacoda setup [--interactive] [--advanced]");
+    expect(result.output).toContain("Open reviewed setup, repair, and onboarding");
+    expect(result.output).not.toContain("Recommended path:");
+    expect(result.output).not.toContain("Setup check");
+    await expect(readFile(profileConfigPath(tempDir), "utf8")).rejects.toThrow();
+  });
+
   it("preserves direct noninteractive provider setup flags", async () => {
     const workspaceRoot = join(tempDir, "workspace");
     const result = await runCliCommand({

@@ -289,6 +289,8 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
       return evolutionCommand(options, args);
     case "knowledge":
       return knowledge(options, args);
+    case "packs":
+      return packCommand(options, args);
     case "skills":
       return skillsCommand(options, args);
     case "handoff":
@@ -321,6 +323,14 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
 }
 
 async function setup(options: CliOptions, args: string[]): Promise<CliCommandResult> {
+  if (hasFlag(args, "--help", "-h")) {
+    return {
+      handled: true,
+      exitCode: 0,
+      output: renderSetupHelp()
+    };
+  }
+
   const parsed = parseSetupArgs(args);
   const allowInteractive = options.interactive !== false;
 
@@ -679,6 +689,14 @@ function selectedProfileId(options: { homeDir?: string; profileId?: string }): s
 }
 
 async function model(options: CliOptions, args: string[]): Promise<CliCommandResult> {
+  if (hasFlag(args, "--help", "-h")) {
+    return {
+      handled: true,
+      exitCode: 0,
+      output: renderModelHelp(args)
+    };
+  }
+
   const config = await loadRuntimeConfig(options);
 
   if (args[0] === "status") {
@@ -1326,6 +1344,113 @@ function renderModelOverview(config: Awaited<ReturnType<typeof loadRuntimeConfig
   diagnosticLines.push("  estacoda model fallback clear");
 
   return diagnosticLines.join("\n");
+}
+
+function renderSetupHelp(): string {
+  return [
+    "EstaCoda setup",
+    "",
+    "Usage:",
+    "  estacoda setup [--interactive] [--advanced]",
+    "  estacoda setup --provider <id> --model <id> [--base-url <url>] [--api-key-env <env>] [--offline|--online]",
+    "",
+    "Open reviewed setup, repair, and onboarding.",
+    "",
+    "Options:",
+    "  --interactive, -i  Open the reviewed setup flow",
+    "  --advanced        Show advanced setup choices where available",
+    "  --provider <id>   Configure a provider directly",
+    "  --model <id>      Configure a model directly",
+    "  --help, -h        Show this help"
+  ].join("\n");
+}
+
+function renderModelHelp(args: string[]): string {
+  if (args[0] === "setup") {
+    return renderModelSetupHelp(args.slice(1));
+  }
+
+  return [
+    "EstaCoda model",
+    "",
+    "Usage:",
+    "  estacoda model",
+    "  estacoda model status",
+    "  estacoda model diagnose",
+    "  estacoda model list [--provider <id>] [--configured] [--live]",
+    "  estacoda model search <query> [--provider <id>] [--configured] [--live]",
+    "  estacoda model providers",
+    "  estacoda model refresh",
+    "  estacoda model setup <local|custom|codex>",
+    "  estacoda model auxiliary status",
+    "  estacoda model fallback <status|add|remove|reorder|clear>",
+    "",
+    "Bare `estacoda model` opens the picker interactively or prints an overview noninteractively.",
+    "`estacoda model set` is deprecated and disabled.",
+    "Fallback routes are configured through `estacoda model fallback ...`."
+  ].join("\n");
+}
+
+function renderModelSetupHelp(args: string[]): string {
+  const subcommand = args[0];
+
+  if (subcommand === "local") {
+    return [
+      "EstaCoda local model setup",
+      "",
+      "Usage:",
+      "  estacoda model setup local [--base-url <url>] [--model <id>] [--context-window <n>]",
+      "",
+      "Configures a local OpenAI-compatible endpoint such as Ollama or llama.cpp.",
+      "",
+      "Options:",
+      "  --base-url <url>       Endpoint URL (default: http://localhost:11434/v1)",
+      "  --model <id>           Model id to save without interactive discovery selection",
+      "  --context-window <n>   Context window token count"
+    ].join("\n");
+  }
+
+  if (subcommand === "custom") {
+    return [
+      "EstaCoda custom model setup",
+      "",
+      "Usage:",
+      "  estacoda model setup custom --base-url <url> [--provider-id <id>] [--model <id>] [--api-key-env <env>] [--context-window <n>]",
+      "",
+      "Configures a custom OpenAI-compatible endpoint.",
+      "",
+      "Options:",
+      "  --base-url <url>       Endpoint URL",
+      "  --provider-id <id>     Provider id to save",
+      "  --model <id>           Model id to save",
+      "  --api-key-env <env>    Environment variable containing the API key",
+      "  --context-window <n>   Context window token count"
+    ].join("\n");
+  }
+
+  if (subcommand === "codex") {
+    return [
+      "EstaCoda Codex model setup",
+      "",
+      "Usage:",
+      "  estacoda model setup codex",
+      "",
+      "Configures the Codex provider route.",
+      "Codex setup uses OAuth device-code authentication.",
+      "No OAuth session starts when this help is shown."
+    ].join("\n");
+  }
+
+  return [
+    "EstaCoda model setup",
+    "",
+    "Usage:",
+    "  estacoda model setup local [--base-url <url>] [--model <id>] [--context-window <n>]",
+    "  estacoda model setup custom --base-url <url> [--provider-id <id>] [--model <id>] [--api-key-env <env>] [--context-window <n>]",
+    "  estacoda model setup codex",
+    "",
+    "Codex setup uses OAuth device-code authentication."
+  ].join("\n");
 }
 
 function renderModelStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>, options: CliOptions): string {

@@ -37,6 +37,22 @@ async function main(): Promise<void> {
   }
 
   let workspaceRoot = process.cwd();
+
+  if (isSideEffectFreeHelp(argv)) {
+    const helpCommand = await runCliCommand({
+      argv,
+      workspaceRoot,
+      profileId: parsedGlobalOptions.profileId
+    });
+
+    if (helpCommand.handled) {
+      if (helpCommand.output.length > 0) {
+        console.log(helpCommand.output);
+      }
+      process.exit(helpCommand.exitCode);
+    }
+  }
+
   const cliSessionStore = new PersistentCliSessionStore();
   const cliApprovalController = new WorkspaceApprovalController();
   let launchLocale: UiLocale | undefined;
@@ -318,6 +334,7 @@ function canDispatchBeforeRuntime(argv: readonly string[]): boolean {
     "manifest",
     "mcp",
     "model",
+    "packs",
     "profile",
     "proposal",
     "security",
@@ -331,6 +348,13 @@ function canDispatchBeforeRuntime(argv: readonly string[]): boolean {
     "voice",
     "web"
   ]).has(command);
+}
+
+function isSideEffectFreeHelp(argv: readonly string[]): boolean {
+  if (argv[0] === "help" || argv[0] === "--help" || argv[0] === "-h") {
+    return true;
+  }
+  return argv.includes("--help") || argv.includes("-h");
 }
 
 void main().catch((error) => {

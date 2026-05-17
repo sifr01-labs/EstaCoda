@@ -14,6 +14,14 @@ export async function packCommand(options: CliOptions, args: string[]): Promise<
   const homeDir = options.homeDir ?? process.env.HOME ?? "";
   const actor = process.env.USER ?? "cli";
 
+  if (hasFlag(args, "--help") || hasFlag(args, "-h")) {
+    return {
+      handled: true,
+      exitCode: 0,
+      output: renderPackUsage()
+    };
+  }
+
   switch (subcommand) {
     case "list":
       return listPacks(homeDir, subArgs);
@@ -31,20 +39,24 @@ export async function packCommand(options: CliOptions, args: string[]): Promise<
       return {
         handled: true,
         exitCode: 1,
-        output: [
-          "Usage: estacoda packs <subcommand>",
-          "",
-          "Subcommands:",
-          "  list                       List installed packs",
-          "  install <path> [--force]   Install a pack from a local path",
-          "  inspect <id>               Show full manifest and metadata",
-          "  enable <id> [--force]      Enable a pack",
-          "  disable <id>               Disable a pack",
-          "  uninstall <id> [--keep-files]  Uninstall a pack",
-          ""
-        ].join("\n")
+        output: renderPackUsage()
       };
   }
+}
+
+function renderPackUsage(): string {
+  return [
+    "Usage: estacoda packs <subcommand>",
+    "",
+    "Subcommands:",
+    "  list                       List installed packs",
+    "  install <path> [--force]   Install a pack from a local path",
+    "  inspect <id>               Show full manifest and metadata",
+    "  enable <id> [--force]      Enable a pack",
+    "  disable <id>               Disable a pack",
+    "  uninstall <id> [--keep-files]  Uninstall a pack",
+    ""
+  ].join("\n");
 }
 
 async function listPacks(homeDir: string, args: string[]): Promise<CliCommandResult> {

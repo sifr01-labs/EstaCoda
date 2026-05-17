@@ -70,6 +70,26 @@ describe("cli model", () => {
   });
 
   describe("bare model command", () => {
+    it("renders model help without loading config or resolving aliases", async () => {
+      await mkdir(dirname(profileConfigPath(tmpDir)), { recursive: true });
+      await writeFile(profileConfigPath(tmpDir), "{not-json", "utf8");
+
+      const result = await runCliCommand({
+        argv: ["model", "--help"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("EstaCoda model");
+      expect(result.output).toContain("Bare `estacoda model` opens the picker interactively or prints an overview noninteractively.");
+      expect(result.output).toContain("`estacoda model set` is deprecated and disabled.");
+      expect(result.output).toContain("estacoda model fallback <status|add|remove|reorder|clear>");
+      expect(result.output).not.toContain("Unexpected token");
+      expect(result.output).not.toContain("unknown model");
+    });
+
     it("renders overview in non-interactive context without writing config", async () => {
       await writeUserConfig(tmpDir, {
         providers: {
@@ -1822,6 +1842,70 @@ describe("cli model", () => {
 
       expect(result.handled).toBe(true);
       expect(result.output).toContain("estacoda model setup codex");
+    });
+
+    it("model setup --help renders setup help without loading config", async () => {
+      await mkdir(dirname(profileConfigPath(tmpDir)), { recursive: true });
+      await writeFile(profileConfigPath(tmpDir), "{not-json", "utf8");
+
+      const result = await runCliCommand({
+        argv: ["model", "setup", "--help"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("EstaCoda model setup");
+      expect(result.output).toContain("estacoda model setup local");
+      expect(result.output).toContain("estacoda model setup custom");
+      expect(result.output).toContain("estacoda model setup codex");
+      expect(result.output).not.toContain("Unexpected token");
+    });
+
+    it("model setup local --help renders local setup help without probing", async () => {
+      const result = await runCliCommand({
+        argv: ["model", "setup", "local", "--help"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("EstaCoda local model setup");
+      expect(result.output).toContain("estacoda model setup local");
+      expect(result.output).not.toContain("Endpoint check:");
+      expect(result.output).not.toContain("Could not discover models");
+    });
+
+    it("model setup custom --help renders custom setup help without requiring flags", async () => {
+      const result = await runCliCommand({
+        argv: ["model", "setup", "custom", "--help"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("EstaCoda custom model setup");
+      expect(result.output).toContain("estacoda model setup custom --base-url <url>");
+      expect(result.output).not.toContain("Error: --base-url is required");
+    });
+
+    it("model setup codex --help renders Codex help without starting OAuth", async () => {
+      const result = await runCliCommand({
+        argv: ["model", "setup", "codex", "--help"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("EstaCoda Codex model setup");
+      expect(result.output).toContain("OAuth device-code authentication");
+      expect(result.output).not.toContain("Cancelled. No changes were made.");
+      expect(result.output).not.toContain("Codex requires OAuth authentication.");
+      await expect(readFile(profileConfigPath(tmpDir), "utf8")).rejects.toThrow();
     });
 
     it("bare model command help includes codex setup", async () => {

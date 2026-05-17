@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { runCliCommand } from "./cli.js";
 import { packCommand } from "./pack-commands.js";
 import { installPack } from "../packs/pack-installer.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
@@ -70,6 +72,43 @@ describe("packCommand", () => {
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain("cli-sp");
     expect(result.output).toContain("CLI Test Pack");
+  });
+
+  it("dispatches packs list through runCliCommand in a fresh home", async () => {
+    const result = await runCliCommand({
+      argv: ["packs", "list"],
+      workspaceRoot: process.cwd(),
+      homeDir: tmpDir
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toBe("No packs installed.");
+  });
+
+  it("shows pack usage through runCliCommand help", async () => {
+    const result = await runCliCommand({
+      argv: ["packs", "--help"],
+      workspaceRoot: process.cwd(),
+      homeDir: tmpDir
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("Usage: estacoda packs <subcommand>");
+    expect(result.output).toContain("list");
+  });
+
+  it("entrypoint packs list exits before one-shot prompt handling", async () => {
+    const result = await runEntrypoint({
+      argv: ["packs", "list"],
+      cwd: process.cwd(),
+      homeDir: tmpDir
+    });
+
+    expect(result.code).toBe(0);
+    expect(result.stdout.trim()).toBe("No packs installed.");
+    expect(result.stderr).not.toContain("One-shot prompt");
   });
 
   it("inspects a pack", async () => {
@@ -209,3 +248,54 @@ describe("packCommand", () => {
     expect(result.output).toContain("Usage: estacoda packs <subcommand>");
   });
 });
+
+type EntrypointResult = {
+  readonly code: number | null;
+  readonly stdout: string;
+  readonly stderr: string;
+};
+
+function runEntrypoint(input: {
+  readonly argv: readonly string[];
+  readonly cwd: string;
+  readonly homeDir: string;
+}): Promise<EntrypointResult> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [
+      "--import",
+      "tsx",
+      join(process.cwd(), "src", "index.ts"),
+      ...input.argv
+    ], {
+      cwd: input.cwd,
+      env: {
+        ...process.env,
+        HOME: input.homeDir,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    const timeout = setTimeout(() => {
+      child.kill("SIGTERM");
+      reject(new Error("Timed out waiting for entrypoint packs command."));
+    }, 10_000);
+
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.on("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timeout);
+      resolve({ code, stdout, stderr });
+    });
+  });
+}
