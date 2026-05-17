@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentLoop } from "../../runtime/agent-loop.js";
 import type { AgentLoopInput, AgentLoopResponse } from "../../runtime/agent-loop.js";
-import { kemetBlueTheme } from "../../theme/kemet-blue.js";
+import { resolveTokens } from "../../theme/token-resolver.js";
 
 function makeIntent(): IntentRoute {
   return {
@@ -49,7 +49,7 @@ const minimalModel = {
 };
 
 const minimalRuntimeOptions = {
-  theme: kemetBlueTheme,
+  tokens: resolveTokens("standard", "dark", "kemetBlue"),
   model: minimalModel,
   workspaceRoot: process.cwd()
 };

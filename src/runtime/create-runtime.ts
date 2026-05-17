@@ -6,7 +6,6 @@ import type { SkillCatalogEntry } from "../contracts/skill.js";
 import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
 import { ArtifactStore } from "../artifacts/artifact-store.js";
 import { createBrowserBackendFromConfig, type CdpFetchLike, type CdpWebSocketFactory } from "../browser/browser-backend.js";
-import type { ThemeDefinition } from "../contracts/theme.js";
 import type { ResolvedTokens, TokenBranding } from "../contracts/ui-tokens.js";
 import { createConfigTools } from "../config/config-tools.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
@@ -91,9 +90,7 @@ import { collectSetupVerificationReport } from "../onboarding/verification.js";
 import { readCachedUpdateStatus } from "../lifecycle/update-engine.js";
 
 export type RuntimeOptions = {
-  /** @deprecated Legacy runtime branding path. Prefer tokens. */
-  theme?: ThemeDefinition;
-  tokens?: ResolvedTokens;
+  tokens: ResolvedTokens;
   model: ModelProfile;
   primaryModelRoute?: ResolvedModelRoute;
   modelFallbackRoutes?: ResolvedModelRoute[];
@@ -160,24 +157,20 @@ type RuntimeBranding = Pick<
   "agentName" | "responseLabel" | "taglinePrimary" | "taglineSecondary"
 >;
 
-function resolveRuntimeBranding(options: RuntimeOptions): RuntimeBranding {
+function resolveRuntimeTokens(options: RuntimeOptions): ResolvedTokens {
   if (options.tokens !== undefined) {
-    return options.tokens.contract.branding;
+    return options.tokens;
   }
-  if (options.theme !== undefined) {
-    return options.theme.branding;
-  }
-  throw new TypeError("createRuntime requires either tokens or legacy theme.");
+  throw new TypeError("createRuntime requires tokens.");
+}
+
+function resolveRuntimeBranding(options: RuntimeOptions): RuntimeBranding {
+  return resolveRuntimeTokens(options).contract.branding;
 }
 
 function resolveRuntimeUiIdentity(options: RuntimeOptions): string {
-  if (options.tokens !== undefined) {
-    return `${options.tokens.skin}-${options.tokens.theme}`;
-  }
-  if (options.theme !== undefined) {
-    return options.theme.name;
-  }
-  throw new TypeError("createRuntime requires either tokens or legacy theme.");
+  const tokens = resolveRuntimeTokens(options);
+  return `${tokens.skin}-${tokens.theme}`;
 }
 
 export type Runtime = {

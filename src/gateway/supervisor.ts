@@ -18,7 +18,7 @@ import { RuntimeCache } from "../runtime/runtime-cache.js";
 import { computeRuntimeFingerprint, stableJsonHash, type RuntimeFingerprint } from "../runtime/runtime-fingerprint.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
-import { kemetBlueTheme } from "../theme/kemet-blue.js";
+import { resolveTokens } from "../theme/token-resolver.js";
 import { ChannelApprovalStore } from "../channels/channel-approval-store.js";
 import { ChannelGateway, telegramGatewayCommands } from "../channels/channel-gateway.js";
 import { PersistentChannelSessionStore } from "../channels/channel-session-store.js";
@@ -98,7 +98,7 @@ export function buildGatewayCronRuntimeOptions(input: {
 }): RuntimeOptions {
   const { latestConfig } = input;
   return {
-    theme: kemetBlueTheme,
+    tokens: resolveTokens("standard", "dark", "kemetBlue"),
     model: latestConfig.model,
     primaryModelRoute: latestConfig.primaryModelRoute,
     modelFallbackRoutes: latestConfig.modelFallbackRoutes,
@@ -336,6 +336,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
 
   const config = await loadConfig();
   const version = await getPackageVersion();
+  const runtimeTokens = resolveTokens("standard", "dark", "kemetBlue");
 
   const runtimeFingerprint = computeRuntimeFingerprint(config, {
     profileId,
@@ -348,6 +349,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     approvalControllerPresent: false,
     explicitSecurityPolicyPresent: true,
     currentPlatform: process.platform,
+    tokens: runtimeTokens,
   });
 
   const state = createInitialState(homeDir, profilePaths, options.factories?.exit ?? ((code: number) => process.exit(code)), startedAt);
@@ -490,7 +492,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     }
   ): Promise<Runtime> => {
     return createRuntime({
-      theme: kemetBlueTheme,
+      tokens: runtimeTokens,
       model: latestConfig.model,
       primaryModelRoute: latestConfig.primaryModelRoute,
       modelFallbackRoutes: latestConfig.modelFallbackRoutes,

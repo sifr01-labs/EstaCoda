@@ -14,7 +14,7 @@ import type { Runtime, RuntimeOptions } from "../runtime/create-runtime.js";
 import type { AgentLoopResponse } from "../runtime/agent-loop.js";
 import { createRuntime } from "../runtime/create-runtime.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
-import { kemetBlueTheme } from "../theme/kemet-blue.js";
+import { resolveTokens } from "../theme/token-resolver.js";
 import type { WorkspaceFsAdapter } from "../tools/workspace-tools.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { createSecurityPolicyForMode } from "../security/security-policy-factory.js";
@@ -753,7 +753,7 @@ export class AcpServer {
     });
 
     const runtimeOptions: RuntimeOptions = {
-      theme: kemetBlueTheme,
+      tokens: resolveTokens("standard", "dark", "kemetBlue"),
       model: config.model,
       primaryModelRoute: config.primaryModelRoute,
       modelFallbackRoutes: config.modelFallbackRoutes,

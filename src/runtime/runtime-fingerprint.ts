@@ -2,7 +2,6 @@ import { join } from "node:path";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import type { ResolvedModelRoute } from "../contracts/provider.js";
 import type { SecurityApprovalMode } from "../contracts/security.js";
-import type { ThemeDefinition } from "../contracts/theme.js";
 import type { ToolsetName } from "../contracts/tool.js";
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
 
@@ -77,7 +76,6 @@ export function computeRuntimeFingerprint(
     approvalControllerPresent: boolean;
     explicitSecurityPolicyPresent: boolean;
     currentPlatform: string;
-    theme?: ThemeDefinition;
     tokens?: ResolvedTokens;
   }
 ): RuntimeFingerprint {
@@ -133,13 +131,12 @@ export function computeRuntimeFingerprint(
 }
 
 function fingerprintRuntimeUiIdentity(options: {
-  theme?: ThemeDefinition;
   tokens?: ResolvedTokens;
 }): string | undefined {
   if (options.tokens !== undefined) {
     return `${options.tokens.skin}-${options.tokens.theme}`;
   }
-  return options.theme?.name;
+  return undefined;
 }
 
 function fingerprintRoute(route: ResolvedModelRoute): Record<string, unknown> {

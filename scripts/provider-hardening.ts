@@ -6,7 +6,7 @@ import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "..
 import type { ProviderId } from "../src/contracts/provider.js";
 import type { RuntimeEvent } from "../src/contracts/runtime-event.js";
 import { createRuntime } from "../src/runtime/create-runtime.js";
-import { kemetBlueTheme } from "../src/theme/kemet-blue.js";
+import { resolveTokens } from "../src/theme/token-resolver.js";
 
 type ProviderSpec = {
   provider: ProviderId;
@@ -187,7 +187,7 @@ async function runProvider(spec: ProviderSpec): Promise<ProviderResult> {
 
 async function buildRuntime(config: LoadedRuntimeConfig) {
   return createRuntime({
-    theme: kemetBlueTheme,
+    tokens: resolveTokens("standard", "dark", "kemetBlue"),
     workspaceRoot,
     model: config.model,
     externalSkillRoots: config.skills.externalDirs,

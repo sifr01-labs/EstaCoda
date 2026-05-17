@@ -2,14 +2,12 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { createRuntime, createDefaultProviderRegistry } from "./create-runtime.js";
+import { createRuntime, createDefaultProviderRegistry, type RuntimeOptions } from "./create-runtime.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
 import type { ModelProfile, ProviderAdapter } from "../contracts/provider.js";
-import type { ThemeDefinition } from "../contracts/theme.js";
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
-import { kemetBlueTheme } from "../theme/kemet-blue.js";
 import { resolveTokens } from "../theme/token-resolver.js";
 
 const mockModel: ModelProfile = {
@@ -19,50 +17,6 @@ const mockModel: ModelProfile = {
   supportsTools: true,
   supportsVision: false,
   supportsStructuredOutput: false
-};
-
-const mockTheme: ThemeDefinition = {
-  name: "test",
-  description: "test theme",
-  colors: {
-    bannerBorder: "",
-    bannerTitle: "",
-    bannerAccent: "",
-    bannerDim: "",
-    bannerText: "",
-    uiAccent: "",
-    uiLabel: "",
-    uiOk: "",
-    uiError: "",
-    uiWarn: "",
-    prompt: "",
-    inputRule: "",
-    responseBorder: "",
-    sessionLabel: "",
-    sessionBorder: "",
-    statusBarBg: "",
-    voiceStatusBg: "",
-    completionMenuBg: "",
-    completionMenuCurrentBg: "",
-    completionMenuMetaBg: "",
-    completionMenuMetaCurrentBg: ""
-  },
-  spinner: {
-    waitingFaces: [],
-    thinkingFaces: [],
-    thinkingVerbs: [],
-    wings: []
-  },
-  branding: {
-    agentName: "Test",
-    responseLabel: "Test",
-    promptSymbol: ">",
-    helpHeader: "",
-    taglinePrimary: "",
-    taglineSecondary: ""
-  },
-  toolPrefix: "",
-  toolSymbols: {}
 };
 
 function createMockProviderRegistry(): ProviderRegistry {
@@ -81,12 +35,11 @@ function createMockProviderRegistry(): ProviderRegistry {
 async function minimalRuntimeOptions(overrides: {
   workspaceTrusted?: boolean;
   mcpServers?: Record<string, { command: string; args?: string[] }>;
-  theme?: ThemeDefinition | undefined;
   tokens?: ResolvedTokens | undefined;
 } = {}) {
   const workspaceRoot = await mkdtemp(join(tmpdir(), "estacoda-runtime-test-"));
   return {
-    theme: mockTheme,
+    tokens: resolveTokens("standard", "dark", "kemetBlue"),
     model: mockModel,
     providerRegistry: createMockProviderRegistry(),
     workspaceRoot,
@@ -99,7 +52,7 @@ async function minimalRuntimeOptions(overrides: {
 describe("createRuntime token branding", () => {
   it("accepts resolved tokens and uses token branding", async () => {
     const tokens = resolveTokens("standard", "dark", "kemetBlue");
-    const options = await minimalRuntimeOptions({ theme: undefined, tokens });
+    const options = await minimalRuntimeOptions({ tokens });
     const runtime = await createRuntime(options);
 
     try {
@@ -111,36 +64,11 @@ describe("createRuntime token branding", () => {
     }
   });
 
-  it("prefers token branding when both tokens and legacy theme are supplied", async () => {
-    const tokens = resolveTokens("standard", "dark", "kemetBlue");
-    const options = await minimalRuntimeOptions({ tokens });
-    const runtime = await createRuntime(options);
+  it("fails closed when tokens are missing", async () => {
+    const { tokens: _tokens, ...options } = await minimalRuntimeOptions();
 
-    try {
-      expect(runtime.describe()).toContain(`${tokens.contract.branding.responseLabel} is ready`);
-      expect(runtime.describe()).not.toContain(`${mockTheme.branding.responseLabel} is ready`);
-    } finally {
-      await runtime.dispose();
-    }
-  });
-
-  it("keeps the legacy theme branding path working", async () => {
-    const options = await minimalRuntimeOptions({ theme: kemetBlueTheme });
-    const runtime = await createRuntime(options);
-
-    try {
-      expect(runtime.describe()).toContain(`${kemetBlueTheme.branding.responseLabel} is ready`);
-      expect(runtime.getStartup().agentName).toBe(kemetBlueTheme.branding.agentName);
-    } finally {
-      await runtime.dispose();
-    }
-  });
-
-  it("fails closed when neither tokens nor legacy theme are supplied", async () => {
-    const options = await minimalRuntimeOptions({ theme: undefined });
-
-    await expect(createRuntime(options)).rejects.toThrow(
-      "createRuntime requires either tokens or legacy theme."
+    await expect(createRuntime(options as RuntimeOptions)).rejects.toThrow(
+      "createRuntime requires tokens."
     );
   });
 });

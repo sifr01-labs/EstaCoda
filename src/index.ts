@@ -12,7 +12,7 @@ import { runSessionLoop, handleSlashCommand } from "./cli/session-loop.js";
 import { runOneShotPrompt } from "./cli/one-shot.js";
 import { WorkspaceApprovalController } from "./security/workspace-approval-controller.js";
 import { WorkspaceTrustStore } from "./security/workspace-trust-store.js";
-import { kemetBlueTheme } from "./theme/kemet-blue.js";
+import { resolveTokens } from "./theme/token-resolver.js";
 import { launchInteractiveSession } from "./cli/interactive-launcher.js";
 import { getPackageVersion } from "./cli/version-command.js";
 import { renderPlain } from "./ui/renderers/plain-renderer.js";
@@ -161,7 +161,7 @@ async function main(): Promise<void> {
     const latestConfig = await loadRuntimeConfig({ workspaceRoot, profileId });
 
     return createRuntime({
-      theme: kemetBlueTheme,
+      tokens: resolveTokens("standard", "dark", "kemetBlue"),
       model: latestConfig.model,
       primaryModelRoute: latestConfig.primaryModelRoute,
       modelFallbackRoutes: latestConfig.modelFallbackRoutes,
