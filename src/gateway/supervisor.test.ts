@@ -660,10 +660,10 @@ describe("runGatewaySupervisor", () => {
       },
     });
 
-    await new Promise((r) => setTimeout(r, 50));
+    await waitForCondition(() => capturedRegistry !== undefined);
 
     const ac = new AbortController();
-    capturedRegistry?.startTurn("test-key", ac);
+    capturedRegistry!.startTurn("test-key", ac);
 
     process.emit("SIGTERM");
 
@@ -706,10 +706,10 @@ describe("runGatewaySupervisor", () => {
       },
     });
 
-    await new Promise((r) => setTimeout(r, 50));
+    await waitForCondition(() => capturedRegistry !== undefined);
 
     const ac = new AbortController();
-    capturedRegistry?.startTurn("test-key", ac);
+    capturedRegistry!.startTurn("test-key", ac);
 
     process.emit("SIGTERM");
 
@@ -1644,9 +1644,9 @@ describe("supervisor lifecycle hooks", () => {
         },
       });
 
-      await new Promise((r) => setTimeout(r, 50));
+      await waitForCondition(() => capturedRegistry !== undefined);
       const ac = new AbortController();
-      capturedRegistry?.startTurn("test-key", ac);
+      capturedRegistry!.startTurn("test-key", ac);
 
       process.emit("SIGTERM");
       await promise;
@@ -1699,9 +1699,9 @@ describe("supervisor lifecycle hooks", () => {
         },
       });
 
-      await new Promise((r) => setTimeout(r, 50));
+      await waitForCondition(() => capturedRegistry !== undefined);
       const ac = new AbortController();
-      capturedRegistry?.startTurn("test-key", ac);
+      capturedRegistry!.startTurn("test-key", ac);
 
       process.emit("SIGTERM");
       await new Promise((r) => setTimeout(r, 100));
