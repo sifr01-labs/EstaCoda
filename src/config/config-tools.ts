@@ -51,7 +51,6 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
             `Web extraction: ${loaded.web.enableNetwork ? "enabled" : "disabled"}`,
             `Browser backend: ${loaded.browser.backend}`,
             `Config sources: ${loaded.sources.join(", ") || "none"}`,
-            `Credential pools: ${loaded.credentialPools.snapshots().map((snapshot) => `${snapshot.provider}:${snapshot.entries.length}`).join(", ") || "none"}`,
             "",
             renderProviderDiagnostic(diagnostic)
           ].join("\n"),
@@ -60,7 +59,6 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
             model: loaded.model,
             web: loaded.web,
             browser: loaded.browser,
-            credentialPools: loaded.credentialPools.snapshots(),
             providerDiagnostic: diagnostic
           }
         };
@@ -451,7 +449,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
     },
     {
       name: "config.provider.setup",
-      description: "Configure EstaCoda's model provider, API key environment variable, credential pool, and endpoint.",
+      description: "Configure EstaCoda's model provider, API key environment variable, and endpoint.",
       inputSchema: {
         type: "object",
         properties: {
@@ -462,7 +460,6 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           apiKey: { type: "string" },
           enableNetwork: { type: "boolean" },
           scope: { type: "string", enum: ["user", "project"] },
-          credentialPoolStrategy: { type: "string" },
           primary: { type: "boolean" }
         },
         required: ["provider", "model"]

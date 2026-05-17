@@ -1,9 +1,7 @@
-import { dirname, join } from "node:path";
 import type {
   ProviderId,
   ProviderApiMode,
-  ProviderAuthMethod,
-  CredentialRotationStrategy
+  ProviderAuthMethod
 } from "../contracts/provider.js";
 import {
   mergeConfig,
@@ -14,7 +12,7 @@ import {
   type ModelFallbackConfig
 } from "./runtime-config.js";
 import { getProviderMetadata } from "../providers/provider-metadata.js";
-import { writeEnvSecret } from "./env-secret-store.js";
+import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "./profile-home.js";
 
 // ── Input types ──────────────────────────────────────────────────────────────
 
@@ -33,8 +31,6 @@ export type StoreProviderCredentialInput = {
   provider: ProviderId;
   apiKeyEnv: string;
   apiKey?: string;
-  writeCredentialPool?: boolean;
-  credentialPoolStrategy?: CredentialRotationStrategy;
 };
 
 export type RegisterProviderModelInput = {
@@ -96,13 +92,12 @@ export function applyRegisterProviderConfig(
 
 /**
  * Store a credential reference on the provider block.
- * Optionally writes a credential pool entry if writeCredentialPool is true.
  * Never stores the raw apiKey value in config.
  */
 export function applyStoreProviderCredential(
   existing: EstaCodaConfig,
   input: StoreProviderCredentialInput
-): { config: EstaCodaConfig; wroteCredentialPool: boolean } {
+): EstaCodaConfig {
   const providers = existing.providers;
   const existingProvider = providers !== undefined ? providers[input.provider] ?? {} : {};
   const providerConfig = {
@@ -110,35 +105,11 @@ export function applyStoreProviderCredential(
     apiKeyEnv: input.apiKeyEnv
   };
 
-  let wroteCredentialPool = false;
-  let credentialPoolsPatch: Record<string, unknown> | undefined;
-
-  if (input.writeCredentialPool) {
-    wroteCredentialPool = true;
-    credentialPoolsPatch = {
-      [input.provider]: {
-        strategy: input.credentialPoolStrategy ?? "fill_first",
-        entries: [
-          {
-            id: `${input.provider}-${input.apiKeyEnv}`,
-            source: { kind: "env" as const, name: input.apiKeyEnv },
-            priority: 1
-          }
-        ]
-      }
-    };
-  }
-
-  const config = mergeConfig(existing, {
+  return mergeConfig(existing, {
     providers: {
       [input.provider]: providerConfig
-    },
-    ...(credentialPoolsPatch !== undefined
-      ? { credentialPools: credentialPoolsPatch as EstaCodaConfig["credentialPools"] }
-      : {})
+    }
   } as EstaCodaConfig);
-
-  return { config, wroteCredentialPool };
 }
 
 /**
@@ -242,15 +213,12 @@ export function applyAddFallbackRoute(
 export type MutationOptions = {
   workspaceRoot: string;
   homeDir?: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
-  scope?: "user" | "project";
+  profileId?: string;
 };
 
 async function resolveTargetPath(options: MutationOptions): Promise<string> {
-  return options.scope === "project"
-    ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
-    : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir })?.profileId ?? defaultProfileId();
+  return resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
 }
 
 export async function registerProviderConfig(
@@ -265,12 +233,12 @@ export async function registerProviderConfig(
 
 export async function storeProviderCredential(
   options: MutationOptions & { input: StoreProviderCredentialInput }
-): Promise<{ path: string; config: EstaCodaConfig; wroteCredentialPool: boolean }> {
+): Promise<{ path: string; config: EstaCodaConfig }> {
   const targetPath = await resolveTargetPath(options);
   const existing = await readConfig(targetPath);
-  const { config, wroteCredentialPool } = applyStoreProviderCredential(existing.config, options.input);
+  const config = applyStoreProviderCredential(existing.config, options.input);
   await saveRuntimeConfig(targetPath, config);
-  return { path: targetPath, config, wroteCredentialPool };
+  return { path: targetPath, config };
 }
 
 export async function registerProviderModel(

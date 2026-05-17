@@ -11,14 +11,14 @@ import {
 import { CURRENT_OAUTH_STORE_VERSION } from "./oauth-types.js";
 
 describe("defaultOAuthStorePath", () => {
-  it("derives path from resolveStateHome", () => {
+  it("derives path from resolveProfileStateHome", () => {
     const path = defaultOAuthStorePath();
-    expect(path).toMatch(/\.estacoda[/\\]auth\.json$/u);
+    expect(path).toMatch(/\.estacoda[/\\]profiles[/\\]default[/\\]auth\.json$/u);
   });
 
   it("accepts explicit homeDir", () => {
     const path = defaultOAuthStorePath("/tmp/fake-home");
-    expect(path).toBe("/tmp/fake-home/.estacoda/auth.json");
+    expect(path).toBe("/tmp/fake-home/.estacoda/profiles/default/auth.json");
   });
 });
 

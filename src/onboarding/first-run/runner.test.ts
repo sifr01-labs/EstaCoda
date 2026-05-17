@@ -9,9 +9,18 @@ import { resolveSetupCopy } from "../setup-copy.js";
 import { createReviewedSetupApplyExecutor } from "../review/apply-executor.js";
 import { runFirstRunSetup } from "./runner.js";
 import type { FlowEngine, ProviderCandidate } from "../../providers/provider-model-selection-flow.js";
+import { resolveProfileStateHome } from "../../config/profile-home.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-first-run-runner-"));
+}
+
+function profileConfigPath(homeDir: string): string {
+  return resolveProfileStateHome({ homeDir, profileId: "default" }).configPath;
+}
+
+function profileEnvPath(homeDir: string): string {
+  return resolveProfileStateHome({ homeDir, profileId: "default" }).envPath;
 }
 
 function flowEngine(overrides: {
@@ -238,7 +247,7 @@ describe("runFirstRunSetup", () => {
       expect(result.applyPlanningResult.applyPlan.metadata.trustOperationCount).toBe(1);
     }
     expect(output.join("")).toContain(resolveSetupCopy("en", "setupReview.title"));
-    await expect(readFile(join(tempDir, ".estacoda", "config.json"), "utf8")).rejects.toThrow();
+    await expect(readFile(profileConfigPath(tempDir), "utf8")).rejects.toThrow();
     await expect(readFile(join(tempDir, ".estacoda", "trust.json"), "utf8")).rejects.toThrow();
   });
 
@@ -361,8 +370,8 @@ describe("runFirstRunSetup", () => {
     expect(result.completed).toBe(false);
     expect(result.selections.primaryCredential).toEqual({ kind: "env", name: "OPENAI_API_KEY" });
     expect(JSON.stringify(result)).not.toContain("sk-cancelled-secret");
-    await expect(readFile(join(tempDir, ".estacoda", ".env"), "utf8")).rejects.toThrow();
-    await expect(readFile(join(tempDir, ".estacoda", "config.json"), "utf8")).rejects.toThrow();
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).rejects.toThrow();
+    await expect(readFile(profileConfigPath(tempDir), "utf8")).rejects.toThrow();
     await expect(readFile(join(tempDir, ".estacoda", "trust.json"), "utf8")).rejects.toThrow();
   });
 
@@ -408,7 +417,7 @@ describe("runFirstRunSetup", () => {
 
     expect(result.completed).toBe(true);
     expect(result.applyEndState?.kind).toBe("saved-not-launched");
-    const config = JSON.parse(await readFile(join(tempDir, ".estacoda", "config.json"), "utf8")) as {
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
       model?: { provider?: string; id?: string };
     };
     expect(config.model).toEqual({ provider: "local", id: "hermes-local", contextWindowTokens: 8192 });
@@ -423,7 +432,7 @@ describe("runFirstRunSetup", () => {
     });
 
     expect(result.selections.primaryCredential).toEqual({ kind: "env", name: "OPENAI_API_KEY" });
-    await expect(readFile(join(tempDir, ".estacoda", ".env"), "utf8")).rejects.toThrow();
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).rejects.toThrow();
     expect(JSON.stringify(result)).not.toContain("sk-fir...7890");
     expect(JSON.stringify(result.reviewManifest)).not.toContain("sk-fir...7890");
     expect(JSON.stringify(result.reviewManifest)).toContain("OPENAI_API_KEY");
@@ -440,7 +449,7 @@ describe("runFirstRunSetup", () => {
 
     expect(result.completed).toBe(true);
     expect(result.selections.primaryCredential).toEqual({ kind: "env", name: "OPENAI_API_KEY" });
-    const envContent = await readFile(join(tempDir, ".estacoda", ".env"), "utf8");
+    const envContent = await readFile(profileEnvPath(tempDir), "utf8");
     expect(envContent).toContain('OPENAI_API_KEY="sk-approved-secret"');
     expect(JSON.stringify(result)).not.toContain("sk-approved-secret");
     expect(JSON.stringify(result.reviewManifest)).toContain("OPENAI_API_KEY");
@@ -457,7 +466,7 @@ describe("runFirstRunSetup", () => {
     });
 
     expect(result.selections.primaryCredential).toEqual({ kind: "env", name: "OPENAI_API_KEY" });
-    await expect(readFile(join(tempDir, ".estacoda", ".env"), "utf8")).rejects.toThrow();
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).rejects.toThrow();
     const combined = outputLines.join("");
     expect(combined).toContain("Config will expect OPENAI_API_KEY to be available externally");
   });
@@ -501,7 +510,7 @@ describe("runFirstRunSetup", () => {
     });
 
     expect(result.selections.primaryCredential).toEqual({ kind: "env", name: "OPENAI_API_KEY" });
-    await expect(readFile(join(tempDir, ".estacoda", ".env"), "utf8")).rejects.toThrow();
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).rejects.toThrow();
   });
 
   it("throws on malformed reuse credential reference", async () => {
@@ -569,7 +578,7 @@ describe("runFirstRunSetup", () => {
     });
 
     expect(result.completed).toBe(true);
-    const rawConfig = await readFile(join(tempDir, ".estacoda", "config.json"), "utf8");
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
     const config = JSON.parse(rawConfig) as Record<string, unknown>;
 
     expect(rawConfig).not.toContain("apiMode");

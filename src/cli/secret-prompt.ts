@@ -1,5 +1,6 @@
 import type { ProviderId } from "../contracts/provider.js";
 import { writeEnvSecret, type EnvSecretWriteResult } from "../config/env-secret-store.js";
+import { defaultProfileId, readActiveProfile } from "../config/profile-home.js";
 import type { Prompt } from "./readline-prompt.js";
 
 export type PromptForApiKeyResult =
@@ -41,6 +42,7 @@ export async function promptForApiKey(options: {
 
   const result: EnvSecretWriteResult = await writeEnvSecret({
     homeDir: options.homeDir,
+    profileId: readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId(),
     key: options.envVarName,
     value: input.value,
   });

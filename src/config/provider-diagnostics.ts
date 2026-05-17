@@ -20,9 +20,6 @@ export async function diagnoseProviderConfig(config: LoadedRuntimeConfig): Promi
   const provider = config.providerRegistry.get(selectedProvider);
   const registeredSelectedModel = models.find((model) => model.provider === selectedProvider && model.id === selectedModel);
   const selectedProfile = registeredSelectedModel ?? config.model;
-  const pools = config.credentialPools.snapshots();
-  const selectedPool = pools.find((pool) => pool.provider === selectedProvider);
-  const selectedPoolHasAvailableCredential = selectedPool?.entries.some((entry) => entry.available) === true;
   const warnings: string[] = [];
   const lines: string[] = [
     `Selected route: ${selectedProvider}/${selectedModel}`,
@@ -54,11 +51,9 @@ export async function diagnoseProviderConfig(config: LoadedRuntimeConfig): Promi
     lines.push("Provider health: not executable");
   } else {
     const health = await provider.health();
-    const blockedByMissingEndpointEnv = !health.available && /Missing\s+[A-Z0-9_]+/u.test(health.reason ?? "");
-    const healthAvailableViaPool = blockedByMissingEndpointEnv && selectedPoolHasAvailableCredential;
-    lines.push(`Provider health: ${health.available || healthAvailableViaPool ? "available" : `blocked (${health.reason ?? "unknown reason"})`}`);
+    lines.push(`Provider health: ${health.available ? "available" : `blocked (${health.reason ?? "unknown reason"})`}`);
 
-    if (!health.available && !healthAvailableViaPool) {
+    if (!health.available) {
       warnings.push(humanProviderHealthIssue(health.reason));
     }
 
@@ -82,19 +77,8 @@ export async function diagnoseProviderConfig(config: LoadedRuntimeConfig): Promi
     lines.push("Network inference: local OpenAI-compatible route");
   }
 
-  lines.push(`Credential pool: ${selectedPool === undefined ? "none" : `${selectedPool.entries.length} entr${selectedPool.entries.length === 1 ? "y" : "ies"}`}`);
-
-  if (selectedProvider !== "local" && selectedProvider !== "unconfigured" && selectedPool === undefined && route?.apiKeyEnv === undefined) {
-    warnings.push(`No credential pool is configured for ${selectedProvider}.`);
-  } else if (
-    selectedProvider !== "local" &&
-    selectedProvider !== "unconfigured" &&
-    selectedPool !== undefined &&
-    selectedPool.entries.length > 0 &&
-    !selectedPool.entries.some((entry) => entry.available) &&
-    route?.apiKeyEnv === undefined
-  ) {
-    warnings.push(`No available credential is configured for ${selectedProvider}.`);
+  if (selectedProvider !== "local" && selectedProvider !== "unconfigured" && route?.apiKeyEnv === undefined) {
+    warnings.push(`No apiKeyEnv is configured for ${selectedProvider}.`);
   }
 
   const fallbackRoutes = config.modelFallbackRoutes;
@@ -132,8 +116,7 @@ export async function diagnoseProviderLive(config: LoadedRuntimeConfig): Promise
   }
 
   const executor = new ProviderExecutor({
-    registry: config.providerRegistry,
-    credentialPools: config.credentialPools
+    registry: config.providerRegistry
   });
   const execution = await executor.complete({
     provider: config.model.provider,

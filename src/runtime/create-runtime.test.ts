@@ -210,7 +210,7 @@ describe("createRuntime getStartupReadiness trust threading", () => {
     }
   });
 
-  it("loads project config in verification when projectConfigTrust is trusted", async () => {
+  it("ignores project config in verification when projectConfigTrust is trusted", async () => {
     const options = await minimalRuntimeOptions({ projectConfigTrust: "trusted" });
     await mkdir(join(options.workspaceRoot, ".estacoda"), { recursive: true });
     await writeFile(
@@ -234,8 +234,8 @@ describe("createRuntime getStartupReadiness trust threading", () => {
     const runtime = await createRuntime({ ...options, trustStore, trustStorePath });
     try {
       const readiness = await runtime.getStartupReadiness();
-      expect(readiness.providerReadiness).toBe("ready");
-      expect(readiness.workspaceVerification).toBe("verified");
+      expect(readiness.providerReadiness).toBe("missing-config");
+      expect(readiness.workspaceVerification).toBe("unverified");
     } finally {
       await runtime.dispose();
     }

@@ -35,7 +35,6 @@ import type { SecurityApprovalMode, SecurityPolicy, SecurityRequest } from "../c
 import type { SessionDB } from "../contracts/session.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
-import { CredentialPoolRegistry } from "../providers/credential-pool.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { createWorkspaceTrustTools } from "../security/workspace-trust-tools.js";
@@ -106,7 +105,6 @@ export type RuntimeOptions = {
   trustStore?: WorkspaceTrustStore;
   trustStorePath?: string;
   providerRegistry?: ProviderRegistry;
-  credentialPools?: CredentialPoolRegistry;
   memoryProvider?: MemoryProvider;
   userMemoryRoot?: string;
   projectMemoryRoot?: string;
@@ -370,8 +368,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       mainRoute,
       fallbackToMain: visionRoute?.fallbackToMain,
       providerExecutor: new ProviderExecutor({
-        registry: providerRegistry,
-        credentialPools: options.credentialPools
+        registry: providerRegistry
       })
     }, input, signal)
   })) {
@@ -416,8 +413,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     mainRoute,
     fallbackToMain: visionRoute?.fallbackToMain,
     providerExecutor: new ProviderExecutor({
-      registry: providerRegistry,
-      credentialPools: options.credentialPools
+      registry: providerRegistry
     })
   })) {
     toolRegistry.register(tool);
@@ -532,8 +528,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
 
   const intentRouter = new IntentRouter({ skillRegistry: sessionSkillRegistry, model: options.model });
   const providerExecutor = new ProviderExecutor({
-    registry: providerRegistry,
-    credentialPools: options.credentialPools
+    registry: providerRegistry
   });
   const configuredSecurityMode = options.securityMode ?? "adaptive";
   let activeSecurityMode: SecurityApprovalMode = configuredSecurityMode;

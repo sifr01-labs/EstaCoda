@@ -3,6 +3,7 @@ import { closeSync, openSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { access, constants, readFile, writeFile, mkdir, rm, rename, stat } from "node:fs/promises";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
+import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 import { resolveStateHome } from "../config/state-home.js";
 import { getTelegramGatewayDiagnostics } from "../channels/gateway-runner.js";
 import { getWhatsAppGatewayDiagnostics } from "../channels/whatsapp-diagnostics.js";
@@ -712,7 +713,8 @@ function validateChannel(
 }
 
 function resolveUserConfigPath(options: GatewayCommandOptions): string {
-  return options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const profileId = readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+  return options.userConfigPath ?? resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
 }
 
 async function readUserConfigRaw(path: string): Promise<Record<string, unknown> | undefined> {

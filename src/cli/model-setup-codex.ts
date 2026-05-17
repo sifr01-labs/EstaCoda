@@ -1,5 +1,5 @@
-import { join } from "node:path";
 import { readConfig, saveRuntimeConfig } from "../config/runtime-config.js";
+import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 import {
   loadOAuthStore,
   writeOAuthStore
@@ -245,7 +245,8 @@ async function handleNewAuthentication(
 async function configureCodexRoute(
   options: ModelSetupCodexOptions
 ): Promise<{ ok: true } | { ok: false; message: string }> {
-  const targetPath = join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const profileId = readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+  const targetPath = resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
 
   try {
     const existing = await readConfig(targetPath);

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto";
-import { loadUserRuntimeConfig, loadTrustedRuntimeConfig, type LoadedRuntimeConfig } from "./config/runtime-config.js";
+import { loadRuntimeConfig, type LoadedRuntimeConfig } from "./config/runtime-config.js";
 import { resolveStateHome } from "./config/state-home.js";
+import { defaultProfileId, readActiveProfile } from "./config/profile-home.js";
 import { PersistentCliSessionStore } from "./cli/cli-session-store.js";
 import { runCliCommand } from "./cli/cli.js";
 import type { SessionDB } from "./contracts/session.js";
@@ -35,6 +36,7 @@ async function main(): Promise<void> {
   let launchLocale: UiLocale | undefined;
 
   const stateHome = resolveStateHome();
+  const profileId = readActiveProfile()?.profileId ?? defaultProfileId();
   const trustStore = new WorkspaceTrustStore({ path: stateHome.trustJsonPath });
   let workspaceTrusted = await trustStore.isTrusted(workspaceRoot);
 
@@ -95,9 +97,7 @@ async function main(): Promise<void> {
 
   let config: LoadedRuntimeConfig;
   try {
-    config = workspaceTrusted
-      ? await loadTrustedRuntimeConfig({ workspaceRoot })
-      : await loadUserRuntimeConfig({ workspaceRoot });
+    config = await loadRuntimeConfig({ workspaceRoot, profileId });
   } catch (error) {
     if (argv[0] === "doctor" || argv[0] === "verify") {
       const diagnosticCommand = await runCliCommand({
@@ -122,15 +122,14 @@ async function main(): Promise<void> {
     sessionDb?: SessionDB;
   } = {}) {
     const nowTrusted = await trustStore.isTrusted(workspaceRoot);
-    const latestConfig = nowTrusted
-      ? await loadTrustedRuntimeConfig({ workspaceRoot })
-      : await loadUserRuntimeConfig({ workspaceRoot });
+    const latestConfig = await loadRuntimeConfig({ workspaceRoot, profileId });
 
     return createRuntime({
       theme: kemetBlueTheme,
       model: latestConfig.model,
       primaryModelRoute: latestConfig.primaryModelRoute,
       modelFallbackRoutes: latestConfig.modelFallbackRoutes,
+      profileId,
       workspaceRoot,
       sessionId: input.sessionId,
       sessionDb: input.sessionDb,
@@ -140,7 +139,6 @@ async function main(): Promise<void> {
       ui: latestConfig.ui,
       agentProfile: latestConfig.profile,
       providerRegistry: latestConfig.providerRegistry,
-      credentialPools: latestConfig.credentialPools,
       auxiliaryModels: latestConfig.auxiliaryModels,
       mcpServers: latestConfig.mcp.servers,
       browser: latestConfig.browser,

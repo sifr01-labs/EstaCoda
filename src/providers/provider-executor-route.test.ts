@@ -13,8 +13,9 @@ import type {
 import { ProviderExecutor, type ProviderExecutionOptions, type ProviderRuntimeEvent } from "./provider-executor.js";
 import { ProviderRegistry } from "./provider-registry.js";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
+import { resolveProfileStateHome } from "../config/profile-home.js";
 
 type MockCall = {
   request: ProviderRequest;
@@ -83,8 +84,8 @@ async function makeTempDir(): Promise<string> {
 }
 
 async function writeAuthJson(homeDir: string, store: unknown): Promise<void> {
-  const path = join(homeDir, ".estacoda", "auth.json");
-  await mkdir(join(homeDir, ".estacoda"), { recursive: true });
+  const path = resolveProfileStateHome({ homeDir, profileId: "default" }).authJsonPath;
+  await mkdir(dirname(path), { recursive: true });
   await writeFile(path, JSON.stringify(store, null, 2) + "\n", "utf8");
 }
 
@@ -340,35 +341,6 @@ describe("ProviderExecutor route-based execution", () => {
         process.env.COMBINED_KEY = originalEnv;
       }
     }
-  });
-
-  it("falls back to credential pool when route has no apiKeyEnv", async () => {
-    const { CredentialPool, CredentialPoolRegistry } = await import("./credential-pool.js");
-    const poolRegistry = new CredentialPoolRegistry();
-    poolRegistry.register(new CredentialPool({
-      provider: "openai",
-      entries: [
-        {
-          id: "openai-pool-1",
-          source: { kind: "literal", value: "pool-secret" },
-          priority: 1
-        }
-      ]
-    }));
-
-    const adapter = createMockAdapter({ id: "openai" });
-    registry.register(adapter);
-
-    const route = createDefaultRoute();
-    const exec = new ProviderExecutor({ registry, credentialPools: poolRegistry });
-    const result = await exec.complete({ messages: [] }, {}, {
-      primaryRoute: route
-    });
-
-    expect(result.ok).toBe(true);
-    expect(adapter.calls.length).toBe(1);
-    expect(adapter.calls[0].options?.credential?.id).toBe("openai-pool-1");
-    expect(adapter.calls[0].options?.credential?.value).toBe("pool-secret");
   });
 
   it("streams with route-level endpoint override", async () => {

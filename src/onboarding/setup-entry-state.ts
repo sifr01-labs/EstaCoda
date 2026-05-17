@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
+import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 import type { ProviderDiagnostic } from "../config/provider-diagnostics.js";
 import type { StartupReadinessSnapshot } from "../runtime/startup-readiness.js";
 import { collectStartupReadinessSnapshot } from "../runtime/startup-readiness.js";
@@ -255,8 +256,9 @@ function collectBlockers(
 }
 
 function setupConfigPaths(options: CollectSetupEntryStateOptions): SetupEntryState["configPaths"] {
+  const profileId = readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
   return {
-    user: options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json"),
+    user: options.userConfigPath ?? resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath,
     project: options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json"),
   };
 }

@@ -62,6 +62,7 @@ import { CronExecutionStore } from "../cron/cron-execution-store.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { resolveStateHome } from "../config/state-home.js";
+import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 import { runSessionsCommand } from "./session-commands.js";
 import { runHandoffCommand } from "./handoff-commands.js";
 import { createFileCronJobLock } from "../cron/cron-lock.js";
@@ -1046,7 +1047,8 @@ async function persistModelSelection(
   });
 
   // ── Persist config ──
-  const targetPath = options.userConfigPath ?? resolveStateHome({ homeDir: options.homeDir }).configPath;
+  const profileId = readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+  const targetPath = options.userConfigPath ?? resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
   try {
     await saveRuntimeConfig(targetPath, mutated);
   } catch (err) {
@@ -1256,7 +1258,8 @@ async function runBareModelPicker(
   });
 
   // ── Persist config ──
-  const targetPath = options.userConfigPath ?? resolveStateHome({ homeDir: options.homeDir }).configPath;
+  const profileId = readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+  const targetPath = options.userConfigPath ?? resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
   try {
     await saveRuntimeConfig(targetPath, mutated);
   } catch (err) {
@@ -1707,7 +1710,6 @@ async function doctor(options: CliOptions, args: string[] = []): Promise<CliComm
       `Web extraction: ${config === undefined ? "unknown" : config.web.enableNetwork ? "enabled" : "disabled"}`,
       `Browser backend: ${config?.browser.backend ?? "unknown"}`,
       `Config sources: ${(config?.sources ?? setupState.configSources).join(", ") || "none"}`,
-      `Credential pools: ${config?.credentialPools.snapshots().map((snapshot) => `${snapshot.provider}:${snapshot.entries.length}`).join(", ") || "none"}`,
       "",
       renderProviderDiagnostic(providerDiagnostic),
       liveProviderDiagnostic === undefined ? undefined : "",
@@ -3201,9 +3203,6 @@ function parseSetupArgs(args: string[]): Partial<ProviderSetupInput> {
       parsed.scope = "user";
     } else if (arg === "--offline") {
       parsed.enableNetwork = false;
-    } else if (arg === "--strategy") {
-      parsed.credentialPoolStrategy = next as ProviderSetupInput["credentialPoolStrategy"];
-      index += 1;
     }
   }
 

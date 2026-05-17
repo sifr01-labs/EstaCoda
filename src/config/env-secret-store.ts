@@ -48,9 +48,12 @@ export async function writeEnvSecret(options: {
 export async function loadDotEnvSecrets(options: {
   homeDir?: string;
   path?: string;
+  profileId?: string;
   override?: boolean;
 }): Promise<string[]> {
-  const path = options.path ?? defaultEnvPath(options.homeDir);
+  const path = options.path ?? (options.profileId === undefined
+    ? defaultEnvPath(options.homeDir)
+    : resolveProfileStateHome({ homeDir: options.homeDir, profileId: options.profileId }).envPath);
   const content = await readEnvFile(path);
   const loaded: string[] = [];
 

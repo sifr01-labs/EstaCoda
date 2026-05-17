@@ -56,6 +56,7 @@ import type { RuntimeCacheState } from "../gateway/runtime-cache-state.js";
 import { writeAdapterRuntimeState, RUNTIME_STATE_FILE } from "../gateway/adapter-runtime-state.js";
 import type { PersistedRuntimeState, AdapterRuntimeState } from "../gateway/adapter-runtime-state.js";
 import { openDefaultSQLiteDatabase } from "../storage/factory.js";
+import { resolveProfileStateHome } from "../config/profile-home.js";
 
 function fakeRuntimeCacheState(overrides?: Partial<RuntimeCacheState>): RuntimeCacheState {
   return {
@@ -111,9 +112,13 @@ function fakeAdapterRuntimeState(
 }
 
 async function writeUserConfig(homeDir: string, config: unknown): Promise<void> {
-  const configPath = join(homeDir, ".estacoda", "config.json");
+  const configPath = defaultProfileConfigPath(homeDir);
   await mkdir(dirname(configPath), { recursive: true });
   await writeFile(configPath, JSON.stringify(config), "utf8");
+}
+
+function defaultProfileConfigPath(homeDir: string): string {
+  return resolveProfileStateHome({ homeDir, profileId: "default" }).configPath;
 }
 
 async function writeRawAdapterRuntimeState(homeDir: string, content: string): Promise<void> {
@@ -863,7 +868,7 @@ describe("gateway commands", () => {
 
   describe("runChannelsEnable", () => {
     it("enables a disabled channel", async () => {
-      const configPath = join(tmpDir, ".estacoda", "config.json");
+      const configPath = defaultProfileConfigPath(tmpDir);
       await mkdir(dirname(configPath), { recursive: true });
       await writeFile(configPath, JSON.stringify({ channels: { telegram: { enabled: false } } }), "utf8");
 
@@ -876,7 +881,7 @@ describe("gateway commands", () => {
     });
 
     it("is idempotent when channel already enabled", async () => {
-      const configPath = join(tmpDir, ".estacoda", "config.json");
+      const configPath = defaultProfileConfigPath(tmpDir);
       await mkdir(dirname(configPath), { recursive: true });
       const original = JSON.stringify({ channels: { telegram: { enabled: true, botTokenEnv: "X" } } }, null, 2);
       await writeFile(configPath, original, "utf8");
@@ -903,7 +908,7 @@ describe("gateway commands", () => {
     });
 
     it("preserves other channel fields", async () => {
-      const configPath = join(tmpDir, ".estacoda", "config.json");
+      const configPath = defaultProfileConfigPath(tmpDir);
       await mkdir(dirname(configPath), { recursive: true });
       await writeFile(configPath, JSON.stringify({ channels: { telegram: { botTokenEnv: "X", allowedUserIds: ["u1"] } } }), "utf8");
 
@@ -917,7 +922,7 @@ describe("gateway commands", () => {
     });
 
     it("preserves other channels", async () => {
-      const configPath = join(tmpDir, ".estacoda", "config.json");
+      const configPath = defaultProfileConfigPath(tmpDir);
       await mkdir(dirname(configPath), { recursive: true });
       await writeFile(configPath, JSON.stringify({ channels: { discord: { enabled: true }, telegram: { enabled: false } } }), "utf8");
 
@@ -929,7 +934,7 @@ describe("gateway commands", () => {
     });
 
     it("preserves non-channel config", async () => {
-      const configPath = join(tmpDir, ".estacoda", "config.json");
+      const configPath = defaultProfileConfigPath(tmpDir);
       await mkdir(dirname(configPath), { recursive: true });
       await writeFile(configPath, JSON.stringify({ model: { provider: "openai" }, channels: { telegram: { enabled: false } } }), "utf8");
 
@@ -941,7 +946,7 @@ describe("gateway commands", () => {
     });
 
     it("preserves unknown top-level fields", async () => {
-      const configPath = join(tmpDir, ".estacoda", "config.json");
+      const configPath = defaultProfileConfigPath(tmpDir);
       await mkdir(dirname(configPath), { recursive: true });
       await writeFile(configPath, JSON.stringify({ customField: 123, channels: { telegram: { enabled: false } } }), "utf8");
 
@@ -953,7 +958,7 @@ describe("gateway commands", () => {
     });
 
     it("preserves unknown nested channel fields", async () => {
-      const configPath = join(tmpDir, ".estacoda", "config.json");
+      const configPath = defaultProfileConfigPath(tmpDir);
       await mkdir(dirname(configPath), { recursive: true });
       await writeFile(configPath, JSON.stringify({ channels: { telegram: { customFlag: true, enabled: false } } }), "utf8");
 
@@ -965,7 +970,7 @@ describe("gateway commands", () => {
     });
 
     it("preserves busyPolicy and queueDepth", async () => {
-      const configPath = join(tmpDir, ".estacoda", "config.json");
+      const configPath = defaultProfileConfigPath(tmpDir);
       await mkdir(dirname(configPath), { recursive: true });
       await writeFile(configPath, JSON.stringify({ channels: { telegram: { busyPolicy: "queue", queueDepth: 7, enabled: false } } }), "utf8");
 
@@ -982,7 +987,7 @@ describe("gateway commands", () => {
       expect(result.ok).toBe(true);
       expect(result.output).toBe("Telegram enabled");
 
-      const configPath = join(tmpDir, ".estacoda", "config.json");
+      const configPath = defaultProfileConfigPath(tmpDir);
       const parsed = JSON.parse(await readFile(configPath, "utf8"));
       expect(parsed.channels.telegram.enabled).toBe(true);
     });
@@ -1008,7 +1013,7 @@ describe("gateway commands", () => {
     });
 
     it("fails on invalid JSON without overwriting", async () => {
-      const configPath = join(tmpDir, ".estacoda", "config.json");
+      const configPath = defaultProfileConfigPath(tmpDir);
       await mkdir(dirname(configPath), { recursive: true });
       const bad = "{ not json";
       await writeFile(configPath, bad, "utf8");
@@ -1023,7 +1028,7 @@ describe("gateway commands", () => {
     });
 
     it("fails on non-object JSON without overwriting", async () => {
-      const configPath = join(tmpDir, ".estacoda", "config.json");
+      const configPath = defaultProfileConfigPath(tmpDir);
       await mkdir(dirname(configPath), { recursive: true });
       const bad = "[]";
       await writeFile(configPath, bad, "utf8");
@@ -1038,7 +1043,7 @@ describe("gateway commands", () => {
     });
 
     it("fails on null JSON without overwriting", async () => {
-      const configPath = join(tmpDir, ".estacoda", "config.json");
+      const configPath = defaultProfileConfigPath(tmpDir);
       await mkdir(dirname(configPath), { recursive: true });
       const bad = "null";
       await writeFile(configPath, bad, "utf8");
@@ -1054,7 +1059,7 @@ describe("gateway commands", () => {
 
     it("accepts mixed-case channel names", async () => {
       for (const name of ["Telegram", "TELEGRAM", "teLeGrAm"]) {
-        const configPath = join(tmpDir, ".estacoda", "config.json");
+        const configPath = defaultProfileConfigPath(tmpDir);
         await rm(dirname(configPath), { recursive: true, force: true });
         const result = await runChannelsEnable({ workspaceRoot: tmpDir, homeDir: tmpDir, channel: name });
         expect(result.ok).toBe(true);
@@ -1069,7 +1074,7 @@ describe("gateway commands", () => {
     });
 
     it("writes to temp file then renames", async () => {
-      const configPath = join(tmpDir, ".estacoda", "config.json");
+      const configPath = defaultProfileConfigPath(tmpDir);
       await mkdir(dirname(configPath), { recursive: true });
       await writeFile(configPath, JSON.stringify({ channels: { telegram: { enabled: false } } }), "utf8");
 
@@ -1081,7 +1086,7 @@ describe("gateway commands", () => {
     });
 
     it("leaves original intact on write failure", async () => {
-      const configPath = join(tmpDir, ".estacoda", "config.json");
+      const configPath = defaultProfileConfigPath(tmpDir);
       await mkdir(dirname(configPath), { recursive: true });
       const original = JSON.stringify({ channels: { telegram: { enabled: false } } });
       await writeFile(configPath, original, "utf8");
@@ -1097,7 +1102,7 @@ describe("gateway commands", () => {
 
   describe("runChannelsDisable", () => {
     it("disables an enabled channel", async () => {
-      const configPath = join(tmpDir, ".estacoda", "config.json");
+      const configPath = defaultProfileConfigPath(tmpDir);
       await mkdir(dirname(configPath), { recursive: true });
       await writeFile(configPath, JSON.stringify({ channels: { telegram: { enabled: true } } }), "utf8");
 
@@ -1110,7 +1115,7 @@ describe("gateway commands", () => {
     });
 
     it("is idempotent when channel already disabled", async () => {
-      const configPath = join(tmpDir, ".estacoda", "config.json");
+      const configPath = defaultProfileConfigPath(tmpDir);
       await mkdir(dirname(configPath), { recursive: true });
       const original = JSON.stringify({ channels: { telegram: { enabled: false, botTokenEnv: "X" } } }, null, 2);
       await writeFile(configPath, original, "utf8");
@@ -1124,7 +1129,7 @@ describe("gateway commands", () => {
     });
 
     it("is idempotent when channel has no enabled field", async () => {
-      const configPath = join(tmpDir, ".estacoda", "config.json");
+      const configPath = defaultProfileConfigPath(tmpDir);
       await mkdir(dirname(configPath), { recursive: true });
       const original = JSON.stringify({ channels: { telegram: {} } }, null, 2);
       await writeFile(configPath, original, "utf8");
@@ -1142,7 +1147,7 @@ describe("gateway commands", () => {
       expect(result.ok).toBe(true);
       expect(result.output).toBe("Telegram is already disabled");
 
-      const configPath = join(tmpDir, ".estacoda", "config.json");
+      const configPath = defaultProfileConfigPath(tmpDir);
       await expect(readFile(configPath, "utf8")).rejects.toThrow();
     });
 
@@ -1160,7 +1165,7 @@ describe("gateway commands", () => {
     });
 
     it("preserves other fields on disable", async () => {
-      const configPath = join(tmpDir, ".estacoda", "config.json");
+      const configPath = defaultProfileConfigPath(tmpDir);
       await mkdir(dirname(configPath), { recursive: true });
       await writeFile(configPath, JSON.stringify({ channels: { telegram: { enabled: true, botTokenEnv: "X", allowedUserIds: ["u1"], busyPolicy: "queue", queueDepth: 7, customFlag: true }, discord: { enabled: true } } }), "utf8");
 
@@ -1178,7 +1183,7 @@ describe("gateway commands", () => {
     });
 
     it("fails on invalid JSON without overwriting", async () => {
-      const configPath = join(tmpDir, ".estacoda", "config.json");
+      const configPath = defaultProfileConfigPath(tmpDir);
       await mkdir(dirname(configPath), { recursive: true });
       const bad = "{ not json";
       await writeFile(configPath, bad, "utf8");
@@ -1193,7 +1198,7 @@ describe("gateway commands", () => {
     });
 
     it("fails on non-object JSON without overwriting", async () => {
-      const configPath = join(tmpDir, ".estacoda", "config.json");
+      const configPath = defaultProfileConfigPath(tmpDir);
       await mkdir(dirname(configPath), { recursive: true });
       const bad = "[]";
       await writeFile(configPath, bad, "utf8");
@@ -1208,7 +1213,7 @@ describe("gateway commands", () => {
     });
 
     it("outputs correct display name for WhatsApp", async () => {
-      const configPath = join(tmpDir, ".estacoda", "config.json");
+      const configPath = defaultProfileConfigPath(tmpDir);
       await mkdir(dirname(configPath), { recursive: true });
       await writeFile(configPath, JSON.stringify({ channels: { whatsapp: { enabled: true } } }), "utf8");
 

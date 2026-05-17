@@ -9,6 +9,7 @@ import {
 import type { ProviderId } from "../contracts/provider.js";
 import type { FetchLike } from "../providers/openai-compatible-provider.js";
 import type { CliOptions, CliCommandResult } from "./cli.js";
+import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 
 export type OpenAIModelProbe = {
   ok: boolean;
@@ -333,9 +334,8 @@ export async function runModelSetupCustom(options: CliOptions, args: string[]): 
     };
   }
 
-  const targetPath = parsed.scope === "project"
-    ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
-    : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const profileId = readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+  const targetPath = resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
 
   const existing = await readConfig(targetPath);
   const conflict = validateCustomProviderId(existing.config, providerId as ProviderId, baseUrl);

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Prompt } from "../../cli/readline-prompt.js";
 import { WorkspaceTrustStore } from "../../security/workspace-trust-store.js";
@@ -8,6 +8,7 @@ import type { ProviderId, ProviderApiMode, ProviderAuthMethod } from "../../cont
 import type { FlowEngine } from "../../providers/provider-model-selection-flow.js";
 import { createReviewedSetupApplyExecutor } from "../review/apply-executor.js";
 import { runConfigEditor } from "./runner.js";
+import { resolveProfileStateHome } from "../../config/profile-home.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-config-editor-"));
@@ -31,7 +32,7 @@ describe("runConfigEditor", () => {
   it("renders configured setup sections and exits without mutating config", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
-    const before = await readFile(join(tempDir, ".estacoda", "config.json"), "utf8");
+    const before = await readFile(profileConfigPath(tempDir), "utf8");
     const output: string[] = [];
     let applyCalled = false;
 
@@ -66,7 +67,7 @@ describe("runConfigEditor", () => {
     expect(output.join("")).toContain("verify-setup - Run read-only verification");
     expect(output.join("")).toContain("show-diagnostics - Show diagnostics");
     expect(output.join("")).toContain("exit - Exit without changes");
-    await expect(readFile(join(tempDir, ".estacoda", "config.json"), "utf8")).resolves.toBe(before);
+    await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
   });
 
   it("prepares the read-only verification route without applying changes", async () => {
@@ -150,7 +151,7 @@ describe("runConfigEditor", () => {
       }),
     });
 
-    const config = JSON.parse(await readFile(join(tempDir, ".estacoda", "config.json"), "utf8")) as {
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
       model?: unknown;
       providers?: unknown;
       security?: { approvalMode?: string; assessor?: { enabled?: boolean } };
@@ -188,7 +189,7 @@ describe("runConfigEditor", () => {
       }),
     });
 
-    const config = JSON.parse(await readFile(join(tempDir, ".estacoda", "config.json"), "utf8")) as {
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
       skills?: { autonomy?: string; externalDirs?: string[] };
     };
 
@@ -212,7 +213,7 @@ describe("runConfigEditor", () => {
       applyExecutor: createReviewedSetupApplyExecutor({
         homeDir: tempDir,
         workspaceRoot,
-        collectVerification: () => readyVerification(join(tempDir, ".estacoda", "config.json")),
+        collectVerification: () => readyVerification(profileConfigPath(tempDir)),
       }),
     });
 
@@ -240,7 +241,7 @@ describe("runConfigEditor", () => {
       applyExecutor: createReviewedSetupApplyExecutor({
         homeDir: tempDir,
         workspaceRoot,
-        collectVerification: () => degradedVerification(join(tempDir, ".estacoda", "config.json")),
+        collectVerification: () => degradedVerification(profileConfigPath(tempDir)),
       }),
     });
 
@@ -282,7 +283,7 @@ describe("runConfigEditor", () => {
       applyExecutor: createReviewedSetupApplyExecutor({
         homeDir: tempDir,
         workspaceRoot,
-        collectVerification: () => blockedVerification(join(tempDir, ".estacoda", "config.json")),
+        collectVerification: () => blockedVerification(profileConfigPath(tempDir)),
       }),
     });
 
@@ -345,7 +346,7 @@ describe("runConfigEditor", () => {
       defaultActionId: "trust-workspace",
       applyExecutor: {
         apply: () => ({ ok: true, appliedOperationIds: [] }),
-        verify: () => readyVerification(join(tempDir, ".estacoda", "config.json")),
+        verify: () => readyVerification(profileConfigPath(tempDir)),
       },
     });
 
@@ -370,7 +371,7 @@ describe("runConfigEditor", () => {
       applyExecutor: createReviewedSetupApplyExecutor({
         homeDir: tempDir,
         workspaceRoot,
-        collectVerification: () => degradedVerification(join(tempDir, ".estacoda", "config.json")),
+        collectVerification: () => degradedVerification(profileConfigPath(tempDir)),
       }),
       output: { write: (value) => output.push(value) },
     });
@@ -401,16 +402,16 @@ describe("runConfigEditor", () => {
       applyExecutor: createReviewedSetupApplyExecutor({
         homeDir: tempDir,
         workspaceRoot,
-        collectVerification: () => readyVerification(join(tempDir, ".estacoda", "config.json")),
+        collectVerification: () => readyVerification(profileConfigPath(tempDir)),
       }),
     });
-    const rawConfig = await readFile(join(tempDir, ".estacoda", "config.json"), "utf8");
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
     const config = JSON.parse(rawConfig) as {
       model?: { provider?: string; id?: string; contextWindowTokens?: number; apiMode?: string; authMethod?: string };
       providers?: Record<string, { apiKeyEnv?: string; baseUrl?: string; models?: string[]; apiMode?: string; authMethod?: string }>;
       security?: { approvalMode?: string; assessor?: { enabled?: boolean } };
     };
-    const envFile = await readFile(join(tempDir, ".estacoda", ".env"), "utf8");
+    const envFile = await readFile(profileEnvPath(tempDir), "utf8");
 
     expect(result.completed).toBe(true);
     expect(result.selectedActionId).toBe("edit-primary-model-route");
@@ -440,7 +441,7 @@ describe("runConfigEditor", () => {
     delete process.env.PR8_CANCELLED_KEY;
     await writeUserConfig(tempDir, hostedMissingCredentialConfig("PR8_CANCELLED_KEY"));
     await trustWorkspace(tempDir, workspaceRoot);
-    const before = await readFile(join(tempDir, ".estacoda", "config.json"), "utf8");
+    const before = await readFile(profileConfigPath(tempDir), "utf8");
 
     const result = await runConfigEditor({
       homeDir: tempDir,
@@ -456,8 +457,8 @@ describe("runConfigEditor", () => {
 
     expect(result.completed).toBe(false);
     expect(result.applyPlanningResult?.kind).toBe("cancelled");
-    await expect(readFile(join(tempDir, ".estacoda", "config.json"), "utf8")).resolves.toBe(before);
-    await expect(readFile(join(tempDir, ".estacoda", ".env"), "utf8")).rejects.toThrow();
+    await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).rejects.toThrow();
     expect(JSON.stringify(result)).not.toContain("sk-pr8-cancelled");
     expect(JSON.stringify(result.reviewManifest)).not.toContain("sk-pr8-cancelled");
     expect(JSON.stringify(result.applyPlanningResult)).not.toContain("sk-pr8-cancelled");
@@ -499,15 +500,15 @@ describe("runConfigEditor", () => {
       applyExecutor: createReviewedSetupApplyExecutor({
         homeDir: tempDir,
         workspaceRoot,
-        collectVerification: () => readyVerification(join(tempDir, ".estacoda", "config.json")),
+        collectVerification: () => readyVerification(profileConfigPath(tempDir)),
       }),
     });
-    const rawConfig = await readFile(join(tempDir, ".estacoda", "config.json"), "utf8");
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
     const config = JSON.parse(rawConfig) as {
       model?: { provider?: string; id?: string };
       providers?: Record<string, { apiKeyEnv?: string; models?: string[] }>;
     };
-    const envFile = await readFile(join(tempDir, ".estacoda", ".env"), "utf8");
+    const envFile = await readFile(profileEnvPath(tempDir), "utf8");
 
     expect(result.completed).toBe(true);
     expect(result.selectedActionId).toBe("repair-missing-credential");
@@ -532,7 +533,7 @@ describe("runConfigEditor", () => {
     delete process.env.PR8_UNAVAILABLE_KEY;
     await writeUserConfig(tempDir, hostedMissingCredentialConfig("PR8_UNAVAILABLE_KEY"));
     await trustWorkspace(tempDir, workspaceRoot);
-    const before = await readFile(join(tempDir, ".estacoda", "config.json"), "utf8");
+    const before = await readFile(profileConfigPath(tempDir), "utf8");
 
     const result = await runConfigEditor({
       homeDir: tempDir,
@@ -555,15 +556,15 @@ describe("runConfigEditor", () => {
     expect(result.reviewManifest).toBeUndefined();
     expect(result.applyPlanningResult).toBeUndefined();
     expect(result.output).toContain("Use provider/model repair");
-    await expect(readFile(join(tempDir, ".estacoda", "config.json"), "utf8")).resolves.toBe(before);
-    await expect(readFile(join(tempDir, ".estacoda", ".env"), "utf8")).rejects.toThrow();
+    await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).rejects.toThrow();
     expect(JSON.stringify(result)).not.toContain("sk-pr8-unavailable");
   });
 
   it("treats shared-flow diagnostics as non-mutating editor output", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
-    const before = await readFile(join(tempDir, ".estacoda", "config.json"), "utf8");
+    const before = await readFile(profileConfigPath(tempDir), "utf8");
 
     const result = await runConfigEditor({
       homeDir: tempDir,
@@ -581,7 +582,7 @@ describe("runConfigEditor", () => {
     expect(result.completed).toBe(false);
     expect(result.output).toContain("Provider/model selection failed: Provider OpenAI is not runnable.");
     expect(result.reviewManifest).toBeUndefined();
-    await expect(readFile(join(tempDir, ".estacoda", "config.json"), "utf8")).resolves.toBe(before);
+    await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
   });
 
   it("grants workspace trust only after explicit confirmation and reviewed approval", async () => {
@@ -640,7 +641,7 @@ describe("runConfigEditor", () => {
   it("leaves optional capabilities unchanged without drafting or applying changes", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
-    const before = await readFile(join(tempDir, ".estacoda", "config.json"), "utf8");
+    const before = await readFile(profileConfigPath(tempDir), "utf8");
     let applyCalled = false;
 
     const result = await runConfigEditor({
@@ -662,7 +663,7 @@ describe("runConfigEditor", () => {
     expect(result.reviewManifest).toBeUndefined();
     expect(result.applyPlanningResult).toBeUndefined();
     expect(applyCalled).toBe(false);
-    await expect(readFile(join(tempDir, ".estacoda", "config.json"), "utf8")).resolves.toBe(before);
+    await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
   });
 
   it("does not offer skip for already configured optional capabilities", async () => {
@@ -706,7 +707,7 @@ describe("runConfigEditor", () => {
   it("blocks Telegram optional capability apply without allowed remote-control identities", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
-    const before = await readFile(join(tempDir, ".estacoda", "config.json"), "utf8");
+    const before = await readFile(profileConfigPath(tempDir), "utf8");
     let applyCalled = false;
 
     const result = await runConfigEditor({
@@ -730,7 +731,7 @@ describe("runConfigEditor", () => {
     expect(result.applyPlanningResult?.kind).toBe("blocked");
     expect(applyCalled).toBe(false);
     expect(JSON.stringify(result)).not.toContain("123456:");
-    await expect(readFile(join(tempDir, ".estacoda", "config.json"), "utf8")).resolves.toBe(before);
+    await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
   });
 
   it("applies reviewed Telegram optional capability with env ref and allowlisted identities", async () => {
@@ -749,7 +750,7 @@ describe("runConfigEditor", () => {
         workspaceRoot,
       }),
     });
-    const rawConfig = await readFile(join(tempDir, ".estacoda", "config.json"), "utf8");
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
     const config = JSON.parse(rawConfig) as {
       channels?: { telegram?: { enabled?: boolean; botTokenEnv?: string; allowedUserIds?: string[]; allowedChatIds?: string[] } };
     };
@@ -803,7 +804,7 @@ describe("runConfigEditor", () => {
         workspaceRoot,
       }),
     });
-    const rawConfig = await readFile(join(tempDir, ".estacoda", "config.json"), "utf8");
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
     const config = JSON.parse(rawConfig) as {
       tts?: { provider?: string; openai?: { model?: string; apiKeyEnv?: string } };
       stt?: { provider?: string; openai?: { model?: string; apiKeyEnv?: string } };
@@ -839,8 +840,8 @@ describe("runConfigEditor", () => {
   });
 
   it("renders broken config as a repair-first diagnostic surface", async () => {
-    await mkdir(join(tempDir, ".estacoda"), { recursive: true });
-    await writeFile(join(tempDir, ".estacoda", "config.json"), "{not-json", "utf8");
+    await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
+    await writeFile(profileConfigPath(tempDir), "{not-json", "utf8");
     const output: string[] = [];
 
     const result = await runConfigEditor({
@@ -858,7 +859,7 @@ describe("runConfigEditor", () => {
     expect(result.initialDecision.setupEditorPlanSession?.metadata.mode).toBe("repair-first");
     expect(result.output).toContain("Setup diagnostics");
     expect(result.output).toContain("State: broken-config");
-    expect(result.output).toContain(join(tempDir, ".estacoda", "config.json"));
+    expect(result.output).toContain(profileConfigPath(tempDir));
     expect(result.output).toContain("Error:");
     expect(result.output).toContain("Normal config edits are blocked until the config file can be parsed.");
     expect(result.output).toContain("Only diagnostics, verification, and exit are available");
@@ -888,7 +889,7 @@ describe("runConfigEditor", () => {
     expect(result.initialDecision.state.kind).toBe("state-not-writable");
     expect(result.initialDecision.setupEditorPlanSession?.metadata.mode).toBe("repair-first");
     expect(result.output).toContain("State: state-not-writable");
-    expect(result.output).toContain(join(tempDir, ".estacoda", "config.json"));
+    expect(result.output).toContain(profileConfigPath(tempDir));
     expect(result.output).toContain("not writable");
     expect(result.output).toContain("write permission");
     expect(result.output).toContain("Restore write permission");
@@ -928,8 +929,17 @@ function fakePrompt(options: { readonly values?: readonly unknown[]; readonly se
 }
 
 async function writeUserConfig(homeDir: string, config: unknown): Promise<void> {
-  await mkdir(join(homeDir, ".estacoda"), { recursive: true });
-  await writeFile(join(homeDir, ".estacoda", "config.json"), `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  const configPath = profileConfigPath(homeDir);
+  await mkdir(dirname(configPath), { recursive: true });
+  await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+}
+
+function profileConfigPath(homeDir: string): string {
+  return resolveProfileStateHome({ homeDir, profileId: "default" }).configPath;
+}
+
+function profileEnvPath(homeDir: string): string {
+  return resolveProfileStateHome({ homeDir, profileId: "default" }).envPath;
 }
 
 async function trustWorkspace(homeDir: string, workspaceRoot: string): Promise<void> {

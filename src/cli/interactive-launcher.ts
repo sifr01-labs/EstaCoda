@@ -113,8 +113,7 @@ async function loadLaunchLocale(options: LaunchOptions): Promise<UiLocale> {
   try {
     const config = await loadRuntimeConfig({
       workspaceRoot: options.workspaceRoot,
-      homeDir: options.homeDir,
-      projectConfigTrust: options.projectConfigTrust
+      homeDir: options.homeDir
     });
     return config.ui.language === "ar" ? "ar" : "en";
   } catch {

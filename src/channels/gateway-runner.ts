@@ -1,5 +1,5 @@
 import { loadRuntimeConfig } from "../config/runtime-config.js";
-import { resolveStateHome } from "../config/state-home.js";
+import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
 import type { ChannelAuthPolicies } from "../contracts/channel.js";
 import { getWhatsAppGatewayDiagnostics } from "./whatsapp-diagnostics.js";
 
@@ -9,6 +9,7 @@ export type GatewayRunOptions = {
   userConfigPath?: string;
   projectConfigPath?: string;
   projectConfigTrust?: "trusted" | "untrusted";
+  profileId?: string;
   telegramFetch?: import("./telegram-adapter.js").TelegramFetch;
   once?: boolean;
 };
@@ -53,12 +54,18 @@ export type TelegramGatewayDiagnostics = {
 };
 
 export async function getTelegramGatewayDiagnostics(options: GatewayRunOptions): Promise<TelegramGatewayDiagnostics> {
-  const config = await loadRuntimeConfig(options);
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir })?.profileId ?? defaultProfileId();
+  const config = await loadRuntimeConfig({
+    workspaceRoot: options.workspaceRoot,
+    homeDir: options.homeDir,
+    profileId
+  });
   const telegram = config.channels.telegram;
-  const stateHome = resolveStateHome({ homeDir: options.homeDir ?? process.env.HOME ?? options.workspaceRoot });
-  const stateRoot = stateHome.stateRoot;
-  const sessionDbPath = stateHome.sessionsSqlitePath;
-  const mediaRoot = stateHome.channelMediaPath;
+  const globalPaths = resolveGlobalStateHome({ homeDir: options.homeDir ?? process.env.HOME ?? options.workspaceRoot });
+  const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir ?? process.env.HOME ?? options.workspaceRoot, profileId });
+  const stateRoot = globalPaths.stateRoot;
+  const sessionDbPath = globalPaths.sessionsSqlitePath;
+  const mediaRoot = profilePaths.channelMediaPath;
   const approvalStorePath = `${stateRoot}/channel-approvals.json`;
   const sessionContextPath = `${stateRoot}/channel-sessions.json`;
   const authPolicy = telegramAuthPolicy(telegram.allowedUserIds ?? [], telegram.allowedChatIds ?? []);

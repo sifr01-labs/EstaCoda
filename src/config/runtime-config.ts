@@ -5,8 +5,6 @@ import type { BrowserBackendKind } from "../contracts/browser.js";
 import type {
   AuxiliaryModelConfig,
   AuxiliaryModelTask,
-  CredentialPoolEntry,
-  CredentialRotationStrategy,
   ModelProfile,
   ProviderEndpoint,
   ProviderApiMode,
@@ -14,7 +12,6 @@ import type {
   ProviderId,
   ResolvedModelRoute
 } from "../contracts/provider.js";
-import { CredentialPool, CredentialPoolRegistry } from "../providers/credential-pool.js";
 import { loadDotEnvSecrets, writeEnvSecret } from "./env-secret-store.js";
 import {
   enrichModelProfiles,
@@ -42,8 +39,8 @@ import {
   defaultImageModel,
   resolveImageModel
 } from "../contracts/image-generation.js";
-import { resolveStateHome } from "./state-home.js";
 import type { ModelsDevRegistryOptions } from "../model-catalog/models-dev-registry.js";
+import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "./profile-home.js";
 
 export type MCPServerTrust = "conservative" | "read-only-network" | "read-only-local";
 export type UiLanguage = "en" | "ar";
@@ -247,10 +244,6 @@ export type EstaCodaConfig = {
     enableNetwork?: boolean;
     headers?: Record<string, string>;
   }>;
-  credentialPools?: Record<string, {
-    strategy?: CredentialRotationStrategy;
-    entries?: CredentialPoolEntry[];
-  }>;
   auxiliaryModels?: AuxiliaryModelConfig;
   web?: {
     enableNetwork?: boolean;
@@ -365,7 +358,6 @@ export type LoadedRuntimeConfig = {
   primaryModelRoute: ResolvedModelRoute;
   modelFallbackRoutes: ResolvedModelRoute[];
   providerRegistry: ProviderRegistry;
-  credentialPools: CredentialPoolRegistry;
   auxiliaryModels: AuxiliaryModelConfig;
   web: {
     enableNetwork: boolean;
@@ -435,7 +427,6 @@ export type ProviderSetupInput = {
   apiKey?: string;
   enableNetwork?: boolean;
   scope?: "user" | "project";
-  credentialPoolStrategy?: CredentialRotationStrategy;
   primary?: boolean;
   contextWindowTokens?: number;
   requiresCredential?: boolean;
@@ -558,24 +549,17 @@ export type ProfileSetupInput = {
 export type LoadRuntimeConfigOptions = {
   workspaceRoot: string;
   homeDir?: string;
-  userConfigPath?: string;
-  projectConfigPath?: string;
+  profileId?: string;
   providerFetch?: ProviderFetchLike;
   modelsDevOptions?: ModelsDevRegistryOptions;
-  projectConfigTrust?: "trusted" | "untrusted";
 };
 
 export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Promise<LoadedRuntimeConfig> {
-  await loadDotEnvSecrets({ homeDir: options.homeDir });
-  const stateHome = resolveStateHome({ homeDir: options.homeDir });
-  const sources: string[] = [
-    options.userConfigPath ?? stateHome.configPath
-  ];
-  if (options.projectConfigTrust === "trusted") {
-    sources.push(options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json"));
-  }
-  const loaded = await Promise.all(sources.map((path) => readConfig(path)));
-  const config = mergeConfig(...loaded.map((entry) => entry.config));
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir })?.profileId ?? defaultProfileId();
+  await loadDotEnvSecrets({ homeDir: options.homeDir, profileId });
+  const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId });
+  const loadedConfig = await readConfig(profilePaths.configPath);
+  const config = mergeConfig(loadedConfig.config);
   const catalogProfiles = await resolveModelProfilesFromCatalog({
     homeDir: options.homeDir,
     allowNetwork: false,
@@ -593,7 +577,6 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
     fetch: options.providerFetch,
     catalogProfiles
   });
-  const credentialPools = buildCredentialPools(config);
   const telegram = config.channels?.telegram ?? {};
   const telegramMissing = telegram.enabled === true && telegram.botTokenEnv !== undefined && process.env[telegram.botTokenEnv] === undefined
     ? [telegram.botTokenEnv]
@@ -660,12 +643,11 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
 
   return {
     config,
-    sources: loaded.filter((entry) => entry.loaded).map((entry) => entry.path),
+    sources: loadedConfig.loaded ? [loadedConfig.path] : [],
     model,
     primaryModelRoute,
     modelFallbackRoutes,
     providerRegistry,
-    credentialPools,
     auxiliaryModels: normalizeAuxiliaryModels(config.auxiliaryModels),
     web: {
       enableNetwork: config.web?.enableNetwork ?? false,
@@ -732,12 +714,18 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
   };
 }
 
-export async function loadUserRuntimeConfig(options: Omit<LoadRuntimeConfigOptions, "projectConfigTrust">): Promise<LoadedRuntimeConfig> {
-  return loadRuntimeConfig({ ...options, projectConfigTrust: "untrusted" });
+export type LegacyLoadRuntimeConfigOptions = LoadRuntimeConfigOptions & {
+  userConfigPath?: string;
+  projectConfigPath?: string;
+  projectConfigTrust?: "trusted" | "untrusted";
+};
+
+export async function loadUserRuntimeConfig(options: LegacyLoadRuntimeConfigOptions): Promise<LoadedRuntimeConfig> {
+  return loadRuntimeConfig(options);
 }
 
-export async function loadTrustedRuntimeConfig(options: Omit<LoadRuntimeConfigOptions, "projectConfigTrust">): Promise<LoadedRuntimeConfig> {
-  return loadRuntimeConfig({ ...options, projectConfigTrust: "trusted" });
+export async function loadTrustedRuntimeConfig(options: LegacyLoadRuntimeConfigOptions): Promise<LoadedRuntimeConfig> {
+  return loadRuntimeConfig(options);
 }
 
 export function mergeConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
@@ -747,7 +735,6 @@ export function mergeConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
       ...(config.model ?? {})
     },
     providers: mergeRecordEntries(merged.providers, config.providers),
-    credentialPools: mergeRecordEntries(merged.credentialPools, config.credentialPools),
     modelAliases: mergeRecordEntries(
       mergeRecordEntries(merged.modelAliases, merged.model_aliases),
       mergeRecordEntries(config.modelAliases, config.model_aliases)
@@ -1354,23 +1341,18 @@ export function buildProviderRegistry(config: EstaCodaConfig, options: {
   return registry;
 }
 
-export function buildCredentialPools(config: EstaCodaConfig): CredentialPoolRegistry {
-  const registry = new CredentialPoolRegistry();
-
-  for (const [provider, poolConfig] of Object.entries(config.credentialPools ?? {})) {
-    registry.register(new CredentialPool({
-      provider: provider as ProviderId,
-      strategy: poolConfig.strategy,
-      entries: poolConfig.entries ?? []
-    }));
-  }
-
-  return registry;
-}
-
 export async function saveRuntimeConfig(path: string, config: EstaCodaConfig): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+}
+
+function resolveSelectedProfileId(options: { homeDir?: string; profileId?: string }): string {
+  return options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+}
+
+function resolveConfigMutationPath(options: { homeDir?: string; profileId?: string }): string {
+  const profileId = resolveSelectedProfileId(options);
+  return resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
 }
 
 /**
@@ -1399,20 +1381,20 @@ export async function setupProviderConfig(options: {
   secretPath?: string;
 }> {
   validateProviderSetupInput(options.input);
-  const targetPath = options.input.scope === "project"
-    ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
-    : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
   const explicitlyProvidesCredential = options.input.apiKeyEnv !== undefined || options.input.apiKey !== undefined;
   const forceCredential = options.input.requiresCredential !== false && options.input.provider !== "local";
   const requiresCredential = explicitlyProvidesCredential || forceCredential;
   const envName = requiresCredential ? options.input.apiKeyEnv ?? getDefaultApiKeyEnv(options.input.provider) : undefined;
+  const profileId = resolveSelectedProfileId(options);
 
   // Write raw secret to .env boundary, never into config JSON
   let secretPath: string | undefined;
   if (options.input.apiKey !== undefined && options.input.apiKey.trim().length > 0 && envName !== undefined) {
     const secret = await writeEnvSecret({
       homeDir: options.homeDir,
+      profileId,
       key: envName,
       value: options.input.apiKey
     });
@@ -1458,33 +1440,12 @@ export async function setupProviderConfig(options: {
       }
     };
 
-  // Only configure credential pools when explicit rotation is requested.
-  // Normal API-key storage is provider/route env reference + .env, not pool.
-  const credentialPoolPatch =
-    options.input.credentialPoolStrategy !== undefined && envName !== undefined
-      ? {
-        credentialPools: {
-          [options.input.provider]: {
-            strategy: options.input.credentialPoolStrategy,
-            entries: [
-              {
-                id: `${options.input.provider}-${envName}`,
-                source: { kind: "env" as const, name: envName },
-                priority: 1
-              }
-            ]
-          }
-        }
-      }
-      : {};
-
   // Single read, single merge, single save — no multi-write partial states
   const config = mergeConfig(existing.config, {
     ...primaryModelPatch,
     providers: {
       [options.input.provider]: providerConfig
-    },
-    ...credentialPoolPatch
+    }
   });
 
   await saveRuntimeConfig(targetPath, config);
@@ -1507,9 +1468,7 @@ export async function setupModelFallbackConfig(options: {
   config: EstaCodaConfig;
 }> {
   validateModelFallbackSetupInput(options.input);
-  const targetPath = options.input.scope === "project"
-    ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
-    : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
   const merged = mergeConfig(existing.config, {
     model: {
@@ -1548,9 +1507,7 @@ export async function removeModelFallbackConfig(options: {
   path: string;
   config: EstaCodaConfig;
 }> {
-  const targetPath = options.input.scope === "project"
-    ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
-    : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
   const targetKey = `${options.input.provider}/${options.input.id}/${options.input.baseUrl ?? ""}`;
   const remaining = (existing.config.model?.fallbacks ?? []).filter((fb) => {
@@ -1583,9 +1540,7 @@ export async function reorderModelFallbackConfig(options: {
   path: string;
   config: EstaCodaConfig;
 }> {
-  const targetPath = options.input.scope === "project"
-    ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
-    : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
   const current = existing.config.model?.fallbacks ?? [];
   const orderKeys = new Set(options.input.order.map((o) => `${o.provider}/${o.id}/${o.baseUrl ?? ""}`));
@@ -1617,9 +1572,7 @@ export async function clearModelFallbackConfig(options: {
   path: string;
   config: EstaCodaConfig;
 }> {
-  const targetPath = options.scope === "project"
-    ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
-    : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
   const config = mergeConfig(existing.config, {
     model: {
@@ -1646,9 +1599,7 @@ export async function setupWebConfig(options: {
   config: EstaCodaConfig;
 }> {
   validateWebSetupInput(options.input);
-  const targetPath = options.input.scope === "project"
-    ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
-    : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
   const config = mergeConfig(existing.config, {
     web: {
@@ -1676,9 +1627,7 @@ export async function setupBrowserConfig(options: {
   config: EstaCodaConfig;
 }> {
   validateBrowserSetupInput(options.input);
-  const targetPath = options.input.scope === "project"
-    ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
-    : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
   const config = mergeConfig(existing.config, {
     browser: {
@@ -1709,9 +1658,7 @@ export async function setupVoiceConfig(options: {
   secretPaths: string[];
 }> {
   validateVoiceSetupInput(options.input);
-  const targetPath = options.input.scope === "project"
-    ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
-    : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
   const previousTts = normalizeTtsConfig(existing.config.tts);
   const previousStt = normalizeSttConfig(existing.config.stt);
@@ -1728,6 +1675,7 @@ export async function setupVoiceConfig(options: {
   if (options.input.ttsApiKey !== undefined && options.input.ttsApiKey.trim().length > 0 && ttsApiKeyEnv !== undefined) {
     const secret = await writeEnvSecret({
       homeDir: options.homeDir,
+      profileId: resolveSelectedProfileId(options),
       key: ttsApiKeyEnv,
       value: options.input.ttsApiKey
     });
@@ -1737,6 +1685,7 @@ export async function setupVoiceConfig(options: {
   if (options.input.sttApiKey !== undefined && options.input.sttApiKey.trim().length > 0 && sttApiKeyEnv !== undefined) {
     const secret = await writeEnvSecret({
       homeDir: options.homeDir,
+      profileId: resolveSelectedProfileId(options),
       key: sttApiKeyEnv,
       value: options.input.sttApiKey
     });
@@ -1786,9 +1735,7 @@ export async function setupImageGenerationConfig(options: {
   secretPath?: string;
 }> {
   validateImageGenerationSetupInput(options.input);
-  const targetPath = options.input.scope === "project"
-    ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
-    : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
   const previous = normalizeImageGenerationConfig(existing.config.imageGen ?? existing.config.image_gen);
   const provider = options.input.provider ?? previous.provider;
@@ -1798,6 +1745,7 @@ export async function setupImageGenerationConfig(options: {
   if (options.input.apiKey !== undefined && options.input.apiKey.trim().length > 0) {
     const secret = await writeEnvSecret({
       homeDir: options.homeDir,
+      profileId: resolveSelectedProfileId(options),
       key: apiKeyEnv,
       value: options.input.apiKey
     });
@@ -1842,9 +1790,7 @@ export async function setupMcpConfig(options: {
   config: EstaCodaConfig;
 }> {
   validateMcpSetupInput(options.input);
-  const targetPath = options.input.scope === "project"
-    ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
-    : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
   const serverName = options.input.name.trim();
   const servers = normalizeMcpServers(existing.config.mcpServers ?? existing.config.mcp_servers, options.homeDir);
@@ -1899,9 +1845,7 @@ export async function setupSecurityConfig(options: {
   config: EstaCodaConfig;
 }> {
   validateSecuritySetupInput(options.input);
-  const targetPath = options.input.scope === "project"
-    ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
-    : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
   const assessorPatch = options.input.assessorEnabled !== undefined ||
     options.input.assessorProvider !== undefined ||
@@ -1944,9 +1888,7 @@ export async function setupSkillConfig(options: {
   config: EstaCodaConfig;
 }> {
   validateSkillSetupInput(options.input);
-  const targetPath = options.input.scope === "project"
-    ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
-    : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
   const config = mergeConfig(existing.config, {
     skills: {
@@ -1972,9 +1914,7 @@ export async function setupUiConfig(options: {
   config: EstaCodaConfig;
 }> {
   validateUiSetupInput(options.input);
-  const targetPath = options.input.scope === "project"
-    ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
-    : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
   const previous = normalizeUiConfig(existing.config.ui);
   const nextLanguage = options.input.language ?? previous.language;
@@ -2013,9 +1953,7 @@ export async function setupProfileConfig(options: {
   config: EstaCodaConfig;
 }> {
   validateProfileSetupInput(options.input);
-  const targetPath = options.input.scope === "project"
-    ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
-    : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
   const previous = normalizeProfileConfig(existing.config.profile);
   const config = mergeConfig(existing.config, {
@@ -2056,15 +1994,14 @@ export async function setupTelegramConfig(options: {
   secretPath?: string;
 }> {
   validateTelegramSetupInput(options.input);
-  const targetPath = options.input.scope === "project"
-    ? options.projectConfigPath ?? join(options.workspaceRoot, ".estacoda", "config.json")
-    : options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
   const envName = options.input.botTokenEnv ?? "ESTACODA_TELEGRAM_BOT_TOKEN";
   let secretPath: string | undefined;
   if (options.input.botToken !== undefined && options.input.botToken.trim().length > 0) {
     const secret = await writeEnvSecret({
       homeDir: options.homeDir,
+      profileId: resolveSelectedProfileId(options),
       key: envName,
       value: options.input.botToken
     });
@@ -2123,7 +2060,7 @@ export async function createTelegramPairingCode(options: {
   if (input.scope === "project") {
     throw new Error("Telegram pairing codes are user-scoped for MVP.");
   }
-  const targetPath = options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
   const now = options.now?.() ?? new Date();
   const ttlMinutes = input.ttlMinutes ?? 10;
@@ -2167,7 +2104,7 @@ export async function consumeTelegramPairingCode(options: {
   path: string;
   config: EstaCodaConfig;
 }> {
-  const targetPath = options.userConfigPath ?? join(options.homeDir ?? process.env.HOME ?? "", ".estacoda", "config.json");
+  const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
   const pairing = existing.config.channels?.telegram?.pairing;
   const now = options.now?.() ?? new Date();
@@ -2246,9 +2183,6 @@ function validateProviderSetupInput(input: ProviderSetupInput): void {
   validateScope(input.scope);
   validateOptionalUrl(input.baseUrl, "baseUrl");
   validateOptionalEnvName(input.apiKeyEnv, "apiKeyEnv");
-  if (input.credentialPoolStrategy !== undefined && input.credentialPoolStrategy !== "fill_first" && input.credentialPoolStrategy !== "round_robin") {
-    throw new Error("Expected credentialPoolStrategy fill_first or round_robin");
-  }
 }
 
 function validateModelFallbackSetupInput(input: ModelFallbackSetupInput): void {

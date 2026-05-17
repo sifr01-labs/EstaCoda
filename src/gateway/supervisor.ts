@@ -1,8 +1,9 @@
 import { mkdir, unlink } from "node:fs/promises";
 import { randomUUID, createHash } from "node:crypto";
 import { dirname, join } from "node:path";
-import { loadUserRuntimeConfig, loadTrustedRuntimeConfig, consumeTelegramPairingCode } from "../config/runtime-config.js";
+import { loadRuntimeConfig, consumeTelegramPairingCode } from "../config/runtime-config.js";
 import { resolveStateHome } from "../config/state-home.js";
+import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import type { LoadedRuntimeConfig, ChannelBusyPolicy } from "../config/runtime-config.js";
 import type { ChannelAdapter, ChannelAuthPolicies, ChannelKind } from "../contracts/channel.js";
@@ -93,6 +94,7 @@ export function buildGatewayCronRuntimeOptions(input: {
   homeDir: string;
   userConfigPath?: string;
   projectConfigPath?: string;
+  profileId: string;
   sessionDb: SQLiteSessionDB;
   sessionId: string;
 }): RuntimeOptions {
@@ -107,7 +109,7 @@ export function buildGatewayCronRuntimeOptions(input: {
     userConfigPath: input.userConfigPath,
     projectConfigPath: input.projectConfigPath,
     sessionId: input.sessionId,
-    profileId: "default",
+    profileId: input.profileId,
     sessionDb: input.sessionDb,
     externalSkillRoots: latestConfig.skills.externalDirs,
     skillAutonomy: latestConfig.skills.autonomy,
@@ -115,7 +117,6 @@ export function buildGatewayCronRuntimeOptions(input: {
     ui: latestConfig.ui,
     agentProfile: latestConfig.profile,
     providerRegistry: latestConfig.providerRegistry,
-    credentialPools: latestConfig.credentialPools,
     auxiliaryModels: latestConfig.auxiliaryModels,
     mcpServers: latestConfig.mcp.servers,
     imageGen: latestConfig.imageGen,
@@ -126,7 +127,6 @@ export function buildGatewayCronRuntimeOptions(input: {
       ...latestConfig.security.assessor,
       providerExecutor: new ProviderExecutor({
         registry: latestConfig.providerRegistry,
-        credentialPools: latestConfig.credentialPools,
       }),
     },
     browser: latestConfig.browser,
@@ -320,27 +320,25 @@ async function cleanupSupervisorStartupResources(state: SupervisorInternalState)
 export async function runGatewaySupervisor(options: GatewaySupervisorOptions): Promise<GatewayRunResult> {
   const startedAt = new Date().toISOString();
   const homeDir = options.homeDir ?? process.env.HOME ?? process.cwd();
+  const profileId = options.profileId ?? readActiveProfile({ homeDir })?.profileId ?? defaultProfileId();
+  const profilePaths = resolveProfileStateHome({ homeDir, profileId });
   const stateRoot = join(homeDir, ".estacoda");
   const trustStorePath = join(homeDir, ".estacoda", "trust.json");
 
-  const projectConfigTrust = options.projectConfigTrust ?? await (async () => {
-    const stateHome = resolveStateHome({ homeDir: options.homeDir });
-    const trustStore = new WorkspaceTrustStore({ path: stateHome.trustJsonPath });
-    return (await trustStore.isTrusted(options.workspaceRoot)) ? "trusted" : "untrusted";
-  })();
-
-  const loadConfig = () => projectConfigTrust === "trusted"
-    ? loadTrustedRuntimeConfig(options)
-    : loadUserRuntimeConfig(options);
+  const loadConfig = () => loadRuntimeConfig({
+    workspaceRoot: options.workspaceRoot,
+    homeDir,
+    profileId
+  });
 
   const config = await loadConfig();
   const version = await getPackageVersion();
 
   const runtimeFingerprint = computeRuntimeFingerprint(config, {
-    profileId: "default",
+    profileId,
     workspaceRoot: options.workspaceRoot,
     homeDir,
-    localSkillsRoot: join(homeDir, ".estacoda", "skills"),
+    localSkillsRoot: profilePaths.skillsPath,
     trustStorePath,
     userConfigPath: options.userConfigPath,
     projectConfigPath: options.projectConfigPath,
@@ -500,7 +498,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       userConfigPath: options.userConfigPath,
       projectConfigPath: options.projectConfigPath,
       sessionId: input.sessionId,
-      profileId: "default",
+      profileId,
       sessionDb: db,
       closeSessionDbOnDispose: false,
       sessionMetadata: input.metadata,
@@ -510,7 +508,6 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       ui: latestConfig.ui,
       agentProfile: latestConfig.profile,
       providerRegistry: latestConfig.providerRegistry,
-      credentialPools: latestConfig.credentialPools,
       auxiliaryModels: latestConfig.auxiliaryModels,
       mcpServers: latestConfig.mcp.servers,
       securityPolicy: input.securityPolicy,
@@ -867,7 +864,6 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
             ...config.security.assessor,
             providerExecutor: new ProviderExecutor({
               registry: config.providerRegistry,
-              credentialPools: config.credentialPools,
             }),
           },
           activeTurnRegistry,
@@ -924,7 +920,6 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
             ...config.security.assessor,
             providerExecutor: new ProviderExecutor({
               registry: config.providerRegistry,
-              credentialPools: config.credentialPools,
             }),
           },
           activeTurnRegistry,
@@ -1035,6 +1030,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
               homeDir,
               userConfigPath: options.userConfigPath,
               projectConfigPath: options.projectConfigPath,
+              profileId,
               sessionDb,
               sessionId: `cron-${job.id}-${randomUUID()}`,
             }));

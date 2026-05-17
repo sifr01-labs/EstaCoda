@@ -1,17 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { collectSetupEntryState } from "./setup-entry-state.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
+import { resolveProfileStateHome } from "../config/profile-home.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-setup-entry-state-"));
 }
 
 async function writeUserConfig(homeDir: string, config: unknown): Promise<void> {
-  await mkdir(join(homeDir, ".estacoda"), { recursive: true });
-  await writeFile(join(homeDir, ".estacoda", "config.json"), `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  const configPath = profileConfigPath(homeDir);
+  await mkdir(dirname(configPath), { recursive: true });
+  await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+}
+
+function profileConfigPath(homeDir: string): string {
+  return resolveProfileStateHome({ homeDir, profileId: "default" }).configPath;
 }
 
 async function trustWorkspace(homeDir: string, workspaceRoot: string): Promise<void> {
@@ -187,8 +193,8 @@ describe("collectSetupEntryState", () => {
 
   it("classifies an unreadable config parse failure as broken-config", async () => {
     const { homeDir, workspaceRoot } = await makeHomeAndWorkspace();
-    await mkdir(join(homeDir, ".estacoda"), { recursive: true });
-    await writeFile(join(homeDir, ".estacoda", "config.json"), "{ nope", "utf8");
+    await mkdir(dirname(profileConfigPath(homeDir)), { recursive: true });
+    await writeFile(profileConfigPath(homeDir), "{ nope", "utf8");
 
     const state = await collectSetupEntryState({ homeDir, workspaceRoot });
 
@@ -204,12 +210,12 @@ describe("collectSetupEntryState", () => {
     const state = await collectSetupEntryState({ homeDir, workspaceRoot });
     const configContent = await readFile(state.configSources[0]!, "utf8");
 
-    expect(state.configPaths.user).toBe(join(homeDir, ".estacoda", "config.json"));
+    expect(state.configPaths.user).toBe(profileConfigPath(homeDir));
     expect(state.configPaths.project).toBe(join(workspaceRoot, ".estacoda", "config.json"));
     expect(configContent).toContain("hermes-local");
   });
 
-  it("includes project config in verification when projectConfigTrust is trusted", async () => {
+  it("ignores project config in verification when projectConfigTrust is trusted", async () => {
     const { homeDir, workspaceRoot } = await makeHomeAndWorkspace();
     await writeUserConfig(homeDir, localReadyConfig());
     await mkdir(join(workspaceRoot, ".estacoda"), { recursive: true });
@@ -217,7 +223,7 @@ describe("collectSetupEntryState", () => {
     await trustWorkspace(homeDir, workspaceRoot);
 
     const state = await collectSetupEntryState({ homeDir, workspaceRoot, projectConfigTrust: "trusted" });
-    expect(state.setupVerification.configSources.some((s) => s.includes(join(workspaceRoot, ".estacoda", "config.json")))).toBe(true);
+    expect(state.setupVerification.configSources.some((s) => s.includes(join(workspaceRoot, ".estacoda", "config.json")))).toBe(false);
   });
 
   it("excludes project config in verification when projectConfigTrust is untrusted", async () => {

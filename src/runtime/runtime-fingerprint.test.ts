@@ -16,7 +16,6 @@ function fakeLoadedRuntimeConfig(overrides?: Partial<LoadedRuntimeConfig>): Load
       supportsStructuredOutput: true,
     },
     providerRegistry: {} as unknown as LoadedRuntimeConfig["providerRegistry"],
-    credentialPools: {} as unknown as LoadedRuntimeConfig["credentialPools"],
     web: { enableNetwork: true, maxContentChars: 5000 },
     browser: { backend: "unconfigured", autoLaunch: false },
     imageGen: { provider: "fal", model: "test", useGateway: false },

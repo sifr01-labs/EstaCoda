@@ -89,12 +89,9 @@ function produceModelRouteDiagnostic(route: ResolvedModelRoute, config: LoadedRu
   };
 }
 
-function isCredentialReady(route: ResolvedModelRoute, config: LoadedRuntimeConfig): boolean {
+function isCredentialReady(route: ResolvedModelRoute, _config: LoadedRuntimeConfig): boolean {
   if (route.provider === "local" && route.apiKeyEnv === undefined) return true;
   if (route.apiKeyEnv !== undefined) return process.env[route.apiKeyEnv] !== undefined;
-  const pools = config.credentialPools.snapshots();
-  const pool = pools.find((p) => p.provider === route.provider);
-  if (pool !== undefined && pool.entries.some((e) => e.available)) return true;
   return false;
 }
 

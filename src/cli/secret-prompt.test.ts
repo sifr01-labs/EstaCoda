@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { promptForApiKey, promptForApiKeyInput, maskSecret, redactInObject } from "./secret-prompt.js";
 import type { Prompt } from "./readline-prompt.js";
+import { resolveProfileStateHome } from "../config/profile-home.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-secret-prompt-test-"));
@@ -20,6 +21,10 @@ function fakePrompt(answer: string): Prompt {
     }
   );
   return prompt as Prompt;
+}
+
+function profileEnvPath(homeDir: string): string {
+  return resolveProfileStateHome({ homeDir, profileId: "default" }).envPath;
 }
 
 describe("promptForApiKey", () => {
@@ -44,10 +49,10 @@ describe("promptForApiKey", () => {
     expect(result.kind).toBe("stored");
     if (result.kind === "stored") {
       expect(result.envVarName).toBe("OPENAI_API_KEY");
-      expect(result.envPath).toBe(join(tempDir, ".estacoda", ".env"));
+      expect(result.envPath).toBe(profileEnvPath(tempDir));
     }
 
-    const envContent = await readFile(join(tempDir, ".estacoda", ".env"), "utf8");
+    const envContent = await readFile(profileEnvPath(tempDir), "utf8");
     expect(envContent).toContain('OPENAI_API_KEY="sk-test-key-1234"');
   });
 
@@ -64,7 +69,7 @@ describe("promptForApiKey", () => {
       expect(result.envVarName).toBe("OPENAI_API_KEY");
     }
 
-    await expect(readFile(join(tempDir, ".estacoda", ".env"), "utf8")).rejects.toThrow();
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).rejects.toThrow();
   });
 
   it("does not print raw key in any returned field", async () => {
@@ -88,7 +93,7 @@ describe("promptForApiKey", () => {
       homeDir: tempDir,
     });
 
-    const s = await stat(join(tempDir, ".estacoda", ".env"));
+    const s = await stat(profileEnvPath(tempDir));
     // 0o100600 on Unix; on Windows this may differ, so only assert on non-Windows
     if (process.platform !== "win32") {
       expect(s.mode & 0o777).toBe(0o600);
@@ -119,7 +124,7 @@ describe("promptForApiKeyInput", () => {
       envVarName: "OPENAI_API_KEY",
       value: "sk-deferred-key-1234",
     });
-    await expect(readFile(join(tempDir, ".estacoda", ".env"), "utf8")).rejects.toThrow();
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).rejects.toThrow();
   });
 
   it("returns skipped for empty input without writing .env", async () => {
@@ -130,7 +135,7 @@ describe("promptForApiKeyInput", () => {
     });
 
     expect(result).toEqual({ kind: "skipped", envVarName: "OPENAI_API_KEY" });
-    await expect(readFile(join(tempDir, ".estacoda", ".env"), "utf8")).rejects.toThrow();
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).rejects.toThrow();
   });
 });
 

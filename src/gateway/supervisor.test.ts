@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   runGatewaySupervisor,
@@ -21,9 +21,14 @@ import { RuntimeCache } from "../runtime/runtime-cache.js";
 import { runtimeCacheStatePath, readRuntimeCacheState } from "./runtime-cache-state.js";
 import { readCleanShutdownMarker, writeCleanShutdownMarker } from "./supervisor-lifecycle.js";
 import { HookRegistry } from "./hook-registry.js";
+import { resolveProfileStateHome } from "../config/profile-home.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-supervisor-test-"));
+}
+
+function profileConfigPath(homeDir: string): string {
+  return resolveProfileStateHome({ homeDir, profileId: "default" }).configPath;
 }
 
 function createFakeConfig(tmpDir: string, channels: Record<string, unknown>) {
@@ -113,7 +118,6 @@ function fakeLoadedRuntimeConfig(overrides: Record<string, unknown> = {}) {
       },
     ],
     providerRegistry: {},
-    credentialPools: {},
     auxiliaryModels: {},
     mcp: { servers: {} },
     skills: { externalDirs: [], autonomy: "suggest", config: {} },
@@ -205,6 +209,7 @@ describe("runGatewaySupervisor", () => {
       homeDir: tmpDir,
       userConfigPath: join(tmpDir, ".estacoda", "config.json"),
       projectConfigPath: join(tmpDir, ".estacoda", "project-config.json"),
+      profileId: "default",
       sessionDb,
       sessionId: "cron-test",
     });
@@ -213,7 +218,7 @@ describe("runGatewaySupervisor", () => {
     expect(options.modelFallbackRoutes).toEqual(latestConfig.modelFallbackRoutes);
     expect(options.model).toEqual(latestConfig.model);
     expect(options.providerRegistry).toBe(latestConfig.providerRegistry);
-    expect(options.credentialPools).toBe(latestConfig.credentialPools);
+    expect(options.profileId).toBe("default");
     expect(options.disableCronTools).toBe(true);
     expect(options.disabledToolsets).toEqual(["cron", "messaging", "clarify"]);
   });
@@ -480,8 +485,8 @@ describe("runGatewaySupervisor", () => {
   });
 
   it("pollOnce error is caught by wrapper, supervisor continues", async () => {
-    const configPath = join(tmpDir, ".estacoda", "config.json");
-    await mkdir(join(tmpDir, ".estacoda"), { recursive: true });
+    const configPath = profileConfigPath(tmpDir);
+    await mkdir(dirname(configPath), { recursive: true });
     await writeFile(configPath, JSON.stringify({
       channels: {
         telegram: {
@@ -522,8 +527,8 @@ describe("runGatewaySupervisor", () => {
   });
 
   it("supervisor loop calls wrapper poll exactly once per adapter per iteration", async () => {
-    const configPath = join(tmpDir, ".estacoda", "config.json");
-    await mkdir(join(tmpDir, ".estacoda"), { recursive: true });
+    const configPath = profileConfigPath(tmpDir);
+    await mkdir(dirname(configPath), { recursive: true });
     await writeFile(configPath, JSON.stringify({
       channels: {
         telegram: {
@@ -904,8 +909,8 @@ describe("runGatewaySupervisor", () => {
     let capturedOpts: any;
     const gateway = { start: async () => {}, stop: async () => {}, hasPendingWork: () => false };
 
-    const configPath = join(tmpDir, ".estacoda", "config.json");
-    await mkdir(join(tmpDir, ".estacoda"), { recursive: true });
+    const configPath = profileConfigPath(tmpDir);
+    await mkdir(dirname(configPath), { recursive: true });
     await writeFile(configPath, JSON.stringify({
       channels: {
         telegram: {
@@ -1327,8 +1332,8 @@ describe("supervisor 5E internals", () => {
         await mkdir(sessionDir, { recursive: true });
 
         // Write config to enable telegram adapter
-        const configPath = join(tmpDir, ".estacoda", "config.json");
-        await mkdir(join(tmpDir, ".estacoda"), { recursive: true });
+        const configPath = profileConfigPath(tmpDir);
+    await mkdir(dirname(configPath), { recursive: true });
         await writeFile(configPath, JSON.stringify({
           channels: {
             telegram: {
@@ -1407,8 +1412,8 @@ describe("supervisor lifecycle hooks", () => {
     };
 
     try {
-      const configPath = join(tmpDir, ".estacoda", "config.json");
-      await mkdir(join(tmpDir, ".estacoda"), { recursive: true });
+      const configPath = profileConfigPath(tmpDir);
+    await mkdir(dirname(configPath), { recursive: true });
       await writeFile(configPath, JSON.stringify({
         channels: {
           telegram: {

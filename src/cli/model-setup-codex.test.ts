@@ -1,38 +1,47 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, writeFile, readFile, mkdir, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { runModelSetupCodex, type ModelSetupCodexOptions } from "./model-setup-codex.js";
 import type { Prompt } from "./readline-prompt.js";
 import type { FetchLike } from "../providers/oauth/codex-oauth.js";
 import { loadOAuthStore } from "../providers/oauth/oauth-store.js";
+import { resolveProfileStateHome } from "../config/profile-home.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-codex-setup-test-"));
 }
 
 async function writeUserConfig(homeDir: string, config: unknown): Promise<void> {
-  const configPath = join(homeDir, ".estacoda", "config.json");
-  await mkdir(join(homeDir, ".estacoda"), { recursive: true });
+  const configPath = profileConfigPath(homeDir);
+  await mkdir(dirname(configPath), { recursive: true });
   await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", "utf8");
 }
 
 async function readUserConfig(homeDir: string): Promise<unknown> {
-  const configPath = join(homeDir, ".estacoda", "config.json");
+  const configPath = profileConfigPath(homeDir);
   const content = await readFile(configPath, "utf8");
   return JSON.parse(content);
 }
 
 async function writeAuthJson(homeDir: string, store: unknown): Promise<void> {
-  const path = join(homeDir, ".estacoda", "auth.json");
-  await mkdir(join(homeDir, ".estacoda"), { recursive: true });
+  const path = profileAuthPath(homeDir);
+  await mkdir(dirname(path), { recursive: true });
   await writeFile(path, JSON.stringify(store, null, 2) + "\n", "utf8");
 }
 
 async function readAuthJson(homeDir: string): Promise<unknown> {
-  const path = join(homeDir, ".estacoda", "auth.json");
+  const path = profileAuthPath(homeDir);
   const content = await readFile(path, "utf8");
   return JSON.parse(content);
+}
+
+function profileConfigPath(homeDir: string): string {
+  return resolveProfileStateHome({ homeDir, profileId: "default" }).configPath;
+}
+
+function profileAuthPath(homeDir: string): string {
+  return resolveProfileStateHome({ homeDir, profileId: "default" }).authJsonPath;
 }
 
 function createMockPrompt(responses: string[]): Prompt {
@@ -196,7 +205,7 @@ describe("model setup codex", () => {
       expect(result.output).toBe("Cancelled. No changes were made.");
 
       // Verify auth.json was NOT written
-      const authPath = join(tmpDir, ".estacoda", "auth.json");
+      const authPath = profileAuthPath(tmpDir);
       const authExists = await readFile(authPath, "utf8").then(() => true).catch(() => false);
       expect(authExists).toBe(false);
     });
@@ -280,7 +289,7 @@ describe("model setup codex", () => {
         fetchLike
       }));
 
-      const authPath = join(tmpDir, ".estacoda", "auth.json");
+      const authPath = profileAuthPath(tmpDir);
       if (process.platform !== "win32") {
         const s = await stat(authPath);
         const mode = s.mode & 0o777;
@@ -398,7 +407,7 @@ describe("model setup codex", () => {
       expect(result.output).toBe("Cancelled. No changes were made.");
 
       // Config should not be written
-      const configPath = join(tmpDir, ".estacoda", "config.json");
+      const configPath = profileConfigPath(tmpDir);
       const configExists = await readFile(configPath, "utf8").then(() => true).catch(() => false);
       expect(configExists).toBe(false);
     });
@@ -407,7 +416,7 @@ describe("model setup codex", () => {
   describe("partial-write recovery", () => {
     it("preserves auth.json and exits non-zero when config write fails", async () => {
       // Write a config.json that is a directory (so writing to it fails)
-      const configDir = join(tmpDir, ".estacoda", "config.json");
+      const configDir = profileConfigPath(tmpDir);
       await mkdir(join(tmpDir, ".estacoda"), { recursive: true });
       await mkdir(configDir, { recursive: true });
 
@@ -453,7 +462,7 @@ describe("model setup codex", () => {
 
     it("rerun via valid-existing-credentials path recovers by configuring route", async () => {
       // Step 1: auth.json exists, config write fails
-      const configDir = join(tmpDir, ".estacoda", "config.json");
+      const configDir = profileConfigPath(tmpDir);
       await mkdir(join(tmpDir, ".estacoda"), { recursive: true });
       await mkdir(configDir, { recursive: true });
 
@@ -582,7 +591,7 @@ describe("model setup codex", () => {
         fetchLike
       }));
 
-      const configRaw = await readFile(join(tmpDir, ".estacoda", "config.json"), "utf8");
+      const configRaw = await readFile(profileConfigPath(tmpDir), "utf8");
       expect(configRaw).not.toContain("eyJfake.codex.token.12345");
       expect(configRaw).not.toContain("def502.fake.refresh.token.67890");
       expect(configRaw).not.toContain("accessToken");
@@ -617,7 +626,7 @@ describe("model setup codex", () => {
       });
 
       // Force config write to fail
-      const configDir = join(tmpDir, ".estacoda", "config.json");
+      const configDir = profileConfigPath(tmpDir);
       await mkdir(configDir, { recursive: true });
 
       const result = await runModelSetupCodex(baseOptions({

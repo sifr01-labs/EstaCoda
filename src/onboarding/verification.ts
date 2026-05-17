@@ -1,7 +1,7 @@
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { defaultEnvPath } from "../config/env-secret-store.js";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
+import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 import { diagnoseProviderConfig, renderProviderDiagnostic, type ProviderDiagnostic } from "../config/provider-diagnostics.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { formatSecurityMode, formatSkillAutonomy } from "../ui/settings-labels.js";
@@ -82,7 +82,8 @@ export async function collectSetupVerificationReport(
   const workspaceTrusted = await isWorkspaceTrusted(trustStore, options.workspaceRoot);
   const stateRoot = join(options.homeDir ?? process.env.HOME ?? "", ".estacoda");
   const verifyFile = join(stateRoot, ".verify");
-  const envPath = defaultEnvPath(options.homeDir);
+  const profileId = readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+  const envPath = resolveProfileStateHome({ homeDir: options.homeDir, profileId }).envPath;
   let stateWritable = false;
   let envFilePresent = false;
   let envMode: string | undefined;
