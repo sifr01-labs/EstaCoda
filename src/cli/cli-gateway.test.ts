@@ -97,6 +97,11 @@ describe("cli gateway start", () => {
   it("runs --dry-run without entering the foreground supervisor or writing PID/lock state", async () => {
     const tmpDir = await makeTempDir();
     try {
+      const paths = resolveProfileStateHome({ homeDir: tmpDir, profileId: "default" });
+      await mkdir(join(paths.cronPath, "output"), { recursive: true });
+      await mkdir(join(paths.cronPath, "locks"), { recursive: true });
+      await mkdir(paths.logsPath, { recursive: true });
+
       const result = await runCliCommand({
         argv: ["gateway", "start", "--dry-run"],
         workspaceRoot: tmpDir,
@@ -111,6 +116,23 @@ describe("cli gateway start", () => {
       expect(supervisorSpy).not.toHaveBeenCalled();
       await expect(readFile(join(tmpDir, ".estacoda", "gateway", "gateway.pid"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
       await expect(readFile(join(tmpDir, ".estacoda", "gateway", "gateway.lock"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns a failing exit code when --dry-run readiness is blocked", async () => {
+    const tmpDir = await makeTempDir();
+    try {
+      const result = await runCliCommand({
+        argv: ["gateway", "start", "--dry-run"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+      });
+
+      expect(result.exitCode).toBe(1);
+      expect(result.output).toContain("run estacoda init");
+      expect(supervisorSpy).not.toHaveBeenCalled();
     } finally {
       await rm(tmpDir, { recursive: true, force: true });
     }

@@ -513,28 +513,24 @@ export function buildGatewayDiagnoseViewModel(data: GatewayDiagnoseData): Comman
     kv("Output dir writable", data.outputDirWritable ? "yes" : "no"),
     kv("Lock dir writable", data.lockDirWritable ? "yes" : "no"),
   ];
+  const cronProblems: string[] = [];
   if (!data.jobsFileReadable) {
     cronEntries.push(kv("Jobs file", "not readable", "warn"));
-    warnings.push(buildWarningErrorViewModel({
-      severity: "warn",
-      title: "Cron",
-      message: "jobs file not readable",
-    }));
+    cronProblems.push("jobs file not readable");
   }
   if (!data.outputDirWritable) {
     cronEntries.push(kv("Output dir", "not writable", "warn"));
-    warnings.push(buildWarningErrorViewModel({
-      severity: "warn",
-      title: "Cron",
-      message: "output directory not writable",
-    }));
+    cronProblems.push("output directory not writable");
   }
   if (!data.lockDirWritable) {
     cronEntries.push(kv("Lock dir", "not writable", "warn"));
+    cronProblems.push("lock directory not writable");
+  }
+  if (cronProblems.length > 0) {
     warnings.push(buildWarningErrorViewModel({
       severity: "warn",
       title: "Cron",
-      message: "lock directory not writable",
+      message: `${cronProblems.join("; ")}. Run estacoda init if this is a fresh state home.`,
     }));
   }
   blocks.push(buildKeyValueBlockViewModel({ title: "Cron", entries: cronEntries }));

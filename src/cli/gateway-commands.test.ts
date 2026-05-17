@@ -133,6 +133,12 @@ async function writeStaleLock(homeDir: string, kind: string, content: string): P
   await writeFile(join(locksDir, `identity-${kind}-deadbeef.lock`), content, "utf8");
 }
 
+async function createGatewayStateDirs(paths: ProfileStatePaths): Promise<void> {
+  await mkdir(join(paths.cronPath, "output"), { recursive: true });
+  await mkdir(join(paths.cronPath, "locks"), { recursive: true });
+  await mkdir(paths.logsPath, { recursive: true });
+}
+
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-gateway-test-"));
 }
@@ -715,20 +721,35 @@ describe("gateway commands", () => {
   });
 
   describe("runGatewayStartDryRun", () => {
-    it("passes in cron-only mode when no adapters are enabled", async () => {
+    it("fails in cron-only mode when state dirs are missing", async () => {
+      const result = await runGatewayStartDryRun({ workspaceRoot: tmpDir, homeDir: tmpDir });
+
+      expect(result.ok).toBe(false);
+      expect(result.output).toContain("Adapters: none");
+      expect(result.output).toContain("Mode: cron-only");
+      expect(result.output).toContain("Adapter identities: none");
+      expect(result.output).toContain("State dirs: not initialized");
+      expect(result.output).toContain("run estacoda init");
+      expect(result.output).toContain("Gateway lock: no active owner detected");
+    });
+
+    it("passes in cron-only mode when state dirs exist and no blockers are present", async () => {
+      await createGatewayStateDirs(profilePaths);
+
       const result = await runGatewayStartDryRun({ workspaceRoot: tmpDir, homeDir: tmpDir });
 
       expect(result.ok).toBe(true);
       expect(result.output).toContain("Adapters: none");
       expect(result.output).toContain("Mode: cron-only");
-      expect(result.output).toContain("Adapter identities: none");
-      expect(result.output).toContain("Gateway lock: no active owner detected");
+      expect(result.output).toContain("State dirs: ready");
+      expect(result.output).not.toContain("run estacoda init");
     });
 
     it("passes when an enabled adapter has locally derivable identity", async () => {
       const tokenEnv = "ESTACODA_TEST_TELEGRAM_TOKEN";
       process.env[tokenEnv] = "telegram-token";
       try {
+        await createGatewayStateDirs(profilePaths);
         await writeUserConfig(tmpDir, {
           channels: {
             telegram: {
@@ -764,6 +785,7 @@ describe("gateway commands", () => {
       const result = await runGatewayStartDryRun({ workspaceRoot: tmpDir, homeDir: tmpDir });
 
       expect(result.ok).toBe(false);
+      expect(result.output).toContain("telegram: missing");
       expect(result.output).toContain("telegram: configured but no derivable identity");
     });
 

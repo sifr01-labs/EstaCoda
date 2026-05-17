@@ -260,6 +260,26 @@ describe("buildGatewayDiagnoseViewModel", () => {
     expect(rendered).toContain("[WARN] Runtime Cache: runtime-cache-state exists but supervisor is not live");
   });
 
+  it("summarizes cron directory problems in one warning block", () => {
+    const data: GatewayDiagnoseData = {
+      ...baseDiagnoseData(),
+      jobsFileReadable: false,
+      outputDirWritable: false,
+      lockDirWritable: false,
+    };
+    const vm = buildGatewayDiagnoseViewModel(data);
+    const rendered = renderPlain(vm);
+    const cronWarningCount = rendered.match(/\[WARN\] Cron:/g)?.length ?? 0;
+
+    expect(rendered).toContain("[WARN] Jobs file: not readable");
+    expect(rendered).toContain("[WARN] Output dir: not writable");
+    expect(rendered).toContain("[WARN] Lock dir: not writable");
+    expect(cronWarningCount).toBe(1);
+    expect(rendered).toContain(
+      "[WARN] Cron: jobs file not readable; output directory not writable; lock directory not writable. Run estacoda init if this is a fresh state home."
+    );
+  });
+
   it("warns when recent delivery errors >= 3", () => {
     const data: GatewayDiagnoseData = {
       ...baseDiagnoseData(),
