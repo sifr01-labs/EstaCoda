@@ -332,8 +332,8 @@ export async function runGatewayStartDryRun(
   const selected = await resolveGatewayProfile(options);
   const config = await loadRuntimeConfig({ ...options, profileId: selected.profileId });
   const registry = new AdapterRegistry(config.channels);
-  const configured = registry.configured();
   const enabled = registry.enabled();
+  const misconfigured = registry.misconfigured();
   const identityReadiness = inspectAdapterIdentityReadiness(config.channels);
   const lock = await inspectGatewayLockState(selected.paths);
   const cronOutputWritable = await isWritable(join(selected.paths.cronPath, "output"));
@@ -348,11 +348,8 @@ export async function runGatewayStartDryRun(
   const mode = enabled.length > 0 ? "adapters" : "cron-only";
   const warnings: string[] = [];
 
-  if (enabled.length > configured.length) {
-    const misconfigured = registry.misconfigured();
-    for (const cap of misconfigured) {
-      warnings.push(`${cap.kind}: missing ${cap.missingConfig?.join(", ") ?? "configuration"}`);
-    }
+  for (const cap of misconfigured) {
+    warnings.push(`${cap.kind}: missing ${cap.missingConfig?.join(", ") ?? "configuration"}`);
   }
   for (const error of identityReadiness.errors) {
     warnings.push(error);
@@ -365,7 +362,11 @@ export async function runGatewayStartDryRun(
   }
 
   return {
-    ok: lockSummary.severity === "ok" && identityReadiness.errors.length === 0,
+    ok:
+      lockSummary.severity === "ok" &&
+      identityReadiness.errors.length === 0 &&
+      stateDirsReady &&
+      misconfigured.length === 0,
     output: [
       `Adapters: ${adapters}`,
       `Mode: ${mode}`,
