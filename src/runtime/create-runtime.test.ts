@@ -5,8 +5,10 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { createRuntime, createDefaultProviderRegistry, type RuntimeOptions } from "./create-runtime.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
+import { WorkspaceApprovalController } from "../security/workspace-approval-controller.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
 import type { ModelProfile, ProviderAdapter, ProviderRequest } from "../contracts/provider.js";
+import type { SecurityApprovalMode, SecurityAssessment, SecurityPolicy, SecurityRequest } from "../contracts/security.js";
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
 import { resolveTokens } from "../theme/token-resolver.js";
 
@@ -399,6 +401,99 @@ describe("createRuntime auxiliary consumer wiring", () => {
 
       expect(result?.decision).toBe("ask");
       expect(observedModels).toEqual(["assessor-model", "main-model"]);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("passes active profileId as smart approval scope key", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "estacoda-runtime-smart-approval-"));
+    const mainModel: ModelProfile = {
+      id: "main-model",
+      provider: "local",
+      contextWindowTokens: 32000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    };
+    const assessorModel: ModelProfile = {
+      id: "assessor-model",
+      provider: "local",
+      contextWindowTokens: 32000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    };
+    const registry = new ProviderRegistry();
+    registry.register({
+      id: "local",
+      name: "Local",
+      endpoint: { baseUrl: "http://localhost:11434/v1" },
+      health: () => ({ available: true }),
+      listModels: () => [mainModel, assessorModel],
+      complete: async (request) => ({
+        ok: true,
+        content: JSON.stringify({ risk_score: 45, reasoning: "Escalate.", confidence: "medium" }),
+        provider: "local",
+        model: request.model
+      })
+    });
+    class ObservingApprovalController extends WorkspaceApprovalController {
+      observedScopeKey: string | undefined;
+      observedTask: string | undefined;
+
+      override async assess(
+        _basePolicy: SecurityPolicy,
+        _request: SecurityRequest,
+        options: {
+          workspaceRoot: string;
+          sessionId: string;
+          mode: SecurityApprovalMode;
+          smartApproval?: {
+            scopeKey: string;
+            assessorRoute?: { task: string };
+          };
+        }
+      ): Promise<SecurityAssessment> {
+        this.observedScopeKey = options.smartApproval?.scopeKey;
+        this.observedTask = options.smartApproval?.assessorRoute?.task;
+        return {
+          decision: "ask",
+          mode: options.mode,
+          reason: "observed",
+          risk: "high"
+        };
+      }
+    }
+    const approvalController = new ObservingApprovalController();
+    const runtime = await createRuntime({
+      tokens: resolveTokens("standard", "dark", "kemetBlue"),
+      model: mainModel,
+      primaryModelRoute: { provider: "local", id: "main-model", profile: mainModel },
+      providerRegistry: registry,
+      workspaceRoot,
+      localSkillsRoot: join(workspaceRoot, "skills"),
+      profileId: "profile-smart",
+      securityMode: "adaptive",
+      securityAssessor: { enabled: true },
+      auxiliaryModels: {
+        assessor: {
+          provider: "local",
+          id: "assessor-model",
+          timeoutMs: 1000
+        }
+      },
+      approvalController
+    });
+
+    try {
+      await runtime.executeTool?.({
+        tool: "terminal.run",
+        toolInput: { command: "sudo apt update" }
+      });
+
+      expect(approvalController.observedScopeKey).toBe("profile-smart");
+      expect(approvalController.observedTask).toBe("assessor");
     } finally {
       await runtime.dispose();
     }
