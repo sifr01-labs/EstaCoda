@@ -8,7 +8,10 @@ import { getTelegramGatewayDiagnostics } from "../channels/gateway-runner.js";
 import { getWhatsAppGatewayDiagnostics } from "../channels/whatsapp-diagnostics.js";
 import { CronStore } from "../cron/cron-store.js";
 import { CronExecutionStore } from "../cron/cron-execution-store.js";
+import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { openDefaultSQLiteDatabase } from "../storage/factory.js";
+import { WorkspaceApprovalController } from "../security/workspace-approval-controller.js";
+import { GatewayApprovalQueue } from "../gateway/approval-queue.js";
 import { ChannelApprovalStore } from "../channels/channel-approval-store.js";
 import { FileSurfacePointerStore } from "../channels/surface-pointer-store.js";
 import { DeliveryRouter } from "../channels/delivery-router.js";
@@ -320,6 +323,93 @@ export async function runGatewayDiagnose(
 
   const viewModel = buildGatewayDiagnoseViewModel(data);
   return { ok: viewModel.ok, output: renderer(viewModel) };
+}
+
+export async function runGatewayApprovals(
+  options: GatewayCommandOptions,
+  args: string[] = []
+): Promise<{ ok: boolean; output: string }> {
+  const selected = await resolveGatewayProfile(options, { preferRunning: true });
+  const globalPaths = resolveGlobalStateHome({ homeDir: selected.homeDir });
+  const action = firstPositional(args) ?? "list";
+  const sessionId = valueAfter(args, "--session");
+
+  const sessionDb = await createSQLiteSessionDB({ path: globalPaths.sessionsSqlitePath });
+  const queue = new GatewayApprovalQueue({
+    db: sessionDb.db,
+    controller: new WorkspaceApprovalController()
+  });
+
+  try {
+    if (action === "list") {
+      const approvals = await queue.listPending({
+        profileId: selected.profileId,
+        sessionId
+      });
+
+      if (approvals.length === 0) {
+        return {
+          ok: true,
+          output: `No pending gateway approvals for profile ${selected.profileId}.`
+        };
+      }
+
+      return {
+        ok: true,
+        output: [
+          `Pending gateway approvals for profile ${selected.profileId}:`,
+          ...approvals.map((approval) => [
+            `- ${approval.id}`,
+            `  session: ${approval.sessionId}`,
+            `  channel: ${approval.channel}`,
+            `  tool: ${approval.toolName}`,
+            `  command: ${approval.commandPreview}`,
+            `  hash: ${approval.commandHash}`,
+            `  expires: ${approval.expiresAt.toISOString()}`
+          ].join("\n"))
+        ].join("\n")
+      };
+    }
+
+    if (action === "approve" || action === "deny") {
+      const id = positionalAt(args, 1);
+      if (id === undefined || id === "all") {
+        return {
+          ok: false,
+          output: "Usage: estacoda gateway approvals approve <id> [--session <id>] [--profile <id>]"
+        };
+      }
+
+      await queue.resolveApproval(
+        id,
+        action === "approve" ? "approved" : "denied",
+        "cli",
+        { profileId: selected.profileId, sessionId }
+      );
+
+      return {
+        ok: true,
+        output: `Gateway approval ${id} ${action === "approve" ? "approved" : "denied"}.`
+      };
+    }
+
+    return {
+      ok: false,
+      output: [
+        "Usage:",
+        "  estacoda gateway approvals [list] [--session <id>] [--profile <id>]",
+        "  estacoda gateway approvals approve <id> [--session <id>] [--profile <id>]",
+        "  estacoda gateway approvals deny <id> [--session <id>] [--profile <id>]"
+      ].join("\n")
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      output: error instanceof Error ? error.message : String(error)
+    };
+  } finally {
+    sessionDb.close();
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -931,6 +1021,32 @@ function inspectAdapterIdentityReadiness(channels: LoadedRuntimeConfig["channels
   }
 
   return { valid, errors };
+}
+
+function valueAfter(args: string[], flag: string): string | undefined {
+  const index = args.indexOf(flag);
+  return index < 0 ? undefined : args[index + 1];
+}
+
+function positionalArgs(args: string[]): string[] {
+  const values: string[] = [];
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg.startsWith("--")) {
+      index += 1;
+      continue;
+    }
+    values.push(arg);
+  }
+  return values;
+}
+
+function firstPositional(args: string[]): string | undefined {
+  return positionalArgs(args)[0];
+}
+
+function positionalAt(args: string[], index: number): string | undefined {
+  return positionalArgs(args)[index];
 }
 
 function resolveBackgroundGatewayStartArgs(profileId?: string): string[] {

@@ -1,6 +1,6 @@
 import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
 import type { EnvironmentType } from "../contracts/security.js";
-import { assessCommandSafety } from "../security/command-safety.js";
+import { assessHardlineFloor } from "../security/command-safety.js";
 import type { ProcessManager } from "./process-manager.js";
 
 export type ProcessToolOptions = {
@@ -154,14 +154,7 @@ export function createProcessTools(options: ProcessToolOptions): readonly Regist
 }
 
 function explainCommandBlock(command: string, environmentType?: EnvironmentType): string | undefined {
-  const assessment = assessCommandSafety(command, { environmentType });
-  if (assessment.hardBlock !== undefined) {
-    return assessment.hardBlock.reason;
-  }
-  if (assessment.riskClass === "destructive-local") {
-    return "command matches a destructive or privilege-escalating pattern";
-  }
-  return undefined;
+  return assessHardlineFloor(command, { environmentType })?.reason;
 }
 
 function errorResult(content: string): ToolResult {

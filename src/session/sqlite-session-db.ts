@@ -556,6 +556,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     this.#runMigrationStep(2, "v0.8-schema-v2", () => this.#migrateV2());
     this.#runMigrationStep(3, "v0.8-schema-v3", () => this.#migrateV3());
     this.#runMigrationStep(4, "v0.9-schema-v4-cron-executions", () => this.#migrateV4());
+    this.#runMigrationStep(5, "v0.9-schema-v5-pending-approvals", () => this.#migrateV5());
   }
 
   #withMigrationLock(migrate: () => void): void {
@@ -634,6 +635,31 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
       create index if not exists idx_cron_executions_job on cron_executions(job_id, started_at desc);
       create index if not exists idx_cron_executions_status on cron_executions(status, started_at desc);
       create index if not exists idx_cron_executions_session on cron_executions(session_id);
+    `);
+  }
+
+  #migrateV5(): void {
+    this.#db.exec(`
+      create table if not exists pending_approvals (
+        id text primary key,
+        session_id text not null,
+        profile_id text not null,
+        command_preview text not null,
+        command_hash text not null,
+        command_payload text,
+        tool_name text not null,
+        requested_at text not null,
+        expires_at text not null,
+        status text not null default 'pending',
+        resolved_at text,
+        resolved_by text,
+        channel text not null,
+        chat_id text
+      );
+
+      create index if not exists idx_pending_approvals_session on pending_approvals(session_id);
+      create index if not exists idx_pending_approvals_status on pending_approvals(status);
+      create index if not exists idx_pending_approvals_profile on pending_approvals(profile_id);
     `);
   }
 

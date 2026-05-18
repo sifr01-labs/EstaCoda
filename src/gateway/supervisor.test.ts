@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
@@ -8,6 +8,8 @@ import {
   runStuckScan,
   runStuckScanGuarded,
   runRuntimeCacheStateHeartbeat,
+  runGatewayApprovalExpiry,
+  runGatewayApprovalResolutionTick,
   buildRuntimeCacheState,
   buildGatewayCronRuntimeOptions,
   type SupervisorInternalState,
@@ -574,6 +576,38 @@ describe("runGatewaySupervisor", () => {
     expect(pollOnceCalls).toBe(1);
   });
 
+  it("continues the supervisor loop when approval resolution ticking throws", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      let ticked = false;
+      const result = await runGatewaySupervisor({
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        once: true,
+        factories: {
+          tickCron: fakeTickCron().tickCron,
+          createChannelGateway: () => ({
+            start: async () => {},
+            stop: async () => {},
+            hasPendingWork: () => false,
+            tickApprovalResolutions: async () => {
+              ticked = true;
+              throw new Error("database locked");
+            },
+          }) as any,
+          createDeliveryRouter: () => fakeDeliveryRouter() as any,
+        },
+      });
+
+      expect(ticked).toBe(true);
+      expect(result.ok).toBe(true);
+      expect(result.polls).toBe(1);
+      expect(warn).toHaveBeenCalledWith("Gateway approval resolution tick error: database locked");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("ChannelGateway receives runtimeCache, activeTurnRegistry, runtimeFingerprint, securityMode, securityAssessor", async () => {
     let capturedOpts: any;
     const gateway = { start: async () => {}, stop: async () => {}, hasPendingWork: () => false };
@@ -981,6 +1015,7 @@ describe("supervisor 5E internals", () => {
       runtimeCache: undefined,
       runtimeFingerprint: undefined,
       lastRuntimeCacheStateWrite: 0,
+      lastGatewayApprovalExpiryRun: 0,
       runtimeCacheStatePath: join(tmpDir, "rcs.json"),
       supervisorStartedAt: new Date().toISOString(),
       stuckAbortSent: new Set(),
@@ -1280,6 +1315,53 @@ describe("supervisor 5E internals", () => {
       const written = await readRuntimeCacheState(path);
       expect(written).toBeDefined();
       expect(written!.version).toBe(1);
+    });
+  });
+
+  describe("runGatewayApprovalExpiry", () => {
+    it("expires stale approvals through the queue and updates the cadence marker", async () => {
+      let expired = false;
+      const state = createMockSupervisorState({
+        gatewayApprovalQueue: {
+          expireStaleApprovals: async () => {
+            expired = true;
+            return 1;
+          }
+        } as any
+      });
+
+      await runGatewayApprovalExpiry(state, { running: false });
+
+      expect(expired).toBe(true);
+      expect(state.lastGatewayApprovalExpiryRun).toBeGreaterThan(0);
+    });
+
+    it("does not crash when approval expiry fails", async () => {
+      const state = createMockSupervisorState({
+        gatewayApprovalQueue: {
+          expireStaleApprovals: async () => {
+            throw new Error("database locked");
+          }
+        } as any
+      });
+
+      await expect(runGatewayApprovalExpiry(state, { running: false })).resolves.toBeUndefined();
+    });
+  });
+
+  describe("runGatewayApprovalResolutionTick", () => {
+    it("guards concurrent approval resolution ticks", async () => {
+      let calls = 0;
+      const guard = { running: true };
+
+      await runGatewayApprovalResolutionTick({
+        tickApprovalResolutions: async () => {
+          calls += 1;
+        }
+      }, guard);
+
+      expect(calls).toBe(0);
+      expect(guard.running).toBe(true);
     });
   });
 

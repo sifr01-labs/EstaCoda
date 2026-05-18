@@ -129,6 +129,7 @@ import {
   runGatewayRestart,
   runGatewayStartDryRun,
   runGatewayStartBackground,
+  runGatewayApprovals,
 } from "./gateway-commands.js";
 import {
   renderSettingsOverview,
@@ -3086,6 +3087,11 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
     return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
   }
 
+  if (subcommand === "approvals") {
+    const result = await runGatewayApprovals({ ...options, profileId: parseGatewayProfileFlag(rest) }, rest);
+    return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
+  }
+
   if (subcommand === "stop") {
     const profileId = parseGatewayProfileFlag(rest);
     const result = await runGatewayStop({
@@ -3168,6 +3174,7 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
       "EstaCoda gateway",
       "  estacoda gateway status",
       "  estacoda gateway diagnose",
+      "  estacoda gateway approvals [list|approve|deny]",
       "  estacoda gateway stop",
       "  estacoda gateway stop --force",
       "  estacoda gateway restart",

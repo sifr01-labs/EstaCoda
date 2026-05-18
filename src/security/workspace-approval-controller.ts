@@ -1,11 +1,11 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { DEFAULT_ENVIRONMENT_TYPE, assessSecurityPolicy, type SecurityApprovalMode, type SecurityAssessment, type SecurityPolicy, type SecurityRequest } from "../contracts/security.js";
+import { DEFAULT_ENVIRONMENT_TYPE, assessSecurityPolicy, type EnvironmentType, type SecurityApprovalMode, type SecurityAssessment, type SecurityPolicy, type SecurityRequest } from "../contracts/security.js";
 import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
 import type { ProviderExecutor } from "../providers/provider-executor.js";
-import { assessCommandSafety } from "./command-safety.js";
+import { assessCommandSafety, assessHardlineFloor } from "./command-safety.js";
 import { assessCommandRisk, type SmartApprovalDecision } from "./smart-approval-assessor.js";
 
 export type ApprovalScope = "once" | "session" | "always";
@@ -284,6 +284,43 @@ export class WorkspaceApprovalController {
     return await this.#store.revoke(input.id, input.workspaceRoot);
   }
 
+  preflightGatewayApproval(input: {
+    toolName: string;
+    commandPreview: string;
+    commandPayload?: string;
+    environmentType?: EnvironmentType;
+  }): SecurityAssessment | undefined {
+    const command = input.commandPayload ?? input.commandPreview;
+    const hardlineBlock = hardlineBlockFor({
+      riskClass: "destructive-local",
+      description: "gateway approval request",
+      toolName: input.toolName,
+      targetSummary: input.commandPreview,
+      command,
+      environmentType: input.environmentType,
+      context: {
+        trustedWorkspace: true,
+        targetConversationIsActive: false
+      }
+    });
+
+    if (hardlineBlock === undefined) {
+      return undefined;
+    }
+
+    return {
+      decision: "deny",
+      mode: "strict",
+      reason: hardlineBlock.reason,
+      risk: "high",
+      deterministicRule: hardlineBlock.code,
+      assessor: {
+        used: false,
+        status: "hard-block-overrode-assessor"
+      }
+    };
+  }
+
   async #findMatchingGrant(
     request: SecurityRequest,
     options: {
@@ -322,11 +359,11 @@ function hardlineBlockFor(request: SecurityRequest): {
   reason: string;
 } | undefined {
   const command = request.command ?? request.targetSummary ?? "";
-  const hardBlock = assessCommandSafety(command, {
+  const hardBlock = assessHardlineFloor(command, {
     environmentType: request.environmentType ?? DEFAULT_ENVIRONMENT_TYPE
-  }).hardBlock;
+  });
 
-  return hardBlock?.severity === "critical"
+  return hardBlock !== undefined
     ? { code: hardBlock.code, reason: hardBlock.reason }
     : undefined;
 }

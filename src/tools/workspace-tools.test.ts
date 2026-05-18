@@ -169,3 +169,40 @@ describe("safe nested file.write", () => {
     expect(result?.metadata?.path).toBe("a/b/c/d.txt");
   });
 });
+
+describe("terminal.run hardline floor", () => {
+  it("allows approved non-hardline destructive-local commands to reach execution", async () => {
+    const root = await makeTempDir();
+    await mkdir(join(root, "build"));
+    const tools = createWorkspaceTools({ workspaceRoot: root, commandTimeoutMs: 1000 });
+    const terminal = tools.find((tool) => tool.name === "terminal.run");
+
+    const result = await terminal?.run({ command: "rm -rf ./build" });
+
+    expect(result?.ok).toBe(true);
+    expect(result?.metadata?.command).toBe("rm -rf ./build");
+    await expect(access(join(root, "build"))).rejects.toBeDefined();
+  });
+
+  it("rejects hardBlock commands inside the tool handler", async () => {
+    const root = await makeTempDir();
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const terminal = tools.find((tool) => tool.name === "terminal.run");
+
+    const result = await terminal?.run({ command: "rm -rf /" });
+
+    expect(result?.ok).toBe(false);
+    expect(result?.content).toContain("filesystem root");
+  });
+
+  it("ignores environmentType supplied through tool input", async () => {
+    const root = await makeTempDir();
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const terminal = tools.find((tool) => tool.name === "terminal.run");
+
+    const result = await terminal?.run({ command: "sudo apt update", environmentType: "docker" } as never);
+
+    expect(result?.ok).toBe(false);
+    expect(result?.content).toContain("privilege escalation");
+  });
+});

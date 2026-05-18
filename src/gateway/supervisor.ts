@@ -5,6 +5,7 @@ import { loadRuntimeConfig, consumeTelegramPairingCode } from "../config/runtime
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 import type { ProfileStatePaths } from "../config/profile-home.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
+import { WorkspaceApprovalController } from "../security/workspace-approval-controller.js";
 import type { LoadedRuntimeConfig, ChannelBusyPolicy } from "../config/runtime-config.js";
 import type { ChannelAdapter, ChannelAuthPolicies, ChannelKind } from "../contracts/channel.js";
 import type { SecurityPolicy } from "../contracts/security.js";
@@ -55,6 +56,7 @@ import {
   type RuntimeCacheState,
 } from "./runtime-cache-state.js";
 import { ActiveTurnRegistry } from "./active-turn-registry.js";
+import { GatewayApprovalQueue } from "./approval-queue.js";
 import {
   HookRegistry,
   type GatewayHookEventName,
@@ -154,11 +156,13 @@ export type SupervisorInternalState = {
   cleanupDone: boolean;
   exit: (code: number) => void;
   activeTurnRegistry?: ActiveTurnRegistry;
+  gatewayApprovalQueue?: GatewayApprovalQueue;
   runtimeCache?: RuntimeCache;
   runtimeFingerprint?: RuntimeFingerprint;
   pruneTimer?: ReturnType<typeof setInterval>;
   stuckScanTimer?: ReturnType<typeof setInterval>;
   lastRuntimeCacheStateWrite: number;
+  lastGatewayApprovalExpiryRun: number;
   runtimeCacheStatePath: string;
   supervisorStartedAt: string;
   stuckAbortSent: Set<string>;
@@ -222,11 +226,13 @@ function createInitialState(
     running: true,
     exit: exitFn,
     activeTurnRegistry: undefined,
+    gatewayApprovalQueue: undefined,
     runtimeCache: undefined,
     runtimeFingerprint: undefined,
     pruneTimer: undefined,
     stuckScanTimer: undefined,
     lastRuntimeCacheStateWrite: 0,
+    lastGatewayApprovalExpiryRun: 0,
     runtimeCacheStatePath: runtimeCacheStatePath(stateHome),
     supervisorStartedAt,
     stuckAbortSent: new Set(),
@@ -585,6 +591,11 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     await mkdir(dirname(sessionDbPath), { recursive: true });
     const sessionDb = await createSQLiteSessionDB({ path: sessionDbPath });
     state.sessionDb = sessionDb;
+    const gatewayApprovalQueue = new GatewayApprovalQueue({
+      db: sessionDb.db,
+      controller: new WorkspaceApprovalController()
+    });
+    state.gatewayApprovalQueue = gatewayApprovalQueue;
 
     const activeTurnRegistry = new ActiveTurnRegistry({
       stuckThresholdMs: 300_000,
@@ -900,6 +911,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           },
           hookRegistry,
           profileId,
+          approvalQueue: gatewayApprovalQueue,
         })
       : new ChannelGateway({
           adapters: wrappers,
@@ -955,6 +967,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           },
           hookRegistry,
           profileId,
+          approvalQueue: gatewayApprovalQueue,
         });
 
     state.channelGateway = gateway;
@@ -995,6 +1008,8 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     }, STUCK_SCAN_INTERVAL_MS);
 
     const runtimeCacheStateWriteGuard = { running: false };
+    const gatewayApprovalExpiryGuard = { running: false };
+    const gatewayApprovalResolutionGuard = { running: false };
 
     // 13. Main loop
     let polls = 0;
@@ -1053,6 +1068,8 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
         await wrapper.tick();
       }
 
+      await runGatewayApprovalResolutionTick(gateway, gatewayApprovalResolutionGuard);
+
       for (const wrapper of wrappers) {
         try {
           const count = await wrapper.poll();
@@ -1069,6 +1086,10 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
 
       if (now - state.lastRuntimeCacheStateWrite >= RUNTIME_CACHE_STATE_HEARTBEAT_MS) {
         await runRuntimeCacheStateHeartbeat(state, runtimeCacheStateWriteGuard);
+      }
+
+      if (now - state.lastGatewayApprovalExpiryRun >= RUNTIME_CACHE_STATE_HEARTBEAT_MS) {
+        await runGatewayApprovalExpiry(state, gatewayApprovalExpiryGuard);
       }
 
       polls += 1;
@@ -1220,6 +1241,43 @@ export async function runRuntimeCacheStateHeartbeat(state: SupervisorInternalSta
     state.lastRuntimeCacheStateWrite = Date.now();
   } catch (err) {
     logWarning(`Runtime cache state write error: ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    guard.running = false;
+  }
+}
+
+export async function runGatewayApprovalExpiry(state: SupervisorInternalState, guard: { running: boolean }): Promise<void> {
+  if (guard.running) {
+    logDebug("Gateway approval expiry skipped: previous run still active");
+    return;
+  }
+  guard.running = true;
+  try {
+    await state.gatewayApprovalQueue?.expireStaleApprovals();
+    state.lastGatewayApprovalExpiryRun = Date.now();
+  } catch (err) {
+    logWarning(`Gateway approval expiry error: ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    guard.running = false;
+  }
+}
+
+export async function runGatewayApprovalResolutionTick(
+  gateway: { tickApprovalResolutions?: () => Promise<void> },
+  guard: { running: boolean }
+): Promise<void> {
+  if (guard.running) {
+    logDebug("Gateway approval resolution tick skipped: previous run still active");
+    return;
+  }
+  if (typeof gateway.tickApprovalResolutions !== "function") {
+    return;
+  }
+  guard.running = true;
+  try {
+    await gateway.tickApprovalResolutions();
+  } catch (err) {
+    logWarning(`Gateway approval resolution tick error: ${err instanceof Error ? err.message : String(err)}`);
   } finally {
     guard.running = false;
   }

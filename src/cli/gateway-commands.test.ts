@@ -39,6 +39,7 @@ import {
   runGatewayRestart,
   runGatewayStartDryRun,
   runGatewayStartBackground,
+  runGatewayApprovals,
 } from "./gateway-commands.js";
 import { CronStore } from "../cron/cron-store.js";
 import { CronExecutionStore } from "../cron/cron-execution-store.js";
@@ -56,7 +57,9 @@ import type { RuntimeCacheState } from "../gateway/runtime-cache-state.js";
 import { writeAdapterRuntimeState, RUNTIME_STATE_FILE } from "../gateway/adapter-runtime-state.js";
 import type { PersistedRuntimeState, AdapterRuntimeState } from "../gateway/adapter-runtime-state.js";
 import { openDefaultSQLiteDatabase } from "../storage/factory.js";
-import { resolveProfileStateHome, type ProfileStatePaths } from "../config/profile-home.js";
+import { createSQLiteSessionDB } from "../session/session-setup.js";
+import { createCommandHash } from "../gateway/approval-queue.js";
+import { resolveGlobalStateHome, resolveProfileStateHome, type ProfileStatePaths } from "../config/profile-home.js";
 
 function fakeRuntimeCacheState(overrides?: Partial<RuntimeCacheState>): RuntimeCacheState {
   return {
@@ -395,6 +398,115 @@ describe("gateway commands", () => {
       expect(result.ok).toBe(true);
       expect(result.output).not.toContain("Runtime Cache");
       expect(result.output).not.toContain("Active Turns");
+    });
+  });
+
+  describe("runGatewayApprovals", () => {
+    it("lists pending approvals for the selected profile without raw payloads", async () => {
+      const globalPaths = resolveGlobalStateHome({ homeDir: tmpDir });
+      const sessionDb = await createSQLiteSessionDB({ path: globalPaths.sessionsSqlitePath });
+      try {
+        sessionDb.db.query(
+          `insert into pending_approvals (
+            id, session_id, profile_id, command_preview, command_hash, command_payload,
+            tool_name, requested_at, expires_at, status, resolved_at, resolved_by, channel, chat_id
+          ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', null, null, ?, ?)`
+        ).run(
+          "approval-a",
+          "session-a",
+          "default",
+          "sudo apt update",
+          createCommandHash("sudo apt update SECRET=abc"),
+          "sudo apt update SECRET=abc",
+          "terminal.run",
+          "2026-05-18T10:00:00.000Z",
+          "2099-05-18T10:05:00.000Z",
+          "telegram",
+          "chat-a"
+        );
+
+        const result = await runGatewayApprovals({ workspaceRoot: tmpDir, homeDir: tmpDir }, ["list"]);
+
+        expect(result.ok).toBe(true);
+        expect(result.output).toContain("approval-a");
+        expect(result.output).toContain("sudo apt update");
+        expect(result.output).toContain(createCommandHash("sudo apt update SECRET=abc"));
+        expect(result.output).not.toContain("SECRET=abc");
+      } finally {
+        sessionDb.close();
+      }
+    });
+
+    it("resolves pending approvals by id for the selected profile", async () => {
+      const globalPaths = resolveGlobalStateHome({ homeDir: tmpDir });
+      const sessionDb = await createSQLiteSessionDB({ path: globalPaths.sessionsSqlitePath });
+      try {
+        sessionDb.db.query(
+          `insert into pending_approvals (
+            id, session_id, profile_id, command_preview, command_hash, command_payload,
+            tool_name, requested_at, expires_at, status, resolved_at, resolved_by, channel, chat_id
+          ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', null, null, ?, ?)`
+        ).run(
+          "approval-a",
+          "session-a",
+          "default",
+          "sudo apt update",
+          createCommandHash("sudo apt update"),
+          "sudo apt update",
+          "terminal.run",
+          "2026-05-18T10:00:00.000Z",
+          "2099-05-18T10:05:00.000Z",
+          "telegram",
+          "chat-a"
+        );
+
+        const result = await runGatewayApprovals({ workspaceRoot: tmpDir, homeDir: tmpDir }, ["approve", "approval-a"]);
+        const row = sessionDb.db.query<{ status: string; command_payload: string | null }>(
+          "select status, command_payload from pending_approvals where id = ?"
+        ).get("approval-a");
+
+        expect(result.ok).toBe(true);
+        expect(result.output).toContain("approved");
+        expect(row).toMatchObject({ status: "approved", command_payload: null });
+      } finally {
+        sessionDb.close();
+      }
+    });
+
+    it("denies pending approvals by id for the selected profile", async () => {
+      const globalPaths = resolveGlobalStateHome({ homeDir: tmpDir });
+      const sessionDb = await createSQLiteSessionDB({ path: globalPaths.sessionsSqlitePath });
+      try {
+        sessionDb.db.query(
+          `insert into pending_approvals (
+            id, session_id, profile_id, command_preview, command_hash, command_payload,
+            tool_name, requested_at, expires_at, status, resolved_at, resolved_by, channel, chat_id
+          ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', null, null, ?, ?)`
+        ).run(
+          "approval-deny",
+          "session-a",
+          "default",
+          "sudo apt update",
+          createCommandHash("sudo apt update"),
+          "sudo apt update",
+          "terminal.run",
+          "2026-05-18T10:00:00.000Z",
+          "2099-05-18T10:05:00.000Z",
+          "telegram",
+          "chat-a"
+        );
+
+        const result = await runGatewayApprovals({ workspaceRoot: tmpDir, homeDir: tmpDir }, ["deny", "approval-deny"]);
+        const row = sessionDb.db.query<{ status: string; command_payload: string | null }>(
+          "select status, command_payload from pending_approvals where id = ?"
+        ).get("approval-deny");
+
+        expect(result.ok).toBe(true);
+        expect(result.output).toContain("denied");
+        expect(row).toMatchObject({ status: "denied", command_payload: null });
+      } finally {
+        sessionDb.close();
+      }
     });
   });
 

@@ -76,6 +76,13 @@ export function normalizeCommandForSafety(value: string): string {
   return stripAnsi(value.normalize("NFKC")).trim().replace(/\s+/gu, " ");
 }
 
+export function assessHardlineFloor(
+  command: string,
+  options: { environmentType?: EnvironmentType } = {}
+): CommandSafetyAssessment["hardBlock"] | undefined {
+  return assessCommandSafety(command, options).hardBlock;
+}
+
 function toAssessment(normalized: string, detection: Detection): CommandSafetyAssessment {
   return {
     normalized,

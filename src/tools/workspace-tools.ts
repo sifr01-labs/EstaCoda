@@ -6,7 +6,7 @@ import type { EnvironmentType } from "../contracts/security.js";
 import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
 import type { FileChangePreviewViewModel } from "../contracts/view-model.js";
 import { explainPathBlock, isLikelyBinary, isTextyPath } from "../context/context-security.js";
-import { assessCommandSafety } from "../security/command-safety.js";
+import { assessHardlineFloor } from "../security/command-safety.js";
 
 export type WorkspaceToolOptions = {
   workspaceRoot: string;
@@ -841,14 +841,7 @@ function applyLineRange(content: string, lineStart?: number, lineEnd?: number): 
 }
 
 function explainCommandBlock(command: string, environmentType?: EnvironmentType): string | undefined {
-  const assessment = assessCommandSafety(command, { environmentType });
-  if (assessment.hardBlock !== undefined) {
-    return assessment.hardBlock.reason;
-  }
-  if (assessment.riskClass === "destructive-local") {
-    return "command matches a destructive or privilege-escalating pattern";
-  }
-  return undefined;
+  return assessHardlineFloor(command, { environmentType })?.reason;
 }
 
 function errorResult(content: string): ToolResult {

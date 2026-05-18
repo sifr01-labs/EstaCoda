@@ -13,7 +13,7 @@ import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/pr
 import { executeAuxiliaryTask } from "../providers/auxiliary-executor.js";
 import { buildResolvedModelRoute, getProviderMetadata } from "../providers/provider-metadata.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
-import { assessCommandSafety, normalizeCommandForSafety } from "./command-safety.js";
+import { assessCommandSafety, assessHardlineFloor, normalizeCommandForSafety } from "./command-safety.js";
 
 export function normalizeSecurityApprovalMode(mode: string | undefined): SecurityApprovalMode {
   switch (mode) {
@@ -239,7 +239,7 @@ function hardBlockFor(request: SecurityRequest): {
   reason: string;
 } | undefined {
   const command = request.command ?? request.targetSummary ?? "";
-  return assessCommandSafety(command, { environmentType: environmentTypeFor(request) }).hardBlock;
+  return assessHardlineFloor(command, { environmentType: environmentTypeFor(request) });
 }
 
 function nonHostCommandBypassFor(

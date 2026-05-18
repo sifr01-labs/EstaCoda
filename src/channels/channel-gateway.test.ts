@@ -1,17 +1,248 @@
 import { describe, it, expect, vi } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { ChannelGateway, InMemoryChannelSessionStore, telegramGatewayCommands, authorizeChannelMessage } from "./channel-gateway.js";
+import { ChannelApprovalStore } from "./channel-approval-store.js";
 import { createFakeTelegramAdapter } from "../test/fakes/fake-telegram-adapter.js";
 import { InMemorySurfacePointerStore } from "./surface-pointer-store.js";
 import type { ChannelMessage, ChannelSessionKey } from "../contracts/channel.js";
+import type { SecurityAssessment, SecurityPolicy, SecurityRequest } from "../contracts/security.js";
 import type { Runtime } from "../runtime/create-runtime.js";
 import { ActiveTurnRegistry } from "../gateway/active-turn-registry.js";
-import type { RuntimeCache } from "../runtime/runtime-cache.js";
+import { RuntimeCache } from "../runtime/runtime-cache.js";
 import type { RuntimeFingerprint } from "../runtime/runtime-fingerprint.js";
 import type { ChannelSessionStore } from "./channel-gateway.js";
 import type { FakeDeliveryRecord } from "../test/fakes/fake-channel-adapter.js";
 import { HookRegistry } from "../gateway/hook-registry.js";
+import { createSQLiteSessionDB } from "../session/session-setup.js";
+import { GatewayApprovalQueue } from "../gateway/approval-queue.js";
+import { WorkspaceApprovalController, WorkspaceApprovalStore } from "../security/workspace-approval-controller.js";
 
 type FakeTelegramAdapter = ReturnType<typeof createFakeTelegramAdapter> & { records: FakeDeliveryRecord[]; clearRecords(): void };
+
+async function setupGatewayApprovalQueue() {
+  const directory = await mkdtemp(join(tmpdir(), "estacoda-channel-approval-"));
+  const sessionDb = await createSQLiteSessionDB({ path: join(directory, "sessions.sqlite") });
+  let nextId = 0;
+  const queue = new GatewayApprovalQueue({
+    db: sessionDb.db,
+    controller: new WorkspaceApprovalController({
+      store: new WorkspaceApprovalStore({ path: join(directory, "workspace-approvals.json") })
+    }),
+    idFactory: () => `gateway-approval-${++nextId}`,
+    pollIntervalMs: 1
+  });
+
+  return {
+    directory,
+    sessionDb,
+    queue,
+    cleanup: async () => {
+      sessionDb.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  };
+}
+
+function createApprovalRuntime() {
+  let calls = 0;
+  const runtime = createMinimalRuntime();
+  runtime.handle = async () => {
+    calls += 1;
+    if (calls === 1) {
+      return {
+        label: "approval",
+        text: "blocked",
+        matchedSkills: [],
+        intent: { labels: ["general"], confidence: 1, nativeIntent: "general", suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, evidence: [], rationale: "" },
+        securityDecision: "ask",
+        toolExecutions: [
+              { tool: { name: "terminal.run", description: "Run a terminal command", inputSchema: {}, riskClass: "destructive-local" as const, toolsets: ["terminal" as const], progressLabel: "Running", maxResultSizeChars: 10000 }, decision: "ask", riskClass: "destructive-local", targetKey: "terminal.run:rm-build", targetSummary: "rm -rf ./build" }
+        ],
+        toolPlans: [],
+        skillOutcomes: [],
+        artifacts: [],
+        context: undefined,
+        projectContext: undefined,
+        progress: []
+      } as Awaited<ReturnType<Runtime["handle"]>>;
+    }
+
+    return {
+      label: "ok",
+      text: "resumed",
+      matchedSkills: [],
+      intent: { labels: ["general"], confidence: 1, nativeIntent: "general", suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, evidence: [], rationale: "" },
+      securityDecision: "allow",
+      toolExecutions: [],
+      toolPlans: [],
+      skillOutcomes: [],
+      artifacts: [],
+      context: undefined,
+      projectContext: undefined,
+      progress: []
+    } as Awaited<ReturnType<Runtime["handle"]>>;
+  };
+
+  return {
+    runtime,
+    calls: () => calls
+  };
+}
+
+function runtimeResponse(input: {
+  text: string;
+  securityDecision: "allow" | "ask" | "deny";
+  toolExecutions?: Awaited<ReturnType<Runtime["handle"]>>["toolExecutions"];
+}): Awaited<ReturnType<Runtime["handle"]>> {
+  return {
+    label: "test",
+    text: input.text,
+    matchedSkills: [],
+    intent: { labels: ["general"], confidence: 1, nativeIntent: "general", suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, evidence: [], rationale: "" },
+    securityDecision: input.securityDecision,
+    toolExecutions: input.toolExecutions ?? [],
+    toolPlans: [],
+    skillOutcomes: [],
+    artifacts: [],
+    context: undefined,
+    projectContext: undefined,
+    progress: []
+  };
+}
+
+function commandExecution(decision: "allow" | "ask" | "deny", command: string): Awaited<ReturnType<Runtime["handle"]>>["toolExecutions"][number] {
+  return {
+    tool: { name: "terminal.run", description: "Run a terminal command", inputSchema: {}, riskClass: "destructive-local" as const, toolsets: ["terminal" as const], progressLabel: "Running", maxResultSizeChars: 10000 },
+    decision,
+    riskClass: "destructive-local",
+    targetKey: undefined,
+    targetSummary: command
+  };
+}
+
+async function assessWithPolicy(policy: SecurityPolicy, request: SecurityRequest): Promise<SecurityAssessment> {
+  if (policy.assess !== undefined) {
+    return await policy.assess(request);
+  }
+  return {
+    decision: policy.decide(request),
+    mode: "adaptive",
+    reason: "test",
+    risk: "high"
+  };
+}
+
+function createGrantProbeRuntime(securityPolicy: () => SecurityPolicy) {
+  let calls = 0;
+  const runtime = createMinimalRuntime();
+  runtime.handle = async (input) => {
+    calls += 1;
+    if (input.text.includes("hardline")) {
+      const assessment = await assessWithPolicy(securityPolicy(), {
+        toolName: "terminal.run",
+        riskClass: "destructive-local",
+        targetKey: undefined,
+        targetSummary: "rm -rf /",
+        command: "rm -rf /",
+        description: "run terminal command",
+        context: {
+          trustedWorkspace: true,
+          targetConversationIsActive: true
+        }
+      });
+      return runtimeResponse({
+        text: `hardline decision=${assessment.decision}`,
+        securityDecision: assessment.decision,
+        toolExecutions: [commandExecution(assessment.decision, "rm -rf /")]
+      });
+    }
+
+    if (input.text.includes("normal")) {
+      const assessment = await assessWithPolicy(securityPolicy(), {
+        toolName: "terminal.run",
+        riskClass: "destructive-local",
+        targetKey: undefined,
+        targetSummary: "rm -rf ./build",
+        command: "rm -rf ./build",
+        description: "run terminal command",
+        context: {
+          trustedWorkspace: true,
+          targetConversationIsActive: true
+        }
+      });
+      return runtimeResponse({
+        text: `normal decision=${assessment.decision}`,
+        securityDecision: assessment.decision,
+        toolExecutions: [commandExecution(assessment.decision, "rm -rf ./build")]
+      });
+    }
+
+    if (calls > 1) {
+      const assessment = await assessWithPolicy(securityPolicy(), {
+        toolName: "terminal.run",
+        riskClass: "destructive-local",
+        targetKey: undefined,
+        targetSummary: "rm -rf ./build",
+        command: "rm -rf ./build",
+        description: "run terminal command",
+        context: {
+          trustedWorkspace: true,
+          targetConversationIsActive: true
+        }
+      });
+      return runtimeResponse({
+        text: `resumed decision=${assessment.decision}`,
+        securityDecision: assessment.decision,
+        toolExecutions: [commandExecution(assessment.decision, "rm -rf ./build")]
+      });
+    }
+
+    return runtimeResponse({
+      text: "blocked",
+      securityDecision: "ask",
+      toolExecutions: [commandExecution("ask", "rm -rf ./build")]
+    });
+  };
+
+  return { runtime, calls: () => calls };
+}
+
+function createTerminalDecisionRuntime(decision: "ask" | "deny", command: string) {
+  const runtime = createMinimalRuntime();
+  runtime.handle = async () => runtimeResponse({
+    text: `${decision} ${command}`,
+    securityDecision: decision,
+    toolExecutions: [commandExecution(decision, command)]
+  });
+  return runtime;
+}
+
+function createCachedPolicyProbeRuntime(securityPolicy: SecurityPolicy) {
+  const runtime = createMinimalRuntime();
+  runtime.handle = async (input) => {
+    const assessment = await assessWithPolicy(securityPolicy, {
+      toolName: "terminal.run",
+      riskClass: "destructive-local",
+      targetKey: undefined,
+      targetSummary: "rm -rf ./build",
+      command: "rm -rf ./build",
+      description: "run terminal command",
+      context: {
+        trustedWorkspace: true,
+        targetConversationIsActive: true
+      }
+    });
+
+    return runtimeResponse({
+      text: `${input.text} decision=${assessment.decision}`,
+      securityDecision: assessment.decision,
+      toolExecutions: [commandExecution(assessment.decision, "rm -rf ./build")]
+    });
+  };
+  return runtime;
+}
 
 function makeMessage(text: string, overrides?: Partial<ChannelMessage>): ChannelMessage {
   const sessionKey: ChannelSessionKey = {
@@ -1217,6 +1448,419 @@ describe("ChannelGateway commands", () => {
 
       const approveResult = await gateway.receive(makeMessage("/approve"));
       expect(approveResult.replyText).toContain("Approval granted");
+    });
+
+    it("creates a durable pending approval row for real gateway approvals", async () => {
+      const { queue, cleanup } = await setupGatewayApprovalQueue();
+      try {
+        const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+        const approvalRuntime = createApprovalRuntime();
+        const gateway = new ChannelGateway({
+          adapters: [adapter],
+          runtimeForSession: async () => approvalRuntime.runtime,
+          sessionStore: new InMemoryChannelSessionStore(),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          profileId: "profile-a",
+          approvalQueue: queue
+        });
+
+        await gateway.receive(makeMessage("run something risky"));
+        const pending = await queue.listPending({ profileId: "profile-a" });
+
+        expect(pending).toHaveLength(1);
+        expect(pending[0]).toMatchObject({
+          id: "gateway-approval-1",
+          profileId: "profile-a",
+          toolName: "terminal.run",
+          commandPreview: "rm -rf ./build",
+          commandPayload: undefined
+        });
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it("session approval grants cannot allow a later hardline command", async () => {
+      const { queue, cleanup } = await setupGatewayApprovalQueue();
+      try {
+        const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+        let currentSecurityPolicy: SecurityPolicy | undefined;
+        let probe: ReturnType<typeof createGrantProbeRuntime> | undefined;
+        const gateway = new ChannelGateway({
+          adapters: [adapter],
+          runtimeForSession: async ({ securityPolicy }) => {
+            currentSecurityPolicy = securityPolicy;
+            probe ??= createGrantProbeRuntime(() => currentSecurityPolicy ?? securityPolicy);
+            return probe.runtime;
+          },
+          sessionStore: new InMemoryChannelSessionStore(),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          profileId: "profile-a",
+          approvalQueue: queue
+        });
+
+        await gateway.receive(makeMessage("run something risky"));
+        expect(await queue.listPending({ profileId: "profile-a" })).toHaveLength(1);
+
+        const approveResult = await gateway.receive(makeMessage("/approve session"));
+        expect(approveResult.replyText).toContain("resumed decision=allow");
+
+        const hardlineResult = await gateway.receive(makeMessage("run hardline"));
+        expect(hardlineResult.replyText).toContain("hardline decision=deny");
+        expect(await queue.listPending({ profileId: "profile-a" })).toEqual([]);
+        expect(probe?.calls()).toBe(3);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it("persisted channel approvals cannot allow a later hardline command", async () => {
+      const { queue, cleanup, directory } = await setupGatewayApprovalQueue();
+      try {
+        const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+        const approvalStore = new ChannelApprovalStore({ path: join(directory, "channel-approvals.json") });
+        await approvalStore.grant({
+          sessionKey: { platform: "telegram", chatId: "123456", chatType: "dm" },
+          toolName: "terminal.run",
+          riskClass: "destructive-local",
+          targetKey: undefined,
+          targetSummary: "rm -rf ./build"
+        });
+
+        let currentSecurityPolicy: SecurityPolicy | undefined;
+        let probe: ReturnType<typeof createGrantProbeRuntime> | undefined;
+        const gateway = new ChannelGateway({
+          adapters: [adapter],
+          runtimeForSession: async ({ securityPolicy }) => {
+            currentSecurityPolicy = securityPolicy;
+            probe ??= createGrantProbeRuntime(() => currentSecurityPolicy ?? securityPolicy);
+            return probe.runtime;
+          },
+          sessionStore: new InMemoryChannelSessionStore(),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          profileId: "profile-a",
+          approvalQueue: queue,
+          approvalStore
+        });
+
+        const normalResult = await gateway.receive(makeMessage("run normal approved command"));
+        expect(normalResult.replyText).toContain("normal decision=allow");
+
+        const hardlineResult = await gateway.receive(makeMessage("run hardline"));
+        expect(hardlineResult.replyText).toContain("hardline decision=deny");
+        expect(await queue.listPending({ profileId: "profile-a" })).toEqual([]);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it("/approve always cannot allow a later hardline command", async () => {
+        const { queue, cleanup } = await setupGatewayApprovalQueue();
+      try {
+        const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+        let currentSecurityPolicy: SecurityPolicy | undefined;
+        let probe: ReturnType<typeof createGrantProbeRuntime> | undefined;
+        const gateway = new ChannelGateway({
+          adapters: [adapter],
+          runtimeForSession: async ({ securityPolicy }) => {
+            currentSecurityPolicy = securityPolicy;
+            probe ??= createGrantProbeRuntime(() => currentSecurityPolicy ?? securityPolicy);
+            return probe.runtime;
+          },
+          sessionStore: new InMemoryChannelSessionStore(),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          profileId: "profile-a",
+          approvalQueue: queue
+        });
+
+        await gateway.receive(makeMessage("run something risky"));
+        const approveResult = await gateway.receive(makeMessage("/approve always"));
+        expect(approveResult.replyText).toContain("Approval granted");
+
+        const hardlineResult = await gateway.receive(makeMessage("run hardline"));
+        expect(hardlineResult.replyText).toContain("hardline decision=deny");
+        expect(await queue.listPending({ profileId: "profile-a" })).toEqual([]);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it("/approve always invalidates the affected cached runtime before replay", async () => {
+      const { queue, cleanup, directory } = await setupGatewayApprovalQueue();
+      const runtimeCache = new RuntimeCache({
+        createRuntime: async ({ securityPolicy }) => createCachedPolicyProbeRuntime(securityPolicy)
+      });
+      try {
+        const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+        const approvalStore = new ChannelApprovalStore({ path: join(directory, "channel-approvals.json") });
+        const gateway = new ChannelGateway({
+          adapters: [adapter],
+          runtimeForSession: async () => createMinimalRuntime(),
+          sessionStore: new InMemoryChannelSessionStore(),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          profileId: "profile-a",
+          approvalQueue: queue,
+          approvalStore,
+          runtimeCache,
+          runtimeFingerprint: createFakeFingerprint(),
+          securityMode: "strict"
+        });
+
+        const first = await gateway.receive(makeMessage("run normal"));
+        expect(first.replyText).toContain("decision=ask");
+        expect(await queue.listPending({ profileId: "profile-a" })).toHaveLength(1);
+
+        const approveResult = await gateway.receive(makeMessage("/approve always"));
+
+        expect(runtimeCache.stats().totalInvalidated).toBe(1);
+        expect(approveResult.replyText).toContain("Approval granted");
+        expect(approveResult.replyText).toContain("run normal decision=allow");
+      } finally {
+        await runtimeCache.disposeAll();
+        await cleanup();
+      }
+    });
+
+    it("/revoke invalidates the affected cached runtime so matching actions are gated again", async () => {
+      const { queue, cleanup, directory } = await setupGatewayApprovalQueue();
+      const runtimeCache = new RuntimeCache({
+        createRuntime: async ({ securityPolicy }) => createCachedPolicyProbeRuntime(securityPolicy)
+      });
+      try {
+        const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+        const approvalStore = new ChannelApprovalStore({
+          path: join(directory, "channel-approvals.json"),
+          idFactory: () => "persisted-approval-1"
+        });
+        await approvalStore.grant({
+          sessionKey: { platform: "telegram", chatId: "123456", chatType: "dm" },
+          toolName: "terminal.run",
+          riskClass: "destructive-local",
+          targetKey: undefined,
+          targetSummary: "rm -rf ./build"
+        });
+        const gateway = new ChannelGateway({
+          adapters: [adapter],
+          runtimeForSession: async () => createMinimalRuntime(),
+          sessionStore: new InMemoryChannelSessionStore(),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          profileId: "profile-a",
+          approvalQueue: queue,
+          approvalStore,
+          runtimeCache,
+          runtimeFingerprint: createFakeFingerprint(),
+          securityMode: "strict"
+        });
+
+        const allowed = await gateway.receive(makeMessage("run normal"));
+        expect(allowed.replyText).toContain("decision=allow");
+        expect(await queue.listPending({ profileId: "profile-a" })).toEqual([]);
+
+        const revokeResult = await gateway.receive(makeMessage("/revoke persisted-approval-1"));
+        expect(revokeResult.replyText).toContain("Revoked persistent approval");
+        expect(runtimeCache.stats().totalInvalidated).toBe(1);
+
+        const gated = await gateway.receive(makeMessage("run normal"));
+        expect(gated.replyText).toContain("decision=ask");
+        expect(await queue.listPending({ profileId: "profile-a" })).toHaveLength(1);
+      } finally {
+        await runtimeCache.disposeAll();
+        await cleanup();
+      }
+    });
+
+    it("session grants still work through the cached ChannelGateway policy", async () => {
+      const { queue, cleanup, directory } = await setupGatewayApprovalQueue();
+      const runtimeCache = new RuntimeCache({
+        createRuntime: async ({ securityPolicy }) => createCachedPolicyProbeRuntime(securityPolicy)
+      });
+      try {
+        const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+        const approvalStore = new ChannelApprovalStore({ path: join(directory, "channel-approvals.json") });
+        const gateway = new ChannelGateway({
+          adapters: [adapter],
+          runtimeForSession: async () => createMinimalRuntime(),
+          sessionStore: new InMemoryChannelSessionStore(),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          profileId: "profile-a",
+          approvalQueue: queue,
+          approvalStore,
+          runtimeCache,
+          runtimeFingerprint: createFakeFingerprint(),
+          securityMode: "strict"
+        });
+
+        const first = await gateway.receive(makeMessage("run normal"));
+        expect(first.replyText).toContain("decision=ask");
+
+        const approveResult = await gateway.receive(makeMessage("/approve session"));
+
+        expect(approveResult.replyText).toContain("Approval granted");
+        expect(approveResult.replyText).toContain("run normal decision=allow");
+        expect(runtimeCache.stats().totalInvalidated).toBe(0);
+        expect(runtimeCache.stats().totalReused).toBeGreaterThan(0);
+      } finally {
+        await runtimeCache.disposeAll();
+        await cleanup();
+      }
+    });
+
+    it("does not create a durable approval row for hardline deny decisions", async () => {
+      const { queue, cleanup } = await setupGatewayApprovalQueue();
+      try {
+        const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+        const gateway = new ChannelGateway({
+          adapters: [adapter],
+          runtimeForSession: async () => createTerminalDecisionRuntime("deny", "rm -rf /"),
+          sessionStore: new InMemoryChannelSessionStore(),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          profileId: "profile-a",
+          approvalQueue: queue
+        });
+
+        await gateway.receive(makeMessage("run hardline"));
+
+        expect(await queue.listPending({ profileId: "profile-a" })).toEqual([]);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it("keeps gateway pending approvals ask-only and never queues terminal deny decisions", async () => {
+      const { queue, cleanup } = await setupGatewayApprovalQueue();
+      try {
+        const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+        const gateway = new ChannelGateway({
+          adapters: [adapter],
+          runtimeForSession: async () => createTerminalDecisionRuntime("deny", "rm -rf ./build"),
+          sessionStore: new InMemoryChannelSessionStore(),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          profileId: "profile-a",
+          approvalQueue: queue
+        });
+
+        await gateway.receive(makeMessage("run denied non-hardline command"));
+
+        expect(await queue.listPending({ profileId: "profile-a" })).toEqual([]);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it("remote /approve resolves the durable row and resumes the blocked request", async () => {
+      const { queue, cleanup } = await setupGatewayApprovalQueue();
+      try {
+        const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+        const approvalRuntime = createApprovalRuntime();
+        const gateway = new ChannelGateway({
+          adapters: [adapter],
+          runtimeForSession: async () => approvalRuntime.runtime,
+          sessionStore: new InMemoryChannelSessionStore(),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          profileId: "profile-a",
+          approvalQueue: queue
+        });
+
+        await gateway.receive(makeMessage("run something risky"));
+        const [pending] = await queue.listPending({ profileId: "profile-a" });
+        const approveResult = await gateway.receive(makeMessage("/approve"));
+        const durable = await queue.getApproval(pending.id, { profileId: "profile-a", sessionId: pending.sessionId });
+
+        expect(durable?.status).toBe("approved");
+        expect(approvalRuntime.calls()).toBe(2);
+        expect(approveResult.replyText).toContain("Approval granted");
+        expect(approveResult.replyText).toContain("resumed");
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it("remote /deny resolves the durable row without resuming the blocked request", async () => {
+      const { queue, cleanup } = await setupGatewayApprovalQueue();
+      try {
+        const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+        const approvalRuntime = createApprovalRuntime();
+        const gateway = new ChannelGateway({
+          adapters: [adapter],
+          runtimeForSession: async () => approvalRuntime.runtime,
+          sessionStore: new InMemoryChannelSessionStore(),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          profileId: "profile-a",
+          approvalQueue: queue
+        });
+
+        await gateway.receive(makeMessage("run something risky"));
+        const [pending] = await queue.listPending({ profileId: "profile-a" });
+        const denyResult = await gateway.receive(makeMessage("/deny"));
+        const durable = await queue.getApproval(pending.id, { profileId: "profile-a", sessionId: pending.sessionId });
+
+        expect(durable?.status).toBe("denied");
+        expect(approvalRuntime.calls()).toBe(1);
+        expect(denyResult.replyText).toContain("Approval denied");
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it("CLI approval of the durable row is observed by the live gateway and resumes", async () => {
+      const { queue, cleanup } = await setupGatewayApprovalQueue();
+      try {
+        const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+        const approvalRuntime = createApprovalRuntime();
+        const gateway = new ChannelGateway({
+          adapters: [adapter],
+          runtimeForSession: async () => approvalRuntime.runtime,
+          sessionStore: new InMemoryChannelSessionStore(),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          profileId: "profile-a",
+          approvalQueue: queue
+        });
+
+        await gateway.receive(makeMessage("run something risky"));
+        const [pending] = await queue.listPending({ profileId: "profile-a" });
+        await queue.resolveApproval(pending.id, "approved", "cli", {
+          profileId: "profile-a",
+          sessionId: pending.sessionId
+        });
+
+        await gateway.tickApprovalResolutions();
+
+        expect(approvalRuntime.calls()).toBe(2);
+        expect(adapter.records.some((record) => record.kind === "text" && record.text?.includes("Approved by CLI/operator."))).toBe(true);
+        expect(adapter.records.some((record) => record.kind === "text" && record.text?.includes("resumed"))).toBe(true);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it("CLI denial of the durable row is observed by the live gateway without resuming", async () => {
+      const { queue, cleanup } = await setupGatewayApprovalQueue();
+      try {
+        const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+        const approvalRuntime = createApprovalRuntime();
+        const gateway = new ChannelGateway({
+          adapters: [adapter],
+          runtimeForSession: async () => approvalRuntime.runtime,
+          sessionStore: new InMemoryChannelSessionStore(),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          profileId: "profile-a",
+          approvalQueue: queue
+        });
+
+        await gateway.receive(makeMessage("run something risky"));
+        const [pending] = await queue.listPending({ profileId: "profile-a" });
+        await queue.resolveApproval(pending.id, "denied", "cli", {
+          profileId: "profile-a",
+          sessionId: pending.sessionId
+        });
+
+        await gateway.tickApprovalResolutions();
+
+        expect(approvalRuntime.calls()).toBe(1);
+        expect(adapter.records.some((record) => record.kind === "text" && record.text?.includes("Approval denied"))).toBe(true);
+      } finally {
+        await cleanup();
+      }
     });
 
     it("handoff /attach and /detach still work", async () => {

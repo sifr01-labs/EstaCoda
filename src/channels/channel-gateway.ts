@@ -8,7 +8,7 @@ import type {
 import type { ChannelKind } from "../contracts/channel.js";
 import type { ChannelBusyPolicy } from "../config/runtime-config.js";
 import { SessionMessageQueue } from "./session-message-queue.js";
-import { assessSecurityPolicy, type SecurityApprovalMode, type SecurityDecision, type SecurityPolicy, type SecurityRequest } from "../contracts/security.js";
+import { assessSecurityPolicy, type SecurityApprovalMode, type SecurityAssessment, type SecurityDecision, type SecurityPolicy, type SecurityRequest } from "../contracts/security.js";
 import { runCronCommand } from "../cron/cron-command.js";
 import { originFromSessionKey } from "../cron/cron-runner.js";
 import { CronStore } from "../cron/cron-store.js";
@@ -20,9 +20,16 @@ import type { ArtifactRecord } from "../contracts/artifact.js";
 import { ChannelApprovalStore, type PersistedApprovalGrant } from "./channel-approval-store.js";
 import { buildBaseSessionId, normalizeSessionKey, type ChannelSessionPolicy, shouldAutoResetSession, stableSessionKey } from "./channel-session-store.js";
 import { createSecurityPolicyForMode } from "../security/security-policy-factory.js";
+import { assessHardlineFloor } from "../security/command-safety.js";
 import type { RuntimeCache } from "../runtime/runtime-cache.js";
 import type { RuntimeFingerprint } from "../runtime/runtime-fingerprint.js";
 import type { ActiveTurnRegistry } from "../gateway/active-turn-registry.js";
+import {
+  createCommandHash,
+  createCommandPreview,
+  type GatewayApprovalQueue,
+  type PendingApprovalChannel
+} from "../gateway/approval-queue.js";
 import { HookRegistry, sanitizeHookError } from "../gateway/hook-registry.js";
 import { createHash } from "node:crypto";
 import type { HandoffStore } from "./handoff-store.js";
@@ -33,6 +40,8 @@ import type { DeliveryRouter } from "./delivery-router.js";
 function sessionKeyHash(sessionId: string): string {
   return createHash("sha256").update(sessionId).digest("hex").slice(0, 16);
 }
+
+const DEFAULT_GATEWAY_APPROVAL_TTL_MS = 5 * 60 * 1000;
 
 export type BusyPolicyConfig = {
   busyPolicy: ChannelBusyPolicy;
@@ -71,6 +80,7 @@ export type ChannelGatewayOptions = {
   diagnostics?: () => Promise<string>;
   deliveryRouter?: DeliveryRouter;
   profileId?: string;
+  approvalQueue?: GatewayApprovalQueue;
 
   // Stage 5D additions (all optional)
   /** Active turn registry for busy protection and abort tracking. */
@@ -89,7 +99,8 @@ export type ChannelGatewayOptions = {
 
 type ApprovalScope = "once" | "session" | "always";
 
-type PendingApproval = {
+type PendingApprovalContinuation = {
+  approvalId?: string;
   toolName: string;
   riskClass: string;
   targetKey?: string;
@@ -196,8 +207,9 @@ export class ChannelGateway {
   readonly #diagnostics: (() => Promise<string>) | undefined;
   readonly #deliveryRouter: DeliveryRouter | undefined;
   readonly #profileId: string;
+  readonly #approvalQueue: GatewayApprovalQueue | undefined;
   readonly #activeTurns = new Map<string, AbortController>();
-  readonly #pendingApprovals = new Map<string, PendingApproval>();
+  readonly #pendingApprovals = new Map<string, PendingApprovalContinuation>();
   readonly #approvalGrants = new Map<string, ApprovalGrant[]>();
   readonly #yoloSessions = new Map<string, boolean>();
 
@@ -237,6 +249,7 @@ export class ChannelGateway {
     this.#diagnostics = options.diagnostics;
     this.#deliveryRouter = options.deliveryRouter;
     this.#profileId = options.profileId ?? "default";
+    this.#approvalQueue = options.approvalQueue;
 
     // Stage 5D
     this.#activeTurnRegistry = options.activeTurnRegistry;
@@ -304,6 +317,56 @@ export class ChannelGateway {
     }
   }
 
+  async #createPendingApprovalContinuation(
+    pending: PendingApprovalContinuation | undefined,
+    adapter: ChannelAdapter
+  ): Promise<PendingApprovalContinuation | undefined> {
+    if (pending === undefined || this.#approvalQueue === undefined) {
+      return pending;
+    }
+
+    const payload = pending.targetSummary ?? pending.targetKey ?? pending.toolName;
+    const requestedAt = dateOrNow(pending.originalMessage.receivedAt);
+    const durable = await this.#approvalQueue.createPendingApproval({
+      sessionId: pending.sessionId,
+      profileId: this.#profileId,
+      commandPreview: createCommandPreview(payload),
+      commandHash: createCommandHash(payload),
+      commandPayload: payload,
+      toolName: pending.toolName,
+      requestedAt,
+      expiresAt: new Date(requestedAt.getTime() + DEFAULT_GATEWAY_APPROVAL_TTL_MS),
+      channel: toPendingApprovalChannel(adapter.kind),
+      chatId: pending.originalMessage.sessionKey.chatId
+    });
+
+    if (durable.status !== "pending") {
+      return undefined;
+    }
+
+    return {
+      ...pending,
+      approvalId: durable.id,
+      targetSummary: durable.commandPreview
+    };
+  }
+
+  async #refreshCachedRuntimePolicy(sessionId: string, reason: string): Promise<void> {
+    if (this.#runtimeCache === undefined) {
+      return;
+    }
+
+    try {
+      await this.#runtimeCache.invalidate(sessionId);
+    } catch (error) {
+      this.#logWarning?.(
+        `${reason} cache invalidate failed for ${sessionId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
+
   async start(): Promise<void> {
     for (const adapter of this.#adapters.values()) {
       await adapter.start?.(async (message) => {
@@ -315,6 +378,49 @@ export class ChannelGateway {
   async stop(): Promise<void> {
     for (const adapter of this.#adapters.values()) {
       await adapter.stop?.();
+    }
+  }
+
+  async tickApprovalResolutions(): Promise<void> {
+    if (this.#approvalQueue === undefined || this.#pendingApprovals.size === 0) {
+      return;
+    }
+
+    for (const [key, pending] of [...this.#pendingApprovals]) {
+      if (pending.approvalId === undefined) {
+        continue;
+      }
+
+      let durable = await this.#approvalQueue.getApproval(pending.approvalId, {
+        profileId: this.#profileId,
+        sessionId: pending.sessionId
+      });
+
+      if (durable?.status === "pending" && durable.expiresAt.getTime() <= Date.now()) {
+        await this.#approvalQueue.expireStaleApprovals();
+        durable = await this.#approvalQueue.getApproval(pending.approvalId, {
+          profileId: this.#profileId,
+          sessionId: pending.sessionId
+        });
+      }
+
+      if (durable?.status === "approved") {
+        const adapter = this.#adapterFor(pending.originalMessage.channel);
+        await this.#resumePendingApproval(key, pending, adapter, "once", "Approved by CLI/operator.");
+      } else if (durable?.status === "denied" || durable?.status === "expired") {
+        const adapter = this.#adapterFor(pending.originalMessage.channel);
+        await this.#terminatePendingApproval(
+          key,
+          pending,
+          adapter,
+          durable.status === "expired"
+            ? "Approval expired"
+            : "Approval denied",
+          durable.status === "expired"
+            ? "The pending action expired before it was approved."
+            : "The pending action was denied by CLI/operator."
+        );
+      }
     }
   }
 
@@ -535,7 +641,10 @@ export class ChannelGateway {
         }
       });
 
-      const pendingApproval = firstPendingApproval(response.toolExecutions, message, sessionId);
+      const pendingApproval = await this.#createPendingApprovalContinuation(
+        firstPendingApproval(response.toolExecutions, message, sessionId),
+        adapter
+      );
       if (pendingApproval !== undefined) {
         this.#pendingApprovals.set(activeTurnKey, pendingApproval);
       } else {
@@ -1448,24 +1557,7 @@ export class ChannelGateway {
     }
 
     if (command === "/deny") {
-      const key = stableSessionKey(message.sessionKey, this.#sessionPolicy);
-      const pending = this.#pendingApprovals.get(key);
-      const text = pending === undefined
-        ? "There is no pending approval request for this chat."
-        : [
-            "❌ Approval denied",
-            `Tool: ${pending.toolName}`,
-            "EstaCoda will not run that action unless it is requested again."
-          ].join("\n");
-      this.#pendingApprovals.delete(key);
-      await this.#deliverText(adapter, message.sessionKey, text);
-
-      return {
-        sessionId: pending?.sessionId ?? await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt }),
-        replyText: text,
-        artifactCount: 0,
-        progressCount: 0
-      };
+      return this.#denyPending(message, adapter);
     }
 
     if (command === "/revoke") {
@@ -1519,7 +1611,6 @@ export class ChannelGateway {
 
   async #approvePending(message: ChannelMessage, adapter: ChannelAdapter): Promise<ChannelGatewayResult> {
     const key = stableSessionKey(message.sessionKey, this.#sessionPolicy);
-    const normalizedSessionKey = normalizeSessionKey(message.sessionKey, this.#sessionPolicy);
     const pending = this.#pendingApprovals.get(key);
 
     if (pending === undefined) {
@@ -1535,28 +1626,24 @@ export class ChannelGateway {
     }
 
     const scope = parseApprovalScope(message.text);
-    if (scope !== "always") {
-      const grants = this.#approvalGrants.get(key) ?? [];
-      grants.push({
-        toolName: pending.toolName,
-        riskClass: pending.riskClass,
-        targetKey: pending.targetKey,
-        targetSummary: pending.targetSummary,
-        scope,
-        sessionId: scope === "session" ? pending.sessionId : undefined
-      });
-      this.#approvalGrants.set(key, grants);
-    }
-    this.#pendingApprovals.delete(key);
-
-    if (scope === "always") {
-      await this.#approvalStore.grant({
-        sessionKey: normalizedSessionKey,
-        toolName: pending.toolName,
-        riskClass: pending.riskClass,
-        targetKey: pending.targetKey,
-        targetSummary: pending.targetSummary
-      });
+    if (pending.approvalId !== undefined && this.#approvalQueue !== undefined) {
+      try {
+        await this.#approvalQueue.resolveApproval(
+          pending.approvalId,
+          "approved",
+          message.sender.id,
+          { profileId: this.#profileId, sessionId: pending.sessionId }
+        );
+      } catch (error) {
+        const text = error instanceof Error ? error.message : String(error);
+        await this.#deliverText(adapter, message.sessionKey, text);
+        return {
+          sessionId: pending.sessionId,
+          replyText: text,
+          artifactCount: 0,
+          progressCount: 0
+        };
+      }
     }
 
     const approvalText = scope === "always"
@@ -1572,7 +1659,85 @@ export class ChannelGateway {
           `Scope: ${scope}`,
           "EstaCoda is resuming the blocked request now."
         ].join("\n");
-    await this.#deliverText(adapter, message.sessionKey, approvalText);
+    return await this.#resumePendingApproval(key, pending, adapter, scope, approvalText);
+  }
+
+  async #denyPending(message: ChannelMessage, adapter: ChannelAdapter): Promise<ChannelGatewayResult> {
+    const key = stableSessionKey(message.sessionKey, this.#sessionPolicy);
+    const pending = this.#pendingApprovals.get(key);
+
+    if (pending === undefined) {
+      const text = "There is no pending approval request for this chat.";
+      await this.#deliverText(adapter, message.sessionKey, text);
+      return {
+        sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt }),
+        replyText: text,
+        artifactCount: 0,
+        progressCount: 0
+      };
+    }
+
+    if (pending.approvalId !== undefined && this.#approvalQueue !== undefined) {
+      try {
+        await this.#approvalQueue.resolveApproval(
+          pending.approvalId,
+          "denied",
+          message.sender.id,
+          { profileId: this.#profileId, sessionId: pending.sessionId }
+        );
+      } catch (error) {
+        const text = error instanceof Error ? error.message : String(error);
+        await this.#deliverText(adapter, message.sessionKey, text);
+        return {
+          sessionId: pending.sessionId,
+          replyText: text,
+          artifactCount: 0,
+          progressCount: 0
+        };
+      }
+    }
+
+    return await this.#terminatePendingApproval(
+      key,
+      pending,
+      adapter,
+      "Approval denied",
+      "EstaCoda will not run that action unless it is requested again."
+    );
+  }
+
+  async #resumePendingApproval(
+    key: string,
+    pending: PendingApprovalContinuation,
+    adapter: ChannelAdapter,
+    scope: ApprovalScope,
+    approvalText: string
+  ): Promise<ChannelGatewayResult> {
+    const normalizedSessionKey = normalizeSessionKey(pending.originalMessage.sessionKey, this.#sessionPolicy);
+    if (scope !== "always") {
+      const grants = this.#approvalGrants.get(key) ?? [];
+      grants.push({
+        toolName: pending.toolName,
+        riskClass: pending.riskClass,
+        targetKey: pending.targetKey,
+        targetSummary: pending.targetSummary,
+        scope,
+        sessionId: scope === "session" ? pending.sessionId : undefined
+      });
+      this.#approvalGrants.set(key, grants);
+    } else {
+      await this.#approvalStore.grant({
+        sessionKey: normalizedSessionKey,
+        toolName: pending.toolName,
+        riskClass: pending.riskClass,
+        targetKey: pending.targetKey,
+        targetSummary: pending.targetSummary
+      });
+      await this.#refreshCachedRuntimePolicy(pending.sessionId, "Persistent approval grant");
+    }
+    this.#pendingApprovals.delete(key);
+
+    await this.#deliverText(adapter, pending.originalMessage.sessionKey, approvalText);
 
     const resumed = await this.receive({
       ...pending.originalMessage,
@@ -1588,6 +1753,29 @@ export class ChannelGateway {
       replyText: [approvalText, "", resumed.replyText].join("\n"),
       artifactCount: resumed.artifactCount,
       progressCount: resumed.progressCount
+    };
+  }
+
+  async #terminatePendingApproval(
+    key: string,
+    pending: PendingApprovalContinuation,
+    adapter: ChannelAdapter,
+    title: string,
+    detail: string
+  ): Promise<ChannelGatewayResult> {
+    this.#pendingApprovals.delete(key);
+    const text = [
+      title,
+      `Tool: ${pending.toolName}`,
+      detail
+    ].join("\n");
+    await this.#deliverText(adapter, pending.originalMessage.sessionKey, text);
+
+    return {
+      sessionId: pending.sessionId,
+      replyText: text,
+      artifactCount: 0,
+      progressCount: 0
     };
   }
 
@@ -1640,14 +1828,18 @@ export class ChannelGateway {
       };
     }
 
+    const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
     const revoked = await this.#approvalStore.revoke(approvalId, normalizeSessionKey(message.sessionKey, this.#sessionPolicy));
+    if (revoked) {
+      await this.#refreshCachedRuntimePolicy(sessionId, "Persistent approval revoke");
+    }
     const text = revoked
       ? `Revoked persistent approval ${approvalId}.`
       : `No persistent approval matched ${approvalId} for this chat.`;
     await this.#deliverText(adapter, message.sessionKey, text);
 
     return {
-      sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt }),
+      sessionId,
       replyText: text,
       artifactCount: 0,
       progressCount: 0
@@ -1681,6 +1873,11 @@ export class ChannelGateway {
             sessionId
           }
       });
+      const hardline = hardlineAssessmentForRequest(request, securityMode);
+      if (hardline !== undefined) {
+        return hardline;
+      }
+
       const grants = approvalGrants.get(key) ?? [];
       const grantIndex = grants.findIndex((grant) =>
         grant.toolName === request.toolName &&
@@ -1737,6 +1934,11 @@ export class ChannelGateway {
       },
       decide(request: SecurityRequest): SecurityDecision {
         const basePolicy = createSecurityPolicyForMode(securityMode);
+        const hardline = hardlineAssessmentForRequest(request, securityMode);
+        if (hardline !== undefined) {
+          return hardline.decision;
+        }
+
         const grants = approvalGrants.get(key) ?? [];
         const grantIndex = grants.findIndex((grant) =>
           grant.toolName === request.toolName &&
@@ -1919,8 +2121,8 @@ function firstPendingApproval(
   executions: ToolExecutionRecord[],
   originalMessage: ChannelMessage,
   sessionId: string
-): PendingApproval | undefined {
-  const blocked = executions.find((execution) => execution.decision === "ask" || execution.decision === "deny");
+): PendingApprovalContinuation | undefined {
+  const blocked = executions.find((execution) => execution.decision === "ask");
 
   if (blocked === undefined) {
     return undefined;
@@ -1936,7 +2138,30 @@ function firstPendingApproval(
   };
 }
 
-function renderApprovalPrompt(input: PendingApproval, format: "plain" | "html" = "plain"): string {
+function hardlineAssessmentForRequest(
+  request: SecurityRequest,
+  mode: SecurityApprovalMode
+): SecurityAssessment | undefined {
+  const command = request.command ?? request.targetSummary ?? "";
+  const hardline = assessHardlineFloor(command, { environmentType: request.environmentType });
+  if (hardline === undefined) {
+    return undefined;
+  }
+
+  return {
+    decision: "deny",
+    mode,
+    reason: hardline.reason,
+    risk: "high",
+    deterministicRule: hardline.code,
+    assessor: {
+      used: false,
+      status: "hard-block-overrode-assessor"
+    }
+  };
+}
+
+function renderApprovalPrompt(input: PendingApprovalContinuation, format: "plain" | "html" = "plain"): string {
   const reason = deriveApprovalReason(input);
   const preview = truncateForApprovalPreview(input.targetSummary ?? input.toolName, 320);
 
@@ -2028,9 +2253,10 @@ function formatPersistentApproval(grant: PersistedApprovalGrant): string {
   ].filter(Boolean).join(" · ");
 }
 
-function formatPendingApproval(pending: PendingApproval): string {
+function formatPendingApproval(pending: PendingApprovalContinuation): string {
   return [
     "Pending approval:",
+    pending.approvalId === undefined ? undefined : `ID: ${pending.approvalId}`,
     `Tool: ${pending.toolName}`,
     `Risk: ${formatRiskLabel(pending.riskClass)}`,
     pending.targetSummary === undefined ? undefined : `Target: ${pending.targetSummary}`
@@ -2050,7 +2276,7 @@ function approvalActions() {
   ];
 }
 
-function deriveApprovalReason(input: PendingApproval): string {
+function deriveApprovalReason(input: PendingApprovalContinuation): string {
   const summary = (input.targetSummary ?? "").toLowerCase();
 
   if (input.toolName === "terminal.run") {
@@ -2105,6 +2331,20 @@ function formatApprovalToolLabel(toolName: string): string {
 
 function truncateForApprovalPreview(value: string, maxChars: number): string {
   return value.length <= maxChars ? value : `${value.slice(0, maxChars - 1)}…`;
+}
+
+function dateOrNow(value: string): Date {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? new Date() : date;
+}
+
+function toPendingApprovalChannel(channel: ChannelKind): PendingApprovalChannel {
+  const value = String(channel);
+  if (value === "telegram" || value === "discord" || value === "email" || value === "cli") {
+    return value;
+  }
+
+  return "cli";
 }
 
 function escapeHtml(value: string): string {

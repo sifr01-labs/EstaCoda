@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { SecurityPolicy, SecurityRequest } from "../contracts/security.js";
 import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
 import type { ProviderExecutor } from "../providers/provider-executor.js";
+import { assessHardlineFloor } from "./command-safety.js";
 import { createSecurityPolicyForMode } from "./security-policy-factory.js";
 import { WorkspaceApprovalController, WorkspaceApprovalStore, type SmartApprovalAssessorRuntimeConfig } from "./workspace-approval-controller.js";
 
@@ -35,9 +36,9 @@ const assessorRoute: ResolvedAuxiliaryRoute = {
 const request: SecurityRequest = {
   toolName: "terminal.run",
   riskClass: "destructive-local",
-  targetKey: "terminal.run:cmd=sudo apt update",
-  targetSummary: "sudo apt update",
-  command: "sudo apt update",
+  targetKey: "terminal.run:cmd=rm -rf ./build",
+  targetSummary: "rm -rf ./build",
+  command: "rm -rf ./build",
   description: "run terminal command",
   context: {
     trustedWorkspace: true,
@@ -151,8 +152,8 @@ describe("WorkspaceApprovalController smart approvals", () => {
       ...request,
       riskClass,
       targetKey: `terminal.run:${riskClass}`,
-      targetSummary: "sudo apt update",
-      command: "sudo apt update"
+      targetSummary: "rm -rf ./build",
+      command: "rm -rf ./build"
     }, {
       workspaceRoot: process.cwd(),
       sessionId: "session",
@@ -177,7 +178,7 @@ describe("WorkspaceApprovalController smart approvals", () => {
       smartApproval: smart
     });
 
-    expect(result.decision).toBe("deny");
+    expect(result.decision).toBe("ask");
     expect(smart.assessCommandRisk).not.toHaveBeenCalled();
   });
 
@@ -233,5 +234,51 @@ describe("WorkspaceApprovalController smart approvals", () => {
 
     expect(result.decision).toBe("allow");
     expect(smart.assessCommandRisk).not.toHaveBeenCalled();
+  });
+
+  it("preflights gateway approvals against the hardline floor", async () => {
+    const approvals = await controller();
+
+    expect(approvals.preflightGatewayApproval({
+      toolName: "terminal.run",
+      commandPreview: "rm -rf /",
+      commandPayload: "rm -rf /"
+    })).toMatchObject({
+      decision: "deny",
+      deterministicRule: "destructive-delete-root-or-broad-path"
+    });
+
+    expect(approvals.preflightGatewayApproval({
+      toolName: "terminal.run",
+      commandPreview: "sudo apt update",
+      commandPayload: "sudo apt update"
+    })).toMatchObject({
+      decision: "deny",
+      deterministicRule: "privilege-escalation"
+    });
+
+    expect(approvals.preflightGatewayApproval({
+      toolName: "terminal.run",
+      commandPreview: "rm -rf ./build",
+      commandPayload: "rm -rf ./build"
+    })).toBeUndefined();
+  });
+
+  it("treats hardBlock existence as non-overridable regardless of severity", async () => {
+    const approvals = await controller();
+    const highSeverityHardBlock = assessHardlineFloor("sudo apt update");
+
+    expect(highSeverityHardBlock).toMatchObject({
+      severity: "high",
+      code: "privilege-escalation"
+    });
+    expect(approvals.preflightGatewayApproval({
+      toolName: "terminal.run",
+      commandPreview: "sudo apt update",
+      commandPayload: "sudo apt update"
+    })).toMatchObject({
+      decision: "deny",
+      deterministicRule: "privilege-escalation"
+    });
   });
 });
