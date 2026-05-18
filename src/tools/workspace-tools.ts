@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { lstat, mkdir, readdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { platform } from "node:os";
+import type { EnvironmentType } from "../contracts/security.js";
 import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
 import type { FileChangePreviewViewModel } from "../contracts/view-model.js";
 import { explainPathBlock, isLikelyBinary, isTextyPath } from "../context/context-security.js";
@@ -286,12 +287,12 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
       progressLabel: "running command",
       maxResultSizeChars: 16_000,
       isAvailable: () => true,
-      run: async (input: { command?: string; timeoutMs?: number }) => {
+      run: async (input: { command?: string; timeoutMs?: number }, context) => {
         if (typeof input.command !== "string" || input.command.trim().length === 0) {
           return errorResult("command must be a non-empty string");
         }
 
-        const blockedReason = explainCommandBlock(input.command);
+        const blockedReason = explainCommandBlock(input.command, context?.environmentType);
         if (blockedReason !== undefined) {
           return errorResult(blockedReason);
         }
@@ -839,8 +840,8 @@ function applyLineRange(content: string, lineStart?: number, lineEnd?: number): 
   return lines.slice(start - 1, end).join("\n");
 }
 
-function explainCommandBlock(command: string): string | undefined {
-  const assessment = assessCommandSafety(command);
+function explainCommandBlock(command: string, environmentType?: EnvironmentType): string | undefined {
+  const assessment = assessCommandSafety(command, { environmentType });
   if (assessment.hardBlock !== undefined) {
     return assessment.hardBlock.reason;
   }

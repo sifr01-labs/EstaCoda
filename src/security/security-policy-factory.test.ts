@@ -1,8 +1,12 @@
+import { mkdtemp } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { describe, it, expect, vi } from "vitest";
 import { createSecurityPolicyForMode } from "./security-policy-factory.js";
 import type { SecurityAssessorRuntimeConfig } from "./security-policy-factory.js";
 import type { ProviderExecutor } from "../providers/provider-executor.js";
 import type { ResolvedModelRoute } from "../contracts/provider.js";
+import { WorkspaceApprovalController, WorkspaceApprovalStore } from "./workspace-approval-controller.js";
 
 function createMockExecutor(ok = true, content = JSON.stringify({ decision: "allow", risk: "low", reason: "test", confidence: 0.9 })) {
   const fn = vi.fn().mockResolvedValue({
@@ -40,6 +44,127 @@ const baseRequest = {
 };
 
 describe("security policy factory", () => {
+  describe("hardline and environment handling", () => {
+    it("defaults missing environmentType to host command safety", async () => {
+      const policy = createSecurityPolicyForMode("adaptive");
+      const result = await policy.assess!({
+        ...baseRequest,
+        command: "sudo apt update"
+      });
+
+      expect(result.decision).toBe("deny");
+      expect(result.deterministicRule).toBe("privilege-escalation");
+    });
+
+    it("enforces host-only command blocks on host", async () => {
+      const policy = createSecurityPolicyForMode("strict");
+      const result = await policy.assess!({
+        ...baseRequest,
+        command: "git reset --hard"
+      });
+
+      expect(result.decision).toBe("deny");
+      expect(result.deterministicRule).toBe("git-destructive");
+    });
+
+    it("bypasses non-hardline destructive command handling in docker", async () => {
+      const policy = createSecurityPolicyForMode("adaptive");
+      const result = await policy.assess!({
+        ...baseRequest,
+        command: "sudo apt update",
+        environmentType: "docker"
+      });
+
+      expect(result.decision).toBe("allow");
+      expect(result.deterministicRule).toBe("non-host-command-bypass");
+    });
+
+    it.each([
+      "credential-access",
+      "sandbox-escape",
+      "spend-money"
+    ] as const)("does not let docker bypass adaptive %s denial", async (riskClass) => {
+      const policy = createSecurityPolicyForMode("adaptive");
+      const result = await policy.assess!({
+        ...baseRequest,
+        riskClass,
+        command: "sudo apt update",
+        environmentType: "docker"
+      });
+
+      expect(result.decision).toBe("deny");
+      expect(result.deterministicRule).toBe("hard-risk-class");
+    });
+
+    it("does not bypass hardline commands in docker", async () => {
+      const policy = createSecurityPolicyForMode("adaptive");
+      const result = await policy.assess!({
+        ...baseRequest,
+        command: "rm -rf /",
+        environmentType: "docker"
+      });
+
+      expect(result.decision).toBe("deny");
+      expect(result.deterministicRule).toBe("destructive-delete-root-or-broad-path");
+    });
+
+    it("does not bypass hardline commands in open mode", async () => {
+      const policy = createSecurityPolicyForMode("open");
+      const result = await policy.assess!({
+        ...baseRequest,
+        command: "shutdown now"
+      });
+
+      expect(result.decision).toBe("deny");
+      expect(result.deterministicRule).toBe("self-termination");
+    });
+
+    it("preserves safe command behavior", async () => {
+      const policy = createSecurityPolicyForMode("adaptive");
+      const result = await policy.assess!({
+        ...baseRequest,
+        riskClass: "workspace-write",
+        command: "pnpm exec vitest run src/security/security-policy-factory.test.ts"
+      });
+
+      expect(result.decision).toBe("allow");
+      expect(result.deterministicRule).toBe("capability-first");
+    });
+
+    it("keeps hardline commands above persistent approvals", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "estacoda-approval-test-"));
+      const controller = new WorkspaceApprovalController({
+        store: new WorkspaceApprovalStore({ path: join(directory, "workspace-approvals.json") })
+      });
+      const policy = createSecurityPolicyForMode("open");
+      const request = {
+        ...baseRequest,
+        toolName: "terminal.run",
+        targetKey: "terminal.run:cmd=rm -rf /",
+        command: "rm -rf /",
+        environmentType: "docker" as const
+      };
+
+      await controller.grant({
+        workspaceRoot: process.cwd(),
+        sessionId: "test-session",
+        toolName: request.toolName,
+        riskClass: request.riskClass,
+        targetKey: request.targetKey,
+        scope: "always"
+      });
+
+      const result = await controller.assess(policy, request, {
+        workspaceRoot: process.cwd(),
+        sessionId: "test-session",
+        mode: "open"
+      });
+
+      expect(result.decision).toBe("deny");
+      expect(result.deterministicRule).toBe("destructive-delete-root-or-broad-path");
+    });
+  });
+
   describe("assessor routing", () => {
     it("uses security.assessor.provider/model override when set", async () => {
       const executor = createMockExecutor();

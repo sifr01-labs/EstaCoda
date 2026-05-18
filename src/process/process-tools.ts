@@ -1,4 +1,5 @@
 import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
+import type { EnvironmentType } from "../contracts/security.js";
 import { assessCommandSafety } from "../security/command-safety.js";
 import type { ProcessManager } from "./process-manager.js";
 
@@ -23,12 +24,12 @@ export function createProcessTools(options: ProcessToolOptions): readonly Regist
       progressLabel: "starting process",
       maxResultSizeChars: 3000,
       isAvailable: () => true,
-      run: async (input: { command?: string }) => {
+      run: async (input: { command?: string }, context) => {
         if (typeof input.command !== "string" || input.command.trim().length === 0) {
           return errorResult("command must be a non-empty string");
         }
 
-        const blockedReason = explainCommandBlock(input.command);
+        const blockedReason = explainCommandBlock(input.command, context?.environmentType);
         if (blockedReason !== undefined) {
           return errorResult(blockedReason);
         }
@@ -152,8 +153,8 @@ export function createProcessTools(options: ProcessToolOptions): readonly Regist
   ];
 }
 
-function explainCommandBlock(command: string): string | undefined {
-  const assessment = assessCommandSafety(command);
+function explainCommandBlock(command: string, environmentType?: EnvironmentType): string | undefined {
+  const assessment = assessCommandSafety(command, { environmentType });
   if (assessment.hardBlock !== undefined) {
     return assessment.hardBlock.reason;
   }

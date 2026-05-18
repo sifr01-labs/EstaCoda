@@ -1,6 +1,12 @@
 import { realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
-import { assessSecurityPolicy, type SecurityDecision, type SecurityPolicy } from "../contracts/security.js";
+import {
+  DEFAULT_ENVIRONMENT_TYPE,
+  assessSecurityPolicy,
+  type EnvironmentType,
+  type SecurityDecision,
+  type SecurityPolicy
+} from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
 import type { ToolDefinition, ToolResult, ToolRiskClass, ToolsetName } from "../contracts/tool.js";
 import { assessCommandSafety } from "../security/command-safety.js";
@@ -15,6 +21,7 @@ export type ToolExecutionRequest = {
   input: Record<string, unknown>;
   trustedWorkspace: boolean;
   sessionId: string;
+  environmentType?: EnvironmentType;
   excludedTools?: string[];
   signal?: AbortSignal;
 };
@@ -24,6 +31,7 @@ export type NamedToolExecutionRequest = {
   input: Record<string, unknown>;
   trustedWorkspace: boolean;
   sessionId: string;
+  environmentType?: EnvironmentType;
   signal?: AbortSignal;
 };
 
@@ -74,6 +82,7 @@ export class ToolExecutor {
       input: request.input,
       trustedWorkspace: request.trustedWorkspace,
       sessionId: request.sessionId,
+      environmentType: request.environmentType,
       signal: request.signal
     });
   }
@@ -85,7 +94,8 @@ export class ToolExecutor {
       return undefined;
     }
 
-    const riskClass = classifyEffectiveRisk(tool, request.input);
+    const environmentType = request.environmentType ?? DEFAULT_ENVIRONMENT_TYPE;
+    const riskClass = classifyEffectiveRisk(tool, request.input, environmentType);
     const validationError = validateToolInput(tool, request.input);
     if (validationError !== undefined) {
       const result: ToolResult = {
@@ -115,6 +125,7 @@ export class ToolExecutor {
       targetKey,
       targetSummary,
       command: typeof request.input.command === "string" ? request.input.command : undefined,
+      environmentType,
       description: `run tool ${tool.name}`,
       context: {
         trustedWorkspace: request.trustedWorkspace,
@@ -185,7 +196,8 @@ export class ToolExecutor {
     } else {
       try {
         result = await tool.run(request.input, {
-          signal: request.signal
+          signal: request.signal,
+          environmentType
         });
       } catch (error) {
         if (request.signal?.aborted) {
@@ -302,9 +314,13 @@ export class ToolExecutor {
   }
 }
 
-function classifyEffectiveRisk(tool: ToolDefinition, input: Record<string, unknown>): ToolRiskClass {
+function classifyEffectiveRisk(
+  tool: ToolDefinition,
+  input: Record<string, unknown>,
+  environmentType: EnvironmentType = DEFAULT_ENVIRONMENT_TYPE
+): ToolRiskClass {
   if ((tool.name === "terminal.run" || tool.name === "process.start") && typeof input.command === "string") {
-    const assessment = assessCommandSafety(input.command);
+    const assessment = assessCommandSafety(input.command, { environmentType });
     if (assessment.riskClass !== undefined) {
       return assessment.riskClass;
     }

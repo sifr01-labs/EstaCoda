@@ -1,8 +1,9 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { assessSecurityPolicy, type SecurityApprovalMode, type SecurityAssessment, type SecurityPolicy, type SecurityRequest } from "../contracts/security.js";
+import { DEFAULT_ENVIRONMENT_TYPE, assessSecurityPolicy, type SecurityApprovalMode, type SecurityAssessment, type SecurityPolicy, type SecurityRequest } from "../contracts/security.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
+import { assessCommandSafety } from "./command-safety.js";
 
 export type ApprovalScope = "once" | "session" | "always";
 
@@ -158,6 +159,21 @@ export class WorkspaceApprovalController {
       mode: SecurityApprovalMode;
     }
   ): Promise<SecurityAssessment> {
+    const hardlineBlock = hardlineBlockFor(request);
+    if (hardlineBlock !== undefined) {
+      return {
+        decision: "deny",
+        mode: options.mode,
+        reason: hardlineBlock.reason,
+        risk: "high",
+        deterministicRule: hardlineBlock.code,
+        assessor: {
+          used: false,
+          status: "disabled"
+        }
+      };
+    }
+
     const matched = await this.#findMatchingGrant(request, options);
     if (matched !== undefined) {
       if (matched.scope === "once") {
@@ -281,6 +297,20 @@ export class WorkspaceApprovalController {
 
     return undefined;
   }
+}
+
+function hardlineBlockFor(request: SecurityRequest): {
+  code: string;
+  reason: string;
+} | undefined {
+  const command = request.command ?? request.targetSummary ?? "";
+  const hardBlock = assessCommandSafety(command, {
+    environmentType: request.environmentType ?? DEFAULT_ENVIRONMENT_TYPE
+  }).hardBlock;
+
+  return hardBlock?.severity === "critical"
+    ? { code: hardBlock.code, reason: hardBlock.reason }
+    : undefined;
 }
 
 function matchesRequest(

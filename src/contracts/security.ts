@@ -4,6 +4,28 @@ import type { ToolRiskClass } from "./tool.js";
 
 export type SecurityDecision = "allow" | "ask" | "deny";
 export type SecurityRiskLevel = "low" | "medium" | "high";
+export type EnvironmentType =
+  | "host"
+  | "docker"
+  | "singularity"
+  | "modal"
+  | "daytona"
+  | "vercel_sandbox";
+
+export const DEFAULT_ENVIRONMENT_TYPE: EnvironmentType = "host";
+
+const ENVIRONMENT_TYPES = new Set<string>([
+  "host",
+  "docker",
+  "singularity",
+  "modal",
+  "daytona",
+  "vercel_sandbox"
+]);
+
+export function isEnvironmentType(value: unknown): value is EnvironmentType {
+  return typeof value === "string" && ENVIRONMENT_TYPES.has(value);
+}
 
 export type SecurityContext = {
   trustedWorkspace: boolean;
@@ -28,6 +50,7 @@ export type SecurityRequest = {
   targetKey?: string;
   targetSummary?: string;
   command?: string;
+  environmentType?: EnvironmentType;
   context: SecurityContext;
 };
 

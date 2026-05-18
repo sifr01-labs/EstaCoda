@@ -1,3 +1,5 @@
+import type { EnvironmentType } from "./security.js";
+
 export type ToolRiskClass =
   | "read-only-local"
   | "read-only-network"
@@ -44,6 +46,7 @@ export type ToolResult = {
 
 export type ToolExecutionContext = {
   signal?: AbortSignal;
+  environmentType?: EnvironmentType;
 };
 
 export type ToolHandler<TInput = unknown> = (input: TInput, context?: ToolExecutionContext) => Promise<ToolResult>;

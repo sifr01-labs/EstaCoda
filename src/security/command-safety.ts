@@ -1,12 +1,7 @@
+import type { EnvironmentType } from "../contracts/security.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
 
-export type EnvironmentType =
-  | "host"
-  | "docker"
-  | "singularity"
-  | "modal"
-  | "daytona"
-  | "vercel_sandbox";
+export type { EnvironmentType } from "../contracts/security.js";
 
 export type CommandSafetySeverity = "critical" | "high" | "medium" | "low";
 

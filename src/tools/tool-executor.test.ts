@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { SecurityPolicy } from "../contracts/security.js";
+import type { SecurityPolicy, SecurityRequest } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
 import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
@@ -62,6 +62,31 @@ function createSensitiveEchoTool(name: string): RegisteredTool {
     isAvailable: () => true,
     run: async (input): Promise<ToolResult> => {
       return { ok: true, content: JSON.stringify(input) };
+    }
+  };
+}
+
+function createTerminalEchoTool(): RegisteredTool {
+  return {
+    name: "terminal.run",
+    description: "runs command",
+    inputSchema: {
+      type: "object",
+      properties: {
+        command: { type: "string" }
+      },
+      required: ["command"]
+    },
+    riskClass: "workspace-write",
+    toolsets: ["shell-write"],
+    progressLabel: "running",
+    maxResultSizeChars: 1000,
+    isAvailable: () => true,
+    run: async (_input, context): Promise<ToolResult> => {
+      return {
+        ok: true,
+        content: `environment=${context?.environmentType ?? "missing"}`
+      };
     }
   };
 }
@@ -264,5 +289,76 @@ describe("ToolExecutor input redaction", () => {
         apiKey: "[REDACTED]"
       }
     });
+  });
+});
+
+describe("ToolExecutor command environment", () => {
+  it("passes explicit backend environmentType into command safety and tool context", async () => {
+    let observedRequest: SecurityRequest | undefined;
+    const policy: SecurityPolicy = {
+      decide() {
+        return "allow";
+      },
+      assess(request) {
+        observedRequest = request;
+        return {
+          decision: "allow",
+          mode: "adaptive",
+          reason: "test",
+          risk: "medium"
+        };
+      }
+    };
+    const { executor } = await setupExecutor({
+      policy,
+      tools: [createTerminalEchoTool()]
+    });
+
+    const record = await executor.executeTool({
+      tool: "terminal.run",
+      input: { command: "sudo apt update" },
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      environmentType: "docker"
+    });
+
+    expect(record?.decision).toBe("allow");
+    expect(record?.riskClass).toBe("workspace-write");
+    expect(record?.result?.content).toBe("environment=docker");
+    expect(observedRequest?.environmentType).toBe("docker");
+  });
+
+  it("ignores environmentType supplied inside tool input", async () => {
+    let observedRequest: SecurityRequest | undefined;
+    const policy: SecurityPolicy = {
+      decide() {
+        return "allow";
+      },
+      assess(request) {
+        observedRequest = request;
+        return {
+          decision: "deny",
+          mode: "adaptive",
+          reason: "test",
+          risk: "high"
+        };
+      }
+    };
+    const { executor } = await setupExecutor({
+      policy,
+      tools: [createTerminalEchoTool()]
+    });
+
+    const record = await executor.executeTool({
+      tool: "terminal.run",
+      input: { command: "sudo apt update", environmentType: "docker" },
+      trustedWorkspace: true,
+      sessionId: "test-session"
+    });
+
+    expect(record?.decision).toBe("deny");
+    expect(record?.result).toBeUndefined();
+    expect(observedRequest?.environmentType).toBe("host");
+    expect(observedRequest?.riskClass).toBe("destructive-local");
   });
 });
