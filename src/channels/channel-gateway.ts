@@ -36,6 +36,11 @@ import type { HandoffStore } from "./handoff-store.js";
 import type { SurfacePointerStore } from "./surface-pointer-store.js";
 import type { SurfaceType } from "./surface-pointer.js";
 import type { DeliveryRouter } from "./delivery-router.js";
+import {
+  parseApprovalAction,
+  renderApprovalActions,
+  type ApprovalActionScope
+} from "./approval-actions.js";
 
 function sessionKeyHash(sessionId: string): string {
   return createHash("sha256").update(sessionId).digest("hex").slice(0, 16);
@@ -668,12 +673,14 @@ export class ChannelGateway {
         await this.#deliverText(adapter,
           normalizedSessionKey,
           approvalPrompt,
-          adapter.kind === "telegram"
-            ? {
-                format: "html",
-                actions: approvalActions()
+          pendingApproval.approvalId === undefined
+            ? adapter.kind === "telegram"
+              ? { format: "html" }
+              : undefined
+            : {
+                format: adapter.kind === "telegram" ? "html" : undefined,
+                actions: renderApprovalActions(pendingApproval.approvalId)
               }
-            : undefined
         );
         await adapter.send?.({
           conversationId: message.sessionKey.chatId,
@@ -896,6 +903,20 @@ export class ChannelGateway {
   }
 
   async #handleCommand(message: ChannelMessage, adapter: ChannelAdapter): Promise<ChannelGatewayResult | undefined> {
+    const approvalAction = parseApprovalAction(message.text);
+    if (approvalAction !== undefined) {
+      if (approvalAction.decision === "approved") {
+        return this.#approvePending(message, adapter, {
+          approvalId: approvalAction.approvalId,
+          scope: approvalAction.scope
+        });
+      }
+
+      return this.#denyPending(message, adapter, {
+        approvalId: approvalAction.approvalId
+      });
+    }
+
     const command = parseGatewayCommand(message.text);
 
     if (command === undefined) {
@@ -1609,23 +1630,18 @@ export class ChannelGateway {
     return undefined;
   }
 
-  async #approvePending(message: ChannelMessage, adapter: ChannelAdapter): Promise<ChannelGatewayResult> {
-    const key = stableSessionKey(message.sessionKey, this.#sessionPolicy);
-    const pending = this.#pendingApprovals.get(key);
-
-    if (pending === undefined) {
-      const text = "There is no pending approval request for this chat.";
-      await this.#deliverText(adapter, message.sessionKey, text);
-
-      return {
-        sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt }),
-        replyText: text,
-        artifactCount: 0,
-        progressCount: 0
-      };
+  async #approvePending(
+    message: ChannelMessage,
+    adapter: ChannelAdapter,
+    action?: { approvalId?: string; scope?: ApprovalActionScope }
+  ): Promise<ChannelGatewayResult> {
+    const pendingResult = await this.#pendingApprovalForMessage(message, adapter, action?.approvalId);
+    if ("replyText" in pendingResult) {
+      return pendingResult;
     }
 
-    const scope = parseApprovalScope(message.text);
+    const { key, pending } = pendingResult;
+    const scope = action?.scope ?? parseApprovalScope(message.text);
     if (pending.approvalId !== undefined && this.#approvalQueue !== undefined) {
       try {
         await this.#approvalQueue.resolveApproval(
@@ -1662,20 +1678,17 @@ export class ChannelGateway {
     return await this.#resumePendingApproval(key, pending, adapter, scope, approvalText);
   }
 
-  async #denyPending(message: ChannelMessage, adapter: ChannelAdapter): Promise<ChannelGatewayResult> {
-    const key = stableSessionKey(message.sessionKey, this.#sessionPolicy);
-    const pending = this.#pendingApprovals.get(key);
-
-    if (pending === undefined) {
-      const text = "There is no pending approval request for this chat.";
-      await this.#deliverText(adapter, message.sessionKey, text);
-      return {
-        sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt }),
-        replyText: text,
-        artifactCount: 0,
-        progressCount: 0
-      };
+  async #denyPending(
+    message: ChannelMessage,
+    adapter: ChannelAdapter,
+    action?: { approvalId?: string }
+  ): Promise<ChannelGatewayResult> {
+    const pendingResult = await this.#pendingApprovalForMessage(message, adapter, action?.approvalId);
+    if ("replyText" in pendingResult) {
+      return pendingResult;
     }
+
+    const { key, pending } = pendingResult;
 
     if (pending.approvalId !== undefined && this.#approvalQueue !== undefined) {
       try {
@@ -1704,6 +1717,42 @@ export class ChannelGateway {
       "Approval denied",
       "EstaCoda will not run that action unless it is requested again."
     );
+  }
+
+  async #pendingApprovalForMessage(
+    message: ChannelMessage,
+    adapter: ChannelAdapter,
+    approvalId?: string
+  ): Promise<{ key: string; pending: PendingApprovalContinuation } | ChannelGatewayResult> {
+    const key = stableSessionKey(message.sessionKey, this.#sessionPolicy);
+    const pending = this.#pendingApprovals.get(key);
+    if (pending !== undefined && (approvalId === undefined || pending.approvalId === approvalId)) {
+      return { key, pending };
+    }
+
+    const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
+    let text = "There is no pending approval request for this chat.";
+    if (approvalId !== undefined && this.#approvalQueue !== undefined) {
+      const durable = await this.#approvalQueue.getApproval(approvalId, {
+        profileId: this.#profileId,
+        sessionId
+      });
+      if (durable?.status === "approved") {
+        text = "Pending approval is already approved.";
+      } else if (durable?.status === "denied") {
+        text = "Pending approval is already denied.";
+      } else if (durable?.status === "expired") {
+        text = "Pending approval has expired.";
+      }
+    }
+
+    await this.#deliverText(adapter, message.sessionKey, text);
+    return {
+      sessionId,
+      replyText: text,
+      artifactCount: 0,
+      progressCount: 0
+    };
   }
 
   async #resumePendingApproval(
@@ -2261,19 +2310,6 @@ function formatPendingApproval(pending: PendingApprovalContinuation): string {
     `Risk: ${formatRiskLabel(pending.riskClass)}`,
     pending.targetSummary === undefined ? undefined : `Target: ${pending.targetSummary}`
   ].filter(Boolean).join("\n");
-}
-
-function approvalActions() {
-  return [
-    [
-      { label: "✅ Allow Once", value: "/approve once" },
-      { label: "✅ Session", value: "/approve session" }
-    ],
-    [
-      { label: "✅ Always", value: "/approve always" },
-      { label: "❌ Deny", value: "/deny" }
-    ]
-  ];
 }
 
 function deriveApprovalReason(input: PendingApprovalContinuation): string {

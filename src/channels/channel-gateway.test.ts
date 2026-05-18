@@ -18,6 +18,7 @@ import { HookRegistry } from "../gateway/hook-registry.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { GatewayApprovalQueue } from "../gateway/approval-queue.js";
 import { WorkspaceApprovalController, WorkspaceApprovalStore } from "../security/workspace-approval-controller.js";
+import { renderApprovalActions } from "./approval-actions.js";
 
 type FakeTelegramAdapter = ReturnType<typeof createFakeTelegramAdapter> & { records: FakeDeliveryRecord[]; clearRecords(): void };
 
@@ -1480,6 +1481,33 @@ describe("ChannelGateway commands", () => {
       }
     });
 
+    it("approval prompts include generic actions for the durable approval id", async () => {
+      const { queue, cleanup } = await setupGatewayApprovalQueue();
+      try {
+        const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+        const approvalRuntime = createApprovalRuntime();
+        const gateway = new ChannelGateway({
+          adapters: [adapter],
+          runtimeForSession: async () => approvalRuntime.runtime,
+          sessionStore: new InMemoryChannelSessionStore(),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          profileId: "profile-a",
+          approvalQueue: queue
+        });
+
+        await gateway.receive(makeMessage("run something risky"));
+        const [pending] = await queue.listPending({ profileId: "profile-a" });
+        const approvalPrompt = adapter.records.find((record) =>
+          record.kind === "text" && record.text?.includes("Command Approval Required")
+        );
+
+        expect(approvalPrompt?.options?.actions).toEqual(renderApprovalActions(pending.id));
+        expect(JSON.stringify(approvalPrompt?.options?.actions)).not.toContain("rm -rf");
+      } finally {
+        await cleanup();
+      }
+    });
+
     it("session approval grants cannot allow a later hardline command", async () => {
       const { queue, cleanup } = await setupGatewayApprovalQueue();
       try {
@@ -1721,6 +1749,7 @@ describe("ChannelGateway commands", () => {
         await gateway.receive(makeMessage("run hardline"));
 
         expect(await queue.listPending({ profileId: "profile-a" })).toEqual([]);
+        expect(adapter.records.some((record) => record.options?.actions !== undefined)).toBe(false);
       } finally {
         await cleanup();
       }
@@ -1742,6 +1771,7 @@ describe("ChannelGateway commands", () => {
         await gateway.receive(makeMessage("run denied non-hardline command"));
 
         expect(await queue.listPending({ profileId: "profile-a" })).toEqual([]);
+        expect(adapter.records.some((record) => record.options?.actions !== undefined)).toBe(false);
       } finally {
         await cleanup();
       }
@@ -1775,6 +1805,35 @@ describe("ChannelGateway commands", () => {
       }
     });
 
+    it("inline approval action resolves through the same approve path and resumes", async () => {
+      const { queue, cleanup } = await setupGatewayApprovalQueue();
+      try {
+        const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+        const approvalRuntime = createApprovalRuntime();
+        const gateway = new ChannelGateway({
+          adapters: [adapter],
+          runtimeForSession: async () => approvalRuntime.runtime,
+          sessionStore: new InMemoryChannelSessionStore(),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          profileId: "profile-a",
+          approvalQueue: queue
+        });
+
+        await gateway.receive(makeMessage("run something risky"));
+        const [pending] = await queue.listPending({ profileId: "profile-a" });
+        const actionValue = renderApprovalActions(pending.id)[0][0].value;
+        const approveResult = await gateway.receive(makeMessage(actionValue));
+        const durable = await queue.getApproval(pending.id, { profileId: "profile-a", sessionId: pending.sessionId });
+
+        expect(durable?.status).toBe("approved");
+        expect(approvalRuntime.calls()).toBe(2);
+        expect(approveResult.replyText).toContain("Approval granted");
+        expect(approveResult.replyText).toContain("resumed");
+      } finally {
+        await cleanup();
+      }
+    });
+
     it("remote /deny resolves the durable row without resuming the blocked request", async () => {
       const { queue, cleanup } = await setupGatewayApprovalQueue();
       try {
@@ -1797,6 +1856,113 @@ describe("ChannelGateway commands", () => {
         expect(durable?.status).toBe("denied");
         expect(approvalRuntime.calls()).toBe(1);
         expect(denyResult.replyText).toContain("Approval denied");
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it("inline deny action resolves through the same deny path without resuming", async () => {
+      const { queue, cleanup } = await setupGatewayApprovalQueue();
+      try {
+        const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+        const approvalRuntime = createApprovalRuntime();
+        const gateway = new ChannelGateway({
+          adapters: [adapter],
+          runtimeForSession: async () => approvalRuntime.runtime,
+          sessionStore: new InMemoryChannelSessionStore(),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          profileId: "profile-a",
+          approvalQueue: queue
+        });
+
+        await gateway.receive(makeMessage("run something risky"));
+        const [pending] = await queue.listPending({ profileId: "profile-a" });
+        const actionValue = renderApprovalActions(pending.id)[1][1].value;
+        const denyResult = await gateway.receive(makeMessage(actionValue));
+        const durable = await queue.getApproval(pending.id, { profileId: "profile-a", sessionId: pending.sessionId });
+
+        expect(durable?.status).toBe("denied");
+        expect(approvalRuntime.calls()).toBe(1);
+        expect(denyResult.replyText).toContain("Approval denied");
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it("inline approve always keeps cache refresh centralized in ChannelGateway", async () => {
+      const { queue, cleanup, directory } = await setupGatewayApprovalQueue();
+      const runtimeCache = new RuntimeCache({
+        createRuntime: async ({ securityPolicy }) => createCachedPolicyProbeRuntime(securityPolicy)
+      });
+      try {
+        const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+        const approvalStore = new ChannelApprovalStore({ path: join(directory, "channel-approvals.json") });
+        const gateway = new ChannelGateway({
+          adapters: [adapter],
+          runtimeForSession: async () => createMinimalRuntime(),
+          sessionStore: new InMemoryChannelSessionStore(),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          profileId: "profile-a",
+          approvalQueue: queue,
+          approvalStore,
+          runtimeCache,
+          runtimeFingerprint: createFakeFingerprint(),
+          securityMode: "strict"
+        });
+
+        await gateway.receive(makeMessage("run normal"));
+        const [pending] = await queue.listPending({ profileId: "profile-a" });
+        const actionValue = renderApprovalActions(pending.id)[1][0].value;
+        const approveResult = await gateway.receive(makeMessage(actionValue));
+
+        expect(runtimeCache.stats().totalInvalidated).toBe(1);
+        expect(approveResult.replyText).toContain("Approval granted");
+        expect(approveResult.replyText).toContain("run normal decision=allow");
+      } finally {
+        await runtimeCache.disposeAll();
+        await cleanup();
+      }
+    });
+
+    it("inline approval actions reject stale, resolved, or wrong-session ids", async () => {
+      const { queue, cleanup } = await setupGatewayApprovalQueue();
+      try {
+        const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+        const approvalRuntime = createApprovalRuntime();
+        const gateway = new ChannelGateway({
+          adapters: [adapter],
+          runtimeForSession: async () => approvalRuntime.runtime,
+          sessionStore: new InMemoryChannelSessionStore(),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          profileId: "profile-a",
+          approvalQueue: queue
+        });
+
+        await gateway.receive(makeMessage("run something risky"));
+        const [pending] = await queue.listPending({ profileId: "profile-a" });
+        const actionValue = renderApprovalActions(pending.id)[0][0].value;
+        const wrongSessionResult = await gateway.receive(makeMessage(actionValue, {
+          id: "msg-other-chat",
+          sessionKey: {
+            platform: "telegram",
+            chatId: "other-chat",
+            userId: "user-1"
+          }
+        }));
+
+        expect(wrongSessionResult.replyText).toContain("There is no pending approval request");
+        expect(approvalRuntime.calls()).toBe(1);
+
+        await queue.resolveApproval(pending.id, "approved", "cli", {
+          profileId: "profile-a",
+          sessionId: pending.sessionId
+        });
+        const resolvedResult = await gateway.receive(makeMessage(actionValue, {
+          id: "msg-stale"
+        }));
+
+        expect(resolvedResult.replyText).toContain("already approved");
+        expect(approvalRuntime.calls()).toBe(1);
       } finally {
         await cleanup();
       }

@@ -36,7 +36,7 @@ export const BASE_CAPABILITIES: Record<
     outboundMode: "push",
     supportsAttachments: false,
     supportsThreads: false,
-    supportsApprovals: false,
+    supportsApprovals: true,
     supportsProgressStreaming: false,
     experimental: false,
     implementationStatus: "present_not_live_proven",

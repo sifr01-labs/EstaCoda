@@ -11,6 +11,7 @@ import type {
   ChannelAttachmentKind,
   ChannelMessage,
   ChannelSessionKey,
+  ChannelTextAction,
   ChannelTextOptions,
 } from "../contracts/channel.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
@@ -97,7 +98,8 @@ export class DiscordAdapter implements ChannelAdapter {
         }
         const sendable = channel as any;
         const chunks = chunkDiscordText(text, this.options.maxTextLength ?? 2000);
-        for (const chunk of chunks) {
+        const components = discordComponentsFromActions(options?.actions);
+        for (const [index, chunk] of chunks.entries()) {
           try {
             await sendable.sendTyping();
           } catch {
@@ -106,6 +108,7 @@ export class DiscordAdapter implements ChannelAdapter {
           await sendable.send({
             content: chunk,
             allowedMentions: { parse: [] },
+            components: index === chunks.length - 1 ? components : undefined,
           });
         }
       },
@@ -274,9 +277,71 @@ export class DiscordAdapter implements ChannelAdapter {
     };
   }
 
-  private handleInteraction(interaction: any): void {
+  private async handleInteraction(interaction: any): Promise<void> {
+    if (interaction.isButton?.()) {
+      await this.handleButtonInteraction(interaction);
+      return;
+    }
+
     if (interaction.isChatInputCommand?.()) {
       console.warn(`[discord] Slash commands not implemented. Received: ${interaction.commandName}`);
+    }
+  }
+
+  private async handleButtonInteraction(interaction: any): Promise<void> {
+    if (!this.handler || typeof interaction.customId !== "string" || interaction.customId.length === 0) {
+      await acknowledgeDiscordInteraction(interaction);
+      return;
+    }
+
+    const senderId = String(interaction.user?.id ?? "");
+    const channelId = String(interaction.channelId ?? "");
+    const isDM = interaction.guildId === undefined || interaction.guildId === null;
+    const sessionKey: ChannelSessionKey = isDM
+      ? {
+          platform: "discord",
+          chatId: senderId || channelId,
+          chatType: "dm",
+          userId: senderId
+        }
+      : interaction.channel?.isThread?.()
+        ? {
+            platform: "discord",
+            chatId: channelId,
+            chatType: "thread",
+            userId: senderId
+          }
+        : {
+            platform: "discord",
+            chatId: channelId,
+            chatType: "channel",
+            userId: senderId
+          };
+
+    const channelMessage: ChannelMessage = {
+      id: `discord-interaction-${interaction.id ?? Date.now()}`,
+      channel: "discord",
+      sessionKey,
+      text: interaction.customId,
+      sender: {
+        id: senderId,
+        displayName: interaction.member?.displayName ?? interaction.user?.displayName ?? interaction.user?.username,
+        username: interaction.user?.username
+      },
+      attachments: [],
+      receivedAt: this.options.now?.().toISOString() ?? new Date().toISOString(),
+      metadata: {
+        guildId: interaction.guildId ?? undefined,
+        channelId,
+        interactionId: interaction.id,
+      }
+    };
+
+    try {
+      await acknowledgeDiscordInteraction(interaction);
+      await this.handler(channelMessage);
+    } catch {
+      // Keep interaction handling from taking down the adapter.
     }
   }
 }
@@ -309,6 +374,32 @@ function chunkDiscordText(text: string, maxLen: number): string[] {
     i = end + (text[end] === "\n" || text[end] === " " ? 1 : 0);
   }
   return chunks;
+}
+
+function discordComponentsFromActions(actions: ChannelTextAction[][] | undefined): unknown[] | undefined {
+  if (actions === undefined || actions.length === 0) {
+    return undefined;
+  }
+
+  return actions.map((row) => ({
+    type: 1,
+    components: row.map((action) => ({
+      type: 2,
+      style: 2,
+      label: action.label.slice(0, 80),
+      custom_id: action.value.slice(0, 100)
+    }))
+  }));
+}
+
+async function acknowledgeDiscordInteraction(interaction: any): Promise<void> {
+  try {
+    if (interaction.deferred !== true && interaction.replied !== true && typeof interaction.deferUpdate === "function") {
+      await interaction.deferUpdate();
+    }
+  } catch {
+    // Presentation-only acknowledgement; gateway command routing is independent.
+  }
 }
 
 function guessAttachmentKind(contentType: string | null): ChannelAttachmentKind {

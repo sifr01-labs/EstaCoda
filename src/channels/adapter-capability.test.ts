@@ -105,6 +105,7 @@ describe("buildAdapterCapability", () => {
     expect(cap.inboundMode).toBe("websocket");
     expect(cap.supportsAttachments).toBe(false);
     expect(cap.supportsThreads).toBe(false);
+    expect(cap.supportsApprovals).toBe(true);
   });
 
   it("returns email with thread support", () => {

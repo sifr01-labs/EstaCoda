@@ -1,8 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { DiscordAdapter } from "./discord-adapter.js";
 import { buildAdapterCapability } from "./adapter-capability.js";
 import { AdapterRegistry } from "./adapter-registry.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
+import { renderApprovalActions } from "./approval-actions.js";
 
 describe("DiscordAdapter", () => {
   it("initializes with options", () => {
@@ -78,6 +79,7 @@ describe("DiscordAdapter", () => {
     expect(cap.inboundMode).toBe("websocket");
     expect(cap.supportsAttachments).toBe(false);
     expect(cap.supportsThreads).toBe(false);
+    expect(cap.supportsApprovals).toBe(true);
     expect(cap.implementationStatus).toBe("present_not_live_proven");
   });
 
@@ -120,6 +122,94 @@ describe("DiscordAdapter", () => {
     for (const chunk of chunks) {
       expect(chunk.length).toBeLessThanOrEqual(2000);
     }
+  });
+
+  it("renders generic actions as Discord message components", async () => {
+    const send = vi.fn(async () => undefined);
+    const adapter = new DiscordAdapter({ botToken: "test" });
+    (adapter as any).client = {
+      channels: {
+        fetch: vi.fn(async () => ({
+          send,
+          sendTyping: vi.fn(async () => undefined)
+        }))
+      }
+    };
+    const actions = renderApprovalActions("gateway-approval-1");
+
+    await adapter.delivery.sendText({ platform: "discord", chatId: "channel-1" }, "approve?", { actions });
+
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      content: "approve?",
+      components: actions.map((row) => ({
+        type: 1,
+        components: row.map((action) => ({
+          type: 2,
+          style: 2,
+          label: action.label,
+          custom_id: action.value
+        }))
+      }))
+    }));
+    const calls = send.mock.calls as unknown as Array<[{ components?: unknown[] }]>;
+    const sentPayload = calls[0]?.[0];
+    expect(JSON.stringify(sentPayload?.components)).not.toContain("rm -rf");
+  });
+
+  it("turns button interactions into ChannelMessage text while preserving identity", async () => {
+    const adapter = new DiscordAdapter({
+      botToken: "test",
+      now: () => new Date("2025-01-01T00:00:00.000Z")
+    });
+    const received: any[] = [];
+    (adapter as any).handler = async (message: unknown) => {
+      received.push(message);
+    };
+    const value = renderApprovalActions("gateway-approval-1")[0][0].value;
+    const deferUpdate = vi.fn(async () => undefined);
+
+    await (adapter as any).handleInteraction({
+      id: "interaction-1",
+      isButton: () => true,
+      customId: value,
+      user: {
+        id: "user-1",
+        username: "ada",
+        displayName: "Ada"
+      },
+      member: {
+        displayName: "Ada Lovelace"
+      },
+      guildId: "guild-1",
+      channelId: "channel-1",
+      channel: {
+        isThread: () => false
+      },
+      deferUpdate
+    });
+
+    expect(deferUpdate).toHaveBeenCalled();
+    expect(received).toHaveLength(1);
+    expect(received[0]).toMatchObject({
+      channel: "discord",
+      text: value,
+      sender: {
+        id: "user-1",
+        displayName: "Ada Lovelace",
+        username: "ada"
+      },
+      sessionKey: {
+        platform: "discord",
+        chatId: "channel-1",
+        chatType: "channel",
+        userId: "user-1"
+      },
+      metadata: {
+        guildId: "guild-1",
+        channelId: "channel-1",
+        interactionId: "interaction-1"
+      }
+    });
   });
 });
 
