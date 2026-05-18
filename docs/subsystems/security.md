@@ -118,5 +118,5 @@ Gateway diagnostics (`estacoda gateway diagnose`) surface missing credentials an
 
 ## Adaptive Assessor
 
-- Defaults to auxiliary `approval` route when enabled without explicit provider/model override.
+- Defaults to auxiliary `assessor` route when enabled without explicit provider/model override.
 - Assessor failures, malformed output, or timeouts fall back to `ask`.

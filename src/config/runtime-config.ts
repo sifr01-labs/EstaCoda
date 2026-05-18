@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import type { BrowserBackendKind } from "../contracts/browser.js";
 import type {
   AuxiliaryModelConfig,
+  AuxiliaryModelSlotConfig,
+  AuxiliaryModelSlotInput,
   AuxiliaryModelTask,
   ModelProfile,
   ProviderEndpoint,
@@ -842,7 +844,8 @@ function stripDefaultAuxiliarySlots(
   config: AuxiliaryModelConfig
 ): AuxiliaryModelConfig {
   const stripped: AuxiliaryModelConfig = {};
-  for (const [task, slot] of Object.entries(config)) {
+  for (const [task, slotInput] of Object.entries(config)) {
+    const slot = normalizeAuxiliarySlotInput(slotInput as AuxiliaryModelSlotInput, `auxiliaryModels.${task}`);
     if (slot === undefined) continue;
     const isDefault =
       slot.provider === "auto" &&
@@ -856,7 +859,7 @@ function stripDefaultAuxiliarySlots(
       slot.extraBody === undefined &&
       slot.fallbackToMain === undefined;
     if (!isDefault) {
-      stripped[task as AuxiliaryModelTask] = slot;
+      stripped[task as AuxiliaryModelTask | "default"] = slot;
     }
   }
   return stripped;
@@ -871,11 +874,11 @@ function mergeAuxiliaryModels(
   }
   const merged: AuxiliaryModelConfig = { ...(left ?? {}) };
   for (const [task, slot] of Object.entries(right ?? {})) {
-    const existing = merged[task as AuxiliaryModelTask];
-    merged[task as AuxiliaryModelTask] = {
-      ...(existing ?? {}),
-      ...(slot ?? {})
-    };
+    const key = task as AuxiliaryModelTask | "default";
+    const existing = merged[key];
+    merged[key] = isPlainRecord(existing) && isPlainRecord(slot)
+      ? { ...existing, ...slot }
+      : slot;
   }
   return merged;
 }
@@ -883,7 +886,7 @@ function mergeAuxiliaryModels(
 export const ALL_AUXILIARY_MODEL_TASKS: AuxiliaryModelTask[] = [
   "vision",
   "compression",
-  "approval",
+  "assessor",
   "web_extract",
   "session_search",
   "mcp",
@@ -892,15 +895,31 @@ export const ALL_AUXILIARY_MODEL_TASKS: AuxiliaryModelTask[] = [
   "skills_library",
   "title_generation",
   "curator",
-  "memory_compaction"
+  "memory_compaction",
+  "profile_context"
 ];
 
 export function normalizeAuxiliaryModels(
   value: AuxiliaryModelConfig | undefined
 ): AuxiliaryModelConfig {
   const normalized: AuxiliaryModelConfig = {};
+  const defaultSlot = normalizeAuxiliarySlotInput(value?.default, "auxiliaryModels.default");
+  if (value?.default !== undefined) {
+    normalized.default = defaultSlot;
+  }
+
+  for (const key of Object.keys(value ?? {})) {
+    if (key !== "default" && !(ALL_AUXILIARY_MODEL_TASKS as string[]).includes(key)) {
+      throw new Error(`Unsupported auxiliary model task '${key}' in auxiliaryModels`);
+    }
+  }
+
   for (const task of ALL_AUXILIARY_MODEL_TASKS) {
-    const slot = value?.[task];
+    const taskSlot = normalizeAuxiliarySlotInput(value?.[task], `auxiliaryModels.${task}`);
+    const slot = {
+      ...(defaultSlot ?? {}),
+      ...(taskSlot ?? {})
+    };
     normalized[task] = {
       provider: slot?.provider ?? "auto",
       enabled: slot?.enabled ?? true,
@@ -915,6 +934,33 @@ export function normalizeAuxiliaryModels(
     };
   }
   return normalized;
+}
+
+function normalizeAuxiliarySlotInput(
+  slot: AuxiliaryModelSlotInput | undefined,
+  path: string
+): AuxiliaryModelSlotConfig | undefined {
+  if (slot === undefined) return undefined;
+  if (typeof slot === "string") {
+    return parseAuxiliaryModelShorthand(slot, path);
+  }
+  return slot;
+}
+
+function parseAuxiliaryModelShorthand(value: string, path: string): AuxiliaryModelSlotConfig {
+  const slashIndex = value.indexOf("/");
+  if (slashIndex < 0) {
+    throw new Error(`${path} shorthand must be provider/model`);
+  }
+  const provider = value.slice(0, slashIndex);
+  const id = value.slice(slashIndex + 1);
+  if (provider.length === 0) {
+    throw new Error(`${path} shorthand is missing provider before /`);
+  }
+  if (id.length === 0) {
+    throw new Error(`${path} shorthand is missing model id after /`);
+  }
+  return { provider: provider as ProviderId, id };
 }
 
 function compactValue(value: unknown): unknown {

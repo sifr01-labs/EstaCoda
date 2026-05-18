@@ -52,13 +52,14 @@ Auxiliary routes are preference/routing constructs, not separate runtimes:
 | `main` | Primary inference |
 | `vision` | Image analysis |
 | `compression` | Context compression |
-| `approval` | Security assessor |
+| `assessor` | Security assessor |
 | `web_extract` | Web extraction |
 | `session_search` | Session semantic search |
 | `skills_hub` | Skills distribution |
 | `mcp` | MCP tool delegation |
 | `memory_flush` | Memory operations |
 | `delegation` | Subagent delegation |
+| `profile_context` | Profile context generation |
 
 ## Important Distinctions
 

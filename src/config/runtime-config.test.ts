@@ -13,10 +13,11 @@ describe("normalizeAuxiliaryModels", () => {
   it("fills missing tasks with auto/enabled defaults", () => {
     const result = normalizeAuxiliaryModels({});
     expect(result.vision).toEqual({ provider: "auto", enabled: true });
-    expect(result.approval).toEqual({ provider: "auto", enabled: true });
+    expect(result.assessor).toEqual({ provider: "auto", enabled: true });
     expect(result.compression).toEqual({ provider: "auto", enabled: true });
     expect(result.mcp).toEqual({ provider: "auto", enabled: true });
     expect(result.memory_compaction).toEqual({ provider: "auto", enabled: true });
+    expect(result.profile_context).toEqual({ provider: "auto", enabled: true });
   });
 
   it("preserves explicitly configured fields", () => {
@@ -24,7 +25,7 @@ describe("normalizeAuxiliaryModels", () => {
       vision: { provider: "openai", id: "gpt-4o", enabled: false, fallbackToMain: true },
     });
     expect(result.vision).toEqual({ provider: "openai", id: "gpt-4o", enabled: false, fallbackToMain: true });
-    expect(result.approval).toEqual({ provider: "auto", enabled: true });
+    expect(result.assessor).toEqual({ provider: "auto", enabled: true });
   });
 
   it("does not include undefined optional fields", () => {
@@ -32,6 +33,42 @@ describe("normalizeAuxiliaryModels", () => {
       vision: { provider: "auto", enabled: true },
     });
     expect(Object.keys(result.vision!)).toEqual(["provider", "enabled"]);
+  });
+
+  it("accepts and normalizes a default auxiliary slot", () => {
+    const result = normalizeAuxiliaryModels({
+      default: { provider: "openai", id: "gpt-4.1-mini", timeoutMs: 5000 },
+    });
+    expect(result.default).toEqual({ provider: "openai", id: "gpt-4.1-mini", timeoutMs: 5000 });
+    expect(result.compression).toEqual({ provider: "openai", enabled: true, id: "gpt-4.1-mini", timeoutMs: 5000 });
+  });
+
+  it("normalizes string shorthand for auxiliary slots", () => {
+    const result = normalizeAuxiliaryModels({
+      default: "openai/gpt-4.1-mini",
+      assessor: "local/qwen2.5:3b",
+    });
+    expect(result.default).toEqual({ provider: "openai", id: "gpt-4.1-mini" });
+    expect(result.assessor).toEqual({ provider: "local", enabled: true, id: "qwen2.5:3b" });
+  });
+
+  it("splits shorthand only on the first slash", () => {
+    const result = normalizeAuxiliaryModels({
+      vision: "openrouter/anthropic/claude-3.7-sonnet",
+    });
+    expect(result.vision).toEqual({ provider: "openrouter", enabled: true, id: "anthropic/claude-3.7-sonnet" });
+  });
+
+  it("rejects invalid shorthand with clear errors", () => {
+    expect(() => normalizeAuxiliaryModels({ vision: "openai" })).toThrow("auxiliaryModels.vision shorthand must be provider/model");
+    expect(() => normalizeAuxiliaryModels({ vision: "/gpt-4.1-mini" })).toThrow("auxiliaryModels.vision shorthand is missing provider before /");
+    expect(() => normalizeAuxiliaryModels({ vision: "openai/" })).toThrow("auxiliaryModels.vision shorthand is missing model id after /");
+  });
+
+  it("rejects approval as an auxiliary route", () => {
+    expect(() => normalizeAuxiliaryModels({
+      approval: { provider: "openai", id: "gpt-4.1-mini" },
+    } as any)).toThrow("Unsupported auxiliary model task 'approval'");
   });
 });
 
@@ -49,7 +86,7 @@ describe("loadRuntimeConfig auxiliaryModels", () => {
 
     expect(loaded.auxiliaryModels).toBeDefined();
     expect(loaded.auxiliaryModels.vision).toEqual({ provider: "auto", enabled: true });
-    expect(loaded.auxiliaryModels.approval).toEqual({ provider: "auto", enabled: true });
+    expect(loaded.auxiliaryModels.assessor).toEqual({ provider: "auto", enabled: true });
   });
 
   it("ignores deprecated auxiliaryProviders without migrating and strips on save", async () => {

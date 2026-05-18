@@ -4,7 +4,6 @@ import {
   resolveAllAuxiliaryRoutes
 } from "./auxiliary-model-resolver.js";
 import type {
-  AuxiliaryModelSlotConfig,
   AuxiliaryModelTask,
   ModelProfile,
   ResolvedModelRoute
@@ -57,7 +56,7 @@ describe("resolveAuxiliaryModelRoute", () => {
   });
 
   it("returns custom route when baseUrl and id are set", () => {
-    const result = resolveAuxiliaryModelRoute("approval", {
+    const result = resolveAuxiliaryModelRoute("assessor", {
       baseUrl: "http://localhost:11434/v1",
       id: "qwen2.5:3b",
       apiKeyEnv: "LOCAL_API_KEY",
@@ -74,7 +73,7 @@ describe("resolveAuxiliaryModelRoute", () => {
   });
 
   it("returns unavailable when baseUrl is set but id is missing", () => {
-    const result = resolveAuxiliaryModelRoute("approval", {
+    const result = resolveAuxiliaryModelRoute("assessor", {
       baseUrl: "http://localhost:11434/v1",
     }, {
       mainRoute: fakeMainRoute(),
@@ -87,7 +86,7 @@ describe("resolveAuxiliaryModelRoute", () => {
 
   it("uses main route when provider is main", () => {
     const mainRoute = fakeMainRoute();
-    const result = resolveAuxiliaryModelRoute("approval", { provider: "main" }, {
+    const result = resolveAuxiliaryModelRoute("assessor", { provider: "main" }, {
       mainRoute,
       providerRegistry: fakeRegistry(),
     });
@@ -97,7 +96,7 @@ describe("resolveAuxiliaryModelRoute", () => {
   });
 
   it("resolves explicit provider+id to exact route", () => {
-    const result = resolveAuxiliaryModelRoute("approval", {
+    const result = resolveAuxiliaryModelRoute("assessor", {
       provider: "openai",
       id: "gpt-4o-mini",
     }, {
@@ -110,12 +109,38 @@ describe("resolveAuxiliaryModelRoute", () => {
     expect(result.fallbackToMain).toBe(false);
   });
 
+  it("propagates slot timeoutMs and maxConcurrency", () => {
+    const result = resolveAuxiliaryModelRoute("assessor", {
+      provider: "openai",
+      id: "gpt-4o-mini",
+      timeoutMs: 7000,
+      maxConcurrency: 3,
+    }, {
+      mainRoute: fakeMainRoute(),
+      providerRegistry: fakeRegistry(),
+    });
+    expect(result.timeoutMs).toBe(7000);
+    expect(result.maxConcurrency).toBe(3);
+  });
+
+  it("leaves omitted timeoutMs and maxConcurrency undefined", () => {
+    const result = resolveAuxiliaryModelRoute("assessor", {
+      provider: "openai",
+      id: "gpt-4o-mini",
+    }, {
+      mainRoute: fakeMainRoute(),
+      providerRegistry: fakeRegistry(),
+    });
+    expect(result.timeoutMs).toBeUndefined();
+    expect(result.maxConcurrency).toBeUndefined();
+  });
+
   it("chooses best model on explicit provider when id is missing", () => {
     const models = [
       fakeModelProfile({ provider: "deepseek", id: "deepseek-chat", supportsTools: true, supportsStructuredOutput: true, contextWindowTokens: 64_000 }),
       fakeModelProfile({ provider: "deepseek", id: "deepseek-reasoner", supportsTools: false, supportsStructuredOutput: true, contextWindowTokens: 32_000 }),
     ];
-    const result = resolveAuxiliaryModelRoute("approval", { provider: "deepseek" }, {
+    const result = resolveAuxiliaryModelRoute("assessor", { provider: "deepseek" }, {
       mainRoute: fakeMainRoute(),
       providerRegistry: fakeRegistry(models),
       providerModels: models,
@@ -129,7 +154,7 @@ describe("resolveAuxiliaryModelRoute", () => {
     const models = [
       fakeModelProfile({ provider: "deepseek", id: "deepseek-chat", supportsTools: false, supportsStructuredOutput: false }),
     ];
-    const result = resolveAuxiliaryModelRoute("approval", { provider: "deepseek" }, {
+    const result = resolveAuxiliaryModelRoute("assessor", { provider: "deepseek" }, {
       mainRoute: fakeMainRoute(),
       providerRegistry: fakeRegistry(models),
       providerModels: models,
@@ -166,6 +191,108 @@ describe("resolveAuxiliaryModelRoute", () => {
     expect(result.diagnostics.some((d) => d.includes("Auto-selected"))).toBe(true);
   });
 
+  it("resolves a task with no task slot through auxiliaryModels.default", () => {
+    const mainRoute = fakeMainRoute();
+    const result = resolveAuxiliaryModelRoute("compression", {
+      default: { provider: "openai", id: "gpt-4.1-mini" },
+    }, {
+      mainRoute,
+      providerRegistry: fakeRegistry(),
+    });
+    expect(result.source).toBe("explicit");
+    expect(result.route).not.toBe(mainRoute);
+    expect(result.route?.provider).toBe("openai");
+    expect(result.route?.id).toBe("gpt-4.1-mini");
+  });
+
+  it("inherits missing provider, model, and operational fields from auxiliaryModels.default", () => {
+    const result = resolveAuxiliaryModelRoute("compression", {
+      default: {
+        provider: "openai",
+        id: "gpt-4.1-mini",
+        apiKeyEnv: "OPENAI_API_KEY",
+        fallbackToMain: true,
+        timeoutMs: 5000,
+        maxConcurrency: 2,
+      },
+      compression: { contextWindowTokens: 64_000 },
+    }, {
+      mainRoute: fakeMainRoute(),
+      providerRegistry: fakeRegistry(),
+    });
+    expect(result.source).toBe("explicit");
+    expect(result.route?.provider).toBe("openai");
+    expect(result.route?.id).toBe("gpt-4.1-mini");
+    expect(result.route?.apiKeyEnv).toBe("OPENAI_API_KEY");
+    expect(result.route?.contextWindowTokens).toBe(64_000);
+    expect(result.fallbackToMain).toBe(true);
+    expect(result.timeoutMs).toBe(5000);
+    expect(result.maxConcurrency).toBe(2);
+  });
+
+  it("inherits default-lane timeoutMs and maxConcurrency into task routes", () => {
+    const result = resolveAuxiliaryModelRoute("compression", {
+      default: { provider: "openai", id: "gpt-4.1-mini", timeoutMs: 7000, maxConcurrency: 4 },
+      compression: { fallbackToMain: true },
+    }, {
+      mainRoute: fakeMainRoute(),
+      providerRegistry: fakeRegistry(),
+    });
+    expect(result.timeoutMs).toBe(7000);
+    expect(result.maxConcurrency).toBe(4);
+  });
+
+  it("lets task timeoutMs and maxConcurrency override default-lane values", () => {
+    const result = resolveAuxiliaryModelRoute("compression", {
+      default: { provider: "openai", id: "gpt-4.1-mini", timeoutMs: 7000, maxConcurrency: 4 },
+      compression: { timeoutMs: 3000, maxConcurrency: 1 },
+    }, {
+      mainRoute: fakeMainRoute(),
+      providerRegistry: fakeRegistry(),
+    });
+    expect(result.timeoutMs).toBe(3000);
+    expect(result.maxConcurrency).toBe(1);
+  });
+
+  it("lets task provider and model override auxiliaryModels.default", () => {
+    const result = resolveAuxiliaryModelRoute("compression", {
+      default: { provider: "openai", id: "gpt-4.1-mini" },
+      compression: { provider: "deepseek", id: "deepseek-chat" },
+    }, {
+      mainRoute: fakeMainRoute(),
+      providerRegistry: fakeRegistry(),
+    });
+    expect(result.source).toBe("explicit");
+    expect(result.route?.provider).toBe("deepseek");
+    expect(result.route?.id).toBe("deepseek-chat");
+  });
+
+  it("uses configured default instead of accidentally auto-selecting main", () => {
+    const mainRoute = fakeMainRoute();
+    const result = resolveAuxiliaryModelRoute("compression", {
+      default: { provider: "openai", id: "gpt-4.1-mini" },
+    }, {
+      mainRoute,
+      providerRegistry: fakeRegistry(),
+    });
+    expect(result.source).toBe("explicit");
+    expect(result.route).not.toBe(mainRoute);
+    expect(result.route?.id).toBe("gpt-4.1-mini");
+  });
+
+  it("lets explicit provider main select main over auxiliaryModels.default", () => {
+    const mainRoute = fakeMainRoute();
+    const result = resolveAuxiliaryModelRoute("compression", {
+      default: { provider: "openai", id: "gpt-4.1-mini" },
+      compression: { provider: "main" },
+    }, {
+      mainRoute,
+      providerRegistry: fakeRegistry(),
+    });
+    expect(result.source).toBe("main");
+    expect(result.route).toBe(mainRoute);
+  });
+
   it("auto returns unavailable when no configured model matches and main is unsuitable", () => {
     const mainRoute = fakeMainRoute({ profile: { ...fakeMainRoute().profile, supportsVision: false } });
     const models = [
@@ -181,18 +308,18 @@ describe("resolveAuxiliaryModelRoute", () => {
     expect(result.diagnostics.some((d) => d.includes("No configured model matches"))).toBe(true);
   });
 
-  it("defaults fallbackToMain to true for text-only structured tasks", () => {
+  it("defaults fallbackToMain to false for non-vision structured tasks", () => {
     const mainRoute = fakeMainRoute();
     const result = resolveAuxiliaryModelRoute("compression", { provider: "auto" }, {
       mainRoute,
       providerRegistry: fakeRegistry(),
     });
     expect(result.source).toBe("auto-main");
-    expect(result.fallbackToMain).toBe(true);
+    expect(result.fallbackToMain).toBe(false);
   });
 
   it("defaults fallbackToMain to false for explicit routes", () => {
-    const result = resolveAuxiliaryModelRoute("approval", {
+    const result = resolveAuxiliaryModelRoute("assessor", {
       provider: "openai",
       id: "gpt-4o-mini",
     }, {
@@ -204,7 +331,7 @@ describe("resolveAuxiliaryModelRoute", () => {
   });
 
   it("defaults fallbackToMain to false for custom routes", () => {
-    const result = resolveAuxiliaryModelRoute("approval", {
+    const result = resolveAuxiliaryModelRoute("assessor", {
       baseUrl: "http://localhost:11434/v1",
       id: "qwen2.5:3b",
     }, {
@@ -216,7 +343,7 @@ describe("resolveAuxiliaryModelRoute", () => {
   });
 
   it("respects explicit fallbackToMain override", () => {
-    const result = resolveAuxiliaryModelRoute("approval", {
+    const result = resolveAuxiliaryModelRoute("assessor", {
       provider: "openai",
       id: "gpt-4o-mini",
       fallbackToMain: true,
@@ -253,13 +380,13 @@ describe("resolveAuxiliaryModelRoute", () => {
     expect(result.fallbackToMain).toBe(false);
   });
 
-  it("defaults fallbackToMain for tool-reasoning tasks to main.supportsTools", () => {
+  it("defaults fallbackToMain for tool-reasoning tasks to false", () => {
     const mainRouteTools = fakeMainRoute({ profile: { ...fakeMainRoute().profile, supportsTools: true } });
     const resultMcp = resolveAuxiliaryModelRoute("mcp", { provider: "auto" }, {
       mainRoute: mainRouteTools,
       providerRegistry: fakeRegistry(),
     });
-    expect(resultMcp.fallbackToMain).toBe(true);
+    expect(resultMcp.fallbackToMain).toBe(false);
 
     const mainRouteNoTools = fakeMainRoute({ profile: { ...fakeMainRoute().profile, supportsTools: false } });
     const resultDelegation = resolveAuxiliaryModelRoute("delegation", { provider: "auto" }, {
@@ -283,12 +410,23 @@ describe("resolveAuxiliaryModelRoute", () => {
     expect(result.diagnostics.some((d) => d.includes("No configured model matches"))).toBe(true);
   });
 
-  it("approval task requires structured output capability", () => {
+  it("assessor exists as the structured security-assessor route", () => {
+    const mainRoute = fakeMainRoute({ profile: { ...fakeMainRoute().profile, supportsStructuredOutput: true } });
+    const result = resolveAuxiliaryModelRoute("assessor", { provider: "auto" }, {
+      mainRoute,
+      providerRegistry: fakeRegistry(),
+    });
+    expect(result.source).toBe("auto-main");
+    expect(result.route).toBe(mainRoute);
+    expect(result.fallbackToMain).toBe(false);
+  });
+
+  it("assessor task requires structured output capability", () => {
     const mainRoute = fakeMainRoute({ profile: { ...fakeMainRoute().profile, supportsStructuredOutput: false } });
     const models = [
       fakeModelProfile({ provider: "openai", id: "gpt-4o-mini", supportsStructuredOutput: false }),
     ];
-    const result = resolveAuxiliaryModelRoute("approval", { provider: "auto" }, {
+    const result = resolveAuxiliaryModelRoute("assessor", { provider: "auto" }, {
       mainRoute,
       providerRegistry: fakeRegistry(models),
       providerModels: models,
@@ -297,12 +435,55 @@ describe("resolveAuxiliaryModelRoute", () => {
     expect(result.diagnostics.some((d) => d.includes("No configured model matches"))).toBe(true);
   });
 
+  it("profile_context exists as a structured auxiliary route", () => {
+    const mainRoute = fakeMainRoute({ profile: { ...fakeMainRoute().profile, supportsStructuredOutput: true } });
+    const result = resolveAuxiliaryModelRoute("profile_context", { provider: "auto" }, {
+      mainRoute,
+      providerRegistry: fakeRegistry(),
+    });
+    expect(result.source).toBe("auto-main");
+    expect(result.route).toBe(mainRoute);
+    expect(result.fallbackToMain).toBe(false);
+  });
+
+  it("rejects approval as an auxiliary route", () => {
+    expect(() => resolveAuxiliaryModelRoute("approval" as any, { provider: "auto" }, {
+      mainRoute: fakeMainRoute(),
+      providerRegistry: fakeRegistry(),
+    })).toThrow("Unsupported auxiliary model task 'approval'");
+  });
+
   it("includes diagnostic metadata explaining resolution path", () => {
-    const result = resolveAuxiliaryModelRoute("approval", { provider: "main" }, {
+    const result = resolveAuxiliaryModelRoute("assessor", { provider: "main" }, {
       mainRoute: fakeMainRoute(),
       providerRegistry: fakeRegistry(),
     });
     expect(result.diagnostics).toContain("Using main model route");
+  });
+});
+
+describe("AuxiliaryModelTask coverage", () => {
+  it("keeps existing auxiliary task names routable", () => {
+    const existingTasks: AuxiliaryModelTask[] = [
+      "vision",
+      "compression",
+      "web_extract",
+      "session_search",
+      "mcp",
+      "memory_flush",
+      "delegation",
+      "skills_library",
+      "title_generation",
+      "curator",
+      "memory_compaction",
+    ];
+
+    for (const task of existingTasks) {
+      expect(() => resolveAuxiliaryModelRoute(task, { provider: "auto" }, {
+        mainRoute: fakeMainRoute(),
+        providerRegistry: fakeRegistry(),
+      })).not.toThrow();
+    }
   });
 });
 
@@ -315,7 +496,7 @@ describe("resolveAllAuxiliaryRoutes", () => {
     const registry = fakeRegistry(models);
     const config = {
       vision: { provider: "auto", enabled: true },
-      approval: { provider: "main", enabled: true },
+      assessor: { provider: "main", enabled: true },
     };
     const results = await resolveAllAuxiliaryRoutes(config, {
       mainRoute,
@@ -323,6 +504,23 @@ describe("resolveAllAuxiliaryRoutes", () => {
     });
     expect(results.length).toBe(2);
     expect(results.find((r) => r.task === "vision")?.source).toBe("auto-main");
-    expect(results.find((r) => r.task === "approval")?.source).toBe("main");
+    expect(results.find((r) => r.task === "assessor")?.source).toBe("main");
+  });
+
+  it("excludes default as a task route while applying default inheritance", async () => {
+    const mainRoute = fakeMainRoute();
+    const registry = fakeRegistry();
+    const results = await resolveAllAuxiliaryRoutes({
+      default: { provider: "openai", id: "gpt-4.1-mini", fallbackToMain: true },
+      compression: { contextWindowTokens: 64_000 },
+    }, {
+      mainRoute,
+      providerRegistry: registry,
+    });
+    expect(results.map((r) => r.task)).toEqual(["compression"]);
+    expect(results[0]!.route?.provider).toBe("openai");
+    expect(results[0]!.route?.id).toBe("gpt-4.1-mini");
+    expect(results[0]!.route?.contextWindowTokens).toBe(64_000);
+    expect(results[0]!.fallbackToMain).toBe(true);
   });
 });

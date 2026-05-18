@@ -706,7 +706,7 @@ describe("cli model", () => {
       expect(result.handled).toBe(true);
       expect(result.output).toContain("Auxiliary models:");
       expect(result.output).toContain("vision:");
-      expect(result.output).toContain("approval:");
+      expect(result.output).toContain("assessor:");
     });
   });
 
@@ -737,7 +737,7 @@ describe("cli model", () => {
       expect(result.exitCode).toBe(0);
       expect(result.output).toContain("Auxiliary model status:");
       expect(result.output).toContain("vision:");
-      expect(result.output).toContain("approval:");
+      expect(result.output).toContain("assessor:");
     });
 
     it("shows command guide when no subcommand given", async () => {

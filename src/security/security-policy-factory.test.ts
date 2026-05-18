@@ -74,7 +74,7 @@ describe("security policy factory", () => {
       expect(result.assessor).toEqual({ used: false, status: "unavailable" });
     });
 
-    it("uses full auxiliaryModels.approval resolved route when override absent", async () => {
+    it("uses full auxiliaryModels.assessor resolved route when override absent", async () => {
       const executor = createMockExecutor();
       const resolvedRoute: ResolvedModelRoute = {
         provider: "anthropic",

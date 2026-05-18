@@ -264,16 +264,16 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     profile: options.model
   };
   const auxiliaryModels = options.auxiliaryModels ?? {};
-  const approvalRoute = options.model.provider === "unconfigured"
+  const assessorRoute = options.model.provider === "unconfigured"
     ? undefined
-    : resolveAuxiliaryModelRoute("approval", auxiliaryModels.approval ?? { provider: "auto", enabled: true }, {
+    : resolveAuxiliaryModelRoute("assessor", auxiliaryModels, {
       mainRoute,
       providerRegistry,
       providerModels
     });
   const visionRoute = options.model.provider === "unconfigured"
     ? undefined
-    : resolveAuxiliaryModelRoute("vision", auxiliaryModels.vision ?? { provider: "auto", enabled: true }, {
+    : resolveAuxiliaryModelRoute("vision", auxiliaryModels, {
       mainRoute,
       providerRegistry,
       providerModels
@@ -569,9 +569,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     ? undefined
     : {
       ...options.securityAssessor,
-      provider: options.securityAssessor.provider ?? approvalRoute?.route?.provider,
-      model: options.securityAssessor.model ?? approvalRoute?.route?.id,
-      route: options.securityAssessor.route ?? approvalRoute?.route
+      provider: options.securityAssessor.provider ?? assessorRoute?.route?.provider,
+      model: options.securityAssessor.model ?? assessorRoute?.route?.id,
+      route: options.securityAssessor.route ?? assessorRoute?.route
     };
   const baseSecurityPolicyForActiveMode = () => options.securityPolicy ?? createSecurityPolicyForMode(activeSecurityMode, {
     assessor: effectiveSecurityAssessor === undefined
