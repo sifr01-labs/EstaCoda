@@ -44,6 +44,7 @@ export function resolveAuxiliaryModelRoute(
     throw new Error(`Unsupported auxiliary model task '${String(task)}'`);
   }
   const slot = resolveEffectiveSlot(task, slotOrConfig);
+  const executionFields = resolvedExecutionFields(slot);
 
   // 1. Disabled
   if (slot.enabled === false) {
@@ -52,6 +53,7 @@ export function resolveAuxiliaryModelRoute(
       route: undefined,
       source: "disabled",
       fallbackToMain: false,
+      ...executionFields,
       diagnostics: ["Slot is explicitly disabled"]
     };
   }
@@ -65,6 +67,7 @@ export function resolveAuxiliaryModelRoute(
         route: undefined,
         source: "custom",
         fallbackToMain: false,
+        ...executionFields,
         diagnostics
       };
     }
@@ -84,6 +87,7 @@ export function resolveAuxiliaryModelRoute(
       route,
       source: "custom",
       fallbackToMain: slot.fallbackToMain ?? false,
+      ...executionFields,
       diagnostics: [`Custom OpenAI-compatible route at ${slot.baseUrl}`]
     };
   }
@@ -95,6 +99,7 @@ export function resolveAuxiliaryModelRoute(
       route: context.mainRoute,
       source: "main",
       fallbackToMain: false,
+      ...executionFields,
       diagnostics: ["Using main model route"]
     };
   }
@@ -122,6 +127,7 @@ export function resolveAuxiliaryModelRoute(
         route,
         source: "explicit",
         fallbackToMain: slot.fallbackToMain ?? false,
+        ...executionFields,
         diagnostics: [`Explicit route ${explicitProvider}/${slot.id}`]
       };
     }
@@ -137,6 +143,7 @@ export function resolveAuxiliaryModelRoute(
         route: undefined,
         source: "explicit",
         fallbackToMain: computeFallbackToMain({ task, slot, mainRoute: context.mainRoute, source: "explicit" }),
+        ...executionFields,
         diagnostics
       };
     }
@@ -154,6 +161,7 @@ export function resolveAuxiliaryModelRoute(
       route,
       source: "explicit",
       fallbackToMain: slot.fallbackToMain ?? false,
+      ...executionFields,
       diagnostics: [`Best model on ${explicitProvider}: ${chosen.primary.id}`]
     };
   }
@@ -166,6 +174,7 @@ export function resolveAuxiliaryModelRoute(
       route: context.mainRoute,
       source: "auto-main",
       fallbackToMain: computeFallbackToMain({ task, slot, mainRoute: context.mainRoute, source: "auto-main" }),
+      ...executionFields,
       diagnostics: ["Main model satisfies task requirements"]
     };
   }
@@ -180,6 +189,7 @@ export function resolveAuxiliaryModelRoute(
       route: undefined,
       source: "auto-configured",
       fallbackToMain: computeFallbackToMain({ task, slot, mainRoute: context.mainRoute, source: "auto-configured" }),
+      ...executionFields,
       diagnostics
     };
   }
@@ -197,7 +207,15 @@ export function resolveAuxiliaryModelRoute(
     route,
     source: "auto-configured",
     fallbackToMain: computeFallbackToMain({ task, slot, mainRoute: context.mainRoute, source: "auto-configured" }),
+    ...executionFields,
     diagnostics: [`Auto-selected ${chosen.primary.provider}/${chosen.primary.id}`]
+  };
+}
+
+function resolvedExecutionFields(slot: AuxiliaryModelSlotConfig): Pick<ResolvedAuxiliaryRoute, "timeoutMs" | "maxConcurrency"> {
+  return {
+    ...(slot.timeoutMs !== undefined ? { timeoutMs: slot.timeoutMs } : {}),
+    ...(slot.maxConcurrency !== undefined ? { maxConcurrency: slot.maxConcurrency } : {})
   };
 }
 

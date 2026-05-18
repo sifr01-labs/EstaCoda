@@ -156,6 +156,8 @@ export type ResolvedAuxiliaryRoute = {
   route: ResolvedModelRoute | undefined;
   source: "main" | "auto-main" | "auto-configured" | "explicit" | "custom" | "disabled";
   fallbackToMain: boolean;
+  timeoutMs?: number;
+  maxConcurrency?: number;
   diagnostics: string[];
 };
 

@@ -109,6 +109,32 @@ describe("resolveAuxiliaryModelRoute", () => {
     expect(result.fallbackToMain).toBe(false);
   });
 
+  it("propagates slot timeoutMs and maxConcurrency", () => {
+    const result = resolveAuxiliaryModelRoute("assessor", {
+      provider: "openai",
+      id: "gpt-4o-mini",
+      timeoutMs: 7000,
+      maxConcurrency: 3,
+    }, {
+      mainRoute: fakeMainRoute(),
+      providerRegistry: fakeRegistry(),
+    });
+    expect(result.timeoutMs).toBe(7000);
+    expect(result.maxConcurrency).toBe(3);
+  });
+
+  it("leaves omitted timeoutMs and maxConcurrency undefined", () => {
+    const result = resolveAuxiliaryModelRoute("assessor", {
+      provider: "openai",
+      id: "gpt-4o-mini",
+    }, {
+      mainRoute: fakeMainRoute(),
+      providerRegistry: fakeRegistry(),
+    });
+    expect(result.timeoutMs).toBeUndefined();
+    expect(result.maxConcurrency).toBeUndefined();
+  });
+
   it("chooses best model on explicit provider when id is missing", () => {
     const models = [
       fakeModelProfile({ provider: "deepseek", id: "deepseek-chat", supportsTools: true, supportsStructuredOutput: true, contextWindowTokens: 64_000 }),
@@ -200,6 +226,32 @@ describe("resolveAuxiliaryModelRoute", () => {
     expect(result.route?.apiKeyEnv).toBe("OPENAI_API_KEY");
     expect(result.route?.contextWindowTokens).toBe(64_000);
     expect(result.fallbackToMain).toBe(true);
+    expect(result.timeoutMs).toBe(5000);
+    expect(result.maxConcurrency).toBe(2);
+  });
+
+  it("inherits default-lane timeoutMs and maxConcurrency into task routes", () => {
+    const result = resolveAuxiliaryModelRoute("compression", {
+      default: { provider: "openai", id: "gpt-4.1-mini", timeoutMs: 7000, maxConcurrency: 4 },
+      compression: { fallbackToMain: true },
+    }, {
+      mainRoute: fakeMainRoute(),
+      providerRegistry: fakeRegistry(),
+    });
+    expect(result.timeoutMs).toBe(7000);
+    expect(result.maxConcurrency).toBe(4);
+  });
+
+  it("lets task timeoutMs and maxConcurrency override default-lane values", () => {
+    const result = resolveAuxiliaryModelRoute("compression", {
+      default: { provider: "openai", id: "gpt-4.1-mini", timeoutMs: 7000, maxConcurrency: 4 },
+      compression: { timeoutMs: 3000, maxConcurrency: 1 },
+    }, {
+      mainRoute: fakeMainRoute(),
+      providerRegistry: fakeRegistry(),
+    });
+    expect(result.timeoutMs).toBe(3000);
+    expect(result.maxConcurrency).toBe(1);
   });
 
   it("lets task provider and model override auxiliaryModels.default", () => {
