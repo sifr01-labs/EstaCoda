@@ -2,8 +2,11 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { DEFAULT_ENVIRONMENT_TYPE, assessSecurityPolicy, type SecurityApprovalMode, type SecurityAssessment, type SecurityPolicy, type SecurityRequest } from "../contracts/security.js";
+import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
+import type { ProviderExecutor } from "../providers/provider-executor.js";
 import { assessCommandSafety } from "./command-safety.js";
+import { assessCommandRisk, type SmartApprovalDecision } from "./smart-approval-assessor.js";
 
 export type ApprovalScope = "once" | "session" | "always";
 
@@ -34,6 +37,15 @@ type MatchingGrant = {
   scope: ApprovalScope;
   grant: EphemeralApprovalGrant | PersistedWorkspaceApprovalGrant;
   index?: number;
+};
+
+export type SmartApprovalAssessorRuntimeConfig = {
+  enabled?: boolean;
+  assessorRoute?: ResolvedAuxiliaryRoute;
+  mainRoute?: ResolvedModelRoute;
+  providerExecutor?: ProviderExecutor;
+  scopeKey: string;
+  assessCommandRisk?: typeof assessCommandRisk;
 };
 
 export class WorkspaceApprovalStore {
@@ -157,6 +169,7 @@ export class WorkspaceApprovalController {
       workspaceRoot: string;
       sessionId: string;
       mode: SecurityApprovalMode;
+      smartApproval?: SmartApprovalAssessorRuntimeConfig;
     }
   ): Promise<SecurityAssessment> {
     const hardlineBlock = hardlineBlockFor(request);
@@ -207,6 +220,11 @@ export class WorkspaceApprovalController {
           status: "disabled"
         }
       };
+    }
+
+    const smartAssessment = await smartAssessmentFor(request, options.mode, options.smartApproval);
+    if (smartAssessment !== undefined) {
+      return smartAssessment;
     }
 
     return await assessSecurityPolicy(basePolicy, request, options.mode);
@@ -311,6 +329,94 @@ function hardlineBlockFor(request: SecurityRequest): {
   return hardBlock?.severity === "critical"
     ? { code: hardBlock.code, reason: hardBlock.reason }
     : undefined;
+}
+
+async function smartAssessmentFor(
+  request: SecurityRequest,
+  mode: SecurityApprovalMode,
+  smartApproval: SmartApprovalAssessorRuntimeConfig | undefined
+): Promise<SecurityAssessment | undefined> {
+  if (mode !== "adaptive" || smartApproval?.enabled !== true) {
+    return undefined;
+  }
+
+  if (
+    request.command === undefined ||
+    request.riskClass !== "destructive-local" ||
+    smartApproval.assessorRoute === undefined ||
+    smartApproval.mainRoute === undefined ||
+    smartApproval.providerExecutor === undefined
+  ) {
+    return undefined;
+  }
+
+  const commandSafety = assessCommandSafety(request.command, {
+    environmentType: request.environmentType ?? DEFAULT_ENVIRONMENT_TYPE
+  });
+  if (commandSafety.hardBlock === undefined && commandSafety.riskClass !== "destructive-local") {
+    return undefined;
+  }
+
+  const assess = smartApproval.assessCommandRisk ?? assessCommandRisk;
+  const decision = await assess(request.command, {
+    assessorRoute: smartApproval.assessorRoute,
+    mainRoute: smartApproval.mainRoute,
+    providerExecutor: smartApproval.providerExecutor,
+    scopeKey: smartApproval.scopeKey
+  });
+
+  return smartDecisionToAssessment(decision, request);
+}
+
+function smartDecisionToAssessment(
+  decision: SmartApprovalDecision,
+  request: SecurityRequest
+): SecurityAssessment {
+  if (decision === "APPROVE") {
+    return {
+      decision: "allow",
+      mode: "adaptive",
+      reason: "Smart approval classified this command as safe to run automatically.",
+      risk: "low",
+      deterministicRule: "smart-approval",
+      assessor: {
+        used: true,
+        decision: "allow",
+        risk: "low",
+        status: "ok"
+      }
+    };
+  }
+
+  if (decision === "DENY") {
+    return {
+      decision: "deny",
+      mode: "adaptive",
+      reason: "Smart approval classified this command as too risky to run.",
+      risk: "high",
+      deterministicRule: "smart-approval",
+      assessor: {
+        used: true,
+        decision: "deny",
+        risk: "high",
+        status: "ok"
+      }
+    };
+  }
+
+  return {
+    decision: "ask",
+    mode: "adaptive",
+    reason: "Smart approval escalated this command for manual approval.",
+    risk: inferRiskLevel(request.riskClass),
+    deterministicRule: "smart-approval-escalated",
+    assessor: {
+      used: true,
+      decision: "ask",
+      risk: inferRiskLevel(request.riskClass),
+      status: "ok"
+    }
+  };
 }
 
 function matchesRequest(

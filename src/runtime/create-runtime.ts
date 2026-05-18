@@ -42,7 +42,7 @@ import { ProviderExecutor } from "../providers/provider-executor.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { createWorkspaceTrustTools } from "../security/workspace-trust-tools.js";
 import { createSecurityPolicyForMode } from "../security/security-policy-factory.js";
-import { type ApprovalScope, type PersistedWorkspaceApprovalGrant, type WorkspaceApprovalController } from "../security/workspace-approval-controller.js";
+import { type ApprovalScope, type PersistedWorkspaceApprovalGrant, type SmartApprovalAssessorRuntimeConfig, type WorkspaceApprovalController } from "../security/workspace-approval-controller.js";
 import { loadSkillsFromDirectory } from "../skills/skill-loader.js";
 import { SkillRegistry } from "../skills/skill-registry.js";
 import { SkillEvolutionStore } from "../skills/skill-evolution.js";
@@ -599,10 +599,21 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         };
       }
 
+      const smartApproval = effectiveSecurityAssessor?.enabled === true
+        ? {
+          enabled: true,
+          assessorRoute: effectiveSecurityAssessor.auxiliaryRoute ?? assessorRoute,
+          mainRoute,
+          providerExecutor: effectiveSecurityAssessor.providerExecutor ?? providerExecutor,
+          scopeKey: profileId
+        } satisfies SmartApprovalAssessorRuntimeConfig
+        : undefined;
+
       return await options.approvalController.assess(basePolicy, request, {
           workspaceRoot,
           sessionId,
-          mode: activeSecurityMode
+          mode: activeSecurityMode,
+          smartApproval
         });
     }
   };
