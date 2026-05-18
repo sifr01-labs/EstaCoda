@@ -351,6 +351,22 @@ export class ChannelGateway {
     };
   }
 
+  async #refreshCachedRuntimePolicy(sessionId: string, reason: string): Promise<void> {
+    if (this.#runtimeCache === undefined) {
+      return;
+    }
+
+    try {
+      await this.#runtimeCache.invalidate(sessionId);
+    } catch (error) {
+      this.#logWarning?.(
+        `${reason} cache invalidate failed for ${sessionId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
+
   async start(): Promise<void> {
     for (const adapter of this.#adapters.values()) {
       await adapter.start?.(async (message) => {
@@ -1717,6 +1733,7 @@ export class ChannelGateway {
         targetKey: pending.targetKey,
         targetSummary: pending.targetSummary
       });
+      await this.#refreshCachedRuntimePolicy(pending.sessionId, "Persistent approval grant");
     }
     this.#pendingApprovals.delete(key);
 
@@ -1811,14 +1828,18 @@ export class ChannelGateway {
       };
     }
 
+    const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
     const revoked = await this.#approvalStore.revoke(approvalId, normalizeSessionKey(message.sessionKey, this.#sessionPolicy));
+    if (revoked) {
+      await this.#refreshCachedRuntimePolicy(sessionId, "Persistent approval revoke");
+    }
     const text = revoked
       ? `Revoked persistent approval ${approvalId}.`
       : `No persistent approval matched ${approvalId} for this chat.`;
     await this.#deliverText(adapter, message.sessionKey, text);
 
     return {
-      sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt }),
+      sessionId,
       replyText: text,
       artifactCount: 0,
       progressCount: 0
