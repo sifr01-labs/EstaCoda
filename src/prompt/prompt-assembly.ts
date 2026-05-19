@@ -3,7 +3,7 @@ import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { ChannelAttachment } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
-import type { MemoryProviderContext } from "../contracts/memory.js";
+import type { MemoryPromptContext, PromptMemoryBlock } from "../contracts/memory.js";
 import type { PromptBudgetReport, PromptLayerName, PromptLayerReport } from "../contracts/prompt.js";
 import type { ModelProfile, ProviderMessage, ProviderMessageContentPart } from "../contracts/provider.js";
 import type { SecurityDecision } from "../contracts/security.js";
@@ -28,12 +28,7 @@ export type ProviderPromptInput = {
   cache?: PromptCache;
   sessionHistory?: Array<Pick<ProviderMessage, "role" | "content">>;
   soul?: string;
-  frozenMemory?: {
-    shared?: string;
-    user?: string;
-    soul?: string;
-    memory?: string;
-  };
+  memoryPromptContext?: MemoryPromptContext;
   skillsIndex?: SkillCatalogEntry[];
   userText: string;
   routedText: string;
@@ -58,7 +53,6 @@ export type ProviderPromptInput = {
   toolExecutions: ToolExecutionRecord[];
   context: ContextExpansionResult | undefined;
   projectContext: ProjectContextSnapshot | undefined;
-  memoryContext: MemoryProviderContext | undefined;
   providerTools?: OpenAICompatibleToolSchema[];
   ui?: {
     language: UiLanguage;
@@ -201,9 +195,6 @@ function buildBaseLayers(input: ProviderPromptInput): InternalPromptLayer[] {
     : input.projectContext.files
         .map((file) => `Source: ${file.source}\n${truncate(file.content, 1_500)}`)
         .join("\n\n");
-  const memoryContext = input.memoryContext?.text.trim().length
-    ? truncate(input.memoryContext.text, 5_000)
-    : "No memory provider context was loaded.";
   const skillInstructions = input.selectedSkillInstructions === undefined
     ? "No skill instruction body was loaded."
     : truncate(input.selectedSkillInstructions, 4_000);
@@ -238,10 +229,17 @@ function buildBaseLayers(input: ProviderPromptInput): InternalPromptLayer[] {
       content: renderProfileGuidance(input)
     }),
     layer({
-      name: "frozen-memory",
+      name: "safety-memory",
       cacheable: true,
+      protectedLayer: true,
       priority: 2,
-      content: renderFrozenMemory(input.frozenMemory)
+      content: renderSafetyMemory(input.memoryPromptContext)
+    }),
+    layer({
+      name: "memory",
+      cacheable: true,
+      priority: 3,
+      content: renderPromptMemory(input.memoryPromptContext)
     }),
     layer({
       name: "skills-index",
@@ -324,13 +322,6 @@ function buildBaseLayers(input: ProviderPromptInput): InternalPromptLayer[] {
       priority: 4,
       content: `Project context:\n${projectContext}`,
       truncated: input.projectContext?.files.some((file) => file.status === "truncated") ?? false
-    }),
-    layer({
-      name: "memory",
-      cacheable: false,
-      priority: 3,
-      content: `Memory provider context:\n${memoryContext}`,
-      truncated: input.memoryContext?.text !== undefined && input.memoryContext.text.length > memoryContext.length
     }),
     layer({
       name: "native-tools",
@@ -778,23 +769,43 @@ function defaultIdentity(): string {
   ].join("\n");
 }
 
-function renderFrozenMemory(memory: ProviderPromptInput["frozenMemory"]): string {
-  const shared = memory?.shared?.trim();
-  const user = memory?.user?.trim();
-  const soul = memory?.soul?.trim();
-  const project = memory?.memory?.trim();
+function renderSafetyMemory(memory: MemoryPromptContext | undefined): string {
+  const blocks = memory?.safetyMemory ?? [];
 
-  if (!shared && !user && !soul && !project) {
-    return "Frozen memory snapshot: no shared memory, USER.md, SOUL.md, or MEMORY.md content loaded for this session.";
+  if (blocks.length === 0) {
+    return "Safety and identity memory: no SOUL.md content loaded for this session.";
   }
 
   return [
-    "Frozen memory snapshot:",
-    shared ? `§ memory/shared\n${truncate(shared, 3_000)}` : undefined,
-    user ? `§ USER.md\n${truncate(user, 2_000)}` : undefined,
-    soul ? `§ SOUL.md\n${truncate(soul, 2_000)}` : undefined,
-    project ? `§ MEMORY.md\n${truncate(project, 3_000)}` : undefined
-  ].filter((line) => line !== undefined).join("\n\n");
+    "Safety and identity memory:",
+    ...blocks.map((block) => renderMemoryBlock(block, 2_000))
+  ].join("\n\n");
+}
+
+function renderPromptMemory(memory: MemoryPromptContext | undefined): string {
+  const blocks = [
+    ...(memory?.frozenCompactMemory ?? []),
+    ...(memory?.sessionRecall ?? [])
+  ];
+
+  if (blocks.length === 0) {
+    return "Canonical memory prompt context: no shared memory, USER.md, MEMORY.md, or session recall loaded for this session.";
+  }
+
+  return [
+    "Canonical memory prompt context:",
+    "Memory is loaded once for this turn. Writes persist to disk but do not alter this prompt context until refresh.",
+    "",
+    ...blocks.map((block) => renderMemoryBlock(block, block.source === "USER.md" ? 2_000 : 3_000))
+  ].join("\n\n");
+}
+
+function renderMemoryBlock(block: PromptMemoryBlock, maxChars: number): string {
+  return [
+    `§ ${block.source}`,
+    `kind=${block.kind} scope=${block.scope} trusted=${block.trusted ? "yes" : "no"} chars=${block.chars}`,
+    truncate(block.content, maxChars)
+  ].join("\n");
 }
 
 function renderSkillsIndex(skills: SkillCatalogEntry[] | undefined): string {

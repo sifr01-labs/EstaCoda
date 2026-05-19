@@ -63,7 +63,7 @@ export function createKnowledgeMemoryTools(inspector: MemoryInspector | undefine
     {
       name: "knowledge.memory.deactivate",
       description:
-        "Deactivate a memory promotion by ID. This suppresses the entry from rendered context. Cannot deactivate SOUL.md or AGENTS.md entries. Requires approval.",
+        "Deactivate a memory promotion by ID. This suppresses the entry from rendered context. Cannot deactivate SOUL.md entries. Requires approval.",
       inputSchema: {
         type: "object",
         properties: {

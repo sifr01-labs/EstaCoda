@@ -22,6 +22,8 @@ import { MemoryStore } from "../memory/memory-store.js";
 import { loadIdentityContext } from "../memory/identity-loader.js";
 import { listSharedMemory, type SharedMemoryEntry } from "../memory/shared-memory.js";
 import { LocalMemoryProvider } from "../memory/local-memory-provider.js";
+import { MemoryPromptContextBuilder } from "../memory/memory-prompt-context-builder.js";
+import { MemoryPromotionStore } from "../memory/memory-promotion-store.js";
 import type { AgentProfileMode, AgentResponseLanguage, LoadedRuntimeConfig, MCPServerConfig, UiFlavor, UiLanguage } from "../config/runtime-config.js";
 import { loadMcpServers, type MCPServerSnapshot } from "../mcp/mcp-tools.js";
 import { ProcessManager } from "../process/process-manager.js";
@@ -515,6 +517,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   if (identityContext.memory !== undefined) {
     memoryStore.write("MEMORY.md", identityContext.memory);
   }
+  const memoryPromotionStore = new MemoryPromotionStore({ path: profilePaths.promotionsPath });
   const memoryProvider = options.memoryProvider ?? new LocalMemoryProvider({
     store: memoryStore,
     saveRoots: {
@@ -522,7 +525,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       "MEMORY.md": profileMemoryRoot,
       "SOUL.md": profileMemoryRoot
     },
-    promotionStorePath: profilePaths.promotionsPath
+    promotionStore: memoryPromotionStore
   });
   for (const tool of createKnowledgeMemoryTools(
     memoryProvider instanceof LocalMemoryProvider ? memoryProvider.inspector : undefined
@@ -539,8 +542,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     storePath: skillLearningStorePath,
     sessionDb
   });
-  const frozenMemorySnapshot = memoryStore.snapshot();
-  const memoryContext = await memoryProvider.context();
+  const memoryPromptContext = await new MemoryPromptContextBuilder({
+    store: memoryStore,
+    promotionStore: memoryPromotionStore
+  }).build();
   const contextReferenceExpander = new ContextReferenceExpander({ workspaceRoot });
   const projectContext = await new ProjectContextLoader({ workspaceRoot }).load();
   const renderedProjectContext = renderProjectContext(projectContext);
@@ -694,12 +699,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     runRecorder,
     toolPlanRunner,
     soul: undefined,
-    frozenMemory: {
-      shared: frozenMemorySnapshot.files.get("SHARED.md"),
-      user: frozenMemorySnapshot.files.get("USER.md"),
-      soul: frozenMemorySnapshot.files.get("SOUL.md"),
-      memory: frozenMemorySnapshot.files.get("MEMORY.md")
-    },
+    memoryPromptContext,
     skillsIndex: sessionSkillCatalog,
     ui: options.ui,
     agentProfile: options.agentProfile,
@@ -743,7 +743,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     toolExecutor,
     toolCallPlanner,
     memoryProvider,
-    memoryContext,
+    memoryPromptContext,
     model: options.model,
     providerPreferences: {
       providerOrder: [options.model.provider]
@@ -752,12 +752,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     projectContext,
     providerTools: providerToolSchemaCatalog.tools,
     soul: undefined,
-    frozenMemory: {
-      shared: frozenMemorySnapshot.files.get("SHARED.md"),
-      user: frozenMemorySnapshot.files.get("USER.md"),
-      soul: frozenMemorySnapshot.files.get("SOUL.md"),
-      memory: frozenMemorySnapshot.files.get("MEMORY.md")
-    },
     skillsIndex: sessionSkillCatalog,
     skillConfig: options.skillConfig,
     skillLearningManager,

@@ -24,6 +24,7 @@ export class LocalMemoryProvider implements MemoryProvider {
     store: MemoryStore;
     saveRoot?: string;
     saveRoots?: Partial<Record<MemoryFileKind, string>>;
+    promotionStore?: MemoryPromotionStore;
     promotionStorePath?: string;
   }) {
     this.#store = options.store;
@@ -33,15 +34,14 @@ export class LocalMemoryProvider implements MemoryProvider {
         : {
             "MEMORY.md": options.saveRoot,
             "USER.md": options.saveRoot,
-            "SOUL.md": options.saveRoot,
-            "AGENTS.md": options.saveRoot
+            "SOUL.md": options.saveRoot
           }
     );
-    this.#promotionStore = options.promotionStorePath === undefined
+    this.#promotionStore = options.promotionStore ?? (options.promotionStorePath === undefined
       ? undefined
       : new MemoryPromotionStore({
           path: options.promotionStorePath
-        });
+        }));
     this.#inspector = this.#promotionStore === undefined
       ? undefined
       : new MemoryInspector({
@@ -57,9 +57,9 @@ export class LocalMemoryProvider implements MemoryProvider {
   async context(options?: { query?: string }): Promise<MemoryProviderContext> {
     const snapshot = this.#store.snapshot();
 
-    if (options?.query !== undefined && options.query.trim().length > 0 && this.#promotionStore !== undefined) {
+    if (this.#promotionStore !== undefined) {
       const records = await this.#promotionStore.list();
-      const rendered = renderSelective(snapshot, records, { query: options.query });
+      const rendered = renderSelective(snapshot, records, { query: options?.query });
       return {
         text: rendered.text,
         usage: rendered.usage
@@ -198,7 +198,7 @@ export class LocalMemoryProvider implements MemoryProvider {
   }
 
   async #save(): Promise<void> {
-    for (const file of ["MEMORY.md", "USER.md", "SOUL.md", "AGENTS.md"] as const) {
+    for (const file of ["MEMORY.md", "USER.md", "SOUL.md"] as const) {
       const root = this.#saveRoots[file];
       if (root !== undefined) {
         await this.#store.saveFileToDirectory(root, file);

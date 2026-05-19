@@ -2,7 +2,7 @@ import type { AgentLoopResponse } from "./agent-loop.js";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
-import type { MemoryProviderContext, SkillOutcome } from "../contracts/memory.js";
+import type { SkillOutcome } from "../contracts/memory.js";
 import type { SecurityDecision } from "../contracts/security.js";
 import type { LoadedSkill, SkillDefinition } from "../contracts/skill.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
@@ -28,7 +28,6 @@ export function buildFallbackResponse(input: {
   artifacts: ArtifactRecord[];
   context: ContextExpansionResult | undefined;
   projectContext: ProjectContextSnapshot | undefined;
-  memoryContext: MemoryProviderContext | undefined;
 }): AgentLoopResponse {
   const contextProgress = [
     ...(input.context === undefined

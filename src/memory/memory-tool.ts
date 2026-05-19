@@ -2,6 +2,8 @@ import type { MemoryFileKind, MemoryOperation } from "../contracts/memory.js";
 import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
 import type { MemoryStore } from "./memory-store.js";
 
+const MEMORY_CURATE_FILES: readonly MemoryFileKind[] = ["MEMORY.md", "USER.md", "SOUL.md"];
+
 export function createMemoryTool(memoryStore: MemoryStore): RegisteredTool<MemoryToolInput> {
   return {
     name: "memory.curate",
@@ -11,7 +13,7 @@ export function createMemoryTool(memoryStore: MemoryStore): RegisteredTool<Memor
       type: "object",
       properties: {
         kind: { type: "string", enum: ["append", "replace", "remove"] },
-        file: { type: "string", enum: ["MEMORY.md", "USER.md", "SOUL.md", "AGENTS.md"] },
+        file: { type: "string", enum: MEMORY_CURATE_FILES },
         content: { type: "string" },
         match: { type: "string" },
         replacement: { type: "string" }
@@ -29,7 +31,7 @@ export function createMemoryTool(memoryStore: MemoryStore): RegisteredTool<Memor
 
 type MemoryToolInput = {
   kind: "append" | "replace" | "remove";
-  file: MemoryFileKind;
+  file: string;
   content?: string;
   match?: string;
   replacement?: string;
@@ -46,11 +48,13 @@ function applyMemoryToolInput(memoryStore: MemoryStore, input: MemoryToolInput):
 }
 
 function toOperation(input: MemoryToolInput): MemoryOperation {
+  const file = assertMemoryFile(input.file);
+
   if (input.kind === "append") {
     assertPresent(input.content, "content");
     return {
       kind: "append",
-      file: input.file,
+      file,
       content: input.content
     };
   }
@@ -60,7 +64,7 @@ function toOperation(input: MemoryToolInput): MemoryOperation {
     assertPresent(input.replacement, "replacement");
     return {
       kind: "replace",
-      file: input.file,
+      file,
       match: input.match,
       replacement: input.replacement
     };
@@ -69,9 +73,17 @@ function toOperation(input: MemoryToolInput): MemoryOperation {
   assertPresent(input.match, "match");
   return {
     kind: "remove",
-    file: input.file,
+    file,
     match: input.match
   };
+}
+
+function assertMemoryFile(file: string): MemoryFileKind {
+  if (MEMORY_CURATE_FILES.includes(file as MemoryFileKind)) {
+    return file as MemoryFileKind;
+  }
+
+  throw new Error(`memory.curate does not manage ${file}`);
 }
 
 function assertPresent(value: string | undefined, field: string): asserts value is string {
@@ -79,4 +91,3 @@ function assertPresent(value: string | undefined, field: string): asserts value 
     throw new Error(`memory.curate requires ${field}`);
   }
 }
-

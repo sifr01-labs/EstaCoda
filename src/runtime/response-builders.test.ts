@@ -25,8 +25,7 @@ describe("buildFallbackResponse", () => {
       skillOutcomes: [],
       artifacts: [],
       context: undefined,
-      projectContext: undefined,
-      memoryContext: undefined
+      projectContext: undefined
     });
 
     expect(response.text).toBe(

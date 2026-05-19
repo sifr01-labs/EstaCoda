@@ -2,7 +2,7 @@ import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { ChannelAttachment, ChannelKind } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
-import type { MemoryProvider, MemoryProviderContext, SkillOutcome } from "../contracts/memory.js";
+import type { MemoryProvider, MemoryPromptContext, SkillOutcome } from "../contracts/memory.js";
 import type { PromptBudgetReport } from "../contracts/prompt.js";
 import type { ModelProfile, ProviderMessage, ProviderRequest, ProviderRoutePreferences } from "../contracts/provider.js";
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
@@ -86,19 +86,13 @@ export type AgentLoopOptions = {
   toolExecutor: ToolExecutor;
   toolCallPlanner?: ToolCallPlanner;
   memoryProvider?: MemoryProvider;
-  memoryContext?: MemoryProviderContext;
+  memoryPromptContext?: MemoryPromptContext;
   model?: ModelProfile;
   providerPreferences?: ProviderRoutePreferences;
   contextReferenceExpander?: ContextReferenceExpander;
   projectContext?: ProjectContextSnapshot;
   providerTools?: OpenAICompatibleToolSchema[];
   soul?: string;
-  frozenMemory?: {
-    shared?: string;
-    user?: string;
-    soul?: string;
-    memory?: string;
-  };
   skillsIndex?: SkillCatalogEntry[];
   skillConfig?: Record<string, Record<string, unknown>>;
   skillLearningManager?: SkillLearningManager;
@@ -157,7 +151,7 @@ export class AgentLoop {
   readonly #toolExecutor: ToolExecutor;
   readonly #toolCallPlanner: ToolCallPlanner | undefined;
   readonly #memoryProvider: MemoryProvider | undefined;
-  readonly #memoryContext: MemoryProviderContext | undefined;
+  readonly #memoryPromptContext: MemoryPromptContext | undefined;
   readonly #model: ModelProfile | undefined;
   readonly #providerPreferences: ProviderRoutePreferences;
   readonly #contextReferenceExpander: ContextReferenceExpander | undefined;
@@ -167,7 +161,6 @@ export class AgentLoop {
   readonly #skillWorkflowExecutor: SkillWorkflowExecutor;
   readonly #nativeToolExecutor: NativeToolExecutor;
   readonly #soul: string | undefined;
-  readonly #frozenMemory: { shared?: string; user?: string; soul?: string; memory?: string } | undefined;
   readonly #skillsIndex: SkillCatalogEntry[];
   readonly #skillConfig: Record<string, Record<string, unknown>>;
   readonly #skillLearningManager: SkillLearningManager | undefined;
@@ -190,7 +183,7 @@ export class AgentLoop {
     this.#toolExecutor = options.toolExecutor;
     this.#toolCallPlanner = options.toolCallPlanner;
     this.#memoryProvider = options.memoryProvider;
-    this.#memoryContext = options.memoryContext;
+    this.#memoryPromptContext = options.memoryPromptContext;
     this.#model = options.model;
     this.#providerPreferences = options.providerPreferences ?? {};
     this.#contextReferenceExpander = options.contextReferenceExpander;
@@ -200,7 +193,6 @@ export class AgentLoop {
     this.#skillWorkflowExecutor = options.skillWorkflowExecutor;
     this.#nativeToolExecutor = options.nativeToolExecutor;
     this.#soul = options.soul;
-    this.#frozenMemory = options.frozenMemory;
     this.#skillsIndex = options.skillsIndex ?? [];
     this.#skillConfig = options.skillConfig ?? {};
     this.#skillLearningManager = options.skillLearningManager;
@@ -517,8 +509,7 @@ export class AgentLoop {
       skillOutcomes: [],
       artifacts,
       context,
-      projectContext: this.#projectContext,
-      memoryContext: this.#memoryContext
+      projectContext: this.#projectContext
     });
     const deterministicImageGenerationRan = deterministicNativeTools.executions.some((execution) => execution.tool.name === "image.generate");
     const providerTools = this.#model?.supportsTools === true ? this.#providerTools : [];
@@ -535,7 +526,7 @@ export class AgentLoop {
       context,
       projectContext: this.#projectContext,
       attachments,
-      memoryContext: this.#memoryContext,
+      memoryPromptContext: this.#memoryPromptContext,
       providerTools: deterministicImageGenerationRan ? suppressImageGenerationTools(providerTools) : providerTools,
       fallbackText: fallbackResponse.text,
       onEvent: input.onEvent,

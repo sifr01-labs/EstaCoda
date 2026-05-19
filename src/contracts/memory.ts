@@ -1,4 +1,4 @@
-export type MemoryFileKind = "SHARED.md" | "MEMORY.md" | "USER.md" | "SOUL.md" | "AGENTS.md";
+export type MemoryFileKind = "SHARED.md" | "MEMORY.md" | "USER.md" | "SOUL.md";
 
 export type MemoryBudget = {
   kind: MemoryFileKind;
@@ -43,6 +43,58 @@ export type RenderedMemorySnapshot = {
 export type MemoryProviderContext = {
   text: string;
   usage: MemoryUsage[];
+};
+
+export type MemoryScope =
+  | "bundled"
+  | "user-global"
+  | "project"
+  | "workspace"
+  | "session";
+
+export type PromptMemoryBlock = {
+  id: string;
+  kind:
+    | "learned-user"
+    | "learned-project"
+    | "safety"
+    | "identity"
+    | "session-recall";
+  scope: MemoryScope;
+  source: string;
+  content: string;
+  chars: number;
+  entryIds?: string[];
+  lineRanges?: Array<{ startLine: number; endLine: number }>;
+  trusted: boolean;
+};
+
+export type MemoryBudgetPressure = {
+  source: string;
+  chars: number;
+  maxChars?: number;
+  percent?: number;
+};
+
+export type MemoryPromptDiagnostics = {
+  includedBlocks: Array<{
+    id: string;
+    kind: PromptMemoryBlock["kind"];
+    source: string;
+    chars: number;
+  }>;
+  suppressedEntries: number;
+  duplicateEntriesRemoved: number;
+  recallTriggered: boolean;
+  compactionPressure: MemoryBudgetPressure[];
+  warnings: string[];
+};
+
+export type MemoryPromptContext = {
+  frozenCompactMemory: PromptMemoryBlock[];
+  safetyMemory: PromptMemoryBlock[];
+  sessionRecall?: PromptMemoryBlock[];
+  diagnostics: MemoryPromptDiagnostics;
 };
 
 export type MemorySearchResult = {
@@ -94,7 +146,7 @@ export type SkillOutcome = {
 
 export type MemoryProvider = {
   id: string;
-  context(): Promise<MemoryProviderContext> | MemoryProviderContext;
+  context(options?: { query?: string }): Promise<MemoryProviderContext> | MemoryProviderContext;
   search(query: string, options?: { limit?: number }): Promise<MemorySearchResult[]> | MemorySearchResult[];
   conclude(conclusion: MemoryConclusion): Promise<void> | void;
   recordSkillOutcome(outcome: SkillOutcome): Promise<void> | void;

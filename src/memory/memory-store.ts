@@ -113,7 +113,7 @@ export class MemoryStore {
   }
 }
 
-const MEMORY_FILE_KINDS: readonly MemoryFileKind[] = ["SHARED.md", "MEMORY.md", "USER.md", "SOUL.md", "AGENTS.md"];
+export const MEMORY_FILE_KINDS: readonly MemoryFileKind[] = ["SHARED.md", "MEMORY.md", "USER.md", "SOUL.md"];
 
 function isNotFound(error: unknown): boolean {
   return (

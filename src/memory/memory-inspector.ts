@@ -2,7 +2,7 @@ import type { MemoryFileKind, MemoryPromotionRecord } from "../contracts/memory.
 import type { MemoryPromotionStore } from "./memory-promotion-store.js";
 import type { MemoryStore } from "./memory-store.js";
 
-const SAFETY_FILES: readonly MemoryFileKind[] = ["SOUL.md", "AGENTS.md"];
+export const SAFETY_FILES: readonly MemoryFileKind[] = ["SOUL.md"];
 
 export class MemoryInspector {
   readonly #promotionStore: MemoryPromotionStore;

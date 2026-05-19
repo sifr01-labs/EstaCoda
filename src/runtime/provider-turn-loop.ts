@@ -1,7 +1,7 @@
 import type { ChannelAttachment } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
-import type { MemoryProviderContext } from "../contracts/memory.js";
+import type { MemoryPromptContext } from "../contracts/memory.js";
 import type { ModelProfile, ProviderRequest, ProviderRoutePreferences, ResolvedModelRoute } from "../contracts/provider.js";
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SecurityDecision } from "../contracts/security.js";
@@ -45,7 +45,7 @@ export type ProviderTurnLoopOptions = {
   runRecorder: RunRecorder;
   toolPlanRunner: ToolPlanRunner;
   soul: string | undefined;
-  frozenMemory: { shared?: string; user?: string; soul?: string; memory?: string } | undefined;
+  memoryPromptContext: MemoryPromptContext | undefined;
   skillsIndex: SkillCatalogEntry[];
   ui: {
     language: UiLanguage;
@@ -72,7 +72,7 @@ export class ProviderTurnLoop {
   readonly #toolPlanRunner: ToolPlanRunner;
   readonly #promptCache: PromptCache;
   readonly #soul: string | undefined;
-  readonly #frozenMemory: { shared?: string; user?: string; soul?: string; memory?: string } | undefined;
+  readonly #memoryPromptContext: MemoryPromptContext | undefined;
   readonly #skillsIndex: SkillCatalogEntry[];
   readonly #ui: ProviderTurnLoopOptions["ui"];
   readonly #agentProfile: ProviderTurnLoopOptions["agentProfile"];
@@ -91,7 +91,7 @@ export class ProviderTurnLoop {
     this.#toolPlanRunner = options.toolPlanRunner;
     this.#promptCache = new PromptCache();
     this.#soul = options.soul;
-    this.#frozenMemory = options.frozenMemory;
+    this.#memoryPromptContext = options.memoryPromptContext;
     this.#skillsIndex = options.skillsIndex;
     this.#ui = options.ui;
     this.#agentProfile = options.agentProfile;
@@ -117,7 +117,7 @@ export class ProviderTurnLoop {
     context: ContextExpansionResult | undefined;
     projectContext: ProjectContextSnapshot | undefined;
     attachments: ChannelAttachment[] | undefined;
-    memoryContext: MemoryProviderContext | undefined;
+    memoryPromptContext: MemoryPromptContext | undefined;
     providerTools: OpenAICompatibleToolSchema[];
     fallbackText: string;
     onEvent?: RuntimeEventSink;
@@ -307,7 +307,7 @@ export class ProviderTurnLoop {
     context: ContextExpansionResult | undefined;
     projectContext: ProjectContextSnapshot | undefined;
     attachments: ChannelAttachment[] | undefined;
-    memoryContext: MemoryProviderContext | undefined;
+    memoryPromptContext: MemoryPromptContext | undefined;
     providerTools: OpenAICompatibleToolSchema[];
     fallbackText: string;
     onEvent?: RuntimeEventSink;
@@ -326,7 +326,7 @@ export class ProviderTurnLoop {
       cache: this.#promptCache,
       sessionHistory,
       soul: this.#soul,
-      frozenMemory: this.#frozenMemory,
+      memoryPromptContext: this.#memoryPromptContext,
       skillsIndex: this.#skillsIndex,
       selectedSkillResources: input.selectedSkillResources,
       selectedSkillSetup: input.selectedSkillSetup,
@@ -413,7 +413,7 @@ export class ProviderTurnLoop {
     context: ContextExpansionResult | undefined;
     projectContext: ProjectContextSnapshot | undefined;
     attachments: ChannelAttachment[] | undefined;
-    memoryContext: MemoryProviderContext | undefined;
+    memoryPromptContext: MemoryPromptContext | undefined;
     providerTools: OpenAICompatibleToolSchema[];
     providerExecution: ProviderExecutionResult | undefined;
     toolPlans: ToolCallPlan[];
@@ -440,7 +440,7 @@ export class ProviderTurnLoop {
       cache: this.#promptCache,
       sessionHistory,
       soul: this.#soul,
-      frozenMemory: this.#frozenMemory,
+      memoryPromptContext: this.#memoryPromptContext,
       skillsIndex: this.#skillsIndex,
       selectedSkillResources: input.selectedSkillResources,
       selectedSkillSetup: input.selectedSkillSetup,
