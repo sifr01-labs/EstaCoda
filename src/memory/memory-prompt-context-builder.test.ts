@@ -78,6 +78,39 @@ describe("MemoryPromptContextBuilder", () => {
     expect(context.diagnostics.warnings).toContain("dry-run: no memory files were written");
     await expect(readFile(promotionsPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
+
+  it("exposes USER.md and MEMORY.md budget pressure in prompt diagnostics", async () => {
+    const store = new MemoryStore({
+      budgets: [
+        { kind: "USER.md", maxChars: 10 },
+        { kind: "MEMORY.md", maxChars: 20 }
+      ]
+    });
+    store.write("USER.md", "12345678");
+    store.write("MEMORY.md", "1234567890123456789");
+
+    const context = await new MemoryPromptContextBuilder({ store }).build();
+
+    expect(context.diagnostics.budgetPressure).toEqual([
+      expect.objectContaining({
+        kind: "USER.md",
+        chars: 8,
+        maxChars: 10,
+        state: "warning"
+      }),
+      expect.objectContaining({
+        kind: "MEMORY.md",
+        chars: 19,
+        maxChars: 20,
+        state: "critical"
+      })
+    ]);
+    expect(context.diagnostics.compactionPressure).toBe(context.diagnostics.budgetPressure);
+    expect(context.diagnostics.warnings).toEqual([
+      "USER.md memory budget pressure is warning: 8/10 chars",
+      "MEMORY.md memory budget pressure is critical: 19/20 chars"
+    ]);
+  });
 });
 
 function promotionRecord(

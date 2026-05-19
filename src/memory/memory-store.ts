@@ -2,16 +2,28 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   DEFAULT_MEMORY_BUDGETS,
+  type MemoryBudgetOverflow,
   type MemoryBudget,
   type MemoryFileKind,
   type MemoryOperation
 } from "../contracts/memory.js";
 import { scanMemoryContent } from "./memory-scanner.js";
+import { calculateMemoryBudgetPressure, findBudget } from "./memory-pressure.js";
 
 export type MemorySnapshot = {
   files: ReadonlyMap<MemoryFileKind, string>;
   budgets: readonly MemoryBudget[];
 };
+
+export class MemoryBudgetOverflowError extends Error {
+  readonly name = "MemoryBudgetOverflowError";
+  readonly overflow: MemoryBudgetOverflow;
+
+  constructor(overflow: MemoryBudgetOverflow) {
+    super(`${overflow.kind} exceeds ${overflow.maxChars} character memory budget by ${overflow.overflowChars} characters`);
+    this.overflow = overflow;
+  }
+}
 
 export class MemoryStore {
   readonly #files = new Map<MemoryFileKind, string>();
@@ -91,10 +103,28 @@ export class MemoryStore {
   }
 
   #assertBudget(kind: MemoryFileKind, content: string): void {
-    const budget = this.#budgets.find((entry) => entry.kind === kind);
+    const budget = findBudget(this.#budgets, kind);
 
-    if (budget !== undefined && content.length > budget.maxChars) {
-      throw new Error(`${kind} exceeds ${budget.maxChars} character memory budget`);
+    if (budget === undefined) {
+      return;
+    }
+
+    const pressure = calculateMemoryBudgetPressure({
+      kind,
+      chars: content.length,
+      maxChars: budget.maxChars
+    });
+
+    if (pressure.state === "overflow") {
+      throw new MemoryBudgetOverflowError({
+        code: "memory-budget-overflow",
+        kind,
+        source: kind,
+        chars: pressure.chars,
+        maxChars: pressure.maxChars,
+        overflowChars: pressure.overflowChars,
+        pressure
+      });
     }
   }
 
@@ -114,6 +144,10 @@ export class MemoryStore {
 }
 
 export const MEMORY_FILE_KINDS: readonly MemoryFileKind[] = ["SHARED.md", "MEMORY.md", "USER.md", "SOUL.md"];
+
+export function isMemoryBudgetOverflowError(error: unknown): error is MemoryBudgetOverflowError {
+  return error instanceof MemoryBudgetOverflowError;
+}
 
 function isNotFound(error: unknown): boolean {
   return (

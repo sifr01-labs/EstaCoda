@@ -11,7 +11,7 @@ import { renderMemorySnapshot } from "./memory-renderer.js";
 import { renderSelective } from "./selective-renderer.js";
 import { MemoryPromotionStore } from "./memory-promotion-store.js";
 import { MemoryInspector } from "./memory-inspector.js";
-import type { MemoryStore } from "./memory-store.js";
+import { isMemoryBudgetOverflowError, type MemoryStore } from "./memory-store.js";
 
 export class LocalMemoryProvider implements MemoryProvider {
   readonly id = "local";
@@ -103,6 +103,8 @@ export class LocalMemoryProvider implements MemoryProvider {
   async conclude(conclusion: MemoryConclusion): Promise<void> {
     const target = conclusion.kind === "user-preference" ? "USER.md" : "MEMORY.md";
     if (conclusion.kind === "user-preference" && this.#promotionStore !== undefined) {
+      const previousRecords = await this.#promotionStore.list();
+      const previousMarkdown = this.#store.read(target);
       const applied = await this.#promotionStore.applyUserPreference({
         id: conclusion.id,
         content: conclusion.content,
@@ -114,16 +116,26 @@ export class LocalMemoryProvider implements MemoryProvider {
         sourceEventId: conclusion.sourceEventId
       });
 
-      if (applied.superseded !== undefined) {
-        this.#removeExactLine("USER.md", `- ${applied.superseded.content}`);
-      }
-      if (applied.action === "created" || applied.action === "replaced") {
-        this.#appendDedupe(target, `- ${conclusion.content}`);
+      try {
+        if (applied.superseded !== undefined) {
+          this.#removeExactLine("USER.md", `- ${applied.superseded.content}`);
+        }
+        if (applied.action === "created" || applied.action === "replaced") {
+          this.#appendDedupe(target, `- ${conclusion.content}`);
+        }
+      } catch (error) {
+        if (isMemoryBudgetOverflowError(error)) {
+          this.#store.write(target, previousMarkdown);
+          await this.#promotionStore.restore(previousRecords);
+        }
+        throw error;
       }
       await this.#save();
       return;
     }
     if (conclusion.kind === "project-fact" && this.#promotionStore !== undefined) {
+      const previousRecords = await this.#promotionStore.list();
+      const previousMarkdown = this.#store.read(target);
       const applied = await this.#promotionStore.applyProjectFact({
         id: conclusion.id,
         content: conclusion.content,
@@ -134,8 +146,16 @@ export class LocalMemoryProvider implements MemoryProvider {
         sourceTrajectoryId: conclusion.sourceTrajectoryId,
         sourceEventId: conclusion.sourceEventId
       });
-      if (applied.action === "created") {
-        this.#appendDedupe(target, `- ${conclusion.content}`);
+      try {
+        if (applied.action === "created") {
+          this.#appendDedupe(target, `- ${conclusion.content}`);
+        }
+      } catch (error) {
+        if (isMemoryBudgetOverflowError(error)) {
+          this.#store.write(target, previousMarkdown);
+          await this.#promotionStore.restore(previousRecords);
+        }
+        throw error;
       }
       await this.#save();
       return;

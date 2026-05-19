@@ -43,6 +43,7 @@ import {
 } from "../contracts/image-generation.js";
 import type { ModelsDevRegistryOptions } from "../model-catalog/models-dev-registry.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "./profile-home.js";
+import { coerceFiniteNumber, coercePositiveInteger } from "./numeric-coercion.js";
 
 export type MCPServerTrust = "conservative" | "read-only-network" | "read-only-local";
 export type UiLanguage = "en" | "ar";
@@ -1198,9 +1199,7 @@ function isSttProvider(value: unknown): value is SttProvider {
 }
 
 function boundedNumber(value: unknown, fallback: number, min: number, max: number): number {
-  return typeof value === "number" && Number.isFinite(value)
-    ? Math.min(max, Math.max(min, value))
-    : fallback;
+  return coerceFiniteNumber(value, { default: fallback, min, max });
 }
 
 function normalizeMcpServers(
@@ -2554,6 +2553,5 @@ function normalizeChannelBusyPolicy(
 }
 
 function normalizeQueueDepth(value: unknown): number {
-  const num = typeof value === "number" && Number.isFinite(value) ? value : 3;
-  return Math.min(Math.max(num, 1), 10);
+  return coercePositiveInteger(value, { default: 3, max: 10 });
 }

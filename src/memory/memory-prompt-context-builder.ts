@@ -8,6 +8,7 @@ import type {
 } from "../contracts/memory.js";
 import type { MemoryPromotionStore } from "./memory-promotion-store.js";
 import type { MemoryStore } from "./memory-store.js";
+import { calculateSnapshotBudgetPressure } from "./memory-pressure.js";
 
 type PromotionStoreReader = Pick<MemoryPromotionStore, "list">;
 
@@ -32,13 +33,22 @@ export class MemoryPromptContextBuilder {
     const snapshot = this.#store.snapshot();
     const records = this.#promotionStore === undefined ? [] : await this.#promotionStore.list();
     const inactive = inactiveContentSet(records);
+    const budgetPressure = calculateSnapshotBudgetPressure(snapshot);
     const diagnostics: MemoryPromptDiagnostics = {
       includedBlocks: [],
       suppressedEntries: 0,
       duplicateEntriesRemoved: 0,
       recallTriggered: false,
-      compactionPressure: [],
-      warnings: options.dryRun === true ? ["dry-run: no memory files were written"] : []
+      budgetPressure,
+      compactionPressure: budgetPressure,
+      warnings: [
+        ...(options.dryRun === true ? ["dry-run: no memory files were written"] : []),
+        ...budgetPressure
+          .filter((pressure) => pressure.state !== "ok")
+          .map((pressure) =>
+            `${pressure.source} memory budget pressure is ${pressure.state}: ${pressure.chars}/${pressure.maxChars} chars`
+          )
+      ]
     };
     const frozenCompactMemory: PromptMemoryBlock[] = [];
     const safetyMemory: PromptMemoryBlock[] = [];

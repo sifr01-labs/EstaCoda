@@ -198,6 +198,15 @@ export class MemoryPromotionStore {
     return [...this.#records.values()].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   }
 
+  async restore(records: readonly MemoryPromotionRecord[]): Promise<void> {
+    await this.#ensureLoaded();
+    this.#records.clear();
+    for (const record of records) {
+      this.#records.set(normalizeContentKey(record.content), record);
+    }
+    await this.#flush();
+  }
+
   #findMatchingActiveRecord(content: string): MemoryPromotionRecord | undefined {
     const target = normalizeContentKey(content);
     const exact = this.#records.get(target);

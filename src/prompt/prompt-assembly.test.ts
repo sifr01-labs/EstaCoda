@@ -116,6 +116,7 @@ describe("assembleProviderPrompt", () => {
           suppressedEntries: 0,
           duplicateEntriesRemoved: 0,
           recallTriggered: false,
+          budgetPressure: [],
           compactionPressure: [],
           warnings: []
         }

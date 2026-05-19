@@ -1,6 +1,6 @@
 import type { MemoryFileKind, MemoryOperation } from "../contracts/memory.js";
 import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
-import type { MemoryStore } from "./memory-store.js";
+import { isMemoryBudgetOverflowError, type MemoryStore } from "./memory-store.js";
 
 const MEMORY_CURATE_FILES: readonly MemoryFileKind[] = ["MEMORY.md", "USER.md", "SOUL.md"];
 
@@ -39,7 +39,25 @@ type MemoryToolInput = {
 
 function applyMemoryToolInput(memoryStore: MemoryStore, input: MemoryToolInput): ToolResult {
   const operation = toOperation(input);
-  memoryStore.apply(operation);
+  try {
+    memoryStore.apply(operation);
+  } catch (error) {
+    if (isMemoryBudgetOverflowError(error)) {
+      return {
+        ok: false,
+        content: [
+          `${error.overflow.kind} was not updated because it exceeded the memory budget.`,
+          `Budget: ${error.overflow.chars}/${error.overflow.maxChars} chars (${error.overflow.pressure.state}).`
+        ].join("\n"),
+        metadata: {
+          error: error.overflow.code,
+          overflow: error.overflow,
+          pressure: error.overflow.pressure
+        }
+      };
+    }
+    throw error;
+  }
 
   return {
     ok: true,

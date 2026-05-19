@@ -2,7 +2,12 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { MEMORY_FILE_KINDS, MemoryStore } from "./memory-store.js";
+import {
+  isMemoryBudgetOverflowError,
+  MEMORY_FILE_KINDS,
+  MemoryBudgetOverflowError,
+  MemoryStore
+} from "./memory-store.js";
 
 const tempDirs: string[] = [];
 
@@ -34,5 +39,37 @@ describe("MemoryStore", () => {
 
     expect(store.snapshot().files.has("AGENTS.md" as never)).toBe(false);
     expect(store.read("USER.md")).toBe("load as memory");
+  });
+
+  it("throws structured overflow errors and preserves the previous content", () => {
+    const store = new MemoryStore({ budgets: [{ kind: "USER.md", maxChars: 10 }] });
+    store.write("USER.md", "short");
+
+    expect(() => store.apply({
+      kind: "append",
+      file: "USER.md",
+      content: "too long"
+    })).toThrow(MemoryBudgetOverflowError);
+
+    expect(store.read("USER.md")).toBe("short");
+
+    let overflowError: unknown;
+    try {
+      store.write("USER.md", "01234567890");
+    } catch (error) {
+      overflowError = error;
+    }
+    expect(isMemoryBudgetOverflowError(overflowError)).toBe(true);
+    if (!isMemoryBudgetOverflowError(overflowError)) {
+      throw overflowError;
+    }
+    expect(overflowError.overflow).toMatchObject({
+      code: "memory-budget-overflow",
+      kind: "USER.md",
+      chars: 11,
+      maxChars: 10,
+      overflowChars: 1
+    });
+    expect(overflowError.overflow.pressure.state).toBe("overflow");
   });
 });

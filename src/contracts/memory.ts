@@ -69,11 +69,28 @@ export type PromptMemoryBlock = {
   trusted: boolean;
 };
 
+export type MemoryBudgetPressureState = "ok" | "warning" | "critical" | "overflow";
+
 export type MemoryBudgetPressure = {
+  kind: MemoryFileKind;
   source: string;
   chars: number;
-  maxChars?: number;
-  percent?: number;
+  maxChars: number;
+  ratio: number;
+  percent: number;
+  state: MemoryBudgetPressureState;
+  remainingChars: number;
+  overflowChars: number;
+};
+
+export type MemoryBudgetOverflow = {
+  code: "memory-budget-overflow";
+  kind: MemoryFileKind;
+  source: string;
+  chars: number;
+  maxChars: number;
+  overflowChars: number;
+  pressure: MemoryBudgetPressure;
 };
 
 export type MemoryPromptDiagnostics = {
@@ -86,6 +103,7 @@ export type MemoryPromptDiagnostics = {
   suppressedEntries: number;
   duplicateEntriesRemoved: number;
   recallTriggered: boolean;
+  budgetPressure: MemoryBudgetPressure[];
   compactionPressure: MemoryBudgetPressure[];
   warnings: string[];
 };

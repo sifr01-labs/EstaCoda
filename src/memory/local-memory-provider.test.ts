@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { LocalMemoryProvider } from "./local-memory-provider.js";
 import { MemoryPromotionStore } from "./memory-promotion-store.js";
-import { MemoryStore } from "./memory-store.js";
+import { MemoryBudgetOverflowError, MemoryStore } from "./memory-store.js";
 
 const tempDirs: string[] = [];
 
@@ -41,5 +41,102 @@ describe("LocalMemoryProvider", () => {
 
     expect(context.text).not.toContain("stale preference");
     expect(context.text).toContain("active preference");
+  });
+
+  it("surfaces structured promotion overflow failures without mutating memory markdown", async () => {
+    const root = await makeTempDir();
+    const store = new MemoryStore({ budgets: [{ kind: "USER.md", maxChars: 10 }] });
+    store.write("USER.md", "short");
+    const promotionStore = new MemoryPromotionStore({ path: join(root, "promotions.json") });
+    await promotionStore.applyUserPreference({
+      id: "pref-existing",
+      content: "existing",
+      confidence: 0.8,
+      occurrences: 1,
+      source: "test",
+      sourceSessionIds: []
+    });
+    const provider = new LocalMemoryProvider({ store, promotionStore });
+
+    await expect(provider.conclude({
+      id: "pref-overflow",
+      kind: "user-preference",
+      content: "this preference cannot fit",
+      confidence: 0.9
+    })).rejects.toThrow(MemoryBudgetOverflowError);
+
+    expect(store.read("USER.md")).toBe("short");
+    expect(await promotionStore.list()).toEqual([
+      expect.objectContaining({
+        id: "pref-existing",
+        content: "existing",
+        active: true
+      })
+    ]);
+  });
+
+  it("rolls back superseded promotion metadata and markdown when replacement overflows", async () => {
+    const root = await makeTempDir();
+    const store = new MemoryStore({ budgets: [{ kind: "USER.md", maxChars: 36 }] });
+    store.write("USER.md", "- concise replies");
+    const promotionStore = new MemoryPromotionStore({ path: join(root, "promotions.json") });
+    await promotionStore.applyUserPreference({
+      id: "pref-existing",
+      content: "concise replies",
+      confidence: 0.8,
+      occurrences: 1,
+      source: "test",
+      sourceSessionIds: []
+    });
+    const provider = new LocalMemoryProvider({ store, promotionStore });
+
+    await expect(provider.conclude({
+      id: "pref-replacement",
+      kind: "user-preference",
+      content: "detailed replies with careful citations",
+      confidence: 0.9
+    })).rejects.toThrow(MemoryBudgetOverflowError);
+
+    expect(store.read("USER.md")).toBe("- concise replies");
+    expect(await promotionStore.list()).toEqual([
+      expect.objectContaining({
+        id: "pref-existing",
+        content: "concise replies",
+        active: true
+      })
+    ]);
+    expect((await promotionStore.list())[0]?.supersededBy).toBeUndefined();
+  });
+
+  it("rolls back project fact promotion metadata when MEMORY.md overflows", async () => {
+    const root = await makeTempDir();
+    const store = new MemoryStore({ budgets: [{ kind: "MEMORY.md", maxChars: 10 }] });
+    store.write("MEMORY.md", "short");
+    const promotionStore = new MemoryPromotionStore({ path: join(root, "promotions.json") });
+    await promotionStore.applyProjectFact({
+      id: "fact-existing",
+      content: "existing fact",
+      confidence: 0.8,
+      occurrences: 1,
+      source: "test",
+      sourceSessionIds: []
+    });
+    const provider = new LocalMemoryProvider({ store, promotionStore });
+
+    await expect(provider.conclude({
+      id: "fact-overflow",
+      kind: "project-fact",
+      content: "project fact cannot fit",
+      confidence: 0.9
+    })).rejects.toThrow(MemoryBudgetOverflowError);
+
+    expect(store.read("MEMORY.md")).toBe("short");
+    expect(await promotionStore.list()).toEqual([
+      expect.objectContaining({
+        id: "fact-existing",
+        content: "existing fact",
+        active: true
+      })
+    ]);
   });
 });
