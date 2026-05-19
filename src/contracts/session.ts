@@ -253,6 +253,17 @@ export type SessionEvent =
       conclusion: MemoryConclusion;
     }
   | {
+      kind: "memory-file-compaction";
+      file?: string;
+      dryRun?: boolean;
+      status: string;
+      backupId?: string;
+      preRestoreBackupId?: string;
+      originalChars?: number;
+      compactedChars?: number;
+      restoredChars?: number;
+    }
+  | {
       kind: "skill-learned";
       action: "observed" | "candidate" | "created";
       record: {

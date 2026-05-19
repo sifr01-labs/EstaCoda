@@ -17,6 +17,8 @@ import { DelegationManager } from "../delegation/delegation-manager.js";
 import { createDelegationTools } from "../delegation/delegation-tools.js";
 import { createMemoryTool } from "../memory/memory-tool.js";
 import { createKnowledgeMemoryTools } from "../memory/knowledge-memory-tools.js";
+import { MemoryFileCompactionService } from "../memory/memory-file-compaction-service.js";
+import { createMemoryFileCompactionTools } from "../memory/memory-file-compaction-tools.js";
 import { createKnowledgeCodeTools } from "../knowledge/knowledge-code-tools.js";
 import { MemoryStore } from "../memory/memory-store.js";
 import { loadIdentityContext } from "../memory/identity-loader.js";
@@ -253,6 +255,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const closeSessionDbOnDispose = options.closeSessionDbOnDispose ?? true;
   const workspaceRoot = options.workspaceRoot ?? process.cwd();
   const localSkillsRoot = options.localSkillsRoot ?? profilePaths.skillsPath;
+  const profileMemoryRoot = profilePaths.profileRoot;
   const trustStore = options.trustStore ?? new WorkspaceTrustStore({ path: options.trustStorePath });
   const cronStore = options.cronStore ?? new CronStore({
     path: join(profilePaths.cronPath, "jobs.json"),
@@ -280,6 +283,16 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       providerRegistry,
       providerModels
     });
+  const memoryFileCompactionRoute = options.model.provider === "unconfigured"
+    ? undefined
+    : resolveAuxiliaryModelRoute("memory_compaction", auxiliaryModels, {
+      mainRoute,
+      providerRegistry,
+      providerModels
+    });
+  const providerExecutor = new ProviderExecutor({
+    registry: providerRegistry
+  });
   const processManager = new ProcessManager({ workspaceRoot });
   const channelMediaRoot = profilePaths.channelMediaPath;
   const audioCacheRoot = profilePaths.audioCachePath;
@@ -438,9 +451,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     allowedRoots: [channelMediaRoot],
     visionAuxiliaryRoute: visionRoute,
     mainRoute,
-    providerExecutor: new ProviderExecutor({
-      registry: providerRegistry
-    })
+    providerExecutor
   })) {
     toolRegistry.register(tool);
   }
@@ -463,6 +474,19 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     }
   }
   toolRegistry.register(createMemoryTool(memoryStore));
+  const memoryFileCompactionService = new MemoryFileCompactionService({
+    store: memoryStore,
+    memoryRoot: profileMemoryRoot,
+    route: memoryFileCompactionRoute,
+    mainRoute,
+    providerExecutor,
+    trajectoryRecorder,
+    sessionDb,
+    sessionId
+  });
+  for (const tool of createMemoryFileCompactionTools(memoryFileCompactionService)) {
+    toolRegistry.register(tool);
+  }
   const browserAvailable = await browserBackend.isAvailable();
   const toolAvailability = await toolRegistry.snapshot();
   const skillEvolutionStore = new SkillEvolutionStore({
@@ -501,7 +525,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     toolRegistry.register(tool);
   }
 
-  const profileMemoryRoot = profilePaths.profileRoot;
   const identityContext = await loadIdentityContext({ profilePaths });
   const sharedMemoryContent = renderSharedMemory(await listSharedMemory({ homeDir: options.homeDir }));
   const skillLearningStorePath = join(workspaceRoot, ".estacoda", "skill-learning.json");
@@ -563,9 +586,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   });
 
   const intentRouter = new IntentRouter({ skillRegistry: sessionSkillRegistry, model: options.model });
-  const providerExecutor = new ProviderExecutor({
-    registry: providerRegistry
-  });
   const configuredSecurityMode = options.securityMode ?? "adaptive";
   let activeSecurityMode: SecurityApprovalMode = configuredSecurityMode;
   const effectiveSecurityAssessor = options.securityAssessor === undefined
