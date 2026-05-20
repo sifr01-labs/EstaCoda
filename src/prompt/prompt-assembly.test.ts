@@ -1,8 +1,12 @@
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { ModelProfile, ProviderMessage } from "../contracts/provider.js";
 import { SESSION_RECALL_UNTRUSTED_NOTICE } from "../session/session-recall-service.js";
 import { assembleProviderPrompt } from "./prompt-assembly.js";
+import { IMAGE_TOKEN_ESTIMATE } from "./token-estimator.js";
 
 const model: ModelProfile = {
   id: "test-model",
@@ -345,7 +349,111 @@ describe("assembleProviderPrompt", () => {
     }));
     expect(prompt.budget.compressedLayers).not.toContain("compaction-notice");
   });
+
+  it("adds native image attachment cost to the prompt budget for vision models", async () => {
+    const imagePath = join(await mkdtemp(join(tmpdir(), "estacoda-prompt-image-")), "sample.png");
+    await writeFile(imagePath, Buffer.from("fake-png"));
+    const visionModel = { ...model, supportsVision: true };
+    const withoutImage = assembleProviderPrompt(basePromptInput({ model: visionModel }));
+    const withImage = assembleProviderPrompt(basePromptInput({
+      model: visionModel,
+      attachments: [
+        {
+          id: "image-1",
+          kind: "image",
+          status: "ready",
+          localPath: imagePath,
+          mimeType: "image/png"
+        }
+      ]
+    }));
+    const withoutLayer = channelAttachmentLayer(withoutImage);
+    const withLayer = channelAttachmentLayer(withImage);
+
+    expect(withLayer.estimatedTokens).toBeGreaterThanOrEqual(withoutLayer.estimatedTokens + IMAGE_TOKEN_ESTIMATE);
+    expect(JSON.stringify(withImage.messages)).toContain("image_url");
+  });
+
+  it("does not add native image token cost for non-vision models", async () => {
+    const imagePath = join(await mkdtemp(join(tmpdir(), "estacoda-prompt-nonvision-image-")), "sample.png");
+    await writeFile(imagePath, Buffer.from("fake-png"));
+    const attachments = [
+      {
+        id: "image-1",
+        kind: "image" as const,
+        status: "ready" as const,
+        localPath: imagePath,
+        mimeType: "image/png"
+      }
+    ];
+    const nonVision = assembleProviderPrompt(basePromptInput({ model, attachments }));
+    const vision = assembleProviderPrompt(basePromptInput({ model: { ...model, supportsVision: true }, attachments }));
+
+    expect(channelAttachmentLayer(vision).estimatedTokens - channelAttachmentLayer(nonVision).estimatedTokens)
+      .toBe(IMAGE_TOKEN_ESTIMATE);
+    expect(JSON.stringify(nonVision.messages)).not.toContain("image_url");
+  });
+
+  it("includes persisted session-history image metadata in the prompt budget", () => {
+    const textOnly = assembleProviderPrompt(basePromptInput({
+      sessionHistory: [
+        {
+          role: "user",
+          content: "Historical image request"
+        }
+      ]
+    }));
+    const withImageMetadata = assembleProviderPrompt(basePromptInput({
+      sessionHistory: [
+        {
+          role: "user",
+          content: "Historical image request",
+          metadata: {
+            attachments: [
+              { kind: "image", status: "ready" }
+            ]
+          }
+        }
+      ]
+    }));
+
+    expect(sessionHistoryLayer(withImageMetadata).estimatedTokens)
+      .toBeGreaterThanOrEqual(sessionHistoryLayer(textOnly).estimatedTokens + IMAGE_TOKEN_ESTIMATE);
+  });
 });
+
+function basePromptInput(overrides: Partial<Parameters<typeof assembleProviderPrompt>[0]> = {}): Parameters<typeof assembleProviderPrompt>[0] {
+  return {
+    model,
+    userText: "Inspect this.",
+    routedText: "Inspect this.",
+    selectedSkill: undefined,
+    selectedSkillInstructions: undefined,
+    selectedSkillResources: undefined,
+    selectedSkillSetup: undefined,
+    intent: generalIntent,
+    securityDecision: "allow",
+    toolExecutions: [],
+    context: undefined,
+    projectContext: undefined,
+    memoryPromptContext: undefined,
+    providerTools: [],
+    fallbackText: "fallback",
+    ...overrides
+  };
+}
+
+function channelAttachmentLayer(prompt: ReturnType<typeof assembleProviderPrompt>) {
+  const layer = prompt.budget.layers.find((candidate) => candidate.name === "channel-attachments");
+  expect(layer).toBeDefined();
+  return layer!;
+}
+
+function sessionHistoryLayer(prompt: ReturnType<typeof assembleProviderPrompt>) {
+  const layer = prompt.budget.layers.find((candidate) => candidate.name === "session-history");
+  expect(layer).toBeDefined();
+  return layer!;
+}
 
 function promptMemoryBlock(
   id: string,

@@ -66,6 +66,34 @@ describe("SessionHygieneService", () => {
     }));
   });
 
+  it("uses image-heavy message metadata for the gateway hygiene threshold", async () => {
+    const db = await dbWithMessages("session", ["short"]);
+    await db.appendMessage({
+      id: "image-history",
+      sessionId: "session",
+      role: "user",
+      content: "image-heavy history",
+      metadata: {
+        attachments: [
+          { kind: "image", status: "ready" }
+        ]
+      }
+    });
+    const compactIfNeeded = vi.fn(async () => compactResult());
+    const service = new SessionHygieneService({
+      sessionDb: db,
+      profileId: "profile",
+      compressionConfig: normalizeSessionCompressionConfig({ enabled: true, experimental: true }),
+      compressionService: { compactIfNeeded },
+      contextWindowTokens: 1_000
+    });
+
+    const result = await service.run({ sessionId: "session" });
+
+    expect(result.status).toBe("compacted");
+    expect(compactIfNeeded).toHaveBeenCalledTimes(1);
+  });
+
   it("returns a safe failure result when the compression service fails", async () => {
     const db = await dbWithMessages("session", ["x".repeat(300)]);
     const compactIfNeeded = vi.fn(async () => {

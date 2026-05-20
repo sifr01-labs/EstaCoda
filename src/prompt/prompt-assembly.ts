@@ -16,8 +16,12 @@ import { packetizeToolExecution, packetizeToolResult, renderToolResultPacket } f
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
 import type { PromptCache } from "./prompt-cache.js";
-import { estimateTextTokensRough } from "./token-estimator.js";
+import { countImageLikeMetadata, estimateTextTokensRough, IMAGE_TOKEN_ESTIMATE } from "./token-estimator.js";
 import type { AgentProfileMode, AgentResponseLanguage, UiFlavor, UiLanguage } from "../config/runtime-config.js";
+
+type PromptSessionHistoryMessage = Pick<ProviderMessage, "role" | "content"> & {
+  metadata?: Record<string, unknown>;
+};
 
 export type ProviderPromptAssembly = {
   messages: ProviderMessage[];
@@ -27,7 +31,7 @@ export type ProviderPromptAssembly = {
 export type ProviderPromptInput = {
   model?: ModelProfile;
   cache?: PromptCache;
-  sessionHistory?: Array<Pick<ProviderMessage, "role" | "content">>;
+  sessionHistory?: PromptSessionHistoryMessage[];
   compactionNotice?: string;
   compression?: PromptSemanticCompressionReport;
   soul?: string;
@@ -215,6 +219,8 @@ function buildBaseLayers(input: ProviderPromptInput): InternalPromptLayer[] {
         .map((tool) => `${tool.function.name}: ${tool.function.description}`)
         .join("\n");
   const attachmentManifest = renderChannelAttachments(input.attachments);
+  const sessionHistory = renderSessionHistory(input.sessionHistory);
+  const channelAttachments = `Channel attachments:\n${attachmentManifest}`;
   const identity = input.soul?.trim().length
     ? input.soul.trim()
     : defaultIdentity();
@@ -269,7 +275,8 @@ function buildBaseLayers(input: ProviderPromptInput): InternalPromptLayer[] {
       name: "session-history",
       cacheable: false,
       priority: 4,
-      content: renderSessionHistory(input.sessionHistory)
+      content: sessionHistory,
+      estimatedTokens: estimateTokens(sessionHistory) + estimateSessionHistoryImageTokens(input.sessionHistory)
     }),
     ...(hasSessionRecall(input.memoryPromptContext)
       ? [
@@ -307,7 +314,8 @@ function buildBaseLayers(input: ProviderPromptInput): InternalPromptLayer[] {
       cacheable: false,
       protectedLayer: true,
       priority: 1,
-      content: `Channel attachments:\n${attachmentManifest}`
+      content: channelAttachments,
+      estimatedTokens: estimateTokens(channelAttachments) + estimateNativeImageAttachmentTokens(input.model, input.attachments)
     }),
     layer({
       name: "intent",
@@ -649,12 +657,13 @@ function layer(input: {
   compressed?: boolean;
   protectedLayer?: boolean;
   priority?: number;
+  estimatedTokens?: number;
 }): InternalPromptLayer {
   return {
     name: input.name,
     content: input.content,
     chars: input.content.length,
-    estimatedTokens: estimateTokens(input.content),
+    estimatedTokens: input.estimatedTokens ?? estimateTokens(input.content),
     cacheable: input.cacheable,
     truncated: input.truncated ?? false,
     compressed: input.compressed ?? false,
@@ -920,7 +929,7 @@ function hashString(value: string): string {
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
-function renderSessionHistory(messages: Array<Pick<ProviderMessage, "role" | "content">> | undefined): string {
+function renderSessionHistory(messages: PromptSessionHistoryMessage[] | undefined): string {
   if (messages === undefined || messages.length === 0) {
     return "Session history: no prior turns loaded.";
   }
@@ -929,6 +938,44 @@ function renderSessionHistory(messages: Array<Pick<ProviderMessage, "role" | "co
     "Session history:",
     ...messages.slice(-8).map((message) => `${message.role}: ${truncate(stringifyProviderMessageContent(message.content), 900)}`)
   ].join("\n");
+}
+
+function estimateSessionHistoryImageTokens(messages: PromptSessionHistoryMessage[] | undefined): number {
+  return (messages ?? []).reduce((sum, message) => (
+    sum + countImageLikeMetadata(message.metadata) * IMAGE_TOKEN_ESTIMATE
+  ), 0);
+}
+
+function estimateNativeImageAttachmentTokens(
+  model: ModelProfile | undefined,
+  attachments: ChannelAttachment[] | undefined
+): number {
+  if (model?.supportsVision !== true) {
+    return 0;
+  }
+
+  return (attachments ?? []).filter(isReadyNativeImageAttachment).length * IMAGE_TOKEN_ESTIMATE;
+}
+
+function isReadyNativeImageAttachment(attachment: ChannelAttachment): boolean {
+  if (attachment.status !== undefined && attachment.status !== "ready") {
+    return false;
+  }
+
+  const path = attachment.localPath ?? attachment.path;
+  if (typeof path !== "string" || path.length === 0) {
+    return false;
+  }
+
+  if (attachment.kind === "image") {
+    return true;
+  }
+
+  if (attachment.mimeType?.toLowerCase().startsWith("image/") === true) {
+    return true;
+  }
+
+  return inferMimeType(path).startsWith("image/");
 }
 
 function stringifyProviderMessageContent(content: ProviderMessage["content"]): string {

@@ -57,6 +57,35 @@ describe("rough token estimator", () => {
     })).toBe(MESSAGE_FRAMING_TOKEN_ESTIMATE + IMAGE_TOKEN_ESTIMATE * 4);
   });
 
+  it("counts ready image attachments in persisted metadata", () => {
+    expect(estimateMessageTokensRough({
+      role: "user",
+      content: "",
+      metadata: {
+        attachments: [
+          { kind: "image", status: "ready" },
+          { kind: "image" },
+          { kind: "file", status: "ready", mimeType: "image/png" }
+        ]
+      }
+    })).toBe(MESSAGE_FRAMING_TOKEN_ESTIMATE + IMAGE_TOKEN_ESTIMATE * 3);
+  });
+
+  it("does not count failed, unsupported, or non-image attachment metadata", () => {
+    expect(estimateMessageTokensRough({
+      role: "user",
+      content: "",
+      metadata: {
+        attachments: [
+          { kind: "image", status: "download-failed" },
+          { kind: "image", status: "unsupported" },
+          { kind: "document", status: "ready", mimeType: "application/pdf" },
+          { kind: "file", url: "https://example.test/image.png" }
+        ]
+      }
+    })).toBe(MESSAGE_FRAMING_TOKEN_ESTIMATE);
+  });
+
   it("handles empty messages with framing overhead only", () => {
     expect(estimateMessageTokensRough({ role: "assistant", content: "" })).toBe(MESSAGE_FRAMING_TOKEN_ESTIMATE);
   });

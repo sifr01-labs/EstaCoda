@@ -1,5 +1,5 @@
 import type { SessionMessage } from "../contracts/session.js";
-import { estimateTextTokensRough } from "./token-estimator.js";
+import { estimateMessagesTokensRough } from "./token-estimator.js";
 
 type PackableSessionMessage = {
   id?: string;
@@ -13,6 +13,7 @@ type PackableSessionMessage = {
 export type PackedHistoryMessage = {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
+  metadata?: Record<string, unknown>;
 };
 
 export type PackedHistory = {
@@ -63,7 +64,8 @@ export function packSessionHistory(
         }]),
     ...recent.map((message) => ({
       role: message.role === "agent" ? "assistant" as const : message.role,
-      content: truncate(message.content, maxMessageChars)
+      content: truncate(message.content, maxMessageChars),
+      metadata: message.metadata
     }))
   ];
   packedMessages = trimToTokenBudget(packedMessages, maxEstimatedTokens);
@@ -75,7 +77,7 @@ export function packSessionHistory(
     summarizedMessageCount: older.length,
     protectedMessageCount: recent.length,
     protectedToolPairCount: countProtectedToolPairs(recent),
-    estimatedTokens: estimateTokens(packedMessages.map((message) => message.content).join("\n"))
+    estimatedTokens: estimateTokens(packedMessages)
   };
 }
 
@@ -137,7 +139,7 @@ function countProtectedToolPairs(messages: PackableSessionMessage[]): number {
 function trimToTokenBudget(messages: PackedHistoryMessage[], maxEstimatedTokens: number): PackedHistoryMessage[] {
   let trimmed = [...messages];
 
-  while (estimateTokens(trimmed.map((message) => message.content).join("\n")) > maxEstimatedTokens && trimmed.length > 1) {
+  while (estimateTokens(trimmed) > maxEstimatedTokens && trimmed.length > 1) {
     const removableIndex = trimmed.findIndex((message) => message.role !== "tool");
     if (removableIndex === -1) {
       break;
@@ -152,6 +154,10 @@ function truncate(value: string, maxChars: number): string {
   return value.length <= maxChars ? value : `${value.slice(0, maxChars)}\n[truncated ${value.length - maxChars} chars]`;
 }
 
-function estimateTokens(value: string): number {
-  return estimateTextTokensRough(value);
+function estimateTokens(messages: PackedHistoryMessage[]): number {
+  return estimateMessagesTokensRough(messages.map((message) => ({
+    role: message.role,
+    content: message.content,
+    metadata: message.metadata
+  })));
 }

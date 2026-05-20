@@ -385,6 +385,43 @@ describe("ProviderTurnLoop semantic session compression", () => {
     }));
   });
 
+  it("uses image metadata when deciding whether session history crosses the compression threshold", async () => {
+    const harness = await createCompressionHarness();
+    const compactIfNeeded = vi.fn(async () => ({
+      didCompress: false,
+      messages: [],
+      diagnostics: compressionDiagnostics({
+        shouldCompress: false,
+        reason: "anti-thrashing"
+      }),
+      userFacingMessage: undefined
+    }));
+    const loop = harness.loop({
+      sessionCompressionService: { compactIfNeeded },
+      compressionConfig: normalizeSessionCompressionConfig({
+        enabled: true,
+        experimental: true,
+        summaryModelContextLength: 1_000,
+        threshold: 0.50
+      })
+    });
+    await harness.sessionDb.appendMessage({
+      id: `${harness.sessionId}-image-history`,
+      sessionId: harness.sessionId,
+      role: "user",
+      content: "image-heavy history",
+      metadata: {
+        attachments: [
+          { kind: "image", status: "ready" }
+        ]
+      }
+    });
+
+    await runBasicProviderTurn(loop);
+
+    expect(compactIfNeeded).toHaveBeenCalledTimes(1);
+  });
+
   it("calls semantic compression above threshold and uses returned compressed messages", async () => {
     const harness = await createCompressionHarness();
     const compressedMessages: ReplacementSessionMessage[] = [
