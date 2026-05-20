@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ModelProfile, ProviderResponse, ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
 import { InMemorySessionDB } from "./in-memory-session-db.js";
 import {
@@ -45,6 +45,63 @@ describe("SessionRecallService", () => {
     expect(result.blocks).toHaveLength(1);
     expect(result.blocks[0]?.summary).toContain("Source session session-cite:");
     expect(result.blocks[0]?.sourceSessionIds).toEqual(["session-cite"]);
+  });
+
+  it("redacts recall query and historical context before auxiliary session_search", async () => {
+    const db = new InMemorySessionDB();
+    const rawContextSecret = "OPENAI_API_KEY=context-secret-value";
+    const rawQuerySecret = "OPENAI_API_KEY=query-secret-value";
+    await seedSession(db, "session-secret", "default", [`alpha recall detail ${rawContextSecret}`]);
+    let observedRequest = "";
+    const providerExecutor = {
+      complete: vi.fn(async (request?: unknown) => {
+        observedRequest = JSON.stringify(request);
+        return {
+          ok: true,
+          fallbackUsed: false,
+          attempts: [
+            {
+              provider: "test",
+              model: "session-search",
+              ok: true,
+              content: "safe summary"
+            }
+          ],
+          toolCalls: [],
+          response: providerResponse(JSON.stringify({ summary: "safe summary" }))
+        };
+      })
+    };
+
+    const result = await new SessionRecallService({
+      sessionDb: db,
+      profileId: "default",
+      route: auxiliaryRoute(),
+      mainRoute: mainRoute(),
+      providerExecutor
+    }).recall(`alpha ${rawQuerySecret}`);
+    const persisted = await db.listMessages("session-secret");
+
+    expect(result.blocks).toHaveLength(1);
+    expect(providerExecutor.complete).toHaveBeenCalled();
+    expect(observedRequest).not.toContain("context-secret-value");
+    expect(observedRequest).not.toContain("query-secret-value");
+    expect(observedRequest).toContain("OPENAI_API_KEY=[REDACTED]");
+    expect(persisted[0]?.content).toContain(rawContextSecret);
+  });
+
+  it("redacts auxiliary summary output before returning recall", async () => {
+    const db = new InMemorySessionDB();
+    await seedSession(db, "session-output-secret", "default", ["alpha output detail"]);
+
+    const result = await new SessionRecallService({
+      sessionDb: db,
+      profileId: "default",
+      ...auxiliaryOptions("summary mentions OPENAI_API_KEY=output-secret-value")
+    }).recall("alpha");
+
+    expect(result.blocks[0]?.summary).not.toContain("output-secret-value");
+    expect(result.blocks[0]?.summary).toContain("OPENAI_API_KEY=[REDACTED]");
   });
 
   it("does not include unrelated profiles", async () => {
@@ -125,6 +182,21 @@ describe("SessionRecallService", () => {
     ]);
   });
 
+  it("redacts bearer tokens in deterministic fallback snippets", async () => {
+    const db = new InMemorySessionDB();
+    const token = "abcdefghijklmnopqrstuvwxyz123456";
+    await seedSession(db, "session-bearer", "default", [`alpha fallback Authorization: Bearer ${token}`]);
+
+    const result = await new SessionRecallService({
+      sessionDb: db,
+      profileId: "default"
+    }).recall("alpha");
+
+    expect(result.blocks[0]?.usedFallback).toBe(true);
+    expect(result.blocks[0]?.summary).not.toContain(token);
+    expect(result.blocks[0]?.summary).toContain("Authorization: Bearer [REDACTED]");
+  });
+
   it("detects explicit recall intent conservatively", () => {
     expect(detectSessionRecallIntent("What did we decide about deploys?").triggered).toBe(true);
     expect(detectSessionRecallIntent("continue from the last API plan").triggered).toBe(true);
@@ -148,6 +220,20 @@ describe("SessionRecallService", () => {
     expect(blocks[0]?.source).toBe("session:session-prompt-block");
     expect(blocks[0]?.entryIds).toEqual(["session-prompt-block"]);
     expect(blocks[0]?.content).toContain(SESSION_RECALL_UNTRUSTED_NOTICE);
+  });
+
+  it("does not include raw secrets in prompt recall blocks", async () => {
+    const db = new InMemorySessionDB();
+    await seedSession(db, "session-block-secret", "default", ["alpha prompt OPENAI_API_KEY=block-secret-value"]);
+
+    const result = await new SessionRecallService({
+      sessionDb: db,
+      profileId: "default"
+    }).recall("alpha");
+    const blocks = sessionRecallResultToPromptBlocks(result);
+
+    expect(blocks[0]?.content).not.toContain("block-secret-value");
+    expect(blocks[0]?.content).toContain("OPENAI_API_KEY=[REDACTED]");
   });
 
   it("bounds recall blocks by configured session and summary limits", async () => {
