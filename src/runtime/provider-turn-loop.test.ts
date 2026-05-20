@@ -455,6 +455,104 @@ describe("ProviderTurnLoop semantic session compression", () => {
     }));
   });
 
+  it("passes last assembled prompt estimate and actual provider usage into compression state inputs", async () => {
+    const harness = await createCompressionHarness();
+    const compressedMessages: ReplacementSessionMessage[] = [
+      {
+        id: "summary-1",
+        role: "system",
+        content: "[CONTEXT COMPACTION — REFERENCE ONLY]\nSemantic summary marker",
+        createdAt: "2030-01-01T00:00:00.000Z",
+        metadata: { semanticCompression: true, summaryFormatVersion: "v1" }
+      },
+      {
+        id: "current-user",
+        role: "user",
+        content: "latest user survives",
+        createdAt: "2030-01-01T00:00:01.000Z"
+      }
+    ];
+    const compactIfNeeded = vi.fn(async () => ({
+      didCompress: true,
+      messages: compressedMessages,
+      diagnostics: compressionDiagnostics({
+        preTokens: 500,
+        postTokens: 100,
+        estimatedSavingsRatio: 0.8
+      }),
+      userFacingMessage: "Session history compacted"
+    }));
+    const loop = harness.loop({
+      sessionCompressionService: { compactIfNeeded },
+      compressionConfig: normalizeSessionCompressionConfig({
+        enabled: true,
+        experimental: true,
+        summaryModelContextLength: 50,
+        threshold: 0.10
+      })
+    });
+
+    await runBasicProviderTurn(loop);
+    const promptEvent = (await harness.sessionDb.listEvents(harness.sessionId))
+      .find((event) => event.kind === "prompt-assembled");
+    const estimatedPromptTokens = promptEvent?.kind === "prompt-assembled"
+      ? promptEvent.budget.estimatedTokens
+      : undefined;
+    await appendHistory(harness.sessionDb, harness.sessionId, "large history ".repeat(200));
+    await runBasicProviderTurn(loop);
+
+    expect(estimatedPromptTokens).toEqual(expect.any(Number));
+    expect(compactIfNeeded).toHaveBeenCalledWith(expect.objectContaining({
+      lastPromptTokensEstimated: estimatedPromptTokens,
+      lastActualPromptTokens: 123
+    }));
+  });
+
+  it("does not fail when provider usage is absent before a later compression check", async () => {
+    const harness = await createCompressionHarness();
+    harness.completeSpy.mockResolvedValue({
+      ok: true,
+      response: {
+        ok: true,
+        content: "mock-response",
+        model: "test-model",
+        provider: "test-provider"
+      },
+      fallbackUsed: false,
+      attempts: [{ provider: "test-provider", model: "test-model", ok: true, content: "mock-response" }],
+      toolCalls: []
+    });
+    const compactIfNeeded = vi.fn(async () => ({
+      didCompress: false,
+      messages: [],
+      diagnostics: compressionDiagnostics({
+        shouldCompress: false,
+        reason: "anti-thrashing",
+        warnings: ["skipped"]
+      }),
+      userFacingMessage: undefined
+    }));
+    const loop = harness.loop({
+      sessionCompressionService: { compactIfNeeded },
+      compressionConfig: normalizeSessionCompressionConfig({
+        enabled: true,
+        experimental: true,
+        summaryModelContextLength: 50,
+        threshold: 0.10
+      })
+    });
+
+    await runBasicProviderTurn(loop);
+    await appendHistory(harness.sessionDb, harness.sessionId, "large history ".repeat(200));
+    await expect(runBasicProviderTurn(loop)).resolves.toMatchObject({
+      providerExecution: expect.objectContaining({ ok: true })
+    });
+
+    expect(compactIfNeeded).toHaveBeenCalledWith(expect.not.objectContaining({
+      lastActualPromptTokens: expect.anything()
+    }));
+  });
+
   it("provider turn succeeds when semantic compression skips for anti-thrashing", async () => {
     const harness = await createCompressionHarness();
     const compactIfNeeded = vi.fn(async () => ({

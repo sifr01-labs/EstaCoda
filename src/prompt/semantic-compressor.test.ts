@@ -8,6 +8,7 @@ import {
   CONTENT_TAIL,
   computeSummaryBudget,
   computeSummaryRequestMaxTokens,
+  deterministicFallbackSummary,
   SemanticCompressor,
   SUMMARY_FORMAT_VERSION,
   SUMMARY_PREFIX,
@@ -369,7 +370,7 @@ describe("SemanticCompressor", () => {
     expect(observedPrompt).toContain("Manual focus topic: deployment handoff");
   });
 
-  it("falls back deterministically when auxiliary or main fallback summarization fails", async () => {
+  it("falls back deterministically when auxiliary and explicit main retry fail", async () => {
     const failing = auxiliaryHarness("provider failed", false);
     const compressor = new SemanticCompressor({
       config: normalizeSessionCompressionConfig({
@@ -386,8 +387,61 @@ describe("SemanticCompressor", () => {
     const result = await compressor.compress({ messages: fixtureMessages(6), profileId: "profile", sessionId: "session" });
 
     expect(result.diagnostics.fallbackUsed).toBe(true);
-    expect(result.diagnostics.fallbackReason).toBe("failed");
+    expect(result.diagnostics.fallbackReason).toBe("deterministic-fallback");
+    expect(result.diagnostics.auxModelFailure).toEqual(expect.objectContaining({
+      code: "failed"
+    }));
+    expect(result.diagnostics.mainRetryFailure).toEqual(expect.objectContaining({
+      code: "failed"
+    }));
     expect(result.messages.find((entry) => entry.metadata?.semanticCompression === true)?.content).toContain(SUMMARY_PREFIX);
+  });
+
+  it("records main retry success after auxiliary compression failure", async () => {
+    const providerExecutor = {
+      complete: vi.fn(async (_request?: unknown, _preferences?: unknown, options?: { primaryRoute?: ResolvedModelRoute }): Promise<any> => {
+        if (options?.primaryRoute?.id === "compression-model") {
+          return providerResult("aux failed OPENAI_API_KEY=aux-secret", false, "compression-model", "network");
+        }
+        return providerResult("main retry summary", true, "main-model");
+      })
+    };
+    const compressor = new SemanticCompressor({
+      config: normalizeSessionCompressionConfig({
+        enabled: true,
+        experimental: true,
+        protectFirstN: 0,
+        protectLastN: 1,
+        summaryModelContextLength: 50,
+        threshold: 0.10
+      }),
+      route: auxiliaryRoute(),
+      mainRoute: mainRoute(),
+      providerExecutor
+    });
+
+    const result = await compressor.compress({ messages: fixtureMessages(6), profileId: "profile", sessionId: "session" });
+
+    expect(providerExecutor.complete).toHaveBeenCalledTimes(2);
+    expect(result.diagnostics.fallbackUsed).toBe(true);
+    expect(result.diagnostics.fallbackReason).toBeUndefined();
+    expect(result.diagnostics.model).toBe("main-model");
+    expect(result.diagnostics.auxModelFailure).toEqual({
+      code: "network",
+      message: "aux failed OPENAI_API_KEY=[REDACTED]",
+      recoverable: true
+    });
+    expect(result.diagnostics.mainRetryFailure).toBeUndefined();
+    expect(result.messages.find((entry) => entry.metadata?.semanticCompression === true)?.content).toContain("main retry summary");
+  });
+
+  it("uses a static emergency marker only when deterministic fallback cannot fit", () => {
+    const deterministic = deterministicFallbackSummary("old context ".repeat(100), 2_000);
+    const staticFallback = deterministicFallbackSummary("old context ".repeat(100), 1);
+
+    expect(deterministic.reason).toBe("deterministic-fallback");
+    expect(staticFallback.reason).toBe("static-emergency-marker");
+    expect(staticFallback.summary).toContain("could not be summarized within the fallback budget");
   });
 
   it("skips after ineffective recent compression to avoid thrashing", async () => {
@@ -490,18 +544,19 @@ function auxiliaryHarness(content: string, ok = true) {
   };
 }
 
-function providerResult(content: string, ok = true) {
+function providerResult(content: string, ok = true, model = "compression-model", errorClass?: ProviderResponse["errorClass"]) {
   const response: ProviderResponse = {
     ok,
     content,
-    model: "compression-model",
-    provider: "test-provider"
+    model,
+    provider: "test-provider",
+    errorClass
   };
   return {
     ok,
     response,
     fallbackUsed: false,
-    attempts: [{ provider: "test-provider", model: "compression-model", ok, content }],
+    attempts: [{ provider: "test-provider", model, ok, content, errorClass }],
     toolCalls: []
   };
 }

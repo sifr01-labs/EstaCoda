@@ -39,6 +39,8 @@ export type SessionCompressionRequest = {
   sessionId: string;
   focusTopic?: string;
   trigger?: SessionCompressionTrigger;
+  lastPromptTokensEstimated?: number;
+  lastActualPromptTokens?: number;
   signal?: AbortSignal;
 };
 
@@ -115,6 +117,8 @@ export class SessionCompressionService {
         messagesBefore: messages,
         messagesAfter: written,
         previousState,
+        lastPromptTokensEstimated: input.lastPromptTokensEstimated,
+        lastActualPromptTokens: input.lastActualPromptTokens,
         diagnostics: compressed.diagnostics
       });
 
@@ -136,6 +140,8 @@ export class SessionCompressionService {
     messagesBefore: SessionMessage[];
     messagesAfter: SessionMessage[];
     previousState: SessionCompressionState;
+    lastPromptTokensEstimated?: number;
+    lastActualPromptTokens?: number;
     diagnostics: SemanticCompressionDiagnostics;
   }): Promise<string[]> {
     const warnings: string[] = [];
@@ -200,9 +206,9 @@ export class SessionCompressionService {
         lastCompressedAt: this.#now().toISOString(),
         ...(previousSummary === undefined ? {} : { previousSummary }),
         lastCompressedThroughMessageId,
-        lastPromptTokensEstimated: input.diagnostics.preTokens,
-        ...(input.previousState.lastActualPromptTokens === undefined ? {} : {
-          lastActualPromptTokens: input.previousState.lastActualPromptTokens
+        lastPromptTokensEstimated: input.lastPromptTokensEstimated ?? input.diagnostics.preTokens,
+        ...((input.lastActualPromptTokens ?? input.previousState.lastActualPromptTokens) === undefined ? {} : {
+          lastActualPromptTokens: input.lastActualPromptTokens ?? input.previousState.lastActualPromptTokens
         }),
         source: compressedEvent.source,
         protectedFirstN: input.diagnostics.protectedFirstN,

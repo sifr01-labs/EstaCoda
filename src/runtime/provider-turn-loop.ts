@@ -87,6 +87,8 @@ export class ProviderTurnLoop {
   readonly #ui: ProviderTurnLoopOptions["ui"];
   readonly #agentProfile: ProviderTurnLoopOptions["agentProfile"];
   readonly #budgets: ProviderTurnLoopBudgets;
+  #lastPromptTokens = 0;
+  #lastActualPromptTokens: number | undefined;
 
   constructor(options: ProviderTurnLoopOptions) {
     this.#providerExecutor = options.providerExecutor;
@@ -348,6 +350,7 @@ export class ProviderTurnLoop {
       ui: this.#ui,
       agentProfile: this.#agentProfile
     });
+    this.#lastPromptTokens = prompt.budget.estimatedTokens;
     await this.#runRecorder.recordPromptAssembly(prompt.budget);
 
     const execution = await this.#providerExecutor.complete(normalizeProviderRequest({
@@ -375,6 +378,9 @@ export class ProviderTurnLoop {
         await emit(input.onEvent, mapProviderRuntimeEvent(event));
       }
     });
+    if (execution.response?.usage?.inputTokens !== undefined) {
+      this.#lastActualPromptTokens = execution.response.usage.inputTokens;
+    }
 
     await this.#sessionDb.appendEvent(this.#sessionId, {
       kind: "provider-completion",
@@ -464,6 +470,7 @@ export class ProviderTurnLoop {
       ui: this.#ui,
       agentProfile: this.#agentProfile
     });
+    this.#lastPromptTokens = prompt.budget.estimatedTokens;
     await this.#runRecorder.recordPromptAssembly(prompt.budget);
 
     const execution = await this.#providerExecutor.complete(normalizeProviderRequest({
@@ -491,6 +498,9 @@ export class ProviderTurnLoop {
         await emit(input.onEvent, mapProviderRuntimeEvent(event));
       }
     });
+    if (execution.response?.usage?.inputTokens !== undefined) {
+      this.#lastActualPromptTokens = execution.response.usage.inputTokens;
+    }
 
     await this.#sessionDb.appendEvent(this.#sessionId, {
       kind: "provider-continuation",
@@ -610,6 +620,8 @@ export class ProviderTurnLoop {
       const result = await this.#sessionCompressionService.compactIfNeeded({
         profileId: this.#profileId,
         sessionId: this.#sessionId,
+        ...(this.#lastPromptTokens > 0 ? { lastPromptTokensEstimated: this.#lastPromptTokens } : {}),
+        ...(this.#lastActualPromptTokens === undefined ? {} : { lastActualPromptTokens: this.#lastActualPromptTokens }),
         signal
       });
       return {
@@ -652,7 +664,7 @@ function compressionReportFromResult(result: CompactResult): PromptSemanticCompr
   return {
     triggered: result.didCompress,
     mode: result.didCompress
-      ? result.diagnostics.fallbackUsed ? "deterministic" : "semantic"
+      ? isDeterministicCompressionFallback(result.diagnostics.fallbackReason) ? "deterministic" : "semantic"
       : "none",
     summaryFormatVersion: result.diagnostics.summaryFormatVersion,
     preTokens: result.diagnostics.preTokens,
@@ -671,6 +683,10 @@ function compressionReportFromResult(result: CompactResult): PromptSemanticCompr
       ...result.diagnostics.eventWarnings
     ]
   };
+}
+
+function isDeterministicCompressionFallback(reason: string | undefined): boolean {
+  return reason === "deterministic-fallback" || reason === "static-emergency-marker";
 }
 
 function toReplacementMessage(message: SessionMessage): ReplacementSessionMessage {

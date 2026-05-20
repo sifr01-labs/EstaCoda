@@ -307,7 +307,7 @@ export class SemanticCompressor {
     mainRetryFailure?: SessionCompressionFailure;
     warnings: string[];
   }> {
-    const fallback = deterministicFallbackSummary(input.transcript);
+    const fallback = deterministicFallbackSummary(input.transcript, input.summaryBudget);
     if (
       this.#route?.route === undefined ||
       this.#mainRoute === undefined ||
@@ -315,9 +315,9 @@ export class SemanticCompressor {
       input.transcript.trim().length === 0
     ) {
       return {
-        summary: fallback,
+        summary: fallback.summary,
         fallbackUsed: true,
-        fallbackReason: "auxiliary-unavailable",
+        fallbackReason: fallback.reason,
         auxModelFailure: {
           code: "unavailable",
           message: "auxiliary compression unavailable",
@@ -345,9 +345,9 @@ export class SemanticCompressor {
 
     if (!auxiliary.ok || auxiliary.response === undefined || auxiliary.response.content.trim().length === 0) {
       return {
-        summary: fallback,
+        summary: fallback.summary,
         fallbackUsed: true,
-        fallbackReason: auxiliary.status,
+        fallbackReason: fallback.reason,
         model: modelFromAttempts(auxiliary),
         auxModelFailure: compressionFailureFromAttempt(auxiliary, "primary"),
         mainRetryFailure: compressionFailureFromAttempt(auxiliary, "fallback"),
@@ -578,9 +578,18 @@ function summarizerRequest(input: {
   };
 }
 
-function deterministicFallbackSummary(transcript: string): string {
+export function deterministicFallbackSummary(
+  transcript: string,
+  summaryBudget = MIN_SUMMARY_TOKENS
+): {
+  summary: string;
+  reason: "deterministic-fallback" | "static-emergency-marker";
+} {
   if (transcript.trim().length === 0) {
-    return normalizeSummaryPrefix("[CONTEXT COMPACTION — REFERENCE ONLY] Summary generation was unavailable. 0 message(s) were removed to free context space but could not be summarized. Continue based on recent messages and current file state.");
+    return {
+      summary: staticEmergencySummary(0),
+      reason: "static-emergency-marker"
+    };
   }
   const packed = packSessionHistory([
     {
@@ -591,8 +600,25 @@ function deterministicFallbackSummary(transcript: string): string {
       createdAt: new Date(0).toISOString()
     }
   ], { maxSummaryChars: 1_400, maxProtectedMessages: 0, maxEstimatedTokens: 2_000 });
-  const summary = packed.summary ?? `[CONTEXT COMPACTION — REFERENCE ONLY] Summary generation was unavailable. 1 message(s) were removed to free context space but could not be summarized. Continue based on recent messages and current file state.`;
-  return normalizeSummaryPrefix(summary);
+  const summary = normalizeSummaryPrefix(packed.summary ?? "Summary generation was unavailable. Earlier turns were compacted into a deterministic fallback reference. Continue based on recent messages and current file state.");
+  const summaryTokens = estimateMessagesTokensRough([{
+    role: "system",
+    content: summary
+  }]);
+  if (summaryTokens > Math.max(1, summaryBudget)) {
+    return {
+      summary: staticEmergencySummary(1),
+      reason: "static-emergency-marker"
+    };
+  }
+  return {
+    summary,
+    reason: "deterministic-fallback"
+  };
+}
+
+function staticEmergencySummary(removedMessageCount: number): string {
+  return normalizeSummaryPrefix(`Summary generation was unavailable. ${removedMessageCount} message(s) were removed to free context space but could not be summarized within the fallback budget. Continue based on recent messages and current file state.`);
 }
 
 function protectedMessageIndexes(messages: readonly SessionMessage[], config: SessionCompressionConfig): Set<number> {

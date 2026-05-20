@@ -105,6 +105,34 @@ describe("SessionCompressionService", () => {
     expect(expectedSummaryTokens).toBeLessThan(result.diagnostics.postTokens);
   });
 
+  it("records supplied prompt token estimates and actual provider input tokens", async () => {
+    const { db, sessionId } = await sessionDbWithMessages(8);
+    const service = new SessionCompressionService({
+      sessionDb: db,
+      config: normalizeSessionCompressionConfig({
+        enabled: true,
+        experimental: true,
+        protectFirstN: 0,
+        protectLastN: 1,
+        summaryModelContextLength: 50,
+        threshold: 0.10
+      }),
+      ...auxiliaryHarness("summary")
+    });
+
+    const result = await service.compactIfNeeded({
+      profileId: "profile",
+      sessionId,
+      lastPromptTokensEstimated: 4_321,
+      lastActualPromptTokens: 4_444
+    });
+    const state = reconstructSessionCompressionState(await db.listEvents(sessionId));
+
+    expect(result.didCompress).toBe(true);
+    expect(state.lastPromptTokensEstimated).toBe(4_321);
+    expect(state.lastActualPromptTokens).toBe(4_444);
+  });
+
   it("compactNow bypasses threshold", async () => {
     const { db, sessionId } = await sessionDbWithMessages(4);
     let observedPrompt = "";
@@ -135,6 +163,29 @@ describe("SessionCompressionService", () => {
       kind: "session-history-compressed",
       trigger: "manual"
     }));
+  });
+
+  it("compactNow uses the same deterministic fallback behavior when summarization is unavailable", async () => {
+    const { db, sessionId } = await sessionDbWithMessages(4);
+    const service = new SessionCompressionService({
+      sessionDb: db,
+      config: normalizeSessionCompressionConfig({
+        enabled: false,
+        protectFirstN: 0,
+        protectLastN: 1,
+        summaryModelContextLength: 100_000,
+        threshold: 0.95
+      })
+    });
+
+    const result = await service.compactNow({ profileId: "profile", sessionId, focusTopic: "manual focus" });
+    const state = reconstructSessionCompressionState(await db.listEvents(sessionId));
+
+    expect(result.didCompress).toBe(true);
+    expect(result.diagnostics.reason).toBe("forced");
+    expect(result.diagnostics.fallbackUsed).toBe(true);
+    expect(result.diagnostics.fallbackReason).toBe("deterministic-fallback");
+    expect(state.fallbackReason).toBe("deterministic-fallback");
   });
 
   it("records explicit hygiene trigger for gateway hygiene compression", async () => {
@@ -436,7 +487,7 @@ describe("SessionCompressionService", () => {
     expect(result.didCompress).toBe(true);
     expect(compressedEvent).toEqual(expect.objectContaining({
       fallbackUsed: true,
-      fallbackReason: "failed",
+      fallbackReason: "deterministic-fallback",
       auxModelFailure: {
         code: "network",
         message: "primary failed OPENAI_API_KEY=[REDACTED]",
@@ -451,7 +502,7 @@ describe("SessionCompressionService", () => {
     expect(JSON.stringify(compressedEvent)).not.toContain("primary-secret");
     expect(JSON.stringify(compressedEvent)).not.toContain("main-secret");
     expect(state.fallbackUsed).toBe(true);
-    expect(state.fallbackReason).toBe("failed");
+    expect(state.fallbackReason).toBe("deterministic-fallback");
     expect(state.auxModelFailure?.message).toContain("[REDACTED]");
     expect(state.mainRetryFailure?.message).toContain("[REDACTED]");
   });
