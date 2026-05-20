@@ -24,12 +24,14 @@ description: "Cross-subsystem boundary analysis for memory, skills, provider loo
 - `memory-promotion.ts` promotes repeated preferences and facts after the response path.
 
 **Outbound boundaries:**
-- `memory-tool.ts` exposes `memory.curate` with `append`/`replace`/`remove`.
+- `memory-tool.ts` exposes `memory.curate` with `kind: append | replace | remove`.
 - `memory-promotion.ts` writes promoted content back to disk.
 - Changes during a session are persisted immediately and can affect later turns in the same runtime because prompt memory context is rebuilt per turn.
 
 **Crosses:**
 - AgentLoop → MemoryRecallOrchestrator → MemoryPromptContextBuilder
+- AgentLoop → MemoryRecallOrchestrator → SessionRecallService for eligible recall turns
+- ProviderTurnLoop consumes prepared memory context; it does not decide recall policy
 - AgentLoop → memory-promotion (triggers post-run promotion)
 - SkillLearningManager → MemoryStore (workflow learning state)
 

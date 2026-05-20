@@ -67,7 +67,7 @@ Key composition rules:
 5. Short-circuit on attachment preflight failures
 6. Route native intent and skill (delegated to `RuntimeRouter`)
 7. Make security decision
-8. Assemble prompt
+8. Prepare per-turn memory context through `MemoryRecallOrchestrator` and assemble prompt
 9. **Delegate provider turn loop to `ProviderTurnLoop`**
 10. **Delegate tool execution to `ToolPlanRunner`**
 11. **Delegate skill workflow execution to `SkillWorkflowExecutor`**
@@ -83,7 +83,7 @@ Guardrails inside the loop:
 - Safe tool concurrency is bounded (enforced by `ToolPlanRunner`).
 - Security decisions are attached to tool executions, not just final replies.
 
-**Remaining coupling:** `AgentLoop` still assembles the full prompt, manages memory context injection, and coordinates between components. It does not execute provider iterations or tool plans directly.
+**Remaining coupling:** `AgentLoop` still assembles the full prompt, asks `MemoryRecallOrchestrator` for per-turn memory context, and coordinates between components. It does not execute provider iterations or tool plans directly.
 
 Native intent routing handles product-owned paths before normal provider planning:
 
@@ -134,6 +134,8 @@ Prompt assembly is layered and partly cacheable. Key context groups:
 15. Tool results / continuation feedback
 
 The implemented non-cacheable sequence renders compaction notice, session history, session recall, external recall, then the live user message. This render order is separate from trust and authority: recall, external recall, and compression summaries remain reference-only/untrusted context.
+
+Recall policy is not decided by `ProviderTurnLoop`, which consumes the prepared session history and memory context for provider calls. `IntentRouter` currently classifies native intents and does not emit recall-specific labels; recall/continuity detection lives in `MemoryRecallOrchestrator`, which calls `SessionRecallService` when eligible.
 
 Other cacheable context includes:
 

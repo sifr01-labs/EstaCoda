@@ -23,13 +23,13 @@ Canonical docs updated for Memory Hardening:
 |-------|---------------------|---------------|
 | 0A | `AGENTS.md` removed from memory contracts | It remains project context only. |
 | 0B/1 | `MemoryPromptContextBuilder` | One prompt memory contract prevents duplicate `USER.md` / `MEMORY.md` injection. |
-| 3 | Memory budget pressure and NaN-safe config coercion | Overflow fails closed with structured metadata. |
+| 3 | Memory budget pressure and NaN-safe config coercion | Overflow fails closed with structured metadata using `kind`, `chars`, and `maxChars`. |
 | 4 | Memory File Compaction tools | Manual/tool-driven by default; targets only `USER.md` / `MEMORY.md`. |
 | 5 | Manual session recall | `estacoda session(s) recall <query>` and slash recall where runtime surfaces are present. |
-| 6 | High-confidence runtime recall | Ordinary turns do not trigger broad recall. |
+| 6 | High-confidence runtime recall | `AgentLoop -> MemoryRecallOrchestrator -> SessionRecallService` owns recall; ordinary turns do not trigger broad recall. |
 | 7 | Semantic session compression | Experimental/default-off; `/compact`, `sessions compact`, gateway hygiene. |
 | 8 | `MemoryRecallOrchestrator` | Owns per-turn local/session/external recall decisions and diagnostics. |
-| 9 | External provider lifecycle hooks | Contract is present; active runtime paths are recall and opt-in mirror writes. |
+| 9 | External provider lifecycle hooks | Contract is present; active runtime paths are recall and opt-in mirror writes. `afterTurn` and `flushSession` are reserved hooks and are not actively invoked by runtime orchestration. |
 | 10 | File-backed external memory provider | Profile-local JSONL storage beneath `external-memory/`. |
 
 ## Enabling And Disabling
@@ -104,11 +104,15 @@ memory.file_compaction_restore
 memory.curate
 ```
 
+`memory.curate` is the implemented memory write surface. Its `kind` field accepts `append`, `replace`, or `remove`; docs should not treat a generic `add` memory action as an available command or tool.
+
 There is no top-level memory prompt, memory compact, or memory restore-backup CLI command in this implementation. Use the runtime tools for Memory File Compaction and restore.
 
 ## Diagnostics
 
 Memory diagnostics appear in prompt context diagnostics, session events, trajectory events, and command output depending on the surface.
+
+Memory budget pressure reports the implemented `MemoryBudgetPressure` contract: `kind`, `source`, `chars`, `maxChars`, `ratio`, `percent`, `state`, `remainingChars`, and `overflowChars`. Earlier planning names for file kind and character budget are not the implemented field names.
 
 Key event kinds:
 
