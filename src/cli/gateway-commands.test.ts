@@ -20,6 +20,10 @@ const serviceManagerMock = vi.hoisted(() => ({
   stopService: vi.fn(),
 }));
 
+const execResolverMock = vi.hoisted(() => ({
+  resolveGatewayExec: vi.fn(),
+}));
+
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   fsPromisesMock.rename.mockImplementation(actual.rename);
@@ -47,6 +51,14 @@ vi.mock("../gateway/service-manager.js", async (importOriginal) => {
     probeServiceState: serviceManagerMock.probeServiceState,
     restartService: serviceManagerMock.restartService,
     stopService: serviceManagerMock.stopService,
+  };
+});
+
+vi.mock("../gateway/service-exec-resolver.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../gateway/service-exec-resolver.js")>();
+  return {
+    ...actual,
+    resolveGatewayExec: execResolverMock.resolveGatewayExec,
   };
 });
 
@@ -188,9 +200,19 @@ describe("gateway commands", () => {
     serviceManagerMock.probeServiceState.mockReset();
     serviceManagerMock.restartService.mockReset();
     serviceManagerMock.stopService.mockReset();
+    execResolverMock.resolveGatewayExec.mockReset();
     serviceManagerMock.detectServiceManager.mockReturnValue("none");
     serviceManagerMock.restartService.mockResolvedValue({ ok: true });
     serviceManagerMock.stopService.mockResolvedValue({ ok: true });
+    execResolverMock.resolveGatewayExec.mockReturnValue({
+      ok: true,
+      resolved: {
+        mode: "compiled",
+        command: "/usr/bin/node",
+        args: [join(tmpDir, "dist", "index.js")],
+        cwd: tmpDir,
+      },
+    });
     serviceManagerMock.probeServiceState.mockImplementation(async (options: { profileId: string; system?: boolean }) => ({
       kind: "none",
       installed: false,
@@ -1232,16 +1254,16 @@ describe("gateway commands", () => {
       stopGatewaySpy.mockRestore();
     });
 
-    it("starts gateway in the background and reports the child PID", async () => {
+    it("starts gateway in the background with the resolver-selected compiled entrypoint", async () => {
       const result = await runGatewayStartBackground({ workspaceRoot: tmpDir, homeDir: tmpDir });
 
       expect(result.ok).toBe(true);
       expect(result.output).toContain("Gateway started (PID 12346)");
       expect(result.output).toContain(join(profilePaths.logsPath, "gateway.log"));
       expect(childProcessMock.spawn).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.arrayContaining(["gateway", "start"]),
-        expect.objectContaining({ detached: true })
+        "/usr/bin/node",
+        [join(tmpDir, "dist", "index.js"), "gateway", "start", "--profile", "default"],
+        expect.objectContaining({ cwd: tmpDir, detached: true })
       );
       expect(childProcessMock.spawn.mock.calls[0]?.[2]?.stdio).toEqual([
         "ignore",
@@ -1251,20 +1273,60 @@ describe("gateway commands", () => {
       expect(unrefSpy).toHaveBeenCalled();
     });
 
-    it("preserves Node exec args before the entrypoint and does not recurse background mode", async () => {
-      const originalExecArgv = [...process.execArgv];
-      process.execArgv.splice(0, process.execArgv.length, "--import", "tsx");
-      try {
-        await runGatewayStartBackground({ workspaceRoot: tmpDir, homeDir: tmpDir });
+    it("starts package-bin mode through the resolved package bin path", async () => {
+      const binPath = join(tmpDir, "bin", "estacoda.js");
+      execResolverMock.resolveGatewayExec.mockReturnValue({
+        ok: true,
+        resolved: {
+          mode: "package-bin",
+          command: "/usr/local/bin/node",
+          args: [binPath],
+          cwd: tmpDir,
+        },
+      });
 
-        const childArgs = childProcessMock.spawn.mock.calls[0]?.[1] as string[];
-        expect(childArgs.slice(0, 2)).toEqual(["--import", "tsx"]);
-        expect(childArgs[2]).toBe(process.argv[1]);
-        expect(childArgs.slice(-4)).toEqual(["gateway", "start", "--profile", "default"]);
-        expect(childArgs).not.toContain("--background");
-      } finally {
-        process.execArgv.splice(0, process.execArgv.length, ...originalExecArgv);
-      }
+      await runGatewayStartBackground({ workspaceRoot: tmpDir, homeDir: tmpDir });
+
+      expect(childProcessMock.spawn).toHaveBeenCalledWith(
+        "/usr/local/bin/node",
+        [binPath, "gateway", "start", "--profile", "default"],
+        expect.objectContaining({ cwd: tmpDir, detached: true })
+      );
+    });
+
+    it("starts source mode with Bun only when the resolver selects source mode", async () => {
+      const sourceEntrypoint = join(tmpDir, "src", "index.ts");
+      execResolverMock.resolveGatewayExec.mockReturnValue({
+        ok: true,
+        resolved: {
+          mode: "source",
+          command: "/opt/homebrew/bin/bun",
+          args: ["run", sourceEntrypoint],
+          cwd: tmpDir,
+        },
+      });
+
+      await runGatewayStartBackground({ workspaceRoot: tmpDir, homeDir: tmpDir });
+
+      const childArgs = childProcessMock.spawn.mock.calls[0]?.[1] as string[];
+      expect(childProcessMock.spawn.mock.calls[0]?.[0]).toBe("/opt/homebrew/bin/bun");
+      expect(childArgs).toEqual(["run", sourceEntrypoint, "gateway", "start", "--profile", "default"]);
+      expect(childArgs).not.toContain("--background");
+    });
+
+    it("returns resolver failures without spawning", async () => {
+      execResolverMock.resolveGatewayExec.mockReturnValue({
+        ok: false,
+        error: "bun not found in PATH. Install bun or use compiled/package mode.",
+      });
+
+      const result = await runGatewayStartBackground({ workspaceRoot: tmpDir, homeDir: tmpDir });
+
+      expect(result).toEqual({
+        ok: false,
+        output: "Failed to start gateway in background: bun not found in PATH. Install bun or use compiled/package mode.",
+      });
+      expect(childProcessMock.spawn).not.toHaveBeenCalled();
     });
 
     it("reports not running and background-starts when no PID exists", async () => {

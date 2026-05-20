@@ -16,6 +16,10 @@ const serviceManagerMock = vi.hoisted(() => ({
   stopService: vi.fn(),
 }));
 
+const execResolverMock = vi.hoisted(() => ({
+  resolveGatewayExec: vi.fn(),
+}));
+
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
   return {
@@ -34,6 +38,14 @@ vi.mock("../gateway/service-manager.js", async (importOriginal) => {
     probeServiceState: serviceManagerMock.probeServiceState,
     restartService: serviceManagerMock.restartService,
     stopService: serviceManagerMock.stopService,
+  };
+});
+
+vi.mock("../gateway/service-exec-resolver.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../gateway/service-exec-resolver.js")>();
+  return {
+    ...actual,
+    resolveGatewayExec: execResolverMock.resolveGatewayExec,
   };
 });
 
@@ -60,11 +72,21 @@ describe("cli gateway start", () => {
     serviceManagerMock.probeServiceState.mockReset();
     serviceManagerMock.restartService.mockReset();
     serviceManagerMock.stopService.mockReset();
+    execResolverMock.resolveGatewayExec.mockReset();
     serviceManagerMock.detectServiceManager.mockReturnValue("none");
     serviceManagerMock.installService.mockResolvedValue({ ok: true, mode: "compiled" });
     serviceManagerMock.uninstallService.mockResolvedValue({ ok: true });
     serviceManagerMock.restartService.mockResolvedValue({ ok: true });
     serviceManagerMock.stopService.mockResolvedValue({ ok: true });
+    execResolverMock.resolveGatewayExec.mockReturnValue({
+      ok: true,
+      resolved: {
+        mode: "compiled",
+        command: "/usr/bin/node",
+        args: ["/tmp/estacoda/dist/index.js"],
+        cwd: "/tmp/estacoda",
+      },
+    });
     serviceManagerMock.probeServiceState.mockResolvedValue({
       kind: "none",
       installed: false,

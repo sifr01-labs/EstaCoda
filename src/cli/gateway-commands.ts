@@ -69,6 +69,7 @@ import {
   uninstallService,
 } from "../gateway/service-manager.js";
 import type { ServiceManagerState, ServiceScope } from "../gateway/service-manager.js";
+import { resolveGatewayExec } from "../gateway/service-exec-resolver.js";
 
 export type GatewayCommandOptions = {
   homeDir?: string;
@@ -563,14 +564,24 @@ export async function runGatewayStartBackground(
   options: GatewayCommandOptions
 ): Promise<{ ok: boolean; output: string }> {
   const selected = await resolveGatewayProfile(options);
+  const resolved = resolveGatewayExec({ workspaceRoot: options.workspaceRoot });
+  if (!resolved.ok) {
+    return { ok: false, output: `Failed to start gateway in background: ${resolved.error}` };
+  }
   const logPath = join(selected.paths.logsPath, "gateway.log");
   await mkdir(selected.paths.logsPath, { recursive: true });
 
   let logFd: number | undefined;
   try {
     logFd = openSync(logPath, "a", 0o600);
-    const child = spawn(process.execPath, resolveBackgroundGatewayStartArgs(selected.profileId), {
-      cwd: options.workspaceRoot,
+    const child = spawn(resolved.resolved.command, [
+      ...resolved.resolved.args,
+      "gateway",
+      "start",
+      "--profile",
+      selected.profileId,
+    ], {
+      cwd: resolved.resolved.cwd,
       detached: true,
       env: {
         ...process.env,
@@ -1214,17 +1225,6 @@ function firstPositional(args: string[]): string | undefined {
 
 function positionalAt(args: string[], index: number): string | undefined {
   return positionalArgs(args)[index];
-}
-
-function resolveBackgroundGatewayStartArgs(profileId?: string): string[] {
-  const entrypoint = process.argv[1];
-  return [
-    ...process.execArgv,
-    ...(entrypoint === undefined ? [] : [entrypoint]),
-    "gateway",
-    "start",
-    ...(profileId === undefined ? [] : ["--profile", profileId]),
-  ];
 }
 
 async function isReadable(path: string): Promise<boolean> {

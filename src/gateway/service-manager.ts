@@ -184,7 +184,7 @@ export async function probeServiceState(options: {
 }): Promise<ServiceManagerState> {
   try {
     const homeDir = resolve(options.homeDir);
-    const kind = targetKind(options);
+    const kind = targetKind(options, { unsupportedSystemAsNone: true });
     if (kind === "none") return fallbackState(options);
     if (kind === "launchd") return await probeLaunchd({ homeDir, profileId: options.profileId });
     return await probeSystemd({ homeDir, profileId: options.profileId, kind });
@@ -226,25 +226,20 @@ export function launchdPlistPath(options: { homeDir: string; profileId: string }
   return join(options.homeDir, "Library", "LaunchAgents", plistNameForProfile(options.profileId));
 }
 
-function targetKind(options: { system?: boolean }): ServiceManagerKind {
+function targetKind(options: { system?: boolean }, behavior: { unsupportedSystemAsNone?: boolean } = {}): ServiceManagerKind {
   const detected = detectServiceManager();
   if (options.system === true && detected.startsWith("systemd")) {
     return "systemd-system";
   }
-  return detected;
-}
-
-function fallbackKind(options: { system?: boolean }): ServiceManagerKind {
-  const detected = detectServiceManager();
-  if (options.system === true && detected.startsWith("systemd")) {
-    return "systemd-system";
+  if (options.system === true && behavior.unsupportedSystemAsNone === true) {
+    return "none";
   }
   return detected;
 }
 
 function fallbackState(options: { profileId: string; system?: boolean }): ServiceManagerState {
-  const kind = fallbackKind(options);
-  const scope: ServiceScope = kind === "systemd-system" ? "system" : "user";
+  const kind = targetKind(options, { unsupportedSystemAsNone: true });
+  const scope: ServiceScope = options.system === true || kind === "systemd-system" ? "system" : "user";
   return {
     kind,
     installed: false,

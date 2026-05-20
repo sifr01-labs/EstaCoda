@@ -929,9 +929,9 @@ describe("service manager", () => {
     setPlatform("darwin");
     mockSpawn(() => ({ code: 1, stderr: "boom" }));
     await expect(probeServiceState({ homeDir: tmpDir, profileId: "default", system: true })).resolves.toMatchObject({
-      kind: "launchd",
+      kind: "none",
       installed: false,
-      scope: "user",
+      scope: "system",
       activeState: "unknown",
     });
   });
