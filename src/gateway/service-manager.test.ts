@@ -83,6 +83,7 @@ import {
 } from "./service-manager.js";
 
 type SpawnCall = { command: string; args: string[] };
+type SpawnResponse = { code?: number; stdout?: string; stderr?: string };
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-service-manager-test-"));
@@ -102,16 +103,16 @@ async function addExecutable(dir: string, name: string): Promise<void> {
   await chmod(path, 0o755);
 }
 
-function mockSpawn(responder?: (call: SpawnCall) => { code?: number; stdout?: string; stderr?: string }): SpawnCall[] {
+function mockSpawn(responder?: (call: SpawnCall) => SpawnResponse | Promise<SpawnResponse>): SpawnCall[] {
   const calls: SpawnCall[] = [];
   childProcessMock.spawn.mockImplementation((command: string, args: string[]) => {
     const call = { command, args };
     calls.push(call);
-    const response = responder?.(call) ?? { code: 0, stdout: "", stderr: "" };
     const child = new EventEmitter() as EventEmitter & { stdout: PassThrough; stderr: PassThrough };
     child.stdout = new PassThrough();
     child.stderr = new PassThrough();
-    queueMicrotask(() => {
+    queueMicrotask(async () => {
+      const response = await Promise.resolve(responder?.(call) ?? { code: 0, stdout: "", stderr: "" });
       if (response.stdout !== undefined) child.stdout.write(response.stdout);
       if (response.stderr !== undefined) child.stderr.write(response.stderr);
       child.stdout.end();
@@ -364,6 +365,63 @@ describe("service manager", () => {
     const calls = mockSpawn();
     await expect(installService({ homeDir: tmpDir, workspaceRoot: tmpDir, profileId: "default", force: true })).resolves.toMatchObject({ ok: true });
     expect(calls.map((call) => [call.command, ...call.args])[0]).toEqual(["systemctl", "--user", "stop", unitNameForProfile("default")]);
+  });
+
+  it("stops existing systemd units before checking live gateway evidence during force replacement", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "systemctl");
+    process.env.PATH = binDir;
+    setPlatform("linux");
+    mockSpawn();
+    await expect(installService({ homeDir: tmpDir, workspaceRoot: tmpDir, profileId: "default" })).resolves.toMatchObject({ ok: true });
+    const unitPath = systemdUnitPath({ homeDir: tmpDir, profileId: "default" });
+    const originalUnit = await readFile(unitPath, "utf8");
+    resolverMock.resolveGatewayExec.mockReturnValue({
+      ok: true,
+      resolved: {
+        mode: "source",
+        command: "/usr/bin/node",
+        args: [join(tmpDir, "replacement-entry.ts")],
+        cwd: tmpDir,
+      },
+    });
+    await acquireGatewayLock(resolveProfileStateHome({ homeDir: tmpDir, profileId: "default" }));
+
+    const calls = mockSpawn();
+    await expect(installService({ homeDir: tmpDir, workspaceRoot: tmpDir, profileId: "default", force: true })).resolves.toEqual({
+      ok: false,
+      error: "Gateway already appears to be running for profile 'default'; stop it before installing/starting the service.",
+    });
+    await expect(readFile(unitPath, "utf8")).resolves.toBe(originalUnit);
+    expect(calls.map((call) => [call.command, ...call.args])).toEqual([
+      ["systemctl", "--user", "stop", unitNameForProfile("default")],
+    ]);
+  });
+
+  it("allows systemd force replacement after stop clears live gateway evidence", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "systemctl");
+    process.env.PATH = binDir;
+    setPlatform("linux");
+    mockSpawn();
+    await expect(installService({ homeDir: tmpDir, workspaceRoot: tmpDir, profileId: "default" })).resolves.toMatchObject({ ok: true });
+    const paths = resolveProfileStateHome({ homeDir: tmpDir, profileId: "default" });
+    await acquireGatewayLock(paths);
+    const lockPath = join(paths.gatewayStatePath, "gateway.lock");
+
+    const calls = mockSpawn(async (call) => {
+      if (call.command === "systemctl" && call.args.includes("stop")) {
+        await rm(lockPath, { force: true });
+      }
+      return { code: 0 };
+    });
+    await expect(installService({ homeDir: tmpDir, workspaceRoot: tmpDir, profileId: "default", force: true })).resolves.toMatchObject({ ok: true });
+    expect(calls.map((call) => [call.command, ...call.args])).toEqual([
+      ["systemctl", "--user", "stop", unitNameForProfile("default")],
+      ["systemctl", "--user", "daemon-reload"],
+      ["systemctl", "--user", "enable", unitNameForProfile("default")],
+      ["systemctl", "--user", "start", unitNameForProfile("default")],
+    ]);
   });
 
   it("refuses a live gateway lock but tolerates stale and corrupt lock evidence", async () => {
@@ -698,6 +756,37 @@ describe("service manager", () => {
     expect((await stat(plistPath)).mode & 0o777).toBe(0o600);
     expect(calls.map((call) => [call.command, ...call.args])).toEqual([
       ["launchctl", "load", "-w", plistPath],
+    ]);
+  });
+
+  it("unloads existing launchd plists before checking live gateway evidence during force replacement", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "launchctl");
+    process.env.PATH = binDir;
+    setPlatform("darwin");
+    mockSpawn();
+    await expect(installService({ homeDir: tmpDir, workspaceRoot: tmpDir, profileId: "default" })).resolves.toMatchObject({ ok: true });
+    const plistPath = launchdPlistPath({ homeDir: tmpDir, profileId: "default" });
+    const originalPlist = await readFile(plistPath, "utf8");
+    resolverMock.resolveGatewayExec.mockReturnValue({
+      ok: true,
+      resolved: {
+        mode: "source",
+        command: "/usr/bin/node",
+        args: [join(tmpDir, "replacement-entry.ts")],
+        cwd: tmpDir,
+      },
+    });
+    await acquireGatewayLock(resolveProfileStateHome({ homeDir: tmpDir, profileId: "default" }));
+
+    const calls = mockSpawn();
+    await expect(installService({ homeDir: tmpDir, workspaceRoot: tmpDir, profileId: "default", force: true })).resolves.toEqual({
+      ok: false,
+      error: "Gateway already appears to be running for profile 'default'; stop it before installing/starting the service.",
+    });
+    await expect(readFile(plistPath, "utf8")).resolves.toBe(originalPlist);
+    expect(calls.map((call) => [call.command, ...call.args])).toEqual([
+      ["launchctl", "unload", "-w", plistPath],
     ]);
   });
 

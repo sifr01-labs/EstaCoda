@@ -88,22 +88,6 @@ export async function installService(options: {
   ]);
   if (!baseValidation.ok) return baseValidation;
 
-  const profilePaths = resolveProfileStateHome({ homeDir, profileId: options.profileId });
-  const lock = await inspectGatewayLockState(profilePaths);
-  if (lock.state === "active") {
-    return {
-      ok: false,
-      error: `Gateway already appears to be running for profile '${options.profileId}'; stop it before installing/starting the service.`,
-    };
-  }
-  const pid = await readGatewayPid(profilePaths);
-  if (pid !== undefined && !(await isStalePid(profilePaths))) {
-    return {
-      ok: false,
-      error: `Gateway already appears to be running for profile '${options.profileId}'; stop it before installing/starting the service.`,
-    };
-  }
-
   const resolved = resolveGatewayExec({ workspaceRoot });
   if (!resolved.ok) {
     return resolved;
@@ -241,6 +225,8 @@ async function installSystemd(options: {
     const stop = await systemctl(options.kind, ["stop", unitName]);
     if (!stop.ok) return { ok: false, error: commandError("systemctl stop", stop) };
   }
+  const liveEvidence = await assertNoLiveGatewayEvidence(options.homeDir, options.profileId);
+  if (!liveEvidence.ok) return liveEvidence;
 
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, renderSystemdUnit({
@@ -300,6 +286,8 @@ async function installLaunchd(options: {
     const unload = await runCommand("launchctl", ["unload", "-w", path]);
     if (!unload.ok) return { ok: false, error: commandError("launchctl unload", unload) };
   }
+  const liveEvidence = await assertNoLiveGatewayEvidence(options.homeDir, options.profileId);
+  if (!liveEvidence.ok) return liveEvidence;
 
   const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId: options.profileId });
   await mkdir(dirname(path), { recursive: true });
@@ -535,6 +523,25 @@ function validateServiceRenderValues(values: Array<{ label: string; value: strin
     if (/[\u0000-\u001F\u007F]/u.test(value)) {
       return { ok: false, error: `Invalid service manager value for ${label}: control characters are not allowed.` };
     }
+  }
+  return { ok: true };
+}
+
+async function assertNoLiveGatewayEvidence(homeDir: string, profileId: string): Promise<ValidationResult> {
+  const profilePaths = resolveProfileStateHome({ homeDir, profileId });
+  const lock = await inspectGatewayLockState(profilePaths);
+  if (lock.state === "active") {
+    return {
+      ok: false,
+      error: `Gateway already appears to be running for profile '${profileId}'; stop it before installing/starting the service.`,
+    };
+  }
+  const pid = await readGatewayPid(profilePaths);
+  if (pid !== undefined && !(await isStalePid(profilePaths))) {
+    return {
+      ok: false,
+      error: `Gateway already appears to be running for profile '${profileId}'; stop it before installing/starting the service.`,
+    };
   }
   return { ok: true };
 }
