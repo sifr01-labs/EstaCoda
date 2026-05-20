@@ -197,6 +197,113 @@ describe("service manager", () => {
     expect(content).toContain('index\\"quoted.js"');
   });
 
+  it("escapes systemd percent specifiers in rendered values", async () => {
+    const binDir = join(tmpDir, "bin");
+    const pathWithPercent = join(tmpDir, "%i-path");
+    await addExecutable(binDir, "systemctl");
+    process.env.PATH = `${binDir}:${pathWithPercent}`;
+    setPlatform("linux");
+    mockSpawn();
+    resolverMock.resolveGatewayExec.mockReturnValue({
+      ok: true,
+      resolved: {
+        mode: "compiled",
+        command: join(tmpDir, "%h-bin", "node"),
+        args: [join(tmpDir, "%i-work", "dist", "index%.js")],
+        cwd: join(tmpDir, "%i-work"),
+      },
+    });
+
+    await installService({ homeDir: tmpDir, workspaceRoot: join(tmpDir, "%i-work"), profileId: "default" });
+    const content = await readFile(systemdUnitPath({ homeDir: tmpDir, profileId: "default" }), "utf8");
+    expect(content).toContain(`"${join(tmpDir, "%%h-bin", "node")}"`);
+    expect(content).toContain(`"${join(tmpDir, "%%i-work", "dist", "index%%.js")}"`);
+    expect(content).toContain(`Environment="PATH=${join(tmpDir, "%%h-bin")}:`);
+    expect(content).toContain(join(tmpDir, "%%i-path"));
+    expect(content).toContain(`WorkingDirectory="${join(tmpDir, "%%i-work")}"`);
+  });
+
+  it("rejects systemd unit values with control characters before rendering", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "systemctl");
+    process.env.PATH = binDir;
+    setPlatform("linux");
+    mockSpawn();
+
+    await expect(installService({ homeDir: `${tmpDir}\n`, workspaceRoot: tmpDir, profileId: "default" })).resolves.toEqual({
+      ok: false,
+      error: "Invalid service manager value for homeDir: control characters are not allowed.",
+    });
+
+    resolverMock.resolveGatewayExec.mockReturnValueOnce({
+      ok: true,
+      resolved: {
+        mode: "compiled",
+        command: join(tmpDir, "bin\nnode"),
+        args: [join(tmpDir, "dist", "index.js")],
+        cwd: tmpDir,
+      },
+    });
+    await expect(installService({ homeDir: tmpDir, workspaceRoot: tmpDir, profileId: "default" })).resolves.toEqual({
+      ok: false,
+      error: "Invalid service manager value for resolved.command: control characters are not allowed.",
+    });
+
+    resolverMock.resolveGatewayExec.mockReturnValueOnce({
+      ok: true,
+      resolved: {
+        mode: "compiled",
+        command: "/usr/bin/node",
+        args: [`${join(tmpDir, "dist", "index.js")}\u0000`],
+        cwd: tmpDir,
+      },
+    });
+    await expect(installService({ homeDir: tmpDir, workspaceRoot: tmpDir, profileId: "default" })).resolves.toEqual({
+      ok: false,
+      error: "Invalid service manager value for resolved.args[0]: control characters are not allowed.",
+    });
+
+    resolverMock.resolveGatewayExec.mockReturnValueOnce({
+      ok: true,
+      resolved: {
+        mode: "compiled",
+        command: "/usr/bin/node",
+        args: [join(tmpDir, "dist", "index.js")],
+        cwd: `${tmpDir}\r`,
+      },
+    });
+    await expect(installService({ homeDir: tmpDir, workspaceRoot: tmpDir, profileId: "default" })).resolves.toEqual({
+      ok: false,
+      error: "Invalid service manager value for resolved.cwd: control characters are not allowed.",
+    });
+  });
+
+  it("rejects systemd run-as-user and computed PATH control characters", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "systemctl");
+    process.env.PATH = binDir;
+    setPlatform("linux");
+    mockSpawn();
+    vi.spyOn(process, "geteuid").mockReturnValue(0);
+
+    await expect(installService({
+      homeDir: tmpDir,
+      workspaceRoot: tmpDir,
+      profileId: "default",
+      system: true,
+      runAsUser: "estacoda\nExecStartPost=/bin/false",
+    })).resolves.toEqual({
+      ok: false,
+      error: "Invalid service manager value for runAsUser: control characters are not allowed.",
+    });
+
+    process.env.PATH = `${binDir}:${join(tmpDir, "bad\npath")}`;
+    await expect(installService({ homeDir: tmpDir, workspaceRoot: tmpDir, profileId: "default" })).resolves.toEqual({
+      ok: false,
+      error: "Invalid service manager value for PATH: control characters are not allowed.",
+    });
+  });
+
   it("refuses idempotent install without force and stops before overwrite with force", async () => {
     const binDir = join(tmpDir, "bin");
     await addExecutable(binDir, "systemctl");
@@ -319,6 +426,34 @@ describe("service manager", () => {
     expect(calls.map((call) => [call.command, ...call.args])).toEqual([
       ["launchctl", "load", "-w", plistPath],
     ]);
+  });
+
+  it("rejects launchd plist values with control characters before XML escaping", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "launchctl");
+    process.env.PATH = binDir;
+    setPlatform("darwin");
+    mockSpawn();
+
+    resolverMock.resolveGatewayExec.mockReturnValueOnce({
+      ok: true,
+      resolved: {
+        mode: "source",
+        command: "/opt/homebrew/bin/bun",
+        args: ["run", `${join(tmpDir, "src", "index.ts")}\n`],
+        cwd: tmpDir,
+      },
+    });
+    await expect(installService({ homeDir: tmpDir, workspaceRoot: tmpDir, profileId: "default" })).resolves.toEqual({
+      ok: false,
+      error: "Invalid service manager value for resolved.args[1]: control characters are not allowed.",
+    });
+
+    process.env.PATH = `${binDir}:${join(tmpDir, "bad\rpath")}`;
+    await expect(installService({ homeDir: tmpDir, workspaceRoot: tmpDir, profileId: "default" })).resolves.toEqual({
+      ok: false,
+      error: "Invalid service manager value for PATH: control characters are not allowed.",
+    });
   });
 
   it("uninstalls systemd services and no-ops when absent", async () => {

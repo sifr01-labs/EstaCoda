@@ -29,6 +29,8 @@ type CommandResult = {
   code?: number | null;
 };
 
+type ValidationResult = { ok: true } | { ok: false; error: string };
+
 export function detectServiceManager(): ServiceManagerKind {
   if (process.platform === "linux" && commandExists("systemctl")) {
     return "systemd-user";
@@ -65,6 +67,14 @@ export async function installService(options: {
       return { ok: false, error: "System service install requires --run-as-user <user> so HOME/profile state are explicit." };
     }
   }
+  const baseValidation = validateServiceRenderValues([
+    { label: "profileId", value: options.profileId },
+    { label: "homeDir", value: homeDir },
+    ...(kind === "systemd-system" && options.runAsUser !== undefined
+      ? [{ label: "runAsUser", value: options.runAsUser }]
+      : []),
+  ]);
+  if (!baseValidation.ok) return baseValidation;
 
   const profilePaths = resolveProfileStateHome({ homeDir, profileId: options.profileId });
   const lock = await inspectGatewayLockState(profilePaths);
@@ -207,6 +217,13 @@ async function installSystemd(options: {
   if (exists && options.force !== true) {
     return { ok: false, error: `Service already installed for profile '${options.profileId}'. Use --force to replace.` };
   }
+  const validation = validateSystemdUnitInput({
+    homeDir: options.homeDir,
+    profileId: options.profileId,
+    runAsUser: options.kind === "systemd-system" ? options.runAsUser : undefined,
+    resolved: options.resolved,
+  });
+  if (!validation.ok) return validation;
 
   if (exists && options.force === true) {
     const stop = await systemctl(options.kind, ["stop", unitName]);
@@ -260,6 +277,13 @@ async function installLaunchd(options: {
   if (exists && options.force !== true) {
     return { ok: false, error: `Service already installed for profile '${options.profileId}'. Use --force to replace.` };
   }
+  const validation = validateLaunchdPlistInput({
+    homeDir: options.homeDir,
+    profileId: options.profileId,
+    resolved: options.resolved,
+  });
+  if (!validation.ok) return validation;
+
   if (exists && options.force === true) {
     const unload = await runCommand("launchctl", ["unload", "-w", path]);
     if (!unload.ok) return { ok: false, error: commandError("launchctl unload", unload) };
@@ -323,7 +347,7 @@ function renderSystemdUnit(options: {
 
   return [
     "[Unit]",
-    `Description=EstaCoda Gateway Supervisor (profile: ${options.profileId})`,
+    `Description=EstaCoda Gateway Supervisor (profile: ${systemdEscapeScalar(options.profileId)})`,
     "After=network-online.target",
     "Wants=network-online.target",
     "StartLimitIntervalSec=300",
@@ -450,6 +474,59 @@ function normalizeActiveState(value: string | undefined): ServiceActiveState {
   return "unknown";
 }
 
+function validateSystemdUnitInput(options: {
+  homeDir: string;
+  profileId: string;
+  runAsUser?: string;
+  resolved: ResolvedExec;
+}): ValidationResult {
+  const inputValidation = validateServiceRenderValues([
+    { label: "profileId", value: options.profileId },
+    ...(options.runAsUser === undefined ? [] : [{ label: "runAsUser", value: options.runAsUser }]),
+    { label: "homeDir", value: options.homeDir },
+    { label: "resolved.command", value: options.resolved.command },
+    ...options.resolved.args.map((arg, index) => ({ label: `resolved.args[${index}]`, value: arg })),
+    { label: "resolved.cwd", value: options.resolved.cwd },
+  ]);
+  if (!inputValidation.ok) return inputValidation;
+
+  return validateServiceRenderValues([
+    { label: "PATH", value: servicePath(options.resolved.command) },
+  ]);
+}
+
+function validateLaunchdPlistInput(options: {
+  homeDir: string;
+  profileId: string;
+  resolved: ResolvedExec;
+}): ValidationResult {
+  const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId: options.profileId });
+  const inputValidation = validateServiceRenderValues([
+    { label: "profileId", value: options.profileId },
+    { label: "homeDir", value: options.homeDir },
+    { label: "resolved.command", value: options.resolved.command },
+    ...options.resolved.args.map((arg, index) => ({ label: `resolved.args[${index}]`, value: arg })),
+    { label: "resolved.cwd", value: options.resolved.cwd },
+  ]);
+  if (!inputValidation.ok) return inputValidation;
+
+  return validateServiceRenderValues([
+    { label: "PATH", value: servicePath(options.resolved.command) },
+    { label: "StandardOutPath", value: join(profilePaths.logsPath, "gateway.stdout") },
+    { label: "StandardErrorPath", value: join(profilePaths.logsPath, "gateway.stderr") },
+  ]);
+}
+
+function validateServiceRenderValues(values: Array<{ label: string; value: string | undefined }>): ValidationResult {
+  for (const { label, value } of values) {
+    if (value === undefined) continue;
+    if (/[\u0000-\u001F\u007F]/u.test(value)) {
+      return { ok: false, error: `Invalid service manager value for ${label}: control characters are not allowed.` };
+    }
+  }
+  return { ok: true };
+}
+
 async function systemctl(kind: "systemd-user" | "systemd-system", args: string[]): Promise<CommandResult> {
   return runCommand("systemctl", kind === "systemd-user" ? ["--user", ...args] : args);
 }
@@ -507,7 +584,7 @@ function systemdEscapeArg(value: string): string {
 }
 
 function systemdEscapeScalar(value: string): string {
-  return value.replace(/\\/gu, "\\\\").replace(/"/gu, "\\\"");
+  return value.replace(/\\/gu, "\\\\").replace(/"/gu, "\\\"").replace(/%/gu, "%%");
 }
 
 function systemdEscapeEnvAssignment(name: string, value: string): string {
