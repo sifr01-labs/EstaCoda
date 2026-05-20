@@ -46,6 +46,7 @@ export type SessionRecallServiceOptions = {
   surroundingMessages?: number;
   maxContextChars?: number;
   maxSummaryChars?: number;
+  excludeSessionIds?: string[];
 };
 
 export type SessionRecallIntentDecision = {
@@ -71,6 +72,7 @@ export class SessionRecallService {
   readonly #surroundingMessages: number;
   readonly #maxContextChars: number;
   readonly #maxSummaryChars: number;
+  readonly #excludeSessionIds: ReadonlySet<string>;
 
   constructor(options: SessionRecallServiceOptions) {
     this.#sessionDb = options.sessionDb;
@@ -84,6 +86,7 @@ export class SessionRecallService {
     this.#surroundingMessages = options.surroundingMessages ?? 2;
     this.#maxContextChars = options.maxContextChars ?? 6_000;
     this.#maxSummaryChars = options.maxSummaryChars ?? 1_200;
+    this.#excludeSessionIds = new Set(options.excludeSessionIds ?? []);
   }
 
   async recall(query: string): Promise<SessionRecallResult> {
@@ -107,7 +110,10 @@ export class SessionRecallService {
       profileId: this.#profileId,
       limit: this.#maxHits
     });
-    const hits = rawHits.filter((hit) => sessionMatchesWorkspace(hit.session, this.#workspaceRoot));
+    const hits = rawHits.filter((hit) =>
+      !this.#excludeSessionIds.has(hit.session.id) &&
+      sessionMatchesWorkspace(hit.session, this.#workspaceRoot)
+    );
     const groups = groupHitsBySession(hits).slice(0, this.#maxSessions);
     const warnings: string[] = [];
     const blocks: SessionRecallBlock[] = [];

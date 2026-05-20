@@ -167,6 +167,47 @@ describe("createRuntime external memory providers", () => {
   });
 });
 
+describe("createRuntime session recall", () => {
+  it("excludes the active runtime session from recall", async () => {
+    const options = await minimalRuntimeOptions();
+    const sessionDb = new InMemorySessionDB();
+    const activeSessionId = "runtime-active-recall-session";
+    const runtime = await createRuntime({
+      ...options,
+      sessionDb,
+      sessionId: activeSessionId
+    });
+
+    try {
+      await sessionDb.appendMessage({
+        id: "active-recall-message",
+        sessionId: activeSessionId,
+        role: "user",
+        content: "alpha detail already present in the active session"
+      });
+      await sessionDb.createSession({
+        id: "historical-recall-session",
+        profileId: "default",
+        title: "Historical recall session",
+        metadata: { workspaceRoot: options.workspaceRoot }
+      });
+      await sessionDb.appendMessage({
+        id: "historical-recall-message",
+        sessionId: "historical-recall-session",
+        role: "user",
+        content: "alpha detail from a prior session"
+      });
+
+      const result = await runtime.recallSession?.("alpha");
+
+      expect(result?.blocks.map((block) => block.sessionId)).toEqual(["historical-recall-session"]);
+      expect(result?.blocks.flatMap((block) => block.sourceSessionIds)).not.toContain(activeSessionId);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+});
+
 describe("createRuntime semantic compression construction", () => {
   it("uses the compression auxiliary route and not memory_compaction for semantic compression", async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "estacoda-runtime-compression-"));

@@ -619,6 +619,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     sessionDb,
     profileId,
     workspaceRoot,
+    excludeSessionIds: [sessionId],
     route: sessionSearchRoute,
     mainRoute,
     providerExecutor
