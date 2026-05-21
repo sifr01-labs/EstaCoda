@@ -3,23 +3,17 @@ import type { AuxiliaryModelConfig, ModelProfile, ResolvedModelRoute } from "../
 import type { BrowserBackend } from "../contracts/browser.js";
 import type { ExternalMemoryProvider, MemoryPromotionRecord, MemoryProvider } from "../contracts/memory.js";
 import type { SkillCatalogEntry } from "../contracts/skill.js";
-import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
+import type { RegisteredTool, ToolDefinition, ToolProvider, ToolsetName } from "../contracts/tool.js";
+import type { RuntimeToolContext, SessionToolContext } from "../contracts/tool-context.js";
 import { ArtifactStore } from "../artifacts/artifact-store.js";
 import { createBrowserBackendFromConfig, type CdpFetchLike, type CdpWebSocketFactory } from "../browser/browser-backend.js";
 import type { ResolvedTokens, TokenBranding } from "../contracts/ui-tokens.js";
-import { createConfigTools } from "../config/config-tools.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { ContextReferenceExpander } from "../context/context-reference-expander.js";
 import { ProjectContextLoader, renderProjectContext } from "../context/project-context-loader.js";
 import { CronStore } from "../cron/cron-store.js";
-import { createCronTools } from "../cron/cron-tools.js";
 import { DelegationManager } from "../delegation/delegation-manager.js";
-import { createDelegationTools } from "../delegation/delegation-tools.js";
-import { createMemoryTool } from "../memory/memory-tool.js";
-import { createKnowledgeMemoryTools } from "../memory/knowledge-memory-tools.js";
 import { MemoryFileCompactionService } from "../memory/memory-file-compaction-service.js";
-import { createMemoryFileCompactionTools } from "../memory/memory-file-compaction-tools.js";
-import { createKnowledgeCodeTools } from "../knowledge/knowledge-code-tools.js";
 import { MemoryStore } from "../memory/memory-store.js";
 import { loadIdentityContext } from "../memory/identity-loader.js";
 import { listSharedMemory, type SharedMemoryEntry } from "../memory/shared-memory.js";
@@ -31,7 +25,6 @@ import { MemoryPromotionStore } from "../memory/memory-promotion-store.js";
 import { normalizeExternalMemoryConfig, normalizeSessionCompressionConfig, type AgentProfileMode, type AgentResponseLanguage, type LoadedRuntimeConfig, type MCPServerConfig, type UiFlavor, type UiLanguage } from "../config/runtime-config.js";
 import { loadMcpServers, type MCPServerSnapshot } from "../mcp/mcp-tools.js";
 import { ProcessManager } from "../process/process-manager.js";
-import { createProcessTools } from "../process/process-tools.js";
 import { resolveAuxiliaryModelRoute } from "../providers/auxiliary-model-resolver.js";
 import { createCatalogProvider } from "../providers/catalog-provider.js";
 import { fallbackKnownModelProfiles, inferModelProfile } from "../providers/model-catalog.js";
@@ -48,7 +41,6 @@ import { SessionRecallService, type SessionRecallResult } from "../session/sessi
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { SessionCompressionService, type CompactResult } from "../prompt/session-compression-service.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
-import { createWorkspaceTrustTools } from "../security/workspace-trust-tools.js";
 import { createSecurityPolicyForMode } from "../security/security-policy-factory.js";
 import { type ApprovalScope, type PersistedWorkspaceApprovalGrant, type SmartApprovalAssessorRuntimeConfig, type WorkspaceApprovalController } from "../security/workspace-approval-controller.js";
 import { loadSkillsFromDirectory } from "../skills/skill-loader.js";
@@ -57,7 +49,6 @@ import { SkillEvolutionStore } from "../skills/skill-evolution.js";
 import { ChangeManifestStore } from "../skills/change-manifest-store.js";
 import { SkillLearningManager, type SkillAutonomy } from "../skills/skill-learning.js";
 import { evaluateSkillVisibility } from "../skills/skill-visibility.js";
-import { createSkillTools } from "../skills/skill-tools.js";
 
 // TaskFlow v0.8 imports
 import { SQLiteTaskFlowStore } from "../taskflow/sqlite-taskflow-store.js";
@@ -69,18 +60,14 @@ import { FlowCompactionService, DEFAULT_COMPACTION_CONFIG } from "../taskflow/fl
 import { FlowRestartRecovery } from "../taskflow/flow-restart-recovery.js";
 import { TaskFlowAgentLoopAdapter } from "../taskflow/taskflow-agent-loop-adapter.js";
 
-import { builtinTools } from "../tools/builtin-tools.js";
-import { createExecuteCodeTool } from "../tools/execute-code-tool.js";
-import { createPythonTools } from "../tools/python-tools.js";
-import { createMediaTools } from "../tools/media-tools.js";
-import { createImageGenerationTools, type ImageGenerationFetchLike } from "../tools/image-generation-tools.js";
+import type { ImageGenerationFetchLike } from "../tools/image-generation-tools.js";
 import { defaultImageGenerationConfig, verifyImageGeneration, type ImageGenerationVerification } from "../tools/image-generation-verify.js";
-import { createVoiceTools, type VoiceFetchLike } from "../tools/voice-tools.js";
-import { analyzeImageWithVision, createVisionTools } from "../tools/vision-tools.js";
+import type { VoiceFetchLike } from "../tools/voice-tools.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
 import { ToolRegistry } from "../tools/tool-registry.js";
-import { createWebTools, type FetchLike as WebFetchLike } from "../tools/web-tools.js";
-import { createWorkspaceTools, type WorkspaceFsAdapter } from "../tools/workspace-tools.js";
+import { toolRegistrationPlan, type ToolRegistrationPhase } from "../tools/index.js";
+import type { FetchLike as WebFetchLike } from "../tools/web-tools.js";
+import type { WorkspaceFsAdapter } from "../tools/workspace-tools.js";
 import { ToolCallPlanner } from "../tools/tool-call-planner.js";
 import { buildProviderToolSchemaCatalog } from "../tools/tool-schema.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
@@ -178,6 +165,125 @@ function resolveRuntimeTokens(options: RuntimeOptions): ResolvedTokens {
 
 function resolveRuntimeBranding(options: RuntimeOptions): RuntimeBranding {
   return resolveRuntimeTokens(options).contract.branding;
+}
+
+function buildRuntimeToolContext(input: RuntimeToolContext): RuntimeToolContext {
+  return {
+    workspaceRoot: input.workspaceRoot,
+    homeDir: input.homeDir,
+    profileId: input.profileId,
+    cronStore: input.cronStore,
+    trustStore: input.trustStore,
+    disableCronTools: input.disableCronTools
+  };
+}
+
+function buildPreSkillVisibilityToolContext(input: SessionToolContext): SessionToolContext {
+  return {
+    workspaceRoot: input.workspaceRoot,
+    profileId: input.profileId,
+    sessionId: input.sessionId,
+    currentSessionId: input.currentSessionId,
+    homeDir: input.homeDir,
+    channelMediaRoot: input.channelMediaRoot,
+    audioCacheRoot: input.audioCacheRoot,
+    imageCacheRoot: input.imageCacheRoot,
+    browserBackend: input.browserBackend,
+    mainRoute: input.mainRoute,
+    visionRoute: input.visionRoute,
+    providerRegistry: input.providerRegistry,
+    providerExecutor: input.providerExecutor,
+    processManager: input.processManager,
+    artifactStore: input.artifactStore,
+    sessionDb: input.sessionDb,
+    trajectoryRecorder: input.trajectoryRecorder,
+    memoryStore: input.memoryStore,
+    memoryFileCompactionService: input.memoryFileCompactionService,
+    workspaceFsAdapter: input.workspaceFsAdapter,
+    webFetch: input.webFetch,
+    enableWebNetwork: input.enableWebNetwork,
+    webMaxContentChars: input.webMaxContentChars,
+    voiceFetch: input.voiceFetch,
+    tts: input.tts,
+    stt: input.stt,
+    imageGen: input.imageGen,
+    imageGenerationFetch: input.imageGenerationFetch,
+    externalMemory: input.externalMemory,
+    externalMemoryProviders: input.externalMemoryProviders
+  };
+}
+
+function buildPostSkillVisibilityToolContext(input: SessionToolContext): SessionToolContext {
+  return {
+    workspaceRoot: input.workspaceRoot,
+    profileId: input.profileId,
+    sessionId: input.sessionId,
+    currentSessionId: input.currentSessionId,
+    skillRegistry: input.skillRegistry,
+    sessionSkillRegistry: input.sessionSkillRegistry,
+    localSkillsRoot: input.localSkillsRoot,
+    bundledSkillsRoot: input.bundledSkillsRoot,
+    skillEvolutionStore: input.skillEvolutionStore,
+    changeManifestStore: input.changeManifestStore
+  };
+}
+
+function buildPostMemoryProviderToolContext(input: SessionToolContext): SessionToolContext {
+  return {
+    workspaceRoot: input.workspaceRoot,
+    profileId: input.profileId,
+    sessionId: input.sessionId,
+    currentSessionId: input.currentSessionId,
+    memoryInspector: input.memoryInspector
+  };
+}
+
+function buildPostToolExecutorToolContext(input: SessionToolContext): SessionToolContext {
+  return {
+    workspaceRoot: input.workspaceRoot,
+    profileId: input.profileId,
+    sessionId: input.sessionId,
+    currentSessionId: input.currentSessionId,
+    toolExecutor: input.toolExecutor,
+    delegationManager: input.delegationManager,
+    sessionDb: input.sessionDb,
+    trajectoryRecorder: input.trajectoryRecorder,
+    trustedWorkspace: input.trustedWorkspace
+  };
+}
+
+function registerToolRegistrationPhase(input: {
+  registry: ToolRegistry;
+  phase: ToolRegistrationPhase;
+  runtimeCtx: RuntimeToolContext;
+  sessionCtx?: SessionToolContext;
+}): void {
+  for (const entry of toolRegistrationPlan) {
+    if (entry.phase !== input.phase) {
+      continue;
+    }
+    for (const tool of createToolsForProvider(entry.provider, input.runtimeCtx, input.sessionCtx)) {
+      input.registry.register(tool);
+    }
+  }
+}
+
+function createToolsForProvider(
+  provider: ToolProvider,
+  runtimeCtx: RuntimeToolContext,
+  sessionCtx: SessionToolContext | undefined
+): readonly RegisteredTool[] {
+  switch (provider.kind) {
+    case "static":
+      return provider.tools;
+    case "runtime":
+      return provider.createTools(runtimeCtx);
+    case "session":
+      if (sessionCtx === undefined) {
+        throw new TypeError(`${provider.name}ToolProvider requires session context.`);
+      }
+      return provider.createTools(sessionCtx);
+  }
 }
 
 function resolveRuntimeUiIdentity(options: RuntimeOptions): string {
@@ -414,9 +520,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       skillRegistry.register(skill);
     }
   }
-  for (const tool of builtinTools) {
-    toolRegistry.register(tool);
-  }
   const browserBackend = options.browserBackend ?? createBrowserBackendFromConfig({
     backend: options.browser?.backend ?? "unconfigured",
     cdpUrl: options.browser?.cdpUrl,
@@ -425,105 +528,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     fetch: options.cdpFetch,
     webSocketFactory: options.cdpWebSocketFactory
   });
-  for (const tool of createPythonTools({
-    workspaceRoot,
-    allowedRoots: [channelMediaRoot]
-  })) {
-    toolRegistry.register(tool);
-  }
-  for (const tool of createWebTools({
-    fetch: options.webFetch,
-    browserBackend,
-    enableNetwork: options.enableWebNetwork,
-    maxContentChars: options.webMaxContentChars,
-    workspaceRoot,
-    visionAnalyzer: (input, signal) => analyzeImageWithVision({
-      workspaceRoot,
-      allowedRoots: [channelMediaRoot],
-      visionAuxiliaryRoute: visionRoute,
-      mainRoute,
-      providerExecutor: new ProviderExecutor({
-        registry: providerRegistry
-      })
-    }, input, signal)
-  })) {
-    toolRegistry.register(tool);
-  }
-  for (const tool of createWorkspaceTools({
-    workspaceRoot,
-    fsAdapter: options.workspaceFsAdapter
-  })) {
-    toolRegistry.register(tool);
-  }
-  for (const tool of createMediaTools({
-    workspaceRoot,
-    artifactStore,
-    allowedRoots: [channelMediaRoot]
-  })) {
-    toolRegistry.register(tool);
-  }
-  for (const tool of createVoiceTools({
-    audioCacheRoot,
-    artifactStore,
-    workspaceRoot,
-    allowedRoots: [channelMediaRoot],
-    tts: options.tts,
-    stt: options.stt,
-    fetch: options.voiceFetch
-  })) {
-    toolRegistry.register(tool);
-  }
-  for (const tool of createImageGenerationTools({
-    imageCacheRoot,
-    artifactStore,
-    imageGen: options.imageGen,
-    fetch: options.imageGenerationFetch
-  })) {
-    toolRegistry.register(tool);
-  }
-  for (const tool of createVisionTools({
-    workspaceRoot,
-    allowedRoots: [channelMediaRoot],
-    visionAuxiliaryRoute: visionRoute,
-    mainRoute,
-    providerExecutor
-  })) {
-    toolRegistry.register(tool);
-  }
-  for (const tool of createProcessTools({ processManager })) {
-    toolRegistry.register(tool);
-  }
-  for (const tool of createWorkspaceTrustTools({ workspaceRoot, trustStore })) {
-    toolRegistry.register(tool);
-  }
-  for (const tool of createConfigTools({
-    workspaceRoot,
-    homeDir: options.homeDir,
-    profileId: options.profileId,
-    sessionId: () => sessionRuntimeContext.currentSessionId(),
-    sessionDb
-  })) {
-    toolRegistry.register(tool);
-  }
-  if (options.disableCronTools !== true) {
-    for (const tool of createCronTools({ store: cronStore })) {
-      toolRegistry.register(tool);
-    }
-  }
   const externalMemoryConfig = normalizeExternalMemoryConfig(options.externalMemory);
   const externalMemoryProviders = [
     ...createExternalMemoryProvidersFromConfig(externalMemoryConfig, { profileRoot: profileMemoryRoot }),
     ...(options.externalMemoryProviders ?? [])
   ];
-  toolRegistry.register(createMemoryTool(memoryStore, {
-    externalMemory: externalMemoryConfig,
-    externalMemoryProviders,
-    profileId,
-    sessionId: () => sessionRuntimeContext.currentSessionId(),
-    workspaceRoot,
-    sessionDb,
-    trajectoryRecorder
-  }));
   const memoryFileCompactionService = new MemoryFileCompactionService({
     store: memoryStore,
     memoryRoot: profileMemoryRoot,
@@ -534,9 +543,52 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     sessionDb,
     sessionId
   });
-  for (const tool of createMemoryFileCompactionTools(memoryFileCompactionService)) {
-    toolRegistry.register(tool);
-  }
+  const runtimeToolContext = buildRuntimeToolContext({
+    workspaceRoot,
+    homeDir: options.homeDir,
+    profileId,
+    cronStore,
+    trustStore,
+    disableCronTools: options.disableCronTools
+  });
+  const preSkillVisibilityToolContext = buildPreSkillVisibilityToolContext({
+    workspaceRoot,
+    profileId,
+    sessionId,
+    currentSessionId: () => sessionRuntimeContext.currentSessionId(),
+    homeDir: options.homeDir,
+    channelMediaRoot,
+    audioCacheRoot,
+    imageCacheRoot,
+    browserBackend,
+    mainRoute,
+    visionRoute,
+    providerRegistry,
+    providerExecutor,
+    processManager,
+    artifactStore,
+    sessionDb,
+    trajectoryRecorder,
+    memoryStore,
+    memoryFileCompactionService,
+    workspaceFsAdapter: options.workspaceFsAdapter,
+    webFetch: options.webFetch,
+    enableWebNetwork: options.enableWebNetwork,
+    webMaxContentChars: options.webMaxContentChars,
+    voiceFetch: options.voiceFetch,
+    tts: options.tts,
+    stt: options.stt,
+    imageGen: options.imageGen,
+    imageGenerationFetch: options.imageGenerationFetch,
+    externalMemory: externalMemoryConfig,
+    externalMemoryProviders
+  });
+  registerToolRegistrationPhase({
+    registry: toolRegistry,
+    phase: "pre-skill-visibility",
+    runtimeCtx: runtimeToolContext,
+    sessionCtx: preSkillVisibilityToolContext
+  });
   const browserAvailable = await browserBackend.isAvailable();
   const toolAvailability = await toolRegistry.snapshot();
   const skillEvolutionStore = new SkillEvolutionStore({
@@ -564,16 +616,23 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     }
   }
   const sessionSkillCatalog = sessionSkillRegistry.catalog();
-  for (const tool of createSkillTools({
-    registry: skillRegistry,
-    visibleRegistry: sessionSkillRegistry,
-    localSkillsRoot,
-    bundledSkillsRoot: bundledSkillsDir,
-    skillEvolutionStore,
-    changeManifestStore
-  })) {
-    toolRegistry.register(tool);
-  }
+  registerToolRegistrationPhase({
+    registry: toolRegistry,
+    phase: "post-skill-visibility",
+    runtimeCtx: runtimeToolContext,
+    sessionCtx: buildPostSkillVisibilityToolContext({
+      workspaceRoot,
+      profileId,
+      sessionId,
+      currentSessionId: () => sessionRuntimeContext.currentSessionId(),
+      skillRegistry,
+      sessionSkillRegistry,
+      localSkillsRoot,
+      bundledSkillsRoot: bundledSkillsDir,
+      skillEvolutionStore,
+      changeManifestStore
+    })
+  });
 
   const identityContext = await loadIdentityContext({ profilePaths });
   const sharedMemoryContent = renderSharedMemory(await listSharedMemory({ homeDir: options.homeDir }));
@@ -600,14 +659,18 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     },
     promotionStore: memoryPromotionStore
   });
-  for (const tool of createKnowledgeMemoryTools(
-    memoryProvider instanceof LocalMemoryProvider ? memoryProvider.inspector : undefined
-  )) {
-    toolRegistry.register(tool);
-  }
-  for (const tool of createKnowledgeCodeTools(workspaceRoot)) {
-    toolRegistry.register(tool);
-  }
+  registerToolRegistrationPhase({
+    registry: toolRegistry,
+    phase: "post-memory-provider",
+    runtimeCtx: runtimeToolContext,
+    sessionCtx: buildPostMemoryProviderToolContext({
+      workspaceRoot,
+      profileId,
+      sessionId,
+      currentSessionId: () => sessionRuntimeContext.currentSessionId(),
+      memoryInspector: memoryProvider instanceof LocalMemoryProvider ? memoryProvider.inspector : undefined
+    })
+  });
   const skillLearningManager = new SkillLearningManager({
     autonomy: options.skillAutonomy ?? "suggest",
     registry: skillRegistry,
@@ -720,22 +783,22 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     toolExecutor,
     trajectoryRecorder
   });
-  for (const tool of createDelegationTools({
-    manager: delegationManager,
-    parentSessionId: () => sessionRuntimeContext.currentSessionId(),
-    profileId,
-    trustedWorkspace: async () => activeTrustedWorkspace || await trustStore.isTrusted(workspaceRoot)
-  })) {
-    toolRegistry.register(tool);
-  }
-  toolRegistry.register(createExecuteCodeTool({
-    workspaceRoot,
-    toolExecutor,
-    sessionDb,
-    trajectoryRecorder,
-    sessionId: () => sessionRuntimeContext.currentSessionId(),
-    trustedWorkspace: async () => activeTrustedWorkspace || await trustStore.isTrusted(workspaceRoot)
-  }));
+  registerToolRegistrationPhase({
+    registry: toolRegistry,
+    phase: "post-tool-executor",
+    runtimeCtx: runtimeToolContext,
+    sessionCtx: buildPostToolExecutorToolContext({
+      workspaceRoot,
+      profileId,
+      sessionId,
+      currentSessionId: () => sessionRuntimeContext.currentSessionId(),
+      toolExecutor,
+      delegationManager,
+      sessionDb,
+      trajectoryRecorder,
+      trustedWorkspace: async () => activeTrustedWorkspace || await trustStore.isTrusted(workspaceRoot)
+    })
+  });
   const providerToolAvailability = await toolRegistry.snapshot();
 
   // Remove tools from disabled toolsets (e.g. cron recursion guard)

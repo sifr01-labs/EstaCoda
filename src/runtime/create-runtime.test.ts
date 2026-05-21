@@ -186,6 +186,42 @@ describe("createRuntime MCP trust gating", () => {
     }
   });
 
+  it("removes disabled toolsets from the registry and execution path", async () => {
+    const options = await minimalRuntimeOptions();
+    const runtime = await createRuntime({
+      ...options,
+      disabledToolsets: ["shell-write"]
+    });
+
+    try {
+      expect(runtime.tools().map((tool) => tool.name)).not.toContain("terminal.run");
+      await expect(runtime.executeTool?.({
+        tool: "terminal.run",
+        toolInput: { command: "echo hidden" }
+      })).resolves.toBeUndefined();
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("omits cron tools when cron registration is disabled", async () => {
+    const options = await minimalRuntimeOptions();
+    const runtime = await createRuntime({
+      ...options,
+      disableCronTools: true
+    });
+
+    try {
+      expect(runtime.tools().map((tool) => tool.name)).not.toContain("cronjob");
+      await expect(runtime.executeTool?.({
+        tool: "cronjob",
+        toolInput: { action: "list" }
+      })).resolves.toBeUndefined();
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("does not start/register MCP when workspaceTrusted is omitted", async () => {
     const options = await minimalRuntimeOptions({
       mcpServers: { echo: { command: "echo", args: ["hello"] } }
