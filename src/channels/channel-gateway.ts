@@ -622,13 +622,24 @@ export class ChannelGateway {
       }
       this.#sessionIdByTurnKey.set(activeTurnKey, sessionId);
 
+      const hygieneResult = await this.#runSessionHygiene(sessionId, controller.signal);
+      if (hygieneResult?.status === "compacted" && hygieneResult.rotated) {
+        const nextSessionId = hygieneResult.activeSessionId;
+        await this.#adoptSessionId(message.sessionKey, sessionId, nextSessionId, {
+          receivedAt: message.receivedAt,
+          reason: "Gateway session hygiene"
+        });
+        sessionId = nextSessionId;
+        if (this.#activeTurnRegistry !== undefined && turnId !== undefined) {
+          this.#activeTurnRegistry.updateTurn(activeTurnKey, turnId, { sessionId });
+        }
+      }
+
       const securityPolicy = this.#securityPolicyFor(
         normalizedSessionKey,
         sessionId,
         await this.#approvalStore.listForSession(normalizedSessionKey)
       );
-
-      await this.#runSessionHygiene(sessionId, controller.signal);
 
       // Runtime acquisition
       runtime = await this.#acquireRuntime(sessionId, securityPolicy, message, normalizedSessionKey);
@@ -807,7 +818,7 @@ export class ChannelGateway {
     }
   }
 
-  async #runSessionHygiene(sessionId: string, signal: AbortSignal): Promise<void> {
+  async #runSessionHygiene(sessionId: string, signal: AbortSignal): Promise<Awaited<ReturnType<SessionHygieneService["run"]>> | undefined> {
     if (this.#sessionHygieneService === undefined || this.#isDraining?.()) {
       return;
     }
@@ -817,11 +828,49 @@ export class ChannelGateway {
       if (result.status === "failed") {
         this.#logWarning?.(`Gateway session hygiene skipped after failure for ${sessionId}: ${result.error}`);
       }
+      return result;
     } catch (error) {
       this.#logWarning?.(
         `Gateway session hygiene failed for ${sessionId}: ${error instanceof Error ? error.message : String(error)}`
       );
+      return undefined;
     }
+  }
+
+  async #adoptSessionId(
+    sessionKey: ChannelSessionKey,
+    previousSessionId: string,
+    nextSessionId: string,
+    options: { receivedAt?: string; reason: string }
+  ): Promise<void> {
+    if (previousSessionId === nextSessionId) {
+      return;
+    }
+
+    if (this.#sessionStore.setSessionId === undefined) {
+      this.#logWarning?.(`${options.reason} could not update channel session pointer: session store does not support setSessionId`);
+    } else {
+      await this.#sessionStore.setSessionId(sessionKey, nextSessionId, { receivedAt: options.receivedAt });
+    }
+
+    const key = stableSessionKey(sessionKey, this.#sessionPolicy);
+    const cachedSessionId = this.#sessionIdByTurnKey.get(key);
+    const invalidateIds = uniqueStrings([
+      previousSessionId,
+      ...(cachedSessionId === undefined ? [] : [cachedSessionId])
+    ]).filter((sessionId) => sessionId !== nextSessionId);
+    for (const sessionId of invalidateIds) {
+      try {
+        await this.#runtimeCache?.invalidate(sessionId);
+      } catch (error) {
+        this.#logWarning?.(
+          `${options.reason} cache invalidate failed for ${sessionId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      }
+    }
+    this.#sessionIdByTurnKey.set(key, nextSessionId);
   }
 
   async #drainQueuedTurns(activeTurnKey: string): Promise<void> {
@@ -1617,17 +1666,27 @@ export class ChannelGateway {
         )
       });
       try {
-        const text = runtime.compactSession === undefined
-          ? "Session compaction is not available in this runtime."
-          : renderSessionCompactionResult(await runtime.compactSession({
+        const compactResult = runtime.compactSession === undefined
+          ? undefined
+          : await runtime.compactSession({
               sessionId,
-              focusTopic: normalizedTopic
-            }), {
+              focusTopic: normalizedTopic,
+              preserveTranscript: true
+            });
+        if (compactResult?.rotated === true) {
+          await this.#adoptSessionId(message.sessionKey, sessionId, compactResult.activeSessionId, {
+            receivedAt: message.receivedAt,
+            reason: "Gateway /compact"
+          });
+        }
+        const text = compactResult === undefined
+          ? "Session compaction is not available in this runtime."
+          : renderSessionCompactionResult(compactResult, {
               focusTopic: normalizedTopic
             });
         await this.#deliverText(adapter, message.sessionKey, text);
         return {
-          sessionId,
+          sessionId: compactResult?.activeSessionId ?? sessionId,
           replyText: text,
           artifactCount: 0,
           progressCount: 0
@@ -2485,6 +2544,10 @@ function toPendingApprovalChannel(channel: ChannelKind): PendingApprovalChannel 
   }
 
   return "cli";
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+  return [...new Set(values)];
 }
 
 function escapeHtml(value: string): string {

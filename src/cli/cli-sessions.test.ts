@@ -300,14 +300,14 @@ describe("CLI session commands", () => {
 
   describe("sessions compact", () => {
     it("compacts a session through the shared runtime service path", async () => {
-      const calls: Array<{ sessionId?: string; focusTopic?: string }> = [];
+      const calls: Array<{ sessionId?: string; focusTopic?: string; preserveTranscript?: boolean }> = [];
       const result = await runCliCommand({
         argv: ["sessions", "compact", "sess-compact", "--topic", "handoff notes"],
         workspaceRoot: tmpDir,
         homeDir: tmpDir,
         runtime: {
           sessionId: "active-session",
-          compactSession: async (input?: { sessionId?: string; focusTopic?: string }) => {
+          compactSession: async (input?: { sessionId?: string; focusTopic?: string; preserveTranscript?: boolean }) => {
             calls.push(input ?? {});
             return compactResult();
           }
@@ -316,7 +316,7 @@ describe("CLI session commands", () => {
 
       expect(result.handled).toBe(true);
       expect(result.exitCode).toBe(0);
-      expect(calls).toEqual([{ sessionId: "sess-compact", focusTopic: "handoff notes" }]);
+      expect(calls).toEqual([{ sessionId: "sess-compact", focusTopic: "handoff notes", preserveTranscript: false }]);
       expect(result.output).toContain("Compacted 8 messages -> 4 messages");
       expect(result.output).toContain("Token estimate: 2000 -> 900");
       expect(result.output).toContain("Focus topic: handoff notes");

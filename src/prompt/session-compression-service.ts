@@ -6,7 +6,8 @@ import type {
   SessionCompressionState,
   SessionDB,
   SessionEvent,
-  SessionMessage
+  SessionMessage,
+  SessionRecord
 } from "../contracts/session.js";
 import type { ProviderExecutor } from "../providers/provider-executor.js";
 import { SessionCompressionLock } from "../session/session-compression-lock.js";
@@ -41,6 +42,7 @@ export type SessionCompressionRequest = {
   trigger?: SessionCompressionTrigger;
   lastPromptTokensEstimated?: number;
   lastActualPromptTokens?: number;
+  preserveTranscript?: boolean;
   signal?: AbortSignal;
 };
 
@@ -87,6 +89,10 @@ export class SessionCompressionService {
 
   async #compact(input: SessionCompressionRequest, force: boolean): Promise<CompactResult> {
     return this.#lock.runExclusive(input.sessionId, async () => {
+      const trigger = input.trigger ?? (force ? "manual" : "auto");
+      const originalSession = input.preserveTranscript === true
+        ? await this.#requireSession(input.sessionId)
+        : undefined;
       const messages = await this.#sessionDb.listMessages(input.sessionId);
       const previousState = reconstructSessionCompressionState(await this.#sessionDb.listEvents(input.sessionId));
       const compressed = await this.#compressor.compress({
@@ -114,13 +120,67 @@ export class SessionCompressionService {
         });
       }
 
+      if (input.preserveTranscript === true) {
+        const parentSession = originalSession ?? await this.#requireSession(input.sessionId);
+        const compactedAt = this.#now().toISOString();
+        const childSession = await this.#sessionDb.createSession({
+          profileId: parentSession.profileId,
+          title: compactedSessionTitle(parentSession),
+          parentSessionId: parentSession.id,
+          metadata: compactedSessionMetadata(parentSession, {
+            compactedAt,
+            compactedFromSessionId: parentSession.id,
+            compactionTrigger: trigger
+          })
+        });
+        const written = await this.#sessionDb.rewriteTranscript({
+          sessionId: childSession.id,
+          messages: compressed.messages.map(toChildTranscriptMessage)
+        });
+        await this.#sessionDb.endSession(parentSession.id, "compression");
+        const eventWarnings = [
+          ...(await this.#recordEventsBestEffort({
+            sessionId: childSession.id,
+            trigger,
+            messagesBefore: messages,
+            messagesAfter: written,
+            previousState,
+            lastPromptTokensEstimated: input.lastPromptTokensEstimated,
+            lastActualPromptTokens: input.lastActualPromptTokens,
+            diagnostics: compressed.diagnostics
+          })),
+          ...(await this.#recordForkEventBestEffort({
+            parentSessionId: parentSession.id,
+            childSessionId: childSession.id,
+            trigger,
+            compactedAt,
+            sourceMessageCount: messages.length,
+            compactedMessageCount: written.length
+          }))
+        ];
+
+        return freezeCompactResult({
+          didCompress: true,
+          originalSessionId: parentSession.id,
+          activeSessionId: childSession.id,
+          replacementSessionId: childSession.id,
+          rotated: true,
+          messages: written.map(toReplacementMessage),
+          diagnostics: {
+            ...compressed.diagnostics,
+            eventWarnings
+          },
+          userFacingMessage: compressed.userFacingMessage
+        });
+      }
+
       const written = await this.#sessionDb.replaceMessages({
         sessionId: input.sessionId,
         messages: compressed.messages
       });
       const eventWarnings = await this.#recordEventsBestEffort({
         sessionId: input.sessionId,
-        trigger: input.trigger ?? (force ? "manual" : "auto"),
+        trigger,
         messagesBefore: messages,
         messagesAfter: written,
         previousState,
@@ -142,6 +202,14 @@ export class SessionCompressionService {
         userFacingMessage: compressed.userFacingMessage
       });
     });
+  }
+
+  async #requireSession(sessionId: string): Promise<SessionRecord> {
+    const session = await this.#sessionDb.getSession(sessionId);
+    if (session === undefined) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+    return session;
   }
 
   async #recordEventsBestEffort(input: {
@@ -263,6 +331,29 @@ export class SessionCompressionService {
 
     return warnings;
   }
+
+  async #recordForkEventBestEffort(input: {
+    parentSessionId: string;
+    childSessionId: string;
+    trigger: SessionCompressionTrigger;
+    compactedAt: string;
+    sourceMessageCount: number;
+    compactedMessageCount: number;
+  }): Promise<string[]> {
+    try {
+      await this.#sessionDb.appendEvent(input.parentSessionId, {
+        kind: "session-compaction-forked",
+        trigger: input.trigger,
+        childSessionId: input.childSessionId,
+        compactedAt: input.compactedAt,
+        sourceMessageCount: input.sourceMessageCount,
+        compactedMessageCount: input.compactedMessageCount
+      });
+      return [];
+    } catch (error) {
+      return [`session compaction fork event write failed: ${errorMessage(error)}`];
+    }
+  }
 }
 
 export function renderSessionCompactionResult(
@@ -284,6 +375,10 @@ export function renderSessionCompactionResult(
   const focusTopic = options.focusTopic?.trim();
   if (focusTopic !== undefined && focusTopic.length > 0) {
     lines.push(`Focus topic: ${focusTopic}`);
+  }
+
+  if (result.rotated) {
+    lines.push(`Active session: ${result.activeSessionId}`);
   }
 
   lines.push(`Token estimate: ${result.diagnostics.preTokens} -> ${result.diagnostics.postTokens}`);
@@ -333,6 +428,35 @@ function toReplacementMessage(message: SessionMessage): ReplacementSessionMessag
     createdAt: message.createdAt,
     channel: message.channel,
     metadata: message.metadata === undefined ? undefined : { ...message.metadata }
+  };
+}
+
+function toChildTranscriptMessage(message: ReplacementSessionMessage): ReplacementSessionMessage {
+  return {
+    role: message.role,
+    content: message.content,
+    createdAt: message.createdAt,
+    channel: message.channel,
+    metadata: message.metadata === undefined ? undefined : { ...message.metadata }
+  };
+}
+
+function compactedSessionTitle(parent: SessionRecord): string {
+  const title = parent.title?.trim();
+  return title === undefined || title.length === 0 ? "Compacted session" : `${title} (compacted)`;
+}
+
+function compactedSessionMetadata(
+  parent: SessionRecord,
+  compaction: {
+    compactedAt: string;
+    compactedFromSessionId: string;
+    compactionTrigger: SessionCompressionTrigger;
+  }
+): Record<string, unknown> {
+  return {
+    ...(parent.metadata ?? {}),
+    ...compaction
   };
 }
 

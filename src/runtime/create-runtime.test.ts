@@ -209,6 +209,70 @@ describe("createRuntime session recall", () => {
 });
 
 describe("createRuntime semantic compression construction", () => {
+  it("keeps runtime compactSession non-rotating unless caller opts into transcript preservation", async () => {
+    const options = await minimalRuntimeOptions();
+    const sessionDb = new InMemorySessionDB({
+      now: () => new Date("2030-01-01T00:00:00.000Z"),
+      id: () => crypto.randomUUID()
+    });
+    const runtime = await createRuntime({
+      ...options,
+      sessionDb,
+      sessionId: "active-runtime-session",
+      compression: {
+        enabled: false,
+        threshold: 0.95,
+        targetRatio: 0.20,
+        protectFirstN: 0,
+        protectLastN: 1,
+        summaryModelContextLength: 100_000
+      }
+    });
+
+    try {
+      await sessionDb.createSession({ id: "non-rotating-session", profileId: "default" });
+      await sessionDb.createSession({ id: "preserving-session", profileId: "default" });
+      for (const sessionId of ["non-rotating-session", "preserving-session"]) {
+        for (let index = 0; index < 4; index += 1) {
+          await sessionDb.appendMessage({
+            id: `${sessionId}-m${index}`,
+            sessionId,
+            role: index % 2 === 0 ? "user" : "agent",
+            content: `message ${index} ${"x".repeat(120)}`
+          });
+        }
+      }
+
+      const defaultResult = await runtime.compactSession?.({ sessionId: "non-rotating-session" });
+      const preservedResult = await runtime.compactSession?.({
+        sessionId: "preserving-session",
+        preserveTranscript: true
+      });
+
+      expect(defaultResult).toEqual(expect.objectContaining({
+        didCompress: true,
+        originalSessionId: "non-rotating-session",
+        activeSessionId: "non-rotating-session",
+        rotated: false
+      }));
+      expect(preservedResult).toEqual(expect.objectContaining({
+        didCompress: true,
+        originalSessionId: "preserving-session",
+        replacementSessionId: preservedResult?.activeSessionId,
+        rotated: true
+      }));
+      expect(preservedResult?.activeSessionId).not.toBe("preserving-session");
+      await expect(sessionDb.getSession("preserving-session")).resolves.toEqual(expect.objectContaining({
+        endReason: "compression"
+      }));
+      await expect(sessionDb.getSession(preservedResult!.activeSessionId)).resolves.toEqual(expect.objectContaining({
+        parentSessionId: "preserving-session"
+      }));
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("uses the compression auxiliary route and not memory_compaction for semantic compression", async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "estacoda-runtime-compression-"));
     const requests: ProviderRequest[] = [];

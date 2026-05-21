@@ -365,12 +365,17 @@ function compactResult(overrides: {
   fallbackUsed?: boolean;
   fallbackReason?: string;
   warnings?: string[];
+  activeSessionId?: string;
+  rotated?: boolean;
 } = {}) {
+  const activeSessionId = overrides.activeSessionId ?? "sess-1";
+  const rotated = overrides.rotated ?? false;
   return {
     didCompress: true,
     originalSessionId: "sess-1",
-    activeSessionId: "sess-1",
-    rotated: false,
+    activeSessionId,
+    replacementSessionId: rotated ? activeSessionId : undefined,
+    rotated,
     messages: [
       { id: "m1", role: "user" as const, content: "head" },
       { id: "summary", role: "system" as const, content: "summary", metadata: { semanticCompression: true } },
@@ -410,16 +415,16 @@ function compactResult(overrides: {
 describe("ChannelGateway commands", () => {
   it("/compact runs manual session compaction and replies through the gateway", async () => {
     const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
-    const calls: Array<{ sessionId?: string; focusTopic?: string }> = [];
+    const calls: Array<{ sessionId?: string; focusTopic?: string; preserveTranscript?: boolean }> = [];
     const hygieneRun = vi.fn();
     const gateway = new ChannelGateway({
       adapters: [adapter],
       runtimeForSession: async ({ sessionId }) => ({
         ...createMinimalRuntime(),
         sessionId,
-        compactSession: async (input?: { sessionId?: string; focusTopic?: string }) => {
+        compactSession: async (input?: { sessionId?: string; focusTopic?: string; preserveTranscript?: boolean }) => {
           calls.push(input ?? {});
-          return compactResult();
+          return compactResult({ activeSessionId: sessionId });
         }
       }),
       sessionStore: new InMemoryChannelSessionStore(),
@@ -432,6 +437,7 @@ describe("ChannelGateway commands", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]?.sessionId).toBe(result.sessionId);
     expect(calls[0]?.focusTopic).toBe("deploy handoff");
+    expect(calls[0]?.preserveTranscript).toBe(true);
     expect(result.replyText).toContain("Compacted 8 messages -> 4 messages");
     expect(result.replyText).toContain("Focus topic: deploy handoff");
     expect(hygieneRun).not.toHaveBeenCalled();
@@ -458,6 +464,43 @@ describe("ChannelGateway commands", () => {
 
     expect(result.replyText).toContain("Warning: fallback summary used (failed)");
     expect(result.replyText).toContain("Warning: auxiliary compression failed; used deterministic fallback");
+  });
+
+  it("/compact switches the channel session pointer when compaction rotates", async () => {
+    const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+    const sessionStore = new InMemoryChannelSessionStore();
+    const parentSessionId = await sessionStore.getOrCreateSessionId(makeMessage("seed").sessionKey);
+    const invalidated: string[] = [];
+    const gateway = new ChannelGateway({
+      adapters: [adapter],
+      runtimeForSession: async ({ sessionId }) => ({
+        ...createMinimalRuntime(),
+        sessionId,
+        compactSession: async () => compactResult({
+          activeSessionId: "sess-1-child",
+          rotated: true
+        })
+      }),
+      sessionStore,
+      authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+      runtimeCache: {
+        getOrCreate: async () => {
+          throw new Error("not used");
+        },
+        invalidate: async (sessionId: string) => {
+          invalidated.push(sessionId);
+        },
+        suspend: async () => {}
+      } as never
+    });
+
+    const result = await gateway.receive(makeMessage("/compact deploy handoff"));
+    const nextSessionId = await sessionStore.getOrCreateSessionId(makeMessage("next").sessionKey);
+
+    expect(result.sessionId).toBe("sess-1-child");
+    expect(nextSessionId).toBe("sess-1-child");
+    expect(result.replyText).toContain("Active session: sess-1-child");
+    expect(invalidated).toContain(parentSessionId);
   });
 
   it("/compact is rejected while the same chat has an active turn", async () => {
@@ -514,6 +557,8 @@ describe("ChannelGateway commands", () => {
         reason: "threshold-exceeded" as const,
         preTokens: 100,
         thresholdTokens: 85,
+        activeSessionId: "channel-telegram-default-dm-123456-main",
+        rotated: false,
         result: compactResult(),
         warnings: []
       };
@@ -534,6 +579,58 @@ describe("ChannelGateway commands", () => {
     expect(result.replyText).toBe("ok");
     expect(hygieneRun).toHaveBeenCalledWith(expect.objectContaining({ sessionId: result.sessionId }));
     expect(order).toEqual(["hygiene", "runtime"]);
+  });
+
+  it("adopts a rotated gateway hygiene session before runtime acquisition", async () => {
+    const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+    const sessionStore = new InMemoryChannelSessionStore();
+    const parentSessionId = await sessionStore.getOrCreateSessionId(makeMessage("seed").sessionKey);
+    const runtimeSessionIds: string[] = [];
+    const invalidated: string[] = [];
+    const gateway = new ChannelGateway({
+      adapters: [adapter],
+      runtimeForSession: async ({ sessionId }) => {
+        runtimeSessionIds.push(sessionId);
+        return {
+          ...createMinimalRuntime(),
+          sessionId
+        };
+      },
+      sessionStore,
+      authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+      sessionHygieneService: {
+        run: vi.fn(async () => ({
+          status: "compacted" as const,
+          reason: "threshold-exceeded" as const,
+          preTokens: 100,
+          thresholdTokens: 85,
+          activeSessionId: "sess-1-child",
+          rotated: true,
+          result: compactResult({
+            activeSessionId: "sess-1-child",
+            rotated: true
+          }),
+          warnings: []
+        }))
+      },
+      runtimeCache: {
+        getOrCreate: async () => {
+          throw new Error("not used");
+        },
+        invalidate: async (sessionId: string) => {
+          invalidated.push(sessionId);
+        },
+        suspend: async () => {}
+      } as never
+    });
+
+    const result = await gateway.receive(makeMessage("please handle this"));
+    const storedSessionId = await sessionStore.getOrCreateSessionId(makeMessage("next").sessionKey);
+
+    expect(result.sessionId).toBe("sess-1-child");
+    expect(runtimeSessionIds).toEqual(["sess-1-child"]);
+    expect(storedSessionId).toBe("sess-1-child");
+    expect(invalidated).toContain(parentSessionId);
   });
 
   it("continues the gateway turn when hygiene fails safely", async () => {

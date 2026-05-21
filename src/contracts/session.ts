@@ -123,6 +123,15 @@ export type SessionCompressionStateEvent = {
   state: Partial<SessionCompressionState>;
 };
 
+export type SessionCompactionForkedEvent = {
+  kind: "session-compaction-forked";
+  trigger: SessionCompressionTrigger;
+  childSessionId: string;
+  compactedAt: string;
+  sourceMessageCount: number;
+  compactedMessageCount: number;
+};
+
 export type SessionEvent =
   | {
       kind: "intent-routed";
@@ -325,6 +334,7 @@ export type SessionEvent =
     }
   | SessionHistoryCompressedEvent
   | SessionCompressionStateEvent
+  | SessionCompactionForkedEvent
   | {
       kind: "provider-budget-exhausted";
       budget: string;

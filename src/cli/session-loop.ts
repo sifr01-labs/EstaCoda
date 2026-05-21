@@ -1284,7 +1284,8 @@ async function renderSessionCompaction(runtime: Runtime, focusTopic: string): Pr
   try {
     const normalizedTopic = topic.length === 0 ? undefined : topic;
     return renderSessionCompactionResult(await runtime.compactSession({
-      focusTopic: normalizedTopic
+      focusTopic: normalizedTopic,
+      preserveTranscript: false
     }), {
       focusTopic: normalizedTopic
     });

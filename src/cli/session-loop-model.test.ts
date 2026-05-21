@@ -373,7 +373,7 @@ describe("session-loop session compaction", () => {
   });
 
   it("/compact uses manual session compaction and passes the focus topic", async () => {
-    const calls: Array<{ focusTopic?: string }> = [];
+    const calls: Array<{ focusTopic?: string; preserveTranscript?: boolean }> = [];
     const runtime = {
       ...fakeRuntime({
         provider: "local",
@@ -383,7 +383,7 @@ describe("session-loop session compaction", () => {
         supportsVision: false,
         supportsStructuredOutput: true
       }),
-      compactSession: async (input?: { focusTopic?: string }) => {
+      compactSession: async (input?: { focusTopic?: string; preserveTranscript?: boolean }) => {
         calls.push(input ?? {});
         return compactResult();
       }
@@ -399,7 +399,7 @@ describe("session-loop session compaction", () => {
     });
 
     expect(result).toBe(false);
-    expect(calls).toEqual([{ focusTopic: "billing topic" }]);
+    expect(calls).toEqual([{ focusTopic: "billing topic", preserveTranscript: false }]);
     const text = outputChunks.join("");
     expect(text).toContain("Compacted 8 messages -> 4 messages");
     expect(text).toContain("Token estimate: 2000 -> 900");

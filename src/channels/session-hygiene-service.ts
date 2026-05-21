@@ -17,6 +17,8 @@ export type SessionHygieneResult =
       reason: "threshold-exceeded";
       preTokens: number;
       thresholdTokens: number;
+      activeSessionId: string;
+      rotated: boolean;
       result: CompactResult;
       warnings: readonly string[];
     }
@@ -104,6 +106,7 @@ export class SessionHygieneService {
         profileId: this.#profileId,
         sessionId: input.sessionId,
         trigger: "hygiene",
+        preserveTranscript: true,
         signal: input.signal
       };
       const result = await this.#compressionService.compactIfNeeded(request);
@@ -124,6 +127,8 @@ export class SessionHygieneService {
         reason: "threshold-exceeded",
         preTokens,
         thresholdTokens,
+        activeSessionId: result.activeSessionId,
+        rotated: result.rotated,
         result,
         warnings
       };

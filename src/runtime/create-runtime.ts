@@ -198,6 +198,7 @@ export type Runtime = {
   compactSession?(input?: {
     sessionId?: string;
     focusTopic?: string;
+    preserveTranscript?: boolean;
     signal?: AbortSignal;
   }): Promise<CompactResult>;
   inspectMcpServers(): MCPServerSnapshot[];
@@ -958,6 +959,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         profileId,
         sessionId: targetSessionId,
         focusTopic: input.focusTopic,
+        preserveTranscript: input.preserveTranscript === true,
         signal: input.signal
       });
     },
