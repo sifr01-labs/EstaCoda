@@ -406,6 +406,23 @@ export type SessionEvent =
       conclusion: MemoryConclusion;
     }
   | {
+      kind: "memory-promotion-failed";
+      provider: string;
+      reason: "memory-budget-overflow";
+      targetFile: string;
+      memoryKind: string;
+      pressure?: {
+        state: string;
+        chars: number;
+        maxChars?: number;
+        overflowChars?: number;
+      };
+      conclusionKind?: MemoryConclusion["kind"];
+      conclusionId?: string;
+      remediationHint: string;
+      failure?: string;
+    }
+  | {
       kind: "memory-file-compaction";
       file?: string;
       dryRun?: boolean;

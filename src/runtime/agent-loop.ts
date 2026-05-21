@@ -2,7 +2,7 @@ import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { ChannelAttachment, ChannelKind } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
-import type { MemoryProvider, MemoryPromptContext, SkillOutcome } from "../contracts/memory.js";
+import type { MemoryConclusion, MemoryFileKind, MemoryProvider, MemoryPromptContext, SkillOutcome } from "../contracts/memory.js";
 import type { PromptBudgetReport, PromptSemanticCompressionReport } from "../contracts/prompt.js";
 import type { ModelProfile, ProviderMessage, ProviderRequest, ProviderRoutePreferences } from "../contracts/provider.js";
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
@@ -25,6 +25,7 @@ import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
 import type { ToolExecutor, ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { resolveProjectFactPromotion, resolveUserPreferencePromotion } from "../memory/memory-promotion.js";
+import { isMemoryBudgetOverflowError, type MemoryBudgetOverflowError } from "../memory/memory-store.js";
 import type { MemoryRecallOrchestrator } from "../memory/memory-recall-orchestrator.js";
 import type { SkillLearningManager } from "../skills/skill-learning.js";
 import type { SkillEvolutionStore } from "../skills/skill-evolution.js";
@@ -45,6 +46,7 @@ import { appendArtifactSummary, renderArtifactProgress } from "../utils/artifact
 import { summarizeProviderFailure } from "../providers/provider-diagnostics.js";
 import type { SessionCompressionService } from "../prompt/session-compression-service.js";
 import { estimateMessagesTokensRough } from "../prompt/token-estimator.js";
+import { redactSensitiveText } from "../utils/redaction.js";
 
 export type AgentLoopInput = {
   text: string;
@@ -799,14 +801,27 @@ export class AgentLoop {
       return;
     }
 
-    const preferenceResult = await resolveUserPreferencePromotion({
-      profileId: this.#profileId,
-      currentUserText: userText,
-      sessionDb: this.#sessionDb,
-      memoryProvider: this.#memoryProvider,
-      sourceTrajectoryId: this.#trajectoryRecorder.trajectoryId,
-      sourceEventId: userInputEventId
-    });
+    let preferenceResult: Awaited<ReturnType<typeof resolveUserPreferencePromotion>> | undefined;
+    try {
+      preferenceResult = await resolveUserPreferencePromotion({
+        profileId: this.#profileId,
+        currentUserText: userText,
+        sessionDb: this.#sessionDb,
+        memoryProvider: this.#memoryProvider,
+        sourceTrajectoryId: this.#trajectoryRecorder.trajectoryId,
+        sourceEventId: userInputEventId
+      });
+    } catch (error) {
+      if (!isMemoryBudgetOverflowError(error)) {
+        throw error;
+      }
+      await this.#recordPromotionOverflow({
+        error,
+        targetFile: "USER.md",
+        conclusionKind: "user-preference"
+      });
+      return;
+    }
 
     if (preferenceResult?.kind === "conclusion") {
       const { conclusion } = preferenceResult;
@@ -834,14 +849,27 @@ export class AgentLoop {
       return;
     }
 
-    const projectFactResult = await resolveProjectFactPromotion({
-      profileId: this.#profileId,
-      currentUserText: userText,
-      sessionDb: this.#sessionDb,
-      memoryProvider: this.#memoryProvider,
-      sourceTrajectoryId: this.#trajectoryRecorder.trajectoryId,
-      sourceEventId: userInputEventId
-    });
+    let projectFactResult: Awaited<ReturnType<typeof resolveProjectFactPromotion>> | undefined;
+    try {
+      projectFactResult = await resolveProjectFactPromotion({
+        profileId: this.#profileId,
+        currentUserText: userText,
+        sessionDb: this.#sessionDb,
+        memoryProvider: this.#memoryProvider,
+        sourceTrajectoryId: this.#trajectoryRecorder.trajectoryId,
+        sourceEventId: userInputEventId
+      });
+    } catch (error) {
+      if (!isMemoryBudgetOverflowError(error)) {
+        throw error;
+      }
+      await this.#recordPromotionOverflow({
+        error,
+        targetFile: "MEMORY.md",
+        conclusionKind: "project-fact"
+      });
+      return;
+    }
 
     if (projectFactResult?.kind !== "conclusion") {
       return;
@@ -865,6 +893,49 @@ export class AgentLoop {
       provider: this.#memoryProvider.id,
       conclusion
     });
+  }
+
+  async #recordPromotionOverflow(input: {
+    error: MemoryBudgetOverflowError;
+    targetFile: MemoryFileKind;
+    conclusionKind: MemoryConclusion["kind"];
+    conclusionId?: string;
+  }): Promise<void> {
+    if (this.#memoryProvider === undefined) {
+      return;
+    }
+
+    const payload = {
+      provider: this.#memoryProvider.id,
+      reason: "memory-budget-overflow" as const,
+      targetFile: input.targetFile,
+      memoryKind: input.error.overflow.kind,
+      pressure: {
+        state: input.error.overflow.pressure.state,
+        chars: input.error.overflow.chars,
+        maxChars: input.error.overflow.maxChars,
+        overflowChars: input.error.overflow.overflowChars
+      },
+      conclusionKind: input.conclusionKind,
+      ...(input.conclusionId === undefined ? {} : { conclusionId: input.conclusionId }),
+      remediationHint: "Use memory-file compaction or reduce memory size before retrying promotion.",
+      failure: truncate(redactSensitiveText(input.error.message), 240)
+    };
+
+    try {
+      this.#trajectoryRecorder.record("memory-promotion-failed", payload);
+    } catch {
+      // Promotion overflow diagnostics must not fail an otherwise successful turn.
+    }
+
+    try {
+      await this.#sessionDb.appendEvent(this.#currentSessionId(), {
+        kind: "memory-promotion-failed",
+        ...payload
+      });
+    } catch {
+      // Session diagnostics are best-effort for memory-side promotion failures.
+    }
   }
 
   #currentSessionId(): string {
@@ -901,6 +972,10 @@ function isResumeRequest(text: string): boolean {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function truncate(value: string, maxChars: number): string {
+  return value.length <= maxChars ? value : `${value.slice(0, maxChars - 3)}...`;
 }
 
 

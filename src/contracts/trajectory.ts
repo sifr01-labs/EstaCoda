@@ -13,6 +13,7 @@ export type TrajectoryEventKind =
   | "memory-write"
   | "memory-conclusion"
   | "memory-promotion"
+  | "memory-promotion-failed"
   | "memory-file-compaction"
   | "delegation-started"
   | "delegation-finished"
