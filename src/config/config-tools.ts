@@ -25,7 +25,7 @@ export type ConfigToolsOptions = {
   workspaceRoot: string;
   homeDir?: string;
   profileId?: string;
-  sessionId?: string;
+  sessionId?: string | (() => string);
   sessionDb?: Pick<SessionDB, "listEvents">;
 };
 
@@ -116,7 +116,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
         const status = await buildCompressionStatusReport({
           loaded,
           sessionDb: options.sessionDb,
-          sessionId: options.sessionId
+          sessionId: typeof options.sessionId === "function" ? options.sessionId() : options.sessionId
         });
 
         return {

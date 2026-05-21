@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SQLiteSessionDB } from "./sqlite-session-db.js";
 import { reconstructSessionCompressionState } from "./session-compression-state.js";
+import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 
 describe("SQLiteSessionDB", () => {
   let tmpDir: string;
@@ -42,6 +43,92 @@ describe("SQLiteSessionDB", () => {
     }
   });
 
+  it("round-trips session lineage and ended fields", async () => {
+    const db = new SQLiteSessionDB({
+      path: dbPath,
+      now: () => new Date("2030-01-01T00:00:00.000Z")
+    });
+
+    try {
+      const parent = await db.createSession({
+        id: "parent-session",
+        profileId: "default",
+        title: "Parent",
+        endedAt: "2030-01-01T00:00:10.000Z",
+        endReason: "compression"
+      });
+      const child = await db.createSession({
+        id: "child-session",
+        profileId: "default",
+        parentSessionId: parent.id,
+        endedAt: "2030-01-01T00:00:20.000Z",
+        endReason: "manual-test"
+      });
+
+      await expect(db.getSession("child-session")).resolves.toMatchObject({
+        id: "child-session",
+        parentSessionId: "parent-session",
+        endedAt: "2030-01-01T00:00:20.000Z",
+        endReason: "manual-test"
+      });
+      await expect(db.listSessions("default")).resolves.toContainEqual(expect.objectContaining({
+        id: child.id,
+        parentSessionId: "parent-session",
+        endedAt: "2030-01-01T00:00:20.000Z",
+        endReason: "manual-test"
+      }));
+    } finally {
+      db.close();
+    }
+  });
+
+  it("migrates existing session DBs without ended columns", async () => {
+    const legacy = openDefaultSQLiteDatabase({ path: dbPath });
+    try {
+      legacy.exec(`
+        create table sessions (
+          id text primary key,
+          profile_id text not null default 'default',
+          title text,
+          created_at text not null,
+          updated_at text not null,
+          parent_session_id text,
+          metadata_json text
+        );
+        create table schema_version (version integer primary key);
+        insert into schema_version (version) values (5);
+        insert into sessions (
+          id, profile_id, title, created_at, updated_at, parent_session_id, metadata_json
+        ) values (
+          'legacy-child', 'default', 'Legacy child',
+          '2030-01-01T00:00:00.000Z', '2030-01-01T00:00:00.000Z',
+          'legacy-parent', null
+        );
+      `);
+    } finally {
+      legacy.close();
+    }
+
+    const migrated = new SQLiteSessionDB({ path: dbPath });
+    try {
+      const session = await migrated.getSession("legacy-child");
+      expect(session).toMatchObject({
+        id: "legacy-child",
+        parentSessionId: "legacy-parent"
+      });
+      expect(session?.endedAt).toBeUndefined();
+      expect(session?.endReason).toBeUndefined();
+
+      await migrated.endSession("legacy-child", "compression");
+      await expect(migrated.getSession("legacy-child")).resolves.toMatchObject({
+        endedAt: expect.any(String),
+        endReason: "compression"
+      });
+    } finally {
+      migrated.close();
+    }
+  });
+
   it("opens an existing DB and preserves FTS search behavior", async () => {
     const first = new SQLiteSessionDB({ path: dbPath });
     try {
@@ -74,6 +161,122 @@ describe("SQLiteSessionDB", () => {
         sessionId: "missing-session",
         messages: [{ role: "user", content: "replacement" }]
       })).rejects.toThrow("Session not found: missing-session");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("marks sessions ended without deleting messages and keeps the first end reason", async () => {
+    const times = [
+      "2030-01-01T00:00:00.000Z",
+      "2030-01-01T00:00:01.000Z",
+      "2030-01-01T00:00:02.000Z",
+      "2030-01-01T00:00:03.000Z"
+    ];
+    const db = new SQLiteSessionDB({
+      path: dbPath,
+      now: () => new Date(times.shift() ?? "2030-01-01T00:00:09.000Z")
+    });
+
+    try {
+      await db.createSession({ id: "session-1", profileId: "default" });
+      await db.appendMessage({
+        id: "message-1",
+        sessionId: "session-1",
+        role: "user",
+        content: "ended sessions stay searchable"
+      });
+
+      await db.endSession("session-1", "compression");
+      await db.endSession("session-1", "second-call");
+
+      await expect(db.getSession("session-1")).resolves.toMatchObject({
+        endedAt: "2030-01-01T00:00:03.000Z",
+        endReason: "compression"
+      });
+      await expect(db.listMessages("session-1")).resolves.toHaveLength(1);
+      const results = await db.search("searchable", { profileId: "default" });
+      expect(results).toHaveLength(1);
+      expect(results[0].session).toMatchObject({
+        id: "session-1",
+        endedAt: "2030-01-01T00:00:03.000Z",
+        endReason: "compression"
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("requires an existing session before rewriting a transcript", async () => {
+    const db = new SQLiteSessionDB({ path: dbPath });
+    try {
+      await expect(db.rewriteTranscript({
+        sessionId: "missing-session",
+        messages: [{ role: "user", content: "replacement" }]
+      })).rejects.toThrow("Session not found: missing-session");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rewrites transcripts transactionally while preserving timestamps and FTS", async () => {
+    const db = new SQLiteSessionDB({
+      path: dbPath,
+      now: () => new Date("2030-01-01T00:00:00.000Z"),
+      id: (() => {
+        let next = 0;
+        return () => `rewrite-${++next}`;
+      })()
+    });
+
+    try {
+      await db.createSession({ id: "session-1", profileId: "default" });
+      await db.appendMessage({ id: "old-1", sessionId: "session-1", role: "user", content: "old rewrite searchable" });
+
+      const rewritten = await db.rewriteTranscript({
+        sessionId: "session-1",
+        messages: [
+          { role: "user", content: "new rewrite alpha" },
+          { id: "supplied", role: "agent", content: "new rewrite beta", createdAt: "2030-01-01T00:00:10.000Z" }
+        ]
+      });
+
+      expect(rewritten.map((message) => message.id)).toEqual(["rewrite-1", "supplied"]);
+      expect(rewritten.map((message) => message.createdAt)).toEqual([
+        "2030-01-01T00:00:00.000Z",
+        "2030-01-01T00:00:10.000Z"
+      ]);
+      await expect(db.search("old", { profileId: "default" })).resolves.toHaveLength(0);
+      await expect(db.search("alpha", { profileId: "default" })).resolves.toHaveLength(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rolls back messages and FTS rows when transcript rewrite fails", async () => {
+    const db = new SQLiteSessionDB({ path: dbPath });
+
+    try {
+      await db.createSession({ id: "session-1", profileId: "default" });
+      await db.appendMessage({
+        id: "old-1",
+        sessionId: "session-1",
+        role: "user",
+        content: "old rewrite rollback searchable"
+      });
+
+      await expect(db.rewriteTranscript({
+        sessionId: "session-1",
+        messages: [
+          { id: "duplicate", role: "user", content: "new rewrite should rollback" },
+          { id: "duplicate", role: "agent", content: "new rewrite should also rollback" }
+        ]
+      })).rejects.toThrow();
+
+      const messages = await db.listMessages("session-1");
+      expect(messages.map((message) => message.id)).toEqual(["old-1"]);
+      await expect(db.search("rollback", { profileId: "default" })).resolves.toHaveLength(1);
+      await expect(db.search("should", { profileId: "default" })).resolves.toHaveLength(0);
     } finally {
       db.close();
     }

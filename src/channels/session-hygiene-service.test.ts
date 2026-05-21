@@ -62,7 +62,13 @@ describe("SessionHygieneService", () => {
     expect(compactIfNeeded).toHaveBeenCalledWith(expect.objectContaining<Partial<SessionCompressionRequest>>({
       profileId: "profile",
       sessionId: "session",
-      trigger: "hygiene"
+      trigger: "hygiene",
+      preserveTranscript: true
+    }));
+    expect(result).toEqual(expect.objectContaining({
+      status: "compacted",
+      activeSessionId: "session",
+      rotated: false
     }));
   });
 
@@ -135,9 +141,15 @@ async function dbWithMessages(sessionId: string, contents: string[]): Promise<In
   return db;
 }
 
-function compactResult(): CompactResult {
+function compactResult(overrides: { activeSessionId?: string; rotated?: boolean } = {}): CompactResult {
+  const activeSessionId = overrides.activeSessionId ?? "session";
+  const rotated = overrides.rotated ?? false;
   return {
     didCompress: true,
+    originalSessionId: "session",
+    activeSessionId,
+    replacementSessionId: rotated ? activeSessionId : undefined,
+    rotated,
     messages: [
       { id: "summary", role: "system", content: "summary", metadata: { semanticCompression: true } },
       { id: "latest", role: "user", content: "latest" }

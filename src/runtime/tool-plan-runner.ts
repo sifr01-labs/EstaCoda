@@ -7,6 +7,7 @@ import type { ToolCallPlanner } from "../tools/tool-call-planner.js";
 import type { ToolExecutor, ToolExecutionRecord } from "../tools/tool-executor.js";
 import { packetizeToolExecution } from "../tools/tool-result-packet.js";
 import type { RunRecorder } from "./run-recorder.js";
+import type { SessionRuntimeContext } from "./session-runtime-context.js";
 import { emit } from "../utils/runtime-helpers.js";
 
 export type ToolPlanRunnerOptions = {
@@ -14,6 +15,7 @@ export type ToolPlanRunnerOptions = {
   toolExecutor: ToolExecutor;
   runRecorder: RunRecorder;
   sessionId: string;
+  sessionRuntimeContext?: SessionRuntimeContext;
   maxConcurrentSafeTools: number;
 };
 
@@ -22,6 +24,7 @@ export class ToolPlanRunner {
   readonly #toolExecutor: ToolExecutor;
   readonly #runRecorder: RunRecorder;
   readonly #sessionId: string;
+  readonly #sessionRuntimeContext: SessionRuntimeContext | undefined;
   readonly #maxConcurrentSafeTools: number;
 
   constructor(options: ToolPlanRunnerOptions) {
@@ -29,6 +32,7 @@ export class ToolPlanRunner {
     this.#toolExecutor = options.toolExecutor;
     this.#runRecorder = options.runRecorder;
     this.#sessionId = options.sessionId;
+    this.#sessionRuntimeContext = options.sessionRuntimeContext;
     this.#maxConcurrentSafeTools = options.maxConcurrentSafeTools;
   }
 
@@ -135,7 +139,7 @@ export class ToolPlanRunner {
       tool: plan.tool,
       input: plan.input,
       trustedWorkspace: input.trustedWorkspace,
-      sessionId: this.#sessionId,
+      sessionId: this.#currentSessionId(),
       toolCallId: plan.id,
       toolCallName: plan.tool,
       providerNativeToolCall: plan.raw,
@@ -179,6 +183,10 @@ export class ToolPlanRunner {
     });
 
     return execution;
+  }
+
+  #currentSessionId(): string {
+    return this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId;
   }
 }
 

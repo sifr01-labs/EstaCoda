@@ -10,16 +10,14 @@ import type { LoadedSkill, SkillDefinition, SkillCatalogEntry } from "../contrac
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
 import type { AgentProfileMode, AgentResponseLanguage, UiFlavor, UiLanguage } from "../config/runtime-config.js";
-import type { SessionCompressionConfig } from "../config/runtime-config.js";
 import { PromptCache } from "../prompt/prompt-cache.js";
 import {
   assembleProviderContinuationPrompt,
   assembleProviderPrompt
 } from "../prompt/prompt-assembly.js";
 import { packSessionHistory } from "../prompt/history-packer.js";
-import type { CompactResult, SessionCompressionService } from "../prompt/session-compression-service.js";
+import type { CompactResult } from "../prompt/session-compression-service.js";
 import { SUMMARY_FORMAT_VERSION } from "../prompt/semantic-compressor.js";
-import { estimateMessagesTokensRough } from "../prompt/token-estimator.js";
 import { normalizeProviderMessagesStrict } from "../providers/provider-message-normalizer.js";
 import type { PromptSemanticCompressionReport } from "../contracts/prompt.js";
 import type { ProviderExecutionResult, ProviderExecutor, ProviderRuntimeEvent } from "../providers/provider-executor.js";
@@ -29,6 +27,7 @@ import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { RunRecorder } from "./run-recorder.js";
 import type { ToolPlanRunner } from "./tool-plan-runner.js";
 import type { SkillSetupContext } from "./agent-loop.js";
+import type { SessionRuntimeContext } from "./session-runtime-context.js";
 import { emit, isAborted } from "../utils/runtime-helpers.js";
 
 export type ProviderTurnLoopBudgets = {
@@ -46,12 +45,11 @@ export type ProviderTurnLoopOptions = {
   providerPreferences: ProviderRoutePreferences;
   sessionDb: SessionDB;
   sessionId: string;
+  sessionRuntimeContext?: SessionRuntimeContext;
   profileId: string;
   trajectoryRecorder: TrajectoryRecorder;
   runRecorder: RunRecorder;
   toolPlanRunner: ToolPlanRunner;
-  sessionCompressionService?: Pick<SessionCompressionService, "compactIfNeeded">;
-  compressionConfig?: SessionCompressionConfig;
   soul: string | undefined;
   memoryPromptContext: MemoryPromptContext | undefined;
   skillsIndex: SkillCatalogEntry[];
@@ -75,12 +73,10 @@ export class ProviderTurnLoop {
   readonly #providerPreferences: ProviderRoutePreferences;
   readonly #sessionDb: SessionDB;
   readonly #sessionId: string;
-  readonly #profileId: string;
+  readonly #sessionRuntimeContext: SessionRuntimeContext | undefined;
   readonly #trajectoryRecorder: TrajectoryRecorder;
   readonly #runRecorder: RunRecorder;
   readonly #toolPlanRunner: ToolPlanRunner;
-  readonly #sessionCompressionService: Pick<SessionCompressionService, "compactIfNeeded"> | undefined;
-  readonly #compressionConfig: SessionCompressionConfig | undefined;
   readonly #promptCache: PromptCache;
   readonly #soul: string | undefined;
   readonly #skillsIndex: SkillCatalogEntry[];
@@ -98,12 +94,10 @@ export class ProviderTurnLoop {
     this.#providerPreferences = options.providerPreferences;
     this.#sessionDb = options.sessionDb;
     this.#sessionId = options.sessionId;
-    this.#profileId = options.profileId;
+    this.#sessionRuntimeContext = options.sessionRuntimeContext;
     this.#trajectoryRecorder = options.trajectoryRecorder;
     this.#runRecorder = options.runRecorder;
     this.#toolPlanRunner = options.toolPlanRunner;
-    this.#sessionCompressionService = options.sessionCompressionService;
-    this.#compressionConfig = options.compressionConfig;
     this.#promptCache = new PromptCache();
     this.#soul = options.soul;
     this.#skillsIndex = options.skillsIndex;
@@ -133,6 +127,7 @@ export class ProviderTurnLoop {
     attachments: ChannelAttachment[] | undefined;
     memoryPromptContext: MemoryPromptContext | undefined;
     providerTools: OpenAICompatibleToolSchema[];
+    preflightCompression?: PromptSemanticCompressionReport;
     fallbackText: string;
     onEvent?: RuntimeEventSink;
     toolPlans: ToolCallPlan[];
@@ -323,6 +318,7 @@ export class ProviderTurnLoop {
     attachments: ChannelAttachment[] | undefined;
     memoryPromptContext: MemoryPromptContext | undefined;
     providerTools: OpenAICompatibleToolSchema[];
+    preflightCompression?: PromptSemanticCompressionReport;
     fallbackText: string;
     onEvent?: RuntimeEventSink;
     toolPlans: ToolCallPlan[];
@@ -333,14 +329,14 @@ export class ProviderTurnLoop {
       return undefined;
     }
 
-    const sessionHistory = await this.#providerSessionHistory({ allowSemanticCompression: true, signal: input.signal });
+    const sessionHistory = await this.#providerSessionHistory();
     const prompt = assembleProviderPrompt({
       ...input,
       model: this.#model,
       cache: this.#promptCache,
       sessionHistory: sessionHistory.messages,
       compactionNotice: sessionHistory.compactionNotice,
-      compression: sessionHistory.compression,
+      compression: input.preflightCompression ?? sessionHistory.compression,
       soul: this.#soul,
       memoryPromptContext: input.memoryPromptContext,
       skillsIndex: this.#skillsIndex,
@@ -369,7 +365,7 @@ export class ProviderTurnLoop {
       providerOrder: [this.#model.provider],
       ...this.#providerPreferences
     }, {
-      sessionId: this.#sessionId,
+      sessionId: this.#currentSessionId(),
       stream: true,
       signal: input.signal,
       primaryRoute: this.#primaryModelRoute,
@@ -382,7 +378,7 @@ export class ProviderTurnLoop {
       this.#lastActualPromptTokens = execution.response.usage.inputTokens;
     }
 
-    await this.#sessionDb.appendEvent(this.#sessionId, {
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), {
       kind: "provider-completion",
       iteration: input.iteration,
       ok: execution.ok,
@@ -453,7 +449,7 @@ export class ProviderTurnLoop {
       return undefined;
     }
 
-    const sessionHistory = await this.#providerSessionHistory({ allowSemanticCompression: false, signal: input.signal });
+    const sessionHistory = await this.#providerSessionHistory();
     const prompt = assembleProviderContinuationPrompt({
       ...input,
       model: this.#model,
@@ -489,7 +485,7 @@ export class ProviderTurnLoop {
       providerOrder: [this.#model.provider],
       ...this.#providerPreferences
     }, {
-      sessionId: this.#sessionId,
+      sessionId: this.#currentSessionId(),
       stream: true,
       signal: input.signal,
       primaryRoute: this.#primaryModelRoute,
@@ -502,7 +498,7 @@ export class ProviderTurnLoop {
       this.#lastActualPromptTokens = execution.response.usage.inputTokens;
     }
 
-    await this.#sessionDb.appendEvent(this.#sessionId, {
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), {
       kind: "provider-continuation",
       iteration: input.iteration,
       ok: execution.ok,
@@ -548,23 +544,17 @@ export class ProviderTurnLoop {
     return execution;
   }
 
-  async #providerSessionHistory(input: {
-    allowSemanticCompression: boolean;
-    signal?: AbortSignal;
-  }): Promise<{
+  async #providerSessionHistory(): Promise<{
     messages: Array<Pick<import("../contracts/provider.js").ProviderMessage, "role" | "content">>;
     compactionNotice?: string;
     compression?: PromptSemanticCompressionReport;
   }> {
-    const sourceMessages = await this.#sessionDb.listMessages(this.#sessionId);
-    const compression = input.allowSemanticCompression
-      ? await this.#compactSessionHistoryIfNeeded(sourceMessages, input.signal)
-      : undefined;
-    const messages = compression?.messages ?? sourceMessages;
+    const sourceMessages = await this.#sessionDb.listMessages(this.#currentSessionId());
+    const messages = sourceMessages;
     const packed = packSessionHistory(messages);
 
     if (packed.sourceMessageCount > 0) {
-      await this.#sessionDb.appendEvent(this.#sessionId, {
+      await this.#sessionDb.appendEvent(this.#currentSessionId(), {
         kind: "session-history-packed",
         sourceMessageCount: packed.sourceMessageCount,
         summarizedMessageCount: packed.summarizedMessageCount,
@@ -586,61 +576,20 @@ export class ProviderTurnLoop {
     return {
       messages: packed.messages,
       compactionNotice: semanticCompressionNotice(messages),
-      compression: compression?.report
+      compression: undefined
     };
   }
 
-  async #compactSessionHistoryIfNeeded(
-    messages: SessionMessage[],
-    signal: AbortSignal | undefined
-  ): Promise<{
-    messages: ReplacementSessionMessage[];
-    report: PromptSemanticCompressionReport;
-  } | undefined> {
-    if (
-      this.#sessionCompressionService === undefined ||
-      this.#compressionConfig?.enabled !== true ||
-      this.#model === undefined
-    ) {
-      return undefined;
-    }
+  lastPromptTokens(): number {
+    return this.#lastPromptTokens;
+  }
 
-    const preTokens = estimateMessagesTokensRough(messages.map((message) => ({
-      role: message.role,
-      content: message.content,
-      metadata: message.metadata
-    })));
-    const contextLength = this.#compressionConfig.summaryModelContextLength ?? this.#model.contextWindowTokens ?? 128_000;
-    const thresholdTokens = Math.floor(contextLength * this.#compressionConfig.threshold);
-    if (preTokens < thresholdTokens) {
-      return undefined;
-    }
+  lastActualPromptTokens(): number | undefined {
+    return this.#lastActualPromptTokens;
+  }
 
-    try {
-      const result = await this.#sessionCompressionService.compactIfNeeded({
-        profileId: this.#profileId,
-        sessionId: this.#sessionId,
-        ...(this.#lastPromptTokens > 0 ? { lastPromptTokensEstimated: this.#lastPromptTokens } : {}),
-        ...(this.#lastActualPromptTokens === undefined ? {} : { lastActualPromptTokens: this.#lastActualPromptTokens }),
-        signal
-      });
-      return {
-        messages: result.messages.map((message) => ({ ...message, metadata: cloneMetadata(message.metadata) })),
-        report: compressionReportFromResult(result)
-      };
-    } catch (error) {
-      return {
-        messages: messages.map(toReplacementMessage),
-        report: {
-          triggered: false,
-          mode: "none",
-          preTokens,
-          fallbackUsed: true,
-          fallbackReason: `compression-failed: ${errorMessage(error)}`,
-          warnings: [`semantic compression failed before prompt assembly: ${errorMessage(error)}`]
-        }
-      };
-    }
+  #currentSessionId(): string {
+    return this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId;
   }
 }
 
@@ -660,7 +609,7 @@ function semanticCompressionNotice(messages: ReadonlyArray<SessionMessage | Repl
   ].join("\n");
 }
 
-function compressionReportFromResult(result: CompactResult): PromptSemanticCompressionReport {
+export function compressionReportFromResult(result: CompactResult): PromptSemanticCompressionReport {
   return {
     triggered: result.didCompress,
     mode: result.didCompress
@@ -688,26 +637,6 @@ function compressionReportFromResult(result: CompactResult): PromptSemanticCompr
 function isDeterministicCompressionFallback(reason: string | undefined): boolean {
   return reason === "deterministic-fallback" || reason === "static-emergency-marker";
 }
-
-function toReplacementMessage(message: SessionMessage): ReplacementSessionMessage {
-  return {
-    id: message.id,
-    role: message.role,
-    content: message.content,
-    createdAt: message.createdAt,
-    channel: message.channel,
-    metadata: cloneMetadata(message.metadata)
-  };
-}
-
-function cloneMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
-  return metadata === undefined ? undefined : { ...metadata };
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 
 function isRecoverableToolPlanStatus(status: ToolCallPlan["status"]): boolean {
   return status === "invalid" || status === "unavailable" || status === "blocked";

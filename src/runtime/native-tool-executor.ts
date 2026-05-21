@@ -5,20 +5,24 @@ import type { ToolExecutor, ToolExecutionRecord } from "../tools/tool-executor.j
 import { inferImageAspectRatio } from "../tools/image-tool-utils.js";
 import { emit } from "../utils/runtime-helpers.js";
 import type { RunRecorder } from "./run-recorder.js";
+import type { SessionRuntimeContext } from "./session-runtime-context.js";
 
 export class NativeToolExecutor {
   readonly #toolExecutor: ToolExecutor;
   readonly #runRecorder: RunRecorder;
   readonly #sessionId: string;
+  readonly #sessionRuntimeContext: SessionRuntimeContext | undefined;
 
   constructor(options: {
     toolExecutor: ToolExecutor;
     runRecorder: RunRecorder;
     sessionId: string;
+    sessionRuntimeContext?: SessionRuntimeContext;
   }) {
     this.#toolExecutor = options.toolExecutor;
     this.#runRecorder = options.runRecorder;
     this.#sessionId = options.sessionId;
+    this.#sessionRuntimeContext = options.sessionRuntimeContext;
   }
 
   async executeDeterministicNativeTools(input: {
@@ -57,7 +61,7 @@ export class NativeToolExecutor {
       tool: plan.tool,
       input: plan.input,
       trustedWorkspace: input.trustedWorkspace,
-      sessionId: this.#sessionId,
+      sessionId: this.#currentSessionId(),
       signal: input.signal
     });
 
@@ -78,5 +82,9 @@ export class NativeToolExecutor {
     await this.#runRecorder.recordToolPlan(plan);
 
     return { executions: [execution], plans: [plan] };
+  }
+
+  #currentSessionId(): string {
+    return this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId;
   }
 }

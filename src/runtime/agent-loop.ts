@@ -3,7 +3,7 @@ import type { ChannelAttachment, ChannelKind } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { MemoryProvider, MemoryPromptContext, SkillOutcome } from "../contracts/memory.js";
-import type { PromptBudgetReport } from "../contracts/prompt.js";
+import type { PromptBudgetReport, PromptSemanticCompressionReport } from "../contracts/prompt.js";
 import type { ModelProfile, ProviderMessage, ProviderRequest, ProviderRoutePreferences } from "../contracts/provider.js";
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SecurityDecision, SecurityPolicy } from "../contracts/security.js";
@@ -17,7 +17,7 @@ import type {
 } from "../contracts/skill.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolDefinition, ToolRiskClass, ToolsetName } from "../contracts/tool.js";
-import type { AgentProfileMode, AgentResponseLanguage, UiFlavor, UiLanguage } from "../config/runtime-config.js";
+import type { AgentProfileMode, AgentResponseLanguage, SessionCompressionConfig, UiFlavor, UiLanguage } from "../config/runtime-config.js";
 import type { ContextReferenceExpander } from "../context/context-reference-expander.js";
 import type { ProviderExecutionResult, ProviderRuntimeEvent } from "../providers/provider-executor.js";
 import type { ToolCallPlanner } from "../tools/tool-call-planner.js";
@@ -30,7 +30,7 @@ import type { SkillLearningManager } from "../skills/skill-learning.js";
 import type { SkillEvolutionStore } from "../skills/skill-evolution.js";
 import { compileSkillWorkflowPlan } from "../skills/skill-workflow-planner.js";
 import { createSkillRouteTelemetry, hashSkillRoutePrompt } from "../skills/skill-usage-telemetry.js";
-import { ProviderTurnLoop } from "./provider-turn-loop.js";
+import { compressionReportFromResult, ProviderTurnLoop } from "./provider-turn-loop.js";
 import type { IntentRouter } from "./intent-router.js";
 import { RunRecorder } from "./run-recorder.js";
 import type { RuntimeRouter } from "./runtime-router.js";
@@ -38,10 +38,13 @@ import { summarizeAttachments } from "./runtime-router.js";
 import { ToolPlanRunner, toolResultStats } from "./tool-plan-runner.js";
 import { SkillWorkflowExecutor } from "./skill-workflow-executor.js";
 import { NativeToolExecutor } from "./native-tool-executor.js";
+import type { SessionRuntimeContext } from "./session-runtime-context.js";
 import { buildFallbackResponse, cancelledResponse, buildResumeNote, renderToolPlanProgress } from "./response-builders.js";
 import { emit, isAborted } from "../utils/runtime-helpers.js";
 import { appendArtifactSummary, renderArtifactProgress } from "../utils/artifact-formatting.js";
 import { summarizeProviderFailure } from "../providers/provider-diagnostics.js";
+import type { SessionCompressionService } from "../prompt/session-compression-service.js";
+import { estimateMessagesTokensRough } from "../prompt/token-estimator.js";
 
 export type AgentLoopInput = {
   text: string;
@@ -83,12 +86,15 @@ export type AgentLoopOptions = {
   trajectoryRecorder: TrajectoryRecorder;
   sessionDb: SessionDB;
   sessionId: string;
+  sessionRuntimeContext?: SessionRuntimeContext;
   profileId: string;
   toolExecutor: ToolExecutor;
   toolCallPlanner?: ToolCallPlanner;
   memoryProvider?: MemoryProvider;
   memoryPromptContext?: MemoryPromptContext;
   memoryRecallOrchestrator?: Pick<MemoryRecallOrchestrator, "prepareForTurn">;
+  sessionCompressionService?: Pick<SessionCompressionService, "compactIfNeeded">;
+  compressionConfig?: SessionCompressionConfig;
   model?: ModelProfile;
   providerPreferences?: ProviderRoutePreferences;
   contextReferenceExpander?: ContextReferenceExpander;
@@ -149,12 +155,15 @@ export class AgentLoop {
   readonly #trajectoryRecorder: TrajectoryRecorder;
   readonly #sessionDb: SessionDB;
   readonly #sessionId: string;
+  readonly #sessionRuntimeContext: SessionRuntimeContext | undefined;
   readonly #profileId: string;
   readonly #toolExecutor: ToolExecutor;
   readonly #toolCallPlanner: ToolCallPlanner | undefined;
   readonly #memoryProvider: MemoryProvider | undefined;
   readonly #memoryPromptContext: MemoryPromptContext | undefined;
   readonly #memoryRecallOrchestrator: Pick<MemoryRecallOrchestrator, "prepareForTurn"> | undefined;
+  readonly #sessionCompressionService: Pick<SessionCompressionService, "compactIfNeeded"> | undefined;
+  readonly #compressionConfig: SessionCompressionConfig | undefined;
   readonly #model: ModelProfile | undefined;
   readonly #providerPreferences: ProviderRoutePreferences;
   readonly #contextReferenceExpander: ContextReferenceExpander | undefined;
@@ -182,12 +191,15 @@ export class AgentLoop {
     this.#trajectoryRecorder = options.trajectoryRecorder;
     this.#sessionDb = options.sessionDb;
     this.#sessionId = options.sessionId;
+    this.#sessionRuntimeContext = options.sessionRuntimeContext;
     this.#profileId = options.profileId;
     this.#toolExecutor = options.toolExecutor;
     this.#toolCallPlanner = options.toolCallPlanner;
     this.#memoryProvider = options.memoryProvider;
     this.#memoryPromptContext = options.memoryPromptContext;
     this.#memoryRecallOrchestrator = options.memoryRecallOrchestrator;
+    this.#sessionCompressionService = options.sessionCompressionService;
+    this.#compressionConfig = options.compressionConfig;
     this.#model = options.model;
     this.#providerPreferences = options.providerPreferences ?? {};
     this.#contextReferenceExpander = options.contextReferenceExpander;
@@ -227,7 +239,7 @@ export class AgentLoop {
       : input.text;
     await emit(input.onEvent, {
       kind: "agent-start",
-      sessionId: this.#sessionId,
+      sessionId: this.#currentSessionId(),
       input: effectiveText
     });
     if (isAborted(input.signal)) {
@@ -261,7 +273,7 @@ export class AgentLoop {
     const attachments = route.attachments;
 
     await this.#sessionDb.appendMessage({
-      sessionId: this.#sessionId,
+      sessionId: this.#currentSessionId(),
       role: "user",
       content: effectiveText,
       channel: input.channel,
@@ -280,7 +292,7 @@ export class AgentLoop {
     });
 
     if (context !== undefined && context.references.length > 0) {
-      await this.#sessionDb.appendEvent(this.#sessionId, {
+      await this.#sessionDb.appendEvent(this.#currentSessionId(), {
         kind: "context-expanded",
         references: context.references,
         blocks: context.blocks.map((block) => ({
@@ -322,7 +334,7 @@ export class AgentLoop {
     }
 
     if (route.attachmentFailureResponse !== undefined) {
-      await this.#sessionDb.appendEvent(this.#sessionId, {
+      await this.#sessionDb.appendEvent(this.#currentSessionId(), {
         kind: "intent-routed",
         route: route.intent
       });
@@ -336,7 +348,7 @@ export class AgentLoop {
           targetConversationIsActive: true
         }
       }, "strict");
-      await this.#sessionDb.appendEvent(this.#sessionId, {
+      await this.#sessionDb.appendEvent(this.#currentSessionId(), {
         kind: "security-decided",
         decision: attachmentFailureSecurityAssessment.decision,
         description: "respond to attachment failure",
@@ -358,7 +370,7 @@ export class AgentLoop {
         artifacts: []
       });
       await this.#sessionDb.appendMessage({
-        sessionId: this.#sessionId,
+        sessionId: this.#currentSessionId(),
         role: "agent",
         content: route.attachmentFailureResponse,
         channel: input.channel,
@@ -406,7 +418,7 @@ export class AgentLoop {
     const selectedSkillResources = route.selectedSkillResources;
     const selectedSkillSetup = route.selectedSkillSetup;
 
-    await this.#sessionDb.appendEvent(this.#sessionId, {
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), {
       kind: "intent-routed",
       route: intent
     });
@@ -436,7 +448,7 @@ export class AgentLoop {
         kind: "skill",
         name: selectedSkill.name
       });
-      await this.#sessionDb.appendEvent(this.#sessionId, {
+      await this.#sessionDb.appendEvent(this.#currentSessionId(), {
         kind: "skill-selected",
         skill: selectedSkill.name
       });
@@ -464,7 +476,7 @@ export class AgentLoop {
     });
     const securityDecision = securityAssessment.decision;
 
-    await this.#sessionDb.appendEvent(this.#sessionId, {
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), {
       kind: "security-decided",
       decision: securityDecision,
       description: selectedSkill === undefined ? "respond to user prompt" : `run skill ${selectedSkill.name}`,
@@ -521,6 +533,7 @@ export class AgentLoop {
     });
     const deterministicImageGenerationRan = deterministicNativeTools.executions.some((execution) => execution.tool.name === "image.generate");
     const providerTools = this.#model?.supportsTools === true ? this.#providerTools : [];
+    const preflightCompression = await this.#compactBeforeProviderTurn(input.signal);
     const providerLoop = await this.#providerTurnLoop.run({
       userText: effectiveText,
       routedText,
@@ -536,6 +549,7 @@ export class AgentLoop {
       attachments,
       memoryPromptContext: turnMemoryPromptContext,
       providerTools: deterministicImageGenerationRan ? suppressImageGenerationTools(providerTools) : providerTools,
+      preflightCompression,
       fallbackText: fallbackResponse.text,
       onEvent: input.onEvent,
       toolPlans,
@@ -645,7 +659,7 @@ export class AgentLoop {
 
     await this.#skillLearningManager?.observeTurn({
       profileId: this.#profileId,
-      sessionId: this.#sessionId,
+      sessionId: this.#currentSessionId(),
       userText: effectiveText,
       selectedSkill,
       toolExecutions
@@ -675,7 +689,7 @@ export class AgentLoop {
     });
 
     await this.#sessionDb.appendMessage({
-      sessionId: this.#sessionId,
+      sessionId: this.#currentSessionId(),
       role: "agent",
       content: response.text,
       channel: input.channel,
@@ -728,6 +742,58 @@ export class AgentLoop {
     return result.context;
   }
 
+  async #compactBeforeProviderTurn(signal: AbortSignal | undefined): Promise<PromptSemanticCompressionReport | undefined> {
+    if (
+      !this.#providerTurnLoop.canRunProvider() ||
+      this.#sessionCompressionService === undefined ||
+      this.#compressionConfig?.enabled !== true ||
+      this.#model === undefined
+    ) {
+      return undefined;
+    }
+
+    const sessionId = this.#currentSessionId();
+    const messages = await this.#sessionDb.listMessages(sessionId);
+    const preTokens = estimateMessagesTokensRough(messages.map((message) => ({
+      role: message.role,
+      content: message.content,
+      metadata: message.metadata
+    })));
+    const contextLength = this.#compressionConfig.summaryModelContextLength ?? this.#model.contextWindowTokens ?? 128_000;
+    const thresholdTokens = Math.floor(contextLength * this.#compressionConfig.threshold);
+    if (preTokens < thresholdTokens) {
+      return undefined;
+    }
+
+    try {
+      const result = await this.#sessionCompressionService.compactIfNeeded({
+        profileId: this.#profileId,
+        sessionId,
+        preserveTranscript: true,
+        ...(this.#providerTurnLoop.lastPromptTokens() > 0
+          ? { lastPromptTokensEstimated: this.#providerTurnLoop.lastPromptTokens() }
+          : {}),
+        ...(this.#providerTurnLoop.lastActualPromptTokens() === undefined
+          ? {}
+          : { lastActualPromptTokens: this.#providerTurnLoop.lastActualPromptTokens() }),
+        signal
+      });
+      if (result.rotated) {
+        this.#sessionRuntimeContext?.rotateSession(result.activeSessionId);
+      }
+      return compressionReportFromResult(result);
+    } catch (error) {
+      return {
+        triggered: false,
+        mode: "none",
+        preTokens,
+        fallbackUsed: true,
+        fallbackReason: `compression-failed: ${errorMessage(error)}`,
+        warnings: [`semantic compression failed before prompt assembly: ${errorMessage(error)}`]
+      };
+    }
+  }
+
   async #promoteRepeatedPreferences(userText: string, userInputEventId: string): Promise<void> {
     if (this.#memoryProvider === undefined) {
       return;
@@ -757,7 +823,7 @@ export class AgentLoop {
         provider: this.#memoryProvider.id,
         conclusion
       });
-      await this.#sessionDb.appendEvent(this.#sessionId, {
+      await this.#sessionDb.appendEvent(this.#currentSessionId(), {
         kind: "memory-conclusion",
         provider: this.#memoryProvider.id,
         conclusion
@@ -794,11 +860,15 @@ export class AgentLoop {
       provider: this.#memoryProvider.id,
       conclusion
     });
-    await this.#sessionDb.appendEvent(this.#sessionId, {
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), {
       kind: "memory-conclusion",
       provider: this.#memoryProvider.id,
       conclusion
     });
+  }
+
+  #currentSessionId(): string {
+    return this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId;
   }
 
 
@@ -827,6 +897,10 @@ function inferInitialRiskClass(skill: LoadedSkill | SkillDefinition | undefined)
 
 function isResumeRequest(text: string): boolean {
   return /^(resume|resume that|continue|continue that|pick up where we left off)\b/iu.test(text.trim());
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 

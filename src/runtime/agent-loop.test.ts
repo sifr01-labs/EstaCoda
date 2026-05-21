@@ -13,11 +13,14 @@ import { MemoryStore } from "../memory/memory-store.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { RunRecorder } from "./run-recorder.js";
 import { AgentLoop } from "./agent-loop.js";
+import type { CompactResult, SessionCompressionService } from "../prompt/session-compression-service.js";
 import type { NativeToolExecutor } from "./native-tool-executor.js";
 import type { ProviderTurnLoop } from "./provider-turn-loop.js";
 import type { RuntimeRouter } from "./runtime-router.js";
 import type { SkillWorkflowExecutor } from "./skill-workflow-executor.js";
 import type { ToolPlanRunner } from "./tool-plan-runner.js";
+import { createSessionRuntimeContext } from "./session-runtime-context.js";
+import { normalizeSessionCompressionConfig, type SessionCompressionConfig } from "../config/runtime-config.js";
 
 const model: ModelProfile = {
   id: "test-model",
@@ -86,10 +89,13 @@ async function createAgentLoop(input: {
   executeSkillWorkflow: ReturnType<typeof vi.fn>;
   sessionRecallService?: Pick<SessionRecallService, "recall">;
   failSessionRecallDecisionEvent?: boolean;
+  sessionCompressionService?: Pick<SessionCompressionService, "compactIfNeeded">;
+  compressionConfig?: SessionCompressionConfig;
 }) {
   const sessionDb = new InMemorySessionDB();
   const sessionId = `agent-loop-test-${Date.now()}-${Math.random()}`;
   await sessionDb.createSession({ id: sessionId, profileId: "default", title: "test" });
+  const sessionRuntimeContext = createSessionRuntimeContext(sessionId);
   const runtimeSessionDb = input.failSessionRecallDecisionEvent
     ? new Proxy(sessionDb, {
         get(target, property, receiver) {
@@ -114,6 +120,7 @@ async function createAgentLoop(input: {
   const runRecorder = new RunRecorder({
     sessionDb: runtimeSessionDb,
     sessionId,
+    sessionRuntimeContext,
     trajectoryRecorder,
     profileId: "default"
   });
@@ -136,6 +143,8 @@ async function createAgentLoop(input: {
 
   const providerTurnLoop = {
     canRunProvider: vi.fn(() => input.canRunProvider),
+    lastPromptTokens: vi.fn(() => 77),
+    lastActualPromptTokens: vi.fn(() => 88),
     run: vi.fn(async () => ({
       providerExecution: undefined,
       toolExecutions: [],
@@ -167,11 +176,14 @@ async function createAgentLoop(input: {
     trajectoryRecorder,
     sessionDb: runtimeSessionDb,
     sessionId,
+    sessionRuntimeContext,
     profileId: "default",
     toolExecutor: {} as any,
     model,
     providerTools: [],
-    memoryRecallOrchestrator
+    memoryRecallOrchestrator,
+    sessionCompressionService: input.sessionCompressionService,
+    compressionConfig: input.compressionConfig
   });
 
   return {
@@ -179,7 +191,8 @@ async function createAgentLoop(input: {
     providerTurnLoop,
     executeSkillWorkflow: input.executeSkillWorkflow,
     sessionDb,
-    sessionId
+    sessionId,
+    sessionRuntimeContext
   };
 }
 
@@ -197,7 +210,7 @@ describe("AgentLoop provider availability gating", () => {
       trustedWorkspace: true
     });
 
-    expect(providerTurnLoop.canRunProvider).toHaveBeenCalledTimes(1);
+    expect(providerTurnLoop.canRunProvider).toHaveBeenCalled();
     expect(executeSkillWorkflow).toHaveBeenCalledTimes(1);
     expect(response.toolExecutions).toHaveLength(1);
     expect(response.toolExecutions[0]?.tool.name).toBe("files.read");
@@ -216,9 +229,118 @@ describe("AgentLoop provider availability gating", () => {
       trustedWorkspace: true
     });
 
-    expect(providerTurnLoop.canRunProvider).toHaveBeenCalledTimes(1);
+    expect(providerTurnLoop.canRunProvider).toHaveBeenCalled();
     expect(executeSkillWorkflow).not.toHaveBeenCalled();
     expect(response.toolExecutions).toHaveLength(0);
+  });
+
+  it("rotates session context before provider turn and appends final response to the child", async () => {
+    const executeSkillWorkflow = vi.fn(async () => []);
+    const compactIfNeeded = vi.fn(async (input: { sessionId: string }): Promise<CompactResult> => {
+      const childSessionId = `${input.sessionId}-child`;
+      await sessionDb.createSession({
+        id: childSessionId,
+        profileId: "default",
+        parentSessionId: input.sessionId
+      });
+      await sessionDb.rewriteTranscript({
+        sessionId: childSessionId,
+        messages: [
+          {
+            role: "system",
+            content: "[CONTEXT COMPACTION — REFERENCE ONLY]\nsummary",
+            metadata: { semanticCompression: true }
+          },
+          {
+            role: "user",
+            content: "use the test skill"
+          }
+        ]
+      });
+      await sessionDb.endSession(input.sessionId, "compression");
+      return {
+        didCompress: true,
+        originalSessionId: input.sessionId,
+        activeSessionId: childSessionId,
+        replacementSessionId: childSessionId,
+        rotated: true,
+        messages: await sessionDb.listMessages(childSessionId),
+        diagnostics: {
+          shouldCompress: true,
+          reason: "compressed",
+          summaryFormatVersion: "v1",
+          preTokens: 1_000,
+          postTokens: 100,
+          estimatedSavingsTokens: 900,
+          estimatedSavingsRatio: 0.9,
+          sourceMessageCount: 2,
+          summarizedMessageCount: 1,
+          protectedMessageCount: 1,
+          protectedFirstN: 0,
+          protectedLastN: 1,
+          protectedSpans: [],
+          protectedCategories: [],
+          summaryChars: 7,
+          prunedToolResults: 0,
+          prunedToolResultChars: 0,
+          protectedToolResultsKept: 0,
+          scopeKey: "default",
+          lastCompressionSavingsPct: 90,
+          ineffectiveCompressionCount: 0,
+          recentSavingsRatios: [0.9],
+          warnings: [],
+          eventWarnings: [],
+          fallbackUsed: false
+        },
+        userFacingMessage: "Session history compacted"
+      };
+    });
+    const { loop, providerTurnLoop, sessionDb, sessionId, sessionRuntimeContext } = await createAgentLoop({
+      canRunProvider: true,
+      executeSkillWorkflow,
+      sessionCompressionService: { compactIfNeeded },
+      compressionConfig: normalizeSessionCompressionConfig({
+        enabled: true,
+        experimental: true,
+        summaryModelContextLength: 50,
+        threshold: 0.10
+      })
+    });
+    await sessionDb.appendMessage({
+      sessionId,
+      role: "user",
+      content: "older history ".repeat(200)
+    });
+
+    await loop.handle({
+      text: "use the test skill",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    const childSessionId = `${sessionId}-child`;
+    expect(sessionRuntimeContext.currentSessionId()).toBe(childSessionId);
+    expect(compactIfNeeded).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId,
+      preserveTranscript: true,
+      lastPromptTokensEstimated: 77,
+      lastActualPromptTokens: 88
+    }));
+    expect(providerTurnLoop.run).toHaveBeenCalledWith(expect.objectContaining({
+      preflightCompression: expect.objectContaining({
+        triggered: true,
+        fallbackUsed: false
+      })
+    }));
+    await expect(sessionDb.getSession(sessionId)).resolves.toEqual(expect.objectContaining({
+      endReason: "compression"
+    }));
+    await expect(sessionDb.getSession(childSessionId)).resolves.toEqual(expect.objectContaining({
+      parentSessionId: sessionId
+    }));
+    await expect(sessionDb.listMessages(childSessionId)).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: "agent", content: expect.stringContaining("test-skill") })
+    ]));
   });
 
   it("does not inject session recall for ordinary turns", async () => {

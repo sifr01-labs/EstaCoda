@@ -209,6 +209,70 @@ describe("createRuntime session recall", () => {
 });
 
 describe("createRuntime semantic compression construction", () => {
+  it("keeps runtime compactSession non-rotating unless caller opts into transcript preservation", async () => {
+    const options = await minimalRuntimeOptions();
+    const sessionDb = new InMemorySessionDB({
+      now: () => new Date("2030-01-01T00:00:00.000Z"),
+      id: () => crypto.randomUUID()
+    });
+    const runtime = await createRuntime({
+      ...options,
+      sessionDb,
+      sessionId: "active-runtime-session",
+      compression: {
+        enabled: false,
+        threshold: 0.95,
+        targetRatio: 0.20,
+        protectFirstN: 0,
+        protectLastN: 1,
+        summaryModelContextLength: 100_000
+      }
+    });
+
+    try {
+      await sessionDb.createSession({ id: "non-rotating-session", profileId: "default" });
+      await sessionDb.createSession({ id: "preserving-session", profileId: "default" });
+      for (const sessionId of ["non-rotating-session", "preserving-session"]) {
+        for (let index = 0; index < 4; index += 1) {
+          await sessionDb.appendMessage({
+            id: `${sessionId}-m${index}`,
+            sessionId,
+            role: index % 2 === 0 ? "user" : "agent",
+            content: `message ${index} ${"x".repeat(120)}`
+          });
+        }
+      }
+
+      const defaultResult = await runtime.compactSession?.({ sessionId: "non-rotating-session" });
+      const preservedResult = await runtime.compactSession?.({
+        sessionId: "preserving-session",
+        preserveTranscript: true
+      });
+
+      expect(defaultResult).toEqual(expect.objectContaining({
+        didCompress: true,
+        originalSessionId: "non-rotating-session",
+        activeSessionId: "non-rotating-session",
+        rotated: false
+      }));
+      expect(preservedResult).toEqual(expect.objectContaining({
+        didCompress: true,
+        originalSessionId: "preserving-session",
+        replacementSessionId: preservedResult?.activeSessionId,
+        rotated: true
+      }));
+      expect(preservedResult?.activeSessionId).not.toBe("preserving-session");
+      await expect(sessionDb.getSession("preserving-session")).resolves.toEqual(expect.objectContaining({
+        endReason: "compression"
+      }));
+      await expect(sessionDb.getSession(preservedResult!.activeSessionId)).resolves.toEqual(expect.objectContaining({
+        parentSessionId: "preserving-session"
+      }));
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("uses the compression auxiliary route and not memory_compaction for semantic compression", async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "estacoda-runtime-compression-"));
     const requests: ProviderRequest[] = [];
@@ -286,6 +350,107 @@ describe("createRuntime semantic compression construction", () => {
 
       expect(requests.map((request) => request.model)).toContain("compression-model");
       expect(requests.map((request) => request.model)).not.toContain("memory-compaction-model");
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("rotates provider-turn auto compression before provider prompt assembly and writes the response to the child", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "estacoda-runtime-rotate-compression-"));
+    const requests: ProviderRequest[] = [];
+    const mainModel: ModelProfile = {
+      id: "main-model",
+      provider: "local",
+      contextWindowTokens: 128_000,
+      supportsTools: false,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    };
+    const compressionModel: ModelProfile = {
+      ...mainModel,
+      id: "compression-model"
+    };
+    const registry = new ProviderRegistry();
+    registry.register({
+      id: "local",
+      name: "Local",
+      executable: true,
+      health: () => ({ available: true }),
+      listModels: () => [mainModel, compressionModel],
+      complete: async (request: ProviderRequest) => {
+        requests.push(request);
+        return {
+          ok: true,
+          content: request.model === "compression-model" ? "Compressed summary" : "Final child response",
+          model: request.model,
+          provider: "local",
+          usage: { inputTokens: 321 }
+        };
+      }
+    });
+    const sessionDb = new InMemorySessionDB();
+    const sessionId = "auto-compression-parent";
+    const runtime = await createRuntime({
+      tokens: resolveTokens("standard", "dark", "kemetBlue"),
+      model: mainModel,
+      primaryModelRoute: { provider: "local", id: "main-model", profile: mainModel },
+      providerRegistry: registry,
+      workspaceRoot,
+      localSkillsRoot: join(workspaceRoot, "skills"),
+      sessionDb,
+      sessionId,
+      compression: {
+        enabled: true,
+        experimental: true,
+        threshold: 0.10,
+        targetRatio: 0.20,
+        protectFirstN: 0,
+        protectLastN: 1,
+        summaryModelContextLength: 50
+      },
+      auxiliaryModels: {
+        compression: { provider: "local", id: "compression-model" }
+      }
+    });
+
+    try {
+      await sessionDb.appendMessage({
+        id: "old-history",
+        sessionId,
+        role: "user",
+        content: "older history ".repeat(200)
+      });
+
+      const response = await runtime.handle({
+        text: "continue",
+        channel: "cli"
+      });
+
+      const childSessionId = runtime.sessionId;
+      expect(childSessionId).not.toBe(sessionId);
+      expect(response.text).toContain("Final child response");
+      await expect(sessionDb.getSession(sessionId)).resolves.toEqual(expect.objectContaining({
+        endReason: "compression"
+      }));
+      await expect(sessionDb.getSession(childSessionId)).resolves.toEqual(expect.objectContaining({
+        parentSessionId: sessionId
+      }));
+      await expect(sessionDb.listMessages(sessionId)).resolves.toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: "old-history", content: expect.stringContaining("older history") })
+      ]));
+      const childMessages = await sessionDb.listMessages(childSessionId);
+      expect(childMessages).toEqual(expect.arrayContaining([
+        expect.objectContaining({ role: "system", metadata: expect.objectContaining({ semanticCompression: true }) }),
+        expect.objectContaining({ role: "agent", content: expect.stringContaining("Final child response") })
+      ]));
+      expect(await sessionDb.listEvents(childSessionId)).toEqual(expect.arrayContaining([
+        expect.objectContaining({ kind: "prompt-assembled" }),
+        expect.objectContaining({ kind: "provider-completion" })
+      ]));
+      const recall = await runtime.recallSession?.("continue");
+      expect(recall?.blocks.flatMap((block) => block.sourceSessionIds)).not.toContain(childSessionId);
+      const finalProviderRequest = requests.find((request) => request.model === "main-model");
+      expect(JSON.stringify(finalProviderRequest?.messages)).toContain("CONTEXT COMPACTION");
     } finally {
       await runtime.dispose();
     }

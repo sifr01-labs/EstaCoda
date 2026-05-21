@@ -23,6 +23,8 @@ type SessionRow = {
   created_at: string;
   updated_at: string;
   parent_session_id: string | null;
+  ended_at: string | null;
+  end_reason: string | null;
   metadata_json: string | null;
 };
 
@@ -46,6 +48,8 @@ type SearchRow = MessageRow & {
   session_created_at: string;
   session_updated_at: string;
   session_parent_session_id: string | null;
+  session_ended_at: string | null;
+  session_end_reason: string | null;
   session_metadata_json: string | null;
   rank: number;
 };
@@ -128,8 +132,10 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
           created_at,
           updated_at,
           parent_session_id,
+          ended_at,
+          end_reason,
           metadata_json
-        ) values (?, ?, ?, ?, ?, ?, ?)`
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         id,
@@ -138,6 +144,8 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
         now,
         now,
         input.parentSessionId ?? null,
+        input.endedAt ?? null,
+        input.endReason ?? null,
         stringifyJson(input.metadata)
       );
 
@@ -221,7 +229,28 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     return message;
   }
 
+  async endSession(sessionId: string, reason: string): Promise<void> {
+    const endedAt = this.#now().toISOString();
+
+    this.#withWriteTransaction(() => {
+      const session = this.#db.query<SessionRow>("select * from sessions where id = ?").get(sessionId);
+      if (session === null) {
+        throw new Error(`Session not found: ${sessionId}`);
+      }
+      if (session.ended_at !== null) {
+        return;
+      }
+      this.#db
+        .query("update sessions set ended_at = ?, end_reason = ?, updated_at = ? where id = ?")
+        .run(endedAt, reason, endedAt, sessionId);
+    });
+  }
+
   async replaceMessages(input: { sessionId: string; messages: ReplacementSessionMessage[] }): Promise<SessionMessage[]> {
+    return this.rewriteTranscript(input);
+  }
+
+  async rewriteTranscript(input: { sessionId: string; messages: ReplacementSessionMessage[] }): Promise<SessionMessage[]> {
     const replacements = this.#buildReplacementMessages(input);
 
     this.#withWriteTransaction(() => {
@@ -342,6 +371,8 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
                 s.created_at as session_created_at,
                 s.updated_at as session_updated_at,
                 s.parent_session_id as session_parent_session_id,
+                s.ended_at as session_ended_at,
+                s.end_reason as session_end_reason,
                 s.metadata_json as session_metadata_json,
                 bm25(messages_fts) as rank
               from messages_fts
@@ -361,6 +392,8 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
                 s.created_at as session_created_at,
                 s.updated_at as session_updated_at,
                 s.parent_session_id as session_parent_session_id,
+                s.ended_at as session_ended_at,
+                s.end_reason as session_end_reason,
                 s.metadata_json as session_metadata_json,
                 bm25(messages_fts) as rank
               from messages_fts
@@ -380,6 +413,8 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
         createdAt: row.session_created_at,
         updatedAt: row.session_updated_at,
         parentSessionId: row.session_parent_session_id ?? undefined,
+        endedAt: row.session_ended_at ?? undefined,
+        endReason: row.session_end_reason ?? undefined,
         metadata: parseJson(row.session_metadata_json)
       },
       message: rowToMessage(row),
@@ -532,6 +567,8 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
           created_at text not null,
           updated_at text not null,
           parent_session_id text,
+          ended_at text,
+          end_reason text,
           metadata_json text
         );
 
@@ -606,6 +643,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     this.#runMigrationStep(3, "v0.8-schema-v3", () => this.#migrateV3());
     this.#runMigrationStep(4, "v0.9-schema-v4-cron-executions", () => this.#migrateV4());
     this.#runMigrationStep(5, "v0.9-schema-v5-pending-approvals", () => this.#migrateV5());
+    this.#runMigrationStep(6, "v0.9-schema-v6-session-lineage", () => this.#migrateV6());
   }
 
   #withMigrationLock(migrate: () => void): void {
@@ -743,6 +781,17 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
       create index if not exists idx_pending_approvals_status on pending_approvals(status);
       create index if not exists idx_pending_approvals_profile on pending_approvals(profile_id);
     `);
+  }
+
+  #migrateV6(): void {
+    const rows = this.#db.query("pragma table_info(sessions)").all() as Array<{ name: string }>;
+    const colNames = new Set(rows.map((row) => row.name));
+    if (!colNames.has("ended_at")) {
+      this.#db.exec("alter table sessions add column ended_at text");
+    }
+    if (!colNames.has("end_reason")) {
+      this.#db.exec("alter table sessions add column end_reason text");
+    }
   }
 
   #migrateV3(): void {
@@ -971,6 +1020,8 @@ function rowToSession(row: SessionRow): SessionRecord {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     parentSessionId: row.parent_session_id ?? undefined,
+    endedAt: row.ended_at ?? undefined,
+    endReason: row.end_reason ?? undefined,
     metadata: parseJson(row.metadata_json)
   };
 }

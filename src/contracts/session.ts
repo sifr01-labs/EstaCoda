@@ -20,6 +20,8 @@ export type SessionRecord = {
   createdAt: string;
   updatedAt: string;
   parentSessionId?: string;
+  endedAt?: string;
+  endReason?: string;
   metadata?: Record<string, unknown>;
 };
 
@@ -119,6 +121,15 @@ export type SessionHistoryCompressedEvent = {
 export type SessionCompressionStateEvent = {
   kind: "session-compression-state";
   state: Partial<SessionCompressionState>;
+};
+
+export type SessionCompactionForkedEvent = {
+  kind: "session-compaction-forked";
+  trigger: SessionCompressionTrigger;
+  childSessionId: string;
+  compactedAt: string;
+  sourceMessageCount: number;
+  compactedMessageCount: number;
 };
 
 export type SessionEvent =
@@ -323,6 +334,7 @@ export type SessionEvent =
     }
   | SessionHistoryCompressedEvent
   | SessionCompressionStateEvent
+  | SessionCompactionForkedEvent
   | {
       kind: "provider-budget-exhausted";
       budget: string;
@@ -440,6 +452,8 @@ export type CreateSessionInput = {
   profileId: string;
   title?: string;
   parentSessionId?: string;
+  endedAt?: string;
+  endReason?: string;
   metadata?: Record<string, unknown>;
 };
 
@@ -465,8 +479,10 @@ export type SessionDB = {
   createSession(input: CreateSessionInput): Promise<SessionRecord>;
   getSession(id: string): Promise<SessionRecord | undefined>;
   listSessions(profileId?: string): Promise<SessionRecord[]>;
+  endSession(sessionId: string, reason: string): Promise<void>;
   appendMessage(input: AppendMessageInput): Promise<SessionMessage>;
   replaceMessages(input: { sessionId: string; messages: ReplacementSessionMessage[] }): Promise<SessionMessage[]>;
+  rewriteTranscript(input: { sessionId: string; messages: ReplacementSessionMessage[] }): Promise<SessionMessage[]>;
   appendEvent(sessionId: string, event: SessionEvent): Promise<void>;
   listMessages(sessionId: string): Promise<SessionMessage[]>;
   listEvents(sessionId: string): Promise<SessionEvent[]>;

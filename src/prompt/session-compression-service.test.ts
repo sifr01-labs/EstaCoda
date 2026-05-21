@@ -1,8 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { normalizeSessionCompressionConfig } from "../config/runtime-config.js";
 import type { ProviderResponse, ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
 import type { ReplacementSessionMessage, SessionDB, SessionEvent, SessionMessage } from "../contracts/session.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
+import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { SessionCompressionLock } from "../session/session-compression-lock.js";
 import { reconstructSessionCompressionState } from "../session/session-compression-state.js";
 import { SUMMARY_FORMAT_VERSION, SUMMARY_PREFIX } from "./semantic-compressor.js";
@@ -27,6 +31,10 @@ describe("SessionCompressionService", () => {
     const result = await service.compactIfNeeded({ profileId: "profile", sessionId });
 
     expect(result.didCompress).toBe(false);
+    expect(result.originalSessionId).toBe(sessionId);
+    expect(result.activeSessionId).toBe(sessionId);
+    expect(result.rotated).toBe(false);
+    expect(result.replacementSessionId).toBeUndefined();
     expect(result.diagnostics.reason).toBe("below-threshold");
     expect(await db.listMessages(sessionId)).toHaveLength(8);
   });
@@ -52,6 +60,10 @@ describe("SessionCompressionService", () => {
     const events = await db.listEvents(sessionId);
 
     expect(result.didCompress).toBe(true);
+    expect(result.originalSessionId).toBe(sessionId);
+    expect(result.activeSessionId).toBe(sessionId);
+    expect(result.rotated).toBe(false);
+    expect(result.replacementSessionId).toBeUndefined();
     expect(result.userFacingMessage).toContain("Session history compacted");
     const summaryMessage = result.messages.find((message) => message.metadata?.semanticCompression === true);
     expect(summaryMessage).toBeDefined();
@@ -215,6 +227,242 @@ describe("SessionCompressionService", () => {
       kind: "session-compression-state",
       state: expect.objectContaining({ trigger: "hygiene" })
     }));
+  });
+
+  it("compactNow preserves the parent transcript by rotating to a compacted child session", async () => {
+    const { db, sessionId } = await sessionDbWithMessages(8);
+    const originalMessages = await db.listMessages(sessionId);
+    const service = new SessionCompressionService({
+      sessionDb: db,
+      config: normalizeSessionCompressionConfig({
+        enabled: false,
+        protectFirstN: 1,
+        protectLastN: 2,
+        summaryModelContextLength: 100_000,
+        threshold: 0.95
+      }),
+      ...auxiliaryHarness("preserved summary"),
+      now: () => new Date("2030-01-02T00:00:00.000Z"),
+      id: () => "summary-id"
+    });
+
+    const result = await service.compactNow({
+      profileId: "profile",
+      sessionId,
+      focusTopic: "manual focus",
+      preserveTranscript: true
+    });
+    const parent = await db.getSession(sessionId);
+    const child = await db.getSession(result.activeSessionId);
+    const childEvents = await db.listEvents(result.activeSessionId);
+    const parentEvents = await db.listEvents(sessionId);
+
+    expect(result.didCompress).toBe(true);
+    expect(result.originalSessionId).toBe(sessionId);
+    expect(result.activeSessionId).not.toBe(sessionId);
+    expect(result.replacementSessionId).toBe(result.activeSessionId);
+    expect(result.rotated).toBe(true);
+    expect(await db.listMessages(sessionId)).toEqual(originalMessages);
+    expect((await db.listMessages(result.activeSessionId)).map((message) => message.id)).toEqual(
+      result.messages.map((message) => message.id)
+    );
+    expect(child).toEqual(expect.objectContaining({
+      parentSessionId: sessionId,
+      metadata: expect.objectContaining({
+        compactedFromSessionId: sessionId,
+        compactionTrigger: "manual",
+        compactedAt: "2030-01-02T00:00:00.000Z"
+      })
+    }));
+    expect(parent).toEqual(expect.objectContaining({
+      endedAt: expect.any(String),
+      endReason: "compression"
+    }));
+    expect(childEvents).toContainEqual(expect.objectContaining({
+      kind: "session-history-compressed",
+      trigger: "manual"
+    }));
+    expect(childEvents).toContainEqual(expect.objectContaining({
+      kind: "session-compression-state",
+      state: expect.objectContaining({ trigger: "manual" })
+    }));
+    expect(parentEvents).toContainEqual(expect.objectContaining({
+      kind: "session-compaction-forked",
+      childSessionId: result.activeSessionId,
+      trigger: "manual"
+    }));
+  });
+
+  it("compactIfNeeded can rotate hygiene compaction to a compacted child session", async () => {
+    const { db, sessionId } = await sessionDbWithMessages(8);
+    const service = new SessionCompressionService({
+      sessionDb: db,
+      config: normalizeSessionCompressionConfig({
+        enabled: true,
+        experimental: true,
+        protectFirstN: 1,
+        protectLastN: 2,
+        summaryModelContextLength: 50,
+        threshold: 0.10
+      }),
+      ...auxiliaryHarness("hygiene summary")
+    });
+
+    const result = await service.compactIfNeeded({
+      profileId: "profile",
+      sessionId,
+      trigger: "hygiene",
+      preserveTranscript: true
+    });
+
+    expect(result.didCompress).toBe(true);
+    expect(result.rotated).toBe(true);
+    await expect(db.getSession(result.activeSessionId)).resolves.toEqual(expect.objectContaining({
+      parentSessionId: sessionId
+    }));
+    await expect(db.getSession(sessionId)).resolves.toEqual(expect.objectContaining({
+      endReason: "compression"
+    }));
+  });
+
+  it("does not create a child session when preserveTranscript compaction no-ops", async () => {
+    const { db, sessionId } = await sessionDbWithMessages(4);
+    const service = new SessionCompressionService({
+      sessionDb: db,
+      config: normalizeSessionCompressionConfig({
+        enabled: true,
+        experimental: true,
+        protectFirstN: 0,
+        protectLastN: 1,
+        summaryModelContextLength: 100_000,
+        threshold: 0.95
+      })
+    });
+
+    const result = await service.compactIfNeeded({ profileId: "profile", sessionId, preserveTranscript: true });
+
+    expect(result.didCompress).toBe(false);
+    expect(result.rotated).toBe(false);
+    expect(await db.listSessions("profile")).toHaveLength(1);
+    await expect(db.getSession(sessionId)).resolves.not.toEqual(expect.objectContaining({
+      endReason: "compression"
+    }));
+  });
+
+  it("does not mark the parent ended when child transcript rewrite fails", async () => {
+    const base = await sessionDbWithMessages(8);
+    const originalMessages = await base.db.listMessages(base.sessionId);
+    const failingDb = forwardingSessionDb(base.db, {
+      rewriteTranscript: async () => {
+        throw new Error("child rewrite down");
+      }
+    });
+    const service = new SessionCompressionService({
+      sessionDb: failingDb,
+      config: normalizeSessionCompressionConfig({
+        enabled: true,
+        experimental: true,
+        protectFirstN: 0,
+        protectLastN: 1,
+        summaryModelContextLength: 50,
+        threshold: 0.10
+      }),
+      ...auxiliaryHarness("summary")
+    });
+
+    await expect(service.compactIfNeeded({
+      profileId: "profile",
+      sessionId: base.sessionId,
+      preserveTranscript: true
+    })).rejects.toThrow("child rewrite down");
+    await expect(base.db.getSession(base.sessionId)).resolves.not.toEqual(expect.objectContaining({
+      endReason: "compression"
+    }));
+    expect(await base.db.listMessages(base.sessionId)).toEqual(originalMessages);
+  });
+
+  it("keeps child compaction successful when audit event writes fail", async () => {
+    const base = await sessionDbWithMessages(8);
+    const throwingDb = forwardingSessionDb(base.db, {
+      appendEvent: async () => {
+        throw new Error("event sink down");
+      }
+    });
+    const service = new SessionCompressionService({
+      sessionDb: throwingDb,
+      config: normalizeSessionCompressionConfig({
+        enabled: true,
+        experimental: true,
+        protectFirstN: 0,
+        protectLastN: 1,
+        summaryModelContextLength: 50,
+        threshold: 0.10
+      }),
+      ...auxiliaryHarness("summary")
+    });
+
+    const result = await service.compactIfNeeded({
+      profileId: "profile",
+      sessionId: base.sessionId,
+      preserveTranscript: true
+    });
+
+    expect(result.didCompress).toBe(true);
+    expect(result.rotated).toBe(true);
+    await expect(base.db.getSession(base.sessionId)).resolves.toEqual(expect.objectContaining({
+      endReason: "compression"
+    }));
+    expect(await base.db.listMessages(result.activeSessionId)).toHaveLength(result.messages.length);
+    expect(result.diagnostics.eventWarnings).toEqual([
+      "session compression event write failed: event sink down",
+      "session compression event write failed: event sink down",
+      "session compaction fork event write failed: event sink down"
+    ]);
+  });
+
+  it("leaves the parent transcript searchable in SQLite after preserved compaction", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "estacoda-preserve-compaction-"));
+    const db = new SQLiteSessionDB({
+      path: join(tmpDir, "sessions.sqlite"),
+      now: () => new Date("2030-01-01T00:00:00.000Z"),
+      id: () => crypto.randomUUID()
+    });
+    try {
+      const session = await db.createSession({ id: "sqlite-parent", profileId: "profile" });
+      for (let index = 0; index < 8; index += 1) {
+        await db.appendMessage({
+          id: `sqlite-message-${index}`,
+          sessionId: session.id,
+          role: index % 2 === 0 ? "user" : "agent",
+          content: `uniqueparentsearchtoken message ${index} ${"x".repeat(120)}`
+        });
+      }
+      const service = new SessionCompressionService({
+        sessionDb: db,
+        config: normalizeSessionCompressionConfig({
+          enabled: true,
+          experimental: true,
+          protectFirstN: 0,
+          protectLastN: 1,
+          summaryModelContextLength: 50,
+          threshold: 0.10
+        }),
+        ...auxiliaryHarness("sqlite summary")
+      });
+
+      const result = await service.compactIfNeeded({
+        profileId: "profile",
+        sessionId: session.id,
+        preserveTranscript: true
+      });
+      const matches = await db.search("uniqueparentsearchtoken", { profileId: "profile", limit: 20 });
+
+      expect(result.rotated).toBe(true);
+      expect(matches.some((match) => match.session.id === session.id)).toBe(true);
+    } finally {
+      db.close();
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 
   it("hydrates latest state event before compression", async () => {
@@ -676,8 +924,10 @@ function forwardingSessionDb(db: InMemorySessionDB, overrides: Partial<SessionDB
     createSession: overrides.createSession ?? db.createSession.bind(db),
     getSession: overrides.getSession ?? db.getSession.bind(db),
     listSessions: overrides.listSessions ?? db.listSessions.bind(db),
+    endSession: overrides.endSession ?? db.endSession.bind(db),
     appendMessage: overrides.appendMessage ?? db.appendMessage.bind(db),
     replaceMessages: overrides.replaceMessages ?? db.replaceMessages.bind(db),
+    rewriteTranscript: overrides.rewriteTranscript ?? db.rewriteTranscript.bind(db),
     appendEvent: overrides.appendEvent ?? db.appendEvent.bind(db),
     listMessages: overrides.listMessages ?? db.listMessages.bind(db),
     listEvents: overrides.listEvents ?? db.listEvents.bind(db),

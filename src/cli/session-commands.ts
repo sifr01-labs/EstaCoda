@@ -35,6 +35,7 @@ export type SessionCommandInput = {
     compactSession?: (input?: {
       sessionId?: string;
       focusTopic?: string;
+      preserveTranscript?: boolean;
       signal?: AbortSignal;
     }) => Promise<CompactResult>;
   };
@@ -131,7 +132,8 @@ export async function runSessionsCommand(
     try {
       const result = await input.runtime.compactSession({
         sessionId: parsed.sessionId,
-        focusTopic: parsed.topic
+        focusTopic: parsed.topic,
+        preserveTranscript: false
       });
       return {
         ok: true,

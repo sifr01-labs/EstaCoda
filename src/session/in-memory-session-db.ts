@@ -37,6 +37,8 @@ export class InMemorySessionDB implements SessionDB {
       createdAt: now,
       updatedAt: now,
       parentSessionId: input.parentSessionId,
+      endedAt: input.endedAt,
+      endReason: input.endReason,
       metadata: input.metadata
     };
 
@@ -82,7 +84,27 @@ export class InMemorySessionDB implements SessionDB {
     return cloneMessage(message);
   }
 
+  async endSession(sessionId: string, reason: string): Promise<void> {
+    const session = this.#sessions.get(sessionId);
+
+    if (session === undefined) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    if (session.endedAt !== undefined) {
+      return;
+    }
+
+    session.endedAt = this.#now().toISOString();
+    session.endReason = reason;
+    this.#touch(sessionId);
+  }
+
   async replaceMessages(input: { sessionId: string; messages: ReplacementSessionMessage[] }): Promise<SessionMessage[]> {
+    return this.rewriteTranscript(input);
+  }
+
+  async rewriteTranscript(input: { sessionId: string; messages: ReplacementSessionMessage[] }): Promise<SessionMessage[]> {
     const session = this.#sessions.get(input.sessionId);
 
     if (session === undefined) {

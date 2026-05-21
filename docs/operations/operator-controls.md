@@ -223,7 +223,7 @@ Sessions are **separate by default**. A CLI session and a channel session for th
 
 `sessions recall` is bounded historical recall. It is profile-scoped, workspace-scoped when workspace metadata is available, and labeled as untrusted context. It uses auxiliary `session_search` summarization when configured and deterministic snippets as fallback.
 
-`sessions compact` is semantic session compression. It compacts older history for the target session through the active runtime service. It is separate from TaskFlow compaction and Memory File Compaction.
+`sessions compact` is semantic session compression. It compacts older history for the target session through the active runtime service. It is separate from TaskFlow compaction and Memory File Compaction. The top-level CLI command is non-rotating in this implementation; it does not adopt a compacted child session.
 
 ## Channel Slash Commands
 
@@ -286,6 +286,8 @@ Auto-compaction checks the boundary at the end of each adapter turn. It only run
 Compaction creates a `CompactSummary` and appends `compacted` / `operator-compacted` events. Original events are preserved.
 
 TaskFlow compaction is unrelated to bare `/compact`. Bare `/compact [topic]` is semantic session compression for the current in-session context; `/flow compact <flowId>` and `estacoda flow compact <flowId>` compact TaskFlow events.
+
+Gateway `/compact [topic]` preserves the parent transcript when compaction succeeds by creating a compacted child session and switching the channel pointer to that child. Interactive CLI `/compact [topic]` remains non-rotating until the CLI grows equivalent child-session adoption.
 
 ## Memory File Compaction
 

@@ -111,6 +111,13 @@ memory.curate
 
 There is no top-level memory prompt, memory compact, or memory restore-backup CLI command in this implementation. Use the runtime tools for Memory File Compaction and restore.
 
+Surface-specific session compaction behavior:
+
+- Gateway `/compact [topic]` preserves the parent transcript by creating a compacted child session and adopting that child as the active channel session.
+- Gateway hygiene also preserves transcripts. It runs before runtime acquisition, creates/adopts the child when compaction rotates, and then acquires the runtime for the child session.
+- Provider-turn automatic compression rotates at the `AgentLoop` boundary before provider prompt assembly. `ProviderTurnLoop` reads the active child session and does not perform persistent session forking itself.
+- Interactive CLI `/compact [topic]` and top-level `estacoda sessions compact <session-id>` remain non-rotating because those surfaces do not yet adopt child sessions.
+
 ## Diagnostics
 
 Memory diagnostics appear in prompt context diagnostics, session events, trajectory events, and command output depending on the surface.
@@ -125,6 +132,7 @@ Key event kinds:
 - `session-compression-state` — latest semantic compression state for runtime rehydration.
 - `external-memory-recall` — metadata-only external provider recall audit.
 - `external-memory-mirror-write` — metadata-only external provider mirror-write audit.
+- `session-compaction-forked` — best-effort parent-side lineage/audit event when preserving semantic compaction creates a child.
 
 Compression command output reports message counts, token estimates, optional focus topic, fallback status, and warnings.
 
@@ -135,6 +143,8 @@ Summary budgeting is computed from the source messages being summarized. The tar
 Anti-thrashing state is durable. Two consecutive compressions saving less than 10% cause automatic semantic compression to skip until a higher-savings compression resets the count or a manual `/compact [topic]` bypasses the gate. The skip applies only to semantic compression; deterministic history packing remains available.
 
 Provider-turn compression diagnostics may include the assembled prompt token estimate and actual provider input tokens when the provider reports usage. Missing usage is normal for some providers and does not fail the turn.
+
+Preserved semantic compaction creates explicit session lineage. The child session stores `parentSessionId`, receives the compacted transcript, and stores compression events/state. The parent session keeps its original transcript, remains searchable/queryable for audit, and is marked with `endedAt` plus `endReason: "compression"` only after the child transcript write succeeds. Gateway runtime rotation is adopted on both success and error paths so later turns do not resume an ended parent.
 
 ## Troubleshooting
 
@@ -171,6 +181,13 @@ Gateway hygiene:
 - Runs only for normal gateway turns, after session ID resolution and before runtime acquisition.
 - Skips gateway commands such as `/compact`, `/help`, and `/status`.
 - Uses semantic session compression with `trigger: "hygiene"`.
+- Creates and adopts a compacted child session when preserved compaction rotates.
+
+Transcript lineage troubleshooting:
+
+- If a gateway session was compacted, inspect the active child session for current work and the parent session for full pre-compaction history.
+- Parent sessions ended for semantic compaction should still be searchable; `endedAt` / `endReason` are lifecycle markers, not deletion markers.
+- CLI compact commands are intentionally non-rotating in this implementation. Do not expect `parentSessionId` lineage from those surfaces unless a later CLI adoption patch changes them.
 
 ## Security Review Checklist
 
@@ -186,6 +203,7 @@ Before merge or release, inspect:
 - External provider audit events are metadata-only and must not include credentials, raw recalled content, or raw mirrored payloads.
 - Memory File Compaction creates backups and scans generated content before writes.
 - Semantic compression is experimental/default-off and preserves protected head/tail/latest-user/tool-pair context. Tool-result pruning is compression-input-only and must not mutate persisted history.
+- Transcript-preserving semantic compaction must create the child transcript before marking the parent ended; audit/event write failures may warn but must not corrupt parent or child transcript state.
 - TaskFlow compaction remains separate from bare `/compact`.
 
 ## Rollout Guidance

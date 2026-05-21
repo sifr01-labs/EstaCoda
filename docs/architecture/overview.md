@@ -67,13 +67,15 @@ Key composition rules:
 5. Short-circuit on attachment preflight failures
 6. Route native intent and skill (delegated to `RuntimeRouter`)
 7. Make security decision
-8. Prepare per-turn memory context through `MemoryRecallOrchestrator` and assemble prompt
-9. **Delegate provider turn loop to `ProviderTurnLoop`**
-10. **Delegate tool execution to `ToolPlanRunner`**
-11. **Delegate skill workflow execution to `SkillWorkflowExecutor`**
-12. **Delegate deterministic native execution to `NativeToolExecutor`**
-13. Persist results, outcomes, artifacts
-14. Return text/progress/artifacts
+8. Prepare per-turn memory context through `MemoryRecallOrchestrator`
+9. Check provider-turn semantic compression at the `AgentLoop` boundary when enabled
+10. Rotate to the compacted child session before provider prompt assembly when auto-compression preserves the transcript
+11. **Delegate provider prompt assembly and turn loop to `ProviderTurnLoop`**
+12. **Delegate tool execution to `ToolPlanRunner`**
+13. **Delegate skill workflow execution to `SkillWorkflowExecutor`**
+14. **Delegate deterministic native execution to `NativeToolExecutor`**
+15. Persist results, outcomes, artifacts
+16. Return text/progress/artifacts
 
 Guardrails inside the loop:
 
@@ -136,6 +138,8 @@ Prompt assembly is layered and partly cacheable. Key context groups:
 The implemented non-cacheable sequence renders compaction notice, session history, session recall, external recall, then the live user message. This render order is separate from trust and authority: recall, external recall, and compression summaries remain reference-only/untrusted context.
 
 Recall policy is not decided by `ProviderTurnLoop`, which consumes the prepared session history and memory context for provider calls. `IntentRouter` currently classifies native intents and does not emit recall-specific labels; recall/continuity detection lives in `MemoryRecallOrchestrator`, which calls `SessionRecallService` when eligible.
+
+Provider-turn semantic compression is also not owned by `ProviderTurnLoop`. When enabled and over threshold, `AgentLoop` can preserve the parent transcript by compacting into a child session and rotating the runtime session context before provider prompt assembly. Post-rotation writes use the active child session; the parent remains queryable as historical/audit context.
 
 Other cacheable context includes:
 

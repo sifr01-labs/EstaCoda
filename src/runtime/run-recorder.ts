@@ -24,10 +24,12 @@ import { emit } from "../utils/runtime-helpers.js";
 import { truncate } from "../utils/formatting.js";
 import { buildFailureRecord, type FailureContext } from "../trajectory/failure-classifier.js";
 import { redactSensitiveText } from "../utils/redaction.js";
+import type { SessionRuntimeContext } from "./session-runtime-context.js";
 
 export type RunRecorderOptions = {
   sessionDb: SessionDB;
   sessionId: string;
+  sessionRuntimeContext?: SessionRuntimeContext;
   trajectoryRecorder: TrajectoryRecorder;
   profileId: string;
   skillEvolutionStore?: SkillEvolutionStore;
@@ -37,6 +39,7 @@ export type RunRecorderOptions = {
 export class RunRecorder {
   readonly #sessionDb: SessionDB;
   readonly #sessionId: string;
+  readonly #sessionRuntimeContext: SessionRuntimeContext | undefined;
   readonly #trajectoryRecorder: TrajectoryRecorder;
   readonly #profileId: string;
   readonly #skillEvolutionStore: SkillEvolutionStore | undefined;
@@ -45,6 +48,7 @@ export class RunRecorder {
   constructor(options: RunRecorderOptions) {
     this.#sessionDb = options.sessionDb;
     this.#sessionId = options.sessionId;
+    this.#sessionRuntimeContext = options.sessionRuntimeContext;
     this.#trajectoryRecorder = options.trajectoryRecorder;
     this.#profileId = options.profileId;
     this.#skillEvolutionStore = options.skillEvolutionStore;
@@ -59,7 +63,7 @@ export class RunRecorder {
     tool?: string;
     reason?: string;
   }): Promise<void> {
-    await this.#sessionDb.appendEvent(this.#sessionId, {
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), {
       kind: "skill-workflow-step",
       skill: input.skill,
       stepId: input.step.id,
@@ -81,7 +85,7 @@ export class RunRecorder {
   }
 
   async recordWorkflowPlan(plan: SkillWorkflowPlan): Promise<void> {
-    await this.#sessionDb.appendEvent(this.#sessionId, {
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), {
       kind: "skill-workflow-planned",
       plan
     });
@@ -104,7 +108,7 @@ export class RunRecorder {
 
       recordedIds.add(artifact.id);
       artifacts.push(artifact);
-      await this.#sessionDb.appendEvent(this.#sessionId, {
+      await this.#sessionDb.appendEvent(this.#currentSessionId(), {
         kind: "artifact-created",
         artifact,
         tool: execution.tool.name
@@ -119,7 +123,7 @@ export class RunRecorder {
   }
 
   async recordToolPlan(plan: ToolCallPlan): Promise<void> {
-    await this.#sessionDb.appendEvent(this.#sessionId, {
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), {
       kind: "tool-plan",
       plan
     });
@@ -138,7 +142,7 @@ export class RunRecorder {
     observed: number;
     reason: string;
   }, sink: RuntimeEventSink | undefined): Promise<void> {
-    await this.#sessionDb.appendEvent(this.#sessionId, {
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), {
       kind: "provider-budget-exhausted",
       ...input
     });
@@ -155,7 +159,7 @@ export class RunRecorder {
     activeSkill?: string;
     activeToolPlans?: ToolCallPlan[];
   }, sink: RuntimeEventSink | undefined): Promise<void> {
-    await this.#sessionDb.appendEvent(this.#sessionId, {
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), {
       kind: "agent-cancelled",
       reason: input.reason,
       resumeNote: input.resumeNote,
@@ -191,7 +195,7 @@ export class RunRecorder {
     executedTools: number;
     exhausted: boolean;
   }): Promise<void> {
-    await this.#sessionDb.appendEvent(this.#sessionId, {
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), {
       kind: "provider-iteration",
       ...input
     });
@@ -232,7 +236,7 @@ export class RunRecorder {
       evidenceKinds: input.intent.evidence.map((entry) => entry.kind),
       surface: input.channel
     };
-    await this.#sessionDb.appendEvent(this.#sessionId, event);
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), event);
     this.#trajectoryRecorder.record("skill-route-usage", event);
     for (const telemetry of routeTelemetry) {
       await this.#skillEvolutionStore?.recordSkillRouteTelemetry(telemetry);
@@ -244,7 +248,7 @@ export class RunRecorder {
       });
     }
 
-    await this.#sessionDb.appendEvent(this.#sessionId, {
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), {
       kind: "skill-route-telemetry",
       telemetry: {
         promptHash,
@@ -284,7 +288,7 @@ export class RunRecorder {
     onEvent?: RuntimeEventSink;
   }): Promise<void> {
     const reason = "provider proposed higher-risk tool call than initial turn posture";
-    await this.#sessionDb.appendEvent(this.#sessionId, {
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), {
       kind: "security-risk-escalated",
       from: input.from,
       to: input.to,
@@ -304,7 +308,7 @@ export class RunRecorder {
   }
 
   async recordPromptAssembly(budget: PromptBudgetReport): Promise<void> {
-    await this.#sessionDb.appendEvent(this.#sessionId, {
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), {
       kind: "prompt-assembled",
       budget
     });
@@ -323,7 +327,7 @@ export class RunRecorder {
   }): Promise<string[]> {
     const warnings: string[] = [];
     try {
-      await this.#sessionDb.appendEvent(this.#sessionId, {
+      await this.#sessionDb.appendEvent(this.#currentSessionId(), {
         kind: "session-recall-decision",
         triggered: input.triggered,
         reason: input.reason,
@@ -389,7 +393,7 @@ export class RunRecorder {
     };
     const warnings: string[] = [];
     try {
-      await this.#sessionDb.appendEvent(this.#sessionId, event);
+      await this.#sessionDb.appendEvent(this.#currentSessionId(), event);
     } catch (error) {
       warnings.push(`external memory recall session event failed: ${auditErrorMessage(error)}`);
     }
@@ -435,7 +439,7 @@ export class RunRecorder {
     };
     const warnings: string[] = [];
     try {
-      await this.#sessionDb.appendEvent(this.#sessionId, event);
+      await this.#sessionDb.appendEvent(this.#currentSessionId(), event);
     } catch (error) {
       warnings.push(`external memory mirror write session event failed: ${auditErrorMessage(error)}`);
     }
@@ -497,7 +501,7 @@ export class RunRecorder {
         provider: this.#memoryProvider.id,
         outcome
       });
-      await this.#sessionDb.appendEvent(this.#sessionId, {
+      await this.#sessionDb.appendEvent(this.#currentSessionId(), {
         kind: "memory-write",
         provider: this.#memoryProvider.id,
         outcome
@@ -507,7 +511,7 @@ export class RunRecorder {
     await this.#skillEvolutionStore?.recordSkillOutcome({
       skill: input.selectedSkill,
       outcome,
-      sessionId: this.#sessionId,
+      sessionId: this.#currentSessionId(),
       promptSummary: truncate(input.userText, 240),
       selectedWorkflowStep: input.selectedSkill.workflow[0]?.id,
       toolExecutions: input.toolExecutions
@@ -533,7 +537,7 @@ export class RunRecorder {
     channel: ChannelKind;
   }): Promise<void> {
     await this.#sessionDb.appendMessage({
-      sessionId: this.#sessionId,
+      sessionId: this.#currentSessionId(),
       role: "agent",
       content: input.response.text,
       channel: input.channel,
@@ -551,7 +555,7 @@ export class RunRecorder {
   }
 
   async latestResumeNote(): Promise<string | undefined> {
-    const events = await this.#sessionDb.listEvents(this.#sessionId);
+    const events = await this.#sessionDb.listEvents(this.#currentSessionId());
     const cancelled = [...events].reverse().find((event) => event.kind === "agent-cancelled" && event.resumeNote !== undefined);
 
     return cancelled?.kind === "agent-cancelled" ? cancelled.resumeNote : undefined;
@@ -563,7 +567,7 @@ export class RunRecorder {
     }
 
     const record = buildFailureRecord(context, {
-      sessionId: this.#sessionId,
+      sessionId: this.#currentSessionId(),
       trajectoryId: this.#trajectoryRecorder.trajectoryId,
       sourceEventKind
     });
@@ -581,7 +585,7 @@ export class RunRecorder {
       skillName: input.skillName,
       reason: input.reason
     });
-    await this.#sessionDb.appendEvent(this.#sessionId, {
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), {
       kind: "user-correction",
       correctionText: input.correctionText,
       skillName: input.skillName,
@@ -597,6 +601,10 @@ export class RunRecorder {
         requiresHumanApproval: true
       });
     }
+  }
+
+  #currentSessionId(): string {
+    return this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId;
   }
 }
 

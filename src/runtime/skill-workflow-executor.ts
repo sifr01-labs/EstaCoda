@@ -7,23 +7,27 @@ import { packetizeToolExecution, renderToolResultPacket } from "../tools/tool-re
 import type { ToolExecutor, ToolExecutionRecord } from "../tools/tool-executor.js";
 import { toolResultFileChangePreview, toolResultStats } from "./tool-plan-runner.js";
 import type { RunRecorder } from "./run-recorder.js";
+import type { SessionRuntimeContext } from "./session-runtime-context.js";
 import { emit, isAborted } from "../utils/runtime-helpers.js";
 import { truncate } from "../utils/formatting.js";
 
 export type SkillWorkflowExecutorOptions = {
   toolExecutor: ToolExecutor;
   sessionId: string;
+  sessionRuntimeContext?: SessionRuntimeContext;
   runRecorder: RunRecorder;
 };
 
 export class SkillWorkflowExecutor {
   readonly #toolExecutor: ToolExecutor;
   readonly #sessionId: string;
+  readonly #sessionRuntimeContext: SessionRuntimeContext | undefined;
   readonly #runRecorder: RunRecorder;
 
   constructor(options: SkillWorkflowExecutorOptions) {
     this.#toolExecutor = options.toolExecutor;
     this.#sessionId = options.sessionId;
+    this.#sessionRuntimeContext = options.sessionRuntimeContext;
     this.#runRecorder = options.runRecorder;
   }
 
@@ -153,14 +157,14 @@ export class SkillWorkflowExecutor {
       const execution = preferredTool === undefined || input.usedTools.has(preferredTool)
         ? await this.#toolExecutor.executeFirstAvailable({
             toolset,
-            sessionId: this.#sessionId,
+            sessionId: this.#currentSessionId(),
             trustedWorkspace: input.trustedWorkspace,
             excludedTools: [...input.usedTools],
             input: toolInput
           })
         : await this.#toolExecutor.executeTool({
             tool: preferredTool,
-            sessionId: this.#sessionId,
+            sessionId: this.#currentSessionId(),
             trustedWorkspace: input.trustedWorkspace,
             input: toolInput
           });
@@ -206,6 +210,10 @@ export class SkillWorkflowExecutor {
     });
 
     return undefined;
+  }
+
+  #currentSessionId(): string {
+    return this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId;
   }
 }
 
@@ -256,5 +264,4 @@ function nextFallbackIndex(
 function extractFirstUrl(text: string): string | undefined {
   return /https?:\/\/[^\s<>"')]+/iu.exec(text)?.[0];
 }
-
 

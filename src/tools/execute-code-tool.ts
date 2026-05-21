@@ -13,7 +13,7 @@ export type ExecuteCodeToolOptions = {
   toolExecutor: ToolExecutor;
   sessionDb: SessionDB;
   trajectoryRecorder: TrajectoryRecorder;
-  sessionId: string;
+  sessionId: string | (() => string);
   trustedWorkspace: () => Promise<boolean>;
   allowedTools?: string[];
 };
@@ -81,7 +81,7 @@ export function createExecuteCodeTool(options: ExecuteCodeToolOptions): Register
             tool,
             input: toolInput,
             trustedWorkspace: await options.trustedWorkspace(),
-            sessionId: options.sessionId
+            sessionId: typeof options.sessionId === "function" ? options.sessionId() : options.sessionId
           });
 
           if (execution === undefined) {
