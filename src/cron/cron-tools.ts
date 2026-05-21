@@ -1,4 +1,4 @@
-import type { RegisteredTool } from "../contracts/tool.js";
+import type { RegisteredTool, RuntimeToolProvider } from "../contracts/tool.js";
 import { CronStore } from "./cron-store.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
 import { buildCronListViewModel, buildCronActionViewModel, buildCronNotFoundViewModel } from "./cron-view-models.js";
@@ -124,6 +124,17 @@ export function createCronTools(options: { store: CronStore }): RegisteredTool[]
     }
   }];
 }
+
+export const cronToolProvider: RuntimeToolProvider = {
+  name: "cron",
+  kind: "runtime",
+  createTools(ctx) {
+    if (ctx.disableCronTools === true) {
+      return [];
+    }
+    return createCronTools({ store: ctx.cronStore });
+  }
+};
 
 export function renderCronJobs(jobs: Awaited<ReturnType<CronStore["list"]>>): string {
   return renderPlain(buildCronListViewModel({ jobs }));

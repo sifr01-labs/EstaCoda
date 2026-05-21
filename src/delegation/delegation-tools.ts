@@ -1,4 +1,4 @@
-import type { RegisteredTool, ToolsetName } from "../contracts/tool.js";
+import type { RegisteredTool, SessionToolProvider, ToolsetName } from "../contracts/tool.js";
 import type { DelegationManager } from "./delegation-manager.js";
 
 export type DelegationToolOptions = {
@@ -73,4 +73,24 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
       }
     }
   ];
+}
+
+export const delegationToolProvider: SessionToolProvider = {
+  name: "delegation",
+  kind: "session",
+  createTools(ctx) {
+    return createDelegationTools({
+      manager: requireProviderDependency("delegation", "delegationManager", ctx.delegationManager),
+      parentSessionId: ctx.currentSessionId,
+      profileId: ctx.profileId,
+      trustedWorkspace: requireProviderDependency("delegation", "trustedWorkspace", ctx.trustedWorkspace)
+    });
+  }
+};
+
+function requireProviderDependency<T>(provider: string, dependency: string, value: T | undefined): T {
+  if (value === undefined) {
+    throw new TypeError(`${provider}ToolProvider requires ${dependency}.`);
+  }
+  return value;
 }

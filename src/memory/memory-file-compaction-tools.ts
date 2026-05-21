@@ -1,4 +1,4 @@
-import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
+import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
 import type { MemoryFileCompactionService } from "./memory-file-compaction-service.js";
 
 export function createMemoryFileCompactionTools(
@@ -57,6 +57,23 @@ export function createMemoryFileCompactionTools(
       }
     }
   ];
+}
+
+export const memoryFileCompactionToolProvider: SessionToolProvider = {
+  name: "memoryFileCompaction",
+  kind: "session",
+  createTools(ctx) {
+    return createMemoryFileCompactionTools(
+      requireProviderDependency("memoryFileCompaction", "memoryFileCompactionService", ctx.memoryFileCompactionService)
+    );
+  }
+};
+
+function requireProviderDependency<T>(provider: string, dependency: string, value: T | undefined): T {
+  if (value === undefined) {
+    throw new TypeError(`${provider}ToolProvider requires ${dependency}.`);
+  }
+  return value;
 }
 
 function toToolResult(

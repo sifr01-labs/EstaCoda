@@ -5,7 +5,7 @@ import { basename, join, relative, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ArtifactStore } from "../artifacts/artifact-store.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
-import type { RegisteredTool } from "../contracts/tool.js";
+import type { RegisteredTool, SessionToolProvider } from "../contracts/tool.js";
 
 export type VoiceFetchLike = (url: string, init?: {
   method?: string;
@@ -182,6 +182,29 @@ export function createVoiceTools(options: VoiceToolOptions): readonly Registered
       }
     }
   ];
+}
+
+export const voiceToolProvider: SessionToolProvider = {
+  name: "voice",
+  kind: "session",
+  createTools(ctx) {
+    return createVoiceTools({
+      audioCacheRoot: requireProviderDependency("voice", "audioCacheRoot", ctx.audioCacheRoot),
+      artifactStore: requireProviderDependency("voice", "artifactStore", ctx.artifactStore),
+      workspaceRoot: ctx.workspaceRoot,
+      allowedRoots: [requireProviderDependency("voice", "channelMediaRoot", ctx.channelMediaRoot)],
+      tts: ctx.tts,
+      stt: ctx.stt,
+      fetch: ctx.voiceFetch
+    });
+  }
+};
+
+function requireProviderDependency<T>(provider: string, dependency: string, value: T | undefined): T {
+  if (value === undefined) {
+    throw new TypeError(`${provider}ToolProvider requires ${dependency}.`);
+  }
+  return value;
 }
 
 async function synthesizeSpeech(input: {

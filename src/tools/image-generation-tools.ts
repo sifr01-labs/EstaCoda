@@ -5,7 +5,7 @@ import type { ArtifactStore } from "../artifacts/artifact-store.js";
 import { setupNeeded } from "../setup/capability-setup.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { defaultImageApiKeyEnv, defaultImageBaseUrl, defaultImageModel } from "../contracts/image-generation.js";
-import type { RegisteredTool } from "../contracts/tool.js";
+import type { RegisteredTool, SessionToolProvider } from "../contracts/tool.js";
 
 export type ImageGenerationFetchLike = (url: string, init?: {
   method?: string;
@@ -110,6 +110,26 @@ export function createImageGenerationTools(options: ImageGenerationToolOptions):
       };
     }
   }];
+}
+
+export const imageGenerationToolProvider: SessionToolProvider = {
+  name: "imageGeneration",
+  kind: "session",
+  createTools(ctx) {
+    return createImageGenerationTools({
+      imageCacheRoot: requireProviderDependency("imageGeneration", "imageCacheRoot", ctx.imageCacheRoot),
+      artifactStore: requireProviderDependency("imageGeneration", "artifactStore", ctx.artifactStore),
+      imageGen: ctx.imageGen,
+      fetch: ctx.imageGenerationFetch
+    });
+  }
+};
+
+function requireProviderDependency<T>(provider: string, dependency: string, value: T | undefined): T {
+  if (value === undefined) {
+    throw new TypeError(`${provider}ToolProvider requires ${dependency}.`);
+  }
+  return value;
 }
 
 async function generateImage(input: {

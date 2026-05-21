@@ -1,8 +1,11 @@
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { RegisteredTool } from "../contracts/tool.js";
+import type { SessionToolProvider } from "../contracts/tool.js";
 import type { BrowserActionInput, BrowserBackend, BrowserSnapshot, WebExtractionResult } from "../contracts/browser.js";
 import { createUnconfiguredBrowserBackend } from "../browser/browser-backend.js";
+import { ProviderExecutor } from "../providers/provider-executor.js";
+import { analyzeImageWithVision } from "./vision-tools.js";
 
 export type WebToolOptions = {
   fetch?: FetchLike;
@@ -494,6 +497,38 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       }
     }
   ];
+}
+
+export const webToolProvider: SessionToolProvider = {
+  name: "web",
+  kind: "session",
+  createTools(ctx) {
+    const providerRegistry = requireProviderDependency("web", "providerRegistry", ctx.providerRegistry);
+    const channelMediaRoot = requireProviderDependency("web", "channelMediaRoot", ctx.channelMediaRoot);
+    return createWebTools({
+      fetch: ctx.webFetch,
+      browserBackend: requireProviderDependency("web", "browserBackend", ctx.browserBackend),
+      enableNetwork: ctx.enableWebNetwork,
+      maxContentChars: ctx.webMaxContentChars,
+      workspaceRoot: ctx.workspaceRoot,
+      visionAnalyzer: (input, signal) => analyzeImageWithVision({
+        workspaceRoot: ctx.workspaceRoot,
+        allowedRoots: [channelMediaRoot],
+        visionAuxiliaryRoute: ctx.visionRoute,
+        mainRoute: ctx.mainRoute,
+        providerExecutor: new ProviderExecutor({
+          registry: providerRegistry
+        })
+      }, input, signal)
+    });
+  }
+};
+
+function requireProviderDependency<T>(provider: string, dependency: string, value: T | undefined): T {
+  if (value === undefined) {
+    throw new TypeError(`${provider}ToolProvider requires ${dependency}.`);
+  }
+  return value;
 }
 
 function createBrowserSnapshotTool(browserBackend: BrowserBackend): RegisteredTool {

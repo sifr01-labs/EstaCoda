@@ -1,6 +1,6 @@
 import type { ExternalMemoryProvider, MemoryFileKind, MemoryOperation } from "../contracts/memory.js";
 import type { SessionDB } from "../contracts/session.js";
-import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
+import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { truncate } from "../utils/formatting.js";
 import { redactSensitiveText } from "../utils/redaction.js";
@@ -43,6 +43,31 @@ export function createMemoryTool(memoryStore: MemoryStore, options: MemoryToolOp
     isAvailable: () => true,
     run: async (input) => applyMemoryToolInput(memoryStore, input, options)
   };
+}
+
+export const memoryToolProvider: SessionToolProvider = {
+  name: "memory",
+  kind: "session",
+  createTools(ctx) {
+    return [
+      createMemoryTool(requireProviderDependency("memory", "memoryStore", ctx.memoryStore), {
+        externalMemory: ctx.externalMemory ?? ctx.externalMemoryConfig,
+        externalMemoryProviders: ctx.externalMemoryProviders,
+        profileId: ctx.profileId,
+        sessionId: ctx.currentSessionId,
+        workspaceRoot: ctx.workspaceRoot,
+        sessionDb: requireProviderDependency("memory", "sessionDb", ctx.sessionDb),
+        trajectoryRecorder: requireProviderDependency("memory", "trajectoryRecorder", ctx.trajectoryRecorder)
+      })
+    ];
+  }
+};
+
+function requireProviderDependency<T>(provider: string, dependency: string, value: T | undefined): T {
+  if (value === undefined) {
+    throw new TypeError(`${provider}ToolProvider requires ${dependency}.`);
+  }
+  return value;
 }
 
 type MemoryToolInput = {

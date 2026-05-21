@@ -1,4 +1,4 @@
-import type { RegisteredTool } from "../contracts/tool.js";
+import type { RegisteredTool, SessionToolProvider } from "../contracts/tool.js";
 import type { SessionDB } from "../contracts/session.js";
 import { buildCompressionStatusReport, renderCompressionStatusReport } from "./compression-status.js";
 import {
@@ -575,6 +575,27 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
       }
     }
   ];
+}
+
+export const configToolProvider: SessionToolProvider = {
+  name: "config",
+  kind: "session",
+  createTools(ctx) {
+    return createConfigTools({
+      workspaceRoot: ctx.workspaceRoot,
+      homeDir: ctx.homeDir,
+      profileId: ctx.profileId,
+      sessionId: ctx.currentSessionId,
+      sessionDb: requireProviderDependency("config", "sessionDb", ctx.sessionDb)
+    });
+  }
+};
+
+function requireProviderDependency<T>(provider: string, dependency: string, value: T | undefined): T {
+  if (value === undefined) {
+    throw new TypeError(`${provider}ToolProvider requires ${dependency}.`);
+  }
+  return value;
 }
 
 function redactConfigToolInput<T extends Record<string, unknown>>(input: T): T {

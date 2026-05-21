@@ -1,7 +1,7 @@
 import { cp, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import type { LoadedSkill, SkillDefinition, SkillEvaluation } from "../contracts/skill.js";
-import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
+import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
 import { SkillEvolutionStore, type SkillEvalRunRecord, type SkillObservationRecord, type SkillPatchOperation, type SkillPatchProposal, type SkillPatchRiskLevel, type SkillSourceTrust } from "./skill-evolution.js";
 import { resetBundledSkill } from "./skill-bundled-sync.js";
 import { MAX_SKILL_RESOURCE_BYTES, MAX_SKILL_RESOURCE_CHARS } from "./skill-limits.js";
@@ -1172,6 +1172,28 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
       }
     }
   ];
+}
+
+export const skillToolProvider: SessionToolProvider = {
+  name: "skill",
+  kind: "session",
+  createTools(ctx) {
+    return createSkillTools({
+      registry: requireProviderDependency("skill", "skillRegistry", ctx.skillRegistry),
+      visibleRegistry: ctx.sessionSkillRegistry,
+      localSkillsRoot: requireProviderDependency("skill", "localSkillsRoot", ctx.localSkillsRoot),
+      bundledSkillsRoot: ctx.bundledSkillsRoot,
+      skillEvolutionStore: ctx.skillEvolutionStore,
+      changeManifestStore: ctx.changeManifestStore
+    });
+  }
+};
+
+function requireProviderDependency<T>(provider: string, dependency: string, value: T | undefined): T {
+  if (value === undefined) {
+    throw new TypeError(`${provider}ToolProvider requires ${dependency}.`);
+  }
+  return value;
 }
 
 type GetSkillResult =

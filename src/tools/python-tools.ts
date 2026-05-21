@@ -1,7 +1,7 @@
 import { realpath } from "node:fs/promises";
 import { resolve } from "node:path";
 import { explainPathBlock } from "../context/context-security.js";
-import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
+import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
 import { runPythonWorker } from "../workers/python-worker.js";
 
 export type PythonToolOptions = {
@@ -72,6 +72,24 @@ export function createPythonTools(options: PythonToolOptions = {}): readonly Reg
 }
 
 export const pythonTools: readonly RegisteredTool[] = createPythonTools();
+
+export const pythonToolProvider: SessionToolProvider = {
+  name: "python",
+  kind: "session",
+  createTools(ctx) {
+    return createPythonTools({
+      workspaceRoot: ctx.workspaceRoot,
+      allowedRoots: [requireProviderDependency("python", "channelMediaRoot", ctx.channelMediaRoot)]
+    });
+  }
+};
+
+function requireProviderDependency<T>(provider: string, dependency: string, value: T | undefined): T {
+  if (value === undefined) {
+    throw new TypeError(`${provider}ToolProvider requires ${dependency}.`);
+  }
+  return value;
+}
 
 function dedupeRoots(roots: Array<string | undefined>): string[] {
   return [...new Set(

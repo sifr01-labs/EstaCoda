@@ -1,4 +1,5 @@
 import type { EnvironmentType } from "./security.js";
+import type { RuntimeToolContext, SessionToolContext } from "./tool-context.js";
 
 export type ToolRiskClass =
   | "read-only-local"
@@ -55,3 +56,28 @@ export type RegisteredTool<TInput = any> = ToolDefinition & {
   isAvailable(): Promise<boolean> | boolean;
   run: ToolHandler<TInput>;
 };
+
+export interface StaticToolProvider {
+  readonly name: string;
+  readonly kind: "static";
+  readonly tools: readonly RegisteredTool[];
+}
+
+export interface RuntimeToolProvider {
+  readonly name: string;
+  readonly kind: "runtime";
+  createTools(ctx: RuntimeToolContext): readonly RegisteredTool[];
+}
+
+export interface SessionToolProvider {
+  readonly name: string;
+  readonly kind: "session";
+  createTools(ctx: SessionToolContext): readonly RegisteredTool[];
+}
+
+export type ToolProvider =
+  | StaticToolProvider
+  | RuntimeToolProvider
+  | SessionToolProvider;
+
+// Context shapes are defined in src/contracts/tool-context.ts.

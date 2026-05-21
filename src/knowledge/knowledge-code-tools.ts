@@ -1,4 +1,4 @@
-import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
+import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
 import { KnowledgeCache } from "./knowledge-cache.js";
 import { forwardDeps, reverseDeps, affectedFiles, graphSummary } from "./code-dependency-graph.js";
 
@@ -84,3 +84,11 @@ export function createKnowledgeCodeTools(workspaceRoot: string): RegisteredTool[
     }
   ];
 }
+
+export const knowledgeCodeToolProvider: SessionToolProvider = {
+  name: "knowledgeCode",
+  kind: "session",
+  createTools(ctx) {
+    return createKnowledgeCodeTools(ctx.workspaceRoot);
+  }
+};

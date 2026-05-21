@@ -1,4 +1,4 @@
-import type { RegisteredTool } from "../contracts/tool.js";
+import type { RegisteredTool, StaticToolProvider } from "../contracts/tool.js";
 
 export const builtinTools: readonly RegisteredTool[] = [
   {
@@ -66,3 +66,9 @@ export const builtinTools: readonly RegisteredTool[] = [
     })
   }
 ];
+
+export const builtinToolProvider: StaticToolProvider = {
+  name: "builtin",
+  kind: "static",
+  tools: builtinTools
+};

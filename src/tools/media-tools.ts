@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdir, realpath, stat } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { ARTIFACT_KINDS, isArtifactKind, type ArtifactKind } from "../contracts/artifact.js";
-import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
+import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
 import type { ArtifactStore } from "../artifacts/artifact-store.js";
 import { explainPathBlock } from "../context/context-security.js";
 
@@ -230,6 +230,25 @@ export function createMediaTools(options: MediaToolOptions): readonly Registered
       }
     }
   ];
+}
+
+export const mediaToolProvider: SessionToolProvider = {
+  name: "media",
+  kind: "session",
+  createTools(ctx) {
+    return createMediaTools({
+      workspaceRoot: ctx.workspaceRoot,
+      artifactStore: requireProviderDependency("media", "artifactStore", ctx.artifactStore),
+      allowedRoots: [requireProviderDependency("media", "channelMediaRoot", ctx.channelMediaRoot)]
+    });
+  }
+};
+
+function requireProviderDependency<T>(provider: string, dependency: string, value: T | undefined): T {
+  if (value === undefined) {
+    throw new TypeError(`${provider}ToolProvider requires ${dependency}.`);
+  }
+  return value;
 }
 
 async function resolveAllowedPath(

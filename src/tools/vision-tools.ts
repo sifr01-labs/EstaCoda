@@ -1,6 +1,6 @@
 import { readFile, realpath, stat } from "node:fs/promises";
 import { dirname, extname, resolve } from "node:path";
-import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
+import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
 import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
 import { executeAuxiliaryTask } from "../providers/auxiliary-executor.js";
 import type { ProviderExecutor } from "../providers/provider-executor.js";
@@ -50,6 +50,27 @@ export function createVisionTools(options: VisionToolOptions): readonly Register
       run: (input: { path?: string; prompt?: string }, context) => analyzeImageWithVision(options, input, context?.signal)
     }
   ];
+}
+
+export const visionToolProvider: SessionToolProvider = {
+  name: "vision",
+  kind: "session",
+  createTools(ctx) {
+    return createVisionTools({
+      workspaceRoot: ctx.workspaceRoot,
+      allowedRoots: [requireProviderDependency("vision", "channelMediaRoot", ctx.channelMediaRoot)],
+      visionAuxiliaryRoute: ctx.visionRoute,
+      mainRoute: ctx.mainRoute,
+      providerExecutor: requireProviderDependency("vision", "providerExecutor", ctx.providerExecutor)
+    });
+  }
+};
+
+function requireProviderDependency<T>(provider: string, dependency: string, value: T | undefined): T {
+  if (value === undefined) {
+    throw new TypeError(`${provider}ToolProvider requires ${dependency}.`);
+  }
+  return value;
 }
 
 export async function analyzeImageWithVision(

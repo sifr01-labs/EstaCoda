@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SessionDB } from "../contracts/session.js";
-import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
+import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { buildSafeChildEnv } from "../security/process-env.js";
 import type { ToolExecutor } from "./tool-executor.js";
@@ -108,6 +108,30 @@ export function createExecuteCodeTool(options: ExecuteCodeToolOptions): Register
       });
     }
   };
+}
+
+export const executeCodeToolProvider: SessionToolProvider = {
+  name: "executeCode",
+  kind: "session",
+  createTools(ctx) {
+    return [
+      createExecuteCodeTool({
+        workspaceRoot: ctx.workspaceRoot,
+        toolExecutor: requireProviderDependency("executeCode", "toolExecutor", ctx.toolExecutor),
+        sessionDb: requireProviderDependency("executeCode", "sessionDb", ctx.sessionDb),
+        trajectoryRecorder: requireProviderDependency("executeCode", "trajectoryRecorder", ctx.trajectoryRecorder),
+        sessionId: ctx.currentSessionId,
+        trustedWorkspace: requireProviderDependency("executeCode", "trustedWorkspace", ctx.trustedWorkspace)
+      })
+    ];
+  }
+};
+
+function requireProviderDependency<T>(provider: string, dependency: string, value: T | undefined): T {
+  if (value === undefined) {
+    throw new TypeError(`${provider}ToolProvider requires ${dependency}.`);
+  }
+  return value;
 }
 
 type RunCodeOptions = {

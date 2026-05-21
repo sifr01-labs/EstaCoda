@@ -89,6 +89,103 @@ describe("createRuntime MCP trust gating", () => {
     }
   });
 
+  it("keeps the current built-in tool registration order", async () => {
+    const options = await minimalRuntimeOptions();
+    const runtime = await createRuntime(options);
+    try {
+      expect(runtime.tools().map((tool) => tool.name)).toMatchInlineSnapshot(`
+        [
+          "workflow.plan",
+          "trajectory.record",
+          "python.probe",
+          "document.probe",
+          "web.extract",
+          "browser.status",
+          "browser.snapshot",
+          "browser.click",
+          "browser.type",
+          "browser.scroll",
+          "browser.press",
+          "browser.back",
+          "browser.get_images",
+          "browser.console",
+          "browser.cdp",
+          "browser.screenshot",
+          "browser.vision",
+          "browser.dialog",
+          "browser.navigate",
+          "file.read",
+          "file.write",
+          "file.replace",
+          "file.search",
+          "terminal.run",
+          "media.probe-ffmpeg",
+          "media.inspect",
+          "media.extract-frame",
+          "artifact.record",
+          "voice.speak",
+          "voice.transcribe",
+          "image.generate",
+          "vision.analyze",
+          "process.start",
+          "process.list",
+          "process.logs",
+          "process.stop",
+          "workspace.trust.status",
+          "workspace.trust.grant",
+          "workspace.trust.revoke",
+          "config.provider.status",
+          "config.security.status",
+          "config.compression.status",
+          "config.security.setup",
+          "config.web.setup",
+          "config.browser.setup",
+          "config.mcp.status",
+          "config.mcp.setup",
+          "config.telegram.setup",
+          "config.telegram.status",
+          "config.image.status",
+          "config.provider.setup",
+          "config.image.setup",
+          "cronjob",
+          "memory.curate",
+          "memory.file_compact",
+          "memory.file_compaction_restore",
+          "skill.list",
+          "skill.view",
+          "skill.inspect",
+          "skill.eval",
+          "skill.usage",
+          "skill.observe",
+          "skill.propose_patch",
+          "skill.list_proposals",
+          "skill.review_proposals",
+          "skill.review_proposal",
+          "skill.approve_patch",
+          "skill.reject_patch",
+          "skill.promote_patch",
+          "skill.create",
+          "skill.patch",
+          "skill.edit",
+          "skill.delete",
+          "skill.rollback",
+          "skill.reset",
+          "skill.write_file",
+          "skill.remove_file",
+          "skill.import",
+          "skill.export",
+          "knowledge.memory.inspect",
+          "knowledge.memory.deactivate",
+          "knowledge.code.query",
+          "delegate_task",
+          "execute_code",
+        ]
+      `);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("does not start/register MCP when workspaceTrusted is omitted", async () => {
     const options = await minimalRuntimeOptions({
       mcpServers: { echo: { command: "echo", args: ["hello"] } }

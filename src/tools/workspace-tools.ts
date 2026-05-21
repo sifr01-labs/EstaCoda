@@ -3,7 +3,7 @@ import { lstat, mkdir, readdir, readFile, realpath, stat, writeFile } from "node
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { platform } from "node:os";
 import type { EnvironmentType } from "../contracts/security.js";
-import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
+import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
 import type { FileChangePreviewViewModel } from "../contracts/view-model.js";
 import { explainPathBlock, isLikelyBinary, isTextyPath } from "../context/context-security.js";
 import { assessHardlineFloor } from "../security/command-safety.js";
@@ -302,6 +302,17 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
     }
   ];
 }
+
+export const workspaceToolProvider: SessionToolProvider = {
+  name: "workspace",
+  kind: "session",
+  createTools(ctx) {
+    return createWorkspaceTools({
+      workspaceRoot: ctx.workspaceRoot,
+      fsAdapter: ctx.workspaceFsAdapter
+    });
+  }
+};
 
 async function resolveWorkspacePath(
   root: string,
