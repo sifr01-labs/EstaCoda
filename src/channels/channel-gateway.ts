@@ -666,6 +666,14 @@ export class ChannelGateway {
           await this.#deliverProgress(adapter, normalizedSessionKey, event);
         }
       });
+      sessionId = await this.#consumeRuntimeRotation({
+        runtime,
+        sessionKey: message.sessionKey,
+        expectedSessionId: sessionId,
+        activeTurnKey,
+        turnId,
+        receivedAt: message.receivedAt
+      }) ?? sessionId;
 
       const pendingApproval = await this.#createPendingApprovalContinuation(
         firstPendingApproval(response.toolExecutions, message, sessionId),
@@ -735,6 +743,14 @@ export class ChannelGateway {
     } catch (turnErr) {
       // Classify abort vs runtime error
       const isAbort = controller.signal.aborted || this.#isAbortError(turnErr);
+      sessionId = await this.#consumeRuntimeRotation({
+        runtime,
+        sessionKey: message.sessionKey,
+        expectedSessionId: sessionId,
+        activeTurnKey,
+        turnId,
+        receivedAt: message.receivedAt
+      }) ?? sessionId;
 
       if (!isAbort && this.#runtimeCache !== undefined && runtime !== undefined) {
         try {
@@ -835,6 +851,31 @@ export class ChannelGateway {
       );
       return undefined;
     }
+  }
+
+  async #consumeRuntimeRotation(input: {
+    runtime: Runtime | undefined;
+    sessionKey: ChannelSessionKey;
+    expectedSessionId: string;
+    activeTurnKey: string;
+    turnId: string | undefined;
+    receivedAt?: string;
+  }): Promise<string | undefined> {
+    const runtimeRotation = input.runtime?.consumeSessionRotation?.();
+    if (runtimeRotation === undefined || runtimeRotation.originalSessionId !== input.expectedSessionId) {
+      return undefined;
+    }
+
+    await this.#adoptSessionId(input.sessionKey, input.expectedSessionId, runtimeRotation.activeSessionId, {
+      receivedAt: input.receivedAt,
+      reason: "Runtime session rotation"
+    });
+    if (this.#activeTurnRegistry !== undefined && input.turnId !== undefined) {
+      this.#activeTurnRegistry.updateTurn(input.activeTurnKey, input.turnId, {
+        sessionId: runtimeRotation.activeSessionId
+      });
+    }
+    return runtimeRotation.activeSessionId;
   }
 
   async #adoptSessionId(

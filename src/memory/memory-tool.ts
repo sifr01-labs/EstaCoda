@@ -14,7 +14,7 @@ export type MemoryToolOptions = {
   externalMemory?: ExternalMemoryRuntimeConfig;
   externalMemoryProviders?: ExternalMemoryProvider[];
   profileId?: string;
-  sessionId?: string;
+  sessionId?: string | (() => string);
   workspaceRoot?: string;
   sessionDb?: Pick<SessionDB, "appendEvent">;
   trajectoryRecorder?: Pick<TrajectoryRecorder, "record">;
@@ -82,7 +82,7 @@ async function applyMemoryToolInput(
   const mirror = await mirrorMemoryWriteToExternalProviders({
     entry: {
       profileId: options.profileId ?? "default",
-      sessionId: options.sessionId,
+      sessionId: resolveSessionId(options.sessionId),
       workspaceRoot: options.workspaceRoot,
       operation,
       source: "memory.curate"
@@ -157,8 +157,9 @@ async function recordExternalMemoryMirrorWrite(input: {
   };
   const warnings: string[] = [];
   try {
-    if (input.options.sessionDb !== undefined && input.options.sessionId !== undefined) {
-      await input.options.sessionDb.appendEvent(input.options.sessionId, event);
+    const sessionId = resolveSessionId(input.options.sessionId);
+    if (input.options.sessionDb !== undefined && sessionId !== undefined) {
+      await input.options.sessionDb.appendEvent(sessionId, event);
     }
   } catch (error) {
     warnings.push(`external memory mirror write session event failed: ${errorMessage(error)}`);
@@ -169,6 +170,10 @@ async function recordExternalMemoryMirrorWrite(input: {
     warnings.push(`external memory mirror write trajectory event failed: ${errorMessage(error)}`);
   }
   return warnings;
+}
+
+function resolveSessionId(sessionId: string | (() => string) | undefined): string | undefined {
+  return typeof sessionId === "function" ? sessionId() : sessionId;
 }
 
 function operationCharCount(operation: MemoryOperation): number {

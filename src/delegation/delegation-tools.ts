@@ -3,7 +3,7 @@ import type { DelegationManager } from "./delegation-manager.js";
 
 export type DelegationToolOptions = {
   manager: DelegationManager;
-  parentSessionId: string;
+  parentSessionId: string | (() => string);
   profileId: string;
   trustedWorkspace: () => Promise<boolean> | boolean;
 };
@@ -52,7 +52,7 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
         }
 
         const summary = await options.manager.delegate({
-          parentSessionId: options.parentSessionId,
+          parentSessionId: typeof options.parentSessionId === "function" ? options.parentSessionId() : options.parentSessionId,
           profileId: options.profileId,
           task,
           context: input.context,

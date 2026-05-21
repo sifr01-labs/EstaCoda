@@ -50,7 +50,7 @@ export type MemoryRecallOrchestratorOptions = {
   externalMemory?: ExternalMemoryRuntimeConfig;
   externalMemoryProviders?: ExternalMemoryProvider[];
   profileId?: string;
-  sessionId?: string;
+  sessionId?: string | (() => string);
   workspaceRoot?: string;
 };
 
@@ -76,7 +76,7 @@ export class MemoryRecallOrchestrator {
   readonly #externalMemory: ExternalMemoryRuntimeConfig;
   readonly #externalMemoryProviders: ExternalMemoryProvider[];
   readonly #profileId: string;
-  readonly #sessionId: string | undefined;
+  readonly #sessionId: string | (() => string) | undefined;
   readonly #workspaceRoot: string | undefined;
 
   constructor(options: MemoryRecallOrchestratorOptions) {
@@ -230,7 +230,7 @@ export class MemoryRecallOrchestrator {
       config: this.#externalMemory,
       context: {
         profileId: this.#profileId,
-        sessionId: this.#sessionId,
+        sessionId: this.#currentSessionId(),
         workspaceRoot: this.#workspaceRoot
       }
     });
@@ -264,6 +264,10 @@ export class MemoryRecallOrchestrator {
         warnings
       }
     };
+  }
+
+  #currentSessionId(): string | undefined {
+    return typeof this.#sessionId === "function" ? this.#sessionId() : this.#sessionId;
   }
 
   async #recordSessionRecallDecision(input: {

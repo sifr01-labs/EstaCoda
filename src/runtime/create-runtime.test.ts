@@ -354,6 +354,107 @@ describe("createRuntime semantic compression construction", () => {
       await runtime.dispose();
     }
   });
+
+  it("rotates provider-turn auto compression before provider prompt assembly and writes the response to the child", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "estacoda-runtime-rotate-compression-"));
+    const requests: ProviderRequest[] = [];
+    const mainModel: ModelProfile = {
+      id: "main-model",
+      provider: "local",
+      contextWindowTokens: 128_000,
+      supportsTools: false,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    };
+    const compressionModel: ModelProfile = {
+      ...mainModel,
+      id: "compression-model"
+    };
+    const registry = new ProviderRegistry();
+    registry.register({
+      id: "local",
+      name: "Local",
+      executable: true,
+      health: () => ({ available: true }),
+      listModels: () => [mainModel, compressionModel],
+      complete: async (request: ProviderRequest) => {
+        requests.push(request);
+        return {
+          ok: true,
+          content: request.model === "compression-model" ? "Compressed summary" : "Final child response",
+          model: request.model,
+          provider: "local",
+          usage: { inputTokens: 321 }
+        };
+      }
+    });
+    const sessionDb = new InMemorySessionDB();
+    const sessionId = "auto-compression-parent";
+    const runtime = await createRuntime({
+      tokens: resolveTokens("standard", "dark", "kemetBlue"),
+      model: mainModel,
+      primaryModelRoute: { provider: "local", id: "main-model", profile: mainModel },
+      providerRegistry: registry,
+      workspaceRoot,
+      localSkillsRoot: join(workspaceRoot, "skills"),
+      sessionDb,
+      sessionId,
+      compression: {
+        enabled: true,
+        experimental: true,
+        threshold: 0.10,
+        targetRatio: 0.20,
+        protectFirstN: 0,
+        protectLastN: 1,
+        summaryModelContextLength: 50
+      },
+      auxiliaryModels: {
+        compression: { provider: "local", id: "compression-model" }
+      }
+    });
+
+    try {
+      await sessionDb.appendMessage({
+        id: "old-history",
+        sessionId,
+        role: "user",
+        content: "older history ".repeat(200)
+      });
+
+      const response = await runtime.handle({
+        text: "continue",
+        channel: "cli"
+      });
+
+      const childSessionId = runtime.sessionId;
+      expect(childSessionId).not.toBe(sessionId);
+      expect(response.text).toContain("Final child response");
+      await expect(sessionDb.getSession(sessionId)).resolves.toEqual(expect.objectContaining({
+        endReason: "compression"
+      }));
+      await expect(sessionDb.getSession(childSessionId)).resolves.toEqual(expect.objectContaining({
+        parentSessionId: sessionId
+      }));
+      await expect(sessionDb.listMessages(sessionId)).resolves.toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: "old-history", content: expect.stringContaining("older history") })
+      ]));
+      const childMessages = await sessionDb.listMessages(childSessionId);
+      expect(childMessages).toEqual(expect.arrayContaining([
+        expect.objectContaining({ role: "system", metadata: expect.objectContaining({ semanticCompression: true }) }),
+        expect.objectContaining({ role: "agent", content: expect.stringContaining("Final child response") })
+      ]));
+      expect(await sessionDb.listEvents(childSessionId)).toEqual(expect.arrayContaining([
+        expect.objectContaining({ kind: "prompt-assembled" }),
+        expect.objectContaining({ kind: "provider-completion" })
+      ]));
+      const recall = await runtime.recallSession?.("continue");
+      expect(recall?.blocks.flatMap((block) => block.sourceSessionIds)).not.toContain(childSessionId);
+      const finalProviderRequest = requests.find((request) => request.model === "main-model");
+      expect(JSON.stringify(finalProviderRequest?.messages)).toContain("CONTEXT COMPACTION");
+    } finally {
+      await runtime.dispose();
+    }
+  });
 });
 
 describe("createDefaultProviderRegistry", () => {

@@ -633,6 +633,132 @@ describe("ChannelGateway commands", () => {
     expect(invalidated).toContain(parentSessionId);
   });
 
+  it("adopts a runtime session rotation after provider-turn auto compression", async () => {
+    const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+    const sessionStore = new InMemoryChannelSessionStore();
+    const parentSessionId = await sessionStore.getOrCreateSessionId(makeMessage("seed").sessionKey);
+    const invalidated: string[] = [];
+    const gateway = new ChannelGateway({
+      adapters: [adapter],
+      runtimeForSession: async ({ sessionId }) => ({
+        ...createMinimalRuntime(),
+        sessionId: `${sessionId}-child`,
+        consumeSessionRotation: () => ({
+          originalSessionId: sessionId,
+          activeSessionId: `${sessionId}-child`
+        })
+      }),
+      sessionStore,
+      authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+      runtimeCache: {
+        getOrCreate: async () => {
+          throw new Error("not used");
+        },
+        invalidate: async (sessionId: string) => {
+          invalidated.push(sessionId);
+        },
+        suspend: async () => {}
+      } as never
+    });
+
+    const result = await gateway.receive(makeMessage("please handle this"));
+    const storedSessionId = await sessionStore.getOrCreateSessionId(makeMessage("next").sessionKey);
+
+    expect(result.sessionId).toBe(`${parentSessionId}-child`);
+    expect(storedSessionId).toBe(`${parentSessionId}-child`);
+    expect(invalidated).toContain(parentSessionId);
+  });
+
+  it("adopts a runtime session rotation when the rotated turn throws", async () => {
+    const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+    const sessionStore = new InMemoryChannelSessionStore();
+    const parentSessionId = await sessionStore.getOrCreateSessionId(makeMessage("seed").sessionKey);
+    const runtimeSessionIds: string[] = [];
+    const invalidated: string[] = [];
+    const suspended: string[] = [];
+    const gateway = new ChannelGateway({
+      adapters: [adapter],
+      runtimeForSession: async ({ sessionId }) => {
+        runtimeSessionIds.push(sessionId);
+        if (runtimeSessionIds.length === 1) {
+          return {
+            ...createMinimalRuntime(),
+            sessionId: `${sessionId}-child`,
+            consumeSessionRotation: () => ({
+              originalSessionId: sessionId,
+              activeSessionId: `${sessionId}-child`
+            }),
+            handle: async () => {
+              throw new Error("provider exploded after rotation");
+            }
+          };
+        }
+        return createMinimalRuntime();
+      },
+      sessionStore,
+      authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+      runtimeCache: {
+        getOrCreate: async () => {
+          throw new Error("not used");
+        },
+        invalidate: async (sessionId: string) => {
+          invalidated.push(sessionId);
+        },
+        suspend: async (sessionId: string) => {
+          suspended.push(sessionId);
+        }
+      } as never
+    });
+
+    const failed = await gateway.receive(makeMessage("please handle this"));
+    const storedAfterFailure = await sessionStore.getOrCreateSessionId(makeMessage("next").sessionKey);
+    const next = await gateway.receive(makeMessage("please continue"));
+
+    expect(failed.sessionId).toBe(`${parentSessionId}-child`);
+    expect(failed.replyText).toContain("provider exploded after rotation");
+    expect(storedAfterFailure).toBe(`${parentSessionId}-child`);
+    expect(next.sessionId).toBe(`${parentSessionId}-child`);
+    expect(runtimeSessionIds).toEqual([parentSessionId, `${parentSessionId}-child`]);
+    expect(invalidated).toContain(parentSessionId);
+    expect(suspended).toContain(`${parentSessionId}-child`);
+  });
+
+  it("does not adopt stale or unrelated runtime rotations", async () => {
+    const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+    const sessionStore = new InMemoryChannelSessionStore();
+    const parentSessionId = await sessionStore.getOrCreateSessionId(makeMessage("seed").sessionKey);
+    const invalidated: string[] = [];
+    const gateway = new ChannelGateway({
+      adapters: [adapter],
+      runtimeForSession: async ({ sessionId }) => ({
+        ...createMinimalRuntime(),
+        sessionId: `${sessionId}-unrelated-child`,
+        consumeSessionRotation: () => ({
+          originalSessionId: "some-other-session",
+          activeSessionId: `${sessionId}-unrelated-child`
+        })
+      }),
+      sessionStore,
+      authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+      runtimeCache: {
+        getOrCreate: async () => {
+          throw new Error("not used");
+        },
+        invalidate: async (sessionId: string) => {
+          invalidated.push(sessionId);
+        },
+        suspend: async () => {}
+      } as never
+    });
+
+    const result = await gateway.receive(makeMessage("please handle this"));
+    const storedSessionId = await sessionStore.getOrCreateSessionId(makeMessage("next").sessionKey);
+
+    expect(result.sessionId).toBe(parentSessionId);
+    expect(storedSessionId).toBe(parentSessionId);
+    expect(invalidated).not.toContain(parentSessionId);
+  });
+
   it("continues the gateway turn when hygiene fails safely", async () => {
     const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
     const warnings: string[] = [];

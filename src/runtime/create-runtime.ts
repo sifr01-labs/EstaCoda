@@ -92,6 +92,7 @@ import { ToolPlanRunner } from "./tool-plan-runner.js";
 import { ProviderTurnLoop } from "./provider-turn-loop.js";
 import { SkillWorkflowExecutor } from "./skill-workflow-executor.js";
 import { NativeToolExecutor } from "./native-tool-executor.js";
+import { createSessionRuntimeContext } from "./session-runtime-context.js";
 import { buildStatusViewModel, buildKeyValueBlockViewModel, kv, buildWarningErrorViewModel, buildStartupViewModel } from "../ui/view-models/builders.js";
 import { collectStartupReadinessSnapshot, type StartupReadinessSnapshot } from "./startup-readiness.js";
 import { collectSetupVerificationReport } from "../onboarding/verification.js";
@@ -237,6 +238,7 @@ export type Runtime = {
   dispose(): Promise<void>;
   sessionDb: SessionDB;
   sessionId: string;
+  consumeSessionRotation?(): { originalSessionId: string; activeSessionId: string } | undefined;
 
   // TaskFlow v0.8 integration (available when SQLiteSessionDB is used)
   taskflow?: {
@@ -265,6 +267,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const profileId = options.profileId ?? "default";
   const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId });
   const sessionId = options.sessionId ?? "scaffold";
+  const sessionRuntimeContext = createSessionRuntimeContext(sessionId);
+  let observedRuntimeSessionId = sessionId;
   const sessionDb = options.sessionDb ?? new InMemorySessionDB();
   const closeSessionDbOnDispose = options.closeSessionDbOnDispose ?? true;
   const workspaceRoot = options.workspaceRoot ?? process.cwd();
@@ -496,7 +500,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     workspaceRoot,
     homeDir: options.homeDir,
     profileId: options.profileId,
-    sessionId,
+    sessionId: () => sessionRuntimeContext.currentSessionId(),
     sessionDb
   })) {
     toolRegistry.register(tool);
@@ -515,7 +519,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     externalMemory: externalMemoryConfig,
     externalMemoryProviders,
     profileId,
-    sessionId,
+    sessionId: () => sessionRuntimeContext.currentSessionId(),
     workspaceRoot,
     sessionDb,
     trajectoryRecorder
@@ -620,7 +624,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     sessionDb,
     profileId,
     workspaceRoot,
-    excludeSessionIds: [sessionId],
+    excludeSessionIds: () => [sessionRuntimeContext.currentSessionId()],
     route: sessionSearchRoute,
     mainRoute,
     providerExecutor
@@ -667,7 +671,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       : {
         ...effectiveSecurityAssessor,
         providerExecutor: effectiveSecurityAssessor.providerExecutor ?? providerExecutor,
-        sessionId
+        sessionId: sessionRuntimeContext.currentSessionId()
       }
   });
   const securityPolicy: SecurityPolicy = {
@@ -698,7 +702,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
 
       return await options.approvalController.assess(basePolicy, request, {
           workspaceRoot,
-          sessionId,
+          sessionId: sessionRuntimeContext.currentSessionId(),
           mode: activeSecurityMode,
           smartApproval
         });
@@ -718,7 +722,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   });
   for (const tool of createDelegationTools({
     manager: delegationManager,
-    parentSessionId: sessionId,
+    parentSessionId: () => sessionRuntimeContext.currentSessionId(),
     profileId,
     trustedWorkspace: async () => activeTrustedWorkspace || await trustStore.isTrusted(workspaceRoot)
   })) {
@@ -729,7 +733,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     toolExecutor,
     sessionDb,
     trajectoryRecorder,
-    sessionId,
+    sessionId: () => sessionRuntimeContext.currentSessionId(),
     trustedWorkspace: async () => activeTrustedWorkspace || await trustStore.isTrusted(workspaceRoot)
   }));
   const providerToolAvailability = await toolRegistry.snapshot();
@@ -755,6 +759,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const runRecorder = new RunRecorder({
     sessionDb,
     sessionId,
+    sessionRuntimeContext,
     trajectoryRecorder,
     profileId,
     skillEvolutionStore,
@@ -767,7 +772,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     externalMemory: externalMemoryConfig,
     externalMemoryProviders,
     profileId,
-    sessionId,
+    sessionId: () => sessionRuntimeContext.currentSessionId(),
     workspaceRoot
   });
 
@@ -776,6 +781,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     toolExecutor,
     runRecorder,
     sessionId,
+    sessionRuntimeContext,
     maxConcurrentSafeTools: 4
   });
 
@@ -789,12 +795,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     },
     sessionDb,
     sessionId,
+    sessionRuntimeContext,
     profileId,
     trajectoryRecorder,
     runRecorder,
     toolPlanRunner,
-    sessionCompressionService,
-    compressionConfig,
     soul: undefined,
     memoryPromptContext,
     skillsIndex: sessionSkillCatalog,
@@ -811,13 +816,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const skillWorkflowExecutor = new SkillWorkflowExecutor({
     toolExecutor,
     sessionId,
+    sessionRuntimeContext,
     runRecorder
   });
 
   const nativeToolExecutor = new NativeToolExecutor({
     toolExecutor,
     runRecorder,
-    sessionId
+    sessionId,
+    sessionRuntimeContext
   });
 
   const agentLoop = new AgentLoop({
@@ -836,12 +843,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     trajectoryRecorder,
     sessionDb,
     sessionId,
+    sessionRuntimeContext,
     profileId,
     toolExecutor,
     toolCallPlanner,
     memoryProvider,
     memoryPromptContext,
     memoryRecallOrchestrator,
+    sessionCompressionService,
+    compressionConfig,
     model: options.model,
     providerPreferences: {
       providerOrder: [options.model.provider]
@@ -927,7 +937,21 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
 
   return {
     sessionDb,
-    sessionId,
+    get sessionId() {
+      return sessionRuntimeContext.currentSessionId();
+    },
+    consumeSessionRotation() {
+      const activeSessionId = sessionRuntimeContext.currentSessionId();
+      if (activeSessionId === observedRuntimeSessionId) {
+        return undefined;
+      }
+      const originalSessionId = observedRuntimeSessionId;
+      observedRuntimeSessionId = activeSessionId;
+      return {
+        originalSessionId,
+        activeSessionId
+      };
+    },
     tools() {
       return toolRegistry.list();
     },
@@ -935,7 +959,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       return sessionSkillCatalog;
     },
     async latestResumeNote() {
-      const events = await sessionDb.listEvents(sessionId);
+      const events = await sessionDb.listEvents(sessionRuntimeContext.currentSessionId());
       const cancelled = [...events].reverse().find((event) => event.kind === "agent-cancelled" && event.resumeNote !== undefined);
 
       return cancelled?.kind === "agent-cancelled" ? cancelled.resumeNote : undefined;
@@ -947,7 +971,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       return await sessionRecallService.recall(query);
     },
     async compactSession(input = {}) {
-      const targetSessionId = input.sessionId ?? sessionId;
+      const targetSessionId = input.sessionId ?? sessionRuntimeContext.currentSessionId();
       const targetSession = await sessionDb.getSession(targetSessionId);
       if (targetSession === undefined) {
         throw new Error(`Session not found: ${targetSessionId}`);
@@ -1000,7 +1024,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         tool: input.tool,
         input: input.toolInput,
         trustedWorkspace,
-        sessionId,
+        sessionId: sessionRuntimeContext.currentSessionId(),
         signal: input.signal
       });
     },
@@ -1018,7 +1042,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     async grantApproval(input) {
       await options.approvalController?.grant({
         workspaceRoot,
-        sessionId,
+        sessionId: sessionRuntimeContext.currentSessionId(),
         toolName: input.toolName,
         riskClass: input.riskClass,
         targetKey: input.targetKey,
@@ -1029,7 +1053,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     async inspectApprovals() {
       return await options.approvalController?.inspect({
         workspaceRoot,
-        sessionId
+        sessionId: sessionRuntimeContext.currentSessionId()
       }) ?? {
         session: [],
         persistent: []
