@@ -79,6 +79,8 @@ Memory Hardening uses distinct auxiliary route names:
 
 All three routes resolve through `resolveAuxiliaryModelRoute(...)` and execute through provider infrastructure. Missing routes fail closed or fall back as documented by the calling subsystem.
 
+Transcript-preserving semantic compaction is a session DB/runtime lineage behavior layered around the `compression` route. It does not involve external memory providers, vector search, embeddings, or the `memory_compaction` route.
+
 ## External Memory Provider
 
 External memory providers are not LLM providers. They implement a memory lifecycle contract and are wired from runtime config under `externalMemory`.

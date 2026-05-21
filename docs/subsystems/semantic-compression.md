@@ -51,11 +51,11 @@ Malformed numeric values are normalized with NaN-safe coercion. Values outside s
 
 ## Runtime Paths
 
-Provider-turn compression runs before prompt assembly when enabled and over threshold. It uses `SessionCompressionService.compactIfNeeded()` and the auxiliary route named `compression`.
+Provider-turn compression runs at the `AgentLoop` boundary before provider prompt assembly when enabled and over threshold. It uses `SessionCompressionService.compactIfNeeded()` and the auxiliary route named `compression`.
 
 Threshold checks use image-aware rough token estimation over persisted session messages. Image parts count toward pressure so multimodal sessions are less likely to be underestimated.
 
-Provider-turn token accounting is split into two signals. Before prompt assembly, compression still uses a rough estimate of persisted session messages to decide whether semantic compression should run. After prompt assembly, `ProviderTurnLoop` records the assembled prompt estimate from `prompt.budget.estimatedTokens`; after provider execution, it records actual input tokens when the provider exposes usage. Providers that omit usage and first turns without usage remain safe. These tracked values feed compression diagnostics and session compression state when available.
+Provider-turn token accounting is split into two signals. Before prompt assembly, compression still uses a rough estimate of persisted session messages to decide whether semantic compression should run. After prompt assembly, `ProviderTurnLoop` records the assembled prompt estimate from `prompt.budget.estimatedTokens`; after provider execution, it records actual input tokens when the provider exposes usage. Providers that omit usage and first turns without usage remain safe. These tracked values feed compression diagnostics and session compression state when available. `ProviderTurnLoop` does not perform persistent session forking; it reads whichever session is active after the `AgentLoop` boundary check.
 
 Manual session compaction is available through:
 
@@ -65,9 +65,18 @@ Manual session compaction is available through:
 
 Manual compaction uses `SessionCompressionService.compactNow()` and intentionally bypasses the threshold. It is still the same semantic session compression path, not TaskFlow compaction.
 
-Gateway hygiene is gateway-only. It runs after session ID resolution and before runtime acquisition for normal gateway turns. It uses an 85% threshold and records compression events with `trigger: "hygiene"`. It skips gateway commands such as `/compact`, `/help`, and `/status`, and it skips drain/shutdown rejection paths.
+Surface behavior differs by whether the caller can adopt a rotated child session:
 
-Session replacement is transactional through `sessionDb.replaceMessages()`. Compression writes `session-history-compressed` and `session-compression-state` events best-effort; event failures are returned as warnings and do not undo a successful message replacement.
+- Gateway `/compact [topic]` uses transcript-preserving compaction and adopts the compacted child session.
+- Gateway hygiene uses transcript-preserving compaction and adopts the compacted child before runtime acquisition.
+- Provider-turn automatic compression rotates at the `AgentLoop` boundary before provider prompt assembly. The runtime session context follows the compacted child, and final assistant messages plus later runtime write paths use that active child session.
+- Interactive CLI `/compact [topic]` and top-level `estacoda sessions compact <session-id>` remain non-rotating in this implementation because those callers do not yet adopt child sessions.
+
+Gateway hygiene is gateway-only. It runs after session ID resolution and before runtime acquisition for normal gateway turns. It uses an 85% threshold and records compression events with `trigger: "hygiene"`. It skips gateway commands such as `/compact`, `/help`, and `/status`, and it skips drain/shutdown rejection paths. Hygiene failure remains non-fatal for the turn.
+
+Gateway `/compact` is rejected while the same chat/session is active, queued, or draining. This prevents manual gateway compaction from racing an active runtime turn.
+
+Non-preserving compaction rewrites the target session transactionally through the session DB rewrite path. Preserving compaction writes the compacted transcript to a child session, then ends the parent only after the child transcript write succeeds. Compression writes `session-history-compressed` and `session-compression-state` events best-effort; event failures are returned as warnings and do not undo a successful transcript rewrite or child-session creation.
 
 Manual output follows this shape:
 
@@ -103,6 +112,23 @@ Repeated marginal compactions are suppressed by durable anti-thrashing logic. Co
 A session-level compression lock prevents concurrent compactions for the same session. Auxiliary compression uses a per-session scope key so unrelated sessions do not block each other.
 
 Summary output is redacted and normalized with the current summary prefix. Legacy prefixes are tolerated. The current implementation does not structurally validate headings as a schema; malformed summaries are treated as historical context and remain subordinate to live instructions.
+
+## Session Lineage
+
+Transcript-preserving semantic compaction keeps the original session queryable for audit/history by creating a compacted child session instead of rewriting the parent.
+
+When a preserving caller compacts successfully:
+
+- the child session has `parentSessionId` set to the original session ID
+- the child session contains the compacted transcript
+- the parent session keeps its original transcript and messages
+- the parent session is marked with `endedAt` and `endReason: "compression"` after the child transcript write succeeds
+- compression events and rehydratable compression state are written to the child session
+- the parent may receive a best-effort lineage/audit event
+
+The child becomes the active session only on surfaces that explicitly adopt the rotation. Gateway `/compact`, gateway hygiene, and provider-turn automatic compression adopt the child. CLI compact surfaces remain non-rotating until they grow explicit child-session adoption.
+
+Gateway runtime rotations are consumed on both success and error paths. If provider-turn auto compression creates a child and a later provider/tool/write step throws, the gateway still adopts the child before returning the error so the next turn does not resume the ended parent.
 
 ## Summary Budgeting
 
@@ -173,27 +199,32 @@ Older large tool results may be pruned before LLM summarization. This pruning af
 
 Semantic session compression:
 
-- rewrites old session messages into a reference summary
+- writes older session context into a reference summary
 - uses the `compression` auxiliary route
 - is gated and experimental
 - records compression state/events for diagnostics
+- preserves parent transcripts on gateway-adopted and provider-turn auto paths by rotating to child sessions
+- remains non-rotating for CLI compact surfaces that do not yet adopt child sessions
 
 Memory File Compaction:
 
 - compacts `USER.md` or `MEMORY.md`
 - uses the `memory_compaction` auxiliary route
 - never compacts `SOUL.md` or `AGENTS.md`
+- does not create session child lineage
 
 TaskFlow compaction:
 
 - belongs to TaskFlow state and `/flow compact <flowId>`
 - is not invoked by semantic session compression or `/compact`
+- does not use semantic session lineage
 
 Deterministic history packing:
 
 - is local prompt packing, not LLM summarization
 - remains available when semantic compression is disabled
 - is the fallback path when semantic summarization cannot run
+- does not create child sessions or end parent sessions
 
 ## Not Implemented Here
 
@@ -202,7 +233,7 @@ This subsystem still does not provide:
 - default-on semantic compression
 - `config.compression.setup`
 - config mutation through `config.compression.status`
-- channel pointer rewrites
+- generic session fork UX beyond compaction rotation/adoption paths
 - archive tables
 - vector search
 - embedding stores

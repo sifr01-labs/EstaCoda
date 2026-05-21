@@ -248,9 +248,11 @@ Workflow learning is separated from memory files:
 
 ## Session Compression Boundary
 
-Semantic session compression is documented separately in [Semantic Session Compression](./semantic-compression.md). It rewrites older session history into reference-only summaries; it does not compact `USER.md`, `SOUL.md`, `MEMORY.md`, `AGENTS.md`, shared memory, or promotion metadata.
+Semantic session compression is documented separately in [Semantic Session Compression](./semantic-compression.md). It turns older session context into reference-only summaries; it does not compact `USER.md`, `SOUL.md`, `MEMORY.md`, `AGENTS.md`, shared memory, or promotion metadata.
 
 Compression observability now includes computed summary budgeting, durable anti-thrashing state, ProviderTurnLoop prompt-token diagnostics, fallback diagnostics, and compression-input-only tool-result pruning. The pruning pass can replace old large tool output with bounded redacted placeholders before summarization, but it does not mutate persisted session history or implement broad orphan cleanup.
+
+Transcript-preserving semantic compaction creates explicit session lineage where the caller can adopt a rotated session. Gateway `/compact`, gateway hygiene, and provider-turn automatic compression preserve the original transcript by creating an active compacted child session with `parentSessionId`; the parent keeps its transcript, remains searchable, and is marked ended for `compression`. Interactive CLI `/compact` and top-level `estacoda sessions compact` remain non-rotating in this implementation.
 
 Memory File Compaction is also a separate path. It can compact `USER.md` and `MEMORY.md` only, uses the `memory_compaction` auxiliary route, and remains distinct from semantic session compression and TaskFlow compaction.
 

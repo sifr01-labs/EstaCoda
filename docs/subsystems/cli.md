@@ -98,7 +98,7 @@ Top-level semantic session compaction:
 estacoda sessions compact <session-id> [--topic <topic>]
 ```
 
-This calls the active runtime's session compaction service. It is semantic session compression for a session transcript, not TaskFlow compaction and not Memory File Compaction.
+This calls the active runtime's session compaction service. It is semantic session compression for a session transcript, not TaskFlow compaction and not Memory File Compaction. This top-level CLI command is non-rotating in the current implementation; it does not create/adopt a compacted child session.
 
 Memory-file compaction is exposed as runtime tools, not as a top-level CLI command in this implementation:
 
@@ -156,6 +156,8 @@ In-session commands:
 | `/revoke <approval-id>` | Revoke a persistent approval by id |
 | `/reload-mcp` | Reload MCP servers |
 | `/exit` | Exit session |
+
+Interactive `/compact [topic]` is semantic session compression for the current session, but it is non-rotating in this implementation. Gateway `/compact` has separate adoption logic and can preserve the parent transcript by switching the channel to a compacted child session.
 
 ## Interactive Approval Prompt
 
