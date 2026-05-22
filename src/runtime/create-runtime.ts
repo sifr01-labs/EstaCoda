@@ -530,7 +530,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   }
   const supervisedLocalCdp = options.browserBackend === undefined
     && options.browser?.backend === "local-cdp"
-    && options.browser.supervised === true;
+    && options.browser.supervised !== false;
   let browserLifecycleBackend: (BrowserBackend & {
     closeSession?: (sessionId: string) => void | Promise<void>;
   }) | undefined;

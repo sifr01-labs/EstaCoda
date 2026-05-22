@@ -291,6 +291,7 @@ export type EstaCodaConfig = {
     cdpUrl?: string;
     launchCommand?: string;
     autoLaunch?: boolean;
+    supervised?: boolean;
     allowPrivateUrls?: boolean | string;
   };
   imageGen?: ImageGenerationConfig;
@@ -415,6 +416,7 @@ export type LoadedRuntimeConfig = {
     cdpUrl?: string;
     launchCommand?: string;
     autoLaunch: boolean;
+    supervised: boolean;
   };
   imageGen: Required<Pick<ImageGenerationConfig, "provider" | "model" | "useGateway">> & ImageGenerationConfig;
   tts: Required<Pick<TtsConfig, "provider" | "speed">> & TtsConfig;
@@ -491,6 +493,7 @@ export type BrowserSetupInput = {
   cdpUrl?: string;
   launchCommand?: string;
   autoLaunch?: boolean;
+  supervised?: boolean;
 };
 
 export type VoiceSetupInput = {
@@ -701,7 +704,8 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
       cloudProvider: config.browser?.cloudProvider,
       cdpUrl: config.browser?.cdpUrl,
       launchCommand: config.browser?.launchCommand,
-      autoLaunch: config.browser?.autoLaunch ?? false
+      autoLaunch: config.browser?.autoLaunch ?? false,
+      supervised: config.browser?.supervised ?? config.browser?.backend === "local-cdp"
     },
     imageGen: normalizeImageGenerationConfig(config.imageGen ?? config.image_gen),
     tts: normalizeTtsConfig(config.tts),

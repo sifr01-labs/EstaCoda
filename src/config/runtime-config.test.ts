@@ -528,9 +528,39 @@ describe("loadRuntimeConfig browser provider compatibility", () => {
       expect(loaded.browser).toMatchObject({
         backend,
         cloudProvider: "browser-use",
+        supervised: false,
         autoLaunch: false
       });
     }
+  });
+
+  it("defaults loaded local CDP config to supervised mode", async () => {
+    const loaded = await loadBrowserConfig({
+      browser: {
+        backend: "local-cdp",
+        cdpUrl: "http://127.0.0.1:9222"
+      }
+    });
+
+    expect(loaded.browser).toMatchObject({
+      backend: "local-cdp",
+      cdpUrl: "http://127.0.0.1:9222",
+      supervised: true
+    });
+  });
+
+  it("preserves explicit local CDP supervised escape hatch", async () => {
+    const loaded = await loadBrowserConfig({
+      browser: {
+        backend: "local-cdp",
+        supervised: false
+      }
+    });
+
+    expect(loaded.browser).toMatchObject({
+      backend: "local-cdp",
+      supervised: false
+    });
   });
 });
 

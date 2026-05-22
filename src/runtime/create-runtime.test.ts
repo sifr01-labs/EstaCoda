@@ -1,13 +1,14 @@
 import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { createRuntime, createDefaultProviderRegistry, type RuntimeOptions } from "./create-runtime.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { WorkspaceApprovalController } from "../security/workspace-approval-controller.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
+import type { CdpFetchLike, CdpWebSocketEvent, CdpWebSocketLike } from "../browser/cdp-client.js";
 import type { ModelProfile, ProviderAdapter, ProviderRequest } from "../contracts/provider.js";
 import type { SecurityApprovalMode, SecurityAssessment, SecurityPolicy, SecurityRequest } from "../contracts/security.js";
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
@@ -22,6 +23,82 @@ const mockModel: ModelProfile = {
   supportsVision: false,
   supportsStructuredOutput: false
 };
+
+class FakeRuntimeCdpSocket implements CdpWebSocketLike {
+  readonly readyState = 1;
+  readonly sent: Array<{ id: number; method: string; params?: Record<string, unknown> }> = [];
+  readonly #listeners = new Map<string, Array<(event: CdpWebSocketEvent) => void>>();
+
+  send(data: string): void {
+    const message = JSON.parse(data) as {
+      id: number;
+      method: string;
+      params?: Record<string, unknown>;
+    };
+    this.sent.push(message);
+    const result = message.method === "Runtime.evaluate"
+      ? {
+        result: {
+          value: JSON.stringify({
+            sessionId: "runtime-cdp-session",
+            url: "https://93.184.216.34/",
+            title: "Runtime CDP",
+            text: "Supervised runtime CDP",
+            elements: []
+          })
+        }
+      }
+      : { ok: true, method: message.method };
+    this.#emit("message", { data: JSON.stringify({ id: message.id, result }) });
+    if (message.method === "Page.navigate") {
+      setTimeout(() => this.#emit("message", { data: JSON.stringify({ method: "Page.loadEventFired", params: {} }) }), 0);
+    }
+  }
+
+  close(): void {
+    this.#emit("close", {});
+  }
+
+  addEventListener(type: "open" | "message" | "error" | "close", listener: (event: CdpWebSocketEvent) => void): void {
+    const listeners = this.#listeners.get(type) ?? [];
+    listeners.push(listener);
+    this.#listeners.set(type, listeners);
+  }
+
+  #emit(type: string, event: CdpWebSocketEvent): void {
+    for (const listener of this.#listeners.get(type) ?? []) {
+      listener(event);
+    }
+  }
+}
+
+function createRuntimeCdpFetch(): CdpFetchLike {
+  return vi.fn(async (url: string) => {
+    if (url.endsWith("/json/version")) {
+      return cdpResponse({
+        Browser: "Chrome/125.0.0.0",
+        "Protocol-Version": "1.3"
+      });
+    }
+    if (url.includes("/json/new?")) {
+      return cdpResponse({
+        id: "runtime-target",
+        webSocketDebuggerUrl: "ws://runtime-cdp/target"
+      });
+    }
+    throw new Error(`Unexpected CDP URL: ${url}`);
+  });
+}
+
+function cdpResponse(payload: unknown): Awaited<ReturnType<CdpFetchLike>> {
+  return {
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    json: async () => payload,
+    text: async () => JSON.stringify(payload)
+  };
+}
 
 function createMockProviderRegistry(): ProviderRegistry {
   const registry = new ProviderRegistry();
@@ -2005,6 +2082,74 @@ describe("createRuntime external memory providers", () => {
         "utf8"
       );
       expect(mirrored).toContain("Runtime file external memory mirror works");
+    } finally {
+      await runtime.dispose();
+    }
+  });
+});
+
+describe("createRuntime browser backend wiring", () => {
+  it("uses supervised local CDP by default from ordinary runtime config", async () => {
+    const options = await minimalRuntimeOptions();
+    const socket = new FakeRuntimeCdpSocket();
+    const runtime = await createRuntime({
+      ...options,
+      cdpFetch: createRuntimeCdpFetch(),
+      cdpWebSocketFactory: () => socket,
+      browser: {
+        backend: "local-cdp",
+        cdpUrl: "http://127.0.0.1:9222",
+        autoLaunch: false
+      }
+    });
+
+    try {
+      const result = await runtime.executeTool?.({
+        tool: "browser.navigate",
+        toolInput: { url: "https://93.184.216.34/" }
+      });
+
+      expect(result?.result?.ok).toBe(true);
+      expect(socket.sent.map((message) => message.method)).toContain("Fetch.enable");
+      expect(socket.sent.map((message) => message.method)).toContain("Page.navigate");
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("preserves injected browserBackend behavior", async () => {
+    const options = await minimalRuntimeOptions();
+    const runtime = await createRuntime({
+      ...options,
+      browserBackend: {
+        kind: "mock",
+        isAvailable: () => true,
+        status: () => ({ backend: "mock", available: true }),
+        navigate: async (input) => ({
+          session: {
+            id: "injected",
+            backend: "mock",
+            currentUrl: input.url,
+            createdAt: new Date(0).toISOString()
+          },
+          snapshot: {
+            sessionId: "injected",
+            url: input.url,
+            text: "Injected backend",
+            elements: []
+          }
+        })
+      }
+    });
+
+    try {
+      const result = await runtime.executeTool?.({
+        tool: "browser.navigate",
+        toolInput: { url: "https://93.184.216.34/" }
+      });
+
+      expect(result?.result?.ok).toBe(true);
+      expect(result?.result?.metadata).toMatchObject({ backend: "mock" });
     } finally {
       await runtime.dispose();
     }

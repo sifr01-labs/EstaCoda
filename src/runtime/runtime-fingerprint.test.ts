@@ -36,7 +36,7 @@ function fakeLoadedRuntimeConfig(overrides?: Partial<LoadedRuntimeConfig>): Load
       maxChars: 2500,
       mirrorWrites: false,
     },
-    browser: { backend: "unconfigured", autoLaunch: false },
+    browser: { backend: "unconfigured", autoLaunch: false, supervised: false },
     imageGen: { provider: "fal", model: "test", useGateway: false },
     tts: { provider: "edge", speed: 1.0 },
     stt: { provider: "local" },
@@ -523,7 +523,7 @@ describe("computeRuntimeFingerprint", () => {
     const fp1 = computeRuntimeFingerprint(base, opts);
     const fp2 = computeRuntimeFingerprint(
       fakeLoadedRuntimeConfig({
-        browser: { backend: "local-cdp", autoLaunch: true, cdpUrl: "ws://localhost:9222" },
+        browser: { backend: "local-cdp", autoLaunch: true, cdpUrl: "ws://localhost:9222", supervised: true },
       }),
       opts
     );
