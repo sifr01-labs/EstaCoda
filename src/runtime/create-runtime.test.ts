@@ -1126,6 +1126,7 @@ describe("createRuntime MCP trust gating", () => {
               "autoLaunch",
               "backend",
               "cdpUrl",
+              "cloudProvider",
               "launchCommand",
             ],
             "toolsets": [

@@ -2051,6 +2051,7 @@ async function browser(options: CliOptions, args: string[]): Promise<CliCommandR
         "EstaCoda browser backend",
         "  estacoda browser status",
         "  estacoda browser setup --backend local-cdp --cdp-url http://127.0.0.1:9222",
+        "  estacoda browser setup --backend browserbase --cloud-provider browserbase",
         "  estacoda browser test",
         "  estacoda browser disable"
       ].join("\n")
@@ -2065,6 +2066,7 @@ async function browser(options: CliOptions, args: string[]): Promise<CliCommandR
       output: [
         subcommand === "test" ? "EstaCoda browser test" : undefined,
         `Browser backend: ${config.browser.backend}`,
+        config.browser.cloudProvider === undefined ? undefined : `Cloud provider: ${config.browser.cloudProvider}`,
         config.browser.cdpUrl === undefined ? undefined : `CDP URL: ${config.browser.cdpUrl}`,
         config.browser.launchCommand === undefined ? undefined : `Launch command: ${config.browser.launchCommand}`,
         `Auto-launch: ${config.browser.autoLaunch ? "enabled" : "disabled"}`,
@@ -2091,6 +2093,7 @@ async function browser(options: CliOptions, args: string[]): Promise<CliCommandR
     exitCode: 0,
     output: [
       `Browser backend: ${result.config.browser?.backend ?? "unconfigured"}.`,
+      result.config.browser?.cloudProvider === undefined ? undefined : `Cloud provider: ${result.config.browser.cloudProvider}`,
       result.config.browser?.cdpUrl === undefined ? undefined : `CDP URL: ${result.config.browser.cdpUrl}`,
       result.config.browser?.launchCommand === undefined ? undefined : `Launch command: ${result.config.browser.launchCommand}`,
       `Auto-launch: ${result.config.browser?.autoLaunch === true ? "enabled" : "disabled"}`,
@@ -3511,6 +3514,9 @@ function parseBrowserArgs(args: string[]): Partial<BrowserSetupInput> {
 
     if (arg === "--backend") {
       parsed.backend = next as BrowserSetupInput["backend"];
+      index += 1;
+    } else if (arg === "--cloud-provider") {
+      parsed.cloudProvider = next as BrowserSetupInput["cloudProvider"];
       index += 1;
     } else if (arg === "--cdp-url") {
       parsed.cdpUrl = next;

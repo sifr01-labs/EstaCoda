@@ -213,6 +213,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
         type: "object",
         properties: {
           backend: { type: "string" },
+          cloudProvider: { type: "string" },
           cdpUrl: { type: "string" },
           launchCommand: { type: "string" },
           autoLaunch: { type: "boolean" },
@@ -233,6 +234,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           ok: true,
           content: [
             `Browser backend: ${result.config.browser?.backend ?? "unconfigured"}.`,
+            result.config.browser?.cloudProvider === undefined ? undefined : `Cloud provider: ${result.config.browser.cloudProvider}`,
             result.config.browser?.cdpUrl === undefined ? undefined : `CDP URL: ${result.config.browser.cdpUrl}`,
             result.config.browser?.launchCommand === undefined ? undefined : `Launch command: ${result.config.browser.launchCommand}`,
             `Auto-launch: ${result.config.browser?.autoLaunch === true ? "enabled" : "disabled"}`,
