@@ -11,6 +11,7 @@ import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import type { CdpFetchLike, CdpWebSocketFactory } from "./cdp-client.js";
 import type { ResolveHostnameFn } from "./url-safety.js";
 import { CDPSupervisor } from "./cdp-supervisor.js";
+import type { BrowserSessionLifecycle } from "./session-lifecycle.js";
 
 export type SupervisedLocalCdpBackendOptions = {
   cdpUrl?: string;
@@ -20,6 +21,7 @@ export type SupervisedLocalCdpBackendOptions = {
   webSocketFactory?: CdpWebSocketFactory;
   securityConfig?: Pick<LoadedRuntimeConfig["security"], "allowPrivateUrls" | "websiteBlocklist">;
   resolveHostname?: ResolveHostnameFn;
+  lifecycle?: BrowserSessionLifecycle;
 };
 
 type SupervisedSession = {
@@ -30,8 +32,10 @@ type SupervisedSession = {
 
 export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalCdpBackendOptions = {}): BrowserBackend {
   const endpoint = normalizeCdpUrl(options.cdpUrl);
+  const lifecycle = options.lifecycle;
   const sessions = new Map<string, SupervisedSession>();
   let latestSessionId: string | undefined;
+  lifecycle?.start();
 
   const getSession = (input?: BrowserActionInput): SupervisedSession => {
     const sessionId = input?.sessionId ?? latestSessionId;
@@ -42,10 +46,27 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     if (session === undefined) {
       throw new Error(`Browser session not found: ${sessionId}`);
     }
+    lifecycle?.touch(sessionId);
     return session;
   };
 
-  return {
+  const closeSession = (sessionId: string): void => {
+    const session = sessions.get(sessionId);
+    if (session === undefined) {
+      lifecycle?.unregister(sessionId);
+      return;
+    }
+    sessions.delete(sessionId);
+    if (latestSessionId === sessionId) {
+      latestSessionId = [...sessions.keys()].at(-1);
+    }
+    session.supervisor.close();
+    lifecycle?.unregister(sessionId);
+  };
+
+  const backend: BrowserBackend & {
+    closeSession(sessionId: string): void;
+  } = {
     kind: "local-cdp",
     isAvailable: async () => (await checkLocalCdpStatus(endpoint, options.fetch)).available,
     status: () => checkLocalCdpStatus(endpoint, options.fetch),
@@ -61,39 +82,58 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       });
       const sessionId = input.sessionId ?? target.id ?? `cdp-${Date.now()}`;
       const existing = sessions.get(sessionId);
+      let createdSupervisor = false;
       const supervisor = existing?.webSocketDebuggerUrl === target.webSocketDebuggerUrl
         ? existing.supervisor
-        : new CDPSupervisor({
-          webSocketUrl: target.webSocketDebuggerUrl,
-          webSocketFactory: options.webSocketFactory,
-          requestInterception: {
-            allowPrivateUrls: options.securityConfig?.allowPrivateUrls,
-            websiteBlocklist: options.securityConfig?.websiteBlocklist,
-            resolveHostname: options.resolveHostname
-          }
-        });
+        : (() => {
+          createdSupervisor = true;
+          return new CDPSupervisor({
+            webSocketUrl: target.webSocketDebuggerUrl,
+            webSocketFactory: options.webSocketFactory,
+            requestInterception: {
+              allowPrivateUrls: options.securityConfig?.allowPrivateUrls,
+              websiteBlocklist: options.securityConfig?.websiteBlocklist,
+              resolveHostname: options.resolveHostname
+            }
+          });
+        })();
 
-      await supervisor.start();
-      await supervisor.send("Page.navigate", { url: input.url });
-      await supervisor.waitFor("Page.loadEventFired", 5_000).catch(() => undefined);
+      try {
+        await supervisor.start();
+        await supervisor.send("Page.navigate", { url: input.url });
+        await supervisor.waitFor("Page.loadEventFired", 5_000).catch(() => undefined);
 
-      const snapshot = await supervisor.getSnapshot(sessionId);
-      sessions.set(sessionId, {
-        id: sessionId,
-        webSocketDebuggerUrl: target.webSocketDebuggerUrl,
-        supervisor,
-      });
-      latestSessionId = sessionId;
-
-      return {
-        session: {
+        const snapshot = await supervisor.getSnapshot(sessionId);
+        if (existing !== undefined && existing.supervisor !== supervisor) {
+          existing.supervisor.close();
+        }
+        sessions.set(sessionId, {
           id: sessionId,
+          webSocketDebuggerUrl: target.webSocketDebuggerUrl,
+          supervisor,
+        });
+        latestSessionId = sessionId;
+        lifecycle?.register(sessionId, {
           backend: "local-cdp",
-          currentUrl: snapshot.url,
-          createdAt: new Date().toISOString(),
-        },
-        snapshot,
-      };
+          webSocketDebuggerUrl: target.webSocketDebuggerUrl
+        });
+        lifecycle?.touch(sessionId);
+
+        return {
+          session: {
+            id: sessionId,
+            backend: "local-cdp",
+            currentUrl: snapshot.url,
+            createdAt: new Date().toISOString(),
+          },
+          snapshot,
+        };
+      } catch (error) {
+        if (createdSupervisor) {
+          supervisor.close();
+        }
+        throw error;
+      }
     },
     snapshot: async (input) => {
       const session = getSession(input);
@@ -181,8 +221,11 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         promptText: input.promptText
       });
       return session.supervisor.getSnapshot(session.id);
-    }
+    },
+    closeSession
   };
+
+  return backend;
 }
 
 function refActionExpression(ref: string | undefined, action: "click" | "type", text = ""): string {

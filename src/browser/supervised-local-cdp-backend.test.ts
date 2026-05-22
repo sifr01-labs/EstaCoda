@@ -2,11 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import type { CdpFetchLike, CdpWebSocketEvent, CdpWebSocketLike } from "./cdp-client.js";
 import { createBrowserBackendFromConfig } from "./browser-backend.js";
 import { createSupervisedLocalCdpBrowserBackend } from "./supervised-local-cdp-backend.js";
+import { BrowserSessionLifecycle } from "./session-lifecycle.js";
 
 class FakeCdpSocket implements CdpWebSocketLike {
   readonly readyState = 1;
   readonly sent: Array<{ id: number; method: string; params?: Record<string, unknown> }> = [];
   readonly #listeners = new Map<string, Array<(event: CdpWebSocketEvent) => void>>();
+  closed = false;
   snapshot = {
     url: "https://example.com/final",
     title: "Supervised Page",
@@ -28,7 +30,8 @@ class FakeCdpSocket implements CdpWebSocketLike {
         result
       })
     });
-    if (message.method === "Page.navigate") {
+    if (message.method === "Page.navigate"
+      || (message.method === "Runtime.evaluate" && typeof message.params?.expression === "string" && message.params.expression.includes("history.back"))) {
       setTimeout(() => this.#emit("message", {
         data: JSON.stringify({ method: "Page.loadEventFired", params: {} })
       }), 0);
@@ -36,6 +39,7 @@ class FakeCdpSocket implements CdpWebSocketLike {
   }
 
   close(): void {
+    this.closed = true;
     this.#emit("close", {});
   }
 
@@ -296,5 +300,81 @@ describe("supervised local CDP backend", () => {
         params: { accept: false, promptText: "" }
       })
     ]));
+  });
+
+  it("registers lifecycle metadata after successful navigate", async () => {
+    const lifecycle = new BrowserSessionLifecycle({ onCleanup: vi.fn() });
+    const register = vi.spyOn(lifecycle, "register");
+    const touch = vi.spyOn(lifecycle, "touch");
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: () => new FakeCdpSocket(),
+      lifecycle
+    });
+
+    await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
+
+    expect(register).toHaveBeenCalledWith("session-1", {
+      backend: "local-cdp",
+      webSocketDebuggerUrl: "ws://cdp/target-1"
+    });
+    expect(touch).toHaveBeenCalledWith("session-1");
+    lifecycle.stop();
+  });
+
+  it("touches lifecycle state on every supervised session action", async () => {
+    const lifecycle = new BrowserSessionLifecycle({ onCleanup: vi.fn() });
+    const touch = vi.spyOn(lifecycle, "touch");
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: () => new FakeCdpSocket(),
+      lifecycle
+    });
+
+    await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
+    touch.mockClear();
+
+    await backend.snapshot?.({ sessionId: "session-1" });
+    await backend.click?.({ sessionId: "session-1", ref: "@e1" });
+    await backend.type?.({ sessionId: "session-1", ref: "@e1", text: "hello" });
+    await backend.scroll?.({ sessionId: "session-1", direction: "down" });
+    await backend.press?.({ sessionId: "session-1", key: "Enter" });
+    await backend.back?.({ sessionId: "session-1" });
+    await backend.dialog?.({ sessionId: "session-1", action: "dismiss" });
+    await backend.console?.({ sessionId: "session-1" });
+    await backend.getImages?.({ sessionId: "session-1" });
+    await backend.screenshot?.({ sessionId: "session-1" });
+    await backend.cdp?.({ sessionId: "session-1", method: "Runtime.getProperties" });
+
+    expect(touch).toHaveBeenCalledTimes(11);
+    expect(touch).toHaveBeenCalledWith("session-1");
+    lifecycle.stop();
+  });
+
+  it("lifecycle cleanup closes the matching supervisor session", async () => {
+    const socket = new FakeCdpSocket();
+    let backend: ReturnType<typeof createSupervisedLocalCdpBrowserBackend> & {
+      closeSession(sessionId: string): void;
+    };
+    const lifecycle = new BrowserSessionLifecycle({
+      onCleanup: (sessionId) => backend.closeSession(sessionId)
+    });
+    const unregister = vi.spyOn(lifecycle, "unregister");
+    backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: () => socket,
+      lifecycle
+    }) as typeof backend;
+
+    await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
+    await lifecycle.cleanupAll();
+
+    expect(socket.closed).toBe(true);
+    expect(unregister).toHaveBeenCalledWith("session-1");
+    await expect(backend.snapshot?.({ sessionId: "session-1" })).rejects.toThrow("Browser session not found: session-1");
+    lifecycle.stop();
   });
 });

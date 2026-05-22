@@ -7,6 +7,8 @@ import type { RegisteredTool, ToolDefinition, ToolProvider, ToolsetName } from "
 import type { RuntimeToolContext, SessionToolContext } from "../contracts/tool-context.js";
 import { ArtifactStore } from "../artifacts/artifact-store.js";
 import { createBrowserBackendFromConfig, type CdpFetchLike, type CdpWebSocketFactory } from "../browser/browser-backend.js";
+import { createSupervisedLocalCdpBrowserBackend } from "../browser/supervised-local-cdp-backend.js";
+import { BrowserSessionLifecycle, registerEmergencyCleanup } from "../browser/session-lifecycle.js";
 import type { ResolvedTokens, TokenBranding } from "../contracts/ui-tokens.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { ContextReferenceExpander } from "../context/context-reference-expander.js";
@@ -523,16 +525,47 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       skillRegistry.register(skill);
     }
   }
-  const browserBackend = options.browserBackend ?? createBrowserBackendFromConfig({
-    backend: options.browser?.backend ?? "unconfigured",
-    cdpUrl: options.browser?.cdpUrl,
-    launchCommand: options.browser?.launchCommand,
-    autoLaunch: options.browser?.autoLaunch,
-    fetch: options.cdpFetch,
-    webSocketFactory: options.cdpWebSocketFactory,
-    supervised: options.browser?.supervised,
-    securityConfig: options.securityConfig
-  });
+  const supervisedLocalCdp = options.browserBackend === undefined
+    && options.browser?.backend === "local-cdp"
+    && options.browser.supervised === true;
+  let browserLifecycleBackend: (BrowserBackend & {
+    closeSession?: (sessionId: string) => void | Promise<void>;
+  }) | undefined;
+  const browserSessionLifecycle = supervisedLocalCdp
+    ? new BrowserSessionLifecycle({
+      onCleanup: async (sessionId) => {
+        await browserLifecycleBackend?.closeSession?.(sessionId);
+      }
+    })
+    : undefined;
+  const unregisterBrowserEmergencyCleanup = browserSessionLifecycle === undefined
+    ? undefined
+    : registerEmergencyCleanup(browserSessionLifecycle);
+  const browserBackend = options.browserBackend ?? (
+    supervisedLocalCdp
+      ? createSupervisedLocalCdpBrowserBackend({
+        cdpUrl: options.browser?.cdpUrl,
+        launchCommand: options.browser?.launchCommand,
+        autoLaunch: options.browser?.autoLaunch,
+        fetch: options.cdpFetch,
+        webSocketFactory: options.cdpWebSocketFactory,
+        securityConfig: options.securityConfig,
+        lifecycle: browserSessionLifecycle
+      })
+      : createBrowserBackendFromConfig({
+        backend: options.browser?.backend ?? "unconfigured",
+        cdpUrl: options.browser?.cdpUrl,
+        launchCommand: options.browser?.launchCommand,
+        autoLaunch: options.browser?.autoLaunch,
+        fetch: options.cdpFetch,
+        webSocketFactory: options.cdpWebSocketFactory,
+        supervised: options.browser?.supervised,
+        securityConfig: options.securityConfig
+      })
+  );
+  browserLifecycleBackend = browserBackend as BrowserBackend & {
+    closeSession?: (sessionId: string) => void | Promise<void>;
+  };
   const externalMemoryConfig = normalizeExternalMemoryConfig(options.externalMemory);
   const externalMemoryProviders = [
     ...createExternalMemoryProvidersFromConfig(externalMemoryConfig, { profileRoot: profileMemoryRoot }),
@@ -1164,6 +1197,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         return;
       }
       disposed = true;
+      unregisterBrowserEmergencyCleanup?.();
+      browserSessionLifecycle?.stop();
+      await browserSessionLifecycle?.cleanupAll();
       await Promise.all(loadedMcpServers.map((server) => server.stop().catch(() => undefined)));
       const closeSessionDb = closeSessionDbOnDispose
         ? (sessionDb as { close?: () => void | Promise<void> }).close
