@@ -490,7 +490,7 @@ describe("createRuntime MCP trust gating", () => {
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
-            "riskClass": "read-only-network",
+            "riskClass": "external-side-effect",
             "schemaAliasOrder": [
               "method",
               "params",

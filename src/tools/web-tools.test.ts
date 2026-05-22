@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { BrowserBackend } from "../contracts/browser.js";
+import type { BrowserActionInput, BrowserBackend } from "../contracts/browser.js";
 import { createMockBrowserBackend, createUnconfiguredBrowserBackend } from "../browser/browser-backend.js";
 import { createWebTools, type FetchLike } from "./web-tools.js";
 
@@ -70,6 +70,19 @@ function createInvalidRefBackend(): BrowserBackend {
     ...backend,
     click: async (input) => {
       throw new Error(`Invalid browser element ref: ${input.ref ?? ""}`);
+    }
+  };
+}
+
+function createRecordingCdpBackend(calls: BrowserActionInput[] = []): BrowserBackend {
+  return {
+    ...createMockBrowserBackend(),
+    cdp: async (input) => {
+      calls.push(input);
+      return {
+        method: input.method,
+        params: input.params ?? {}
+      };
     }
   };
 }
@@ -557,6 +570,338 @@ describe("web and browser tools baselines", () => {
       matchedRule: "blocked.test"
     });
     expect(calls).toEqual(["https://example.com/start", "about:blank"]);
+  });
+
+  it("classifies browser.cdp as an external side-effect tool", () => {
+    const cdp = tool("browser.cdp");
+
+    expect(cdp.riskClass).toBe("external-side-effect");
+    expect(cdp.toolsets).toContain("browser");
+  });
+
+  it("blocks browser.cdp Page.navigate to metadata and private URLs before the backend call", async () => {
+    const calls: BrowserActionInput[] = [];
+    const cdp = tool("browser.cdp", createWebTools({
+      browserBackend: createRecordingCdpBackend(calls)
+    }));
+
+    await expect(cdp.run({ method: "Page.navigate", params: { url: "http://169.254.169.254" } })).resolves.toMatchObject({
+      ok: false,
+      metadata: {
+        url: "http://169.254.169.254/",
+        backend: "mock",
+        method: "Page.navigate",
+        reason: "unsafe-url"
+      }
+    });
+    await expect(cdp.run({ method: "Page.navigate", params: { url: "http://localhost:8080" } })).resolves.toMatchObject({
+      ok: false,
+      metadata: {
+        url: "http://localhost:8080/",
+        backend: "mock",
+        method: "Page.navigate",
+        reason: "unsafe-url"
+      }
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("blocks browser.cdp Target.createTarget with private URLs", async () => {
+    const calls: BrowserActionInput[] = [];
+    const cdp = tool("browser.cdp", createWebTools({
+      browserBackend: createRecordingCdpBackend(calls)
+    }));
+
+    const result = await cdp.run({ method: "Target.createTarget", params: { url: "http://192.168.1.10/admin" } });
+
+    expect(result).toMatchObject({
+      ok: false,
+      metadata: {
+        url: "http://192.168.1.10/admin",
+        backend: "mock",
+        method: "Target.createTarget",
+        reason: "unsafe-url"
+      }
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("blocks browser.cdp Runtime.evaluate with unsafe URL literals", async () => {
+    const calls: BrowserActionInput[] = [];
+    const cdp = tool("browser.cdp", createWebTools({
+      browserBackend: createRecordingCdpBackend(calls)
+    }));
+
+    await expect(cdp.run({
+      method: "Runtime.evaluate",
+      params: { expression: "fetch(\"http://169.254.169.254/latest\")" }
+    })).resolves.toMatchObject({
+      ok: false,
+      metadata: {
+        url: "http://169.254.169.254/latest",
+        backend: "mock",
+        method: "Runtime.evaluate",
+        reason: "unsafe-url"
+      }
+    });
+    await expect(cdp.run({
+      method: "Runtime.evaluate",
+      params: { expression: "new XMLHttpRequest().open('GET', 'http://localhost:8080/private')" }
+    })).resolves.toMatchObject({
+      ok: false,
+      metadata: {
+        url: "http://localhost:8080/private",
+        backend: "mock",
+        method: "Runtime.evaluate",
+        reason: "unsafe-url"
+      }
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("blocks browser.cdp Runtime.evaluate navigation expressions with unsafe URL literals", async () => {
+    const calls: BrowserActionInput[] = [];
+    const cdp = tool("browser.cdp", createWebTools({
+      browserBackend: createRecordingCdpBackend(calls)
+    }));
+
+    await expect(cdp.run({
+      method: "Runtime.evaluate",
+      params: { expression: "location.href = \"http://169.254.169.254/latest\"" }
+    })).resolves.toMatchObject({
+      ok: false,
+      metadata: {
+        url: "http://169.254.169.254/latest",
+        backend: "mock",
+        method: "Runtime.evaluate",
+        reason: "unsafe-url"
+      }
+    });
+    await expect(cdp.run({
+      method: "Runtime.evaluate",
+      params: { expression: "window.open(\"http://localhost:8080\")" }
+    })).resolves.toMatchObject({
+      ok: false,
+      metadata: {
+        url: "http://localhost:8080/",
+        backend: "mock",
+        method: "Runtime.evaluate",
+        reason: "unsafe-url"
+      }
+    });
+    await expect(cdp.run({
+      method: "Runtime.evaluate",
+      params: { expression: "location.assign(\"http://127.0.0.1:3000\")" }
+    })).resolves.toMatchObject({
+      ok: false,
+      metadata: {
+        url: "http://127.0.0.1:3000/",
+        backend: "mock",
+        method: "Runtime.evaluate",
+        reason: "unsafe-url"
+      }
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("fails closed for browser.cdp Runtime.evaluate network expressions without checkable URLs", async () => {
+    const calls: BrowserActionInput[] = [];
+    const cdp = tool("browser.cdp", createWebTools({
+      browserBackend: createRecordingCdpBackend(calls)
+    }));
+
+    const result = await cdp.run({
+      method: "Runtime.evaluate",
+      params: { expression: "fetch(window.__targetUrl)" }
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      metadata: {
+        backend: "mock",
+        method: "Runtime.evaluate",
+        reason: "cdp-network-expression-unchecked"
+      }
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("blocks browser.cdp Runtime.evaluate secret-bearing URLs without leaking raw values", async () => {
+    const calls: BrowserActionInput[] = [];
+    const cdp = tool("browser.cdp", createWebTools({
+      browserBackend: createRecordingCdpBackend(calls),
+      resolveHostname: publicResolver
+    }));
+
+    const result = await cdp.run({
+      method: "Runtime.evaluate",
+      params: { expression: "fetch(\"https://example.com/?api_key=cdp-secret\")" }
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      metadata: {
+        url: "[REDACTED_URL_WITH_SECRET]",
+        backend: "mock",
+        method: "Runtime.evaluate",
+        reason: "secret-in-url"
+      }
+    });
+    expect(JSON.stringify(result)).not.toContain("cdp-secret");
+    expect(calls).toEqual([]);
+  });
+
+  it("blocks browser.cdp Runtime.evaluate secret-bearing navigation URLs without leaking raw values", async () => {
+    const calls: BrowserActionInput[] = [];
+    const cdp = tool("browser.cdp", createWebTools({
+      browserBackend: createRecordingCdpBackend(calls)
+    }));
+
+    const result = await cdp.run({
+      method: "Runtime.evaluate",
+      params: { expression: "window.location = \"https://example.com/?api_key=cdp-nav-secret\"" }
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      metadata: {
+        url: "[REDACTED_URL_WITH_SECRET]",
+        backend: "mock",
+        method: "Runtime.evaluate",
+        reason: "secret-in-url"
+      }
+    });
+    expect(JSON.stringify(result)).not.toContain("cdp-nav-secret");
+    expect(calls).toEqual([]);
+  });
+
+  it("blocks browser.cdp Runtime.callFunctionOn with unsafe literal URL usage", async () => {
+    const calls: BrowserActionInput[] = [];
+    const cdp = tool("browser.cdp", createWebTools({
+      browserBackend: createRecordingCdpBackend(calls)
+    }));
+
+    const result = await cdp.run({
+      method: "Runtime.callFunctionOn",
+      params: {
+        functionDeclaration: "function(url) { return fetch(url); }",
+        arguments: [{ value: "http://169.254.169.254/latest" }]
+      }
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      metadata: {
+        url: "http://169.254.169.254/latest",
+        backend: "mock",
+        method: "Runtime.callFunctionOn",
+        reason: "unsafe-url"
+      }
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("blocks browser.cdp Runtime.callFunctionOn with navigation-capable literal URL usage", async () => {
+    const calls: BrowserActionInput[] = [];
+    const cdp = tool("browser.cdp", createWebTools({
+      browserBackend: createRecordingCdpBackend(calls)
+    }));
+
+    const result = await cdp.run({
+      method: "Runtime.callFunctionOn",
+      params: {
+        functionDeclaration: "function(url) { location.replace(url); }",
+        arguments: [{ value: "http://192.168.1.1/admin" }]
+      }
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      metadata: {
+        url: "http://192.168.1.1/admin",
+        backend: "mock",
+        method: "Runtime.callFunctionOn",
+        reason: "unsafe-url"
+      }
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("applies browser.cdp allowPrivateUrls without bypassing the metadata floor", async () => {
+    const calls: BrowserActionInput[] = [];
+    const cdp = tool("browser.cdp", createWebTools({
+      browserBackend: createRecordingCdpBackend(calls),
+      securityConfig: {
+        allowPrivateUrls: true,
+        websiteBlocklist: {}
+      }
+    }));
+
+    await expect(cdp.run({ method: "Page.navigate", params: { url: "http://192.168.1.10/admin" } })).resolves.toMatchObject({
+      ok: true,
+      metadata: {
+        backend: "mock"
+      }
+    });
+    await expect(cdp.run({ method: "Page.navigate", params: { url: "http://169.254.169.254/latest" } })).resolves.toMatchObject({
+      ok: false,
+      metadata: {
+        url: "http://169.254.169.254/latest",
+        backend: "mock",
+        method: "Page.navigate",
+        reason: "unsafe-url"
+      }
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ method: "Page.navigate", params: { url: "http://192.168.1.10/admin" } });
+  });
+
+  it("blocks browser.cdp URLs matched by website policy", async () => {
+    const calls: BrowserActionInput[] = [];
+    const cdp = tool("browser.cdp", createWebTools({
+      browserBackend: createRecordingCdpBackend(calls),
+      resolveHostname: publicResolver,
+      securityConfig: {
+        allowPrivateUrls: false,
+        websiteBlocklist: { domains: ["blocked.test"] }
+      }
+    }));
+
+    const result = await cdp.run({ method: "Page.navigate", params: { url: "https://blocked.test/page" } });
+
+    expect(result).toMatchObject({
+      ok: false,
+      metadata: {
+        url: "https://blocked.test/page",
+        backend: "mock",
+        method: "Page.navigate",
+        reason: "website-policy",
+        host: "blocked.test",
+        matchedRule: "blocked.test"
+      }
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("keeps safe read-only browser.cdp commands working", async () => {
+    const calls: BrowserActionInput[] = [];
+    const cdp = tool("browser.cdp", createWebTools({
+      browserBackend: createRecordingCdpBackend(calls)
+    }));
+
+    const result = await cdp.run({ method: "Runtime.getProperties", params: { objectId: "object-1" } });
+
+    expect(result).toMatchObject({
+      ok: true,
+      metadata: {
+        backend: "mock",
+        result: {
+          method: "Runtime.getProperties",
+          params: { objectId: "object-1" }
+        }
+      }
+    });
+    expect(calls).toHaveLength(1);
   });
 
   it("renders browser snapshot text and interactive elements", async () => {

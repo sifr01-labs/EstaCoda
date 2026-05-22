@@ -41,6 +41,14 @@ export type FetchLike = (url: string, init?: {
 
 const DEFAULT_MAX_CONTENT_CHARS = 24_000;
 const MAX_WEB_EXTRACT_REDIRECTS = 10;
+const CDP_URL_PARAMETER_METHODS = new Map<string, string>([
+  ["Page.navigate", "url"],
+  ["Target.createTarget", "url"]
+]);
+const CDP_RUNTIME_METHODS = new Set(["Runtime.evaluate", "Runtime.callFunctionOn"]);
+const CDP_NETWORK_EXPRESSION_PATTERN = /\b(?:fetch|XMLHttpRequest|sendBeacon|WebSocket|EventSource)\b/u;
+const CDP_NAVIGATION_EXPRESSION_PATTERN = /\b(?:location\.(?:href|assign|replace)|(?:window|document|self|top|parent)\.location|window\.open|open\s*\()/u;
+const CDP_URL_LITERAL_PATTERN = /https?:\/\/[^\s"'<>\\)]+/giu;
 
 export function createWebTools(options: WebToolOptions = {}): readonly RegisteredTool[] {
   const maxContentChars = options.maxContentChars ?? DEFAULT_MAX_CONTENT_CHARS;
@@ -296,7 +304,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         },
         required: ["method"]
       },
-      riskClass: "read-only-network",
+      riskClass: "external-side-effect",
       toolsets: ["browser", "web", "research"],
       progressLabel: "running browser CDP command",
       maxResultSizeChars: 8000,
@@ -304,6 +312,10 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       run: async (input: BrowserActionInput) => {
         if (browserBackend.cdp === undefined) {
           return unsupportedBrowserTool(browserBackend, "browser.cdp");
+        }
+        const guardFailure = await guardBrowserCdpInput(input, urlGuard, browserBackend.kind);
+        if (guardFailure !== undefined) {
+          return guardFailure;
         }
         const result = await browserBackend.cdp(input).catch((error: unknown) => ({ error }));
         if (typeof result === "object" && result !== null && "error" in result) {
@@ -754,6 +766,119 @@ function blockSecretUrl(
       reason
     }
   };
+}
+
+async function guardBrowserCdpInput(
+  input: BrowserActionInput,
+  guardUrl: UrlGuard,
+  backend: BrowserBackend["kind"]
+): Promise<UrlGuardFailure | undefined> {
+  const method = input.method ?? "";
+  const metadata = { backend, method };
+  const urlParamName = CDP_URL_PARAMETER_METHODS.get(method);
+  const explicitUrl = urlParamName === undefined ? undefined : input.params?.[urlParamName];
+  if (typeof explicitUrl === "string") {
+    return guardCdpUrl(explicitUrl, guardUrl, metadata);
+  }
+
+  if (!CDP_RUNTIME_METHODS.has(method)) {
+    return undefined;
+  }
+
+  return guardCdpRuntimeExpression(input.params, guardUrl, metadata);
+}
+
+async function guardCdpUrl(
+  url: string,
+  guardUrl: UrlGuard,
+  metadata: Record<string, unknown>
+): Promise<UrlGuardFailure | undefined> {
+  const secretFailure = blockSecretUrl(url, "secret-in-url", metadata);
+  if (secretFailure !== undefined) {
+    return secretFailure;
+  }
+
+  return guardUrl(url, {
+    unsafeReason: "unsafe-url",
+    policyReason: "website-policy",
+    metadata
+  });
+}
+
+async function guardCdpRuntimeExpression(
+  params: Record<string, unknown> | undefined,
+  guardUrl: UrlGuard,
+  metadata: Record<string, unknown>
+): Promise<UrlGuardFailure | undefined> {
+  const texts = collectStrings(params ?? {});
+  const literalUrls = unique(texts.flatMap(extractUrlLiterals));
+  for (const url of literalUrls) {
+    const secretFailure = blockSecretUrl(url, "secret-in-url", metadata);
+    if (secretFailure !== undefined) {
+      return secretFailure;
+    }
+  }
+
+  if (!texts.some(isGuardableCdpRuntimeExpression)) {
+    return undefined;
+  }
+
+  if (literalUrls.length === 0) {
+    return {
+      ok: false,
+      content: "Blocked network-capable CDP expression.",
+      metadata: {
+        ...metadata,
+        reason: "cdp-network-expression-unchecked"
+      }
+    };
+  }
+
+  for (const url of literalUrls) {
+    const guardFailure = await guardUrl(url, {
+      unsafeReason: "unsafe-url",
+      policyReason: "website-policy",
+      metadata
+    });
+    if (guardFailure !== undefined) {
+      return guardFailure;
+    }
+  }
+
+  return undefined;
+}
+
+function collectStrings(value: unknown, depth = 0): string[] {
+  if (depth > 6) {
+    return [];
+  }
+  if (typeof value === "string") {
+    return [value];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => collectStrings(entry, depth + 1));
+  }
+  if (typeof value === "object" && value !== null) {
+    return Object.values(value).flatMap((entry) => collectStrings(entry, depth + 1));
+  }
+  return [];
+}
+
+function isGuardableCdpRuntimeExpression(text: string): boolean {
+  return CDP_NETWORK_EXPRESSION_PATTERN.test(text) || CDP_NAVIGATION_EXPRESSION_PATTERN.test(text);
+}
+
+function extractUrlLiterals(text: string): string[] {
+  CDP_URL_LITERAL_PATTERN.lastIndex = 0;
+  return Array.from(text.matchAll(CDP_URL_LITERAL_PATTERN), (match) => trimUrlLiteral(match[0]));
+}
+
+function trimUrlLiteral(url: string): string {
+  return url.replace(/[.,;]+$/u, "");
+}
+
+function unique(values: string[]): string[] {
+  return Array.from(new Set(values));
 }
 
 async function extractWithFetch(input: {
