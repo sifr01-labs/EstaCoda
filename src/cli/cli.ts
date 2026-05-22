@@ -142,6 +142,13 @@ import {
   renderTelegramSettings,
   renderUiSettings,
 } from "./settings-view-models.js";
+import {
+  readCliVoiceMode,
+  cliVoiceModeStatePath,
+  renderCliVoiceModeStatus,
+  writeCliVoiceMode,
+  type CliVoiceEnvironmentOptions,
+} from "./voice-mode.js";
 
 import { runVersionCommand } from "./version-command.js";
 import { runInitCommand } from "./init-command.js";
@@ -184,6 +191,7 @@ export type CliOptions = {
   modelsDevOptions?: ModelsDevRegistryOptions;
   profileContextGenerator?: ProfileContextGenerator;
   output?: { write(chunk: string): void };
+  voiceModeEnv?: CliVoiceEnvironmentOptions;
 };
 
 export type ParsedGlobalCliOptions =
@@ -2161,7 +2169,7 @@ async function local(options: CliOptions, args: string[]): Promise<CliCommandRes
 async function voice(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const [subcommand] = args;
 
-  if (subcommand !== "status" && subcommand !== "setup") {
+  if (subcommand !== "status" && subcommand !== "setup" && subcommand !== "mode") {
     return {
       handled: true,
       exitCode: 0,
@@ -2169,6 +2177,7 @@ async function voice(options: CliOptions, args: string[]): Promise<CliCommandRes
         "EstaCoda voice",
         "Hermes-aligned voice stack: TTS output plus STT transcription. Only ready providers are exposed to runtime tools.",
         "  estacoda voice status",
+        "  estacoda voice mode [on|off|tts|status]",
         "  estacoda voice setup --tts-provider openai --tts-model gpt-4o-mini-tts --tts-voice alloy --tts-api-key-env VOICE_TOOLS_OPENAI_KEY",
         "  estacoda voice setup --tts-provider edge --tts-voice en-US-AriaNeural",
         "  estacoda voice setup --stt-provider local --stt-model base",
@@ -2178,6 +2187,47 @@ async function voice(options: CliOptions, args: string[]): Promise<CliCommandRes
         "  STT: local command, model base",
         "  CLI audio target: selected profile audio-cache/ for generated speech and transcripts"
       ].join("\n")
+    };
+  }
+
+  if (subcommand === "mode") {
+    const config = await loadRuntimeConfig(options);
+    const profileId = selectedProfileId(options);
+    const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId });
+    const mode = args[1] ?? "status";
+    if (mode === "status") {
+      return {
+        handled: true,
+        exitCode: 0,
+        output: await renderCliVoiceModeStatus({
+          config,
+          profilePaths,
+          envOptions: options.voiceModeEnv,
+          commandExists: options.voiceModeEnv?.commandExists
+        })
+      };
+    }
+    if (mode === "on" || mode === "off" || mode === "tts") {
+      await writeCliVoiceMode(profilePaths, mode);
+      const current = await readCliVoiceMode(profilePaths);
+      return {
+        handled: true,
+        exitCode: 0,
+        output: [
+          `CLI voice mode: ${current}.`,
+          current === "off"
+            ? "Microphone recording is disabled for CLI sessions."
+            : current === "tts"
+              ? "CLI sessions will record voice turns and try local playback for replies when a player is available."
+              : "CLI sessions will record voice turns and inject transcripts as user input.",
+          `State: ${cliVoiceModeStatePath(profilePaths)}`
+        ].join("\n")
+      };
+    }
+    return {
+      handled: true,
+      exitCode: 1,
+      output: "Usage: estacoda voice mode [on|off|tts|status]"
     };
   }
 
@@ -2388,6 +2438,7 @@ function renderVoiceStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>
     `Auto-TTS replies: ${config.voice.autoTts ? "enabled" : "disabled"}`,
     `Auto-TTS max chars/reply: ${config.voice.autoTtsMaxCharsPerReply ?? "unset"}`,
     `Auto-TTS max chars/hour/chat: ${config.voice.autoTtsMaxCharsPerHourPerChat ?? "unset"}`,
+    "CLI voice mode: estacoda voice mode [on|off|tts|status]",
     "Platform delivery: CLI audio cache, Telegram voice bubble when Opus/OGG conversion is available; otherwise audio file fallback.",
     "Change with: estacoda voice setup --tts-provider edge|openai|elevenlabs|minimax|mistral|gemini|xai|neutts|kittentts --stt-provider local|groq|openai|mistral|xai"
   ].join("\n");

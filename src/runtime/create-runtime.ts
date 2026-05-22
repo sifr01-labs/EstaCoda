@@ -64,7 +64,7 @@ import { TaskFlowAgentLoopAdapter } from "../taskflow/taskflow-agent-loop-adapte
 
 import type { ImageGenerationFetchLike } from "../tools/image-generation-tools.js";
 import { defaultImageGenerationConfig, verifyImageGeneration, type ImageGenerationVerification } from "../tools/image-generation-verify.js";
-import type { VoiceFetchLike } from "../tools/voice-tools.js";
+import { transcribeAudioFile, type VoiceFetchLike } from "../tools/voice-tools.js";
 import { FasterWhisperWorkerClient } from "../tools/stt-local-whisper.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
 import { ToolRegistry } from "../tools/tool-registry.js";
@@ -326,6 +326,13 @@ export type Runtime = {
     toolInput: Record<string, unknown>;
     signal?: AbortSignal;
   }): Promise<import("../tools/tool-executor.js").ToolExecutionRecord | undefined>;
+  transcribeAudio?(input: {
+    path: string;
+    language?: string;
+    prompt?: string;
+    model?: string;
+    signal?: AbortSignal;
+  }): Promise<Awaited<ReturnType<typeof transcribeAudioFile>>>;
   verifyImageGeneration?(options?: {
     checkProvider?: boolean;
   }): Promise<ImageGenerationVerification>;
@@ -1144,6 +1151,20 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         input: input.toolInput,
         trustedWorkspace,
         sessionId: sessionRuntimeContext.currentSessionId(),
+        signal: input.signal
+      });
+    },
+    async transcribeAudio(input) {
+      return await transcribeAudioFile({
+        path: input.path,
+        language: input.language,
+        prompt: input.prompt,
+        model: input.model,
+        stt: options.stt ?? { provider: "local" },
+        fetch: options.voiceFetch,
+        localWhisper,
+        audioCacheRoot,
+        tempRoot: join(profilePaths.tempPath, "audio"),
         signal: input.signal
       });
     },

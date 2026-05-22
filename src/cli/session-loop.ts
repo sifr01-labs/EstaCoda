@@ -44,7 +44,15 @@ import type { SlashMenuViewModel, ToolActivityRailEvent } from "../contracts/vie
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
-import { saveRuntimeConfig } from "../config/runtime-config.js";
+import { loadRuntimeConfig, saveRuntimeConfig } from "../config/runtime-config.js";
+import {
+  playCliTtsResponse,
+  readCliVoiceMode,
+  recordAndTranscribeCliVoice,
+  type CliVoiceEnvironmentOptions,
+  type CliVoiceRecorder,
+  type CliVoiceMode
+} from "./voice-mode.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -59,6 +67,11 @@ export type SessionLoopOptions = {
   homeDir?: string;
   locale?: import("../contracts/ui.js").UiLocale;
   capabilities?: TerminalCapabilities;
+  cliVoice?: {
+    recorder?: CliVoiceRecorder;
+    envOptions?: CliVoiceEnvironmentOptions;
+    playbackCommandExists?: (command: string) => Promise<boolean>;
+  };
 };
 
 export class ToolActivityAnimator {
@@ -200,7 +213,22 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         output.write(`${topRule}\n`);
       }
 
-      const text = (await prompt(colorPromptPrefix(promptPrefix, renderer.tokens, useColor))).trim();
+      const voiceMode = await currentCliVoiceMode({
+        runtime,
+        homeDir: options.homeDir
+      });
+      const text = await readNextCliInput({
+        voiceMode,
+        prompt,
+        promptPrefix,
+        renderer,
+        useColor,
+        runtime,
+        output,
+        homeDir: options.homeDir,
+        workspaceRoot: options.workspaceRoot,
+        cliVoice: options.cliVoice
+      });
 
       if (chrome.enabled) {
         chrome.clearChrome();
@@ -341,6 +369,21 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           progress: response.progress,
         });
         output.write(renderer.render(assistantVm));
+        if (voiceMode === "tts") {
+          const playback = await playCliResponseIfEnabled({
+            runtime,
+            text: response.text,
+            homeDir: options.homeDir,
+            workspaceRoot: options.workspaceRoot,
+            commandExists: options.cliVoice?.playbackCommandExists,
+            signal: activeTurn?.signal
+          });
+          if (playback !== undefined && playback.played === false && playback.reason !== "empty-response") {
+            output.write(`\nCLI voice playback skipped: ${playback.reason}\n`);
+          } else if (playback !== undefined && playback.played === true) {
+            output.write(`\nCLI voice playback: ${playback.player}\n`);
+          }
+        }
 
         const setupResolution = await maybeHandleSetupNeeded({
           runtime,
@@ -385,6 +428,106 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     await runtime.dispose();
     close();
   }
+}
+
+async function currentCliVoiceMode(input: {
+  runtime: Runtime;
+  homeDir?: string;
+}): Promise<CliVoiceMode> {
+  const profileId = await runtimeProfileId(input.runtime);
+  const profilePaths = resolveProfileStateHome({ homeDir: input.homeDir ?? homedir(), profileId });
+  return await readCliVoiceMode(profilePaths);
+}
+
+async function readNextCliInput(input: {
+  voiceMode: CliVoiceMode;
+  prompt: Prompt;
+  promptPrefix: string;
+  renderer: { tokens: ResolvedTokens };
+  useColor: boolean;
+  runtime: Runtime;
+  output: NodeJS.WritableStream;
+  homeDir?: string;
+  workspaceRoot?: string;
+  cliVoice?: SessionLoopOptions["cliVoice"];
+}): Promise<string> {
+  if (input.voiceMode === "off") {
+    return (await input.prompt(colorPromptPrefix(input.promptPrefix, input.renderer.tokens, input.useColor))).trim();
+  }
+
+  const promptPrefix = `${input.promptPrefix}[voice:${input.voiceMode}] `;
+  const typed = (await input.prompt(colorPromptPrefix(promptPrefix, input.renderer.tokens, input.useColor))).trim();
+  if (typed.length > 0) {
+    return typed;
+  }
+
+  const profileId = await runtimeProfileId(input.runtime);
+  const profilePaths = resolveProfileStateHome({ homeDir: input.homeDir ?? homedir(), profileId });
+  const config = await loadRuntimeConfig({
+    workspaceRoot: input.workspaceRoot ?? process.cwd(),
+    homeDir: input.homeDir,
+    profileId
+  });
+
+  input.output.write("Recording CLI voice input...\n");
+  const captured = await recordAndTranscribeCliVoice({
+    config,
+    profilePaths,
+    recorder: input.cliVoice?.recorder,
+    envOptions: input.cliVoice?.envOptions,
+    transcriber: async ({ path, signal }) => {
+      const result = input.runtime.transcribeAudio === undefined
+        ? undefined
+        : await input.runtime.transcribeAudio({ path, signal });
+      if (result === undefined) {
+        return { ok: false, content: "This runtime cannot transcribe CLI voice input." };
+      }
+      if (!result.ok) {
+        return result;
+      }
+      return {
+        ok: true,
+        text: result.text,
+        model: result.model,
+        language: result.language
+      };
+    }
+  });
+  if (!captured.ok) {
+    input.output.write(`CLI voice unavailable: ${captured.content}\n`);
+    return "";
+  }
+
+  input.output.write(`Transcript: ${captured.transcript}\n`);
+  return captured.transcript.trim();
+}
+
+async function playCliResponseIfEnabled(input: {
+  runtime: Runtime;
+  text: string;
+  homeDir?: string;
+  workspaceRoot?: string;
+  commandExists?: (command: string) => Promise<boolean>;
+  signal?: AbortSignal;
+}): Promise<Extract<Awaited<ReturnType<typeof playCliTtsResponse>>, { ok: true }> | undefined> {
+  const profileId = await runtimeProfileId(input.runtime);
+  const profilePaths = resolveProfileStateHome({ homeDir: input.homeDir ?? homedir(), profileId });
+  const config = await loadRuntimeConfig({
+    workspaceRoot: input.workspaceRoot ?? process.cwd(),
+    homeDir: input.homeDir,
+    profileId
+  });
+  const result = await playCliTtsResponse({
+    text: input.text,
+    config,
+    profilePaths,
+    commandExists: input.commandExists,
+    signal: input.signal
+  });
+  if (!result.ok) {
+    return { ok: true, played: false, reason: result.content };
+  }
+  return result;
 }
 
 export async function handleSlashCommand(input: {

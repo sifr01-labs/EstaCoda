@@ -385,7 +385,7 @@ function registerAll(): void {
     name: "voice",
     aliases: [],
     category: "Setup",
-    description: "Configure TTS/STT voice tools",
+    description: "Configure TTS/STT voice tools and CLI voice mode",
     visibility: "public",
     scope: "cli",
   });

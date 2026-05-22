@@ -1,4 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { runSessionLoop } from "./session-loop.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import type { Runtime } from "../runtime/create-runtime.js";
@@ -6,6 +9,8 @@ import type { AgentLoopResponse } from "../runtime/agent-loop.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import { isolateLtr } from "../ui/bidi.js";
+import { resolveProfileStateHome } from "../config/profile-home.js";
+import { writeCliVoiceMode } from "./voice-mode.js";
 
 function interactiveCaps(overrides: Partial<TerminalCapabilities> = {}): TerminalCapabilities {
   return {
@@ -225,6 +230,76 @@ async function runApprovalPromptScenario(approvalAnswers: string[]): Promise<{
 }
 
 describe("runSessionLoop — user prompt rail behavior", () => {
+  it("injects a CLI voice transcript as the next user turn", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "estacoda-session-voice-"));
+    const profilePaths = resolveProfileStateHome({ homeDir, profileId: "default" });
+    await mkdir(dirname(profilePaths.configPath), { recursive: true });
+    await writeFile(profilePaths.configPath, JSON.stringify({
+      stt: {
+        provider: "local",
+        local: { command: "mock-stt" }
+      }
+    }), "utf8");
+    await writeCliVoiceMode(profilePaths, "on");
+    const outputChunks: string[] = [];
+    const handleInputs: string[] = [];
+    const recorder = {
+      record: vi.fn(async ({ outputPath }: { outputPath: string }) => {
+        await writeFile(outputPath, "wav");
+        return { ok: true as const };
+      })
+    };
+    const runtime = {
+      ...createMockRuntime(),
+      transcribeAudio: async ({ path }): ReturnType<NonNullable<Runtime["transcribeAudio"]>> => {
+        expect(path).toContain("/audio/cli-voice/");
+        return { ok: true, text: "spoken turn", model: "mock-stt" };
+      },
+      handle: async (input): Promise<AgentLoopResponse> => {
+        handleInputs.push(input.text);
+        return {
+          ...await createMockRuntime().handle(input),
+          text: `heard ${input.text}`
+        };
+      }
+    } as Runtime;
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      homeDir,
+      workspaceRoot: homeDir,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: false,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ isTTY: false, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+      cliVoice: {
+        recorder,
+        envOptions: {
+          platform: "darwin",
+          commandExists: async (command) => command === "sox"
+        }
+      }
+    });
+
+    expect(recorder.record).toHaveBeenCalledTimes(1);
+    expect(handleInputs).toEqual(["spoken turn"]);
+    expect(outputChunks.join("")).toContain("Transcript: spoken turn");
+  });
+
   it("defaults startup and session chrome to English when no locale is provided", async () => {
     const outputChunks: string[] = [];
     const runtime = createMockRuntime();
