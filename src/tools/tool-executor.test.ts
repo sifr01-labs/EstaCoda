@@ -66,6 +66,28 @@ function createSensitiveEchoTool(name: string): RegisteredTool {
   };
 }
 
+function createRequiredUrlTool(name: string): RegisteredTool {
+  return {
+    name,
+    description: "requires url",
+    inputSchema: {
+      type: "object",
+      properties: {
+        url: { type: "string" }
+      },
+      required: ["url"]
+    },
+    riskClass: "read-only-network",
+    toolsets: ["web"],
+    progressLabel: "validating",
+    maxResultSizeChars: 1000,
+    isAvailable: () => true,
+    run: async (): Promise<ToolResult> => {
+      return { ok: true, content: "validated" };
+    }
+  };
+}
+
 function createTerminalEchoTool(): RegisteredTool {
   return {
     name: "terminal.run",
@@ -114,6 +136,23 @@ async function setupExecutor(options: {
   });
   await sessionDb.createSession({ profileId: "test", id: "test-session" });
   return { executor, sessionDb, trajectoryRecorder };
+}
+
+async function persistedExecutionState(
+  sessionDb: SessionDB,
+  trajectoryRecorder: TrajectoryRecorder
+): Promise<string> {
+  return JSON.stringify({
+    events: await sessionDb.listEvents("test-session"),
+    messages: await sessionDb.listMessages("test-session"),
+    trajectory: trajectoryRecorder.snapshot().events
+  });
+}
+
+function expectNoRawSecrets(serialized: string, secrets: string[]): void {
+  for (const secret of secrets) {
+    expect(serialized).not.toContain(secret);
+  }
 }
 
 describe("ToolExecutor exception containment", () => {
@@ -240,6 +279,13 @@ describe("ToolExecutor input redaction", () => {
         apiKey: "[REDACTED]"
       }
     });
+    expectNoRawSecrets(JSON.stringify(events), [
+      "sk-secret123",
+      "sk-secret456",
+      "hunter2",
+      "tok-abc",
+      "nested-secret"
+    ]);
   });
 
   it("does not mutate the original input passed to tool.run", async () => {
@@ -349,6 +395,120 @@ describe("ToolExecutor input redaction", () => {
     expect(trajectory).not.toContain("key=secret");
     expect(persisted).toContain("[REDACTED_URL_WITH_SECRET]");
     expect(trajectory).toContain("[REDACTED_URL_WITH_SECRET]");
+  });
+
+  it.each([
+    ["token URL", { url: "https://x.test/?token=secret" }, ["token=secret"]],
+    ["password URL", { url: "https://x.test/?password=secret" }, ["password=secret"]],
+    ["client secret URL", { url: "https://x.test/?client_secret=secret" }, ["client_secret=secret"]],
+    ["access token URL", { url: "https://x.test/?access_token=secret" }, ["access_token=secret"]],
+    ["userinfo URL", { url: "https://user:pass@x.test/path" }, ["user:pass"]],
+    ["authorization bearer text", { note: "Authorization: Bearer secret" }, ["Bearer secret"]],
+    ["nested params URL", { params: { url: "https://x.test/?password=secret" } }, ["password=secret"]]
+  ])("redacts %s before any execution persistence", async (_label, input, secrets) => {
+    const { executor, sessionDb, trajectoryRecorder } = await setupExecutor({
+      tools: [createEchoTool("web.extract")]
+    });
+
+    await executor.executeTool({
+      tool: "web.extract",
+      input,
+      trustedWorkspace: true,
+      sessionId: "test-session"
+    });
+
+    const persisted = await persistedExecutionState(sessionDb, trajectoryRecorder);
+    expectNoRawSecrets(persisted, secrets);
+    expect(persisted).toMatch(/\[REDACTED(?:_URL_WITH_SECRET)?\]/u);
+  });
+
+  it("redacts provider-native JSON argument strings across persisted events and messages", async () => {
+    const { executor, sessionDb, trajectoryRecorder } = await setupExecutor({
+      tools: [createEchoTool("web.extract")]
+    });
+    const providerNativeToolCall = {
+      id: "call-provider-secret",
+      type: "function",
+      function: {
+        name: "web.extract",
+        arguments: JSON.stringify({
+          url: "https://x.test/?token=secret",
+          params: {
+            url: "https://x.test/?password=secret"
+          },
+          note: "Authorization: Bearer secret"
+        })
+      }
+    };
+
+    await executor.executeTool({
+      tool: "web.extract",
+      input: { url: "https://example.test/page" },
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      toolCallId: "call-stable-secret",
+      toolCallName: "web.extract",
+      providerNativeToolCall
+    });
+
+    const persisted = await persistedExecutionState(sessionDb, trajectoryRecorder);
+    expectNoRawSecrets(persisted, ["token=secret", "password=secret", "Bearer secret"]);
+    expect(persisted).toContain("call-provider-secret");
+    expect(persisted).toContain("web.extract");
+    expect(persisted).toContain("[REDACTED_URL_WITH_SECRET]");
+  });
+
+  it("strips ambiguous provider-native argument strings before persistence", async () => {
+    const { executor, sessionDb, trajectoryRecorder } = await setupExecutor({
+      tools: [createEchoTool("web.extract")]
+    });
+
+    await executor.executeTool({
+      tool: "web.extract",
+      input: { url: "https://example.test/page" },
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      providerNativeToolCall: {
+        id: "call-provider-ambiguous",
+        type: "function",
+        function: {
+          name: "web.extract",
+          arguments: "url=https://x.test/?token=secret"
+        }
+      }
+    });
+
+    const persisted = await persistedExecutionState(sessionDb, trajectoryRecorder);
+    expectNoRawSecrets(persisted, ["token=secret", "url=https://x.test"]);
+    expect(persisted).toContain("[REDACTED_PROVIDER_ARGUMENTS]");
+  });
+
+  it("redacts provider-native payloads on validation-error persistence", async () => {
+    const { executor, sessionDb, trajectoryRecorder } = await setupExecutor({
+      tools: [createRequiredUrlTool("web.extract")]
+    });
+
+    await executor.executeTool({
+      tool: "web.extract",
+      input: { url: 42 },
+      trustedWorkspace: true,
+      sessionId: "test-session",
+      providerNativeToolCall: {
+        id: "call-provider-validation",
+        type: "function",
+        function: {
+          name: "web.extract",
+          arguments: JSON.stringify({
+            url: "https://x.test/?access_token=secret"
+          })
+        }
+      }
+    });
+
+    const persisted = await persistedExecutionState(sessionDb, trajectoryRecorder);
+    expectNoRawSecrets(persisted, ["access_token=secret"]);
+    expect(persisted).toContain("call-provider-validation");
+    expect(persisted).toContain("[REDACTED_URL_WITH_SECRET]");
   });
 
   it("redacts Runtime.evaluate expressions before persistence", async () => {
