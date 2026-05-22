@@ -1,4 +1,4 @@
-import { mkdir, unlink } from "node:fs/promises";
+import { appendFile, mkdir, unlink } from "node:fs/promises";
 import { randomUUID, createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { loadRuntimeConfig, consumeTelegramPairingCode } from "../config/runtime-config.js";
@@ -43,7 +43,7 @@ import {
   deriveEmailIdentityHash,
   deriveWhatsAppIdentityHash,
 } from "../channels/adapter-identity.js";
-import { injectVoiceTranscripts } from "../channels/voice-transcription.js";
+import { injectVoiceTranscripts, type VoiceTranscriptionAuditEvent } from "../channels/voice-transcription.js";
 import { acquireGatewayLock, releaseGatewayLock } from "./gateway-lock.js";
 import { writeGatewayPid, removeGatewayPid } from "./pid-file.js";
 import { writeGatewayState, removeGatewayState } from "./supervisor-state.js";
@@ -257,6 +257,28 @@ function emitSupervisorHook<N extends GatewayHookEventName>(
   } catch {
     // HookRegistry.emit threw synchronously — ignore
   }
+}
+
+export function createVoiceTranscriptionAudit(input: {
+  profilePaths: ProfileStatePaths;
+  hookRegistry?: HookRegistry;
+  logWarning?: (message: string) => void;
+}): (event: VoiceTranscriptionAuditEvent) => Promise<void> {
+  return async (event) => {
+    const payload = {
+      outcome: event.outcome,
+      provider: event.provider,
+      reason: event.reason,
+      attachment: event.attachment
+    };
+    emitSupervisorHook(input.hookRegistry, "gateway:stt:preprocess", payload);
+    const logPath = join(input.profilePaths.gatewayStatePath, "logs", "voice-stt-preprocess.jsonl");
+    await mkdir(dirname(logPath), { recursive: true });
+    await appendFile(logPath, `${JSON.stringify(event)}\n`, "utf8");
+    if (event.outcome === "deny" || event.outcome === "fail") {
+      input.logWarning?.(`[voice-stt-preprocess] ${event.outcome}: ${event.reason ?? "unknown"} attachment=${event.attachment.id} pathHash=${event.attachment.pathHash ?? "none"}`);
+    }
+  };
 }
 
 async function sleep(ms: number): Promise<void> {
@@ -978,6 +1000,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     };
     const gatewaySecurityAssessor = await buildGatewaySecurityAssessorConfig(config);
+    const voiceAudit = createVoiceTranscriptionAudit({ profilePaths, hookRegistry, logWarning });
 
     const gateway = options.factories?.createChannelGateway
       ? options.factories.createChannelGateway({
@@ -994,7 +1017,8 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
             const latestConfig = await loadConfig();
             return injectVoiceTranscripts(message, {
               stt: latestConfig.stt,
-              allowedRoots: [profilePaths.channelMediaPath, profilePaths.audioCachePath]
+              allowedRoots: [profilePaths.channelMediaPath, profilePaths.audioCachePath],
+              audit: voiceAudit
             });
           },
           pair: async (message) => {
@@ -1059,7 +1083,8 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
             const latestConfig = await loadConfig();
             return injectVoiceTranscripts(message, {
               stt: latestConfig.stt,
-              allowedRoots: [profilePaths.channelMediaPath, profilePaths.audioCachePath]
+              allowedRoots: [profilePaths.channelMediaPath, profilePaths.audioCachePath],
+              audit: voiceAudit
             });
           },
           pair: async (message) => {

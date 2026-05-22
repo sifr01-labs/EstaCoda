@@ -93,6 +93,29 @@ describe("media capability setup does not render raw secrets", () => {
     expect(result.output).toContain("GROQ_API_KEY");
   });
 
+  it("voice setup/status supports xAI STT without exposing raw secrets", async () => {
+    const rawKey = "xai-stt-secret-5555";
+    const setup = await runCliCommand({
+      argv: ["voice", "setup", "--stt-provider", "xai", "--stt-api-key", rawKey],
+      workspaceRoot: tempDir,
+      homeDir: tempDir,
+    });
+    expect(setup.exitCode).toBe(0);
+    expect(setup.output).not.toContain(rawKey);
+    expect(setup.output).toContain("XAI_API_KEY");
+
+    await withEnv({ XAI_API_KEY: "present" }, async () => {
+      const status = await runCliCommand({
+        argv: ["voice", "status"],
+        workspaceRoot: tempDir,
+        homeDir: tempDir,
+      });
+      expect(status.output).toContain("STT provider: xai");
+      expect(status.output).toContain("STT readiness: ready");
+      expect(status.output).toContain("STT API key: XAI_API_KEY");
+    });
+  });
+
   it("voice status reports provider readiness", async () => {
     await withEnv({ VOICE_TOOLS_OPENAI_KEY: undefined, OPENAI_API_KEY: undefined, HERMES_LOCAL_STT_COMMAND: undefined }, async () => {
       const result = await runCliCommand({

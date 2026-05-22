@@ -55,7 +55,7 @@ export type AgentProfileMode = "focused" | "operator" | "builder" | "research";
 export type AgentResponseLanguage = "en" | "ar" | "match-user";
 export type ChannelBusyPolicy = "reject" | "queue" | "interrupt";
 export type TtsProvider = "edge" | "elevenlabs" | "openai" | "minimax" | "mistral" | "gemini" | "xai" | "neutts" | "kittentts";
-export type SttProvider = "local" | "groq" | "openai" | "mistral";
+export type SttProvider = "local" | "groq" | "openai" | "mistral" | "xai";
 export type ImageGenerationProvider = "fal" | "byteplus";
 
 export type SessionCompressionConfig = {
@@ -161,12 +161,39 @@ export type TtsConfig = {
   };
 };
 
+export type FasterWhisperConfig = {
+  enabled?: boolean;
+  model?: string;
+  device?: string;
+  computeType?: string;
+  compute_type?: string;
+  hfHome?: string;
+  hf_home?: string;
+  allowModelDownload?: boolean;
+  allow_model_download?: boolean;
+  gatewayAllowModelDownload?: boolean;
+  gateway_allow_model_download?: boolean;
+  queueDepth?: number;
+  queue_depth?: number;
+  timeoutMs?: number;
+  timeout_ms?: number;
+  modelCached?: boolean;
+  model_cached?: boolean;
+};
+
 export type SttConfig = {
   provider?: SttProvider;
   enabled?: boolean;
   local?: {
     model?: string;
     command?: string;
+    engine?: "command" | "faster-whisper";
+    normalizeWithFfmpeg?: boolean;
+    normalize_with_ffmpeg?: boolean;
+    ffmpegPath?: string;
+    ffmpeg_path?: string;
+    fasterWhisper?: FasterWhisperConfig;
+    faster_whisper?: FasterWhisperConfig;
   };
   groq?: {
     model?: string;
@@ -182,6 +209,22 @@ export type SttConfig = {
     model?: string;
     apiKeyEnv?: string;
     api_key_env?: string;
+  };
+  xai?: {
+    baseUrl?: string;
+    base_url?: string;
+    apiKeyEnv?: string;
+    api_key_env?: string;
+    language?: string;
+    format?: string;
+    diarize?: boolean;
+    diarization?: boolean;
+    keyterms?: string[];
+    key_terms?: string[];
+    fillerWords?: boolean;
+    filler_words?: boolean;
+    rawAudioHints?: boolean;
+    raw_audio_hints?: boolean;
   };
 };
 
@@ -1321,13 +1364,29 @@ function mergeImageGenerationConfig(left: EstaCodaConfig["imageGen"], right: Est
 
 function normalizeSttConfig(value: EstaCodaConfig["stt"]): LoadedRuntimeConfig["stt"] {
   const provider = isSttProvider(value?.provider) ? value.provider : "local";
+  const fasterWhisper = value?.local?.fasterWhisper ?? value?.local?.faster_whisper;
   return {
     ...value,
     provider,
     enabled: value?.enabled ?? true,
     local: {
       model: value?.local?.model ?? "base",
-      command: value?.local?.command ?? process.env.HERMES_LOCAL_STT_COMMAND
+      command: value?.local?.command ?? process.env.HERMES_LOCAL_STT_COMMAND,
+      engine: value?.local?.engine ?? (fasterWhisper?.enabled === true ? "faster-whisper" : "command"),
+      normalizeWithFfmpeg: value?.local?.normalizeWithFfmpeg ?? value?.local?.normalize_with_ffmpeg ?? true,
+      ffmpegPath: value?.local?.ffmpegPath ?? value?.local?.ffmpeg_path ?? "ffmpeg",
+      fasterWhisper: {
+        enabled: fasterWhisper?.enabled ?? false,
+        model: fasterWhisper?.model ?? "base",
+        device: fasterWhisper?.device ?? "auto",
+        computeType: fasterWhisper?.computeType ?? fasterWhisper?.compute_type ?? "default",
+        hfHome: fasterWhisper?.hfHome ?? fasterWhisper?.hf_home,
+        allowModelDownload: fasterWhisper?.allowModelDownload ?? fasterWhisper?.allow_model_download ?? false,
+        gatewayAllowModelDownload: fasterWhisper?.gatewayAllowModelDownload ?? fasterWhisper?.gateway_allow_model_download ?? false,
+        queueDepth: normalizeOptionalPositiveInteger(fasterWhisper?.queueDepth ?? fasterWhisper?.queue_depth) ?? undefined,
+        timeoutMs: normalizeOptionalPositiveInteger(fasterWhisper?.timeoutMs ?? fasterWhisper?.timeout_ms) ?? undefined,
+        modelCached: fasterWhisper?.modelCached ?? fasterWhisper?.model_cached
+      }
     },
     groq: {
       model: value?.groq?.model ?? "whisper-large-v3",
@@ -1340,6 +1399,16 @@ function normalizeSttConfig(value: EstaCodaConfig["stt"]): LoadedRuntimeConfig["
     mistral: {
       model: value?.mistral?.model ?? "voxtral-mini-latest",
       apiKeyEnv: value?.mistral?.apiKeyEnv ?? value?.mistral?.api_key_env ?? "MISTRAL_API_KEY"
+    },
+    xai: {
+      baseUrl: value?.xai?.baseUrl ?? value?.xai?.base_url ?? "https://api.x.ai/v1",
+      apiKeyEnv: value?.xai?.apiKeyEnv ?? value?.xai?.api_key_env ?? "XAI_API_KEY",
+      language: value?.xai?.language,
+      format: value?.xai?.format ?? "json",
+      diarize: value?.xai?.diarize ?? value?.xai?.diarization,
+      keyterms: value?.xai?.keyterms ?? value?.xai?.key_terms ?? [],
+      fillerWords: value?.xai?.fillerWords ?? value?.xai?.filler_words,
+      rawAudioHints: value?.xai?.rawAudioHints ?? value?.xai?.raw_audio_hints
     }
   };
 }
@@ -1382,7 +1451,8 @@ function mergeSttConfig(left: SttConfig | undefined, right: SttConfig | undefine
     local: { ...(left?.local ?? {}), ...(right?.local ?? {}) },
     groq: { ...(left?.groq ?? {}), ...(right?.groq ?? {}) },
     openai: { ...(left?.openai ?? {}), ...(right?.openai ?? {}) },
-    mistral: { ...(left?.mistral ?? {}), ...(right?.mistral ?? {}) }
+    mistral: { ...(left?.mistral ?? {}), ...(right?.mistral ?? {}) },
+    xai: { ...(left?.xai ?? {}), ...(right?.xai ?? {}) }
   };
 }
 
@@ -1399,7 +1469,7 @@ function isTtsProvider(value: unknown): value is TtsProvider {
 }
 
 function isSttProvider(value: unknown): value is SttProvider {
-  return value === "local" || value === "groq" || value === "openai" || value === "mistral";
+  return value === "local" || value === "groq" || value === "openai" || value === "mistral" || value === "xai";
 }
 
 function boundedNumber(value: unknown, fallback: number, min: number, max: number): number {
@@ -2590,6 +2660,8 @@ function sttDefaultApiKeyEnv(provider: SttProvider): string | undefined {
       return "VOICE_TOOLS_OPENAI_KEY";
     case "mistral":
       return "MISTRAL_API_KEY";
+    case "xai":
+      return "XAI_API_KEY";
   }
 }
 
@@ -2603,6 +2675,8 @@ function sttProviderApiKeyEnv(config: LoadedRuntimeConfig["stt"], provider: SttP
       return config.openai?.apiKeyEnv ?? config.openai?.api_key_env;
     case "mistral":
       return config.mistral?.apiKeyEnv ?? config.mistral?.api_key_env;
+    case "xai":
+      return config.xai?.apiKeyEnv ?? config.xai?.api_key_env;
   }
 }
 

@@ -34,6 +34,7 @@ export type GatewayHookEventName =
   | "session:cache:evict"
   | "delivery:success"
   | "delivery:error"
+  | "gateway:stt:preprocess"
   | "cron:tick:start"
   | "cron:tick:complete"
   | "cron:job:fail";
@@ -159,6 +160,19 @@ export type GatewayHookPayloadByName = {
     platform?: string;
     errorClass: string;
     errorMessage: string;
+  };
+  "gateway:stt:preprocess": {
+    outcome: "allow" | "deny" | "fail";
+    provider: string;
+    reason?: string;
+    attachment: {
+      id: string;
+      kind: string;
+      status?: string;
+      mimeType?: string;
+      bytes?: number;
+      pathHash?: string;
+    };
   };
   "cron:tick:start": {
     dueCount: number;

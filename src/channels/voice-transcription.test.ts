@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -100,5 +100,133 @@ describe("injectVoiceTranscripts", () => {
     expect(result.text).toContain("[Voice transcript unavailable for voice-1]");
     expect(result.text).toContain("Local STT command not configured");
     expect(result.metadata?.voiceTranscription).toEqual({ injected: true, count: 1 });
+  });
+
+  it("denies gateway faster-whisper first-run downloads before worker startup", async () => {
+    const roots = await createRoots();
+    const audio = join(roots.mediaRoot, "voice.ogg");
+    await writeFile(audio, "audio");
+    const events: unknown[] = [];
+
+    const result = await injectVoiceTranscripts(message({
+      attachments: [
+        { id: "voice-1", kind: "voice", status: "ready", localPath: audio, bytes: 5 }
+      ]
+    }), {
+      stt: {
+        provider: "local",
+        enabled: true,
+        local: { engine: "faster-whisper", fasterWhisper: { enabled: true, modelCached: false } }
+      },
+      allowedRoots: [roots.mediaRoot, roots.audioRoot],
+      audit: (event) => {
+        events.push(event);
+      }
+    });
+
+    expect(result.text).toContain("first-run model downloads are disabled");
+    expect(events).toEqual([
+      expect.objectContaining({
+        outcome: "deny",
+        provider: "local",
+        attachment: expect.objectContaining({ id: "voice-1", pathHash: expect.any(String) })
+      })
+    ]);
+    expect(JSON.stringify(events)).not.toContain(audio);
+  });
+
+  it("denies faster-whisper when no runtime-owned worker is available", async () => {
+    const roots = await createRoots();
+    const audio = join(roots.mediaRoot, "voice.ogg");
+    await writeFile(audio, "audio");
+
+    const result = await injectVoiceTranscripts(message({
+      attachments: [
+        { id: "voice-1", kind: "voice", status: "ready", localPath: audio }
+      ]
+    }), {
+      stt: {
+        provider: "local",
+        enabled: true,
+        local: { engine: "faster-whisper", fasterWhisper: { enabled: true, modelCached: true } }
+      },
+      allowedRoots: [roots.mediaRoot, roots.audioRoot]
+    });
+
+    expect(result.text).toContain("requires a runtime-owned worker resource");
+  });
+
+  it("uses the runtime-owned faster-whisper worker when provided", async () => {
+    const roots = await createRoots();
+    const audio = join(roots.mediaRoot, "voice.ogg");
+    await writeFile(audio, "audio");
+    const transcribe = vi.fn(async () => ({ ok: true, text: "managed transcript", model: "base" }));
+
+    const result = await injectVoiceTranscripts(message({
+      attachments: [
+        { id: "voice-1", kind: "voice", status: "ready", localPath: audio, originalName: "voice.ogg" }
+      ]
+    }), {
+      stt: {
+        provider: "local",
+        enabled: true,
+        local: { engine: "faster-whisper", fasterWhisper: { enabled: true, modelCached: true } }
+      },
+      allowedRoots: [roots.mediaRoot, roots.audioRoot],
+      localWhisper: { transcribe } as any
+    });
+
+    expect(result.text).toContain("[Voice transcript from voice.ogg]\nmanaged transcript");
+    expect(transcribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("denies gateway faster-whisper when hfHome hub exists but the selected model is absent", async () => {
+    const roots = await createRoots();
+    const hfHome = await mkdtemp(join(tmpdir(), "estacoda-fw-gateway-cache-"));
+    await mkdir(join(hfHome, "hub"), { recursive: true });
+    const audio = join(roots.mediaRoot, "voice.ogg");
+    await writeFile(audio, "audio");
+    const transcribe = vi.fn(async () => ({ ok: true, text: "should not run", model: "small" }));
+
+    const result = await injectVoiceTranscripts(message({
+      attachments: [
+        { id: "voice-1", kind: "voice", status: "ready", localPath: audio }
+      ]
+    }), {
+      stt: {
+        provider: "local",
+        enabled: true,
+        local: { engine: "faster-whisper", fasterWhisper: { enabled: true, hfHome, model: "small" } }
+      },
+      allowedRoots: [roots.mediaRoot, roots.audioRoot],
+      localWhisper: { transcribe } as any
+    });
+
+    expect(result.text).toContain("first-run model downloads are disabled");
+    expect(transcribe).not.toHaveBeenCalled();
+  });
+
+  it("audits validation failures before provider dispatch", async () => {
+    const roots = await createRoots();
+    const audio = join(roots.mediaRoot, "voice.txt");
+    await writeFile(audio, "not audio");
+    const events: unknown[] = [];
+
+    const result = await injectVoiceTranscripts(message({
+      attachments: [
+        { id: "voice-1", kind: "voice", status: "ready", localPath: audio }
+      ]
+    }), {
+      stt: { provider: "local", enabled: true, local: { command: "printf should-not-run" } },
+      allowedRoots: [roots.mediaRoot, roots.audioRoot],
+      audit: (event) => {
+        events.push(event);
+      }
+    });
+
+    expect(result.text).toContain("Audio file type is not supported");
+    expect(events).toEqual([
+      expect.objectContaining({ outcome: "deny", reason: expect.stringContaining("not supported") })
+    ]);
   });
 });

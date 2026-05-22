@@ -2389,7 +2389,7 @@ function renderVoiceStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>
     `Auto-TTS max chars/reply: ${config.voice.autoTtsMaxCharsPerReply ?? "unset"}`,
     `Auto-TTS max chars/hour/chat: ${config.voice.autoTtsMaxCharsPerHourPerChat ?? "unset"}`,
     "Platform delivery: CLI audio cache, Telegram voice bubble when Opus/OGG conversion is available; otherwise audio file fallback.",
-    "Change with: estacoda voice setup --tts-provider edge|openai|elevenlabs|minimax|mistral|gemini|xai|neutts|kittentts --stt-provider local|groq|openai|mistral"
+    "Change with: estacoda voice setup --tts-provider edge|openai|elevenlabs|minimax|mistral|gemini|xai|neutts|kittentts --stt-provider local|groq|openai|mistral|xai"
   ].join("\n");
 }
 
@@ -2474,6 +2474,8 @@ function sttModel(provider: Awaited<ReturnType<typeof loadRuntimeConfig>>["stt"]
       return config.stt.openai?.model ?? "whisper-1";
     case "mistral":
       return config.stt.mistral?.model ?? "voxtral-mini-latest";
+    case "xai":
+      return "xai-stt";
   }
 }
 
@@ -2487,6 +2489,8 @@ function sttApiKeyEnv(provider: Awaited<ReturnType<typeof loadRuntimeConfig>>["s
       return config.stt.openai?.apiKeyEnv ?? "VOICE_TOOLS_OPENAI_KEY";
     case "mistral":
       return config.stt.mistral?.apiKeyEnv ?? "MISTRAL_API_KEY";
+    case "xai":
+      return config.stt.xai?.apiKeyEnv ?? "XAI_API_KEY";
   }
 }
 
@@ -3442,10 +3446,10 @@ function parseTtsProvider(value: string | undefined): VoiceSetupInput["ttsProvid
 }
 
 function parseSttProvider(value: string | undefined): VoiceSetupInput["sttProvider"] {
-  if (value === "local" || value === "groq" || value === "openai" || value === "mistral") {
+  if (value === "local" || value === "groq" || value === "openai" || value === "mistral" || value === "xai") {
     return value;
   }
-  throw new Error("Expected --stt-provider local, groq, openai, or mistral");
+  throw new Error("Expected --stt-provider local, groq, openai, mistral, or xai");
 }
 
 function renderLocalDiscovery(discovery: OpenAIModelProbe): string {

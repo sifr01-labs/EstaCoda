@@ -12,6 +12,7 @@ import {
   runGatewayApprovalResolutionTick,
   buildRuntimeCacheState,
   buildGatewayCronRuntimeOptions,
+  createVoiceTranscriptionAudit,
   type SupervisorInternalState,
 } from "./supervisor.js";
 import { readGatewayPid } from "./pid-file.js";
@@ -39,6 +40,45 @@ function createFakeConfig(tmpDir: string, channels: Record<string, unknown>) {
     homeDir: tmpDir,
   };
 }
+
+describe("gateway STT preprocess audit", () => {
+  it("emits hook events, JSONL, and warnings without full private paths", async () => {
+    const homeDir = await makeTempDir();
+    const profilePaths = resolveProfileStateHome({ homeDir, profileId: "default" });
+    const hookRegistry = new HookRegistry();
+    const hooks: unknown[] = [];
+    hookRegistry.on("gateway:stt:preprocess", (event) => {
+      hooks.push(event.payload);
+    });
+    const warnings: string[] = [];
+    const audit = createVoiceTranscriptionAudit({
+      profilePaths,
+      hookRegistry,
+      logWarning: (message) => warnings.push(message)
+    });
+
+    await audit({
+      timestamp: "2026-05-22T00:00:00.000Z",
+      outcome: "deny",
+      provider: "local",
+      reason: "blocked",
+      attachment: {
+        id: "voice-1",
+        kind: "voice",
+        bytes: 10,
+        pathHash: "abc123"
+      }
+    });
+
+    const jsonl = await readFile(join(profilePaths.gatewayStatePath, "logs", "voice-stt-preprocess.jsonl"), "utf8");
+    expect(hooks).toEqual([
+      expect.objectContaining({ outcome: "deny", provider: "local", reason: "blocked" })
+    ]);
+    expect(jsonl).toContain("\"pathHash\":\"abc123\"");
+    expect(jsonl).not.toContain(homeDir);
+    expect(warnings[0]).toContain("[voice-stt-preprocess]");
+  });
+});
 
 function fakeAdapter(kind: string, pollCount = 0) {
   return {

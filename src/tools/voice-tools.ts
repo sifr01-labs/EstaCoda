@@ -1,12 +1,15 @@
-import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, realpath, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, realpath, stat, writeFile } from "node:fs/promises";
 import { basename, join, relative, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ArtifactStore } from "../artifacts/artifact-store.js";
 import type { LoadedRuntimeConfig, SttProvider, TtsProvider } from "../config/runtime-config.js";
 import type { RegisteredTool, SessionToolProvider } from "../contracts/tool.js";
-import { validateAudioInput } from "./audio-validation.js";
+import type { FasterWhisperWorkerClient } from "./stt-local-whisper.js";
+import {
+  checkSttProviderStatus as checkSttProviderStatusFromDispatch,
+  computeSttRiskClass,
+  transcribeSpeech
+} from "./stt-providers.js";
 import { getTtsTextCap, synthesizeSpeech } from "./tts-providers.js";
 
 export type VoiceFetchLike = (url: string, init?: {
@@ -31,6 +34,8 @@ export type VoiceToolOptions = {
   stt?: LoadedRuntimeConfig["stt"];
   fetch?: VoiceFetchLike;
   id?: () => string;
+  localWhisper?: FasterWhisperWorkerClient;
+  tempRoot?: string;
 };
 
 export type VoiceProviderStatus =
@@ -65,34 +70,7 @@ export function checkSttProviderStatus(
   provider: SttProvider,
   config: LoadedRuntimeConfig["stt"]
 ): VoiceProviderStatus {
-  if (config.enabled === false) {
-    return { ready: false, reason: "STT disabled" };
-  }
-
-  if (provider === "openai" || provider === "groq") {
-    const apiKeyEnv = provider === "openai"
-      ? (config.openai?.apiKeyEnv ?? "VOICE_TOOLS_OPENAI_KEY")
-      : (config.groq?.apiKeyEnv ?? "GROQ_API_KEY");
-    const apiKey = process.env[apiKeyEnv] ??
-      (provider === "openai" && apiKeyEnv === "VOICE_TOOLS_OPENAI_KEY" ? process.env.OPENAI_API_KEY : undefined);
-    if (apiKey === undefined || apiKey.length === 0) {
-      return {
-        ready: false,
-        reason: `Missing ${apiKeyEnv}${provider === "openai" && apiKeyEnv === "VOICE_TOOLS_OPENAI_KEY" ? " or OPENAI_API_KEY" : ""}`
-      };
-    }
-    return { ready: true };
-  }
-
-  if (provider === "local") {
-    const command = config.local?.command ?? process.env.HERMES_LOCAL_STT_COMMAND;
-    if (command === undefined || command.trim().length === 0) {
-      return { ready: false, reason: "Local STT command not configured" };
-    }
-    return { ready: true };
-  }
-
-  return { ready: false, reason: `${provider} STT is not implemented in v0.1.0 Stage 0` };
+  return checkSttProviderStatusFromDispatch(provider, config);
 }
 
 export function createVoiceTools(options: VoiceToolOptions): readonly RegisteredTool[] {
@@ -205,7 +183,7 @@ export function createVoiceTools(options: VoiceToolOptions): readonly Registered
         },
         required: ["path"]
       },
-      riskClass: stt.provider === "local" ? "read-only-local" : "external-side-effect",
+      riskClass: sttRiskClass(stt),
       toolsets: ["media", "research"],
       progressLabel: "transcribing audio",
       maxResultSizeChars: 8000,
@@ -231,6 +209,9 @@ export function createVoiceTools(options: VoiceToolOptions): readonly Registered
           model: input.model,
           stt,
           fetch: options.fetch,
+          localWhisper: options.localWhisper,
+          audioCacheRoot: options.audioCacheRoot,
+          tempRoot: options.tempRoot ?? options.audioCacheRoot,
           signal: context?.signal
         });
         if (!result.ok) {
@@ -285,7 +266,9 @@ export const voiceToolProvider: SessionToolProvider = {
       allowedRoots: [requireProviderDependency("voice", "channelMediaRoot", ctx.channelMediaRoot)],
       tts: ctx.tts,
       stt: ctx.stt,
-      fetch: ctx.voiceFetch
+      fetch: ctx.voiceFetch,
+      localWhisper: ctx.localWhisper,
+      tempRoot: ctx.audioCacheRoot
     });
   }
 };
@@ -315,201 +298,16 @@ export async function transcribeAudioFile(input: {
   model?: string;
   stt: LoadedRuntimeConfig["stt"];
   fetch?: VoiceFetchLike;
+  localWhisper?: FasterWhisperWorkerClient;
+  audioCacheRoot?: string;
+  tempRoot?: string;
+  gateway?: boolean;
   signal?: AbortSignal;
 }): Promise<
-  | { ok: true; text: string; model: string; language?: string }
+  | { ok: true; text: string; model: string; language?: string; duration?: number; words?: unknown; channels?: unknown; metadata?: Record<string, unknown> }
   | { ok: false; content: string; metadata?: Record<string, unknown> }
 > {
-  const status = checkSttProviderStatus(input.stt.provider, input.stt);
-  if (!status.ready) {
-    return {
-      ok: false,
-      content: `STT provider unavailable: ${status.reason}`,
-      metadata: {
-        provider: input.stt.provider,
-        reason: status.reason
-      }
-    };
-  }
-
-  const audioValidation = await validateAudioInput(input.path);
-  if (!audioValidation.ok) {
-    return audioValidation;
-  }
-
-  if (input.stt.provider === "local") {
-    return transcribeWithLocalCommand(input);
-  }
-
-  if (input.stt.provider !== "openai" && input.stt.provider !== "groq") {
-    return {
-      ok: false,
-      content: [
-        `STT execution for ${input.stt.provider} is not enabled yet.`,
-        "This pass supports OpenAI-compatible hosted transcription providers: openai and groq.",
-        "Configured providers are visible through estacoda voice status."
-      ].join("\n"),
-      metadata: {
-        provider: input.stt.provider
-      }
-    };
-  }
-
-  const provider = input.stt.provider;
-  const config = provider === "openai" ? input.stt.openai : input.stt.groq;
-  const apiKeyEnv = config?.apiKeyEnv ?? (provider === "openai" ? "VOICE_TOOLS_OPENAI_KEY" : "GROQ_API_KEY");
-  const apiKey = process.env[apiKeyEnv] ?? (provider === "openai" && apiKeyEnv === "VOICE_TOOLS_OPENAI_KEY" ? process.env.OPENAI_API_KEY : undefined);
-  if (apiKey === undefined || apiKey.length === 0) {
-    return {
-      ok: false,
-      content: `Missing STT API key. Export ${apiKeyEnv}${provider === "openai" && apiKeyEnv === "VOICE_TOOLS_OPENAI_KEY" ? " or OPENAI_API_KEY" : ""}.`,
-      metadata: {
-        provider,
-        apiKeyEnv
-      }
-    };
-  }
-
-  const bytes = await readFile(input.path);
-  const form = new FormData();
-  form.set("file", new Blob([bytes]), basename(input.path));
-  const model = input.model ?? config?.model ?? (provider === "openai" ? "whisper-1" : "whisper-large-v3");
-  form.set("model", model);
-  form.set("response_format", "json");
-  if (input.language !== undefined && input.language.length > 0) {
-    form.set("language", input.language);
-  }
-  if (input.prompt !== undefined && input.prompt.length > 0) {
-    form.set("prompt", input.prompt);
-  }
-
-  const baseUrl = provider === "openai" ? "https://api.openai.com/v1" : "https://api.groq.com/openai/v1";
-  const response = await (input.fetch ?? globalVoiceFetch)(`${baseUrl}/audio/transcriptions`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${apiKey}`
-    },
-    body: form,
-    signal: input.signal
-  });
-
-  if (!response.ok) {
-    return {
-      ok: false,
-      content: `STT request failed: ${response.status} ${response.statusText}\n${await response.text()}`,
-      metadata: {
-        provider,
-        model
-      }
-    };
-  }
-
-  const raw = await response.text();
-  const parsed = tryJson(raw);
-  const text = typeof parsed?.text === "string" ? parsed.text : raw;
-  return {
-    ok: true,
-    text,
-    model,
-    language: input.language
-  };
-}
-
-async function transcribeWithLocalCommand(input: {
-  path: string;
-  language?: string;
-  model?: string;
-  stt: LoadedRuntimeConfig["stt"];
-  signal?: AbortSignal;
-}): Promise<
-  | { ok: true; text: string; model: string; language?: string }
-  | { ok: false; content: string; metadata?: Record<string, unknown> }
-> {
-  const command = input.stt.local?.command;
-  const model = input.model ?? input.stt.local?.model ?? "base";
-  if (command === undefined || command.trim().length === 0) {
-    return {
-      ok: false,
-      content: [
-        "Local STT command is not configured.",
-        "Set stt.local.command or HERMES_LOCAL_STT_COMMAND with placeholders like {input_path}, {output_dir}, {language}, and {model}."
-      ].join("\n"),
-      metadata: {
-        provider: "local",
-        model
-      }
-    };
-  }
-
-  const outputDir = await mkdtemp(join(tmpdir(), "estacoda-stt-"));
-  const rendered = command
-    .replaceAll("{input_path}", shellQuote(input.path))
-    .replaceAll("{output_dir}", shellQuote(outputDir))
-    .replaceAll("{language}", shellQuote(input.language ?? ""))
-    .replaceAll("{model}", shellQuote(model));
-  const result = await runShellCommand(rendered, input.signal);
-  if (!result.ok) {
-    return {
-      ok: false,
-      content: `Local STT command failed: ${result.content}`,
-      metadata: {
-        provider: "local",
-        model
-      }
-    };
-  }
-
-  const text = result.content.trim();
-  if (text.length === 0) {
-    return {
-      ok: false,
-      content: "Local STT command completed but produced no transcript text.",
-      metadata: {
-        provider: "local",
-        model
-      }
-    };
-  }
-
-  return {
-    ok: true,
-    text,
-    model,
-    language: input.language
-  };
-}
-
-function runShellCommand(command: string, signal?: AbortSignal): Promise<{ ok: true; content: string } | { ok: false; content: string }> {
-  return new Promise((resolveResult) => {
-    const child = spawn(command, {
-      shell: true,
-      stdio: ["ignore", "pipe", "pipe"],
-      signal
-    });
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout.on("data", (chunk) => {
-      stdout += String(chunk);
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += String(chunk);
-    });
-    child.on("error", (error) => {
-      resolveResult({ ok: false, content: error.message });
-    });
-    child.on("close", (code) => {
-      if (code === 0) {
-        resolveResult({ ok: true, content: stdout });
-        return;
-      }
-      resolveResult({ ok: false, content: stderr.trim() || `exit code ${code ?? "unknown"}` });
-    });
-  });
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
+  return await transcribeSpeech(input);
 }
 
 type ResolvedPath =
@@ -548,14 +346,6 @@ function errorResult(message: string): { ok: false; content: string; metadata: {
       reason: message
     }
   };
-}
-
-function tryJson(value: string): any {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return undefined;
-  }
 }
 
 function extensionForMime(mimeType: string): string {
@@ -621,4 +411,9 @@ function defaultStt(): LoadedRuntimeConfig["stt"] {
   return {
     provider: "local"
   };
+}
+
+function sttRiskClass(stt: LoadedRuntimeConfig["stt"]) {
+  const risk = computeSttRiskClass({ stt });
+  return risk.available ? risk.riskClass : "read-only-local";
 }

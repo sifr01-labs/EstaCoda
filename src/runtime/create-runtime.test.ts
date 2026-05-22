@@ -2850,4 +2850,21 @@ describe("createRuntime SQLite session lifecycle", () => {
     await expect(sessionDb.listSessions()).resolves.toEqual(expect.any(Array));
     sessionDb.close();
   });
+
+  it("disposes runtime-owned faster-whisper resources", async () => {
+    const options = await minimalRuntimeOptions();
+    let disposed = false;
+    const runtime = await createRuntime({
+      ...options,
+      localWhisper: {
+        dispose: async () => {
+          disposed = true;
+        }
+      } as any
+    });
+
+    await runtime.dispose();
+
+    expect(disposed).toBe(true);
+  });
 });
