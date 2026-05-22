@@ -932,6 +932,9 @@ function forwardingSessionDb(db: InMemorySessionDB, overrides: Partial<SessionDB
     listMessages: overrides.listMessages ?? db.listMessages.bind(db),
     listEvents: overrides.listEvents ?? db.listEvents.bind(db),
     search: overrides.search ?? db.search.bind(db),
+    setSessionModelOverride: overrides.setSessionModelOverride ?? db.setSessionModelOverride.bind(db),
+    clearSessionModelOverride: overrides.clearSessionModelOverride ?? db.clearSessionModelOverride.bind(db),
+    getSessionModelOverride: overrides.getSessionModelOverride ?? db.getSessionModelOverride.bind(db),
     saveFailure: overrides.saveFailure ?? db.saveFailure.bind(db)
   };
 }

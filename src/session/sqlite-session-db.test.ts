@@ -43,6 +43,36 @@ describe("SQLiteSessionDB", () => {
     }
   });
 
+  it("persists a typed session model override in session metadata", async () => {
+    const db = new SQLiteSessionDB({ path: dbPath });
+    try {
+      await db.createSession({ id: "session-1", profileId: "default", metadata: { keep: true } });
+      await db.setSessionModelOverride("session-1", sampleOverride());
+
+      await expect(db.getSessionModelOverride("session-1")).resolves.toMatchObject({
+        route: { provider: "local", id: "phi4:latest" },
+        source: "cli"
+      });
+    } finally {
+      db.close();
+    }
+
+    const reopened = new SQLiteSessionDB({ path: dbPath });
+    try {
+      await expect(reopened.getSessionModelOverride("session-1")).resolves.toMatchObject({
+        route: { provider: "local", id: "phi4:latest" },
+        source: "cli"
+      });
+      await reopened.clearSessionModelOverride("session-1");
+      await expect(reopened.getSessionModelOverride("session-1")).resolves.toBeUndefined();
+      await expect(reopened.getSession("session-1")).resolves.toMatchObject({
+        metadata: { keep: true }
+      });
+    } finally {
+      reopened.close();
+    }
+  });
+
   it("round-trips session lineage and ended fields", async () => {
     const db = new SQLiteSessionDB({
       path: dbPath,
@@ -603,3 +633,26 @@ describe("SQLiteSessionDB", () => {
     }
   });
 });
+
+function sampleOverride() {
+  return {
+    route: {
+      provider: "local" as const,
+      id: "phi4:latest",
+      baseUrl: "http://localhost:11434/v1",
+      apiMode: "custom_openai_compatible" as const,
+      authMethod: "none" as const,
+      contextWindowTokens: 128000
+    },
+    modelProfile: {
+      id: "phi4:latest",
+      provider: "local" as const,
+      contextWindowTokens: 128000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    },
+    setAt: "2030-01-01T00:00:00.000Z",
+    source: "cli" as const
+  };
+}

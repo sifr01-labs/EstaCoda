@@ -5,10 +5,13 @@ import type {
   SessionDB,
   SessionEvent,
   SessionMessage,
+  SessionModelOverride,
   SessionRecord,
   SessionSearchResult
 } from "../contracts/session.js";
 import type { FailureRecord } from "../contracts/failure.js";
+
+const SESSION_MODEL_OVERRIDE_METADATA_KEY = "sessionModelOverride";
 
 export class InMemorySessionDB implements SessionDB {
   readonly #sessions = new Map<string, SessionRecord>();
@@ -46,19 +49,19 @@ export class InMemorySessionDB implements SessionDB {
     this.#messages.set(id, []);
     this.#events.set(id, []);
 
-    return { ...session };
+    return cloneSession(session);
   }
 
   async getSession(id: string): Promise<SessionRecord | undefined> {
     const session = this.#sessions.get(id);
-    return session === undefined ? undefined : { ...session };
+    return session === undefined ? undefined : cloneSession(session);
   }
 
   async listSessions(profileId?: string): Promise<SessionRecord[]> {
     return [...this.#sessions.values()]
       .filter((session) => profileId === undefined || session.profileId === profileId)
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
-      .map((session) => ({ ...session }));
+      .map(cloneSession);
   }
 
   async appendMessage(input: AppendMessageInput): Promise<SessionMessage> {
@@ -98,6 +101,44 @@ export class InMemorySessionDB implements SessionDB {
     session.endedAt = this.#now().toISOString();
     session.endReason = reason;
     this.#touch(sessionId);
+  }
+
+  async setSessionModelOverride(sessionId: string, override: SessionModelOverride): Promise<void> {
+    const session = this.#sessions.get(sessionId);
+    if (session === undefined) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    session.metadata = {
+      ...(session.metadata ?? {}),
+      [SESSION_MODEL_OVERRIDE_METADATA_KEY]: structuredClone(override)
+    };
+    this.#touch(sessionId);
+  }
+
+  async clearSessionModelOverride(sessionId: string): Promise<void> {
+    const session = this.#sessions.get(sessionId);
+    if (session === undefined) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    if (session.metadata === undefined || !(SESSION_MODEL_OVERRIDE_METADATA_KEY in session.metadata)) {
+      this.#touch(sessionId);
+      return;
+    }
+
+    const { [SESSION_MODEL_OVERRIDE_METADATA_KEY]: _removed, ...rest } = session.metadata;
+    session.metadata = Object.keys(rest).length === 0 ? undefined : rest;
+    this.#touch(sessionId);
+  }
+
+  async getSessionModelOverride(sessionId: string): Promise<SessionModelOverride | undefined> {
+    const session = this.#sessions.get(sessionId);
+    if (session === undefined) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    return readSessionModelOverride(session.metadata);
   }
 
   async replaceMessages(input: { sessionId: string; messages: ReplacementSessionMessage[] }): Promise<SessionMessage[]> {
@@ -159,7 +200,7 @@ export class InMemorySessionDB implements SessionDB {
 
         if (score > 0) {
           results.push({
-            session: { ...session },
+            session: cloneSession(session),
             message: cloneMessage(message),
             score
           });
@@ -195,11 +236,40 @@ function scoreMessage(content: string, terms: string[]): number {
   return terms.reduce((score, term) => score + (normalized.includes(term) ? 1 : 0), 0);
 }
 
+function cloneSession(session: SessionRecord): SessionRecord {
+  return {
+    ...session,
+    metadata: session.metadata === undefined ? undefined : structuredClone(session.metadata)
+  };
+}
+
 function cloneMessage(message: SessionMessage): SessionMessage {
   return {
     ...message,
-    metadata: message.metadata === undefined ? undefined : { ...message.metadata }
+    metadata: message.metadata === undefined ? undefined : structuredClone(message.metadata)
   };
+}
+
+function readSessionModelOverride(metadata: Record<string, unknown> | undefined): SessionModelOverride | undefined {
+  const value = metadata?.[SESSION_MODEL_OVERRIDE_METADATA_KEY];
+  return isSessionModelOverride(value) ? structuredClone(value) : undefined;
+}
+
+function isSessionModelOverride(value: unknown): value is SessionModelOverride {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Partial<SessionModelOverride>;
+  return (
+    typeof candidate.setAt === "string" &&
+    (candidate.source === "cli" || candidate.source === "gateway") &&
+    typeof candidate.route === "object" &&
+    candidate.route !== null &&
+    typeof candidate.route.provider === "string" &&
+    typeof candidate.route.id === "string" &&
+    typeof candidate.modelProfile === "object" &&
+    candidate.modelProfile !== null &&
+    typeof candidate.modelProfile.id === "string" &&
+    typeof candidate.modelProfile.provider === "string"
+  );
 }
 
 function buildReplacementMessages(input: {

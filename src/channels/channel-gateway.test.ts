@@ -341,6 +341,9 @@ function createMinimalRuntime(): Runtime {
       getSession: async () => undefined,
       listSessions: async () => [],
       endSession: async () => {},
+      setSessionModelOverride: async () => {},
+      clearSessionModelOverride: async () => {},
+      getSessionModelOverride: async () => undefined,
       appendMessage: async (input) => ({
         id: "msg-1",
         sessionId: input.sessionId,

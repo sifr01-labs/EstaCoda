@@ -2,6 +2,35 @@ import { describe, expect, it } from "vitest";
 import { InMemorySessionDB } from "./in-memory-session-db.js";
 
 describe("InMemorySessionDB", () => {
+  it("sets, reads, and clears a typed session model override", async () => {
+    const db = new InMemorySessionDB({
+      now: () => new Date("2030-01-01T00:00:00.000Z")
+    });
+    await db.createSession({ id: "session-1", profileId: "profile", metadata: { keep: true } });
+
+    await db.setSessionModelOverride("session-1", sampleOverride());
+
+    await expect(db.getSessionModelOverride("session-1")).resolves.toMatchObject({
+      route: { provider: "local", id: "phi4:latest" },
+      source: "cli"
+    });
+    await expect(db.getSession("session-1")).resolves.toMatchObject({
+      metadata: {
+        keep: true,
+        sessionModelOverride: expect.objectContaining({
+          route: expect.objectContaining({ provider: "local", id: "phi4:latest" })
+        })
+      }
+    });
+
+    await db.clearSessionModelOverride("session-1");
+
+    await expect(db.getSessionModelOverride("session-1")).resolves.toBeUndefined();
+    await expect(db.getSession("session-1")).resolves.toMatchObject({
+      metadata: { keep: true }
+    });
+  });
+
   it("round-trips session lineage and ended fields", async () => {
     const db = new InMemorySessionDB({
       now: () => new Date("2030-01-01T00:00:00.000Z")
@@ -115,3 +144,26 @@ describe("InMemorySessionDB", () => {
     })).rejects.toThrow("Session not found: missing");
   });
 });
+
+function sampleOverride() {
+  return {
+    route: {
+      provider: "local" as const,
+      id: "phi4:latest",
+      baseUrl: "http://localhost:11434/v1",
+      apiMode: "custom_openai_compatible" as const,
+      authMethod: "none" as const,
+      contextWindowTokens: 128000
+    },
+    modelProfile: {
+      id: "phi4:latest",
+      provider: "local" as const,
+      contextWindowTokens: 128000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    },
+    setAt: "2030-01-01T00:00:00.000Z",
+    source: "cli" as const
+  };
+}

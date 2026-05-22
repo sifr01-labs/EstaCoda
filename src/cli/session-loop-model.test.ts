@@ -1,11 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { handleSlashCommand } from "./session-loop.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { SESSION_RECALL_UNTRUSTED_NOTICE } from "../session/session-recall-service.js";
+import { loadRuntimeConfig } from "../config/runtime-config.js";
+import { resolveProfileStateHome } from "../config/profile-home.js";
 
 function fakeRuntime(modelInfo: {
   provider: string;
@@ -14,9 +16,10 @@ function fakeRuntime(modelInfo: {
   supportsTools: boolean;
   supportsVision: boolean;
   supportsStructuredOutput: boolean;
-}) {
+}, sessionDb = new InMemorySessionDB()) {
   return {
     sessionId: "test-session",
+    sessionDb,
     getModelInfo: () => ({
       kind: "kv" as const,
       title: "Model",
@@ -34,6 +37,12 @@ function fakeRuntime(modelInfo: {
     tools: () => [],
     dispose: async () => {}
   } as any;
+}
+
+async function writeProfileConfig(homeDir: string, config: unknown): Promise<void> {
+  const configPath = resolveProfileStateHome({ homeDir, profileId: "default" }).configPath;
+  mkdirSync(dirname(configPath), { recursive: true });
+  writeFileSync(configPath, JSON.stringify(config, null, 2), "utf8");
 }
 
 describe("session-loop /model", () => {
@@ -78,7 +87,20 @@ describe("session-loop /model", () => {
     expect(outputChunks.join("")).toContain("model: qwen2.5:3b");
   });
 
-  it("/model set refuses with clear message", async () => {
+  it("/model set stores a session-scoped override and refreshes the runtime", async () => {
+    await writeProfileConfig(tempHome, {
+      providers: {
+        local: {
+          kind: "openai-compatible",
+          baseUrl: "http://localhost:11434/v1",
+          models: ["qwen2.5:3b", "phi4:latest"],
+          enableNetwork: true
+        }
+      },
+      model: { provider: "local", id: "qwen2.5:3b" }
+    });
+    const sessionDb = new InMemorySessionDB();
+    await sessionDb.createSession({ id: "test-session", profileId: "default" });
     const runtime = fakeRuntime({
       provider: "local",
       model: "qwen2.5:3b",
@@ -86,28 +108,40 @@ describe("session-loop /model", () => {
       supportsTools: true,
       supportsVision: false,
       supportsStructuredOutput: true
-    });
+    }, sessionDb);
+    const refreshed = fakeRuntime({
+      provider: "local",
+      model: "phi4:latest",
+      contextWindowTokens: 128000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    }, sessionDb);
 
     const result = await handleSlashCommand({
       text: "/model set local/phi4:latest",
       runtime,
       output,
       renderer: { render: renderPlain },
+      modelSwitchContext: async () => {
+        const loaded = await loadRuntimeConfig({ workspaceRoot: tempHome, homeDir: tempHome, profileId: "default" });
+        return { config: loaded.config, providerRegistry: loaded.providerRegistry, homeDir: tempHome };
+      },
+      switchRuntime: async () => refreshed as any,
       workspaceRoot: tempHome,
       homeDir: tempHome
     });
 
-    expect(result).toBe(false);
-    const text = outputChunks.join("");
-    expect(text).toContain("Session-scoped model switching is not supported");
-    expect(text).toContain("Persistent `estacoda model set` is deprecated and disabled");
-    expect(text).toContain("estacoda model setup local");
+    expect(result).not.toBe(false);
+    const override = await sessionDb.getSessionModelOverride("test-session");
+    expect(override?.route.provider).toBe("local");
+    expect(override?.route.id).toBe("phi4:latest");
+    expect(override?.source).toBe("cli");
   });
 
   it("/model set does not write provider config", async () => {
-    const estacodaDir = join(tempHome, ".estacoda");
-    mkdirSync(estacodaDir, { recursive: true });
-    const configPath = join(estacodaDir, "config.json");
+    const configPath = resolveProfileStateHome({ homeDir: tempHome, profileId: "default" }).configPath;
+    mkdirSync(dirname(configPath), { recursive: true });
     const original = JSON.stringify({
       providers: {
         local: {
@@ -121,6 +155,8 @@ describe("session-loop /model", () => {
     }, null, 2);
     writeFileSync(configPath, original);
 
+    const sessionDb = new InMemorySessionDB();
+    await sessionDb.createSession({ id: "test-session", profileId: "default" });
     const runtime = fakeRuntime({
       provider: "local",
       model: "qwen2.5:3b",
@@ -128,13 +164,18 @@ describe("session-loop /model", () => {
       supportsTools: true,
       supportsVision: false,
       supportsStructuredOutput: true
-    });
+    }, sessionDb);
 
     await handleSlashCommand({
       text: "/model set local/phi4:latest",
       runtime,
       output,
       renderer: { render: renderPlain },
+      modelSwitchContext: async () => {
+        const loaded = await loadRuntimeConfig({ workspaceRoot: tempHome, homeDir: tempHome, profileId: "default" });
+        return { config: loaded.config, providerRegistry: loaded.providerRegistry, homeDir: tempHome };
+      },
+      switchRuntime: async () => runtime,
       workspaceRoot: tempHome,
       homeDir: tempHome
     });
@@ -143,10 +184,55 @@ describe("session-loop /model", () => {
     expect(after).toBe(original);
   });
 
+  it("/model clear removes the session override and refreshes the runtime", async () => {
+    const sessionDb = new InMemorySessionDB();
+    await sessionDb.createSession({ id: "test-session", profileId: "default" });
+    await sessionDb.setSessionModelOverride("test-session", {
+      route: {
+        provider: "local",
+        id: "phi4:latest",
+        baseUrl: "http://localhost:11434/v1",
+        apiMode: "custom_openai_compatible",
+        authMethod: "none",
+        contextWindowTokens: 128000
+      },
+      modelProfile: {
+        id: "phi4:latest",
+        provider: "local",
+        contextWindowTokens: 128000,
+        supportsTools: true,
+        supportsVision: false,
+        supportsStructuredOutput: true
+      },
+      setAt: "2030-01-01T00:00:00.000Z",
+      source: "cli"
+    });
+    const runtime = fakeRuntime({
+      provider: "local",
+      model: "phi4:latest",
+      contextWindowTokens: 128000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    }, sessionDb);
+
+    const result = await handleSlashCommand({
+      text: "/model clear",
+      runtime,
+      output,
+      renderer: { render: renderPlain },
+      switchRuntime: async () => runtime,
+      workspaceRoot: tempHome,
+      homeDir: tempHome
+    });
+
+    expect(result).not.toBe(false);
+    await expect(sessionDb.getSessionModelOverride("test-session")).resolves.toBeUndefined();
+  });
+
   it("/model set does not change persistent config.model.provider or config.model.id", async () => {
-    const estacodaDir = join(tempHome, ".estacoda");
-    mkdirSync(estacodaDir, { recursive: true });
-    const configPath = join(estacodaDir, "config.json");
+    const configPath = resolveProfileStateHome({ homeDir: tempHome, profileId: "default" }).configPath;
+    mkdirSync(dirname(configPath), { recursive: true });
     const original = JSON.stringify({
       providers: {
         local: {
@@ -160,6 +246,8 @@ describe("session-loop /model", () => {
     }, null, 2);
     writeFileSync(configPath, original);
 
+    const sessionDb = new InMemorySessionDB();
+    await sessionDb.createSession({ id: "test-session", profileId: "default" });
     const runtime = fakeRuntime({
       provider: "local",
       model: "qwen2.5:3b",
@@ -167,13 +255,18 @@ describe("session-loop /model", () => {
       supportsTools: true,
       supportsVision: false,
       supportsStructuredOutput: true
-    });
+    }, sessionDb);
 
     await handleSlashCommand({
       text: "/model set local/phi4:latest",
       runtime,
       output,
       renderer: { render: renderPlain },
+      modelSwitchContext: async () => {
+        const loaded = await loadRuntimeConfig({ workspaceRoot: tempHome, homeDir: tempHome, profileId: "default" });
+        return { config: loaded.config, providerRegistry: loaded.providerRegistry, homeDir: tempHome };
+      },
+      switchRuntime: async () => runtime,
       workspaceRoot: tempHome,
       homeDir: tempHome
     });
@@ -184,9 +277,8 @@ describe("session-loop /model", () => {
   });
 
   it("/model set does not add provider entries, API keys, or fallback routes", async () => {
-    const estacodaDir = join(tempHome, ".estacoda");
-    mkdirSync(estacodaDir, { recursive: true });
-    const configPath = join(estacodaDir, "config.json");
+    const configPath = resolveProfileStateHome({ homeDir: tempHome, profileId: "default" }).configPath;
+    mkdirSync(dirname(configPath), { recursive: true });
     const original = JSON.stringify({
       providers: {
         local: {
@@ -200,6 +292,8 @@ describe("session-loop /model", () => {
     }, null, 2);
     writeFileSync(configPath, original);
 
+    const sessionDb = new InMemorySessionDB();
+    await sessionDb.createSession({ id: "test-session", profileId: "default" });
     const runtime = fakeRuntime({
       provider: "local",
       model: "qwen2.5:3b",
@@ -207,13 +301,18 @@ describe("session-loop /model", () => {
       supportsTools: true,
       supportsVision: false,
       supportsStructuredOutput: true
-    });
+    }, sessionDb);
 
     await handleSlashCommand({
       text: "/model set local/phi4:latest",
       runtime,
       output,
       renderer: { render: renderPlain },
+      modelSwitchContext: async () => {
+        const loaded = await loadRuntimeConfig({ workspaceRoot: tempHome, homeDir: tempHome, profileId: "default" });
+        return { config: loaded.config, providerRegistry: loaded.providerRegistry, homeDir: tempHome };
+      },
+      switchRuntime: async () => runtime,
       workspaceRoot: tempHome,
       homeDir: tempHome
     });
@@ -224,7 +323,20 @@ describe("session-loop /model", () => {
     expect(after.model.fallbacks).toBeUndefined();
   });
 
-  it("/model set rejects missing slash syntax with unsupported message", async () => {
+  it("/model set rejects unresolved model input with setup guidance", async () => {
+    await writeProfileConfig(tempHome, {
+      providers: {
+        local: {
+          kind: "openai-compatible",
+          baseUrl: "http://localhost:11434/v1",
+          models: ["qwen2.5:3b"],
+          enableNetwork: true
+        }
+      },
+      model: { provider: "local", id: "qwen2.5:3b" }
+    });
+    const sessionDb = new InMemorySessionDB();
+    await sessionDb.createSession({ id: "test-session", profileId: "default" });
     const runtime = fakeRuntime({
       provider: "local",
       model: "qwen2.5:3b",
@@ -232,19 +344,75 @@ describe("session-loop /model", () => {
       supportsTools: true,
       supportsVision: false,
       supportsStructuredOutput: true
-    });
+    }, sessionDb);
 
     const result = await handleSlashCommand({
       text: "/model set badmodel",
       runtime,
       output,
       renderer: { render: renderPlain },
+      modelSwitchContext: async () => {
+        const loaded = await loadRuntimeConfig({ workspaceRoot: tempHome, homeDir: tempHome, profileId: "default" });
+        return { config: loaded.config, providerRegistry: loaded.providerRegistry, homeDir: tempHome };
+      },
       workspaceRoot: tempHome,
       homeDir: tempHome
     });
 
     expect(result).toBe(false);
-    expect(outputChunks.join("")).toContain("Session-scoped model switching is not supported");
+    expect(outputChunks.join("")).toContain("Could not resolve");
+    expect(outputChunks.join("")).toContain("estacoda model setup");
+  });
+
+  it("/model set rejects missing credentials without collecting secrets", async () => {
+    const originalOpenAiKey = process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    try {
+      await writeProfileConfig(tempHome, {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-4o"],
+            apiKeyEnv: "OPENAI_API_KEY"
+          }
+        },
+        model: { provider: "local", id: "qwen2.5:3b" }
+      });
+      const sessionDb = new InMemorySessionDB();
+      await sessionDb.createSession({ id: "test-session", profileId: "default" });
+      const runtime = fakeRuntime({
+        provider: "local",
+        model: "qwen2.5:3b",
+        contextWindowTokens: 128000,
+        supportsTools: true,
+        supportsVision: false,
+        supportsStructuredOutput: true
+      }, sessionDb);
+
+      const result = await handleSlashCommand({
+        text: "/model set openai/gpt-4o",
+        runtime,
+        output,
+        renderer: { render: renderPlain },
+        modelSwitchContext: async () => {
+          const loaded = await loadRuntimeConfig({ workspaceRoot: tempHome, homeDir: tempHome, profileId: "default" });
+          return { config: loaded.config, providerRegistry: loaded.providerRegistry, homeDir: tempHome };
+        },
+        workspaceRoot: tempHome,
+        homeDir: tempHome
+      });
+
+      expect(result).toBe(false);
+      expect(outputChunks.join("")).toContain("Credentials are not configured for openai/gpt-4o");
+      expect(outputChunks.join("")).toContain("estacoda model setup openai");
+      await expect(sessionDb.getSessionModelOverride("test-session")).resolves.toBeUndefined();
+    } finally {
+      if (originalOpenAiKey === undefined) {
+        delete process.env.OPENAI_API_KEY;
+      } else {
+        process.env.OPENAI_API_KEY = originalOpenAiKey;
+      }
+    }
   });
 });
 

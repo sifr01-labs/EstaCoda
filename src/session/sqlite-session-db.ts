@@ -5,6 +5,7 @@ import type {
   SessionDB,
   SessionEvent,
   SessionMessage,
+  SessionModelOverride,
   SessionRecord,
   SessionRole,
   SessionSearchResult
@@ -82,6 +83,7 @@ const MIGRATION_LOCK_TIMEOUT_MS = 5_000;
 const MIGRATION_LOCK_RETRY_INTERVAL_MS = 25;
 const MIGRATION_LOCK_SLEEP_BUFFER = new SharedArrayBuffer(4);
 const MIGRATION_LOCK_SLEEP_VIEW = new Int32Array(MIGRATION_LOCK_SLEEP_BUFFER);
+const SESSION_MODEL_OVERRIDE_METADATA_KEY = "sessionModelOverride";
 
 function isSQLiteBusyError(error: unknown): boolean {
   const code = typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
@@ -244,6 +246,51 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
         .query("update sessions set ended_at = ?, end_reason = ?, updated_at = ? where id = ?")
         .run(endedAt, reason, endedAt, sessionId);
     });
+  }
+
+  async setSessionModelOverride(sessionId: string, override: SessionModelOverride): Promise<void> {
+    const updatedAt = this.#now().toISOString();
+    this.#withWriteTransaction(() => {
+      const session = this.#db.query<SessionRow>("select * from sessions where id = ?").get(sessionId);
+      if (session === null) {
+        throw new Error(`Session not found: ${sessionId}`);
+      }
+      const metadata = {
+        ...(parseJson(session.metadata_json) ?? {}),
+        [SESSION_MODEL_OVERRIDE_METADATA_KEY]: structuredClone(override)
+      };
+      this.#db
+        .query("update sessions set metadata_json = ?, updated_at = ? where id = ?")
+        .run(stringifyJson(metadata), updatedAt, sessionId);
+    });
+  }
+
+  async clearSessionModelOverride(sessionId: string): Promise<void> {
+    const updatedAt = this.#now().toISOString();
+    this.#withWriteTransaction(() => {
+      const session = this.#db.query<SessionRow>("select * from sessions where id = ?").get(sessionId);
+      if (session === null) {
+        throw new Error(`Session not found: ${sessionId}`);
+      }
+      const metadata = parseJson(session.metadata_json);
+      if (metadata === undefined || !(SESSION_MODEL_OVERRIDE_METADATA_KEY in metadata)) {
+        this.#db.query("update sessions set updated_at = ? where id = ?").run(updatedAt, sessionId);
+        return;
+      }
+      const { [SESSION_MODEL_OVERRIDE_METADATA_KEY]: _removed, ...rest } = metadata;
+      this.#db
+        .query("update sessions set metadata_json = ?, updated_at = ? where id = ?")
+        .run(stringifyJson(Object.keys(rest).length === 0 ? undefined : rest), updatedAt, sessionId);
+    });
+  }
+
+  async getSessionModelOverride(sessionId: string): Promise<SessionModelOverride | undefined> {
+    const session = this.#db.query<SessionRow>("select * from sessions where id = ?").get(sessionId);
+    if (session === null) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    return readSessionModelOverride(parseJson(session.metadata_json));
   }
 
   async replaceMessages(input: { sessionId: string; messages: ReplacementSessionMessage[] }): Promise<SessionMessage[]> {
@@ -1044,6 +1091,28 @@ function stringifyJson(value: Record<string, unknown> | undefined): string | nul
 
 function parseJson(value: string | null): Record<string, unknown> | undefined {
   return value === null ? undefined : (JSON.parse(value) as Record<string, unknown>);
+}
+
+function readSessionModelOverride(metadata: Record<string, unknown> | undefined): SessionModelOverride | undefined {
+  const value = metadata?.[SESSION_MODEL_OVERRIDE_METADATA_KEY];
+  return isSessionModelOverride(value) ? structuredClone(value) : undefined;
+}
+
+function isSessionModelOverride(value: unknown): value is SessionModelOverride {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Partial<SessionModelOverride>;
+  return (
+    typeof candidate.setAt === "string" &&
+    (candidate.source === "cli" || candidate.source === "gateway") &&
+    typeof candidate.route === "object" &&
+    candidate.route !== null &&
+    typeof candidate.route.provider === "string" &&
+    typeof candidate.route.id === "string" &&
+    typeof candidate.modelProfile === "object" &&
+    candidate.modelProfile !== null &&
+    typeof candidate.modelProfile.id === "string" &&
+    typeof candidate.modelProfile.provider === "string"
+  );
 }
 
 function toFtsQuery(query: string): string {

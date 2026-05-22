@@ -10,6 +10,8 @@ import { canRunInteractive } from "./cli/readline-prompt.js";
 import { createRuntime } from "./runtime/create-runtime.js";
 import { runSessionLoop, handleSlashCommand } from "./cli/session-loop.js";
 import { runOneShotPrompt } from "./cli/one-shot.js";
+import type { ModelSwitchContext } from "./providers/model-switch-resolver.js";
+import { resolveEffectiveSessionModelOverride } from "./providers/model-switch-resolver.js";
 import { WorkspaceApprovalController } from "./security/workspace-approval-controller.js";
 import { WorkspaceTrustStore } from "./security/workspace-trust-store.js";
 import { resolveTokens } from "./theme/token-resolver.js";
@@ -159,16 +161,26 @@ async function main(): Promise<void> {
   } = {}) {
     const nowTrusted = await trustStore.isTrusted(workspaceRoot);
     const latestConfig = await loadRuntimeConfig({ workspaceRoot, profileId });
+    const sessionDb = input.sessionDb;
+    const storedOverride = input.sessionId !== undefined && sessionDb !== undefined
+      ? await sessionDb.getSessionModelOverride(input.sessionId).catch(() => undefined)
+      : undefined;
+    const effectiveOverride = await resolveEffectiveSessionModelOverride(storedOverride, {
+      config: latestConfig.config,
+      providerRegistry: latestConfig.providerRegistry
+    });
+    const effectiveRoute = effectiveOverride?.ok === true ? effectiveOverride.route : latestConfig.primaryModelRoute;
+    const effectiveModel = effectiveOverride?.ok === true ? effectiveOverride.route.profile : latestConfig.model;
 
     return createRuntime({
       tokens: resolveTokens("standard", "dark", "kemetBlue"),
-      model: latestConfig.model,
-      primaryModelRoute: latestConfig.primaryModelRoute,
+      model: effectiveModel,
+      primaryModelRoute: effectiveRoute,
       modelFallbackRoutes: latestConfig.modelFallbackRoutes,
       profileId,
       workspaceRoot,
       sessionId: input.sessionId,
-      sessionDb: input.sessionDb,
+      sessionDb,
       externalSkillRoots: latestConfig.skills.externalDirs,
       skillAutonomy: latestConfig.skills.autonomy,
       skillConfig: latestConfig.skills.config,
@@ -191,6 +203,14 @@ async function main(): Promise<void> {
       approvalController: cliApprovalController,
       workspaceTrusted: nowTrusted
     });
+  }
+
+  async function modelSwitchContext(): Promise<ModelSwitchContext> {
+    const latestConfig = await loadRuntimeConfig({ workspaceRoot, profileId });
+    return {
+      config: latestConfig.config,
+      providerRegistry: latestConfig.providerRegistry
+    };
   }
 
   async function openLocalSessionDb(): Promise<SessionDB> {
@@ -254,7 +274,8 @@ async function main(): Promise<void> {
         });
         await cliSessionStore.setSessionId(workspaceRoot, nextRuntime.sessionId);
         return nextRuntime;
-      }
+      },
+      modelSwitchContext
     });
     await runtime.dispose();
     process.exit(0);

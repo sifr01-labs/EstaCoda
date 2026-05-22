@@ -10,6 +10,12 @@ import type { ToolResult, ToolRiskClass } from "./tool.js";
 import type { ToolCallPlan } from "./tool-plan.js";
 import type { SkillLifecycleState, SkillRouteTelemetry, SkillWorkflowPlan } from "./skill.js";
 import type { FailureRecord } from "./failure.js";
+import type {
+  ModelProfile,
+  ProviderApiMode,
+  ProviderAuthMethod,
+  ProviderId
+} from "./provider.js";
 
 export type SessionRole = "user" | "agent" | "system" | "tool";
 
@@ -23,6 +29,22 @@ export type SessionRecord = {
   endedAt?: string;
   endReason?: string;
   metadata?: Record<string, unknown>;
+};
+
+export type SessionModelOverride = {
+  route: {
+    provider: ProviderId;
+    id: string;
+    baseUrl?: string;
+    apiKeyEnv?: string;
+    apiMode?: ProviderApiMode;
+    authMethod?: ProviderAuthMethod;
+    contextWindowTokens?: number;
+    routeId?: string;
+  };
+  modelProfile: ModelProfile;
+  setAt: string;
+  source: "cli" | "gateway";
 };
 
 export type SessionMessage = {
@@ -497,6 +519,9 @@ export type SessionDB = {
   getSession(id: string): Promise<SessionRecord | undefined>;
   listSessions(profileId?: string): Promise<SessionRecord[]>;
   endSession(sessionId: string, reason: string): Promise<void>;
+  setSessionModelOverride(sessionId: string, override: SessionModelOverride): Promise<void>;
+  clearSessionModelOverride(sessionId: string): Promise<void>;
+  getSessionModelOverride(sessionId: string): Promise<SessionModelOverride | undefined>;
   appendMessage(input: AppendMessageInput): Promise<SessionMessage>;
   replaceMessages(input: { sessionId: string; messages: ReplacementSessionMessage[] }): Promise<SessionMessage[]>;
   rewriteTranscript(input: { sessionId: string; messages: ReplacementSessionMessage[] }): Promise<SessionMessage[]>;
