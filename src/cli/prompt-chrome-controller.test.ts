@@ -282,6 +282,16 @@ describe("PromptChromeController — inline spinner", () => {
     expect(chunks[1]).toBe("* routing\n");
   });
 
+  it("clears all previous inline lines when the spinner render is multiline", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream, makeCaps({ supportsAnimation: false }));
+    ctrl.renderInlineSpinner("thinking", (phase) => `status\n* ${phase}`);
+    chunks.length = 0;
+    ctrl.renderInlineSpinner("routing", (phase) => `status\n* ${phase}`);
+    expect(chunks[0]).toBe("\x1b[1A\x1b[2K\x1b[1A\x1b[2K\r");
+    expect(chunks[1]).toBe("status\n* routing\n");
+  });
+
   it("clearInlineSpinner stops timer and clears line", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream, makeCaps({ supportsAnimation: true }));

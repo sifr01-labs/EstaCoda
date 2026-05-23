@@ -40,7 +40,7 @@ import {
 import { createSessionRenderer, type SessionRenderer } from "./session-renderer.js";
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
 import { PromptChromeController } from "./prompt-chrome-controller.js";
-import type { SlashMenuViewModel, ToolActivityRailEvent } from "../contracts/view-model.js";
+import type { SessionStatusRailViewModel, SlashMenuViewModel, ToolActivityRailEvent } from "../contracts/view-model.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
@@ -73,6 +73,8 @@ export type SessionLoopOptions = {
     playbackCommandExists?: (command: string) => Promise<boolean>;
   };
 };
+
+type ContextUsageSnapshot = NonNullable<SessionStatusRailViewModel["contextUsage"]>;
 
 export class ToolActivityAnimator {
   readonly #output: NodeJS.WritableStream;
@@ -195,6 +197,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 
   try {
     let pendingSlashCompletion: SlashMenuViewModel | undefined;
+    let latestContextUsage: ContextUsageSnapshot | undefined;
     const startupVm = typeof runtime.getStartup === "function" ? runtime.getStartup() : undefined;
     const startupText = startupVm !== undefined ? renderer.render(startupVm) : runtime.describe();
     output.write(`${startupText}\n\n`);
@@ -207,7 +210,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 
     while (true) {
       if (chrome.enabled) {
-        chrome.renderChrome(buildPromptChromeState(runtime, renderer, undefined, pendingSlashCompletion));
+        chrome.renderChrome(buildPromptChromeState(runtime, renderer, undefined, pendingSlashCompletion, latestContextUsage));
       } else {
         const topRule = renderHorizontalRule(renderer.tokens, useColor, useUnicode, termWidth);
         output.write(`${topRule}\n`);
@@ -277,6 +280,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         if (typeof shouldExit !== "boolean") {
           await runtime.dispose();
           runtime = shouldExit.runtime;
+          latestContextUsage = undefined;
           activityBuilder = new ToolActivityViewModelBuilder({
             tools: runtime.tools()
           });
@@ -320,7 +324,17 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 
         const renderSpinner = (phase: string) => {
           if (chrome.enabled) {
-            chrome.renderInlineSpinner(phase, (p) => renderer.render(buildActiveTurnSpinnerViewModel({ phase: p })));
+            chrome.renderInlineSpinner(phase, (p) => {
+              const activeSpinner = buildActiveTurnSpinnerViewModel({ phase: p });
+              const statusRail = latestContextUsage === undefined
+                ? undefined
+                : buildPromptChromeState(runtime, renderer, undefined, undefined, latestContextUsage).statusRail;
+              return [
+                statusRail === undefined ? undefined : renderer.render(statusRail),
+                renderer.render(activeSpinner)
+              ].filter((line) => line !== undefined).join("\n");
+            });
+            turnOutput.spinnerPhase = phase;
             return;
           }
           if (turnOutput.spinnerPhase === phase) {
@@ -349,6 +363,12 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             channel: "cli",
             signal: activeTurn.signal,
             onEvent: (event) => {
+              if (event.kind === "context-usage") {
+                latestContextUsage = { filled: event.filled, total: event.total };
+                if (chrome.enabled && turnOutput.spinnerPhase !== undefined) {
+                  renderSpinner(turnOutput.spinnerPhase);
+                }
+              }
               const newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, chrome, turnOutput, currentAnimator);
               if (newPhase !== undefined) {
                 renderSpinner(newPhase);
@@ -1825,6 +1845,8 @@ export function renderRuntimeEvent(
       clearActiveSpinnerLine();
       safeWrite(`\nprovider budget: ${event.reason}\n`);
       return undefined;
+    case "context-usage":
+      return undefined;
     case "agent-cancelled":
       animator?.cancel();
       clearActiveSpinnerLine();
@@ -1849,7 +1871,8 @@ function buildPromptChromeState(
   runtime: Runtime,
   renderer: SessionRenderer,
   activeSpinner?: import("../contracts/view-model.js").ActiveTurnSpinnerViewModel,
-  slashMenu?: SlashMenuViewModel
+  slashMenu?: SlashMenuViewModel,
+  contextUsage?: ContextUsageSnapshot
 ) {
   const modelInfo = typeof runtime.getModelInfo === "function" ? runtime.getModelInfo() : undefined;
   const modelId = modelInfo?.kind === "kv"
@@ -1863,9 +1886,9 @@ function buildPromptChromeState(
     statusRail: buildSessionStatusRailViewModel({
       modelLabel: modelId,
       turnState: "idle",
-      contextUsage: Number.isFinite(contextWindow) && contextWindow > 0
+      contextUsage: contextUsage ?? (Number.isFinite(contextWindow) && contextWindow > 0
         ? { filled: 0, total: contextWindow }
-        : undefined,
+        : undefined),
     }),
     activeSpinner,
     slashMenu,

@@ -11,6 +11,7 @@ import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
 import type { AgentProfileMode, AgentResponseLanguage, UiFlavor, UiLanguage } from "../config/runtime-config.js";
 import { PromptCache } from "../prompt/prompt-cache.js";
+import { estimateTextTokensRough } from "../prompt/token-estimator.js";
 import {
   assembleProviderContinuationPrompt,
   assembleProviderPrompt
@@ -19,7 +20,7 @@ import { packSessionHistory } from "../prompt/history-packer.js";
 import type { CompactResult } from "../prompt/session-compression-service.js";
 import { SUMMARY_FORMAT_VERSION } from "../prompt/semantic-compressor.js";
 import { normalizeProviderMessagesStrict } from "../providers/provider-message-normalizer.js";
-import type { PromptSemanticCompressionReport } from "../contracts/prompt.js";
+import type { PromptBudgetReport, PromptSemanticCompressionReport } from "../contracts/prompt.js";
 import type { ProviderExecutionResult, ProviderExecutor, ProviderRuntimeEvent } from "../providers/provider-executor.js";
 import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
@@ -226,6 +227,14 @@ export class ProviderTurnLoop {
       const loopToolExecutions = loopToolExecutionResult.executions;
       maxObservedRisk = loopToolExecutionResult.maxObservedRisk;
       providerToolExecutions.push(...loopToolExecutions);
+      if (loopToolExecutions.length > 0 && this.#model !== undefined) {
+        await emit(input.onEvent, {
+          kind: "context-usage",
+          filled: normalizeTokenCount(this.#lastPromptTokens + estimateProviderToolFeedbackTokens(loopToolExecutions)),
+          total: normalizeTokenCount(this.#model.contextWindowTokens),
+          source: "live-estimate"
+        });
+      }
       const currentPlans = input.toolPlans.slice(beforePlans);
       const hasRecoverableToolFeedback = currentPlans.some((plan) => isRecoverableToolPlanStatus(plan.status));
       const repeatedFailureBudgetExceeded = this.#recordRepeatedToolFailures(loopToolExecutions, repeatedFailures);
@@ -348,6 +357,7 @@ export class ProviderTurnLoop {
     });
     this.#lastPromptTokens = prompt.budget.estimatedTokens;
     await this.#runRecorder.recordPromptAssembly(prompt.budget);
+    await emitContextUsage(input.onEvent, prompt.budget, "assembled-prompt");
 
     const execution = await this.#providerExecutor.complete(normalizeProviderRequest({
       provider: this.#model.provider,
@@ -376,6 +386,12 @@ export class ProviderTurnLoop {
     });
     if (execution.response?.usage?.inputTokens !== undefined) {
       this.#lastActualPromptTokens = execution.response.usage.inputTokens;
+      await emit(input.onEvent, {
+        kind: "context-usage",
+        filled: normalizeTokenCount(execution.response.usage.inputTokens),
+        total: normalizeTokenCount(prompt.budget.contextWindowTokens),
+        source: "provider-actual"
+      });
     }
 
     await this.#sessionDb.appendEvent(this.#currentSessionId(), {
@@ -468,6 +484,7 @@ export class ProviderTurnLoop {
     });
     this.#lastPromptTokens = prompt.budget.estimatedTokens;
     await this.#runRecorder.recordPromptAssembly(prompt.budget);
+    await emitContextUsage(input.onEvent, prompt.budget, "assembled-prompt");
 
     const execution = await this.#providerExecutor.complete(normalizeProviderRequest({
       provider: this.#model.provider,
@@ -496,6 +513,12 @@ export class ProviderTurnLoop {
     });
     if (execution.response?.usage?.inputTokens !== undefined) {
       this.#lastActualPromptTokens = execution.response.usage.inputTokens;
+      await emit(input.onEvent, {
+        kind: "context-usage",
+        filled: normalizeTokenCount(execution.response.usage.inputTokens),
+        total: normalizeTokenCount(prompt.budget.contextWindowTokens),
+        source: "provider-actual"
+      });
     }
 
     await this.#sessionDb.appendEvent(this.#currentSessionId(), {
@@ -636,6 +659,31 @@ export function compressionReportFromResult(result: CompactResult): PromptSemant
 
 function isDeterministicCompressionFallback(reason: string | undefined): boolean {
   return reason === "deterministic-fallback" || reason === "static-emergency-marker";
+}
+
+async function emitContextUsage(
+  sink: RuntimeEventSink | undefined,
+  budget: PromptBudgetReport,
+  source: Extract<RuntimeEvent, { kind: "context-usage" }>["source"]
+): Promise<void> {
+  await emit(sink, {
+    kind: "context-usage",
+    filled: normalizeTokenCount(budget.estimatedTokens),
+    total: normalizeTokenCount(budget.contextWindowTokens),
+    source
+  });
+}
+
+function normalizeTokenCount(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0;
+}
+
+function estimateProviderToolFeedbackTokens(executions: ToolExecutionRecord[]): number {
+  return executions.reduce((sum, execution) => {
+    return sum +
+      estimateTextTokensRough(execution.tool.name) +
+      estimateTextTokensRough(execution.result?.content ?? "");
+  }, 0);
 }
 
 function isRecoverableToolPlanStatus(status: ToolCallPlan["status"]): boolean {

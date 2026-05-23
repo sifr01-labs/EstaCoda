@@ -45,7 +45,7 @@ import { emit, isAborted } from "../utils/runtime-helpers.js";
 import { appendArtifactSummary, renderArtifactProgress } from "../utils/artifact-formatting.js";
 import { summarizeProviderFailure } from "../providers/provider-diagnostics.js";
 import type { SessionCompressionService } from "../prompt/session-compression-service.js";
-import { estimateMessagesTokensRough } from "../prompt/token-estimator.js";
+import { estimateMessagesTokensRough, estimateTextTokensRough } from "../prompt/token-estimator.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 
 export type AgentLoopInput = {
@@ -292,6 +292,14 @@ export class AgentLoop {
       attachments: summarizeAttachments(attachments),
       contextReferences: context?.references.map((reference) => reference.raw) ?? []
     });
+    await this.#emitLiveContextUsageEstimate({
+      onEvent: input.onEvent,
+      routedText,
+      context,
+      projectContext: this.#projectContext,
+      attachments,
+      stage: "input"
+    });
 
     if (context !== undefined && context.references.length > 0) {
       await this.#sessionDb.appendEvent(this.#currentSessionId(), {
@@ -444,6 +452,15 @@ export class AgentLoop {
       text: routedText,
       onEvent: input.onEvent
     });
+    await this.#emitLiveContextUsageEstimate({
+      onEvent: input.onEvent,
+      routedText,
+      context,
+      projectContext: this.#projectContext,
+      attachments,
+      memoryPromptContext: turnMemoryPromptContext,
+      stage: "memory"
+    });
 
     if (selectedSkill !== undefined) {
       await emit(input.onEvent, {
@@ -462,6 +479,18 @@ export class AgentLoop {
           loadedInstructions: selectedSkillInstructions !== undefined,
           instructionBytes: selectedSkillInstructions === undefined ? 0 : Buffer.byteLength(selectedSkillInstructions)
         }
+      });
+      await this.#emitLiveContextUsageEstimate({
+        onEvent: input.onEvent,
+        routedText,
+        context,
+        projectContext: this.#projectContext,
+        attachments,
+        memoryPromptContext: turnMemoryPromptContext,
+        selectedSkillInstructions,
+        selectedSkillResources,
+        selectedSkillSetup,
+        stage: "skill"
       });
     }
 
@@ -517,6 +546,19 @@ export class AgentLoop {
       ...deterministicNativeTools.executions,
       ...skillToolExecutions
     ];
+    await this.#emitLiveContextUsageEstimate({
+      onEvent: input.onEvent,
+      routedText,
+      context,
+      projectContext: this.#projectContext,
+      attachments,
+      memoryPromptContext: turnMemoryPromptContext,
+      selectedSkillInstructions,
+      selectedSkillResources,
+      selectedSkillSetup,
+      toolExecutions,
+      stage: "tools"
+    });
     const recordedArtifactIds = new Set<string>();
     const artifacts = await this.#runRecorder.recordArtifactsFromExecutions(toolExecutions, recordedArtifactIds);
     const toolPlans: ToolCallPlan[] = [...deterministicNativeTools.plans];
@@ -536,6 +578,21 @@ export class AgentLoop {
     const deterministicImageGenerationRan = deterministicNativeTools.executions.some((execution) => execution.tool.name === "image.generate");
     const providerTools = this.#model?.supportsTools === true ? this.#providerTools : [];
     const preflightCompression = await this.#compactBeforeProviderTurn(input.signal);
+    await this.#emitLiveContextUsageEstimate({
+      onEvent: input.onEvent,
+      routedText,
+      context,
+      projectContext: this.#projectContext,
+      attachments,
+      memoryPromptContext: turnMemoryPromptContext,
+      selectedSkillInstructions,
+      selectedSkillResources,
+      selectedSkillSetup,
+      toolExecutions,
+      providerTools: deterministicImageGenerationRan ? suppressImageGenerationTools(providerTools) : providerTools,
+      preflightCompression,
+      stage: "preflight"
+    });
     const providerLoop = await this.#providerTurnLoop.run({
       userText: effectiveText,
       routedText,
@@ -732,6 +789,83 @@ export class AgentLoop {
 
 
 
+
+  async #emitLiveContextUsageEstimate(input: {
+    onEvent?: RuntimeEventSink;
+    routedText: string;
+    context: ContextExpansionResult | undefined;
+    projectContext: ProjectContextSnapshot | undefined;
+    attachments: ChannelAttachment[] | undefined;
+    memoryPromptContext?: MemoryPromptContext;
+    selectedSkillInstructions?: string;
+    selectedSkillResources?: LoadedSkill["resources"];
+    selectedSkillSetup?: SkillSetupContext;
+    toolExecutions?: ToolExecutionRecord[];
+    providerTools?: OpenAICompatibleToolSchema[];
+    preflightCompression?: PromptSemanticCompressionReport;
+    stage: string;
+  }): Promise<void> {
+    const total = this.#model?.contextWindowTokens;
+    if (!Number.isFinite(total) || total === undefined || total <= 0) {
+      return;
+    }
+
+    await emit(input.onEvent, {
+      kind: "context-usage",
+      filled: Math.max(0, Math.round(await this.#estimateLiveContextTokens(input))),
+      total,
+      source: "live-estimate"
+    });
+  }
+
+  async #estimateLiveContextTokens(input: {
+    routedText: string;
+    context: ContextExpansionResult | undefined;
+    projectContext: ProjectContextSnapshot | undefined;
+    attachments: ChannelAttachment[] | undefined;
+    memoryPromptContext?: MemoryPromptContext;
+    selectedSkillInstructions?: string;
+    selectedSkillResources?: LoadedSkill["resources"];
+    selectedSkillSetup?: SkillSetupContext;
+    toolExecutions?: ToolExecutionRecord[];
+    providerTools?: OpenAICompatibleToolSchema[];
+    preflightCompression?: PromptSemanticCompressionReport;
+    stage: string;
+  }): Promise<number> {
+    const sessionMessages = await this.#sessionDb.listMessages(this.#currentSessionId()).catch(() => []);
+    let tokens = estimateMessagesTokensRough(sessionMessages.map((message) => ({
+      role: message.role,
+      content: message.content,
+      metadata: message.metadata
+    })));
+
+    if (sessionMessages.length === 0) {
+      tokens += estimateTextTokensRough(input.routedText);
+    }
+
+    tokens += estimateTextTokensRough(this.#soul ?? "");
+    tokens += estimateContextReferenceTokens(input.context);
+    tokens += estimateProjectContextTokens(input.projectContext);
+    tokens += estimateTextTokensRough(input.selectedSkillInstructions === undefined
+      ? ""
+      : truncate(input.selectedSkillInstructions, 4_000));
+    tokens += estimateResourceIndexTokens(input.selectedSkillResources);
+    tokens += estimateSkillSetupTokens(input.selectedSkillSetup);
+    tokens += estimateMemoryPromptContextTokens(input.memoryPromptContext);
+    tokens += estimateToolExecutionTokens(input.toolExecutions);
+    tokens += estimateJsonTokens(input.providerTools);
+    tokens += estimateJsonTokens(input.preflightCompression);
+    tokens += estimateJsonTokens({
+      stage: input.stage,
+      contextReferences: input.context?.references.length ?? 0,
+      contextWarnings: input.context?.warnings.length ?? 0,
+      projectWarnings: input.projectContext?.warnings.length ?? 0,
+      attachmentCount: input.attachments?.length ?? 0,
+      skillCount: this.#skillsIndex.length
+    });
+
+    return tokens;
+  }
 
   async #memoryPromptContextForTurn(input: {
     text: string;
@@ -946,6 +1080,105 @@ export class AgentLoop {
 
 }
 
+
+function estimateMemoryPromptContextTokens(context: MemoryPromptContext | undefined): number {
+  if (context === undefined) {
+    return 0;
+  }
+
+  const blocks = [
+    ...context.frozenCompactMemory,
+    ...context.safetyMemory,
+    ...(context.sessionRecall ?? []),
+    ...(context.externalRecall ?? [])
+  ];
+  return blocks.reduce((sum, block) => sum + estimateTextTokensRough(block.content), 0);
+}
+
+function estimateContextReferenceTokens(context: ContextExpansionResult | undefined): number {
+  const blocks = context?.blocks.filter((block) => block.content.length > 0) ?? [];
+  if (blocks.length === 0) {
+    return estimateTextTokensRough("No explicit context references were loaded.");
+  }
+  return blocks.reduce((sum, block) => {
+    return sum + estimateTextTokensRough(`Source: ${block.source}\n${truncate(block.content, 2_000)}`);
+  }, 0);
+}
+
+function estimateProjectContextTokens(context: ProjectContextSnapshot | undefined): number {
+  if (context === undefined || context.files.length === 0) {
+    return estimateTextTokensRough("No project context files were loaded.");
+  }
+  return context.files.reduce((sum, file) => {
+    return sum + estimateTextTokensRough(`Source: ${file.source}\n${truncate(file.content, 1_500)}`);
+  }, 0);
+}
+
+function estimateResourceIndexTokens(resources: LoadedSkill["resources"] | undefined): number {
+  if (resources === undefined) {
+    return 0;
+  }
+  return resources.reduce((sum, resource) => {
+    const labels = [
+      resource.path,
+      resource.bytes === undefined ? undefined : `${resource.bytes} bytes`,
+      resource.declared === true ? "declared" : undefined
+    ].filter((value) => value !== undefined);
+    return sum + estimateTextTokensRough(`${resource.kind}: - ${labels.join(" · ")}`);
+  }, 0);
+}
+
+function estimateSkillSetupTokens(setup: SkillSetupContext | undefined): number {
+  if (setup === undefined) {
+    return 0;
+  }
+  return estimateJsonTokens({
+    skillDirectory: setup.skillDirectory,
+    requiredEnvironmentVariables: setup.requiredEnvironmentVariables.map((item) => ({
+      name: item.name,
+      present: item.present
+    })),
+    requiredCredentialFiles: setup.requiredCredentialFiles.map((item) => ({
+      path: item.path,
+      present: item.present,
+      resolvedPath: item.resolvedPath
+    })),
+    configFields: setup.configFields.map((field) => ({
+      key: field.key,
+      required: field.required,
+      source: field.source,
+      valueType: field.value === undefined ? "undefined" : typeof field.value
+    }))
+  });
+}
+
+function estimateToolExecutionTokens(toolExecutions: ToolExecutionRecord[] | undefined): number {
+  if (toolExecutions === undefined) {
+    return 0;
+  }
+  return toolExecutions.reduce((sum, execution) => {
+    return sum +
+      estimateTextTokensRough(execution.tool.name) +
+      estimateTextTokensRough(execution.result?.content ?? "") +
+      estimateJsonTokens({
+        ok: execution.result?.ok,
+        decision: execution.decision,
+        riskClass: execution.riskClass,
+        metadata: execution.result?.metadata
+      });
+  }, 0);
+}
+
+function estimateJsonTokens(value: unknown): number {
+  if (value === undefined) {
+    return 0;
+  }
+  try {
+    return estimateTextTokensRough(JSON.stringify(value));
+  } catch {
+    return 0;
+  }
+}
 
 function inferInitialRiskClass(skill: LoadedSkill | SkillDefinition | undefined) {
   if (skill === undefined) {

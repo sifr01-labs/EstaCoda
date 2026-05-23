@@ -46,6 +46,7 @@ export class PromptChromeController {
   #inlinePhase?: string;
   #inlineRender?: (phase: string) => string;
   #inlineActive = false;
+  #inlineLineCount = 0;
 
   constructor(options: PromptChromeControllerOptions) {
     this.#output = options.output;
@@ -121,8 +122,7 @@ export class PromptChromeController {
     if (!this.#enabled) return;
 
     if (this.#inlineActive && this.#inlinePhase !== phase) {
-      this.#output.write(`\x1b[1A\x1b[2K\r`);
-      this.#inlineActive = false;
+      this.#clearInlineActiveLines();
     }
 
     this.#inlinePhase = phase;
@@ -142,8 +142,7 @@ export class PromptChromeController {
   clearInlineSpinner(): void {
     this.#stopInlineAnimation();
     if (this.#inlineActive) {
-      this.#output.write(`\x1b[1A\x1b[2K\r`);
-      this.#inlineActive = false;
+      this.#clearInlineActiveLines();
     }
     this.#inlinePhase = undefined;
     this.#inlineRender = undefined;
@@ -159,7 +158,7 @@ export class PromptChromeController {
   #tickInlineSpinner(): void {
     if (this.#inlinePhase === undefined || this.#inlineRender === undefined) return;
     if (this.#inlineActive) {
-      this.#output.write(`\x1b[1A\x1b[2K\r`);
+      this.#clearInlineActiveLines();
     }
     this.#writeInlineSpinner();
   }
@@ -167,8 +166,23 @@ export class PromptChromeController {
   #writeInlineSpinner(): void {
     if (this.#inlinePhase === undefined || this.#inlineRender === undefined) return;
     const text = this.#inlineRender(this.#inlinePhase);
-    this.#output.write(`${text}\n`);
+    const lines = this.#boundedLines(text, Math.max(1, this.#capabilities.terminalWidth));
+    if (lines.length === 0) return;
+    this.#output.write(`${lines.join("\n")}\n`);
     this.#inlineActive = true;
+    this.#inlineLineCount = lines.length;
+  }
+
+  #clearInlineActiveLines(): void {
+    const lineCount = Math.max(1, this.#inlineLineCount);
+    let sequence = "";
+    for (let index = 0; index < lineCount; index += 1) {
+      sequence += "\x1b[1A\x1b[2K";
+    }
+    sequence += "\r";
+    this.#output.write(sequence);
+    this.#inlineActive = false;
+    this.#inlineLineCount = 0;
   }
 
   #renderChromeLines(state: PromptChromeState): string[] {

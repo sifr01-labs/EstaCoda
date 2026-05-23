@@ -9,6 +9,7 @@ import type { AgentLoopResponse } from "../runtime/agent-loop.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import { isolateLtr } from "../ui/bidi.js";
+import { stripAnsi } from "../ui/renderers/layout.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { writeCliVoiceMode } from "./voice-mode.js";
 
@@ -787,6 +788,53 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(clearIndex).toBeGreaterThan(-1);
     expect(assistantIndex).toBeGreaterThan(-1);
     expect(clearIndex).toBeLessThan(assistantIndex);
+  });
+
+  it("updates chrome status rail from live context usage events", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+
+    const runtime = {
+      ...createEventEmittingMockRuntime([
+        { kind: "agent-start", sessionId: "test-session", input: "hello" },
+        { kind: "context-usage", filled: 1024, total: 64_000, source: "live-estimate" },
+        { kind: "agent-final", text: "Mock response" },
+      ]),
+      getModelInfo: () => ({
+        kind: "kv" as const,
+        title: "Model",
+        entries: [
+          { key: "provider", value: "mock" },
+          { key: "model", value: "mock-model" },
+          { key: "context window", value: "64000" },
+        ],
+      }),
+    };
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      capabilities: interactiveCaps({ supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("context 1.0k/64.0k");
   });
 
   it("uses deterministic spinner labels in plain/noninteractive mode", async () => {

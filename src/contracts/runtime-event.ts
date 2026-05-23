@@ -69,6 +69,12 @@ export type RuntimeEvent =
       reason: string;
     }
   | {
+      kind: "context-usage";
+      filled: number;
+      total: number;
+      source: "live-estimate" | "assembled-prompt" | "provider-actual";
+    }
+  | {
       kind: "security-risk-escalated";
       from: string;
       to: string;
