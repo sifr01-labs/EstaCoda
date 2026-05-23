@@ -17,6 +17,9 @@ Channels are the surfaces through which users interact with EstaCoda. v0.9 suppo
 | `src/channels/email-adapter.ts` | ~350 | Email-specific adapter (IMAP/SMTP) |
 | `src/channels/whatsapp-adapter.ts` | ~500 | WhatsApp-specific adapter (Baileys) |
 | `src/channels/delivery-router.ts` | ~200 | Normalized delivery path |
+| `src/channels/voice-transcription.ts` | ~280 | Gateway voice attachment transcript injection and STT preprocessing handoff |
+| `src/gateway/voice-state.ts` | ~160 | Profile-local per-chat voice mode and duplicate transcript state |
+| `src/channels/discord-voice-bridge.ts` | ~430 | Optional Discord voice-channel join/listen/speak/leave bridge |
 | `src/channels/channel-session-store.ts` | ~240 | Persisted session mapping |
 | `src/channels/channel-approval-store.ts` | ~180 | Approval persistence per channel |
 | `src/gateway/approval-queue.ts` | ~320 | Durable pending gateway approvals |
@@ -101,6 +104,8 @@ estacoda gateway start
 - Slash commands are deferred to v0.9.1. Prefix-style text commands and tested button interactions work.
 - Live credential smoke is optional/manual.
 
+**Voice channels:** Optional Discord voice-channel support is available only when `channels.discord.voiceChannel.enabled` is true and the optional Discord voice stack is installed in the operator environment. `ChannelGateway`, not the adapter, owns `/voice channel` and `/voice leave` parsing and delegates to adapter capability methods. Missing optional packages, `GuildVoiceStates` intent, or `Connect`/`Speak`/`UseVAD` permissions return setup errors before joining.
+
 **Setup:**
 
 ```bash
@@ -174,6 +179,8 @@ estacoda whatsapp configure --allowed-user 1234567890
 
 `DeliveryRouter` is the normalized delivery path for all channels.
 
+Voice-hinted ephemeral audio artifacts use object/artifact delivery, not arbitrary model-emitted path text. `MEDIA:/path` text remains normal text unless an existing non-auto file-delivery path explicitly handles it with its own path checks. Telegram sends compatible `.ogg`, `.opus`, and `audio/ogg` artifacts as voice bubbles; voice-hinted incompatible audio converts through ffmpeg when available and otherwise falls back to normal audio delivery.
+
 **Targets:**
 
 | Target | Syntax | Example |
@@ -238,6 +245,8 @@ Gateway processes are bound to the profile selected at gateway start time. Chang
 - gateway process registry entries are profile-tagged
 
 Gateway turns rebuild runtimes from fresh selected-profile config snapshots. This helps MCP reload semantics, but the supervisor remains bound to the profile chosen at start.
+
+Gateway voice state is also bound to the selected profile. Per-chat voice modes live under `gateway/voice-mode.json`; voice STT preprocess audit events live under `gateway/logs/voice-stt-preprocess.jsonl`; profile temp audio is used for auto-TTS, Telegram conversion, CLI recordings, and Discord voice receive files. See [Voice](./voice.md) and [Voice Operations](../operations/voice.md).
 
 ## Gateway Service Management
 

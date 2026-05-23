@@ -61,6 +61,22 @@ Telegram:
 |----------|---------|
 | `ESTACODA_TELEGRAM_BOT_TOKEN` | Telegram bot token |
 
+Voice:
+
+| Variable | Purpose |
+|----------|---------|
+| `VOICE_TOOLS_OPENAI_KEY` | Default OpenAI audio key for TTS/STT. |
+| `OPENAI_API_KEY` | OpenAI audio fallback only when the configured OpenAI audio env is the default `VOICE_TOOLS_OPENAI_KEY`. |
+| `ELEVENLABS_API_KEY` | ElevenLabs TTS. |
+| `MINIMAX_API_KEY` | MiniMax TTS. |
+| `GEMINI_API_KEY` | Gemini TTS. |
+| `XAI_API_KEY` | xAI native TTS/STT. |
+| `GROQ_API_KEY` | Groq STT. |
+| `HF_HOME` | Optional faster-whisper/Hugging Face model cache root when `hfHome` is not configured. |
+| `TRANSFORMERS_CACHE` | Optional Hugging Face cache env respected by the worker environment. |
+
+Voice credentials are direct environment-variable references only. There are no voice credential pools, gateway brokers, managed fallbacks, `useGateway`, or non-env credential sources.
+
 Rules:
 - Do not hardcode secrets in repo files.
 - Do not commit real keys.
@@ -105,6 +121,8 @@ Profile root: `~/.estacoda/profiles/<id>/`
 | `audio-cache/` | Profile audio cache |
 | `image-cache/` | Profile image cache |
 | `temp/` | Profile temporary files |
+
+Voice uses profile-local `temp/audio/` for CLI recordings, auto-TTS temp files, Telegram conversion temps, and Discord voice receive audio. Gateway voice state and STT preprocess audit logs live under the selected profile `gateway/` directory.
 
 **Project-local overlays:**
 

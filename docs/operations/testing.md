@@ -137,6 +137,7 @@ Run with `pnpm run eval:fixtures` or `pnpm run dev -- eval <fixture-id>`.
 - Real browser automation (mock backend)
 - Real MCP server execution (mocked)
 - Real voice/image generation (mocked responses)
+- Real Discord voice-channel sessions, optional Discord voice packages, real microphone input, live voice providers, and live faster-whisper model downloads. Voice unit tests mock these surfaces unless explicitly run as operator integration tests.
 
 ### Smoke Limitations
 
@@ -166,6 +167,32 @@ These are runtime inspection and validation tools, not a replacement for unit te
 2. Run `pnpm run test`, `pnpm run smoke`, and `pnpm run smoke:dist` before declaring success.
 3. For live behavior, run the internal alpha harness.
 4. Capture failures with screenshots, logs, and reproduction steps.
+
+## Voice Validation
+
+Targeted voice checks:
+
+```bash
+pnpm exec vitest run src/tools/voice-tools.test.ts src/tools/tts-providers.test.ts src/tools/stt-providers.test.ts
+pnpm exec vitest run src/channels/voice-transcription.test.ts src/channels/channel-gateway.test.ts src/gateway/voice-state.test.ts
+pnpm exec vitest run src/channels/telegram-adapter.test.ts src/channels/discord-adapter.test.ts src/channels/discord-voice-bridge.test.ts
+pnpm exec vitest run src/cli/voice-mode.test.ts src/cli/session-loop.test.ts
+```
+
+For full voice-adjacent validation, also run:
+
+```bash
+pnpm run typecheck
+pnpm run test
+pnpm run smoke
+pnpm run build
+pnpm run audit:runtime-imports
+pnpm run audit:esm
+pnpm run smoke:dist
+git diff --check
+```
+
+Provider, Discord voice, and faster-whisper tests use mocks where optional packages or live services are absent. Live Discord voice, real provider calls, microphone capture, and first-run model downloads are operator integration tests, not base CI requirements.
 
 ## Future Testing
 

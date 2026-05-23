@@ -52,12 +52,20 @@ Every channel object supports:
       "allowedGuilds": ["123456789"],
       "allowedChannels": ["123456789"],
       "freeResponseChannels": ["123456789"],
+      "voiceChannel": {
+        "enabled": false,
+        "autoJoinOnCommand": true
+      },
       "busyPolicy": "reject",
       "queueDepth": 3
     }
   }
 }
 ```
+
+`channels.discord.voiceChannel.enabled` defaults to `false`. When enabled, EstaCoda requests `GatewayIntentBits.GuildVoiceStates` and `/voice channel` can delegate to Discord voice capability methods. `autoJoinOnCommand` defaults to `true`. The bot must have `Connect`, `Speak`, and `UseVAD` permissions before joining; missing optional voice dependencies or permissions return structured setup errors.
+
+See [Voice Operations](./voice.md) for optional package and troubleshooting details.
 
 ## Email
 

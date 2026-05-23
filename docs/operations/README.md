@@ -9,6 +9,7 @@ description: "How to set up, test, maintain, and hand off work on EstaCoda."
 |-----|---------|
 | [Testing](./testing.md) | Smoke tests, eval fixtures, and verification commands |
 | [Environment](./environment.md) | Development environment setup |
+| [Voice Operations](./voice.md) | Voice provider setup, gateway commands, local STT, Discord voice, troubleshooting |
 | [Known Issues](./known-issues.md) | Blunt accounting of current limitations |
 | [Maintenance](./maintenance.md) | Documentation governance rules |
 | [Memory Operator Readiness](./memory-operator-readiness.md) | Operator guide for Memory Hardening phases 0-10 |

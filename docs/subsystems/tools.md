@@ -43,6 +43,19 @@ Tools are functions that extend the agent's capabilities. They are organized int
 | `skill.*` | `safe` | `smoke-tested` |
 | `cronjob` | `caution` | `smoke-tested` |
 
+## Voice Tools
+
+`voice.speak` and `voice.transcribe` use boolean-only tool availability. Human-readable readiness reasons are exposed through exported helpers and CLI/status surfaces, not through `RegisteredTool.isAvailable()`.
+
+Implemented voice providers and security boundaries are documented in [Voice](./voice.md). In short:
+
+- Hosted TTS: OpenAI, ElevenLabs, MiniMax, Gemini, and xAI.
+- Hosted STT: OpenAI, Groq, and xAI.
+- Local STT: command and faster-whisper.
+- Deferred: local TTS providers and Mistral TTS/STT.
+
+Voice credentials are direct environment-variable lookups only. Tool errors use stable provider/reason metadata and bounded sanitized snippets.
+
 ## Tool Execution
 
 1. Provider requests tool call

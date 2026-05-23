@@ -197,6 +197,8 @@ Security-relevant cases include:
 
 Gateway access must deny by default unless a platform is explicitly configured for open access.
 
+Voice-specific gateway handling must preserve the deterministic STT preprocess gate: profile-local allowed roots, audio type/size validation, provider readiness checks, and faster-whisper download denial before worker startup. Auto-TTS must remain object/artifact based and must not treat arbitrary `MEDIA:/path` model text as a voice-delivery instruction. Voice credentials are direct env-var references only; do not add credential pools, gateway brokers, managed fallbacks, `useGateway`, or non-env credential sources for voice.
+
 ### Secrets and credentials
 
 Secrets must not be committed, logged, displayed, or persisted into memory.

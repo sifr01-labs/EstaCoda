@@ -176,6 +176,26 @@ See [Handoff Preflight Report](../security/handoff-preflight-report-v0.9.md) for
 - **No automatic context merge:** attaching a Telegram surface to a CLI session does not merge histories or messages. It only means future Telegram messages go to that session.
 - Detaching creates a new independent session for that surface.
 
+### Voice Security Boundaries
+
+Voice input is a remote-control surface when it arrives through a gateway. Gateway STT preprocessing runs before provider dispatch, worker startup, ffmpeg normalization, hosted STT, downloads, or temp writes. It canonicalizes `attachment.localPath ?? attachment.path` under profile-local allowed media/audio roots, validates file type and size, checks STT readiness, and denies gateway-triggered faster-whisper first-run downloads unless explicitly allowed.
+
+Voice STT preprocess audit events are emitted through `gateway:stt:preprocess` and written to `~/.estacoda/profiles/<profile-id>/gateway/logs/voice-stt-preprocess.jsonl`. Deny/fail warnings use `[voice-stt-preprocess]`. Audit records use path hashes and safe attachment metadata instead of full private paths.
+
+Voice credentials are direct environment variables only. The OpenAI audio resolver uses configured `apiKeyEnv`, then `VOICE_TOOLS_OPENAI_KEY`, then `OPENAI_API_KEY` only for the default voice env case. There are no voice credential pools, gateway brokers, managed fallbacks, `useGateway`, or non-env credential sources.
+
+Auto-TTS is text-first and fail-open. Generated auto-TTS media is ephemeral, profile-temp scoped, and not inserted into durable artifact storage, session DB, artifact history, prompt context, or model-visible attachment lists. Arbitrary `MEDIA:/path` response text is not an auto-TTS signal.
+
+Local STT risk classes are:
+
+| Path | Risk |
+|------|------|
+| command without ffmpeg normalization | `read-only-local` |
+| command with ffmpeg normalization | `workspace-write` |
+| cached faster-whisper | `workspace-write` |
+| first-run faster-whisper download allowed | `external-side-effect` |
+| uncached faster-whisper download disallowed | `unavailable` |
+
 ## Security Audit
 
 Interactive CLI sessions expose `/security` and `/security debug` for inspecting recent decisions, target keys, deterministic rule hits, and assessor status.

@@ -16,8 +16,8 @@ This directory is the **source of truth** for the EstaCoda codebase as it exists
 | Section | Purpose |
 |---------|---------|
 | [Architecture](./architecture/) | System structure, runtime composition, data flow, evolution, and risk register. |
-| [Subsystems](./subsystems/) | Per-subsystem deep dives: skills, memory, security, providers, channels, tools, CLI, traces, evals, cron, browser, MCP, ACP. |
-| [Operations](./operations/) | How to set up, test, run smoke, perform maintenance, agent handoff, and validate releases. |
+| [Subsystems](./subsystems/) | Per-subsystem deep dives: skills, memory, security, providers, channels, voice, tools, CLI, traces, evals, cron, browser, MCP, ACP. |
+| [Operations](./operations/) | How to set up, test, run smoke, operate voice, perform maintenance, agent handoff, and validate releases. |
 | [Memory Operator Readiness](./operations/memory-operator-readiness.md) | Operational guide for Memory Hardening phases 0-10. |
 | [ADR](./adr/) | Architectural Decision Records for durable cross-subsystem decisions. |
 | [Planning](./planning/) | Governance note: planning docs are private workspace artifacts. |

@@ -17,6 +17,7 @@ description: "Per-subsystem deep dives for the EstaCoda agent runtime."
 | [Security](./security.md) | Capability-first security, approval modes, hard floor |
 | [Providers](./providers.md) | Provider registry, executor, adapters, model catalog |
 | [Channels](./channels.md) | Telegram gateway, session mapping, approvals |
+| [Voice](./voice.md) | TTS/STT providers, gateway voice policy, CLI voice mode, Discord voice-channel support |
 | [Cron](./cron.md) | Scheduled tasks, tick locking, persistence |
 | [Browser](./browser.md) | Chrome DevTools Protocol automation |
 | [MCP](./mcp.md) | MCP client for stdio and HTTP servers |
