@@ -46,7 +46,7 @@ describe("interactive-select onboarding surface", () => {
 
     await expect(pending).resolves.toBe("skip");
     const rendered = stripAnsi(output.getText());
-    expect(rendered).toContain("𓂀 Workspace trust");
+    expect(rendered).toContain("𓂀  Workspace trust");
     expect(rendered).toContain("▸ Not now");
     expect(rendered).not.toContain("Assistant");
   });
@@ -89,7 +89,7 @@ describe("interactive-select onboarding surface", () => {
 
     await expect(pending).resolves.toBe("trust");
     const rendered = stripAnsi(output.getText());
-    expect(rendered).toContain("+---- * Workspace trust");
+    expect(rendered).toContain("+---- *  Workspace trust");
     expect(rendered).toContain("> Trust workspace");
     expect(rendered).not.toContain("𓂀");
     expect(rendered).not.toContain("▸");

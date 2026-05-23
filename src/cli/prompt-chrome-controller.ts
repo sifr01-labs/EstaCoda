@@ -30,8 +30,8 @@ export interface PromptChromeControllerOptions {
  * Controller for drawing a bounded status row above the prompt line
  * and clearing it before transcript output so it never enters scrollback.
  *
- * This is a feasibility prototype (Pass 7A). It assumes the prompt
- * fits on one line; wrapped prompts may leave the status line uncleared.
+ * When clearing after input submission, callers can pass the physical
+ * prompt row count so wrapped readline prompts do not leave stale rails.
  */
 export class PromptChromeController {
   readonly #output: NodeJS.WritableStream;
@@ -46,6 +46,7 @@ export class PromptChromeController {
   #inlinePhase?: string;
   #inlineRender?: (phase: string) => string;
   #inlineActive = false;
+  #inlineLineCount = 0;
 
   constructor(options: PromptChromeControllerOptions) {
     this.#output = options.output;
@@ -74,21 +75,21 @@ export class PromptChromeController {
   }
 
   /** Clear previously drawn rail lines using cursor-control sequences. */
-  clearChrome(): void {
+  clearChrome(promptLineCount = 1): void {
     if (!this.#enabled || !this.#active) return;
-    // From the line below the submitted prompt, move up across the prompt line
+    // From the line below the submitted prompt, move up across the prompt rows
     // plus all rail lines, clear only rail lines, then return to the original
-    // cursor position. The prompt line belongs to readline until a future input
-    // rewrite owns it fully.
+    // cursor position. The prompt rows belong to readline.
     const railLines = Math.max(1, this.#activeLineCount);
-    let sequence = `\x1b[${railLines + 1}A`;
+    const promptRows = Math.max(1, Math.ceil(promptLineCount));
+    let sequence = `\x1b[${railLines + promptRows}A`;
     for (let index = 0; index < railLines; index += 1) {
       sequence += "\x1b[2K";
       if (index < railLines - 1) {
         sequence += "\x1b[1B";
       }
     }
-    sequence += "\x1b[2B";
+    sequence += `\x1b[${promptRows + 1}B`;
     this.#output.write(sequence);
     this.#active = false;
     this.#activeLineCount = 0;
@@ -121,8 +122,7 @@ export class PromptChromeController {
     if (!this.#enabled) return;
 
     if (this.#inlineActive && this.#inlinePhase !== phase) {
-      this.#output.write(`\x1b[1A\x1b[2K\r`);
-      this.#inlineActive = false;
+      this.#clearInlineActiveLines();
     }
 
     this.#inlinePhase = phase;
@@ -142,8 +142,7 @@ export class PromptChromeController {
   clearInlineSpinner(): void {
     this.#stopInlineAnimation();
     if (this.#inlineActive) {
-      this.#output.write(`\x1b[1A\x1b[2K\r`);
-      this.#inlineActive = false;
+      this.#clearInlineActiveLines();
     }
     this.#inlinePhase = undefined;
     this.#inlineRender = undefined;
@@ -159,7 +158,7 @@ export class PromptChromeController {
   #tickInlineSpinner(): void {
     if (this.#inlinePhase === undefined || this.#inlineRender === undefined) return;
     if (this.#inlineActive) {
-      this.#output.write(`\x1b[1A\x1b[2K\r`);
+      this.#clearInlineActiveLines();
     }
     this.#writeInlineSpinner();
   }
@@ -167,8 +166,23 @@ export class PromptChromeController {
   #writeInlineSpinner(): void {
     if (this.#inlinePhase === undefined || this.#inlineRender === undefined) return;
     const text = this.#inlineRender(this.#inlinePhase);
-    this.#output.write(`${text}\n`);
+    const lines = this.#boundedLines(text, Math.max(1, this.#capabilities.terminalWidth));
+    if (lines.length === 0) return;
+    this.#output.write(`${lines.join("\n")}\n`);
     this.#inlineActive = true;
+    this.#inlineLineCount = lines.length;
+  }
+
+  #clearInlineActiveLines(): void {
+    const lineCount = Math.max(1, this.#inlineLineCount);
+    let sequence = "";
+    for (let index = 0; index < lineCount; index += 1) {
+      sequence += "\x1b[1A\x1b[2K";
+    }
+    sequence += "\r";
+    this.#output.write(sequence);
+    this.#inlineActive = false;
+    this.#inlineLineCount = 0;
   }
 
   #renderChromeLines(state: PromptChromeState): string[] {

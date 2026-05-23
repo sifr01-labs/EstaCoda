@@ -1,4 +1,5 @@
 import type { FileChangePreviewViewModel } from "./view-model.js";
+import type { SessionCompressionTrigger } from "./session.js";
 
 export type RuntimeEvent =
   | {
@@ -67,6 +68,20 @@ export type RuntimeEvent =
       limit: number;
       observed: number;
       reason: string;
+    }
+  | {
+      kind: "context-usage";
+      filled: number;
+      total: number;
+      source: "live-estimate" | "assembled-prompt" | "provider-actual";
+    }
+  | {
+      kind: "session-compacted";
+      originalSessionId: string;
+      activeSessionId: string;
+      rotated: boolean;
+      trigger: SessionCompressionTrigger;
+      postTokens: number;
     }
   | {
       kind: "security-risk-escalated";

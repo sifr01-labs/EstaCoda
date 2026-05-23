@@ -8,7 +8,9 @@ import type { Runtime } from "../runtime/create-runtime.js";
 import type { AgentLoopResponse } from "../runtime/agent-loop.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
+import type { CompactResult } from "../prompt/session-compression-service.js";
 import { isolateLtr } from "../ui/bidi.js";
+import { stripAnsi } from "../ui/renderers/layout.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { writeCliVoiceMode } from "./voice-mode.js";
 
@@ -665,6 +667,82 @@ function createEventEmittingMockRuntime(events: RuntimeEvent[]): Runtime {
   };
 }
 
+function mockResponse(): AgentLoopResponse {
+  return {
+    label: "EstaCoda",
+    text: "Mock response",
+    matchedSkills: [],
+    intent: {
+      nativeIntent: "general",
+      labels: ["chat"],
+      confidence: 1,
+      suggestedToolsets: [],
+      suggestedSkills: [],
+      evidence: [{ kind: "native-intent" as const, detail: "mock" }],
+      confirmationRequired: false,
+      rationale: "mock",
+    },
+    securityDecision: "allow",
+    toolExecutions: [],
+    toolPlans: [],
+    skillOutcomes: [],
+    artifacts: [],
+    context: undefined,
+    projectContext: undefined,
+    progress: [],
+  };
+}
+
+function withModelInfo<T extends Runtime>(runtime: T): T {
+  return {
+    ...runtime,
+    getModelInfo: () => ({
+      kind: "kv" as const,
+      title: "Model",
+      entries: [
+        { key: "provider", value: "mock" },
+        { key: "model", value: "gpt-5.5" },
+        { key: "context window", value: "128000" },
+      ],
+    }),
+  };
+}
+
+function compactResult(didCompress: boolean, postTokens: number): CompactResult {
+  return {
+    didCompress,
+    originalSessionId: "test-session",
+    activeSessionId: "test-session",
+    rotated: false,
+    messages: [],
+    diagnostics: {
+      shouldCompress: didCompress,
+      reason: didCompress ? "compressed" : "nothing-to-compress",
+      preTokens: 32_000,
+      postTokens,
+      estimatedSavingsTokens: Math.max(0, 32_000 - postTokens),
+      estimatedSavingsRatio: didCompress ? 0.5 : 0,
+      sourceMessageCount: 4,
+      summarizedMessageCount: didCompress ? 2 : 0,
+      protectedMessageCount: 0,
+      protectedFirstN: 0,
+      protectedLastN: 0,
+      protectedSpans: [],
+      protectedCategories: [],
+      summaryFormatVersion: "test",
+      summaryChars: 0,
+      fallbackUsed: false,
+      warnings: [],
+      prunedToolResults: 0,
+      prunedToolResultChars: 0,
+      protectedToolResultsKept: 0,
+      scopeKey: "test",
+      ineffectiveCompressionCount: 0,
+      eventWarnings: [],
+    },
+  };
+}
+
 describe("runSessionLoop — active turn spinner", () => {
   it("renders active turn spinner phases in standard interactive mode", async () => {
     const outputChunks: string[] = [];
@@ -787,6 +865,580 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(clearIndex).toBeGreaterThan(-1);
     expect(assistantIndex).toBeGreaterThan(-1);
     expect(clearIndex).toBeLessThan(assistantIndex);
+  });
+
+  it("clears the readline echo before rendering the submitted user prompt rail", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+
+    const runtime = createEventEmittingMockRuntime([
+      { kind: "agent-start", sessionId: "test-session", input: "hello" },
+      { kind: "agent-final", text: "Mock response" },
+    ]);
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      capabilities: interactiveCaps(),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    const userRailIndex = rendered.indexOf("▸ hello");
+    const echoClearIndex = rendered.lastIndexOf("\x1b[1A\x1b[2K\r", userRailIndex);
+    expect(echoClearIndex).toBeGreaterThan(-1);
+    expect(echoClearIndex).toBeLessThan(userRailIndex);
+  });
+
+  it("clears every wrapped readline echo row before the submitted user prompt rail", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 20,
+    } as unknown as NodeJS.WritableStream;
+    const longText = "this is a deliberately long prompt";
+    const runtime = createEventEmittingMockRuntime([
+      { kind: "agent-start", sessionId: "test-session", input: longText },
+      { kind: "agent-final", text: "Mock response" },
+    ]);
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      capabilities: interactiveCaps({ terminalWidth: 20, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = [longText, "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    const userRailIndex = rendered.indexOf("▸ this is a delib...");
+    const chromeClearIndex = rendered.lastIndexOf("\x1b[3A\x1b[2K\x1b[3B", userRailIndex);
+    const echoClearIndex = rendered.lastIndexOf("\x1b[1A\x1b[2K\x1b[1A\x1b[2K\r", userRailIndex);
+    expect(chromeClearIndex).toBeGreaterThan(-1);
+    expect(chromeClearIndex).toBeLessThan(echoClearIndex);
+    expect(echoClearIndex).toBeGreaterThan(-1);
+    expect(echoClearIndex).toBeLessThan(userRailIndex);
+  });
+
+  it("uses the raw echoed readline text when clearing trailing-space wraps", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 20,
+    } as unknown as NodeJS.WritableStream;
+    const rawText = "x".padEnd(35, " ");
+    const runtime = createEventEmittingMockRuntime([
+      { kind: "agent-start", sessionId: "test-session", input: "x" },
+      { kind: "agent-final", text: "Mock response" },
+    ]);
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      capabilities: interactiveCaps({ terminalWidth: 20, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = [rawText, "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = outputChunks.join("");
+    const userRailIndex = rendered.indexOf("▸ x");
+    const echoClearIndex = rendered.lastIndexOf("\x1b[1A\x1b[2K\x1b[1A\x1b[2K\r", userRailIndex);
+    expect(echoClearIndex).toBeGreaterThan(-1);
+    expect(echoClearIndex).toBeLessThan(userRailIndex);
+  });
+
+  it("updates chrome status rail from live context usage events", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+
+    const runtime = {
+      ...createEventEmittingMockRuntime([
+        { kind: "agent-start", sessionId: "test-session", input: "hello" },
+        { kind: "context-usage", filled: 1024, total: 64_000, source: "live-estimate" },
+        { kind: "agent-final", text: "Mock response" },
+      ]),
+      getModelInfo: () => ({
+        kind: "kv" as const,
+        title: "Model",
+        entries: [
+          { key: "provider", value: "mock" },
+          { key: "model", value: "mock-model" },
+          { key: "context window", value: "64000" },
+        ],
+      }),
+    };
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      capabilities: interactiveCaps({ supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("context 1.0k/64.0k");
+  });
+
+  it("renders fresh session timing with idle state and no turn timer", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+
+    const runtime = withModelInfo(createMockRuntime());
+    let promptIndex = 0;
+    let nowCalls = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      now: () => nowCalls++ === 0 ? 0 : 10_000,
+      capabilities: interactiveCaps({ supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    const idleRail = rendered.split("\n").find((line) => line.includes("◷ 10s") && line.includes("idle"));
+    expect(idleRail).toBeDefined();
+    expect(idleRail).not.toContain("⧖");
+  });
+
+  it("renders live session and turn timing while the agent is working", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+    let nowMs = 0;
+    const runtime = withModelInfo({
+      ...createMockRuntime(),
+      handle: async ({ onEvent }: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
+        nowMs = 252_000;
+        onEvent?.({ kind: "context-usage", filled: 32_700, total: 128_000, source: "live-estimate" });
+        onEvent?.({ kind: "agent-final", text: "Mock response" });
+        return mockResponse();
+      },
+    });
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      now: () => nowMs,
+      capabilities: interactiveCaps({ supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          if (promptIndex === 0) {
+            nowMs = 234_000;
+          }
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    const activeRail = rendered.split("\n").find((line) => line.includes("◷ 4m 12s") && line.includes("⧖ 18s"));
+    expect(activeRail).toBeDefined();
+    expect(activeRail).not.toContain("running");
+  });
+
+  it("keeps showing the completed turn duration while waiting for the next user input", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+    let nowMs = 0;
+    const runtime = withModelInfo({
+      ...createMockRuntime(),
+      handle: async ({ onEvent }: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
+        nowMs = 312_000;
+        onEvent?.({ kind: "agent-final", text: "Mock response" });
+        return mockResponse();
+      },
+    });
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      now: () => nowMs,
+      capabilities: interactiveCaps({ supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    const completedRail = rendered.split("\n").find((line) => line.includes("⧖ 5m 12s"));
+    expect(completedRail).toBeDefined();
+    expect(completedRail).not.toContain("idle");
+  });
+
+  it("clears the completed turn timer after /reset swaps to a fresh runtime", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+    let nowMs = 0;
+    const runtime = withModelInfo({
+      ...createMockRuntime(),
+      handle: async ({ onEvent }: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
+        nowMs = 312_000;
+        onEvent?.({ kind: "agent-final", text: "Mock response" });
+        return mockResponse();
+      },
+    });
+    const refreshedRuntime = withModelInfo({
+      ...createMockRuntime(),
+      sessionId: "fresh-session",
+    });
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      refreshRuntime: async () => refreshedRuntime,
+      now: () => nowMs,
+      capabilities: interactiveCaps({ supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/reset", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("⧖ 5m 12s");
+    const afterReset = rendered.slice(rendered.indexOf("Started fresh session fresh-session."));
+    const resetRail = afterReset.split("\n").find((line) => line.includes("idle"));
+    expect(resetRail).toBeDefined();
+    expect(resetRail).not.toContain("⧖");
+  });
+
+  it("clears the completed turn timer after /switch swaps to another session", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+    let nowMs = 0;
+    const runtime = withModelInfo({
+      ...createMockRuntime(),
+      handle: async ({ onEvent }: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
+        nowMs = 312_000;
+        onEvent?.({ kind: "agent-final", text: "Mock response" });
+        return mockResponse();
+      },
+    });
+    await runtime.sessionDb.createSession({ id: "target-session", profileId: "default" });
+    const switchedRuntime = withModelInfo({
+      ...createMockRuntime(),
+      sessionDb: runtime.sessionDb,
+      sessionId: "target-session",
+    });
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      switchRuntime: async () => switchedRuntime,
+      now: () => nowMs,
+      capabilities: interactiveCaps({ supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/switch target-session", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("⧖ 5m 12s");
+    const afterSwitch = rendered.slice(rendered.indexOf("Switched this session to an existing session."));
+    const switchRail = afterSwitch.split("\n").find((line) => line.includes("idle"));
+    expect(switchRail).toBeDefined();
+    expect(switchRail).not.toContain("⧖");
+  });
+
+  it("resets the completed turn timer after successful manual compaction", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+    let nowMs = 0;
+    const runtime = withModelInfo({
+      ...createMockRuntime(),
+      handle: async ({ onEvent }: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
+        nowMs = 312_000;
+        onEvent?.({ kind: "agent-final", text: "Mock response" });
+        return mockResponse();
+      },
+      compactSession: async () => compactResult(true, 5_000),
+    });
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      now: () => nowMs,
+      capabilities: interactiveCaps({ supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/compact", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    const resetRail = rendered.split("\n").find((line) => line.includes("context 5.0k/128k") && line.includes("idle"));
+    expect(resetRail).toBeDefined();
+    expect(resetRail).not.toContain("⧖");
+  });
+
+  it("reuses the last known context total when compaction resets without model context window", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+    let nowMs = 0;
+    const runtime = {
+      ...createMockRuntime(),
+      getModelInfo: () => ({
+        kind: "kv" as const,
+        title: "Model",
+        entries: [
+          { key: "provider", value: "mock" },
+          { key: "model", value: "gpt-5.5" },
+        ],
+      }),
+      handle: async ({ onEvent }: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
+        nowMs = 312_000;
+        onEvent?.({ kind: "context-usage", filled: 90_000, total: 128_000, source: "live-estimate" });
+        onEvent?.({ kind: "agent-final", text: "Mock response" });
+        return mockResponse();
+      },
+      compactSession: async () => compactResult(true, 5_000),
+    };
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      now: () => nowMs,
+      capabilities: interactiveCaps({ supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/compact", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    const resetRail = rendered.split("\n").find((line) => line.includes("context 5.0k/128k") && line.includes("idle"));
+    expect(resetRail).toBeDefined();
+  });
+
+  it("resets the completed turn timer after an automatic compaction event", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+    let nowMs = 0;
+    const runtime = withModelInfo({
+      ...createMockRuntime(),
+      handle: async ({ onEvent }: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
+        nowMs = 312_000;
+        onEvent?.({
+          kind: "session-compacted",
+          originalSessionId: "test-session",
+          activeSessionId: "test-session",
+          rotated: false,
+          trigger: "auto",
+          postTokens: 5_000,
+        });
+        onEvent?.({ kind: "agent-final", text: "Mock response" });
+        return mockResponse();
+      },
+    });
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      now: () => nowMs,
+      capabilities: interactiveCaps({ supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    const resetRail = rendered.split("\n").find((line) => line.includes("context 5.0k/128k") && line.includes("idle"));
+    expect(resetRail).toBeDefined();
+    expect(resetRail).not.toContain("⧖");
+  });
+
+  it("keeps the completed turn timer when manual compaction is skipped", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+    let nowMs = 0;
+    const runtime = withModelInfo({
+      ...createMockRuntime(),
+      handle: async ({ onEvent }: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
+        nowMs = 312_000;
+        onEvent?.({ kind: "agent-final", text: "Mock response" });
+        return mockResponse();
+      },
+      compactSession: async () => compactResult(false, 5_000),
+    });
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      now: () => nowMs,
+      capabilities: interactiveCaps({ supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/compact", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    const completedRail = rendered.split("\n").find((line) => line.includes("⧖ 5m 12s"));
+    expect(completedRail).toBeDefined();
+    expect(completedRail).not.toContain("idle");
   });
 
   it("uses deterministic spinner labels in plain/noninteractive mode", async () => {

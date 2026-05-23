@@ -505,6 +505,7 @@ describe("ViewModel builders", () => {
     const vm = buildSessionStatusRailViewModel({
       modelLabel: "deepseek-reasoner",
       turnState: "running",
+      showTurnState: false,
       sessionElapsedMs: 3600000,
       currentTurnSeconds: 24,
       contextUsage: { filled: 3, total: 8 },
@@ -513,6 +514,7 @@ describe("ViewModel builders", () => {
     expect(vm.kind).toBe("sessionStatusRail");
     expect(vm.modelLabel).toBe("deepseek-reasoner");
     expect(vm.turnState).toBe("running");
+    expect(vm.showTurnState).toBe(false);
     expect(vm.sessionElapsedMs).toBe(3600000);
     expect(vm.currentTurnSeconds).toBe(24);
     expect(vm.contextUsage).toEqual({ filled: 3, total: 8 });

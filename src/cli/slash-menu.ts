@@ -37,6 +37,7 @@ const implementedSlashCommands = new Set([
   "revoke",
   "sessions",
   "search",
+  "compact",
   "switch",
   "trust",
   "untrust",

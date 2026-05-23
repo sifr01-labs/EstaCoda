@@ -16,6 +16,8 @@ import type {
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolsetName, ToolRiskClass } from "../contracts/tool.js";
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
+import type { Trajectory } from "../contracts/trajectory.js";
+import type { TrajectoryStore } from "../contracts/trajectory-store.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { createSkillRouteTelemetry, hashSkillRoutePrompt } from "../skills/skill-usage-telemetry.js";
@@ -31,6 +33,7 @@ export type RunRecorderOptions = {
   sessionId: string;
   sessionRuntimeContext?: SessionRuntimeContext;
   trajectoryRecorder: TrajectoryRecorder;
+  trajectoryStore?: Pick<TrajectoryStore, "saveTrajectory">;
   profileId: string;
   skillEvolutionStore?: SkillEvolutionStore;
   memoryProvider?: MemoryProvider;
@@ -41,6 +44,7 @@ export class RunRecorder {
   readonly #sessionId: string;
   readonly #sessionRuntimeContext: SessionRuntimeContext | undefined;
   readonly #trajectoryRecorder: TrajectoryRecorder;
+  readonly #trajectoryStore: Pick<TrajectoryStore, "saveTrajectory"> | undefined;
   readonly #profileId: string;
   readonly #skillEvolutionStore: SkillEvolutionStore | undefined;
   readonly #memoryProvider: MemoryProvider | undefined;
@@ -50,6 +54,7 @@ export class RunRecorder {
     this.#sessionId = options.sessionId;
     this.#sessionRuntimeContext = options.sessionRuntimeContext;
     this.#trajectoryRecorder = options.trajectoryRecorder;
+    this.#trajectoryStore = options.trajectoryStore;
     this.#profileId = options.profileId;
     this.#skillEvolutionStore = options.skillEvolutionStore;
     this.#memoryProvider = options.memoryProvider;
@@ -566,6 +571,8 @@ export class RunRecorder {
       return;
     }
 
+    await this.persistTrajectory();
+
     const record = buildFailureRecord(context, {
       sessionId: this.#currentSessionId(),
       trajectoryId: this.#trajectoryRecorder.trajectoryId,
@@ -573,6 +580,28 @@ export class RunRecorder {
     });
 
     await this.#sessionDb.saveFailure(record);
+  }
+
+  async persistTrajectory(): Promise<void> {
+    await this.#trajectoryStore?.saveTrajectory(this.#trajectoryRecorder.snapshot());
+  }
+
+  async completeTrajectory(
+    outcome: Trajectory["outcome"],
+    options: { bestEffort?: boolean } = {}
+  ): Promise<void> {
+    const trajectory = this.#trajectoryRecorder.complete(outcome);
+
+    if (options.bestEffort === true) {
+      try {
+        await this.#trajectoryStore?.saveTrajectory(trajectory);
+      } catch {
+        // Final trace persistence must not fail an already-completed user turn.
+      }
+      return;
+    }
+
+    await this.#trajectoryStore?.saveTrajectory(trajectory);
   }
 
   async recordUserCorrection(input: {

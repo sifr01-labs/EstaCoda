@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { normalizeSessionCompressionConfig } from "../config/runtime-config.js";
 import type { ModelProfile, ResolvedModelRoute, ProviderRequest, ProviderResponse } from "../contracts/provider.js";
+import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { ReplacementSessionMessage, SessionDB, SessionEvent } from "../contracts/session.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
@@ -225,7 +226,10 @@ async function appendHistory(db: InMemorySessionDB, sessionId: string, content: 
   });
 }
 
-async function runBasicProviderTurn(loop: ProviderTurnLoop): Promise<Awaited<ReturnType<ProviderTurnLoop["run"]>>> {
+async function runBasicProviderTurn(
+  loop: ProviderTurnLoop,
+  onEvent?: (event: RuntimeEvent) => void
+): Promise<Awaited<ReturnType<ProviderTurnLoop["run"]>>> {
   return await loop.run({
     userText: "current user request",
     routedText: "current user request",
@@ -244,7 +248,8 @@ async function runBasicProviderTurn(loop: ProviderTurnLoop): Promise<Awaited<Ret
     fallbackText: "",
     toolPlans: [],
     trustedWorkspace: false,
-    initialRiskClass: "read-only-local"
+    initialRiskClass: "read-only-local",
+    onEvent
   });
 }
 
@@ -355,6 +360,30 @@ describe("ProviderTurnLoop semantic session compression", () => {
     expect(loop.lastPromptTokens()).toEqual(expect.any(Number));
     expect(loop.lastPromptTokens()).toBeGreaterThan(0);
     expect(loop.lastActualPromptTokens()).toBe(123);
+  });
+
+  it("emits context usage for assembled prompts and provider actual usage", async () => {
+    const harness = await createCompressionHarness();
+    const events: RuntimeEvent[] = [];
+
+    await runBasicProviderTurn(harness.loop(), (event) => events.push(event));
+
+    const usageEvents = events.filter((event): event is Extract<RuntimeEvent, { kind: "context-usage" }> =>
+      event.kind === "context-usage"
+    );
+    expect(usageEvents).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        source: "assembled-prompt",
+        total: mockModel.contextWindowTokens
+      }),
+      {
+        kind: "context-usage",
+        filled: 123,
+        total: mockModel.contextWindowTokens,
+        source: "provider-actual"
+      }
+    ]));
+    expect(usageEvents.find((event) => event.source === "assembled-prompt")?.filled).toBeGreaterThan(0);
   });
 });
 

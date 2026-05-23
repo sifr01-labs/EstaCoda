@@ -742,34 +742,59 @@ describe("runConfigEditor", () => {
     expect(result.reviewManifest).toBeUndefined();
   });
 
-  it("blocks Telegram optional capability apply without allowed remote-control identities", async () => {
+  it("lets incomplete Telegram optional capability setup skip instead of drafting blockers", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
     const before = await readFile(profileConfigPath(tempDir), "utf8");
-    let applyCalled = false;
 
     const result = await runConfigEditor({
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["enable", "TELEGRAM_BOT_TOKEN", "", "", "unchanged", "unchanged", "unchanged", true],
+        values: ["enable", "TELEGRAM_BOT_TOKEN", "", "", "skip", "unchanged", "unchanged", "unchanged", true],
       }),
       defaultActionId: "review-optional-capabilities",
-      applyExecutor: {
-        apply: () => {
-          applyCalled = true;
-          return { ok: true, appliedOperationIds: [] };
-        },
-      },
     });
 
-    expect(result.completed).toBe(false);
-    expect(result.reviewManifest?.sections["remote-control-surfaces"]).toHaveLength(1);
-    expect(result.reviewManifest?.sections.blockers[0]?.blockers).toContain("Telegram remote control requires allowed user or chat identities.");
-    expect(result.applyPlanningResult?.kind).toBe("blocked");
-    expect(applyCalled).toBe(false);
+    expect(result.completed).toBe(true);
+    expect(result.reviewManifest?.sections.blockers).toHaveLength(0);
+    expect(result.reviewManifest?.sections["remote-control-surfaces"]).toHaveLength(0);
+    expect(result.applyPlanningResult?.kind).toBe("apply-plan-ready");
     expect(JSON.stringify(result)).not.toContain("123456:");
     await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
+  });
+
+  it("lets incomplete Telegram optional capability setup retry before drafting", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: [
+          "enable",
+          "TELEGRAM_BOT_TOKEN",
+          "",
+          "",
+          "retry",
+          "TELEGRAM_BOT_TOKEN",
+          "42",
+          "",
+          "unchanged",
+          "unchanged",
+          "unchanged",
+          true,
+        ],
+      }),
+      defaultActionId: "review-optional-capabilities",
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.reviewManifest?.sections.blockers).toHaveLength(0);
+    expect(result.reviewManifest?.sections["remote-control-surfaces"]).toHaveLength(1);
+    expect(result.reviewManifest?.sections["remote-control-surfaces"][0]?.review.values.allowedUserIds).toEqual(["42"]);
+    expect(result.applyPlanningResult?.kind).toBe("apply-plan-ready");
   });
 
   it("applies reviewed Telegram optional capability with env ref and allowlisted identities", async () => {

@@ -354,6 +354,16 @@ function formatDuration(ms: number): string {
   return `${(ms / 1000).toFixed(ms >= 10000 ? 0 : 1)}s`;
 }
 
+function formatRailDuration(ms: number): string {
+  if (ms >= 60000) {
+    const totalSeconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
+  }
+  return formatDuration(ms);
+}
+
 function formatCount(value: number): string {
   if (value >= 1000) {
     return `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)}k`;
@@ -842,14 +852,16 @@ export function renderSessionStatusRail(vm: SessionStatusRailViewModel, locale?:
   }
 
   if (vm.sessionElapsedMs !== undefined) {
-    parts.push(`session ${formatDuration(vm.sessionElapsedMs)}`);
+    parts.push(`session ${formatRailDuration(vm.sessionElapsedMs)}`);
   }
 
   if (vm.currentTurnSeconds !== undefined) {
-    parts.push(`turn ${vm.currentTurnSeconds}s`);
+    parts.push(`turn ${formatRailDuration(vm.currentTurnSeconds * 1000)}`);
   }
 
-  parts.push(turnStateLabel(vm.turnState, copy));
+  if (vm.showTurnState !== false) {
+    parts.push(turnStateLabel(vm.turnState, copy));
+  }
   return parts.join(" | ");
 }
 

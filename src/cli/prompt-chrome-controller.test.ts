@@ -155,6 +155,15 @@ describe("PromptChromeController — chrome lifecycle", () => {
     expect(chunks).toEqual(["\x1b[3A\x1b[2K\x1b[1B\x1b[2K\x1b[2B"]);
   });
 
+  it("clearChrome can account for wrapped submitted prompt rows", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.renderChrome({ statusRail: rail("status") });
+    chunks.length = 0;
+    ctrl.clearChrome(3);
+    expect(chunks).toEqual(["\x1b[4A\x1b[2K\x1b[4B"]);
+  });
+
   it("clearChrome is a no-op when not active", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream);
@@ -280,6 +289,16 @@ describe("PromptChromeController — inline spinner", () => {
     ctrl.renderInlineSpinner("routing", (phase) => `* ${phase}`);
     expect(chunks[0]).toBe("\x1b[1A\x1b[2K\r");
     expect(chunks[1]).toBe("* routing\n");
+  });
+
+  it("clears all previous inline lines when the spinner render is multiline", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream, makeCaps({ supportsAnimation: false }));
+    ctrl.renderInlineSpinner("thinking", (phase) => `status\n* ${phase}`);
+    chunks.length = 0;
+    ctrl.renderInlineSpinner("routing", (phase) => `status\n* ${phase}`);
+    expect(chunks[0]).toBe("\x1b[1A\x1b[2K\x1b[1A\x1b[2K\r");
+    expect(chunks[1]).toBe("status\n* routing\n");
   });
 
   it("clearInlineSpinner stops timer and clears line", () => {

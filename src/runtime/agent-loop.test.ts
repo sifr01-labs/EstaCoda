@@ -8,6 +8,7 @@ import type { ModelProfile } from "../contracts/provider.js";
 import type { SecurityPolicy } from "../contracts/security.js";
 import type { SkillDefinition } from "../contracts/skill.js";
 import type { ToolDefinition } from "../contracts/tool.js";
+import type { TrajectoryStore } from "../contracts/trajectory-store.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { SESSION_RECALL_UNTRUSTED_NOTICE, type SessionRecallService } from "../session/session-recall-service.js";
@@ -113,6 +114,7 @@ async function createAgentLoop(input: {
   sessionCompressionService?: Pick<SessionCompressionService, "compactIfNeeded">;
   compressionConfig?: SessionCompressionConfig;
   memoryProvider?: MemoryProvider;
+  trajectoryStore?: Pick<TrajectoryStore, "saveTrajectory">;
 }) {
   const sessionDb = new InMemorySessionDB();
   const sessionId = `agent-loop-test-${Date.now()}-${Math.random()}`;
@@ -148,6 +150,7 @@ async function createAgentLoop(input: {
     sessionId,
     sessionRuntimeContext,
     trajectoryRecorder,
+    trajectoryStore: input.trajectoryStore,
     profileId: "default"
   });
   const memoryRecallOrchestrator = new MemoryRecallOrchestrator({
@@ -219,7 +222,8 @@ async function createAgentLoop(input: {
     executeSkillWorkflow: input.executeSkillWorkflow,
     sessionDb,
     sessionId,
-    sessionRuntimeContext
+    sessionRuntimeContext,
+    trajectoryRecorder
   };
 }
 
@@ -259,6 +263,55 @@ describe("AgentLoop provider availability gating", () => {
     expect(providerTurnLoop.canRunProvider).toHaveBeenCalled();
     expect(executeSkillWorkflow).not.toHaveBeenCalled();
     expect(response.toolExecutions).toHaveLength(0);
+  });
+
+  it("persists the trajectory snapshot when a turn returns successfully", async () => {
+    const saveTrajectory = vi.fn(async () => undefined);
+    const { loop, trajectoryRecorder } = await createAgentLoop({
+      canRunProvider: true,
+      executeSkillWorkflow: vi.fn(async () => []),
+      trajectoryStore: { saveTrajectory }
+    });
+
+    await loop.handle({
+      text: "use the test skill",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(saveTrajectory).toHaveBeenCalledTimes(1);
+    expect(saveTrajectory).toHaveBeenCalledWith(expect.objectContaining({
+      id: trajectoryRecorder.trajectoryId,
+      outcome: {
+        success: true,
+        summary: "Turn completed."
+      },
+      events: expect.arrayContaining([
+        expect.objectContaining({ kind: "assistant-output" }),
+        expect.objectContaining({ kind: "session-end" })
+      ])
+    }));
+  });
+
+  it("does not fail a completed turn when final trajectory persistence fails", async () => {
+    const saveTrajectory = vi.fn(async () => {
+      throw new Error("database locked");
+    });
+    const { loop } = await createAgentLoop({
+      canRunProvider: true,
+      executeSkillWorkflow: vi.fn(async () => []),
+      trajectoryStore: { saveTrajectory }
+    });
+
+    await expect(loop.handle({
+      text: "use the test skill",
+      channel: "cli",
+      trustedWorkspace: true
+    })).resolves.toMatchObject({
+      label: "Test",
+      text: expect.any(String)
+    });
+    expect(saveTrajectory).toHaveBeenCalledTimes(1);
   });
 
   it("rotates session context before provider turn and appends final response to the child", async () => {
@@ -368,6 +421,81 @@ describe("AgentLoop provider availability gating", () => {
     await expect(sessionDb.listMessages(childSessionId)).resolves.toEqual(expect.arrayContaining([
       expect.objectContaining({ role: "agent", content: expect.stringContaining("test-skill") })
     ]));
+  });
+
+  it("keeps successful preflight compression when session-compacted event emission fails", async () => {
+    const compactIfNeeded = vi.fn(async (input: { sessionId: string }): Promise<CompactResult> => ({
+      didCompress: true,
+      originalSessionId: input.sessionId,
+      activeSessionId: input.sessionId,
+      rotated: false,
+      messages: await sessionDb.listMessages(input.sessionId),
+      diagnostics: {
+        shouldCompress: true,
+        reason: "compressed",
+        summaryFormatVersion: "v1",
+        preTokens: 1_000,
+        postTokens: 100,
+        estimatedSavingsTokens: 900,
+        estimatedSavingsRatio: 0.9,
+        sourceMessageCount: 2,
+        summarizedMessageCount: 1,
+        protectedMessageCount: 1,
+        protectedFirstN: 0,
+        protectedLastN: 1,
+        protectedSpans: [],
+        protectedCategories: [],
+        summaryChars: 7,
+        prunedToolResults: 0,
+        prunedToolResultChars: 0,
+        protectedToolResultsKept: 0,
+        scopeKey: "default",
+        lastCompressionSavingsPct: 90,
+        ineffectiveCompressionCount: 0,
+        recentSavingsRatios: [0.9],
+        warnings: [],
+        eventWarnings: [],
+        fallbackUsed: false
+      },
+      userFacingMessage: "Session history compacted"
+    }));
+    const { loop, providerTurnLoop, sessionDb, sessionId } = await createAgentLoop({
+      canRunProvider: true,
+      executeSkillWorkflow: vi.fn(async () => []),
+      sessionCompressionService: { compactIfNeeded },
+      compressionConfig: normalizeSessionCompressionConfig({
+        enabled: true,
+        experimental: true,
+        summaryModelContextLength: 50,
+        threshold: 0.10
+      })
+    });
+    await sessionDb.appendMessage({
+      sessionId,
+      role: "user",
+      content: "older history ".repeat(200)
+    });
+
+    await expect(loop.handle({
+      text: "use the test skill",
+      channel: "cli",
+      trustedWorkspace: true,
+      onEvent: (event) => {
+        if (event.kind === "session-compacted") {
+          throw new Error("rail sink unavailable");
+        }
+      }
+    })).resolves.toMatchObject({
+      label: "Test",
+      text: expect.any(String)
+    });
+
+    expect(providerTurnLoop.run).toHaveBeenCalledWith(expect.objectContaining({
+      preflightCompression: expect.objectContaining({
+        triggered: true,
+        fallbackUsed: false
+      })
+    }));
   });
 
   it("does not inject session recall for ordinary turns", async () => {

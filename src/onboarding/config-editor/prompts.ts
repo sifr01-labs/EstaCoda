@@ -15,6 +15,8 @@ export type OptionalCapabilityPromptAction = "unchanged" | "skip" | "enable";
 
 export type OptionalCapabilityPromptId = "telegram" | "voice" | "vision" | "browser";
 
+export type IncompleteTelegramCapabilityAction = "retry" | "skip" | "unchanged";
+
 export type ConfigEditorPostApplyActionId =
   | "launch"
   | "accept-limited-mode"
@@ -344,6 +346,40 @@ export async function promptTelegramCapability(
     allowedUserIds,
     allowedChatIds,
   };
+}
+
+export async function promptIncompleteTelegramCapabilityAction(
+  prompt: Prompt
+): Promise<IncompleteTelegramCapabilityAction> {
+  return promptSetupChoice(prompt, {
+    title: setupCopyText("en", "setupModules.telegram.title"),
+    message: [
+      setupCopyText("en", "setupEditor.prompt.telegram.remoteControlRisk"),
+      setupCopyText("en", "setupEditor.prompt.telegram.incomplete.body"),
+      "",
+    ].join("\n"),
+    choices: [
+      {
+        id: "telegram-incomplete-retry",
+        label: setupCopyText("en", "setupEditor.prompt.telegram.incomplete.retry"),
+        description: setupCopyText("en", "setupEditor.prompt.telegram.incomplete.retry.description"),
+        value: "retry" as const,
+      },
+      {
+        id: "telegram-incomplete-skip",
+        label: setupCopyText("en", "setupEditor.prompt.optionalCapabilityAction.skip"),
+        description: setupCopyText("en", "setupEditor.prompt.optionalCapabilityAction.skip.description"),
+        value: "skip" as const,
+      },
+      {
+        id: "telegram-incomplete-unchanged",
+        label: setupCopyText("en", "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged"),
+        description: setupCopyText("en", "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged.description"),
+        value: "unchanged" as const,
+      },
+    ],
+    defaultValue: "skip" as const,
+  });
 }
 
 export async function promptVoiceCapability(

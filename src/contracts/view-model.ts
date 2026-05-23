@@ -357,6 +357,7 @@ export interface SessionStatusRailViewModel {
   readonly kind: "sessionStatusRail";
   readonly modelLabel: string;
   readonly turnState: "idle" | "running" | "blocked" | "error" | "unknown";
+  readonly showTurnState?: boolean;
   readonly sessionElapsedMs?: number;
   readonly currentTurnSeconds?: number;
   readonly contextUsage?: {

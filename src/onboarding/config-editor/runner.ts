@@ -58,6 +58,7 @@ import {
   promptConfigEditorAction,
   promptConfigEditorReviewApproval,
   promptBrowserCapability,
+  promptIncompleteTelegramCapabilityAction,
   promptModelCandidate,
   promptConfigEditorPostApplyAction,
   promptOptionalCapabilityAction,
@@ -115,6 +116,15 @@ type OptionalCapabilityPromptContext = {
   readonly title: string;
   readonly configured: boolean;
 };
+
+type OptionalCapabilityCollectionResult =
+  | {
+      readonly kind: "configured";
+      readonly context: SetupModuleContext;
+    }
+  | {
+      readonly kind: "skip" | "unchanged";
+    };
 
 type RunOnceResult = ConfigEditorRunnerResult & {
   readonly repairAgainDecision?: SetupRouteDecision;
@@ -393,9 +403,19 @@ async function handleOptionalCapabilitiesAction(
       continue;
     }
 
-    const enabledContext = await collectOptionalCapabilityContext(options, baseContext, promptContext.module);
-    const configuration = promptContext.module.configure(enabledContext);
-    selectedDrafts.push(...promptContext.module.toDrafts(enabledContext, configuration));
+    const collected = await collectOptionalCapabilityContext(options, baseContext, promptContext.module);
+    if (collected.kind === "unchanged") continue;
+
+    if (collected.kind === "skip") {
+      const configuration = promptContext.module.configure(baseContext, { skip: true });
+      selectedDrafts.push(...promptContext.module.toDrafts(baseContext, configuration));
+      continue;
+    }
+
+    if (collected.kind === "configured") {
+      const configuration = promptContext.module.configure(collected.context);
+      selectedDrafts.push(...promptContext.module.toDrafts(collected.context, configuration));
+    }
   }
 
   if (selectedDrafts.length === 0) {
@@ -876,46 +896,77 @@ async function collectOptionalCapabilityContext(
   options: ConfigEditorRunnerOptions,
   baseContext: SetupModuleContext,
   module: OptionalCapabilityModule
-): Promise<SetupModuleContext> {
+): Promise<OptionalCapabilityCollectionResult> {
   switch (module.id) {
     case "telegram": {
-      const values = await promptTelegramCapability(options.prompt, {
-        botTokenEnv: baseContext.telegram?.botTokenEnv,
-        allowedUserIds: baseContext.telegram?.allowedUserIds,
-        allowedChatIds: baseContext.telegram?.allowedChatIds,
-      });
-      return {
-        ...baseContext,
-        telegram: {
-          enabled: true,
-          ...values,
-        },
-      };
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const values = await promptTelegramCapability(options.prompt, {
+          botTokenEnv: baseContext.telegram?.botTokenEnv,
+          allowedUserIds: baseContext.telegram?.allowedUserIds,
+          allowedChatIds: baseContext.telegram?.allowedChatIds,
+        });
+
+        if (hasTelegramAllowedIdentity(values)) {
+          return {
+            kind: "configured",
+            context: {
+              ...baseContext,
+              telegram: {
+                enabled: true,
+                ...values,
+              },
+            },
+          };
+        }
+
+        const next = await promptIncompleteTelegramCapabilityAction(options.prompt);
+        if (next !== "retry") {
+          return { kind: next };
+        }
+      }
+
+      return { kind: "skip" };
     }
     case "voice": {
       const values = await promptVoiceCapability(options.prompt, baseContext.voice ?? {});
       return {
-        ...baseContext,
-        voice: values,
+        kind: "configured",
+        context: {
+          ...baseContext,
+          voice: values,
+        },
       };
     }
     case "vision": {
       const values = await promptVisionCapability(options.prompt, baseContext.vision ?? {});
       return {
-        ...baseContext,
-        vision: values,
+        kind: "configured",
+        context: {
+          ...baseContext,
+          vision: values,
+        },
       };
     }
     case "browser": {
       const values = await promptBrowserCapability(options.prompt, baseContext.browser ?? {});
       return {
-        ...baseContext,
-        browser: values,
+        kind: "configured",
+        context: {
+          ...baseContext,
+          browser: values,
+        },
       };
     }
     default:
       throw new Error(`Unsupported optional capability module: ${module.id}`);
   }
+}
+
+function hasTelegramAllowedIdentity(values: {
+  readonly allowedUserIds?: readonly string[];
+  readonly allowedChatIds?: readonly string[];
+}): boolean {
+  return (values.allowedUserIds?.length ?? 0) > 0 || (values.allowedChatIds?.length ?? 0) > 0;
 }
 
 function optionalPromptId(moduleId: string): OptionalCapabilityPromptId {

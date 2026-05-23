@@ -37,6 +37,7 @@ import { getDefaultApiKeyEnv, getProviderMetadata } from "../providers/provider-
 import { capabilityFirstDefaults } from "../contracts/security.js";
 import type { SecurityApprovalMode, SecurityPolicy, SecurityRequest } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
+import type { TrajectoryStore } from "../contracts/trajectory-store.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { SessionRecallService, type SessionRecallResult } from "../session/session-recall-service.js";
@@ -887,6 +888,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     sessionId,
     sessionRuntimeContext,
     trajectoryRecorder,
+    trajectoryStore: hasTrajectoryStore(sessionDb) ? sessionDb : undefined,
     profileId,
     skillEvolutionStore,
     memoryProvider
@@ -1329,6 +1331,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     },
     taskflow
   };
+}
+
+function hasTrajectoryStore(db: SessionDB): db is SessionDB & Pick<TrajectoryStore, "saveTrajectory"> {
+  return typeof (db as { saveTrajectory?: unknown }).saveTrajectory === "function";
 }
 
 function createSkillVisibilityContext(input: {

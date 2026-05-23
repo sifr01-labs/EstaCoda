@@ -1144,9 +1144,11 @@ describe("PlainRenderer — prompt chrome rails", () => {
       turnState: "idle",
       contextUsage: { filled: 32700, total: 128000 },
       sessionElapsedMs: 58000,
+      currentTurnSeconds: 312,
+      showTurnState: false,
     });
     const out = renderSessionStatusRail(vm);
-    expect(out).toBe("* deepseek-reasoner | context 32.7k/128k | 26% | session 58s | idle");
+    expect(out).toBe("* deepseek-reasoner | context 32.7k/128k | 26% | session 58s | turn 5m 12s");
     assertNoAnsi(out);
   });
 

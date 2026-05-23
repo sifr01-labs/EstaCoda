@@ -338,7 +338,7 @@ describe("StandardRenderer — dark theme", () => {
     const out = r.renderOnboardingPromptCard(onboardingTrustCard());
     const plain = stripAnsi(out);
 
-    expect(plain).toContain("╭──── 𓂀 Workspace trust");
+    expect(plain).toContain("╭──── 𓂀  Workspace trust");
     expect(plain).toContain("Trust this workspace?");
     expect(plain).toContain("/workspace");
     expect(plain).toContain("▸ Trust workspace");
@@ -354,7 +354,7 @@ describe("StandardRenderer — dark theme", () => {
     const out = r.renderOnboardingPromptCard(onboardingTrustCard());
     const plain = stripAnsi(out);
 
-    expect(plain).toContain("╭──── 𓂀 Workspace trust");
+    expect(plain).toContain("╭──── 𓂀  Workspace trust");
     expect(plain).toContain("▸ Trust workspace");
     expect(plain).not.toContain("Assistant");
     expect(hasAnsi(out)).toBe(true);
@@ -365,7 +365,7 @@ describe("StandardRenderer — dark theme", () => {
     const r = new StandardRenderer({ tokens, capabilities: fullCaps() });
     const out = r.renderOnboardingPromptCard(onboardingTrustCard());
 
-    expect(out).toContain(`${ansiFgForHex(tokens.contract.palette.brand)}\x1b[1m𓂀 Workspace trust`);
+    expect(out).toContain(`${ansiFgForHex(tokens.contract.palette.brand)}\x1b[1m𓂀  Workspace trust`);
     expect(out).toContain(`${ansiFgForHex(tokens.contract.palette.action)}▸`);
     expect(out).toContain(`${ansiFgForHex(tokens.contract.surface.border)}╭──── `);
     expect(out).not.toContain(`${ansiFgForHex(tokens.contract.palette.brand)}╭`);
@@ -378,7 +378,7 @@ describe("StandardRenderer — dark theme", () => {
     }));
     const plain = stripAnsi(out);
 
-    expect(plain).toContain("╭──── 𓂀 Workspace trust");
+    expect(plain).toContain("╭──── 𓂀  Workspace trust");
     expect(plain).toContain("...");
     for (const line of plain.split("\n")) {
       expect(measureVisibleWidth(line)).toBeLessThanOrEqual(narrowCaps().terminalWidth);
@@ -389,7 +389,7 @@ describe("StandardRenderer — dark theme", () => {
     const r = renderer("dark", noColorCaps());
     const out = r.renderOnboardingPromptCard(onboardingTrustCard());
     assertNoAnsi(out);
-    expect(out).toContain("𓂀 Workspace trust");
+    expect(out).toContain("𓂀  Workspace trust");
     expect(out).toContain("▸ Trust workspace");
   });
 
@@ -397,7 +397,7 @@ describe("StandardRenderer — dark theme", () => {
     const r = renderer("dark", noColorCaps());
     const out = r.renderOnboardingPromptCard(onboardingTrustCard());
     expect(out).toMatchInlineSnapshot(`
-      "╭──── 𓂀 Workspace trust ─────────────────────────────────────────────────────╮
+      "╭──── 𓂀  Workspace trust ────────────────────────────────────────────────────╮
         Trust this workspace?
         EstaCoda can read project files and request approval before risky actions.
         /workspace
@@ -410,7 +410,7 @@ describe("StandardRenderer — dark theme", () => {
   it("renders English onboarding card with stable no-Unicode fallback", () => {
     const r = renderer("dark", noUnicodeCaps());
     const out = stripAnsi(r.renderOnboardingPromptCard(onboardingTrustCard()));
-    expect(out).toContain("+---- * Workspace trust");
+    expect(out).toContain("+---- *  Workspace trust");
     expect(out).toContain("> Trust workspace");
     expect(out).not.toContain("𓂀");
     expect(out).not.toContain("▸");
@@ -451,7 +451,7 @@ describe("StandardRenderer — dark theme", () => {
       direction: "rtl",
     }));
 
-    expect(stripAnsi(out)).toContain("𓂀 الثقة بمساحة العمل");
+    expect(stripAnsi(out)).toContain("𓂀  الثقة بمساحة العمل");
     expect(out).toContain(isolateLtr("/workspace"));
     expect(out).toContain(isolateLtr("KIMI_API_KEY"));
     expect(out).toContain(isolateLtr("kimi-k2"));
@@ -1294,12 +1294,15 @@ describe("StandardRenderer — prompt chrome rails", () => {
       turnState: "idle",
       contextUsage: { filled: 32700, total: 128000 },
       sessionElapsedMs: 58000,
+      currentTurnSeconds: 312,
+      showTurnState: false,
     });
     const out = r.render(vm);
     expect(out).toContain("deepseek-reasoner");
     expect(out).toContain("context 32.7k/128k");
     expect(out).toContain("◷ 58s");
-    expect(out).toContain("idle");
+    expect(out).toContain("⧖ 5m 12s");
+    expect(out).not.toContain("idle");
     expect(out.split("\n")).toHaveLength(1);
   });
 

@@ -531,6 +531,7 @@ export function buildFileChangePreviewViewModel(
 export interface BuildSessionStatusRailInput {
   readonly modelLabel: string;
   readonly turnState: "idle" | "running" | "blocked" | "error" | "unknown";
+  readonly showTurnState?: boolean;
   readonly sessionElapsedMs?: number;
   readonly currentTurnSeconds?: number;
   readonly contextUsage?: { readonly filled: number; readonly total: number };
@@ -543,6 +544,7 @@ export function buildSessionStatusRailViewModel(
     kind: "sessionStatusRail",
     modelLabel: input.modelLabel,
     turnState: input.turnState,
+    showTurnState: input.showTurnState,
     sessionElapsedMs: input.sessionElapsedMs,
     currentTurnSeconds: input.currentTurnSeconds,
     contextUsage: input.contextUsage,

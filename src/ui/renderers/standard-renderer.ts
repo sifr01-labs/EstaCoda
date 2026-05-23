@@ -282,7 +282,13 @@ export class StandardRenderer {
 
   #onboardingTitle(title: string, maxWidth: number): string {
     const symbol = this.#useUnicode ? "𓂀" : "*";
-    return truncateVisible(`${symbol} ${title}`, maxWidth);
+    return truncateVisible(`${symbol}  ${title}`, maxWidth);
+  }
+
+  #assistantResponseTitle(label: string, maxWidth: number): string {
+    const symbol = this.#useUnicode ? "𓂀" : "*";
+    const title = label.replace(/^(?:𓂀|𓇠|\*)\s*/u, "").trim() || this.#copy.assistantCardTitle;
+    return truncateVisible(`${symbol}  ${title}`, maxWidth);
   }
 
   #localizedTechnical(value: string, locale: UiLocale, maxWidth: number): string {
@@ -1169,21 +1175,44 @@ export class StandardRenderer {
   renderAssistantResponse(vm: AssistantResponseViewModel): string {
     const horiz = this.#useUnicode ? "─" : "-";
     const topLeft = this.#useUnicode ? "╭" : "+";
+    const topRight = this.#useUnicode ? "╮" : "+";
     const bottomLeft = this.#useUnicode ? "╰" : "+";
+    const bottomRight = this.#useUnicode ? "╯" : "+";
     const vert = this.#useUnicode ? "│" : "|";
+    const requestedWidth = Math.max(24, this.#capabilities.terminalWidth);
+    const rawTitle = this.#assistantResponseTitle(vm.label, Math.max(1, requestedWidth - 4));
+    const titleWidth = measureVisibleWidth(rawTitle);
+    const maxRawContent = Math.max(0, ...vm.text.split("\n").map((line) => measureVisibleWidth(line)));
     const width = Math.min(
-      this.#capabilities.terminalWidth,
-      Math.max(vm.label.length + 4, ...vm.text.split("\n").map((l) => measureTextWidth(l))) + 4
+      requestedWidth,
+      Math.max(40, titleWidth + 4, maxRawContent + 4)
     );
+    const contentWidth = Math.max(8, width - 4);
+    const boundedTitle = truncateVisible(rawTitle, Math.max(1, width - 2));
+    const boundedTitleWidth = measureVisibleWidth(boundedTitle);
+    const titleAvail = Math.max(0, width - 2 - boundedTitleWidth);
+    const titleLeft = Math.floor(titleAvail / 2);
+    const titleRight = titleAvail - titleLeft;
 
-    const top = `${topLeft}${horiz.repeat(width - 2)}`;
-    const bottom = `${bottomLeft}${horiz.repeat(width - 2)}`;
+    const top = [
+      this.#surfaceBorder(`${topLeft}${horiz.repeat(titleLeft)}`),
+      this.#brand(this.#bold(boundedTitle)),
+      this.#surfaceBorder(`${horiz.repeat(titleRight)}${topRight}`),
+    ].join("");
+    const bottom = this.#surfaceBorder(`${bottomLeft}${horiz.repeat(width - 2)}${bottomRight}`);
 
     const lines: string[] = ["", top];
-    lines.push(`${vert} ${this.#brand(this.#bold(vm.label))}`);
 
     for (const rawLine of vm.text.split("\n")) {
-      lines.push(`${vert} ${rawLine}`);
+      for (const wrappedLine of wrapVisibleLine(rawLine, contentWidth)) {
+        lines.push([
+          this.#surfaceBorder(vert),
+          " ",
+          padVisibleEnd(wrappedLine, contentWidth),
+          " ",
+          this.#surfaceBorder(vert),
+        ].join(""));
+      }
     }
 
     lines.push(bottom);
@@ -1239,7 +1268,7 @@ export class StandardRenderer {
   // ──────────────────────────────────────
 
   renderSessionStatusRail(vm: SessionStatusRailViewModel): string {
-    const eye = this.#useUnicode ? "\uD80C\uDDE0" : "*";
+    const eye = this.#useUnicode ? "𓂀" : "*";
     const modelLabel = this.#locale === "ar" ? isolateLtr(vm.modelLabel) : vm.modelLabel;
     const parts: string[] = [`${this.#brand(eye)} ${modelLabel}`];
 
@@ -1253,15 +1282,17 @@ export class StandardRenderer {
 
     if (vm.sessionElapsedMs !== undefined) {
       const glyph = this.#useUnicode ? "◷" : "session";
-      parts.push(`${glyph} ${formatDuration(vm.sessionElapsedMs)}`);
+      parts.push(`${glyph} ${formatRailDuration(vm.sessionElapsedMs)}`);
     }
 
     if (vm.currentTurnSeconds !== undefined) {
       const glyph = this.#useUnicode ? "⧖" : "turn";
-      parts.push(`${glyph} ${vm.currentTurnSeconds}s`);
+      parts.push(`${glyph} ${formatRailDuration(vm.currentTurnSeconds * 1000)}`);
     }
 
-    parts.push(this.#turnStateLabel(vm.turnState));
+    if (vm.showTurnState !== false) {
+      parts.push(this.#turnStateLabel(vm.turnState));
+    }
     return truncateVisible(parts.join(" | "), this.#capabilities.terminalWidth);
   }
 
@@ -1368,6 +1399,48 @@ function computeColumnWidths(
   });
 }
 
+function wrapVisibleLine(line: string, maxWidth: number): string[] {
+  if (line.length === 0 || measureVisibleWidth(line) <= maxWidth) {
+    return [line];
+  }
+
+  const indent = line.match(/^\s*/u)?.[0] ?? "";
+  const wrapped: string[] = [];
+  let remaining = line;
+  while (measureVisibleWidth(remaining) > maxWidth) {
+    const index = visibleBreakIndex(remaining, maxWidth);
+    wrapped.push(remaining.slice(0, index).trimEnd());
+    remaining = `${indent}${remaining.slice(index).trimStart()}`;
+    if (remaining.trim().length === 0) {
+      break;
+    }
+  }
+  if (remaining.length > 0) {
+    wrapped.push(remaining);
+  }
+  return wrapped.length > 0 ? wrapped : [""];
+}
+
+function visibleBreakIndex(value: string, maxWidth: number): number {
+  let width = 0;
+  let index = 0;
+  let lastWhitespaceIndex = -1;
+
+  for (const char of value) {
+    const nextWidth = width + measureTextWidth(char);
+    if (nextWidth > maxWidth) {
+      return lastWhitespaceIndex > 0 ? lastWhitespaceIndex : Math.max(1, index);
+    }
+    width = nextWidth;
+    index += char.length;
+    if (/\s/u.test(char)) {
+      lastWhitespaceIndex = index;
+    }
+  }
+
+  return value.length;
+}
+
 function boundedFileChangePreviewLines(
   vm: FileChangePreviewViewModel,
   maxLines: number
@@ -1401,6 +1474,16 @@ function formatDuration(ms: number): string {
     return `${Math.max(0, ms)}ms`;
   }
   return `${(ms / 1000).toFixed(ms >= 10000 ? 0 : 1)}s`;
+}
+
+function formatRailDuration(ms: number): string {
+  if (ms >= 60000) {
+    const totalSeconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
+  }
+  return formatDuration(ms);
 }
 
 function formatCount(value: number): string {
