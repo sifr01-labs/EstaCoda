@@ -29,6 +29,7 @@ export interface BottomChromeControllerOptions {
   readonly renderViewModel: (vm: ViewModel) => string;
   readonly enabled?: boolean;
   readonly tickMs?: number;
+  readonly readlineTickMs?: number;
 }
 
 export class BottomChromeController {
@@ -37,7 +38,9 @@ export class BottomChromeController {
   readonly #renderViewModel: (vm: ViewModel) => string;
   readonly #enabled: boolean;
   readonly #tickMs: number;
+  readonly #readlineTickMs: number;
   #activeLineCount = 0;
+  #lastRenderedLines?: readonly string[];
   #currentState: BottomChromeState = {};
   #ticker?: ReturnType<typeof setInterval>;
   #stateFactory?: () => BottomChromeState;
@@ -51,6 +54,7 @@ export class BottomChromeController {
     this.#renderViewModel = options.renderViewModel;
     this.#enabled = options.enabled ?? detectEnabled(options.capabilities);
     this.#tickMs = options.tickMs ?? 200;
+    this.#readlineTickMs = options.readlineTickMs ?? 1000;
   }
 
   get enabled(): boolean {
@@ -77,6 +81,7 @@ export class BottomChromeController {
     sequence += `\x1b[${promptRows + 1}B`;
     this.#output.write(sequence);
     this.#activeLineCount = 0;
+    this.#lastRenderedLines = undefined;
   }
 
   writeAboveChromeSync<T>(fn: () => T): T {
@@ -149,6 +154,7 @@ export class BottomChromeController {
     this.#stateFactory = undefined;
     this.#clearForOutput();
     this.#currentState = {};
+    this.#lastRenderedLines = undefined;
   }
 
   startTicker(stateFactory: () => BottomChromeState): void {
@@ -169,7 +175,7 @@ export class BottomChromeController {
     this.#ticker = setInterval(() => {
       if (this.#stateFactory === undefined) return;
       this.updateStateAboveReadline(this.#stateFactory(), this.#readlinePromptLineCountFactory?.() ?? 1);
-    }, this.#tickMs);
+    }, this.#readlineTickMs);
   }
 
   updateStateAboveReadline(state: BottomChromeState, promptLineCount = 1): void {
@@ -183,9 +189,12 @@ export class BottomChromeController {
       this.#redraw();
       return;
     }
+    if (linesEqual(lines, this.#lastRenderedLines)) {
+      return;
+    }
 
     const promptRows = Math.max(1, Math.ceil(promptLineCount));
-    let sequence = "\x1b[s";
+    let sequence = "\x1b7";
     sequence += `\x1b[${this.#activeLineCount + promptRows - 1}A`;
     for (let index = 0; index < lines.length; index += 1) {
       sequence += `\x1b[2K\r${lines[index]}`;
@@ -193,8 +202,9 @@ export class BottomChromeController {
         sequence += "\x1b[1B";
       }
     }
-    sequence += "\x1b[u";
+    sequence += "\x1b8";
     this.#output.write(sequence);
+    this.#lastRenderedLines = lines;
   }
 
   stopTicker(): void {
@@ -211,6 +221,7 @@ export class BottomChromeController {
     if (!this.#enabled) return;
     this.#clearForOutput();
     this.#currentState = {};
+    this.#lastRenderedLines = undefined;
   }
 
   #redraw(): void {
@@ -224,6 +235,7 @@ export class BottomChromeController {
     const lineCount = Math.max(1, this.#activeLineCount);
     this.#output.write(`\x1b[${lineCount}A\x1b[1G\x1b[0J`);
     this.#activeLineCount = 0;
+    this.#lastRenderedLines = undefined;
   }
 
   #draw(): void {
@@ -234,6 +246,7 @@ export class BottomChromeController {
       if (lines.length === 0) return;
       this.#output.write(`${lines.join("\n")}\n`);
       this.#activeLineCount = lines.length;
+      this.#lastRenderedLines = lines;
     } finally {
       this.#isDrawing = false;
     }
@@ -291,4 +304,11 @@ export class BottomChromeController {
 
 function detectEnabled(caps: TerminalCapabilities): boolean {
   return caps.isTTY && !caps.isCI && !caps.isDumb;
+}
+
+function linesEqual(a: readonly string[], b: readonly string[] | undefined): boolean {
+  if (b === undefined || a.length !== b.length) {
+    return false;
+  }
+  return a.every((line, index) => line === b[index]);
 }

@@ -1350,7 +1350,7 @@ describe("runSessionLoop — active turn spinner", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
     nowMs = 61_000;
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await new Promise((resolve) => setTimeout(resolve, 1050));
     resolvePrompt("/exit");
     await loop;
 
@@ -1396,11 +1396,11 @@ describe("runSessionLoop — active turn spinner", () => {
     }
     promptOptions.onRowsChange?.(3);
     nowMs = 61_000;
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await new Promise((resolve) => setTimeout(resolve, 1050));
     resolvePrompt("/exit");
     await loop;
 
-    expect(outputChunks.some((chunk) => chunk.includes("\x1b[s\x1b[4A"))).toBe(true);
+    expect(outputChunks.some((chunk) => chunk.includes("\x1b7\x1b[4A"))).toBe(true);
   });
 
   it("updates chrome status rail from live context usage events", async () => {

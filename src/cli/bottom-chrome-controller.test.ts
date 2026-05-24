@@ -102,6 +102,7 @@ describe("BottomChromeController", () => {
         capabilities: makeCaps(),
         renderViewModel,
         tickMs: 100,
+        readlineTickMs: 100,
       });
       let phase = "thinking";
       ctrl.updateState({ activeSpinner: buildActiveTurnSpinnerViewModel({ phase }) });
@@ -125,6 +126,7 @@ describe("BottomChromeController", () => {
         capabilities: makeCaps(),
         renderViewModel,
         tickMs: 100,
+        readlineTickMs: 100,
       });
       let label = "first";
       ctrl.updateState({ statusRail: status(label) });
@@ -133,7 +135,7 @@ describe("BottomChromeController", () => {
       label = "second";
       vi.advanceTimersByTime(100);
       expect(chunks).toEqual([
-        `\x1b[s\x1b[2A\x1b[2K\rsecond | idle\x1b[1B\x1b[2K\r${"─".repeat(40)}\x1b[u`,
+        `\x1b7\x1b[2A\x1b[2K\rsecond | idle\x1b[1B\x1b[2K\r${"─".repeat(40)}\x1b8`,
       ]);
       ctrl.dispose();
     } finally {
@@ -150,6 +152,7 @@ describe("BottomChromeController", () => {
         capabilities: makeCaps(),
         renderViewModel,
         tickMs: 100,
+        readlineTickMs: 100,
       });
       let label = "first";
       let promptRows = 3;
@@ -159,8 +162,59 @@ describe("BottomChromeController", () => {
       label = "second";
       vi.advanceTimersByTime(100);
       expect(chunks).toEqual([
-        `\x1b[s\x1b[4A\x1b[2K\rsecond | idle\x1b[1B\x1b[2K\r${"─".repeat(40)}\x1b[u`,
+        `\x1b7\x1b[4A\x1b[2K\rsecond | idle\x1b[1B\x1b[2K\r${"─".repeat(40)}\x1b8`,
       ]);
+      ctrl.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("skips identical readline redraw frames", () => {
+    vi.useFakeTimers();
+    try {
+      const { chunks, stream } = mockOutput();
+      const ctrl = new BottomChromeController({
+        output: stream,
+        capabilities: makeCaps(),
+        renderViewModel,
+        tickMs: 100,
+        readlineTickMs: 100,
+      });
+      ctrl.updateState({ statusRail: status("same") });
+      chunks.length = 0;
+      ctrl.startReadlineTicker(() => ({ statusRail: status("same") }));
+      vi.advanceTimersByTime(300);
+      expect(chunks).toEqual([]);
+
+      ctrl.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("uses a slower default readline ticker than active-turn animation", () => {
+    vi.useFakeTimers();
+    try {
+      const { chunks, stream } = mockOutput();
+      const ctrl = new BottomChromeController({
+        output: stream,
+        capabilities: makeCaps(),
+        renderViewModel,
+        tickMs: 100,
+      });
+      let label = "first";
+      ctrl.updateState({ statusRail: status(label) });
+      chunks.length = 0;
+      ctrl.startReadlineTicker(() => ({ statusRail: status(label) }));
+      label = "second";
+      vi.advanceTimersByTime(999);
+      expect(chunks).toEqual([]);
+      vi.advanceTimersByTime(1);
+      expect(chunks).toEqual([
+        `\x1b7\x1b[2A\x1b[2K\rsecond | idle\x1b[1B\x1b[2K\r${"─".repeat(40)}\x1b8`,
+      ]);
+
       ctrl.dispose();
     } finally {
       vi.useRealTimers();
