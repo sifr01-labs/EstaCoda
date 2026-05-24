@@ -4,6 +4,7 @@ import type { ToolsetName } from "../contracts/tool.js";
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import { compileSkillWorkflowPlan } from "../skills/skill-workflow-planner.js";
 import { packetizeToolExecution, renderToolResultPacket } from "../tools/tool-result-packet.js";
+import { summarizeSecurityTarget } from "../tools/tool-executor.js";
 import type { ToolExecutor, ToolExecutionRecord } from "../tools/tool-executor.js";
 import { toolResultFileChangePreview, toolResultStats } from "./tool-plan-runner.js";
 import type { RunRecorder } from "./run-recorder.js";
@@ -145,12 +146,15 @@ export class SkillWorkflowExecutor {
         previousResults: input.previousResults.map((result) => truncate(result, 500))
       };
       const preferredTool = firstAvailablePreferredTool(input.step, toolset, input.usedTools);
+      const activityId = `skill:${input.skill.name}:${input.step.id}:${toolset}:${preferredTool ?? "auto"}`;
       let emittedStart = false;
       if (preferredTool !== undefined && !input.usedTools.has(preferredTool)) {
         await emit(input.onEvent, {
           kind: "tool-start",
           tool: preferredTool,
-          stepId: input.step.id
+          stepId: input.step.id,
+          targetSummary: summarizeSecurityTarget(preferredTool, toolInput),
+          activityId
         });
         emittedStart = true;
       }
@@ -170,13 +174,24 @@ export class SkillWorkflowExecutor {
           });
 
       if (execution === undefined) {
+        if (emittedStart && preferredTool !== undefined) {
+          await emit(input.onEvent, {
+            kind: "tool-result",
+            tool: preferredTool,
+            ok: false,
+            targetSummary: summarizeSecurityTarget(preferredTool, toolInput),
+            activityId
+          });
+        }
         continue;
       }
       if (!emittedStart) {
         await emit(input.onEvent, {
           kind: "tool-start",
           tool: execution.tool.name,
-          stepId: input.step.id
+          stepId: input.step.id,
+          targetSummary: execution.targetSummary,
+          activityId
         });
       }
 
@@ -195,6 +210,8 @@ export class SkillWorkflowExecutor {
         riskClass: execution.riskClass,
         ok: execution.result?.ok,
         fileChangePreview: toolResultFileChangePreview(execution),
+        targetSummary: execution.targetSummary,
+        activityId,
         ...toolResultStats(execution)
       });
 
@@ -264,4 +281,3 @@ function nextFallbackIndex(
 function extractFirstUrl(text: string): string | undefined {
   return /https?:\/\/[^\s<>"')]+/iu.exec(text)?.[0];
 }
-

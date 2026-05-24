@@ -250,6 +250,14 @@ describe("ChannelToolActivityRenderer", () => {
     assertNoEmoji(out);
   });
 
+  it("renders target summaries without emoji", () => {
+    const r = new ChannelToolActivityRenderer({ tools: [] });
+    r.render({ kind: "tool-start", tool: "file.read", targetSummary: "src/app.ts" });
+    const out = r.render({ kind: "tool-result", tool: "file.read", ok: true, targetSummary: "src/app.ts" });
+    expect(out).toContain("src/app.ts");
+    assertNoEmoji(out);
+  });
+
   it("renders elapsed time", () => {
     let t = 0;
     const r = new ChannelToolActivityRenderer({ tools: [], now: () => t });

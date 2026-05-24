@@ -20,6 +20,8 @@ export type RuntimeEvent =
       kind: "tool-start";
       tool: string;
       stepId?: string;
+      targetSummary?: string;
+      activityId?: string;
     }
   | {
       kind: "tool-result";
@@ -31,6 +33,8 @@ export type RuntimeEvent =
       sentChars?: number;
       truncated?: boolean;
       fileChangePreview?: FileChangePreviewViewModel;
+      targetSummary?: string;
+      activityId?: string;
     }
   | {
       kind: "provider-attempt";

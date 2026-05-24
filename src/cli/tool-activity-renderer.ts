@@ -18,19 +18,21 @@ export class ToolActivityRenderer {
 
   render(event: Extract<RuntimeEvent, { kind: "tool-start" | "tool-result" }>): string {
     if (event.kind === "tool-start") {
-      this.#pushStart(event.tool);
-      return `[>] ${toolIcon(event.tool)} ${toolAction(event.tool, this.#tools.get(event.tool))} · preparing ${event.tool}${event.stepId === undefined ? "" : ` · ${event.stepId}`}`;
+      this.#pushStart(this.#eventKey(event));
+      const target = event.targetSummary ?? event.tool;
+      return `[>] ${toolIcon(event.tool)} ${toolAction(event.tool, this.#tools.get(event.tool))} · preparing ${target}${event.stepId === undefined ? "" : ` · ${event.stepId}`}`;
     }
 
-    const elapsed = this.#popElapsed(event.tool);
+    const elapsed = this.#popElapsed(this.#eventKey(event));
+    const target = event.targetSummary === undefined ? "" : ` · ${event.targetSummary}`;
     if (event.decision !== undefined && event.decision !== "allow") {
-      return `⚠ ${toolIcon(event.tool)} ${event.tool} gated · ${humanRisk(event.riskClass)}${elapsed}`;
+      return `⚠ ${toolIcon(event.tool)} ${event.tool}${target} gated · ${humanRisk(event.riskClass)}${elapsed}`;
     }
 
     const status = event.ok === false ? "failed" : "done";
     const icon = event.ok === false ? "🩸" : toolIcon(event.tool);
 
-    return `${icon} ${event.tool} ${status}${elapsed}${renderToolSize(event)}`;
+    return `${icon} ${event.tool}${target} ${status}${elapsed}${renderToolSize(event)}`;
   }
 
   #pushStart(tool: string): void {
@@ -52,6 +54,10 @@ export class ToolActivityRenderer {
     }
 
     return ` · ${formatDuration(this.#now() - startedAt)}`;
+  }
+
+  #eventKey(event: Extract<RuntimeEvent, { kind: "tool-start" | "tool-result" }>): string {
+    return event.activityId ?? `${event.tool}\0${event.targetSummary ?? ""}`;
   }
 }
 

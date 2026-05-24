@@ -109,15 +109,22 @@ type RuntimeEventChrome = {
   clearInlineSpinner(): void;
 };
 
-export class ToolActivityAnimator {
+type ToolActivityRailAnimator = {
+  start(event: ToolActivityRailEvent): void;
+  complete(event: ToolActivityRailEvent): void;
+  cancel(): void;
+  dispose(): void;
+};
+
+export class ToolActivityAnimator implements ToolActivityRailAnimator {
   readonly #output: NodeJS.WritableStream;
   readonly #renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string };
   readonly #streamState: { lastWriteEndedWithNewline: boolean };
   readonly #enabled: boolean;
   readonly #tickMs = 200;
   #timer?: ReturnType<typeof setInterval>;
-  #activeEvent?: ToolActivityRailEvent;
-  #lastRowWasActive = false;
+  #rows: Array<{ event: ToolActivityRailEvent; active: boolean }> = [];
+  #renderedRowCount = 0;
 
   constructor(options: {
     output: NodeJS.WritableStream;
@@ -132,56 +139,96 @@ export class ToolActivityAnimator {
   }
 
   start(event: ToolActivityRailEvent): void {
-    if (this.#activeEvent !== undefined && this.#enabled && this.#lastRowWasActive) {
-      this.#rewriteRow(this.#activeEvent);
+    if (!this.#enabled) {
+      this.#writeDurableRow(event);
+      return;
     }
-    this.#stopTimer();
-    this.#activeEvent = event;
-    this.#lastRowWasActive = false;
-    this.#writeRow(event);
-    if (this.#enabled) {
-      this.#lastRowWasActive = true;
+    this.#upsertRow(event, true);
+    this.#redrawRows();
+    if (this.#timer === undefined) {
       this.#timer = setInterval(() => this.#tick(), this.#tickMs);
     }
   }
 
   complete(event: ToolActivityRailEvent): void {
-    this.#stopTimer();
-    this.#activeEvent = undefined;
-    if (this.#enabled && this.#lastRowWasActive) {
-      this.#rewriteRow(event);
-      this.#lastRowWasActive = false;
-    } else {
-      this.#writeRow(event);
+    if (!this.#enabled || this.#rows.length === 0) {
+      this.#writeDurableRow(event);
+      return;
+    }
+    this.#upsertRow(event, false);
+    this.#redrawRows();
+    if (!this.#hasActiveRows()) {
+      this.#stopTimer();
+      this.#rows = [];
+      this.#renderedRowCount = 0;
     }
   }
 
   cancel(): void {
     this.#stopTimer();
-    this.#activeEvent = undefined;
-    if (this.#enabled && this.#lastRowWasActive) {
-      this.#output.write(`\x1b[1A\x1b[2K\r`);
-      this.#lastRowWasActive = false;
+    if (this.#enabled && this.#renderedRowCount > 0) {
+      this.#clearRows();
     }
+    this.#rows = [];
+    this.#renderedRowCount = 0;
   }
 
   dispose(): void {
     this.#stopTimer();
-    this.#activeEvent = undefined;
-    this.#lastRowWasActive = false;
+    this.#rows = [];
+    this.#renderedRowCount = 0;
   }
 
   #tick(): void {
-    if (this.#activeEvent === undefined || !this.#lastRowWasActive) return;
-    this.#rewriteRow(this.#activeEvent);
+    if (!this.#hasActiveRows() || this.#renderedRowCount === 0) return;
+    this.#redrawRows();
   }
 
-  #rewriteRow(event: ToolActivityRailEvent): void {
-    this.#output.write(`\x1b[1A\x1b[2K\r`);
-    this.#writeRow(event);
+  #upsertRow(event: ToolActivityRailEvent, active: boolean): void {
+    const index = this.#findRowIndex(event);
+    const row = { event, active };
+    if (index === -1) {
+      this.#rows.push(row);
+    } else {
+      this.#rows[index] = row;
+    }
   }
 
-  #writeRow(event: ToolActivityRailEvent): void {
+  #findRowIndex(event: ToolActivityRailEvent): number {
+    const key = toolActivityRowKey(event);
+    const exactIndex = this.#rows.findIndex((row) => toolActivityRowKey(row.event) === key);
+    if (exactIndex !== -1 || event.target !== undefined || event.activityId !== undefined) {
+      return exactIndex;
+    }
+    return this.#rows.findIndex((row) => row.active && row.event.tool === event.tool);
+  }
+
+  #hasActiveRows(): boolean {
+    return this.#rows.some((row) => row.active);
+  }
+
+  #redrawRows(): void {
+    // The animated terminal path owns a contiguous tool block at the bottom of the transcript;
+    // unrelated output must clear/cancel it before writing.
+    this.#clearRows();
+    const vm = buildToolActivityRailViewModel({ events: this.#rows.map((row) => row.event) });
+    this.#output.write(`${this.#renderer.render(vm)}\n`);
+    this.#renderedRowCount = this.#rows.length;
+    this.#streamState.lastWriteEndedWithNewline = true;
+  }
+
+  #clearRows(): void {
+    if (this.#renderedRowCount === 0) {
+      return;
+    }
+    if (this.#renderedRowCount === 1) {
+      this.#output.write(`\x1b[1A\x1b[2K\r`);
+      return;
+    }
+    this.#output.write(clearTranscriptBlock(this.#renderedRowCount));
+  }
+
+  #writeDurableRow(event: ToolActivityRailEvent): void {
     const vm = buildToolActivityRailViewModel({ events: [event] });
     this.#output.write(`${this.#renderer.render(vm)}\n`);
     this.#streamState.lastWriteEndedWithNewline = true;
@@ -193,6 +240,106 @@ export class ToolActivityAnimator {
       this.#timer = undefined;
     }
   }
+}
+
+export class BottomChromeToolActivityAnimator implements ToolActivityRailAnimator {
+  readonly #output: NodeJS.WritableStream;
+  readonly #renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string };
+  readonly #streamState: { lastWriteEndedWithNewline: boolean };
+  #rows: Array<{ event: ToolActivityRailEvent; active: boolean }> = [];
+  #renderedRowCount = 0;
+
+  constructor(options: {
+    output: NodeJS.WritableStream;
+    renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string };
+    streamState: { lastWriteEndedWithNewline: boolean };
+  }) {
+    this.#output = options.output;
+    this.#renderer = options.renderer;
+    this.#streamState = options.streamState;
+  }
+
+  start(event: ToolActivityRailEvent): void {
+    this.#upsertRow(event, true);
+    this.#redrawRows();
+  }
+
+  complete(event: ToolActivityRailEvent): void {
+    if (this.#rows.length === 0) {
+      this.#writeDurableRow(event);
+      return;
+    }
+
+    this.#upsertRow(event, false);
+    this.#redrawRows();
+
+    if (this.#rows.every((row) => !row.active)) {
+      this.#rows = [];
+      this.#renderedRowCount = 0;
+    }
+  }
+
+  cancel(): void {
+    if (this.#renderedRowCount > 0) {
+      this.#clearRows();
+      this.#rows = [];
+      this.#renderedRowCount = 0;
+      this.#streamState.lastWriteEndedWithNewline = true;
+    }
+  }
+
+  dispose(): void {
+    this.#rows = [];
+    this.#renderedRowCount = 0;
+  }
+
+  #redrawRows(): void {
+    this.#clearRows();
+    const vm = buildToolActivityRailViewModel({ events: this.#rows.map((row) => row.event) });
+    this.#output.write(`${this.#renderer.render(vm)}\n`);
+    this.#renderedRowCount = this.#rows.length;
+    this.#streamState.lastWriteEndedWithNewline = true;
+  }
+
+  #upsertRow(event: ToolActivityRailEvent, active: boolean): void {
+    const index = this.#findRowIndex(event);
+    const row = { event, active };
+    if (index === -1) {
+      this.#rows.push(row);
+    } else {
+      this.#rows[index] = row;
+    }
+  }
+
+  #findRowIndex(event: ToolActivityRailEvent): number {
+    const key = toolActivityRowKey(event);
+    const exactIndex = this.#rows.findIndex((row) => toolActivityRowKey(row.event) === key);
+    if (exactIndex !== -1 || event.target !== undefined || event.activityId !== undefined) {
+      return exactIndex;
+    }
+    return this.#rows.findIndex((row) => row.active && row.event.tool === event.tool);
+  }
+
+  #clearRows(): void {
+    if (this.#renderedRowCount === 0) {
+      return;
+    }
+    if (this.#renderedRowCount === 1) {
+      this.#output.write(`\x1b[1A\x1b[2K\r`);
+      return;
+    }
+    this.#output.write(clearTranscriptBlock(this.#renderedRowCount));
+  }
+
+  #writeDurableRow(event: ToolActivityRailEvent): void {
+    const vm = buildToolActivityRailViewModel({ events: [event] });
+    this.#output.write(`${this.#renderer.render(vm)}\n`);
+    this.#streamState.lastWriteEndedWithNewline = true;
+  }
+}
+
+function toolActivityRowKey(event: ToolActivityRailEvent): string {
+  return event.activityId ?? `${event.tool}\0${event.target ?? ""}`;
 }
 
 async function buildSessionStartupViewModel(runtime: Runtime): Promise<ViewModel> {
@@ -482,6 +629,11 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           streamState,
           enabled: !bottomChrome.enabled && renderer.capabilities.isTTY && renderer.capabilities.supportsAnimation && !renderer.capabilities.isCI && !renderer.capabilities.isDumb,
         });
+        const bottomChromeToolActivityAnimator = new BottomChromeToolActivityAnimator({
+          output,
+          renderer,
+          streamState,
+        });
 
         const supportsBottomChromeTranscriptSpinnerAnimation =
           renderer.capabilities.supportsAnimation
@@ -630,7 +782,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
                 bottomChrome.writeAboveChromeSync(() => {
                   bottomChromeOutputSuspended = true;
                   try {
-                    newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, runtimeEventBottomChrome, turnOutput, undefined);
+                    newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, runtimeEventBottomChrome, turnOutput, bottomChromeToolActivityAnimator);
                   } finally {
                     bottomChromeOutputSuspended = false;
                   }
@@ -2164,7 +2316,7 @@ export function renderRuntimeEvent(
   streamState: { lastWriteEndedWithNewline: boolean },
   chrome: RuntimeEventChrome | undefined,
   turnOutput: { spinnerPhase?: string; hasOutput: boolean; lastOutputWasSpinner: boolean },
-  animator?: ToolActivityAnimator
+  animator?: ToolActivityRailAnimator
 ): string | undefined {
   function safeWrite(text: string): void {
     const endsWithNewline = text.endsWith("\n");
@@ -2244,14 +2396,6 @@ export function renderRuntimeEvent(
       return "provider";
     }
     case "provider-tool-call":
-      clearActiveSpinnerLine();
-      const providerRailEvent = activityBuilder.buildToolActivityRailEvent(event);
-      if (animator !== undefined) {
-        animator.start(providerRailEvent);
-      } else {
-        const providerRailVm = buildToolActivityRailViewModel({ events: [providerRailEvent] });
-        safeWrite(`${renderer.render(providerRailVm)}\n`);
-      }
       return "tool";
     case "provider-result":
       if (!event.ok && !event.willFallback) {

@@ -170,11 +170,11 @@ export class ToolActivityViewModelBuilder {
     event: Extract<RuntimeEvent, { kind: "tool-start" | "tool-result" }>
   ): TimelineEvent {
     if (event.kind === "tool-start") {
-      this.#pushStart(event.tool);
+      this.#pushStart(this.#eventKey(event));
       return timelineEvent(event.tool, "running");
     }
 
-    const elapsed = this.#popElapsed(event.tool);
+    const elapsed = this.#popElapsed(this.#eventKey(event));
     const decision = event.decision !== undefined && event.decision !== "allow"
       ? (event.decision as "ask" | "block")
       : undefined;
@@ -207,10 +207,11 @@ export class ToolActivityViewModelBuilder {
     event: Extract<RuntimeEvent, { kind: "tool-start" | "tool-result" | "provider-tool-call" }>
   ): ToolActivityRailEvent {
     if (event.kind === "tool-start") {
-      this.#pushStart(event.tool);
+      this.#pushStart(this.#eventKey(event));
       return toolActivityRailEvent(event.tool, "running", {
         label: "preparing",
-        target: event.tool,
+        target: event.targetSummary ?? event.tool,
+        activityId: event.activityId,
       });
     }
 
@@ -218,11 +219,10 @@ export class ToolActivityViewModelBuilder {
       const tool = event.name ?? "provider-tool";
       return toolActivityRailEvent(tool, "running", {
         label: toolActivityLabelKey(tool),
-        target: event.argumentsText,
       });
     }
 
-    const elapsed = this.#popElapsed(event.tool);
+    const elapsed = this.#popElapsed(this.#eventKey(event));
     const decision = event.decision !== undefined && event.decision !== "allow"
       ? (event.decision as "ask" | "block")
       : undefined;
@@ -232,6 +232,8 @@ export class ToolActivityViewModelBuilder {
         elapsedMs: elapsed ?? undefined,
         label: "gated",
         riskClass: event.riskClass,
+        target: event.targetSummary,
+        activityId: event.activityId,
       });
     }
 
@@ -239,6 +241,8 @@ export class ToolActivityViewModelBuilder {
     return toolActivityRailEvent(event.tool, status, {
       elapsedMs: elapsed ?? undefined,
       label: status === "failed" ? "failed" : toolActivityLabelKey(event.tool),
+      target: event.targetSummary,
+      activityId: event.activityId,
     });
   }
 
@@ -268,6 +272,10 @@ export class ToolActivityViewModelBuilder {
     }
 
     return this.#now() - startedAt;
+  }
+
+  #eventKey(event: Extract<RuntimeEvent, { kind: "tool-start" | "tool-result" }>): string {
+    return event.activityId ?? `${event.tool}\0${event.targetSummary ?? ""}`;
   }
 }
 

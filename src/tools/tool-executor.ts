@@ -455,7 +455,7 @@ function toDefinition(tool: ToolDefinition): ToolDefinition {
   };
 }
 
-function summarizeSecurityTarget(toolName: string, input: Record<string, unknown>): string | undefined {
+export function summarizeSecurityTarget(toolName: string, input: Record<string, unknown>): string | undefined {
   if ((toolName === "terminal.run" || toolName === "process.start") && typeof input.command === "string") {
     return truncateSecuritySummary(input.command);
   }

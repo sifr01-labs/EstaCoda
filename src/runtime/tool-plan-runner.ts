@@ -5,6 +5,7 @@ import type { FileChangePreviewViewModel } from "../contracts/view-model.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
 import type { ToolCallPlanner } from "../tools/tool-call-planner.js";
 import type { ToolExecutor, ToolExecutionRecord } from "../tools/tool-executor.js";
+import { summarizeSecurityTarget } from "../tools/tool-executor.js";
 import { packetizeToolExecution } from "../tools/tool-result-packet.js";
 import type { RunRecorder } from "./run-recorder.js";
 import type { SessionRuntimeContext } from "./session-runtime-context.js";
@@ -68,6 +69,13 @@ export class ToolPlanRunner {
       await this.#runRecorder.recordToolPlan(plan);
 
       if (plan.status !== "planned") {
+        await emit(input.onEvent, {
+          kind: "tool-result",
+          tool: plan.tool.length === 0 ? "provider-tool" : plan.tool,
+          ok: false,
+          targetSummary: summarizeSecurityTarget(plan.tool, plan.input) ?? plan.error ?? (plan.tool.length === 0 ? "provider-tool" : plan.tool),
+          activityId: plan.id
+        });
         continue;
       }
 
@@ -132,7 +140,9 @@ export class ToolPlanRunner {
 
     await emit(input.onEvent, {
       kind: "tool-start",
-      tool: plan.tool
+      tool: plan.tool,
+      targetSummary: summarizeSecurityTarget(plan.tool, plan.input),
+      activityId: plan.id
     });
 
     const execution = await this.#toolExecutor.executeTool({
@@ -154,6 +164,13 @@ export class ToolPlanRunner {
         { kind: "tool-plan", plan },
         "tool-execution"
       );
+      await emit(input.onEvent, {
+        kind: "tool-result",
+        tool: plan.tool,
+        ok: false,
+        targetSummary: summarizeSecurityTarget(plan.tool, plan.input),
+        activityId: plan.id
+      });
       return undefined;
     }
 
@@ -179,6 +196,8 @@ export class ToolPlanRunner {
       riskClass: execution.riskClass,
       ok: execution.result?.ok,
       fileChangePreview: toolResultFileChangePreview(execution),
+      targetSummary: execution.targetSummary,
+      activityId: plan.id,
       ...toolResultStats(execution)
     });
 

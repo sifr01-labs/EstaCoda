@@ -319,6 +319,7 @@ export interface ToolActivityRailEvent {
   readonly label?: string;
   readonly target?: string;
   readonly riskClass?: string;
+  readonly activityId?: string;
 }
 
 export interface ToolActivityRailViewModel {
