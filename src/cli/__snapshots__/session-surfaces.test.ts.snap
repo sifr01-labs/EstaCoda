@@ -729,67 +729,64 @@ exports[`Session surfaces — startup > renders in standard light > startup-stan
 `;
 
 exports[`Session surfaces — startup dashboard > renders in narrow width > startup-dashboard-narrow width 1`] = `
-"
-[38;2;90;172;255m[1mEstaCoda[0m[0m
+"                [38;2;90;172;255m[1mEstaCoda[0m[0m
 
-[2mKemet Research[0m
-[2mالسيادة التكنولوجية العربية[0m
+             [2mKemet Research[0m
+      [2mالسيادة التكنولوجية العربية[0m
 
-[2m─────── v0.0.5  𓂀  sess-9f7a2c1b ───────[0m
-
-│ [38;2;76;175;80m●[0m [1mdeepseek-reasoner[0m  ·  [38;2;76;175;80mready[0m
-
-Workspace Trust        :  trusted
-Workspace Verification :  verified
-Workspace Directory    :  /workspace
-User Security Mode     :  high
-User Skill Autonomy    :  autonomous
-Version Status         :  unknown
-
-[1mInteractive Commands:[0m
-
-[38;2;64;224;208m/tools[0m   [2mBrowse runtime tools[0m
-[38;2;64;224;208m/skills[0m   [2mBrowse skills[0m
-[38;2;64;224;208m/model[0m   [2mShow active model[0m
-[38;2;64;224;208m/status[0m   [2mShow session status[0m"
+[38;2;51;51;51m╭───────[0m[38;2;90;172;255m[1mv0.0.5  𓂀  sess-9f7a2c1b[0m[0m[38;2;51;51;51m───────╮[0m
+[38;2;51;51;51m│[0m [38;2;76;175;80m●[0m [1mdeepseek-reasoner[0m  ·  [38;2;76;175;80mready[0m        [38;2;51;51;51m│[0m
+[38;2;51;51;51m│[0m                                      [38;2;51;51;51m│[0m
+[38;2;51;51;51m│[0m Workspace Trust        :  trusted    [38;2;51;51;51m│[0m
+[38;2;51;51;51m│[0m Workspace Verification :  verified   [38;2;51;51;51m│[0m
+[38;2;51;51;51m│[0m Workspace Directory    :  /workspace [38;2;51;51;51m│[0m
+[38;2;51;51;51m│[0m Security Mode          :  high       [38;2;51;51;51m│[0m
+[38;2;51;51;51m│[0m Skill Autonomy         :  autonomous [38;2;51;51;51m│[0m
+[38;2;51;51;51m│[0m Version Status         :  unknown    [38;2;51;51;51m│[0m
+[38;2;51;51;51m│[0m                                      [38;2;51;51;51m│[0m
+[38;2;51;51;51m│[0m [1mInteractive Commands:[0m                [38;2;51;51;51m│[0m
+[38;2;51;51;51m│[0m                                      [38;2;51;51;51m│[0m
+[38;2;51;51;51m│[0m [38;2;64;224;208m/tools[0m   [2mBrowse runtime tools[0m        [38;2;51;51;51m│[0m
+[38;2;51;51;51m│[0m [38;2;64;224;208m/skills[0m   [2mBrowse skills[0m              [38;2;51;51;51m│[0m
+[38;2;51;51;51m│[0m [38;2;64;224;208m/model[0m   [2mShow active model[0m           [38;2;51;51;51m│[0m
+[38;2;51;51;51m│[0m [38;2;64;224;208m/status[0m   [2mShow session status[0m        [38;2;51;51;51m│[0m
+[38;2;51;51;51m╰──────────────────────────────────────╯[0m"
 `;
 
 exports[`Session surfaces — startup dashboard > renders in no Unicode > startup-dashboard-no Unicode 1`] = `
-"
-[38;2;90;172;255m[1mEstaCoda[0m[0m
+"                                 [38;2;90;172;255m[1mEstaCoda[0m[0m
 
-[2mKemet Research[0m
-[2mالسيادة التكنولوجية العربية[0m
+                              [2mKemet Research[0m
+                        [2mالسيادة التكنولوجية العربية[0m
 
-[2m------- v0.0.5  *  sess-9f7a2c1b -------[0m
-
-| [38;2;76;175;80m●[0m [1mdeepseek-reasoner[0m  ·  [38;2;76;175;80mready[0m
-
-Workspace Trust        :  trusted         [1mInteractive Commands:[0m
-Workspace Verification :  verified
-Workspace Directory    :  /workspace      [38;2;64;224;208m/tools[0m   [2mBrowse runtime tools[0m
-User Security Mode     :  high            [38;2;64;224;208m/skills[0m   [2mBrowse skills[0m
-User Skill Autonomy    :  autonomous      [38;2;64;224;208m/model[0m   [2mShow active model[0m
-Version Status         :  unknown         [38;2;64;224;208m/status[0m   [2mShow session status[0m"
+[38;2;51;51;51m+------------------------[0m[38;2;90;172;255m[1mv0.0.5  *  sess-9f7a2c1b[0m[0m[38;2;51;51;51m-------------------------+[0m
+[38;2;51;51;51m|[0m [38;2;76;175;80m●[0m [1mdeepseek-reasoner[0m  ·  [38;2;76;175;80mready[0m                                           [38;2;51;51;51m|[0m
+[38;2;51;51;51m|[0m                                                                         [38;2;51;51;51m|[0m
+[38;2;51;51;51m|[0m Workspace Trust        :  trusted         [1mInteractive Commands:[0m         [38;2;51;51;51m|[0m
+[38;2;51;51;51m|[0m Workspace Verification :  verified                                      [38;2;51;51;51m|[0m
+[38;2;51;51;51m|[0m Workspace Directory    :  /workspace      [38;2;64;224;208m/tools[0m   [2mBrowse runtime tools[0m [38;2;51;51;51m|[0m
+[38;2;51;51;51m|[0m Security Mode          :  high            [38;2;64;224;208m/skills[0m   [2mBrowse skills[0m       [38;2;51;51;51m|[0m
+[38;2;51;51;51m|[0m Skill Autonomy         :  autonomous      [38;2;64;224;208m/model[0m   [2mShow active model[0m    [38;2;51;51;51m|[0m
+[38;2;51;51;51m|[0m Version Status         :  unknown         [38;2;64;224;208m/status[0m   [2mShow session status[0m [38;2;51;51;51m|[0m
+[38;2;51;51;51m+-------------------------------------------------------------------------+[0m"
 `;
 
 exports[`Session surfaces — startup dashboard > renders in no color > startup-dashboard-no color 1`] = `
-"
-EstaCoda
+"                                 EstaCoda
 
-Kemet Research
-السيادة التكنولوجية العربية
+                              Kemet Research
+                        السيادة التكنولوجية العربية
 
-─────── v0.0.5  𓂀  sess-9f7a2c1b ───────
-
-│ ● deepseek-reasoner  ·  ready
-
-Workspace Trust        :  trusted         Interactive Commands:
-Workspace Verification :  verified
-Workspace Directory    :  /workspace      /tools   Browse runtime tools
-User Security Mode     :  high            /skills   Browse skills
-User Skill Autonomy    :  autonomous      /model   Show active model
-Version Status         :  unknown         /status   Show session status"
+╭────────────────────────v0.0.5  𓂀  sess-9f7a2c1b─────────────────────────╮
+│ ● deepseek-reasoner  ·  ready                                           │
+│                                                                         │
+│ Workspace Trust        :  trusted         Interactive Commands:         │
+│ Workspace Verification :  verified                                      │
+│ Workspace Directory    :  /workspace      /tools   Browse runtime tools │
+│ Security Mode          :  high            /skills   Browse skills       │
+│ Skill Autonomy         :  autonomous      /model   Show active model    │
+│ Version Status         :  unknown         /status   Show session status │
+╰─────────────────────────────────────────────────────────────────────────╯"
 `;
 
 exports[`Session surfaces — startup dashboard > renders in plain > startup-dashboard-plain 1`] = `
@@ -815,41 +812,39 @@ Interactive commands:
 `;
 
 exports[`Session surfaces — startup dashboard > renders in standard dark > startup-dashboard-standard dark 1`] = `
-"
-[38;2;90;172;255m[1mEstaCoda[0m[0m
+"                                 [38;2;90;172;255m[1mEstaCoda[0m[0m
 
-[2mKemet Research[0m
-[2mالسيادة التكنولوجية العربية[0m
+                              [2mKemet Research[0m
+                        [2mالسيادة التكنولوجية العربية[0m
 
-[2m─────── v0.0.5  𓂀  sess-9f7a2c1b ───────[0m
-
-│ [38;2;76;175;80m●[0m [1mdeepseek-reasoner[0m  ·  [38;2;76;175;80mready[0m
-
-Workspace Trust        :  trusted         [1mInteractive Commands:[0m
-Workspace Verification :  verified
-Workspace Directory    :  /workspace      [38;2;64;224;208m/tools[0m   [2mBrowse runtime tools[0m
-User Security Mode     :  high            [38;2;64;224;208m/skills[0m   [2mBrowse skills[0m
-User Skill Autonomy    :  autonomous      [38;2;64;224;208m/model[0m   [2mShow active model[0m
-Version Status         :  unknown         [38;2;64;224;208m/status[0m   [2mShow session status[0m"
+[38;2;51;51;51m╭────────────────────────[0m[38;2;90;172;255m[1mv0.0.5  𓂀  sess-9f7a2c1b[0m[0m[38;2;51;51;51m─────────────────────────╮[0m
+[38;2;51;51;51m│[0m [38;2;76;175;80m●[0m [1mdeepseek-reasoner[0m  ·  [38;2;76;175;80mready[0m                                           [38;2;51;51;51m│[0m
+[38;2;51;51;51m│[0m                                                                         [38;2;51;51;51m│[0m
+[38;2;51;51;51m│[0m Workspace Trust        :  trusted         [1mInteractive Commands:[0m         [38;2;51;51;51m│[0m
+[38;2;51;51;51m│[0m Workspace Verification :  verified                                      [38;2;51;51;51m│[0m
+[38;2;51;51;51m│[0m Workspace Directory    :  /workspace      [38;2;64;224;208m/tools[0m   [2mBrowse runtime tools[0m [38;2;51;51;51m│[0m
+[38;2;51;51;51m│[0m Security Mode          :  high            [38;2;64;224;208m/skills[0m   [2mBrowse skills[0m       [38;2;51;51;51m│[0m
+[38;2;51;51;51m│[0m Skill Autonomy         :  autonomous      [38;2;64;224;208m/model[0m   [2mShow active model[0m    [38;2;51;51;51m│[0m
+[38;2;51;51;51m│[0m Version Status         :  unknown         [38;2;64;224;208m/status[0m   [2mShow session status[0m [38;2;51;51;51m│[0m
+[38;2;51;51;51m╰─────────────────────────────────────────────────────────────────────────╯[0m"
 `;
 
 exports[`Session surfaces — startup dashboard > renders in standard light > startup-dashboard-standard light 1`] = `
-"
-[38;2;0;87;217m[1mEstaCoda[0m[0m
+"                                 [38;2;0;87;217m[1mEstaCoda[0m[0m
 
-[2mKemet Research[0m
-[2mالسيادة التكنولوجية العربية[0m
+                              [2mKemet Research[0m
+                        [2mالسيادة التكنولوجية العربية[0m
 
-[2m─────── v0.0.5  𓂀  sess-9f7a2c1b ───────[0m
-
-│ [38;2;46;125;50m●[0m [1mdeepseek-reasoner[0m  ·  [38;2;46;125;50mready[0m
-
-Workspace Trust        :  trusted         [1mInteractive Commands:[0m
-Workspace Verification :  verified
-Workspace Directory    :  /workspace      [38;2;0;140;149m/tools[0m   [2mBrowse runtime tools[0m
-User Security Mode     :  high            [38;2;0;140;149m/skills[0m   [2mBrowse skills[0m
-User Skill Autonomy    :  autonomous      [38;2;0;140;149m/model[0m   [2mShow active model[0m
-Version Status         :  unknown         [38;2;0;140;149m/status[0m   [2mShow session status[0m"
+[38;2;224;224;224m╭────────────────────────[0m[38;2;0;87;217m[1mv0.0.5  𓂀  sess-9f7a2c1b[0m[0m[38;2;224;224;224m─────────────────────────╮[0m
+[38;2;224;224;224m│[0m [38;2;46;125;50m●[0m [1mdeepseek-reasoner[0m  ·  [38;2;46;125;50mready[0m                                           [38;2;224;224;224m│[0m
+[38;2;224;224;224m│[0m                                                                         [38;2;224;224;224m│[0m
+[38;2;224;224;224m│[0m Workspace Trust        :  trusted         [1mInteractive Commands:[0m         [38;2;224;224;224m│[0m
+[38;2;224;224;224m│[0m Workspace Verification :  verified                                      [38;2;224;224;224m│[0m
+[38;2;224;224;224m│[0m Workspace Directory    :  /workspace      [38;2;0;140;149m/tools[0m   [2mBrowse runtime tools[0m [38;2;224;224;224m│[0m
+[38;2;224;224;224m│[0m Security Mode          :  high            [38;2;0;140;149m/skills[0m   [2mBrowse skills[0m       [38;2;224;224;224m│[0m
+[38;2;224;224;224m│[0m Skill Autonomy         :  autonomous      [38;2;0;140;149m/model[0m   [2mShow active model[0m    [38;2;224;224;224m│[0m
+[38;2;224;224;224m│[0m Version Status         :  unknown         [38;2;0;140;149m/status[0m   [2mShow session status[0m [38;2;224;224;224m│[0m
+[38;2;224;224;224m╰─────────────────────────────────────────────────────────────────────────╯[0m"
 `;
 
 exports[`Session surfaces — unknown-command fallback > renders in narrow width > unknown-command-narrow width 1`] = `"• No slash commands or skills match "/nonexistent"."`;

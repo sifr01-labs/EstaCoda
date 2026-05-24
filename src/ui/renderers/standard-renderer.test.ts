@@ -898,6 +898,11 @@ describe("StandardRenderer — startup dashboard", () => {
     expect(out).toContain("verified");
     expect(out).toContain("Workspace Directory");
     expect(out).toContain("/workspace");
+    expect(out).toContain("Security Mode");
+    expect(out).toContain("Skill Autonomy");
+    expect(stripAnsi(out)).toContain("╭");
+    expect(stripAnsi(out)).toContain("╰");
+    expect(stripAnsi(out)).not.toContain("│ │");
     expect(out).toContain("/tools");
     expect(out).toContain("Browse runtime tools");
     expect(out).toContain("/status");
@@ -1006,6 +1011,27 @@ describe("StandardRenderer — startup dashboard", () => {
     // Should use ASCII dash for separator, not Unicode box-drawing
     expect(out).not.toContain("─");
     expect(out).toContain("-");
+  });
+
+  it("keeps startup dashboard border styling isolated when title truncates", () => {
+    const r = renderer("dark", narrowCaps());
+    const vm = buildStartupDashboardViewModel({
+      agentName: "EstaCoda",
+      taglines: [],
+      version: "v0.0.5",
+      sessionId: "session-id-that-is-long-enough-to-truncate",
+      model: { provider: "p", id: "deepseek-reasoner" },
+      workspaceTrust: "trusted",
+      workspaceVerification: "verified",
+      securityMode: "high",
+      providerReadiness: "ready",
+      availableCommands: [],
+      warnings: [],
+    });
+    const top = r.renderStartupDashboard(vm).split("\n").find((line) => stripAnsi(line).startsWith("╭"));
+    expect(top).toBeDefined();
+    expect(top).toContain("...");
+    expect(top).toMatch(/\.\.\.\x1b\[0m\x1b\[0m\x1b\[38;2;51;51;51m─*╮/);
   });
 
   it("renders Arabic dashboard chrome and isolates startup technical tokens", () => {
@@ -1373,7 +1399,7 @@ describe("StandardRenderer — prompt chrome rails", () => {
     const tokens = resolveTokens("plain", "light", "kemetBlue");
     const r = new StandardRenderer({ tokens, capabilities: noUnicodeCaps() });
     const out = r.render(buildSessionStatusRailViewModel({ modelLabel: "m", turnState: "idle" }));
-    expect(out).toContain("* m");
+    expect(out).toContain("*  m");
     expect(out).toContain("idle");
     assertNoAnsi(out);
   });

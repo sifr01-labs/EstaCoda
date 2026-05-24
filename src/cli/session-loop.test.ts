@@ -335,7 +335,9 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     expect(rendered).toContain("test-session");
     expect(rendered).toContain("Workspace Trust");
     expect(rendered).toContain("Workspace Verification");
-    expect(rendered).toContain("User Security Mode");
+    expect(rendered).toContain("Security Mode");
+    expect(rendered).toContain("╭");
+    expect(rendered).toContain("𓂀  mock-model");
     expect(rendered).toContain("/tools");
   });
 

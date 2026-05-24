@@ -1034,26 +1034,19 @@ export class StandardRenderer {
   renderStartupDashboard(vm: StartupDashboardViewModel): string {
     const lines: string[] = [];
 
-    // Hero
-    lines.push(this.#heroPanel(vm.agentName, vm.taglines));
-    lines.push("");
-
     // Version / session separator line
     const versionText = vm.version.length > 0 ? this.#technical(vm.version) : this.#copy.startupUnknown;
     const sessionText = vm.sessionId !== undefined ? this.#technical(vm.sessionId) : "";
     const horiz = this.#useUnicode ? "─" : "-";
+    const topLeft = this.#useUnicode ? "╭" : "+";
+    const topRight = this.#useUnicode ? "╮" : "+";
+    const bottomLeft = this.#useUnicode ? "╰" : "+";
+    const bottomRight = this.#useUnicode ? "╯" : "+";
+    const vert = this.#useUnicode ? "│" : "|";
     const eye = this.#useUnicode ? "𓂀" : "*";
-    const sepLabel = sessionText
+    const cardTitle = sessionText
       ? `${versionText}  ${eye}  ${sessionText}`
       : versionText;
-    const sepWidth = Math.min(
-      this.#capabilities.terminalWidth,
-      Math.max(measureTextWidth(sepLabel) + 4, 40)
-    );
-    const sideLen = Math.max(0, Math.floor((sepWidth - measureTextWidth(sepLabel)) / 2) - 1);
-    const sepLine = `${horiz.repeat(sideLen)} ${sepLabel} ${horiz.repeat(sideLen)}`;
-    lines.push(this.#dim(sepLine));
-    lines.push("");
 
     // Model route readiness line
     const readiness = vm.providerReadiness;
@@ -1086,8 +1079,6 @@ export class StandardRenderer {
     }
 
     const modelLine = `${modelDot} ${this.#bold(modelLabel)}  ·  ${readinessColor}`;
-    lines.push(this.#rail(modelLine));
-    lines.push("");
 
     // Two-column layout: info (left) and commands (right)
     const infoRows: string[] = [];
@@ -1118,24 +1109,74 @@ export class StandardRenderer {
     }
 
     // Combine side by side if width allows
-    const maxInfoWidth = infoRows.length > 0 ? Math.max(...infoRows.map((r) => measureTextWidth(r))) : 0;
-    const maxCmdWidth = cmdRows.length > 0 ? Math.max(...cmdRows.map((r) => measureTextWidth(r))) : 0;
+    const maxInfoWidth = infoRows.length > 0 ? Math.max(...infoRows.map((r) => measureVisibleWidth(r))) : 0;
+    const maxCmdWidth = cmdRows.length > 0 ? Math.max(...cmdRows.map((r) => measureVisibleWidth(r))) : 0;
     const gap = 6;
     const totalWidth = maxInfoWidth + gap + maxCmdWidth;
+    const maxFrameWidth = Math.max(24, this.#capabilities.terminalWidth);
+    const maxContentWidth = Math.max(8, maxFrameWidth - 4);
+    const dashboardRows: string[] = [modelLine, ""];
 
-    if (totalWidth <= this.#capabilities.terminalWidth && maxInfoWidth > 0 && maxCmdWidth > 0) {
+    if (totalWidth <= maxContentWidth && maxInfoWidth > 0 && maxCmdWidth > 0) {
       const maxRows = Math.max(infoRows.length, cmdRows.length);
       for (let i = 0; i < maxRows; i++) {
         const left = infoRows[i] ?? "";
         const right = cmdRows[i] ?? "";
         const paddedLeft = padVisibleEnd(left, maxInfoWidth);
-        lines.push(`${paddedLeft}${" ".repeat(gap)}${right}`);
+        dashboardRows.push(`${paddedLeft}${" ".repeat(gap)}${right}`);
       }
     } else {
-      for (const row of infoRows) lines.push(row);
-      if (infoRows.length > 0 && cmdRows.length > 0) lines.push("");
-      for (const row of cmdRows) lines.push(row);
+      for (const row of infoRows) dashboardRows.push(row);
+      if (infoRows.length > 0 && cmdRows.length > 0) dashboardRows.push("");
+      for (const row of cmdRows) dashboardRows.push(row);
     }
+
+    const blockWidth = Math.max(0, ...dashboardRows.map((row) => measureVisibleWidth(row)));
+    const titleWidth = measureTextWidth(cardTitle);
+    const frameWidth = Math.min(
+      maxFrameWidth,
+      Math.max(40, titleWidth + 4, blockWidth + 4)
+    );
+    const contentWidth = Math.max(8, frameWidth - 4);
+    const boundedTitleText = truncateVisible(cardTitle, Math.max(1, frameWidth - 2));
+    const boundedTitle = this.#brand(this.#bold(boundedTitleText));
+    const boundedTitleWidth = measureVisibleWidth(boundedTitle);
+    const titleAvail = Math.max(0, frameWidth - 2 - boundedTitleWidth);
+    const titleLeft = Math.floor(titleAvail / 2);
+    const titleRight = titleAvail - titleLeft;
+
+    const heroLines = [
+      padVisibleAlign(this.#brand(this.#bold(vm.agentName)), frameWidth, "center"),
+      "",
+      ...vm.taglines
+        .filter((tag) => tag.length > 0)
+        .map((tag) => padVisibleAlign(this.#dim(tag), frameWidth, "center")),
+    ];
+    lines.push(...heroLines);
+    lines.push("");
+
+    lines.push([
+      this.#surfaceBorder(`${topLeft}${horiz.repeat(titleLeft)}`),
+      boundedTitle,
+      this.#surfaceBorder(`${horiz.repeat(titleRight)}${topRight}`),
+    ].join(""));
+
+    const blockOffset = blockWidth < contentWidth ? Math.floor((contentWidth - blockWidth) / 2) : 0;
+    for (const row of dashboardRows) {
+      const alignedRow = blockWidth < contentWidth
+        ? `${" ".repeat(blockOffset)}${padVisibleEnd(row, blockWidth)}`
+        : row;
+      const content = padVisibleEnd(truncateVisible(alignedRow, contentWidth), contentWidth);
+      lines.push([
+        this.#surfaceBorder(vert),
+        " ",
+        content,
+        " ",
+        this.#surfaceBorder(vert),
+      ].join(""));
+    }
+
+    lines.push(this.#surfaceBorder(`${bottomLeft}${horiz.repeat(frameWidth - 2)}${bottomRight}`));
 
     // Warnings
     for (const warning of vm.warnings) {
@@ -1270,7 +1311,7 @@ export class StandardRenderer {
   renderSessionStatusRail(vm: SessionStatusRailViewModel): string {
     const eye = this.#useUnicode ? "𓂀" : "*";
     const modelLabel = this.#locale === "ar" ? isolateLtr(vm.modelLabel) : vm.modelLabel;
-    const parts: string[] = [`${this.#brand(eye)} ${modelLabel}`];
+    const parts: string[] = [`${this.#brand(eye)}  ${this.#brand(modelLabel)}`];
 
     if (vm.contextUsage !== undefined) {
       const filled = formatContextCount(vm.contextUsage.filled);

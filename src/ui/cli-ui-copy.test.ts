@@ -27,6 +27,8 @@ describe("chromeCopy — en", () => {
     const copy = chromeCopy("en");
     expect(copy.startupVersion).toBe("version");
     expect(copy.startupWorkspaceTrust).toBe("Workspace Trust");
+    expect(copy.startupSecurityMode).toBe("Security Mode");
+    expect(copy.startupSkillAutonomy).toBe("Skill Autonomy");
     expect(copy.startupInteractiveCommands).toBe("Interactive Commands:");
     expect(copy.startupPromptHint).toBe("Type a message. Use /help for commands or /exit to leave.");
   });
@@ -66,6 +68,8 @@ describe("chromeCopy — ar", () => {
     const copy = chromeCopy("ar");
     expect(copy.startupVersion).toBe("\u0627\u0644\u0625\u0635\u062f\u0627\u0631");
     expect(copy.startupWorkspaceVerification).toBe("\u062d\u0627\u0644\u0629 \u062a\u062d\u0642\u0642 \u0645\u0633\u0627\u062d\u0629 \u0627\u0644\u0639\u0645\u0644");
+    expect(copy.startupSecurityMode).toBe("\u0648\u0636\u0639 \u0627\u0644\u0623\u0645\u0627\u0646");
+    expect(copy.startupSkillAutonomy).toBe("\u0627\u0633\u062a\u0642\u0644\u0627\u0644\u064a\u0629 \u0627\u0644\u0645\u0647\u0627\u0631\u0627\u062a");
     expect(copy.startupCommandModel).toBe("\u0627\u0639\u0631\u0636 \u0627\u0644\u0646\u0645\u0648\u0630\u062c \u0627\u0644\u0646\u0634\u0637");
     expect(copy.startupPromptHint).toContain(isolateLtr("/help"));
     expect(copy.startupPromptHint).toContain(isolateLtr("/exit"));
