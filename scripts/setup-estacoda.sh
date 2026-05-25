@@ -2,27 +2,20 @@
 set -euo pipefail
 
 INSTALLER_VERSION="v0.1.0-prerelease"
-DEFAULT_SOURCE_URL="https://github.com/KemetResearch/EstaCoda.git"
-SOURCE_URL="${ESTACODA_SOURCE_URL:-$DEFAULT_SOURCE_URL}"
-BRANCH="${ESTACODA_BRANCH:-main}"
-INSTALL_DIR=""
 SKIP_INIT=0
-FORCE_FHS=0
 
 usage() {
   cat <<'USAGE'
-EstaCoda source installer
+EstaCoda manual source setup
 
 Usage:
-  curl -fsSL https://raw.githubusercontent.com/KemetResearch/EstaCoda/main/scripts/install.sh | bash
-  bash scripts/install.sh [--branch <branch>] [--dir <path>] [--skip-init] [--fhs]
+  git clone https://github.com/KemetResearch/EstaCoda.git
+  cd EstaCoda
+  ./scripts/setup-estacoda.sh [--skip-init]
 
 Options:
-  --branch <branch>  Clone or update the managed install from this branch (default: main)
-  --dir <path>       Install into a custom managed source directory
-  --skip-init        Do not run `estacoda init` after building
-  --fhs              Use Linux FHS paths: /usr/local/lib/estacoda and /usr/local/bin
-  -h, --help         Show this help without changing files
+  --skip-init  Do not run `estacoda init` after building
+  -h, --help   Show this help without changing files
 USAGE
 }
 
@@ -37,22 +30,8 @@ command_exists() {
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --branch)
-      [ "$#" -ge 2 ] || die "--branch requires a value"
-      BRANCH="$2"
-      shift 2
-      ;;
-    --dir)
-      [ "$#" -ge 2 ] || die "--dir requires a value"
-      INSTALL_DIR="$2"
-      shift 2
-      ;;
     --skip-init)
       SKIP_INIT=1
-      shift
-      ;;
-    --fhs)
-      FORCE_FHS=1
       shift
       ;;
     -h|--help)
@@ -65,18 +44,8 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-if [ -z "$BRANCH" ]; then
-  die "Branch must not be empty"
-fi
-
-resolve_path() {
-  local path="$1"
-  mkdir -p "$(dirname "$path")"
-  (
-    cd "$(dirname "$path")"
-    printf '%s/%s\n' "$(pwd -P)" "$(basename "$path")"
-  )
-}
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 
 shell_quote() {
   printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
@@ -117,7 +86,7 @@ detect_platform() {
       if command_exists ldd && ldd --version 2>&1 | head -n 1 | grep -Eiq 'glibc|gnu libc'; then
         return 0
       fi
-      die "A modern Linux distribution with glibc is required for the v0.1.0 source installer."
+      die "A modern Linux distribution with glibc is required for manual source setup."
       ;;
     *)
       die "Unsupported operating system: $os"
@@ -156,30 +125,21 @@ ensure_pnpm() {
   echo "pnpm: $pnpm_version"
 }
 
-require_git() {
-  if ! command_exists git; then
-    die "git is required for source installation."
+detect_git_metadata() {
+  SOURCE_URL="unknown"
+  BRANCH="unknown"
+  if command_exists git && git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    SOURCE_URL="$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || printf 'unknown')"
+    BRANCH="$(git -C "$REPO_ROOT" branch --show-current 2>/dev/null || printf 'unknown')"
+    if [ -z "$BRANCH" ]; then
+      BRANCH="unknown"
+    fi
   fi
 }
 
-choose_paths() {
-  local os
-  os="$(uname -s)"
-
-  if [ -n "$INSTALL_DIR" ]; then
-    INSTALL_DIR="$(resolve_path "$INSTALL_DIR")"
-  elif [ "$FORCE_FHS" -eq 1 ] || { [ "${EUID:-$(id -u)}" -eq 0 ] && [ "$os" = "Linux" ] && ! is_termux; }; then
-    INSTALL_DIR="/usr/local/lib/estacoda"
-    FORCE_FHS=1
-  else
-    [ -n "${HOME:-}" ] || die "HOME is not set. Use --dir to choose an install directory."
-    INSTALL_DIR="$HOME/.estacoda/estacoda"
-  fi
-
-  if [ "$FORCE_FHS" -eq 1 ]; then
-    BIN_DIR="/usr/local/bin"
-  elif is_termux; then
-    [ -n "${PREFIX:-}" ] || die "PREFIX is required for Termux installs."
+choose_bin_dir() {
+  if is_termux; then
+    [ -n "${PREFIX:-}" ] || die "PREFIX is required for Termux setup."
     BIN_DIR="$PREFIX/bin"
   else
     [ -n "${HOME:-}" ] || die "HOME is not set."
@@ -187,55 +147,10 @@ choose_paths() {
   fi
 }
 
-stamp_matches_managed_install() {
-  local stamp_path="$1"
-  [ -f "$stamp_path" ] || return 1
-  node --input-type=module - "$stamp_path" "$SOURCE_URL" "$BRANCH" <<'NODE'
-import { readFileSync } from "node:fs";
-
-const [stampPath, sourceUrl, branch] = process.argv.slice(2);
-const stamp = JSON.parse(readFileSync(stampPath, "utf8"));
-if (
-  stamp.method === "managed-source" &&
-  stamp.sourceUrl === sourceUrl &&
-  stamp.branch === branch
-) {
-  process.exit(0);
-}
-process.exit(1);
-NODE
-}
-
-clone_or_update_managed_source() {
-  local stamp_path="$INSTALL_DIR/.install-method.json"
-
-  if [ -d "$INSTALL_DIR/.git" ]; then
-    if ! stamp_matches_managed_install "$stamp_path"; then
-      die "Refusing to update $INSTALL_DIR because it is not stamped as this managed-source install."
-    fi
-    echo "Updating existing managed source install: $INSTALL_DIR"
-    (
-      cd "$INSTALL_DIR"
-      git fetch origin "$BRANCH"
-      git checkout "$BRANCH"
-      git pull --ff-only origin "$BRANCH"
-    )
-    return 0
-  fi
-
-  if [ -e "$INSTALL_DIR" ] && [ "$(find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')" != "0" ]; then
-    die "Refusing to overwrite non-empty unmanaged directory: $INSTALL_DIR"
-  fi
-
-  mkdir -p "$(dirname "$INSTALL_DIR")"
-  echo "Cloning EstaCoda $BRANCH into $INSTALL_DIR"
-  git clone --branch "$BRANCH" "$SOURCE_URL" "$INSTALL_DIR"
-}
-
 build_source() {
   echo "Installing dependencies and building dist/"
   (
-    cd "$INSTALL_DIR"
+    cd "$REPO_ROOT"
     CI=true pnpm install --frozen-lockfile
     pnpm run build
   )
@@ -244,7 +159,7 @@ build_source() {
 write_wrapper() {
   local wrapper="$BIN_DIR/estacoda"
   local quoted_root
-  quoted_root="$(shell_quote "$INSTALL_DIR")"
+  quoted_root="$(shell_quote "$REPO_ROOT")"
   mkdir -p "$BIN_DIR"
 
   if [ -e "$wrapper" ] || [ -L "$wrapper" ]; then
@@ -260,7 +175,7 @@ write_wrapper() {
   cat > "$wrapper" <<WRAPPER
 #!/usr/bin/env bash
 set -euo pipefail
-# EstaCoda source wrapper. Generated by scripts/install.sh.
+# EstaCoda source wrapper. Generated by scripts/setup-estacoda.sh.
 REPO_ROOT=$quoted_root
 ENTRYPOINT="\$REPO_ROOT/dist/index.js"
 if [ ! -f "\$ENTRYPOINT" ]; then
@@ -274,8 +189,8 @@ WRAPPER
 }
 
 write_stamp() {
-  local stamp_path="$INSTALL_DIR/.install-method.json"
-  node --input-type=module - "$stamp_path" "managed-source" "$SOURCE_URL" "$BRANCH" "$INSTALL_DIR" "$INSTALLER_VERSION" <<'NODE'
+  local stamp_path="$REPO_ROOT/.install-method.json"
+  node --input-type=module - "$stamp_path" "manual-source" "$SOURCE_URL" "$BRANCH" "$REPO_ROOT" "$INSTALLER_VERSION" <<'NODE'
 import { writeFileSync } from "node:fs";
 
 const [stampPath, method, sourceUrl, branch, installDir, installerVersion] = process.argv.slice(2);
@@ -300,26 +215,25 @@ run_init() {
   HOME="${HOME:-}" "$BIN_DIR/estacoda" init
 }
 
-echo "EstaCoda source installer"
+echo "EstaCoda manual source setup"
 detect_platform
 validate_node
-require_git
 ensure_pnpm
-choose_paths
+detect_git_metadata
+choose_bin_dir
 
+echo "Repo root: $REPO_ROOT"
 echo "Source: $SOURCE_URL"
 echo "Branch: $BRANCH"
-echo "Install dir: $INSTALL_DIR"
 echo "Bin dir: $BIN_DIR"
 
-clone_or_update_managed_source
 build_source
 write_stamp
 write_wrapper
 run_init
 
 echo ""
-echo "EstaCoda installed."
+echo "EstaCoda source checkout is set up."
 echo "Command: $BIN_DIR/estacoda"
 echo ""
 echo "Next steps:"

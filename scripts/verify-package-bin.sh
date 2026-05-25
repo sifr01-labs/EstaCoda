@@ -66,6 +66,7 @@ process.stdin.on("end", () => {
   const requiredFiles = [
     "dist/index.js",
     "scripts/install.sh",
+    "scripts/setup-estacoda.sh",
     "scripts/estacoda-wrapper.sh",
     "README.md",
     "LICENSE",
