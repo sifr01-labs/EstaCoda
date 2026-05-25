@@ -4,6 +4,7 @@ import {
   canApplyUpdate,
   applyUpdate,
   applyManagedSourceUpdate,
+  type UpdateApplyResult,
   type UpdateCheckResult
 } from "../lifecycle/update-engine.js";
 import {
@@ -14,6 +15,10 @@ import {
   resolveGitUpdateInfo,
   type GitUpdateResolverResult
 } from "../lifecycle/version-resolver.js";
+import {
+  runManagedSourceUpdateWithResilience,
+  type UpdateResilienceResult
+} from "./update-resilience.js";
 
 export type UpdateOptions = {
   check?: boolean;
@@ -30,6 +35,7 @@ export type UpdateOptions = {
   canApplyUpdate?: typeof canApplyUpdate;
   applyUpdate?: typeof applyUpdate;
   applyManagedSourceUpdate?: typeof applyManagedSourceUpdate;
+  runUpdateWithResilience?: typeof runManagedSourceUpdateWithResilience;
 };
 
 export type UpdateResult = {
@@ -58,21 +64,24 @@ export async function runUpdateCommand(options: UpdateOptions): Promise<UpdateRe
       return await runSourceUpdateCheck(installMethod, options, true);
     }
 
-    const result = await (options.applyManagedSourceUpdate ?? applyManagedSourceUpdate)({
-      installMethod,
+    const resilience = await (options.runUpdateWithResilience ?? runManagedSourceUpdateWithResilience)({
       homeDir,
-      workspaceRoot: options.workspaceRoot,
-      backupMode: options.backupMode ?? "default"
+      installMethod,
+      processLike: process,
+      stdout: process.stdout,
+      stderr: process.stderr,
+      run: () => (options.applyManagedSourceUpdate ?? applyManagedSourceUpdate)({
+        installMethod,
+        homeDir,
+        workspaceRoot: options.workspaceRoot,
+        backupMode: options.backupMode ?? "default"
+      })
     });
+    const result = resilience.result;
 
     return {
       exitCode: result.kind === "success" ? 0 : result.message.includes("Exit code: 3") ? 3 : 1,
-      output: [
-        "Detected install method: managed-source",
-        `Reason: ${installMethod.reason}`,
-        "",
-        result.message
-      ].join("\n")
+      output: renderManagedSourceApplyOutput(installMethod, result, resilience)
     };
   }
 
@@ -155,6 +164,24 @@ export async function runUpdateCommand(options: UpdateOptions): Promise<UpdateRe
       result.message
     ].join("\n")
   };
+}
+
+function renderManagedSourceApplyOutput(
+  installMethod: InstallMethodInfo,
+  result: UpdateApplyResult,
+  resilience: UpdateResilienceResult
+): string {
+  return [
+    "Detected install method: managed-source",
+    `Reason: ${installMethod.reason}`,
+    "",
+    result.message,
+    resilience.logPath !== undefined ? `Update log: ${resilience.logPath}` : undefined,
+    resilience.logPath === undefined && resilience.logFailure !== undefined
+      ? `Update log unavailable: ${resilience.logFailure}`
+      : undefined,
+    resilience.sighupReceived ? "SIGHUP received during update; update continued where possible." : undefined
+  ].filter((line): line is string => line !== undefined).join("\n");
 }
 
 async function runSourceUpdateCheck(

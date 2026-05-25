@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { runUpdateCommand } from "./update-command.js";
+import { updateLogPath } from "./update-resilience.js";
 import type { InstallMethod, InstallMethodInfo } from "../lifecycle/install-method.js";
 import type { UpdateApplyResult } from "../lifecycle/update-engine.js";
 import type { GitUpdateResolverResult } from "../lifecycle/version-resolver.js";
@@ -76,18 +80,24 @@ describe("runUpdateCommand install-method routing", () => {
   });
 
   it("refuses to self-mutate manual-source installs on apply", async () => {
-    const result = await runUpdateCommand({
-      dryRun: false,
-      apply: true,
-      explicitApply: true,
-      homeDir: "/tmp/estacoda-home",
-      installMethodInfo: installInfo("manual-source")
-    });
+    const homeDir = mkdtempSync(join(tmpdir(), "estacoda-update-command-"));
+    try {
+      const result = await runUpdateCommand({
+        dryRun: false,
+        apply: true,
+        explicitApply: true,
+        homeDir,
+        installMethodInfo: installInfo("manual-source")
+      });
 
-    expect(result.exitCode).toBe(1);
-    expect(result.output).toContain("Detected install method: manual-source");
-    expect(result.output).toContain("Manual source checkouts are not self-mutated");
-    expect(result.output).toContain("No files were modified.");
+      expect(result.exitCode).toBe(1);
+      expect(result.output).toContain("Detected install method: manual-source");
+      expect(result.output).toContain("Manual source checkouts are not self-mutated");
+      expect(result.output).toContain("No files were modified.");
+      expect(existsSync(updateLogPath(homeDir))).toBe(false);
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
   });
 
   it("applies managed-source updates through the source updater without artifact update", async () => {
@@ -128,6 +138,66 @@ describe("runUpdateCommand install-method routing", () => {
     expect(checkedArtifact).toBe(false);
     expect(appliedArtifact).toBe(false);
     expect(appliedSource).toBe(true);
+  });
+
+  it("wraps managed-source apply with update logging", async () => {
+    const homeDir = mkdtempSync(join(tmpdir(), "estacoda-update-command-"));
+    try {
+      const result = await runUpdateCommand({
+        dryRun: false,
+        apply: true,
+        explicitApply: false,
+        homeDir,
+        installMethodInfo: installInfo("managed-source", {
+          source: "stamp",
+          installDir: "/repo",
+          sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+          expectedBranch: "main"
+        }),
+        applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => ({
+          kind: "success",
+          message: "Update applied from TOKEN=secret-value"
+        })
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain(`Update log: ${updateLogPath(homeDir)}`);
+      const log = readFileSync(updateLogPath(homeDir), "utf8");
+      expect(log).toContain("update result: success");
+      expect(log).toContain("TOKEN=[redacted]");
+      expect(log).not.toContain("secret-value");
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports unavailable update logging without blocking managed-source apply", async () => {
+    const result = await runUpdateCommand({
+      dryRun: false,
+      apply: true,
+      explicitApply: false,
+      homeDir: "/tmp/estacoda-home",
+      installMethodInfo: installInfo("managed-source", {
+        source: "stamp",
+        installDir: "/repo",
+        sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+        expectedBranch: "main"
+      }),
+      runUpdateWithResilience: async (input) => ({
+        result: await input.run(),
+        logAvailable: false,
+        logFailure: "disk full",
+        sighupReceived: false
+      }),
+      applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => ({
+        kind: "success",
+        message: "Update applied."
+      })
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("Update applied.");
+    expect(result.output).toContain("Update log unavailable: disk full");
   });
 
   it("passes explicit backup modes to managed-source updates", async () => {
@@ -183,28 +253,34 @@ describe("runUpdateCommand install-method routing", () => {
     "pnpm-global",
     "unknown"
   ] as const)("routes %s apply without source or artifact mutation", async (method) => {
+    const homeDir = mkdtempSync(join(tmpdir(), "estacoda-update-command-"));
     let appliedSource = false;
     let appliedArtifact = false;
-    const result = await runUpdateCommand({
-      dryRun: false,
-      apply: true,
-      explicitApply: true,
-      homeDir: "/tmp/estacoda-home",
-      installMethodInfo: installInfo(method),
-      applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => {
-        appliedSource = true;
-        return { kind: "success", message: "should not apply" };
-      },
-      applyUpdate: async () => {
-        appliedArtifact = true;
-        return { kind: "success", message: "should not apply" };
-      }
-    });
+    try {
+      const result = await runUpdateCommand({
+        dryRun: false,
+        apply: true,
+        explicitApply: true,
+        homeDir,
+        installMethodInfo: installInfo(method),
+        applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => {
+          appliedSource = true;
+          return { kind: "success", message: "should not apply" };
+        },
+        applyUpdate: async () => {
+          appliedArtifact = true;
+          return { kind: "success", message: "should not apply" };
+        }
+      });
 
-    expect(result.exitCode).toBe(1);
-    expect(result.output).toContain("No files were modified.");
-    expect(appliedSource).toBe(false);
-    expect(appliedArtifact).toBe(false);
+      expect(result.exitCode).toBe(1);
+      expect(result.output).toContain("No files were modified.");
+      expect(appliedSource).toBe(false);
+      expect(appliedArtifact).toBe(false);
+      expect(existsSync(updateLogPath(homeDir))).toBe(false);
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
   });
 
   it("treats default non-self-update routing as successful guidance", async () => {
@@ -222,44 +298,50 @@ describe("runUpdateCommand install-method routing", () => {
   });
 
   it("reports managed-source update availability through git without applying", async () => {
+    const homeDir = mkdtempSync(join(tmpdir(), "estacoda-update-command-"));
     let appliedSource = false;
-    const result = await runUpdateCommand({
-      check: true,
-      dryRun: true,
-      apply: false,
-      homeDir: "/tmp/estacoda-home",
-      installMethodInfo: installInfo("managed-source", {
-        installDir: "/repo",
-        sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
-        expectedBranch: "main"
-      }),
-      checkGitUpdate: async (info, options): Promise<GitUpdateResolverResult> => {
-        expect(info.installDir).toBe("/repo");
-        expect(options.mutateRemoteRefs).toBe(true);
-        return {
-          ok: true,
-          kind: "available",
-          info: {
-            current: "local",
-            latest: "remote",
-            branch: "main",
-            remote: "origin",
-            repoDir: "/repo",
-            commitsBehind: 3
-          }
-        };
-      },
-      applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => {
-        appliedSource = true;
-        return { kind: "success", message: "should not apply" };
-      }
-    });
+    try {
+      const result = await runUpdateCommand({
+        check: true,
+        dryRun: true,
+        apply: false,
+        homeDir,
+        installMethodInfo: installInfo("managed-source", {
+          installDir: "/repo",
+          sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+          expectedBranch: "main"
+        }),
+        checkGitUpdate: async (info, options): Promise<GitUpdateResolverResult> => {
+          expect(info.installDir).toBe("/repo");
+          expect(options.mutateRemoteRefs).toBe(true);
+          return {
+            ok: true,
+            kind: "available",
+            info: {
+              current: "local",
+              latest: "remote",
+              branch: "main",
+              remote: "origin",
+              repoDir: "/repo",
+              commitsBehind: 3
+            }
+          };
+        },
+        applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => {
+          appliedSource = true;
+          return { kind: "success", message: "should not apply" };
+        }
+      });
 
-    expect(result.exitCode).toBe(0);
-    expect(result.output).toContain("Update available: 3 commits behind origin/main.");
-    expect(result.output).toContain("Run: estacoda update");
-    expect(result.output).toContain("No files were modified.");
-    expect(appliedSource).toBe(false);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("Update available: 3 commits behind origin/main.");
+      expect(result.output).toContain("Run: estacoda update");
+      expect(result.output).toContain("No files were modified.");
+      expect(appliedSource).toBe(false);
+      expect(existsSync(updateLogPath(homeDir))).toBe(false);
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
   });
 
   it("reports managed-source up-to-date through git", async () => {
@@ -372,32 +454,38 @@ describe("runUpdateCommand install-method routing", () => {
   });
 
   it("keeps managed-source dry-run on the existing update check path", async () => {
+    const homeDir = mkdtempSync(join(tmpdir(), "estacoda-update-command-"));
     let appliedSource = false;
-    const result = await runUpdateCommand({
-      dryRun: true,
-      apply: false,
-      homeDir: "/tmp/estacoda-home",
-      installMethodInfo: installInfo("managed-source"),
-      checkGitUpdate: async (): Promise<GitUpdateResolverResult> => ({
-        ok: true,
-        kind: "up-to-date",
-        info: {
-          current: "same",
-          latest: "same",
-          branch: "main",
-          remote: "origin",
-          repoDir: "/repo",
-          commitsBehind: 0
+    try {
+      const result = await runUpdateCommand({
+        dryRun: true,
+        apply: false,
+        homeDir,
+        installMethodInfo: installInfo("managed-source"),
+        checkGitUpdate: async (): Promise<GitUpdateResolverResult> => ({
+          ok: true,
+          kind: "up-to-date",
+          info: {
+            current: "same",
+            latest: "same",
+            branch: "main",
+            remote: "origin",
+            repoDir: "/repo",
+            commitsBehind: 0
+          }
+        }),
+        applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => {
+          appliedSource = true;
+          return { kind: "success", message: "should not apply" };
         }
-      }),
-      applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => {
-        appliedSource = true;
-        return { kind: "success", message: "should not apply" };
-      }
-    });
+      });
 
-    expect(result.exitCode).toBe(2);
-    expect(result.output).toContain("Already up to date.");
-    expect(appliedSource).toBe(false);
+      expect(result.exitCode).toBe(2);
+      expect(result.output).toContain("Already up to date.");
+      expect(appliedSource).toBe(false);
+      expect(existsSync(updateLogPath(homeDir))).toBe(false);
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
   });
 });
