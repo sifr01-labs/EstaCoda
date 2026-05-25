@@ -1412,7 +1412,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(outputChunks.some((chunk) => chunk.includes("\x1b7\x1b[4A"))).toBe(true);
   });
 
-  it("updates chrome status rail from live context usage events", async () => {
+  it("updates chrome status rail from provider-actual context usage events", async () => {
     const outputChunks: string[] = [];
     const output = {
       write(chunk: string | Uint8Array): boolean {
@@ -1426,7 +1426,7 @@ describe("runSessionLoop — active turn spinner", () => {
     const runtime = {
       ...createEventEmittingMockRuntime([
         { kind: "agent-start", sessionId: "test-session", input: "hello" },
-        { kind: "context-usage", filled: 1024, total: 64_000, source: "live-estimate" },
+        { kind: "context-usage", filled: 1024, total: 64_000, source: "provider-actual" },
         { kind: "agent-final", text: "Mock response" },
       ]),
       getModelInfo: () => ({
@@ -1457,6 +1457,57 @@ describe("runSessionLoop — active turn spinner", () => {
 
     const rendered = stripAnsi(outputChunks.join(""));
     expect(rendered).toContain("context 1.0k/64.0k");
+  });
+
+  it("keeps the last provider-actual context usage when live estimates arrive", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 120,
+    } as unknown as NodeJS.WritableStream;
+
+    const runtime = {
+      ...createEventEmittingMockRuntime([
+        { kind: "agent-start", sessionId: "test-session", input: "hello" },
+        { kind: "context-usage", filled: 12_000, total: 64_000, source: "provider-actual" },
+        { kind: "context-usage", filled: 300, total: 64_000, source: "live-estimate" },
+        { kind: "context-usage", filled: 500, total: 64_000, source: "assembled-prompt" },
+        { kind: "agent-final", text: "Mock response" },
+      ]),
+      getModelInfo: () => ({
+        kind: "kv" as const,
+        title: "Model",
+        entries: [
+          { key: "provider", value: "mock" },
+          { key: "model", value: "mock-model" },
+          { key: "context window", value: "64000" },
+        ],
+      }),
+    };
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      capabilities: interactiveCaps({ supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("context 12.0k/64.0k");
+    expect(rendered).not.toContain("context 300/64.0k");
+    expect(rendered).not.toContain("context 500/64.0k");
   });
 
   it("renders fresh session timing with idle state and no turn timer", async () => {
@@ -1509,7 +1560,7 @@ describe("runSessionLoop — active turn spinner", () => {
       ...createMockRuntime(),
       handle: async ({ onEvent }: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
         nowMs = 252_000;
-        onEvent?.({ kind: "context-usage", filled: 32_700, total: 128_000, source: "live-estimate" });
+        onEvent?.({ kind: "context-usage", filled: 32_700, total: 128_000, source: "provider-actual" });
         onEvent?.({ kind: "agent-final", text: "Mock response" });
         return mockResponse();
       },
@@ -1748,7 +1799,7 @@ describe("runSessionLoop — active turn spinner", () => {
       }),
       handle: async ({ onEvent }: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
         nowMs = 312_000;
-        onEvent?.({ kind: "context-usage", filled: 90_000, total: 128_000, source: "live-estimate" });
+        onEvent?.({ kind: "context-usage", filled: 90_000, total: 128_000, source: "provider-actual" });
         onEvent?.({ kind: "agent-final", text: "Mock response" });
         return mockResponse();
       },

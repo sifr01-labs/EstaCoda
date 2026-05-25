@@ -749,7 +749,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             channel: "cli",
             signal: activeTurn.signal,
             onEvent: (event) => {
-              if (event.kind === "context-usage") {
+              if (event.kind === "context-usage" && event.source === "provider-actual") {
                 latestContextUsage = { filled: event.filled, total: event.total };
                 if ((bottomChrome.enabled || chrome.enabled) && turnOutput.spinnerPhase !== undefined) {
                   renderSpinner(turnOutput.spinnerPhase);
