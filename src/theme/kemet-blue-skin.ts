@@ -10,8 +10,8 @@ export const kemetBlueSkin: ThemeAwareSkin = {
     glyph: {
       prompt: "›",
       spinner: {
-        waiting: ["(⌦)", "(◈)", "(✦)", "(◉)", "(☥)"],
-        thinking: ["(⌦)", "(◐)", "(◑)", "(◒)"],
+        waiting: ["⌦", "◈", "✦", "◉", "☥"],
+        thinking: ["⌦", "◐", "◑", "◒"],
       },
     },
     toolIcon: {

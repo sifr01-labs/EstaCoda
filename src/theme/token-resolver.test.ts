@@ -171,7 +171,7 @@ describe("kemetBlue skin overlay", () => {
 
   it("overrides spinner glyphs", () => {
     const r = resolveTokens("standard", "light", "kemetBlue");
-    expect(r.contract.glyph.spinner.waiting).toContain("(\u2326)");
+    expect(r.contract.glyph.spinner.waiting).toContain("\u2326");
   });
 
   it("overrides tool icons", () => {

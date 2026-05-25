@@ -71,7 +71,7 @@ exports[`tool-activity > Approval prompt > renders in standard light > approval-
 exports[`tool-activity > Progress context rail > renders active in narrow width > rail-active-narrow width 1`] = `
 "[1mTurn progress[0m
 [38;2;76;175;80m✓[0m [2mweb.extract[0m
-[38;2;64;224;208m(⌦)[0m [38;2;64;224;208mmemory.write[0m
+[38;2;64;224;208m⌦[0m [38;2;64;224;208mmemory.write[0m
 [2m○[0m terminal.exec"
 `;
 
@@ -85,7 +85,7 @@ exports[`tool-activity > Progress context rail > renders active in no Unicode > 
 exports[`tool-activity > Progress context rail > renders active in no color > rail-active-no color 1`] = `
 "Turn progress
 ✓ web.extract
-(⌦) memory.write
+⌦ memory.write
 ○ terminal.exec"
 `;
 
@@ -99,14 +99,14 @@ exports[`tool-activity > Progress context rail > renders active in plain > rail-
 exports[`tool-activity > Progress context rail > renders active in standard dark > rail-active-standard dark 1`] = `
 "[1mTurn progress[0m
 [38;2;76;175;80m✓[0m [2mweb.extract[0m
-[38;2;64;224;208m(⌦)[0m [38;2;64;224;208mmemory.write[0m
+[38;2;64;224;208m⌦[0m [38;2;64;224;208mmemory.write[0m
 [2m○[0m terminal.exec"
 `;
 
 exports[`tool-activity > Progress context rail > renders active in standard light > rail-active-standard light 1`] = `
 "[1mTurn progress[0m
 [38;2;46;125;50m✓[0m [2mweb.extract[0m
-[38;2;0;140;149m(⌦)[0m [38;2;0;140;149mmemory.write[0m
+[38;2;0;140;149m⌦[0m [38;2;0;140;149mmemory.write[0m
 [2m○[0m terminal.exec"
 `;
 
@@ -209,7 +209,7 @@ exports[`tool-activity > Progress context rail > renders idle in standard light 
 exports[`tool-activity > Progress context rail > renders timers in narrow width > rail-timer-narrow width 1`] = `
 "[1mTurn progress[0m
 [38;2;76;175;80m✓[0m [2mweb.extract[0m
-[38;2;64;224;208m(⌦)[0m [38;2;64;224;208mmemory.write[0m
+[38;2;64;224;208m⌦[0m [38;2;64;224;208mmemory.write[0m
 [2m○[0m terminal.exec
 ◷ 58s  ⧖ 16s"
 `;
@@ -225,7 +225,7 @@ sess 58s  task 16s"
 exports[`tool-activity > Progress context rail > renders timers in no color > rail-timer-no color 1`] = `
 "Turn progress
 ✓ web.extract
-(⌦) memory.write
+⌦ memory.write
 ○ terminal.exec
 ◷ 58s  ⧖ 16s"
 `;
@@ -241,7 +241,7 @@ sess 58s  task 16s"
 exports[`tool-activity > Progress context rail > renders timers in standard dark > rail-timer-standard dark 1`] = `
 "[1mTurn progress[0m
 [38;2;76;175;80m✓[0m [2mweb.extract[0m
-[38;2;64;224;208m(⌦)[0m [38;2;64;224;208mmemory.write[0m
+[38;2;64;224;208m⌦[0m [38;2;64;224;208mmemory.write[0m
 [2m○[0m terminal.exec
 ◷ 58s  ⧖ 16s"
 `;
@@ -249,7 +249,7 @@ exports[`tool-activity > Progress context rail > renders timers in standard dark
 exports[`tool-activity > Progress context rail > renders timers in standard light > rail-timer-standard light 1`] = `
 "[1mTurn progress[0m
 [38;2;46;125;50m✓[0m [2mweb.extract[0m
-[38;2;0;140;149m(⌦)[0m [38;2;0;140;149mmemory.write[0m
+[38;2;0;140;149m⌦[0m [38;2;0;140;149mmemory.write[0m
 [2m○[0m terminal.exec
 ◷ 58s  ⧖ 16s"
 `;
@@ -506,7 +506,7 @@ exports[`tool-activity > Tool activity rail > renders long path truncated in sta
 
 exports[`tool-activity > Tool activity rail > renders multiple mixed in narrow width > tool-rail-mixed-narrow width 1`] = `
 "│ ◰  read  /workspace/Stage-9B-plan.m...
-│ [38;2;90;172;255m(⌦)[0m  preparing  /workspace/Stage-9B...
+│ [38;2;90;172;255m⌦[0m  preparing  /workspace/Stage-9B-p...
 │ [38;2;239;83;80m✗[0m  run  npm test  [2m500ms[0m
 │ ◇  review  diff  [2m1.2s[0m"
 `;
@@ -520,7 +520,7 @@ exports[`tool-activity > Tool activity rail > renders multiple mixed in no Unico
 
 exports[`tool-activity > Tool activity rail > renders multiple mixed in no color > tool-rail-mixed-no color 1`] = `
 "│ ◰  read  /workspace/Stage-9B-plan.md  1.4s
-│ (⌦)  preparing  /workspace/Stage-9B-plan.md
+│ ⌦  preparing  /workspace/Stage-9B-plan.md
 │ ✗  run  npm test  500ms
 │ ◇  review  diff  1.2s"
 `;
@@ -534,14 +534,14 @@ exports[`tool-activity > Tool activity rail > renders multiple mixed in plain > 
 
 exports[`tool-activity > Tool activity rail > renders multiple mixed in standard dark > tool-rail-mixed-standard dark 1`] = `
 "│ ◰  read  /workspace/Stage-9B-plan.md  [2m1.4s[0m
-│ [38;2;90;172;255m(⌦)[0m  preparing  /workspace/Stage-9B-plan.md
+│ [38;2;90;172;255m⌦[0m  preparing  /workspace/Stage-9B-plan.md
 │ [38;2;239;83;80m✗[0m  run  npm test  [2m500ms[0m
 │ ◇  review  diff  [2m1.2s[0m"
 `;
 
 exports[`tool-activity > Tool activity rail > renders multiple mixed in standard light > tool-rail-mixed-standard light 1`] = `
 "│ ◰  read  /workspace/Stage-9B-plan.md  [2m1.4s[0m
-│ [38;2;0;87;217m(⌦)[0m  preparing  /workspace/Stage-9B-plan.md
+│ [38;2;0;87;217m⌦[0m  preparing  /workspace/Stage-9B-plan.md
 │ [38;2;198;40;40m✗[0m  run  npm test  [2m500ms[0m
 │ ◇  review  diff  [2m1.2s[0m"
 `;
@@ -582,17 +582,17 @@ exports[`tool-activity > Tool activity rail > renders single gated in standard d
 
 exports[`tool-activity > Tool activity rail > renders single gated in standard light > tool-rail-gated-standard light 1`] = `"│ [38;2;180;83;9m⚠[0m  write  src/index.ts  [2m50ms[0m"`;
 
-exports[`tool-activity > Tool activity rail > renders single running in narrow width > tool-rail-running-narrow width 1`] = `"│ [38;2;90;172;255m(⌦)[0m  preparing  /workspace/Stage-9B..."`;
+exports[`tool-activity > Tool activity rail > renders single running in narrow width > tool-rail-running-narrow width 1`] = `"│ [38;2;90;172;255m⌦[0m  preparing  /workspace/Stage-9B-p..."`;
 
 exports[`tool-activity > Tool activity rail > renders single running in no Unicode > tool-rail-running-no Unicode 1`] = `"| [38;2;90;172;255m[>][0m  preparing  /workspace/Stage-9B-plan.md"`;
 
-exports[`tool-activity > Tool activity rail > renders single running in no color > tool-rail-running-no color 1`] = `"│ (⌦)  preparing  /workspace/Stage-9B-plan.md"`;
+exports[`tool-activity > Tool activity rail > renders single running in no color > tool-rail-running-no color 1`] = `"│ ⌦  preparing  /workspace/Stage-9B-plan.md"`;
 
 exports[`tool-activity > Tool activity rail > renders single running in plain > tool-rail-running-plain 1`] = `"| [>] preparing  /workspace/Stage-9B-plan.md"`;
 
-exports[`tool-activity > Tool activity rail > renders single running in standard dark > tool-rail-running-standard dark 1`] = `"│ [38;2;90;172;255m(⌦)[0m  preparing  /workspace/Stage-9B-plan.md"`;
+exports[`tool-activity > Tool activity rail > renders single running in standard dark > tool-rail-running-standard dark 1`] = `"│ [38;2;90;172;255m⌦[0m  preparing  /workspace/Stage-9B-plan.md"`;
 
-exports[`tool-activity > Tool activity rail > renders single running in standard light > tool-rail-running-standard light 1`] = `"│ [38;2;0;87;217m(⌦)[0m  preparing  /workspace/Stage-9B-plan.md"`;
+exports[`tool-activity > Tool activity rail > renders single running in standard light > tool-rail-running-standard light 1`] = `"│ [38;2;0;87;217m⌦[0m  preparing  /workspace/Stage-9B-plan.md"`;
 
 exports[`tool-activity > Tool activity timeline > renders empty in narrow width > timeline-empty-narrow width 1`] = `"[2mNo activity.[0m"`;
 
@@ -608,7 +608,7 @@ exports[`tool-activity > Tool activity timeline > renders empty in standard ligh
 
 exports[`tool-activity > Tool activity timeline > renders multiple mixed in narrow width > timeline-mixed-narrow width 1`] = `
 "[38;2;76;175;80m✓[0m [1mweb.extract[0m [2m| 800ms[0m
-[38;2;64;224;208m(⌦)[0m [1mmemory.write[0m
+[38;2;64;224;208m⌦[0m [1mmemory.write[0m
 [38;2;239;83;80m✗[0m [1mterminal.exec[0m [2m| 300ms[0m"
 `;
 
@@ -620,7 +620,7 @@ exports[`tool-activity > Tool activity timeline > renders multiple mixed in no U
 
 exports[`tool-activity > Tool activity timeline > renders multiple mixed in no color > timeline-mixed-no color 1`] = `
 "✓ web.extract | 800ms
-(⌦) memory.write
+⌦ memory.write
 ✗ terminal.exec | 300ms"
 `;
 
@@ -632,13 +632,13 @@ exports[`tool-activity > Tool activity timeline > renders multiple mixed in plai
 
 exports[`tool-activity > Tool activity timeline > renders multiple mixed in standard dark > timeline-mixed-standard dark 1`] = `
 "[38;2;76;175;80m✓[0m [1mweb.extract[0m [2m| 800ms[0m
-[38;2;64;224;208m(⌦)[0m [1mmemory.write[0m
+[38;2;64;224;208m⌦[0m [1mmemory.write[0m
 [38;2;239;83;80m✗[0m [1mterminal.exec[0m [2m| 300ms[0m"
 `;
 
 exports[`tool-activity > Tool activity timeline > renders multiple mixed in standard light > timeline-mixed-standard light 1`] = `
 "[38;2;46;125;50m✓[0m [1mweb.extract[0m [2m| 800ms[0m
-[38;2;0;140;149m(⌦)[0m [1mmemory.write[0m
+[38;2;0;140;149m⌦[0m [1mmemory.write[0m
 [38;2;198;40;40m✗[0m [1mterminal.exec[0m [2m| 300ms[0m"
 `;
 
@@ -678,14 +678,14 @@ exports[`tool-activity > Tool activity timeline > renders single gated in standa
 
 exports[`tool-activity > Tool activity timeline > renders single gated in standard light > timeline-gated-standard light 1`] = `"[38;2;180;83;9m⚠[0m [1mworkspace.write[0m [2m| 50ms[0m [38;2;180;83;9m| decision: ask[0m [38;2;180;83;9m| risk: destructive-local[0m"`;
 
-exports[`tool-activity > Tool activity timeline > renders single running in narrow width > timeline-running-narrow width 1`] = `"[38;2;64;224;208m(⌦)[0m [1martifact.store[0m"`;
+exports[`tool-activity > Tool activity timeline > renders single running in narrow width > timeline-running-narrow width 1`] = `"[38;2;64;224;208m⌦[0m [1martifact.store[0m"`;
 
 exports[`tool-activity > Tool activity timeline > renders single running in no Unicode > timeline-running-no Unicode 1`] = `"[>] [1martifact.store[0m"`;
 
-exports[`tool-activity > Tool activity timeline > renders single running in no color > timeline-running-no color 1`] = `"(⌦) artifact.store"`;
+exports[`tool-activity > Tool activity timeline > renders single running in no color > timeline-running-no color 1`] = `"⌦ artifact.store"`;
 
 exports[`tool-activity > Tool activity timeline > renders single running in plain > timeline-running-plain 1`] = `"[>] artifact.store"`;
 
-exports[`tool-activity > Tool activity timeline > renders single running in standard dark > timeline-running-standard dark 1`] = `"[38;2;64;224;208m(⌦)[0m [1martifact.store[0m"`;
+exports[`tool-activity > Tool activity timeline > renders single running in standard dark > timeline-running-standard dark 1`] = `"[38;2;64;224;208m⌦[0m [1martifact.store[0m"`;
 
-exports[`tool-activity > Tool activity timeline > renders single running in standard light > timeline-running-standard light 1`] = `"[38;2;0;140;149m(⌦)[0m [1martifact.store[0m"`;
+exports[`tool-activity > Tool activity timeline > renders single running in standard light > timeline-running-standard light 1`] = `"[38;2;0;140;149m⌦[0m [1martifact.store[0m"`;

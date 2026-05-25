@@ -87,8 +87,8 @@ The KemetBlue skin overrides glyphs, branding, and tool icons with Egyptian-them
 | Glyph | Default | KemetBlue |
 |-------|---------|-----------|
 | `prompt` | `›` | `›` |
-| `spinner.waiting` | Braille dots | `(⌦) (◈) (✦) (◉) (☥)` |
-| `spinner.thinking` | `◐◓◑◒` | `(⌦) (◐) (◑) (◒)` |
+| `spinner.waiting` | Braille dots | `⌦ ◈ ✦ ◉ ☥` |
+| `spinner.thinking` | `◐◓◑◒` | `⌦ ◐ ◑ ◒` |
 
 ### 3.2 Tool Icon Overrides
 
