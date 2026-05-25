@@ -1,27 +1,151 @@
 ---
 title: Sessions
-description: Session lifecycle, attach/detach, and handoff.
+description: Session lifecycle, state ownership, attach/detach, and handoff for v0.1.0.
 sidebar_position: 2
 ---
 
 # Sessions
 
-This page documents **Sessions** for EstaCoda v0.1.0.
+A session is a bounded conversation context. It owns the message history, the selected profile, model route state, session-scoped approvals, and any active surface pointers. Sessions are not global context blobs; they are isolated per profile and must be attached explicitly if you want channels to share them.
 
-## Purpose
+This page explains what a session owns, how to move between sessions, and what goes wrong when sessions drift.
 
-Session lifecycle, attach/detach, and handoff.
+---
 
-## Source of Truth
+## What a Session Owns
 
-For release-scope decisions and current claims, see:
+| State | Owner | Notes |
+|---|---|---|
+| Conversation history | Session | Stored in the session DB under the active profile |
+| Selected profile | Session | The profile active when the session was created |
+| Model route override | Session | Set via `/model <provider>/<model>` |
+| Session-scoped approvals | Session | Granted with `session` scope expire when the session ends |
+| Surface pointers | Session | Links from channels (Telegram, Discord, etc.) to this session |
 
-- `docs/operations/v0.1.0-release-scope.md`
+Sessions do not own persistent memory files. `USER.md`, `MEMORY.md`, and `SOUL.md` belong to the profile. Sessions do not own workspace trust or cron state. Those are also profile-scoped.
 
-## TODO
+---
 
-- [ ] Migrate and rewrite content from existing repo docs.
-- [ ] Align claims with v0.1.0 release scope.
-- [ ] Add code examples, CLI snippets, and configuration samples.
-- [ ] Cross-link related docs pages.
-- [ ] Validate technical accuracy against current codebase.
+## Session Isolation
+
+Sessions are separate by default. A CLI session and a Telegram session for the same user do not share context automatically. If you want a Telegram chat to continue a CLI session, you must attach it explicitly.
+
+Profile isolation is strict. A session created under profile `work` cannot see sessions created under profile `personal`, even if both are on the same machine. The session DB is scoped to the profile directory.
+
+---
+
+## Session Commands
+
+```bash
+# List recent sessions with attached surfaces
+estacoda sessions list
+
+# Show session detail and surface pointers
+estacoda sessions show <session-id>
+
+# Current runtime session
+estacoda sessions current
+
+# Attach a surface to a session
+estacoda sessions attach <surface> <id> <session-id>
+
+# Detach a surface from a session
+estacoda sessions detach <surface> <id>
+
+# Summarize historical session matches
+estacoda sessions recall <query>
+
+# Compact session history manually
+estacoda sessions compact <session-id> [--topic <topic>]
+```
+
+Valid surfaces: `cli`, `telegram`, `discord`, `whatsapp`, `email`.
+
+`sessions recall` is bounded historical recall. It is profile-scoped and workspace-scoped when workspace metadata is available. Recalled content is labeled as untrusted context and cannot override current instructions.
+
+`sessions compact` is semantic session compression. It compacts older history for the target session. It is non-rotating in this implementation; it does not create or adopt a compacted child session. Gateway `/compact` has separate rotation logic.
+
+---
+
+## Interactive Session Controls
+
+Inside an active CLI session:
+
+| Command | Purpose |
+|---------|---------|
+| `/sessions` | List active sessions |
+| `/switch <session-id>` | Switch to another session |
+| `/reset` | Start a fresh session |
+
+Gateway channels support a subset of session commands:
+
+| Command | Purpose |
+|---------|---------|
+| `/sessions` | List recent sessions |
+| `/switch <session-id>` | Switch to a different session |
+| `/attach <code>` | Attach to a CLI session via handoff code |
+| `/detach` | Detach from current session and create a new one |
+| `/new` | Create a new session |
+| `/reset` | Reset current session |
+
+`/attach <code>` uses a short-lived, single-use handoff code generated in the CLI. The code is Crockford base-32, 6 characters, TTL 10 minutes. Failed redemption returns a generic message; no session ID is leaked.
+
+`/detach` creates a new independent session for that surface. It does not merge histories or messages.
+
+---
+
+## State and Files
+
+Session state lives in the selected profile directory:
+
+```
+~/.estacoda/profiles/<profile-id>/
+  sessions.db          # SQLite session database
+  cli-session-store.json  # Active session pointer for CLI resume
+```
+
+The session DB is SQLite. It stores messages, events, compression state, and surface pointers. If the session DB is missing or corrupted, sessions cannot be listed, recalled, or resumed.
+
+---
+
+## Failure Modes
+
+**Stale session:** A session resumed from `cli-session-store.json` may reference an old profile or workspace. If the profile has changed, the session may load with stale context. Use `/reset` or `estacoda sessions current` to inspect.
+
+**Wrong profile:** Sessions are profile-scoped. If you switch profiles with `estacoda profile use <name>`, existing sessions from the previous profile are no longer visible. They are not deleted; they belong to the other profile.
+
+**Missing session:** If a session ID does not exist in the current profile's session DB, commands return `session not found`. Check `estacoda sessions list` and verify the active profile.
+
+**Session DB issues:** If `sessions.db` is corrupted or locked, session commands fail. The CLI may fall back to an in-memory session. In that case, persistence, recall, and attach/detach are unavailable. Restart the CLI and check file permissions.
+
+**Attach/detach mismatch:** Attaching a surface to a session does not merge histories. It only means future messages from that surface go to that session. If you expected merged context, you will not get it.
+
+---
+
+## Inspection and Recovery
+
+```bash
+# Verify the active profile
+estacoda profile show
+
+# List sessions for this profile
+estacoda sessions list
+
+# Inspect current session
+estacoda sessions current
+
+# Switch to a known good session
+/switch <session-id>
+
+# Start fresh if context is corrupted
+/reset
+```
+
+---
+
+## Related
+
+- [CLI](./cli.md) — interactive session loop and slash commands
+- [Profiles](./profiles.md) — profile boundaries and switching
+- [Memory](./memory.md) — persistent memory files vs. session context
+- [Channels](./channels.md) — channel configuration and surface pointers
