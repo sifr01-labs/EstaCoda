@@ -19,6 +19,13 @@ import {
   runManagedSourceUpdateWithResilience,
   type UpdateResilienceResult
 } from "./update-resilience.js";
+import {
+  detectServiceManager,
+  probeServiceState,
+  restartService,
+  type ServiceManagerState,
+  type ServiceScope
+} from "../gateway/service-manager.js";
 
 export type UpdateOptions = {
   check?: boolean;
@@ -26,7 +33,9 @@ export type UpdateOptions = {
   apply: boolean;
   explicitApply?: boolean;
   backupMode?: "default" | "force" | "skip";
+  gatewayMode?: boolean;
   homeDir?: string;
+  profileId?: string;
   workspaceRoot?: string;
   installMethodInfo?: InstallMethodInfo;
   detectInstallMethod?: () => Promise<InstallMethodInfo>;
@@ -36,11 +45,22 @@ export type UpdateOptions = {
   applyUpdate?: typeof applyUpdate;
   applyManagedSourceUpdate?: typeof applyManagedSourceUpdate;
   runUpdateWithResilience?: typeof runManagedSourceUpdateWithResilience;
+  restartGatewayService?: (options: GatewayRestartHandoffOptions) => Promise<GatewayRestartHandoffResult>;
 };
 
 export type UpdateResult = {
   exitCode: number;
   output: string;
+};
+
+export type GatewayRestartHandoffOptions = {
+  homeDir: string;
+  profileId: string;
+};
+
+export type GatewayRestartHandoffResult = {
+  message: string;
+  restarted: boolean;
 };
 
 export async function runUpdateCommand(options: UpdateOptions): Promise<UpdateResult> {
@@ -61,7 +81,7 @@ export async function runUpdateCommand(options: UpdateOptions): Promise<UpdateRe
 
   if (installMethod.method === "managed-source") {
     if (options.check || options.dryRun) {
-      return await runSourceUpdateCheck(installMethod, options, true);
+      return appendGatewayGuidance(await runSourceUpdateCheck(installMethod, options, true), options);
     }
 
     const resilience = await (options.runUpdateWithResilience ?? runManagedSourceUpdateWithResilience)({
@@ -70,12 +90,27 @@ export async function runUpdateCommand(options: UpdateOptions): Promise<UpdateRe
       processLike: process,
       stdout: process.stdout,
       stderr: process.stderr,
-      run: () => (options.applyManagedSourceUpdate ?? applyManagedSourceUpdate)({
-        installMethod,
-        homeDir,
-        workspaceRoot: options.workspaceRoot,
-        backupMode: options.backupMode ?? "default"
-      })
+      run: async () => {
+        const result = await (options.applyManagedSourceUpdate ?? applyManagedSourceUpdate)({
+          installMethod,
+          homeDir,
+          workspaceRoot: options.workspaceRoot,
+          backupMode: options.backupMode ?? "default"
+        });
+
+        if (options.gatewayMode === true && result.kind === "success") {
+          const handoff = await (options.restartGatewayService ?? restartManagedGatewayService)({
+            homeDir,
+            profileId: options.profileId ?? "default"
+          });
+          return {
+            kind: "success",
+            message: [result.message, "", handoff.message].join("\n")
+          };
+        }
+
+        return result;
+      }
     });
     const result = resilience.result;
 
@@ -89,24 +124,27 @@ export async function runUpdateCommand(options: UpdateOptions): Promise<UpdateRe
     if (options.apply) {
       return {
         exitCode: options.explicitApply ? 1 : 0,
-        output: renderInstallMethodRouting(installMethod, "apply")
+        output: withGatewayRestartInstruction(renderInstallMethodRouting(installMethod, "apply"), options)
       };
     }
 
     if (!options.check) {
       return {
         exitCode: 0,
-        output: renderInstallMethodRouting(installMethod, "dry-run")
+        output: withGatewayRestartInstruction(renderInstallMethodRouting(installMethod, "dry-run"), options)
       };
     }
 
-    return await runSourceUpdateCheck(installMethod, options, false);
+    return appendGatewayGuidance(await runSourceUpdateCheck(installMethod, options, false), options);
   }
 
   if (!installMethod.canSelfUpdate) {
     return {
       exitCode: options.apply && options.explicitApply ? 1 : 0,
-      output: renderInstallMethodRouting(installMethod, options.apply ? "apply" : options.check ? "check" : "dry-run")
+      output: withGatewayRestartInstruction(
+        renderInstallMethodRouting(installMethod, options.apply ? "apply" : options.check ? "check" : "dry-run"),
+        options
+      )
     };
   }
 
@@ -115,14 +153,14 @@ export async function runUpdateCommand(options: UpdateOptions): Promise<UpdateRe
   if (check.kind === "error") {
     return {
       exitCode: 1,
-      output: `Update check failed: ${check.message}`
+      output: withGatewayRestartInstruction(`Update check failed: ${check.message}`, options)
     };
   }
 
   if (check.kind === "up-to-date") {
     return {
       exitCode: 2,
-      output: `You are on the latest version (${check.current}).`
+      output: withGatewayRestartInstruction(`You are on the latest version (${check.current}).`, options)
     };
   }
 
@@ -132,11 +170,11 @@ export async function runUpdateCommand(options: UpdateOptions): Promise<UpdateRe
   if (!options.apply) {
     return {
       exitCode: 0,
-      output: [
+      output: withGatewayRestartInstruction([
         summary,
         "",
         "This was a dry run. No files were modified."
-      ].join("\n")
+      ].join("\n"), options)
     };
   }
 
@@ -145,11 +183,11 @@ export async function runUpdateCommand(options: UpdateOptions): Promise<UpdateRe
   if (!test.testable) {
     return {
       exitCode: 1,
-      output: [
+      output: withGatewayRestartInstruction([
         summary,
         "",
         `Cannot apply update: ${test.reason}`
-      ].join("\n")
+      ].join("\n"), options)
     };
   }
 
@@ -158,12 +196,94 @@ export async function runUpdateCommand(options: UpdateOptions): Promise<UpdateRe
 
   return {
     exitCode: result.kind === "success" ? 0 : 1,
-    output: [
+    output: withGatewayRestartInstruction([
       summary,
       "",
       result.message
-    ].join("\n")
+    ].join("\n"), options)
   };
+}
+
+async function restartManagedGatewayService(
+  options: GatewayRestartHandoffOptions
+): Promise<GatewayRestartHandoffResult> {
+  const detected = await detectManagedGatewayService(options);
+
+  if (detected === undefined) {
+    return {
+      restarted: false,
+      message: [
+        "Gateway restart: no managed gateway service was detected.",
+        "Restart the gateway manually with: estacoda gateway restart"
+      ].join("\n")
+    };
+  }
+
+  const restart = await restartService({
+    homeDir: options.homeDir,
+    profileId: options.profileId,
+    system: detected.scope === "system"
+  });
+
+  if (!restart.ok) {
+    return {
+      restarted: false,
+      message: [
+        `Gateway restart failed for ${detected.scope} service ${detected.unitName ?? "(unknown service)"}.`,
+        `Reason: ${restart.error}`,
+        `Restart the gateway manually with: estacoda gateway restart${detected.scope === "system" ? " --system" : ""}`
+      ].join("\n")
+    };
+  }
+
+  return {
+    restarted: true,
+    message: `Gateway service restarted (${detected.scope} scope, profile: ${options.profileId}).`
+  };
+}
+
+async function detectManagedGatewayService(options: GatewayRestartHandoffOptions): Promise<(ServiceManagerState & { scope: ServiceScope }) | undefined> {
+  const userState = await probeServiceState({
+    homeDir: options.homeDir,
+    profileId: options.profileId,
+    system: false
+  });
+  if (userState.installed && userState.scope !== undefined) {
+    return userState as ServiceManagerState & { scope: ServiceScope };
+  }
+
+  if (detectServiceManager().startsWith("systemd")) {
+    const systemState = await probeServiceState({
+      homeDir: options.homeDir,
+      profileId: options.profileId,
+      system: true
+    });
+    if (systemState.installed && systemState.scope !== undefined) {
+      return systemState as ServiceManagerState & { scope: ServiceScope };
+    }
+  }
+
+  return undefined;
+}
+
+function appendGatewayGuidance(result: UpdateResult, options: UpdateOptions): UpdateResult {
+  return {
+    ...result,
+    output: withGatewayRestartInstruction(result.output, options)
+  };
+}
+
+function withGatewayRestartInstruction(output: string, options: UpdateOptions): string {
+  if (options.gatewayMode !== true) {
+    return output;
+  }
+
+  return [
+    output,
+    "",
+    "Gateway mode: no gateway restart was attempted.",
+    "After completing the update, restart the gateway with: estacoda gateway restart"
+  ].join("\n");
 }
 
 function renderManagedSourceApplyOutput(

@@ -529,6 +529,7 @@ async function update(options: CliOptions, args: string[]): Promise<CliCommandRe
   const explicitApply = hasFlag(args, "--apply");
   const backup = hasFlag(args, "--backup");
   const noBackup = hasFlag(args, "--no-backup");
+  const gatewayMode = hasFlag(args, "--gateway");
   if (backup && noBackup) {
     return {
       handled: true,
@@ -542,7 +543,9 @@ async function update(options: CliOptions, args: string[]): Promise<CliCommandRe
     apply: explicitApply || !dryRun,
     explicitApply,
     backupMode: noBackup ? "skip" : backup ? "force" : "default",
+    gatewayMode,
     homeDir: options.homeDir,
+    profileId: options.profileId,
     workspaceRoot: options.workspaceRoot
   });
 
