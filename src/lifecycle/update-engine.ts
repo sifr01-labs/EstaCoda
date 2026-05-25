@@ -4,7 +4,8 @@ import { existsSync } from "node:fs";
 import {
   resolveLatestVersion,
   compareVersions,
-  type VersionInfo
+  type VersionInfo,
+  type VersionResolverResult
 } from "./version-resolver.js";
 import { backupState, getProtectedPaths } from "./state-preservation.js";
 
@@ -27,7 +28,7 @@ type UpdateCacheEntry = {
   versionStatus: "up-to-date" | "update-available";
 };
 
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+export const UPDATE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
 function cachePath(homeDir: string): string {
   return join(homeDir, ".estacoda", "update-cache.json");
@@ -39,7 +40,7 @@ export async function readCachedUpdateStatus(homeDir: string): Promise<"up-to-da
     const parsed = JSON.parse(raw) as UpdateCacheEntry;
     const checkedAt = new Date(parsed.checkedAt).getTime();
     const now = Date.now();
-    if (Number.isNaN(checkedAt) || now - checkedAt > CACHE_TTL_MS) {
+    if (Number.isNaN(checkedAt) || now - checkedAt > UPDATE_CACHE_TTL_MS) {
       return "unknown";
     }
     if (parsed.versionStatus === "up-to-date" || parsed.versionStatus === "update-available") {
@@ -60,8 +61,15 @@ async function writeUpdateCache(homeDir: string, status: "up-to-date" | "update-
   await writeFile(cachePath(homeDir), JSON.stringify(entry, null, 2) + "\n", "utf8");
 }
 
-export async function checkForUpdate(fetchFn?: typeof fetch): Promise<UpdateCheckResult> {
-  const resolved = await resolveLatestVersion(fetchFn);
+export async function checkForUpdate(input?: typeof fetch | {
+  fetchFn?: typeof fetch;
+  homeDir?: string;
+  resolveLatestVersion?: () => Promise<VersionResolverResult>;
+}): Promise<UpdateCheckResult> {
+  const options = typeof input === "function" ? { fetchFn: input } : input ?? {};
+  const resolved = options.resolveLatestVersion !== undefined
+    ? await options.resolveLatestVersion()
+    : await resolveLatestVersion(options.fetchFn);
 
   if (!resolved.ok) {
     return { kind: "error", message: resolved.error };
@@ -70,14 +78,14 @@ export async function checkForUpdate(fetchFn?: typeof fetch): Promise<UpdateChec
   const { info } = resolved;
 
   if (compareVersions(info.current, info.latest) >= 0) {
-    const homeDir = process.env.HOME ?? "";
+    const homeDir = options.homeDir ?? process.env.HOME ?? "";
     if (homeDir.length > 0) {
       await writeUpdateCache(homeDir, "up-to-date").catch(() => {});
     }
     return { kind: "up-to-date", current: info.current };
   }
 
-  const homeDir = process.env.HOME ?? "";
+  const homeDir = options.homeDir ?? process.env.HOME ?? "";
   if (homeDir.length > 0) {
     await writeUpdateCache(homeDir, "update-available").catch(() => {});
   }

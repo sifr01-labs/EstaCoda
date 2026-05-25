@@ -7,7 +7,8 @@ import {
   checkForUpdate,
   canApplyUpdate,
   prepareUpdateInfo,
-  readCachedUpdateStatus
+  readCachedUpdateStatus,
+  UPDATE_CACHE_TTL_MS
 } from "./update-engine.js";
 
 describe("checkForUpdate", () => {
@@ -33,6 +34,25 @@ describe("checkForUpdate", () => {
     if (result.kind === "error") {
       expect(result.message).toContain("timeout");
     }
+  });
+
+  it("treats cache write failures as non-fatal", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-cache-write-test-"));
+    const homeFile = join(tempDir, "home-file");
+    await writeFile(homeFile, "not a directory");
+    const mockFetch = () =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            tag_name: "v0.0.5",
+            html_url: "https://example.com"
+          })
+      } as Response);
+
+    const result = await checkForUpdate({ fetchFn: mockFetch, homeDir: homeFile });
+
+    expect(result.kind).toBe("up-to-date");
   });
 });
 
@@ -115,10 +135,26 @@ describe("readCachedUpdateStatus", () => {
     expect(result).toBe("update-available");
   });
 
-  it("returns unknown when cache is stale", async () => {
+  it("uses a 6 hour cache TTL", () => {
+    expect(UPDATE_CACHE_TTL_MS).toBe(6 * 60 * 60 * 1000);
+  });
+
+  it("returns cached status within the 6 hour cache TTL", async () => {
     const tempDir = mkdtempSync(join(tmpdir(), "estacoda-cache-test-"));
     await mkdir(join(tempDir, ".estacoda"), { recursive: true });
-    const oldDate = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+    const freshDate = new Date(Date.now() - UPDATE_CACHE_TTL_MS + 60 * 1000).toISOString();
+    await writeFile(
+      join(tempDir, ".estacoda", "update-cache.json"),
+      JSON.stringify({ checkedAt: freshDate, versionStatus: "up-to-date" })
+    );
+    const result = await readCachedUpdateStatus(tempDir);
+    expect(result).toBe("up-to-date");
+  });
+
+  it("returns unknown when cache is stale after the 6 hour cache TTL", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-cache-test-"));
+    await mkdir(join(tempDir, ".estacoda"), { recursive: true });
+    const oldDate = new Date(Date.now() - UPDATE_CACHE_TTL_MS - 60 * 1000).toISOString();
     await writeFile(
       join(tempDir, ".estacoda", "update-cache.json"),
       JSON.stringify({ checkedAt: oldDate, versionStatus: "up-to-date" })
@@ -132,6 +168,15 @@ describe("readCachedUpdateStatus", () => {
     await mkdir(join(tempDir, ".estacoda"), { recursive: true });
     await writeFile(join(tempDir, ".estacoda", "update-cache.json"), "not json");
     const result = await readCachedUpdateStatus(tempDir);
+    expect(result).toBe("unknown");
+  });
+
+  it("treats cache read failures as non-fatal", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-cache-test-"));
+    await writeFile(join(tempDir, ".estacoda"), "not a directory");
+
+    const result = await readCachedUpdateStatus(tempDir);
+
     expect(result).toBe("unknown");
   });
 
