@@ -525,10 +525,13 @@ async function init(options: CliOptions, args: string[]): Promise<CliCommandResu
 
 async function update(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const check = hasFlag(args, "--check");
+  const dryRun = check || hasFlag(args, "--dry-run");
+  const explicitApply = hasFlag(args, "--apply");
   const result = await runUpdateCommand({
     check,
-    dryRun: check || hasFlag(args, "--dry-run") || (!hasFlag(args, "--apply")),
-    apply: hasFlag(args, "--apply"),
+    dryRun,
+    apply: explicitApply || !dryRun,
+    explicitApply,
     homeDir: options.homeDir
   });
 

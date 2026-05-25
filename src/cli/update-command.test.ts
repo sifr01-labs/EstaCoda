@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { runUpdateCommand } from "./update-command.js";
 import type { InstallMethod, InstallMethodInfo } from "../lifecycle/install-method.js";
+import type { UpdateApplyResult } from "../lifecycle/update-engine.js";
 import type { GitUpdateResolverResult } from "../lifecycle/version-resolver.js";
 
 function installInfo(method: InstallMethod, overrides: Partial<InstallMethodInfo> = {}): InstallMethodInfo {
@@ -78,6 +79,7 @@ describe("runUpdateCommand install-method routing", () => {
     const result = await runUpdateCommand({
       dryRun: false,
       apply: true,
+      explicitApply: true,
       homeDir: "/tmp/estacoda-home",
       installMethodInfo: installInfo("manual-source")
     });
@@ -88,17 +90,80 @@ describe("runUpdateCommand install-method routing", () => {
     expect(result.output).toContain("No files were modified.");
   });
 
-  it("reports that managed-source apply is reserved for PR-I5", async () => {
+  it("applies managed-source updates through the source updater without artifact update", async () => {
     let checkedArtifact = false;
+    let appliedArtifact = false;
+    let appliedSource = false;
+    const result = await runUpdateCommand({
+      dryRun: false,
+      apply: true,
+      explicitApply: true,
+      homeDir: "/tmp/estacoda-home",
+      installMethodInfo: installInfo("managed-source", {
+        source: "stamp",
+        installDir: "/repo",
+        sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+        expectedBranch: "main"
+      }),
+      canApplyUpdate: () => {
+        checkedArtifact = true;
+        return { testable: true, reason: "test artifact" };
+      },
+      applyUpdate: async () => {
+        appliedArtifact = true;
+        return { kind: "success", message: "should not apply" };
+      },
+      applyManagedSourceUpdate: async (input): Promise<UpdateApplyResult> => {
+        appliedSource = true;
+        expect(input.homeDir).toBe("/tmp/estacoda-home");
+        expect(input.installMethod.installDir).toBe("/repo");
+        return { kind: "success", message: "Update applied: test" };
+      }
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("Detected install method: managed-source");
+    expect(result.output).toContain("Update applied: test");
+    expect(checkedArtifact).toBe(false);
+    expect(appliedArtifact).toBe(false);
+    expect(appliedSource).toBe(true);
+  });
+
+  it("maps managed-source dirty worktree refusal to exit 3", async () => {
+    const result = await runUpdateCommand({
+      dryRun: false,
+      apply: true,
+      explicitApply: true,
+      homeDir: "/tmp/estacoda-home",
+      installMethodInfo: installInfo("managed-source", { source: "stamp" }),
+      applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => ({
+        kind: "error",
+        message: "Update refused: managed-source worktree has uncommitted changes.\nExit code: 3"
+      })
+    });
+
+    expect(result.exitCode).toBe(3);
+    expect(result.output).toContain("uncommitted changes");
+  });
+
+  it.each([
+    "homebrew",
+    "docker",
+    "npm-global",
+    "pnpm-global",
+    "unknown"
+  ] as const)("routes %s apply without source or artifact mutation", async (method) => {
+    let appliedSource = false;
     let appliedArtifact = false;
     const result = await runUpdateCommand({
       dryRun: false,
       apply: true,
+      explicitApply: true,
       homeDir: "/tmp/estacoda-home",
-      installMethodInfo: installInfo("managed-source"),
-      canApplyUpdate: () => {
-        checkedArtifact = true;
-        return { testable: true, reason: "test artifact" };
+      installMethodInfo: installInfo(method),
+      applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => {
+        appliedSource = true;
+        return { kind: "success", message: "should not apply" };
       },
       applyUpdate: async () => {
         appliedArtifact = true;
@@ -107,11 +172,23 @@ describe("runUpdateCommand install-method routing", () => {
     });
 
     expect(result.exitCode).toBe(1);
-    expect(result.output).toContain("Detected install method: managed-source");
-    expect(result.output).toContain("PR-I5");
     expect(result.output).toContain("No files were modified.");
-    expect(checkedArtifact).toBe(false);
+    expect(appliedSource).toBe(false);
     expect(appliedArtifact).toBe(false);
+  });
+
+  it("treats default non-self-update routing as successful guidance", async () => {
+    const result = await runUpdateCommand({
+      dryRun: false,
+      apply: true,
+      explicitApply: false,
+      homeDir: "/tmp/estacoda-home",
+      installMethodInfo: installInfo("homebrew")
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("Homebrew install detected");
+    expect(result.output).toContain("No files were modified.");
   });
 
   it("reports managed-source update availability through git without applying", async () => {

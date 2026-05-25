@@ -3,6 +3,7 @@ import {
   prepareUpdateInfo,
   canApplyUpdate,
   applyUpdate,
+  applyManagedSourceUpdate,
   type UpdateCheckResult
 } from "../lifecycle/update-engine.js";
 import {
@@ -18,6 +19,7 @@ export type UpdateOptions = {
   check?: boolean;
   dryRun: boolean;
   apply: boolean;
+  explicitApply?: boolean;
   homeDir?: string;
   installMethodInfo?: InstallMethodInfo;
   detectInstallMethod?: () => Promise<InstallMethodInfo>;
@@ -25,6 +27,7 @@ export type UpdateOptions = {
   checkGitUpdate?: (info: InstallMethodInfo, options: { mutateRemoteRefs: boolean }) => Promise<GitUpdateResolverResult>;
   canApplyUpdate?: typeof canApplyUpdate;
   applyUpdate?: typeof applyUpdate;
+  applyManagedSourceUpdate?: typeof applyManagedSourceUpdate;
 };
 
 export type UpdateResult = {
@@ -49,26 +52,30 @@ export async function runUpdateCommand(options: UpdateOptions): Promise<UpdateRe
   })))();
 
   if (installMethod.method === "managed-source") {
-    if (options.apply) {
-      return {
-        exitCode: 1,
-        output: [
-          "Detected install method: managed-source",
-          `Reason: ${installMethod.reason}`,
-          "",
-          "Managed source update apply is planned for PR-I5 and is not active in this build.",
-          "No files were modified."
-        ].join("\n")
-      };
+    if (options.check || options.dryRun) {
+      return await runSourceUpdateCheck(installMethod, options, true);
     }
 
-    return await runSourceUpdateCheck(installMethod, options, true);
+    const result = await (options.applyManagedSourceUpdate ?? applyManagedSourceUpdate)({
+      installMethod,
+      homeDir
+    });
+
+    return {
+      exitCode: result.kind === "success" ? 0 : result.message.includes("Exit code: 3") ? 3 : 1,
+      output: [
+        "Detected install method: managed-source",
+        `Reason: ${installMethod.reason}`,
+        "",
+        result.message
+      ].join("\n")
+    };
   }
 
   if (installMethod.method === "manual-source") {
     if (options.apply) {
       return {
-        exitCode: 1,
+        exitCode: options.explicitApply ? 1 : 0,
         output: renderInstallMethodRouting(installMethod, "apply")
       };
     }
@@ -85,7 +92,7 @@ export async function runUpdateCommand(options: UpdateOptions): Promise<UpdateRe
 
   if (!installMethod.canSelfUpdate) {
     return {
-      exitCode: options.apply ? 1 : 0,
+      exitCode: options.apply && options.explicitApply ? 1 : 0,
       output: renderInstallMethodRouting(installMethod, options.apply ? "apply" : options.check ? "check" : "dry-run")
     };
   }

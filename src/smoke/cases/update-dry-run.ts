@@ -26,7 +26,8 @@ export const update_dry_run_case: SmokeCase = {
     // --apply without a valid artifact should exit 1
     const applyResult = await runUpdateCommand({
       dryRun: false,
-      apply: true
+      apply: true,
+      explicitApply: true
     });
 
     if (applyResult.exitCode !== 1 && applyResult.exitCode !== 2) {
