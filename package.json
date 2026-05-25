@@ -1,11 +1,22 @@
 {
   "name": "estacoda",
   "version": "0.0.6",
-  "private": true,
+  "private": false,
   "type": "module",
   "packageManager": "pnpm@10.33.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KemetResearch/EstaCoda.git"
+  },
+  "bugs": {
+    "url": "https://github.com/KemetResearch/EstaCoda/issues"
+  },
+  "homepage": "https://estacoda.kemetresearch.com",
   "engines": {
     "node": ">=22.18.0"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "files": [
     "dist",
