@@ -21,4 +21,6 @@ live-tool-smoke.ts
 !.env.example
 
 .estacoda/
+.docusaurus/
+website/pnpm-lock.yaml
 tsconfig.tsbuildinfo
