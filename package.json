@@ -31,7 +31,6 @@
     "README.md",
     "LICENSE",
     "NOTICE",
-    "CHANGELOG.md",
     "package.json"
   ],
   "bin": {

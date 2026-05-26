@@ -22,14 +22,12 @@ description: "Rules for keeping EstaCoda documentation accurate, navigable, and 
 | Subsystem docs | Internal assessments |
 | Operations docs | Alpha runbooks |
 | ADRs | Call graphs, builder assessments |
-| Roadmap | Detailed milestone planning |
+| Release notes | Detailed milestone planning |
 | Security model | Vulnerability drafts |
 
 ## Planning Docs
 
-`docs/planning/README.md` states the rule:
-
-> Planning documents are working artifacts, not canonical documentation. Execution plans should live in the private workspace and should not be committed to the public repo. Durable decisions must be promoted into architecture docs, ADRs, ROADMAP.md, or prelaunch milestone history.
+Planning documents are working artifacts, not canonical documentation. Execution plans should live in the private workspace and should not be committed to the public repo. Durable decisions must be promoted into architecture docs, ADRs, release notes, or public operations docs.
 
 ## Handoff Material
 

@@ -13,7 +13,6 @@ description: "How to set up, test, maintain, and hand off work on EstaCoda."
 | [Known Issues](./known-issues.md) | Blunt accounting of current limitations |
 | [Maintenance](./maintenance.md) | Documentation governance rules |
 | [Memory Operator Readiness](./memory-operator-readiness.md) | Operator guide for Memory Hardening phases 0-10 |
-| [Prelaunch Milestones](./prelaunch-milestones.md) | What landed in v0.4–v0.7 and baseline before v0.8 |
 | [Agent Handoff](./agent-handoff.md) | Short operational note for incoming coding agents |
 | [Operator Controls](./operator-controls.md) | Slash commands and CLI commands for TaskFlow |
 | [TaskFlow CLI](./taskflow-cli.md) | Command reference for `estacoda flow` |

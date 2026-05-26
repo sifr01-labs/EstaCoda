@@ -14,9 +14,7 @@ Provider execution internals.
 
 ## Source of Truth
 
-For release-scope decisions and current claims, see:
-
-- `docs/operations/v0.1.0-release-scope.md`
+This Docusaurus documentation set is the public source for v0.1.0 user-facing claims. When it disagrees with implemented behavior, fix the docs or the code before shipping.
 
 ## TODO
 

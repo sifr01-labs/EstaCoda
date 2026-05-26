@@ -26,7 +26,7 @@ COPY assets ./assets
 COPY workers ./workers
 COPY acp_registry ./acp_registry
 COPY scripts ./scripts
-COPY README.md LICENSE NOTICE CHANGELOG.md ./
+COPY README.md LICENSE NOTICE ./
 
 RUN pnpm run build
 RUN pnpm prune --prod
@@ -51,7 +51,7 @@ COPY --from=build --chown=estacoda:estacoda /app/assets ./assets
 COPY --from=build --chown=estacoda:estacoda /app/workers ./workers
 COPY --from=build --chown=estacoda:estacoda /app/acp_registry ./acp_registry
 COPY --from=build --chown=estacoda:estacoda /app/scripts ./scripts
-COPY --from=build --chown=estacoda:estacoda /app/README.md /app/LICENSE /app/NOTICE /app/CHANGELOG.md ./
+COPY --from=build --chown=estacoda:estacoda /app/README.md /app/LICENSE /app/NOTICE ./
 
 USER estacoda
 

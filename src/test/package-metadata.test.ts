@@ -58,7 +58,6 @@ describe("package installability metadata", () => {
       "README.md",
       "LICENSE",
       "NOTICE",
-      "CHANGELOG.md",
       "package.json"
     ]));
   });

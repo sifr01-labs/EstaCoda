@@ -39,14 +39,14 @@ These are working artifacts, not canonical documentation. They exist for enginee
 | Subsystem docs | Internal assessments |
 | Operations docs | Alpha runbooks |
 | ADRs | Call graphs, builder assessments |
-| Roadmap | Detailed milestone planning |
+| Release notes | Detailed milestone planning |
 | Security model | Vulnerability drafts |
 
 Execution plans belong in the private workspace, not the public repo.
 
 ## Release scope controls public claims
 
-The file `docs/operations/v0.1.0-release-scope.md` is the source of truth for what v0.1.0 supports, defers, or rejects. Public docs must match it. When the scope changes, the public docs change with it.
+Public docs must match implemented behavior and the accepted release scope for the active release. When the scope changes, the public docs change with it.
 
 Rules:
 
@@ -79,7 +79,7 @@ Do not keep `docs/handoff/` as a folder. Use `docs/operations/agent-handoff.md` 
 
 ## What this means for operators
 
-If you are reading `docs/operations/v0.1.0-release-scope.md` or `docs/operations/v0.1.0-docs-migration-map.md`, you are looking at internal release-control artifacts. The public docs on the website are the claims that matter for users. The internal docs may contain future plans, rejected ideas, or draft language that has not been promoted.
+The public docs on the website are the claims that matter for users. Internal release-control artifacts may contain future plans, rejected ideas, or draft language that has not been promoted. Those artifacts do not ship in the public v0.1.0 repository.
 
 ## Related docs
 

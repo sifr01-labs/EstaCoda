@@ -80,7 +80,6 @@ process.stdin.on("end", () => {
     "README.md",
     "LICENSE",
     "NOTICE",
-    "CHANGELOG.md",
     "package.json"
   ];
   const requiredRoots = [

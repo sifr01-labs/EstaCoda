@@ -20,7 +20,7 @@ Execution plans are detailed, iterative, and contain internal decisions, trade-o
 
 1. **Execution plans live in the private workspace**, not the public repo.
 2. **Canonical docs in the repo are public-ready** unless explicitly marked internal.
-3. **Durable decisions from execution plans are promoted** into architecture docs, ADRs, ROADMAP.md, or prelaunch milestone history.
+3. **Durable decisions from execution plans are promoted** into architecture docs, ADRs, release notes, or public operations docs.
 4. **Internal alpha runbooks, assessments, and call graphs** are private workspace artifacts.
 
 ## Rejected alternatives
@@ -31,9 +31,9 @@ Execution plans are detailed, iterative, and contain internal decisions, trade-o
 
 ## Consequences
 
-- `docs/planning/` contains only a governance README.
-- `docs/operations/prelaunch-milestones.md` compresses public history.
-- Private workspace at `~/.estacoda/private/` holds detailed plans.
+- Planning and release-control artifacts stay outside the public repo.
+- Public history is promoted into release notes or Docusaurus operations docs when it matters to users.
+- Private workspace material holds detailed plans.
 
 ## Operational impact
 
@@ -42,10 +42,9 @@ Execution plans are detailed, iterative, and contain internal decisions, trade-o
 - The private workspace contains working memory: plans, assessments, grep maps, and operational runbooks.
 
 **What files, commands, and subsystems it affects:**
-- `docs/planning/README.md` — governance note explaining the boundary
-- `docs/operations/prelaunch-milestones.md` — compressed public milestone history
-- `~/.estacoda/private/` — private workspace for detailed plans
-- Release-scope and migration-map docs remain internal
+- Docusaurus operations docs — public maintenance and release process guidance
+- ADRs — durable architecture and governance decisions
+- Private workspace material — detailed execution plans and internal assessments
 
 **What maintainers must preserve:**
 - Durable decisions must be promoted, not left in private plans. A decision that stays private is invisible to future maintainers.

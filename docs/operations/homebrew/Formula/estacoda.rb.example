@@ -39,7 +39,6 @@ class Estacoda < Formula
     libexec.install "README.md"
     libexec.install "LICENSE"
     libexec.install "NOTICE"
-    libexec.install "CHANGELOG.md"
 
     # TODO: Confirm wrapper behavior in the external tap before release.
     (libexec/"bin").mkpath

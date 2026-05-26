@@ -38,11 +38,10 @@ skills/
 - [Architecture](../architecture/overview.md)
 - [Subsystems](../subsystems/)
 - [Operations](../operations/)
-- [ROADMAP.md](../../ROADMAP.md)
 - [AGENTS.md](../../AGENTS.md)
 
 ## Next Priority
 
 v0.8: Durable TaskFlow — state machines, wait/resume/cancel, flow persistence, approval gates.
 
-See [Prelaunch Milestones](./prelaunch-milestones.md) for full history.
+See the Docusaurus operations and release-process docs for current public handoff guidance.
