@@ -52,6 +52,30 @@ Profile root: `~/.estacoda/profiles/<id>/`
 - `gateway/` — Do not delete while the gateway is running. Stop the gateway first.
 - `promotions.json` — Do not hand-edit unless you understand the promotion schema. Corrupting it can suppress memory entries.
 - `skills/.evolution/` — Contains proposal metadata. Editing it manually can break the evolution pipeline.
+- `.backups/` — Contains copies of protected state created before managed-source updates. They are not automatically restored; copy them back manually if needed.
+
+## Update backups
+
+`estacoda update` creates a backup of protected user state before mutating a managed-source checkout.
+
+- **What is backed up:** `active-profile.json`, `profiles/`, `trust.json`, `workspace-approvals.json`, `sessions.sqlite`, `memory/`, `packs/registry.jsonl`, and project `config.json` if known.
+- **Where:** `~/.estacoda/.backups/pre-source-update-<timestamp>/`
+- **When:** Before every managed-source update unless `--no-backup` is passed.
+- **Restore:** Copy files back manually. There is no automatic restore command.
+- **Skip:** `--no-backup` skips the backup. Not recommended.
+
+## Uninstall data behavior
+
+Default `estacoda uninstall` preserves `~/.estacoda` entirely. To remove user data, both flags are required:
+
+```bash
+estacoda uninstall --purge --yes
+```
+
+- `--purge` alone is rejected.
+- `--yes` alone keeps user data.
+- With both flags, `~/.estacoda` is removed after gateway teardown and install-code cleanup.
+- Other named profiles are preserved in v0.1.0. Bulk profile removal requires a future explicit flag.
 
 ## Backup workflow
 

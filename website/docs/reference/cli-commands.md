@@ -408,13 +408,58 @@ These are advanced surfaces. Run `--help` on each for subcommands.
 ## Update
 
 ```bash
-estacoda update                         # check for updates (dry-run)
-estacoda update --apply                 # apply update artifact if available
+estacoda update --check                 # check only; never modify files
+estacoda update                         # apply update (managed-source) or print routing
+estacoda update --backup                # force backup before applying
+estacoda update --no-backup             # skip user-state backup
+estacoda update --gateway               # non-interactive gateway/service update mode
 ```
 
-**Current behavior:** The updater checks for available updates and can apply a preexisting update artifact. Full Hermes-style source update behavior (git pull, managed install routing, rollback) is not yet merged. Do not rely on `estacoda update` as a complete update path until the install/update implementation lands.
+**Install-method routing:** `estacoda update` detects how EstaCoda was installed and routes accordingly.
 
-**State touched:** May write update artifacts and cache under `~/.estacoda/`.
+| Method | Behavior |
+|---|---|
+| `managed-source` | Guarded source update: fetch, ff-only check, worktree check, pull, install deps, build, validate. Rollback on failure. |
+| `manual-source` | Check and advise only. No self-mutation. |
+| `homebrew` | Print `brew upgrade kemetresearch/tap/estacoda`. |
+| `docker` | Print `docker pull ghcr.io/kemetresearch/estacoda:latest`. |
+| `npm-global` | Print `npm install -g estacoda@latest`. |
+| `pnpm-global` | Print `pnpm add -g estacoda@latest`. |
+| `unknown` | Print reinstall guidance. |
+
+**State touched:**
+- `~/.estacoda/update-cache.json` — update check cache
+- `~/.estacoda/logs/update.log` — update operation log (gateway mode)
+- `~/.estacoda/.backups/<label>/` — user-state backup before managed-source mutation
+
+**Exit codes:** 0 on success/routing, 1 on error, 2 if up-to-date, 3 if dirty worktree.
+
+**Related docs:** [Updating](../getting-started/updating.md), [Update Operations](../operations/update-operations.md)
+
+## Uninstall
+
+```bash
+estacoda uninstall                      # keep data; remove code/wrappers/services
+estacoda uninstall --purge --yes        # remove user data too
+```
+
+**Behavior:** Default mode removes managed-source install code, known wrappers, installer-owned PATH entries, and gateway services while preserving `~/.estacoda`. `--yes` alone does not purge. Full data deletion requires both `--purge` and `--yes`.
+
+**Install-method routing:**
+
+| Method | Behavior |
+|---|---|
+| `managed-source` | Gateway teardown, remove wrappers/PATH lines, remove install dir (if stamp is trusted), preserve `~/.estacoda` |
+| `manual-source` | Gateway teardown, remove wrappers/PATH lines, preserve clone and `~/.estacoda` |
+| `homebrew` | Print `brew uninstall estacoda` |
+| `docker` | Print container/image guidance |
+| `npm-global` | Print `npm uninstall -g estacoda` |
+| `pnpm-global` | Print `pnpm remove -g estacoda` |
+| `unknown` | Remove known wrappers/PATH lines, preserve user data |
+
+**State touched:** May remove install directory, wrappers, PATH entries, gateway services. With `--purge --yes`, removes `~/.estacoda`.
+
+**Related docs:** [Uninstall](../getting-started/uninstall.md)
 
 ---
 
@@ -458,8 +503,10 @@ Generates a handoff code to share the current CLI session with a channel surface
 |------|---------|
 | 0 | Success |
 | 1 | Error, warning, or command rejected |
+| 2 | Up-to-date (update command) |
+| 3 | Dirty worktree; stash or commit before retrying (update command) |
 
-Most commands exit 0 on success and 1 on any failure, diagnostic warning, or invalid input. The gateway family follows the same convention.
+Most commands exit 0 on success and 1 on any failure, diagnostic warning, or invalid input. The update command uses 2 when already up-to-date and 3 when the managed-source worktree has uncommitted changes. The gateway family follows the same convention.
 
 ---
 

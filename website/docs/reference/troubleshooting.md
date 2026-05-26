@@ -207,6 +207,108 @@ estacoda sessions list --profile work
 
 Switch to the profile that owns the session, or attach the surface to the correct session.
 
+## Update says install is manual-source
+
+**Symptom:** `estacoda update` prints `git fetch origin && git status` instead of applying an update.
+
+**Likely cause:** The `.install-method.json` stamp is missing, invalid, or mismatched. EstaCoda treats the checkout as contributor-owned.
+
+**Inspect:**
+
+```bash
+cat .install-method.json 2>/dev/null || echo "No stamp found"
+git remote get-url origin
+git rev-parse --abbrev-ref HEAD
+```
+
+**Repair:**
+
+If you installed via `curl | bash` and the stamp is missing, the checkout may have been moved or the stamp deleted. Update manually with `git pull` or reinstall via the installer.
+
+## Update refuses dirty worktree
+
+**Symptom:** `estacoda update` exits with code 3 and reports uncommitted changes.
+
+**Likely cause:** The managed-source worktree has local modifications.
+
+**Inspect:**
+
+```bash
+git status --short
+```
+
+**Repair:**
+
+Commit, stash, or discard changes, then retry. Auto-stash is not implemented in v0.1.0.
+
+## Update rollback occurred
+
+**Symptom:** `estacoda update` reports failure during build or validation, then "Rolled back managed-source checkout to `<sha>`".
+
+**Likely cause:** `pnpm install` or `pnpm run build` failed after the pull.
+
+**Inspect:**
+
+```bash
+git log --oneline -3
+node --version
+which pnpm
+```
+
+**Repair:**
+
+Fix the local environment issue (Node version, pnpm availability), then retry `estacoda update`.
+
+## Startup update hint looks stale
+
+**Symptom:** A startup hint says an update is available, but `estacoda update --check` reports up-to-date.
+
+**Likely cause:** The `~/.estacoda/update-cache.json` TTL is 6 hours. If you updated through another means (e.g., `git pull` directly), the cache may be stale.
+
+**Repair:**
+
+The cache will refresh on the next successful update check. Ignore the hint or run `estacoda update --check` to refresh it.
+
+## Gateway update did not restart service
+
+**Symptom:** `estacoda update --gateway` succeeded but the gateway is still running the old version.
+
+**Likely cause:** No managed gateway service was detected. `--gateway` only restarts services installed via `estacoda gateway install-service`.
+
+**Repair:**
+
+Restart the gateway manually: `estacoda gateway restart`.
+
+## Uninstall refuses to delete install directory
+
+**Symptom:** `estacoda uninstall` reports "managed-source stamp was not trusted" and preserves the install directory.
+
+**Likely cause:** The `.install-method.json` stamp is missing, mismatched, or the `installDir` is not in the safe list (`estacoda`, `estacoda.git`, `estacoda-source`).
+
+**Repair:**
+
+Remove the directory manually if you are certain it is installer-owned. The safety gate exists to prevent accidental deletion of contributor checkouts.
+
+## Purge refused
+
+**Symptom:** `estacoda uninstall --purge` exits with code 1 and says "Re-run with --purge --yes".
+
+**Likely cause:** `--purge` without `--yes` is rejected. Both flags are required for non-interactive confirmation.
+
+**Repair:**
+
+Run `estacoda uninstall --purge --yes` if you intend to remove `~/.estacoda`.
+
+## Package-manager install routes to package-manager command
+
+**Symptom:** `estacoda update` or `estacoda uninstall` prints an external command instead of acting directly.
+
+**Likely cause:** EstaCoda detected a package-manager or container install. It does not self-mutate package-manager-managed installs.
+
+**Repair:**
+
+Run the printed command (`brew upgrade`, `docker pull`, `npm install -g`, etc.) or use the package manager's native uninstall path.
+
 ## Related docs
 
 - [FAQ](./faq.md) — short operational answers

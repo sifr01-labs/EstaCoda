@@ -15,7 +15,7 @@ These surfaces exist in code or registry but are not live for users.
 | Surface | Status | Detail |
 |---------|--------|--------|
 | Native Windows installer | Unsupported | No Windows-native install path. WSL is best-effort. |
-| Automatic release download and self-update artifact apply | Unsupported | Updater requires a preexisting `ESTACODA_UPDATE_ARTIFACT`. It does not download artifacts itself. |
+| Binary artifact-only update via `ESTACODA_UPDATE_ARTIFACT` | Reachable, not recommended | The artifact path exists in code but is not the public v0.1.0 update mechanism. Use `estacoda update` or package-manager routing. |
 | Cloud browser providers | Registered, not live | Browserbase, browser-use, Firecrawl, Camofox are registered but cannot create live sessions. |
 | Web research providers beyond fetch | Registered, not live | Firecrawl, Parallel, Tavily, Exa, SearXNG, Brave, DDGS are registered stubs. Only guarded built-in `fetch` extraction is live. |
 | Anthropic Messages API adapter | Catalog-known, not runnable | Code exists but is not runnable in the current build. |
@@ -71,7 +71,10 @@ These channels and providers exist in code but lack live validation evidence for
 - Live provider capability detection deserves an explicit operator signal.
 - Session recall works, but richer lineage/history management is missing.
 - Profile effects beyond prompt guidance remain incomplete.
-- Update/install lifecycle for end users is not finalized.
+- npm global install requires the package to be published to npm. `private: true` remains in `package.json` until the final release PR.
+- Homebrew install depends on an external tap (`KemetResearch/homebrew-tap`) that is not part of this repository.
+- Docker install depends on GHCR image availability and tag publishing.
+- Auto-stash on dirty worktree is not implemented.
 
 ## OS support
 

@@ -18,11 +18,21 @@ Default root: `~/.estacoda/`
 | `trust.json` | Workspace trust grants | `estacoda workspace trust` |
 | `workspace-approvals.json` | Workspace approval grants | Approval commands |
 | `sessions.sqlite` | Global session database with `profile_id` scoping | Runtime initialization |
-| `update-cache.json` | Update check cache | Update command |
+| `update-cache.json` | Update check cache (global, 6-hour TTL) | Startup prefetch, update command |
 | `packs/registry.jsonl` | Global pack cache | Pack operations |
 | `memory/shared/` | Global shared memory snippets | Memory operations |
+| `logs/update.log` | Update operation log (gateway mode and managed-source updates) | Update command |
+| `.backups/<label>/` | User-state backups before managed-source mutation | `estacoda update` |
 
 Global state is not deleted when a profile is removed. If you want a clean slate, delete the global root. Backup your sessions database first if you care about history.
+
+## Install-local state
+
+Source install directories may contain an `.install-method.json` stamp that proves install ownership. EstaCoda uses this stamp to decide whether a checkout is `managed-source` (installer-owned, may be mutated by update) or `manual-source` (contributor-owned, never self-mutated).
+
+| Path | Purpose | Created by |
+|------|---------|------------|
+| `.install-method.json` | Install method stamp: method, source URL, branch, installDir | Installer (`scripts/install.sh`, `scripts/setup-estacoda.sh`) |
 
 ## Profile-local state
 
@@ -81,6 +91,8 @@ tail -f ~/.estacoda/profiles/work/logs/gateway.log
 - Do not edit `sessions.sqlite` directly unless you know the schema.
 - Do not copy `.env` files between profiles without updating the paths and secrets.
 - Do not delete `gateway/` while the gateway is running; stop the gateway first.
+- Do not delete `.install-method.json` unless you intend to convert a `managed-source` install to `manual-source`.
+- Do not hand-edit `update-cache.json`; it is a machine-generated cache.
 
 ## Related docs
 

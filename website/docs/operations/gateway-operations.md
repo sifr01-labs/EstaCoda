@@ -212,10 +212,29 @@ In foreground mode, logs also appear in the terminal. In background or managed-s
 | Approval expiry | Pending approval timed out | Re-issue the command; approvals have a TTL |
 | Hard safety block | Command matches hardline floor | Rephrase the command; hard blocks cannot be overridden |
 
+## Gateway update mode
+
+`estacoda update --gateway` is the non-interactive update path for managed gateway deployments.
+
+- Logs to `~/.estacoda/logs/update.log`.
+- After a successful managed-source update, attempts to restart the gateway service through the service-manager abstraction.
+- If no managed service is detected, prints a manual restart instruction: `estacoda gateway restart`.
+- Never restarts arbitrary user processes.
+
+For full update internals, see [Update Operations](./update-operations.md).
+
+## Gateway teardown during uninstall
+
+`estacoda uninstall` tears down the gateway before removing install code or user data.
+
+- Uses the service-manager abstraction (`estacoda gateway uninstall-service`).
+- No raw `pkill`, `killall`, `systemctl`, or `launchctl` calls in the uninstall path.
+- On Termux, system service removal is skipped; known wrapper paths are cleaned best-effort.
+- Happens before code removal and before `--purge` data deletion.
+
 ## What is not documented here
 
 - Full slash-command reference is not included here; see [Gateway](../user-guide/gateway.md) for user-facing gateway behavior.
-- Final service update/restart handoff behavior is blocked until the update implementation lands.
 
 ## Related docs
 
