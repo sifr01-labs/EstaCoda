@@ -9,7 +9,8 @@ const config: Config = {
   // TODO: add favicon and social-card image under static/img/ when branding assets are ready
 
   url: 'https://estacoda.kemetresearch.com',
-  baseUrl: '/',
+  baseUrl: '/docs/',
+  trailingSlash: true,
 
   organizationName: 'KemetResearch',
   projectName: 'EstaCoda',
@@ -23,10 +24,12 @@ const config: Config = {
       en: {
         label: 'English',
         direction: 'ltr',
+        htmlLang: 'en',
       },
       ar: {
         label: 'العربية',
         direction: 'rtl',
+        htmlLang: 'ar',
       },
     },
   },
@@ -36,6 +39,7 @@ const config: Config = {
       'classic',
       {
         docs: {
+          routeBasePath: '/',
           sidebarPath: './sidebars.ts',
           editUrl: 'https://github.com/KemetResearch/EstaCoda/tree/main/website/',
         },
@@ -77,11 +81,11 @@ const config: Config = {
           items: [
             {
               label: 'Getting Started',
-              to: '/docs/getting-started/',
+              to: '/getting-started/',
             },
             {
               label: 'User Guide',
-              to: '/docs/user-guide/cli',
+              to: '/user-guide/cli',
             },
           ],
         },
