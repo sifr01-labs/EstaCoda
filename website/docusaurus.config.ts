@@ -6,7 +6,14 @@ const config: Config = {
   title: 'EstaCoda',
   tagline: 'A CLI AI agent runtime with multi-channel, multi-provider, and multi-tool support.',
 
-  // TODO: add favicon and social-card image under static/img/ when branding assets are ready
+  favicon: 'img/favicon.svg',
+
+  stylesheets: [
+    {
+      href: 'https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Crimson+Text:ital,wght@0,400;0,600;1,400;1,600&family=JetBrains+Mono:wght@400;500;600&family=Cairo:wght@400;500;600;700&display=swap',
+      rel: 'stylesheet',
+    },
+  ],
 
   url: 'https://estacoda.kemetresearch.com',
   baseUrl: '/docs/',
@@ -52,15 +59,27 @@ const config: Config = {
   ],
 
   themeConfig: {
+    colorMode: {
+      defaultMode: 'light',
+      respectPrefersColorScheme: true,
+    },
     // TODO: configure local search (e.g. @easyops-cn/docusaurus-search-local) once dependency friction is resolved
     navbar: {
       title: 'EstaCoda',
+      logo: {
+        alt: 'EstaCoda',
+        src: 'img/logo-light.png',
+        srcDark: 'img/logo-dark.png',
+        // Point the brand mark at the main marketing site, not the docs root.
+        href: 'https://estacoda.kemetresearch.com/',
+        target: '_self',
+      },
       items: [
         {
-          type: 'docSidebar',
-          sidebarId: 'docsSidebar',
-          position: 'left',
+          to: '/',
           label: 'Docs',
+          position: 'left',
+          activeBaseRegex: '^/$|^/(?!ar(?:/|$)).*$',
         },
         {
           href: 'https://github.com/KemetResearch/EstaCoda',

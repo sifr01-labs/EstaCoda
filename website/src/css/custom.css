@@ -1,17 +1,329 @@
-/* EstaCoda custom styles */
+/* ============================================================
+   EstaCoda Docs — brand match for the marketing site.
+   Light mode: papyrus / warm beige + Kemet blue accent.
+   Dark mode:  deep midnight blue + warm cream ink + brass accent.
+   Fonts: Playfair Display (serif headings), Crimson Text (body),
+          JetBrains Mono (code), Cairo (Arabic body).
+   ============================================================ */
 
+/* Fonts (Playfair Display, Crimson Text, JetBrains Mono, Cairo) are loaded
+   from Google Fonts via <link> tags in docusaurus.config.ts -> stylesheets,
+   not via @import here — keeps webpack from inlining and slowing builds. */
+
+/* ---------- Brand tokens (mirrors artifacts/estacoda/src/pages/EstaCoda.tsx) ---------- */
 :root {
-  --ifm-color-primary: #2e8555;
-  --ifm-color-primary-dark: #29784c;
-  --ifm-color-primary-darker: #277148;
-  --ifm-color-primary-darkest: #205d3b;
-  --ifm-color-primary-light: #33925d;
-  --ifm-color-primary-lighter: #359962;
-  --ifm-color-primary-lightest: #3cad6e;
-  --ifm-code-font-size: 95%;
-  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+  --estacoda-kemet:        #1b4c9d;
+  --estacoda-kemet-deep:   #143a78;
+  --estacoda-kemet-soft:   #2a64b8;
+  --estacoda-ink:          #1f2230;
+  --estacoda-ink-soft:     rgba(31, 34, 48, 0.62);
+  --estacoda-ink-faint:    rgba(31, 34, 48, 0.32);
+  --estacoda-rule:         rgba(31, 34, 48, 0.16);
+  --estacoda-paper-top:    #F7EFD9;
+  --estacoda-paper-bot:    #EFE3C5;
+  --estacoda-paper-sunk:   #ece0c2;
+  --estacoda-paper-warm:   #f1e6cc;
+
+  --estacoda-serif-heading: 'Playfair Display', Georgia, 'Times New Roman', serif;
+  --estacoda-serif-body:    'Crimson Text', Georgia, 'Times New Roman', serif;
+  --estacoda-mono:          'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Infima primary (Kemet blue) — used for links, sidebar active state, etc. */
+  --ifm-color-primary:          var(--estacoda-kemet);
+  --ifm-color-primary-dark:     #184689;
+  --ifm-color-primary-darker:   var(--estacoda-kemet-deep);
+  --ifm-color-primary-darkest:  #0f2d61;
+  --ifm-color-primary-light:    var(--estacoda-kemet-soft);
+  --ifm-color-primary-lighter:  #3a73c4;
+  --ifm-color-primary-lightest: #6b95d3;
+
+  /* Base surfaces & ink */
+  --ifm-background-color:           var(--estacoda-paper-top);
+  --ifm-background-surface-color:   var(--estacoda-paper-warm);
+  --ifm-color-content:              var(--estacoda-ink);
+  --ifm-color-content-secondary:    var(--estacoda-ink-soft);
+  --ifm-heading-color:              var(--estacoda-kemet);
+  --ifm-link-color:                 var(--estacoda-kemet);
+  --ifm-link-hover-color:           var(--estacoda-kemet-deep);
+
+  /* Typography */
+  --ifm-font-family-base:           var(--estacoda-serif-body);
+  --ifm-heading-font-family:        var(--estacoda-serif-heading);
+  --ifm-font-family-monospace:      var(--estacoda-mono);
+  --ifm-font-size-base:             17px;
+  --ifm-line-height-base:           1.65;
+  --ifm-heading-font-weight:        600;
+  --ifm-h1-font-size:               2.4rem;
+  --ifm-h2-font-size:               1.85rem;
+  --ifm-h3-font-size:               1.4rem;
+  --ifm-code-font-size:             92%;
+
+  /* Rules, borders, dividers */
+  --ifm-color-emphasis-100:  #efe3c5;
+  --ifm-color-emphasis-200:  #e8d8b2;
+  --ifm-color-emphasis-300:  #d9c8a0;
+  --ifm-toc-border-color:    var(--estacoda-rule);
+  --ifm-hr-border-color:     var(--estacoda-rule);
+  --ifm-table-border-color:  var(--estacoda-rule);
+
+  /* Code blocks */
+  --ifm-code-background:                rgba(27, 76, 157, 0.08);
+  --ifm-pre-background:                 #2a2418;
+  --ifm-pre-color:                      #f1e6cc;
+  --docusaurus-highlighted-code-line-bg: rgba(27, 76, 157, 0.18);
+
+  /* Navbar */
+  --ifm-navbar-background-color: var(--estacoda-paper-top);
+  --ifm-navbar-link-color:       var(--estacoda-ink);
+  --ifm-navbar-link-hover-color: var(--estacoda-kemet);
+  --ifm-navbar-shadow:           inset 0 -1px 0 var(--estacoda-rule);
+  --ifm-navbar-height:           4rem;
+
+  /* Sidebar (the "default Docusaurus green" the brief calls out) */
+  --ifm-menu-color:                     var(--estacoda-ink-soft);
+  --ifm-menu-color-active:              var(--estacoda-kemet);
+  --ifm-menu-color-background-active:   rgba(27, 76, 157, 0.10);
+  --ifm-menu-color-background-hover:    rgba(27, 76, 157, 0.06);
 }
 
+/* ---------- Dark mode ---------- */
 [data-theme='dark'] {
-  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+  --estacoda-kemet:        #d4b882;   /* brass — used as accent in night mode */
+  --estacoda-kemet-deep:   #b8995f;
+  --estacoda-kemet-soft:   #e6cf9e;
+  --estacoda-ink:          #e8d5b0;
+  --estacoda-ink-soft:     rgba(232, 213, 176, 0.74);
+  --estacoda-ink-faint:    rgba(232, 213, 176, 0.40);
+  --estacoda-rule:         rgba(232, 213, 176, 0.14);
+  --estacoda-paper-top:    #0f1d38;
+  --estacoda-paper-bot:    #0c1731;
+  --estacoda-paper-sunk:   #0a1428;
+  --estacoda-paper-warm:   #14233f;
+
+  --ifm-color-primary:          #6aa3f0;
+  --ifm-color-primary-dark:     #4a8be4;
+  --ifm-color-primary-darker:   #3a7cd6;
+  --ifm-color-primary-darkest:  #2a64b8;
+  --ifm-color-primary-light:    #8ab8f4;
+  --ifm-color-primary-lighter:  #a3c7f7;
+  --ifm-color-primary-lightest: #c5dafa;
+
+  --ifm-background-color:           var(--estacoda-paper-top);
+  --ifm-background-surface-color:   var(--estacoda-paper-warm);
+  --ifm-color-content:              var(--estacoda-ink);
+  --ifm-color-content-secondary:    var(--estacoda-ink-soft);
+  --ifm-heading-color:              var(--estacoda-kemet);
+  --ifm-link-color:                 #6aa3f0;
+  --ifm-link-hover-color:           #8ab8f4;
+
+  --ifm-color-emphasis-100:  #14233f;
+  --ifm-color-emphasis-200:  #1a2c4d;
+  --ifm-color-emphasis-300:  #25395f;
+  --ifm-toc-border-color:    var(--estacoda-rule);
+  --ifm-hr-border-color:     var(--estacoda-rule);
+  --ifm-table-border-color:  var(--estacoda-rule);
+
+  --ifm-code-background:                rgba(212, 184, 130, 0.12);
+  --ifm-pre-background:                 #0a1428;
+  --ifm-pre-color:                      #e8d5b0;
+  --docusaurus-highlighted-code-line-bg: rgba(212, 184, 130, 0.18);
+
+  --ifm-navbar-background-color: var(--estacoda-paper-top);
+  --ifm-navbar-link-color:       var(--estacoda-ink);
+  --ifm-navbar-link-hover-color: #6aa3f0;
+  --ifm-navbar-shadow:           inset 0 -1px 0 var(--estacoda-rule);
+
+  --ifm-menu-color:                     var(--estacoda-ink-soft);
+  --ifm-menu-color-active:              #6aa3f0;
+  --ifm-menu-color-background-active:   rgba(106, 163, 240, 0.12);
+  --ifm-menu-color-background-hover:    rgba(106, 163, 240, 0.07);
+}
+
+/* ---------- Page chrome ---------- */
+html, body {
+  background-color: var(--ifm-background-color);
+}
+
+body {
+  background-image: linear-gradient(180deg, var(--estacoda-paper-top) 0%, var(--estacoda-paper-bot) 100%);
+  background-attachment: fixed;
+}
+
+/* Inline code keeps a quiet brand tint */
+code {
+  border: 1px solid var(--estacoda-rule);
+  border-radius: 3px;
+  padding: 0.05rem 0.35rem;
+}
+
+/* Code blocks stay highly readable on a warm dark slab regardless of mode */
+pre, .theme-code-block, div[class*='codeBlockContainer'] {
+  background-color: var(--ifm-pre-background) !important;
+  color: var(--ifm-pre-color) !important;
+  border: 1px solid var(--estacoda-rule);
+  border-radius: 6px;
+}
+pre code,
+.theme-code-block code,
+div[class*='codeBlockContainer'] code {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  color: inherit !important;
+  font-family: var(--estacoda-mono);
+}
+
+/* Headings — Playfair Display, with the homepage's italic-emphasis register */
+h1, h2, h3, h4, h5, h6,
+.markdown h1, .markdown h2, .markdown h3, .markdown h4, .markdown h5, .markdown h6 {
+  font-family: var(--estacoda-heading-font, var(--estacoda-serif-heading));
+  letter-spacing: -0.01em;
+  color: var(--ifm-heading-color);
+}
+h1, .markdown h1 { font-weight: 600; line-height: 1.15; }
+h2, .markdown h2 {
+  font-weight: 600;
+  border-bottom: 1px solid var(--estacoda-rule);
+  padding-bottom: 0.35rem;
+  margin-top: 2.25rem;
+}
+h3, .markdown h3 { font-weight: 600; }
+
+/* Body copy */
+.markdown {
+  font-family: var(--estacoda-serif-body);
+  font-size: 1.05rem;
+  line-height: 1.7;
+}
+
+/* Navbar */
+.navbar {
+  background-color: var(--ifm-navbar-background-color);
+  border-bottom: 1px solid var(--estacoda-rule);
+  box-shadow: none;
+}
+.navbar__title {
+  font-family: var(--estacoda-serif-heading);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  font-size: 1.15rem;
+  color: var(--estacoda-kemet);
+}
+.navbar__logo img { height: 1.75rem; width: auto; }
+.navbar__link { font-family: var(--estacoda-mono); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.14em; }
+
+/* Sidebar */
+.menu {
+  background: transparent;
+  font-family: var(--estacoda-serif-body);
+  font-size: 0.98rem;
+}
+.menu__link {
+  border-radius: 4px;
+  padding: 0.35rem 0.6rem;
+}
+.menu__link--active {
+  font-weight: 600;
+  color: var(--ifm-menu-color-active);
+  background-color: var(--ifm-menu-color-background-active);
+  border-left: 2px solid var(--ifm-menu-color-active);
+}
+.menu__list-item-collapsible:hover,
+.menu__link:hover { background-color: var(--ifm-menu-color-background-hover); }
+
+/* Right-column ToC */
+.table-of-contents__link {
+  font-family: var(--estacoda-mono);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--estacoda-ink-soft);
+}
+.table-of-contents__link--active,
+.table-of-contents__link:hover {
+  color: var(--ifm-color-primary);
+}
+
+/* Tables */
+table { border-collapse: collapse; }
+table thead {
+  background-color: rgba(27, 76, 157, 0.08);
+  font-family: var(--estacoda-mono);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+[data-theme='dark'] table thead { background-color: rgba(212, 184, 130, 0.08); }
+table th, table td { border: 1px solid var(--estacoda-rule); }
+
+/* Admonitions — restrained borders, brand-tinted */
+.alert, .admonition {
+  border: 1px solid var(--estacoda-rule);
+  border-left-width: 3px;
+  background-color: var(--ifm-background-surface-color);
+  color: var(--ifm-color-content);
+}
+
+/* Pagination buttons */
+.pagination-nav__link {
+  border: 1px solid var(--estacoda-rule);
+  background-color: var(--ifm-background-surface-color);
+}
+.pagination-nav__sublabel {
+  font-family: var(--estacoda-mono);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--estacoda-ink-soft);
+}
+.pagination-nav__label {
+  font-family: var(--estacoda-serif-heading);
+  color: var(--ifm-color-primary);
+}
+
+/* Footer — already dark; keep brand mono labels */
+.footer__title {
+  font-family: var(--estacoda-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.78rem;
+}
+.footer__link-item { font-family: var(--estacoda-serif-body); }
+
+/* Color-mode toggle button */
+.clean-btn[class*='colorModeToggle'] { color: var(--estacoda-ink-soft); }
+
+/* ---------- Arabic / RTL polish ---------- */
+html[lang='ar'] body,
+html[lang='ar'] .markdown {
+  font-family: 'Cairo', var(--estacoda-serif-body);
+}
+html[lang='ar'] h1,
+html[lang='ar'] h2,
+html[lang='ar'] h3,
+html[lang='ar'] h4,
+html[lang='ar'] h5,
+html[lang='ar'] h6,
+html[lang='ar'] .markdown h1,
+html[lang='ar'] .markdown h2,
+html[lang='ar'] .markdown h3,
+html[lang='ar'] .markdown h4 {
+  font-family: 'Cairo', var(--estacoda-serif-heading);
+  letter-spacing: 0;
+}
+html[lang='ar'] .navbar__title { font-family: 'Cairo', var(--estacoda-serif-heading); }
+
+/* Mirror the active-link left border in RTL */
+html[dir='rtl'] .menu__link--active {
+  border-left: none;
+  border-right: 2px solid var(--ifm-menu-color-active);
+}
+
+/* Mono content (CLI, env vars) stays LTR even inside RTL pages */
+html[dir='rtl'] code,
+html[dir='rtl'] pre,
+html[dir='rtl'] .table-of-contents__link {
+  direction: ltr;
+  text-align: left;
+  unicode-bidi: embed;
 }
