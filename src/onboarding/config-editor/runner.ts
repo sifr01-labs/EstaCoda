@@ -137,13 +137,6 @@ type LaunchableApplyEndState = {
   readonly launchHandoffIntent?: SetupLaunchHandoffIntent;
 };
 
-const OPTIONAL_CAPABILITY_MODULES: readonly OptionalCapabilityModule[] = [
-  telegramSetupModule,
-  voiceSetupModule,
-  visionSetupModule,
-  browserSetupModule,
-];
-
 type LoadedConfig = Awaited<ReturnType<typeof loadRuntimeConfig>>["config"];
 
 export async function runConfigEditor(
@@ -291,8 +284,11 @@ async function handleAction(
     case "edit-primary-credential-reference":
     case "repair-missing-credential":
       return handleCredentialAction(options, initialDecision, session, action);
-    case "review-optional-capabilities":
-      return handleOptionalCapabilitiesAction(options, initialDecision, session, action);
+    case "configure-channels":
+    case "configure-voice":
+    case "configure-image-generation":
+    case "configure-browser":
+      return handleOptionalCapabilityAction(options, initialDecision, session, action);
     default: {
       const output = `Action ${action.id} is not implemented in the guided setup editor.`;
       write(options, `${output}\n`);
@@ -379,7 +375,7 @@ async function handleWorkflowLearningAction(
   });
 }
 
-async function handleOptionalCapabilitiesAction(
+async function handleOptionalCapabilityAction(
   options: ConfigEditorRunnerOptions,
   initialDecision: SetupRouteDecision,
   session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
@@ -389,30 +385,28 @@ async function handleOptionalCapabilitiesAction(
   const stateHome = resolveStateHome({ homeDir: options.homeDir });
   const loaded = await loadRuntimeConfig(options);
   const baseContext = setupModuleContextFromConfig(options, initialDecision, stateHome, loaded.config);
+  const promptContext = optionalCapabilityPromptContext(
+    baseContext,
+    optionalCapabilityModuleForAction(action.id)
+  );
   const selectedDrafts: SetupDraft[] = [];
   const pendingCredentialWrites: PendingCredentialWrite[] = [];
+  const selected = await promptOptionalCapabilityAction(options.prompt, {
+    id: optionalPromptId(promptContext.module.id),
+    title: promptContext.title,
+    configured: promptContext.configured,
+  });
 
-  for (const promptContext of optionalCapabilityPromptContexts(baseContext)) {
-    const selected = await promptOptionalCapabilityAction(options.prompt, {
-      id: optionalPromptId(promptContext.module.id),
-      title: promptContext.title,
-      configured: promptContext.configured,
-    });
-    if (selected === "unchanged") continue;
+  if (selected === "skip") {
+    const configuration = promptContext.module.configure(baseContext, { skip: true });
+    selectedDrafts.push(...promptContext.module.toDrafts(baseContext, configuration));
+  }
 
-    if (selected === "skip") {
-      const configuration = promptContext.module.configure(baseContext, { skip: true });
-      selectedDrafts.push(...promptContext.module.toDrafts(baseContext, configuration));
-      continue;
-    }
-
+  if (selected === "enable") {
     const collected = await collectOptionalCapabilityContext(options, baseContext, promptContext.module);
-    if (collected.kind === "unchanged") continue;
-
     if (collected.kind === "skip") {
       const configuration = promptContext.module.configure(baseContext, { skip: true });
       selectedDrafts.push(...promptContext.module.toDrafts(baseContext, configuration));
-      continue;
     }
 
     if (collected.kind === "configured") {
@@ -425,7 +419,7 @@ async function handleOptionalCapabilitiesAction(
   }
 
   if (selectedDrafts.length === 0) {
-    const output = "Optional capabilities left unchanged. No setup changes were drafted.";
+    const output = `${promptContext.title} left unchanged. No setup changes were drafted.`;
     write(options, `${output}\n`);
     return {
       completed: true,
@@ -439,7 +433,7 @@ async function handleOptionalCapabilitiesAction(
   const bundle: SetupDraftBundle = {
     kind: "setup-draft-bundle",
     sourceKind: "setup-module-session",
-    sourceId: "setup-editor.optional-capabilities",
+    sourceId: `setup-editor.optional-capabilities.${promptContext.module.id}`,
     drafts: selectedDrafts,
     blockers: [...new Set(selectedDrafts.flatMap((draft) => draft.blockers))].sort(),
     warnings: [...new Set(selectedDrafts.flatMap((draft) => draft.warnings))].sort(),
@@ -917,15 +911,31 @@ function setupModuleContextFromConfig(
   };
 }
 
-function optionalCapabilityPromptContexts(context: SetupModuleContext): OptionalCapabilityPromptContext[] {
-  return OPTIONAL_CAPABILITY_MODULES.map((module) => {
-    const detection = module.detect(context);
-    return {
-      module,
-      title: optionalCapabilityTitle(module.id),
-      configured: detection.status === "configured",
-    };
-  });
+function optionalCapabilityPromptContext(
+  context: SetupModuleContext,
+  module: OptionalCapabilityModule
+): OptionalCapabilityPromptContext {
+  const detection = module.detect(context);
+  return {
+    module,
+    title: optionalCapabilityTitle(module.id),
+    configured: detection.status === "configured",
+  };
+}
+
+function optionalCapabilityModuleForAction(actionId: string): OptionalCapabilityModule {
+  switch (actionId) {
+    case "configure-channels":
+      return telegramSetupModule;
+    case "configure-voice":
+      return voiceSetupModule;
+    case "configure-image-generation":
+      return visionSetupModule;
+    case "configure-browser":
+      return browserSetupModule;
+    default:
+      throw new Error(`Unsupported optional capability action: ${actionId}`);
+  }
 }
 
 async function collectOptionalCapabilityContext(

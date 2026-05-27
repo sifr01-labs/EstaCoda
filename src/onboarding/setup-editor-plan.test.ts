@@ -242,7 +242,36 @@ describe("buildSetupEditorPlan", () => {
       independentlyReviewable: true,
       capabilities: ["channels", "voice", "vision", "browser"],
     });
-    expect(capabilities.actions[0]?.patch?.fields).toEqual(["channels", "voice", "vision", "browser"]);
+    expect(capabilities.actions.map((action) => action.id)).toEqual([
+      "configure-channels",
+      "configure-voice",
+      "configure-image-generation",
+      "configure-browser",
+    ]);
+    expect(capabilities.actions.map((action) => action.patch?.fields)).toEqual([
+      ["channels"],
+      ["voice"],
+      ["vision"],
+      ["browser"],
+    ]);
+    expect(capabilities.actions.some((action) => action.id === "review-optional-capabilities")).toBe(false);
+  });
+
+  it("keeps split optional capability action ordering stable", () => {
+    const plan = buildSetupEditorPlan(state("configured-ready"));
+
+    expect(plan.actions.map((action) => action.id)).toEqual([
+      "edit-primary-model-route",
+      "edit-primary-credential-reference",
+      "edit-security-mode",
+      "edit-workflow-learning",
+      "configure-channels",
+      "configure-voice",
+      "configure-image-generation",
+      "configure-browser",
+      "run-readonly-verification",
+      "cancel-setup-editor",
+    ]);
   });
 
   it("does not reintroduce backupForMain or future fallback placeholders", () => {

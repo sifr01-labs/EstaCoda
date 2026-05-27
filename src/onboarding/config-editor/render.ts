@@ -17,10 +17,15 @@ const PR6_EDITOR_ACTION_ORDER: readonly SetupEditorActionId[] = [
   "edit-primary-model-route",
   "repair-missing-credential",
   "edit-primary-credential-reference",
+  "edit-fallback-model-route",
+  "edit-auxiliary-model-route",
+  "configure-channels",
+  "configure-voice",
+  "configure-image-generation",
+  "configure-browser",
   "repair-workspace-trust",
   "edit-security-mode",
   "edit-workflow-learning",
-  "review-optional-capabilities",
 ];
 
 export function renderConfigEditor(input: {
@@ -210,8 +215,14 @@ function editorActionDescription(action: SetupEditorActionDraft): string {
       return setupCopyText("en", "setupEditor.actions.editSecurityMode.description");
     case "edit-workflow-learning":
       return setupCopyText("en", "setupEditor.actions.editWorkflowLearning.description");
-    case "review-optional-capabilities":
-      return setupCopyText("en", "setupEditor.actions.reviewOptionalCapabilities.description");
+    case "configure-channels":
+      return setupCopyText("en", "setupEditor.actions.configureChannels.description");
+    case "configure-voice":
+      return setupCopyText("en", "setupEditor.actions.configureVoice.description");
+    case "configure-image-generation":
+      return setupCopyText("en", "setupEditor.actions.configureImageGeneration.description");
+    case "configure-browser":
+      return setupCopyText("en", "setupEditor.actions.configureBrowser.description");
     case "repair-primary-provider":
       return setupCopyText("en", "setupEditor.actions.repairPrimaryProvider.description");
     case "edit-primary-model-route":

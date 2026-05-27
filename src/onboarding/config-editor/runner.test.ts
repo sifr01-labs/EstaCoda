@@ -64,7 +64,11 @@ describe("runConfigEditor", () => {
     expect(output.join("")).toContain("Available actions:");
     expect(output.join("")).toContain("edit-security-mode");
     expect(output.join("")).toContain("edit-workflow-learning");
-    expect(output.join("")).toContain("review-optional-capabilities");
+    expect(output.join("")).toContain("configure-channels");
+    expect(output.join("")).toContain("configure-voice");
+    expect(output.join("")).toContain("configure-image-generation");
+    expect(output.join("")).toContain("configure-browser");
+    expect(output.join("")).not.toContain("review-optional-capabilities");
     expect(output.join("")).toContain("verify-setup - Run read-only verification");
     expect(output.join("")).toContain("show-diagnostics - Show diagnostics");
     expect(output.join("")).toContain("exit - Exit without changes");
@@ -830,7 +834,7 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt(),
-      defaultActionId: "review-optional-capabilities",
+      defaultActionId: "configure-channels",
       applyExecutor: {
         apply: () => {
           applyCalled = true;
@@ -840,8 +844,8 @@ describe("runConfigEditor", () => {
     });
 
     expect(result.completed).toBe(true);
-    expect(result.selectedActionId).toBe("review-optional-capabilities");
-    expect(result.output).toContain("Optional capabilities left unchanged");
+    expect(result.selectedActionId).toBe("configure-channels");
+    expect(result.output).toContain("Telegram/channels left unchanged");
     expect(result.reviewManifest).toBeUndefined();
     expect(result.applyPlanningResult).toBeUndefined();
     expect(applyCalled).toBe(false);
@@ -873,16 +877,12 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt,
-      defaultActionId: "review-optional-capabilities",
+      defaultActionId: "configure-channels",
     });
 
     expect(result.completed).toBe(true);
     expect(optionLabels[0]).toEqual(["Leave unchanged", "Enable/configure"]);
-    expect(optionLabels.slice(1)).toEqual([
-      ["Leave unchanged", "Skip", "Enable/configure"],
-      ["Leave unchanged", "Skip", "Enable/configure"],
-      ["Leave unchanged", "Skip", "Enable/configure"],
-    ]);
+    expect(optionLabels).toHaveLength(1);
     expect(result.reviewManifest).toBeUndefined();
   });
 
@@ -895,9 +895,9 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["enable", "TELEGRAM_BOT_TOKEN", "", "", "skip", "unchanged", "unchanged", "unchanged", true],
+        values: ["enable", "TELEGRAM_BOT_TOKEN", "", "", "skip", true],
       }),
-      defaultActionId: "review-optional-capabilities",
+      defaultActionId: "configure-channels",
     });
 
     expect(result.completed).toBe(true);
@@ -925,13 +925,10 @@ describe("runConfigEditor", () => {
           "TELEGRAM_BOT_TOKEN",
           "42",
           "",
-          "unchanged",
-          "unchanged",
-          "unchanged",
           true,
         ],
       }),
-      defaultActionId: "review-optional-capabilities",
+      defaultActionId: "configure-channels",
     });
 
     expect(result.completed).toBe(true);
@@ -949,10 +946,10 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["enable", "TELEGRAM_BOT_TOKEN", "42", "-100", "unchanged", "unchanged", "unchanged", true],
+        values: ["enable", "TELEGRAM_BOT_TOKEN", "42", "-100", true],
         secret: "123456:stored-telegram-token",
       }),
-      defaultActionId: "review-optional-capabilities",
+      defaultActionId: "configure-channels",
       applyExecutor: createReviewedSetupApplyExecutor({
         homeDir: tempDir,
         workspaceRoot,
@@ -965,8 +962,12 @@ describe("runConfigEditor", () => {
     };
 
     expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("configure-channels");
     expect(result.reviewManifest?.sections["enabled-optional-capabilities"]).toHaveLength(1);
     expect(result.reviewManifest?.sections["remote-control-surfaces"]).toHaveLength(1);
+    expect(result.reviewManifest?.sections["enabled-optional-capabilities"].map((line) => line.sourceDraftIds[0])).toEqual([
+      "setup-module.telegram.capability",
+    ]);
     expect(result.reviewManifest?.sections["remote-control-surfaces"][0]?.review.values.remoteControlIdentityConstraint).toBe("allowed-user-or-chat-id");
     expect(config.channels?.telegram).toEqual(expect.objectContaining({
       enabled: true,
@@ -979,7 +980,7 @@ describe("runConfigEditor", () => {
     expect(JSON.stringify(result)).not.toContain("123456:");
   });
 
-  it("applies voice, vision, and browser optional capability refs without raw secrets or browser launch", async () => {
+  it("configures voice without drafting other optional capabilities", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
 
@@ -988,7 +989,6 @@ describe("runConfigEditor", () => {
       workspaceRoot,
       prompt: fakePrompt({
         values: [
-          "skip",
           "enable",
           "openai",
           "gpt-4o-mini-tts",
@@ -996,19 +996,10 @@ describe("runConfigEditor", () => {
           "openai",
           "gpt-4o-mini-transcribe",
           "VOICE_STT_KEY",
-          "enable",
-          "fal",
-          "fal-ai/imagen4/preview",
-          "FAL_KEY",
-          false,
-          "enable",
-          "local-cdp",
-          "http://127.0.0.1:1",
-          "google-chrome --remote-debugging-port=9222",
           true,
         ],
       }),
-      defaultActionId: "review-optional-capabilities",
+      defaultActionId: "configure-voice",
       applyExecutor: createReviewedSetupApplyExecutor({
         homeDir: tempDir,
         workspaceRoot,
@@ -1016,35 +1007,126 @@ describe("runConfigEditor", () => {
     });
     const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
     const config = JSON.parse(rawConfig) as {
+      channels?: unknown;
       tts?: { provider?: string; openai?: { model?: string; apiKeyEnv?: string } };
       stt?: { provider?: string; openai?: { model?: string; apiKeyEnv?: string } };
+      imageGen?: unknown;
+      browser?: unknown;
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("configure-voice");
+    expect(result.reviewManifest?.sections["enabled-optional-capabilities"].map((line) => line.sourceDraftIds[0])).toEqual([
+      "setup-module.voice.capability",
+    ]);
+    expect(config.tts?.provider).toBe("openai");
+    expect(config.tts?.openai?.apiKeyEnv).toBe("VOICE_TTS_KEY");
+    expect(config.stt?.provider).toBe("openai");
+    expect(config.stt?.openai?.apiKeyEnv).toBe("VOICE_STT_KEY");
+    expect(config.channels).toBeUndefined();
+    expect(config.imageGen).toBeUndefined();
+    expect(config.browser).toBeUndefined();
+    expect(rawConfig).not.toContain("sk-");
+    expect(JSON.stringify(result)).not.toContain("sk-");
+  });
+
+  it("configures image generation without drafting other optional capabilities", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: [
+          "enable",
+          "fal",
+          "fal-ai/imagen4/preview",
+          "FAL_KEY",
+          false,
+          true,
+        ],
+      }),
+      defaultActionId: "configure-image-generation",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      channels?: unknown;
+      tts?: unknown;
+      stt?: unknown;
       imageGen?: { provider?: string; model?: string; fal?: { apiKeyEnv?: string } };
+      browser?: unknown;
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("configure-image-generation");
+    expect(result.reviewManifest?.sections["enabled-optional-capabilities"].map((line) => line.sourceDraftIds[0])).toEqual([
+      "setup-module.vision.capability",
+    ]);
+    expect(config.imageGen?.provider).toBe("fal");
+    expect(config.imageGen?.fal?.apiKeyEnv).toBe("FAL_KEY");
+    expect(config.channels).toBeUndefined();
+    expect(config.tts).toBeUndefined();
+    expect(config.stt).toBeUndefined();
+    expect(config.browser).toBeUndefined();
+    expect(rawConfig).not.toContain("sk-");
+    expect(JSON.stringify(result)).not.toContain("sk-");
+  });
+
+  it("configures browser without drafting other optional capabilities or auto-launching", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: [
+          "enable",
+          "local-cdp",
+          "http://127.0.0.1:1",
+          "google-chrome --remote-debugging-port=9222",
+          true,
+        ],
+      }),
+      defaultActionId: "configure-browser",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      channels?: unknown;
+      tts?: unknown;
+      stt?: unknown;
+      imageGen?: unknown;
       browser?: { backend?: string; cdpUrl?: string; launchCommand?: string; autoLaunch?: boolean };
     };
     const browserLine = result.reviewManifest?.sections["enabled-optional-capabilities"]
       .find((line) => line.sourceDraftIds.includes("setup-module.browser.capability"));
 
     expect(result.completed).toBe(true);
-    expect(result.reviewManifest?.sections["enabled-optional-capabilities"].map((line) => line.sourceDraftIds[0])).toEqual(expect.arrayContaining([
-      "setup-module.voice.capability",
-      "setup-module.vision.capability",
+    expect(result.selectedActionId).toBe("configure-browser");
+    expect(result.reviewManifest?.sections["enabled-optional-capabilities"].map((line) => line.sourceDraftIds[0])).toEqual([
       "setup-module.browser.capability",
-    ]));
-    expect(result.reviewManifest?.sections["enabled-optional-capabilities"].map((line) => line.sourceDraftIds[0])).not.toContain("setup-module.telegram.capability");
+    ]);
     expect(browserLine?.review.values.autoLaunchRequested).toBe(false);
     expect(browserLine?.review.values.autoLaunchWillRunNow).toBe(false);
-    expect(config.tts?.provider).toBe("openai");
-    expect(config.tts?.openai?.apiKeyEnv).toBe("VOICE_TTS_KEY");
-    expect(config.stt?.provider).toBe("openai");
-    expect(config.stt?.openai?.apiKeyEnv).toBe("VOICE_STT_KEY");
-    expect(config.imageGen?.provider).toBe("fal");
-    expect(config.imageGen?.fal?.apiKeyEnv).toBe("FAL_KEY");
     expect(config.browser).toEqual({
       backend: "local-cdp",
       cdpUrl: "http://127.0.0.1:1",
       launchCommand: "google-chrome --remote-debugging-port=9222",
       autoLaunch: false,
     });
+    expect(config.channels).toBeUndefined();
+    expect(config.tts).toBeUndefined();
+    expect(config.stt).toBeUndefined();
+    expect(config.imageGen).toBeUndefined();
     expect(rawConfig).not.toContain("sk-");
     expect(JSON.stringify(result)).not.toContain("sk-");
   });
