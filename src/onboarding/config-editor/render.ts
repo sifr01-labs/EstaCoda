@@ -16,7 +16,6 @@ const PR6_EDITOR_ACTION_ORDER: readonly SetupEditorActionId[] = [
   "repair-primary-provider",
   "edit-primary-model-route",
   "repair-missing-credential",
-  "edit-primary-credential-reference",
   "edit-fallback-model-route",
   "edit-auxiliary-model-route",
   "configure-channels",
@@ -229,8 +228,6 @@ function editorActionDescription(action: SetupEditorActionDraft): string {
       return setupCopyText("en", "setupEditor.actions.editPrimaryModelRoute.description");
     case "repair-missing-credential":
       return setupCopyText("en", "setupEditor.actions.repairMissingCredential.description");
-    case "edit-primary-credential-reference":
-      return setupCopyText("en", "setupEditor.actions.editPrimaryCredentialReference.description");
     default:
       return setupCopyText("en", action.copyKey);
   }

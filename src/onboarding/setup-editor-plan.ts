@@ -267,32 +267,20 @@ function credentialsSection(state: SetupEntryState): SetupEditorSection {
     },
     warnings: blocked ? state.warnings : [],
     blockers: blocked ? state.blockers : [],
-    actions: [
-      ...(blocked
-        ? [
-            setupEditorAction({
-              id: "repair-missing-credential",
-              copyKey: "setupEditor.actions.repairMissingCredential",
-              sectionId: "credentials",
-              effect: "draft-config-patch",
-              readOnly: false,
-              requiresExplicitApply: true,
-              patch: scopedPatch(["provider.credentialReference"]),
-              credentialRefs: missingCredentialRefs,
-            }),
-          ]
-        : []),
-      setupEditorAction({
-        id: "edit-primary-credential-reference",
-        copyKey: "setupEditor.actions.editPrimaryCredentialReference",
-        sectionId: "credentials",
-        effect: "draft-config-patch",
-        readOnly: false,
-        requiresExplicitApply: true,
-        patch: scopedPatch(["provider.credentialReference"]),
-        credentialRefs: missingCredentialRefs,
-      }),
-    ],
+    actions: blocked
+      ? [
+          setupEditorAction({
+            id: "repair-missing-credential",
+            copyKey: "setupEditor.actions.repairMissingCredential",
+            sectionId: "credentials",
+            effect: "draft-config-patch",
+            readOnly: false,
+            requiresExplicitApply: true,
+            patch: scopedPatch(["provider.credentialReference"]),
+            credentialRefs: missingCredentialRefs,
+          }),
+        ]
+      : [],
   });
 }
 

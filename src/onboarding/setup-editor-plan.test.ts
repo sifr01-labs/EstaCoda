@@ -264,7 +264,6 @@ describe("buildSetupEditorPlan", () => {
       "edit-primary-model-route",
       "edit-fallback-model-route",
       "edit-auxiliary-model-route",
-      "edit-primary-credential-reference",
       "edit-security-mode",
       "edit-workflow-learning",
       "configure-channels",
@@ -274,6 +273,15 @@ describe("buildSetupEditorPlan", () => {
       "run-readonly-verification",
       "cancel-setup-editor",
     ]);
+  });
+
+  it("hides the redundant credential-reference editor action from normal menus", () => {
+    const plan = buildSetupEditorPlan(state("configured-ready"));
+    const credentials = section(plan, "credentials");
+
+    expect(credentials.actions).toEqual([]);
+    expect(plan.actions.some((action) => action.id === "edit-primary-credential-reference")).toBe(false);
+    expect(plan.actions.some((action) => action.id === "store-provider-credential-reference")).toBe(false);
   });
 
   it("exposes fallback route editing as a scoped reviewed model route action", () => {

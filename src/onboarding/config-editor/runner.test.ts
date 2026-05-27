@@ -70,6 +70,7 @@ describe("runConfigEditor", () => {
     expect(output.join("")).toContain("configure-voice");
     expect(output.join("")).toContain("configure-image-generation");
     expect(output.join("")).toContain("configure-browser");
+    expect(output.join("")).not.toContain("edit-primary-credential-reference");
     expect(output.join("")).not.toContain("review-optional-capabilities");
     expect(output.join("")).toContain("verify-setup - Run read-only verification");
     expect(output.join("")).toContain("show-diagnostics - Show diagnostics");
