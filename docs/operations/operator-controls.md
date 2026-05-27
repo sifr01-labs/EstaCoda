@@ -136,12 +136,49 @@ Supported service managers:
 
 Installed gateway services are profile-aware. The generated service launch command includes `gateway start --profile <profileId>`, and each profile receives its own hash-suffixed unit or plist name, so multiple profiles can have independent managed services.
 
-System-scope installs require root and an explicit `--run-as-user <user>`. EstaCoda validates the username, verifies the user exists with `id -u`, and resolves the service `HOME` with `getent passwd <user>`. Pass `--home <absolute-dir>` when automatic home resolution is unavailable or should be overridden. EstaCoda does not insert `sudo` for you; run the install command with the privilege model you intend.
+Gateway services use two homes:
+
+| Concept | Meaning |
+|---------|---------|
+| `stateHomeDir` / `estacodaHomeDir` | EstaCoda state root. Holds profile config, profile-local `.env`, sessions, gateway state, logs, and cron files. Generated services receive this as `ESTACODA_HOME`. |
+| `serviceUserHomeDir` / `osHomeDir` | Real OS user home. Holds systemd user units, launchd plists, and the generated service `HOME`. |
+
+With this environment:
+
+```bash
+HOME=/home/agent ESTACODA_HOME=/srv/estacoda-state
+```
+
+the service uses:
+
+```text
+EstaCoda state:
+  /srv/estacoda-state/.estacoda/...
+
+Service files:
+  /home/agent/.config/systemd/user/...
+  /home/agent/Library/LaunchAgents/...
+
+Generated service environment:
+  ESTACODA_HOME=/srv/estacoda-state
+  HOME=/home/agent
+```
+
+System-scope installs require root and an explicit `--run-as-user <user>`. EstaCoda validates the username, verifies the user exists with `id -u`, and resolves the service `HOME` with `getent passwd <user>`. Pass `--home <absolute-dir>` when the run-as user's OS home cannot be resolved or should be overridden. `--home` is a service-user OS-home override; it is not the EstaCoda state home unless `ESTACODA_HOME` is also set to the same path. EstaCoda does not insert `sudo` for you; run the install command with the privilege model you intend.
+
+Example:
+
+```bash
+sudo ESTACODA_HOME=/srv/estacoda-state \
+  estacoda gateway install --system --run-as-user estacoda --home /var/lib/estacoda
+```
+
+In that command, `/var/lib/estacoda` is the service user's OS home and generated `HOME`. EstaCoda state remains under `/srv/estacoda-state/.estacoda`.
 
 Operational warnings:
 
-- Services use an explicit `HOME` but not your interactive shell environment.
-- Put bot tokens and provider API keys in `~/.estacoda/profiles/<profileId>/.env`, not only in shell exports.
+- Services set `ESTACODA_HOME` for state and `HOME` for the OS/service user. They do not inherit your interactive shell environment.
+- Put bot tokens and provider API keys in the resolved profile-local `.env` under the selected state home, for example `/srv/estacoda-state/.estacoda/profiles/<profileId>/.env`, not only in shell exports.
 - systemd user services may stop on logout unless linger is enabled, for example `sudo loginctl enable-linger $USER`.
 - systemd service output is sent to the journal. Use `journalctl --user -u <unit> -f` for user services and `sudo journalctl -u <unit> -f` for system services.
 - Source-mode installs hardcode the absolute workspace path. If the repo moves, uninstall and reinstall the service.

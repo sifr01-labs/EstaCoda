@@ -48,7 +48,8 @@ State isolation:
 
 | Variable | Purpose |
 |----------|---------|
-| `ESTACODA_HOME` | Override the default state root (`~/.estacoda`). Use this to run dev builds against isolated state without touching your real user data. |
+| `ESTACODA_HOME` | Override the EstaCoda state home. Defaults to the OS `HOME` with state under `~/.estacoda`. This does not change the operating-system user home. |
+| `HOME` | Operating-system user home. EstaCoda uses it for OS-home behavior such as `~` expansion and service-user paths. Do not use `HOME` as the state isolation knob when `ESTACODA_HOME` is available. |
 
 Provider keys (configure at least one):
 
@@ -98,6 +99,34 @@ Runtime config loads exactly one selected profile config: an explicit `--profile
 ## Runtime State Paths
 
 Default root: `~/.estacoda/` (override with `ESTACODA_HOME`)
+
+EstaCoda keeps two home concepts separate:
+
+| Concept | Controlled by | Used for |
+|---------|---------------|----------|
+| `stateHomeDir` / `estacodaHomeDir` | explicit home option, then `ESTACODA_HOME`, then `HOME`, then `os.homedir()` | EstaCoda state root, profile config, profile-local `.env`, session database, gateway state/log/cron paths, generated service `ESTACODA_HOME` |
+| `osHomeDir` / `serviceUserHomeDir` | `HOME`, then `USERPROFILE`, then `os.homedir()` | OS user home, `~` expansion, systemd user unit path, launchd plist path, generated service `HOME` |
+
+Example split:
+
+```bash
+HOME=/home/agent ESTACODA_HOME=/srv/estacoda-state estacoda gateway status
+```
+
+Expected paths:
+
+```text
+EstaCoda state:
+  /srv/estacoda-state/.estacoda/...
+
+OS/service files:
+  /home/agent/.config/systemd/user/...
+  /home/agent/Library/LaunchAgents/...
+
+Generated service environment:
+  ESTACODA_HOME=/srv/estacoda-state
+  HOME=/home/agent
+```
 
 | Path | Purpose |
 |------|---------|
