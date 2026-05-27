@@ -1246,6 +1246,7 @@ describe("StandardRenderer — conversation message", () => {
     // Should contain the Unicode eye symbol and brand name
     expect(out).toContain("𓂀");
     expect(out).toContain("EstaCoda");
+    expect(stripAnsi(out).split("\n")[0]).toContain("─ 𓂀 EstaCoda ─");
     // Should have open horizontal frame corners
     expect(out).toContain("╭");
     expect(out).toContain("╮");
@@ -1279,6 +1280,7 @@ describe("StandardRenderer — conversation message", () => {
     const out = r.renderConversationMessage(vm);
     // Should use ASCII fallback for brand symbol
     expect(out).toContain("* EstaCoda");
+    expect(stripAnsi(out).split("\n")[0]).toContain("- * EstaCoda -");
     // Should use ASCII corners
     expect(out).toContain("+");
     expect(out).not.toContain("\u256D");

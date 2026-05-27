@@ -219,16 +219,17 @@ export function openHorizontalFrame(
   const bottomRight = useUnicode ? "╯" : "+";
 
   const contentWidth = Math.max(0, ...lines.map((l) => measureVisibleWidth(l)));
-  const titleWidth = options.title ? measureVisibleWidth(options.title) : 0;
+  const framedTitle = options.title ? ` ${options.title} ` : undefined;
+  const titleWidth = framedTitle ? measureVisibleWidth(framedTitle) : 0;
   const minWidth = Math.max(contentWidth + 4, titleWidth + 4);
   const width = Math.max(minWidth, options.width ?? 0);
 
   let top = topLeft + horiz.repeat(width - 2) + topRight;
-  if (options.title && titleWidth > 0) {
+  if (framedTitle && titleWidth > 0) {
     const avail = width - 2 - titleWidth;
     const left = Math.floor(avail / 2);
     const right = avail - left;
-    top = topLeft + horiz.repeat(left) + options.title + horiz.repeat(right) + topRight;
+    top = topLeft + horiz.repeat(left) + framedTitle + horiz.repeat(right) + topRight;
   }
 
   const bottom = bottomLeft + horiz.repeat(width - 2) + bottomRight;

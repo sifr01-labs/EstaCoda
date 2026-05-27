@@ -284,9 +284,18 @@ describe("openHorizontalFrame", () => {
       useUnicode: true,
       title: "Title",
     });
-    expect(result).toContain("Title");
+    expect(result).toContain("─ Title ─");
     const lines = result.split("\n");
-    expect(lines[0]).toContain("Title");
+    expect(lines[0]).toContain("─ Title ─");
+  });
+
+  it("renders ASCII frame title with rule gaps", () => {
+    const result = openHorizontalFrame(["content"], {
+      useUnicode: false,
+      title: "* EstaCoda",
+    });
+    const lines = result.split("\n");
+    expect(lines[0]).toContain("- * EstaCoda -");
   });
 
   it("respects explicit width", () => {
