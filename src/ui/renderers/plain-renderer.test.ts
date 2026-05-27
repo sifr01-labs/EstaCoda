@@ -1179,6 +1179,20 @@ describe("PlainRenderer — prompt chrome rails", () => {
     assertNoAnsi(out);
   });
 
+  it("renders long status rail durations as hours and minutes without ANSI", () => {
+    const vm = buildSessionStatusRailViewModel({
+      modelLabel: "deepseek-reasoner",
+      turnState: "idle",
+      sessionElapsedMs: 217 * 60_000,
+      currentTurnSeconds: 217 * 60,
+      showTurnState: false,
+    });
+    const out = renderSessionStatusRail(vm);
+
+    expect(out).toBe("* deepseek-reasoner | session 3h 37m | turn 3h 37m");
+    assertNoAnsi(out);
+  });
+
   it("renders deterministic shortcut rail without ANSI", () => {
     const out = renderShortcutHintRail(buildShortcutHintRailViewModel({ hints: [] }));
     expect(out).toBe("> /help · /tools · /model · /status · Ctrl+C exit");

@@ -1354,10 +1354,27 @@ describe("StandardRenderer — prompt chrome rails", () => {
     });
     const out = r.render(vm);
     expect(out).toContain("deepseek-reasoner");
+    expect(out).toMatch(/\x1b\[1mdeepseek-reasoner\x1b\[0m/u);
     expect(out).toContain("context 32.7k/128k");
     expect(out).toContain("◷ 58s");
     expect(out).toContain("⧖ 5m 12s");
     expect(out).not.toContain("idle");
+    expect(out.split("\n")).toHaveLength(1);
+  });
+
+  it("renders long rail durations as hours and minutes", () => {
+    const r = renderer("dark", fullCaps());
+    const vm = buildSessionStatusRailViewModel({
+      modelLabel: "deepseek-reasoner",
+      turnState: "idle",
+      sessionElapsedMs: 217 * 60_000,
+      currentTurnSeconds: 217 * 60,
+      showTurnState: false,
+    });
+    const out = r.render(vm);
+
+    expect(out).toContain("◷ 3h 37m");
+    expect(out).toContain("⧖ 3h 37m");
     expect(out.split("\n")).toHaveLength(1);
   });
 

@@ -355,8 +355,15 @@ function formatDuration(ms: number): string {
 }
 
 function formatRailDuration(ms: number): string {
-  if (ms >= 60000) {
-    const totalSeconds = Math.floor(ms / 1000);
+  if (ms >= 3_600_000) {
+    const totalMinutes = Math.floor(ms / 60_000);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
+  }
+
+  if (ms >= 60_000) {
+    const totalSeconds = Math.floor(ms / 1_000);
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;
     return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
