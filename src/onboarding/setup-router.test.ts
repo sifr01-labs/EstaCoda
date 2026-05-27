@@ -267,11 +267,16 @@ describe("routeSetupEntryState", () => {
     assertNoRenderingFields(session);
   });
 
-  it("adds an explicit trust warning for untrusted workspaces", () => {
-    const decision = routeSetupEntryState(state("untrusted-workspace"));
+  it("keeps untrusted workspace warnings actionable without duplicating blockers", () => {
+    const decision = routeSetupEntryState(state("untrusted-workspace", {
+      blockers: ["Workspace is not trusted."],
+      warnings: ["Workspace is not trusted yet; local write/terminal actions will ask first."],
+    }));
 
     expect(decision.summary).toContain("not trusted");
-    expect(decision.warnings).toContain("Workspace is not trusted.");
+    expect(decision.blockers).toContain("Workspace is not trusted.");
+    expect(decision.warnings).not.toContain("Workspace is not trusted.");
+    expect(decision.warnings).toContain("Workspace is not trusted yet; local write/terminal actions will ask first.");
     expect(decision.actions.some((action) => action.id === "trust-workspace")).toBe(true);
   });
 

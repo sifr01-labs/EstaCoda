@@ -1,6 +1,6 @@
 import type { SetupEditorPlanSession, SetupRouteAction, SetupRouteActionId, SetupRouteDecision } from "../setup-router.js";
 import type { SetupEditorActionDraft, SetupEditorActionId } from "../setup-editor-actions.js";
-import { setupCopyText } from "../setup-prompts.js";
+import { formatSetupCopy, setupCopyText, type SetupPromptValue } from "../setup-prompts.js";
 
 export type ConfigEditorRenderedAction = {
   readonly id: SetupRouteActionId | SetupEditorActionId;
@@ -120,7 +120,8 @@ export function renderConfigEditorDiagnostics(decision: SetupRouteDecision): str
 
 export function configEditorActions(
   decision: SetupRouteDecision,
-  session: SetupEditorPlanSession
+  session: SetupEditorPlanSession,
+  copyValues: Record<string, SetupPromptValue> = {}
 ): readonly ConfigEditorRenderedAction[] {
   const routeActions = new Map(
     decision.actions
@@ -142,7 +143,7 @@ export function configEditorActions(
   const guidedActions = PR6_EDITOR_ACTION_ORDER
     .map((id) => editorActions.get(id))
     .filter((action): action is SetupEditorActionDraft => action !== undefined)
-    .map((action) => renderEditorAction(action));
+    .map((action) => renderEditorAction(action, copyValues));
 
   return [...guidedActions, ...readOnlyActions];
 }
@@ -164,10 +165,13 @@ function renderRouteAction(action: SetupRouteAction): ConfigEditorRenderedAction
   };
 }
 
-function renderEditorAction(action: SetupEditorActionDraft): ConfigEditorRenderedAction {
+function renderEditorAction(
+  action: SetupEditorActionDraft,
+  copyValues: Record<string, SetupPromptValue>
+): ConfigEditorRenderedAction {
   return {
     id: action.id,
-    label: setupCopyText("en", action.copyKey),
+    label: formatSetupCopy("en", action.copyKey, copyValues),
     description: editorActionDescription(action),
     readOnly: action.readOnly,
     source: "editor",

@@ -428,6 +428,7 @@ async function interactiveSetup(options: CliOptions, input: { readonly advanced:
           homeDir: options.homeDir,
           profileId: options.profileId,
         }),
+        renderInitialOverview: false,
         output: {
           write: (value) => chunks.push(value),
         },

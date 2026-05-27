@@ -174,18 +174,16 @@ describe("cli setup command", () => {
       argv: ["setup", "--interactive"],
       workspaceRoot,
       homeDir: tempDir,
-      prompt: firstRunPrompt({ reviewAccepted: true }),
+      prompt: firstRunPrompt({ reviewAccepted: true, setupEditorActionId: "exit" }),
     });
 
     expect(result.handled).toBe(true);
     expect(result.exitCode).toBe(0);
-    expect(result.output).toContain("EstaCoda guided setup editor");
-    expect(result.output).toContain("EstaCoda is already configured");
-    expect(result.output).toContain("Kind: configured-ready");
-    expect(result.output).toContain("Route: configured-menu");
-    expect(result.output).toContain("verify-setup - Run read-only verification");
-    expect(result.output).toContain("show-diagnostics - Show diagnostics");
-    expect(result.output).toContain("exit - Exit without changes");
+    expect(result.output).toContain("Exited setup editor without applying changes.");
+    expect(result.output).not.toContain("EstaCoda guided setup editor");
+    expect(result.output).not.toContain("Kind: configured-ready");
+    expect(result.output).not.toContain("Available actions:");
+    expect(result.output).not.toContain("Sections:");
     expect(result.output).not.toContain("review-edit-config - Review/edit config");
     expect(result.output).not.toContain("launch-agent - Launch agent");
   });
@@ -199,16 +197,17 @@ describe("cli setup command", () => {
       argv: ["setup", "--interactive"],
       workspaceRoot,
       homeDir: tempDir,
-      prompt: firstRunPrompt({ reviewAccepted: true }),
+      prompt: firstRunPrompt({ reviewAccepted: true, setupEditorActionId: "show-diagnostics" }),
     });
 
     expect(result.handled).toBe(true);
     expect(result.exitCode).toBe(0);
-    expect(result.output).toContain("EstaCoda guided setup editor");
-    expect(result.output).toContain("Kind: configured-degraded");
+    expect(result.output).toContain("Setup diagnostics");
+    expect(result.output).toContain("State: configured-degraded");
     expect(result.output).toContain("Route: configured-degraded-menu");
     expect(result.output).toContain("Configured model context window is below 64K tokens.");
-    expect(result.output).toContain("show-diagnostics - Show diagnostics");
+    expect(result.output).not.toContain("Available actions:");
+    expect(result.output).not.toContain("Sections:");
     expect(result.output).not.toContain("repair-setup - Fix now");
     expect(result.output).not.toContain("launch-agent - Continue in limited mode");
     expect(result.output).not.toContain("review-edit-config - Review/edit config");
@@ -237,16 +236,17 @@ describe("cli setup command", () => {
         argv: ["setup", "--interactive"],
         workspaceRoot,
         homeDir: tempDir,
-        prompt: firstRunPrompt({ reviewAccepted: true }),
+        prompt: firstRunPrompt({ reviewAccepted: true, setupEditorActionId: "show-diagnostics" }),
       });
 
       expect(result.handled).toBe(true);
-      expect(result.output).toContain("EstaCoda guided setup editor");
-      expect(result.output).toContain("Kind: missing-secret");
+      expect(result.output).toContain("Setup diagnostics");
+      expect(result.output).toContain("State: missing-secret");
       expect(result.output).toContain("Route: repair-first-menu");
-      expect(result.output).toContain("repair-missing-credential - Repair missing credential reference");
       expect(result.output).toContain("Blockers:");
       expect(result.output).toContain("OPENAI_API_KEY");
+      expect(result.output).not.toContain("Available actions:");
+      expect(result.output).not.toContain("Sections:");
       expect(result.output).not.toContain("repair-setup - Repair setup");
       expect(result.output).not.toContain("sk-");
     } finally {
@@ -268,19 +268,19 @@ describe("cli setup command", () => {
       argv: ["setup", "--interactive"],
       workspaceRoot,
       homeDir: tempDir,
-      prompt: firstRunPrompt({ reviewAccepted: true }),
+      prompt: firstRunPrompt({ reviewAccepted: true, setupEditorActionId: "show-diagnostics" }),
     });
 
     expect(result.handled).toBe(true);
     expect(result.exitCode).toBe(0);
-    expect(result.output).toContain("EstaCoda guided setup editor");
-    expect(result.output).toContain("Kind: broken-config");
+    expect(result.output).toContain("Setup diagnostics");
+    expect(result.output).toContain("State: broken-config");
     expect(result.output).toContain("Route: repair-first-menu");
-    expect(result.output).toContain("status: blocked");
     expect(result.output).toContain(configPath);
     expect(result.output).toContain("Normal config edits are blocked until the config file can be parsed.");
     expect(result.output).toContain("Only diagnostics, verification, and exit are available");
-    expect(result.output).toContain("show-diagnostics - Show diagnostics");
+    expect(result.output).not.toContain("Available actions:");
+    expect(result.output).not.toContain("Sections:");
     expect(result.output).not.toContain("repair-setup - Repair setup");
     expect(result.output).not.toContain("review-edit-config - Open config editor");
     expect(result.output).not.toContain("edit-primary-model-route");
@@ -295,16 +295,16 @@ describe("cli setup command", () => {
       argv: ["setup", "--interactive"],
       workspaceRoot,
       homeDir: tempDir,
-      prompt: firstRunPrompt({ reviewAccepted: true }),
+      prompt: firstRunPrompt({ reviewAccepted: true, setupEditorActionId: "repair-workspace-trust" }),
     });
 
     expect(result.handled).toBe(true);
-    expect(result.output).toContain("EstaCoda guided setup editor");
-    expect(result.output).toContain("Kind: untrusted-workspace");
-    expect(result.output).toContain("Route: configured-menu");
-    expect(result.output).toContain("workspace-trust");
-    expect(result.output).toContain("repair-workspace-trust - Review workspace trust grant");
-    expect(result.output).toContain("status: repair-required");
+    expect(result.output).toContain("Workspace trust write.");
+    expect(result.output).toContain(`Grant trust for ${workspaceRoot}`);
+    expect(result.output).toContain("Verification passed. Setup is ready.");
+    expect(result.output).not.toContain("Available actions:");
+    expect(result.output).not.toContain("Sections:");
+    expect(result.output).not.toContain("Workspace is not trusted.\n- Warning: Workspace is not trusted.");
     expect(result.output).not.toContain("trust-workspace - Trust workspace");
   });
 
@@ -318,19 +318,19 @@ describe("cli setup command", () => {
       argv: ["setup", "--interactive"],
       workspaceRoot,
       homeDir: tempDir,
-      prompt: firstRunPrompt({ reviewAccepted: true }),
+      prompt: firstRunPrompt({ reviewAccepted: true, setupEditorActionId: "show-diagnostics" }),
     });
 
     expect(result.handled).toBe(true);
-    expect(result.output).toContain("EstaCoda guided setup editor");
-    expect(result.output).toContain("Kind: state-not-writable");
+    expect(result.output).toContain("Setup diagnostics");
+    expect(result.output).toContain("State: state-not-writable");
     expect(result.output).toContain("Route: repair-first-menu");
-    expect(result.output).toContain("state writable: no");
-    expect(result.output).toContain("status: blocked");
     expect(result.output).toContain(profileConfigPath(tempDir));
     expect(result.output).toContain("fix-state-directory");
     expect(result.output).toContain("Restore write permission");
     expect(result.output).toContain("Only diagnostics, verification, and exit are available");
+    expect(result.output).not.toContain("Available actions:");
+    expect(result.output).not.toContain("Sections:");
     expect(result.output).not.toContain("repair-setup - Repair setup");
     expect(result.output).not.toContain("review-edit-config - Open config editor");
     expect(result.output).not.toContain("edit-primary-model-route");
@@ -368,6 +368,7 @@ describe("cli setup command", () => {
 type FirstRunPromptOptions = {
   readonly reviewAccepted: boolean;
   readonly launchSelected?: boolean;
+  readonly setupEditorActionId?: string;
 };
 
 function firstRunPrompt(options: FirstRunPromptOptions): Prompt {
@@ -382,6 +383,9 @@ function firstRunPrompt(options: FirstRunPromptOptions): Prompt {
     }
     if (title.includes("provider")) {
       return valueOrDefault(selection, "local");
+    }
+    if (title.includes("guided setup editor") && options.setupEditorActionId !== undefined) {
+      return valueWithIdOrDefault(selection, options.setupEditorActionId);
     }
     if (title.includes("review")) {
       return valueOrDefault(selection, options.reviewAccepted);
@@ -403,6 +407,21 @@ function valueOrDefault<T>(selection: SelectPromptInput<T>, value: unknown): T {
   return selection.options.find((option) => Object.is(option.value, value))?.value
     ?? selection.options[selection.defaultIndex ?? 0]?.value
     ?? selection.options[0]!.value;
+}
+
+function valueWithIdOrDefault<T>(selection: SelectPromptInput<T>, id: string): T {
+  return selection.options.find((option) => optionValueId(option.value) === id)?.value
+    ?? selection.options[selection.defaultIndex ?? 0]?.value
+    ?? selection.options[0]!.value;
+}
+
+function optionValueId(value: unknown): string | undefined {
+  return typeof value === "object" &&
+    value !== null &&
+    "id" in value &&
+    typeof value.id === "string"
+    ? value.id
+    : undefined;
 }
 
 function allBooleanOptions<T>(selection: SelectPromptInput<T>): boolean {

@@ -88,6 +88,7 @@ export type ConfigEditorRunnerOptions = CollectSetupRouteOptions & {
   readonly applyExecutor?: SetupApplyExecutor;
   readonly output?: { readonly write: (value: string) => void };
   readonly defaultActionId?: SetupEditorActionId | SetupRouteActionId;
+  readonly renderInitialOverview?: boolean;
   readonly applyFlowOptions?: SetupApplyFlowOptions;
   readonly flowEngine?: FlowEngine;
 };
@@ -183,9 +184,13 @@ async function runConfigEditorOnce(
     };
   }
 
-  const actions = configEditorActions(initialDecision, session);
-  const rendered = renderConfigEditor({ decision: initialDecision, session, actions });
-  write(options, `${rendered}\n`);
+  const actions = configEditorActions(initialDecision, session, {
+    workspacePath: options.workspaceRoot,
+  });
+  if (options.renderInitialOverview !== false) {
+    const rendered = renderConfigEditor({ decision: initialDecision, session, actions });
+    write(options, `${rendered}\n`);
+  }
 
   const selectedAction = await selectAction(options, actions, defaultActionId);
   if (selectedAction === undefined) {
