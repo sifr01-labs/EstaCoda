@@ -1,5 +1,5 @@
-import { homedir } from "node:os";
 import { join } from "node:path";
+import { resolveHomeDir } from "./home-dir.js";
 
 export type StateHomePaths = {
   homeDir: string;
@@ -18,7 +18,7 @@ export type StateHomePaths = {
 // Returns global state paths only. Profile-scoped config/auth/env/runtime
 // paths live in profile-home.ts.
 export function resolveStateHome(options?: { homeDir?: string }): StateHomePaths {
-  const homeDir = options?.homeDir ?? process.env.HOME ?? homedir() ?? "";
+  const homeDir = resolveHomeDir(options?.homeDir);
   const stateRoot = join(homeDir, ".estacoda");
   return {
     homeDir,

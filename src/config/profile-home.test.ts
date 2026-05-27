@@ -75,6 +75,30 @@ describe("profile home paths", () => {
     expect(globalPaths.sharedMemoryPath).toBe(join(tempDir, ".estacoda", "memory", "shared"));
   });
 
+  it("uses ESTACODA_HOME before HOME for state paths", async () => {
+    const prodHome = await mkdtemp(join(tmpdir(), "estacoda-profile-prod-home-"));
+    const devHome = await mkdtemp(join(tmpdir(), "estacoda-profile-dev-home-"));
+    const originalHome = process.env.HOME;
+    const originalEstacodaHome = process.env.ESTACODA_HOME;
+
+    try {
+      process.env.HOME = prodHome;
+      process.env.ESTACODA_HOME = devHome;
+
+      const globalPaths = resolveGlobalStateHome();
+      const profilePaths = resolveProfileStateHome({ profileId: "default" });
+
+      expect(globalPaths.stateRoot).toBe(join(devHome, ".estacoda"));
+      expect(globalPaths.stateRoot).not.toBe(join(prodHome, ".estacoda"));
+      expect(profilePaths.configPath).toBe(join(devHome, ".estacoda", "profiles", "default", "config.json"));
+    } finally {
+      restoreEnv("HOME", originalHome);
+      restoreEnv("ESTACODA_HOME", originalEstacodaHome);
+      await rm(prodHome, { recursive: true, force: true });
+      await rm(devHome, { recursive: true, force: true });
+    }
+  });
+
   it("round-trips active-profile.json", async () => {
     writeActiveProfile("coder", { homeDir: tempDir });
     const paths = resolveGlobalStateHome({ homeDir: tempDir });
@@ -118,3 +142,11 @@ describe("profile home paths", () => {
     });
   });
 });
+
+function restoreEnv(key: "HOME" | "ESTACODA_HOME", value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+  process.env[key] = value;
+}

@@ -220,7 +220,37 @@ describe("defaultEnvPath", () => {
   it("returns path under homeDir when provided", () => {
     expect(defaultEnvPath("/home/user")).toBe(join("/home/user", ".estacoda", ".env"));
   });
+
+  it("uses ESTACODA_HOME before HOME for state paths", async () => {
+    const prodHome = await mkdtemp(join(tmpdir(), "estacoda-env-prod-home-"));
+    const devHome = await mkdtemp(join(tmpdir(), "estacoda-env-dev-home-"));
+    const originalHome = process.env.HOME;
+    const originalEstacodaHome = process.env.ESTACODA_HOME;
+
+    try {
+      process.env.HOME = prodHome;
+      process.env.ESTACODA_HOME = devHome;
+
+      expect(defaultEnvPath()).toBe(join(devHome, ".estacoda", ".env"));
+
+      const result = await writeEnvSecret({ key: "DEV_HOME_KEY", value: "value" });
+      expect(result.path).toBe(join(devHome, ".estacoda", ".env"));
+    } finally {
+      restoreEnv("HOME", originalHome);
+      restoreEnv("ESTACODA_HOME", originalEstacodaHome);
+      await rm(prodHome, { recursive: true, force: true });
+      await rm(devHome, { recursive: true, force: true });
+    }
+  });
 });
+
+function restoreEnv(key: "HOME" | "ESTACODA_HOME", value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+  process.env[key] = value;
+}
 
 // Helper to write file content directly for comment-line test
 async function writeFile(path: string, content: string, encoding: BufferEncoding): Promise<void> {

@@ -1,5 +1,6 @@
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { resolveHomeDir } from "./home-dir.js";
 import { resolveProfileStateHome } from "./profile-home.js";
 
 export type EnvSecretWriteResult = {
@@ -13,7 +14,7 @@ export type SavedEnvSecretPresence = {
 };
 
 export function defaultEnvPath(homeDir?: string): string {
-  return join(homeDir ?? process.env.HOME ?? "", ".estacoda", ".env");
+  return join(resolveHomeDir(homeDir), ".estacoda", ".env");
 }
 
 export async function writeEnvSecret(options: {

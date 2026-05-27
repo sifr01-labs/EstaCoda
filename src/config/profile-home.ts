@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { resolveHomeDir } from "./home-dir.js";
 
 export type ProfileId = string;
 
@@ -154,10 +154,6 @@ export function writeActiveProfile(profileId: string, options?: { homeDir?: stri
     }
     throw error;
   }
-}
-
-function resolveHomeDir(homeDir: string | undefined): string {
-  return homeDir ?? process.env.ESTACODA_HOME ?? process.env.HOME ?? homedir() ?? "";
 }
 
 function readPreviousActiveProfile(activeProfilePath: string): ActiveProfileRecord | undefined {
