@@ -806,6 +806,7 @@ describe("runConfigEditor", () => {
       workspaceRoot,
       prompt: fakePrompt({
         values: ["enable", "TELEGRAM_BOT_TOKEN", "42", "-100", "unchanged", "unchanged", "unchanged", true],
+        secret: "123456:stored-telegram-token",
       }),
       defaultActionId: "review-optional-capabilities",
       applyExecutor: createReviewedSetupApplyExecutor({
@@ -814,6 +815,7 @@ describe("runConfigEditor", () => {
       }),
     });
     const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    const envFile = await readFile(profileEnvPath(tempDir), "utf8");
     const config = JSON.parse(rawConfig) as {
       channels?: { telegram?: { enabled?: boolean; botTokenEnv?: string; allowedUserIds?: string[]; allowedChatIds?: string[] } };
     };
@@ -829,6 +831,7 @@ describe("runConfigEditor", () => {
       allowedChatIds: ["-100"],
     }));
     expect(rawConfig).not.toContain("123456:");
+    expect(envFile).toContain('TELEGRAM_BOT_TOKEN="123456:stored-telegram-token"');
     expect(JSON.stringify(result)).not.toContain("123456:");
   });
 

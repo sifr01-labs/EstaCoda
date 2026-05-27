@@ -271,8 +271,15 @@ export const SETUP_COPY_ENTRIES = [
   copy("setupEditor.prompt.optionalCapabilityAction.leaveUnchanged.description", "Keep the current setting and write nothing.", "احتفظ بالإعداد الحالي دون كتابة أي تغيير.", [], "optional-capability"),
   copy("setupEditor.prompt.optionalCapabilityAction.skip.description", "Skip this optional capability. Core setup remains valid.", "تخطَّ هذه القدرة الاختيارية. يبقى الإعداد الأساسي صالحًا.", [], "optional-capability"),
   copy("setupEditor.prompt.optionalCapabilityAction.enableConfigure.description", "Review and configure this optional capability.", "راجع واضبط هذه القدرة الاختيارية.", [], "optional-capability"),
-  copy("setupEditor.prompt.telegram.summary", "Telegram enables remote control. Add the bot token env var and restrict access to allowed users or chats.", "يتيح Telegram التحكم عن بُعد. أضف متغير بيئة رمز البوت، وقيّد الوصول بالمستخدمين أو المحادثات المسموح بها.", [], "optional-capability"),
-  copy("setupEditor.prompt.telegram.botTokenEnv", "Telegram bot token environment variable name", "اسم متغير بيئة رمز Telegram bot", [], "optional-capability"),
+  copy(
+    "setupEditor.prompt.telegram.summary",
+    "Telegram gives EstaCoda a remote command channel. Set the bot token, then restrict access to the users or chats you actually trust.",
+    "يمنح Telegram لـ EstaCoda قناة أوامر عن بُعد. اضبط رمز البوت، ثم قيّد الوصول بالمستخدمين أو المحادثات التي تثق بها فعليًا.",
+    [],
+    "optional-capability"
+  ),
+  copy("setupEditor.prompt.telegram.botTokenEnv", "Env var name to store Telegram bot token under", "اسم متغير البيئة لتخزين رمز Telegram bot تحته", [], "optional-capability"),
+  copy("setupEditor.prompt.telegram.botToken", "Telegram bot token (leave blank to use an existing env var)", "رمز Telegram bot (اتركه فارغًا لاستخدام متغير بيئة موجود)", [], "optional-capability"),
   copy("setupEditor.prompt.telegram.allowedUserIds", "Allowed Telegram user IDs", "معرّفات مستخدمي Telegram المسموح بها", [], "optional-capability"),
   copy("setupEditor.prompt.telegram.allowedChatIds", "Allowed Telegram chat IDs", "معرّفات محادثات Telegram المسموح بها", [], "optional-capability"),
   copy("setupEditor.prompt.telegram.remoteControlRisk", "Remote-control access must be restricted before Telegram can be enabled.", "يجب تقييد الوصول للتحكم عن بُعد قبل تفعيل Telegram.", [], "optional-capability"),

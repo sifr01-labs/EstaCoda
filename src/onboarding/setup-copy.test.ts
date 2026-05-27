@@ -124,6 +124,7 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.prompt.optionalCapabilityAction.enableConfigure.description",
   "setupEditor.prompt.telegram.summary",
   "setupEditor.prompt.telegram.botTokenEnv",
+  "setupEditor.prompt.telegram.botToken",
   "setupEditor.prompt.telegram.allowedUserIds",
   "setupEditor.prompt.telegram.allowedChatIds",
   "setupEditor.prompt.telegram.remoteControlRisk",

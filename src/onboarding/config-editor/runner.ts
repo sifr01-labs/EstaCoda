@@ -121,6 +121,7 @@ type OptionalCapabilityCollectionResult =
   | {
       readonly kind: "configured";
       readonly context: SetupModuleContext;
+      readonly pendingCredentialWrite?: PendingCredentialWrite;
     }
   | {
       readonly kind: "skip" | "unchanged";
@@ -388,6 +389,7 @@ async function handleOptionalCapabilitiesAction(
   const loaded = await loadRuntimeConfig(options);
   const baseContext = setupModuleContextFromConfig(options, initialDecision, stateHome, loaded.config);
   const selectedDrafts: SetupDraft[] = [];
+  const pendingCredentialWrites: PendingCredentialWrite[] = [];
 
   for (const promptContext of optionalCapabilityPromptContexts(baseContext)) {
     const selected = await promptOptionalCapabilityAction(options.prompt, {
@@ -413,6 +415,9 @@ async function handleOptionalCapabilitiesAction(
     }
 
     if (collected.kind === "configured") {
+      if (collected.pendingCredentialWrite !== undefined) {
+        pendingCredentialWrites.push(collected.pendingCredentialWrite);
+      }
       const configuration = promptContext.module.configure(collected.context);
       selectedDrafts.push(...promptContext.module.toDrafts(collected.context, configuration));
     }
@@ -448,7 +453,7 @@ async function handleOptionalCapabilitiesAction(
   return reviewAndApplyBundles(options, initialDecision, action.id, [
     bundle,
     ...(verificationBundle === undefined ? [] : [verificationBundle]),
-  ]);
+  ], { pendingCredentialWrites });
 }
 
 async function handleProviderRouteAction(
@@ -527,17 +532,23 @@ async function reviewAndApplyBundles(
   options: ConfigEditorRunnerOptions,
   initialDecision: SetupRouteDecision,
   selectedActionId: string,
-  bundles: readonly SetupDraftBundle[]
+  bundles: readonly SetupDraftBundle[],
+  sideEffects: {
+    readonly pendingCredentialWrites?: readonly PendingCredentialWrite[];
+  } = {}
 ): Promise<ConfigEditorRunnerResult> {
   const reviewManifest = buildSetupReviewManifest(bundles);
-  return reviewAndApplyManifest(options, initialDecision, selectedActionId, reviewManifest);
+  return reviewAndApplyManifest(options, initialDecision, selectedActionId, reviewManifest, sideEffects);
 }
 
 async function reviewAndApplyManifest(
   options: ConfigEditorRunnerOptions,
   initialDecision: SetupRouteDecision,
   selectedActionId: string,
-  reviewManifest: SetupReviewManifest
+  reviewManifest: SetupReviewManifest,
+  sideEffects: {
+    readonly pendingCredentialWrites?: readonly PendingCredentialWrite[];
+  } = {}
 ): Promise<ConfigEditorRunnerResult> {
   const reviewText = renderSetupReviewManifest(reviewManifest, "en");
   write(options, `${reviewText}\n`);
@@ -545,6 +556,14 @@ async function reviewAndApplyManifest(
   const applyPlanningResult = planSetupApply(reviewAccepted
     ? { kind: "approved-review-result", manifest: reviewManifest }
     : { kind: "cancelled-review-result", manifest: reviewManifest, reason: "User cancelled review." });
+  if (
+    sideEffects.pendingCredentialWrites !== undefined &&
+    sideEffects.pendingCredentialWrites.length > 0 &&
+    applyPlanningResult.kind === "apply-plan-ready" &&
+    options.applyExecutor !== undefined
+  ) {
+    await writePendingCredentialWrites(options, sideEffects.pendingCredentialWrites);
+  }
   return finalizeReviewedApply({
     options,
     initialDecision,
@@ -597,6 +616,22 @@ async function finalizeReviewedApply(input: {
     renderedApplyOutput: output,
   });
   return postApply;
+}
+
+async function writePendingCredentialWrites(
+  options: ConfigEditorRunnerOptions,
+  writes: readonly PendingCredentialWrite[]
+): Promise<void> {
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+  for (const pendingWrite of writes) {
+    const result = await writeEnvSecret({
+      homeDir: options.homeDir,
+      profileId,
+      key: pendingWrite.envVarName,
+      value: pendingWrite.value,
+    });
+    process.env[result.key] = pendingWrite.value;
+  }
 }
 
 async function handlePostApplyHandoff(input: {
@@ -907,6 +942,9 @@ async function collectOptionalCapabilityContext(
         });
 
         if (hasTelegramAllowedIdentity(values)) {
+          const pendingCredentialWrite = values.botToken === undefined
+            ? undefined
+            : { envVarName: values.botTokenEnv, value: values.botToken };
           return {
             kind: "configured",
             context: {
@@ -916,6 +954,7 @@ async function collectOptionalCapabilityContext(
                 ...values,
               },
             },
+            pendingCredentialWrite,
           };
         }
 

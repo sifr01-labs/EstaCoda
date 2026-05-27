@@ -1,4 +1,5 @@
 import type { Prompt } from "../../cli/readline-prompt.js";
+import { promptForApiKeyInput } from "../../cli/secret-prompt.js";
 import type { BrowserBackendKind } from "../../contracts/browser.js";
 import type { SecurityApprovalMode } from "../../contracts/security.js";
 import type { ImageGenerationProvider, SttProvider, TtsProvider } from "../../config/runtime-config.js";
@@ -318,6 +319,7 @@ export async function promptTelegramCapability(
   }
 ): Promise<{
   readonly botTokenEnv: string;
+  readonly botToken?: string;
   readonly allowedUserIds: readonly string[];
   readonly allowedChatIds: readonly string[];
 }> {
@@ -330,6 +332,12 @@ export async function promptTelegramCapability(
     ].join("\n"),
     current.botTokenEnv ?? "ESTACODA_TELEGRAM_BOT_TOKEN"
   );
+  const botTokenInput = await promptForApiKeyInput({
+    prompt,
+    providerId: "telegram",
+    envVarName: botTokenEnv,
+    question: `${setupCopyText("en", "setupEditor.prompt.telegram.botToken")}: `,
+  });
   const allowedUserIds = splitCsv(await promptSetupStringWithDefault(
     prompt,
     `${setupCopyText("en", "setupEditor.prompt.telegram.allowedUserIds")}, comma-separated: `,
@@ -343,6 +351,7 @@ export async function promptTelegramCapability(
 
   return {
     botTokenEnv,
+    botToken: botTokenInput.kind === "entered" ? botTokenInput.value : undefined,
     allowedUserIds,
     allowedChatIds,
   };

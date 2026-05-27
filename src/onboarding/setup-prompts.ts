@@ -222,12 +222,23 @@ function reviewPlaceholderValues(
     ...values,
     providerId: values.providerId ?? values.provider,
     modelId: values.modelId ?? values.model,
-    envVar: values.envVar ?? (Array.isArray(envVars) ? envVars.join(", ") : envVars),
+    envVar: values.envVar ?? values.botTokenEnv ?? (Array.isArray(envVars) ? envVars.join(", ") : envVars),
+    identityRefs: values.identityRefs ?? telegramIdentityRefs(values),
     workspacePath: values.workspacePath ?? values.workspaceRoot,
     workflowMode: values.workflowMode ?? values.workflowLearning,
     capabilities: values.capabilities,
     launchPreference: values.launchPreference ?? launchPreference(values.launchSelected),
   };
+}
+
+function telegramIdentityRefs(values: Record<string, SetupPromptValue>): string | undefined {
+  const allowedUserIds = Array.isArray(values.allowedUserIds) ? values.allowedUserIds : [];
+  const allowedChatIds = Array.isArray(values.allowedChatIds) ? values.allowedChatIds : [];
+  const refs = [
+    ...allowedUserIds.map((id) => `user:${id}`),
+    ...allowedChatIds.map((id) => `chat:${id}`),
+  ];
+  return refs.length > 0 ? refs.join(", ") : undefined;
 }
 
 function launchPreference(value: SetupPromptValue): string | undefined {

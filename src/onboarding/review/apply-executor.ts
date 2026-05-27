@@ -325,12 +325,9 @@ async function applyTelegramCapability(
   operation: SetupApplyOperation,
   options: ReviewedSetupApplyExecutorOptions
 ): Promise<void> {
-  const botTokenEnv = stringValue(operation.review.values.botTokenEnv ?? operation.review.values.envVar);
+  const botTokenEnv = stringValue(operation.review.values.botTokenEnv ?? operation.review.values.envVar) ?? "ESTACODA_TELEGRAM_BOT_TOKEN";
   const allowedUserIds = arrayValue(operation.review.values.allowedUserIds);
   const allowedChatIds = arrayValue(operation.review.values.allowedChatIds);
-  if (botTokenEnv === undefined) {
-    throw new Error("Telegram apply requires a bot token environment-variable reference.");
-  }
   if (allowedUserIds.length === 0 && allowedChatIds.length === 0) {
     throw new Error("Telegram apply requires allowed user or chat identities.");
   }
