@@ -293,9 +293,10 @@ export async function runGatewayInstallService(
   if (!result.ok) return { ok: false, output: result.error };
 
   const scope = options.system ? "system" : "user";
+  const profileEnvPath = join(resolveProfileStateHome({ homeDir: stateHomeDir, profileId }).profileRoot, ".env");
   const warnings = [
     "Service inherits HOME but not interactive shell environment.",
-    `Ensure secrets (bot tokens, API keys) are in the profile-local .env at ~/.estacoda/profiles/${profileId}/.env, not only shell exports.`,
+    `Ensure secrets (bot tokens, API keys) are in the profile-local .env at ${profileEnvPath}, not only shell exports.`,
   ];
 
   if (!options.system && detectServiceManager().startsWith("systemd")) {
@@ -569,7 +570,8 @@ export async function runGatewayStartBackground(
   options: GatewayCommandOptions
 ): Promise<{ ok: boolean; output: string }> {
   const selected = await resolveGatewayProfile(options);
-  const preflight = await preflightBackgroundStart(selected);
+  const serviceUserHomeDir = resolveOsHomeDir();
+  const preflight = await preflightBackgroundStart(selected, serviceUserHomeDir);
   if (!preflight.ok) {
     return { ok: false, output: preflight.output };
   }
@@ -594,7 +596,8 @@ export async function runGatewayStartBackground(
       detached: true,
       env: {
         ...process.env,
-        HOME: selected.homeDir,
+        HOME: serviceUserHomeDir,
+        ESTACODA_HOME: selected.homeDir,
       },
       stdio: ["ignore", logFd, logFd],
     });
@@ -620,8 +623,10 @@ export async function runGatewayStartBackground(
   }
 }
 
-async function preflightBackgroundStart(selected: SelectedGatewayProfile): Promise<{ ok: true } | { ok: false; output: string }> {
-  const serviceUserHomeDir = resolveOsHomeDir();
+async function preflightBackgroundStart(
+  selected: SelectedGatewayProfile,
+  serviceUserHomeDir: string
+): Promise<{ ok: true } | { ok: false; output: string }> {
   const userState = await probeServiceState({
     serviceUserHomeDir,
     profileId: selected.profileId,

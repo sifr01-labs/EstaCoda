@@ -646,6 +646,8 @@ describe("gateway commands", () => {
           workspaceRoot: tmpDir,
           profileId: "dev-profile",
         }));
+        expect(result.output).toContain(join(devHome, ".estacoda", "profiles", "dev-profile", ".env"));
+        expect(result.output).not.toContain("~/.estacoda/profiles/dev-profile/.env");
       } finally {
         await rm(envRoot, { recursive: true, force: true });
       }
@@ -765,6 +767,35 @@ describe("gateway commands", () => {
       expect(result.output).toContain("Service Manager");
       expect(result.output).toContain("systemd-user (user): active (running)");
       expect(result.output).toContain("systemd-system (system): inactive (dead)");
+    });
+
+    it("uses ESTACODA_HOME for status state and OS HOME for service probing", async () => {
+      const envRoot = await makeTempDir();
+      const prodHome = join(envRoot, "prod-home");
+      const devHome = join(envRoot, "dev-home");
+      await mkdir(join(devHome, ".estacoda"), { recursive: true });
+      await writeFile(join(devHome, ".estacoda", "active-profile.json"), JSON.stringify({ profileId: "dev-profile" }), "utf8");
+      serviceManagerMock.detectServiceManager.mockReturnValue("systemd-user");
+
+      try {
+        const result = await withEnv({ HOME: prodHome, ESTACODA_HOME: devHome }, () => (
+          runGatewayStatus({ workspaceRoot: tmpDir })
+        ));
+
+        expect(result.ok).toBe(true);
+        expect(serviceManagerMock.probeServiceState).toHaveBeenCalledWith(expect.objectContaining({
+          serviceUserHomeDir: prodHome,
+          profileId: "dev-profile",
+          system: false,
+        }));
+        expect(serviceManagerMock.probeServiceState).toHaveBeenCalledWith(expect.objectContaining({
+          serviceUserHomeDir: prodHome,
+          profileId: "dev-profile",
+          system: true,
+        }));
+      } finally {
+        await rm(envRoot, { recursive: true, force: true });
+      }
     });
 
     it("keeps status ok when service probing degrades", async () => {
@@ -1218,6 +1249,31 @@ describe("gateway commands", () => {
       expect(result.output).toContain("99999");
     });
 
+    it("uses ESTACODA_HOME state paths for unmanaged stop and OS HOME for service probes", async () => {
+      const envRoot = await makeTempDir();
+      const prodHome = join(envRoot, "prod-home");
+      const devHome = join(envRoot, "dev-home");
+      const devPaths = resolveProfileStateHome({ homeDir: devHome, profileId: "default" });
+      await writeGatewayPid(devPaths, { pid: 99999, startedAt: new Date().toISOString(), version: "0.0.1" });
+
+      try {
+        const result = await withEnv({ HOME: prodHome, ESTACODA_HOME: devHome }, () => (
+          runGatewayStop({ workspaceRoot: tmpDir })
+        ));
+
+        expect(result.ok).toBe(true);
+        expect(result.output).toContain("was not running");
+        expect(result.output).toContain("99999");
+        expect(serviceManagerMock.probeServiceState).toHaveBeenCalledWith(expect.objectContaining({
+          serviceUserHomeDir: prodHome,
+          profileId: "default",
+          system: false,
+        }));
+      } finally {
+        await rm(envRoot, { recursive: true, force: true });
+      }
+    });
+
     it("reports not running when no PID file exists", async () => {
       const result = await runGatewayStop({ workspaceRoot: tmpDir, homeDir: tmpDir });
       expect(result.ok).toBe(true);
@@ -1359,6 +1415,34 @@ describe("gateway commands", () => {
         expect.any(Number),
       ]);
       expect(unrefSpy).toHaveBeenCalled();
+    });
+
+    it("passes ESTACODA_HOME as state home and OS HOME as process home when background-starting", async () => {
+      const envRoot = await makeTempDir();
+      const prodHome = join(envRoot, "prod-home");
+      const devHome = join(envRoot, "dev-home");
+
+      try {
+        const result = await withEnv({ HOME: prodHome, ESTACODA_HOME: devHome }, () => (
+          runGatewayStartBackground({ workspaceRoot: tmpDir })
+        ));
+
+        expect(result.ok).toBe(true);
+        expect(result.output).toContain(join(devHome, ".estacoda", "profiles", "default", "logs", "gateway.log"));
+        const spawnOptions = childProcessMock.spawn.mock.calls[0]?.[2];
+        expect(spawnOptions?.env).toEqual(expect.objectContaining({
+          HOME: prodHome,
+          ESTACODA_HOME: devHome,
+        }));
+        expect(spawnOptions?.env?.HOME).not.toBe(devHome);
+        expect(serviceManagerMock.probeServiceState).toHaveBeenCalledWith(expect.objectContaining({
+          serviceUserHomeDir: prodHome,
+          profileId: "default",
+          system: false,
+        }));
+      } finally {
+        await rm(envRoot, { recursive: true, force: true });
+      }
     });
 
     it("refuses background start when a user managed service exists before spawning", async () => {
