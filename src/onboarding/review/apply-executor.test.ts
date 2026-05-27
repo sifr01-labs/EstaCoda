@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { buildFirstRunDraftBundle } from "../setup-drafts.js";
 import { buildSetupModuleDraftBundle, type SetupModuleContext } from "../setup-modules.js";
@@ -13,6 +13,8 @@ import {
   executeReviewedSetupApplyPlan,
 } from "./apply-executor.js";
 import { resolveProfileStateHome } from "../../config/profile-home.js";
+
+type ReviewValues = Record<string, string | readonly string[] | boolean | number | undefined>;
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-reviewed-apply-"));
@@ -86,6 +88,94 @@ function modulePlan(context: SetupModuleContext): SetupApplyPlan {
     throw new Error("expected apply plan");
   }
   return planned.applyPlan;
+}
+
+function fallbackPlan(values: ReviewValues): SetupApplyPlan {
+  return {
+    kind: "setup-save-apply-plan",
+    manifestSourceBundleIds: ["test-fallback-bundle"],
+    operations: [{
+      id: "test-fallback-route",
+      kind: "config-patch",
+      sourceLineIds: ["test-fallback-line"],
+      target: {
+        kind: "config-scope",
+        scope: ["model.fallbacks"],
+        path: "/tmp/test/config.json",
+        preserveUnrelatedConfig: true,
+      },
+      review: {
+        copyKey: "setupDrafts.review",
+        summaryKey: values.fallbackOperation === "replace"
+          ? "setupDrafts.fallbackModelRoute.replace.summary"
+          : "setupDrafts.fallbackModelRoute.add.summary",
+        redacted: true,
+        values,
+      },
+      preserveUnrelatedConfig: true,
+      writesConfig: false,
+      writesTrustStore: false,
+      dryRunOnly: true,
+    }],
+    eligibility: {
+      eligible: true,
+      blockers: [],
+      repairIntents: [],
+    },
+    preservesUnrelatedConfig: true,
+    writesConfig: false,
+    writesTrustStore: false,
+    dryRunOnly: true,
+    metadata: {
+      operationCount: 1,
+      configOperationCount: 1,
+      trustOperationCount: 0,
+      credentialOperationCount: 0,
+    },
+  };
+}
+
+function auxiliaryPlan(values: ReviewValues): SetupApplyPlan {
+  return {
+    kind: "setup-save-apply-plan",
+    manifestSourceBundleIds: ["test-auxiliary-bundle"],
+    operations: [{
+      id: "test-auxiliary-route",
+      kind: "config-patch",
+      sourceLineIds: ["test-auxiliary-line"],
+      target: {
+        kind: "config-scope",
+        scope: ["auxiliaryModels.*"],
+        path: "/tmp/test/config.json",
+        preserveUnrelatedConfig: true,
+      },
+      review: {
+        copyKey: "setupDrafts.review",
+        summaryKey: "setupDrafts.auxiliaryModelRoute.summary",
+        redacted: true,
+        values,
+      },
+      preserveUnrelatedConfig: true,
+      writesConfig: false,
+      writesTrustStore: false,
+      dryRunOnly: true,
+    }],
+    eligibility: {
+      eligible: true,
+      blockers: [],
+      repairIntents: [],
+    },
+    preservesUnrelatedConfig: true,
+    writesConfig: false,
+    writesTrustStore: false,
+    dryRunOnly: true,
+    metadata: {
+      operationCount: 1,
+      configOperationCount: 1,
+      trustOperationCount: 0,
+      credentialOperationCount: 0,
+    },
+  };
 }
 
 describe("reviewed setup apply executor", () => {
@@ -186,6 +276,231 @@ describe("reviewed setup apply executor", () => {
     expect(config.providers?.openai).toEqual(expect.objectContaining({
       baseUrl: "https://custom.example.com/v1",
     }));
+  });
+
+  it("appends reviewed fallback routes without mutating the primary route", async () => {
+    await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
+    await writeFile(profileConfigPath(tempDir), JSON.stringify({
+      model: { provider: "local", id: "hermes-local" },
+      providers: {
+        local: { kind: "openai-compatible", baseUrl: "http://localhost:11434/v1" },
+      },
+    }, null, 2), "utf8");
+    const plan = fallbackPlan({
+      fallbackOperation: "add",
+      provider: "openai",
+      model: "gpt-5.5",
+      baseUrl: "https://api.openai.com/v1",
+      apiKeyEnv: "OPENAI_API_KEY",
+      contextWindowTokens: 128000,
+    });
+
+    const result = await applyReviewedSetupPlanOperations(plan, {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      model?: { provider?: string; id?: string; fallbacks?: Array<{ provider?: string; id?: string; apiKeyEnv?: string }> };
+    };
+
+    expect(result.ok).toBe(true);
+    expect(config.model?.provider).toBe("local");
+    expect(config.model?.id).toBe("hermes-local");
+    expect(config.model?.fallbacks).toEqual([
+      expect.objectContaining({ provider: "openai", id: "gpt-5.5", apiKeyEnv: "OPENAI_API_KEY" }),
+    ]);
+  });
+
+  it("replaces a reviewed fallback route while preserving surrounding fallbacks and unrelated config", async () => {
+    await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
+    await writeFile(profileConfigPath(tempDir), JSON.stringify({
+      model: {
+        provider: "local",
+        id: "hermes-local",
+        fallbacks: [
+          { provider: "openai", id: "gpt-5.5" },
+          { provider: "kimi", id: "kimi-k2" },
+          { provider: "anthropic", id: "claude-3-5-haiku" },
+        ],
+      },
+      security: { approvalMode: "strict", assessor: { enabled: true } },
+    }, null, 2), "utf8");
+    const plan = fallbackPlan({
+      fallbackOperation: "replace",
+      fallbackIndex: 1,
+      previousProvider: "kimi",
+      previousModel: "kimi-k2",
+      provider: "anthropic",
+      model: "claude-sonnet-4-5",
+    });
+
+    const result = await applyReviewedSetupPlanOperations(plan, {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      model?: { fallbacks?: Array<{ provider?: string; id?: string }> };
+      security?: { approvalMode?: string; assessor?: { enabled?: boolean } };
+    };
+
+    expect(result.ok).toBe(true);
+    expect(config.model?.fallbacks).toEqual([
+      expect.objectContaining({ provider: "openai", id: "gpt-5.5" }),
+      expect.objectContaining({ provider: "anthropic", id: "claude-sonnet-4-5" }),
+      expect.objectContaining({ provider: "anthropic", id: "claude-3-5-haiku" }),
+    ]);
+    expect(config.security).toEqual({ approvalMode: "strict", assessor: { enabled: true } });
+  });
+
+  it("handles invalid fallback replacement indexes safely", async () => {
+    await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
+    await writeFile(profileConfigPath(tempDir), JSON.stringify({
+      model: {
+        provider: "local",
+        id: "hermes-local",
+        fallbacks: [{ provider: "openai", id: "gpt-5.5" }],
+      },
+    }, null, 2), "utf8");
+    const plan = fallbackPlan({
+      fallbackOperation: "replace",
+      fallbackIndex: 4,
+      provider: "anthropic",
+      model: "claude-sonnet-4-5",
+    });
+
+    const result = await applyReviewedSetupPlanOperations(plan, {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      model?: { fallbacks?: Array<{ provider?: string; id?: string }> };
+    };
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("valid fallback index");
+    expect(config.model?.fallbacks).toEqual([
+      expect.objectContaining({ provider: "openai", id: "gpt-5.5" }),
+    ]);
+  });
+
+  it("applies a reviewed auxiliary route while preserving primary and fallback config", async () => {
+    await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
+    await writeFile(profileConfigPath(tempDir), JSON.stringify({
+      model: {
+        provider: "local",
+        id: "hermes-local",
+        fallbacks: [{ provider: "openai", id: "gpt-5.5" }],
+      },
+      auxiliaryModels: {
+        assessor: { provider: "local", id: "assessor-local", enabled: true },
+        session_search: { provider: "local", id: "search-local", enabled: true },
+      },
+      security: { approvalMode: "strict" },
+    }, null, 2), "utf8");
+    const plan = auxiliaryPlan({
+      auxiliaryTask: "compression",
+      provider: "openai",
+      model: "gpt-5.5",
+      baseUrl: "https://api.openai.com/v1",
+      apiKeyEnv: "OPENAI_API_KEY",
+      contextWindowTokens: 128000,
+    });
+
+    const result = await applyReviewedSetupPlanOperations(plan, {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      model?: { provider?: string; id?: string; fallbacks?: Array<{ provider?: string; id?: string }> };
+      auxiliaryModels?: Record<string, { provider?: string; id?: string; apiKeyEnv?: string; enabled?: boolean }>;
+      security?: { approvalMode?: string };
+    };
+
+    expect(result.ok).toBe(true);
+    expect(config.model).toEqual({
+      provider: "local",
+      id: "hermes-local",
+      fallbacks: [expect.objectContaining({ provider: "openai", id: "gpt-5.5" })],
+    });
+    expect(config.auxiliaryModels?.compression).toEqual(expect.objectContaining({
+      provider: "openai",
+      id: "gpt-5.5",
+      apiKeyEnv: "OPENAI_API_KEY",
+      enabled: true,
+    }));
+    expect(config.auxiliaryModels?.assessor).toEqual({ provider: "local", id: "assessor-local", enabled: true });
+    expect(config.auxiliaryModels?.session_search).toEqual({ provider: "local", id: "search-local", enabled: true });
+    expect(config.security).toEqual({ approvalMode: "strict" });
+  });
+
+  it("updates assessor only through the reviewed auxiliary operation", async () => {
+    await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
+    await writeFile(profileConfigPath(tempDir), JSON.stringify({
+      model: {
+        provider: "local",
+        id: "hermes-local",
+        fallbacks: [{ provider: "openai", id: "gpt-5.5" }],
+      },
+      auxiliaryModels: {
+        assessor: { provider: "auto", enabled: true },
+        compression: { provider: "local", id: "summary-local", enabled: true },
+      },
+    }, null, 2), "utf8");
+    const plan = auxiliaryPlan({
+      auxiliaryTask: "assessor",
+      provider: "openai",
+      model: "gpt-5.5",
+      apiKeyEnv: "OPENAI_API_KEY",
+    });
+
+    const result = await applyReviewedSetupPlanOperations(plan, {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      model?: { fallbacks?: Array<{ provider?: string; id?: string }> };
+      auxiliaryModels?: Record<string, { provider?: string; id?: string; apiKeyEnv?: string; enabled?: boolean }>;
+    };
+
+    expect(result.ok).toBe(true);
+    expect(config.auxiliaryModels?.assessor).toEqual(expect.objectContaining({
+      provider: "openai",
+      id: "gpt-5.5",
+      apiKeyEnv: "OPENAI_API_KEY",
+      enabled: true,
+    }));
+    expect(config.auxiliaryModels?.compression).toEqual({ provider: "local", id: "summary-local", enabled: true });
+    expect(config.model?.fallbacks).toEqual([
+      expect.objectContaining({ provider: "openai", id: "gpt-5.5" }),
+    ]);
+  });
+
+  it("rejects unsupported auxiliary task review values safely", async () => {
+    await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
+    await writeFile(profileConfigPath(tempDir), JSON.stringify({
+      model: { provider: "local", id: "hermes-local" },
+      auxiliaryModels: {
+        assessor: { provider: "local", id: "assessor-local", enabled: true },
+      },
+    }, null, 2), "utf8");
+    const plan = auxiliaryPlan({
+      auxiliaryTask: "vision",
+      provider: "openai",
+      model: "gpt-5.5",
+    });
+
+    const result = await applyReviewedSetupPlanOperations(plan, {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      auxiliaryModels?: Record<string, unknown>;
+    };
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("Auxiliary route apply requires");
+    expect(config.auxiliaryModels?.assessor).toEqual({ provider: "local", id: "assessor-local", enabled: true });
+    expect(config.auxiliaryModels?.vision).toBeUndefined();
   });
 
   it("applies reviewed browser capability without enabling auto-launch", async () => {

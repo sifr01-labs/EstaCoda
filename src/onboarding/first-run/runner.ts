@@ -8,7 +8,7 @@ import {
 import { writeEnvSecret } from "../../config/env-secret-store.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../../config/profile-home.js";
 import { ensureDefaultProfileState } from "../../cli/profile-state.js";
-import type { ProviderId } from "../../contracts/provider.js";
+import type { ModelProfile, ProviderId } from "../../contracts/provider.js";
 import type { Prompt } from "../../cli/readline-prompt.js";
 import { promptForApiKeyInput } from "../../cli/secret-prompt.js";
 import {
@@ -216,7 +216,7 @@ export async function runFirstRunSetup(
         model.profile.supportsTools ? setupCopyText("en", "onboarding.catalog.model.features.tools") : undefined,
         model.profile.supportsVision ? setupCopyText("en", "onboarding.catalog.model.features.vision") : undefined,
         model.profile.supportsReasoning ? setupCopyText("en", "onboarding.catalog.model.features.reasoning") : undefined,
-        model.profile.status !== undefined ? model.profile.status : undefined,
+        renderableModelStatus(model.profile.status),
       ].filter((part): part is string => part !== undefined).join(", "),
       value: model.id,
     })),
@@ -550,6 +550,10 @@ function interfaceStyleChoices(language: UiLanguage): readonly InterfaceStyleCho
       value: { flavor: "arabic-light", activityLabels: "en" },
     },
   ];
+}
+
+function renderableModelStatus(status: ModelProfile["status"]): ModelProfile["status"] | undefined {
+  return status === "alpha" || status === "beta" || status === "deprecated" ? status : undefined;
 }
 
 function write(options: FirstRunSetupRunnerOptions, value: string): void {

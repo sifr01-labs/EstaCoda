@@ -13,6 +13,7 @@ import {
   buildSetupEditorDraftBundle,
   type SetupDraftBundle,
 } from "./setup-drafts.js";
+import { scopedPatch, setupEditorAction } from "./setup-editor-actions.js";
 import type { ProviderApiMode, ProviderAuthMethod } from "../contracts/provider.js";
 
 function providerDiagnostic(status: ProviderDiagnostic["status"] = "ready"): ProviderDiagnostic {
@@ -357,6 +358,207 @@ describe("setup draft bundles", () => {
     expect(json).not.toContain("raw");
     expect(json).not.toContain("secretValue");
     expect(json).not.toContain("providers.*.apiKeyEnv");
+  });
+
+  it("builds internal provider credential reference drafts without exposing values", () => {
+    const decision = routeSetupEntryState(state("configured-ready"));
+    if (decision.setupEditorPlanSession === undefined) {
+      throw new Error("Expected setup editor plan session");
+    }
+
+    const bundle = buildSetupEditorActionDraftBundle(decision.setupEditorPlanSession, [
+      setupEditorAction({
+        id: "store-provider-credential-reference",
+        copyKey: "setupEditor.actions.storeProviderCredentialReference",
+        sectionId: "credentials",
+        effect: "draft-config-patch",
+        readOnly: false,
+        requiresExplicitApply: true,
+        patch: scopedPatch(["provider.credentialReference"]),
+        credentialRefs: [{ kind: "env", name: "OPENAI_API_KEY", value: "not-included" }],
+        reviewValues: {
+          provider: "openai",
+          model: "gpt-5.5",
+          apiKeyEnv: "OPENAI_API_KEY",
+        },
+      }),
+    ], {
+      configPath: "/tmp/home/.estacoda/config.json",
+    });
+    const draft = bundle.drafts[0];
+
+    expect(draft?.kind).toBe("credential-reference");
+    expect(draft?.review.values).toEqual(expect.objectContaining({
+      provider: "openai",
+      model: "gpt-5.5",
+      envVars: ["OPENAI_API_KEY"],
+      credentialValuesIncluded: false,
+    }));
+    expect(JSON.stringify(draft)).not.toContain("sk-");
+  });
+
+  it("builds fallback provider/model drafts scoped to model fallbacks", () => {
+    const decision = routeSetupEntryState(state("configured-ready"));
+    if (decision.setupEditorPlanSession === undefined) {
+      throw new Error("Expected setup editor plan session");
+    }
+
+    const bundle = buildSetupEditorActionDraftBundle(decision.setupEditorPlanSession, [
+      setupEditorAction({
+        id: "edit-fallback-model-route",
+        copyKey: "setupEditor.actions.editFallbackModelRoute",
+        sectionId: "model-route",
+        effect: "draft-config-patch",
+        readOnly: false,
+        requiresExplicitApply: true,
+        patch: scopedPatch(["model.fallbacks"]),
+        reviewValues: {
+          fallbackOperation: "add",
+          provider: "openai",
+          model: "gpt-5.5",
+        },
+      }),
+    ], {
+      configPath: "/tmp/home/.estacoda/config.json",
+    });
+    const draft = bundle.drafts[0];
+
+    expect(draft?.kind).toBe("fallback-model-route");
+    expect(draft?.target).toEqual({
+      kind: "config-scope",
+      scope: ["model.fallbacks"],
+      path: "/tmp/home/.estacoda/config.json",
+      preserveUnrelatedConfig: true,
+    });
+    expect(draft?.review.summaryKey).toBe("setupDrafts.fallbackModelRoute.add.summary");
+  });
+
+  it("enforces fallback provider/model draft scope over caller patch fields", () => {
+    const decision = routeSetupEntryState(state("configured-ready"));
+    if (decision.setupEditorPlanSession === undefined) {
+      throw new Error("Expected setup editor plan session");
+    }
+
+    const bundle = buildSetupEditorActionDraftBundle(decision.setupEditorPlanSession, [
+      setupEditorAction({
+        id: "edit-fallback-model-route",
+        copyKey: "setupEditor.actions.editFallbackModelRoute",
+        sectionId: "model-route",
+        effect: "draft-config-patch",
+        readOnly: false,
+        requiresExplicitApply: true,
+        patch: scopedPatch(["security.approvalMode"]),
+        reviewValues: {
+          fallbackOperation: "add",
+          provider: "openai",
+          model: "gpt-5.5",
+        },
+      }),
+    ], {
+      configPath: "/tmp/home/.estacoda/config.json",
+    });
+
+    expect(bundle.drafts[0]?.target).toEqual(expect.objectContaining({
+      kind: "config-scope",
+      scope: ["model.fallbacks"],
+    }));
+  });
+
+  it("builds auxiliary provider/model drafts scoped to auxiliary models", () => {
+    const decision = routeSetupEntryState(state("configured-ready"));
+    if (decision.setupEditorPlanSession === undefined) {
+      throw new Error("Expected setup editor plan session");
+    }
+
+    const bundle = buildSetupEditorActionDraftBundle(decision.setupEditorPlanSession, [
+      setupEditorAction({
+        id: "edit-auxiliary-model-route",
+        copyKey: "setupEditor.actions.editAuxiliaryModelRoute",
+        sectionId: "model-route",
+        effect: "draft-config-patch",
+        readOnly: false,
+        requiresExplicitApply: true,
+        patch: scopedPatch(["auxiliaryModels.*"]),
+        reviewValues: {
+          auxiliaryTask: "compression",
+          provider: "openai",
+          model: "gpt-5.5",
+        },
+      }),
+    ], {
+      configPath: "/tmp/home/.estacoda/config.json",
+    });
+    const draft = bundle.drafts[0];
+
+    expect(draft?.kind).toBe("auxiliary-model-route");
+    expect(draft?.target).toEqual({
+      kind: "config-scope",
+      scope: ["auxiliaryModels.*"],
+      path: "/tmp/home/.estacoda/config.json",
+      preserveUnrelatedConfig: true,
+    });
+    expect(draft?.review.summaryKey).toBe("setupDrafts.auxiliaryModelRoute.summary");
+  });
+
+  it("enforces auxiliary provider/model draft scope over caller patch fields", () => {
+    const decision = routeSetupEntryState(state("configured-ready"));
+    if (decision.setupEditorPlanSession === undefined) {
+      throw new Error("Expected setup editor plan session");
+    }
+
+    const bundle = buildSetupEditorActionDraftBundle(decision.setupEditorPlanSession, [
+      setupEditorAction({
+        id: "edit-auxiliary-model-route",
+        copyKey: "setupEditor.actions.editAuxiliaryModelRoute",
+        sectionId: "model-route",
+        effect: "draft-config-patch",
+        readOnly: false,
+        requiresExplicitApply: true,
+        patch: scopedPatch(["model.fallbacks"]),
+        reviewValues: {
+          auxiliaryTask: "compression",
+          provider: "openai",
+          model: "gpt-5.5",
+        },
+      }),
+    ], {
+      configPath: "/tmp/home/.estacoda/config.json",
+    });
+
+    expect(bundle.drafts[0]?.target).toEqual(expect.objectContaining({
+      kind: "config-scope",
+      scope: ["auxiliaryModels.*"],
+    }));
+  });
+
+  it("keeps primary provider/model draft scope controlled by the action patch", () => {
+    const decision = routeSetupEntryState(state("configured-ready"));
+    if (decision.setupEditorPlanSession === undefined) {
+      throw new Error("Expected setup editor plan session");
+    }
+
+    const bundle = buildSetupEditorActionDraftBundle(decision.setupEditorPlanSession, [
+      setupEditorAction({
+        id: "edit-primary-model-route",
+        copyKey: "setupEditor.actions.editPrimaryModelRoute",
+        sectionId: "model-route",
+        effect: "draft-config-patch",
+        readOnly: false,
+        requiresExplicitApply: true,
+        patch: scopedPatch(["model.provider", "model.id"]),
+        reviewValues: {
+          provider: "openai",
+          model: "gpt-5.5",
+        },
+      }),
+    ], {
+      configPath: "/tmp/home/.estacoda/config.json",
+    });
+
+    expect(bundle.drafts[0]?.target).toEqual(expect.objectContaining({
+      kind: "config-scope",
+      scope: ["model.provider", "model.id"],
+    }));
   });
 
   it("keeps optional capability drafts independent and skippable", () => {

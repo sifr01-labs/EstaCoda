@@ -1,5 +1,5 @@
 import { resolveStateHome } from "../../config/state-home.js";
-import { writeEnvSecret } from "../../config/env-secret-store.js";
+import { hasSavedEnvSecret, writeEnvSecret } from "../../config/env-secret-store.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../../config/profile-home.js";
 import {
   loadRuntimeConfig,
@@ -57,7 +57,10 @@ import {
 import {
   promptConfigEditorAction,
   promptConfigEditorReviewApproval,
+  promptAuxiliaryModelTask,
   promptBrowserCapability,
+  promptCredentialReuseChoice,
+  promptFallbackRouteAction,
   promptIncompleteTelegramCapabilityAction,
   promptModelCandidate,
   promptConfigEditorPostApplyAction,
@@ -85,6 +88,7 @@ export type ConfigEditorRunnerOptions = CollectSetupRouteOptions & {
   readonly applyExecutor?: SetupApplyExecutor;
   readonly output?: { readonly write: (value: string) => void };
   readonly defaultActionId?: SetupEditorActionId | SetupRouteActionId;
+  readonly renderInitialOverview?: boolean;
   readonly applyFlowOptions?: SetupApplyFlowOptions;
   readonly flowEngine?: FlowEngine;
 };
@@ -136,13 +140,6 @@ type LaunchableApplyEndState = {
   readonly launchHandoffIntent?: SetupLaunchHandoffIntent;
 };
 
-const OPTIONAL_CAPABILITY_MODULES: readonly OptionalCapabilityModule[] = [
-  telegramSetupModule,
-  voiceSetupModule,
-  visionSetupModule,
-  browserSetupModule,
-];
-
 type LoadedConfig = Awaited<ReturnType<typeof loadRuntimeConfig>>["config"];
 
 export async function runConfigEditor(
@@ -187,9 +184,13 @@ async function runConfigEditorOnce(
     };
   }
 
-  const actions = configEditorActions(initialDecision, session);
-  const rendered = renderConfigEditor({ decision: initialDecision, session, actions });
-  write(options, `${rendered}\n`);
+  const actions = configEditorActions(initialDecision, session, {
+    workspacePath: options.workspaceRoot,
+  });
+  if (options.renderInitialOverview !== false) {
+    const rendered = renderConfigEditor({ decision: initialDecision, session, actions });
+    write(options, `${rendered}\n`);
+  }
 
   const selectedAction = await selectAction(options, actions, defaultActionId);
   if (selectedAction === undefined) {
@@ -287,11 +288,18 @@ async function handleAction(
     case "edit-primary-model-route":
     case "repair-primary-provider":
       return handleProviderRouteAction(options, initialDecision, session, action);
+    case "edit-fallback-model-route":
+      return handleFallbackRouteAction(options, initialDecision, session, action);
+    case "edit-auxiliary-model-route":
+      return handleAuxiliaryRouteAction(options, initialDecision, session, action);
     case "edit-primary-credential-reference":
     case "repair-missing-credential":
       return handleCredentialAction(options, initialDecision, session, action);
-    case "review-optional-capabilities":
-      return handleOptionalCapabilitiesAction(options, initialDecision, session, action);
+    case "configure-channels":
+    case "configure-voice":
+    case "configure-image-generation":
+    case "configure-browser":
+      return handleOptionalCapabilityAction(options, initialDecision, session, action);
     default: {
       const output = `Action ${action.id} is not implemented in the guided setup editor.`;
       write(options, `${output}\n`);
@@ -378,7 +386,7 @@ async function handleWorkflowLearningAction(
   });
 }
 
-async function handleOptionalCapabilitiesAction(
+async function handleOptionalCapabilityAction(
   options: ConfigEditorRunnerOptions,
   initialDecision: SetupRouteDecision,
   session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
@@ -388,30 +396,28 @@ async function handleOptionalCapabilitiesAction(
   const stateHome = resolveStateHome({ homeDir: options.homeDir });
   const loaded = await loadRuntimeConfig(options);
   const baseContext = setupModuleContextFromConfig(options, initialDecision, stateHome, loaded.config);
+  const promptContext = optionalCapabilityPromptContext(
+    baseContext,
+    optionalCapabilityModuleForAction(action.id)
+  );
   const selectedDrafts: SetupDraft[] = [];
   const pendingCredentialWrites: PendingCredentialWrite[] = [];
+  const selected = await promptOptionalCapabilityAction(options.prompt, {
+    id: optionalPromptId(promptContext.module.id),
+    title: promptContext.title,
+    configured: promptContext.configured,
+  });
 
-  for (const promptContext of optionalCapabilityPromptContexts(baseContext)) {
-    const selected = await promptOptionalCapabilityAction(options.prompt, {
-      id: optionalPromptId(promptContext.module.id),
-      title: promptContext.title,
-      configured: promptContext.configured,
-    });
-    if (selected === "unchanged") continue;
+  if (selected === "skip") {
+    const configuration = promptContext.module.configure(baseContext, { skip: true });
+    selectedDrafts.push(...promptContext.module.toDrafts(baseContext, configuration));
+  }
 
-    if (selected === "skip") {
-      const configuration = promptContext.module.configure(baseContext, { skip: true });
-      selectedDrafts.push(...promptContext.module.toDrafts(baseContext, configuration));
-      continue;
-    }
-
+  if (selected === "enable") {
     const collected = await collectOptionalCapabilityContext(options, baseContext, promptContext.module);
-    if (collected.kind === "unchanged") continue;
-
     if (collected.kind === "skip") {
       const configuration = promptContext.module.configure(baseContext, { skip: true });
       selectedDrafts.push(...promptContext.module.toDrafts(baseContext, configuration));
-      continue;
     }
 
     if (collected.kind === "configured") {
@@ -424,7 +430,7 @@ async function handleOptionalCapabilitiesAction(
   }
 
   if (selectedDrafts.length === 0) {
-    const output = "Optional capabilities left unchanged. No setup changes were drafted.";
+    const output = `${promptContext.title} left unchanged. No setup changes were drafted.`;
     write(options, `${output}\n`);
     return {
       completed: true,
@@ -438,7 +444,7 @@ async function handleOptionalCapabilitiesAction(
   const bundle: SetupDraftBundle = {
     kind: "setup-draft-bundle",
     sourceKind: "setup-module-session",
-    sourceId: "setup-editor.optional-capabilities",
+    sourceId: `setup-editor.optional-capabilities.${promptContext.module.id}`,
     drafts: selectedDrafts,
     blockers: [...new Set(selectedDrafts.flatMap((draft) => draft.blockers))].sort(),
     warnings: [...new Set(selectedDrafts.flatMap((draft) => draft.warnings))].sort(),
@@ -469,6 +475,65 @@ async function handleProviderRouteAction(
   }
 
   return reviewAndApplyResolvedRoute(options, initialDecision, session, editorAction, resolved.selection);
+}
+
+async function handleFallbackRouteAction(
+  options: ConfigEditorRunnerOptions,
+  initialDecision: SetupRouteDecision,
+  session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
+  action: ConfigEditorRenderedAction
+): Promise<ConfigEditorRunnerResult> {
+  const editorAction = requireEditorAction(action);
+  const loaded = await loadRuntimeConfig(options);
+  const fallbacks = loaded.config.model?.fallbacks ?? [];
+  const choice = fallbacks.length === 0
+    ? { id: "fallback-add" as const, fallbackOperation: "add" as const }
+    : await promptFallbackRouteAction(options.prompt, fallbacks);
+  const currentFallback = choice.fallbackOperation === "replace" ? choice.fallback : undefined;
+  const resolved = await selectResolvedProviderRoute(options, initialDecision, {
+    currentProviderId: currentFallback?.provider,
+    currentModelId: currentFallback?.id,
+  });
+  if (resolved.kind === "diagnostic") {
+    return diagnosticResult(options, initialDecision, action.id, resolved.output);
+  }
+
+  return reviewAndApplyResolvedRoute(options, initialDecision, session, {
+    ...editorAction,
+    reviewValues: {
+      ...editorAction.reviewValues,
+      fallbackOperation: choice.fallbackOperation,
+      ...(choice.fallbackOperation === "replace"
+        ? {
+            fallbackIndex: choice.fallbackIndex,
+            previousProvider: choice.fallback.provider,
+            previousModel: choice.fallback.id,
+          }
+        : {}),
+    },
+  }, resolved.selection);
+}
+
+async function handleAuxiliaryRouteAction(
+  options: ConfigEditorRunnerOptions,
+  initialDecision: SetupRouteDecision,
+  session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
+  action: ConfigEditorRenderedAction
+): Promise<ConfigEditorRunnerResult> {
+  const editorAction = requireEditorAction(action);
+  const auxiliaryTask = await promptAuxiliaryModelTask(options.prompt);
+  const resolved = await selectResolvedProviderRoute(options, initialDecision);
+  if (resolved.kind === "diagnostic") {
+    return diagnosticResult(options, initialDecision, action.id, resolved.output);
+  }
+
+  return reviewAndApplyResolvedRoute(options, initialDecision, session, {
+    ...editorAction,
+    reviewValues: {
+      ...editorAction.reviewValues,
+      auxiliaryTask,
+    },
+  }, resolved.selection);
 }
 
 async function handleCredentialAction(
@@ -916,15 +981,31 @@ function setupModuleContextFromConfig(
   };
 }
 
-function optionalCapabilityPromptContexts(context: SetupModuleContext): OptionalCapabilityPromptContext[] {
-  return OPTIONAL_CAPABILITY_MODULES.map((module) => {
-    const detection = module.detect(context);
-    return {
-      module,
-      title: optionalCapabilityTitle(module.id),
-      configured: detection.status === "configured",
-    };
-  });
+function optionalCapabilityPromptContext(
+  context: SetupModuleContext,
+  module: OptionalCapabilityModule
+): OptionalCapabilityPromptContext {
+  const detection = module.detect(context);
+  return {
+    module,
+    title: optionalCapabilityTitle(module.id),
+    configured: detection.status === "configured",
+  };
+}
+
+function optionalCapabilityModuleForAction(actionId: string): OptionalCapabilityModule {
+  switch (actionId) {
+    case "configure-channels":
+      return telegramSetupModule;
+    case "configure-voice":
+      return voiceSetupModule;
+    case "configure-image-generation":
+      return visionSetupModule;
+    case "configure-browser":
+      return browserSetupModule;
+    default:
+      throw new Error(`Unsupported optional capability action: ${actionId}`);
+  }
 }
 
 async function collectOptionalCapabilityContext(
@@ -1138,7 +1219,11 @@ async function reviewAndApplyResolvedRoute(
 
 async function selectResolvedProviderRoute(
   options: ConfigEditorRunnerOptions,
-  initialDecision: SetupRouteDecision
+  initialDecision: SetupRouteDecision,
+  currentRoute: {
+    readonly currentProviderId?: string;
+    readonly currentModelId?: string;
+  } = {}
 ): Promise<
   | { readonly kind: "selected"; readonly selection: ProviderModelSelectionResult }
   | { readonly kind: "diagnostic"; readonly output: string }
@@ -1151,7 +1236,7 @@ async function selectResolvedProviderRoute(
 
   const provider = await promptProviderCandidate(options.prompt, {
     candidates: providers,
-    currentProviderId: initialDecision.state.model?.provider,
+    currentProviderId: currentRoute.currentProviderId ?? initialDecision.state.model?.provider,
   });
   const models = await flowEngine.listModelCandidates(provider.id);
   if (models.length === 0) {
@@ -1161,7 +1246,9 @@ async function selectResolvedProviderRoute(
   const model = await promptModelCandidate(options.prompt, {
     providerId: provider.id,
     candidates: models,
-    currentModelId: initialDecision.state.model?.provider === provider.id ? initialDecision.state.model.id : undefined,
+    currentModelId: currentRoute.currentProviderId === provider.id
+      ? currentRoute.currentModelId
+      : initialDecision.state.model?.provider === provider.id ? initialDecision.state.model.id : undefined,
   });
   const resolved = await flowEngine.resolveSelection(provider.id, model.id);
   if (resolved.kind === "diagnostic") {
@@ -1237,6 +1324,36 @@ async function resolveCredentialForReview(
         return { kind: "diagnostic", output: `Malformed reuse credential reference: ${ref}` };
       }
       const envVarName = ref.slice(4);
+      const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+      const savedSecret = await hasSavedEnvSecret({
+        homeDir: options.homeDir,
+        profileId,
+        key: envVarName,
+      });
+
+      if (savedSecret.exists) {
+        const reuseChoice = await promptCredentialReuseChoice(options.prompt);
+        if (reuseChoice === "new") {
+          const promptResult = await promptForApiKeyInput({
+            prompt: options.prompt,
+            providerId: resolution.provider,
+            envVarName,
+          });
+          if (promptResult.kind === "skipped") {
+            return {
+              kind: "diagnostic",
+              output: `No API key was entered for ${envVarName}. The saved credential was left unchanged.`,
+            };
+          }
+          return {
+            kind: "ready",
+            envVarName,
+            credentialAction: credentialReferenceAction(resolution, envVarName),
+            pendingCredentialWrite: { envVarName: promptResult.envVarName, value: promptResult.value },
+          };
+        }
+      }
+
       return {
         kind: "ready",
         envVarName,
@@ -1268,8 +1385,8 @@ function credentialReferenceAction(
 ): SetupEditorActionDraft {
   return {
     kind: "setup-editor-action-draft",
-    id: "edit-primary-credential-reference",
-    copyKey: "setupEditor.actions.editPrimaryCredentialReference",
+    id: "store-provider-credential-reference",
+    copyKey: "setupEditor.actions.storeProviderCredentialReference",
     sectionId: "credentials",
     effect: "draft-config-patch",
     readOnly: false,

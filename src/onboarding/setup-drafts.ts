@@ -21,6 +21,8 @@ export type SetupDraftSource =
 
 export type SetupDraftKind =
   | "provider-model-route"
+  | "fallback-model-route"
+  | "auxiliary-model-route"
   | "credential-reference"
   | "security-mode"
   | "workflow-learning"
@@ -367,6 +369,32 @@ function draftFromEditorAction(
     });
   }
 
+  if (action.id === "edit-fallback-model-route") {
+    return configDraft({
+      id: editorDraftId(action),
+      kind: "fallback-model-route",
+      source,
+      riskSurface: "provider-selection",
+      scope: ["model.fallbacks"],
+      configPath: options.configPath,
+      summaryKey: fallbackRouteSummaryKey(action.reviewValues),
+      values: action.reviewValues ?? {},
+    });
+  }
+
+  if (action.id === "edit-auxiliary-model-route") {
+    return configDraft({
+      id: editorDraftId(action),
+      kind: "auxiliary-model-route",
+      source,
+      riskSurface: "provider-selection",
+      scope: ["auxiliaryModels.*"],
+      configPath: options.configPath,
+      summaryKey: "setupDrafts.auxiliaryModelRoute.summary",
+      values: action.reviewValues ?? {},
+    });
+  }
+
   if (action.id === "cancel-setup-editor") {
     return {
       id: editorDraftId(action),
@@ -403,7 +431,12 @@ function draftFromEditorAction(
     };
   }
 
-  if (action.credentialRefs !== undefined || action.id === "edit-primary-credential-reference" || action.id === "repair-missing-credential") {
+  if (
+    action.credentialRefs !== undefined ||
+    action.id === "store-provider-credential-reference" ||
+    action.id === "edit-primary-credential-reference" ||
+    action.id === "repair-missing-credential"
+  ) {
     const envVar = stringReviewValue(action.reviewValues?.apiKeyEnv);
     const credentialRefs = action.credentialRefs?.map((ref) => ref.name) ?? [];
     return credentialDraft({
@@ -498,6 +531,12 @@ function credentialDraft(input: {
 
 function stringReviewValue(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function fallbackRouteSummaryKey(reviewValues: SetupEditorActionDraft["reviewValues"]): string {
+  return reviewValues?.fallbackOperation === "replace"
+    ? "setupDrafts.fallbackModelRoute.replace.summary"
+    : "setupDrafts.fallbackModelRoute.add.summary";
 }
 
 function workspaceTrustDraft(input: {
@@ -599,14 +638,23 @@ function kindForEditorAction(action: SetupEditorActionDraft): SetupDraftKind {
     case "edit-primary-model-route":
     case "repair-primary-provider":
       return "provider-model-route";
+    case "edit-fallback-model-route":
+      return "fallback-model-route";
+    case "edit-auxiliary-model-route":
+      return "auxiliary-model-route";
     case "edit-security-mode":
       return "security-mode";
     case "edit-workflow-learning":
       return "workflow-learning";
     case "review-optional-capabilities":
+    case "configure-channels":
+    case "configure-voice":
+    case "configure-image-generation":
+    case "configure-browser":
       return "optional-capability";
     case "repair-state-directory":
       return "diagnostic-blocker";
+    case "store-provider-credential-reference":
     case "edit-primary-credential-reference":
     case "repair-missing-credential":
     case "repair-workspace-trust":

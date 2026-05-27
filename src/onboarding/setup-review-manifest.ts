@@ -199,6 +199,12 @@ function linesForDraft(draft: SetupDraft): SetupReviewManifestLine[] {
     case "provider-model-route":
       lines.push(lineFromDraft(draft, "provider-model-network", { idSuffix: "provider-model" }));
       break;
+    case "fallback-model-route":
+      lines.push(lineFromDraft(draft, "provider-model-network", { idSuffix: "fallback" }));
+      break;
+    case "auxiliary-model-route":
+      lines.push(lineFromDraft(draft, "provider-model-network", { idSuffix: "auxiliary" }));
+      break;
     case "credential-reference":
       lines.push(lineFromDraft(draft, "secret-refs-to-store", { idSuffix: "secret-ref" }));
       break;

@@ -573,6 +573,11 @@ export class StandardRenderer {
       lines.push(`  ${this.#primary(this.#localizedTechnical(technicalLine, locale, contentWidth))}`);
     }
 
+    const hasPreOptionContent = vm.bodyLines.length > 0 || (vm.technicalLines?.length ?? 0) > 0;
+    if (hasPreOptionContent && vm.options.length > 0) {
+      lines.push("  ");
+    }
+
     for (let i = 0; i < vm.options.length; i++) {
       const option = vm.options[i];
       const isSelected = i === vm.selectedOptionIndex;

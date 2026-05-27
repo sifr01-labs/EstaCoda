@@ -1,12 +1,15 @@
 import type { Prompt } from "../../cli/readline-prompt.js";
 import { promptForApiKeyInput } from "../../cli/secret-prompt.js";
 import type { BrowserBackendKind } from "../../contracts/browser.js";
+import type { AuxiliaryModelTask, ModelProfile } from "../../contracts/provider.js";
 import type { SecurityApprovalMode } from "../../contracts/security.js";
 import type { ImageGenerationProvider, SttProvider, TtsProvider } from "../../config/runtime-config.js";
+import type { ModelFallbackConfig } from "../../config/runtime-config.js";
 import type { ModelCandidate, ProviderCandidate } from "../../providers/provider-model-selection-flow.js";
 import type { SkillAutonomy } from "../../skills/skill-learning.js";
 import {
   promptSetupChoice,
+  type SetupChoice,
   promptSetupStringWithDefault,
   setupCopyText,
 } from "../setup-prompts.js";
@@ -17,6 +20,30 @@ export type OptionalCapabilityPromptAction = "unchanged" | "skip" | "enable";
 export type OptionalCapabilityPromptId = "telegram" | "voice" | "vision" | "browser";
 
 export type IncompleteTelegramCapabilityAction = "retry" | "skip" | "unchanged";
+
+export type CredentialReuseChoice = "existing" | "new";
+
+export type FallbackRouteChoice =
+  | {
+      readonly id: "fallback-add";
+      readonly fallbackOperation: "add";
+    }
+  | {
+      readonly id: `fallback-${number}`;
+      readonly fallbackOperation: "replace";
+      readonly fallbackIndex: number;
+      readonly fallback: ModelFallbackConfig;
+    };
+
+export const SETUP_EDITOR_AUXILIARY_TASKS = [
+  "assessor",
+  "compression",
+  "session_search",
+  "memory_compaction",
+  "profile_context",
+] as const satisfies readonly AuxiliaryModelTask[];
+
+export type SetupEditorAuxiliaryTask = typeof SETUP_EDITOR_AUXILIARY_TASKS[number];
 
 export type ConfigEditorPostApplyActionId =
   | "launch"
@@ -188,12 +215,16 @@ export async function promptModelCandidate(
         candidate.profile.supportsTools ? setupCopyText("en", "onboarding.catalog.model.features.tools") : undefined,
         candidate.profile.supportsVision ? setupCopyText("en", "onboarding.catalog.model.features.vision") : undefined,
         candidate.profile.supportsReasoning ? setupCopyText("en", "onboarding.catalog.model.features.reasoning") : undefined,
-        candidate.profile.status,
+        renderableModelStatus(candidate.profile.status),
       ].filter((part): part is string => part !== undefined).join(", "),
       value: candidate,
     })),
     defaultValue: input.candidates.find((candidate) => candidate.id === input.currentModelId) ?? input.candidates[0],
   });
+}
+
+function renderableModelStatus(status: ModelProfile["status"]): ModelProfile["status"] | undefined {
+  return status === "alpha" || status === "beta" || status === "deprecated" ? status : undefined;
 }
 
 export async function promptConfigEditorReviewApproval(
@@ -217,6 +248,108 @@ export async function promptConfigEditorReviewApproval(
       },
     ],
     defaultValue: true,
+  });
+}
+
+export async function promptCredentialReuseChoice(
+  prompt: Prompt
+): Promise<CredentialReuseChoice> {
+  return promptSetupChoice(prompt, {
+    title: setupCopyText("en", "setupEditor.prompt.credentialReuse.title"),
+    message: `${setupCopyText("en", "setupEditor.prompt.credentialReuse.body")}\n`,
+    choices: [
+      {
+        id: "existing",
+        label: setupCopyText("en", "setupEditor.prompt.credentialReuse.existing"),
+        description: setupCopyText("en", "setupEditor.prompt.credentialReuse.existing.description"),
+        value: "existing" as const,
+      },
+      {
+        id: "new",
+        label: setupCopyText("en", "setupEditor.prompt.credentialReuse.new"),
+        description: setupCopyText("en", "setupEditor.prompt.credentialReuse.new.description"),
+        value: "new" as const,
+      },
+    ],
+    defaultValue: "existing" as const,
+  });
+}
+
+export async function promptFallbackRouteAction(
+  prompt: Prompt,
+  fallbacks: readonly ModelFallbackConfig[]
+): Promise<FallbackRouteChoice> {
+  const editChoices: SetupChoice<FallbackRouteChoice>[] = fallbacks.map((fallback, index) => ({
+    id: `fallback-${index}`,
+    label: setupCopyText("en", "setupEditor.prompt.fallbackRoute.edit")
+      .replace("{index}", String(index + 1))
+      .replace("{providerId}", fallback.provider)
+      .replace("{modelId}", fallback.id),
+    description: setupCopyText("en", "setupEditor.prompt.fallbackRoute.edit.description"),
+    value: {
+      id: `fallback-${index}` as const,
+      fallbackOperation: "replace" as const,
+      fallbackIndex: index,
+      fallback,
+    },
+  }));
+  const addChoice: SetupChoice<FallbackRouteChoice> = {
+    id: "fallback-add",
+    label: setupCopyText("en", "setupEditor.prompt.fallbackRoute.add"),
+    description: setupCopyText("en", "setupEditor.prompt.fallbackRoute.add.description"),
+    value: {
+      id: "fallback-add" as const,
+      fallbackOperation: "add" as const,
+    },
+  };
+
+  return promptSetupChoice(prompt, {
+    title: setupCopyText("en", "setupEditor.prompt.fallbackRoute.title"),
+    message: `${setupCopyText("en", "setupEditor.prompt.fallbackRoute.body")}\n`,
+    choices: [...editChoices, addChoice],
+    defaultValue: editChoices[0]?.value ?? addChoice.value,
+  });
+}
+
+export async function promptAuxiliaryModelTask(
+  prompt: Prompt
+): Promise<SetupEditorAuxiliaryTask> {
+  return promptSetupChoice(prompt, {
+    title: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.title"),
+    message: `${setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.body")}\n`,
+    choices: [
+      {
+        id: "assessor",
+        label: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.assessor"),
+        description: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.assessor.description"),
+        value: "assessor" as const,
+      },
+      {
+        id: "compression",
+        label: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.compression"),
+        description: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.compression.description"),
+        value: "compression" as const,
+      },
+      {
+        id: "session_search",
+        label: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.sessionSearch"),
+        description: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.sessionSearch.description"),
+        value: "session_search" as const,
+      },
+      {
+        id: "memory_compaction",
+        label: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.memoryCompaction"),
+        description: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.memoryCompaction.description"),
+        value: "memory_compaction" as const,
+      },
+      {
+        id: "profile_context",
+        label: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.profileContext"),
+        description: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.profileContext.description"),
+        value: "profile_context" as const,
+      },
+    ],
+    defaultValue: "assessor" as const,
   });
 }
 

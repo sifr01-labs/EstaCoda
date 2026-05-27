@@ -87,11 +87,18 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.actions.editPrimaryModelRoute",
   "setupEditor.actions.repairPrimaryProvider",
   "setupEditor.actions.editPrimaryCredentialReference",
+  "setupEditor.actions.storeProviderCredentialReference",
+  "setupEditor.actions.editFallbackModelRoute",
+  "setupEditor.actions.editAuxiliaryModelRoute",
   "setupEditor.actions.repairMissingCredential",
   "setupEditor.actions.editSecurityMode",
   "setupEditor.actions.editWorkflowLearning",
   "setupEditor.actions.repairWorkspaceTrust",
   "setupEditor.actions.reviewOptionalCapabilities",
+  "setupEditor.actions.configureChannels",
+  "setupEditor.actions.configureVoice",
+  "setupEditor.actions.configureImageGeneration",
+  "setupEditor.actions.configureBrowser",
   "setupEditor.actions.runReadonlyVerification",
   "setupEditor.actions.repairBrokenConfig",
   "setupEditor.actions.repairStateDirectory",
@@ -103,7 +110,14 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.actions.editPrimaryModelRoute.description",
   "setupEditor.actions.repairMissingCredential.description",
   "setupEditor.actions.editPrimaryCredentialReference.description",
+  "setupEditor.actions.storeProviderCredentialReference.description",
+  "setupEditor.actions.editFallbackModelRoute.description",
+  "setupEditor.actions.editAuxiliaryModelRoute.description",
   "setupEditor.actions.reviewOptionalCapabilities.description",
+  "setupEditor.actions.configureChannels.description",
+  "setupEditor.actions.configureVoice.description",
+  "setupEditor.actions.configureImageGeneration.description",
+  "setupEditor.actions.configureBrowser.description",
   "setupEditor.diagnostics.title",
   "setupEditor.diagnostics.manualRepair.brokenConfig",
   "setupEditor.diagnostics.manualRepair.stateNotWritable",
@@ -116,6 +130,30 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.prompt.postApply.repairAgain",
   "setupEditor.prompt.postApply.exit",
   "setupEditor.postApply.warningList",
+  "setupEditor.prompt.credentialReuse.title",
+  "setupEditor.prompt.credentialReuse.body",
+  "setupEditor.prompt.credentialReuse.existing",
+  "setupEditor.prompt.credentialReuse.existing.description",
+  "setupEditor.prompt.credentialReuse.new",
+  "setupEditor.prompt.credentialReuse.new.description",
+  "setupEditor.prompt.fallbackRoute.title",
+  "setupEditor.prompt.fallbackRoute.body",
+  "setupEditor.prompt.fallbackRoute.edit",
+  "setupEditor.prompt.fallbackRoute.edit.description",
+  "setupEditor.prompt.fallbackRoute.add",
+  "setupEditor.prompt.fallbackRoute.add.description",
+  "setupEditor.prompt.auxiliaryRoute.title",
+  "setupEditor.prompt.auxiliaryRoute.body",
+  "setupEditor.prompt.auxiliaryRoute.assessor",
+  "setupEditor.prompt.auxiliaryRoute.assessor.description",
+  "setupEditor.prompt.auxiliaryRoute.compression",
+  "setupEditor.prompt.auxiliaryRoute.compression.description",
+  "setupEditor.prompt.auxiliaryRoute.sessionSearch",
+  "setupEditor.prompt.auxiliaryRoute.sessionSearch.description",
+  "setupEditor.prompt.auxiliaryRoute.memoryCompaction",
+  "setupEditor.prompt.auxiliaryRoute.memoryCompaction.description",
+  "setupEditor.prompt.auxiliaryRoute.profileContext",
+  "setupEditor.prompt.auxiliaryRoute.profileContext.description",
   "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged",
   "setupEditor.prompt.optionalCapabilityAction.skip",
   "setupEditor.prompt.optionalCapabilityAction.enableConfigure",
@@ -199,6 +237,9 @@ const REVIEW_MANIFEST_KEYS = [
   "setupReview.sections.warnings",
   "setupDrafts.review",
   "setupDrafts.providerModelRoute.summary",
+  "setupDrafts.fallbackModelRoute.add.summary",
+  "setupDrafts.fallbackModelRoute.replace.summary",
+  "setupDrafts.auxiliaryModelRoute.summary",
   "setupDrafts.credentialReference.summary",
   "setupDrafts.workspaceTrust.summary",
   "setupDrafts.securityMode.summary",
@@ -346,6 +387,54 @@ describe("setup copy", () => {
     assertKeys(FIRST_RUN_KEYS);
     assertKeys(SETUP_EDITOR_KEYS);
     assertKeys(SETUP_MODULE_KEYS);
+  });
+
+  it("contains Phase 1 setup editor foundation copy", () => {
+    expect(rawSetupCopy("en", "setupEditor.actions.editFallbackModelRoute")).toBe("Edit fallback provider/model route.");
+    expect(rawSetupCopy("en", "setupEditor.actions.editFallbackModelRoute.description")).toBe("Choose or add a fallback provider/model route through a reviewed setup change.");
+    expect(rawSetupCopy("en", "setupEditor.actions.editAuxiliaryModelRoute")).toBe("Edit auxiliary provider/model route.");
+    expect(rawSetupCopy("en", "setupEditor.actions.editAuxiliaryModelRoute.description")).toBe("Choose an auxiliary route for assessor, compression, session search, memory compaction, or profile context.");
+    expect(rawSetupCopy("en", "setupEditor.actions.configureChannels")).toBe("Configure channels.");
+    expect(rawSetupCopy("en", "setupEditor.actions.configureVoice")).toBe("Configure voice.");
+    expect(rawSetupCopy("en", "setupEditor.actions.configureImageGeneration")).toBe("Configure image generation.");
+    expect(rawSetupCopy("en", "setupEditor.actions.configureBrowser")).toBe("Configure browser.");
+    expect(rawSetupCopy("en", "setupEditor.actions.storeProviderCredentialReference")).toBe("Store provider credential reference.");
+    expect(rawSetupCopy("en", "setupDrafts.fallbackModelRoute.add.summary")).toBe("Add fallback route {providerId} / {modelId}.");
+    expect(rawSetupCopy("en", "setupDrafts.fallbackModelRoute.replace.summary")).toBe("Replace fallback route {previousProviderId} / {previousModelId} with {providerId} / {modelId}.");
+    expect(rawSetupCopy("en", "setupDrafts.auxiliaryModelRoute.summary")).toBe("Set auxiliary {auxiliaryTask} route to {providerId} / {modelId}.");
+    expect(rawSetupCopy("en", "setupDrafts.credentialReference.summary")).toBe("Store credential env-var reference {envVar} only.");
+    expect(rawSetupCopy("en", "setupEditor.prompt.fallbackRoute.add")).toBe("Add another fallback route");
+    expect(rawSetupCopy("en", "setupEditor.prompt.fallbackRoute.edit")).toBe("Edit fallback {index}: {providerId}/{modelId}");
+    expect(rawSetupCopy("en", "setupEditor.prompt.auxiliaryRoute.title")).toBe("Choose auxiliary route.");
+    expect(rawSetupCopy("en", "setupEditor.prompt.auxiliaryRoute.assessor")).toBe("Assessor");
+    expect(rawSetupCopy("en", "setupEditor.prompt.auxiliaryRoute.compression")).toBe("Compression");
+    expect(rawSetupCopy("en", "setupEditor.prompt.auxiliaryRoute.sessionSearch")).toBe("Session search");
+    expect(rawSetupCopy("en", "setupEditor.prompt.auxiliaryRoute.memoryCompaction")).toBe("Memory compaction");
+    expect(rawSetupCopy("en", "setupEditor.prompt.auxiliaryRoute.profileContext")).toBe("Profile context");
+    expect(rawSetupCopy("en", "setupEditor.prompt.auxiliaryRoute.assessor.description")).toContain("approval assessment");
+
+    expect(rawSetupCopy("ar", "setupEditor.actions.editAuxiliaryModelRoute.description")).toContain("assessor");
+    expect(rawSetupCopy("ar", "setupEditor.actions.editAuxiliaryModelRoute.description")).toContain("compression");
+    expect(rawSetupCopy("ar", "setupEditor.actions.editAuxiliaryModelRoute.description")).toContain("session_search");
+    expect(rawSetupCopy("ar", "setupEditor.actions.editAuxiliaryModelRoute.description")).toContain("memory_compaction");
+    expect(rawSetupCopy("ar", "setupEditor.actions.editAuxiliaryModelRoute.description")).toContain("profile_context");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.auxiliaryRoute.assessor.description")).toContain("assessor");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.auxiliaryRoute.compression.description")).toContain("compression");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.auxiliaryRoute.sessionSearch.description")).toContain("session_search");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.auxiliaryRoute.memoryCompaction.description")).toContain("memory_compaction");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.auxiliaryRoute.profileContext.description")).toContain("profile_context");
+  });
+
+  it("contains Phase 2 credential reuse prompt copy", () => {
+    expect(rawSetupCopy("en", "setupEditor.prompt.credentialReuse.existing")).toBe("Use existing saved API key.");
+    expect(rawSetupCopy("en", "setupEditor.prompt.credentialReuse.existing.description")).toBe("Keep the saved credential reference and continue.");
+    expect(rawSetupCopy("en", "setupEditor.prompt.credentialReuse.new")).toBe("Enter a new API key.");
+    expect(rawSetupCopy("en", "setupEditor.prompt.credentialReuse.new.description")).toBe("Replace the saved secret value after review.");
+
+    expect(rawSetupCopy("ar", "setupEditor.prompt.credentialReuse.existing")).toContain("API");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.credentialReuse.new")).toContain("API");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.credentialReuse.existing").length).toBeGreaterThan(0);
+    expect(rawSetupCopy("ar", "setupEditor.prompt.credentialReuse.new.description").length).toBeGreaterThan(0);
   });
 
   it("contains review manifest copy keys", () => {

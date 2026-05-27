@@ -7,6 +7,11 @@ export type EnvSecretWriteResult = {
   key: string;
 };
 
+export type SavedEnvSecretPresence = {
+  path: string;
+  exists: boolean;
+};
+
 export function defaultEnvPath(homeDir?: string): string {
   return join(homeDir ?? process.env.HOME ?? "", ".estacoda", ".env");
 }
@@ -70,6 +75,30 @@ export async function loadDotEnvSecrets(options: {
   }
 
   return loaded;
+}
+
+export async function hasSavedEnvSecret(options: {
+  homeDir?: string;
+  path?: string;
+  profileId?: string;
+  key: string;
+}): Promise<SavedEnvSecretPresence> {
+  const path = options.path ?? (options.profileId === undefined
+    ? defaultEnvPath(options.homeDir)
+    : resolveProfileStateHome({ homeDir: options.homeDir, profileId: options.profileId }).envPath);
+  const key = normalizeEnvKey(options.key);
+  const content = await readEnvFile(path);
+
+  for (const line of content.split(/\r?\n/u)) {
+    const parsed = parseDotEnvLine(line);
+    if (parsed?.key === key) {
+      if (parsed.value.trim().length > 0) {
+        return { path, exists: true };
+      }
+    }
+  }
+
+  return { path, exists: false };
 }
 
 function normalizeEnvKey(key: string): string {

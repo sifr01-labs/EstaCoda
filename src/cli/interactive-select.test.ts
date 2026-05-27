@@ -105,6 +105,7 @@ describe("interactive-select prompt card surface", () => {
       "Workspace trust",
       "Trust this workspace?",
       "/workspace",
+      "",
       "> Trust workspace",
       "  Not now",
     ].join("\n"));

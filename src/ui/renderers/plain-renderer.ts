@@ -510,6 +510,11 @@ export function renderOnboardingPromptCard(
     lines.push(effectiveLocale === "ar" ? isolateLtr(technicalLine) : technicalLine);
   }
 
+  const hasPreOptionContent = vm.bodyLines.length > 0 || (vm.technicalLines?.length ?? 0) > 0;
+  if (hasPreOptionContent && vm.options.length > 0) {
+    lines.push("");
+  }
+
   for (let i = 0; i < vm.options.length; i++) {
     const option = vm.options[i];
     const marker = i === vm.selectedOptionIndex ? ">" : " ";

@@ -148,6 +148,7 @@ async function listProvidersImpl(
   const config = options.config;
   const registry = options.providerRegistry;
   const seen = new Map<ProviderId, CatalogProvider>();
+  const modelCounts = buildProviderModelCounts(config, snapshot);
 
   // Configured providers always appear
   for (const [providerId, providerConfig] of Object.entries(config.providers ?? {})) {
@@ -161,7 +162,7 @@ async function listProvidersImpl(
       continue;
     }
 
-    const modelsCount = providerConfig.models?.length ?? 0;
+    const modelsCount = modelCounts.get(id) ?? 0;
 
     seen.set(id, {
       id,
@@ -188,7 +189,7 @@ async function listProvidersImpl(
       continue;
     }
 
-    const modelsCount = snapshot.models.filter((m) => m.providerId === provider.id).length;
+    const modelsCount = modelCounts.get(id) ?? 0;
 
     seen.set(id, {
       id,
@@ -215,12 +216,6 @@ async function listProvidersImpl(
       continue;
     }
 
-    const existing = seen.get(id);
-    if (existing) {
-      existing.modelsCount = Math.max(existing.modelsCount, 1);
-      continue;
-    }
-
     seen.set(id, {
       id,
       name: providerDisplayName(id, snapshot),
@@ -229,13 +224,52 @@ async function listProvidersImpl(
       configured: false,
       executable,
       catalogOnly,
-      modelsCount: 1,
+      modelsCount: modelCounts.get(id) ?? 0,
       credentialReady: isCredentialReady(id),
       endpointReady: false
     });
   }
 
   return [...seen.values()].sort((a, b) => a.id.localeCompare(b.id));
+}
+
+function buildProviderModelCounts(
+  config: EstaCodaConfig,
+  snapshot: ModelsDevSnapshot
+): Map<ProviderId, number> {
+  const modelIdsByProvider = new Map<ProviderId, Set<string>>();
+  const add = (provider: ProviderId | undefined, modelId: string | undefined) => {
+    if (provider === undefined || modelId === undefined || modelId.length === 0) {
+      return;
+    }
+    let modelIds = modelIdsByProvider.get(provider);
+    if (modelIds === undefined) {
+      modelIds = new Set<string>();
+      modelIdsByProvider.set(provider, modelIds);
+    }
+    modelIds.add(modelId);
+  };
+
+  for (const [providerId, providerConfig] of Object.entries(config.providers ?? {})) {
+    for (const modelId of providerConfig.models ?? []) {
+      add(providerId as ProviderId, modelId);
+    }
+  }
+
+  for (const model of snapshot.models) {
+    add(model.providerId as ProviderId, model.id);
+  }
+
+  for (const profile of fallbackKnownModelProfiles) {
+    add(profile.provider, profile.id);
+  }
+
+  add(config.model?.provider, config.model?.id);
+  for (const fallback of config.model?.fallbacks ?? []) {
+    add(fallback.provider, fallback.id);
+  }
+
+  return new Map([...modelIdsByProvider].map(([provider, modelIds]) => [provider, modelIds.size]));
 }
 
 async function listModelsImpl(

@@ -8,7 +8,7 @@ import type { ProviderId, ProviderApiMode, ProviderAuthMethod } from "../../cont
 import { resolveSetupCopy } from "../setup-copy.js";
 import { createReviewedSetupApplyExecutor } from "../review/apply-executor.js";
 import { runFirstRunSetup } from "./runner.js";
-import type { FlowEngine, ProviderCandidate } from "../../providers/provider-model-selection-flow.js";
+import type { FlowEngine, ModelCandidate, ProviderCandidate } from "../../providers/provider-model-selection-flow.js";
 import { readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../../config/profile-home.js";
 
 async function makeTempDir(): Promise<string> {
@@ -155,9 +155,46 @@ function flowEngine(overrides: {
   };
 }
 
+function modelStatusCandidates(provider: ProviderId): ModelCandidate[] {
+  return [
+    modelStatusCandidate(provider, "model-alpha", "alpha"),
+    modelStatusCandidate(provider, "model-beta", "beta"),
+    modelStatusCandidate(provider, "model-deprecated", "deprecated"),
+    modelStatusCandidate(provider, "model-unknown", "unknown"),
+    modelStatusCandidate(provider, "model-stable", "stable"),
+    modelStatusCandidate(provider, "model-missing"),
+  ];
+}
+
+function modelStatusCandidate(
+  provider: ProviderId,
+  id: string,
+  status?: ModelCandidate["profile"]["status"]
+): ModelCandidate {
+  return {
+    id,
+    provider,
+    profile: {
+      id,
+      provider,
+      contextWindowTokens: 128000,
+      supportsTools: false,
+      supportsVision: false,
+      supportsReasoning: false,
+      supportsStructuredOutput: true,
+      ...(status !== undefined ? { status } : {}),
+    },
+    configured: true,
+    executable: true,
+    catalogOnly: false,
+    supportsVision: false,
+  };
+}
+
 function fakePrompt(
   overrides: Record<string, string | boolean> = {},
-  seenOptions: Record<string, readonly string[]> = {}
+  seenOptions: Record<string, readonly string[]> = {},
+  seenDescriptions: Record<string, readonly (string | undefined)[]> = {}
 ): Prompt {
   const prompt = Object.assign(
     async (_question: string, options?: { secret?: boolean }) => {
@@ -169,6 +206,7 @@ function fakePrompt(
     {
       select: async <T>(input: SelectPromptInput<T>): Promise<T> => {
         seenOptions[input.title] = input.options.map((option) => option.label);
+        seenDescriptions[input.title] = input.options.map((option) => option.description);
         const requested = overrides[input.title];
         const byLabel = typeof requested === "string"
           ? input.options.find((option) => option.label === requested)
@@ -349,6 +387,31 @@ describe("runFirstRunSetup", () => {
     expect(optionalDraft?.review.values.capabilities).toEqual(["voice", "vision"]);
     expect(result.reviewManifest.sections["provider-model-network"]).toHaveLength(1);
     expect(result.reviewManifest.sections["enabled-optional-capabilities"]).toHaveLength(1);
+  });
+
+  it("renders only actionable model status tags in first-run model choices", async () => {
+    const seenDescriptions: Record<string, readonly (string | undefined)[]> = {};
+    const baseFlow = flowEngine();
+    const customFlow: FlowEngine = {
+      ...baseFlow,
+      listModelCandidates: async () => modelStatusCandidates("openai" as ProviderId),
+    };
+
+    await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ "Primary provider": "OpenAI" }, {}, seenDescriptions),
+      flowEngine: customFlow,
+    });
+
+    expect(seenDescriptions["Primary model"]).toEqual([
+      "alpha",
+      "beta",
+      "deprecated",
+      "",
+      "",
+      "",
+    ]);
   });
 
   it("cancels cleanly after review without preparing an apply plan", async () => {

@@ -396,15 +396,44 @@ describe("StandardRenderer — dark theme", () => {
   it("renders no-color onboarding card with tokens removed cleanly", () => {
     const r = renderer("dark", noColorCaps());
     const out = r.renderOnboardingPromptCard(onboardingTrustCard());
-    expect(out).toMatchInlineSnapshot(`
-      "╭──── 𓂀  Workspace trust ────────────────────────────────────────────────────╮
-        Trust this workspace?
-        EstaCoda can read project files and request approval before risky actions.
-        /workspace
-        ▸ Trust workspace
-          Not now
-      ╰────────────────────────────────────────────────────────────────────────────╯"
-    `);
+    expect(out).toBe([
+      "╭──── 𓂀  Workspace trust ────────────────────────────────────────────────────╮",
+      "  Trust this workspace?",
+      "  EstaCoda can read project files and request approval before risky actions.",
+      "  /workspace",
+      "  ",
+      "  ▸ Trust workspace",
+      "    Not now",
+      "╰────────────────────────────────────────────────────────────────────────────╯",
+    ].join("\n"));
+  });
+
+  it("inserts aligned prompt-card spacing between pre-option content and options", () => {
+    const r = renderer("dark", noColorCaps());
+    const out = r.renderOnboardingPromptCard(onboardingTrustCard());
+    expect(out).toContain("/workspace\n  \n  ▸ Trust workspace");
+  });
+
+  it("does not insert prompt-card spacing for option-only cards", () => {
+    const r = renderer("dark", noColorCaps());
+    const out = r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose",
+      bodyLines: [],
+      options: [{ id: "continue", label: "Continue" }],
+      selectedOptionIndex: 0,
+    }));
+    expect(out).not.toContain("\n  \n");
+  });
+
+  it("does not insert prompt-card spacing for content-only cards", () => {
+    const r = renderer("dark", noColorCaps());
+    const out = r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Notice",
+      bodyLines: ["Nothing to choose."],
+      options: [],
+      selectedOptionIndex: 0,
+    }));
+    expect(out).not.toContain("\n  \n");
   });
 
   it("renders English onboarding card with stable no-Unicode fallback", () => {

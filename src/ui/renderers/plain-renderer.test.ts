@@ -109,11 +109,38 @@ describe("PlainRenderer — renderOnboardingPromptCard", () => {
       "Trust this workspace?",
       "EstaCoda can read project files and request approval before risky actions.",
       "/workspace",
+      "",
       "> Trust workspace",
       "  Not now",
     ].join("\n"));
     assertNoAnsi(out);
     assertAsciiSafe(out);
+  });
+
+  it("does not insert prompt-card spacing for option-only cards", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose",
+      bodyLines: [],
+      options: [{ id: "continue", label: "Continue" }],
+      selectedOptionIndex: 0,
+    }));
+    expect(out).toBe([
+      "Choose",
+      "> Continue",
+    ].join("\n"));
+  });
+
+  it("does not insert prompt-card spacing for content-only cards", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Notice",
+      bodyLines: ["Nothing to choose."],
+      options: [],
+      selectedOptionIndex: 0,
+    }));
+    expect(out).toBe([
+      "Notice",
+      "Nothing to choose.",
+    ].join("\n"));
   });
 
   it("renders selected option marker at the selected index", () => {

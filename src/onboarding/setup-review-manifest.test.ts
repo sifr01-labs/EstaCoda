@@ -158,6 +158,92 @@ describe("setup review manifest", () => {
     }));
   });
 
+  it("lists fallback provider/model drafts as provider/model/network changes", () => {
+    const manifest = buildSetupReviewManifest([singleDraftBundle({
+      id: "setup-editor.model-route.edit-fallback-model-route",
+      kind: "fallback-model-route",
+      source: {
+        kind: "setup-editor",
+        sectionId: "model-route",
+        actionId: "edit-fallback-model-route",
+      },
+      riskSurface: "provider-selection",
+      target: {
+        kind: "config-scope",
+        scope: ["model.fallbacks"],
+        path: "/tmp/home/.estacoda/config.json",
+        preserveUnrelatedConfig: true,
+      },
+      review: {
+        copyKey: "setupDrafts.review",
+        summaryKey: "setupDrafts.fallbackModelRoute.add.summary",
+        redacted: true,
+        values: {
+          fallbackOperation: "add",
+          provider: "openai",
+          model: "gpt-5.5",
+        },
+      },
+      applyIntent: configPatchIntent(),
+      preserveUnrelatedConfig: true,
+      requiresReview: true,
+      readOnly: false,
+      blockers: [],
+      warnings: [],
+    })]);
+    const line = manifest.sections["provider-model-network"]
+      .find((candidate) => candidate.sourceDraftIds.includes("setup-editor.model-route.edit-fallback-model-route"));
+
+    expect(line?.review.summaryKey).toBe("setupDrafts.fallbackModelRoute.add.summary");
+    expect(line?.target).toEqual(expect.objectContaining({
+      kind: "config-scope",
+      scope: ["model.fallbacks"],
+    }));
+  });
+
+  it("lists auxiliary provider/model drafts as provider/model/network changes", () => {
+    const manifest = buildSetupReviewManifest([singleDraftBundle({
+      id: "setup-editor.model-route.edit-auxiliary-model-route",
+      kind: "auxiliary-model-route",
+      source: {
+        kind: "setup-editor",
+        sectionId: "model-route",
+        actionId: "edit-auxiliary-model-route",
+      },
+      riskSurface: "provider-selection",
+      target: {
+        kind: "config-scope",
+        scope: ["auxiliaryModels.*"],
+        path: "/tmp/home/.estacoda/config.json",
+        preserveUnrelatedConfig: true,
+      },
+      review: {
+        copyKey: "setupDrafts.review",
+        summaryKey: "setupDrafts.auxiliaryModelRoute.summary",
+        redacted: true,
+        values: {
+          auxiliaryTask: "compression",
+          provider: "openai",
+          model: "gpt-5.5",
+        },
+      },
+      applyIntent: configPatchIntent(),
+      preserveUnrelatedConfig: true,
+      requiresReview: true,
+      readOnly: false,
+      blockers: [],
+      warnings: [],
+    })]);
+    const line = manifest.sections["provider-model-network"]
+      .find((candidate) => candidate.sourceDraftIds.includes("setup-editor.model-route.edit-auxiliary-model-route"));
+
+    expect(line?.review.summaryKey).toBe("setupDrafts.auxiliaryModelRoute.summary");
+    expect(line?.target).toEqual(expect.objectContaining({
+      kind: "config-scope",
+      scope: ["auxiliaryModels.*"],
+    }));
+  });
+
   it("lists enabled optional capabilities", () => {
     const manifest = buildSetupReviewManifest([buildSetupModuleDraftBundle(moduleContext())]);
     const optionalLines = manifest.sections["enabled-optional-capabilities"];
@@ -439,6 +525,33 @@ function repairableBlockedBundle(bundle: SetupDraftBundle, blocker: string): Set
     ...bundle,
     blockers: [...bundle.blockers, blocker],
     safeToApplyLater: false,
+  };
+}
+
+function singleDraftBundle(draft: SetupDraft): SetupDraftBundle {
+  return {
+    kind: "setup-draft-bundle",
+    sourceKind: "setup-editor-plan-session",
+    sourceId: `bundle.${draft.id}`,
+    drafts: [draft],
+    blockers: [],
+    warnings: [],
+    safeToApplyLater: true,
+    metadata: {
+      draftCount: 1,
+      requiresReviewCount: draft.requiresReview ? 1 : 0,
+      readOnlyCount: draft.readOnly ? 1 : 0,
+    },
+  };
+}
+
+function configPatchIntent(): SetupDraft["applyIntent"] {
+  return {
+    kind: "dry-run-apply-intent",
+    effect: "config-patch",
+    dryRunOnly: true,
+    writesConfig: false,
+    writesTrustStore: false,
   };
 }
 

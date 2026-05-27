@@ -229,6 +229,24 @@ function modelRouteSection(state: SetupEntryState, mode: SetupEditorPlanMode): S
         requiresExplicitApply: true,
         patch: scopedPatch(["provider.route"]),
       }),
+      setupEditorAction({
+        id: "edit-fallback-model-route",
+        copyKey: "setupEditor.actions.editFallbackModelRoute",
+        sectionId: "model-route",
+        effect: "draft-config-patch",
+        readOnly: false,
+        requiresExplicitApply: true,
+        patch: scopedPatch(["model.fallbacks"]),
+      }),
+      setupEditorAction({
+        id: "edit-auxiliary-model-route",
+        copyKey: "setupEditor.actions.editAuxiliaryModelRoute",
+        sectionId: "model-route",
+        effect: "draft-config-patch",
+        readOnly: false,
+        requiresExplicitApply: true,
+        patch: scopedPatch(["auxiliaryModels.*"]),
+      }),
     ],
   });
 }
@@ -249,32 +267,20 @@ function credentialsSection(state: SetupEntryState): SetupEditorSection {
     },
     warnings: blocked ? state.warnings : [],
     blockers: blocked ? state.blockers : [],
-    actions: [
-      ...(blocked
-        ? [
-            setupEditorAction({
-              id: "repair-missing-credential",
-              copyKey: "setupEditor.actions.repairMissingCredential",
-              sectionId: "credentials",
-              effect: "draft-config-patch",
-              readOnly: false,
-              requiresExplicitApply: true,
-              patch: scopedPatch(["provider.credentialReference"]),
-              credentialRefs: missingCredentialRefs,
-            }),
-          ]
-        : []),
-      setupEditorAction({
-        id: "edit-primary-credential-reference",
-        copyKey: "setupEditor.actions.editPrimaryCredentialReference",
-        sectionId: "credentials",
-        effect: "draft-config-patch",
-        readOnly: false,
-        requiresExplicitApply: true,
-        patch: scopedPatch(["provider.credentialReference"]),
-        credentialRefs: missingCredentialRefs,
-      }),
-    ],
+    actions: blocked
+      ? [
+          setupEditorAction({
+            id: "repair-missing-credential",
+            copyKey: "setupEditor.actions.repairMissingCredential",
+            sectionId: "credentials",
+            effect: "draft-config-patch",
+            readOnly: false,
+            requiresExplicitApply: true,
+            patch: scopedPatch(["provider.credentialReference"]),
+            credentialRefs: missingCredentialRefs,
+          }),
+        ]
+      : [],
   });
 }
 
@@ -382,13 +388,40 @@ function optionalCapabilitiesSection(): SetupEditorSection {
     blockers: [],
     actions: [
       setupEditorAction({
-        id: "review-optional-capabilities",
-        copyKey: "setupEditor.actions.reviewOptionalCapabilities",
+        id: "configure-channels",
+        copyKey: "setupEditor.actions.configureChannels",
         sectionId: "optional-capabilities",
         effect: "draft-config-patch",
         readOnly: false,
         requiresExplicitApply: true,
-        patch: scopedPatch(["channels", "voice", "vision", "browser"]),
+        patch: scopedPatch(["channels"]),
+      }),
+      setupEditorAction({
+        id: "configure-voice",
+        copyKey: "setupEditor.actions.configureVoice",
+        sectionId: "optional-capabilities",
+        effect: "draft-config-patch",
+        readOnly: false,
+        requiresExplicitApply: true,
+        patch: scopedPatch(["voice"]),
+      }),
+      setupEditorAction({
+        id: "configure-image-generation",
+        copyKey: "setupEditor.actions.configureImageGeneration",
+        sectionId: "optional-capabilities",
+        effect: "draft-config-patch",
+        readOnly: false,
+        requiresExplicitApply: true,
+        patch: scopedPatch(["vision"]),
+      }),
+      setupEditorAction({
+        id: "configure-browser",
+        copyKey: "setupEditor.actions.configureBrowser",
+        sectionId: "optional-capabilities",
+        effect: "draft-config-patch",
+        readOnly: false,
+        requiresExplicitApply: true,
+        patch: scopedPatch(["browser"]),
       }),
     ],
   });

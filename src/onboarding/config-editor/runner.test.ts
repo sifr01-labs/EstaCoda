@@ -5,9 +5,10 @@ import { tmpdir } from "node:os";
 import type { Prompt } from "../../cli/readline-prompt.js";
 import { WorkspaceTrustStore } from "../../security/workspace-trust-store.js";
 import type { ProviderId, ProviderApiMode, ProviderAuthMethod } from "../../contracts/provider.js";
-import type { FlowEngine } from "../../providers/provider-model-selection-flow.js";
+import type { FlowEngine, ModelCandidate } from "../../providers/provider-model-selection-flow.js";
 import { createReviewedSetupApplyExecutor } from "../review/apply-executor.js";
 import { runConfigEditor } from "./runner.js";
+import { promptModelCandidate } from "./prompts.js";
 import { resolveProfileStateHome, writeActiveProfile } from "../../config/profile-home.js";
 
 async function makeTempDir(): Promise<string> {
@@ -25,6 +26,7 @@ describe("runConfigEditor", () => {
   });
 
   afterEach(async () => {
+    delete process.env.PR8_SHELL_ONLY_KEY;
     await chmod(join(tempDir, ".estacoda"), 0o700).catch(() => undefined);
     await rm(tempDir, { recursive: true, force: true });
   });
@@ -61,13 +63,43 @@ describe("runConfigEditor", () => {
     expect(applyCalled).toBe(false);
     expect(output.join("")).toContain("EstaCoda guided setup editor");
     expect(output.join("")).toContain("Available actions:");
+    expect(output.join("")).toContain("edit-fallback-model-route");
+    expect(output.join("")).toContain("edit-auxiliary-model-route");
     expect(output.join("")).toContain("edit-security-mode");
     expect(output.join("")).toContain("edit-workflow-learning");
-    expect(output.join("")).toContain("review-optional-capabilities");
+    expect(output.join("")).toContain("configure-channels");
+    expect(output.join("")).toContain("configure-voice");
+    expect(output.join("")).toContain("configure-image-generation");
+    expect(output.join("")).toContain("configure-browser");
+    expect(output.join("")).not.toContain("edit-primary-credential-reference");
+    expect(output.join("")).not.toContain("review-optional-capabilities");
     expect(output.join("")).toContain("verify-setup - Run read-only verification");
     expect(output.join("")).toContain("show-diagnostics - Show diagnostics");
     expect(output.join("")).toContain("exit - Exit without changes");
     await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
+  });
+
+  it("renders only actionable model status tags in config-editor model choices", async () => {
+    const descriptions: Array<string | undefined> = [];
+    const prompt = fakePrompt();
+    prompt.select = async (input) => {
+      descriptions.push(...input.options.map((option) => option.description));
+      return input.options[0]!.value;
+    };
+
+    await promptModelCandidate(prompt, {
+      providerId: "openai",
+      candidates: modelStatusCandidates("openai" as ProviderId),
+    });
+
+    expect(descriptions).toEqual([
+      "alpha",
+      "beta",
+      "deprecated",
+      "",
+      "",
+      "",
+    ]);
   });
 
   it("prepares the read-only verification route without applying changes", async () => {
@@ -475,6 +507,417 @@ describe("runConfigEditor", () => {
     expect(JSON.stringify(result)).not.toContain("sk-pr8-provider-route");
   });
 
+  it("prompts to reuse a saved profile credential and keeps the existing key without raw key prompt", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await mkdir(dirname(profileEnvPath(tempDir)), { recursive: true });
+    await writeFile(profileEnvPath(tempDir), 'PR8_REUSE_KEY="saved-reuse-secret"\n', "utf8");
+    await chmod(profileEnvPath(tempDir), 0o600);
+    await trustWorkspace(tempDir, workspaceRoot);
+    const prompt = trackingPrompt({
+      values: ["OpenAI", "gpt-5.5", "existing", true],
+      secret: "sk-should-not-be-read",
+    });
+    const reuseChoiceLabels: string[][] = [];
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      if (input.title === "Saved provider API key") {
+        reuseChoiceLabels.push(input.options.map((option) => option.label));
+      }
+      return baseSelect(input);
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "edit-primary-model-route",
+      flowEngine: flowEngine({ credentialAction: "reuse", envVarName: "PR8_REUSE_KEY" }),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+        collectVerification: () => readyVerification(profileConfigPath(tempDir)),
+      }),
+    });
+    const envFile = await readFile(profileEnvPath(tempDir), "utf8");
+
+    expect(result.completed).toBe(true);
+    expect(reuseChoiceLabels).toEqual([["Use existing saved API key.", "Enter a new API key."]]);
+    expect(prompt.secretPromptCount()).toBe(0);
+    expect(envFile).toContain("saved-reuse-secret");
+    expect(envFile).not.toContain("sk-should-not-be-read");
+    expect(result.reviewManifest?.sections["secret-refs-to-store"][0]?.sourceDraftIds).toEqual([
+      "setup-editor.credentials.store-provider-credential-reference",
+    ]);
+    expect(JSON.stringify(result)).not.toContain("saved-reuse-secret");
+    expect(JSON.stringify(result.reviewManifest)).not.toContain("saved-reuse-secret");
+  });
+
+  it("adds a fallback route directly when no fallbacks exist", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const prompt = trackingPrompt({
+      values: ["OpenAI", "gpt-5.5", true],
+      secret: "sk-fallback-add-secret",
+    });
+    const fallbackChoiceTitles: string[] = [];
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      if (input.title === "Fallback provider/model route") {
+        fallbackChoiceTitles.push(input.title);
+      }
+      return baseSelect(input);
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "edit-fallback-model-route",
+      flowEngine: flowEngine({ credentialAction: "collect", envVarName: "PR8_FALLBACK_KEY" }),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+        collectVerification: () => readyVerification(profileConfigPath(tempDir)),
+      }),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      model?: { provider?: string; id?: string; fallbacks?: Array<{ provider?: string; id?: string; apiKeyEnv?: string }> };
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("edit-fallback-model-route");
+    expect(fallbackChoiceTitles).toEqual([]);
+    expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values).toEqual(expect.objectContaining({
+      fallbackOperation: "add",
+      provider: "openai",
+      model: "gpt-5.5",
+      apiKeyEnv: "PR8_FALLBACK_KEY",
+    }));
+    expect(result.reviewManifest?.sections["files-to-write-update"][0]?.target).toEqual(expect.objectContaining({
+      kind: "config-scope",
+      scope: ["model.fallbacks"],
+    }));
+    expect(result.reviewManifest?.sections["secret-refs-to-store"][0]?.sourceDraftIds).toEqual([
+      "setup-editor.credentials.store-provider-credential-reference",
+    ]);
+    expect(config.model?.provider).toBe("local");
+    expect(config.model?.id).toBe("hermes-local");
+    expect(config.model?.fallbacks).toEqual([
+      expect.objectContaining({ provider: "openai", id: "gpt-5.5", apiKeyEnv: "PR8_FALLBACK_KEY" }),
+    ]);
+    expect(rawConfig).not.toContain("sk-fallback-add-secret");
+    expect(JSON.stringify(result)).not.toContain("sk-fallback-add-secret");
+  });
+
+  it("prompts to edit existing fallbacks or add another route", async () => {
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig(),
+      model: {
+        provider: "local",
+        id: "hermes-local",
+        fallbacks: [
+          { provider: "openai", id: "gpt-5.5" },
+          { provider: "kimi", id: "kimi-k2" },
+        ],
+      },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+    const prompt = fakePrompt({ values: ["fallback-add", "Anthropic", "claude-sonnet-4-5", true] });
+    const fallbackChoiceLabels: string[][] = [];
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      if (input.title === "Fallback provider/model route") {
+        fallbackChoiceLabels.push(input.options.map((option) => option.label));
+      }
+      return baseSelect(input);
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "edit-fallback-model-route",
+      flowEngine: flowEngine({ credentialAction: "none", providers: ["anthropic"] }),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+
+    expect(result.completed).toBe(true);
+    expect(fallbackChoiceLabels).toEqual([[
+      "Edit fallback 1: openai/gpt-5.5",
+      "Edit fallback 2: kimi/kimi-k2",
+      "Add another fallback route",
+    ]]);
+    expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values).toEqual(expect.objectContaining({
+      fallbackOperation: "add",
+      provider: "anthropic",
+      model: "claude-sonnet-4-5",
+    }));
+  });
+
+  it("replaces a selected fallback route while preserving surrounding fallbacks", async () => {
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig(),
+      model: {
+        provider: "local",
+        id: "hermes-local",
+        fallbacks: [
+          { provider: "openai", id: "gpt-5.5" },
+          { provider: "kimi", id: "kimi-k2" },
+        ],
+      },
+      providers: {
+        ...(localReadyConfig().providers as Record<string, unknown>),
+        openai: { kind: "openai-compatible", baseUrl: "https://api.openai.com/v1", models: ["gpt-5.5"], enableNetwork: true },
+        kimi: { kind: "openai-compatible", baseUrl: "https://api.moonshot.ai/v1", models: ["kimi-k2"], enableNetwork: true },
+      },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ values: ["fallback-1", "Anthropic", "claude-sonnet-4-5", true] }),
+      defaultActionId: "edit-fallback-model-route",
+      flowEngine: flowEngine({ credentialAction: "none", providers: ["anthropic"] }),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      model?: { provider?: string; id?: string; fallbacks?: Array<{ provider?: string; id?: string }> };
+      providers?: Record<string, unknown>;
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.summaryKey).toBe("setupDrafts.fallbackModelRoute.replace.summary");
+    expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values).toEqual(expect.objectContaining({
+      fallbackOperation: "replace",
+      fallbackIndex: 1,
+      previousProvider: "kimi",
+      previousModel: "kimi-k2",
+      provider: "anthropic",
+      model: "claude-sonnet-4-5",
+    }));
+    expect(config.model?.provider).toBe("local");
+    expect(config.model?.id).toBe("hermes-local");
+    expect(config.model?.fallbacks).toEqual([
+      expect.objectContaining({ provider: "openai", id: "gpt-5.5" }),
+      expect.objectContaining({ provider: "anthropic", id: "claude-sonnet-4-5" }),
+    ]);
+    expect(config.providers?.kimi).toBeDefined();
+  });
+
+  it("selects an auxiliary task and applies a reviewed auxiliary route", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const prompt = trackingPrompt({
+      values: ["compression", "OpenAI", "gpt-5.5", true],
+      secret: "sk-auxiliary-compression-secret",
+    });
+    const taskOptions: Array<{ labels: string[]; values: unknown[] }> = [];
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      if (input.title === "Choose auxiliary route.") {
+        taskOptions.push({
+          labels: input.options.map((option) => option.label),
+          values: input.options.map((option) => option.value),
+        });
+      }
+      return baseSelect(input);
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "edit-auxiliary-model-route",
+      flowEngine: flowEngine({ credentialAction: "collect", envVarName: "PR8_AUX_KEY" }),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      model?: { provider?: string; id?: string; fallbacks?: unknown };
+      auxiliaryModels?: {
+        compression?: { provider?: string; id?: string; apiKeyEnv?: string; enabled?: boolean };
+      };
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("edit-auxiliary-model-route");
+    expect(taskOptions).toEqual([{
+      labels: ["Assessor", "Compression", "Session search", "Memory compaction", "Profile context"],
+      values: ["assessor", "compression", "session_search", "memory_compaction", "profile_context"],
+    }]);
+    expect(result.reviewManifest?.sections["provider-model-network"][0]?.review).toEqual(expect.objectContaining({
+      summaryKey: "setupDrafts.auxiliaryModelRoute.summary",
+      values: expect.objectContaining({
+        auxiliaryTask: "compression",
+        provider: "openai",
+        model: "gpt-5.5",
+        apiKeyEnv: "PR8_AUX_KEY",
+      }),
+    }));
+    expect(result.reviewManifest?.sections["files-to-write-update"][0]?.target).toEqual(expect.objectContaining({
+      kind: "config-scope",
+      scope: ["auxiliaryModels.*"],
+    }));
+    expect(result.reviewManifest?.sections["secret-refs-to-store"][0]?.sourceDraftIds).toEqual([
+      "setup-editor.credentials.store-provider-credential-reference",
+    ]);
+    expect(config.model).toEqual({ provider: "local", id: "hermes-local" });
+    expect(config.auxiliaryModels?.compression).toEqual(expect.objectContaining({
+      provider: "openai",
+      id: "gpt-5.5",
+      apiKeyEnv: "PR8_AUX_KEY",
+      enabled: true,
+    }));
+    expect(rawConfig).not.toContain("sk-auxiliary-compression-secret");
+    expect(JSON.stringify(result)).not.toContain("sk-auxiliary-compression-secret");
+    expect(JSON.stringify(result.reviewManifest)).not.toContain("sk-auxiliary-compression-secret");
+  });
+
+  it("does not change assessor route when auxiliary review is cancelled", async () => {
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig(),
+      auxiliaryModels: {
+        assessor: { provider: "auto", enabled: true },
+      },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["assessor", "OpenAI", "gpt-5.5", false],
+        secret: "sk-assessor-cancelled-secret",
+      }),
+      defaultActionId: "edit-auxiliary-model-route",
+      flowEngine: flowEngine({ credentialAction: "collect", envVarName: "PR8_ASSESSOR_KEY" }),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      auxiliaryModels?: { assessor?: { provider?: string; id?: string; enabled?: boolean } };
+    };
+
+    expect(result.completed).toBe(false);
+    expect(result.applyPlanningResult?.kind).toBe("cancelled");
+    expect(config.auxiliaryModels?.assessor).toEqual({ provider: "auto", enabled: true });
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).rejects.toThrow();
+    expect(rawConfig).not.toContain("sk-assessor-cancelled-secret");
+    expect(JSON.stringify(result)).not.toContain("sk-assessor-cancelled-secret");
+  });
+
+  it("replaces a saved profile credential only after reviewed approval when the user enters a new key", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await mkdir(dirname(profileEnvPath(tempDir)), { recursive: true });
+    await writeFile(profileEnvPath(tempDir), 'PR8_REPLACE_KEY="old-reuse-secret"\n', "utf8");
+    await chmod(profileEnvPath(tempDir), 0o600);
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["OpenAI", "gpt-5.5", "new", true],
+        secret: "sk-pr8-replacement-secret",
+      }),
+      defaultActionId: "edit-primary-model-route",
+      flowEngine: flowEngine({ credentialAction: "reuse", envVarName: "PR8_REPLACE_KEY" }),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+        collectVerification: () => readyVerification(profileConfigPath(tempDir)),
+      }),
+    });
+    const envFile = await readFile(profileEnvPath(tempDir), "utf8");
+
+    expect(result.completed).toBe(true);
+    expect(result.applyPlanningResult?.kind).toBe("apply-plan-ready");
+    expect(envFile).toContain('PR8_REPLACE_KEY="sk-pr8-replacement-secret"');
+    expect(envFile).not.toContain("old-reuse-secret");
+    expect(result.reviewManifest?.sections["secret-refs-to-store"][0]?.sourceDraftIds).toEqual([
+      "setup-editor.credentials.store-provider-credential-reference",
+    ]);
+    expect(result.output).not.toContain("sk-pr8-replacement-secret");
+    expect(JSON.stringify(result)).not.toContain("sk-pr8-replacement-secret");
+    expect(JSON.stringify(result.reviewManifest)).not.toContain("sk-pr8-replacement-secret");
+    expect(JSON.stringify(result.applyPlanningResult)).not.toContain("sk-pr8-replacement-secret");
+  });
+
+  it("returns a diagnostic when replacing a saved credential with an empty key", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await mkdir(dirname(profileEnvPath(tempDir)), { recursive: true });
+    await writeFile(profileEnvPath(tempDir), 'PR8_EMPTY_REUSE_KEY="old-reuse-secret"\n', "utf8");
+    await chmod(profileEnvPath(tempDir), 0o600);
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ values: ["OpenAI", "gpt-5.5", "new"], secret: "" }),
+      defaultActionId: "edit-primary-model-route",
+      flowEngine: flowEngine({ credentialAction: "reuse", envVarName: "PR8_EMPTY_REUSE_KEY" }),
+      applyExecutor: {
+        apply: () => {
+          throw new Error("apply should not run for empty replacement credential");
+        },
+      },
+    });
+    const envFile = await readFile(profileEnvPath(tempDir), "utf8");
+
+    expect(result.completed).toBe(false);
+    expect(result.reviewManifest).toBeUndefined();
+    expect(result.applyPlanningResult).toBeUndefined();
+    expect(result.output).toContain("No API key was entered for PR8_EMPTY_REUSE_KEY");
+    expect(envFile).toContain("old-reuse-secret");
+  });
+
+  it("does not show the saved-key prompt when only shell env has the credential", async () => {
+    process.env.PR8_SHELL_ONLY_KEY = "sk-shell-only-secret";
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const prompt = trackingPrompt({ values: ["OpenAI", "gpt-5.5", true] });
+    const reuseChoiceLabels: string[][] = [];
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      if (input.title === "Saved provider API key") {
+        reuseChoiceLabels.push(input.options.map((option) => option.label));
+      }
+      return baseSelect(input);
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "edit-primary-model-route",
+      flowEngine: flowEngine({ credentialAction: "reuse", envVarName: "PR8_SHELL_ONLY_KEY" }),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+
+    expect(result.completed).toBe(true);
+    expect(reuseChoiceLabels).toEqual([]);
+    expect(prompt.secretPromptCount()).toBe(0);
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).rejects.toThrow();
+    expect(JSON.stringify(result)).not.toContain("sk-shell-only-secret");
+  });
+
   it("cancels guided credential repair without writing config or .env", async () => {
     delete process.env.PR8_CANCELLED_KEY;
     await writeUserConfig(tempDir, hostedMissingCredentialConfig("PR8_CANCELLED_KEY"));
@@ -686,7 +1129,7 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt(),
-      defaultActionId: "review-optional-capabilities",
+      defaultActionId: "configure-channels",
       applyExecutor: {
         apply: () => {
           applyCalled = true;
@@ -696,8 +1139,8 @@ describe("runConfigEditor", () => {
     });
 
     expect(result.completed).toBe(true);
-    expect(result.selectedActionId).toBe("review-optional-capabilities");
-    expect(result.output).toContain("Optional capabilities left unchanged");
+    expect(result.selectedActionId).toBe("configure-channels");
+    expect(result.output).toContain("Telegram/channels left unchanged");
     expect(result.reviewManifest).toBeUndefined();
     expect(result.applyPlanningResult).toBeUndefined();
     expect(applyCalled).toBe(false);
@@ -729,16 +1172,12 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt,
-      defaultActionId: "review-optional-capabilities",
+      defaultActionId: "configure-channels",
     });
 
     expect(result.completed).toBe(true);
     expect(optionLabels[0]).toEqual(["Leave unchanged", "Enable/configure"]);
-    expect(optionLabels.slice(1)).toEqual([
-      ["Leave unchanged", "Skip", "Enable/configure"],
-      ["Leave unchanged", "Skip", "Enable/configure"],
-      ["Leave unchanged", "Skip", "Enable/configure"],
-    ]);
+    expect(optionLabels).toHaveLength(1);
     expect(result.reviewManifest).toBeUndefined();
   });
 
@@ -751,9 +1190,9 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["enable", "TELEGRAM_BOT_TOKEN", "", "", "skip", "unchanged", "unchanged", "unchanged", true],
+        values: ["enable", "TELEGRAM_BOT_TOKEN", "", "", "skip", true],
       }),
-      defaultActionId: "review-optional-capabilities",
+      defaultActionId: "configure-channels",
     });
 
     expect(result.completed).toBe(true);
@@ -781,13 +1220,10 @@ describe("runConfigEditor", () => {
           "TELEGRAM_BOT_TOKEN",
           "42",
           "",
-          "unchanged",
-          "unchanged",
-          "unchanged",
           true,
         ],
       }),
-      defaultActionId: "review-optional-capabilities",
+      defaultActionId: "configure-channels",
     });
 
     expect(result.completed).toBe(true);
@@ -805,10 +1241,10 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["enable", "TELEGRAM_BOT_TOKEN", "42", "-100", "unchanged", "unchanged", "unchanged", true],
+        values: ["enable", "TELEGRAM_BOT_TOKEN", "42", "-100", true],
         secret: "123456:stored-telegram-token",
       }),
-      defaultActionId: "review-optional-capabilities",
+      defaultActionId: "configure-channels",
       applyExecutor: createReviewedSetupApplyExecutor({
         homeDir: tempDir,
         workspaceRoot,
@@ -821,8 +1257,12 @@ describe("runConfigEditor", () => {
     };
 
     expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("configure-channels");
     expect(result.reviewManifest?.sections["enabled-optional-capabilities"]).toHaveLength(1);
     expect(result.reviewManifest?.sections["remote-control-surfaces"]).toHaveLength(1);
+    expect(result.reviewManifest?.sections["enabled-optional-capabilities"].map((line) => line.sourceDraftIds[0])).toEqual([
+      "setup-module.telegram.capability",
+    ]);
     expect(result.reviewManifest?.sections["remote-control-surfaces"][0]?.review.values.remoteControlIdentityConstraint).toBe("allowed-user-or-chat-id");
     expect(config.channels?.telegram).toEqual(expect.objectContaining({
       enabled: true,
@@ -835,7 +1275,7 @@ describe("runConfigEditor", () => {
     expect(JSON.stringify(result)).not.toContain("123456:");
   });
 
-  it("applies voice, vision, and browser optional capability refs without raw secrets or browser launch", async () => {
+  it("configures voice without drafting other optional capabilities", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
 
@@ -844,7 +1284,6 @@ describe("runConfigEditor", () => {
       workspaceRoot,
       prompt: fakePrompt({
         values: [
-          "skip",
           "enable",
           "openai",
           "gpt-4o-mini-tts",
@@ -852,19 +1291,10 @@ describe("runConfigEditor", () => {
           "openai",
           "gpt-4o-mini-transcribe",
           "VOICE_STT_KEY",
-          "enable",
-          "fal",
-          "fal-ai/imagen4/preview",
-          "FAL_KEY",
-          false,
-          "enable",
-          "local-cdp",
-          "http://127.0.0.1:1",
-          "google-chrome --remote-debugging-port=9222",
           true,
         ],
       }),
-      defaultActionId: "review-optional-capabilities",
+      defaultActionId: "configure-voice",
       applyExecutor: createReviewedSetupApplyExecutor({
         homeDir: tempDir,
         workspaceRoot,
@@ -872,35 +1302,126 @@ describe("runConfigEditor", () => {
     });
     const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
     const config = JSON.parse(rawConfig) as {
+      channels?: unknown;
       tts?: { provider?: string; openai?: { model?: string; apiKeyEnv?: string } };
       stt?: { provider?: string; openai?: { model?: string; apiKeyEnv?: string } };
+      imageGen?: unknown;
+      browser?: unknown;
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("configure-voice");
+    expect(result.reviewManifest?.sections["enabled-optional-capabilities"].map((line) => line.sourceDraftIds[0])).toEqual([
+      "setup-module.voice.capability",
+    ]);
+    expect(config.tts?.provider).toBe("openai");
+    expect(config.tts?.openai?.apiKeyEnv).toBe("VOICE_TTS_KEY");
+    expect(config.stt?.provider).toBe("openai");
+    expect(config.stt?.openai?.apiKeyEnv).toBe("VOICE_STT_KEY");
+    expect(config.channels).toBeUndefined();
+    expect(config.imageGen).toBeUndefined();
+    expect(config.browser).toBeUndefined();
+    expect(rawConfig).not.toContain("sk-");
+    expect(JSON.stringify(result)).not.toContain("sk-");
+  });
+
+  it("configures image generation without drafting other optional capabilities", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: [
+          "enable",
+          "fal",
+          "fal-ai/imagen4/preview",
+          "FAL_KEY",
+          false,
+          true,
+        ],
+      }),
+      defaultActionId: "configure-image-generation",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      channels?: unknown;
+      tts?: unknown;
+      stt?: unknown;
       imageGen?: { provider?: string; model?: string; fal?: { apiKeyEnv?: string } };
+      browser?: unknown;
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("configure-image-generation");
+    expect(result.reviewManifest?.sections["enabled-optional-capabilities"].map((line) => line.sourceDraftIds[0])).toEqual([
+      "setup-module.vision.capability",
+    ]);
+    expect(config.imageGen?.provider).toBe("fal");
+    expect(config.imageGen?.fal?.apiKeyEnv).toBe("FAL_KEY");
+    expect(config.channels).toBeUndefined();
+    expect(config.tts).toBeUndefined();
+    expect(config.stt).toBeUndefined();
+    expect(config.browser).toBeUndefined();
+    expect(rawConfig).not.toContain("sk-");
+    expect(JSON.stringify(result)).not.toContain("sk-");
+  });
+
+  it("configures browser without drafting other optional capabilities or auto-launching", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: [
+          "enable",
+          "local-cdp",
+          "http://127.0.0.1:1",
+          "google-chrome --remote-debugging-port=9222",
+          true,
+        ],
+      }),
+      defaultActionId: "configure-browser",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      channels?: unknown;
+      tts?: unknown;
+      stt?: unknown;
+      imageGen?: unknown;
       browser?: { backend?: string; cdpUrl?: string; launchCommand?: string; autoLaunch?: boolean };
     };
     const browserLine = result.reviewManifest?.sections["enabled-optional-capabilities"]
       .find((line) => line.sourceDraftIds.includes("setup-module.browser.capability"));
 
     expect(result.completed).toBe(true);
-    expect(result.reviewManifest?.sections["enabled-optional-capabilities"].map((line) => line.sourceDraftIds[0])).toEqual(expect.arrayContaining([
-      "setup-module.voice.capability",
-      "setup-module.vision.capability",
+    expect(result.selectedActionId).toBe("configure-browser");
+    expect(result.reviewManifest?.sections["enabled-optional-capabilities"].map((line) => line.sourceDraftIds[0])).toEqual([
       "setup-module.browser.capability",
-    ]));
-    expect(result.reviewManifest?.sections["enabled-optional-capabilities"].map((line) => line.sourceDraftIds[0])).not.toContain("setup-module.telegram.capability");
+    ]);
     expect(browserLine?.review.values.autoLaunchRequested).toBe(false);
     expect(browserLine?.review.values.autoLaunchWillRunNow).toBe(false);
-    expect(config.tts?.provider).toBe("openai");
-    expect(config.tts?.openai?.apiKeyEnv).toBe("VOICE_TTS_KEY");
-    expect(config.stt?.provider).toBe("openai");
-    expect(config.stt?.openai?.apiKeyEnv).toBe("VOICE_STT_KEY");
-    expect(config.imageGen?.provider).toBe("fal");
-    expect(config.imageGen?.fal?.apiKeyEnv).toBe("FAL_KEY");
     expect(config.browser).toEqual({
       backend: "local-cdp",
       cdpUrl: "http://127.0.0.1:1",
       launchCommand: "google-chrome --remote-debugging-port=9222",
       autoLaunch: false,
     });
+    expect(config.channels).toBeUndefined();
+    expect(config.tts).toBeUndefined();
+    expect(config.stt).toBeUndefined();
+    expect(config.imageGen).toBeUndefined();
     expect(rawConfig).not.toContain("sk-");
     expect(JSON.stringify(result)).not.toContain("sk-");
   });
@@ -992,6 +1513,62 @@ function fakePrompt(options: { readonly values?: readonly unknown[]; readonly se
   prompt.onboardingCard = () => undefined;
   prompt.close = () => undefined;
   return prompt;
+}
+
+function trackingPrompt(options: { readonly values?: readonly unknown[]; readonly secret?: string } = {}): Prompt & {
+  readonly secretPromptCount: () => number;
+} {
+  const base = fakePrompt(options);
+  let secretPromptCount = 0;
+  const prompt = (async (question: string, promptOptions?: { secret?: boolean }) => {
+    if (promptOptions?.secret === true) {
+      secretPromptCount += 1;
+    }
+    return base(question, promptOptions);
+  }) as Prompt & { readonly secretPromptCount: () => number };
+  prompt.select = base.select;
+  prompt.onboardingCard = base.onboardingCard;
+  prompt.close = base.close;
+  Object.defineProperty(prompt, "secretPromptCount", {
+    value: () => secretPromptCount,
+  });
+  return prompt;
+}
+
+function modelStatusCandidates(provider: ProviderId): ModelCandidate[] {
+  return [
+    modelStatusCandidate(provider, "model-alpha", "alpha"),
+    modelStatusCandidate(provider, "model-beta", "beta"),
+    modelStatusCandidate(provider, "model-deprecated", "deprecated"),
+    modelStatusCandidate(provider, "model-unknown", "unknown"),
+    modelStatusCandidate(provider, "model-stable", "stable"),
+    modelStatusCandidate(provider, "model-missing"),
+  ];
+}
+
+function modelStatusCandidate(
+  provider: ProviderId,
+  id: string,
+  status?: ModelCandidate["profile"]["status"]
+): ModelCandidate {
+  return {
+    id,
+    provider,
+    configured: true,
+    executable: true,
+    catalogOnly: false,
+    supportsVision: false,
+    profile: {
+      id,
+      provider,
+      contextWindowTokens: 128000,
+      supportsTools: false,
+      supportsVision: false,
+      supportsReasoning: false,
+      supportsStructuredOutput: true,
+      ...(status !== undefined ? { status } : {}),
+    },
+  };
 }
 
 async function writeUserConfig(homeDir: string, config: unknown, profileId = "default"): Promise<void> {

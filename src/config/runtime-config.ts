@@ -629,6 +629,15 @@ export type ModelFallbackSetupInput = {
   fallbacks: ModelFallbackConfig[];
 };
 
+export type AuxiliaryModelRouteSetupInput = {
+  task: AuxiliaryModelTask;
+  provider: ProviderId;
+  id: string;
+  baseUrl?: string;
+  apiKeyEnv?: string;
+  contextWindowTokens?: number;
+};
+
 export type SkillSetupInput = {
   autonomy?: SkillAutonomy;
 };
@@ -1788,6 +1797,45 @@ export async function setupModelFallbackConfig(options: {
   };
 }
 
+export async function setupAuxiliaryModelConfig(options: {
+  workspaceRoot: string;
+  homeDir?: string;
+  profileId?: string;
+  input: AuxiliaryModelRouteSetupInput;
+}): Promise<{
+  path: string;
+  config: EstaCodaConfig;
+}> {
+  validateAuxiliaryModelRouteSetupInput(options.input);
+  const targetPath = resolveConfigMutationPath(options);
+  const existing = await readConfig(targetPath);
+  const mergedAuxiliaryModels: AuxiliaryModelConfig = {
+    ...(existing.config.auxiliaryModels ?? {}),
+    [options.input.task]: {
+      provider: options.input.provider,
+      id: options.input.id,
+      ...(options.input.baseUrl !== undefined ? { baseUrl: options.input.baseUrl } : {}),
+      ...(options.input.apiKeyEnv !== undefined ? { apiKeyEnv: options.input.apiKeyEnv } : {}),
+      ...(options.input.contextWindowTokens !== undefined ? { contextWindowTokens: options.input.contextWindowTokens } : {}),
+      enabled: true
+    }
+  };
+  const normalized = normalizeAuxiliaryModels(mergedAuxiliaryModels);
+  const config = patchConfig(existing.config, {
+    auxiliaryModels: {
+      ...(existing.config.auxiliaryModels ?? {}),
+      [options.input.task]: normalized[options.input.task]
+    }
+  });
+
+  await saveRuntimeConfig(targetPath, config);
+
+  return {
+    path: targetPath,
+    config
+  };
+}
+
 export async function removeModelFallbackConfig(options: {
   workspaceRoot: string;
   homeDir?: string;
@@ -2458,6 +2506,17 @@ function validateModelFallbackSetupInput(input: ModelFallbackSetupInput): void {
     if (fb.apiKeyEnv !== undefined) {
       validateOptionalEnvName(fb.apiKeyEnv, "fallback apiKeyEnv");
     }
+  }
+}
+
+function validateAuxiliaryModelRouteSetupInput(input: AuxiliaryModelRouteSetupInput): void {
+  requireNonEmpty(input.task, "auxiliary task");
+  requireNonEmpty(input.provider, "auxiliary provider");
+  requireNonEmpty(input.id, "auxiliary model id");
+  validateOptionalUrl(input.baseUrl, "auxiliary baseUrl");
+  validateOptionalEnvName(input.apiKeyEnv, "auxiliary apiKeyEnv");
+  if (input.contextWindowTokens !== undefined && (!Number.isInteger(input.contextWindowTokens) || input.contextWindowTokens <= 0)) {
+    throw new Error("Expected auxiliary contextWindowTokens to be a positive integer");
   }
 }
 

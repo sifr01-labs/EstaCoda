@@ -558,6 +558,42 @@ describe("ModelSelectionCatalog provider listing", () => {
     expect(anthropic!.configured).toBe(false);
   }));
 
+  it("counts merged unique model IDs from configured, snapshot, fallback-known, and manual routes", withFixture(async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      config: {
+        model: {
+          provider: "openai" as ProviderId,
+          id: "manual-primary",
+          fallbacks: [
+            { provider: "openai" as ProviderId, id: "manual-fallback" },
+            { provider: "openai" as ProviderId, id: "gpt-4o" },
+          ],
+        },
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-4o"]
+          }
+        }
+      }
+    }));
+
+    const providers = await catalog.listProviders();
+    const openai = providers.find((p) => p.id === "openai");
+    expect(openai).toBeDefined();
+    expect(openai!.configured).toBe(true);
+    expect(openai!.modelsCount).toBe(7);
+  }));
+
+  it("counts multiple fallback-known models for fallback-only providers", withFixture(async (fixturePath, cachePath) => {
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath));
+
+    const providers = await catalog.listProviders();
+    const kimi = providers.find((p) => p.id === "kimi");
+    expect(kimi).toBeDefined();
+    expect(kimi!.modelsCount).toBe(2);
+  }));
+
   it("infers provider uxKind correctly", withFixture(async (fixturePath, cachePath) => {
     const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
       config: {

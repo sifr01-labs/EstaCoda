@@ -289,7 +289,7 @@ function untrustedConfiguredDecision(state: SetupEntryState): SetupRouteDecision
       action("trust-workspace", "Trust workspace", "Grant explicit trust for this workspace before local file or terminal work.", true),
       ...configuredActions(),
     ],
-    warnings: [...new Set(["Workspace is not trusted.", ...state.warnings])],
+    warnings: [...new Set(state.warnings)],
     blockers: state.blockers,
     readOnly: true,
     setupEditorPlanSession: createSetupEditorPlanSession(state),

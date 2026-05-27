@@ -242,14 +242,80 @@ describe("buildSetupEditorPlan", () => {
       independentlyReviewable: true,
       capabilities: ["channels", "voice", "vision", "browser"],
     });
-    expect(capabilities.actions[0]?.patch?.fields).toEqual(["channels", "voice", "vision", "browser"]);
+    expect(capabilities.actions.map((action) => action.id)).toEqual([
+      "configure-channels",
+      "configure-voice",
+      "configure-image-generation",
+      "configure-browser",
+    ]);
+    expect(capabilities.actions.map((action) => action.patch?.fields)).toEqual([
+      ["channels"],
+      ["voice"],
+      ["vision"],
+      ["browser"],
+    ]);
+    expect(capabilities.actions.some((action) => action.id === "review-optional-capabilities")).toBe(false);
   });
 
-  it("does not reintroduce backupForMain or future fallback placeholders", () => {
+  it("keeps split optional capability action ordering stable", () => {
+    const plan = buildSetupEditorPlan(state("configured-ready"));
+
+    expect(plan.actions.map((action) => action.id)).toEqual([
+      "edit-primary-model-route",
+      "edit-fallback-model-route",
+      "edit-auxiliary-model-route",
+      "edit-security-mode",
+      "edit-workflow-learning",
+      "configure-channels",
+      "configure-voice",
+      "configure-image-generation",
+      "configure-browser",
+      "run-readonly-verification",
+      "cancel-setup-editor",
+    ]);
+  });
+
+  it("hides the redundant credential-reference editor action from normal menus", () => {
+    const plan = buildSetupEditorPlan(state("configured-ready"));
+    const credentials = section(plan, "credentials");
+
+    expect(credentials.actions).toEqual([]);
+    expect(plan.actions.some((action) => action.id === "edit-primary-credential-reference")).toBe(false);
+    expect(plan.actions.some((action) => action.id === "store-provider-credential-reference")).toBe(false);
+  });
+
+  it("exposes fallback route editing as a scoped reviewed model route action", () => {
+    const plan = buildSetupEditorPlan(state("configured-ready"));
+    const fallback = plan.actions.find((action) => action.id === "edit-fallback-model-route");
+
+    expect(fallback).toEqual(expect.objectContaining({
+      sectionId: "model-route",
+      effect: "draft-config-patch",
+      patch: expect.objectContaining({
+        fields: ["model.fallbacks"],
+        preserveUnrelatedConfig: true,
+      }),
+    }));
+  });
+
+  it("exposes auxiliary route editing as a scoped reviewed model route action", () => {
+    const plan = buildSetupEditorPlan(state("configured-ready"));
+    const auxiliary = plan.actions.find((action) => action.id === "edit-auxiliary-model-route");
+
+    expect(auxiliary).toEqual(expect.objectContaining({
+      sectionId: "model-route",
+      effect: "draft-config-patch",
+      patch: expect.objectContaining({
+        fields: ["auxiliaryModels.*"],
+        preserveUnrelatedConfig: true,
+      }),
+    }));
+  });
+
+  it("does not reintroduce backupForMain placeholders", () => {
     const plan = buildSetupEditorPlan(state("configured-ready"));
 
     expect(JSON.stringify(plan)).not.toContain("backupForMain");
-    expect(JSON.stringify(plan)).not.toContain("model.fallbacks");
   });
 
   it("keeps the setup editor plan free of terminal rendering fields", () => {

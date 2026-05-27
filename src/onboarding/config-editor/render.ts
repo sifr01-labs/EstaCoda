@@ -1,6 +1,6 @@
 import type { SetupEditorPlanSession, SetupRouteAction, SetupRouteActionId, SetupRouteDecision } from "../setup-router.js";
 import type { SetupEditorActionDraft, SetupEditorActionId } from "../setup-editor-actions.js";
-import { setupCopyText } from "../setup-prompts.js";
+import { formatSetupCopy, setupCopyText, type SetupPromptValue } from "../setup-prompts.js";
 
 export type ConfigEditorRenderedAction = {
   readonly id: SetupRouteActionId | SetupEditorActionId;
@@ -16,11 +16,15 @@ const PR6_EDITOR_ACTION_ORDER: readonly SetupEditorActionId[] = [
   "repair-primary-provider",
   "edit-primary-model-route",
   "repair-missing-credential",
-  "edit-primary-credential-reference",
+  "edit-fallback-model-route",
+  "edit-auxiliary-model-route",
+  "configure-channels",
+  "configure-voice",
+  "configure-image-generation",
+  "configure-browser",
   "repair-workspace-trust",
   "edit-security-mode",
   "edit-workflow-learning",
-  "review-optional-capabilities",
 ];
 
 export function renderConfigEditor(input: {
@@ -116,7 +120,8 @@ export function renderConfigEditorDiagnostics(decision: SetupRouteDecision): str
 
 export function configEditorActions(
   decision: SetupRouteDecision,
-  session: SetupEditorPlanSession
+  session: SetupEditorPlanSession,
+  copyValues: Record<string, SetupPromptValue> = {}
 ): readonly ConfigEditorRenderedAction[] {
   const routeActions = new Map(
     decision.actions
@@ -138,7 +143,7 @@ export function configEditorActions(
   const guidedActions = PR6_EDITOR_ACTION_ORDER
     .map((id) => editorActions.get(id))
     .filter((action): action is SetupEditorActionDraft => action !== undefined)
-    .map((action) => renderEditorAction(action));
+    .map((action) => renderEditorAction(action, copyValues));
 
   return [...guidedActions, ...readOnlyActions];
 }
@@ -160,10 +165,13 @@ function renderRouteAction(action: SetupRouteAction): ConfigEditorRenderedAction
   };
 }
 
-function renderEditorAction(action: SetupEditorActionDraft): ConfigEditorRenderedAction {
+function renderEditorAction(
+  action: SetupEditorActionDraft,
+  copyValues: Record<string, SetupPromptValue>
+): ConfigEditorRenderedAction {
   return {
     id: action.id,
-    label: setupCopyText("en", action.copyKey),
+    label: formatSetupCopy("en", action.copyKey, copyValues),
     description: editorActionDescription(action),
     readOnly: action.readOnly,
     source: "editor",
@@ -210,16 +218,20 @@ function editorActionDescription(action: SetupEditorActionDraft): string {
       return setupCopyText("en", "setupEditor.actions.editSecurityMode.description");
     case "edit-workflow-learning":
       return setupCopyText("en", "setupEditor.actions.editWorkflowLearning.description");
-    case "review-optional-capabilities":
-      return setupCopyText("en", "setupEditor.actions.reviewOptionalCapabilities.description");
+    case "configure-channels":
+      return setupCopyText("en", "setupEditor.actions.configureChannels.description");
+    case "configure-voice":
+      return setupCopyText("en", "setupEditor.actions.configureVoice.description");
+    case "configure-image-generation":
+      return setupCopyText("en", "setupEditor.actions.configureImageGeneration.description");
+    case "configure-browser":
+      return setupCopyText("en", "setupEditor.actions.configureBrowser.description");
     case "repair-primary-provider":
       return setupCopyText("en", "setupEditor.actions.repairPrimaryProvider.description");
     case "edit-primary-model-route":
       return setupCopyText("en", "setupEditor.actions.editPrimaryModelRoute.description");
     case "repair-missing-credential":
       return setupCopyText("en", "setupEditor.actions.repairMissingCredential.description");
-    case "edit-primary-credential-reference":
-      return setupCopyText("en", "setupEditor.actions.editPrimaryCredentialReference.description");
     default:
       return setupCopyText("en", action.copyKey);
   }

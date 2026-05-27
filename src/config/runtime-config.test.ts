@@ -8,7 +8,8 @@ import {
   normalizeExternalMemoryConfig,
   normalizeSessionCompressionConfig,
   redactExternalMemoryConfig,
-  saveRuntimeConfig
+  saveRuntimeConfig,
+  setupAuxiliaryModelConfig
 } from "./runtime-config.js";
 import { resolveProfileStateHome } from "./profile-home.js";
 
@@ -296,6 +297,80 @@ describe("loadRuntimeConfig auxiliaryModels", () => {
     const saved = JSON.parse(await readFile(configPath, "utf8"));
     expect(saved.auxiliaryProviders).toBeUndefined();
     expect(saved.auxiliaryModels).toBeUndefined();
+  });
+
+  it("setupAuxiliaryModelConfig writes normalized auxiliary config", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "local", id: "hermes-local" },
+      auxiliaryModels: {
+        assessor: { provider: "auto", enabled: true }
+      }
+    }));
+
+    const result = await setupAuxiliaryModelConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace,
+      input: {
+        task: "compression",
+        provider: "openai",
+        id: "gpt-5.5",
+        apiKeyEnv: "OPENAI_API_KEY",
+        contextWindowTokens: 128_000
+      }
+    });
+    const saved = JSON.parse(await readFile(configPath, "utf8"));
+
+    expect(result.path).toBe(configPath);
+    expect(saved.auxiliaryModels.compression).toEqual({
+      provider: "openai",
+      id: "gpt-5.5",
+      apiKeyEnv: "OPENAI_API_KEY",
+      contextWindowTokens: 128_000,
+      enabled: true
+    });
+    expect(saved.model).toEqual({ provider: "local", id: "hermes-local" });
+  });
+
+  it("setupAuxiliaryModelConfig preserves unrelated auxiliary slots", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+    await writeFile(configPath, JSON.stringify({
+      model: {
+        provider: "local",
+        id: "hermes-local",
+        fallbacks: [{ provider: "openai", id: "gpt-5.5" }]
+      },
+      auxiliaryModels: {
+        assessor: { provider: "local", id: "assessor-local", enabled: true },
+        session_search: { provider: "local", id: "search-local", enabled: true }
+      },
+      browser: { backend: "local-cdp" }
+    }));
+
+    await setupAuxiliaryModelConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace,
+      input: {
+        task: "memory_compaction",
+        provider: "openai",
+        id: "gpt-5.5"
+      }
+    });
+    const saved = JSON.parse(await readFile(configPath, "utf8"));
+
+    expect(saved.auxiliaryModels.assessor).toEqual({ provider: "local", id: "assessor-local", enabled: true });
+    expect(saved.auxiliaryModels.session_search).toEqual({ provider: "local", id: "search-local", enabled: true });
+    expect(saved.auxiliaryModels.memory_compaction).toEqual({ provider: "openai", id: "gpt-5.5", enabled: true });
+    expect(saved.model).toEqual({
+      provider: "local",
+      id: "hermes-local",
+      fallbacks: [{ provider: "openai", id: "gpt-5.5" }]
+    });
+    expect(saved.browser).toEqual({ backend: "local-cdp" });
   });
 });
 

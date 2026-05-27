@@ -1,8 +1,8 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { mkdtemp, readFile, rm, stat, access } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, access } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { writeEnvSecret, loadDotEnvSecrets, defaultEnvPath } from "./env-secret-store.js";
+import { writeEnvSecret, loadDotEnvSecrets, defaultEnvPath, hasSavedEnvSecret } from "./env-secret-store.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-env-secret-test-"));
@@ -140,6 +140,79 @@ describe("loadDotEnvSecrets", () => {
     expect(loaded).toContain("REAL_KEY");
     expect(process.env.REAL_KEY).toBe("real");
     delete process.env.REAL_KEY;
+  });
+});
+
+describe("hasSavedEnvSecret", () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await makeTempDir();
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+    delete process.env.SAVED_ONLY_KEY;
+    delete process.env.SHELL_ONLY_KEY;
+  });
+
+  it("detects a present saved env var without exposing its value", async () => {
+    await writeEnvSecret({ homeDir: tempDir, key: "SAVED_ONLY_KEY", value: "saved-secret-value" });
+
+    const result = await hasSavedEnvSecret({ homeDir: tempDir, key: "SAVED_ONLY_KEY" });
+
+    expect(result).toEqual({
+      path: join(tempDir, ".estacoda", ".env"),
+      exists: true,
+    });
+    expect(JSON.stringify(result)).not.toContain("saved-secret-value");
+  });
+
+  it("detects a missing saved env var", async () => {
+    await writeEnvSecret({ homeDir: tempDir, key: "SAVED_ONLY_KEY", value: "saved-secret-value" });
+
+    await expect(hasSavedEnvSecret({ homeDir: tempDir, key: "MISSING_KEY" })).resolves.toEqual({
+      path: join(tempDir, ".estacoda", ".env"),
+      exists: false,
+    });
+  });
+
+  it("detects empty and whitespace-only saved env vars as absent", async () => {
+    const path = join(tempDir, ".estacoda", ".env");
+    await mkdir(join(tempDir, ".estacoda"), { recursive: true });
+    await writeFile(path, [
+      "EMPTY_KEY=",
+      "QUOTED_EMPTY_KEY=\"\"",
+      "SPACE_KEY=\"   \"",
+      "",
+    ].join("\n"), "utf8");
+
+    await expect(hasSavedEnvSecret({ homeDir: tempDir, key: "EMPTY_KEY" })).resolves.toEqual({ path, exists: false });
+    await expect(hasSavedEnvSecret({ homeDir: tempDir, key: "QUOTED_EMPTY_KEY" })).resolves.toEqual({ path, exists: false });
+    await expect(hasSavedEnvSecret({ homeDir: tempDir, key: "SPACE_KEY" })).resolves.toEqual({ path, exists: false });
+  });
+
+  it("does not expose the secret value for direct file entries", async () => {
+    const path = join(tempDir, ".estacoda", ".env");
+    await mkdir(join(tempDir, ".estacoda"), { recursive: true });
+    await writeFile(path, "SAVED_ONLY_KEY=plain-secret-value\n", "utf8");
+
+    const result = await hasSavedEnvSecret({ homeDir: tempDir, key: "SAVED_ONLY_KEY" });
+
+    expect(result.exists).toBe(true);
+    expect(JSON.stringify(result)).not.toContain("plain-secret-value");
+  });
+
+  it("does not treat shell env as a saved profile .env secret", async () => {
+    process.env.SHELL_ONLY_KEY = "shell-secret-value";
+
+    const result = await hasSavedEnvSecret({ homeDir: tempDir, key: "SHELL_ONLY_KEY" });
+
+    expect(result).toEqual({
+      path: join(tempDir, ".estacoda", ".env"),
+      exists: false,
+    });
+    expect(JSON.stringify(result)).not.toContain("shell-secret-value");
   });
 });
 
