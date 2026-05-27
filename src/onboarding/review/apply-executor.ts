@@ -19,6 +19,7 @@ import {
   setupSecurityConfig,
   setupSkillConfig,
   setupModelFallbackConfig,
+  setupAuxiliaryModelConfig,
   setupTelegramConfig,
   setupUiConfig,
   setupVoiceConfig,
@@ -38,7 +39,7 @@ import {
   storeProviderCredential,
 } from "../../config/provider-config-mutations.js";
 import type { BrowserBackendKind } from "../../contracts/browser.js";
-import type { ProviderId } from "../../contracts/provider.js";
+import type { AuxiliaryModelTask, ProviderId } from "../../contracts/provider.js";
 import type { SecurityApprovalMode } from "../../contracts/security.js";
 import { WorkspaceTrustStore } from "../../security/workspace-trust-store.js";
 import type { SkillAutonomy } from "../../skills/skill-learning.js";
@@ -167,6 +168,9 @@ async function applyConfigPatch(
     case "setupDrafts.fallbackModelRoute.replace.summary":
       await applyFallbackRoute(operation, context, options);
       return;
+    case "setupDrafts.auxiliaryModelRoute.summary":
+      await applyAuxiliaryModelRoute(operation, context, options);
+      return;
     case "setupDrafts.credentialReference.summary":
     case "setupModules.credentials.draft":
       await applyCredentialReference(operation, context, options);
@@ -284,6 +288,34 @@ async function applyFallbackRoute(
     ...target,
     input: {
       fallbacks: nextFallbacks,
+    },
+  });
+}
+
+async function applyAuxiliaryModelRoute(
+  operation: SetupApplyOperation,
+  context: PlanContext,
+  options: ReviewedSetupApplyExecutorOptions
+): Promise<void> {
+  const auxiliaryTask = auxiliaryTaskValue(operation.review.values.auxiliaryTask);
+  const provider = providerIdValue(operation.review.values.provider ?? operation.review.values.providerId);
+  const model = stringValue(operation.review.values.model ?? operation.review.values.modelId);
+  if (auxiliaryTask === undefined || provider === undefined || model === undefined) {
+    throw new Error("Auxiliary route apply requires auxiliary task, provider, and model review values.");
+  }
+  const baseUrl = stringValue(operation.review.values.baseUrl);
+  const apiKeyEnv = stringValue(operation.review.values.apiKeyEnv) ?? context.credentialEnv;
+  const contextWindowTokens = numberValue(operation.review.values.contextWindowTokens);
+  const target = configApplyTarget(operation, options);
+  await setupAuxiliaryModelConfig({
+    ...target,
+    input: {
+      task: auxiliaryTask,
+      provider,
+      id: model,
+      ...(baseUrl !== undefined ? { baseUrl } : {}),
+      ...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
+      ...(contextWindowTokens !== undefined ? { contextWindowTokens } : {}),
     },
   });
 }
@@ -531,6 +563,16 @@ function numberValue(value: unknown): number | undefined {
 
 function providerIdValue(value: unknown): ProviderId | undefined {
   return stringValue(value) as ProviderId | undefined;
+}
+
+function auxiliaryTaskValue(value: unknown): AuxiliaryModelTask | undefined {
+  return value === "assessor" ||
+    value === "compression" ||
+    value === "session_search" ||
+    value === "memory_compaction" ||
+    value === "profile_context"
+    ? value
+    : undefined;
 }
 
 function securityModeValue(value: unknown): SecurityApprovalMode | undefined {

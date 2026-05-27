@@ -263,6 +263,7 @@ describe("buildSetupEditorPlan", () => {
     expect(plan.actions.map((action) => action.id)).toEqual([
       "edit-primary-model-route",
       "edit-fallback-model-route",
+      "edit-auxiliary-model-route",
       "edit-primary-credential-reference",
       "edit-security-mode",
       "edit-workflow-learning",
@@ -284,6 +285,20 @@ describe("buildSetupEditorPlan", () => {
       effect: "draft-config-patch",
       patch: expect.objectContaining({
         fields: ["model.fallbacks"],
+        preserveUnrelatedConfig: true,
+      }),
+    }));
+  });
+
+  it("exposes auxiliary route editing as a scoped reviewed model route action", () => {
+    const plan = buildSetupEditorPlan(state("configured-ready"));
+    const auxiliary = plan.actions.find((action) => action.id === "edit-auxiliary-model-route");
+
+    expect(auxiliary).toEqual(expect.objectContaining({
+      sectionId: "model-route",
+      effect: "draft-config-patch",
+      patch: expect.objectContaining({
+        fields: ["auxiliaryModels.*"],
         preserveUnrelatedConfig: true,
       }),
     }));

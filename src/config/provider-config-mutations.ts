@@ -1,12 +1,15 @@
 import type {
+  AuxiliaryModelTask,
   ProviderId,
   ProviderApiMode,
   ProviderAuthMethod
 } from "../contracts/provider.js";
 import {
+  normalizeAuxiliaryModels,
   normalizeModelFallbacks,
   readConfig,
   saveRuntimeConfig,
+  type AuxiliaryModelRouteSetupInput,
   type EstaCodaConfig,
   type ModelFallbackConfig
 } from "./runtime-config.js";
@@ -46,6 +49,15 @@ export type SetPreferredModelRouteInput = {
 };
 
 export type AddFallbackRouteInput = {
+  provider: ProviderId;
+  id: string;
+  baseUrl?: string;
+  apiKeyEnv?: string;
+  contextWindowTokens?: number;
+};
+
+export type SetAuxiliaryModelRouteInput = {
+  task: AuxiliaryModelTask;
   provider: ProviderId;
   id: string;
   baseUrl?: string;
@@ -207,6 +219,34 @@ export function applyAddFallbackRoute(
   };
 }
 
+/**
+ * Set one auxiliary model route without touching primary or fallback routes.
+ */
+export function applySetAuxiliaryModelRoute(
+  existing: EstaCodaConfig,
+  input: SetAuxiliaryModelRouteInput
+): EstaCodaConfig {
+  const mergedAuxiliaryModels = {
+    ...(existing.auxiliaryModels ?? {}),
+    [input.task]: {
+      provider: input.provider,
+      id: input.id,
+      ...(input.baseUrl !== undefined ? { baseUrl: input.baseUrl } : {}),
+      ...(input.apiKeyEnv !== undefined ? { apiKeyEnv: input.apiKeyEnv } : {}),
+      ...(input.contextWindowTokens !== undefined ? { contextWindowTokens: input.contextWindowTokens } : {}),
+      enabled: true
+    }
+  };
+  const normalized = normalizeAuxiliaryModels(mergedAuxiliaryModels);
+
+  return patchConfig(existing, {
+    auxiliaryModels: {
+      ...(existing.auxiliaryModels ?? {}),
+      [input.task]: normalized[input.task]
+    }
+  });
+}
+
 // ── Load/save wrappers ───────────────────────────────────────────────────────
 
 export type MutationOptions = {
@@ -270,6 +310,16 @@ export async function addFallbackRoute(
   return { path: targetPath, config };
 }
 
+export async function setAuxiliaryModelRoute(
+  options: MutationOptions & { input: AuxiliaryModelRouteSetupInput }
+): Promise<{ path: string; config: EstaCodaConfig }> {
+  const targetPath = await resolveTargetPath(options);
+  const existing = await readConfig(targetPath);
+  const config = applySetAuxiliaryModelRoute(existing.config, options.input);
+  await saveRuntimeConfig(targetPath, config);
+  return { path: targetPath, config };
+}
+
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
 function patchConfig(existing: EstaCodaConfig, patch: EstaCodaConfig): EstaCodaConfig {
@@ -287,6 +337,12 @@ function patchConfig(existing: EstaCodaConfig, patch: EstaCodaConfig): EstaCodaC
       : {
         ...(existing.providers ?? {}),
         ...patch.providers
+      },
+    auxiliaryModels: patch.auxiliaryModels === undefined
+      ? existing.auxiliaryModels
+      : {
+        ...(existing.auxiliaryModels ?? {}),
+        ...patch.auxiliaryModels
       }
   };
 }

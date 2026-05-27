@@ -63,6 +63,7 @@ describe("runConfigEditor", () => {
     expect(output.join("")).toContain("EstaCoda guided setup editor");
     expect(output.join("")).toContain("Available actions:");
     expect(output.join("")).toContain("edit-fallback-model-route");
+    expect(output.join("")).toContain("edit-auxiliary-model-route");
     expect(output.join("")).toContain("edit-security-mode");
     expect(output.join("")).toContain("edit-workflow-learning");
     expect(output.join("")).toContain("configure-channels");
@@ -684,6 +685,114 @@ describe("runConfigEditor", () => {
       expect.objectContaining({ provider: "anthropic", id: "claude-sonnet-4-5" }),
     ]);
     expect(config.providers?.kimi).toBeDefined();
+  });
+
+  it("selects an auxiliary task and applies a reviewed auxiliary route", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const prompt = trackingPrompt({
+      values: ["compression", "OpenAI", "gpt-5.5", true],
+      secret: "sk-auxiliary-compression-secret",
+    });
+    const taskOptions: Array<{ labels: string[]; values: unknown[] }> = [];
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      if (input.title === "Choose auxiliary route.") {
+        taskOptions.push({
+          labels: input.options.map((option) => option.label),
+          values: input.options.map((option) => option.value),
+        });
+      }
+      return baseSelect(input);
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "edit-auxiliary-model-route",
+      flowEngine: flowEngine({ credentialAction: "collect", envVarName: "PR8_AUX_KEY" }),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      model?: { provider?: string; id?: string; fallbacks?: unknown };
+      auxiliaryModels?: {
+        compression?: { provider?: string; id?: string; apiKeyEnv?: string; enabled?: boolean };
+      };
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("edit-auxiliary-model-route");
+    expect(taskOptions).toEqual([{
+      labels: ["Assessor", "Compression", "Session search", "Memory compaction", "Profile context"],
+      values: ["assessor", "compression", "session_search", "memory_compaction", "profile_context"],
+    }]);
+    expect(result.reviewManifest?.sections["provider-model-network"][0]?.review).toEqual(expect.objectContaining({
+      summaryKey: "setupDrafts.auxiliaryModelRoute.summary",
+      values: expect.objectContaining({
+        auxiliaryTask: "compression",
+        provider: "openai",
+        model: "gpt-5.5",
+        apiKeyEnv: "PR8_AUX_KEY",
+      }),
+    }));
+    expect(result.reviewManifest?.sections["files-to-write-update"][0]?.target).toEqual(expect.objectContaining({
+      kind: "config-scope",
+      scope: ["auxiliaryModels.*"],
+    }));
+    expect(result.reviewManifest?.sections["secret-refs-to-store"][0]?.sourceDraftIds).toEqual([
+      "setup-editor.credentials.store-provider-credential-reference",
+    ]);
+    expect(config.model).toEqual({ provider: "local", id: "hermes-local" });
+    expect(config.auxiliaryModels?.compression).toEqual(expect.objectContaining({
+      provider: "openai",
+      id: "gpt-5.5",
+      apiKeyEnv: "PR8_AUX_KEY",
+      enabled: true,
+    }));
+    expect(rawConfig).not.toContain("sk-auxiliary-compression-secret");
+    expect(JSON.stringify(result)).not.toContain("sk-auxiliary-compression-secret");
+    expect(JSON.stringify(result.reviewManifest)).not.toContain("sk-auxiliary-compression-secret");
+  });
+
+  it("does not change assessor route when auxiliary review is cancelled", async () => {
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig(),
+      auxiliaryModels: {
+        assessor: { provider: "auto", enabled: true },
+      },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["assessor", "OpenAI", "gpt-5.5", false],
+        secret: "sk-assessor-cancelled-secret",
+      }),
+      defaultActionId: "edit-auxiliary-model-route",
+      flowEngine: flowEngine({ credentialAction: "collect", envVarName: "PR8_ASSESSOR_KEY" }),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      auxiliaryModels?: { assessor?: { provider?: string; id?: string; enabled?: boolean } };
+    };
+
+    expect(result.completed).toBe(false);
+    expect(result.applyPlanningResult?.kind).toBe("cancelled");
+    expect(config.auxiliaryModels?.assessor).toEqual({ provider: "auto", enabled: true });
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).rejects.toThrow();
+    expect(rawConfig).not.toContain("sk-assessor-cancelled-secret");
+    expect(JSON.stringify(result)).not.toContain("sk-assessor-cancelled-secret");
   });
 
   it("replaces a saved profile credential only after reviewed approval when the user enters a new key", async () => {

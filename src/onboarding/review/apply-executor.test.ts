@@ -135,6 +135,49 @@ function fallbackPlan(values: ReviewValues): SetupApplyPlan {
   };
 }
 
+function auxiliaryPlan(values: ReviewValues): SetupApplyPlan {
+  return {
+    kind: "setup-save-apply-plan",
+    manifestSourceBundleIds: ["test-auxiliary-bundle"],
+    operations: [{
+      id: "test-auxiliary-route",
+      kind: "config-patch",
+      sourceLineIds: ["test-auxiliary-line"],
+      target: {
+        kind: "config-scope",
+        scope: ["auxiliaryModels.*"],
+        path: "/tmp/test/config.json",
+        preserveUnrelatedConfig: true,
+      },
+      review: {
+        copyKey: "setupDrafts.review",
+        summaryKey: "setupDrafts.auxiliaryModelRoute.summary",
+        redacted: true,
+        values,
+      },
+      preserveUnrelatedConfig: true,
+      writesConfig: false,
+      writesTrustStore: false,
+      dryRunOnly: true,
+    }],
+    eligibility: {
+      eligible: true,
+      blockers: [],
+      repairIntents: [],
+    },
+    preservesUnrelatedConfig: true,
+    writesConfig: false,
+    writesTrustStore: false,
+    dryRunOnly: true,
+    metadata: {
+      operationCount: 1,
+      configOperationCount: 1,
+      trustOperationCount: 0,
+      credentialOperationCount: 0,
+    },
+  };
+}
+
 describe("reviewed setup apply executor", () => {
   let tempDir: string;
   let workspaceRoot: string;
@@ -338,6 +381,126 @@ describe("reviewed setup apply executor", () => {
     expect(config.model?.fallbacks).toEqual([
       expect.objectContaining({ provider: "openai", id: "gpt-5.5" }),
     ]);
+  });
+
+  it("applies a reviewed auxiliary route while preserving primary and fallback config", async () => {
+    await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
+    await writeFile(profileConfigPath(tempDir), JSON.stringify({
+      model: {
+        provider: "local",
+        id: "hermes-local",
+        fallbacks: [{ provider: "openai", id: "gpt-5.5" }],
+      },
+      auxiliaryModels: {
+        assessor: { provider: "local", id: "assessor-local", enabled: true },
+        session_search: { provider: "local", id: "search-local", enabled: true },
+      },
+      security: { approvalMode: "strict" },
+    }, null, 2), "utf8");
+    const plan = auxiliaryPlan({
+      auxiliaryTask: "compression",
+      provider: "openai",
+      model: "gpt-5.5",
+      baseUrl: "https://api.openai.com/v1",
+      apiKeyEnv: "OPENAI_API_KEY",
+      contextWindowTokens: 128000,
+    });
+
+    const result = await applyReviewedSetupPlanOperations(plan, {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      model?: { provider?: string; id?: string; fallbacks?: Array<{ provider?: string; id?: string }> };
+      auxiliaryModels?: Record<string, { provider?: string; id?: string; apiKeyEnv?: string; enabled?: boolean }>;
+      security?: { approvalMode?: string };
+    };
+
+    expect(result.ok).toBe(true);
+    expect(config.model).toEqual({
+      provider: "local",
+      id: "hermes-local",
+      fallbacks: [expect.objectContaining({ provider: "openai", id: "gpt-5.5" })],
+    });
+    expect(config.auxiliaryModels?.compression).toEqual(expect.objectContaining({
+      provider: "openai",
+      id: "gpt-5.5",
+      apiKeyEnv: "OPENAI_API_KEY",
+      enabled: true,
+    }));
+    expect(config.auxiliaryModels?.assessor).toEqual({ provider: "local", id: "assessor-local", enabled: true });
+    expect(config.auxiliaryModels?.session_search).toEqual({ provider: "local", id: "search-local", enabled: true });
+    expect(config.security).toEqual({ approvalMode: "strict" });
+  });
+
+  it("updates assessor only through the reviewed auxiliary operation", async () => {
+    await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
+    await writeFile(profileConfigPath(tempDir), JSON.stringify({
+      model: {
+        provider: "local",
+        id: "hermes-local",
+        fallbacks: [{ provider: "openai", id: "gpt-5.5" }],
+      },
+      auxiliaryModels: {
+        assessor: { provider: "auto", enabled: true },
+        compression: { provider: "local", id: "summary-local", enabled: true },
+      },
+    }, null, 2), "utf8");
+    const plan = auxiliaryPlan({
+      auxiliaryTask: "assessor",
+      provider: "openai",
+      model: "gpt-5.5",
+      apiKeyEnv: "OPENAI_API_KEY",
+    });
+
+    const result = await applyReviewedSetupPlanOperations(plan, {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      model?: { fallbacks?: Array<{ provider?: string; id?: string }> };
+      auxiliaryModels?: Record<string, { provider?: string; id?: string; apiKeyEnv?: string; enabled?: boolean }>;
+    };
+
+    expect(result.ok).toBe(true);
+    expect(config.auxiliaryModels?.assessor).toEqual(expect.objectContaining({
+      provider: "openai",
+      id: "gpt-5.5",
+      apiKeyEnv: "OPENAI_API_KEY",
+      enabled: true,
+    }));
+    expect(config.auxiliaryModels?.compression).toEqual({ provider: "local", id: "summary-local", enabled: true });
+    expect(config.model?.fallbacks).toEqual([
+      expect.objectContaining({ provider: "openai", id: "gpt-5.5" }),
+    ]);
+  });
+
+  it("rejects unsupported auxiliary task review values safely", async () => {
+    await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
+    await writeFile(profileConfigPath(tempDir), JSON.stringify({
+      model: { provider: "local", id: "hermes-local" },
+      auxiliaryModels: {
+        assessor: { provider: "local", id: "assessor-local", enabled: true },
+      },
+    }, null, 2), "utf8");
+    const plan = auxiliaryPlan({
+      auxiliaryTask: "vision",
+      provider: "openai",
+      model: "gpt-5.5",
+    });
+
+    const result = await applyReviewedSetupPlanOperations(plan, {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      auxiliaryModels?: Record<string, unknown>;
+    };
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("Auxiliary route apply requires");
+    expect(config.auxiliaryModels?.assessor).toEqual({ provider: "local", id: "assessor-local", enabled: true });
+    expect(config.auxiliaryModels?.vision).toBeUndefined();
   });
 
   it("applies reviewed browser capability without enabling auto-launch", async () => {

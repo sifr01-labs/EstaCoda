@@ -142,6 +142,18 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.prompt.fallbackRoute.edit.description",
   "setupEditor.prompt.fallbackRoute.add",
   "setupEditor.prompt.fallbackRoute.add.description",
+  "setupEditor.prompt.auxiliaryRoute.title",
+  "setupEditor.prompt.auxiliaryRoute.body",
+  "setupEditor.prompt.auxiliaryRoute.assessor",
+  "setupEditor.prompt.auxiliaryRoute.assessor.description",
+  "setupEditor.prompt.auxiliaryRoute.compression",
+  "setupEditor.prompt.auxiliaryRoute.compression.description",
+  "setupEditor.prompt.auxiliaryRoute.sessionSearch",
+  "setupEditor.prompt.auxiliaryRoute.sessionSearch.description",
+  "setupEditor.prompt.auxiliaryRoute.memoryCompaction",
+  "setupEditor.prompt.auxiliaryRoute.memoryCompaction.description",
+  "setupEditor.prompt.auxiliaryRoute.profileContext",
+  "setupEditor.prompt.auxiliaryRoute.profileContext.description",
   "setupEditor.prompt.optionalCapabilityAction.leaveUnchanged",
   "setupEditor.prompt.optionalCapabilityAction.skip",
   "setupEditor.prompt.optionalCapabilityAction.enableConfigure",
@@ -393,12 +405,24 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "setupDrafts.credentialReference.summary")).toBe("Store credential env-var reference {envVar} only.");
     expect(rawSetupCopy("en", "setupEditor.prompt.fallbackRoute.add")).toBe("Add another fallback route");
     expect(rawSetupCopy("en", "setupEditor.prompt.fallbackRoute.edit")).toBe("Edit fallback {index}: {providerId}/{modelId}");
+    expect(rawSetupCopy("en", "setupEditor.prompt.auxiliaryRoute.title")).toBe("Choose auxiliary route.");
+    expect(rawSetupCopy("en", "setupEditor.prompt.auxiliaryRoute.assessor")).toBe("Assessor");
+    expect(rawSetupCopy("en", "setupEditor.prompt.auxiliaryRoute.compression")).toBe("Compression");
+    expect(rawSetupCopy("en", "setupEditor.prompt.auxiliaryRoute.sessionSearch")).toBe("Session search");
+    expect(rawSetupCopy("en", "setupEditor.prompt.auxiliaryRoute.memoryCompaction")).toBe("Memory compaction");
+    expect(rawSetupCopy("en", "setupEditor.prompt.auxiliaryRoute.profileContext")).toBe("Profile context");
+    expect(rawSetupCopy("en", "setupEditor.prompt.auxiliaryRoute.assessor.description")).toContain("approval assessment");
 
     expect(rawSetupCopy("ar", "setupEditor.actions.editAuxiliaryModelRoute.description")).toContain("assessor");
     expect(rawSetupCopy("ar", "setupEditor.actions.editAuxiliaryModelRoute.description")).toContain("compression");
     expect(rawSetupCopy("ar", "setupEditor.actions.editAuxiliaryModelRoute.description")).toContain("session_search");
     expect(rawSetupCopy("ar", "setupEditor.actions.editAuxiliaryModelRoute.description")).toContain("memory_compaction");
     expect(rawSetupCopy("ar", "setupEditor.actions.editAuxiliaryModelRoute.description")).toContain("profile_context");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.auxiliaryRoute.assessor.description")).toContain("assessor");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.auxiliaryRoute.compression.description")).toContain("compression");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.auxiliaryRoute.sessionSearch.description")).toContain("session_search");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.auxiliaryRoute.memoryCompaction.description")).toContain("memory_compaction");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.auxiliaryRoute.profileContext.description")).toContain("profile_context");
   });
 
   it("contains Phase 2 credential reuse prompt copy", () => {

@@ -238,6 +238,15 @@ function modelRouteSection(state: SetupEntryState, mode: SetupEditorPlanMode): S
         requiresExplicitApply: true,
         patch: scopedPatch(["model.fallbacks"]),
       }),
+      setupEditorAction({
+        id: "edit-auxiliary-model-route",
+        copyKey: "setupEditor.actions.editAuxiliaryModelRoute",
+        sectionId: "model-route",
+        effect: "draft-config-patch",
+        readOnly: false,
+        requiresExplicitApply: true,
+        patch: scopedPatch(["auxiliaryModels.*"]),
+      }),
     ],
   });
 }

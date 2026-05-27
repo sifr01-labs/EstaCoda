@@ -57,6 +57,7 @@ import {
 import {
   promptConfigEditorAction,
   promptConfigEditorReviewApproval,
+  promptAuxiliaryModelTask,
   promptBrowserCapability,
   promptCredentialReuseChoice,
   promptFallbackRouteAction,
@@ -284,6 +285,8 @@ async function handleAction(
       return handleProviderRouteAction(options, initialDecision, session, action);
     case "edit-fallback-model-route":
       return handleFallbackRouteAction(options, initialDecision, session, action);
+    case "edit-auxiliary-model-route":
+      return handleAuxiliaryRouteAction(options, initialDecision, session, action);
     case "edit-primary-credential-reference":
     case "repair-missing-credential":
       return handleCredentialAction(options, initialDecision, session, action);
@@ -502,6 +505,28 @@ async function handleFallbackRouteAction(
             previousModel: choice.fallback.id,
           }
         : {}),
+    },
+  }, resolved.selection);
+}
+
+async function handleAuxiliaryRouteAction(
+  options: ConfigEditorRunnerOptions,
+  initialDecision: SetupRouteDecision,
+  session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
+  action: ConfigEditorRenderedAction
+): Promise<ConfigEditorRunnerResult> {
+  const editorAction = requireEditorAction(action);
+  const auxiliaryTask = await promptAuxiliaryModelTask(options.prompt);
+  const resolved = await selectResolvedProviderRoute(options, initialDecision);
+  if (resolved.kind === "diagnostic") {
+    return diagnosticResult(options, initialDecision, action.id, resolved.output);
+  }
+
+  return reviewAndApplyResolvedRoute(options, initialDecision, session, {
+    ...editorAction,
+    reviewValues: {
+      ...editorAction.reviewValues,
+      auxiliaryTask,
     },
   }, resolved.selection);
 }

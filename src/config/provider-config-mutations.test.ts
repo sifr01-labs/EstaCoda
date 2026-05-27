@@ -8,11 +8,13 @@ import {
   applyRegisterProviderModel,
   applySetPreferredModelRoute,
   applyAddFallbackRoute,
+  applySetAuxiliaryModelRoute,
   registerProviderConfig,
   storeProviderCredential,
   registerProviderModel,
   setPreferredModelRoute,
-  addFallbackRoute
+  addFallbackRoute,
+  setAuxiliaryModelRoute
 } from "./provider-config-mutations.js";
 import { setupProviderConfig, loadRuntimeConfig, type EstaCodaConfig } from "./runtime-config.js";
 import { computeRuntimeFingerprint } from "../runtime/runtime-fingerprint.js";
@@ -317,6 +319,74 @@ describe("applyAddFallbackRoute", () => {
   });
 });
 
+describe("applySetAuxiliaryModelRoute", () => {
+  it("sets one auxiliary task route", () => {
+    const existing: EstaCodaConfig = {};
+    const result = applySetAuxiliaryModelRoute(existing, {
+      task: "compression",
+      provider: "openai",
+      id: "gpt-5.5",
+      baseUrl: "https://api.openai.com/v1",
+      apiKeyEnv: "OPENAI_API_KEY",
+      contextWindowTokens: 128_000
+    });
+
+    expect(result.auxiliaryModels?.compression).toEqual({
+      provider: "openai",
+      id: "gpt-5.5",
+      baseUrl: "https://api.openai.com/v1",
+      apiKeyEnv: "OPENAI_API_KEY",
+      contextWindowTokens: 128_000,
+      enabled: true
+    });
+  });
+
+  it("preserves other auxiliary tasks", () => {
+    const existing: EstaCodaConfig = {
+      auxiliaryModels: {
+        assessor: { provider: "auto", enabled: true },
+        session_search: { provider: "local", id: "search-local", enabled: true }
+      }
+    };
+    const result = applySetAuxiliaryModelRoute(existing, {
+      task: "compression",
+      provider: "openai",
+      id: "gpt-5.5"
+    });
+
+    expect(result.auxiliaryModels?.compression).toEqual({ provider: "openai", id: "gpt-5.5", enabled: true });
+    expect(result.auxiliaryModels?.assessor).toEqual({ provider: "auto", enabled: true });
+    expect(result.auxiliaryModels?.session_search).toEqual({ provider: "local", id: "search-local", enabled: true });
+  });
+
+  it("preserves primary route, fallback routes, and unrelated config", () => {
+    const existing: EstaCodaConfig = {
+      model: {
+        provider: "local",
+        id: "hermes-local",
+        fallbacks: [{ provider: "openai", id: "gpt-5.5" }]
+      },
+      security: {
+        approvalMode: "strict"
+      },
+      imageGen: {
+        provider: "fal",
+        model: "fal-ai/imagen4/preview"
+      }
+    };
+    const result = applySetAuxiliaryModelRoute(existing, {
+      task: "assessor",
+      provider: "openai",
+      id: "gpt-5.5"
+    });
+
+    expect(result.model).toEqual(existing.model);
+    expect(result.security).toEqual(existing.security);
+    expect(result.imageGen).toEqual(existing.imageGen);
+    expect(result.auxiliaryModels?.assessor).toEqual({ provider: "openai", id: "gpt-5.5", enabled: true });
+  });
+});
+
 describe("load/save wrappers", () => {
   let tmpDir: string;
 
@@ -362,6 +432,31 @@ describe("load/save wrappers", () => {
     const config = await readUserConfig(tmpDir);
     expect(config.model!.fallbacks).toHaveLength(1);
     expect(config.model!.fallbacks![0].provider).toBe("deepseek");
+  });
+
+  it("setAuxiliaryModelRoute writes one normalized auxiliary task", async () => {
+    await writeUserConfig(tmpDir, {
+      model: {
+        provider: "local",
+        id: "hermes-local",
+        fallbacks: [{ provider: "openai", id: "gpt-5.5" }]
+      },
+      auxiliaryModels: {
+        assessor: { provider: "local", id: "assessor-local", enabled: true }
+      }
+    });
+    await setAuxiliaryModelRoute({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      input: { task: "compression", provider: "openai", id: "gpt-5.5" }
+    });
+    const config = await readUserConfig(tmpDir);
+
+    expect(config.model!.fallbacks).toEqual([
+      expect.objectContaining({ provider: "openai", id: "gpt-5.5" })
+    ]);
+    expect(config.auxiliaryModels?.assessor).toEqual({ provider: "local", id: "assessor-local", enabled: true });
+    expect(config.auxiliaryModels?.compression).toEqual({ provider: "openai", id: "gpt-5.5", enabled: true });
   });
 
   it("load/save preserves missing base URL as missing for custom providers", async () => {

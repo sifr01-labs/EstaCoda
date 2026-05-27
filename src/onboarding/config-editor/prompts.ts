@@ -1,6 +1,7 @@
 import type { Prompt } from "../../cli/readline-prompt.js";
 import { promptForApiKeyInput } from "../../cli/secret-prompt.js";
 import type { BrowserBackendKind } from "../../contracts/browser.js";
+import type { AuxiliaryModelTask } from "../../contracts/provider.js";
 import type { SecurityApprovalMode } from "../../contracts/security.js";
 import type { ImageGenerationProvider, SttProvider, TtsProvider } from "../../config/runtime-config.js";
 import type { ModelFallbackConfig } from "../../config/runtime-config.js";
@@ -33,6 +34,16 @@ export type FallbackRouteChoice =
       readonly fallbackIndex: number;
       readonly fallback: ModelFallbackConfig;
     };
+
+export const SETUP_EDITOR_AUXILIARY_TASKS = [
+  "assessor",
+  "compression",
+  "session_search",
+  "memory_compaction",
+  "profile_context",
+] as const satisfies readonly AuxiliaryModelTask[];
+
+export type SetupEditorAuxiliaryTask = typeof SETUP_EDITOR_AUXILIARY_TASKS[number];
 
 export type ConfigEditorPostApplyActionId =
   | "launch"
@@ -293,6 +304,48 @@ export async function promptFallbackRouteAction(
     message: `${setupCopyText("en", "setupEditor.prompt.fallbackRoute.body")}\n`,
     choices: [...editChoices, addChoice],
     defaultValue: editChoices[0]?.value ?? addChoice.value,
+  });
+}
+
+export async function promptAuxiliaryModelTask(
+  prompt: Prompt
+): Promise<SetupEditorAuxiliaryTask> {
+  return promptSetupChoice(prompt, {
+    title: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.title"),
+    message: `${setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.body")}\n`,
+    choices: [
+      {
+        id: "assessor",
+        label: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.assessor"),
+        description: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.assessor.description"),
+        value: "assessor" as const,
+      },
+      {
+        id: "compression",
+        label: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.compression"),
+        description: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.compression.description"),
+        value: "compression" as const,
+      },
+      {
+        id: "session_search",
+        label: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.sessionSearch"),
+        description: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.sessionSearch.description"),
+        value: "session_search" as const,
+      },
+      {
+        id: "memory_compaction",
+        label: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.memoryCompaction"),
+        description: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.memoryCompaction.description"),
+        value: "memory_compaction" as const,
+      },
+      {
+        id: "profile_context",
+        label: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.profileContext"),
+        description: setupCopyText("en", "setupEditor.prompt.auxiliaryRoute.profileContext.description"),
+        value: "profile_context" as const,
+      },
+    ],
+    defaultValue: "assessor" as const,
   });
 }
 
