@@ -71,6 +71,8 @@ Fallback routes are configured under `model.fallbacks`. They are ordered. EstaCo
 
 Fallbacks preserve `apiKeyEnv`, `baseUrl`, `apiMode`, and `authMethod` metadata when available. Fallback evaluation is logged. If all fallbacks fail, the turn reports the error and stops.
 
+Fallback routes are manageable through both the guided setup editor (`edit-fallback-model-route`) and `estacoda model fallback ...`.
+
 ---
 
 ## Model Switching During a Session
@@ -130,9 +132,11 @@ Config example:
 }
 ```
 
-The `assessor` route drives smart approval classification. It requires a working provider executor and a runnable model. If the assessor route is missing, malformed, or fails, the system falls back to manual approval. There is no `auxiliaryModels.approval` route.
+The `assessor` route drives smart approval classification. It requires a working provider executor and a runnable model. If the assessor route is missing, malformed, or fails, the system falls back to manual approval. There is no `auxiliaryModels.approval` route. The assessor route is configurable through the guided setup editor (`edit-auxiliary-model-route`) in addition to direct config edits.
 
 Missing auxiliary routes fail closed or fall back as documented by the calling subsystem. They do not crash the session.
+
+Auxiliary route management is available through the guided setup editor (`edit-auxiliary-model-route`).
 
 ---
 

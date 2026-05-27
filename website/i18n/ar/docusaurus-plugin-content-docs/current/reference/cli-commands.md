@@ -39,7 +39,7 @@ estacoda setup --provider <p> --model <m> --api-key-env <env>
 
 **حدود الملف التعريف:** يستخدم الملف التعريف النشط، أو الملف المختار عبر `--profile`.
 
-**السلوك:** يوجّه عبر قرار إعداد محدد بناءً على الحالة الحالية (first-run، configured-ready، configured-degraded، partial-provider، missing-credential، broken-config، untrusted-workspace، state-not-writable). إلغاء المراجعة لا ينتج تعديلاً. البيانات السرية الخام لا تُعرض أبداً في بيانات المراجعة.
+**السلوك:** يوجّه عبر قرار إعداد محدد بناءً على الحالة الحالية (first-run، configured-ready، configured-degraded، partial-provider، missing-credential، broken-config، untrusted-workspace، state-not-writable). حالة configured-ready توفر تعديل المسار الرئيسي للنموذج، وتعديل مسار الاحتياطي، وتعديل المسار الإضافي، وإعداد القدرات الاختيارية، وتعديل وضع الأمان، وتعديل تعلم سير العمل، والتحقق للقراءة فقط، والتشغيل بعد التحقق، والخروج. إلغاء المراجعة لا ينتج تعديلاً. البيانات السرية الخام لا تُعرض أبداً في بيانات المراجعة.
 
 **أنماط الفشل:**
 - الإعداد التالف يحظر التعديلات العادية حتى يصبح التحليل آمناً.
@@ -110,7 +110,7 @@ estacoda model setup codex              # إعداد OAuth device-code لـ Code
 **السلوك:**
 - `estacoda model` الصافي يفتح منتقي تفاعلي في وضع الإعداد عند توفر TTY؛ وإلا يطبع نظرة عامة.
 - `model setup codex` يُ authenticate عبر تدفق رمز الجهاز OAuth، ويخزن الرموز في `~/.estacoda/auth.json`، ويُهيئ مسار `codex/o3`.
-- `model fallback` تدير سلسلة الاحتياطي المرتبة. `estacoda model set` مرفوض كأمر مهمل.
+- `model fallback` تدير سلسلة الاحتياطي المرتبة وهي متوفرة أيضًا عبر محرر الإعداد الموجه (`edit-fallback-model-route`). `estacoda model set` مرفوض كأمر مهمل.
 
 **أنماط الفشل:**
 - إدخال نموذج غير معروف يرجع رمز خروج 1 مع اقتراحات للمرشحين.

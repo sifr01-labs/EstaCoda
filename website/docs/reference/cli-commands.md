@@ -39,7 +39,7 @@ estacoda setup --provider <p> --model <m> --api-key-env <env>
 
 **Profile boundary:** Uses the active profile, or the profile selected via `--profile`.
 
-**Behavior:** Routes through a deterministic setup decision based on current state (first-run, configured-ready, configured-degraded, partial-provider, missing-credential, broken-config, untrusted-workspace, state-not-writable). Cancelling review produces no mutation. Raw secrets are never displayed in review metadata.
+**Behavior:** Routes through a deterministic setup decision based on current state (first-run, configured-ready, configured-degraded, partial-provider, missing-credential, broken-config, untrusted-workspace, state-not-writable). Configured-ready state offers primary model route edit, fallback route edit, auxiliary route edit, optional capability configuration, security mode edit, workflow learning edit, read-only verification, launch after verification, and exit. Cancelling review produces no mutation. Raw secrets are never displayed in review metadata.
 
 **Failure modes:**
 - Broken config blocks normal edits until parsing is safe.
@@ -110,7 +110,7 @@ estacoda model setup codex              # OAuth device-code setup for Codex
 **Behavior:**
 - Bare `estacoda model` opens an interactive picker in setup mode when a TTY is available; otherwise prints an overview.
 - `model setup codex` authenticates through OAuth device code flow, stores tokens in `~/.estacoda/auth.json`, and configures the `codex/o3` route.
-- `model fallback` manages the ordered fallback chain. `estacoda model set` is deprecated and rejected.
+- `model fallback` manages the ordered fallback chain and is also accessible through the guided setup editor (`edit-fallback-model-route`). `estacoda model set` is deprecated and rejected.
 
 **Failure modes:**
 - Unknown model input returns exit code 1 with candidate suggestions.
