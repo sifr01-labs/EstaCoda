@@ -43,8 +43,8 @@ sidebar_position: 12
 
 | المحرك | ملاحظات |
 |--------|---------|
-| `command` | يشغل قالب أمر مُعد؛ يفضل نص النصي من stdout. |
-| `faster-whisper` | عامل Python JSONL طويل الأجل مملوك من قبل بيئة التشغيل. |
+| `faster-whisper` | الافتراضي عند `stt.provider: "local"` في v0.1.0. يستخدم بيئة Python المُدارة من EstaCoda ما لم تُضبط Python مخصصة. |
+| `command` | اختيار صريح عبر `stt.local.engine: "command"`. يشغل قالب أمر مُعد؛ يفضل نص transcript من stdout. |
 
 ### مؤجل أو تجريبي
 
@@ -241,7 +241,16 @@ Auto-TTS يتخطى:
 
 ## faster-whisper محلي STT
 
-يعمل faster-whisper المحلي عبر عامل Python JSONL طويل الأجل مملوك من قبل بيئة التشغيل لكل runtime/profile.
+يعمل faster-whisper المحلي عبر عامل Python JSONL طويل الأجل مملوك من قبل بيئة التشغيل لكل runtime/profile. في v0.1.0، يعني `stt.provider: "local"` مسار faster-whisper المُدار افتراضياً.
+
+المسارات المُدارة:
+
+```text
+~/.estacoda/python-env
+~/.estacoda/cache/huggingface
+```
+
+`~/.estacoda/python-env` هي بيئة venv المُدارة. `~/.estacoda/cache/huggingface` هي ذاكرة تخزين النموذج الافتراضية. ذاكرة النموذج لا تعيش داخل venv.
 
 شكل الإعدادات:
 
@@ -251,21 +260,79 @@ Auto-TTS يتخطى:
     "provider": "local",
     "local": {
       "engine": "faster-whisper",
+      "model": "base",
+      "pythonBinary": "/optional/custom/python",
       "fasterWhisper": {
         "enabled": true,
         "model": "base",
         "device": "auto",
         "computeType": "default",
-        "hfHome": "/path/to/profile-local/hf-cache",
-        "allowModelDownload": false,
+        "hfHome": "/optional/model-cache",
+        "allowModelDownload": true,
         "gatewayAllowModelDownload": false,
-        "queueDepth": 3,
+        "queueDepth": 1,
         "timeoutMs": 300000
       }
     }
   }
 }
 ```
+
+وضع الأوامر:
+
+```json
+{
+  "stt": {
+    "provider": "local",
+    "local": {
+      "engine": "command",
+      "command": "/path/to/transcriber {input}"
+    }
+  }
+}
+```
+
+`stt.local.engine: "command"` هو الحاكم ولا يستخدم faster-whisper المُدار.
+
+### إعداد البيئة المُدارة
+
+```bash
+estacoda voice setup --stt-provider local
+```
+
+عند عدم توفير Python مخصصة، يقوم الإعداد بما يلي:
+
+1. يفحص `~/.estacoda/python-env`
+2. ينشئه أو يصلحه عندما يكون مفقوداً أو تالفاً
+3. يثبّت بالضبط `faster-whisper==1.2.1`
+4. يتحقق من `import faster_whisper`
+5. يكتب إعداد STT المحلي فقط بعد نجاح الإعداد
+
+يعرض الإعداد رسائل تقدم منتقاة، وليس سجلات pip الخام. لا تثبت EstaCoda حزم مستخدم عشوائية في البيئة المُدارة. يُستخدم Python النظام فقط لإنشاء venv؛ لا تُعدّل EstaCoda Python النظام أو conda envs أو project venvs أو poetry envs أو uv envs. تُحصر ذاكرة pip المؤقتة أثناء الإعداد المُدار تحت حالة EstaCoda.
+
+Python مخصص:
+
+```bash
+estacoda voice setup --stt-provider local --python-binary /path/to/python
+```
+
+هذا يتخطى فحص/إنشاء البيئة المُدارة ويخزن المسار المخصص. المشغل يملك بيئة Python هذه، بما في ذلك تثبيت `faster-whisper`.
+
+إعداد TTS فقط يبقى TTS فقط:
+
+```bash
+estacoda voice setup --tts-provider openai
+```
+
+لا يغيّر إعداد STT ولا يلمس بيئة Python المُدارة.
+
+### حدود مرحلة التشغيل
+
+- يحل runtime مسار `stt.local.pythonBinary` المُعد أولاً، وإلا يستخدم مسار venv المُدار تحت `~/.estacoda/python-env`.
+- يضبط runtime قيم `HF_HOME` / `TRANSFORMERS_CACHE` دائمة تحت `~/.estacoda/cache/huggingface`.
+- لا ينشئ runtime البيئة المُدارة، ولا يثبّت الحزم، ولا يصلح Python في Phase 1.
+- تثبيت الحزم عند أول استخدام عبر البوابة ليس جزءاً من Phase 1.
+- قد يضيف أمر `voice doctor` لاحقاً فحص/إصلاح هذا المسار. وقد يُسمح لاحقاً بتثبيت أول استخدام عبر البوابة لـ STT المحلي المضبوط صراحةً، لكنه غير مُنفذ هنا.
 
 سلوك تشغيلي:
 
@@ -276,17 +343,11 @@ Auto-TTS يتخطى:
 - خروج العامل غير المتوقع يُعيد التشغيل مرة واحدة، ثم يُعلّم faster-whisper غير متاح للـ runtime الحالي.
 - `runtime.dispose()` يُوقف العامل.
 - المهلة الافتراضية 300 ثانية.
-- عمق الطابور الافتراضي 3 للاستخدام المُطلق عبر البوابة و 1 للاستخدام التفاعلي CLI/محلي ما لم يُعدل.
+- عمق الطابور الافتراضي 1 ما لم يُعدل.
 - تجاوز الطابور يفشل سريعًا.
 - ترفض البوابة تنزيلات النموذج الأولى افتراضيًا قبل بدء العامل. اضبط `gatewayAllowModelDownload: true` فقط عندما يكون هذا التأثير الجانبي مقبولًا.
-- يُمرَّر `hfHome` إلى العامل عند ضبطه. وإلا يحترم العامل متغيرات بيئة `HF_HOME` أو `TRANSFORMERS_CACHE` الموجودة ويستخدم سياسة التخزين المؤقت المحلية للملف الشخصي حيث تتحكم EstaCoda في المسار.
-
-ثبّت تبعيات Python في بيئة المشغل. الحزمة Node لا تثبّت Python faster-whisper نيابة عنك.
-
-```bash
-python3 -m venv ~/.estacoda/venvs/faster-whisper
-~/.estacoda/venvs/faster-whisper/bin/pip install faster-whisper
-```
+- يسمح faster-whisper المحلي غير المُطلق من البوابة بتنزيل النماذج افتراضياً.
+- يُمرَّر `hfHome` إلى العامل عند ضبطه. وإلا تضبط EstaCoda `HF_HOME` افتراضياً إلى `~/.estacoda/cache/huggingface` وتحافظ على `TRANSFORMERS_CACHE` الموجود إذا ضبطته بيئة العملية مسبقاً.
 
 ملف العامل مُعبَّأ في:
 
@@ -301,7 +362,7 @@ workers/faster-whisper/faster-whisper-worker.py
 | `missing key` | متغير البيئة المُشار إليه من المزود غير موجود. | أضفه إلى `.env` الخاص بالملف الشخصي أو بيئة الخدمة. |
 | `disabled` | `tts.enabled` أو `stt.enabled` هي `false`. | فعّل المزود في إعدادات الملف الشخصي إذا كان مقصودًا. |
 | `not implemented` | مزود مؤجل مُحدد (مثل Mistral). | اختر مزودًا منفذًا. |
-| `python package missing` | فشل استيراد faster-whisper. | ثبّت تبعيات Python في بيئة التشغيل. |
+| `python package missing` | فشل استيراد faster-whisper. | شغّل `estacoda voice setup --stt-provider local`، أو أصلح `~/.estacoda/python-env`. عند استخدام `--python-binary`، أصلح بيئة Python المملوكة للمشغل. |
 | `download required` | النموذج المحدد غير مخبأ والتنزيلات ممنوعة. | خزّن النموذج مسبقًا أو اسمح بالتنزيل صراحةً. |
 | `queue full` | تجاوز عمق طابور faster-whisper. | انتظر، أو زِد عمق الطابور، أو قلل الطلبات المتزامنة. |
 | `timeout` | تجاوز طلب STT المهلة. | تحقق من أداء النموذج/الجهاز وإعدادات المهلة. |
@@ -317,7 +378,10 @@ workers/faster-whisper/faster-whisper-worker.py
 | `~/.estacoda/profiles/<profile-id>/audio-cache/` | ذاكرة التخزين المؤقت للصوت ومساحة عمل إخراج الأمر المحلي. |
 | `~/.estacoda/profiles/<profile-id>/channel-media/` | مرفقات القنوات التي تم تنزيلها عبر البوابة. |
 | `~/.estacoda/profiles/<profile-id>/gateway/logs/voice-stt-preprocess.jsonl` | أحداث تدقيق معالجة STT المسبقة في البوابة. |
-| `hfHome` أو متغير بيئة Hugging Face cache | ذاكرة تخزين مؤقت لنماذج faster-whisper. |
+| `~/.estacoda/python-env` | بيئة Python الافتراضية المُدارة لـ STT المحلي عبر faster-whisper. |
+| `~/.estacoda/cache/huggingface` | ذاكرة تخزين النموذج الافتراضية لـ faster-whisper / Hugging Face. منفصلة عن venv. |
+| `~/.estacoda/cache/pip` | ذاكرة pip المؤقتة أثناء تثبيت البيئة المُدارة. |
+| `hfHome` أو متغير بيئة Hugging Face cache | تجاوز اختياري لذاكرة نماذج faster-whisper. |
 
 لا تسجل أحداث التدقيق المسارات الخاصة الكاملة. تستخدم تجزئات مسارات مستقرة وبيانات وصفية آمنة للمرفقات.
 

@@ -21,10 +21,22 @@ sidebar_position: 7
 | `update-cache.json` | ذاكرة تخزين مؤقت لفحص التحديث (عامة، TTL 6 ساعات) | التحميل المسبق عند البدء، أمر التحديث |
 | `packs/registry.jsonl` | ذاكرة تخزين مؤقت للحزم العامة | عمليات الحزم |
 | `memory/shared/` | مقتطفات الذاكرة المشتركة العامة | عمليات الذاكرة |
+| `python-env/` | بيئة Python الافتراضية المُدارة لـ STT المحلي عبر faster-whisper | `estacoda voice setup --stt-provider local` |
+| `cache/huggingface/` | ذاكرة تخزين النموذج الافتراضية لـ faster-whisper / Hugging Face | تشغيل faster-whisper STT |
+| `cache/pip/` | ذاكرة pip المؤقتة المحصورة تحت حالة EstaCoda لإعداد STT المحلي المُدار | إعداد Python المُدار |
 | `logs/update.log` | سجل عملية التحديث (وضع البوابة وتحديثات managed-source) | أمر التحديث |
 | `.backups/<label>/` | نسخ احتياطية لحالة المستخدم قبل تعديل managed-source | `estacoda update` |
 
 لا يتم حذف الحالة العامة عند إزالة ملف شخصي. إذا أردت بداية نظيفة، احذف الجذر العام. قم بنسخ قاعدة بيانات الجلسات احتياطياً أولاً إذا كنت تهتم بالتاريخ.
+
+بيئة STT المحلية المُدارة وذاكرة النموذج منفصلتان عمداً:
+
+```text
+~/.estacoda/python-env
+~/.estacoda/cache/huggingface
+```
+
+ذاكرة النموذج لا تعيش داخل venv. حذف أحد المسارين لا يصلح الآخر؛ أعد تشغيل `estacoda voice setup --stt-provider local` لإعادة إنشاء بيئة Python المُدارة.
 
 ## الحالة المحلية للتثبيت
 

@@ -85,6 +85,47 @@ estacoda config show | grep -A 5 browser
 
 اضبط `browser.backend` على `local-cdp` في إعدادات الملف الشخصي. مزودو المتصفحات السحابية مسجلون لكن لا يمكنهم إنشاء جلسات مباشرة في v0.1.0.
 
+## فشل إعداد STT المحلي
+
+**العرض:** يفشل `estacoda voice setup --stt-provider local` أثناء إنشاء Python، أو تثبيت `faster-whisper==1.2.1`، أو التحقق من `import faster_whisper`.
+
+**السبب المحتمل:** Python النظام مفقود، أو `python -m venv` غير متاح، أو فشل تثبيت الحزمة، أو أن venv المُدار في `~/.estacoda/python-env` تالف.
+
+**الفحص:**
+
+```bash
+estacoda voice status
+ls -la ~/.estacoda/python-env
+ls -la ~/.estacoda/cache/huggingface
+```
+
+**الإصلاح:**
+
+```bash
+estacoda voice setup --stt-provider local
+# أو استخدم بيئة Python يملكها المشغل
+estacoda voice setup --stt-provider local --python-binary /path/to/python
+```
+
+الـ venv المُدار مخصص لـ `faster-whisper==1.2.1` المثبت بالإصدار فقط. لا تستخدمه لحزم عشوائية. إذا استخدمت `--python-binary`، تتخطى EstaCoda فحص/إنشاء البيئة المُدارة وتترك بيئة Python للمشغل.
+
+## تنزيل نموذج STT المحلي مرفوض في البوابة
+
+**العرض:** يبلغ نسخ الصوت في البوابة أن تنزيل نموذج faster-whisper غير مسموح.
+
+**السبب المحتمل:** يسمح faster-whisper المحلي بتنزيل النماذج للاستخدام المحلي العادي افتراضياً، لكن تنزيلات النموذج المُطلقة عبر البوابة معطلة افتراضياً.
+
+**الفحص:**
+
+```bash
+estacoda config show
+ls -la ~/.estacoda/cache/huggingface
+```
+
+**الإصلاح:**
+
+خزّن النموذج مسبقاً أثناء الإعداد/الاستخدام المحلي، أو اضبط `stt.local.fasterWhisper.gatewayAllowModelDownload: true` صراحةً فقط عندما تكون تنزيلات النماذج عبر البوابة مقبولة.
+
 ## قناة البوابة غير جاهزة
 
 **العرض:** `estacoda gateway diagnose` يبلغ عن تحذيرات لقناة ما.

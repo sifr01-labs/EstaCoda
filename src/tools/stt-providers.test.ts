@@ -8,6 +8,7 @@ import {
   checkSttProviderStatus,
   computeSttRiskClass,
   isGatewayFasterWhisperDownloadDenied,
+  isFasterWhisperConfig,
   transcribeSpeech
 } from "./stt-providers.js";
 
@@ -298,6 +299,27 @@ describe("STT risk classification", () => {
     enabled: true,
     local: { command: "printf transcript", normalizeWithFfmpeg: false }
   };
+
+  it("detects faster-whisper mode while command mode wins explicitly", () => {
+    expect(isFasterWhisperConfig({
+      provider: "local",
+      enabled: true,
+      local: { engine: "faster-whisper" }
+    })).toBe(true);
+    expect(isFasterWhisperConfig({
+      provider: "local",
+      enabled: true,
+      local: { fasterWhisper: { enabled: true } }
+    })).toBe(true);
+    expect(isFasterWhisperConfig({
+      provider: "local",
+      enabled: true,
+      local: {
+        engine: "command",
+        fasterWhisper: { enabled: true }
+      }
+    })).toBe(false);
+  });
 
   it("matches the Stage 2 risk-class matrix", () => {
     expect(computeSttRiskClass({ stt: localCommand, path: "/tmp/a.wav" })).toEqual({

@@ -203,6 +203,50 @@ TTS المستضاف المستقر: OpenAI، ElevenLabs، MiniMax، Gemini، xA
 
 STT المستضاف المستقر: OpenAI، Groq، xAI. STT المحلي يدعم `command` و `faster-whisper`. Mistral STT مؤجل.
 
+في v0.1.0، يعني `stt.provider: "local"` faster-whisper المُدار افتراضياً:
+
+```json
+{
+  "stt": {
+    "provider": "local",
+    "local": {
+      "engine": "faster-whisper",
+      "model": "base",
+      "pythonBinary": "/optional/custom/python",
+      "fasterWhisper": {
+        "enabled": true,
+        "model": "base",
+        "device": "auto",
+        "computeType": "default",
+        "hfHome": "/optional/model-cache",
+        "allowModelDownload": true,
+        "gatewayAllowModelDownload": false,
+        "queueDepth": 1,
+        "timeoutMs": 300000
+      }
+    }
+  }
+}
+```
+
+اترك `pythonBinary` غير مضبوط لاستخدام المسار المُدار تحت `~/.estacoda/python-env`، أو اضبطه على Python يملكه المشغل عند استخدام `estacoda voice setup --stt-provider local --python-binary /path/to/python`. ذاكرة النموذج الافتراضية هي `~/.estacoda/cache/huggingface` وهي منفصلة عن venv.
+
+وضع الأوامر صريح:
+
+```json
+{
+  "stt": {
+    "provider": "local",
+    "local": {
+      "engine": "command",
+      "command": "/path/to/transcriber {input}"
+    }
+  }
+}
+```
+
+`engine: "command"` هو الحاكم ولا يستخدم faster-whisper المُدار.
+
 ### voice
 
 سلوك auto-TTS في البوابة.

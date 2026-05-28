@@ -198,6 +198,8 @@ export type SttConfig = {
     model?: string;
     command?: string;
     engine?: "command" | "faster-whisper";
+    pythonBinary?: string;
+    python_binary?: string;
     normalizeWithFfmpeg?: boolean;
     normalize_with_ffmpeg?: boolean;
     ffmpegPath?: string;
@@ -576,6 +578,7 @@ export type VoiceSetupInput = {
   sttCommand?: string;
   sttApiKeyEnv?: string;
   sttApiKey?: string;
+  pythonBinary?: string;
 };
 
 export type ImageGenerationSetupInput = {
@@ -1395,6 +1398,7 @@ function mergeImageGenerationConfig(left: EstaCodaConfig["imageGen"], right: Est
 function normalizeSttConfig(value: EstaCodaConfig["stt"]): LoadedRuntimeConfig["stt"] {
   const provider = isSttProvider(value?.provider) ? value.provider : "local";
   const fasterWhisper = value?.local?.fasterWhisper ?? value?.local?.faster_whisper;
+  const engine = value?.local?.engine ?? "faster-whisper";
   return {
     ...value,
     provider,
@@ -1402,16 +1406,17 @@ function normalizeSttConfig(value: EstaCodaConfig["stt"]): LoadedRuntimeConfig["
     local: {
       model: value?.local?.model ?? "base",
       command: value?.local?.command ?? process.env.HERMES_LOCAL_STT_COMMAND,
-      engine: value?.local?.engine ?? (fasterWhisper?.enabled === true ? "faster-whisper" : "command"),
+      engine,
+      pythonBinary: value?.local?.pythonBinary ?? value?.local?.python_binary,
       normalizeWithFfmpeg: value?.local?.normalizeWithFfmpeg ?? value?.local?.normalize_with_ffmpeg ?? true,
       ffmpegPath: value?.local?.ffmpegPath ?? value?.local?.ffmpeg_path ?? "ffmpeg",
       fasterWhisper: {
-        enabled: fasterWhisper?.enabled ?? false,
+        enabled: fasterWhisper?.enabled ?? engine === "faster-whisper",
         model: fasterWhisper?.model ?? "base",
         device: fasterWhisper?.device ?? "auto",
         computeType: fasterWhisper?.computeType ?? fasterWhisper?.compute_type ?? "default",
         hfHome: fasterWhisper?.hfHome ?? fasterWhisper?.hf_home,
-        allowModelDownload: fasterWhisper?.allowModelDownload ?? fasterWhisper?.allow_model_download ?? false,
+        allowModelDownload: fasterWhisper?.allowModelDownload ?? fasterWhisper?.allow_model_download ?? true,
         gatewayAllowModelDownload: fasterWhisper?.gatewayAllowModelDownload ?? fasterWhisper?.gateway_allow_model_download ?? false,
         queueDepth: normalizeOptionalPositiveInteger(fasterWhisper?.queueDepth ?? fasterWhisper?.queue_depth) ?? undefined,
         timeoutMs: normalizeOptionalPositiveInteger(fasterWhisper?.timeoutMs ?? fasterWhisper?.timeout_ms) ?? undefined,
@@ -2012,6 +2017,12 @@ export async function setupVoiceConfig(options: {
     sttProviderApiKeyEnv(previousStt, sttProvider) ??
     sttDefaultApiKeyEnv(sttProvider);
   const secretPaths: string[] = [];
+  const hasSttInput = options.input.sttProvider !== undefined ||
+    options.input.sttModel !== undefined ||
+    options.input.sttCommand !== undefined ||
+    options.input.sttApiKeyEnv !== undefined ||
+    options.input.sttApiKey !== undefined ||
+    options.input.pythonBinary !== undefined;
 
   if (options.input.ttsApiKey !== undefined && options.input.ttsApiKey.trim().length > 0 && ttsApiKeyEnv !== undefined) {
     const secret = await writeEnvSecret({
@@ -2034,15 +2045,20 @@ export async function setupVoiceConfig(options: {
     secretPaths.push(secret.path);
   }
 
-  const sttConfigPatch = sttProvider === "local"
+  const sttModel = options.input.sttModel ?? previousStt.local?.model ?? "base";
+  const sttConfigPatch: EstaCodaConfig["stt"] | undefined = !hasSttInput
+    ? undefined
+    : sttProvider === "local"
     ? {
         provider: sttProvider,
         local: {
-          model: options.input.sttModel ?? "base",
+          model: sttModel,
           engine: "faster-whisper" as const,
+          pythonBinary: options.input.pythonBinary,
           fasterWhisper: {
             enabled: true,
-            model: options.input.sttModel ?? "base"
+            model: sttModel,
+            allowModelDownload: true
           }
         }
       }

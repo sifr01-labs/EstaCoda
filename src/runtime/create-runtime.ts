@@ -10,7 +10,7 @@ import { createBrowserBackendFromConfig, type CdpFetchLike, type CdpWebSocketFac
 import { createSupervisedLocalCdpBrowserBackend } from "../browser/supervised-local-cdp-backend.js";
 import { BrowserSessionLifecycle, registerEmergencyCleanup } from "../browser/session-lifecycle.js";
 import type { ResolvedTokens, TokenBranding } from "../contracts/ui-tokens.js";
-import { resolveProfileStateHome } from "../config/profile-home.js";
+import { resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
 import { ContextReferenceExpander } from "../context/context-reference-expander.js";
 import { ProjectContextLoader, renderProjectContext } from "../context/project-context-loader.js";
 import { CronStore } from "../cron/cron-store.js";
@@ -67,6 +67,8 @@ import type { ImageGenerationFetchLike } from "../tools/image-generation-tools.j
 import { defaultImageGenerationConfig, verifyImageGeneration, type ImageGenerationVerification } from "../tools/image-generation-verify.js";
 import { transcribeAudioFile, type VoiceFetchLike } from "../tools/voice-tools.js";
 import { FasterWhisperWorkerClient } from "../tools/stt-local-whisper.js";
+import { isFasterWhisperConfig } from "../tools/stt-providers.js";
+import { resolvePythonBinary } from "../python-env/manager.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
 import { ToolRegistry } from "../tools/tool-registry.js";
 import { toolRegistrationPlan, type ToolRegistrationPhase } from "../tools/index.js";
@@ -394,6 +396,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const memoryStore = new MemoryStore();
   const artifactStore = new ArtifactStore();
   const profileId = options.profileId ?? "default";
+  const globalPaths = resolveGlobalStateHome({ homeDir: options.homeDir });
   const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId });
   const sessionId = options.sessionId ?? "scaffold";
   const sessionRuntimeContext = createSessionRuntimeContext(sessionId);
@@ -458,14 +461,21 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const channelMediaRoot = profilePaths.channelMediaPath;
   const audioCacheRoot = profilePaths.audioCachePath;
   const imageCacheRoot = profilePaths.imageCachePath;
-  const localWhisper = options.localWhisper ?? new FasterWhisperWorkerClient({
-    queueDepth: options.stt?.local?.fasterWhisper?.queueDepth ?? 1,
-    timeoutMs: options.stt?.local?.fasterWhisper?.timeoutMs ?? 300_000,
-    env: {
-      HF_HOME: options.stt?.local?.fasterWhisper?.hfHome ?? process.env.HF_HOME ?? join(profilePaths.tempPath, "huggingface"),
-      TRANSFORMERS_CACHE: process.env.TRANSFORMERS_CACHE ?? options.stt?.local?.fasterWhisper?.hfHome ?? join(profilePaths.tempPath, "huggingface")
-    }
-  });
+  const persistentHfHome = options.stt?.local?.fasterWhisper?.hfHome ?? join(globalPaths.stateRoot, "cache", "huggingface");
+  const localWhisper = options.localWhisper ?? (options.stt !== undefined && isFasterWhisperConfig(options.stt)
+    ? new FasterWhisperWorkerClient({
+        pythonBinary: resolvePythonBinary({
+          stateRoot: globalPaths.stateRoot,
+          configOverride: options.stt.local?.pythonBinary
+        }),
+        queueDepth: options.stt.local?.fasterWhisper?.queueDepth ?? 1,
+        timeoutMs: options.stt.local?.fasterWhisper?.timeoutMs ?? 300_000,
+        env: {
+          HF_HOME: persistentHfHome,
+          TRANSFORMERS_CACHE: process.env.TRANSFORMERS_CACHE ?? persistentHfHome
+        }
+      })
+    : undefined);
   let activeTrustedWorkspace = false;
   let disposed = false;
   const existingSession = await sessionDb.getSession(sessionId);
@@ -1244,7 +1254,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       unregisterBrowserEmergencyCleanup?.();
       browserSessionLifecycle?.stop();
       await browserSessionLifecycle?.cleanupAll();
-      await localWhisper.dispose();
+      await localWhisper?.dispose();
       await Promise.all(loadedMcpServers.map((server) => server.stop().catch(() => undefined)));
       const closeSessionDb = closeSessionDbOnDispose
         ? (sessionDb as { close?: () => void | Promise<void> }).close

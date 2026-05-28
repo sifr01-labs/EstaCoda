@@ -51,7 +51,7 @@ Implemented voice providers and security boundaries are documented in [Voice](./
 
 - Hosted TTS: OpenAI, ElevenLabs, MiniMax, Gemini, and xAI.
 - Hosted STT: OpenAI, Groq, and xAI.
-- Local STT: command and faster-whisper.
+- Local STT: managed faster-whisper by default for `stt.provider: "local"`; command mode only with explicit `stt.local.engine: "command"`.
 - Deferred: local TTS providers and Mistral TTS/STT.
 
 Voice credentials are direct environment-variable lookups only. Tool errors use stable provider/reason metadata and bounded sanitized snippets.

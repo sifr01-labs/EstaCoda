@@ -55,6 +55,8 @@ Codex authentication stores tokens in `~/.estacoda/auth.json` after OAuth device
 
 Voice credentials are direct environment-variable references only. There are no voice credential pools, gateway brokers, managed fallbacks, or non-env sources.
 
+Managed local STT defaults to `~/.estacoda/cache/huggingface` for faster-whisper model cache when `hfHome` is not configured. If `TRANSFORMERS_CACHE` is already set in the process environment, runtime preserves it. The managed Python venv remains separate at `~/.estacoda/python-env`.
+
 ## Image generation keys
 
 | Variable | Provider |

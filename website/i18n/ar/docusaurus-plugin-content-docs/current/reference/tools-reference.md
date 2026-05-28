@@ -106,12 +106,12 @@ sidebar_position: 6
 | `voice.speak` | `external-side-effect` | قد يشغّل صوتًا أو يكتب ملفات |
 | `voice.transcribe` | `safe` | لا شيء |
 
-**التوفر:** TTS المستضاف يتطلب مفتاح مزود. STT المحلي يتطلب `faster-whisper` أو أمرًا مُهيّأً. جاهزية الصوت تُعرض من خلال أسطح حالة CLI، وليس من خلال `isAvailable()`.
+**التوفر:** TTS المستضاف يتطلب مفتاح مزود. STT المحلي يستخدم `faster-whisper` المُدار تحت `~/.estacoda/python-env` افتراضياً، أو محرك أمر صريح. جاهزية الصوت تُعرض من خلال أسطح حالة CLI، وليس من خلال `isAvailable()`.
 
 **المزودون المُطبّقون:**
 - TTS مستضاف: OpenAI، ElevenLabs، MiniMax، Gemini، xAI
 - STT مستضاف: OpenAI، Groq، xAI
-- STT محلي: command، faster-whisper
+- STT محلي: faster-whisper مُدار افتراضياً، وcommand عند ضبط `stt.local.engine: "command"` صراحةً
 - مؤجل: مزودو TTS المحليون، Mistral TTS/STT
 
 ### تنفيذ الكود
@@ -212,7 +212,7 @@ sidebar_position: 6
 - `web.search` يتطلب مفتاح مزود بحث الويب.
 - `image.generate` يتطلب مفتاح مزود توليد صور.
 - `voice.speak` يتطلب مفتاح مزود TTS.
-- `voice.transcribe` يتطلب مزود STT أو أمرًا محليًا.
+- `voice.transcribe` يتطلب مزود STT، أو faster-whisper محلياً مُداراً، أو أمراً محلياً صريحاً.
 
 ### ثقة workspace
 

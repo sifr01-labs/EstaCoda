@@ -9,7 +9,8 @@ import {
   normalizeSessionCompressionConfig,
   redactExternalMemoryConfig,
   saveRuntimeConfig,
-  setupAuxiliaryModelConfig
+  setupAuxiliaryModelConfig,
+  setupVoiceConfig
 } from "./runtime-config.js";
 import { resolveProfileStateHome } from "./profile-home.js";
 
@@ -407,6 +408,70 @@ describe("loadRuntimeConfig auxiliaryModels", () => {
       fallbacks: [{ provider: "openai", id: "gpt-5.5" }]
     });
     expect(saved.browser).toEqual({ backend: "local-cdp" });
+  });
+
+  it("setupVoiceConfig does not patch STT during TTS-only setup", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+    await writeFile(configPath, JSON.stringify({
+      stt: {
+        provider: "local",
+        local: {
+          engine: "command",
+          command: "existing-stt-command"
+        }
+      }
+    }));
+
+    await setupVoiceConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace,
+      input: {
+        ttsProvider: "openai"
+      }
+    });
+
+    const saved = JSON.parse(await readFile(configPath, "utf8"));
+    expect(saved.stt).toEqual({
+      provider: "local",
+      local: {
+        engine: "command",
+        command: "existing-stt-command"
+      }
+    });
+  });
+
+  it("setupVoiceConfig writes local faster-whisper schema with python binary", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+    await writeFile(configPath, JSON.stringify({}));
+
+    await setupVoiceConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace,
+      input: {
+        sttProvider: "local",
+        sttModel: "small",
+        pythonBinary: "/custom/python3"
+      }
+    });
+
+    const saved = JSON.parse(await readFile(configPath, "utf8"));
+    expect(saved.stt).toEqual({
+      provider: "local",
+      local: {
+        model: "small",
+        engine: "faster-whisper",
+        pythonBinary: "/custom/python3",
+        fasterWhisper: {
+          enabled: true,
+          model: "small",
+          allowModelDownload: true
+        }
+      }
+    });
   });
 });
 
@@ -1065,6 +1130,96 @@ describe("loadRuntimeConfig media boundary", () => {
       autoTtsMaxCharsPerReply: 1200,
       autoTtsMaxCharsPerHourPerChat: 5000
     });
+  });
+
+  it("defaults local STT to managed faster-whisper settings", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace
+    });
+
+    expect(loaded.stt.local).toMatchObject({
+      model: "base",
+      engine: "faster-whisper",
+      fasterWhisper: {
+        enabled: true,
+        model: "base",
+        device: "auto",
+        computeType: "default",
+        allowModelDownload: true,
+        gatewayAllowModelDownload: false
+      }
+    });
+  });
+
+  it("normalizes local STT python binary aliases", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      stt: {
+        local: {
+          python_binary: "/usr/bin/python3"
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace
+    });
+
+    expect(loaded.stt.local?.pythonBinary).toBe("/usr/bin/python3");
+
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      stt: {
+        local: {
+          pythonBinary: "/opt/python/bin/python"
+        }
+      }
+    }));
+
+    const loadedCamel = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace
+    });
+
+    expect(loadedCamel.stt.local?.pythonBinary).toBe("/opt/python/bin/python");
+  });
+
+  it("preserves explicit local command mode without defaulting faster-whisper on", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      stt: {
+        local: {
+          engine: "command",
+          command: "whisper-cli"
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace
+    });
+
+    expect(loaded.stt.local?.engine).toBe("command");
+    expect(loaded.stt.local?.fasterWhisper?.enabled).toBe(false);
   });
 
   it("normalizes xAI native TTS config without adding a model field", async () => {

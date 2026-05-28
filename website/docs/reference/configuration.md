@@ -203,6 +203,50 @@ Speech-to-text provider and model.
 
 Stable hosted STT: OpenAI, Groq, xAI. Local STT supports `command` and `faster-whisper`. Mistral STT is deferred.
 
+In v0.1.0, `stt.provider: "local"` defaults to managed faster-whisper:
+
+```json
+{
+  "stt": {
+    "provider": "local",
+    "local": {
+      "engine": "faster-whisper",
+      "model": "base",
+      "pythonBinary": "/optional/custom/python",
+      "fasterWhisper": {
+        "enabled": true,
+        "model": "base",
+        "device": "auto",
+        "computeType": "default",
+        "hfHome": "/optional/model-cache",
+        "allowModelDownload": true,
+        "gatewayAllowModelDownload": false,
+        "queueDepth": 1,
+        "timeoutMs": 300000
+      }
+    }
+  }
+}
+```
+
+Omit `pythonBinary` for the managed path resolved under `~/.estacoda/python-env`, or set it to an operator-owned Python when using `estacoda voice setup --stt-provider local --python-binary /path/to/python`. The default model cache is `~/.estacoda/cache/huggingface`; it is separate from the venv.
+
+Command mode is explicit:
+
+```json
+{
+  "stt": {
+    "provider": "local",
+    "local": {
+      "engine": "command",
+      "command": "/path/to/transcriber {input}"
+    }
+  }
+}
+```
+
+`engine: "command"` wins and does not use managed faster-whisper.
+
 ### voice
 
 Gateway auto-TTS behavior.

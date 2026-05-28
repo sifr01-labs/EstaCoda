@@ -21,10 +21,22 @@ Default root: `~/.estacoda/`
 | `update-cache.json` | Update check cache (global, 6-hour TTL) | Startup prefetch, update command |
 | `packs/registry.jsonl` | Global pack cache | Pack operations |
 | `memory/shared/` | Global shared memory snippets | Memory operations |
+| `python-env/` | Managed Python virtual environment for local faster-whisper STT | `estacoda voice setup --stt-provider local` |
+| `cache/huggingface/` | Default faster-whisper / Hugging Face model cache | Runtime faster-whisper STT |
+| `cache/pip/` | pip cache constrained under EstaCoda state for managed local STT setup | Managed Python setup |
 | `logs/update.log` | Update operation log (gateway mode and managed-source updates) | Update command |
 | `.backups/<label>/` | User-state backups before managed-source mutation | `estacoda update` |
 
 Global state is not deleted when a profile is removed. If you want a clean slate, delete the global root. Backup your sessions database first if you care about history.
+
+The managed local STT venv and model cache are intentionally separate:
+
+```text
+~/.estacoda/python-env
+~/.estacoda/cache/huggingface
+```
+
+The model cache does not live inside the venv. Removing one does not repair the other; rerun `estacoda voice setup --stt-provider local` to recreate the managed Python environment.
 
 ## Install-local state
 

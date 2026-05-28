@@ -184,6 +184,8 @@ Voice STT preprocess audit events are emitted through `gateway:stt:preprocess` a
 
 Voice credentials are direct environment variables only. The OpenAI audio resolver uses configured `apiKeyEnv`, then `VOICE_TOOLS_OPENAI_KEY`, then `OPENAI_API_KEY` only for the default voice env case. There are no voice credential pools, gateway brokers, managed fallbacks, `useGateway`, or non-env credential sources.
 
+Local faster-whisper STT uses a managed Python environment at `~/.estacoda/python-env` and a separate model cache at `~/.estacoda/cache/huggingface` by default. `estacoda voice setup --stt-provider local` creates or repairs that venv and installs only the pinned `faster-whisper==1.2.1` package after explicit local STT setup. System Python and user-managed venvs are not modified. `--python-binary` and `stt.local.engine: "command"` are operator-owned escape hatches.
+
 Auto-TTS is text-first and fail-open. Generated auto-TTS media is ephemeral, profile-temp scoped, and not inserted into durable artifact storage, session DB, artifact history, prompt context, or model-visible attachment lists. Arbitrary `MEDIA:/path` response text is not an auto-TTS signal.
 
 Local STT risk classes are:

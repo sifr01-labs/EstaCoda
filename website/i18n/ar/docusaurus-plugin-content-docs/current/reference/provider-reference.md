@@ -81,7 +81,7 @@ sidebar_position: 5
 | **OpenAI** | `live-proven` | STT مستضاف. |
 | **Groq** | `live-proven` | STT مستضاف. |
 | **xAI** | `live-proven` | STT مستضاف. |
-| **local** | `implemented` | محرّك الأوامر ومسار `faster-whisper`. تنزيل نموذج faster-whisper معطّل افتراضيًا. |
+| **local** | `implemented` | `faster-whisper` مُدار افتراضياً عند `stt.provider: "local"`؛ محرك الأوامر عبر `stt.local.engine: "command"` صراحةً. تنزيل نموذج faster-whisper عبر البوابة معطّل افتراضيًا. |
 | **Mistral** | `experimental` | مؤجل لـ v0.1.0. |
 
 ---

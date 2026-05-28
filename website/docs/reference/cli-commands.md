@@ -328,6 +328,36 @@ estacoda doctor --live                  # includes live provider endpoint probes
 
 ---
 
+## Voice
+
+```bash
+estacoda voice status
+estacoda voice setup --stt-provider local
+estacoda voice setup --stt-provider local --python-binary /path/to/python
+estacoda voice setup --tts-provider openai
+estacoda voice mode on|off|tts|status
+```
+
+**State touched:**
+- `~/.estacoda/profiles/<id>/config.json`
+- `~/.estacoda/profiles/<id>/.env` when storing voice provider secrets
+- `~/.estacoda/python-env` for managed local STT setup
+- `~/.estacoda/cache/huggingface` for faster-whisper model cache at runtime
+
+**Behavior:**
+- `estacoda voice setup --stt-provider local` checks the managed Python environment, creates or repairs it when needed, installs pinned `faster-whisper==1.2.1`, and writes local STT config only after setup succeeds.
+- Setup progress is curated. Raw pip output is not the normal CLI UX.
+- `--python-binary /path/to/python` skips managed environment check/create and stores the custom path. The operator owns that Python environment.
+- `estacoda voice setup --tts-provider openai` is TTS-only. It does not mutate STT config and does not touch the managed Python environment.
+- Runtime resolves configured Python first, then the managed venv path. Runtime does not install packages in Phase 1.
+
+**Failure modes:**
+- Missing/corrupted managed Python env is repaired during explicit local STT setup.
+- Failed package install exits without writing a broken local STT config.
+- Custom Python failures are repaired by the operator, not by EstaCoda.
+
+---
+
 ## Trace and eval
 
 ```bash

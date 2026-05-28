@@ -1123,7 +1123,7 @@ describe("runGatewaySupervisor", () => {
       stt: {
         provider: "local",
         enabled: true,
-        local: { command: "printf transcript" }
+        local: { engine: "command", command: "printf transcript" }
       }
     }));
     let capturedGatewayOptions: any;

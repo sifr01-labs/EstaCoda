@@ -14,6 +14,39 @@ import type { SecurityApprovalMode, SecurityAssessment, SecurityPolicy, Security
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
 import { resolveTokens } from "../theme/token-resolver.js";
 import { toolRegistrationPlan } from "../tools/index.js";
+import * as pythonEnvManager from "../python-env/manager.js";
+
+type CapturedFasterWhisperOptions = {
+  pythonBinary?: string;
+  queueDepth?: number;
+  timeoutMs?: number;
+  env?: NodeJS.ProcessEnv;
+};
+
+const fasterWhisperMockState = vi.hoisted(() => ({
+  constructedOptions: [] as CapturedFasterWhisperOptions[],
+  disposedCount: 0
+}));
+
+vi.mock("../tools/stt-local-whisper.js", () => ({
+  FasterWhisperWorkerClient: vi.fn().mockImplementation(function FasterWhisperWorkerClient(options: CapturedFasterWhisperOptions = {}) {
+    fasterWhisperMockState.constructedOptions.push(options);
+    return {
+      dispose: vi.fn(async () => {
+        fasterWhisperMockState.disposedCount += 1;
+      }),
+      probe: vi.fn(),
+      status: vi.fn(),
+      transcribe: vi.fn()
+    };
+  }),
+  defaultFasterWhisperWorkerPath: () => "/mock/faster-whisper-worker.py"
+}));
+
+afterEach(() => {
+  fasterWhisperMockState.constructedOptions.length = 0;
+  fasterWhisperMockState.disposedCount = 0;
+});
 
 const mockModel: ModelProfile = {
   id: "mock-model",
@@ -128,6 +161,60 @@ async function minimalRuntimeOptions(overrides: {
     sessionId: `test-${Date.now()}`,
     ...overrides
   };
+}
+
+function fasterWhisperStt(input: {
+  pythonBinary?: string;
+  hfHome?: string;
+  queueDepth?: number;
+  timeoutMs?: number;
+} = {}): RuntimeOptions["stt"] {
+  return {
+    provider: "local",
+    enabled: true,
+    local: {
+      model: "base",
+      engine: "faster-whisper",
+      pythonBinary: input.pythonBinary,
+      fasterWhisper: {
+        enabled: true,
+        model: "base",
+        device: "auto",
+        computeType: "default",
+        hfHome: input.hfHome,
+        allowModelDownload: true,
+        gatewayAllowModelDownload: false,
+        queueDepth: input.queueDepth,
+        timeoutMs: input.timeoutMs
+      }
+    }
+  } as RuntimeOptions["stt"];
+}
+
+function commandStt(): RuntimeOptions["stt"] {
+  return {
+    provider: "local",
+    enabled: true,
+    local: {
+      model: "base",
+      engine: "command",
+      command: "printf transcript",
+      fasterWhisper: {
+        enabled: false,
+        model: "base",
+        device: "auto",
+        computeType: "default",
+        allowModelDownload: true,
+        gatewayAllowModelDownload: false
+      }
+    }
+  } as RuntimeOptions["stt"];
+}
+
+function expectedManagedPython(stateRoot: string): string {
+  return process.platform === "win32"
+    ? join(stateRoot, "python-env", "Scripts", "python.exe")
+    : join(stateRoot, "python-env", "bin", "python");
 }
 
 const providerToolNameGroups = [
@@ -2823,6 +2910,100 @@ describe("createRuntime auxiliary consumer wiring", () => {
     } finally {
       await runtime.dispose();
     }
+  });
+});
+
+describe("createRuntime faster-whisper runtime wiring", () => {
+  it("resolves managed Python and persistent model cache paths under global state", async () => {
+    const originalTransformersCache = process.env.TRANSFORMERS_CACHE;
+    delete process.env.TRANSFORMERS_CACHE;
+    const homeDir = await mkdtemp(join(tmpdir(), "estacoda-runtime-home-"));
+    const options = await minimalRuntimeOptions();
+    const createSpy = vi.spyOn(pythonEnvManager, "createManagedEnvironment");
+    const checkSpy = vi.spyOn(pythonEnvManager, "checkManagedEnvironment");
+
+    try {
+      const runtime = await createRuntime({
+        ...options,
+        homeDir,
+        stt: fasterWhisperStt({
+          queueDepth: 4,
+          timeoutMs: 12_345
+        })
+      });
+      await runtime.dispose();
+
+      const stateRoot = join(homeDir, ".estacoda");
+      const persistentHfHome = join(stateRoot, "cache", "huggingface");
+      expect(fasterWhisperMockState.constructedOptions).toHaveLength(1);
+      expect(fasterWhisperMockState.constructedOptions[0]).toMatchObject({
+        pythonBinary: expectedManagedPython(stateRoot),
+        queueDepth: 4,
+        timeoutMs: 12_345,
+        env: {
+          HF_HOME: persistentHfHome,
+          TRANSFORMERS_CACHE: persistentHfHome
+        }
+      });
+      expect(fasterWhisperMockState.constructedOptions[0].pythonBinary).toContain(join(stateRoot, "python-env"));
+      expect(fasterWhisperMockState.constructedOptions[0].env?.HF_HOME).not.toContain("python-env");
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(checkSpy).not.toHaveBeenCalled();
+    } finally {
+      createSpy.mockRestore();
+      checkSpy.mockRestore();
+      if (originalTransformersCache === undefined) {
+        delete process.env.TRANSFORMERS_CACHE;
+      } else {
+        process.env.TRANSFORMERS_CACHE = originalTransformersCache;
+      }
+    }
+  });
+
+  it("uses configured Python and Hugging Face cache overrides when provided", async () => {
+    const originalTransformersCache = process.env.TRANSFORMERS_CACHE;
+    process.env.TRANSFORMERS_CACHE = "/existing/transformers-cache";
+    const homeDir = await mkdtemp(join(tmpdir(), "estacoda-runtime-home-"));
+    const options = await minimalRuntimeOptions();
+
+    try {
+      const runtime = await createRuntime({
+        ...options,
+        homeDir,
+        stt: fasterWhisperStt({
+          pythonBinary: "/custom/python3",
+          hfHome: "/custom/huggingface"
+        })
+      });
+      await runtime.dispose();
+
+      expect(fasterWhisperMockState.constructedOptions).toHaveLength(1);
+      expect(fasterWhisperMockState.constructedOptions[0]).toMatchObject({
+        pythonBinary: "/custom/python3",
+        env: {
+          HF_HOME: "/custom/huggingface",
+          TRANSFORMERS_CACHE: "/existing/transformers-cache"
+        }
+      });
+    } finally {
+      if (originalTransformersCache === undefined) {
+        delete process.env.TRANSFORMERS_CACHE;
+      } else {
+        process.env.TRANSFORMERS_CACHE = originalTransformersCache;
+      }
+    }
+  });
+
+  it("does not instantiate faster-whisper resources for local command mode", async () => {
+    const options = await minimalRuntimeOptions();
+    const runtime = await createRuntime({
+      ...options,
+      stt: commandStt()
+    });
+
+    await runtime.dispose();
+
+    expect(fasterWhisperMockState.constructedOptions).toHaveLength(0);
   });
 });
 

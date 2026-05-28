@@ -106,12 +106,12 @@ Text-to-speech and speech-to-text.
 | `voice.speak` | `external-side-effect` | May play audio or write files |
 | `voice.transcribe` | `safe` | None |
 
-**Availability:** Hosted TTS requires a provider key. Local STT requires `faster-whisper` or a configured command. Voice readiness is exposed through CLI status surfaces, not through `isAvailable()` human-readable reasons.
+**Availability:** Hosted TTS requires a provider key. Local STT defaults to managed `faster-whisper` under `~/.estacoda/python-env`, or an explicit command engine. Voice readiness is exposed through CLI status surfaces, not through `isAvailable()` human-readable reasons.
 
 **Implemented providers:**
 - Hosted TTS: OpenAI, ElevenLabs, MiniMax, Gemini, xAI
 - Hosted STT: OpenAI, Groq, xAI
-- Local STT: command, faster-whisper
+- Local STT: managed faster-whisper by default, command with explicit `stt.local.engine: "command"`
 - Deferred: local TTS providers, Mistral TTS/STT
 
 ### Code execution
@@ -212,7 +212,7 @@ Tools that depend on a provider route require the route to be configured and cre
 - `web.search` requires a web research provider key.
 - `image.generate` requires an image generation provider key.
 - `voice.speak` requires a TTS provider key.
-- `voice.transcribe` requires an STT provider or local command.
+- `voice.transcribe` requires an STT provider, managed local faster-whisper, or an explicit local command.
 
 ### Workspace trust
 

@@ -85,6 +85,47 @@ estacoda config show | grep -A 5 browser
 
 Set `browser.backend` to `local-cdp` in profile config. Cloud browser providers are registered but cannot create live sessions in v0.1.0.
 
+## Local STT setup fails
+
+**Symptom:** `estacoda voice setup --stt-provider local` fails while creating Python, installing `faster-whisper==1.2.1`, or verifying `import faster_whisper`.
+
+**Likely cause:** System Python is missing, `python -m venv` is unavailable, the package install failed, or the managed venv at `~/.estacoda/python-env` is corrupted.
+
+**Inspect:**
+
+```bash
+estacoda voice status
+ls -la ~/.estacoda/python-env
+ls -la ~/.estacoda/cache/huggingface
+```
+
+**Repair:**
+
+```bash
+estacoda voice setup --stt-provider local
+# or use an operator-owned Python environment
+estacoda voice setup --stt-provider local --python-binary /path/to/python
+```
+
+The managed venv is for pinned `faster-whisper==1.2.1` only. Do not use it for arbitrary packages. If you use `--python-binary`, EstaCoda skips managed env check/create and leaves that Python environment to you.
+
+## Gateway local STT download denied
+
+**Symptom:** Gateway voice transcription reports that faster-whisper model download is not allowed.
+
+**Likely cause:** Local faster-whisper allows model downloads for normal local use by default, but gateway-triggered model downloads default to disabled.
+
+**Inspect:**
+
+```bash
+estacoda config show
+ls -la ~/.estacoda/cache/huggingface
+```
+
+**Repair:**
+
+Pre-cache the model during local setup/use, or explicitly set `stt.local.fasterWhisper.gatewayAllowModelDownload: true` only when gateway-triggered model fetches are acceptable.
+
 ## Gateway channel not ready
 
 **Symptom:** `estacoda gateway diagnose` reports warnings for a channel.

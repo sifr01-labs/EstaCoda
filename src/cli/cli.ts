@@ -65,7 +65,9 @@ import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { resolveHomeDir } from "../config/home-dir.js";
 import { resolveStateHome } from "../config/state-home.js";
-import { defaultProfileId, normalizeProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
+import { defaultProfileId, normalizeProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
+import { checkManagedEnvironment, createManagedEnvironment } from "../python-env/manager.js";
+import { isFasterWhisperConfig } from "../tools/stt-providers.js";
 import { runSessionsCommand } from "./session-commands.js";
 import { runHandoffCommand } from "./handoff-commands.js";
 import { createFileCronJobLock } from "../cron/cron-lock.js";
@@ -2225,10 +2227,11 @@ async function voice(options: CliOptions, args: string[]): Promise<CliCommandRes
         "  estacoda voice setup --tts-provider openai --tts-model gpt-4o-mini-tts --tts-voice alloy --tts-api-key-env VOICE_TOOLS_OPENAI_KEY",
         "  estacoda voice setup --tts-provider edge --tts-voice en-US-AriaNeural",
         "  estacoda voice setup --stt-provider local --stt-model base",
+        "  estacoda voice setup --stt-provider local --stt-model small --python-binary /usr/bin/python3",
         "",
         "Defaults:",
         "  TTS: openai, gpt-4o-mini-tts, VOICE_TOOLS_OPENAI_KEY or OPENAI_API_KEY",
-        "  STT: local command, model base",
+        "  STT: local faster-whisper, model base",
         "  CLI audio target: selected profile audio-cache/ for generated speech and transcripts"
       ].join("\n")
     };
@@ -2277,6 +2280,50 @@ async function voice(options: CliOptions, args: string[]): Promise<CliCommandRes
 
   if (subcommand === "setup") {
     const parsed = parseVoiceArgs(args.slice(1));
+    const setupOutput = createCliOutput(options);
+    const previousConfig = await loadRuntimeConfig(options);
+    const explicitSttInput = hasExplicitVoiceSttInput(args.slice(1));
+    const effectiveSttProvider = parsed.sttProvider ?? previousConfig.stt.provider;
+
+    if (explicitSttInput && effectiveSttProvider === "local" && parsed.pythonBinary === undefined) {
+      const globalPaths = resolveGlobalStateHome({ homeDir: options.homeDir });
+      const status = await checkManagedEnvironment({ stateRoot: globalPaths.stateRoot });
+      if (status.kind === "ready") {
+        parsed.pythonBinary = status.pythonBinary;
+      } else {
+        const disclosure = "Local STT setup will create EstaCoda's managed Python environment and install pinned faster-whisper==1.2.1.";
+        if (options.interactive !== false && (options.prompt !== undefined || canRunInteractive())) {
+          const prompt = options.prompt ?? createReadlinePrompt();
+          const answer = await prompt(`${disclosure} Continue? [Y/n] `);
+          if (answer.trim().toLowerCase().startsWith("n")) {
+            return {
+              handled: true,
+              exitCode: 1,
+              output: "Local STT setup cancelled."
+            };
+          }
+        } else {
+          setupOutput.writeLine(disclosure);
+        }
+
+        const envResult = await createManagedEnvironment({ stateRoot: globalPaths.stateRoot }, setupOutput.writeLine);
+        if (!envResult.ok) {
+          return {
+            handled: true,
+            exitCode: 1,
+            output: [
+              ...setupOutput.lines,
+              `Failed to set up local STT: ${envResult.reason}`,
+              "",
+              "Try specifying a Python binary manually:",
+              "  estacoda voice setup --stt-provider local --python-binary /usr/bin/python3"
+            ].join("\n")
+          };
+        }
+        parsed.pythonBinary = envResult.pythonBinary;
+      }
+    }
+
     const result = await setupVoiceConfig({
       ...options,
       input: parsed
@@ -2287,6 +2334,7 @@ async function voice(options: CliOptions, args: string[]): Promise<CliCommandRes
       handled: true,
       exitCode: 0,
       output: [
+        ...setupOutput.lines,
         "Configured EstaCoda voice.",
         renderVoiceStatus(loaded),
         `Config: ${result.path}`,
@@ -2465,6 +2513,7 @@ function renderVoiceStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>
   const sttKey = sttApiKeyEnv(config.stt.provider, config);
   const ttsStatus = checkTtsProviderStatus(config.tts.provider, config.tts);
   const sttStatus = checkSttProviderStatus(config.stt.provider, config.stt);
+  const sttPython = sttPythonSource(config);
 
   return [
     "EstaCoda voice",
@@ -2474,6 +2523,8 @@ function renderVoiceStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>
     `TTS voice: ${ttsVoice(config.tts.provider, config)}`,
     `TTS speed: ${config.tts.speed}`,
     `TTS API key: ${ttsKey === undefined ? "none" : ttsKey}`,
+    `STT: ${sttSummary(config)}`,
+    ...(sttPython === undefined ? [] : [`STT Python: ${sttPython}`]),
     `STT provider: ${config.stt.provider}`,
     `STT readiness: ${formatVoiceReadiness(sttStatus)}`,
     `STT model: ${sttModel(config.stt.provider, config)}`,
@@ -2486,6 +2537,25 @@ function renderVoiceStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>
     "Platform delivery: CLI audio cache, Telegram voice bubble when Opus/OGG conversion is available; otherwise audio file fallback.",
     "Change with: estacoda voice setup --tts-provider edge|openai|elevenlabs|minimax|mistral|gemini|xai|neutts|kittentts --stt-provider local|groq|openai|mistral|xai"
   ].join("\n");
+}
+
+function sttSummary(config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string {
+  if (config.stt.provider === "local") {
+    return isFasterWhisperConfig(config.stt)
+      ? `local faster-whisper, model ${sttModel("local", config)}`
+      : `local command, model ${sttModel("local", config)}`;
+  }
+  return `${config.stt.provider}, model ${sttModel(config.stt.provider, config)}`;
+}
+
+function sttPythonSource(config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string | undefined {
+  if (config.stt.provider !== "local" || !isFasterWhisperConfig(config.stt)) {
+    return undefined;
+  }
+  const pythonBinary = config.stt.local?.pythonBinary;
+  return pythonBinary === undefined || pythonBinary.length === 0
+    ? "managed: EstaCoda Python environment"
+    : `custom: ${pythonBinary}`;
 }
 
 function formatVoiceReadiness(status: ReturnType<typeof checkTtsProviderStatus> | ReturnType<typeof checkSttProviderStatus>): string {
@@ -2562,7 +2632,9 @@ function ttsApiKeyEnv(provider: TtsProvider, config: Awaited<ReturnType<typeof l
 function sttModel(provider: Awaited<ReturnType<typeof loadRuntimeConfig>>["stt"]["provider"], config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string {
   switch (provider) {
     case "local":
-      return config.stt.local?.model ?? "base";
+      return isFasterWhisperConfig(config.stt)
+        ? config.stt.local?.fasterWhisper?.model ?? config.stt.local?.model ?? "base"
+        : config.stt.local?.model ?? "base";
     case "groq":
       return config.stt.groq?.model ?? "whisper-large-v3";
     case "openai":
@@ -3428,45 +3500,81 @@ function uniqueStrings(values: string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))];
 }
 
+function requireFlagValue(args: string[], index: number, flag: string): string {
+  const value = args[index + 1];
+  if (value === undefined || value.startsWith("--")) {
+    throw new Error(`Missing value for ${flag}`);
+  }
+  return value;
+}
+
+function hasExplicitVoiceSttInput(args: string[]): boolean {
+  return args.some((arg) =>
+    arg === "--stt-provider" ||
+    arg === "--stt-model" ||
+    arg === "--stt-command" ||
+    arg === "--stt-api-key-env" ||
+    arg === "--stt-api-key" ||
+    arg === "--python-binary" ||
+    arg === "--python_binary"
+  );
+}
+
+function createCliOutput(options: CliOptions): {
+  lines: string[];
+  writeLine: (message: string) => void;
+} {
+  const lines: string[] = [];
+  return {
+    lines,
+    writeLine(message: string): void {
+      lines.push(message);
+      options.output?.write(`${message}\n`);
+    }
+  };
+}
+
 function parseVoiceArgs(args: string[]): VoiceSetupInput {
   const parsed: VoiceSetupInput = {};
 
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
-    const next = args[index + 1];
 
     if (arg === "--tts-provider") {
-      parsed.ttsProvider = parseTtsProvider(next);
+      parsed.ttsProvider = parseTtsProvider(requireFlagValue(args, index, arg));
       index += 1;
     } else if (arg === "--tts-speed") {
-      parsed.ttsSpeed = next === undefined ? undefined : Number(next);
+      parsed.ttsSpeed = Number(requireFlagValue(args, index, arg));
       index += 1;
     } else if (arg === "--tts-voice") {
-      parsed.ttsVoice = next;
+      parsed.ttsVoice = requireFlagValue(args, index, arg);
       index += 1;
     } else if (arg === "--tts-model") {
-      parsed.ttsModel = next;
+      parsed.ttsModel = requireFlagValue(args, index, arg);
       index += 1;
     } else if (arg === "--tts-api-key-env") {
-      parsed.ttsApiKeyEnv = next;
+      parsed.ttsApiKeyEnv = requireFlagValue(args, index, arg);
       index += 1;
     } else if (arg === "--tts-api-key") {
-      parsed.ttsApiKey = next;
+      parsed.ttsApiKey = requireFlagValue(args, index, arg);
       index += 1;
     } else if (arg === "--stt-provider") {
-      parsed.sttProvider = parseSttProvider(next);
+      parsed.sttProvider = parseSttProvider(requireFlagValue(args, index, arg));
       index += 1;
     } else if (arg === "--stt-model") {
-      parsed.sttModel = next;
+      parsed.sttModel = requireFlagValue(args, index, arg);
       index += 1;
     } else if (arg === "--stt-command") {
-      parsed.sttCommand = next;
+      parsed.sttCommand = requireFlagValue(args, index, arg);
       index += 1;
     } else if (arg === "--stt-api-key-env") {
-      parsed.sttApiKeyEnv = next;
+      parsed.sttApiKeyEnv = requireFlagValue(args, index, arg);
       index += 1;
     } else if (arg === "--stt-api-key") {
-      parsed.sttApiKey = next;
+      parsed.sttApiKey = requireFlagValue(args, index, arg);
+      index += 1;
+    } else if (arg === "--python-binary" || arg === "--python_binary") {
+      parsed.pythonBinary = requireFlagValue(args, index, "--python-binary");
       index += 1;
     }
   }

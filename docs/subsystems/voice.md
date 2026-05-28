@@ -19,8 +19,8 @@ Voice is an optional media capability. It is separate from the primary LLM provi
 | Hosted STT | OpenAI | Implemented | Uses the shared OpenAI audio credential resolver. |
 | Hosted STT | Groq | Implemented | Direct environment key lookup. |
 | Hosted STT | xAI | Implemented | Uses native `{baseUrl}/stt`, not an OpenAI-compatible shape. |
-| Local STT | command | Implemented | Preserves command-template rendering and prefers stdout transcript text. |
-| Local STT | faster-whisper | Implemented | Runtime-owned long-lived Python JSONL worker. |
+| Local STT | faster-whisper | Implemented | Default for `stt.provider: "local"` in v0.1.0. Uses EstaCoda's managed Python environment unless a custom Python is configured. |
+| Local STT | command | Implemented | Explicit `stt.local.engine: "command"` opt-in. Preserves command-template rendering and prefers stdout transcript text. |
 | Local TTS | Deferred | Not implemented | Do not configure as available in v0.1.0. |
 | Mistral TTS/STT | Deferred | Not implemented | Config shape may exist, but execution is unavailable in v0.1.0. |
 
@@ -86,7 +86,16 @@ Provider-specific notes:
 
 ## faster-whisper
 
-Local faster-whisper STT runs through one runtime-owned long-lived Python JSONL worker per runtime/profile.
+Local faster-whisper STT runs through one runtime-owned long-lived Python JSONL worker per runtime/profile. In v0.1.0, `stt.provider: "local"` defaults to managed faster-whisper. `stt.local.engine: "command"` is the explicit power-user path for an operator-owned STT command.
+
+Managed environment paths:
+
+```text
+~/.estacoda/python-env
+~/.estacoda/cache/huggingface
+```
+
+The virtual environment and model cache are separate. The Hugging Face/model cache does not live inside the venv.
 
 Config shape:
 
@@ -96,21 +105,58 @@ Config shape:
     "provider": "local",
     "local": {
       "engine": "faster-whisper",
+      "model": "base",
+      "pythonBinary": "/optional/custom/python",
       "fasterWhisper": {
         "enabled": true,
         "model": "base",
         "device": "auto",
         "computeType": "default",
-        "hfHome": "/path/to/profile-local/hf-cache",
-        "allowModelDownload": false,
+        "hfHome": "/optional/model-cache",
+        "allowModelDownload": true,
         "gatewayAllowModelDownload": false,
-        "queueDepth": 3,
+        "queueDepth": 1,
         "timeoutMs": 300000
       }
     }
   }
 }
 ```
+
+Command mode:
+
+```json
+{
+  "stt": {
+    "provider": "local",
+    "local": {
+      "engine": "command",
+      "command": "/path/to/transcriber {input}"
+    }
+  }
+}
+```
+
+`engine: "command"` wins and does not use managed faster-whisper.
+
+Setup behavior:
+
+```bash
+estacoda voice setup --stt-provider local
+estacoda voice setup --stt-provider local --python-binary /path/to/python
+```
+
+Without `--python-binary`, setup checks `~/.estacoda/python-env`, creates or repairs it when needed, installs exactly `faster-whisper==1.2.1`, verifies `import faster_whisper`, and writes local STT config only after the managed environment is ready. It does not install arbitrary packages, and it does not mutate system Python or user-managed venvs. pip cache writes are constrained under EstaCoda state.
+
+With `--python-binary`, setup skips managed environment check/create and stores the custom path. That Python environment is operator-owned.
+
+Runtime behavior in Phase 1:
+
+- Runtime resolves configured `stt.local.pythonBinary` first, otherwise the managed venv path under `~/.estacoda/python-env`.
+- Runtime sets persistent model cache env defaults under `~/.estacoda/cache/huggingface`.
+- Runtime does not create the managed environment, install packages, or probe Python.
+- Gateway first-use package install is not part of Phase 1.
+- A later `voice doctor` command may inspect/repair this path. Gateway first-use install may be allowed later only for explicitly configured local STT; it is not implemented here.
 
 Operational behavior:
 
@@ -123,10 +169,11 @@ Operational behavior:
 - Unexpected worker exit restarts once, then marks faster-whisper unavailable for the current runtime/client.
 - `runtime.dispose()` shuts down the worker.
 - Default timeout is 300 seconds.
-- Default queue depth is 3 for gateway-triggered use and 1 for CLI/local interactive use unless config overrides it.
+- Default queue depth is 1 unless config overrides it.
 - Queue overflow fails fast.
 - The gateway denies first-run model downloads by default before worker startup. Set `gatewayAllowModelDownload: true` only when that side effect is acceptable.
-- `hfHome` is passed to the worker when configured. Otherwise the worker respects existing `HF_HOME` or `TRANSFORMERS_CACHE` and uses profile-local cache/temp policy where EstaCoda controls the path.
+- Local non-gateway faster-whisper allows model downloads by default.
+- `hfHome` is passed to the worker when configured. Otherwise EstaCoda defaults `HF_HOME` to `~/.estacoda/cache/huggingface` and preserves an existing `TRANSFORMERS_CACHE` if the process already set one.
 
 ## Tools
 
@@ -288,5 +335,6 @@ Temp and cache behavior:
 - Recorded CLI voice input is written under selected profile temp audio space.
 - Gateway auto-TTS and Telegram conversion temps are written under selected profile temp audio space.
 - Audio caches live under selected profile `audio-cache/`.
-- faster-whisper model cache is controlled by `hfHome`, existing Hugging Face cache env vars, or profile-local fallback policy.
+- faster-whisper uses `~/.estacoda/python-env` for the managed venv and `~/.estacoda/cache/huggingface` for default model cache. These paths are separate.
+- faster-whisper model cache is controlled by `hfHome`, existing Hugging Face cache env vars, or the global EstaCoda cache fallback.
 - Temp files are best-effort cleaned after delivery or playback paths.

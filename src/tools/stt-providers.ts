@@ -419,6 +419,7 @@ function shouldNormalizeForLocalCommand(path: string, stt: LoadedRuntimeConfig["
 }
 
 export function isFasterWhisperConfig(stt: LoadedRuntimeConfig["stt"]): boolean {
+  if (stt.local?.engine === "command") return false;
   return stt.local?.engine === "faster-whisper" || stt.local?.fasterWhisper?.enabled === true;
 }
 
