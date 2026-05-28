@@ -80,6 +80,26 @@ function createRoute(provider: string, id: string, overrides?: Partial<ResolvedM
   };
 }
 
+function rawToolCall(id: string, name = "test.tool", argumentsText = "{}"): unknown {
+  return {
+    choices: [
+      {
+        message: {
+          tool_calls: [
+            {
+              id,
+              function: {
+                name,
+                arguments: argumentsText
+              }
+            }
+          ]
+        }
+      }
+    ]
+  };
+}
+
 describe("ProviderExecutor fallback behavior", () => {
   let registry: ProviderRegistry;
 
@@ -120,6 +140,220 @@ describe("ProviderExecutor fallback behavior", () => {
     expect(result.attempts[0].provider).toBe("primary");
     expect(result.attempts[1].provider).toBe("fallback1");
     expect(fallback2.calls.length).toBe(0);
+  });
+
+  it("does not fallback when empty content includes tool calls", async () => {
+    const primary = createMockAdapter({
+      id: "primary",
+      completeResponse: {
+        ok: true,
+        content: "",
+        model: "m1",
+        provider: "primary",
+        raw: rawToolCall("call-1")
+      }
+    });
+    const fallback = createMockAdapter({
+      id: "fallback",
+      completeResponse: { ok: true, content: "fallback ok", model: "m2", provider: "fallback" }
+    });
+    registry.register(primary);
+    registry.register(fallback);
+
+    const executor = new ProviderExecutor({ registry });
+    const result = await executor.complete(
+      { messages: [] },
+      {},
+      {
+        primaryRoute: createRoute("primary", "m1"),
+        fallbackChain: [createRoute("fallback", "m2")]
+      }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.fallbackUsed).toBe(false);
+    expect(result.response?.content).toBe("");
+    expect(result.toolCalls).toEqual([
+      expect.objectContaining({
+        id: "call-1",
+        name: "test.tool",
+        argumentsText: "{}"
+      })
+    ]);
+    expect(fallback.calls.length).toBe(0);
+  });
+
+  it("falls back when successful primary content is empty and has no tool calls", async () => {
+    const primary = createMockAdapter({
+      id: "primary",
+      completeResponse: { ok: true, content: "", model: "m1", provider: "primary" }
+    });
+    const fallback = createMockAdapter({
+      id: "fallback",
+      completeResponse: { ok: true, content: "fallback ok", model: "m2", provider: "fallback" }
+    });
+    registry.register(primary);
+    registry.register(fallback);
+
+    const events: ProviderRuntimeEvent[] = [];
+    const executor = new ProviderExecutor({ registry });
+    const result = await executor.complete(
+      { messages: [] },
+      {},
+      {
+        primaryRoute: createRoute("primary", "m1"),
+        fallbackChain: [createRoute("fallback", "m2")],
+        onEvent: (event) => {
+          events.push(event);
+        }
+      }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.fallbackUsed).toBe(true);
+    expect(result.response?.content).toBe("fallback ok");
+    expect(result.attempts).toEqual([
+      expect.objectContaining({
+        provider: "primary",
+        ok: false,
+        errorClass: "empty-response",
+        content: "Provider returned empty content with no tool calls."
+      }),
+      expect.objectContaining({
+        provider: "fallback",
+        ok: true,
+        content: "fallback ok"
+      })
+    ]);
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "provider-attempt-end",
+      provider: "primary",
+      ok: false,
+      errorClass: "empty-response",
+      willFallback: true
+    }));
+  });
+
+  it("returns fallback content when primary succeeds with empty content and no tool calls", async () => {
+    const primary = createMockAdapter({
+      id: "primary",
+      completeResponse: { ok: true, content: "", model: "m1", provider: "primary" }
+    });
+    const fallback = createMockAdapter({
+      id: "fallback",
+      completeResponse: { ok: true, content: "visible fallback", model: "m2", provider: "fallback" }
+    });
+    registry.register(primary);
+    registry.register(fallback);
+
+    const executor = new ProviderExecutor({ registry });
+    const result = await executor.complete(
+      { messages: [] },
+      {},
+      {
+        primaryRoute: createRoute("primary", "m1"),
+        fallbackChain: [createRoute("fallback", "m2")]
+      }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.fallbackUsed).toBe(true);
+    expect(result.response?.content).toBe("visible fallback");
+  });
+
+  it("returns fallback tool calls when primary succeeds with empty content and no tool calls", async () => {
+    const primary = createMockAdapter({
+      id: "primary",
+      completeResponse: { ok: true, content: "", model: "m1", provider: "primary" }
+    });
+    const fallback = createMockAdapter({
+      id: "fallback",
+      completeResponse: {
+        ok: true,
+        content: "",
+        model: "m2",
+        provider: "fallback",
+        raw: rawToolCall("fallback-call")
+      }
+    });
+    registry.register(primary);
+    registry.register(fallback);
+
+    const executor = new ProviderExecutor({ registry });
+    const result = await executor.complete(
+      { messages: [] },
+      {},
+      {
+        primaryRoute: createRoute("primary", "m1"),
+        fallbackChain: [createRoute("fallback", "m2")]
+      }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.fallbackUsed).toBe(true);
+    expect(result.response?.provider).toBe("fallback");
+    expect(result.toolCalls).toEqual([
+      expect.objectContaining({
+        id: "fallback-call",
+        name: "test.tool"
+      })
+    ]);
+  });
+
+  it("keeps empty successful content when no fallback route exists", async () => {
+    const primary = createMockAdapter({
+      id: "primary",
+      completeResponse: { ok: true, content: "", model: "m1", provider: "primary" }
+    });
+    registry.register(primary);
+
+    const executor = new ProviderExecutor({ registry });
+    const result = await executor.complete(
+      { messages: [] },
+      {},
+      {
+        primaryRoute: createRoute("primary", "m1")
+      }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.fallbackUsed).toBe(false);
+    expect(result.response?.content).toBe("");
+    expect(result.attempts).toEqual([
+      expect.objectContaining({
+        provider: "primary",
+        ok: true,
+        content: ""
+      })
+    ]);
+  });
+
+  it("does not fallback when primary returns normal content", async () => {
+    const primary = createMockAdapter({
+      id: "primary",
+      completeResponse: { ok: true, content: "primary ok", model: "m1", provider: "primary" }
+    });
+    const fallback = createMockAdapter({
+      id: "fallback",
+      completeResponse: { ok: true, content: "fallback ok", model: "m2", provider: "fallback" }
+    });
+    registry.register(primary);
+    registry.register(fallback);
+
+    const executor = new ProviderExecutor({ registry });
+    const result = await executor.complete(
+      { messages: [] },
+      {},
+      {
+        primaryRoute: createRoute("primary", "m1"),
+        fallbackChain: [createRoute("fallback", "m2")]
+      }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.fallbackUsed).toBe(false);
+    expect(result.response?.content).toBe("primary ok");
+    expect(fallback.calls.length).toBe(0);
   });
 
   it("preserves fallback route metadata during execution", async () => {

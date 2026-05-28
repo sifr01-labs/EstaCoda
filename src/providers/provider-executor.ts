@@ -261,6 +261,7 @@ export class ProviderExecutor {
       let routeAttemptCount = 0;
       const maxRouteAttempts = 2;
       const effectiveAuthMethod = route.authMethod ?? metadata.defaultAuthMethod;
+      const toolCallsBeforeRoute = toolCalls.length;
 
       while (routeAttemptCount < maxRouteAttempts) {
         routeAttemptCount++;
@@ -391,7 +392,36 @@ export class ProviderExecutor {
       const willFallback = !response.ok && shouldFallback(response, route, nextRoute);
 
       if (response.ok) {
-        for (const toolCall of extractToolCallsFromProviderResponse(response.raw)) {
+        const streamedToolCalls = toolCalls.slice(toolCallsBeforeRoute);
+        const extractedToolCalls = extractToolCallsFromProviderResponse(response.raw);
+        const terminalEmptyWithoutTools =
+          response.content.trim().length === 0 &&
+          streamedToolCalls.length === 0 &&
+          extractedToolCalls.length === 0;
+
+        if (terminalEmptyWithoutTools && nextRoute !== undefined) {
+          attempts[attempts.length - 1] = {
+            ...attempts[attempts.length - 1],
+            ok: false,
+            errorClass: "empty-response",
+            content: "Provider returned empty content with no tool calls."
+          };
+
+          await options.onEvent?.({
+            kind: "provider-attempt-end",
+            provider: route.provider,
+            model: route.id,
+            credentialId: credential?.id,
+            ok: false,
+            errorClass: "empty-response",
+            fallback: index > 0,
+            willFallback: true
+          });
+
+          continue;
+        }
+
+        for (const toolCall of extractedToolCalls) {
           toolCalls.push(toolCall);
           await options.onEvent?.({
             kind: "provider-tool-call",
