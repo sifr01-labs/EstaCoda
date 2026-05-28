@@ -149,6 +149,7 @@ export class ProviderTurnLoop {
     let maxObservedRisk = input.initialRiskClass;
     let pendingEmptyResponseNudge = false;
     let postToolEmptyRetried = false;
+    let capturedContentWithHousekeepingTools: string | undefined;
 
     for (let iteration = 0; iteration < this.#budgets.maxProviderIterations; iteration += 1) {
       if (isAborted(input.signal)) {
@@ -231,6 +232,15 @@ export class ProviderTurnLoop {
       const loopToolExecutions = loopToolExecutionResult.executions;
       maxObservedRisk = loopToolExecutionResult.maxObservedRisk;
       providerToolExecutions.push(...loopToolExecutions);
+      if (loopToolExecutions.some((execution) => !isHousekeepingToolName(execution.tool.name))) {
+        capturedContentWithHousekeepingTools = undefined;
+      } else if (
+        execution.ok === true &&
+        loopToolExecutions.length > 0 &&
+        execution.response?.content.trim().length
+      ) {
+        capturedContentWithHousekeepingTools = execution.response.content;
+      }
       if (loopToolExecutions.length > 0 && this.#model !== undefined) {
         await emit(input.onEvent, {
           kind: "context-usage",
@@ -269,12 +279,22 @@ export class ProviderTurnLoop {
         exhausted
       });
 
-      const terminalPostToolEmpty =
+      let terminalPostToolEmpty =
         execution.ok === true &&
         execution.toolCalls.length === 0 &&
         phase === "continuation" &&
         providerToolExecutions.length > 0 &&
         execution.response?.content.trim().length === 0;
+
+      if (
+        terminalPostToolEmpty &&
+        capturedContentWithHousekeepingTools !== undefined &&
+        execution.response !== undefined
+      ) {
+        execution.response.content = capturedContentWithHousekeepingTools;
+        capturedContentWithHousekeepingTools = undefined;
+        terminalPostToolEmpty = false;
+      }
 
       if (
         terminalPostToolEmpty &&
@@ -721,6 +741,19 @@ function estimateProviderToolFeedbackTokens(executions: ToolExecutionRecord[]): 
 
 function isRecoverableToolPlanStatus(status: ToolCallPlan["status"]): boolean {
   return status === "invalid" || status === "unavailable" || status === "blocked";
+}
+
+function isHousekeepingToolName(name: string | undefined): boolean {
+  return name === "memory.curate" ||
+    name === "knowledge.memory.inspect" ||
+    name === "skill.observe" ||
+    name === "skill.list" ||
+    name === "skill.view" ||
+    name === "skill.inspect" ||
+    name === "skill.usage" ||
+    name === "skill.list_proposals" ||
+    name === "skill.review_proposals" ||
+    name === "skill.review_proposal";
 }
 
 function mergeProviderExecutions(
