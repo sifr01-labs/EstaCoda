@@ -230,6 +230,20 @@ export function createRuntimeCronRunner(input: {
           channel: "cli",
           trustedWorkspace: true
         });
+        if (response.text.trim().length === 0) {
+          const message = "Agent completed but produced empty response (model error, timeout, or misconfiguration)";
+          const failure = classifyCronFailure({ runtimeError: message });
+          const content = formatCronOutput(job, message, input.wrapResponse ?? true);
+          return {
+            job,
+            ok: false,
+            output: content,
+            delivered: false,
+            deliveryResults: new Map(),
+            failureClass: failure.class,
+            executionId
+          };
+        }
         const content = formatCronOutput(job, response.text, input.wrapResponse ?? true);
         const silent = response.text.trimStart().startsWith("[SILENT]");
         const rawDelivery = silent ? undefined : await input.deliver?.(job, content);

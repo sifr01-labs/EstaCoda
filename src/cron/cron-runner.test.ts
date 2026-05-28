@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { CronStore } from "./cron-store.js";
 import { CronExecutionStore } from "./cron-execution-store.js";
 import { createFileCronJobLock } from "./cron-lock.js";
-import { tickCron, type CronRunner } from "./cron-runner.js";
+import { createRuntimeCronRunner, tickCron, type CronRunner } from "./cron-runner.js";
 import type { CronJob } from "./cron-store.js";
 import { HookRegistry } from "../gateway/hook-registry.js";
 import type { SQLiteDatabase } from "../storage/sqlite.js";
@@ -37,6 +37,88 @@ function mockFail(
     failureMessage
   });
 }
+
+function fakeCronJob(): CronJob {
+  return {
+    id: "cron-test-runtime",
+    name: "Runtime job",
+    prompt: "Summarize the queue.",
+    schedule: "* * * * *",
+    scheduleKind: "cron",
+    skills: [],
+    delivery: "local",
+    status: "active",
+    createdAt: "2030-01-01T00:00:00.000Z",
+    updatedAt: "2030-01-01T00:00:00.000Z",
+    runCount: 0
+  };
+}
+
+function fakeRuntime(text: string) {
+  return {
+    handle: vi.fn(async () => ({ text })),
+    dispose: vi.fn(async () => undefined)
+  };
+}
+
+describe("createRuntimeCronRunner", () => {
+  it("marks empty runtime responses as failures without attempting delivery", async () => {
+    const job = fakeCronJob();
+    const runtime = fakeRuntime("");
+    const deliver = vi.fn();
+    const runner = createRuntimeCronRunner({
+      runtimeFactory: vi.fn(async () => runtime as never),
+      deliver
+    });
+
+    const result = await runner.runJob(job, "exec-empty");
+
+    expect(result.ok).toBe(false);
+    expect(result.delivered).toBe(false);
+    expect(result.deliveryResults.size).toBe(0);
+    expect(result.failureClass).toBe("runtime_error");
+    expect(result.output).toContain("Agent completed but produced empty response (model error, timeout, or misconfiguration)");
+    expect(deliver).not.toHaveBeenCalled();
+    expect(runtime.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves delivery behavior for non-empty runtime responses", async () => {
+    const job = fakeCronJob();
+    const runtime = fakeRuntime("Cron completed.");
+    const perTarget = new Map([["local", { success: true }]]);
+    const deliver = vi.fn(async () => ({ success: true, perTarget }));
+    const runner = createRuntimeCronRunner({
+      runtimeFactory: vi.fn(async () => runtime as never),
+      deliver
+    });
+
+    const result = await runner.runJob(job, "exec-ok");
+
+    expect(result.ok).toBe(true);
+    expect(result.delivered).toBe(true);
+    expect(result.deliveryResults).toBe(perTarget);
+    expect(result.output).toContain("Cron completed.");
+    expect(deliver).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves silent behavior for non-empty silent runtime responses", async () => {
+    const job = fakeCronJob();
+    const runtime = fakeRuntime("[SILENT] Cron completed.");
+    const deliver = vi.fn();
+    const runner = createRuntimeCronRunner({
+      runtimeFactory: vi.fn(async () => runtime as never),
+      deliver
+    });
+
+    const result = await runner.runJob(job, "exec-silent");
+
+    expect(result.ok).toBe(true);
+    expect(result.delivered).toBe(true);
+    expect(result.deliveryResults.size).toBe(0);
+    expect(result.output).toContain("[SILENT] Cron completed.");
+    expect(deliver).not.toHaveBeenCalled();
+  });
+});
 
 describe("tickCron with execution store and job lock", () => {
   let tmpDir: string;
