@@ -38,6 +38,10 @@ export type HistoryPackerOptions = {
   maxEstimatedTokens?: number;
 };
 
+type InternalPackedHistoryMessage = PackedHistoryMessage & {
+  pinned: boolean;
+};
+
 export function deriveSessionHistoryBudget(
   contextWindowTokens: number | undefined,
 ): number {
@@ -65,32 +69,36 @@ export function packSessionHistory(
   );
   const semanticSummary = latestSemanticCompressionSummary(messages);
   const protectedStart = findProtectedStart(conversational, maxProtectedMessages);
+  const pinnedIndexes = pinnedConversationalIndexes(conversational, protectedStart);
   const older = conversational.slice(0, protectedStart);
   const recent = conversational.slice(protectedStart);
   const summary = summarizeOlderTurns(older, maxSummaryChars);
-  let packedMessages: PackedHistoryMessage[] = [
+  let packedMessages: InternalPackedHistoryMessage[] = [
     ...(semanticSummary === undefined
       ? []
       : [{
           role: "system" as const,
-          content: truncate(semanticSummary.content, maxSummaryChars * 2)
+          content: truncate(semanticSummary.content, maxSummaryChars * 2),
+          pinned: false
         }]),
     ...(summary === undefined
       ? []
       : [{
           role: "system" as const,
-          content: summary
+          content: summary,
+          pinned: false
         }]),
-    ...recent.map((message) => ({
+    ...recent.map((message, index) => ({
       role: message.role === "agent" ? "assistant" as const : message.role,
       content: truncate(message.content, maxMessageChars),
-      metadata: message.metadata
+      metadata: message.metadata,
+      pinned: pinnedIndexes.has(protectedStart + index)
     }))
   ];
   packedMessages = trimToTokenBudget(packedMessages, maxEstimatedTokens);
 
   return {
-    messages: packedMessages,
+    messages: packedMessages.map(({ pinned: _pinned, ...message }) => message),
     summary,
     sourceMessageCount: conversational.length,
     summarizedMessageCount: older.length,
@@ -140,7 +148,42 @@ function findProtectedStart(messages: PackableSessionMessage[], maxProtectedMess
     start -= 1;
   }
 
+  const latestUserIndex = findLatestUserIndex(messages);
+  if (latestUserIndex !== undefined && latestUserIndex < start) {
+    start = latestUserIndex;
+  }
+
   return start;
+}
+
+function pinnedConversationalIndexes(messages: PackableSessionMessage[], protectedStart: number): Set<number> {
+  const pinned = new Set<number>();
+  const latestUserIndex = findLatestUserIndex(messages);
+  if (latestUserIndex !== undefined) {
+    pinned.add(latestUserIndex);
+    const adjacent = messages[latestUserIndex + 1];
+    if (adjacent?.role === "agent") {
+      pinned.add(latestUserIndex + 1);
+    }
+  }
+
+  const tailPinStart = latestUserIndex ?? protectedStart;
+  for (let index = Math.max(protectedStart, tailPinStart); index < messages.length; index += 1) {
+    if (messages[index]?.role !== "tool") {
+      pinned.add(index);
+    }
+  }
+
+  return pinned;
+}
+
+function findLatestUserIndex(messages: PackableSessionMessage[]): number | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === "user") {
+      return index;
+    }
+  }
+  return undefined;
 }
 
 function countProtectedToolPairs(messages: PackableSessionMessage[]): number {
@@ -155,7 +198,7 @@ function countProtectedToolPairs(messages: PackableSessionMessage[]): number {
   return pairs;
 }
 
-function trimToTokenBudget(messages: PackedHistoryMessage[], maxEstimatedTokens: number): PackedHistoryMessage[] {
+function trimToTokenBudget(messages: InternalPackedHistoryMessage[], maxEstimatedTokens: number): InternalPackedHistoryMessage[] {
   const trimmed = [...messages];
 
   while (estimateTokens(trimmed) > maxEstimatedTokens && trimmed.length > 1) {
@@ -164,10 +207,14 @@ function trimToTokenBudget(messages: PackedHistoryMessage[], maxEstimatedTokens:
       .map((message, index) => ({
         index,
         tokens: estimateMessageTokensRough(message),
-        importance: messageImportance(message),
-        role: message.role
+        importance: messageImportance(message, summaryCount),
+        role: message.role,
+        pinned: message.pinned
       }))
-      .filter((candidate) => !(candidate.role === "system" && summaryCount <= 1));
+      .filter((candidate) =>
+        !candidate.pinned &&
+        !(candidate.role === "system" && summaryCount <= 1)
+      );
 
     if (candidates.length === 0) {
       break;
@@ -180,10 +227,11 @@ function trimToTokenBudget(messages: PackedHistoryMessage[], maxEstimatedTokens:
   return trimmed;
 }
 
-function messageImportance(message: PackedHistoryMessage): number {
+function messageImportance(message: PackedHistoryMessage, summaryCount: number): number {
   if (message.role === "tool") return 1;
-  if (message.role === "user" || message.role === "assistant") return 2;
-  return 3;
+  if (message.role === "system" && summaryCount > 1) return 2;
+  if (message.role === "user" || message.role === "assistant") return 3;
+  return 4;
 }
 
 function truncate(value: string, maxChars: number): string {
