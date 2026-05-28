@@ -160,13 +160,17 @@ describe("ProviderExecutor fallback behavior", () => {
     registry.register(primary);
     registry.register(fallback);
 
+    const events: ProviderRuntimeEvent[] = [];
     const executor = new ProviderExecutor({ registry });
     const result = await executor.complete(
       { messages: [] },
       {},
       {
         primaryRoute: createRoute("primary", "m1"),
-        fallbackChain: [createRoute("fallback", "m2")]
+        fallbackChain: [createRoute("fallback", "m2")],
+        onEvent: (event) => {
+          events.push(event);
+        }
       }
     );
 
@@ -181,6 +185,12 @@ describe("ProviderExecutor fallback behavior", () => {
       })
     ]);
     expect(fallback.calls.length).toBe(0);
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "provider-attempt-end",
+      provider: "primary",
+      ok: true,
+      willFallback: false
+    }));
   });
 
   it("falls back when successful primary content is empty and has no tool calls", async () => {
@@ -231,6 +241,20 @@ describe("ProviderExecutor fallback behavior", () => {
       ok: false,
       errorClass: "empty-response",
       willFallback: true
+    }));
+    const primaryAttemptEndEvents = events.filter((event) =>
+      event.kind === "provider-attempt-end" &&
+      event.provider === "primary"
+    );
+    expect(primaryAttemptEndEvents).toEqual([
+      expect.objectContaining({
+        ok: false,
+        errorClass: "empty-response",
+        willFallback: true
+      })
+    ]);
+    expect(primaryAttemptEndEvents).not.toContainEqual(expect.objectContaining({
+      ok: true
     }));
   });
 
@@ -340,13 +364,17 @@ describe("ProviderExecutor fallback behavior", () => {
     registry.register(primary);
     registry.register(fallback);
 
+    const events: ProviderRuntimeEvent[] = [];
     const executor = new ProviderExecutor({ registry });
     const result = await executor.complete(
       { messages: [] },
       {},
       {
         primaryRoute: createRoute("primary", "m1"),
-        fallbackChain: [createRoute("fallback", "m2")]
+        fallbackChain: [createRoute("fallback", "m2")],
+        onEvent: (event) => {
+          events.push(event);
+        }
       }
     );
 
@@ -354,6 +382,12 @@ describe("ProviderExecutor fallback behavior", () => {
     expect(result.fallbackUsed).toBe(false);
     expect(result.response?.content).toBe("primary ok");
     expect(fallback.calls.length).toBe(0);
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "provider-attempt-end",
+      provider: "primary",
+      ok: true,
+      willFallback: false
+    }));
   });
 
   it("preserves fallback route metadata during execution", async () => {

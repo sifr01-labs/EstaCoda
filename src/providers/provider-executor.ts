@@ -322,16 +322,18 @@ export class ProviderExecutor {
           content: callResponse.content
         });
 
-        await options.onEvent?.({
-          kind: "provider-attempt-end",
-          provider: route.provider,
-          model: route.id,
-          credentialId: credential?.id,
-          ok: callResponse.ok,
-          errorClass: callResponse.errorClass,
-          fallback: index > 0,
-          willFallback: callWillFallback
-        });
+        if (!callResponse.ok) {
+          await options.onEvent?.({
+            kind: "provider-attempt-end",
+            provider: route.provider,
+            model: route.id,
+            credentialId: credential?.id,
+            ok: callResponse.ok,
+            errorClass: callResponse.errorClass,
+            fallback: index > 0,
+            willFallback: callWillFallback
+          });
+        }
 
         if (callResponse.ok) {
           response = callResponse;
@@ -420,6 +422,16 @@ export class ProviderExecutor {
 
           continue;
         }
+
+        await options.onEvent?.({
+          kind: "provider-attempt-end",
+          provider: route.provider,
+          model: route.id,
+          credentialId: credential?.id,
+          ok: true,
+          fallback: index > 0,
+          willFallback: false
+        });
 
         for (const toolCall of extractedToolCalls) {
           toolCalls.push(toolCall);

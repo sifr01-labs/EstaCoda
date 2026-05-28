@@ -197,6 +197,25 @@ describe("terminal.run hardline floor", () => {
     expect(result?.metadata?._estacoda_context_summary).toContain("stderr: 1 lines / 4 chars.");
   });
 
+  it("bounds terminal context summaries for very long commands", async () => {
+    const root = await makeTempDir();
+    const tools = createWorkspaceTools({ workspaceRoot: root, commandTimeoutMs: 1000 });
+    const terminal = tools.find((tool) => tool.name === "terminal.run");
+    const longComment = "long-command-fragment ".repeat(80);
+    const command = `printf 'ok\\n'; # ${longComment}`;
+
+    const result = await terminal?.run({ command });
+    const summary = result?.metadata?._estacoda_context_summary;
+
+    expect(result?.ok).toBe(true);
+    expect(typeof summary).toBe("string");
+    expect(summary?.length).toBeLessThanOrEqual(500);
+    expect(summary).toContain("exited with code 0.");
+    expect(summary).toContain("stdout: 1 lines / 3 chars.");
+    expect(summary).toContain("stderr: 0 lines / 0 chars.");
+    expect(summary).not.toContain(longComment);
+  });
+
   it("rejects hardBlock commands inside the tool handler", async () => {
     const root = await makeTempDir();
     const tools = createWorkspaceTools({ workspaceRoot: root });

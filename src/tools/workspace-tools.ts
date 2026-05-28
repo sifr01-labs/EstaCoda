@@ -25,6 +25,8 @@ const DEFAULT_MAX_READ_BYTES = 48_000;
 const DEFAULT_MAX_SEARCH_RESULTS = 80;
 const DEFAULT_COMMAND_TIMEOUT_MS = 30_000;
 const FILE_CHANGE_PREVIEW_LINES = 8;
+const MAX_TERMINAL_CONTEXT_SUMMARY_CHARS = 500;
+const MAX_TERMINAL_CONTEXT_COMMAND_CHARS = 220;
 const SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", ".next", ".turbo"]);
 
 type ResolvedWorkspacePath =
@@ -829,11 +831,19 @@ function terminalContextSummary(input: {
   stdout: string;
   stderr: string;
 }): string {
-  return [
-    `Command ${JSON.stringify(input.command)} exited with code ${input.code ?? "signal"}.`,
+  return boundText([
+    `Command ${terminalCommandLabel(input.command)} exited with code ${input.code ?? "signal"}.`,
     `stdout: ${lineCount(input.stdout)} lines / ${input.stdout.length} chars.`,
     `stderr: ${lineCount(input.stderr)} lines / ${input.stderr.length} chars.`
-  ].join(" ");
+  ].join(" "), MAX_TERMINAL_CONTEXT_SUMMARY_CHARS);
+}
+
+function terminalCommandLabel(command: string): string {
+  return boundText(JSON.stringify(command), MAX_TERMINAL_CONTEXT_COMMAND_CHARS);
+}
+
+function boundText(value: string, maxChars: number): string {
+  return value.length <= maxChars ? value : `${value.slice(0, Math.max(0, maxChars - 3))}...`;
 }
 
 function lineCount(value: string): number {
