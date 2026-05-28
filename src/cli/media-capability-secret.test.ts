@@ -1,11 +1,18 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { runCliCommand } from "./cli.js";
+import { resolveProfileStateHome } from "../config/profile-home.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-media-secret-test-"));
+}
+
+async function writeProfileConfig(homeDir: string, config: unknown): Promise<void> {
+  const configPath = resolveProfileStateHome({ homeDir, profileId: "default" }).configPath;
+  await mkdir(dirname(configPath), { recursive: true });
+  await writeFile(configPath, JSON.stringify(config));
 }
 
 async function withEnv<T>(updates: Record<string, string | undefined>, run: () => Promise<T>): Promise<T> {
@@ -131,5 +138,102 @@ describe("media capability setup does not render raw secrets", () => {
       expect(result.output).toContain("STT readiness: ready");
       expect(result.output).toContain("Auto-TTS replies: disabled");
     });
+  });
+
+  it("voice status and settings show managed faster-whisper local STT", async () => {
+    await writeProfileConfig(tempDir, {
+      stt: {
+        provider: "local",
+        local: {
+          engine: "faster-whisper",
+          fasterWhisper: {
+            enabled: true,
+            model: "small"
+          }
+        }
+      }
+    });
+
+    const status = await runCliCommand({
+      argv: ["voice", "status"],
+      workspaceRoot: tempDir,
+      homeDir: tempDir,
+    });
+    expect(status.output).toContain("STT: local faster-whisper, model small");
+    expect(status.output).toContain("STT Python: managed: EstaCoda Python environment");
+    expect(status.output).toContain("STT model: small");
+
+    const settings = await runCliCommand({
+      argv: ["settings"],
+      workspaceRoot: tempDir,
+      homeDir: tempDir,
+    });
+    expect(settings.output).toContain("STT local faster-whisper, model small");
+    expect(settings.output).toContain("Voice STT Python: managed: EstaCoda Python environment");
+  });
+
+  it("voice status shows custom Python for local faster-whisper", async () => {
+    await writeProfileConfig(tempDir, {
+      stt: {
+        provider: "local",
+        local: {
+          engine: "faster-whisper",
+          pythonBinary: "/x/python",
+          fasterWhisper: {
+            enabled: true,
+            model: "base"
+          }
+        }
+      }
+    });
+
+    const status = await runCliCommand({
+      argv: ["voice", "status"],
+      workspaceRoot: tempDir,
+      homeDir: tempDir,
+    });
+
+    expect(status.output).toContain("STT: local faster-whisper, model base");
+    expect(status.output).toContain("STT Python: custom: /x/python");
+  });
+
+  it("voice status does not describe command-mode or cloud STT as managed faster-whisper", async () => {
+    await writeProfileConfig(tempDir, {
+      stt: {
+        provider: "local",
+        local: {
+          engine: "command",
+          command: "mock-stt",
+          model: "command-model"
+        }
+      }
+    });
+
+    const commandStatus = await runCliCommand({
+      argv: ["voice", "status"],
+      workspaceRoot: tempDir,
+      homeDir: tempDir,
+    });
+    expect(commandStatus.output).toContain("STT: local command, model command-model");
+    expect(commandStatus.output).not.toContain("STT: local faster-whisper");
+    expect(commandStatus.output).not.toContain("STT Python: managed");
+
+    await writeProfileConfig(tempDir, {
+      stt: {
+        provider: "openai",
+        openai: {
+          apiKeyEnv: "VOICE_TOOLS_OPENAI_KEY"
+        }
+      }
+    });
+
+    const cloudStatus = await runCliCommand({
+      argv: ["voice", "status"],
+      workspaceRoot: tempDir,
+      homeDir: tempDir,
+    });
+    expect(cloudStatus.output).toContain("STT: openai, model whisper-1");
+    expect(cloudStatus.output).not.toContain("STT Python:");
+    expect(cloudStatus.output).not.toContain("managed: EstaCoda Python environment");
   });
 });

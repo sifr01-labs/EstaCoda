@@ -10,12 +10,36 @@ import { renderPlain } from "../ui/renderers/plain-renderer.js";
 import type { ViewModel } from "../contracts/view-model.js";
 import type { Locale } from "../ui/settings-labels.js";
 import { formatSkillAutonomy, formatSecurityMode } from "../ui/settings-labels.js";
+import { isFasterWhisperConfig } from "../tools/stt-providers.js";
 
 // ──────────────────────────────────────
 type SettingsViewModelResult = { viewModel: ViewModel; render: () => string };
+type SttConfig = LoadedRuntimeConfig["stt"];
 
 function result(viewModel: ViewModel): SettingsViewModelResult {
   return { viewModel, render: () => renderPlain(viewModel) };
+}
+
+function formatSettingsStt(stt: SttConfig): string {
+  if (stt.provider === "local") {
+    const model = isFasterWhisperConfig(stt)
+      ? stt.local?.fasterWhisper?.model ?? stt.local?.model ?? "base"
+      : stt.local?.model ?? "base";
+    return isFasterWhisperConfig(stt)
+      ? `local faster-whisper, model ${model}`
+      : `local command, model ${model}`;
+  }
+  return stt.provider;
+}
+
+function formatSettingsSttPython(stt: SttConfig): string | undefined {
+  if (stt.provider !== "local" || !isFasterWhisperConfig(stt)) {
+    return undefined;
+  }
+  const pythonBinary = stt.local?.pythonBinary;
+  return pythonBinary === undefined || pythonBinary.length === 0
+    ? "managed: EstaCoda Python environment"
+    : `custom: ${pythonBinary}`;
 }
 
 // ──────────────────────────────────────
@@ -23,6 +47,7 @@ function result(viewModel: ViewModel): SettingsViewModelResult {
 // ──────────────────────────────────────
 
 export function buildSettingsOverviewViewModel(config: LoadedRuntimeConfig): ViewModel {
+  const sttPython = formatSettingsSttPython(config.stt);
   return buildCommandResultViewModel({
     ok: true,
     title: "EstaCoda settings",
@@ -34,7 +59,8 @@ export function buildSettingsOverviewViewModel(config: LoadedRuntimeConfig): Vie
           kv("Profile", `${config.profile.mode} (${config.profile.responseLanguage})`),
           kv("UI", `${config.ui.language} / ${config.ui.flavor} / labels:${config.ui.activityLabels}`),
           kv("Workflow learning", config.skills.autonomy),
-          kv("Voice", `TTS ${config.tts.provider}, STT ${config.stt.provider}, auto-TTS ${config.voice.autoTts ? "on" : "off"}, CLI mode via estacoda voice mode`),
+          kv("Voice", `TTS ${config.tts.provider}, STT ${formatSettingsStt(config.stt)}, auto-TTS ${config.voice.autoTts ? "on" : "off"}, CLI mode via estacoda voice mode`),
+          ...(sttPython === undefined ? [] : [kv("Voice STT Python", sttPython)]),
           kv("Web extraction", config.web.enableNetwork ? "enabled" : "disabled"),
           kv("Browser backend", config.browser.backend),
           kv("MCP servers", Object.keys(config.mcp.servers).length),

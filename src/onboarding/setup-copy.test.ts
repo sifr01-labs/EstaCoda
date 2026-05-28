@@ -367,6 +367,25 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.summary")).not.toContain("OAuth");
     expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.useGateway")).toContain(isolateLtr("image gateway"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.ttsProvider")).toContain(isolateLtr("TTS"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.summary")).toContain(isolateLtr("faster-whisper"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.summary")).toContain(isolateLtr("pythonBinary"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.summary")).toContain(isolateLtr("~/.estacoda/python-env"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.summary")).toContain(isolateLtr("~/.estacoda/cache/huggingface"));
+  });
+
+  it("describes managed local STT as the normal onboarding path", () => {
+    const english = rawSetupCopy("en", "setupEditor.prompt.voice.summary");
+    expect(english).toContain("Local STT uses managed faster-whisper by default");
+    expect(english).toContain("~/.estacoda/python-env");
+    expect(english).toContain("~/.estacoda/cache/huggingface");
+    expect(english).toContain("Onboarding does not ask for pythonBinary");
+    expect(english).toContain("custom Python stay outside the normal onboarding path");
+
+    const arabic = resolveSetupCopy("ar", "setupEditor.prompt.voice.summary");
+    expect(arabic).toContain(isolateLtr("faster-whisper"));
+    expect(arabic).toContain(isolateLtr("pythonBinary"));
+    expect(arabic).toContain(isolateLtr("~/.estacoda/python-env"));
+    expect(arabic).toContain(isolateLtr("~/.estacoda/cache/huggingface"));
   });
 
   it("can return raw Arabic source copy without isolation for review tooling", () => {

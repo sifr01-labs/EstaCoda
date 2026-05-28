@@ -67,6 +67,7 @@ import { resolveHomeDir } from "../config/home-dir.js";
 import { resolveStateHome } from "../config/state-home.js";
 import { defaultProfileId, normalizeProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
 import { checkManagedEnvironment, createManagedEnvironment } from "../python-env/manager.js";
+import { isFasterWhisperConfig } from "../tools/stt-providers.js";
 import { runSessionsCommand } from "./session-commands.js";
 import { runHandoffCommand } from "./handoff-commands.js";
 import { createFileCronJobLock } from "../cron/cron-lock.js";
@@ -2512,6 +2513,7 @@ function renderVoiceStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>
   const sttKey = sttApiKeyEnv(config.stt.provider, config);
   const ttsStatus = checkTtsProviderStatus(config.tts.provider, config.tts);
   const sttStatus = checkSttProviderStatus(config.stt.provider, config.stt);
+  const sttPython = sttPythonSource(config);
 
   return [
     "EstaCoda voice",
@@ -2521,6 +2523,8 @@ function renderVoiceStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>
     `TTS voice: ${ttsVoice(config.tts.provider, config)}`,
     `TTS speed: ${config.tts.speed}`,
     `TTS API key: ${ttsKey === undefined ? "none" : ttsKey}`,
+    `STT: ${sttSummary(config)}`,
+    ...(sttPython === undefined ? [] : [`STT Python: ${sttPython}`]),
     `STT provider: ${config.stt.provider}`,
     `STT readiness: ${formatVoiceReadiness(sttStatus)}`,
     `STT model: ${sttModel(config.stt.provider, config)}`,
@@ -2533,6 +2537,25 @@ function renderVoiceStatus(config: Awaited<ReturnType<typeof loadRuntimeConfig>>
     "Platform delivery: CLI audio cache, Telegram voice bubble when Opus/OGG conversion is available; otherwise audio file fallback.",
     "Change with: estacoda voice setup --tts-provider edge|openai|elevenlabs|minimax|mistral|gemini|xai|neutts|kittentts --stt-provider local|groq|openai|mistral|xai"
   ].join("\n");
+}
+
+function sttSummary(config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string {
+  if (config.stt.provider === "local") {
+    return isFasterWhisperConfig(config.stt)
+      ? `local faster-whisper, model ${sttModel("local", config)}`
+      : `local command, model ${sttModel("local", config)}`;
+  }
+  return `${config.stt.provider}, model ${sttModel(config.stt.provider, config)}`;
+}
+
+function sttPythonSource(config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string | undefined {
+  if (config.stt.provider !== "local" || !isFasterWhisperConfig(config.stt)) {
+    return undefined;
+  }
+  const pythonBinary = config.stt.local?.pythonBinary;
+  return pythonBinary === undefined || pythonBinary.length === 0
+    ? "managed: EstaCoda Python environment"
+    : `custom: ${pythonBinary}`;
 }
 
 function formatVoiceReadiness(status: ReturnType<typeof checkTtsProviderStatus> | ReturnType<typeof checkSttProviderStatus>): string {
@@ -2609,7 +2632,9 @@ function ttsApiKeyEnv(provider: TtsProvider, config: Awaited<ReturnType<typeof l
 function sttModel(provider: Awaited<ReturnType<typeof loadRuntimeConfig>>["stt"]["provider"], config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string {
   switch (provider) {
     case "local":
-      return config.stt.local?.model ?? "base";
+      return isFasterWhisperConfig(config.stt)
+        ? config.stt.local?.fasterWhisper?.model ?? config.stt.local?.model ?? "base"
+        : config.stt.local?.model ?? "base";
     case "groq":
       return config.stt.groq?.model ?? "whisper-large-v3";
     case "openai":
