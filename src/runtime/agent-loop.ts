@@ -677,10 +677,19 @@ export class AgentLoop {
       toolExecutions,
       toolPlans
     });
+    const rawProviderContent = effectiveProviderExecution?.ok === true
+      ? (effectiveProviderExecution.response?.content ?? "")
+      : "";
+    const providerReturnedEmptyContent =
+      effectiveProviderExecution?.ok === true &&
+      rawProviderContent.trim().length === 0;
+    const displayText = providerReturnedEmptyContent
+      ? "I completed the requested actions but did not produce any visible output."
+      : rawProviderContent;
     const response = effectiveProviderExecution?.ok === true && effectiveProviderExecution.response !== undefined
       ? {
           ...fallbackResponse,
-          text: appendArtifactSummary(effectiveProviderExecution.response.content, artifacts),
+          text: appendArtifactSummary(displayText, artifacts),
           toolExecutions,
           toolPlans,
           skillOutcomes,
@@ -1238,6 +1247,16 @@ function outcomeFromResponse(response: AgentLoopResponse): {
   success: boolean;
   summary: string;
 } {
+  if (
+    response.providerExecution?.ok === true &&
+    (response.providerExecution.response?.content ?? "").trim().length === 0
+  ) {
+    return {
+      success: false,
+      summary: "Provider turn succeeded but returned empty visible content."
+    };
+  }
+
   if (response.providerExecution?.ok === false) {
     return {
       success: false,

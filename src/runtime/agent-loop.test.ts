@@ -9,6 +9,7 @@ import type { SecurityPolicy } from "../contracts/security.js";
 import type { SkillDefinition } from "../contracts/skill.js";
 import type { ToolDefinition } from "../contracts/tool.js";
 import type { TrajectoryStore } from "../contracts/trajectory-store.js";
+import type { ProviderExecutionResult } from "../providers/provider-executor.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { SESSION_RECALL_UNTRUSTED_NOTICE, type SessionRecallService } from "../session/session-recall-service.js";
@@ -101,6 +102,45 @@ const execution: ToolExecutionRecord = {
   }
 };
 
+function successfulProviderExecution(content: string): ProviderExecutionResult {
+  return {
+    ok: true,
+    response: {
+      ok: true,
+      content,
+      model: model.id,
+      provider: model.provider
+    },
+    fallbackUsed: false,
+    attempts: [
+      {
+        provider: model.provider,
+        model: model.id,
+        ok: true,
+        content
+      }
+    ],
+    toolCalls: []
+  };
+}
+
+function failedProviderExecution(): ProviderExecutionResult {
+  return {
+    ok: false,
+    fallbackUsed: false,
+    attempts: [
+      {
+        provider: model.provider,
+        model: model.id,
+        ok: false,
+        errorClass: "network",
+        content: "network unavailable"
+      }
+    ],
+    toolCalls: []
+  };
+}
+
 const securityPolicy: SecurityPolicy = {
   decide: () => "allow"
 };
@@ -115,6 +155,7 @@ async function createAgentLoop(input: {
   compressionConfig?: SessionCompressionConfig;
   memoryProvider?: MemoryProvider;
   trajectoryStore?: Pick<TrajectoryStore, "saveTrajectory">;
+  providerExecution?: ProviderExecutionResult;
 }) {
   const sessionDb = new InMemorySessionDB();
   const sessionId = `agent-loop-test-${Date.now()}-${Math.random()}`;
@@ -175,9 +216,9 @@ async function createAgentLoop(input: {
     lastPromptTokens: vi.fn(() => 77),
     lastActualPromptTokens: vi.fn(() => 88),
     run: vi.fn(async () => ({
-      providerExecution: undefined,
+      providerExecution: input.providerExecution,
       toolExecutions: [],
-      iterations: 0
+      iterations: input.providerExecution === undefined ? 0 : 1
     }))
   } as unknown as ProviderTurnLoop;
 
@@ -263,6 +304,72 @@ describe("AgentLoop provider availability gating", () => {
     expect(providerTurnLoop.canRunProvider).toHaveBeenCalled();
     expect(executeSkillWorkflow).not.toHaveBeenCalled();
     expect(response.toolExecutions).toHaveLength(0);
+  });
+
+  it("renders a dedicated message when a successful provider response is empty", async () => {
+    const { loop } = await createAgentLoop({
+      canRunProvider: true,
+      executeSkillWorkflow: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("")
+    });
+
+    const response = await loop.handle({
+      text: "use the test skill",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(response.text).toBe("I completed the requested actions but did not produce any visible output.");
+  });
+
+  it("renders a dedicated message when a successful provider response is whitespace-only", async () => {
+    const { loop } = await createAgentLoop({
+      canRunProvider: true,
+      executeSkillWorkflow: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("   \n\t")
+    });
+
+    const response = await loop.handle({
+      text: "use the test skill",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(response.text).toBe("I completed the requested actions but did not produce any visible output.");
+  });
+
+  it("passes through non-empty successful provider content unchanged", async () => {
+    const { loop } = await createAgentLoop({
+      canRunProvider: true,
+      executeSkillWorkflow: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("real answer")
+    });
+
+    const response = await loop.handle({
+      text: "use the test skill",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(response.text).toBe("real answer");
+  });
+
+  it("keeps failed provider responses on the existing fallback path", async () => {
+    const { loop } = await createAgentLoop({
+      canRunProvider: true,
+      executeSkillWorkflow: vi.fn(async () => []),
+      providerExecution: failedProviderExecution()
+    });
+
+    const response = await loop.handle({
+      text: "use the test skill",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(response.text).toContain("I matched the test-skill skill");
+    expect(response.text).toContain("Provider note:");
+    expect(response.text).not.toBe("I completed the requested actions but did not produce any visible output.");
   });
 
   it("persists the trajectory snapshot when a turn returns successfully", async () => {
