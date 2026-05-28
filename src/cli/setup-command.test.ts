@@ -204,7 +204,7 @@ describe("cli setup command", () => {
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain("Setup diagnostics");
     expect(result.output).toContain("State: configured-degraded");
-    expect(result.output).toContain("Route: configured-degraded-menu");
+    expect(result.output).toContain("Setup path: configured-degraded-menu");
     expect(result.output).toContain("Configured model context window is below 64K tokens.");
     expect(result.output).not.toContain("Available actions:");
     expect(result.output).not.toContain("Sections:");
@@ -242,7 +242,7 @@ describe("cli setup command", () => {
       expect(result.handled).toBe(true);
       expect(result.output).toContain("Setup diagnostics");
       expect(result.output).toContain("State: missing-secret");
-      expect(result.output).toContain("Route: repair-first-menu");
+      expect(result.output).toContain("Setup path: repair-first-menu");
       expect(result.output).toContain("Blockers:");
       expect(result.output).toContain("OPENAI_API_KEY");
       expect(result.output).not.toContain("Available actions:");
@@ -275,7 +275,7 @@ describe("cli setup command", () => {
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain("Setup diagnostics");
     expect(result.output).toContain("State: broken-config");
-    expect(result.output).toContain("Route: repair-first-menu");
+    expect(result.output).toContain("Setup path: repair-first-menu");
     expect(result.output).toContain(configPath);
     expect(result.output).toContain("Normal config edits are blocked until the config file can be parsed.");
     expect(result.output).toContain("Only diagnostics, verification, and exit are available");
@@ -324,7 +324,7 @@ describe("cli setup command", () => {
     expect(result.handled).toBe(true);
     expect(result.output).toContain("Setup diagnostics");
     expect(result.output).toContain("State: state-not-writable");
-    expect(result.output).toContain("Route: repair-first-menu");
+    expect(result.output).toContain("Setup path: repair-first-menu");
     expect(result.output).toContain(profileConfigPath(tempDir));
     expect(result.output).toContain("fix-state-directory");
     expect(result.output).toContain("Restore write permission");
@@ -384,7 +384,7 @@ function firstRunPrompt(options: FirstRunPromptOptions): Prompt {
     if (title.includes("provider")) {
       return valueOrDefault(selection, "local");
     }
-    if (title.includes("guided setup editor") && options.setupEditorActionId !== undefined) {
+    if (title.includes("setup editor") && options.setupEditorActionId !== undefined) {
       return valueWithIdOrDefault(selection, options.setupEditorActionId);
     }
     if (title.includes("review")) {

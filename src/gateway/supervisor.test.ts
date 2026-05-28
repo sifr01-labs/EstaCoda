@@ -1080,6 +1080,7 @@ describe("runGatewaySupervisor", () => {
         discord: {
           enabled: true,
           botTokenEnv: "DISCORD_BOT_TOKEN",
+          allowedUsers: ["user-1"],
           voiceChannel: { enabled: true, autoJoinOnCommand: true }
         }
       },
@@ -1105,6 +1106,7 @@ describe("runGatewaySupervisor", () => {
         enabled: true,
         autoJoinOnCommand: true
       });
+      expect(capturedDiscordOptions.allowedUsers).toEqual(["user-1"]);
       expect(capturedDiscordOptions.voiceTempRoot).toBe(join(profilePaths.tempPath, "audio"));
     } finally {
       if (previousToken === undefined) {
