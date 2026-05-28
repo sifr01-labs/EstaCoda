@@ -85,7 +85,7 @@ describe("voice setup managed local STT", () => {
     });
   });
 
-  it("uses an already-ready managed Python environment without reinstalling", async () => {
+  it("uses an already-ready managed Python environment without storing it as a custom override", async () => {
     pythonEnvMock.checkManagedEnvironment.mockResolvedValue({
       kind: "ready",
       pythonBinary: "/state/python-env/bin/python"
@@ -99,16 +99,16 @@ describe("voice setup managed local STT", () => {
     expect((await readProfileConfig(homeDir)).stt.local).toMatchObject({
       model: "small",
       engine: "faster-whisper",
-      pythonBinary: "/state/python-env/bin/python",
       fasterWhisper: {
         enabled: true,
         model: "small",
         allowModelDownload: true
       }
     });
+    expect((await readProfileConfig(homeDir)).stt.local).not.toHaveProperty("pythonBinary");
   });
 
-  it("creates a missing managed Python environment and writes the returned binary", async () => {
+  it("creates a missing managed Python environment without storing it as a custom override", async () => {
     pythonEnvMock.checkManagedEnvironment.mockResolvedValue({ kind: "missing" });
     pythonEnvMock.createManagedEnvironment.mockImplementation(async (_options, onProgress) => {
       onProgress?.("Creating managed Python environment...");
@@ -123,7 +123,7 @@ describe("voice setup managed local STT", () => {
     expect(result.output).toContain("Local STT setup will create EstaCoda's managed Python environment");
     expect(result.output).toContain("Installing faster-whisper==1.2.1...");
     expect(result.output).not.toContain("Collecting faster-whisper");
-    expect((await readProfileConfig(homeDir)).stt.local.pythonBinary).toBe("/state/python-env/bin/python");
+    expect((await readProfileConfig(homeDir)).stt.local).not.toHaveProperty("pythonBinary");
   });
 
   it("attempts creation for a corrupted managed Python environment", async () => {
@@ -134,7 +134,7 @@ describe("voice setup managed local STT", () => {
 
     expect(result.exitCode).toBe(0);
     expect(pythonEnvMock.createManagedEnvironment).toHaveBeenCalledTimes(1);
-    expect((await readProfileConfig(homeDir)).stt.local.pythonBinary).toBe("/state/python-env/bin/python");
+    expect((await readProfileConfig(homeDir)).stt.local).not.toHaveProperty("pythonBinary");
   });
 
   it("does not write local STT config when managed environment creation fails", async () => {

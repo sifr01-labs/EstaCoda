@@ -294,6 +294,33 @@ describe("injectVoiceTranscripts", () => {
     expect(transcribe).not.toHaveBeenCalled();
   });
 
+  it("uses the default managed Hugging Face cache before denying gateway downloads", async () => {
+    const roots = await createRoots();
+    const defaultHfHome = await mkdtemp(join(tmpdir(), "estacoda-fw-default-gateway-cache-"));
+    await mkdir(join(defaultHfHome, "hub", "models--Systran--faster-whisper-base"), { recursive: true });
+    const audio = join(roots.mediaRoot, "voice.ogg");
+    await writeFile(audio, "audio");
+    const transcribe = vi.fn(async () => ({ ok: true, text: "cached transcript", model: "base" }));
+
+    const result = await injectVoiceTranscripts(message({
+      attachments: [
+        { id: "voice-1", kind: "voice", status: "ready", localPath: audio }
+      ]
+    }), {
+      stt: {
+        provider: "local",
+        enabled: true,
+        local: { engine: "faster-whisper", model: "base", fasterWhisper: { enabled: true } }
+      },
+      allowedRoots: [roots.mediaRoot, roots.audioRoot],
+      fasterWhisperDefaultHfHome: defaultHfHome,
+      localWhisper: { transcribe } as any
+    });
+
+    expect(result.text).toContain("[Voice message transcript]\ncached transcript");
+    expect(transcribe).toHaveBeenCalledTimes(1);
+  });
+
   it("audits validation failures before provider dispatch", async () => {
     const roots = await createRoots();
     const audio = join(roots.mediaRoot, "voice.txt");

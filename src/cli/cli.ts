@@ -2288,9 +2288,9 @@ async function voice(options: CliOptions, args: string[]): Promise<CliCommandRes
     if (explicitSttInput && effectiveSttProvider === "local" && parsed.pythonBinary === undefined) {
       const globalPaths = resolveGlobalStateHome({ homeDir: options.homeDir });
       const status = await checkManagedEnvironment({ stateRoot: globalPaths.stateRoot });
-      if (status.kind === "ready") {
-        parsed.pythonBinary = status.pythonBinary;
-      } else {
+      // The managed venv is the default runtime path; only explicit --python-binary
+      // values should be persisted as custom Python overrides.
+      if (status.kind !== "ready") {
         const disclosure = "Local STT setup will create EstaCoda's managed Python environment and install pinned faster-whisper==1.2.1.";
         if (options.interactive !== false && (options.prompt !== undefined || canRunInteractive())) {
           const prompt = options.prompt ?? createReadlinePrompt();
@@ -2320,7 +2320,6 @@ async function voice(options: CliOptions, args: string[]): Promise<CliCommandRes
             ].join("\n")
           };
         }
-        parsed.pythonBinary = envResult.pythonBinary;
       }
     }
 

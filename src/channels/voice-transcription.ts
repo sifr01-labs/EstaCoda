@@ -26,6 +26,7 @@ export type VoiceTranscriptionAuditEvent = {
 export type ChannelVoiceTranscriptionOptions = {
   stt: LoadedRuntimeConfig["stt"];
   allowedRoots?: string[];
+  fasterWhisperDefaultHfHome?: string;
   fetch?: VoiceFetchLike;
   localWhisper?: FasterWhisperWorkerClient;
   voiceStateManager?: VoiceStateManager;
@@ -76,7 +77,7 @@ export async function injectVoiceTranscripts(
       notes.push(`[Voice transcript unavailable for ${attachmentLabel(attachment)}]\nSTT provider unavailable: ${status.reason}`);
       continue;
     }
-    if (isGatewayFasterWhisperDownloadDenied(options.stt)) {
+    if (isGatewayFasterWhisperDownloadDenied(options.stt, undefined, options.fasterWhisperDefaultHfHome)) {
       const reason = "Gateway faster-whisper first-run model downloads are disabled";
       await emitAudit(options, auditEvent("deny", options.stt, attachment, resolvedPath.path, reason));
       notes.push(`[Voice transcript unavailable for ${attachmentLabel(attachment)}]\n${reason}`);
@@ -95,7 +96,8 @@ export async function injectVoiceTranscripts(
       stt: options.stt,
       fetch: options.fetch,
       localWhisper: options.localWhisper,
-      gateway: true
+      gateway: true,
+      fasterWhisperDefaultHfHome: options.fasterWhisperDefaultHfHome
     });
     if (result.ok) {
       consumedAttachmentIds.add(attachment.id);

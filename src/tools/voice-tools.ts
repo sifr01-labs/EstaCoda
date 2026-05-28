@@ -384,6 +384,7 @@ export async function transcribeAudioFile(input: {
   audioCacheRoot?: string;
   tempRoot?: string;
   gateway?: boolean;
+  fasterWhisperDefaultHfHome?: string;
   signal?: AbortSignal;
 }): Promise<
   | { ok: true; text: string; model: string; language?: string; duration?: number; words?: unknown; channels?: unknown; metadata?: Record<string, unknown> }

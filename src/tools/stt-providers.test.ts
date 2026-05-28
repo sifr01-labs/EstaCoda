@@ -393,4 +393,20 @@ describe("STT risk classification", () => {
     await mkdir(join(hfHome, "hub", "models--Systran--faster-whisper-small"), { recursive: true });
     expect(isGatewayFasterWhisperDownloadDenied(stt)).toBe(false);
   });
+
+  it("checks the default managed Hugging Face cache when hfHome is not configured", async () => {
+    const defaultHfHome = await mkdtemp(join(tmpdir(), "estacoda-fw-default-cache-"));
+    await mkdir(join(defaultHfHome, "hub", "models--Systran--faster-whisper-base"), { recursive: true });
+    const stt: LoadedRuntimeConfig["stt"] = {
+      provider: "local",
+      enabled: true,
+      local: {
+        engine: "faster-whisper",
+        model: "base",
+        fasterWhisper: { enabled: true }
+      }
+    };
+
+    expect(isGatewayFasterWhisperDownloadDenied(stt, undefined, defaultHfHome)).toBe(false);
+  });
 });

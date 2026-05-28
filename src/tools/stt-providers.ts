@@ -35,6 +35,7 @@ export type SpeechTranscriptionInput = {
   audioCacheRoot?: string;
   tempRoot?: string;
   gateway?: boolean;
+  fasterWhisperDefaultHfHome?: string;
 };
 
 export type SttRiskResult =
@@ -88,6 +89,7 @@ export function computeSttRiskClass(input: {
   gateway?: boolean;
   ffmpegAvailable?: boolean;
   fasterWhisperModelCached?: boolean;
+  fasterWhisperDefaultHfHome?: string;
 }): SttRiskResult {
   if (input.stt.enabled === false) {
     return { available: false, riskClass: "unavailable", reason: "STT disabled" };
@@ -96,7 +98,8 @@ export function computeSttRiskClass(input: {
     return { available: true, riskClass: "external-side-effect" };
   }
   if (isFasterWhisperConfig(input.stt)) {
-    const cached = input.fasterWhisperModelCached ?? isFasterWhisperModelCached(input.stt);
+    const cached = input.fasterWhisperModelCached ??
+      isFasterWhisperModelCached(input.stt, undefined, input.fasterWhisperDefaultHfHome);
     if (cached) {
       return { available: true, riskClass: "workspace-write" };
     }
@@ -114,10 +117,14 @@ export function computeSttRiskClass(input: {
   return { available: true, riskClass: "read-only-local" };
 }
 
-export function isGatewayFasterWhisperDownloadDenied(config: LoadedRuntimeConfig["stt"], model?: string): boolean {
+export function isGatewayFasterWhisperDownloadDenied(
+  config: LoadedRuntimeConfig["stt"],
+  model?: string,
+  defaultHfHome?: string
+): boolean {
   return config.provider === "local" &&
     isFasterWhisperConfig(config) &&
-    !isFasterWhisperModelCached(config, model) &&
+    !isFasterWhisperModelCached(config, model, defaultHfHome) &&
     !fasterWhisperDownloadAllowed(config, true);
 }
 
@@ -134,7 +141,12 @@ export async function transcribeSpeech(input: SpeechTranscriptionInput): Promise
   if (!audioValidation.ok) {
     return audioValidation;
   }
-  const risk = computeSttRiskClass({ stt: input.stt, path: input.path, gateway: input.gateway });
+  const risk = computeSttRiskClass({
+    stt: input.stt,
+    path: input.path,
+    gateway: input.gateway,
+    fasterWhisperDefaultHfHome: input.fasterWhisperDefaultHfHome
+  });
   if (!risk.available) {
     return {
       ok: false,
@@ -431,11 +443,15 @@ function fasterWhisperDownloadAllowed(stt: LoadedRuntimeConfig["stt"], gateway?:
     stt.local?.fasterWhisper?.gatewayAllowModelDownload === true;
 }
 
-export function isFasterWhisperModelCached(stt: LoadedRuntimeConfig["stt"], model?: string): boolean {
+export function isFasterWhisperModelCached(
+  stt: LoadedRuntimeConfig["stt"],
+  model?: string,
+  defaultHfHome?: string
+): boolean {
   if (stt.local?.fasterWhisper?.modelCached === true) {
     return true;
   }
-  const hfHome = stt.local?.fasterWhisper?.hfHome;
+  const hfHome = stt.local?.fasterWhisper?.hfHome ?? defaultHfHome;
   if (hfHome === undefined || hfHome.length === 0) {
     return false;
   }

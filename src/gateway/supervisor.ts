@@ -413,6 +413,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
   const profileId = options.profileId ?? readActiveProfile({ homeDir })?.profileId ?? defaultProfileId();
   const profilePaths = resolveProfileStateHome({ homeDir, profileId });
   const globalStateRoot = join(homeDir, ".estacoda");
+  const fasterWhisperDefaultHfHome = join(globalStateRoot, "cache", "huggingface");
   const trustStorePath = join(homeDir, ".estacoda", "trust.json");
 
   const loadConfig = () => loadRuntimeConfig({
@@ -1027,6 +1028,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
             return injectVoiceTranscripts(message, {
               stt: latestConfig.stt,
               allowedRoots: [profilePaths.channelMediaPath, profilePaths.audioCachePath, join(profilePaths.tempPath, "audio")],
+              fasterWhisperDefaultHfHome,
               voiceStateManager,
               audit: voiceAudit
             });
@@ -1101,6 +1103,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
             return injectVoiceTranscripts(message, {
               stt: latestConfig.stt,
               allowedRoots: [profilePaths.channelMediaPath, profilePaths.audioCachePath, join(profilePaths.tempPath, "audio")],
+              fasterWhisperDefaultHfHome,
               voiceStateManager,
               audit: voiceAudit
             });
