@@ -507,8 +507,9 @@ describe("runFirstRunSetup", () => {
       workspaceRoot,
       prompt: fakePrompt({
         "Primary provider": "OpenAI",
-        Voice: true,
-        "Vision and Image Generation": true,
+        "Optional capabilities": "Yes",
+        "Configure optional capability": "Configure voice",
+        "Configure other capabilities now": "Skip",
       }, seenOptions),
       flowEngine: flowEngine({
         credentialAction: "reuse",
@@ -537,16 +538,24 @@ describe("runFirstRunSetup", () => {
       "Voice",
       "Vision and Image Generation",
     ]));
+    expect(seenOptions["Configure optional capability"]).toEqual([
+      "Configure channels",
+      "Configure voice",
+      "Configure browser",
+      "Skip",
+    ]);
+    expect(seenOptions["Configure optional capability"]).not.toContain("Configure image generation");
     expect(result.selections.primaryProvider).toBe("openai");
     expect(result.selections.primaryModel).toBe("gpt-5.5");
-    expect(result.selections.optionalCapabilities).toEqual(["voice", "vision"]);
+    expect(result.selections.optionalCapabilities).toEqual(["voice"]);
 
     const providerDraft = result.draftBundle.drafts.find((draft) => draft.kind === "provider-model-route");
-    const optionalDraft = result.draftBundle.drafts.find((draft) => draft.kind === "optional-capability");
+    const optionalDraft = result.draftBundle.drafts.find((draft) => draft.id === "setup-module.voice.capability");
     expect(providerDraft?.review.values.provider).toBe("openai");
     expect(providerDraft?.review.values.model).toBe("gpt-5.5");
     expect(providerDraft?.review.values.provider).not.toBe("codex");
-    expect(optionalDraft?.review.values.capabilities).toEqual(["voice", "vision"]);
+    expect(optionalDraft?.review.values.sttProvider).toBe("openai");
+    expect(optionalDraft?.review.values).not.toHaveProperty("ttsProvider");
     expect(result.reviewManifest.sections["provider-model-network"]).toHaveLength(1);
     expect(result.reviewManifest.sections["enabled-optional-capabilities"]).toHaveLength(1);
   });
@@ -724,17 +733,34 @@ describe("runFirstRunSetup", () => {
   });
 
   it("does not write a collected API key when reviewed apply is blocked before deferred secrets", async () => {
+    let deferredSecretCalls = 0;
+    const blockingExecutor: SetupApplyExecutor = {
+      apply: () => ({
+        ok: false,
+        appliedOperationIds: [],
+        error: "blocked before deferred secrets",
+      }),
+      applyDeferredSecrets: () => {
+        deferredSecretCalls += 1;
+        return {
+          ok: true,
+          appliedSecretCount: 1,
+        };
+      },
+    };
+
     const result = await runFirstRunSetup({
       homeDir: tempDir,
       workspaceRoot,
       flowEngine: flowEngine(),
-      prompt: fakePrompt({ "Primary provider": "OpenAI", Telegram: true, __secret: "sk-blocked-apply-secret" }),
-      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+      prompt: fakePrompt({ "Primary provider": "OpenAI", __secret: "sk-blocked-apply-secret" }),
+      applyExecutor: blockingExecutor,
     });
 
     expect(result.completed).toBe(false);
     expect(result.applyPlanningResult.kind).toBe("apply-plan-ready");
     expect(result.applyEndState?.kind).toBe("blocked");
+    expect(deferredSecretCalls).toBe(0);
     await expect(readFile(profileEnvPath(tempDir), "utf8")).resolves.toBe("");
     expect(JSON.stringify(result)).not.toContain("sk-blocked-apply-secret");
   });
@@ -775,14 +801,111 @@ describe("runFirstRunSetup", () => {
     const result = await runFirstRunSetup({
       homeDir: tempDir,
       workspaceRoot,
-      prompt: fakePrompt({ Telegram: true, Browser: true }),
+      prompt: fakePrompt({
+        "Optional capabilities": "Yes",
+        "Configure optional capability": ["Configure channels", "Configure browser"],
+        "Configure other capabilities now": ["Yes", "Skip"],
+        __prompt: ["", "", "12345", "", "", ""],
+        __secret: "",
+      }),
       flowEngine: flowEngine(),
     });
 
     expect(result.selections.optionalCapabilities).toEqual(["channels", "browser"]);
-    expect(result.reviewManifest.sections["enabled-optional-capabilities"]).toHaveLength(1);
+    expect(result.reviewManifest.sections["enabled-optional-capabilities"]).toHaveLength(2);
+    expect(result.reviewManifest.sections["remote-control-surfaces"]).toHaveLength(1);
     expect(JSON.stringify(result.reviewManifest)).toContain("channels");
+    expect(JSON.stringify(result.reviewManifest)).toContain("telegram");
     expect(JSON.stringify(result.reviewManifest)).toContain("browser");
+  });
+
+  it("removes configured onboarding capabilities from the remaining capability menu", async () => {
+    const seenOptions: Record<string, readonly string[]> = {};
+
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        "Optional capabilities": "Yes",
+        "Configure optional capability": ["Configure browser", "Skip"],
+        "Configure other capabilities now": "Yes",
+        __prompt: ["", ""],
+      }, seenOptions),
+      flowEngine: flowEngine(),
+    });
+
+    expect(result.selections.optionalCapabilities).toEqual(["browser"]);
+    expect(seenOptions["Configure optional capability"]).toEqual([
+      "Configure channels",
+      "Configure voice",
+      "Skip",
+    ]);
+  });
+
+  it("skips the onboarding optional capability flow cleanly", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ "Optional capabilities": "No" }),
+      flowEngine: flowEngine(),
+    });
+
+    expect(result.selections.optionalCapabilities).toEqual([]);
+    expect(result.selections.optionalCapabilitiesSkipped).toBe(true);
+    expect(result.reviewManifest.sections["enabled-optional-capabilities"]).toHaveLength(0);
+  });
+
+  it("configures onboarding voice STT without TTS", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        "Optional capabilities": "Yes",
+        "Configure optional capability": "Configure voice",
+        "Configure other capabilities now": "Skip",
+        __prompt: ["", ""],
+      }),
+      flowEngine: flowEngine(),
+    });
+
+    expect(result.selections.optionalCapabilities).toEqual(["voice"]);
+    expect(result.wizardState.optionalCapabilities?.voice).toEqual({
+      stt: "configured",
+      tts: "not_set",
+    });
+    expect(result.reviewManifest.sections["enabled-optional-capabilities"][0]?.review.values).toMatchObject({
+      sttProvider: "openai",
+      sttModel: "gpt-4o-mini-transcribe",
+      sttApiKeyEnv: "OPENAI_API_KEY",
+    });
+    expect(result.reviewManifest.sections["enabled-optional-capabilities"][0]?.review.values).not.toHaveProperty("ttsProvider");
+  });
+
+  it("configures onboarding voice TTS without STT", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        "Optional capabilities": "Yes",
+        "Configure optional capability": "Configure voice",
+        "Configure voice": "Set Text to Speech (TTS) Provider",
+        "Configure other capabilities now": "Skip",
+        __prompt: ["", ""],
+      }),
+      flowEngine: flowEngine(),
+    });
+
+    expect(result.selections.optionalCapabilities).toEqual(["voice"]);
+    expect(result.wizardState.optionalCapabilities?.voice).toEqual({
+      stt: "not_set",
+      tts: "configured",
+    });
+    expect(result.reviewManifest.sections["enabled-optional-capabilities"][0]?.review.values).toMatchObject({
+      ttsProvider: "openai",
+      ttsModel: "gpt-4o-mini-tts",
+      ttsApiKeyEnv: "OPENAI_API_KEY",
+    });
+    expect(result.reviewManifest.sections["enabled-optional-capabilities"][0]?.review.values).not.toHaveProperty("sttProvider");
   });
 
   it("normal onboarding confirms the user-facing summary instead of the technical manifest", async () => {

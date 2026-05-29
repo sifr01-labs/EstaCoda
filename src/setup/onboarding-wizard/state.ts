@@ -2,6 +2,7 @@ import type { ActivityLabelsLocale, UiFlavor, UiLanguage } from "../../config/ru
 import type { ProviderApiMode, ProviderAuthMethod, ProviderId } from "../../contracts/provider.js";
 import type { SecurityApprovalMode } from "../../contracts/security.js";
 import type { SkillAutonomy } from "../../skills/skill-learning.js";
+import type { SetupDraft } from "../setup-drafts.js";
 
 export type OnboardingCredentialSummaryStatus =
   | "not_set"
@@ -59,5 +60,6 @@ export type OnboardingWizardState = {
   readonly securityMode?: SecurityApprovalMode;
   readonly agentEvolution?: SkillAutonomy;
   readonly optionalCapabilities?: OnboardingOptionalCapabilitySummaries;
+  readonly optionalCapabilityDrafts?: readonly SetupDraft[];
   readonly launchSelected?: boolean;
 };

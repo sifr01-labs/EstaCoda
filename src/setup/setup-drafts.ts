@@ -166,7 +166,7 @@ export function buildOnboardingWizardDraftBundle(
     onboardingSecurityDraft(state, options),
     onboardingAgentEvolutionDraft(state, options),
     onboardingWorkspaceTrustDraft(state, options),
-    onboardingOptionalCapabilitiesDraft(state, options),
+    ...onboardingOptionalCapabilityDrafts(state, options),
     verificationDraft({ kind: "first-run", stepId: "verify" }),
     onboardingLaunchDraft(state),
   ].filter((draft): draft is SetupDraft => draft !== undefined);
@@ -362,6 +362,16 @@ function onboardingOptionalCapabilitiesDraft(
     },
     requiresReview: false,
   });
+}
+
+function onboardingOptionalCapabilityDrafts(
+  state: OnboardingWizardState,
+  options: SetupDraftBundleOptions
+): readonly (SetupDraft | undefined)[] {
+  if (state.optionalCapabilityDrafts !== undefined) {
+    return state.optionalCapabilityDrafts;
+  }
+  return [onboardingOptionalCapabilitiesDraft(state, options)];
 }
 
 function onboardingSelectedOptionalCapabilities(

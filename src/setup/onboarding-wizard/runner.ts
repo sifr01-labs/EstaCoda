@@ -14,14 +14,14 @@ import {
   type FirstRunOnboardingSelections,
   type OptionalCapabilityId,
 } from "./plan.js";
-import type { OnboardingCredentialSummaryStatus, OnboardingWizardState } from "./state.js";
+import type { OnboardingCredentialSummaryStatus, OnboardingOptionalCapabilitySummaries, OnboardingWizardState } from "./state.js";
 import { renderOnboardingWizardSummary } from "./summary.js";
 import {
   validateOnboardingWorkspacePath,
   type OnboardingInvalidWorkspaceAction,
 } from "./workspace.js";
 import { promptInterfaceLanguageAndStyle } from "../interface-preferences.js";
-import { buildOnboardingWizardDraftBundle, type SetupDraftBundle } from "../setup-drafts.js";
+import { buildOnboardingWizardDraftBundle, type SetupDraft, type SetupDraftBundle } from "../setup-drafts.js";
 import {
   buildSetupReviewManifest,
   type SetupReviewManifest,
@@ -40,7 +40,7 @@ import {
   type CollectSetupEntryStateOptions,
   type SetupEntryState,
 } from "../setup-entry-state.js";
-import type { SetupCopyKey, SetupCopyLocale } from "../setup-copy.js";
+import type { SetupCopyLocale } from "../setup-copy.js";
 import {
   formatSetupCopy,
   promptSetupChoice,
@@ -53,7 +53,18 @@ import {
 import {
   promptModelCandidate,
   promptProviderCandidate,
+  promptVoiceCapability,
 } from "../config-editor/prompts.js";
+import {
+  collectOptionalCapabilityContext,
+  setupModuleContextFromConfig,
+} from "../optional-capability-flow.js";
+import {
+  browserSetupModule,
+  telegramSetupModule,
+  voiceSetupModule,
+  type SetupModuleContext,
+} from "../setup-modules.js";
 
 export type FirstRunSetupRunnerOptions = CollectSetupEntryStateOptions & {
   readonly prompt: Prompt;
@@ -83,24 +94,14 @@ type PendingCredentialWrite = SetupDeferredSecretWrite;
 
 type WorkspaceTrustAction = "trust" | "change-workspace" | "decide-later";
 
-const OPTIONAL_CAPABILITY_COPY_KEYS: Record<OptionalCapabilityId, {
-  readonly title: SetupCopyKey;
-}> = {
-  channels: {
-    title: "setupModules.telegram.title",
-  },
-  voice: {
-    title: "setupModules.voice.title",
-  },
-  vision: {
-    title: "setupModules.vision.title",
-  },
-  browser: {
-    title: "setupModules.browser.title",
-  },
-};
+type OnboardingSupportedOptionalCapabilityId = Exclude<OptionalCapabilityId, "vision">;
 
-const OPTIONAL_CAPABILITY_IDS: readonly OptionalCapabilityId[] = ["channels", "voice", "vision", "browser"];
+type OnboardingOptionalCapabilityFlowResult = {
+  readonly selected: readonly OnboardingSupportedOptionalCapabilityId[];
+  readonly summaries: OnboardingOptionalCapabilitySummaries;
+  readonly drafts: readonly SetupDraft[];
+  readonly pendingCredentialWrites: readonly PendingCredentialWrite[];
+};
 
 export async function runFirstRunSetup(
   options: FirstRunSetupRunnerOptions
@@ -163,7 +164,7 @@ export async function runFirstRunSetup(
   const primaryAuthMethod = resolution.authMethod;
 
   let primaryCredential: FirstRunOnboardingSelections["primaryCredential"];
-  let pendingCredentialWrite: PendingCredentialWrite | undefined;
+  const pendingCredentialWrites: PendingCredentialWrite[] = [];
   let credentialStatus: OnboardingCredentialSummaryStatus = "not_set";
 
   switch (resolution.credentialAction.kind) {
@@ -197,10 +198,10 @@ export async function runFirstRunSetup(
         write(options, `Config will expect ${envVarName} to be available externally.\n`);
       } else {
         credentialStatus = "new_pending";
-        pendingCredentialWrite = {
+        pendingCredentialWrites.push({
           envVarName: promptResult.envVarName,
           value: promptResult.value,
-        };
+        });
       }
       break;
     }
@@ -265,7 +266,20 @@ export async function runFirstRunSetup(
     defaultValue: options.defaultSelections?.workflowLearning ?? "suggest",
   });
 
-  const optionalCapabilities = await chooseOptionalCapabilities(prompt, language, options.defaultSelections);
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+  const configPath = resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
+  const optionalCapabilityFlow = await chooseOptionalCapabilities(options, language, {
+    configPath,
+    profileId,
+    workspaceRoot,
+    workspaceTrusted,
+    primaryProvider,
+    primaryModel,
+    securityMode,
+    workflowLearning,
+  });
+  pendingCredentialWrites.push(...optionalCapabilityFlow.pendingCredentialWrites);
+  const optionalCapabilities = optionalCapabilityFlow.selected;
   const launchSelected = workspaceTrusted
     ? await promptSetupChoice(prompt, {
         title: setupCopyText(language, "onboarding.launch.preferenceTitle"),
@@ -309,10 +323,9 @@ export async function runFirstRunSetup(
     launchSelected,
   };
 
-  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
-  const wizardState = onboardingWizardStateFromSelections(selections, credentialStatus);
+  const wizardState = onboardingWizardStateFromSelections(selections, credentialStatus, optionalCapabilityFlow);
   const draftBundle = buildOnboardingWizardDraftBundle(wizardState, {
-    configPath: resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath,
+    configPath,
     workspaceRoot,
     trustStorePath: stateHome.trustJsonPath,
   });
@@ -349,10 +362,10 @@ export async function runFirstRunSetup(
     ? { kind: "approved-review-result", manifest: reviewManifest }
     : { kind: "cancelled-review-result", manifest: reviewManifest, reason: "User cancelled summary confirmation." });
   const applyEndState = applyPlanningResult.kind === "apply-plan-ready" && options.applyExecutor !== undefined
-    ? await executeSetupApplyPlan(applyPlanningResult.applyPlan, options.applyExecutor, {
+      ? await executeSetupApplyPlan(applyPlanningResult.applyPlan, options.applyExecutor, {
         ...options.applyFlowOptions,
-        ...(pendingCredentialWrite !== undefined
-          ? { deferredSecretWrites: [pendingCredentialWrite] }
+        ...(pendingCredentialWrites.length > 0
+          ? { deferredSecretWrites: pendingCredentialWrites }
           : {}),
       })
     : undefined;
@@ -382,7 +395,8 @@ export async function runFirstRunSetup(
 
 function onboardingWizardStateFromSelections(
   selections: FirstRunOnboardingSelections,
-  credentialStatus: OnboardingCredentialSummaryStatus
+  credentialStatus: OnboardingCredentialSummaryStatus,
+  optionalCapabilityFlow: OnboardingOptionalCapabilityFlowResult
 ): OnboardingWizardState {
   const credentialEnvVarName = selections.primaryCredential?.kind === "env"
     ? selections.primaryCredential.name
@@ -412,17 +426,8 @@ function onboardingWizardStateFromSelections(
     },
     securityMode: selections.securityMode,
     agentEvolution: selections.workflowLearning,
-    optionalCapabilities: {
-      selected: selections.optionalCapabilities ?? [],
-      channels: {
-        telegram: selections.optionalCapabilities?.includes("channels") === true ? "configured" : "not_set",
-      },
-      voice: {
-        stt: selections.optionalCapabilities?.includes("voice") === true ? "configured" : "not_set",
-        tts: selections.optionalCapabilities?.includes("voice") === true ? "configured" : "not_set",
-      },
-      browser: selections.optionalCapabilities?.includes("browser") === true ? "configured" : "not_set",
-    },
+    optionalCapabilities: optionalCapabilityFlow.summaries,
+    optionalCapabilityDrafts: optionalCapabilityFlow.drafts,
     launchSelected: selections.launchSelected,
   };
 }
@@ -552,43 +557,258 @@ async function createDefaultFlowEngine(options: CollectSetupEntryStateOptions): 
 }
 
 async function chooseOptionalCapabilities(
-  prompt: Prompt,
+  options: FirstRunSetupRunnerOptions,
   locale: SetupCopyLocale,
-  defaultSelections: FirstRunOnboardingSelections | undefined
-): Promise<readonly OptionalCapabilityId[]> {
-  const selected = new Set(defaultSelections?.optionalCapabilities ?? []);
-  const result: OptionalCapabilityId[] = [];
+  contextInput: {
+    readonly configPath: string;
+    readonly profileId: string;
+    readonly workspaceRoot: string;
+    readonly workspaceTrusted: boolean;
+    readonly primaryProvider: FirstRunOnboardingSelections["primaryProvider"];
+    readonly primaryModel: FirstRunOnboardingSelections["primaryModel"];
+    readonly securityMode: FirstRunOnboardingSelections["securityMode"];
+    readonly workflowLearning: FirstRunOnboardingSelections["workflowLearning"];
+  }
+): Promise<OnboardingOptionalCapabilityFlowResult> {
+  const configureNow = await promptSetupChoice(options.prompt, {
+    title: setupCopyText(locale, "onboarding.optionalCapabilities.title"),
+    message: [
+      setupCopyText(locale, "onboarding.optionalCapabilities.configureNow"),
+      setupCopyText(locale, "onboarding.optionalCapabilities.note"),
+      "",
+    ].join("\n"),
+    choices: [
+      {
+        id: "yes",
+        label: setupCopyText(locale, "onboarding.optionalCapabilities.configureNow.yes"),
+        value: true,
+      },
+      {
+        id: "no",
+        label: setupCopyText(locale, "onboarding.optionalCapabilities.configureNow.no"),
+        value: false,
+      },
+    ],
+    defaultValue: (options.defaultSelections?.optionalCapabilities?.length ?? 0) > 0,
+  });
 
-  for (const capabilityId of OPTIONAL_CAPABILITY_IDS) {
-    const capabilityCopy = OPTIONAL_CAPABILITY_COPY_KEYS[capabilityId];
-    const title = setupCopyText(locale, capabilityCopy.title);
-    const enabled = await promptSetupChoice(prompt, {
-      title,
-      message: `${formatSetupCopy(locale, "onboarding.optionalCapabilities.promptCapability", {
-        capabilityId: title,
-      })}\n`,
+  const loaded = await loadRuntimeConfig(options);
+  let context = setupModuleContextFromConfig({
+    homeDir: options.homeDir,
+    profileId: contextInput.profileId,
+    workspaceRoot: contextInput.workspaceRoot,
+    trustStorePath: resolveStateHome({ homeDir: options.homeDir }).trustJsonPath,
+    configPath: contextInput.configPath,
+  }, loaded.config, {
+    provider: contextInput.primaryProvider,
+    model: contextInput.primaryModel,
+    workspaceTrusted: contextInput.workspaceTrusted,
+    securityMode: contextInput.securityMode,
+    workflowLearning: contextInput.workflowLearning,
+  });
+  const selected = new Set<OnboardingSupportedOptionalCapabilityId>();
+  const draftMap = new Map<OnboardingSupportedOptionalCapabilityId, readonly SetupDraft[]>();
+  const pendingCredentialWrites: PendingCredentialWrite[] = [];
+
+  if (!configureNow) {
+    return onboardingOptionalCapabilityResult(context, selected, draftMap, pendingCredentialWrites);
+  }
+
+  while (true) {
+    const action = await promptOnboardingOptionalCapabilityAction(options.prompt, locale, context);
+    if (action === "skip") {
+      break;
+    }
+
+    const collected = await collectOnboardingOptionalCapability(options, locale, context, action);
+    if (collected.kind === "configured") {
+      context = collected.context;
+      selected.add(action);
+      draftMap.set(action, collected.drafts);
+      pendingCredentialWrites.push(...collected.pendingCredentialWrites);
+    }
+
+    if (onboardingOptionalCapabilityActions(context).length === 0) {
+      break;
+    }
+
+    const configureMore = await promptSetupChoice(options.prompt, {
+      title: setupCopyText(locale, "onboarding.optionalCapabilities.more.title"),
+      message: `${setupCopyText(locale, "onboarding.optionalCapabilities.note")}\n`,
       choices: [
         {
-          id: "enable",
-          label: setupCopyText(locale, "onboarding.optionalCapabilities.enable"),
-          description: formatSetupCopy(locale, "onboarding.optionalCapabilities.enableDescription", { capabilityId: title }),
+          id: "yes",
+          label: setupCopyText(locale, "onboarding.optionalCapabilities.more.yes"),
           value: true,
         },
         {
           id: "skip",
           label: setupCopyText(locale, "onboarding.optionalCapabilities.skip"),
-          description: formatSetupCopy(locale, "setupValidation.capability.skipped", { capabilityId: title }),
+          description: setupCopyText(locale, "onboarding.optionalCapabilities.note"),
           value: false,
         },
       ],
-      defaultValue: selected.has(capabilityId),
+      defaultValue: false,
     });
-    if (enabled) {
-      result.push(capabilityId);
+
+    if (!configureMore) {
+      break;
     }
   }
 
-  return result;
+  return onboardingOptionalCapabilityResult(context, selected, draftMap, pendingCredentialWrites);
+}
+
+async function promptOnboardingOptionalCapabilityAction(
+  prompt: Prompt,
+  locale: SetupCopyLocale,
+  context: SetupModuleContext
+): Promise<OnboardingSupportedOptionalCapabilityId | "skip"> {
+  const actions = onboardingOptionalCapabilityActions(context);
+  return promptSetupChoice(prompt, {
+    title: setupCopyText(locale, "onboarding.optionalCapabilities.menu.title"),
+    message: `${setupCopyText(locale, "onboarding.optionalCapabilities")}\n${setupCopyText(locale, "onboarding.optionalCapabilities.note")}\n`,
+    choices: [
+      ...actions.map((action) => onboardingOptionalCapabilityChoice(action, locale)),
+      {
+        id: "skip",
+        label: setupCopyText(locale, "onboarding.optionalCapabilities.skip"),
+        description: setupCopyText(locale, "onboarding.optionalCapabilities.note"),
+        value: "skip" as const,
+      },
+    ],
+    defaultValue: "skip" as const,
+  });
+}
+
+function onboardingOptionalCapabilityActions(
+  context: SetupModuleContext
+): readonly OnboardingSupportedOptionalCapabilityId[] {
+  const actions: OnboardingSupportedOptionalCapabilityId[] = [];
+  if (telegramSetupModule.detect(context).status !== "configured") {
+    actions.push("channels");
+  }
+  if (context.voice?.sttProvider === undefined || context.voice.ttsProvider === undefined) {
+    actions.push("voice");
+  }
+  if (browserSetupModule.detect(context).status !== "configured") {
+    actions.push("browser");
+  }
+  return actions;
+}
+
+function onboardingOptionalCapabilityChoice(
+  action: OnboardingSupportedOptionalCapabilityId,
+  locale: SetupCopyLocale
+): {
+  readonly id: OnboardingSupportedOptionalCapabilityId;
+  readonly label: string;
+  readonly description: string;
+  readonly value: OnboardingSupportedOptionalCapabilityId;
+} {
+  switch (action) {
+    case "channels":
+      return {
+        id: "channels",
+        label: setupCopyText(locale, "setupEditor.actions.configureChannels"),
+        description: setupCopyText(locale, "setupEditor.actions.configureChannels.description"),
+        value: "channels",
+      };
+    case "voice":
+      return {
+        id: "voice",
+        label: setupCopyText(locale, "setupEditor.actions.configureVoice"),
+        description: setupCopyText(locale, "setupEditor.actions.configureVoice.description"),
+        value: "voice",
+      };
+    case "browser":
+      return {
+        id: "browser",
+        label: setupCopyText(locale, "setupEditor.actions.configureBrowser"),
+        description: setupCopyText(locale, "setupEditor.actions.configureBrowser.description"),
+        value: "browser",
+      };
+  }
+}
+
+async function collectOnboardingOptionalCapability(
+  options: FirstRunSetupRunnerOptions,
+  locale: SetupCopyLocale,
+  context: SetupModuleContext,
+  action: OnboardingSupportedOptionalCapabilityId
+): Promise<
+  | {
+      readonly kind: "configured";
+      readonly context: SetupModuleContext;
+      readonly drafts: readonly SetupDraft[];
+      readonly pendingCredentialWrites: readonly PendingCredentialWrite[];
+    }
+  | {
+      readonly kind: "skip" | "unchanged";
+    }
+> {
+  const module = action === "channels"
+    ? telegramSetupModule
+    : action === "voice" ? voiceSetupModule : browserSetupModule;
+  const voiceMode = action === "voice"
+    ? await promptVoiceCapability(options.prompt, locale)
+    : undefined;
+  const collected = await collectOptionalCapabilityContext({
+    homeDir: options.homeDir,
+    profileId: options.profileId,
+    workspaceRoot: context.workspaceRoot ?? options.workspaceRoot,
+    trustStorePath: context.trustStorePath,
+    configPath: context.configPath,
+    prompt: options.prompt,
+    locale,
+  }, context, module, voiceMode);
+
+  if (collected.kind !== "configured") {
+    return collected;
+  }
+
+  const collectedContext = action === "voice"
+    ? {
+        ...collected.context,
+        voice: {
+          ...context.voice,
+          ...collected.context.voice,
+        },
+      }
+    : collected.context;
+  const configuration = module.configure(collectedContext);
+  return {
+    kind: "configured",
+    context: collectedContext,
+    drafts: module.toDrafts(collectedContext, configuration),
+    pendingCredentialWrites: collected.pendingCredentialWrite === undefined
+      ? []
+      : [collected.pendingCredentialWrite],
+  };
+}
+
+function onboardingOptionalCapabilityResult(
+  context: SetupModuleContext,
+  selected: ReadonlySet<OnboardingSupportedOptionalCapabilityId>,
+  draftMap: ReadonlyMap<OnboardingSupportedOptionalCapabilityId, readonly SetupDraft[]>,
+  pendingCredentialWrites: readonly PendingCredentialWrite[]
+): OnboardingOptionalCapabilityFlowResult {
+  return {
+    selected: [...selected],
+    summaries: {
+      selected: [...selected],
+      channels: {
+        telegram: telegramSetupModule.detect(context).status === "configured" ? "configured" : "not_set",
+      },
+      voice: {
+        stt: context.voice?.sttProvider === undefined ? "not_set" : "configured",
+        tts: context.voice?.ttsProvider === undefined ? "not_set" : "configured",
+      },
+      browser: browserSetupModule.detect(context).status === "configured" ? "configured" : "not_set",
+    },
+    drafts: [...draftMap.values()].flat(),
+    pendingCredentialWrites,
+  };
 }
 
 function write(options: FirstRunSetupRunnerOptions, value: string): void {
