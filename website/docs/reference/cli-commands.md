@@ -19,11 +19,11 @@ The `--profile` / `-p` flag selects a profile for the current command only. It d
 
 ---
 
-## Setup and onboarding
+## Setup
 
 ### `estacoda setup`
 
-Opens the reviewed setup, repair, and onboarding flow. This is the canonical path for first-run configuration and later repair.
+Opens the Setup Editor.
 
 ```bash
 estacoda setup                          # interactive setup/repair
@@ -110,7 +110,7 @@ estacoda model setup codex              # OAuth device-code setup for Codex
 **Behavior:**
 - Bare `estacoda model` opens an interactive picker in setup mode when a TTY is available; otherwise prints an overview.
 - `model setup codex` authenticates through OAuth device code flow, stores tokens in `~/.estacoda/auth.json`, and configures the `codex/o3` route.
-- `model fallback` manages the ordered fallback chain and is also accessible through the guided setup editor (`edit-fallback-model-route`). `estacoda model set` is deprecated and rejected.
+- `model fallback` manages the ordered fallback chain and is also accessible through the Setup Editor (`edit-fallback-model-route`). `estacoda model set` is deprecated and rejected.
 
 **Failure modes:**
 - Unknown model input returns exit code 1 with candidate suggestions.

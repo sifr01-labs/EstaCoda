@@ -61,7 +61,7 @@ Auxiliary routes are preference/routing constructs, not separate runtimes:
 | `delegation` | Subagent delegation |
 | `profile_context` | Profile context generation |
 
-Security smart approval uses `auxiliaryModels.assessor`. The route key is exactly `assessor`; there is no `auxiliaryModels.approval` route. The assessor route is resolved with `resolveAuxiliaryModelRoute("assessor", ...)` and consumed through `executeAuxiliaryTask(...)`. The assessor route is configurable through the guided setup editor (`edit-auxiliary-model-route`) in addition to direct config edits.
+Security smart approval uses `auxiliaryModels.assessor`. The route key is exactly `assessor`; there is no `auxiliaryModels.approval` route. The assessor route is resolved with `resolveAuxiliaryModelRoute("assessor", ...)` and consumed through `executeAuxiliaryTask(...)`. The assessor route is configurable through the Setup Editor (`edit-auxiliary-model-route`) in addition to direct config edits.
 
 Config should not use legacy auxiliary names such as `models.auxiliary`, `auxiliary.default`, or `auxiliary.contextualize`. Profile-context CLI/documentation should use `--profile-context`, not `--contextualize`.
 
@@ -75,7 +75,7 @@ The same model-switch resolver validates CLI typed commands, gateway typed comma
 
 Scoped overrides persist with the session and are revalidated whenever a runtime is constructed. If the stored route becomes stale, non-runnable, catalog-only, media-only, credential-missing, or otherwise invalid, the override is ignored non-fatally and the configured primary route is used. No raw secrets are stored in session override state or picker action payloads. Fallback routes and auxiliary routes are preserved.
 
-`/model --global <provider>/<model>` and `/model set --global <provider>/<model>` are the explicit persistent forms. They mutate only the profile-level primary model route after the required local or gateway trust/authorization checks pass. `/model --global clear` is rejected. `estacoda model set ...` remains deprecated and disabled; `estacoda model setup` remains the supported surface for credential collection and primary provider setup. Fallback routes are manageable through both the guided setup editor (`edit-fallback-model-route`) and `estacoda model fallback ...`. Auxiliary route management is available through the guided setup editor (`edit-auxiliary-model-route`).
+`/model --global <provider>/<model>` and `/model set --global <provider>/<model>` are the explicit persistent forms. They mutate only the profile-level primary model route after the required local or gateway trust/authorization checks pass. `/model --global clear` is rejected. `estacoda model set ...` remains deprecated and disabled; `estacoda model setup` remains the supported surface for credential collection and primary provider setup. Fallback routes are manageable through both the Setup Editor (`edit-fallback-model-route`) and `estacoda model fallback ...`. Auxiliary route management is available through the Setup Editor (`edit-auxiliary-model-route`).
 
 ## Memory-Related Routes
 
@@ -181,7 +181,7 @@ Cloud browser providers are separate from web research providers. The registry h
 - Vision routing is implemented in code, but live success depends on actual provider capability plus working credentials.
 - Smart approval does not build a legacy provider/model assessor fallback. It requires the resolved `auxiliaryModels.assessor` route, the main route, and a provider executor; missing route/config fails safe to manual approval.
 - `estacoda model setup codex` authenticates through OAuth device code, stores tokens in `~/.estacoda/auth.json`, and configures the `codex/o3` route. Raw OAuth tokens are not printed. Route config remains separate from token storage.
-- Codex OAuth setup lives on the model setup surface, not in first-run guided onboarding. If guided onboarding later offers Codex OAuth, it must delegate to that model setup/OAuth boundary.
+- Codex OAuth setup lives on the model setup surface, not in the Onboarding Wizard. If the Onboarding Wizard later offers Codex OAuth, it must delegate to that model setup/OAuth boundary.
 
 ## Provider Hardening
 

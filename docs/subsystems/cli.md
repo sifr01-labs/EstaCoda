@@ -1,9 +1,9 @@
 ---
-title: "CLI & Onboarding"
-description: "CLI commands, interactive session loop, trace/eval inspection, and first-run onboarding."
+title: "CLI & Setup"
+description: "CLI commands, interactive session loop, trace/eval inspection, and the Onboarding Wizard."
 ---
 
-# CLI & Onboarding
+# CLI & Setup
 
 ## Files
 
@@ -19,7 +19,7 @@ description: "CLI commands, interactive session loop, trace/eval inspection, and
 | `src/cli/eval-commands.ts` | ~100 | `estacoda eval` commands |
 | `src/setup/setup-entry-state.ts` | 283 | Setup readiness classifier |
 | `src/setup/setup-router.ts` | 364 | Setup route planner |
-| `src/setup/onboarding-wizard/runner.ts` | 718 | Reviewed first-run setup runner |
+| `src/setup/onboarding-wizard/runner.ts` | 718 | Reviewed Onboarding Wizard runner |
 | `src/setup/review/apply-executor.ts` | 483 | Reviewed setup apply executor |
 | `src/setup/setup-copy.ts` | 372 | Token-based setup copy registry |
 | `src/setup/setup-verification-copy.ts` | 111 | Setup verification labels and actions |
@@ -219,7 +219,7 @@ Interactive setup uses the reviewed setup architecture:
 10. Structured read-only verification after apply
 11. Launch handoff for verified-ready setup, or explicit accepted degraded state
 
-First-run setup silently creates and selects the default profile before writing configuration. Normal day-one onboarding copy should not require users to know profiles exist; profile commands are an advanced surface for multi-context setups.
+The Onboarding Wizard silently creates and selects the default profile before writing configuration. Normal day-one setup copy should not require users to know profiles exist; profile commands are an advanced surface for multi-context setups.
 
 ### Setup Routes
 
@@ -227,8 +227,8 @@ First-run setup silently creates and selects the default profile before writing 
 
 | State | Route behavior |
 |-------|----------------|
-| `first-run` / no usable config | Runs first-run setup and review/apply. |
-| configured ready | Opens the guided setup editor with primary model route edit, fallback route edit, auxiliary route edit, optional capability configuration, security mode edit, workflow learning edit, read-only verification, launch after verification, and exit choices. |
+| `first-run` / no usable config | Runs the Onboarding Wizard and review/apply. |
+| configured ready | Opens the Setup Editor with primary model route edit, fallback route edit, auxiliary route edit, optional capability configuration, security mode edit, workflow learning edit, read-only verification, launch after verification, and exit choices. |
 | configured degraded | Shows verification warnings; repair or explicit limited-mode acceptance is required before launch. |
 | partial provider / broken route | Runs guided provider/model repair through the shared provider/model selection flow. |
 | missing credential | Repairs the active route credential reference; review shows env var references only. |
@@ -236,7 +236,7 @@ First-run setup silently creates and selects the default profile before writing 
 | untrusted workspace | Offers an explicit workspace trust grant through reviewed apply. |
 | state-not-writable | Shows state/config path permission guidance and blocks normal writes until state is writable. |
 
-Configured, degraded, untrusted, and repair states use the guided setup editor. First-run setup uses the first-run runner. Read-only verification remains a separate route and does not write config, trust, state, or `.env`.
+Configured, degraded, untrusted, and repair states use the Setup Editor. The `first-run` state uses the Onboarding Wizard runner. Read-only verification remains a separate route and does not write config, trust, state, or `.env`.
 
 ### Review, Apply, And Launch Safety
 
@@ -252,7 +252,7 @@ Configured, degraded, untrusted, and repair states use the guided setup editor. 
 
 Primary provider/model setup and repair use the shared provider/model flow. That flow applies provider visibility, runnable/configurable gates, and credential boundaries owned by the provider layer.
 
-Codex OAuth setup is implemented on the model setup surface (`estacoda model setup codex`), not in first-run guided onboarding. Guided onboarding copy must not imply it can complete Codex OAuth until it deliberately delegates to that flow.
+Codex OAuth setup is implemented on the model setup surface (`estacoda model setup codex`), not in the Onboarding Wizard. Onboarding Wizard copy must not imply it can complete Codex OAuth until it deliberately delegates to that flow.
 
 `estacoda model setup codex` authenticates through OAuth device code, stores tokens in `~/.estacoda/auth.json`, and configures the `codex/o3` route. Raw OAuth tokens are not printed. Route config remains separate from token storage.
 
@@ -276,9 +276,9 @@ estacoda setup --advanced --provider deepseek --model deepseek-chat --api-key-en
 
 These flags are compatibility/direct paths. They are not the preferred guided repair path for existing users.
 
-Runtime mutating onboarding tools are removed. The runtime no longer exposes `onboarding.status` or `onboarding.complete`; setup mutation stays behind reviewed CLI setup/apply.
+Legacy runtime mutating onboarding tools are removed. The runtime no longer exposes `onboarding.status` or `onboarding.complete`; setup mutation stays behind reviewed CLI setup/apply.
 
-Fallback routes are manageable through both the guided setup editor (`edit-fallback-model-route`) and `estacoda model fallback ...`. Auxiliary routes (including assessor, compression, session_search, memory_compaction, and profile_context) are configurable through the guided setup editor (`edit-auxiliary-model-route`). First-run onboarding no longer offers the legacy backup-provider prompt.
+Fallback routes are manageable through both the Setup Editor (`edit-fallback-model-route`) and `estacoda model fallback ...`. Auxiliary routes (including assessor, compression, session_search, memory_compaction, and profile_context) are configurable through the Setup Editor (`edit-auxiliary-model-route`). The Onboarding Wizard no longer offers the legacy backup-provider prompt.
 
 **Arabic support:**
 - Selector chrome is localized

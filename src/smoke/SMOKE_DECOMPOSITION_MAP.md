@@ -79,7 +79,7 @@ The following subsystems are covered inline in `_legacy.ts`:
 | ACP | 7500–8000 | acp |
 | Context + prompt packing | 8000–8500 | context |
 | Artifact handling | 8500–9000 | artifacts |
-| Onboarding | 9000–9500 | onboarding |
+| Setup | 9000–9500 | setup |
 | Trajectory + trace CLI | 9500–10000 | trajectory |
 | Eval runner + fixtures | 10000–10500 | eval |
 | Code dependency graph | 10500–11000 | code-graph |

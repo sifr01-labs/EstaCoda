@@ -62,7 +62,7 @@ These channels and providers exist in code but lack live validation evidence for
 - Memory rendering is selective but not ranked. No freshness/staleness handling.
 - On non-vision providers, image analysis degrades to metadata-only.
 - Gateway status reports readiness, not real background-process liveness.
-- Full runtime CLI localization is incomplete. Arabic support is onboarding plus setup labels only.
+- Full runtime CLI localization is incomplete. Arabic support is limited to setup labels and select surfaces.
 - Mixed Arabic + English technical tokens can show terminal bidi artifacts.
 - Evaluation substrate exists but is not a scored automated benchmark.
 - Internal alpha harness is manual and not yet a strict release gate.

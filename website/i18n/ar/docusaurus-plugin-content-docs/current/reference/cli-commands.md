@@ -19,11 +19,11 @@ estacoda -p <id> <command>
 
 ---
 
-## الإعداد والتهيئة
+## الإعداد
 
 ### `estacoda setup`
 
-يفتح تدفق الإعداد والإصلاح والتهيئة المراجع. هذا هو المسار المعياري لتهيئة التشغيل الأول وللإصلاح لاحقاً.
+يفتح محرّر الإعدادات.
 
 ```bash
 estacoda setup                          # إعداد تفاعلي/إصلاح
@@ -110,7 +110,7 @@ estacoda model setup codex              # إعداد OAuth device-code لـ Code
 **السلوك:**
 - `estacoda model` الصافي يفتح منتقي تفاعلي في وضع الإعداد عند توفر TTY؛ وإلا يطبع نظرة عامة.
 - `model setup codex` يُ authenticate عبر تدفق رمز الجهاز OAuth، ويخزن الرموز في `~/.estacoda/auth.json`، ويُهيئ مسار `codex/o3`.
-- `model fallback` تدير سلسلة الاحتياطي المرتبة وهي متوفرة أيضًا عبر محرر الإعداد الموجه (`edit-fallback-model-route`). `estacoda model set` مرفوض كأمر مهمل.
+- `model fallback` تدير سلسلة الاحتياطي المرتبة وهي متوفرة أيضًا عبر محرّر الإعدادات (`edit-fallback-model-route`). `estacoda model set` مرفوض كأمر مهمل.
 
 **أنماط الفشل:**
 - إدخال نموذج غير معروف يرجع رمز خروج 1 مع اقتراحات للمرشحين.

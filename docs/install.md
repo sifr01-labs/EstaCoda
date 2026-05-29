@@ -81,7 +81,7 @@ estacoda verify     # Check readiness
 estacoda            # Start interactive session
 ```
 
-`estacoda setup --interactive` uses the guided setup router. It runs first-run setup for new users, opens the guided editor for configured or degraded setup (supporting primary provider/model, fallback route, auxiliary route, and optional capability editing), and shows repair-first diagnostics for missing credentials, broken provider routes, broken config, untrusted workspaces, and state paths that are not writable.
+`estacoda setup --interactive` routes new users into the Onboarding Wizard, opens the Setup Editor for configured or degraded setup (supporting primary provider/model, fallback route, auxiliary route, and optional capability editing), and shows repair-first diagnostics for missing credentials, broken provider routes, broken config, untrusted workspaces, and state paths that are not writable.
 
 Setup review appears before apply. Cancelling review does not write config, trust, state, or `.env`. Verification is read-only, and launch requires verified-ready setup or an explicit limited-mode choice after warnings are shown.
 

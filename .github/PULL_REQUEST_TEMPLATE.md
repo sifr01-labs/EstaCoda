@@ -29,7 +29,7 @@ Select all that apply.
 - [ ] Providers or model routing
 - [ ] Security, approvals, sandboxing, or trust model
 - [ ] Memory or persistence
-- [ ] CLI or onboarding
+- [ ] CLI or setup
 - [ ] Gateway or messaging integration
 - [ ] Documentation
 - [ ] Tests, smoke checks, or evaluation harness

@@ -1,6 +1,6 @@
 ---
 title: التشغيل الأول
-description: بدء تشغيل EstaCoda وأكمل التوجيه التفاعلي.
+description: ابدأ EstaCoda وتابع باستخدام معالج التهيئة.
 sidebar_position: 4
 ---
 
@@ -10,7 +10,7 @@ sidebar_position: 4
 
 ## الغرض
 
-بدء تشغيل EstaCoda وأكمل التوجيه التفاعلي.
+ابدأ EstaCoda وتابع باستخدام معالج التهيئة.
 
 ## ملاحظات مهمة
 

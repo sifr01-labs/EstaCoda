@@ -371,7 +371,7 @@ HOME=/tmp/estacoda-qa-ready pnpm run dev -- setup --interactive
 ```
 
 **Verify:**
-- The guided setup editor opens instead of first-run setup.
+- The Setup Editor opens instead of the Onboarding Wizard.
 - Available actions include primary model route edit, fallback route edit, auxiliary route edit, optional capability configuration, security mode edit, workflow learning edit, read-only verification, launch after verification, and exit.
 - Exiting writes nothing.
 - Running verification is read-only.
@@ -388,7 +388,7 @@ HOME=/tmp/estacoda-qa-degraded pnpm run dev -- setup --interactive
 - Concrete verification warnings are shown.
 - Launch is not automatic.
 - Limited mode requires explicit acceptance after warnings are visible.
-- Choosing repair re-enters the guided setup editor.
+- Choosing repair re-enters the Setup Editor.
 
 ### 10.4 Partial Provider / Broken Route
 
@@ -399,7 +399,7 @@ HOME=/tmp/estacoda-qa-partial-provider pnpm run dev -- setup --interactive
 ```
 
 **Verify:**
-- Setup opens repair-first guided editor behavior.
+- Setup opens repair-first Setup Editor behavior.
 - Provider/model repair uses the shared provider/model flow.
 - Review/apply drafts route/auth-shaped config changes.
 - Direct setup compatibility is not presented as the preferred repair path.
@@ -590,7 +590,7 @@ Arabic setup spot check:
 HOME=/tmp/estacoda-setup-qa-home-ar pnpm run dev -- setup --interactive
 ```
 
-Choose Arabic and verify that commands, provider names, paths, and env vars remain readable with LTR isolation. This checks onboarding-owned setup surfaces only; full runtime CLI localization is not complete.
+Choose Arabic and verify that commands, provider names, paths, and env vars remain readable with LTR isolation. This checks setup-owned localized surfaces only; full runtime CLI localization is not complete.
 
 ---
 

@@ -117,7 +117,7 @@ See [Uninstall](https://estacoda.kemetresearch.com/docs/getting-started/uninstal
 | Kimi | Live-proven |
 | DeepSeek | Live-proven |
 | OpenRouter | Live-proven |
-| Codex | Implemented — public setup path via `estacoda model setup codex`; excluded from first-run onboarding by design |
+| Codex | Implemented — public setup path via `estacoda model setup codex`; excluded from the Onboarding Wizard by design |
 | Google | Configurable |
 | Anthropic | Catalog-known, not runnable in this build |
 | MiniMax | Catalog-known, not runnable in this build |

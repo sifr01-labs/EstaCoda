@@ -35,7 +35,7 @@ Labels are cumulative downward. A `live-proven` provider is also `implemented`. 
 | **OpenAI** | `live-proven` | Chat completions and responses modes both supported. |
 | **DeepSeek** | `live-proven` | Validated for chat completions with tool schema. |
 | **OpenRouter** | `live-proven` | Runtime works. Tool-call exactness is occasionally inconsistent; monitor for routing edge cases. |
-| **Codex** | `implemented` | Public CLI setup path via `estacoda model setup codex`. OAuth device-code authentication, token storage in `~/.estacoda/auth.json`, `codex/o3` route configured. Excluded from first-run guided onboarding by design, not hidden. |
+| **Codex** | `implemented` | Public CLI setup path via `estacoda model setup codex`. OAuth device-code authentication, token storage in `~/.estacoda/auth.json`, `codex/o3` route configured. Excluded from onboarding wizard by design, not hidden. |
 | **Google** | `configurable` | Catalog-enriched. Inference adapter exists but live validation is limited in this build. |
 | **Anthropic** | `configurable` | Catalog-known. Not runnable as a primary LLM route in this build. |
 | **MiniMax** | `catalog-known` | Registered in model catalog. Not runnable in the current build. |

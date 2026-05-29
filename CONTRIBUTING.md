@@ -23,7 +23,7 @@ Good first contributions:
 - Fix a reproducible bug.
 - Add a missing test or smoke case.
 - Improve an unclear error message.
-- Improve setup or onboarding copy.
+- Improve setup copy.
 - Improve documentation for an existing behavior.
 - Add a guardrail around an unsafe edge case.
 
@@ -126,7 +126,7 @@ Rules:
 Branch from the current `main`. Use short, descriptive names.
 
 ```text
-fix/onboarding-selector-redraw
+fix/setup-selector-redraw
 feat/provider-tool-recovery
 docs/security-model
 test/intent-router-fixtures
@@ -190,7 +190,7 @@ pnpm run validate:docker
 
 If your change touches provider tool-calling, run the relevant live or mocked provider check.
 
-If your change touches install, onboarding, CLI rendering, terminal behavior, or filesystem paths, test manually in a fresh shell.
+If your change touches install, setup, CLI rendering, terminal behavior, or filesystem paths, test manually in a fresh shell.
 
 ---
 

@@ -1,6 +1,6 @@
 ---
 title: First Run
-description: Initialize EstaCoda and complete guided onboarding.
+description: Initialize EstaCoda and continue with the onboarding wizard.
 sidebar_position: 4
 ---
 
@@ -10,7 +10,7 @@ This page documents **First Run** for EstaCoda v0.1.0.
 
 ## Purpose
 
-Initialize EstaCoda and complete guided onboarding.
+Initialize EstaCoda and continue with the onboarding wizard.
 
 ## Source of Truth
 

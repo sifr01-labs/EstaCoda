@@ -15,7 +15,7 @@ Canonical docs updated for Memory Hardening:
 - [Semantic Session Compression](../subsystems/semantic-compression.md) — `/compact`, `estacoda sessions compact`, gateway hygiene, fallback, and events.
 - [Providers](../subsystems/providers.md) — auxiliary route boundaries and file-backed external memory config.
 - [Security](../subsystems/security.md) — trust boundaries for memory, recall, compression, and external providers.
-- [CLI & Onboarding](../subsystems/cli.md) and [Operator Controls](./operator-controls.md) — implemented command surfaces.
+- [CLI & Setup](../subsystems/cli.md) and [Operator Controls](./operator-controls.md) — implemented command surfaces.
 
 ## Feature Map
 

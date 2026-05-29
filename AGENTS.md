@@ -131,7 +131,7 @@ EstaCoda is a TypeScript-first agent runtime with Node.js as the production runt
 
 The main architectural surfaces are:
 
-1. CLI and onboarding.
+1. CLI and setup.
 2. Provider and model configuration.
 3. Intent router.
 4. Skill system.
@@ -278,26 +278,26 @@ Rules:
 8. Workspace trust is global directory action trust only. It gates behavior, not config loading.
 9. `USER.md`, `SOUL.md`, `MEMORY.md`, and `promotions.json` are profile-local. Global shared memory is only `~/.estacoda/memory/shared/`.
 
-## CLI and onboarding rules
+## CLI and setup rules
 
-CLI onboarding is a product surface and a trust surface.
+CLI setup is a product surface and a trust surface.
 
-When changing CLI or onboarding code:
+When changing CLI or setup code:
 
 1. Preserve keyboard navigation.
 2. Preserve terminal redraw behavior.
 3. Avoid rendering bugs caused by cursor restore after scroll.
 4. Keep selector UI centralized.
 5. Do not duplicate interactive selector logic across files.
-6. Keep language selection early in onboarding.
+6. Keep language selection early in the Onboarding Wizard.
 7. Keep workspace trust explicit.
 8. Keep provider setup separate from optional capability setup.
 9. Do not imply that skipped optional features are required.
 10. Do not claim full runtime localization unless it exists.
-11. Keep first-run profile handling silent: onboarding may create/select the default profile behind the scenes, but normal first-run copy should not require profile awareness.
+11. Keep Onboarding Wizard profile handling silent: setup may create/select the default profile behind the scenes, but normal Onboarding Wizard copy should not require profile awareness.
 12. Route setup/config edits to the selected profile config and selected profile `.env`.
 
-Current onboarding sequence should remain conceptually close to:
+Current Onboarding Wizard sequence should remain conceptually close to:
 
 1. Choose interface language and style.
 2. Trust this workspace.
@@ -648,7 +648,7 @@ Use focused branches.
 Recommended branch names:
 
 ```text
-fix/onboarding-selector-redraw
+fix/setup-selector-redraw
 feat/skill-review-proposals
 docs/security-model
 chore/ci-typecheck
@@ -732,11 +732,11 @@ Learning is useful only if reviewable. Automatic skill mutation turns user behav
 
 ### Do not break terminal selector redraw
 
-Interactive selectors must own their redraw region. Later onboarding selectors may appear low enough in the terminal to cause scroll, which can break cursor restore.
+Interactive selectors must own their redraw region. Later setup selectors may appear low enough in the terminal to cause scroll, which can break cursor restore.
 
 ### Do not claim full Arabic localization prematurely
 
-Localized onboarding copy is not the same as full runtime localization.
+Localized setup copy is not the same as full runtime localization.
 
 ### Do not hardcode real user paths
 

@@ -71,7 +71,7 @@ Fallback routes are configured under `model.fallbacks`. They are ordered. EstaCo
 
 Fallbacks preserve `apiKeyEnv`, `baseUrl`, `apiMode`, and `authMethod` metadata when available. Fallback evaluation is logged. If all fallbacks fail, the turn reports the error and stops.
 
-Fallback routes are manageable through both the guided setup editor (`edit-fallback-model-route`) and `estacoda model fallback ...`.
+Fallback routes are manageable through both the Setup Editor (`edit-fallback-model-route`) and `estacoda model fallback ...`.
 
 ---
 
@@ -105,7 +105,7 @@ To clear a session override:
 
 ## Codex Setup Path
 
-Codex is not a first-run onboarding path. It is a public CLI setup path for advanced users who want to use the Codex CLI model.
+Codex is not an option in the onboarding wizard. It is a public CLI setup path for advanced users who want to use the Codex CLI model.
 
 ```bash
 estacoda model setup codex
@@ -113,7 +113,7 @@ estacoda model setup codex
 
 This command runs OAuth device-code authentication, stores tokens in `~/.estacoda/auth.json`, and configures the `codex/o3` route. Raw OAuth tokens are not printed. Route config remains separate from token storage.
 
-Codex is excluded from guided onboarding by design. If you need Codex, run the setup command explicitly.
+Codex is excluded from the onboarding wizard by design. If you need Codex, run the setup command explicitly.
 
 ---
 
@@ -132,11 +132,11 @@ Config example:
 }
 ```
 
-The `assessor` route drives smart approval classification. It requires a working provider executor and a runnable model. If the assessor route is missing, malformed, or fails, the system falls back to manual approval. There is no `auxiliaryModels.approval` route. The assessor route is configurable through the guided setup editor (`edit-auxiliary-model-route`) in addition to direct config edits.
+The `assessor` route drives smart approval classification. It requires a working provider executor and a runnable model. If the assessor route is missing, malformed, or fails, the system falls back to manual approval. There is no `auxiliaryModels.approval` route. The assessor route is configurable through the Setup Editor (`edit-auxiliary-model-route`) in addition to direct config edits.
 
 Missing auxiliary routes fail closed or fall back as documented by the calling subsystem. They do not crash the session.
 
-Auxiliary route management is available through the guided setup editor (`edit-auxiliary-model-route`).
+Auxiliary route management is available through the Setup Editor (`edit-auxiliary-model-route`).
 
 ---
 

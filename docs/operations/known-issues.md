@@ -36,7 +36,7 @@ This file is intentionally blunt. It is for engineering continuity, not marketin
 
 ## CLI / UX
 
-- Full runtime CLI localization is incomplete. Arabic support is onboarding plus setup labels only. `live-proven`
+- Full runtime CLI localization is incomplete. Arabic support is limited to setup labels and select surfaces. `live-proven`
 - Mixed Arabic + English technical tokens can show terminal bidi artifacts. `live-proven`
 - Interactive multiline paste ergonomics are rough. `live-proven`
 - Some answers remain too "assistant-ish" depending on surface. `live-proven`
