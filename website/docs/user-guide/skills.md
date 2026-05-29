@@ -106,13 +106,13 @@ Proposed changes carry a `ChangeManifest` with hypothesis, predicted impact, ris
 
 ---
 
-## Learning and Autonomy
+## Agent Evolution
 
-`SkillLearningManager` observes workflow execution and can create project skills when `skills.autonomy` is enabled.
+Agent Evolution controls whether EstaCoda may learn reusable Skills from workflow patterns. The persisted config key is `skills.autonomy`; setup and settings show this as Agent Evolution.
 
 | Mode | Behavior |
 |---|---|
-| `none` | No workflow learning |
+| `none` | Agent Evolution is off |
 | `suggest` | Records candidates after repeated success; does not write files |
 | `proactive` | Auto-creates project skills after repeated successful bounded local workflows |
 | `autonomous` | Auto-creates after first successful bounded local workflow |
@@ -149,7 +149,7 @@ The agent can perform these operations via runtime tools:
 
 **Skill mutation refused:** Pinned skills and authority-expanding mutations are refused by the mutation path.
 
-**Skill learning disabled:** Check `skills.autonomy` in profile config. Default is `none`.
+**Agent Evolution disabled:** Check `skills.autonomy` in profile config. Default is `none`.
 
 ---
 
@@ -157,4 +157,4 @@ The agent can perform these operations via runtime tools:
 
 - [Architecture](../developer/architecture.md) — skill system in the runtime composition
 - [Runtime](../developer/runtime.md) — skill registry and workflow execution
-- [Memory](./memory.md) — workflow learning separation from memory files
+- [Memory](./memory.md) — Agent Evolution separation from memory files

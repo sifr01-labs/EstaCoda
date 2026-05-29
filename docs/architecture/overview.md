@@ -387,7 +387,7 @@ Capability-first security boundary.
 - Bounded budgets enforced by `MemoryStore`
 - `LocalMemoryProvider` persists: manual conclusions, promoted user preferences, promoted project facts/conventions, skill outcomes
 - Contradiction/forget/inspection for promoted user preferences
-- Workflow learning separated from memory files:
+- Agent Evolution separated from memory files:
   - Facts/conventions → profile-local `MEMORY.md`
   - User preferences → profile-local `USER.md`
   - Persona/identity → profile-local `SOUL.md`

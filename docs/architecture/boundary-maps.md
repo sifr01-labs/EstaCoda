@@ -33,7 +33,7 @@ description: "Cross-subsystem boundary analysis for memory, skills, provider loo
 - AgentLoop → MemoryRecallOrchestrator → SessionRecallService for eligible recall turns
 - ProviderTurnLoop consumes prepared memory context; it does not decide recall policy
 - AgentLoop → memory-promotion (triggers post-run promotion)
-- SkillLearningManager → MemoryStore (workflow learning state)
+- SkillLearningManager → MemoryStore (Agent Evolution state)
 
 ## Skill Runtime Boundary
 
@@ -64,7 +64,7 @@ description: "Cross-subsystem boundary analysis for memory, skills, provider loo
 - AgentLoop → SkillRegistry (read skill instructions)
 - AgentLoop → SkillLearningManager (observe outcomes)
 - SkillTools → SkillEvolutionStore (propose/approve/reject)
-- SkillLearningManager → MemoryStore (workflow learning state)
+- SkillLearningManager → MemoryStore (Agent Evolution state)
 
 ## Provider–Tool Loop Boundary
 

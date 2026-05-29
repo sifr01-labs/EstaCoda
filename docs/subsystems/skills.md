@@ -122,13 +122,13 @@ estacoda curator status
 estacoda evolution export --dataset <path> [--since <date>] [--skill <name>]
 ```
 
-## Learning
+## Agent Evolution
 
-`SkillLearningManager` observes workflow execution and creates project skills when `skills.autonomy` is enabled.
+Agent Evolution controls whether EstaCoda may learn reusable Skills from workflow patterns. The persisted config key is `skills.autonomy`; the user-facing setup label is Agent Evolution.
 
 | Mode | Behavior |
 |------|----------|
-| `none` | No workflow learning |
+| `none` | Agent Evolution is off |
 | `suggest` | Records candidates after repeated success; does not write files |
 | `proactive` | Auto-creates project skills after repeated successful bounded local workflows |
 | `autonomous` | Auto-creates after first successful bounded local workflow |

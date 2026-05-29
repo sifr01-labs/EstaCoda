@@ -20,7 +20,7 @@ This file is intentionally blunt. It is for engineering continuity, not marketin
 
 ## Memory
 
-- Autonomous workflow learning creates new project skills but does not intelligently patch existing ones. `implemented but not live-proven`
+- Autonomous Agent Evolution creates new project skills but does not intelligently patch existing ones. `implemented but not live-proven`
 - Memory rendering is selective but not ranked.
 - No freshness/staleness handling.
 

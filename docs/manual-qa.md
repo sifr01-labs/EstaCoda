@@ -342,12 +342,13 @@ HOME=/tmp/estacoda-setup-qa-home pnpm run dev -- setup --interactive
 - Workspace trust is explicit.
 - Provider/model setup is separate from optional capabilities.
 - Optional capabilities can be skipped independently.
-- A review appears before any apply/write step.
-- Raw secret values are not shown in review, logs, or final output.
+- The normal Onboarding Wizard shows a configuration summary and confirmation before apply; it does not show the technical manifest as the normal user-facing screen.
+- Raw secret values are not shown in summary, review, logs, or final output.
 - Verification runs after approved apply and reports structured readiness.
-- Launch handoff happens only after verified-ready or explicitly accepted degraded setup.
+- `Start EstaCoda now?` appears only after apply and verification. It is not a pre-apply preference.
+- Launch handoff reloads config and trust, verifies workspace trust, rebuilds runtime from fresh config, and then enters the normal interactive launcher.
 
-### 10.1 First-Run Setup
+### 10.1 Onboarding Wizard
 
 ```bash
 rm -rf /tmp/estacoda-qa-first-run
@@ -356,11 +357,13 @@ HOME=/tmp/estacoda-qa-first-run pnpm run dev -- setup --interactive
 ```
 
 **Verify:**
-- First-run setup starts because no usable config exists.
+- The Onboarding Wizard starts because no usable config exists.
+- The visible sequence is setup detection, profile bootstrap, welcome, language/style, workspace, workspace trust, model route, safety, Agent Evolution, optional capabilities, summary, apply, launch.
 - Primary provider/model setup uses the shared provider/model picker.
 - Hosted provider credential input is masked.
-- Review shows env var references, not raw key values.
-- Cancelling review leaves no config, trust, state, or `.env` mutation from the cancelled plan.
+- Credential summary shows only `Not set`, `Existing credential detected`, or `New credential pending`.
+- Cancelling before apply leaves no config, trust, state, or `.env` mutation from the cancelled plan.
+- Deferring workspace trust may save setup but must show `Setup saved. Workspace trust is still required before EstaCoda can run here.` and must not offer launch.
 
 ### 10.2 Configured Ready
 
@@ -372,7 +375,7 @@ HOME=/tmp/estacoda-qa-ready pnpm run dev -- setup --interactive
 
 **Verify:**
 - The Setup Editor opens instead of the Onboarding Wizard.
-- Available actions include primary model route edit, fallback route edit, auxiliary route edit, optional capability configuration, security mode edit, workflow learning edit, read-only verification, launch after verification, and exit.
+- Available actions include primary model route edit, fallback route edit, auxiliary route edit, optional capability configuration, security mode edit, Agent Evolution edit, read-only verification, launch after verification, and exit.
 - Exiting writes nothing.
 - Running verification is read-only.
 
@@ -491,6 +494,7 @@ HOME=/tmp/estacoda-qa-ready pnpm run dev -- setup --interactive
 **Verify:**
 - Selecting `configure-voice` creates a single-module draft bundle for voice only.
 - Voice setup does not change the primary LLM route.
+- STT and TTS can be configured independently.
 - `Leave unchanged` writes nothing.
 - `Skip` keeps core setup valid and non-blocking.
 
@@ -505,6 +509,7 @@ HOME=/tmp/estacoda-qa-ready pnpm run dev -- setup --interactive
 **Verify:**
 - Selecting `configure-image-generation` creates a single-module draft bundle for vision only.
 - Image generation setup does not change the primary LLM route.
+- Image generation remains a Setup Editor capability. It must not appear in the Onboarding Wizard optional capability menu.
 - `Leave unchanged` writes nothing.
 - `Skip` keeps core setup valid and non-blocking.
 

@@ -75,15 +75,17 @@ For any path that gives you an `estacoda` command:
 
 ```bash
 estacoda init       # Bootstrap state directories
-estacoda setup      # Reviewed setup flow for provider, trust, security, workflow, and optional capabilities
+estacoda setup      # Reviewed setup flow for provider, trust, security, Agent Evolution, and optional capabilities
 estacoda setup --interactive
 estacoda verify     # Check readiness
 estacoda            # Start interactive session
 ```
 
-`estacoda setup --interactive` routes new users into the Onboarding Wizard, opens the Setup Editor for configured or degraded setup (supporting primary provider/model, fallback route, auxiliary route, and optional capability editing), and shows repair-first diagnostics for missing credentials, broken provider routes, broken config, untrusted workspaces, and state paths that are not writable.
+`estacoda setup --interactive` routes new users into the Onboarding Wizard, opens the Setup Editor for configured or degraded setup (supporting primary provider/model, fallback route, auxiliary route, Agent Evolution, and optional capability editing), and shows repair-first diagnostics for missing credentials, broken provider routes, broken config, untrusted workspaces, and state paths that are not writable.
 
-Setup review appears before apply. Cancelling review does not write config, trust, state, or `.env`. Verification is read-only, and launch requires verified-ready setup or an explicit limited-mode choice after warnings are shown.
+Onboarding Wizard users see a configuration summary, confirm it, then setup applies and verifies. The redacted manifest and apply plan still exist internally for operator inspection, but they are not the normal first screen after setup questions. Cancelling before apply does not write config, trust, state, or `.env`. Workspace trust is required before EstaCoda can run in that workspace; if trust is deferred, setup may be saved but launch is blocked with `Setup saved. Workspace trust is still required before EstaCoda can run here.`
+
+`Start EstaCoda now?` appears only after successful apply and verification. If selected, setup reloads the selected profile config, reloads trust state, verifies workspace trust, rebuilds runtime from fresh config, and enters the normal interactive launcher.
 
 Advanced/direct provider setup can reference an existing environment variable:
 

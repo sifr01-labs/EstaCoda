@@ -39,12 +39,14 @@ estacoda setup --provider <p> --model <m> --api-key-env <env>
 
 **Profile boundary:** Uses the active profile, or the profile selected via `--profile`.
 
-**Behavior:** Routes through a deterministic setup decision based on current state (first-run, configured-ready, configured-degraded, partial-provider, missing-credential, broken-config, untrusted-workspace, state-not-writable). Configured-ready state offers primary model route edit, fallback route edit, auxiliary route edit, optional capability configuration, security mode edit, workflow learning edit, read-only verification, launch after verification, and exit. Cancelling review produces no mutation. Raw secrets are never displayed in review metadata.
+**Behavior:** Routes through a deterministic setup decision based on current state (`first-run`, configured-ready, configured-degraded, partial-provider, missing-credential, broken-config, untrusted-workspace, state-not-writable). The internal `first-run` state opens the Onboarding Wizard. Normal onboarding uses `summary -> confirm -> apply -> verify`; the redacted manifest and apply plan remain internal/operator-inspectable. Configured-ready state opens the Setup Editor with primary model route edit, fallback route edit, auxiliary route edit, optional capability configuration, security mode edit, Agent Evolution edit, read-only verification, launch after verification, and exit. Cancelling review or summary confirmation produces no mutation. Raw secrets are never displayed in review metadata.
 
 **Failure modes:**
 - Broken config blocks normal edits until parsing is safe.
 - State-not-writable blocks writes until permissions are fixed.
 - Missing credentials route to credential repair without collecting raw values inline.
+- Deferred workspace trust can save setup, but launch is blocked with `Setup saved. Workspace trust is still required before EstaCoda can run here.`
+- `Start EstaCoda now?` appears only after apply and verification. The launch handoff reloads profile config and trust state, rebuilds runtime from fresh config, then enters the normal interactive launcher.
 
 ### `estacoda init`
 

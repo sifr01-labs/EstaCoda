@@ -205,19 +205,27 @@ CLI startup restores the active workspace session from `cli-session-store.ts`. F
 
 `estacoda setup` is the canonical setup entrypoint. Bare `estacoda` launch uses setup-route decisions when setup is incomplete and points users to setup instead of running the product flow inline.
 
-Interactive setup uses the reviewed setup architecture:
+The normal Onboarding Wizard flow is deliberately shorter than the backend pipeline:
 
-1. Interface language and expression style
-2. Workspace trust prompt
-3. Primary provider and model selection
-4. Hosted-provider API key capture (masked input, saved to the selected profile `.env` with `0600`)
-5. Security mode selection
-6. Workflow-learning mode selection
-7. Optional capabilities (Telegram, voice, vision, browser)
-8. Review manifest before apply
-9. Reviewed apply operations perform config, credential-reference, and trust writes
-10. Structured read-only verification after apply
-11. Launch handoff for verified-ready setup, or explicit accepted degraded state
+1. Setup detection
+2. Profile bootstrap
+3. Welcome
+4. Language/style
+5. Workspace
+6. Workspace trust
+7. Model route
+8. Safety
+9. Agent Evolution
+10. Optional capabilities
+11. Summary
+12. Apply
+13. Launch
+
+Normal users see `summary -> confirm -> apply -> verify`. They do not see the technical redacted manifest as a separate screen. Operators still care about the backend path because it explains why setup can be inspected, blocked, or safely cancelled:
+
+```text
+OnboardingWizardState -> draft bundle -> redacted manifest -> apply plan -> reviewed apply -> verification
+```
 
 The Onboarding Wizard silently creates and selects the default profile before writing configuration. Normal day-one setup copy should not require users to know profiles exist; profile commands are an advanced surface for multi-context setups.
 
@@ -227,8 +235,8 @@ The Onboarding Wizard silently creates and selects the default profile before wr
 
 | State | Route behavior |
 |-------|----------------|
-| `first-run` / no usable config | Runs the Onboarding Wizard and review/apply. |
-| configured ready | Opens the Setup Editor with primary model route edit, fallback route edit, auxiliary route edit, optional capability configuration, security mode edit, workflow learning edit, read-only verification, launch after verification, and exit choices. |
+| `first-run` / no usable config | Runs the Onboarding Wizard. `first-run` is the internal route state; the user-facing surface is the Onboarding Wizard. |
+| configured ready | Opens the Setup Editor with primary model route edit, fallback route edit, auxiliary route edit, optional capability configuration, security mode edit, Agent Evolution edit, read-only verification, launch after verification, and exit choices. |
 | configured degraded | Shows verification warnings; repair or explicit limited-mode acceptance is required before launch. |
 | partial provider / broken route | Runs guided provider/model repair through the shared provider/model selection flow. |
 | missing credential | Repairs the active route credential reference; review shows env var references only. |
@@ -236,16 +244,24 @@ The Onboarding Wizard silently creates and selects the default profile before wr
 | untrusted workspace | Offers an explicit workspace trust grant through reviewed apply. |
 | state-not-writable | Shows state/config path permission guidance and blocks normal writes until state is writable. |
 
-Configured, degraded, untrusted, and repair states use the Setup Editor. The `first-run` state uses the Onboarding Wizard runner. Read-only verification remains a separate route and does not write config, trust, state, or `.env`.
+Configured, degraded, untrusted, and repair states use the Setup Editor. The internal `first-run` state uses the Onboarding Wizard runner. Read-only verification remains a separate route and does not write config, trust, state, or `.env`.
 
 ### Review, Apply, And Launch Safety
 
-- Setup builds a review manifest before apply.
-- Cancelling review produces no apply plan and no mutation.
-- Raw secrets are not displayed in review metadata or apply planning output.
+- The Onboarding Wizard builds a redacted manifest and apply plan internally after the user confirms the summary.
+- The Setup Editor remains the advanced/reviewable configuration surface and may show technical review/manifest details.
+- No wizard step writes secrets.
+- No wizard step serializes raw secrets.
+- No cancellation path writes secrets.
+- No blocked apply writes secrets.
+- Only reviewed apply execution writes secrets.
+- Credential status may display only `Not set`, `Existing credential detected`, or `New credential pending`. It must not display raw values, prefixes, suffixes, lengths, hashes, partial keys, or token-derived identifiers.
 - Credential repair stores route/auth references and env var names, not raw key values.
 - Verification after apply is read-only.
-- Launch requires verified-ready setup, or explicit limited-mode acceptance after degraded warnings are shown.
+- Workspace trust is required before EstaCoda can run in that workspace. If trust is deferred, setup may be saved, but launch is blocked with `Setup saved. Workspace trust is still required before EstaCoda can run here.`
+- `Start EstaCoda now?` is a post-success prompt after apply and verification, not a pre-apply setup preference.
+- Onboarding launch reloads the selected profile config, reloads trust state, verifies workspace trust, rebuilds runtime from fresh config, and enters the normal interactive launcher. No pre-setup runtime state is reused.
+- Launch requires verified-ready setup, or explicit limited-mode acceptance after degraded warnings are shown in Setup Editor paths.
 - Broken config, missing credential, untrusted workspace, state-not-writable, failed verification, and blocked verification do not expose a launch path.
 
 ### Provider And Optional Capability Boundaries
@@ -256,7 +272,9 @@ Codex OAuth setup is implemented on the model setup surface (`estacoda model set
 
 `estacoda model setup codex` authenticates through OAuth device code, stores tokens in `~/.estacoda/auth.json`, and configures the `codex/o3` route. Raw OAuth tokens are not printed. Route config remains separate from token storage.
 
-Optional capabilities stay separate from the primary LLM route. Each capability creates its own single-module draft bundle through an independent setup editor action:
+Optional capabilities stay separate from the primary LLM route. In the Onboarding Wizard, the menu is limited to Channels, Voice STT/TTS, Browser, and Skip. Vision/image generation is intentionally absent from that menu.
+
+The Setup Editor is the broader operator surface. It keeps technical review/manifest behavior and exposes capabilities that the Onboarding Wizard does not show, including Vision/image generation. Each Setup Editor capability creates its own single-module draft bundle through an independent action:
 
 | Action | Setup behavior |
 |--------|----------------|

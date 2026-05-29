@@ -241,9 +241,9 @@ External recall and mirror-write paths also emit best-effort metadata-only audit
 
 These events never store raw recalled content, raw mirrored memory content, credentials, or secrets. Audit event failure is non-fatal, and local memory remains authoritative.
 
-## Workflow Learning Separation
+## Agent Evolution Separation
 
-Workflow learning is separated from memory files:
+Agent Evolution is separated from memory files:
 
 | Content Type | Destination |
 |--------------|-------------|
