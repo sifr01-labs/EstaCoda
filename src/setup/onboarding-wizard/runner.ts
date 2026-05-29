@@ -16,6 +16,10 @@ import {
   type FirstRunOnboardingSelections,
   type OptionalCapabilityId,
 } from "./plan.js";
+import {
+  validateOnboardingWorkspacePath,
+  type OnboardingInvalidWorkspaceAction,
+} from "./workspace.js";
 import { promptInterfaceLanguageAndStyle } from "../interface-preferences.js";
 import { buildFirstRunDraftBundle, type SetupDraftBundle } from "../setup-drafts.js";
 import {
@@ -77,6 +81,8 @@ type PendingCredentialWrite = {
   readonly value: string;
 };
 
+type WorkspaceTrustAction = "trust" | "change-workspace" | "decide-later";
+
 const OPTIONAL_CAPABILITY_COPY_KEYS: Record<OptionalCapabilityId, {
   readonly title: SetupCopyKey;
 }> = {
@@ -119,37 +125,9 @@ export async function runFirstRunSetup(
   });
   const language = interfaceChoice.language;
 
-  await showSetupCard(prompt, language, {
-    title: setupCopyText(language, "onboarding.workspace.title"),
-    bodyLines: [setupCopyText(language, "onboarding.workspace.root")],
-    technicalLines: [options.workspaceRoot],
-    options: [{ id: "workspace", label: options.workspaceRoot, technical: true }],
-  });
-  const workspaceRoot = await promptSetupStringWithDefault(
-    prompt,
-    `${setupCopyText(language, "onboarding.workspace.root")} [${options.workspaceRoot}]: `,
-    options.defaultSelections?.workspaceRoot ?? options.workspaceRoot
-  );
-
-  const workspaceTrusted = await promptSetupChoice(prompt, {
-    title: setupCopyText(language, "onboarding.workspace.trust.title"),
-    message: `${setupCopyText(language, "onboarding.workspace.trust")}\n`,
-    choices: [
-      {
-        id: "trust",
-        label: setupCopyText(language, "onboarding.workspace.trustAction.label"),
-        description: setupCopyText(language, "onboarding.workspace.trustAction.description"),
-        value: true,
-      },
-      {
-        id: "skip",
-        label: setupCopyText(language, "onboarding.workspace.deferTrustAction.label"),
-        description: setupCopyText(language, "onboarding.workspace.deferTrustAction.description"),
-        value: false,
-      },
-    ],
-    defaultValue: options.defaultSelections?.workspaceTrusted ?? true,
-  });
+  const workspaceSelection = await promptForWorkspaceAndTrust(options, language);
+  const workspaceRoot = workspaceSelection.workspaceRoot;
+  const workspaceTrusted = workspaceSelection.workspaceTrusted;
 
 
   const providerCandidates = await flowEngine.listProviderCandidates();
@@ -295,25 +273,27 @@ export async function runFirstRunSetup(
   });
 
   const optionalCapabilities = await chooseOptionalCapabilities(prompt, language, options.defaultSelections);
-  const launchSelected = await promptSetupChoice(prompt, {
-    title: setupCopyText(language, "onboarding.launch.preferenceTitle"),
-    message: `${setupCopyText(language, "onboarding.launch")}\n`,
-    choices: [
-      {
-        id: "skip",
-        label: setupCopyText(language, "onboarding.launch.skipAction.label"),
-        description: setupCopyText(language, "onboarding.launch.skipAction.description"),
-        value: false,
-      },
-      {
-        id: "offer",
-        label: setupCopyText(language, "onboarding.launch.offerAction.label"),
-        description: setupCopyText(language, "onboarding.launch.offerAction.description"),
-        value: true,
-      },
-    ],
-    defaultValue: options.defaultSelections?.launchSelected ?? false,
-  });
+  const launchSelected = workspaceTrusted
+    ? await promptSetupChoice(prompt, {
+        title: setupCopyText(language, "onboarding.launch.preferenceTitle"),
+        message: `${setupCopyText(language, "onboarding.launch")}\n`,
+        choices: [
+          {
+            id: "skip",
+            label: setupCopyText(language, "onboarding.launch.skipAction.label"),
+            description: setupCopyText(language, "onboarding.launch.skipAction.description"),
+            value: false,
+          },
+          {
+            id: "offer",
+            label: setupCopyText(language, "onboarding.launch.offerAction.label"),
+            description: setupCopyText(language, "onboarding.launch.offerAction.description"),
+            value: true,
+          },
+        ],
+        defaultValue: options.defaultSelections?.launchSelected ?? false,
+      })
+    : false;
 
   const selections: FirstRunOnboardingSelections = {
     language,
@@ -397,12 +377,15 @@ export async function runFirstRunSetup(
   const applyEndState = applyPlanningResult.kind === "apply-plan-ready" && options.applyExecutor !== undefined
     ? await executeSetupApplyPlan(applyPlanningResult.applyPlan, options.applyExecutor, options.applyFlowOptions)
     : undefined;
-  const output = applyEndState === undefined
+  const renderedApplyOutput = applyEndState === undefined
     ? renderSetupApplyPlanningResult(applyPlanningResult, language)
     : renderSetupApplyEndState(applyEndState, language);
   const completed = applyEndState === undefined
     ? applyPlanningResult.kind === "apply-plan-ready"
     : applyEndState.kind !== "blocked" && applyEndState.kind !== "cancelled";
+  const output = workspaceTrusted || !completed
+    ? renderedApplyOutput
+    : setupCopyText(language, "onboarding.workspace.trust.deferredFinal");
 
   return {
     completed,
@@ -416,6 +399,117 @@ export async function runFirstRunSetup(
     applyPlanningResult,
     applyEndState,
   };
+}
+
+async function promptForWorkspaceAndTrust(
+  options: FirstRunSetupRunnerOptions,
+  language: SetupCopyLocale
+): Promise<{
+  readonly workspaceRoot: string;
+  readonly workspaceTrusted: boolean;
+}> {
+  while (true) {
+    const workspaceRoot = await promptForCanonicalWorkspaceRoot(options, language);
+    const action = await promptSetupChoice<WorkspaceTrustAction>(options.prompt, {
+      title: setupCopyText(language, "onboarding.workspace.trust.title"),
+      message: `${formatSetupCopy(language, "onboarding.workspace.trust", { workspacePath: workspaceRoot })}\n`,
+      choices: [
+        {
+          id: "trust",
+          label: setupCopyText(language, "onboarding.workspace.trustAction.label"),
+          description: setupCopyText(language, "onboarding.workspace.trustAction.description"),
+          value: "trust",
+        },
+        {
+          id: "change-workspace",
+          label: setupCopyText(language, "onboarding.workspace.changeWorkspaceAction.label"),
+          description: setupCopyText(language, "onboarding.workspace.changeWorkspaceAction.description"),
+          value: "change-workspace",
+        },
+        {
+          id: "decide-later",
+          label: setupCopyText(language, "onboarding.workspace.deferTrustAction.label"),
+          description: setupCopyText(language, "onboarding.workspace.deferTrustAction.description"),
+          value: "decide-later",
+        },
+      ],
+      defaultValue: options.defaultSelections?.workspaceTrusted === false ? "decide-later" : "trust",
+    });
+
+    if (action === "change-workspace") {
+      continue;
+    }
+
+    return {
+      workspaceRoot,
+      workspaceTrusted: action === "trust",
+    };
+  }
+}
+
+async function promptForCanonicalWorkspaceRoot(
+  options: FirstRunSetupRunnerOptions,
+  language: SetupCopyLocale
+): Promise<string> {
+  let defaultWorkspaceRoot = options.defaultSelections?.workspaceRoot ?? options.workspaceRoot;
+
+  while (true) {
+    await showSetupCard(options.prompt, language, {
+      title: setupCopyText(language, "onboarding.workspace.title"),
+      bodyLines: [setupCopyText(language, "onboarding.workspace.root")],
+      technicalLines: [defaultWorkspaceRoot],
+      options: [{ id: "workspace", label: defaultWorkspaceRoot, technical: true }],
+    });
+    const requestedWorkspaceRoot = await promptSetupStringWithDefault(
+      options.prompt,
+      `${setupCopyText(language, "onboarding.workspace.root")} [${defaultWorkspaceRoot}]: `,
+      defaultWorkspaceRoot
+    );
+    const validation = await validateOnboardingWorkspacePath(requestedWorkspaceRoot);
+    if (validation.ok) {
+      return validation.canonicalPath;
+    }
+
+    write(options, `${validation.message}\n`);
+    const action = await promptSetupChoice<OnboardingInvalidWorkspaceAction>(options.prompt, {
+      title: setupCopyText(language, "onboarding.workspace.invalid.title"),
+      message: `${validation.message}\n`,
+      choices: [
+        {
+          id: "try-again",
+          label: setupCopyText(language, "onboarding.workspace.invalid.tryAgain"),
+          value: "try-again",
+        },
+        {
+          id: "use-current",
+          label: setupCopyText(language, "onboarding.workspace.invalid.useCurrent"),
+          value: "use-current",
+        },
+        {
+          id: "cancel",
+          label: setupCopyText(language, "onboarding.workspace.invalid.cancel"),
+          value: "cancel",
+        },
+      ],
+      defaultValue: "try-again",
+    });
+
+    if (action === "cancel") {
+      throw new Error("Setup cancelled during workspace selection.");
+    }
+
+    if (action === "use-current") {
+      const currentValidation = await validateOnboardingWorkspacePath(options.workspaceRoot);
+      if (currentValidation.ok) {
+        return currentValidation.canonicalPath;
+      }
+      write(options, `${currentValidation.message}\n`);
+      defaultWorkspaceRoot = options.workspaceRoot;
+      continue;
+    }
+
+    defaultWorkspaceRoot = requestedWorkspaceRoot;
+  }
 }
 
 async function createDefaultFlowEngine(options: CollectSetupEntryStateOptions): Promise<FlowEngine> {

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Prompt } from "../../cli/readline-prompt.js";
@@ -191,23 +192,39 @@ function modelStatusCandidate(
   };
 }
 
+type FakePromptOverrideValue = string | boolean | readonly (string | boolean)[];
+
 function fakePrompt(
-  overrides: Record<string, string | boolean> = {},
+  overrides: Record<string, FakePromptOverrideValue> = {},
   seenOptions: Record<string, readonly string[]> = {},
   seenDescriptions: Record<string, readonly (string | undefined)[]> = {}
 ): Prompt {
+  const overrideQueues = new Map<string, (string | boolean)[]>();
+  function nextOverride(key: string): string | boolean | undefined {
+    const override = overrides[key];
+    if (override === undefined || typeof override === "string" || typeof override === "boolean") {
+      return override;
+    }
+    const queue = overrideQueues.get(key) ?? [...override];
+    const next = queue.shift();
+    overrideQueues.set(key, queue);
+    return next;
+  }
+
   const prompt = Object.assign(
     async (_question: string, options?: { secret?: boolean }) => {
       if (options?.secret === true) {
-        return typeof overrides.__secret === "string" ? overrides.__secret : "";
+        const secret = nextOverride("__secret");
+        return typeof secret === "string" ? secret : "";
       }
-      return "";
+      const answer = nextOverride("__prompt");
+      return typeof answer === "string" ? answer : "";
     },
     {
       select: async <T>(input: SelectPromptInput<T>): Promise<T> => {
         seenOptions[input.title] = input.options.map((option) => option.label);
         seenDescriptions[input.title] = input.options.map((option) => option.description);
-        const requested = overrides[input.title];
+        const requested = nextOverride(input.title);
         const byLabel = typeof requested === "string"
           ? input.options.find((option) => option.label === requested)
           : undefined;
@@ -297,6 +314,134 @@ describe("runFirstRunSetup", () => {
     await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toContain("\"provider\": \"unconfigured\"");
     await expect(readFile(profileEnvPath(tempDir), "utf8")).resolves.toBe("");
     await expect(readFile(join(tempDir, ".estacoda", "trust.json"), "utf8")).rejects.toThrow();
+  });
+
+  it("blocks a missing workspace path before the trust prompt", async () => {
+    const missingWorkspace = join(tempDir, "missing-workspace");
+    const seenOptions: Record<string, readonly string[]> = {};
+
+    await expect(runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        "Workspace path unavailable": "Cancel setup",
+      }, seenOptions),
+      flowEngine: flowEngine(),
+      defaultSelections: {
+        workspaceRoot: missingWorkspace,
+      },
+    })).rejects.toThrow("Setup cancelled during workspace selection.");
+
+    expect(existsSync(missingWorkspace)).toBe(false);
+    expect(seenOptions["Workspace path unavailable"]).toEqual([
+      "Try again",
+      "Use current workspace",
+      "Cancel setup",
+    ]);
+    expect(seenOptions["Workspace trust"]).toBeUndefined();
+  });
+
+  it("blocks a non-directory workspace path before the trust prompt", async () => {
+    const filePath = join(tempDir, "not-a-directory.txt");
+    await writeFile(filePath, "not a workspace\n", "utf8");
+    const seenOptions: Record<string, readonly string[]> = {};
+
+    await expect(runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        "Workspace path unavailable": "Cancel setup",
+      }, seenOptions),
+      flowEngine: flowEngine(),
+      defaultSelections: {
+        workspaceRoot: filePath,
+      },
+    })).rejects.toThrow("Setup cancelled during workspace selection.");
+
+    expect(seenOptions["Workspace trust"]).toBeUndefined();
+  });
+
+  it("uses the canonical workspace path in selections and trust drafts", async () => {
+    const nonCanonicalWorkspace = join(workspaceRoot, "..", "workspace");
+    const canonicalWorkspace = await realpath(workspaceRoot);
+
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot: nonCanonicalWorkspace,
+      prompt: fakePrompt(),
+      flowEngine: flowEngine(),
+    });
+
+    expect(result.selections.workspaceRoot).toBe(canonicalWorkspace);
+    const trustDraft = result.draftBundle.drafts.find((draft) => draft.kind === "workspace-trust");
+    expect(trustDraft?.target).toEqual({
+      kind: "trust-store",
+      workspaceRoot: canonicalWorkspace,
+      trustStorePath: join(tempDir, ".estacoda", "trust.json"),
+    });
+    expect(JSON.stringify(result.reviewManifest)).toContain(canonicalWorkspace);
+  });
+
+  it("lets Change Workspace loop back to workspace selection", async () => {
+    const secondWorkspace = join(tempDir, "second-workspace");
+    await mkdir(secondWorkspace, { recursive: true });
+
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        "Workspace trust": ["Change Workspace", "Trust"],
+        __prompt: ["", secondWorkspace],
+      }),
+      flowEngine: flowEngine(),
+    });
+
+    expect(result.selections.workspaceRoot).toBe(await realpath(secondWorkspace));
+    expect(result.selections.workspaceTrusted).toBe(true);
+  });
+
+  it("lets Decide Later save config without ready or complete wording", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        "Workspace trust": "Decide Later",
+      }),
+      flowEngine: flowEngine(),
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.selections.workspaceTrusted).toBe(false);
+    expect(result.reviewManifest.sections["workspace-trust-grants"]).toHaveLength(0);
+    expect(result.output).toBe("Setup saved. Workspace trust is still required before EstaCoda can run here.");
+    expect(result.output).not.toContain("Setup complete");
+    expect(result.output).not.toContain("Setup is ready");
+    await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toContain("\"provider\": \"local\"");
+    await expect(readFile(join(tempDir, ".estacoda", "trust.json"), "utf8")).rejects.toThrow();
+  });
+
+  it("does not treat deferred workspace trust as launch-ready", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        "Workspace trust": "Decide Later",
+      }),
+      flowEngine: flowEngine(),
+      defaultSelections: {
+        workspaceTrusted: false,
+        launchSelected: true,
+      },
+    });
+
+    expect(result.selections.workspaceTrusted).toBe(false);
+    expect(result.selections.launchSelected).toBe(false);
+    expect(result.applyPlanningResult.kind).toBe("apply-plan-ready");
+    if (result.applyPlanningResult.kind === "apply-plan-ready") {
+      expect(result.applyPlanningResult.applyPlan.launchHandoffIntent?.preference).toBe("skip-launch");
+    }
   });
 
   it("stores only hosted provider credential references in review data", async () => {
