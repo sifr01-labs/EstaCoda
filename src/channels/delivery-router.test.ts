@@ -11,6 +11,7 @@ import { PlainLogSurfaceAdapter } from "./surface-adapters/plain-log-surface-ada
 import type { ChannelAdapter, ChannelSessionKey } from "../contracts/channel.js";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { FakeDeliveryRecord } from "../test/fakes/fake-channel-adapter.js";
+import { createFakeChannelAdapter } from "../test/fakes/fake-channel-adapter.js";
 import { HookRegistry } from "../gateway/hook-registry.js";
 
 type FakeAdapter = ChannelAdapter & { records: FakeDeliveryRecord[]; clearRecords(): void };
@@ -118,29 +119,87 @@ describe("DeliveryRouter", () => {
       expect(telegram.records[0].sessionKey.chatId).toBe("123");
     });
 
+    it("does not truncate long channel text by default", async () => {
+      const router = new DeliveryRouter({ homeDir: tmpDir });
+      const telegram = createFakeTelegramAdapter() as FakeAdapter;
+      router.registerAdapter(telegram);
+
+      const longText = "A".repeat(10_000);
+      const results = await router.deliverText([{ kind: "channel", platform: "telegram", chatId: "123" }], longText);
+
+      expect(results.get("telegram:123")?.success).toBe(true);
+      expect(telegram.records).toHaveLength(1);
+      expect(telegram.records[0].text).toBe(longText);
+    });
+
     it("delivers to origin via original session platform", async () => {
       const router = new DeliveryRouter({ homeDir: tmpDir });
       const telegram = createFakeTelegramAdapter() as FakeAdapter;
       router.registerAdapter(telegram);
 
       const targets = router.parseTarget("origin", baseSessionKey);
-      const results = await router.deliverText(targets, "Hello origin");
+      const longText = "Origin ".repeat(2_000);
+      const results = await router.deliverText(targets, longText);
 
       expect(results.get("origin")?.success).toBe(true);
       expect(telegram.records[0].sessionKey.chatId).toBe("123456");
+      expect(telegram.records[0].text).toBe(longText);
+    });
+
+    it("delivers full origin text by default for a non-Telegram adapter", async () => {
+      const router = new DeliveryRouter({ homeDir: tmpDir });
+      const cli = createFakeChannelAdapter({ kind: "cli" }) as FakeAdapter;
+      router.registerAdapter(cli);
+
+      const sessionKey: ChannelSessionKey = {
+        platform: "cli",
+        chatId: "terminal"
+      };
+      const longText = "CLI origin ".repeat(2_000);
+      const results = await router.deliverText([{ kind: "origin", originalSessionKey: sessionKey }], longText);
+
+      expect(results.get("origin")?.success).toBe(true);
+      expect(cli.records).toHaveLength(1);
+      expect(cli.records[0].sessionKey).toEqual(sessionKey);
+      expect(cli.records[0].text).toBe(longText);
+    });
+
+    it("does not pre-truncate Discord text before adapter delivery by default", async () => {
+      const router = new DeliveryRouter({ homeDir: tmpDir });
+      const discord = createFakeDiscordAdapter() as FakeAdapter;
+      router.registerAdapter(discord);
+
+      const longText = "D".repeat(10_000);
+      const results = await router.deliverText([{ kind: "channel", platform: "discord", chatId: "456" }], longText);
+
+      expect(results.get("discord:456")?.success).toBe(true);
+      expect(discord.records[0].text).toBe(longText);
+    });
+
+    it("does not pre-truncate WhatsApp text before adapter delivery by default", async () => {
+      const router = new DeliveryRouter({ homeDir: tmpDir });
+      const whatsapp = createFakeWhatsAppAdapter() as FakeAdapter;
+      router.registerAdapter(whatsapp);
+
+      const longText = "W".repeat(10_000);
+      const results = await router.deliverText([{ kind: "channel", platform: "whatsapp", chatId: "971501234567" }], longText);
+
+      expect(results.get("whatsapp:971501234567")?.success).toBe(true);
+      expect(whatsapp.records[0].text).toBe(longText);
     });
 
     it("saves local delivery to disk", async () => {
       const router = new DeliveryRouter({ homeDir: tmpDir });
       const targets = router.parseTarget("local", baseSessionKey);
-      await router.deliverText(targets, "Local content");
+      const longText = "Local content ".repeat(1_000);
+      await router.deliverText(targets, longText);
 
       const deliveryDir = join(tmpDir, ".estacoda", "delivery");
       const files = await readdir(deliveryDir);
       expect(files.length).toBeGreaterThan(0);
 
       const content = await readFile(join(deliveryDir, files[0]), "utf-8");
-      expect(content).toBe("Local content");
+      expect(content).toBe(longText);
     });
 
     it("uses ESTACODA_HOME before HOME for default local delivery state", async () => {
@@ -187,6 +246,7 @@ describe("DeliveryRouter", () => {
 
       expect(results.get("discord:456")?.success).toBe(false);
       expect(results.get("discord:456")?.error).toContain("No delivery adapter available");
+      await expect(readdir(join(tmpDir, ".estacoda", "delivery", "truncated"))).rejects.toMatchObject({ code: "ENOENT" });
     });
 
     it("returns failure when adapter delivery fails", async () => {
@@ -201,27 +261,59 @@ describe("DeliveryRouter", () => {
       expect(results.get("telegram:123")?.error).toBe("Network error");
     });
 
-    it("truncates oversized output and saves full to disk", async () => {
-      const router = new DeliveryRouter({ homeDir: tmpDir, maxOutputChars: 20 });
+    it("truncates oversized output and saves full to disk when maxOutputChars is explicit", async () => {
+      const router = new DeliveryRouter({
+        homeDir: tmpDir,
+        maxOutputChars: 20,
+        now: () => new Date("2026-05-30T01:02:03.004Z")
+      });
       const telegram = createFakeTelegramAdapter() as FakeAdapter;
       router.registerAdapter(telegram);
 
       const longText = "This is a very long message that should be truncated by the delivery router.";
-      const targets = router.parseTarget("telegram:123", baseSessionKey);
+      const targets = router.parseTarget("telegram:chat-secret-id", baseSessionKey);
       await router.deliverText(targets, longText);
 
       const record = telegram.records[0];
       expect(record.text).toContain("[Output truncated. Full response saved to disk.]");
       expect(record.text!.length).toBeLessThan(longText.length);
 
-      // Full output saved to disk (async, may need a tick)
-      await new Promise((r) => setTimeout(r, 50));
       const truncatedDir = join(tmpDir, ".estacoda", "delivery", "truncated");
       const files = await readdir(truncatedDir);
-      expect(files.length).toBeGreaterThan(0);
+      expect(files).toHaveLength(1);
+      expect(files[0]).toMatch(/^2026-05-30T01-02-03\.004Z_telegram_[a-f0-9]{12}\.md$/);
+      expect(files[0]).not.toContain("chat-secret-id");
+      expect(files[0]).not.toContain("secret");
+      expect(files[0]).not.toContain(":");
+      expect(files[0]).not.toContain("/");
 
       const fullContent = await readFile(join(truncatedDir, files[0]), "utf-8");
       expect(fullContent).toBe(longText);
+    });
+
+    it("uses sanitized overflow filenames without target metadata", async () => {
+      const router = new DeliveryRouter({
+        homeDir: tmpDir,
+        maxOutputChars: 12,
+        now: () => new Date("2026-05-30T12:34:56.789Z")
+      });
+      const email = createFakeEmailAdapter() as FakeAdapter;
+      router.registerAdapter(email);
+
+      const longText = "Sensitive email target output ".repeat(20);
+      const targets = router.parseTarget("email:operator@example.com", baseSessionKey);
+      await router.deliverText(targets, longText);
+
+      const truncatedDir = join(tmpDir, ".estacoda", "delivery", "truncated");
+      const files = await readdir(truncatedDir);
+      expect(files).toHaveLength(1);
+      expect(files[0]).toMatch(/^2026-05-30T12-34-56\.789Z_email_[a-f0-9]{12}\.md$/);
+      expect(files[0]).not.toContain("operator");
+      expect(files[0]).not.toContain("example.com");
+      expect(files[0]).not.toContain("@");
+      expect(files[0]).not.toContain(":");
+      expect(files[0]).not.toContain("/");
+      expect(await readFile(join(truncatedDir, files[0]), "utf-8")).toBe(longText);
     });
   });
 
@@ -507,11 +599,14 @@ describe("DeliveryRouter", () => {
       expect(payload.kind).toBe("text");
       expect(payload.platform).toBe("telegram");
       expect(payload.truncated).toBeUndefined();
+      expect(payload.overflowSaved).toBeUndefined();
+      expect(payload).not.toHaveProperty("overflowPath");
+      expect(payload).not.toHaveProperty("fullPath");
       expect(payload.target).not.toBe("telegram:123");
       expect(payload.target).toMatch(/^telegram:[a-f0-9]{16}$/);
     });
 
-    it("delivery:success includes truncated: true when text exceeds limit", async () => {
+    it("delivery:success includes safe metadata when explicit legacy cap truncates text", async () => {
       const hookRegistry = new HookRegistry();
       const router = new DeliveryRouter({ homeDir: tmpDir, maxOutputChars: 20, hookRegistry });
       const telegram = createFakeTelegramAdapter() as FakeAdapter;
@@ -525,6 +620,10 @@ describe("DeliveryRouter", () => {
       expect(successEvents).toHaveLength(1);
       const payload = successEvents[0].payload as Record<string, unknown>;
       expect(payload.truncated).toBe(true);
+      expect(payload.overflowSaved).toBe(true);
+      expect(payload).not.toHaveProperty("overflowPath");
+      expect(payload).not.toHaveProperty("fullPath");
+      expect(JSON.stringify(payload)).not.toContain(tmpDir);
       expect(payload.target).not.toBe("telegram:123");
       expect(payload.target).toMatch(/^telegram:[a-f0-9]{16}$/);
     });

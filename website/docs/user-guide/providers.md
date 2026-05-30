@@ -75,6 +75,55 @@ Fallback routes are manageable through both the Setup Editor (`edit-fallback-mod
 
 ---
 
+## Finalization, Streaming, and Tool Calls
+
+Provider output is usable only after the provider response is finalized. Streaming can show visible tokens while a request is running, but executable tool calls are not planned or executed until finalization produces canonical `ProviderExecutionResult.toolCalls`.
+
+Normalized finish reasons are:
+
+| Finish reason | Runtime meaning |
+|---|---|
+| `stop` | Normal completion. |
+| `length` | Provider stopped at its output limit. Visible text may continue; tool calls are unsafe until retried. |
+| `tool_calls` | Provider finalized tool calls. |
+| `content_filter` | Provider stopped for policy or filtering. |
+| `incomplete` | Provider reported an incomplete response. |
+| `unknown` | Transport finalized without a provider-specific finish reason. |
+
+Usage metadata is normalized as `inputTokens`, `outputTokens`, `totalTokens`, and `reasoningTokens`. `reasoningTokens` is usage telemetry only. It does not mean raw reasoning was available, extracted, stored, or displayed.
+
+Streaming rules:
+
+- streamed tool-call fragments are collected locally while the stream is open
+- stream errors discard accumulated tool fragments
+- incomplete streams remain provider failures
+- `[DONE]` transport handling is internal and not user-visible output
+- visible-only transport completion can finalize as `finishReason: "unknown"`
+- transport completion with unfinished tool fragments fails as `incomplete-stream`
+- Responses API streaming remains unsupported unless explicitly implemented later
+
+Tool-call safety rules:
+
+- length-truncated tool calls retry once on the successful route chain
+- if the retry is still length-truncated with tool calls, EstaCoda refuses deterministically instead of executing incomplete arguments
+- finalized malformed tool JSON remains a tool-planning error, not a provider failure
+- discarded truncated tool-call attempts must not leak raw arguments into events or execution
+
+Reasoning hygiene rules:
+
+- raw reasoning is turn-local only
+- visible output strips hidden reasoning blocks
+- provider-bound history strips reasoning fields by default
+- summaries, semantic compression, memory, skill learning, and exports consume visible text only
+- safe reasoning metadata may include only `present`, `chars`, and `format`
+- provider-bound reasoning echo-back is deferred unless an explicit provider metadata opt-in is implemented and tested
+
+Reasoning-only provider success reaches the turn loop. Non-length reasoning-only responses retry with a local-only visible-answer prefill. Length-truncated reasoning-only exhaustion returns safe visible guidance. Raw reasoning is never displayed.
+
+Visible text with `finishReason: "length"` can continue. Continuation stays on the successful route chain: if the primary route fails and a fallback produces the truncated visible text, continuation starts from that fallback and preserves later fallbacks. Synthetic continuation messages are local-only, intermediate partials are not persisted, and the final visible text is persisted once. Continuation trims exact suffix/prefix overlap; it does not use semantic or fuzzy matching.
+
+---
+
 ## Model Switching During a Session
 
 The `/model` command changes the model for the current session without editing profile config.
@@ -177,6 +226,12 @@ estacoda model setup
 **Provider timeout:** The request exceeded the configured timeout. Check network connectivity and provider status. Fallbacks are tried if configured.
 
 **Tool-call exactness failure:** Some providers (notably OpenRouter) return tool calls in formats that require normalization. If tool calls fail, check the provider-specific normalization path in the executor logs.
+
+**Tool-call refusal after truncation:** The provider stopped with `finishReason: "length"` while generating tool calls, and retry did not produce complete tool arguments. Increase `model.maxTokens`, narrow the request, or switch to a route with better tool-call reliability.
+
+**Reasoning appears in a persisted surface:** Treat this as a hygiene bug. Inspect session messages, summaries, memory files, skill records, and export traces. Raw reasoning fields and inline hidden reasoning blocks should be stripped; only safe `reasoningMetadata` or `reasoningTokens` telemetry may remain.
+
+**Incomplete stream:** Check provider connectivity, adapter streaming support, and whether the stream ended with unfinished tool fragments. Incomplete streams remain provider failures and should not become final assistant answers.
 
 **Smart approval fallback:** If the `assessor` auxiliary route is missing or fails, the system falls back to manual approval. This is safe but slower.
 

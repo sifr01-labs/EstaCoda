@@ -308,6 +308,7 @@ export type ModelFallbackConfig = {
   baseUrl?: string;
   apiKeyEnv?: string;
   contextWindowTokens?: number;
+  maxTokens?: number;
 };
 
 export type ModelAliasDefinition = {
@@ -316,6 +317,7 @@ export type ModelAliasDefinition = {
   baseUrl?: string;
   apiMode?: string;
   apiKeyEnv?: string;
+  maxTokens?: number;
 };
 
 export type EstaCodaConfig = {
@@ -323,6 +325,7 @@ export type EstaCodaConfig = {
     provider?: ProviderId;
     id?: string;
     contextWindowTokens?: number;
+    maxTokens?: number;
     fallbacks?: ModelFallbackConfig[];
   };
   modelAliases?: Record<string, ModelAliasDefinition>;
@@ -755,6 +758,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
   const primaryProviderId = config.model?.provider ?? "unconfigured";
   const primaryProviderConfig = config.providers?.[primaryProviderId];
   const primaryProviderMetadata = getProviderMetadata(primaryProviderId);
+  const primaryMaxTokens = normalizeOptionalPositiveIntegerStrict(config.model?.maxTokens, "model.maxTokens");
   const primaryModelRoute = buildResolvedModelRoute({
     provider: primaryProviderId,
     model: config.model?.id ?? "unconfigured",
@@ -762,7 +766,8 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
     baseUrl: primaryProviderConfig?.baseUrl ?? primaryProviderMetadata.defaultBaseUrl,
     apiKeyEnv: primaryProviderConfig?.apiKeyEnv,
     apiMode: primaryProviderConfig?.apiMode,
-    contextWindowTokens: config.model?.contextWindowTokens
+    contextWindowTokens: config.model?.contextWindowTokens,
+    maxTokens: primaryMaxTokens
   });
 
   const modelFallbackRoutes: ResolvedModelRoute[] = [];
@@ -783,7 +788,8 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
       baseUrl: fallback.baseUrl ?? fallbackProviderConfig?.baseUrl,
       apiKeyEnv: fallback.apiKeyEnv ?? fallbackProviderConfig?.apiKeyEnv,
       apiMode: fallbackProviderConfig?.apiMode,
-      contextWindowTokens: fallback.contextWindowTokens
+      contextWindowTokens: fallback.contextWindowTokens,
+      maxTokens: fallback.maxTokens
     }));
   }
 
@@ -1005,6 +1011,9 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 
 function compactConfig(config: EstaCodaConfig): EstaCodaConfig {
   const compacted = (compactValue(config) ?? {}) as EstaCodaConfig;
+  if (compacted.modelAliases !== undefined) {
+    compacted.modelAliases = normalizeModelAliases(compacted.modelAliases);
+  }
   if (compacted.auxiliaryModels !== undefined) {
     const stripped = stripDefaultAuxiliarySlots(compacted.auxiliaryModels);
     if (Object.keys(stripped).length === 0) {
@@ -1313,6 +1322,46 @@ function normalizeOptionalPositiveInteger(value: unknown): number | undefined {
     return undefined;
   }
   return coercePositiveInteger(value, { default: 1 });
+}
+
+export function normalizeOptionalPositiveIntegerStrict(value: unknown, path: string): number | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value === "string" && value.trim().length === 0) {
+    return undefined;
+  }
+
+  const parsed = typeof value === "string" ? Number(value) : value;
+  if (
+    typeof parsed !== "number" ||
+    !Number.isInteger(parsed) ||
+    parsed <= 0
+  ) {
+    throw new Error(`${path} must be a positive integer when set.`);
+  }
+
+  return parsed;
+}
+
+function normalizeModelAliases(
+  aliases: Record<string, ModelAliasDefinition>
+): Record<string, ModelAliasDefinition> {
+  const normalized: Record<string, ModelAliasDefinition> = {};
+  for (const [name, alias] of Object.entries(aliases)) {
+    const { maxTokens: _maxTokens, ...rest } = alias as ModelAliasDefinition & {
+      maxTokens?: unknown;
+    };
+    const maxTokens = normalizeOptionalPositiveIntegerStrict(
+      _maxTokens,
+      `modelAliases.${name}.maxTokens`
+    );
+    normalized[name] = {
+      ...rest,
+      ...(maxTokens !== undefined ? { maxTokens } : {})
+    };
+  }
+  return normalized;
 }
 
 function normalizeTtsConfig(value: EstaCodaConfig["tts"]): LoadedRuntimeConfig["tts"] {
@@ -3017,7 +3066,7 @@ export function normalizeModelFallbacks(
   const primaryId = config.model?.id;
   const primaryBaseUrl = config.providers?.[primaryProvider ?? ""]?.baseUrl;
 
-  for (const entry of raw) {
+  for (const [index, entry] of raw.entries()) {
     if (entry === undefined || entry === null || typeof entry !== "object") {
       warnings.push("Ignored non-object fallback entry.");
       continue;
@@ -3048,6 +3097,10 @@ export function normalizeModelFallbacks(
     }
 
     const contextWindowTokens = (entry as Record<string, unknown>).contextWindowTokens;
+    const maxTokens = normalizeOptionalPositiveIntegerStrict(
+      (entry as Record<string, unknown>).maxTokens,
+      `model.fallbacks[${index}].maxTokens`
+    );
     const normalized: ModelFallbackConfig = {
       provider: provider as ProviderId,
       id,
@@ -3055,7 +3108,8 @@ export function normalizeModelFallbacks(
       ...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
       ...(typeof contextWindowTokens === "number" && Number.isFinite(contextWindowTokens)
         ? { contextWindowTokens }
-        : {})
+        : {}),
+      ...(maxTokens !== undefined ? { maxTokens } : {})
     };
 
     const key = fallbackRouteKey(normalized);

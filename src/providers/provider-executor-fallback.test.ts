@@ -193,6 +193,71 @@ describe("ProviderExecutor fallback behavior", () => {
     }));
   });
 
+  it("does not fallback when empty content includes reasoning metadata", async () => {
+    const primary = createMockAdapter({
+      id: "primary",
+      completeResponse: {
+        ok: true,
+        content: "",
+        model: "m1",
+        provider: "primary",
+        reasoning: "hidden provider reasoning",
+        reasoningMetadata: {
+          present: true,
+          chars: "hidden provider reasoning".length,
+          format: "reasoning_content"
+        }
+      }
+    });
+    const fallback = createMockAdapter({
+      id: "fallback",
+      completeResponse: { ok: true, content: "fallback ok", model: "m2", provider: "fallback" }
+    });
+    registry.register(primary);
+    registry.register(fallback);
+
+    const events: ProviderRuntimeEvent[] = [];
+    const executor = new ProviderExecutor({ registry });
+    const result = await executor.complete(
+      { messages: [] },
+      {},
+      {
+        primaryRoute: createRoute("primary", "m1"),
+        fallbackChain: [createRoute("fallback", "m2")],
+        onEvent: (event) => {
+          events.push(event);
+        }
+      }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.fallbackUsed).toBe(false);
+    expect(result.response?.content).toBe("");
+    expect(result.response?.reasoning).toBe("hidden provider reasoning");
+    expect(result.runtimeMetadata).toEqual({
+      reasoning: {
+        present: true,
+        chars: "hidden provider reasoning".length,
+        format: "reasoning_content"
+      }
+    });
+    expect(fallback.calls.length).toBe(0);
+    expect(result.attempts[0]).not.toHaveProperty("reasoning");
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "provider-attempt-end",
+      provider: "primary",
+      ok: true,
+      willFallback: false,
+      reasoningMetadata: {
+        present: true,
+        chars: "hidden provider reasoning".length,
+        format: "reasoning_content"
+      }
+    }));
+    expect(JSON.stringify(result.attempts)).not.toContain("hidden provider reasoning");
+    expect(JSON.stringify(events)).not.toContain("hidden provider reasoning");
+  });
+
   it("falls back when successful primary content is empty and has no tool calls", async () => {
     const primary = createMockAdapter({
       id: "primary",
@@ -390,6 +455,94 @@ describe("ProviderExecutor fallback behavior", () => {
     }));
   });
 
+  it("propagates safe final-state metadata without copying raw reasoning into attempts", async () => {
+    const primaryRoute = createRoute("primary", "m1");
+    const primary = createMockAdapter({
+      id: "primary",
+      completeResponse: {
+        ok: true,
+        content: "final answer",
+        model: "m1",
+        provider: "primary",
+        finishReason: "length",
+        incompleteReason: "max_output_tokens",
+        usage: {
+          inputTokens: 10,
+          outputTokens: 5,
+          totalTokens: 15,
+          reasoningTokens: 2
+        },
+        reasoning: "hidden provider reasoning",
+        reasoningMetadata: {
+          present: true,
+          chars: 25,
+          format: "reasoning_content"
+        }
+      }
+    });
+    registry.register(primary);
+
+    const events: ProviderRuntimeEvent[] = [];
+    const executor = new ProviderExecutor({ registry });
+    const result = await executor.complete(
+      { messages: [] },
+      {},
+      {
+        primaryRoute,
+        onEvent: (event) => {
+          events.push(event);
+        }
+      }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.route).toEqual(primaryRoute);
+    expect(result.attemptedRouteIndex).toBe(0);
+    expect(result.routeRole).toBe("primary");
+    expect(result.runtimeMetadata).toEqual({
+      reasoning: {
+        present: true,
+        chars: 25,
+        format: "reasoning_content"
+      }
+    });
+    expect(result.attempts[0]).toEqual(expect.objectContaining({
+      finishReason: "length",
+      incompleteReason: "max_output_tokens",
+      usage: {
+        inputTokens: 10,
+        outputTokens: 5,
+        totalTokens: 15,
+        reasoningTokens: 2
+      },
+      reasoningMetadata: {
+        present: true,
+        chars: 25,
+        format: "reasoning_content"
+      }
+    }));
+    expect(result.attempts[0]).not.toHaveProperty("reasoning");
+
+    const attemptEnd = events.find((event) => event.kind === "provider-attempt-end");
+    expect(attemptEnd).toEqual(expect.objectContaining({
+      finishReason: "length",
+      incompleteReason: "max_output_tokens",
+      usage: {
+        inputTokens: 10,
+        outputTokens: 5,
+        totalTokens: 15,
+        reasoningTokens: 2
+      },
+      reasoningMetadata: {
+        present: true,
+        chars: 25,
+        format: "reasoning_content"
+      }
+    }));
+    expect(JSON.stringify(result.attempts)).not.toContain("hidden provider reasoning");
+    expect(JSON.stringify(events)).not.toContain("hidden provider reasoning");
+  });
+
   it("preserves fallback route metadata during execution", async () => {
     const primary = createMockAdapter({
       id: "test-primary",
@@ -403,15 +556,19 @@ describe("ProviderExecutor fallback behavior", () => {
     registry.register(fallback);
 
     const executor = new ProviderExecutor({ registry });
-    await executor.complete(
+    const fallbackRoute = createRoute("test-fallback", "m2", { baseUrl: "https://fallback.example.com/v1" });
+    const result = await executor.complete(
       { messages: [] },
       {},
       {
         primaryRoute: createRoute("test-primary", "m1", { baseUrl: "https://primary.example.com/v1" }),
-        fallbackChain: [createRoute("test-fallback", "m2", { baseUrl: "https://fallback.example.com/v1" })]
+        fallbackChain: [fallbackRoute]
       }
     );
 
+    expect(result.route).toEqual(fallbackRoute);
+    expect(result.attemptedRouteIndex).toBe(1);
+    expect(result.routeRole).toBe("fallback");
     expect(primary.calls.length).toBe(1);
     expect(primary.calls[0].options?.endpoint?.baseUrl).toBe("https://primary.example.com/v1");
     expect(fallback.calls.length).toBe(1);
@@ -496,7 +653,7 @@ describe("ProviderExecutor fallback behavior", () => {
     expect(fallback.calls.length).toBe(2);
   });
 
-  it("returns failed incomplete stream executions with sanitized partial content", async () => {
+  it("falls back after incomplete streams without persisting partial stream content as success", async () => {
     const primary = createMockAdapter({
       id: "stream-primary",
       streamEvents: [
@@ -505,7 +662,14 @@ describe("ProviderExecutor fallback behavior", () => {
     });
     const fallback = createMockAdapter({
       id: "stream-fallback",
-      completeResponse: { ok: true, content: "fallback ok", model: "m2", provider: "stream-fallback" }
+      streamEvents: [
+        {
+          kind: "done",
+          provider: "stream-fallback" as any,
+          model: "m2",
+          response: { ok: true, content: "fallback ok", model: "m2", provider: "stream-fallback" as any }
+        }
+      ]
     });
     registry.register(primary);
     registry.register(fallback);
@@ -521,19 +685,265 @@ describe("ProviderExecutor fallback behavior", () => {
       }
     );
 
-    expect(result.ok).toBe(false);
-    expect(result.response).toBeUndefined();
-    expect(result.partialContent).toBe("Visible partial answer.");
+    expect(result.ok).toBe(true);
+    expect(result.response?.content).toBe("fallback ok");
+    expect(result.partialContent).toBeUndefined();
+    expect(result.toolCalls).toEqual([]);
     expect(result.attempts).toEqual([
       expect.objectContaining({
         provider: "stream-primary",
         ok: false,
         errorClass: "incomplete-stream",
         partialContent: "Visible partial answer."
+      }),
+      expect.objectContaining({
+        provider: "stream-fallback",
+        ok: true,
+        content: "fallback ok"
       })
     ]);
     expect(result.attempts[0].content).toContain("Provider stream ended before completion after partial output:");
-    expect(fallback.calls.length).toBe(0);
+    expect(fallback.calls.length).toBe(1);
+  });
+
+  it("does not surface streamed tool-call fragments when the stream errors", async () => {
+    const primary = createMockAdapter({
+      id: "stream-primary",
+      streamEvents: [
+        {
+          kind: "tool-call",
+          provider: "stream-primary" as any,
+          model: "m1",
+          index: 0,
+          id: "call-1",
+          name: "test.tool",
+          argumentsText: "{\"path\""
+        },
+        {
+          kind: "error",
+          provider: "stream-primary" as any,
+          model: "m1",
+          response: {
+            ok: false,
+            content: "stream failed",
+            model: "m1",
+            provider: "stream-primary" as any,
+            errorClass: "server"
+          }
+        }
+      ]
+    });
+    registry.register(primary);
+
+    const events: ProviderRuntimeEvent[] = [];
+    const executor = new ProviderExecutor({ registry });
+    const result = await executor.complete(
+      { messages: [] },
+      {},
+      {
+        primaryRoute: createRoute("stream-primary", "m1"),
+        stream: true,
+        onEvent: (event) => {
+          events.push(event);
+        }
+      }
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.toolCalls).toEqual([]);
+    expect(events.filter((event) => event.kind === "provider-tool-call")).toEqual([]);
+  });
+
+  it("finalizes visible-only streams on transport done with unknown finish reason", async () => {
+    const primary = createMockAdapter({
+      id: "stream-primary",
+      streamEvents: [
+        { kind: "token", provider: "stream-primary" as any, model: "m1", text: "Visible partial answer." },
+        { kind: "transport-done", provider: "stream-primary" as any, model: "m1" }
+      ]
+    });
+    registry.register(primary);
+
+    const executor = new ProviderExecutor({ registry });
+    const result = await executor.complete(
+      { messages: [] },
+      {},
+      {
+        primaryRoute: createRoute("stream-primary", "m1"),
+        stream: true
+      }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.response?.content).toBe("Visible partial answer.");
+    expect(result.response?.finishReason).toBe("unknown");
+    expect(result.toolCalls).toEqual([]);
+  });
+
+  it("treats transport-only completion with tool fragments as incomplete", async () => {
+    const primary = createMockAdapter({
+      id: "stream-primary",
+      streamEvents: [
+        {
+          kind: "tool-call",
+          provider: "stream-primary" as any,
+          model: "m1",
+          index: 0,
+          id: "call-1",
+          name: "test.tool",
+          argumentsText: "{\"path\":\"README.md\"}"
+        },
+        { kind: "transport-done", provider: "stream-primary" as any, model: "m1" }
+      ]
+    });
+    registry.register(primary);
+
+    const events: ProviderRuntimeEvent[] = [];
+    const executor = new ProviderExecutor({ registry });
+    const result = await executor.complete(
+      { messages: [] },
+      {},
+      {
+        primaryRoute: createRoute("stream-primary", "m1"),
+        stream: true,
+        onEvent: (event) => {
+          events.push(event);
+        }
+      }
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.toolCalls).toEqual([]);
+    expect(result.attempts[0]).toEqual(expect.objectContaining({
+      errorClass: "incomplete-stream"
+    }));
+    expect(events.filter((event) => event.kind === "provider-tool-call")).toEqual([]);
+  });
+
+  it("treats abrupt stream end with tool fragments as incomplete", async () => {
+    const primary = createMockAdapter({
+      id: "stream-primary",
+      streamEvents: [
+        {
+          kind: "tool-call",
+          provider: "stream-primary" as any,
+          model: "m1",
+          index: 0,
+          id: "call-1",
+          name: "test.tool",
+          argumentsText: "{\"path\":\"README.md\"}"
+        }
+      ]
+    });
+    registry.register(primary);
+
+    const executor = new ProviderExecutor({ registry });
+    const result = await executor.complete(
+      { messages: [] },
+      {},
+      {
+        primaryRoute: createRoute("stream-primary", "m1"),
+        stream: true
+      }
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.toolCalls).toEqual([]);
+    expect(result.attempts[0]).toEqual(expect.objectContaining({
+      errorClass: "incomplete-stream"
+    }));
+  });
+
+  it("treats empty abrupt stream end as incomplete", async () => {
+    const primary = createMockAdapter({
+      id: "stream-primary",
+      streamEvents: []
+    });
+    registry.register(primary);
+
+    const executor = new ProviderExecutor({ registry });
+    const result = await executor.complete(
+      { messages: [] },
+      {},
+      {
+        primaryRoute: createRoute("stream-primary", "m1"),
+        stream: true
+      }
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.toolCalls).toEqual([]);
+    expect(result.partialContent).toBeUndefined();
+    expect(result.attempts[0]).toEqual(expect.objectContaining({
+      errorClass: "incomplete-stream"
+    }));
+  });
+
+  it("emits finalized streamed tool calls once after route completion", async () => {
+    const primary = createMockAdapter({
+      id: "stream-primary",
+      streamEvents: [
+        {
+          kind: "tool-call",
+          provider: "stream-primary" as any,
+          model: "m1",
+          index: 0,
+          id: "call-1",
+          name: "test.tool",
+          argumentsText: "{\"path\":"
+        },
+        {
+          kind: "tool-call",
+          provider: "stream-primary" as any,
+          model: "m1",
+          index: 0,
+          id: "call-1",
+          argumentsText: "\"README.md\"}"
+        },
+        {
+          kind: "done",
+          provider: "stream-primary" as any,
+          model: "m1",
+          response: { ok: true, content: "", model: "m1", provider: "stream-primary" as any }
+        }
+      ]
+    });
+    registry.register(primary);
+
+    const events: ProviderRuntimeEvent[] = [];
+    const executor = new ProviderExecutor({ registry });
+    const result = await executor.complete(
+      { messages: [] },
+      {},
+      {
+        primaryRoute: createRoute("stream-primary", "m1"),
+        stream: true,
+        onEvent: (event) => {
+          events.push(event);
+        }
+      }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.toolCalls).toEqual([
+      expect.objectContaining({
+        index: 0,
+        id: "call-1",
+        name: "test.tool",
+        argumentsText: "{\"path\":\"README.md\"}"
+      })
+    ]);
+    const toolCallEvents = events.filter((event) => event.kind === "provider-tool-call");
+    expect(toolCallEvents).toHaveLength(1);
+    expect(toolCallEvents[0]).toEqual(expect.objectContaining({
+      index: 0,
+      id: "call-1",
+      name: "test.tool",
+      argumentsText: "{\"path\":\"README.md\"}"
+    }));
+    const attemptEndIndex = events.findIndex((event) => event.kind === "provider-attempt-end");
+    const toolCallEventIndex = events.findIndex((event) => event.kind === "provider-tool-call");
+    expect(toolCallEventIndex).toBeGreaterThan(attemptEndIndex);
   });
 
   it("does not expose partial content for incomplete streams with only reasoning tags", async () => {
@@ -616,7 +1026,7 @@ describe("ProviderExecutor fallback behavior", () => {
     ["model-unavailable", true],
     ["unknown", true],
     ["timeout", true],
-    ["incomplete-stream", false],
+    ["incomplete-stream", true],
     ["unsupported", false]
   ])("eligible failure class %s triggers fallback: %s", async (errorClass: string, shouldTrigger: boolean) => {
     const primary = createMockAdapter({

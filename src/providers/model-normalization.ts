@@ -1,5 +1,5 @@
 import type { ProviderId, ProviderApiMode, ResolvedModelRoute, ModelProfile } from "../contracts/provider.js";
-import type { EstaCodaConfig, ModelAliasDefinition } from "../config/runtime-config.js";
+import { normalizeOptionalPositiveIntegerStrict, type EstaCodaConfig, type ModelAliasDefinition } from "../config/runtime-config.js";
 import { getProviderMetadata, providerRequiresBaseUrl } from "./provider-metadata.js";
 import type { ModelSelectionCatalog } from "./model-selection-catalog.js";
 import { inferModelProfile, fallbackKnownModelProfiles, inferProviderFromModel } from "./model-catalog.js";
@@ -131,6 +131,10 @@ function resolveDirectAlias(
   const baseUrl = alias.baseUrl ?? meta.defaultBaseUrl;
   const apiMode = (alias.apiMode as ProviderApiMode | undefined) ?? meta.apiMode;
   const apiKeyEnv = alias.apiKeyEnv ?? meta.defaultApiKeyEnv;
+  const maxTokens = normalizeOptionalPositiveIntegerStrict(
+    (alias as Record<string, unknown>).maxTokens,
+    `modelAliases.${input}.maxTokens`
+  );
 
   const profile = inferModelProfile({
     provider: alias.provider as ProviderId,
@@ -147,6 +151,7 @@ function resolveDirectAlias(
       baseUrl,
       apiKeyEnv,
       contextWindowTokens: profile.contextWindowTokens,
+      maxTokens,
       apiMode
     },
     resolvedViaAlias: input

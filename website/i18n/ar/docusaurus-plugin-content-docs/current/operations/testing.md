@@ -173,6 +173,43 @@ pnpm exec vitest run src/tools/voice-tools.test.ts src/tools/tts-providers.test.
 pnpm exec vitest run src/channels/voice-transcription.test.ts src/gateway/voice-state.test.ts
 ```
 
+فحوصات إنهاء المزود ونظافة التفكير:
+
+```bash
+pnpm exec vitest run src/providers/provider-executor-fallback.test.ts
+pnpm exec vitest run src/providers/provider-executor-route.test.ts
+pnpm exec vitest run src/providers/openai-compatible-provider.test.ts
+pnpm exec vitest run src/providers/openai-responses-provider.test.ts
+pnpm exec vitest run src/providers/provider-reasoning.test.ts
+pnpm exec vitest run src/providers/provider-message-normalizer.test.ts
+pnpm exec vitest run src/runtime/provider-turn-loop.test.ts
+pnpm exec vitest run src/runtime/agent-loop.test.ts
+pnpm exec vitest run src/prompt/semantic-compressor.test.ts
+pnpm exec vitest run src/memory/local-memory-provider.test.ts
+pnpm exec vitest run src/skills/skill-learning.test.ts
+pnpm exec vitest run src/skills/skill-evolution.test.ts
+pnpm exec vitest run src/evolution/export-format.test.ts
+```
+
+افحص أوضاع الفشل هذه قبل تغيير سلوك وقت تشغيل المزود:
+
+- `incomplete-stream` يبقى فشلًا أو يستخدم الاحتياطي؛ ويجب ألا يصبح جوابًا نهائيًا للمساعد
+- استدعاءات الأدوات المقطوعة بسبب `length` تُعاد محاولتها مرة واحدة أو تُرفض؛ ويجب ألا تصل المحاولة المقطوعة الأولى إلى التخطيط أو التنفيذ
+- JSON النهائي المشوه للأدوات يبقى خطأ في تخطيط الأدوات
+- الاستجابات التي تحتوي على تفكير فقط تستخدم مسار إعادة محاولة الجواب المرئي دون عرض التفكير الخام
+- متابعة النص المرئي المقطوع بسبب `length` تحفظ رسالة مساعد نهائية واحدة ولا تحفظ رسائل متابعة اصطناعية
+- اختبارات الملخصات والذاكرة والمهارات والتصدير تزيل التفكير مع الحفاظ على النص المرئي العادي
+
+مسار الفحص اليدوي:
+
+```bash
+pnpm run dev
+estacoda trace list --limit 5
+estacoda trace dump <trajectory-id> --raw
+```
+
+يجب ألا تظهر بيانات التفكير الخام، أو `reasoning_content`، أو `reasoning_details`، أو وسائط الأدوات المقطوعة والمستبعدة، أو رسائل المتابعة/التمهيد الاصطناعية في رسائل الجلسة المرئية المحفوظة، أو أحداث وقت التشغيل/الجلسة، أو الملخصات، أو ملفات الذاكرة، أو سجلات المهارات، أو آثار التصدير. قد تظهر بيانات آمنة مثل سبب الإنهاء، والاستخدام، و`reasoningMetadata`، وحالة القطع، وحالة المتابعة.
+
 تستخدم اختبارات المزود، وصوت Discord، وfaster-whisper المحاكاة حيث تكون الحزم الاختيارية أو الخدمات الحية غائبة. استدعاءات المزود الحية، وصوت Discord الحقيقي، والتقاط الميكروفون، وتنزيلات النموذج الأولى هي اختبارات تكامل المشغل، وليست متطلبات CI الأساسية.
 
 ## الممارسة الموصى بها

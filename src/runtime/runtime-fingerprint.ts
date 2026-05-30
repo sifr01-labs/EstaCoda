@@ -163,6 +163,7 @@ function fingerprintRoute(route: ResolvedModelRoute): Record<string, unknown> {
     apiKeyEnv: route.apiKeyEnv,
     apiMode: route.apiMode,
     contextWindowTokens: route.contextWindowTokens,
+    maxTokens: route.maxTokens,
   };
 }
 

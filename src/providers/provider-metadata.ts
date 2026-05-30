@@ -6,6 +6,13 @@ import type {
   ModelProfile
 } from "../contracts/provider.js";
 
+export type ChatMaxTokenParam = "max_tokens" | "max_completion_tokens";
+
+export type ReasoningEchoField =
+  | "reasoning_content"
+  | "reasoning"
+  | "reasoning_details";
+
 export type ProviderVisibility = {
   modelPicker: boolean;
   setup: boolean;
@@ -26,6 +33,8 @@ export type ProviderMetadata = {
   defaultAuthMethod: ProviderAuthMethod;
   allowsCustomBaseUrl: boolean;
   requiresModelSelection: boolean;
+  chatMaxTokenParam?: ChatMaxTokenParam;
+  reasoningEchoField?: ReasoningEchoField;
 };
 
 const BUILT_IN_METADATA: Record<string, ProviderMetadata> = {
@@ -275,6 +284,17 @@ export function getProviderMetadata(providerId: ProviderId): ProviderMetadata {
   };
 }
 
+export function resolveChatMaxTokenParam(
+  providerId: ProviderId,
+  metadata: Pick<ProviderMetadata, "chatMaxTokenParam"> = getProviderMetadata(providerId)
+): ChatMaxTokenParam {
+  if (metadata.chatMaxTokenParam !== undefined) {
+    return metadata.chatMaxTokenParam;
+  }
+
+  return providerId === "openai" ? "max_completion_tokens" : "max_tokens";
+}
+
 /**
  * Return the real default base URL for a provider when metadata defines one.
  */
@@ -376,6 +396,7 @@ export function buildResolvedModelRoute(options: {
   baseUrl?: string;
   apiKeyEnv?: string;
   contextWindowTokens?: number;
+  maxTokens?: number;
   apiMode?: ProviderApiMode;
   authMethod?: ProviderAuthMethod;
 }): ResolvedModelRoute {
@@ -387,6 +408,7 @@ export function buildResolvedModelRoute(options: {
     baseUrl: options.baseUrl,
     apiKeyEnv: options.apiKeyEnv,
     contextWindowTokens: options.contextWindowTokens,
+    maxTokens: options.maxTokens,
     apiMode: options.apiMode ?? metadata.apiMode,
     authMethod: options.authMethod ?? metadata.defaultAuthMethod
   };

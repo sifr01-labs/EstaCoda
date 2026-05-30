@@ -28,11 +28,35 @@ sidebar_position: 3
 {
   "model": {
     "provider": "openai",
-    "model": "gpt-4o",
-    "apiKeyEnv": "OPENAI_API_KEY"
+    "id": "gpt-4.1",
+    "apiKeyEnv": "OPENAI_API_KEY",
+    "maxTokens": 8192
   }
 }
 ```
+
+الشكل المكافئ:
+
+```yaml
+model:
+  provider: openai
+  id: gpt-4.1
+  maxTokens: 8192
+```
+
+الحقل `model.maxTokens` هو حد الخرج على مستوى المسار. إذا كان غير مضبوط، يُستخدم الافتراضي لدى المزود. تُقبل الأعداد الصحيحة الموجبة، سواء كانت أرقامًا أو سلاسل نصية. تُرفض القيم `0`، والقيم السالبة، والكسور، والسلاسل غير الرقمية. تعرض التشخيصات `provider default` عندما يكون غير مضبوط، وتحذر من القيم المضبوطة تحت `2048`.
+
+الحقل `maxTokens` على مستوى الطلب يتجاوز إعداد المسار لتلك مكالمة المزود فقط. لا يغيّر إعداد الملف الشخصي، ولا تجاوزات الجلسة، ولا الأسماء المستعارة، ولا الاحتياطيات، ولا البصمات.
+
+تُختار أسماء معاملات حد الرموز حسب وضع API:
+
+| المزود/وضع API | المعامل المرسل |
+|---|---|
+| OpenAI Chat Completions | `max_completion_tokens` |
+| دردشة طرف ثالث متوافقة مع OpenAI | `max_tokens` |
+| OpenAI Responses API | `max_output_tokens` |
+
+إذا كان الحد غير مضبوط، لا يُرسل أي معامل حد رموز.
 
 ### modelAliases / model_aliases
 

@@ -11,7 +11,7 @@ describe("InMemorySessionDB", () => {
     await db.setSessionModelOverride("session-1", sampleOverride());
 
     await expect(db.getSessionModelOverride("session-1")).resolves.toMatchObject({
-      route: { provider: "local", id: "phi4:latest" },
+      route: { provider: "local", id: "phi4:latest", maxTokens: 8192 },
       source: "cli"
     });
     await expect(db.getSession("session-1")).resolves.toMatchObject({
@@ -153,7 +153,8 @@ function sampleOverride() {
       baseUrl: "http://localhost:11434/v1",
       apiMode: "custom_openai_compatible" as const,
       authMethod: "none" as const,
-      contextWindowTokens: 128000
+      contextWindowTokens: 128000,
+      maxTokens: 8192
     },
     modelProfile: {
       id: "phi4:latest",

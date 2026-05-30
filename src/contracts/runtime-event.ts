@@ -1,5 +1,10 @@
 import type { FileChangePreviewViewModel } from "./view-model.js";
 import type { SessionCompressionTrigger } from "./session.js";
+import type {
+  ProviderFinishReason,
+  ProviderReasoningMetadata,
+  ProviderUsage
+} from "./provider.js";
 
 export type RuntimeEvent =
   | {
@@ -65,6 +70,10 @@ export type RuntimeEvent =
       fallback: boolean;
       willFallback: boolean;
       errorClass?: string;
+      finishReason?: ProviderFinishReason;
+      incompleteReason?: string;
+      usage?: ProviderUsage;
+      reasoningMetadata?: ProviderReasoningMetadata;
     }
   | {
       kind: "provider-budget-exhausted";

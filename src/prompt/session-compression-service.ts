@@ -10,6 +10,7 @@ import type {
   SessionRecord
 } from "../contracts/session.js";
 import type { ProviderExecutor } from "../providers/provider-executor.js";
+import { stripInlineReasoning } from "../providers/provider-reasoning.js";
 import { SessionCompressionLock } from "../session/session-compression-lock.js";
 import { reconstructSessionCompressionState } from "../session/session-compression-state.js";
 import { redactSensitiveText } from "../utils/redaction.js";
@@ -461,7 +462,7 @@ function compactedSessionMetadata(
 }
 
 function sanitizePersistedText(value: string, maxChars: number): string {
-  const redacted = redactSensitiveText(value);
+  const redacted = redactSensitiveText(stripInlineReasoning(value));
   return redacted.length <= maxChars ? redacted : redacted.slice(0, maxChars);
 }
 

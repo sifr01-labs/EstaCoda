@@ -153,6 +153,8 @@ export type GatewayHookPayloadByName = {
     target: string;
     platform?: string;
     truncated?: boolean;
+    overflowSaved?: boolean;
+    chunkCount?: number;
   };
   "delivery:error": {
     kind: "text" | "progress" | "artifact";

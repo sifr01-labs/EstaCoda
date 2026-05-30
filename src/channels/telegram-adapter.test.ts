@@ -10,6 +10,44 @@ import { renderApprovalActions } from "./approval-actions.js";
 import { modelPickerSelectActionKey, renderModelPickerActions } from "./model-picker-actions.js";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 
+function createTelegramTextHarness(options: { failOnSendMessage?: number } = {}): {
+  adapter: TelegramAdapter;
+  bodies: Array<Record<string, unknown>>;
+} {
+  const bodies: Array<Record<string, unknown>> = [];
+  let sendMessageCount = 0;
+  const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
+    if (url.endsWith("/sendMessage")) {
+      sendMessageCount += 1;
+      bodies.push(JSON.parse(init?.body ?? "{}") as Record<string, unknown>);
+
+      if (sendMessageCount === options.failOnSendMessage) {
+        return {
+          ok: false,
+          status: 400,
+          statusText: "Bad Request",
+          json: async () => ({ ok: false, description: "message is too long" })
+        };
+      }
+    }
+
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, result: { message_id: sendMessageCount } })
+    };
+  });
+
+  return {
+    adapter: new TelegramAdapter({ botToken: "test-token", fetch }),
+    bodies
+  };
+}
+
+function sentText(body: Record<string, unknown>): string {
+  return String(body.text ?? "");
+}
+
 describe("TelegramAdapter", () => {
   it("getCapabilities exists and returns correct kind", () => {
     const adapter = new TelegramAdapter({ botToken: "test-token" });
@@ -111,6 +149,134 @@ describe("TelegramAdapter", () => {
       )
     });
     expect(JSON.stringify(bodies[0]?.reply_markup)).not.toContain("rm -rf");
+  });
+
+  it("delivery.sendText sends short messages once", async () => {
+    const { adapter, bodies } = createTelegramTextHarness();
+
+    await adapter.delivery.sendText({ platform: "telegram", chatId: "123" }, "short reply");
+
+    expect(bodies).toHaveLength(1);
+    expect(sentText(bodies[0])).toBe("short reply");
+    expect(bodies[0]?.parse_mode).toBe("HTML");
+  });
+
+  it("delivery.sendText chunks long plain messages", async () => {
+    const { adapter, bodies } = createTelegramTextHarness();
+
+    await adapter.delivery.sendText(
+      { platform: "telegram", chatId: "123" },
+      "A ".repeat(5_000),
+      { format: "plain" }
+    );
+
+    expect(bodies.length).toBeGreaterThan(1);
+    for (const body of bodies) {
+      expect(sentText(body).length).toBeLessThanOrEqual(4096);
+    }
+    expect(sentText(bodies[0])).toMatch(/ \(1\/\d+\)$/u);
+  });
+
+  it("delivery.sendText measures emoji as UTF-16 code units", async () => {
+    const { adapter, bodies } = createTelegramTextHarness();
+
+    await adapter.delivery.sendText(
+      { platform: "telegram", chatId: "123" },
+      "🙂".repeat(3_000),
+      { format: "plain" }
+    );
+
+    expect(bodies.length).toBeGreaterThan(1);
+    for (const body of bodies) {
+      expect(sentText(body).length).toBeLessThanOrEqual(4096);
+      expect(sentText(body)).not.toContain("\uFFFD");
+    }
+  });
+
+  it("delivery.sendText chunks after default HTML formatting expands text", async () => {
+    const { adapter, bodies } = createTelegramTextHarness();
+
+    await adapter.delivery.sendText({ platform: "telegram", chatId: "123" }, "<>&".repeat(700));
+
+    expect(bodies.length).toBeGreaterThan(1);
+    expect(sentText(bodies[0])).toContain("&lt;&gt;&amp;");
+    for (const body of bodies) {
+      expect(body.parse_mode).toBe("HTML");
+      expect(sentText(body).length).toBeLessThanOrEqual(4096);
+    }
+  });
+
+  it("delivery.sendText avoids obvious broken HTML boundaries when chunking", async () => {
+    const { adapter, bodies } = createTelegramTextHarness();
+
+    await adapter.delivery.sendText({ platform: "telegram", chatId: "123" }, [
+      "# Heading",
+      "<>& ".repeat(1_000),
+      "**bold text** ".repeat(800)
+    ].join("\n"));
+
+    expect(bodies.length).toBeGreaterThan(1);
+    for (const body of bodies) {
+      const text = sentText(body);
+      expect(text.length).toBeLessThanOrEqual(4096);
+      expect(text).not.toMatch(/<\/?[^>]*$/u);
+      expect(text).not.toMatch(/&[^;\s]{0,20}$/u);
+    }
+  });
+
+  it("delivery.sendText chunks long code fences without oversized payloads", async () => {
+    const { adapter, bodies } = createTelegramTextHarness();
+    const code = [
+      "```ts",
+      "const ok = value < limit && other > floor;".repeat(600),
+      "```"
+    ].join("\n");
+
+    await adapter.delivery.sendText({ platform: "telegram", chatId: "123" }, code);
+
+    expect(bodies.length).toBeGreaterThan(1);
+    for (const body of bodies) {
+      const text = sentText(body);
+      expect(text.length).toBeLessThanOrEqual(4096);
+      expect(text).not.toMatch(/<\/?[^>]*$/u);
+      expect(text).not.toMatch(/&[^;\s]{0,20}$/u);
+    }
+  });
+
+  it("delivery.sendText attaches inline actions only to the final chunk", async () => {
+    const { adapter, bodies } = createTelegramTextHarness();
+    const actions = renderApprovalActions("gateway-approval-1");
+
+    await adapter.delivery.sendText(
+      { platform: "telegram", chatId: "123" },
+      "Approve this ".repeat(1_000),
+      { actions }
+    );
+
+    expect(bodies.length).toBeGreaterThan(1);
+    for (const body of bodies.slice(0, -1)) {
+      expect(body.reply_markup).toBeUndefined();
+    }
+    expect(bodies.at(-1)?.reply_markup).toEqual({
+      inline_keyboard: actions.map((row) =>
+        row.map((action) => ({
+          text: action.label,
+          callback_data: action.value
+        }))
+      )
+    });
+  });
+
+  it("delivery.sendText rejects on a failed chunk and does not send later chunks", async () => {
+    const { adapter, bodies } = createTelegramTextHarness({ failOnSendMessage: 2 });
+
+    await expect(adapter.delivery.sendText(
+      { platform: "telegram", chatId: "123" },
+      "Failure chunk ".repeat(2_000),
+      { format: "plain" }
+    )).rejects.toThrow("Telegram sendMessage failed: message is too long");
+
+    expect(bodies).toHaveLength(2);
   });
 
   it("turns callback query data into ChannelMessage text", () => {

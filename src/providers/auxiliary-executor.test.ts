@@ -129,6 +129,75 @@ describe("executeAuxiliaryTask", () => {
     ]);
   });
 
+  it("preserves safe provider final-state metadata without copying raw reasoning", async () => {
+    const route = fakeRoute({ provider: "openai", id: "gpt-4.1-mini" });
+    const providerResult = executionResult(route, true, "primary ok");
+    providerResult.response = {
+      ok: true,
+      content: "primary ok",
+      provider: route.provider,
+      model: route.id,
+      finishReason: "length",
+      incompleteReason: "max_output_tokens",
+      usage: {
+        inputTokens: 12,
+        outputTokens: 6,
+        totalTokens: 18,
+        reasoningTokens: 4
+      },
+      reasoning: "hidden auxiliary reasoning",
+      reasoningMetadata: {
+        present: true,
+        chars: 26,
+        format: "reasoning_content"
+      }
+    };
+    providerResult.attempts[0] = {
+      ...providerResult.attempts[0],
+      finishReason: "length",
+      incompleteReason: "max_output_tokens",
+      usage: {
+        inputTokens: 12,
+        outputTokens: 6,
+        totalTokens: 18,
+        reasoningTokens: 4
+      },
+      reasoningMetadata: {
+        present: true,
+        chars: 26,
+        format: "reasoning_content"
+      },
+      reasoning: "hidden auxiliary reasoning"
+    } as typeof providerResult.attempts[number] & { reasoning: string };
+    const complete = vi.fn(async () => providerResult);
+
+    const result = await executeAuxiliaryTask({
+      route: fakeAuxiliaryRoute({ route }),
+      mainRoute: fakeRoute({ id: "gpt-4o" }),
+      providerExecutor: { complete },
+      request,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.attempts[0]).toEqual(expect.objectContaining({
+      finishReason: "length",
+      incompleteReason: "max_output_tokens",
+      usage: {
+        inputTokens: 12,
+        outputTokens: 6,
+        totalTokens: 18,
+        reasoningTokens: 4
+      },
+      reasoningMetadata: {
+        present: true,
+        chars: 26,
+        format: "reasoning_content"
+      }
+    }));
+    expect(result.attempts[0]).not.toHaveProperty("reasoning");
+    expect(JSON.stringify(result.attempts)).not.toContain("hidden auxiliary reasoning");
+  });
+
   it("falls back to mainRoute only when fallbackToMain is true", async () => {
     const route = fakeRoute({ id: "gpt-4.1-mini" });
     const mainRoute = fakeRoute({ id: "gpt-4o" });

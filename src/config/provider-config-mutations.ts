@@ -46,6 +46,7 @@ export type SetPreferredModelRouteInput = {
   baseUrl?: string;
   apiKeyEnv?: string;
   contextWindowTokens?: number;
+  maxTokens?: number;
 };
 
 export type AddFallbackRouteInput = {
@@ -54,6 +55,7 @@ export type AddFallbackRouteInput = {
   baseUrl?: string;
   apiKeyEnv?: string;
   contextWindowTokens?: number;
+  maxTokens?: number;
 };
 
 export type SetAuxiliaryModelRouteInput = {
@@ -178,6 +180,9 @@ export function applySetPreferredModelRoute(
   if (input.contextWindowTokens !== undefined) {
     modelPatch.contextWindowTokens = input.contextWindowTokens;
   }
+  if (input.maxTokens !== undefined) {
+    modelPatch.maxTokens = input.maxTokens;
+  }
 
   const patch: EstaCodaConfig = {
     model: modelPatch as EstaCodaConfig["model"],
@@ -207,7 +212,8 @@ export function applyAddFallbackRoute(
     ...(input.apiKeyEnv !== undefined ? { apiKeyEnv: input.apiKeyEnv } : {}),
     ...(input.contextWindowTokens !== undefined
       ? { contextWindowTokens: input.contextWindowTokens }
-      : {})
+      : {}),
+    ...(input.maxTokens !== undefined ? { maxTokens: input.maxTokens } : {})
   };
 
   const merged = patchConfig(existing, {

@@ -6,9 +6,17 @@ import type {
   ProviderId,
   ProviderRequest,
   ProviderResponse,
-  ProviderStreamEvent
+  ProviderStreamEvent,
+  ProviderFinishReason,
+  ProviderReasoningMetadata,
+  ProviderUsage
 } from "../contracts/provider.js";
 import { classifyHttpError } from "./openai-compatible-provider.js";
+import {
+  extractInlineReasoning,
+  mergeReasoningParts,
+  reasoningMetadataFromReasoning
+} from "./provider-reasoning.js";
 
 export type OpenAIResponsesProviderOptions = {
   id: ProviderId;
@@ -150,8 +158,9 @@ export function buildResponsesRequest(
     store: false
   };
 
-  if (request.maxTokens !== undefined) {
-    body.max_output_tokens = request.maxTokens;
+  const maxTokens = normalizeProviderMaxTokens(request.maxTokens);
+  if (maxTokens !== undefined) {
+    body.max_output_tokens = maxTokens;
   }
 
   if (hasTools) {
@@ -169,6 +178,12 @@ export function buildResponsesRequest(
     },
     body
   };
+}
+
+function normalizeProviderMaxTokens(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : undefined;
 }
 
 function extractInstructionsAndInput(messages: ProviderRequest["messages"]): {
@@ -273,7 +288,12 @@ export function parseResponsesPayload(input: {
       content?: Array<{
         type?: string;
         text?: string;
+        reasoning?: string;
+        thinking?: string;
       }> | string;
+      text?: string;
+      reasoning?: string;
+      summary?: Array<{ text?: string }>;
       call_id?: string;
       name?: string;
       arguments?: string;
@@ -282,6 +302,10 @@ export function parseResponsesPayload(input: {
       input_tokens?: number;
       output_tokens?: number;
       total_tokens?: number;
+      reasoning_tokens?: number;
+      output_tokens_details?: {
+        reasoning_tokens?: number;
+      };
     };
     error?: {
       message?: string;
@@ -308,11 +332,15 @@ export function parseResponsesPayload(input: {
       model: input.model,
       provider: input.provider,
       errorClass: "server",
+      finishReason: normalizeResponsesFinishReason(payload.status, payload.incomplete_details?.reason, false, false),
+      incompleteReason: payload.incomplete_details?.reason,
       raw: input.payload
     };
   }
 
   const contentParts: string[] = [];
+  const reasoningParts: string[] = [];
+  let sawReasoningShape = false;
   const functionCalls: Array<{
     call_id?: string;
     name?: string;
@@ -323,15 +351,38 @@ export function parseResponsesPayload(input: {
     if (item.type === "message") {
       const itemContent = item.content;
       if (typeof itemContent === "string") {
-        if (itemContent.length > 0) {
-          contentParts.push(itemContent);
+        const extracted = extractInlineReasoning(itemContent);
+        if (extracted.visible.length > 0) {
+          contentParts.push(extracted.visible);
+        }
+        if (extracted.reasoning !== undefined) {
+          reasoningParts.push(extracted.reasoning);
+          sawReasoningShape = true;
         }
       } else if (Array.isArray(itemContent)) {
         for (const part of itemContent) {
           if (part.type === "output_text" && part.text) {
-            contentParts.push(part.text);
+            const extracted = extractInlineReasoning(part.text);
+            if (extracted.visible.length > 0) {
+              contentParts.push(extracted.visible);
+            }
+            if (extracted.reasoning !== undefined) {
+              reasoningParts.push(extracted.reasoning);
+              sawReasoningShape = true;
+            }
+          }
+          if ((part.type === "reasoning" || part.type === "thinking") && (part.reasoning ?? part.thinking ?? part.text) !== undefined) {
+            reasoningParts.push(part.reasoning ?? part.thinking ?? part.text ?? "");
+            sawReasoningShape = true;
           }
         }
+      }
+    }
+
+    if (item.type === "reasoning") {
+      sawReasoningShape = true;
+      if (item.reasoning !== undefined || item.text !== undefined) {
+        reasoningParts.push(item.reasoning ?? item.text ?? "");
       }
     }
 
@@ -345,14 +396,29 @@ export function parseResponsesPayload(input: {
   }
 
   const content = contentParts.join("");
+  const reasoning = mergeReasoningParts(reasoningParts);
+  const reasoningMetadata = reasoning === undefined
+    ? (sawReasoningShape ? emptyResponsesReasoningMetadata() : undefined)
+    : reasoningMetadataFromReasoning(reasoning, "responses_reasoning");
+  const finishReason = normalizeResponsesFinishReason(
+    payload.status,
+    payload.incomplete_details?.reason,
+    content.length > 0,
+    functionCalls.length > 0
+  );
+  const hasReasoningOnlySignal = reasoning !== undefined || reasoningMetadata?.present === true;
 
-  if (content.length === 0 && functionCalls.length === 0 && payload.status !== "in_progress") {
+  if (content.length === 0 && functionCalls.length === 0 && payload.status !== "in_progress" && !hasReasoningOnlySignal) {
     return {
       ok: false,
       content: "Provider response did not include assistant content.",
       model: input.model,
       provider: input.provider,
       errorClass: payload.status === "incomplete" ? "unknown" : "unknown",
+      finishReason,
+      incompleteReason: payload.incomplete_details?.reason,
+      ...(reasoning === undefined ? {} : { reasoning }),
+      ...(reasoningMetadata === undefined ? {} : { reasoningMetadata }),
       raw: input.payload
     };
   }
@@ -362,12 +428,66 @@ export function parseResponsesPayload(input: {
     content,
     model: input.model,
     provider: input.provider,
-    usage: {
-      inputTokens: payload.usage?.input_tokens,
-      outputTokens: payload.usage?.output_tokens,
-      totalTokens: payload.usage?.total_tokens
-    },
+    finishReason,
+    incompleteReason: payload.incomplete_details?.reason,
+    ...(reasoning === undefined ? {} : { reasoning }),
+    ...(reasoningMetadata === undefined ? {} : { reasoningMetadata }),
+    usage: normalizeResponsesUsage(payload.usage),
     raw: input.payload
+  };
+}
+
+function normalizeResponsesFinishReason(
+  status: string | undefined,
+  incompleteReason: string | undefined,
+  hasText: boolean,
+  hasFunctionCalls: boolean
+): ProviderFinishReason {
+  if (status === "incomplete") {
+    return incompleteReason === "max_output_tokens" ? "length" : "incomplete";
+  }
+
+  if (status === "completed") {
+    if (hasFunctionCalls) {
+      return "tool_calls";
+    }
+    if (hasText) {
+      return "stop";
+    }
+    return "unknown";
+  }
+
+  return "unknown";
+}
+
+function normalizeResponsesUsage(usage: {
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+  reasoning_tokens?: number;
+  output_tokens_details?: {
+    reasoning_tokens?: number;
+  };
+} | undefined): ProviderUsage | undefined {
+  if (usage === undefined) {
+    return undefined;
+  }
+
+  const reasoningTokens = usage.output_tokens_details?.reasoning_tokens ?? usage.reasoning_tokens;
+
+  return {
+    ...(usage.input_tokens === undefined ? {} : { inputTokens: usage.input_tokens }),
+    ...(usage.output_tokens === undefined ? {} : { outputTokens: usage.output_tokens }),
+    ...(usage.total_tokens === undefined ? {} : { totalTokens: usage.total_tokens }),
+    ...(reasoningTokens === undefined ? {} : { reasoningTokens })
+  };
+}
+
+function emptyResponsesReasoningMetadata(): ProviderReasoningMetadata {
+  return {
+    present: true,
+    chars: 0,
+    format: "responses_reasoning"
   };
 }
 

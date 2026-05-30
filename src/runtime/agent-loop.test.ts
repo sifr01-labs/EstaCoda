@@ -358,6 +358,52 @@ describe("AgentLoop provider availability gating", () => {
     expect(response.text).toBe("real answer");
   });
 
+  it("persists finalized continuation text once without synthetic continuation messages", async () => {
+    const providerExecution = {
+      ...successfulProviderExecution("Final concatenated answer."),
+      runtimeMetadata: {
+        continuation: {
+          reason: "provider_length" as const,
+          attempts: 1,
+          exhausted: false,
+          initialFinishReason: "length" as const,
+          finalFinishReason: "stop" as const
+        }
+      }
+    };
+    const { loop, sessionDb, sessionId } = await createAgentLoop({
+      canRunProvider: true,
+      executeSkillWorkflow: vi.fn(async () => []),
+      providerExecution
+    });
+    const events: Array<{ kind: string; text?: string }> = [];
+
+    const response = await loop.handle({
+      text: "use the test skill",
+      channel: "cli",
+      trustedWorkspace: true,
+      onEvent: (event) => {
+        if (event.kind === "agent-final") {
+          events.push(event);
+        }
+      }
+    });
+
+    const messages = await sessionDb.listMessages(sessionId);
+    const agentMessages = messages.filter((message) => message.role === "agent");
+    expect(response.text).toBe("Final concatenated answer.");
+    expect(events).toEqual([
+      {
+        kind: "agent-final",
+        text: "Final concatenated answer."
+      }
+    ]);
+    expect(agentMessages.map((message) => message.content)).toEqual([
+      "Final concatenated answer."
+    ]);
+    expect(JSON.stringify(messages)).not.toContain("Your previous response was truncated by the output length limit");
+  });
+
   it("keeps failed provider responses on the existing fallback path", async () => {
     const { loop } = await createAgentLoop({
       canRunProvider: true,

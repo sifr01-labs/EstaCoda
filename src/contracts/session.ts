@@ -14,7 +14,11 @@ import type {
   ModelProfile,
   ProviderApiMode,
   ProviderAuthMethod,
-  ProviderId
+  ProviderFinishReason,
+  ProviderId,
+  ProviderLoopRuntimeMetadata,
+  ProviderReasoningMetadata,
+  ProviderUsage
 } from "./provider.js";
 
 export type SessionRole = "user" | "agent" | "system" | "tool";
@@ -40,6 +44,7 @@ export type SessionModelOverride = {
     apiMode?: ProviderApiMode;
     authMethod?: ProviderAuthMethod;
     contextWindowTokens?: number;
+    maxTokens?: number;
     routeId?: string;
   };
   modelProfile: ModelProfile;
@@ -251,41 +256,47 @@ export type SessionEvent =
       kind: "provider-completion";
       iteration?: number;
       ok: boolean;
+      finishReason?: ProviderFinishReason;
+      incompleteReason?: string;
       attempts: Array<{
         provider: string;
         model: string;
         credentialId?: string;
         ok: boolean;
         errorClass?: ProviderErrorClass | string;
+        finishReason?: ProviderFinishReason;
+        incompleteReason?: string;
+        usage?: ProviderUsage;
+        reasoningMetadata?: ProviderReasoningMetadata;
       }>;
       fallbackUsed: boolean;
-      usage?: {
-        inputTokens?: number;
-        outputTokens?: number;
-        totalTokens?: number;
-      };
+      usage?: ProviderUsage;
+      runtimeMetadata?: ProviderLoopRuntimeMetadata;
     }
   | {
       kind: "provider-continuation";
       iteration?: number;
       ok: boolean;
+      finishReason?: ProviderFinishReason;
+      incompleteReason?: string;
       attempts: Array<{
         provider: string;
         model: string;
         credentialId?: string;
         ok: boolean;
         errorClass?: ProviderErrorClass | string;
+        finishReason?: ProviderFinishReason;
+        incompleteReason?: string;
+        usage?: ProviderUsage;
+        reasoningMetadata?: ProviderReasoningMetadata;
       }>;
       toolPlans: Array<{
         id: string;
         tool: string;
         status: string;
       }>;
-      usage?: {
-        inputTokens?: number;
-        outputTokens?: number;
-        totalTokens?: number;
-      };
+      usage?: ProviderUsage;
+      runtimeMetadata?: ProviderLoopRuntimeMetadata;
     }
   | {
       kind: "provider-iteration";

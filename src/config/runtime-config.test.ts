@@ -914,6 +914,109 @@ describe("loadRuntimeConfig channel readiness", () => {
 });
 
 describe("loadRuntimeConfig modelFallbackRoutes resolution", () => {
+  it("preserves primary and fallback maxTokens on resolved routes", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+
+    await writeFile(configPath, JSON.stringify({
+      model: {
+        provider: "openai",
+        id: "gpt-4o",
+        maxTokens: "8192",
+        fallbacks: [
+          { provider: "deepseek", id: "deepseek-chat", maxTokens: 4096 }
+        ]
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace
+    });
+
+    expect(loaded.primaryModelRoute.maxTokens).toBe(8192);
+    expect(loaded.modelFallbackRoutes[0].maxTokens).toBe(4096);
+  });
+
+  it.each([
+    ["unset", undefined, undefined],
+    ["null", null, undefined],
+    ["empty string", "", undefined],
+    ["whitespace", "   ", undefined],
+    ["numeric string", "8192", 8192],
+    ["number", 8192, 8192]
+  ] as const)("normalizes primary maxTokens for %s", async (_name, value, expected) => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+
+    await writeFile(configPath, JSON.stringify({
+      model: {
+        provider: "openai",
+        id: "gpt-4o",
+        maxTokens: value
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace
+    });
+
+    expect(loaded.primaryModelRoute.maxTokens).toBe(expected);
+  });
+
+  it.each([
+    ["zero", 0],
+    ["negative", -1],
+    ["float", 1.5],
+    ["non-numeric string", "many"]
+  ] as const)("rejects invalid primary maxTokens for %s", async (_name, value) => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+
+    await writeFile(configPath, JSON.stringify({
+      model: {
+        provider: "openai",
+        id: "gpt-4o",
+        maxTokens: value
+      }
+    }));
+
+    await expect(loadRuntimeConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace
+    })).rejects.toThrow("model.maxTokens must be a positive integer when set.");
+  });
+
+  it.each([
+    ["zero", 0],
+    ["negative", -1],
+    ["float", 1.5],
+    ["non-numeric string", "many"]
+  ] as const)("rejects invalid fallback maxTokens for %s", async (_name, value) => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+
+    await writeFile(configPath, JSON.stringify({
+      model: {
+        provider: "openai",
+        id: "gpt-4o",
+        fallbacks: [
+          { provider: "deepseek", id: "deepseek-chat", maxTokens: value }
+        ]
+      }
+    }));
+
+    await expect(loadRuntimeConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace
+    })).rejects.toThrow("model.fallbacks[0].maxTokens must be a positive integer when set.");
+  });
+
   it("resolves explicit fallback routes with provider defaults and overrides", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
@@ -1709,7 +1812,7 @@ describe("modelAliases normalization", () => {
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
     await writeFile(profileConfigPath(workspace), JSON.stringify({
       model_aliases: {
-        myllm: { provider: "local", model: "llama3" }
+        myllm: { provider: "local", model: "llama3", maxTokens: "8192" }
       }
     }));
 
@@ -1718,7 +1821,24 @@ describe("modelAliases normalization", () => {
       homeDir: workspace
     });
 
-    expect(loaded.config.modelAliases?.myllm).toEqual({ provider: "local", model: "llama3" });
+    expect(loaded.config.modelAliases?.myllm).toEqual({ provider: "local", model: "llama3", maxTokens: 8192 });
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("rejects invalid alias maxTokens", async () => {
+    const { loadRuntimeConfig } = await import("./runtime-config.js");
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-alias-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      modelAliases: {
+        myllm: { provider: "local", model: "llama3", maxTokens: 0 }
+      }
+    }));
+
+    await expect(loadRuntimeConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace
+    })).rejects.toThrow("modelAliases.myllm.maxTokens must be a positive integer when set.");
     await rm(workspace, { recursive: true, force: true });
   });
 

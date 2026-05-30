@@ -308,6 +308,64 @@ describe("packSessionHistory", () => {
     ]);
   });
 
+  it("strips hidden reasoning blocks from protected history messages", () => {
+    const packed = packSessionHistory([
+      {
+        id: "a1",
+        sessionId: "s",
+        role: "agent" as const,
+        content: "<think>hidden</think>Visible"
+      },
+      {
+        id: "u1",
+        sessionId: "s",
+        role: "user" as const,
+        content: "Use <think> as the example tag"
+      },
+      {
+        id: "a2",
+        sessionId: "s",
+        role: "agent" as const,
+        content: "Visible before <reasoning>hidden forever"
+      }
+    ], {
+      maxProtectedMessages: 6,
+      maxEstimatedTokens: 2_000
+    });
+
+    const content = packed.messages.map((message) => message.content).join("\n");
+
+    expect(content).toContain("Visible");
+    expect(content).toContain("Use <think> as the example tag");
+    expect(content).toContain("Visible before");
+    expect(content).not.toContain("hidden");
+    expect(content).not.toContain("<reasoning>");
+  });
+
+  it("strips hidden reasoning blocks from summarized older history", () => {
+    const packed = packSessionHistory([
+      {
+        id: "a1",
+        sessionId: "s",
+        role: "agent" as const,
+        content: "<thinking>hidden summary</thinking>Older visible"
+      },
+      {
+        id: "u1",
+        sessionId: "s",
+        role: "user" as const,
+        content: "ACTIVE TASK: continue"
+      }
+    ], {
+      maxProtectedMessages: 1,
+      maxEstimatedTokens: 2_000
+    });
+
+    expect(packed.summary).toContain("Older visible");
+    expect(packed.summary).not.toContain("hidden summary");
+    expect(packed.summary).not.toContain("<thinking>");
+  });
+
   it("does not let a protected tail tool run crowd out the latest user task", () => {
     const messages = [
       {

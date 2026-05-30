@@ -58,14 +58,12 @@ export type DeliveryErrorRecord = {
   retryCount: number;
 };
 
-const DEFAULT_MAX_OUTPUT = 4000;
-
 export class DeliveryRouter {
   readonly #adapters = new Map<ChannelKind, ChannelAdapter>();
   readonly #homeDir: string;
   readonly #deliveryRoot: string;
   readonly #deliveryErrorLogPath: string;
-  readonly #maxOutputChars: number;
+  readonly #maxOutputChars: number | undefined;
   readonly #now: () => Date;
   #surfaceAdapter?: SurfaceAdapter;
   #hookRegistry?: HookRegistry;
@@ -74,7 +72,7 @@ export class DeliveryRouter {
     this.#homeDir = resolveHomeDir(options.homeDir);
     this.#deliveryRoot = options.deliveryRoot ?? join(this.#homeDir, ".estacoda", "delivery");
     this.#deliveryErrorLogPath = options.deliveryErrorLogPath ?? join(this.#homeDir, ".estacoda", "gateway", "delivery-errors.jsonl");
-    this.#maxOutputChars = options.maxOutputChars ?? DEFAULT_MAX_OUTPUT;
+    this.#maxOutputChars = options.maxOutputChars;
     this.#now = options.now ?? (() => new Date());
     this.#hookRegistry = options.hookRegistry;
   }
@@ -167,6 +165,7 @@ export class DeliveryRouter {
           target: this.#sanitizeHookTarget(target),
           platform: target.kind === "channel" ? target.platform : target.kind === "origin" ? target.originalSessionKey.platform : undefined,
           truncated: meta.truncated,
+          overflowSaved: meta.overflowSaved,
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -201,7 +200,7 @@ export class DeliveryRouter {
     target: DeliveryTarget,
     text: string,
     options?: ChannelTextOptions
-  ): Promise<{ truncated?: boolean }> {
+  ): Promise<{ truncated?: boolean; overflowSaved?: boolean }> {
     if (target.kind === "silent") {
       return {};
     }
@@ -234,14 +233,13 @@ export class DeliveryRouter {
       throw new Error(`No delivery adapter available for ${sessionKey.platform}`);
     }
 
-    const truncated = this.#truncate(text, sessionKey.platform);
-    await adapter.delivery.sendText(sessionKey, truncated.text, options);
+    const capped = await this.#applyLegacyOutputCap(text, sessionKey.platform);
+    await adapter.delivery.sendText(sessionKey, capped.text, options);
 
-    if (truncated.wasTruncated && truncated.fullPath) {
-      // Full output already saved to disk during truncation
-    }
-
-    return { truncated: truncated.wasTruncated || undefined };
+    return {
+      truncated: capped.wasTruncated || undefined,
+      overflowSaved: capped.overflowSaved || undefined,
+    };
   }
 
   async deliverProgress(
@@ -344,20 +342,32 @@ export class DeliveryRouter {
     }
   }
 
-  #truncate(text: string, platform: ChannelKind): { text: string; wasTruncated: boolean; fullPath?: string } {
-    if (text.length <= this.#maxOutputChars) {
+  async #applyLegacyOutputCap(
+    text: string,
+    platform: ChannelKind
+  ): Promise<{ text: string; wasTruncated: boolean; overflowSaved?: boolean }> {
+    if (this.#maxOutputChars === undefined || text.length <= this.#maxOutputChars) {
       return { text, wasTruncated: false };
     }
 
     const truncated = text.slice(0, this.#maxOutputChars) + "\n\n[Output truncated. Full response saved to disk.]";
-    const fullPath = join(this.#deliveryRoot, "truncated", `${this.#now().toISOString()}_${platform}.md`);
+    const timestamp = this.#now().toISOString().replaceAll(":", "-");
+    const safePlatform = this.#safeFilenamePart(platform);
+    const hash = createHash("sha256")
+      .update(`${platform}\0${timestamp}\0${text.length}\0${text.slice(0, 1024)}`)
+      .digest("hex")
+      .slice(0, 12);
+    const fullPath = join(this.#deliveryRoot, "truncated", `${timestamp}_${safePlatform}_${hash}.md`);
 
-    // Fire-and-forget save of full output
-    mkdir(dirname(fullPath), { recursive: true })
-      .then(() => writeFile(fullPath, text, "utf-8"))
-      .catch(() => { /* ignore save errors */ });
+    await mkdir(dirname(fullPath), { recursive: true });
+    await writeFile(fullPath, text, "utf-8");
 
-    return { text: truncated, wasTruncated: true, fullPath };
+    return { text: truncated, wasTruncated: true, overflowSaved: true };
+  }
+
+  #safeFilenamePart(value: string): string {
+    const sanitized = value.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+    return sanitized.length > 0 ? sanitized : "channel";
   }
 
   #targetToString(target: DeliveryTarget): string {

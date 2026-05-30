@@ -9,8 +9,10 @@ import {
   listProvidersVisibleInModelPicker,
   listCatalogKnownProviders,
   isProviderMediaOnly,
+  resolveChatMaxTokenParam,
   resolveCustomProviderMetadata,
-  buildResolvedModelRoute
+  buildResolvedModelRoute,
+  type ProviderMetadata
 } from "./provider-metadata.js";
 import type { ProviderId } from "../contracts/provider.js";
 
@@ -72,6 +74,39 @@ describe("provider-metadata", () => {
       expect(getDefaultApiKeyEnv("local")).toBe("OPENAI_COMPATIBLE_API_KEY");
       expect(getDefaultApiKeyEnv("anthropic")).toBe("ANTHROPIC_API_KEY");
       expect(getDefaultApiKeyEnv("unknown-provider" as ProviderId)).toBe("OPENAI_COMPATIBLE_API_KEY");
+    });
+
+    it("exposes optional provider finalization metadata knobs without enabling reasoning echo by default", () => {
+      const openai = getProviderMetadata("openai");
+      const deepseek = getProviderMetadata("deepseek");
+      const custom = getProviderMetadata("custom-corp" as ProviderId);
+
+      expect(openai).toHaveProperty("apiMode");
+      expect(openai.chatMaxTokenParam).toBeUndefined();
+      expect(openai.reasoningEchoField).toBeUndefined();
+      expect(deepseek.reasoningEchoField).toBeUndefined();
+      expect(custom.chatMaxTokenParam).toBeUndefined();
+      expect(custom.reasoningEchoField).toBeUndefined();
+    });
+
+    it("types provider metadata token parameter and reasoning echo fields", () => {
+      const metadata: ProviderMetadata = {
+        ...getProviderMetadata("openai"),
+        chatMaxTokenParam: "max_completion_tokens",
+        reasoningEchoField: "reasoning_content"
+      };
+
+      expect(metadata.chatMaxTokenParam).toBe("max_completion_tokens");
+      expect(metadata.reasoningEchoField).toBe("reasoning_content");
+    });
+
+    it("resolves chat max token parameter names from provider metadata", () => {
+      expect(resolveChatMaxTokenParam("openai")).toBe("max_completion_tokens");
+      expect(resolveChatMaxTokenParam("deepseek")).toBe("max_tokens");
+      expect(resolveChatMaxTokenParam("custom-corp" as ProviderId)).toBe("max_tokens");
+      expect(resolveChatMaxTokenParam("custom-corp" as ProviderId, {
+        chatMaxTokenParam: "max_completion_tokens"
+      })).toBe("max_completion_tokens");
     });
   });
 

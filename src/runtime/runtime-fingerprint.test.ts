@@ -357,6 +357,53 @@ describe("computeRuntimeFingerprint", () => {
     expect(fp1).not.toEqual(fp2);
   });
 
+  it("primary model route maxTokens change changes fingerprint", () => {
+    const profile = {
+      id: "gpt-4o",
+      provider: "openai" as const,
+      contextWindowTokens: 128_000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true,
+    };
+    const base = fakeLoadedRuntimeConfig({
+      primaryModelRoute: {
+        provider: "openai",
+        id: "gpt-4o",
+        profile,
+      },
+    });
+    const opts = fakeOptions();
+    const fp1 = computeRuntimeFingerprint(base, opts);
+    const fp2 = computeRuntimeFingerprint(
+      fakeLoadedRuntimeConfig({
+        primaryModelRoute: {
+          provider: "openai",
+          id: "gpt-4o",
+          profile,
+          maxTokens: 8192,
+        },
+      }),
+      opts
+    );
+    const fp3 = computeRuntimeFingerprint(
+      fakeLoadedRuntimeConfig({
+        primaryModelRoute: {
+          provider: "openai",
+          id: "gpt-4o",
+          profile,
+          maxTokens: undefined,
+        },
+      }),
+      opts
+    );
+
+    expect(fp1.primaryModelRouteHash).toBeDefined();
+    expect(fp2.primaryModelRouteHash).toBeDefined();
+    expect(fp1.primaryModelRouteHash).not.toBe(fp2.primaryModelRouteHash);
+    expect(fp1.primaryModelRouteHash).toBe(fp3.primaryModelRouteHash);
+  });
+
   it("fallback route apiMode change changes fingerprint", () => {
     const base = fakeLoadedRuntimeConfig({
       modelFallbackRoutes: [
@@ -401,6 +448,59 @@ describe("computeRuntimeFingerprint", () => {
     expect(fp2.modelFallbackRoutesHash).toBeDefined();
     expect(fp1.modelFallbackRoutesHash).not.toBe(fp2.modelFallbackRoutesHash);
     expect(fp1).not.toEqual(fp2);
+  });
+
+  it("fallback route maxTokens change changes fingerprint", () => {
+    const profile = {
+      id: "deepseek-chat",
+      provider: "deepseek" as const,
+      contextWindowTokens: 128_000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true,
+    };
+    const base = fakeLoadedRuntimeConfig({
+      modelFallbackRoutes: [
+        {
+          provider: "deepseek",
+          id: "deepseek-chat",
+          profile,
+        },
+      ],
+    });
+    const opts = fakeOptions();
+    const fp1 = computeRuntimeFingerprint(base, opts);
+    const fp2 = computeRuntimeFingerprint(
+      fakeLoadedRuntimeConfig({
+        modelFallbackRoutes: [
+          {
+            provider: "deepseek",
+            id: "deepseek-chat",
+            profile,
+            maxTokens: 4096,
+          },
+        ],
+      }),
+      opts
+    );
+    const fp3 = computeRuntimeFingerprint(
+      fakeLoadedRuntimeConfig({
+        modelFallbackRoutes: [
+          {
+            provider: "deepseek",
+            id: "deepseek-chat",
+            profile,
+            maxTokens: undefined,
+          },
+        ],
+      }),
+      opts
+    );
+
+    expect(fp1.modelFallbackRoutesHash).toBeDefined();
+    expect(fp2.modelFallbackRoutesHash).toBeDefined();
+    expect(fp1.modelFallbackRoutesHash).not.toBe(fp2.modelFallbackRoutesHash);
+    expect(fp1.modelFallbackRoutesHash).toBe(fp3.modelFallbackRoutesHash);
   });
 
   it("security mode change changes fingerprint", () => {

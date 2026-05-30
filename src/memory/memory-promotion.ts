@@ -1,5 +1,6 @@
 import type { MemoryConclusion, MemoryProvider } from "../contracts/memory.js";
 import type { SessionDB } from "../contracts/session.js";
+import { stripInlineReasoning } from "../providers/provider-reasoning.js";
 
 export type UserPreferencePromotionResult =
   | {
@@ -24,7 +25,8 @@ export async function resolveUserPreferencePromotion(options: {
   sourceTrajectoryId?: string;
   sourceEventId?: string;
 }): Promise<UserPreferencePromotionResult | undefined> {
-  const forgottenContent = detectForgetPreference(options.currentUserText);
+  const currentUserText = sanitizeMemoryLearningText(options.currentUserText);
+  const forgottenContent = detectForgetPreference(currentUserText);
   if (forgottenContent !== undefined && options.memoryProvider.forgetPromotion !== undefined) {
     const forgotten = await options.memoryProvider.forgetPromotion(forgottenContent);
     if (forgotten !== undefined) {
@@ -35,7 +37,7 @@ export async function resolveUserPreferencePromotion(options: {
     }
   }
 
-  const currentPreference = detectUserPreference(options.currentUserText);
+  const currentPreference = detectUserPreference(currentUserText);
 
   if (currentPreference === undefined) {
     return undefined;
@@ -52,7 +54,7 @@ export async function resolveUserPreferencePromotion(options: {
       continue;
     }
 
-    const candidate = detectUserPreference(match.message.content);
+    const candidate = detectUserPreference(sanitizeMemoryLearningText(match.message.content));
     if (candidate?.key === currentPreference.key) {
       matchingSessionIds.add(match.session.id);
     }
@@ -90,7 +92,8 @@ export async function resolveProjectFactPromotion(options: {
   sourceTrajectoryId?: string;
   sourceEventId?: string;
 }): Promise<ProjectFactPromotionResult | undefined> {
-  const currentFact = detectProjectFact(options.currentUserText);
+  const currentUserText = sanitizeMemoryLearningText(options.currentUserText);
+  const currentFact = detectProjectFact(currentUserText);
 
   if (currentFact === undefined) {
     return undefined;
@@ -107,7 +110,7 @@ export async function resolveProjectFactPromotion(options: {
       continue;
     }
 
-    const candidate = detectProjectFact(match.message.content);
+    const candidate = detectProjectFact(sanitizeMemoryLearningText(match.message.content));
     if (candidate?.key === currentFact.key) {
       matchingSessionIds.add(match.session.id);
     }
@@ -301,6 +304,10 @@ function detectForgetPreference(text: string): string | undefined {
 
 function normalize(value: string): string {
   return value.trim().replace(/\s+/gu, " ");
+}
+
+function sanitizeMemoryLearningText(value: string): string {
+  return stripInlineReasoning(value);
 }
 
 function stripTrailingPunctuation(value: string): string {

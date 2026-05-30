@@ -28,11 +28,35 @@ Primary model route. Decides which provider and model handle the main inference 
 {
   "model": {
     "provider": "openai",
-    "model": "gpt-4o",
-    "apiKeyEnv": "OPENAI_API_KEY"
+    "id": "gpt-4.1",
+    "apiKeyEnv": "OPENAI_API_KEY",
+    "maxTokens": 8192
   }
 }
 ```
+
+Equivalent shape:
+
+```yaml
+model:
+  provider: openai
+  id: gpt-4.1
+  maxTokens: 8192
+```
+
+`model.maxTokens` is the route-level output cap. Unset means provider default. Positive integer numbers and positive integer strings are accepted. Zero, negative values, floats, and non-numeric strings are rejected. Diagnostics show `provider default` when unset and warn for configured values below `2048`.
+
+Request-level `maxTokens` overrides route config for that provider call only. It does not mutate profile config, session overrides, aliases, fallbacks, or fingerprints.
+
+Provider request parameter names are selected by API mode:
+
+| Provider/API mode | Sent parameter |
+|---|---|
+| OpenAI Chat Completions | `max_completion_tokens` |
+| Third-party OpenAI-compatible chat | `max_tokens` |
+| OpenAI Responses API | `max_output_tokens` |
+
+Unset caps send no token parameter.
 
 ### modelAliases / model_aliases
 

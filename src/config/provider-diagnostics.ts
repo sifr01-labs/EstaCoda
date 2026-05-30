@@ -39,6 +39,10 @@ export async function diagnoseProviderConfig(config: LoadedRuntimeConfig): Promi
       warnings.push(`Missing env var ${route.apiKeyEnv} for route.`);
     }
   }
+  lines.push(`Max output tokens: ${route?.maxTokens === undefined ? "provider default" : formatInteger(route.maxTokens)}`);
+  if (route?.maxTokens !== undefined && route.maxTokens < 2_048) {
+    warnings.push("Max output tokens is below 2,048. Long answers and tool calls are more likely to truncate.");
+  }
 
   if (selectedProvider === "unconfigured" || selectedModel === "unconfigured") {
     warnings.push("Provider setup is incomplete.");
@@ -199,4 +203,8 @@ function formatCount(value: number): string {
   }
 
   return String(value);
+}
+
+function formatInteger(value: number): string {
+  return Math.trunc(value).toString().replace(/\B(?=(\d{3})+(?!\d))/gu, ",");
 }

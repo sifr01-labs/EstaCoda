@@ -1,9 +1,12 @@
 import type {
   AuxiliaryModelTask,
   ProviderErrorClass,
+  ProviderFinishReason,
+  ProviderReasoningMetadata,
   ProviderRequest,
   ProviderResponse,
   ProviderRoutePreferences,
+  ProviderUsage,
   ResolvedAuxiliaryRoute,
   ResolvedModelRoute
 } from "../contracts/provider.js";
@@ -16,6 +19,10 @@ export type AuxiliaryExecutionAttempt = {
   ok: boolean;
   errorClass?: ProviderErrorClass | "aborted" | "exception";
   content: string;
+  finishReason?: ProviderFinishReason;
+  incompleteReason?: string;
+  usage?: ProviderUsage;
+  reasoningMetadata?: ProviderReasoningMetadata;
 };
 
 export type AuxiliaryExecutionStatus =
@@ -478,7 +485,11 @@ function toAuxiliaryAttempts(result: ProviderExecutionResult, role: "primary" | 
     model: attempt.model,
     ok: attempt.ok,
     errorClass: attempt.errorClass as ProviderErrorClass | undefined,
-    content: attempt.content
+    content: attempt.content,
+    finishReason: attempt.finishReason,
+    incompleteReason: attempt.incompleteReason,
+    usage: attempt.usage,
+    reasoningMetadata: attempt.reasoningMetadata
   }));
 }
 

@@ -2,7 +2,16 @@ import type { ChannelAttachment } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { MemoryPromptContext } from "../contracts/memory.js";
-import type { ModelProfile, ProviderId, ProviderRequest, ProviderRoutePreferences, ResolvedModelRoute } from "../contracts/provider.js";
+import type {
+  ModelProfile,
+  ProviderFinishReason,
+  ProviderLoopRuntimeMetadata,
+  ProviderRequest,
+  ProviderResponse,
+  ProviderRoutePreferences,
+  ProviderUsage,
+  ResolvedModelRoute
+} from "../contracts/provider.js";
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SecurityDecision } from "../contracts/security.js";
 import type { ReplacementSessionMessage, SessionDB, SessionMessage } from "../contracts/session.js";
@@ -21,7 +30,7 @@ import type { CompactResult } from "../prompt/session-compression-service.js";
 import { SUMMARY_FORMAT_VERSION } from "../prompt/semantic-compressor.js";
 import { normalizeProviderMessagesStrict } from "../providers/provider-message-normalizer.js";
 import type { PromptBudgetReport, PromptSemanticCompressionReport } from "../contracts/prompt.js";
-import type { ProviderExecutionResult, ProviderExecutor, ProviderRuntimeEvent } from "../providers/provider-executor.js";
+import type { ProviderAttempt, ProviderExecutionResult, ProviderExecutor, ProviderRuntimeEvent } from "../providers/provider-executor.js";
 import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
@@ -152,6 +161,9 @@ export class ProviderTurnLoop {
     let capturedContentWithHousekeepingTools: string | undefined;
     let emptyContentRetries = 0;
     let retryEmptyInitialResponse = false;
+    let reasoningOnlyPrefillRetries = 0;
+    let pendingReasoningOnlyPrefill = false;
+    let retryReasoningOnlyInitialResponse = false;
 
     for (let iteration = 0; iteration < this.#budgets.maxProviderIterations; iteration += 1) {
       if (isAborted(input.signal)) {
@@ -194,13 +206,18 @@ export class ProviderTurnLoop {
         );
         break;
       }
-      const phase = iteration === 0 || retryEmptyInitialResponse ? "initial" : "continuation";
+      const phase: "initial" | "continuation" = iteration === 0 || retryEmptyInitialResponse || retryReasoningOnlyInitialResponse
+        ? "initial"
+        : "continuation";
       retryEmptyInitialResponse = false;
+      retryReasoningOnlyInitialResponse = false;
 
       let execution = phase === "initial"
         ? await this.#completeWithProvider({
             ...input,
-            iteration
+            iteration,
+            loopStartedAt,
+            reasoningOnlyPrefill: pendingReasoningOnlyPrefill
           })
         : await this.#continueProviderAfterTools({
           ...input,
@@ -210,15 +227,95 @@ export class ProviderTurnLoop {
           ],
           providerExecution: previousProviderExecution,
           iteration,
-          emptyResponseNudge: pendingEmptyResponseNudge
+          loopStartedAt,
+          emptyResponseNudge: pendingEmptyResponseNudge,
+          reasoningOnlyPrefill: pendingReasoningOnlyPrefill
         });
       pendingEmptyResponseNudge = false;
+      pendingReasoningOnlyPrefill = false;
 
       if (execution === undefined) {
         break;
       }
 
-      iterations += 1;
+      const consumedProviderIterations = providerIterationCost(execution);
+      iterations += consumedProviderIterations;
+
+      if (isTruncatedToolCallRefusalExecution(execution)) {
+        await this.#runRecorder.recordProviderIteration({
+          iteration,
+          phase,
+          ok: execution.ok,
+          toolCalls: 0,
+          executedTools: 0,
+          exhausted: false
+        });
+        effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
+        previousProviderExecution = execution;
+        if (consumedProviderIterations > 1) {
+          iteration += consumedProviderIterations - 1;
+        }
+        break;
+      }
+
+      if (isReasoningOnlyExecution(execution)) {
+        if (isReasoningOnlyLengthExhaustion(execution)) {
+          execution = reasoningOnlySafeGuidanceExecution(execution, REASONING_ONLY_LENGTH_EXHAUSTION_MESSAGE);
+          await this.#runRecorder.recordProviderIteration({
+            iteration,
+            phase,
+            ok: execution.ok,
+            toolCalls: 0,
+            executedTools: 0,
+            exhausted: false
+          });
+          effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
+          previousProviderExecution = execution;
+          if (consumedProviderIterations > 1) {
+            iteration += consumedProviderIterations - 1;
+          }
+          break;
+        }
+
+        if (
+          reasoningOnlyPrefillRetries < 2 &&
+          iteration + consumedProviderIterations < this.#budgets.maxProviderIterations
+        ) {
+          reasoningOnlyPrefillRetries += 1;
+          pendingReasoningOnlyPrefill = true;
+          retryReasoningOnlyInitialResponse = phase === "initial";
+          await this.#runRecorder.recordProviderIteration({
+            iteration,
+            phase,
+            ok: execution.ok,
+            toolCalls: 0,
+            executedTools: 0,
+            exhausted: false
+          });
+          effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
+          previousProviderExecution = execution;
+          if (consumedProviderIterations > 1) {
+            iteration += consumedProviderIterations - 1;
+          }
+          continue;
+        }
+
+        execution = reasoningOnlySafeGuidanceExecution(execution, REASONING_ONLY_EMPTY_RESPONSE_MESSAGE);
+        await this.#runRecorder.recordProviderIteration({
+          iteration,
+          phase,
+          ok: execution.ok,
+          toolCalls: 0,
+          executedTools: 0,
+          exhausted: false
+        });
+        effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
+        previousProviderExecution = execution;
+        if (consumedProviderIterations > 1) {
+          iteration += consumedProviderIterations - 1;
+        }
+        break;
+      }
 
       const beforeExecutions = providerToolExecutions.length;
       const beforePlans = input.toolPlans.length;
@@ -267,29 +364,10 @@ export class ProviderTurnLoop {
         );
       }
       const exhausted = (
-        iteration + 1 >= this.#budgets.maxProviderIterations ||
+        iteration + consumedProviderIterations >= this.#budgets.maxProviderIterations ||
         providerToolExecutions.length >= this.#budgets.maxProviderToolCalls ||
         repeatedFailureBudgetExceeded !== undefined
       ) && execution.toolCalls.length > 0 && loopToolExecutions.length > 0;
-
-      if (
-        execution.ok !== true &&
-        execution.toolCalls.length === 0 &&
-        execution.partialContent?.trim().length &&
-        lastAttemptErrorClass(execution) === "incomplete-stream"
-      ) {
-        const lastAttempt = execution.attempts[execution.attempts.length - 1];
-        execution = {
-          ...execution,
-          ok: true,
-          response: {
-            ok: true,
-            content: execution.partialContent.trim(),
-            model: lastAttempt?.model ?? this.#model?.id ?? "unknown",
-            provider: (lastAttempt?.provider ?? this.#model?.provider ?? "unknown") as ProviderId
-          }
-        };
-      }
 
       let terminalPostToolEmpty =
         execution.ok === true &&
@@ -324,12 +402,15 @@ export class ProviderTurnLoop {
       if (
         terminalPostToolEmpty &&
         !postToolEmptyRetried &&
-        iteration + 1 < this.#budgets.maxProviderIterations
+        iteration + consumedProviderIterations < this.#budgets.maxProviderIterations
       ) {
         postToolEmptyRetried = true;
         pendingEmptyResponseNudge = true;
         effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
         previousProviderExecution = execution;
+        if (consumedProviderIterations > 1) {
+          iteration += consumedProviderIterations - 1;
+        }
         continue;
       }
 
@@ -341,13 +422,16 @@ export class ProviderTurnLoop {
       if (
         successfulEmptyWithoutTools &&
         emptyContentRetries < 3 &&
-        iteration + 1 < this.#budgets.maxProviderIterations
+        iteration + consumedProviderIterations < this.#budgets.maxProviderIterations
       ) {
         emptyContentRetries += 1;
         if (phase === "initial") {
           retryEmptyInitialResponse = true;
           effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
           previousProviderExecution = execution;
+          if (consumedProviderIterations > 1) {
+            iteration += consumedProviderIterations - 1;
+          }
           continue;
         }
       }
@@ -368,6 +452,10 @@ export class ProviderTurnLoop {
           );
         }
         break;
+      }
+
+      if (consumedProviderIterations > 1) {
+        iteration += consumedProviderIterations - 1;
       }
     }
 
@@ -422,7 +510,9 @@ export class ProviderTurnLoop {
     onEvent?: RuntimeEventSink;
     toolPlans: ToolCallPlan[];
     iteration: number;
+    loopStartedAt: number;
     signal?: AbortSignal;
+    reasoningOnlyPrefill?: boolean;
   }): Promise<ProviderExecutionResult | undefined> {
     if (this.#providerExecutor === undefined || this.#model === undefined || this.#model.provider === "unconfigured") {
       return undefined;
@@ -445,34 +535,37 @@ export class ProviderTurnLoop {
       ui: this.#ui,
       agentProfile: this.#agentProfile
     });
+    if (input.reasoningOnlyPrefill === true) {
+      prompt.messages.push(reasoningOnlyPrefillMessage());
+    }
     this.#lastPromptTokens = prompt.budget.estimatedTokens;
     await this.#runRecorder.recordPromptAssembly(prompt.budget);
     await emitContextUsage(input.onEvent, prompt.budget, "assembled-prompt");
 
-    const execution = await this.#providerExecutor.complete(normalizeProviderRequest({
+    const providerRequest = normalizeProviderRequest({
       provider: this.#model.provider,
       model: this.#model.id,
       messages: prompt.messages,
       temperature: 0.2,
-      maxTokens: 1_200,
       tools: this.#model.supportsTools && input.providerTools.length > 0
         ? input.providerTools
         : undefined
-    }), {
+    });
+    const providerPreferences = {
       requireTools: input.providerTools.length > 0,
       requireVision: false,
       requireStructuredOutput: false,
       providerOrder: [this.#model.provider],
       ...this.#providerPreferences
-    }, {
+    };
+    const execution = await this.#completeProviderRequestWithFinalizationRetries({
+      request: providerRequest,
+      preferences: providerPreferences,
       sessionId: this.#currentSessionId(),
-      stream: true,
+      iteration: input.iteration,
+      loopStartedAt: input.loopStartedAt,
       signal: input.signal,
-      primaryRoute: this.#primaryModelRoute,
-      fallbackChain: this.#modelFallbackRoutes,
-      onEvent: async (event) => {
-        await emit(input.onEvent, mapProviderRuntimeEvent(event));
-      }
+      onEvent: input.onEvent
     });
     if (execution.response?.usage?.inputTokens !== undefined) {
       this.#lastActualPromptTokens = execution.response.usage.inputTokens;
@@ -488,28 +581,16 @@ export class ProviderTurnLoop {
       kind: "provider-completion",
       iteration: input.iteration,
       ok: execution.ok,
-      attempts: execution.attempts.map((attempt) => ({
-        provider: attempt.provider,
-        model: attempt.model,
-        credentialId: attempt.credentialId,
-        ok: attempt.ok,
-        errorClass: attempt.errorClass
-      })),
+      attempts: execution.attempts.map(providerAttemptEventPayload),
       fallbackUsed: execution.fallbackUsed,
-      usage: execution.response?.usage
+      ...providerExecutionEventMetadata(execution)
     });
     this.#trajectoryRecorder.record("provider-completion", {
       iteration: input.iteration,
       ok: execution.ok,
-      attempts: execution.attempts.map((attempt) => ({
-        provider: attempt.provider,
-        model: attempt.model,
-        credentialId: attempt.credentialId,
-        ok: attempt.ok,
-        errorClass: attempt.errorClass
-      })),
+      attempts: execution.attempts.map(providerAttemptEventPayload),
       fallbackUsed: execution.fallbackUsed,
-      usage: execution.response?.usage
+      ...providerExecutionEventMetadata(execution)
     });
 
     if (!execution.ok) {
@@ -542,7 +623,9 @@ export class ProviderTurnLoop {
     fallbackText: string;
     onEvent?: RuntimeEventSink;
     iteration: number;
+    loopStartedAt: number;
     emptyResponseNudge?: boolean;
+    reasoningOnlyPrefill?: boolean;
     signal?: AbortSignal;
   }): Promise<ProviderExecutionResult | undefined> {
     if (
@@ -579,34 +662,37 @@ export class ProviderTurnLoop {
         content: "You just executed tool calls but returned an empty response. Please process the tool results above and continue with the task."
       });
     }
+    if (input.reasoningOnlyPrefill === true) {
+      prompt.messages.push(reasoningOnlyPrefillMessage());
+    }
     this.#lastPromptTokens = prompt.budget.estimatedTokens;
     await this.#runRecorder.recordPromptAssembly(prompt.budget);
     await emitContextUsage(input.onEvent, prompt.budget, "assembled-prompt");
 
-    const execution = await this.#providerExecutor.complete(normalizeProviderRequest({
+    const providerRequest = normalizeProviderRequest({
       provider: this.#model.provider,
       model: this.#model.id,
       messages: prompt.messages,
       temperature: 0.2,
-      maxTokens: 1_200,
       tools: this.#model.supportsTools && input.providerTools.length > 0
         ? input.providerTools
         : undefined
-    }), {
+    });
+    const providerPreferences = {
       requireTools: input.providerTools.length > 0,
       requireVision: false,
       requireStructuredOutput: false,
       providerOrder: [this.#model.provider],
       ...this.#providerPreferences
-    }, {
+    };
+    const execution = await this.#completeProviderRequestWithFinalizationRetries({
+      request: providerRequest,
+      preferences: providerPreferences,
       sessionId: this.#currentSessionId(),
-      stream: true,
+      iteration: input.iteration,
+      loopStartedAt: input.loopStartedAt,
       signal: input.signal,
-      primaryRoute: this.#primaryModelRoute,
-      fallbackChain: this.#modelFallbackRoutes,
-      onEvent: async (event) => {
-        await emit(input.onEvent, mapProviderRuntimeEvent(event));
-      }
+      onEvent: input.onEvent
     });
     if (execution.response?.usage?.inputTokens !== undefined) {
       this.#lastActualPromptTokens = execution.response.usage.inputTokens;
@@ -622,38 +708,26 @@ export class ProviderTurnLoop {
       kind: "provider-continuation" as const,
       iteration: input.iteration,
       ok: execution.ok,
-      attempts: execution.attempts.map((attempt) => ({
-        provider: attempt.provider,
-        model: attempt.model,
-        credentialId: attempt.credentialId,
-        ok: attempt.ok,
-        errorClass: attempt.errorClass
-      })),
+      attempts: execution.attempts.map(providerAttemptEventPayload),
       toolPlans: input.toolPlans.map((plan) => ({
         id: plan.id,
         tool: plan.tool,
         status: plan.status
       })),
-      usage: execution.response?.usage,
+      ...providerExecutionEventMetadata(execution),
       nudge: input.emptyResponseNudge === true
     };
     await this.#sessionDb.appendEvent(this.#currentSessionId(), continuationEvent);
     this.#trajectoryRecorder.record("provider-continuation", {
       iteration: input.iteration,
       ok: execution.ok,
-      attempts: execution.attempts.map((attempt) => ({
-        provider: attempt.provider,
-        model: attempt.model,
-        credentialId: attempt.credentialId,
-        ok: attempt.ok,
-        errorClass: attempt.errorClass
-      })),
+      attempts: execution.attempts.map(providerAttemptEventPayload),
       toolPlans: input.toolPlans.map((plan) => ({
         id: plan.id,
         tool: plan.tool,
         status: plan.status
       })),
-      usage: execution.response?.usage,
+      ...providerExecutionEventMetadata(execution),
       nudge: input.emptyResponseNudge === true
     });
 
@@ -665,6 +739,229 @@ export class ProviderTurnLoop {
     }
 
     return execution;
+  }
+
+  async #completeProviderRequestWithFinalizationRetries(input: {
+    request: Omit<ProviderRequest, "model"> & { model?: string };
+    preferences: ProviderRoutePreferences;
+    sessionId: string;
+    iteration: number;
+    loopStartedAt: number;
+    signal?: AbortSignal;
+    onEvent?: RuntimeEventSink;
+  }): Promise<ProviderExecutionResult> {
+    const initial = await this.#completeProviderRequestWithTruncatedToolRetry(input);
+    return await this.#continueLengthTruncatedTextResponse({
+      ...input,
+      initial
+    });
+  }
+
+  async #completeProviderRequestWithTruncatedToolRetry(input: {
+    request: Omit<ProviderRequest, "model"> & { model?: string };
+    preferences: ProviderRoutePreferences;
+    sessionId: string;
+    iteration: number;
+    loopStartedAt: number;
+    primaryRoute?: ResolvedModelRoute;
+    fallbackChain?: ResolvedModelRoute[];
+    signal?: AbortSignal;
+    onEvent?: RuntimeEventSink;
+  }): Promise<ProviderExecutionResult> {
+    const primaryRoute = input.primaryRoute ?? this.#primaryModelRoute;
+    const fallbackChain = input.fallbackChain ?? this.#modelFallbackRoutes;
+    const initialEvents = createProviderToolCallEventBuffer(input.onEvent);
+    const execution = await this.#providerExecutor!.complete(input.request, input.preferences, {
+      sessionId: input.sessionId,
+      stream: true,
+      signal: input.signal,
+      primaryRoute,
+      fallbackChain,
+      onEvent: initialEvents.onEvent
+    });
+
+    if (!isLengthTruncatedToolCallExecution(execution)) {
+      await initialEvents.flushToolCalls();
+      return execution;
+    }
+    initialEvents.discardToolCalls();
+
+    const originalRouteChain = resolvedRouteChain(primaryRoute, fallbackChain);
+    const retryChain = buildRetryRouteChainFromSuccessfulAttempt(execution, originalRouteChain);
+    const retryPrimaryRoute = retryChain[0];
+    if (retryPrimaryRoute === undefined) {
+      return execution;
+    }
+
+    if (input.iteration + 1 >= this.#budgets.maxProviderIterations) {
+      return truncatedToolRetryRefusal({
+        initial: execution,
+        provider: (execution.response?.provider ?? input.request.provider ?? this.#model?.provider ?? "unknown") as ProviderResponse["provider"],
+        model: execution.response?.model ?? input.request.model ?? "unknown",
+        retried: false
+      });
+    }
+
+    const elapsedMs = Date.now() - input.loopStartedAt;
+    if (elapsedMs > this.#budgets.maxProviderWallClockMs) {
+      await this.#runRecorder.recordProviderBudgetExhausted({
+        budget: "provider-wall-clock-ms",
+        limit: this.#budgets.maxProviderWallClockMs,
+        observed: elapsedMs,
+        reason: "Provider loop exceeded its wall-clock budget before retrying a truncated tool call."
+      }, input.onEvent);
+      await this.#runRecorder.recordClassifiedFailure(
+        { kind: "budget", budget: "provider-wall-clock-ms", limit: this.#budgets.maxProviderWallClockMs, observed: elapsedMs, reason: "Provider loop exceeded its wall-clock budget before retrying a truncated tool call." },
+        "provider-budget-exhausted"
+      );
+      return truncatedToolRetryRefusal({
+        initial: execution,
+        provider: (execution.response?.provider ?? input.request.provider ?? this.#model?.provider ?? "unknown") as ProviderResponse["provider"],
+        model: execution.response?.model ?? input.request.model ?? "unknown",
+        retried: false
+      });
+    }
+
+    const baseMaxTokens = input.request.maxTokens ?? (execution.route ?? retryPrimaryRoute).maxTokens ?? 4096;
+    const retryMaxTokens = Math.min(baseMaxTokens * 2, 32768);
+    const retryEvents = createProviderToolCallEventBuffer(input.onEvent);
+    const retryExecutionRaw = await this.#providerExecutor!.complete({
+      ...input.request,
+      maxTokens: retryMaxTokens
+    }, input.preferences, {
+      sessionId: input.sessionId,
+      stream: true,
+      signal: input.signal,
+      primaryRoute: retryPrimaryRoute,
+      fallbackChain: retryChain.slice(1),
+      onEvent: retryEvents.onEvent
+    });
+    const retryExecution = rebaseRetryRouteIdentity(retryExecutionRaw, retryChain, originalRouteChain);
+
+    if (isLengthTruncatedToolCallExecution(retryExecution)) {
+      retryEvents.discardToolCalls();
+      return truncatedToolRetryRefusal({
+        initial: execution,
+        retry: retryExecution,
+        provider: (retryExecution.response?.provider ?? execution.response?.provider ?? input.request.provider ?? this.#model?.provider ?? "unknown") as ProviderResponse["provider"],
+        model: retryExecution.response?.model ?? execution.response?.model ?? input.request.model ?? "unknown",
+        retried: true
+      });
+    }
+
+    await retryEvents.flushToolCalls();
+    return mergeTruncatedToolRetryExecutions(execution, retryExecution);
+  }
+
+  async #continueLengthTruncatedTextResponse(input: {
+    initial: ProviderExecutionResult;
+    request: Omit<ProviderRequest, "model"> & { model?: string };
+    preferences: ProviderRoutePreferences;
+    sessionId: string;
+    iteration: number;
+    loopStartedAt: number;
+    signal?: AbortSignal;
+    onEvent?: RuntimeEventSink;
+  }): Promise<ProviderExecutionResult> {
+    if (!isLengthTruncatedTextExecution(input.initial)) {
+      return input.initial;
+    }
+
+    const originalRouteChain = resolvedRouteChain(this.#primaryModelRoute, this.#modelFallbackRoutes);
+    const executions: ProviderExecutionResult[] = [input.initial];
+    let current = input.initial;
+    let accumulatedVisibleText = input.initial.response!.content;
+    let continuationAttempts = 0;
+    let consumedProviderIterations = providerIterationCost(input.initial);
+    let exhausted = false;
+    let finalFinishReason: ProviderFinishReason | undefined = input.initial.response?.finishReason;
+
+    while (continuationAttempts < MAX_TEXT_CONTINUATION_ATTEMPTS && isLengthTruncatedTextExecution(current)) {
+      const retryChain = buildRetryRouteChainFromSuccessfulAttempt(current, originalRouteChain);
+      const retryPrimaryRoute = retryChain[0];
+      if (retryPrimaryRoute === undefined) {
+        exhausted = true;
+        break;
+      }
+
+      if (input.iteration + consumedProviderIterations >= this.#budgets.maxProviderIterations) {
+        exhausted = true;
+        break;
+      }
+
+      const elapsedMs = Date.now() - input.loopStartedAt;
+      if (elapsedMs > this.#budgets.maxProviderWallClockMs) {
+        await this.#runRecorder.recordProviderBudgetExhausted({
+          budget: "provider-wall-clock-ms",
+          limit: this.#budgets.maxProviderWallClockMs,
+          observed: elapsedMs,
+          reason: "Provider loop exceeded its wall-clock budget before continuing a length-truncated response."
+        }, input.onEvent);
+        await this.#runRecorder.recordClassifiedFailure(
+          { kind: "budget", budget: "provider-wall-clock-ms", limit: this.#budgets.maxProviderWallClockMs, observed: elapsedMs, reason: "Provider loop exceeded its wall-clock budget before continuing a length-truncated response." },
+          "provider-budget-exhausted"
+        );
+        exhausted = true;
+        break;
+      }
+
+      continuationAttempts += 1;
+      const baseMaxTokens = input.request.maxTokens ?? (current.route ?? retryPrimaryRoute).maxTokens ?? 4096;
+      const continuationMaxTokens = Math.min(baseMaxTokens * (continuationAttempts + 1), 32768);
+      const continuationMessages: ProviderRequest["messages"] = [
+        ...input.request.messages,
+        {
+          role: "assistant",
+          content: accumulatedVisibleText
+        },
+        {
+          role: "user",
+          content: TEXT_CONTINUATION_PROMPT
+        }
+      ];
+      const continuationExecutionRaw = await this.#completeProviderRequestWithTruncatedToolRetry({
+        ...input,
+        request: {
+          ...input.request,
+          messages: continuationMessages,
+          maxTokens: continuationMaxTokens
+        },
+        iteration: input.iteration + consumedProviderIterations,
+        primaryRoute: retryPrimaryRoute,
+        fallbackChain: retryChain.slice(1)
+      });
+      const continuationExecution = rebaseRetryRouteIdentity(
+        continuationExecutionRaw,
+        retryChain,
+        originalRouteChain
+      );
+      executions.push(continuationExecution);
+      consumedProviderIterations += providerIterationCost(continuationExecution);
+
+      if (continuationExecution.ok !== true || continuationExecution.response === undefined) {
+        finalFinishReason = undefined;
+        break;
+      }
+
+      accumulatedVisibleText = appendWithExactOverlapTrim(
+        accumulatedVisibleText,
+        continuationExecution.response.content
+      );
+      finalFinishReason = continuationExecution.response.finishReason;
+      current = continuationExecution;
+    }
+
+    if (isLengthTruncatedTextExecution(current)) {
+      exhausted = true;
+    }
+
+    return mergeTextContinuationExecutions(executions, accumulatedVisibleText, {
+      reason: "provider_length",
+      attempts: continuationAttempts,
+      exhausted,
+      initialFinishReason: "length",
+      ...(finalFinishReason === undefined ? {} : { finalFinishReason })
+    });
   }
 
   async #providerSessionHistory(): Promise<{
@@ -788,6 +1085,44 @@ function estimateProviderToolFeedbackTokens(executions: ToolExecutionRecord[]): 
   }, 0);
 }
 
+function providerAttemptEventPayload(attempt: ProviderAttempt): {
+  provider: string;
+  model: string;
+  credentialId?: string;
+  ok: boolean;
+  errorClass?: string;
+  finishReason?: ProviderAttempt["finishReason"];
+  incompleteReason?: string;
+  usage?: ProviderAttempt["usage"];
+  reasoningMetadata?: ProviderAttempt["reasoningMetadata"];
+} {
+  return {
+    provider: attempt.provider,
+    model: attempt.model,
+    ok: attempt.ok,
+    ...(attempt.credentialId === undefined ? {} : { credentialId: attempt.credentialId }),
+    ...(attempt.errorClass === undefined ? {} : { errorClass: attempt.errorClass }),
+    ...(attempt.finishReason === undefined ? {} : { finishReason: attempt.finishReason }),
+    ...(attempt.incompleteReason === undefined ? {} : { incompleteReason: attempt.incompleteReason }),
+    ...(attempt.usage === undefined ? {} : { usage: attempt.usage }),
+    ...(attempt.reasoningMetadata === undefined ? {} : { reasoningMetadata: attempt.reasoningMetadata })
+  };
+}
+
+function providerExecutionEventMetadata(execution: ProviderExecutionResult): {
+  finishReason?: ProviderFinishReason;
+  incompleteReason?: string;
+  usage?: ProviderUsage;
+  runtimeMetadata?: ProviderLoopRuntimeMetadata;
+} {
+  return {
+    ...(execution.response?.finishReason === undefined ? {} : { finishReason: execution.response.finishReason }),
+    ...(execution.response?.incompleteReason === undefined ? {} : { incompleteReason: execution.response.incompleteReason }),
+    ...(execution.response?.usage === undefined ? {} : { usage: execution.response.usage }),
+    ...(execution.runtimeMetadata === undefined ? {} : { runtimeMetadata: execution.runtimeMetadata })
+  };
+}
+
 function isRecoverableToolPlanStatus(status: ToolCallPlan["status"]): boolean {
   return status === "invalid" || status === "unavailable" || status === "blocked";
 }
@@ -805,8 +1140,297 @@ function isHousekeepingToolName(name: string | undefined): boolean {
     name === "skill.review_proposal";
 }
 
-function lastAttemptErrorClass(execution: ProviderExecutionResult): string | undefined {
-  return execution.attempts[execution.attempts.length - 1]?.errorClass;
+const TRUNCATED_TOOL_CALL_REFUSAL = "The model response was truncated while generating tool calls, so EstaCoda refused to execute the incomplete tool arguments. Try again with a higher model.maxTokens value or a narrower request.";
+const REASONING_ONLY_LENGTH_EXHAUSTION_MESSAGE = "The model exhausted its output budget while reasoning and did not produce a visible answer. Try again with a higher model.maxTokens value or a narrower request.";
+const REASONING_ONLY_EMPTY_RESPONSE_MESSAGE = "The model produced internal reasoning but did not produce a visible answer. Try again with a narrower request.";
+const REASONING_ONLY_PREFILL_CONTENT = "I’ll answer directly and only include the final visible answer.";
+const TEXT_CONTINUATION_PROMPT = "Your previous response was truncated by the output length limit. Continue exactly where you left off. Do not repeat previous text.";
+const MAX_TEXT_CONTINUATION_ATTEMPTS = 3;
+const MAX_CONTINUATION_OVERLAP_CHARS = 1000;
+
+function isLengthTruncatedToolCallExecution(execution: ProviderExecutionResult): boolean {
+  return execution.ok === true &&
+    execution.response?.finishReason === "length" &&
+    execution.toolCalls.length > 0;
+}
+
+function isLengthTruncatedTextExecution(execution: ProviderExecutionResult): boolean {
+  return execution.ok === true &&
+    execution.response?.finishReason === "length" &&
+    execution.response.content.trim().length > 0 &&
+    execution.toolCalls.length === 0;
+}
+
+function isReasoningOnlyExecution(execution: ProviderExecutionResult): boolean {
+  return execution.ok === true &&
+    execution.response !== undefined &&
+    execution.response.content.trim().length === 0 &&
+    hasReasoning(execution.response) &&
+    execution.toolCalls.length === 0;
+}
+
+function isReasoningOnlyLengthExhaustion(execution: ProviderExecutionResult): boolean {
+  return isReasoningOnlyExecution(execution) &&
+    execution.response?.finishReason === "length";
+}
+
+function hasReasoning(response: ProviderResponse): boolean {
+  return (response.reasoning !== undefined && response.reasoning.length > 0) ||
+    response.reasoningMetadata?.present === true;
+}
+
+function reasoningOnlyPrefillMessage(): ProviderRequest["messages"][number] {
+  return {
+    role: "assistant",
+    content: REASONING_ONLY_PREFILL_CONTENT
+  };
+}
+
+function reasoningOnlySafeGuidanceExecution(
+  execution: ProviderExecutionResult,
+  content: string
+): ProviderExecutionResult {
+  const response = execution.response;
+  return {
+    ...execution,
+    response: {
+      ok: true,
+      content,
+      model: response?.model ?? execution.route?.id ?? "unknown",
+      provider: (response?.provider ?? execution.route?.provider ?? "unknown") as ProviderResponse["provider"],
+      ...(response?.finishReason === undefined ? {} : { finishReason: response.finishReason }),
+      ...(response?.incompleteReason === undefined ? {} : { incompleteReason: response.incompleteReason }),
+      ...(response?.usage === undefined ? {} : { usage: response.usage })
+    },
+    toolCalls: []
+  };
+}
+
+function isTruncatedToolCallRefusalExecution(execution: ProviderExecutionResult): boolean {
+  return execution.ok === true &&
+    execution.toolCalls.length === 0 &&
+    execution.runtimeMetadata?.truncation?.kind === "tool_call" &&
+    execution.runtimeMetadata.truncation.refused === true &&
+    execution.response?.content === TRUNCATED_TOOL_CALL_REFUSAL;
+}
+
+function providerIterationCost(execution: ProviderExecutionResult): number {
+  let cost = 1;
+  if (
+    execution.runtimeMetadata?.truncation?.kind === "tool_call" &&
+    execution.runtimeMetadata.truncation.retried
+  ) {
+    cost += 1;
+  }
+  cost += execution.runtimeMetadata?.continuation?.attempts ?? 0;
+  return cost;
+}
+
+function createProviderToolCallEventBuffer(sink: RuntimeEventSink | undefined): {
+  onEvent: (event: ProviderRuntimeEvent) => Promise<void>;
+  flushToolCalls: () => Promise<void>;
+  discardToolCalls: () => void;
+} {
+  const toolCallEvents: Extract<ProviderRuntimeEvent, { kind: "provider-tool-call" }>[] = [];
+
+  return {
+    async onEvent(event) {
+      if (event.kind === "provider-tool-call") {
+        toolCallEvents.push(event);
+        return;
+      }
+      await emit(sink, mapProviderRuntimeEvent(event));
+    },
+    async flushToolCalls() {
+      for (const event of toolCallEvents) {
+        await emit(sink, mapProviderRuntimeEvent(event));
+      }
+      toolCallEvents.length = 0;
+    },
+    discardToolCalls() {
+      toolCallEvents.length = 0;
+    }
+  };
+}
+
+function resolvedRouteChain(
+  primaryRoute: ResolvedModelRoute | undefined,
+  fallbackRoutes: ResolvedModelRoute[]
+): ResolvedModelRoute[] {
+  return primaryRoute === undefined ? [...fallbackRoutes] : [primaryRoute, ...fallbackRoutes];
+}
+
+function buildRetryRouteChainFromSuccessfulAttempt(
+  execution: ProviderExecutionResult,
+  originalRouteChain: ResolvedModelRoute[]
+): ResolvedModelRoute[] {
+  const attemptedRouteIndex = execution.attemptedRouteIndex;
+  if (
+    attemptedRouteIndex !== undefined &&
+    attemptedRouteIndex >= 0 &&
+    attemptedRouteIndex < originalRouteChain.length
+  ) {
+    return originalRouteChain.slice(attemptedRouteIndex);
+  }
+
+  if (execution.route === undefined) {
+    return originalRouteChain;
+  }
+
+  const routeIndex = originalRouteChain.findIndex((route) => routesMatch(route, execution.route!));
+  return routeIndex === -1 ? [execution.route] : originalRouteChain.slice(routeIndex);
+}
+
+function routesMatch(a: ResolvedModelRoute, b: ResolvedModelRoute): boolean {
+  return a.provider === b.provider &&
+    a.id === b.id &&
+    a.baseUrl === b.baseUrl &&
+    a.apiKeyEnv === b.apiKeyEnv;
+}
+
+function rebaseRetryRouteIdentity(
+  execution: ProviderExecutionResult,
+  retryChain: ResolvedModelRoute[],
+  originalRouteChain: ResolvedModelRoute[]
+): ProviderExecutionResult {
+  const retryRoute = execution.route;
+  if (retryRoute === undefined) {
+    return execution;
+  }
+
+  const originalIndex = originalRouteChain.findIndex((route) => routesMatch(route, retryRoute));
+  if (originalIndex === -1) {
+    return execution;
+  }
+
+  return {
+    ...execution,
+    attemptedRouteIndex: originalIndex,
+    routeRole: originalIndex === 0 ? "primary" : "fallback",
+    fallbackUsed: execution.fallbackUsed || originalIndex > 0 || retryChain[0] !== originalRouteChain[0]
+  };
+}
+
+function mergeTruncatedToolRetryExecutions(
+  initial: ProviderExecutionResult,
+  retry: ProviderExecutionResult
+): ProviderExecutionResult {
+  return {
+    ...retry,
+    fallbackUsed: initial.fallbackUsed || retry.fallbackUsed,
+    attempts: [
+      ...initial.attempts,
+      ...retry.attempts
+    ],
+    toolCalls: retry.toolCalls,
+    runtimeMetadata: mergeProviderRuntimeMetadata(
+      mergeProviderRuntimeMetadata(initial.runtimeMetadata, retry.runtimeMetadata),
+      {
+        truncation: {
+          kind: "tool_call",
+          retried: true,
+          refused: false
+        }
+      }
+    )
+  };
+}
+
+function truncatedToolRetryRefusal(input: {
+  initial: ProviderExecutionResult;
+  retry?: ProviderExecutionResult;
+  provider: ProviderResponse["provider"];
+  model: string;
+  retried: boolean;
+}): ProviderExecutionResult {
+  return {
+    ok: true,
+    response: {
+      ok: true,
+      content: TRUNCATED_TOOL_CALL_REFUSAL,
+      model: input.model,
+      provider: input.provider
+    },
+    fallbackUsed: input.initial.fallbackUsed || input.retry?.fallbackUsed === true,
+    attempts: [
+      ...input.initial.attempts,
+      ...(input.retry?.attempts ?? [])
+    ],
+    route: input.retry?.route ?? input.initial.route,
+    attemptedRouteIndex: input.retry?.attemptedRouteIndex ?? input.initial.attemptedRouteIndex,
+    routeRole: input.retry?.routeRole ?? input.initial.routeRole,
+    runtimeMetadata: mergeProviderRuntimeMetadata(
+      mergeProviderRuntimeMetadata(input.initial.runtimeMetadata, input.retry?.runtimeMetadata),
+      {
+        truncation: {
+          kind: "tool_call",
+          retried: input.retried,
+          refused: true
+        }
+      }
+    ),
+    toolCalls: []
+  };
+}
+
+function mergeTextContinuationExecutions(
+  executions: ProviderExecutionResult[],
+  content: string,
+  continuation: NonNullable<ProviderLoopRuntimeMetadata["continuation"]>
+): ProviderExecutionResult {
+  const initial = executions[0]!;
+  const final = executions[executions.length - 1] ?? initial;
+  const response = final.response ?? initial.response;
+
+  return {
+    ...final,
+    ok: true,
+    response: {
+      ok: true,
+      content,
+      model: response?.model ?? final.route?.id ?? initial.route?.id ?? "unknown",
+      provider: (response?.provider ?? final.route?.provider ?? initial.route?.provider ?? "unknown") as ProviderResponse["provider"],
+      ...(response?.finishReason === undefined ? {} : { finishReason: response.finishReason }),
+      ...(response?.incompleteReason === undefined ? {} : { incompleteReason: response.incompleteReason }),
+      ...(response?.usage === undefined ? {} : { usage: response.usage }),
+      ...(response?.reasoningMetadata === undefined ? {} : { reasoningMetadata: response.reasoningMetadata })
+    },
+    fallbackUsed: executions.some((execution) => execution.fallbackUsed),
+    attempts: executions.flatMap((execution) => execution.attempts),
+    toolCalls: final.toolCalls,
+    route: final.route,
+    attemptedRouteIndex: final.attemptedRouteIndex,
+    routeRole: final.routeRole,
+    runtimeMetadata: mergeRuntimeMetadataList([
+      ...executions.map((execution) => execution.runtimeMetadata),
+      { continuation }
+    ])
+  };
+}
+
+function mergeRuntimeMetadataList(
+  metadata: Array<ProviderExecutionResult["runtimeMetadata"]>
+): ProviderExecutionResult["runtimeMetadata"] {
+  return metadata.reduce<ProviderExecutionResult["runtimeMetadata"]>((merged, entry) =>
+    mergeProviderRuntimeMetadata(merged, entry), undefined);
+}
+
+function appendWithExactOverlapTrim(accumulated: string, continuation: string): string {
+  if (accumulated.length === 0 || continuation.length === 0) {
+    return accumulated + continuation;
+  }
+
+  const tail = accumulated.slice(-MAX_CONTINUATION_OVERLAP_CHARS);
+  const head = continuation.slice(0, MAX_CONTINUATION_OVERLAP_CHARS);
+  const maxOverlap = Math.min(tail.length, head.length);
+
+  for (let length = maxOverlap; length > 0; length -= 1) {
+    if (tail.slice(tail.length - length) === head.slice(0, length)) {
+      return accumulated + continuation.slice(length);
+    }
+  }
+
+  return accumulated + continuation;
 }
 
 function mergeProviderExecutions(
@@ -832,7 +1456,29 @@ function mergeProviderExecutions(
     toolCalls: [
       ...initial.toolCalls,
       ...continuation.toolCalls
-    ]
+    ],
+    route: continuation.route,
+    attemptedRouteIndex: continuation.attemptedRouteIndex,
+    routeRole: continuation.routeRole,
+    runtimeMetadata: mergeProviderRuntimeMetadata(initial.runtimeMetadata, continuation.runtimeMetadata)
+  };
+}
+
+function mergeProviderRuntimeMetadata(
+  initial: ProviderExecutionResult["runtimeMetadata"],
+  continuation: ProviderExecutionResult["runtimeMetadata"]
+): ProviderExecutionResult["runtimeMetadata"] {
+  if (initial === undefined) {
+    return continuation;
+  }
+
+  if (continuation === undefined) {
+    return initial;
+  }
+
+  return {
+    ...initial,
+    ...continuation
   };
 }
 
@@ -880,7 +1526,11 @@ function mapProviderRuntimeEvent(event: ProviderRuntimeEvent): RuntimeEvent {
         ok: event.ok,
         fallback: event.fallback,
         willFallback: event.willFallback,
-        errorClass: event.errorClass
+        ...(event.errorClass === undefined ? {} : { errorClass: event.errorClass }),
+        ...(event.finishReason === undefined ? {} : { finishReason: event.finishReason }),
+        ...(event.incompleteReason === undefined ? {} : { incompleteReason: event.incompleteReason }),
+        ...(event.usage === undefined ? {} : { usage: event.usage }),
+        ...(event.reasoningMetadata === undefined ? {} : { reasoningMetadata: event.reasoningMetadata })
       };
   }
 }

@@ -190,13 +190,13 @@ describe("applyRegisterProviderModel", () => {
 describe("applySetPreferredModelRoute", () => {
   it("switches preferred model", () => {
     const existing: EstaCodaConfig = {
-      model: { provider: "openai", id: "gpt-4o" }
+      model: { provider: "openai", id: "gpt-4o", maxTokens: 8192 }
     };
     const result = applySetPreferredModelRoute(existing, {
       provider: "deepseek",
       model: "deepseek-chat"
     });
-    expect(result.model).toEqual({ provider: "deepseek", id: "deepseek-chat" });
+    expect(result.model).toEqual({ provider: "deepseek", id: "deepseek-chat", maxTokens: 8192 });
   });
 
   it("preserves contextWindowTokens when provided", () => {
@@ -204,12 +204,14 @@ describe("applySetPreferredModelRoute", () => {
     const result = applySetPreferredModelRoute(existing, {
       provider: "deepseek",
       model: "deepseek-chat",
-      contextWindowTokens: 128_000
+      contextWindowTokens: 128_000,
+      maxTokens: 8192
     });
     expect(result.model).toEqual({
       provider: "deepseek",
       id: "deepseek-chat",
-      contextWindowTokens: 128_000
+      contextWindowTokens: 128_000,
+      maxTokens: 8192
     });
   });
 
@@ -317,14 +319,16 @@ describe("applyAddFallbackRoute", () => {
       id: "backup",
       baseUrl: "https://backup.example/v1",
       apiKeyEnv: "BACKUP_API_KEY",
-      contextWindowTokens: 64_000
+      contextWindowTokens: 64_000,
+      maxTokens: 4096
     });
     expect(result.model!.fallbacks![0]).toEqual({
       provider: "custom",
       id: "backup",
       baseUrl: "https://backup.example/v1",
       apiKeyEnv: "BACKUP_API_KEY",
-      contextWindowTokens: 64_000
+      contextWindowTokens: 64_000,
+      maxTokens: 4096
     });
   });
 

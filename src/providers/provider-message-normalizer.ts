@@ -1,4 +1,5 @@
 import type { ProviderMessage } from "../contracts/provider.js";
+import { stripInlineReasoning } from "./provider-reasoning.js";
 
 export type ProviderMessageNormalization = {
   messages: ProviderMessage[];
@@ -10,6 +11,21 @@ export type ProviderMessageNormalizationOptions = {
   ensureSystemMessage?: boolean;
 };
 
+const UNSAFE_PROVIDER_BOUND_MESSAGE_FIELDS = new Set([
+  "finishReason",
+  "finish_reason",
+  "incompleteReason",
+  "reasoning",
+  "reasoning_content",
+  "reasoning_details",
+  "reasoningMetadata",
+  "runtimeMetadata",
+  "providerLoopRuntimeMetadata",
+  "attemptedRouteIndex",
+  "routeRole",
+  "usage"
+]);
+
 export function normalizeProviderMessagesStrict(
   messages: ProviderMessage[],
   options: ProviderMessageNormalizationOptions = {}
@@ -19,7 +35,8 @@ export function normalizeProviderMessagesStrict(
   const normalized: Array<Omit<ProviderMessage, "content"> & { content: unknown }> = [];
   let systemContent: unknown;
 
-  for (const message of messages) {
+  for (const originalMessage of messages) {
+    const message = sanitizeProviderBoundMessage(originalMessage);
     const content = normalizeContent(message.content);
 
     if (message.role === "system") {
@@ -110,6 +127,24 @@ export function normalizeProviderMessagesStrict(
   };
 }
 
+export function sanitizeProviderBoundMessage(message: ProviderMessage): ProviderMessage {
+  const sanitized: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(message as unknown as Record<string, unknown>)) {
+    if (UNSAFE_PROVIDER_BOUND_MESSAGE_FIELDS.has(key)) {
+      continue;
+    }
+
+    sanitized[key] = key === "content" ? sanitizeProviderBoundContent(value) : value;
+  }
+
+  if (!("content" in sanitized)) {
+    sanitized.content = "[empty]";
+  }
+
+  return sanitized as ProviderMessage;
+}
+
 function normalizeContent(content: unknown): unknown {
   if (typeof content === "string") {
     const trimmed = content.trim();
@@ -121,6 +156,45 @@ function normalizeContent(content: unknown): unknown {
   }
 
   return "[empty]";
+}
+
+function sanitizeProviderBoundContent(content: unknown): unknown {
+  if (typeof content === "string") {
+    return stripInlineReasoning(content);
+  }
+
+  if (Array.isArray(content)) {
+    const parts = content
+      .map(sanitizeProviderBoundContentPart)
+      .filter((part) => part !== undefined);
+    return parts.length === 0 ? "[empty]" : parts;
+  }
+
+  return content;
+}
+
+function sanitizeProviderBoundContentPart(part: unknown): unknown | undefined {
+  if (typeof part !== "object" || part === null) {
+    return part;
+  }
+
+  const record = part as Record<string, unknown>;
+  const type = typeof record.type === "string" ? record.type.toLowerCase() : undefined;
+  if (type === "thinking" || type === "reasoning" || type === "reasoning_content") {
+    return undefined;
+  }
+
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(record)) {
+    if (UNSAFE_PROVIDER_BOUND_MESSAGE_FIELDS.has(key)) {
+      continue;
+    }
+    sanitized[key] = key === "text" && typeof value === "string"
+      ? stripInlineReasoning(value)
+      : value;
+  }
+
+  return sanitized;
 }
 
 function mergeNormalizedContent(left: unknown, right: unknown): unknown {

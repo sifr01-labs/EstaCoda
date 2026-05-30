@@ -104,6 +104,59 @@ export type ProviderRequest = {
   responseFormat?: unknown;
 };
 
+export type ProviderFinishReason =
+  | "stop"
+  | "length"
+  | "tool_calls"
+  | "content_filter"
+  | "incomplete"
+  | "unknown";
+
+export type ProviderReasoningFormat =
+  | "reasoning"
+  | "reasoning_content"
+  | "reasoning_details"
+  | "think_block"
+  | "responses_reasoning"
+  | "mixed"
+  | "unknown";
+
+export type ProviderReasoningMetadata = {
+  present: boolean;
+  chars: number;
+  format: ProviderReasoningFormat;
+};
+
+export type ProviderUsage = {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  reasoningTokens?: number;
+};
+
+export type ProviderRouteRole =
+  | "primary"
+  | "fallback"
+  | "alias"
+  | "override"
+  | "unknown";
+
+export type ProviderLoopRuntimeMetadata = {
+  reasoning?: ProviderReasoningMetadata;
+  continuation?: {
+    reason: "provider_length";
+    attempts: number;
+    exhausted: boolean;
+    initialFinishReason: ProviderFinishReason;
+    finalFinishReason?: ProviderFinishReason;
+  };
+  truncation?: {
+    kind: "tool_call";
+    retried: boolean;
+    refused: boolean;
+  };
+};
+
 export type ResolvedModelRoute = {
   provider: ProviderId;
   id: string;
@@ -111,6 +164,7 @@ export type ResolvedModelRoute = {
   baseUrl?: string;
   apiKeyEnv?: string;
   contextWindowTokens?: number;
+  maxTokens?: number;
   apiMode?: ProviderApiMode;
   authMethod?: ProviderAuthMethod;
 };
@@ -177,11 +231,11 @@ export type ProviderResponse = {
   model: string;
   provider: ProviderId;
   errorClass?: ProviderErrorClass;
-  usage?: {
-    inputTokens?: number;
-    outputTokens?: number;
-    totalTokens?: number;
-  };
+  finishReason?: ProviderFinishReason;
+  incompleteReason?: string;
+  reasoning?: string;
+  reasoningMetadata?: ProviderReasoningMetadata;
+  usage?: ProviderUsage;
   raw?: unknown;
 };
 
@@ -218,6 +272,11 @@ export type ProviderStreamEvent =
       provider: ProviderId;
       model: string;
       response: ProviderResponse;
+    }
+  | {
+      kind: "transport-done";
+      provider: ProviderId;
+      model: string;
     };
 
 export type ProviderErrorClass =

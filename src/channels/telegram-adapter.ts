@@ -137,6 +137,8 @@ type TelegramProgressState = {
 };
 
 const DEFAULT_MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+const TELEGRAM_MAX_TEXT_UTF16 = 4096;
+const TELEGRAM_HTML_BALANCE_RESERVE = 64;
 
 export class TelegramAdapter implements ChannelAdapter {
   readonly id = "telegram";
@@ -162,10 +164,15 @@ export class TelegramAdapter implements ChannelAdapter {
     sendText: async (sessionKey: ChannelSessionKey, text: string, options?: ChannelTextOptions) => {
       this.#progressByChat.delete(sessionKey.chatId);
       const formatted = formatTelegramReply(text, options);
-      await this.#sendMessage(sessionKey.chatId, formatted.text, {
-        ...options,
-        format: formatted.format
-      });
+      const chunks = chunkTelegramText(formatted.text, formatted.format);
+
+      for (const [index, chunk] of chunks.entries()) {
+        await this.#sendMessage(sessionKey.chatId, chunk, {
+          ...options,
+          actions: index === chunks.length - 1 ? options?.actions : undefined,
+          format: formatted.format
+        });
+      }
     },
     sendProgress: async (sessionKey: ChannelSessionKey, event: RuntimeEvent) => {
       if (event.kind === "agent-start" || event.kind === "provider-attempt") {
@@ -842,6 +849,196 @@ function renderImageArtifactCaption(artifact: ArtifactRecord): string {
     artifact.summary ?? "Generated image",
     `Artifact: ${artifact.id}`
   ].join("\n").slice(0, 1024);
+}
+
+function chunkTelegramText(
+  text: string,
+  format: "plain" | "html",
+  maxLength = TELEGRAM_MAX_TEXT_UTF16
+): string[] {
+  if (utf16Length(text) <= maxLength) {
+    return [text];
+  }
+
+  let expectedChunkCount = Math.max(2, Math.ceil(utf16Length(text) / Math.max(1, maxLength - telegramChunkSuffix(1, 9).length)));
+  let htmlReserve = format === "html" ? TELEGRAM_HTML_BALANCE_RESERVE : 0;
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const suffixReserve = telegramChunkSuffix(expectedChunkCount, expectedChunkCount).length;
+    const bodyLimit = maxLength - suffixReserve - htmlReserve;
+
+    if (bodyLimit < 1) {
+      break;
+    }
+
+    const rawChunks = splitTelegramText(text, bodyLimit);
+    const chunks = format === "html" ? balanceHtmlChunks(rawChunks) : rawChunks;
+    const nextChunkCount = chunks.length;
+    const hasOversizedChunk = chunks.some((chunk, index) =>
+      utf16Length(chunk) + telegramChunkSuffix(index + 1, nextChunkCount).length > maxLength
+    );
+
+    if (!hasOversizedChunk && nextChunkCount === expectedChunkCount) {
+      return chunks.map((chunk, index) => chunk + telegramChunkSuffix(index + 1, nextChunkCount));
+    }
+
+    expectedChunkCount = nextChunkCount;
+
+    if (hasOversizedChunk) {
+      htmlReserve += TELEGRAM_HTML_BALANCE_RESERVE;
+    }
+  }
+
+  return splitTelegramText(text, maxLength - telegramChunkSuffix(1, expectedChunkCount).length)
+    .map((chunk, index, chunks) => chunk + telegramChunkSuffix(index + 1, chunks.length));
+}
+
+function utf16Length(text: string): number {
+  return text.length;
+}
+
+function telegramChunkSuffix(index: number, total: number): string {
+  return ` (${index}/${total})`;
+}
+
+function splitTelegramText(text: string, maxLength: number): string[] {
+  if (utf16Length(text) <= maxLength) {
+    return [text];
+  }
+
+  const chunks: string[] = [];
+  let start = 0;
+
+  while (start < text.length) {
+    if (utf16Length(text.slice(start)) <= maxLength) {
+      chunks.push(text.slice(start));
+      break;
+    }
+
+    const splitAt = findTelegramSplit(text, start, maxLength);
+    chunks.push(text.slice(start, splitAt));
+    start = splitAt;
+  }
+
+  return chunks;
+}
+
+function findTelegramSplit(text: string, start: number, maxLength: number): number {
+  const hardEnd = Math.min(start + maxLength, text.length);
+  const minimum = start + Math.floor(maxLength / 2);
+  const newline = text.lastIndexOf("\n", hardEnd);
+
+  if (newline > minimum) {
+    const splitAt = nudgeTelegramSplit(text, start, newline + 1, minimum);
+    if (splitAt > start) {
+      return splitAt;
+    }
+  }
+
+  const space = text.lastIndexOf(" ", hardEnd);
+
+  if (space > minimum) {
+    const splitAt = nudgeTelegramSplit(text, start, space + 1, minimum);
+    if (splitAt > start) {
+      return splitAt;
+    }
+  }
+
+  const splitAt = nudgeTelegramSplit(text, start, hardEnd, minimum);
+  return splitAt > start ? splitAt : avoidSplitSurrogatePair(text, hardEnd);
+}
+
+function nudgeTelegramSplit(text: string, start: number, candidate: number, minimum: number): number {
+  let splitAt = avoidSplitSurrogatePair(text, candidate);
+
+  while (splitAt > start) {
+    const unsafeStart = unsafeTrailingHtmlBoundaryStart(text, start, splitAt);
+
+    if (unsafeStart === undefined) {
+      return splitAt;
+    }
+
+    if (unsafeStart < minimum) {
+      return 0;
+    }
+
+    splitAt = avoidSplitSurrogatePair(text, unsafeStart);
+  }
+
+  return 0;
+}
+
+function unsafeTrailingHtmlBoundaryStart(text: string, start: number, end: number): number | undefined {
+  const value = text.slice(start, end);
+  const lastLt = value.lastIndexOf("<");
+  const lastGt = value.lastIndexOf(">");
+
+  if (lastLt > lastGt) {
+    return start + lastLt;
+  }
+
+  const lastAmp = value.lastIndexOf("&");
+  const lastSemi = value.lastIndexOf(";");
+
+  if (lastAmp > lastSemi && !/\s/u.test(value.slice(lastAmp + 1))) {
+    return start + lastAmp;
+  }
+
+  return undefined;
+}
+
+function avoidSplitSurrogatePair(text: string, index: number): number {
+  if (index <= 0 || index >= text.length) {
+    return index;
+  }
+
+  const previous = text.charCodeAt(index - 1);
+  const next = text.charCodeAt(index);
+
+  if (previous >= 0xD800 && previous <= 0xDBFF && next >= 0xDC00 && next <= 0xDFFF) {
+    return index - 1;
+  }
+
+  return index;
+}
+
+type HtmlTagFrame = {
+  name: string;
+  open: string;
+};
+
+function balanceHtmlChunks(chunks: string[]): string[] {
+  const activeTags: HtmlTagFrame[] = [];
+
+  return chunks.map((chunk) => {
+    const prefix = activeTags.map((tag) => tag.open).join("");
+    updateHtmlTagStack(activeTags, chunk);
+    const suffix = [...activeTags].reverse().map((tag) => `</${tag.name}>`).join("");
+    return `${prefix}${chunk}${suffix}`;
+  });
+}
+
+function updateHtmlTagStack(activeTags: HtmlTagFrame[], text: string): void {
+  for (const match of text.matchAll(/<\s*(\/)?\s*([a-zA-Z][a-zA-Z0-9-]*)(?:\s[^>]*)?>/gu)) {
+    const full = match[0];
+    const closing = match[1] === "/";
+    const name = match[2].toLowerCase();
+
+    if (full.endsWith("/>")) {
+      continue;
+    }
+
+    if (closing) {
+      const existing = activeTags.map((tag) => tag.name).lastIndexOf(name);
+
+      if (existing >= 0) {
+        activeTags.splice(existing);
+      }
+      continue;
+    }
+
+    activeTags.push({ name, open: full });
+  }
 }
 
 function isHttpUrl(value: string): boolean {

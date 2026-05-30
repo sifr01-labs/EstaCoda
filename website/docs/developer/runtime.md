@@ -113,6 +113,30 @@ Tool risk classes: `safe`, `caution`, `external-side-effect`, `irreversible`. Th
 
 ---
 
+## Provider Finalization Boundary
+
+`ProviderTurnLoop` treats provider output as usable only after finalization. Streaming may emit live visible tokens, but executable tool calls, persisted assistant content, prompt-bound history, summaries, memory inputs, skill learning, and exports use finalized visible output only.
+
+Stream safety rules:
+
+- streamed tool-call fragments are collected locally while the stream is open
+- stream errors discard fragments
+- incomplete streams remain provider failures
+- `[DONE]` is an internal transport marker, not user-visible output
+- visible-only transport completion may finalize as `finishReason: "unknown"`
+- transport completion with unfinished tool fragments fails as `incomplete-stream`
+- Responses streaming is not implemented
+
+`ProviderExecutionResult.toolCalls` is canonical. Length-truncated tool calls retry once on the successful route chain. If the retry is still length-truncated, the runtime returns deterministic refusal text and executes no tools. Malformed finalized tool JSON stays a tool-planning error.
+
+Reasoning is hidden material. Raw reasoning is turn-local only. Safe metadata may include `present`, `chars`, and `format`; `reasoningTokens` is telemetry only. Visible output, provider-bound history, semantic compression, summaries, memory, skill learning, and exports strip raw reasoning and inline hidden reasoning blocks. Provider-bound reasoning echo-back remains deferred unless an explicit provider metadata opt-in is implemented and tested.
+
+Reasoning-only provider success reaches the turn loop. Non-length reasoning-only responses retry with a local-only visible-answer prefill. Length reasoning-only exhaustion returns safe visible guidance and does not text-continue.
+
+Visible text with `finishReason: "length"` can continue on the successful route chain. Synthetic continuation messages are local-only. Intermediate partials are not persisted. The final visible text is persisted once. Continuation uses exact overlap trimming, not semantic or fuzzy matching.
+
+---
+
 ## Gateway, Session, and Runtime Cache Boundaries
 
 ### Gateway Mode

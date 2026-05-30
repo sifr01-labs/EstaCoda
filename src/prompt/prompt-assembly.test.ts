@@ -422,6 +422,32 @@ describe("assembleProviderPrompt", () => {
       .toBeGreaterThanOrEqual(sessionHistoryLayer(textOnly).estimatedTokens + IMAGE_TOKEN_ESTIMATE);
   });
 
+  it("strips hidden reasoning blocks from provider-bound session history", () => {
+    const prompt = assembleProviderPrompt(basePromptInput({
+      sessionHistory: [
+        {
+          role: "assistant",
+          content: "<think>hidden</think>Visible"
+        },
+        {
+          role: "assistant",
+          content: "Visible before <reasoning>hidden forever"
+        },
+        {
+          role: "user",
+          content: "Use <think> as the example tag"
+        }
+      ]
+    }));
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain("assistant: Visible");
+    expect(rendered).toContain("assistant: Visible before");
+    expect(rendered).toContain("user: Use <think> as the example tag");
+    expect(rendered).not.toContain("hidden");
+    expect(rendered).not.toContain("<reasoning>");
+  });
+
   it("renders tool context summaries without replacing bounded excerpts", () => {
     const prompt = assembleProviderPrompt(basePromptInput({
       toolExecutions: [
@@ -465,6 +491,17 @@ describe("assembleProviderContinuationPrompt", () => {
     expect(rendered).not.toContain(
       "I have requested tools and received their results below. I will now process these results to produce the final answer."
     );
+  });
+
+  it("strips hidden reasoning blocks from continuation assistant content", () => {
+    const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
+      providerExecution: providerExecution("<think>hidden</think>Visible final answer")
+    }));
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain("Visible final answer");
+    expect(rendered).not.toContain("hidden");
+    expect(rendered).not.toContain("<think>");
   });
 
   it("keeps final-answer continuation guidance with executed tool results", () => {

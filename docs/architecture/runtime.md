@@ -140,6 +140,49 @@ Gateway runtime construction receives the gateway-owned security policy and appr
 **File:** `src/runtime/provider-turn-loop.ts`
 **Role:** Owns the provider streaming loop: send prompt, collect tokens, assemble tool-call fragments, build continuation packets, enforce iteration budgets. Previously embedded in `AgentLoop`.
 
+#### Provider finalization invariant
+
+The provider loop treats a provider response as usable only after finalization. Streaming may emit live visible tokens for the UI, but canonical state uses finalized data:
+
+- executable tool calls come only from finalized `ProviderExecutionResult.toolCalls`
+- tool planning and tool execution run after finalization checks
+- persisted assistant messages use finalized visible content only
+- prompt-bound history, summaries, memory inputs, skill learning/evolution, run-recorder learned artifacts, and exports consume visible output with reasoning stripped
+
+This invariant exists because streamed provider output can be partial, reordered by provider protocol details, or terminated before the provider has supplied a complete finish state. Live tokens are progress. They are not permission to execute tools, write memory, or preserve internal reasoning.
+
+Stream finalization rules are intentionally conservative:
+
+- streamed tool-call fragments are collected locally while the stream is open
+- stream errors discard accumulated tool fragments and use the existing provider failure/fallback path
+- incomplete streams remain provider failures
+- `[DONE]` is represented by an internal transport marker; it is not emitted as user-visible text
+- visible-only transport completion can finalize with `finishReason: "unknown"`
+- transport completion with unfinished tool fragments and no final finish metadata fails as `incomplete-stream`
+
+`ProviderExecutionResult.toolCalls` is the canonical tool-call list. Length-truncated tool calls are unsafe: the first attempt never reaches tool planning, never executes tools, and must not leak discarded raw arguments into runtime events or execution records. The runtime retries once on the successful route chain. If the retry is still length-truncated with tool calls, it returns deterministic visible refusal text and executes no tools. If finalized tool JSON is malformed, that remains a tool-planning error rather than a provider failure or incomplete-stream classification.
+
+Reasoning is handled as hidden provider-side material. Raw reasoning is turn-local only. Safe metadata may record `present`, `chars`, and `format`; `reasoningTokens` is usage telemetry only and does not imply raw reasoning was extracted or stored. Inline reasoning blocks and provider reasoning fields are stripped from visible output, provider-bound history, semantic compression, summaries, memory, skill learning/evolution, and export traces. Responses summary-shaped reasoning remains metadata-only where implemented. Provider-bound reasoning echo-back is deferred unless an explicit provider metadata opt-in is implemented and tested for that route.
+
+Reasoning-only successful provider responses reach the turn loop; they are not treated as provider failures. Non-length reasoning-only responses may retry with a local-only assistant prefill asking for a visible answer. The prefill is not persisted and is not emitted as assistant output. Length-truncated reasoning-only responses do not text-continue or prefill retry; they return deterministic visible guidance. Raw reasoning is never displayed.
+
+Finalized visible text with `finishReason: "length"` can continue on the same successful route chain. If primary failed and a fallback produced the length-truncated text, continuation starts at that fallback and preserves later fallbacks; it does not restart at the original primary. Continuation appends local-only provider messages containing the partial visible text and the continuation instruction. Intermediate partials and synthetic messages are not persisted. The final visible text is persisted once. Concatenation trims exact suffix/prefix overlap over bounded windows; it does not use semantic or fuzzy matching. If continuation exhausts all attempts, Wave 1 returns the best visible partial without appending a runtime note.
+
+Inspection surfaces:
+
+- runtime `provider-result` events report provider/model, success, fallback status, finish reason, incomplete reason, usage, and safe reasoning metadata
+- session `provider-completion` and `provider-continuation` events record attempts plus safe runtime metadata for reasoning, truncation, and continuation
+- `estacoda trace dump <trajectory-id> --raw` can inspect trajectory-level event flow, but raw provider reasoning and discarded tool arguments should not appear there
+- focused tests live in `src/providers/provider-executor-fallback.test.ts`, `src/providers/provider-executor-route.test.ts`, `src/providers/openai-compatible-provider.test.ts`, `src/runtime/provider-turn-loop.test.ts`, and `src/runtime/agent-loop.test.ts`
+
+Operational failure modes to check before changing this area:
+
+- `incomplete-stream` should fail or fall back, not become a successful assistant answer
+- partial streamed tool fragments should not appear as finalized tool calls
+- discarded truncated tool arguments should not appear in runtime events, session events, session messages, or traces
+- synthetic reasoning-prefill and text-continuation messages should not persist as session-visible messages
+- summaries, memory files, skill records, and export traces should contain visible content only
+
 ### ToolPlanRunner
 
 **File:** `src/runtime/tool-plan-runner.ts`

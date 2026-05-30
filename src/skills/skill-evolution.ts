@@ -11,6 +11,17 @@ import type {
   SkillSourceKind
 } from "../contracts/skill.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
+import { stripInlineReasoning } from "../providers/provider-reasoning.js";
+
+const UNSAFE_SKILL_EVIDENCE_FIELDS = new Set([
+  "reasoning",
+  "reasoning_content",
+  "reasoning_details",
+  "reasoningMetadata",
+  "finishReason",
+  "finish_reason",
+  "runtimeMetadata"
+]);
 
 export type SkillUsageRecord = {
   skillName: string;
@@ -207,11 +218,11 @@ export class SkillEvolutionStore {
       sessionId: input.sessionId,
       timestamp: now,
       type: observationTypeForOutcome(input.outcome.status),
-      promptSummary: input.promptSummary,
+      promptSummary: sanitizeSkillObservationText(input.promptSummary),
       selectedWorkflowStep: input.selectedWorkflowStep,
       toolsAttempted: input.toolExecutions.map((execution) => execution.tool.name),
       outcome: input.outcome.status,
-      lesson: defaultLesson(input.outcome),
+      lesson: sanitizeSkillObservationText(defaultLesson(input.outcome)) ?? "",
       sourceTrust: "runtime_internal",
       mayPromoteAutomatically: input.outcome.status === "succeeded",
       requiresHumanApproval: input.outcome.status !== "succeeded",
@@ -219,7 +230,7 @@ export class SkillEvolutionStore {
         useCount: usage.useCount,
         successCount: usage.successCount,
         failureCount: usage.failureCount,
-        summary: input.outcome.summary
+        summary: sanitizeSkillObservationText(input.outcome.summary)
       }
     };
     await this.appendObservation(observation);
@@ -349,16 +360,16 @@ export class SkillEvolutionStore {
       sessionId: input.sessionId,
       timestamp: input.timestamp ?? this.#nowIso(),
       type: input.type,
-      promptSummary: input.promptSummary,
+      promptSummary: sanitizeSkillObservationText(input.promptSummary),
       selectedWorkflowStep: input.selectedWorkflowStep,
       toolsAttempted: input.toolsAttempted ?? [],
       outcome: input.outcome ?? outcomeForObservationType(input.type),
-      lesson: input.lesson,
-      candidateImprovement: input.candidateImprovement,
+      lesson: sanitizeSkillObservationText(input.lesson) ?? "",
+      candidateImprovement: sanitizeSkillObservationText(input.candidateImprovement),
       sourceTrust,
       mayPromoteAutomatically: input.mayPromoteAutomatically ?? sourceTrustAllowsAutomaticPromotion(sourceTrust),
       requiresHumanApproval: input.requiresHumanApproval ?? !sourceTrustAllowsAutomaticPromotion(sourceTrust),
-      evidence: input.evidence
+      evidence: sanitizeSkillEvidence(input.evidence)
     };
     await this.#appendJsonl("observations.jsonl", observation);
     return observation;
@@ -667,6 +678,40 @@ function defaultLesson(outcome: SkillOutcome): string {
     return `Skill completed successfully using ${outcome.tools.join(", ") || "no tools"}.`;
   }
   return `Skill ended with status ${outcome.status}: ${outcome.summary}`;
+}
+
+function sanitizeSkillObservationText(value: string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  return stripInlineReasoning(value);
+}
+
+function sanitizeSkillEvidence(value: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  return sanitizeSkillEvidenceValue(value) as Record<string, unknown>;
+}
+
+function sanitizeSkillEvidenceValue(value: unknown): unknown {
+  if (typeof value === "string") {
+    return stripInlineReasoning(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => sanitizeSkillEvidenceValue(entry));
+  }
+  if (typeof value === "object" && value !== null) {
+    const sanitized: Record<string, unknown> = {};
+    for (const [key, nested] of Object.entries(value)) {
+      if (UNSAFE_SKILL_EVIDENCE_FIELDS.has(key)) {
+        continue;
+      }
+      sanitized[key] = sanitizeSkillEvidenceValue(nested);
+    }
+    return sanitized;
+  }
+  return value;
 }
 
 function clampConfidence(value: number): number {

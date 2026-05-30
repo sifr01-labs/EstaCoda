@@ -119,6 +119,47 @@ describe("ProviderExecutor route-based execution", () => {
     expect(adapter.calls[0].options?.endpoint?.baseUrl).toBe("https://custom.example.com/v1");
   });
 
+  it("passes route maxTokens when request maxTokens is unset", async () => {
+    const adapter = createMockAdapter({ id: "test-provider" });
+    registry.register(adapter);
+
+    const route = createDefaultRoute({ provider: "test-provider", maxTokens: 8192 });
+    const result = await executor.complete({ messages: [] }, {}, {
+      primaryRoute: route
+    });
+
+    expect(result.ok).toBe(true);
+    expect(adapter.calls[0].request.maxTokens).toBe(8192);
+    expect(route.maxTokens).toBe(8192);
+  });
+
+  it("lets request maxTokens override route maxTokens without mutating the route", async () => {
+    const adapter = createMockAdapter({ id: "test-provider" });
+    registry.register(adapter);
+
+    const route = createDefaultRoute({ provider: "test-provider", maxTokens: 8192 });
+    const result = await executor.complete({ messages: [], maxTokens: 2048 }, {}, {
+      primaryRoute: route
+    });
+
+    expect(result.ok).toBe(true);
+    expect(adapter.calls[0].request.maxTokens).toBe(2048);
+    expect(route.maxTokens).toBe(8192);
+  });
+
+  it("omits maxTokens when neither request nor route sets it", async () => {
+    const adapter = createMockAdapter({ id: "test-provider" });
+    registry.register(adapter);
+
+    const route = createDefaultRoute({ provider: "test-provider" });
+    const result = await executor.complete({ messages: [] }, {}, {
+      primaryRoute: route
+    });
+
+    expect(result.ok).toBe(true);
+    expect(adapter.calls[0].request).not.toHaveProperty("maxTokens");
+  });
+
   it("honors route-level apiKeyEnv during execution", async () => {
     const originalEnv = process.env.CUSTOM_OPENAI_KEY;
     process.env.CUSTOM_OPENAI_KEY = "sk-custom-key";

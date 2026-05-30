@@ -10,6 +10,7 @@ import type { SecurityDecision } from "../contracts/security.js";
 import type { LoadedSkill, SkillCatalogEntry, SkillDefinition, SkillResourceEntry } from "../contracts/skill.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
+import { stripInlineReasoning } from "../providers/provider-reasoning.js";
 import { compileSkillWorkflowPlan, renderSkillWorkflowPlan } from "../skills/skill-workflow-planner.js";
 import { inferMimeType } from "../tools/media-tools.js";
 import { packetizeToolExecution, packetizeToolResult, renderToolResultPacket } from "../tools/tool-result-packet.js";
@@ -161,7 +162,7 @@ export function assembleProviderContinuationPrompt(input: ProviderContinuationPr
     {
       role: "assistant",
       content: input.providerExecution?.response?.content.trim().length
-        ? input.providerExecution.response.content
+        ? stripInlineReasoning(input.providerExecution.response.content)
         : "I have requested tools and received their results below. I will now process these results to produce the final answer."
     },
     {
@@ -972,7 +973,7 @@ function renderSessionHistory(messages: PromptSessionHistoryMessage[] | undefine
 
   return [
     "Session history:",
-    ...messages.map((message) => `${message.role}: ${truncate(stringifyProviderMessageContent(message.content), 900)}`)
+    ...messages.map((message) => `${message.role}: ${truncate(stripInlineReasoning(stringifyProviderMessageContent(message.content)), 900)}`)
   ].join("\n");
 }
 

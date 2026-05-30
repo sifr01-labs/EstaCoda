@@ -173,6 +173,43 @@ pnpm exec vitest run src/tools/voice-tools.test.ts src/tools/tts-providers.test.
 pnpm exec vitest run src/channels/voice-transcription.test.ts src/gateway/voice-state.test.ts
 ```
 
+Provider finalization and reasoning hygiene checks:
+
+```bash
+pnpm exec vitest run src/providers/provider-executor-fallback.test.ts
+pnpm exec vitest run src/providers/provider-executor-route.test.ts
+pnpm exec vitest run src/providers/openai-compatible-provider.test.ts
+pnpm exec vitest run src/providers/openai-responses-provider.test.ts
+pnpm exec vitest run src/providers/provider-reasoning.test.ts
+pnpm exec vitest run src/providers/provider-message-normalizer.test.ts
+pnpm exec vitest run src/runtime/provider-turn-loop.test.ts
+pnpm exec vitest run src/runtime/agent-loop.test.ts
+pnpm exec vitest run src/prompt/semantic-compressor.test.ts
+pnpm exec vitest run src/memory/local-memory-provider.test.ts
+pnpm exec vitest run src/skills/skill-learning.test.ts
+pnpm exec vitest run src/skills/skill-evolution.test.ts
+pnpm exec vitest run src/evolution/export-format.test.ts
+```
+
+Inspect these failure modes before changing provider runtime behavior:
+
+- `incomplete-stream` stays a failure or uses fallback; it must not become a final assistant answer
+- length-truncated tool calls retry once or refuse; the first truncated attempt must not reach planning or execution
+- malformed finalized tool JSON stays a tool-planning error
+- reasoning-only responses use the visible-answer retry path without displaying raw reasoning
+- length-truncated visible text continuation persists one final assistant message and no synthetic continuation messages
+- summary, memory, skill, and export tests strip reasoning while preserving ordinary visible prose
+
+Manual inspection path:
+
+```bash
+pnpm run dev
+estacoda trace list --limit 5
+estacoda trace dump <trajectory-id> --raw
+```
+
+Raw reasoning, `reasoning_content`, `reasoning_details`, discarded truncated tool arguments, and synthetic continuation/prefill messages should not appear in persisted session-visible messages, runtime/session events, summaries, memory files, skill records, or export traces. Safe finish reason, usage, `reasoningMetadata`, truncation status, and continuation status may appear.
+
 Provider, Discord voice, and faster-whisper tests use mocks where optional packages or live services are absent. Live provider calls, real Discord voice, microphone capture, and first-run model downloads are operator integration tests, not base CI requirements.
 
 ## Recommended practice

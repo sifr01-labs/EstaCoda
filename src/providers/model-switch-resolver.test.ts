@@ -3,7 +3,12 @@ import type { EstaCodaConfig } from "../config/runtime-config.js";
 import type { ProviderAdapter, ProviderId } from "../contracts/provider.js";
 import type { SessionModelOverride } from "../contracts/session.js";
 import { ProviderRegistry } from "./provider-registry.js";
-import { resolveEffectiveSessionModelOverride } from "./model-switch-resolver.js";
+import {
+  applyModelSwitchPrimaryRoute,
+  resolveEffectiveSessionModelOverride,
+  resolveModelSwitchRequest,
+  sessionOverrideToResolvedRoute
+} from "./model-switch-resolver.js";
 
 function adapter(id: ProviderId): ProviderAdapter {
   return {
@@ -103,7 +108,8 @@ describe("model-switch-resolver stored override revalidation", () => {
           model: "super-model",
           baseUrl: "https://custom.example/v1",
           apiKeyEnv: "OPENAI_COMPATIBLE_API_KEY",
-          apiMode: "custom_openai_compatible"
+          apiMode: "custom_openai_compatible",
+          maxTokens: 4096
         }
       }
     };
@@ -122,6 +128,58 @@ describe("model-switch-resolver stored override revalidation", () => {
       expect(result.route.apiKeyEnv).toBe("OPENAI_COMPATIBLE_API_KEY");
       expect(result.route.apiMode).toBe("custom_openai_compatible");
       expect(result.route.authMethod).toBe("api_key");
+      expect(result.route.maxTokens).toBe(4096);
     }
+  });
+
+  it("preserves maxTokens when reconstructing a stored override route", () => {
+    const route = sessionOverrideToResolvedRoute(
+      override("custom-ai", "super-model", { maxTokens: 8192 })
+    );
+
+    expect(route.maxTokens).toBe(8192);
+  });
+
+  it("stores alias maxTokens in /model switch overrides", async () => {
+    const registry = new ProviderRegistry();
+    registry.register(adapter("local"));
+    const config: EstaCodaConfig = {
+      providers: {
+        local: {
+          baseUrl: "http://localhost:11434/v1",
+          apiMode: "custom_openai_compatible",
+          authMethod: "none",
+          models: ["phi4:latest"]
+        }
+      },
+      modelAliases: {
+        fast: {
+          provider: "local",
+          model: "phi4:latest",
+          baseUrl: "http://localhost:11434/v1",
+          apiMode: "custom_openai_compatible",
+          maxTokens: 8192
+        }
+      }
+    };
+
+    const result = await resolveModelSwitchRequest(
+      { modelInput: "fast", source: "cli", now: () => new Date("2026-01-02T00:00:00.000Z") },
+      { config, providerRegistry: registry }
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok !== true) return;
+    expect(result.route.maxTokens).toBe(8192);
+    expect(result.override.route.maxTokens).toBe(8192);
+  });
+
+  it("preserves maxTokens when applying a switched route to primary config", () => {
+    const mutated = applyModelSwitchPrimaryRoute(
+      {},
+      sessionOverrideToResolvedRoute(override("local", "phi4:latest", { maxTokens: 4096 }))
+    );
+
+    expect(mutated.model?.maxTokens).toBe(4096);
   });
 });

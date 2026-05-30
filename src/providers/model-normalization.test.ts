@@ -90,6 +90,30 @@ describe("model-normalization", () => {
       if (result.kind !== "exact") return;
       expect(result.route.apiKeyEnv).toBe("MY_OPENAI_KEY");
     });
+
+    it("preserves maxTokens from alias definition", async () => {
+      const config: EstaCodaConfig = {
+        modelAliases: {
+          mykey: { provider: "openai", model: "gpt-4o", maxTokens: 8192 }
+        }
+      };
+      const result = await normalizeModelInput("mykey", { config });
+      expect(result.kind).toBe("exact");
+      if (result.kind !== "exact") return;
+      expect(result.route.maxTokens).toBe(8192);
+    });
+
+    it("rejects invalid alias maxTokens", async () => {
+      const config: EstaCodaConfig = {
+        modelAliases: {
+          mykey: { provider: "openai", model: "gpt-4o", maxTokens: 0 }
+        }
+      };
+
+      await expect(normalizeModelInput("mykey", { config }))
+        .rejects
+        .toThrow("modelAliases.mykey.maxTokens must be a positive integer when set.");
+    });
   });
 
   describe("curated alias", () => {

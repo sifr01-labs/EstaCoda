@@ -106,6 +106,7 @@ export async function resolveModelSwitchRequest(
       apiMode: route.apiMode,
       authMethod: route.authMethod,
       contextWindowTokens: route.contextWindowTokens,
+      maxTokens: route.maxTokens,
       routeId: route.baseUrl === undefined ? `${route.provider}/${route.id}` : `${route.provider}/${route.id}@${route.baseUrl}`
     },
     modelProfile: route.profile,
@@ -186,6 +187,7 @@ function findCurrentConfiguredOverrideRoute(
     baseUrl: fallback?.baseUrl ?? providerConfig.baseUrl,
     apiKeyEnv: fallback?.apiKeyEnv ?? providerConfig.apiKeyEnv,
     contextWindowTokens: fallback?.contextWindowTokens ?? stored.contextWindowTokens ?? override.modelProfile.contextWindowTokens,
+    maxTokens: fallback?.maxTokens ?? (primaryMatches ? config.model?.maxTokens : undefined) ?? stored.maxTokens,
     apiMode: providerConfig.apiMode,
     authMethod: providerConfig.authMethod
   });
@@ -212,6 +214,7 @@ function findMatchingAliasRoute(
       baseUrl: alias.baseUrl ?? providerConfig?.baseUrl ?? meta.defaultBaseUrl,
       apiKeyEnv: alias.apiKeyEnv ?? providerConfig?.apiKeyEnv ?? meta.defaultApiKeyEnv,
       contextWindowTokens: override.route.contextWindowTokens ?? override.modelProfile.contextWindowTokens,
+      maxTokens: alias.maxTokens ?? override.route.maxTokens,
       apiMode: (alias.apiMode as ProviderApiMode | undefined) ?? providerConfig?.apiMode ?? meta.apiMode,
       authMethod: providerConfig?.authMethod ?? meta.defaultAuthMethod
     });
@@ -238,6 +241,7 @@ export function sessionOverrideToResolvedRoute(override: SessionModelOverride): 
     baseUrl: override.route.baseUrl,
     apiKeyEnv: override.route.apiKeyEnv,
     contextWindowTokens: override.route.contextWindowTokens ?? override.modelProfile.contextWindowTokens,
+    maxTokens: override.route.maxTokens,
     apiMode: override.route.apiMode,
     authMethod: override.route.authMethod
   });
@@ -265,7 +269,8 @@ export function applyModelSwitchPrimaryRoute(
     model: route.id,
     baseUrl: route.baseUrl,
     apiKeyEnv: route.apiKeyEnv,
-    contextWindowTokens: route.contextWindowTokens ?? route.profile.contextWindowTokens
+    contextWindowTokens: route.contextWindowTokens ?? route.profile.contextWindowTokens,
+    maxTokens: route.maxTokens
   });
 }
 
@@ -284,6 +289,7 @@ async function resolveExecutableRoute(
       baseUrl: route.baseUrl ?? providerConfig?.baseUrl,
       apiKeyEnv: providerConfig?.apiKeyEnv ?? route.apiKeyEnv,
       contextWindowTokens: route.contextWindowTokens,
+      maxTokens: route.maxTokens,
       apiMode: route.apiMode ?? providerConfig?.apiMode,
       authMethod: route.authMethod ?? providerConfig?.authMethod
     });
@@ -328,6 +334,7 @@ async function resolveExecutableRoute(
     baseUrl: resolution.baseUrl,
     apiKeyEnv: canonicalRoute.apiKeyEnv,
     contextWindowTokens: resolution.profile.contextWindowTokens,
+    maxTokens: canonicalRoute.maxTokens,
     apiMode: resolution.apiMode,
     authMethod: resolution.authMethod
   });

@@ -6,10 +6,23 @@ import type {
   ProviderId,
   ProviderRequest,
   ProviderResponse,
-  ProviderStreamEvent
+  ProviderStreamEvent,
+  ProviderFinishReason,
+  ProviderReasoningFormat,
+  ProviderReasoningMetadata,
+  ProviderUsage
 } from "../contracts/provider.js";
 import { inferModelProfile } from "./model-catalog.js";
 import { normalizeProviderMessagesStrict } from "./provider-message-normalizer.js";
+import { resolveChatMaxTokenParam } from "./provider-metadata.js";
+import {
+  extractInlineReasoning,
+  extractReasoningFromContentList,
+  mergeReasoningParts,
+  reasoningMetadataFromReasoning,
+  StreamingReasoningFilter,
+  type ProviderContentListPart
+} from "./provider-reasoning.js";
 
 export type OpenAICompatibleProviderOptions = {
   id: ProviderId;
@@ -178,6 +191,8 @@ export function buildOpenAICompatibleRequest(endpoint: ProviderEndpoint, request
         : undefined);
 
   const normalized = normalizeOpenAICompatibleRequest(request, provider);
+  const maxTokens = normalizeProviderMaxTokens(normalized.maxTokens);
+  const maxTokenParam = resolveChatMaxTokenParam(provider);
 
   return {
     url: `${endpoint.baseUrl.replace(/\/$/, "")}/chat/completions`,
@@ -191,10 +206,10 @@ export function buildOpenAICompatibleRequest(endpoint: ProviderEndpoint, request
       model: normalized.model,
       messages: normalized.messages,
       temperature: normalized.temperature,
-      max_tokens: normalized.maxTokens,
       stream: normalized.stream,
       tools: normalized.tools,
-      response_format: normalized.responseFormat
+      response_format: normalized.responseFormat,
+      ...(maxTokens === undefined ? {} : { [maxTokenParam]: maxTokens })
     })
   };
 }
@@ -359,11 +374,31 @@ export async function* streamOpenAICompatibleRequest(input: {
 
     let content = "";
     let usage: ProviderResponse["usage"] | undefined;
+    let finalResponse: ProviderResponse | undefined;
+    let sawTransportDone = false;
     let sawToolCall = false;
+    const reasoningFilter = new StreamingReasoningFilter();
+    const reasoningParts: string[] = [];
+    const reasoningFormats: ProviderReasoningFormat[] = [];
 
     for await (const event of parseOpenAICompatibleStream(response.body, input.provider, input.model)) {
       if (event.kind === "token") {
-        content += event.text;
+        const visibleText = reasoningFilter.push(event.text);
+        if (visibleText.length === 0) {
+          continue;
+        }
+        content += visibleText;
+        yield {
+          ...event,
+          text: visibleText
+        };
+        continue;
+      }
+
+      if (event.kind === "reasoning-delta") {
+        reasoningParts.push(event.text);
+        reasoningFormats.push(event.format);
+        continue;
       }
 
       if (event.kind === "tool-call") {
@@ -376,14 +411,87 @@ export async function* streamOpenAICompatibleRequest(input: {
       }
 
       if (event.kind === "done") {
-        usage = event.response.usage;
+        usage = event.response.usage ?? usage;
+        finalResponse = finalResponse === undefined
+          ? event.response
+          : {
+              ...finalResponse,
+              ...event.response,
+              content: event.response.content.length > 0 ? event.response.content : finalResponse.content,
+              finishReason: event.response.finishReason ?? finalResponse.finishReason,
+              usage: event.response.usage ?? finalResponse.usage,
+              raw: event.response.raw ?? finalResponse.raw
+            };
+        continue;
+      }
+
+      if (event.kind === "transport-done") {
+        sawTransportDone = true;
         continue;
       }
 
       yield event;
     }
 
-    if (content.length === 0 && !sawToolCall) {
+    const finalVisibleText = reasoningFilter.finish();
+    if (finalVisibleText.length > 0) {
+      content += finalVisibleText;
+      yield {
+        kind: "token",
+        provider: input.provider,
+        model: input.model,
+        text: finalVisibleText
+      };
+    }
+    const reasoning = mergeReasoningParts([
+      ...reasoningParts,
+      reasoningFilter.reasoning(),
+      finalResponse?.reasoning
+    ]);
+    const reasoningMetadata = reasoningMetadataForParts([
+      ...reasoningFormats,
+      reasoningFilter.reasoning() === undefined ? undefined : "think_block",
+      finalResponse?.reasoningMetadata?.format
+    ], reasoning, finalResponse?.reasoningMetadata);
+
+    if (finalResponse !== undefined) {
+      yield {
+        kind: "done",
+        provider: input.provider,
+        model: input.model,
+        response: {
+          ...finalResponse,
+          content: finalResponse.content.length === 0 && content.length > 0
+            ? content
+            : finalResponse.content,
+          ...(usage === undefined ? {} : { usage }),
+          ...(reasoning === undefined ? {} : { reasoning }),
+          ...(reasoningMetadata === undefined ? {} : { reasoningMetadata })
+        }
+      };
+      return;
+    }
+
+    if (sawTransportDone && !sawToolCall && (content.length > 0 || reasoning !== undefined)) {
+      yield {
+        kind: "done",
+        provider: input.provider,
+        model: input.model,
+        response: {
+          ok: true,
+          content,
+          model: input.model,
+          provider: input.provider,
+          finishReason: "unknown",
+          ...(usage === undefined ? {} : { usage }),
+          ...(reasoning === undefined ? {} : { reasoning }),
+          ...(reasoningMetadata === undefined ? {} : { reasoningMetadata })
+        }
+      };
+      return;
+    }
+
+    if (sawTransportDone && content.length === 0 && !sawToolCall) {
       const fallback = await executeOpenAICompatibleRequest({
         provider: input.provider,
         model: input.model,
@@ -440,18 +548,13 @@ export async function* streamOpenAICompatibleRequest(input: {
       return;
     }
 
-    yield {
-      kind: "done",
-      provider: input.provider,
-      model: input.model,
-      response: {
-        ok: true,
-        content,
-        model: input.model,
+    if (sawTransportDone) {
+      yield {
+        kind: "transport-done",
         provider: input.provider,
-        usage
-      }
-    };
+        model: input.model
+      };
+    }
   } catch (error) {
     yield {
       kind: "error",
@@ -478,7 +581,10 @@ export function parseOpenAICompatibleResponse(input: {
   const payload = input.payload as {
     choices?: Array<{
       message?: {
-        content?: string | Array<{ type?: string; text?: string }>;
+        content?: string | ProviderContentListPart[];
+        reasoning?: string;
+        reasoning_content?: string;
+        reasoning_details?: unknown;
         tool_calls?: Array<{
           id?: string;
           function?: {
@@ -488,11 +594,15 @@ export function parseOpenAICompatibleResponse(input: {
         }>;
       };
       text?: string;
+      finish_reason?: unknown;
     }>;
     usage?: {
       prompt_tokens?: number;
       completion_tokens?: number;
       total_tokens?: number;
+      completion_tokens_details?: {
+        reasoning_tokens?: number;
+      };
     };
     error?: {
       message?: string;
@@ -513,16 +623,35 @@ export function parseOpenAICompatibleResponse(input: {
   }
 
   const firstChoice = payload.choices?.[0];
-  const content = normalizeContent(firstChoice?.message?.content) ?? firstChoice?.text;
-  const hasToolCalls = (firstChoice?.message?.tool_calls?.length ?? 0) > 0;
+  const message = firstChoice?.message;
+  const contentExtraction = extractOpenAICompatibleContent(message?.content, firstChoice?.text);
+  const reasoning = mergeReasoningParts([
+    message?.reasoning,
+    message?.reasoning_content,
+    contentExtraction.reasoning
+  ]);
+  const reasoningMetadata = reasoningMetadataForParts([
+    message?.reasoning === undefined ? undefined : "reasoning",
+    message?.reasoning_content === undefined ? undefined : "reasoning_content",
+    contentExtraction.reasoningMetadata?.format,
+    message?.reasoning_details === undefined ? undefined : "reasoning_details"
+  ], reasoning, message?.reasoning_details === undefined
+    ? contentExtraction.reasoningMetadata
+    : metadataFromReasoningDetails(message.reasoning_details, contentExtraction.reasoningMetadata));
+  const content = contentExtraction.visible;
+  const hasToolCalls = (message?.tool_calls?.length ?? 0) > 0;
+  const finishReason = normalizeChatFinishReason(firstChoice?.finish_reason);
 
-  if (content === undefined && !hasToolCalls) {
+  if (content === undefined && !hasToolCalls && reasoning === undefined && reasoningMetadata?.present !== true) {
     return {
       ok: false,
       content: "Provider response did not include assistant content.",
       model: input.model,
       provider: input.provider,
       errorClass: "unknown",
+      finishReason,
+      ...(reasoning === undefined ? {} : { reasoning }),
+      ...(reasoningMetadata === undefined ? {} : { reasoningMetadata }),
       raw: input.payload
     };
   }
@@ -532,12 +661,49 @@ export function parseOpenAICompatibleResponse(input: {
     content: content ?? "",
     model: input.model,
     provider: input.provider,
-    usage: {
-      inputTokens: payload.usage?.prompt_tokens,
-      outputTokens: payload.usage?.completion_tokens,
-      totalTokens: payload.usage?.total_tokens
-    },
+    finishReason,
+    ...(reasoning === undefined ? {} : { reasoning }),
+    ...(reasoningMetadata === undefined ? {} : { reasoningMetadata }),
+    usage: normalizeOpenAICompatibleUsage(payload.usage),
     raw: input.payload
+  };
+}
+
+function normalizeChatFinishReason(value: unknown): ProviderFinishReason {
+  switch (value) {
+    case "stop":
+      return "stop";
+    case "length":
+      return "length";
+    case "tool_calls":
+    case "function_call":
+      return "tool_calls";
+    case "content_filter":
+      return "content_filter";
+    default:
+      return "unknown";
+  }
+}
+
+function normalizeOpenAICompatibleUsage(usage: {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  completion_tokens_details?: {
+    reasoning_tokens?: number;
+  };
+} | undefined): ProviderUsage | undefined {
+  if (usage === undefined) {
+    return undefined;
+  }
+
+  return {
+    ...(usage.prompt_tokens === undefined ? {} : { inputTokens: usage.prompt_tokens }),
+    ...(usage.completion_tokens === undefined ? {} : { outputTokens: usage.completion_tokens }),
+    ...(usage.total_tokens === undefined ? {} : { totalTokens: usage.total_tokens }),
+    ...(usage.completion_tokens_details?.reasoning_tokens === undefined
+      ? {}
+      : { reasoningTokens: usage.completion_tokens_details.reasoning_tokens })
   };
 }
 
@@ -633,15 +799,29 @@ function compactObject(value: Record<string, unknown>): Record<string, unknown> 
   );
 }
 
+function normalizeProviderMaxTokens(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : undefined;
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
+
+type OpenAICompatibleParsedStreamEvent = ProviderStreamEvent | {
+  kind: "reasoning-delta";
+  provider: ProviderId;
+  model: string;
+  text: string;
+  format: Extract<ProviderReasoningFormat, "reasoning" | "reasoning_content">;
+};
 
 async function* parseOpenAICompatibleStream(
   body: ReadableStream<Uint8Array>,
   provider: ProviderId,
   model: string
-): AsyncIterable<ProviderStreamEvent> {
+): AsyncIterable<OpenAICompatibleParsedStreamEvent> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -670,6 +850,11 @@ async function* parseOpenAICompatibleStream(
       const data = trimmed.slice("data:".length).trim();
 
       if (data === "[DONE]") {
+        yield {
+          kind: "transport-done",
+          provider,
+          model
+        };
         return;
       }
 
@@ -682,7 +867,13 @@ async function* parseOpenAICompatibleStream(
   if (buffer.trim().startsWith("data:")) {
     const data = buffer.trim().slice("data:".length).trim();
 
-    if (data !== "[DONE]") {
+    if (data === "[DONE]") {
+      yield {
+        kind: "transport-done",
+        provider,
+        model
+      };
+    } else {
       for (const event of parseOpenAICompatibleStreamChunk(data, provider, model)) {
         yield event;
       }
@@ -690,12 +881,15 @@ async function* parseOpenAICompatibleStream(
   }
 }
 
-function parseOpenAICompatibleStreamChunk(data: string, provider: ProviderId, model: string): ProviderStreamEvent[] {
+function parseOpenAICompatibleStreamChunk(data: string, provider: ProviderId, model: string): OpenAICompatibleParsedStreamEvent[] {
   try {
     const payload = JSON.parse(data) as {
       choices?: Array<{
+        finish_reason?: unknown;
         delta?: {
           content?: string;
+          reasoning?: string;
+          reasoning_content?: string;
           tool_calls?: Array<{
             index?: number;
             id?: string;
@@ -710,6 +904,9 @@ function parseOpenAICompatibleStreamChunk(data: string, provider: ProviderId, mo
         prompt_tokens?: number;
         completion_tokens?: number;
         total_tokens?: number;
+        completion_tokens_details?: {
+          reasoning_tokens?: number;
+        };
       };
       error?: {
         message?: string;
@@ -734,9 +931,27 @@ function parseOpenAICompatibleStreamChunk(data: string, provider: ProviderId, mo
       }];
     }
 
-    const events: ProviderStreamEvent[] = [];
+    const events: OpenAICompatibleParsedStreamEvent[] = [];
+    const finishReason = (payload.choices ?? [])
+      .map((choice) => choice.finish_reason)
+      .find((value) => value !== undefined && value !== null);
 
     for (const choice of payload.choices ?? []) {
+      for (const reasoningDelta of [
+        { text: choice.delta?.reasoning, format: "reasoning" as const },
+        { text: choice.delta?.reasoning_content, format: "reasoning_content" as const }
+      ]) {
+        if (reasoningDelta.text !== undefined && reasoningDelta.text.length > 0) {
+          events.push({
+            kind: "reasoning-delta",
+            provider,
+            model,
+            text: reasoningDelta.text,
+            format: reasoningDelta.format
+          });
+        }
+      }
+
       if (choice.delta?.content !== undefined && choice.delta.content.length > 0) {
         events.push({
           kind: "token",
@@ -760,7 +975,7 @@ function parseOpenAICompatibleStreamChunk(data: string, provider: ProviderId, mo
       }
     }
 
-    if (payload.usage !== undefined) {
+    if (payload.usage !== undefined || finishReason !== undefined) {
       events.push({
         kind: "done",
         provider,
@@ -770,11 +985,8 @@ function parseOpenAICompatibleStreamChunk(data: string, provider: ProviderId, mo
           content: "",
           model,
           provider,
-          usage: {
-            inputTokens: payload.usage.prompt_tokens,
-            outputTokens: payload.usage.completion_tokens,
-            totalTokens: payload.usage.total_tokens
-          },
+          ...(finishReason === undefined ? {} : { finishReason: normalizeChatFinishReason(finishReason) }),
+          usage: normalizeOpenAICompatibleUsage(payload.usage),
           raw: payload
         }
       });
@@ -795,19 +1007,83 @@ async function safeErrorText(response: { json(): Promise<unknown>; text(): Promi
   }
 }
 
-function normalizeContent(content: string | Array<{ type?: string; text?: string }> | undefined): string | undefined {
-  if (typeof content === "string") {
-    return content;
+type ReasoningContentExtraction = {
+  visible?: string;
+  reasoning?: string;
+  reasoningMetadata?: ProviderReasoningMetadata;
+};
+
+function extractOpenAICompatibleContent(
+  content: string | ProviderContentListPart[] | undefined,
+  fallbackText: string | undefined
+): ReasoningContentExtraction {
+  const contentValue = content ?? fallbackText;
+  if (typeof contentValue === "string") {
+    const extracted = extractInlineReasoning(contentValue);
+    return {
+      visible: extracted.visible,
+      reasoning: extracted.reasoning,
+      reasoningMetadata: extracted.reasoningMetadata
+    };
   }
 
-  if (Array.isArray(content)) {
-    return content
-      .map((part) => part.text)
-      .filter((part): part is string => part !== undefined)
-      .join("\n");
+  if (Array.isArray(contentValue)) {
+    const extracted = extractReasoningFromContentList(contentValue);
+    const inline = extractInlineReasoning(extracted.visible);
+    const reasoning = mergeReasoningParts([extracted.reasoning, inline.reasoning]);
+    return {
+      visible: inline.visible,
+      reasoning,
+      reasoningMetadata: reasoningMetadataForParts([
+        extracted.reasoningMetadata?.format,
+        inline.reasoningMetadata?.format
+      ], reasoning, extracted.reasoningMetadata ?? inline.reasoningMetadata)
+    };
   }
 
-  return undefined;
+  return {};
+}
+
+function reasoningMetadataForParts(
+  formats: Array<ProviderReasoningFormat | undefined>,
+  reasoning: string | undefined,
+  fallback: ProviderReasoningMetadata | undefined
+): ProviderReasoningMetadata | undefined {
+  const presentFormats = formats.filter((format): format is ProviderReasoningFormat => format !== undefined);
+  if (reasoning !== undefined) {
+    return reasoningMetadataFromReasoning(reasoning, mergeReasoningFormat(presentFormats));
+  }
+  return fallback;
+}
+
+function metadataFromReasoningDetails(
+  reasoningDetails: unknown,
+  fallback: ProviderReasoningMetadata | undefined
+): ProviderReasoningMetadata {
+  return {
+    present: true,
+    chars: boundedJsonLength(reasoningDetails),
+    format: fallback === undefined ? "reasoning_details" : "mixed"
+  };
+}
+
+function mergeReasoningFormat(formats: ProviderReasoningFormat[]): ProviderReasoningFormat {
+  const unique = new Set(formats);
+  if (unique.size === 0) {
+    return "unknown";
+  }
+  if (unique.size === 1) {
+    return formats[0] ?? "unknown";
+  }
+  return "mixed";
+}
+
+function boundedJsonLength(value: unknown): number {
+  try {
+    return JSON.stringify(value)?.slice(0, 20_000).length ?? 0;
+  } catch {
+    return 0;
+  }
 }
 
 function extractOpenAICompatibleToolCalls(payload: unknown): Array<{

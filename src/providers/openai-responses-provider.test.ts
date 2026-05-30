@@ -116,6 +116,8 @@ describe("openai-responses-provider", () => {
 
       const prepared = buildResponsesRequest(DEFAULT_ENDPOINT, request);
       expect(prepared.body.max_output_tokens).toBe(1024);
+      expect(prepared.body).not.toHaveProperty("max_tokens");
+      expect(prepared.body).not.toHaveProperty("max_completion_tokens");
     });
 
     it("omits max_output_tokens when maxTokens is undefined", () => {
@@ -126,6 +128,21 @@ describe("openai-responses-provider", () => {
 
       const prepared = buildResponsesRequest(DEFAULT_ENDPOINT, request);
       expect(prepared.body).not.toHaveProperty("max_output_tokens");
+    });
+
+    it("omits max_output_tokens when maxTokens is null or zero", () => {
+      for (const maxTokens of [null, 0] as const) {
+        const request: ProviderRequest = {
+          model: "gpt-4o",
+          messages: [{ role: "user", content: "Hello" }],
+          maxTokens: maxTokens as never
+        };
+
+        const prepared = buildResponsesRequest(DEFAULT_ENDPOINT, request);
+        expect(prepared.body).not.toHaveProperty("max_output_tokens");
+        expect(prepared.body).not.toHaveProperty("max_tokens");
+        expect(prepared.body).not.toHaveProperty("max_completion_tokens");
+      }
     });
 
     it("handles multiple system messages by using first as instructions and rest as developer", () => {
@@ -163,6 +180,60 @@ describe("openai-responses-provider", () => {
   });
 
   describe("parseResponsesPayload", () => {
+    it.each([
+      [
+        "incomplete max output",
+        {
+          status: "incomplete",
+          incomplete_details: { reason: "max_output_tokens" },
+          output: [{ type: "message", content: [{ type: "output_text", text: "Partial" }] }]
+        },
+        "length"
+      ],
+      [
+        "other incomplete",
+        {
+          status: "incomplete",
+          incomplete_details: { reason: "safety_filter" },
+          output: [{ type: "message", content: [{ type: "output_text", text: "Partial" }] }]
+        },
+        "incomplete"
+      ],
+      [
+        "completed function call",
+        {
+          status: "completed",
+          output: [{ type: "function_call", call_id: "call-1", name: "test_tool", arguments: "{}" }]
+        },
+        "tool_calls"
+      ],
+      [
+        "completed visible text",
+        {
+          status: "completed",
+          output: [{ type: "message", content: [{ type: "output_text", text: "Done" }] }]
+        },
+        "stop"
+      ],
+      [
+        "unknown state",
+        {
+          status: "queued",
+          output: [{ type: "message", content: [{ type: "output_text", text: "Pending" }] }]
+        },
+        "unknown"
+      ]
+    ] as const)("maps finish state for %s", (_name, payload, expected) => {
+      const response = parseResponsesPayload({
+        provider: "codex",
+        model: "codex-model",
+        payload
+      });
+
+      expect(response.ok).toBe(true);
+      expect(response.finishReason).toBe(expected);
+    });
+
     it("extracts output_text content from message items", () => {
       const response = parseResponsesPayload({
         provider: "codex",
@@ -220,6 +291,38 @@ describe("openai-responses-provider", () => {
       });
     });
 
+    it("extracts usage with reasoning tokens when present", () => {
+      const response = parseResponsesPayload({
+        provider: "codex",
+        model: "codex-model",
+        payload: {
+          status: "completed",
+          output: [
+            {
+              type: "message",
+              role: "assistant",
+              content: [{ type: "output_text", text: "Hi" }]
+            }
+          ],
+          usage: {
+            input_tokens: 5,
+            output_tokens: 4,
+            total_tokens: 9,
+            output_tokens_details: {
+              reasoning_tokens: 3
+            }
+          }
+        }
+      });
+
+      expect(response.usage).toEqual({
+        inputTokens: 5,
+        outputTokens: 4,
+        totalTokens: 9,
+        reasoningTokens: 3
+      });
+    });
+
     it("maps failed status to error", () => {
       const response = parseResponsesPayload({
         provider: "codex",
@@ -245,6 +348,55 @@ describe("openai-responses-provider", () => {
       });
 
       expect(response.ok).toBe(false);
+    });
+
+    it("treats reasoning-only Responses output as provider-successful", () => {
+      const response = parseResponsesPayload({
+        provider: "codex",
+        model: "codex-model",
+        payload: {
+          status: "completed",
+          output: [
+            { type: "reasoning", text: "hidden responses reasoning" }
+          ]
+        }
+      });
+
+      expect(response.ok).toBe(true);
+      expect(response.content).toBe("");
+      expect(response.reasoning).toBe("hidden responses reasoning");
+      expect(response.reasoningMetadata).toEqual({
+        present: true,
+        chars: "hidden responses reasoning".length,
+        format: "responses_reasoning"
+      });
+      expect(response.errorClass).toBeUndefined();
+      expect(response.content).not.toContain("Provider response did not include assistant content.");
+    });
+
+    it("treats summary-only Responses reasoning metadata as provider-successful", () => {
+      const response = parseResponsesPayload({
+        provider: "codex",
+        model: "codex-model",
+        payload: {
+          status: "completed",
+          output: [
+            { type: "reasoning", summary: [{ text: "summary should stay metadata-only" }] }
+          ]
+        }
+      });
+
+      expect(response.ok).toBe(true);
+      expect(response.content).toBe("");
+      expect(response.reasoning).toBeUndefined();
+      expect(response.reasoningMetadata).toEqual({
+        present: true,
+        chars: 0,
+        format: "responses_reasoning"
+      });
+      expect(response.errorClass).toBeUndefined();
+      expect(JSON.stringify(response.reasoningMetadata)).not.toContain("summary should stay metadata-only");
+      expect(response.content).not.toContain("Provider response did not include assistant content.");
     });
 
     it("handles payload-level error object", () => {
@@ -283,6 +435,87 @@ describe("openai-responses-provider", () => {
       });
 
       expect(response.content).toBe("FirstSecond");
+    });
+
+    it("extracts reasoning-shaped output items while preserving visible output only", () => {
+      const response = parseResponsesPayload({
+        provider: "codex",
+        model: "codex-model",
+        payload: {
+          status: "completed",
+          output: [
+            { type: "reasoning", text: "hidden responses reasoning" },
+            {
+              type: "message",
+              role: "assistant",
+              content: [{ type: "output_text", text: "Visible answer" }]
+            }
+          ]
+        }
+      });
+
+      expect(response.ok).toBe(true);
+      expect(response.content).toBe("Visible answer");
+      expect(response.reasoning).toBe("hidden responses reasoning");
+      expect(response.reasoningMetadata).toEqual({
+        present: true,
+        chars: "hidden responses reasoning".length,
+        format: "responses_reasoning"
+      });
+    });
+
+    it("keeps Responses reasoning summaries as metadata-only", () => {
+      const response = parseResponsesPayload({
+        provider: "codex",
+        model: "codex-model",
+        payload: {
+          status: "completed",
+          output: [
+            { type: "reasoning", summary: [{ text: "summary should not become raw reasoning" }] },
+            {
+              type: "message",
+              role: "assistant",
+              content: [{ type: "output_text", text: "Visible answer" }]
+            }
+          ]
+        }
+      });
+
+      expect(response.ok).toBe(true);
+      expect(response.content).toBe("Visible answer");
+      expect(response.reasoning).toBeUndefined();
+      expect(response.reasoningMetadata).toEqual({
+        present: true,
+        chars: 0,
+        format: "responses_reasoning"
+      });
+      expect(JSON.stringify(response.reasoningMetadata)).not.toContain("summary should not become raw reasoning");
+    });
+
+    it("strips inline reasoning from Responses visible output", () => {
+      const response = parseResponsesPayload({
+        provider: "codex",
+        model: "codex-model",
+        payload: {
+          status: "completed",
+          output: [
+            {
+              type: "message",
+              role: "assistant",
+              content: [{ type: "output_text", text: "Visible <think>hidden</think> answer" }]
+            }
+          ]
+        }
+      });
+
+      expect(response.ok).toBe(true);
+      expect(response.content).toBe("Visible  answer");
+      expect(response.reasoning).toBe("hidden");
+      expect(response.reasoningMetadata).toEqual({
+        present: true,
+        chars: "hidden".length,
+        format: "responses_reasoning"
+      });
     });
   });
 

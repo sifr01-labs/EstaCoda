@@ -1,4 +1,5 @@
 import type { SessionMessage } from "../contracts/session.js";
+import { stripInlineReasoning } from "../providers/provider-reasoning.js";
 import { estimateMessageTokensRough, estimateMessagesTokensRough } from "./token-estimator.js";
 
 export const DEFAULT_HISTORY_CONTEXT_WINDOW = 128_000;
@@ -90,7 +91,7 @@ export function packSessionHistory(
         }]),
     ...recent.map((message, index) => ({
       role: message.role === "agent" ? "assistant" as const : message.role,
-      content: truncate(message.content, maxMessageChars),
+      content: sanitizeHistoryContent(message.content, maxMessageChars),
       metadata: message.metadata,
       pinned: pinnedIndexes.has(protectedStart + index)
     }))
@@ -124,13 +125,13 @@ function summarizeOlderTurns(messages: PackableSessionMessage[], maxChars: numbe
   const toolMessages = messages.filter((message) => message.role === "tool");
   const notableUserTurns = userMessages
     .slice(-4)
-    .map((message) => `- user: ${truncate(message.content, 220)}`);
+    .map((message) => `- user: ${sanitizeHistoryContent(message.content, 220)}`);
   const notableAgentTurns = agentMessages
     .slice(-3)
-    .map((message) => `- agent: ${truncate(message.content, 220)}`);
+    .map((message) => `- agent: ${sanitizeHistoryContent(message.content, 220)}`);
   const notableToolTurns = toolMessages
     .slice(-3)
-    .map((message) => `- tool: ${truncate(message.content, 220)}`);
+    .map((message) => `- tool: ${sanitizeHistoryContent(message.content, 220)}`);
   const summary = [
     `Session summary of ${messages.length} older turn(s):`,
     ...notableUserTurns,
@@ -236,6 +237,10 @@ function messageImportance(message: PackedHistoryMessage, summaryCount: number):
 
 function truncate(value: string, maxChars: number): string {
   return value.length <= maxChars ? value : `${value.slice(0, maxChars)}\n[truncated ${value.length - maxChars} chars]`;
+}
+
+function sanitizeHistoryContent(value: string, maxChars: number): string {
+  return truncate(stripInlineReasoning(value), maxChars);
 }
 
 function estimateTokens(messages: PackedHistoryMessage[]): number {

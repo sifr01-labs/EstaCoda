@@ -222,12 +222,16 @@ describe("HookRegistry", () => {
       target: "origin",
       platform: "telegram",
       truncated: true,
+      overflowSaved: true,
+      chunkCount: 3,
     };
 
     await registry.emit("delivery:success", payload);
 
     expect(received).toHaveLength(1);
     expect(received[0]).toEqual(payload);
+    expect(received[0]).not.toHaveProperty("overflowPath");
+    expect(received[0]).not.toHaveProperty("fullPath");
   });
 
   it("typed payload compile coverage for representative event names", async () => {

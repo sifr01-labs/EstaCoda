@@ -22,6 +22,7 @@ import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { createSkillRouteTelemetry, hashSkillRoutePrompt } from "../skills/skill-usage-telemetry.js";
 import type { SkillEvolutionStore } from "../skills/skill-evolution.js";
+import { stripInlineReasoning } from "../providers/provider-reasoning.js";
 import { emit } from "../utils/runtime-helpers.js";
 import { truncate } from "../utils/formatting.js";
 import { buildFailureRecord, type FailureContext } from "../trajectory/failure-classifier.js";
@@ -517,7 +518,7 @@ export class RunRecorder {
       skill: input.selectedSkill,
       outcome,
       sessionId: this.#currentSessionId(),
-      promptSummary: truncate(input.userText, 240),
+      promptSummary: truncate(stripInlineReasoning(input.userText), 240),
       selectedWorkflowStep: input.selectedSkill.workflow[0]?.id,
       toolExecutions: input.toolExecutions
     }).catch(() => undefined);

@@ -6,8 +6,14 @@ import type {
   ProviderStreamEvent,
   ProviderId,
   ResolvedModelRoute,
-  ProviderApiMode
+  ProviderApiMode,
+  ProviderFinishReason,
+  ProviderLoopRuntimeMetadata,
+  ProviderReasoningMetadata,
+  ProviderRouteRole,
+  ProviderUsage
 } from "../contracts/provider.js";
+import { stripThinkBlocks } from "./provider-reasoning.js";
 import { ProviderRegistry } from "./provider-registry.js";
 import { resolveRuntimeCredential } from "./runtime-credential-resolver.js";
 import { getProviderMetadata } from "./provider-metadata.js";
@@ -23,6 +29,10 @@ export type ProviderAttempt = {
   errorClass?: string;
   content: string;
   partialContent?: string;
+  finishReason?: ProviderFinishReason;
+  incompleteReason?: string;
+  usage?: ProviderUsage;
+  reasoningMetadata?: ProviderReasoningMetadata;
 };
 
 export type ProviderExecutionResult = {
@@ -31,6 +41,10 @@ export type ProviderExecutionResult = {
   partialContent?: string;
   fallbackUsed: boolean;
   attempts: ProviderAttempt[];
+  route?: ResolvedModelRoute;
+  attemptedRouteIndex?: number;
+  routeRole?: ProviderRouteRole;
+  runtimeMetadata?: ProviderLoopRuntimeMetadata;
   toolCalls: Array<{
     index?: number;
     id?: string;
@@ -73,6 +87,10 @@ export type ProviderRuntimeEvent =
       errorClass?: string;
       fallback: boolean;
       willFallback: boolean;
+      finishReason?: ProviderFinishReason;
+      incompleteReason?: string;
+      usage?: ProviderUsage;
+      reasoningMetadata?: ProviderReasoningMetadata;
     };
 
 export type ProviderExecutionOptions = {
@@ -262,10 +280,10 @@ export class ProviderExecutor {
         : undefined;
 
       let response: ProviderResponse | undefined;
+      let finalizedStreamToolCalls: ProviderExecutionResult["toolCalls"] = [];
       let routeAttemptCount = 0;
       const maxRouteAttempts = 2;
       const effectiveAuthMethod = route.authMethod ?? metadata.defaultAuthMethod;
-      const toolCallsBeforeRoute = toolCalls.length;
 
       while (routeAttemptCount < maxRouteAttempts) {
         routeAttemptCount++;
@@ -294,25 +312,19 @@ export class ProviderExecutor {
           };
         }
 
-        const callResponse = options.stream === true && provider.stream !== undefined
+        const callResult = options.stream === true && provider.stream !== undefined
           ? await collectProviderStream({
               provider: route.provider,
               model: route.id,
-              stream: provider.stream({
-                ...request,
-                provider: route.provider,
-                model: route.id,
-                stream: true
-              }, completionOptions),
+              stream: provider.stream(buildRouteProviderRequest(request, route, { stream: true }), completionOptions),
               onEvent: options.onEvent,
-              toolCalls,
               signal: options.signal
             })
-          : await provider.complete({
-              ...request,
-              provider: route.provider,
-              model: route.id
-            }, completionOptions);
+          : {
+              response: await provider.complete(buildRouteProviderRequest(request, route), completionOptions),
+              toolCalls: []
+            };
+        const callResponse = callResult.response;
 
         const nextRoute = chain[index + 1];
         const callWillFallback = !callResponse.ok && shouldFallback(callResponse, route, nextRoute);
@@ -324,7 +336,8 @@ export class ProviderExecutor {
           ok: callResponse.ok,
           errorClass: callResponse.errorClass,
           content: callResponse.content,
-          ...(callResponse.partialContent === undefined ? {} : { partialContent: callResponse.partialContent })
+          ...(callResponse.partialContent === undefined ? {} : { partialContent: callResponse.partialContent }),
+          ...attemptMetadataFromResponse(callResponse)
         });
 
         if (!callResponse.ok) {
@@ -336,12 +349,14 @@ export class ProviderExecutor {
             ok: callResponse.ok,
             errorClass: callResponse.errorClass,
             fallback: index > 0,
-            willFallback: callWillFallback
+            willFallback: callWillFallback,
+            ...attemptMetadataFromResponse(callResponse)
           });
         }
 
         if (callResponse.ok) {
           response = callResponse;
+          finalizedStreamToolCalls = callResult.toolCalls;
           break;
         }
 
@@ -399,12 +414,13 @@ export class ProviderExecutor {
       const willFallback = !response.ok && shouldFallback(response, route, nextRoute);
 
       if (response.ok) {
-        const streamedToolCalls = toolCalls.slice(toolCallsBeforeRoute);
         const extractedToolCalls = extractToolCallsFromProviderResponse(response.raw);
+        const reasoningPresent = hasReasoning(response);
         const terminalEmptyWithoutTools =
           response.content.trim().length === 0 &&
-          streamedToolCalls.length === 0 &&
-          extractedToolCalls.length === 0;
+          finalizedStreamToolCalls.length === 0 &&
+          extractedToolCalls.length === 0 &&
+          !reasoningPresent;
 
         if (terminalEmptyWithoutTools && nextRoute !== undefined) {
           attempts[attempts.length - 1] = {
@@ -422,7 +438,8 @@ export class ProviderExecutor {
             ok: false,
             errorClass: "empty-response",
             fallback: index > 0,
-            willFallback: true
+            willFallback: true,
+            ...attemptMetadataFromResponse(response)
           });
 
           continue;
@@ -435,8 +452,23 @@ export class ProviderExecutor {
           credentialId: credential?.id,
           ok: true,
           fallback: index > 0,
-          willFallback: false
+          willFallback: false,
+          ...attemptMetadataFromResponse(response)
         });
+
+        for (const toolCall of finalizedStreamToolCalls) {
+          toolCalls.push(toolCall);
+          await options.onEvent?.({
+            kind: "provider-tool-call",
+            provider: route.provider,
+            model: route.id,
+            index: toolCall.index,
+            id: toolCall.id,
+            name: toolCall.name,
+            argumentsText: toolCall.argumentsText,
+            raw: toolCall.raw
+          });
+        }
 
         for (const toolCall of extractedToolCalls) {
           toolCalls.push(toolCall);
@@ -457,6 +489,10 @@ export class ProviderExecutor {
           response,
           fallbackUsed: index > 0,
           attempts,
+          route,
+          attemptedRouteIndex: index,
+          routeRole: routeRoleForIndex(index),
+          runtimeMetadata: runtimeMetadataFromResponse(response),
           toolCalls
         };
       }
@@ -511,27 +547,100 @@ export class ProviderExecutor {
   }
 }
 
+function attemptMetadataFromResponse(response: ProviderResponse): Pick<
+  ProviderAttempt,
+  "finishReason" | "incompleteReason" | "usage" | "reasoningMetadata"
+> {
+  const reasoningMetadata = safeReasoningMetadataFromResponse(response);
+  return {
+    ...(response.finishReason === undefined ? {} : { finishReason: response.finishReason }),
+    ...(response.incompleteReason === undefined ? {} : { incompleteReason: response.incompleteReason }),
+    ...(response.usage === undefined ? {} : { usage: response.usage }),
+    ...(reasoningMetadata === undefined ? {} : { reasoningMetadata })
+  };
+}
+
+function runtimeMetadataFromResponse(response: ProviderResponse): ProviderLoopRuntimeMetadata | undefined {
+  const reasoning = safeReasoningMetadataFromResponse(response);
+  return reasoning === undefined ? undefined : { reasoning };
+}
+
+function hasReasoning(response: ProviderResponse): boolean {
+  return (response.reasoning !== undefined && response.reasoning.length > 0) ||
+    response.reasoningMetadata?.present === true;
+}
+
+function safeReasoningMetadataFromResponse(response: ProviderResponse): ProviderReasoningMetadata | undefined {
+  if (response.reasoningMetadata !== undefined) {
+    return response.reasoningMetadata;
+  }
+
+  if (response.reasoning !== undefined && response.reasoning.length > 0) {
+    return {
+      present: true,
+      chars: response.reasoning.length,
+      format: "unknown"
+    };
+  }
+
+  return undefined;
+}
+
+function routeRoleForIndex(index: number): ProviderRouteRole {
+  return index === 0 ? "primary" : "fallback";
+}
+
+function buildRouteProviderRequest(
+  request: Omit<ProviderRequest, "model"> & { model?: string },
+  route: ResolvedModelRoute,
+  overrides: Partial<ProviderRequest> = {}
+): ProviderRequest {
+  const {
+    provider: _provider,
+    model: _model,
+    maxTokens: requestMaxTokens,
+    ...rest
+  } = request;
+  const effectiveMaxTokens = requestMaxTokens ?? route.maxTokens;
+
+  return {
+    ...rest,
+    ...overrides,
+    provider: route.provider,
+    model: route.id,
+    ...(effectiveMaxTokens === undefined ? {} : { maxTokens: effectiveMaxTokens })
+  };
+}
+
+type CollectedProviderStream = {
+  response: ProviderResponse;
+  toolCalls: ProviderExecutionResult["toolCalls"];
+};
+
 async function collectProviderStream(input: {
   provider: ProviderId;
   model: string;
   stream: AsyncIterable<ProviderStreamEvent>;
   onEvent?: (event: ProviderRuntimeEvent) => void | Promise<void>;
-  toolCalls: ProviderExecutionResult["toolCalls"];
   signal?: AbortSignal;
-}): Promise<ProviderResponse> {
+}): Promise<CollectedProviderStream> {
   let content = "";
   let finalResponse: ProviderResponse | undefined;
   let errorResponse: ProviderResponse | undefined;
+  let sawTransportDone = false;
   const toolCallFragments = new Map<string, ProviderExecutionResult["toolCalls"][number]>();
 
   for await (const event of input.stream) {
     if (input.signal?.aborted === true) {
       return {
-        ok: false,
-        content: "Provider stream cancelled.",
-        model: input.model,
-        provider: input.provider,
-        errorClass: "timeout"
+        response: {
+          ok: false,
+          content: "Provider stream cancelled.",
+          model: input.model,
+          provider: input.provider,
+          errorClass: "timeout"
+        },
+        toolCalls: []
       };
     }
 
@@ -561,50 +670,53 @@ async function collectProviderStream(input: {
       case "error":
         errorResponse = event.response;
         break;
+      case "transport-done":
+        sawTransportDone = true;
+        break;
     }
   }
 
-  for (const toolCall of toolCallFragments.values()) {
-    input.toolCalls.push(toolCall);
-    await input.onEvent?.({
-      kind: "provider-tool-call",
-      provider: input.provider,
-      model: input.model,
-      index: toolCall.index,
-      id: toolCall.id,
-      name: toolCall.name,
-      argumentsText: toolCall.argumentsText,
-      raw: toolCall.raw
-    });
-  }
-
   if (errorResponse !== undefined) {
-    return errorResponse;
+    return {
+      response: errorResponse,
+      toolCalls: []
+    };
   }
 
   if (finalResponse !== undefined) {
-    return finalResponse;
+    return {
+      response: finalResponse,
+      toolCalls: [...toolCallFragments.values()]
+    };
+  }
+
+  if (sawTransportDone && toolCallFragments.size === 0 && content.length > 0) {
+    return {
+      response: {
+        ok: true,
+        content,
+        model: input.model,
+        provider: input.provider,
+        finishReason: "unknown"
+      },
+      toolCalls: []
+    };
   }
 
   const partialContent = partialContentFromIncompleteStream(content);
   return {
-    ok: false,
-    content: content.length === 0
-      ? "Provider stream ended before a done or error event."
-      : `Provider stream ended before completion after partial output:\n${content}`,
-    ...(partialContent === undefined ? {} : { partialContent }),
-    model: input.model,
-    provider: input.provider,
-    errorClass: "incomplete-stream"
+    response: {
+      ok: false,
+      content: content.length === 0
+        ? "Provider stream ended before a done or error event."
+        : `Provider stream ended before completion after partial output:\n${content}`,
+      ...(partialContent === undefined ? {} : { partialContent }),
+      model: input.model,
+      provider: input.provider,
+      errorClass: "incomplete-stream"
+    },
+    toolCalls: []
   };
-}
-
-function stripThinkBlocks(text: string): string {
-  return text
-    .replace(/<think>[\s\S]*?<\/think>/giu, "")
-    .replace(/<thinking>[\s\S]*?<\/thinking>/giu, "")
-    .replace(/<reasoning>[\s\S]*?<\/reasoning>/giu, "")
-    .trim();
 }
 
 function partialContentFromIncompleteStream(content: string): string | undefined {
@@ -675,6 +787,7 @@ function shouldFallback(
       response.errorClass === "network" ||
       response.errorClass === "server" ||
       response.errorClass === "model-unavailable" ||
+      response.errorClass === "incomplete-stream" ||
       response.errorClass === "timeout") {
     return true;
   }

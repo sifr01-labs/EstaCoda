@@ -12,11 +12,11 @@ Channels are the surfaces through which users interact with EstaCoda. v0.9 suppo
 | File | Lines | Role |
 |------|-------|------|
 | `src/channels/channel-gateway.ts` | 1,408 | Generic adapter bridge |
-| `src/channels/telegram-adapter.ts` | 847 | Telegram-specific adapter |
+| `src/channels/telegram-adapter.ts` | ~1,160 | Telegram-specific adapter |
 | `src/channels/discord-adapter.ts` | ~400 | Discord-specific adapter |
 | `src/channels/email-adapter.ts` | ~350 | Email-specific adapter (IMAP/SMTP) |
 | `src/channels/whatsapp-adapter.ts` | ~500 | WhatsApp-specific adapter (Baileys) |
-| `src/channels/delivery-router.ts` | ~200 | Normalized delivery path |
+| `src/channels/delivery-router.ts` | ~430 | Normalized delivery path |
 | `src/channels/voice-transcription.ts` | ~280 | Gateway voice attachment transcript injection and STT preprocessing handoff |
 | `src/gateway/voice-state.ts` | ~160 | Profile-local per-chat voice mode and duplicate transcript state |
 | `src/channels/discord-voice-bridge.ts` | ~430 | Optional Discord voice-channel join/listen/speak/leave bridge |
@@ -71,6 +71,9 @@ Adapters only render or normalize channel-specific transport events. They must n
 - One evolving progress message per active turn
 - Inline approval buttons map to `/approve` and `/deny`
 - Final replies formatted in Telegram-safe HTML
+- Long final replies are chunked after Telegram formatting, using Telegram's 4096 UTF-16 code-unit text payload limit
+- Chunk suffixes such as `(1/3)` count inside Telegram's payload limit
+- Inline actions are attached only to the final text chunk
 - Activity labels localized (`en`, `ar`)
 - Group sessions per-user by default
 - Thread sessions shared by default
@@ -196,9 +199,43 @@ Voice-hinted ephemeral audio artifacts use object/artifact delivery, not arbitra
 **Behavior:**
 
 - Multi-target: one message can be delivered to multiple targets.
-- Truncation: long text is truncated with ellipsis when channel limits apply.
+- Target resolution: `origin` resolves to the source platform/session key, then delivery is handled like any other platform target.
+- Local/silent handling: `local` writes the full text to disk, and `silent` returns success without delivery.
+- Adapter handoff: channel targets receive full text by default through the resolved adapter. `DeliveryRouter` does not perform platform-specific chunking.
+- Legacy truncation: explicit `maxOutputChars` remains as opt-in router truncation for legacy callers. There is no default router text cap.
 - Error persistence: delivery failures are recorded and visible via `estacoda gateway status`.
 - Progress/artifact variants: `deliverProgress`, `deliverArtifact`.
+
+### Delivery Limits
+
+Platform message limits belong to channel adapters because formatting and transport rules are platform-specific:
+
+- Telegram formats replies first, then chunks the formatted payload in `telegram-adapter.ts`. Each outgoing `sendMessage` text payload, including suffixes such as `(1/3)`, must fit within Telegram's 4096 UTF-16 code-unit limit. Inline action buttons are sent only on the final chunk. If sending any chunk fails, later chunks are not sent and delivery reports failure.
+- Discord keeps adapter-owned text chunking in `discord-adapter.ts`.
+- WhatsApp keeps adapter-owned text chunking in `whatsapp-adapter.ts`.
+- Email and custom adapters receive full text unless they implement their own limits.
+
+### Overflow And Hooks
+
+When explicit legacy router truncation is used, the full output is saved locally for operator inspection. Overflow filenames are sanitized and may contain only safe components such as a timestamp, a safe platform label, and a short hash. They must not include chat IDs, email addresses, raw target strings, slash-derived path fragments, or colon-delimited target metadata.
+
+Remote channel messages and public hook payloads must not expose local overflow paths. Delivery success hooks may include safe delivery metadata:
+
+- `truncated`
+- `overflowSaved`
+- `chunkCount` (reserved for adapter-reported chunk counts)
+
+Hooks and remote messages must not include `overflowPath`, `fullPath`, raw local filesystem paths, chat IDs, email addresses, or raw target metadata from overflow filenames.
+
+### Deferred Delivery Work
+
+These behaviors are intentionally separate from delivery routing:
+
+- CLI pagination is deferred.
+- Remote download links for overflow files are not implemented.
+- A shared chunking refactor across all adapters is not part of this design; adapters continue to own platform-specific limits.
+- Provider `maxTokens` behavior is independent from channel delivery limits.
+- Runtime and tool-output compression are independent from channel delivery limits.
 
 ## Session Identity Policy
 
