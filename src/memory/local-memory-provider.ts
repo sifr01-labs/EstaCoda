@@ -7,6 +7,7 @@ import type {
   MemorySearchResult,
   SkillOutcome
 } from "../contracts/memory.js";
+import { stripInlineReasoning } from "../providers/provider-reasoning.js";
 import { renderMemorySnapshot } from "./memory-renderer.js";
 import { renderSelective } from "./selective-renderer.js";
 import { MemoryPromotionStore } from "./memory-promotion-store.js";
@@ -101,19 +102,27 @@ export class LocalMemoryProvider implements MemoryProvider {
   }
 
   async conclude(conclusion: MemoryConclusion): Promise<void> {
-    const target = conclusion.kind === "user-preference" ? "USER.md" : "MEMORY.md";
-    if (conclusion.kind === "user-preference" && this.#promotionStore !== undefined) {
+    const visibleContent = sanitizeMemoryText(conclusion.content);
+    if (visibleContent.length === 0) {
+      return;
+    }
+    const sanitizedConclusion = {
+      ...conclusion,
+      content: visibleContent
+    };
+    const target = sanitizedConclusion.kind === "user-preference" ? "USER.md" : "MEMORY.md";
+    if (sanitizedConclusion.kind === "user-preference" && this.#promotionStore !== undefined) {
       const previousRecords = await this.#promotionStore.list();
       const previousMarkdown = this.#store.read(target);
       const applied = await this.#promotionStore.applyUserPreference({
-        id: conclusion.id,
-        content: conclusion.content,
-        confidence: conclusion.confidence,
-        occurrences: conclusion.occurrences ?? 1,
-        source: conclusion.source ?? "unknown",
-        sourceSessionIds: conclusion.sourceSessionIds ?? [],
-        sourceTrajectoryId: conclusion.sourceTrajectoryId,
-        sourceEventId: conclusion.sourceEventId
+        id: sanitizedConclusion.id,
+        content: sanitizedConclusion.content,
+        confidence: sanitizedConclusion.confidence,
+        occurrences: sanitizedConclusion.occurrences ?? 1,
+        source: sanitizedConclusion.source ?? "unknown",
+        sourceSessionIds: sanitizedConclusion.sourceSessionIds ?? [],
+        sourceTrajectoryId: sanitizedConclusion.sourceTrajectoryId,
+        sourceEventId: sanitizedConclusion.sourceEventId
       });
 
       try {
@@ -121,7 +130,7 @@ export class LocalMemoryProvider implements MemoryProvider {
           this.#removeExactLine("USER.md", `- ${applied.superseded.content}`);
         }
         if (applied.action === "created" || applied.action === "replaced") {
-          this.#appendDedupe(target, `- ${conclusion.content}`);
+          this.#appendDedupe(target, `- ${sanitizedConclusion.content}`);
         }
         await this.#save();
       } catch (error) {
@@ -131,22 +140,22 @@ export class LocalMemoryProvider implements MemoryProvider {
       }
       return;
     }
-    if (conclusion.kind === "project-fact" && this.#promotionStore !== undefined) {
+    if (sanitizedConclusion.kind === "project-fact" && this.#promotionStore !== undefined) {
       const previousRecords = await this.#promotionStore.list();
       const previousMarkdown = this.#store.read(target);
       const applied = await this.#promotionStore.applyProjectFact({
-        id: conclusion.id,
-        content: conclusion.content,
-        confidence: conclusion.confidence,
-        occurrences: conclusion.occurrences ?? 1,
-        source: conclusion.source ?? "unknown",
-        sourceSessionIds: conclusion.sourceSessionIds ?? [],
-        sourceTrajectoryId: conclusion.sourceTrajectoryId,
-        sourceEventId: conclusion.sourceEventId
+        id: sanitizedConclusion.id,
+        content: sanitizedConclusion.content,
+        confidence: sanitizedConclusion.confidence,
+        occurrences: sanitizedConclusion.occurrences ?? 1,
+        source: sanitizedConclusion.source ?? "unknown",
+        sourceSessionIds: sanitizedConclusion.sourceSessionIds ?? [],
+        sourceTrajectoryId: sanitizedConclusion.sourceTrajectoryId,
+        sourceEventId: sanitizedConclusion.sourceEventId
       });
       try {
         if (applied.action === "created") {
-          this.#appendDedupe(target, `- ${conclusion.content}`);
+          this.#appendDedupe(target, `- ${sanitizedConclusion.content}`);
         }
         await this.#save();
       } catch (error) {
@@ -157,7 +166,7 @@ export class LocalMemoryProvider implements MemoryProvider {
       return;
     }
 
-    this.#appendDedupe(target, `- ${conclusion.content}`);
+    this.#appendDedupe(target, `- ${sanitizedConclusion.content}`);
     await this.#save();
   }
 
@@ -168,7 +177,7 @@ export class LocalMemoryProvider implements MemoryProvider {
       outcome.stepId === undefined ? undefined : `step:${outcome.stepId}`,
       `status:${outcome.status}`,
       `tools:${outcome.tools.join(",") || "none"}`,
-      `summary:${outcome.summary}`
+      `summary:${sanitizeMemoryText(outcome.summary)}`
     ].filter((part) => part !== undefined).join(" | ");
 
     for (const target of targets) {
@@ -228,4 +237,8 @@ function excerpt(content: string, index: number): string {
   const end = Math.min(content.length, index + 360);
 
   return content.slice(start, end).trim();
+}
+
+function sanitizeMemoryText(value: string): string {
+  return stripInlineReasoning(value).trim();
 }

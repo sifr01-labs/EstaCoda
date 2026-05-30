@@ -4,6 +4,7 @@ import type { SessionDB } from "../contracts/session.js";
 import type { LoadedSkill, SkillDefinition, SkillSourceKind } from "../contracts/skill.js";
 import type { ToolRiskClass, ToolsetName } from "../contracts/tool.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
+import { stripInlineReasoning } from "../providers/provider-reasoning.js";
 import { parseSkillFile, hydrateSkillResources } from "./skill-loader.js";
 import type { SkillRegistry } from "./skill-registry.js";
 import { buildSkillFileContent, slugifySkillName } from "../tools/skill-tools.js";
@@ -355,13 +356,14 @@ function detectWorkflow(input: {
     return undefined;
   }
 
-  const redactedPrompt = redactLearningText(input.userText);
+  const visibleUserText = stripInlineReasoning(input.userText);
+  const redactedPrompt = redactLearningText(visibleUserText);
   const normalizedPrompt = normalizePrompt(redactedPrompt);
   if (normalizedPrompt.length === 0) {
     return undefined;
   }
 
-  const secretReason = sensitiveWorkflowReason(input.userText);
+  const secretReason = sensitiveWorkflowReason(visibleUserText);
   const boundedByRisk = successful.every((execution) => isBoundedRisk(execution.riskClass));
   const bounded = boundedByRisk && secretReason === undefined;
   const boundedReason = secretReason ?? (boundedByRisk ? "bounded-local-workflow" : "unbounded-tool-risk");

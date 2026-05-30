@@ -210,4 +210,28 @@ describe("LocalMemoryProvider", () => {
       })
     ]);
   });
+
+  it("strips hidden reasoning before writing memory conclusions and skill outcomes", async () => {
+    const store = new MemoryStore();
+    const provider = new LocalMemoryProvider({ store });
+
+    await provider.conclude({
+      id: "pref-reasoning",
+      kind: "user-preference",
+      content: "<think>private chain</think>Prefer concise replies.",
+      confidence: 0.9
+    });
+    await provider.recordSkillOutcome({
+      skill: "demo",
+      status: "succeeded",
+      tools: ["shell"],
+      memoryTargets: ["MEMORY.md"],
+      summary: "<reasoning>private tool rationale</reasoning>Ran the checks."
+    });
+
+    expect(store.read("USER.md")).toContain("Prefer concise replies.");
+    expect(store.read("USER.md")).not.toContain("private chain");
+    expect(store.read("MEMORY.md")).toContain("Ran the checks.");
+    expect(store.read("MEMORY.md")).not.toContain("private tool rationale");
+  });
 });

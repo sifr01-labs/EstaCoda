@@ -237,6 +237,29 @@ describe("memory hardening evals", () => {
     expect(providerContext.text).not.toContain("secret-value");
   });
 
+  it("strips hidden reasoning before promoting repeated preferences", async () => {
+    const root = await makeTempDir();
+    const db = new InMemorySessionDB();
+    const store = new MemoryStore();
+    const promotionStore = new MemoryPromotionStore({ path: join(root, "promotions.json") });
+    const provider = new LocalMemoryProvider({ store, promotionStore });
+    const hiddenPreference = "<think>private chain</think>I prefer careful release notes";
+
+    await seedSession(db, "reasoning-source-a", "default", [hiddenPreference]);
+    await seedSession(db, "reasoning-source-b", "default", [hiddenPreference]);
+
+    await resolveUserPreferencePromotion({
+      profileId: "default",
+      currentUserText: hiddenPreference,
+      sessionDb: db,
+      memoryProvider: provider
+    });
+
+    expect(store.read("USER.md")).toContain("Prefer careful release notes.");
+    expect(store.read("USER.md")).not.toContain("private chain");
+    expect(JSON.stringify(await promotionStore.list())).not.toContain("private chain");
+  });
+
   it("does not resurrect manually deleted markdown from stale promotion metadata", async () => {
     const root = await makeTempDir();
     const store = new MemoryStore();

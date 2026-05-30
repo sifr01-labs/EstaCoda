@@ -12,6 +12,7 @@ import type {
 } from "../contracts/session.js";
 import { executeAuxiliaryTask, type AuxiliaryExecutionResult } from "../providers/auxiliary-executor.js";
 import type { ProviderExecutor } from "../providers/provider-executor.js";
+import { stripInlineReasoning } from "../providers/provider-reasoning.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 import { packSessionHistory } from "./history-packer.js";
 import { estimateMessagesTokensRough } from "./token-estimator.js";
@@ -170,10 +171,10 @@ export class SemanticCompressor {
     });
     const providerMaxTokens = computeSummaryRequestMaxTokens(summaryBudget);
     const summary = await this.#summarize({
-      activeTask: redactSensitiveText(input.focusTopic?.trim() || latestUserText(input.messages)),
-      focusTopic: input.focusTopic === undefined ? undefined : redactSensitiveText(input.focusTopic),
+      activeTask: sanitizeSummaryText(input.focusTopic?.trim() || latestUserText(input.messages)),
+      focusTopic: input.focusTopic === undefined ? undefined : sanitizeSummaryText(input.focusTopic),
       transcript: serialized.text,
-      previousSummary: previousSummary === undefined ? undefined : redactSensitiveText(previousSummary),
+      previousSummary: previousSummary === undefined ? undefined : sanitizeSummaryText(previousSummary),
       summaryBudget,
       providerMaxTokens,
       scopeKey,
@@ -374,7 +375,7 @@ export class SemanticCompressor {
     }
 
     return {
-      summary: redactSensitiveText(auxiliary.response.content),
+      summary: sanitizeSummaryText(auxiliary.response.content),
       fallbackUsed: auxiliary.fallbackUsed,
       model: auxiliary.response.model,
       auxModelFailure: compressionFailureFromAttempt(auxiliary, "primary"),
@@ -495,7 +496,7 @@ export function computeSummaryRequestMaxTokens(summaryBudget: number): number {
 }
 
 export function normalizeSummaryPrefix(summary: string): string {
-  let stripped = summary.trim();
+  let stripped = stripInlineReasoning(summary).trim();
   stripped = stripped.replace(/^\[CONTEXT (?:COMPACTION|SUMMARY)[^\]]*\]\s*/iu, "");
   stripped = stripped.replace(/^Compacted earlier turns are reference only[^\n]*\n?/iu, "");
   stripped = stripped.replace(/^Format:\s*v\d+\s*\n?/iu, "");
@@ -511,11 +512,12 @@ export function serializeMessagesForSummary(messages: readonly SessionMessage[])
   const warnings: string[] = [];
   let prunedToolResults = 0;
   const text = messages.map((message) => {
-    const content = truncateMessageContent(message.content);
+    const visibleContent = sanitizeVisibleContent(message.content);
+    const content = truncateMessageContent(visibleContent);
     const contextSummary = message.role === "tool"
       ? toolContextSummary(message.metadata)
       : undefined;
-    if (message.role === "tool" && content !== message.content) {
+    if (message.role === "tool" && content !== visibleContent) {
       prunedToolResults += 1;
       warnings.push(`tool result ${message.id} was truncated before summarization`);
     }
@@ -665,7 +667,7 @@ function buildPrunedToolResultPlaceholder(message: SessionMessage): string {
   if (contextSummary !== undefined) {
     return `Tool result context summary: ${contextSummary}`;
   }
-  const content = redactSensitiveText(message.content);
+  const content = sanitizeSummaryText(message.content);
   const charCount = message.content.length;
   const lineCount = message.content.length === 0 ? 0 : message.content.split(/\r\n|\r|\n/u).length;
   const details = [
@@ -692,7 +694,7 @@ function toolContextSummary(metadata: Record<string, unknown> | undefined): stri
   if (typeof summary !== "string") {
     return undefined;
   }
-  const redacted = redactSensitiveText(summary).trim();
+  const redacted = sanitizeSummaryText(summary).trim();
   if (redacted.length === 0) {
     return undefined;
   }
@@ -1028,7 +1030,7 @@ function replaceCompressedMessages(
 
 function latestUserText(messages: readonly SessionMessage[]): string {
   const index = findLatestUserIndex(messages);
-  return index === undefined ? "" : messages[index]!.content;
+  return index === undefined ? "" : sanitizeVisibleContent(messages[index]!.content);
 }
 
 function findLatestUserIndex(messages: readonly SessionMessage[]): number | undefined {
@@ -1045,7 +1047,15 @@ function previousSummaryText(messages: readonly SessionMessage[], state: Session
     message.metadata?.semanticCompression === true ||
     (state?.summaryMessageId !== undefined && message.id === state.summaryMessageId)
   );
-  return summary?.content;
+  return summary === undefined ? undefined : sanitizeVisibleContent(summary.content);
+}
+
+function sanitizeVisibleContent(value: string): string {
+  return stripInlineReasoning(value);
+}
+
+function sanitizeSummaryText(value: string): string {
+  return redactSensitiveText(sanitizeVisibleContent(value));
 }
 
 function estimateSessionMessages(messages: ReadonlyArray<SessionMessage | ReplacementSessionMessage>): number {

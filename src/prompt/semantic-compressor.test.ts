@@ -110,6 +110,42 @@ describe("SemanticCompressor", () => {
     expect(serialized.prunedToolResults).toBe(1);
   });
 
+  it("strips hidden reasoning from summary transcripts while preserving visible prose", () => {
+    const serialized = serializeMessagesForSummary([
+      message("agent-reasoning", "agent", "<think>private chain</think>Visible answer."),
+      message("agent-ordinary", "agent", "Use <think> as the example tag.")
+    ]);
+
+    expect(serialized.text).toContain("Visible answer.");
+    expect(serialized.text).toContain("Use <think> as the example tag.");
+    expect(serialized.text).not.toContain("private chain");
+  });
+
+  it("strips hidden reasoning from auxiliary summary output before persistence", async () => {
+    const compressor = new SemanticCompressor({
+      config: normalizeSessionCompressionConfig({
+        enabled: true,
+        experimental: true,
+        protectFirstN: 0,
+        protectLastN: 0,
+        summaryModelContextLength: 50,
+        threshold: 0.10
+      }),
+      ...auxiliaryHarness("<thinking>private chain</thinking>Visible compact summary.")
+    });
+
+    const result = await compressor.compress({
+      messages: fixtureMessages(6),
+      profileId: "profile",
+      sessionId: "session"
+    });
+
+    const summary = result.messages.find((entry) => entry.metadata?.semanticCompression === true)?.content ?? "";
+    expect(summary).toContain("Visible compact summary.");
+    expect(summary).not.toContain("private chain");
+    expect(summary).not.toContain("<thinking>");
+  });
+
   it("prunes old large tool results into bounded redacted placeholders before summarization", () => {
     const secret = "OPENAI_API_KEY=sk-tool-secret1234567890abcdef";
     const output = [
