@@ -8,9 +8,15 @@ import type {
   ProviderResponse,
   ProviderStreamEvent,
   ProviderFinishReason,
+  ProviderReasoningMetadata,
   ProviderUsage
 } from "../contracts/provider.js";
 import { classifyHttpError } from "./openai-compatible-provider.js";
+import {
+  extractInlineReasoning,
+  mergeReasoningParts,
+  reasoningMetadataFromReasoning
+} from "./provider-reasoning.js";
 
 export type OpenAIResponsesProviderOptions = {
   id: ProviderId;
@@ -282,7 +288,12 @@ export function parseResponsesPayload(input: {
       content?: Array<{
         type?: string;
         text?: string;
+        reasoning?: string;
+        thinking?: string;
       }> | string;
+      text?: string;
+      reasoning?: string;
+      summary?: Array<{ text?: string }>;
       call_id?: string;
       name?: string;
       arguments?: string;
@@ -328,6 +339,8 @@ export function parseResponsesPayload(input: {
   }
 
   const contentParts: string[] = [];
+  const reasoningParts: string[] = [];
+  let sawReasoningShape = false;
   const functionCalls: Array<{
     call_id?: string;
     name?: string;
@@ -338,15 +351,38 @@ export function parseResponsesPayload(input: {
     if (item.type === "message") {
       const itemContent = item.content;
       if (typeof itemContent === "string") {
-        if (itemContent.length > 0) {
-          contentParts.push(itemContent);
+        const extracted = extractInlineReasoning(itemContent);
+        if (extracted.visible.length > 0) {
+          contentParts.push(extracted.visible);
+        }
+        if (extracted.reasoning !== undefined) {
+          reasoningParts.push(extracted.reasoning);
+          sawReasoningShape = true;
         }
       } else if (Array.isArray(itemContent)) {
         for (const part of itemContent) {
           if (part.type === "output_text" && part.text) {
-            contentParts.push(part.text);
+            const extracted = extractInlineReasoning(part.text);
+            if (extracted.visible.length > 0) {
+              contentParts.push(extracted.visible);
+            }
+            if (extracted.reasoning !== undefined) {
+              reasoningParts.push(extracted.reasoning);
+              sawReasoningShape = true;
+            }
+          }
+          if ((part.type === "reasoning" || part.type === "thinking") && (part.reasoning ?? part.thinking ?? part.text) !== undefined) {
+            reasoningParts.push(part.reasoning ?? part.thinking ?? part.text ?? "");
+            sawReasoningShape = true;
           }
         }
+      }
+    }
+
+    if (item.type === "reasoning") {
+      sawReasoningShape = true;
+      if (item.reasoning !== undefined || item.text !== undefined) {
+        reasoningParts.push(item.reasoning ?? item.text ?? "");
       }
     }
 
@@ -360,6 +396,10 @@ export function parseResponsesPayload(input: {
   }
 
   const content = contentParts.join("");
+  const reasoning = mergeReasoningParts(reasoningParts);
+  const reasoningMetadata = reasoning === undefined
+    ? (sawReasoningShape ? emptyResponsesReasoningMetadata() : undefined)
+    : reasoningMetadataFromReasoning(reasoning, "responses_reasoning");
   const finishReason = normalizeResponsesFinishReason(
     payload.status,
     payload.incomplete_details?.reason,
@@ -376,6 +416,8 @@ export function parseResponsesPayload(input: {
       errorClass: payload.status === "incomplete" ? "unknown" : "unknown",
       finishReason,
       incompleteReason: payload.incomplete_details?.reason,
+      ...(reasoning === undefined ? {} : { reasoning }),
+      ...(reasoningMetadata === undefined ? {} : { reasoningMetadata }),
       raw: input.payload
     };
   }
@@ -387,6 +429,8 @@ export function parseResponsesPayload(input: {
     provider: input.provider,
     finishReason,
     incompleteReason: payload.incomplete_details?.reason,
+    ...(reasoning === undefined ? {} : { reasoning }),
+    ...(reasoningMetadata === undefined ? {} : { reasoningMetadata }),
     usage: normalizeResponsesUsage(payload.usage),
     raw: input.payload
   };
@@ -435,6 +479,14 @@ function normalizeResponsesUsage(usage: {
     ...(usage.output_tokens === undefined ? {} : { outputTokens: usage.output_tokens }),
     ...(usage.total_tokens === undefined ? {} : { totalTokens: usage.total_tokens }),
     ...(reasoningTokens === undefined ? {} : { reasoningTokens })
+  };
+}
+
+function emptyResponsesReasoningMetadata(): ProviderReasoningMetadata {
+  return {
+    present: true,
+    chars: 0,
+    format: "responses_reasoning"
   };
 }
 

@@ -146,7 +146,7 @@ describe("createOpenAICompatibleProvider streaming", () => {
     ]));
   });
 
-  it("surfaces transport done when DONE is the only terminal signal after visible text", async () => {
+  it("finalizes transport-only visible text with unknown finish reason", async () => {
     const provider = createOpenAICompatibleProvider({
       id: "openai" as any,
       endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
@@ -172,9 +172,15 @@ describe("createOpenAICompatibleProvider streaming", () => {
 
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: "token", text: "Partial" }),
-      expect.objectContaining({ kind: "transport-done" })
+      expect.objectContaining({
+        kind: "done",
+        response: expect.objectContaining({
+          content: "Partial",
+          finishReason: "unknown"
+        })
+      })
     ]));
-    expect(events.some((event) => event.kind === "done")).toBe(false);
+    expect(events.some((event) => event.kind === "transport-done")).toBe(false);
   });
 
   it("does not fallback or finalize empty abrupt streams", async () => {
@@ -213,6 +219,416 @@ describe("createOpenAICompatibleProvider streaming", () => {
     expect(events).toEqual([
       expect.objectContaining({ kind: "start" })
     ]);
+  });
+
+  it("extracts reasoning deltas without emitting them as visible tokens", async () => {
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      fetch: async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({}),
+        text: async () => "",
+        body: sseStream([
+          sseData({ choices: [{ delta: { reasoning_content: "hidden chain" }, finish_reason: null }] }),
+          sseData({ choices: [{ delta: { content: "Visible" }, finish_reason: null }] }),
+          sseData({ choices: [{ delta: {}, finish_reason: "stop" }] })
+        ])
+      })
+    });
+
+    const events = await collectStreamEvents(provider.stream?.({
+      provider: "openai" as any,
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    }) ?? []);
+
+    expect(events.filter((event) => event.kind === "token")).toEqual([
+      expect.objectContaining({ text: "Visible" })
+    ]);
+    expect(JSON.stringify(events.filter((event) => event.kind === "token"))).not.toContain("hidden chain");
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "done",
+      response: expect.objectContaining({
+        content: "Visible",
+        reasoning: "hidden chain",
+        reasoningMetadata: {
+          present: true,
+          chars: "hidden chain".length,
+          format: "reasoning_content"
+        }
+      })
+    }));
+  });
+
+  it("extracts streamed reasoning fields and inline hidden blocks from visible deltas", async () => {
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      fetch: async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({}),
+        text: async () => "",
+        body: sseStream([
+          sseData({ choices: [{ delta: { reasoning: "delta hidden" }, finish_reason: null }] }),
+          sseData({ choices: [{ delta: { content: "A <thi" }, finish_reason: null }] }),
+          sseData({ choices: [{ delta: { content: "nk>inline hidden</think>B" }, finish_reason: null }] }),
+          sseData({ choices: [{ delta: {}, finish_reason: "stop" }] })
+        ])
+      })
+    });
+
+    const events = await collectStreamEvents(provider.stream?.({
+      provider: "openai" as any,
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    }) ?? []);
+
+    expect(events.filter((event) => event.kind === "token")).toEqual([
+      expect.objectContaining({ text: "A " }),
+      expect.objectContaining({ text: "B" })
+    ]);
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "done",
+      response: expect.objectContaining({
+        content: "A B",
+        reasoning: "delta hidden\n\ninline hidden",
+        reasoningMetadata: {
+          present: true,
+          chars: "delta hidden\n\ninline hidden".length,
+          format: "mixed"
+        }
+      })
+    }));
+  });
+
+  it("preserves streamed reasoning source format in safe metadata", async () => {
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      fetch: async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({}),
+        text: async () => "",
+        body: sseStream([
+          sseData({ choices: [{ delta: { reasoning: "hidden reasoning" }, finish_reason: null }] }),
+          sseData({ choices: [{ delta: { content: "Visible" }, finish_reason: null }] }),
+          sseData({ choices: [{ delta: {}, finish_reason: "stop" }] })
+        ])
+      })
+    });
+
+    const events = await collectStreamEvents(provider.stream?.({
+      provider: "openai" as any,
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    }) ?? []);
+
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "done",
+      response: expect.objectContaining({
+        reasoning: "hidden reasoning",
+        reasoningMetadata: {
+          present: true,
+          chars: "hidden reasoning".length,
+          format: "reasoning"
+        }
+      })
+    }));
+  });
+
+  it("preserves transport-only streamed reasoning fields through unknown finalization", async () => {
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      fetch: async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({}),
+        text: async () => "",
+        body: sseStream([
+          sseData({ choices: [{ delta: { reasoning: "transport hidden" }, finish_reason: null }] }),
+          sseData({ choices: [{ delta: { content: "Visible" }, finish_reason: null }] }),
+          "data: [DONE]\n\n"
+        ])
+      })
+    });
+
+    const events = await collectStreamEvents(provider.stream?.({
+      provider: "openai" as any,
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    }) ?? []);
+
+    expect(events.filter((event) => event.kind === "token")).toEqual([
+      expect.objectContaining({ text: "Visible" })
+    ]);
+    expect(JSON.stringify(events.filter((event) => event.kind === "token"))).not.toContain("transport hidden");
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "done",
+      response: expect.objectContaining({
+        content: "Visible",
+        finishReason: "unknown",
+        reasoning: "transport hidden",
+        reasoningMetadata: {
+          present: true,
+          chars: "transport hidden".length,
+          format: "reasoning"
+        }
+      })
+    }));
+  });
+
+  it("preserves transport-only streamed reasoning_content through unknown finalization", async () => {
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      fetch: async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({}),
+        text: async () => "",
+        body: sseStream([
+          sseData({ choices: [{ delta: { reasoning_content: "transport hidden" }, finish_reason: null }] }),
+          sseData({ choices: [{ delta: { content: "Visible" }, finish_reason: null }] }),
+          "data: [DONE]\n\n"
+        ])
+      })
+    });
+
+    const events = await collectStreamEvents(provider.stream?.({
+      provider: "openai" as any,
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    }) ?? []);
+
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "done",
+      response: expect.objectContaining({
+        content: "Visible",
+        finishReason: "unknown",
+        reasoning: "transport hidden",
+        reasoningMetadata: {
+          present: true,
+          chars: "transport hidden".length,
+          format: "reasoning_content"
+        }
+      })
+    }));
+  });
+
+  it("preserves transport-only inline hidden reasoning through unknown finalization", async () => {
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      fetch: async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({}),
+        text: async () => "",
+        body: sseStream([
+          sseData({ choices: [{ delta: { content: "Visible <think>transport hidden</think>" }, finish_reason: null }] }),
+          "data: [DONE]\n\n"
+        ])
+      })
+    });
+
+    const events = await collectStreamEvents(provider.stream?.({
+      provider: "openai" as any,
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    }) ?? []);
+
+    expect(events.filter((event) => event.kind === "token")).toEqual([
+      expect.objectContaining({ text: "Visible " })
+    ]);
+    expect(JSON.stringify(events.filter((event) => event.kind === "token"))).not.toContain("transport hidden");
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "done",
+      response: expect.objectContaining({
+        content: "Visible ",
+        finishReason: "unknown",
+        reasoning: "transport hidden",
+        reasoningMetadata: {
+          present: true,
+          chars: "transport hidden".length,
+          format: "think_block"
+        }
+      })
+    }));
+  });
+
+  it("marks transport-only mixed reasoning sources as mixed", async () => {
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      fetch: async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({}),
+        text: async () => "",
+        body: sseStream([
+          sseData({ choices: [{ delta: { reasoning: "delta hidden" }, finish_reason: null }] }),
+          sseData({ choices: [{ delta: { content: "Visible <think>inline hidden</think>" }, finish_reason: null }] }),
+          "data: [DONE]\n\n"
+        ])
+      })
+    });
+
+    const events = await collectStreamEvents(provider.stream?.({
+      provider: "openai" as any,
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    }) ?? []);
+
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "done",
+      response: expect.objectContaining({
+        content: "Visible ",
+        finishReason: "unknown",
+        reasoning: "delta hidden\n\ninline hidden",
+        reasoningMetadata: {
+          present: true,
+          chars: "delta hidden\n\ninline hidden".length,
+          format: "mixed"
+        }
+      })
+    }));
+  });
+
+  it("keeps transport-only tool fragments unsafe without explicit finish metadata", async () => {
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      fetch: async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({}),
+        text: async () => "",
+        body: sseStream([
+          sseData({
+            choices: [{
+              delta: {
+                tool_calls: [{
+                  index: 0,
+                  id: "call-1",
+                  function: { name: "test.tool", arguments: "{\"x\":" }
+                }]
+              },
+              finish_reason: null
+            }]
+          }),
+          "data: [DONE]\n\n"
+        ])
+      })
+    });
+
+    const events = await collectStreamEvents(provider.stream?.({
+      provider: "openai" as any,
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    }) ?? []);
+
+    expect(events.some((event) => event.kind === "done")).toBe(false);
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "tool-call", id: "call-1" }),
+      expect.objectContaining({ kind: "transport-done" })
+    ]));
+  });
+
+  it("marks streamed reasoning metadata as mixed when delta formats differ", async () => {
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      fetch: async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({}),
+        text: async () => "",
+        body: sseStream([
+          sseData({ choices: [{ delta: { reasoning: "first" }, finish_reason: null }] }),
+          sseData({ choices: [{ delta: { reasoning_content: "second" }, finish_reason: null }] }),
+          sseData({ choices: [{ delta: { content: "Visible" }, finish_reason: null }] }),
+          sseData({ choices: [{ delta: {}, finish_reason: "stop" }] })
+        ])
+      })
+    });
+
+    const events = await collectStreamEvents(provider.stream?.({
+      provider: "openai" as any,
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    }) ?? []);
+
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "done",
+      response: expect.objectContaining({
+        reasoning: "first\n\nsecond",
+        reasoningMetadata: {
+          present: true,
+          chars: "first\n\nsecond".length,
+          format: "mixed"
+        }
+      })
+    }));
+  });
+
+  it("does not flush unclosed streamed hidden blocks into visible output", async () => {
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      fetch: async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({}),
+        text: async () => "",
+        body: sseStream([
+          sseData({ choices: [{ delta: { content: "Visible <reasoning>hidden forever" }, finish_reason: null }] }),
+          sseData({ choices: [{ delta: {}, finish_reason: "stop" }] })
+        ])
+      })
+    });
+
+    const events = await collectStreamEvents(provider.stream?.({
+      provider: "openai" as any,
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    }) ?? []);
+
+    expect(events.filter((event) => event.kind === "token")).toEqual([
+      expect.objectContaining({ text: "Visible " })
+    ]);
+    expect(JSON.stringify(events.filter((event) => event.kind === "token"))).not.toContain("hidden forever");
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "done",
+      response: expect.objectContaining({
+        content: "Visible ",
+        reasoning: "hidden forever"
+      })
+    }));
   });
 });
 
@@ -275,6 +691,132 @@ describe("parseOpenAICompatibleResponse", () => {
       totalTokens: 18,
       reasoningTokens: 3
     });
+  });
+
+  it("extracts reasoning_content into turn-local response reasoning", () => {
+    const response = parseOpenAICompatibleResponse({
+      provider: "openai",
+      model: "gpt-test",
+      payload: {
+        choices: [
+          {
+            finish_reason: "stop",
+            message: {
+              content: "Visible",
+              reasoning_content: "hidden chain"
+            }
+          }
+        ]
+      }
+    });
+
+    expect(response.ok).toBe(true);
+    expect(response.content).toBe("Visible");
+    expect(response.reasoning).toBe("hidden chain");
+    expect(response.reasoningMetadata).toEqual({
+      present: true,
+      chars: "hidden chain".length,
+      format: "reasoning_content"
+    });
+  });
+
+  it("extracts reasoning fields into turn-local response reasoning", () => {
+    const response = parseOpenAICompatibleResponse({
+      provider: "openai",
+      model: "gpt-test",
+      payload: {
+        choices: [
+          {
+            finish_reason: "stop",
+            message: {
+              content: "Visible",
+              reasoning: "hidden reasoning"
+            }
+          }
+        ]
+      }
+    });
+
+    expect(response.ok).toBe(true);
+    expect(response.reasoning).toBe("hidden reasoning");
+    expect(response.reasoningMetadata?.format).toBe("reasoning");
+  });
+
+  it("keeps reasoning_details metadata-only", () => {
+    const response = parseOpenAICompatibleResponse({
+      provider: "openai",
+      model: "gpt-test",
+      payload: {
+        choices: [
+          {
+            finish_reason: "stop",
+            message: {
+              content: "Visible",
+              reasoning_details: { provider_specific: "opaque hidden detail" }
+            }
+          }
+        ]
+      }
+    });
+
+    expect(response.ok).toBe(true);
+    expect(response.reasoning).toBeUndefined();
+    expect(response.reasoningMetadata).toEqual({
+      present: true,
+      chars: JSON.stringify({ provider_specific: "opaque hidden detail" }).length,
+      format: "reasoning_details"
+    });
+  });
+
+  it("strips inline think blocks from visible content and extracts reasoning", () => {
+    const response = parseOpenAICompatibleResponse({
+      provider: "openai",
+      model: "gpt-test",
+      payload: {
+        choices: [
+          {
+            finish_reason: "stop",
+            message: {
+              content: "Before <think>hidden</think> after"
+            }
+          }
+        ]
+      }
+    });
+
+    expect(response.ok).toBe(true);
+    expect(response.content).toBe("Before  after");
+    expect(response.reasoning).toBe("hidden");
+    expect(response.reasoningMetadata?.format).toBe("think_block");
+  });
+
+  it("extracts content-list reasoning and preserves visible output", () => {
+    const response = parseOpenAICompatibleResponse({
+      provider: "openai",
+      model: "gpt-test",
+      payload: {
+        choices: [
+          {
+            finish_reason: "stop",
+            message: {
+              content: [
+                { type: "thinking", thinking: "hidden thought" },
+                { type: "output", text: "Visible" },
+                { type: "reasoning", reasoning: "hidden reason" },
+                { type: "unknown", reasoning: "do not stringify", text: "do not show" }
+              ]
+            }
+          }
+        ]
+      }
+    });
+
+    expect(response.ok).toBe(true);
+    expect(response.content).toBe("Visible");
+    expect(response.reasoning).toBe("hidden thought\n\nhidden reason");
+    expect(response.reasoningMetadata?.format).toBe("mixed");
+    expect(response.content).not.toContain("do not show");
+    expect(response.reasoning).not.toContain("do not stringify");
   });
 });
 

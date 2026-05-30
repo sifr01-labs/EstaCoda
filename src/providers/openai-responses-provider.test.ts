@@ -387,6 +387,87 @@ describe("openai-responses-provider", () => {
 
       expect(response.content).toBe("FirstSecond");
     });
+
+    it("extracts reasoning-shaped output items while preserving visible output only", () => {
+      const response = parseResponsesPayload({
+        provider: "codex",
+        model: "codex-model",
+        payload: {
+          status: "completed",
+          output: [
+            { type: "reasoning", text: "hidden responses reasoning" },
+            {
+              type: "message",
+              role: "assistant",
+              content: [{ type: "output_text", text: "Visible answer" }]
+            }
+          ]
+        }
+      });
+
+      expect(response.ok).toBe(true);
+      expect(response.content).toBe("Visible answer");
+      expect(response.reasoning).toBe("hidden responses reasoning");
+      expect(response.reasoningMetadata).toEqual({
+        present: true,
+        chars: "hidden responses reasoning".length,
+        format: "responses_reasoning"
+      });
+    });
+
+    it("keeps Responses reasoning summaries as metadata-only", () => {
+      const response = parseResponsesPayload({
+        provider: "codex",
+        model: "codex-model",
+        payload: {
+          status: "completed",
+          output: [
+            { type: "reasoning", summary: [{ text: "summary should not become raw reasoning" }] },
+            {
+              type: "message",
+              role: "assistant",
+              content: [{ type: "output_text", text: "Visible answer" }]
+            }
+          ]
+        }
+      });
+
+      expect(response.ok).toBe(true);
+      expect(response.content).toBe("Visible answer");
+      expect(response.reasoning).toBeUndefined();
+      expect(response.reasoningMetadata).toEqual({
+        present: true,
+        chars: 0,
+        format: "responses_reasoning"
+      });
+      expect(JSON.stringify(response.reasoningMetadata)).not.toContain("summary should not become raw reasoning");
+    });
+
+    it("strips inline reasoning from Responses visible output", () => {
+      const response = parseResponsesPayload({
+        provider: "codex",
+        model: "codex-model",
+        payload: {
+          status: "completed",
+          output: [
+            {
+              type: "message",
+              role: "assistant",
+              content: [{ type: "output_text", text: "Visible <think>hidden</think> answer" }]
+            }
+          ]
+        }
+      });
+
+      expect(response.ok).toBe(true);
+      expect(response.content).toBe("Visible  answer");
+      expect(response.reasoning).toBe("hidden");
+      expect(response.reasoningMetadata).toEqual({
+        present: true,
+        chars: "hidden".length,
+        format: "responses_reasoning"
+      });
+    });
   });
 
   describe("executeResponsesRequest", () => {
