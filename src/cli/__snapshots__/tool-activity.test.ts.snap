@@ -3,9 +3,9 @@
 exports[`tool-activity > Approval prompt > renders in narrow width > approval-narrow width 1`] = `
 "╭──────────────────────────────────────╮
 │ [38;2;255;180;84m[1m⚠ Permission required[0m[0m               │
-│   [2mTool  [0m  [38;2;64;224;208m⁦workspace.write⁩[0m          │
-│   [2mRisk  [0m  [38;2;255;180;84m⁦destructive-local⁩[0m        │
-│   [2mTarget[0m  ⁦src/index.ts⁩             │
+│   [2mTool  [0m  [38;2;64;224;208m⁦workspace.write⁩[0m            │
+│   [2mRisk  [0m  [38;2;255;180;84m⁦destructive-local⁩[0m          │
+│   [2mTarget[0m  ⁦src/index.ts⁩               │
 │                                      │
 │   [38;2;64;224;208m[1mAllow once[0m[0m    [38;2;64;224;208m[1mAllow for this session[0m[0m    [38;2;64;224;208m[1mAlways allow[0m[0m    [38;2;239;83;80m[1mDeny[0m[0m │
 ╰──────────────────────────────────────╯"
@@ -14,9 +14,9 @@ exports[`tool-activity > Approval prompt > renders in narrow width > approval-na
 exports[`tool-activity > Approval prompt > renders in no Unicode > approval-no Unicode 1`] = `
 "+----------------------------------------------------------------+
 | [38;2;255;180;84m[1m! Permission required[0m[0m                                          |
-|   [2mTool  [0m  [38;2;64;224;208m⁦workspace.write⁩[0m                                    |
-|   [2mRisk  [0m  [38;2;255;180;84m⁦destructive-local⁩[0m                                  |
-|   [2mTarget[0m  ⁦src/index.ts⁩                                       |
+|   [2mTool  [0m  [38;2;64;224;208m⁦workspace.write⁩[0m                                      |
+|   [2mRisk  [0m  [38;2;255;180;84m⁦destructive-local⁩[0m                                    |
+|   [2mTarget[0m  ⁦src/index.ts⁩                                         |
 |                                                                |
 |   [38;2;64;224;208m[1mAllow once[0m[0m    [38;2;64;224;208m[1mAllow for this session[0m[0m    [38;2;64;224;208m[1mAlways allow[0m[0m    [38;2;239;83;80m[1mDeny[0m[0m |
 +----------------------------------------------------------------+"
@@ -25,9 +25,9 @@ exports[`tool-activity > Approval prompt > renders in no Unicode > approval-no U
 exports[`tool-activity > Approval prompt > renders in no color > approval-no color 1`] = `
 "╭────────────────────────────────────────────────────────────────╮
 │ ⚠ Permission required                                         │
-│   Tool    ⁦workspace.write⁩                                    │
-│   Risk    ⁦destructive-local⁩                                  │
-│   Target  ⁦src/index.ts⁩                                       │
+│   Tool    ⁦workspace.write⁩                                      │
+│   Risk    ⁦destructive-local⁩                                    │
+│   Target  ⁦src/index.ts⁩                                         │
 │                                                                │
 │   Allow once    Allow for this session    Always allow    Deny │
 ╰────────────────────────────────────────────────────────────────╯"
@@ -49,9 +49,9 @@ Actions:
 exports[`tool-activity > Approval prompt > renders in standard dark > approval-standard dark 1`] = `
 "╭────────────────────────────────────────────────────────────────╮
 │ [38;2;255;180;84m[1m⚠ Permission required[0m[0m                                         │
-│   [2mTool  [0m  [38;2;64;224;208m⁦workspace.write⁩[0m                                    │
-│   [2mRisk  [0m  [38;2;255;180;84m⁦destructive-local⁩[0m                                  │
-│   [2mTarget[0m  ⁦src/index.ts⁩                                       │
+│   [2mTool  [0m  [38;2;64;224;208m⁦workspace.write⁩[0m                                      │
+│   [2mRisk  [0m  [38;2;255;180;84m⁦destructive-local⁩[0m                                    │
+│   [2mTarget[0m  ⁦src/index.ts⁩                                         │
 │                                                                │
 │   [38;2;64;224;208m[1mAllow once[0m[0m    [38;2;64;224;208m[1mAllow for this session[0m[0m    [38;2;64;224;208m[1mAlways allow[0m[0m    [38;2;239;83;80m[1mDeny[0m[0m │
 ╰────────────────────────────────────────────────────────────────╯"
@@ -60,9 +60,9 @@ exports[`tool-activity > Approval prompt > renders in standard dark > approval-s
 exports[`tool-activity > Approval prompt > renders in standard light > approval-standard light 1`] = `
 "╭────────────────────────────────────────────────────────────────╮
 │ [38;2;180;83;9m[1m⚠ Permission required[0m[0m                                         │
-│   [2mTool  [0m  [38;2;0;140;149m⁦workspace.write⁩[0m                                    │
-│   [2mRisk  [0m  [38;2;180;83;9m⁦destructive-local⁩[0m                                  │
-│   [2mTarget[0m  ⁦src/index.ts⁩                                       │
+│   [2mTool  [0m  [38;2;0;140;149m⁦workspace.write⁩[0m                                      │
+│   [2mRisk  [0m  [38;2;180;83;9m⁦destructive-local⁩[0m                                    │
+│   [2mTarget[0m  ⁦src/index.ts⁩                                         │
 │                                                                │
 │   [38;2;0;140;149m[1mAllow once[0m[0m    [38;2;0;140;149m[1mAllow for this session[0m[0m    [38;2;0;140;149m[1mAlways allow[0m[0m    [38;2;198;40;40m[1mDeny[0m[0m │
 ╰────────────────────────────────────────────────────────────────╯"
