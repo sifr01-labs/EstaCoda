@@ -161,6 +161,46 @@ estacoda eval [fixture-id]
 
 These are runtime inspection and validation tools, not a replacement for unit tests.
 
+## Provider Finalization Checks
+
+When changing provider streaming, tool-call planning, reasoning extraction, continuation, or downstream transcript consumers, run the narrow lane first:
+
+```bash
+pnpm exec vitest run src/providers/provider-executor-fallback.test.ts
+pnpm exec vitest run src/providers/provider-executor-route.test.ts
+pnpm exec vitest run src/providers/openai-compatible-provider.test.ts
+pnpm exec vitest run src/providers/openai-responses-provider.test.ts
+pnpm exec vitest run src/providers/provider-reasoning.test.ts
+pnpm exec vitest run src/providers/provider-message-normalizer.test.ts
+pnpm exec vitest run src/runtime/provider-turn-loop.test.ts
+pnpm exec vitest run src/runtime/agent-loop.test.ts
+pnpm exec vitest run src/prompt/semantic-compressor.test.ts
+pnpm exec vitest run src/memory/local-memory-provider.test.ts
+pnpm exec vitest run src/skills/skill-learning.test.ts
+pnpm exec vitest run src/skills/skill-evolution.test.ts
+pnpm exec vitest run src/evolution/export-format.test.ts
+```
+
+Expected failure modes to inspect:
+
+- `incomplete-stream` stays a provider failure or uses fallback; it must not become a successful assistant response
+- length-truncated tool calls retry once or refuse safely; the first truncated attempt must not reach tool planning or execution
+- malformed finalized tool JSON stays a tool-planning error
+- reasoning-only non-length responses retry with local-only visible-answer prefill
+- reasoning-only length exhaustion returns visible guidance and does not text-continue
+- length-truncated visible text continuation persists one final assistant message and no synthetic continuation messages
+- summary, memory, skill learning/evolution, and export tests preserve ordinary visible prose while stripping raw reasoning fields and inline hidden blocks
+
+For manual inspection, run a local turn that streams visible text and tools, then inspect session messages and trace output:
+
+```bash
+pnpm run dev
+estacoda trace list --limit 5
+estacoda trace dump <trajectory-id> --raw
+```
+
+Raw reasoning, `reasoning_content`, `reasoning_details`, discarded truncated tool arguments, and synthetic continuation/prefill messages should not appear in persisted session-visible messages, runtime/session events, summaries, memory files, skill records, or export traces. Safe metadata such as finish reason, usage, `reasoningMetadata`, truncation status, and continuation status may appear.
+
 ## Recommended Test Practices
 
 1. Run `pnpm run typecheck` first.
