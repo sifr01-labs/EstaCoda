@@ -5,7 +5,6 @@ import type { MemoryPromptContext } from "../contracts/memory.js";
 import type {
   ModelProfile,
   ProviderFinishReason,
-  ProviderId,
   ProviderLoopRuntimeMetadata,
   ProviderRequest,
   ProviderRoutePreferences,
@@ -280,25 +279,6 @@ export class ProviderTurnLoop {
         providerToolExecutions.length >= this.#budgets.maxProviderToolCalls ||
         repeatedFailureBudgetExceeded !== undefined
       ) && execution.toolCalls.length > 0 && loopToolExecutions.length > 0;
-
-      if (
-        execution.ok !== true &&
-        execution.toolCalls.length === 0 &&
-        execution.partialContent?.trim().length &&
-        lastAttemptErrorClass(execution) === "incomplete-stream"
-      ) {
-        const lastAttempt = execution.attempts[execution.attempts.length - 1];
-        execution = {
-          ...execution,
-          ok: true,
-          response: {
-            ok: true,
-            content: execution.partialContent.trim(),
-            model: lastAttempt?.model ?? this.#model?.id ?? "unknown",
-            provider: (lastAttempt?.provider ?? this.#model?.provider ?? "unknown") as ProviderId
-          }
-        };
-      }
 
       let terminalPostToolEmpty =
         execution.ok === true &&
@@ -824,10 +804,6 @@ function isHousekeepingToolName(name: string | undefined): boolean {
     name === "skill.list_proposals" ||
     name === "skill.review_proposals" ||
     name === "skill.review_proposal";
-}
-
-function lastAttemptErrorClass(execution: ProviderExecutionResult): string | undefined {
-  return execution.attempts[execution.attempts.length - 1]?.errorClass;
 }
 
 function mergeProviderExecutions(

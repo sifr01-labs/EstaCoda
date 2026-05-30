@@ -272,6 +272,11 @@ export type ProviderStreamEvent =
       provider: ProviderId;
       model: string;
       response: ProviderResponse;
+    }
+  | {
+      kind: "transport-done";
+      provider: ProviderId;
+      model: string;
     };
 
 export type ProviderErrorClass =

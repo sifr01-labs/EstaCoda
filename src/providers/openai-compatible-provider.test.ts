@@ -4,7 +4,7 @@ import {
   createOpenAICompatibleProvider,
   parseOpenAICompatibleResponse
 } from "./openai-compatible-provider.js";
-import type { ProviderEndpoint } from "../contracts/provider.js";
+import type { ProviderEndpoint, ProviderStreamEvent } from "../contracts/provider.js";
 
 const DEFAULT_ENDPOINT: ProviderEndpoint = {
   baseUrl: "https://api.openai.com/v1",
@@ -102,6 +102,120 @@ describe("buildOpenAICompatibleRequest", () => {
   });
 });
 
+describe("createOpenAICompatibleProvider streaming", () => {
+  it("finalizes on finish_reason without usage", async () => {
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      fetch: async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({}),
+        text: async () => "",
+        body: sseStream([
+          sseData({ choices: [{ delta: { content: "Hello" }, finish_reason: null }] }),
+          sseData({ choices: [{ delta: {}, finish_reason: "stop" }] }),
+          sseData({ choices: [], usage: { prompt_tokens: 4, completion_tokens: 2, total_tokens: 6 } })
+        ])
+      })
+    });
+
+    const events = await collectStreamEvents(provider.stream?.({
+      provider: "openai" as any,
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    }) ?? []);
+
+    expect(events.filter((event) => event.kind === "done")).toHaveLength(1);
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "token", text: "Hello" }),
+      expect.objectContaining({
+        kind: "done",
+        response: expect.objectContaining({
+          content: "Hello",
+          finishReason: "stop",
+          usage: {
+            inputTokens: 4,
+            outputTokens: 2,
+            totalTokens: 6
+          }
+        })
+      })
+    ]));
+  });
+
+  it("surfaces transport done when DONE is the only terminal signal after visible text", async () => {
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      fetch: async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({}),
+        text: async () => "",
+        body: sseStream([
+          sseData({ choices: [{ delta: { content: "Partial" }, finish_reason: null }] }),
+          "data: [DONE]\n\n"
+        ])
+      })
+    });
+
+    const events = await collectStreamEvents(provider.stream?.({
+      provider: "openai" as any,
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    }) ?? []);
+
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "token", text: "Partial" }),
+      expect.objectContaining({ kind: "transport-done" })
+    ]));
+    expect(events.some((event) => event.kind === "done")).toBe(false);
+  });
+
+  it("does not fallback or finalize empty abrupt streams", async () => {
+    let fallbackJsonCalled = false;
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      fetch: async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => {
+          fallbackJsonCalled = true;
+          return {
+            choices: [
+              {
+                finish_reason: "stop",
+                message: { content: "fallback should not run" }
+              }
+            ]
+          };
+        },
+        text: async () => "",
+        body: sseStream([])
+      })
+    });
+
+    const events = await collectStreamEvents(provider.stream?.({
+      provider: "openai" as any,
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    }) ?? []);
+
+    expect(fallbackJsonCalled).toBe(false);
+    expect(events).toEqual([
+      expect.objectContaining({ kind: "start" })
+    ]);
+  });
+});
+
 describe("parseOpenAICompatibleResponse", () => {
   it.each([
     ["stop", "stop"],
@@ -163,3 +277,27 @@ describe("parseOpenAICompatibleResponse", () => {
     });
   });
 });
+
+async function collectStreamEvents(events: AsyncIterable<ProviderStreamEvent> | Iterable<ProviderStreamEvent>): Promise<ProviderStreamEvent[]> {
+  const collected: ProviderStreamEvent[] = [];
+  for await (const event of events) {
+    collected.push(event);
+  }
+  return collected;
+}
+
+function sseData(payload: unknown): string {
+  return `data: ${JSON.stringify(payload)}\n\n`;
+}
+
+function sseStream(chunks: string[]): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(encoder.encode(chunk));
+      }
+      controller.close();
+    }
+  });
+}

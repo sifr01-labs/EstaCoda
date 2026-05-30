@@ -364,6 +364,8 @@ export async function* streamOpenAICompatibleRequest(input: {
 
     let content = "";
     let usage: ProviderResponse["usage"] | undefined;
+    let finalResponse: ProviderResponse | undefined;
+    let sawTransportDone = false;
     let sawToolCall = false;
 
     for await (const event of parseOpenAICompatibleStream(response.body, input.provider, input.model)) {
@@ -381,14 +383,45 @@ export async function* streamOpenAICompatibleRequest(input: {
       }
 
       if (event.kind === "done") {
-        usage = event.response.usage;
+        usage = event.response.usage ?? usage;
+        finalResponse = finalResponse === undefined
+          ? event.response
+          : {
+              ...finalResponse,
+              ...event.response,
+              content: event.response.content.length > 0 ? event.response.content : finalResponse.content,
+              finishReason: event.response.finishReason ?? finalResponse.finishReason,
+              usage: event.response.usage ?? finalResponse.usage,
+              raw: event.response.raw ?? finalResponse.raw
+            };
+        continue;
+      }
+
+      if (event.kind === "transport-done") {
+        sawTransportDone = true;
         continue;
       }
 
       yield event;
     }
 
-    if (content.length === 0 && !sawToolCall) {
+    if (finalResponse !== undefined) {
+      yield {
+        kind: "done",
+        provider: input.provider,
+        model: input.model,
+        response: {
+          ...finalResponse,
+          content: finalResponse.content.length === 0 && content.length > 0
+            ? content
+            : finalResponse.content,
+          ...(usage === undefined ? {} : { usage })
+        }
+      };
+      return;
+    }
+
+    if (sawTransportDone && content.length === 0 && !sawToolCall) {
       const fallback = await executeOpenAICompatibleRequest({
         provider: input.provider,
         model: input.model,
@@ -445,18 +478,13 @@ export async function* streamOpenAICompatibleRequest(input: {
       return;
     }
 
-    yield {
-      kind: "done",
-      provider: input.provider,
-      model: input.model,
-      response: {
-        ok: true,
-        content,
-        model: input.model,
+    if (sawTransportDone) {
+      yield {
+        kind: "transport-done",
         provider: input.provider,
-        usage
-      }
-    };
+        model: input.model
+      };
+    }
   } catch (error) {
     yield {
       kind: "error",
@@ -722,6 +750,11 @@ async function* parseOpenAICompatibleStream(
       const data = trimmed.slice("data:".length).trim();
 
       if (data === "[DONE]") {
+        yield {
+          kind: "transport-done",
+          provider,
+          model
+        };
         return;
       }
 
@@ -734,7 +767,13 @@ async function* parseOpenAICompatibleStream(
   if (buffer.trim().startsWith("data:")) {
     const data = buffer.trim().slice("data:".length).trim();
 
-    if (data !== "[DONE]") {
+    if (data === "[DONE]") {
+      yield {
+        kind: "transport-done",
+        provider,
+        model
+      };
+    } else {
       for (const event of parseOpenAICompatibleStreamChunk(data, provider, model)) {
         yield event;
       }
@@ -746,6 +785,7 @@ function parseOpenAICompatibleStreamChunk(data: string, provider: ProviderId, mo
   try {
     const payload = JSON.parse(data) as {
       choices?: Array<{
+        finish_reason?: unknown;
         delta?: {
           content?: string;
           tool_calls?: Array<{
@@ -790,6 +830,9 @@ function parseOpenAICompatibleStreamChunk(data: string, provider: ProviderId, mo
     }
 
     const events: ProviderStreamEvent[] = [];
+    const finishReason = (payload.choices ?? [])
+      .map((choice) => choice.finish_reason)
+      .find((value) => value !== undefined && value !== null);
 
     for (const choice of payload.choices ?? []) {
       if (choice.delta?.content !== undefined && choice.delta.content.length > 0) {
@@ -815,7 +858,7 @@ function parseOpenAICompatibleStreamChunk(data: string, provider: ProviderId, mo
       }
     }
 
-    if (payload.usage !== undefined) {
+    if (payload.usage !== undefined || finishReason !== undefined) {
       events.push({
         kind: "done",
         provider,
@@ -825,6 +868,7 @@ function parseOpenAICompatibleStreamChunk(data: string, provider: ProviderId, mo
           content: "",
           model,
           provider,
+          ...(finishReason === undefined ? {} : { finishReason: normalizeChatFinishReason(finishReason) }),
           usage: normalizeOpenAICompatibleUsage(payload.usage),
           raw: payload
         }

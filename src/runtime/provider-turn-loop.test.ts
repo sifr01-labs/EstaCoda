@@ -591,7 +591,7 @@ describe("ProviderTurnLoop semantic session compression", () => {
 });
 
 describe("ProviderTurnLoop post-tool empty response recovery", () => {
-  it("recovers partial incomplete stream content as the final turn content", async () => {
+  it("does not recover partial incomplete stream content as final turn content", async () => {
     const harness = await createPostToolNudgeHarness({
       responses: [
         incompleteStreamExecution("Recovered partial answer.")
@@ -605,8 +605,8 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     const result = await runBasicProviderTurn(harness.loop);
 
     expect(result.iterations).toBe(1);
-    expect(result.providerExecution?.ok).toBe(true);
-    expect(result.providerExecution?.response?.content).toBe("Recovered partial answer.");
+    expect(result.providerExecution?.ok).toBe(false);
+    expect(result.providerExecution?.response).toBeUndefined();
     expect(result.providerExecution?.attempts).toEqual([
       expect.objectContaining({
         ok: false,

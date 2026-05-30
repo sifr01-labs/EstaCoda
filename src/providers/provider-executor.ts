@@ -619,6 +619,7 @@ async function collectProviderStream(input: {
   let content = "";
   let finalResponse: ProviderResponse | undefined;
   let errorResponse: ProviderResponse | undefined;
+  let sawTransportDone = false;
   const toolCallFragments = new Map<string, ProviderExecutionResult["toolCalls"][number]>();
 
   for await (const event of input.stream) {
@@ -661,6 +662,9 @@ async function collectProviderStream(input: {
       case "error":
         errorResponse = event.response;
         break;
+      case "transport-done":
+        sawTransportDone = true;
+        break;
     }
   }
 
@@ -675,6 +679,19 @@ async function collectProviderStream(input: {
     return {
       response: finalResponse,
       toolCalls: [...toolCallFragments.values()]
+    };
+  }
+
+  if (sawTransportDone && toolCallFragments.size === 0 && content.length > 0) {
+    return {
+      response: {
+        ok: true,
+        content,
+        model: input.model,
+        provider: input.provider,
+        finishReason: "unknown"
+      },
+      toolCalls: []
     };
   }
 
@@ -770,6 +787,7 @@ function shouldFallback(
       response.errorClass === "network" ||
       response.errorClass === "server" ||
       response.errorClass === "model-unavailable" ||
+      response.errorClass === "incomplete-stream" ||
       response.errorClass === "timeout") {
     return true;
   }
