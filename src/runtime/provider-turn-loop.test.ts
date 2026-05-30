@@ -12,7 +12,9 @@ import { SessionCompressionService, type CompactResult } from "../prompt/session
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { SESSION_RECALL_UNTRUSTED_NOTICE } from "../session/session-recall-service.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
+import { ToolCallPlanner } from "../tools/tool-call-planner.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
+import { ToolRegistry } from "../tools/tool-registry.js";
 import { RunRecorder } from "./run-recorder.js";
 import { ToolPlanRunner } from "./tool-plan-runner.js";
 import { ProviderTurnLoop, type ProviderTurnLoopOptions } from "./provider-turn-loop.js";
@@ -495,6 +497,92 @@ async function createPostToolNudgeHarness(input: {
     executePlans,
     sessionDb,
     sessionId
+  };
+}
+
+async function createRealToolPlanningHarness(input: {
+  response: ProviderExecutionResult;
+}) {
+  const completeSpy = vi.fn<ProviderExecutor["complete"]>(async (_request, _preferences, options) => {
+    for (const toolCall of input.response.toolCalls) {
+      await options?.onEvent?.({
+        kind: "provider-tool-call",
+        provider: input.response.response?.provider ?? "test-provider",
+        model: input.response.response?.model ?? "test-model",
+        index: toolCall.index,
+        id: toolCall.id,
+        name: toolCall.name,
+        argumentsText: toolCall.argumentsText,
+        raw: toolCall.raw
+      });
+    }
+    return input.response;
+  });
+  const providerExecutor = {
+    complete: completeSpy
+  } as unknown as ProviderExecutor;
+  const sessionDb = new InMemorySessionDB();
+  const sessionId = `real-planning-session-${Date.now()}-${Math.random()}`;
+  await sessionDb.createSession({ id: sessionId, profileId: "default", title: "real-planning" });
+  const trajectoryRecorder = new TrajectoryRecorder({
+    profileId: "default",
+    sessionId,
+    modelId: "test-model"
+  });
+  const runRecorder = new RunRecorder({
+    sessionDb,
+    sessionId,
+    trajectoryRecorder,
+    profileId: "default"
+  });
+  const toolRegistry = new ToolRegistry();
+  toolRegistry.register({
+    ...testTool,
+    isAvailable: () => true,
+    run: async () => ({ ok: true, content: "should not execute" })
+  });
+  const executeTool = vi.fn();
+  const toolPlanRunner = new ToolPlanRunner({
+    toolCallPlanner: new ToolCallPlanner({ registry: toolRegistry }),
+    toolExecutor: {
+      getToolDefinition: (name: string) => name === testTool.name ? testTool : undefined,
+      executeTool
+    } as never,
+    runRecorder,
+    sessionId,
+    maxConcurrentSafeTools: 4
+  });
+  const loop = new ProviderTurnLoop({
+    providerExecutor,
+    model: mockModel,
+    primaryModelRoute: primaryRoute,
+    modelFallbackRoutes: [fallbackRoute],
+    providerPreferences: {
+      providerOrder: ["test-provider"]
+    },
+    sessionDb,
+    sessionId,
+    profileId: "default",
+    trajectoryRecorder,
+    runRecorder,
+    toolPlanRunner,
+    soul: undefined,
+    memoryPromptContext: undefined,
+    skillsIndex: [],
+    ui: undefined,
+    agentProfile: undefined,
+    budgets: {
+      maxProviderIterations: 1,
+      maxProviderToolCalls: 8,
+      maxRepeatedToolFailures: 3,
+      maxProviderWallClockMs: 10_000
+    }
+  });
+
+  return {
+    loop,
+    completeSpy,
+    executeTool
   };
 }
 
@@ -1339,6 +1427,61 @@ describe("ProviderTurnLoop truncated tool-call safety", () => {
     expect(result.toolExecutions).toEqual([]);
     expect(result.providerExecution?.ok).toBe(false);
     expect(result.providerExecution?.attempts).toHaveLength(2);
+  });
+
+  it("keeps finalized malformed tool JSON as a tool-planning error", async () => {
+    const harness = await createRealToolPlanningHarness({
+      response: providerExecution("", [providerToolCall("bad-json", "{\"path\"")], {
+        response: {
+          ok: true,
+          content: "",
+          finishReason: "tool_calls",
+          model: "test-model",
+          provider: "test-provider"
+        }
+      })
+    });
+    const toolPlans: ToolCallPlan[] = [];
+
+    const result = await harness.loop.run({
+      userText: "current user request",
+      routedText: "current user request",
+      selectedSkill: undefined,
+      selectedSkillInstructions: undefined,
+      selectedSkillResources: undefined,
+      selectedSkillSetup: undefined,
+      intent: { labels: ["general"], confidence: 1, nativeIntent: "general", evidence: [], suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, rationale: "" },
+      securityDecision: "allow",
+      toolExecutions: [],
+      context: undefined,
+      projectContext: undefined,
+      attachments: undefined,
+      memoryPromptContext: undefined,
+      providerTools: [],
+      fallbackText: "",
+      toolPlans,
+      trustedWorkspace: false,
+      initialRiskClass: "read-only-local"
+    });
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(1);
+    expect(harness.executeTool).not.toHaveBeenCalled();
+    expect(result.providerExecution?.ok).toBe(true);
+    expect(result.providerExecution?.response?.finishReason).toBe("tool_calls");
+    expect(result.providerExecution?.toolCalls).toEqual([
+      expect.objectContaining({
+        id: "bad-json",
+        argumentsText: "{\"path\""
+      })
+    ]);
+    expect(result.toolExecutions).toEqual([]);
+    expect(toolPlans).toEqual([
+      expect.objectContaining({
+        id: "bad-json",
+        status: "invalid",
+        source: "provider-tool-call"
+      })
+    ]);
   });
 });
 
