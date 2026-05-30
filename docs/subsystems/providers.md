@@ -43,6 +43,120 @@ Two layers:
 - `ProviderExecutor`: streaming token collection, tool-call fragment assembly, fallback handling
 - `OpenAICompatibleProvider`: chat completions with tool schema support
 
+## Final State Metadata
+
+Provider output is not treated as usable until the runtime has a finalized provider response. Streaming token text can be shown while a request is in flight, but canonical assistant content, tool calls, retries, and session writes use the finalized `ProviderResponse` and `ProviderExecutionResult`.
+
+Normalized finish reasons are:
+
+| Finish reason | Meaning | Runtime behavior |
+|---------------|---------|------------------|
+| `stop` | Provider reported a normal stop. | The response can proceed to tool planning or final assistant output. |
+| `length` | Provider stopped at its output limit. | Visible text can enter text continuation. Tool calls are treated as unsafe until retried. Reasoning-only length exhaustion returns safe visible guidance. |
+| `tool_calls` | Provider finalized tool calls. | Finalized tool calls can be planned and executed through the normal tool safety path. |
+| `content_filter` | Provider stopped for policy/filtering. | The runtime does not text-continue filtered visible text. Operators should inspect provider policy, prompt content, and route choice. |
+| `incomplete` | Provider indicated an incomplete response. | The execution is not treated as a complete answer unless a later fallback succeeds. |
+| `unknown` | Provider finalized transport without a provider-specific reason. | Chat Completions streaming may finalize visible-only transport completion with `unknown`; tool-fragment streams without explicit final metadata still fail. |
+
+`finishReason: "length"` has two separate safety paths:
+
+- Visible text with no tool calls may continue on the same successful route. Continuation concatenates visible `response.content` only.
+- Tool calls produced under `length` are not executed from the first attempt. The runtime retries once on the successful route chain. If the retry is still length-truncated with tool calls, EstaCoda returns a deterministic refusal instead of executing incomplete arguments.
+
+Finalized malformed tool JSON remains a tool-planning error. It is not reclassified as provider failure, incomplete stream, or truncated-tool refusal. This distinction matters when debugging: provider execution succeeded, but the tool planner rejected unusable finalized arguments.
+
+Incomplete streams remain provider failures. Partial streamed tool fragments are discarded and are not surfaced as finalized tool calls. The `transport-done` marker used for `[DONE]` is internal stream-collector state, not user-visible text and not a session message.
+
+Provider usage metadata is normalized as:
+
+| Field | Meaning |
+|-------|---------|
+| `inputTokens` | Provider-reported prompt/input tokens |
+| `outputTokens` | Provider-reported completion/output tokens |
+| `totalTokens` | Provider-reported total tokens |
+| `reasoningTokens` | Provider-reported reasoning token telemetry |
+
+`reasoningTokens` is safe usage telemetry only. It does not mean raw reasoning was available, extracted, stored, displayed, summarized, or sent back to a provider. Raw reasoning, when an adapter can extract it for turn-local handling, is kept out of attempts, runtime events, session messages, summaries, memory, skill learning, and normal exports. Safe `reasoningMetadata` may record only presence, character count, and format.
+
+Operators can inspect provider final-state behavior through runtime `provider-result` events and session `provider-completion` / `provider-continuation` events. These events include finish reason, incomplete reason, usage, safe reasoning metadata, fallback status, and safe `runtimeMetadata` for truncation or continuation. They do not include raw provider payloads, raw reasoning, or discarded truncated tool arguments.
+
+## Route Output Limits
+
+Primary routes can set a route-level output cap:
+
+```yaml
+model:
+  provider: openai
+  id: gpt-4.1
+  maxTokens: 8192
+```
+
+The selected profile config is JSON on disk; the YAML above shows the shape. The same `maxTokens` route field is preserved through model aliases, fallback routes, `/model` session overrides, and session override reconstruction.
+
+Normalization rules:
+
+| Input | Result |
+|-------|--------|
+| unset, `null`, empty string, or whitespace | unset; provider default applies |
+| positive integer string, for example `"8192"` | accepted and normalized to `8192` |
+| positive integer number, for example `8192` | accepted |
+| `0`, negative values, floats, and non-numeric strings | rejected |
+
+Request-level `maxTokens` still wins over route-level `maxTokens`, but it is call-local. It does not mutate profile config, routes, aliases, fallback routes, session model overrides, runtime fingerprints, or diagnostics.
+
+Provider diagnostics display `Max output tokens: provider default` when the route value is unset. Configured integers are displayed directly. Values below `2048` warn because they are likely to increase truncation, tool-call refusal, or continuation attempts. Repair is ordinary config repair: edit the selected profile config through setup/model tooling or remove the cap to return to provider defaults.
+
+The provider request parameter name depends on the API mode:
+
+| API mode | Token cap parameter |
+|----------|---------------------|
+| OpenAI direct Chat Completions | `max_completion_tokens` |
+| Third-party OpenAI-compatible Chat Completions | `max_tokens` by default |
+| Provider metadata override | The metadata-selected chat token parameter |
+| OpenAI Responses API | `max_output_tokens` |
+
+Unset caps send no token parameter. Defensive request construction also omits token cap parameters for `null` or `0`.
+
+## Route-Aware Retries And Continuation
+
+Fallback identity is part of finalization behavior. Retry and continuation begin from the route that produced the successful-but-finalization-sensitive response, then preserve later fallbacks.
+
+Examples:
+
+| Original route chain | Successful route | Retry or continuation chain |
+|----------------------|------------------|-----------------------------|
+| `primary -> fallbackA -> fallbackB` | `primary` | `primary -> fallbackA -> fallbackB` |
+| `primary -> fallbackA -> fallbackB` | `fallbackA` | `fallbackA -> fallbackB` |
+| `primary -> fallbackA` | `fallbackA` | `fallbackA` |
+
+This applies to truncated tool-call retry and length-truncated visible text continuation. The runtime does not restart at the original primary after a fallback has already succeeded. Provider failure and fallback behavior still applies inside the sliced chain.
+
+Text continuation adds local-only provider messages:
+
+```json
+[
+  { "role": "assistant", "content": "<partial visible text>" },
+  {
+    "role": "user",
+    "content": "Your previous response was truncated by the output length limit. Continue exactly where you left off. Do not repeat previous text."
+  }
+]
+```
+
+Those synthetic messages are not persisted and are not emitted as user or assistant output. Continuation concatenates visible response content only, trims exact suffix/prefix overlap, and records safe continuation metadata when available. If all continuation attempts are still length-truncated, the best visible partial is returned without appending a runtime note.
+
+## Streaming Status
+
+OpenAI-compatible Chat Completions streaming is implemented with explicit finalization rules:
+
+- A chunk with a final `finish_reason` finalizes the stream even when usage arrives separately or is absent.
+- `[DONE]` is parsed as an internal transport marker.
+- Visible-only transport completion without provider finish metadata finalizes as `finishReason: "unknown"`.
+- Transport-only tool fragments without final finish metadata fail as `incomplete-stream`.
+- Abrupt stream end without transport completion or a final response fails as `incomplete-stream`.
+
+Responses API non-streaming execution is implemented for runnable routes. Responses streaming remains unsupported in this subsystem. If a route requires Responses streaming behavior, treat it as not implemented rather than assuming Chat Completions streaming semantics apply.
+
 ## Auxiliary Routes
 
 Auxiliary routes are preference/routing constructs, not separate runtimes:
