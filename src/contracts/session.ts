@@ -14,7 +14,10 @@ import type {
   ModelProfile,
   ProviderApiMode,
   ProviderAuthMethod,
-  ProviderId
+  ProviderFinishReason,
+  ProviderId,
+  ProviderLoopRuntimeMetadata,
+  ProviderUsage
 } from "./provider.js";
 
 export type SessionRole = "user" | "agent" | "system" | "tool";
@@ -251,6 +254,8 @@ export type SessionEvent =
       kind: "provider-completion";
       iteration?: number;
       ok: boolean;
+      finishReason?: ProviderFinishReason;
+      incompleteReason?: string;
       attempts: Array<{
         provider: string;
         model: string;
@@ -259,16 +264,15 @@ export type SessionEvent =
         errorClass?: ProviderErrorClass | string;
       }>;
       fallbackUsed: boolean;
-      usage?: {
-        inputTokens?: number;
-        outputTokens?: number;
-        totalTokens?: number;
-      };
+      usage?: ProviderUsage;
+      runtimeMetadata?: ProviderLoopRuntimeMetadata;
     }
   | {
       kind: "provider-continuation";
       iteration?: number;
       ok: boolean;
+      finishReason?: ProviderFinishReason;
+      incompleteReason?: string;
       attempts: Array<{
         provider: string;
         model: string;
@@ -281,11 +285,8 @@ export type SessionEvent =
         tool: string;
         status: string;
       }>;
-      usage?: {
-        inputTokens?: number;
-        outputTokens?: number;
-        totalTokens?: number;
-      };
+      usage?: ProviderUsage;
+      runtimeMetadata?: ProviderLoopRuntimeMetadata;
     }
   | {
       kind: "provider-iteration";

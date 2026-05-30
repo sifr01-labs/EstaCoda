@@ -6,6 +6,13 @@ import type {
   ModelProfile
 } from "../contracts/provider.js";
 
+export type ChatMaxTokenParam = "max_tokens" | "max_completion_tokens";
+
+export type ReasoningEchoField =
+  | "reasoning_content"
+  | "reasoning"
+  | "reasoning_details";
+
 export type ProviderVisibility = {
   modelPicker: boolean;
   setup: boolean;
@@ -26,6 +33,8 @@ export type ProviderMetadata = {
   defaultAuthMethod: ProviderAuthMethod;
   allowsCustomBaseUrl: boolean;
   requiresModelSelection: boolean;
+  chatMaxTokenParam?: ChatMaxTokenParam;
+  reasoningEchoField?: ReasoningEchoField;
 };
 
 const BUILT_IN_METADATA: Record<string, ProviderMetadata> = {
