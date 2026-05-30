@@ -13,6 +13,7 @@ import type {
   ProviderRouteRole,
   ProviderUsage
 } from "../contracts/provider.js";
+import { stripThinkBlocks } from "./provider-reasoning.js";
 import { ProviderRegistry } from "./provider-registry.js";
 import { resolveRuntimeCredential } from "./runtime-credential-resolver.js";
 import { getProviderMetadata } from "./provider-metadata.js";
@@ -709,14 +710,6 @@ async function collectProviderStream(input: {
     },
     toolCalls: []
   };
-}
-
-function stripThinkBlocks(text: string): string {
-  return text
-    .replace(/<think>[\s\S]*?<\/think>/giu, "")
-    .replace(/<thinking>[\s\S]*?<\/thinking>/giu, "")
-    .replace(/<reasoning>[\s\S]*?<\/reasoning>/giu, "")
-    .trim();
 }
 
 function partialContentFromIncompleteStream(content: string): string | undefined {
