@@ -5,6 +5,10 @@ import type { Readable, Writable } from "node:stream";
 import { buildOnboardingPromptCardViewModel, type BuildOnboardingPromptCardInput } from "../ui/view-models/builders.js";
 import { selectOption, type SelectPromptInput } from "./interactive-select.js";
 import { createSessionRenderer } from "./session-renderer.js";
+import {
+  promptUiContextForLocale,
+  type PromptUiContext,
+} from "../contracts/ui.js";
 
 export type PromptOptions = {
   secret?: boolean;
@@ -12,12 +16,31 @@ export type PromptOptions = {
 };
 
 export type Prompt = ((question: string, options?: PromptOptions) => Promise<string>) & {
+  uiContext?: PromptUiContext;
   select?: <T>(input: SelectPromptInput<T>) => Promise<T>;
   onboardingCard?: (input: BuildOnboardingPromptCardInput) => Promise<void> | void;
   close?: () => void;
 };
 
-export function createReadlinePrompt(input: Readable = defaultInput, output: Writable = defaultOutput): Prompt {
+export type CreateReadlinePromptOptions = {
+  readonly input?: Readable;
+  readonly output?: Writable;
+  readonly uiContext?: PromptUiContext;
+};
+
+export function createReadlinePrompt(options?: CreateReadlinePromptOptions): Prompt;
+export function createReadlinePrompt(input?: Readable, output?: Writable): Prompt;
+export function createReadlinePrompt(
+  inputOrOptions: Readable | CreateReadlinePromptOptions = defaultInput,
+  outputArg: Writable = defaultOutput
+): Prompt {
+  const options = isCreateReadlinePromptOptions(inputOrOptions)
+    ? inputOrOptions
+    : { input: inputOrOptions, output: outputArg };
+  const input = options.input ?? defaultInput;
+  const output = options.output ?? defaultOutput;
+  const uiContext = options.uiContext ?? promptUiContextForLocale("en");
+
   return Object.assign(
     async (question: string, options?: PromptOptions) => {
       if (options?.secret === true) {
@@ -26,17 +49,51 @@ export function createReadlinePrompt(input: Readable = defaultInput, output: Wri
       return plainQuestion(input, output, question, options);
     },
     {
-      select: async <T>(selection: SelectPromptInput<T>) => selectOption(input, output, selection),
+      uiContext,
+      select: async <T>(selection: SelectPromptInput<T>) => selectOption(input, output, applyPromptUiContext(selection, uiContext)),
       onboardingCard: (card: BuildOnboardingPromptCardInput) => {
+        const contextualCard = applyPromptUiContext(card, uiContext);
         const renderer = createSessionRenderer({
           output: output as NodeJS.WritableStream,
-          locale: card.locale,
+          locale: contextualCard.locale,
         });
-        output.write(`${renderer.render(buildOnboardingPromptCardViewModel(card))}\n`);
+        output.write(`${renderer.render(buildOnboardingPromptCardViewModel(contextualCard))}\n`);
       },
       close: () => undefined
     }
   );
+}
+
+export function withPromptUiContext(prompt: Prompt, uiContext: PromptUiContext): Prompt {
+  return Object.assign(
+    async (question: string, options?: PromptOptions) => prompt(question, options),
+    {
+      uiContext,
+      select: prompt.select === undefined
+        ? undefined
+        : async <T>(selection: SelectPromptInput<T>) => prompt.select!(applyPromptUiContext(selection, uiContext)),
+      onboardingCard: prompt.onboardingCard === undefined
+        ? undefined
+        : (card: BuildOnboardingPromptCardInput) => prompt.onboardingCard!(applyPromptUiContext(card, uiContext)),
+      close: () => prompt.close?.(),
+    }
+  );
+}
+
+function applyPromptUiContext<T extends { readonly locale?: PromptUiContext["locale"]; readonly direction?: PromptUiContext["direction"] }>(
+  input: T,
+  uiContext: PromptUiContext
+): T & PromptUiContext {
+  const locale = input.locale ?? uiContext.locale;
+  return {
+    ...input,
+    locale,
+    direction: input.direction ?? (input.locale === undefined ? uiContext.direction : promptUiContextForLocale(locale).direction),
+  };
+}
+
+function isCreateReadlinePromptOptions(value: Readable | CreateReadlinePromptOptions): value is CreateReadlinePromptOptions {
+  return typeof value === "object" && value !== null && ("input" in value || "output" in value || "uiContext" in value);
 }
 
 export function canRunInteractive(input: NodeJS.ReadStream = defaultInput): boolean {

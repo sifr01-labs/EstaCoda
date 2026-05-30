@@ -2,6 +2,7 @@
 // Keep this minimal — no full bidi framework.
 
 export const LRI = "\u2066";
+export const RLI = "\u2067";
 export const PDI = "\u2069";
 
 /**
@@ -10,4 +11,12 @@ export const PDI = "\u2069";
  */
 export function isolateLtr(value: string): string {
   return `${LRI}${value}${PDI}`;
+}
+
+/**
+ * Wraps natural-language RTL text in Right-to-Left Isolate (RLI) and
+ * Pop Directional Isolate (PDI) for render-time terminal stability.
+ */
+export function isolateRtl(value: string): string {
+  return `${RLI}${value}${PDI}`;
 }

@@ -36,6 +36,7 @@ import {
   type WebSetupInput
 } from "../config/runtime-config.js";
 import { canRunInteractive, createReadlinePrompt, type Prompt } from "./readline-prompt.js";
+import { promptUiContextForLocale } from "../contracts/ui.js";
 import { runFirstRunSetup } from "../setup/onboarding-wizard/runner.js";
 import { runConfigEditorSetup } from "../setup/config-editor/runner.js";
 import { createReviewedSetupApplyExecutor } from "../setup/review/apply-executor.js";
@@ -1199,7 +1200,9 @@ async function runBareModelPicker(
     mode: "setup"
   });
 
-  const prompt = options.prompt ?? createReadlinePrompt();
+  const prompt = options.prompt ?? createReadlinePrompt({
+    uiContext: promptUiContextForLocale(localeForConfig(config)),
+  });
 
   // ── Provider selection ──
   const providerCandidates = await flow.listProviderCandidates();

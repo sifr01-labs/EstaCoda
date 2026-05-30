@@ -32,10 +32,11 @@ import type {
   ToolActivityRailEvent,
 } from "../../contracts/view-model.js";
 import type { ResolvedTokens, TokenGlyph } from "../../contracts/ui-tokens.js";
-import { measureTextWidth, measureVisibleWidth, padVisibleEnd, padVisibleAlign, openHorizontalFrame, truncateVisible } from "./layout.js";
+import { measureTextWidth, measureVisibleWidth, padVisibleEnd, padVisibleStart, padVisibleAlign, openHorizontalFrame, truncateVisible } from "./layout.js";
 import type { UiLocale } from "../../ui/cli-ui-copy.js";
 import { chromeCopy } from "../../ui/cli-ui-copy.js";
-import { isolateLtr } from "../../ui/bidi.js";
+import { isolateLtr, isolateRtl } from "../../ui/bidi.js";
+import type { TextDirection } from "../../contracts/ui.js";
 
 export interface StandardRendererOptions {
   readonly tokens: ResolvedTokens;
@@ -284,9 +285,11 @@ export class StandardRenderer {
     return contentLines.map((l) => `  ${l}`).join("\n");
   }
 
-  #onboardingTitle(title: string, maxWidth: number): string {
+  #onboardingTitle(title: string, maxWidth: number, direction: TextDirection = "ltr"): string {
     const symbol = this.#useUnicode ? "𓂀" : "*";
-    return truncateVisible(`${symbol}  ${title}`, maxWidth);
+    const rawTitle = direction === "rtl" ? `${title}  ${symbol}` : `${symbol}  ${title}`;
+    const visibleTitle = truncateVisible(rawTitle, maxWidth);
+    return direction === "rtl" ? isolateRtl(visibleTitle) : visibleTitle;
   }
 
   #assistantResponseTitle(label: string, maxWidth: number): string {
@@ -534,6 +537,7 @@ export class StandardRenderer {
 
   renderOnboardingPromptCard(vm: OnboardingPromptCardViewModel): string {
     const locale = vm.locale ?? this.#locale;
+    const direction = vm.direction ?? (locale === "ar" ? "rtl" : "ltr");
     const horiz = this.#useUnicode ? "─" : "-";
     const topLeft = this.#useUnicode ? "╭" : "+";
     const topRight = this.#useUnicode ? "╮" : "+";
@@ -554,7 +558,7 @@ export class StandardRenderer {
     const contentWidth = Math.max(8, width - 4);
     const innerWidth = Math.max(8, width - 2);
     const leftTitleRule = `${horiz.repeat(Math.min(4, Math.max(1, innerWidth - 4)))} `;
-    const titleRaw = this.#onboardingTitle(vm.title, Math.max(1, innerWidth - measureVisibleWidth(leftTitleRule) - 2));
+    const titleRaw = this.#onboardingTitle(vm.title, Math.max(1, innerWidth - measureVisibleWidth(leftTitleRule) - 2), direction);
     const rightRuleWidth = Math.max(
       0,
       innerWidth - measureVisibleWidth(leftTitleRule) - measureVisibleWidth(titleRaw) - 1
@@ -569,12 +573,14 @@ export class StandardRenderer {
     const lines: string[] = [top];
 
     for (let i = 0; i < vm.bodyLines.length; i++) {
-      const text = truncateVisible(vm.bodyLines[i], contentWidth);
-      lines.push(`  ${i === 0 ? this.#primary(text) : this.#secondary(text)}`);
+      const text = this.#localizedNatural(vm.bodyLines[i], direction, contentWidth);
+      const styled = i === 0 ? this.#primary(text) : this.#secondary(text);
+      lines.push(`  ${direction === "rtl" ? padVisibleStart(styled, contentWidth) : styled}`);
     }
 
     for (const technicalLine of vm.technicalLines ?? []) {
-      lines.push(`  ${this.#primary(this.#localizedTechnical(technicalLine, locale, contentWidth))}`);
+      const text = this.#primary(this.#localizedTechnical(technicalLine, locale, contentWidth));
+      lines.push(`  ${direction === "rtl" ? padVisibleStart(text, contentWidth) : text}`);
     }
 
     const hasPreOptionContent = vm.bodyLines.length > 0 || (vm.technicalLines?.length ?? 0) > 0;
@@ -588,19 +594,31 @@ export class StandardRenderer {
       const marker = isSelected ? this.#action(selectedMarker) : " ";
       const optionText = option.technical === true
         ? this.#localizedTechnical(option.label, locale, Math.max(1, contentWidth - 2))
-        : truncateVisible(option.label, Math.max(1, contentWidth - 2));
-      lines.push(`  ${marker} ${this.#primary(optionText)}`);
+        : this.#localizedNatural(option.label, direction, Math.max(1, contentWidth - 2));
+      const styledOption = this.#primary(optionText);
+      lines.push(direction === "rtl"
+        ? `  ${padVisibleStart(styledOption, Math.max(1, contentWidth - 2))} ${marker}`
+        : `  ${marker} ${styledOption}`);
       if (option.description !== undefined) {
-        lines.push(`    ${this.#muted(truncateVisible(option.description, Math.max(1, contentWidth - 4)))}`);
+        const description = this.#muted(this.#localizedNatural(option.description, direction, Math.max(1, contentWidth - 4)));
+        lines.push(direction === "rtl"
+          ? `  ${padVisibleStart(description, Math.max(1, contentWidth - 2))}`
+          : `    ${description}`);
       }
     }
 
     if (vm.hint !== undefined && vm.hint.length > 0) {
-      lines.push(`  ${this.#muted(truncateVisible(vm.hint, contentWidth))}`);
+      const hint = this.#muted(this.#localizedNatural(vm.hint, direction, contentWidth));
+      lines.push(`  ${direction === "rtl" ? padVisibleStart(hint, contentWidth) : hint}`);
     }
 
     lines.push(bottom);
     return lines.join("\n");
+  }
+
+  #localizedNatural(value: string, direction: TextDirection, maxWidth: number): string {
+    const truncated = truncateVisible(value, maxWidth);
+    return direction === "rtl" ? isolateRtl(truncated) : truncated;
   }
 
   // ──────────────────────────────────────

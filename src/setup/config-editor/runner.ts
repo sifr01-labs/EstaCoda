@@ -4,6 +4,8 @@ import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "..
 import { loadRuntimeConfig } from "../../config/runtime-config.js";
 import type { SecurityApprovalMode } from "../../contracts/security.js";
 import type { Prompt } from "../../cli/readline-prompt.js";
+import { withPromptUiContext } from "../../cli/readline-prompt.js";
+import { promptUiContextForLocale } from "../../contracts/ui.js";
 import { promptForApiKeyInput } from "../../cli/secret-prompt.js";
 import {
   createProviderModelSelectionFlow,
@@ -149,7 +151,11 @@ async function runConfigEditorOnce(
   defaultActionId: SetupEditorActionId | SetupRouteActionId | undefined
 ): Promise<RunOnceResult> {
   const locale = await resolveConfigEditorLocale(options);
-  const localizedOptions: LocalizedConfigEditorRunnerOptions = { ...options, locale };
+  const localizedOptions: LocalizedConfigEditorRunnerOptions = {
+    ...options,
+    locale,
+    prompt: withPromptUiContext(options.prompt, promptUiContextForLocale(locale)),
+  };
   const session = initialDecision.setupEditorPlanSession;
 
   if (session === undefined) {

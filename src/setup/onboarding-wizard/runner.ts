@@ -5,6 +5,8 @@ import {
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../../config/profile-home.js";
 import { ensureDefaultProfileState } from "../../cli/profile-state.js";
 import type { Prompt } from "../../cli/readline-prompt.js";
+import { withPromptUiContext } from "../../cli/readline-prompt.js";
+import { promptUiContextForLocale } from "../../contracts/ui.js";
 import { promptForApiKeyInput } from "../../cli/secret-prompt.js";
 import {
   createProviderModelSelectionFlow,
@@ -49,6 +51,7 @@ import {
   promptSetupStringWithDefault,
   renderSetupApplyEndState,
   renderSetupApplyPlanningResult,
+  setupPromptContext,
   setupCopyText,
   showSetupCard,
 } from "../setup-prompts.js";
@@ -113,8 +116,9 @@ export async function runFirstRunSetup(
   const stateHome = resolveStateHome({ homeDir: options.homeDir });
   const flowEngine = options.flowEngine ?? await createDefaultFlowEngine(options);
   const initialLocale = options.defaultSelections?.language ?? "en";
+  const initialPromptContext = setupPromptContext(prompt, initialLocale);
 
-  await showSetupCard(prompt, initialLocale, {
+  await showSetupCard(initialPromptContext, {
     title: setupCopyText(initialLocale, "onboarding.welcome.title"),
     bodyLines: [setupCopyText(initialLocale, "onboarding.welcome")],
     options: [{ id: "begin", label: setupCopyText(initialLocale, "onboarding.common.begin") }],
@@ -126,8 +130,13 @@ export async function runFirstRunSetup(
     currentFlavor: options.defaultSelections?.interfaceFlavor,
   });
   const language = interfaceChoice.language;
+  const localizedOptions: FirstRunSetupRunnerOptions = {
+    ...options,
+    prompt: withPromptUiContext(prompt, promptUiContextForLocale(language)),
+  };
+  const promptContext = setupPromptContext(localizedOptions.prompt, language);
 
-  const workspaceSelection = await promptForWorkspaceAndTrust(options, language);
+  const workspaceSelection = await promptForWorkspaceAndTrust(localizedOptions, language);
   const workspaceRoot = workspaceSelection.workspaceRoot;
   const workspaceTrusted = workspaceSelection.workspaceTrusted;
 
@@ -136,7 +145,7 @@ export async function runFirstRunSetup(
   if (providerCandidates.length === 0) {
     throw new Error("No setup-visible provider candidates are available.");
   }
-  const primaryProviderCandidate = await promptProviderCandidate(prompt, {
+  const primaryProviderCandidate = await promptProviderCandidate(localizedOptions.prompt, {
     candidates: providerCandidates,
     currentProviderId: options.defaultSelections?.primaryProvider,
   }, language);
@@ -147,7 +156,7 @@ export async function runFirstRunSetup(
   if (modelCandidates.length === 0) {
     throw new Error(`No setup-visible models are available for ${primaryProviderCandidate.displayName}.`);
   }
-  const primaryModelCandidate = await promptModelCandidate(prompt, {
+  const primaryModelCandidate = await promptModelCandidate(localizedOptions.prompt, {
     providerId: primaryProvider,
     candidates: modelCandidates,
     currentModelId: options.defaultSelections?.primaryModel,
@@ -189,7 +198,7 @@ export async function runFirstRunSetup(
       const envVarName = resolution.credentialAction.envVarName;
       primaryCredential = { kind: "env", name: envVarName };
       const promptResult = await promptForApiKeyInput({
-        prompt,
+        prompt: localizedOptions.prompt,
         providerId: primaryProvider,
         envVarName,
         question: `${setupCopyText(language, "onboarding.providers.primaryCredential")} [${envVarName}]: `,
@@ -209,7 +218,7 @@ export async function runFirstRunSetup(
 
   }
 
-  const securityMode = await promptSetupChoice(prompt, {
+  const securityMode = await promptSetupChoice(promptContext, {
     title: setupCopyText(language, "onboarding.security.title"),
     message: `${setupCopyText(language, "onboarding.security")}\n`,
     choices: [
@@ -235,7 +244,7 @@ export async function runFirstRunSetup(
     defaultValue: options.defaultSelections?.securityMode ?? "adaptive",
   });
 
-  const workflowLearning = await promptSetupChoice(prompt, {
+  const workflowLearning = await promptSetupChoice(promptContext, {
     title: setupCopyText(language, "onboarding.workflowLearning.title"),
     message: `${setupCopyText(language, "onboarding.workflowLearning")}\n`,
     choices: [
@@ -269,7 +278,7 @@ export async function runFirstRunSetup(
 
   const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
   const configPath = resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
-  const optionalCapabilityFlow = await chooseOptionalCapabilities(options, language, {
+  const optionalCapabilityFlow = await chooseOptionalCapabilities(localizedOptions, language, {
     configPath,
     profileId,
     workspaceRoot,
@@ -310,7 +319,7 @@ export async function runFirstRunSetup(
   const summaryText = renderOnboardingWizardSummary(wizardState);
   write(options, `${summaryText}\n`);
 
-  const reviewAccepted = await promptSetupChoice(prompt, {
+  const reviewAccepted = await promptSetupChoice(promptContext, {
     title: setupCopyText(language, "onboarding.summary.confirmTitle"),
     message: `${summaryText}\n\n${setupCopyText(language, "onboarding.summary.confirmMessage")}\n`,
     choices: [
@@ -354,6 +363,7 @@ export async function runFirstRunSetup(
     : applyEndState.kind !== "blocked" && applyEndState.kind !== "cancelled";
   const launchRequested = await promptForPostSetupLaunchRequest({
     options,
+    prompt: localizedOptions.prompt,
     locale: language,
     completed,
     workspaceTrusted,
@@ -380,6 +390,7 @@ export async function runFirstRunSetup(
 
 async function promptForPostSetupLaunchRequest(input: {
   readonly options: FirstRunSetupRunnerOptions;
+  readonly prompt: Prompt;
   readonly locale: SetupCopyLocale;
   readonly completed: boolean;
   readonly workspaceTrusted: boolean;
@@ -394,7 +405,7 @@ async function promptForPostSetupLaunchRequest(input: {
     return undefined;
   }
 
-  return promptSetupChoice(input.options.prompt, {
+  return promptSetupChoice(setupPromptContext(input.prompt, input.locale), {
     title: setupCopyText(input.locale, "onboarding.launch.startNow"),
     message: `${setupCopyText(input.locale, "onboarding.launch.startNow")}\n`,
     choices: [
@@ -509,7 +520,7 @@ async function promptForCanonicalWorkspaceRoot(
   let defaultWorkspaceRoot = options.defaultSelections?.workspaceRoot ?? options.workspaceRoot;
 
   while (true) {
-    await showSetupCard(options.prompt, language, {
+    await showSetupCard(setupPromptContext(options.prompt, language), {
       title: setupCopyText(language, "onboarding.workspace.title"),
       bodyLines: [setupCopyText(language, "onboarding.workspace.root")],
       technicalLines: [defaultWorkspaceRoot],

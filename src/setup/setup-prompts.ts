@@ -1,6 +1,10 @@
 import type { SelectPromptInput } from "../cli/interactive-select.js";
 import type { Prompt } from "../cli/readline-prompt.js";
 import {
+  promptUiContextForLocale,
+  type PromptUiContext,
+} from "../contracts/ui.js";
+import {
   type SetupApplyEndState,
   type SetupApplyPlanningResult,
 } from "./setup-apply-plan.js";
@@ -26,6 +30,20 @@ export type SetupCardOption = {
   readonly technical?: boolean;
 };
 
+export type SetupPromptContext = {
+  readonly prompt: Prompt;
+  readonly locale: SetupCopyLocale;
+  readonly uiContext: PromptUiContext;
+};
+
+export function setupPromptContext(prompt: Prompt, locale: SetupCopyLocale): SetupPromptContext {
+  return {
+    prompt,
+    locale,
+    uiContext: promptUiContextForLocale(locale),
+  };
+}
+
 const REVIEW_SECTION_COPY_KEYS: Record<SetupReviewManifestSection, SetupCopyKey> = {
   "files-to-write-update": "setupReview.sections.filesToWriteUpdate",
   "secret-refs-to-store": "setupReview.sections.secretRefsToStore",
@@ -41,7 +59,9 @@ const REVIEW_SECTION_COPY_KEYS: Record<SetupReviewManifestSection, SetupCopyKey>
   warnings: "setupReview.sections.warnings",
 };
 
-export async function promptSetupChoice<T>(prompt: Prompt, input: {
+type SetupPromptTarget = Prompt | SetupPromptContext;
+
+export async function promptSetupChoice<T>(target: SetupPromptTarget, input: {
   readonly title: string;
   readonly message: string;
   readonly choices: readonly SetupChoice<T>[];
@@ -52,6 +72,7 @@ export async function promptSetupChoice<T>(prompt: Prompt, input: {
   }
 
   const defaultIndex = Math.max(0, input.choices.findIndex((choice) => Object.is(choice.value, input.defaultValue)));
+  const { prompt, uiContext } = resolveSetupPromptTarget(target);
   if (prompt.select !== undefined) {
     return prompt.select({
       title: input.title,
@@ -64,6 +85,8 @@ export async function promptSetupChoice<T>(prompt: Prompt, input: {
       defaultIndex,
       fallbackPrompt: "Choose: ",
       surface: "promptCard",
+      locale: uiContext.locale,
+      direction: uiContext.direction,
     } satisfies SelectPromptInput<T>);
   }
 
@@ -73,14 +96,14 @@ export async function promptSetupChoice<T>(prompt: Prompt, input: {
   return input.choices[selectedIndex]?.value ?? input.choices[defaultIndex === -1 ? 0 : defaultIndex]!.value;
 }
 
-export async function promptSetupYesNo(prompt: Prompt, input: {
+export async function promptSetupYesNo(target: SetupPromptTarget, input: {
   readonly title: string;
   readonly message: string;
   readonly yes: Omit<SetupChoice<true>, "value">;
   readonly no: Omit<SetupChoice<false>, "value">;
   readonly defaultValue?: boolean;
 }): Promise<boolean> {
-  return promptSetupChoice(prompt, {
+  return promptSetupChoice(target, {
     title: input.title,
     message: input.message,
     choices: [
@@ -92,17 +115,18 @@ export async function promptSetupYesNo(prompt: Prompt, input: {
 }
 
 export async function promptSetupStringWithDefault(
-  prompt: Prompt,
+  target: SetupPromptTarget,
   question: string,
   defaultValue: string
 ): Promise<string> {
+  // Follow-up: raw readline prompts need RTL-safe display for mixed defaults.
+  const { prompt } = resolveSetupPromptTarget(target);
   const answer = (await prompt(question)).trim();
   return answer.length > 0 ? answer : defaultValue;
 }
 
 export async function showSetupCard(
-  prompt: Prompt,
-  locale: SetupCopyLocale,
+  target: SetupPromptTarget,
   input: {
     readonly title: string;
     readonly bodyLines: readonly string[];
@@ -110,15 +134,28 @@ export async function showSetupCard(
     readonly options: readonly SetupCardOption[];
   }
 ): Promise<void> {
+  const { prompt, uiContext } = resolveSetupPromptTarget(target);
   await prompt.onboardingCard?.({
     title: input.title,
     bodyLines: input.bodyLines,
     technicalLines: input.technicalLines,
     options: input.options,
     selectedOptionIndex: 0,
-    locale,
-    direction: locale === "ar" ? "rtl" : "ltr",
+    locale: uiContext.locale,
+    direction: uiContext.direction,
   });
+}
+
+function resolveSetupPromptTarget(target: SetupPromptTarget): SetupPromptContext {
+  if (typeof target === "function") {
+    const uiContext = target.uiContext ?? promptUiContextForLocale("en");
+    return {
+      prompt: target,
+      locale: uiContext.locale,
+      uiContext,
+    };
+  }
+  return target;
 }
 
 export function setupCopyText(locale: SetupCopyLocale, key: SetupCopyKey): string {

@@ -3,7 +3,7 @@ import { createInterface as createPromptInterface } from "node:readline/promises
 import type { Readable, Writable } from "node:stream";
 import { buildOnboardingPromptCardViewModel, buildPickerViewModel } from "../ui/view-models/builders.js";
 import type { OnboardingPromptOption, PickerOption, ViewModel } from "../contracts/view-model.js";
-import type { UiLocale } from "../contracts/ui.js";
+import type { Locale, TextDirection } from "../contracts/ui.js";
 import { createSessionRenderer } from "./session-renderer.js";
 
 export type SelectPromptInput<T> = {
@@ -19,8 +19,8 @@ export type SelectPromptInput<T> = {
   defaultIndex?: number;
   fallbackPrompt: string;
   surface?: "promptCard";
-  locale?: UiLocale;
-  direction?: "ltr" | "rtl";
+  locale?: Locale;
+  direction?: TextDirection;
   technicalLines?: readonly string[];
 };
 

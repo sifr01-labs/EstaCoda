@@ -1,7 +1,9 @@
 import type { Prompt } from "../cli/readline-prompt.js";
+import { withPromptUiContext } from "../cli/readline-prompt.js";
 import type { ActivityLabelsLocale, UiFlavor, UiLanguage } from "../config/runtime-config.js";
+import { promptUiContextForLocale } from "../contracts/ui.js";
 import type { SetupCopyKey, SetupCopyLocale } from "./setup-copy.js";
-import { promptSetupChoice, setupCopyText, type SetupChoice } from "./setup-prompts.js";
+import { promptSetupChoice, setupPromptContext, setupCopyText, type SetupChoice } from "./setup-prompts.js";
 
 export type InterfaceStyleChoice = SetupChoice<{
   readonly flavor: UiFlavor;
@@ -27,7 +29,7 @@ export async function promptInterfaceLanguageAndStyle(
 ): Promise<InterfaceLanguageAndStyleSelection> {
   const initialLocale = input.initialLocale ?? input.currentLanguage ?? "en";
   const defaultLanguage = input.currentLanguage ?? "en";
-  const language = await promptSetupChoice(prompt, {
+  const language = await promptSetupChoice(setupPromptContext(prompt, initialLocale), {
     title: setupCopyText(initialLocale, "onboarding.interfaceLanguage.title"),
     message: `${setupCopyText(initialLocale, "onboarding.interfaceLanguage")}\n`,
     choices: [
@@ -51,7 +53,8 @@ export async function promptInterfaceLanguageAndStyle(
   const defaultStyle = language === input.currentLanguage
     ? choices.find((choice) => choice.value.flavor === input.currentFlavor)?.value ?? choices[0]!.value
     : choices[0]!.value;
-  const style = await promptSetupChoice(prompt, {
+  const localizedPrompt = withPromptUiContext(prompt, promptUiContextForLocale(language));
+  const style = await promptSetupChoice(setupPromptContext(localizedPrompt, language), {
     title: setupCopyText(language, "onboarding.interfaceStyle.title"),
     message: `${setupCopyText(language, "onboarding.interfaceStyle.prompt")}\n`,
     choices: choices.map((choice) => ({

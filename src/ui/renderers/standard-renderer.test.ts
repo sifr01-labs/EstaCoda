@@ -37,7 +37,7 @@ import {
   slashMenuOption,
 } from "../view-models/builders.js";
 import { StandardRenderer } from "./standard-renderer.js";
-import { isolateLtr } from "../bidi.js";
+import { isolateLtr, isolateRtl } from "../bidi.js";
 import { measureVisibleWidth, stripAnsi } from "./layout.js";
 
 function fullCaps(): TerminalCapabilities {
@@ -485,7 +485,8 @@ describe("StandardRenderer — dark theme", () => {
       direction: "rtl",
     }));
 
-    expect(stripAnsi(out)).toContain("𓂀  الثقة بمساحة العمل");
+    expect(stripAnsi(out)).toContain(isolateRtl("الثقة بمساحة العمل  𓂀"));
+    expect(stripAnsi(out)).toContain(`${isolateRtl("ثق بمساحة العمل")} `);
     expect(out).toContain(isolateLtr("/workspace"));
     expect(out).toContain(isolateLtr("KIMI_API_KEY"));
     expect(out).toContain(isolateLtr("kimi-k2"));

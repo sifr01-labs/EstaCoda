@@ -3,7 +3,24 @@
 
 export type { UiMode, UiTheme, SkinName } from "./ui-tokens.js";
 export type { UiTokenContract, ResolvedTokens } from "./ui-tokens.js";
+import type { UiLocale } from "../ui/cli-ui-copy.js";
+
 export type { UiLocale } from "../ui/cli-ui-copy.js";
+
+export type Locale = UiLocale;
+export type TextDirection = "ltr" | "rtl";
+
+export interface PromptUiContext {
+  readonly locale: Locale;
+  readonly direction: TextDirection;
+}
+
+export function promptUiContextForLocale(locale: Locale): PromptUiContext {
+  return {
+    locale,
+    direction: locale === "ar" ? "rtl" : "ltr",
+  };
+}
 
 export interface TerminalCapabilities {
   isTTY: boolean;

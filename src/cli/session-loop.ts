@@ -45,6 +45,7 @@ import type { SessionStatusRailViewModel, SlashMenuViewModel, ToolActivityRailEv
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import { measureVisibleWidth } from "../ui/renderers/layout.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
+import { promptUiContextForLocale } from "../contracts/ui.js";
 import { resolveHomeDir } from "../config/home-dir.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { loadRuntimeConfig, saveRuntimeConfig } from "../config/runtime-config.js";
@@ -385,7 +386,11 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   let activeTurn: AbortController | undefined;
   let currentAnimator: ToolActivityAnimator | undefined;
   let clearActiveTurnChrome: () => void = () => undefined;
-  const prompt = options.prompt ?? createReadlinePrompt(options.input as NodeJS.ReadStream | undefined ?? defaultInput, output as NodeJS.WriteStream);
+  const prompt = options.prompt ?? createReadlinePrompt({
+    input: options.input as NodeJS.ReadStream | undefined ?? defaultInput,
+    output: output as NodeJS.WriteStream,
+    uiContext: promptUiContextForLocale(renderer.locale),
+  });
   const close = options.close ?? (() => prompt.close?.());
   const bottomChrome = new BottomChromeController({
     output,

@@ -12,7 +12,7 @@ export function measureTextWidth(text: string): number {
   let width = 0;
   for (const ch of text) {
     const cp = ch.codePointAt(0) ?? 0;
-    if (isCombiningChar(cp)) {
+    if (isCombiningChar(cp) || isBidiControl(cp)) {
       continue;
     }
     if (isFullWidthChar(cp) || isEmoji(cp)) {
@@ -83,7 +83,7 @@ export function truncateText(
     const cp = ch.codePointAt(0) ?? 0;
     let charWidth = 1;
     if (isFullWidthChar(cp) || isEmoji(cp)) charWidth = 2;
-    if (isCombiningChar(cp)) charWidth = 0;
+    if (isCombiningChar(cp) || isBidiControl(cp)) charWidth = 0;
 
     if (width + charWidth + ellipsisWidth > maxWidth) {
       return result + ellipsis;
@@ -139,7 +139,7 @@ export function truncateVisible(
     const cp = ch.codePointAt(0) ?? 0;
     let charWidth = 1;
     if (isFullWidthChar(cp) || isEmoji(cp)) charWidth = 2;
-    if (isCombiningChar(cp)) charWidth = 0;
+    if (isCombiningChar(cp) || isBidiControl(cp)) charWidth = 0;
 
     if (width + charWidth + ellipsisWidth > maxWidth) {
       return result + ellipsis;
@@ -275,6 +275,14 @@ function isCombiningChar(cp: number): boolean {
     (cp >= 0x1dc0 && cp <= 0x1dff) ||
     (cp >= 0x20d0 && cp <= 0x20ff) ||
     (cp >= 0xfe20 && cp <= 0xfe2f)
+  );
+}
+
+function isBidiControl(cp: number): boolean {
+  return (
+    (cp >= 0x200e && cp <= 0x200f) ||
+    (cp >= 0x202a && cp <= 0x202e) ||
+    (cp >= 0x2066 && cp <= 0x2069)
   );
 }
 
