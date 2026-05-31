@@ -1,3 +1,5 @@
+import type { ProviderReplayEcho, ProviderStructuredToolCall } from "../contracts/provider.js";
+
 export const CHARS_PER_TOKEN = 4;
 export const IMAGE_TOKEN_ESTIMATE = 1_600;
 export const MESSAGE_FRAMING_TOKEN_ESTIMATE = 10;
@@ -5,6 +7,9 @@ export const MESSAGE_FRAMING_TOKEN_ESTIMATE = 10;
 export type TokenEstimateMessage = {
   role: string;
   content: string;
+  toolCalls?: ProviderStructuredToolCall[];
+  toolCallId?: string;
+  providerReplayEcho?: ProviderReplayEcho;
   metadata?: Record<string, unknown>;
   parts?: Array<
     | { type: "text"; text: string }
@@ -17,7 +22,7 @@ export function estimateTextTokensRough(value: string): number {
 }
 
 export function estimateMessageTokensRough(message: TokenEstimateMessage): number {
-  const textChars = message.content.length + (message.parts ?? []).reduce((sum, part) => {
+  const textChars = message.content.length + estimateStructuredFieldChars(message) + (message.parts ?? []).reduce((sum, part) => {
     return part.type === "text" ? sum + part.text.length : sum;
   }, 0);
   const imageCount = (message.parts ?? []).filter((part) => isImagePartType(part.type)).length +
@@ -61,6 +66,47 @@ export function countImageLikeMetadata(metadata: Record<string, unknown> | undef
 
 function isImagePartType(type: string): boolean {
   return type === "image_url" || type === "input_image" || type === "image";
+}
+
+function estimateStructuredFieldChars(message: TokenEstimateMessage): number {
+  let chars = 0;
+
+  if (message.role === "assistant" && Array.isArray(message.toolCalls) && message.toolCalls.length > 0) {
+    for (const toolCall of message.toolCalls) {
+      chars += estimateStructuredToolCallChars(toolCall);
+    }
+
+    if (isValidProviderReplayEcho(message.providerReplayEcho)) {
+      chars += message.providerReplayEcho.value.length;
+    }
+  }
+
+  if (message.role === "tool" && typeof message.toolCallId === "string") {
+    chars += message.toolCallId.length;
+  }
+
+  return chars;
+}
+
+function estimateStructuredToolCallChars(toolCall: ProviderStructuredToolCall): number {
+  return toolCall.id.length + toolCall.name.length + toolCall.argumentsText.length;
+}
+
+function isValidProviderReplayEcho(value: unknown): value is ProviderReplayEcho {
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return record.field === "reasoning_content" &&
+    typeof record.value === "string" &&
+    isProviderReplayEchoFamily(record.providerFamily) &&
+    record.apiMode === "openai_chat_completions" &&
+    typeof record.chars === "number" &&
+    record.chars === record.value.length;
+}
+
+function isProviderReplayEchoFamily(value: unknown): value is ProviderReplayEcho["providerFamily"] {
+  return value === "deepseek" || value === "kimi" || value === "mimo";
 }
 
 function isReadyImageAttachmentMetadata(value: unknown): boolean {

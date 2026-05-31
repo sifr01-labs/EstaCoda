@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  CHARS_PER_TOKEN,
   estimateMessageTokensRough,
   estimateMessagesTokensRough,
   estimateTextTokensRough,
@@ -89,4 +90,107 @@ describe("rough token estimator", () => {
   it("handles empty messages with framing overhead only", () => {
     expect(estimateMessageTokensRough({ role: "assistant", content: "" })).toBe(MESSAGE_FRAMING_TOKEN_ESTIMATE);
   });
+
+  it("counts assistant tool call IDs, names, and arguments", () => {
+    const content = "Calling tool";
+    const id = "call-1";
+    const name = "files.read";
+    const argumentsText = "{\"path\":\"src/index.ts\"}";
+    expect(estimateMessageTokensRough({
+      role: "assistant",
+      content,
+      toolCalls: [
+        {
+          id,
+          name,
+          argumentsText
+        }
+      ]
+    })).toBe(MESSAGE_FRAMING_TOKEN_ESTIMATE + estimateChars(content.length + id.length + name.length + argumentsText.length));
+  });
+
+  it("counts empty assistant messages with structured tool calls", () => {
+    const id = "call-empty";
+    const name = "files.read";
+    const argumentsText = "{}";
+    expect(estimateMessageTokensRough({
+      role: "assistant",
+      content: "",
+      toolCalls: [
+        {
+          id,
+          name,
+          argumentsText
+        }
+      ]
+    })).toBe(MESSAGE_FRAMING_TOKEN_ESTIMATE + estimateChars(id.length + name.length + argumentsText.length));
+  });
+
+  it("counts tool result content and toolCallId", () => {
+    const content = "tool result";
+    const toolCallId = "call-1";
+    expect(estimateMessageTokensRough({
+      role: "tool",
+      content,
+      toolCallId
+    })).toBe(MESSAGE_FRAMING_TOKEN_ESTIMATE + estimateChars(content.length + toolCallId.length));
+  });
+
+  it("counts provider replay echo only in the valid assistant tool-call location", () => {
+    const echo = {
+      field: "reasoning_content" as const,
+      value: "private provider reasoning",
+      providerFamily: "deepseek" as const,
+      apiMode: "openai_chat_completions" as const,
+      chars: "private provider reasoning".length
+    };
+    const toolCall = {
+      id: "call-1",
+      name: "files.read",
+      argumentsText: "{}"
+    };
+    const baseChars = toolCall.id.length + toolCall.name.length + toolCall.argumentsText.length;
+
+    expect(estimateMessageTokensRough({
+      role: "assistant",
+      content: "",
+      toolCalls: [toolCall],
+      providerReplayEcho: echo
+    })).toBe(MESSAGE_FRAMING_TOKEN_ESTIMATE + estimateChars(baseChars + echo.value.length));
+    expect(estimateMessageTokensRough({
+      role: "assistant",
+      content: "",
+      providerReplayEcho: echo
+    })).toBe(MESSAGE_FRAMING_TOKEN_ESTIMATE);
+    expect(estimateMessageTokensRough({
+      role: "user",
+      content: "",
+      toolCalls: [toolCall],
+      providerReplayEcho: echo
+    })).toBe(MESSAGE_FRAMING_TOKEN_ESTIMATE);
+  });
+
+  it("ignores raw reasoning and runtime-only provider fields", () => {
+    const unsafeMessage = {
+      role: "assistant",
+      content: "Visible",
+      reasoning: "raw reasoning should not count",
+      reasoning_content: "raw reasoning_content should not count",
+      reasoningMetadata: { present: true, chars: 1_000, format: "reasoning_content" },
+      metadata: { nested: "metadata should not count" },
+      usage: { totalTokens: 10_000 },
+      finishReason: "length",
+      raw: { payload: "raw provider payload should not count" },
+      runtimeMetadata: { note: "runtime metadata should not count" }
+    };
+
+    expect(estimateMessageTokensRough(unsafeMessage)).toBe(estimateMessageTokensRough({
+      role: "assistant",
+      content: "Visible"
+    }));
+  });
 });
+
+function estimateChars(chars: number): number {
+  return Math.ceil(chars / CHARS_PER_TOKEN);
+}
