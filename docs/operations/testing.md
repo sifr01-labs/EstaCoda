@@ -201,6 +201,48 @@ estacoda trace dump <trajectory-id> --raw
 
 Raw reasoning, `reasoning_content`, `reasoning_details`, discarded truncated tool arguments, and synthetic continuation/prefill messages should not appear in persisted session-visible messages, runtime/session events, summaries, memory files, skill records, or export traces. Safe metadata such as finish reason, usage, `reasoningMetadata`, truncation status, and continuation status may appear.
 
+## Native Tool-Call Replay Checks
+
+When changing native tool-call replay, prompt assembly, token estimation, provider message normalization, Chat Completions serialization, semantic compression, or tool result persistence, run this lane before the broader suite:
+
+```bash
+pnpm exec vitest run src/runtime/provider-turn-loop.test.ts
+pnpm exec vitest run src/runtime/run-recorder.test.ts
+pnpm exec vitest run src/prompt/prompt-assembly.test.ts
+pnpm exec vitest run src/prompt/native-history-builder.test.ts
+pnpm exec vitest run src/prompt/native-history-selector.test.ts
+pnpm exec vitest run src/prompt/token-estimator.test.ts
+pnpm exec vitest run src/providers/provider-message-normalizer.test.ts
+pnpm exec vitest run src/providers/openai-compatible-provider.test.ts
+pnpm exec vitest run src/providers/provider-metadata.test.ts
+pnpm exec vitest run src/prompt/semantic-compressor.test.ts
+pnpm exec vitest run src/prompt/session-compression-service.test.ts
+```
+
+Expected behavior:
+
+- Supported OpenAI-compatible Chat Completions routes can replay safe provider tool-call turns as native assistant/tool messages.
+- Unsupported providers, Responses routes, Anthropic routes, model-without-tools routes, and malformed histories use flat fallback.
+- `nativeReplaySafe` is turn-level. Unsafe turns emit no native assistant/tool messages.
+- Secret-bearing arguments do not preserve faithful `argumentsText`.
+- Required echo is stored only as bounded `providerReplayEcho` and only for same-provider/API-mode replay.
+- Missing or oversized required echo disables native replay for that turn unless an explicitly tested placeholder path is enabled.
+- Native selection uses a budget-selected chronological suffix of atomic units.
+- Tool groups are selected, serialized, compressed, or protected atomically.
+- Selected native tool results are not duplicated in flat continuation text.
+- `providerReplayEcho` is absent from compressor input, generated summaries, flat prompt text, diagnostics, memory-facing surfaces, and logs.
+- Diagnostics are `structured-tool-history-*` session events with counts and reasons only.
+
+For manual inspection, run a supported Chat Completions route with a tool-using prompt, then inspect session events and messages:
+
+```bash
+pnpm run dev
+estacoda trace list --limit 5
+estacoda trace dump <trajectory-id> --raw
+```
+
+Look for `structured-tool-history-selected`, `structured-tool-history-skipped`, `structured-tool-history-repaired`, and `structured-tool-history-serialized` events. Those events may show counts such as `nativePairs`, `droppedOrphans`, `echoMissing`, or `nativeReplayUnsafeTurns`; they must not show arguments, tool results, echo values, raw reasoning, paths, hashes, request bodies, or prompt content.
+
 ## Recommended Test Practices
 
 1. Run `pnpm run typecheck` first.

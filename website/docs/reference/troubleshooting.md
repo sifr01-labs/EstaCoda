@@ -350,6 +350,103 @@ Run `estacoda uninstall --purge --yes` if you intend to remove `~/.estacoda`.
 
 Run the printed command (`brew upgrade`, `docker pull`, `npm install -g`, etc.) or use the package manager's native uninstall path.
 
+## Native tool history is not active
+
+**Symptom:** A supported-looking tool session is replayed as flat text instead of native assistant/tool history.
+
+**Likely cause:** One of the native replay gates failed, or there was no complete safe provider tool group to replay.
+
+**Inspect:**
+
+```bash
+estacoda trace list --limit 5
+estacoda trace dump <trajectory-id> --raw
+```
+
+Look for `structured-tool-history-skipped` and its coarse reason. Common reasons include provider unsupported, model tools unsupported, no native messages, malformed history, budget fallback, missing echo, oversized echo, or unsafe arguments.
+
+**Repair:**
+
+- Use a tested OpenAI-compatible Chat Completions route with tool support.
+- Do not expect native replay on Responses or Anthropic routes; those paths remain fallback/deferred.
+- If the turn is unsafe, fix the tool input or let the sanitized flat fallback carry the context.
+
+## Echo-required replay fails closed
+
+**Symptom:** DeepSeek or Kimi thinking-mode tool history falls back instead of serializing native tool calls.
+
+**Likely cause:** The provider requires same-provider/API-mode `reasoning_content` echo, but the prior turn has missing, oversized, or mismatched `providerReplayEcho`.
+
+**Inspect:**
+
+Check count-only diagnostics for `missing_echo` or `echo_oversized`. Do not search logs for echo values; they should not be there.
+
+**Repair:**
+
+- Continue on the same provider family and Chat Completions API mode when native echo replay is required.
+- If echo was not captured or was over cap, allow flat fallback or start a fresh tool turn.
+- Do not add placeholder echo unless the provider path has explicit test coverage.
+
+## Tool replay disabled by secret-bearing arguments
+
+**Symptom:** A provider tool-call turn is present, but native replay is skipped with unsafe arguments.
+
+**Likely cause:** A tool-call argument contained obvious credential material, so faithful arguments were not stored.
+
+**Inspect:**
+
+Look for `nativeReplaySafe: false` and `argumentsRedacted: true` on the provider tool-call turn. Diagnostics may count `unsafe_arguments`, but they should not contain the argument value.
+
+**Repair:**
+
+Remove the credential material from the requested tool arguments. Use secret references, configuration, or environment-backed credentials instead of putting secret values into prompts or tool-call arguments.
+
+## Multi-call tool history fails closed
+
+**Symptom:** A multi-call assistant turn does not serialize as native tool history.
+
+**Likely cause:** At least one call was missing a valid matching tool result before the next non-tool message, or the group was malformed.
+
+**Inspect:**
+
+Compare `metadata.providerToolCalls[].id` on the provider tool-call turn with following tool result `metadata.tool_call_id` values.
+
+**Repair:**
+
+Treat the group as corrupted native history. Let flat fallback carry the context, or rerun the workflow so the provider tool-call turn and tool results are captured cleanly. Do not create synthetic tool results to patch the transcript.
+
+## Native continuation appears to duplicate tool results
+
+**Symptom:** A tool result appears once as a native `tool` message and again in the flat continuation instruction.
+
+**Likely cause:** This should not happen for selected native tool groups. The continuation path excludes selected native tool-call IDs from the flat executed-results block.
+
+**Inspect:**
+
+Check whether the duplicate result belongs to a selected native group or to an older unselected group. Non-selected tool results may still appear in flat continuation text.
+
+**Repair:**
+
+If a selected native result is duplicated, treat it as a bug in prompt assembly and run:
+
+```bash
+pnpm exec vitest run src/prompt/prompt-assembly.test.ts
+```
+
+## Native replay diagnostics contain content
+
+**Symptom:** A `structured-tool-history-*` event includes arguments, tool results, echo values, raw reasoning, provider payloads, message content, paths, hashes, request bodies, or content fingerprints.
+
+**Likely cause:** A diagnostic event crossed the observability boundary and captured sensitive prompt material.
+
+**Inspect:**
+
+Use `estacoda trace dump <trajectory-id> --raw` and review only the diagnostic payload shape.
+
+**Repair:**
+
+Treat this as a security bug. Diagnostics must be counts and coarse reasons only.
+
 ## Related docs
 
 - [FAQ](./faq.md) — short operational answers

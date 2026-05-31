@@ -197,6 +197,93 @@ The `session-surfaces.test.ts` includes a test proving `createSessionRenderer` w
 
 ---
 
+## 3.3 Native Tool-Call Replay QA
+
+Run these checks when changing provider finalization, tool-call persistence, prompt assembly, native history selection, provider serialization, semantic compression, or diagnostics.
+
+### Supported Chat Completions Route
+
+1. Configure a tested OpenAI-compatible Chat Completions route that supports tools and native history.
+2. Start a local session:
+   ```bash
+   pnpm run dev
+   ```
+3. Ask for a task that requires at least one tool call.
+4. Inspect the resulting trace/session events:
+   ```bash
+   estacoda trace list --limit 5
+   estacoda trace dump <trajectory-id> --raw
+   ```
+
+**Verify:**
+- Provider tool-call turns persist before tool execution.
+- Stable tool-call IDs match between the persisted provider turn and tool result metadata.
+- `structured-tool-history-selected` and, where applicable, `structured-tool-history-serialized` events appear.
+- Diagnostic payloads are counts and reasons only.
+- No raw arguments, tool results, echo values, raw reasoning, request bodies, paths, hashes, or prompt content appear in diagnostics.
+
+### Unsupported Provider Fallback
+
+Run the same tool-using prompt on an unsupported route, a Responses route, or an Anthropic route.
+
+**Verify:**
+- No native assistant `tool_calls` or native `tool` history is sent.
+- Flat session history fallback remains usable.
+- `structured-tool-history-skipped` records a coarse reason such as `provider_unsupported` or `serialization_unsupported`.
+- The final answer still follows the normal tool continuation path.
+
+### Missing Echo Fail-Closed
+
+Use a tested echo-required thinking route only if available in the operator environment.
+
+**Verify:**
+- Same-provider/API-mode echo is required before native replay.
+- Missing or mismatched echo disables native replay for that provider tool-call turn.
+- No placeholder echo is used unless the route has an explicitly tested placeholder path.
+- Echo values do not appear in flat prompt text, diagnostics, logs, traces, summaries, or memory.
+
+### Unsafe Argument Redaction
+
+Ask the model to inspect or search for a credential-like token name, not a real secret.
+
+**Verify:**
+- If a provider tool-call argument contains obvious credential material, the whole provider tool-call turn is `nativeReplaySafe: false`.
+- Affected calls omit faithful `argumentsText` and set `argumentsRedacted: true`.
+- The unsafe turn is not replayed as native assistant/tool protocol history.
+- Diagnostics count `unsafe_arguments` without recording the sensitive argument.
+
+### Multi-Call Atomicity
+
+Use or simulate a provider turn that emits multiple tool calls.
+
+**Verify:**
+- All call IDs have matching tool result messages before native serialization.
+- Missing or malformed tool results fail closed for the whole native group.
+- The serializer does not emit partial assistant `tool_calls` or partial native tool replies.
+- Semantic compression keeps the whole group or compresses the whole group.
+
+### Continuation With Native History
+
+Use a tool call that requires a second provider pass after tool execution.
+
+**Verify:**
+- Supported routes include selected assistant/tool history as structured native messages.
+- The final continuation instruction remains the last user message.
+- Tool results already selected as native `tool` messages do not appear again in the flat `Executed tool results` block.
+- Non-selected tool results still appear in flat continuation text.
+
+### Compression Excluding Echo
+
+Force or simulate a long session where old tool history is compressed.
+
+**Verify:**
+- Selected native groups bypass compression.
+- Unselected groups feed compression only after echo and raw reasoning fields are stripped.
+- Active or incomplete provider tool groups remain protected.
+- Generated summaries contain no echo values, raw reasoning, or faithful secret-bearing arguments.
+
+---
+
 ## 4. Startup and Picker QA
 
 ### 4.1 Startup Screen

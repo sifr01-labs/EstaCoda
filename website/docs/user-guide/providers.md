@@ -111,16 +111,67 @@ Tool-call safety rules:
 
 Reasoning hygiene rules:
 
-- raw reasoning is turn-local only
+- raw reasoning is turn-local only, except for bounded `providerReplayEcho` used as sensitive same-provider protocol state when a tested native tool replay route requires it
 - visible output strips hidden reasoning blocks
 - provider-bound history strips reasoning fields by default
 - summaries, semantic compression, memory, skill learning, and exports consume visible text only
 - safe reasoning metadata may include only `present`, `chars`, and `format`
-- provider-bound reasoning echo-back is deferred unless an explicit provider metadata opt-in is implemented and tested
+- provider replay echo is not UI text, normal prompt text, summary input, diagnostics content, memory, export material, or logs
 
 Reasoning-only provider success reaches the turn loop. Non-length reasoning-only responses retry with a local-only visible-answer prefill. Length-truncated reasoning-only exhaustion returns safe visible guidance. Raw reasoning is never displayed.
 
 Visible text with `finishReason: "length"` can continue. Continuation stays on the successful route chain: if the primary route fails and a fallback produces the truncated visible text, continuation starts from that fallback and preserves later fallbacks. Synthetic continuation messages are local-only, intermediate partials are not persisted, and the final visible text is persisted once. Continuation trims exact suffix/prefix overlap; it does not use semantic or fuzzy matching.
+
+---
+
+## Native Tool-Call Replay
+
+Supported OpenAI-compatible Chat Completions routes can preserve provider-native tool-call history. When enabled, prior assistant `tool_calls` and matching `tool` replies are sent back in the protocol shape the provider expects. Unsupported routes keep the flat text fallback.
+
+Native replay is active only when all of these are true:
+
+- provider metadata enables `supportsNativeToolHistory`
+- the model supports tools
+- the route API mode is `openai_chat_completions`
+
+Responses routes remain fallback/deferred for native replay. Anthropic native replay remains deferred. Custom or catalog-known providers do not inherit support just because they use an OpenAI-compatible shape.
+
+### Replay Safety
+
+Native replay is all-or-nothing per provider tool-call turn. If one call in a multi-call turn is unsafe, the whole turn is not replayed natively.
+
+Unsafe examples include:
+
+- secret-bearing arguments
+- missing faithful `argumentsText`
+- missing required provider echo
+- oversized required provider echo
+- malformed or incomplete native tool groups
+
+Secret-bearing arguments are not faithfully persisted. Affected calls store `argumentsRedacted: true`, and the turn is marked `nativeReplaySafe: false`. Unsafe turns still have sanitized flat history available; they do not emit native assistant/tool protocol messages.
+
+### Budget and Compression
+
+Native history is selected as a budgeted chronological suffix of prior session history. Selected native units bypass semantic compression. Older unselected units feed summary/compression. Tool groups stay atomic: a provider tool-call turn and its matching tool results are kept whole or compressed whole.
+
+### Thinking-Mode Echo
+
+Some thinking-mode providers, including DeepSeek and Kimi on tested Chat Completions routes, may require `reasoning_content` to be echoed for native assistant tool-call turns. EstaCoda stores this only as bounded `providerReplayEcho`.
+
+`providerReplayEcho` is sensitive persisted provider protocol state. It is raw provider reasoning retained only for same-provider/API-mode replay. It is stripped for cross-provider replay and removed before compression input. Missing or mismatched echo fails closed for echo-required native replay.
+
+MiMo is represented in the internal echo contract, but it is not user-facing native replay support unless provider metadata and tests enable it.
+
+### Diagnostics
+
+Native replay diagnostics are persistent session events:
+
+- `structured-tool-history-selected`
+- `structured-tool-history-repaired`
+- `structured-tool-history-skipped`
+- `structured-tool-history-serialized`
+
+Payloads are counts and reasons only. They must not include arguments, tool results, echo values, raw reasoning, provider payloads, message content, paths, hashes, request bodies, or content fingerprints.
 
 ---
 
@@ -230,6 +281,10 @@ estacoda model setup
 **Tool-call refusal after truncation:** The provider stopped with `finishReason: "length"` while generating tool calls, and retry did not produce complete tool arguments. Increase `model.maxTokens`, narrow the request, or switch to a route with better tool-call reliability.
 
 **Reasoning appears in a persisted surface:** Treat this as a hygiene bug. Inspect session messages, summaries, memory files, skill records, and export traces. Raw reasoning fields and inline hidden reasoning blocks should be stripped; only safe `reasoningMetadata` or `reasoningTokens` telemetry may remain.
+
+**Native tool history is not replayed:** Check provider metadata, model tool support, route API mode, and `structured-tool-history-skipped` events. Unsupported providers, Responses routes, Anthropic routes, malformed tool groups, unsafe arguments, and missing required echo all fall back to flat history.
+
+**Echo-required native replay fails closed:** For DeepSeek or Kimi thinking-mode routes, prior tool-call turns may require matching same-provider/API-mode `providerReplayEcho`. Missing, oversized, or cross-provider echo disables native replay for that turn. Echo values should not appear in diagnostics or flat prompt text.
 
 **Incomplete stream:** Check provider connectivity, adapter streaming support, and whether the stream ended with unfinished tool fragments. Incomplete streams remain provider failures and should not become final assistant answers.
 

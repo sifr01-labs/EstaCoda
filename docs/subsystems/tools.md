@@ -63,6 +63,21 @@ Voice credentials are direct environment-variable lookups only. Tool errors use 
 3. `ToolExecutor` runs the tool under `SecurityPolicy`
 4. Result is packetized and returned to the provider
 
+Provider-native replay adds one persistence rule to this flow: after the provider response is finalized and missing IDs are normalized, the assistant tool-call turn is persisted before planning/execution. The persisted turn records `metadata.kind: "provider-tool-call-turn"` and the same stable IDs that `ToolCallPlanner` will use. Tool result messages continue to carry `metadata.tool_call_id`.
+
+No synthetic tool results are created by the replay layer. If a call is invalid, blocked, denied, over budget, or execution-failed, that outcome remains the existing tool planning/execution result. Native history builders may later represent known missing results for provider protocol repair, but the tool runtime does not pretend a tool ran.
+
+Replay safety is turn-level. If any call in a provider tool-call turn contains obvious credential material, faithful `argumentsText` is omitted for affected calls, `argumentsRedacted: true` is stored, and the whole turn is marked `nativeReplaySafe: false`. Unsafe turns are not replayed as provider-native assistant/tool protocol messages.
+
+When inspecting tool replay issues, check these fields:
+
+| Surface | What to inspect |
+|---------|-----------------|
+| Provider tool-call turn | `metadata.kind`, `metadata.nativeReplaySafe`, `metadata.providerToolCalls[].id` |
+| Tool result message | `metadata.tool_call_id` |
+| Tool planner | generated stable IDs from `stableToolCallId()` |
+| Diagnostics | `structured-tool-history-*` session events, counts only |
+
 ## Hardening
 
 - Invalid `file.search` regexes are caught before execution.
@@ -72,6 +87,8 @@ Voice credentials are direct environment-variable lookups only. Tool errors use 
 - Stable provider tool-call IDs.
 - Basic schema validation before execution.
 - Stored-result truncation.
+- Native replay never replays a partial multi-call turn.
+- Native replay diagnostics never record raw arguments or tool results.
 
 ## Tool Plan Dependency Model
 

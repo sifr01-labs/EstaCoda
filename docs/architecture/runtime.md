@@ -162,16 +162,38 @@ Stream finalization rules are intentionally conservative:
 
 `ProviderExecutionResult.toolCalls` is the canonical tool-call list. Length-truncated tool calls are unsafe: the first attempt never reaches tool planning, never executes tools, and must not leak discarded raw arguments into runtime events or execution records. The runtime retries once on the successful route chain. If the retry is still length-truncated with tool calls, it returns deterministic visible refusal text and executes no tools. If finalized tool JSON is malformed, that remains a tool-planning error rather than a provider failure or incomplete-stream classification.
 
-Reasoning is handled as hidden provider-side material. Raw reasoning is turn-local only. Safe metadata may record `present`, `chars`, and `format`; `reasoningTokens` is usage telemetry only and does not imply raw reasoning was extracted or stored. Inline reasoning blocks and provider reasoning fields are stripped from visible output, provider-bound history, semantic compression, summaries, memory, skill learning/evolution, and export traces. Responses summary-shaped reasoning remains metadata-only where implemented. Provider-bound reasoning echo-back is deferred unless an explicit provider metadata opt-in is implemented and tested for that route.
+Reasoning is handled as hidden provider-side material. Raw reasoning is turn-local only except for `providerReplayEcho`, a bounded provider-scoped replay field used for same-provider native tool-call history when a tested Chat Completions route requires `reasoning_content` echo. Safe metadata may record `present`, `chars`, and `format`; `reasoningTokens` is usage telemetry only and does not imply raw reasoning was displayed. Inline reasoning blocks and provider reasoning fields are stripped from visible output, flat provider-bound history, semantic compression, summaries, memory, skill learning/evolution, and export traces. Responses summary-shaped reasoning remains metadata-only where implemented. Provider replay echo is sensitive persisted provider protocol state, not product memory or UI text.
 
 Reasoning-only successful provider responses reach the turn loop; they are not treated as provider failures. Non-length reasoning-only responses may retry with a local-only assistant prefill asking for a visible answer. The prefill is not persisted and is not emitted as assistant output. Length-truncated reasoning-only responses do not text-continue or prefill retry; they return deterministic visible guidance. Raw reasoning is never displayed.
 
 Finalized visible text with `finishReason: "length"` can continue on the same successful route chain. If primary failed and a fallback produced the length-truncated text, continuation starts at that fallback and preserves later fallbacks; it does not restart at the original primary. Continuation appends local-only provider messages containing the partial visible text and the continuation instruction. Intermediate partials and synthetic messages are not persisted. The final visible text is persisted once. Concatenation trims exact suffix/prefix overlap over bounded windows; it does not use semantic or fuzzy matching. If continuation exhausts all attempts, Wave 1 returns the best visible partial without appending a runtime note.
 
+#### Native tool-call replay
+
+Provider-native replay sits between prompt packing and provider request serialization. It preserves finalized provider tool-call turns as native assistant/tool history for supported OpenAI-compatible Chat Completions routes, while unsupported routes keep flat text history.
+
+The pipeline is:
+
+1. Finalized provider tool calls are ID-normalized after Wave 1 finalization.
+2. The provider tool-call turn is persisted as an `agent` session message before tool planning/execution.
+3. `ToolCallPlanner` receives the exact normalized IDs that were persisted.
+4. Prompt assembly selects a budgeted chronological suffix of raw session history before irreversible summarization.
+5. The native history builder converts safe provider tool groups into structured provider messages.
+6. The OpenAI-compatible Chat Completions serializer emits native `tool_calls` and matching `tool_call_id` replies only for complete valid groups.
+
+Replay is all-or-nothing per provider tool-call turn. If any call is unsafe, malformed, missing faithful arguments, missing required echo, or oversized for required echo, the turn does not emit native assistant/tool messages. Flat fallback and sanitized summaries remain available.
+
+Tool groups are atomic throughout packing and compression. A group is the provider tool-call turn plus immediately following matching tool result messages. Complete groups are kept whole or compressed whole. Multi-call turns are never split. Active or incomplete groups are protected from compression. `providerReplayEcho` is removed before compressor input is constructed.
+
+Continuation prompts reuse the same native selector and builder path when route gates pass. The final continuation instruction remains the last user message. Tool results already included as selected native `tool` messages are not duplicated in the flat continuation results block; non-selected tool results still appear there.
+
+Native replay diagnostics are persistent session events, not runtime live events. They use the `structured-tool-history-*` event family and contain only counts and coarse reasons. They are meant to answer "why did native replay happen or not happen?" without copying prompt material into observability.
+
 Inspection surfaces:
 
 - runtime `provider-result` events report provider/model, success, fallback status, finish reason, incomplete reason, usage, and safe reasoning metadata
 - session `provider-completion` and `provider-continuation` events record attempts plus safe runtime metadata for reasoning, truncation, and continuation
+- session `structured-tool-history-*` events record native replay selection, repair, skip, and serialization counts
 - `estacoda trace dump <trajectory-id> --raw` can inspect trajectory-level event flow, but raw provider reasoning and discarded tool arguments should not appear there
 - focused tests live in `src/providers/provider-executor-fallback.test.ts`, `src/providers/provider-executor-route.test.ts`, `src/providers/openai-compatible-provider.test.ts`, `src/runtime/provider-turn-loop.test.ts`, and `src/runtime/agent-loop.test.ts`
 
@@ -182,6 +204,8 @@ Operational failure modes to check before changing this area:
 - discarded truncated tool arguments should not appear in runtime events, session events, session messages, or traces
 - synthetic reasoning-prefill and text-continuation messages should not persist as session-visible messages
 - summaries, memory files, skill records, and export traces should contain visible content only
+- native replay should degrade to flat fallback for unsupported routes, Responses routes, Anthropic routes, unsafe arguments, and missing required echo
+- `providerReplayEcho` should appear only in provider-tool-call-turn metadata and matching structured provider messages, never in summaries, diagnostics, memory, logs, or flat prompt text
 
 ### ToolPlanRunner
 

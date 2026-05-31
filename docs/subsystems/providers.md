@@ -80,6 +80,82 @@ Provider usage metadata is normalized as:
 
 Operators can inspect provider final-state behavior through runtime `provider-result` events and session `provider-completion` / `provider-continuation` events. These events include finish reason, incomplete reason, usage, safe reasoning metadata, fallback status, and safe `runtimeMetadata` for truncation or continuation. They do not include raw provider payloads, raw reasoning, or discarded truncated tool arguments.
 
+## Native Tool-Call Replay
+
+EstaCoda can preserve finalized provider tool-call turns and replay them as provider-native history for supported OpenAI-compatible Chat Completions routes. The feature exists so a model can see its prior assistant `tool_calls` and linked `tool` replies in the protocol shape it expects, instead of only as prose in flat session history.
+
+Replay is gated by resolved route metadata, model capability, and API mode:
+
+| Gate | Required value |
+|------|----------------|
+| Provider route | `supportsNativeToolHistory === true` |
+| Model profile | `supportsTools === true` |
+| API mode | `openai_chat_completions` |
+
+Unsupported routes keep the existing flat text fallback. Responses API routes remain fallback/deferred. Anthropic native replay remains deferred. Do not assume every OpenAI-compatible provider supports native replay just because it shares a request shape.
+
+### Provider tool-call turns
+
+The runtime persists a provider tool-call turn after Wave 1 finalization and ID normalization, before tool planning and execution. The persisted session message is an `agent` message with `metadata.kind === "provider-tool-call-turn"`.
+
+Rules:
+
+- Stable tool-call IDs are shared by persistence and `ToolCallPlanner`; there is no second ID path.
+- The same IDs flow into tool result metadata as `tool_call_id`.
+- Non-empty assistant content is preserved on the provider tool-call turn.
+- No synthetic tool results are created during persistence.
+- Invalid, denied, blocked, or failed tool outcomes remain normal tool planning/execution outcomes.
+
+### Turn-level replay safety
+
+`nativeReplaySafe` is a turn-level flag. Native replay is all-or-nothing per provider tool-call turn.
+
+If any call in the turn contains obvious credential material, the whole turn is unsafe for native replay. Secret-bearing calls omit faithful `argumentsText` and mark the affected call with `argumentsRedacted: true`. Unsafe turns do not emit native assistant `tool_calls` or matching native `tool` messages; they remain available only through sanitized flat or summarized text.
+
+This is intentionally conservative. A mixed safe/unsafe multi-call assistant turn is still one assistant protocol turn, so replaying only part of it would produce a transcript the provider never actually saw.
+
+### Budget-selected native suffix
+
+Native history selection operates over raw session messages before irreversible flat summarization. It selects the largest chronological suffix of atomic units that fits the native-history budget after reserving room for system/context/current-user layers and summary text.
+
+Atomic units are:
+
+- ordinary session messages
+- provider tool groups: `agent(provider-tool-call-turn)` plus following matching tool results
+
+Selected native units bypass semantic compression and become provider messages. Unselected older units remain available for summary/compression. The current user message is excluded from native history selection and appended once at the end of the provider prompt.
+
+### Provider replay echo
+
+Some thinking-mode providers require replaying prior `reasoning_content` on assistant tool-call turns. EstaCoda stores that data only as `providerReplayEcho`, a bounded private provider protocol field inside provider-tool-call-turn metadata.
+
+`providerReplayEcho` is sensitive persisted state. It is raw provider reasoning retained only for same-provider/API-mode protocol replay. It is not UI text, normal prompt text, memory, summary input, export material, diagnostics content, or logs. It is removed before semantic compression input is constructed and stripped for cross-provider replay.
+
+Rules:
+
+- Store echo only for routes that both support native replay and require echo.
+- Store echo only when the whole provider tool-call turn remains `nativeReplaySafe`.
+- Missing or oversized required echo disables native replay for that turn unless a provider has an explicitly tested placeholder path.
+- DeepSeek and Kimi thinking-mode Chat Completions routes use `reasoning_content` echo when metadata and same-provider/API-mode checks match.
+- MiMo is represented in the provider echo contract but must not be documented as enabled unless provider metadata and tests enable it.
+
+Storage tradeoff: if session metadata is not encrypted/private, `providerReplayEcho` is still sensitive persisted state. If EstaCoda later adds encrypted private session metadata, this field should move there.
+
+### Diagnostics
+
+Native replay diagnostics persist as session events:
+
+| Event | Meaning |
+|-------|---------|
+| `structured-tool-history-selected` | Native history was selected for provider prompt context. |
+| `structured-tool-history-repaired` | Builder repaired countable structure, such as dropped orphan tool messages or injected known missing-result stubs. |
+| `structured-tool-history-skipped` | Native replay was skipped for a coarse reason. |
+| `structured-tool-history-serialized` | Structured native history was present in provider-bound Chat Completions context. |
+
+Payloads are counts and coarse reasons only: provider, model, route role, native pair counts, skipped/repair counts, echo counts, and reason enums such as `provider_unsupported`, `model_tools_unsupported`, `budget_fallback`, `missing_echo`, `echo_oversized`, or `unsafe_arguments`.
+
+Diagnostics must not contain raw arguments, tool results, echo values, raw reasoning, provider payloads, message content, paths, hashes, request bodies, stack traces, or content fingerprints. If you find those in diagnostic events, treat it as a bug.
+
 ## Route Output Limits
 
 Primary routes can set a route-level output cap:
