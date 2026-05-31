@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { PassThrough } from "node:stream";
 import { runSessionLoop } from "./session-loop.js";
 import type { PromptOptions } from "./readline-prompt.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
@@ -28,6 +29,28 @@ function interactiveCaps(overrides: Partial<TerminalCapabilities> = {}): Termina
     supportsAnimation: true,
     ...overrides,
   };
+}
+
+function makeTtyInput(): NodeJS.ReadStream & {
+  readonly rawModes: boolean[];
+  press(chunk: string, key?: { name?: string; ctrl?: boolean; sequence?: string }): void;
+} {
+  const input = new PassThrough() as unknown as NodeJS.ReadStream & {
+    rawModes: boolean[];
+    press(chunk: string, key?: { name?: string; ctrl?: boolean; sequence?: string }): void;
+  };
+  input.isTTY = true;
+  input.isRaw = false;
+  input.rawModes = [];
+  input.setRawMode = (mode: boolean) => {
+    input.isRaw = mode;
+    input.rawModes.push(mode);
+    return input;
+  };
+  input.press = (chunk, key = {}) => {
+    input.emit("keypress", chunk, key);
+  };
+  return input;
 }
 
 function createMockRuntime(overrides: Partial<Runtime> = {}): Runtime {
@@ -1346,6 +1369,176 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(nextChromeChunkIndex).toBeGreaterThan(providerSpinnerChunkIndex);
     expect(promptOffset).toBe(-1);
     expect(chromeChunksAfterTool.some((chunk) => chunk.includes("mock-model"))).toBe(true);
+  });
+
+  it("attaches the active-turn command controller only during runtime.handle", async () => {
+    const input = makeTtyInput();
+    let resolvePrompt: ((value: string) => void) | undefined;
+    let promptIndex = 0;
+    const prompt = Object.assign(
+      vi.fn(async () => {
+        if (promptIndex++ === 0) {
+          return await new Promise<string>((resolve) => {
+            resolvePrompt = resolve;
+          });
+        }
+        return "/exit";
+      }),
+      { close: () => {} }
+    );
+    let releaseTurn: (() => void) | undefined;
+    let handleStarted: (() => void) | undefined;
+    const handleStartedPromise = new Promise<void>((resolve) => {
+      handleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async () => {
+        handleStarted?.();
+        await new Promise<void>((resolve) => {
+          releaseTurn = resolve;
+        });
+        return mockResponse();
+      },
+    });
+
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(): boolean {
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt,
+      close: () => {},
+    });
+
+    while (resolvePrompt === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(input.listenerCount("keypress")).toBe(0);
+    resolvePrompt("hello");
+    await handleStartedPromise;
+    expect(input.listenerCount("keypress")).toBe(1);
+    releaseTurn?.();
+    await loop;
+    expect(input.listenerCount("keypress")).toBe(0);
+    expect(input.rawModes).toEqual([true, false]);
+  });
+
+  it("/interrupt aborts an active turn from the command lane", async () => {
+    const input = makeTtyInput();
+    const outputChunks: string[] = [];
+    let abortReason: unknown;
+    let handleStarted: (() => void) | undefined;
+    const handleStartedPromise = new Promise<void>((resolve) => {
+      handleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async ({ signal, onEvent }: { text: string; channel: string; signal?: AbortSignal; onEvent?: (event: RuntimeEvent) => void }) => {
+        onEvent?.({ kind: "agent-start", sessionId: "test-session", input: "hello" });
+        handleStarted?.();
+        await new Promise<void>((resolve) => {
+          signal?.addEventListener("abort", () => {
+            abortReason = signal.reason;
+            resolve();
+          }, { once: true });
+        });
+        onEvent?.({ kind: "agent-cancelled", reason: String(abortReason) });
+        return {
+          ...mockResponse(),
+          text: "Interrupted response",
+        };
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await handleStartedPromise;
+    for (const char of "/interrupt") {
+      input.press(char, { name: char, sequence: char });
+    }
+    expect(stripAnsi(outputChunks.join(""))).toContain("active command: /interrupt");
+    const beforeSubmit = outputChunks.length;
+    input.press("\r", { name: "return" });
+    await loop;
+
+    expect(abortReason).toBe("CLI interrupt");
+    expect(outputChunks.slice(beforeSubmit).map((chunk) => stripAnsi(chunk)).join("")).not.toContain("active command: /interrupt");
+    expect(stripAnsi(outputChunks.join(""))).toContain("cancelled: CLI interrupt");
+  });
+
+  it("keeps normal active-turn typing out of the transcript", async () => {
+    const input = makeTtyInput();
+    const outputChunks: string[] = [];
+    let handleStarted: (() => void) | undefined;
+    const handleStartedPromise = new Promise<void>((resolve) => {
+      handleStarted = resolve;
+    });
+    let releaseTurn: (() => void) | undefined;
+    const runtime = createMockRuntime({
+      handle: async () => {
+        handleStarted?.();
+        await new Promise<void>((resolve) => {
+          releaseTurn = resolve;
+        });
+        return mockResponse();
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await handleStartedPromise;
+    for (const char of "zzqzz") {
+      input.press(char, { name: char, sequence: char });
+    }
+    releaseTurn?.();
+    await loop;
+
+    expect(stripAnsi(outputChunks.join(""))).not.toContain("zzqzz");
   });
 
   it("animates the bottom chrome transcript spinner in place between runtime events", async () => {

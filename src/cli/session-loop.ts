@@ -58,6 +58,7 @@ import {
   type CliVoiceRecorder,
   type CliVoiceMode
 } from "./voice-mode.js";
+import { ActiveTurnCommandController } from "./active-turn-command-controller.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -386,8 +387,9 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   let activeTurn: AbortController | undefined;
   let currentAnimator: ToolActivityAnimator | undefined;
   let clearActiveTurnChrome: () => void = () => undefined;
+  const cliInput = (options.input as NodeJS.ReadStream | undefined) ?? defaultInput;
   const prompt = options.prompt ?? createReadlinePrompt({
-    input: options.input as NodeJS.ReadStream | undefined ?? defaultInput,
+    input: cliInput,
     output: output as NodeJS.WriteStream,
     uiContext: promptUiContextForLocale(renderer.locale),
   });
@@ -639,9 +641,12 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         const turnOutput = { spinnerPhase: undefined as string | undefined, hasOutput: false, lastOutputWasSpinner: false };
         let bottomChromeTranscriptSpinnerTicker: ReturnType<typeof setInterval> | undefined;
         let bottomChromeActiveChromeTicker: ReturnType<typeof setInterval> | undefined;
-        let bottomChromeTranscriptSpinnerPhase: string | undefined;
+        let bottomChromeTransientSpinnerLines: readonly string[] = [];
+        let activeTurnCommandLine: string | undefined;
+        let activeTurnCommandStatusLine: string | undefined;
         let currentPhase: string | undefined;
         let turnWasCancelled = false;
+        let activeTurnCommandController: ActiveTurnCommandController | undefined;
         const runningBottomState = () => buildBottomChromeState({
           runtime,
           renderer,
@@ -666,17 +671,29 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           && !renderer.capabilities.isCI
           && !renderer.capabilities.isDumb;
 
-        const stopBottomChromeTranscriptSpinner = () => {
+        const activeTurnCommandLines = () => [
+          activeTurnCommandLine ?? activeTurnCommandStatusLine,
+        ].filter((line): line is string => line !== undefined);
+
+        const updateActiveTurnTransientLines = () => {
+          if (!bottomChrome.enabled) return;
+          bottomChrome.updateTransientLines([
+            ...activeTurnCommandLines(),
+            ...bottomChromeTransientSpinnerLines,
+          ]);
+        };
+
+        const stopBottomChromeTransientSpinner = () => {
           if (bottomChromeTranscriptSpinnerTicker !== undefined) {
             clearInterval(bottomChromeTranscriptSpinnerTicker);
             bottomChromeTranscriptSpinnerTicker = undefined;
           }
-          bottomChromeTranscriptSpinnerPhase = undefined;
-          bottomChrome.clearTransientLines();
+          bottomChromeTransientSpinnerLines = [];
+          updateActiveTurnTransientLines();
           streamState.lastWriteEndedWithNewline = true;
           turnOutput.lastOutputWasSpinner = false;
         };
-        clearBottomChromeTranscriptSpinner = stopBottomChromeTranscriptSpinner;
+        clearBottomChromeTranscriptSpinner = stopBottomChromeTransientSpinner;
 
         const stopBottomChromeActiveChromeTicker = () => {
           if (bottomChromeActiveChromeTicker !== undefined) {
@@ -686,19 +703,19 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         };
 
         const renderBottomChromeTranscriptSpinnerFrame = () => {
-          if (!bottomChrome.enabled || bottomChromeTranscriptSpinnerPhase === undefined) {
+          if (!bottomChrome.enabled || currentPhase === undefined) {
             return;
           }
-          const spinnerText = renderer.render(buildActiveTurnSpinnerViewModel({ phase: bottomChromeTranscriptSpinnerPhase }));
-          const spinnerLines = spinnerText.split("\n").filter((line) => line.length > 0);
-          bottomChrome.updateTransientLines(spinnerLines);
+          const spinnerText = renderer.render(buildActiveTurnSpinnerViewModel({ phase: currentPhase }));
+          bottomChromeTransientSpinnerLines = spinnerText.split("\n").filter((line) => line.length > 0);
+          updateActiveTurnTransientLines();
           streamState.lastWriteEndedWithNewline = true;
           turnOutput.hasOutput = true;
           turnOutput.lastOutputWasSpinner = true;
         };
 
         const startBottomChromeTranscriptSpinner = (phase: string) => {
-          bottomChromeTranscriptSpinnerPhase = phase;
+          currentPhase = phase;
           renderBottomChromeTranscriptSpinnerFrame();
           if (!supportsBottomChromeTranscriptSpinnerAnimation || bottomChromeTranscriptSpinnerTicker !== undefined) {
             return;
@@ -742,7 +759,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         const clearSpinner = () => {
           if (bottomChrome.enabled) {
             stopBottomChromeActiveChromeTicker();
-            stopBottomChromeTranscriptSpinner();
+            stopBottomChromeTransientSpinner();
             currentPhase = undefined;
           } else if (chrome.enabled) {
             chrome.clearInlineSpinner();
@@ -770,7 +787,25 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           output.write("\n");
         }
 
-        const response = await runtime.handle({
+        activeTurnCommandController = new ActiveTurnCommandController({
+          input: cliInput,
+          enabled: renderer.capabilities.isTTY && !renderer.capabilities.isCI && !renderer.capabilities.isDumb,
+          onCommandLaneChange: (line) => {
+            activeTurnCommandLine = line;
+            if (line !== undefined) {
+              activeTurnCommandStatusLine = undefined;
+            }
+            updateActiveTurnTransientLines();
+          },
+          onStatusMessage: (message) => {
+            activeTurnCommandStatusLine = `active command: ${message}`;
+            updateActiveTurnTransientLines();
+          },
+          onInterrupt: () => {
+            activeTurn?.abort("CLI interrupt");
+          },
+        });
+        const responsePromise = runtime.handle({
             text: retryText,
             channel: "cli",
             signal: activeTurn.signal,
@@ -809,12 +844,18 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           .finally(() => {
             activeTurn = undefined;
             activeTurnStartedAtMs = undefined;
+            activeTurnCommandController?.dispose();
+            activeTurnCommandController = undefined;
+            activeTurnCommandLine = undefined;
+            activeTurnCommandStatusLine = undefined;
             clearSpinner();
             currentAnimator?.dispose();
             currentAnimator = undefined;
             clearBottomChromeTranscriptSpinner = () => undefined;
             clearActiveTurnChrome = () => undefined;
           });
+        activeTurnCommandController.start();
+        const response = await responsePromise;
         if (pendingCompactionPostTokens !== undefined) {
           applyCompactionRailReset(pendingCompactionPostTokens);
           pendingCompactionPostTokens = undefined;
