@@ -13,6 +13,7 @@ const serviceManagerMock = vi.hoisted(() => ({
   uninstallService: vi.fn(),
   probeServiceState: vi.fn(),
   restartService: vi.fn(),
+  startService: vi.fn(),
   stopService: vi.fn(),
 }));
 
@@ -37,6 +38,7 @@ vi.mock("../gateway/service-manager.js", async (importOriginal) => {
     uninstallService: serviceManagerMock.uninstallService,
     probeServiceState: serviceManagerMock.probeServiceState,
     restartService: serviceManagerMock.restartService,
+    startService: serviceManagerMock.startService,
     stopService: serviceManagerMock.stopService,
   };
 });
@@ -71,12 +73,14 @@ describe("cli gateway start", () => {
     serviceManagerMock.uninstallService.mockReset();
     serviceManagerMock.probeServiceState.mockReset();
     serviceManagerMock.restartService.mockReset();
+    serviceManagerMock.startService.mockReset();
     serviceManagerMock.stopService.mockReset();
     execResolverMock.resolveGatewayExec.mockReset();
     serviceManagerMock.detectServiceManager.mockReturnValue("none");
     serviceManagerMock.installService.mockResolvedValue({ ok: true, mode: "compiled" });
     serviceManagerMock.uninstallService.mockResolvedValue({ ok: true });
     serviceManagerMock.restartService.mockResolvedValue({ ok: true });
+    serviceManagerMock.startService.mockResolvedValue({ ok: true });
     serviceManagerMock.stopService.mockResolvedValue({ ok: true });
     execResolverMock.resolveGatewayExec.mockReturnValue({
       ok: true,
@@ -150,15 +154,18 @@ describe("cli gateway start", () => {
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain("estacoda gateway start");
     expect(result.output).not.toContain("--telegram");
-    expect(result.output).toContain("estacoda gateway start --dry-run");
-    expect(result.output).toContain("estacoda gateway start --background");
+    expect(result.output).toContain("estacoda gateway run");
+    expect(result.output).toContain("estacoda gateway run --dry-run");
+    expect(result.output).toContain("estacoda gateway run --once");
+    expect(result.output).not.toContain("estacoda gateway start --dry-run");
+    expect(result.output).not.toContain("estacoda gateway start --background");
     expect(result.output).toContain("estacoda gateway restart");
     expect(result.output).toContain("estacoda gateway restart --graceful");
     expect(result.output).toContain("estacoda gateway install");
     expect(result.output).toContain("estacoda gateway uninstall");
   });
 
-  it("runs --dry-run without entering the foreground supervisor or writing PID/lock state", async () => {
+  it("runs gateway run --dry-run without entering the foreground supervisor or writing PID/lock state", async () => {
     const tmpDir = await makeTempDir();
     try {
       const paths = resolveProfileStateHome({ homeDir: tmpDir, profileId: "default" });
@@ -167,7 +174,7 @@ describe("cli gateway start", () => {
       await mkdir(paths.logsPath, { recursive: true });
 
       const result = await runCliCommand({
-        argv: ["gateway", "start", "--dry-run"],
+        argv: ["gateway", "run", "--dry-run"],
         workspaceRoot: tmpDir,
         homeDir: tmpDir,
       });
@@ -185,11 +192,11 @@ describe("cli gateway start", () => {
     }
   });
 
-  it("returns a failing exit code when --dry-run readiness is blocked", async () => {
+  it("returns a failing exit code when gateway run --dry-run readiness is blocked", async () => {
     const tmpDir = await makeTempDir();
     try {
       const result = await runCliCommand({
-        argv: ["gateway", "start", "--dry-run"],
+        argv: ["gateway", "run", "--dry-run"],
         workspaceRoot: tmpDir,
         homeDir: tmpDir,
       });
@@ -202,7 +209,36 @@ describe("cli gateway start", () => {
     }
   });
 
-  it("runs --background without entering the foreground supervisor", async () => {
+  it("rejects start --dry-run with migration guidance", async () => {
+    const tmpDir = await makeTempDir();
+    try {
+      const result = await runCliCommand({
+        argv: ["gateway", "start", "--dry-run"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+      });
+
+      expect(result.exitCode).toBe(1);
+      expect(result.output).toContain("estacoda gateway run --dry-run");
+      expect(supervisorSpy).not.toHaveBeenCalled();
+      expect(childProcessMock.spawn).not.toHaveBeenCalled();
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects start --once with migration guidance", async () => {
+    const result = await runCliCommand({
+      argv: ["gateway", "start", "--once"],
+      workspaceRoot: "/tmp",
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toContain("estacoda gateway run --once");
+    expect(supervisorSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects start --background with migration guidance and does not spawn", async () => {
     const tmpDir = await makeTempDir();
     try {
       const result = await runCliCommand({
@@ -211,21 +247,47 @@ describe("cli gateway start", () => {
         homeDir: tmpDir,
       });
 
-      expect(result.exitCode).toBe(0);
-      expect(result.output).toContain("Gateway started (PID 12346)");
-      expect(result.output).toContain(join(resolveProfileStateHome({ homeDir: tmpDir, profileId: "default" }).logsPath, "gateway.log"));
+      expect(result.exitCode).toBe(1);
+      expect(result.output).toContain("estacoda gateway start --background is deprecated");
+      expect(result.output).toContain("estacoda gateway install");
+      expect(result.output).toContain("estacoda gateway start");
+      expect(result.output).toContain("estacoda gateway run");
       expect(supervisorSpy).not.toHaveBeenCalled();
-      expect(childProcessMock.spawn).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.arrayContaining(["gateway", "start"]),
-        expect.objectContaining({ detached: true })
-      );
+      expect(childProcessMock.spawn).not.toHaveBeenCalled();
     } finally {
       await rm(tmpDir, { recursive: true, force: true });
     }
   });
 
-  it("keeps bare gateway start process-oriented even when a managed service exists", async () => {
+  it("runs gateway run in the foreground", async () => {
+    const result = await runCliCommand({
+      argv: ["gateway", "run"],
+      workspaceRoot: "/tmp",
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toBe("Gateway started");
+    expect(supervisorSpy).toHaveBeenCalledWith(expect.objectContaining({
+      profileId: undefined,
+      once: false,
+    }));
+    expect(serviceManagerMock.startService).not.toHaveBeenCalled();
+    expect(childProcessMock.spawn).not.toHaveBeenCalled();
+  });
+
+  it("passes --once through gateway run", async () => {
+    const result = await runCliCommand({
+      argv: ["gateway", "run", "--once"],
+      workspaceRoot: "/tmp",
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(supervisorSpy).toHaveBeenCalledWith(expect.objectContaining({
+      once: true,
+    }));
+  });
+
+  it("starts the installed user service for bare gateway start", async () => {
     serviceManagerMock.detectServiceManager.mockReturnValue("systemd-user");
     serviceManagerMock.probeServiceState.mockResolvedValue({
       kind: "systemd-user",
@@ -242,13 +304,28 @@ describe("cli gateway start", () => {
     });
 
     expect(result.exitCode).toBe(0);
-    expect(result.output).toBe("Gateway started");
-    expect(supervisorSpy).toHaveBeenCalledWith(expect.objectContaining({
-      profileId: undefined,
-      once: false,
+    expect(result.output).toBe("Gateway service started (user scope, profile: default).");
+    expect(supervisorSpy).not.toHaveBeenCalled();
+    expect(serviceManagerMock.startService).toHaveBeenCalledWith(expect.objectContaining({
+      profileId: "default",
+      system: false,
     }));
-    expect(serviceManagerMock.probeServiceState).not.toHaveBeenCalled();
     expect(serviceManagerMock.restartService).not.toHaveBeenCalled();
+    expect(childProcessMock.spawn).not.toHaveBeenCalled();
+  });
+
+  it("fails bare gateway start when no service is installed", async () => {
+    const result = await runCliCommand({
+      argv: ["gateway", "start"],
+      workspaceRoot: "/tmp",
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toContain("Gateway service is not installed for profile 'default'.");
+    expect(result.output).toContain("Run: estacoda gateway install");
+    expect(result.output).toContain("For foreground mode: estacoda gateway run");
+    expect(supervisorSpy).not.toHaveBeenCalled();
+    expect(serviceManagerMock.startService).not.toHaveBeenCalled();
     expect(childProcessMock.spawn).not.toHaveBeenCalled();
   });
 
@@ -258,8 +335,7 @@ describe("cli gateway start", () => {
       workspaceRoot: "/tmp",
     });
     expect(result.handled).toBe(true);
-    // Will fail to start due to no config, but command is handled
-    expect(result.output).toContain("Gateway was not running");
+    expect(result.output).toContain("Gateway service is not installed");
   });
 
   it("parses gateway restart --graceful", async () => {
@@ -268,7 +344,7 @@ describe("cli gateway start", () => {
       workspaceRoot: "/tmp",
     });
     expect(result.handled).toBe(true);
-    expect(result.output).toContain("Gateway was not running");
+    expect(result.output).toContain("Gateway service is not installed");
   });
 
   it("parses gateway stop --system", async () => {

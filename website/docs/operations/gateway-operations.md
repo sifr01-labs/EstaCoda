@@ -19,24 +19,32 @@ Every gateway process is bound to the profile selected at start time. The profil
 - Session database (`sessions.sqlite`, global but profile-scoped by `profile_id`)
 
 ```bash
-# Start gateway for the current active profile
-estacoda gateway start
+# Run foreground gateway for the current active profile
+estacoda gateway run
 
-# Start gateway for a specific profile
-estacoda gateway start --profile work
+# Run foreground gateway for a specific profile
+estacoda gateway run --profile work
 ```
 
-## Start
+## Run and start
 
 ```bash
-estacoda gateway start              # Foreground. Logs in terminal.
-estacoda gateway start --dry-run    # Readiness check only. No lock, no PID, no adapters.
-estacoda gateway start --background # Detached. Output to profile logs/gateway.log.
+estacoda gateway run              # Foreground supervisor. Logs in terminal.
+estacoda gateway run --dry-run    # Readiness check only. No lock, no PID, no adapters.
+estacoda gateway run --once       # One supervisor pass, then exit.
+
+estacoda gateway install          # Install user-scope service.
+estacoda gateway start            # Start installed user-scope service.
+estacoda gateway start --system   # Start installed system-scope service.
 ```
 
-`--dry-run` checks adapter readiness, state directory writability, and gateway lock state without starting adapters or polling remote APIs. Use it to validate configuration before committing to a live process.
+`gateway run` is the foreground/debug path. Use it when you want logs attached to the current terminal and no service manager in the loop.
 
-`--background` spawns a detached process and returns. It refuses to spawn if a managed service is installed for the profile, a live PID file exists, or an active gateway lock is held.
+`gateway run --dry-run` checks adapter readiness, state directory writability, and gateway lock state without starting adapters or polling remote APIs. Use it to validate configuration before committing to a live process. `gateway run --once` performs one supervisor pass and exits.
+
+`gateway start` starts an installed service. It defaults to the selected profile's user-scope service. `gateway start --system` controls only the system service. If only a system service exists and `--system` is omitted, the command fails closed and tells the operator to rerun with `--system`.
+
+`gateway install` is required before `gateway start`. `gateway start --background` is deprecated and no longer creates a detached unmanaged process; use service install/start for persistent operation.
 
 ## Stop
 
@@ -50,11 +58,12 @@ If a user-scope managed service exists, `stop` delegates to systemd or launchd. 
 ## Restart
 
 ```bash
-estacoda gateway restart            # Stop then background-start
+estacoda gateway restart            # Restart installed user-scope service
 estacoda gateway restart --graceful # Alias for restart in v0.1.0
+estacoda gateway restart --system   # Restart system-scope service
 ```
 
-If a managed service exists, restart delegates to the platform service manager. If not, it stops the unmanaged process and starts a new background process.
+`restart` delegates to the installed service using the same selection rules as `start`: user service by default, system service only with `--system`. If no managed service exists, it fails with installation guidance and does not create an unmanaged detached process. `restart --graceful` remains an alias for `restart`.
 
 ## Managed services
 
@@ -79,7 +88,8 @@ Operational notes:
 - systemd user services may stop on logout unless linger is enabled: `sudo loginctl enable-linger $USER`.
 - Service output goes to the journal. Use `journalctl --user -u <unit> -f` for user services.
 - Source-mode installs hardcode the absolute workspace path. If the repo moves, uninstall and reinstall.
-- `gateway start` remains process-oriented. Use the platform service manager or `gateway restart` for managed service lifecycle after installation.
+- Generated services invoke `gateway run --profile <id>`.
+- `gateway start`, `gateway stop`, and `gateway restart` default to the installed user service. Use `--system` for an installed system service.
 
 ## Diagnostics
 
@@ -199,7 +209,7 @@ Gateway logs for the active profile:
 ~/.estacoda/profiles/<profile-id>/logs/gateway.log
 ```
 
-In foreground mode, logs also appear in the terminal. In background or managed-service mode, logs go to the profile log file or the system journal.
+In foreground mode (`gateway run`), logs also appear in the terminal. In managed-service mode, logs go to the profile log file or the system journal.
 
 ## Failure modes
 

@@ -29,7 +29,7 @@ description: "Identified architecture risks, severity, and mitigations."
 | R20 | **Service environment omits shell secrets** | High | Medium | High | **Accepted** | Services set explicit `HOME`/`PATH` but do not inherit interactive shell exports. Operators must place bot tokens and provider API keys in `~/.estacoda/profiles/<profileId>/.env`. |
 | R21 | **Source-mode service path drift** | Medium | Medium | Medium | **Accepted** | Source-mode units hardcode the workspace path. Install output and docs tell operators to reinstall if the repo moves. |
 | R22 | **System service privilege boundary** | High | Low | High | **Mitigated** | System installs require root for installation and explicit `--run-as-user <user>` for runtime execution; units include `User=<runAsUser>` and explicit `HOME`. |
-| R23 | **Service-aware lifecycle gap** | Medium | Medium | Medium | **Partial** | `gateway stop` and `gateway restart` now delegate to installed user-scope services and require `--system` for system-scope services. `gateway start` remains process-oriented in v0.1.0. |
+| R23 | **Service-aware lifecycle gap** | Medium | Medium | Medium | **Mitigated** | Foreground/debug operation is `gateway run`; persistent operation is an installed service plus `gateway start`. `gateway start`, `gateway stop`, and `gateway restart` delegate to installed user-scope services by default and require `--system` for system-scope services. Detached unmanaged background spawning is no longer the start path. |
 | R24 | **Service manager probe failures obscure state** | Low | Medium | Low | **Mitigated** | `probeServiceState` never throws; `gateway status` remains usable and reports unknown/not-installed state when systemd/launchd probing fails or is permission-limited. |
 | R25 | **Voice gateway media side effects** | High | Medium | High | **Mitigated** | Gateway STT preprocessing validates allowed profile-local roots, type/size, provider readiness, and faster-whisper download policy before side effects; audit JSONL records allow/deny/fail outcomes without private paths. |
 | R26 | **Optional Discord voice dependency drift** | Medium | Medium | Medium | **Accepted** | Discord text startup must work without optional voice packages. `/voice channel` returns structured setup errors until the operator installs the voice stack and grants intent/permissions. |
@@ -40,13 +40,13 @@ description: "Identified architecture risks, severity, and mitigations."
 |---|----------------|-------------------|-----------------|
 | **Critical Severity** | — | — | — |
 | **High Severity** | R22 | R20, R25 | R02 |
-| **Medium Severity** | R07, R12 | R15, R19, R21, R23, R26 | R05 |
+| **Medium Severity** | R07, R12 | R15, R19, R21, R26 | R05 |
 | **Low Severity** | R16, R17 | R13, R18, R24 | R10 |
 
 ## Summary
 
 - **Resolved (8):** R01, R03, R04, R06, R08, R09, R11, R14
-- **Partially resolved (3):** R05, R10, R23
-- **Mitigated (3):** R22, R24, R25
+- **Partially resolved (2):** R05, R10
+- **Mitigated (4):** R22, R23, R24, R25
 - **Mitigation in progress (0):** —
 - **Accepted (12):** R02, R07, R12, R13, R15, R16, R17, R18, R19, R20, R21, R26

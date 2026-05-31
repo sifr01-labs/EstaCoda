@@ -52,7 +52,7 @@ export class SkillWorkflowExecutor {
     const visited = new Set<string>();
     let stepIndex = 0;
 
-    while (stepIndex < plan.steps.length && executions.length < 4) {
+    while (stepIndex < plan.steps.length && executions.length < 50) {
       if (isAborted(input.signal)) {
         break;
       }

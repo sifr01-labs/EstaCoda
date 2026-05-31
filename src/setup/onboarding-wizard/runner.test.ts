@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -14,6 +14,13 @@ import { promptModelCandidate, promptProviderCandidate } from "../config-editor/
 import type { FlowEngine, ModelCandidate, ProviderCandidate } from "../../providers/provider-model-selection-flow.js";
 import { readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../../config/profile-home.js";
 import type { SetupApplyExecutor } from "../setup-apply-plan.js";
+import {
+  gatewayServiceActivationNotNowGuidance,
+  gatewayServiceActivationPromptTitle,
+  maybeOfferGatewayStartAfterChannelSetup,
+  type GatewayActivationServiceActions,
+} from "../gateway-service-activation.js";
+import type { SetupReviewManifest } from "../setup-review-manifest.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-first-run-runner-"));
@@ -29,6 +36,23 @@ function profileEnvPath(homeDir: string): string {
 
 function activeProfilePath(homeDir: string): string {
   return resolveGlobalStateHome({ homeDir }).activeProfilePath;
+}
+
+function localReadyConfigObject(): Record<string, unknown> {
+  return {
+    model: {
+      provider: "local",
+      id: "hermes-local",
+    },
+    providers: {
+      local: {
+        kind: "openai-compatible",
+        baseUrl: "http://localhost:11434/v1",
+        models: ["hermes-local"],
+        enableNetwork: true,
+      },
+    },
+  };
 }
 
 function flowEngine(overrides: {
@@ -268,6 +292,86 @@ function reviewedExecutor(homeDir: string, workspaceRoot: string, profileId?: st
   });
 }
 
+function gatewayServiceActions(input: {
+  readonly installedBefore?: boolean;
+  readonly activeAfterInstall?: boolean;
+} = {}): GatewayActivationServiceActions {
+  const probe = vi.fn<GatewayActivationServiceActions["probe"]>();
+  probe.mockResolvedValueOnce({
+    kind: "systemd-user",
+    installed: input.installedBefore === true,
+    activeState: input.installedBefore === true ? "inactive" : undefined,
+    profileId: "default",
+  });
+  probe.mockResolvedValue({
+    kind: "systemd-user",
+    installed: true,
+    activeState: input.activeAfterInstall === true ? "active" : "inactive",
+    profileId: "default",
+  });
+  return {
+    probe,
+    install: vi.fn<GatewayActivationServiceActions["install"]>().mockResolvedValue({
+      ok: true,
+      mode: "source",
+    }),
+    start: vi.fn<GatewayActivationServiceActions["start"]>().mockResolvedValue({
+      ok: true,
+    }),
+  };
+}
+
+function remoteControlManifest(channelIds: readonly ("telegram" | "discord" | "whatsapp")[]): SetupReviewManifest {
+  const lines = channelIds.map((channelId) => ({
+    id: `remote-control-surfaces.setup-module.${channelId}.capability.remote-control`,
+    section: "remote-control-surfaces" as const,
+    sourceDraftIds: [`setup-module.${channelId}.capability`],
+    copyKey: `setupModules.${channelId}.review`,
+    summaryKey: `setupModules.${channelId}.draft`,
+    riskSurface: "optional-capability" as const,
+    review: {
+      copyKey: `setupModules.${channelId}.review`,
+      summaryKey: `setupModules.${channelId}.draft`,
+      redacted: true as const,
+      values: {},
+    },
+    severity: "info" as const,
+    blockers: [],
+    warnings: [],
+    readOnly: false,
+  }));
+  return {
+    kind: "setup-review-manifest",
+    sourceBundleIds: ["test"],
+    lines,
+    sections: {
+      "files-to-write-update": [],
+      "secret-refs-to-store": [],
+      "workspace-trust-grants": [],
+      "provider-model-network": [],
+      "enabled-optional-capabilities": [],
+      "remote-control-surfaces": lines,
+      "security-mode": [],
+      "workflow-learning": [],
+      "verification-checks": [],
+      "launch-handoff": [],
+      blockers: [],
+      warnings: [],
+    },
+    blockers: [],
+    warnings: [],
+    safeToReviewForApply: true,
+    suppressedNormalWrites: [],
+    metadata: {
+      bundleCount: 1,
+      lineCount: lines.length,
+      blockerCount: 0,
+      warningCount: 0,
+      readOnlyCount: 0,
+    },
+  };
+}
+
 describe("runFirstRunSetup", () => {
   let tempDir: string;
   let workspaceRoot: string;
@@ -279,6 +383,8 @@ describe("runFirstRunSetup", () => {
   });
 
   afterEach(async () => {
+    delete process.env.ESTACODA_TELEGRAM_BOT_TOKEN;
+    delete process.env.ESTACODA_DISCORD_BOT_TOKEN;
     await rm(tempDir, { recursive: true, force: true });
   });
 
@@ -1090,6 +1196,234 @@ describe("runFirstRunSetup", () => {
       model?: { provider?: string; id?: string };
     };
     expect(config.model).toEqual({ provider: "local", id: "hermes-local", contextWindowTokens: 8192 });
+  });
+
+  it("prompts to install and start the gateway after ready Telegram onboarding before the launch prompt", async () => {
+    const actions = gatewayServiceActions();
+    const promptOrder: string[] = [];
+    const prompt = fakePrompt({
+      "Optional capabilities": "Yes",
+      "Configure optional capability": "Configure channels",
+      [gatewayServiceActivationPromptTitle]: "Yes",
+      [resolveSetupCopy("en", "onboarding.launch.startNow")]: "No",
+      __prompt: ["", "ESTACODA_TELEGRAM_BOT_TOKEN", "42", ""],
+      __secret: "123456:telegram-token",
+    });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      promptOrder.push(input.title);
+      if (promptOrder.length > 30) {
+        throw new Error(`Unexpected prompt loop: ${promptOrder.join(" -> ")}`);
+      }
+      return baseSelect(input);
+    };
+
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      flowEngine: flowEngine(),
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+      gatewayServiceActivation: { serviceActions: actions },
+    });
+
+    expect(result.gatewayServiceActivationResult).toEqual(expect.objectContaining({
+      kind: "started",
+      installed: true,
+    }));
+    expect(actions.install).toHaveBeenCalledTimes(1);
+    expect(actions.start).toHaveBeenCalledTimes(1);
+    expect(promptOrder.indexOf(gatewayServiceActivationPromptTitle)).toBeGreaterThan(-1);
+    expect(promptOrder.indexOf(gatewayServiceActivationPromptTitle)).toBeLessThan(
+      promptOrder.indexOf(resolveSetupCopy("en", "onboarding.launch.startNow"))
+    );
+    expect(result.output).toContain("Gateway service installed and started for configured Telegram channel.");
+    expect(JSON.stringify(result)).not.toContain("123456:telegram-token");
+  });
+
+  it("does not install or start when the onboarding gateway prompt is declined", async () => {
+    const actions = gatewayServiceActions();
+
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        "Optional capabilities": "Yes",
+        "Configure optional capability": "Configure channels",
+        [gatewayServiceActivationPromptTitle]: "Not now",
+        [resolveSetupCopy("en", "onboarding.launch.startNow")]: "No",
+        __prompt: ["", "ESTACODA_TELEGRAM_BOT_TOKEN", "42", ""],
+        __secret: "123456:telegram-token",
+      }),
+      flowEngine: flowEngine(),
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+      gatewayServiceActivation: { serviceActions: actions },
+    });
+
+    expect(result.gatewayServiceActivationResult).toEqual(expect.objectContaining({
+      kind: "declined",
+      output: gatewayServiceActivationNotNowGuidance,
+    }));
+    expect(actions.install).not.toHaveBeenCalled();
+    expect(actions.start).not.toHaveBeenCalled();
+    expect(result.output).toContain(gatewayServiceActivationNotNowGuidance);
+  });
+
+  it("does not offer the onboarding gateway prompt when no channel was configured", async () => {
+    const actions = gatewayServiceActions();
+    const promptTitles: string[] = [];
+    const prompt = fakePrompt({
+      "Optional capabilities": "No",
+      [resolveSetupCopy("en", "onboarding.launch.startNow")]: "No",
+    });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      promptTitles.push(input.title);
+      return baseSelect(input);
+    };
+
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      flowEngine: flowEngine(),
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+      gatewayServiceActivation: { serviceActions: actions },
+    });
+
+    expect(result.gatewayServiceActivationResult?.kind).toBe("not-offered");
+    expect(promptTitles).not.toContain(gatewayServiceActivationPromptTitle);
+    expect(actions.install).not.toHaveBeenCalled();
+    expect(actions.start).not.toHaveBeenCalled();
+  });
+
+  it("renders multiple configured channels without exposing raw secrets", async () => {
+    await mkdir(join(tempDir, ".estacoda", "profiles", "default"), { recursive: true });
+    await writeFile(profileConfigPath(tempDir), `${JSON.stringify({
+      ...localReadyConfigObject(),
+      channels: {
+        telegram: {
+          enabled: true,
+          botTokenEnv: "ESTACODA_TELEGRAM_BOT_TOKEN",
+          allowedUserIds: ["42"],
+        },
+        discord: {
+          enabled: true,
+          botTokenEnv: "ESTACODA_DISCORD_BOT_TOKEN",
+          allowedUsers: ["user-42"],
+          allowedChannels: [],
+        },
+      },
+    }, null, 2)}\n`, "utf8");
+    process.env.ESTACODA_TELEGRAM_BOT_TOKEN = "telegram-secret-value";
+    process.env.ESTACODA_DISCORD_BOT_TOKEN = "discord-secret-value";
+    const actions = gatewayServiceActions({ installedBefore: true });
+
+    const result = await maybeOfferGatewayStartAfterChannelSetup({
+      prompt: fakePrompt({
+        [gatewayServiceActivationPromptTitle]: "Yes",
+      }),
+      locale: "en",
+      homeDir: tempDir,
+      workspaceRoot,
+      reviewManifest: remoteControlManifest(["telegram", "discord"]),
+      readinessGate: true,
+      serviceActions: actions,
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      kind: "started",
+      installed: false,
+      output: "Gateway service started for configured Telegram and Discord channels.",
+    }));
+    expect(actions.install).not.toHaveBeenCalled();
+    expect(actions.start).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(result)).not.toContain("telegram-secret-value");
+    expect(JSON.stringify(result)).not.toContain("discord-secret-value");
+  });
+
+  it("does not offer the onboarding gateway prompt when channel configuration is incomplete", async () => {
+    const actions = gatewayServiceActions();
+    const promptTitles: string[] = [];
+    const prompt = fakePrompt({
+      "Optional capabilities": "Yes",
+      "Configure optional capability": "Configure channels",
+      [resolveSetupCopy("en", "onboarding.launch.startNow")]: "No",
+      __prompt: ["", "ESTACODA_TELEGRAM_BOT_TOKEN", "", ""],
+      __secret: "123456:telegram-token",
+    });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      promptTitles.push(input.title);
+      return baseSelect(input);
+    };
+
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      flowEngine: flowEngine(),
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+      gatewayServiceActivation: { serviceActions: actions },
+    });
+
+    expect(result.gatewayServiceActivationResult?.kind).toBe("not-offered");
+    expect(promptTitles).not.toContain(gatewayServiceActivationPromptTitle);
+    expect(actions.install).not.toHaveBeenCalled();
+    expect(actions.start).not.toHaveBeenCalled();
+  });
+
+  it("uses the onboarding launch-offerable readiness gate before offering gateway activation", async () => {
+    const actions = gatewayServiceActions();
+    const promptTitles: string[] = [];
+    const prompt = fakePrompt({
+      "Optional capabilities": "Yes",
+      "Configure optional capability": "Configure channels",
+      __prompt: ["", "ESTACODA_TELEGRAM_BOT_TOKEN", "42", ""],
+      __secret: "123456:telegram-token",
+    });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      promptTitles.push(input.title);
+      return baseSelect(input);
+    };
+
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      flowEngine: flowEngine(),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+        collectVerification: () => ({
+          stateWritable: true,
+          envFilePresent: false,
+          envFileSecure: true,
+          workspaceTrusted: true,
+          securityModeLabel: "Adaptive",
+          securityModeValue: "adaptive",
+          skillAutonomyLabel: "Suggest",
+          skillAutonomyValue: "suggest",
+          providerDiagnostic: {
+            status: "ready",
+            lines: ["Provider status: ready"],
+            warnings: [],
+          },
+          toolStatus: "skipped",
+          configSources: [],
+          warnings: ["non-blocking warning"],
+          issueCodes: [],
+        }),
+      }),
+      gatewayServiceActivation: { serviceActions: actions },
+    });
+
+    expect(result.applyEndState?.kind).toBe("verified-degraded");
+    expect(result.gatewayServiceActivationResult?.kind).toBe("not-offered");
+    expect(promptTitles).not.toContain(gatewayServiceActivationPromptTitle);
+    expect(actions.install).not.toHaveBeenCalled();
+    expect(actions.start).not.toHaveBeenCalled();
   });
 
   it("uses an explicit profile for setup writes without making it active", async () => {

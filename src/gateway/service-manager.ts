@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { accessSync, constants } from "node:fs";
 import { chmod, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { userInfo } from "node:os";
 import { dirname, delimiter, isAbsolute, join, resolve } from "node:path";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { inspectGatewayLockState } from "./gateway-lock.js";
@@ -31,7 +32,10 @@ type CommandResult = {
 
 type ValidationResult = { ok: true } | { ok: false; error: string };
 type ServiceUserHomeDirResult = { ok: true; serviceUserHomeDir: string } | { ok: false; error: string };
-type InstallResult = { ok: true; mode: ExecMode; unitName?: string; logCommand?: string } | { ok: false; error: string };
+type SystemdLingerStatus =
+  | { kind: "message"; text: "Systemd linger is enabled." | "Systemd linger enabled." }
+  | { kind: "warning"; text: "Warning: Could not enable systemd linger. The gateway may stop after logout. Run: loginctl enable-linger $USER" };
+type InstallResult = { ok: true; mode: ExecMode; unitName?: string; logCommand?: string; lingerStatus?: SystemdLingerStatus } | { ok: false; error: string };
 type ExistingServiceFile = { content: string; mode: number };
 
 const FORCE_REINSTALL_EVIDENCE_WAIT_MS = 5_000;
@@ -315,6 +319,9 @@ async function installSystemd(options: {
       return { ok: false, error: commandError(`systemctl ${args.join(" ")}`, result) };
     }
   }
+  const lingerStatus = options.kind === "systemd-user"
+    ? await ensureSystemdUserLinger()
+    : undefined;
   return {
     ok: true,
     mode: options.resolved.mode,
@@ -322,6 +329,7 @@ async function installSystemd(options: {
     logCommand: options.kind === "systemd-system"
       ? `sudo journalctl -u ${unitName} -f`
       : `journalctl --user -u ${unitName} -f`,
+    ...(lingerStatus === undefined ? {} : { lingerStatus }),
   };
 }
 
@@ -469,7 +477,7 @@ function renderSystemdUnit(options: {
     options.resolved.command,
     ...options.resolved.args,
     "gateway",
-    "start",
+    "run",
     "--profile",
     options.profileId,
   ];
@@ -518,7 +526,7 @@ function renderLaunchdPlist(options: {
     options.resolved.command,
     ...options.resolved.args,
     "gateway",
-    "start",
+    "run",
     "--profile",
     options.profileId,
   ];
@@ -803,6 +811,39 @@ async function validateSystemHomeDir(serviceUserHomeDir: string, label: string):
 
 async function systemctl(kind: "systemd-user" | "systemd-system", args: string[]): Promise<CommandResult> {
   return runCommand("systemctl", kind === "systemd-user" ? ["--user", ...args] : args);
+}
+
+async function ensureSystemdUserLinger(): Promise<SystemdLingerStatus> {
+  const user = currentLoginUser();
+  if (user.length > 0) {
+    const status = await runCommand("loginctl", ["show-user", user, "--property=Linger", "--value"]);
+    if (status.ok && parseLoginctlLingerEnabled(status.stdout)) {
+      return { kind: "message", text: "Systemd linger is enabled." };
+    }
+    const enable = await runCommand("loginctl", ["enable-linger", user]);
+    if (enable.ok) {
+      return { kind: "message", text: "Systemd linger enabled." };
+    }
+  }
+  return {
+    kind: "warning",
+    text: "Warning: Could not enable systemd linger. The gateway may stop after logout. Run: loginctl enable-linger $USER",
+  };
+}
+
+function currentLoginUser(): string {
+  const envUser = (process.env.USER ?? process.env.LOGNAME ?? "").trim();
+  if (envUser.length > 0) return envUser;
+  try {
+    return userInfo().username.trim();
+  } catch {
+    return "";
+  }
+}
+
+function parseLoginctlLingerEnabled(output: string): boolean {
+  const normalized = output.trim().toLowerCase();
+  return normalized === "yes" || normalized === "linger=yes";
 }
 
 function runCommand(command: string, args: string[]): Promise<CommandResult> {

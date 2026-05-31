@@ -948,10 +948,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     ui: options.ui,
     agentProfile: options.agentProfile,
     budgets: {
-      maxProviderIterations: 6,
-      maxProviderToolCalls: 20,
-      maxRepeatedToolFailures: 3,
-      maxProviderWallClockMs: 120_000
+      maxProviderIterations: 45,
+      maxProviderToolCalls: 100,
+      maxRepeatedToolFailures: 5,
+      maxProviderWallClockMs: 300_000
     }
   });
 

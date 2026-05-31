@@ -84,6 +84,7 @@ Adapters only render or normalize channel-specific transport events. They must n
 ```bash
 estacoda telegram configure --bot-token-env ESTACODA_TELEGRAM_TOKEN --allow-user 123456789
 estacoda channels enable telegram
+estacoda gateway install
 estacoda gateway start
 ```
 
@@ -114,6 +115,7 @@ estacoda gateway start
 ```bash
 estacoda discord configure --bot-token-env ESTACODA_DISCORD_TOKEN --allow-user 123456789
 estacoda channels enable discord
+estacoda gateway install
 estacoda gateway start
 ```
 
@@ -273,7 +275,7 @@ See [Channel Configuration](../operations/channel-configuration.md) for config s
 
 ## Gateway Runtime
 
-Gateway processes are bound to the profile selected at gateway start time. Changing `active-profile.json` does not mutate an already-running gateway. Runtime state is profile-local:
+Gateway processes are bound to the profile selected at foreground run or service-install time. Changing `active-profile.json` does not mutate an already-running gateway. Runtime state is profile-local:
 
 - channel approvals, channel sessions, surface pointers, and handoff codes live under the bound profile `gateway/` state
 - durable pending gateway approvals live in the global session DB table `pending_approvals`, scoped by `profile_id`
@@ -302,7 +304,7 @@ estacoda gateway uninstall
 estacoda gateway uninstall-service
 ```
 
-Every installed service is bound to a profile. The generated launch command includes `gateway start --profile <profileId>`, and service names include a profile-derived hash suffix so profiles such as `work.prod` and `work-prod` do not collide. Multiple profiles can have independent service units installed at the same time.
+Every installed service is bound to a profile. The generated launch command includes `gateway run --profile <profileId>`, and service names include a profile-derived hash suffix so profiles such as `work.prod` and `work-prod` do not collide. Multiple profiles can have independent service units installed at the same time.
 
 Install examples:
 
@@ -327,9 +329,10 @@ Service operation notes:
 - Secrets should live in the selected profile env file, for example `~/.estacoda/profiles/work/.env`.
 - systemd user services may stop on logout unless linger is enabled with `sudo loginctl enable-linger $USER`.
 - Source-mode service installs hardcode the workspace path and may need reinstall if the repo moves.
-- `gateway stop` and `gateway restart` are service-aware: they prefer an installed user service and require `--system` to control a system service.
-- `gateway start` remains process-oriented in v0.1.0 because installed units still launch the supervisor through `gateway start --profile <profileId>`.
-- `gateway start --background` refuses to spawn an unmanaged process when a managed service, live PID file, or active gateway lock exists for the selected profile.
+- `gateway run` is the foreground/debug supervisor path. `gateway run --dry-run` performs readiness checks without PID/lock writes, and `gateway run --once` performs one supervisor pass.
+- `gateway start`, `gateway stop`, and `gateway restart` are service-aware: they prefer an installed user service and require `--system` to control a system service.
+- `gateway start` requires an installed service. It no longer runs the supervisor directly and `gateway start --background` no longer spawns an unmanaged detached process.
+- `gateway restart` fails when no managed service exists instead of creating a detached process. `gateway stop` still keeps the unmanaged PID/lock cleanup fallback where already supported.
 - `estacoda gateway status` includes a Service Manager block. The status command remains usable when systemd or launchd probing fails or is permission-limited.
 
 ## Gateway Approvals
@@ -361,9 +364,12 @@ Remote `/approve` and `/deny`, Telegram inline buttons, Discord buttons, and CLI
 estacoda channels enable telegram
 estacoda channels enable discord
 
-# Start gateway
+# Persistent service for the active profile
+estacoda gateway install
 estacoda gateway start
-estacoda gateway start --profile work
+
+# Foreground/debug gateway for another profile
+estacoda gateway run --profile work
 
 # Check status
 estacoda gateway status

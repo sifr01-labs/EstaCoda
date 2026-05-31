@@ -65,6 +65,11 @@ import {
   setupModuleContextFromConfig,
 } from "../optional-capability-flow.js";
 import {
+  maybeOfferGatewayStartAfterChannelSetup,
+  type GatewayServiceActivationOptions,
+  type GatewayServiceActivationResult,
+} from "../gateway-service-activation.js";
+import {
   browserSetupModule,
   telegramSetupModule,
   voiceSetupModule,
@@ -77,6 +82,9 @@ export type FirstRunSetupRunnerOptions = CollectSetupEntryStateOptions & {
   readonly defaultSelections?: OnboardingWizardSelections;
   readonly applyExecutor?: SetupApplyExecutor;
   readonly applyFlowOptions?: SetupApplyFlowOptions;
+  readonly gatewayServiceActivation?: {
+    readonly serviceActions?: GatewayServiceActivationOptions["serviceActions"];
+  };
   readonly output?: {
     readonly write: (value: string) => void;
   };
@@ -94,6 +102,7 @@ export type FirstRunSetupRunnerResult = {
   readonly reviewManifest: SetupReviewManifest;
   readonly applyPlanningResult: SetupApplyPlanningResult;
   readonly applyEndState?: SetupApplyEndState;
+  readonly gatewayServiceActivationResult?: GatewayServiceActivationResult;
 };
 
 type PendingCredentialWrite = SetupDeferredSecretWrite;
@@ -361,6 +370,24 @@ export async function runFirstRunSetup(
   const completed = applyEndState === undefined
     ? applyPlanningResult.kind === "apply-plan-ready"
     : applyEndState.kind !== "blocked" && applyEndState.kind !== "cancelled";
+  const gatewayServiceActivationResult = applyEndState === undefined
+    ? undefined
+    : await maybeOfferGatewayStartAfterChannelSetup({
+        prompt: localizedOptions.prompt,
+        locale: language,
+        homeDir: options.homeDir,
+        workspaceRoot,
+        profileId,
+        reviewManifest,
+        readinessGate: completed && workspaceTrusted && isPostSetupLaunchOfferableEndState(applyEndState),
+        serviceActions: options.gatewayServiceActivation?.serviceActions,
+      });
+  const gatewayServiceActivationOutput = gatewayServiceActivationResult !== undefined && "output" in gatewayServiceActivationResult
+    ? gatewayServiceActivationResult.output
+    : undefined;
+  if (gatewayServiceActivationOutput !== undefined) {
+    write(options, `${gatewayServiceActivationOutput}\n`);
+  }
   const launchRequested = await promptForPostSetupLaunchRequest({
     options,
     prompt: localizedOptions.prompt,
@@ -370,7 +397,7 @@ export async function runFirstRunSetup(
     applyEndState,
   });
   const output = workspaceTrusted || !completed
-    ? renderedApplyOutput
+    ? [renderedApplyOutput, gatewayServiceActivationOutput].filter((line): line is string => line !== undefined).join("\n")
     : setupCopyText(language, "onboarding.workspace.trust.deferredFinal");
 
   return {
@@ -385,6 +412,7 @@ export async function runFirstRunSetup(
     reviewManifest,
     applyPlanningResult,
     applyEndState,
+    gatewayServiceActivationResult,
   };
 }
 

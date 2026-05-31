@@ -133,7 +133,8 @@ import {
   runGatewayStop,
   runGatewayRestart,
   runGatewayStartDryRun,
-  runGatewayStartBackground,
+  runGatewayStartService,
+  deprecatedGatewayBackgroundMessage,
   runGatewayApprovals,
   runGatewayInstallService,
   runGatewayUninstallService,
@@ -3330,6 +3331,52 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
     return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
   }
 
+  if (subcommand === "run") {
+    const profileId = parseGatewayProfileFlag(rest) ?? options.profileId;
+    const deprecatedFlags = ["--telegram", "--discord", "--email", "--whatsapp"];
+    const foundDeprecated = deprecatedFlags.find((f) => hasFlag(rest, f));
+    if (foundDeprecated !== undefined) {
+      return {
+        handled: true,
+        exitCode: 1,
+        output: [
+          `Error: ${foundDeprecated} is deprecated.`,
+          "",
+          "The gateway now starts all enabled adapters automatically.",
+          "",
+          "To configure adapters:",
+          "  estacoda channels enable telegram",
+          "  estacoda channels list",
+          "",
+          "To run the gateway in the foreground:",
+          "  estacoda gateway run",
+        ].join("\n"),
+      };
+    }
+
+    if (hasFlag(rest, "--dry-run")) {
+      const result = await runGatewayStartDryRun({ ...options, profileId });
+      return {
+        handled: true,
+        exitCode: result.ok ? 0 : 1,
+        output: result.output,
+      };
+    }
+
+    const result = await runGatewaySupervisor({
+      ...options,
+      profileId,
+      once: hasFlag(rest, "--once"),
+      telegramFetch: options.telegramFetch,
+    });
+
+    return {
+      handled: true,
+      exitCode: result.ok ? 0 : 1,
+      output: result.output,
+    };
+  }
+
   if (subcommand === "start") {
     const profileId = parseGatewayProfileFlag(rest) ?? options.profileId;
     const deprecatedFlags = ["--telegram", "--discord", "--email", "--whatsapp"];
@@ -3347,37 +3394,49 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
           "  estacoda channels enable telegram",
           "  estacoda channels list",
           "",
-          "To start the gateway:",
+          "To start the installed gateway service:",
           "  estacoda gateway start",
         ].join("\n"),
       };
     }
 
     if (hasFlag(rest, "--dry-run")) {
-      const result = await runGatewayStartDryRun({ ...options, profileId });
       return {
         handled: true,
-        exitCode: result.ok ? 0 : 1,
-        output: result.output,
+        exitCode: 1,
+        output: [
+          "estacoda gateway start --dry-run has moved.",
+          "",
+          "Use: estacoda gateway run --dry-run",
+        ].join("\n"),
+      };
+    }
+
+    if (hasFlag(rest, "--once")) {
+      return {
+        handled: true,
+        exitCode: 1,
+        output: [
+          "estacoda gateway start --once has moved.",
+          "",
+          "Use: estacoda gateway run --once",
+        ].join("\n"),
       };
     }
 
     if (hasFlag(rest, "--background")) {
-      const result = await runGatewayStartBackground({ ...options, profileId });
       return {
         handled: true,
-        exitCode: result.ok ? 0 : 1,
-        output: result.output,
+        exitCode: 1,
+        output: deprecatedGatewayBackgroundMessage(),
       };
     }
 
-    const result = await runGatewaySupervisor({
+    const result = await runGatewayStartService({
       ...options,
       profileId,
-      once: hasFlag(rest, "--once"),
-      telegramFetch: options.telegramFetch,
+      system: hasFlag(rest, "--system"),
     });
-
     return {
       handled: true,
       exitCode: result.ok ? 0 : 1,
@@ -3406,11 +3465,13 @@ async function gateway(options: CliOptions, args: string[]): Promise<CliCommandR
       "  estacoda gateway restart",
       "  estacoda gateway restart --system",
       "  estacoda gateway restart --graceful",
+      "  estacoda gateway run",
+      "  estacoda gateway run --dry-run",
+      "  estacoda gateway run --once",
+      "  estacoda gateway run --profile <id>",
       "  estacoda gateway start",
-      "  estacoda gateway start --dry-run",
-      "  estacoda gateway start --background",
-      "  estacoda gateway start --once",
-      "  estacoda gateway start --profile <id>",
+      "  estacoda gateway start --system",
+      "  estacoda gateway start [--profile <id>]",
     ].join("\n"),
   };
 }

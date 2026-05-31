@@ -23,11 +23,11 @@ sidebar_position: 9
 
 ## ربط الملف الشخصي
 
-تعمل البوابة مقابل **ملف شخصي واحد محدد**. عند التشغيل، يُقفل الملف الشخصي النشط في ذلك الوقت طوال عمر العملية.
+تعمل البوابة مقابل **ملف شخصي واحد محدد**. عند تشغيلها في المقدمة أو تثبيتها كخدمة، يُقفل الملف الشخصي المحدد طوال عمر العملية أو وحدة الخدمة.
 
 ```bash
-estacoda gateway start
-estacoda gateway start --profile work
+estacoda gateway run
+estacoda gateway run --profile work
 ```
 
 تغيير `active-profile.json` لا يؤثر على البوابة التي تعمل بالفعل. إذا كنت بحاجة إلى بوابة لملف شخصي مختلف، شغل نسخة ثانية أو أعد التشغيل مع الملف الشخصي الجديد.
@@ -42,10 +42,11 @@ estacoda gateway start --profile work
 | تنزيلات وسائط القنوات | `~/.estacoda/profiles/<id>/channel-media/` |
 | بيانات مصادقة WhatsApp | `~/.estacoda/profiles/<id>/gateway/whatsapp-auth/` |
 
-تثبيتات الخدمة مرتبطة أيضًا بالملف الشخصي. تتضمن وحدة الخدمة المُنشأة أمر `gateway start --profile <id>`، ويحمل اسم الوحدة تجزئة مشتقة من الملف الشخصي بحيث يمكن أن تتعايش عدة ملفات شخصية.
+تثبيتات الخدمة مرتبطة أيضًا بالملف الشخصي. تتضمن وحدة الخدمة المُنشأة أمر `gateway run --profile <id>`، ويحمل اسم الوحدة تجزئة مشتقة من الملف الشخصي بحيث يمكن أن تتعايش عدة ملفات شخصية.
 
 ```bash
 estacoda gateway install --profile work
+estacoda gateway start
 estacoda gateway uninstall --profile work
 ```
 
@@ -154,8 +155,11 @@ estacoda gateway diagnose    # فحص جاهزية لكل قناة؛ يخرج ب
 
 ```bash
 estacoda gateway install
+estacoda gateway start
 estacoda gateway uninstall
 ```
+
+`gateway start` يبدأ خدمة نطاق المستخدم المثبتة. استخدم `gateway start --system` لخدمة نطاق النظام المثبتة. لجلسات المقدمة أو التشخيص، استخدم `gateway run` أو `gateway run --dry-run` أو `gateway run --once`.
 
 ترث الخدمات `HOME` ولكن ليس بيئة الصدفة التفاعلية. احتفظ بالأسرار في ملف `.env` الخاص بالملف الشخصي. قد تتوقف خدمات مستخدم systemd عند تسجيل الخروج ما لم يُفعّل linger:
 
@@ -163,7 +167,7 @@ estacoda gateway uninstall
 sudo loginctl enable-linger $USER
 ```
 
-للحصول على دليل التشغيل الكامل للخدمة، راجع صفحة عمليات البوابة (لم تُكتب بعد لإصدار v0.1.0).
+للحصول على دليل التشغيل الكامل للخدمة، راجع صفحة عمليات البوابة.
 
 ## صفحات ذات صلة
 

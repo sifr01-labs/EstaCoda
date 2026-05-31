@@ -23,11 +23,11 @@ If you only use the CLI, you do not need the gateway. The moment you want Telegr
 
 ## Profile binding
 
-The gateway runs against **one selected profile**. When you start it, the profile active at that moment is locked for the lifetime of the process.
+The gateway runs against **one selected profile**. When you run it in the foreground or install it as a service, the selected profile is locked for the lifetime of that process or service unit.
 
 ```bash
-estacoda gateway start
-estacoda gateway start --profile work
+estacoda gateway run
+estacoda gateway run --profile work
 ```
 
 Changing `active-profile.json` does not mutate a running gateway. If you need a gateway for a different profile, start a second instance or restart the existing one with the new profile.
@@ -42,10 +42,11 @@ Profile-local state includes:
 | Channel media downloads | `~/.estacoda/profiles/<id>/channel-media/` |
 | WhatsApp auth data | `~/.estacoda/profiles/<id>/gateway/whatsapp-auth/` |
 
-Service installs are also profile-bound. The generated service unit includes `gateway start --profile <id>`, and the unit name carries a profile-derived hash so multiple profiles can coexist.
+Service installs are also profile-bound. The generated service unit includes `gateway run --profile <id>`, and the unit name carries a profile-derived hash so multiple profiles can coexist.
 
 ```bash
 estacoda gateway install --profile work
+estacoda gateway start
 estacoda gateway uninstall --profile work
 ```
 
@@ -154,8 +155,11 @@ EstaCoda can install the gateway as a managed service:
 
 ```bash
 estacoda gateway install
+estacoda gateway start
 estacoda gateway uninstall
 ```
+
+`gateway start` starts the installed user-scope service. Use `gateway start --system` for an installed system service. For foreground/debug sessions, use `gateway run`, `gateway run --dry-run`, or `gateway run --once`.
 
 Services inherit `HOME` but not your interactive shell environment. Keep secrets in the profile `.env` file. systemd user services may stop on logout unless linger is enabled:
 
@@ -163,7 +167,7 @@ Services inherit `HOME` but not your interactive shell environment. Keep secrets
 sudo loginctl enable-linger $USER
 ```
 
-For the full service runbook, see the gateway operations page (not yet written for v0.1.0).
+For the full service runbook, see the gateway operations page.
 
 ## Related docs
 

@@ -80,6 +80,11 @@ import {
   optionalPromptId,
   setupModuleContextFromDecision,
 } from "../optional-capability-flow.js";
+import {
+  maybeOfferGatewayStartAfterChannelSetup,
+  type GatewayServiceActivationOptions,
+  type GatewayServiceActivationResult,
+} from "../gateway-service-activation.js";
 
 export type ConfigEditorRunnerOptions = CollectSetupRouteOptions & {
   readonly prompt: Prompt;
@@ -89,6 +94,9 @@ export type ConfigEditorRunnerOptions = CollectSetupRouteOptions & {
   readonly renderInitialOverview?: boolean;
   readonly applyFlowOptions?: SetupApplyFlowOptions;
   readonly flowEngine?: FlowEngine;
+  readonly gatewayServiceActivation?: {
+    readonly serviceActions?: GatewayServiceActivationOptions["serviceActions"];
+  };
 };
 
 export type ConfigEditorRunnerResult = {
@@ -104,6 +112,7 @@ export type ConfigEditorRunnerResult = {
   readonly reviewManifest?: SetupReviewManifest;
   readonly applyPlanningResult?: SetupApplyPlanningResult;
   readonly applyEndState?: SetupApplyEndState;
+  readonly gatewayServiceActivationResult?: GatewayServiceActivationResult;
 };
 
 type LocalizedConfigEditorRunnerOptions = ConfigEditorRunnerOptions & {
@@ -748,6 +757,22 @@ async function handlePostApplyHandoff(input: {
 
   const postApplyRouteDecision = await collectSetupRoute(options);
   const handoffState = postApplyHandoffState(applyEndState, postApplyRouteDecision);
+  const gatewayServiceActivationResult = await maybeOfferGatewayStartAfterChannelSetup({
+    prompt: options.prompt,
+    locale: options.locale,
+    homeDir: options.homeDir,
+    workspaceRoot: options.workspaceRoot,
+    profileId: options.profileId,
+    reviewManifest,
+    readinessGate: handoffState !== "blocked",
+    serviceActions: options.gatewayServiceActivation?.serviceActions,
+  });
+  const gatewayServiceActivationOutput = "output" in gatewayServiceActivationResult
+    ? gatewayServiceActivationResult.output
+    : undefined;
+  if (gatewayServiceActivationOutput !== undefined) {
+    write(options, `${gatewayServiceActivationOutput}\n`);
+  }
   const handoffWarningOutput = handoffState === "degraded"
     ? renderConcreteVerificationWarnings(applyEndState, options.locale)
     : undefined;
@@ -764,6 +789,7 @@ async function handlePostApplyHandoff(input: {
     const repairAgainSelected = setupCopyText(options.locale, "setupEditor.result.repairAgainSelected");
     const output = [
       renderedApplyOutput,
+      gatewayServiceActivationOutput,
       handoffWarningOutput,
       repairAgainSelected,
     ].filter((line): line is string => line !== undefined).join("\n");
@@ -781,6 +807,7 @@ async function handlePostApplyHandoff(input: {
       reviewManifest,
       applyPlanningResult,
       applyEndState,
+      gatewayServiceActivationResult,
     };
   }
 
@@ -802,6 +829,7 @@ async function handlePostApplyHandoff(input: {
       exitCode: 0,
       output: [
         renderedApplyOutput,
+        gatewayServiceActivationOutput,
         handoffWarningOutput,
         launchOutput,
       ].filter((line): line is string => line !== undefined).join("\n"),
@@ -814,6 +842,7 @@ async function handlePostApplyHandoff(input: {
       reviewManifest,
       applyPlanningResult,
       applyEndState: launchedEndState,
+      gatewayServiceActivationResult,
     };
   }
 
@@ -835,6 +864,7 @@ async function handlePostApplyHandoff(input: {
       exitCode: 0,
       output: [
         renderedApplyOutput,
+        gatewayServiceActivationOutput,
         handoffWarningOutput,
         launchOutput,
       ].filter((line): line is string => line !== undefined).join("\n"),
@@ -847,11 +877,13 @@ async function handlePostApplyHandoff(input: {
       reviewManifest,
       applyPlanningResult,
       applyEndState: launchedEndState,
+      gatewayServiceActivationResult,
     };
   }
 
   const exitOutput = [
     renderedApplyOutput,
+    gatewayServiceActivationOutput,
     handoffWarningOutput,
     "Exited after setup apply without launching.",
   ].filter((line): line is string => line !== undefined).join("\n");
@@ -868,6 +900,7 @@ async function handlePostApplyHandoff(input: {
     reviewManifest,
     applyPlanningResult,
     applyEndState,
+    gatewayServiceActivationResult,
   };
 }
 

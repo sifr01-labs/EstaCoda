@@ -78,6 +78,7 @@ Telegram is the live-proven first-party remote channel for v0.1.0.
 ```bash
 estacoda telegram configure --bot-token-env ESTACODA_TELEGRAM_TOKEN --allow-user 123456789
 estacoda channels enable telegram
+estacoda gateway install
 estacoda gateway start
 ```
 
@@ -118,6 +119,7 @@ Discord is present in code but not live-proven for v0.1.0.
 ```bash
 estacoda discord configure --bot-token-env ESTACODA_DISCORD_TOKEN --allow-user 123456789
 estacoda channels enable discord
+estacoda gateway install
 estacoda gateway start
 ```
 

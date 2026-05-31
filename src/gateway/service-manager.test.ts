@@ -116,7 +116,7 @@ function mockSpawn(responder?: (call: SpawnCall) => SpawnResponse | Promise<Spaw
     child.stdout = new PassThrough();
     child.stderr = new PassThrough();
     queueMicrotask(async () => {
-      const response = await Promise.resolve(responder?.(call) ?? { code: 0, stdout: "", stderr: "" });
+      const response = normalizeSpawnResponse(call, await Promise.resolve(responder?.(call) ?? { code: 0, stdout: "", stderr: "" }));
       if (response.stdout !== undefined) child.stdout.write(response.stdout);
       if (response.stderr !== undefined) child.stderr.write(response.stderr);
       child.stdout.end();
@@ -128,16 +128,40 @@ function mockSpawn(responder?: (call: SpawnCall) => SpawnResponse | Promise<Spaw
   return calls;
 }
 
+function normalizeSpawnResponse(call: SpawnCall, response: SpawnResponse): SpawnResponse {
+  if (call.command === "loginctl" && call.args[0] === "show-user" && response.stdout === undefined) {
+    return { ...response, stdout: "yes\n" };
+  }
+  if (call.command === "loginctl" && call.args[0] === "show-user" && response.stdout === "") {
+    return { ...response, stdout: "yes\n" };
+  }
+  return response;
+}
+
+function restoreEnvVar(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
+}
+
 describe("service manager", () => {
   let tmpDir: string;
   let originalPath: string | undefined;
   let originalPlatform: NodeJS.Platform;
+  let originalUser: string | undefined;
+  let originalLogname: string | undefined;
 
   beforeEach(async () => {
     tmpDir = await makeTempDir();
     originalPath = process.env.PATH;
     originalPlatform = process.platform;
+    originalUser = process.env.USER;
+    originalLogname = process.env.LOGNAME;
     process.env.PATH = "";
+    process.env.USER = "estacoda-test";
+    process.env.LOGNAME = "estacoda-test";
     childProcessMock.spawn.mockReset();
     resolverMock.resolveGatewayExec.mockReset();
     fsPromisesMock.interceptedSystemWrites = [];
@@ -158,7 +182,9 @@ describe("service manager", () => {
       value: originalPlatform,
       configurable: true,
     });
-    process.env.PATH = originalPath;
+    restoreEnvVar("PATH", originalPath);
+    restoreEnvVar("USER", originalUser);
+    restoreEnvVar("LOGNAME", originalLogname);
     vi.restoreAllMocks();
     await rm(tmpDir, { recursive: true, force: true });
   });
@@ -206,6 +232,7 @@ describe("service manager", () => {
       mode: "source",
       unitName: unitNameForProfile("default"),
       logCommand: `journalctl --user -u ${unitNameForProfile("default")} -f`,
+      lingerStatus: { kind: "message", text: "Systemd linger is enabled." },
     });
     const unitPath = systemdUnitPath({ serviceUserHomeDir, profileId: "default" });
     const stateUnitPath = systemdUnitPath({ serviceUserHomeDir: stateHomeDir, profileId: "default" });
@@ -225,14 +252,79 @@ describe("service manager", () => {
     expect(content).not.toContain(`Environment="HOME=${stateHomeDir}"`);
     expect(content).toContain("Environment=\"PATH=/opt/homebrew/bin:");
     expect(content).toContain(`WorkingDirectory="${join(tmpDir, "workspace with spaces")}"`);
-    expect(content).toContain('"gateway" "start" "--profile" "default"');
+    expect(content).toContain('"gateway" "run" "--profile" "default"');
+    expect(content).not.toContain('"gateway" "start" "--profile" "default"');
     expect(content).not.toContain("--replace");
     expect((await stat(unitPath)).mode & 0o777).toBe(0o600);
     expect(calls.map((call) => [call.command, ...call.args])).toEqual([
       ["systemctl", "--user", "daemon-reload"],
       ["systemctl", "--user", "enable", unitNameForProfile("default")],
       ["systemctl", "--user", "start", unitNameForProfile("default")],
+      ["loginctl", "show-user", "estacoda-test", "--property=Linger", "--value"],
     ]);
+  });
+
+  it("auto-enables systemd linger when disabled", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "systemctl");
+    process.env.PATH = binDir;
+    setPlatform("linux");
+    const calls = mockSpawn((call) => {
+      if (call.command === "loginctl" && call.args[0] === "show-user") {
+        return { code: 0, stdout: "no\n" };
+      }
+      return { code: 0 };
+    });
+
+    const result = await installService({
+      stateHomeDir: tmpDir,
+      serviceUserHomeDir: tmpDir,
+      workspaceRoot: tmpDir,
+      profileId: "default",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      lingerStatus: { kind: "message", text: "Systemd linger enabled." },
+    });
+    expect(calls.map((call) => [call.command, ...call.args])).toContainEqual(
+      ["loginctl", "enable-linger", "estacoda-test"]
+    );
+  });
+
+  it("warns but succeeds when systemd linger auto-enable fails", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "systemctl");
+    process.env.PATH = binDir;
+    setPlatform("linux");
+    const calls = mockSpawn((call) => {
+      if (call.command === "loginctl" && call.args[0] === "show-user") {
+        return { code: 1, stderr: "unknown user" };
+      }
+      if (call.command === "loginctl" && call.args[0] === "enable-linger") {
+        return { code: 1, stderr: "permission denied: secret-token-value" };
+      }
+      return { code: 0 };
+    });
+
+    const result = await installService({
+      stateHomeDir: tmpDir,
+      serviceUserHomeDir: tmpDir,
+      workspaceRoot: tmpDir,
+      profileId: "default",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      lingerStatus: {
+        kind: "warning",
+        text: "Warning: Could not enable systemd linger. The gateway may stop after logout. Run: loginctl enable-linger $USER",
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain("secret-token-value");
+    expect(calls.map((call) => [call.command, ...call.args])).toContainEqual(
+      ["loginctl", "enable-linger", "estacoda-test"]
+    );
   });
 
   it.each([
@@ -254,7 +346,25 @@ describe("service manager", () => {
       ok: false,
       error: `systemctl ${failingAction === "daemon-reload" ? "daemon-reload" : `${failingAction} ${unitNameForProfile("default")}`} failed: ${failingAction} boom`,
     });
+    expect(childProcessMock.spawn.mock.calls.some(([command]) => command === "loginctl")).toBe(false);
     await expect(readFile(unitPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("does not attempt systemd linger handling when no supported service manager exists", async () => {
+    const calls = mockSpawn();
+    setPlatform("linux");
+    process.env.PATH = "";
+
+    await expect(installService({
+      stateHomeDir: tmpDir,
+      serviceUserHomeDir: tmpDir,
+      workspaceRoot: tmpDir,
+      profileId: "default",
+    })).resolves.toEqual({
+      ok: false,
+      error: "No supported service manager detected.",
+    });
+    expect(calls.some((call) => call.command === "loginctl")).toBe(false);
   });
 
   it("restores previous systemd unit content and permissions when forced reinstall fails after write", async () => {
@@ -500,6 +610,7 @@ describe("service manager", () => {
       ["systemctl", "--user", "daemon-reload"],
       ["systemctl", "--user", "enable", unitNameForProfile("default")],
       ["systemctl", "--user", "start", unitNameForProfile("default")],
+      ["loginctl", "show-user", "estacoda-test", "--property=Linger", "--value"],
     ]);
   });
 
@@ -814,6 +925,7 @@ describe("service manager", () => {
       ["systemctl", "enable", unitNameForProfile("default")],
       ["systemctl", "start", unitNameForProfile("default")],
     ]);
+    expect(calls.some((call) => call.command === "loginctl")).toBe(false);
   });
 
   it("installs a launchd plist with escaped ProgramArguments and permissions", async () => {
@@ -835,7 +947,8 @@ describe("service manager", () => {
     await expect(readFile(statePlistPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     expect(content).toContain(`<string>com.estacoda.gateway.work-prod-`);
     expect(content).toContain("<string>gateway</string>");
-    expect(content).toContain("<string>start</string>");
+    expect(content).toContain("<string>run</string>");
+    expect(content).not.toContain("<string>start</string>");
     expect(content).toContain("<string>--profile</string>");
     expect(content).toContain("<string>work.prod</string>");
     expect(content).toContain("<key>RunAtLoad</key><true/>");
@@ -851,6 +964,7 @@ describe("service manager", () => {
     expect(calls.map((call) => [call.command, ...call.args])).toEqual([
       ["launchctl", "load", "-w", plistPath],
     ]);
+    expect(calls.some((call) => call.command === "loginctl")).toBe(false);
   });
 
   it("removes a fresh launchd plist when load fails after write", async () => {

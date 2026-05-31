@@ -38,7 +38,7 @@ pnpm run dev -- settings        # Show current settings
 pnpm run dev -- doctor --live   # Live provider check
 pnpm run dev -- profile list    # Advanced profile management
 pnpm run dev -- telegram setup  # Configure Telegram
-pnpm run dev -- gateway start   # Start gateway (channels must be enabled first)
+pnpm run dev -- gateway run     # Run foreground gateway (channels must be enabled first)
 ```
 
 Global command option:

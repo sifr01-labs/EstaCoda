@@ -13,7 +13,7 @@ Every channel object supports:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enabled` | `boolean` | `false` | Whether the adapter is started by `estacoda gateway start`. |
+| `enabled` | `boolean` | `false` | Whether the adapter is loaded by `estacoda gateway run` or by an installed service started with `estacoda gateway start`. |
 | `busyPolicy` | `"reject" \| "queue" \| "interrupt"` | `"reject"` | Behavior when a new message arrives during an active turn. |
 | `queueDepth` | `number` | `3` | Maximum buffered messages when `busyPolicy` is `"queue"`. Clamped to `[1, 10]`. |
 

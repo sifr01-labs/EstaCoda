@@ -217,6 +217,14 @@ function expectedManagedPython(stateRoot: string): string {
     : join(stateRoot, "python-env", "bin", "python");
 }
 
+describe("createRuntime provider turn budgets", () => {
+  it("passes the expanded default budgets to ProviderTurnLoop", async () => {
+    const source = await readFile(new URL("./create-runtime.ts", import.meta.url), "utf8");
+
+    expect(source).toMatch(/const providerTurnLoop = new ProviderTurnLoop\(\{[\s\S]*?budgets: \{\s*maxProviderIterations: 45,\s*maxProviderToolCalls: 100,\s*maxRepeatedToolFailures: 5,\s*maxProviderWallClockMs: 300_000\s*\}/u);
+  });
+});
+
 const providerToolNameGroups = [
   { providerName: "builtin", toolNames: ["workflow.plan", "trajectory.record"] },
   { providerName: "python", toolNames: ["python.probe", "document.probe"] },

@@ -81,32 +81,40 @@ The Service Manager block reports installed/active state for the user service an
 
 Returns exit code 1 if any warnings exist.
 
-### Gateway Stop and Restart
+### Gateway Run, Start, Stop, and Restart
 
 ```bash
-estacoda gateway start          # Run gateway supervisor in the foreground
-estacoda gateway start --dry-run      # Local readiness check; no lock/PID writes
-estacoda gateway start --background   # Start gateway in background and return
-estacoda gateway start --profile work # Start gateway bound to a selected profile
+estacoda gateway run                 # Run gateway supervisor in the foreground
+estacoda gateway run --dry-run       # Local readiness check; no lock/PID writes
+estacoda gateway run --once          # Perform one supervisor pass, then exit
+estacoda gateway run --profile work  # Run foreground gateway bound to a selected profile
+
+estacoda gateway start               # Start installed user-scope service
+estacoda gateway start --system      # Start installed system-scope service
 
 estacoda gateway stop           # Send SIGTERM and wait for shutdown
 estacoda gateway stop --force   # Force termination if graceful stop is not desired or fails
 
-estacoda gateway restart              # Stop, background-start, and return
+estacoda gateway restart              # Restart installed user-scope service
+estacoda gateway restart --system     # Restart installed system-scope service
 estacoda gateway restart --graceful   # Alias for restart in v0.1.0
 ```
 
-`start` runs the gateway supervisor in the foreground. Use it when you want logs in the current terminal and want the command to stay attached.
+`run` starts the gateway supervisor in the foreground. Use it for debugging, local development, and short-lived operator sessions where logs should stay attached to the current terminal.
 
-`start --dry-run` performs local readiness checks without starting adapters, polling remote APIs, entering the supervisor loop, acquiring the gateway lock, or writing PID/lock state. It reports adapter readiness, state directory readiness, and gateway lock state.
+`run --dry-run` performs local readiness checks without starting adapters, polling remote APIs, entering the supervisor loop, acquiring the gateway lock, or writing PID/lock state. It reports adapter readiness, state directory readiness, and gateway lock state.
 
-`start --background` starts the gateway in a detached background process and returns after spawning. Background stdout/stderr are appended to the bound profile `logs/gateway.log`. It refuses to spawn when the selected profile has an installed managed service, a live PID file, or an active gateway lock; use `gateway restart`, `gateway restart --system`, or the platform service manager for managed-service lifecycle.
+`run --once` executes one supervisor pass and exits. It is useful for tests, diagnostics, and controlled handoff checks.
 
-Gateway processes are bound to the profile selected at start time. Changing `active-profile.json` does not mutate a running gateway.
+`start` starts an installed service. It defaults to the selected profile's user-scope service. `start --system` controls only the system-scope service. If only a system service exists and `--system` is omitted, EstaCoda fails closed and tells the operator to rerun with `--system`; it will not silently control a privileged unit.
+
+`gateway install` is required before `gateway start`. For an attached foreground gateway, use `gateway run`. `gateway start --background` is deprecated and no longer spawns an unmanaged detached process; replace it with `gateway install` followed by `gateway start`.
+
+Gateway processes are bound to the profile selected at run or service-install time. Changing `active-profile.json` does not mutate a running gateway.
 
 `stop` first checks whether the selected profile has an installed managed service. If a user-scope service exists, `stop` delegates to systemd or launchd. On systemd, `stop --force` still uses `systemctl stop`; it does not send SIGKILL to the supervisor directly. If no managed service exists, `stop` reads the PID from `gateway.pid`, sends SIGTERM, waits up to 10s for exit, then removes PID/state/lock files. In that unmanaged process mode, `--force` sends SIGKILL and cleans up.
 
-`restart` uses the same service selection rules. If a user-scope service exists, it delegates to systemd or launchd and does not spawn an unmanaged background gateway. If no managed service exists, it calls `stop`, then performs `start --background`, then returns. In v0.1.0, `restart --graceful` is an alias for `restart`; it does not add a separate drain behavior.
+`restart` uses the same service selection rules as `start`. If a user-scope service exists, it delegates to systemd or launchd. `restart --system` controls only the system-scope service. If no managed service exists, `restart` fails with installation guidance and does not create an unmanaged detached process. In v0.1.0, `restart --graceful` is an alias for `restart`; it does not add a separate drain behavior.
 
 ### Gateway Managed Services
 
@@ -126,6 +134,7 @@ sudo estacoda gateway uninstall --system  # Remove system-scope service
 
 estacoda gateway stop --system            # Stop a system-scope service
 estacoda gateway restart --system         # Restart a system-scope service
+estacoda gateway start --system           # Start a system-scope service
 ```
 
 Supported service managers:
@@ -134,7 +143,7 @@ Supported service managers:
 - Linux systemd system services.
 - macOS launchd user LaunchAgents.
 
-Installed gateway services are profile-aware. The generated service launch command includes `gateway start --profile <profileId>`, and each profile receives its own hash-suffixed unit or plist name, so multiple profiles can have independent managed services.
+Installed gateway services are profile-aware. The generated service launch command includes `gateway run --profile <profileId>`, and each profile receives its own hash-suffixed unit or plist name, so multiple profiles can have independent managed services.
 
 Gateway services use two homes:
 
@@ -182,8 +191,8 @@ Operational warnings:
 - systemd user services may stop on logout unless linger is enabled, for example `sudo loginctl enable-linger $USER`.
 - systemd service output is sent to the journal. Use `journalctl --user -u <unit> -f` for user services and `sudo journalctl -u <unit> -f` for system services.
 - Source-mode installs hardcode the absolute workspace path. If the repo moves, uninstall and reinstall the service.
-- `estacoda gateway stop` and `estacoda gateway restart` prefer a user-scope managed service when one exists. If both user and system services exist, the user service is controlled unless `--system` is passed. If only a system service exists, rerun with `--system`; EstaCoda will not silently control the system unit or start/stop an unmanaged process.
-- `estacoda gateway start` remains process-oriented in v0.1.0. Use the platform service manager, or `gateway restart`, for managed service startup after installation.
+- `estacoda gateway start`, `estacoda gateway stop`, and `estacoda gateway restart` prefer a user-scope managed service when one exists. If both user and system services exist, the user service is controlled unless `--system` is passed. If only a system service exists, rerun with `--system`; EstaCoda will not silently control the system unit.
+- Foreground/debug operation is `estacoda gateway run`. Persistent operation is `estacoda gateway install` followed by `estacoda gateway start`. Detached unmanaged background spawning is no longer the start path.
 
 ### Channel Commands
 

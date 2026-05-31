@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
@@ -11,6 +11,12 @@ import { runConfigEditor } from "./runner.js";
 import { promptModelCandidate } from "./prompts.js";
 import { resolveProfileStateHome, writeActiveProfile } from "../../config/profile-home.js";
 import { isolateLtr } from "../../ui/bidi.js";
+import {
+  gatewayServiceActivationNotNowGuidance,
+  gatewayServiceActivationPromptTitle,
+  type GatewayActivationServiceActions,
+} from "../gateway-service-activation.js";
+import { resolveSetupCopy } from "../setup-copy.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-config-editor-"));
@@ -28,6 +34,8 @@ describe("runConfigEditor", () => {
 
   afterEach(async () => {
     delete process.env.PR8_SHELL_ONLY_KEY;
+    delete process.env.TELEGRAM_BOT_TOKEN;
+    delete process.env.DISCORD_BOT_TOKEN;
     await chmod(join(tempDir, ".estacoda"), 0o700).catch(() => undefined);
     await rm(tempDir, { recursive: true, force: true });
   });
@@ -1438,6 +1446,94 @@ describe("runConfigEditor", () => {
     expect(JSON.stringify(result)).not.toContain("123456:");
   });
 
+  it("prompts after reviewed Telegram channel apply before the post-apply handoff and starts the service", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const actions = gatewayServiceActions();
+    const promptTitles: string[] = [];
+    const prompt = fakePrompt({
+      values: [
+        "telegram",
+        "enable",
+        "TELEGRAM_BOT_TOKEN",
+        "42",
+        "-100",
+        true,
+        "Yes",
+        "exit",
+      ],
+      secret: "123456:stored-telegram-token",
+    });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      promptTitles.push(input.title);
+      return baseSelect(input);
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "configure-channels",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+      gatewayServiceActivation: { serviceActions: actions },
+    });
+
+    expect(result.gatewayServiceActivationResult).toEqual(expect.objectContaining({
+      kind: "started",
+      installed: true,
+    }));
+    expect(actions.install).toHaveBeenCalledTimes(1);
+    expect(actions.start).toHaveBeenCalledTimes(1);
+    expect(promptTitles.indexOf(gatewayServiceActivationPromptTitle)).toBeGreaterThan(-1);
+    expect(promptTitles.indexOf(gatewayServiceActivationPromptTitle)).toBeLessThan(
+      promptTitles.indexOf(resolveSetupCopy("en", "setupEditor.prompt.postApply.title"))
+    );
+    expect(result.output).toContain("Gateway service installed and started for configured Telegram channel.");
+    expect(JSON.stringify(result)).not.toContain("123456:stored-telegram-token");
+  });
+
+  it("does not install or start when the config-editor gateway prompt is declined", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const actions = gatewayServiceActions();
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: [
+          "telegram",
+          "enable",
+          "TELEGRAM_BOT_TOKEN",
+          "42",
+          "-100",
+          true,
+          "Not now",
+          "exit",
+        ],
+        secret: "123456:stored-telegram-token",
+      }),
+      defaultActionId: "configure-channels",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+      gatewayServiceActivation: { serviceActions: actions },
+    });
+
+    expect(result.gatewayServiceActivationResult).toEqual(expect.objectContaining({
+      kind: "declined",
+      output: gatewayServiceActivationNotNowGuidance,
+    }));
+    expect(actions.install).not.toHaveBeenCalled();
+    expect(actions.start).not.toHaveBeenCalled();
+    expect(result.output).toContain(gatewayServiceActivationNotNowGuidance);
+  });
+
   it("applies reviewed Discord beta channel with env ref and fail-closed allowlist", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
@@ -1556,6 +1652,63 @@ describe("runConfigEditor", () => {
     expect(config.channels?.whatsapp?.authDir).toContain("/gateway/whatsapp-auth");
   });
 
+  it("offers gateway activation after reviewed Discord and WhatsApp channel setup when each is ready", async () => {
+    for (const scenario of [
+      {
+        channel: "discord",
+        values: ["discord", "enable", "DISCORD_BOT_TOKEN", "user-42", "", "channel-9", true, "Not now", "exit"],
+        secret: "discord-token-value",
+        expected: "Discord",
+      },
+      {
+        channel: "whatsapp",
+        values: ["whatsapp", "enable", "971501234567", true, "Not now", "exit"],
+        secret: undefined,
+        expected: "WhatsApp",
+      },
+    ] as const) {
+      await rm(tempDir, { recursive: true, force: true });
+      tempDir = await makeTempDir();
+      workspaceRoot = join(tempDir, "workspace");
+      await mkdir(workspaceRoot, { recursive: true });
+      await writeUserConfig(tempDir, localReadyConfig());
+      await trustWorkspace(tempDir, workspaceRoot);
+      const promptTitles: string[] = [];
+      const prompt = fakePrompt({
+        values: scenario.values,
+        secret: scenario.secret,
+      });
+      const baseSelect = prompt.select!;
+      prompt.select = async (input) => {
+        promptTitles.push(input.title);
+        return baseSelect(input);
+      };
+      const actions = gatewayServiceActions();
+
+      const result = await runConfigEditor({
+        homeDir: tempDir,
+        workspaceRoot,
+        prompt,
+        defaultActionId: "configure-channels",
+        applyExecutor: createReviewedSetupApplyExecutor({
+          homeDir: tempDir,
+          workspaceRoot,
+        }),
+        gatewayServiceActivation: { serviceActions: actions },
+      });
+
+      expect(result.gatewayServiceActivationResult).toEqual(expect.objectContaining({
+        kind: "declined",
+        channels: [expect.objectContaining({ label: scenario.expected })],
+      }));
+      expect(promptTitles).toContain(gatewayServiceActivationPromptTitle);
+      expect(actions.install).not.toHaveBeenCalled();
+      expect(actions.start).not.toHaveBeenCalled();
+      expect(JSON.stringify(result)).not.toContain("discord-token-value");
+      expect(scenario.channel).toMatch(/discord|whatsapp/u);
+    }
+  });
+
   it("does not draft WhatsApp beta channel enablement without allowed users", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
@@ -1573,6 +1726,212 @@ describe("runConfigEditor", () => {
     expect(result.completed).toBe(true);
     expect(result.reviewManifest?.sections["remote-control-surfaces"]).toHaveLength(0);
     await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
+  });
+
+  it("does not offer gateway activation for non-channel config-editor changes", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const actions = gatewayServiceActions();
+    const promptTitles: string[] = [];
+    const prompt = fakePrompt({ values: ["strict", true, "exit"] });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      promptTitles.push(input.title);
+      return baseSelect(input);
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "edit-security-mode",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+      gatewayServiceActivation: { serviceActions: actions },
+    });
+
+    expect(result.gatewayServiceActivationResult?.kind).toBe("not-offered");
+    expect(promptTitles).not.toContain(gatewayServiceActivationPromptTitle);
+    expect(actions.install).not.toHaveBeenCalled();
+    expect(actions.start).not.toHaveBeenCalled();
+  });
+
+  it("does not offer gateway activation for provider, voice, or browser-only changes", async () => {
+    for (const scenario of [
+      {
+        actionId: "edit-primary-model-route" as const,
+        values: ["OpenAI", "gpt-5.5", true],
+        secret: "sk-provider-only-secret",
+        flowEngine: flowEngine({ credentialAction: "collect", envVarName: "PR8_PROVIDER_ONLY_KEY" }),
+      },
+      {
+        actionId: "configure-voice" as const,
+        values: ["stt", "enable", "openai", "gpt-4o-mini-transcribe", "VOICE_STT_KEY", true],
+      },
+      {
+        actionId: "configure-browser" as const,
+        values: ["enable", "local", "http://127.0.0.1:9222", "google-chrome --remote-debugging-port=9222", true],
+      },
+    ]) {
+      await rm(tempDir, { recursive: true, force: true });
+      tempDir = await makeTempDir();
+      workspaceRoot = join(tempDir, "workspace");
+      await mkdir(workspaceRoot, { recursive: true });
+      await writeUserConfig(tempDir, localReadyConfig());
+      await trustWorkspace(tempDir, workspaceRoot);
+      const actions = gatewayServiceActions();
+      const promptTitles: string[] = [];
+      const prompt = fakePrompt({
+        values: scenario.values,
+        secret: scenario.secret,
+      });
+      const baseSelect = prompt.select!;
+      prompt.select = async (input) => {
+        promptTitles.push(input.title);
+        return baseSelect(input);
+      };
+
+      const result = await runConfigEditor({
+        homeDir: tempDir,
+        workspaceRoot,
+        prompt,
+        defaultActionId: scenario.actionId,
+        ...(scenario.flowEngine === undefined ? {} : { flowEngine: scenario.flowEngine }),
+        applyExecutor: createReviewedSetupApplyExecutor({
+          homeDir: tempDir,
+          workspaceRoot,
+          collectVerification: () => readyVerification(profileConfigPath(tempDir)),
+        }),
+        gatewayServiceActivation: { serviceActions: actions },
+      });
+
+      expect(result.gatewayServiceActivationResult?.kind).toBe("not-offered");
+      expect(promptTitles).not.toContain(gatewayServiceActivationPromptTitle);
+      expect(actions.install).not.toHaveBeenCalled();
+      expect(actions.start).not.toHaveBeenCalled();
+      expect(JSON.stringify(result)).not.toContain("sk-provider-only-secret");
+    }
+  });
+
+  it("does not offer gateway activation when channel review is cancelled", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const actions = gatewayServiceActions();
+    const promptTitles: string[] = [];
+    const prompt = fakePrompt({
+      values: ["telegram", "enable", "TELEGRAM_BOT_TOKEN", "42", "-100", false],
+      secret: "123456:stored-telegram-token",
+    });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      promptTitles.push(input.title);
+      return baseSelect(input);
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "configure-channels",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+      gatewayServiceActivation: { serviceActions: actions },
+    });
+
+    expect(result.applyPlanningResult?.kind).toBe("cancelled");
+    expect(result.gatewayServiceActivationResult).toBeUndefined();
+    expect(promptTitles).not.toContain(gatewayServiceActivationPromptTitle);
+    expect(actions.install).not.toHaveBeenCalled();
+    expect(actions.start).not.toHaveBeenCalled();
+  });
+
+  it("does not offer gateway activation when channel apply fails", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const actions = gatewayServiceActions();
+    const promptTitles: string[] = [];
+    const prompt = fakePrompt({
+      values: ["telegram", "enable", "TELEGRAM_BOT_TOKEN", "42", "-100", true],
+      secret: "123456:stored-telegram-token",
+    });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      promptTitles.push(input.title);
+      return baseSelect(input);
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "configure-channels",
+      applyExecutor: {
+        apply: () => ({ ok: false, appliedOperationIds: [], error: "intentional apply failure" }),
+      },
+      gatewayServiceActivation: { serviceActions: actions },
+    });
+
+    expect(result.applyEndState?.kind).toBe("blocked");
+    expect(result.gatewayServiceActivationResult?.kind).toBe("not-offered");
+    expect(promptTitles).not.toContain(gatewayServiceActivationPromptTitle);
+    expect(actions.install).not.toHaveBeenCalled();
+    expect(actions.start).not.toHaveBeenCalled();
+  });
+
+  it("uses the config-editor post-apply handoff gate before offering gateway activation", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const actions = gatewayServiceActions();
+    const promptTitles: string[] = [];
+    const prompt = fakePrompt({
+      values: ["telegram", "enable", "TELEGRAM_BOT_TOKEN", "42", "-100", true, "exit"],
+      secret: "123456:stored-telegram-token",
+    });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      promptTitles.push(input.title);
+      return baseSelect(input);
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "configure-channels",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+        collectVerification: () => ({
+          stateWritable: false,
+          envFilePresent: false,
+          envFileSecure: true,
+          workspaceTrusted: true,
+          securityModeLabel: "Adaptive",
+          securityModeValue: "adaptive",
+          skillAutonomyLabel: "Suggest",
+          skillAutonomyValue: "suggest",
+          providerDiagnostic: {
+            status: "ready",
+            lines: ["Provider status: ready"],
+            warnings: [],
+          },
+          toolStatus: "skipped",
+          configSources: [],
+          warnings: ["state is not writable"],
+          issueCodes: ["state-not-writable"],
+        }),
+      }),
+      gatewayServiceActivation: { serviceActions: actions },
+    });
+
+    expect(result.gatewayServiceActivationResult?.kind).toBe("not-offered");
+    expect(promptTitles).not.toContain(gatewayServiceActivationPromptTitle);
+    expect(actions.install).not.toHaveBeenCalled();
+    expect(actions.start).not.toHaveBeenCalled();
   });
 
   it("configures TTS voice without drafting STT or other optional capabilities", async () => {
@@ -1900,6 +2259,35 @@ function trackingPrompt(options: { readonly values?: readonly unknown[]; readonl
     value: () => secretPromptCount,
   });
   return prompt;
+}
+
+function gatewayServiceActions(input: {
+  readonly installedBefore?: boolean;
+  readonly activeAfterInstall?: boolean;
+} = {}): GatewayActivationServiceActions {
+  const probe = vi.fn<GatewayActivationServiceActions["probe"]>();
+  probe.mockResolvedValueOnce({
+    kind: "systemd-user",
+    installed: input.installedBefore === true,
+    activeState: input.installedBefore === true ? "inactive" : undefined,
+    profileId: "default",
+  });
+  probe.mockResolvedValue({
+    kind: "systemd-user",
+    installed: true,
+    activeState: input.activeAfterInstall === true ? "active" : "inactive",
+    profileId: "default",
+  });
+  return {
+    probe,
+    install: vi.fn<GatewayActivationServiceActions["install"]>().mockResolvedValue({
+      ok: true,
+      mode: "source",
+    }),
+    start: vi.fn<GatewayActivationServiceActions["start"]>().mockResolvedValue({
+      ok: true,
+    }),
+  };
 }
 
 function modelStatusCandidates(provider: ProviderId): ModelCandidate[] {

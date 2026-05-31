@@ -157,13 +157,15 @@ estacoda profile rename <old> <new>
 Manages the channel gateway lifecycle, service installation, and diagnostics.
 
 ```bash
-estacoda gateway start                  # foreground gateway supervisor
-estacoda gateway start --dry-run        # readiness check; no PID/lock writes
-estacoda gateway start --background     # detached background process
-estacoda gateway start --profile <id>   # bind gateway to a specific profile
+estacoda gateway run                    # foreground gateway supervisor
+estacoda gateway run --dry-run          # readiness check; no PID/lock writes
+estacoda gateway run --once             # one supervisor pass, then exit
+estacoda gateway run --profile <id>     # bind foreground gateway to a specific profile
+estacoda gateway start                  # start installed user-scope service
+estacoda gateway start --system         # start installed system-scope service
 estacoda gateway stop                   # SIGTERM; prefers managed service if installed
 estacoda gateway stop --force           # SIGKILL for unmanaged; systemd stop for managed
-estacoda gateway restart                # stop then background-start
+estacoda gateway restart                # restart installed user-scope service
 estacoda gateway restart --graceful     # alias for restart in v0.1.0
 estacoda gateway restart --system       # restart system-scope service
 estacoda gateway status                 # full status: service manager, channels, cron, approvals
@@ -182,6 +184,8 @@ estacoda gateway uninstall --system     # remove system-scope service
 - `~/.estacoda/profiles/<id>/gateway.lock`
 - `~/.estacoda/profiles/<id>/gateway-state/`
 - systemd user units / launchd plists (when managed)
+
+**Lifecycle boundary:** `gateway run` is foreground/debug mode. `gateway start` requires an installed service and defaults to the user-scope service. Use `gateway start --system` when only a system-scope service is installed. `gateway start --background` is deprecated; use `gateway install` followed by `gateway start`. `gateway restart` no longer starts an unmanaged detached process when no service exists. `gateway stop` still keeps the unmanaged PID/lock cleanup fallback where supported.
 
 **Profile boundary:** Gateway processes bind to the profile selected at start time. Changing `active-profile.json` does not mutate a running gateway.
 

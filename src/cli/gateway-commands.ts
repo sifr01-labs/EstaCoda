@@ -1,5 +1,3 @@
-import { spawn } from "node:child_process";
-import { closeSync, openSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { access, constants, readFile, writeFile, mkdir, rm, rename, stat, readdir } from "node:fs/promises";
 import { resolveHomeDir, resolveOsHomeDir } from "../config/home-dir.js";
@@ -66,11 +64,11 @@ import {
   installService,
   probeServiceState,
   restartService,
+  startService,
   stopService,
   uninstallService,
 } from "../gateway/service-manager.js";
 import type { ServiceManagerState, ServiceScope } from "../gateway/service-manager.js";
-import { resolveGatewayExec } from "../gateway/service-exec-resolver.js";
 
 export type GatewayCommandOptions = {
   homeDir?: string;
@@ -299,10 +297,6 @@ export async function runGatewayInstallService(
     `Ensure secrets (bot tokens, API keys) are in the profile-local .env at ${profileEnvPath}, not only shell exports.`,
   ];
 
-  if (!options.system && detectServiceManager().startsWith("systemd")) {
-    warnings.push("User services stop on logout. On a headless server, run: sudo loginctl enable-linger $USER");
-  }
-
   if (result.mode === "source") {
     warnings.push(`Installed in source mode. If this workspace is moved, run "estacoda gateway uninstall --profile ${profileId} && estacoda gateway install --profile ${profileId}" again.`);
   }
@@ -312,6 +306,7 @@ export async function runGatewayInstallService(
     output: [
       `Gateway service installed (${scope} scope, profile: ${profileId}).`,
       ...(result.logCommand === undefined ? [] : [`Logs: ${result.logCommand}`]),
+      ...(result.lingerStatus === undefined ? [] : [result.lingerStatus.text]),
       ...warnings.map((warning) => `Warning: ${warning}`),
     ].join("\n"),
   };
@@ -563,119 +558,52 @@ export async function runGatewayStartDryRun(
 }
 
 // ─────────────────────────────────────────────────────────────
-// Gateway Start Background
+// Gateway Start Service
 // ─────────────────────────────────────────────────────────────
 
-export async function runGatewayStartBackground(
-  options: GatewayCommandOptions
+export async function runGatewayStartService(
+  options: GatewayCommandOptions & { system?: boolean }
 ): Promise<{ ok: boolean; output: string }> {
   const selected = await resolveGatewayProfile(options);
-  const serviceUserHomeDir = resolveOsHomeDir();
-  const preflight = await preflightBackgroundStart(selected, serviceUserHomeDir);
-  if (!preflight.ok) {
-    return { ok: false, output: preflight.output };
+  const serviceSelection = await selectLifecycleService(selected, options.system);
+  if (serviceSelection.kind === "message") {
+    return { ok: serviceSelection.ok, output: serviceSelection.output };
   }
-  const resolved = resolveGatewayExec({ workspaceRoot: options.workspaceRoot });
-  if (!resolved.ok) {
-    return { ok: false, output: `Failed to start gateway in background: ${resolved.error}` };
+  if (serviceSelection.kind === "process") {
+    return { ok: false, output: serviceNotInstalledMessage(selected.profileId) };
   }
-  const logPath = join(selected.paths.logsPath, "gateway.log");
-  await mkdir(selected.paths.logsPath, { recursive: true });
 
-  let logFd: number | undefined;
-  try {
-    logFd = openSync(logPath, "a", 0o600);
-    const child = spawn(resolved.resolved.command, [
-      ...resolved.resolved.args,
-      "gateway",
-      "start",
-      "--profile",
-      selected.profileId,
-    ], {
-      cwd: resolved.resolved.cwd,
-      detached: true,
-      env: {
-        ...process.env,
-        HOME: serviceUserHomeDir,
-        ESTACODA_HOME: selected.homeDir,
-      },
-      stdio: ["ignore", logFd, logFd],
-    });
-
-    child.unref();
-
-    return {
-      ok: true,
-      output: [
-        `Gateway started (PID ${child.pid ?? "unknown"})`,
-        `Logs: ${logPath}`,
-      ].join("\n"),
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      output: `Failed to start gateway in background: ${error instanceof Error ? error.message : String(error)}`,
-    };
-  } finally {
-    if (logFd !== undefined) {
-      closeSync(logFd);
-    }
-  }
+  const result = await startService({
+    serviceUserHomeDir: resolveOsHomeDir(),
+    profileId: selected.profileId,
+    system: serviceSelection.scope === "system",
+  });
+  if (!result.ok) return { ok: false, output: result.error };
+  return {
+    ok: true,
+    output: `Gateway service started (${serviceSelection.scope} scope, profile: ${selected.profileId}).`,
+  };
 }
 
-async function preflightBackgroundStart(
-  selected: SelectedGatewayProfile,
-  serviceUserHomeDir: string
-): Promise<{ ok: true } | { ok: false; output: string }> {
-  const userState = await probeServiceState({
-    serviceUserHomeDir,
-    profileId: selected.profileId,
-    system: false,
-  });
-  const systemState = detectServiceManager().startsWith("systemd")
-    ? await probeServiceState({
-        serviceUserHomeDir,
-        profileId: selected.profileId,
-        system: true,
-      })
-    : undefined;
+export function deprecatedGatewayBackgroundMessage(): string {
+  return [
+    "estacoda gateway start --background is deprecated.",
+    "",
+    "Use:",
+    "  estacoda gateway install",
+    "  estacoda gateway start",
+    "",
+    "For foreground mode:",
+    "  estacoda gateway run",
+  ].join("\n");
+}
 
-  if (userState.installed && systemState?.installed) {
-    return {
-      ok: false,
-      output: `Gateway has both user and system managed services installed for profile '${selected.profileId}'. Refusing to start an unmanaged background gateway; use estacoda gateway restart for the user service or estacoda gateway restart --system for the system service.`,
-    };
-  }
-  if (userState.installed) {
-    return {
-      ok: false,
-      output: `Gateway user service is installed for profile '${selected.profileId}'. Refusing to start an unmanaged background gateway; use estacoda gateway restart or the service manager directly.`,
-    };
-  }
-  if (systemState?.installed) {
-    return {
-      ok: false,
-      output: `Gateway system service is installed for profile '${selected.profileId}'. Refusing to start an unmanaged background gateway; use estacoda gateway restart --system or the service manager directly.`,
-    };
-  }
-
-  const pidContent = await readGatewayPid(selected.paths);
-  if (pidContent !== undefined && !(await isStalePid(selected.paths))) {
-    return {
-      ok: false,
-      output: `Gateway already appears to be running for profile '${selected.profileId}' (PID ${pidContent.pid}). Refusing to start an unmanaged background gateway.`,
-    };
-  }
-
-  const lock = await inspectGatewayLockState(selected.paths);
-  if (lock.state === "active") {
-    return {
-      ok: false,
-      output: `Gateway already appears to be running for profile '${selected.profileId}' (active lock held by PID ${lock.pid}). Refusing to start an unmanaged background gateway.`,
-    };
-  }
-
-  return { ok: true };
+function serviceNotInstalledMessage(profileId: string): string {
+  return [
+    `Gateway service is not installed for profile '${profileId}'.`,
+    "Run: estacoda gateway install",
+    "For foreground mode: estacoda gateway run",
+  ].join("\n");
 }
 
 // ───────────────────────────────────────────────────────────
@@ -757,28 +685,7 @@ export async function runGatewayRestart(
     };
   }
 
-  // Stop existing gateway (always graceful — plain restart should not force-kill)
-  const stopResult = await stopGateway(selected.paths, { force: false });
-
-  let stopOutput: string;
-  if (stopResult.ok) {
-    if (stopResult.action === "was_not_running") {
-      stopOutput = "Gateway was not running";
-    } else if (stopResult.forced) {
-      stopOutput = `Gateway stopped (forced, PID ${stopResult.pid})`;
-    } else {
-      stopOutput = `Gateway stopped (PID ${stopResult.pid})`;
-    }
-  } else {
-    return { ok: false, output: `Failed to stop gateway: ${stopResult.error}` };
-  }
-
-  const startResult = await runGatewayStartBackground(options);
-
-  return {
-    ok: startResult.ok,
-    output: [stopOutput, startResult.output].filter(Boolean).join("\n"),
-  };
+  return { ok: false, output: serviceNotInstalledMessage(selected.profileId) };
 }
 
 type LifecycleServiceSelection =
@@ -801,7 +708,7 @@ async function selectLifecycleService(
     return {
       kind: "message",
       ok: false,
-      output: `Gateway system service is not installed for profile '${selected.profileId}'. Omit --system to use process-oriented lifecycle for an unmanaged gateway.`,
+      output: `Gateway system service is not installed for profile '${selected.profileId}'. Omit --system to control the user service, or run estacoda gateway install --system --run-as-user <user>.`,
     };
   }
 
