@@ -1338,6 +1338,63 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(rendered.slice(toolIndex)).not.toContain("────────────────────────────────────────────────────────────────────────────────\n▸ hello\n────────────────────────────────────────────────────────────────────────────────");
   });
 
+  it("renders bottom-chrome tool activity as durable transcript rows", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 100,
+    } as unknown as NodeJS.WritableStream;
+
+    const runtime = createEventEmittingMockRuntime([
+      { kind: "agent-start", sessionId: "test-session", input: "hello" },
+      { kind: "tool-start", tool: "browser.status", stepId: "s1" },
+      { kind: "tool-result", tool: "browser.status", ok: true, chars: 10, sentChars: 10 },
+      { kind: "agent-final", text: "Mock response" },
+    ]);
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      capabilities: interactiveCaps({ terminalWidth: 100, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const startChunk = outputChunks.find((chunk) => {
+      const stripped = stripAnsi(chunk);
+      return stripped.includes("preparing") && stripped.includes("browser.status");
+    });
+    const startChunkIndex = outputChunks.findIndex((chunk) => chunk === startChunk);
+    const resultChunk = outputChunks.find((chunk, index) => {
+      const stripped = stripAnsi(chunk);
+      return index > startChunkIndex
+        && stripped.includes("│")
+        && stripped.includes("ms")
+        && !stripped.includes("preparing")
+        && !stripped.includes("mock-model");
+    });
+    expect(startChunk).toBeDefined();
+    expect(resultChunk).toBeDefined();
+    const toolChunks = [startChunk, resultChunk] as string[];
+    for (const chunk of toolChunks) {
+      expect(chunk).not.toContain("\x1b[1A\x1b[2K\r");
+      expect(chunk).not.toContain("\x1b[0J");
+      expect(stripAnsi(chunk)).not.toContain("mock-model");
+    }
+    expect(outputChunks.some((chunk) => stripAnsi(chunk).includes("mock-model"))).toBe(true);
+  });
+
   it("renders provider spinner below the most recent tool row in bottom chrome mode", async () => {
     const outputChunks: string[] = [];
     const output = {

@@ -22,7 +22,7 @@ import {
   toolActivityRailEvent,
 } from "../ui/view-models/builders.js";
 import { ToolActivityRenderer } from "./tool-activity-renderer.js";
-import { BottomChromeToolActivityAnimator, renderRuntimeEvent, ToolActivityAnimator } from "./session-loop.js";
+import { renderRuntimeEvent, ToolActivityAnimator } from "./session-loop.js";
 
 // ──────────────────────────────────────
 // Global deterministic timer for animated snapshots
@@ -1027,55 +1027,6 @@ describe("renderRuntimeEvent with animator", () => {
     const animator = mockAnimator();
     runEvent({ kind: "agent-final", text: "done" }, animator);
     expect(animator.dispose).toHaveBeenCalled();
-  });
-});
-
-describe("BottomChromeToolActivityAnimator", () => {
-  it("rewrites a running tool row when the result arrives", () => {
-    const output = { write: vi.fn() } as unknown as NodeJS.WritableStream;
-    const renderer = standardDarkRenderer();
-    const streamState = { lastWriteEndedWithNewline: false };
-    const animator = new BottomChromeToolActivityAnimator({ output, renderer, streamState });
-
-    animator.start({ tool: "file.read", status: "running", label: "preparing", target: "src/app.ts" });
-    animator.complete({ tool: "file.read", status: "done", label: "read", target: "src/app.ts", elapsedMs: 400 });
-
-    const written = (output.write as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0]).join("");
-    expect(written).toContain("src/app.ts");
-    expect(written).toContain("\x1b[1A\x1b[2K\r");
-    expect(written).toContain("400ms");
-    expect(streamState.lastWriteEndedWithNewline).toBe(true);
-  });
-
-  it("redraws concurrent active tool rows as one settling block", () => {
-    const output = { write: vi.fn() } as unknown as NodeJS.WritableStream;
-    const write = output.write as ReturnType<typeof vi.fn>;
-    const renderer = standardDarkRenderer();
-    const streamState = { lastWriteEndedWithNewline: false };
-    const animator = new BottomChromeToolActivityAnimator({ output, renderer, streamState });
-
-    animator.start({ tool: "file.read", status: "running", label: "preparing", target: "src/a.ts", activityId: "a" });
-    animator.start({ tool: "file.read", status: "running", label: "preparing", target: "src/b.ts", activityId: "b" });
-    write.mockClear();
-
-    animator.complete({ tool: "file.read", status: "done", label: "read", target: "src/b.ts", activityId: "b", elapsedMs: 200 });
-
-    const afterB = write.mock.calls.map((c: unknown[]) => c[0]).join("");
-    expect(afterB).toContain("src/a.ts");
-    expect(afterB).toContain("src/b.ts");
-    expect(afterB).toContain("200ms");
-
-    write.mockClear();
-    animator.complete({ tool: "file.read", status: "done", label: "read", target: "src/a.ts", activityId: "a", elapsedMs: 100 });
-
-    const calls = write.mock.calls.map((c: unknown[]) => c[0]);
-    const written = write.mock.calls.map((c: unknown[]) => c[0]).join("");
-    expect(calls[0]).toBe("\x1b[2A\x1b[0J");
-    expect(written).toContain("\x1b[2A\x1b[0J");
-    expect(written).toContain("src/a.ts");
-    expect(written).toContain("src/b.ts");
-    expect(written).toContain("100ms");
-    expect(written).toContain("200ms");
   });
 });
 

@@ -246,102 +246,6 @@ export class ToolActivityAnimator implements ToolActivityRailAnimator {
   }
 }
 
-export class BottomChromeToolActivityAnimator implements ToolActivityRailAnimator {
-  readonly #output: NodeJS.WritableStream;
-  readonly #renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string };
-  readonly #streamState: { lastWriteEndedWithNewline: boolean };
-  #rows: Array<{ event: ToolActivityRailEvent; active: boolean }> = [];
-  #renderedRowCount = 0;
-
-  constructor(options: {
-    output: NodeJS.WritableStream;
-    renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string };
-    streamState: { lastWriteEndedWithNewline: boolean };
-  }) {
-    this.#output = options.output;
-    this.#renderer = options.renderer;
-    this.#streamState = options.streamState;
-  }
-
-  start(event: ToolActivityRailEvent): void {
-    this.#upsertRow(event, true);
-    this.#redrawRows();
-  }
-
-  complete(event: ToolActivityRailEvent): void {
-    if (this.#rows.length === 0) {
-      this.#writeDurableRow(event);
-      return;
-    }
-
-    this.#upsertRow(event, false);
-    this.#redrawRows();
-
-    if (this.#rows.every((row) => !row.active)) {
-      this.#rows = [];
-      this.#renderedRowCount = 0;
-    }
-  }
-
-  cancel(): void {
-    if (this.#renderedRowCount > 0) {
-      this.#clearRows();
-      this.#rows = [];
-      this.#renderedRowCount = 0;
-      this.#streamState.lastWriteEndedWithNewline = true;
-    }
-  }
-
-  dispose(): void {
-    this.#rows = [];
-    this.#renderedRowCount = 0;
-  }
-
-  #redrawRows(): void {
-    this.#clearRows();
-    const vm = buildToolActivityRailViewModel({ events: this.#rows.map((row) => row.event) });
-    this.#output.write(`${this.#renderer.render(vm)}\n`);
-    this.#renderedRowCount = this.#rows.length;
-    this.#streamState.lastWriteEndedWithNewline = true;
-  }
-
-  #upsertRow(event: ToolActivityRailEvent, active: boolean): void {
-    const index = this.#findRowIndex(event);
-    const row = { event, active };
-    if (index === -1) {
-      this.#rows.push(row);
-    } else {
-      this.#rows[index] = row;
-    }
-  }
-
-  #findRowIndex(event: ToolActivityRailEvent): number {
-    const key = toolActivityRowKey(event);
-    const exactIndex = this.#rows.findIndex((row) => toolActivityRowKey(row.event) === key);
-    if (exactIndex !== -1 || event.target !== undefined || event.activityId !== undefined) {
-      return exactIndex;
-    }
-    return this.#rows.findIndex((row) => row.active && row.event.tool === event.tool);
-  }
-
-  #clearRows(): void {
-    if (this.#renderedRowCount === 0) {
-      return;
-    }
-    if (this.#renderedRowCount === 1) {
-      this.#output.write(`\x1b[1A\x1b[2K\r`);
-      return;
-    }
-    this.#output.write(clearTranscriptBlock(this.#renderedRowCount));
-  }
-
-  #writeDurableRow(event: ToolActivityRailEvent): void {
-    const vm = buildToolActivityRailViewModel({ events: [event] });
-    this.#output.write(`${this.#renderer.render(vm)}\n`);
-    this.#streamState.lastWriteEndedWithNewline = true;
-  }
-}
-
 function toolActivityRowKey(event: ToolActivityRailEvent): string {
   return event.activityId ?? `${event.tool}\0${event.target ?? ""}`;
 }
@@ -672,12 +576,6 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           streamState,
           enabled: !bottomChrome.enabled && renderer.capabilities.isTTY && renderer.capabilities.supportsAnimation && !renderer.capabilities.isCI && !renderer.capabilities.isDumb,
         });
-        const bottomChromeToolActivityAnimator = new BottomChromeToolActivityAnimator({
-          output,
-          renderer,
-          streamState,
-        });
-
         const supportsBottomChromeTranscriptSpinnerAnimation =
           renderer.capabilities.supportsAnimation
           && !renderer.capabilities.isCI
@@ -854,7 +752,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
               let newPhase: string | undefined;
               if (bottomChrome.enabled) {
                 bottomChrome.writeAboveChromeSync(() => {
-                  newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, runtimeEventBottomChrome, turnOutput, bottomChromeToolActivityAnimator);
+                  newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, runtimeEventBottomChrome, turnOutput);
                 });
               } else {
                 newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, chrome, turnOutput, currentAnimator);
