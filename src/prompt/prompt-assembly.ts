@@ -5,8 +5,9 @@ import type { ContextExpansionResult, ProjectContextSnapshot } from "../contract
 import type { IntentRoute } from "../contracts/intent.js";
 import type { MemoryPromptContext, PromptMemoryBlock } from "../contracts/memory.js";
 import type { PromptBudgetReport, PromptLayerName, PromptLayerReport, PromptSemanticCompressionReport } from "../contracts/prompt.js";
-import type { ModelProfile, ProviderMessage, ProviderMessageContentPart } from "../contracts/provider.js";
+import type { ModelProfile, ProviderApiMode, ProviderMessage, ProviderMessageContentPart, ProviderReplayEcho, ProviderId } from "../contracts/provider.js";
 import type { SecurityDecision } from "../contracts/security.js";
+import type { SessionMessage } from "../contracts/session.js";
 import type { LoadedSkill, SkillCatalogEntry, SkillDefinition, SkillResourceEntry } from "../contracts/skill.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
@@ -20,9 +21,19 @@ import { redactSensitiveText } from "../utils/redaction.js";
 import type { PromptCache } from "./prompt-cache.js";
 import { countImageLikeMetadata, estimateTextTokensRough, IMAGE_TOKEN_ESTIMATE } from "./token-estimator.js";
 import type { AgentProfileMode, AgentResponseLanguage, UiFlavor, UiLanguage } from "../config/runtime-config.js";
+import { buildNativeHistoryMessages } from "./native-history-builder.js";
+import { selectNativeHistoryWindow, type NativeHistoryUnit } from "./native-history-selector.js";
 
 type PromptSessionHistoryMessage = Pick<ProviderMessage, "role" | "content"> & {
   metadata?: Record<string, unknown>;
+};
+
+type NativeHistoryRouteSupport = {
+  provider: ProviderId;
+  id: string;
+  apiMode?: ProviderApiMode;
+  supportsNativeToolHistory?: boolean;
+  reasoningEchoProviderFamily?: ProviderReplayEcho["providerFamily"];
 };
 
 export type ProviderPromptAssembly = {
@@ -34,6 +45,8 @@ export type ProviderPromptInput = {
   model?: ModelProfile;
   cache?: PromptCache;
   sessionHistory?: PromptSessionHistoryMessage[];
+  rawSessionHistory?: SessionMessage[];
+  nativeHistoryRoute?: NativeHistoryRouteSupport;
   compactionNotice?: string;
   compression?: PromptSemanticCompressionReport;
   soul?: string;
@@ -83,8 +96,12 @@ export type ProviderContinuationPromptInput = ProviderPromptInput & {
 export function assembleProviderPrompt(input: ProviderPromptInput): ProviderPromptAssembly {
   const contextWindowTokens = input.model?.contextWindowTokens ?? 128_000;
   const budgetTarget = Math.max(4_000, Math.floor(contextWindowTokens * 0.65));
-  const layers = applyCache(input.cache, fitLayersToBudget(buildBaseLayers(input), budgetTarget));
-  const messages = renderBaseMessages(layers, input);
+  const nativeHistory = buildNativePromptHistory(input, budgetTarget);
+  const promptInput = nativeHistory === undefined
+    ? input
+    : { ...input, sessionHistory: nativeHistory.unselectedSessionHistory };
+  const layers = applyCache(input.cache, fitLayersToBudget(buildBaseLayers(promptInput), budgetTarget));
+  const messages = renderBaseMessages(layers, promptInput, nativeHistory?.messages);
   const budget = buildBudgetReport({
     model: input.model?.id ?? "unconfigured",
     contextWindowTokens,
@@ -599,7 +616,11 @@ function renderSkillSetup(input: ProviderPromptInput["selectedSkillSetup"]): str
   ].join("\n");
 }
 
-function renderBaseMessages(layers: InternalPromptLayer[], input: ProviderPromptInput): ProviderMessage[] {
+function renderBaseMessages(
+  layers: InternalPromptLayer[],
+  input: ProviderPromptInput,
+  nativeHistoryMessages: ProviderMessage[] = []
+): ProviderMessage[] {
   const identity = layers.find((candidate) => candidate.name === "identity");
   const cachedSystemLayers = layers.filter((candidate) =>
     candidate.name !== "identity" &&
@@ -627,11 +648,84 @@ function renderBaseMessages(layers: InternalPromptLayer[], input: ProviderPrompt
         ...cachedSystemLayers.map((candidate) => candidate.content)
       ].join("\n")
     },
+    ...nativeHistoryMessages,
     {
       role: "user",
       content: nativeVisionContent
     }
   ];
+}
+
+function buildNativePromptHistory(
+  input: ProviderPromptInput,
+  budgetTarget: number
+): { messages: ProviderMessage[]; unselectedSessionHistory: PromptSessionHistoryMessage[] } | undefined {
+  if (!canUseNativeHistory(input)) {
+    return undefined;
+  }
+  const rawMessages = priorNativeHistoryMessages(input.rawSessionHistory ?? [], input.userText);
+  if (rawMessages.length === 0) {
+    return undefined;
+  }
+
+  const selection = selectNativeHistoryWindow(rawMessages, {
+    maxTokens: budgetTarget,
+    reservedTokens: Math.floor(budgetTarget * 0.75)
+  });
+  const selectedMessages = flattenNativeHistoryUnits(selection.selectedUnits).map(sanitizeNativeHistorySessionMessage);
+  if (selectedMessages.length === 0) {
+    return undefined;
+  }
+
+  const route = input.nativeHistoryRoute!;
+  const built = buildNativeHistoryMessages(selectedMessages, {
+    targetProviderFamily: route.reasoningEchoProviderFamily,
+    targetApiMode: "openai_chat_completions",
+    mergeAdjacentUsers: true
+  });
+  if (built.stats.nativeToolTurns === 0) {
+    return undefined;
+  }
+
+  return {
+    messages: built.messages,
+    unselectedSessionHistory: flattenNativeHistoryUnits(selection.unselectedUnits).map(toPromptSessionHistoryMessage)
+  };
+}
+
+function canUseNativeHistory(input: ProviderPromptInput): boolean {
+  const route = input.nativeHistoryRoute;
+  return route?.supportsNativeToolHistory === true &&
+    input.model?.supportsTools === true &&
+    route.apiMode === "openai_chat_completions";
+}
+
+function flattenNativeHistoryUnits(units: NativeHistoryUnit[]): SessionMessage[] {
+  return units.flatMap((unit) => unit.kind === "message" ? [unit.message] : unit.messages);
+}
+
+function priorNativeHistoryMessages(messages: SessionMessage[], currentUserText: string): SessionMessage[] {
+  const last = messages.at(-1);
+  if (last?.role !== "user" || last.content !== currentUserText) {
+    return messages;
+  }
+
+  return messages.slice(0, -1);
+}
+
+function toPromptSessionHistoryMessage(message: SessionMessage): PromptSessionHistoryMessage {
+  return {
+    role: message.role === "agent" ? "assistant" : message.role,
+    content: message.content,
+    metadata: message.metadata
+  };
+}
+
+function sanitizeNativeHistorySessionMessage(message: SessionMessage): SessionMessage {
+  return {
+    ...message,
+    content: stripInlineReasoning(message.content)
+  };
 }
 
 function buildNativeVisionUserContent(

@@ -531,6 +531,8 @@ export class ProviderTurnLoop {
       model: this.#model,
       cache: this.#promptCache,
       sessionHistory: sessionHistory.messages,
+      rawSessionHistory: sessionHistory.rawMessages,
+      nativeHistoryRoute: this.#primaryModelRoute,
       compactionNotice: sessionHistory.compactionNotice,
       compression: input.preflightCompression ?? sessionHistory.compression,
       soul: this.#soul,
@@ -652,6 +654,8 @@ export class ProviderTurnLoop {
       model: this.#model,
       cache: this.#promptCache,
       sessionHistory: sessionHistory.messages,
+      rawSessionHistory: sessionHistory.rawMessages,
+      nativeHistoryRoute: this.#primaryModelRoute,
       compactionNotice: sessionHistory.compactionNotice,
       compression: sessionHistory.compression,
       soul: this.#soul,
@@ -973,6 +977,7 @@ export class ProviderTurnLoop {
 
   async #providerSessionHistory(): Promise<{
     messages: Array<Pick<import("../contracts/provider.js").ProviderMessage, "role" | "content">>;
+    rawMessages: SessionMessage[];
     compactionNotice?: string;
     compression?: PromptSemanticCompressionReport;
   }> {
@@ -1004,6 +1009,7 @@ export class ProviderTurnLoop {
 
     return {
       messages: packed.messages,
+      rawMessages: messages,
       compactionNotice: semanticCompressionNotice(messages),
       compression: undefined
     };

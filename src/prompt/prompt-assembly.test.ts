@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { IntentRoute } from "../contracts/intent.js";
-import type { ModelProfile, ProviderMessage } from "../contracts/provider.js";
+import type { ModelProfile, ProviderMessage, ResolvedModelRoute } from "../contracts/provider.js";
+import type { SessionMessage } from "../contracts/session.js";
 import { SESSION_RECALL_UNTRUSTED_NOTICE } from "../session/session-recall-service.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { assembleProviderContinuationPrompt, assembleProviderPrompt } from "./prompt-assembly.js";
@@ -17,6 +18,19 @@ const model: ModelProfile = {
   supportsVision: false,
   supportsStructuredOutput: false
 };
+
+const toolModel: ModelProfile = {
+  ...model,
+  supportsTools: true
+};
+
+const supportedNativeRoute = {
+  provider: "test-provider",
+  id: "test-model",
+  profile: toolModel,
+  apiMode: "openai_chat_completions",
+  supportsNativeToolHistory: true
+} as ResolvedModelRoute & { supportsNativeToolHistory: true };
 
 const generalIntent: IntentRoute = {
   nativeIntent: "general",
@@ -512,6 +526,229 @@ describe("assembleProviderContinuationPrompt", () => {
     expect(rendered).toContain("Executed tool results:");
     expect(rendered).toContain("Tool: files.read");
   });
+
+  it("inserts supported native tool history before the current user without duplicating selected flat text", () => {
+    const prompt = assembleProviderPrompt(basePromptInput({
+      model: toolModel,
+      rawSessionHistory: [
+        sessionMessage("old-user", "user", "older flat context ".repeat(9_000)),
+        providerToolTurn("tool-turn"),
+        sessionMessage("tool-result", "tool", "native tool result", { tool_call_id: "call-1" })
+      ],
+      sessionHistory: [
+        { role: "user", content: "flat fallback should be replaced" }
+      ],
+      nativeHistoryRoute: supportedNativeRoute
+    }));
+
+    expect(prompt.messages.at(-1)?.role).toBe("user");
+    expect(prompt.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: "assistant",
+        toolCalls: [
+          {
+            id: "call-1",
+            name: "files.read",
+            argumentsText: "{\"path\":\"src/index.ts\"}"
+          }
+        ]
+      }),
+      expect.objectContaining({
+        role: "tool",
+        toolCallId: "call-1",
+        content: "native tool result"
+      })
+    ]));
+
+    const rendered = renderMessages(prompt.messages);
+    expect(rendered).toContain("older flat context");
+    expect(rendered).toContain("User message:\nInspect this.");
+    expect(rendered).not.toContain("flat fallback should be replaced");
+    expect(countOccurrences(rendered, "native tool result")).toBe(1);
+    expect(prompt.messages.findIndex((message) => message.role === "assistant" && message.toolCalls !== undefined))
+      .toBeLessThan(prompt.messages.length - 1);
+  });
+
+  it("excludes the active current user from native history selection and appends it once at the end", () => {
+    const prompt = assembleProviderPrompt(basePromptInput({
+      model: toolModel,
+      rawSessionHistory: [
+        sessionMessage("older-user", "user", "Earlier request"),
+        providerToolTurn("tool-turn"),
+        sessionMessage("tool-result", "tool", "native tool result", { tool_call_id: "call-1" }),
+        sessionMessage("active-user", "user", "Inspect this.")
+      ],
+      nativeHistoryRoute: supportedNativeRoute
+    }));
+
+    expect(prompt.messages.at(-1)?.role).toBe("user");
+    expect(JSON.stringify(prompt.messages.at(-1)?.content)).toContain("Inspect this.");
+    expect(prompt.messages.filter((message) => message.role === "user" && message.content === "Inspect this.")).toHaveLength(0);
+    expect(JSON.stringify(prompt.messages.slice(0, -1))).not.toContain("Inspect this.");
+    expect(prompt.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: "assistant",
+        toolCalls: expect.any(Array)
+      }),
+      expect.objectContaining({
+        role: "tool",
+        toolCallId: "call-1"
+      })
+    ]));
+  });
+
+  it("preserves older repeated user text when current user is absent from raw history", () => {
+    const prompt = assembleProviderPrompt(basePromptInput({
+      model: toolModel,
+      rawSessionHistory: [
+        sessionMessage("older-repeated-user", "user", "Inspect this."),
+        providerToolTurn("tool-turn"),
+        sessionMessage("tool-result", "tool", "native tool result", { tool_call_id: "call-1" })
+      ],
+      nativeHistoryRoute: supportedNativeRoute
+    }));
+
+    const rendered = renderMessages(prompt.messages);
+    expect(rendered).toContain("Inspect this.");
+    expect(JSON.stringify(prompt.messages.slice(0, -1))).toContain("Inspect this.");
+    expect(JSON.stringify(prompt.messages.at(-1)?.content)).toContain("Inspect this.");
+    expect(prompt.messages.at(-1)?.role).toBe("user");
+    expect(prompt.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: "assistant",
+        toolCalls: expect.any(Array)
+      }),
+      expect.objectContaining({
+        role: "tool",
+        toolCallId: "call-1"
+      })
+    ]));
+  });
+
+  it("preserves current-user image parts with native replay and keeps current user last", async () => {
+    const imagePath = join(await mkdtemp(join(tmpdir(), "estacoda-prompt-native-image-")), "sample.png");
+    await writeFile(imagePath, Buffer.from("fake-png"));
+    const prompt = assembleProviderPrompt(basePromptInput({
+      model: { ...toolModel, supportsVision: true },
+      rawSessionHistory: [
+        providerToolTurn("tool-turn"),
+        sessionMessage("tool-result", "tool", "native tool result", { tool_call_id: "call-1" }),
+        sessionMessage("active-user", "user", "Inspect this.")
+      ],
+      nativeHistoryRoute: supportedNativeRoute,
+      attachments: [
+        {
+          id: "image-1",
+          kind: "image",
+          status: "ready",
+          localPath: imagePath,
+          mimeType: "image/png"
+        }
+      ]
+    }));
+
+    const finalMessage = prompt.messages.at(-1);
+    expect(finalMessage?.role).toBe("user");
+    expect(prompt.messages.filter((message) => message.role === "user")).toHaveLength(1);
+    expect(prompt.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: "assistant",
+        toolCalls: expect.any(Array)
+      }),
+      expect.objectContaining({
+        role: "tool",
+        toolCallId: "call-1"
+      })
+    ]));
+    expect(Array.isArray(finalMessage?.content)).toBe(true);
+    expect(JSON.stringify(finalMessage?.content)).toContain("image_url");
+    expect(JSON.stringify(prompt.messages.slice(0, -1))).not.toContain("image_url");
+  });
+
+  it("uses flat fallback when native history is unsupported by provider, model, or API mode", () => {
+    const rawSessionHistory = [
+      providerToolTurn("tool-turn"),
+      sessionMessage("tool-result", "tool", "flat tool result", { tool_call_id: "call-1" })
+    ];
+    const flatHistory = rawSessionHistory.map(toPromptHistory);
+    const cases = [
+      {
+        model: toolModel,
+        nativeHistoryRoute: { ...supportedNativeRoute, supportsNativeToolHistory: false }
+      },
+      {
+        model,
+        nativeHistoryRoute: supportedNativeRoute
+      },
+      {
+        model: toolModel,
+        nativeHistoryRoute: { ...supportedNativeRoute, apiMode: "openai_responses" as const }
+      }
+    ];
+
+    for (const candidate of cases) {
+      const prompt = assembleProviderPrompt(basePromptInput({
+        model: candidate.model,
+        rawSessionHistory,
+        sessionHistory: flatHistory,
+        nativeHistoryRoute: candidate.nativeHistoryRoute
+      }));
+
+      expect(prompt.messages.some((message) => message.toolCalls !== undefined || message.toolCallId !== undefined)).toBe(false);
+      const rendered = renderMessages(prompt.messages);
+      expect(rendered).toContain("provider tool call");
+      expect(rendered).toContain("flat tool result");
+    }
+  });
+
+  it("falls back to flat history when no valid native tool messages are selected", () => {
+    const rawSessionHistory = [
+      sessionMessage("old-user", "user", "ordinary history only")
+    ];
+    const prompt = assembleProviderPrompt(basePromptInput({
+      model: toolModel,
+      rawSessionHistory,
+      sessionHistory: rawSessionHistory.map(toPromptHistory),
+      nativeHistoryRoute: supportedNativeRoute
+    }));
+
+    expect(prompt.messages.some((message) => message.toolCalls !== undefined || message.toolCallId !== undefined)).toBe(false);
+    expect(renderMessages(prompt.messages)).toContain("ordinary history only");
+  });
+
+  it("keeps provider replay echo out of rendered text while carrying same-provider structured echo", () => {
+    const echoValue = "private provider reasoning";
+    const prompt = assembleProviderPrompt(basePromptInput({
+      model: toolModel,
+      rawSessionHistory: [
+        providerToolTurn("tool-turn", {
+          providerReplayEcho: {
+            field: "reasoning_content",
+            value: echoValue,
+            providerFamily: "deepseek",
+            apiMode: "openai_chat_completions",
+            chars: echoValue.length
+          },
+          reasoning_content: "raw reasoning metadata"
+        }, "<think>raw content reasoning</think>Visible tool call."),
+        sessionMessage("tool-result", "tool", "native tool result", { tool_call_id: "call-1" })
+      ],
+      nativeHistoryRoute: {
+        ...supportedNativeRoute,
+        provider: "deepseek",
+        id: "deepseek-reasoner",
+        reasoningEchoProviderFamily: "deepseek"
+      }
+    }));
+
+    const assistant = prompt.messages.find((message) => message.role === "assistant" && message.toolCalls !== undefined);
+    expect(assistant?.providerReplayEcho?.value).toBe(echoValue);
+    const rendered = renderMessages(prompt.messages);
+    expect(rendered).toContain("Visible tool call.");
+    expect(rendered).not.toContain(echoValue);
+    expect(rendered).not.toContain("raw reasoning metadata");
+    expect(rendered).not.toContain("raw content reasoning");
+  });
 });
 
 function basePromptInput(overrides: Partial<Parameters<typeof assembleProviderPrompt>[0]> = {}): Parameters<typeof assembleProviderPrompt>[0] {
@@ -584,6 +821,51 @@ function providerExecution(content: string): Parameters<typeof assembleProviderC
         argumentsText: "{\"path\":\"src/index.ts\"}"
       }
     ]
+  };
+}
+
+function sessionMessage(
+  id: string,
+  role: SessionMessage["role"],
+  content: string,
+  metadata?: Record<string, unknown>
+): SessionMessage {
+  return {
+    id,
+    sessionId: "prompt-assembly-native-history",
+    role,
+    content,
+    createdAt: "2030-01-01T00:00:00.000Z",
+    metadata
+  };
+}
+
+function providerToolTurn(
+  id: string,
+  metadata: Record<string, unknown> = {},
+  content = "provider tool call"
+): SessionMessage {
+  return sessionMessage(id, "agent", content, {
+    kind: "provider-tool-call-turn",
+    nativeReplaySafe: true,
+    providerToolCalls: [
+      {
+        id: "call-1",
+        name: "files.read",
+        argumentsText: "{\"path\":\"src/index.ts\"}"
+      }
+    ],
+    provider: "test-provider",
+    model: "test-model",
+    ...metadata
+  });
+}
+
+function toPromptHistory(message: SessionMessage): NonNullable<Parameters<typeof assembleProviderPrompt>[0]["sessionHistory"]>[number] {
+  return {
+    role: message.role === "agent" ? "assistant" : message.role,
+    content: message.content,
+    metadata: message.metadata
   };
 }
 

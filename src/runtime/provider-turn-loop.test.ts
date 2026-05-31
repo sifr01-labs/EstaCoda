@@ -58,6 +58,12 @@ const primaryRoute: ResolvedModelRoute = {
   apiKeyEnv: "PRIMARY_KEY"
 };
 
+const nativeHistoryRoute = {
+  ...primaryRoute,
+  apiMode: "openai_chat_completions",
+  supportsNativeToolHistory: true
+} as ResolvedModelRoute & { supportsNativeToolHistory: true };
+
 function echoRequiredRoute(): ResolvedModelRoute {
   return {
     provider: "deepseek",
@@ -279,6 +285,38 @@ async function appendHistory(db: InMemorySessionDB, sessionId: string, content: 
     sessionId,
     role: "user",
     content: "current user request"
+  });
+}
+
+async function appendProviderToolHistory(db: InMemorySessionDB, sessionId: string): Promise<void> {
+  await db.appendMessage({
+    id: `${sessionId}-provider-tool-turn`,
+    sessionId,
+    role: "agent",
+    content: "provider tool call",
+    metadata: {
+      kind: "provider-tool-call-turn",
+      nativeReplaySafe: true,
+      providerToolCalls: [
+        {
+          id: "call-native-history",
+          name: testTool.name,
+          argumentsText: "{\"path\":\"src/index.ts\"}"
+        }
+      ],
+      provider: "test-provider",
+      model: "test-model"
+    }
+  });
+  await db.appendMessage({
+    id: `${sessionId}-provider-tool-result`,
+    sessionId,
+    role: "tool",
+    content: "native replay tool result",
+    metadata: {
+      tool_call_id: "call-native-history",
+      tool_call_name: testTool.name
+    }
   });
 }
 
@@ -842,6 +880,51 @@ describe("ProviderTurnLoop semantic session compression", () => {
       }
     ]));
     expect(usageEvents.find((event) => event.source === "assembled-prompt")?.filled).toBeGreaterThan(0);
+  });
+
+  it("passes native structured tool history for a test-only supported route", async () => {
+    const harness = await createCompressionHarness();
+    await appendProviderToolHistory(harness.sessionDb, harness.sessionId);
+    const loop = harness.loop({
+      primaryModelRoute: nativeHistoryRoute
+    });
+
+    await runBasicProviderTurn(loop);
+
+    const request = harness.completeSpy.mock.calls[0]?.[0] as ProviderRequest;
+    expect(request.messages.at(-1)?.role).toBe("user");
+    expect(request.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: "assistant",
+        content: "provider tool call",
+        toolCalls: [
+          {
+            id: "call-native-history",
+            name: testTool.name,
+            argumentsText: "{\"path\":\"src/index.ts\"}"
+          }
+        ]
+      }),
+      expect.objectContaining({
+        role: "tool",
+        toolCallId: "call-native-history",
+        content: "native replay tool result"
+      })
+    ]));
+  });
+
+  it("keeps native replay disabled for routes without explicit support", async () => {
+    const harness = await createCompressionHarness();
+    await appendProviderToolHistory(harness.sessionDb, harness.sessionId);
+    const loop = harness.loop();
+
+    await runBasicProviderTurn(loop);
+
+    const request = harness.completeSpy.mock.calls[0]?.[0] as ProviderRequest;
+    expect(request.messages.some((message) => message.toolCalls !== undefined || message.toolCallId !== undefined)).toBe(false);
+    const rendered = JSON.stringify(request.messages);
+    expect(rendered).toContain("provider tool call");
+    expect(rendered).toContain("native replay tool result");
   });
 });
 
