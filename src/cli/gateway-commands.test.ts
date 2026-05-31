@@ -25,6 +25,10 @@ const execResolverMock = vi.hoisted(() => ({
   resolveGatewayExec: vi.fn(),
 }));
 
+const installMethodMock = vi.hoisted(() => ({
+  detectInstallMethod: vi.fn(),
+}));
+
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   fsPromisesMock.rename.mockImplementation(actual.rename);
@@ -61,6 +65,14 @@ vi.mock("../gateway/service-exec-resolver.js", async (importOriginal) => {
   return {
     ...actual,
     resolveGatewayExec: execResolverMock.resolveGatewayExec,
+  };
+});
+
+vi.mock("../lifecycle/install-method.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lifecycle/install-method.js")>();
+  return {
+    ...actual,
+    detectInstallMethod: installMethodMock.detectInstallMethod,
   };
 });
 
@@ -228,10 +240,18 @@ describe("gateway commands", () => {
     serviceManagerMock.startService.mockReset();
     serviceManagerMock.stopService.mockReset();
     execResolverMock.resolveGatewayExec.mockReset();
+    installMethodMock.detectInstallMethod.mockReset();
     serviceManagerMock.detectServiceManager.mockReturnValue("none");
     serviceManagerMock.restartService.mockResolvedValue({ ok: true });
     serviceManagerMock.startService.mockResolvedValue({ ok: true });
     serviceManagerMock.stopService.mockResolvedValue({ ok: true });
+    installMethodMock.detectInstallMethod.mockResolvedValue({
+      method: "unknown",
+      source: "unknown",
+      recommendedUpdateCommand: "reinstall using documented install path",
+      canSelfUpdate: false,
+      reason: "test default",
+    });
     execResolverMock.resolveGatewayExec.mockReturnValue({
       ok: true,
       resolved: {
@@ -628,6 +648,28 @@ describe("gateway commands", () => {
         serviceUserHomeDirExplicit: false,
         workspaceRoot: tmpDir,
         profileId: "default",
+      }));
+    });
+
+    it("uses the detected EstaCoda install directory when installing the service", async () => {
+      const cwdWorkspace = join(tmpDir, "shell-cwd");
+      const installDir = join(tmpDir, "estacoda-install");
+      serviceManagerMock.installService.mockResolvedValue({ ok: true, mode: "compiled" });
+      installMethodMock.detectInstallMethod.mockResolvedValue({
+        method: "manual-source",
+        source: "path",
+        installDir,
+        recommendedUpdateCommand: "git fetch origin && git status",
+        canSelfUpdate: false,
+        reason: "A git checkout was detected without a managed-source install stamp.",
+      });
+
+      const result = await runGatewayInstallService({ workspaceRoot: cwdWorkspace, homeDir: tmpDir });
+
+      expect(result.ok).toBe(true);
+      expect(installMethodMock.detectInstallMethod).toHaveBeenCalledWith({ includeCwd: false });
+      expect(serviceManagerMock.installService).toHaveBeenCalledWith(expect.objectContaining({
+        workspaceRoot: installDir,
       }));
     });
 

@@ -69,6 +69,8 @@ import {
   uninstallService,
 } from "../gateway/service-manager.js";
 import type { ServiceManagerState, ServiceScope } from "../gateway/service-manager.js";
+import { resolveGatewayExec } from "../gateway/service-exec-resolver.js";
+import { detectInstallMethod } from "../lifecycle/install-method.js";
 
 export type GatewayCommandOptions = {
   homeDir?: string;
@@ -277,11 +279,13 @@ export async function runGatewayInstallService(
   const stateHomeDir = resolveHomeDir(options.homeDir);
   const serviceUserHomeDir = options.serviceHomeDir ?? resolveOsHomeDir();
   const profileId = options.profileId ?? readActiveProfile({ homeDir: stateHomeDir }).profileId ?? defaultProfileId();
+  const installMethod = await detectInstallMethod({ includeCwd: false });
+  const workspaceRoot = installMethod.installDir ?? options.workspaceRoot;
   const result = await installService({
     stateHomeDir,
     serviceUserHomeDir,
     serviceUserHomeDirExplicit: options.serviceHomeDir !== undefined,
-    workspaceRoot: options.workspaceRoot,
+    workspaceRoot,
     profileId,
     system: options.system,
     runAsUser: options.runAsUser,

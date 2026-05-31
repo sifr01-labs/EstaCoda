@@ -714,6 +714,43 @@ describe("createOpenAICompatibleProvider streaming", () => {
     expect(events.some((event) => event.kind === "transport-done")).toBe(false);
   });
 
+  it("skips null DeepSeek-style stream delta fields without dropping chunks", async () => {
+    const provider = createOpenAICompatibleProvider({
+      id: "deepseek" as any,
+      endpoint: { baseUrl: "https://api.deepseek.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      fetch: async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({}),
+        text: async () => "",
+        body: sseStream([
+          sseData({ choices: [{ delta: { reasoning: null, reasoning_content: null, content: null }, finish_reason: null }] }),
+          sseData({ choices: [{ delta: { content: "Visible" }, finish_reason: null }] }),
+          sseData({ choices: [{ delta: { content: null }, finish_reason: "stop" }] })
+        ])
+      })
+    });
+
+    const events = await collectStreamEvents(provider.stream?.({
+      provider: "deepseek" as any,
+      model: "deepseek-test",
+      messages: [{ role: "user", content: "Hello" }]
+    }) ?? []);
+
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "token", text: "Visible" }),
+      expect.objectContaining({
+        kind: "done",
+        response: expect.objectContaining({
+          content: "Visible",
+          finishReason: "stop"
+        })
+      })
+    ]));
+  });
+
   it("does not fallback or finalize empty abrupt streams", async () => {
     let fallbackJsonCalled = false;
     const provider = createOpenAICompatibleProvider({

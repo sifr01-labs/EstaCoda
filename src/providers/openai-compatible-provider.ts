@@ -1146,9 +1146,9 @@ function parseOpenAICompatibleStreamChunk(data: string, provider: ProviderId, mo
       choices?: Array<{
         finish_reason?: unknown;
         delta?: {
-          content?: string;
-          reasoning?: string;
-          reasoning_content?: string;
+          content?: string | null;
+          reasoning?: string | null;
+          reasoning_content?: string | null;
           tool_calls?: Array<{
             index?: number;
             id?: string;
@@ -1200,7 +1200,7 @@ function parseOpenAICompatibleStreamChunk(data: string, provider: ProviderId, mo
         { text: choice.delta?.reasoning, format: "reasoning" as const },
         { text: choice.delta?.reasoning_content, format: "reasoning_content" as const }
       ]) {
-        if (reasoningDelta.text !== undefined && reasoningDelta.text.length > 0) {
+        if (reasoningDelta.text != null && reasoningDelta.text.length > 0) {
           events.push({
             kind: "reasoning-delta",
             provider,
@@ -1211,7 +1211,7 @@ function parseOpenAICompatibleStreamChunk(data: string, provider: ProviderId, mo
         }
       }
 
-      if (choice.delta?.content !== undefined && choice.delta.content.length > 0) {
+      if (choice.delta?.content != null && choice.delta.content.length > 0) {
         events.push({
           kind: "token",
           provider,
