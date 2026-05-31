@@ -84,6 +84,20 @@ export type ProviderMessageContentPart =
 
 export type ProviderMessageContent = string | ProviderMessageContentPart[];
 
+export type ProviderStructuredToolCall = {
+  id: string;
+  name: string;
+  argumentsText: string;
+};
+
+export type ProviderReplayEcho = {
+  field: "reasoning_content";
+  value: string;
+  providerFamily: "deepseek" | "kimi" | "mimo";
+  apiMode: "openai_chat_completions";
+  chars: number;
+};
+
 export type ProviderMessage = {
   role: "system" | "user" | "assistant" | "tool";
   // Intentionally loose at the boundary because providers can accept
@@ -91,6 +105,9 @@ export type ProviderMessage = {
   // string-oriented paths that are being hardened incrementally.
   content: any;
   name?: string;
+  toolCalls?: ProviderStructuredToolCall[];
+  toolCallId?: string;
+  providerReplayEcho?: ProviderReplayEcho;
 };
 
 export type ProviderRequest = {
