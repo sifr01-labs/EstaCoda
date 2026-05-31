@@ -5,7 +5,7 @@ import type { IntentRoute } from "../contracts/intent.js";
 import type { MemoryProvider, SkillOutcome } from "../contracts/memory.js";
 import type { PromptBudgetReport } from "../contracts/prompt.js";
 import type { SecurityDecision } from "../contracts/security.js";
-import type { SessionDB } from "../contracts/session.js";
+import type { SessionDB, StructuredToolHistoryDiagnosticEvent } from "../contracts/session.js";
 import type {
   LoadedSkill,
   SkillDefinition,
@@ -206,6 +206,11 @@ export class RunRecorder {
       ...input
     });
     this.#trajectoryRecorder.record("provider-iteration", input);
+  }
+
+  async recordStructuredToolHistoryDiagnostic(input: StructuredToolHistoryDiagnosticEvent): Promise<void> {
+    const event = sanitizeStructuredToolHistoryDiagnostic(input);
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), event);
   }
 
   async recordRouteUsage(input: {
@@ -680,6 +685,32 @@ function sanitizeAuditFailures(
     ...(failure.providerId === undefined ? {} : { providerId: truncate(redactSensitiveText(failure.providerId), 80) }),
     reason: truncate(redactSensitiveText(failure.reason), 240)
   }));
+}
+
+function sanitizeStructuredToolHistoryDiagnostic(
+  input: StructuredToolHistoryDiagnosticEvent
+): StructuredToolHistoryDiagnosticEvent {
+  return {
+    kind: input.kind,
+    ...(input.provider === undefined ? {} : { provider: input.provider }),
+    ...(input.model === undefined ? {} : { model: input.model }),
+    ...(input.routeRole === undefined ? {} : { routeRole: input.routeRole }),
+    ...(input.nativePairs === undefined ? {} : { nativePairs: nonNegativeInteger(input.nativePairs) }),
+    ...(input.droppedOrphans === undefined ? {} : { droppedOrphans: nonNegativeInteger(input.droppedOrphans) }),
+    ...(input.injectedStubs === undefined ? {} : { injectedStubs: nonNegativeInteger(input.injectedStubs) }),
+    ...(input.mergedUsers === undefined ? {} : { mergedUsers: nonNegativeInteger(input.mergedUsers) }),
+    ...(input.skippedMalformedToolCalls === undefined ? {} : { skippedMalformedToolCalls: nonNegativeInteger(input.skippedMalformedToolCalls) }),
+    ...(input.skippedUnsafeTurns === undefined ? {} : { skippedUnsafeTurns: nonNegativeInteger(input.skippedUnsafeTurns) }),
+    ...(input.echoMessages === undefined ? {} : { echoMessages: nonNegativeInteger(input.echoMessages) }),
+    ...(input.echoMissing === undefined ? {} : { echoMissing: nonNegativeInteger(input.echoMissing) }),
+    ...(input.echoOversized === undefined ? {} : { echoOversized: nonNegativeInteger(input.echoOversized) }),
+    ...(input.nativeReplayUnsafeTurns === undefined ? {} : { nativeReplayUnsafeTurns: nonNegativeInteger(input.nativeReplayUnsafeTurns) }),
+    ...(input.reason === undefined ? {} : { reason: input.reason })
+  };
+}
+
+function nonNegativeInteger(value: number): number {
+  return Math.max(0, Math.floor(Number.isFinite(value) ? value : 0));
 }
 
 function summarizeSkillOutcome(

@@ -527,6 +527,174 @@ describe("assembleProviderContinuationPrompt", () => {
     expect(rendered).toContain("Tool: files.read");
   });
 
+  it("uses structured native history for supported continuation prompts", () => {
+    const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
+      model: toolModel,
+      rawSessionHistory: [
+        providerToolTurn("tool-turn"),
+        sessionMessage("tool-result", "tool", "native tool result", { tool_call_id: "call-1" })
+      ],
+      sessionHistory: [
+        { role: "assistant", content: "flat native tool turn fallback" },
+        { role: "tool", content: "flat native tool result fallback" }
+      ],
+      nativeHistoryRoute: supportedNativeRoute,
+      nativeHistoryRouteRole: "primary"
+    }));
+
+    expect(prompt.messages.at(-1)?.role).toBe("user");
+    expect(renderMessages([prompt.messages.at(-1)!])).toContain("EstaCoda executed the requested tools.");
+    expect(prompt.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: "assistant",
+        toolCalls: expect.arrayContaining([
+          {
+            id: "call-1",
+            name: "files.read",
+            argumentsText: "{\"path\":\"src/index.ts\"}"
+          }
+        ])
+      }),
+      expect.objectContaining({
+        role: "tool",
+        toolCallId: "call-1",
+        content: "native tool result"
+      })
+    ]));
+    expect(renderMessages(prompt.messages)).not.toContain("flat native tool result fallback");
+    expect(prompt.nativeHistoryDiagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "structured-tool-history-selected",
+        nativePairs: 1,
+        routeRole: "primary"
+      })
+    ]));
+  });
+
+  it("does not duplicate selected native tool results in flat continuation text", () => {
+    const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
+      model: toolModel,
+      rawSessionHistory: [
+        providerToolTurn("tool-turn", {
+          providerToolCalls: [
+            {
+              id: "call-read",
+              name: "files.read",
+              argumentsText: "{\"path\":\"src/index.ts\"}"
+            }
+          ]
+        }),
+        sessionMessage("tool-result", "tool", "selected native result", { tool_call_id: "call-read" })
+      ],
+      nativeHistoryRoute: supportedNativeRoute,
+      toolPlans: [
+        {
+          id: "call-read",
+          tool: "files.read",
+          input: { path: "src/index.ts" },
+          source: "provider-tool-call",
+          status: "executed",
+          result: {
+            ok: true,
+            content: "selected native result"
+          }
+        },
+        {
+          id: "call-extra",
+          tool: "files.read",
+          input: { path: "README.md" },
+          source: "provider-tool-call",
+          status: "executed",
+          result: {
+            ok: true,
+            content: "non-selected flat result"
+          }
+        }
+      ]
+    }));
+
+    const finalMessage = prompt.messages.at(-1);
+    expect(finalMessage?.role).toBe("user");
+    expect(prompt.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: "assistant",
+        toolCalls: [
+          {
+            id: "call-read",
+            name: "files.read",
+            argumentsText: "{\"path\":\"src/index.ts\"}"
+          }
+        ]
+      }),
+      expect.objectContaining({
+        role: "tool",
+        toolCallId: "call-read",
+        content: "selected native result"
+      })
+    ]));
+    const finalContent = renderMessages([finalMessage!]);
+    expect(finalContent).toContain("EstaCoda executed the requested tools.");
+    expect(finalContent).toContain("Some tool results are already included as structured tool messages above.");
+    expect(finalContent).not.toContain("selected native result");
+    expect(finalContent).toContain("non-selected flat result");
+    expect(countOccurrences(JSON.stringify(prompt.messages), "selected native result")).toBe(1);
+  });
+
+  it("keeps flat continuation behavior for unsupported native history routes", () => {
+    const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
+      model: toolModel,
+      rawSessionHistory: [
+        providerToolTurn("tool-turn"),
+        sessionMessage("tool-result", "tool", "native tool result", { tool_call_id: "call-1" })
+      ],
+      sessionHistory: [
+        { role: "assistant", content: "flat native tool turn fallback" },
+        { role: "tool", content: "flat native tool result fallback" }
+      ],
+      nativeHistoryRoute: { ...supportedNativeRoute, supportsNativeToolHistory: false }
+    }));
+
+    expect(prompt.messages.at(-1)?.role).toBe("user");
+    expect(prompt.messages.some((message) => message.toolCalls !== undefined || message.toolCallId !== undefined)).toBe(false);
+    const rendered = renderMessages(prompt.messages);
+    expect(rendered).toContain("flat native tool result fallback");
+    expect(prompt.nativeHistoryDiagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "structured-tool-history-skipped",
+        reason: "provider_unsupported"
+      })
+    ]));
+  });
+
+  it("keeps continuation echo out of rendered text while carrying structured echo", () => {
+    const echoValue = "private continuation reasoning";
+    const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
+      model: toolModel,
+      rawSessionHistory: [
+        providerToolTurn("tool-turn", {
+          providerReplayEcho: {
+            field: "reasoning_content",
+            value: echoValue,
+            providerFamily: "deepseek",
+            apiMode: "openai_chat_completions",
+            chars: echoValue.length
+          }
+        }),
+        sessionMessage("tool-result", "tool", "native tool result", { tool_call_id: "call-1" })
+      ],
+      nativeHistoryRoute: {
+        ...supportedNativeRoute,
+        provider: "deepseek",
+        id: "deepseek-reasoner",
+        reasoningEchoProviderFamily: "deepseek"
+      }
+    }));
+
+    const assistant = prompt.messages.find((message) => message.role === "assistant" && message.toolCalls !== undefined);
+    expect(assistant?.providerReplayEcho?.value).toBe(echoValue);
+    expect(renderMessages(prompt.messages)).not.toContain(echoValue);
+  });
+
   it("inserts supported native tool history before the current user without duplicating selected flat text", () => {
     const prompt = assembleProviderPrompt(basePromptInput({
       model: toolModel,
@@ -748,6 +916,13 @@ describe("assembleProviderContinuationPrompt", () => {
     expect(rendered).not.toContain(echoValue);
     expect(rendered).not.toContain("raw reasoning metadata");
     expect(rendered).not.toContain("raw content reasoning");
+    expect(prompt.nativeHistoryDiagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "structured-tool-history-selected",
+        echoMessages: 1
+      })
+    ]));
+    expect(JSON.stringify(prompt.nativeHistoryDiagnostics)).not.toContain(echoValue);
   });
 });
 

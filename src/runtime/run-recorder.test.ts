@@ -70,4 +70,61 @@ describe("RunRecorder", () => {
       db.close();
     }
   });
+
+  it("persists structured tool-history diagnostics as count-only events", async () => {
+    const db = new SQLiteSessionDB({ path: join(makeTempDir(), "sessions.sqlite") });
+
+    try {
+      const session = await db.createSession({ id: "session-1", profileId: "default" });
+      const trajectoryRecorder = new TrajectoryRecorder({
+        profileId: "default",
+        sessionId: session.id,
+        modelId: "test-model",
+        id: () => "trajectory-1"
+      });
+      const runRecorder = new RunRecorder({
+        sessionDb: db,
+        sessionId: session.id,
+        trajectoryRecorder,
+        trajectoryStore: db,
+        profileId: "default"
+      });
+
+      await runRecorder.recordStructuredToolHistoryDiagnostic({
+        kind: "structured-tool-history-selected",
+        provider: "test-provider",
+        model: "test-model",
+        routeRole: "primary",
+        nativePairs: 1.8,
+        droppedOrphans: -3,
+        injectedStubs: 0,
+        mergedUsers: 1,
+        echoMessages: 1,
+        reason: "missing_echo",
+        rawArgs: "sk-secret",
+        toolResult: "private result",
+        echoValue: "private provider reasoning"
+      } as never);
+
+      const events = await db.listEvents(session.id);
+      expect(events).toContainEqual({
+        kind: "structured-tool-history-selected",
+        provider: "test-provider",
+        model: "test-model",
+        routeRole: "primary",
+        nativePairs: 1,
+        droppedOrphans: 0,
+        injectedStubs: 0,
+        mergedUsers: 1,
+        echoMessages: 1,
+        reason: "missing_echo"
+      });
+      const serialized = JSON.stringify(events);
+      expect(serialized).not.toContain("sk-secret");
+      expect(serialized).not.toContain("private result");
+      expect(serialized).not.toContain("private provider reasoning");
+    } finally {
+      db.close();
+    }
+  });
 });

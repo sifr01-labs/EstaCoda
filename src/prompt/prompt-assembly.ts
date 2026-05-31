@@ -7,7 +7,7 @@ import type { MemoryPromptContext, PromptMemoryBlock } from "../contracts/memory
 import type { PromptBudgetReport, PromptLayerName, PromptLayerReport, PromptSemanticCompressionReport } from "../contracts/prompt.js";
 import type { ModelProfile, ProviderApiMode, ProviderMessage, ProviderMessageContentPart, ProviderReplayEcho, ProviderId } from "../contracts/provider.js";
 import type { SecurityDecision } from "../contracts/security.js";
-import type { SessionMessage } from "../contracts/session.js";
+import type { SessionMessage, StructuredToolHistoryDiagnosticEvent, StructuredToolHistoryDiagnosticReason } from "../contracts/session.js";
 import type { LoadedSkill, SkillCatalogEntry, SkillDefinition, SkillResourceEntry } from "../contracts/skill.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
@@ -39,6 +39,7 @@ type NativeHistoryRouteSupport = {
 export type ProviderPromptAssembly = {
   messages: ProviderMessage[];
   budget: PromptBudgetReport;
+  nativeHistoryDiagnostics?: StructuredToolHistoryDiagnosticEvent[];
 };
 
 export type ProviderPromptInput = {
@@ -47,6 +48,7 @@ export type ProviderPromptInput = {
   sessionHistory?: PromptSessionHistoryMessage[];
   rawSessionHistory?: SessionMessage[];
   nativeHistoryRoute?: NativeHistoryRouteSupport;
+  nativeHistoryRouteRole?: string;
   compactionNotice?: string;
   compression?: PromptSemanticCompressionReport;
   soul?: string;
@@ -112,15 +114,20 @@ export function assembleProviderPrompt(input: ProviderPromptInput): ProviderProm
 
   return {
     messages,
-    budget
+    budget,
+    nativeHistoryDiagnostics: nativeHistory?.diagnostics
   };
 }
 
 export function assembleProviderContinuationPrompt(input: ProviderContinuationPromptInput): ProviderPromptAssembly {
   const contextWindowTokens = input.model?.contextWindowTokens ?? 128_000;
   const budgetTarget = Math.max(4_000, Math.floor(contextWindowTokens * 0.65));
-  const baseLayers = applyCache(input.cache, fitLayersToBudget(buildBaseLayers(input), Math.floor(budgetTarget * 0.85)));
-  const baseMessages = renderBaseMessages(baseLayers, input);
+  const nativeHistory = buildNativePromptHistory(input, budgetTarget);
+  const promptInput = nativeHistory === undefined
+    ? input
+    : { ...input, sessionHistory: nativeHistory.unselectedSessionHistory };
+  const baseLayers = applyCache(input.cache, fitLayersToBudget(buildBaseLayers(promptInput), Math.floor(budgetTarget * 0.85)));
+  const baseMessages = renderBaseMessages(baseLayers, promptInput, nativeHistory?.messages);
   const baseBudget = buildBudgetReport({
     model: input.model?.id ?? "unconfigured",
     contextWindowTokens,
@@ -132,7 +139,9 @@ export function assembleProviderContinuationPrompt(input: ProviderContinuationPr
   const unresolvedPlans = input.toolPlans.filter((plan) =>
     plan.status === "invalid" || plan.status === "unavailable" || plan.status === "blocked"
   );
-  const toolResults = executedPlans
+  const nativeToolResultIds = nativeSelectedToolResultIds(nativeHistory?.messages ?? []);
+  const flatExecutedPlans = executedPlans.filter((plan) => !nativeToolResultIds.has(plan.id));
+  const toolResults = flatExecutedPlans
     .map((plan) => [
       `Tool: ${plan.tool}`,
       `Call id: ${plan.id}`,
@@ -157,11 +166,14 @@ export function assembleProviderContinuationPrompt(input: ProviderContinuationPr
       ? "EstaCoda could not execute one or more requested tool calls. Use the feedback below to correct the tool call or choose an available tool."
       : "EstaCoda executed the requested tools. Use these results to produce the final answer now.",
     "Do not ask the user to run these tools again.",
+    nativeToolResultIds.size > 0
+      ? "Some tool results are already included as structured tool messages above."
+      : undefined,
     "",
-    `Executed tool results:\n${toolResults || "No executed tool results were available."}`,
+    `Executed tool results:\n${toolResults || "No additional executed tool results were available."}`,
     "",
     `Tool call feedback:\n${toolPlanFeedback || "No tool-call errors were recorded."}`
-  ].join("\n");
+  ].filter((line): line is string => line !== undefined).join("\n");
   const continuationLayer = layer({
     name: "provider-continuation",
     content: continuationContent,
@@ -197,7 +209,8 @@ export function assembleProviderContinuationPrompt(input: ProviderContinuationPr
 
   return {
     messages,
-    budget: mergeBudgetWarnings(budget, baseBudget)
+    budget: mergeBudgetWarnings(budget, baseBudget),
+    nativeHistoryDiagnostics: nativeHistory?.diagnostics
   };
 }
 
@@ -656,25 +669,75 @@ function renderBaseMessages(
   ];
 }
 
+function nativeSelectedToolResultIds(messages: ProviderMessage[]): Set<string> {
+  const ids = new Set<string>();
+  for (const message of messages) {
+    if (message.role === "tool" && typeof message.toolCallId === "string") {
+      ids.add(message.toolCallId);
+    }
+  }
+  return ids;
+}
+
 function buildNativePromptHistory(
   input: ProviderPromptInput,
   budgetTarget: number
-): { messages: ProviderMessage[]; unselectedSessionHistory: PromptSessionHistoryMessage[] } | undefined {
+): { messages: ProviderMessage[]; unselectedSessionHistory: PromptSessionHistoryMessage[]; diagnostics: StructuredToolHistoryDiagnosticEvent[] } | undefined {
+  const baseDiagnostic = nativeHistoryDiagnosticBase(input);
   if (!canUseNativeHistory(input)) {
+    const reason = nativeHistorySkipReason(input);
+    if (reason !== undefined) {
+      return {
+        messages: [],
+        unselectedSessionHistory: input.sessionHistory ?? [],
+        diagnostics: [{
+          kind: "structured-tool-history-skipped",
+          ...baseDiagnostic,
+          reason
+        }]
+      };
+    }
     return undefined;
   }
   const rawMessages = priorNativeHistoryMessages(input.rawSessionHistory ?? [], input.userText);
   if (rawMessages.length === 0) {
-    return undefined;
+    return {
+      messages: [],
+      unselectedSessionHistory: input.sessionHistory ?? [],
+      diagnostics: [{
+        kind: "structured-tool-history-skipped",
+        ...baseDiagnostic,
+        reason: "no_native_messages"
+      }]
+    };
   }
 
   const selection = selectNativeHistoryWindow(rawMessages, {
     maxTokens: budgetTarget,
     reservedTokens: Math.floor(budgetTarget * 0.75)
   });
+  if (selection.selectedUnits.length === 0) {
+    return {
+      messages: [],
+      unselectedSessionHistory: input.sessionHistory ?? rawMessages.map(toPromptSessionHistoryMessage),
+      diagnostics: [{
+        kind: "structured-tool-history-skipped",
+        ...baseDiagnostic,
+        reason: selection.unselectedUnits.length > 0 ? "budget_fallback" : "no_native_messages"
+      }]
+    };
+  }
   const selectedMessages = flattenNativeHistoryUnits(selection.selectedUnits).map(sanitizeNativeHistorySessionMessage);
   if (selectedMessages.length === 0) {
-    return undefined;
+    return {
+      messages: [],
+      unselectedSessionHistory: input.sessionHistory ?? rawMessages.map(toPromptSessionHistoryMessage),
+      diagnostics: [{
+        kind: "structured-tool-history-skipped",
+        ...baseDiagnostic,
+        reason: "no_native_messages"
+      }]
+    };
   }
 
   const route = input.nativeHistoryRoute!;
@@ -683,14 +746,95 @@ function buildNativePromptHistory(
     targetApiMode: "openai_chat_completions",
     mergeAdjacentUsers: true
   });
+  const diagnostics = nativeHistoryBuilderDiagnostics(input, built.stats);
   if (built.stats.nativeToolTurns === 0) {
-    return undefined;
+    return {
+      messages: [],
+      unselectedSessionHistory: input.sessionHistory ?? rawMessages.map(toPromptSessionHistoryMessage),
+      diagnostics: [
+        ...diagnostics,
+        {
+          kind: "structured-tool-history-skipped",
+          ...baseDiagnostic,
+          reason: built.stats.skippedMalformedTurns > 0 || built.stats.droppedToolMessages > 0
+            ? "malformed_history"
+            : "no_native_messages",
+          skippedMalformedToolCalls: built.stats.skippedMalformedTurns,
+          skippedUnsafeTurns: built.stats.skippedUnsafeTurns,
+          nativeReplayUnsafeTurns: built.stats.skippedUnsafeTurns
+        }
+      ]
+    };
   }
 
   return {
     messages: built.messages,
-    unselectedSessionHistory: flattenNativeHistoryUnits(selection.unselectedUnits).map(toPromptSessionHistoryMessage)
+    unselectedSessionHistory: flattenNativeHistoryUnits(selection.unselectedUnits).map(toPromptSessionHistoryMessage),
+    diagnostics: [
+      ...diagnostics,
+      {
+        kind: "structured-tool-history-selected",
+        ...baseDiagnostic,
+        nativePairs: built.stats.nativeToolTurns,
+        droppedOrphans: built.stats.droppedToolMessages,
+        injectedStubs: built.stats.injectedMissingResults,
+        mergedUsers: built.stats.mergedUserMessages,
+        skippedMalformedToolCalls: built.stats.skippedMalformedTurns,
+        skippedUnsafeTurns: built.stats.skippedUnsafeTurns,
+        echoMessages: built.messages.filter((message) => message.role === "assistant" && message.providerReplayEcho !== undefined).length,
+        nativeReplayUnsafeTurns: built.stats.skippedUnsafeTurns
+      }
+    ]
   };
+}
+
+function nativeHistoryBuilderDiagnostics(
+  input: ProviderPromptInput,
+  stats: ReturnType<typeof buildNativeHistoryMessages>["stats"]
+): StructuredToolHistoryDiagnosticEvent[] {
+  if (
+    stats.droppedToolMessages === 0 &&
+    stats.injectedMissingResults === 0 &&
+    stats.mergedUserMessages === 0
+  ) {
+    return [];
+  }
+
+  return [{
+    kind: "structured-tool-history-repaired",
+    ...nativeHistoryDiagnosticBase(input),
+    nativePairs: stats.nativeToolTurns,
+    droppedOrphans: stats.droppedToolMessages,
+    injectedStubs: stats.injectedMissingResults,
+    mergedUsers: stats.mergedUserMessages,
+    skippedMalformedToolCalls: stats.skippedMalformedTurns,
+    skippedUnsafeTurns: stats.skippedUnsafeTurns,
+    nativeReplayUnsafeTurns: stats.skippedUnsafeTurns
+  }];
+}
+
+function nativeHistoryDiagnosticBase(input: ProviderPromptInput): Pick<StructuredToolHistoryDiagnosticEvent, "provider" | "model" | "routeRole"> {
+  const provider = input.nativeHistoryRoute?.provider ?? input.model?.provider;
+  const model = input.nativeHistoryRoute?.id ?? input.model?.id;
+  return {
+    ...(provider === undefined ? {} : { provider }),
+    ...(model === undefined ? {} : { model }),
+    ...(input.nativeHistoryRouteRole === undefined ? {} : { routeRole: input.nativeHistoryRouteRole })
+  };
+}
+
+function nativeHistorySkipReason(input: ProviderPromptInput): StructuredToolHistoryDiagnosticReason | undefined {
+  const route = input.nativeHistoryRoute;
+  if (route?.supportsNativeToolHistory !== true) {
+    return "provider_unsupported";
+  }
+  if (input.model?.supportsTools !== true) {
+    return "model_tools_unsupported";
+  }
+  if (route.apiMode !== "openai_chat_completions") {
+    return "serialization_unsupported";
+  }
+  return undefined;
 }
 
 function canUseNativeHistory(input: ProviderPromptInput): boolean {

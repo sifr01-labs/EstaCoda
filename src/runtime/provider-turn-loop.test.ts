@@ -564,6 +564,8 @@ async function createPostToolNudgeHarness(input: {
     executions?: ToolExecutionRecord[];
     plans?: ToolCallPlan[];
   }>;
+  model?: ModelProfile;
+  primaryModelRoute?: ResolvedModelRoute;
   modelFallbackRoutes?: ResolvedModelRoute[];
   maxProviderIterations?: number;
   maxProviderWallClockMs?: number;
@@ -629,8 +631,8 @@ async function createPostToolNudgeHarness(input: {
   } as unknown as ToolPlanRunner;
   const loop = new ProviderTurnLoop({
     providerExecutor,
-    model: mockModel,
-    primaryModelRoute: primaryRoute,
+    model: input.model ?? mockModel,
+    primaryModelRoute: input.primaryModelRoute ?? primaryRoute,
     modelFallbackRoutes: input.modelFallbackRoutes ?? [fallbackRoute],
     providerPreferences: {
       providerOrder: ["test-provider"]
@@ -911,6 +913,24 @@ describe("ProviderTurnLoop semantic session compression", () => {
         content: "native replay tool result"
       })
     ]));
+    const events = await harness.sessionDb.listEvents(harness.sessionId);
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "structured-tool-history-selected",
+        nativePairs: 1,
+        routeRole: "primary"
+      }),
+      expect.objectContaining({
+        kind: "structured-tool-history-serialized",
+        nativePairs: 1,
+        routeRole: "primary"
+      })
+    ]));
+    const serializedEvents = JSON.stringify(events.filter((event) =>
+      event.kind.startsWith("structured-tool-history-")
+    ));
+    expect(serializedEvents).not.toContain("src/index.ts");
+    expect(serializedEvents).not.toContain("native replay tool result");
   });
 
   it("keeps native replay disabled for routes without explicit support", async () => {
@@ -925,6 +945,13 @@ describe("ProviderTurnLoop semantic session compression", () => {
     const rendered = JSON.stringify(request.messages);
     expect(rendered).toContain("provider tool call");
     expect(rendered).toContain("native replay tool result");
+    const events = await harness.sessionDb.listEvents(harness.sessionId);
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "structured-tool-history-skipped",
+        reason: "provider_unsupported"
+      })
+    ]));
   });
 });
 
@@ -992,6 +1019,105 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     }));
   });
 
+  it("uses structured native history for supported post-tool continuation", async () => {
+    const harness = await createPostToolNudgeHarness({
+      primaryModelRoute: nativeHistoryRoute,
+      responses: [
+        providerExecution("", [providerToolCall("call-live")]),
+        providerExecution("final answer")
+      ],
+      toolSteps: [
+        {
+          executions: [toolExecution("call-live", "live tool result")]
+        }
+      ],
+      onExecutePlans: async ({ sessionDb, sessionId }) => {
+        await sessionDb.appendMessage({
+          sessionId,
+          role: "tool",
+          content: "live tool result",
+          metadata: {
+            tool_call_id: "call-live",
+            tool_call_name: testTool.name
+          }
+        });
+      }
+    });
+
+    await runBasicProviderTurn(harness.loop);
+
+    const continuationRequest = harness.completeSpy.mock.calls[1]?.[0] as ProviderRequest;
+    expect(continuationRequest.messages.at(-1)?.role).toBe("user");
+    expect(JSON.stringify(continuationRequest.messages.at(-1)?.content)).toContain("EstaCoda executed the requested tools.");
+    expect(continuationRequest.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: "assistant",
+        toolCalls: [
+          {
+            id: "call-live",
+            name: testTool.name,
+            argumentsText: "{}"
+          }
+        ]
+      }),
+      expect.objectContaining({
+        role: "tool",
+        toolCallId: "call-live",
+        content: "live tool result"
+      })
+    ]));
+    const events = await harness.sessionDb.listEvents(harness.sessionId);
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "structured-tool-history-selected",
+        nativePairs: 1
+      }),
+      expect.objectContaining({
+        kind: "structured-tool-history-serialized",
+        nativePairs: 1
+      })
+    ]));
+  });
+
+  it("keeps flat post-tool continuation for unsupported native history routes", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-flat")]),
+        providerExecution("final answer")
+      ],
+      toolSteps: [
+        {
+          executions: [toolExecution("call-flat", "flat tool result")]
+        }
+      ],
+      onExecutePlans: async ({ sessionDb, sessionId }) => {
+        await sessionDb.appendMessage({
+          sessionId,
+          role: "tool",
+          content: "flat tool result",
+          metadata: {
+            tool_call_id: "call-flat",
+            tool_call_name: testTool.name
+          }
+        });
+      }
+    });
+
+    await runBasicProviderTurn(harness.loop);
+
+    const continuationRequest = harness.completeSpy.mock.calls[1]?.[0] as ProviderRequest;
+    expect(continuationRequest.messages.at(-1)?.role).toBe("user");
+    expect(continuationRequest.messages.some((message) => message.toolCalls !== undefined || message.toolCallId !== undefined)).toBe(false);
+    expect(JSON.stringify(continuationRequest.messages)).toContain("flat tool result");
+    const events = await harness.sessionDb.listEvents(harness.sessionId);
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "structured-tool-history-skipped",
+        reason: "provider_unsupported"
+      })
+    ]));
+  });
+
   it("normalizes missing stable tool-call IDs before persistence and planning", async () => {
     const toolCall = {
       index: 0,
@@ -1051,6 +1177,15 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       ]
     }));
     expect(JSON.stringify(persisted)).not.toContain("sk-secret");
+    const events = await harness.sessionDb.listEvents(harness.sessionId);
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "structured-tool-history-skipped",
+        reason: "unsafe_arguments",
+        nativeReplayUnsafeTurns: 1
+      })
+    ]));
+    expect(JSON.stringify(events)).not.toContain("sk-secret");
   });
 
   it("stores bounded provider replay echo for echo-required safe routes", async () => {
@@ -1146,6 +1281,22 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       expect(turn.metadata).not.toHaveProperty("providerReplayEcho");
     }
     expect(JSON.stringify(messages)).not.toContain(oversizedReasoning);
+    const events = await harness.sessionDb.listEvents(harness.sessionId);
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "structured-tool-history-skipped",
+        reason: "missing_echo",
+        echoMissing: 1,
+        nativeReplayUnsafeTurns: 1
+      }),
+      expect.objectContaining({
+        kind: "structured-tool-history-skipped",
+        reason: "echo_oversized",
+        echoOversized: 1,
+        nativeReplayUnsafeTurns: 1
+      })
+    ]));
+    expect(JSON.stringify(events)).not.toContain(oversizedReasoning);
   });
 
   it("does not store provider replay echo for non-echo routes or unsafe turns", async () => {

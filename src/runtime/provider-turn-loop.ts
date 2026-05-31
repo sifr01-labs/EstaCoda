@@ -6,6 +6,7 @@ import type {
   ModelProfile,
   ProviderFinishReason,
   ProviderLoopRuntimeMetadata,
+  ProviderMessage,
   ProviderRequest,
   ProviderResponse,
   ProviderRoutePreferences,
@@ -14,7 +15,7 @@ import type {
 } from "../contracts/provider.js";
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SecurityDecision } from "../contracts/security.js";
-import type { ReplacementSessionMessage, SessionDB, SessionMessage } from "../contracts/session.js";
+import type { ReplacementSessionMessage, SessionDB, SessionMessage, StructuredToolHistoryDiagnosticEvent } from "../contracts/session.js";
 import type { LoadedSkill, SkillDefinition, SkillCatalogEntry } from "../contracts/skill.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
@@ -23,7 +24,8 @@ import { PromptCache } from "../prompt/prompt-cache.js";
 import { estimateTextTokensRough } from "../prompt/token-estimator.js";
 import {
   assembleProviderContinuationPrompt,
-  assembleProviderPrompt
+  assembleProviderPrompt,
+  type ProviderPromptAssembly
 } from "../prompt/prompt-assembly.js";
 import { deriveSessionHistoryBudget, packSessionHistory } from "../prompt/history-packer.js";
 import type { CompactResult } from "../prompt/session-compression-service.js";
@@ -533,6 +535,7 @@ export class ProviderTurnLoop {
       sessionHistory: sessionHistory.messages,
       rawSessionHistory: sessionHistory.rawMessages,
       nativeHistoryRoute: this.#primaryModelRoute,
+      nativeHistoryRouteRole: "primary",
       compactionNotice: sessionHistory.compactionNotice,
       compression: input.preflightCompression ?? sessionHistory.compression,
       soul: this.#soul,
@@ -549,6 +552,7 @@ export class ProviderTurnLoop {
     }
     this.#lastPromptTokens = prompt.budget.estimatedTokens;
     await this.#runRecorder.recordPromptAssembly(prompt.budget);
+    await this.#recordNativeHistoryDiagnostics(prompt, "primary");
     await emitContextUsage(input.onEvent, prompt.budget, "assembled-prompt");
 
     const providerRequest = normalizeProviderRequest({
@@ -656,6 +660,7 @@ export class ProviderTurnLoop {
       sessionHistory: sessionHistory.messages,
       rawSessionHistory: sessionHistory.rawMessages,
       nativeHistoryRoute: this.#primaryModelRoute,
+      nativeHistoryRouteRole: "primary",
       compactionNotice: sessionHistory.compactionNotice,
       compression: sessionHistory.compression,
       soul: this.#soul,
@@ -678,6 +683,7 @@ export class ProviderTurnLoop {
     }
     this.#lastPromptTokens = prompt.budget.estimatedTokens;
     await this.#runRecorder.recordPromptAssembly(prompt.budget);
+    await this.#recordNativeHistoryDiagnostics(prompt, "primary");
     await emitContextUsage(input.onEvent, prompt.budget, "assembled-prompt");
 
     const providerRequest = normalizeProviderRequest({
@@ -1027,6 +1033,20 @@ export class ProviderTurnLoop {
     return this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId;
   }
 
+  async #recordNativeHistoryDiagnostics(prompt: ProviderPromptAssembly, routeRole: string): Promise<void> {
+    for (const diagnostic of prompt.nativeHistoryDiagnostics ?? []) {
+      await this.#runRecorder.recordStructuredToolHistoryDiagnostic({
+        ...diagnostic,
+        routeRole: diagnostic.routeRole ?? routeRole
+      });
+    }
+
+    const serialized = nativeHistorySerializedDiagnostic(prompt.messages, this.#primaryModelRoute, this.#model, routeRole);
+    if (serialized !== undefined) {
+      await this.#runRecorder.recordStructuredToolHistoryDiagnostic(serialized);
+    }
+  }
+
   async #persistProviderToolCallTurn(execution: ProviderExecutionResult): Promise<ProviderExecutionResult> {
     if (execution.response === undefined) {
       return execution;
@@ -1086,6 +1106,16 @@ export class ProviderTurnLoop {
         ...(providerReplayEcho === undefined ? {} : { providerReplayEcho })
       }
     });
+    const unsafeDiagnostic = unsafeProviderToolCallTurnDiagnostic(execution, {
+      nativeReplaySafe,
+      callCount: normalizedToolCalls.length,
+      secretBearingCalls: secretIndexes.size,
+      echoMissing,
+      echoOversized
+    });
+    if (unsafeDiagnostic !== undefined) {
+      await this.#runRecorder.recordStructuredToolHistoryDiagnostic(unsafeDiagnostic);
+    }
 
     return {
       ...execution,
@@ -1141,6 +1171,115 @@ function providerReplayEchoEligibility(execution: ProviderExecutionResult): {
   return providerFamily === undefined
     ? { required: false }
     : { required: true, providerFamily };
+}
+
+function nativeHistorySerializedDiagnostic(
+  messages: ProviderMessage[],
+  route: ResolvedModelRoute | undefined,
+  model: ModelProfile | undefined,
+  routeRole: string
+): StructuredToolHistoryDiagnosticEvent | undefined {
+  const assistantToolMessages = messages.filter((message) =>
+    message.role === "assistant" &&
+    Array.isArray(message.toolCalls) &&
+    message.toolCalls.length > 0
+  );
+  if (assistantToolMessages.length === 0) {
+    return undefined;
+  }
+
+  const base = nativeHistoryRouteDiagnosticBase(route, model, routeRole);
+  const metadata = nativeHistoryRouteMetadata(route);
+  const requiresEcho = metadata.requiresReasoningEcho === true &&
+    metadata.reasoningEchoField === "reasoning_content" &&
+    metadata.reasoningEchoRequiredForToolCalls === true;
+  const echoMessages = assistantToolMessages.filter((message) =>
+    message.providerReplayEcho !== undefined &&
+    message.providerReplayEcho.providerFamily === metadata.reasoningEchoProviderFamily &&
+    message.providerReplayEcho.apiMode === "openai_chat_completions"
+  ).length;
+  const echoMissing = requiresEcho ? assistantToolMessages.length - echoMessages : 0;
+
+  if (echoMissing > 0) {
+    return {
+      kind: "structured-tool-history-skipped",
+      ...base,
+      nativePairs: assistantToolMessages.length,
+      echoMissing,
+      reason: "missing_echo"
+    };
+  }
+
+  return {
+    kind: "structured-tool-history-serialized",
+    ...base,
+    nativePairs: assistantToolMessages.length,
+    echoMessages
+  };
+}
+
+function unsafeProviderToolCallTurnDiagnostic(
+  execution: ProviderExecutionResult,
+  input: {
+    nativeReplaySafe: boolean;
+    callCount: number;
+    secretBearingCalls: number;
+    echoMissing: boolean;
+    echoOversized: boolean;
+  }
+): StructuredToolHistoryDiagnosticEvent | undefined {
+  if (input.nativeReplaySafe) {
+    return undefined;
+  }
+
+  const reason = input.secretBearingCalls > 0
+    ? "unsafe_arguments"
+    : input.echoOversized
+      ? "echo_oversized"
+      : input.echoMissing
+        ? "missing_echo"
+        : "malformed_history";
+
+  return {
+    kind: "structured-tool-history-skipped",
+    provider: execution.response?.provider,
+    model: execution.response?.model,
+    ...(execution.routeRole === undefined ? {} : { routeRole: execution.routeRole }),
+    nativePairs: input.callCount > 0 ? 1 : 0,
+    skippedUnsafeTurns: 1,
+    nativeReplayUnsafeTurns: 1,
+    ...(input.echoMissing ? { echoMissing: 1 } : {}),
+    ...(input.echoOversized ? { echoOversized: 1 } : {}),
+    reason
+  };
+}
+
+function nativeHistoryRouteDiagnosticBase(
+  route: ResolvedModelRoute | undefined,
+  model: ModelProfile | undefined,
+  routeRole: string
+): Pick<StructuredToolHistoryDiagnosticEvent, "provider" | "model" | "routeRole"> {
+  const provider = route?.provider ?? model?.provider;
+  const modelId = route?.id ?? model?.id;
+  return {
+    ...(provider === undefined ? {} : { provider }),
+    ...(modelId === undefined ? {} : { model: modelId }),
+    routeRole
+  };
+}
+
+function nativeHistoryRouteMetadata(route: ResolvedModelRoute | undefined): {
+  requiresReasoningEcho?: boolean;
+  reasoningEchoField?: "reasoning_content";
+  reasoningEchoRequiredForToolCalls?: boolean;
+  reasoningEchoProviderFamily?: "deepseek" | "kimi" | "mimo";
+} {
+  return (route ?? {}) as {
+    requiresReasoningEcho?: boolean;
+    reasoningEchoField?: "reasoning_content";
+    reasoningEchoRequiredForToolCalls?: boolean;
+    reasoningEchoProviderFamily?: "deepseek" | "kimi" | "mimo";
+  };
 }
 
 function inferReasoningEchoProviderFamily(

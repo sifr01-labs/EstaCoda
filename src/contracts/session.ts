@@ -159,6 +159,39 @@ export type SessionCompactionForkedEvent = {
   compactedMessageCount: number;
 };
 
+export type StructuredToolHistoryDiagnosticReason =
+  | "provider_unsupported"
+  | "model_tools_unsupported"
+  | "no_native_messages"
+  | "malformed_history"
+  | "budget_fallback"
+  | "serialization_unsupported"
+  | "missing_echo"
+  | "echo_oversized"
+  | "unsafe_arguments";
+
+export type StructuredToolHistoryDiagnosticEvent = {
+  kind:
+    | "structured-tool-history-selected"
+    | "structured-tool-history-repaired"
+    | "structured-tool-history-skipped"
+    | "structured-tool-history-serialized";
+  provider?: ProviderId;
+  model?: string;
+  routeRole?: string;
+  nativePairs?: number;
+  droppedOrphans?: number;
+  injectedStubs?: number;
+  mergedUsers?: number;
+  skippedMalformedToolCalls?: number;
+  skippedUnsafeTurns?: number;
+  echoMessages?: number;
+  echoMissing?: number;
+  echoOversized?: number;
+  nativeReplayUnsafeTurns?: number;
+  reason?: StructuredToolHistoryDiagnosticReason;
+};
+
 export type SessionEvent =
   | {
       kind: "intent-routed";
@@ -368,6 +401,7 @@ export type SessionEvent =
   | SessionHistoryCompressedEvent
   | SessionCompressionStateEvent
   | SessionCompactionForkedEvent
+  | StructuredToolHistoryDiagnosticEvent
   | {
       kind: "provider-budget-exhausted";
       budget: string;
