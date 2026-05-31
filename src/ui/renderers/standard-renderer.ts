@@ -35,7 +35,7 @@ import type { ResolvedTokens, TokenGlyph } from "../../contracts/ui-tokens.js";
 import { measureTextWidth, measureVisibleWidth, padVisibleEnd, padVisibleStart, padVisibleAlign, openHorizontalFrame, truncateVisible } from "./layout.js";
 import type { UiLocale } from "../../ui/cli-ui-copy.js";
 import { chromeCopy } from "../../ui/cli-ui-copy.js";
-import { isolateLtr, isolateRtl } from "../../ui/bidi.js";
+import { isolateLtr, isolateRtl, LRI, PDI, RLI } from "../../ui/bidi.js";
 import type { TextDirection } from "../../contracts/ui.js";
 
 export interface StandardRendererOptions {
@@ -301,6 +301,19 @@ export class StandardRenderer {
   #localizedTechnical(value: string, locale: UiLocale, maxWidth: number): string {
     const truncated = truncateVisible(value, maxWidth);
     return locale === "ar" ? isolateLtr(truncated) : truncated;
+  }
+
+  #isRtl(): boolean {
+    return this.#locale === "ar";
+  }
+
+  #natural(value: string, maxWidth?: number): string {
+    const rendered = maxWidth === undefined ? value : truncateVisible(value, maxWidth);
+    return this.#isRtl() ? isolateRtl(rendered) : rendered;
+  }
+
+  #truncateVisibleStable(value: string, maxWidth: number): string {
+    return closeOpenBidiIsolates(truncateVisible(value, maxWidth));
   }
 
   /** Hero panel for startup screen. */
@@ -597,7 +610,7 @@ export class StandardRenderer {
         : this.#localizedNatural(option.label, direction, Math.max(1, contentWidth - 2));
       const styledOption = this.#primary(optionText);
       lines.push(direction === "rtl"
-        ? `  ${padVisibleStart(styledOption, Math.max(1, contentWidth - 2))} ${marker}`
+        ? `  ${marker} ${styledOption}`
         : `  ${marker} ${styledOption}`);
       if (option.description !== undefined) {
         const description = this.#muted(this.#localizedNatural(option.description, direction, Math.max(1, contentWidth - 4)));
@@ -943,8 +956,9 @@ export class StandardRenderer {
       .join("\n");
   }
 
-  #technical(value: string): string {
-    return this.#locale === "ar" ? isolateLtr(value) : value;
+  #technical(value: string, maxWidth?: number): string {
+    const rendered = maxWidth === undefined ? value : truncateVisible(value, maxWidth);
+    return this.#locale === "ar" ? isolateLtr(rendered) : rendered;
   }
 
   #slashDescription(commandName: string, fallback: string): string {
@@ -1342,15 +1356,21 @@ export class StandardRenderer {
   // ──────────────────────────────────────
 
   renderSessionStatusRail(vm: SessionStatusRailViewModel): string {
+    if (this.#isRtl()) {
+      return this.#renderSessionStatusRailRtl(vm);
+    }
+    return this.#renderSessionStatusRailLtr(vm);
+  }
+
+  #renderSessionStatusRailLtr(vm: SessionStatusRailViewModel): string {
     const eye = this.#useUnicode ? "𓂀" : "*";
-    const modelLabel = this.#locale === "ar" ? isolateLtr(vm.modelLabel) : vm.modelLabel;
+    const modelLabel = vm.modelLabel;
     const parts: string[] = [`${this.#brand(eye)}  ${this.#brand(this.#bold(modelLabel))}`];
 
     if (vm.contextUsage !== undefined) {
       const filled = formatContextCount(vm.contextUsage.filled);
       const total = formatContextCount(vm.contextUsage.total);
-      const contextValue = this.#locale === "ar" ? isolateLtr(`${filled}/${total}`) : `${filled}/${total}`;
-      parts.push(`${this.#copy.context} ${contextValue}`);
+      parts.push(`${this.#copy.context} ${filled}/${total}`);
       parts.push(this.#contextBeads(vm.contextUsage.filled, vm.contextUsage.total));
     }
 
@@ -1367,15 +1387,54 @@ export class StandardRenderer {
     if (vm.showTurnState !== false) {
       parts.push(this.#turnStateLabel(vm.turnState));
     }
-    return truncateVisible(parts.join(" | "), this.#capabilities.terminalWidth);
+    return this.#truncateVisibleStable(parts.join(" | "), this.#capabilities.terminalWidth);
+  }
+
+  #renderSessionStatusRailRtl(vm: SessionStatusRailViewModel): string {
+    const eye = this.#useUnicode ? "𓂀" : "*";
+    const parts: string[] = [];
+
+    if (vm.showTurnState !== false) {
+      parts.push(this.#turnStateLabel(vm.turnState));
+    }
+
+    if (vm.sessionElapsedMs !== undefined) {
+      const glyph = this.#useUnicode ? "◷" : "session";
+      parts.push(`${glyph} ${formatRailDuration(vm.sessionElapsedMs)}`);
+    }
+
+    if (vm.currentTurnSeconds !== undefined) {
+      const glyph = this.#useUnicode ? "⧖" : "turn";
+      parts.push(`${glyph} ${formatRailDuration(vm.currentTurnSeconds * 1000)}`);
+    }
+
+    if (vm.contextUsage !== undefined) {
+      const filled = formatContextCount(vm.contextUsage.filled);
+      const total = formatContextCount(vm.contextUsage.total);
+      parts.push(this.#contextBeads(vm.contextUsage.filled, vm.contextUsage.total));
+      parts.push(`${isolateLtr(`${filled}/${total}`)} ${this.#copy.context}`);
+    }
+
+    parts.push(`${this.#brand(this.#bold(isolateLtr(vm.modelLabel)))}  ${this.#brand(eye)}`);
+    return this.#truncateVisibleStable(parts.join(" | "), this.#capabilities.terminalWidth);
   }
 
   renderShortcutHintRail(vm: ShortcutHintRailViewModel): string {
     const prompt = this.#action(this.#glyph("prompt"));
     const text = vm.hints.length === 0
       ? this.#copy.shortcuts
-      : vm.hints.map((hint) => hint.key.length === 0 ? hint.description : `${hint.key} ${hint.description}`).join(" · ");
-    return truncateVisible(`${prompt} ${text}`, this.#capabilities.terminalWidth);
+      : vm.hints.map((hint) => hint.key.length === 0 ? hint.description : `${this.#technical(hint.key)} ${hint.description}`).join(" · ");
+    if (!this.#isRtl()) {
+      return truncateVisible(`${prompt} ${text}`, this.#capabilities.terminalWidth);
+    }
+
+    const prefix = `${prompt} `;
+    const prefixWidth = measureVisibleWidth(prefix);
+    if (prefixWidth >= this.#capabilities.terminalWidth) {
+      return this.#truncateVisibleStable(prefix, this.#capabilities.terminalWidth);
+    }
+    const textWidth = this.#capabilities.terminalWidth - prefixWidth;
+    return `${prefix}${this.#natural(closeOpenBidiIsolates(truncateVisible(text, textWidth)))}`;
   }
 
   renderUserPromptRail(vm: UserPromptRailViewModel): string {
@@ -1513,6 +1572,18 @@ function visibleBreakIndex(value: string, maxWidth: number): number {
   }
 
   return value.length;
+}
+
+function closeOpenBidiIsolates(value: string): string {
+  let openIsolates = 0;
+  for (const char of value) {
+    if (char === LRI || char === RLI) {
+      openIsolates += 1;
+    } else if (char === PDI && openIsolates > 0) {
+      openIsolates -= 1;
+    }
+  }
+  return openIsolates === 0 ? value : `${value}${PDI.repeat(openIsolates)}`;
 }
 
 function boundedFileChangePreviewLines(

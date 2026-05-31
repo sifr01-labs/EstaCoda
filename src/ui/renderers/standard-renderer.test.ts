@@ -37,7 +37,7 @@ import {
   slashMenuOption,
 } from "../view-models/builders.js";
 import { StandardRenderer } from "./standard-renderer.js";
-import { isolateLtr, isolateRtl } from "../bidi.js";
+import { isolateLtr, isolateRtl, LRI, PDI, RLI } from "../bidi.js";
 import { measureVisibleWidth, stripAnsi } from "./layout.js";
 
 function fullCaps(): TerminalCapabilities {
@@ -98,6 +98,19 @@ function renderer(theme: "light" | "dark", caps: TerminalCapabilities) {
 
 function assertNoAnsi(text: string): void {
   expect(text).not.toMatch(/\x1b\[/);
+}
+
+function expectBalancedBidiIsolates(text: string): void {
+  let depth = 0;
+  for (const char of text) {
+    if (char === LRI || char === RLI) {
+      depth += 1;
+    } else if (char === PDI) {
+      depth -= 1;
+    }
+    expect(depth).toBeGreaterThanOrEqual(0);
+  }
+  expect(depth).toBe(0);
 }
 
 function hasAnsi(text: string): boolean {
@@ -485,8 +498,10 @@ describe("StandardRenderer — dark theme", () => {
       direction: "rtl",
     }));
 
-    expect(stripAnsi(out)).toContain(isolateRtl("الثقة بمساحة العمل  𓂀"));
-    expect(stripAnsi(out)).toContain(`${isolateRtl("ثق بمساحة العمل")} `);
+    const plain = stripAnsi(out);
+    expect(plain).toContain(isolateRtl("الثقة بمساحة العمل  𓂀"));
+    expect(plain).toContain(`▸ ${isolateRtl("ثق بمساحة العمل")}`);
+    expect(plain).not.toContain(`${isolateRtl("ثق بمساحة العمل")} ▸`);
     expect(out).toContain(isolateLtr("/workspace"));
     expect(out).toContain(isolateLtr("KIMI_API_KEY"));
     expect(out).toContain(isolateLtr("kimi-k2"));
@@ -1487,6 +1502,54 @@ describe("StandardRenderer — prompt chrome rails", () => {
     expect(status).toContain("\u062e\u0627\u0645\u0644");
     expect(shortcuts).toContain("\u2066/help\u2069");
     expect(shortcuts).toContain("\u2066Ctrl+C\u2069");
+  });
+
+  it("renders Arabic session status rail in RTL-friendly order", () => {
+    const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: fullCaps(), locale: "ar" });
+    const out = stripAnsi(r.render(buildSessionStatusRailViewModel({
+      modelLabel: "kimi-k2.6",
+      turnState: "idle",
+      contextUsage: { filled: 0, total: 262000 },
+      sessionElapsedMs: 251000,
+    })));
+
+    expect(out).toContain(`خامل | ◷ 4m 11s | ·········· 0% | ${isolateLtr("0/262k")} السياق | ${isolateLtr("kimi-k2.6")}  𓂀`);
+    expect(out.indexOf("خامل")).toBeLessThan(out.indexOf("◷ 4m 11s"));
+    expect(out.indexOf("◷ 4m 11s")).toBeLessThan(out.indexOf(isolateLtr("0/262k")));
+    expect(out.indexOf(isolateLtr("0/262k"))).toBeLessThan(out.indexOf(isolateLtr("kimi-k2.6")));
+    expect(measureVisibleWidth(out)).toBeLessThanOrEqual(fullCaps().terminalWidth);
+    expect(out.split("\n")).toHaveLength(1);
+  });
+
+  it("wraps Arabic shortcut rail text while isolating command tokens", () => {
+    const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: fullCaps(), locale: "ar" });
+    const out = stripAnsi(r.render(buildShortcutHintRailViewModel({ hints: [] })));
+
+    expect(out).toContain(isolateLtr("/help"));
+    expect(out).toContain(isolateLtr("Ctrl+C"));
+    expect(out).toContain("خروج");
+    expect(out).toContain("\u2067");
+    expect(out).toContain("\u2069");
+    expect(out.split("\n")).toHaveLength(1);
+  });
+
+  it("keeps truncated Arabic prompt rails bidi-balanced", () => {
+    const caps = { ...fullCaps(), terminalWidth: 48 };
+    const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: caps, locale: "ar" });
+    const status = stripAnsi(r.render(buildSessionStatusRailViewModel({
+      modelLabel: "openrouter/kimi-k2.6-with-a-very-long-route-name",
+      turnState: "idle",
+      contextUsage: { filled: 98765, total: 128000 },
+      sessionElapsedMs: 251000,
+    })));
+    const shortcuts = stripAnsi(r.render(buildShortcutHintRailViewModel({ hints: [] })));
+
+    for (const out of [status, shortcuts]) {
+      expect(out.split("\n")).toHaveLength(1);
+      expect(measureVisibleWidth(out)).toBeLessThanOrEqual(caps.terminalWidth);
+      expect(out).toContain("...");
+      expectBalancedBidiIsolates(out);
+    }
   });
 
   it("renders user prompt rail with Unicode bullet and horizontal rule", () => {

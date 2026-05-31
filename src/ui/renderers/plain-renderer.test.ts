@@ -57,7 +57,7 @@ import {
   renderActiveTurnSpinner,
   renderFileChangePreview,
 } from "./plain-renderer.js";
-import { isolateLtr } from "../bidi.js";
+import { isolateLtr, isolateRtl } from "../bidi.js";
 
 function assertNoAnsi(text: string): void {
   expect(text).not.toMatch(/\x1b\[/);
@@ -1211,8 +1211,7 @@ describe("PlainRenderer — prompt chrome rails", () => {
       contextUsage: { filled: 1024, total: 128000 },
     });
     const out = renderSessionStatusRail(vm, "ar");
-    expect(out).toContain("السياق");
-    expect(out).toContain("خامل");
+    expect(out).toContain(`خامل | 1% | ${isolateLtr("1.0k/128k")} السياق | ${isolateLtr("openai/gpt-4.1")} *`);
     assertNoAnsi(out);
   });
 
@@ -1227,9 +1226,10 @@ describe("PlainRenderer — prompt chrome rails", () => {
     const vm = buildSessionStatusRailViewModel({ modelLabel: "deepseek-reasoner", turnState: "idle" });
     const status = renderSessionStatusRail(vm, "ar");
     const shortcuts = renderShortcutHintRail(buildShortcutHintRailViewModel({ hints: [] }), "ar");
-    expect(status).toContain("deepseek-reasoner");
+    expect(status).toContain(isolateLtr("deepseek-reasoner"));
     expect(shortcuts).toContain("\u2066/help\u2069");
     expect(shortcuts).toContain("\u2066Ctrl+C\u2069");
+    expect(shortcuts).toContain(isolateRtl(`${isolateLtr("/help")} · ${isolateLtr("/tools")} · ${isolateLtr("/model")} · ${isolateLtr("/status")} · ${isolateLtr("Ctrl+C")} خروج`));
   });
 
   it("renders user prompt rail with ASCII bullet and horizontal rule", () => {

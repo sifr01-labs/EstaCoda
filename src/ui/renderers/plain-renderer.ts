@@ -5,7 +5,7 @@
 import { measureTextWidth, measureVisibleWidth, padVisibleAlign, padVisibleEnd, truncateVisible } from "./layout.js";
 import type { UiLocale } from "../../ui/cli-ui-copy.js";
 import { chromeCopy } from "../../ui/cli-ui-copy.js";
-import { isolateLtr } from "../../ui/bidi.js";
+import { isolateLtr, isolateRtl } from "../../ui/bidi.js";
 import type {
   ActiveTurnSpinnerViewModel,
   ActivityTimelineViewModel,
@@ -854,6 +854,9 @@ export function renderConversationMessage(vm: ConversationMessageViewModel, loca
 
 export function renderSessionStatusRail(vm: SessionStatusRailViewModel, locale?: UiLocale): string {
   const copy = chromeCopy(locale ?? "en");
+  if (locale === "ar") {
+    return renderArabicSessionStatusRail(vm, copy);
+  }
   const parts: string[] = [`* ${vm.modelLabel}`];
 
   if (vm.contextUsage !== undefined) {
@@ -877,12 +880,41 @@ export function renderSessionStatusRail(vm: SessionStatusRailViewModel, locale?:
   return parts.join(" | ");
 }
 
+function renderArabicSessionStatusRail(
+  vm: SessionStatusRailViewModel,
+  copy: ReturnType<typeof chromeCopy>
+): string {
+  const parts: string[] = [];
+
+  if (vm.showTurnState !== false) {
+    parts.push(turnStateLabel(vm.turnState, copy));
+  }
+
+  if (vm.sessionElapsedMs !== undefined) {
+    parts.push(`session ${formatRailDuration(vm.sessionElapsedMs)}`);
+  }
+
+  if (vm.currentTurnSeconds !== undefined) {
+    parts.push(`turn ${formatRailDuration(vm.currentTurnSeconds * 1000)}`);
+  }
+
+  if (vm.contextUsage !== undefined) {
+    const filled = formatContextCount(vm.contextUsage.filled);
+    const total = formatContextCount(vm.contextUsage.total);
+    parts.push(`${vm.contextUsage.total > 0 ? Math.round((vm.contextUsage.filled / vm.contextUsage.total) * 100) : 0}%`);
+    parts.push(`${isolateLtr(`${filled}/${total}`)} ${copy.context}`);
+  }
+
+  parts.push(`${isolateLtr(vm.modelLabel)} *`);
+  return parts.join(" | ");
+}
+
 export function renderShortcutHintRail(vm: ShortcutHintRailViewModel, locale?: UiLocale): string {
   const copy = chromeCopy(locale ?? "en");
   const text = vm.hints.length === 0
     ? copy.shortcuts
-    : vm.hints.map((hint) => hint.key.length === 0 ? hint.description : `${hint.key} ${hint.description}`).join(" · ");
-  return `> ${text}`;
+    : vm.hints.map((hint) => hint.key.length === 0 ? hint.description : `${locale === "ar" ? isolateLtr(hint.key) : hint.key} ${hint.description}`).join(" · ");
+  return `> ${locale === "ar" ? isolateRtl(text) : text}`;
 }
 
 export function renderUserPromptRail(vm: UserPromptRailViewModel): string {
