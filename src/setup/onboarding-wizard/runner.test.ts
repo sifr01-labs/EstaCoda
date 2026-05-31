@@ -7,6 +7,7 @@ import type { Prompt } from "../../cli/readline-prompt.js";
 import type { SelectPromptInput } from "../../cli/interactive-select.js";
 import type { ProviderId, ProviderApiMode, ProviderAuthMethod } from "../../contracts/provider.js";
 import { resolveSetupCopy } from "../setup-copy.js";
+import { isolateLtr } from "../../ui/bidi.js";
 import { createReviewedSetupApplyExecutor } from "../review/apply-executor.js";
 import { runFirstRunSetup } from "./runner.js";
 import { promptModelCandidate, promptProviderCandidate } from "../config-editor/prompts.js";
@@ -1055,11 +1056,20 @@ describe("runFirstRunSetup", () => {
     expect(result.selections.language).toBe("ar");
     expect(result.selections.interfaceFlavor).toBe("arabic-light");
     expect(result.selections.activityLabels).toBe("ar");
+    const selectedWorkspaceRoot = result.selections.workspaceRoot;
+    expect(selectedWorkspaceRoot).toBeDefined();
+    if (selectedWorkspaceRoot === undefined) {
+      throw new Error("Expected onboarding to select a workspace root.");
+    }
     expect(seenOptions[resolveSetupCopy("ar", "onboarding.summary.confirmTitle")]).toEqual([
       resolveSetupCopy("ar", "onboarding.summary.confirmAction"),
       resolveSetupCopy("ar", "onboarding.summary.cancelAction"),
     ]);
-    expect(rendered).toContain("Configuration summary");
+    expect(rendered).toContain("ملخص الإعداد");
+    expect(rendered).toContain(`مساحة العمل: ${isolateLtr(selectedWorkspaceRoot)} (موثوقة)`);
+    expect(rendered).toContain(`اللغة: ${isolateLtr("ar")}`);
+    expect(rendered).toContain("حالة بيانات الاعتماد: غير مهيأ");
+    expect(rendered).not.toContain("Configuration summary");
     expect(rendered).not.toContain(resolveSetupCopy("ar", "setupReview.title"));
     expect(rendered).not.toContain(resolveSetupCopy("ar", "setupReview.sections.securityMode"));
     expect(rendered).not.toContain("Files to write/update");

@@ -34,6 +34,7 @@ import {
   buildAssistantResponseViewModel,
   buildStartupDashboardViewModel,
   buildSessionStatusRailViewModel,
+  buildShortcutHintRailViewModel,
   buildUserPromptRailViewModel,
   buildToolActivityRailViewModel,
 } from "../ui/view-models/builders.js";
@@ -41,7 +42,7 @@ import { createSessionRenderer, type SessionRenderer } from "./session-renderer.
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
 import { PromptChromeController } from "./prompt-chrome-controller.js";
 import { BottomChromeController, type BottomChromeState } from "./bottom-chrome-controller.js";
-import type { SessionStatusRailViewModel, SlashMenuViewModel, ToolActivityRailEvent, ViewModel } from "../contracts/view-model.js";
+import type { SessionStatusRailViewModel, ShortcutHintRailViewModel, SlashMenuViewModel, ToolActivityRailEvent, ViewModel } from "../contracts/view-model.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import { measureVisibleWidth, wrapText } from "../ui/renderers/layout.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
@@ -460,7 +461,9 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     const startupVm = await buildSessionStartupViewModel(runtime);
     const startupText = renderer.render(startupVm);
     output.write(`${startupText}\n\n`);
-    output.write(`${chromeCopy(renderer.locale).startupPromptHint}\n\n`);
+    if (!bottomChrome.enabled) {
+      output.write(`${chromeCopy(renderer.locale).startupPromptHint}\n\n`);
+    }
 
     const promptPrefix = renderer.tokens.contract.branding.promptPrefix ?? `${renderer.tokens.contract.glyph.prompt} `;
     const useColor = renderer.capabilities.supportsColor && renderer.tokens.contract.behavior.allowAnsiColor;
@@ -482,10 +485,16 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     while (true) {
       let livePromptRows = 1;
       let readlineTransientLines: readonly string[] = [];
+      let currentInputLine = "";
+      const idleShortcutRail = (): ShortcutHintRailViewModel | undefined =>
+        bottomChrome.enabled && currentInputLine.length === 0 && pendingSlashCompletion === undefined
+          ? buildShortcutHintRailViewModel({ hints: [] })
+          : undefined;
       const idleBottomState = () => buildBottomChromeState({
         runtime,
         renderer,
         slashMenu: pendingSlashCompletion,
+        shortcutRail: idleShortcutRail(),
         contextUsage: latestContextUsage,
         timing: railTiming()
       });
@@ -533,6 +542,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           livePromptRows = rows;
         },
         onInputChange: (line) => {
+          currentInputLine = line;
           pendingSlashCompletion = line.startsWith("/")
             ? buildSlashCompletionViewModel(runtime, line)
             : undefined;
@@ -2575,6 +2585,7 @@ function buildBottomChromeState(input: {
   runtime: Runtime;
   renderer: SessionRenderer;
   slashMenu?: SlashMenuViewModel;
+  shortcutRail?: ShortcutHintRailViewModel;
   contextUsage?: ContextUsageSnapshot;
   timing?: StatusRailTiming;
 }): BottomChromeState {
@@ -2589,6 +2600,7 @@ function buildBottomChromeState(input: {
   return {
     statusRail: chromeState.statusRail,
     activeSpinner: chromeState.activeSpinner,
+    shortcutRail: input.slashMenu === undefined ? input.shortcutRail : undefined,
     slashMenu: chromeState.slashMenu,
   };
 }

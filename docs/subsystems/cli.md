@@ -174,7 +174,9 @@ The idle CLI prompt is real readline input. `ReadlinePrompt` owns the input stre
 
 Bracketed paste is enabled only for TTY prompts that run through the paste interceptor. Multiline paste is made readline-safe by displaying a visible single-line marker in the prompt row, previewing the pasted text as multiline transient chrome above the prompt, and restoring real `\n` characters in the submitted answer. The returned prompt text is the intended user text, not the visible prompt marker. Secret prompts do not emit paste previews or live slash hints; pasted secret content must not be mirrored into transient chrome.
 
-Slash hints are live while idle input starts with `/`. The hint model is built from the current line before submit, rendered through the readline-aware bottom chrome path, and cleared when the line no longer starts with `/` or the prompt resolves. Submitted slash command behavior still uses the normal command registry and handler path.
+Shortcut hints are shown in managed bottom chrome while the idle input line is empty. They disappear as soon as the user starts typing. Slash hints take priority when idle input starts with `/`; the hint model is built from the current line before submit, rendered through the readline-aware bottom chrome path, and cleared when the line no longer starts with `/` or the prompt resolves. Submitted slash command behavior still uses the normal command registry and handler path. Plain, non-TTY, or non-bottom-chrome sessions keep the direct startup hint fallback.
+
+Arabic setup chrome is direction-aware for localized setup selectors, rails, and onboarding summaries. Raw setup string prompts remain a follow-up RTL surface; do not describe this as full runtime Arabic localization.
 
 After a normal message is submitted, the readline prompt is gone. The active turn shows status, timing, spinner, tool activity, approval/setup output, and transient command-lane messages; it does not show a fake read-only prompt box containing the submitted user text. The submitted prompt remains visible in the transcript rail/history.
 

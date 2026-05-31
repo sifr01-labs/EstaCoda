@@ -316,7 +316,7 @@ export async function runFirstRunSetup(
     trustStorePath: stateHome.trustJsonPath,
   });
   const reviewManifest = buildSetupReviewManifest([draftBundle]);
-  const summaryText = renderOnboardingWizardSummary(wizardState);
+  const summaryText = renderOnboardingWizardSummary(wizardState, language);
   write(options, `${summaryText}\n`);
 
   const reviewAccepted = await promptSetupChoice(promptContext, {

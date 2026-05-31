@@ -6,6 +6,7 @@ import {
   workspaceTrustStatusLabel,
 } from "./summary.js";
 import type { OnboardingWizardState } from "./state.js";
+import { isolateLtr } from "../../ui/bidi.js";
 
 describe("onboarding wizard summary", () => {
   it("renders a stable user-facing configuration summary", () => {
@@ -59,6 +60,58 @@ describe("onboarding wizard summary", () => {
     ].join("\n"));
   });
 
+  it("renders Arabic labels while keeping technical values stable", () => {
+    const state: OnboardingWizardState = {
+      interfacePreferences: {
+        language: "ar",
+        flavor: "arabic-light",
+        activityLabels: "ar",
+      },
+      workspace: {
+        path: "/tmp/example-workspace",
+        trustStatus: "trusted",
+      },
+      primaryRoute: {
+        provider: "kimi",
+        model: "kimi-k2.6",
+      },
+      credential: {
+        status: "existing_detected",
+      },
+      securityMode: "adaptive",
+      agentEvolution: "suggest",
+      optionalCapabilities: {
+        channels: {
+          telegram: "not_set",
+        },
+        voice: {
+          stt: "configured",
+          tts: "not_set",
+        },
+        browser: "configured",
+      },
+    };
+
+    const rendered = renderOnboardingWizardSummary(state, "ar");
+
+    expect(rendered).toContain("ملخص الإعداد");
+    expect(rendered).toContain(`مساحة العمل: ${isolateLtr("/tmp/example-workspace")} (موثوقة)`);
+    expect(rendered).toContain(`اللغة: ${isolateLtr("ar")}`);
+    expect(rendered).toContain(`أسلوب الواجهة: ${isolateLtr("arabic-light")}`);
+    expect(rendered).toContain(`المزوّد الأساسي: ${isolateLtr("kimi")}`);
+    expect(rendered).toContain(`النموذج: ${isolateLtr("kimi-k2.6")}`);
+    expect(rendered).toContain("حالة بيانات الاعتماد: تم العثور على بيانات اعتماد موجودة");
+    expect(rendered).toContain(`وضع الأمان: ${isolateLtr("adaptive")}`);
+    expect(rendered).toContain(`تطوّر الوكيل: ${isolateLtr("suggest")}`);
+    expect(rendered).toContain("القدرات الاختيارية:");
+    expect(rendered).toContain(`القنوات / ${isolateLtr("Telegram")}: غير مهيأ`);
+    expect(rendered).toContain(`الصوت ${isolateLtr("STT")}: مهيأ`);
+    expect(rendered).toContain(`الصوت ${isolateLtr("TTS")}: غير مهيأ`);
+    expect(rendered).toContain("المتصفح: مهيأ");
+    expect(rendered).not.toContain("Configuration summary");
+    expect(rendered).not.toContain("Credential status");
+  });
+
   it("renders unset values without inventing readiness", () => {
     expect(renderOnboardingWizardSummary({})).toBe([
       "Configuration summary",
@@ -84,6 +137,9 @@ describe("onboarding wizard summary", () => {
     expect(credentialSummaryStatusLabel("existing_detected")).toBe("Existing credential detected");
     expect(credentialSummaryStatusLabel("new_pending")).toBe("New credential pending");
     expect(credentialSummaryStatusLabel(undefined)).toBe("Not set");
+    expect(credentialSummaryStatusLabel("not_set", "ar")).toBe("غير مهيأ");
+    expect(credentialSummaryStatusLabel("existing_detected", "ar")).toBe("تم العثور على بيانات اعتماد موجودة");
+    expect(credentialSummaryStatusLabel("new_pending", "ar")).toBe("بيانات اعتماد جديدة بانتظار الحفظ");
   });
 
   it("does not render extra credential metadata if an unsafe caller passes it", () => {
@@ -117,5 +173,9 @@ describe("onboarding wizard summary", () => {
     expect(workspaceTrustStatusLabel("trusted")).toBe("trusted");
     expect(workspaceTrustStatusLabel("untrusted")).toBe("untrusted");
     expect(workspaceTrustStatusLabel(undefined)).toBe("untrusted");
+    expect(optionalCapabilityStatusLabel("configured", "ar")).toBe("مهيأ");
+    expect(optionalCapabilityStatusLabel("not_set", "ar")).toBe("غير مهيأ");
+    expect(workspaceTrustStatusLabel("trusted", "ar")).toBe("موثوقة");
+    expect(workspaceTrustStatusLabel("untrusted", "ar")).toBe("غير موثوقة");
   });
 });

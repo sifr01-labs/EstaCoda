@@ -131,6 +131,20 @@ Inside an active session, slash commands provide operational controls. This is a
 
 ---
 
+## Readline Prompt And Active-Turn Controls
+
+The idle CLI prompt is real `readline` input. `ReadlinePrompt` owns the input stream while the user is composing a normal message, and the bottom chrome is redrawn around that prompt instead of replacing it with an application-owned text box.
+
+Managed bottom chrome shows shortcut hints while the input line is empty. The hints disappear as soon as the user starts typing. Slash hints take priority when the line starts with `/`, and they clear when the line no longer starts with `/` or the prompt resolves. Plain, non-TTY, or non-bottom-chrome sessions keep the direct startup hint fallback.
+
+Bracketed paste is enabled only for TTY prompts that run through the paste interceptor. Multiline paste is made readline-safe by displaying a visible single-line marker in the prompt row, previewing the pasted text as multiline transient chrome above the prompt, and restoring real `\n` characters in the submitted answer. Secret prompts do not emit paste previews, shortcut hints, or live slash hints.
+
+Arabic setup chrome is direction-aware for localized setup selectors, rails, and onboarding summaries. Raw setup string prompts remain a follow-up RTL surface; this is not full runtime Arabic localization.
+
+After a normal message is submitted, the readline prompt is gone. The active turn shows status, timing, spinner, tool activity, approval/setup output, and transient command-lane messages. It does not show a fake read-only prompt box containing the submitted user text.
+
+---
+
 ## Approval Prompts
 
 When a tool execution reaches an approval gate, the CLI accepts these bare answers:

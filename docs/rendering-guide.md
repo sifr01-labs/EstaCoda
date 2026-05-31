@@ -242,17 +242,19 @@ pnpm run test -- --update
 
 When readline owns the cursor, do not write ad hoc terminal output around it. The prompt row is not a free output line; readline may repaint it after every keypress, paste, resize, or submit.
 
-Use `BottomChromeController.updateManagedRegionAboveReadline({ state, transientLines, promptLineCount })` for live prompt-adjacent UI. This is the path for live slash hints, paste preview lines, and readline ticker updates. The call must include the current `promptLineCount`; wrapped prompts occupy more than one terminal row.
+Use `BottomChromeController.updateManagedRegionAboveReadline({ state, transientLines, promptLineCount })` for live prompt-adjacent UI. This is the path for idle shortcut hints, live slash hints, paste preview lines, and readline ticker updates. The call must include the current `promptLineCount`; wrapped prompts occupy more than one terminal row.
 
 Operational rules:
 
 - Do not mix `updateTransientLines()` and `updateStateAboveReadline()` manually for live readline UI.
 - Account for managed-region line-count growth and shrink.
-- Clear stale managed lines when slash hints, paste previews, or transient messages disappear.
+- Show shortcut hints only while the editable line is empty; hide them on non-empty input and let slash hints take priority for `/`.
+- Clear stale managed lines when shortcut hints, slash hints, paste previews, or transient messages disappear.
 - Treat terminal width as mutable; prompt wrapping can change while the user is editing.
 - Never mirror secret prompt content into paste previews, transient lines, status rails, logs, or debug chrome.
 - Keep active-turn command-lane rendering in bottom chrome transient/status paths. Do not write command buffers directly to the terminal.
 - Do not reintroduce a fake prompt box after submit. The submitted user text belongs in transcript/history rendering; active-turn chrome is status and control chrome.
+- Arabic setup chrome is direction-aware for setup selectors, rails, and onboarding summaries. Raw setup string prompts are still a follow-up RTL surface; do not claim full runtime Arabic localization.
 
 Cursor-control changes need real terminal smoke in addition to unit tests. Tests can prove line accounting for known streams; a real terminal catches emulator behavior around cursor save/restore, wrapping, scrollback, and bracketed paste mode.
 
