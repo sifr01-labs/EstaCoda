@@ -23,6 +23,7 @@ export interface CliUiChromeCopy {
 
   // Shortcut rail (Pass 7+)
   readonly shortcuts: string;
+  readonly inputPlaceholder: string;
 
   // Active turn spinner (Pass 9+)
   readonly thinking: string;
@@ -115,6 +116,7 @@ const en: CliUiChromeCopy = {
   error: "error",
 
   shortcuts: "/help · /tools · /model · /status · Ctrl+C exit",
+  inputPlaceholder: "/help · /tools · /model · /status · Ctrl+C exit",
 
   thinking: "contemplating",
   routing: "plotting",
@@ -202,6 +204,7 @@ const ar: CliUiChromeCopy = {
 
   // Technical tokens inside Arabic shortcuts must stay LTR-stable
   shortcuts: `${isolateLtr("/help")} · ${isolateLtr("/tools")} · ${isolateLtr("/model")} · ${isolateLtr("/status")} · ${isolateLtr("Ctrl+C")} خروج`,
+  inputPlaceholder: `${isolateLtr("/help")} · ${isolateLtr("/tools")} · ${isolateLtr("/model")} · ${isolateLtr("/status")} · ${isolateLtr("Ctrl+C")} خروج`,
 
   thinking: "بفكر",
   routing: "بحدد",

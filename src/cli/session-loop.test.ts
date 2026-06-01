@@ -545,6 +545,7 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     const outputChunks: string[] = [];
     const runtime = createMockRuntime();
     let promptIndex = 0;
+    let promptOptions: PromptOptions | undefined;
 
     await runSessionLoop({
       runtime,
@@ -558,7 +559,8 @@ describe("runSessionLoop — user prompt rail behavior", () => {
       } as unknown as NodeJS.WritableStream,
       capabilities: interactiveCaps(),
       prompt: Object.assign(
-        async () => {
+        async (_question: string, options?: PromptOptions) => {
+          promptOptions = options;
           const values = ["/exit"];
           return values[promptIndex++] ?? "/exit";
         },
@@ -569,8 +571,8 @@ describe("runSessionLoop — user prompt rail behavior", () => {
 
     const rendered = outputChunks.join("");
     expect(rendered).not.toContain("Type a message.");
-    expect(rendered).toContain("/help");
-    expect(rendered).toContain("Ctrl+C exit");
+    expect(promptOptions?.placeholder).toContain("/help");
+    expect(promptOptions?.placeholder).toContain("Ctrl+C exit");
     expect(rendered).not.toContain("/exit");
     expect(rendered).not.toContain("اكتب رسالة.");
   });
@@ -683,6 +685,7 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     const outputChunks: string[] = [];
     const runtime = createMockRuntime();
     let promptIndex = 0;
+    let promptOptions: PromptOptions | undefined;
 
     await runSessionLoop({
       runtime,
@@ -702,7 +705,8 @@ describe("runSessionLoop — user prompt rail behavior", () => {
         terminalWidth: 80,
       }),
       prompt: Object.assign(
-        async () => {
+        async (_question: string, options?: PromptOptions) => {
+          promptOptions = options;
           const values = ["/exit"];
           return values[promptIndex++] ?? "/exit";
         },
@@ -713,8 +717,8 @@ describe("runSessionLoop — user prompt rail behavior", () => {
 
     const rendered = outputChunks.join("");
     expect(rendered).not.toContain("اكتب رسالة.");
-    expect(rendered).toContain(isolateLtr("/help"));
-    expect(rendered).toContain(isolateLtr("Ctrl+C"));
+    expect(promptOptions?.placeholder).toContain(isolateLtr("/help"));
+    expect(promptOptions?.placeholder).toContain(isolateLtr("Ctrl+C"));
     expect(rendered).not.toContain(isolateLtr("/exit"));
     expect(rendered).not.toContain("𓂀");
     expect(rendered).not.toContain("╭");
@@ -1213,11 +1217,12 @@ describe("runSessionLoop — active turn spinner", () => {
 
     const rendered = outputChunks.join("");
     const userRailIndex = rendered.indexOf("▸ this is a delib...");
-    const chromeClearIndex = rendered.lastIndexOf("\x1b[5A\x1b[2K\x1b[1B\x1b[2K\x1b[1B\x1b[2K\x1b[3B", userRailIndex);
+    const beforeUserRail = rendered.slice(0, userRailIndex);
+    const chromeClearIndex = beforeUserRail.search(/\x1b\[\d+A\x1b\[2K/u);
     const echoClearIndex = rendered.lastIndexOf("\x1b[1A\x1b[2K\x1b[1A\x1b[2K\r", userRailIndex);
     expect(chromeClearIndex).toBeGreaterThan(-1);
-    expect(chromeClearIndex).toBeLessThan(echoClearIndex);
     expect(echoClearIndex).toBeGreaterThan(-1);
+    expect(chromeClearIndex).toBeLessThan(echoClearIndex);
     expect(echoClearIndex).toBeLessThan(userRailIndex);
   });
 
@@ -2141,7 +2146,7 @@ describe("runSessionLoop — active turn spinner", () => {
     resolvePrompt("/exit");
     await loop;
 
-    expect(outputChunks.some((chunk) => chunk.includes("\x1b7\x1b[5A"))).toBe(true);
+    expect(outputChunks.some((chunk) => /\x1b7\x1b\[\d+A/u.test(chunk))).toBe(true);
   });
 
   it("renders slash completion chrome while typing idle input", async () => {
@@ -2231,8 +2236,10 @@ describe("runSessionLoop — active turn spinner", () => {
     const outputChunks: string[] = [];
     let resolvePrompt: ((value: string) => void) | undefined;
     let promptOptions: PromptOptions | undefined;
+    let promptQuestion = "";
     const prompt = Object.assign(
-      vi.fn(async (_question: string, options?: PromptOptions) => {
+      vi.fn(async (question: string, options?: PromptOptions) => {
+        promptQuestion = stripAnsi(question);
         promptOptions = options;
         return await new Promise<string>((resolve) => {
           resolvePrompt = resolve;
@@ -2261,7 +2268,10 @@ describe("runSessionLoop — active turn spinner", () => {
     }
 
     const initial = stripAnsi(outputChunks.join(""));
-    expect(initial).toContain("/help · /tools · /model · /status · Ctrl+C exit");
+    expect(promptQuestion).toBe("> ");
+    expect(promptOptions.placeholder).toContain("/help · /tools · /model · /status · Ctrl+C exit");
+    expect(promptOptions.placeholder).not.toContain("›");
+    expect(initial).not.toContain("/help · /tools · /model · /status · Ctrl+C exit");
     expect(initial).not.toContain("Type a message.");
 
     const afterInitial = outputChunks.length;
@@ -2280,7 +2290,8 @@ describe("runSessionLoop — active turn spinner", () => {
     const afterSlashIndex = outputChunks.length;
     promptOptions.onInputChange?.("");
     const afterEmpty = stripAnsi(outputChunks.slice(afterSlashIndex).join(""));
-    expect(afterEmpty).toContain("/help · /tools · /model · /status · Ctrl+C exit");
+    expect(promptOptions.placeholder).toContain("/help · /tools · /model · /status · Ctrl+C exit");
+    expect(afterEmpty).not.toContain("/help · /tools · /model · /status · Ctrl+C exit");
     expect(afterEmpty).not.toContain("Show command help");
 
     resolvePrompt("/exit");

@@ -1,4 +1,4 @@
-import { Readable, Writable } from "node:stream";
+import { PassThrough, Readable, Writable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { promptUiContextForLocale } from "../contracts/ui.js";
 import { isolateLtr } from "../ui/bidi.js";
@@ -62,6 +62,23 @@ describe("readline prompt bracketed paste", () => {
     });
 
     await expect(prompt("> ")).resolves.toBe("hello world");
+  });
+
+  it("renders idle placeholder text and clears it when typing starts", async () => {
+    const output = captureOutput({ isTTY: true });
+    const input = ttyInteractiveInput();
+    const prompt = createReadlinePrompt({
+      input,
+      output,
+    });
+
+    const answer = prompt("> ", { placeholder: "/help", onRowsChange: () => undefined });
+    await waitFor(() => output.text().includes("/help\x1b[5D"));
+    input.write("h\n");
+    await expect(answer).resolves.toBe("h");
+
+    expect(output.text()).toContain("/help\x1b[5D");
+    expect(output.text()).toContain("\x1b[0K");
   });
 
   it("preserves manually typed paste marker text", async () => {
@@ -160,4 +177,34 @@ function ttyInput(chunks: string[]): Readable {
       },
     }
   );
+}
+
+function ttyInteractiveInput(): PassThrough & {
+  isTTY: true;
+  isRaw: boolean;
+  setRawMode(mode: boolean): unknown;
+} {
+  let isRaw = false;
+  const input = Object.assign(
+    new PassThrough(),
+    {
+      isTTY: true as const,
+      get isRaw() {
+        return isRaw;
+      },
+      setRawMode(mode: boolean) {
+        isRaw = mode;
+        return input;
+      },
+    }
+  );
+  return input;
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error("Timed out waiting for condition");
 }

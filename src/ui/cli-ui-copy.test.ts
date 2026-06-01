@@ -20,6 +20,9 @@ describe("chromeCopy — en", () => {
   it("returns English shortcuts with no isolation marks", () => {
     const copy = chromeCopy("en");
     expect(copy.shortcuts).toBe("/help \u00b7 /tools \u00b7 /model \u00b7 /status \u00b7 Ctrl+C exit");
+    expect(copy.inputPlaceholder).toBe(copy.shortcuts);
+    expect(copy.inputPlaceholder).not.toContain(">");
+    expect(copy.inputPlaceholder).not.toContain("\u203a");
     expect(copy.shortcuts).not.toContain(LRI);
   });
 
@@ -57,6 +60,9 @@ describe("chromeCopy — ar", () => {
     expect(copy.shortcuts).toContain(isolateLtr("/model"));
     expect(copy.shortcuts).toContain(isolateLtr("/status"));
     expect(copy.shortcuts).toContain(isolateLtr("Ctrl+C"));
+    expect(copy.inputPlaceholder).toBe(copy.shortcuts);
+    expect(copy.inputPlaceholder).not.toContain(">");
+    expect(copy.inputPlaceholder).not.toContain("\u203a");
   });
 
   it("preserves Arabic text around isolated tokens", () => {

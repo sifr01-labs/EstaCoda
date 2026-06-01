@@ -17,6 +17,7 @@ export interface BottomChromeState {
   readonly shortcutRail?: ShortcutHintRailViewModel;
   readonly activeSpinner?: ActiveTurnSpinnerViewModel;
   readonly slashMenu?: SlashMenuViewModel;
+  readonly slashMenuMinRows?: number;
 }
 
 export interface BottomChromeControllerOptions {
@@ -416,7 +417,12 @@ export class BottomChromeController {
       lines.push(...this.#boundedLines(this.#renderViewModel(this.#currentState.shortcutRail), width));
     }
     if (this.#currentState.slashMenu !== undefined) {
-      lines.push(...this.#boundedLines(this.#renderViewModel(this.#currentState.slashMenu), width));
+      const slashLines = this.#boundedLines(this.#renderViewModel(this.#currentState.slashMenu), width);
+      lines.push(...slashLines);
+      const minRows = Math.max(0, Math.floor(this.#currentState.slashMenuMinRows ?? 0));
+      for (let index = slashLines.length; index < minRows; index += 1) {
+        lines.push("");
+      }
     }
 
     if (

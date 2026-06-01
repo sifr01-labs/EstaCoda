@@ -34,7 +34,6 @@ import {
   buildAssistantResponseViewModel,
   buildStartupDashboardViewModel,
   buildSessionStatusRailViewModel,
-  buildShortcutHintRailViewModel,
   buildUserPromptRailViewModel,
   buildToolActivityRailViewModel,
 } from "../ui/view-models/builders.js";
@@ -44,7 +43,7 @@ import { PromptChromeController } from "./prompt-chrome-controller.js";
 import { BottomChromeController, type BottomChromeState } from "./bottom-chrome-controller.js";
 import type { SessionStatusRailViewModel, ShortcutHintRailViewModel, SlashMenuViewModel, ToolActivityRailEvent, ViewModel } from "../contracts/view-model.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
-import { measureVisibleWidth, wrapText } from "../ui/renderers/layout.js";
+import { measureVisibleWidth, truncateVisible, wrapText } from "../ui/renderers/layout.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
 import { promptUiContextForLocale } from "../contracts/ui.js";
 import { resolveHomeDir } from "../config/home-dir.js";
@@ -82,6 +81,8 @@ export type SessionLoopOptions = {
     playbackCommandExists?: (command: string) => Promise<boolean>;
   };
 };
+
+const PROMPT_REGION_SLASH_PANEL_ROWS = 10;
 
 type ContextUsageSnapshot = NonNullable<SessionStatusRailViewModel["contextUsage"]>;
 type StatusRailTimerMode = "idle" | "active-turn" | "last-turn";
@@ -390,15 +391,14 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       let livePromptRows = 1;
       let readlineTransientLines: readonly string[] = [];
       let currentInputLine = "";
-      const idleShortcutRail = (): ShortcutHintRailViewModel | undefined =>
-        bottomChrome.enabled && currentInputLine.length === 0 && pendingSlashCompletion === undefined
-          ? buildShortcutHintRailViewModel({ hints: [] })
-          : undefined;
+      const inputPlaceholder = bottomChrome.enabled
+        ? promptInputPlaceholder(renderer, promptPrefix, useColor, termWidth)
+        : undefined;
       const idleBottomState = () => buildBottomChromeState({
         runtime,
         renderer,
         slashMenu: pendingSlashCompletion,
-        shortcutRail: idleShortcutRail(),
+        slashMenuMinRows: pendingSlashCompletion === undefined ? undefined : PROMPT_REGION_SLASH_PANEL_ROWS,
         contextUsage: latestContextUsage,
         timing: railTiming()
       });
@@ -435,6 +435,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         homeDir: options.homeDir,
         workspaceRoot: options.workspaceRoot,
         cliVoice: options.cliVoice,
+        inputPlaceholder,
         onPromptResolved: () => {
           if (bottomChrome.enabled) {
             bottomChrome.stopTicker();
@@ -448,7 +449,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         onInputChange: (line) => {
           currentInputLine = line;
           pendingSlashCompletion = line.startsWith("/")
-            ? buildSlashCompletionViewModel(runtime, line)
+            ? buildPromptRegionSlashCompletionViewModel(runtime, line)
             : undefined;
           redrawIdleReadlineChrome();
         },
@@ -489,7 +490,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           resolvedSubmittedCommand === undefined ||
           !isImplementedSlashCommand(resolvedSubmittedCommand.name)
         ) {
-          pendingSlashCompletion = buildSlashCompletionViewModel(runtime, text);
+          pendingSlashCompletion = buildPromptRegionSlashCompletionViewModel(runtime, text);
           continue;
         }
 
@@ -905,6 +906,7 @@ async function readNextCliInput(input: {
   homeDir?: string;
   workspaceRoot?: string;
   cliVoice?: SessionLoopOptions["cliVoice"];
+  inputPlaceholder?: string;
   onPromptResolved?: () => void;
   onPromptRowsChange?: (rows: number) => void;
   onInputChange?: (line: string) => void;
@@ -916,6 +918,7 @@ async function readNextCliInput(input: {
       onRowsChange: input.onPromptRowsChange,
       onInputChange: input.onInputChange,
       onPastePreview: input.onPastePreview,
+      placeholder: input.inputPlaceholder,
     };
     const rawText = await input.prompt(echoedPromptPrefix, promptOptions);
     input.onPromptResolved?.();
@@ -2483,6 +2486,7 @@ function buildBottomChromeState(input: {
   runtime: Runtime;
   renderer: SessionRenderer;
   slashMenu?: SlashMenuViewModel;
+  slashMenuMinRows?: number;
   shortcutRail?: ShortcutHintRailViewModel;
   contextUsage?: ContextUsageSnapshot;
   timing?: StatusRailTiming;
@@ -2500,7 +2504,26 @@ function buildBottomChromeState(input: {
     activeSpinner: chromeState.activeSpinner,
     shortcutRail: input.slashMenu === undefined ? input.shortcutRail : undefined,
     slashMenu: chromeState.slashMenu,
+    slashMenuMinRows: input.slashMenuMinRows,
   };
+}
+
+function buildPromptRegionSlashCompletionViewModel(runtime: Runtime, line: string): SlashMenuViewModel {
+  return buildSlashCompletionViewModel(runtime, line, { limit: PROMPT_REGION_SLASH_PANEL_ROWS });
+}
+
+function promptInputPlaceholder(
+  renderer: SessionRenderer,
+  promptPrefix: string,
+  useColor: boolean,
+  terminalWidth: number
+): string {
+  const availableWidth = Math.max(0, terminalWidth - measureVisibleWidth(promptPrefix));
+  if (availableWidth <= 0) {
+    return "";
+  }
+  const text = truncateVisible(chromeCopy(renderer.locale).inputPlaceholder, availableWidth);
+  return colorPromptPlaceholder(text, renderer.tokens, useColor);
 }
 
 function currentTurnSecondsForTiming(timing: StatusRailTiming | undefined): number | undefined {
@@ -2541,6 +2564,11 @@ export function renderHorizontalRule(tokens: ResolvedTokens, useColor: boolean, 
 export function colorPromptPrefix(prefix: string, tokens: ResolvedTokens, useColor: boolean): string {
   if (!useColor) return prefix;
   return ansiColor(prefix, tokens.contract.palette.action);
+}
+
+export function colorPromptPlaceholder(value: string, tokens: ResolvedTokens, useColor: boolean): string {
+  if (!useColor) return value;
+  return ansiColor(value, tokens.contract.text.muted);
 }
 
 function ansiColor(text: string, hex: string): string {

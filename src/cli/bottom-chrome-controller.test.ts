@@ -282,6 +282,24 @@ describe("BottomChromeController", () => {
     ]);
   });
 
+  it("keeps slash completion panel height stable with fewer results", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("status") });
+
+    chunks.length = 0;
+    ctrl.updateManagedRegionAboveReadline({
+      state: { statusRail: status("status"), slashMenu: slashMenu(), slashMenuMinRows: 4 },
+      transientLines: [],
+      promptLineCount: 1,
+    });
+
+    const rendered = chunks.join("");
+    expect(rendered).toContain("/help Show command help");
+    expect(rendered).toContain(`\x1b[4L`);
+    expect(rendered).toContain(`\r${"─".repeat(40)}`);
+  });
+
   it("clears slash and transient readline chrome when the managed region shrinks", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream);
