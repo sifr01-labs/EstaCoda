@@ -58,12 +58,24 @@ const config: Config = {
     ],
   ],
 
+  themes: [
+    [
+      '@easyops-cn/docusaurus-search-local',
+      {
+        hashed: true,
+        language: ['en', 'ar'],
+        indexBlog: false,
+        docsRouteBasePath: '/',
+        highlightSearchTermsOnTargetPage: false,
+      },
+    ],
+  ],
+
   themeConfig: {
     colorMode: {
       defaultMode: 'light',
       respectPrefersColorScheme: true,
     },
-    // TODO: configure local search (e.g. @easyops-cn/docusaurus-search-local) once dependency friction is resolved
     navbar: {
       title: 'estacoda',
       logo: {

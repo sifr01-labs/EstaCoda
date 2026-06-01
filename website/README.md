@@ -6,7 +6,7 @@ This is the Docusaurus v3 documentation site for EstaCoda.
 
 ```bash
 cd website
-pnpm install
+pnpm install --ignore-workspace
 pnpm start
 ```
 
@@ -16,6 +16,7 @@ The dev server starts at `http://localhost:3000`.
 
 ```bash
 cd website
+pnpm install --ignore-workspace --frozen-lockfile
 pnpm build
 ```
 
@@ -49,4 +50,4 @@ pnpm build
 
 ## Replit Deployment
 
-See `REPLIT_DEPLOYMENT_NOTES.md` for Replit-specific instructions.
+See `DOCS_BUILDER_DEPLOYMENT_NOTES.md` for docs builder deployment instructions.
