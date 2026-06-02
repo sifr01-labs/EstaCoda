@@ -164,7 +164,8 @@ function selectedOutputLine<T>(
   const selectedValue = selectedOption === undefined
     ? locale === "ar" ? "خيار" : "option"
     : selectedOptionLabel(selectedOption.label, locale, selectedOption.technical === true);
-  return `${useAnsi ? bold(label) : label}: ${selectedValue}`;
+  const line = `${useAnsi ? bold(label) : label}: ${selectedValue}`;
+  return locale === "ar" ? isolateRtl(line) : line;
 }
 
 function selectedOptionLabel(value: string, locale: Locale, explicitTechnical: boolean): string {

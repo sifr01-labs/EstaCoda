@@ -515,6 +515,8 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "setupEditor.prompt.telegram.allowedChatIds.heading")).toBe("Authorize Telegram group chats");
     expect(rawSetupCopy("en", "setupEditor.prompt.telegram.allowedChatIds")).toBe("Allowed Telegram group chat ID(s):");
 
+    expect(rawSetupCopy("ar", "setupEditor.prompt.telegram.card.title")).toBe("ضبط Telegram");
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.telegram.card.title")).toContain(isolateLtr("Telegram"));
     expect(rawSetupCopy("ar", "setupEditor.prompt.telegram.botToken.heading")).toBe("ربط بوت Telegram");
     expect(rawSetupCopy("ar", "setupEditor.prompt.telegram.allowedUserIds.heading")).toBe("اعتماد مستخدمي Telegram");
     expect(rawSetupCopy("ar", "setupEditor.prompt.telegram.allowedUserIds")).toBe(
@@ -589,8 +591,11 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "setupEditor.actions.configureBrowser.description")).toBe("Set browser behavior without launching a browser.");
     expect(rawSetupCopy("en", "setupEditor.actions.editSecurityMode")).toBe("Edit security mode");
     expect(rawSetupCopy("en", "setupEditor.actions.editSecurityMode.description")).toBe("Choose how strictly EstaCoda reviews risky actions.");
-    expect(rawSetupCopy("en", "setupEditor.actions.editWorkflowLearning")).toBe("Edit Agent Evolution");
-    expect(rawSetupCopy("en", "setupEditor.actions.editWorkflowLearning.description")).toBe("Agent Evolution controls whether EstaCoda may learn reusable Skills from your workflow patterns.");
+    expect(rawSetupCopy("en", "onboarding.workflowLearning")).toBe("Agent Evolution controls how EstaCoda learns reusable skills from your workflow patterns.");
+    expect(rawSetupCopy("en", "setupEditor.actions.editWorkflowLearning")).toBe("Configure Agent Evolution");
+    expect(rawSetupCopy("en", "setupEditor.actions.editWorkflowLearning.description")).toBe("Agent Evolution controls how EstaCoda learns reusable skills from your workflow patterns.");
+    expect(rawSetupCopy("ar", "setupEditor.actions.editWorkflowLearning.description")).toBe("يسمح هذا الخيار لـ EstaCoda بتعلّم مهارات قابلة لإعادة الاستخدام من الأنماط المتكررة في عملك.");
+    expect(resolveSetupCopy("ar", "setupEditor.actions.editWorkflowLearning.description")).toContain(isolateLtr("EstaCoda"));
     expect(rawSetupCopy("en", "setupEditor.actions.chooseLanguage")).toBe("Choose language");
     expect(rawSetupCopy("en", "setupEditor.actions.chooseLanguage.description")).toBe("Choose English or Arabic. Arabic support is beta and may fall back to English.");
     expect(rawSetupCopy("en", "setupEditor.actions.runReadonlyVerification")).toBe("Run setup verification");

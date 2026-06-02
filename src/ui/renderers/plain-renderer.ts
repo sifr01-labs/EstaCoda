@@ -545,26 +545,28 @@ export function renderOnboardingPromptCard(
 
 export function renderSlashMenu(vm: SlashMenuViewModel, locale: UiLocale = "en"): string {
   const copy = chromeCopy(locale);
-  const visibleOptions = vm.options.slice(0, 6);
+  const visibleOptions = vm.options;
   if (visibleOptions.length === 0) {
     return copy.slashNoMatches(technical(vm.query, locale));
   }
 
+  const markerWidth = 2;
   const commandWidth = Math.min(
     18,
     Math.max(...visibleOptions.map((option) => measureVisibleWidth(technical(option.label, locale))))
   );
   const gap = 4;
-  const descriptionWidth = Math.max(8, 80 - commandWidth - gap);
+  const descriptionWidth = Math.max(8, 80 - markerWidth - commandWidth - gap);
 
   return visibleOptions
-    .map((option) => {
+    .map((option, index) => {
+      const marker = index === vm.selectedIndex ? "> " : "  ";
       const command = padVisibleEnd(technical(option.label, locale), commandWidth);
       const description = truncateVisible(
         slashDescription(option.id, option.description ?? "", locale),
         descriptionWidth
       );
-      return `${command}${" ".repeat(gap)}${description}`;
+      return `${marker}${command}${" ".repeat(gap)}${description}`;
     })
     .join("\n");
 }

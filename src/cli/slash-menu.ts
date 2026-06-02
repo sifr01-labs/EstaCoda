@@ -80,10 +80,15 @@ const activeTurnCompletionPriority = new Map([
 export function buildSlashCompletionViewModel(
   runtime: Runtime,
   query = "/",
-  options: { readonly limit?: number; readonly includeActiveTurnCommands?: boolean } = {}
+  options: {
+    readonly limit?: number;
+    readonly visibleRows?: number;
+    readonly selectedIndex?: number;
+    readonly includeActiveTurnCommands?: boolean;
+  } = {}
 ): SlashMenuViewModel {
   const normalizedFilter = normalizeFilter(query);
-  const limit = Math.max(1, options.limit ?? DEFAULT_COMPLETION_LIMIT);
+  const visibleRows = Math.max(1, options.visibleRows ?? options.limit ?? DEFAULT_COMPLETION_LIMIT);
   const commands = commandRegistry
     .list({
       scope: "slash",
@@ -100,19 +105,32 @@ export function buildSlashCompletionViewModel(
       const bPriority = priorityMap.get(b.name) ?? 100;
       if (aPriority !== bPriority) return aPriority - bPriority;
       return a.name.localeCompare(b.name);
-    })
-    .slice(0, limit);
+    });
+  const totalOptions = commands.length;
+  const absoluteSelectedIndex = totalOptions === 0
+    ? 0
+    : clampIndex(options.selectedIndex ?? 0, totalOptions);
+  const visibleStartIndex = computeVisibleStartIndex({
+    selectedIndex: absoluteSelectedIndex,
+    totalOptions,
+    visibleRows,
+  });
+  const visibleCommands = commands.slice(visibleStartIndex, visibleStartIndex + visibleRows);
+  const selectedIndex = totalOptions === 0 ? 0 : absoluteSelectedIndex - visibleStartIndex;
 
   void runtime;
 
   return buildSlashCompletionListViewModel({
     query: query.startsWith("/") ? query : `/${query}`,
-    options: commands.map((command) =>
+    options: visibleCommands.map((command) =>
       slashMenuOption(command.name, `/${command.name}`, {
         description: completionDescription(command.name, "en") ?? command.usage ?? command.description,
       })
     ),
-    selectedIndex: 0,
+    selectedIndex,
+    absoluteSelectedIndex,
+    visibleStartIndex,
+    totalOptions,
   });
 }
 
@@ -260,6 +278,24 @@ function matches(filter: string, ...values: string[]): boolean {
 
 function normalizeFilter(value: string): string {
   return value.trim().replace(/^\//u, "").toLowerCase();
+}
+
+function clampIndex(index: number, total: number): number {
+  if (total <= 0) return 0;
+  return Math.min(Math.max(0, Math.floor(index)), total - 1);
+}
+
+function computeVisibleStartIndex(input: {
+  readonly selectedIndex: number;
+  readonly totalOptions: number;
+  readonly visibleRows: number;
+}): number {
+  if (input.totalOptions <= input.visibleRows) {
+    return 0;
+  }
+  const maxStartIndex = input.totalOptions - input.visibleRows;
+  const centeredStartIndex = input.selectedIndex - Math.floor(input.visibleRows / 2);
+  return Math.min(Math.max(0, centeredStartIndex), maxStartIndex);
 }
 
 export function completionDescription(commandName: string, locale: UiLocale): string | undefined {

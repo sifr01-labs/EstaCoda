@@ -1,8 +1,9 @@
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough, Readable, Writable } from "node:stream";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { promptUiContextForLocale } from "../contracts/ui.js";
 import { isolateLtr } from "../ui/bidi.js";
 import { createFilePasteReferenceStore } from "./paste-interceptor.js";
@@ -188,6 +189,176 @@ describe("readline prompt bracketed paste", () => {
       await expect(readdir(tempDir)).resolves.toEqual([]);
     } finally {
       await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("readline prompt special keys", () => {
+  it("handles parsed special keys when the controller is active", async () => {
+    const input = ttyInteractiveInput();
+    const output = captureOutput({ isTTY: true });
+    const seen: string[] = [];
+    const prompt = createReadlinePrompt({ input, output });
+
+    const answer = prompt("> ", {
+      onRowsChange: () => undefined,
+      specialKeyController: {
+        shouldHandleSpecialKey: () => true,
+        onSpecialKey: (key) => {
+          seen.push(key);
+          return "handled";
+        },
+      },
+    });
+    await waitFor(() => output.text().length > 0);
+    input.write("\x1b[A");
+    input.write("\x1b[B");
+    input.write("\t");
+    input.write("\n");
+
+    await expect(answer).resolves.toBe("");
+    expect(seen).toEqual(["up", "down", "tab"]);
+  });
+
+  it("lets special keys fall through when the controller is inactive", async () => {
+    const input = ttyInteractiveInput();
+    const output = captureOutput({ isTTY: true });
+    const seen: string[] = [];
+    const prompt = createReadlinePrompt({ input, output });
+
+    const answer = prompt("> ", {
+      onRowsChange: () => undefined,
+      specialKeyController: {
+        shouldHandleSpecialKey: () => false,
+        onSpecialKey: (key) => {
+          seen.push(key);
+          return "handled";
+        },
+      },
+    });
+    await waitFor(() => output.text().length > 0);
+    input.write("\x1b[A");
+    input.write("typed\n");
+
+    await expect(answer).resolves.toBe("typed");
+    expect(seen).toEqual([]);
+  });
+
+  it("lets handlers update the live readline input line synchronously", async () => {
+    const input = ttyInteractiveInput();
+    const output = captureOutput({ isTTY: true });
+    const changes: string[] = [];
+    const prompt = createReadlinePrompt({ input, output });
+
+    const answer = prompt("> ", {
+      onRowsChange: () => undefined,
+      onInputChange: (line) => changes.push(line),
+      specialKeyController: {
+        shouldHandleSpecialKey: () => true,
+        onSpecialKey: (key, control) => {
+          if (key !== "tab") return undefined;
+          control.setInputLine("/help");
+          return "handled";
+        },
+      },
+    });
+    await waitFor(() => output.text().length > 0);
+    input.write("\t");
+    await waitFor(() => changes.includes("/help"));
+    input.write("\n");
+
+    await expect(answer).resolves.toBe("/help");
+    expect(changes).toContain("/help");
+  });
+
+  it("does not install special-key handling for hidden secret prompts", async () => {
+    const input = ttyInteractiveInput();
+    const output = captureOutput({ isTTY: true });
+    const seen: string[] = [];
+    const prompt = createReadlinePrompt({ input, output });
+
+    const answer = prompt("> ", {
+      secret: true,
+      specialKeyController: {
+        shouldHandleSpecialKey: () => true,
+        onSpecialKey: (key) => {
+          seen.push(key);
+          return "handled";
+        },
+      },
+    });
+    await waitFor(() => output.text().length > 0);
+    input.write("\x1b[Asecret-value\n");
+
+    await expect(answer).resolves.toBe("secret-value");
+    expect(seen).toEqual([]);
+  });
+
+  it("restores special-key handling after a prompt resolves", async () => {
+    const input = ttyInteractiveInput();
+    const output = captureOutput({ isTTY: true });
+    const seen: string[] = [];
+    const prompt = createReadlinePrompt({ input, output });
+
+    const first = prompt("> ", {
+      onRowsChange: () => undefined,
+      specialKeyController: {
+        shouldHandleSpecialKey: () => true,
+        onSpecialKey: (key) => {
+          seen.push(key);
+          return "handled";
+        },
+      },
+    });
+    await waitFor(() => output.text().length > 0);
+    input.write("\t\n");
+    await expect(first).resolves.toBe("");
+
+    const second = prompt("> ", { onRowsChange: () => undefined });
+    input.write("next\n");
+    await expect(second).resolves.toBe("next");
+    expect(seen).toEqual(["tab"]);
+  });
+
+  it("restores special-key handling when tracked readline closes before answering", async () => {
+    vi.resetModules();
+    const originalTtyWrite = vi.fn();
+    const mockReadline = Object.assign(new EventEmitter(), {
+      line: "",
+      cursor: 0,
+      _ttyWrite: originalTtyWrite,
+      _refreshLine: vi.fn(),
+      _writeToOutput: vi.fn(),
+      getCursorPos: () => ({ rows: 0, cols: 0 }),
+      question: vi.fn(),
+      close: vi.fn(function close(this: EventEmitter) {
+        this.emit("close");
+      }),
+    });
+    vi.doMock("node:readline", () => ({
+      createInterface: () => mockReadline,
+    }));
+    try {
+      const { createReadlinePrompt: createMockedReadlinePrompt } = await import("./readline-prompt.js");
+      const input = ttyInteractiveInput();
+      const output = captureOutput({ isTTY: true });
+      const prompt = createMockedReadlinePrompt({ input, output });
+
+      void prompt("> ", {
+        onRowsChange: () => undefined,
+        specialKeyController: {
+          shouldHandleSpecialKey: () => true,
+          onSpecialKey: () => "handled",
+        },
+      });
+
+      await waitFor(() => mockReadline._ttyWrite !== originalTtyWrite);
+      mockReadline.emit("close");
+
+      expect(mockReadline._ttyWrite).toBe(originalTtyWrite);
+    } finally {
+      vi.doUnmock("node:readline");
+      vi.resetModules();
     }
   });
 });

@@ -1269,6 +1269,7 @@ describe("runFirstRunSetup", () => {
     expect(result.selections.language).toBe("ar");
     expect(result.selections.interfaceFlavor).toBe("arabic-light");
     expect(result.selections.activityLabels).toBe("ar");
+    expect(seenOptions[resolveSetupCopy("ar", "onboarding.interfaceStyle.title")]).toBeUndefined();
     const selectedWorkspaceRoot = result.selections.workspaceRoot;
     expect(selectedWorkspaceRoot).toBeDefined();
     if (selectedWorkspaceRoot === undefined) {

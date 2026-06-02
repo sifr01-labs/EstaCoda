@@ -593,6 +593,9 @@ export interface BuildSlashMenuInput {
   readonly query: string;
   readonly options: readonly SlashMenuOption[];
   readonly selectedIndex: number;
+  readonly absoluteSelectedIndex?: number;
+  readonly visibleStartIndex?: number;
+  readonly totalOptions?: number;
 }
 
 export function buildSlashMenuViewModel(input: BuildSlashMenuInput): SlashMenuViewModel {
@@ -601,6 +604,9 @@ export function buildSlashMenuViewModel(input: BuildSlashMenuInput): SlashMenuVi
     query: input.query,
     options: input.options,
     selectedIndex: input.selectedIndex,
+    absoluteSelectedIndex: input.absoluteSelectedIndex,
+    visibleStartIndex: input.visibleStartIndex,
+    totalOptions: input.totalOptions,
   };
 }
 

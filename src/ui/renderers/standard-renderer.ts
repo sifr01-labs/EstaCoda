@@ -981,7 +981,7 @@ export class StandardRenderer {
   }
 
   renderSlashMenu(vm: import("../../contracts/view-model.js").SlashMenuViewModel): string {
-    const visibleOptions = vm.options.slice(0, 6);
+    const visibleOptions = vm.options;
     if (visibleOptions.length === 0) {
       return this.#muted(this.#copy.slashNoMatches(this.#technical(vm.query)));
     }

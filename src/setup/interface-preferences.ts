@@ -1,7 +1,5 @@
 import type { Prompt } from "../cli/readline-prompt.js";
-import { withPromptUiContext } from "../cli/readline-prompt.js";
 import type { ActivityLabelsLocale, UiFlavor, UiLanguage } from "../config/runtime-config.js";
-import { promptUiContextForLocale } from "../contracts/ui.js";
 import type { SetupCopyKey, SetupCopyLocale } from "./setup-copy.js";
 import { promptSetupChoice, setupPromptContext, setupCopyText, type SetupChoice } from "./setup-prompts.js";
 
@@ -49,27 +47,20 @@ export async function promptInterfaceLanguageAndStyle(
     defaultValue: defaultLanguage,
   });
 
-  const choices = interfaceStyleChoices(language);
-  const defaultStyle = language === input.currentLanguage
-    ? choices.find((choice) => choice.value.flavor === input.currentFlavor)?.value ?? choices[0]!.value
-    : choices[0]!.value;
-  const localizedPrompt = withPromptUiContext(prompt, promptUiContextForLocale(language));
-  const style = await promptSetupChoice(setupPromptContext(localizedPrompt, language), {
-    title: setupCopyText(language, "onboarding.interfaceStyle.title"),
-    message: `${setupCopyText(language, "onboarding.interfaceStyle.prompt")}\n`,
-    choices: choices.map((choice) => ({
-      ...choice,
-      label: setupCopyText(language, choice.labelKey),
-      description: setupCopyText(language, choice.descriptionKey),
-    })),
-    defaultValue: defaultStyle,
-  });
-
+  const style = defaultInterfacePreferencesForLanguage(language);
   return {
     language,
     flavor: style.flavor,
     activityLabels: style.activityLabels,
   };
+}
+
+function defaultInterfacePreferencesForLanguage(
+  language: UiLanguage
+): Pick<InterfaceLanguageAndStyleSelection, "flavor" | "activityLabels"> {
+  return language === "ar"
+    ? { flavor: "arabic-light", activityLabels: "ar" }
+    : { flavor: "standard", activityLabels: "en" };
 }
 
 export function interfaceStyleChoices(language: UiLanguage): readonly InterfaceStyleChoice[] {

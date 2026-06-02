@@ -125,7 +125,7 @@ describe("interactive-select prompt card surface", () => {
     await expect(pending).resolves.toBe("yes");
     const rendered = output.getText();
     const plain = stripAnsi(rendered);
-    expect(plain).toContain(`تم تحديد: ${isolateRtl("نعم")}`);
+    expect(plain).toContain(isolateRtl(`تم تحديد: ${isolateRtl("نعم")}`));
     expect(plain).not.toContain("Selected:");
     expect(rendered).toContain("\x1b[1mتم تحديد\x1b[22m");
   });
@@ -144,7 +144,24 @@ describe("interactive-select prompt card surface", () => {
     input.emit("keypress", "", { name: "return" });
 
     await expect(pending).resolves.toBe("model");
-    expect(stripAnsi(output.getText())).toContain(`تم تحديد: ${isolateLtr("deepseek-v4-pro")}`);
+    expect(stripAnsi(output.getText())).toContain(isolateRtl(`تم تحديد: ${isolateLtr("deepseek-v4-pro")}`));
+  });
+
+  it("keeps mixed technical-token selected output line-level RTL", async () => {
+    clearCiEnv();
+    process.env.FORCE_COLOR = "1";
+    process.env.LANG = "ar_EG.UTF-8";
+    const { input, output } = makeTtyStreams();
+    const pending = selectOption(input, output, {
+      ...arabicPromptCardSelection(),
+      options: [{ value: "telegram", label: "Telegram", technical: true }],
+    });
+
+    await Promise.resolve();
+    input.emit("keypress", "", { name: "return" });
+
+    await expect(pending).resolves.toBe("telegram");
+    expect(stripAnsi(output.getText())).toContain(isolateRtl(`تم تحديد: ${isolateLtr("Telegram")}`));
   });
 
   it("keeps selected output readable without ANSI color", async () => {

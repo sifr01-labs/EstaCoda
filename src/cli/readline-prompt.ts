@@ -17,9 +17,25 @@ export type PromptOptions = {
   onRowsChange?: (rows: number) => void;
   onPastePreview?: (original: string, displayed: string) => void;
   onInputChange?: (line: string) => void;
+  specialKeyController?: PromptSpecialKeyController;
   placeholder?: string;
   pasteReferenceStore?: PasteReferenceStore;
   pasteReferenceThresholdChars?: number;
+};
+
+export type PromptSpecialKey = "up" | "down" | "tab" | "escape";
+
+export type PromptSpecialKeyControl = {
+  getInputLine(): string;
+  setInputLine(nextLine: string): void;
+};
+
+export type PromptSpecialKeyController = {
+  shouldHandleSpecialKey(): boolean;
+  onSpecialKey(
+    key: PromptSpecialKey,
+    control: PromptSpecialKeyControl
+  ): "handled" | undefined;
 };
 
 export type Prompt = ((question: string, options?: PromptOptions) => Promise<string>) & {
@@ -116,9 +132,17 @@ async function plainQuestion(input: Readable, output: Writable, question: string
   const pasteSession = createPastePromptSession(input, output, isTty, options);
   const readline = createPromptInterface({ input: pasteSession.input, output, terminal: isTty });
   const inputTracking = startInputChangeTracking(readline, isTty, options);
+  const specialKeyInterceptor = installSpecialKeyInterceptor(
+    readline,
+    options,
+    createReadlineSpecialKeyControl(readline, {
+      reportInputChange: inputTracking.report,
+    })
+  );
   try {
     return pasteSession.restore(await readline.question(question));
   } finally {
+    specialKeyInterceptor.restore();
     inputTracking.stop();
     readline.close();
     pasteSession.close();
@@ -165,6 +189,15 @@ async function trackedQuestion(
       const cursor = mutable.getCursorPos?.();
       onRowsChange(Math.max(1, Math.floor(cursor?.rows ?? 0) + 1));
     };
+    const specialKeyInterceptor = installSpecialKeyInterceptor(
+      readline,
+      options,
+      createReadlineSpecialKeyControl(readline, {
+        reportInputChange: inputTracking.report,
+        reportRows,
+        renderPlaceholder,
+      })
+    );
     const originalWrite = mutable._writeToOutput?.bind(readline);
     if (originalWrite !== undefined) {
       mutable._writeToOutput = (value: string) => {
@@ -174,12 +207,24 @@ async function trackedQuestion(
         inputTracking.report();
       };
     }
-    readline.question(question, (answer) => {
+    let cleanedUp = false;
+    const cleanup = (input: { readonly closeReadline: boolean }) => {
+      if (cleanedUp) return;
+      cleanedUp = true;
       onRowsChange(1);
+      specialKeyInterceptor.restore();
       inputTracking.stop();
-      readline.close();
-      const restored = pasteSession.restore(answer);
+      if (input.closeReadline) {
+        readline.close();
+      }
       pasteSession.close();
+    };
+    const onClose = () => cleanup({ closeReadline: false });
+    readline.once("close", onClose);
+    readline.question(question, (answer) => {
+      readline.off("close", onClose);
+      const restored = pasteSession.restore(answer);
+      cleanup({ closeReadline: true });
       resolve(restored);
     });
     renderPlaceholder();
@@ -206,6 +251,94 @@ function startInputChangeTracking(
   const interval = setInterval(report, 100);
   interval.unref?.();
   return { report, stop: () => clearInterval(interval) };
+}
+
+type MutableReadlineInput = {
+  line?: string;
+  cursor?: number;
+  _refreshLine?: () => void;
+  _ttyWrite?: (value: string, key: unknown) => void;
+  prompt?: (preserveCursor?: boolean) => void;
+};
+
+function createReadlineSpecialKeyControl(
+  readline: unknown,
+  callbacks: {
+    readonly reportInputChange: () => void;
+    readonly reportRows?: () => void;
+    readonly renderPlaceholder?: () => void;
+  }
+): PromptSpecialKeyControl {
+  const mutableReadline = readline as MutableReadlineInput;
+  return {
+    getInputLine: () => mutableReadline.line ?? "",
+    setInputLine: (nextLine) => {
+      mutableReadline.line = nextLine;
+      mutableReadline.cursor = nextLine.length;
+      if (typeof mutableReadline._refreshLine === "function") {
+        mutableReadline._refreshLine();
+      } else {
+        mutableReadline.prompt?.(true);
+      }
+      callbacks.reportInputChange();
+      callbacks.reportRows?.();
+      callbacks.renderPlaceholder?.();
+    },
+  };
+}
+
+function installSpecialKeyInterceptor(
+  readline: unknown,
+  options: PromptOptions | undefined,
+  control: PromptSpecialKeyControl
+): { restore: () => void } {
+  const controller = options?.specialKeyController;
+  if (controller === undefined) {
+    return { restore: () => undefined };
+  }
+  const mutableReadline = readline as MutableReadlineInput;
+  const originalTtyWrite = mutableReadline._ttyWrite;
+  if (typeof originalTtyWrite !== "function") {
+    return { restore: () => undefined };
+  }
+  const boundOriginalTtyWrite = originalTtyWrite.bind(readline);
+  mutableReadline._ttyWrite = (value: string, key: unknown) => {
+    const specialKey = promptSpecialKeyName(key);
+    if (specialKey === undefined) {
+      return boundOriginalTtyWrite(value, key);
+    }
+    if (!controller.shouldHandleSpecialKey()) {
+      return boundOriginalTtyWrite(value, key);
+    }
+    if (controller.onSpecialKey(specialKey, control) === "handled") {
+      return;
+    }
+    return boundOriginalTtyWrite(value, key);
+  };
+
+  let restored = false;
+  return {
+    restore: () => {
+      if (restored) return;
+      restored = true;
+      mutableReadline._ttyWrite = originalTtyWrite;
+    },
+  };
+}
+
+function promptSpecialKeyName(key: unknown): PromptSpecialKey | undefined {
+  const name = typeof key === "object" && key !== null && "name" in key
+    ? (key as { readonly name?: unknown }).name
+    : undefined;
+  switch (name) {
+    case "up":
+    case "down":
+    case "tab":
+    case "escape":
+      return name;
+    default:
+      return undefined;
+  }
 }
 
 type PastePromptSession = {

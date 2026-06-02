@@ -14,6 +14,7 @@ import { buildSessionHelpViewModel, renderSessionHelp } from "./session-help.js"
 import { createSessionRenderer } from "./session-renderer.js";
 import { StandardRenderer } from "../ui/renderers/standard-renderer.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
+import { stripAnsi } from "../ui/renderers/layout.js";
 import { buildStartupViewModel, buildPickerViewModel, buildAssistantResponseViewModel, buildStartupDashboardViewModel, buildUserPromptRailViewModel } from "../ui/view-models/builders.js";
 import { renderHorizontalRule, colorPromptPrefix } from "./session-loop.js";
 
@@ -282,6 +283,23 @@ describe("Session surfaces — slash completion list", () => {
     expect(output).toContain("/status");
     expect(output).toContain("/model");
     expect(output).not.toContain("/tools");
+  });
+
+  it("renders windowed slash completion rows beyond the first page", () => {
+    const vm = buildSlashCompletionViewModel(fakeRuntime, "/", { selectedIndex: 4, visibleRows: 3 });
+    const output = standardDarkRenderer().render(vm);
+
+    expect(vm.options.map((option) => option.label)).toEqual(["/tools", "/skills", "/exit"]);
+    expect(stripAnsi(output)).toContain("> /skills");
+    expect(output).not.toContain("/help");
+  });
+
+  it("marks the selected slash completion row in plain output", () => {
+    const vm = buildSlashCompletionViewModel(fakeRuntime, "/", { selectedIndex: 1, visibleRows: 3 });
+    const output = renderPlain(vm);
+
+    expect(output).toContain("> /status");
+    expect(output).toContain("  /help");
   });
 
   it("keeps /tools as its own command behavior", () => {

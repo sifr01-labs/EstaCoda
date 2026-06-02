@@ -1540,10 +1540,13 @@ describe("runSessionLoop — active turn spinner", () => {
     });
     const runtime = createMockRuntime({
       handle: async () => {
+        const isFirstTurn = releaseTurn === undefined;
         handleStarted?.();
-        await new Promise<void>((resolve) => {
-          releaseTurn = resolve;
-        });
+        if (isFirstTurn) {
+          await new Promise<void>((resolve) => {
+            releaseTurn = resolve;
+          });
+        }
         return mockResponse();
       },
     });
@@ -1630,14 +1633,14 @@ describe("runSessionLoop — active turn spinner", () => {
     for (const char of "/interrupt") {
       input.press(char, { name: char, sequence: char });
     }
-    expect(stripAnsi(outputChunks.join(""))).toContain("active command: /interrupt");
+    expect(stripAnsi(outputChunks.join(""))).toContain("✕ Interrupt");
     const beforeSubmit = outputChunks.length;
     input.press("\r", { name: "return" });
     await loop;
 
     expect(abortReason).toBe("CLI interrupt");
     expect(handleInputs).toEqual(["hello"]);
-    expect(outputChunks.slice(beforeSubmit).map((chunk) => stripAnsi(chunk)).join("")).not.toContain("active command: /interrupt");
+    expect(outputChunks.slice(beforeSubmit).map((chunk) => stripAnsi(chunk)).join("")).not.toContain("✕ Interrupt");
     expect(stripAnsi(outputChunks.join(""))).toContain("cancelled: CLI interrupt");
   });
 
@@ -1651,10 +1654,13 @@ describe("runSessionLoop — active turn spinner", () => {
     });
     const runtime = createMockRuntime({
       handle: async () => {
+        const isFirstTurn = releaseTurn === undefined;
         handleStarted?.();
-        await new Promise<void>((resolve) => {
-          releaseTurn = resolve;
-        });
+        if (isFirstTurn) {
+          await new Promise<void>((resolve) => {
+            releaseTurn = resolve;
+          });
+        }
         return mockResponse();
       },
     });
@@ -1757,7 +1763,7 @@ describe("runSessionLoop — active turn spinner", () => {
     for (const char of "/steer use simpler approach") {
       input.press(char, { name: char, sequence: char });
     }
-    expect(stripAnsi(outputChunks.join(""))).toContain("active command: /steer use simpler approach");
+    expect(stripAnsi(outputChunks.join(""))).toContain("↯ Steer: /steer use simpler approach");
     input.press("\r", { name: "return" });
     await secondHandleStartedPromise;
     await loop;
@@ -1823,7 +1829,7 @@ describe("runSessionLoop — active turn spinner", () => {
     await loop;
 
     expect(aborted).toBe(false);
-    expect(stripAnsi(outputChunks.join(""))).toContain("active command: Usage: /steer <note>");
+    expect(stripAnsi(outputChunks.join(""))).toContain("⌘ active command: Usage: /steer <note>");
   });
 
   it("does not loop forever when the steered retry fails", async () => {
@@ -2053,7 +2059,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(firstAbortReason).toBe("CLI steer");
     expect(secondAbortReason).toBeUndefined();
     expect(handleInputs).toHaveLength(2);
-    expect(stripAnsi(outputChunks.join(""))).toContain("active command: Steering already queued for this turn.");
+    expect(stripAnsi(outputChunks.join(""))).toContain("⌘ active command: Steering already queued for this turn.");
   });
 
   it("queues normal active-turn typing as the next turn without aborting the current turn", async () => {
@@ -2114,17 +2120,373 @@ describe("runSessionLoop — active turn spinner", () => {
     for (const char of "queued follow up") {
       input.press(char, { name: char, sequence: char });
     }
-    expect(stripAnsi(outputChunks.join(""))).toContain("active input: queued follow up");
+    expect(stripAnsi(outputChunks.join(""))).toContain("> Follow up: queued follow up");
+    expect(stripAnsi(outputChunks.join(""))).not.toContain("active input: queued follow up");
     input.press("\r", { name: "return" });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(handleInputs).toEqual(["hello"]);
     expect(aborted).toBe(false);
-    expect(stripAnsi(outputChunks.join(""))).toContain("active input: Queued for the next turn.");
+    expect(stripAnsi(outputChunks.join(""))).toContain("↳ Queued: queued follow up");
     releaseTurn?.();
     await queuedTurnStartedPromise;
     await loop;
 
     expect(handleInputs).toEqual(["hello", "queued follow up"]);
+  });
+
+  it("renders non-steer slash input as an active command preview", async () => {
+    const input = makeTtyInput();
+    const outputChunks: string[] = [];
+    let releaseTurn: (() => void) | undefined;
+    let handleStarted: (() => void) | undefined;
+    const handleStartedPromise = new Promise<void>((resolve) => {
+      handleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async () => {
+        const isFirstTurn = releaseTurn === undefined;
+        handleStarted?.();
+        if (isFirstTurn) {
+          await new Promise<void>((resolve) => {
+            releaseTurn = resolve;
+          });
+        }
+        return mockResponse();
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await handleStartedPromise;
+    input.press("/steerx", { name: "text", sequence: "/steerx" });
+    expect(stripAnsi(outputChunks.join(""))).toContain("⌘ active command: /steerx");
+    expect(stripAnsi(outputChunks.join(""))).not.toContain("↯ Steer: /steerx");
+    input.press("", { name: "escape" });
+    const afterEscapeIndex = outputChunks.length;
+    input.press("/interrupt now", { name: "text", sequence: "/interrupt now" });
+    const afterInterruptNow = stripAnsi(outputChunks.slice(afterEscapeIndex).join(""));
+    expect(afterInterruptNow).toContain("⌘ active command: /interrupt now");
+    expect(afterInterruptNow).not.toContain("✕ Interrupt");
+
+    releaseTurn?.();
+    await loop;
+  });
+
+  it("renders active-turn labels with ASCII glyph fallbacks", async () => {
+    const input = makeTtyInput();
+    const outputChunks: string[] = [];
+    let releaseTurn: (() => void) | undefined;
+    let handleStarted: (() => void) | undefined;
+    const handleStartedPromise = new Promise<void>((resolve) => {
+      handleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async () => {
+        const isFirstTurn = releaseTurn === undefined;
+        handleStarted?.();
+        if (isFirstTurn) {
+          await new Promise<void>((resolve) => {
+            releaseTurn = resolve;
+          });
+        }
+        return mockResponse();
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false, supportsUnicode: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await handleStartedPromise;
+    for (const char of "/interrupt") {
+      input.press(char, { name: char, sequence: char });
+    }
+    expect(stripAnsi(outputChunks.join(""))).toContain("x Interrupt");
+    input.press("", { name: "escape" });
+    const afterEscapeIndex = outputChunks.length;
+    for (const char of "queued follow up") {
+      input.press(char, { name: char, sequence: char });
+    }
+    input.press("\r", { name: "return" });
+    const afterQueue = stripAnsi(outputChunks.slice(afterEscapeIndex).join(""));
+    expect(afterQueue).toContain("-> Queued: queued follow up");
+
+    releaseTurn?.();
+    await loop;
+  });
+
+  it("replaces queued status with a new follow-up preview without stale status", async () => {
+    const input = makeTtyInput();
+    const outputChunks: string[] = [];
+    let releaseTurn: (() => void) | undefined;
+    let handleStarted: (() => void) | undefined;
+    const handleStartedPromise = new Promise<void>((resolve) => {
+      handleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async () => {
+        const isFirstTurn = releaseTurn === undefined;
+        handleStarted?.();
+        if (isFirstTurn) {
+          await new Promise<void>((resolve) => {
+            releaseTurn = resolve;
+          });
+        }
+        return mockResponse();
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await handleStartedPromise;
+    input.press("first queued", { name: "text", sequence: "first queued" });
+    input.press("\r", { name: "return" });
+    expect(stripAnsi(outputChunks.join(""))).toContain("↳ Queued: first queued");
+
+    const beforeSecondPreview = outputChunks.length;
+    input.press("second queued", { name: "text", sequence: "second queued" });
+    const secondPreview = stripAnsi(outputChunks.slice(beforeSecondPreview).join(""));
+    expect(secondPreview).toContain("> Follow up: second queued");
+    expect(secondPreview).not.toContain("↳ Queued: first queued");
+
+    releaseTurn?.();
+    await loop;
+  });
+
+  it("preserves follow-up preview across active-turn tool redraws", async () => {
+    const input = makeTtyInput();
+    const outputChunks: string[] = [];
+    let releaseTurn: (() => void) | undefined;
+    let emitTool: (() => void) | undefined;
+    let handleStarted: (() => void) | undefined;
+    const handleStartedPromise = new Promise<void>((resolve) => {
+      handleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async ({ onEvent }: { text: string; channel: string; signal?: AbortSignal; onEvent?: (event: RuntimeEvent) => void }) => {
+        const isFirstTurn = releaseTurn === undefined;
+        handleStarted?.();
+        emitTool = () => {
+          onEvent?.({
+            kind: "tool-start",
+            tool: "shell.exec",
+            targetSummary: "status",
+            activityId: "tool-1",
+          });
+        };
+        if (isFirstTurn) {
+          await new Promise<void>((resolve) => {
+            releaseTurn = resolve;
+          });
+        }
+        return mockResponse();
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await handleStartedPromise;
+    input.press("queued while tool runs", { name: "text", sequence: "queued while tool runs" });
+    const beforeToolRedraw = outputChunks.length;
+    emitTool?.();
+    const afterToolRedraw = stripAnsi(outputChunks.slice(beforeToolRedraw).join(""));
+    expect(afterToolRedraw).toContain("> Follow up: queued while tool runs");
+    expect(afterToolRedraw).toContain("preparing  status");
+
+    input.press("\r", { name: "return" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(stripAnsi(outputChunks.join(""))).toContain("↳ Queued: queued while tool runs");
+
+    releaseTurn?.();
+    await loop;
+  });
+
+  it("wraps and caps long follow-up previews while preserving the label", async () => {
+    const input = makeTtyInput();
+    const outputChunks: string[] = [];
+    let releaseTurn: (() => void) | undefined;
+    let handleStarted: (() => void) | undefined;
+    const handleStartedPromise = new Promise<void>((resolve) => {
+      handleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async () => {
+        handleStarted?.();
+        await new Promise<void>((resolve) => {
+          releaseTurn = resolve;
+        });
+        return mockResponse();
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 32,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 32, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await handleStartedPromise;
+    input.press(
+      "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron",
+      { name: "text", sequence: "long" }
+    );
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("> Follow up: alpha beta gamma");
+    expect(rendered).toContain("kappa lambda mu nu");
+    expect(rendered).toContain("xi omicron");
+    expect(rendered).not.toContain("             delta epsilon zeta");
+
+    releaseTurn?.();
+    await loop;
+  });
+
+  it("wraps and caps long steer previews while preserving the label", async () => {
+    const input = makeTtyInput();
+    const outputChunks: string[] = [];
+    let releaseTurn: (() => void) | undefined;
+    let handleStarted: (() => void) | undefined;
+    const handleStartedPromise = new Promise<void>((resolve) => {
+      handleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async () => {
+        handleStarted?.();
+        await new Promise<void>((resolve) => {
+          releaseTurn = resolve;
+        });
+        return mockResponse();
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 32,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 32, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await handleStartedPromise;
+    input.press(
+      "/steer alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi omega",
+      { name: "text", sequence: "long" }
+    );
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("↯ Steer: /steer alpha beta");
+    expect(rendered).toContain("sigma tau upsilon phi");
+    expect(rendered).toContain("chi psi omega");
+    expect(rendered).not.toContain("delta epsilon zeta");
+
+    releaseTurn?.();
+    await loop;
   });
 
   it("animates the bottom chrome transcript spinner in place between runtime events", async () => {
@@ -2307,6 +2669,193 @@ describe("runSessionLoop — active turn spinner", () => {
     promptOptions.onInputChange?.("/h");
     expect(outputChunks.join("")).toContain("/help");
     expect(outputChunks.join("")).toContain("Show command help");
+
+    resolvePrompt("/exit");
+    await loop;
+  });
+
+  it("moves idle slash completion selection with special arrow keys", async () => {
+    const outputChunks: string[] = [];
+    let resolvePrompt: ((value: string) => void) | undefined;
+    let promptOptions: PromptOptions | undefined;
+    const prompt = Object.assign(
+      vi.fn(async (_question: string, options?: PromptOptions) => {
+        promptOptions = options;
+        return await new Promise<string>((resolve) => {
+          resolvePrompt = resolve;
+        });
+      }),
+      { close: () => {} }
+    );
+
+    const loop = runSessionLoop({
+      runtime: createMockRuntime(),
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt,
+      close: () => {},
+    });
+
+    while (resolvePrompt === undefined || promptOptions === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    promptOptions.onInputChange?.("/");
+    const beforeMove = outputChunks.length;
+    const result = promptOptions.specialKeyController?.onSpecialKey("down", {
+      getInputLine: () => "/",
+      setInputLine: () => undefined,
+    });
+
+    expect(result).toBe("handled");
+    expect(stripAnsi(outputChunks.slice(beforeMove).join(""))).toContain("> /status");
+
+    resolvePrompt("/exit");
+    await loop;
+  });
+
+  it("applies idle slash completion on Tab", async () => {
+    const outputChunks: string[] = [];
+    let resolvePrompt: ((value: string) => void) | undefined;
+    let promptOptions: PromptOptions | undefined;
+    let inputLine = "/h";
+    const prompt = Object.assign(
+      vi.fn(async (_question: string, options?: PromptOptions) => {
+        promptOptions = options;
+        return await new Promise<string>((resolve) => {
+          resolvePrompt = resolve;
+        });
+      }),
+      { close: () => {} }
+    );
+
+    const loop = runSessionLoop({
+      runtime: createMockRuntime(),
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt,
+      close: () => {},
+    });
+
+    while (resolvePrompt === undefined || promptOptions === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    promptOptions.onInputChange?.(inputLine);
+    const result = promptOptions.specialKeyController?.onSpecialKey("tab", {
+      getInputLine: () => inputLine,
+      setInputLine: (nextLine) => {
+        inputLine = nextLine;
+        promptOptions?.onInputChange?.(nextLine);
+      },
+    });
+
+    expect(result).toBe("handled");
+    expect(inputLine).toBe("/help");
+
+    resolvePrompt("/exit");
+    await loop;
+  });
+
+  it("lets Tab fall through for no-match idle slash completion", async () => {
+    const outputChunks: string[] = [];
+    let resolvePrompt: ((value: string) => void) | undefined;
+    let promptOptions: PromptOptions | undefined;
+    let inputLine = "/zzzz";
+    const prompt = Object.assign(
+      vi.fn(async (_question: string, options?: PromptOptions) => {
+        promptOptions = options;
+        return await new Promise<string>((resolve) => {
+          resolvePrompt = resolve;
+        });
+      }),
+      { close: () => {} }
+    );
+
+    const loop = runSessionLoop({
+      runtime: createMockRuntime(),
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt,
+      close: () => {},
+    });
+
+    while (resolvePrompt === undefined || promptOptions === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    promptOptions.onInputChange?.(inputLine);
+    const result = promptOptions.specialKeyController?.onSpecialKey("tab", {
+      getInputLine: () => inputLine,
+      setInputLine: (nextLine) => {
+        inputLine = nextLine;
+      },
+    });
+
+    expect(result).toBeUndefined();
+    expect(inputLine).toBe("/zzzz");
+
+    resolvePrompt("/exit");
+    await loop;
+  });
+
+  it("closes no-match idle slash completion on Escape", async () => {
+    const outputChunks: string[] = [];
+    let resolvePrompt: ((value: string) => void) | undefined;
+    let promptOptions: PromptOptions | undefined;
+    const prompt = Object.assign(
+      vi.fn(async (_question: string, options?: PromptOptions) => {
+        promptOptions = options;
+        return await new Promise<string>((resolve) => {
+          resolvePrompt = resolve;
+        });
+      }),
+      { close: () => {} }
+    );
+
+    const loop = runSessionLoop({
+      runtime: createMockRuntime(),
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt,
+      close: () => {},
+    });
+
+    while (resolvePrompt === undefined || promptOptions === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    promptOptions.onInputChange?.("/zzzz");
+    const result = promptOptions.specialKeyController?.onSpecialKey("escape", {
+      getInputLine: () => "/zzzz",
+      setInputLine: () => undefined,
+    });
+
+    expect(result).toBe("handled");
 
     resolvePrompt("/exit");
     await loop;
@@ -3513,6 +4062,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(secretPromptOptions).toHaveLength(1);
     expect(secretPromptOptions[0]?.onInputChange).toBeUndefined();
     expect(secretPromptOptions[0]?.onPastePreview).toBeUndefined();
+    expect(secretPromptOptions[0]?.specialKeyController).toBeUndefined();
   });
 
   it("keeps bottom chrome alive after active-turn SIGINT cancellation", async () => {

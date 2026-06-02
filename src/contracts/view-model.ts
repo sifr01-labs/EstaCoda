@@ -396,6 +396,9 @@ export interface SlashMenuViewModel {
   readonly query: string;
   readonly options: readonly SlashMenuOption[];
   readonly selectedIndex: number;
+  readonly absoluteSelectedIndex?: number;
+  readonly visibleStartIndex?: number;
+  readonly totalOptions?: number;
 }
 
 // ─────────────────────────────────────────────────────────────

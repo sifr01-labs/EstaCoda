@@ -1,6 +1,6 @@
 import type { SelectPromptInput } from "../cli/interactive-select.js";
 import type { Prompt } from "../cli/readline-prompt.js";
-import { isolateLtr } from "../ui/bidi.js";
+import { isolateLtr, isolateRtl } from "../ui/bidi.js";
 import {
   promptUiContextForLocale,
   type PromptUiContext,
@@ -140,15 +140,15 @@ export function setupProviderCredentialQuestion(
 }
 
 export function setupTelegramBotTokenQuestion(locale: SetupCopyLocale): string {
-  return `${setupCopyText(locale, "setupEditor.prompt.telegram.botToken")} `;
+  return setupQuestionLine(locale, setupCopyText(locale, "setupEditor.prompt.telegram.botToken"));
 }
 
 export function setupTelegramAllowedUserIdsQuestion(locale: SetupCopyLocale): string {
-  return `${setupCopyText(locale, "setupEditor.prompt.telegram.allowedUserIds")} `;
+  return setupQuestionLine(locale, setupCopyText(locale, "setupEditor.prompt.telegram.allowedUserIds"));
 }
 
 export function setupTelegramAllowedChatIdsQuestion(locale: SetupCopyLocale): string {
-  return `${setupCopyText(locale, "setupEditor.prompt.telegram.allowedChatIds")} `;
+  return setupQuestionLine(locale, setupCopyText(locale, "setupEditor.prompt.telegram.allowedChatIds"));
 }
 
 export async function showSetupCard(
@@ -300,6 +300,10 @@ function reviewPlaceholderValues(
 
 function renderDisplayToken(locale: SetupCopyLocale, value: string): string {
   return locale === "ar" ? isolateLtr(value) : value;
+}
+
+function setupQuestionLine(locale: SetupCopyLocale, value: string): string {
+  return `${locale === "ar" ? isolateRtl(value) : value} `;
 }
 
 function remoteControlIdentityRefs(values: Record<string, SetupPromptValue>): string | undefined {

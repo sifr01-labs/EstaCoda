@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SelectPromptInput } from "../cli/interactive-select.js";
 import type { Prompt } from "../cli/readline-prompt.js";
-import { isolateLtr } from "../ui/bidi.js";
+import { isolateLtr, isolateRtl } from "../ui/bidi.js";
 import {
   promptSetupChoice,
   setupCopyText,
@@ -65,9 +65,9 @@ describe("shared setup string prompt copy", () => {
     expect(setupTelegramAllowedUserIdsQuestion("en")).toBe(`${setupCopyText("en", "setupEditor.prompt.telegram.allowedUserIds")} `);
     expect(setupTelegramAllowedChatIdsQuestion("en")).toBe(`${setupCopyText("en", "setupEditor.prompt.telegram.allowedChatIds")} `);
 
-    expect(setupTelegramBotTokenQuestion("ar")).toBe(`${setupCopyText("ar", "setupEditor.prompt.telegram.botToken")} `);
-    expect(setupTelegramAllowedUserIdsQuestion("ar")).toBe(`${setupCopyText("ar", "setupEditor.prompt.telegram.allowedUserIds")} `);
-    expect(setupTelegramAllowedChatIdsQuestion("ar")).toBe(`${setupCopyText("ar", "setupEditor.prompt.telegram.allowedChatIds")} `);
+    expect(setupTelegramBotTokenQuestion("ar")).toBe(`${isolateRtl(setupCopyText("ar", "setupEditor.prompt.telegram.botToken"))} `);
+    expect(setupTelegramAllowedUserIdsQuestion("ar")).toBe(`${isolateRtl(setupCopyText("ar", "setupEditor.prompt.telegram.allowedUserIds"))} `);
+    expect(setupTelegramAllowedChatIdsQuestion("ar")).toBe(`${isolateRtl(setupCopyText("ar", "setupEditor.prompt.telegram.allowedChatIds"))} `);
     expect(setupTelegramBotTokenQuestion("ar")).toContain(isolateLtr("Telegram"));
     expect(setupTelegramAllowedUserIdsQuestion("ar")).toContain(isolateLtr("Telegram"));
     expect(setupTelegramAllowedChatIdsQuestion("ar")).toContain(isolateLtr("Telegram"));

@@ -22,6 +22,7 @@ import {
 } from "../setup-prompts.js";
 import type { SetupCopyKey, SetupCopyLocale } from "../setup-copy.js";
 import type { ConfigEditorRenderedAction } from "./render.js";
+import { isolateLtr } from "../../ui/bidi.js";
 
 export type OptionalCapabilityPromptAction = "unchanged" | "skip" | "enable";
 
@@ -253,7 +254,7 @@ export async function promptConfigEditorReviewApproval(
   },
   locale: SetupCopyLocale = "en"
 ): Promise<boolean> {
-  const selectedArea = setupEditorReviewSelectedAreaLabel(input.selectedActionId, input.reviewManifest);
+  const selectedArea = setupEditorReviewSelectedAreaLabel(input.selectedActionId, input.reviewManifest, locale);
   return promptSetupChoice(prompt, {
     title: setupCopyText(locale, "setupEditor.review.title"),
     message: [
@@ -281,11 +282,12 @@ export async function promptConfigEditorReviewApproval(
 
 export function setupEditorReviewSelectedAreaLabel(
   selectedActionId: string,
-  reviewManifest: SetupReviewManifest
+  reviewManifest: SetupReviewManifest,
+  locale: SetupCopyLocale = "en"
 ): string {
-  if (manifestHasChannel(reviewManifest, "telegram")) return "Channels · Telegram";
-  if (manifestHasChannel(reviewManifest, "discord")) return "Channels · Discord";
-  if (manifestHasChannel(reviewManifest, "whatsapp")) return "Channels · WhatsApp";
+  if (manifestHasChannel(reviewManifest, "telegram")) return selectedAreaLabel(locale, "Channels", "القنوات", "Telegram");
+  if (manifestHasChannel(reviewManifest, "discord")) return selectedAreaLabel(locale, "Channels", "القنوات", "Discord");
+  if (manifestHasChannel(reviewManifest, "whatsapp")) return selectedAreaLabel(locale, "Channels", "القنوات", "WhatsApp");
 
   switch (selectedActionId) {
     case "edit-primary-model-route":
@@ -293,26 +295,41 @@ export function setupEditorReviewSelectedAreaLabel(
     case "edit-primary-credential-reference":
     case "repair-missing-credential":
     case "store-provider-credential-reference":
-      return "Model · Primary";
+      return selectedAreaLabel(locale, "Model", "النموذج", locale === "ar" ? "الأساسي" : "Primary");
     case "edit-fallback-model-route":
-      return "Model · Fallback";
+      return selectedAreaLabel(locale, "Model", "النموذج", locale === "ar" ? "الاحتياطي" : "Fallback");
     case "edit-auxiliary-model-route":
-      return "Model · Auxiliary";
+      return selectedAreaLabel(locale, "Model", "النموذج", locale === "ar" ? "المساند" : "Auxiliary");
     case "edit-security-mode":
-      return "Security";
+      return locale === "ar" ? "الأمان" : "Security";
     case "configure-voice":
-      return "Voice";
+      return locale === "ar" ? "الصوت" : "Voice";
     case "configure-image-generation":
-      return "Image Generation";
+      return locale === "ar" ? "توليد الصور" : "Image Generation";
     case "configure-browser":
-      return "Browser";
+      return locale === "ar" ? "المتصفح" : "Browser";
     case "edit-language":
-      return "Language";
+      return locale === "ar" ? "اللغة" : "Language";
     case "edit-workflow-learning":
-      return "Agent Evolution";
+      return locale === "ar" ? "تطوّر الوكيل" : "Agent Evolution";
     default:
-      return "Model · Primary";
+      return selectedAreaLabel(locale, "Model", "النموذج", locale === "ar" ? "الأساسي" : "Primary");
   }
+}
+
+function selectedAreaLabel(
+  locale: SetupCopyLocale,
+  englishCategory: string,
+  arabicCategory: string,
+  value: string
+): string {
+  return locale === "ar"
+    ? `${arabicCategory} · ${selectedAreaArabicValue(value)}`
+    : `${englishCategory} · ${value}`;
+}
+
+function selectedAreaArabicValue(value: string): string {
+  return /[A-Za-z0-9]/u.test(value) ? isolateLtr(value) : value;
 }
 
 function manifestHasChannel(
@@ -320,11 +337,13 @@ function manifestHasChannel(
   channelId: "telegram" | "discord" | "whatsapp"
 ): boolean {
   const sourceId = `setup-module.${channelId}.capability`;
+  if (reviewManifest.sourceBundleIds.some((bundleId) => bundleId.endsWith(`.${channelId}`))) {
+    return true;
+  }
   return reviewManifest.lines.some((line) =>
     line.sourceDraftIds.some((sourceDraftId) => sourceDraftId === sourceId) ||
     line.copyKey === `setupModules.${channelId}.review` ||
-    line.summaryKey === `setupModules.${channelId}.review` ||
-    reviewManifest.sourceBundleIds.some((bundleId) => bundleId.endsWith(`.${channelId}`))
+    line.summaryKey === `setupModules.${channelId}.review`
   );
 }
 

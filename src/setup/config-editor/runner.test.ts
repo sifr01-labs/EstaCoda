@@ -8,7 +8,8 @@ import type { ProviderId, ProviderApiMode, ProviderAuthMethod } from "../../cont
 import type { FlowEngine, ModelCandidate } from "../../providers/provider-model-selection-flow.js";
 import { createReviewedSetupApplyExecutor } from "../review/apply-executor.js";
 import { runConfigEditor } from "./runner.js";
-import { promptModelCandidate } from "./prompts.js";
+import { promptModelCandidate, setupEditorReviewSelectedAreaLabel } from "./prompts.js";
+import type { SetupReviewManifest } from "../setup-review-manifest.js";
 import { resolveProfileStateHome, writeActiveProfile } from "../../config/profile-home.js";
 import { isolateLtr } from "../../ui/bidi.js";
 import {
@@ -404,8 +405,7 @@ describe("runConfigEditor", () => {
     expect(result.selectedActionId).toBe("edit-language");
     expect(prompts[0]?.title).toBe("Setup language");
     expect(prompts[0]?.labels).toEqual(["English", "العربية"]);
-    expect(prompts[1]?.title).toBe("أسلوب الواجهة");
-    expect(prompts[1]?.labels).toContain("عربي خفيف");
+    expect(prompts.map((prompt) => prompt.title)).not.toContain("أسلوب الواجهة");
     expect(uiLine?.review.values).toEqual(expect.objectContaining({
       language: "ar",
       flavor: "arabic-light",
@@ -2368,6 +2368,54 @@ describe("runConfigEditor", () => {
     expect(result.initialDecision.setupEditorPlanSession?.plan.actions.some((action) => action.patch !== undefined)).toBe(false);
   });
 });
+
+describe("setupEditorReviewSelectedAreaLabel", () => {
+  it("preserves existing English selected area labels", () => {
+    expect(setupEditorReviewSelectedAreaLabel("configure-channels", minimalManifest(["channels.telegram"]))).toBe("Channels · Telegram");
+    expect(setupEditorReviewSelectedAreaLabel("edit-security-mode", minimalManifest())).toBe("Security");
+  });
+
+  it("localizes Arabic selected area labels while isolating technical channel names", () => {
+    expect(setupEditorReviewSelectedAreaLabel("configure-channels", minimalManifest(["channels.telegram"]), "ar")).toBe(
+      `القنوات · ${isolateLtr("Telegram")}`
+    );
+    expect(setupEditorReviewSelectedAreaLabel("edit-primary-model-route", minimalManifest(), "ar")).toBe("النموذج · الأساسي");
+    expect(setupEditorReviewSelectedAreaLabel("edit-security-mode", minimalManifest(), "ar")).toBe("الأمان");
+  });
+});
+
+function minimalManifest(sourceBundleIds: readonly string[] = []): SetupReviewManifest {
+  return {
+    kind: "setup-review-manifest",
+    sourceBundleIds,
+    lines: [],
+    sections: {
+      "files-to-write-update": [],
+      "secret-refs-to-store": [],
+      "workspace-trust-grants": [],
+      "provider-model-network": [],
+      "enabled-optional-capabilities": [],
+      "remote-control-surfaces": [],
+      "security-mode": [],
+      "workflow-learning": [],
+      "verification-checks": [],
+      "launch-handoff": [],
+      blockers: [],
+      warnings: [],
+    },
+    blockers: [],
+    warnings: [],
+    safeToReviewForApply: true,
+    suppressedNormalWrites: [],
+    metadata: {
+      bundleCount: sourceBundleIds.length,
+      lineCount: 0,
+      blockerCount: 0,
+      warningCount: 0,
+      readOnlyCount: 0,
+    },
+  };
+}
 
 function fakePrompt(options: { readonly values?: readonly unknown[]; readonly secret?: string } = {}): Prompt {
   const values = [...(options.values ?? [])];

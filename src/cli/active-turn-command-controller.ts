@@ -3,7 +3,9 @@ import { emitKeypressEvents } from "node:readline";
 export type ActiveTurnCommandControllerOptions = {
   readonly input: NodeJS.ReadStream;
   readonly enabled?: boolean;
-  readonly onCommandLaneChange: (line: string | undefined) => void;
+  readonly onActiveInputPreviewChange?: (
+    preview: { kind: "message" | "command"; text: string } | undefined
+  ) => void;
   readonly onInputLineChange?: (line: string | undefined) => void;
   readonly onQueueText?: (text: string) => void;
   readonly onInterrupt: () => void;
@@ -21,7 +23,9 @@ type Keypress = {
 export class ActiveTurnCommandController {
   readonly #input: NodeJS.ReadStream;
   readonly #enabled: boolean;
-  readonly #onCommandLaneChange: (line: string | undefined) => void;
+  readonly #onActiveInputPreviewChange?: (
+    preview: { kind: "message" | "command"; text: string } | undefined
+  ) => void;
   readonly #onInputLineChange?: (line: string | undefined) => void;
   readonly #onQueueText?: (text: string) => void;
   readonly #onInterrupt: () => void;
@@ -37,7 +41,7 @@ export class ActiveTurnCommandController {
   constructor(options: ActiveTurnCommandControllerOptions) {
     this.#input = options.input;
     this.#enabled = options.enabled ?? true;
-    this.#onCommandLaneChange = options.onCommandLaneChange;
+    this.#onActiveInputPreviewChange = options.onActiveInputPreviewChange;
     this.#onInputLineChange = options.onInputLineChange;
     this.#onQueueText = options.onQueueText;
     this.#onInterrupt = options.onInterrupt;
@@ -145,15 +149,15 @@ export class ActiveTurnCommandController {
 
   #renderBuffer(): void {
     if (this.#buffer === undefined) return;
-    const prefix = this.#buffer.startsWith("/") ? "active command" : "active input";
-    this.#onCommandLaneChange(`${prefix}: ${this.#buffer}`);
+    const kind = this.#buffer.startsWith("/") ? "command" : "message";
+    this.#onActiveInputPreviewChange?.({ kind, text: this.#buffer });
     this.#onInputLineChange?.(this.#buffer);
   }
 
   #clearBuffer(): void {
     if (this.#buffer === undefined) return;
     this.#buffer = undefined;
-    this.#onCommandLaneChange(undefined);
+    this.#onActiveInputPreviewChange?.(undefined);
     this.#onInputLineChange?.(undefined);
   }
 }
