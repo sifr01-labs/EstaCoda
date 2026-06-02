@@ -140,6 +140,67 @@ describe("BottomChromeController", () => {
     ]);
   });
 
+  it("writes above chrome without restoring rail or transient lines", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("status") });
+    ctrl.updateTransientLines(["tool one", "tool two"]);
+
+    chunks.length = 0;
+    ctrl.writeAboveChromeNoRestore(() => {
+      stream.write("durable tool rows\n");
+    });
+
+    expect(chunks).toEqual([
+      "\x1b[4A\x1b[1G\x1b[0J",
+      "durable tool rows\n",
+    ]);
+
+    chunks.length = 0;
+    ctrl.writeAboveChromeSync(() => {
+      stream.write("assistant response\n");
+    });
+
+    expect(chunks).toEqual([
+      "assistant response\n",
+      "status | idle\n────────────────────────────────────────\n",
+    ]);
+    expect(chunks.join("")).not.toContain("tool one");
+    expect(chunks.join("")).not.toContain("tool two");
+  });
+
+  it("runs no-restore callbacks directly when disabled", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream, makeCaps({ isTTY: false }));
+    let called = false;
+
+    ctrl.updateState({ statusRail: status("status") });
+    ctrl.writeAboveChromeNoRestore(() => {
+      called = true;
+      stream.write("plain durable\n");
+    });
+
+    expect(called).toBe(true);
+    expect(chunks).toEqual(["plain durable\n"]);
+  });
+
+  it("runs no-restore callbacks directly after disposal", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = makeController(stream);
+    ctrl.updateState({ statusRail: status("status") });
+    chunks.length = 0;
+
+    ctrl.dispose();
+    ctrl.writeAboveChromeNoRestore(() => {
+      stream.write("after dispose\n");
+    });
+
+    expect(chunks).toEqual([
+      "\x1b[2A\x1b[1G\x1b[0J",
+      "after dispose\n",
+    ]);
+  });
+
   it("can clear transient lines while transcript output is being written", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream);

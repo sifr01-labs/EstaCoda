@@ -106,6 +106,21 @@ export class BottomChromeController {
     }
   }
 
+  writeAboveChromeNoRestore<T>(fn: () => T): T {
+    if (!this.#enabled || this.#disposed) {
+      return fn();
+    }
+
+    this.#clearForOutput();
+
+    // No-restore durable writes intentionally discard transient live UI.
+    this.#transientLines = [];
+    this.#renderedTransientLineCount = 0;
+    this.#lastRenderedTransientLines = undefined;
+
+    return fn();
+  }
+
   async writeAboveChrome<T>(fn: () => T | Promise<T>): Promise<T> {
     if (!this.#enabled || this.#disposed) {
       return await fn();
