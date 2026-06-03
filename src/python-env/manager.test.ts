@@ -187,6 +187,34 @@ describe("managed Python environment manager", () => {
     ]);
   });
 
+  it("returns actionable capability-scoped diagnostics when Python venv support is missing", async () => {
+    mocks.state.spawnBehavior = (call, child) => {
+      queueMicrotask(() => {
+        if (call.args.join(" ") === "-m venv " + resolveManagedVenvPath(tempDir)) {
+          child.stderr.emit("data", [
+            "The virtual environment was not created successfully because ensurepip is not available.",
+            "On Debian/Ubuntu systems, install the python3.13-venv package using:",
+            "apt install python3.13-venv"
+          ].join("\n"));
+          child.emit("close", 1);
+          return;
+        }
+        child.emit("close", 0);
+      });
+    };
+
+    const result = await createManagedEnvironment({ stateRoot: tempDir });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toContain("ensurepip");
+      expect(result.reason).toContain("python3.13-venv");
+      expect(result.reason).toContain("EstaCoda can still run");
+      expect(result.reason).toContain("--python-binary");
+      expect(result.reason).toContain("Diagnostic:");
+    }
+  });
+
   it("runs import verification after install", async () => {
     await createManagedEnvironment({ stateRoot: tempDir });
     const installIndex = mocks.state.spawnCalls.findIndex((call) => call.args.join(" ") === "-m pip install faster-whisper==1.2.1");

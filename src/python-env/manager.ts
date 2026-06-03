@@ -133,7 +133,7 @@ async function createWithAcquiredLock(
       timeoutMs: COMMAND_TIMEOUT_MS
     });
     if (!venv.ok) {
-      return { ok: false, reason: `Failed to create Python environment. ${formatCommandFailure(venv)}` };
+      return { ok: false, reason: formatVenvCreationFailure(venv) };
     }
 
     onProgress?.(`Installing ${PINNED_FASTER_WHISPER}...`);
@@ -282,6 +282,24 @@ function formatCommandFailure(result: Extract<CommandResult, { ok: false }>): st
     .filter((part) => part.length > 0)
     .join("\n"));
   return details.length === 0 ? "No diagnostic output was captured." : details;
+}
+
+function formatVenvCreationFailure(result: Extract<CommandResult, { ok: false }>): string {
+  const diagnostic = formatCommandFailure(result);
+  if (!looksLikeMissingVenvSupport(diagnostic)) {
+    return `Failed to create Python environment. ${diagnostic}`;
+  }
+  return [
+    "Failed to create Python environment because Python venv/ensurepip support is missing.",
+    "EstaCoda can still run; only local faster-whisper transcription is unavailable until Python venv support is installed.",
+    "Install Python venv support for your system Python, for example `sudo apt install python3.13-venv` or `sudo apt install python3-venv`, then retry `estacoda voice setup --stt-provider local`.",
+    "Alternatively configure a Python that already has faster-whisper installed: `estacoda voice setup --stt-provider local --python-binary /path/to/python3`.",
+    `Diagnostic: ${diagnostic}`
+  ].join("\n");
+}
+
+function looksLikeMissingVenvSupport(diagnostic: string): boolean {
+  return /ensurepip|python3(?:\.\d+)?-venv|No module named ensurepip|venv support/iu.test(diagnostic);
 }
 
 function truncateDiagnostic(value: string): string {
