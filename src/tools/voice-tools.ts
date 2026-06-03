@@ -5,7 +5,7 @@ import type { ArtifactStore } from "../artifacts/artifact-store.js";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { LoadedRuntimeConfig, SttProvider, TtsProvider } from "../config/runtime-config.js";
 import type { RegisteredTool, SessionToolProvider } from "../contracts/tool.js";
-import type { FasterWhisperWorkerClient } from "./stt-local-whisper.js";
+import type { FasterWhisperWorker } from "./stt-local-whisper.js";
 import {
   checkSttProviderStatus as checkSttProviderStatusFromDispatch,
   computeSttRiskClass,
@@ -36,7 +36,7 @@ export type VoiceToolOptions = {
   stt?: LoadedRuntimeConfig["stt"];
   fetch?: VoiceFetchLike;
   id?: () => string;
-  localWhisper?: FasterWhisperWorkerClient;
+  localWhisper?: FasterWhisperWorker;
   tempRoot?: string;
 };
 
@@ -380,7 +380,7 @@ export async function transcribeAudioFile(input: {
   model?: string;
   stt: LoadedRuntimeConfig["stt"];
   fetch?: VoiceFetchLike;
-  localWhisper?: FasterWhisperWorkerClient;
+  localWhisper?: FasterWhisperWorker;
   audioCacheRoot?: string;
   tempRoot?: string;
   gateway?: boolean;

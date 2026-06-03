@@ -2,7 +2,7 @@ import type { ChannelAttachment, ChannelMessage } from "../contracts/channel.js"
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { createHash } from "node:crypto";
 import { validateAudioInput } from "../tools/audio-validation.js";
-import type { FasterWhisperWorkerClient } from "../tools/stt-local-whisper.js";
+import type { FasterWhisperWorker } from "../tools/stt-local-whisper.js";
 import { checkSttProviderStatus, isFasterWhisperConfig } from "../tools/stt-providers.js";
 import { isGatewayFasterWhisperDownloadDenied } from "../tools/stt-providers.js";
 import { resolveAllowedPath, transcribeAudioFile, type VoiceFetchLike } from "../tools/voice-tools.js";
@@ -28,7 +28,7 @@ export type ChannelVoiceTranscriptionOptions = {
   allowedRoots?: string[];
   fasterWhisperDefaultHfHome?: string;
   fetch?: VoiceFetchLike;
-  localWhisper?: FasterWhisperWorkerClient;
+  localWhisper?: FasterWhisperWorker;
   voiceStateManager?: VoiceStateManager;
   audit?: (event: VoiceTranscriptionAuditEvent) => void | Promise<void>;
 };

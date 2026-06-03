@@ -34,6 +34,11 @@ export type FasterWhisperWorkerResponse = {
   metadata?: Record<string, unknown>;
 };
 
+export type FasterWhisperWorker = {
+  transcribe(request: Omit<FasterWhisperWorkerRequest, "type">): Promise<FasterWhisperWorkerResponse>;
+  dispose?(): Promise<void>;
+};
+
 export type FasterWhisperClientOptions = {
   pythonBinary?: string;
   workerPath?: string;

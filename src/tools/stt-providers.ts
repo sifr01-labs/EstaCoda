@@ -7,7 +7,7 @@ import type { LoadedRuntimeConfig, SttProvider } from "../config/runtime-config.
 import type { ToolRiskClass } from "../contracts/tool.js";
 import { validateAudioInput } from "./audio-validation.js";
 import { formatMissingOpenAiAudioCredential, resolveOpenAiAudioCredential } from "./audio-credentials.js";
-import type { FasterWhisperWorkerClient, FasterWhisperPreset } from "./stt-local-whisper.js";
+import type { FasterWhisperWorker, FasterWhisperPreset } from "./stt-local-whisper.js";
 import type { VoiceFetchLike } from "./voice-tools.js";
 
 export type SpeechTranscriptionResult =
@@ -31,7 +31,7 @@ export type SpeechTranscriptionInput = {
   stt: LoadedRuntimeConfig["stt"];
   fetch?: VoiceFetchLike;
   signal?: AbortSignal;
-  localWhisper?: FasterWhisperWorkerClient;
+  localWhisper?: FasterWhisperWorker;
   audioCacheRoot?: string;
   tempRoot?: string;
   gateway?: boolean;

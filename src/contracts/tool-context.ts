@@ -54,7 +54,7 @@ export type SessionToolContext = {
   webConfig?: Pick<import("../config/runtime-config.js").LoadedRuntimeConfig["web"], "backend" | "searchBackend" | "extractBackend" | "crawlBackend">;
   securityConfig?: Pick<import("../config/runtime-config.js").LoadedRuntimeConfig["security"], "allowPrivateUrls" | "websiteBlocklist">;
   voiceFetch?: import("../tools/voice-tools.js").VoiceFetchLike;
-  localWhisper?: import("../tools/stt-local-whisper.js").FasterWhisperWorkerClient;
+  localWhisper?: import("../tools/stt-local-whisper.js").FasterWhisperWorker;
   tts?: import("../config/runtime-config.js").LoadedRuntimeConfig["tts"];
   stt?: import("../config/runtime-config.js").LoadedRuntimeConfig["stt"];
   imageGen?: import("../config/runtime-config.js").LoadedRuntimeConfig["imageGen"];

@@ -25,7 +25,9 @@ type CapturedFasterWhisperOptions = {
 
 const fasterWhisperMockState = vi.hoisted(() => ({
   constructedOptions: [] as CapturedFasterWhisperOptions[],
-  disposedCount: 0
+  disposedCount: 0,
+  transcribeCalls: [] as Array<Record<string, unknown>>,
+  transcribeResponses: [] as Array<Record<string, unknown>>
 }));
 
 vi.mock("../tools/stt-local-whisper.js", () => ({
@@ -37,7 +39,14 @@ vi.mock("../tools/stt-local-whisper.js", () => ({
       }),
       probe: vi.fn(),
       status: vi.fn(),
-      transcribe: vi.fn()
+      transcribe: vi.fn(async (request: Record<string, unknown>) => {
+        fasterWhisperMockState.transcribeCalls.push(request);
+        return fasterWhisperMockState.transcribeResponses.shift() ?? {
+          ok: true,
+          text: "runtime transcript",
+          model: typeof request.model === "string" ? request.model : "base"
+        };
+      })
     };
   }),
   defaultFasterWhisperWorkerPath: () => "/mock/faster-whisper-worker.py"
@@ -46,6 +55,8 @@ vi.mock("../tools/stt-local-whisper.js", () => ({
 afterEach(() => {
   fasterWhisperMockState.constructedOptions.length = 0;
   fasterWhisperMockState.disposedCount = 0;
+  fasterWhisperMockState.transcribeCalls.length = 0;
+  fasterWhisperMockState.transcribeResponses.length = 0;
 });
 
 const mockModel: ModelProfile = {
@@ -215,6 +226,13 @@ function expectedManagedPython(stateRoot: string): string {
   return process.platform === "win32"
     ? join(stateRoot, "python-env", "Scripts", "python.exe")
     : join(stateRoot, "python-env", "bin", "python");
+}
+
+async function createAudioFixture(prefix = "estacoda-runtime-audio-"): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), prefix));
+  const path = join(dir, "voice.ogg");
+  await writeFile(path, "audio");
+  return path;
 }
 
 describe("createRuntime provider turn budgets", () => {
@@ -2939,7 +2957,7 @@ describe("createRuntime auxiliary consumer wiring", () => {
 });
 
 describe("createRuntime faster-whisper runtime wiring", () => {
-  it("resolves managed Python and persistent model cache paths under global state", async () => {
+  it("creates managed Python lazily and resolves persistent model cache paths under global state", async () => {
     const originalTransformersCache = process.env.TRANSFORMERS_CACHE;
     delete process.env.TRANSFORMERS_CACHE;
     const homeDir = await mkdtemp(join(tmpdir(), "estacoda-runtime-home-"));
@@ -2960,9 +2978,15 @@ describe("createRuntime faster-whisper runtime wiring", () => {
           timeoutMs: 12_345
         })
       });
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(fasterWhisperMockState.constructedOptions).toHaveLength(0);
+
+      const result = await runtime.transcribeAudio?.({ path: await createAudioFixture() });
       await runtime.dispose();
 
+      expect(result).toMatchObject({ ok: true, text: "runtime transcript", model: "base" });
       const persistentHfHome = join(stateRoot, "cache", "huggingface");
+      expect(createSpy).toHaveBeenCalledWith({ stateRoot });
       expect(fasterWhisperMockState.constructedOptions).toHaveLength(1);
       expect(fasterWhisperMockState.constructedOptions[0]).toMatchObject({
         pythonBinary: expectedManagedPython(stateRoot),
@@ -2975,7 +2999,6 @@ describe("createRuntime faster-whisper runtime wiring", () => {
       });
       expect(fasterWhisperMockState.constructedOptions[0].pythonBinary).toContain(join(stateRoot, "python-env"));
       expect(fasterWhisperMockState.constructedOptions[0].env?.HF_HOME).not.toContain("python-env");
-      expect(createSpy).not.toHaveBeenCalled();
       expect(checkSpy).not.toHaveBeenCalled();
     } finally {
       createSpy.mockRestore();
@@ -2988,14 +3011,15 @@ describe("createRuntime faster-whisper runtime wiring", () => {
     }
   });
 
-  it("does not fail runtime startup when managed Python environment creation fails", async () => {
+  it("reports faster-whisper unavailable without failing runtime startup when lazy managed Python creation fails", async () => {
     const originalTransformersCache = process.env.TRANSFORMERS_CACHE;
     delete process.env.TRANSFORMERS_CACHE;
     const homeDir = await mkdtemp(join(tmpdir(), "estacoda-runtime-home-"));
     const options = await minimalRuntimeOptions();
+    const stateRoot = join(homeDir, ".estacoda");
     const createSpy = vi.spyOn(pythonEnvManager, "createManagedEnvironment").mockResolvedValue({
       ok: false,
-      reason: "python3 not found"
+      reason: "ensurepip is not available"
     });
 
     try {
@@ -3004,12 +3028,20 @@ describe("createRuntime faster-whisper runtime wiring", () => {
         homeDir,
         stt: fasterWhisperStt()
       });
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(fasterWhisperMockState.constructedOptions).toHaveLength(0);
+
+      const result = await runtime.transcribeAudio?.({ path: await createAudioFixture() });
       await runtime.dispose();
 
-      const stateRoot = join(homeDir, ".estacoda");
-      expect(createSpy).not.toHaveBeenCalled();
-      expect(fasterWhisperMockState.constructedOptions).toHaveLength(1);
-      expect(fasterWhisperMockState.constructedOptions[0].pythonBinary).toBe(expectedManagedPython(stateRoot));
+      expect(createSpy).toHaveBeenCalledWith({ stateRoot });
+      expect(fasterWhisperMockState.constructedOptions).toHaveLength(0);
+      expect(result).toMatchObject({ ok: false });
+      if (result?.ok !== false) {
+        throw new Error("expected faster-whisper transcription to fail");
+      }
+      expect(result.content).toContain("Local faster-whisper STT is unavailable");
+      expect(result.content).toContain("ensurepip is not available");
     } finally {
       createSpy.mockRestore();
       if (originalTransformersCache === undefined) {
@@ -3020,7 +3052,7 @@ describe("createRuntime faster-whisper runtime wiring", () => {
     }
   });
 
-  it("uses configured Python and Hugging Face cache overrides when provided", async () => {
+  it("uses configured Python and Hugging Face cache overrides lazily when provided", async () => {
     const originalTransformersCache = process.env.TRANSFORMERS_CACHE;
     process.env.TRANSFORMERS_CACHE = "/existing/transformers-cache";
     const homeDir = await mkdtemp(join(tmpdir(), "estacoda-runtime-home-"));
@@ -3039,8 +3071,12 @@ describe("createRuntime faster-whisper runtime wiring", () => {
           hfHome: "/custom/huggingface"
         })
       });
+      expect(fasterWhisperMockState.constructedOptions).toHaveLength(0);
+
+      const result = await runtime.transcribeAudio?.({ path: await createAudioFixture() });
       await runtime.dispose();
 
+      expect(result).toMatchObject({ ok: true, text: "runtime transcript", model: "base" });
       expect(fasterWhisperMockState.constructedOptions).toHaveLength(1);
       expect(fasterWhisperMockState.constructedOptions[0]).toMatchObject({
         pythonBinary: "/custom/python3",

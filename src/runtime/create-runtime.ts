@@ -66,9 +66,9 @@ import { TaskFlowAgentLoopAdapter } from "../taskflow/taskflow-agent-loop-adapte
 import type { ImageGenerationFetchLike } from "../tools/image-generation-tools.js";
 import { defaultImageGenerationConfig, verifyImageGeneration, type ImageGenerationVerification } from "../tools/image-generation-verify.js";
 import { transcribeAudioFile, type VoiceFetchLike } from "../tools/voice-tools.js";
-import { FasterWhisperWorkerClient } from "../tools/stt-local-whisper.js";
+import type { FasterWhisperWorker } from "../tools/stt-local-whisper.js";
 import { isFasterWhisperConfig } from "../tools/stt-providers.js";
-import { resolvePythonBinary } from "../python-env/manager.js";
+import { ManagedFasterWhisperWorker } from "../python-env/managed-faster-whisper-worker.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
 import { ToolRegistry } from "../tools/tool-registry.js";
 import { toolRegistrationPlan, type ToolRegistrationPhase } from "../tools/index.js";
@@ -136,7 +136,7 @@ export type RuntimeOptions = {
   tts?: LoadedRuntimeConfig["tts"];
   stt?: LoadedRuntimeConfig["stt"];
   voiceFetch?: VoiceFetchLike;
-  localWhisper?: FasterWhisperWorkerClient;
+  localWhisper?: FasterWhisperWorker;
   imageGen?: LoadedRuntimeConfig["imageGen"];
   imageGenerationFetch?: ImageGenerationFetchLike;
   ui?: {
@@ -464,17 +464,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const imageCacheRoot = profilePaths.imageCachePath;
   const persistentHfHome = options.stt?.local?.fasterWhisper?.hfHome ?? join(globalPaths.stateRoot, "cache", "huggingface");
   const localWhisper = options.localWhisper ?? (options.stt !== undefined && isFasterWhisperConfig(options.stt)
-    ? new FasterWhisperWorkerClient({
-        pythonBinary: resolvePythonBinary({
-          stateRoot: globalPaths.stateRoot,
-          configOverride: options.stt.local?.pythonBinary
-        }),
-        queueDepth: options.stt.local?.fasterWhisper?.queueDepth ?? 1,
-        timeoutMs: options.stt.local?.fasterWhisper?.timeoutMs ?? 300_000,
-        env: {
-          HF_HOME: persistentHfHome,
-          TRANSFORMERS_CACHE: process.env.TRANSFORMERS_CACHE ?? persistentHfHome
-        }
+    ? new ManagedFasterWhisperWorker({
+        stateRoot: globalPaths.stateRoot,
+        stt: options.stt,
+        defaultHfHome: persistentHfHome
       })
     : undefined);
   let activeTrustedWorkspace = false;
@@ -1255,7 +1248,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       unregisterBrowserEmergencyCleanup?.();
       browserSessionLifecycle?.stop();
       await browserSessionLifecycle?.cleanupAll();
-      await localWhisper?.dispose();
+      await localWhisper?.dispose?.();
       await Promise.all(loadedMcpServers.map((server) => server.stop().catch(() => undefined)));
       const closeSessionDb = closeSessionDbOnDispose
         ? (sessionDb as { close?: () => void | Promise<void> }).close
