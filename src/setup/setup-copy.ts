@@ -45,6 +45,7 @@ const TECHNICAL_TOKENS = [
   "ESTACODA_TELEGRAM_BOT_TOKEN",
   "/workspace.trust.grant",
   "@BotFather",
+  "BotFather",
   "@userinfobot",
   "@getidsbot",
   "@chatIDrobot",

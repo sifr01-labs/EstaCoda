@@ -32,7 +32,7 @@ import type {
   ToolActivityRailEvent,
 } from "../../contracts/view-model.js";
 import type { ResolvedTokens, TokenGlyph } from "../../contracts/ui-tokens.js";
-import { measureTextWidth, measureVisibleWidth, padVisibleEnd, padVisibleStart, padVisibleAlign, truncateVisible } from "./layout.js";
+import { measureTextWidth, measureVisibleWidth, padVisibleEnd, padVisibleStart, padVisibleAlign, truncateVisible, wrapText } from "./layout.js";
 import type { UiLocale } from "../../ui/cli-ui-copy.js";
 import { chromeCopy } from "../../ui/cli-ui-copy.js";
 import { isolateLtr, isolateRtl, LRI, PDI, RLI } from "../../ui/bidi.js";
@@ -637,10 +637,14 @@ export class StandardRenderer {
 
     const lines: string[] = [top];
 
-    for (let i = 0; i < vm.bodyLines.length; i++) {
-      const text = this.#localizedNatural(vm.bodyLines[i], direction, contentWidth);
-      const styled = i === 0 ? this.#primary(text) : this.#secondary(text);
-      lines.push(`  ${direction === "rtl" ? padVisibleStart(styled, contentWidth) : styled}`);
+    if (direction === "rtl") {
+      lines.push(...this.#renderRtlOnboardingBodyLines(vm.bodyLines, contentWidth));
+    } else {
+      for (let i = 0; i < vm.bodyLines.length; i++) {
+        const text = this.#localizedNatural(vm.bodyLines[i], direction, contentWidth);
+        const styled = i === 0 ? this.#primary(text) : this.#secondary(text);
+        lines.push(`  ${styled}`);
+      }
     }
 
     for (const technicalLine of vm.technicalLines ?? []) {
@@ -685,6 +689,56 @@ export class StandardRenderer {
   #localizedNatural(value: string, direction: TextDirection, maxWidth: number): string {
     const truncated = truncateVisible(value, maxWidth);
     return direction === "rtl" ? isolateRtl(truncated) : truncated;
+  }
+
+  #renderRtlOnboardingBodyLines(bodyLines: readonly string[], contentWidth: number): string[] {
+    if (bodyLines.length === 0) return [];
+
+    const blockWidth = computeRtlOnboardingBodyBlockWidth(bodyLines, contentWidth);
+    const rendered: string[] = [];
+    for (let i = 0; i < bodyLines.length; i++) {
+      const style = i === 0 ? this.#primary.bind(this) : this.#secondary.bind(this);
+      const numbered = splitNumberedRtlLine(bodyLines[i]);
+      if (numbered !== undefined) {
+        rendered.push(...this.#renderRtlNumberedBodyLine(numbered, blockWidth, contentWidth, style));
+      } else {
+        rendered.push(...this.#renderRtlCardBodyLine(bodyLines[i], blockWidth, contentWidth, style));
+      }
+    }
+    return rendered;
+  }
+
+  #renderRtlCardBodyLine(
+    line: string,
+    blockWidth: number,
+    contentWidth: number,
+    style: (value: string) => string
+  ): string[] {
+    if (line.length === 0) return ["  "];
+    return wrapText(line, blockWidth).map((segment) => {
+      const text = style(isolateRtl(closeOpenBidiIsolates(segment)));
+      return `  ${padVisibleStart(padVisibleStart(text, blockWidth), contentWidth)}`;
+    });
+  }
+
+  #renderRtlNumberedBodyLine(
+    line: RtlNumberedBodyLine,
+    blockWidth: number,
+    contentWidth: number,
+    style: (value: string) => string
+  ): string[] {
+    const marker = style(isolateLtr(line.marker));
+    const markerWidth = measureVisibleWidth(marker);
+    const gap = "  ";
+    const markerSlotWidth = markerWidth + measureVisibleWidth(gap);
+    const textWidth = Math.max(8, blockWidth - markerSlotWidth);
+    return wrapText(line.text, textWidth).map((segment, index) => {
+      const text = style(isolateRtl(closeOpenBidiIsolates(segment)));
+      const row = index === 0
+        ? `${padVisibleStart(text, textWidth)}${gap}${marker}`
+        : `${padVisibleStart(text, textWidth)}${" ".repeat(markerSlotWidth)}`;
+      return `  ${padVisibleStart(padVisibleStart(row, blockWidth), contentWidth)}`;
+    });
   }
 
   // ──────────────────────────────────────
@@ -1713,6 +1767,26 @@ function visibleBreakIndex(value: string, maxWidth: number): number {
   }
 
   return value.length;
+}
+
+type RtlNumberedBodyLine = {
+  readonly marker: string;
+  readonly text: string;
+};
+
+function splitNumberedRtlLine(line: string): RtlNumberedBodyLine | undefined {
+  const match = /^(\d+\.)\s+(.+)$/u.exec(line);
+  if (match === null) return undefined;
+  return { marker: match[1] ?? "", text: match[2] ?? "" };
+}
+
+function computeRtlOnboardingBodyBlockWidth(bodyLines: readonly string[], contentWidth: number): number {
+  const widestLine = Math.max(0, ...bodyLines.map((line) => {
+    const numbered = splitNumberedRtlLine(line);
+    return measureVisibleWidth(numbered?.text ?? line);
+  }));
+  const preferredWidth = Math.min(88, Math.max(56, widestLine));
+  return Math.max(8, Math.min(contentWidth, preferredWidth));
 }
 
 function closeOpenBidiIsolates(value: string): string {

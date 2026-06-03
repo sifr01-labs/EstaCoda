@@ -493,6 +493,7 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.summary")).toContain(isolateLtr("~/.estacoda/python-env"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.summary")).toContain(isolateLtr("~/.estacoda/cache/huggingface"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.telegram.botToken.body")).toContain(isolateLtr("@BotFather"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.telegram.botToken.body")).toContain(isolateLtr("BotFather"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.telegram.botToken.body")).toContain(isolateLtr("/newbot"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.telegram.allowedUserIds.body")).toContain(isolateLtr("@userinfobot"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.telegram.allowedUserIds.body")).toContain(isolateLtr("/start"));

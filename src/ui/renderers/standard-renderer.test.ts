@@ -487,7 +487,7 @@ describe("StandardRenderer — dark theme", () => {
     const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: fullCaps(), locale: "ar" });
     const out = r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
       title: "الثقة بمساحة العمل",
-      bodyLines: ["هل تثق بمساحة العمل هذه؟", "يمكن لـ EstaCoda قراءة ملفات المشروع وطلب الموافقة قبل الإجراءات الخطرة."],
+      bodyLines: ["هل تثق بمساحة العمل هذه؟", `يمكن لـ ${isolateLtr("EstaCoda")} قراءة ملفات المشروع وطلب الموافقة قبل الإجراءات الخطرة.`],
       technicalLines: ["/workspace", "KIMI_API_KEY", "kimi-k2", "openrouter"],
       options: [
         { id: "trust", label: "ثق بمساحة العمل", description: "اسمح بالعمل المحلي هنا." },
@@ -506,10 +506,49 @@ describe("StandardRenderer — dark theme", () => {
     const descriptionLine = plain.split("\n").find((line) => line.includes(isolateRtl("اسمح بالعمل المحلي هنا.")));
     expect(optionLine).toMatch(/^\s{4,}▸/u);
     expect(descriptionLine).toMatch(/^\s{4,}/u);
+    expect(out).toContain(isolateLtr("EstaCoda"));
     expect(out).toContain(isolateLtr("/workspace"));
     expect(out).toContain(isolateLtr("KIMI_API_KEY"));
     expect(out).toContain(isolateLtr("kimi-k2"));
     expect(out).toContain(isolateLtr("openrouter"));
+  });
+
+  it("renders Arabic numbered onboarding body rows with controlled marker placement", () => {
+    const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: fullCaps(), locale: "ar" });
+    const out = r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: `ضبط ${isolateLtr("Telegram")}`,
+      bodyLines: [
+        `ربط بوت ${isolateLtr("Telegram")}`,
+        `يمكن لـ ${isolateLtr("EstaCoda")} تلقّي الأوامر من ${isolateLtr("Telegram")} بعد ربط بوت. اتبع الخطوات التالية:`,
+        `1. افتح ${isolateLtr("Telegram")} وابحث عن الحساب الرسمي ${isolateLtr("@BotFather")}. استخدم الحساب الموثّق بعلامة التحقق الزرقاء.`,
+        `2. أرسل الأمر ${isolateLtr("/newbot")} واتبع تعليمات ${isolateLtr("BotFather")} لإنشاء بوت إذا لم يكن لديك بوت بالفعل.`,
+        `3. انسخ رمز ${isolateLtr("API")} الذي يرسله لك ${isolateLtr("BotFather")}.`,
+      ],
+      options: [],
+      selectedOptionIndex: 0,
+      locale: "ar",
+      direction: "rtl",
+    }));
+
+    const plain = stripAnsi(out);
+    expectBalancedBidiIsolates(plain);
+    expect(plain).toContain(isolateLtr("Telegram"));
+    expect(plain).toContain(isolateLtr("@BotFather"));
+    expect(plain).toContain(isolateLtr("/newbot"));
+    expect(plain).toContain(isolateLtr("API"));
+    expect(plain).toContain(isolateLtr("1."));
+    expect(plain).toContain(isolateLtr("2."));
+    expect(plain).toContain(isolateLtr("3."));
+
+    const numberedRows = plain.split("\n").filter((line) => /\d\./u.test(line));
+    expect(numberedRows.length).toBeGreaterThanOrEqual(3);
+    for (const row of numberedRows) {
+      expect(row).not.toMatch(/^\s*\d+\.\s+[\u0600-\u06FF]/u);
+      expect(measureVisibleWidth(row)).toBeLessThanOrEqual(fullCaps().terminalWidth);
+    }
+    for (const line of plain.split("\n")) {
+      expect(measureVisibleWidth(line)).toBeLessThanOrEqual(fullCaps().terminalWidth);
+    }
   });
 
   it("renders permission card with no ANSI when color disabled", () => {
