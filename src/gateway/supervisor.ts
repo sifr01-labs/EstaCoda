@@ -231,6 +231,7 @@ export type SupervisorInternalState = {
   shutdownClean?: boolean;
   shutdownReason?: string;
   drainCancelled: boolean;
+  signalExit?: Promise<void>;
   hookRegistry?: HookRegistry;
 };
 
@@ -322,6 +323,7 @@ function createInitialState(
     cleanupDone: false,
     startupComplete: false,
     drainCancelled: false,
+    signalExit: undefined,
   };
 }
 
@@ -489,7 +491,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       state.shutdownClean = false;
       state.shutdownReason = "forced-signal";
       state.running = false;
-      cleanupSupervisorStartupResources(state).then(() => {
+      state.signalExit = cleanupSupervisorStartupResources(state).then(() => {
         state.exit(1);
       });
       return;
@@ -498,7 +500,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     state.draining = true;
     logInfo(`Shutting down${signalName ? ` (${signalName})` : ""}...`);
 
-    (async () => {
+    state.signalExit = (async () => {
       await writeGatewayState(profilePaths, { lifecycle: "draining", startedAt, pid: process.pid, version, profileId });
       logInfo("Draining, waiting for active turns...");
 
@@ -1297,6 +1299,16 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
         await doSleep(pollIntervalMs);
       }
     } while (state.running);
+
+    if (state.signalExit !== undefined) {
+      await state.signalExit;
+      return {
+        ok: state.drainCancelled !== true,
+        output: state.drainCancelled === true ? "Gateway forced exit" : "Gateway stopped after signal",
+        polls,
+        processed,
+      };
+    }
 
     state.shutdownClean = true;
     state.shutdownReason = "once";

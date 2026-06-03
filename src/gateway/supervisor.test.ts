@@ -373,8 +373,7 @@ describe("runGatewaySupervisor", () => {
       },
     });
 
-    // Give it time to install handlers
-    await new Promise((r) => setTimeout(r, 50));
+    await waitForCondition(() => process.listenerCount("SIGTERM") > beforeSigterm);
 
     process.emit("SIGTERM");
 
@@ -405,7 +404,7 @@ describe("runGatewaySupervisor", () => {
       },
     });
 
-    await new Promise((r) => setTimeout(r, 50));
+    await waitForCondition(() => process.listenerCount("SIGINT") > beforeSigint);
 
     process.emit("SIGINT");
 
@@ -433,7 +432,7 @@ describe("runGatewaySupervisor", () => {
       },
     });
 
-    await new Promise((r) => setTimeout(r, 50));
+    await waitForCondition(() => process.listenerCount("SIGTERM") > beforeSigterm);
 
     process.emit("SIGTERM");
     process.emit("SIGTERM");
@@ -959,6 +958,7 @@ describe("runGatewaySupervisor", () => {
     const exited = fakeExit();
     const tick = fakeTickCron();
     const gateway = fakeChannelGateway();
+    const beforeSigterm = process.listenerCount("SIGTERM");
 
     const promise = runGatewaySupervisor({
       workspaceRoot: tmpDir,
@@ -972,7 +972,7 @@ describe("runGatewaySupervisor", () => {
       },
     });
 
-    await new Promise((r) => setTimeout(r, 50));
+    await waitForCondition(() => process.listenerCount("SIGTERM") > beforeSigterm && tick.calls() === 1);
     process.emit("SIGTERM");
     await promise;
     await new Promise((r) => setTimeout(r, 600));

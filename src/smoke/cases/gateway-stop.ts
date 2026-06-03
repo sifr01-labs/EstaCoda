@@ -45,7 +45,8 @@ export const gateway_stop_case: SmokeCase = {
   tags: ["lifecycle", "gateway", "stop"],
   run: async () => {
     const tempHome = mkdtempSync(join(tmpdir(), "estacoda-smoke-stop-"));
-    const profilePaths = resolveProfileStateHome({ homeDir: tempHome, profileId: "default" });
+    const profileId = "smoke-gateway-stop";
+    const profilePaths = resolveProfileStateHome({ homeDir: tempHome, profileId });
 
     const pidPath = join(profilePaths.gatewayStatePath, "gateway.pid");
     const statePath = join(profilePaths.gatewayStatePath, "gateway-state.json");
@@ -55,14 +56,14 @@ export const gateway_stop_case: SmokeCase = {
       const child1 = spawnDecoy("process.on('SIGTERM', () => process.exit(0)); setInterval(() => {}, 1000);");
       const pid1 = await waitForPid(child1);
 
-      await writeGatewayPid(profilePaths, { pid: pid1, startedAt: new Date().toISOString(), version: "0.0.1", profileId: "default" });
-      await writeGatewayState(profilePaths, { lifecycle: "running", startedAt: new Date().toISOString(), pid: pid1, version: "0.0.1", profileId: "default" });
+      await writeGatewayPid(profilePaths, { pid: pid1, startedAt: new Date().toISOString(), version: "0.0.1", profileId });
+      await writeGatewayState(profilePaths, { lifecycle: "running", startedAt: new Date().toISOString(), pid: pid1, version: "0.0.1", profileId });
 
-      const result1 = await runGatewayStop({ workspaceRoot: tempHome, homeDir: tempHome });
+      const result1 = await runGatewayStop({ workspaceRoot: tempHome, homeDir: tempHome, profileId });
       if (!result1.ok) {
         throw new Error(`gateway stop failed: ${result1.output}`);
       }
-      if (!result1.output.includes("Gateway stopped")) {
+      if (!result1.output.includes("Gateway service stopped") && !result1.output.includes("Gateway stopped")) {
         throw new Error(`Unexpected output: ${result1.output}`);
       }
       if (isAlive(pid1)) {
@@ -84,10 +85,10 @@ export const gateway_stop_case: SmokeCase = {
       // Allow Python to fully initialize signal handler
       await new Promise((r) => setTimeout(r, 150));
 
-      await writeGatewayPid(profilePaths, { pid: pid2, startedAt: new Date().toISOString(), version: "0.0.1", profileId: "default" });
-      await writeGatewayState(profilePaths, { lifecycle: "running", startedAt: new Date().toISOString(), pid: pid2, version: "0.0.1", profileId: "default" });
+      await writeGatewayPid(profilePaths, { pid: pid2, startedAt: new Date().toISOString(), version: "0.0.1", profileId });
+      await writeGatewayState(profilePaths, { lifecycle: "running", startedAt: new Date().toISOString(), pid: pid2, version: "0.0.1", profileId });
 
-      const result2 = await runGatewayStop({ workspaceRoot: tempHome, homeDir: tempHome, force: true });
+      const result2 = await runGatewayStop({ workspaceRoot: tempHome, homeDir: tempHome, profileId, force: true });
       if (!result2.ok) {
         throw new Error(`gateway stop --force failed: ${result2.output}`);
       }
