@@ -493,31 +493,56 @@ describe("runGatewaySupervisor", () => {
 
   it("double signal forces exit(1)", async () => {
     const exited = fakeExit();
-    const gateway = fakeChannelGateway();
+    let startCalls = 0;
+    let stopCalls = 0;
+    const gateway = {
+      ...fakeChannelGateway(),
+      start: async () => {
+        startCalls += 1;
+      },
+      stop: async () => {
+        stopCalls += 1;
+      },
+      hasPendingWork: () => true,
+    };
+    const warnings: string[] = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation((message: unknown) => {
+      warnings.push(String(message));
+    });
     const beforeSigint = process.listenerCount("SIGINT");
     const beforeSigterm = process.listenerCount("SIGTERM");
 
-    const promise = runGatewaySupervisor({
-      workspaceRoot: tmpDir,
-      homeDir: tmpDir,
-      once: false,
-      factories: {
-        createChannelGateway: () => gateway as any,
-        createDeliveryRouter: () => fakeDeliveryRouter() as any,
-        exit: exited.exit,
-      },
-    });
+    try {
+      const promise = runGatewaySupervisor({
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        once: false,
+        drainTimeoutMs: 5_000,
+        factories: {
+          createChannelGateway: () => gateway as any,
+          createDeliveryRouter: () => fakeDeliveryRouter() as any,
+          exit: exited.exit,
+        },
+      });
 
-    await waitForCondition(() => process.listenerCount("SIGTERM") > beforeSigterm);
+      await waitForCondition(() => process.listenerCount("SIGTERM") > beforeSigterm && startCalls === 1);
 
-    process.emit("SIGTERM");
-    process.emit("SIGTERM");
+      process.emit("SIGTERM");
+      process.emit("SIGTERM");
+      process.emit("SIGTERM");
 
-    await promise;
+      const result = await promise;
 
-    expect(exited.codes()).toContain(1);
-    expect(process.listenerCount("SIGINT")).toBe(beforeSigint);
-    expect(process.listenerCount("SIGTERM")).toBe(beforeSigterm);
+      expect(result.ok).toBe(false);
+      expect(result.output).toBe("Gateway forced exit");
+      expect(exited.codes().filter((code) => code === 1)).toHaveLength(1);
+      expect(stopCalls).toBe(1);
+      expect(warnings.join("\n")).not.toContain("database connection is not open");
+      expect(process.listenerCount("SIGINT")).toBe(beforeSigint);
+      expect(process.listenerCount("SIGTERM")).toBe(beforeSigterm);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("cron tick runs in main loop", async () => {

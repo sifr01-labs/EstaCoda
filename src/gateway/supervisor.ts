@@ -510,6 +510,10 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
   // 4. Signal handlers (installed EARLY)
   const shutdown = (signalName?: string) => {
     if (state.shutdownStarted) {
+      if (state.drainCancelled) {
+        logWarning("Forced exit already in progress");
+        return;
+      }
       logWarning("Forced exit on second signal");
       state.drainCancelled = true;
       state.shutdownClean = false;
@@ -1308,18 +1312,22 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       });
       }
 
-      for (const wrapper of wrappers) {
-        await wrapper.tick();
+      if (shouldRunSupervisorTicks(state)) {
+        for (const wrapper of wrappers) {
+          await wrapper.tick();
+        }
       }
 
-      await runGatewayApprovalResolutionTick(gateway, gatewayApprovalResolutionGuard);
+      await runGatewayApprovalResolutionTick(gateway, gatewayApprovalResolutionGuard, state);
 
-      for (const wrapper of wrappers) {
-        try {
-          const count = await wrapper.poll();
-          processed += count;
-        } catch (err) {
-          logWarning(`Adapter ${wrapper.kind} poll error: ${err instanceof Error ? err.message : String(err)}`);
+      if (shouldRunSupervisorTicks(state)) {
+        for (const wrapper of wrappers) {
+          try {
+            const count = await wrapper.poll();
+            processed += count;
+          } catch (err) {
+            logWarning(`Adapter ${wrapper.kind} poll error: ${err instanceof Error ? err.message : String(err)}`);
+          }
         }
       }
 
@@ -1403,6 +1411,7 @@ const STUCK_EVENT_WINDOW_MS = 600_000;
 const STUCK_EVENTS_BEFORE_SUSPEND = 3;
 
 export async function runPrune(state: SupervisorInternalState, guard: { running: boolean }): Promise<void> {
+  if (!shouldRunSupervisorTicks(state)) return;
   if (guard.running) {
     logDebug("Prune skipped: previous run still active");
     return;
@@ -1418,6 +1427,7 @@ export async function runPrune(state: SupervisorInternalState, guard: { running:
 }
 
 export async function runStuckScanGuarded(state: SupervisorInternalState, guard: { running: boolean }): Promise<void> {
+  if (!shouldRunSupervisorTicks(state)) return;
   if (guard.running) {
     logDebug("Stuck scan skipped: previous run still active");
     return;
@@ -1433,6 +1443,7 @@ export async function runStuckScanGuarded(state: SupervisorInternalState, guard:
 }
 
 export async function runStuckScan(state: SupervisorInternalState): Promise<void> {
+  if (!shouldRunSupervisorTicks(state)) return;
   if (state.activeTurnRegistry === undefined || state.runtimeCache === undefined) return;
 
   const now = Date.now();
@@ -1484,6 +1495,7 @@ export async function runStuckScan(state: SupervisorInternalState): Promise<void
 }
 
 export async function runRuntimeCacheStateHeartbeat(state: SupervisorInternalState, guard: { running: boolean }): Promise<void> {
+  if (!shouldRunSupervisorTicks(state)) return;
   if (guard.running) {
     logDebug("Runtime cache state write skipped: previous write still active");
     return;
@@ -1501,6 +1513,7 @@ export async function runRuntimeCacheStateHeartbeat(state: SupervisorInternalSta
 }
 
 export async function runGatewayApprovalExpiry(state: SupervisorInternalState, guard: { running: boolean }): Promise<void> {
+  if (!shouldRunSupervisorTicks(state)) return;
   if (guard.running) {
     logDebug("Gateway approval expiry skipped: previous run still active");
     return;
@@ -1518,8 +1531,10 @@ export async function runGatewayApprovalExpiry(state: SupervisorInternalState, g
 
 export async function runGatewayApprovalResolutionTick(
   gateway: { tickApprovalResolutions?: () => Promise<void> },
-  guard: { running: boolean }
+  guard: { running: boolean },
+  state?: SupervisorInternalState
 ): Promise<void> {
+  if (state !== undefined && !shouldRunSupervisorTicks(state)) return;
   if (guard.running) {
     logDebug("Gateway approval resolution tick skipped: previous run still active");
     return;
@@ -1535,6 +1550,10 @@ export async function runGatewayApprovalResolutionTick(
   } finally {
     guard.running = false;
   }
+}
+
+function shouldRunSupervisorTicks(state: SupervisorInternalState): boolean {
+  return state.running && !state.draining && !state.cleanupDone;
 }
 
 export function buildRuntimeCacheState(state: SupervisorInternalState): RuntimeCacheState {
