@@ -3,8 +3,9 @@ import { createSessionRenderer } from "./session-renderer.js";
 import { resolveTokens } from "../theme/token-resolver.js";
 import { StandardRenderer } from "../ui/renderers/standard-renderer.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
-import { buildConversationMessageViewModel, buildSessionStatusRailViewModel, buildShortcutHintRailViewModel } from "../ui/view-models/builders.js";
+import { buildConversationMessageViewModel, buildOnboardingPromptCardViewModel, buildSessionStatusRailViewModel, buildShortcutHintRailViewModel } from "../ui/view-models/builders.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
+import { isolateRtl } from "../ui/bidi.js";
 
 function assertNoAnsi(text: string): void {
   expect(text).not.toMatch(/\x1b\[/);
@@ -148,6 +149,26 @@ describe("createSessionRenderer — plain renderer locale", () => {
     const vm = buildShortcutHintRailViewModel({ hints: [] });
     const out = renderer.render(vm);
     expect(out).toContain("خروج");
+    assertNoAnsi(out);
+  });
+
+  it("renders Arabic onboarding prompt cards with mirrored markers in plain mode", () => {
+    const renderer = createSessionRenderer({ capabilities: plainCaps(), locale: "ar" });
+    const vm = buildOnboardingPromptCardViewModel({
+      title: "الثقة بمساحة العمل",
+      bodyLines: ["هل تثق بمساحة العمل هذه؟"],
+      options: [
+        { id: "trust", label: "ثق بمساحة العمل" },
+        { id: "skip", label: "ليس الآن" },
+      ],
+      selectedOptionIndex: 0,
+      locale: "ar",
+      direction: "rtl",
+    });
+    const out = renderer.render(vm);
+
+    expect(out).toContain(`${isolateRtl("ثق بمساحة العمل")} <`);
+    expect(out).not.toContain(`> ${isolateRtl("ثق بمساحة العمل")}`);
     assertNoAnsi(out);
   });
 

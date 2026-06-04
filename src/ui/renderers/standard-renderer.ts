@@ -35,7 +35,7 @@ import type { ResolvedTokens, TokenGlyph } from "../../contracts/ui-tokens.js";
 import { measureTextWidth, measureVisibleWidth, padVisibleEnd, padVisibleStart, padVisibleAlign, truncateVisible, wrapText } from "./layout.js";
 import type { UiLocale } from "../../ui/cli-ui-copy.js";
 import { chromeCopy } from "../../ui/cli-ui-copy.js";
-import { isolateLtr, isolateRtl, LRI, PDI, RLI } from "../../ui/bidi.js";
+import { closeOpenBidiIsolates, isolateLtr, isolateRtl } from "../../ui/bidi.js";
 import type { TextDirection } from "../../contracts/ui.js";
 import { formatSessionDisplayId } from "../../session/session-id.js";
 
@@ -608,7 +608,9 @@ export class StandardRenderer {
     const topRight = this.#useUnicode ? "╮" : "+";
     const bottomLeft = this.#useUnicode ? "╰" : "+";
     const bottomRight = this.#useUnicode ? "╯" : "+";
-    const selectedMarker = this.#useUnicode ? "▸" : ">";
+    const selectedMarker = direction === "rtl"
+      ? this.#useUnicode ? "◂" : "<"
+      : this.#useUnicode ? "▸" : ">";
 
     const rawContentLines: string[] = [
       ...vm.bodyLines,
@@ -622,17 +624,12 @@ export class StandardRenderer {
     const width = Math.min(requestedWidth, naturalWidth);
     const contentWidth = Math.max(8, width - 4);
     const innerWidth = Math.max(8, width - 2);
-    const leftTitleRule = `${horiz.repeat(Math.min(4, Math.max(1, innerWidth - 4)))} `;
+    const titleRuleWidth = Math.min(4, Math.max(1, innerWidth - 4));
+    const leftTitleRule = `${horiz.repeat(titleRuleWidth)} `;
     const titleRaw = this.#onboardingTitle(vm.title, Math.max(1, innerWidth - measureVisibleWidth(leftTitleRule) - 2), direction);
-    const rightRuleWidth = Math.max(
-      0,
-      innerWidth - measureVisibleWidth(leftTitleRule) - measureVisibleWidth(titleRaw) - 1
-    );
-    const top = [
-      this.#surfaceBorder(`${topLeft}${leftTitleRule}`),
-      this.#brand(this.#bold(titleRaw)),
-      this.#surfaceBorder(` ${horiz.repeat(rightRuleWidth)}${topRight}`),
-    ].join("");
+    const top = direction === "rtl"
+      ? this.#renderRtlOnboardingPromptCardTop(topLeft, topRight, horiz, innerWidth, titleRaw, titleRuleWidth)
+      : this.#renderLtrOnboardingPromptCardTop(topLeft, topRight, horiz, innerWidth, titleRaw, leftTitleRule);
     const bottom = this.#surfaceBorder(`${bottomLeft}${horiz.repeat(width - 2)}${bottomRight}`);
 
     const lines: string[] = [top];
@@ -665,15 +662,12 @@ export class StandardRenderer {
         ? this.#localizedTechnical(option.label, locale, Math.max(1, contentWidth - 2))
         : this.#localizedNatural(option.label, direction, Math.max(1, contentWidth - 2));
       const styledOption = this.#primary(optionText);
-      const optionRow = `${marker} ${styledOption}`;
+      const optionRow = direction === "rtl" ? `${styledOption} ${marker}` : `${marker} ${styledOption}`;
       lines.push(direction === "rtl"
         ? `  ${padVisibleStart(optionRow, contentWidth)}`
         : `  ${optionRow}`);
       if (option.description !== undefined) {
-        const description = this.#muted(this.#localizedNatural(option.description, direction, Math.max(1, contentWidth - 4)));
-        lines.push(direction === "rtl"
-          ? `  ${padVisibleStart(description, contentWidth)}`
-          : `    ${description}`);
+        lines.push(...this.#renderOnboardingPromptCardOptionDescription(option.description, direction, contentWidth));
       }
     }
 
@@ -684,6 +678,62 @@ export class StandardRenderer {
 
     lines.push(bottom);
     return lines.join("\n");
+  }
+
+  #renderLtrOnboardingPromptCardTop(
+    topLeft: string,
+    topRight: string,
+    horiz: string,
+    innerWidth: number,
+    titleRaw: string,
+    leftTitleRule: string
+  ): string {
+    const rightRuleWidth = Math.max(
+      0,
+      innerWidth - measureVisibleWidth(leftTitleRule) - measureVisibleWidth(titleRaw) - 1
+    );
+    return [
+      this.#surfaceBorder(`${topLeft}${leftTitleRule}`),
+      this.#brand(this.#bold(titleRaw)),
+      this.#surfaceBorder(` ${horiz.repeat(rightRuleWidth)}${topRight}`),
+    ].join("");
+  }
+
+  #renderRtlOnboardingPromptCardTop(
+    topLeft: string,
+    topRight: string,
+    horiz: string,
+    innerWidth: number,
+    titleRaw: string,
+    titleRuleWidth: number
+  ): string {
+    const rightTitleRule = ` ${horiz.repeat(titleRuleWidth)}`;
+    const leftRuleWidth = Math.max(
+      0,
+      innerWidth - measureVisibleWidth(titleRaw) - measureVisibleWidth(rightTitleRule) - 1
+    );
+    return [
+      this.#surfaceBorder(`${topLeft}${horiz.repeat(leftRuleWidth)} `),
+      this.#brand(this.#bold(titleRaw)),
+      this.#surfaceBorder(`${rightTitleRule}${topRight}`),
+    ].join("");
+  }
+
+  #renderOnboardingPromptCardOptionDescription(
+    description: string,
+    direction: TextDirection,
+    contentWidth: number
+  ): string[] {
+    const descriptionWidth = Math.max(1, contentWidth - 4);
+    if (direction !== "rtl") {
+      const text = this.#muted(this.#localizedNatural(description, direction, descriptionWidth));
+      return [`    ${text}`];
+    }
+
+    return wrapText(description, Math.max(8, descriptionWidth)).map((segment) => {
+      const text = this.#muted(isolateRtl(closeOpenBidiIsolates(segment)));
+      return `  ${padVisibleStart(text, contentWidth)}`;
+    });
   }
 
   #localizedNatural(value: string, direction: TextDirection, maxWidth: number): string {
@@ -1787,18 +1837,6 @@ function computeRtlOnboardingBodyBlockWidth(bodyLines: readonly string[], conten
   }));
   const preferredWidth = Math.min(88, Math.max(56, widestLine));
   return Math.max(8, Math.min(contentWidth, preferredWidth));
-}
-
-function closeOpenBidiIsolates(value: string): string {
-  let openIsolates = 0;
-  for (const char of value) {
-    if (char === LRI || char === RLI) {
-      openIsolates += 1;
-    } else if (char === PDI && openIsolates > 0) {
-      openIsolates -= 1;
-    }
-  }
-  return openIsolates === 0 ? value : `${value}${PDI.repeat(openIsolates)}`;
 }
 
 function boundedFileChangePreviewLines(

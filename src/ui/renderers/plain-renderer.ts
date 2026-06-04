@@ -2,10 +2,10 @@
 // Deterministic, ASCII-safe plain-text output for all ViewModel types.
 // No ANSI, no emoji, no color, no animation, no terminal-width detection.
 
-import { measureTextWidth, measureVisibleWidth, padVisibleAlign, padVisibleEnd, truncateVisible } from "./layout.js";
+import { measureTextWidth, measureVisibleWidth, padVisibleAlign, padVisibleEnd, truncateVisible, wrapText } from "./layout.js";
 import type { UiLocale } from "../../ui/cli-ui-copy.js";
 import { chromeCopy } from "../../ui/cli-ui-copy.js";
-import { isolateLtr, isolateRtl } from "../../ui/bidi.js";
+import { closeOpenBidiIsolates, isolateLtr, isolateRtl } from "../../ui/bidi.js";
 import type {
   ActiveTurnSpinnerViewModel,
   ActivityTimelineViewModel,
@@ -502,6 +502,8 @@ export function renderPicker(vm: PickerViewModel): string {
 // Onboarding Prompt Card
 // ──────────────────────────────────────
 
+const PLAIN_ONBOARDING_DESCRIPTION_WIDTH = 88;
+
 export function renderOnboardingPromptCard(
   vm: OnboardingPromptCardViewModel,
   locale: UiLocale = "en"
@@ -524,15 +526,15 @@ export function renderOnboardingPromptCard(
 
   for (let i = 0; i < vm.options.length; i++) {
     const option = vm.options[i];
-    const marker = i === vm.selectedOptionIndex ? ">" : " ";
+    const marker = i === vm.selectedOptionIndex ? effectiveLocale === "ar" ? "<" : ">" : " ";
     const label = option.technical === true && effectiveLocale === "ar"
       ? isolateLtr(option.label)
       : effectiveLocale === "ar"
         ? isolateRtl(option.label)
       : option.label;
-    lines.push(`${marker} ${label}`);
+    lines.push(effectiveLocale === "ar" ? `${label} ${marker}` : `${marker} ${label}`);
     if (option.description !== undefined) {
-      lines.push(`  ${effectiveLocale === "ar" ? isolateRtl(option.description) : option.description}`);
+      lines.push(...renderPlainOnboardingOptionDescription(option.description, effectiveLocale));
     }
   }
 
@@ -541,6 +543,16 @@ export function renderOnboardingPromptCard(
   }
 
   return lines.join("\n");
+}
+
+function renderPlainOnboardingOptionDescription(description: string, locale: UiLocale): string[] {
+  if (locale !== "ar") {
+    return [`  ${description}`];
+  }
+
+  return wrapText(description, PLAIN_ONBOARDING_DESCRIPTION_WIDTH).map((segment) => (
+    `  ${isolateRtl(closeOpenBidiIsolates(segment))}`
+  ));
 }
 
 export function renderSlashMenu(vm: SlashMenuViewModel, locale: UiLocale = "en"): string {

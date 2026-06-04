@@ -19,7 +19,7 @@ import { runFirstRunSetup } from "./runner.js";
 import { promptModelCandidate, promptProviderCandidate } from "../config-editor/prompts.js";
 import type { FlowEngine, ModelCandidate, ProviderCandidate } from "../../providers/provider-model-selection-flow.js";
 import { readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../../config/profile-home.js";
-import type { SetupApplyExecutor } from "../setup-apply-plan.js";
+import type { SetupApplyExecutor, SetupApplyMode } from "../setup-apply-plan.js";
 import {
   gatewayServiceActivationNotNowGuidance,
   gatewayServiceActivationPromptTitle,
@@ -27,6 +27,7 @@ import {
   type GatewayActivationServiceActions,
 } from "../gateway-service-activation.js";
 import type { SetupReviewManifest } from "../setup-review-manifest.js";
+import * as pythonEnvManager from "../../python-env/manager.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-first-run-runner-"));
@@ -626,6 +627,69 @@ describe("runFirstRunSetup", () => {
     expect(seenOptions["Start EstaCoda now?"]).toBeUndefined();
   });
 
+  it("passes firstRunTolerant mode to reviewed apply execution", async () => {
+    let observedMode: SetupApplyMode | undefined;
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt(),
+      flowEngine: flowEngine(),
+      applyExecutor: {
+        apply: (_plan, context) => {
+          observedMode = context?.mode;
+          return {
+            ok: true,
+            appliedOperationIds: [],
+          };
+        },
+      },
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.applyEndState?.kind).toBe("saved-not-launched");
+    expect(observedMode).toBe("firstRunTolerant");
+  });
+
+  it("renders multiple onboarding apply warnings as bullet lines", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt(),
+      flowEngine: flowEngine(),
+      applyExecutor: {
+        apply: () => ({
+          ok: true,
+          appliedOperationIds: [],
+          warnings: [
+            {
+              operationId: "optional.voice",
+              capability: "voice",
+              subCapability: "stt",
+              code: "managed_python_setup_failed",
+              message: "First optional warning.",
+              cause: "first raw cause",
+            },
+            {
+              operationId: "optional.browser",
+              capability: "browser",
+              subCapability: "browser",
+              code: "external_service_unavailable",
+              message: "Second optional warning.",
+              cause: "second raw cause",
+            },
+          ],
+        }),
+      },
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.output).toContain("Optional capability warnings:");
+    expect(result.output).toContain("- First optional warning.");
+    expect(result.output).toContain("- Second optional warning.");
+    expect(result.output).not.toContain("first raw cause");
+    expect(result.output).not.toContain("second raw cause");
+  });
+
   it("does not offer launch after degraded verification", async () => {
     const seenOptions: Record<string, readonly string[]> = {};
     const result = await runFirstRunSetup({
@@ -1211,6 +1275,82 @@ describe("runFirstRunSetup", () => {
       ttsApiKeyEnv: "OPENAI_API_KEY",
     });
     expect(result.reviewManifest.sections["enabled-optional-capabilities"][0]?.review.values).not.toHaveProperty("sttProvider");
+  });
+
+  it("renders local STT setup warnings without raw causes during onboarding", async () => {
+    vi.spyOn(pythonEnvManager, "createManagedEnvironment").mockResolvedValue({
+      ok: false,
+      reason: "ensurepip is not available\nFailing command: python3 -m venv",
+    });
+
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        "Optional capabilities": "Yes",
+        "Configure optional capability": "Configure voice",
+        "Configure voice": "Set Speech to Text (STT) Provider",
+        "Voice": "Local (via faster-whisper)",
+        "Configure STT": "base",
+        "Configure other capabilities now": "Skip",
+      }),
+      flowEngine: flowEngine(),
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      model?: { provider?: string; id?: string };
+      stt?: unknown;
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("Optional capability warnings:");
+    expect(result.output).toContain(resolveSetupCopy("en", "onboarding.optionalCapabilities.voice.localSttSkipped"));
+    expect(result.output).not.toContain("ensurepip is not available");
+    expect(result.output).not.toContain("Failing command");
+    expect(config.model).toEqual({ provider: "local", id: "hermes-local", contextWindowTokens: 8192 });
+    expect(config.stt).toBeUndefined();
+  });
+
+  it("renders local STT warning while writing selected onboarding TTS", async () => {
+    vi.spyOn(pythonEnvManager, "createManagedEnvironment").mockResolvedValue({
+      ok: false,
+      reason: "ensurepip is not available\nTraceback: hidden details",
+    });
+
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        "Optional capabilities": "Yes",
+        "Configure optional capability": ["Configure voice", "Configure voice"],
+        "Configure voice": ["Set Speech to Text (STT) Provider", "Set Text to Speech (TTS) Provider"],
+        "Voice": ["Local (via faster-whisper)", "openai"],
+        "Configure STT": "base",
+        "Configure other capabilities now": ["Yes", "Skip"],
+        __prompt: ["", ""],
+      }),
+      flowEngine: flowEngine(),
+      applyExecutor: reviewedExecutor(tempDir, workspaceRoot),
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      stt?: unknown;
+      tts?: { provider?: string; openai?: { model?: string; apiKeyEnv?: string } };
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.output).toContain("Optional capability warnings:");
+    expect(result.output).toContain(resolveSetupCopy("en", "onboarding.optionalCapabilities.voice.localSttSkipped"));
+    expect(result.output).not.toContain("Traceback");
+    expect(config.stt).toBeUndefined();
+    expect(config.tts).toEqual({
+      provider: "openai",
+      speed: 1,
+      openai: {
+        model: "gpt-4o-mini-tts",
+        apiKeyEnv: "OPENAI_API_KEY",
+      },
+    });
   });
 
   it("normal onboarding confirms the user-facing summary instead of the technical manifest", async () => {

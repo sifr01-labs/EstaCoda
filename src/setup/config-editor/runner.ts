@@ -697,6 +697,7 @@ async function finalizeReviewedApply(input: {
   const applyEndState = applyPlanningResult.kind === "apply-plan-ready" && options.applyExecutor !== undefined
     ? await executeSetupApplyPlan(applyPlanningResult.applyPlan, options.applyExecutor, {
         ...options.applyFlowOptions,
+        mode: "strict",
         allowAutomaticLaunch: false,
         ...(input.deferredSecretWrites !== undefined && input.deferredSecretWrites.length > 0
           ? { deferredSecretWrites: input.deferredSecretWrites }

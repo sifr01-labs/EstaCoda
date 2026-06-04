@@ -890,7 +890,7 @@ export async function promptSttCapability(
     message: `${setupCopyText(locale, "setupEditor.prompt.voice.summary")}\n${setupCopyText(locale, "setupEditor.prompt.voice.sttProvider")}\n`,
     choices: sttProviders.map((provider) => ({
       id: `stt-${provider}`,
-      label: provider,
+      label: provider === "local" ? setupCopyText(locale, "setupEditor.prompt.voice.sttProvider.local") : provider,
       value: provider,
     })),
     defaultValue: current.sttProvider ?? "openai",
@@ -900,7 +900,13 @@ export async function promptSttCapability(
   let sttApiKeyEnv: string;
 
   if (sttProvider === "local") {
-    sttModel = await promptSetupStringWithDefault(prompt, `${setupCopyText(locale, "setupEditor.prompt.voice.sttModel")}: `, current.sttModel ?? "base");
+    const defaultLocalModel = isSetupLocalSttModel(current.sttModel) ? current.sttModel : "base";
+    sttModel = await promptSetupChoice(prompt, {
+      title: setupCopyText(locale, "setupEditor.prompt.voice.localModel.title"),
+      message: `${setupCopyText(locale, "setupEditor.prompt.voice.localModel")}\n`,
+      choices: localSttModelChoices(locale),
+      defaultValue: defaultLocalModel,
+    });
     sttApiKeyEnv = "";
   } else {
     const defaultSttModel = sttProvider === "groq" ? "whisper-large-v3"
@@ -920,6 +926,35 @@ export async function promptSttCapability(
     sttModel,
     sttApiKeyEnv,
   };
+}
+
+type SetupLocalSttModel = "base" | "small" | "medium";
+
+function isSetupLocalSttModel(value: string | undefined): value is SetupLocalSttModel {
+  return value === "base" || value === "small" || value === "medium";
+}
+
+function localSttModelChoices(locale: SetupCopyLocale): readonly SetupChoice<SetupLocalSttModel>[] {
+  return [
+    {
+      id: "local-stt-model-base",
+      label: setupCopyText(locale, "setupEditor.prompt.voice.localModel.base"),
+      description: setupCopyText(locale, "setupEditor.prompt.voice.localModel.base.description"),
+      value: "base",
+    },
+    {
+      id: "local-stt-model-small",
+      label: setupCopyText(locale, "setupEditor.prompt.voice.localModel.small"),
+      description: setupCopyText(locale, "setupEditor.prompt.voice.localModel.small.description"),
+      value: "small",
+    },
+    {
+      id: "local-stt-model-medium",
+      label: setupCopyText(locale, "setupEditor.prompt.voice.localModel.medium"),
+      description: setupCopyText(locale, "setupEditor.prompt.voice.localModel.medium.description"),
+      value: "medium",
+    },
+  ];
 }
 
 export async function promptVisionCapability(

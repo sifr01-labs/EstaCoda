@@ -18,6 +18,7 @@ import type { SetupVerificationReport } from "./verification.js";
 import {
   executeSetupApplyPlan,
   planSetupApply,
+  type OptionalCapabilityApplyWarning,
   type SetupApplyExecutor,
 } from "./setup-apply-plan.js";
 import { renderSetupApplyEndState } from "./setup-prompts.js";
@@ -114,6 +115,15 @@ function verificationReport(overrides: Partial<SetupVerificationReport> = {}): S
     ...overrides,
   };
 }
+
+const localSttWarning: OptionalCapabilityApplyWarning = {
+  operationId: "apply.voice.stt",
+  capability: "voice",
+  subCapability: "stt",
+  code: "managed_python_setup_failed",
+  message: "Setup completed, but local faster-whisper STT was skipped.",
+  cause: "ensurepip is not available",
+};
 
 describe("setup apply plan", () => {
   it("approved manifest produces a dry-run save/apply plan", () => {
@@ -455,6 +465,37 @@ describe("setup apply plan", () => {
     expect(endState.launchHandoffIntent).toBeUndefined();
   });
 
+  it("firstRunTolerant mode does not tolerate save failures yet", async () => {
+    const planned = planSetupApply({
+      kind: "approved-review-result",
+      manifest: onboardingManifest(),
+    });
+    if (planned.kind !== "apply-plan-ready") throw new Error("expected apply plan");
+    let verifyCalls = 0;
+
+    const endState = await executeSetupApplyPlan(planned.applyPlan, {
+      apply: () => ({
+        ok: false,
+        appliedOperationIds: [],
+        error: "Config writer unavailable.",
+        warnings: [localSttWarning],
+      }),
+      verify: () => {
+        verifyCalls += 1;
+        return verificationReport();
+      },
+    }, {
+      mode: "firstRunTolerant",
+    });
+
+    expect(endState.kind).toBe("blocked");
+    if (endState.kind !== "blocked") throw new Error("expected blocked");
+    expect(endState.reason).toBe("save-failed");
+    expect(endState.blockers).toEqual(["Config writer unavailable."]);
+    expect(verifyCalls).toBe(0);
+    expect("warnings" in endState).toBe(false);
+  });
+
   it("does not apply deferred secrets when the reviewed save fails", async () => {
     const planned = planSetupApply({
       kind: "approved-review-result",
@@ -532,6 +573,40 @@ describe("setup apply plan", () => {
     expect(endState.launchHandoffIntent).toBeUndefined();
   });
 
+  it("empty apply warnings do not change successful end-state shape", async () => {
+    const planned = planSetupApply({
+      kind: "approved-review-result",
+      manifest: onboardingManifest(),
+    });
+    if (planned.kind !== "apply-plan-ready") throw new Error("expected apply plan");
+
+    const endState = await executeSetupApplyPlan(
+      planned.applyPlan,
+      executorWithVerification(verificationReport(), [])
+    );
+
+    expect(endState.kind).toBe("verified-ready");
+    if (endState.kind !== "verified-ready") throw new Error("expected verified ready");
+    expect(endState.warnings).toBeUndefined();
+  });
+
+  it("preserves structured apply warnings on verified-ready end states", async () => {
+    const planned = planSetupApply({
+      kind: "approved-review-result",
+      manifest: onboardingManifest(),
+    });
+    if (planned.kind !== "apply-plan-ready") throw new Error("expected apply plan");
+
+    const endState = await executeSetupApplyPlan(
+      planned.applyPlan,
+      executorWithVerification(verificationReport(), [localSttWarning])
+    );
+
+    expect(endState.kind).toBe("verified-ready");
+    if (endState.kind !== "verified-ready") throw new Error("expected verified ready");
+    expect(endState.warnings).toEqual([localSttWarning]);
+  });
+
   it("verified-degraded requires explicit continue or limited-mode decision", async () => {
     const planned = planSetupApply({
       kind: "approved-review-result",
@@ -554,6 +629,32 @@ describe("setup apply plan", () => {
     if (endState.kind !== "verified-degraded") throw new Error("expected degraded");
     expect(endState.requiresExplicitContinueDecision).toBe(true);
     expect(endState.launchHandoffIntent).toBeUndefined();
+  });
+
+  it("preserves structured apply warnings on verified-degraded end states", async () => {
+    const planned = planSetupApply({
+      kind: "approved-review-result",
+      manifest: onboardingManifest(),
+    });
+    if (planned.kind !== "apply-plan-ready") throw new Error("expected apply plan");
+    const degradedReport = verificationReport({
+      providerDiagnostic: {
+        status: "warning",
+        lines: ["Provider status: warning"],
+        warnings: ["Configured model context window is below 64K tokens."],
+      },
+      warnings: ["Configured model context window is below 64K tokens."],
+      issueCodes: ["small-context-window"],
+    });
+
+    const endState = await executeSetupApplyPlan(
+      planned.applyPlan,
+      executorWithVerification(degradedReport, [localSttWarning])
+    );
+
+    expect(endState.kind).toBe("verified-degraded");
+    if (endState.kind !== "verified-degraded") throw new Error("expected degraded");
+    expect(endState.warnings).toEqual([localSttWarning]);
   });
 
   it("accepted degraded verification saves without launching when no manifest launch intent exists", async () => {
@@ -646,6 +747,53 @@ describe("setup apply plan", () => {
     expect(endState.launchHandoffIntent).toBeUndefined();
   });
 
+  it("preserves structured apply warnings on saved-not-launched end states", async () => {
+    const planned = planSetupApply({
+      kind: "approved-review-result",
+      manifest: onboardingManifest(),
+    });
+    if (planned.kind !== "apply-plan-ready") throw new Error("expected apply plan");
+
+    const endState = await executeSetupApplyPlan(planned.applyPlan, {
+      apply: (plan) => ({
+        ok: true,
+        appliedOperationIds: plan.operations.map((operation) => operation.id),
+        warnings: [localSttWarning],
+      }),
+    });
+
+    expect(endState.kind).toBe("saved-not-launched");
+    if (endState.kind !== "saved-not-launched") throw new Error("expected saved-not-launched");
+    expect(endState.warnings).toEqual([localSttWarning]);
+  });
+
+  it("preserves structured apply warnings on launched end states", async () => {
+    const planned = planSetupApply({
+      kind: "approved-review-result",
+      manifest: onboardingManifest(),
+    });
+    if (planned.kind !== "apply-plan-ready") throw new Error("expected apply plan");
+    const launchPlan = {
+      ...planned.applyPlan,
+      launchHandoffIntent: {
+        kind: "launch-handoff-intent",
+        sourceLineIds: ["launch"],
+        preference: "offer-after-verify",
+        requiresVerifiedReadyOrAcceptedDegraded: true,
+      },
+    } as const;
+
+    const endState = await executeSetupApplyPlan(
+      launchPlan,
+      executorWithVerification(verificationReport(), [localSttWarning])
+    );
+
+    expect(endState.kind).toBe("launched");
+    if (endState.kind !== "launched") throw new Error("expected launched");
+    expect(endState.acceptedDegraded).toBe(false);
+    expect(endState.warnings).toEqual([localSttWarning]);
+  });
+
   it("raw secrets never appear in apply planning output", () => {
     const manifest = buildSetupReviewManifest([rawSecretBundle()]);
     const result = planSetupApply({
@@ -717,11 +865,15 @@ describe("setup apply plan", () => {
   });
 });
 
-function executorWithVerification(report: SetupVerificationReport): SetupApplyExecutor {
+function executorWithVerification(
+  report: SetupVerificationReport,
+  warnings?: readonly OptionalCapabilityApplyWarning[]
+): SetupApplyExecutor {
   return {
     apply: (plan) => ({
       ok: true,
       appliedOperationIds: plan.operations.map((operation) => operation.id),
+      ...(warnings === undefined ? {} : { warnings }),
     }),
     verify: () => report,
   };

@@ -20,3 +20,15 @@ export function isolateLtr(value: string): string {
 export function isolateRtl(value: string): string {
   return `${RLI}${value}${PDI}`;
 }
+
+export function closeOpenBidiIsolates(value: string): string {
+  let openIsolates = 0;
+  for (const char of value) {
+    if (char === LRI || char === RLI) {
+      openIsolates += 1;
+    } else if (char === PDI && openIsolates > 0) {
+      openIsolates -= 1;
+    }
+  }
+  return openIsolates === 0 ? value : `${value}${PDI.repeat(openIsolates)}`;
+}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isolateLtr, LRI, PDI } from "./bidi.js";
+import { closeOpenBidiIsolates, isolateLtr, LRI, PDI, RLI } from "./bidi.js";
 
 describe("isolateLtr", () => {
   it("wraps a slash command in LRI/PDI", () => {
@@ -51,5 +51,16 @@ describe("isolateLtr", () => {
     const a = isolateLtr("/model");
     const b = isolateLtr("/model");
     expect(a).toBe(b);
+  });
+});
+
+describe("closeOpenBidiIsolates", () => {
+  it("leaves balanced isolates unchanged", () => {
+    const value = `${RLI}مرحبا ${LRI}EstaCoda${PDI}${PDI}`;
+    expect(closeOpenBidiIsolates(value)).toBe(value);
+  });
+
+  it("closes unbalanced isolates at the end of a wrapped segment", () => {
+    expect(closeOpenBidiIsolates(`${RLI}مرحبا ${LRI}EstaCoda`)).toBe(`${RLI}مرحبا ${LRI}EstaCoda${PDI}${PDI}`);
   });
 });

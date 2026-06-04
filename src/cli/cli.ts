@@ -410,6 +410,7 @@ async function interactiveSetup(options: CliOptions, input: { readonly advanced:
           workspaceRoot: options.workspaceRoot,
           homeDir: options.homeDir,
           profileId: options.profileId,
+          mode: "firstRunTolerant",
         }),
       });
 
@@ -434,6 +435,7 @@ async function interactiveSetup(options: CliOptions, input: { readonly advanced:
           workspaceRoot: options.workspaceRoot,
           homeDir: options.homeDir,
           profileId: options.profileId,
+          mode: "strict",
         }),
         renderInitialOverview: false,
         output: {

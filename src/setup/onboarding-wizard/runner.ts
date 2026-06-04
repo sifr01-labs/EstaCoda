@@ -363,6 +363,7 @@ export async function runFirstRunSetup(
   const applyEndState = applyPlanningResult.kind === "apply-plan-ready" && options.applyExecutor !== undefined
       ? await executeSetupApplyPlan(applyPlanningResult.applyPlan, options.applyExecutor, {
         ...options.applyFlowOptions,
+        mode: "firstRunTolerant",
         ...(pendingCredentialWrites.length > 0
           ? { deferredSecretWrites: pendingCredentialWrites }
           : {}),
@@ -370,7 +371,7 @@ export async function runFirstRunSetup(
     : undefined;
   const renderedApplyOutput = applyEndState === undefined
     ? renderSetupApplyPlanningResult(applyPlanningResult, language)
-    : renderSetupApplyEndState(applyEndState, language);
+    : renderOnboardingApplyEndState(applyEndState, language);
   const completed = applyEndState === undefined
     ? applyPlanningResult.kind === "apply-plan-ready"
     : applyEndState.kind !== "blocked" && applyEndState.kind !== "cancelled";
@@ -454,6 +455,27 @@ async function promptForPostSetupLaunchRequest(input: {
     ],
     defaultValue: false,
   });
+}
+
+function renderOnboardingApplyEndState(
+  endState: SetupApplyEndState,
+  locale: SetupCopyLocale
+): string {
+  const base = renderSetupApplyEndState(endState, locale);
+  const warningOutput = renderOnboardingOptionalCapabilityWarnings(endState, locale);
+  return [base, warningOutput].filter((line): line is string => line !== undefined).join("\n");
+}
+
+function renderOnboardingOptionalCapabilityWarnings(
+  endState: SetupApplyEndState,
+  locale: SetupCopyLocale
+): string | undefined {
+  const warnings = "warnings" in endState ? endState.warnings ?? [] : [];
+  if (warnings.length === 0) return undefined;
+  return [
+    `${setupCopyText(locale, "setupApply.warnings.title")}:`,
+    ...warnings.map((warning) => `- ${warning.message}`),
+  ].join("\n");
 }
 
 function isPostSetupLaunchOfferableEndState(endState: SetupApplyEndState): boolean {

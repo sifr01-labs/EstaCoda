@@ -499,18 +499,86 @@ describe("StandardRenderer — dark theme", () => {
     }));
 
     const plain = stripAnsi(out);
+    const topLine = plain.split("\n")[0] ?? "";
     expect(plain).toContain(isolateRtl("الثقة بمساحة العمل  𓂀"));
-    expect(plain).toContain(`▸ ${isolateRtl("ثق بمساحة العمل")}`);
-    expect(plain).not.toContain(`${isolateRtl("ثق بمساحة العمل")} ▸`);
+    expect(topLine).not.toContain(`╭──── ${isolateRtl("الثقة بمساحة العمل  𓂀")}`);
+    expect(topLine.indexOf(isolateRtl("الثقة بمساحة العمل  𓂀"))).toBeGreaterThan(4);
+    expect(plain).toContain(`${isolateRtl("ثق بمساحة العمل")} ◂`);
+    expect(plain).not.toContain(`▸ ${isolateRtl("ثق بمساحة العمل")}`);
     const optionLine = plain.split("\n").find((line) => line.includes(isolateRtl("ثق بمساحة العمل")));
     const descriptionLine = plain.split("\n").find((line) => line.includes(isolateRtl("اسمح بالعمل المحلي هنا.")));
-    expect(optionLine).toMatch(/^\s{4,}▸/u);
+    expect(optionLine).toBeDefined();
+    const optionLabelIndex = optionLine!.indexOf(isolateRtl("ثق بمساحة العمل"));
+    const optionMarkerIndex = optionLine!.indexOf("◂");
+    expect(optionLabelIndex).toBeGreaterThanOrEqual(0);
+    expect(optionMarkerIndex).toBeGreaterThan(optionLabelIndex);
     expect(descriptionLine).toMatch(/^\s{4,}/u);
     expect(out).toContain(isolateLtr("EstaCoda"));
     expect(out).toContain(isolateLtr("/workspace"));
     expect(out).toContain(isolateLtr("KIMI_API_KEY"));
     expect(out).toContain(isolateLtr("kimi-k2"));
     expect(out).toContain(isolateLtr("openrouter"));
+  });
+
+  it("renders Arabic onboarding selected marker after the label without Unicode", () => {
+    const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: noUnicodeCaps(), locale: "ar" });
+    const plain = stripAnsi(r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "الثقة بمساحة العمل",
+      bodyLines: ["هل تثق بمساحة العمل هذه؟"],
+      options: [
+        { id: "trust", label: "ثق بمساحة العمل" },
+        { id: "skip", label: "ليس الآن" },
+      ],
+      selectedOptionIndex: 0,
+      locale: "ar",
+      direction: "rtl",
+    })));
+
+    expect(plain).toContain(`${isolateRtl("ثق بمساحة العمل")} <`);
+    expect(plain).not.toContain(`> ${isolateRtl("ثق بمساحة العمل")}`);
+    expect(plain).not.toContain("▸");
+    expect(plain).not.toContain("◂");
+  });
+
+  it("keeps English no-Unicode onboarding selected marker before the label", () => {
+    const r = renderer("dark", noUnicodeCaps());
+    const plain = stripAnsi(r.renderOnboardingPromptCard(onboardingTrustCard()));
+
+    expect(plain).toContain("> Trust workspace");
+    expect(plain).not.toContain("Trust workspace <");
+  });
+
+  it("wraps long Arabic onboarding option descriptions without truncating technical tokens", () => {
+    const caps = { ...fullCaps(), terminalWidth: 64 };
+    const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: caps, locale: "ar" });
+    const out = r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "تعلّم المهارات",
+      bodyLines: ["اختر طريقة التعلّم."],
+      options: [
+        {
+          id: "enabled",
+          label: "فعّل التعلّم",
+          description: `يسمح هذا الخيار لـ ${isolateLtr("EstaCoda")} بتعلّم مهارات قابلة لإعادة الاستخدام من الأنماط المتكررة في العمل اليومي.`,
+        },
+      ],
+      selectedOptionIndex: 0,
+      locale: "ar",
+      direction: "rtl",
+    }));
+    const plain = stripAnsi(out);
+    const descriptionLines = plain
+      .split("\n")
+      .filter((line) => line.includes("يسمح") || line.includes("إعادة") || line.includes("الأنماط"));
+
+    expect(descriptionLines.length).toBeGreaterThan(1);
+    expect(plain).not.toContain("...");
+    expect(out).toContain(isolateLtr("EstaCoda"));
+    for (const line of plain.split("\n")) {
+      expect(measureVisibleWidth(line)).toBeLessThanOrEqual(caps.terminalWidth);
+    }
+    for (const line of descriptionLines) {
+      expect(line).toMatch(/^\s{2,}/u);
+    }
   });
 
   it("renders Arabic numbered onboarding body rows with controlled marker placement", () => {

@@ -57,7 +57,8 @@ import {
   renderActiveTurnSpinner,
   renderFileChangePreview,
 } from "./plain-renderer.js";
-import { isolateLtr, isolateRtl } from "../bidi.js";
+import { isolateLtr, isolateRtl, RLI } from "../bidi.js";
+import { measureVisibleWidth } from "./layout.js";
 
 function assertNoAnsi(text: string): void {
   expect(text).not.toMatch(/\x1b\[/);
@@ -149,12 +150,15 @@ describe("PlainRenderer — renderOnboardingPromptCard", () => {
     expect(out).toContain("> Not now");
   });
 
-  it("isolates Arabic technical lines", () => {
+  it("isolates Arabic technical lines and mirrors selected option marker", () => {
     const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
       title: "الثقة بمساحة العمل",
       bodyLines: ["هل تثق بمساحة العمل هذه؟"],
       technicalLines: ["/workspace", "KIMI_API_KEY", "kimi-k2", "openrouter"],
-      options: [{ id: "trust", label: "ثق بمساحة العمل" }],
+      options: [
+        { id: "trust", label: "ثق بمساحة العمل" },
+        { id: "skip", label: "ليس الآن" },
+      ],
       selectedOptionIndex: 0,
       locale: "ar",
       direction: "rtl",
@@ -163,7 +167,37 @@ describe("PlainRenderer — renderOnboardingPromptCard", () => {
     expect(out).toContain(isolateLtr("KIMI_API_KEY"));
     expect(out).toContain(isolateLtr("kimi-k2"));
     expect(out).toContain(isolateLtr("openrouter"));
-    expect(out).toContain(`> ${isolateRtl("ثق بمساحة العمل")}`);
+    expect(out).toContain(`${isolateRtl("ثق بمساحة العمل")} <`);
+    expect(out).not.toContain(`> ${isolateRtl("ثق بمساحة العمل")}`);
+    expect(out).toContain(`${isolateRtl("ليس الآن")}  `);
+  });
+
+  it("wraps Arabic option descriptions while keeping technical tokens isolated", () => {
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "تعلّم المهارات",
+      bodyLines: ["اختر طريقة التعلّم."],
+      options: [
+        {
+          id: "enabled",
+          label: "فعّل التعلّم",
+          description: `يسمح هذا الخيار لـ ${isolateLtr("EstaCoda")} بتعلّم مهارات قابلة لإعادة الاستخدام من الأنماط المتكررة في العمل اليومي، مع إبقاء الاقتراحات قابلة للمراجعة قبل اعتمادها، ويعرض التفاصيل بطريقة واضحة في السجلات النصية الطويلة.`,
+        },
+      ],
+      selectedOptionIndex: 0,
+      locale: "ar",
+      direction: "rtl",
+    }), "ar");
+    const descriptionLines = out
+      .split("\n")
+      .filter((line) => line.startsWith(`  ${RLI}`));
+
+    expect(descriptionLines.length).toBeGreaterThan(1);
+    expect(out).not.toContain("...");
+    expect(out).toContain(isolateLtr("EstaCoda"));
+    for (const line of descriptionLines) {
+      expect(line).toMatch(/^  /u);
+      expect(measureVisibleWidth(line)).toBeLessThanOrEqual(90);
+    }
   });
 });
 

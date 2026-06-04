@@ -18,9 +18,18 @@ import {
   type GatewayActivationServiceActions,
 } from "../gateway-service-activation.js";
 import { resolveSetupCopy } from "../setup-copy.js";
+import type { SetupApplyMode } from "../setup-apply-plan.js";
+import * as pythonEnvManager from "../../python-env/manager.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-config-editor-"));
+}
+
+function mockManagedPythonEnvironment(homeDir: string): void {
+  vi.spyOn(pythonEnvManager, "createManagedEnvironment").mockResolvedValue({
+    ok: true,
+    pythonBinary: join(homeDir, ".estacoda", "python-env", "bin", "python"),
+  });
 }
 
 describe("runConfigEditor", () => {
@@ -34,6 +43,7 @@ describe("runConfigEditor", () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     delete process.env.PR8_SHELL_ONLY_KEY;
     delete process.env.ESTACODA_TELEGRAM_BOT_TOKEN;
     delete process.env.TELEGRAM_BOT_TOKEN;
@@ -285,6 +295,33 @@ describe("runConfigEditor", () => {
     expect(config.security?.assessor?.enabled).toBe(true);
     expect(config.model).toEqual((localReadyConfig() as { model: unknown }).model);
     expect(config.providers).toEqual((localReadyConfig() as { providers: unknown }).providers);
+  });
+
+  it("passes strict mode to setup editor apply execution", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    let observedMode: SetupApplyMode | undefined;
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({ values: ["strict"] }),
+      defaultActionId: "edit-security-mode",
+      applyExecutor: {
+        apply: (_plan, context) => {
+          observedMode = context?.mode;
+          return {
+            ok: true,
+            appliedOperationIds: [],
+          };
+        },
+      },
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("edit-security-mode");
+    expect(result.applyEndState?.kind).toBe("saved-not-launched");
+    expect(observedMode).toBe("strict");
   });
 
   it("writes active profile config without prompting for profile awareness", async () => {
@@ -2199,6 +2236,158 @@ describe("runConfigEditor", () => {
     expect(rawConfig).not.toContain("sk-");
     expect(JSON.stringify(result)).not.toContain("sk-");
   });
+
+  it("configures local faster-whisper STT with prompt-card model choices", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    mockManagedPythonEnvironment(tempDir);
+    const selectCalls: Array<{
+      title: string;
+      body: string;
+      labels: string[];
+      descriptions: Array<string | undefined>;
+      values: unknown[];
+    }> = [];
+    const prompt = fakePrompt({
+      values: [
+        "stt",
+        "enable",
+        "local",
+        "base",
+        true,
+      ],
+    });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      selectCalls.push({
+        title: input.title,
+        body: input.body ?? "",
+        labels: input.options.map((option) => option.label),
+        descriptions: input.options.map((option) => option.description),
+        values: input.options.map((option) => option.value),
+      });
+      return baseSelect(input);
+    };
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "configure-voice",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      tts?: unknown;
+      stt?: {
+        provider?: string;
+        local?: {
+          model?: string;
+          engine?: string;
+          fasterWhisper?: {
+            enabled?: boolean;
+            model?: string;
+            allowModelDownload?: boolean;
+          };
+        };
+      };
+    };
+    const sttProviderPrompt = selectCalls.find((call) => call.body.includes("STT provider"));
+    const localModelPrompt = selectCalls.find((call) => call.body.includes("Pick the faster-whisper STT model"));
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("configure-voice");
+    expect(result.reviewManifest?.sections["enabled-optional-capabilities"][0]?.review.values).toMatchObject({
+      sttProvider: "local",
+      sttModel: "base",
+      secretValuesIncluded: false,
+    });
+    expect(result.reviewManifest?.sections["enabled-optional-capabilities"][0]?.review.values).not.toHaveProperty("ttsProvider");
+    expect(config.tts).toBeUndefined();
+    expect(config.stt).toEqual({
+      provider: "local",
+      local: {
+        model: "base",
+        engine: "faster-whisper",
+        fasterWhisper: {
+          enabled: true,
+          model: "base",
+          allowModelDownload: true,
+        },
+      },
+    });
+    expect(sttProviderPrompt?.labels).toContain("Local (via faster-whisper)");
+    expect(sttProviderPrompt?.values).toContain("local");
+    expect(localModelPrompt?.title).toBe("Configure STT");
+    expect(localModelPrompt?.labels).toEqual([
+      "Base (recommended for everyday use)",
+      "Small",
+      "Medium",
+    ]);
+    expect(localModelPrompt?.descriptions).toEqual([
+      "Balanced speed and accuracy for most voice notes.",
+      "Better accuracy than Base, with higher CPU and memory use.",
+      "Higher accuracy for difficult audio, but slower and heavier.",
+    ]);
+    expect(localModelPrompt?.values).toEqual(["base", "small", "medium"]);
+    expect(rawConfig).not.toContain("sk-");
+    expect(JSON.stringify(result)).not.toContain("sk-");
+  });
+
+  for (const model of ["small", "medium"] as const) {
+    it(`configures local faster-whisper STT model ${model}`, async () => {
+      await writeUserConfig(tempDir, localReadyConfig());
+      await trustWorkspace(tempDir, workspaceRoot);
+      mockManagedPythonEnvironment(tempDir);
+
+      const result = await runConfigEditor({
+        homeDir: tempDir,
+        workspaceRoot,
+        prompt: fakePrompt({
+          values: [
+            "stt",
+            "enable",
+            "local",
+            model,
+            true,
+          ],
+        }),
+        defaultActionId: "configure-voice",
+        applyExecutor: createReviewedSetupApplyExecutor({
+          homeDir: tempDir,
+          workspaceRoot,
+        }),
+      });
+      const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+      const config = JSON.parse(rawConfig) as {
+        stt?: {
+          provider?: string;
+          local?: {
+            model?: string;
+            engine?: string;
+            fasterWhisper?: { enabled?: boolean; model?: string; allowModelDownload?: boolean };
+          };
+        };
+      };
+
+      expect(result.completed).toBe(true);
+      expect(config.stt).toEqual({
+        provider: "local",
+        local: {
+          model,
+          engine: "faster-whisper",
+          fasterWhisper: {
+            enabled: true,
+            model,
+            allowModelDownload: true,
+          },
+        },
+      });
+    });
+  }
 
   it("configures image generation without drafting other optional capabilities", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
