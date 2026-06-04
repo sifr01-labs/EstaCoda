@@ -13,7 +13,12 @@ import {
   promptSetupChoice,
   type SetupChoice,
   promptSetupStringWithDefault,
+  setupCsvPromptLabel,
+  setupOutputLine,
+  setupPromptLabel,
+  setupPromptWithDefault,
   setupPromptContext,
+  setupTechnicalToken,
   showSetupCard,
   setupTelegramAllowedChatIdsQuestion,
   setupTelegramAllowedUserIdsQuestion,
@@ -674,7 +679,11 @@ export async function promptDiscordCapability(
       setupCopyText(locale, "setupEditor.prompt.discord.summary"),
       setupCopyText(locale, "setupEditor.prompt.discord.beta"),
       setupCopyText(locale, "setupEditor.prompt.discord.remoteControlRisk"),
-      `${setupCopyText(locale, "setupEditor.prompt.discord.botTokenEnv")} [ESTACODA_DISCORD_BOT_TOKEN]: `,
+      setupPromptWithDefault(
+        locale,
+        setupCopyText(locale, "setupEditor.prompt.discord.botTokenEnv"),
+        "ESTACODA_DISCORD_BOT_TOKEN"
+      ),
     ].join("\n"),
     current.botTokenEnv ?? "ESTACODA_DISCORD_BOT_TOKEN"
   );
@@ -682,21 +691,21 @@ export async function promptDiscordCapability(
     prompt,
     providerId: "discord",
     envVarName: botTokenEnv,
-    question: `${setupCopyText(locale, "setupEditor.prompt.discord.botToken")}: `,
+    question: setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.discord.botToken")),
   });
   const allowedUsers = splitCsv(await promptSetupStringWithDefault(
     prompt,
-    `${setupCopyText(locale, "setupEditor.prompt.discord.allowedUsers")}, comma-separated: `,
+    setupCsvPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.discord.allowedUsers")),
     (current.allowedUsers ?? []).join(",")
   ));
   const allowedGuilds = splitCsv(await promptSetupStringWithDefault(
     prompt,
-    `${setupCopyText(locale, "setupEditor.prompt.discord.allowedGuilds")}, comma-separated: `,
+    setupCsvPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.discord.allowedGuilds")),
     (current.allowedGuilds ?? []).join(",")
   ));
   const allowedChannels = splitCsv(await promptSetupStringWithDefault(
     prompt,
-    `${setupCopyText(locale, "setupEditor.prompt.discord.allowedChannels")}, comma-separated: `,
+    setupCsvPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.discord.allowedChannels")),
     (current.allowedChannels ?? []).join(",")
   ));
 
@@ -728,8 +737,11 @@ export async function promptWhatsAppCapability(
       setupCopyText(locale, "setupEditor.prompt.whatsapp.summary"),
       setupCopyText(locale, "setupEditor.prompt.whatsapp.beta"),
       setupCopyText(locale, "setupEditor.prompt.whatsapp.remoteControlRisk"),
-      `${setupCopyText(locale, "setupEditor.prompt.whatsapp.authDir")}: ${authDir}`,
-      `${setupCopyText(locale, "setupEditor.prompt.whatsapp.allowedUsers")}, comma-separated: `,
+      setupOutputLine(
+        locale,
+        `${setupCopyText(locale, "setupEditor.prompt.whatsapp.authDir")}: ${setupTechnicalToken(locale, authDir)}`
+      ),
+      setupCsvPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.whatsapp.allowedUsers")),
     ].join("\n"),
     (current.allowedUsers ?? []).join(",")
   ));
@@ -862,8 +874,16 @@ export async function promptTtsCapability(
     })),
     defaultValue: current.ttsProvider ?? "openai",
   });
-  const ttsModel = await promptSetupStringWithDefault(prompt, `${setupCopyText(locale, "setupEditor.prompt.voice.ttsModel")}: `, current.ttsModel ?? "gpt-4o-mini-tts");
-  const ttsApiKeyEnv = await promptSetupStringWithDefault(prompt, `${setupCopyText(locale, "setupEditor.prompt.voice.ttsApiKeyEnv")}: `, current.ttsApiKeyEnv ?? "OPENAI_API_KEY");
+  const ttsModel = await promptSetupStringWithDefault(
+    prompt,
+    setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.voice.ttsModel")),
+    current.ttsModel ?? "gpt-4o-mini-tts"
+  );
+  const ttsApiKeyEnv = await promptSetupStringWithDefault(
+    prompt,
+    setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.voice.ttsApiKeyEnv")),
+    current.ttsApiKeyEnv ?? "OPENAI_API_KEY"
+  );
 
   return {
     ttsProvider,
@@ -917,8 +937,16 @@ export async function promptSttCapability(
       : sttProvider === "mistral" ? "MISTRAL_API_KEY"
       : sttProvider === "xai" ? "XAI_API_KEY"
       : "OPENAI_API_KEY";
-    sttModel = await promptSetupStringWithDefault(prompt, `${setupCopyText(locale, "setupEditor.prompt.voice.sttModel")}: `, current.sttModel ?? defaultSttModel);
-    sttApiKeyEnv = await promptSetupStringWithDefault(prompt, `${setupCopyText(locale, "setupEditor.prompt.voice.sttApiKeyEnv")}: `, current.sttApiKeyEnv ?? defaultSttApiKeyEnv);
+    sttModel = await promptSetupStringWithDefault(
+      prompt,
+      setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.voice.sttModel")),
+      current.sttModel ?? defaultSttModel
+    );
+    sttApiKeyEnv = await promptSetupStringWithDefault(
+      prompt,
+      setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.voice.sttApiKeyEnv")),
+      current.sttApiKeyEnv ?? defaultSttApiKeyEnv
+    );
   }
 
   return {
@@ -982,8 +1010,16 @@ export async function promptVisionCapability(
     })),
     defaultValue: current.provider ?? "fal",
   });
-  const model = await promptSetupStringWithDefault(prompt, `${setupCopyText(locale, "setupEditor.prompt.vision.model")}: `, current.model ?? "fal-ai/imagen4/preview");
-  const apiKeyEnv = await promptSetupStringWithDefault(prompt, `${setupCopyText(locale, "setupEditor.prompt.vision.apiKeyEnv")}: `, current.apiKeyEnv ?? "FAL_KEY");
+  const model = await promptSetupStringWithDefault(
+    prompt,
+    setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.vision.model")),
+    current.model ?? "fal-ai/imagen4/preview"
+  );
+  const apiKeyEnv = await promptSetupStringWithDefault(
+    prompt,
+    setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.vision.apiKeyEnv")),
+    current.apiKeyEnv ?? "FAL_KEY"
+  );
   const useGateway = await promptSetupChoice(prompt, {
     title: setupCopyText(locale, "setupModules.vision.title"),
     message: `${setupCopyText(locale, "setupEditor.prompt.vision.useGateway")}?\n`,
@@ -1026,8 +1062,16 @@ export async function promptBrowserCapability(
     })),
     defaultValue: current.backend ?? "local-cdp",
   });
-  const cdpUrl = await promptSetupStringWithDefault(prompt, `${setupCopyText(locale, "setupEditor.prompt.browser.cdpUrl")}: `, current.cdpUrl ?? "http://127.0.0.1:9222");
-  const launchCommand = await promptSetupStringWithDefault(prompt, `${setupCopyText(locale, "setupEditor.prompt.browser.launchCommand")}: `, current.launchCommand ?? "");
+  const cdpUrl = await promptSetupStringWithDefault(
+    prompt,
+    setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.cdpUrl")),
+    current.cdpUrl ?? "http://127.0.0.1:9222"
+  );
+  const launchCommand = await promptSetupStringWithDefault(
+    prompt,
+    setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.launchCommand")),
+    current.launchCommand ?? ""
+  );
 
   return {
     backend,

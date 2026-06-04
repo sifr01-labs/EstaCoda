@@ -52,6 +52,7 @@ import {
   renderSetupApplyEndState,
   renderSetupApplyPlanningResult,
   setupProviderCredentialQuestion,
+  setupPromptWithDefault,
   setupPromptContext,
   setupCopyText,
   showSetupCard,
@@ -582,7 +583,7 @@ async function promptForCanonicalWorkspaceRoot(
     });
     const requestedWorkspaceRoot = await promptSetupStringWithDefault(
       options.prompt,
-      `${setupCopyText(language, "onboarding.workspace.root")} [${defaultWorkspaceRoot}]: `,
+      setupPromptWithDefault(language, setupCopyText(language, "onboarding.workspace.root"), defaultWorkspaceRoot),
       defaultWorkspaceRoot
     );
     const validation = await validateOnboardingWorkspacePath(requestedWorkspaceRoot);

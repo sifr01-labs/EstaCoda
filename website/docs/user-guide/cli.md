@@ -158,7 +158,7 @@ Managed bottom chrome shows shortcut hints as input-lane placeholder copy while 
 
 Bracketed paste is enabled only for TTY prompts that run through the paste interceptor. Small single-line pastes remain inline. Multiline and large pastes display as compact `[Pasted text #...]` references when paste storage is available. Paste files live under active profile temp state, not the workspace, and are temporary operational artifacts. Submitted runtime input restores the original pasted content. Secret prompts bypass paste preview/storage and do not emit shortcut hints or live slash hints.
 
-Arabic setup chrome is direction-aware for localized setup selectors, rails, onboarding summaries, prompt cards, and the startup dashboard. Arabic picker rows are RTL/right-aligned, selected output uses `تم تحديد`, and technical selected values are LTR-isolated. The Arabic startup dashboard uses two RTL-aware columns at normal widths and a bounded stacked layout at narrow widths. This is not full runtime Arabic localization.
+Arabic setup chrome is direction-aware for localized setup selectors, rails, onboarding summaries, prompt cards, raw setup prompts, verification reports, and the startup dashboard. Arabic picker rows are RTL/right-aligned, selected output uses `تم تحديد`, and technical selected values are LTR-isolated. The Arabic startup dashboard uses two RTL-aware columns at normal widths and a bounded stacked layout at narrow widths. This is not full runtime Arabic localization.
 
 Onboarding provider credential prompts and Telegram token prompts share setup editor prompt copy. Arabic display strings isolate technical tokens, while stored config, env, auth, and state values remain raw. Secret prompts remain masked.
 

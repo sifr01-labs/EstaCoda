@@ -8,6 +8,7 @@ import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { formatSecurityMode, formatSkillAutonomy } from "../ui/settings-labels.js";
 import type { Runtime } from "../runtime/create-runtime.js";
 import { setupVerificationCopy, type SetupVerificationCopy } from "./setup-verification-copy.js";
+import { setupOutputLine, setupTechnicalToken } from "./setup-prompts.js";
 
 export type SetupVerificationResult = {
   ok: boolean;
@@ -174,27 +175,36 @@ export function renderSetupVerificationReport(
   report: SetupVerificationReport,
   copy: SetupVerificationCopy
 ): string {
+  const locale = copy.locale === "ar" ? "ar" : "en";
   const lines: string[] = [
-    copy.verification.title,
-    copy.verification.body,
+    renderVerificationLine(copy, copy.verification.title),
+    renderVerificationLine(copy, copy.verification.body),
     "",
-    `${copy.verification.stateDirectory}: ${report.stateWritable ? copy.verification.writable : copy.verification.blocked}`,
-    `${copy.verification.secretStore}: ${report.envFilePresent && report.envFileMode !== undefined ? copy.verification.presentMode(report.envFileMode) : copy.verification.notPresent}`,
-    `${copy.verification.workspaceTrust}: ${report.workspaceTrusted ? copy.setupCheck.trusted : copy.setupCheck.notTrusted}`,
-    `${copy.verification.securityMode}: ${report.securityModeLabel} (${report.securityModeValue})`,
-    `${copy.verification.workflowLearning}: ${report.skillAutonomyLabel} (${report.skillAutonomyValue})`,
-    `${copy.verification.readOnlyToolCheck}: ${renderToolStatus(report.toolStatus, copy)}`,
-    `${copy.verification.configSources}: ${report.configSources.join(", ") || "none"}`,
+    renderVerificationPair(copy, copy.verification.stateDirectory, report.stateWritable ? copy.verification.writable : copy.verification.blocked),
+    renderVerificationPair(copy, copy.verification.secretStore, report.envFilePresent && report.envFileMode !== undefined ? copy.verification.presentMode(report.envFileMode) : copy.verification.notPresent),
+    renderVerificationPair(copy, copy.verification.workspaceTrust, report.workspaceTrusted ? copy.setupCheck.trusted : copy.setupCheck.notTrusted),
+    renderVerificationPair(copy, copy.verification.securityMode, `${setupTechnicalToken(locale, report.securityModeLabel)} (${setupTechnicalToken(locale, report.securityModeValue)})`),
+    renderVerificationPair(copy, copy.verification.workflowLearning, `${setupTechnicalToken(locale, report.skillAutonomyLabel)} (${setupTechnicalToken(locale, report.skillAutonomyValue)})`),
+    renderVerificationPair(copy, copy.verification.readOnlyToolCheck, renderToolStatus(report.toolStatus, copy)),
+    renderVerificationPair(copy, copy.verification.configSources, report.configSources.length > 0
+      ? report.configSources.map((source) => setupTechnicalToken(locale, source)).join(", ")
+      : setupTechnicalToken(locale, "none")),
     "",
-    renderProviderDiagnostic(report.providerDiagnostic),
+    renderVerificationBlock(copy, renderProviderDiagnostic(report.providerDiagnostic)),
     "",
   ];
 
   if (report.warnings.length === 0) {
-    lines.push(`${copy.verification.statusReady}\n${copy.verification.nextReady}`);
+    lines.push([
+      renderVerificationLine(copy, copy.verification.statusReady),
+      renderVerificationLine(copy, copy.verification.nextReady),
+    ].join("\n"));
   } else {
     lines.push(
-      `${copy.verification.warningsTitle}\n${[...new Set(report.warnings)].map((warning) => `- ${warning}`).join("\n")}`,
+      [
+        renderVerificationLine(copy, copy.verification.warningsTitle),
+        [...new Set(report.warnings)].map((warning) => renderVerificationBullet(copy, warning)).join("\n"),
+      ].join("\n"),
       "",
       renderVerificationNextSteps(report.issueCodes, copy)
     );
@@ -266,7 +276,31 @@ function renderVerificationNextSteps(issueCodes: readonly SetupVerificationIssue
     steps.add(copy.verification.fallbackNextAction);
   }
 
-  return `${copy.verification.nextActionsTitle}\n${Array.from(steps).map((step) => `- ${step}`).join("\n")}`;
+  return [
+    renderVerificationLine(copy, copy.verification.nextActionsTitle),
+    Array.from(steps).map((step) => renderVerificationBullet(copy, step)).join("\n"),
+  ].join("\n");
+}
+
+function renderVerificationPair(copy: SetupVerificationCopy, label: string, value: string): string {
+  return renderVerificationLine(copy, `${label}: ${value}`);
+}
+
+function renderVerificationBullet(copy: SetupVerificationCopy, value: string): string {
+  return renderVerificationLine(copy, `- ${value}`);
+}
+
+function renderVerificationBlock(copy: SetupVerificationCopy, value: string): string {
+  return value.split("\n").map((line) => renderVerificationLine(copy, line)).join("\n");
+}
+
+function renderVerificationLine(copy: SetupVerificationCopy, value: string): string {
+  if (copy.locale !== "ar") return value;
+  return containsArabic(value) ? setupOutputLine("ar", value) : setupTechnicalToken("ar", value);
+}
+
+function containsArabic(value: string): boolean {
+  return /[\u0600-\u06FF]/u.test(value);
 }
 
 function mapProviderWarningToCodes(warning: string): SetupVerificationIssueCode[] {

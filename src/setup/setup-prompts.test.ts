@@ -2,9 +2,14 @@ import { describe, expect, it } from "vitest";
 import type { SelectPromptInput } from "../cli/interactive-select.js";
 import type { Prompt } from "../cli/readline-prompt.js";
 import { isolateLtr, isolateRtl } from "../ui/bidi.js";
+import type { SetupVerificationReport } from "./verification.js";
 import {
   promptSetupChoice,
+  renderSetupApplyEndState,
   setupCopyText,
+  setupCsvPromptLabel,
+  setupPromptLabel,
+  setupPromptWithDefault,
   setupProviderCredentialQuestion,
   setupPromptContext,
   setupTelegramAllowedChatIdsQuestion,
@@ -52,12 +57,50 @@ describe("shared setup string prompt copy", () => {
     expect(english).toContain(setupCopyText("en", "setupEditor.actions.storeProviderCredentialReference.description"));
     expect(arabic).toContain(setupCopyText("ar", "setupEditor.actions.storeProviderCredentialReference.description"));
     expect(english).toContain("DeepSeek [DEEPSEEK_API_KEY]: ");
+    expect(arabic).toBe(isolateRtl(`${setupCopyText("ar", "setupEditor.actions.storeProviderCredentialReference.description")} ${isolateLtr("DeepSeek")} [${isolateLtr("DEEPSEEK_API_KEY")}]: `));
     expect(arabic).toContain(`${isolateLtr("DeepSeek")} [${isolateLtr("DEEPSEEK_API_KEY")}]: `);
     expect(arabic).not.toContain("DeepSeek [DEEPSEEK_API_KEY]");
     expect(setupProviderCredentialQuestion("ar", {
       providerName: "Telegram",
       envVarName: "ESTACODA_TELEGRAM_BOT_TOKEN",
     })).toContain(isolateLtr("ESTACODA_TELEGRAM_BOT_TOKEN"));
+  });
+
+  it("wraps Arabic raw prompt lines while isolating technical values", () => {
+    expect(setupPromptWithDefault("en", "Workspace", "/tmp/example")).toBe("Workspace [/tmp/example]: ");
+    expect(setupPromptWithDefault("ar", "اختر مساحة العمل", "/tmp/example")).toBe(
+      isolateRtl(`اختر مساحة العمل [${isolateLtr("/tmp/example")}]: `)
+    );
+    expect(setupPromptLabel("ar", "النموذج")).toBe(isolateRtl("النموذج: "));
+    expect(setupCsvPromptLabel("ar", "المستخدمون")).toBe(
+      isolateRtl(`المستخدمون, ${isolateLtr("comma-separated")}: `)
+    );
+  });
+
+  it("wraps Arabic setup apply end-state lines", () => {
+    const verification: SetupVerificationReport = {
+      stateWritable: true,
+      envFilePresent: false,
+      envFileSecure: true,
+      workspaceTrusted: true,
+      securityModeLabel: "Adaptive",
+      securityModeValue: "adaptive",
+      skillAutonomyLabel: "Suggest",
+      skillAutonomyValue: "suggest",
+      providerDiagnostic: {
+        status: "ready",
+        lines: [],
+        warnings: [],
+      },
+      toolStatus: "skipped",
+      configSources: [],
+      warnings: [],
+      issueCodes: [],
+    };
+
+    expect(renderSetupApplyEndState({ kind: "verified-ready", verification }, "ar")).toBe(
+      isolateRtl(setupCopyText("ar", "setupApply.endState.verifiedReady"))
+    );
   });
 
   it("renders Telegram input prompts from shared setup editor copy without an env-var question", () => {

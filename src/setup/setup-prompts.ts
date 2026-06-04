@@ -120,7 +120,6 @@ export async function promptSetupStringWithDefault(
   question: string,
   defaultValue: string
 ): Promise<string> {
-  // Follow-up: raw readline prompts need RTL-safe display for mixed defaults.
   const { prompt } = resolveSetupPromptTarget(target);
   const answer = (await prompt(question)).trim();
   return answer.length > 0 ? answer : defaultValue;
@@ -133,10 +132,34 @@ export function setupProviderCredentialQuestion(
     readonly envVarName: string;
   }
 ): string {
-  return [
+  return setupOutputLine(locale, [
     setupCopyText(locale, "setupEditor.actions.storeProviderCredentialReference.description"),
     `${renderDisplayToken(locale, input.providerName)} [${renderDisplayToken(locale, input.envVarName)}]: `,
-  ].join(" ");
+  ].join(" "));
+}
+
+export function setupPromptWithDefault(
+  locale: SetupCopyLocale,
+  label: string,
+  defaultValue: string
+): string {
+  return setupOutputLine(locale, `${label} [${renderDisplayToken(locale, defaultValue)}]: `);
+}
+
+export function setupPromptLabel(locale: SetupCopyLocale, label: string): string {
+  return setupOutputLine(locale, `${label}: `);
+}
+
+export function setupCsvPromptLabel(locale: SetupCopyLocale, label: string): string {
+  return setupOutputLine(locale, `${label}, ${renderDisplayToken(locale, "comma-separated")}: `);
+}
+
+export function setupOutputLine(locale: SetupCopyLocale, value: string): string {
+  return locale === "ar" ? isolateRtl(value) : value;
+}
+
+export function setupTechnicalToken(locale: SetupCopyLocale, value: string): string {
+  return renderDisplayToken(locale, value);
 }
 
 export function setupTelegramBotTokenQuestion(locale: SetupCopyLocale): string {
@@ -224,50 +247,52 @@ export function renderSetupApplyPlanningResult(
 ): string {
   switch (result.kind) {
     case "apply-plan-ready":
-      return setupCopyText(locale, "setupApply.plan.ready");
+      return setupOutputLine(locale, setupCopyText(locale, "setupApply.plan.ready"));
     case "blocked":
-      return formatSetupCopy(locale, "setupApply.review.blocked", {
+      return setupOutputLine(locale, formatSetupCopy(locale, "setupApply.review.blocked", {
         blockerCount: String(result.eligibility.blockers.length),
-      });
+      }));
     case "cancelled":
-      return setupCopyText(locale, "setupApply.review.cancelled");
+      return setupOutputLine(locale, setupCopyText(locale, "setupApply.review.cancelled"));
   }
 }
 
 export function renderSetupApplyEndState(endState: SetupApplyEndState, locale: SetupCopyLocale): string {
   switch (endState.kind) {
     case "verified-ready":
-      return setupCopyText(locale, "setupApply.endState.verifiedReady");
+      return setupOutputLine(locale, setupCopyText(locale, "setupApply.endState.verifiedReady"));
     case "verified-degraded":
-      return setupCopyText(locale, "setupApply.endState.verifiedDegraded");
+      return setupOutputLine(locale, setupCopyText(locale, "setupApply.endState.verifiedDegraded"));
     case "blocked":
       if (endState.reason === "save-failed") {
-        return formatSetupCopy(locale, "setupApply.endState.saveFailed", {
+        return setupOutputLine(locale, formatSetupCopy(locale, "setupApply.endState.saveFailed", {
           error: endState.blockers[0] ?? "unknown",
-        });
+        }));
       }
       if (endState.reason === "verification-blocked") {
         if ((endState.persistedSecretCount ?? 0) > 0) {
-          return formatSetupCopy(locale, "setupApply.endState.verificationBlockedAfterPersistence", {
+          return setupOutputLine(locale, formatSetupCopy(locale, "setupApply.endState.verificationBlockedAfterPersistence", {
             blocker: endState.blockers[0] ?? "unknown",
-          });
+          }));
         }
-        return formatSetupCopy(locale, "setupApply.endState.verificationBlocked", {
+        return setupOutputLine(locale, formatSetupCopy(locale, "setupApply.endState.verificationBlocked", {
           blocker: endState.blockers[0] ?? "unknown",
-        });
+        }));
       }
-      return formatSetupCopy(locale, "setupApply.review.blocked", {
+      return setupOutputLine(locale, formatSetupCopy(locale, "setupApply.review.blocked", {
         blockerCount: String(endState.blockers.length),
-      });
+      }));
     case "cancelled":
-      return setupCopyText(locale, "setupApply.review.cancelled");
+      return setupOutputLine(locale, setupCopyText(locale, "setupApply.review.cancelled"));
     case "saved-not-launched":
-      return setupCopyText(locale, "setupApply.endState.savedNotLaunched");
+      return setupOutputLine(locale, setupCopyText(locale, "setupApply.endState.savedNotLaunched"));
     case "launched":
       return [
         setupCopyText(locale, "setupApply.endState.launched"),
         endState.acceptedDegraded ? setupCopyText(locale, "setupApply.endState.acceptedDegraded") : undefined,
-      ].filter((line): line is string => line !== undefined).join("\n");
+      ].filter((line): line is string => line !== undefined)
+        .map((line) => setupOutputLine(locale, line))
+        .join("\n");
   }
 }
 
@@ -299,6 +324,7 @@ function reviewPlaceholderValues(
 }
 
 function renderDisplayToken(locale: SetupCopyLocale, value: string): string {
+  if (value.length === 0) return value;
   return locale === "ar" ? isolateLtr(value) : value;
 }
 

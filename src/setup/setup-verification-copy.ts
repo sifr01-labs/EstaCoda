@@ -2,6 +2,7 @@ import { isolateLtr } from "../ui/bidi.js";
 import { resolveSetupCopy, type SetupCopyKey, type SetupCopyLocale } from "./setup-copy.js";
 
 export type SetupVerificationCopy = {
+  readonly locale: SetupCopyLocale | string;
   readonly setupCheck: {
     readonly trusted: string;
     readonly notTrusted: string;
@@ -47,6 +48,7 @@ export type SetupVerificationCopy = {
 
 export function setupVerificationCopy(locale: SetupCopyLocale | string): SetupVerificationCopy {
   return {
+    locale,
     setupCheck: {
       trusted: copy(locale, "setupVerification.status.trusted"),
       notTrusted: copy(locale, "setupVerification.status.notTrusted"),

@@ -8,9 +8,10 @@ import {
   runSetupVerification,
   type SetupVerificationReport,
 } from "./verification.js";
-import { setupVerificationCopyEn } from "./setup-verification-copy.js";
+import { setupVerificationCopy, setupVerificationCopyEn } from "./setup-verification-copy.js";
 import type { ProviderDiagnostic } from "../config/provider-diagnostics.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
+import { isolateLtr, isolateRtl } from "../ui/bidi.js";
 
 function makeProviderDiagnostic(status: ProviderDiagnostic["status"], warnings: string[] = []): ProviderDiagnostic {
   return {
@@ -126,6 +127,21 @@ describe("renderSetupVerificationReport", () => {
     const copy = setupVerificationCopyEn;
     const output = renderSetupVerificationReport(report, copy);
     expect(output).toContain(copy.verification.fallbackNextAction);
+  });
+
+  it("wraps Arabic report rows and isolates technical values", () => {
+    const copy = setupVerificationCopy("ar");
+    const report = makeReport({
+      configSources: ["/tmp/home/.estacoda/profiles/default/config.json"],
+      warnings: [copy.verification.actions.missingApiKey("OPENAI_API_KEY")],
+      issueCodes: ["missing-api-key"],
+    });
+    const output = renderSetupVerificationReport(report, copy);
+
+    expect(output).toContain(isolateRtl(`مصادر الإعداد: ${isolateLtr("/tmp/home/.estacoda/profiles/default/config.json")}`));
+    expect(output).toContain(isolateRtl(`وضع الأمان: ${isolateLtr("Adaptive")} (${isolateLtr("adaptive")})`));
+    expect(output).toContain(isolateRtl(`- ${copy.verification.actions.missingApiKey("OPENAI_API_KEY")}`));
+    expect(output).toContain(isolateLtr("Selected route: test/test"));
   });
 });
 
