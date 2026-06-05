@@ -42,6 +42,41 @@ memory/shared/ -> USER.md -> SOUL.md -> MEMORY.md
 
 `AGENTS.md` is not a memory file. It is project context loaded through `ProjectContextLoader`, and it should never be curated, compacted, deactivated, promoted, or mirrored as memory.
 
+## Retrieval Write And Storage Boundaries
+
+Upcoming local memory retrieval work must keep storage authority explicit. The local memory index lives in profile state as a dedicated SQLite file:
+
+```text
+<profile-state-dir>/memory-index.sqlite
+```
+
+The index is a rebuildable mirror of memory content, not source of truth. It is inspectable, safe to delete and rebuild, separate from authoritative memory files, and must not mix memory-index authority with session transcript authority. When implemented, it should follow the existing SQLite adapter, migration, and lifecycle patterns.
+
+`memory-index.sqlite` lifecycle rules:
+
+- Stored under profile state, for example `<profile-state-dir>/memory-index.sqlite`.
+- Opened through the runtime/profile lifecycle.
+- Closed and disposed with runtime disposal.
+- Safe to delete while the runtime is stopped.
+- Missing file at startup reports a pending rebuild.
+- Bounded backfill may recreate the file.
+- Full rebuild is explicit through `estacoda memory index rebuild`.
+- Runtime cache/fingerprint accounts for retrieval config and index path.
+
+Authoritative memory source invariants:
+
+- `MemoryStore` remains the in-memory representation of local memory files.
+- Profile memory files remain authoritative for `USER.md`, `SOUL.md`, and `MEMORY.md`.
+- Shared memory files remain authoritative under global shared memory.
+- `promotions.json` remains authoritative for promotion metadata.
+- The memory index is always derived and rebuildable.
+
+Local memory disk writes must go through one drift-aware persistence path. Today, `memory.curate` writes directly to `MemoryStore`, while `LocalMemoryProvider` also has save behavior. The preferred follow-up direction is a `MemoryPersistenceService` used by `memory.curate`, `LocalMemoryProvider`, promotions, compaction, and later index sync hooks. This is preferred over overloading `LocalMemoryProvider` with tool-specific write behavior.
+
+Protected memory remains protected even when indexed. `SOUL.md` is indexed as protected for parity, status, and rebuild checks, but it is excluded from read/search unless `includeProtected` is true. Semantic recall must never use `SOUL.md`, even if it is indexed, and protected entries must remain excluded from semantic-facing retrieval paths.
+
+Deterministic session search primitives are EstaCoda-native. `SessionDB` does not currently provide Hermes-style `getMessagesAround()` primitives. Future `session_search` work will build deterministic browse/search/scroll behavior separately from `SessionRecallService`.
+
 ## Prompt Assembly
 
 `MemoryPromptContextBuilder` is the canonical source for memory prompt context. It loads the local memory snapshot, applies promotion filtering, reports diagnostics, and emits prompt blocks for:
