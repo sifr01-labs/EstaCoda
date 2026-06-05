@@ -136,7 +136,7 @@ What can go wrong: a regex can be invalid, output can be truncated, `rg` may be 
 
 ## Notebook Editing
 
-`notebook.edit` edits cells in Jupyter `.ipynb` notebooks under the active workspace. It accepts workspace-relative `.ipynb` paths and rejects traversal or absolute paths outside the workspace. Non-notebook paths are rejected.
+`notebook.edit` edits cells in Jupyter `.ipynb` notebooks scoped to the active workspace. Prefer workspace-relative `.ipynb` paths in prompts and examples. The tool follows the same workspace containment model as `file.read`: paths that resolve outside the workspace, including traversal and absolute paths outside the workspace, are rejected. Non-notebook paths are rejected.
 
 The tool reads the notebook as UTF-8 JSON and validates the minimal notebook shape:
 

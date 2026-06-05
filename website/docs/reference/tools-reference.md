@@ -156,7 +156,7 @@ Failure modes and recovery:
 
 #### `notebook.edit`
 
-`notebook.edit` edits Jupyter notebooks inside the active workspace. It accepts workspace-relative `.ipynb` paths only from the user-facing API and rejects traversal or absolute paths outside the workspace. It uses the same containment model as `file.read`.
+`notebook.edit` edits Jupyter notebooks scoped to the active workspace. Prefer workspace-relative `.ipynb` paths in examples and model-facing guidance. It uses the same containment model as `file.read`: paths that resolve outside the workspace, including traversal and absolute paths outside the workspace, are rejected.
 
 Validation:
 

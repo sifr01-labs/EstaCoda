@@ -156,7 +156,7 @@ sidebar_position: 6
 
 #### `notebook.edit`
 
-`notebook.edit` يحرر Jupyter notebooks داخل workspace النشط. يقبل من واجهة المستخدم مسارات `.ipynb` نسبية إلى workspace، ويرفض traversal أو المسارات المطلقة خارج workspace. يستخدم نموذج الاحتواء نفسه في `file.read`.
+`notebook.edit` يحرر Jupyter notebooks ضمن نطاق workspace النشط. فضّل مسارات `.ipynb` النسبية إلى workspace في الأمثلة والإرشاد الموجه للنموذج. يستخدم نموذج الاحتواء نفسه في `file.read`: أي مسار ينتهي حله خارج workspace، بما في ذلك traversal أو المسارات المطلقة خارج workspace، يُرفض.
 
 التحقق:
 

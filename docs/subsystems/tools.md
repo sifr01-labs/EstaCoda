@@ -86,7 +86,7 @@ Supported output modes are content, files, and count. Content mode includes line
 
 ### `notebook.edit`
 
-`notebook.edit` edits Jupyter `.ipynb` files inside the workspace. It accepts workspace-relative notebook paths, rejects non-`.ipynb` paths, and uses the same containment model as `file.read`. Absolute paths outside the workspace and `..` traversal are rejected.
+`notebook.edit` edits Jupyter `.ipynb` files scoped to the active workspace. Prefer workspace-relative notebook paths in tool calls and examples. The tool uses the same containment model as `file.read`: paths that resolve outside the workspace, including absolute paths outside the workspace and `..` traversal, are rejected. Non-`.ipynb` paths are rejected.
 
 The tool parses UTF-8 JSON and requires a minimal notebook shape: root object, `cells` array, numeric `nbformat`, and numeric `nbformat_minor`. Invalid JSON and invalid notebook shape return clear errors.
 

@@ -136,7 +136,7 @@ sidebar_position: 5
 
 ## تحرير notebooks
 
-`notebook.edit` يحرر خلايا Jupyter `.ipynb` داخل workspace النشط. يقبل مسارات `.ipynb` نسبية إلى workspace ويرفض traversal أو المسارات المطلقة خارج workspace. المسارات التي ليست notebooks تُرفض.
+`notebook.edit` يحرر خلايا Jupyter `.ipynb` ضمن نطاق workspace النشط. فضّل مسارات `.ipynb` النسبية إلى workspace في التعليمات والأمثلة. تتبع الأداة نموذج احتواء workspace نفسه في `file.read`: أي مسار ينتهي حله خارج workspace، بما في ذلك traversal أو المسارات المطلقة خارج workspace، يُرفض. المسارات التي ليست notebooks تُرفض.
 
 تقرأ الأداة notebook كـ JSON بترميز UTF-8 وتتحقق من الشكل الأدنى:
 
