@@ -31,7 +31,10 @@ Built-in tools ship with EstaCoda and are always registered. Availability depend
 | `file.read` | `safe` | Reads files within the workspace |
 | `file.write` | `caution` | Writes files; gated in adaptive/strict mode |
 | `file.replace` | `caution` | Edits files; gated in adaptive/strict mode |
-| `file.search` | `safe` | Searches files with regex |
+| `file.search` | `safe` | Simple compatibility search for literal or regex queries |
+| `file.glob` | `read-only-local` | Finds workspace files by glob pattern |
+| `file.grep` | `read-only-local` | Bounded ripgrep-backed content search |
+| `notebook.edit` | `workspace-write` | Edits cells in workspace `.ipynb` notebooks |
 | `web.search` | `read-only-network` | Web search via configured provider |
 | `web.extract` | `read-only-network` | Extracts content from URLs |
 | `web.crawl` | `read-only-network` | Crawls web pages |
@@ -55,6 +58,108 @@ MCP (Model Context Protocol) tools are loaded from configured MCP servers. They 
 ### Skill-Selected Tool Use
 
 Skills can declare required toolsets. When a skill is visible in a session, its required toolsets are checked for availability. If a toolset is missing, the skill may still be visible but its instructions will note the limitation.
+
+---
+
+## Workspace File Search
+
+Use the workspace file tools when the task is about code, local documentation, fixtures, notebooks, or any other file under the active workspace. All paths remain scoped to the active workspace. Traversal such as `../outside` and absolute paths outside the workspace are rejected before the tool reads, writes, or spawns a search process.
+
+These tools do not change workspace trust semantics. `file.glob` and `file.grep` are read-only local tools. `notebook.edit` is a workspace-write tool.
+
+### `file.search`
+
+`file.search` is the simple fallback and compatibility search tool. Use it for a straightforward literal or regex query when you do not need ripgrep-specific filtering, output modes, context, or pagination.
+
+What can go wrong:
+
+- Invalid regex input is rejected.
+- Very broad searches are less ergonomic than `file.grep`.
+- It is not the right tool for notebook cell edits or glob-only file discovery.
+
+Recovery: narrow the query or path. For larger repositories, prefer `file.grep` for content search and `file.glob` for file discovery.
+
+### `file.glob`
+
+`file.glob` finds files by glob pattern and returns workspace-relative paths. It uses `rg --files -g <pattern>` when ripgrep is installed. That path is fast on large repositories and respects `.gitignore`. When ripgrep is unavailable, EstaCoda uses a smaller Node fallback that supports `*`, `**`, `?`, and basic `{a,b}` groups.
+
+Behavior:
+
+- Hidden files are excluded by default.
+- `include_hidden: true` can include non-sensitive hidden files.
+- Secret-ish files are still excluded even when hidden files are enabled.
+- Generated and VCS directories are excluded.
+- Results are sorted by path by default; `sort: "modified"` sorts by descending file modification time.
+- `limit` and `offset` apply after sorting.
+
+Secret exclusions include `.env`, `.env.*`, `*.pem`, `*.key`, SSH keys such as `id_rsa` and `id_ed25519`, `*.p12`, and `*.pfx`. Generated and VCS exclusions include `.git`, `node_modules`, `dist`, `build`, `.next`, `.turbo`, and similar folders.
+
+What can go wrong: a pattern may match nothing, the scoped path may be a file instead of a directory, or the Node fallback may not support a more advanced glob dialect. Recovery: check the path scope, simplify the glob, or use `file.grep` if the real goal is content search.
+
+### `file.grep`
+
+`file.grep` searches file contents with ripgrep. Use it when you need content matches with filtering, output modes, context, pagination, or bounded result sizes. It uses `rg` directly and does not implement a Node content-search fallback. If ripgrep is missing, the tool returns a clear error; use `file.search` as the simpler fallback.
+
+Behavior:
+
+- The search target is resolved under the active workspace and passed to `rg` as a workspace-relative path.
+- The pattern is passed through `-e`.
+- `glob` maps to `--glob`.
+- `type` maps to `--type`.
+- `ignore_case` maps to `-i`.
+- `multiline` maps to `-U --multiline-dotall`.
+- Binary files are skipped by ripgrep default.
+- Hidden files are excluded by default; `include_hidden: true` passes `--hidden`.
+- Built-in secret and generated-directory exclusions still apply when hidden files are enabled.
+
+Output controls:
+
+| Input | Behavior |
+|---|---|
+| `limit` | Defaults to `50`; bounds logical result rows. |
+| `offset` | Defaults to `0`; skips logical rows before rendering. |
+| `max_result_chars` | Defaults to `100000`; caps rendered output. |
+| `max_line_chars` | Defaults to `500`; truncates long match lines. |
+| `max_filesize` | Defaults to `2M`; passed to ripgrep as `--max-filesize`. |
+
+Output modes:
+
+- `content` is the default. It includes line numbers by default. Context flags apply only in this mode.
+- `files` returns matching file paths.
+- `count` returns per-file match counts.
+
+Timeout behavior: `file.grep` uses a `30000ms` timeout. On timeout or abort, the spawned ripgrep process is killed and the tool returns a structured error or truncated result metadata.
+
+What can go wrong: a regex can be invalid, output can be truncated, `rg` may be missing, or exclusions can intentionally hide secret/generated files. Recovery: narrow `pattern`, `glob`, or `path`; increase `offset`; use `output_mode: "files"` to inspect the match set; or fall back to `file.search` when ripgrep is unavailable.
+
+---
+
+## Notebook Editing
+
+`notebook.edit` edits cells in Jupyter `.ipynb` notebooks under the active workspace. It accepts workspace-relative `.ipynb` paths and rejects traversal or absolute paths outside the workspace. Non-notebook paths are rejected.
+
+The tool reads the notebook as UTF-8 JSON and validates the minimal notebook shape:
+
+- The root is an object.
+- `cells` is an array.
+- `nbformat` is numeric.
+- `nbformat_minor` is numeric.
+
+Edit modes:
+
+| Mode | Behavior |
+|---|---|
+| `replace` | Requires `cell_id` and `new_source`; replaces the target cell source. |
+| `insert` | Requires `new_source`; inserts at the beginning when `cell_id` is omitted, or after the target cell when provided. |
+| `delete` | Requires `cell_id`; removes the target cell. |
+
+Cell lookup prefers real notebook cell IDs. If needed, `cell-N` addresses the zero-based cell index. Inserted cells default to `cell_type: "code"` unless `cell_type: "markdown"` is explicitly provided. Inserted code cells include the minimal valid code-cell fields; markdown cells do not get code output fields. When the notebook format supports cell IDs, inserted cells receive generated IDs.
+
+Replacing a code cell resets `execution_count` and `outputs` to `[]`. Replacing a markdown cell does not invent code outputs. Unknown notebook-level and cell-level fields are preserved.
+
+Use `expected_mtime_ms` to guard against stale edits. If the notebook changed since that timestamp, the tool rejects the edit. Successful writes use a temp file plus rename and return concise metadata plus `fileChangePreview`.
+
+What can go wrong: invalid JSON, invalid notebook shape, stale `expected_mtime_ms`, missing `cell_id`, or an invalid `cell-N` reference. Recovery: read or inspect the notebook again, use a real cell ID when present, or retry with the current `mtime` metadata.
 
 ---
 

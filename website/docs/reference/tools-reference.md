@@ -46,14 +46,159 @@ File-system operations scoped to the workspace and operating under trust boundar
 
 | Tool | Risk | State touched |
 |------|------|---------------|
-| `file.read` | `safe` | None |
-| `file.write` | `caution` | Workspace files |
-| `file.replace` | `caution` | Workspace files |
-| `file.search` | `safe` | None |
+| `file.read` | `read-only-local` | None |
+| `file.write` | `workspace-write` | Workspace files |
+| `file.replace` | `workspace-write` | Workspace files |
+| `file.search` | `read-only-local` | None |
+| `file.glob` | `read-only-local` | None |
+| `file.grep` | `read-only-local` | None |
+| `notebook.edit` | `workspace-write` | Workspace notebook files |
 
-**Trust boundary:** `file.write` and `file.replace` require workspace trust in strict security mode. In normal mode they may prompt for approval. In open mode they auto-approve unless a hard safety block triggers.
+**Trust boundary:** Workspace paths are resolved under the active workspace. Traversal outside the workspace and absolute paths outside the workspace are rejected before reads, writes, or spawned searches. `file.write`, `file.replace`, and `notebook.edit` are workspace-write tools and keep the same workspace trust semantics as other local writes. `file.glob` and `file.grep` are read-only local tools.
 
-**Hardening:** Invalid regexes are caught before execution. Symlink-cycle-safe recursive search. Portable shell fallback for search.
+**Hardening:** Invalid `file.search` regexes are caught before execution. Recursive search remains symlink-cycle-safe. `file.glob` and `file.grep` exclude known secret files and generated directories. `file.grep` bounds rows, line length, total result size, per-file size, and runtime.
+
+#### `file.search`
+
+`file.search` is the simple fallback and compatibility text search tool. Use it for straightforward literal or regex queries when ripgrep-specific behavior is not needed.
+
+Limitations and recovery:
+
+- It does not expose `file.grep` output modes, context, pagination, or ripgrep type filters.
+- It is less suitable for large repositories.
+- Use `file.grep` for bounded ripgrep-backed content search.
+- Use `file.glob` when the goal is to discover files rather than inspect content.
+
+#### `file.glob`
+
+`file.glob` finds workspace files by glob pattern and returns newline-separated workspace-relative paths.
+
+Implementation behavior:
+
+- Primary backend: `rg --files -g <pattern>`.
+- Ripgrep respects `.gitignore`.
+- Hidden files are excluded by default.
+- `include_hidden: true` passes `--hidden`.
+- If ripgrep is unavailable, a smaller Node fallback is used.
+- The Node fallback supports `*`, `**`, `?`, and basic `{a,b}` groups.
+- The Node fallback is intentionally smaller than ripgrep; advanced glob dialect behavior is not promised.
+
+Scope and sorting:
+
+- `path` defaults to `.` and must resolve to a directory inside the workspace.
+- Results are workspace-relative.
+- Default sorting is lexicographic path sort.
+- `sort: "modified"` stats matched files and sorts by descending `mtime`.
+- `offset` and `limit` apply after sorting.
+
+Exclusions:
+
+- Secret-ish files are excluded even when hidden files are enabled: `.env`, `.env.*`, `*.pem`, `*.key`, SSH keys such as `id_rsa` and `id_ed25519`, `*.p12`, and `*.pfx`.
+- Generated and VCS directories are excluded, including `.git`, `.svn`, `.hg`, `.bzr`, `.jj`, `.sl`, `node_modules`, `dist`, `build`, `.next`, and `.turbo`.
+
+Failure modes:
+
+- Missing or empty pattern returns an input error.
+- A scoped `path` outside the workspace is rejected.
+- A scoped `path` that is not a directory is rejected.
+- No matches are a successful empty result, not an execution failure.
+
+#### `file.grep`
+
+`file.grep` is the ripgrep-backed content search tool. Use it for large repositories, path-scoped searches, output modes, context, and bounded results. It requires ripgrep. There is no Node content-search fallback.
+
+Implementation behavior:
+
+- Runs `rg` with `cwd` set to the active workspace.
+- Passes the scoped target as a workspace-relative path.
+- Passes the pattern via `-e <pattern>`.
+- `glob` maps to `--glob`.
+- `type` maps to `--type`.
+- `ignore_case` maps to `-i`.
+- `multiline` maps to `-U --multiline-dotall`.
+- Binary files are skipped by ripgrep default.
+- Hidden files are excluded by default.
+- `include_hidden: true` passes `--hidden`.
+- Built-in secret and generated-directory exclusions are applied after user glob filters so user input cannot re-include excluded paths.
+
+Output modes:
+
+| Mode | Behavior |
+|------|----------|
+| `content` | Default. Includes line numbers by default. Context applies only here. |
+| `files` | Uses ripgrep file-only matching and returns matching paths. |
+| `count` | Returns per-file match counts. |
+
+Limits:
+
+| Input | Default | Behavior |
+|------|---------|----------|
+| `limit` | `50` | Bounds logical result rows. |
+| `offset` | `0` | Skips logical result rows before rendering. |
+| `max_result_chars` | `100000` | Caps rendered tool output. |
+| `max_line_chars` | `500` | Truncates individual result lines. |
+| `max_filesize` | `2M` | Passed to ripgrep as `--max-filesize`. |
+
+Timeout and cancellation:
+
+- Timeout is `30000ms`.
+- The spawned `rg` process is killed on timeout.
+- If the tool execution signal aborts, the spawned `rg` process is killed.
+- Timeout or truncation metadata is returned with a narrowing hint where applicable.
+
+Failure modes and recovery:
+
+- Invalid regex: ripgrep returns an error. Fix the pattern.
+- No matches: successful no-match result.
+- Missing ripgrep: use `file.search` as the compatibility fallback or install ripgrep.
+- Truncated output: narrow `pattern`, `glob`, or `path`; increase `offset`; or use `output_mode: "files"`.
+- Secret/generated files missing from results: this is intentional. The exclusions are part of the safety model.
+
+#### `notebook.edit`
+
+`notebook.edit` edits Jupyter notebooks inside the active workspace. It accepts workspace-relative `.ipynb` paths only from the user-facing API and rejects traversal or absolute paths outside the workspace. It uses the same containment model as `file.read`.
+
+Validation:
+
+- Reads the notebook as UTF-8.
+- Parses JSON.
+- Rejects invalid JSON with a clear error.
+- Requires root object, `cells` array, numeric `nbformat`, and numeric `nbformat_minor`.
+- Rejects non-`.ipynb` paths.
+
+Edit modes:
+
+| Mode | Required input | Behavior |
+|------|----------------|----------|
+| `replace` | `cell_id`, `new_source` | Replaces target cell source. |
+| `insert` | `new_source` | Inserts at the beginning without `cell_id`; inserts after the target with `cell_id`. |
+| `delete` | `cell_id` | Deletes the target cell. |
+
+Cell targeting:
+
+- Real notebook cell IDs are preferred.
+- `cell-N` is supported as a zero-based index fallback.
+- Invalid `cell_id` is rejected for replace and delete.
+- Inserted cells default to `cell_type: "code"` unless `cell_type: "markdown"` is explicitly provided.
+- Inserted code cells include minimal valid code-cell fields.
+- Inserted markdown cells include minimal valid markdown-cell fields and do not invent code outputs.
+- Cell IDs are generated for inserted cells when the notebook format supports them.
+
+Write behavior:
+
+- Unknown notebook-level and cell-level fields are preserved.
+- Replacing a code cell resets `execution_count` and `outputs` to `[]`.
+- Replacing a markdown cell does not add code outputs.
+- `expected_mtime_ms` rejects stale edits when the current mtime differs.
+- Writes are atomic: temp file plus rename.
+- Result metadata is concise and includes `fileChangePreview`.
+
+Failure modes and recovery:
+
+- Invalid JSON or invalid notebook shape: inspect and repair the file before editing.
+- Stale edit: reread the notebook and retry with current metadata.
+- Missing cell: use a real cell ID when available or a valid `cell-N` fallback.
+- Source formatting: `new_source` is converted to a normal `.ipynb` source field, preserving newline-compatible JSON source representation.
 
 ### Web tools
 
