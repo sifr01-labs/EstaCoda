@@ -526,7 +526,7 @@ export function renderOnboardingPromptCard(
 
   for (let i = 0; i < vm.options.length; i++) {
     const option = vm.options[i];
-    const marker = i === vm.selectedOptionIndex ? effectiveLocale === "ar" ? "<" : ">" : " ";
+    const marker = i === vm.selectedOptionIndex ? ">" : " ";
     const label = option.technical === true && effectiveLocale === "ar"
       ? isolateLtr(option.label)
       : effectiveLocale === "ar"

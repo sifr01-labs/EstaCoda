@@ -150,7 +150,7 @@ describe("PlainRenderer — renderOnboardingPromptCard", () => {
     expect(out).toContain("> Not now");
   });
 
-  it("isolates Arabic technical lines and mirrors selected option marker", () => {
+  it("isolates Arabic technical lines and keeps selected marker after the label", () => {
     const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
       title: "الثقة بمساحة العمل",
       bodyLines: ["هل تثق بمساحة العمل هذه؟"],
@@ -167,7 +167,7 @@ describe("PlainRenderer — renderOnboardingPromptCard", () => {
     expect(out).toContain(isolateLtr("KIMI_API_KEY"));
     expect(out).toContain(isolateLtr("kimi-k2"));
     expect(out).toContain(isolateLtr("openrouter"));
-    expect(out).toContain(`${isolateRtl("ثق بمساحة العمل")} <`);
+    expect(out).toContain(`${isolateRtl("ثق بمساحة العمل")} >`);
     expect(out).not.toContain(`> ${isolateRtl("ثق بمساحة العمل")}`);
     expect(out).toContain(`${isolateRtl("ليس الآن")}  `);
   });

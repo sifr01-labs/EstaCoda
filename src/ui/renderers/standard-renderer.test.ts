@@ -503,13 +503,13 @@ describe("StandardRenderer — dark theme", () => {
     expect(plain).toContain(isolateRtl("الثقة بمساحة العمل  𓂀"));
     expect(topLine).not.toContain(`╭──── ${isolateRtl("الثقة بمساحة العمل  𓂀")}`);
     expect(topLine.indexOf(isolateRtl("الثقة بمساحة العمل  𓂀"))).toBeGreaterThan(4);
-    expect(plain).toContain(`${isolateRtl("ثق بمساحة العمل")} ◂`);
+    expect(plain).toContain(`${isolateRtl("ثق بمساحة العمل")} ▸`);
     expect(plain).not.toContain(`▸ ${isolateRtl("ثق بمساحة العمل")}`);
     const optionLine = plain.split("\n").find((line) => line.includes(isolateRtl("ثق بمساحة العمل")));
     const descriptionLine = plain.split("\n").find((line) => line.includes(isolateRtl("اسمح بالعمل المحلي هنا.")));
     expect(optionLine).toBeDefined();
     const optionLabelIndex = optionLine!.indexOf(isolateRtl("ثق بمساحة العمل"));
-    const optionMarkerIndex = optionLine!.indexOf("◂");
+    const optionMarkerIndex = optionLine!.indexOf("▸");
     expect(optionLabelIndex).toBeGreaterThanOrEqual(0);
     expect(optionMarkerIndex).toBeGreaterThan(optionLabelIndex);
     expect(descriptionLine).toMatch(/^\s{4,}/u);
@@ -534,9 +534,9 @@ describe("StandardRenderer — dark theme", () => {
       direction: "rtl",
     })));
 
-    expect(plain).toContain(`${isolateRtl("ثق بمساحة العمل")} <`);
+    expect(plain).toContain(`${isolateRtl("ثق بمساحة العمل")} >`);
     expect(plain).not.toContain(`> ${isolateRtl("ثق بمساحة العمل")}`);
-    expect(plain).not.toContain("▸");
+    expect(plain).not.toContain("<");
     expect(plain).not.toContain("◂");
   });
 
@@ -566,7 +566,7 @@ describe("StandardRenderer — dark theme", () => {
     const selectedLine = plain.split("\n").find((line) => line.includes(isolateLtr("STT")));
     expect(selectedLine).toBeDefined();
     expect(selectedLine).not.toContain("...");
-    expect(selectedLine!.indexOf("◂")).toBeGreaterThan(selectedLine!.indexOf("اضبط"));
+    expect(selectedLine!.indexOf("▸")).toBeGreaterThan(selectedLine!.indexOf("اضبط"));
     expect(plain).toContain(isolateLtr("TTS"));
     for (const line of plain.split("\n")) {
       expect(measureVisibleWidth(line)).toBeLessThanOrEqual(caps.terminalWidth);

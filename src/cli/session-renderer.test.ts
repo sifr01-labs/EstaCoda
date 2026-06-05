@@ -152,7 +152,7 @@ describe("createSessionRenderer — plain renderer locale", () => {
     assertNoAnsi(out);
   });
 
-  it("renders Arabic onboarding prompt cards with mirrored markers in plain mode", () => {
+  it("renders Arabic onboarding prompt cards with selected markers after the label in plain mode", () => {
     const renderer = createSessionRenderer({ capabilities: plainCaps(), locale: "ar" });
     const vm = buildOnboardingPromptCardViewModel({
       title: "الثقة بمساحة العمل",
@@ -167,7 +167,7 @@ describe("createSessionRenderer — plain renderer locale", () => {
     });
     const out = renderer.render(vm);
 
-    expect(out).toContain(`${isolateRtl("ثق بمساحة العمل")} <`);
+    expect(out).toContain(`${isolateRtl("ثق بمساحة العمل")} >`);
     expect(out).not.toContain(`> ${isolateRtl("ثق بمساحة العمل")}`);
     assertNoAnsi(out);
   });

@@ -608,9 +608,7 @@ export class StandardRenderer {
     const topRight = this.#useUnicode ? "╮" : "+";
     const bottomLeft = this.#useUnicode ? "╰" : "+";
     const bottomRight = this.#useUnicode ? "╯" : "+";
-    const selectedMarker = direction === "rtl"
-      ? this.#useUnicode ? "◂" : "<"
-      : this.#useUnicode ? "▸" : ">";
+    const selectedMarker = this.#useUnicode ? "▸" : ">";
 
     const optionMarkerGap = " ";
     const optionMarkerSlotWidth = measureVisibleWidth(selectedMarker) + measureVisibleWidth(optionMarkerGap);
