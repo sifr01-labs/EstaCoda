@@ -21,6 +21,12 @@ Memory is durable execution context, so retrieved or generated memory is always 
 | `src/memory/memory-promotion.ts` | ~260 | Promote repeated preferences and facts |
 | `src/memory/memory-persistence-service.ts` | ~300 | Drift-aware local memory write safety |
 | `src/memory/memory-tool.ts` | ~140 | Agent-facing `memory.curate` curation tool |
+| `src/memory/memory-index-store.ts` | ~260 | Profile-state SQLite schema/lifecycle for the local lexical index |
+| `src/memory/memory-index.ts` | ~560 | Local lexical index writes, read/search, status, and vacuum |
+| `src/memory/memory-index-sync.ts` | ~520 | Startup backfill and post-write index sync orchestration |
+| `src/memory/memory-retrieval-service.ts` | ~620 | Bounded local lexical memory read/search with fallback |
+| `src/cli/memory-commands.ts` | ~430 | CLI memory index/read/search commands |
+| `src/tools/memory-retrieval-tools.ts` | ~270 | Agent-facing `memory.read` and `memory.search` tools |
 | `src/memory/memory-file-compaction-service.ts` | ~540 | Manual memory-file compaction and restore service |
 | `src/memory/external-memory-provider.ts` | ~530 | External memory lifecycle helpers and file-backed provider |
 | `src/session/session-search-service.ts` | ~360 | Deterministic raw session browse/search/scroll |
@@ -46,13 +52,13 @@ memory/shared/ -> USER.md -> SOUL.md -> MEMORY.md
 
 ## Retrieval Write And Storage Boundaries
 
-Phase 1 local memory retrieval work must keep storage authority explicit. The local memory index lives in profile state as a dedicated SQLite file:
+Local memory retrieval keeps storage authority explicit. The local memory index lives in profile state as a dedicated SQLite file:
 
 ```text
 <profile-state-dir>/memory-index.sqlite
 ```
 
-The index is a rebuildable mirror of memory content, not source of truth. It is inspectable, safe to delete and rebuild, separate from authoritative memory files, and must not mix memory-index authority with session transcript authority. When implemented, it should follow the existing SQLite adapter, migration, and lifecycle patterns.
+The index is a rebuildable mirror of memory content, not source of truth. It is inspectable, safe to delete and rebuild, separate from authoritative memory files, and must not mix memory-index authority with session transcript authority. It follows the existing SQLite adapter, migration, and lifecycle patterns.
 
 `memory-index.sqlite` lifecycle rules:
 
@@ -79,18 +85,21 @@ Protected memory remains protected even when indexed. `SOUL.md` is indexed as pr
 
 Deterministic session search primitives are EstaCoda-native. `SessionDB` does not currently provide Hermes-style `getMessagesAround()` primitives. `SessionSearchService` implements deterministic browse/search/scroll behavior separately from `SessionRecallService`.
 
-## Local Lexical Memory Retrieval Boundaries
+## Local Lexical Memory Retrieval
 
-Phase 1 local memory retrieval is a deterministic lexical retrieval path over authoritative memory files. It is not semantic recall, vector search, embedding retrieval, session search, or a new memory authority layer.
+Local memory retrieval is implemented as a deterministic lexical path over authoritative memory files. It is not semantic recall, vector search, embedding retrieval, session search, or a new memory authority layer.
 
-Planned user/operator-facing capabilities:
+Implemented user/operator-facing surfaces:
 
 | Surface | Boundary |
 |---------|----------|
-| `memory.read` | Read bounded local memory content by memory source/kind |
-| `memory.search` | Search local memory content lexically |
+| `memory.read` | Agent-facing bounded local memory read by source/kind |
+| `memory.search` | Agent-facing local lexical memory search |
+| `estacoda memory index path` | Print the profile-state index path |
 | `estacoda memory index status` | Inspect index path, health, and pending rebuild state |
 | `estacoda memory index rebuild` | Explicitly rebuild the local lexical memory index |
+| `estacoda memory search <query>` | Search local memory lexically from the CLI |
+| `estacoda memory read <source>` | Read a bounded local memory source from the CLI |
 
 The local index is a rebuildable mirror. Its profile-state SQLite path is:
 
@@ -98,7 +107,7 @@ The local index is a rebuildable mirror. Its profile-state SQLite path is:
 <profile-state-dir>/memory-index.sqlite
 ```
 
-Deleting `memory-index.sqlite` must not delete or mutate authoritative memory files. A missing or unhealthy index is an operator repair problem, not memory loss. Status and rebuild commands are inspection/repair paths for the mirror. If the index is disabled, missing, or unavailable, future read/search behavior should fall back to safe direct file read or substring search where possible while preserving protected-memory filtering.
+Deleting `memory-index.sqlite` does not delete or mutate authoritative memory files. A missing or unhealthy index is an operator repair problem, not memory loss. Status and rebuild commands are inspection/repair paths for the mirror. If the index is disabled, missing, or unavailable, `memory.read`, `memory.search`, and CLI read/search use safe direct file read or substring search fallback where possible while preserving protected-memory filtering.
 
 Authoritative source boundaries:
 
@@ -114,17 +123,47 @@ Shared memory may be mirrored for lexical retrieval, but the index must preserve
 Protected memory rules:
 
 - `SOUL.md` is indexed as protected for parity, status, and rebuild checks.
-- `SOUL.md` is excluded from `memory.read` and `memory.search` unless `includeProtected` is true.
+- `SOUL.md` is excluded from `memory.read`, `memory.search`, and CLI read/search unless `includeProtected` or `--include-protected` is explicit.
+- Protected excerpts remain bounded.
 - Semantic recall must never use protected identity/safety entries.
 - Protected entries remain excluded from semantic-facing retrieval paths.
 
 Retrieval output and sizing:
 
-- `memory.read` and `memory.search` may accept `maxChars` because they return memory content directly.
+- `memory.read` and `memory.search` accept `maxChars`; the retrieval service bounds it internally.
+- `memory.search` accepts `maxResults`; the retrieval service bounds it internally.
+- CLI read/search expose bounded sizing flags and use the same local lexical retrieval service.
 - `session_search` must not accept `maxChars`; its text-size caps remain system-controlled internally.
 - Lexical memory retrieval is deterministic by default.
 - Semantic memory retrieval is out of scope for Phase 1.
+- Output is redacted, source-labeled, and marked as local memory context, not instruction.
+- Missing sources, empty results, fallback use, truncation, redaction, and protected filtering return structured diagnostics without raw memory content in diagnostic fields.
 - Returned memory content is context, not a higher-priority instruction. System, developer, repo, `AGENTS.md`, security, and current user instructions still outrank retrieved memory.
+
+CLI read supports these sources:
+
+| Source | Behavior |
+|--------|----------|
+| `USER.md` | Reads profile user memory |
+| `MEMORY.md` | Reads profile learned/project memory |
+| `SOUL.md` | Denied unless `--include-protected` is explicit |
+| `shared` | Reads global shared memory by key |
+
+Index inspection and repair workflow:
+
+```bash
+estacoda memory index path
+estacoda memory index status
+# Stop the runtime before deleting the index file.
+rm <profile-state-dir>/memory-index.sqlite
+estacoda memory index status
+estacoda memory index rebuild
+estacoda memory index status
+```
+
+The index is inspectable and deletable. Missing index files report pending rebuild or empty-index diagnostics. Bounded startup backfill may recreate the file. Full rebuild is explicit through `estacoda memory index rebuild`, is idempotent, repopulates from authoritative memory files, and indexes `SOUL.md` as protected.
+
+`session_search` is separate from local memory retrieval. It browses/searches historical sessions and does not expose `maxChars`. `memory.read` and `memory.search` read/search local memory and may expose `maxChars`. Historical session content and memory retrieval results are both context/reference material, not higher-priority instruction.
 
 ## Drift-Aware Local Persistence
 
@@ -230,7 +269,9 @@ The current agent-facing memory write surface is `memory.curate`. It accepts a `
 | `replace` | Replace an existing entry via substring matching (`match`) |
 | `remove` | Remove an entry via substring matching (`match`) |
 
-Phase 1 defines separate local lexical retrieval surfaces, `memory.read` and `memory.search`, instead of overloading `memory.curate` with read behavior. Until those retrieval surfaces are implemented and enabled, memory content continues to be injected through the prompt assembly path rather than exposed through the write tool.
+Local lexical retrieval uses separate `memory.read` and `memory.search` tools instead of overloading `memory.curate` with read behavior. These tools are read-only-local surfaces over local memory context; they do not write memory, promote content, or change the prompt authority model.
+
+`memory.read` reads bounded local memory content by source. `memory.search` performs deterministic lexical search. Both tools accept `maxChars`; `memory.search` also accepts `maxResults`. Returned content is redacted, source-labeled, marked as `local-memory-context`, and treated as context rather than instruction. If the local index is disabled or unavailable, the retrieval service uses safe substring read/search fallback while preserving protected filtering.
 
 `memory.curate` can write `USER.md`, `MEMORY.md`, and `SOUL.md`. It does not manage `AGENTS.md`. If external memory mirror writes are enabled, local writes remain authoritative and mirror failures are returned as warnings without failing the local write.
 

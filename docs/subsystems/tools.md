@@ -46,7 +46,9 @@ Tools are functions that extend the agent's capabilities. They are organized int
 | `voice.speak` | `external-side-effect` | `smoke-tested` |
 | `voice.transcribe` | `safe` | `smoke-tested` |
 | `execute_code` | `caution` | `smoke-tested` |
-| `memory` | `safe` | `smoke-tested` |
+| `memory.curate` | `workspace-write` | `smoke-tested` |
+| `memory.read` | `read-only-local` | `smoke-tested` |
+| `memory.search` | `read-only-local` | `smoke-tested` |
 | `session_search` | `read-only-local` | `smoke-tested` |
 | `skill.*` | `safe` | `smoke-tested` |
 | `cronjob` | `caution` | `smoke-tested` |
@@ -114,6 +116,21 @@ Implemented voice providers and security boundaries are documented in [Voice](./
 - Deferred: local TTS providers and Mistral TTS/STT.
 
 Voice credentials are direct environment-variable lookups only. Tool errors use stable provider/reason metadata and bounded sanitized snippets.
+
+## Memory Retrieval Tools
+
+`memory.read` and `memory.search` are deterministic read-only-local tools for bounded local lexical memory retrieval. They use the local memory retrieval service, not `SessionRecallService`, and they do not call auxiliary/model providers or summarize content.
+
+| Tool | Inputs | Behavior |
+|------|--------|----------|
+| `memory.read` | `source`, `key`, `includeProtected`, `maxChars` | Reads bounded local memory context by source |
+| `memory.search` | `query`, `includeProtected`, `maxResults`, `maxChars` | Searches local memory lexically |
+
+`maxChars` is accepted and bounded internally. `memory.search` also accepts `maxResults`, which is bounded internally. Output is redacted, source-labeled, marked as `local-memory-context`, and treated as context rather than instruction. Diagnostics are structured and do not expose raw memory content.
+
+Protected memory remains excluded by default. `SOUL.md` is indexed as protected and is returned only when `includeProtected` is explicit. If the local index is disabled or unavailable, the retrieval service falls back to safe substring read/search while preserving protected filtering.
+
+`session_search` is separate: it browses/searches historical sessions, does not expose `maxChars`, and returns untrusted historical reference context. `memory.read` and `memory.search` read/search local memory files and shared memory. Neither surface upgrades returned content into higher-priority instruction.
 
 ## Session Search Tool
 

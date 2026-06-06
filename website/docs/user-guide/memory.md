@@ -41,18 +41,21 @@ memory/shared/ -> USER.md -> SOUL.md -> MEMORY.md
 
 ---
 
-## Local Lexical Retrieval Boundary
+## Local Lexical Retrieval
 
-Phase 1 defines local lexical memory retrieval. It is planned as deterministic read/search over authoritative memory files, not semantic recall, vector search, session search, or a new memory authority layer.
+Local lexical memory retrieval is implemented as deterministic read/search over authoritative memory files. It is not semantic recall, vector search, session search, or a new memory authority layer.
 
-Planned user/operator-facing surfaces:
+Implemented user/operator-facing surfaces:
 
 | Surface | Purpose |
 |---|---|
 | `memory.read` | Read bounded local memory content by memory source/kind |
 | `memory.search` | Search local memory content lexically |
+| `estacoda memory index path` | Show the profile-state index path |
 | `estacoda memory index status` | Inspect local index path, health, and pending rebuild state |
 | `estacoda memory index rebuild` | Explicitly rebuild the local lexical memory index |
+| `estacoda memory search <query>` | Search local memory from the CLI |
+| `estacoda memory read <source>` | Read local memory from the CLI |
 
 The local lexical index is a rebuildable mirror stored under profile state:
 
@@ -60,7 +63,7 @@ The local lexical index is a rebuildable mirror stored under profile state:
 <profile-state-dir>/memory-index.sqlite
 ```
 
-Deleting this SQLite file must not delete `USER.md`, `SOUL.md`, `MEMORY.md`, shared memory files, or `promotions.json`. Index status and rebuild commands are operator repair paths for the mirror. If the index is disabled, missing, or unavailable, future read/search behavior should fall back to safe direct file read or substring search where possible while preserving protected-memory filtering.
+Deleting this SQLite file does not delete `USER.md`, `SOUL.md`, `MEMORY.md`, shared memory files, or `promotions.json`. Index status and rebuild commands are operator repair paths for the mirror. If the index is disabled, missing, or unavailable, `memory.read`, `memory.search`, and CLI read/search fall back to safe direct file read or substring search where possible while preserving protected-memory filtering.
 
 Authoritative source boundaries:
 
@@ -70,9 +73,30 @@ Authoritative source boundaries:
 - `AGENTS.md` is not memory and is never indexed as memory.
 - Shared memory may be mirrored for lexical retrieval, but the index must preserve its shared/global source boundary.
 
-Protected identity/safety memory remains protected. `SOUL.md` is indexed as protected for parity, status, and rebuild checks, but `memory.read` and `memory.search` must exclude it unless `includeProtected` is true. Semantic recall must never use protected identity/safety entries, and protected entries remain excluded from semantic-facing retrieval paths.
+Protected identity/safety memory remains protected. `SOUL.md` is indexed as protected for parity, status, and rebuild checks, but `memory.read`, `memory.search`, and CLI read/search exclude it unless `includeProtected` or `--include-protected` is explicit. Protected excerpts remain bounded. Semantic recall must never use protected identity/safety entries, and protected entries remain excluded from semantic-facing retrieval paths.
 
-`memory.read` and `memory.search` may accept `maxChars` because they return memory content directly. `session_search` must not accept `maxChars`; its text-size caps remain system-controlled internally. Returned memory content is context, not a higher-priority instruction.
+`memory.read` and `memory.search` accept `maxChars` because they return memory content directly; the service bounds it internally. `memory.search` accepts bounded `maxResults`. `session_search` must not accept `maxChars`; its text-size caps remain system-controlled internally. Returned memory content is redacted, source-labeled, marked as local memory context, and is not a higher-priority instruction. Missing sources and empty results return structured diagnostics.
+
+CLI read supports:
+
+- `USER.md`
+- `MEMORY.md`
+- `SOUL.md` only with `--include-protected`
+- `shared` memory by key
+
+Operator recovery workflow:
+
+```bash
+estacoda memory index path
+estacoda memory index status
+# Stop the runtime before deleting the index file.
+rm <profile-state-dir>/memory-index.sqlite
+estacoda memory index status
+estacoda memory index rebuild
+estacoda memory index status
+```
+
+Missing index files report pending rebuild or empty diagnostics. Bounded startup backfill may recreate the file. Full rebuild is explicit through `estacoda memory index rebuild`, is idempotent, repopulates from authoritative memory files, and indexes `SOUL.md` as protected.
 
 ---
 
@@ -101,6 +125,8 @@ Memory writes are not unconditional. The system checks for:
 - **Invisible/bidirectional controls** — malformed or suspicious control characters are sanitized or rejected.
 
 If a write fails the safety check, it is rejected and the file is not modified. Promotion overflow after an otherwise successful assistant response is non-fatal to the turn; a best-effort diagnostic is recorded without raw promoted text or secrets.
+
+Local memory writes also use drift-aware persistence. Before overwrite, the persistence path compares the current disk file against the snapshot loaded earlier. The snapshot includes path, memory kind, `mtimeMs`, size, and content hash. External edits fail closed by default, and drift refusal preserves the current disk file. `.bak.<timestamp>` backups are not created by default; they are created only when an operation policy explicitly enables them. Drift diagnostics do not expose raw memory content.
 
 ---
 
@@ -180,13 +206,25 @@ The agent-facing memory write surface is `memory.curate`. It accepts:
 | `replace` | Replace an existing entry by substring match |
 | `remove` | Remove an entry by substring match |
 
-Phase 1 defines separate local lexical retrieval surfaces, `memory.read` and `memory.search`, instead of adding read behavior to `memory.curate`. Until those retrieval surfaces are implemented and enabled, memory content is injected through prompt assembly rather than exposed through the write tool.
+Local lexical retrieval uses separate `memory.read` and `memory.search` tools instead of adding read behavior to `memory.curate`. These tools read/search local memory context only. They do not write memory, promote content, or change instruction priority.
 
 ---
 
 ## Inspection, Backup, and Recovery
 
 ```bash
+# Inspect and repair the local lexical index
+estacoda memory index path
+estacoda memory index status
+estacoda memory index rebuild
+
+# Search/read local memory from the CLI
+estacoda memory search <query>
+estacoda memory read USER.md
+estacoda memory read MEMORY.md
+estacoda memory read shared <key>
+estacoda memory read SOUL.md --include-protected
+
 # Check memory budget pressure
 # (surfaced in diagnostics; no standalone CLI for v0.1.0)
 
