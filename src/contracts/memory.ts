@@ -135,6 +135,95 @@ export type MemorySearchResult = {
   score: number;
 };
 
+export type MemoryAuthority = "canonical" | "derived" | "historical" | "external" | "plugin";
+
+export type MemoryIndexedSourceType = "memory_file" | "shared_memory";
+
+export type MemoryProtectedClass = "none" | "identity" | "safety";
+
+export type MemoryRetrievalMode = "lexical";
+
+export type MemoryLineRange = {
+  startLine: number;
+  endLine: number;
+};
+
+export type MemoryIndexEntry = {
+  id: string;
+  profileId: string;
+  sourceType: MemoryIndexedSourceType;
+  source: string;
+  sourcePath?: string;
+  sourceKey?: string;
+  memoryFileKind?: MemoryFileKind;
+  authority: MemoryAuthority;
+  protectedClass: MemoryProtectedClass;
+  contentHash: string;
+  excerpt: string;
+  lineRanges?: MemoryLineRange[];
+  updatedAt: string;
+};
+
+export type MemoryRetrievalResult = {
+  id: string;
+  profileId: string;
+  mode: MemoryRetrievalMode;
+  sourceType: MemoryIndexedSourceType;
+  source: string;
+  sourcePath?: string;
+  sourceKey?: string;
+  memoryFileKind?: MemoryFileKind;
+  authority: MemoryAuthority;
+  protectedClass: MemoryProtectedClass;
+  contentHash: string;
+  content: string;
+  excerpt: string;
+  score: number;
+  lineRanges?: MemoryLineRange[];
+  updatedAt: string;
+};
+
+export type MemoryRetrievalFallbackReason =
+  | "index-disabled"
+  | "index-unavailable"
+  | "index-pending-rebuild"
+  | "index-stale"
+  | "index-unhealthy";
+
+export type MemoryRetrievalDiagnosticCode =
+  | "memory-index-disabled"
+  | "memory-index-unavailable"
+  | "memory-index-pending-rebuild"
+  | "memory-index-stale"
+  | "memory-index-unhealthy"
+  | "memory-retrieval-fallback"
+  | "memory-protected-filtered"
+  | "memory-result-truncated";
+
+export type MemoryRetrievalDiagnostic = {
+  code: MemoryRetrievalDiagnosticCode;
+  message: string;
+  sourceType?: MemoryIndexedSourceType;
+  source?: string;
+  memoryFileKind?: MemoryFileKind;
+  protectedClass?: MemoryProtectedClass;
+};
+
+export type MemoryRetrievalDiagnostics = {
+  mode: MemoryRetrievalMode;
+  profileId: string;
+  indexEnabled: boolean;
+  indexAvailable: boolean;
+  indexStale: boolean;
+  fallbackUsed: boolean;
+  fallbackReason?: MemoryRetrievalFallbackReason;
+  includeProtected: boolean;
+  protectedFilteredCount: number;
+  resultCount: number;
+  truncated: boolean;
+  diagnostics: MemoryRetrievalDiagnostic[];
+};
+
 export type ExternalMemoryProviderStatus = {
   id: string;
   enabled: boolean;
