@@ -79,6 +79,10 @@ export class MemoryIndexStore {
     return this.#path;
   }
 
+  get db(): SQLiteDatabase {
+    return this.#db;
+  }
+
   dispose(): void {
     this.close();
   }
