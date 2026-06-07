@@ -59,6 +59,9 @@ export type ChannelBusyPolicy = "reject" | "queue" | "interrupt";
 export type TtsProvider = "edge" | "elevenlabs" | "openai" | "minimax" | "mistral" | "gemini" | "xai" | "neutts" | "kittentts";
 export type SttProvider = "local" | "groq" | "openai" | "mistral" | "xai";
 export type ImageGenerationProvider = "fal" | "byteplus";
+export type BrowserEngineKind = "cdp" | "agent-browser" | "auto";
+export type BrowserCloudSpendApproval = "pending" | boolean;
+export type BrowserSnapshotSummarizeMode = "auto" | boolean;
 
 export type SessionCompressionConfig = {
   enabled: boolean;
@@ -358,9 +361,22 @@ export type EstaCodaConfig = {
     backend?: BrowserBackendKind;
     cloudProvider?: BrowserCloudProviderKind;
     cdpUrl?: string;
+    /** @deprecated Use launchExecutable and launchArgs. This value is preserved as raw data and is never shell-parsed. */
     launchCommand?: string;
+    launchExecutable?: string;
+    launchArgs?: string[];
     autoLaunch?: boolean;
     supervised?: boolean;
+    chromeFlags?: string[];
+    engine?: BrowserEngineKind;
+    commandTimeout?: number;
+    inactivityTimeout?: number;
+    recordSessions?: boolean;
+    hybridRouting?: boolean;
+    cloudFallback?: boolean;
+    cloudSpendApproved?: BrowserCloudSpendApproval;
+    summarizeSnapshots?: BrowserSnapshotSummarizeMode;
+    snapshotSummarizeThreshold?: number;
     allowPrivateUrls?: boolean | string;
   };
   imageGen?: ImageGenerationConfig;
@@ -490,9 +506,22 @@ export type LoadedRuntimeConfig = {
     backend: BrowserBackendKind;
     cloudProvider?: BrowserCloudProviderKind;
     cdpUrl?: string;
+    /** @deprecated Use launchExecutable and launchArgs. This value is preserved as raw data and is never shell-parsed. */
     launchCommand?: string;
+    launchExecutable?: string;
+    launchArgs?: string[];
     autoLaunch: boolean;
     supervised: boolean;
+    chromeFlags?: string[];
+    engine?: BrowserEngineKind;
+    commandTimeout?: number;
+    inactivityTimeout?: number;
+    recordSessions?: boolean;
+    hybridRouting?: boolean;
+    cloudFallback?: boolean;
+    cloudSpendApproved?: BrowserCloudSpendApproval;
+    summarizeSnapshots?: BrowserSnapshotSummarizeMode;
+    snapshotSummarizeThreshold?: number;
   };
   imageGen: Required<Pick<ImageGenerationConfig, "provider" | "model" | "useGateway">> & ImageGenerationConfig;
   tts: Required<Pick<TtsConfig, "provider" | "speed">> & TtsConfig;
@@ -569,9 +598,22 @@ export type BrowserSetupInput = {
   backend?: BrowserBackendKind;
   cloudProvider?: BrowserCloudProviderKind;
   cdpUrl?: string;
+  /** @deprecated Use launchExecutable and launchArgs. This value is preserved as raw data and is never shell-parsed. */
   launchCommand?: string;
+  launchExecutable?: string;
+  launchArgs?: string[];
   autoLaunch?: boolean;
   supervised?: boolean;
+  chromeFlags?: string[];
+  engine?: BrowserEngineKind;
+  commandTimeout?: number;
+  inactivityTimeout?: number;
+  recordSessions?: boolean;
+  hybridRouting?: boolean;
+  cloudFallback?: boolean;
+  cloudSpendApproved?: BrowserCloudSpendApproval;
+  summarizeSnapshots?: BrowserSnapshotSummarizeMode;
+  snapshotSummarizeThreshold?: number;
 };
 
 export type VoiceSetupInput = {
@@ -815,14 +857,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
     compression: normalizeSessionCompressionConfig(config.compression),
     memory: normalizeMemoryConfig(config.memory),
     externalMemory: normalizeExternalMemoryConfig(config.externalMemory ?? config.external_memory),
-    browser: {
-      backend: config.browser?.backend ?? "unconfigured",
-      cloudProvider: config.browser?.cloudProvider,
-      cdpUrl: config.browser?.cdpUrl,
-      launchCommand: config.browser?.launchCommand,
-      autoLaunch: config.browser?.autoLaunch ?? false,
-      supervised: config.browser?.supervised ?? config.browser?.backend === "local-cdp"
-    },
+    browser: normalizeBrowserConfig(config.browser),
     imageGen: normalizeImageGenerationConfig(config.imageGen ?? config.image_gen),
     tts: normalizeTtsConfig(config.tts),
     stt: normalizeSttConfig(config.stt),
@@ -1227,6 +1262,163 @@ function normalizeProfileConfig(value: EstaCodaConfig["profile"]): LoadedRuntime
       ? value.responseLanguage
       : "match-user"
   };
+}
+
+function normalizeBrowserConfig(value: EstaCodaConfig["browser"]): LoadedRuntimeConfig["browser"] {
+  const backend = normalizeBrowserBackend(value?.backend);
+  const cloudProvider = normalizeOptionalBrowserCloudProvider(value?.cloudProvider);
+  const launchExecutable = normalizeOptionalNonEmptyString(value?.launchExecutable, "browser.launchExecutable");
+  const launchCommand = normalizeDeprecatedLaunchCommand(value?.launchCommand);
+  const launchArgs = normalizeBrowserStringArray(value?.launchArgs, "browser.launchArgs");
+  const chromeFlags = normalizeBrowserStringArray(value?.chromeFlags, "browser.chromeFlags");
+  const engine = normalizeBrowserEngine(value?.engine);
+  const commandTimeout = normalizeBrowserPositiveInteger(value?.commandTimeout, "browser.commandTimeout");
+  const inactivityTimeout = normalizeBrowserPositiveInteger(value?.inactivityTimeout, "browser.inactivityTimeout");
+  const recordSessions = normalizeOptionalBoolean(value?.recordSessions, "browser.recordSessions");
+  const hybridRouting = normalizeOptionalBoolean(value?.hybridRouting, "browser.hybridRouting") ?? (cloudProvider !== undefined);
+  const cloudFallback = normalizeOptionalBoolean(value?.cloudFallback, "browser.cloudFallback") ?? true;
+  const cloudSpendApproved = normalizeCloudSpendApproved(value?.cloudSpendApproved);
+  const summarizeSnapshots = normalizeSnapshotSummarizeMode(value?.summarizeSnapshots);
+  const snapshotSummarizeThreshold = normalizeSnapshotSummarizeThreshold(value?.snapshotSummarizeThreshold);
+
+  return {
+    backend,
+    cloudProvider,
+    cdpUrl: value?.cdpUrl,
+    launchCommand,
+    launchExecutable,
+    launchArgs,
+    autoLaunch: normalizeOptionalBoolean(value?.autoLaunch, "browser.autoLaunch") ?? false,
+    supervised: normalizeOptionalBoolean(value?.supervised, "browser.supervised") ?? backend === "local-cdp",
+    chromeFlags,
+    engine,
+    commandTimeout,
+    inactivityTimeout,
+    recordSessions,
+    hybridRouting,
+    cloudFallback,
+    cloudSpendApproved,
+    summarizeSnapshots,
+    snapshotSummarizeThreshold
+  };
+}
+
+function normalizeBrowserBackend(value: BrowserBackendKind | undefined): BrowserBackendKind {
+  if (value === undefined) {
+    return "unconfigured";
+  }
+  if (isBrowserBackend(value)) {
+    return value;
+  }
+  throw new Error("browser.backend must be local-cdp, browserbase, firecrawl, camofox, mock, or unconfigured");
+}
+
+function normalizeOptionalBrowserCloudProvider(value: BrowserCloudProviderKind | undefined): BrowserCloudProviderKind | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error("browser.cloudProvider must be a non-empty string");
+  }
+  return value;
+}
+
+function normalizeDeprecatedLaunchCommand(value: string | undefined): string | undefined {
+  return normalizeOptionalNonEmptyString(value, "browser.launchCommand");
+}
+
+function normalizeBrowserStringArray(value: string[] | undefined, path: string): string[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(`${path} must be an array of strings`);
+  }
+
+  return value.map((entry, index) => {
+    if (typeof entry !== "string") {
+      throw new Error(`${path}[${index}] must be a string`);
+    }
+    const normalized = entry.trim();
+    if (normalized.length === 0) {
+      throw new Error(`${path}[${index}] must be a non-empty string`);
+    }
+    if (hasShellSyntax(normalized) || /\s/.test(normalized)) {
+      throw new Error(`${path}[${index}] must not contain shell syntax or embedded whitespace; pass each argument as a separate array entry`);
+    }
+    return normalized;
+  });
+}
+
+function normalizeBrowserEngine(value: BrowserEngineKind | undefined): BrowserEngineKind {
+  if (value === undefined) {
+    return "cdp";
+  }
+  if (value === "cdp" || value === "agent-browser" || value === "auto") {
+    return value;
+  }
+  throw new Error("browser.engine must be cdp, agent-browser, or auto");
+}
+
+function normalizeOptionalBoolean(value: boolean | undefined, path: string): boolean | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "boolean") {
+    throw new Error(`${path} must be a boolean value`);
+  }
+  return value;
+}
+
+function normalizeCloudSpendApproved(value: BrowserCloudSpendApproval | undefined): BrowserCloudSpendApproval {
+  if (value === undefined) {
+    return "pending";
+  }
+  if (value === "pending" || typeof value === "boolean") {
+    return value;
+  }
+  throw new Error("browser.cloudSpendApproved must be pending, true, or false");
+}
+
+function normalizeSnapshotSummarizeMode(value: BrowserSnapshotSummarizeMode | undefined): BrowserSnapshotSummarizeMode {
+  if (value === undefined) {
+    return "auto";
+  }
+  if (value === "auto" || typeof value === "boolean") {
+    return value;
+  }
+  throw new Error("browser.summarizeSnapshots must be auto, true, or false");
+}
+
+function normalizeSnapshotSummarizeThreshold(value: number | undefined): number {
+  if (value === undefined) {
+    return 8_000;
+  }
+  return normalizeBrowserPositiveInteger(value, "browser.snapshotSummarizeThreshold") ?? 8_000;
+}
+
+function normalizeBrowserPositiveInteger(value: number | undefined, path: string): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`${path} must be a positive integer`);
+  }
+  return value;
+}
+
+function normalizeOptionalNonEmptyString(value: string | undefined, path: string): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`${path} must be a non-empty string`);
+  }
+  return value.trim();
+}
+
+function hasShellSyntax(value: string): boolean {
+  return /[;&|<>`$\\\r\n]/.test(value);
 }
 
 function normalizeAllowPrivateUrls(config: EstaCodaConfig): boolean {
@@ -2067,7 +2259,20 @@ export async function setupBrowserConfig(options: {
       cloudProvider: options.input.cloudProvider,
       cdpUrl: options.input.cdpUrl,
       launchCommand: options.input.launchCommand,
-      autoLaunch: options.input.autoLaunch ?? false
+      launchExecutable: options.input.launchExecutable,
+      launchArgs: options.input.launchArgs,
+      autoLaunch: options.input.autoLaunch ?? false,
+      supervised: options.input.supervised,
+      chromeFlags: options.input.chromeFlags,
+      engine: options.input.engine,
+      commandTimeout: options.input.commandTimeout,
+      inactivityTimeout: options.input.inactivityTimeout,
+      recordSessions: options.input.recordSessions,
+      hybridRouting: options.input.hybridRouting,
+      cloudFallback: options.input.cloudFallback,
+      cloudSpendApproved: options.input.cloudSpendApproved,
+      summarizeSnapshots: options.input.summarizeSnapshots,
+      snapshotSummarizeThreshold: options.input.snapshotSummarizeThreshold
     }
   });
 
@@ -2765,6 +2970,25 @@ function validateBrowserSetupInput(input: BrowserSetupInput): void {
     throw new Error("Expected browser backend local-cdp, browserbase, firecrawl, camofox, mock, or unconfigured");
   }
   validateOptionalUrl(input.cdpUrl, "cdpUrl");
+  normalizeBrowserConfig({
+    backend: input.backend,
+    cloudProvider: input.cloudProvider,
+    cdpUrl: input.cdpUrl,
+    launchExecutable: input.launchExecutable,
+    launchArgs: input.launchArgs,
+    autoLaunch: input.autoLaunch,
+    supervised: input.supervised,
+    chromeFlags: input.chromeFlags,
+    engine: input.engine,
+    commandTimeout: input.commandTimeout,
+    inactivityTimeout: input.inactivityTimeout,
+    recordSessions: input.recordSessions,
+    hybridRouting: input.hybridRouting,
+    cloudFallback: input.cloudFallback,
+    cloudSpendApproved: input.cloudSpendApproved,
+    summarizeSnapshots: input.summarizeSnapshots,
+    snapshotSummarizeThreshold: input.snapshotSummarizeThreshold
+  });
 }
 
 function validateVoiceSetupInput(input: VoiceSetupInput): void {

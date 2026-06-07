@@ -834,6 +834,255 @@ describe("loadRuntimeConfig browser provider compatibility", () => {
       supervised: false
     });
   });
+
+  it("normalizes Browser Parity V3 config fields", async () => {
+    const loaded = await loadBrowserConfig({
+      browser: {
+        backend: "local-cdp",
+        cloudProvider: "browserbase",
+        cdpUrl: "http://127.0.0.1:9222",
+        launchCommand: "google-chrome",
+        launchExecutable: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        launchArgs: ["--headless=new", "--profile-directory=Default"],
+        autoLaunch: true,
+        supervised: false,
+        chromeFlags: ["--disable-gpu", "--no-first-run"],
+        engine: "auto",
+        commandTimeout: 12_000,
+        inactivityTimeout: 60_000,
+        recordSessions: true,
+        hybridRouting: true,
+        cloudFallback: false,
+        cloudSpendApproved: true,
+        summarizeSnapshots: false,
+        snapshotSummarizeThreshold: 16_000
+      }
+    });
+
+    expect(loaded.browser).toEqual({
+      backend: "local-cdp",
+      cloudProvider: "browserbase",
+      cdpUrl: "http://127.0.0.1:9222",
+      launchCommand: "google-chrome",
+      launchExecutable: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      launchArgs: ["--headless=new", "--profile-directory=Default"],
+      autoLaunch: true,
+      supervised: false,
+      chromeFlags: ["--disable-gpu", "--no-first-run"],
+      engine: "auto",
+      commandTimeout: 12_000,
+      inactivityTimeout: 60_000,
+      recordSessions: true,
+      hybridRouting: true,
+      cloudFallback: false,
+      cloudSpendApproved: true,
+      summarizeSnapshots: false,
+      snapshotSummarizeThreshold: 16_000
+    });
+  });
+
+  it("applies Browser Parity V3 browser defaults", async () => {
+    const loaded = await loadBrowserConfig({
+      browser: {
+        backend: "local-cdp"
+      }
+    });
+
+    expect(loaded.browser).toMatchObject({
+      backend: "local-cdp",
+      autoLaunch: false,
+      supervised: true,
+      engine: "cdp",
+      hybridRouting: false,
+      cloudFallback: true,
+      cloudSpendApproved: "pending",
+      summarizeSnapshots: "auto",
+      snapshotSummarizeThreshold: 8_000
+    });
+  });
+
+  it("defaults hybrid routing on only when a cloud provider is configured", async () => {
+    const withoutCloud = await loadBrowserConfig({
+      browser: {
+        backend: "local-cdp"
+      }
+    });
+    const withCloud = await loadBrowserConfig({
+      browser: {
+        backend: "local-cdp",
+        cloudProvider: "browserbase"
+      }
+    });
+
+    expect(withoutCloud.browser.hybridRouting).toBe(false);
+    expect(withCloud.browser.hybridRouting).toBe(true);
+  });
+
+  it("keeps launchExecutable as the preferred structured field when deprecated launchCommand is also set", async () => {
+    const loaded = await loadBrowserConfig({
+      browser: {
+        backend: "local-cdp",
+        launchCommand: "google-chrome",
+        launchExecutable: "/usr/bin/chromium"
+      }
+    });
+
+    expect(loaded.browser.launchExecutable).toBe("/usr/bin/chromium");
+    expect(loaded.browser.launchCommand).toBe("google-chrome");
+  });
+
+  it("accepts deprecated single-token launchCommand as raw data", async () => {
+    const loaded = await loadBrowserConfig({
+      browser: {
+        backend: "local-cdp",
+        launchCommand: "google-chrome"
+      }
+    });
+
+    expect(loaded.browser.launchCommand).toBe("google-chrome");
+    expect(loaded.browser.launchExecutable).toBeUndefined();
+  });
+
+  it("preserves deprecated launchCommand values that would need shell parsing as raw data", async () => {
+    const loaded = await loadBrowserConfig({
+      browser: {
+        backend: "local-cdp",
+        launchCommand: "google-chrome --flag"
+      }
+    });
+
+    expect(loaded.browser.launchCommand).toBe("google-chrome --flag");
+    expect(loaded.browser.launchExecutable).toBeUndefined();
+    expect(loaded.browser.launchArgs).toBeUndefined();
+  });
+
+  it("accepts launchArgs arrays and rejects unsafe launchArgs values", async () => {
+    const loaded = await loadBrowserConfig({
+      browser: {
+        backend: "local-cdp",
+        launchArgs: ["--headless=new", "--disable-gpu"]
+      }
+    });
+
+    expect(loaded.browser.launchArgs).toEqual(["--headless=new", "--disable-gpu"]);
+
+    await expect(loadBrowserConfig({
+      browser: {
+        backend: "local-cdp",
+        launchArgs: "--headless=new"
+      }
+    })).rejects.toThrow("browser.launchArgs must be an array of strings");
+
+    await expect(loadBrowserConfig({
+      browser: {
+        backend: "local-cdp",
+        launchArgs: ["--headless=new", ""]
+      }
+    })).rejects.toThrow("browser.launchArgs[1] must be a non-empty string");
+
+    await expect(loadBrowserConfig({
+      browser: {
+        backend: "local-cdp",
+        launchArgs: ["--user-data-dir=/tmp/example && rm"]
+      }
+    })).rejects.toThrow("browser.launchArgs[0] must not contain shell syntax or embedded whitespace");
+  });
+
+  it("accepts chromeFlags arrays and rejects unsafe chromeFlags values", async () => {
+    const loaded = await loadBrowserConfig({
+      browser: {
+        backend: "local-cdp",
+        chromeFlags: ["--no-first-run", "--disable-gpu"]
+      }
+    });
+
+    expect(loaded.browser.chromeFlags).toEqual(["--no-first-run", "--disable-gpu"]);
+
+    await expect(loadBrowserConfig({
+      browser: {
+        backend: "local-cdp",
+        chromeFlags: [" "]
+      }
+    })).rejects.toThrow("browser.chromeFlags[0] must be a non-empty string");
+
+    await expect(loadBrowserConfig({
+      browser: {
+        backend: "local-cdp",
+        chromeFlags: ["--proxy-server=http://proxy.test --other-flag"]
+      }
+    })).rejects.toThrow("browser.chromeFlags[0] must not contain shell syntax or embedded whitespace");
+  });
+
+  it("accepts pending and boolean cloud spend approval states", async () => {
+    for (const cloudSpendApproved of ["pending", true, false] as const) {
+      const loaded = await loadBrowserConfig({
+        browser: {
+          backend: "local-cdp",
+          cloudSpendApproved
+        }
+      });
+
+      expect(loaded.browser.cloudSpendApproved).toBe(cloudSpendApproved);
+    }
+
+    await expect(loadBrowserConfig({
+      browser: {
+        backend: "local-cdp",
+        cloudSpendApproved: "approved"
+      }
+    })).rejects.toThrow("browser.cloudSpendApproved must be pending, true, or false");
+  });
+
+  it("accepts auto and boolean snapshot summarization modes", async () => {
+    for (const summarizeSnapshots of ["auto", true, false] as const) {
+      const loaded = await loadBrowserConfig({
+        browser: {
+          backend: "local-cdp",
+          summarizeSnapshots
+        }
+      });
+
+      expect(loaded.browser.summarizeSnapshots).toBe(summarizeSnapshots);
+    }
+
+    await expect(loadBrowserConfig({
+      browser: {
+        backend: "local-cdp",
+        summarizeSnapshots: "always"
+      }
+    })).rejects.toThrow("browser.summarizeSnapshots must be auto, true, or false");
+  });
+
+  it("defaults and validates snapshot summarize threshold", async () => {
+    const loaded = await loadBrowserConfig({
+      browser: {
+        backend: "local-cdp"
+      }
+    });
+    const configured = await loadBrowserConfig({
+      browser: {
+        backend: "local-cdp",
+        snapshotSummarizeThreshold: 4_000
+      }
+    });
+
+    expect(loaded.browser.snapshotSummarizeThreshold).toBe(8_000);
+    expect(configured.browser.snapshotSummarizeThreshold).toBe(4_000);
+
+    await expect(loadBrowserConfig({
+      browser: {
+        backend: "local-cdp",
+        snapshotSummarizeThreshold: 0
+      }
+    })).rejects.toThrow("browser.snapshotSummarizeThreshold must be a positive integer");
+
+    await expect(loadBrowserConfig({
+      browser: {
+        backend: "local-cdp",
+        snapshotSummarizeThreshold: "8000"
+      }
+    })).rejects.toThrow("browser.snapshotSummarizeThreshold must be a positive integer");
+  });
 });
 
 describe("loadRuntimeConfig channel readiness", () => {
