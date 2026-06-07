@@ -5,6 +5,8 @@ import { evaluateCdpSnapshot } from "./cdp-supervisor.js";
 import { registerDefaultBrowserProviders, selectBrowserProvider } from "./browser-registry.js";
 import { createSupervisedLocalCdpBrowserBackend } from "./supervised-local-cdp-backend.js";
 import { createBrowserbaseBrowserBackend, type BrowserbaseBrowserBackendOptions } from "./browser-providers/browserbase-provider.js";
+import { classifyBrowserUrl, type HybridClassificationResult } from "./hybrid-classifier.js";
+import { decideBrowserRoute, type BrowserRouteDecision } from "./hybrid-router.js";
 import type { ResolveHostnameFn } from "./url-safety.js";
 
 export type { CdpFetchLike, CdpWebSocketEvent, CdpWebSocketFactory, CdpWebSocketLike } from "./cdp-client.js";
@@ -534,6 +536,302 @@ function normalizeCdpUrl(value: string | undefined): string | undefined {
   return value.trim().replace(/\/$/, "");
 }
 
+type ClosableBrowserBackend = BrowserBackend & {
+  closeSession?: (sessionId: string) => void | Promise<void>;
+  close?: () => void | Promise<void>;
+};
+
+type HybridRouteKind = Extract<BrowserRouteDecision["kind"], "cloud" | "local">;
+
+type HybridSessionRoute = {
+  route: HybridRouteKind;
+  routedSessionId: string;
+  reason: string;
+};
+
+export type HybridBrowserBackendOptions = {
+  cloudBackend: ClosableBrowserBackend;
+  localBackend: ClosableBrowserBackend;
+  allowPrivateUrls: boolean;
+  hybridRouting: boolean;
+  resolveHostname?: ResolveHostnameFn;
+};
+
+export function createHybridBrowserBackend(options: HybridBrowserBackendOptions): BrowserBackend {
+  const routesByBrowserKey = new Map<string, HybridSessionRoute>();
+  let latestBrowserKey: string | undefined;
+  let lastNavigationBackend: BrowserBackend["kind"] | undefined;
+  let lastRouteReason: string | undefined;
+  let closed = false;
+
+  const classify = async (url: string): Promise<HybridClassificationResult> => classifyBrowserUrl(url, {
+    resolveHostname: options.resolveHostname
+  });
+
+  const decide = (classification: HybridClassificationResult): BrowserRouteDecision => decideBrowserRoute(classification, {
+    allowPrivateUrls: options.allowPrivateUrls,
+    hybridRouting: options.hybridRouting,
+    cloudProviderConfigured: true
+  });
+
+  const backendForRoute = (route: HybridRouteKind): ClosableBrowserBackend =>
+    route === "cloud" ? options.cloudBackend : options.localBackend;
+
+  const browserKeyForInput = (sessionId: string | undefined): string => {
+    const key = sessionId ?? latestBrowserKey;
+    if (key === undefined) {
+      throw new Error("No active browser session. Call browser.navigate first.");
+    }
+    return key.endsWith("::local") ? key.slice(0, -"::local".length) : key;
+  };
+
+  const routedSessionIdFor = (browserKey: string, route: HybridRouteKind): string =>
+    route === "local" ? `${browserKey}::local` : browserKey;
+
+  const recordRoute = (browserKey: string, route: HybridRouteKind, reason: string): HybridSessionRoute => {
+    const routedSessionId = routedSessionIdFor(browserKey, route);
+    const sessionRoute = { route, routedSessionId, reason };
+    routesByBrowserKey.set(browserKey, sessionRoute);
+    latestBrowserKey = browserKey;
+    lastRouteReason = reason;
+    return sessionRoute;
+  };
+
+  const resolveActionRoute = (input: BrowserActionInput | undefined): HybridSessionRoute => {
+    const browserKey = browserKeyForInput(input?.sessionId);
+    const route = routesByBrowserKey.get(browserKey);
+    if (route === undefined) {
+      throw new Error(`Browser session not found: ${browserKey}`);
+    }
+    latestBrowserKey = browserKey;
+    return route;
+  };
+
+  const closeRouteSession = async (browserKey: string, route: HybridRouteKind): Promise<void> => {
+    const routedSessionId = routedSessionIdFor(browserKey, route);
+    const backend = backendForRoute(route);
+    if (backend.closeSession !== undefined) {
+      await backend.closeSession(routedSessionId);
+    }
+    const current = routesByBrowserKey.get(browserKey);
+    if (current?.route === route) {
+      routesByBrowserKey.delete(browserKey);
+    }
+    if (latestBrowserKey === browserKey && !routesByBrowserKey.has(browserKey)) {
+      latestBrowserKey = [...routesByBrowserKey.keys()].at(-1);
+    }
+  };
+
+  const closeBothRouteSessions = async (browserKey: string): Promise<void> => {
+    let firstError: unknown;
+    for (const route of ["cloud", "local"] as const) {
+      try {
+        await closeRouteSession(browserKey, route);
+      } catch (error) {
+        firstError ??= error;
+      }
+    }
+    routesByBrowserKey.delete(browserKey);
+    if (firstError !== undefined) {
+      throw firstError;
+    }
+  };
+
+  const rewriteSnapshotSession = <T extends BrowserSnapshot>(snapshot: T, browserKey: string): T => ({
+    ...snapshot,
+    sessionId: browserKey
+  });
+
+  const actionInputForRoute = <T extends BrowserActionInput | undefined>(input: T, route: HybridSessionRoute): T =>
+    input === undefined
+      ? { sessionId: route.routedSessionId } as T
+      : { ...input, sessionId: route.routedSessionId };
+
+  const runSnapshotAction = async (
+    input: BrowserActionInput | undefined,
+    method: Exclude<keyof BrowserBackend, "kind" | "isAvailable" | "status" | "navigate">,
+    displayName: string
+  ): Promise<BrowserSnapshot> => {
+    if (closed) {
+      throw new Error("Hybrid browser backend is closed.");
+    }
+    const route = resolveActionRoute(input);
+    const backend = backendForRoute(route.route);
+    const action = backend[method] as ((actionInput?: BrowserActionInput) => Promise<BrowserSnapshot>) | undefined;
+    if (action === undefined) {
+      throw new Error(`Hybrid browser ${route.route} backend does not support ${displayName}.`);
+    }
+    const snapshot = await action(actionInputForRoute(input, route));
+    return rewriteSnapshotSession(snapshot, browserKeyForInput(input?.sessionId));
+  };
+
+  const routeNavigation = async (input: BrowserNavigateInput): Promise<{
+    browserKey: string;
+    route: HybridSessionRoute;
+    decision: BrowserRouteDecision;
+  }> => {
+    const classification = await classify(input.url);
+    const decision = decide(classification);
+    if (decision.kind === "invalid") {
+      throw new Error(`Invalid browser URL: ${decision.reason}`);
+    }
+    if (decision.kind === "blocked") {
+      throw new Error(`Blocked browser URL: ${decision.reason}`);
+    }
+    const browserKey = input.sessionId ?? latestBrowserKey ?? `browser-${Date.now()}`;
+    return {
+      browserKey,
+      route: {
+        route: decision.kind,
+        routedSessionId: routedSessionIdFor(browserKey, decision.kind),
+        reason: decision.reason
+      },
+      decision
+    };
+  };
+
+  const validatePostNavigation = async (input: {
+    browserKey: string;
+    route: HybridSessionRoute;
+    finalUrl: string | undefined;
+  }): Promise<void> => {
+    if (input.finalUrl === undefined || input.finalUrl.trim().length === 0) {
+      return;
+    }
+    const classification = await classify(input.finalUrl);
+    const decision = decide(classification);
+    const unsafeCloudRedirect = input.route.route === "cloud" &&
+      (classification.classification === "private-or-internal" ||
+        classification.classification === "always-blocked" ||
+        classification.classification === "invalid");
+    const unsafeLocalRedirect = input.route.route === "local" &&
+      (classification.classification === "always-blocked" || classification.classification === "invalid");
+    if (!unsafeCloudRedirect && !unsafeLocalRedirect && decision.kind !== "blocked" && decision.kind !== "invalid") {
+      return;
+    }
+
+    await closeRouteSession(input.browserKey, input.route.route).catch(() => undefined);
+    throw new Error(`Browser redirect safety violation: ${decision.reason}`);
+  };
+
+  const backend: BrowserBackend = {
+    kind: "browserbase",
+    isAvailable: async () => (await options.cloudBackend.isAvailable()) || (await options.localBackend.isAvailable()),
+    status: async () => {
+      const cloudStatus = await options.cloudBackend.status();
+      const localStatus = await options.localBackend.status();
+      return {
+        ...cloudStatus,
+        backend: "browserbase",
+        available: cloudStatus.available || localStatus.available,
+        reason: cloudStatus.available || localStatus.available ? cloudStatus.reason : cloudStatus.reason ?? localStatus.reason,
+        hybridRouting: options.hybridRouting,
+        lastNavigationBackend,
+        lastRouteReason
+      };
+    },
+    async navigate(input) {
+      if (closed) {
+        throw new Error("Hybrid browser backend is closed.");
+      }
+      const { browserKey, route, decision } = await routeNavigation(input);
+      const delegate = backendForRoute(route.route);
+      const result = await delegate.navigate({
+        ...input,
+        sessionId: route.routedSessionId
+      });
+      await validatePostNavigation({
+        browserKey,
+        route,
+        finalUrl: result.session.currentUrl ?? result.snapshot.url
+      });
+
+      recordRoute(browserKey, route.route, decision.reason);
+      lastNavigationBackend = result.session.backend;
+      lastRouteReason = decision.reason;
+      return {
+        ...result,
+        session: {
+          ...result.session,
+          id: browserKey
+        },
+        snapshot: rewriteSnapshotSession(result.snapshot, browserKey),
+        metadata: {
+          ...(result.metadata ?? {}),
+          route: route.route,
+          routeReason: decision.reason,
+          routedSessionId: route.routedSessionId,
+          servedBackend: result.session.backend
+        }
+      };
+    },
+    snapshot: (input) => runSnapshotAction(input, "snapshot", "snapshot"),
+    click: (input) => runSnapshotAction(input, "click", "click"),
+    type: (input) => runSnapshotAction(input, "type", "type"),
+    scroll: (input) => runSnapshotAction(input, "scroll", "scroll"),
+    press: (input) => runSnapshotAction(input, "press", "press"),
+    back: (input = {}) => runSnapshotAction(input, "back", "back"),
+    getImages: async (input = {}) => {
+      const route = resolveActionRoute(input);
+      const method = backendForRoute(route.route).getImages;
+      if (method === undefined) {
+        throw new Error(`Hybrid browser ${route.route} backend does not support getImages.`);
+      }
+      return method(actionInputForRoute(input, route));
+    },
+    console: async (input = {}) => {
+      const route = resolveActionRoute(input);
+      const method = backendForRoute(route.route).console;
+      if (method === undefined) {
+        throw new Error(`Hybrid browser ${route.route} backend does not support console.`);
+      }
+      return method(actionInputForRoute(input, route));
+    },
+    cdp: async (input) => {
+      const route = resolveActionRoute(input);
+      const method = backendForRoute(route.route).cdp;
+      if (method === undefined) {
+        throw new Error(`Hybrid browser ${route.route} backend does not support cdp.`);
+      }
+      return method(actionInputForRoute(input, route));
+    },
+    screenshot: async (input = {}) => {
+      const route = resolveActionRoute(input);
+      const method = backendForRoute(route.route).screenshot;
+      if (method === undefined) {
+        throw new Error(`Hybrid browser ${route.route} backend does not support screenshot.`);
+      }
+      return method(actionInputForRoute(input, route));
+    },
+    dialog: (input = {}) => runSnapshotAction(input, "dialog", "dialog"),
+    closeSession: closeBothRouteSessions,
+    close: async () => {
+      if (closed) {
+        return;
+      }
+      closed = true;
+      let firstError: unknown;
+      try {
+        await options.cloudBackend.close?.();
+      } catch (error) {
+        firstError ??= error;
+      }
+      try {
+        await options.localBackend.close?.();
+      } catch (error) {
+        firstError ??= error;
+      }
+      routesByBrowserKey.clear();
+      latestBrowserKey = undefined;
+      if (firstError !== undefined) {
+        throw firstError;
+      }
+    }
+  };
+
+  return backend;
+}
+
 export function createBrowserBackendFromConfig(config: {
   backend: "local-cdp" | "browserbase" | "firecrawl" | "camofox" | "mock" | "unconfigured";
   cloudProvider?: string;
@@ -543,6 +841,7 @@ export function createBrowserBackendFromConfig(config: {
   launchArgs?: string[];
   chromeFlags?: string[];
   autoLaunch?: boolean;
+  hybridRouting?: boolean;
   cloudFallback?: boolean;
   cloudSpendApproved?: "pending" | boolean;
   fetch?: CdpFetchLike;
@@ -552,6 +851,55 @@ export function createBrowserBackendFromConfig(config: {
   resolveHostname?: ResolveHostnameFn;
   browserbase?: Pick<BrowserbaseBrowserBackendOptions, "apiKey" | "projectId" | "client" | "createClient" | "browserbaseFetch" | "createSupervisedBackend" | "log">;
 }): BrowserBackend {
+  if ((config.cloudProvider === "browserbase" || config.backend === "browserbase") && config.hybridRouting === true) {
+    const localBackendOptions = {
+      cdpUrl: config.cdpUrl,
+      launchCommand: config.launchCommand,
+      launchExecutable: config.launchExecutable,
+      launchArgs: config.launchArgs,
+      chromeFlags: config.chromeFlags,
+      autoLaunch: config.autoLaunch,
+      fetch: config.fetch,
+      webSocketFactory: config.webSocketFactory,
+      securityConfig: config.securityConfig,
+      resolveHostname: config.resolveHostname
+    };
+    const cloudSecurityConfig = config.securityConfig === undefined
+      ? undefined
+      : {
+        ...config.securityConfig,
+        allowPrivateUrls: false
+      };
+    return createHybridBrowserBackend({
+      cloudBackend: createBrowserbaseBrowserBackend({
+        apiKey: config.browserbase?.apiKey,
+        projectId: config.browserbase?.projectId,
+        client: config.browserbase?.client,
+        createClient: config.browserbase?.createClient,
+        browserbaseFetch: config.browserbase?.browserbaseFetch,
+        createSupervisedBackend: config.browserbase?.createSupervisedBackend,
+        log: config.browserbase?.log,
+        cloudSpendApproved: config.cloudSpendApproved,
+        cloudFallback: config.cloudFallback,
+        cdpUrl: config.cdpUrl,
+        launchCommand: config.launchCommand,
+        launchExecutable: config.launchExecutable,
+        launchArgs: config.launchArgs,
+        chromeFlags: config.chromeFlags,
+        autoLaunch: config.autoLaunch,
+        fetch: config.fetch,
+        webSocketFactory: config.webSocketFactory,
+        securityConfig: cloudSecurityConfig,
+        resolveHostname: config.resolveHostname
+      }),
+      localBackend: config.browserbase?.createSupervisedBackend?.(localBackendOptions) ??
+        createSupervisedLocalCdpBrowserBackend(localBackendOptions),
+      allowPrivateUrls: config.securityConfig?.allowPrivateUrls === true,
+      hybridRouting: true,
+      resolveHostname: config.resolveHostname
+    });
+  }
+
   switch (config.backend) {
     case "local-cdp":
       if (config.supervised === true) {

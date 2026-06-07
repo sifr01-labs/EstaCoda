@@ -36,7 +36,7 @@ describe("browser CLI setup", () => {
     });
 
     const setup = await runCliCommand({
-      argv: ["browser", "setup", "--backend", "browserbase", "--cloud-provider", "browserbase"],
+      argv: ["browser", "setup", "--backend", "browserbase", "--cloud-provider", "browserbase", "--hybrid-routing"],
       workspaceRoot: tempDir,
       homeDir: tempDir
     });
@@ -44,10 +44,12 @@ describe("browser CLI setup", () => {
     expect(setup.exitCode).toBe(0);
     expect(setup.output).toContain("Browser backend: browserbase.");
     expect(setup.output).toContain("Cloud provider: browserbase");
+    expect(setup.output).toContain("Hybrid routing: enabled");
     await expect(readConfig(tempDir)).resolves.toMatchObject({
       browser: {
         backend: "browserbase",
-        cloudProvider: "browserbase"
+        cloudProvider: "browserbase",
+        hybridRouting: true
       }
     });
 
@@ -60,6 +62,7 @@ describe("browser CLI setup", () => {
     expect(status.exitCode).toBe(0);
     expect(status.output).toContain("Browser backend: browserbase");
     expect(status.output).toContain("Cloud provider: browserbase");
+    expect(status.output).toContain("Hybrid routing: enabled");
   });
 
   it("persists structured local CDP launch configuration", async () => {
@@ -183,9 +186,11 @@ describe("browser CLI setup", () => {
     expect(settings.output).toContain("Launch args: 1");
     expect(settings.output).toContain("Chrome flags: 2");
     expect(settings.output).toContain("Deprecated launch command: configured");
+    expect(settings.output).toContain("Hybrid routing: disabled");
     expect(settings.output).toContain("--launch-executable /path/to/chrome");
     expect(settings.output).toContain("--launch-arg --headless=new");
     expect(settings.output).toContain("--chrome-flag --no-first-run");
+    expect(settings.output).toContain("--cloud-provider browserbase --hybrid-routing");
   });
 
   it("shows browser cloud provider setup help", async () => {
@@ -195,7 +200,7 @@ describe("browser CLI setup", () => {
       homeDir: tempDir
     });
 
-    expect(help.output).toContain("estacoda browser setup --backend browserbase --cloud-provider browserbase");
+    expect(help.output).toContain("estacoda browser setup --backend browserbase --cloud-provider browserbase --hybrid-routing");
     expect(help.output).toContain("--launch-executable /path/to/chrome");
   });
 });

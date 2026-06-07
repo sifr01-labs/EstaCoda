@@ -2117,7 +2117,7 @@ async function browser(options: CliOptions, args: string[]): Promise<CliCommandR
         "EstaCoda browser backend",
         "  estacoda browser status",
         "  estacoda browser setup --backend local-cdp --cdp-url http://127.0.0.1:9222 --launch-executable /path/to/chrome --launch-arg --headless=new --chrome-flag --no-first-run",
-        "  estacoda browser setup --backend browserbase --cloud-provider browserbase",
+        "  estacoda browser setup --backend browserbase --cloud-provider browserbase --hybrid-routing",
         "  estacoda browser test",
         "  estacoda browser disable"
       ].join("\n")
@@ -2141,6 +2141,7 @@ async function browser(options: CliOptions, args: string[]): Promise<CliCommandR
         config.browser.launchCommand === undefined ? undefined : `Deprecated launch command: ${config.browser.launchCommand}`,
         ...deprecatedLaunchCommandWarnings(config.browser.launchCommand),
         `Auto-launch: ${config.browser.autoLaunch ? "enabled" : "disabled"}`,
+        `Hybrid routing: ${config.browser.hybridRouting ? "enabled" : "disabled"}`,
         `Config sources: ${config.sources.join(", ") || "none"}`,
         subcommand === "test"
           ? config.browser.backend === "unconfigured"
@@ -2172,6 +2173,7 @@ async function browser(options: CliOptions, args: string[]): Promise<CliCommandR
       result.config.browser?.launchCommand === undefined ? undefined : `Deprecated launch command: ${result.config.browser.launchCommand}`,
       ...deprecatedLaunchCommandWarnings(result.config.browser?.launchCommand),
       `Auto-launch: ${result.config.browser?.autoLaunch === true ? "enabled" : "disabled"}`,
+      `Hybrid routing: ${result.config.browser?.hybridRouting === true ? "enabled" : "disabled"}`,
       `Config: ${result.path}`
     ].filter((line) => line !== undefined).join("\n")
   };
@@ -3833,6 +3835,8 @@ function parseBrowserArgs(args: string[]): Partial<BrowserSetupInput> {
       index += 1;
     } else if (arg === "--auto-launch") {
       parsed.autoLaunch = true;
+    } else if (arg === "--hybrid-routing") {
+      parsed.hybridRouting = true;
     }
   }
 

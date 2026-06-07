@@ -108,6 +108,9 @@ export type BrowserBackendStatus = {
   reason?: string;
   version?: string;
   browser?: string;
+  hybridRouting?: boolean;
+  lastNavigationBackend?: BrowserBackendKind;
+  lastRouteReason?: string;
   fallbackFromCloud?: boolean;
   fallbackProvider?: BrowserCloudProviderKind;
   fallbackReason?: string;
@@ -132,4 +135,6 @@ export type BrowserBackend = {
   cdp?(input: BrowserActionInput): Promise<unknown>;
   screenshot?(input?: BrowserActionInput): Promise<BrowserScreenshotResult>;
   dialog?(input?: BrowserActionInput): Promise<BrowserSnapshot>;
+  closeSession?(sessionId: string): Promise<void> | void;
+  close?(): Promise<void> | void;
 };

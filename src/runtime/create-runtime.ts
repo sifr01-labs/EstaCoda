@@ -142,6 +142,7 @@ export type RuntimeOptions = {
     chromeFlags?: string[];
     autoLaunch: boolean;
     supervised?: boolean;
+    hybridRouting?: boolean;
     cloudFallback?: boolean;
     cloudSpendApproved?: "pending" | boolean;
     summarizeSnapshots?: LoadedRuntimeConfig["browser"]["summarizeSnapshots"];
@@ -649,6 +650,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         launchArgs: options.browser?.launchArgs,
         chromeFlags: options.browser?.chromeFlags,
         autoLaunch: options.browser?.autoLaunch,
+        hybridRouting: options.browser?.hybridRouting,
         cloudFallback: options.browser?.cloudFallback,
         cloudSpendApproved: options.browser?.cloudSpendApproved,
         fetch: options.cdpFetch,

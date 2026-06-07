@@ -169,8 +169,10 @@ export function buildBrowserSettingsViewModel(
     ...(browser.launchArgs !== undefined ? [kv("Launch args", String(browser.launchArgs.length))] : []),
     ...(browser.chromeFlags !== undefined ? [kv("Chrome flags", String(browser.chromeFlags.length))] : []),
     ...(browser.launchCommand !== undefined ? [kv("Deprecated launch command", "configured")] : []),
+    kv("Hybrid routing", browser.hybridRouting ? "enabled" : "disabled"),
     kv("Web extraction", web.enableNetwork ? "enabled" : "disabled"),
     kv("Change with", "estacoda browser setup --backend local-cdp --cdp-url http://127.0.0.1:9222 --launch-executable /path/to/chrome --launch-arg --headless=new --chrome-flag --no-first-run"),
+    kv("Cloud routing", "estacoda browser setup --backend browserbase --cloud-provider browserbase --hybrid-routing"),
   ];
   return buildKeyValueBlockViewModel({
     title: "EstaCoda settings: browser",

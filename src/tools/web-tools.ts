@@ -232,6 +232,8 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             status.endpoint === undefined ? undefined : `Endpoint: ${status.endpoint}`,
             status.browser === undefined ? undefined : `Browser: ${status.browser}`,
             status.version === undefined ? undefined : `Protocol: ${status.version}`,
+            status.hybridRouting === undefined ? undefined : `Hybrid routing: ${status.hybridRouting ? "enabled" : "disabled"}`,
+            status.lastNavigationBackend === undefined ? undefined : `Last served backend: ${status.lastNavigationBackend}`,
             status.reason === undefined ? undefined : `Reason: ${status.reason}`
           ].filter((line) => line !== undefined).join("\n"),
           metadata: status
