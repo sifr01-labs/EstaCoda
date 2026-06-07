@@ -267,6 +267,40 @@ describe("CDPSupervisor", () => {
     });
   });
 
+  it("getSnapshot() returns additional useful named AX nodes for full snapshots", async () => {
+    const axTree = {
+      nodes: [
+        { nodeId: "root", role: { value: "RootWebArea" }, name: { value: "Example" } },
+        { nodeId: "heading-1", role: { value: "heading" }, name: { value: "Account Settings" } },
+        { nodeId: "button-1", role: { value: "button" }, name: { value: "Save" } },
+        { nodeId: "paragraph-1", role: { value: "paragraph" }, name: { value: "Profile details" } }
+      ]
+    };
+    const compactSocket = new FakeCdpSocket("ws://cdp/page-compact", { axTree });
+    const fullSocket = new FakeCdpSocket("ws://cdp/page-full", { axTree });
+    const compactSupervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-compact",
+      webSocketFactory: () => compactSocket
+    });
+    const fullSupervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-full",
+      webSocketFactory: () => fullSocket
+    });
+
+    await compactSupervisor.start();
+    await fullSupervisor.start();
+    const compact = await compactSupervisor.getSnapshot("session-1");
+    const full = await fullSupervisor.getSnapshot("session-1", { full: true });
+
+    expect(compact.elements).toEqual([{ ref: "@e1", role: "button", name: "Save" }]);
+    expect(full.elements).toEqual([
+      { ref: "@e1", role: "heading", name: "Account Settings" },
+      { ref: "@e2", role: "button", name: "Save" },
+      { ref: "@e3", role: "paragraph", name: "Profile details" }
+    ]);
+    expect((compact.elements ?? []).length).toBeLessThan((full.elements ?? []).length);
+  });
+
   it("close() closes the socket and is safe to call more than once", async () => {
     const socket = new FakeCdpSocket("ws://cdp/page-1");
     const supervisor = new CDPSupervisor({

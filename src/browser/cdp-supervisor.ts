@@ -19,6 +19,10 @@ export type SupervisorSnapshot = BrowserSnapshot & {
   consoleHistory: NonNullable<BrowserSnapshot["consoleHistory"]>;
 };
 
+export type BrowserSnapshotOptions = {
+  full?: boolean;
+};
+
 export type CDPSupervisorOptions = {
   webSocketUrl: string;
   webSocketFactory?: CdpWebSocketFactory;
@@ -87,8 +91,8 @@ export class CDPSupervisor {
     await this.#requireClient().waitFor(method, timeoutMs);
   }
 
-  async getSnapshot(sessionId = "cdp-supervisor"): Promise<SupervisorSnapshot> {
-    const snapshot = await evaluateCdpSnapshot(this.#requireClient(), sessionId);
+  async getSnapshot(sessionId = "cdp-supervisor", options: BrowserSnapshotOptions = {}): Promise<SupervisorSnapshot> {
+    const snapshot = await evaluateCdpSnapshot(this.#requireClient(), sessionId, options);
     return {
       ...snapshot,
       pendingDialogs: [...this.#pendingDialogs.values()],
@@ -352,8 +356,8 @@ function originForUrl(url: string): string {
   }
 }
 
-export async function evaluateCdpSnapshot(client: CdpClient, sessionId: string): Promise<BrowserSnapshot> {
-  const axSnapshot = await evaluateAxSnapshot(client, sessionId).catch(() => undefined);
+export async function evaluateCdpSnapshot(client: CdpClient, sessionId: string, options: BrowserSnapshotOptions = {}): Promise<BrowserSnapshot> {
+  const axSnapshot = await evaluateAxSnapshot(client, sessionId, options).catch(() => undefined);
   if (axSnapshot !== undefined) {
     return axSnapshot;
   }
@@ -365,9 +369,9 @@ export async function evaluateCdpSnapshot(client: CdpClient, sessionId: string):
   return parseCdpSnapshot(evaluated.result?.value, sessionId);
 }
 
-async function evaluateAxSnapshot(client: CdpClient, sessionId: string): Promise<BrowserSnapshot | undefined> {
+async function evaluateAxSnapshot(client: CdpClient, sessionId: string, options: BrowserSnapshotOptions): Promise<BrowserSnapshot | undefined> {
   const axTree = await client.send("Accessibility.getFullAXTree") as unknown;
-  const elements = parseAxElements(axTree);
+  const elements = parseAxElements(axTree, options);
   if (elements.length === 0) {
     return undefined;
   }
@@ -450,25 +454,25 @@ const AX_UNHELPFUL_ROLES = new Set([
   "InlineTextBox"
 ]);
 
-function parseAxElements(value: unknown): BrowserSnapshotElement[] {
+function parseAxElements(value: unknown, options: BrowserSnapshotOptions): BrowserSnapshotElement[] {
   if (!isRecord(value) || !Array.isArray(value.nodes)) {
     return [];
   }
 
   const elements: BrowserSnapshotElement[] = [];
   for (const node of value.nodes) {
-    const element = parseAxElement(node, elements.length + 1);
+    const element = parseAxElement(node, elements.length + 1, options);
     if (element !== undefined) {
       elements.push(element);
     }
-    if (elements.length >= 120) {
+    if (elements.length >= (options.full === true ? 1_000 : 120)) {
       break;
     }
   }
   return elements;
 }
 
-function parseAxElement(value: unknown, index: number): BrowserSnapshotElement | undefined {
+function parseAxElement(value: unknown, index: number, options: BrowserSnapshotOptions): BrowserSnapshotElement | undefined {
   if (!isRecord(value) || value.ignored === true) {
     return undefined;
   }
@@ -483,7 +487,11 @@ function parseAxElement(value: unknown, index: number): BrowserSnapshotElement |
   const disabled = axBooleanProperty(value, "disabled");
   const checked = axCheckedProperty(value);
 
-  if (!AX_INTERACTIVE_ROLES.has(role) && name === undefined && elementValue === undefined && checked === undefined) {
+  const isInteractive = AX_INTERACTIVE_ROLES.has(role);
+  if (options.full !== true && !isInteractive) {
+    return undefined;
+  }
+  if (options.full === true && !isInteractive && name === undefined && elementValue === undefined && checked === undefined) {
     return undefined;
   }
 

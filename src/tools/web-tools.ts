@@ -679,6 +679,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
           requestedUrl: url,
           finalUrl: result.snapshot.url
         });
+        const botDetectionWarning = browserBotDetectionWarning(result.snapshot);
         return {
           ok: true,
           content: [
@@ -686,8 +687,9 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             `Session: ${result.session.id}`,
             `URL: ${result.snapshot.url}`,
             result.snapshot.title === undefined ? undefined : `Title: ${result.snapshot.title}`,
+            botDetectionWarning === undefined ? undefined : `Warning: ${botDetectionWarning}`,
             "",
-            renderBrowserSnapshot(result.snapshot)
+            renderBrowserSnapshot(result.snapshot, { maxChars: 4000 })
           ].filter((line) => line !== undefined).join("\n"),
           metadata: {
             url: redactUrlForMetadata(url),
@@ -1005,7 +1007,8 @@ function createBrowserSnapshotTool(browserBackend: BrowserBackend, deriveBrowser
     inputSchema: {
       type: "object",
       properties: {
-        sessionId: { type: "string" }
+        sessionId: { type: "string" },
+        full: { type: "boolean" }
       }
     },
     riskClass: "read-only-network",
@@ -1028,7 +1031,7 @@ function createBrowserSnapshotTool(browserBackend: BrowserBackend, deriveBrowser
       }
       return {
         ok: true,
-        content: renderBrowserSnapshot(snapshot),
+        content: renderBrowserSnapshot(snapshot, { full: browserInput.full === true, maxChars: 8000 }),
         metadata: { backend: browserBackend.kind, snapshot }
       };
     }
@@ -1069,7 +1072,7 @@ function createBrowserActionTool(input: {
       }
       return {
         ok: true,
-        content: renderBrowserSnapshot(snapshot),
+        content: renderBrowserSnapshot(snapshot, { maxChars: 8000 }),
         metadata: { backend: input.browserBackend.kind, snapshot }
       };
     }
@@ -1138,12 +1141,19 @@ async function saveBrowserScreenshot(workspaceRoot: string | undefined, base64: 
   return { path, bytes: file.size };
 }
 
-function renderBrowserSnapshot(snapshot: BrowserSnapshot): string {
+type BrowserSnapshotRenderOptions = {
+  full?: boolean;
+  maxChars?: number;
+};
+
+function renderBrowserSnapshot(snapshot: BrowserSnapshot, options: BrowserSnapshotRenderOptions = {}): string {
   const elements = snapshot.elements ?? [];
   const pendingDialogs = snapshot.pendingDialogs ?? [];
   const frameTree = snapshot.frameTree ?? [];
   const consoleHistory = snapshot.consoleHistory ?? [];
-  return [
+  const content = [
+    options.full === true ? "[Full page snapshot]" : "[Compact viewport snapshot]",
+    "",
     snapshot.text,
     pendingDialogs.length === 0 ? undefined : "",
     pendingDialogs.length === 0 ? undefined : "Pending dialogs:",
@@ -1166,8 +1176,45 @@ function renderBrowserSnapshot(snapshot: BrowserSnapshot): string {
     }),
     elements.length === 0 ? undefined : "",
     elements.length === 0 ? undefined : "Interactive elements:",
-    ...elements.map((element) => `${element.ref} ${element.role ?? "element"} ${element.name ?? ""}`.trim())
+    ...elements.map((element) => renderBrowserSnapshotElement(element))
   ].filter((line) => line !== undefined).join("\n");
+  return truncateRenderedBrowserSnapshot(content, options.maxChars);
+}
+
+function renderBrowserSnapshotElement(element: NonNullable<BrowserSnapshot["elements"]>[number]): string {
+  const details = [
+    element.name,
+    element.value === undefined ? undefined : `value=${JSON.stringify(element.value)}`,
+    element.disabled === undefined ? undefined : `disabled=${element.disabled}`,
+    element.checked === undefined ? undefined : `checked=${element.checked}`
+  ].filter((part): part is string => part !== undefined && part.length > 0);
+  return `${element.ref} ${element.role ?? "element"} ${details.join(" ")}`.trim();
+}
+
+function truncateRenderedBrowserSnapshot(content: string, maxChars: number | undefined): string {
+  if (maxChars === undefined || content.length <= maxChars) {
+    return content;
+  }
+  const suffix = "\n... [truncated]";
+  return `${content.slice(0, Math.max(0, maxChars - suffix.length))}${suffix}`;
+}
+
+const BOT_DETECTION_TITLE_PATTERNS = [
+  "access denied",
+  "bot detected",
+  "captcha",
+  "cloudflare",
+  "checking your browser",
+  "just a moment",
+  "attention required"
+];
+
+function browserBotDetectionWarning(snapshot: BrowserSnapshot): string | undefined {
+  const haystack = [snapshot.title, snapshot.text].filter((value): value is string => typeof value === "string").join("\n").toLowerCase();
+  if (BOT_DETECTION_TITLE_PATTERNS.some((pattern) => haystack.includes(pattern))) {
+    return "The page may be showing a bot-detection, CAPTCHA, or access-denied interstitial. Navigation succeeded, but browser actions may be limited.";
+  }
+  return undefined;
 }
 
 function unsupportedBrowserTool(browserBackend: BrowserBackend, tool: string) {

@@ -770,6 +770,7 @@ describe("web and browser tools baselines", () => {
     expect(result.content).toContain("Browser: mock");
     expect(result.content).toContain("Session: test-runtime-session:main");
     expect(result.content).toContain("URL: https://example.com/app");
+    expect(result.content).toContain("[Compact viewport snapshot]");
     expect(result.metadata).toMatchObject({
       url: "https://example.com/app",
       backend: "mock",
@@ -779,6 +780,35 @@ describe("web and browser tools baselines", () => {
         currentUrl: "https://example.com/app"
       }
     });
+  });
+
+  it.each([
+    "Cloudflare",
+    "Just a moment",
+    "Access Denied",
+    "CAPTCHA required"
+  ])("warns when browser.navigate reaches a likely bot-detection page: %s", async (title) => {
+    const navigate = tool("browser.navigate", createTestWebTools({
+      browserBackend: createMockBrowserBackend({ title, text: "Challenge page." }),
+      resolveHostname: publicResolver
+    }));
+
+    const result = await navigate.run({ url: "https://example.com/app" });
+
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain("Warning: The page may be showing a bot-detection, CAPTCHA, or access-denied interstitial.");
+  });
+
+  it("does not warn for normal browser.navigate page titles", async () => {
+    const navigate = tool("browser.navigate", createTestWebTools({
+      browserBackend: createMockBrowserBackend({ title: "Example Domain", text: "Normal page." }),
+      resolveHostname: publicResolver
+    }));
+
+    const result = await navigate.run({ url: "https://example.com/app" });
+
+    expect(result.ok).toBe(true);
+    expect(result.content).not.toContain("Warning:");
   });
 
   it("reports unconfigured browser.navigate without calling a backend", async () => {
@@ -1477,6 +1507,27 @@ describe("web and browser tools baselines", () => {
     ]);
   });
 
+  it("browser.snapshot accepts full options and forwards them to the backend", async () => {
+    const calls: Array<{ method: string; input: BrowserActionInput | BrowserNavigateInput }> = [];
+    const snapshot = tool("browser.snapshot", createTestWebTools({
+      browserBackend: createSessionRecordingBrowserBackend(calls),
+      currentSessionId: () => "runtime-session"
+    }));
+
+    expect(snapshot.inputSchema).toMatchObject({
+      properties: {
+        full: { type: "boolean" }
+      }
+    });
+    await expect(snapshot.run({ full: false })).resolves.toMatchObject({ ok: true });
+    await expect(snapshot.run({ full: true })).resolves.toMatchObject({ ok: true });
+
+    expect(calls.map((call) => call.input)).toEqual([
+      expect.objectContaining({ sessionId: "runtime-session:main", full: false }),
+      expect.objectContaining({ sessionId: "runtime-session:main", full: true })
+    ]);
+  });
+
   it("isolates parent and child runtime sessions while allowing explicit sharing", async () => {
     const calls: Array<{ method: string; input: BrowserActionInput | BrowserNavigateInput }> = [];
     const browserBackend = createSessionRecordingBrowserBackend(calls);
@@ -1523,6 +1574,7 @@ describe("web and browser tools baselines", () => {
     const result = await snapshot.run({});
 
     expect(result.ok).toBe(true);
+    expect(result.content).toContain("[Compact viewport snapshot]");
     expect(result.content).toContain("Snapshot text.");
     expect(result.content).toContain("Interactive elements:");
     expect(result.content).toContain("@e1 button Mock Button");
@@ -1534,6 +1586,64 @@ describe("web and browser tools baselines", () => {
         elements: [{ ref: "@e1", role: "button", name: "Mock Button" }]
       }
     });
+  });
+
+  it("renders full browser snapshot headers and concise element state", async () => {
+    const snapshot = tool("browser.snapshot", createTestWebTools({
+      browserBackend: {
+        ...createMockBrowserBackend(),
+        snapshot: async () => ({
+          sessionId: "session-1",
+          url: "https://example.com",
+          title: "Snapshot Title",
+          text: "Snapshot text.",
+          elements: [
+            { ref: "@e1", role: "textbox", name: "Email", value: "ada@example.com", disabled: false },
+            { ref: "@e2", role: "checkbox", name: "Subscribe", checked: "mixed" }
+          ]
+        })
+      }
+    }));
+
+    const result = await snapshot.run({ full: true });
+
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain("[Full page snapshot]");
+    expect(result.content).toContain("@e1 textbox Email value=\"ada@example.com\" disabled=false");
+    expect(result.content).toContain("@e2 checkbox Subscribe checked=mixed");
+  });
+
+  it("browser.snapshot defaults to compact rendering when full is omitted or false", async () => {
+    const snapshot = tool("browser.snapshot", createTestWebTools({
+      browserBackend: createMockBrowserBackend({ text: "Compact text." })
+    }));
+
+    const omitted = await snapshot.run({});
+    const explicitFalse = await snapshot.run({ full: false });
+
+    expect(omitted.content).toContain("[Compact viewport snapshot]");
+    expect(explicitFalse.content).toContain("[Compact viewport snapshot]");
+    expect(omitted.content).not.toContain("[Full page snapshot]");
+  });
+
+  it("truncates rendered browser snapshots with a clear suffix", async () => {
+    const snapshot = tool("browser.snapshot", createTestWebTools({
+      browserBackend: {
+        ...createMockBrowserBackend(),
+        snapshot: async () => ({
+          sessionId: "session-1",
+          url: "https://example.com",
+          text: "x".repeat(9_000),
+          elements: []
+        })
+      }
+    }));
+
+    const result = await snapshot.run({});
+
+    expect(result.ok).toBe(true);
+    expect(result.content.length).toBeLessThanOrEqual(8_000);
+    expect(result.content).toMatch(/\n\.\.\. \[truncated\]$/u);
   });
 
   it("renders browser snapshot observability sections when present", async () => {

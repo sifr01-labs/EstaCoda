@@ -439,7 +439,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     },
     snapshot: async (input) => {
       const session = await getSession(input);
-      return session.supervisor.getSnapshot(session.key);
+      return session.supervisor.getSnapshot(session.key, { full: input?.full === true });
     },
     click: async (input) => {
       const session = await getSession(input);

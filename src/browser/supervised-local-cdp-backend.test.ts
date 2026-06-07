@@ -18,6 +18,7 @@ class FakeCdpSocket implements CdpWebSocketLike {
     text: "Supervised text",
     elements: [{ ref: "@e1", role: "button", name: "Open" }]
   };
+  axTree: unknown;
 
   send(data: string): void {
     const message = JSON.parse(data) as {
@@ -71,6 +72,9 @@ class FakeCdpSocket implements CdpWebSocketLike {
     }
     if (method === "Runtime.evaluate") {
       return { result: { value: JSON.stringify(this.snapshot) } };
+    }
+    if (method === "Accessibility.getFullAXTree") {
+      return this.axTree ?? { nodes: [] };
     }
     if (method === "Page.captureScreenshot") {
       return { data: "png-data" };
@@ -581,6 +585,31 @@ describe("supervised local CDP backend", () => {
       title: "After",
       text: "Updated"
     });
+  });
+
+  it("snapshot() passes full snapshot mode to the supervisor path", async () => {
+    const socket = new FakeCdpSocket();
+    socket.axTree = {
+      nodes: [
+        { nodeId: "heading-1", role: { value: "heading" }, name: { value: "Overview" } },
+        { nodeId: "button-1", role: { value: "button" }, name: { value: "Open" } }
+      ]
+    };
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: () => socket
+    });
+
+    await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
+    const compact = await backend.snapshot?.({ sessionId: "session-1" });
+    const full = await backend.snapshot?.({ sessionId: "session-1", full: true });
+
+    expect(compact?.elements).toEqual([{ ref: "@e1", role: "button", name: "Open" }]);
+    expect(full?.elements).toEqual([
+      { ref: "@e1", role: "heading", name: "Overview" },
+      { ref: "@e2", role: "button", name: "Open" }
+    ]);
   });
 
   it("snapshot() includes pending dialogs, frame tree, and console history from the supervisor", async () => {

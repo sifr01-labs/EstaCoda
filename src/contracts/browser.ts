@@ -64,6 +64,7 @@ export type BrowserSnapshot = {
 
 export type BrowserActionInput = {
   sessionId?: string;
+  full?: boolean;
   ref?: string;
   text?: string;
   key?: string;
