@@ -67,7 +67,6 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
   const configuredEndpoint = normalizeCdpUrl(options.cdpUrl);
   const lifecycle = options.lifecycle;
   const sessionStacks = new Map<string, BrowserSessionStack>();
-  let latestSessionId: string | undefined;
   let launchedChrome: LaunchedChrome | undefined;
   let launchPromise: Promise<LaunchedChrome> | undefined;
   let configuredStack: BrowserSessionStack | undefined;
@@ -76,10 +75,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
   lifecycle?.start();
 
   const getSession = async (input?: BrowserActionInput): Promise<ManagedBackendSession> => {
-    const sessionId = input?.sessionId ?? latestSessionId;
-    if (sessionId === undefined) {
-      throw new Error("No active browser session. Call browser.navigate first.");
-    }
+    const sessionId = requireSessionId(input?.sessionId);
     const stack = sessionStacks.get(sessionId);
     if (stack === undefined || !stack.sessionManager.has(sessionId)) {
       sessionStacks.delete(sessionId);
@@ -93,7 +89,6 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     if (stack === undefined || !stack.sessionManager.has(sessionId)) {
       sessionStacks.delete(sessionId);
       lifecycle?.unregister(sessionId);
-      refreshLatestSessionId(sessionId);
       await closeLaunchedChromeIfIdle();
       return;
     }
@@ -105,7 +100,6 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       closeError = error;
     } finally {
       sessionStacks.delete(sessionId);
-      refreshLatestSessionId(sessionId);
     }
 
     try {
@@ -131,12 +125,6 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     await killLaunchedChrome();
   };
 
-  const refreshLatestSessionId = (closedSessionId: string): void => {
-    if (latestSessionId === closedSessionId) {
-      latestSessionId = [...sessionStacks.keys()].at(-1);
-    }
-  };
-
   const hasSessionsForStack = (stack: BrowserSessionStack): boolean => {
     for (const owner of sessionStacks.values()) {
       if (owner === stack) {
@@ -150,7 +138,6 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     for (const [sessionId, owner] of [...sessionStacks.entries()]) {
       if (owner === stack) {
         sessionStacks.delete(sessionId);
-        refreshLatestSessionId(sessionId);
       }
     }
   };
@@ -287,7 +274,6 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       }
     }
     sessionStacks.clear();
-    latestSessionId = undefined;
     configuredStack = undefined;
     launchedStack = undefined;
     try {
@@ -362,7 +348,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         throw new Error("Browser backend is closed.");
       }
 
-      const sessionId = input.sessionId ?? latestSessionId ?? `cdp-${Date.now()}`;
+      const sessionId = requireSessionId(input.sessionId);
       const existingStack = sessionStacks.get(sessionId);
       const resolved = existingStack === undefined
         ? await resolveSessionStack()
@@ -417,7 +403,6 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
 
         const snapshot = await supervisor.getSnapshot(sessionId);
         sessionStacks.set(sessionId, existingStack ?? sessionStack);
-        latestSessionId = sessionId;
 
         return {
           session: {
@@ -559,6 +544,13 @@ function parseJsonArray(value: unknown): Array<{ src: string; alt?: string }> {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function requireSessionId(sessionId: string | undefined): string {
+  if (sessionId === undefined || sessionId.trim().length === 0) {
+    throw new Error("Browser sessionId is required for supervised local CDP operations.");
+  }
+  return sessionId;
 }
 
 async function checkLocalCdpStatus(endpoint: string | undefined, fetchLike: CdpFetchLike | undefined): Promise<BrowserBackendStatus> {

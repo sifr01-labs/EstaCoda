@@ -65,6 +65,53 @@ describe("browser CLI setup", () => {
     expect(status.output).toContain("Hybrid routing: enabled");
   });
 
+  it("approves and revokes cloud browser spend without changing backend settings", async () => {
+    await writeConfig(tempDir, {
+      model: { provider: "openai", id: "gpt-4o" },
+      browser: {
+        backend: "browserbase",
+        cloudProvider: "browserbase",
+        hybridRouting: true
+      }
+    });
+
+    const approve = await runCliCommand({
+      argv: ["browser", "approve-cloud"],
+      workspaceRoot: tempDir,
+      homeDir: tempDir
+    });
+
+    expect(approve.exitCode).toBe(0);
+    expect(approve.output).toContain("may incur charges");
+    expect(approve.output).toContain("Cloud spend approval: approved");
+    await expect(readConfig(tempDir)).resolves.toMatchObject({
+      browser: {
+        backend: "browserbase",
+        cloudProvider: "browserbase",
+        hybridRouting: true,
+        cloudSpendApproved: true
+      }
+    });
+
+    const revoke = await runCliCommand({
+      argv: ["browser", "revoke-cloud"],
+      workspaceRoot: tempDir,
+      homeDir: tempDir
+    });
+
+    expect(revoke.exitCode).toBe(0);
+    expect(revoke.output).toContain("may incur charges");
+    expect(revoke.output).toContain("Cloud spend approval: revoked");
+    await expect(readConfig(tempDir)).resolves.toMatchObject({
+      browser: {
+        backend: "browserbase",
+        cloudProvider: "browserbase",
+        hybridRouting: true,
+        cloudSpendApproved: false
+      }
+    });
+  });
+
   it("persists structured local CDP launch configuration", async () => {
     await writeConfig(tempDir, {
       model: { provider: "openai", id: "gpt-4o" }
@@ -201,6 +248,8 @@ describe("browser CLI setup", () => {
     });
 
     expect(help.output).toContain("estacoda browser setup --backend browserbase --cloud-provider browserbase --hybrid-routing");
+    expect(help.output).toContain("estacoda browser approve-cloud");
+    expect(help.output).toContain("estacoda browser revoke-cloud");
     expect(help.output).toContain("--launch-executable /path/to/chrome");
   });
 });

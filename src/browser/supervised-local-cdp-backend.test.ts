@@ -9,6 +9,7 @@ class FakeCdpSocket implements CdpWebSocketLike {
   readonly sent: Array<{ id: number; method: string; params?: Record<string, unknown> }> = [];
   readonly #listeners = new Map<string, Array<(event: CdpWebSocketEvent) => void>>();
   readonly failMethods = new Map<string, string>();
+  readonly missingElementIndexes = new Set<number>();
   #contextCounter = 0;
   #targetCounter = 0;
   closed = false;
@@ -27,6 +28,18 @@ class FakeCdpSocket implements CdpWebSocketLike {
       params?: Record<string, unknown>;
     };
     this.sent.push(message);
+    if (message.method === "Runtime.evaluate" && typeof message.params?.expression === "string") {
+      const index = /__estacodaElements\?\.\[(\d+)\]/u.exec(message.params.expression)?.[1];
+      if (index !== undefined && this.missingElementIndexes.has(Number(index))) {
+        this.#emit("message", {
+          data: JSON.stringify({
+            id: message.id,
+            error: { message: `Browser element ref not found at index ${index}` }
+          })
+        });
+        return;
+      }
+    }
     const failure = this.failMethods.get(message.method);
     if (failure !== undefined) {
       this.#emit("message", {
@@ -75,6 +88,12 @@ class FakeCdpSocket implements CdpWebSocketLike {
     }
     if (method === "Accessibility.getFullAXTree") {
       return this.axTree ?? { nodes: [] };
+    }
+    if (method === "DOM.resolveNode") {
+      return { object: { objectId: `object-${this.sent.at(-1)?.params?.backendNodeId ?? "unknown"}` } };
+    }
+    if (method === "Runtime.callFunctionOn") {
+      return { result: { value: true } };
     }
     if (method === "Page.captureScreenshot") {
       return { data: "png-data" };
@@ -514,7 +533,7 @@ describe("supervised local CDP backend", () => {
       launchChrome
     });
 
-    await expect(backend.navigate({ url: "https://example.com/start" })).rejects.toThrow(
+    await expect(backend.navigate({ url: "https://example.com/start", sessionId: "session-1" })).rejects.toThrow(
       "Chromium executable was not found using browser.launchExecutable, deprecated browser.launchCommand, CHROME_PATH, CHROMIUM_PATH, node_modules/.bin/chromium, platform defaults, Homebrew paths, or Docker paths. Set browser.launchExecutable or pass --launch-executable."
     );
     expect(launchChrome).not.toHaveBeenCalled();
@@ -532,7 +551,7 @@ describe("supervised local CDP backend", () => {
       })
     });
 
-    await expect(backend.navigate({ url: "https://example.com/start" })).rejects.toThrow(launchFailure.message);
+    await expect(backend.navigate({ url: "https://example.com/start", sessionId: "session-1" })).rejects.toThrow(launchFailure.message);
   });
 
   it("explains the fallback sequence when explicit cdpUrl and auto-launch both fail", async () => {
@@ -549,7 +568,7 @@ describe("supervised local CDP backend", () => {
 
     let thrown: unknown;
     try {
-      await backend.navigate({ url: "https://example.com/start" });
+      await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
     } catch (error) {
       thrown = error;
     }
@@ -592,7 +611,7 @@ describe("supervised local CDP backend", () => {
     socket.axTree = {
       nodes: [
         { nodeId: "heading-1", role: { value: "heading" }, name: { value: "Overview" } },
-        { nodeId: "button-1", role: { value: "button" }, name: { value: "Open" } }
+        { nodeId: "button-1", backendDOMNodeId: 101, role: { value: "button" }, name: { value: "Open" } }
       ]
     };
     const backend = createSupervisedLocalCdpBrowserBackend({
@@ -610,6 +629,85 @@ describe("supervised local CDP backend", () => {
       { ref: "@e1", role: "heading", name: "Overview" },
       { ref: "@e2", role: "button", name: "Open" }
     ]);
+  });
+
+  it("click() can use AX-derived button refs bound to DOM nodes", async () => {
+    const socket = new FakeCdpSocket();
+    socket.axTree = {
+      nodes: [
+        { nodeId: "button-1", backendDOMNodeId: 101, role: { value: "button" }, name: { value: "Open" } }
+      ]
+    };
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: () => socket
+    });
+
+    await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
+    await expect(backend.click?.({ sessionId: "session-1", ref: "@e1" })).resolves.toMatchObject({
+      sessionId: "session-1"
+    });
+
+    expect(socket.sent).toEqual(expect.arrayContaining([
+      expect.objectContaining({ method: "DOM.resolveNode", params: { backendNodeId: 101 } }),
+      expect.objectContaining({ method: "Runtime.callFunctionOn" }),
+      expect.objectContaining({
+        method: "Runtime.evaluate",
+        params: expect.objectContaining({
+          expression: expect.stringContaining("window.__estacodaElements?.[0]")
+        })
+      })
+    ]));
+  });
+
+  it("type() can use AX-derived textbox refs bound to DOM nodes", async () => {
+    const socket = new FakeCdpSocket();
+    socket.axTree = {
+      nodes: [
+        { nodeId: "textbox-1", backendDOMNodeId: 201, role: { value: "textbox" }, name: { value: "Email" } }
+      ]
+    };
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: () => socket
+    });
+
+    await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
+    await expect(backend.type?.({ sessionId: "session-1", ref: "@e1", text: "ada@example.com" })).resolves.toMatchObject({
+      sessionId: "session-1"
+    });
+
+    expect(socket.sent).toEqual(expect.arrayContaining([
+      expect.objectContaining({ method: "DOM.resolveNode", params: { backendNodeId: 201 } }),
+      expect.objectContaining({
+        method: "Runtime.evaluate",
+        params: expect.objectContaining({
+          expression: expect.stringContaining("ada@example.com")
+        })
+      })
+    ]));
+  });
+
+  it("stale AX-derived refs fail deterministically", async () => {
+    const socket = new FakeCdpSocket();
+    socket.axTree = {
+      nodes: [
+        { nodeId: "button-1", backendDOMNodeId: 101, role: { value: "button" }, name: { value: "Open" } }
+      ]
+    };
+    socket.missingElementIndexes.add(98);
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222",
+      fetch: createFetch(),
+      webSocketFactory: () => socket
+    });
+
+    await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
+    await expect(backend.click?.({ sessionId: "session-1", ref: "@e99" })).rejects.toThrow(
+      "Browser element ref not found"
+    );
   });
 
   it("snapshot() includes pending dialogs, frame tree, and console history from the supervisor", async () => {
@@ -648,7 +746,11 @@ describe("supervised local CDP backend", () => {
       webSocketFactory: () => new FakeCdpSocket()
     });
 
-    await expect(backend.snapshot?.()).rejects.toThrow("No active browser session. Call browser.navigate first.");
+    await expect(backend.navigate({ url: "https://example.com/start" })).rejects.toThrow(
+      "Browser sessionId is required for supervised local CDP operations."
+    );
+    await expect(backend.snapshot?.()).rejects.toThrow("Browser sessionId is required for supervised local CDP operations.");
+    await expect(backend.snapshot?.({ sessionId: "   " })).rejects.toThrow("Browser sessionId is required for supervised local CDP operations.");
     await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
     await expect(backend.snapshot?.({ sessionId: "missing" })).rejects.toThrow("Browser session not found: missing");
   });

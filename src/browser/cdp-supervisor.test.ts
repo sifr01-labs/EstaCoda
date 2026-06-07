@@ -19,6 +19,7 @@ class FakeCdpSocket implements CdpWebSocketLike {
       };
       axTree?: unknown;
       failAxTree?: boolean;
+      failElementClear?: boolean;
     } = {}
   ) {}
 
@@ -38,11 +39,28 @@ class FakeCdpSocket implements CdpWebSocketLike {
       });
       return;
     }
+    if (
+      message.method === "Runtime.evaluate" &&
+      this.options.failElementClear === true &&
+      message.params?.expression === "window.__estacodaElements = []; 'ok';"
+    ) {
+      this.#emit("message", {
+        data: JSON.stringify({
+          id: message.id,
+          error: { message: "Cannot clear browser element bindings" }
+        })
+      });
+      return;
+    }
 
     const result = message.method === "Runtime.evaluate"
       ? { result: { value: JSON.stringify(this.options.snapshot ?? defaultSnapshot()) } }
       : message.method === "Accessibility.getFullAXTree"
         ? this.options.axTree ?? { nodes: [] }
+        : message.method === "DOM.resolveNode"
+          ? { object: { objectId: `object-${message.params?.backendNodeId ?? "unknown"}` } }
+          : message.method === "Runtime.callFunctionOn"
+            ? { result: { value: true } }
         : { ok: true, method: message.method };
     this.#emit("message", {
       data: JSON.stringify({
@@ -166,18 +184,21 @@ describe("CDPSupervisor", () => {
           { nodeId: "static", role: { value: "StaticText" }, name: { value: "Decorative" } },
           {
             nodeId: "button-1",
+            backendDOMNodeId: 101,
             role: { value: "button" },
             name: { value: "Continue" },
             properties: [{ name: "disabled", value: { type: "boolean", value: true } }]
           },
           {
             nodeId: "input-1",
+            backendDOMNodeId: 102,
             role: { value: "textbox" },
             name: { value: "Email" },
             value: { value: "ada@example.com" }
           },
           {
             nodeId: "checkbox-1",
+            backendDOMNodeId: 103,
             role: { value: "checkbox" },
             name: { value: "Subscribe" },
             properties: [{ name: "checked", value: { type: "tristate", value: "mixed" } }]
@@ -206,6 +227,53 @@ describe("CDPSupervisor", () => {
       consoleHistory: []
     });
     expect(socket.sent.map((message) => message.method)).toContain("Accessibility.getFullAXTree");
+    expect(socket.sent.filter((message) => message.method === "DOM.resolveNode").map((message) => message.params)).toEqual([
+      { backendNodeId: 101 },
+      { backendNodeId: 102 },
+      { backendNodeId: 103 }
+    ]);
+    expect(socket.sent.filter((message) => message.method === "Runtime.callFunctionOn")).toHaveLength(3);
+  });
+
+  it("getSnapshot() falls back when compact AX refs cannot be bound to DOM nodes", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1", {
+      axTree: {
+        nodes: [
+          { nodeId: "button-1", role: { value: "button" }, name: { value: "Unbound Continue" } }
+        ]
+      }
+    });
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: () => socket
+    });
+
+    await supervisor.start();
+    await expect(supervisor.getSnapshot("session-1")).resolves.toMatchObject({
+      sessionId: "session-1",
+      elements: [{ ref: "@e1", role: "button", name: "Continue" }]
+    });
+  });
+
+  it("getSnapshot() falls back when AX element bindings cannot be cleared", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1", {
+      failElementClear: true,
+      axTree: {
+        nodes: [
+          { nodeId: "button-1", backendDOMNodeId: 101, role: { value: "button" }, name: { value: "AX Continue" } }
+        ]
+      }
+    });
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: () => socket
+    });
+
+    await supervisor.start();
+    await expect(supervisor.getSnapshot("session-1")).resolves.toMatchObject({
+      sessionId: "session-1",
+      elements: [{ ref: "@e1", role: "button", name: "Continue" }]
+    });
   });
 
   it("getSnapshot() falls back to the DOM snapshot when the AX tree is empty", async () => {
@@ -251,6 +319,7 @@ describe("CDPSupervisor", () => {
             null,
             { role: { value: ["not-a-role"] }, name: { value: "Bad" } },
             {
+              backendDOMNodeId: 101,
               role: { value: "button" },
               name: { value: { nested: "bad" } },
               value: { value: ["bad"] },
@@ -272,7 +341,7 @@ describe("CDPSupervisor", () => {
       nodes: [
         { nodeId: "root", role: { value: "RootWebArea" }, name: { value: "Example" } },
         { nodeId: "heading-1", role: { value: "heading" }, name: { value: "Account Settings" } },
-        { nodeId: "button-1", role: { value: "button" }, name: { value: "Save" } },
+        { nodeId: "button-1", backendDOMNodeId: 101, role: { value: "button" }, name: { value: "Save" } },
         { nodeId: "paragraph-1", role: { value: "paragraph" }, name: { value: "Profile details" } }
       ]
     };

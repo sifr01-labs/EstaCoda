@@ -5,6 +5,7 @@ import {
   loadRuntimeConfig,
   setupMcpConfig,
   setupBrowserConfig,
+  setupBrowserCloudSpendApproval,
   setupImageGenerationConfig,
   setupProviderConfig,
   setupProfileConfig,
@@ -2109,7 +2110,7 @@ async function trustStoreHealthy(path: string): Promise<boolean> {
 async function browser(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const [subcommand] = args;
 
-  if (subcommand !== "status" && subcommand !== "configure" && subcommand !== "setup" && subcommand !== "disable" && subcommand !== "test") {
+  if (subcommand !== "status" && subcommand !== "configure" && subcommand !== "setup" && subcommand !== "disable" && subcommand !== "test" && subcommand !== "approve-cloud" && subcommand !== "revoke-cloud") {
     return {
       handled: true,
       exitCode: 0,
@@ -2118,8 +2119,29 @@ async function browser(options: CliOptions, args: string[]): Promise<CliCommandR
         "  estacoda browser status",
         "  estacoda browser setup --backend local-cdp --cdp-url http://127.0.0.1:9222 --launch-executable /path/to/chrome --launch-arg --headless=new --chrome-flag --no-first-run",
         "  estacoda browser setup --backend browserbase --cloud-provider browserbase --hybrid-routing",
+        "  estacoda browser approve-cloud",
+        "  estacoda browser revoke-cloud",
         "  estacoda browser test",
         "  estacoda browser disable"
+      ].join("\n")
+    };
+  }
+
+  if (subcommand === "approve-cloud" || subcommand === "revoke-cloud") {
+    const approved = subcommand === "approve-cloud";
+    const result = await setupBrowserCloudSpendApproval({
+      ...options,
+      approved
+    });
+    return {
+      handled: true,
+      exitCode: 0,
+      output: [
+        approved
+          ? "Cloud browser session creation approved. Browserbase and other cloud browser sessions may incur charges."
+          : "Cloud browser session creation revoked. Browserbase and other cloud browser sessions may incur charges and will remain blocked until approved again.",
+        `Cloud spend approval: ${approved ? "approved" : "revoked"}`,
+        `Config: ${result.path}`
       ].join("\n")
     };
   }

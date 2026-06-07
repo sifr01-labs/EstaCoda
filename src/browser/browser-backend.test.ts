@@ -47,6 +47,7 @@ function createHybridSnapshot(sessionId: string, url = "https://example.com"): B
 function createFakeHybridBackend(input: {
   kind: BrowserBackend["kind"];
   failNavigate?: Error;
+  failBlankNavigate?: Error;
   finalUrl?: string;
   available?: boolean;
 }): FakeHybridBackend {
@@ -61,6 +62,9 @@ function createFakeHybridBackend(input: {
     status: () => ({ backend: input.kind, available: input.available ?? true }),
     async navigate(request): Promise<BrowserNavigateResult> {
       backend.navigations.push(request);
+      if (request.url === "about:blank" && input.failBlankNavigate !== undefined) {
+        throw input.failBlankNavigate;
+      }
       if (input.failNavigate !== undefined) {
         throw input.failNavigate;
       }
@@ -500,7 +504,7 @@ describe("browser backend baselines", () => {
     expect(local.closeCalls).toBe(1);
   });
 
-  it("blocks public cloud redirects to private URLs and closes the unsafe session", async () => {
+  it("blocks public cloud redirects to private URLs and blanks the unsafe session", async () => {
     const cloud = createFakeHybridBackend({ kind: "browserbase", finalUrl: "http://192.168.1.1" });
     const local = createFakeHybridBackend({ kind: "local-cdp" });
     const backend = createHybridBrowserBackend({
@@ -514,10 +518,36 @@ describe("browser backend baselines", () => {
     await expect(backend.navigate({ url: "https://example.com", sessionId: "browser-key" })).rejects.toThrow(
       "Browser redirect safety violation"
     );
-    expect(cloud.closeSessionCalls).toEqual(["browser-key"]);
+    expect(cloud.navigations).toEqual([
+      { url: "https://example.com", sessionId: "browser-key" },
+      { url: "about:blank", sessionId: "browser-key" }
+    ]);
+    expect(cloud.closeSessionCalls).toEqual([]);
+    await expect(backend.snapshot?.({ sessionId: "browser-key" })).rejects.toThrow("Browser session not found: browser-key");
   });
 
-  it("blocks private local redirects to metadata URLs and closes the unsafe session", async () => {
+  it("blocks public cloud redirects to metadata URLs and blanks the unsafe session", async () => {
+    const cloud = createFakeHybridBackend({ kind: "browserbase", finalUrl: "http://169.254.169.254/latest" });
+    const local = createFakeHybridBackend({ kind: "local-cdp" });
+    const backend = createHybridBrowserBackend({
+      cloudBackend: cloud,
+      localBackend: local,
+      allowPrivateUrls: true,
+      hybridRouting: true,
+      resolveHostname: hybridResolve
+    });
+
+    await expect(backend.navigate({ url: "https://example.com", sessionId: "browser-key" })).rejects.toThrow(
+      "Browser redirect safety violation"
+    );
+    expect(cloud.navigations).toEqual([
+      { url: "https://example.com", sessionId: "browser-key" },
+      { url: "about:blank", sessionId: "browser-key" }
+    ]);
+    expect(cloud.closeSessionCalls).toEqual([]);
+  });
+
+  it("blocks private local redirects to metadata URLs and blanks the unsafe session", async () => {
     const cloud = createFakeHybridBackend({ kind: "browserbase" });
     const local = createFakeHybridBackend({ kind: "local-cdp", finalUrl: "http://169.254.169.254" });
     const backend = createHybridBrowserBackend({
@@ -531,7 +561,51 @@ describe("browser backend baselines", () => {
     await expect(backend.navigate({ url: "http://192.168.1.1", sessionId: "browser-key" })).rejects.toThrow(
       "Browser redirect safety violation"
     );
-    expect(local.closeSessionCalls).toEqual(["browser-key::local"]);
+    expect(local.navigations).toEqual([
+      { url: "http://192.168.1.1", sessionId: "browser-key::local" },
+      { url: "about:blank", sessionId: "browser-key::local" }
+    ]);
+    expect(local.closeSessionCalls).toEqual([]);
+  });
+
+  it("closes unsafe hybrid redirect sessions when blanking fails", async () => {
+    const cloud = createFakeHybridBackend({
+      kind: "browserbase",
+      finalUrl: "http://192.168.1.1",
+      failBlankNavigate: new Error("blank failed")
+    });
+    const backend = createHybridBrowserBackend({
+      cloudBackend: cloud,
+      localBackend: createFakeHybridBackend({ kind: "local-cdp" }),
+      allowPrivateUrls: true,
+      hybridRouting: true,
+      resolveHostname: hybridResolve
+    });
+
+    await expect(backend.navigate({ url: "https://example.com", sessionId: "browser-key" })).rejects.toThrow(
+      "Browser redirect safety violation"
+    );
+    expect(cloud.closeSessionCalls).toEqual(["browser-key"]);
+  });
+
+  it("does not leak URL credentials in hybrid redirect safety errors", async () => {
+    const cloud = createFakeHybridBackend({ kind: "browserbase", finalUrl: "http://user:secret@169.254.169.254/latest" });
+    const backend = createHybridBrowserBackend({
+      cloudBackend: cloud,
+      localBackend: createFakeHybridBackend({ kind: "local-cdp" }),
+      allowPrivateUrls: true,
+      hybridRouting: true,
+      resolveHostname: hybridResolve
+    });
+
+    let message = "";
+    try {
+      await backend.navigate({ url: "https://example.com", sessionId: "browser-key" });
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain("Browser redirect safety violation");
+    expect(message).not.toContain("secret");
   });
 
   it("reports the last served backend in hybrid status", async () => {

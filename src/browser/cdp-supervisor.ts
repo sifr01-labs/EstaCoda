@@ -371,7 +371,8 @@ export async function evaluateCdpSnapshot(client: CdpClient, sessionId: string, 
 
 async function evaluateAxSnapshot(client: CdpClient, sessionId: string, options: BrowserSnapshotOptions): Promise<BrowserSnapshot | undefined> {
   const axTree = await client.send("Accessibility.getFullAXTree") as unknown;
-  const elements = parseAxElements(axTree, options);
+  const candidates = parseAxElements(axTree, options);
+  const elements = await bindAxElements(client, candidates, options);
   if (elements.length === 0) {
     return undefined;
   }
@@ -423,6 +424,10 @@ export function snapshotExpression(): string {
 }
 
 type BrowserSnapshotElement = NonNullable<BrowserSnapshot["elements"]>[number];
+type AxSnapshotElementCandidate = BrowserSnapshotElement & {
+  backendDOMNodeId?: number;
+  actionable: boolean;
+};
 
 const AX_INTERACTIVE_ROLES = new Set([
   "button",
@@ -454,12 +459,12 @@ const AX_UNHELPFUL_ROLES = new Set([
   "InlineTextBox"
 ]);
 
-function parseAxElements(value: unknown, options: BrowserSnapshotOptions): BrowserSnapshotElement[] {
+function parseAxElements(value: unknown, options: BrowserSnapshotOptions): AxSnapshotElementCandidate[] {
   if (!isRecord(value) || !Array.isArray(value.nodes)) {
     return [];
   }
 
-  const elements: BrowserSnapshotElement[] = [];
+  const elements: AxSnapshotElementCandidate[] = [];
   for (const node of value.nodes) {
     const element = parseAxElement(node, elements.length + 1, options);
     if (element !== undefined) {
@@ -472,7 +477,7 @@ function parseAxElements(value: unknown, options: BrowserSnapshotOptions): Brows
   return elements;
 }
 
-function parseAxElement(value: unknown, index: number, options: BrowserSnapshotOptions): BrowserSnapshotElement | undefined {
+function parseAxElement(value: unknown, index: number, options: BrowserSnapshotOptions): AxSnapshotElementCandidate | undefined {
   if (!isRecord(value) || value.ignored === true) {
     return undefined;
   }
@@ -486,8 +491,12 @@ function parseAxElement(value: unknown, index: number, options: BrowserSnapshotO
   const elementValue = axPropertyString(value.value);
   const disabled = axBooleanProperty(value, "disabled");
   const checked = axCheckedProperty(value);
+  const backendDOMNodeId = axBackendDomNodeId(value);
 
   const isInteractive = AX_INTERACTIVE_ROLES.has(role);
+  // Compact AX snapshots are currently a bounded actionable subset, not a
+  // viewport-geometry filter. Do not pretend viewport visibility without real
+  // DOM/bounding data from CDP.
   if (options.full !== true && !isInteractive) {
     return undefined;
   }
@@ -501,8 +510,72 @@ function parseAxElement(value: unknown, index: number, options: BrowserSnapshotO
     ...(name !== undefined ? { name } : {}),
     ...(elementValue !== undefined ? { value: elementValue } : {}),
     ...(disabled !== undefined ? { disabled } : {}),
-    ...(checked !== undefined ? { checked } : {})
+    ...(checked !== undefined ? { checked } : {}),
+    ...(backendDOMNodeId !== undefined ? { backendDOMNodeId } : {}),
+    actionable: isInteractive
   };
+}
+
+async function bindAxElements(
+  client: CdpClient,
+  candidates: AxSnapshotElementCandidate[],
+  options: BrowserSnapshotOptions
+): Promise<BrowserSnapshotElement[]> {
+  if (candidates.length === 0) {
+    return [];
+  }
+
+  const cleared = await client.send("Runtime.evaluate", {
+    expression: "window.__estacodaElements = []; 'ok';",
+    returnByValue: true
+  }).then(() => true, () => false);
+  if (!cleared) {
+    return [];
+  }
+
+  const elements: BrowserSnapshotElement[] = [];
+  for (const candidate of candidates) {
+    const bound = candidate.backendDOMNodeId === undefined
+      ? false
+      : await bindAxElement(client, candidate.backendDOMNodeId, elements.length);
+    if (candidate.actionable && !bound) {
+      continue;
+    }
+    if (options.full !== true && !bound) {
+      continue;
+    }
+    const { backendDOMNodeId: _backendDOMNodeId, actionable: _actionable, ...element } = candidate;
+    elements.push({
+      ...element,
+      ref: `@e${elements.length + 1}`
+    });
+  }
+  return elements;
+}
+
+async function bindAxElement(client: CdpClient, backendNodeId: number, index: number): Promise<boolean> {
+  try {
+    const resolved = await client.send("DOM.resolveNode", { backendNodeId }) as {
+      object?: { objectId?: unknown };
+    };
+    const objectId = resolved.object?.objectId;
+    if (typeof objectId !== "string" || objectId.length === 0) {
+      return false;
+    }
+    await client.send("Runtime.callFunctionOn", {
+      objectId,
+      functionDeclaration: `function(index) {
+        window.__estacodaElements = window.__estacodaElements || [];
+        window.__estacodaElements[index] = this;
+        return true;
+      }`,
+      arguments: [{ value: index }],
+      returnByValue: true
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function axPropertyString(value: unknown): string | undefined {
@@ -540,6 +613,11 @@ function axNamedProperty(node: Record<string, unknown>, name: string): unknown {
   }
   const property = node.properties.find((candidate) => isRecord(candidate) && candidate.name === name);
   return isRecord(property) && isRecord(property.value) ? property.value.value : undefined;
+}
+
+function axBackendDomNodeId(node: Record<string, unknown>): number | undefined {
+  const raw = node.backendDOMNodeId ?? node.backendDomNodeId;
+  return typeof raw === "number" && Number.isInteger(raw) && raw > 0 ? raw : undefined;
 }
 
 function parsePageSnapshotMetadata(value: unknown): Omit<BrowserSnapshot, "sessionId" | "elements"> | undefined {

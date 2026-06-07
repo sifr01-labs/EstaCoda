@@ -622,6 +622,19 @@ export function createHybridBrowserBackend(options: HybridBrowserBackendOptions)
     }
   };
 
+  const blankRouteSession = async (browserKey: string, route: HybridRouteKind): Promise<boolean> => {
+    const routedSessionId = routedSessionIdFor(browserKey, route);
+    try {
+      await backendForRoute(route).navigate({
+        url: "about:blank",
+        sessionId: routedSessionId
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const closeBothRouteSessions = async (browserKey: string): Promise<void> => {
     let firstError: unknown;
     for (const route of ["cloud", "local"] as const) {
@@ -710,7 +723,10 @@ export function createHybridBrowserBackend(options: HybridBrowserBackendOptions)
       return;
     }
 
-    await closeRouteSession(input.browserKey, input.route.route).catch(() => undefined);
+    const blanked = await blankRouteSession(input.browserKey, input.route.route);
+    if (!blanked) {
+      await closeRouteSession(input.browserKey, input.route.route).catch(() => undefined);
+    }
     throw new Error(`Browser redirect safety violation: ${decision.reason}`);
   };
 

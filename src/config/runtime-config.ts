@@ -2284,6 +2284,30 @@ export async function setupBrowserConfig(options: {
   };
 }
 
+export async function setupBrowserCloudSpendApproval(options: {
+  workspaceRoot: string;
+  homeDir?: string;
+  approved: boolean;
+}): Promise<{
+  path: string;
+  config: EstaCodaConfig;
+}> {
+  const targetPath = resolveConfigMutationPath(options);
+  const existing = await readConfig(targetPath);
+  const config = patchConfig(existing.config, {
+    browser: {
+      cloudSpendApproved: options.approved
+    }
+  });
+
+  await saveRuntimeConfig(targetPath, config);
+
+  return {
+    path: targetPath,
+    config
+  };
+}
+
 export async function setupVoiceConfig(options: {
   workspaceRoot: string;
   homeDir?: string;
