@@ -3,9 +3,11 @@ import { dirname, join } from "node:path";
 import type { RegisteredTool } from "../contracts/tool.js";
 import type { SessionToolProvider } from "../contracts/tool.js";
 import type { BrowserActionInput, BrowserBackend, BrowserNavigateInput, BrowserSnapshot, WebExtractionResult } from "../contracts/browser.js";
+import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
 import { createBrowserDebugSession, type BrowserDebugSession } from "../browser/browser-debug.js";
 import { createUnconfiguredBrowserBackend } from "../browser/browser-backend.js";
 import { deriveBrowserSessionKey } from "../browser/session-key.js";
+import { maybeSummarizeSnapshot, truncateSnapshotText } from "../browser/snapshot-summarizer.js";
 import { isAlwaysBlockedUrl, isSafeUrl, redactUrlForMetadata, scanUrlForSecrets, type ResolveHostnameFn } from "../browser/url-safety.js";
 import { checkWebsiteAccess, loadWebsiteBlocklist } from "../browser/website-policy.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
@@ -22,8 +24,12 @@ export type WebToolOptions = {
   enableNetwork?: boolean;
   maxContentChars?: number;
   webConfig?: WebResearchConfig;
+  browserConfig?: Pick<import("../config/runtime-config.js").LoadedRuntimeConfig["browser"], "summarizeSnapshots" | "snapshotSummarizeThreshold">;
   workspaceRoot?: string;
   currentSessionId?: () => string;
+  mainRoute?: ResolvedModelRoute;
+  snapshotAuxiliaryRoute?: ResolvedAuxiliaryRoute;
+  providerExecutor?: Pick<ProviderExecutor, "complete">;
   securityConfig?: Pick<import("../config/runtime-config.js").LoadedRuntimeConfig["security"], "allowPrivateUrls" | "websiteBlocklist">;
   resolveHostname?: ResolveHostnameFn;
   visionAnalyzer?: (input: { path: string; prompt?: string }, signal?: AbortSignal) => Promise<{
@@ -232,7 +238,12 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         };
       }
     },
-    createBrowserSnapshotTool(browserBackend, deriveBrowserInput),
+    createBrowserSnapshotTool(browserBackend, deriveBrowserInput, {
+      browserConfig: options.browserConfig,
+      mainRoute: options.mainRoute,
+      snapshotAuxiliaryRoute: options.snapshotAuxiliaryRoute,
+      providerExecutor: options.providerExecutor
+    }),
     createBrowserActionTool({
       name: "browser.click",
       description: "Click an interactive browser element by ref from browser.snapshot.",
@@ -716,8 +727,12 @@ export const webToolProvider: SessionToolProvider = {
       enableNetwork: ctx.enableWebNetwork,
       maxContentChars: ctx.webMaxContentChars,
       webConfig: ctx.webConfig,
+      browserConfig: ctx.browserConfig,
       workspaceRoot: ctx.workspaceRoot,
       currentSessionId: () => ctx.currentSessionId(),
+      mainRoute: ctx.mainRoute,
+      snapshotAuxiliaryRoute: ctx.compressionRoute,
+      providerExecutor: ctx.providerExecutor,
       securityConfig: ctx.securityConfig,
       visionAnalyzer: (input, signal) => analyzeImageWithVision({
         workspaceRoot: ctx.workspaceRoot,
@@ -1000,7 +1015,16 @@ function safeHostname(url: string): string | undefined {
 type BrowserSessionInput = BrowserActionInput | BrowserNavigateInput;
 type DeriveBrowserInput = <TInput extends BrowserSessionInput>(input: TInput) => TInput & { sessionId: string };
 
-function createBrowserSnapshotTool(browserBackend: BrowserBackend, deriveBrowserInput: DeriveBrowserInput): RegisteredTool {
+function createBrowserSnapshotTool(
+  browserBackend: BrowserBackend,
+  deriveBrowserInput: DeriveBrowserInput,
+  options: {
+    browserConfig?: Pick<import("../config/runtime-config.js").LoadedRuntimeConfig["browser"], "summarizeSnapshots" | "snapshotSummarizeThreshold">;
+    mainRoute?: ResolvedModelRoute;
+    snapshotAuxiliaryRoute?: ResolvedAuxiliaryRoute;
+    providerExecutor?: Pick<ProviderExecutor, "complete">;
+  } = {}
+): RegisteredTool {
   return {
     name: "browser.snapshot",
     description: "Get a text snapshot of the current browser page with interactive element refs like @e1.",
@@ -1016,23 +1040,43 @@ function createBrowserSnapshotTool(browserBackend: BrowserBackend, deriveBrowser
     progressLabel: "snapshotting browser",
     maxResultSizeChars: 8000,
     isAvailable: () => browserBackend.isAvailable(),
-    run: async (input: BrowserActionInput) => {
+    run: async (input: BrowserActionInput, context) => {
+      const debug = createBrowserDebugSession();
       if (browserBackend.snapshot === undefined) {
-        return unsupportedBrowserTool(browserBackend, "browser.snapshot");
+        return withDebug(unsupportedBrowserTool(browserBackend, "browser.snapshot"), debug);
       }
       const browserInput = deriveBrowserInput(input);
       const snapshot = await browserBackend.snapshot(browserInput).catch((error: unknown) => ({ error }));
       if ("error" in snapshot) {
-        return {
+        return withDebug({
           ok: false,
           content: snapshot.error instanceof Error ? snapshot.error.message : "Browser snapshot failed.",
           metadata: { backend: browserBackend.kind }
-        };
+        }, debug);
       }
+      const renderedSnapshot = renderBrowserSnapshot(snapshot, { full: browserInput.full === true });
+      const summarizeResult = await maybeSummarizeSnapshot({
+        renderedSnapshot,
+        userTask: browserInput.text,
+        signal: context?.signal
+      }, {
+        mode: options.browserConfig?.summarizeSnapshots ?? "auto",
+        threshold: options.browserConfig?.snapshotSummarizeThreshold ?? 8_000,
+        maxResultSizeChars: 8_000,
+        providerExecutor: options.providerExecutor,
+        auxiliaryRoute: options.snapshotAuxiliaryRoute,
+        mainRoute: options.mainRoute,
+        debug
+      });
       return {
         ok: true,
-        content: renderBrowserSnapshot(snapshot, { full: browserInput.full === true, maxChars: 8000 }),
-        metadata: { backend: browserBackend.kind, snapshot }
+        content: summarizeResult.content,
+        metadata: {
+          backend: browserBackend.kind,
+          snapshot,
+          ...(summarizeResult.summarized ? { summarized: true } : {}),
+          ...debugMetadata(debug)
+        }
       };
     }
   };
@@ -1195,8 +1239,7 @@ function truncateRenderedBrowserSnapshot(content: string, maxChars: number | und
   if (maxChars === undefined || content.length <= maxChars) {
     return content;
   }
-  const suffix = "\n... [truncated]";
-  return `${content.slice(0, Math.max(0, maxChars - suffix.length))}${suffix}`;
+  return truncateSnapshotText(content, maxChars);
 }
 
 const BOT_DETECTION_TITLE_PATTERNS = [

@@ -3,8 +3,10 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BrowserActionInput, BrowserBackend, BrowserNavigateInput } from "../contracts/browser.js";
+import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
+import type { ProviderExecutor, ProviderExecutionResult } from "../providers/provider-executor.js";
 import { createMockBrowserBackend, createUnconfiguredBrowserBackend } from "../browser/browser-backend.js";
-import { createWebTools, type FetchLike, type WebToolOptions } from "./web-tools.js";
+import { createWebTools, webToolProvider, type FetchLike, type WebToolOptions } from "./web-tools.js";
 import { registerWebResearchProvider, resetWebResearchProvidersForTest } from "./web-research-registry.js";
 import type { WebResearchProvider } from "./web-research-provider.js";
 
@@ -74,6 +76,66 @@ function createFetchResponse(input: {
 const publicResolver = async (hostname: string) => hostname === "localhost"
   ? ["127.0.0.1"]
   : ["93.184.216.34"];
+
+const summaryModelProfile = {
+  id: "summary-model",
+  provider: "openai" as const,
+  contextWindowTokens: 128_000,
+  supportsTools: false,
+  supportsVision: false,
+  supportsStructuredOutput: true
+};
+
+const summaryRoute: ResolvedModelRoute = {
+  provider: "openai",
+  id: "summary-model",
+  profile: summaryModelProfile
+};
+
+const snapshotAuxiliaryRoute: ResolvedAuxiliaryRoute = {
+  task: "compression",
+  route: summaryRoute,
+  source: "explicit",
+  fallbackToMain: false,
+  diagnostics: []
+};
+
+function okProviderResult(content: string): ProviderExecutionResult {
+  return {
+    ok: true,
+    response: {
+      ok: true,
+      content,
+      provider: "openai",
+      model: "summary-model"
+    },
+    fallbackUsed: false,
+    attempts: [{ provider: "openai", model: "summary-model", ok: true, content }],
+    toolCalls: []
+  };
+}
+
+function createSummaryExecutor(content: string): Pick<ProviderExecutor, "complete"> {
+  return {
+    complete: vi.fn(async () => okProviderResult(content))
+  };
+}
+
+function createLargeSnapshotBackend(text = "Snapshot text. ".repeat(800)): BrowserBackend {
+  return {
+    ...createMockBrowserBackend(),
+    snapshot: async () => ({
+      sessionId: "session-1",
+      url: "https://example.com/",
+      title: "Large Snapshot",
+      text,
+      elements: [
+        { ref: "@e1", role: "button", name: "Save" },
+        { ref: "@e2", role: "textbox", name: "Email", value: "ada@example.com" }
+      ]
+    })
+  };
+}
 
 function createInvalidRefBackend(): BrowserBackend {
   const backend = createMockBrowserBackend();
@@ -1644,6 +1706,129 @@ describe("web and browser tools baselines", () => {
     expect(result.ok).toBe(true);
     expect(result.content.length).toBeLessThanOrEqual(8_000);
     expect(result.content).toMatch(/\n\.\.\. \[truncated\]$/u);
+  });
+
+  it("browser.snapshot summarizeSnapshots=false skips LLM summarization and truncates", async () => {
+    const executor = createSummaryExecutor("summary");
+    const snapshot = tool("browser.snapshot", createTestWebTools({
+      browserBackend: createLargeSnapshotBackend("x".repeat(9_000)),
+      browserConfig: {
+        summarizeSnapshots: false,
+        snapshotSummarizeThreshold: 20
+      },
+      snapshotAuxiliaryRoute,
+      mainRoute: summaryRoute,
+      providerExecutor: executor
+    }));
+
+    const result = await snapshot.run({});
+
+    expect(result.ok).toBe(true);
+    expect(executor.complete).not.toHaveBeenCalled();
+    expect(result.content.length).toBeLessThanOrEqual(8_000);
+    expect(result.content).toMatch(/\n\.\.\. \[truncated\]$/u);
+    expect(result.metadata?.summarized).toBeUndefined();
+  });
+
+  it("browser.snapshot summarizeSnapshots=true summarizes oversized output and marks metadata", async () => {
+    const executor = createSummaryExecutor("Condensed snapshot with @e1 Save and @e2 Email.");
+    const snapshot = tool("browser.snapshot", createTestWebTools({
+      browserBackend: createLargeSnapshotBackend(),
+      browserConfig: {
+        summarizeSnapshots: true,
+        snapshotSummarizeThreshold: 20
+      },
+      snapshotAuxiliaryRoute,
+      mainRoute: summaryRoute,
+      providerExecutor: executor
+    }));
+
+    const result = await snapshot.run({});
+
+    expect(result.ok).toBe(true);
+    expect(executor.complete).toHaveBeenCalledTimes(1);
+    expect(result.content).toBe("Condensed snapshot with @e1 Save and @e2 Email.");
+    expect(result.metadata).toMatchObject({ summarized: true });
+  });
+
+  it("browser.snapshot summarizeSnapshots=true does not call the provider below threshold", async () => {
+    const executor = createSummaryExecutor("summary");
+    const snapshot = tool("browser.snapshot", createTestWebTools({
+      browserBackend: createMockBrowserBackend({ text: "Small snapshot." }),
+      browserConfig: {
+        summarizeSnapshots: true,
+        snapshotSummarizeThreshold: 50_000
+      },
+      snapshotAuxiliaryRoute,
+      mainRoute: summaryRoute,
+      providerExecutor: executor
+    }));
+
+    const result = await snapshot.run({});
+
+    expect(result.ok).toBe(true);
+    expect(executor.complete).not.toHaveBeenCalled();
+    expect(result.content).toContain("[Compact viewport snapshot]");
+    expect(result.metadata?.summarized).toBeUndefined();
+  });
+
+  it("browser.snapshot auto summarization requires an auxiliary route", async () => {
+    const executor = createSummaryExecutor("auto summary");
+    const withoutRoute = tool("browser.snapshot", createTestWebTools({
+      browserBackend: createLargeSnapshotBackend("x".repeat(9_000)),
+      browserConfig: {
+        summarizeSnapshots: "auto",
+        snapshotSummarizeThreshold: 20
+      },
+      mainRoute: summaryRoute,
+      providerExecutor: executor
+    }));
+    const withRoute = tool("browser.snapshot", createTestWebTools({
+      browserBackend: createLargeSnapshotBackend(),
+      browserConfig: {
+        summarizeSnapshots: "auto",
+        snapshotSummarizeThreshold: 20
+      },
+      snapshotAuxiliaryRoute,
+      mainRoute: summaryRoute,
+      providerExecutor: executor
+    }));
+
+    const skipped = await withoutRoute.run({});
+    const summarized = await withRoute.run({});
+
+    expect(skipped.ok).toBe(true);
+    expect(skipped.content).toMatch(/\n\.\.\. \[truncated\]$/u);
+    expect(summarized.ok).toBe(true);
+    expect(summarized.metadata).toMatchObject({ summarized: true });
+    expect(executor.complete).toHaveBeenCalledTimes(1);
+  });
+
+  it("browser.snapshot consumes summarization config from the session tool context", async () => {
+    const executor = createSummaryExecutor("Context summary with @e1.");
+    const snapshot = tool("browser.snapshot", webToolProvider.createTools({
+      workspaceRoot: "/tmp/workspace",
+      profileId: "default",
+      sessionId: "runtime-session",
+      currentSessionId: () => "runtime-session",
+      channelMediaRoot: "/tmp/channel-media",
+      browserBackend: createLargeSnapshotBackend(),
+      browserConfig: {
+        summarizeSnapshots: true,
+        snapshotSummarizeThreshold: 20
+      },
+      mainRoute: summaryRoute,
+      compressionRoute: snapshotAuxiliaryRoute,
+      providerExecutor: executor as ProviderExecutor,
+      providerRegistry: {} as never
+    }));
+
+    const result = await snapshot.run({});
+
+    expect(result.ok).toBe(true);
+    expect(result.content).toBe("Context summary with @e1.");
+    expect(result.metadata).toMatchObject({ summarized: true });
+    expect(executor.complete).toHaveBeenCalledTimes(1);
   });
 
   it("renders browser snapshot observability sections when present", async () => {

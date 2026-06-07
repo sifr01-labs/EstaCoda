@@ -142,6 +142,8 @@ export type RuntimeOptions = {
     chromeFlags?: string[];
     autoLaunch: boolean;
     supervised?: boolean;
+    summarizeSnapshots?: LoadedRuntimeConfig["browser"]["summarizeSnapshots"];
+    snapshotSummarizeThreshold?: LoadedRuntimeConfig["browser"]["snapshotSummarizeThreshold"];
   };
   tts?: LoadedRuntimeConfig["tts"];
   stt?: LoadedRuntimeConfig["stt"];
@@ -213,8 +215,10 @@ function buildPreSkillVisibilityToolContext(input: SessionToolContext): SessionT
     audioCacheRoot: input.audioCacheRoot,
     imageCacheRoot: input.imageCacheRoot,
     browserBackend: input.browserBackend,
+    browserConfig: input.browserConfig,
     mainRoute: input.mainRoute,
     visionRoute: input.visionRoute,
+    compressionRoute: input.compressionRoute,
     providerRegistry: input.providerRegistry,
     providerExecutor: input.providerExecutor,
     processManager: input.processManager,
@@ -682,8 +686,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     audioCacheRoot,
     imageCacheRoot,
     browserBackend,
+    browserConfig: options.browser,
     mainRoute,
     visionRoute,
+    compressionRoute,
     providerRegistry,
     providerExecutor,
     processManager,
