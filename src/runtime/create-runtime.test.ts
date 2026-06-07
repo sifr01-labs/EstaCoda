@@ -75,6 +75,8 @@ class FakeRuntimeCdpSocket implements CdpWebSocketLike {
   readonly readyState = 1;
   readonly sent: Array<{ id: number; method: string; params?: Record<string, unknown> }> = [];
   readonly #listeners = new Map<string, Array<(event: CdpWebSocketEvent) => void>>();
+  #contextCounter = 0;
+  #targetCounter = 0;
 
   send(data: string): void {
     const message = JSON.parse(data) as {
@@ -83,8 +85,13 @@ class FakeRuntimeCdpSocket implements CdpWebSocketLike {
       params?: Record<string, unknown>;
     };
     this.sent.push(message);
-    const result = message.method === "Runtime.evaluate"
-      ? {
+    let result: unknown;
+    if (message.method === "Target.createBrowserContext") {
+      result = { browserContextId: `runtime-context-${++this.#contextCounter}` };
+    } else if (message.method === "Target.createTarget") {
+      result = { targetId: `runtime-target-${++this.#targetCounter}` };
+    } else if (message.method === "Runtime.evaluate") {
+      result = {
         result: {
           value: JSON.stringify({
             sessionId: "runtime-cdp-session",
@@ -94,8 +101,10 @@ class FakeRuntimeCdpSocket implements CdpWebSocketLike {
             elements: []
           })
         }
-      }
-      : { ok: true, method: message.method };
+      };
+    } else {
+      result = { ok: true, method: message.method };
+    }
     this.#emit("message", { data: JSON.stringify({ id: message.id, result }) });
     if (message.method === "Page.navigate") {
       setTimeout(() => this.#emit("message", { data: JSON.stringify({ method: "Page.loadEventFired", params: {} }) }), 0);
@@ -124,14 +133,14 @@ function createRuntimeCdpFetch(): CdpFetchLike {
     if (url.endsWith("/json/version")) {
       return cdpResponse({
         Browser: "Chrome/125.0.0.0",
-        "Protocol-Version": "1.3"
+        "Protocol-Version": "1.3",
+        webSocketDebuggerUrl: "ws://runtime-cdp/browser"
       });
     }
-    if (url.includes("/json/new?")) {
-      return cdpResponse({
-        id: "runtime-target",
-        webSocketDebuggerUrl: "ws://runtime-cdp/target"
-      });
+    if (url.endsWith("/json/list")) {
+      return cdpResponse([
+        { id: "runtime-target-1", type: "page", webSocketDebuggerUrl: "ws://runtime-cdp/target-1" }
+      ]);
     }
     throw new Error(`Unexpected CDP URL: ${url}`);
   });
