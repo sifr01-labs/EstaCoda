@@ -358,6 +358,31 @@ async function applyFallbackRoute(
     ? replaceFallbackAtIndex(currentFallbacks, fallbackIndex, nextFallback)
     : [...currentFallbacks, nextFallback];
 
+  await registerProviderConfig({
+    ...target,
+    input: {
+      provider,
+      baseUrl,
+      kind: "openai-compatible",
+      enableNetwork: true,
+    },
+  });
+  if (apiKeyEnv !== undefined) {
+    await storeProviderCredential({
+      ...target,
+      input: {
+        provider,
+        apiKeyEnv,
+      },
+    });
+  }
+  await registerProviderModel({
+    ...target,
+    input: {
+      provider,
+      models: [model],
+    },
+  });
   await setupModelFallbackConfig({
     ...target,
     input: {

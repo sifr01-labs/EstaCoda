@@ -587,7 +587,7 @@ describe("reviewed setup apply executor", () => {
     }));
   });
 
-  it("appends reviewed fallback routes without mutating the primary route", async () => {
+  it("registers reviewed fallback provider config while appending fallback routes", async () => {
     await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
     await writeFile(profileConfigPath(tempDir), JSON.stringify({
       model: { provider: "local", id: "hermes-local" },
@@ -597,11 +597,11 @@ describe("reviewed setup apply executor", () => {
     }, null, 2), "utf8");
     const plan = fallbackPlan({
       fallbackOperation: "add",
-      provider: "openai",
-      model: "gpt-5.5",
-      baseUrl: "https://api.openai.com/v1",
-      apiKeyEnv: "OPENAI_API_KEY",
-      contextWindowTokens: 128000,
+      provider: "deepseek",
+      model: "deepseek-v4-pro",
+      baseUrl: "https://api.deepseek.example/v1",
+      apiKeyEnv: "DEEPSEEK_API_KEY",
+      contextWindowTokens: 1000000,
     });
 
     const result = await applyReviewedSetupPlanOperations(plan, {
@@ -610,13 +610,89 @@ describe("reviewed setup apply executor", () => {
     });
     const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
       model?: { provider?: string; id?: string; fallbacks?: Array<{ provider?: string; id?: string; apiKeyEnv?: string }> };
+      providers?: Record<string, {
+        kind?: string;
+        baseUrl?: string;
+        apiKeyEnv?: string;
+        enableNetwork?: boolean;
+        models?: string[];
+      }>;
     };
 
     expect(result.ok).toBe(true);
     expect(config.model?.provider).toBe("local");
     expect(config.model?.id).toBe("hermes-local");
     expect(config.model?.fallbacks).toEqual([
-      expect.objectContaining({ provider: "openai", id: "gpt-5.5", apiKeyEnv: "OPENAI_API_KEY" }),
+      expect.objectContaining({ provider: "deepseek", id: "deepseek-v4-pro", apiKeyEnv: "DEEPSEEK_API_KEY" }),
+    ]);
+    expect(config.providers?.deepseek).toEqual(expect.objectContaining({
+      kind: "openai-compatible",
+      enableNetwork: true,
+      baseUrl: "https://api.deepseek.example/v1",
+      apiKeyEnv: "DEEPSEEK_API_KEY",
+      models: ["deepseek-v4-pro"],
+    }));
+    expect(config.providers?.local).toEqual({
+      kind: "openai-compatible",
+      baseUrl: "http://localhost:11434/v1",
+    });
+  });
+
+  it("preserves existing fallback provider fields and avoids duplicate model IDs", async () => {
+    await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
+    await writeFile(profileConfigPath(tempDir), JSON.stringify({
+      model: { provider: "local", id: "hermes-local" },
+      providers: {
+        deepseek: {
+          kind: "catalog",
+          enableNetwork: false,
+          baseUrl: "https://old.deepseek.example/v1",
+          apiKeyEnv: "OLD_DEEPSEEK_API_KEY",
+          apiMode: "openai_chat_completions",
+          headers: { "X-Existing": "kept" },
+          models: ["deepseek-chat", "deepseek-v4-pro"],
+        },
+      },
+    }, null, 2), "utf8");
+    const plan = fallbackPlan({
+      fallbackOperation: "add",
+      provider: "deepseek",
+      model: "deepseek-v4-pro",
+      baseUrl: "https://api.deepseek.example/v1",
+      apiKeyEnv: "DEEPSEEK_API_KEY",
+      contextWindowTokens: 1000000,
+    });
+
+    const result = await applyReviewedSetupPlanOperations(plan, {
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      model?: { fallbacks?: Array<{ provider?: string; id?: string; apiKeyEnv?: string }> };
+      providers?: Record<string, {
+        kind?: string;
+        baseUrl?: string;
+        apiKeyEnv?: string;
+        apiMode?: string;
+        enableNetwork?: boolean;
+        headers?: Record<string, string>;
+        models?: string[];
+      }>;
+    };
+
+    expect(result.ok).toBe(true);
+    expect(config.providers?.deepseek).toEqual(expect.objectContaining({
+      kind: "openai-compatible",
+      enableNetwork: true,
+      baseUrl: "https://api.deepseek.example/v1",
+      apiKeyEnv: "DEEPSEEK_API_KEY",
+      apiMode: "openai_chat_completions",
+      headers: { "X-Existing": "kept" },
+      models: ["deepseek-chat", "deepseek-v4-pro"],
+    }));
+    expect(config.providers?.deepseek?.models?.filter((id) => id === "deepseek-v4-pro")).toHaveLength(1);
+    expect(config.model?.fallbacks).toEqual([
+      expect.objectContaining({ provider: "deepseek", id: "deepseek-v4-pro", apiKeyEnv: "DEEPSEEK_API_KEY" }),
     ]);
   });
 
