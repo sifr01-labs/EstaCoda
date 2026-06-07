@@ -118,14 +118,14 @@ sidebar_position: 5
 
 | المزوّد | النضج | ملاحظات |
 |---|---|---|
-| **local-cdp** | `live-proven` | بروتوكول Chrome DevTools المحلي. |
+| **local-cdp** | `live-proven` | بروتوكول Chrome DevTools المحلي. الوضع المُشرف عليه اختياري. |
 | **mock** | `implemented` | واجهة اختبار. لا متصفّح حقيقي. |
-| **Browserbase** | `unsupported` | نموذج مسجّل. غير مُنفّذ. |
+| **Browserbase** | `implemented` | خلفية متصفح سحابية. تتطلب بيانات اعتماد وموافقة صريحة على إنفاق السحابة. |
 | **browser-use** | `unsupported` | نموذج مسجّل. غير مُنفّذ. |
 | **Firecrawl (browser)** | `unsupported` | نموذج مسجّل. غير مُنفّذ. |
 | **Camofox** | `unsupported` | نموذج مسجّل. غير مُنفّذ. |
 
-تبقى قيم `browserbase`، `firecrawl`، و `camofox` مقبولة لـ `browser.backend` للتوافق مع الإصدارات السابقة، لكنها تُبلِّغ عن حالة `recognized-but-not-implemented`.
+يتطلب Browserbase كلًا من `BROWSERBASE_API_KEY` و`BROWSERBASE_PROJECT_ID` و`browser.cloudSpendApproved: true` صريحة قبل إنشاء جلسات سحابية. يوافق `estacoda browser approve-cloud` على إنشاء الجلسات القابلة للفوترة، ويحظرها `estacoda browser revoke-cloud` مرة أخرى. لا تزال استدعاءات `createSession()` المباشرة في سجل مزود Browserbase ترمي خطأ لأن موافقة إنفاق السحابة تُفرض عبر خلفية المتصفح. تبقى قيم `firecrawl` و`camofox` القديمة لـ `browser.backend` مقبولة للتوافق لكنها تُبلغ حالة غير متاحة.
 
 ---
 
@@ -160,7 +160,7 @@ sidebar_position: 5
 - محوّل Anthropic Messages API كمسار رئيسي
 - محوّلات MiniMax أو Nous
 - البحث الحيّ عبر Firecrawl، Parallel، Tavily، Exa، SearXNG، Brave، أو DDGS
-- جلسات المتصفّح السحابي عبر Browserbase، browser-use، Firecrawl، أو Camofox
+- جلسات المتصفّح السحابي عبر browser-use، Firecrawl، أو Camofox
 - مزوّدات ذاكرة خارجية مُعدّة بالاسم دون تنفيذ مدمج
 
 ---

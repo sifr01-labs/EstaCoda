@@ -64,6 +64,15 @@ Managed local STT defaults to `~/.estacoda/cache/huggingface` for faster-whisper
 | `FAL_KEY` | FAL |
 | `BYTEPLUS_ARK_API_KEY` | BytePlus / Seedream |
 
+## Browser provider keys
+
+| Variable | Provider | Purpose |
+|----------|----------|---------|
+| `BROWSERBASE_API_KEY` | Browserbase | Browserbase API authentication. |
+| `BROWSERBASE_PROJECT_ID` | Browserbase | Browserbase project used for cloud browser sessions. |
+
+These credentials satisfy Browserbase readiness only. They do not approve billable session creation. Browserbase sessions remain blocked until `browser.cloudSpendApproved === true`, normally set with `estacoda browser approve-cloud` and revoked with `estacoda browser revoke-cloud`.
+
 ## Channel keys
 
 | Variable | Channel |

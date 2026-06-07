@@ -83,7 +83,7 @@ estacoda config show | grep -A 5 browser
 
 **الإصلاح:**
 
-اضبط `browser.backend` على `local-cdp` في إعدادات الملف الشخصي. مزودو المتصفحات السحابية مسجلون لكن لا يمكنهم إنشاء جلسات مباشرة في v0.1.0.
+اضبط `browser.backend` على `local-cdp` لـ CDP المحلي، أو اضبط Browserbase مع `BROWSERBASE_API_KEY` و`BROWSERBASE_PROJECT_ID` و`estacoda browser approve-cloud`. تبقى browser-use وFirecrawl browser وCamofox مزودات مؤجلة ولا يمكنها إنشاء جلسات مباشرة.
 
 ## فشل إعداد STT المحلي
 

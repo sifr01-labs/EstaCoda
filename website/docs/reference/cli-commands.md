@@ -309,6 +309,35 @@ Valid modes: `strict`, `normal`, `open`. Hard safety blocks apply in all modes.
 
 ---
 
+## Browser
+
+```bash
+estacoda browser status
+estacoda browser setup --backend local-cdp --cdp-url http://127.0.0.1:9222 --launch-executable /path/to/chrome --launch-arg --headless=new --chrome-flag --no-first-run --auto-launch
+estacoda browser setup --backend browserbase --cloud-provider browserbase --hybrid-routing
+estacoda browser approve-cloud
+estacoda browser revoke-cloud
+estacoda browser test
+estacoda browser disable
+```
+
+**State touched:** `~/.estacoda/profiles/<id>/config.json`.
+
+**Behavior:**
+- `setup --backend local-cdp` configures manual CDP or supervised local auto-launch.
+- `--launch-executable`, repeated `--launch-arg`, and repeated `--chrome-flag` write structured launch config.
+- `--launch-command` remains accepted as deprecated compatibility data and is not shell-parsed.
+- `setup --backend browserbase --cloud-provider browserbase --hybrid-routing` configures Browserbase/hybrid routing but does not create a cloud session.
+- `approve-cloud` sets `browser.cloudSpendApproved: true`; `revoke-cloud` disables billable cloud session creation again.
+
+**Failure modes:**
+- Browserbase requires `BROWSERBASE_API_KEY` and `BROWSERBASE_PROJECT_ID`.
+- Browserbase sessions may incur charges and remain blocked until `estacoda browser approve-cloud` is run.
+- Cloud spend approval failure does not fall back to local.
+- `test` reports configuration readiness; live navigation is verified through browser tools during runtime.
+
+---
+
 ## Tools and MCP
 
 ```bash

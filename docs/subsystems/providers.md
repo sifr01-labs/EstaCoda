@@ -359,7 +359,7 @@ Current provider state:
 
 ## Cloud Browser Providers
 
-Cloud browser providers are separate from web research providers. The registry has stubs for Browserbase, browser-use, Firecrawl, and Camofox. All are unavailable in this release and direct `createSession()` calls throw not-implemented errors. Legacy `browser.backend` values `browserbase`, `firecrawl`, and `camofox` remain accepted for compatibility and report recognized-but-not-implemented status; they do not create real cloud sessions.
+Cloud browser providers are separate from web research providers. Browserbase is implemented through the browser backend, requires `BROWSERBASE_API_KEY` and `BROWSERBASE_PROJECT_ID`, and is blocked until `browser.cloudSpendApproved === true`. `estacoda browser approve-cloud` approves billable session creation, and `estacoda browser revoke-cloud` blocks it again. Direct provider-registry `createSession()` calls for Browserbase still throw because spend approval must be enforced by the backend. browser-use, Firecrawl browser, and Camofox remain deferred provider stubs. Legacy `browser.backend` values `firecrawl` and `camofox` remain accepted for compatibility and report unavailable status; they do not create real cloud sessions.
 
 ## Important Distinctions
 

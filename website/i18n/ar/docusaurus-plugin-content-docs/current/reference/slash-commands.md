@@ -233,9 +233,20 @@ sidebar_position: 2
 
 إدارة اتصال المتصفح المحلي/CDP.
 
+```bash
+/browser status
+/browser connect
+/browser connect http://127.0.0.1:9222
+/browser disconnect
+```
+
 **الحالة المُعدّلة:** حالة المتصفح في التشغيل.
 
-**أنماط الفشل:** يتداجر إذا لم يكن هناك backend متصفح مُهيّأ.
+**السلوك:** هذا الأمر slash هو سطح التحكم المحلي داخل الجلسة لاتصال CDP. يمكنه فحص الحالة، أو ضبط endpoint محلي لـ CDP، أو تحديث runtime عندما يتوفر ذلك، أو فصل backend المتصفح للملف التعريفي النشط.
+
+**ملاحظة المتصفح السحابي:** إعداد Browserbase وموافقة الإنفاق أوامر CLI وليست أوامر slash: استخدم `estacoda browser setup --backend browserbase --cloud-provider browserbase --hybrid-routing` و`estacoda browser approve-cloud` و`estacoda browser revoke-cloud`.
+
+**أنماط الفشل:** يتدهور إذا لم يكن هناك backend متصفح مُهيّأ. لا تُدار موافقة إنفاق Browserbase عبر أوامر slash.
 
 ---
 

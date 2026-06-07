@@ -36,7 +36,7 @@ No. WhatsApp is gated behind `experimental: true` and uses an unofficial library
 
 ## Are cloud browsers live-supported?
 
-No. Only `local-cdp` is live-implemented. Browserbase, browser-use, Firecrawl, and Camofox are registered stubs and cannot create live sessions.
+Browserbase is implemented behind explicit cloud spend approval. It requires `BROWSERBASE_API_KEY`, `BROWSERBASE_PROJECT_ID`, and `estacoda browser approve-cloud` before billable cloud sessions can be created. `local-cdp` remains the local backend. browser-use, Firecrawl, and Camofox remain registered stubs.
 
 ## Are web research providers live-supported?
 

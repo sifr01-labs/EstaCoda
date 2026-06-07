@@ -137,7 +137,7 @@ Custom OpenAI-compatible providers work with an explicit `baseUrl`.
 
 ### Other Capabilities
 
-- **Browser automation**: local CDP is supported. Browserbase, browser-use, Firecrawl, and Camofox are registered but not live-supported.
+- **Browser automation**: local CDP is supported, including supervised Chrome/Chromium auto-launch. Browserbase is implemented behind explicit cloud spend approval. browser-use, Firecrawl, and Camofox remain registered deferred providers.
 - **Web research**: guarded built-in fetch/extraction is supported. Firecrawl, Parallel, Tavily, Exa, SearXNG, Brave, and DDGS are registered but not live-supported.
 - **Voice**: hosted TTS (OpenAI, ElevenLabs, MiniMax, Gemini, xAI) and hosted STT (OpenAI, Groq, xAI) are supported. Local STT defaults to managed faster-whisper under `~/.estacoda/python-env`; command-mode local STT remains an explicit `stt.local.engine: "command"` opt-in. Local TTS and Mistral voice remain deferred.
 - **Image generation**: FAL and BytePlus/Seedream are supported.

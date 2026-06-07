@@ -233,9 +233,20 @@ Manage scheduled tasks from within a session.
 
 Manage local browser/CDP connection.
 
+```bash
+/browser status
+/browser connect
+/browser connect http://127.0.0.1:9222
+/browser disconnect
+```
+
 **State touched:** Runtime browser state.
 
-**Failure modes:** Degrades if no browser backend is configured.
+**Behavior:** This slash command is the in-session local CDP control surface. It can inspect status, configure a local CDP endpoint, refresh the runtime when available, or disconnect the browser backend for the active profile.
+
+**Cloud browser note:** Browserbase setup and spend approval are CLI commands, not slash commands: use `estacoda browser setup --backend browserbase --cloud-provider browserbase --hybrid-routing`, `estacoda browser approve-cloud`, and `estacoda browser revoke-cloud`.
+
+**Failure modes:** Degrades if no browser backend is configured. Browserbase spend approval is not handled through slash commands.
 
 ---
 

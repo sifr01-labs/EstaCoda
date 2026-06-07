@@ -73,7 +73,7 @@ estacoda gateway diagnose
 
 **Symptom:** Browser tool returns not configured or backend unavailable.
 
-**Likely cause:** `browser.backend` is unset or set to a cloud provider that is not live-implemented.
+**Likely cause:** `browser.backend` is unset, local CDP is not reachable, Browserbase is missing credentials or spend approval, or a deferred cloud provider is configured.
 
 **Inspect:**
 
@@ -83,7 +83,7 @@ estacoda config show | grep -A 5 browser
 
 **Repair:**
 
-Set `browser.backend` to `local-cdp` in profile config. Cloud browser providers are registered but cannot create live sessions in v0.1.0.
+Set `browser.backend` to `local-cdp` for local CDP, or configure Browserbase with `BROWSERBASE_API_KEY`, `BROWSERBASE_PROJECT_ID`, and `estacoda browser approve-cloud`. browser-use, Firecrawl browser, and Camofox remain deferred provider stubs and cannot create live sessions.
 
 ## Local STT setup fails
 

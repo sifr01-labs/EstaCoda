@@ -164,13 +164,34 @@ Browser backend selection.
 {
   "browser": {
     "backend": "local-cdp",
-    "autoLaunch": false,
-    "allowPrivateUrls": false
+    "supervised": true,
+    "autoLaunch": true,
+    "launchExecutable": "/path/to/chrome",
+    "launchArgs": ["--headless=new"],
+    "chromeFlags": ["--no-first-run"],
+    "summarizeSnapshots": "auto",
+    "snapshotSummarizeThreshold": 8000
   }
 }
 ```
 
-`local-cdp` is the only live-implemented backend. Browserbase, browser-use, Firecrawl, and Camofox are registered but cannot create live sessions.
+`local-cdp` supports manual CDP connections and supervised auto-launch. Use `launchExecutable`, `launchArgs`, and `chromeFlags` for structured launch configuration. `launchCommand` remains accepted only as deprecated compatibility data and is not shell-parsed.
+
+| Key | Type | Notes |
+|---|---|---|
+| `browser.launchExecutable` | string | Preferred explicit Chrome/Chromium executable path for supervised local CDP auto-launch. |
+| `browser.launchArgs` | string array | Structured launch arguments. Repeat `--launch-arg` in CLI setup to append. |
+| `browser.chromeFlags` | string array | Structured Chrome flags. Repeat `--chrome-flag` in CLI setup to append. |
+| `browser.launchCommand` | string | Deprecated compatibility data only. Not split, guessed, or shell-parsed. |
+| `browser.hybridRouting` | boolean | Routes public HTTP(S) URLs to cloud and allowed private/internal URLs to local when configured. Does not bypass URL safety. |
+| `browser.cloudFallback` | boolean | Allows eligible Browserbase failures to fall back to local. Spend approval failures do not fall back. |
+| `browser.cloudSpendApproved` | boolean or `"pending"` | Explicit approval for billable cloud browser session creation. Credentials alone do not approve spend. |
+| `browser.summarizeSnapshots` | boolean or `"auto"` | Controls whether oversized rendered snapshots may be summarized. |
+| `browser.snapshotSummarizeThreshold` | number | Rendered snapshot character threshold before summarization is considered. |
+
+Browserbase is implemented through the browser backend and requires `BROWSERBASE_API_KEY`, `BROWSERBASE_PROJECT_ID`, and explicit `browser.cloudSpendApproved: true` before billable sessions can be created. `estacoda browser approve-cloud` sets approval, and `estacoda browser revoke-cloud` disables it. Config alone does not create Browserbase sessions. browser-use, Firecrawl browser, and Camofox remain deferred providers.
+
+Hybrid routing follows the browser URL-safety policy: private/internal URLs remain blocked unless `security.allowPrivateUrls` is explicitly true, metadata endpoints are always blocked, and unsafe redirects are blanked to `about:blank` when possible or the unsafe session is closed.
 
 ### imageGen / image_gen
 

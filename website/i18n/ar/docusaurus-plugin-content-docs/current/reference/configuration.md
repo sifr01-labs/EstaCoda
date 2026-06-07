@@ -164,13 +164,34 @@ model:
 {
   "browser": {
     "backend": "local-cdp",
-    "autoLaunch": false,
-    "allowPrivateUrls": false
+    "supervised": true,
+    "autoLaunch": true,
+    "launchExecutable": "/path/to/chrome",
+    "launchArgs": ["--headless=new"],
+    "chromeFlags": ["--no-first-run"],
+    "summarizeSnapshots": "auto",
+    "snapshotSummarizeThreshold": 8000
   }
 }
 ```
 
-`local-cdp` هو الخلفية الوحيدة المُنفذة مباشرة. Browserbase وbrowser-use وFirecrawl وCamofox مسجلة لكن لا يمكنها إنشاء جلسات مباشرة.
+يدعم `local-cdp` الاتصال اليدوي عبر CDP والتشغيل التلقائي المُشرف عليه. استخدم `launchExecutable` و`launchArgs` و`chromeFlags` لإعداد التشغيل المنظم. يبقى `launchCommand` مقبولًا فقط كبيانات توافق مهملة ولا يُحلل كـ shell.
+
+| المفتاح | النوع | ملاحظات |
+|---|---|---|
+| `browser.launchExecutable` | string | مسار Chrome/Chromium الصريح والمفضل للتشغيل التلقائي المحلي عبر CDP المُشرف عليه. |
+| `browser.launchArgs` | string array | وسائط تشغيل منظمة. كرر `--launch-arg` في إعداد CLI للإضافة. |
+| `browser.chromeFlags` | string array | أعلام Chrome منظمة. كرر `--chrome-flag` في إعداد CLI للإضافة. |
+| `browser.launchCommand` | string | بيانات توافق مهملة فقط. لا تُقسم ولا تُخمن ولا تُحلل كـ shell. |
+| `browser.hybridRouting` | boolean | يوجّه عناوين HTTP(S) العامة إلى السحابة والعناوين الخاصة/الداخلية المسموحة إلى المحلي عند الإعداد. لا يتجاوز أمان URL. |
+| `browser.cloudFallback` | boolean | يسمح لإخفاقات Browserbase المؤهلة بالرجوع إلى المحلي. إخفاقات موافقة الإنفاق لا ترجع. |
+| `browser.cloudSpendApproved` | boolean أو `"pending"` | موافقة صريحة لإنشاء جلسات متصفح سحابية قابلة للفوترة. بيانات الاعتماد وحدها لا توافق على الإنفاق. |
+| `browser.summarizeSnapshots` | boolean أو `"auto"` | يتحكم في إمكانية تلخيص اللقطات المعروضة الضخمة. |
+| `browser.snapshotSummarizeThreshold` | number | عتبة أحرف عرض اللقطة قبل التفكير في التلخيص. |
+
+Browserbase مُنفّذ عبر خلفية المتصفح، ويتطلب `BROWSERBASE_API_KEY` و`BROWSERBASE_PROJECT_ID` و`browser.cloudSpendApproved: true` صريحة قبل إنشاء جلسات قابلة للفوترة. يضبط `estacoda browser approve-cloud` الموافقة، ويعطلها `estacoda browser revoke-cloud`. الإعداد وحده لا ينشئ جلسات Browserbase. تبقى browser-use وFirecrawl browser وCamofox مزودات مؤجلة.
+
+يتبع التوجيه الهجين سياسة أمان URL للمتصفح: تبقى العناوين الخاصة/الداخلية محظورة ما لم تكن `security.allowPrivateUrls` مفعّلة صراحةً، وتبقى نقاط metadata محظورة دائمًا، وتُفرّغ التحويلات غير الآمنة إلى `about:blank` عندما يمكن ذلك أو تُغلق الجلسة غير الآمنة.
 
 ### imageGen / image_gen
 

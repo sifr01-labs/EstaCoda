@@ -131,6 +131,16 @@ Current protection coverage:
 
 Browser/web debug telemetry is disabled by default and is enabled only with `ESTACODA_BROWSER_DEBUG=true` or `ESTACODA_WEB_TOOLS_DEBUG=true`. Debug data is attached to individual tool results only and is redacted before storage or return, including secret-bearing URLs, auth headers, cookies, request/response bodies, raw Runtime expressions, full page text, and oversized nested payloads.
 
+Cloud browser spend approval is a separate trust boundary. Browserbase credential readiness requires both `BROWSERBASE_API_KEY` and `BROWSERBASE_PROJECT_ID`, but credentials alone do not permit billable session creation. The browser backend refuses cloud sessions until `browser.cloudSpendApproved === true`, normally set through `estacoda browser approve-cloud` and revoked with `estacoda browser revoke-cloud`.
+
+Hybrid routing uses the same URL classifier as browser and web tools:
+
+- Public HTTP(S) URLs may route to Browserbase only when Browserbase is configured and cloud spend is approved.
+- Private/internal URLs route to local only when `security.allowPrivateUrls === true`.
+- Metadata endpoints remain hard-blocked and cannot be enabled by hybrid routing or private URL allowance.
+- Cloud spend approval failures do not fall back to local.
+- Unsafe redirects are blanked to `about:blank` when possible; if blanking fails, the unsafe session is closed.
+
 Known limits: there is no socket-level DNS rebinding or TOCTOU protection, runtime-expression guarding is not full JavaScript static analysis, and debug telemetry is not persistent session recording, video capture, or a dashboard.
 
 ## Channel Security Model

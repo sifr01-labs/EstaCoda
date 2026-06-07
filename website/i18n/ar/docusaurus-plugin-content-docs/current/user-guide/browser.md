@@ -6,7 +6,7 @@ sidebar_position: 11
 
 # المتصفح
 
-EstaCoda تُؤتمت المتصفحات عبر بروتوكول Chrome DevTools (CDP). الواجهة الخلفية الوحيدة الحية في v0.1.0 هي CDP المحلي. مزودو المتصفح السحابي مسجّلون لكن غير مُنفّذين. المتصفح ليس سحريًا. إنه أداة مُشرف عليها بحدود أمان صريحة.
+EstaCoda تُؤتمت المتصفحات عبر بروتوكول Chrome DevTools (CDP). `local-cdp` مُنفّذ، ويمكن لمسار CDP المحلي المُشرف عليه تشغيل Chrome/Chromium تلقائيًا، وBrowserbase مُنفّذ خلف موافقة صريحة على إنفاق السحابة. المتصفح أداة مُشرف عليها بحدود أمان صريحة.
 
 ---
 
@@ -14,14 +14,14 @@ EstaCoda تُؤتمت المتصفحات عبر بروتوكول Chrome DevTools
 
 | الواجهة الخلفية | الحالة | ملاحظات |
 |---|---|---|
-| **local-cdp** | `live-proven` | يتصل بـ Chrome/Chromium محلي عبر CDP. |
+| **local-cdp** | `live-proven` | يتصل بـ Chrome/Chromium محلي عبر CDP. يمكن للوضع المُشرف عليه تشغيل Chrome/Chromium تلقائيًا. |
 | **mock** | `implemented` | واجهة اختبار لاختبارات الدخان. لا متصفح حقيقي. |
-| **Browserbase** | `unsupported` | نموذج مسجّل. غير مُنفّذ. |
+| **Browserbase** | `implemented` | يتطلب بيانات اعتماد وموافقة صريحة على إنفاق السحابة قبل إنشاء جلسات قابلة للفوترة. |
 | **browser-use** | `unsupported` | نموذج مسجّل. غير مُنفّذ. |
 | **Firecrawl (browser)** | `unsupported` | نموذج مسجّل. غير مُنفّذ. |
 | **Camofox** | `unsupported` | نموذج مسجّل. غير مُنفّذ. |
 
-قيم الإعدادات القديمة `browserbase` و `firecrawl` و `camofox` لـ `browser.backend` لا تزال مقبولة للتوافق ولكنها تُبلّغ حالة `recognized-but-not-implemented`. لا تنشئ جلسات حقيقية.
+تُنشأ جلسات Browserbase فقط عبر واجهة المتصفح الخلفية حتى يمكن فرض `browser.cloudSpendApproved`. تبقى browser-use وFirecrawl وCamofox مزودات مؤجلة.
 
 ---
 
@@ -31,7 +31,7 @@ EstaCoda تُؤتمت المتصفحات عبر بروتوكول Chrome DevTools
 
 - `status` — فحص حالة اتصال المتصفح
 - `navigate` — تحميل عنوان URL
-- `snapshot` — التقاط لقطة DOM قابلة للوصول
+- `snapshot` — التقاط لقطة شجرة الوصول مع رجوع احتياطي إلى DOM
 - `click` — النقر على عنصر باستخدام ref
 - `type` — كتابة نص في حقل إدخال
 - `scroll` — تمرير الصفحة
@@ -43,7 +43,26 @@ EstaCoda تُؤتمت المتصفحات عبر بروتوكول Chrome DevTools
 - `screenshot` — التقاط لقطة شاشة للصفحة
 - `dialog handling` — قبول/رفض مربعات الحوار
 
-جميع العمليات باستثناء `status` تتطلب جلسة CDP نشطة. يتم إنشاء الجلسة عند تهيئة الواجهة الخلفية للمتصفح.
+جميع العمليات باستثناء `status` تتطلب جلسة متصفح. أدوات المتصفح تشتق مفاتيح جلسات المتصفح من جلسة وقت التشغيل الحالية، لذلك تحصل جلسات الأب والجلسات المفوضة على حالة متصفح معزولة افتراضيًا. تمرير `sessionId` صريح يشارك تلك الجلسة المسماة عمدًا.
+
+تستخدم الجلسات المُشرف عليها CDP Browser Contexts معزولة. تنشئ EstaCoda Browser Context لكل مفتاح جلسة متصفح، وتفتح page target داخل ذلك السياق، وتلغي السياق أثناء التنظيف حتى لا تتسرب ملفات تعريف الارتباط وحالة browser-context بين جلسات الأب/الجلسات المفوضة.
+
+يمكن لـ CDP المحلي المُشرف عليه تشغيل Chrome/Chromium تلقائيًا عندما تكون `browser.autoLaunch === true`. يبحث الاكتشاف في الإعدادات المنظمة، ومتغيرات البيئة، والثنائيات المحلية، وافتراضات المنصة. يستخدم التشغيل مصفوفات وسائط منظمة، ولا يحلل `browser.launchCommand` كأمر shell، ولا يستخدم `exec`، وينشئ دليل بيانات مستخدم معزولًا، ولا يقتل إلا عمليات Chrome التي شغّلتها EstaCoda أثناء التنظيف.
+
+## اللقطات
+
+تفضّل لقطات المتصفح شجرة الوصول من `Accessibility.getFullAXTree`. تعرض عناصر اللقطة مراجع حتمية مثل `@e1`، وقد تتضمن `role` و`name` و`value` و`disabled` و`checked`. يتم تخطي عقد AX المتجاهلة أو قليلة الفائدة.
+
+يبقى مسار لقطة DOM رجوعًا احتياطيًا عندما تكون AX غير متاحة، أو فارغة، أو مشوهة، أو لا يمكن ربط المراجع القابلة للتنفيذ. تكون المراجع قابلة للتنفيذ عندما تُعرض.
+
+تستخدم `browser.snapshot` لقطة مضغوطة افتراضيًا. اللقطات المضغوطة هي مجموعة AX محدودة من العناصر القابلة للتنفيذ، وليست ترشيحًا حقيقيًا للعناصر المرئية في منفذ العرض بعد. تمرير `full: true` يطلب مسار اللقطة الكاملة. يوسم إخراج الأداة اللقطات المضغوطة والكاملة، ويقص النتائج الكبيرة، وقد يلخص اللقطات الضخمة عند تفعيل الإعداد.
+
+تتحكم الإعدادات التالية في تلخيص اللقطات:
+
+- `browser.summarizeSnapshots`: `false` أو `true` أو `"auto"`
+- `browser.snapshotSummarizeThreshold`: عتبة الأحرف قبل التفكير في التلخيص
+
+في وضع `"auto"`، يعمل التلخيص فقط عندما يتوفر مسار نموذج مساعد ويتجاوز عرض اللقطة العتبة. تُحجب عناوين URL التي تحتوي أسرارًا والقيم الحساسة قبل استدعاءات المزود.
 
 ---
 
@@ -57,7 +76,7 @@ EstaCoda تُؤتمت المتصفحات عبر بروتوكول Chrome DevTools
 
 ### المحظورة افتراضيًا
 
-عناوين URL الخاصة والداخلية محظورة ما لم يُفعّل `browser.allowPrivateUrls` صراحةً:
+عناوين URL الخاصة والداخلية محظورة ما لم يُفعّل `security.allowPrivateUrls` صراحةً:
 
 - `localhost`
 - `127.0.0.1`
@@ -66,7 +85,7 @@ EstaCoda تُؤتمت المتصفحات عبر بروتوكول Chrome DevTools
 
 ### محظورة دائمًا
 
-نقاط نهاية بيانات التعريف السحابية محظورة دائمًا، بغض النظر عن `allowPrivateUrls`:
+نقاط نهاية بيانات التعريف السحابية محظورة دائمًا، بغض النظر عن `security.allowPrivateUrls`:
 
 - `metadata.google.internal`
 - `metadata.goog`
@@ -83,6 +102,8 @@ EstaCoda تُؤتمت المتصفحات عبر بروتوكول Chrome DevTools
 ### قوائم حظر المواقع
 
 قوائم الحظر تدعم النطاقات الدقيقة، ونطاقات البدل، والملفات المشتركة. يتم فحص قائمة الحظر قبل التنقل.
+
+يستخدم التوجيه الهجين المصنف نفسه. عناوين HTTP(S) العامة تُوجّه إلى Browserbase/السحابة عندما يكون Browserbase مُعدًا وموافقة الإنفاق مفعّلة. عناوين URL الخاصة/الداخلية تُوجّه إلى المحلي فقط عندما تكون `security.allowPrivateUrls === true`. تبقى نقاط البيانات التعريفية محظورة. فشل موافقة الإنفاق السحابي لا يرجع إلى المحلي. يمكن لفشل Browserbase الرجوع إلى المحلي عندما تكون `browser.cloudFallback === true`. التحويلات غير الآمنة تُفرّغ إلى `about:blank` عندما يمكن ذلك؛ وإلا تُغلق الجلسة غير الآمنة.
 
 ---
 
@@ -103,10 +124,13 @@ EstaCoda تُؤتمت المتصفحات عبر بروتوكول Chrome DevTools
   "browser": {
     "backend": "local-cdp",
     "cdpUrl": "http://localhost:9222",
-    "autoLaunch": false,
-    "allowPrivateUrls": false,
-    "headless": false,
-    "blocklist": ["example-bad-domain.com"]
+    "supervised": true,
+    "autoLaunch": true,
+    "launchExecutable": "/path/to/chrome",
+    "launchArgs": ["--headless=new"],
+    "chromeFlags": ["--no-first-run"],
+    "summarizeSnapshots": "auto",
+    "snapshotSummarizeThreshold": 8000
   }
 }
 ```
@@ -114,25 +138,63 @@ EstaCoda تُؤتمت المتصفحات عبر بروتوكول Chrome DevTools
 | المفتاح | الافتراضي | الوصف |
 |---|---|---|
 | `backend` | `unconfigured` | الواجهة الخلفية للمتصفح المُستخدمة. |
-| `cdpUrl` | `http://localhost:9222` | نقطة نهاية CDP لـ Chrome المحلي. |
-| `autoLaunch` | `false` | ما إذا كان سيتم تشغيل Chrome تلقائيًا إذا لم يكن يعمل. |
-| `allowPrivateUrls` | `false` | ما إذا كان سيسمح بعناوين URL الخاصة/الداخلية. |
-| `headless` | `false` | ما إذا كان سيعمل Chrome بدون واجهة رسومية. |
-| `blocklist` | `[]` | نطاقات إضافية للحظر. |
+| `cdpUrl` | غير مضبوط | نقطة نهاية CDP لمتصفح يعمل يدويًا. |
+| `supervised` | `true` | استخدام CDP المحلي المُشرف عليه عندما يكون `backend` هو `local-cdp`. |
+| `autoLaunch` | `false` | ما إذا كان CDP المحلي المُشرف عليه قد يشغّل Chrome/Chromium تلقائيًا. |
+| `launchExecutable` | غير مضبوط | مسار Chrome/Chromium الصريح والمفضل. |
+| `launchArgs` | غير مضبوط | مصفوفة وسائط تشغيل منظمة. |
+| `chromeFlags` | غير مضبوط | مصفوفة أعلام Chrome منظمة. |
+| `launchCommand` | غير مضبوط | بيانات توافق مهملة فقط. لا تُقسم ولا تُحلل كـ shell. |
+| `summarizeSnapshots` | `"auto"` | ما إذا كان يمكن تلخيص اللقطات المعروضة الضخمة. |
+| `snapshotSummarizeThreshold` | `8000` | عتبة أحرف عرض اللقطة للتلخيص. |
 
-إذا كان `autoLaunch` صحيحًا وChrome لا يعمل، تحاول EstaCoda تشغيل مثيل Chrome مُشرف عليه مع أعلام الأمان. إذا فشل التشغيل، يُبلغ العملية عن الخطأ ولا يُعيد المحاولة تلقائيًا.
+استخدم أمر الإعداد المنظم لمسار التشغيل التلقائي المحلي:
+
+```bash
+estacoda browser setup --backend local-cdp --auto-launch --launch-executable /path/to/chrome
+estacoda browser setup --backend local-cdp --launch-executable /path/to/chrome --launch-arg --headless=new --chrome-flag --no-first-run --auto-launch
+```
+
+يبقى `launchCommand` مقبولًا للإعدادات القديمة، لكنه ليس مسار الإعداد الطبيعي.
+
+يسجل الشكل القصير الملف التنفيذي ويفعّل التشغيل التلقائي المُشرف عليه. أضف `--launch-arg` و`--chrome-flag` بشكل متكرر عندما يحتاج المشغل إلى خيارات تشغيل محددة مثل headless mode أو `--no-first-run`.
+
+إعداد Browserbase:
+
+```json
+{
+  "browser": {
+    "backend": "browserbase",
+    "cloudProvider": "browserbase",
+    "cloudSpendApproved": "pending",
+    "cloudFallback": true,
+    "hybridRouting": true
+  }
+}
+```
+
+يتطلب Browserbase كلًا من `BROWSERBASE_API_KEY` و`BROWSERBASE_PROJECT_ID`. الحالة الافتراضية/المعلقة للموافقة تمنع الجلسات القابلة للفوترة. شغّل `estacoda browser approve-cloud` للسماح بإنشاء جلسات متصفح سحابية، و`estacoda browser revoke-cloud` لحظرها مرة أخرى. قد تُسبب جلسات Browserbase رسومًا. الإعداد وحده لا ينشئ جلسات؛ الإنشاء كسول عندما تحتاج عملية متصفح إلى الخلفية السحابية. تستخدم EstaCoda شكل API المُتحقق منه في `docs/browserbase-api-notes.md`.
+
+```bash
+estacoda browser setup --backend browserbase --cloud-provider browserbase
+estacoda browser setup --backend browserbase --cloud-provider browserbase --hybrid-routing
+estacoda browser approve-cloud
+estacoda browser revoke-cloud
+```
+
+يضبط الأمر الأول Browserbase كخلفية المتصفح دون تفعيل `browser.hybridRouting`. ويفعّل الثاني التوجيه الهجين حتى تستخدم عناوين URL العامة السحابة وتستخدم العناوين الخاصة/الداخلية المسموحة المحلي. مطلوب `approve-cloud` قبل إنشاء جلسات قابلة للفوترة. يحظر `revoke-cloud` إنشاء جلسات سحابية مستقبلية دون حذف بيانات الاعتماد.
 
 ---
 
 ## الحالة والملفات
 
-حالة المتصفح خاصة بالملف الشخصي:
+إعداد المتصفح خاص بالملف الشخصي. حالة جلسة المتصفح خاصة بعمر وقت التشغيل:
 
 - حالة جلسة CDP تبقى في الذاكرة خلال عمر وقت التشغيل
 - لقطات الشاشة والمنتجات تُكتب إلى دليل temp الخاص بالملف الشخصي النشط
 - سجلات وحدة تحكم المتصفح تُلتقط لكل جلسة وتُدرج في تسجيل المنتجات
 
-لا يوجد ملف شخصي متصفح مستمر أو ملف تعريف ارتباط عبر الجلسات ما لم يُشغّل Chrome مع دليل بيانات مستخدم دائم.
+يستخدم التشغيل التلقائي المُشرف عليه دليل بيانات مستخدم مؤقتًا ومعزولًا لـ Chrome ويزيله أثناء التنظيف. لا يوجد ملف متصفح دائم أو ملف تعريف ارتباط عبر الجلسات إلا إذا استُخدم متصفح خارجي خارج مشغل EstaCoda.
 
 ---
 
@@ -147,6 +209,20 @@ EstaCoda تُؤتمت المتصفحات عبر بروتوكول Chrome DevTools
 **فشل لقطة الشاشة:** الصفحة قد لا تكون قد انتهت من التحميل. أداة snapshot تلتقط DOM؛ لقطات الشاشة تلتقط السطح المُصيّر. التوقيت مهم.
 
 **فشل التشغيل التلقائي:** لم يُعثر على ثنائي Chrome، أو لا توجد صلاحيات كافية للتشغيل. تحقق من `which google-chrome` أو `which chromium-browser`.
+
+**موافقة إنفاق Browserbase مفقودة:** تبلغ الواجهة الخلفية أن الجلسات السحابية قد تُسبب رسومًا وتبقى محظورة حتى تشغيل `estacoda browser approve-cloud`.
+
+**فشل إنشاء جلسة Browserbase:** مع `browser.cloudFallback: true`، يمكن لبعض إخفاقات السحابة الرجوع إلى المحلي. إخفاقات موافقة الإنفاق لا ترجع إلى المحلي.
+
+**حُظر تحويل هجين:** خالف عنوان URL النهائي سياسة أمان المسار. تحاول EstaCoda تفريغ الجلسة إلى `about:blank`؛ وإذا فشل التفريغ، تُغلق الجلسة غير الآمنة.
+
+## الحدود الحالية
+
+- `engine: "agent-browser"` مقبول في الإعداد لكنه غير مُنفّذ.
+- دعم Lightpanda غير مُنفّذ.
+- حزمة تحقق Hermes للتكافؤ وCI التكافؤ غير مُنفّذين.
+- تبقى browser-use وFirecrawl browser وCamofox مزودات مؤجلة.
+- اللقطات المضغوطة عبر AX هي مجموعة محدودة قابلة للتنفيذ، وليست ترشيحًا للعناصر المرئية في منفذ العرض.
 
 ---
 

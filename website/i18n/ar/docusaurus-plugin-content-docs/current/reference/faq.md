@@ -36,7 +36,7 @@ Telegram هي القناة البعيدة الأولية الوحيدة المث
 
 ## هل متصفحات السحابة مدعومة مباشرة؟
 
-لا. فقط `local-cdp` منفذ مباشرة. Browserbase وbrowser-use وFirecrawl وCamofox هم أطروحات مسجلة ولا يمكنهم إنشاء جلسات مباشرة.
+Browserbase مُنفّذ خلف موافقة صريحة على إنفاق السحابة. يتطلب `BROWSERBASE_API_KEY` و`BROWSERBASE_PROJECT_ID` وتشغيل `estacoda browser approve-cloud` قبل إنشاء جلسات سحابية قابلة للفوترة. يبقى `local-cdp` الخلفية المحلية. تبقى browser-use وFirecrawl وCamofox نماذج مسجلة مؤجلة.
 
 ## هل مزودو أبحاث الويب مدعومون مباشرة؟
 

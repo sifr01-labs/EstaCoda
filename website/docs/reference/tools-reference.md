@@ -225,11 +225,22 @@ Local browser automation via CDP or remote browser backend.
 |------|------|---------------|
 | `browser.*` | `external-side-effect` | Browser session state |
 
-**Availability:** Requires a configured browser backend. Cloud browser providers are registered but not live-proven in v0.1.0.
+Implemented browser tools include `browser.status`, `browser.navigate`, `browser.snapshot`, `browser.click`, `browser.type`, `browser.scroll`, `browser.press`, `browser.back`, `browser.get_images`, `browser.console`, `browser.cdp`, `browser.screenshot`, `browser.vision`, and `browser.dialog`.
+
+**Availability:** Requires a configured browser backend. `local-cdp` supports manual CDP and supervised auto-launch. Browserbase is implemented through the browser backend and remains blocked until `browser.cloudSpendApproved === true`. browser-use, Firecrawl browser, and Camofox are registered deferred providers.
+
+**Snapshots:** `browser.snapshot` returns compact output by default. Compact output is a bounded actionable AX subset with refs such as `@e1`; it is not true viewport-visible filtering yet. Passing `full: true` requests the larger full snapshot path. Rendered output labels compact vs full snapshots, truncates oversized text, and may summarize large results when `browser.summarizeSnapshots` and `browser.snapshotSummarizeThreshold` allow it.
+
+**Browserbase navigation:** Public HTTP(S) navigation may create a Browserbase session only when Browserbase is configured, `BROWSERBASE_API_KEY` and `BROWSERBASE_PROJECT_ID` are available, and cloud spend is approved. Credentials and config alone do not create sessions. Missing approval returns a spend-gate error and does not fall back to local. Eligible Browserbase failures may fall back to local only when `browser.cloudFallback === true`.
+
+**Hybrid routing metadata:** Where surfaced, browser status or tool metadata can include last backend kind, hybrid routing state, fallback provider/reason, and Browserbase approval/availability status. Secrets and raw Browserbase response bodies are not returned.
 
 **Failure modes:**
 - No configured backend returns an unavailable status.
 - CDP connection failures surface as execution errors.
+- URL safety blocks private/internal URLs unless `security.allowPrivateUrls` is explicitly true.
+- Metadata endpoints are hard-blocked in local, cloud, and hybrid routing.
+- Unsafe redirects are blanked to `about:blank` when possible; otherwise the unsafe session is closed.
 
 ### Media tools
 

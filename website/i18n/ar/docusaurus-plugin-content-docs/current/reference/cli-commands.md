@@ -307,6 +307,35 @@ estacoda security --mode <mode>         # تعيين وضع الموافقة
 
 ---
 
+## المتصفح
+
+```bash
+estacoda browser status
+estacoda browser setup --backend local-cdp --cdp-url http://127.0.0.1:9222 --launch-executable /path/to/chrome --launch-arg --headless=new --chrome-flag --no-first-run --auto-launch
+estacoda browser setup --backend browserbase --cloud-provider browserbase --hybrid-routing
+estacoda browser approve-cloud
+estacoda browser revoke-cloud
+estacoda browser test
+estacoda browser disable
+```
+
+**الحالة المُعدّلة:** `~/.estacoda/profiles/<id>/config.json`.
+
+**السلوك:**
+- يضبط `setup --backend local-cdp` اتصال CDP اليدوي أو التشغيل التلقائي المحلي المُشرف عليه.
+- تكتب `--launch-executable` و`--launch-arg` المتكررة و`--chrome-flag` المتكررة إعداد تشغيل منظم.
+- يبقى `--launch-command` مقبولًا كبيانات توافق مهملة ولا يُحلل كـ shell.
+- يضبط `setup --backend browserbase --cloud-provider browserbase --hybrid-routing` Browserbase والتوجيه الهجين لكنه لا ينشئ جلسة سحابية.
+- يضبط `approve-cloud` القيمة `browser.cloudSpendApproved: true`؛ ويعطل `revoke-cloud` إنشاء الجلسات السحابية القابلة للفوترة مرة أخرى.
+
+**أنماط الفشل:**
+- يتطلب Browserbase كلًا من `BROWSERBASE_API_KEY` و`BROWSERBASE_PROJECT_ID`.
+- قد تُسبب جلسات Browserbase رسومًا وتبقى محظورة حتى تشغيل `estacoda browser approve-cloud`.
+- فشل موافقة إنفاق السحابة لا يرجع إلى المحلي.
+- يبلغ `test` جاهزية الإعداد؛ يتم التحقق من التنقل الحي عبر أدوات المتصفح أثناء runtime.
+
+---
+
 ## الأدوات و MCP
 
 ```bash

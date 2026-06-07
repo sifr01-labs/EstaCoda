@@ -225,11 +225,22 @@ sidebar_position: 6
 |------|------|---------------|
 | `browser.*` | `external-side-effect` | حالة جلسة المتصفح |
 
-**التوفر:** يتطلب backend متصفح مُهيّأ. مزودو المتصفح السحابي مسجلون لكن غير مُثبتين حيًا في v0.1.0.
+تشمل أدوات المتصفح المُنفذة `browser.status` و`browser.navigate` و`browser.snapshot` و`browser.click` و`browser.type` و`browser.scroll` و`browser.press` و`browser.back` و`browser.get_images` و`browser.console` و`browser.cdp` و`browser.screenshot` و`browser.vision` و`browser.dialog`.
+
+**التوفر:** يتطلب backend متصفح مُهيّأ. يدعم `local-cdp` اتصال CDP اليدوي والتشغيل التلقائي المُشرف عليه. Browserbase مُنفّذ عبر خلفية المتصفح ويبقى محظورًا حتى تكون `browser.cloudSpendApproved === true`. تبقى browser-use وFirecrawl browser وCamofox مزودات مؤجلة مسجلة.
+
+**اللقطات:** تُرجع `browser.snapshot` إخراجًا مضغوطًا افتراضيًا. الإخراج المضغوط هو مجموعة AX محدودة من العناصر القابلة للتنفيذ مع مراجع مثل `@e1`؛ وليس ترشيحًا حقيقيًا للعناصر المرئية في منفذ العرض بعد. تمرير `full: true` يطلب مسار اللقطة الكاملة الأكبر. يوسم الإخراج المعروض اللقطات المضغوطة والكاملة، ويقص النص الضخم، وقد يلخص النتائج الكبيرة عندما يسمح `browser.summarizeSnapshots` و`browser.snapshotSummarizeThreshold` بذلك.
+
+**تنقل Browserbase:** يمكن لتنقل HTTP(S) العام إنشاء جلسة Browserbase فقط عندما يكون Browserbase مُعدًا، وتتوفر `BROWSERBASE_API_KEY` و`BROWSERBASE_PROJECT_ID`، وتكون موافقة إنفاق السحابة مفعّلة. بيانات الاعتماد والإعداد وحدهما لا ينشئان جلسات. الموافقة المفقودة تُرجع خطأ بوابة الإنفاق ولا ترجع إلى المحلي. إخفاقات Browserbase المؤهلة قد ترجع إلى المحلي فقط عندما تكون `browser.cloudFallback === true`.
+
+**metadata للتوجيه الهجين:** حيث تظهر، يمكن لحالة المتصفح أو metadata الأداة أن تتضمن نوع backend الأخير، وحالة `browser.hybridRouting`، ومزود/سبب fallback، وحالة موافقة/توفر Browserbase. لا تُرجع الأسرار ولا أجسام استجابات Browserbase الخام.
 
 **أنماط الفشل:**
 - عدم وجود backend مُهيّأ يُرجع حالة غير متاحة.
 - فشل اتصال CDP يظهر كخطأ تنفيذ.
+- يحظر أمان URL العناوين الخاصة/الداخلية ما لم تكن `security.allowPrivateUrls` مفعّلة صراحةً.
+- نقاط metadata محظورة دائمًا في المحلي والسحابة والتوجيه الهجين.
+- تُفرّغ التحويلات غير الآمنة إلى `about:blank` عندما يمكن ذلك؛ وإلا تُغلق الجلسة غير الآمنة.
 
 ### أدوات الوسائط
 

@@ -120,12 +120,12 @@ Only one web research path is live in v0.1.0. The rest are registered stubs.
 |---|---|---|
 | **local-cdp** | `live-proven` | Local Chrome DevTools Protocol. Supervised mode is opt-in. |
 | **mock** | `implemented` | Test backend. No real browser. |
-| **Browserbase** | `unsupported` | Registered stub. `createSession()` throws not-implemented. |
+| **Browserbase** | `implemented` | Cloud browser backend. Requires credentials and explicit cloud spend approval. |
 | **browser-use** | `unsupported` | Registered stub. Not implemented. |
 | **Firecrawl (browser)** | `unsupported` | Registered stub. Not implemented. |
 | **Camofox** | `unsupported` | Registered stub. Not implemented. |
 
-Legacy `browser.backend` values `browserbase`, `firecrawl`, and `camofox` remain accepted for compatibility but report `recognized-but-not-implemented` status.
+Browserbase requires `BROWSERBASE_API_KEY`, `BROWSERBASE_PROJECT_ID`, and explicit `browser.cloudSpendApproved: true` before cloud sessions can be created. `estacoda browser approve-cloud` approves billable session creation, and `estacoda browser revoke-cloud` blocks it again. Browserbase direct provider-registry `createSession()` calls still throw because cloud spend approval is enforced through the browser backend. Legacy `browser.backend` values `firecrawl` and `camofox` remain accepted for compatibility but report unavailable status.
 
 ---
 
@@ -160,7 +160,7 @@ The following are explicitly out of scope for this release:
 - Runnable Anthropic Messages API adapter as a primary route
 - Runnable MiniMax or Nous LLM adapters
 - Live web search via Firecrawl, Parallel, Tavily, Exa, SearXNG, Brave, or DDGS
-- Live cloud browser sessions via Browserbase, browser-use, Firecrawl, or Camofox
+- Live cloud browser sessions via browser-use, Firecrawl, or Camofox
 - Arbitrary external memory providers configured by name without a built-in implementation
 
 ---

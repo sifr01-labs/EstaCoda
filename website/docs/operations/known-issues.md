@@ -16,7 +16,7 @@ These surfaces exist in code or registry but are not live for users.
 |---------|--------|--------|
 | Native Windows installer | Unsupported | No Windows-native install path. WSL is best-effort. |
 | Binary artifact-only update via `ESTACODA_UPDATE_ARTIFACT` | Reachable, not recommended | The artifact path exists in code but is not the public v0.1.0 update mechanism. Use `estacoda update` or package-manager routing. |
-| Cloud browser providers | Registered, not live | Browserbase, browser-use, Firecrawl, Camofox are registered but cannot create live sessions. |
+| Cloud browser providers except Browserbase | Registered, not live | browser-use, Firecrawl, and Camofox are registered but cannot create live sessions. Browserbase is implemented behind explicit spend approval. |
 | Web research providers beyond fetch | Registered, not live | Firecrawl, Parallel, Tavily, Exa, SearXNG, Brave, DDGS are registered stubs. Only guarded built-in `fetch` extraction is live. |
 | Anthropic Messages API adapter | Catalog-known, not runnable | Code exists but is not runnable in the current build. |
 | MiniMax LLM adapter | Catalog-known, not runnable | Appears in metadata but is not a live inference route. |
@@ -38,7 +38,7 @@ These features are code-gated or maturity-marked. Enable them only if you unders
 | Local TTS | Deferred | No local TTS provider is implemented. |
 | Mistral TTS/STT | Deferred | Not implemented. |
 | Gateway auto-TTS | `voice.autoTts: true` | Per-reply and per-hour caps apply. |
-| Browser cloud provider registry | `browser.backend` accepts legacy names | Legacy values report recognized-but-not-implemented status. |
+| Deferred browser cloud providers | `browser.backend` accepts legacy names | Firecrawl and Camofox browser backends report unavailable status. browser-use remains a deferred cloud provider. |
 | Web research provider registry | `web.backend` accepts stub names | Stub providers report unavailable even when configured. |
 
 ## Present but not live-proven

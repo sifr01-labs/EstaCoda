@@ -614,6 +614,67 @@ HOME=/tmp/estacoda-qa-ready pnpm run dev -- setup --interactive
 - `Leave unchanged` writes nothing.
 - `Skip` keeps core setup valid and non-blocking.
 
+### 10.12.1 Browser Parity QA
+
+Use disposable state for all browser checks:
+
+```bash
+rm -rf /tmp/estacoda-browser-qa-home
+mkdir -p /tmp/estacoda-browser-qa-home
+```
+
+**Local supervised auto-launch:**
+
+```bash
+HOME=/tmp/estacoda-browser-qa-home pnpm run dev -- browser setup --backend local-cdp --auto-launch --launch-executable /path/to/chrome --launch-arg --headless=new --chrome-flag --no-first-run
+HOME=/tmp/estacoda-browser-qa-home pnpm run dev -- browser status
+```
+
+**Verify:**
+- Status shows `local-cdp`, supervised mode, auto-launch enabled, launch executable, launch args count, and Chrome flags count.
+- Runtime navigation can launch Chrome/Chromium only from the configured structured executable/argument fields.
+- `browser.launchCommand` is not split, guessed, or shell-parsed.
+- Cleanup kills only the Chrome process launched by EstaCoda and removes the temporary user data directory.
+
+**Browserbase approval gate:**
+
+Use repo test conventions or mocked/safe placeholder credentials. Do not use real billing credentials in shared QA logs.
+
+```bash
+HOME=/tmp/estacoda-browser-qa-home pnpm run dev -- browser setup --backend browserbase --cloud-provider browserbase
+HOME=/tmp/estacoda-browser-qa-home pnpm run dev -- browser status
+```
+
+**Verify:**
+- Browserbase credentials/config do not create a session.
+- Navigation that would require Browserbase fails while `browser.cloudSpendApproved` is `"pending"` or `false`.
+- The error explains that cloud browser sessions may incur charges and points to `estacoda browser approve-cloud`.
+- Missing spend approval does not fall back to local even when `browser.cloudFallback: true`.
+
+**Browserbase approved path:**
+
+```bash
+HOME=/tmp/estacoda-browser-qa-home pnpm run dev -- browser approve-cloud
+HOME=/tmp/estacoda-browser-qa-home pnpm run dev -- browser status
+```
+
+**Verify:**
+- Status/config shows cloud spend approval as approved where surfaced.
+- With safe mocked Browserbase responses or an operator-owned Browserbase project, Browserbase session creation uses `BROWSERBASE_API_KEY` and `BROWSERBASE_PROJECT_ID`.
+- `estacoda browser revoke-cloud` blocks future cloud session creation without deleting credentials.
+
+**Hybrid routing and URL safety:**
+
+Configure Browserbase plus local CDP with `browser.hybridRouting: true`.
+
+**Verify:**
+- Public HTTP(S) navigation routes to cloud when Browserbase is configured and spend approval is true.
+- Private/internal navigation is blocked when `security.allowPrivateUrls: false`.
+- Private/internal navigation routes to local only when `security.allowPrivateUrls: true`.
+- Metadata targets such as `169.254.169.254`, `169.254.170.2`, `metadata.google.internal`, and `100.100.100.200` are hard-blocked even when private URLs are allowed.
+- Unsafe redirects are navigated to `about:blank` when possible; if cleanup fails, the unsafe session is closed.
+- Tool status or metadata reports the last backend/fallback state where surfaced and does not print secrets or raw Browserbase response bodies.
+
 ### 10.13 Fallback Route Editor
 
 From a configured disposable setup with at least one fallback route configured:

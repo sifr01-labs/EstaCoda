@@ -95,6 +95,10 @@ Secrets must not be committed, logged, displayed, or persisted into memory. Reda
 
 Browser navigation requires `http` or `https`. Private and internal URLs are blocked by default unless explicitly allowed. Cloud metadata endpoints are always blocked.
 
+Browserbase is implemented as a cloud browser backend, but credentials alone do not authorize billable session creation. `BROWSERBASE_API_KEY` and `BROWSERBASE_PROJECT_ID` satisfy credential readiness only. Cloud session creation remains blocked until `browser.cloudSpendApproved === true`, normally set with `estacoda browser approve-cloud` and revoked with `estacoda browser revoke-cloud`.
+
+Hybrid routing does not bypass URL safety. Public HTTP(S) URLs may route to Browserbase only when the cloud provider is configured and spend approval is true. Private and internal URLs route to local only when `security.allowPrivateUrls` is explicitly true. Metadata endpoints remain hard-blocked in all cases. Cloud approval failure does not fall back to local. Unsafe redirects are navigated to `about:blank` when possible; otherwise the unsafe session is closed.
+
 Website blocklists support exact domains, wildcard domains, and shared files. `browser.cdp` is approval-gated by default.
 
 ### Gateway Approval Boundaries
@@ -111,7 +115,7 @@ The following are not considered security vulnerabilities in EstaCoda itself:
 
 - **Native Windows installer** — not part of the v0.1.0 support surface.
 - **Experimental WhatsApp channel** — gated behind `experimental: true`; Baileys is an unofficial API with account-risk implications.
-- **Registered-but-not-live cloud browser providers** — Browserbase, browser-use, Firecrawl, and Camofox are registered stubs, not live-supported.
+- **Cloud browser providers except Browserbase** — browser-use, Firecrawl, and Camofox are registered stubs, not live-supported. Browserbase is implemented behind explicit spend approval.
 - **Registered-but-not-live web research providers** — Firecrawl, Parallel, Tavily, Exa, SearXNG, Brave, and DDGS are registered stubs; only guarded fetch extraction is live.
 - **Local environment compromise** not caused by EstaCoda — a compromised OS account, malicious co-tenant, or physical access to the machine.
 - **Model hallucination** without tool execution, persistence, or boundary crossing.

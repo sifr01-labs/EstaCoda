@@ -9,23 +9,28 @@ description: "Browser backend, CDP integration, and structured browser tools."
 
 | File | Lines | Role |
 |------|-------|------|
-| `src/browser/browser-backend.ts` | 766 | Backend abstraction with mock and CDP |
-| `src/tools/web-tools.ts` | 731 | Browser tool schemas and execution |
+| `src/browser/browser-backend.ts` | current | Backend abstraction with mock, local CDP, Browserbase, and hybrid routing |
+| `src/browser/supervised-local-cdp-backend.ts` | current | Supervised local CDP backend, auto-launch, and session-stack ownership |
+| `src/browser/cdp-supervisor.ts` | current | CDP page supervisor, AX snapshots, dialogs, console history, screenshots |
+| `src/tools/web-tools.ts` | current | Browser tool schemas, session-key derivation, snapshot rendering, and summarization |
 
 ## Backends
 
 | Backend | Status | Evidence |
 |---------|--------|----------|
-| Local Chrome CDP | Implemented | `smoke-tested` |
+| Local Chrome CDP | Implemented | Manual CDP and supervised CDP paths |
 | Mock | Implemented | `smoke-tested` |
-| Browserbase | Recognized in config | `intended but not implemented` |
+| Browserbase | Implemented | Requires credentials and explicit cloud spend approval |
 | browser-use | Recognized in config | `intended but not implemented` |
 | Firecrawl | Recognized in config | `intended but not implemented` |
 | Camofox | Recognized in config | `intended but not implemented` |
 
-Cloud browser provider registry stubs exist for Browserbase, browser-use, Firecrawl, and Camofox, but no real cloud browser session implementation is present. Legacy `browser.backend` values `browserbase`, `firecrawl`, and `camofox` remain config-valid and return recognized-but-not-implemented status.
+Browserbase has a real backend path. Direct provider-registry `createSession()` calls are still blocked because Browserbase sessions must be created through the browser backend so `browser.cloudSpendApproved` is enforced. browser-use, Firecrawl, and Camofox remain deferred provider stubs. Legacy `browser.backend` values `firecrawl` and `camofox` remain config-valid and report unavailable status.
 
-Local CDP also has a supervised backend path. It is opt-in through the runtime/browser `supervised` option and keeps the normal unsupervised local CDP behavior unchanged unless selected.
+Local CDP has two paths:
+
+- Unsupervised local CDP keeps the compatibility behavior: users provide `browser.cdpUrl`, and EstaCoda connects to an already-running browser.
+- Supervised local CDP can auto-launch Chrome/Chromium when `browser.autoLaunch === true`. Discovery checks `browser.launchExecutable`, deprecated `browser.launchCommand` raw data, `CHROME_PATH`, `CHROMIUM_PATH`, local binaries, platform defaults, Homebrew paths, and conservative bundled/Docker paths. The launcher uses structured arguments, never shell-parses `launchCommand`, never calls `exec`, creates an isolated `--user-data-dir`, reads `DevToolsActivePort`, health-checks `/json/version`, and kills only the Chrome process EstaCoda launched during backend cleanup.
 
 ## CDP Capabilities
 
@@ -45,7 +50,40 @@ Local CDP also has a supervised backend path. It is opt-in through the runtime/b
 | Screenshot vision analysis | `smoke-tested` |
 | JavaScript dialog response | `smoke-tested` |
 
-The supervised local CDP backend tracks pending dialogs, recent console history, and frame navigation data in browser snapshots. It also enables supervised request interception for subresource requests and aborts metadata, private/internal, website-policy-blocked, and secret-bearing URLs before response bodies are read. This is not complete browser automation parity and does not provide socket-level DNS rebinding or TOCTOU protection.
+The supervised local CDP backend tracks pending dialogs, recent console history, frame navigation data, and isolated browser sessions. It also enables supervised request interception for subresource requests and aborts metadata, private/internal, website-policy-blocked, and secret-bearing URLs before response bodies are read. This is not complete browser automation parity and does not provide socket-level DNS rebinding or TOCTOU protection.
+
+## Session Ownership
+
+Browser tools derive browser session keys from the runtime session context. A normal tool call without an explicit `sessionId` uses:
+
+```text
+<runtime-session-id>:main
+```
+
+Delegated or child runtime sessions therefore get isolated browser state by default. Passing an explicit `sessionId` remains supported and intentionally shares the named browser session across parent/child contexts. Direct backend calls that omit session IDs are compatibility paths, not the intended browser tool path.
+
+Supervised local CDP owns one session manager per endpoint stack. Configured CDP and auto-launched fallback stacks can coexist, and each browser session key is mapped to the stack that created it. Closing a session closes the owning stack session only; configured/manual CDP sessions do not keep an EstaCoda-launched Chrome process alive.
+
+Each supervised session is created in its own CDP Browser Context through `Target.createBrowserContext`, then a page target is created with that `browserContextId`. Cleanup closes the target and disposes the Browser Context, so cookies and other browser-context state are isolated per browser session key.
+
+## Snapshots
+
+Snapshots prefer `Accessibility.getFullAXTree`. AX nodes are converted into compact `BrowserSnapshot.elements` with deterministic refs such as `@e1`, preserving useful `role`, `name`, `value`, `disabled`, and `checked` fields. Unhelpful and ignored AX nodes are skipped. If the AX command fails, returns an empty/malformed tree, or refs cannot be bound to DOM nodes, EstaCoda falls back to the DOM-query snapshot path.
+
+The default snapshot is a bounded actionable AX subset. It is not true viewport-visible filtering yet. `browser.snapshot` with `full: true` requests a larger full-page snapshot. Snapshot rendering marks compact and full snapshots with headers, truncates oversized text, and can summarize large snapshots when configured.
+
+Snapshot summarization settings:
+
+```json
+{
+  "browser": {
+    "summarizeSnapshots": "auto",
+    "snapshotSummarizeThreshold": 8000
+  }
+}
+```
+
+`browser.summarizeSnapshots` accepts `true`, `false`, or `"auto"`. In `"auto"` mode, summarization uses an auxiliary model route only when one is available. Summarization runs only after the rendered snapshot exceeds `browser.snapshotSummarizeThreshold`. Secret-bearing URLs and sensitive values are redacted before any provider call.
 
 ## Web Research Tools
 
@@ -94,9 +132,54 @@ Current coverage:
 ## Configuration
 
 ```bash
-pnpm run dev -- browser setup --backend local-cdp --cdp-url http://127.0.0.1:9222
+pnpm run dev -- browser setup --backend local-cdp --cdp-url http://127.0.0.1:9222 --launch-executable /path/to/chrome --launch-arg --headless=new --chrome-flag --no-first-run
 pnpm run dev -- browser test
 ```
+
+Structured launch fields are the supported configuration surface:
+
+```json
+{
+  "browser": {
+    "backend": "local-cdp",
+    "supervised": true,
+    "autoLaunch": true,
+    "launchExecutable": "/path/to/chrome",
+    "launchArgs": ["--headless=new"],
+    "chromeFlags": ["--no-first-run"]
+  }
+}
+```
+
+`browser.launchExecutable` is the preferred executable path. `browser.launchArgs` and `browser.chromeFlags` are structured string arrays. `browser.launchCommand` remains accepted as deprecated compatibility data only. It is never split, guessed, or shell-parsed and should not be used as the normal setup path.
+
+Browserbase configuration:
+
+```json
+{
+  "browser": {
+    "backend": "browserbase",
+    "cloudProvider": "browserbase",
+    "cloudSpendApproved": "pending",
+    "cloudFallback": true
+  }
+}
+```
+
+Browserbase requires `BROWSERBASE_API_KEY` and `BROWSERBASE_PROJECT_ID`. The default `"pending"` cloud spend approval blocks billable session creation. Operators must run `estacoda browser approve-cloud` before EstaCoda may create Browserbase sessions; `estacoda browser revoke-cloud` disables creation again. Configuration and status checks do not create cloud sessions. Session creation is lazy and happens only when a browser operation needs the cloud backend.
+
+The Browserbase REST client uses the verified current API shape documented in `docs/browserbase-api-notes.md`: `POST https://api.browserbase.com/v1/sessions`, `X-BB-API-Key`, `connectUrl`, `GET /v1/sessions/{id}`, and `POST /v1/sessions/{id}` with `status: "REQUEST_RELEASE"` for release.
+
+Hybrid routing uses `browser.hybridRouting` with Browserbase/cloud configuration:
+
+- Public HTTP(S) URLs route to cloud when Browserbase is configured and cloud spend is approved.
+- Private/internal URLs route to local only when `security.allowPrivateUrls === true`.
+- Metadata endpoints remain blocked.
+- Cloud spend approval failure does not fall back to local.
+- Browserbase failures may fall back to local when `browser.cloudFallback === true`.
+- Unsafe redirects are blanked to `about:blank` when possible; otherwise the unsafe session is closed.
+
+Status and tool metadata can expose hybrid routing state, last served backend kind, fallback provider/reason metadata, and Browserbase availability/approval status. Secrets and raw Browserbase response bodies are not printed.
 
 `security.allowPrivateUrls` is the canonical setting for private URL access:
 
@@ -125,7 +208,11 @@ When enabled, debug data is attached to individual tool results only. It is reda
 ## Limitations
 
 - Real hosted web research provider API calls are not implemented.
-- Real cloud browser sessions are not implemented.
+- browser-use, Firecrawl browser, and Camofox browser providers remain deferred/stubbed.
+- Optional `agent-browser` engine support is not implemented.
+- Lightpanda support is not implemented.
+- Hermes parity harness and parity CI are not implemented.
+- Compact AX snapshots are a bounded actionable subset, not true viewport-visible filtering.
 - Browser can be selected as an optional reviewed setup capability, but setup records configuration intent and does not auto-launch the browser runtime.
 - Socket-level DNS rebinding and TOCTOU protection is not implemented.
 - `Runtime.evaluate` and `Runtime.callFunctionOn` guards detect obvious literal URL usage but do not perform full JavaScript static analysis.
