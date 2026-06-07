@@ -353,11 +353,51 @@ function originForUrl(url: string): string {
 }
 
 export async function evaluateCdpSnapshot(client: CdpClient, sessionId: string): Promise<BrowserSnapshot> {
+  const axSnapshot = await evaluateAxSnapshot(client, sessionId).catch(() => undefined);
+  if (axSnapshot !== undefined) {
+    return axSnapshot;
+  }
+
   const evaluated = await client.send("Runtime.evaluate", {
     expression: snapshotExpression(),
     returnByValue: true
   }) as { result?: { value?: unknown } };
   return parseCdpSnapshot(evaluated.result?.value, sessionId);
+}
+
+async function evaluateAxSnapshot(client: CdpClient, sessionId: string): Promise<BrowserSnapshot | undefined> {
+  const axTree = await client.send("Accessibility.getFullAXTree") as unknown;
+  const elements = parseAxElements(axTree);
+  if (elements.length === 0) {
+    return undefined;
+  }
+
+  const pageMetadata = await evaluatePageSnapshotMetadata(client).catch(() => undefined);
+  if (pageMetadata === undefined) {
+    return undefined;
+  }
+
+  return {
+    sessionId,
+    ...pageMetadata,
+    elements
+  };
+}
+
+async function evaluatePageSnapshotMetadata(client: CdpClient): Promise<Omit<BrowserSnapshot, "sessionId" | "elements"> | undefined> {
+  const evaluated = await client.send("Runtime.evaluate", {
+    expression: pageSnapshotMetadataExpression(),
+    returnByValue: true
+  }) as { result?: { value?: unknown } };
+  return parsePageSnapshotMetadata(evaluated.result?.value);
+}
+
+function pageSnapshotMetadataExpression(): string {
+  return `(() => JSON.stringify({
+    url: location.href,
+    title: document.title,
+    text: (document.body && document.body.innerText ? document.body.innerText : '').slice(0, 12000)
+  }))()`;
 }
 
 export function snapshotExpression(): string {
@@ -376,6 +416,138 @@ export function snapshotExpression(): string {
       }))
     });
   })()`;
+}
+
+type BrowserSnapshotElement = NonNullable<BrowserSnapshot["elements"]>[number];
+
+const AX_INTERACTIVE_ROLES = new Set([
+  "button",
+  "checkbox",
+  "combobox",
+  "link",
+  "listbox",
+  "menuitem",
+  "menuitemcheckbox",
+  "menuitemradio",
+  "option",
+  "radio",
+  "searchbox",
+  "slider",
+  "spinbutton",
+  "switch",
+  "tab",
+  "textbox",
+  "treeitem"
+]);
+
+const AX_UNHELPFUL_ROLES = new Set([
+  "generic",
+  "ignored",
+  "none",
+  "presentation",
+  "RootWebArea",
+  "StaticText",
+  "InlineTextBox"
+]);
+
+function parseAxElements(value: unknown): BrowserSnapshotElement[] {
+  if (!isRecord(value) || !Array.isArray(value.nodes)) {
+    return [];
+  }
+
+  const elements: BrowserSnapshotElement[] = [];
+  for (const node of value.nodes) {
+    const element = parseAxElement(node, elements.length + 1);
+    if (element !== undefined) {
+      elements.push(element);
+    }
+    if (elements.length >= 120) {
+      break;
+    }
+  }
+  return elements;
+}
+
+function parseAxElement(value: unknown, index: number): BrowserSnapshotElement | undefined {
+  if (!isRecord(value) || value.ignored === true) {
+    return undefined;
+  }
+
+  const role = axPropertyString(value.role);
+  if (role === undefined || AX_UNHELPFUL_ROLES.has(role)) {
+    return undefined;
+  }
+
+  const name = axPropertyString(value.name);
+  const elementValue = axPropertyString(value.value);
+  const disabled = axBooleanProperty(value, "disabled");
+  const checked = axCheckedProperty(value);
+
+  if (!AX_INTERACTIVE_ROLES.has(role) && name === undefined && elementValue === undefined && checked === undefined) {
+    return undefined;
+  }
+
+  return {
+    ref: `@e${index}`,
+    role,
+    ...(name !== undefined ? { name } : {}),
+    ...(elementValue !== undefined ? { value: elementValue } : {}),
+    ...(disabled !== undefined ? { disabled } : {}),
+    ...(checked !== undefined ? { checked } : {})
+  };
+}
+
+function axPropertyString(value: unknown): string | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const raw = value.value;
+  if (typeof raw !== "string" && typeof raw !== "number" && typeof raw !== "boolean") {
+    return undefined;
+  }
+  const text = String(raw).trim();
+  return text.length === 0 ? undefined : text.slice(0, 160);
+}
+
+function axBooleanProperty(node: Record<string, unknown>, name: string): boolean | undefined {
+  const value = axNamedProperty(node, name);
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function axCheckedProperty(node: Record<string, unknown>): boolean | "mixed" | undefined {
+  const value = axNamedProperty(node, "checked");
+  if (value === true || value === false || value === "mixed") {
+    return value;
+  }
+  return undefined;
+}
+
+function axNamedProperty(node: Record<string, unknown>, name: string): unknown {
+  const direct = node[name];
+  if (isRecord(direct) && "value" in direct) {
+    return direct.value;
+  }
+  if (!Array.isArray(node.properties)) {
+    return undefined;
+  }
+  const property = node.properties.find((candidate) => isRecord(candidate) && candidate.name === name);
+  return isRecord(property) && isRecord(property.value) ? property.value.value : undefined;
+}
+
+function parsePageSnapshotMetadata(value: unknown): Omit<BrowserSnapshot, "sessionId" | "elements"> | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(value) as Partial<BrowserSnapshot>;
+    return {
+      url: typeof parsed.url === "string" ? parsed.url : "about:blank",
+      ...(typeof parsed.title === "string" ? { title: parsed.title } : {}),
+      ...(typeof parsed.text === "string" ? { text: parsed.text } : { text: "" })
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 export function parseCdpSnapshot(value: unknown, sessionId: string): BrowserSnapshot {

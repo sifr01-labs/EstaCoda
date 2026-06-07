@@ -38,6 +38,9 @@ export type BrowserSnapshot = {
     ref: string;
     role?: string;
     name?: string;
+    value?: string;
+    disabled?: boolean;
+    checked?: boolean | "mixed";
   }>;
   pendingDialogs?: Array<{
     id: string;

@@ -10,12 +10,16 @@ class FakeCdpSocket implements CdpWebSocketLike {
 
   constructor(
     readonly url: string,
-    private readonly snapshot = {
-      url: "https://example.com/page",
-      title: "Example",
-      text: "Readable text",
-      elements: [{ ref: "@e1", role: "button", name: "Continue" }]
-    }
+    private readonly options: {
+      snapshot?: {
+        url: string;
+        title: string;
+        text: string;
+        elements: Array<{ ref: string; role?: string; name?: string }>;
+      };
+      axTree?: unknown;
+      failAxTree?: boolean;
+    } = {}
   ) {}
 
   send(data: string): void {
@@ -25,9 +29,21 @@ class FakeCdpSocket implements CdpWebSocketLike {
       params?: Record<string, unknown>;
     };
     this.sent.push(message);
+    if (message.method === "Accessibility.getFullAXTree" && this.options.failAxTree === true) {
+      this.#emit("message", {
+        data: JSON.stringify({
+          id: message.id,
+          error: { message: "Accessibility domain unavailable" }
+        })
+      });
+      return;
+    }
+
     const result = message.method === "Runtime.evaluate"
-      ? { result: { value: JSON.stringify(this.snapshot) } }
-      : { ok: true, method: message.method };
+      ? { result: { value: JSON.stringify(this.options.snapshot ?? defaultSnapshot()) } }
+      : message.method === "Accessibility.getFullAXTree"
+        ? this.options.axTree ?? { nodes: [] }
+        : { ok: true, method: message.method };
     this.#emit("message", {
       data: JSON.stringify({
         id: message.id,
@@ -56,6 +72,20 @@ class FakeCdpSocket implements CdpWebSocketLike {
       listener(event);
     }
   }
+}
+
+function defaultSnapshot(): {
+  url: string;
+  title: string;
+  text: string;
+  elements: Array<{ ref: string; role?: string; name?: string }>;
+} {
+  return {
+    url: "https://example.com/page",
+    title: "Example",
+    text: "Readable text",
+    elements: [{ ref: "@e1", role: "button", name: "Continue" }]
+  };
 }
 
 async function flushAsyncEvents(): Promise<void> {
@@ -127,6 +157,116 @@ describe("CDPSupervisor", () => {
     });
   });
 
+  it("getSnapshot() uses Accessibility.getFullAXTree for compact interactive elements", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1", {
+      axTree: {
+        nodes: [
+          { nodeId: "root", role: { value: "RootWebArea" }, name: { value: "Example" } },
+          { nodeId: "ignored", ignored: true, role: { value: "button" }, name: { value: "Ignored" } },
+          { nodeId: "static", role: { value: "StaticText" }, name: { value: "Decorative" } },
+          {
+            nodeId: "button-1",
+            role: { value: "button" },
+            name: { value: "Continue" },
+            properties: [{ name: "disabled", value: { type: "boolean", value: true } }]
+          },
+          {
+            nodeId: "input-1",
+            role: { value: "textbox" },
+            name: { value: "Email" },
+            value: { value: "ada@example.com" }
+          },
+          {
+            nodeId: "checkbox-1",
+            role: { value: "checkbox" },
+            name: { value: "Subscribe" },
+            properties: [{ name: "checked", value: { type: "tristate", value: "mixed" } }]
+          }
+        ]
+      }
+    });
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: () => socket
+    });
+
+    await supervisor.start();
+    await expect(supervisor.getSnapshot("session-1")).resolves.toMatchObject({
+      sessionId: "session-1",
+      url: "https://example.com/page",
+      title: "Example",
+      text: "Readable text",
+      elements: [
+        { ref: "@e1", role: "button", name: "Continue", disabled: true },
+        { ref: "@e2", role: "textbox", name: "Email", value: "ada@example.com" },
+        { ref: "@e3", role: "checkbox", name: "Subscribe", checked: "mixed" }
+      ],
+      pendingDialogs: [],
+      frameTree: [],
+      consoleHistory: []
+    });
+    expect(socket.sent.map((message) => message.method)).toContain("Accessibility.getFullAXTree");
+  });
+
+  it("getSnapshot() falls back to the DOM snapshot when the AX tree is empty", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1", { axTree: { nodes: [] } });
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: () => socket
+    });
+
+    await supervisor.start();
+    await expect(supervisor.getSnapshot("session-1")).resolves.toMatchObject({
+      sessionId: "session-1",
+      elements: [{ ref: "@e1", role: "button", name: "Continue" }]
+    });
+    expect(socket.sent.map((message) => message.method)).toEqual([
+      "Page.enable",
+      "Runtime.enable",
+      "Accessibility.getFullAXTree",
+      "Runtime.evaluate"
+    ]);
+  });
+
+  it("getSnapshot() falls back to the DOM snapshot when the AX command fails", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1", { failAxTree: true });
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: () => socket
+    });
+
+    await supervisor.start();
+    await expect(supervisor.getSnapshot("session-1")).resolves.toMatchObject({
+      sessionId: "session-1",
+      elements: [{ ref: "@e1", role: "button", name: "Continue" }]
+    });
+  });
+
+  it("getSnapshot() ignores malformed AX values without crashing", async () => {
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: (url) => new FakeCdpSocket(url, {
+        axTree: {
+          nodes: [
+            null,
+            { role: { value: ["not-a-role"] }, name: { value: "Bad" } },
+            {
+              role: { value: "button" },
+              name: { value: { nested: "bad" } },
+              value: { value: ["bad"] },
+              properties: [{ name: "checked", value: { value: "sometimes" } }]
+            }
+          ]
+        }
+      })
+    });
+
+    await supervisor.start();
+    await expect(supervisor.getSnapshot("session-1")).resolves.toMatchObject({
+      elements: [{ ref: "@e1", role: "button" }]
+    });
+  });
+
   it("close() closes the socket and is safe to call more than once", async () => {
     const socket = new FakeCdpSocket("ws://cdp/page-1");
     const supervisor = new CDPSupervisor({
@@ -142,8 +282,8 @@ describe("CDPSupervisor", () => {
   });
 
   it("multiple supervisors keep independent client state", async () => {
-    const first = new FakeCdpSocket("ws://cdp/first", { url: "https://first.test", title: "First", text: "One", elements: [] });
-    const second = new FakeCdpSocket("ws://cdp/second", { url: "https://second.test", title: "Second", text: "Two", elements: [] });
+    const first = new FakeCdpSocket("ws://cdp/first", { snapshot: { url: "https://first.test", title: "First", text: "One", elements: [] } });
+    const second = new FakeCdpSocket("ws://cdp/second", { snapshot: { url: "https://second.test", title: "Second", text: "Two", elements: [] } });
 
     const firstSupervisor = new CDPSupervisor({
       webSocketUrl: "ws://cdp/first",
