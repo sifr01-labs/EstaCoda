@@ -13,6 +13,14 @@ Workflow provides durable, observable, operator-controllable multi-step executio
 
 Workflow is wired into `createRuntime` **only** when `sessionDb` is an `SQLiteSessionDB`. In-memory sessions do not support Workflow.
 
+Workflow is production-enterable through explicit operator commands:
+
+- `/workflow begin <objective>` creates, starts, and activates a workflow run in the current interactive session.
+- `estacoda workflow begin --session <sessionId> <objective>` creates and starts a workflow run for an existing session, but does not activate any future interactive session.
+- `/workflow begin --skill <skillName> <objective>` and `estacoda workflow begin --skill <skillName> --session <sessionId> <objective>` opt into a named skill playbook as the source plan.
+
+No automatic workflow promotion exists. Normal AgentLoop skill selection does not create workflow runs, complex-request auto-detection does not exist, and Agent Evolution is not part of workflow begin.
+
 ## Components
 
 ### WorkflowEngine
@@ -65,6 +73,17 @@ Bridges Workflow and AgentLoop. Responsibilities:
 - Record artifact and run links.
 - Check automatic workflow event summaries at safe boundary.
 
+### Skill Playbook Converter
+
+`convertSkillPlaybookToWorkflowPlan()` converts a compiled skill playbook into a `WorkflowPlan`. It is inert by itself. The runtime calls it only from explicit skill-backed workflow begin:
+
+```bash
+/workflow begin --skill <skillName> <objective>
+estacoda workflow begin --skill <skillName> --session <sessionId> <objective>
+```
+
+The converter preserves skill/playbook provenance, step order, step names, step descriptions, preferred toolsets, and success criteria as plan metadata where supported. It does not infer approvals, retries, idempotency, fallback policy, failure policy, routing behavior, or execution behavior.
+
 ## Data Model
 
 ### WorkflowRun
@@ -76,6 +95,7 @@ Bridges Workflow and AgentLoop. Responsibilities:
 - `pauseRequestedAt`, `pauseReason`
 - `checkpointCount`, `stepCount`, `retryCount`
 - `compactedAt`
+- `metadata`: run provenance. Explicit begin records `activationReason: "explicit"` and `objective`. Skill-backed begin records `activationReason: "playbook"`, `objective`, `skillName`, and playbook provenance.
 
 
 ### WorkflowStep
@@ -133,6 +153,10 @@ WorkflowEngine + Store
 
 When `rt.workflow.activeRunId` is set and the workflow run is running, the adapter wraps turns. When no active workflow run is set, AgentLoop runs normally.
 
+The interactive `/workflow begin` path sets `activeRunId` after a successful create/start. The standalone `estacoda workflow begin` path never sets live runtime activation; operators must enter an interactive session and run `/workflow activate <runId>`.
+
+Standalone begin requires an existing session ID. It does not create hidden sessions.
+
 ## Restart Recovery
 
 On `createRuntime` with SQLite:
@@ -148,3 +172,5 @@ On `createRuntime` with SQLite:
 - Lock service is single-process SQLite only.
 - Automatic workflow event summaries are disabled by default.
 - No automatic retry without operator `/retry`.
+- No automatic workflow promotion or complex-request auto-detection.
+- `--skill` is explicit opt-in. `--use-selected-playbook` is not supported.

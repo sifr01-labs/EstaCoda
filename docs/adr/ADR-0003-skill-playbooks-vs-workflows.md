@@ -10,21 +10,18 @@ Skills teach workflows through Markdown instructions. Some workflows need guaran
 
 ## Decision
 
-Skills remain **Markdown-first and advisory** by default:
+Skills remain **Markdown-first and advisory**. A skill playbook teaches the agent a good sequence; normal AgentLoop skill selection does not create a durable Workflow run.
 
-```yaml
-workflowMode: advisory
+Workflow is the durable runtime system. Operators enter it explicitly:
+
+```bash
+/workflow begin <objective>
+/workflow begin --skill <skillName> <objective>
+estacoda workflow begin --session <sessionId> <objective>
+estacoda workflow begin --skill <skillName> --session <sessionId> <objective>
 ```
 
-The skill teaches the agent a good workflow. The agent decides how to apply it.
-
-**Enforced workflows** exist for high-value operational flows:
-
-```yaml
-workflowMode: enforced
-```
-
-Enforced workflows need:
+Durable Workflow runs need:
 - Step state
 - Dependency resolution
 - Failure handling
@@ -35,10 +32,10 @@ Enforced workflows need:
 - Validation hooks
 
 The split:
-- Skill template = authoring surface
-- Workflow schema = runtime interpretation layer
+- Skill playbook = advisory authoring surface
+- `convertSkillPlaybookToWorkflowPlan()` = explicit bridge from a named skill playbook to a `WorkflowPlan`
 - Tool planner = dependency-aware execution
-- Workflow = durable enforced orchestration
+- Workflow = durable orchestration with persisted state and operator controls
 
 ## Rejected Alternatives
 
@@ -49,5 +46,6 @@ The split:
 ## Consequences
 
 - v0.7 supports advisory skill playbooks.
-- v0.8 introduces Workflow for durable enforced orchestration.
+- v0.8 introduces explicit Workflow begin for durable orchestration.
 - Skills do not become a programming language.
+- There is no automatic workflow promotion, no complex-request auto-detection, and no `--use-selected-playbook` shortcut.

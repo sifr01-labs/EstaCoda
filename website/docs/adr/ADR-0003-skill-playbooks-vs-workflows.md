@@ -18,21 +18,18 @@ Skills teach workflows through Markdown instructions. Some workflows need guaran
 
 ## Decision
 
-Skills remain **Markdown-first and advisory** by default:
+Skills remain **Markdown-first and advisory**. A skill playbook teaches the agent a good sequence; normal AgentLoop skill selection does not create a durable Workflow run.
 
-```yaml
-workflowMode: advisory
+Workflow is the durable runtime system. Operators enter it explicitly:
+
+```bash
+/workflow begin <objective>
+/workflow begin --skill <skillName> <objective>
+estacoda workflow begin --session <sessionId> <objective>
+estacoda workflow begin --skill <skillName> --session <sessionId> <objective>
 ```
 
-The skill teaches the agent a good workflow. The agent decides how to apply it.
-
-**Enforced workflows** exist for high-value operational flows:
-
-```yaml
-workflowMode: enforced
-```
-
-Enforced workflows need:
+Durable Workflow runs need:
 
 - Step state
 - Dependency resolution
@@ -45,10 +42,10 @@ Enforced workflows need:
 
 The split:
 
-- Skill template = authoring surface
-- Workflow schema = runtime interpretation layer
+- Skill playbook = advisory authoring surface
+- `convertSkillPlaybookToWorkflowPlan()` = explicit bridge from a named skill playbook to a `WorkflowPlan`
 - Tool planner = dependency-aware execution
-- Workflow = durable enforced orchestration
+- Workflow = durable orchestration with persisted state and operator controls
 
 ## Rejected alternatives
 
@@ -59,14 +56,15 @@ The split:
 ## Consequences
 
 - v0.7 supports advisory skill playbooks.
-- v0.8 introduces Workflow for durable enforced orchestration.
+- v0.8 introduces explicit Workflow begin for durable orchestration.
 - Skills do not become a programming language.
+- There is no automatic workflow promotion, no complex-request auto-detection, and no `--use-selected-playbook` shortcut.
 
 ## Operational impact
 
 **What boundary it creates:**
 - Skill playbooks provide guidance without guaranteeing execution order. The agent may skip, reorder, or reinterpret steps.
-- Enforced workflows execute through Workflow, which records every step, enforces transitions, and blocks illegal state changes.
+- Explicit workflow runs execute through Workflow, which records every step, enforces transitions, and blocks illegal state changes.
 
 **What files, commands, and subsystems it affects:**
 - `estacoda skills list` — browse available skills
@@ -77,7 +75,7 @@ The split:
 - `src/tools/tool-call-planner.ts` — dependency-aware execution planning
 
 **What maintainers must preserve:**
-- The advisory/enforced boundary must remain explicit. A skill that claims `advisory` must never be silently upgraded to `enforced` behavior.
+- The playbook/Workflow boundary must remain explicit. A skill playbook must never be silently upgraded to durable Workflow behavior.
 - Workflow state transitions must remain strict. Illegal transitions throw `IllegalTransitionError`; relaxing this corrupts execution guarantees.
 - Skill templates must stay Markdown-first. Turning skills into a DSL would violate the decision.
 
@@ -87,7 +85,7 @@ The split:
 - Skill bloat where every workflow tries to be both advisory and enforced simultaneously.
 
 **What is intentionally outside the decision:**
-- Automatic workflow mode selection. The skill author chooses the mode.
+- Automatic workflow mode selection or automatic workflow promotion.
 - Visual workflow builder. Authoring remains text-based.
 - Cross-skill playbook composition. A workflow belongs to a single skill or explicit composition layer.
 

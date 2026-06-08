@@ -11,6 +11,8 @@ description: "Slash commands and CLI commands for controlling Workflow, gateway,
 
 Available when Workflow is wired (requires SQLite session persistence):
 
+- `/workflow begin <objective>` — Create, start, and activate a conservative one-step workflow run for this interactive session.
+- `/workflow begin --skill <skillName> <objective>` — Create, start, and activate a workflow run from the named skill's playbook.
 - `/workflow status [runId]` — Show workflow status, progress, pending approvals, elapsed time, and available actions.
 - `/workflow pause <runId> [reason]` — Request pause at next safe boundary.
 - `/workflow resume <runId>` — Resume a paused, interrupted, or waiting workflow run.
@@ -29,9 +31,21 @@ Available when Workflow is wired (requires SQLite session persistence):
 
 If `runId` is omitted for `status` and `trace`, the active workflow run is used.
 
+`/workflow begin <objective>` records explicit provenance and outputs:
+
+```text
+Created workflow: <runId>
+Started workflow: <runId>
+Activated workflow: <runId>
+```
+
+`/workflow begin --skill <skillName> <objective>` is opt-in. It resolves the named skill through the current runtime skill registry, compiles the playbook, converts it into a `WorkflowPlan`, then creates, starts, and activates the run. Unknown skills and missing objectives return usage/error text. Plain `/workflow begin <objective>` does not call the playbook converter.
+
 ### Top-Level CLI Commands
 
 ```bash
+estacoda workflow begin --session <sessionId> <objective>
+estacoda workflow begin --skill <skillName> --session <sessionId> <objective>
 estacoda workflow list                          # List active workflow runs
 estacoda workflow show <runId>                 # Show workflow run details and steps
 estacoda workflow status <runId>               # Show formatted status
@@ -48,6 +62,16 @@ estacoda workflow skip <stepId> [reason]        # Skip step
 estacoda workflow checkpoint <runId> <name>    # Create checkpoint
 estacoda workflow summarize <runId>            # Summarize workflow events
 ```
+
+Standalone `estacoda workflow begin` creates and starts only for an existing session ID. It does not activate future interactive sessions and does not create hidden sessions. Successful standalone begin prints:
+
+```text
+Created workflow: <runId>
+Started workflow: <runId>
+Not activated. Use /workflow activate <runId> inside an interactive session.
+```
+
+Workflow begin does not include automatic workflow promotion, complex-request auto-detection, Agent Evolution, automatic retry/fallback policy inference, or automatic workflow creation from normal AgentLoop skill selection. `--skill` is the explicit playbook bridge. `--use-selected-playbook` is not supported.
 
 ## Gateway Operator Commands
 

@@ -267,6 +267,8 @@ estacoda sessions compact <session-id> [--topic <topic>]
 يتطلب قاعدة بيانات جلسات SQLite. ترفض قاعدة بيانات الذاكرة أوامر Workflow.
 
 ```bash
+estacoda workflow begin --session <sessionId> <objective>
+estacoda workflow begin --skill <skillName> --session <sessionId> <objective>
 estacoda workflow list                      # تشغيلات Workflow النشطة (غير النهائية)
 estacoda workflow show <runId>
 estacoda workflow status <runId>
@@ -286,11 +288,28 @@ estacoda workflow summarize <runId>
 
 **الحالة المُعدّلة:** قاعدة بيانات جلسات SQLite (جداول `workflow_events`، `workflow_steps`).
 
+**السلوك:**
+- `estacoda workflow begin --session <sessionId> <objective>` ينشئ ويبدأ تشغيل Workflow بخطوة محافظة واحدة لجلسة موجودة. يسجل `activationReason: "explicit"` والهدف في metadata التشغيل.
+- `estacoda workflow begin --skill <skillName> --session <sessionId> <objective>` يحل اسم المهارة، ويجمع playbook الخاص بها، ويحوله إلى `WorkflowPlan`، ثم ينشئ التشغيل ويبدأه.
+- أمر CLI المستقل لا يفعّل جلسات تفاعلية لاحقة. استخدم `/workflow activate <runId>` داخل جلسة تفاعلية للتفعيل الحي.
+- `begin` بدون `--skill` لا يستخدم تحويل playbook. خيار `--skill` اشتراك صريح.
+
+ناتج النجاح في CLI المستقل:
+
+```text
+Created workflow: <runId>
+Started workflow: <runId>
+Not activated. Use /workflow activate <runId> inside an interactive session.
+```
+
 **أنماط الفشل:**
+- معرف جلسة مفقود أو غير معروف يرجع خطأ. لا تُنشأ hidden sessions.
+- مهارة غير معروفة ترجع خطأ واضحاً.
 - إعادة المحاولة تعمل فقط إن كان `idempotent` أو `safeToRetry` صحيحاً وتحت `maxRetries`.
 - التخطي يعمل فقط إن لم يبدأ الخطوة وكان `allowSkipIfSkippable` صحيحاً.
 - يُرفض التوجيه لتشغيلات Workflow في حالات نهائية.
 - الإيقاف يرسل SIGTERM مع مهلة 5 ثوانٍ للعمليات النشطة، ثم ينتقل الحالة.
+- لا يوجد automatic workflow promotion، ولا complex-request detection، ولا مشاركة Agent Evolution، ولا إنشاء Workflow تلقائي من اختيار المهارة العادي داخل AgentLoop، ولا خيار `--use-selected-playbook`.
 
 ---
 

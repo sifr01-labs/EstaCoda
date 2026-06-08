@@ -18,21 +18,18 @@ sidebar_position: 3
 
 ## القرار
 
-تبقى المهارات **Markdown-first واستشارية** افتراضيًا:
+تبقى المهارات **Markdown-first واستشارية**. يعلّم skill playbook الوكيل تسلسلاً جيداً؛ اختيار المهارة العادي داخل AgentLoop لا ينشئ تشغيل Workflow دائماً.
 
-```yaml
-workflowMode: advisory
+Workflow هو نظام التشغيل الدائم. يدخل إليه المشغل صراحة:
+
+```bash
+/workflow begin <objective>
+/workflow begin --skill <skillName> <objective>
+estacoda workflow begin --session <sessionId> <objective>
+estacoda workflow begin --skill <skillName> --session <sessionId> <objective>
 ```
 
-تُعلّم المهارة الوكيل سير عمل جيد. يقرر الوكيل كيفية تطبيقه.
-
-توجد **سير عمل مُنفذة** للتدفقات التشغيلية عالية القيمة:
-
-```yaml
-workflowMode: enforced
-```
-
-تتطلب سير العمل المُنفذة:
+تتطلب تشغيلات Workflow الدائمة:
 
 - Step state
 - Dependency resolution
@@ -45,10 +42,10 @@ workflowMode: enforced
 
 الانقسام:
 
-- Skill template = authoring surface
-- Workflow schema = runtime interpretation layer
+- Skill playbook = advisory authoring surface
+- `convertSkillPlaybookToWorkflowPlan()` = explicit bridge من skill playbook مسمى إلى `WorkflowPlan`
 - Tool planner = dependency-aware execution
-- Workflow = durable enforced orchestration
+- Workflow = durable orchestration with persisted state and operator controls
 
 ## البدائل المرفوضة
 
@@ -59,14 +56,15 @@ workflowMode: enforced
 ## العواقب
 
 - v0.7 يدعم سير عمل المهارات الاستشارية.
-- v0.8 يُدخل Workflow للتنظيم المُنفذ الدائم.
+- v0.8 يُدخل Workflow begin الصريح للتنظيم الدائم.
 - المهارات لا تصبح لغة برمجة.
+- لا يوجد automatic workflow promotion، ولا complex-request auto-detection، ولا اختصار `--use-selected-playbook`.
 
 ## الأثر التشغيلي
 
 **الحدود التي يُنشئها:**
 - توفر المهارات الاستشارية توجيهًا دون ضمان ترتيب التنفيذ. قد يتخطى الوكيل أو يعيد ترتيب أو يعيد تفسير الخطوات.
-- تُنفذ سير العمل المُنفذة عبر Workflow، الذي يسجل كل خطوة، ويُنفذ الانتقالات، ويحظر التغييرات غير القانونية.
+- تُنفذ تشغيلات Workflow الصريحة عبر Workflow، الذي يسجل كل خطوة، ويُنفذ الانتقالات، ويحظر التغييرات غير القانونية.
 
 **الملفات والأوامر والأنظمة الفرعية المتأثرة:**
 - `estacoda skills list` — استعراض المهارات المتاحة
@@ -77,7 +75,7 @@ workflowMode: enforced
 - `src/tools/tool-call-planner.ts` — التخطيط للتنفيذ مع مراعاة التبعيات
 
 **ما يجب على المشرفين الحفاظ عليه:**
-- يجب أن يبقى الحد الاستشاري/المُنفذ صريحًا. المهارة التي تدعي `advisory` لا يجب أن تُرقّى صامتًا إلى سلوك `enforced`.
+- يجب أن يبقى حد playbook/Workflow صريحاً. لا يجب ترقية skill playbook صامتاً إلى سلوك Workflow دائم.
 - يجب أن تبقى انتقالات حالة Workflow صارمة. الانتقالات غير القانونية تُطلق `IllegalTransitionError`؛ تخفيف هذا يُفسد ضمانات التنفيذ.
 - يجب أن تبقى قوالب المهارات Markdown-first. تحويل المهارات إلى DSL سينتهك القرار.
 
@@ -87,7 +85,7 @@ workflowMode: enforced
 - انتفاخ المهارات حيث يحاول كل سير عمل أن يكون استشاريًا ومُنفذًا في آن واحد.
 
 **ما هو خارج القرار عن قصد:**
-- اختيار وضع سير العمل تلقائيًا. مؤلف المهارة يختار الوضع.
+- اختيار وضع Workflow تلقائياً أو automatic workflow promotion.
 - منشئ سير عمل بصري. التأليف يبقى قائمًا على النص.
 - تكوين سير العمل عبر المهارات. Workflow ينتمي إلى مهارة واحدة أو طبقة تكوين صريحة.
 

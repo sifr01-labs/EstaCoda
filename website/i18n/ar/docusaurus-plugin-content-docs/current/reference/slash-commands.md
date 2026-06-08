@@ -255,6 +255,8 @@ sidebar_position: 2
 يتطلب قاعدة بيانات جلسات SQLite. متاح عندما يكون Workflow مربوطاً.
 
 ```bash
+/workflow begin <objective>
+/workflow begin --skill <skillName> <objective>
 /workflow status [runId]
 /workflow pause <runId> [reason]
 /workflow resume <runId>
@@ -277,13 +279,20 @@ sidebar_position: 2
 **الحالة المُعدّلة:** قاعدة بيانات جلسات SQLite (جداول `workflow_events`، `workflow_steps`).
 
 **السلوك:**
+- `/workflow begin <objective>` ينشئ تشغيل Workflow محافظاً بخطوة واحدة، ويبدأه، ويفعّله في الجلسة التفاعلية الحالية.
+- `/workflow begin --skill <skillName> <objective>` يحل اسم المهارة، ويجمع playbook الخاص بها، ويحوله إلى `WorkflowPlan`، ثم ينشئ التشغيل ويبدأه ويفعّله في الجلسة التفاعلية الحالية.
+- أمر begin الناجح يطبع `Created workflow: <runId>` و`Started workflow: <runId>` و`Activated workflow: <runId>`.
+- `/workflow begin <objective>` بدون `--skill` يسجل provenance صريحاً ولا يستخدم تحويل playbook.
 - `/workflow steer` يسجّل حدث `OperatorEvent` غير مستهلك. في الدور التالي للمحوّل، يُضاف التوجيه كبدئة لنص المستخدم. الأحداث تُعلّم مستهلكة وتظهر في `/workflow trace`.
 - `/workflow activate` يربط الجلسة الحالية بتشغيل Workflow. `/workflow deactivate` يمسح الربط.
 
 **أنماط الفشل:**
+- الهدف المفقود يرجع نص الاستخدام.
+- المهارة غير المعروفة ترجع خطأ واضحاً.
 - يُرفض التوجيه لتشغيلات Workflow في حالات نهائية.
 - إعادة المحاولة تعمل فقط إذا كان `idempotent` أو `safeToRetry` صحيحاً وتحت `maxRetries`.
 - التخطي يعمل فقط إذا لم يبدأ الخطوة وكان `allowSkipIfSkippable` صحيحاً.
+- Workflow begin لا ينفذ automatic workflow promotion، ولا complex-request detection، ولا سلوك Agent Evolution، ولا إنشاء Workflow تلقائياً من اختيار المهارة العادي داخل AgentLoop. خيار `--skill` اشتراك صريح. `--use-selected-playbook` غير مدعوم.
 
 ---
 
