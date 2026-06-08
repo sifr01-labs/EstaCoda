@@ -406,6 +406,58 @@ describe("computeRuntimeFingerprint", () => {
     expect(fp1.primaryModelRouteHash).toBe(fp3.primaryModelRouteHash);
   });
 
+  it("primary model route timeout changes fingerprint", () => {
+    const profile = {
+      id: "gpt-4o",
+      provider: "openai" as const,
+      contextWindowTokens: 128_000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true,
+    };
+    const base = fakeLoadedRuntimeConfig({
+      primaryModelRoute: {
+        provider: "openai",
+        id: "gpt-4o",
+        profile,
+        timeoutMs: 1_800_000,
+        staleTimeoutMs: 120_000,
+      },
+    });
+    const opts = fakeOptions();
+    const fp1 = computeRuntimeFingerprint(base, opts);
+    const fp2 = computeRuntimeFingerprint(
+      fakeLoadedRuntimeConfig({
+        primaryModelRoute: {
+          provider: "openai",
+          id: "gpt-4o",
+          profile,
+          timeoutMs: 900_000,
+          staleTimeoutMs: 120_000,
+        },
+      }),
+      opts
+    );
+    const fp3 = computeRuntimeFingerprint(
+      fakeLoadedRuntimeConfig({
+        primaryModelRoute: {
+          provider: "openai",
+          id: "gpt-4o",
+          profile,
+          timeoutMs: 1_800_000,
+          staleTimeoutMs: 60_000,
+        },
+      }),
+      opts
+    );
+
+    expect(fp1.primaryModelRouteHash).toBeDefined();
+    expect(fp2.primaryModelRouteHash).toBeDefined();
+    expect(fp3.primaryModelRouteHash).toBeDefined();
+    expect(fp1.primaryModelRouteHash).not.toBe(fp2.primaryModelRouteHash);
+    expect(fp1.primaryModelRouteHash).not.toBe(fp3.primaryModelRouteHash);
+  });
+
   it("fallback route apiMode change changes fingerprint", () => {
     const base = fakeLoadedRuntimeConfig({
       modelFallbackRoutes: [
@@ -503,6 +555,64 @@ describe("computeRuntimeFingerprint", () => {
     expect(fp2.modelFallbackRoutesHash).toBeDefined();
     expect(fp1.modelFallbackRoutesHash).not.toBe(fp2.modelFallbackRoutesHash);
     expect(fp1.modelFallbackRoutesHash).toBe(fp3.modelFallbackRoutesHash);
+  });
+
+  it("fallback route timeout changes fingerprint", () => {
+    const profile = {
+      id: "deepseek-chat",
+      provider: "deepseek" as const,
+      contextWindowTokens: 128_000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true,
+    };
+    const base = fakeLoadedRuntimeConfig({
+      modelFallbackRoutes: [
+        {
+          provider: "deepseek",
+          id: "deepseek-chat",
+          profile,
+          timeoutMs: 1_800_000,
+          staleTimeoutMs: 120_000,
+        },
+      ],
+    });
+    const opts = fakeOptions();
+    const fp1 = computeRuntimeFingerprint(base, opts);
+    const fp2 = computeRuntimeFingerprint(
+      fakeLoadedRuntimeConfig({
+        modelFallbackRoutes: [
+          {
+            provider: "deepseek",
+            id: "deepseek-chat",
+            profile,
+            timeoutMs: 600_000,
+            staleTimeoutMs: 120_000,
+          },
+        ],
+      }),
+      opts
+    );
+    const fp3 = computeRuntimeFingerprint(
+      fakeLoadedRuntimeConfig({
+        modelFallbackRoutes: [
+          {
+            provider: "deepseek",
+            id: "deepseek-chat",
+            profile,
+            timeoutMs: 1_800_000,
+            staleTimeoutMs: 30_000,
+          },
+        ],
+      }),
+      opts
+    );
+
+    expect(fp1.modelFallbackRoutesHash).toBeDefined();
+    expect(fp2.modelFallbackRoutesHash).toBeDefined();
+    expect(fp3.modelFallbackRoutesHash).toBeDefined();
+    expect(fp1.modelFallbackRoutesHash).not.toBe(fp2.modelFallbackRoutesHash);
+    expect(fp1.modelFallbackRoutesHash).not.toBe(fp3.modelFallbackRoutesHash);
   });
 
   it("security mode change changes fingerprint", () => {

@@ -58,6 +58,41 @@ Provider request parameter names are selected by API mode:
 
 Unset caps send no token parameter.
 
+Provider requests also have timeout controls:
+
+```json
+{
+  "model": {
+    "provider": "kimi",
+    "id": "kimi-k2.6",
+    "timeoutMs": 1800000,
+    "staleTimeoutMs": 120000
+  },
+  "providers": {
+    "kimi": {
+      "timeoutMs": 1800000,
+      "staleTimeoutMs": 120000
+    }
+  }
+}
+```
+
+`timeoutMs` is the total provider request budget. It defaults to `1800000` ms, or 30 minutes. `staleTimeoutMs` is the no-progress budget. It defaults to `120000` ms, or 2 minutes.
+
+Precedence:
+
+```text
+model.timeoutMs / model.fallbacks[].timeoutMs
+→ providers.<id>.timeoutMs
+→ 1800000
+
+model.staleTimeoutMs / model.fallbacks[].staleTimeoutMs
+→ providers.<id>.staleTimeoutMs
+→ 120000
+```
+
+For non-streaming provider calls, `staleTimeoutMs` is time-to-response-headers only. After headers arrive, the total timeout governs body parsing. For streaming provider calls, `staleTimeoutMs` resets after received bytes and catches both first-byte stalls and mid-stream stalls. Auxiliary model timeouts are configured separately through `auxiliaryModels.*.timeoutMs`; auxiliary stale timeouts and CLI setup flags for provider timeout tuning are not part of this config surface.
+
 ### modelAliases / model_aliases
 
 Named shortcuts for provider/model combinations.

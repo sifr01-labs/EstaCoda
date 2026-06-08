@@ -313,6 +313,8 @@ export type ModelFallbackConfig = {
   apiKeyEnv?: string;
   contextWindowTokens?: number;
   maxTokens?: number;
+  timeoutMs?: number;
+  staleTimeoutMs?: number;
 };
 
 export type ModelAliasDefinition = {
@@ -330,6 +332,8 @@ export type EstaCodaConfig = {
     id?: string;
     contextWindowTokens?: number;
     maxTokens?: number;
+    timeoutMs?: number;
+    staleTimeoutMs?: number;
     fallbacks?: ModelFallbackConfig[];
   };
   modelAliases?: Record<string, ModelAliasDefinition>;
@@ -342,6 +346,8 @@ export type EstaCodaConfig = {
     authMethod?: ProviderAuthMethod;
     models?: string[];
     enableNetwork?: boolean;
+    timeoutMs?: number;
+    staleTimeoutMs?: number;
     headers?: Record<string, string>;
   }>;
   auxiliaryModels?: AuxiliaryModelConfig;
@@ -800,10 +806,14 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
       console.warn(`[config] ${warning}`);
     }
   }
+  const providerTimeouts = normalizeProviderTimeouts(config.providers);
   const primaryProviderId = config.model?.provider ?? "unconfigured";
   const primaryProviderConfig = config.providers?.[primaryProviderId];
+  const primaryProviderTimeouts = providerTimeouts[primaryProviderId];
   const primaryProviderMetadata = getProviderMetadata(primaryProviderId);
   const primaryMaxTokens = normalizeOptionalPositiveIntegerStrict(config.model?.maxTokens, "model.maxTokens");
+  const primaryTimeoutMs = normalizeOptionalPositiveIntegerStrict(config.model?.timeoutMs, "model.timeoutMs");
+  const primaryStaleTimeoutMs = normalizeOptionalPositiveIntegerStrict(config.model?.staleTimeoutMs, "model.staleTimeoutMs");
   const primaryModelRoute = buildResolvedModelRoute({
     provider: primaryProviderId,
     model: config.model?.id ?? "unconfigured",
@@ -812,7 +822,9 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
     apiKeyEnv: primaryProviderConfig?.apiKeyEnv,
     apiMode: primaryProviderConfig?.apiMode,
     contextWindowTokens: config.model?.contextWindowTokens,
-    maxTokens: primaryMaxTokens
+    maxTokens: primaryMaxTokens,
+    timeoutMs: primaryTimeoutMs ?? primaryProviderTimeouts?.timeoutMs,
+    staleTimeoutMs: primaryStaleTimeoutMs ?? primaryProviderTimeouts?.staleTimeoutMs
   });
 
   const modelFallbackRoutes: ResolvedModelRoute[] = [];
@@ -826,6 +838,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
       ...options.modelsDevOptions
     });
     const fallbackProviderConfig = config.providers?.[fallback.provider];
+    const fallbackProviderTimeouts = providerTimeouts[fallback.provider];
     modelFallbackRoutes.push(buildResolvedModelRoute({
       provider: fallback.provider,
       model: fallback.id,
@@ -834,7 +847,9 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
       apiKeyEnv: fallback.apiKeyEnv ?? fallbackProviderConfig?.apiKeyEnv,
       apiMode: fallbackProviderConfig?.apiMode,
       contextWindowTokens: fallback.contextWindowTokens,
-      maxTokens: fallback.maxTokens
+      maxTokens: fallback.maxTokens,
+      timeoutMs: fallback.timeoutMs ?? fallbackProviderTimeouts?.timeoutMs,
+      staleTimeoutMs: fallback.staleTimeoutMs ?? fallbackProviderTimeouts?.staleTimeoutMs
     }));
   }
 
@@ -1542,6 +1557,24 @@ export function normalizeOptionalPositiveIntegerStrict(value: unknown, path: str
   }
 
   return parsed;
+}
+
+function normalizeProviderTimeouts(providers: EstaCodaConfig["providers"]): Record<string, {
+  timeoutMs?: number;
+  staleTimeoutMs?: number;
+}> {
+  const normalized: Record<string, { timeoutMs?: number; staleTimeoutMs?: number }> = {};
+  for (const [provider, config] of Object.entries(providers ?? {})) {
+    const timeoutMs = normalizeOptionalPositiveIntegerStrict(config.timeoutMs, `providers.${provider}.timeoutMs`);
+    const staleTimeoutMs = normalizeOptionalPositiveIntegerStrict(config.staleTimeoutMs, `providers.${provider}.staleTimeoutMs`);
+    if (timeoutMs !== undefined || staleTimeoutMs !== undefined) {
+      normalized[provider] = {
+        ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+        ...(staleTimeoutMs !== undefined ? { staleTimeoutMs } : {})
+      };
+    }
+  }
+  return normalized;
 }
 
 function normalizeModelAliases(
@@ -3360,6 +3393,14 @@ export function normalizeModelFallbacks(
       (entry as Record<string, unknown>).maxTokens,
       `model.fallbacks[${index}].maxTokens`
     );
+    const timeoutMs = normalizeOptionalPositiveIntegerStrict(
+      (entry as Record<string, unknown>).timeoutMs,
+      `model.fallbacks[${index}].timeoutMs`
+    );
+    const staleTimeoutMs = normalizeOptionalPositiveIntegerStrict(
+      (entry as Record<string, unknown>).staleTimeoutMs,
+      `model.fallbacks[${index}].staleTimeoutMs`
+    );
     const normalized: ModelFallbackConfig = {
       provider: provider as ProviderId,
       id,
@@ -3368,7 +3409,9 @@ export function normalizeModelFallbacks(
       ...(typeof contextWindowTokens === "number" && Number.isFinite(contextWindowTokens)
         ? { contextWindowTokens }
         : {}),
-      ...(maxTokens !== undefined ? { maxTokens } : {})
+      ...(maxTokens !== undefined ? { maxTokens } : {}),
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      ...(staleTimeoutMs !== undefined ? { staleTimeoutMs } : {})
     };
 
     const key = fallbackRouteKey(normalized);

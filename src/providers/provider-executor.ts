@@ -1,5 +1,5 @@
 import type {
-  ProviderEndpoint,
+  ProviderCompletionOptions,
   ProviderRequest,
   ProviderResponse,
   ProviderRoutePreferences,
@@ -296,13 +296,11 @@ export class ProviderExecutor {
           fallback: index > 0
         });
 
-        const completionOptions: {
-          credential?: { id: string; value?: string };
-          endpoint?: ProviderEndpoint;
-          signal?: AbortSignal;
-        } = {
+        const completionOptions: ProviderCompletionOptions = {
           credential,
-          signal: options.signal
+          signal: options.signal,
+          timeoutMs: route.timeoutMs,
+          staleTimeoutMs: route.staleTimeoutMs
         };
 
         if (route.baseUrl !== undefined) {

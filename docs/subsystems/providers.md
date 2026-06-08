@@ -43,6 +43,50 @@ Two layers:
 - `ProviderExecutor`: streaming token collection, tool-call fragment assembly, fallback handling
 - `OpenAICompatibleProvider`: chat completions with tool schema support
 
+## Request Timeouts
+
+Main provider routes use two timeout budgets:
+
+| Field | Default | Scope |
+|-------|---------|-------|
+| `timeoutMs` | `1800000` | Total provider request budget, including response-body parsing. |
+| `staleTimeoutMs` | `120000` | No-progress budget. Non-streaming calls use this for time-to-response-headers only; streaming calls reset it after received response bytes. |
+
+Timeout precedence is route-specific:
+
+```text
+model.timeoutMs / model.fallbacks[].timeoutMs
+→ providers.<id>.timeoutMs
+→ 1800000
+
+model.staleTimeoutMs / model.fallbacks[].staleTimeoutMs
+→ providers.<id>.staleTimeoutMs
+→ 120000
+```
+
+Example:
+
+```json
+{
+  "model": {
+    "provider": "kimi",
+    "id": "kimi-k2.6",
+    "timeoutMs": 1800000,
+    "staleTimeoutMs": 120000
+  },
+  "providers": {
+    "kimi": {
+      "timeoutMs": 1800000,
+      "staleTimeoutMs": 120000
+    }
+  }
+}
+```
+
+`staleTimeoutMs` is intentionally transport-oriented. For non-streaming requests it stops requests that do not return headers. After headers arrive, the stale timer is disabled and the total timeout governs body parsing. For streaming requests it remains active and resets after received bytes, so a stream can run for a long time while still failing closed if it stops producing data.
+
+Auxiliary model route timeouts remain separate through `auxiliaryModels.*.timeoutMs`; this provider-route stale timeout does not add auxiliary stale-timeout behavior. CLI setup commands do not expose timeout flags in this implementation; edit profile config directly for timeout tuning.
+
 ## Final State Metadata
 
 Provider output is not treated as usable until the runtime has a finalized provider response. Streaming token text can be shown while a request is in flight, but canonical assistant content, tool calls, retries, and session writes use the finalized `ProviderResponse` and `ProviderExecutionResult`.

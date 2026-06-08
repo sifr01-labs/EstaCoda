@@ -11,6 +11,10 @@ import type {
   ProviderReasoningMetadata,
   ProviderUsage
 } from "../contracts/provider.js";
+import {
+  DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS as DEFAULT_REQUEST_TIMEOUT_MS,
+  DEFAULT_PROVIDER_STALE_TIMEOUT_MS as DEFAULT_STALE_TIMEOUT_MS
+} from "../contracts/provider.js";
 import { classifyHttpError } from "./openai-compatible-provider.js";
 import {
   extractInlineReasoning,
@@ -27,6 +31,7 @@ export type OpenAIResponsesProviderOptions = {
   enableNetwork?: boolean;
   fetch?: FetchLike;
   timeoutMs?: number;
+  staleTimeoutMs?: number;
 };
 
 export type FetchLike = (url: string, init: {
@@ -90,7 +95,8 @@ export function createOpenAIResponsesProvider(options: OpenAIResponsesProviderOp
           model: request.model,
           preparedRequest,
           fetch: options.fetch ?? globalThis.fetch,
-          timeoutMs: options.timeoutMs ?? 60_000,
+          timeoutMs: completionOptions?.timeoutMs ?? options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+          staleTimeoutMs: completionOptions?.staleTimeoutMs ?? options.staleTimeoutMs ?? DEFAULT_STALE_TIMEOUT_MS,
           signal: completionOptions?.signal
         });
       }
@@ -230,10 +236,14 @@ export async function executeResponsesRequest(input: {
   preparedRequest: ReturnType<typeof buildResponsesRequest>;
   fetch: FetchLike;
   timeoutMs: number;
+  staleTimeoutMs: number;
   signal?: AbortSignal;
 }): Promise<ProviderResponse> {
   const timeout = createTimeoutSignal({
     timeoutMs: input.timeoutMs,
+    staleTimeoutMs: input.staleTimeoutMs,
+    timeoutMessage: formatProviderTotalTimeout(input.timeoutMs),
+    staleTimeoutMessage: formatProviderStaleTimeout(input.staleTimeoutMs),
     parentSignal: input.signal
   });
 
@@ -244,6 +254,7 @@ export async function executeResponsesRequest(input: {
       body: JSON.stringify(input.preparedRequest.body),
       signal: timeout.signal
     });
+    timeout.disableStale();
 
     if (!response.ok) {
       return {
@@ -530,6 +541,26 @@ function classifyProviderError(code: string | undefined): string {
   if (/model|not_found|unavailable/i.test(code)) return "model-unavailable";
   if (/timeout/i.test(code)) return "timeout";
   return "unknown";
+}
+
+function formatProviderTotalTimeout(timeoutMs: number): string {
+  return `Provider request timed out after ${formatDuration(timeoutMs)}.`;
+}
+
+function formatProviderStaleTimeout(timeoutMs: number): string {
+  return `No response from provider for ${formatDuration(timeoutMs)}.`;
+}
+
+function formatDuration(timeoutMs: number): string {
+  if (timeoutMs % 60_000 === 0) {
+    const minutes = timeoutMs / 60_000;
+    return minutes === 1 ? "1 minute" : `${minutes} minutes`;
+  }
+  if (timeoutMs % 1_000 === 0) {
+    const seconds = timeoutMs / 1_000;
+    return seconds === 1 ? "1 second" : `${seconds} seconds`;
+  }
+  return `${timeoutMs}ms`;
 }
 
 async function safeErrorText(response: { json(): Promise<unknown>; text(): Promise<string> }): Promise<string> {

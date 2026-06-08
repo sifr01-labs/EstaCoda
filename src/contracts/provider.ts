@@ -174,6 +174,9 @@ export type ProviderLoopRuntimeMetadata = {
   };
 };
 
+export const DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS = 1_800_000;
+export const DEFAULT_PROVIDER_STALE_TIMEOUT_MS = 120_000;
+
 export type ResolvedModelRoute = {
   provider: ProviderId;
   id: string;
@@ -182,6 +185,8 @@ export type ResolvedModelRoute = {
   apiKeyEnv?: string;
   contextWindowTokens?: number;
   maxTokens?: number;
+  timeoutMs?: number;
+  staleTimeoutMs?: number;
   apiMode?: ProviderApiMode;
   authMethod?: ProviderAuthMethod;
 };
@@ -239,6 +244,8 @@ export type ProviderCompletionOptions = {
   };
   endpoint?: ProviderEndpoint;
   signal?: AbortSignal;
+  timeoutMs?: number;
+  staleTimeoutMs?: number;
 };
 
 export type ProviderResponse = {

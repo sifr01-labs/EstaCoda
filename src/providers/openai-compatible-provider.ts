@@ -13,6 +13,10 @@ import type {
   ProviderReasoningMetadata,
   ProviderUsage
 } from "../contracts/provider.js";
+import {
+  DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS as DEFAULT_REQUEST_TIMEOUT_MS,
+  DEFAULT_PROVIDER_STALE_TIMEOUT_MS as DEFAULT_STALE_TIMEOUT_MS
+} from "../contracts/provider.js";
 import { inferModelProfile } from "./model-catalog.js";
 import { normalizeProviderMessagesStrict } from "./provider-message-normalizer.js";
 import {
@@ -38,6 +42,7 @@ export type OpenAICompatibleProviderOptions = {
   enableNetwork?: boolean;
   fetch?: FetchLike;
   timeoutMs?: number;
+  staleTimeoutMs?: number;
 };
 
 export type FetchLike = (url: string, init: {
@@ -101,7 +106,8 @@ export function createOpenAICompatibleProvider(options: OpenAICompatibleProvider
           model: request.model,
           preparedRequest,
           fetch: options.fetch ?? globalThis.fetch,
-          timeoutMs: options.timeoutMs ?? 60_000,
+          timeoutMs: completionOptions?.timeoutMs ?? options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+          staleTimeoutMs: completionOptions?.staleTimeoutMs ?? options.staleTimeoutMs ?? DEFAULT_STALE_TIMEOUT_MS,
           signal: completionOptions?.signal
         });
       }
@@ -162,7 +168,8 @@ export function createOpenAICompatibleProvider(options: OpenAICompatibleProvider
         model: request.model,
         preparedRequest,
         fetch: options.fetch ?? globalThis.fetch,
-        timeoutMs: options.timeoutMs ?? 60_000,
+        timeoutMs: completionOptions?.timeoutMs ?? options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+        staleTimeoutMs: completionOptions?.staleTimeoutMs ?? options.staleTimeoutMs ?? DEFAULT_STALE_TIMEOUT_MS,
         signal: completionOptions?.signal
       });
     }
@@ -495,10 +502,14 @@ export async function executeOpenAICompatibleRequest(input: {
   preparedRequest: ReturnType<typeof buildOpenAICompatibleRequest>;
   fetch: FetchLike;
   timeoutMs: number;
+  staleTimeoutMs: number;
   signal?: AbortSignal;
 }): Promise<ProviderResponse> {
   const timeout = createTimeoutSignal({
     timeoutMs: input.timeoutMs,
+    staleTimeoutMs: input.staleTimeoutMs,
+    timeoutMessage: formatProviderTotalTimeout(input.timeoutMs),
+    staleTimeoutMessage: formatProviderStaleTimeout(input.staleTimeoutMs),
     parentSignal: input.signal
   });
 
@@ -509,6 +520,7 @@ export async function executeOpenAICompatibleRequest(input: {
       body: JSON.stringify(input.preparedRequest.body),
       signal: timeout.signal
     });
+    timeout.disableStale();
 
     if (!response.ok) {
       return {
@@ -549,10 +561,14 @@ export async function* streamOpenAICompatibleRequest(input: {
   preparedRequest: ReturnType<typeof buildOpenAICompatibleRequest>;
   fetch: FetchLike;
   timeoutMs: number;
+  staleTimeoutMs: number;
   signal?: AbortSignal;
 }): AsyncIterable<ProviderStreamEvent> {
   const timeout = createTimeoutSignal({
     timeoutMs: input.timeoutMs,
+    staleTimeoutMs: input.staleTimeoutMs,
+    timeoutMessage: formatProviderTotalTimeout(input.timeoutMs),
+    staleTimeoutMessage: formatProviderStaleTimeout(input.staleTimeoutMs),
     parentSignal: input.signal
   });
 
@@ -569,8 +585,10 @@ export async function* streamOpenAICompatibleRequest(input: {
       body: JSON.stringify(input.preparedRequest.body),
       signal: timeout.signal
     });
+    timeout.markProgress();
 
     if (!response.ok) {
+      timeout.disableStale();
       yield {
         kind: "error",
         provider: input.provider,
@@ -591,6 +609,7 @@ export async function* streamOpenAICompatibleRequest(input: {
     }
 
     if (response.body === undefined || response.body === null) {
+      timeout.disableStale();
       const payload = await response.json();
       const parsed = parseOpenAICompatibleResponse({
         provider: input.provider,
@@ -647,7 +666,7 @@ export async function* streamOpenAICompatibleRequest(input: {
     const reasoningParts: string[] = [];
     const reasoningFormats: ProviderReasoningFormat[] = [];
 
-    for await (const event of parseOpenAICompatibleStream(response.body, input.provider, input.model)) {
+    for await (const event of parseOpenAICompatibleStream(response.body, input.provider, input.model, timeout.markProgress)) {
       if (event.kind === "token") {
         const visibleText = reasoningFilter.push(event.text);
         if (visibleText.length === 0) {
@@ -770,6 +789,7 @@ export async function* streamOpenAICompatibleRequest(input: {
         },
         fetch: input.fetch,
         timeoutMs: input.timeoutMs,
+        staleTimeoutMs: input.staleTimeoutMs,
         signal: input.signal
       });
 
@@ -1032,6 +1052,26 @@ function looksReasoningModel(model: string): boolean {
   return /reasoner|reasoning|thinking|r1|o1|o3|o4/i.test(model);
 }
 
+function formatProviderTotalTimeout(timeoutMs: number): string {
+  return `Provider request timed out after ${formatDuration(timeoutMs)}.`;
+}
+
+function formatProviderStaleTimeout(timeoutMs: number): string {
+  return `No response from provider for ${formatDuration(timeoutMs)}.`;
+}
+
+function formatDuration(timeoutMs: number): string {
+  if (timeoutMs % 60_000 === 0) {
+    const minutes = timeoutMs / 60_000;
+    return minutes === 1 ? "1 minute" : `${minutes} minutes`;
+  }
+  if (timeoutMs % 1_000 === 0) {
+    const seconds = timeoutMs / 1_000;
+    return seconds === 1 ? "1 second" : `${seconds} seconds`;
+  }
+  return `${timeoutMs}ms`;
+}
+
 function compactObject(value: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries(value).filter(([, entry]) => entry !== undefined)
@@ -1059,7 +1099,8 @@ type OpenAICompatibleParsedStreamEvent = ProviderStreamEvent | {
 async function* parseOpenAICompatibleStream(
   body: ReadableStream<Uint8Array>,
   provider: ProviderId,
-  model: string
+  model: string,
+  onProgress?: () => void
 ): AsyncIterable<OpenAICompatibleParsedStreamEvent> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -1070,6 +1111,9 @@ async function* parseOpenAICompatibleStream(
 
     if (read.done) {
       break;
+    }
+    if (read.value.byteLength > 0) {
+      onProgress?.();
     }
 
     buffer += decoder.decode(read.value, {

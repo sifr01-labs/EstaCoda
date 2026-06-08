@@ -6,6 +6,7 @@ import {
   loadRuntimeConfig,
   normalizeAuxiliaryModels,
   normalizeExternalMemoryConfig,
+  normalizeModelFallbacks,
   normalizeSessionCompressionConfig,
   redactExternalMemoryConfig,
   saveRuntimeConfig,
@@ -1256,6 +1257,103 @@ describe("loadRuntimeConfig modelFallbackRoutes resolution", () => {
     expect(loaded.modelFallbackRoutes[0].maxTokens).toBe(4096);
   });
 
+  it("resolves primary timeout controls from model config", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+
+    await writeFile(configPath, JSON.stringify({
+      model: {
+        provider: "openai",
+        id: "gpt-4o",
+        timeoutMs: 1234,
+        staleTimeoutMs: 567
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace
+    });
+
+    expect(loaded.primaryModelRoute.timeoutMs).toBe(1234);
+    expect(loaded.primaryModelRoute.staleTimeoutMs).toBe(567);
+  });
+
+  it("resolves primary timeout controls from provider config when model omits them", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+
+    await writeFile(configPath, JSON.stringify({
+      model: {
+        provider: "kimi",
+        id: "kimi-k2.6"
+      },
+      providers: {
+        kimi: {
+          timeoutMs: 4321,
+          staleTimeoutMs: 876
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace
+    });
+
+    expect(loaded.primaryModelRoute.timeoutMs).toBe(4321);
+    expect(loaded.primaryModelRoute.staleTimeoutMs).toBe(876);
+  });
+
+  it("lets fallback timeout controls override provider fallback defaults", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+
+    await writeFile(configPath, JSON.stringify({
+      model: {
+        provider: "openai",
+        id: "gpt-4o",
+        fallbacks: [
+          { provider: "deepseek", id: "deepseek-chat", timeoutMs: 2222, staleTimeoutMs: 333 }
+        ]
+      },
+      providers: {
+        deepseek: {
+          timeoutMs: 9999,
+          staleTimeoutMs: 888
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace
+    });
+
+    expect(loaded.modelFallbackRoutes[0].timeoutMs).toBe(2222);
+    expect(loaded.modelFallbackRoutes[0].staleTimeoutMs).toBe(333);
+  });
+
+  it("preserves fallback timeout controls during fallback normalization", () => {
+    const normalized = normalizeModelFallbacks({
+      model: {
+        provider: "openai",
+        id: "gpt-4o",
+        fallbacks: [
+          { provider: "deepseek", id: "deepseek-chat", timeoutMs: 2222, staleTimeoutMs: 333 }
+        ]
+      }
+    });
+
+    expect(normalized.fallbacks[0]).toEqual(expect.objectContaining({
+      timeoutMs: 2222,
+      staleTimeoutMs: 333
+    }));
+  });
+
   it.each([
     ["unset", undefined, undefined],
     ["null", null, undefined],
@@ -1309,6 +1407,30 @@ describe("loadRuntimeConfig modelFallbackRoutes resolution", () => {
   });
 
   it.each([
+    ["model.timeoutMs", { model: { provider: "openai", id: "gpt-4o", timeoutMs: 0 } }, "model.timeoutMs must be a positive integer when set."],
+    ["model.staleTimeoutMs", { model: { provider: "openai", id: "gpt-4o", staleTimeoutMs: -1 } }, "model.staleTimeoutMs must be a positive integer when set."],
+    ["providers.kimi.timeoutMs", {
+      model: { provider: "kimi", id: "kimi-k2.6" },
+      providers: { kimi: { timeoutMs: 1.5 } }
+    }, "providers.kimi.timeoutMs must be a positive integer when set."],
+    ["providers.kimi.staleTimeoutMs", {
+      model: { provider: "kimi", id: "kimi-k2.6" },
+      providers: { kimi: { staleTimeoutMs: "many" } }
+    }, "providers.kimi.staleTimeoutMs must be a positive integer when set."]
+  ] as const)("rejects invalid timeout config for %s", async (_name, config, expected) => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+
+    await writeFile(configPath, JSON.stringify(config));
+
+    await expect(loadRuntimeConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace
+    })).rejects.toThrow(expected);
+  });
+
+  it.each([
     ["zero", 0],
     ["negative", -1],
     ["float", 1.5],
@@ -1332,6 +1454,30 @@ describe("loadRuntimeConfig modelFallbackRoutes resolution", () => {
       workspaceRoot: workspace,
       homeDir: workspace
     })).rejects.toThrow("model.fallbacks[0].maxTokens must be a positive integer when set.");
+  });
+
+  it.each([
+    ["timeoutMs", 0, "model.fallbacks[0].timeoutMs must be a positive integer when set."],
+    ["staleTimeoutMs", -1, "model.fallbacks[0].staleTimeoutMs must be a positive integer when set."]
+  ] as const)("rejects invalid fallback %s", async (field, value, expected) => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+
+    await writeFile(configPath, JSON.stringify({
+      model: {
+        provider: "openai",
+        id: "gpt-4o",
+        fallbacks: [
+          { provider: "deepseek", id: "deepseek-chat", [field]: value }
+        ]
+      }
+    }));
+
+    await expect(loadRuntimeConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace
+    })).rejects.toThrow(expected);
   });
 
   it("resolves explicit fallback routes with provider defaults and overrides", async () => {

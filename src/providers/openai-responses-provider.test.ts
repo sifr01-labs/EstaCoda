@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS,
+  DEFAULT_PROVIDER_STALE_TIMEOUT_MS
+} from "../contracts/provider.js";
+import {
   createOpenAIResponsesProvider,
   buildResponsesRequest,
   parseResponsesPayload,
@@ -81,6 +85,179 @@ describe("openai-responses-provider", () => {
 
       expect(response.ok).toBe(false);
       expect(response.errorClass).toBe("network");
+    });
+
+    it("uses the default stale timeout before response headers", async () => {
+      vi.useFakeTimers();
+      const provider = createOpenAIResponsesProvider({
+        id: "codex",
+        endpoint: {
+          baseUrl: "https://api.openai.com/v1",
+          apiKey: { kind: "none" }
+        },
+        enableNetwork: true,
+        fetch: (_url, init) => new Promise((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+        })
+      });
+
+      const responsePromise = provider.complete({
+        model: "codex-model",
+        messages: [{ role: "user", content: "Hello" }]
+      });
+      await vi.advanceTimersByTimeAsync(DEFAULT_PROVIDER_STALE_TIMEOUT_MS);
+      const response = await responsePromise;
+
+      expect(response.ok).toBe(false);
+      expect(response.errorClass).toBe("timeout");
+      expect(response.content).toBe("No response from provider for 2 minutes.");
+    });
+
+    it("uses the default total timeout when stale timeout is longer", async () => {
+      vi.useFakeTimers();
+      const provider = createOpenAIResponsesProvider({
+        id: "codex",
+        endpoint: {
+          baseUrl: "https://api.openai.com/v1",
+          apiKey: { kind: "none" }
+        },
+        enableNetwork: true,
+        fetch: (_url, init) => new Promise((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+        })
+      });
+
+      const responsePromise = provider.complete({
+        model: "codex-model",
+        messages: [{ role: "user", content: "Hello" }]
+      }, { staleTimeoutMs: DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS + 1_000 });
+      await vi.advanceTimersByTimeAsync(DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS);
+      const response = await responsePromise;
+
+      expect(response.ok).toBe(false);
+      expect(response.errorClass).toBe("timeout");
+      expect(response.content).toBe("Provider request timed out after 30 minutes.");
+    });
+
+    it("lets completion timeout and stale timeout options override adapter defaults", async () => {
+      vi.useFakeTimers();
+      const provider = createOpenAIResponsesProvider({
+        id: "codex",
+        endpoint: {
+          baseUrl: "https://api.openai.com/v1",
+          apiKey: { kind: "none" }
+        },
+        enableNetwork: true,
+        timeoutMs: 1_000,
+        staleTimeoutMs: 1_000,
+        fetch: (_url, init) => new Promise((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+        })
+      });
+
+      const responsePromise = provider.complete({
+        model: "codex-model",
+        messages: [{ role: "user", content: "Hello" }]
+      }, { timeoutMs: 1_000, staleTimeoutMs: 10 });
+      await vi.advanceTimersByTimeAsync(10);
+      const response = await responsePromise;
+
+      expect(response.ok).toBe(false);
+      expect(response.errorClass).toBe("timeout");
+      expect(response.content).toBe("No response from provider for 10ms.");
+    });
+
+    it("lets completion total timeout option override adapter defaults", async () => {
+      vi.useFakeTimers();
+      const provider = createOpenAIResponsesProvider({
+        id: "codex",
+        endpoint: {
+          baseUrl: "https://api.openai.com/v1",
+          apiKey: { kind: "none" }
+        },
+        enableNetwork: true,
+        timeoutMs: 1_000,
+        staleTimeoutMs: 1_000,
+        fetch: (_url, init) => new Promise((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+        })
+      });
+
+      const responsePromise = provider.complete({
+        model: "codex-model",
+        messages: [{ role: "user", content: "Hello" }]
+      }, { timeoutMs: 10, staleTimeoutMs: 1_000 });
+      await vi.advanceTimersByTimeAsync(10);
+      const response = await responsePromise;
+
+      expect(response.ok).toBe(false);
+      expect(response.errorClass).toBe("timeout");
+      expect(response.content).toBe("Provider request timed out after 10ms.");
+    });
+
+
+    it("honors adapter-level stale timeout", async () => {
+      vi.useFakeTimers();
+      const provider = createOpenAIResponsesProvider({
+        id: "codex",
+        endpoint: {
+          baseUrl: "https://api.openai.com/v1",
+          apiKey: { kind: "none" }
+        },
+        enableNetwork: true,
+        timeoutMs: 1_000,
+        staleTimeoutMs: 10,
+        fetch: (_url, init) => new Promise((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+        })
+      });
+
+      const responsePromise = provider.complete({
+        model: "codex-model",
+        messages: [{ role: "user", content: "Hello" }]
+      });
+      await vi.advanceTimersByTimeAsync(10);
+      const response = await responsePromise;
+
+      expect(response.ok).toBe(false);
+      expect(response.errorClass).toBe("timeout");
+      expect(response.content).toBe("No response from provider for 10ms.");
+    });
+
+    it("disables non-streaming stale timeout after response headers", async () => {
+      vi.useFakeTimers();
+      const provider = createOpenAIResponsesProvider({
+        id: "codex",
+        endpoint: {
+          baseUrl: "https://api.openai.com/v1",
+          apiKey: { kind: "none" }
+        },
+        enableNetwork: true,
+        timeoutMs: 30,
+        staleTimeoutMs: 5,
+        fetch: async (_url, init) => ({
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => new Promise((_resolve, reject) => {
+            init.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+          }),
+          text: async () => "",
+          body: null
+        })
+      });
+
+      const responsePromise = provider.complete({
+        model: "codex-model",
+        messages: [{ role: "user", content: "Hello" }]
+      });
+      await vi.advanceTimersByTimeAsync(6);
+      await vi.advanceTimersByTimeAsync(24);
+      const response = await responsePromise;
+
+      expect(response.ok).toBe(false);
+      expect(response.errorClass).toBe("timeout");
+      expect(response.content).toBe("Provider request timed out after 30ms.");
     });
   });
 

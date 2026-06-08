@@ -58,6 +58,41 @@ model:
 
 إذا كان الحد غير مضبوط، لا يُرسل أي معامل حد رموز.
 
+تملك طلبات المزود أيضًا ضوابط مهلة:
+
+```json
+{
+  "model": {
+    "provider": "kimi",
+    "id": "kimi-k2.6",
+    "timeoutMs": 1800000,
+    "staleTimeoutMs": 120000
+  },
+  "providers": {
+    "kimi": {
+      "timeoutMs": 1800000,
+      "staleTimeoutMs": 120000
+    }
+  }
+}
+```
+
+`timeoutMs` هي ميزانية الطلب الكلية للمزود. قيمتها الافتراضية `1800000` مللي ثانية، أي 30 دقيقة. `staleTimeoutMs` هي ميزانية انعدام التقدم. قيمتها الافتراضية `120000` مللي ثانية، أي دقيقتان.
+
+الأسبقية:
+
+```text
+model.timeoutMs / model.fallbacks[].timeoutMs
+→ providers.<id>.timeoutMs
+→ 1800000
+
+model.staleTimeoutMs / model.fallbacks[].staleTimeoutMs
+→ providers.<id>.staleTimeoutMs
+→ 120000
+```
+
+في طلبات المزود غير المتدفقة، تقيس `staleTimeoutMs` مدة انتظار رؤوس الاستجابة فقط. بعد وصول الرؤوس، تحكم المهلة الكلية قراءة جسم الاستجابة. في الطلبات المتدفقة، يعاد ضبط `staleTimeoutMs` بعد كل بايتات مستلمة، فتلتقط تعطل أول بايت وتعطل منتصف التدفق. مهلات النماذج المساعدة تضبط بشكل منفصل عبر `auxiliaryModels.*.timeoutMs`؛ مهلات الركود للنماذج المساعدة وأعلام CLI لضبط مهلات المزود ليست جزءًا من هذا السطح.
+
 ### modelAliases / model_aliases
 
 اختصارات مُسمّاة لتركيبات مزود/نموذج.

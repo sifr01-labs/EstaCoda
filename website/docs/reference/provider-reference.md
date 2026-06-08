@@ -57,6 +57,17 @@ The following API modes are executable by current code:
 - `none` — no credentials required
 - `codex_oauth_device_pkce` — Codex-specific OAuth device-code flow
 
+### Request Timeouts
+
+Primary and fallback LLM routes use a total timeout and a stale/no-progress timeout:
+
+| Field | Default | Notes |
+|---|---:|---|
+| `timeoutMs` | `1800000` | Total provider request budget. |
+| `staleTimeoutMs` | `120000` | Time-to-response-headers for non-streaming calls; time between received bytes for streaming calls. |
+
+Precedence is route-specific: `model` or fallback route value, then `providers.<id>` value, then the built-in default. Auxiliary model routes keep their existing `auxiliaryModels.*.timeoutMs` behavior and do not gain stale-timeout controls in this implementation. CLI setup commands do not expose provider timeout flags; configure these values in the selected profile config.
+
 ---
 
 ## Voice Providers

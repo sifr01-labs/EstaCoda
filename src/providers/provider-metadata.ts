@@ -5,6 +5,10 @@ import type {
   ResolvedModelRoute,
   ModelProfile
 } from "../contracts/provider.js";
+import {
+  DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS,
+  DEFAULT_PROVIDER_STALE_TIMEOUT_MS
+} from "../contracts/provider.js";
 
 export type ChatMaxTokenParam = "max_tokens" | "max_completion_tokens";
 
@@ -412,6 +416,8 @@ export function buildResolvedModelRoute(options: {
   apiKeyEnv?: string;
   contextWindowTokens?: number;
   maxTokens?: number;
+  timeoutMs?: number;
+  staleTimeoutMs?: number;
   apiMode?: ProviderApiMode;
   authMethod?: ProviderAuthMethod;
 }): ResolvedModelRoute {
@@ -424,6 +430,8 @@ export function buildResolvedModelRoute(options: {
     apiKeyEnv: options.apiKeyEnv,
     contextWindowTokens: options.contextWindowTokens,
     maxTokens: options.maxTokens,
+    timeoutMs: options.timeoutMs ?? DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS,
+    staleTimeoutMs: options.staleTimeoutMs ?? DEFAULT_PROVIDER_STALE_TIMEOUT_MS,
     apiMode: options.apiMode ?? metadata.apiMode,
     authMethod: options.authMethod ?? metadata.defaultAuthMethod,
     supportsNativeToolHistory: metadata.supportsNativeToolHistory,

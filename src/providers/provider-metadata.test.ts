@@ -14,7 +14,11 @@ import {
   buildResolvedModelRoute,
   type ProviderMetadata
 } from "./provider-metadata.js";
-import type { ProviderId } from "../contracts/provider.js";
+import {
+  DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS,
+  DEFAULT_PROVIDER_STALE_TIMEOUT_MS,
+  type ProviderId
+} from "../contracts/provider.js";
 
 describe("provider-metadata", () => {
   describe("built-in providers", () => {
@@ -300,6 +304,44 @@ describe("provider-metadata", () => {
       expect(route.baseUrl).toBeUndefined();
       expect(route.apiKeyEnv).toBeUndefined();
       expect((route as ResolvedRouteNativeMetadata).supportsNativeToolHistory).toBe(true);
+    });
+
+    it("applies provider timeout defaults when omitted", () => {
+      const route = buildResolvedModelRoute({
+        provider: "openai",
+        model: "gpt-4o",
+        profile: {
+          id: "gpt-4o",
+          provider: "openai",
+          contextWindowTokens: 128000,
+          supportsTools: true,
+          supportsVision: true,
+          supportsStructuredOutput: true
+        }
+      });
+
+      expect(route.timeoutMs).toBe(DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS);
+      expect(route.staleTimeoutMs).toBe(DEFAULT_PROVIDER_STALE_TIMEOUT_MS);
+    });
+
+    it("preserves explicit provider timeout fields", () => {
+      const route = buildResolvedModelRoute({
+        provider: "openai",
+        model: "gpt-4o",
+        profile: {
+          id: "gpt-4o",
+          provider: "openai",
+          contextWindowTokens: 128000,
+          supportsTools: true,
+          supportsVision: true,
+          supportsStructuredOutput: true
+        },
+        timeoutMs: 1234,
+        staleTimeoutMs: 567
+      });
+
+      expect(route.timeoutMs).toBe(1234);
+      expect(route.staleTimeoutMs).toBe(567);
     });
 
     it("preserves explicit apiMode when provided", () => {

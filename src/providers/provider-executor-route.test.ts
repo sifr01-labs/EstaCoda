@@ -119,6 +119,35 @@ describe("ProviderExecutor route-based execution", () => {
     expect(adapter.calls[0].options?.endpoint?.baseUrl).toBe("https://custom.example.com/v1");
   });
 
+  it("passes route timeout options during completion", async () => {
+    const adapter = createMockAdapter({ id: "test-provider" });
+    registry.register(adapter);
+
+    const route = createDefaultRoute({ provider: "test-provider", timeoutMs: 1234, staleTimeoutMs: 567 });
+    const result = await executor.complete({ messages: [] }, {}, {
+      primaryRoute: route
+    });
+
+    expect(result.ok).toBe(true);
+    expect(adapter.calls[0].options?.timeoutMs).toBe(1234);
+    expect(adapter.calls[0].options?.staleTimeoutMs).toBe(567);
+  });
+
+  it("passes route timeout options during streaming", async () => {
+    const adapter = createMockAdapter({ id: "test-provider" });
+    registry.register(adapter);
+
+    const route = createDefaultRoute({ provider: "test-provider", timeoutMs: 1234, staleTimeoutMs: 567 });
+    const result = await executor.complete({ messages: [] }, {}, {
+      primaryRoute: route,
+      stream: true
+    });
+
+    expect(result.ok).toBe(true);
+    expect(adapter.calls[0].options?.timeoutMs).toBe(1234);
+    expect(adapter.calls[0].options?.staleTimeoutMs).toBe(567);
+  });
+
   it("passes route maxTokens when request maxTokens is unset", async () => {
     const adapter = createMockAdapter({ id: "test-provider" });
     registry.register(adapter);

@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS,
+  DEFAULT_PROVIDER_STALE_TIMEOUT_MS
+} from "../contracts/provider.js";
+import {
   buildOpenAICompatibleRequest,
   createOpenAICompatibleProvider,
   parseOpenAICompatibleResponse
@@ -110,6 +114,160 @@ describe("createOpenAICompatibleProvider timeout classification", () => {
 
     expect(response.ok).toBe(false);
     expect(response.errorClass).toBe("network");
+  });
+
+  it("uses the default stale timeout before response headers", async () => {
+    vi.useFakeTimers();
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      fetch: (_url, init) => new Promise((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+      })
+    });
+
+    const responsePromise = provider.complete({
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    });
+    await vi.advanceTimersByTimeAsync(DEFAULT_PROVIDER_STALE_TIMEOUT_MS);
+    const response = await responsePromise;
+
+    expect(response.ok).toBe(false);
+    expect(response.errorClass).toBe("timeout");
+    expect(response.content).toBe("No response from provider for 2 minutes.");
+  });
+
+  it("uses the default total timeout when stale timeout is longer", async () => {
+    vi.useFakeTimers();
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      fetch: (_url, init) => new Promise((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+      })
+    });
+
+    const responsePromise = provider.complete({
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    }, { staleTimeoutMs: DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS + 1_000 });
+    await vi.advanceTimersByTimeAsync(DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS);
+    const response = await responsePromise;
+
+    expect(response.ok).toBe(false);
+    expect(response.errorClass).toBe("timeout");
+    expect(response.content).toBe("Provider request timed out after 30 minutes.");
+  });
+
+  it("lets completion timeout options override adapter defaults", async () => {
+    vi.useFakeTimers();
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      timeoutMs: 1_000,
+      staleTimeoutMs: 1_000,
+      fetch: (_url, init) => new Promise((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+      })
+    });
+
+    const responsePromise = provider.complete({
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    }, { timeoutMs: 10, staleTimeoutMs: 1_000 });
+    await vi.advanceTimersByTimeAsync(10);
+    const response = await responsePromise;
+
+    expect(response.ok).toBe(false);
+    expect(response.errorClass).toBe("timeout");
+    expect(response.content).toBe("Provider request timed out after 10ms.");
+  });
+
+  it("lets completion stale timeout options override adapter defaults", async () => {
+    vi.useFakeTimers();
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      timeoutMs: 1_000,
+      staleTimeoutMs: 1_000,
+      fetch: (_url, init) => new Promise((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+      })
+    });
+
+    const responsePromise = provider.complete({
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    }, { staleTimeoutMs: 10 });
+    await vi.advanceTimersByTimeAsync(10);
+    const response = await responsePromise;
+
+    expect(response.ok).toBe(false);
+    expect(response.errorClass).toBe("timeout");
+    expect(response.content).toBe("No response from provider for 10ms.");
+  });
+
+  it("honors adapter-level stale timeout", async () => {
+    vi.useFakeTimers();
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      timeoutMs: 1_000,
+      staleTimeoutMs: 10,
+      fetch: (_url, init) => new Promise((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+      })
+    });
+
+    const responsePromise = provider.complete({
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    const response = await responsePromise;
+
+    expect(response.ok).toBe(false);
+    expect(response.errorClass).toBe("timeout");
+    expect(response.content).toBe("No response from provider for 10ms.");
+  });
+
+  it("disables non-streaming stale timeout after response headers", async () => {
+    vi.useFakeTimers();
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      timeoutMs: 30,
+      staleTimeoutMs: 5,
+      fetch: async (_url, init) => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => new Promise((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+        }),
+        text: async () => "",
+        body: null
+      })
+    });
+
+    const responsePromise = provider.complete({
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    });
+    await vi.advanceTimersByTimeAsync(6);
+    await vi.advanceTimersByTimeAsync(24);
+    const response = await responsePromise;
+
+    expect(response.ok).toBe(false);
+    expect(response.errorClass).toBe("timeout");
+    expect(response.content).toBe("Provider request timed out after 30ms.");
   });
 });
 
@@ -682,6 +840,99 @@ function bodyMessages(prepared: ReturnType<typeof buildOpenAICompatibleRequest>)
 }
 
 describe("createOpenAICompatibleProvider streaming", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("classifies streaming stale timeout before the first byte", async () => {
+    vi.useFakeTimers();
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      timeoutMs: 100,
+      staleTimeoutMs: 10,
+      fetch: async (_url, init) => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({}),
+        text: async () => "",
+        body: abortAwareStream(init.signal)
+      })
+    });
+
+    const eventsPromise = collectStreamEvents(provider.stream?.({
+      provider: "openai" as any,
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    }) ?? []);
+    await vi.advanceTimersByTimeAsync(10);
+    const events = await eventsPromise;
+
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "start" }),
+      expect.objectContaining({
+        kind: "error",
+        response: expect.objectContaining({
+          errorClass: "timeout",
+          content: "No response from provider for 10ms."
+        })
+      })
+    ]));
+  });
+
+  it("resets streaming stale timeout after received bytes", async () => {
+    vi.useFakeTimers();
+    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      timeoutMs: 100,
+      staleTimeoutMs: 10,
+      fetch: async (_url, init) => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({}),
+        text: async () => "",
+        body: new ReadableStream<Uint8Array>({
+          start(controller) {
+            streamController = controller;
+            init.signal?.addEventListener("abort", () => controller.error(init.signal?.reason), { once: true });
+          }
+        })
+      })
+    });
+    const encoder = new TextEncoder();
+
+    const eventsPromise = collectStreamEvents(provider.stream?.({
+      provider: "openai" as any,
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    }) ?? []);
+    await vi.advanceTimersByTimeAsync(0);
+    streamController?.enqueue(encoder.encode(sseData({ choices: [{ delta: { content: "A" }, finish_reason: null }] })));
+    await vi.advanceTimersByTimeAsync(8);
+    streamController?.enqueue(encoder.encode(sseData({ choices: [{ delta: { content: "B" }, finish_reason: null }] })));
+    await vi.advanceTimersByTimeAsync(8);
+    await vi.advanceTimersByTimeAsync(2);
+    const events = await eventsPromise;
+
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "token", text: "A" }),
+      expect.objectContaining({ kind: "token", text: "B" }),
+      expect.objectContaining({
+        kind: "error",
+        response: expect.objectContaining({
+          errorClass: "timeout",
+          content: "No response from provider for 10ms."
+        })
+      })
+    ]));
+  });
+
   it("finalizes on finish_reason without usage", async () => {
     const provider = createOpenAICompatibleProvider({
       id: "openai" as any,
@@ -1561,6 +1812,14 @@ function sseStream(chunks: string[]): ReadableStream<Uint8Array> {
         controller.enqueue(encoder.encode(chunk));
       }
       controller.close();
+    }
+  });
+}
+
+function abortAwareStream(signal: AbortSignal | undefined): ReadableStream<Uint8Array> {
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      signal?.addEventListener("abort", () => controller.error(signal.reason), { once: true });
     }
   });
 }
