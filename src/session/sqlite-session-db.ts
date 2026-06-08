@@ -40,7 +40,7 @@ type MessageRow = {
   metadata_json: string | null;
 };
 
-type EventRow = {
+type SessionEventRow = {
   event_json: string;
 };
 
@@ -382,14 +382,14 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
 
   async listEvents(sessionId: string): Promise<SessionEvent[]> {
     return this.#db
-      .query<EventRow>("select event_json from session_events where session_id = ? order by created_at asc, rowid asc")
+      .query<SessionEventRow>("select event_json from session_events where session_id = ? order by created_at asc, rowid asc")
       .all(sessionId)
       .map((row) => JSON.parse(row.event_json) as SessionEvent);
   }
 
   async listEventsForProfile(sessionId: string, profileId: string): Promise<SessionEvent[]> {
     return this.#db
-      .query<EventRow>(
+      .query<SessionEventRow>(
         `select e.event_json
         from session_events e
         join sessions s on s.id = e.session_id
@@ -843,36 +843,36 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
   }
 
   #migrateV3(): void {
-    // Defensive: inspect operator_events columns before adding each
-    const rows = this.#db.query("pragma table_info(operator_events)").all() as Array<{ name: string }>;
+    // Defensive: inspect workflow_operator_events columns before adding each
+    const rows = this.#db.query("pragma table_info(workflow_operator_events)").all() as Array<{ name: string }>;
     const colNames = new Set(rows.map((r) => r.name));
     if (!colNames.has("consumed_at")) {
-      this.#db.exec("alter table operator_events add column consumed_at text");
+      this.#db.exec("alter table workflow_operator_events add column consumed_at text");
     }
-    if (!colNames.has("consumed_by_step_id")) {
-      this.#db.exec("alter table operator_events add column consumed_by_step_id text");
+    if (!colNames.has("consumed_by_workflow_step_id")) {
+      this.#db.exec("alter table workflow_operator_events add column consumed_by_workflow_step_id text");
     }
     if (!colNames.has("consumed_by_run_id")) {
-      this.#db.exec("alter table operator_events add column consumed_by_run_id text");
+      this.#db.exec("alter table workflow_operator_events add column consumed_by_run_id text");
     }
-    if (!colNames.has("consumed_by_flow_event_id")) {
-      this.#db.exec("alter table operator_events add column consumed_by_flow_event_id text");
+    if (!colNames.has("consumed_by_workflow_event_id")) {
+      this.#db.exec("alter table workflow_operator_events add column consumed_by_workflow_event_id text");
     }
   }
 
   #migrateV2(): void {
     this.#db.exec(`
-      create table if not exists compact_summaries (
+      create table if not exists workflow_event_summaries (
         id text primary key,
-        flow_id text not null references flows(id) on delete cascade,
-        from_event_id text not null,
-        to_event_id text not null,
+        workflow_run_id text not null references workflow_runs(id) on delete cascade,
+        from_workflow_event_id text not null,
+        to_workflow_event_id text not null,
         turn_summaries_json text not null,
         tool_outcome_summaries_json text not null,
         operator_action_summaries_json text not null,
         created_at text not null
       );
-      create index if not exists idx_compact_summaries_flow on compact_summaries(flow_id, created_at);
+      create index if not exists idx_workflow_event_summaries_flow on workflow_event_summaries(workflow_run_id, created_at);
     `);
   }
 
@@ -887,15 +887,15 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
   }
 
   #migrateV1(): void {
-    // TaskFlow durable execution schema (v0.8)
+    // Workflow durable execution schema (v0.8)
     this.#db.exec(`
-      create table if not exists flows (
+      create table if not exists workflow_runs (
         id text primary key,
         session_id text not null,
         status text not null default 'pending',
         intent_json text not null,
         selected_skill text,
-        current_step_id text,
+        current_workflow_step_id text,
         created_at text not null,
         updated_at text not null,
         completed_at text,
@@ -914,9 +914,9 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
         metadata_json text
       );
 
-      create table if not exists flow_steps (
+      create table if not exists workflow_steps (
         id text primary key,
-        flow_id text not null references flows(id) on delete cascade,
+        workflow_run_id text not null references workflow_runs(id) on delete cascade,
         step_index integer not null,
         status text not null default 'pending',
         name text not null,
@@ -933,7 +933,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
         pause_reason text,
         interrupt_reason text,
         skip_reason text,
-        retry_of_step_id text,
+        retry_of_workflow_step_id text,
         attempt_number integer not null default 1,
         started_at text,
         completed_at text,
@@ -947,19 +947,19 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
         updated_at text not null
       );
 
-      create table if not exists flow_events (
+      create table if not exists workflow_events (
         id text primary key,
-        flow_id text not null references flows(id) on delete cascade,
-        step_id text,
+        workflow_run_id text not null references workflow_runs(id) on delete cascade,
+        workflow_step_id text,
         kind text not null,
         data_json text not null,
         timestamp text not null
       );
 
-      create table if not exists operator_events (
+      create table if not exists workflow_operator_events (
         id text primary key,
-        flow_id text not null references flows(id) on delete cascade,
-        step_id text,
+        workflow_run_id text not null references workflow_runs(id) on delete cascade,
+        workflow_step_id text,
         kind text not null,
         operator text not null,
         command text not null,
@@ -970,10 +970,10 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
         timestamp text not null
       );
 
-      create table if not exists checkpoints (
+      create table if not exists workflow_checkpoints (
         id text primary key,
-        flow_id text not null references flows(id) on delete cascade,
-        step_id text,
+        workflow_run_id text not null references workflow_runs(id) on delete cascade,
+        workflow_step_id text,
         name text not null,
         description text,
         snapshot_json text not null,
@@ -981,10 +981,10 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
         created_by text not null
       );
 
-      create table if not exists approval_gates (
+      create table if not exists workflow_approval_gates (
         id text primary key,
-        step_id text not null references flow_steps(id) on delete cascade,
-        flow_id text not null references flows(id) on delete cascade,
+        workflow_step_id text not null references workflow_steps(id) on delete cascade,
+        workflow_run_id text not null references workflow_runs(id) on delete cascade,
         status text not null default 'pending',
         requested_at text not null,
         resolved_at text,
@@ -1000,18 +1000,18 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
         deterministic_rule text
       );
 
-      create table if not exists flow_locks (
-        flow_id text primary key,
+      create table if not exists workflow_locks (
+        workflow_run_id text primary key,
         owner_id text not null,
         locked_at text not null,
         heartbeat_at text not null,
         expires_at text not null
       );
 
-      create table if not exists flow_processes (
+      create table if not exists workflow_processes (
         id text primary key,
-        flow_id text not null references flows(id) on delete cascade,
-        step_id text not null,
+        workflow_run_id text not null references workflow_runs(id) on delete cascade,
+        workflow_step_id text not null,
         process_manager_id text not null,
         process_type text not null,
         command_summary text,
@@ -1020,36 +1020,36 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
         status text not null default 'running'
       );
 
-      create table if not exists flow_artifacts (
+      create table if not exists workflow_artifacts (
         artifact_id text not null,
-        step_id text not null,
-        flow_id text not null references flows(id) on delete cascade,
+        workflow_step_id text not null,
+        workflow_run_id text not null references workflow_runs(id) on delete cascade,
         kind text not null,
         linked_at text not null,
-        primary key (artifact_id, step_id, flow_id)
+        primary key (artifact_id, workflow_step_id, workflow_run_id)
       );
 
-      create table if not exists flow_run_links (
+      create table if not exists workflow_agent_run_links (
         run_id text not null,
-        step_id text not null,
-        flow_id text not null references flows(id) on delete cascade,
+        workflow_step_id text not null,
+        workflow_run_id text not null references workflow_runs(id) on delete cascade,
         turn_index integer not null,
         linked_at text not null,
-        primary key (run_id, step_id, flow_id)
+        primary key (run_id, workflow_step_id, workflow_run_id)
       );
 
-      create index if not exists idx_flows_session on flows(session_id, created_at);
-      create index if not exists idx_flows_status on flows(status);
-      create index if not exists idx_flow_steps_flow on flow_steps(flow_id, step_index);
-      create index if not exists idx_flow_steps_status on flow_steps(status);
-      create index if not exists idx_flow_events_flow on flow_events(flow_id, timestamp);
-      create index if not exists idx_flow_events_step on flow_events(flow_id, step_id, timestamp);
-      create index if not exists idx_operator_events_flow on operator_events(flow_id, timestamp);
-      create index if not exists idx_checkpoints_flow on checkpoints(flow_id, created_at);
-      create index if not exists idx_approval_gates_flow on approval_gates(flow_id, status);
-      create index if not exists idx_approval_gates_step on approval_gates(step_id, status);
-      create index if not exists idx_flow_processes_flow on flow_processes(flow_id, step_id);
-      create index if not exists idx_flow_locks_expires on flow_locks(expires_at);
+      create index if not exists idx_workflow_runs_session on workflow_runs(session_id, created_at);
+      create index if not exists idx_workflow_runs_status on workflow_runs(status);
+      create index if not exists idx_workflow_steps_flow on workflow_steps(workflow_run_id, step_index);
+      create index if not exists idx_workflow_steps_status on workflow_steps(status);
+      create index if not exists idx_workflow_events_flow on workflow_events(workflow_run_id, timestamp);
+      create index if not exists idx_workflow_events_step on workflow_events(workflow_run_id, workflow_step_id, timestamp);
+      create index if not exists idx_workflow_operator_events_flow on workflow_operator_events(workflow_run_id, timestamp);
+      create index if not exists idx_workflow_checkpoints_flow on workflow_checkpoints(workflow_run_id, created_at);
+      create index if not exists idx_workflow_approval_gates_flow on workflow_approval_gates(workflow_run_id, status);
+      create index if not exists idx_workflow_approval_gates_step on workflow_approval_gates(workflow_step_id, status);
+      create index if not exists idx_workflow_processes_flow on workflow_processes(workflow_run_id, workflow_step_id);
+      create index if not exists idx_workflow_locks_expires on workflow_locks(expires_at);
     `);
   }
 

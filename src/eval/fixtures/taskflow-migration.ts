@@ -6,8 +6,8 @@ import { rmSync } from "node:fs";
 
 export const taskflowMigrationCase: EvalCase = {
   id: "taskflow-migration",
-  name: "v0.8 schema migration creates tables and sets version",
-  description: "SQLiteSessionDB introduces schema_version and v0.8 TaskFlow tables on first open.",
+  name: "schema migration creates workflow tables and sets version",
+  description: "SQLiteSessionDB introduces schema_version and workflow persistence tables on first open.",
   tags: ["taskflow", "migration", "deterministic"],
   run: async (): Promise<EvalResult> => {
     const startedAt = Date.now();
@@ -18,37 +18,35 @@ export const taskflowMigrationCase: EvalCase = {
       // Fresh DB
       const sessionDb = new SQLiteSessionDB({ path: dbPath });
 
-      // schema_version should be 1
+      // schema_version should include all workflow persistence migrations.
       const versionRow = sessionDb.db
-        .query<{ version: number }>("select version from schema_version limit 1")
+        .query<{ version: number | null }>("select max(version) as version from schema_version")
         .get();
-      assertions.push(assertEqual("schema_version is 1", versionRow?.version, 1));
+      assertions.push(assertEqual("schema_version is 6", versionRow?.version, 6));
 
-      // v0.8 tables exist
       const tables = sessionDb.db
         .query<{ name: string }>("select name from sqlite_master where type='table'")
         .all()
         .map((r) => r.name);
-      assertions.push(assertTrue("flows table exists", tables.includes("flows")));
-      assertions.push(assertTrue("flow_steps table exists", tables.includes("flow_steps")));
-      assertions.push(assertTrue("flow_events table exists", tables.includes("flow_events")));
-      assertions.push(assertTrue("operator_events table exists", tables.includes("operator_events")));
-      assertions.push(assertTrue("flow_locks table exists", tables.includes("flow_locks")));
-      assertions.push(assertTrue("checkpoints table exists", tables.includes("checkpoints")));
-      assertions.push(assertTrue("approval_gates table exists", tables.includes("approval_gates")));
-      assertions.push(assertTrue("flow_processes table exists", tables.includes("flow_processes")));
-      assertions.push(assertTrue("flow_artifacts table exists", tables.includes("flow_artifacts")));
-      assertions.push(assertTrue("flow_run_links table exists", tables.includes("flow_run_links")));
+      for (const table of LEGACY_WORKFLOW_TABLES) {
+        assertions.push(assertTrue(`${table} table absent`, !tables.includes(table)));
+      }
+      for (const table of WORKFLOW_TABLES) {
+        assertions.push(assertTrue(`${table} table exists`, tables.includes(table)));
+      }
 
-      // Indexes exist
       const indexes = sessionDb.db
         .query<{ name: string }>("select name from sqlite_master where type='index'")
         .all()
         .map((r) => r.name);
-      assertions.push(assertTrue("idx_flows_status exists", indexes.includes("idx_flows_status")));
-      assertions.push(assertTrue("idx_flow_locks_expires exists", indexes.includes("idx_flow_locks_expires")));
+      for (const index of LEGACY_WORKFLOW_INDEXES) {
+        assertions.push(assertTrue(`${index} absent`, !indexes.includes(index)));
+      }
+      for (const index of WORKFLOW_INDEXES) {
+        assertions.push(assertTrue(`${index} exists`, indexes.includes(index)));
+      }
 
-      // Store can write and read a flow
+      // Store can write and read a workflow run.
       const store = new SQLiteWorkflowStore({ db: sessionDb.db });
       const flow = makeTestFlow("flow-1");
       await store.createWorkflowRun(flow);
@@ -62,7 +60,7 @@ export const taskflowMigrationCase: EvalCase = {
       try { rmSync(dbPath); } catch { /* ignore */ }
     }
 
-    return buildResult("taskflow-migration", "v0.8 schema migration creates tables and sets version", assertions, Date.now() - startedAt);
+    return buildResult("taskflow-migration", "schema migration creates workflow tables and sets version", assertions, Date.now() - startedAt);
   }
 };
 
@@ -89,3 +87,63 @@ function makeTestFlow(id: string) {
     metadata: {}
   };
 }
+
+const LEGACY_WORKFLOW_TABLES = [
+  "flows",
+  "flow_steps",
+  "flow_events",
+  "operator_events",
+  "approval_gates",
+  "checkpoints",
+  "flow_locks",
+  "flow_processes",
+  "flow_artifacts",
+  "flow_run_links",
+  "compact_summaries"
+];
+
+const WORKFLOW_TABLES = [
+  "workflow_runs",
+  "workflow_steps",
+  "workflow_events",
+  "workflow_operator_events",
+  "workflow_approval_gates",
+  "workflow_checkpoints",
+  "workflow_locks",
+  "workflow_processes",
+  "workflow_artifacts",
+  "workflow_agent_run_links",
+  "workflow_event_summaries"
+];
+
+const LEGACY_WORKFLOW_INDEXES = [
+  "idx_flows_session",
+  "idx_flows_status",
+  "idx_flow_steps_flow",
+  "idx_flow_steps_status",
+  "idx_flow_events_flow",
+  "idx_flow_events_step",
+  "idx_operator_events_flow",
+  "idx_checkpoints_flow",
+  "idx_approval_gates_flow",
+  "idx_approval_gates_step",
+  "idx_flow_processes_flow",
+  "idx_flow_locks_expires",
+  "idx_compact_summaries_flow"
+];
+
+const WORKFLOW_INDEXES = [
+  "idx_workflow_runs_session",
+  "idx_workflow_runs_status",
+  "idx_workflow_steps_flow",
+  "idx_workflow_steps_status",
+  "idx_workflow_events_flow",
+  "idx_workflow_events_step",
+  "idx_workflow_operator_events_flow",
+  "idx_workflow_checkpoints_flow",
+  "idx_workflow_approval_gates_flow",
+  "idx_workflow_approval_gates_step",
+  "idx_workflow_processes_flow",
+  "idx_workflow_locks_expires",
+  "idx_workflow_event_summaries_flow"
+];

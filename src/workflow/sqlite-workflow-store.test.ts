@@ -22,6 +22,34 @@ describe("SQLiteWorkflowStore", () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  it("creates the workflow schema without legacy flow tables or indexes", () => {
+    const tables = new Set(
+      sessionDb.db
+        .query<{ name: string }>("select name from sqlite_master where type = 'table'")
+        .all()
+        .map((row) => row.name)
+    );
+    const indexes = new Set(
+      sessionDb.db
+        .query<{ name: string }>("select name from sqlite_master where type = 'index'")
+        .all()
+        .map((row) => row.name)
+    );
+
+    for (const table of LEGACY_WORKFLOW_TABLES) {
+      expect(tables.has(table), `${table} should not exist`).toBe(false);
+    }
+    for (const table of WORKFLOW_TABLES) {
+      expect(tables.has(table), `${table} should exist`).toBe(true);
+    }
+    for (const index of LEGACY_WORKFLOW_INDEXES) {
+      expect(indexes.has(index), `${index} should not exist`).toBe(false);
+    }
+    for (const index of WORKFLOW_INDEXES) {
+      expect(indexes.has(index), `${index} should exist`).toBe(true);
+    }
+  });
+
   it("commits atomic transitions through the internal SQLite adapter", async () => {
     await store.atomicTransition("flow-1", async (tx) => {
       await tx.createWorkflowRun(makeFlow("flow-1"));
@@ -115,3 +143,63 @@ function makeEvent(id: string, flowId: string, stepId: string): WorkflowEvent {
     timestamp: "2030-01-01T00:00:00.000Z"
   };
 }
+
+const LEGACY_WORKFLOW_TABLES = [
+  "flows",
+  "flow_steps",
+  "flow_events",
+  "operator_events",
+  "approval_gates",
+  "checkpoints",
+  "flow_locks",
+  "flow_processes",
+  "flow_artifacts",
+  "flow_run_links",
+  "compact_summaries"
+];
+
+const WORKFLOW_TABLES = [
+  "workflow_runs",
+  "workflow_steps",
+  "workflow_events",
+  "workflow_operator_events",
+  "workflow_approval_gates",
+  "workflow_checkpoints",
+  "workflow_locks",
+  "workflow_processes",
+  "workflow_artifacts",
+  "workflow_agent_run_links",
+  "workflow_event_summaries"
+];
+
+const LEGACY_WORKFLOW_INDEXES = [
+  "idx_flows_session",
+  "idx_flows_status",
+  "idx_flow_steps_flow",
+  "idx_flow_steps_status",
+  "idx_flow_events_flow",
+  "idx_flow_events_step",
+  "idx_operator_events_flow",
+  "idx_checkpoints_flow",
+  "idx_approval_gates_flow",
+  "idx_approval_gates_step",
+  "idx_flow_processes_flow",
+  "idx_flow_locks_expires",
+  "idx_compact_summaries_flow"
+];
+
+const WORKFLOW_INDEXES = [
+  "idx_workflow_runs_session",
+  "idx_workflow_runs_status",
+  "idx_workflow_steps_flow",
+  "idx_workflow_steps_status",
+  "idx_workflow_events_flow",
+  "idx_workflow_events_step",
+  "idx_workflow_operator_events_flow",
+  "idx_workflow_checkpoints_flow",
+  "idx_workflow_approval_gates_flow",
+  "idx_workflow_approval_gates_step",
+  "idx_workflow_processes_flow",
+  "idx_workflow_locks_expires",
+  "idx_workflow_event_summaries_flow"
+];
