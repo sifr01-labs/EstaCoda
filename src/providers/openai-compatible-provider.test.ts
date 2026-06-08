@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildOpenAICompatibleRequest,
   createOpenAICompatibleProvider,
@@ -62,6 +62,54 @@ describe("createOpenAICompatibleProvider health", () => {
 
     const health = await provider.health(overrideEndpoint);
     expect(health.available).toBe(true);
+  });
+});
+
+describe("createOpenAICompatibleProvider timeout classification", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("classifies local request timeout as timeout", async () => {
+    vi.useFakeTimers();
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      timeoutMs: 10,
+      fetch: (_url, init) => new Promise((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+      })
+    });
+
+    const responsePromise = provider.complete({
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    const response = await responsePromise;
+
+    expect(response.ok).toBe(false);
+    expect(response.errorClass).toBe("timeout");
+  });
+
+  it("keeps real fetch rejection classified as network", async () => {
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      fetch: async () => {
+        throw new Error("Connection refused");
+      }
+    });
+
+    const response = await provider.complete({
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    });
+
+    expect(response.ok).toBe(false);
+    expect(response.errorClass).toBe("network");
   });
 });
 

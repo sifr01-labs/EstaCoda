@@ -246,6 +246,7 @@ describe("web and browser tools baselines", () => {
     tempRoots = [];
     resetWebResearchProvidersForTest();
     vi.unstubAllEnvs();
+    vi.useRealTimers();
   });
 
   it("exposes the expected browser and web tool names", () => {
@@ -818,6 +819,25 @@ describe("web and browser tools baselines", () => {
 
     expect(result.ok).toBe(false);
     expect(result.metadata).toEqual({ reason: "missing-url" });
+  });
+
+  it("keeps web.extract timeout failures in the existing fetch-failed shape", async () => {
+    vi.useFakeTimers();
+    const fetch: FetchLike = async (_url, init) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+    });
+    const extract = tool("web.extract", createWebTools({ fetch, enableNetwork: true, resolveHostname: publicResolver }));
+
+    const resultPromise = extract.run({ url: "https://example.com" });
+    await vi.advanceTimersByTimeAsync(30_000);
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(false);
+    expect(result.content).toContain("Timed out after 30000ms");
+    expect(result.metadata).toEqual(expect.objectContaining({
+      url: "https://example.com/",
+      reason: "fetch-failed"
+    }));
   });
 
   it("navigates with the mock browser backend and includes backend metadata", async () => {

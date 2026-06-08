@@ -28,6 +28,7 @@ import {
   StreamingReasoningFilter,
   type ProviderContentListPart
 } from "./provider-reasoning.js";
+import { createTimeoutSignal } from "../utils/timeout-signal.js";
 
 export type OpenAICompatibleProviderOptions = {
   id: ProviderId;
@@ -496,14 +497,17 @@ export async function executeOpenAICompatibleRequest(input: {
   timeoutMs: number;
   signal?: AbortSignal;
 }): Promise<ProviderResponse> {
-  const { signal, cleanup } = createTimeoutSignal(input.timeoutMs, input.signal);
+  const timeout = createTimeoutSignal({
+    timeoutMs: input.timeoutMs,
+    parentSignal: input.signal
+  });
 
   try {
     const response = await input.fetch(input.preparedRequest.url, {
       method: "POST",
       headers: input.preparedRequest.headers,
       body: JSON.stringify(input.preparedRequest.body),
-      signal
+      signal: timeout.signal
     });
 
     if (!response.ok) {
@@ -532,10 +536,10 @@ export async function executeOpenAICompatibleRequest(input: {
       content: error instanceof Error ? error.message : "Network request failed.",
       model: input.model,
       provider: input.provider,
-      errorClass: isAbortError(error) ? "timeout" : "network"
+      errorClass: timeout.classify(error) ?? "network"
     };
   } finally {
-    cleanup();
+    timeout.cleanup();
   }
 }
 
@@ -547,7 +551,10 @@ export async function* streamOpenAICompatibleRequest(input: {
   timeoutMs: number;
   signal?: AbortSignal;
 }): AsyncIterable<ProviderStreamEvent> {
-  const { signal, cleanup } = createTimeoutSignal(input.timeoutMs, input.signal);
+  const timeout = createTimeoutSignal({
+    timeoutMs: input.timeoutMs,
+    parentSignal: input.signal
+  });
 
   yield {
     kind: "start",
@@ -560,7 +567,7 @@ export async function* streamOpenAICompatibleRequest(input: {
       method: "POST",
       headers: input.preparedRequest.headers,
       body: JSON.stringify(input.preparedRequest.body),
-      signal
+      signal: timeout.signal
     });
 
     if (!response.ok) {
@@ -824,11 +831,11 @@ export async function* streamOpenAICompatibleRequest(input: {
         content: error instanceof Error ? error.message : "Network streaming request failed.",
         model: input.model,
         provider: input.provider,
-        errorClass: isAbortError(error) ? "timeout" : "network"
+        errorClass: timeout.classify(error) ?? "network"
       }
     };
   } finally {
-    cleanup();
+    timeout.cleanup();
   }
 }
 
@@ -1023,33 +1030,6 @@ function modelLikelySupportsLocalTools(model: string): boolean {
 
 function looksReasoningModel(model: string): boolean {
   return /reasoner|reasoning|thinking|r1|o1|o3|o4/i.test(model);
-}
-
-function createTimeoutSignal(timeoutMs: number, parentSignal: AbortSignal | undefined): {
-  signal: AbortSignal;
-  cleanup(): void;
-} {
-  const controller = new AbortController();
-  const abort = () => controller.abort(parentSignal?.reason);
-  const timeout = setTimeout(() => controller.abort(new Error(`Timed out after ${timeoutMs}ms`)), timeoutMs);
-
-  if (parentSignal?.aborted === true) {
-    abort();
-  } else {
-    parentSignal?.addEventListener("abort", abort, { once: true });
-  }
-
-  return {
-    signal: controller.signal,
-    cleanup() {
-      clearTimeout(timeout);
-      parentSignal?.removeEventListener("abort", abort);
-    }
-  };
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
 }
 
 function compactObject(value: Record<string, unknown>): Record<string, unknown> {

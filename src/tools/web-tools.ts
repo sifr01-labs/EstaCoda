@@ -12,6 +12,7 @@ import { isAlwaysBlockedUrl, isSafeUrl, redactUrlForMetadata, scanUrlForSecrets,
 import { checkWebsiteAccess, loadWebsiteBlocklist } from "../browser/website-policy.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { analyzeImageWithVision } from "./vision-tools.js";
+import { createTimeoutSignal } from "../utils/timeout-signal.js";
 import {
   registerDefaultWebResearchProviders,
   selectWebResearchProvider
@@ -1478,13 +1479,16 @@ async function extractWithFetch(input: {
   debug: BrowserDebugSession;
   signal?: AbortSignal;
 }) {
-  const { signal, cleanup } = createTimeoutSignal(30_000, input.signal);
+  const timeout = createTimeoutSignal({
+    timeoutMs: 30_000,
+    parentSignal: input.signal
+  });
 
   try {
     const { response, url, redirectCount } = await fetchWithGuardedRedirects(input.url, {
       fetch: input.fetch,
       guardUrl: input.guardUrl,
-      signal
+      signal: timeout.signal
     });
     const raw = await response.text();
     const contentType = response.headers.get("content-type") ?? undefined;
@@ -1549,7 +1553,7 @@ async function extractWithFetch(input: {
       }
     }, input.debug);
   } finally {
-    cleanup();
+    timeout.cleanup();
   }
 }
 
@@ -1716,29 +1720,6 @@ function normalizeUrl(url: string | undefined): string | undefined {
   } catch {
     return undefined;
   }
-}
-
-function createTimeoutSignal(timeoutMs: number, parentSignal: AbortSignal | undefined): {
-  signal: AbortSignal;
-  cleanup(): void;
-} {
-  const controller = new AbortController();
-  const abort = () => controller.abort(parentSignal?.reason);
-  const timeout = setTimeout(() => controller.abort(new Error(`Timed out after ${timeoutMs}ms`)), timeoutMs);
-
-  if (parentSignal?.aborted === true) {
-    abort();
-  } else {
-    parentSignal?.addEventListener("abort", abort, { once: true });
-  }
-
-  return {
-    signal: controller.signal,
-    cleanup() {
-      clearTimeout(timeout);
-      parentSignal?.removeEventListener("abort", abort);
-    }
-  };
 }
 
 function extractReadableText(raw: string, contentType: string | undefined): string {

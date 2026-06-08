@@ -17,6 +17,7 @@ import {
   mergeReasoningParts,
   reasoningMetadataFromReasoning
 } from "./provider-reasoning.js";
+import { createTimeoutSignal } from "../utils/timeout-signal.js";
 
 export type OpenAIResponsesProviderOptions = {
   id: ProviderId;
@@ -231,14 +232,17 @@ export async function executeResponsesRequest(input: {
   timeoutMs: number;
   signal?: AbortSignal;
 }): Promise<ProviderResponse> {
-  const { signal, cleanup } = createTimeoutSignal(input.timeoutMs, input.signal);
+  const timeout = createTimeoutSignal({
+    timeoutMs: input.timeoutMs,
+    parentSignal: input.signal
+  });
 
   try {
     const response = await input.fetch(input.preparedRequest.url, {
       method: "POST",
       headers: input.preparedRequest.headers,
       body: JSON.stringify(input.preparedRequest.body),
-      signal
+      signal: timeout.signal
     });
 
     if (!response.ok) {
@@ -267,10 +271,10 @@ export async function executeResponsesRequest(input: {
       content: error instanceof Error ? error.message : "Network request failed.",
       model: input.model,
       provider: input.provider,
-      errorClass: isAbortError(error) ? "timeout" : "network"
+      errorClass: timeout.classify(error) ?? "network"
     };
   } finally {
-    cleanup();
+    timeout.cleanup();
   }
 }
 
@@ -526,33 +530,6 @@ function classifyProviderError(code: string | undefined): string {
   if (/model|not_found|unavailable/i.test(code)) return "model-unavailable";
   if (/timeout/i.test(code)) return "timeout";
   return "unknown";
-}
-
-function createTimeoutSignal(timeoutMs: number, parentSignal: AbortSignal | undefined): {
-  signal: AbortSignal;
-  cleanup(): void;
-} {
-  const controller = new AbortController();
-  const abort = () => controller.abort(parentSignal?.reason);
-  const timeout = setTimeout(() => controller.abort(new Error(`Timed out after ${timeoutMs}ms`)), timeoutMs);
-
-  if (parentSignal?.aborted === true) {
-    abort();
-  } else {
-    parentSignal?.addEventListener("abort", abort, { once: true });
-  }
-
-  return {
-    signal: controller.signal,
-    cleanup() {
-      clearTimeout(timeout);
-      parentSignal?.removeEventListener("abort", abort);
-    }
-  };
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
 }
 
 async function safeErrorText(response: { json(): Promise<unknown>; text(): Promise<string> }): Promise<string> {
