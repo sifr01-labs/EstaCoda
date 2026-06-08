@@ -5,6 +5,7 @@ import type { AgentLoop, AgentLoopInput, AgentLoopResponse } from "../runtime/ag
 import type { WorkflowRun, WorkflowRunId, WorkflowStep, RunId } from "./types.js";
 import type { WorkflowStore } from "./workflow-store.js";
 import type { WorkflowEventSummaryService } from "./workflow-event-summary-service.js";
+import { normalizeWorkflowActivationReason } from "../contracts/workflow-context.js";
 
 export type WorkflowAgentLoopAdapterOptions = {
   agentLoop: AgentLoop;
@@ -83,7 +84,12 @@ export class WorkflowAgentLoopAdapter {
       text: turnText,
       channel: input.channel,
       signal: input.signal,
-      onEvent: input.onEvent
+      onEvent: input.onEvent,
+      workflow: {
+        runId,
+        ...(stepId === undefined ? {} : { stepId }),
+        activationReason: normalizeWorkflowActivationReason(input.run.metadata.activationReason)
+      }
     });
 
     // 4. Obtain real trajectory/run id from AgentLoop (never synthetic)

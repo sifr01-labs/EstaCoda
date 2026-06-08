@@ -301,6 +301,57 @@ async function createAgentLoop(input: {
 }
 
 describe("AgentLoop provider availability gating", () => {
+  it("records workflow context on active workflow turns", async () => {
+    const { loop, sessionDb, sessionId, trajectoryRecorder } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("done")
+    });
+
+    await loop.handle({
+      text: "continue workflow",
+      channel: "cli",
+      trustedWorkspace: true,
+      workflow: {
+        runId: "workflow-run-1",
+        stepId: "workflow-step-1",
+        activationReason: "explicit"
+      }
+    });
+
+    const messages = await sessionDb.listMessages(sessionId);
+    expect(messages[0]?.metadata?.workflow).toEqual({
+      runId: "workflow-run-1",
+      stepId: "workflow-step-1",
+      activationReason: "explicit"
+    });
+    const userInput = trajectoryRecorder.snapshot().events.find((event) => event.kind === "user-input");
+    expect(userInput?.data.workflow).toEqual({
+      runId: "workflow-run-1",
+      stepId: "workflow-step-1",
+      activationReason: "explicit"
+    });
+  });
+
+  it("does not record workflow context on normal non-workflow turns", async () => {
+    const { loop, sessionDb, sessionId, trajectoryRecorder } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("done")
+    });
+
+    await loop.handle({
+      text: "normal turn",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    const messages = await sessionDb.listMessages(sessionId);
+    expect(messages[0]?.metadata).not.toHaveProperty("workflow");
+    const userInput = trajectoryRecorder.snapshot().events.find((event) => event.kind === "user-input");
+    expect(userInput?.data).not.toHaveProperty("workflow");
+  });
+
   it("runs deterministic skill playbook when ProviderTurnLoop cannot run provider", async () => {
     const runSkillPlaybook = vi.fn(async () => [execution]);
     const { loop, providerTurnLoop } = await createAgentLoop({

@@ -47,6 +47,7 @@ import { summarizeProviderFailure } from "../providers/provider-diagnostics.js";
 import type { SessionCompressionService } from "../prompt/session-compression-service.js";
 import { estimateMessagesTokensRough, estimateTextTokensRough } from "../prompt/token-estimator.js";
 import { redactSensitiveText } from "../utils/redaction.js";
+import type { WorkflowRuntimeContext } from "../contracts/workflow-context.js";
 
 export type AgentLoopInput = {
   text: string;
@@ -57,6 +58,7 @@ export type AgentLoopInput = {
   onEvent?: RuntimeEventSink;
   signal?: AbortSignal;
   inputMetadata?: Record<string, unknown>;
+  workflow?: WorkflowRuntimeContext;
 };
 
 export type AgentLoopResponse = {
@@ -284,6 +286,7 @@ export class AgentLoop {
       channel: input.channel,
       metadata: {
         ...input.inputMetadata,
+        ...(input.workflow === undefined ? {} : { workflow: input.workflow }),
         attachments: summarizeAttachments(attachments),
         contextReferences: context?.references.map((reference) => reference.raw) ?? [],
         projectContextFiles: this.#projectContext?.files.map((file) => file.source) ?? []
@@ -293,7 +296,8 @@ export class AgentLoop {
       text: effectiveText,
       channel: input.channel,
       attachments: summarizeAttachments(attachments),
-      contextReferences: context?.references.map((reference) => reference.raw) ?? []
+      contextReferences: context?.references.map((reference) => reference.raw) ?? [],
+      ...(input.workflow === undefined ? {} : { workflow: input.workflow })
     });
     await this.#emitLiveContextUsageEstimate({
       onEvent: input.onEvent,
