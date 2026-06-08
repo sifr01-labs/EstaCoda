@@ -1,4 +1,7 @@
 import type { IntentRoute } from "../contracts/intent.js";
+import type { LoadedSkill, SkillDefinition } from "../contracts/skill.js";
+import { compileSkillPlaybook } from "../skills/skill-playbook-planner.js";
+import { convertSkillPlaybookToWorkflowPlan } from "./skill-playbook-to-workflow-plan.js";
 import type { WorkflowEngine } from "./workflow-engine.js";
 import type { WorkflowPlan, WorkflowRun } from "./types.js";
 
@@ -13,6 +16,13 @@ export type BeginExplicitWorkflowInput = {
 export type BeginExplicitWorkflowResult = {
   run: WorkflowRun;
   plan: WorkflowPlan;
+};
+
+export type BeginSkillPlaybookWorkflowInput = {
+  engine: WorkflowEngine;
+  sessionId: string;
+  objective: string;
+  skill: LoadedSkill | SkillDefinition;
 };
 
 export function summarizeObjective(objective: string): string {
@@ -60,6 +70,29 @@ export async function beginExplicitWorkflowRun(input: BeginExplicitWorkflowInput
   return { run: startResult.run, plan };
 }
 
+export async function beginSkillPlaybookWorkflowRun(input: BeginSkillPlaybookWorkflowInput): Promise<BeginExplicitWorkflowResult> {
+  const objective = input.objective.trim().replace(/\s+/gu, " ");
+  const compiled = compileSkillPlaybook(input.skill);
+  const plan = convertSkillPlaybookToWorkflowPlan(compiled);
+  const run = await input.engine.createWorkflowRun({
+    sessionId: input.sessionId,
+    intent: makeSkillPlaybookWorkflowIntent(objective, input.skill.name),
+    plan,
+    selectedSkill: input.skill.name,
+    metadata: {
+      activationReason: "playbook",
+      objective,
+      skillName: input.skill.name,
+      ...(plan.metadata === undefined ? {} : { playbook: plan.metadata })
+    }
+  });
+  const startResult = await input.engine.startWorkflowRun(run.id);
+  if (!startResult.ok) {
+    throw new Error(startResult.error);
+  }
+  return { run: startResult.run, plan };
+}
+
 function makeExplicitWorkflowIntent(objective: string): IntentRoute {
   return {
     nativeIntent: "general",
@@ -77,5 +110,25 @@ function makeExplicitWorkflowIntent(objective: string): IntentRoute {
       }
     ],
     rationale: "User explicitly began a durable workflow."
+  };
+}
+
+function makeSkillPlaybookWorkflowIntent(objective: string, skillName: string): IntentRoute {
+  return {
+    nativeIntent: "general",
+    labels: ["workflow", "workflow-playbook"],
+    confidence: 1,
+    suggestedToolsets: [],
+    suggestedSkills: [],
+    confirmationRequired: false,
+    evidence: [
+      {
+        kind: "slash-invocation",
+        source: "workflow.begin",
+        detail: `${skillName}: ${objective}`,
+        weight: 1
+      }
+    ],
+    rationale: "User explicitly began a durable workflow from a skill playbook."
   };
 }

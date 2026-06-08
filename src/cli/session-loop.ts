@@ -61,7 +61,7 @@ import {
 } from "./voice-mode.js";
 import { ActiveTurnCommandController } from "./active-turn-command-controller.js";
 import { createFilePasteReferenceStore } from "./paste-interceptor.js";
-import { beginExplicitWorkflowRun } from "../workflow/workflow-begin.js";
+import { beginExplicitWorkflowRun, beginSkillPlaybookWorkflowRun } from "../workflow/workflow-begin.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -1964,6 +1964,8 @@ async function handleWorkflowCommand(input: {
       return [
         "Workflow operator commands (v0.8)",
         "  /workflow begin <objective>        Create, start, and activate a workflow",
+        "  /workflow begin --skill <name> <objective>",
+        "                                      Create a workflow from a skill playbook",
         "  /workflow status [runId]           Show workflow status (active workflow if omitted)",
         "  /workflow pause <runId> [reason]   Request pause at next safe boundary",
         "  /workflow resume <runId>           Resume a paused/interrupted/waiting workflow",
@@ -1982,13 +1984,31 @@ async function handleWorkflowCommand(input: {
       ].join("\n");
 
     case "begin": {
-      const objective = rest.join(" ").trim();
-      if (objective.length === 0) return "Usage: /workflow begin <objective>";
-      const result = await beginExplicitWorkflowRun({
-        engine: workflow.engine,
-        sessionId: input.runtime.sessionId,
-        objective
-      });
+      const parsed = parseInteractiveWorkflowBeginArgs(rest);
+      if (parsed.error !== undefined) return parsed.error;
+      if (parsed.objective.length === 0) {
+        return parsed.skillName === undefined
+          ? "Usage: /workflow begin <objective>"
+          : "Usage: /workflow begin --skill <skillName> <objective>";
+      }
+      const resolveSkill = input.runtime.resolveSkill;
+      if (parsed.skillName !== undefined && resolveSkill === undefined) {
+        return "Skill-backed workflow begin is not available in this runtime.";
+      }
+      const skill = parsed.skillName === undefined ? undefined : resolveSkill?.(parsed.skillName);
+      if (parsed.skillName !== undefined && skill === undefined) return `Skill not found: ${parsed.skillName}`;
+      const result = skill === undefined
+        ? await beginExplicitWorkflowRun({
+            engine: workflow.engine,
+            sessionId: input.runtime.sessionId,
+            objective: parsed.objective
+          })
+        : await beginSkillPlaybookWorkflowRun({
+            engine: workflow.engine,
+            sessionId: input.runtime.sessionId,
+            objective: parsed.objective,
+            skill
+          });
       workflow.setActiveRunId(result.run.id);
       return [
         `Created workflow: ${result.run.id}`,
@@ -2165,6 +2185,30 @@ async function handleWorkflowCommand(input: {
     default:
       return `Unknown workflow command: ${subcommand}\nUse /workflow help for available commands.`;
   }
+}
+
+function parseInteractiveWorkflowBeginArgs(args: string[]): { skillName?: string; objective: string; error?: string } {
+  const objectiveParts: string[] = [];
+  let skillName: string | undefined;
+
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === "--skill") {
+      const value = args[index + 1];
+      if (value === undefined || value.startsWith("-")) {
+        return { objective: "", error: "Usage: /workflow begin --skill <skillName> <objective>" };
+      }
+      skillName = value;
+      index++;
+      continue;
+    }
+    objectiveParts.push(arg);
+  }
+
+  return {
+    skillName,
+    objective: objectiveParts.join(" ").trim()
+  };
 }
 
 async function renderSecurityAudit(

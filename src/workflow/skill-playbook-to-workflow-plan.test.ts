@@ -47,7 +47,8 @@ describe("convertSkillPlaybookToWorkflowPlan", () => {
   it("stays inert during normal runtime execution paths", async () => {
     const runtimeSources = await Promise.all([
       readFile(new URL("../runtime/agent-loop.ts", import.meta.url), "utf8"),
-      readFile(new URL("../runtime/skill-playbook-runner.ts", import.meta.url), "utf8")
+      readFile(new URL("../runtime/skill-playbook-runner.ts", import.meta.url), "utf8"),
+      readFile(new URL("../runtime/create-runtime.ts", import.meta.url), "utf8")
     ]);
 
     for (const source of runtimeSources) {

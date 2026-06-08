@@ -9,7 +9,8 @@ import { WorkflowEngine } from "../workflow/workflow-engine.js";
 import { WorkflowCommandDispatcher } from "../workflow/workflow-command-dispatcher.js";
 import { WorkflowProcessRegistry } from "../workflow/workflow-process-registry.js";
 import { WorkflowEventSummaryService, DEFAULT_WORKFLOW_EVENT_SUMMARY_CONFIG } from "../workflow/workflow-event-summary-service.js";
-import { beginExplicitWorkflowRun } from "../workflow/workflow-begin.js";
+import { beginExplicitWorkflowRun, beginSkillPlaybookWorkflowRun } from "../workflow/workflow-begin.js";
+import type { LoadedSkill, SkillDefinition } from "../contracts/skill.js";
 
 export async function workflowCommand(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const [subcommand, ...restArgs] = args;
@@ -20,7 +21,10 @@ export async function workflowCommand(options: CliOptions, args: string[]): Prom
   try {
     switch (subcommand) {
       case "begin":
-        return await workflowBegin(db, profileId, restArgs, options.runtime?.sessionId);
+        return await workflowBegin(db, profileId, restArgs, {
+          runtimeSessionId: options.runtime?.sessionId,
+          resolveSkill: options.runtime?.resolveSkill
+        });
       case "list":
         return await workflowList(db, profileId);
       case "show":
@@ -98,6 +102,8 @@ function workflowHelp(): string {
     "EstaCoda workflow commands (v0.8)",
     "  estacoda workflow begin --session <sessionId> <objective>",
     "                                                   Create and start a workflow run",
+    "  estacoda workflow begin --skill <skillName> --session <sessionId> <objective>",
+    "                                                   Create and start a skill playbook workflow run",
     "  estacoda workflow list                          List workflow runs",
     "  estacoda workflow show <runId>                   Show workflow run details",
     "  estacoda workflow status <runId>                 Show workflow run status",
@@ -116,9 +122,17 @@ function workflowHelp(): string {
   ].join("\n");
 }
 
-async function workflowBegin(db: SQLiteSessionDB, profileId: string, args: string[], runtimeSessionId?: string): Promise<CliCommandResult> {
+async function workflowBegin(
+  db: SQLiteSessionDB,
+  profileId: string,
+  args: string[],
+  options: {
+    runtimeSessionId?: string;
+    resolveSkill?: (name: string) => LoadedSkill | SkillDefinition | undefined;
+  } = {}
+): Promise<CliCommandResult> {
   const parsed = parseWorkflowBeginArgs(args);
-  const sessionId = parsed.sessionId ?? runtimeSessionId;
+  const sessionId = parsed.sessionId ?? options.runtimeSessionId;
   if (parsed.error !== undefined) {
     return { handled: true, exitCode: 1, output: parsed.error };
   }
@@ -134,7 +148,13 @@ async function workflowBegin(db: SQLiteSessionDB, profileId: string, args: strin
   }
   const objective = parsed.objective;
   if (objective.length === 0) {
-    return { handled: true, exitCode: 1, output: "Usage: estacoda workflow begin --session <sessionId> <objective>" };
+    return {
+      handled: true,
+      exitCode: 1,
+      output: parsed.skillName === undefined
+        ? "Usage: estacoda workflow begin --session <sessionId> <objective>"
+        : "Usage: estacoda workflow begin --skill <skillName> --session <sessionId> <objective>"
+    };
   }
 
   const session = await db.getSessionForProfile(sessionId, profileId);
@@ -143,11 +163,29 @@ async function workflowBegin(db: SQLiteSessionDB, profileId: string, args: strin
   }
 
   const { engine } = createWorkflowServices(db, profileId);
-  const result = await beginExplicitWorkflowRun({
-    engine,
-    sessionId,
-    objective
-  });
+  const skill = parsed.skillName === undefined ? undefined : options.resolveSkill?.(parsed.skillName);
+  if (parsed.skillName !== undefined && options.resolveSkill === undefined) {
+    return {
+      handled: true,
+      exitCode: 1,
+      output: "Skill-backed workflow begin is not available in standalone CLI without a runtime skill registry."
+    };
+  }
+  if (parsed.skillName !== undefined && skill === undefined) {
+    return { handled: true, exitCode: 1, output: `Skill not found: ${parsed.skillName}` };
+  }
+  const result = skill === undefined
+    ? await beginExplicitWorkflowRun({
+        engine,
+        sessionId,
+        objective
+      })
+    : await beginSkillPlaybookWorkflowRun({
+        engine,
+        sessionId,
+        objective,
+        skill
+      });
 
   return {
     handled: true,
@@ -160,9 +198,10 @@ async function workflowBegin(db: SQLiteSessionDB, profileId: string, args: strin
   };
 }
 
-function parseWorkflowBeginArgs(args: string[]): { sessionId?: string; objective: string; error?: string } {
+function parseWorkflowBeginArgs(args: string[]): { sessionId?: string; skillName?: string; objective: string; error?: string } {
   const objectiveParts: string[] = [];
   let sessionId: string | undefined;
+  let skillName: string | undefined;
 
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
@@ -175,11 +214,21 @@ function parseWorkflowBeginArgs(args: string[]): { sessionId?: string; objective
       index++;
       continue;
     }
+    if (arg === "--skill") {
+      const value = args[index + 1];
+      if (value === undefined || value.startsWith("-")) {
+        return { objective: "", error: "Usage: estacoda workflow begin --skill <skillName> --session <sessionId> <objective>" };
+      }
+      skillName = value;
+      index++;
+      continue;
+    }
     objectiveParts.push(arg);
   }
 
   return {
     sessionId,
+    skillName,
     objective: objectiveParts.join(" ").trim()
   };
 }

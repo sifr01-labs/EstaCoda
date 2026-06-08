@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { AuxiliaryModelConfig, ModelProfile, ResolvedModelRoute } from "../contracts/provider.js";
 import type { BrowserBackend } from "../contracts/browser.js";
 import type { ExternalMemoryProvider, MemoryPromotionRecord, MemoryProvider } from "../contracts/memory.js";
-import type { SkillCatalogEntry } from "../contracts/skill.js";
+import type { LoadedSkill, SkillCatalogEntry, SkillDefinition } from "../contracts/skill.js";
 import type { RegisteredTool, ToolDefinition, ToolProvider, ToolsetName } from "../contracts/tool.js";
 import type { RuntimeToolContext, SessionToolContext } from "../contracts/tool-context.js";
 import { ArtifactStore } from "../artifacts/artifact-store.js";
@@ -340,6 +340,7 @@ export type Runtime = {
   getStartupReadiness(): Promise<StartupReadinessSnapshot>;
   tools(): import("../contracts/tool.js").ToolDefinition[];
   skills(): SkillCatalogEntry[];
+  resolveSkill?(name: string): LoadedSkill | SkillDefinition | undefined;
   latestResumeNote(): Promise<string | undefined>;
   inspectMemoryPromotions(): Promise<MemoryPromotionRecord[]>;
   recallSession?(query: string): Promise<SessionRecallResult>;
@@ -1190,6 +1191,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     },
     skills() {
       return sessionSkillCatalog;
+    },
+    resolveSkill(name) {
+      return sessionSkillRegistry.resolve(name);
     },
     async latestResumeNote() {
       const events = await sessionDb.listEvents(sessionRuntimeContext.currentSessionId());

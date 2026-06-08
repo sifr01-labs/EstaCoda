@@ -11,9 +11,11 @@ import { resolveProfileStateHome } from "../config/profile-home.js";
 import { FakeWorkflowStore } from "../workflow/fake-workflow-store.js";
 import { WorkflowEngine } from "../workflow/workflow-engine.js";
 import { WorkflowLockService } from "../workflow/workflow-lock-service.js";
+import type { WorkflowStep } from "../workflow/types.js";
 import type { Prompt } from "./readline-prompt.js";
 import type { SelectPromptInput } from "./interactive-select.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
+import type { SkillDefinition } from "../contracts/skill.js";
 
 function fakeRuntime(modelInfo: {
   provider: string;
@@ -1179,12 +1181,98 @@ describe("session-loop /workflow begin", () => {
       })
     });
   });
+
+  it("/workflow begin --skill creates, starts, and activates a skill playbook workflow run", async () => {
+    const runtime = workflowRuntime([workflowSkill()]);
+
+    const result = await handleSlashCommand({
+      text: "/workflow begin --skill research-skill research auth options",
+      runtime: runtime as any,
+      output,
+      renderer: { render: renderPlain },
+      workspaceRoot: tempHome,
+      homeDir: tempHome
+    });
+
+    expect(result).toBe(false);
+    const outputText = outputChunks.join("");
+    expect(outputText).toContain("Created workflow: ");
+    expect(outputText).toContain("Started workflow: ");
+    expect(outputText).toContain("Activated workflow: ");
+
+    const activeRunId = runtime.workflow.activeRunId;
+    if (activeRunId === null) throw new Error("expected active workflow run");
+    const run = await runtime.workflow.store.getWorkflowRun(activeRunId);
+    expect(run).toEqual(expect.objectContaining({
+      id: activeRunId,
+      sessionId: "test-session",
+      status: "running",
+      selectedSkill: "research-skill",
+      metadata: {
+        activationReason: "playbook",
+        objective: "research auth options",
+        skillName: "research-skill",
+        playbook: {
+          source: "skill-playbook",
+          skill: "research-skill"
+        }
+      }
+    }));
+
+    const steps = await runtime.workflow.store.listWorkflowSteps(activeRunId);
+    expect(steps.map((step: WorkflowStep) => step.name)).toEqual(["inspect", "summarize"]);
+    expect(steps.map((step: WorkflowStep) => step.description)).toEqual([
+      "Inspect the target material",
+      "Summarize the findings"
+    ]);
+    expect(steps[0]).toMatchObject({
+      status: "running",
+      maxRetries: 0,
+      idempotent: false,
+      failurePolicy: expect.objectContaining({
+        allowSkipIfSkippable: false,
+        defaultAction: "stop"
+      })
+    });
+  });
+
+  it("/workflow begin --skill rejects missing skill values and unknown skills", async () => {
+    const missingRuntime = workflowRuntime([workflowSkill()]);
+
+    const missingResult = await handleSlashCommand({
+      text: "/workflow begin --skill",
+      runtime: missingRuntime as any,
+      output,
+      renderer: { render: renderPlain },
+      workspaceRoot: tempHome,
+      homeDir: tempHome
+    });
+
+    expect(missingResult).toBe(false);
+    expect(outputChunks.join("")).toContain("Usage: /workflow begin --skill <skillName> <objective>");
+
+    outputChunks = [];
+    const unknownRuntime = workflowRuntime([workflowSkill()]);
+    const unknownResult = await handleSlashCommand({
+      text: "/workflow begin --skill missing-skill research auth",
+      runtime: unknownRuntime as any,
+      output,
+      renderer: { render: renderPlain },
+      workspaceRoot: tempHome,
+      homeDir: tempHome
+    });
+
+    expect(unknownResult).toBe(false);
+    expect(outputChunks.join("")).toContain("Skill not found: missing-skill");
+    expect(unknownRuntime.workflow.activeRunId).toBeNull();
+  });
 });
 
-function workflowRuntime() {
+function workflowRuntime(skills: SkillDefinition[] = []) {
   const store = new FakeWorkflowStore();
   const lockService = new WorkflowLockService({ store });
   const engine = new WorkflowEngine({ store, lockService, ownerId: "test" });
+  const skillByName = new Map(skills.map((skill) => [skill.name, skill]));
   const runtime = {
     ...fakeRuntime({
       provider: "local",
@@ -1201,9 +1289,39 @@ function workflowRuntime() {
       setActiveRunId(runId: string | null) {
         this.activeRunId = runId;
       }
+    },
+    resolveSkill(name: string) {
+      return skillByName.get(name);
     }
   };
   return runtime;
+}
+
+function workflowSkill(): SkillDefinition {
+  return {
+    name: "research-skill",
+    description: "Research skill",
+    version: "0.1.0",
+    whenToUse: ["research"],
+    requiredToolsets: ["files"],
+    playbook: [
+      {
+        id: "inspect",
+        description: "Inspect the target material",
+        toolsets: ["files"],
+        fallbackTo: ["summarize"],
+        successCriteria: ["source inspected"]
+      },
+      {
+        id: "summarize",
+        description: "Summarize the findings",
+        successCriteria: ["findings summarized"]
+      }
+    ],
+    permissionExpectations: ["auto-read"],
+    examples: [],
+    evaluations: []
+  };
 }
 
 function compactResult() {
