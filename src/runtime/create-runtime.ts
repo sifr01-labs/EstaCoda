@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { AuxiliaryModelConfig, ModelProfile, ResolvedModelRoute } from "../contracts/provider.js";
+import { deriveAgentEvolutionPolicy, type AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import type { BrowserBackend } from "../contracts/browser.js";
 import type { ExternalMemoryProvider, MemoryPromotionRecord, MemoryProvider } from "../contracts/memory.js";
 import type { LoadedSkill, SkillCatalogEntry, SkillDefinition } from "../contracts/skill.js";
@@ -331,6 +332,7 @@ function resolveRuntimeUiIdentity(options: RuntimeOptions): string {
 }
 
 export type Runtime = {
+  agentEvolutionPolicy(): AgentEvolutionPolicy;
   describe(): string;
   getStatus(): import("../contracts/view-model.js").StatusViewModel;
   getModelInfo(): import("../contracts/view-model.js").KeyValueBlockViewModel;
@@ -841,8 +843,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       memoryRetrievalService
     })
   });
+  const skillAutonomy = options.skillAutonomy ?? "suggest";
+  const agentEvolutionPolicy = deriveAgentEvolutionPolicy(skillAutonomy);
   const skillLearningManager = new SkillLearningManager({
-    autonomy: options.skillAutonomy ?? "suggest",
+    autonomy: skillAutonomy,
     registry: skillRegistry,
     localSkillsRoot,
     storePath: skillLearningStorePath,
@@ -1171,6 +1175,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
 
   return {
     sessionDb,
+    agentEvolutionPolicy() {
+      return agentEvolutionPolicy;
+    },
     get sessionId() {
       return sessionRuntimeContext.currentSessionId();
     },

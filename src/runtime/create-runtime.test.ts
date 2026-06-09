@@ -485,6 +485,76 @@ describe("createRuntime token branding", () => {
       "createRuntime requires tokens."
     );
   });
+
+  it("derives AgentEvolutionPolicy from skill autonomy without changing skill routing", async () => {
+    async function runtimeWithAlphaSkill(skillAutonomy: NonNullable<RuntimeOptions["skillAutonomy"]>) {
+      const options = await minimalRuntimeOptions();
+      const skillDir = join(options.localSkillsRoot, "alpha-route-skill");
+      await mkdir(skillDir, { recursive: true });
+      await writeFile(
+        join(skillDir, "SKILL.md"),
+        [
+          "---",
+          JSON.stringify({
+            name: "alpha-route-skill",
+            description: "Routes alpha prompts.",
+            version: "1.0.0",
+            category: "test",
+            routing: {
+              triggerPatterns: [{ type: "contains", value: "alpha route" }]
+            },
+            playbook: [{ id: "respond", description: "Respond to alpha route prompts" }]
+          }),
+          "---",
+          "Use this skill for alpha route prompts."
+        ].join("\n"),
+        "utf8"
+      );
+      return await createRuntime({
+        ...options,
+        homeDir: await mkdtemp(join(tmpdir(), "estacoda-runtime-agent-evolution-home-")),
+        sessionId: `agent-evolution-${skillAutonomy}`,
+        skillAutonomy
+      });
+    }
+
+    const suggestRuntime = await runtimeWithAlphaSkill("suggest");
+    let suggestMatchedSkills: string[];
+    let suggestSuggestedSkills: string[];
+    try {
+      const suggestResponse = await suggestRuntime.handle({
+        text: "please use the alpha route",
+        channel: "cli"
+      });
+      suggestMatchedSkills = suggestResponse.matchedSkills;
+      suggestSuggestedSkills = suggestResponse.intent.suggestedSkills.map((skill) => skill.name);
+    } finally {
+      await suggestRuntime.dispose();
+    }
+
+    const autonomousRuntime = await runtimeWithAlphaSkill("autonomous");
+    try {
+      expect(autonomousRuntime.agentEvolutionPolicy()).toMatchObject({
+        mode: "autonomous",
+        routingMode: "hybrid-plus",
+        shadowAutonomousDecisions: true,
+        autoPromoteEligibleLocalChanges: false,
+        autoRollbackEligibleLocalChanges: false
+      });
+
+      const autonomousResponse = await autonomousRuntime.handle({
+        text: "please use the alpha route",
+        channel: "cli"
+      });
+
+      expect(suggestMatchedSkills).toEqual(["alpha-route-skill"]);
+      expect(autonomousResponse.matchedSkills).toEqual(suggestMatchedSkills);
+      expect(autonomousResponse.intent.suggestedSkills.map((skill) => skill.name))
+        .toEqual(suggestSuggestedSkills);
+    } finally {
+      await autonomousRuntime.dispose();
+    }
+  });
 });
 
 describe("createRuntime MCP trust gating", () => {

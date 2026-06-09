@@ -7,6 +7,7 @@ import { runSessionLoop } from "./session-loop.js";
 import type { PromptOptions } from "./readline-prompt.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import type { Runtime } from "../runtime/create-runtime.js";
+import { deriveAgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import type { AgentLoopResponse } from "../runtime/agent-loop.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
@@ -56,6 +57,7 @@ function makeTtyInput(): NodeJS.ReadStream & {
 function createMockRuntime(overrides: Partial<Runtime> = {}): Runtime {
   const sessionDb = new InMemorySessionDB();
   const runtime: Runtime = {
+    agentEvolutionPolicy: () => deriveAgentEvolutionPolicy("suggest"),
     describe: () => "mock runtime",
     getStatus: () => ({
       kind: "status" as const,
