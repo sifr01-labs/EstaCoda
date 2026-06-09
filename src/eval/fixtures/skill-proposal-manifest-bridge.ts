@@ -53,11 +53,12 @@ export const skillProposalManifestBridgeCase: EvalCase = {
 
     const assertions = [
       assertTrue("propose returns ok", result.ok === true),
-      assertTrue("proposal has changeManifestId", isNonEmptyString(metadata?.changeManifestId)),
+      assertTrue("proposal has changeManifestId", typeof metadata?.changeManifestId === "string" && metadata.changeManifestId.length > 0),
       assertTrue("manifest exists", manifest !== undefined),
       assertEqual("manifest hypothesis", manifest?.hypothesis, "Replace old instruction with new one"),
-      assertTrue("manifest has evalCommand", isNonEmptyString(manifest?.evalCommand)),
-      assertTrue("manifest has constraintGates", (manifest?.constraintGates?.length ?? 0) > 0)
+      assertEqual("manifest evalCommand is allowlisted", manifest?.evalCommand, "pnpm run eval:fixtures"),
+      assertEqual("manifest first constraint gate is allowlisted", manifest?.constraintGates?.[0], "pnpm run typecheck"),
+      assertEqual("manifest second constraint gate is allowlisted", manifest?.constraintGates?.[1], "pnpm run smoke")
     ];
 
     return buildResult(
@@ -68,7 +69,3 @@ export const skillProposalManifestBridgeCase: EvalCase = {
     );
   }
 };
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0;
-}

@@ -14,8 +14,8 @@ The skill system is the most mature subsystem in EstaCoda. It provides procedura
 | `src/skills/skill-loader.ts` | 916 | Load skills from official, personal, project, and external roots |
 | `src/skills/skill-registry.ts` | ~180 | Hold loaded skills, filter visibility |
 | `src/skills/skill-tools.ts` | 2,292 | Agent-facing skill CRUD tools |
-| `src/skills/skill-evolution.ts` | ~666 | Propose, review, approve, reject, promote patches |
-| `src/skills/skill-learning.ts` | ~240 | Observe workflows and create project skills |
+| `src/skills/skill-evolution.ts` | ~1,100 | Store observations, candidates, proposals, experiments, evals, promotions, snapshots, and rollback metadata |
+| `src/skills/skill-learning.ts` | ~240 | Observe completed turns and emit evidence/candidates; not mutation authority |
 | `src/skills/skill-playbook-planner.ts` | ~140 | Compile skill playbook plans |
 | `src/skills/skill-usage-telemetry.ts` | ~120 | Usage tracking and route telemetry |
 | `src/skills/skill-bundled-sync.ts` | ~100 | Sync bundled official skills |
@@ -66,12 +66,12 @@ The agent can perform these operations via `skill-tools.ts`:
 
 ## Evolution
 
-Skill evolution is **governed, not autonomous**. The system improves skills through an evidence-backed, reviewable, reversible pipeline.
+Skill evolution is **governed, not autonomous mutation**. In Phase 1A, Agent Evolution is the user-facing control plane for reviewable self-improvement: policy, route/outcome telemetry, evidence, learning candidates, governed proposals, experiment records, and review listings.
 
 **Governed loop:**
 
 ```
-observe → propose → review → approve/reject → promote → rollback (if needed)
+observe → evidence/candidate → proposal → eval/review → manual promotion → rollback if needed
 ```
 
 **Current capabilities:**
@@ -79,7 +79,13 @@ observe → propose → review → approve/reject → promote → rollback (if n
 | Capability | Status |
 |------------|--------|
 | Usage telemetry (`skill-usage-telemetry.ts`) | `smoke-tested` |
-| Observe with `candidateImprovement` → auto-create ChangeManifest | `smoke-tested` |
+| Agent Evolution policy derived from persisted `skills.autonomy` | `tested` |
+| Route/outcome telemetry fields for routing evidence and future advisory signals | `tested` |
+| SkillLearningManager observes completed turns and emits evidence/candidates | `tested` |
+| Governed proposal kinds: `skill_patch`, `skill_create`, `routing_metadata_update` | `tested` |
+| EvolutionExperiment records for evidence/proposal/metric grouping | `tested` |
+| `estacoda proposal list` review queue and `inspect` detail view | `tested` |
+| Observe with `candidateImprovement` → create ChangeManifest | `smoke-tested` |
 | Propose patches (`skill-evolution.ts`) | `smoke-tested` |
 | Review proposals with trust/risk scoring | `smoke-tested` |
 | Approve/reject/promote via agent tools and CLI | `smoke-tested` |
@@ -94,18 +100,26 @@ observe → propose → review → approve/reject → promote → rollback (if n
 
 **What "governed" means:**
 
-- Proposed changes carry a `ChangeManifest` with hypothesis, predicted impact, risk level, eval plan, constraint gates, and rollback plan.
+- `SkillLearningManager` is an evidence source. It does not directly create, patch, promote, or mutate skills as final authority.
+- `SkillEvolutionStore` owns observations, learning candidates, proposals, eval/promotion/snapshot/rollback metadata, experiment records, and experiment links.
+- `ChangeManifestStore` owns change manifests. Evolution records may link to manifests, but manifests are not stored in `SkillEvolutionStore`.
+- Proposed manifest-backed changes carry a `ChangeManifest` with hypothesis, predicted impact, risk level, eval plan, constraint gates, and rollback plan.
 - High-risk or untrusted proposals require explicit approval before promotion.
 - Promotion runs eval gates; failing gates block the promotion.
 - No silent mutation — every change is logged, reviewable, and reversible.
-- Bundled skills evolve only through local working copies.
-- External skills remain read-only.
+- Bundled and external skill assets are not mutated. Bundled skills can be shadowed only by local/profile-owned working copies.
+- Autonomous mode in Phase 1A is shadow-only: it records policy decisions and proposal metadata, but it does not auto-promote, auto-rollback, or bypass gates.
+- Routing remains deterministic in Phase 1A. Routing quality telemetry is evidence for Agent Evolution, not a new routing system.
 
 **Limitations:**
 
 - Skill evals are metadata/workflow-scoring only. No real task fixture execution yet.
 - Tool-description and routing-metadata proposals are representable as manifest targets but not auto-applied.
-- No autonomous proposal generation from observations (observations create lightweight manifests; full proposals require explicit `skill.propose_patch`).
+- No autonomous promotion or rollback automation.
+- No semantic retrieval, provider embeddings, compact skill index fallback, or LLM reranking.
+- No taskClass routing, supporting candidates, or advisory route tools such as `skill.reject_route` and `skill.search_routes`.
+- No skill fork/merge/archive governed proposal operations in Phase 1A.
+- No hygiene scanning loop for automatic proposal creation.
 - `skill` namespace CLI (`estacoda skill list`, `estacoda skill inspect`) is deferred to post-v0.7.
 
 **CLI surface:**
@@ -124,14 +138,16 @@ estacoda evolution export --dataset <path> [--since <date>] [--skill <name>]
 
 ## Agent Evolution
 
-Agent Evolution controls whether EstaCoda may learn reusable Skills from workflow patterns. The persisted config key is `skills.autonomy`; the user-facing setup label is Agent Evolution.
+Agent Evolution is the user-facing control plane for EstaCoda's reviewable self-improvement behavior. The persisted compatibility key remains `skills.autonomy`; setup and settings present it as Agent Evolution.
 
 | Mode | Behavior |
 |------|----------|
-| `none` | Agent Evolution is off |
-| `suggest` | Records candidates after repeated success; does not write files |
-| `proactive` | Auto-creates project skills after repeated successful bounded local workflows |
-| `autonomous` | Auto-creates after first successful bounded local workflow |
+| `none` | No Agent Evolution evidence or proposals |
+| `suggest` | Records evidence/candidates and creates reviewable proposal records; no promotion |
+| `proactive` | Prepares stronger review proposals and eval metadata; asks before promotion |
+| `autonomous` | Records shadow-only autonomous decisions and proposal metadata; no real auto-promotion or auto-rollback in Phase 1A |
+
+Roadmap behavior must remain labeled as planned until implemented: semantic/local retrieval, embeddings, reranking, compact skill index fallback, taskClass routing, supporting candidates, advisory route tools, real autonomous promotion, auto-rollback, skill fork/merge/archive, and hygiene scanning.
 
 ## Contracts
 

@@ -20,11 +20,30 @@ export const ALLOWED_GATES: Readonly<Record<string, readonly string[]>> = {
   "pnpm run eval:fixtures": ["pnpm", "run", "eval:fixtures"],
 };
 
+const GATE_COMMAND_ALIASES: Readonly<Record<string, string>> = {
+  typecheck: "pnpm run typecheck",
+  test: "pnpm run test",
+  smoke: "pnpm run smoke",
+  "eval:fixtures": "pnpm run eval:fixtures",
+};
+
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const INHERITED_COREPACK_HOME = resolveInheritedCorepackHome();
 
 export function normalizeCommand(value: string): string {
   return value.trim().replace(/\s+/gu, " ");
+}
+
+export function normalizeGateCommand(value: string): string {
+  const normalized = normalizeCommand(value);
+  return GATE_COMMAND_ALIASES[normalized] ?? normalized;
+}
+
+export function isAllowedGateCommand(
+  value: string,
+  allowedGates: Readonly<Record<string, readonly string[]>> = ALLOWED_GATES
+): boolean {
+  return allowedGates[normalizeGateCommand(value)] !== undefined;
 }
 
 export async function runConstraintGates(
@@ -34,7 +53,7 @@ export async function runConstraintGates(
 ): Promise<GateResult[]> {
   const results: GateResult[] = [];
   for (const gate of gates) {
-    const normalized = normalizeCommand(gate);
+    const normalized = normalizeGateCommand(gate);
     const argv = allowedGates[normalized];
     if (argv === undefined) {
       results.push({

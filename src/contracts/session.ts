@@ -8,7 +8,13 @@ import type { MemoryConclusion, SkillOutcome } from "./memory.js";
 import type { SecurityAssessment, SecurityDecision } from "./security.js";
 import type { ToolResult, ToolRiskClass } from "./tool.js";
 import type { ToolCallPlan } from "./tool-plan.js";
-import type { SkillLifecycleState, SkillRouteTelemetry, CompiledSkillPlaybook } from "./skill.js";
+import type {
+  SkillLifecycleState,
+  SkillRouteTelemetry,
+  SkillRouteTelemetryDetails,
+  SkillRouteFinalOutcomeStatus,
+  CompiledSkillPlaybook
+} from "./skill.js";
 import type { FailureRecord } from "./failure.js";
 import type {
   ModelProfile,
@@ -412,6 +418,7 @@ export type SessionEvent =
   | {
       kind: "skill-route-usage";
       timestamp: string;
+      promptHash?: string;
       skillName?: string;
       nativeIntent: string;
       labels: string[];
@@ -429,10 +436,22 @@ export type SessionEvent =
         promptHash: string;
         labels: string[];
         confidence: number;
+        routeConfidence?: number;
         selectedSkill?: string;
+        finalSkillUsed?: string;
         explicitInvocation: boolean;
         candidates: SkillRouteTelemetry[];
-      };
+        candidatesShown?: string[];
+        finalOutcomeStatus?: SkillRouteFinalOutcomeStatus;
+      } & SkillRouteTelemetryDetails;
+    }
+  | {
+      kind: "skill-route-advisory";
+      timestamp: string;
+      promptHash: string;
+      selectedSkill?: string;
+      action: "reject_route" | "search_routes" | "rerank";
+      details: SkillRouteTelemetryDetails;
     }
   | {
       kind: "skill-lifecycle-changed";
@@ -513,6 +532,11 @@ export type SessionEvent =
         requiredToolsets: string[];
         bounded: boolean;
         status: "observed" | "candidate" | "created";
+        evidenceIds?: string[];
+        candidateId?: string;
+        candidateKind?: string;
+        promptHash?: string;
+        selectedSkillName?: string;
         createdSkillName?: string;
         createdSkillPath?: string;
         updatedAt: string;

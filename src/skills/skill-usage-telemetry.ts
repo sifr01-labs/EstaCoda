@@ -11,20 +11,25 @@ export type SkillRouteTelemetryInput = {
   evidence?: string[];
   routeId?: string;
   prompt?: string;
+  promptHash?: string;
   matchedAt?: string;
+  taskClass?: string;
 };
 
 export function createSkillRouteTelemetry(input: SkillRouteTelemetryInput): SkillRouteTelemetry {
+  const promptHash = input.promptHash ?? (input.prompt === undefined ? undefined : hashSkillRoutePrompt(input.prompt));
   return {
     skillName: input.skillName,
     sourceKind: input.sourceKind,
-    routeId: input.routeId ?? (input.prompt === undefined ? undefined : hashSkillRoutePrompt(input.prompt)),
+    routeId: input.routeId ?? promptHash,
     matchedAt: input.matchedAt ?? new Date().toISOString(),
     selected: input.selected,
     explicitInvocation: input.explicitInvocation ?? false,
     confidence: clampConfidence(input.confidence ?? 0),
     labels: input.labels ?? [],
-    evidence: input.evidence ?? []
+    evidence: input.evidence ?? [],
+    promptHash,
+    taskClass: input.taskClass
   };
 }
 

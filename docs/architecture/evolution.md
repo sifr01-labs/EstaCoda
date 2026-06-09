@@ -1,35 +1,51 @@
 ---
 title: "Evolution & Self-Improvement"
-description: "Governed skill evolution, evidence-backed proposals, and AHE-aligned harness improvement."
+description: "Agent Evolution as a governed, reviewable self-improvement control plane."
 ---
 
 # Evolution & Self-Improvement
 
-EstaCoda improves its harness through **governed, reviewable, reversible** proposals — not silent runtime mutation.
+EstaCoda improves its harness through **governed, reviewable, reversible** proposals — not silent runtime mutation. Agent Evolution is the user-facing control plane for that behavior. Routing quality is one evidence input, not the product identity.
 
 ## Core Principle
 
 > Self-improvement is not silent mutation. It is evidence-backed, eval-tested, reviewable, reversible harness improvement.
 
+The persisted compatibility key remains `skills.autonomy`. Setup and settings present the same value as Agent Evolution.
+
 ## Governed Loop
 
 ```
-Runtime produces traces
+Runtime produces traces and route/outcome telemetry
   ↓
-Curator distills evidence (SkillProposalService)
+SkillLearningManager emits evidence and learning candidates
   ↓
-Evolution pipeline proposes candidates (ChangeManifest)
+SkillEvolutionStore records observations, candidates, proposals, evals, experiments, promotions, snapshots, rollback metadata, and experiment links
   ↓
-Evals and constraint gates select survivors
+SkillProposalService creates governed proposals and review metadata
   ↓
-Change manifests explain hypotheses and risks
+ChangeManifestStore owns change manifests with hypotheses, risks, gates, and rollback plans
   ↓
-Human/operator review promotes accepted changes
+Human/operator review decides promotion
   ↓
-Rollback remains available
+Rollback remains manual/snapshot-backed where implemented
 ```
 
 **Critical rule:** The runtime does not silently rewrite itself during normal user work.
+
+## Phase 1A State
+
+Implemented in Phase 1A:
+
+- Agent Evolution policy derivation from `skills.autonomy`.
+- Additive route/outcome telemetry fields for routing evidence, future correction signals, and final outcomes.
+- Offline deterministic routing/evolution baseline fixture metrics.
+- `SkillLearningManager` as an evidence source, not mutation authority.
+- Reduced governed evolution change kinds: `skill_patch`, `skill_create`, `routing_metadata_update`.
+- Durable `EvolutionExperiment` records.
+- `estacoda proposal list` and `estacoda proposal inspect <id>` review surfaces for pending proposals and linked evidence/candidates/experiments/evals.
+
+Phase 1A autonomous behavior is shadow-only. It may record policy decisions and proposal metadata, but it does not auto-promote, auto-rollback, bypass approval gates, or mutate bundled/external skills.
 
 ## Change Manifest
 
@@ -51,14 +67,20 @@ Every proposed change carries an `EvolutionChangeManifest`:
 }
 ```
 
+Manifest ownership is explicit:
+
+- `SkillEvolutionStore` owns observations, learning candidates, proposals, eval/promotion/snapshot/rollback metadata, experiment records, and experiment links.
+- `ChangeManifestStore` owns change manifests.
+- `EvolutionExperiment` records may link to both evolution records and change manifests by ID.
+
 ## Self-Evolution Target Set (Staged)
 
 | Stage | Target | Timing |
 |-------|--------|--------|
-| 1 | Skill instructions and metadata | v0.7 ✅ |
-| 2 | Tool descriptions and routing hints | v0.7 ✅ (skeleton) |
-| 3 | Memory promotion/rendering policy | v0.6–v0.10 |
-| 4 | Eval fixtures and golden flows | v0.5–v0.10 |
+| 1 | Skill instructions and metadata | implemented for governed patch proposals |
+| 2 | Tool descriptions and routing hints | manifest/proposal skeletons implemented; application is future work |
+| 3 | Memory promotion/rendering policy | planned |
+| 4 | Eval fixtures and golden flows | partially implemented; richer eval execution is planned |
 | 5 | Middleware/runtime strategy | post-v0.10 |
 | 6 | Runtime code evolution | post-MVP, PR-only |
 
@@ -104,13 +126,20 @@ Produced by `estacoda evolution export --dataset <path>`. No Python dependency.
 9. No broad semantic architecture inference.
 10. No automatic memory policy evolution in v0.7.
 11. No embedding/vector search.
+12. No semantic retrieval, compact skill index fallback, LLM reranking, taskClass routing, or supporting-candidate routing in Phase 1A.
+13. No advisory route tools such as `skill.reject_route` or `skill.search_routes` in Phase 1A.
+14. No real autonomous promotion, auto-rollback, skill fork/merge/archive, or hygiene scanning loop in Phase 1A.
+
+## Routing Boundary
+
+Routing remains deterministic in Phase 1A. Route telemetry, rejection/search-compatible contracts, and routing baseline metrics exist so Agent Evolution can later evaluate routing quality. They do not enable semantic retrieval, provider embeddings, reranking, compact skill indexes, supporting candidates, or advisory route tools yet.
 
 ## CLI Commands
 
 | Command | Purpose |
 |---------|---------|
-| `estacoda proposal list` | List skill patch proposals |
-| `estacoda proposal inspect <id>` | Inspect a proposal |
+| `estacoda proposal list` | List proposals with review metadata |
+| `estacoda proposal inspect <id>` | Inspect a proposal with linked evidence/candidates/experiment/eval summaries |
 | `estacoda proposal approve <id>` | Approve a proposal |
 | `estacoda proposal reject <id>` | Reject a proposal |
 | `estacoda proposal promote <id>` | Promote an approved proposal |

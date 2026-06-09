@@ -368,7 +368,7 @@ Trust levels: `conservative`, `read-only-network`, `read-only-local`.
 
 ### skills
 
-Skill loading and autonomy.
+Skill loading and Agent Evolution policy.
 
 ```json
 {
@@ -380,6 +380,8 @@ Skill loading and autonomy.
 ```
 
 Autonomy modes: `none`, `suggest`, `proactive`, `autonomous`.
+
+`skills.autonomy` is the persisted compatibility key for Agent Evolution. In Phase 1A it controls reviewable evidence/proposal behavior only. `autonomous` is shadow-only: it records decisions for review but does not auto-promote, auto-rollback, or mutate skill files.
 
 ### ui
 

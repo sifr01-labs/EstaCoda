@@ -339,7 +339,15 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
           failures: input.failures,
           ...deriveToolProposalTrust(),
           patch: input.patch,
-          changeManifestId
+          changeManifestId,
+          hypothesis: input.reason,
+          riskClass: riskLevel,
+          authorityExpansion: riskLevel === "high",
+          evalPlan: {
+            command: "pnpm run eval:fixtures",
+            constraintGates: ["pnpm run typecheck", "pnpm run smoke"]
+          },
+          rollbackExpectation: "Revert skill file using skill.rollback or restore from snapshot."
         });
         if (changeManifestId !== undefined && options.changeManifestStore !== undefined && input.observationIds !== undefined && input.observationIds.length > 0) {
           await options.changeManifestStore.linkEvidence(changeManifestId, {

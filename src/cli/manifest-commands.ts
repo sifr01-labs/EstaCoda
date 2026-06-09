@@ -177,15 +177,16 @@ async function manifestDiff(
     lines.push(`--- ${filePath}`);
     lines.push(`file exists (${fileStat.size} bytes)`);
 
-    if (linkedProposal !== undefined && linkedProposal.patch.type === "text_patch") {
+    const linkedPatch = linkedProposal?.patch;
+    if (linkedPatch?.type === "text_patch") {
       lines.push("");
       lines.push("Proposed patch:");
-      lines.push(`- ${linkedProposal.patch.oldString.replace(/\n/gu, "\\n")}`);
-      lines.push(`+ ${linkedProposal.patch.newString.replace(/\n/gu, "\\n")}`);
-    } else if (linkedProposal !== undefined && linkedProposal.patch.type === "json_frontmatter_patch") {
+      lines.push(`- ${linkedPatch.oldString.replace(/\n/gu, "\\n")}`);
+      lines.push(`+ ${linkedPatch.newString.replace(/\n/gu, "\\n")}`);
+    } else if (linkedPatch?.type === "json_frontmatter_patch") {
       lines.push("");
-      lines.push(`Proposed JSON patch: ${linkedProposal.patch.path}`);
-      lines.push(`+ ${JSON.stringify(linkedProposal.patch.value)}`);
+      lines.push(`Proposed JSON patch: ${linkedPatch.path}`);
+      lines.push(`+ ${JSON.stringify(linkedPatch.value)}`);
     }
     lines.push("");
   }

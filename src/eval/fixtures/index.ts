@@ -15,6 +15,7 @@ import { skillProposalManifestBridgeCase } from "./skill-proposal-manifest-bridg
 import { userCorrectionRecordingCase } from "./user-correction-recording.js";
 import { toolDescriptionProposalCase } from "./tool-description-proposal.js";
 import { routingMetadataProposalCase } from "./routing-metadata-proposal.js";
+import { routingEvolutionBaselineCase } from "./routing-evolution-baseline.js";
 import { evolutionExportShapeCase } from "./evolution-export-shape.js";
 import { workflowRunStateTransitionsCase } from "./workflow-run-state-transitions.js";
 import { workflowLockingCase } from "./workflow-locking.js";
@@ -44,6 +45,7 @@ export const defaultEvalFixtures = [
   userCorrectionRecordingCase,
   toolDescriptionProposalCase,
   routingMetadataProposalCase,
+  routingEvolutionBaselineCase,
   evolutionExportShapeCase,
   workflowRunStateTransitionsCase,
   workflowLockingCase,

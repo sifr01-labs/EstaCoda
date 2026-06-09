@@ -175,6 +175,46 @@ export type SkillRouteTelemetry = {
   labels: string[];
   evidence: string[];
   sourceKind: SkillSourceKind;
+  taskClass?: string;
+  promptHash?: string;
+};
+
+export type SkillRouteRejectedCandidate = {
+  skillName: string;
+  reason?: string;
+};
+
+export type SkillRouteCorrectionSignal = {
+  source: "user" | "developer" | "model";
+  kind: "rejected" | "searched" | "selected" | "self-corrected";
+  skillName?: string;
+  replacementSkillName?: string;
+  reason?: string;
+};
+
+export type SkillRouteNoSkillResult =
+  | "correct"
+  | "missed"
+  | "not-applicable";
+
+export type SkillRouteFinalOutcomeStatus =
+  | "succeeded"
+  | "failed"
+  | "blocked"
+  | "partial"
+  | "cancelled"
+  | "unknown";
+
+export type SkillRouteTelemetryDetails = {
+  taskClass?: string;
+  candidatesShown?: string[];
+  candidatesRejected?: SkillRouteRejectedCandidate[];
+  searchedReplacementSkill?: string;
+  finalSkillUsed?: string;
+  noSkillResult?: SkillRouteNoSkillResult;
+  correctionSignals?: SkillRouteCorrectionSignal[];
+  modelSelfCorrectionSignal?: string;
+  finalOutcomeStatus?: SkillRouteFinalOutcomeStatus;
 };
 
 export type BundledManifest = {

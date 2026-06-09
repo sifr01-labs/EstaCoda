@@ -69,6 +69,8 @@ sidebar_position: 2
 
 ## بناء بيئة التشغيل
 
+`SkillLearningManager` هو مصدر أدلة لـ Agent Evolution في Phase 1A. يراقب الأدوار المكتملة ويصدر أدلة ومرشحين؛ وتبقى proposal المحكومة، وmanifest، والترقية، والاسترجاع أسطح مراجعة منفصلة.
+
 `createRuntime()` تبني الأنظمة الفرعية بترتيب ثابت:
 
 1. **مخازن الثقة والموافقة** — `WorkspaceTrustStore`، `WorkspaceApprovalController`

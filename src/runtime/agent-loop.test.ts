@@ -12,6 +12,7 @@ import type { ToolDefinition } from "../contracts/tool.js";
 import type { TrajectoryStore } from "../contracts/trajectory-store.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
+import { deriveAgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { SESSION_RECALL_UNTRUSTED_NOTICE, type SessionRecallService } from "../session/session-recall-service.js";
 import { MemoryPromptContextBuilder } from "../memory/memory-prompt-context-builder.js";
@@ -22,6 +23,7 @@ import { MemoryStore } from "../memory/memory-store.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { RunRecorder } from "./run-recorder.js";
 import { AgentLoop } from "./agent-loop.js";
+import type { SkillLearningManager } from "../skills/skill-learning.js";
 import type { CompactResult, SessionCompressionService } from "../prompt/session-compression-service.js";
 import type { NativeToolExecutor } from "./native-tool-executor.js";
 import type { ProviderTurnLoop } from "./provider-turn-loop.js";
@@ -188,6 +190,7 @@ async function createAgentLoop(input: {
   memoryProvider?: MemoryProvider;
   trajectoryStore?: Pick<TrajectoryStore, "saveTrajectory">;
   providerExecution?: ProviderExecutionResult;
+  skillLearningManager?: SkillLearningManager;
 }) {
   const sessionDb = new InMemorySessionDB();
   const sessionId = `agent-loop-test-${Date.now()}-${Math.random()}`;
@@ -286,7 +289,9 @@ async function createAgentLoop(input: {
     memoryProvider: input.memoryProvider,
     memoryRecallOrchestrator,
     sessionCompressionService: input.sessionCompressionService,
-    compressionConfig: input.compressionConfig
+    compressionConfig: input.compressionConfig,
+    skillLearningManager: input.skillLearningManager,
+    agentEvolutionPolicy: deriveAgentEvolutionPolicy("suggest")
   });
 
   return {
@@ -301,6 +306,39 @@ async function createAgentLoop(input: {
 }
 
 describe("AgentLoop provider availability gating", () => {
+  it("passes completed-turn route and outcome context to skill learning", async () => {
+    const observeTurn = vi.fn(async () => undefined);
+    const { loop } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("done"),
+      skillLearningManager: { observeTurn } as unknown as SkillLearningManager
+    });
+
+    await loop.handle({
+      text: "use the test skill",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(observeTurn).toHaveBeenCalledWith(expect.objectContaining({
+      profileId: "default",
+      userText: "use the test skill",
+      selectedSkill,
+      finalSkillUsed: "test-skill",
+      routeConfidence: 1,
+      promptHash: expect.stringMatching(/^[0-9a-f]{16}$/u),
+      outcomeStatus: "succeeded",
+      candidatesShown: ["test-skill"],
+      agentEvolutionPolicy: expect.objectContaining({
+        mode: "suggest",
+        observeTurns: true,
+        autoPromoteEligibleLocalChanges: false,
+        autoRollbackEligibleLocalChanges: false
+      })
+    }));
+  });
+
   it("records workflow context on active workflow turns", async () => {
     const { loop, sessionDb, sessionId, trajectoryRecorder } = await createAgentLoop({
       canRunProvider: true,

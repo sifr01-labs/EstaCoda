@@ -32,7 +32,7 @@ These features are code-gated or maturity-marked. Enable them only if you unders
 |---------|------|------|
 | WhatsApp channel | `channels.whatsapp.experimental: true` | Uses unofficial Baileys library. Meta may suspend accounts. |
 | Session compression | `compression.enabled` and `compression.experimental` both `true` | Experimental-only. Disabled by default. |
-| Agent Evolution and autonomous local skill creation | `skills.autonomy` modes above `suggest` | Creates skills automatically from bounded workflow observations. |
+| Agent Evolution autonomy above `suggest` | `skills.autonomy` modes above `suggest` | Phase 1A records reviewable evidence/proposals and shadow-only decisions. Real auto-promotion, auto-rollback, and automatic local skill creation are planned, not active. |
 | Skill evolution/proposal/promotion workflows | `skill.propose_patch`, `skill.rollback` | Governed but not fully autonomous. Promotion runs eval gates. |
 | Workflow runtime integration | SQLite session DB required | Best-effort. Wires only when the session database is SQLite. |
 | Local TTS | Deferred | No local TTS provider is implemented. |

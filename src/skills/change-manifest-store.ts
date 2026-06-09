@@ -2,6 +2,7 @@ import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { EvolutionChangeManifest, EvolutionTarget } from "../contracts/evolution.js";
+import { normalizeGateCommand } from "../evolution/constraint-gate-runner.js";
 
 export class ChangeManifestStore {
   readonly #root: string;
@@ -15,11 +16,12 @@ export class ChangeManifestStore {
   async propose(
     input: Omit<EvolutionChangeManifest, "id" | "createdAt" | "status">
   ): Promise<EvolutionChangeManifest> {
+    const normalized = normalizeManifestGates(input);
     const manifest: EvolutionChangeManifest = {
       id: `manifest_${randomUUID()}`,
       status: "proposed",
       createdAt: this.#nowIso(),
-      ...input,
+      ...normalized,
     };
     await this.#appendJsonl("manifests.jsonl", manifest);
     return manifest;
@@ -134,4 +136,14 @@ export class ChangeManifestStore {
   #nowIso(): string {
     return this.#now().toISOString();
   }
+}
+
+function normalizeManifestGates(
+  input: Omit<EvolutionChangeManifest, "id" | "createdAt" | "status">
+): Omit<EvolutionChangeManifest, "id" | "createdAt" | "status"> {
+  return {
+    ...input,
+    evalCommand: input.evalCommand.length === 0 ? "" : normalizeGateCommand(input.evalCommand),
+    constraintGates: input.constraintGates.map((gate) => normalizeGateCommand(gate))
+  };
 }

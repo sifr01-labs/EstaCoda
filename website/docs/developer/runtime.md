@@ -63,6 +63,8 @@ Profile state lives under `~/.estacoda/profiles/<id>/`. See [Architecture](./arc
 
 Any constructor signature change cascades through this file. There is no DI container or plugin boundary.
 
+`SkillLearningManager` is an Agent Evolution evidence source in Phase 1A. It observes completed turns and emits evidence/candidates; governed proposals, manifests, promotion, and rollback remain separate review surfaces.
+
 ---
 
 ## Provider Route Resolution

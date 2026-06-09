@@ -52,6 +52,9 @@ export const manifestCreationFromObservationCase: EvalCase = {
       assertEqual("manifest target is skill", manifest?.target, "skill"),
       assertEqual("manifest hypothesis", manifest?.hypothesis, "Test observation lesson"),
       assertEqual("manifest predictedImpact", manifest?.predictedImpact, "Add step 3 to the workflow"),
+      assertEqual("manifest evalCommand is allowlisted", manifest?.evalCommand, "pnpm run eval:fixtures"),
+      assertEqual("manifest first constraint gate is allowlisted", manifest?.constraintGates?.[0], "pnpm run typecheck"),
+      assertEqual("manifest second constraint gate is allowlisted", manifest?.constraintGates?.[1], "pnpm run smoke"),
       assertTrue("manifest has rollbackPlan", manifest?.rollbackPlan?.includes("Revert") ?? false),
       assertEqual("manifest evidence traces length", manifest?.evidence?.traces?.length, 1)
     ];

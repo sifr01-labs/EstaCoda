@@ -1,13 +1,20 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
+import type { AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import type { SessionDB } from "../contracts/session.js";
-import type { LoadedSkill, SkillDefinition, SkillSourceKind } from "../contracts/skill.js";
+import type {
+  LoadedSkill,
+  SkillDefinition,
+  SkillRouteCorrectionSignal,
+  SkillRouteFinalOutcomeStatus,
+  SkillRouteNoSkillResult,
+  SkillRouteRejectedCandidate
+} from "../contracts/skill.js";
 import type { ToolRiskClass, ToolsetName } from "../contracts/tool.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { stripInlineReasoning } from "../providers/provider-reasoning.js";
-import { parseSkillFile, hydrateSkillResources } from "./skill-loader.js";
 import type { SkillRegistry } from "./skill-registry.js";
-import { buildSkillFileContent, slugifySkillName } from "../tools/skill-tools.js";
+import type { SkillEvolutionStore, SkillLearningCandidate, SkillObservationRecord } from "./skill-evolution.js";
 
 export type SkillAutonomy = "none" | "suggest" | "proactive" | "autonomous";
 
@@ -22,6 +29,11 @@ export type SkillLearningRecord = {
   bounded: boolean;
   boundedReason?: string;
   status: "observed" | "candidate" | "created";
+  evidenceIds?: string[];
+  candidateId?: string;
+  candidateKind?: SkillLearningCandidate["kind"];
+  promptHash?: string;
+  selectedSkillName?: string;
   createdSkillName?: string;
   createdSkillPath?: string;
   updatedAt: string;
@@ -36,20 +48,15 @@ export type SkillLearningObservation =
   | {
       action: "observed" | "candidate";
       record: SkillLearningRecord;
-    }
-  | {
-      action: "created";
-      record: SkillLearningRecord;
-      skillName: string;
-      skillPath: string;
+      evidence?: SkillObservationRecord;
+      candidate?: SkillLearningCandidate;
     };
 
 export class SkillLearningManager {
   readonly #autonomy: SkillAutonomy;
-  readonly #registry: SkillRegistry;
-  readonly #localSkillsRoot: string;
   readonly #store: SkillLearningStore;
   readonly #sessionDb: SessionDB;
+  readonly #skillEvolutionStore: SkillEvolutionStore | undefined;
 
   constructor(options: {
     autonomy: SkillAutonomy;
@@ -57,14 +64,14 @@ export class SkillLearningManager {
     localSkillsRoot: string;
     storePath: string;
     sessionDb: SessionDB;
+    skillEvolutionStore?: SkillEvolutionStore;
   }) {
     this.#autonomy = options.autonomy;
-    this.#registry = options.registry;
-    this.#localSkillsRoot = options.localSkillsRoot;
     this.#store = new SkillLearningStore({
       path: options.storePath
     });
     this.#sessionDb = options.sessionDb;
+    this.#skillEvolutionStore = options.skillEvolutionStore;
   }
 
   async observeTurn(input: {
@@ -72,14 +79,37 @@ export class SkillLearningManager {
     sessionId: string;
     userText: string;
     selectedSkill: LoadedSkill | SkillDefinition | undefined;
+    finalSkillUsed?: string;
+    noSkillResult?: SkillRouteNoSkillResult;
+    routeConfidence?: number;
+    promptHash?: string;
+    outcomeStatus?: SkillRouteFinalOutcomeStatus;
+    correctionSignals?: SkillRouteCorrectionSignal[];
+    modelSelfCorrectionSignal?: string;
+    candidatesShown?: string[];
+    candidatesRejected?: SkillRouteRejectedCandidate[];
+    searchedReplacementSkill?: string;
+    agentEvolutionPolicy: AgentEvolutionPolicy;
     toolExecutions: ToolExecutionRecord[];
   }): Promise<SkillLearningObservation | undefined> {
-    if (this.#autonomy === "none") {
+    if (
+      this.#autonomy === "none" ||
+      !input.agentEvolutionPolicy.observeTurns ||
+      !input.agentEvolutionPolicy.createEvidence ||
+      this.#skillEvolutionStore === undefined
+    ) {
       return undefined;
     }
 
-    if (input.selectedSkill !== undefined) {
-      return undefined;
+    const selectedSkill = input.selectedSkill;
+    if (selectedSkill !== undefined) {
+      if (!input.agentEvolutionPolicy.observeSelectedSkillTurns) {
+        return undefined;
+      }
+      return await this.#observeSelectedSkillTurn({
+        ...input,
+        selectedSkill
+      });
     }
 
     const workflow = detectWorkflow({
@@ -90,6 +120,36 @@ export class SkillLearningManager {
       return undefined;
     }
 
+    const evidence = await this.#skillEvolutionStore.appendObservation({
+      skillName: workflow.name,
+      sessionId: input.sessionId,
+      type: observationTypeFromOutcome(input.outcomeStatus),
+      promptSummary: workflow.content,
+      toolsAttempted: workflow.tools,
+      outcome: observationOutcomeFromFinalStatus(input.outcomeStatus),
+      lesson: `No skill was selected for a repeated local workflow using ${workflow.tools.join(", ")}.`,
+      candidateImprovement: "Create a governed skill or update routing metadata for this missing workflow.",
+      sourceTrust: "runtime_internal",
+      mayPromoteAutomatically: false,
+      requiresHumanApproval: true,
+      evidence: buildLearningEvidence(input, {
+        workflowKey: workflow.key,
+        bounded: workflow.bounded,
+        boundedReason: workflow.boundedReason,
+        requiredToolsets: workflow.requiredToolsets
+      })
+    });
+    const candidate = await this.#skillEvolutionStore.appendLearningCandidate({
+      kind: "new_or_missing_playbook",
+      evidenceIds: [evidence.id],
+      suggestedTarget: workflow.bounded ? "skill_create" : "routing_metadata_update",
+      reason: workflow.bounded
+        ? "Repeated no-skill workflow may need a governed skill."
+        : "No-skill workflow is not bounded enough for skill creation; consider routing metadata instead.",
+      confidence: confidenceFromObservation(input.routeConfidence, workflow.bounded ? 0.65 : 0.45),
+      sessionId: input.sessionId,
+      promptHash: input.promptHash
+    });
     const record = await this.#store.observe({
       key: workflow.key,
       name: workflow.name,
@@ -98,43 +158,29 @@ export class SkillLearningManager {
       tools: workflow.tools,
       requiredToolsets: workflow.requiredToolsets,
       bounded: workflow.bounded,
-      boundedReason: workflow.boundedReason
+      boundedReason: workflow.boundedReason,
+      evidenceId: evidence.id,
+      candidateId: candidate.id,
+      candidateKind: candidate.kind,
+      promptHash: input.promptHash
     });
-    const threshold = this.#autonomy === "autonomous" ? 1 : 2;
 
     if (record.status === "created") {
       return undefined;
     }
 
-    if (workflow.bounded && shouldCreateSkill(this.#autonomy, record.occurrences, threshold)) {
-      const created = await this.#createLocalSkill(record);
-      const updated = await this.#store.markCreated(record.key, {
-        createdSkillName: created.name,
-        createdSkillPath: created.path
-      });
-      await this.#sessionDb.appendEvent(input.sessionId, {
-        kind: "skill-learned",
-        action: "created",
-        record: updated
-      });
-      return {
-        action: "created",
-        record: updated,
-        skillName: created.name,
-        skillPath: created.path
-      };
-    }
-
     if (record.occurrences >= 2 && record.status !== "candidate") {
-      const candidate = await this.#store.markCandidate(record.key);
+      const candidateRecord = await this.#store.markCandidate(record.key);
       await this.#sessionDb.appendEvent(input.sessionId, {
         kind: "skill-learned",
         action: "candidate",
-        record: candidate
+        record: candidateRecord
       });
       return {
         action: "candidate",
-        record: candidate
+        record: candidateRecord,
+        evidence,
+        candidate
       };
     }
 
@@ -145,7 +191,9 @@ export class SkillLearningManager {
     });
     return {
       action: "observed",
-      record
+      record,
+      evidence,
+      candidate
     };
   }
 
@@ -153,69 +201,161 @@ export class SkillLearningManager {
     return this.#store.list();
   }
 
-  async #createLocalSkill(record: SkillLearningRecord): Promise<{ name: string; path: string }> {
-    const name = ensureUniqueSkillName(this.#registry, record.name);
-    const skillDir = join(this.#localSkillsRoot, slugifySkillName(name));
-    const skillPath = join(skillDir, "SKILL.md");
-    const description = record.content.replace(/^Reusable workflow:\s*/u, "");
-    const instructions = [
-      "Use this skill for this repeated local workflow.",
-      "",
-      "Observed successful pattern:",
-      ...record.tools.map((tool, index) => `${index + 1}. Run \`${tool}\`.`),
-      "",
-      "Execution notes:",
-      "- Keep the workflow local to this workspace unless the user explicitly asks otherwise.",
-      "- Verify the result before replying.",
-      "- Adapt the exact commands or file paths if the workspace has changed.",
-      "",
-      `Learned from repeated successful sessions (${record.occurrences} observations).`
-    ].join("\n");
-    const content = buildSkillFileContent({
-      name,
-      description,
-      category: "workflow",
-      whenToUse: [description],
-      requiredToolsets: record.requiredToolsets,
-      metadata: {
-        estacoda: {
-          provenance: {
-            kind: "agent-created",
-            createdBy: "agent",
-            sourceSessionId: record.sourceSessionIds.at(-1),
-            sourceSessionIds: record.sourceSessionIds
-          },
-          learning: {
-            occurrences: record.occurrences,
-            bounded: record.bounded,
-            boundedReason: record.boundedReason,
-            tools: record.tools
-          }
-        }
-      },
-      evaluations: [
-        {
-          input: description,
-          shouldUseToolsets: record.requiredToolsets,
-          expectedOutcome: "Skill should select the learned workflow and use the observed tool sequence where applicable."
-        }
-      ],
-      instructions
+  async #observeSelectedSkillTurn(input: {
+    profileId: string;
+    sessionId: string;
+    userText: string;
+    selectedSkill: LoadedSkill | SkillDefinition;
+    finalSkillUsed?: string;
+    noSkillResult?: SkillRouteNoSkillResult;
+    routeConfidence?: number;
+    promptHash?: string;
+    outcomeStatus?: SkillRouteFinalOutcomeStatus;
+    correctionSignals?: SkillRouteCorrectionSignal[];
+    modelSelfCorrectionSignal?: string;
+    candidatesShown?: string[];
+    candidatesRejected?: SkillRouteRejectedCandidate[];
+    searchedReplacementSkill?: string;
+    agentEvolutionPolicy: AgentEvolutionPolicy;
+    toolExecutions: ToolExecutionRecord[];
+  }): Promise<SkillLearningObservation | undefined> {
+    const tools = successfulToolNames(input.toolExecutions);
+    const selectedSkillName = input.selectedSkill.name;
+    const finalSkillUsed = input.finalSkillUsed ?? selectedSkillName;
+    const evidence = await this.#skillEvolutionStore!.appendObservation({
+      skillName: selectedSkillName,
+      source: "sourceKind" in input.selectedSkill ? input.selectedSkill.sourceKind : undefined,
+      sessionId: input.sessionId,
+      type: observationTypeFromOutcome(input.outcomeStatus),
+      promptSummary: promptSummaryForLearning(input.userText),
+      toolsAttempted: tools,
+      outcome: observationOutcomeFromFinalStatus(input.outcomeStatus),
+      lesson: finalSkillUsed === selectedSkillName
+        ? `Selected skill ${selectedSkillName} completed with outcome ${input.outcomeStatus ?? "unknown"}.`
+        : `Selected skill ${selectedSkillName} was corrected to final skill ${finalSkillUsed}.`,
+      candidateImprovement: "Refine the selected skill or its routing metadata through the governed evolution path.",
+      sourceTrust: "runtime_internal",
+      mayPromoteAutomatically: false,
+      requiresHumanApproval: true,
+      evidence: buildLearningEvidence(input, {
+        selectedSkill: selectedSkillName,
+        finalSkillUsed
+      })
+    });
+    const candidate = await this.#skillEvolutionStore!.appendLearningCandidate({
+      kind: "selected_skill_refinement",
+      selectedSkill: selectedSkillName,
+      evidenceIds: [evidence.id],
+      suggestedTarget: finalSkillUsed === selectedSkillName ? "skill_patch" : "routing_metadata_update",
+      reason: finalSkillUsed === selectedSkillName
+        ? "Selected skill turn produced evidence for future governed refinement."
+        : "Route or model correction suggests routing metadata should be reviewed.",
+      confidence: confidenceFromObservation(input.routeConfidence, 0.6),
+      sessionId: input.sessionId,
+      promptHash: input.promptHash
+    });
+    const record = await this.#store.observe({
+      key: `selected:${selectedSkillName}:${input.promptHash ?? normalizePrompt(promptSummaryForLearning(input.userText))}`,
+      name: `${selectedSkillName} refinement`,
+      content: `Selected skill refinement evidence: ${selectedSkillName}`,
+      sessionId: input.sessionId,
+      tools,
+      requiredToolsets: input.selectedSkill.requiredToolsets,
+      bounded: true,
+      boundedReason: "selected-skill-turn",
+      evidenceId: evidence.id,
+      candidateId: candidate.id,
+      candidateKind: candidate.kind,
+      promptHash: input.promptHash,
+      selectedSkillName
+    });
+    const candidateRecord = record.status === "candidate"
+      ? record
+      : await this.#store.markCandidate(record.key);
+
+    await this.#sessionDb.appendEvent(input.sessionId, {
+      kind: "skill-learned",
+      action: "candidate",
+      record: candidateRecord
     });
 
-    await mkdir(skillDir, { recursive: true });
-    await writeFile(skillPath, content, "utf8");
-    const loaded = await hydrateSkillResources(parseSkillFile(skillPath, content, {
-      sourceKind: "local" satisfies SkillSourceKind,
-      sourceRoot: this.#localSkillsRoot
-    }));
-    this.#registry.register(loaded);
-
     return {
-      name: loaded.name,
-      path: skillPath
+      action: "candidate",
+      record: candidateRecord,
+      evidence,
+      candidate
     };
   }
+}
+
+function buildLearningEvidence(
+  input: {
+    profileId: string;
+    promptHash?: string;
+    finalSkillUsed?: string;
+    noSkillResult?: SkillRouteNoSkillResult;
+    routeConfidence?: number;
+    outcomeStatus?: SkillRouteFinalOutcomeStatus;
+    correctionSignals?: SkillRouteCorrectionSignal[];
+    modelSelfCorrectionSignal?: string;
+    candidatesShown?: string[];
+    candidatesRejected?: SkillRouteRejectedCandidate[];
+    searchedReplacementSkill?: string;
+    toolExecutions: ToolExecutionRecord[];
+  },
+  extra: Record<string, unknown>
+): Record<string, unknown> {
+  return {
+    profileId: input.profileId,
+    promptHash: input.promptHash,
+    routeConfidence: input.routeConfidence,
+    finalSkillUsed: input.finalSkillUsed,
+    noSkillResult: input.noSkillResult,
+    outcomeStatus: input.outcomeStatus,
+    correctionSignals: input.correctionSignals,
+    modelSelfCorrectionSignal: input.modelSelfCorrectionSignal,
+    candidatesShown: input.candidatesShown,
+    candidatesRejected: input.candidatesRejected,
+    searchedReplacementSkill: input.searchedReplacementSkill,
+    tools: input.toolExecutions.map((execution) => ({
+      name: execution.tool.name,
+      ok: execution.result?.ok,
+      riskClass: execution.riskClass
+    })),
+    ...extra
+  };
+}
+
+function promptSummaryForLearning(userText: string): string {
+  return humanizePrompt(redactLearningText(stripInlineReasoning(userText)));
+}
+
+function successfulToolNames(toolExecutions: ToolExecutionRecord[]): string[] {
+  return mergeOrdered([], toolExecutions
+    .filter((execution) => execution.result?.ok === true)
+    .map((execution) => execution.tool.name));
+}
+
+function observationTypeFromOutcome(status: SkillRouteFinalOutcomeStatus | undefined): SkillObservationRecord["type"] {
+  if (status === "succeeded") return "success";
+  if (status === "blocked") return "blocked";
+  if (status === "partial") return "partial";
+  if (status === "failed" || status === "cancelled") return "failure";
+  return "note";
+}
+
+function observationOutcomeFromFinalStatus(status: SkillRouteFinalOutcomeStatus | undefined): SkillObservationRecord["outcome"] {
+  if (status === "succeeded") return "succeeded";
+  if (status === "blocked") return "blocked";
+  if (status === "partial") return "partial";
+  return "failed";
+}
+
+function confidenceFromObservation(routeConfidence: number | undefined, fallback: number): number {
+  if (!Number.isFinite(routeConfidence)) {
+    return fallback;
+  }
+  return Math.max(0, Math.min(1, routeConfidence ?? fallback));
 }
 
 class SkillLearningStore {
@@ -238,6 +378,11 @@ class SkillLearningStore {
     requiredToolsets: ToolsetName[];
     bounded: boolean;
     boundedReason?: string;
+    evidenceId?: string;
+    candidateId?: string;
+    candidateKind?: SkillLearningCandidate["kind"];
+    promptHash?: string;
+    selectedSkillName?: string;
   }): Promise<SkillLearningRecord> {
     await this.#ensureLoaded();
     const now = this.#now().toISOString();
@@ -256,6 +401,11 @@ class SkillLearningStore {
       bounded: existing?.bounded === false ? false : input.bounded,
       boundedReason: existing?.boundedReason ?? input.boundedReason,
       status: existing?.status ?? "observed",
+      evidenceIds: mergeOrdered(existing?.evidenceIds ?? [], input.evidenceId === undefined ? [] : [input.evidenceId]),
+      candidateId: input.candidateId ?? existing?.candidateId,
+      candidateKind: input.candidateKind ?? existing?.candidateKind,
+      promptHash: input.promptHash ?? existing?.promptHash,
+      selectedSkillName: input.selectedSkillName ?? existing?.selectedSkillName,
       createdSkillName: existing?.createdSkillName,
       createdSkillPath: existing?.createdSkillPath,
       updatedAt: now
@@ -274,24 +424,6 @@ class SkillLearningStore {
     const updated: SkillLearningRecord = {
       ...existing,
       status: "candidate",
-      updatedAt: this.#now().toISOString()
-    };
-    this.#records.set(key, updated);
-    await this.#flush();
-    return updated;
-  }
-
-  async markCreated(key: string, input: { createdSkillName: string; createdSkillPath: string }): Promise<SkillLearningRecord> {
-    await this.#ensureLoaded();
-    const existing = this.#records.get(key);
-    if (existing === undefined) {
-      throw new Error(`Workflow skill record not found: ${key}`);
-    }
-    const updated: SkillLearningRecord = {
-      ...existing,
-      status: "created",
-      createdSkillName: input.createdSkillName,
-      createdSkillPath: input.createdSkillPath,
       updatedAt: this.#now().toISOString()
     };
     this.#records.set(key, updated);
@@ -382,29 +514,6 @@ function detectWorkflow(input: {
     bounded,
     boundedReason
   };
-}
-
-function shouldCreateSkill(autonomy: SkillAutonomy, occurrences: number, threshold: number): boolean {
-  if (autonomy === "suggest" || autonomy === "none") {
-    return false;
-  }
-
-  return occurrences >= threshold;
-}
-
-function ensureUniqueSkillName(registry: SkillRegistry, proposed: string): string {
-  if (registry.get(proposed) === undefined) {
-    return proposed;
-  }
-
-  for (let index = 2; index < 100; index++) {
-    const candidate = `${proposed} ${index}`;
-    if (registry.get(candidate) === undefined) {
-      return candidate;
-    }
-  }
-
-  return `${proposed} ${Date.now()}`;
 }
 
 function mergeOrdered<T extends string>(left: T[], right: T[]): T[] {

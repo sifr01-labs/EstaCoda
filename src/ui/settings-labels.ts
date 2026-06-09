@@ -40,41 +40,41 @@ export const SKILL_AUTONOMY_LABELS = {
   none: {
     en: {
       label: "None",
-      description: "No Agent Evolution learning or automatic skill creation."
+      description: "Agent Evolution is off. No evidence or improvement proposals are recorded."
     },
     ar: {
       label: "متوقف",
-      description: "لا يتعلّم طرق عمل جديدة ولا ينشئ مهارات تلقائياً."
+      description: "Agent Evolution متوقف. لا تُسجّل أدلة أو مقترحات تحسين."
     }
   },
   suggest: {
     en: {
       label: "Suggest",
-      description: "Records reusable workflow candidates and suggests skill creation after repetition. Does not write skills automatically."
+      description: "Records evidence and reviewable improvement proposals. Does not promote or write skills automatically."
     },
     ar: {
       label: "اقتراح",
-      description: "يسجّل طرق العمل القابلة لإعادة الاستخدام ويقترح تحويلها إلى مهارة بعد تكرارها، لكنه لا يكتب مهارات تلقائياً."
+      description: "يسجّل الأدلة ومقترحات تحسين قابلة للمراجعة. لا يرقي ولا يكتب مهارات تلقائياً."
     }
   },
   proactive: {
     en: {
       label: "Proactive",
-      description: "Automatically creates project skills after repeated successful bounded local workflows."
+      description: "Prepares stronger review proposals from evidence and evals. Promotion remains manual."
     },
     ar: {
       label: "استباقي",
-      description: "ينشئ مهارات للمشروع تلقائياً بعد تكرار طريقة عمل محلية ناجحة ومحدودة المخاطر."
+      description: "يجهّز مقترحات مراجعة أقوى من الأدلة والتقييمات. تبقى الترقية يدوية."
     }
   },
   autonomous: {
     en: {
       label: "Autonomous",
-      description: "Automatically creates project skills after the first successful bounded workflow. Risky or external workflows remain candidates."
+      description: "Records shadow-only autonomous decisions for review. Real auto-promotion is not active in Phase 1A."
     },
     ar: {
       label: "ذاتي",
-      description: "ينشئ مهارات للمشروع تلقائياً بعد أول طريقة عمل ناجحة ومحدودة المخاطر. طرق العمل الخطرة أو ذات الآثار الخارجية تبقى كاقتراحات فقط."
+      description: "يسجّل قرارات ذاتية في وضع ظل فقط للمراجعة. الترقية التلقائية الفعلية غير مفعّلة في Phase 1A."
     }
   }
 } as const;

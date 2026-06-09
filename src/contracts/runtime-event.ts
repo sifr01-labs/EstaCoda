@@ -5,6 +5,10 @@ import type {
   ProviderReasoningMetadata,
   ProviderUsage
 } from "./provider.js";
+import type {
+  SkillRouteTelemetryDetails,
+  SkillRouteFinalOutcomeStatus
+} from "./skill.js";
 
 export type RuntimeEvent =
   | {
@@ -106,7 +110,11 @@ export type RuntimeEvent =
       kind: "skill-route-telemetry";
       promptHash: string;
       selectedSkill?: string;
+      finalSkillUsed?: string;
       confidence: number;
+      routeConfidence?: number;
+      candidatesShown?: string[];
+      finalOutcomeStatus?: SkillRouteFinalOutcomeStatus;
       candidates: Array<{
         skillName: string;
         selected: boolean;
@@ -114,6 +122,14 @@ export type RuntimeEvent =
         confidence: number;
         sourceKind: string;
       }>;
+      details?: SkillRouteTelemetryDetails;
+    }
+  | {
+      kind: "skill-route-advisory";
+      promptHash: string;
+      selectedSkill?: string;
+      action: "reject_route" | "search_routes" | "rerank";
+      details: SkillRouteTelemetryDetails;
     }
   | {
       kind: "skill-lifecycle-changed";

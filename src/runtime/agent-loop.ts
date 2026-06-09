@@ -13,11 +13,13 @@ import type {
   LoadedSkill,
   SkillConfigField,
   SkillDefinition,
-  SkillCatalogEntry
+  SkillCatalogEntry,
+  SkillRouteFinalOutcomeStatus
 } from "../contracts/skill.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolDefinition, ToolRiskClass, ToolsetName } from "../contracts/tool.js";
 import type { AgentProfileMode, AgentResponseLanguage, SessionCompressionConfig, UiFlavor, UiLanguage } from "../config/runtime-config.js";
+import type { AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import type { ContextReferenceExpander } from "../context/context-reference-expander.js";
 import type { ProviderExecutionResult, ProviderRuntimeEvent } from "../providers/provider-executor.js";
 import type { ToolCallPlanner } from "../tools/tool-call-planner.js";
@@ -109,6 +111,7 @@ export type AgentLoopOptions = {
   skillConfig?: Record<string, Record<string, unknown>>;
   skillLearningManager?: SkillLearningManager;
   skillEvolutionStore?: SkillEvolutionStore;
+  agentEvolutionPolicy?: AgentEvolutionPolicy;
   ui?: {
     language: UiLanguage;
     flavor: UiFlavor;
@@ -181,6 +184,7 @@ export class AgentLoop {
   readonly #skillConfig: Record<string, Record<string, unknown>>;
   readonly #skillLearningManager: SkillLearningManager | undefined;
   readonly #skillEvolutionStore: SkillEvolutionStore | undefined;
+  readonly #agentEvolutionPolicy: AgentEvolutionPolicy | undefined;
   readonly #ui: AgentLoopOptions["ui"];
   readonly #agentProfile: AgentLoopOptions["agentProfile"];
   readonly #budgets: AgentLoopBudgets;
@@ -217,6 +221,7 @@ export class AgentLoop {
     this.#skillConfig = options.skillConfig ?? {};
     this.#skillLearningManager = options.skillLearningManager;
     this.#skillEvolutionStore = options.skillEvolutionStore;
+    this.#agentEvolutionPolicy = options.agentEvolutionPolicy;
     this.#ui = options.ui;
     this.#agentProfile = options.agentProfile;
     this.#budgets = {
@@ -746,6 +751,13 @@ export class AgentLoop {
       sessionId: this.#currentSessionId(),
       userText: effectiveText,
       selectedSkill,
+      finalSkillUsed: selectedSkill?.name,
+      noSkillResult: selectedSkill === undefined ? "not-applicable" : undefined,
+      routeConfidence: intent.confidence,
+      promptHash: hashSkillRoutePrompt(effectiveText),
+      outcomeStatus: finalOutcomeStatusForLearning(effectiveProviderExecution, toolExecutions),
+      candidatesShown: intent.suggestedSkills.map((skill) => skill.name),
+      agentEvolutionPolicy: this.#agentEvolutionPolicy ?? noLearningPolicy(),
       toolExecutions
     }).catch(() => undefined);
 
@@ -1305,6 +1317,44 @@ function outcomeFromResponse(response: AgentLoopResponse): {
   return {
     success: true,
     summary: "Turn completed."
+  };
+}
+
+function finalOutcomeStatusForLearning(
+  providerExecution: ProviderExecutionResult | undefined,
+  toolExecutions: ToolExecutionRecord[]
+): SkillRouteFinalOutcomeStatus {
+  if (providerExecution?.ok === false) {
+    return "failed";
+  }
+  if (toolExecutions.some((execution) => execution.decision !== "allow")) {
+    return "blocked";
+  }
+  if (toolExecutions.some((execution) => execution.result?.ok === false)) {
+    return "failed";
+  }
+  return "succeeded";
+}
+
+function noLearningPolicy(): AgentEvolutionPolicy {
+  return {
+    mode: "none",
+    routingMode: "deterministic",
+    observeTurns: false,
+    observeSelectedSkillTurns: false,
+    createEvidence: false,
+    createProposals: false,
+    createExperiments: false,
+    createManifests: false,
+    preparePatches: false,
+    runEvals: false,
+    shadowAutonomousDecisions: false,
+    requireApprovalForLowRisk: true,
+    requireApprovalForMediumRisk: true,
+    requireApprovalForHighRisk: true,
+    autoPromoteEligibleLocalChanges: false,
+    autoRollbackEligibleLocalChanges: false,
+    budgets: {}
   };
 }
 

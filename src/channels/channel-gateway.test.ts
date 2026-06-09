@@ -9,6 +9,7 @@ import { InMemorySurfacePointerStore } from "./surface-pointer-store.js";
 import type { ChannelMessage, ChannelSessionKey } from "../contracts/channel.js";
 import type { SecurityAssessment, SecurityPolicy, SecurityRequest } from "../contracts/security.js";
 import type { Runtime } from "../runtime/create-runtime.js";
+import { deriveAgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import { ActiveTurnRegistry } from "../gateway/active-turn-registry.js";
 import { RuntimeCache } from "../runtime/runtime-cache.js";
 import type { RuntimeFingerprint } from "../runtime/runtime-fingerprint.js";
@@ -376,6 +377,7 @@ async function ensureSession(db: InMemorySessionDB, sessionId: string): Promise<
 
 function createMinimalRuntime(): Runtime {
   return {
+    agentEvolutionPolicy: () => deriveAgentEvolutionPolicy("suggest"),
     describe: () => "minimal",
     getStatus: () => ({
       kind: "status" as const,

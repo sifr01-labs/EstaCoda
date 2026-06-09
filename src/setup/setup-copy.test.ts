@@ -642,11 +642,12 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "setupEditor.actions.configureBrowser.description")).toBe("Set browser behavior without launching a browser.");
     expect(rawSetupCopy("en", "setupEditor.actions.editSecurityMode")).toBe("Edit security mode");
     expect(rawSetupCopy("en", "setupEditor.actions.editSecurityMode.description")).toBe("Choose how strictly EstaCoda reviews risky actions.");
-    expect(rawSetupCopy("en", "onboarding.workflowLearning")).toBe("Agent Evolution controls how EstaCoda learns reusable skills from your workflow patterns.");
+    expect(rawSetupCopy("en", "onboarding.workflowLearning")).toBe("Agent Evolution controls EstaCoda's reviewable self-improvement: evidence, proposals, evals, and manual promotion.");
     expect(rawSetupCopy("en", "setupEditor.actions.editWorkflowLearning")).toBe("Configure Agent Evolution");
-    expect(rawSetupCopy("en", "setupEditor.actions.editWorkflowLearning.description")).toBe("Agent Evolution controls how EstaCoda learns reusable skills from your workflow patterns.");
-    expect(rawSetupCopy("ar", "setupEditor.actions.editWorkflowLearning.description")).toBe("يسمح هذا الخيار لـ EstaCoda بتعلّم مهارات قابلة لإعادة الاستخدام من الأنماط المتكررة في عملك.");
-    expect(resolveSetupCopy("ar", "setupEditor.actions.editWorkflowLearning.description")).toContain(isolateLtr("EstaCoda"));
+    expect(rawSetupCopy("en", "setupEditor.actions.editWorkflowLearning.description")).toBe("Agent Evolution controls reviewable self-improvement proposals backed by evidence, evals, and manual promotion.");
+    expect(rawSetupCopy("ar", "setupEditor.actions.editWorkflowLearning.description")).toBe("يتحكم Agent Evolution في proposal تحسين ذاتي قابلة للمراجعة ومدعومة بالأدلة، والتقييمات، والترقية اليدوية.");
+    expect(resolveSetupCopy("ar", "setupEditor.actions.editWorkflowLearning.description")).toContain(isolateLtr("Agent Evolution"));
+    expect(resolveSetupCopy("ar", "setupEditor.actions.editWorkflowLearning.description")).toContain(isolateLtr("proposal"));
     expect(rawSetupCopy("en", "setupEditor.actions.chooseLanguage")).toBe("Choose language");
     expect(rawSetupCopy("en", "setupEditor.actions.chooseLanguage.description")).toBe("Choose English or Arabic. Arabic support is beta and may fall back to English.");
     expect(rawSetupCopy("en", "setupEditor.actions.runReadonlyVerification")).toBe("Run setup verification");

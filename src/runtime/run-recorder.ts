@@ -11,7 +11,8 @@ import type {
   SkillDefinition,
   CompiledSkillPlaybook,
   CompiledSkillPlaybookStep,
-  SkillPlaybookStepSpec
+  SkillPlaybookStepSpec,
+  SkillRouteTelemetryDetails
 } from "../contracts/skill.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolsetName, ToolRiskClass } from "../contracts/tool.js";
@@ -218,6 +219,7 @@ export class RunRecorder {
     selectedSkill: LoadedSkill | SkillDefinition | undefined;
     channel: ChannelKind;
     userText: string;
+    routeDetails?: SkillRouteTelemetryDetails;
     onEvent?: RuntimeEventSink;
   }): Promise<void> {
     const promptHash = hashSkillRoutePrompt(input.userText);
@@ -231,11 +233,19 @@ export class RunRecorder {
       labels: input.intent.labels,
       evidence: input.intent.evidence.map((entry) => `${entry.kind}: ${entry.detail}`),
       routeId: promptHash,
+      promptHash,
+      taskClass: input.routeDetails?.taskClass,
       matchedAt: timestamp
     }));
+    const telemetryDetails: SkillRouteTelemetryDetails = {
+      ...input.routeDetails,
+      candidatesShown: input.routeDetails?.candidatesShown ?? routeTelemetry.map((telemetry) => telemetry.skillName),
+      finalSkillUsed: input.routeDetails?.finalSkillUsed ?? input.selectedSkill?.name
+    };
     const event = {
       kind: "skill-route-usage" as const,
       timestamp,
+      promptHash,
       skillName: input.selectedSkill?.name,
       nativeIntent: input.intent.nativeIntent,
       labels: input.intent.labels,
@@ -265,31 +275,42 @@ export class RunRecorder {
         promptHash,
         labels: input.intent.labels,
         confidence: input.intent.confidence,
+        routeConfidence: input.intent.confidence,
         selectedSkill: input.selectedSkill?.name,
+        finalSkillUsed: telemetryDetails.finalSkillUsed,
         explicitInvocation: input.intent.invocation?.explicit === true,
-        candidates: routeTelemetry
+        candidates: routeTelemetry,
+        ...telemetryDetails
       }
     });
     this.#trajectoryRecorder.record("skill-route-telemetry", {
       promptHash,
       labels: input.intent.labels,
       confidence: input.intent.confidence,
+      routeConfidence: input.intent.confidence,
       selectedSkill: input.selectedSkill?.name,
+      finalSkillUsed: telemetryDetails.finalSkillUsed,
       explicitInvocation: input.intent.invocation?.explicit === true,
-      candidates: routeTelemetry
+      candidates: routeTelemetry,
+      ...telemetryDetails
     });
     await emit(input.onEvent, {
       kind: "skill-route-telemetry",
       promptHash,
       selectedSkill: input.selectedSkill?.name,
+      finalSkillUsed: telemetryDetails.finalSkillUsed,
       confidence: input.intent.confidence,
+      routeConfidence: input.intent.confidence,
+      candidatesShown: telemetryDetails.candidatesShown,
+      finalOutcomeStatus: telemetryDetails.finalOutcomeStatus,
       candidates: routeTelemetry.map((telemetry) => ({
         skillName: telemetry.skillName,
         selected: telemetry.selected,
         explicitInvocation: telemetry.explicitInvocation,
         confidence: telemetry.confidence,
         sourceKind: telemetry.sourceKind
-      }))
+      })),
+      details: telemetryDetails
     });
   }
 

@@ -1,9 +1,14 @@
 import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { LoadedSkill, SkillDefinition, SkillEvaluation } from "../contracts/skill.js";
-import type { EvolutionChangeManifest } from "../contracts/evolution.js";
+import type { EvolutionChangeManifest, EvolutionExperiment } from "../contracts/evolution.js";
+import type { AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import {
   SkillEvolutionStore,
+  type GovernedProposalChangeKind,
+  type GovernedProposalEvalPlan,
+  type GovernedProposalPolicyDecision,
+  type SkillLearningCandidate,
   type SkillEvalRunRecord,
   type SkillObservationRecord,
   type SkillPatchOperation,
@@ -51,6 +56,39 @@ export type ProposalReview = {
   blockedReason?: string;
 };
 
+export type ProposalEvidenceSummary = Pick<
+  SkillObservationRecord,
+  | "id"
+  | "skillName"
+  | "sessionId"
+  | "timestamp"
+  | "type"
+  | "outcome"
+  | "lesson"
+  | "candidateImprovement"
+  | "sourceTrust"
+>;
+
+export type ProposalLearningCandidateSummary = SkillLearningCandidate;
+
+export type ProposalEvalRunSummary = Pick<
+  SkillEvalRunRecord,
+  "id" | "skillName" | "evalId" | "ranAt" | "score" | "passed" | "threshold"
+>;
+
+export type ProposalReviewDetails = {
+  proposal: SkillPatchProposal;
+  review: ProposalReview;
+  linkedEvidence: ProposalEvidenceSummary[];
+  linkedLearningCandidates: ProposalLearningCandidateSummary[];
+  linkedExperiment?: EvolutionExperiment;
+  evalRuns: ProposalEvalRunSummary[];
+};
+
+export type LearningCandidateProposalResult =
+  | { ok: true; proposal: SkillPatchProposal }
+  | { ok: false; reason: string };
+
 export type PromoteResult =
   | { ok: true; promotion: Record<string, unknown>; evalGate: SkillEvalGateResult; snapshotPath: string; skill: LoadedSkill }
   | { ok: false; reason: string };
@@ -75,7 +113,7 @@ export class SkillProposalService {
       skillName: proposal.skillName,
       ids: proposal.evidence.observations
     });
-    const riskLevel = classifyPatchRisk(proposal.patch);
+    const riskLevel = riskLevelForProposal(proposal);
     const skill = this.#options.registry.get(proposal.skillName);
     const evalGate = skill === undefined ? undefined : await runSkillEvalGate(skill);
     const trustGate = evaluateProposalTrust(proposal, observations, riskLevel);
@@ -85,7 +123,7 @@ export class SkillProposalService {
         ? "review"
         : evalGate?.status === "failed"
           ? "reject"
-          : riskLevel === "low"
+          : proposal.patch !== undefined && proposal.changeKind === "skill_patch" && riskLevel === "low"
             ? "promote"
             : "approve";
     return {
@@ -96,8 +134,10 @@ export class SkillProposalService {
       reason: proposal.reason,
       evidenceCount: proposal.evidence.observations.length,
       riskLevel,
-      affectedFields: affectedFieldsForPatch(proposal.patch),
-      diffSummary: summarizePatchOperation(proposal.patch),
+      affectedFields: proposal.patch === undefined ? [] : affectedFieldsForPatch(proposal.patch),
+      diffSummary: proposal.patch === undefined
+        ? summarizeGovernedProposal(proposal)
+        : summarizePatchOperation(proposal.patch),
       evalResult: evalGate === undefined
         ? undefined
         : {
@@ -108,6 +148,31 @@ export class SkillProposalService {
           },
       recommendedAction,
       blockedReason: trustGate.ok ? undefined : trustGate.reason
+    };
+  }
+
+  async reviewProposalDetails(proposal: SkillPatchProposal): Promise<ProposalReviewDetails> {
+    const review = await this.reviewProposal(proposal);
+    const evidenceIds = evidenceIdsForProposal(proposal);
+    const evidenceIdSet = new Set(evidenceIds);
+    const [observations, learningCandidates, linkedExperiment, evalRuns] = await Promise.all([
+      this.#options.skillEvolutionStore.listObservations({ ids: evidenceIds }),
+      this.#options.skillEvolutionStore.listLearningCandidates(),
+      proposal.experimentId === undefined
+        ? Promise.resolve(undefined)
+        : this.#options.skillEvolutionStore.findExperiment(proposal.experimentId),
+      this.#options.skillEvolutionStore.listEvalRuns({ skillName: proposal.skillName })
+    ]);
+    const linkedLearningCandidates = learningCandidates.filter((candidate) =>
+      evidenceIdSet.has(candidate.id) || candidate.evidenceIds.some((id) => evidenceIdSet.has(id))
+    );
+    return {
+      proposal,
+      review,
+      linkedEvidence: observations.map(summarizeObservationForReview),
+      linkedLearningCandidates,
+      linkedExperiment,
+      evalRuns: evalRuns.map(summarizeEvalRunForReview)
     };
   }
 
@@ -130,6 +195,12 @@ export class SkillProposalService {
     }
     if (proposal.status !== "proposed") {
       return { ok: false, reason: `Skill patch proposal ${proposalId} is ${proposal.status}, not proposed.` };
+    }
+    if (proposal.changeKind !== undefined && proposal.changeKind !== "skill_patch") {
+      return { ok: false, reason: `Governed proposal ${proposalId} is ${proposal.changeKind} and is not promotable by skill patch promotion.` };
+    }
+    if (proposal.patch === undefined) {
+      return { ok: false, reason: `Skill patch proposal ${proposalId} has no executable patch.` };
     }
 
     const proposalObservations = await this.#options.skillEvolutionStore.listObservations({
@@ -235,8 +306,8 @@ export class SkillProposalService {
       hypothesis: options.lesson,
       predictedImpact: options.candidateImprovement,
       riskLevel: options.sourceTrust === "developer" || options.sourceTrust === "runtime_internal" ? "low" : "medium",
-      evalCommand: `pnpm run smoke -- --tag skills`,
-      constraintGates: ["typecheck", "smoke"],
+      evalCommand: "pnpm run eval:fixtures",
+      constraintGates: ["pnpm run typecheck", "pnpm run smoke"],
       rollbackPlan: `Revert skill file using skill.rollback or restore from snapshot.`
     });
     await this.#options.changeManifestStore.linkEvidence(manifest.id, {
@@ -267,11 +338,59 @@ export class SkillProposalService {
       hypothesis: options.reason,
       predictedImpact: `Apply ${options.patch.type} to skill ${options.skillName}`,
       riskLevel,
-      evalCommand: `pnpm run smoke -- --tag skills`,
-      constraintGates: ["typecheck", "smoke"],
+      evalCommand: "pnpm run eval:fixtures",
+      constraintGates: ["pnpm run typecheck", "pnpm run smoke"],
       rollbackPlan: `Revert skill file using skill.rollback or restore from snapshot.`
     });
     return { manifestId: manifest.id };
+  }
+
+  async createProposalFromLearningCandidate(options: {
+    candidate: SkillLearningCandidate;
+    agentEvolutionPolicy: AgentEvolutionPolicy;
+    skillName?: string;
+    affectedFiles?: string[];
+    evalPlan?: GovernedProposalEvalPlan;
+    rollbackExpectation?: string;
+  }): Promise<LearningCandidateProposalResult> {
+    const policyDecision = policyDecisionForLearningCandidateProposal(options.agentEvolutionPolicy);
+    if (!policyDecision.allowed) {
+      return { ok: false, reason: policyDecision.reason ?? "Agent Evolution policy does not allow proposal creation." };
+    }
+
+    const changeKind = governedChangeKindForLearningCandidate(options.candidate);
+    const skillName = skillNameForLearningCandidate(options.candidate, options.skillName);
+    const skill = this.#options.registry.get(skillName);
+    const source = skill !== undefined && isLoadedSkill(skill) ? skill.sourceKind : undefined;
+    const affectedFiles = options.affectedFiles ?? (skill !== undefined && isLoadedSkill(skill) ? [skill.sourcePath] : []);
+    const riskClass = riskClassForGovernedChangeKind(changeKind);
+    const requiresHumanApproval = requiresApprovalForRisk(options.agentEvolutionPolicy, riskClass);
+    const proposal = await this.#options.skillEvolutionStore.appendGovernedProposal({
+      skillName,
+      source,
+      reason: options.candidate.reason,
+      confidence: options.candidate.confidence,
+      evidenceIds: options.candidate.evidenceIds,
+      sourceTrust: "runtime_internal",
+      mayPromoteAutomatically: false,
+      requiresHumanApproval,
+      changeKind,
+      targetSurface: changeKind === "routing_metadata_update" ? "routing_metadata" : "skill",
+      affectedSurface: changeKind === "routing_metadata_update" ? `${skillName}:routing` : skillName,
+      affectedFiles,
+      hypothesis: options.candidate.reason,
+      riskClass,
+      authorityExpansion: changeKind === "skill_create",
+      sourceKind: source,
+      evalPlan: options.evalPlan ?? defaultEvalPlan(),
+      rollbackExpectation: options.rollbackExpectation ?? defaultRollbackExpectation(changeKind),
+      policyDecision: {
+        ...policyDecision,
+        requiresApproval: requiresHumanApproval
+      },
+      approvalState: requiresHumanApproval ? "required" : "not_required"
+    });
+    return { ok: true, proposal };
   }
 
   async createManifestForToolDescription(options: {
@@ -296,8 +415,8 @@ export class SkillProposalService {
       hypothesis: options.hypothesis,
       predictedImpact: options.predictedImpact,
       riskLevel: "low",
-      evalCommand: `pnpm run smoke`,
-      constraintGates: ["typecheck", "smoke"],
+      evalCommand: "pnpm run eval:fixtures",
+      constraintGates: ["pnpm run typecheck", "pnpm run smoke"],
       rollbackPlan: `Revert tool description to previous version via manifest store.`
     });
     return { manifestId: manifest.id };
@@ -326,8 +445,8 @@ export class SkillProposalService {
       hypothesis: options.hypothesis,
       predictedImpact: options.predictedImpact,
       riskLevel: "medium",
-      evalCommand: `pnpm run smoke -- --tag skills`,
-      constraintGates: ["typecheck", "smoke"],
+      evalCommand: "pnpm run eval:fixtures",
+      constraintGates: ["pnpm run typecheck", "pnpm run smoke"],
       rollbackPlan: `Revert routing metadata to previous version via manifest store.`
     });
     return { manifestId: manifest.id };
@@ -447,6 +566,49 @@ export function classifyPatchRisk(patch: SkillPatchOperation): SkillPatchRiskLev
   return "low";
 }
 
+function riskLevelForProposal(proposal: SkillPatchProposal): SkillPatchRiskLevel {
+  if (proposal.riskClass !== undefined) {
+    return proposal.riskClass;
+  }
+  if (proposal.patch !== undefined) {
+    return classifyPatchRisk(proposal.patch);
+  }
+  return riskClassForGovernedChangeKind(proposal.changeKind ?? "skill_patch");
+}
+
+function evidenceIdsForProposal(proposal: SkillPatchProposal): string[] {
+  return [...new Set([
+    ...(proposal.evidenceIds ?? []),
+    ...(proposal.evidence?.observations ?? [])
+  ])];
+}
+
+function summarizeObservationForReview(observation: SkillObservationRecord): ProposalEvidenceSummary {
+  return {
+    id: observation.id,
+    skillName: observation.skillName,
+    sessionId: observation.sessionId,
+    timestamp: observation.timestamp,
+    type: observation.type,
+    outcome: observation.outcome,
+    lesson: observation.lesson,
+    candidateImprovement: observation.candidateImprovement,
+    sourceTrust: observation.sourceTrust
+  };
+}
+
+function summarizeEvalRunForReview(run: SkillEvalRunRecord): ProposalEvalRunSummary {
+  return {
+    id: run.id,
+    skillName: run.skillName,
+    evalId: run.evalId,
+    ranAt: run.ranAt,
+    score: run.score,
+    passed: run.passed,
+    threshold: run.threshold
+  };
+}
+
 export function evaluateProposalTrust(
   proposal: SkillPatchProposal,
   observations: SkillObservationRecord[],
@@ -469,6 +631,90 @@ export function evaluateProposalTrust(
     return { ok: false, reason: "Skill patch proposal only cites untrusted observations and requires review before promotion." };
   }
   return { ok: true };
+}
+
+function governedChangeKindForLearningCandidate(candidate: SkillLearningCandidate): GovernedProposalChangeKind {
+  return candidate.suggestedTarget;
+}
+
+function skillNameForLearningCandidate(candidate: SkillLearningCandidate, provided: string | undefined): string {
+  if (provided !== undefined && provided.trim().length > 0) {
+    return provided;
+  }
+  if (candidate.kind === "selected_skill_refinement") {
+    return candidate.selectedSkill;
+  }
+  return `learning-candidate-${candidate.id}`;
+}
+
+function policyDecisionForLearningCandidateProposal(policy: AgentEvolutionPolicy): GovernedProposalPolicyDecision {
+  if (!policy.observeTurns || !policy.createEvidence) {
+    return {
+      mode: policy.mode,
+      createProposals: policy.createProposals,
+      shadowOnly: policy.shadowAutonomousDecisions,
+      allowed: false,
+      requiresApproval: true,
+      reason: "Agent Evolution policy does not allow learning evidence."
+    };
+  }
+  if (!policy.createProposals) {
+    return {
+      mode: policy.mode,
+      createProposals: policy.createProposals,
+      shadowOnly: policy.shadowAutonomousDecisions,
+      allowed: false,
+      requiresApproval: true,
+      reason: "Agent Evolution policy does not allow proposal creation."
+    };
+  }
+  return {
+    mode: policy.mode,
+    createProposals: policy.createProposals,
+    shadowOnly: policy.shadowAutonomousDecisions,
+    allowed: true,
+    requiresApproval: true,
+    reason: policy.shadowAutonomousDecisions ? "Autonomous proposal is recorded as shadow-only in Phase 1A." : undefined
+  };
+}
+
+function riskClassForGovernedChangeKind(kind: GovernedProposalChangeKind): SkillPatchRiskLevel {
+  if (kind === "skill_patch") {
+    return "low";
+  }
+  return "medium";
+}
+
+function requiresApprovalForRisk(policy: AgentEvolutionPolicy, riskClass: SkillPatchRiskLevel): boolean {
+  if (riskClass === "high") {
+    return policy.requireApprovalForHighRisk;
+  }
+  if (riskClass === "medium") {
+    return policy.requireApprovalForMediumRisk;
+  }
+  return policy.requireApprovalForLowRisk;
+}
+
+function defaultEvalPlan(): GovernedProposalEvalPlan {
+  return {
+    command: "pnpm run eval:fixtures",
+    constraintGates: ["pnpm run typecheck", "pnpm run smoke"],
+    expectedMetrics: ["primary_skill_precision", "false_positive_rate", "no_skill_correctness"]
+  };
+}
+
+function defaultRollbackExpectation(kind: GovernedProposalChangeKind): string {
+  if (kind === "routing_metadata_update") {
+    return "Revert routing metadata through the governed manifest/proposal path before changing live routing behavior.";
+  }
+  if (kind === "skill_create") {
+    return "Remove or archive the governed local skill candidate before promotion is considered.";
+  }
+  return "Revert the governed skill patch through snapshot-backed promotion rollback if later promoted.";
+}
+
+function summarizeGovernedProposal(proposal: SkillPatchProposal): string {
+  return `Governed ${proposal.changeKind ?? "skill_patch"} proposal for ${proposal.affectedSurface ?? proposal.skillName}.`;
 }
 
 function isUntrustedSource(sourceTrust: SkillSourceTrust): boolean {

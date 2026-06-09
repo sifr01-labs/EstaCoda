@@ -108,16 +108,18 @@ Proposed changes carry a `ChangeManifest` with hypothesis, predicted impact, ris
 
 ## Agent Evolution
 
-Agent Evolution controls whether EstaCoda may learn reusable Skills from workflow patterns. The persisted config key is `skills.autonomy`; setup and settings show this as Agent Evolution.
+Agent Evolution is the reviewable self-improvement control plane. It records evidence, learning candidates, governed proposals, eval metadata, optional experiment links, and review status. The persisted compatibility key is `skills.autonomy`; setup and settings show this as Agent Evolution.
 
 | Mode | Behavior |
 |---|---|
-| `none` | Agent Evolution is off |
-| `suggest` | Records candidates after repeated success; does not write files |
-| `proactive` | Auto-creates project skills after repeated successful bounded local workflows |
-| `autonomous` | Auto-creates after first successful bounded local workflow |
+| `none` | Agent Evolution is off. No evidence or proposals are recorded. |
+| `suggest` | Records evidence/candidates and creates reviewable proposal records. No promotion. |
+| `proactive` | Prepares stronger review proposals and eval metadata. Promotion remains manual. |
+| `autonomous` | Records shadow-only autonomous decisions for review. Real auto-promotion and auto-rollback are not active in Phase 1A. |
 
-Learning and autonomy are maturity-bounded. They create local skills only for detected bounded workflows. They do not imply a marketplace or a broad bundled catalog.
+`SkillLearningManager` is an evidence source, not mutation authority. `SkillEvolutionStore` owns evolution records such as observations, candidates, proposals, experiments, evals, promotions, snapshots, and rollback metadata. `ChangeManifestStore` owns change manifests. Bundled and external skill assets are not mutated.
+
+Routing remains deterministic in Phase 1A. Semantic retrieval, provider embeddings, LLM reranking, compact skill index fallback, taskClass routing, supporting candidates, advisory route tools, real autonomous promotion, auto-rollback, skill fork/merge/archive, and hygiene scanning are roadmap behavior, not active behavior.
 
 ---
 

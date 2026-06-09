@@ -10,7 +10,7 @@ import { SkillProposalService, slugifySkillName } from "../skills/skill-proposal
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
-import { runConstraintGates } from "../evolution/constraint-gate-runner.js";
+import { normalizeGateCommand, runConstraintGates } from "../evolution/constraint-gate-runner.js";
 import { canTransition } from "../evolution/candidate-lifecycle.js";
 import { populateTraces } from "../evolution/export-format.js";
 import type { OptimizationDataset } from "../evolution/export-format.js";
@@ -137,7 +137,7 @@ async function evolutionTest(options: CliOptions, args: string[]): Promise<CliCo
     };
   }
 
-  const filteredGates = gateFilter !== undefined ? gates.filter((g) => normalizeCommand(g) === normalizeCommand(gateFilter)) : gates;
+  const filteredGates = gateFilter !== undefined ? gates.filter((g) => normalizeGateCommand(g) === normalizeGateCommand(gateFilter)) : gates;
 
   await changeManifestStore.updateStatus(manifestId, "testing");
 

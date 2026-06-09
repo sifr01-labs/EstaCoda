@@ -52,6 +52,9 @@ export const routingMetadataProposalCase: EvalCase = {
       assertEqual("manifest hypothesis", manifest?.hypothesis, "Skill is under-triggered for research prompts"),
       assertEqual("manifest predictedImpact", manifest?.predictedImpact, "Higher routing accuracy for research-oriented queries"),
       assertEqual("manifest riskLevel", manifest?.riskLevel, "medium"),
+      assertEqual("manifest evalCommand is allowlisted", manifest?.evalCommand, "pnpm run eval:fixtures"),
+      assertEqual("manifest first constraint gate is allowlisted", manifest?.constraintGates?.[0], "pnpm run typecheck"),
+      assertEqual("manifest second constraint gate is allowlisted", manifest?.constraintGates?.[1], "pnpm run smoke"),
       assertTrue("manifest has evidence trace", manifest?.evidence?.traces?.includes("trace_xyz789") ?? false),
       assertTrue("manifest has rollbackPlan", manifest?.rollbackPlan?.includes("Revert") ?? false),
       assertEqual("manifest status", manifest?.status, "proposed")
