@@ -1,32 +1,31 @@
 /* ============================================================
-   EstaCoda Docs — brand match for the marketing site.
-   Light mode: papyrus / warm beige + Kemet blue accent.
-   Dark mode:  deep midnight blue + warm cream ink + brass accent.
-   Fonts: Playfair Display (serif headings), Crimson Text (body),
-          JetBrains Mono (code), Cairo (Arabic body).
+   EstaCoda Docs — brand match for the Monolith marketing site.
+   Light mode: white paper, ink #1f2230, Kemet blue #1b4c9d accent.
+   Dark mode:  near-black #0b0c11, off-white ink, blue accent.
+   Fonts: Playfair Display (serif headings), Geist (body),
+          Geist Mono (code / labels / nav), Cairo (Arabic).
    ============================================================ */
 
-/* Fonts (Playfair Display, Crimson Text, JetBrains Mono, Cairo) are loaded
-   from Google Fonts via <link> tags in docusaurus.config.ts -> stylesheets,
-   not via @import here — keeps webpack from inlining and slowing builds. */
+/* Fonts (Playfair Display, Geist, Geist Mono, Cairo) are loaded from Google
+   Fonts via <link> tags in docusaurus.config.ts -> stylesheets, not via
+   @import here — keeps webpack from inlining and slowing builds. */
 
-/* ---------- Brand tokens (mirrors artifacts/estacoda/src/pages/EstaCoda.tsx) ---------- */
+/* ---------- Brand tokens (mirrors artifacts/estacoda Monolith design) ---------- */
 :root {
   --estacoda-kemet:        #1b4c9d;
   --estacoda-kemet-deep:   #143a78;
   --estacoda-kemet-soft:   #2a64b8;
   --estacoda-ink:          #1f2230;
-  --estacoda-ink-soft:     rgba(31, 34, 48, 0.62);
-  --estacoda-ink-faint:    rgba(31, 34, 48, 0.32);
-  --estacoda-rule:         rgba(31, 34, 48, 0.16);
-  --estacoda-paper-top:    #F7EFD9;
-  --estacoda-paper-bot:    #EFE3C5;
-  --estacoda-paper-sunk:   #ece0c2;
-  --estacoda-paper-warm:   #f1e6cc;
+  --estacoda-ink-soft:     rgba(31, 34, 48, 0.64);
+  --estacoda-ink-faint:    rgba(31, 34, 48, 0.34);
+  --estacoda-rule:         rgba(31, 34, 48, 0.12);
+  --estacoda-paper:        #ffffff;
+  --estacoda-paper-soft:   #f6f6f7;
+  --estacoda-paper-sunk:   #f0f0f1;
 
   --estacoda-serif-heading: 'Playfair Display', Georgia, 'Times New Roman', serif;
-  --estacoda-serif-body:    'Crimson Text', Georgia, 'Times New Roman', serif;
-  --estacoda-mono:          'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --estacoda-sans-body:     'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --estacoda-mono:          'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
   /* Infima primary (Kemet blue) — used for links, sidebar active state, etc. */
   --ifm-color-primary:          var(--estacoda-kemet);
@@ -38,67 +37,70 @@
   --ifm-color-primary-lightest: #6b95d3;
 
   /* Base surfaces & ink */
-  --ifm-background-color:           var(--estacoda-paper-top);
-  --ifm-background-surface-color:   var(--estacoda-paper-warm);
+  --ifm-background-color:           var(--estacoda-paper);
+  --ifm-background-surface-color:   var(--estacoda-paper-soft);
   --ifm-color-content:              var(--estacoda-ink);
   --ifm-color-content-secondary:    var(--estacoda-ink-soft);
-  --ifm-heading-color:              var(--estacoda-kemet);
+  --ifm-heading-color:              var(--estacoda-ink);
   --ifm-link-color:                 var(--estacoda-kemet);
   --ifm-link-hover-color:           var(--estacoda-kemet-deep);
 
   /* Typography */
-  --ifm-font-family-base:           var(--estacoda-serif-body);
+  --ifm-font-family-base:           var(--estacoda-sans-body);
   --ifm-heading-font-family:        var(--estacoda-serif-heading);
   --ifm-font-family-monospace:      var(--estacoda-mono);
-  --ifm-font-size-base:             17px;
-  --ifm-line-height-base:           1.65;
+  --ifm-font-size-base:             16px;
+  --ifm-line-height-base:           1.7;
   --ifm-heading-font-weight:        600;
-  --ifm-h1-font-size:               2.4rem;
+  --ifm-h1-font-size:               2.5rem;
   --ifm-h2-font-size:               1.85rem;
-  --ifm-h3-font-size:               1.4rem;
-  --ifm-code-font-size:             92%;
+  --ifm-h3-font-size:               1.35rem;
+  --ifm-code-font-size:             88%;
 
   /* Rules, borders, dividers */
-  --ifm-color-emphasis-100:  #efe3c5;
-  --ifm-color-emphasis-200:  #e8d8b2;
-  --ifm-color-emphasis-300:  #d9c8a0;
+  --ifm-color-emphasis-100:  #f4f4f5;
+  --ifm-color-emphasis-200:  #ececed;
+  --ifm-color-emphasis-300:  #dededf;
   --ifm-toc-border-color:    var(--estacoda-rule);
   --ifm-hr-border-color:     var(--estacoda-rule);
   --ifm-table-border-color:  var(--estacoda-rule);
 
   /* Code blocks */
   --ifm-code-background:                rgba(27, 76, 157, 0.08);
-  --ifm-pre-background:                 #2a2418;
-  --ifm-pre-color:                      #f1e6cc;
-  --docusaurus-highlighted-code-line-bg: rgba(27, 76, 157, 0.18);
+  --ifm-pre-background:                 var(--estacoda-paper-soft);
+  --ifm-pre-color:                      var(--estacoda-ink);
+  --docusaurus-highlighted-code-line-bg: rgba(27, 76, 157, 0.12);
 
   /* Navbar */
-  --ifm-navbar-background-color: var(--estacoda-paper-top);
+  --ifm-navbar-background-color: var(--estacoda-paper);
   --ifm-navbar-link-color:       var(--estacoda-ink);
   --ifm-navbar-link-hover-color: var(--estacoda-kemet);
   --ifm-navbar-shadow:           inset 0 -1px 0 var(--estacoda-rule);
   --ifm-navbar-height:           4rem;
 
-  /* Sidebar (the "default Docusaurus green" the brief calls out) */
+  /* Sidebar */
   --ifm-menu-color:                     var(--estacoda-ink-soft);
   --ifm-menu-color-active:              var(--estacoda-kemet);
-  --ifm-menu-color-background-active:   rgba(27, 76, 157, 0.10);
-  --ifm-menu-color-background-hover:    rgba(27, 76, 157, 0.06);
+  --ifm-menu-color-background-active:   rgba(27, 76, 157, 0.09);
+  --ifm-menu-color-background-hover:    rgba(27, 76, 157, 0.05);
+
+  /* Footer — light editorial band (mirrors the site footer #e8e8e8) */
+  --ifm-footer-background-color: #e8e8e8;
+  --ifm-footer-color:            var(--estacoda-ink);
+  --ifm-footer-link-color:       var(--estacoda-ink-soft);
+  --ifm-footer-link-hover-color: var(--estacoda-kemet);
+  --ifm-footer-title-color:      var(--estacoda-ink);
 }
 
-/* ---------- Dark mode ---------- */
+/* ---------- Dark mode (near-black, off-white ink, blue accent) ---------- */
 [data-theme='dark'] {
-  --estacoda-kemet:        #d4b882;   /* brass — used as accent in night mode */
-  --estacoda-kemet-deep:   #b8995f;
-  --estacoda-kemet-soft:   #e6cf9e;
-  --estacoda-ink:          #e8d5b0;
-  --estacoda-ink-soft:     rgba(232, 213, 176, 0.74);
-  --estacoda-ink-faint:    rgba(232, 213, 176, 0.40);
-  --estacoda-rule:         rgba(232, 213, 176, 0.14);
-  --estacoda-paper-top:    #0f1d38;
-  --estacoda-paper-bot:    #0c1731;
-  --estacoda-paper-sunk:   #0a1428;
-  --estacoda-paper-warm:   #14233f;
+  --estacoda-ink:          #e8eaf0;
+  --estacoda-ink-soft:     rgba(232, 234, 240, 0.66);
+  --estacoda-ink-faint:    rgba(232, 234, 240, 0.36);
+  --estacoda-rule:         rgba(232, 234, 240, 0.12);
+  --estacoda-paper:        #0b0c11;
+  --estacoda-paper-soft:   #14161c;
+  --estacoda-paper-sunk:   #0f1117;
 
   --ifm-color-primary:          #6aa3f0;
   --ifm-color-primary-dark:     #4a8be4;
@@ -108,27 +110,27 @@
   --ifm-color-primary-lighter:  #a3c7f7;
   --ifm-color-primary-lightest: #c5dafa;
 
-  --ifm-background-color:           var(--estacoda-paper-top);
-  --ifm-background-surface-color:   var(--estacoda-paper-warm);
+  --ifm-background-color:           var(--estacoda-paper);
+  --ifm-background-surface-color:   var(--estacoda-paper-soft);
   --ifm-color-content:              var(--estacoda-ink);
   --ifm-color-content-secondary:    var(--estacoda-ink-soft);
-  --ifm-heading-color:              var(--estacoda-kemet);
+  --ifm-heading-color:              var(--estacoda-ink);
   --ifm-link-color:                 #6aa3f0;
   --ifm-link-hover-color:           #8ab8f4;
 
-  --ifm-color-emphasis-100:  #14233f;
-  --ifm-color-emphasis-200:  #1a2c4d;
-  --ifm-color-emphasis-300:  #25395f;
+  --ifm-color-emphasis-100:  #14161c;
+  --ifm-color-emphasis-200:  #1b1e26;
+  --ifm-color-emphasis-300:  #262a35;
   --ifm-toc-border-color:    var(--estacoda-rule);
   --ifm-hr-border-color:     var(--estacoda-rule);
   --ifm-table-border-color:  var(--estacoda-rule);
 
-  --ifm-code-background:                rgba(212, 184, 130, 0.12);
-  --ifm-pre-background:                 #0a1428;
-  --ifm-pre-color:                      #e8d5b0;
-  --docusaurus-highlighted-code-line-bg: rgba(212, 184, 130, 0.18);
+  --ifm-code-background:                rgba(106, 163, 240, 0.12);
+  --ifm-pre-background:                 #14161c;
+  --ifm-pre-color:                      var(--estacoda-ink);
+  --docusaurus-highlighted-code-line-bg: rgba(106, 163, 240, 0.16);
 
-  --ifm-navbar-background-color: var(--estacoda-paper-top);
+  --ifm-navbar-background-color: var(--estacoda-paper);
   --ifm-navbar-link-color:       var(--estacoda-ink);
   --ifm-navbar-link-hover-color: #6aa3f0;
   --ifm-navbar-shadow:           inset 0 -1px 0 var(--estacoda-rule);
@@ -137,16 +139,20 @@
   --ifm-menu-color-active:              #6aa3f0;
   --ifm-menu-color-background-active:   rgba(106, 163, 240, 0.12);
   --ifm-menu-color-background-hover:    rgba(106, 163, 240, 0.07);
+
+  --ifm-footer-background-color: #0f1117;
+  --ifm-footer-color:            var(--estacoda-ink);
+  --ifm-footer-link-color:       var(--estacoda-ink-soft);
+  --ifm-footer-link-hover-color: #6aa3f0;
+  --ifm-footer-title-color:      var(--estacoda-ink);
 }
 
-/* ---------- Page chrome ---------- */
+/* ---------- Page chrome — flat paper, no papyrus gradient ---------- */
 html, body {
   background-color: var(--ifm-background-color);
 }
-
 body {
-  background-image: linear-gradient(180deg, var(--estacoda-paper-top) 0%, var(--estacoda-paper-bot) 100%);
-  background-attachment: fixed;
+  background-image: none;
 }
 
 /* Inline code keeps a quiet brand tint */
@@ -156,12 +162,12 @@ code {
   padding: 0.05rem 0.35rem;
 }
 
-/* Code blocks stay highly readable on a warm dark slab regardless of mode */
+/* Code blocks — clean editorial surface, brand hairline border */
 pre, .theme-code-block, div[class*='codeBlockContainer'] {
   background-color: var(--ifm-pre-background) !important;
   color: var(--ifm-pre-color) !important;
   border: 1px solid var(--estacoda-rule);
-  border-radius: 6px;
+  border-radius: 8px;
 }
 pre code,
 .theme-code-block code,
@@ -173,14 +179,14 @@ div[class*='codeBlockContainer'] code {
   font-family: var(--estacoda-mono);
 }
 
-/* Headings — Playfair Display, with the homepage's italic-emphasis register */
+/* Headings — Playfair Display, ink (accent reserved for links) */
 h1, h2, h3, h4, h5, h6,
 .markdown h1, .markdown h2, .markdown h3, .markdown h4, .markdown h5, .markdown h6 {
-  font-family: var(--estacoda-heading-font, var(--estacoda-serif-heading));
+  font-family: var(--estacoda-serif-heading);
   letter-spacing: -0.01em;
   color: var(--ifm-heading-color);
 }
-h1, .markdown h1 { font-weight: 600; line-height: 1.15; }
+h1, .markdown h1 { font-weight: 600; line-height: 1.12; }
 h2, .markdown h2 {
   font-weight: 600;
   border-bottom: 1px solid var(--estacoda-rule);
@@ -189,10 +195,10 @@ h2, .markdown h2 {
 }
 h3, .markdown h3 { font-weight: 600; }
 
-/* Body copy */
+/* Body copy — Geist sans */
 .markdown {
-  font-family: var(--estacoda-serif-body);
-  font-size: 1.05rem;
+  font-family: var(--estacoda-sans-body);
+  font-size: 1rem;
   line-height: 1.7;
 }
 
@@ -210,7 +216,7 @@ h3, .markdown h3 { font-weight: 600; }
   letter-spacing: -0.01em;
   font-size: 1.15rem;
   line-height: 1;
-  color: var(--estacoda-kemet);
+  color: var(--estacoda-ink);
 }
 .navbar__title::after {
   content: 'BY KEMET RESEARCH';
@@ -221,14 +227,20 @@ h3, .markdown h3 { font-weight: 600; }
   letter-spacing: 0.2em;
   color: var(--estacoda-ink-faint);
 }
-.navbar__logo img { height: 1.75rem; width: auto; }
-.navbar__link { font-family: var(--estacoda-mono); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.14em; }
+.navbar__logo img { height: 1.85rem; width: auto; }
+.navbar__link {
+  font-family: var(--estacoda-mono);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
 
 /* Sidebar */
 .menu {
   background: transparent;
-  font-family: var(--estacoda-serif-body);
-  font-size: 0.98rem;
+  font-family: var(--estacoda-sans-body);
+  font-size: 0.95rem;
 }
 .menu__link {
   border-radius: 4px;
@@ -243,7 +255,7 @@ h3, .markdown h3 { font-weight: 600; }
 .menu__list-item-collapsible:hover,
 .menu__link:hover { background-color: var(--ifm-menu-color-background-hover); }
 
-/* Right-column ToC */
+/* Right-column ToC — mono uppercase index, like the site section markers */
 .table-of-contents__link {
   font-family: var(--estacoda-mono);
   font-size: 0.72rem;
@@ -259,13 +271,13 @@ h3, .markdown h3 { font-weight: 600; }
 /* Tables */
 table { border-collapse: collapse; }
 table thead {
-  background-color: rgba(27, 76, 157, 0.08);
+  background-color: rgba(27, 76, 157, 0.07);
   font-family: var(--estacoda-mono);
   font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
-[data-theme='dark'] table thead { background-color: rgba(212, 184, 130, 0.08); }
+[data-theme='dark'] table thead { background-color: rgba(106, 163, 240, 0.10); }
 table th, table td { border: 1px solid var(--estacoda-rule); }
 
 /* Admonitions — restrained borders, brand-tinted */
@@ -290,17 +302,36 @@ table th, table td { border: 1px solid var(--estacoda-rule); }
 }
 .pagination-nav__label {
   font-family: var(--estacoda-serif-heading);
-  color: var(--ifm-color-primary);
+  color: var(--ifm-heading-color);
 }
 
-/* Footer — already dark; keep brand mono labels */
+/* Footer — light editorial band; mono uppercase labels */
+.footer {
+  background-color: var(--ifm-footer-background-color);
+  color: var(--ifm-footer-color);
+  border-top: 1px solid var(--estacoda-rule);
+}
 .footer__title {
   font-family: var(--estacoda-mono);
   text-transform: uppercase;
   letter-spacing: 0.12em;
   font-size: 0.78rem;
+  color: var(--ifm-footer-title-color);
 }
-.footer__link-item { font-family: var(--estacoda-serif-body); }
+.footer__link-item {
+  font-family: var(--estacoda-mono);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ifm-footer-link-color);
+}
+.footer__link-item:hover { color: var(--ifm-footer-link-hover-color); }
+.footer__copyright {
+  font-family: var(--estacoda-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  color: var(--estacoda-ink-soft);
+}
 
 /* Color-mode toggle button */
 .clean-btn[class*='colorModeToggle'] { color: var(--estacoda-ink-soft); }
@@ -308,7 +339,7 @@ table th, table td { border: 1px solid var(--estacoda-rule); }
 /* ---------- Arabic / RTL polish ---------- */
 html[lang='ar'] body,
 html[lang='ar'] .markdown {
-  font-family: 'Cairo', var(--estacoda-serif-body);
+  font-family: 'Cairo', var(--estacoda-sans-body);
 }
 html[lang='ar'] h1,
 html[lang='ar'] h2,
@@ -330,6 +361,7 @@ html[lang='ar'] .menu__link,
 html[lang='ar'] .table-of-contents__link,
 html[lang='ar'] .breadcrumbs__link,
 html[lang='ar'] .footer__title,
+html[lang='ar'] .footer__link-item,
 html[lang='ar'] .theme-doc-sidebar-item-category > .menu__list-item-collapsible {
   letter-spacing: 0;
   text-transform: none;

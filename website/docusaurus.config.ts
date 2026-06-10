@@ -10,7 +10,7 @@ const config: Config = {
 
   stylesheets: [
     {
-      href: 'https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Crimson+Text:ital,wght@0,400;0,600;1,400;1,600&family=JetBrains+Mono:wght@400;500;600&family=Cairo:wght@400;500;600;700&display=swap',
+      href: 'https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600;700&family=Cairo:wght@400;500;600;700&display=swap',
       rel: 'stylesheet',
     },
   ],
@@ -80,8 +80,8 @@ const config: Config = {
       title: 'estacoda',
       logo: {
         alt: 'EstaCoda',
-        src: 'img/logo-light.png',
-        srcDark: 'img/logo-dark.png',
+        src: 'img/logo-light.svg',
+        srcDark: 'img/logo-dark.svg',
         // Point the brand mark at the main marketing site, not the docs root.
         href: 'https://estacoda.kemetresearch.com/',
         target: '_self',
@@ -105,7 +105,7 @@ const config: Config = {
       ],
     },
     footer: {
-      style: 'dark',
+      style: 'light',
       links: [
         {
           title: 'Docs',
