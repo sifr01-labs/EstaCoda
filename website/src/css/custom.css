@@ -376,8 +376,7 @@ html[dir='rtl'] .menu__link--active {
 
 /* Mono content (CLI, env vars) stays LTR even inside RTL pages */
 html[dir='rtl'] code,
-html[dir='rtl'] pre,
-html[dir='rtl'] .table-of-contents__link {
+html[dir='rtl'] pre {
   direction: ltr;
   text-align: left;
   unicode-bidi: embed;
