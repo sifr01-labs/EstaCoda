@@ -8,6 +8,7 @@ import type { FileChangePreviewViewModel } from "../contracts/view-model.js";
 import type { FileStateOperationKind, FileStateTracker } from "../delegation/file-state-tracker.js";
 import { isLikelyBinary, isTextyPath } from "../context/context-security.js";
 import { assessHardlineFloor } from "../security/command-safety.js";
+import { createTerminalInspectTool } from "./terminal-inspect-tool.js";
 import { errorResult, resolveWorkspacePath } from "./workspace-paths.js";
 
 export type WorkspaceToolOptions = {
@@ -305,6 +306,10 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
         };
       }
     },
+    createTerminalInspectTool({
+      workspaceRoot: root,
+      timeoutMs: Math.min(commandTimeoutMs, 10_000)
+    }),
     {
       name: "terminal.run",
       description: "Run a bounded shell command in the active workspace.",

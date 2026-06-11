@@ -753,7 +753,14 @@ function createSkillVisibilityContext(input: {
   setToolsetAvailability(availableToolsets, "web", input.webEnabled && availableTools.has("web.extract"));
   setToolsetAvailability(availableToolsets, "browser", input.browserAvailable && availableTools.has("browser.navigate"));
   setToolsetAvailability(availableToolsets, "telegram", input.telegramReady);
-  setToolsetAvailability(availableToolsets, "shell-readonly", availableTools.has("terminal.run"));
+  setToolsetAvailability(
+    availableToolsets,
+    "shell-readonly",
+    availableTools.has("terminal.inspect") ||
+      availableTools.has("terminal.run") ||
+      availableTools.has("process.list") ||
+      availableTools.has("process.logs")
+  );
   setToolsetAvailability(
     availableToolsets,
     "shell-write",

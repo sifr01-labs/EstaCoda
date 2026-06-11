@@ -66,6 +66,7 @@ const REQUIRED_IF_REGISTERED_READ_ONLY_TOOLS = [
   "file.search",
   "file.glob",
   "file.grep",
+  "terminal.inspect",
   "process.list",
   "process.logs",
   "web.search",

@@ -13,7 +13,7 @@ describe("resolveChildToolAccess", () => {
       request: { role: "leaf", depth: 1 }
     });
 
-    expect(result.effectiveAllowedTools).toEqual(["file.read", "file.search", "process.logs", "web.search"]);
+    expect(result.effectiveAllowedTools).toEqual(["file.read", "file.search", "terminal.inspect", "process.logs", "web.search"]);
     expect(result.strippedTools).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "delegate_task", reasons: ["leaf-delegation-disabled", "disallowed-risk-class"] }),
       expect.objectContaining({ name: "terminal.run", reasons: ["blocked-exact-name", "disallowed-risk-class"] }),
@@ -122,6 +122,7 @@ function inventory(): ToolDefinition[] {
   return [
     tool("file.read", "read-only-local", ["files", "core"]),
     tool("file.search", "read-only-local", ["files", "research"]),
+    tool("terminal.inspect", "read-only-local", ["shell-readonly", "coding", "research"]),
     tool("process.logs", "read-only-local", ["core"]),
     tool("web.search", "read-only-network", ["web", "research"]),
     tool("delegate_task", "shared-state-mutation", ["core", "research", "coding"]),
