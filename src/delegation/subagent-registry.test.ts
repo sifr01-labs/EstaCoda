@@ -65,6 +65,8 @@ describe("SubagentRegistry", () => {
     registry.registerSubagent(record("sub-2", "parent-2"));
 
     expect(registry.listActiveSubagents("parent-1").map((item) => item.subagentId)).toEqual(["sub-1"]);
+    expect(registry.hasActiveSubagents("parent-1")).toBe(true);
+    expect(registry.hasActiveSubagents("parent-missing")).toBe(false);
   });
 
   it("unregisters active subagents", () => {

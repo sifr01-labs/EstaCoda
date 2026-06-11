@@ -117,6 +117,15 @@ export class SubagentRegistry {
     return records.map(snapshot);
   }
 
+  hasActiveSubagents(parentSessionId: string): boolean {
+    for (const record of this.#active.values()) {
+      if (record.parentSessionId === parentSessionId) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   interruptSubagent(id: string, reason: string): boolean {
     const record = this.#active.get(id);
     if (record === undefined) {

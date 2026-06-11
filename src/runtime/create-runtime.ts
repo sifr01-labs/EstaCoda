@@ -212,6 +212,7 @@ export type Runtime = {
     signal?: AbortSignal;
   }): Promise<CompactResult>;
   inspectMcpServers(): MCPServerSnapshot[];
+  hasActiveSubagents?(parentSessionId: string): boolean;
   handle(input: AgentLoopInput): Promise<AgentLoopResponse>;
   executeTool?(input: {
     tool: string;
@@ -938,6 +939,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     },
     inspectMcpServers() {
       return loadedMcpServers.map((server) => structuredClone(server.snapshot));
+    },
+    hasActiveSubagents(parentSessionId) {
+      return subagentRegistry.hasActiveSubagents(parentSessionId);
     },
     async handle(input) {
       const trustedWorkspace = input.trustedWorkspace ?? await trustStore.isTrusted(workspaceRoot);

@@ -272,6 +272,17 @@ function makeMessage(text: string, overrides?: Partial<ChannelMessage>): Channel
   };
 }
 
+async function waitFor(predicate: () => boolean, timeoutMs = 500): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Timed out waiting for condition.");
+}
+
 function makeVoiceTranscriptMessage(text = "voice request"): ChannelMessage {
   return makeMessage(text, {
     metadata: {
@@ -2667,6 +2678,182 @@ describe("ChannelGateway commands", () => {
       expect(aborted).toBe(true);
       expect(stopResult.replyText).toContain("Cancelled");
       expect(registry.stats().totalAborted).toBe(1);
+    });
+
+    it("queues ordinary interrupt-policy messages while the active turn has subagents", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      let resolveFirst: (() => void) | undefined;
+      let firstStarted: (() => void) | undefined;
+      const firstStartedPromise = new Promise<void>((resolve) => { firstStarted = resolve; });
+      let handleCalls = 0;
+      const handledTexts: string[] = [];
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async ({ sessionId }) => ({
+          ...createMinimalRuntime(),
+          hasActiveSubagents: (parentSessionId) => parentSessionId === sessionId,
+          handle: async ({ text, signal }: { text: string; signal?: AbortSignal }) => {
+            handleCalls++;
+            handledTexts.push(text);
+            if (handleCalls === 1) {
+              firstStarted?.();
+              await new Promise<void>((resolve, reject) => {
+                resolveFirst = resolve;
+                signal?.addEventListener("abort", () => reject(new Error("unexpected abort")));
+              });
+              return runtimeResponse({ text: "first done", securityDecision: "allow" });
+            }
+            return runtimeResponse({ text: `queued ${text}`, securityDecision: "allow" });
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        activeTurnRegistry: registry,
+        busyPolicyResolver: () => ({ busyPolicy: "interrupt", queueDepth: 3 })
+      });
+
+      const first = gateway.receive(makeMessage("first"));
+      await firstStartedPromise;
+      const second = await gateway.receive(makeMessage("second"));
+
+      expect(second.replyText).toBe("");
+      expect(registry.stats().totalAborted).toBe(0);
+      expect(adapter.records).toContainEqual(expect.objectContaining({
+        kind: "text",
+        text: "Queued (position 1)"
+      }));
+
+      resolveFirst?.();
+      const firstResult = await first;
+      expect(firstResult.replyText).toBe("first done");
+      await waitFor(() => handledTexts.includes("second"));
+      expect(handledTexts).toEqual(["first", "second"]);
+    });
+
+    it("keeps ordinary interrupt behavior when the active turn has no subagents", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      let handleStartedResolve: (() => void) | undefined;
+      const handleStarted = new Promise<void>((resolve) => { handleStartedResolve = resolve; });
+      let aborted = false;
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          hasActiveSubagents: () => false,
+          handle: async ({ signal }: { signal?: AbortSignal }) => {
+            handleStartedResolve?.();
+            return await new Promise<Awaited<ReturnType<Runtime["handle"]>>>((resolve, reject) => {
+              signal?.addEventListener("abort", () => {
+                aborted = true;
+                reject(new Error("interrupted"));
+              });
+              setTimeout(() => resolve(runtimeResponse({ text: "done", securityDecision: "allow" })), 100);
+            });
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        activeTurnRegistry: registry,
+        busyPolicyResolver: () => ({ busyPolicy: "interrupt", queueDepth: 3 })
+      });
+
+      const first = gateway.receive(makeMessage("first"));
+      await handleStarted;
+      await gateway.receive(makeMessage("second"));
+      await first;
+
+      expect(aborted).toBe(true);
+      expect(registry.stats().totalAborted).toBe(1);
+    });
+
+    it("/stop is not queued while subagents are active and aborts the active turn", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      let handleStartedResolve: (() => void) | undefined;
+      const handleStarted = new Promise<void>((resolve) => { handleStartedResolve = resolve; });
+      let childAborted = false;
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          hasActiveSubagents: () => true,
+          handle: async ({ signal }: { signal?: AbortSignal }) => {
+            handleStartedResolve?.();
+            return await new Promise<Awaited<ReturnType<Runtime["handle"]>>>((resolve, reject) => {
+              signal?.addEventListener("abort", () => {
+                childAborted = true;
+                reject(new Error("stopped"));
+              });
+              setTimeout(() => resolve(runtimeResponse({ text: "done", securityDecision: "allow" })), 500);
+            });
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        activeTurnRegistry: registry,
+        busyPolicyResolver: () => ({ busyPolicy: "interrupt", queueDepth: 3 })
+      });
+
+      const turn = gateway.receive(makeMessage("first"));
+      await handleStarted;
+      const stopResult = await gateway.receive(makeMessage("/stop"));
+      await turn;
+
+      expect(stopResult.replyText).toContain("Cancelled");
+      expect(childAborted).toBe(true);
+      expect(registry.stats().totalAborted).toBe(1);
+      expect(adapter.records.some((record) => record.text === "Queued (position 1)")).toBe(false);
+    });
+
+    it("does not demote ordinary messages for another session with active subagents elsewhere", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      let resolveFirst: (() => void) | undefined;
+      let firstStarted: (() => void) | undefined;
+      const firstStartedPromise = new Promise<void>((resolve) => { firstStarted = resolve; });
+      const handledTexts: string[] = [];
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async ({ sessionId }) => ({
+          ...createMinimalRuntime(),
+          hasActiveSubagents: (parentSessionId) => parentSessionId === sessionId,
+          handle: async ({ text }: { text: string }) => {
+            handledTexts.push(text);
+            if (text === "first") {
+              firstStarted?.();
+              await new Promise<void>((resolve) => { resolveFirst = resolve; });
+              return runtimeResponse({ text: "first done", securityDecision: "allow" });
+            }
+            return runtimeResponse({ text: `handled ${text}`, securityDecision: "allow" });
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1"], allowedChatIds: ["123456", "999"] } },
+        activeTurnRegistry: registry,
+        busyPolicyResolver: () => ({ busyPolicy: "interrupt", queueDepth: 3 })
+      });
+
+      const first = gateway.receive(makeMessage("first"));
+      await firstStartedPromise;
+      const other = await gateway.receive(makeMessage("other", {
+        sessionKey: {
+          platform: "telegram",
+          chatId: "999",
+          userId: "user-1"
+        }
+      }));
+
+      expect(other.replyText).toBe("handled other");
+      expect(registry.stats().totalAborted).toBe(0);
+      resolveFirst?.();
+      await first;
+      expect(handledTexts).toEqual(["first", "other"]);
     });
 
     it("/stop without active turn falls back to onStopRequested", async () => {

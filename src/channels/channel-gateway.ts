@@ -293,6 +293,7 @@ export class ChannelGateway {
   readonly #runtimeCache: RuntimeCache | undefined;
   readonly #runtimeFingerprint: RuntimeFingerprint | undefined;
   readonly #sessionIdByTurnKey = new Map<string, string>();
+  readonly #activeRuntimeByTurnKey = new Map<string, Runtime>();
   readonly #logWarning?: (message: string) => void;
 
   // Stage 6
@@ -761,8 +762,24 @@ export class ChannelGateway {
           return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
         }
         case "interrupt": {
+          if (this.#hasActiveSubagentsForTurn(activeTurnKey)) {
+            const enqueueResult = this.#sessionMessageQueue.enqueue(
+              activeTurnKey,
+              processedMessage,
+              policy.busyPolicy,
+              policy.queueDepth
+            );
+            if (enqueueResult.accepted) {
+              const position = enqueueResult.position;
+              if (position !== undefined) {
+                await this.#deliverText(adapter, normalizedSessionKey, `Queued (position ${position})`);
+              }
+            } else {
+              await this.#deliverText(adapter, normalizedSessionKey, "Queue is full. Please try again later.");
+            }
+            return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+          }
           this.#sessionMessageQueue.clear(activeTurnKey);
-          const policy = this.#busyPolicyResolver?.(processedMessage.channel) ?? { busyPolicy: "reject" as const, queueDepth: 3 };
           this.#sessionMessageQueue.unshift(
             activeTurnKey,
             processedMessage,
@@ -875,6 +892,7 @@ export class ChannelGateway {
 
       // Runtime acquisition
       runtime = await this.#acquireRuntime(sessionId, securityPolicy, message, normalizedSessionKey);
+      this.#activeRuntimeByTurnKey.set(activeTurnKey, runtime);
 
       const trustedWorkspace = typeof this.#trustedWorkspace === "function"
         ? await this.#trustedWorkspace(message)
@@ -1057,6 +1075,7 @@ export class ChannelGateway {
 
       // 2. Release runtime only if it was successfully acquired
       if (runtime !== undefined) {
+        this.#activeRuntimeByTurnKey.delete(activeTurnKey);
         try {
           await runtime.dispose();
         } catch (disposeErr) {
@@ -1098,6 +1117,23 @@ export class ChannelGateway {
       );
       return undefined;
     }
+  }
+
+  #hasActiveSubagentsForTurn(activeTurnKey: string): boolean {
+    const runtime = this.#activeRuntimeByTurnKey.get(activeTurnKey);
+    if (runtime?.hasActiveSubagents === undefined) {
+      return false;
+    }
+
+    const activeSessionId = this.#activeTurnRegistry?.getTurn(activeTurnKey)?.metadata?.sessionId;
+    const sessionId = typeof activeSessionId === "string"
+      ? activeSessionId
+      : this.#sessionIdByTurnKey.get(activeTurnKey);
+    if (sessionId === undefined) {
+      return false;
+    }
+
+    return runtime.hasActiveSubagents(sessionId);
   }
 
   async #consumeRuntimeRotation(input: {
