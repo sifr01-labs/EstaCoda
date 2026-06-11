@@ -323,9 +323,44 @@ Output is redacted, source-labeled, marked as local memory context, and treated 
 
 | Tool | Risk | State touched |
 |------|------|---------------|
-| `delegate_task` | `caution` | SQLite (delegation records) |
+| `delegate_task` | `shared-state-mutation` | Child session rows, delegation events, optional diagnostics |
 
-**Behavior:** Spawns a subagent in an isolated context. The parent receives only the final summary. Subagents cannot use `clarify`, `memory`, `send_message`, or `execute_code`.
+**Behavior:** Spawns real child agent loops for bounded subtasks. Child sessions are isolated from parent prompt packing, recall, session search, and memory by default. The parent receives a structured result containing child session ID, status, reason, final answer, tool-bound diagnostics, role/depth, and timeout/cancelled metadata.
+
+Single-task input:
+
+```json
+{
+  "task": "Inspect the failing test and summarize the likely cause.",
+  "context": "Keep the answer short.",
+  "allowedTools": ["file.read", "file.grep"],
+  "role": "leaf"
+}
+```
+
+Batch input:
+
+```json
+{
+  "tasks": [
+    { "task": "Inspect config tests." },
+    { "task": "Inspect runtime tests." },
+    { "task": "Inspect gateway tests.", "context": "Focus on interrupt behavior." }
+  ]
+}
+```
+
+`tasks` may also be a JSON string when JSON-string recovery is enabled. Recovery is strict: each recovered task must be an object with only `task`, `context`, `allowedToolsets`, `allowedTools`, and `role`; `context` must be a string when present; unknown fields are rejected.
+
+Default child capability is defined by risk class, not broad toolset names. After parent-visible intersection, children receive `read-only-local` and `read-only-network` tools only, then exact blocked names, blocked prefixes, and excluded toolsets are stripped. Browser, media, and MCP toolsets are excluded by default. Memory/session search, skill mutation, config mutation, cron mutation, trust mutation, credential access, process control, workspace writes, and dangerous shell tools are unavailable by default. `terminal.run` is excluded; a read-only `terminal.inspect` tool is not shipped yet.
+
+`leaf` children cannot delegate further. `orchestrator` children can see `delegate_task` only below `maxSpawnDepth`; over-depth requests fail before child session creation.
+
+Child approval policy is non-interactive fail-closed: hardline denies are evaluated first, and anything that would ask for approval or rely on parent approval grants is denied in the child runtime.
+
+Batch execution is capped by `maxBatchTasks` and `maxConcurrentChildren`. Results preserve input order. Per-child `timeout` and `cancelled` statuses are preserved in metadata even when the aggregate batch status is `failed`.
+
+Timeout diagnostics are profile-local, bounded, and redacted. They default to enabled, but full prompt previews are disabled unless explicitly configured.
 
 ### Config tools
 

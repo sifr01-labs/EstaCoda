@@ -110,6 +110,33 @@ The route key is `assessor`. Runtime route construction uses `resolveAuxiliaryMo
 
 Gateway runtime construction receives the gateway-owned security policy and approval controller context. `ChannelGateway` remains the orchestrator for remote approval resolution and runtime-cache invalidation; adapters do not mutate approval state. Gateway global model switching writes profile config only when channel authorization, runtime workspace/profile trust, and profile config path proof are available; otherwise it returns terminal guidance and does not write.
 
+### Delegation Runtime
+
+`createRuntime` owns a runtime-scoped `SubagentRegistry`, `DelegationManager`, and `DefaultChildAgentLoopFactory`. Child loops are built through `AgentLoopBuilder` so the parent and child construction paths share provider registry/executor, MCP registrations, skill metadata, memory stores, process manager, browser backend, artifact store, trust store, and loaded config without restarting parent-owned MCP servers.
+
+Child construction is still session-bound. Each child gets a fresh `SessionRuntimeContext`, `ToolRegistry`, `ToolExecutor`, `ToolCallPlanner`, `RunRecorder`, `ToolPlanRunner`, `ProviderTurnLoop`, `SkillPlaybookRunner`, `NativeToolExecutor`, `RuntimeRouter`, and `AgentLoop`. Parent session-bound services that capture session ID, such as recall and memory-file compaction, are created per built session rather than shared from the parent.
+
+The factory creates a child session with `parentSessionId`, role/depth metadata, effective tool metadata, stripped/blocked diagnostics, suppressed runtime features, and `approvalMode: "non-interactive-fail-closed"`. Child runtime suppression defaults disable memory recall, skill learning, and session compression, with bounded project context. Child transcripts are excluded from parent recall/search and prompt packing by default.
+
+Tool authority is resolved before provider schemas are built:
+
+1. Start with tools visible to the parent.
+2. Intersect with child candidate tools.
+3. Keep only default read-only local/network risk classes unless a delegation-depth exception allows `delegate_task` for an orchestrator below `maxSpawnDepth`.
+4. Strip default blocked exact names and prefixes.
+5. Strip excluded toolsets: browser, media, and MCP by default.
+6. Apply explicit `allowedTools` / `allowedToolsets` as further narrowing, not expansion.
+
+The child approval policy evaluates hardline command denies first, then denies anything that would ask, consume parent approval grants, inherit pending approval queues, or depend on persisted/session approval behavior. Parent-mediated child approvals are not implemented in this MVP.
+
+`DelegationManager` records `delegation-started` / `delegation-finished` events additively, registers active children while they run, relays bounded progress events, and cleans registry state on success, cancellation, timeout, or parent abort. Batch delegation runs children through a bounded concurrency runner and preserves input order. Aggregate batch status may be `failed`, while per-child metadata preserves `timeout` and `cancelled`.
+
+Gateway interrupt protection is runtime/session scoped. `ChannelGateway` checks the active runtime's `hasActiveSubagents(parentSessionId)` for the active turn; under interrupt busy policy, ordinary messages queue while subagents are active. `/stop`, `/approve`, `/deny`, `/status`, and existing control flows continue to bypass normal blocked-message queues.
+
+Diagnostics for child timeout/stale heartbeat are written only under the configured profile-local diagnostics root. They store bounded task previews, hashes, effective tool names, provider/model labels, last safe event summaries, and timing metadata. Full prompt previews are disabled by default.
+
+This shipped delegation path is MVP Hermes parity for isolated child execution, bounded tool authority, depth, batch execution, timeout diagnostics, fail-closed approvals, and gateway active-turn protection. It does not ship cost rollups, memory outcome hooks, stale-file warnings, child provider/model overrides, operator lifecycle/status surfaces, `terminal.inspect`, or parent-mediated child approvals.
+
 ### Created subsystems
 
 1. `WorkspaceTrustStore`

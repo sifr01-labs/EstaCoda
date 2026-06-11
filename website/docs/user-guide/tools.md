@@ -182,6 +182,48 @@ Controls are intentionally small:
 
 ---
 
+## Delegating Tasks
+
+`delegate_task` lets EstaCoda start bounded child agents for subtasks while the parent turn continues to own the final answer. Use it when a task can be split into independent inspection or research work.
+
+Single task:
+
+```json
+{
+  "task": "Read the runtime tests and report the risky assumptions.",
+  "context": "Focus on behavior, not style.",
+  "role": "leaf"
+}
+```
+
+Batch tasks:
+
+```json
+{
+  "tasks": [
+    { "task": "Inspect config defaults." },
+    { "task": "Inspect gateway interrupt behavior." },
+    { "task": "Inspect delegation timeout behavior." }
+  ]
+}
+```
+
+Batch results come back in the same order as the input tasks. Parallelism is bounded by runtime config, so a batch can run more than one child at once without exceeding `maxConcurrentChildren`.
+
+Child agents are intentionally narrower than the parent. By default they can use parent-visible read-only local and read-only network tools, such as file reads/searches and web research. They do not receive workspace-write, memory/session search, skill mutation, config mutation, cron mutation, trust mutation, browser, media, MCP, credential, process-control, or shell execution tools. `terminal.run` is excluded by default. A read-only terminal inspection tool is planned separately, but is not currently shipped.
+
+`leaf` children cannot spawn more children. `orchestrator` children may delegate only while under the configured depth limit. Requests beyond the depth limit fail before a new child session is created.
+
+Child approvals are non-interactive and fail closed. A child does not inherit parent approval grants or pending approval queues. If an action would need approval, the child denies it instead of asking.
+
+If a child times out or is cancelled, the result is structured. Timeout diagnostics are written under profile-local diagnostics paths when enabled. Prompt previews are off by default, and diagnostics are bounded and redacted.
+
+Gateway behavior is also protected: if a remote channel is configured to interrupt active turns, ordinary messages are queued while the active turn has child work running. Explicit control commands such as `/stop` still cancel the active turn and active child work.
+
+This is MVP subagent parity, not full Hermes parity. Cost rollups, memory outcome hooks, stale-file warnings, provider/model overrides for children, operator lifecycle surfaces, parent-mediated child approvals, and `terminal.inspect` are not shipped yet.
+
+---
+
 ## Tool Execution Flow
 
 1. Provider requests a tool call.

@@ -8,6 +8,7 @@ import { evolution_safety_case } from "./evolution-safety.js";
 import { evolution_lifecycle_case } from "./evolution-lifecycle.js";
 import { gateway_stop_case } from "./gateway-stop.js";
 import { whatsapp_support_case } from "./whatsapp-support.js";
+import { delegation_mvp_case } from "./delegation-mvp.js";
 
 export const allSmokeCases = [
   corrupt_skill_usage_case,
@@ -19,5 +20,6 @@ export const allSmokeCases = [
   evolution_safety_case,
   evolution_lifecycle_case,
   gateway_stop_case,
-  whatsapp_support_case
+  whatsapp_support_case,
+  delegation_mvp_case
 ];
