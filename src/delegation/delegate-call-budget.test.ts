@@ -20,4 +20,3 @@ describe("DelegateCallBudget", () => {
     expect(budget.tryConsume()).toEqual({ allowed: true, used: 1, limit: 1 });
   });
 });
-

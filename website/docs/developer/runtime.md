@@ -139,6 +139,20 @@ Visible text with `finishReason: "length"` can continue on the successful route 
 
 ---
 
+## Delegation Runtime
+
+`delegate_task` builds real child `AgentLoop` instances through the shared agent-loop builder. Parent-owned substrate such as provider registry/executor, MCP registrations, stores, process manager, browser backend, artifact store, trust store, and loaded config is reused, while session-bound child components are fresh per child session.
+
+Child sessions are persisted with `parentSessionId`, role/depth, effective tool access, stripped/blocked diagnostics, model override metadata where present, and child runtime suppression metadata. Child prompt assembly uses the child session. Child transcripts are excluded from parent recall, session search, memory recall, and prompt packing by default.
+
+Child tool access is resolved before provider schemas are built. The default profile keeps parent-visible `read-only-local` and `read-only-network` tools only, strips exact/prefix blocked tools, and excludes browser, media, and MCP toolsets. `terminal.run` remains excluded. `terminal.inspect` is available as a read-only-local tool only through the same parent-visible policy.
+
+Child approvals are non-interactive fail-closed. Hardline denies run first; any action that would ask, use parent grants, use pending approval queues, or depend on persisted/session approvals is denied in the child runtime. Parent-mediated child approvals are not shipped.
+
+The delegation manager records `delegation-started`, `delegation-finished`, `delegation-heartbeat`, and `delegation-diagnostic` session events and relays bounded runtime `delegation-progress` events. Results carry structured status/reason metadata, child session ids, role/depth, timeout/cancelled details, effective tool diagnostics, stale-file warnings, and token usage when available. Batch results preserve per-child statuses and roll up usage. Durable or estimated USD cost accounting is not shipped.
+
+Outcome memory is opt-in and stores only bounded task preview plus deterministic status/reason metadata. File-state tracking snapshots parent reads before delegation and emits advisory stale-file warnings when tracked child writes touch those paths. Child model overrides support same-provider and reviewed cross-provider routes using existing provider config and `apiKeyEnv`; child fallbacks are disabled for overrides.
+
 ## Gateway, Session, and Runtime Cache Boundaries
 
 ### Gateway Mode

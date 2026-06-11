@@ -64,4 +64,3 @@ async function waitFor(predicate: () => boolean): Promise<void> {
   }
   throw new Error("Timed out waiting for condition.");
 }
-

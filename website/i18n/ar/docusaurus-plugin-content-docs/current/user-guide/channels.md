@@ -297,6 +297,8 @@ estacoda sessions detach telegram <chat-id>
 
 أوامر التحكم في النموذج تتجاوز طوابير الجلسات المشغولة حتى يستطيع المشغل تغيير حالة النموذج أثناء محادثة نشطة.
 
+إذا كان الدور النشط يحتوي على subagents قيد التشغيل، تُصفّ الرسائل العادية في الطابور تحت سياسة `interrupt` بدل إلغاء دور الأب. `/stop` ما زال يلغي دور الأب النشط وعمل الأطفال. `/approve` و`/deny` و`/status` وأوامر النموذج/التحكم تحافظ على سلوك تجاوز أوامر التحكم. يمكن أن يعرض `/status` ملخصات active-subagent محدودة دون كشف prompts، أو transcripts، أو raw provider token streams، أو credentials، أو tool arguments.
+
 ---
 
 ## DeliveryRouter

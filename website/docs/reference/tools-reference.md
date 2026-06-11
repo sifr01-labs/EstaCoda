@@ -323,9 +323,10 @@ Output is redacted, source-labeled, marked as local memory context, and treated 
 
 | Tool | Risk | State touched |
 |------|------|---------------|
-| `delegate_task` | `shared-state-mutation` | Child session rows, delegation events, optional diagnostics |
+| `delegate_task` | `shared-state-mutation` | Child session rows, delegation events, optional diagnostics, optional outcome memory |
+| `terminal.inspect` | `read-only-local` | Bounded command output only |
 
-**Behavior:** Spawns real child agent loops for bounded subtasks. Child sessions are isolated from parent prompt packing, recall, session search, and memory by default. The parent receives a structured result containing child session ID, status, reason, final answer, tool-bound diagnostics, role/depth, and timeout/cancelled metadata.
+**Behavior:** Spawns real child agent loops for bounded subtasks. Child sessions are isolated from parent prompt packing, recall, session search, and memory by default. The parent receives a structured result containing child session ID, status, reason, final answer, tool-bound diagnostics, role/depth, timeout/cancelled metadata, stale-file warnings, and provider token usage when available.
 
 Single-task input:
 
@@ -350,13 +351,25 @@ Batch input:
 }
 ```
 
-`tasks` may also be a JSON string when JSON-string recovery is enabled. Recovery is strict: each recovered task must be an object with only `task`, `context`, `allowedToolsets`, `allowedTools`, and `role`; `context` must be a string when present; unknown fields are rejected.
+`tasks` may also be a JSON string when JSON-string recovery is enabled. Recovery is strict: each recovered task must be an object with only `task`, `context`, `allowedToolsets`, `allowedTools`, `role`, and `modelOverride`; `context` must be a string when present; unknown fields are rejected.
 
-Default child capability is defined by risk class, not broad toolset names. After parent-visible intersection, children receive `read-only-local` and `read-only-network` tools only, then exact blocked names, blocked prefixes, and excluded toolsets are stripped. Browser, media, and MCP toolsets are excluded by default. Memory/session search, skill mutation, config mutation, cron mutation, trust mutation, credential access, process control, workspace writes, and dangerous shell tools are unavailable by default. `terminal.run` is excluded; a read-only `terminal.inspect` tool is not shipped yet.
+Default child capability is defined by risk class, not broad toolset names. After parent-visible intersection, children receive `read-only-local` and `read-only-network` tools only, then exact blocked names, blocked prefixes, and excluded toolsets are stripped. Browser, media, and MCP toolsets are excluded by default. Memory/session search, skill mutation, config mutation, cron mutation, trust mutation, credential access, process control, workspace writes, and general shell execution are unavailable by default. `terminal.run` is excluded; `terminal.inspect` is shipped and may be visible to children only through the parent-visible read-only policy.
 
 `leaf` children cannot delegate further. `orchestrator` children can see `delegate_task` only below `maxSpawnDepth`; over-depth requests fail before child session creation.
 
 Child approval policy is non-interactive fail-closed: hardline denies are evaluated first, and anything that would ask for approval or rely on parent approval grants is denied in the child runtime.
+
+Batch delegation is bounded by runtime config (`maxBatchTasks`, `maxConcurrentChildren`) and returns results in input order. Per-child `timeout` and `cancelled` statuses are preserved even when the aggregate batch status is `failed`. Dynamic provider schemas describe the active delegation limits, including spawn depth and batch bounds. `maxDelegateCallsPerTurn` caps multiple separate `delegate_task` tool calls in one provider turn.
+
+Provider token usage is copied from structured provider execution metadata. Batch usage rolls up numeric token fields and reports unavailable usage explicitly. Durable or estimated USD cost accounting is not shipped.
+
+`modelOverride` supports same-provider child model selection and reviewed cross-provider child routes. Cross-provider overrides preserve target provider config, use existing `apiKeyEnv` credentials, respect `authMethod: "none"`, reject `enableNetwork: false` before child execution, and disable fallbacks for the overridden child. Metadata is bounded/redacted.
+
+Outcome memory is disabled by default. When enabled, delegation records bounded task preview and deterministic status/reason summary only, not raw child output, prompts, transcripts, tool arguments, file contents, or diagnostics payloads.
+
+Stale-file warnings are advisory metadata. Parent file reads are snapshotted before delegation; tracked child writes/replaces/deletes to those paths produce warnings without changing delegation status. Shell/process writes are not detected unless represented through the file-state tracker.
+
+**`terminal.inspect`:** Read-only local terminal inspection. Input is `{ "argv": ["git", "status", "--short"] }`. It runs without a shell and allows only `pwd`, `ls`, `cat`, `head`, `tail`, `wc`, `stat`, `file`, `git status`, `git diff`, `git log`, `git branch`, `git remote`, `git ls-files`, and `git grep`. `git show` is not allowed. The tool rejects shell wrappers, pipes, redirection, chaining, command substitution, environment assignment, package scripts, interpreters, arbitrary binaries, mutating commands, unsupported glob arguments, and workspace escapes. Output is bounded and redacted.
 
 Batch execution is capped by `maxBatchTasks` and `maxConcurrentChildren`. Results preserve input order. Per-child `timeout` and `cancelled` statuses are preserved in metadata even when the aggregate batch status is `failed`.
 

@@ -137,6 +137,32 @@ Specialized routes for non-primary tasks. Unsupported auxiliary names throw duri
 | `memory_compaction` | Memory file compaction |
 | `profile_context` | Profile context generation |
 
+### delegation
+
+Subagent delegation config is normalized with defaults when omitted.
+
+| Key | Default | Behavior |
+|-----|---------|----------|
+| `maxSpawnDepth` | `1` | Maximum recursive child delegation depth. `leaf` children cannot delegate. |
+| `maxConcurrentChildren` | `3` | Maximum active children in a batch. |
+| `maxDelegateCallsPerTurn` | `3` | Per-provider-turn cap for separate `delegate_task` calls. |
+| `maxBatchTasks` | `10` | Maximum `tasks[]` length. |
+| `childTimeoutSeconds` | `600` | Child timeout floor is 30 seconds. |
+| `heartbeatSeconds` | `30` | Parent heartbeat interval while child work runs. |
+| `heartbeatStaleCyclesIdle` | `3` | Idle stale-heartbeat threshold. |
+| `heartbeatStaleCyclesInTool` | `6` | In-tool stale-heartbeat threshold. |
+| `recoverJsonStringTasks` | `true` | Strictly recover JSON-string `tasks` arrays. |
+| `diagnostics.enabled` | `true` | Write bounded timeout/stale diagnostics where a profile diagnostics root exists. |
+| `diagnostics.includePromptPreview` | `false` | Full prompt previews stay off by default. |
+| `outcomeMemory.enabled` | `false` | Opt-in bounded delegation outcome memory. |
+| `defaultAllowedRiskClasses` | `read-only-local`, `read-only-network` | Default child tool risk classes after parent-visible intersection. |
+| `defaultExcludedToolsets` | `browser`, `media`, `mcp` | Toolsets stripped from default child schemas. |
+| `defaultAllowedToolsets` | empty | No broad default toolset grant. |
+| `blockedToolNames` / `blockedToolPrefixes` | built-in deny list | Exact/prefix tool stripping before child schemas are built. |
+| `childRuntime` | recall/learning/compression disabled, project context bounded | Suppresses parent-like runtime features in child loops. |
+
+`terminal.run`, write/process control, memory/session search, skill/config/cron/trust mutation, and credential surfaces are stripped by default. `terminal.inspect` is read-only-local and may be child-visible only when parent-visible and allowed by the read-only policy. Delegation config participates in the runtime fingerprint so schema-affecting changes rebuild provider tool schemas.
+
 ### web
 
 Web research backend selection.

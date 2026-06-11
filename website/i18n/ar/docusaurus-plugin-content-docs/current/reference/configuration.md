@@ -137,6 +137,32 @@ model.staleTimeoutMs / model.fallbacks[].staleTimeoutMs
 | `memory_compaction` | ضغط ملف الذاكرة |
 | `profile_context` | توليد سياق الملف الشخصي |
 
+### delegation
+
+إعدادات تفويض الوكلاء الفرعيين تُطبّع بالقيم الافتراضية عندما تكون محذوفة.
+
+| المفتاح | الافتراضي | السلوك |
+|---------|-----------|--------|
+| `maxSpawnDepth` | `1` | أقصى عمق لتفويض الأطفال recursively. أطفال `leaf` لا يفوضون. |
+| `maxConcurrentChildren` | `3` | أقصى عدد أطفال نشطين في دفعة. |
+| `maxDelegateCallsPerTurn` | `3` | سقف كل provider turn لاستدعاءات `delegate_task` المنفصلة. |
+| `maxBatchTasks` | `10` | أقصى طول لـ `tasks[]`. |
+| `childTimeoutSeconds` | `600` | حد timeout للطفل؛ الحد الأدنى 30 ثانية. |
+| `heartbeatSeconds` | `30` | فترة heartbeat للأب أثناء عمل الأطفال. |
+| `heartbeatStaleCyclesIdle` | `3` | عتبة stale-heartbeat عندما يكون الطفل idle. |
+| `heartbeatStaleCyclesInTool` | `6` | عتبة stale-heartbeat عندما يكون الطفل داخل أداة. |
+| `recoverJsonStringTasks` | `true` | استرداد صارم لمصفوفات `tasks` المرسلة كسلسلة JSON. |
+| `diagnostics.enabled` | `true` | كتابة تشخيصات timeout/stale محدودة عندما يوجد diagnostics root للملف التعريفي. |
+| `diagnostics.includePromptPreview` | `false` | معاينات prompt الكاملة تبقى معطلة افتراضيًا. |
+| `outcomeMemory.enabled` | `false` | ذاكرة نتائج التفويض اختيارية ومحدودة. |
+| `defaultAllowedRiskClasses` | `read-only-local`, `read-only-network` | فئات مخاطر أدوات الطفل الافتراضية بعد التقاطع مع أدوات الأب المرئية. |
+| `defaultExcludedToolsets` | `browser`, `media`, `mcp` | toolsets تُزال من مخططات الأطفال الافتراضية. |
+| `defaultAllowedToolsets` | فارغ | لا يوجد grant افتراضي واسع لـ toolset. |
+| `blockedToolNames` / `blockedToolPrefixes` | deny list مدمجة | إزالة أدوات exact/prefix قبل بناء مخططات الطفل. |
+| `childRuntime` | recall/learning/compression معطلة، project context محدود | تعطيل ميزات runtime الشبيهة بالأب داخل حلقات الأطفال. |
+
+`terminal.run`، وأدوات الكتابة/التحكم بالعمليات، والذاكرة/بحث الجلسات، وتعديل المهارات/الإعداد/cron/الثقة، وأس surfaces بيانات الاعتماد تُزال افتراضيًا. `terminal.inspect` هي أداة `read-only-local` وقد تظهر للطفل فقط عندما تكون مرئية للأب وتسمح بها سياسة القراءة فقط. إعدادات التفويض تدخل في runtime fingerprint حتى تعيد تغييرات المخطط بناء provider tool schemas.
+
 ### web
 
 اختيار خلفية أبحاث الويب.

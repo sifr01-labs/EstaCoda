@@ -311,6 +311,16 @@ Scoped overrides persist with the session and are revalidated whenever a runtime
 
 `/model --global <provider>/<model>` and `/model set --global <provider>/<model>` are the explicit persistent forms. They mutate only the profile-level primary model route after the required local or gateway trust/authorization checks pass. `/model --global clear` is rejected. `estacoda model set ...` remains deprecated and disabled; `estacoda model setup` remains the supported surface for credential collection and primary provider setup. Fallback routes are manageable through both the Setup Editor (`edit-fallback-model-route`) and `estacoda model fallback ...`. Auxiliary route management is available through the Setup Editor (`edit-auxiliary-model-route`).
 
+## Delegated Child Model Overrides
+
+`delegate_task` may request a child `modelOverride`. Same-provider model overrides and reviewed cross-provider child routes are supported. Overrides are request-local: they affect only the child loop being constructed and do not mutate profile config, session model overrides, parent fallback routes, auxiliary routes, or provider preferences outside that child.
+
+Cross-provider child routes are derived from the normalized target provider config, not from parent route internals. The executable child route preserves target `baseUrl`, `apiKeyEnv`, `apiMode`, `authMethod`, `enableNetwork`, `timeoutMs`, and `staleTimeoutMs` where configured. Provider preference for the child is set to the target provider only, and fallback routes are disabled with `fallbackBehavior: "disabled-for-override"`.
+
+Credential handling uses the existing provider config and `apiKeyEnv` path. Credential pools are not introduced. `authMethod: "none"` does not require credentials when configured for the target provider. Env-backed missing credentials reject before child session/provider execution. `enableNetwork: false` rejects before child execution with structured override metadata. Literal credential routes or unsupported credential forms are rejected rather than copied into child metadata.
+
+Override metadata is bounded and redacted. It must not include raw API keys, env values, raw route objects, private config paths, prompts, diagnostics payloads, or transcripts.
+
 ## Memory-Related Routes
 
 Memory Hardening uses distinct auxiliary route names:

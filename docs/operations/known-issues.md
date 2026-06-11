@@ -22,7 +22,7 @@ This file is intentionally blunt. It is for engineering continuity, not marketin
 
 - Autonomous Agent Evolution creates new project skills but does not intelligently patch existing ones. `implemented but not live-proven`
 - Memory rendering is selective but not ranked.
-- No freshness/staleness handling.
+- Freshness/staleness handling is narrow. Delegation warns when a child writes a tracked file the parent read before delegation, but broader memory/session/web freshness handling is not implemented.
 
 ## Telegram / Channels
 

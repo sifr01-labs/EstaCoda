@@ -135,6 +135,8 @@ The gateway intercepts a set of control commands before they reach the agent loo
 
 `/model --global` persists the chosen route as the profile primary model only when channel authorization, workspace trust, and profile config path proof all pass. It fails closed. `/model --global clear` is rejected.
 
+When an active turn has running subagents, interrupt-mode busy policy queues ordinary inbound messages instead of aborting the parent turn. Control commands still bypass that queue. `/stop` cancels the active parent turn and active child work. `/approve`, `/deny`, `/status`, and model/control commands keep their existing bypass behavior. `/status` can include bounded active-subagent summaries without child prompts, raw transcripts, provider token streams, credentials, or tool arguments.
+
 ## Common failures and how to read them
 
 | Symptom | Likely cause | Recovery |

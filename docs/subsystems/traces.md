@@ -37,12 +37,14 @@ The contract defines 32 event kinds:
 | Memory | `memory-write`, `memory-conclusion` |
 | Security | `security-risk-escalated` |
 | Artifacts | `artifact-created` |
-| Delegation | `delegation-started`, `delegation-finished` |
+| Delegation | `delegation-started`, `delegation-finished`, `delegation-heartbeat`, `delegation-diagnostic`, runtime `delegation-progress` |
 | Prompt | `prompt-assembled`, `session-history-packed` |
 | Progress | `progress`, `fallback`, `assistant-output`, `user-correction` |
 | Cancel | `agent-cancelled` |
 
 ### User Corrections
+
+Delegation events are additive and bounded. `delegation-started` / `delegation-finished` are persisted session events for child lifecycle summaries. `delegation-heartbeat` keeps long-running child work visible to the parent without raw token streams. `delegation-diagnostic` points at bounded timeout/stale-heartbeat diagnostics. Runtime `delegation-progress` relays selected child activity such as tool start/result and provider attempt/result summaries with child metadata.
 
 `user-correction` is a structured trajectory event kind introduced in v0.7. When the user provides corrective feedback (e.g., "no, do it this way"), the runtime records:
 

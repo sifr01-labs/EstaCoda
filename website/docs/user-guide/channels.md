@@ -297,6 +297,8 @@ All gateway channels support a common set of control commands:
 
 Model control commands bypass busy-session queues so the operator can change model state while a conversation is active.
 
+If the active turn has running subagents, ordinary messages queue under interrupt busy policy instead of aborting the parent turn. `/stop` still aborts the active parent turn and child work. `/approve`, `/deny`, `/status`, and model/control commands keep their control-command bypass behavior. `/status` can show bounded active-subagent summaries without exposing prompts, transcripts, raw provider token streams, credentials, or tool arguments.
+
 ---
 
 ## DeliveryRouter

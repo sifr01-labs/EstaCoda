@@ -69,8 +69,11 @@ Profile root: `~/.estacoda/profiles/<id>/`
 | `audio-cache/` | Audio cache | Voice tools |
 | `image-cache/` | Generated image cache | `image.generate` |
 | `temp/` | Temporary files | Various operations |
+| `temp/delegation/` | Bounded delegation timeout/stale-heartbeat diagnostics when enabled | Delegation runtime |
 | `temp/audio/` | CLI recordings, auto-TTS temps, Telegram conversion, Discord receive audio | Voice operations |
 | `external-memory/` | File-backed external memory records | External memory (if enabled) |
+
+Delegation also writes session rows/events to `sessions.sqlite`. Child sessions are linked with `parentSessionId`. Delegation outcome memory, when enabled, is stored through the configured memory provider as bounded task/status metadata only. Stale-file warnings are session/result metadata and do not store file contents or diffs.
 
 ## Ownership rule
 

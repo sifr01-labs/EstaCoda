@@ -163,6 +163,22 @@ sidebar_position: 2
 
 ---
 
+## Runtime التفويض
+
+`delegate_task` يبني حلقات `AgentLoop` حقيقية للأطفال عبر agent-loop builder المشترك. الركائز المملوكة للأب مثل provider registry/executor، وتسجيلات MCP، والمخازن، وprocess manager، وbrowser backend، وartifact store، وtrust store، والإعداد المحمّل تُعاد استخدامها، بينما مكونات الجلسة المرتبطة بالطفل تكون جديدة لكل جلسة طفل.
+
+جلسات الأطفال تُحفظ مع `parentSessionId`، والدور/العمق، وإمكانية الوصول الفعلية للأدوات، وتشخيصات stripped/blocked، وmetadata تجاوز النموذج عند وجودها، وmetadata تعطيل ميزات runtime للطفل. تجميع prompt الطفل يستخدم جلسة الطفل. transcripts الأطفال مستبعدة افتراضيًا من recall الأب، وsession search، وmemory recall، وprompt packing.
+
+وصول أدوات الطفل يُحل قبل بناء مخططات المزود. الملف الافتراضي يبقي أدوات `read-only-local` و`read-only-network` المرئية للأب فقط، ثم يزيل الأدوات المحظورة exact/prefix، ويستبعد toolsets `browser` و`media` و`mcp`. تبقى `terminal.run` مستبعدة. `terminal.inspect` متاحة كأداة `read-only-local` فقط عبر سياسة مرئية للأب نفسها.
+
+موافقات الطفل غير تفاعلية وتفشل مغلقة. hardline denies تعمل أولًا؛ أي إجراء يحتاج سؤالًا، أو يستخدم منح الأب، أو يستخدم طوابير موافقات معلقة، أو يعتمد على موافقات persisted/session يُرفض داخل runtime الطفل. موافقات الطفل بوساطة الأب غير مشحونة.
+
+يسجل مدير التفويض أحداث جلسة `delegation-started` و`delegation-finished` و`delegation-heartbeat` و`delegation-diagnostic`، ويرسل أحداث runtime محدودة من نوع `delegation-progress`. النتائج تحمل metadata منظمة للحالة/السبب، ومعرّفات جلسات الأطفال، والدور/العمق، وتفاصيل timeout/cancelled، وتشخيصات الأدوات الفعلية، وتحذيرات stale-file، واستخدام الرموز عندما يكون متاحًا. نتائج الدفعات تحفظ حالات كل طفل وتجمع usage. محاسبة USD دائمة أو تقديرية غير مشحونة.
+
+ذاكرة نتائج التفويض اختيارية ولا تحفظ إلا معاينة مهمة محدودة وmetadata حتمية للحالة/السبب. file-state tracking يلتقط قراءات الأب قبل التفويض ويصدر تحذيرات stale-file استشارية عندما تكتب أدوات الطفل المتعقبة تلك المسارات. تجاوزات نموذج الطفل تدعم المزود نفسه والمسارات المراجعة عبر مزود آخر باستخدام إعدادات المزود الحالية و`apiKeyEnv`؛ fallbacks الطفل تُعطل عند التجاوز.
+
+---
+
 ## حدود البوابة والجلسة وذاكرة التخزين المؤقت لوقت التشغيل
 
 ### وضع البوابة

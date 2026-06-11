@@ -65,6 +65,14 @@ memory/shared/ -> USER.md -> SOUL.md -> MEMORY.md
 
 حذف ملف SQLite هذا لا يحذف `USER.md`، أو `SOUL.md`، أو `MEMORY.md`، أو ملفات الذاكرة المشتركة، أو `promotions.json`. أوامر حالة الفهرس وإعادة بنائه هي مسارات إصلاح للمشغل للمرآة. إذا كان الفهرس معطّلًا، أو مفقودًا، أو غير متاح، يستخدم `memory.read` و `memory.search` وقراءة/بحث CLI fallback آمنًا لقراءة الملف المباشرة أو بحث substring حيثما أمكن مع الحفاظ على ترشيح الذاكرة المحمية.
 
+## ذاكرة نتائج التفويض
+
+ذاكرة نتائج التفويض منفصلة عن recall transcripts الأطفال، وهي معطلة افتراضيًا تحت `delegation.outcomeMemory.enabled`.
+
+عند تفعيلها، يسجل التفويض observation محدودة للنتيجة: معرف جلسة الأب، ومعرف جلسة الطفل عند توفره، والدور، والعمق، وفهرس المهمة، ومعرف الدفعة، والحالة/السبب، والطابع الزمني، واستخدام رموز المزود عند توفره، ومعاينة محدودة للمهمة المفوضة. ملخص النتيجة هو metadata حالة حتمية فقط، مثل `completed`، أو `timeout`، أو `cancelled`، أو `failed: provider-error`.
+
+لا تخزن raw child output، أو prompts، أو transcripts، أو tool arguments، أو محتوى ملفات، أو diagnostic payloads، أو credentials. فشل التسجيل غير قاتل ولا يغير نتيجة التفويض. transcripts الأطفال تبقى مستبعدة من recall الأب، وsession search، وmemory recall، وprompt packing افتراضيًا.
+
 حدود مصادر السلطة:
 
 - تبقى `USER.md`، و `SOUL.md`، و `MEMORY.md` ملفات مصدر محلية للملف الشخصي.

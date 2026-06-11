@@ -93,6 +93,7 @@ estacoda gateway diagnose     # Per-channel readiness check
 - Recent cron failures (last 5)
 - Recent delivery errors (last 5)
 - Missing config/env warnings
+- Bounded active-subagent summaries when a runtime exposes active delegated child work
 
 The Service Manager block reports installed/active state for the user service and, on systemd hosts, the system service scope too. Status remains usable when `systemctl` or `launchctl` probing fails or is permission-limited; failed probes degrade to an unknown/not-installed state instead of failing the whole status command.
 
@@ -332,6 +333,8 @@ Available in Telegram gateway (and applicable Discord/WhatsApp where supported):
 - `/cron` — list cron jobs
 - `/approvals` — show pending approvals
 - `/stop` — abort the active turn for this chat; if no active turn, clear queued messages; if nothing is active or queued, request gateway stop
+
+If the active turn has delegated child work, `/status` may include bounded active-subagent rows: child id, parent session id, role/depth, status, age, last activity, cancellation state, task index/batch id, and bounded task preview. It does not include child prompts, raw transcripts, provider token streams, credentials, or tool arguments. `/stop` cancels the parent turn and active child work.
 
 ## /steer Semantics
 

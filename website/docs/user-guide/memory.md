@@ -65,6 +65,14 @@ The local lexical index is a rebuildable mirror stored under profile state:
 
 Deleting this SQLite file does not delete `USER.md`, `SOUL.md`, `MEMORY.md`, shared memory files, or `promotions.json`. Index status and rebuild commands are operator repair paths for the mirror. If the index is disabled, missing, or unavailable, `memory.read`, `memory.search`, and CLI read/search fall back to safe direct file read or substring search where possible while preserving protected-memory filtering.
 
+## Delegation outcome memory
+
+Delegation outcome memory is separate from child transcript recall and is disabled by default under `delegation.outcomeMemory.enabled`.
+
+When enabled, delegation records a bounded outcome observation: parent session id, child session id where available, role, depth, task index, batch id, status/reason, timestamp, provider token usage when available, and a bounded preview of the delegated task. The result summary is deterministic status metadata only, such as `completed`, `timeout`, `cancelled`, or `failed: provider-error`.
+
+It does not store raw child output, prompts, transcripts, tool arguments, file contents, diagnostic payloads, or credentials. Recording failures are non-fatal and do not change the delegation result. Child transcripts remain excluded from parent recall, session search, memory recall, and prompt packing by default.
+
 Authoritative source boundaries:
 
 - `USER.md`, `SOUL.md`, and `MEMORY.md` remain profile-local source files.

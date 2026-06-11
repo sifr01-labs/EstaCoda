@@ -162,6 +162,8 @@ Auxiliary routes are preference constructs, not separate runtimes. They resolve 
 
 Unsupported auxiliary task names throw during config normalization. Config should not use legacy names such as `models.auxiliary`, `auxiliary.default`, or `auxiliary.contextualize`.
 
+Delegated child `modelOverride` requests use configured provider routes only. Same-provider and reviewed cross-provider child overrides preserve target provider config, use existing `apiKeyEnv` credentials, respect `authMethod: "none"`, reject `enableNetwork: false` before execution, and disable fallback routes for the overridden child. They do not introduce credential pools or mutate parent/session/profile routes.
+
 ---
 
 ## Unsupported in v0.1.0

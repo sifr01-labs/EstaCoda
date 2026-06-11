@@ -210,17 +210,37 @@ Batch tasks:
 
 Batch results come back in the same order as the input tasks. Parallelism is bounded by runtime config, so a batch can run more than one child at once without exceeding `maxConcurrentChildren`.
 
-Child agents are intentionally narrower than the parent. By default they can use parent-visible read-only local and read-only network tools, such as file reads/searches and web research. They do not receive workspace-write, memory/session search, skill mutation, config mutation, cron mutation, trust mutation, browser, media, MCP, credential, process-control, or shell execution tools. `terminal.run` is excluded by default. A read-only terminal inspection tool is planned separately, but is not currently shipped.
+Child agents are intentionally narrower than the parent. By default they can use parent-visible read-only local and read-only network tools, such as file reads/searches, process logs/listing, web research, and `terminal.inspect` when that tool is parent-visible. They do not receive workspace-write, memory/session search, skill mutation, config mutation, cron mutation, trust mutation, browser, media, MCP, credential, process-control, or general shell execution tools. `terminal.run` is excluded by default.
 
 `leaf` children cannot spawn more children. `orchestrator` children may delegate only while under the configured depth limit. Requests beyond the depth limit fail before a new child session is created.
 
 Child approvals are non-interactive and fail closed. A child does not inherit parent approval grants or pending approval queues. If an action would need approval, the child denies it instead of asking.
 
-If a child times out or is cancelled, the result is structured. Timeout diagnostics are written under profile-local diagnostics paths when enabled. Prompt previews are off by default, and diagnostics are bounded and redacted.
+If a child times out or is cancelled, the result is structured. Timeout diagnostics are written under profile-local diagnostics paths when enabled. Prompt previews are off by default, and diagnostics are bounded and redacted. Long-running child work emits bounded progress and heartbeat metadata so the parent turn stays observable without exposing raw provider token streams.
 
 Gateway behavior is also protected: if a remote channel is configured to interrupt active turns, ordinary messages are queued while the active turn has child work running. Explicit control commands such as `/stop` still cancel the active turn and active child work.
 
-This is MVP subagent parity, not full Hermes parity. Cost rollups, memory outcome hooks, stale-file warnings, provider/model overrides for children, operator lifecycle surfaces, parent-mediated child approvals, and `terminal.inspect` are not shipped yet.
+Delegation results include structured status/reason metadata, child session ids where created, effective child tool metadata, timeout/cancelled details, batch indexes, stale-file warnings, and provider token usage when available. Batch token usage rolls up numeric usage fields and marks unavailable usage explicitly. Durable or estimated USD cost accounting is not shipped.
+
+Child model overrides are supported through `modelOverride`. Same-provider overrides and reviewed cross-provider child routes use existing configured providers only; they do not create credential pools. Cross-provider overrides preserve target provider config, reject disabled-network routes before child execution, and disable fallbacks for the overridden child.
+
+Delegation outcome memory is configurable and disabled by default. When enabled, it records bounded task preview and deterministic status/reason metadata only. It does not store raw child output, prompts, transcripts, tool arguments, file contents, or diagnostic payloads.
+
+Stale-file warnings are advisory. EstaCoda snapshots parent file reads before delegation; if a child writes, replaces, or deletes a tracked file the parent already read, the result includes a warning. The warning does not change success/failure status. Shell/process writes are not detected unless represented through the file-state tracker.
+
+Parent-mediated child approvals are not shipped. Children remain non-interactive and fail closed for approval-required actions.
+
+## Read-Only Terminal Inspection
+
+`terminal.inspect` is a bounded read-only terminal inspection tool. It accepts argv arrays, runs without a shell, and is not a general command runner.
+
+```json
+{ "argv": ["git", "status", "--short"] }
+```
+
+Allowed commands are `pwd`, `ls`, `cat`, `head`, `tail`, `wc`, `stat`, `file`, `git status`, `git diff`, `git log`, `git branch`, `git remote`, `git ls-files`, and `git grep`. `git show` is not allowed.
+
+The tool rejects shell wrappers, pipes, redirection, command chaining, command substitution, environment assignment, package scripts, interpreters, arbitrary binaries, mutating commands, unsupported glob arguments, and paths outside the workspace. Output is bounded and redacted. `terminal.inspect` may be available to children only through the same parent-visible, read-only child tool policy; `terminal.run` remains excluded from default child schemas.
 
 ---
 

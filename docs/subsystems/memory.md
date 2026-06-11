@@ -163,6 +163,14 @@ estacoda memory index status
 
 The index is inspectable and deletable. Missing index files report pending rebuild or empty-index diagnostics. Bounded startup backfill may recreate the file. Full rebuild is explicit through `estacoda memory index rebuild`, is idempotent, repopulates from authoritative memory files, and indexes `SOUL.md` as protected.
 
+## Delegation Outcome Memory
+
+Delegation outcome memory is separate from parent/child transcript recall and is disabled by default under `delegation.outcomeMemory.enabled`.
+
+When enabled, delegation records a bounded outcome observation through `MemoryProvider.recordDelegationOutcome(...)`. The record may include parent session id, child session id where one exists, role, depth, task index, batch id, structured status/reason, timestamp, provider token usage, and a bounded preview of the delegated task. `resultSummary` is deterministic status metadata only, such as `completed`, `timeout`, `cancelled`, `skipped: spawn-paused`, or `failed: provider-error`.
+
+Delegation outcome memory must not store raw child output, child transcripts, prompts, tool arguments, file contents, diagnostic payloads, or provider credentials. Recording failure is non-fatal and does not change the delegation result. Child transcripts remain excluded from parent `SessionRecallService`, `session_search`, memory recall, and prompt packing by default.
+
 `session_search` is separate from local memory retrieval. It browses/searches historical sessions and does not expose `maxChars`. `memory.read` and `memory.search` read/search local memory and may expose `maxChars`. Historical session content and memory retrieval results are both context/reference material, not higher-priority instruction.
 
 ## Drift-Aware Local Persistence

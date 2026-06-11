@@ -124,6 +124,16 @@ Visible text with `finishReason: "length"` can continue. Continuation stays on t
 
 ---
 
+## Delegated Child Model Overrides
+
+Delegated child tasks may request a `modelOverride`. Same-provider model overrides and reviewed cross-provider child routes are supported for the child loop only. They do not mutate the parent session override, profile primary route, fallback routes, auxiliary routes, or provider config.
+
+Cross-provider child routes are built from the normalized target provider config. EstaCoda preserves target route fields such as `baseUrl`, `apiKeyEnv`, `apiMode`, `authMethod`, `enableNetwork`, `timeoutMs`, and `staleTimeoutMs`, sets provider preference to the target provider, and disables fallback routes for the overridden child.
+
+Credentials still come from existing provider config and `apiKeyEnv`. No credential pools are introduced. `authMethod: "none"` does not require credentials when configured. Env-backed missing credentials and `enableNetwork: false` reject before child provider execution. Override metadata is bounded/redacted and does not include raw credentials, env values, route objects, private config paths, prompts, diagnostics payloads, or transcripts.
+
+---
+
 ## Native Tool-Call Replay
 
 Supported OpenAI-compatible Chat Completions routes can preserve provider-native tool-call history. When enabled, prior assistant `tool_calls` and matching `tool` replies are sent back in the protocol shape the provider expects. Unsupported routes keep the flat text fallback.

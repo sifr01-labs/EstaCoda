@@ -132,6 +132,7 @@ Returns exit code 1 if any warnings exist.
 - Cron job summary and recent failures
 - Recent delivery errors
 - Missing config/env warnings
+- Bounded active-subagent summaries when the active runtime exposes delegated child work
 
 ## Channel enable and disable
 
@@ -184,6 +185,8 @@ When a user sends input while the agent is already processing:
 | `reject` (default) | Reply immediately with a busy message |
 | `queue` | Buffer and process after the current turn |
 | `interrupt` | Abort the current turn and start a new one |
+
+If the active turn has running subagents, ordinary messages are queued under `interrupt` instead of aborting the parent turn. Control commands still bypass: `/stop` aborts the parent turn and child work, `/approve` and `/deny` resolve approvals, `/status` can report bounded active-subagent state, and model/control commands keep their existing bypass behavior.
 
 Configure per-channel in profile `config.json`:
 
