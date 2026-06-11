@@ -274,6 +274,9 @@ export type SessionEvent =
       taskIndex?: number;
       batchId?: string;
       diagnosticPath?: string;
+      usage?: ProviderUsage;
+      aggregateUsage?: ProviderUsage;
+      usageUnavailable?: boolean;
     }
   | {
       kind: "delegation-heartbeat";

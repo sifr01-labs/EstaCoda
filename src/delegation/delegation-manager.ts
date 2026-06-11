@@ -68,6 +68,8 @@ export type DelegationSummary = {
     reasons: ChildToolDiagnostic["reasons"];
   }>;
   usage?: DelegationUsageMetadata;
+  aggregateUsage?: DelegationUsageMetadata;
+  usageUnavailable?: boolean;
   diagnosticPath?: string;
 };
 
@@ -82,6 +84,9 @@ export type BatchDelegationSummary = {
     index: number;
     childStatus: BatchDelegationChildStatus;
   }>;
+  aggregateUsage?: DelegationUsageMetadata;
+  usageUnavailable: boolean;
+  usageUnavailableCount: number;
   maxObservedConcurrency: number;
   recoveredTasksFromJsonString?: boolean;
 };
@@ -156,7 +161,8 @@ export class DelegationManager {
         blockedTools: [],
         rejectedRequestedTools: [],
         rejectedRequestedToolsets: [],
-        toolExecutions: []
+        toolExecutions: [],
+        usageUnavailable: true
       })
     });
     const results = batch.results.map((result, index) => ({
@@ -190,6 +196,7 @@ export class DelegationManager {
       timeoutCount > 0 ? `Timed out: ${timeoutCount}.` : undefined,
       cancelledCount > 0 ? `Cancelled: ${cancelledCount}.` : undefined
     ].filter((line): line is string => line !== undefined).join(" ");
+    const usageRollup = rollUpChildUsage(results);
 
     return {
       batchId,
@@ -197,6 +204,9 @@ export class DelegationManager {
       reason,
       summary,
       results,
+      aggregateUsage: usageRollup.aggregateUsage,
+      usageUnavailable: usageRollup.usageUnavailable,
+      usageUnavailableCount: usageRollup.usageUnavailableCount,
       maxObservedConcurrency: batch.maxObservedConcurrency,
       recoveredTasksFromJsonString: request.recoveredTasksFromJsonString === true ? true : undefined
     };
@@ -332,6 +342,7 @@ export class DelegationManager {
           child,
           diagnostic: runnerResult.diagnostic
         });
+        result.usageUnavailable = true;
         await this.#recordFinished({
           parentSessionId: request.parentSessionId,
           childSessionId: child.childSessionId,
@@ -340,7 +351,8 @@ export class DelegationManager {
           summary: result.summary,
           durationMs: Date.now() - startedAt,
           error: result.summary,
-          diagnosticPath: result.diagnosticPath
+          diagnosticPath: result.diagnosticPath,
+          usageUnavailable: result.usageUnavailable
         });
         return result;
       }
@@ -363,7 +375,8 @@ export class DelegationManager {
           blockedTools: child.toolAccess.blockedTools,
           rejectedRequestedTools: child.toolAccess.rejectedRequestedTools,
           rejectedRequestedToolsets: child.toolAccess.rejectedRequestedToolsets,
-          toolExecutions: []
+          toolExecutions: [],
+          usageUnavailable: true
         };
         await this.#recordFinished({
           parentSessionId: request.parentSessionId,
@@ -372,13 +385,16 @@ export class DelegationManager {
           reason: result.reason,
           summary: result.summary,
           durationMs: Date.now() - startedAt,
-          error: result.summary
+          error: result.summary,
+          usageUnavailable: result.usageUnavailable
         });
         return result;
       }
       const childResponse = runnerResult.response;
       const summary = childResponse.text;
       const status = await this.#statusFromChildResponse(child.childSessionId, childResponse, request.signal);
+      const usage = usageFromProviderResponse(childResponse.providerExecution?.response?.usage);
+      const usageUnavailable = usage === undefined;
       const result: DelegationSummary = {
         childSessionId: child.childSessionId,
         status: status.status,
@@ -397,7 +413,9 @@ export class DelegationManager {
         blockedTools: child.toolAccess.blockedTools,
         rejectedRequestedTools: child.toolAccess.rejectedRequestedTools,
         rejectedRequestedToolsets: child.toolAccess.rejectedRequestedToolsets,
-        usage: usageFromProviderResponse(childResponse.providerExecution?.response?.usage),
+        usage,
+        aggregateUsage: usage,
+        usageUnavailable,
         toolExecutions: childResponse.toolExecutions.map((execution) => ({
           tool: execution.tool.name,
           decision: execution.decision,
@@ -414,7 +432,10 @@ export class DelegationManager {
         status: result.status,
         reason: result.reason,
         summary: result.summary,
-        durationMs: Date.now() - startedAt
+        durationMs: Date.now() - startedAt,
+        usage: result.usage,
+        aggregateUsage: result.aggregateUsage,
+        usageUnavailable: result.usageUnavailable
       });
       return result;
     } catch (error) {
@@ -437,7 +458,8 @@ export class DelegationManager {
         blockedTools: [],
         rejectedRequestedTools: [],
         rejectedRequestedToolsets: [],
-        toolExecutions: []
+        toolExecutions: [],
+        usageUnavailable: true
       };
       if (subagentId !== undefined) {
         this.#subagentRegistry.updateSubagent(subagentId, {
@@ -453,7 +475,8 @@ export class DelegationManager {
           reason: result.reason,
           summary,
           durationMs: Date.now() - startedAt,
-          error: summary
+          error: summary,
+          usageUnavailable: result.usageUnavailable
         });
       }
       return result;
@@ -479,7 +502,8 @@ export class DelegationManager {
       childSessionId: "unavailable",
       status: "failed",
       reason: "cancelled",
-      summary
+      summary,
+      usageUnavailable: true
     });
     return {
       childSessionId: "unavailable",
@@ -499,7 +523,8 @@ export class DelegationManager {
       blockedTools: [],
       rejectedRequestedTools: [],
       rejectedRequestedToolsets: [],
-      toolExecutions: []
+      toolExecutions: [],
+      usageUnavailable: true
     };
   }
 
@@ -530,7 +555,8 @@ export class DelegationManager {
       blockedTools: [],
       rejectedRequestedTools: [],
       rejectedRequestedToolsets: [],
-      toolExecutions: []
+      toolExecutions: [],
+      usageUnavailable: true
     };
   }
 
@@ -563,7 +589,8 @@ export class DelegationManager {
       blockedTools: [],
       rejectedRequestedTools: [],
       rejectedRequestedToolsets: [],
-      toolExecutions: []
+      toolExecutions: [],
+      usageUnavailable: true
     };
   }
 
@@ -582,7 +609,8 @@ export class DelegationManager {
       reason: "spawn-depth-exceeded",
       role,
       depth,
-      summary
+      summary,
+      usageUnavailable: true
     });
     return {
       childSessionId: "unavailable",
@@ -602,7 +630,8 @@ export class DelegationManager {
       blockedTools: [],
       rejectedRequestedTools: [],
       rejectedRequestedToolsets: [],
-      toolExecutions: []
+      toolExecutions: [],
+      usageUnavailable: true
     };
   }
 
@@ -640,6 +669,9 @@ export class DelegationManager {
     durationMs: number;
     error?: string;
     diagnosticPath?: string;
+    usage?: DelegationUsageMetadata;
+    aggregateUsage?: DelegationUsageMetadata;
+    usageUnavailable?: boolean;
   }): Promise<void> {
     await this.#sessionDb.appendEvent(input.parentSessionId, {
       kind: "delegation-finished",
@@ -649,7 +681,10 @@ export class DelegationManager {
       reason: input.reason,
       durationMs: input.durationMs,
       error: input.error,
-      diagnosticPath: input.diagnosticPath
+      diagnosticPath: input.diagnosticPath,
+      usage: input.usage,
+      aggregateUsage: input.aggregateUsage,
+      usageUnavailable: input.usageUnavailable
     });
     this.#trajectoryRecorder.record("delegation-finished", input);
   }
@@ -708,12 +743,77 @@ function usageFromProviderResponse(usage: ProviderUsage | undefined): Delegation
   if (usage === undefined) {
     return undefined;
   }
+  return normalizeUsage(usage);
+}
+
+function rollUpChildUsage(results: readonly DelegationSummary[]): {
+  aggregateUsage?: DelegationUsageMetadata;
+  usageUnavailable: boolean;
+  usageUnavailableCount: number;
+} {
+  let usageUnavailableCount = 0;
+  const aggregate: DelegationUsageMetadata = {};
+
+  for (const result of results) {
+    const usage = normalizeUsage(result.usage);
+    if (usage === undefined) {
+      usageUnavailableCount += 1;
+      continue;
+    }
+    addUsage(aggregate, usage);
+  }
+
   return {
-    inputTokens: usage.inputTokens,
-    outputTokens: usage.outputTokens,
-    totalTokens: usage.totalTokens,
-    reasoningTokens: usage.reasoningTokens
+    aggregateUsage: hasUsage(aggregate) ? aggregate : undefined,
+    usageUnavailable: usageUnavailableCount > 0,
+    usageUnavailableCount
   };
+}
+
+function normalizeUsage(usage: DelegationUsageMetadata | ProviderUsage | undefined): DelegationUsageMetadata | undefined {
+  if (usage === undefined) {
+    return undefined;
+  }
+  const normalized: DelegationUsageMetadata = {};
+  if (isFiniteNumber(usage.inputTokens)) {
+    normalized.inputTokens = usage.inputTokens;
+  }
+  if (isFiniteNumber(usage.outputTokens)) {
+    normalized.outputTokens = usage.outputTokens;
+  }
+  if (isFiniteNumber(usage.totalTokens)) {
+    normalized.totalTokens = usage.totalTokens;
+  }
+  if (isFiniteNumber(usage.reasoningTokens)) {
+    normalized.reasoningTokens = usage.reasoningTokens;
+  }
+  return hasUsage(normalized) ? normalized : undefined;
+}
+
+function addUsage(target: DelegationUsageMetadata, usage: DelegationUsageMetadata): void {
+  if (usage.inputTokens !== undefined) {
+    target.inputTokens = (target.inputTokens ?? 0) + usage.inputTokens;
+  }
+  if (usage.outputTokens !== undefined) {
+    target.outputTokens = (target.outputTokens ?? 0) + usage.outputTokens;
+  }
+  if (usage.totalTokens !== undefined) {
+    target.totalTokens = (target.totalTokens ?? 0) + usage.totalTokens;
+  }
+  if (usage.reasoningTokens !== undefined) {
+    target.reasoningTokens = (target.reasoningTokens ?? 0) + usage.reasoningTokens;
+  }
+}
+
+function hasUsage(usage: DelegationUsageMetadata): boolean {
+  return usage.inputTokens !== undefined ||
+    usage.outputTokens !== undefined ||
+    usage.totalTokens !== undefined ||
+    usage.reasoningTokens !== undefined;
+}
+
+function isFiniteNumber(value: number | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value);
 }
 
 function childModel(child: ChildAgentLoopRuntime): string {

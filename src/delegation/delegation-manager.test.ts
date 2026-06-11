@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ProviderUsage } from "../contracts/provider.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { AgentLoopInput, AgentLoopResponse } from "../runtime/agent-loop.js";
 import type { ChildAgentLoopFactory } from "../runtime/agent-loop-factory.js";
@@ -144,6 +145,86 @@ describe("DelegationManager", () => {
       totalTokens: 30,
       reasoningTokens: 4
     });
+    expect(result.aggregateUsage).toEqual(result.usage);
+    expect(result.usageUnavailable).toBe(false);
+    await expect(harness.db.listEvents("parent")).resolves.toContainEqual(expect.objectContaining({
+      kind: "delegation-finished",
+      childSessionId: "child",
+      usage: result.usage,
+      aggregateUsage: result.usage,
+      usageUnavailable: false
+    }));
+  });
+
+  it("does not fail single delegation when child provider usage is missing", async () => {
+    const harness = await createHarness();
+
+    const result = await harness.manager.delegate({
+      parentSessionId: "parent",
+      profileId: "default",
+      task: "No usage",
+      trustedWorkspace: true
+    });
+
+    expect(result.status).toBe("completed");
+    expect(result.usage).toBeUndefined();
+    expect(result.aggregateUsage).toBeUndefined();
+    expect(result.usageUnavailable).toBe(true);
+    await expect(harness.db.listEvents("parent")).resolves.toContainEqual(expect.objectContaining({
+      kind: "delegation-finished",
+      childSessionId: "child",
+      usageUnavailable: true
+    }));
+  });
+
+  it("preserves child usage for structured blocked and failed provider responses", async () => {
+    const blocked = await createHarness({
+      beforeResponse: async (db) => {
+        await db.appendEvent("child", {
+          kind: "security-assessed",
+          tool: "terminal.run",
+          riskClass: "workspace-write",
+          assessment: {
+            decision: "deny",
+            mode: "strict",
+            reason: "blocked",
+            risk: "high"
+          }
+        });
+      },
+      response: response({
+        providerExecution: providerExecution({ inputTokens: 3, outputTokens: 4, totalTokens: 7 })
+      })
+    });
+    const blockedResult = await blocked.manager.delegate({
+      parentSessionId: "parent",
+      profileId: "default",
+      task: "Blocked but counted",
+      trustedWorkspace: true
+    });
+
+    expect(blockedResult.reason).toBe("blocked");
+    expect(blockedResult.usage).toEqual({ inputTokens: 3, outputTokens: 4, totalTokens: 7 });
+    expect(blockedResult.usageUnavailable).toBe(false);
+
+    const failed = await createHarness({
+      response: response({
+        providerExecution: {
+          ...providerExecution({ inputTokens: 8, outputTokens: 2, totalTokens: 10, reasoningTokens: 1 }),
+          ok: false
+        }
+      })
+    });
+    const failedResult = await failed.manager.delegate({
+      parentSessionId: "parent",
+      profileId: "default",
+      task: "Provider failed but counted",
+      trustedWorkspace: true
+    });
+
+    expect(failedResult.reason).toBe("provider-error");
+    expect(failedResult.usage).toEqual({ inputTokens: 8, outputTokens: 2, totalTokens: 10, reasoningTokens: 1 });
+    expect(failedResult.usageUnavailable).toBe(false);
   });
 
   it("does not start a child when the parent signal is already aborted", async () => {
@@ -506,6 +587,67 @@ describe("DelegationManager", () => {
     expect(result.results.map((child) => child.childStatus)).toEqual(["completed", "completed", "completed"]);
   });
 
+  it("preserves per-child batch usage and rolls up aggregate child usage", async () => {
+    const harness = await createHarness({
+      maxConcurrentChildren: 3,
+      handle: async (handleInput) => response({
+        text: `answer for ${handleInput.text}`,
+        providerExecution: providerExecution(
+          handleInput.text === "one"
+            ? { inputTokens: 1, outputTokens: 2, totalTokens: 3, reasoningTokens: 1 }
+            : handleInput.text === "two"
+              ? { inputTokens: 10, outputTokens: 20, totalTokens: 30, reasoningTokens: 4 }
+              : { inputTokens: 100, outputTokens: 200, totalTokens: 300 }
+        )
+      })
+    });
+
+    const result = await harness.manager.delegateBatch({
+      parentSessionId: "parent",
+      profileId: "default",
+      tasks: [{ task: "one" }, { task: "two" }, { task: "three" }],
+      trustedWorkspace: true
+    });
+
+    expect(result.results.map((child) => child.usage)).toEqual([
+      { inputTokens: 1, outputTokens: 2, totalTokens: 3, reasoningTokens: 1 },
+      { inputTokens: 10, outputTokens: 20, totalTokens: 30, reasoningTokens: 4 },
+      { inputTokens: 100, outputTokens: 200, totalTokens: 300 }
+    ]);
+    expect(result.aggregateUsage).toEqual({
+      inputTokens: 111,
+      outputTokens: 222,
+      totalTokens: 333,
+      reasoningTokens: 5
+    });
+    expect(result.usageUnavailable).toBe(false);
+    expect(result.usageUnavailableCount).toBe(0);
+  });
+
+  it("rolls up batch usage while tolerating missing child usage", async () => {
+    const harness = await createHarness({
+      maxConcurrentChildren: 2,
+      handle: async (handleInput) => response({
+        text: `answer for ${handleInput.text}`,
+        providerExecution: handleInput.text === "counted"
+          ? providerExecution({ inputTokens: 6, outputTokens: 7, totalTokens: 13 })
+          : undefined
+      })
+    });
+
+    const result = await harness.manager.delegateBatch({
+      parentSessionId: "parent",
+      profileId: "default",
+      tasks: [{ task: "counted" }, { task: "missing" }],
+      trustedWorkspace: true
+    });
+
+    expect(result.results.map((child) => child.usageUnavailable)).toEqual([false, true]);
+    expect(result.aggregateUsage).toEqual({ inputTokens: 6, outputTokens: 7, totalTokens: 13 });
+    expect(result.usageUnavailable).toBe(true);
+    expect(result.usageUnavailableCount).toBe(1);
+  });
+
   it("preserves timeout child status when batch aggregate fails", async () => {
     vi.useFakeTimers();
     let calls = 0;
@@ -515,7 +657,10 @@ describe("DelegationManager", () => {
       handle: async () => {
         calls += 1;
         if (calls === 1) {
-          return response({ text: "fast" });
+          return response({
+            text: "fast",
+            providerExecution: providerExecution({ inputTokens: 2, outputTokens: 3, totalTokens: 5 })
+          });
         }
         return await new Promise<AgentLoopResponse>(() => undefined);
       }
@@ -533,6 +678,13 @@ describe("DelegationManager", () => {
     expect(result.status).toBe("failed");
     expect(result.reason).toBe("child-timeout");
     expect(result.results.map((child) => child.childStatus)).toEqual(["completed", "timeout"]);
+    expect(result.results.map((child) => child.usage)).toEqual([
+      { inputTokens: 2, outputTokens: 3, totalTokens: 5 },
+      undefined
+    ]);
+    expect(result.aggregateUsage).toEqual({ inputTokens: 2, outputTokens: 3, totalTokens: 5 });
+    expect(result.usageUnavailable).toBe(true);
+    expect(result.usageUnavailableCount).toBe(1);
   });
 
   it("parent abort cancels running batch children and skips queued children", async () => {
@@ -699,6 +851,22 @@ function response(overrides: Partial<AgentLoopResponse> = {}): AgentLoopResponse
     projectContext: undefined,
     progress: [],
     ...overrides
+  };
+}
+
+function providerExecution(usage: ProviderUsage): NonNullable<AgentLoopResponse["providerExecution"]> {
+  return {
+    ok: true,
+    fallbackUsed: false,
+    attempts: [],
+    toolCalls: [],
+    response: {
+      ok: true,
+      provider: "local",
+      model: "test",
+      content: "child answer",
+      usage
+    }
   };
 }
 
