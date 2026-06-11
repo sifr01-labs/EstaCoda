@@ -1,5 +1,5 @@
 import type { ChannelKind } from "../contracts/channel.js";
-import type { DelegateRole, DelegationConfig, DelegateTaskItem } from "../contracts/delegation.js";
+import type { DelegateRole, DelegationConfig, DelegateTaskItem, DelegationStaleFileWarning } from "../contracts/delegation.js";
 import type { RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SessionDB, SessionEvent } from "../contracts/session.js";
 import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
@@ -12,6 +12,8 @@ import { redactSensitiveText } from "../utils/redaction.js";
 import type { AgentLoopResponse } from "../runtime/agent-loop.js";
 import type { ChildAgentLoopFactory, ChildAgentLoopRuntime } from "../runtime/agent-loop-factory.js";
 import type { ChildToolDiagnostic } from "./toolset-security.js";
+import type { FileStateReadSnapshot, FileStateTracker } from "./file-state-tracker.js";
+import { findStaleParentFileReadWarnings } from "./file-state-guard.js";
 import { SubagentRegistry } from "./subagent-registry.js";
 import {
   appendDiagnosticEvent,
@@ -72,6 +74,8 @@ export type DelegationSummary = {
   usage?: DelegationUsageMetadata;
   aggregateUsage?: DelegationUsageMetadata;
   usageUnavailable?: boolean;
+  staleFileWarnings?: DelegationStaleFileWarning[];
+  staleFileWarningCount?: number;
   diagnosticPath?: string;
 };
 
@@ -89,6 +93,7 @@ export type BatchDelegationSummary = {
   aggregateUsage?: DelegationUsageMetadata;
   usageUnavailable: boolean;
   usageUnavailableCount: number;
+  staleFileWarningCount: number;
   maxObservedConcurrency: number;
   recoveredTasksFromJsonString?: boolean;
 };
@@ -103,6 +108,7 @@ export type DelegationManagerOptions = {
   subagentRegistry?: SubagentRegistry;
   diagnosticsRoot?: string;
   memoryProvider?: Pick<MemoryProvider, "recordDelegationOutcome">;
+  fileStateTracker?: FileStateTracker;
 };
 
 export class DelegationManager {
@@ -115,6 +121,7 @@ export class DelegationManager {
   readonly #subagentRegistry: SubagentRegistry;
   readonly #diagnosticsRoot: string | undefined;
   readonly #memoryProvider: Pick<MemoryProvider, "recordDelegationOutcome"> | undefined;
+  readonly #fileStateTracker: FileStateTracker | undefined;
 
   constructor(options: DelegationManagerOptions) {
     this.#sessionDb = options.sessionDb;
@@ -126,6 +133,7 @@ export class DelegationManager {
     this.#subagentRegistry = options.subagentRegistry ?? new SubagentRegistry();
     this.#diagnosticsRoot = options.diagnosticsRoot;
     this.#memoryProvider = options.memoryProvider;
+    this.#fileStateTracker = options.fileStateTracker;
   }
 
   async delegateBatch(request: Omit<DelegationRequest, "task" | "batchId" | "taskIndex"> & {
@@ -135,11 +143,12 @@ export class DelegationManager {
     const batchId = `batch-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const maxConcurrency = Math.min(this.#delegationConfig.maxConcurrentChildren, request.tasks.length);
     const skippedIndexes = new Set<number>();
+    const parentReadSnapshot = this.#snapshotParentReads(request.parentSessionId);
     const batch = await runBoundedBatch<DelegateTaskItem, DelegationSummary>({
       tasks: request.tasks,
       maxConcurrency,
       signal: request.signal,
-      runTask: async (task, index) => this.delegate({
+      runTask: async (task, index) => this.#delegateWithSnapshot({
         ...request,
         task: task.task,
         context: task.context,
@@ -148,7 +157,7 @@ export class DelegationManager {
         role: task.role,
         batchId,
         taskIndex: index
-      }),
+      }, parentReadSnapshot),
       skipTask: (task, index): DelegationSummary => {
         skippedIndexes.add(index);
         return {
@@ -206,6 +215,7 @@ export class DelegationManager {
       cancelledCount > 0 ? `Cancelled: ${cancelledCount}.` : undefined
     ].filter((line): line is string => line !== undefined).join(" ");
     const usageRollup = rollUpChildUsage(results);
+    const staleFileWarningCount = results.reduce((count, result) => count + (result.staleFileWarningCount ?? 0), 0);
     for (const index of skippedIndexes) {
       const result = results[index];
       if (result !== undefined) {
@@ -222,12 +232,20 @@ export class DelegationManager {
       aggregateUsage: usageRollup.aggregateUsage,
       usageUnavailable: usageRollup.usageUnavailable,
       usageUnavailableCount: usageRollup.usageUnavailableCount,
+      staleFileWarningCount,
       maxObservedConcurrency: batch.maxObservedConcurrency,
       recoveredTasksFromJsonString: request.recoveredTasksFromJsonString === true ? true : undefined
     };
   }
 
   async delegate(request: DelegationRequest): Promise<DelegationSummary> {
+    return await this.#delegateWithSnapshot(request, this.#snapshotParentReads(request.parentSessionId));
+  }
+
+  async #delegateWithSnapshot(
+    request: DelegationRequest,
+    parentReadSnapshot: FileStateReadSnapshot | undefined
+  ): Promise<DelegationSummary> {
     const allowedToolsets = request.allowedToolsets ?? [];
     const allowedTools = request.allowedTools ?? [];
     const role = request.role ?? "leaf";
@@ -269,11 +287,15 @@ export class DelegationManager {
       });
       childSessionId = child.childSessionId;
 
-      if (isSignalAborted(request.signal)) {
-        const result = this.#cancelledAfterConstruction(request, allowedToolsets, allowedTools, role, depth, childSessionId);
-        await this.#recordDelegationOutcome(request.parentSessionId, result);
-        return result;
-      }
+	      if (isSignalAborted(request.signal)) {
+	        const result = this.#withStaleFileWarnings(
+	          this.#cancelledAfterConstruction(request, allowedToolsets, allowedTools, role, depth, childSessionId),
+	          request,
+	          parentReadSnapshot
+	        );
+	        await this.#recordDelegationOutcome(request.parentSessionId, result);
+	        return result;
+	      }
 
       childAbortController = new AbortController();
       subagentId = child.childSessionId;
@@ -348,10 +370,10 @@ export class DelegationManager {
           taskHash: "",
           taskPreview: ""
         });
-        const result = timeoutDelegationSummary({
-          childSessionId: child.childSessionId,
-          task: request.task,
-          summary: runnerResult.summary,
+	        let result = timeoutDelegationSummary({
+	          childSessionId: child.childSessionId,
+	          task: request.task,
+	          summary: runnerResult.summary,
           role,
           depth,
           batchId: request.batchId,
@@ -360,26 +382,29 @@ export class DelegationManager {
           allowedTools,
           child,
           diagnostic: runnerResult.diagnostic
-        });
-        result.usageUnavailable = true;
-        await this.#recordFinished({
-          parentSessionId: request.parentSessionId,
-          childSessionId: child.childSessionId,
+	        });
+	        result.usageUnavailable = true;
+	        result = this.#withStaleFileWarnings(result, request, parentReadSnapshot);
+	        await this.#recordFinished({
+	          parentSessionId: request.parentSessionId,
+	          childSessionId: child.childSessionId,
           status: result.status,
           reason: result.reason,
           summary: result.summary,
           durationMs: Date.now() - startedAt,
-          error: result.summary,
-          diagnosticPath: result.diagnosticPath,
-          usageUnavailable: result.usageUnavailable
-        });
+	          error: result.summary,
+	          diagnosticPath: result.diagnosticPath,
+	          usageUnavailable: result.usageUnavailable,
+	          staleFileWarnings: result.staleFileWarnings,
+	          staleFileWarningCount: result.staleFileWarningCount
+	        });
         await this.#recordDelegationOutcome(request.parentSessionId, result);
         return result;
       }
       if (runnerResult.kind === "cancelled") {
-        const result: DelegationSummary = {
-          childSessionId: child.childSessionId,
-          status: "failed",
+	        const result = this.#withStaleFileWarnings({
+	          childSessionId: child.childSessionId,
+	          status: "failed",
           reason: "cancelled",
           task: request.task,
           summary: runnerResult.summary,
@@ -396,9 +421,9 @@ export class DelegationManager {
           rejectedRequestedTools: child.toolAccess.rejectedRequestedTools,
           rejectedRequestedToolsets: child.toolAccess.rejectedRequestedToolsets,
           toolExecutions: [],
-          usageUnavailable: true
-        };
-        await this.#recordFinished({
+	          usageUnavailable: true
+	        }, request, parentReadSnapshot);
+	        await this.#recordFinished({
           parentSessionId: request.parentSessionId,
           childSessionId: child.childSessionId,
           status: result.status,
@@ -406,8 +431,10 @@ export class DelegationManager {
           summary: result.summary,
           durationMs: Date.now() - startedAt,
           error: result.summary,
-          usageUnavailable: result.usageUnavailable
-        });
+	          usageUnavailable: result.usageUnavailable,
+	          staleFileWarnings: result.staleFileWarnings,
+	          staleFileWarningCount: result.staleFileWarningCount
+	        });
         await this.#recordDelegationOutcome(request.parentSessionId, result);
         return result;
       }
@@ -416,9 +443,9 @@ export class DelegationManager {
       const status = await this.#statusFromChildResponse(child.childSessionId, childResponse, request.signal);
       const usage = usageFromProviderResponse(childResponse.providerExecution?.response?.usage);
       const usageUnavailable = usage === undefined;
-      const result: DelegationSummary = {
-        childSessionId: child.childSessionId,
-        status: status.status,
+	      const result = this.#withStaleFileWarnings({
+	        childSessionId: child.childSessionId,
+	        status: status.status,
         reason: status.reason,
         task: request.task,
         summary,
@@ -437,12 +464,12 @@ export class DelegationManager {
         usage,
         aggregateUsage: usage,
         usageUnavailable,
-        toolExecutions: childResponse.toolExecutions.map((execution) => ({
-          tool: execution.tool.name,
-          decision: execution.decision,
-          ok: execution.result?.ok
-        }))
-      };
+	        toolExecutions: childResponse.toolExecutions.map((execution) => ({
+	          tool: execution.tool.name,
+	          decision: execution.decision,
+	          ok: execution.result?.ok
+	        }))
+	      }, request, parentReadSnapshot);
       this.#subagentRegistry.updateSubagent(subagentId, {
         status: result.status === "completed" ? "completed" : "failed",
         lastActivityAt: new Date().toISOString()
@@ -456,15 +483,17 @@ export class DelegationManager {
         durationMs: Date.now() - startedAt,
         usage: result.usage,
         aggregateUsage: result.aggregateUsage,
-        usageUnavailable: result.usageUnavailable
-      });
+	        usageUnavailable: result.usageUnavailable,
+	        staleFileWarnings: result.staleFileWarnings,
+	        staleFileWarningCount: result.staleFileWarningCount
+	      });
       await this.#recordDelegationOutcome(request.parentSessionId, result);
       return result;
     } catch (error) {
       const summary = error instanceof Error ? error.message : "Unknown child delegation error.";
-      const result: DelegationSummary = {
-        childSessionId: childSessionId ?? "unavailable",
-        status: "failed",
+	      const result = this.#withStaleFileWarnings({
+	        childSessionId: childSessionId ?? "unavailable",
+	        status: "failed",
         reason: childSessionId === undefined ? "construction-error" : "runtime-error",
         task: request.task,
         summary,
@@ -481,8 +510,8 @@ export class DelegationManager {
         rejectedRequestedTools: [],
         rejectedRequestedToolsets: [],
         toolExecutions: [],
-        usageUnavailable: true
-      };
+	        usageUnavailable: true
+	      }, request, parentReadSnapshot);
       if (subagentId !== undefined) {
         this.#subagentRegistry.updateSubagent(subagentId, {
           status: isSignalAborted(request.signal) ? "cancelling" : "failed",
@@ -498,8 +527,10 @@ export class DelegationManager {
           summary,
           durationMs: Date.now() - startedAt,
           error: summary,
-          usageUnavailable: result.usageUnavailable
-        });
+	          usageUnavailable: result.usageUnavailable,
+	          staleFileWarnings: result.staleFileWarnings,
+	          staleFileWarningCount: result.staleFileWarningCount
+	        });
       }
       await this.#recordDelegationOutcome(request.parentSessionId, result);
       return result;
@@ -619,7 +650,7 @@ export class DelegationManager {
     };
   }
 
-  async #spawnDepthExceeded(
+	  async #spawnDepthExceeded(
     request: DelegationRequest,
     allowedToolsets: ToolsetName[],
     allowedTools: string[],
@@ -658,11 +689,38 @@ export class DelegationManager {
       toolExecutions: [],
       usageUnavailable: true
     };
-    await this.#recordDelegationOutcome(request.parentSessionId, result);
-    return result;
-  }
+	    await this.#recordDelegationOutcome(request.parentSessionId, result);
+	    return result;
+	  }
 
-  async #recordStarted(input: {
+	  #snapshotParentReads(parentSessionId: string): FileStateReadSnapshot | undefined {
+	    return this.#fileStateTracker?.snapshotReads(parentSessionId);
+	  }
+
+	  #withStaleFileWarnings(
+	    result: DelegationSummary,
+	    request: DelegationRequest,
+	    parentReadSnapshot: FileStateReadSnapshot | undefined
+	  ): DelegationSummary {
+	    const staleFileWarnings = findStaleParentFileReadWarnings({
+	      tracker: this.#fileStateTracker,
+	      parentReadSnapshot,
+	      parentSessionId: request.parentSessionId,
+	      childSessionId: result.childSessionId,
+	      taskIndex: request.taskIndex,
+	      batchId: request.batchId
+	    });
+	    if (staleFileWarnings.length === 0) {
+	      return result;
+	    }
+	    return {
+	      ...result,
+	      staleFileWarnings,
+	      staleFileWarningCount: staleFileWarnings.length
+	    };
+	  }
+
+	  async #recordStarted(input: {
     parentSessionId: string;
     childSessionId: string;
     task: string;
@@ -696,11 +754,13 @@ export class DelegationManager {
     durationMs: number;
     error?: string;
     diagnosticPath?: string;
-    usage?: DelegationUsageMetadata;
-    aggregateUsage?: DelegationUsageMetadata;
-    usageUnavailable?: boolean;
-  }): Promise<void> {
-    await this.#sessionDb.appendEvent(input.parentSessionId, {
+	    usage?: DelegationUsageMetadata;
+	    aggregateUsage?: DelegationUsageMetadata;
+	    usageUnavailable?: boolean;
+	    staleFileWarnings?: DelegationStaleFileWarning[];
+	    staleFileWarningCount?: number;
+	  }): Promise<void> {
+	    await this.#sessionDb.appendEvent(input.parentSessionId, {
       kind: "delegation-finished",
       childSessionId: input.childSessionId,
       summary: input.summary,
@@ -709,10 +769,12 @@ export class DelegationManager {
       durationMs: input.durationMs,
       error: input.error,
       diagnosticPath: input.diagnosticPath,
-      usage: input.usage,
-      aggregateUsage: input.aggregateUsage,
-      usageUnavailable: input.usageUnavailable
-    });
+	      usage: input.usage,
+	      aggregateUsage: input.aggregateUsage,
+	      usageUnavailable: input.usageUnavailable,
+	      staleFileWarnings: input.staleFileWarnings,
+	      staleFileWarningCount: input.staleFileWarningCount
+	    });
     this.#trajectoryRecorder.record("delegation-finished", input);
   }
 

@@ -14,6 +14,7 @@ export type FileStateOperationMetadata = {
 };
 
 export type FileStateOperation = {
+  sequence: number;
   sessionId: string;
   turnId?: string;
   taskId?: string;
@@ -28,7 +29,7 @@ export type FileStateOperation = {
   metadata?: FileStateOperationMetadata;
 };
 
-export type FileStateOperationInput = Omit<FileStateOperation, "normalizedPath" | "timestamp"> & {
+export type FileStateOperationInput = Omit<FileStateOperation, "normalizedPath" | "sequence" | "timestamp"> & {
   normalizedPath?: string;
   timestamp?: string;
 };
@@ -42,17 +43,20 @@ export type FileStateOperationFilter = {
   normalizedPath?: string;
   since?: string;
   after?: string;
+  afterSequence?: number;
   until?: string;
 };
 
 export type FileStateReadSnapshot = {
   sessionId: string;
   capturedAt: string;
+  capturedSequence: number;
   reads: FileStateOperation[];
 };
 
 export type FileStateWriteQuery = FileStateOperationFilter & {
-  after: string;
+  after?: string;
+  afterSequence?: number;
   paths?: readonly string[];
   normalizedPaths?: readonly string[];
 };
@@ -64,6 +68,7 @@ const WRITE_OPERATIONS: readonly FileStateOperationKind[] = ["write", "replace",
 export class FileStateTracker {
   readonly #maxOperations: number;
   readonly #operations: FileStateOperation[] = [];
+  #cursor = 0;
 
   constructor(options: { maxOperations?: number } = {}) {
     this.#maxOperations = Math.max(1, Math.floor(options.maxOperations ?? DEFAULT_MAX_OPERATIONS));
@@ -71,6 +76,7 @@ export class FileStateTracker {
 
   recordOperation(input: FileStateOperationInput): FileStateOperation {
     const operation: FileStateOperation = {
+      sequence: this.#nextSequence(),
       sessionId: input.sessionId,
       turnId: input.turnId,
       taskId: input.taskId,
@@ -111,9 +117,11 @@ export class FileStateTracker {
   }
 
   snapshotReads(sessionId: string, capturedAt = new Date().toISOString()): FileStateReadSnapshot {
+    const capturedSequence = this.#cursor;
     return {
       sessionId,
       capturedAt,
+      capturedSequence,
       reads: this.listReads(sessionId)
     };
   }
@@ -126,7 +134,8 @@ export class FileStateTracker {
     return this.listOperations({
       ...options,
       operation: WRITE_OPERATIONS,
-      after: options.after
+      after: options.after,
+      afterSequence: options.afterSequence
     }).filter((operation) =>
       normalizedPaths.size === 0 || normalizedPaths.has(operation.normalizedPath)
     );
@@ -138,6 +147,11 @@ export class FileStateTracker {
         this.#operations.splice(index, 1);
       }
     }
+  }
+
+  #nextSequence(): number {
+    this.#cursor += 1;
+    return this.#cursor;
   }
 }
 
@@ -175,6 +189,9 @@ function matchesFilter(operation: FileStateOperation, filter: FileStateOperation
     return false;
   }
   if (filter.after !== undefined && operation.timestamp <= filter.after) {
+    return false;
+  }
+  if (filter.afterSequence !== undefined && operation.sequence <= filter.afterSequence) {
     return false;
   }
   if (filter.until !== undefined && operation.timestamp > filter.until) {

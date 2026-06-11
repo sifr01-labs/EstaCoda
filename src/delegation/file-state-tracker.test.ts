@@ -20,6 +20,7 @@ describe("FileStateTracker", () => {
     });
 
     expect(operation).toMatchObject({
+      sequence: 1,
       sessionId: "session-1",
       path: "src/../src/app.ts",
       normalizedPath: "src/app.ts",
@@ -57,6 +58,7 @@ describe("FileStateTracker", () => {
     expect(snapshot).toMatchObject({
       sessionId: "parent",
       capturedAt: "2026-06-11T10:02:00.000Z",
+      capturedSequence: 2,
       reads: [
         expect.objectContaining({
           sessionId: "parent",
@@ -64,6 +66,42 @@ describe("FileStateTracker", () => {
         })
       ]
     });
+  });
+
+  it("assigns monotonic operation sequences and snapshots the current cursor", () => {
+    const tracker = new FileStateTracker();
+    const first = tracker.recordOperation({
+      sessionId: "parent",
+      path: "a.ts",
+      operation: "read",
+      sourceTool: "file.read",
+      timestamp: "2026-06-11T10:00:00.000Z"
+    });
+    const snapshot = tracker.snapshotReads("parent", "2026-06-11T10:00:00.000Z");
+    const second = tracker.recordOperation({
+      sessionId: "child",
+      parentSessionId: "parent",
+      childSessionId: "child",
+      path: "a.ts",
+      operation: "write",
+      sourceTool: "file.write",
+      timestamp: "2026-06-11T10:00:00.000Z"
+    });
+
+    expect(first.sequence).toBe(1);
+    expect(snapshot.capturedSequence).toBe(1);
+    expect(second.sequence).toBe(2);
+    expect(tracker.findWritesAfter({
+      parentSessionId: "parent",
+      childSessionId: "child",
+      afterSequence: snapshot.capturedSequence,
+      paths: ["a.ts"]
+    })).toEqual([
+      expect.objectContaining({
+        sequence: 2,
+        operation: "write"
+      })
+    ]);
   });
 
   it("queries child writes after a timestamp by path and relationship", () => {

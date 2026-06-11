@@ -781,7 +781,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     ui: options.ui,
     agentProfile: options.agentProfile,
     subagentRegistry,
-    diagnosticsRoot: profilePaths.tempPath
+    diagnosticsRoot: profilePaths.tempPath,
+    fileStateTracker
   });
   const builtSession = await builder.buildSession({
     sessionId,
@@ -804,6 +805,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       subagentRegistry,
       diagnosticsRoot: profilePaths.tempPath,
       memoryProvider,
+      fileStateTracker,
       parentVisibleTools: () => toolRegistry.list()
     }),
     trustedWorkspace: async () => activeTrustedWorkspace || await trustStore.isTrusted(workspaceRoot),

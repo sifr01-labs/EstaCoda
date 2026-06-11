@@ -5,6 +5,7 @@ import { assessSecurityPolicy, capabilityFirstDefaults } from "../contracts/secu
 import type { SessionDB, SessionRecord } from "../contracts/session.js";
 import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
 import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
+import type { FileStateTracker } from "../delegation/file-state-tracker.js";
 import type { AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import { DelegationManager } from "../delegation/delegation-manager.js";
 import type { SubagentRegistry } from "../delegation/subagent-registry.js";
@@ -76,6 +77,7 @@ export type DefaultChildAgentLoopFactoryOptions = {
   agentProfile?: ConstructorParameters<typeof AgentLoop>[0]["agentProfile"];
   subagentRegistry?: SubagentRegistry;
   diagnosticsRoot?: string;
+  fileStateTracker?: FileStateTracker;
   id?: () => string;
 };
 
@@ -91,6 +93,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
   readonly #agentProfile: ConstructorParameters<typeof AgentLoop>[0]["agentProfile"];
   readonly #subagentRegistry: SubagentRegistry | undefined;
   readonly #diagnosticsRoot: string | undefined;
+  readonly #fileStateTracker: FileStateTracker | undefined;
   readonly #id: () => string;
 
   constructor(options: DefaultChildAgentLoopFactoryOptions) {
@@ -105,6 +108,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
     this.#agentProfile = options.agentProfile;
     this.#subagentRegistry = options.subagentRegistry;
     this.#diagnosticsRoot = options.diagnosticsRoot;
+    this.#fileStateTracker = options.fileStateTracker;
     this.#id = options.id ?? (() => `child_${crypto.randomUUID()}`);
   }
 
@@ -147,6 +151,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
         currentDepth: depth,
         subagentRegistry: this.#subagentRegistry,
         diagnosticsRoot: this.#diagnosticsRoot,
+        fileStateTracker: this.#fileStateTracker,
         parentVisibleTools: () => builtSession?.toolRegistry.list() ?? []
       }),
       trustedWorkspace: async () => input.trustedWorkspace,

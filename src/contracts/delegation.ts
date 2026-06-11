@@ -41,3 +41,17 @@ export type DelegateTaskItem = {
   allowedTools?: string[];
   role?: DelegateRole;
 };
+
+export type DelegationStaleFileWarning = {
+  kind: "stale-parent-file-read";
+  normalizedPath: string;
+  displayPath?: string;
+  parentSessionId: string;
+  childSessionId: string;
+  parentReadAt: string;
+  childWriteAt: string;
+  writeOperation: "write" | "replace" | "delete" | "unknown-write";
+  sourceTool: string;
+  taskIndex?: number;
+  batchId?: string;
+};

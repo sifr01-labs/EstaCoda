@@ -9,6 +9,7 @@ import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { LocalMemoryProvider } from "../memory/local-memory-provider.js";
 import { MemoryStore } from "../memory/memory-store.js";
+import { FileStateTracker } from "./file-state-tracker.js";
 import { DelegationManager, delegatedPrompt } from "./delegation-manager.js";
 import { SubagentRegistry } from "./subagent-registry.js";
 
@@ -179,6 +180,146 @@ describe("DelegationManager", () => {
       childSessionId: "child",
       usageUnavailable: true
     }));
+  });
+
+  it("adds stale-file warnings when a child writes a file the parent read before delegation", async () => {
+    const tracker = new FileStateTracker();
+    tracker.recordOperation({
+      sessionId: "parent",
+      path: "src/app.ts",
+      operation: "read",
+      sourceTool: "file.read",
+      timestamp: "2026-06-11T10:00:00.000Z"
+    });
+    const harness = await createHarness({
+      fileStateTracker: tracker,
+      beforeResponse: async (_db, _registry, _handleInput, childSessionId) => {
+        tracker.recordOperation({
+          sessionId: childSessionId,
+          parentSessionId: "parent",
+          childSessionId,
+          path: "./src/app.ts",
+          operation: "write",
+          sourceTool: "file.write",
+          timestamp: "9999-01-01T00:00:00.000Z",
+          metadata: {
+            bytes: 18,
+            changed: true,
+            previewAvailable: true,
+            content: "OPENAI_API_KEY=sk-secret"
+          } as never
+        });
+      }
+    });
+
+    const result = await harness.manager.delegate({
+      parentSessionId: "parent",
+      profileId: "default",
+      task: "Update the file",
+      trustedWorkspace: true
+    });
+
+    expect(result.status).toBe("completed");
+    expect(result.staleFileWarningCount).toBe(1);
+    expect(result.staleFileWarnings).toEqual([
+      expect.objectContaining({
+        kind: "stale-parent-file-read",
+        normalizedPath: "src/app.ts",
+        displayPath: "./src/app.ts",
+        parentSessionId: "parent",
+        childSessionId: "child",
+        parentReadAt: "2026-06-11T10:00:00.000Z",
+        childWriteAt: "9999-01-01T00:00:00.000Z",
+        writeOperation: "write",
+        sourceTool: "file.write"
+      })
+    ]);
+    expect(JSON.stringify(result.staleFileWarnings)).not.toContain("OPENAI_API_KEY");
+    expect(JSON.stringify(result.staleFileWarnings)).not.toContain("sk-secret");
+    await expect(harness.db.listEvents("parent")).resolves.toContainEqual(expect.objectContaining({
+      kind: "delegation-finished",
+      childSessionId: "child",
+      staleFileWarningCount: 1,
+      staleFileWarnings: result.staleFileWarnings
+    }));
+  });
+
+  it("does not add stale-file warnings for unrelated child writes", async () => {
+    const tracker = new FileStateTracker();
+    tracker.recordOperation({
+      sessionId: "parent",
+      path: "src/app.ts",
+      operation: "read",
+      sourceTool: "file.read",
+      timestamp: "2026-06-11T10:00:00.000Z"
+    });
+    const harness = await createHarness({
+      fileStateTracker: tracker,
+      beforeResponse: async (_db, _registry, _handleInput, childSessionId) => {
+        tracker.recordOperation({
+          sessionId: childSessionId,
+          parentSessionId: "parent",
+          childSessionId,
+          path: "src/other.ts",
+          operation: "write",
+          sourceTool: "file.write",
+          timestamp: "9999-01-01T00:00:00.000Z"
+        });
+      }
+    });
+
+    const result = await harness.manager.delegate({
+      parentSessionId: "parent",
+      profileId: "default",
+      task: "Update another file",
+      trustedWorkspace: true
+    });
+
+    expect(result.status).toBe("completed");
+    expect(result.staleFileWarnings).toBeUndefined();
+    expect(result.staleFileWarningCount).toBeUndefined();
+  });
+
+  it("preserves stale-file warnings for runtime-error child results", async () => {
+    const tracker = new FileStateTracker();
+    tracker.recordOperation({
+      sessionId: "parent",
+      path: "src/app.ts",
+      operation: "read",
+      sourceTool: "file.read",
+      timestamp: "2026-06-11T10:00:00.000Z"
+    });
+    const harness = await createHarness({
+      fileStateTracker: tracker,
+      handleError: new Error("child crashed"),
+      beforeResponse: async (_db, _registry, _handleInput, childSessionId) => {
+        tracker.recordOperation({
+          sessionId: childSessionId,
+          parentSessionId: "parent",
+          childSessionId,
+          path: "src/app.ts",
+          operation: "replace",
+          sourceTool: "file.replace",
+          timestamp: "9999-01-01T00:00:00.000Z"
+        });
+      }
+    });
+
+    const result = await harness.manager.delegate({
+      parentSessionId: "parent",
+      profileId: "default",
+      task: "Crash after writing",
+      trustedWorkspace: true
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.reason).toBe("runtime-error");
+    expect(result.staleFileWarningCount).toBe(1);
+    expect(result.staleFileWarnings?.[0]).toMatchObject({
+      normalizedPath: "src/app.ts",
+      writeOperation: "replace",
+      sourceTool: "file.replace"
+    });
   });
 
   it("preserves child usage for structured blocked and failed provider responses", async () => {
@@ -793,6 +934,52 @@ describe("DelegationManager", () => {
     }));
   });
 
+  it("preserves stale-file warnings when a child times out after a tracked write", async () => {
+    vi.useFakeTimers();
+    const tracker = new FileStateTracker();
+    tracker.recordOperation({
+      sessionId: "parent",
+      path: "src/app.ts",
+      operation: "read",
+      sourceTool: "file.read",
+      timestamp: "2026-06-11T10:00:00.000Z"
+    });
+    const harness = await createHarness({
+      maxSpawnDepth: 1,
+      childTimeoutSeconds: 0.001,
+      fileStateTracker: tracker,
+      handle: async (_handleInput, childSessionId) => {
+        tracker.recordOperation({
+          sessionId: childSessionId,
+          parentSessionId: "parent",
+          childSessionId,
+          path: "src/app.ts",
+          operation: "write",
+          sourceTool: "file.write",
+          timestamp: "9999-01-01T00:00:00.000Z"
+        });
+        return await new Promise<AgentLoopResponse>(() => undefined);
+      }
+    });
+
+    const pending = harness.manager.delegate({
+      parentSessionId: "parent",
+      profileId: "default",
+      task: "Timeout after write",
+      trustedWorkspace: true
+    });
+    await vi.advanceTimersByTimeAsync(2);
+    const result = await pending;
+
+    expect(result.reason).toBe("timeout");
+    expect(result.staleFileWarningCount).toBe(1);
+    expect(result.staleFileWarnings?.[0]).toMatchObject({
+      normalizedPath: "src/app.ts",
+      writeOperation: "write",
+      sourceTool: "file.write"
+    });
+  });
+
   it("relays child progress to the parent event sink with subagent metadata", async () => {
     const events: RuntimeEvent[] = [];
     const harness = await createHarness({
@@ -867,6 +1054,53 @@ describe("DelegationManager", () => {
     expect(result.results.map((child) => child.task)).toEqual(["one", "two", "three"]);
     expect(result.results.map((child) => child.index)).toEqual([0, 1, 2]);
     expect(result.results.map((child) => child.childStatus)).toEqual(["completed", "completed", "completed"]);
+  });
+
+  it("preserves per-child batch stale-file warnings and aggregate warning count", async () => {
+    const tracker = new FileStateTracker();
+    tracker.recordOperation({
+      sessionId: "parent",
+      path: "src/app.ts",
+      operation: "read",
+      sourceTool: "file.read",
+      timestamp: "2026-06-11T10:00:00.000Z"
+    });
+    const harness = await createHarness({
+      maxConcurrentChildren: 2,
+      fileStateTracker: tracker,
+      beforeResponse: async (_db, _registry, handleInput, childSessionId) => {
+        tracker.recordOperation({
+          sessionId: childSessionId,
+          parentSessionId: "parent",
+          childSessionId,
+          path: handleInput.text === "touch matching" ? "src/app.ts" : "src/other.ts",
+          operation: "replace",
+          sourceTool: "file.replace",
+          timestamp: "9999-01-01T00:00:00.000Z"
+        });
+      }
+    });
+
+    const result = await harness.manager.delegateBatch({
+      parentSessionId: "parent",
+      profileId: "default",
+      tasks: [{ task: "touch matching" }, { task: "touch other" }],
+      trustedWorkspace: true
+    });
+
+    expect(result.status).toBe("completed");
+    expect(result.staleFileWarningCount).toBe(1);
+    expect(result.results[0]?.staleFileWarningCount).toBe(1);
+    expect(result.results[0]?.staleFileWarnings).toEqual([
+      expect.objectContaining({
+        normalizedPath: "src/app.ts",
+        writeOperation: "replace",
+        taskIndex: 0,
+        batchId: result.batchId
+      })
+    ]);
+    expect(result.results[1]?.staleFileWarnings).toBeUndefined();
+    expect(result.results.map((child) => child.childStatus)).toEqual(["completed", "completed"]);
   });
 
   it("preserves per-child batch usage and rolls up aggregate child usage", async () => {
@@ -1005,8 +1239,8 @@ describe("delegatedPrompt", () => {
 
 async function createHarness(input: {
   response?: AgentLoopResponse;
-  beforeResponse?: (db: InMemorySessionDB, registry: SubagentRegistry, handleInput: AgentLoopInput) => Promise<void>;
-  handle?: (handleInput: AgentLoopInput) => Promise<AgentLoopResponse>;
+  beforeResponse?: (db: InMemorySessionDB, registry: SubagentRegistry, handleInput: AgentLoopInput, childSessionId: string) => Promise<void>;
+  handle?: (handleInput: AgentLoopInput, childSessionId: string) => Promise<AgentLoopResponse>;
   handleError?: Error;
   currentDepth?: number;
   maxSpawnDepth?: number;
@@ -1016,6 +1250,7 @@ async function createHarness(input: {
   registry?: SubagentRegistry;
   memoryProvider?: Pick<MemoryProvider, "recordDelegationOutcome">;
   outcomeMemory?: Partial<DelegationConfig["outcomeMemory"]>;
+  fileStateTracker?: FileStateTracker;
 } = {}) {
   const db = new InMemorySessionDB({ id: deterministicId() });
   const registry = input.registry ?? new SubagentRegistry();
@@ -1052,9 +1287,9 @@ async function createHarness(input: {
         handle: vi.fn(async (handleInput) => {
           handleInputs.push({ text: handleInput.text, signal: handleInput.signal });
           if (input.handle !== undefined) {
-            return await input.handle(handleInput);
+            return await input.handle(handleInput, childSessionId);
           }
-          await input.beforeResponse?.(db, registry, handleInput);
+          await input.beforeResponse?.(db, registry, handleInput, childSessionId);
           if (input.handleError !== undefined) {
             throw input.handleError;
           }
@@ -1074,9 +1309,10 @@ async function createHarness(input: {
       childFactory: factory,
       trajectoryRecorder: new TrajectoryRecorder({ profileId: "default", sessionId: "parent", modelId: "test" }),
       subagentRegistry: registry,
-      currentDepth: input.currentDepth,
-      memoryProvider: input.memoryProvider,
-      delegationConfig: input.maxSpawnDepth === undefined &&
+	      currentDepth: input.currentDepth,
+	      memoryProvider: input.memoryProvider,
+	      fileStateTracker: input.fileStateTracker,
+	      delegationConfig: input.maxSpawnDepth === undefined &&
         input.maxConcurrentChildren === undefined &&
         input.maxBatchTasks === undefined &&
         input.childTimeoutSeconds === undefined &&

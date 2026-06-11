@@ -16,7 +16,7 @@ import type {
   CompiledSkillPlaybook
 } from "./skill.js";
 import type { FailureRecord } from "./failure.js";
-import type { DelegateRole } from "./delegation.js";
+import type { DelegateRole, DelegationStaleFileWarning } from "./delegation.js";
 import type {
   ModelProfile,
   ProviderApiMode,
@@ -275,9 +275,11 @@ export type SessionEvent =
       batchId?: string;
       diagnosticPath?: string;
       usage?: ProviderUsage;
-      aggregateUsage?: ProviderUsage;
-      usageUnavailable?: boolean;
-    }
+	      aggregateUsage?: ProviderUsage;
+	      usageUnavailable?: boolean;
+	      staleFileWarnings?: DelegationStaleFileWarning[];
+	      staleFileWarningCount?: number;
+	    }
   | {
       kind: "delegation-heartbeat";
       childSessionId?: string;
