@@ -1,4 +1,4 @@
-import { isolateLtr } from "../ui/bidi.js";
+import { isolateLtr, LRI, PDI, RLI } from "../ui/bidi.js";
 
 export type SetupCopyLocale = "en" | "ar";
 
@@ -39,6 +39,7 @@ const TECHNICAL_TOKENS = [
   "estacoda setup --advanced --provider <provider> --model <model> --api-key-env <ENV_NAME>",
   "estacoda setup --provider deepseek --model deepseek-chat --api-key-env DEEPSEEK_API_KEY",
   "estacoda telegram setup",
+  "estacoda whatsapp",
   "estacoda browser setup",
   "estacoda setup --advanced",
   "chmod 600 <secret-store>",
@@ -71,6 +72,14 @@ const TECHNICAL_TOKENS = [
   "faster-whisper",
   "python3-venv",
   "pythonBinary",
+  "npm ci",
+  "scripts/whatsapp-bridge/",
+  "WhatsApp Business",
+  "QR",
+  "dmPolicy",
+  "authDir",
+  "pairing-pending",
+  "eSIM",
   "Debian/Ubuntu",
   "~/.estacoda/python-env",
   "~/.estacoda/cache/huggingface",
@@ -603,6 +612,33 @@ export const SETUP_COPY_ENTRIES = [
   copy("setupApply.repairRequired", "Repair required before normal apply.", "الإصلاح مطلوب قبل التطبيق العادي.", [], "config-repair"),
   copy("setupApply.warnings.title", "Optional capability warnings", "تحذيرات القدرات الاختيارية", [], "setup-review"),
 
+  copy("whatsappWizard.intro.block", "⌘ WhatsApp Setup", "⌘ إعداد WhatsApp", [], "optional-capability"),
+  copy("whatsappWizard.dependencies.missingQuestion", "WhatsApp bridge dependencies are missing. Run npm ci in scripts/whatsapp-bridge/ now? [y/N] ", "تبعيات جسر WhatsApp غير مثبتة. هل تريد تشغيل npm ci داخل scripts/whatsapp-bridge/ الآن؟ [y/N] ", [], "optional-capability"),
+  copy("whatsappWizard.dependencies.ready", "✓ WhatsApp bridge dependencies ready", "✓ تبعيات جسر WhatsApp جاهزة", [], "optional-capability"),
+  copy("whatsappWizard.dependencies.declined", "WhatsApp setup cancelled. Config was not changed.", "تم إلغاء إعداد WhatsApp. لم يتم تغيير الإعدادات.", [], "none"),
+  copy("whatsappWizard.dependencies.failed", "WhatsApp bridge dependency install failed: {message}", "فشل تثبيت تبعيات جسر WhatsApp: {message}", ["{message}"], "optional-capability"),
+  copy("whatsappWizard.repair.question", "Existing WhatsApp auth is missing or logged out. Clear this profile-local authDir and re-pair? [y/N] ", "مصادقة WhatsApp الحالية مفقودة أو logged_out. هل تريد مسح authDir المحلي لهذا profile وإعادة الاقتران؟ [y/N] ", [], "optional-capability"),
+  copy("whatsappWizard.repair.declined", "WhatsApp re-pair cancelled. Config was not changed.", "تم إلغاء إعادة ربط WhatsApp. لم يتم تغيير الإعدادات.", [], "none"),
+  copy("whatsappWizard.mode.block", "Choose how EstaCoda should receive WhatsApp messages.\n\n1. Dedicated WhatsApp number  [recommended]\n   Best for normal use. People message the agent directly.\n   Requires a second number with WhatsApp or WhatsApp Business.\n2. Personal number  [self-chat]\n   Fastest setup. You message yourself to talk to the agent.\n   Works for testing, but the interaction is less natural.\n\nChoose [1/2]: ", "اختر كيف ستستقبل EstaCoda رسائل WhatsApp.\n\n1. رقم WhatsApp مخصص  [موصى به]\n   الأفضل للاستخدام العادي. يراسل الناس الوكيل مباشرة.\n   يتطلب رقماً ثانياً عليه WhatsApp أو WhatsApp Business.\n2. الرقم الشخصي  [محادثة ذاتية]\n   أسرع إعداد. تراسل نفسك للتحدث مع الوكيل.\n   مناسب للاختبار، لكن التجربة أقل طبيعية.\n\nاختر [1/2]: ", [], "optional-capability"),
+  copy("whatsappWizard.mode.invalid", "WhatsApp setup cancelled. Choose 1 for a dedicated WhatsApp number or 2 for a personal number when you run estacoda whatsapp again.", "تم إلغاء إعداد WhatsApp. اختر 1 لرقم WhatsApp مخصص أو 2 للرقم الشخصي عند تشغيل estacoda whatsapp مرة أخرى.", [], "none"),
+  copy("whatsappWizard.mode.selectedDedicated", "✓ Mode: dedicated WhatsApp number", "✓ الوضع: رقم WhatsApp مخصص", [], "optional-capability"),
+  copy("whatsappWizard.mode.selectedPersonal", "✓ Mode: personal number", "✓ الوضع: الرقم الشخصي", [], "optional-capability"),
+  copy("whatsappWizard.dedicated.guidance", "Dedicated number setup\n──────────────────────\nUse WhatsApp Business on your phone with a second number.\nIt can run alongside your personal WhatsApp app.\n\nCommon options:\n  • Dual SIM / eSIM number\n  • Prepaid SIM\n  • Virtual number, where WhatsApp verification is supported\n\nThis device does not need to be the agent host.\nIt only needs to scan the pairing code once.", "إعداد الرقم المخصص\n──────────────────────\nاستخدم WhatsApp Business على هاتفك مع رقم ثانٍ.\nيمكنه العمل بجانب تطبيق WhatsApp الشخصي.\n\nخيارات شائعة:\n  • شريحة مزدوجة / eSIM\n  • شريحة مسبقة الدفع\n  • رقم افتراضي، إذا كان تحقق WhatsApp مدعوماً\n\nهذا الجهاز لا يحتاج أن يكون مضيف الوكيل.\nيكفي أن يمسح رمز الاقتران مرة واحدة.", [], "optional-capability"),
+  copy("whatsappWizard.personal.guidance", "Personal number setup\n────────────────────\nUse your own WhatsApp account and message yourself to talk to the agent.\nThis is fastest for testing, but less natural for normal use.", "إعداد الرقم الشخصي\n────────────────────\nاستخدم حسابك الشخصي على WhatsApp وراسل نفسك للتحدث مع الوكيل.\nهذا هو الأسرع للاختبار، لكنه أقل طبيعية للاستخدام العادي.", [], "optional-capability"),
+  copy("whatsappWizard.allowlist.question", "Who can message this agent?\nEnter phone numbers separated by commas.\nLeave blank to link WhatsApp now and authorize senders later: ", "من يمكنه مراسلة هذا الوكيل؟\nأدخل أرقام الهاتف مفصولة بفواصل.\nاتركه فارغاً لربط WhatsApp الآن وتفويض المرسلين لاحقاً: ", [], "optional-capability"),
+  copy("whatsappWizard.allowlist.selected", "✓ Allowed senders: {allowedSenders}", "✓ المرسلون المسموحون: {allowedSenders}", ["{allowedSenders}"], "optional-capability"),
+  copy("whatsappWizard.allowlist.empty", "No allowed senders were added.", "لم تتم إضافة مرسلين مسموحين.", [], "optional-capability"),
+  copy("whatsappWizard.pairing.instructions", "Open WhatsApp or WhatsApp Business on the phone using the agent number.\n\nThen open:\n  Settings → Linked Devices → Link a Device\n\nScan the code below.", "افتح WhatsApp أو WhatsApp Business على الهاتف الذي يستخدم رقم الوكيل.\n\nثم افتح:\n  الإعدادات → الأجهزة المرتبطة → ربط جهاز\n\nامسح الرمز أدناه.", [], "optional-capability"),
+  copy("whatsappWizard.pairing.block", "WhatsApp pairing\n────────────────\nSession:\n  {authDir}\n\nScan this code with WhatsApp on your phone:", "اقتران WhatsApp\n────────────────\nالجلسة:\n  {authDir}\n\nامسح هذا الرمز باستخدام WhatsApp على هاتفك:", ["{authDir}"], "optional-capability"),
+  copy("whatsappWizard.pairing.timeout", "Pairing timed out - run estacoda whatsapp to try again.", "انتهت مهلة الاقتران - شغّل estacoda whatsapp للمحاولة مرة أخرى.", [], "optional-capability"),
+  copy("whatsappWizard.pairing.failed", "WhatsApp QR pairing failed: {message}", "فشل اقتران WhatsApp عبر QR: {message}", ["{message}"], "optional-capability"),
+  copy("whatsappWizard.success.linked", "✓ WhatsApp linked", "✓ تم ربط WhatsApp", [], "optional-capability"),
+  copy("whatsappWizard.success.sessionSaved", "✓ Session saved", "✓ تم حفظ الجلسة", [], "optional-capability"),
+  copy("whatsappWizard.success.restricted", "✓ Incoming messages restricted to: {allowedSenders}", "✓ الرسائل الواردة مقيدة بـ: {allowedSenders}", ["{allowedSenders}"], "optional-capability"),
+  copy("whatsappWizard.success.pairingPending", "No allowed senders were added.\nWhatsApp is linked, but user authorization is pairing-pending.", "لم تتم إضافة مرسلين مسموحين.\nتم ربط WhatsApp، لكن تفويض المستخدمين ما زال في حالة pairing-pending.", [], "optional-capability"),
+  copy("whatsappWizard.success.ready", "WhatsApp is ready.", "WhatsApp جاهز.", [], "optional-capability"),
+  copy("whatsappWizard.cancelled", "WhatsApp setup cancelled. Config was not changed.", "تم إلغاء إعداد WhatsApp. لم يتم تغيير الإعدادات.", [], "none"),
+
   copy("setupValidation.provider.invalid", "Provider {providerId} is not available.", "المزوّد {providerId} غير متاح.", ["{providerId}"], "provider-selection"),
   copy("setupValidation.model.invalid", "Model {modelId} is not available for provider {providerId}.", "النموذج {modelId} غير متاح للمزوّد {providerId}.", ["{modelId}", "{providerId}"], "provider-selection"),
   copy("setupValidation.credential.missing", "Missing credential environment variable {envVar}.", "متغير بيئة بيانات الاعتماد {envVar} مفقود.", ["{envVar}"], "credential-reference"),
@@ -687,9 +723,22 @@ function copy(
 function isolateArabicCopy(value: string): string {
   let isolated = value.replace(/\{[A-Za-z][A-Za-z0-9]*\}/gu, (placeholder) => isolateLtr(placeholder));
   const tokenPattern = new RegExp(TECHNICAL_TOKENS.map(escapeRegExp).join("|"), "gu");
-  return isolated.replace(tokenPattern, (token) => isolateLtr(token));
+  return isolated.replace(tokenPattern, (token, offset: number) => isInsideBidiIsolation(isolated, offset) ? token : isolateLtr(token));
 }
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function isInsideBidiIsolation(value: string, offset: number): boolean {
+  let depth = 0;
+  for (let index = 0; index < offset; index += 1) {
+    const char = value[index];
+    if (char === LRI || char === RLI) {
+      depth += 1;
+    } else if (char === PDI && depth > 0) {
+      depth -= 1;
+    }
+  }
+  return depth > 0;
 }

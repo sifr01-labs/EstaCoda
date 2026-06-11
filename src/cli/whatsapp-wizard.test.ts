@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readConfig } from "../config/runtime-config.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { WhatsAppBridgeRuntimeError } from "../channels/whatsapp-bridge-errors.js";
+import { isolateLtr } from "../ui/bidi.js";
 import {
   runWhatsAppWizard,
   type WhatsAppPairDeviceOptions,
@@ -38,6 +39,7 @@ describe("runWhatsAppWizard", () => {
     expect(result.output).toContain("Config was not changed");
     expect(deps.installDependencies).not.toHaveBeenCalled();
     expect(await configLoaded(tempDir)).toBe(false);
+    expect(prompt).toHaveBeenCalledWith(expect.stringContaining("npm ci"));
   });
 
   it("leaves config unchanged when explicit dependency install fails", async () => {
@@ -71,7 +73,7 @@ describe("runWhatsAppWizard", () => {
     });
 
     expect(result.exitCode).toBe(1);
-    expect(result.output).toContain("Enter bot or self");
+    expect(result.output).toContain("Choose 1 for a dedicated WhatsApp number");
     expect(deps.pairDevice).not.toHaveBeenCalled();
     expect(await configLoaded(tempDir)).toBe(false);
   });
@@ -84,7 +86,7 @@ describe("runWhatsAppWizard", () => {
     const result = await runWhatsAppWizard({
       workspaceRoot: tempDir,
       homeDir: tempDir,
-      prompt: fakePrompt(["bot", "971501234567"]),
+      prompt: fakePrompt(["1", "971501234567"]),
       dependencies: deps,
     });
 
@@ -99,7 +101,7 @@ describe("runWhatsAppWizard", () => {
     const result = await runWhatsAppWizard({
       workspaceRoot: tempDir,
       homeDir: tempDir,
-      prompt: fakePrompt(["bot", "971501234567, abc123@lid"]),
+      prompt: fakePrompt(["1", "971501234567, abc123@lid"]),
       dependencies: deps,
     });
 
@@ -115,6 +117,36 @@ describe("runWhatsAppWizard", () => {
       pairingMode: "qr",
       allowedUsers: ["971501234567", "abc123@lid"],
     });
+    expect(result.output).toContain("✓ Mode: dedicated WhatsApp number");
+    expect(result.output).toContain("✓ Allowed senders: 971501234567, abc123@lid");
+    expect(result.output).toContain("✓ WhatsApp bridge dependencies ready");
+    expect(result.output).toContain("✓ WhatsApp linked");
+    expect(result.output).toContain("✓ Session saved");
+    expect(result.output).toContain("✓ Incoming messages restricted to: 971501234567, abc123@lid");
+    expect(result.output).toContain("WhatsApp is ready.");
+  });
+
+  it.each([
+    ["1", "bot"],
+    ["bot", "bot"],
+    ["dedicated", "bot"],
+    ["2", "self-chat"],
+    ["self", "self-chat"],
+    ["self-chat", "self-chat"],
+    ["personal", "self-chat"],
+  ])("maps mode input %s to internal mode %s", async (answer, expectedMode) => {
+    const deps = depsWithInstalledBridge({ pairDevice: successfulPairDevice() });
+
+    const result = await runWhatsAppWizard({
+      workspaceRoot: tempDir,
+      homeDir: tempDir,
+      prompt: fakePrompt([answer, "971501234567"]),
+      dependencies: deps,
+    });
+
+    const config = await readConfig(resolveProfileStateHome({ homeDir: tempDir, profileId: "default" }).configPath);
+    expect(result.exitCode).toBe(0);
+    expect(config.config.channels?.whatsapp?.mode).toBe(expectedMode);
   });
 
   it("strips stale pairing-code and unknown WhatsApp config keys after successful QR setup", async () => {
@@ -141,7 +173,7 @@ describe("runWhatsAppWizard", () => {
     const result = await runWhatsAppWizard({
       workspaceRoot: tempDir,
       homeDir: tempDir,
-      prompt: fakePrompt(["bot", "971501234567"]),
+      prompt: fakePrompt(["dedicated", "971501234567"]),
       dependencies: depsWithInstalledBridge({ pairDevice: successfulPairDevice() }),
     });
 
@@ -173,13 +205,15 @@ describe("runWhatsAppWizard", () => {
     const result = await runWhatsAppWizard({
       workspaceRoot: tempDir,
       homeDir: tempDir,
-      prompt: fakePrompt(["self", ""]),
+      prompt: fakePrompt(["2", ""]),
       dependencies: deps,
     });
 
     const config = await readConfig(resolveProfileStateHome({ homeDir: tempDir, profileId: "default" }).configPath);
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain("pairing-pending");
+    expect(result.output).toContain("No allowed senders were added.");
+    expect(result.output).not.toContain("allow anyone");
     expect(config.config.channels?.whatsapp).toMatchObject({
       enabled: true,
       experimental: true,
@@ -212,7 +246,7 @@ describe("runWhatsAppWizard", () => {
     const result = await runWhatsAppWizard({
       workspaceRoot: tempDir,
       homeDir: tempDir,
-      prompt: fakePrompt(["y", "bot", "971501234567"]),
+      prompt: fakePrompt(["y", "1", "971501234567"]),
       dependencies: deps,
     });
 
@@ -288,14 +322,30 @@ describe("runWhatsAppWizard", () => {
     const result = await runWhatsAppWizard({
       workspaceRoot: tempDir,
       homeDir: tempDir,
-      prompt: fakePrompt(["cancel"]),
-      dependencies: depsWithInstalledBridge(),
+      prompt: fakePrompt(["1", "0507773879"]),
+      dependencies: depsWithInstalledBridge({ pairDevice: successfulPairDevice() }),
     });
 
-    expect(result.output).toContain("WhatsApp");
-    expect(result.output).toContain("Baileys");
-    expect(result.output).toContain("scripts/whatsapp-bridge/");
-    expect(result.output).toContain("estacoda whatsapp");
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain(isolateLtr("WhatsApp"));
+    expect(result.output).toContain(isolateLtr("WhatsApp Business"));
+    expect(result.output).toContain("المرسلون المسموحون");
+    expect(result.output).toContain("تم حفظ الجلسة");
+  });
+
+  it("uses setup-copy allowlist wording without advertising open access", async () => {
+    const prompt = fakePrompt(["1", ""]);
+    const result = await runWhatsAppWizard({
+      workspaceRoot: tempDir,
+      homeDir: tempDir,
+      prompt,
+      dependencies: depsWithInstalledBridge({ pairDevice: successfulPairDevice() }),
+    });
+
+    expect(result.exitCode).toBe(0);
+    const promptText = JSON.stringify((prompt as unknown as { mock: { calls: unknown[][] } }).mock.calls);
+    expect(promptText).toContain("Who can message this agent?");
+    expect(promptText).not.toContain("*");
   });
 });
 

@@ -12,6 +12,7 @@ import {
   type WhatsAppChannelMode,
   type WhatsAppDmPolicy,
 } from "../config/runtime-config.js";
+import { resolveSetupCopy, type SetupCopyKey } from "../setup/setup-copy.js";
 import { HttpWhatsAppBridgeClient } from "../channels/whatsapp-bridge-client.js";
 import { WhatsAppBridgeRuntimeError } from "../channels/whatsapp-bridge-errors.js";
 import {
@@ -57,68 +58,73 @@ export type WhatsAppWizardOptions = {
   dependencies?: WhatsAppWizardDependencies;
 };
 
-type WizardCopy = {
-  intro: string[];
-  installQuestion: string;
-  declinedInstall: string;
-  installFailed: (message: string) => string;
-  modeQuestion: string;
-  invalidMode: string;
+type ResolvedWhatsAppWizardCopy = {
+  introBlock: string;
+  dependenciesMissingQuestion: string;
+  dependenciesReady: string;
+  dependenciesDeclined: string;
+  dependenciesFailed(message: string): string;
+  repairQuestion: string;
+  repairDeclined: string;
+  modeBlock: string;
+  modeInvalid: string;
+  modeSelectedDedicated: string;
+  modeSelectedPersonal: string;
+  dedicatedGuidance: string;
+  personalGuidance: string;
   allowlistQuestion: string;
-  rePairQuestion: string;
-  rePairDeclined: string;
-  qrIntro: string;
-  qrTimeout: string;
-  qrFailed: (message: string) => string;
-  pairingPending: string;
-  success: (path: string) => string;
+  allowlistSelected(allowedSenders: string): string;
+  allowlistEmpty: string;
+  pairingInstructions: string;
+  pairingBlock(authDir: string): string;
+  pairingTimeout: string;
+  pairingFailed(message: string): string;
+  successLinked: string;
+  successSessionSaved: string;
+  successRestricted(allowedSenders: string): string;
+  successPairingPending: string;
+  successReady: string;
   cancelled: string;
 };
 
-const COPY: Record<UiLanguage, WizardCopy> = {
-  en: {
-    intro: [
-      "EstaCoda WhatsApp setup",
-      "WhatsApp uses the unofficial Baileys transport. Meta may suspend accounts that use unofficial libraries.",
-      "Transport dependencies stay isolated under scripts/whatsapp-bridge/ and are not root runtime dependencies.",
-    ],
-    installQuestion: "WhatsApp bridge dependencies are missing. Run npm ci in scripts/whatsapp-bridge/ now? [y/N] ",
-    declinedInstall: "WhatsApp setup cancelled. Config was not changed.",
-    installFailed: (message) => `WhatsApp bridge dependency install failed: ${message}`,
-    modeQuestion: "Use a separate bot WhatsApp number or your personal/self-chat number? [bot/self] ",
-    invalidMode: "WhatsApp setup cancelled. Enter bot or self when you run estacoda whatsapp again.",
-    allowlistQuestion: "Allowed WhatsApp numbers or JIDs now, comma separated. Leave blank for pairing-pending authorization: ",
-    rePairQuestion: "Existing WhatsApp auth is missing or logged out. Clear this profile-local auth dir and re-pair? [y/N] ",
-    rePairDeclined: "WhatsApp re-pair cancelled. Config was not changed.",
-    qrIntro: "Scan the QR code in this terminal with WhatsApp. Pairing uses QR only.",
-    qrTimeout: "Pairing timed out - run estacoda whatsapp to try again.",
-    qrFailed: (message) => `WhatsApp QR pairing failed: ${message}`,
-    pairingPending: "No allowed users were added. WhatsApp is device-paired but user authorization is pairing-pending.",
-    success: (path) => `WhatsApp setup saved to ${path}`,
-    cancelled: "WhatsApp setup cancelled. Config was not changed.",
-  },
-  ar: {
-    intro: [
-      "إعداد WhatsApp في EstaCoda",
-      "يستخدم WhatsApp ناقل Baileys غير الرسمي. قد توقف Meta الحسابات التي تستخدم مكتبات غير رسمية.",
-      "تبقى الاعتمادات معزولة داخل scripts/whatsapp-bridge/ وليست ضمن اعتمادات وقت التشغيل الجذرية.",
-    ],
-    installQuestion: "اعتمادات جسر WhatsApp غير مثبتة. هل تريد تشغيل npm ci داخل scripts/whatsapp-bridge/ الآن؟ [y/N] ",
-    declinedInstall: "تم إلغاء إعداد WhatsApp. لم يتم تغيير config.",
-    installFailed: (message) => `فشل تثبيت اعتمادات جسر WhatsApp: ${message}`,
-    modeQuestion: "هل ستستخدم رقم WhatsApp منفصل للبوت أم رقمك الشخصي/self-chat؟ [bot/self] ",
-    invalidMode: "تم إلغاء إعداد WhatsApp. اكتب bot أو self عند تشغيل estacoda whatsapp مرة أخرى.",
-    allowlistQuestion: "أرقام WhatsApp أو JIDs المسموح بها الآن، مفصولة بفواصل. اتركها فارغة لحالة dmPolicy pairing: ",
-    rePairQuestion: "مصادقة WhatsApp الحالية مفقودة أو logged_out. هل تريد مسح authDir الخاص بهذا profile فقط وإعادة QR؟ [y/N] ",
-    rePairDeclined: "تم إلغاء إعادة ربط WhatsApp. لم يتم تغيير config.",
-    qrIntro: "امسح QR code في هذا الطرفية باستخدام WhatsApp. الربط يدعم QR فقط.",
-    qrTimeout: "Pairing timed out - run estacoda whatsapp to try again.",
-    qrFailed: (message) => `فشل ربط WhatsApp عبر QR: ${message}`,
-    pairingPending: "لم تتم إضافة allowedUsers. تم ربط جهاز WhatsApp لكن تفويض المستخدمين ما زال pairing-pending.",
-    success: (path) => `تم حفظ إعداد WhatsApp في ${path}`,
-    cancelled: "تم إلغاء إعداد WhatsApp. لم يتم تغيير config.",
-  },
-};
+function wizardCopy(locale: UiLanguage): ResolvedWhatsAppWizardCopy {
+  const token = (key: SetupCopyKey) => resolveSetupCopy(locale, key);
+  const format = (key: SetupCopyKey, values: Record<string, string>) => {
+    let value = token(key);
+    for (const [name, replacement] of Object.entries(values)) {
+      value = value.replaceAll(`{${name}}`, replacement);
+    }
+    return value;
+  };
+  return {
+    introBlock: token("whatsappWizard.intro.block"),
+    dependenciesMissingQuestion: token("whatsappWizard.dependencies.missingQuestion"),
+    dependenciesReady: token("whatsappWizard.dependencies.ready"),
+    dependenciesDeclined: token("whatsappWizard.dependencies.declined"),
+    dependenciesFailed: (message) => format("whatsappWizard.dependencies.failed", { message }),
+    repairQuestion: token("whatsappWizard.repair.question"),
+    repairDeclined: token("whatsappWizard.repair.declined"),
+    modeBlock: token("whatsappWizard.mode.block"),
+    modeInvalid: token("whatsappWizard.mode.invalid"),
+    modeSelectedDedicated: token("whatsappWizard.mode.selectedDedicated"),
+    modeSelectedPersonal: token("whatsappWizard.mode.selectedPersonal"),
+    dedicatedGuidance: token("whatsappWizard.dedicated.guidance"),
+    personalGuidance: token("whatsappWizard.personal.guidance"),
+    allowlistQuestion: token("whatsappWizard.allowlist.question"),
+    allowlistSelected: (allowedSenders) => format("whatsappWizard.allowlist.selected", { allowedSenders }),
+    allowlistEmpty: token("whatsappWizard.allowlist.empty"),
+    pairingInstructions: token("whatsappWizard.pairing.instructions"),
+    pairingBlock: (authDir) => format("whatsappWizard.pairing.block", { authDir }),
+    pairingTimeout: token("whatsappWizard.pairing.timeout"),
+    pairingFailed: (message) => format("whatsappWizard.pairing.failed", { message }),
+    successLinked: token("whatsappWizard.success.linked"),
+    successSessionSaved: token("whatsappWizard.success.sessionSaved"),
+    successRestricted: (allowedSenders) => format("whatsappWizard.success.restricted", { allowedSenders }),
+    successPairingPending: token("whatsappWizard.success.pairingPending"),
+    successReady: token("whatsappWizard.success.ready"),
+    cancelled: token("whatsappWizard.cancelled"),
+  };
+}
 
 export async function runWhatsAppWizard(options: WhatsAppWizardOptions): Promise<WhatsAppWizardResult> {
   const homeDir = resolveHomeDir(options.homeDir);
@@ -126,7 +132,7 @@ export async function runWhatsAppWizard(options: WhatsAppWizardOptions): Promise
   const paths = resolveProfileStateHome({ homeDir, profileId });
   const loaded = await loadRuntimeConfig({ workspaceRoot: options.workspaceRoot, homeDir, profileId });
   const locale = loaded.ui.language === "ar" ? "ar" : "en";
-  const copy = COPY[locale];
+  const copy = wizardCopy(locale);
   const lines: string[] = [];
   const write = (chunk: string) => {
     if (options.output !== undefined) {
@@ -137,7 +143,7 @@ export async function runWhatsAppWizard(options: WhatsAppWizardOptions): Promise
   };
   const say = (line = "") => lines.push(line);
 
-  for (const line of copy.intro) say(line);
+  say(copy.introBlock);
   say("");
 
   const deps = options.dependencies ?? {};
@@ -147,14 +153,14 @@ export async function runWhatsAppWizard(options: WhatsAppWizardOptions): Promise
   const pairDevice = deps.pairDevice ?? pairDeviceWithForegroundBridge;
   const dependencyStatus = await getDependencyStatus({ bridgeDir });
   if (dependencyStatus.missing.length > 0) {
-    if (!yes(await ask(options.prompt, copy.installQuestion))) {
-      say(copy.declinedInstall);
+    if (!yes(await ask(options.prompt, copy.dependenciesMissingQuestion))) {
+      say(copy.dependenciesDeclined);
       return finish(1, lines);
     }
     try {
       await installDependencies({ bridgeDir, logPath: join(paths.logsPath, "whatsapp-bridge-install.log") });
     } catch (error) {
-      say(copy.installFailed(installErrorMessage(error)));
+      say(copy.dependenciesFailed(installErrorMessage(error)));
       return finish(1, lines);
     }
   }
@@ -164,22 +170,35 @@ export async function runWhatsAppWizard(options: WhatsAppWizardOptions): Promise
     || loaded.config.channels?.whatsapp?.authDir !== undefined;
   const state = hasExistingWhatsAppConfig ? await detectPairingState(authDir) : "fresh";
   if (state !== "fresh") {
-    if (!yes(await ask(options.prompt, copy.rePairQuestion))) {
-      say(copy.rePairDeclined);
+    if (!yes(await ask(options.prompt, copy.repairQuestion))) {
+      say(copy.repairDeclined);
       return finish(1, lines);
     }
     await clearProfileLocalAuthDir(authDir, paths.gatewayStatePath);
   }
 
-  const mode = normalizeMode(await ask(options.prompt, copy.modeQuestion));
+  const mode = normalizeMode(await ask(options.prompt, copy.modeBlock));
   if (mode === undefined) {
-    say(copy.invalidMode);
+    say(copy.modeInvalid);
     return finish(1, lines);
   }
+  say(mode === "bot" ? copy.modeSelectedDedicated : copy.modeSelectedPersonal);
+  say(mode === "bot" ? copy.dedicatedGuidance : copy.personalGuidance);
+  say("");
+
   const allowedUsers = normalizeAllowedUsers(await ask(options.prompt, copy.allowlistQuestion));
   const dmPolicy: WhatsAppDmPolicy = allowedUsers.length > 0 ? "allowlist" : "pairing";
 
-  say(copy.qrIntro);
+  if (allowedUsers.length > 0) {
+    say(copy.allowlistSelected(allowedUsers.join(", ")));
+  } else {
+    say(copy.allowlistEmpty);
+  }
+  say(copy.dependenciesReady);
+  say("");
+  say(copy.pairingInstructions);
+  say("");
+  say(copy.pairingBlock(authDir));
   const qrOutput: string[] = [];
   const pairResult = await pairDevice({
     authDir,
@@ -193,7 +212,7 @@ export async function runWhatsAppWizard(options: WhatsAppWizardOptions): Promise
     },
   });
   if (!pairResult.ok) {
-    say(pairResult.reason === "timeout" ? copy.qrTimeout : copy.qrFailed(pairResult.message ?? "unknown error"));
+    say(pairResult.reason === "timeout" ? copy.pairingTimeout : copy.pairingFailed(pairResult.message ?? "unknown error"));
     return finish(1, lines);
   }
 
@@ -211,8 +230,16 @@ export async function runWhatsAppWizard(options: WhatsAppWizardOptions): Promise
       pairingMode: "qr",
     },
   });
-  if (dmPolicy === "pairing") say(copy.pairingPending);
-  say(copy.success(result.path));
+  void result;
+  say(copy.successLinked);
+  say(copy.successSessionSaved);
+  if (dmPolicy === "pairing") {
+    say(copy.successPairingPending);
+  } else {
+    say(copy.successRestricted(allowedUsers.join(", ")));
+  }
+  say("");
+  say(copy.successReady);
   return finish(0, lines, qrOutput);
 }
 
@@ -232,8 +259,9 @@ function yes(value: string | undefined): boolean {
 
 function normalizeMode(value: string | undefined): WhatsAppChannelMode | undefined {
   const normalized = (value ?? "").trim().toLowerCase();
-  if (normalized === "bot") return "bot";
+  if (normalized === "1" || normalized === "bot" || normalized === "dedicated") return "bot";
   if (normalized === "self" || normalized === "personal" || normalized === "self-chat") return "self-chat";
+  if (normalized === "2") return "self-chat";
   return undefined;
 }
 

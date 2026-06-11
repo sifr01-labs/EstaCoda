@@ -2927,19 +2927,25 @@ async function whatsapp(options: CliOptions, args: string[]): Promise<CliCommand
       output: "WhatsApp setup uses a single command: estacoda whatsapp",
     };
   }
-  const result = await runWhatsAppWizard({
-    workspaceRoot: options.workspaceRoot,
-    homeDir: options.homeDir,
-    profileId: options.profileId,
-    prompt: options.prompt,
-    output: options.output,
-    dependencies: options.whatsappWizardDependencies,
-  });
-  return {
-    handled: result.handled,
-    exitCode: result.exitCode,
-    output: result.output,
-  };
+  const prompt = options.prompt ?? createReadlinePrompt();
+  const closePrompt = options.prompt === undefined;
+  try {
+    const result = await runWhatsAppWizard({
+      workspaceRoot: options.workspaceRoot,
+      homeDir: options.homeDir,
+      profileId: options.profileId,
+      prompt,
+      output: options.output,
+      dependencies: options.whatsappWizardDependencies,
+    });
+    return {
+      handled: result.handled,
+      exitCode: result.exitCode,
+      output: result.output,
+    };
+  } finally {
+    if (closePrompt) prompt.close?.();
+  }
 }
 
 async function telegram(options: CliOptions, args: string[]): Promise<CliCommandResult> {
