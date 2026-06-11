@@ -32,7 +32,7 @@ import {
 } from "../providers/provider-metadata.js";
 import type { MCPServerTransport } from "../mcp/mcp-client.js";
 import type { SkillAutonomy } from "../skills/skill-learning.js";
-import type { ToolRiskClass } from "../contracts/tool.js";
+import type { ToolRiskClass, ToolsetName } from "../contracts/tool.js";
 import { normalizeSecurityApprovalMode } from "../security/security-policy-factory.js";
 import type { SecurityApprovalMode, SecurityAssessorConfig } from "../contracts/security.js";
 import {
@@ -48,6 +48,8 @@ import { coerceFiniteNumber, coerceNonNegativeInteger, coercePositiveInteger } f
 import { redactObject } from "../utils/redaction.js";
 import type { WebsitePolicyConfig } from "../browser/website-policy.js";
 import { normalizeMemoryConfig, type MemoryConfig, type MemoryConfigInput } from "./memory-config.js";
+import type { DelegationConfig } from "../contracts/delegation.js";
+import { DEFAULT_DELEGATION_CONFIG } from "./delegation-defaults.js";
 import {
   WHATSAPP_DEFAULT_REPLY_PREFIX,
   normalizeWhatsAppAllowlist,
@@ -94,6 +96,11 @@ export type ExternalMemoryConfig = {
     path?: string;
     maxEntries: number;
   };
+};
+
+export type DelegationConfigInput = Partial<Omit<DelegationConfig, "diagnostics" | "childRuntime">> & {
+  diagnostics?: Partial<DelegationConfig["diagnostics"]>;
+  childRuntime?: Partial<DelegationConfig["childRuntime"]>;
 };
 
 export function shouldPersistProviderBaseUrl(
@@ -372,6 +379,7 @@ export type EstaCodaConfig = {
   compression?: Partial<SessionCompressionConfig>;
   externalMemory?: Partial<ExternalMemoryConfig>;
   external_memory?: Partial<ExternalMemoryConfig>;
+  delegation?: DelegationConfigInput;
   browser?: {
     backend?: BrowserBackendKind;
     cloudProvider?: BrowserCloudProviderKind;
@@ -524,6 +532,7 @@ export type LoadedRuntimeConfig = {
   compression: SessionCompressionConfig;
   memory: MemoryConfig;
   externalMemory: ExternalMemoryConfig;
+  delegation: DelegationConfig;
   browser: {
     backend: BrowserBackendKind;
     cloudProvider?: BrowserCloudProviderKind;
@@ -912,6 +921,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
     compression: normalizeSessionCompressionConfig(config.compression),
     memory: normalizeMemoryConfig(config.memory),
     externalMemory: normalizeExternalMemoryConfig(config.externalMemory ?? config.external_memory),
+    delegation: normalizeDelegationConfig(config.delegation),
     browser: normalizeBrowserConfig(config.browser),
     imageGen: normalizeImageGenerationConfig(config.imageGen ?? config.image_gen),
     tts: normalizeTtsConfig(config.tts),
@@ -1009,6 +1019,10 @@ function patchConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
     externalMemory: {
       ...(merged.externalMemory ?? merged.external_memory ?? {}),
       ...(config.externalMemory ?? config.external_memory ?? {})
+    },
+    delegation: {
+      ...(merged.delegation ?? {}),
+      ...(config.delegation ?? {})
     },
     browser: {
       ...(merged.browser ?? {}),
@@ -1530,6 +1544,108 @@ export function normalizeSessionCompressionConfig(
     ...(summaryModelContextLength === undefined ? {} : { summaryModelContextLength }),
     experimental
   };
+}
+
+const DELEGATION_RISK_CLASSES = new Set<ToolRiskClass>([
+  "read-only-local",
+  "read-only-network",
+  "workspace-write",
+  "external-side-effect",
+  "credential-access",
+  "destructive-local",
+  "shared-state-mutation",
+  "spend-money",
+  "sandbox-escape"
+]);
+
+export function normalizeDelegationConfig(
+  value: DelegationConfigInput | undefined
+): DelegationConfig {
+  const defaults = DEFAULT_DELEGATION_CONFIG;
+  const diagnostics = isPlainRecord(value?.diagnostics) ? value.diagnostics : {};
+  const childRuntime = isPlainRecord(value?.childRuntime) ? value.childRuntime : {};
+
+  return {
+    maxSpawnDepth: coercePositiveInteger(value?.maxSpawnDepth, { default: defaults.maxSpawnDepth }),
+    maxConcurrentChildren: coercePositiveInteger(value?.maxConcurrentChildren, { default: defaults.maxConcurrentChildren }),
+    maxDelegateCallsPerTurn: coercePositiveInteger(value?.maxDelegateCallsPerTurn, { default: defaults.maxDelegateCallsPerTurn }),
+    maxBatchTasks: coercePositiveInteger(value?.maxBatchTasks, { default: defaults.maxBatchTasks }),
+    childTimeoutSeconds: coerceNonNegativeInteger(value?.childTimeoutSeconds, {
+      default: defaults.childTimeoutSeconds,
+      min: 30
+    }),
+    heartbeatSeconds: coerceNonNegativeInteger(value?.heartbeatSeconds, {
+      default: defaults.heartbeatSeconds,
+      min: 5
+    }),
+    heartbeatStaleCyclesIdle: coercePositiveInteger(value?.heartbeatStaleCyclesIdle, {
+      default: defaults.heartbeatStaleCyclesIdle
+    }),
+    heartbeatStaleCyclesInTool: coercePositiveInteger(value?.heartbeatStaleCyclesInTool, {
+      default: defaults.heartbeatStaleCyclesInTool
+    }),
+    recoverJsonStringTasks: value?.recoverJsonStringTasks !== false,
+    diagnostics: {
+      enabled: diagnostics.enabled === undefined ? defaults.diagnostics.enabled : diagnostics.enabled === true,
+      includePromptPreview: diagnostics.includePromptPreview === true
+    },
+    defaultAllowedRiskClasses: normalizeRiskClassArray(
+      value?.defaultAllowedRiskClasses,
+      defaults.defaultAllowedRiskClasses
+    ),
+    defaultExcludedToolsets: normalizeToolsetArray(
+      value?.defaultExcludedToolsets,
+      defaults.defaultExcludedToolsets
+    ),
+    defaultAllowedToolsets: normalizeToolsetArray(
+      value?.defaultAllowedToolsets,
+      defaults.defaultAllowedToolsets
+    ),
+    blockedToolNames: normalizeStringArray(value?.blockedToolNames, defaults.blockedToolNames),
+    blockedToolPrefixes: normalizeStringArray(value?.blockedToolPrefixes, defaults.blockedToolPrefixes),
+    childRuntime: {
+      memoryRecall: childRuntime.memoryRecall === "bounded" ? "bounded" : defaults.childRuntime.memoryRecall,
+      skillLearning: defaults.childRuntime.skillLearning,
+      sessionCompression: childRuntime.sessionCompression === "enabled" ? "enabled" : defaults.childRuntime.sessionCompression,
+      projectContext: childRuntime.projectContext === "disabled" ? "disabled" : defaults.childRuntime.projectContext
+    }
+  };
+}
+
+function normalizeRiskClassArray(
+  value: readonly unknown[] | undefined,
+  fallback: readonly ToolRiskClass[]
+): ToolRiskClass[] {
+  if (!Array.isArray(value)) {
+    return [...fallback];
+  }
+
+  const normalized = value.filter((item): item is ToolRiskClass =>
+    typeof item === "string" && DELEGATION_RISK_CLASSES.has(item as ToolRiskClass)
+  );
+  return normalized.length === 0 ? [...fallback] : [...new Set(normalized)];
+}
+
+function normalizeToolsetArray(
+  value: readonly unknown[] | undefined,
+  fallback: readonly ToolsetName[]
+): ToolsetName[] {
+  return normalizeStringArray(value, fallback) as ToolsetName[];
+}
+
+function normalizeStringArray(
+  value: readonly unknown[] | undefined,
+  fallback: readonly string[]
+): string[] {
+  if (!Array.isArray(value)) {
+    return [...fallback];
+  }
+
+  const normalized = value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+  return [...new Set(normalized)];
 }
 
 export function normalizeExternalMemoryConfig(

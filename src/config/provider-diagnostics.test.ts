@@ -5,6 +5,7 @@ import { ProviderRegistry } from "../providers/provider-registry.js";
 import { createOpenAICompatibleProvider, type FetchLike } from "../providers/openai-compatible-provider.js";
 import { diagnoseProviderConfig, diagnoseProviderLive } from "./provider-diagnostics.js";
 import { normalizeMemoryConfig } from "./memory-config.js";
+import { normalizeDelegationConfig } from "./runtime-config.js";
 
 const modelProfile: ModelProfile = {
   id: "gpt-5",
@@ -78,6 +79,7 @@ function loadedConfig(input: {
       maxChars: 2500,
       mirrorWrites: false
     },
+    delegation: normalizeDelegationConfig(undefined),
     browser: { backend: "unconfigured", autoLaunch: false, supervised: false },
     imageGen: { provider: "fal", model: "test", useGateway: false },
     tts: { provider: "edge", speed: 1 },

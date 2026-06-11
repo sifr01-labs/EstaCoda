@@ -5,6 +5,7 @@ import type { ToolsetName } from "../contracts/tool.js";
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
 import { resolveTokens } from "../theme/token-resolver.js";
 import { normalizeMemoryConfig } from "../config/memory-config.js";
+import { normalizeDelegationConfig } from "../config/runtime-config.js";
 
 type FingerprintOptions = Parameters<typeof computeRuntimeFingerprint>[1];
 
@@ -38,6 +39,7 @@ function fakeLoadedRuntimeConfig(overrides?: Partial<LoadedRuntimeConfig>): Load
       maxChars: 2500,
       mirrorWrites: false,
     },
+    delegation: normalizeDelegationConfig(undefined),
     browser: { backend: "unconfigured", autoLaunch: false, supervised: false },
     imageGen: { provider: "fal", model: "test", useGateway: false },
     tts: { provider: "edge", speed: 1.0 },
@@ -186,6 +188,25 @@ describe("computeRuntimeFingerprint", () => {
       opts
     );
     expect(fp2.modelId).toBe("gpt-5");
+    expect(fp1).not.toEqual(fp2);
+  });
+
+  it("delegation config changes fingerprint", () => {
+    const base = fakeLoadedRuntimeConfig();
+    const opts = fakeOptions();
+    const fp1 = computeRuntimeFingerprint(base, opts);
+    const fp2 = computeRuntimeFingerprint(
+      fakeLoadedRuntimeConfig({
+        delegation: normalizeDelegationConfig({
+          maxConcurrentChildren: base.delegation.maxConcurrentChildren + 1
+        })
+      }),
+      opts
+    );
+
+    expect(fp1.delegationConfigHash).toBeDefined();
+    expect(fp2.delegationConfigHash).toBeDefined();
+    expect(fp1.delegationConfigHash).not.toBe(fp2.delegationConfigHash);
     expect(fp1).not.toEqual(fp2);
   });
 

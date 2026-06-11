@@ -42,6 +42,7 @@ export type RuntimeFingerprint = {
   compressionConfigHash: string;
   memoryRetrievalConfigHash: string;
   externalMemoryConfigHash: string;
+  delegationConfigHash: string;
   disableCronTools: boolean;
 
   // ── Skills ──
@@ -127,6 +128,7 @@ export function computeRuntimeFingerprint(
     compressionConfigHash: stableJsonHash(config.compression),
     memoryRetrievalConfigHash: stableJsonHash(config.memory),
     externalMemoryConfigHash: stableJsonHash(config.externalMemory),
+    delegationConfigHash: stableJsonHash(config.delegation),
     disableCronTools: options.disableCronTools,
     skillAutonomy: config.skills.autonomy,
     skillConfigHash: stableJsonHash(config.skills.config),

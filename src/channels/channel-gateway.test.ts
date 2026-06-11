@@ -2357,6 +2357,7 @@ describe("ChannelGateway commands", () => {
         compressionConfigHash: "hash",
         memoryRetrievalConfigHash: "hash",
         externalMemoryConfigHash: "hash",
+        delegationConfigHash: "hash",
         disableCronTools: false,
         skillAutonomy: "off",
         skillConfigHash: "hash",

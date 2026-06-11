@@ -4,6 +4,7 @@ import { dirname, join, relative, sep } from "node:path";
 import { tmpdir } from "node:os";
 import {
   loadRuntimeConfig,
+  normalizeDelegationConfig,
   normalizeAuxiliaryModels,
   normalizeExternalMemoryConfig,
   normalizeModelFallbacks,
@@ -14,7 +15,9 @@ import {
   setupAuxiliaryModelConfig,
   setupVoiceConfig
 } from "./runtime-config.js";
+import { DEFAULT_DELEGATION_CONFIG } from "./delegation-defaults.js";
 import { resolveProfileStateHome } from "./profile-home.js";
+import type { SessionEvent } from "../contracts/session.js";
 
 function profileConfigPath(homeDir: string): string {
   return resolveProfileStateHome({ homeDir, profileId: "default" }).configPath;
@@ -203,6 +206,123 @@ describe("normalizeSessionCompressionConfig", () => {
       protectFirstN: 3,
       protectLastN: 20
     });
+  });
+});
+
+describe("normalizeDelegationConfig", () => {
+  it("normalizes defaults when omitted", () => {
+    expect(normalizeDelegationConfig(undefined)).toEqual(DEFAULT_DELEGATION_CONFIG);
+  });
+
+  it("applies numeric floors", () => {
+    const normalized = normalizeDelegationConfig({
+      maxSpawnDepth: 0,
+      maxConcurrentChildren: 0,
+      childTimeoutSeconds: 1,
+      heartbeatSeconds: 1,
+      heartbeatStaleCyclesIdle: 0,
+      heartbeatStaleCyclesInTool: 0,
+      maxDelegateCallsPerTurn: 0,
+      maxBatchTasks: 0
+    });
+
+    expect(normalized.maxSpawnDepth).toBe(1);
+    expect(normalized.maxConcurrentChildren).toBe(1);
+    expect(normalized.childTimeoutSeconds).toBe(30);
+    expect(normalized.heartbeatSeconds).toBe(5);
+    expect(normalized.heartbeatStaleCyclesIdle).toBe(1);
+    expect(normalized.heartbeatStaleCyclesInTool).toBe(1);
+    expect(normalized.maxDelegateCallsPerTurn).toBe(1);
+    expect(normalized.maxBatchTasks).toBe(1);
+  });
+
+  it("defaults JSON task recovery and child risk/toolset boundaries", () => {
+    const normalized = normalizeDelegationConfig({});
+
+    expect(normalized.recoverJsonStringTasks).toBe(true);
+    expect(normalized.defaultAllowedRiskClasses).toEqual(["read-only-local", "read-only-network"]);
+    expect(normalized.defaultExcludedToolsets).toEqual(["browser", "media", "mcp"]);
+  });
+
+  it("applies child runtime suppression defaults when omitted", () => {
+    expect(normalizeDelegationConfig({ childRuntime: {} }).childRuntime).toEqual({
+      memoryRecall: "disabled",
+      skillLearning: "disabled",
+      sessionCompression: "disabled",
+      projectContext: "bounded"
+    });
+  });
+
+  it("keeps prompt diagnostics disabled unless explicitly enabled", () => {
+    expect(normalizeDelegationConfig({}).diagnostics).toEqual({
+      enabled: true,
+      includePromptPreview: false
+    });
+    expect(normalizeDelegationConfig({
+      diagnostics: {
+        includePromptPreview: true
+      }
+    }).diagnostics.includePromptPreview).toBe(true);
+  });
+
+  it("ignores unknown delegation config keys during config loading", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      delegation: {
+        unknownKey: true,
+        maxSpawnDepth: 2
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.delegation.maxSpawnDepth).toBe(2);
+    expect(loaded.delegation.maxConcurrentChildren).toBe(3);
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("keeps delegation session events backward-compatible", () => {
+    const legacyEvents: SessionEvent[] = [
+      {
+        kind: "delegation-started",
+        childSessionId: "child-1",
+        task: "Inspect files",
+        allowedToolsets: []
+      },
+      {
+        kind: "delegation-finished",
+        childSessionId: "child-1",
+        summary: "Done",
+        status: "completed"
+      }
+    ];
+    const extendedEvents: SessionEvent[] = [
+      {
+        kind: "delegation-started",
+        childSessionId: "child-2",
+        task: "Inspect files",
+        allowedToolsets: [],
+        role: "leaf",
+        depth: 1,
+        taskIndex: 0,
+        batchId: "batch-1"
+      },
+      {
+        kind: "delegation-finished",
+        childSessionId: "child-2",
+        summary: "Timed out",
+        status: "failed",
+        durationMs: 600_000,
+        error: "timeout",
+        taskIndex: 0,
+        batchId: "batch-1"
+      }
+    ];
+
+    expect(legacyEvents).toHaveLength(2);
+    expect(extendedEvents).toHaveLength(2);
   });
 });
 

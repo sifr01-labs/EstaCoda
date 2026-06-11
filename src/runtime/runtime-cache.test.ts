@@ -71,6 +71,7 @@ function fakeFingerprint(overrides?: Partial<RuntimeFingerprint>): RuntimeFinger
     compressionConfigHash: "0000000000000000",
     memoryRetrievalConfigHash: "0000000000000000",
     externalMemoryConfigHash: "0000000000000000",
+    delegationConfigHash: "0000000000000000",
     disableCronTools: false,
     skillAutonomy: "suggest",
     skillConfigHash: "0000000000000000",

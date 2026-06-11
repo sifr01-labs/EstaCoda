@@ -16,6 +16,7 @@ import type {
   CompiledSkillPlaybook
 } from "./skill.js";
 import type { FailureRecord } from "./failure.js";
+import type { DelegateRole } from "./delegation.js";
 import type {
   ModelProfile,
   ProviderApiMode,
@@ -257,12 +258,20 @@ export type SessionEvent =
       task: string;
       allowedToolsets: string[];
       allowedTools?: string[];
+      role?: DelegateRole;
+      depth?: number;
+      taskIndex?: number;
+      batchId?: string;
     }
   | {
       kind: "delegation-finished";
       childSessionId: string;
       summary: string;
       status: "completed" | "blocked" | "failed";
+      durationMs?: number;
+      error?: string;
+      taskIndex?: number;
+      batchId?: string;
     }
   | {
       kind: "tool-called";
