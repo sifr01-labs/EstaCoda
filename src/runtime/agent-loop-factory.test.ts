@@ -1,9 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
-import { MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH } from "../contracts/delegation.js";
-import type { ModelProfile, ResolvedModelRoute } from "../contracts/provider.js";
+import {
+  MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH,
+  MAX_DELEGATE_PROVIDER_OVERRIDE_ID_LENGTH
+} from "../contracts/delegation.js";
+import type { ModelProfile, ProviderId, ResolvedModelRoute } from "../contracts/provider.js";
 import type { SessionRecord } from "../contracts/session.js";
 import type { ToolDefinition, ToolRiskClass, ToolsetName } from "../contracts/tool.js";
+import { ProviderRegistry } from "../providers/provider-registry.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { ToolRegistry } from "../tools/tool-registry.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
@@ -298,13 +302,103 @@ describe("DefaultChildAgentLoopFactory", () => {
     await expect(db.getSession("child-overlong-model")).resolves.toBeUndefined();
   });
 
-  it("rejects cross-provider child model overrides before building a child session", async () => {
+  it("applies reviewed cross-provider child model overrides with target provider route data", async () => {
+    const db = new InMemorySessionDB();
+    const built = fakeBuiltSession();
+    const builder = fakeBuilder(built);
+    const registry = new ProviderRegistry();
+    registry.register({
+      id: "deepseek",
+      name: "DeepSeek",
+      endpoint: {
+        baseUrl: "https://api.deepseek.com/v1",
+        apiKey: { kind: "env", name: "DEEPSEEK_API_KEY" }
+      },
+      health: () => ({ available: true }),
+      listModels: async () => [modelProfile("deepseek", "deepseek-chat")],
+      complete: async () => ({ ok: true, content: "", provider: "deepseek", model: "deepseek-chat" })
+    });
+    const factory = new DefaultChildAgentLoopFactory({
+      builder: builder as never,
+      parentRoutes: parentRoutes(),
+      providerRegistry: registry,
+      providerConfigs: {
+        deepseek: {
+          baseUrl: "https://configured.deepseek.example/v1",
+          apiKeyEnv: "DEEPSEEK_API_KEY",
+          apiMode: "custom_openai_compatible",
+          authMethod: "api_key",
+          enableNetwork: true
+        }
+      },
+      sessionDb: db,
+      trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
+      responseLabel: "EstaCoda",
+      workspaceRoot: "/workspace",
+      id: () => "child-cross-provider"
+    });
+    const previous = process.env.DEEPSEEK_API_KEY;
+    process.env.DEEPSEEK_API_KEY = "secret-route-value";
+
+    try {
+      const child = await factory.createChild({
+        parentSessionId: "parent-1",
+        profileId: "default",
+        task: "Use another provider",
+        trustedWorkspace: true,
+        modelOverride: { provider: "deepseek", model: "deepseek-chat" },
+        parentVisibleTools: readOnlyParentTools()
+      });
+      const buildInput = builder.buildSession.mock.calls[0]?.[0] as {
+        providerRoutes?: {
+          model: ModelProfile;
+          primaryModelRoute?: ResolvedModelRoute;
+          modelFallbackRoutes?: ResolvedModelRoute[];
+          providerPreferences?: { providerOrder?: string[] };
+        };
+      };
+      const session = await db.getSession("child-cross-provider");
+
+      expect(buildInput.providerRoutes?.model).toMatchObject({
+        provider: "deepseek",
+        id: "deepseek-chat"
+      });
+      expect(buildInput.providerRoutes?.primaryModelRoute).toMatchObject({
+        provider: "deepseek",
+        id: "deepseek-chat",
+        baseUrl: "https://configured.deepseek.example/v1",
+        apiKeyEnv: "DEEPSEEK_API_KEY",
+        apiMode: "custom_openai_compatible",
+        authMethod: "api_key"
+      });
+      expect(buildInput.providerRoutes?.modelFallbackRoutes).toEqual([]);
+      expect(buildInput.providerRoutes?.providerPreferences?.providerOrder).toEqual(["deepseek"]);
+      expect(child.modelOverride).toEqual({
+        requested: true,
+        status: "applied",
+        provider: "deepseek",
+        model: "deepseek-chat",
+        fallbackBehavior: "disabled-for-override"
+      });
+      expect(session?.metadata?.modelOverride).toEqual(child.modelOverride);
+      expect(JSON.stringify(session?.metadata?.modelOverride)).not.toContain("secret-route-value");
+    } finally {
+      if (previous === undefined) {
+        delete process.env.DEEPSEEK_API_KEY;
+      } else {
+        process.env.DEEPSEEK_API_KEY = previous;
+      }
+    }
+  });
+
+  it("rejects unknown cross-provider overrides before building a child session", async () => {
     const db = new InMemorySessionDB();
     const built = fakeBuiltSession();
     const builder = fakeBuilder(built);
     const factory = new DefaultChildAgentLoopFactory({
       builder: builder as never,
       parentRoutes: parentRoutes(),
+      providerRegistry: new ProviderRegistry(),
       sessionDb: db,
       trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
       responseLabel: "EstaCoda",
@@ -325,11 +419,292 @@ describe("DefaultChildAgentLoopFactory", () => {
         status: "rejected",
         provider: "openai",
         model: "gpt-test",
-        reason: "cross-provider-unsupported"
+        reason: "unknown-provider"
       }
     });
     expect(builder.buildSession).not.toHaveBeenCalled();
     await expect(db.getSession("child-cross-provider")).resolves.toBeUndefined();
+  });
+
+  it("rejects unknown cross-provider models before building a child session", async () => {
+    const db = new InMemorySessionDB();
+    const built = fakeBuiltSession();
+    const builder = fakeBuilder(built);
+    const registry = new ProviderRegistry();
+    registry.register({
+      id: "deepseek",
+      name: "DeepSeek",
+      endpoint: {
+        baseUrl: "https://api.deepseek.com/v1",
+        apiKey: { kind: "env", name: "DEEPSEEK_API_KEY" }
+      },
+      health: () => ({ available: true }),
+      listModels: async () => [modelProfile("deepseek", "deepseek-chat")],
+      complete: async () => ({ ok: true, content: "", provider: "deepseek", model: "deepseek-chat" })
+    });
+    const factory = new DefaultChildAgentLoopFactory({
+      builder: builder as never,
+      parentRoutes: parentRoutes(),
+      providerRegistry: registry,
+      providerConfigs: {
+        deepseek: {
+          baseUrl: "https://api.deepseek.com/v1",
+          apiKeyEnv: "DEEPSEEK_API_KEY",
+          enableNetwork: true
+        }
+      },
+      sessionDb: db,
+      trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
+      responseLabel: "EstaCoda",
+      workspaceRoot: "/workspace",
+      id: () => "child-unknown-model"
+    });
+
+    await expect(factory.createChild({
+      parentSessionId: "parent-1",
+      profileId: "default",
+      task: "Use another provider",
+      trustedWorkspace: true,
+      modelOverride: { provider: "deepseek", model: "not-registered" },
+      parentVisibleTools: readOnlyParentTools()
+    })).rejects.toMatchObject({
+      metadata: {
+        requested: true,
+        status: "rejected",
+        provider: "deepseek",
+        model: "not-registered",
+        reason: "unknown-model"
+      }
+    });
+    expect(builder.buildSession).not.toHaveBeenCalled();
+    await expect(db.getSession("child-unknown-model")).resolves.toBeUndefined();
+  });
+
+  it("rejects cross-provider model overrides with missing credentials before building a child session", async () => {
+    const db = new InMemorySessionDB();
+    const built = fakeBuiltSession();
+    const builder = fakeBuilder(built);
+    const registry = new ProviderRegistry();
+    registry.register({
+      id: "deepseek",
+      name: "DeepSeek",
+      endpoint: {
+        baseUrl: "https://api.deepseek.com/v1",
+        apiKey: { kind: "env", name: "DEEPSEEK_MISSING_API_KEY" }
+      },
+      health: () => ({ available: true }),
+      listModels: async () => [modelProfile("deepseek", "deepseek-chat")],
+      complete: async () => ({ ok: true, content: "", provider: "deepseek", model: "deepseek-chat" })
+    });
+    const factory = new DefaultChildAgentLoopFactory({
+      builder: builder as never,
+      parentRoutes: parentRoutes(),
+      providerRegistry: registry,
+      providerConfigs: {
+        deepseek: {
+          baseUrl: "https://api.deepseek.com/v1",
+          apiKeyEnv: "DEEPSEEK_MISSING_API_KEY",
+          enableNetwork: true
+        }
+      },
+      sessionDb: db,
+      trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
+      responseLabel: "EstaCoda",
+      workspaceRoot: "/workspace",
+      id: () => "child-missing-provider-key"
+    });
+    delete process.env.DEEPSEEK_MISSING_API_KEY;
+
+    await expect(factory.createChild({
+      parentSessionId: "parent-1",
+      profileId: "default",
+      task: "Use another provider",
+      trustedWorkspace: true,
+      modelOverride: { provider: "deepseek", model: "deepseek-chat" },
+      parentVisibleTools: readOnlyParentTools()
+    })).rejects.toMatchObject({
+      metadata: {
+        requested: true,
+        status: "rejected",
+        provider: "deepseek",
+        model: "deepseek-chat",
+        reason: "missing-credentials"
+      }
+    });
+    expect(builder.buildSession).not.toHaveBeenCalled();
+    await expect(db.getSession("child-missing-provider-key")).resolves.toBeUndefined();
+  });
+
+  it("allows cross-provider authMethod none without requiring credentials", async () => {
+    const db = new InMemorySessionDB();
+    const built = fakeBuiltSession();
+    const builder = fakeBuilder(built);
+    const registry = new ProviderRegistry();
+    registry.register({
+      id: "custom-local",
+      name: "Custom Local",
+      endpoint: {
+        baseUrl: "http://localhost:9000/v1",
+        apiKey: { kind: "none" }
+      },
+      health: () => ({ available: true }),
+      listModels: async () => [modelProfile("custom-local", "local-no-auth-model")],
+      complete: async () => ({ ok: true, content: "", provider: "custom-local", model: "local-no-auth-model" })
+    });
+    const factory = new DefaultChildAgentLoopFactory({
+      builder: builder as never,
+      parentRoutes: parentRoutes(),
+      providerRegistry: registry,
+      providerConfigs: {
+        "custom-local": {
+          baseUrl: "http://localhost:9000/v1",
+          apiMode: "custom_openai_compatible",
+          authMethod: "none",
+          enableNetwork: true
+        }
+      },
+      sessionDb: db,
+      trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
+      responseLabel: "EstaCoda",
+      workspaceRoot: "/workspace",
+      id: () => "child-no-auth-provider"
+    });
+
+    const child = await factory.createChild({
+      parentSessionId: "parent-1",
+      profileId: "default",
+      task: "Use no-auth provider",
+      trustedWorkspace: true,
+      modelOverride: { provider: "custom-local", model: "local-no-auth-model" },
+      parentVisibleTools: readOnlyParentTools()
+    });
+    const buildInput = builder.buildSession.mock.calls[0]?.[0] as {
+      providerRoutes?: {
+        primaryModelRoute?: ResolvedModelRoute;
+        providerPreferences?: { providerOrder?: string[] };
+      };
+    };
+
+    expect(child.modelOverride).toMatchObject({
+      requested: true,
+      status: "applied",
+      provider: "custom-local",
+      model: "local-no-auth-model"
+    });
+    expect(buildInput.providerRoutes?.primaryModelRoute).toMatchObject({
+      provider: "custom-local",
+      id: "local-no-auth-model",
+      apiMode: "custom_openai_compatible",
+      authMethod: "none",
+      baseUrl: "http://localhost:9000/v1"
+    });
+    expect(buildInput.providerRoutes?.primaryModelRoute?.apiKeyEnv).toBeUndefined();
+    expect(buildInput.providerRoutes?.providerPreferences?.providerOrder).toEqual(["custom-local"]);
+  });
+
+  it("rejects cross-provider overrides when target provider network execution is disabled", async () => {
+    const db = new InMemorySessionDB();
+    const built = fakeBuiltSession();
+    const builder = fakeBuilder(built);
+    const registry = new ProviderRegistry();
+    registry.register({
+      id: "deepseek",
+      name: "DeepSeek",
+      endpoint: {
+        baseUrl: "https://api.deepseek.com/v1",
+        apiKey: { kind: "env", name: "DEEPSEEK_API_KEY" }
+      },
+      health: () => ({ available: true }),
+      listModels: async () => [modelProfile("deepseek", "deepseek-chat")],
+      complete: async () => ({ ok: true, content: "", provider: "deepseek", model: "deepseek-chat" })
+    });
+    const factory = new DefaultChildAgentLoopFactory({
+      builder: builder as never,
+      parentRoutes: parentRoutes(),
+      providerRegistry: registry,
+      providerConfigs: {
+        deepseek: {
+          baseUrl: "https://api.deepseek.com/v1",
+          apiKeyEnv: "DEEPSEEK_API_KEY",
+          enableNetwork: false
+        }
+      },
+      sessionDb: db,
+      trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
+      responseLabel: "EstaCoda",
+      workspaceRoot: "/workspace",
+      id: () => "child-network-disabled"
+    });
+    const previous = process.env.DEEPSEEK_API_KEY;
+    process.env.DEEPSEEK_API_KEY = "secret-route-value";
+
+    try {
+      await expect(factory.createChild({
+        parentSessionId: "parent-1",
+        profileId: "default",
+        task: "Use another provider",
+        trustedWorkspace: true,
+        modelOverride: { provider: "deepseek", model: "deepseek-chat" },
+        parentVisibleTools: readOnlyParentTools()
+      })).rejects.toMatchObject({
+        metadata: {
+          requested: true,
+          status: "rejected",
+          provider: "deepseek",
+          model: "deepseek-chat",
+          reason: "provider-network-disabled"
+        }
+      });
+      expect(builder.buildSession).not.toHaveBeenCalled();
+      await expect(db.getSession("child-network-disabled")).resolves.toBeUndefined();
+    } finally {
+      if (previous === undefined) {
+        delete process.env.DEEPSEEK_API_KEY;
+      } else {
+        process.env.DEEPSEEK_API_KEY = previous;
+      }
+    }
+  });
+
+  it("rejects overlong provider override ids without exposing the full value", async () => {
+    const db = new InMemorySessionDB();
+    const built = fakeBuiltSession();
+    const builder = fakeBuilder(built);
+    const factory = new DefaultChildAgentLoopFactory({
+      builder: builder as never,
+      parentRoutes: parentRoutes(),
+      sessionDb: db,
+      trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
+      responseLabel: "EstaCoda",
+      workspaceRoot: "/workspace",
+      id: () => "child-overlong-provider"
+    });
+    const overlongProvider = `provider-${"x".repeat(MAX_DELEGATE_PROVIDER_OVERRIDE_ID_LENGTH + 1)}`;
+    let error: unknown;
+
+    try {
+      await factory.createChild({
+        parentSessionId: "parent-1",
+        profileId: "default",
+        task: "Use an overlong provider id",
+        trustedWorkspace: true,
+        modelOverride: { provider: overlongProvider, model: "child-model" },
+        parentVisibleTools: readOnlyParentTools()
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toMatchObject({
+      metadata: {
+        requested: true,
+        status: "rejected",
+        reason: "invalid-model-override"
+      }
+    });
+    expect(builder.buildSession).not.toHaveBeenCalled();
+    expect(JSON.stringify((error as { metadata?: unknown }).metadata)).not.toContain(overlongProvider);
+    await expect(db.getSession("child-overlong-provider")).resolves.toBeUndefined();
   });
 
   it("uses a non-interactive fail-closed child approval policy", async () => {
@@ -447,14 +822,7 @@ function parentToolsWithDelegate() {
 }
 
 function parentRoutes() {
-  const model: ModelProfile = {
-    id: "parent-model",
-    provider: "local",
-    contextWindowTokens: 128_000,
-    supportsTools: true,
-    supportsVision: false,
-    supportsStructuredOutput: true
-  };
+  const model = modelProfile("local", "parent-model");
   const mainRoute: ResolvedModelRoute = {
     provider: "local",
     id: model.id,
@@ -472,6 +840,17 @@ function parentRoutes() {
       }
     ],
     providerPreferences: { providerOrder: ["local"] }
+  };
+}
+
+function modelProfile(provider: ProviderId, id: string): ModelProfile {
+  return {
+    id,
+    provider,
+    contextWindowTokens: 128_000,
+    supportsTools: true,
+    supportsVision: false,
+    supportsStructuredOutput: true
   };
 }
 

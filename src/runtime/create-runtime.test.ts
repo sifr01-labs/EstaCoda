@@ -13,7 +13,7 @@ import { WorkspaceApprovalController } from "../security/workspace-approval-cont
 import { ProviderRegistry } from "../providers/provider-registry.js";
 import type { CdpFetchLike, CdpWebSocketEvent, CdpWebSocketLike } from "../browser/cdp-client.js";
 import type { BrowserBackend } from "../contracts/browser.js";
-import type { ModelProfile, ProviderAdapter, ProviderRequest } from "../contracts/provider.js";
+import type { ModelProfile, ProviderAdapter, ProviderCompletionOptions, ProviderRequest } from "../contracts/provider.js";
 import type { SecurityApprovalMode, SecurityAssessment, SecurityPolicy, SecurityRequest } from "../contracts/security.js";
 import type { SessionToolContext } from "../contracts/tool-context.js";
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
@@ -2679,6 +2679,15 @@ describe("createRuntime MCP trust gating", () => {
         }
       ],
       providerRegistry: registry,
+      providerConfigs: {
+        deepseek: {
+          baseUrl: "https://configured.deepseek.example/v1",
+          apiKeyEnv: "DEEPSEEK_API_KEY",
+          apiMode: "custom_openai_compatible",
+          authMethod: "api_key",
+          enableNetwork: true
+        }
+      },
       sessionDb
     });
 
@@ -2712,6 +2721,228 @@ describe("createRuntime MCP trust gating", () => {
       expect(childToolSchemas).toEqual(expect.arrayContaining(["file_read", "file_search"]));
       expect(childToolSchemas).not.toEqual(expect.arrayContaining(["delegate_task", "terminal_run", "file_write"]));
       expect(JSON.stringify(metadata?.modelOverride)).not.toContain("KEY");
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("runs reviewed cross-provider child model overrides with target provider routing", async () => {
+    const options = await minimalRuntimeOptions();
+    const sessionDb = new InMemorySessionDB();
+    const providerRequests: ProviderRequest[] = [];
+    const providerOptions: ProviderCompletionOptions[] = [];
+    const parentModel: ModelProfile = {
+      id: "local-parent",
+      provider: "local",
+      contextWindowTokens: 4096,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: false
+    };
+    const targetModel: ModelProfile = {
+      id: "deepseek-chat",
+      provider: "deepseek",
+      contextWindowTokens: 64_000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    };
+    const registry = new ProviderRegistry();
+    registry.register({
+      id: "local",
+      name: "Local",
+      health: () => ({ available: true }),
+      listModels: () => [parentModel],
+      complete: async (request) => {
+        providerRequests.push(request);
+        return {
+          ok: true,
+          provider: "local",
+          model: request.model,
+          content: "Unexpected parent provider answer"
+        };
+      }
+    });
+    registry.register({
+      id: "deepseek",
+      name: "DeepSeek",
+      endpoint: {
+        baseUrl: "https://api.deepseek.com/v1",
+        apiKey: { kind: "env", name: "DEEPSEEK_API_KEY" }
+      },
+      health: () => ({ available: true }),
+      listModels: () => [targetModel],
+      complete: async (request, completionOptions) => {
+        providerRequests.push(request);
+        providerOptions.push(completionOptions ?? {});
+        return {
+          ok: true,
+          provider: "deepseek",
+          model: request.model,
+          content: "Cross-provider child answer"
+        };
+      }
+    });
+    const previous = process.env.DEEPSEEK_API_KEY;
+    process.env.DEEPSEEK_API_KEY = "secret-deepseek-value";
+    const runtime = await createRuntime({
+      ...options,
+      model: parentModel,
+      primaryModelRoute: { provider: "local", id: "local-parent", profile: parentModel },
+      modelFallbackRoutes: [
+        {
+          provider: "local",
+          id: "local-fallback",
+          profile: { ...parentModel, id: "local-fallback" }
+        }
+      ],
+      providerRegistry: registry,
+      providerConfigs: {
+        deepseek: {
+          baseUrl: "https://configured.deepseek.example/v1",
+          apiKeyEnv: "DEEPSEEK_API_KEY",
+          apiMode: "custom_openai_compatible",
+          authMethod: "api_key",
+          enableNetwork: true
+        }
+      },
+      sessionDb
+    });
+
+    try {
+      await runtime.trustWorkspace?.();
+      const execution = await runtime.executeTool?.({
+        tool: "delegate_task",
+        toolInput: {
+          task: "Use cross-provider override",
+          modelOverride: { provider: "deepseek", model: "deepseek-chat" }
+        }
+      });
+      const metadata = execution?.result?.metadata as {
+        childSessionId?: string;
+        modelOverride?: Record<string, unknown>;
+      } | undefined;
+      const childSession = await sessionDb.getSession(metadata?.childSessionId ?? "");
+      const childToolSchemas = providerToolNames(providerRequests[0]?.tools);
+
+      expect(execution?.result?.ok).toBe(true);
+      expect(providerRequests).toHaveLength(1);
+      expect(providerRequests[0]?.provider).toBe("deepseek");
+      expect(providerRequests[0]?.model).toBe("deepseek-chat");
+      expect(providerOptions[0]?.endpoint).toMatchObject({
+        baseUrl: "https://configured.deepseek.example/v1",
+        apiKey: { kind: "env", name: "DEEPSEEK_API_KEY" }
+      });
+      expect(metadata?.modelOverride).toEqual({
+        requested: true,
+        status: "applied",
+        provider: "deepseek",
+        model: "deepseek-chat",
+        fallbackBehavior: "disabled-for-override"
+      });
+      expect(childSession?.metadata?.modelOverride).toEqual(metadata?.modelOverride);
+      expect(childToolSchemas).toEqual(expect.arrayContaining(["file_read", "file_search"]));
+      expect(childToolSchemas).not.toEqual(expect.arrayContaining(["delegate_task", "terminal_run", "file_write"]));
+      expect(JSON.stringify(metadata?.modelOverride)).not.toContain("secret-deepseek-value");
+    } finally {
+      if (previous === undefined) {
+        delete process.env.DEEPSEEK_API_KEY;
+      } else {
+        process.env.DEEPSEEK_API_KEY = previous;
+      }
+      await runtime.dispose();
+    }
+  });
+
+  it("blocks cross-provider child model overrides with missing target credentials before execution", async () => {
+    const options = await minimalRuntimeOptions();
+    const sessionDb = new InMemorySessionDB();
+    const providerRequests: ProviderRequest[] = [];
+    const parentModel: ModelProfile = {
+      id: "local-parent",
+      provider: "local",
+      contextWindowTokens: 4096,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: false
+    };
+    const targetModel: ModelProfile = {
+      id: "deepseek-chat",
+      provider: "deepseek",
+      contextWindowTokens: 64_000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    };
+    const registry = new ProviderRegistry();
+    registry.register({
+      id: "local",
+      name: "Local",
+      health: () => ({ available: true }),
+      listModels: () => [parentModel],
+      complete: async (request) => {
+        providerRequests.push(request);
+        return { ok: true, provider: "local", model: request.model, content: "parent" };
+      }
+    });
+    registry.register({
+      id: "deepseek",
+      name: "DeepSeek",
+      endpoint: {
+        baseUrl: "https://api.deepseek.com/v1",
+        apiKey: { kind: "env", name: "DEEPSEEK_MISSING_API_KEY" }
+      },
+      health: () => ({ available: true }),
+      listModels: () => [targetModel],
+      complete: async (request) => {
+        providerRequests.push(request);
+        return { ok: true, provider: "deepseek", model: request.model, content: "child" };
+      }
+    });
+    delete process.env.DEEPSEEK_MISSING_API_KEY;
+    const runtime = await createRuntime({
+      ...options,
+      model: parentModel,
+      primaryModelRoute: { provider: "local", id: "local-parent", profile: parentModel },
+      providerRegistry: registry,
+      providerConfigs: {
+        deepseek: {
+          baseUrl: "https://api.deepseek.com/v1",
+          apiKeyEnv: "DEEPSEEK_MISSING_API_KEY",
+          enableNetwork: true
+        }
+      },
+      sessionDb
+    });
+
+    try {
+      await runtime.trustWorkspace?.();
+      const execution = await runtime.executeTool?.({
+        tool: "delegate_task",
+        toolInput: {
+          task: "Use cross-provider override",
+          modelOverride: { provider: "deepseek", model: "deepseek-chat" }
+        }
+      });
+      const metadata = execution?.result?.metadata as {
+        status?: string;
+        reason?: string;
+        modelOverride?: Record<string, unknown>;
+      } | undefined;
+
+      expect(execution?.result?.ok).toBe(false);
+      expect(metadata).toMatchObject({
+        status: "blocked",
+        reason: "model-override-unsupported",
+        modelOverride: {
+          requested: true,
+          status: "rejected",
+          provider: "deepseek",
+          model: "deepseek-chat",
+          reason: "missing-credentials"
+        }
+      });
+      expect(providerRequests).toEqual([]);
     } finally {
       await runtime.dispose();
     }

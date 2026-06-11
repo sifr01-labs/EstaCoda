@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH } from "../contracts/delegation.js";
+import {
+  MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH,
+  MAX_DELEGATE_PROVIDER_OVERRIDE_ID_LENGTH
+} from "../contracts/delegation.js";
 import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
 import { createDelegationTools } from "./delegation-tools.js";
 
@@ -87,7 +90,7 @@ describe("createDelegationTools", () => {
     }));
   });
 
-  it("passes normalized same-provider model overrides into single delegation", async () => {
+  it("passes normalized model overrides into single delegation", async () => {
     const delegate = vi.fn(async () => ({
       childSessionId: "child",
       status: "completed",
@@ -149,6 +152,33 @@ describe("createDelegationTools", () => {
     });
     expect(result.content).toContain(`${MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH}`);
     expect(JSON.stringify(result)).not.toContain(overlongModelId);
+    expect(delegate).not.toHaveBeenCalled();
+  });
+
+  it("rejects overlong provider overrides before launching delegation", async () => {
+    const delegate = vi.fn();
+    const [tool] = createDelegationTools({
+      manager: { delegate } as never,
+      parentSessionId: "parent",
+      profileId: "default",
+      trustedWorkspace: () => true
+    });
+    const overlongProviderId = `provider-${"x".repeat(MAX_DELEGATE_PROVIDER_OVERRIDE_ID_LENGTH + 1)}`;
+
+    const result = await tool!.run({
+      task: "Do work",
+      modelOverride: { provider: overlongProviderId, model: "child-model" }
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      metadata: {
+        reason: "validation-error",
+        code: "invalid-model-override"
+      }
+    });
+    expect(result.content).toContain(`${MAX_DELEGATE_PROVIDER_OVERRIDE_ID_LENGTH}`);
+    expect(JSON.stringify(result)).not.toContain(overlongProviderId);
     expect(delegate).not.toHaveBeenCalled();
   });
 

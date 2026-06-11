@@ -768,6 +768,7 @@ export class AcpServer {
       ui: config.ui,
       agentProfile: config.profile,
       providerRegistry: config.providerRegistry,
+      providerConfigs: config.config.providers,
       auxiliaryModels: config.auxiliaryModels,
       compression: config.compression,
       externalMemory: config.externalMemory,

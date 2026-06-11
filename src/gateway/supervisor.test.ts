@@ -236,6 +236,19 @@ function fakeLoadedRuntimeConfig(overrides: Record<string, unknown> = {}) {
       },
     ],
     providerRegistry: {},
+    config: {
+      providers: {
+        custom: {
+          baseUrl: "https://custom.example/v1",
+          apiKeyEnv: "CUSTOM_API_KEY",
+          apiMode: "chat",
+          authMethod: "api_key",
+          enableNetwork: true,
+          timeoutMs: 12_000,
+          staleTimeoutMs: 60_000
+        }
+      }
+    },
     auxiliaryModels: {},
     mcp: { servers: {} },
     skills: { externalDirs: [], autonomy: "suggest", config: {} },
@@ -337,6 +350,7 @@ describe("runGatewaySupervisor", () => {
     expect(options.modelFallbackRoutes).toEqual(latestConfig.modelFallbackRoutes);
     expect(options.model).toEqual(latestConfig.model);
     expect(options.providerRegistry).toBe(latestConfig.providerRegistry);
+    expect(options.providerConfigs).toBe(latestConfig.config.providers);
     expect(options.profileId).toBe("default");
     expect(options.disableCronTools).toBe(true);
     expect(options.disabledToolsets).toEqual(["cron", "messaging", "clarify"]);

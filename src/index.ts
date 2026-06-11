@@ -219,6 +219,7 @@ async function main(): Promise<void> {
       ui: latestConfig.ui,
       agentProfile: latestConfig.profile,
       providerRegistry: latestConfig.providerRegistry,
+      providerConfigs: latestConfig.config.providers,
       auxiliaryModels: latestConfig.auxiliaryModels,
       compression: latestConfig.compression,
       memory: latestConfig.memory,

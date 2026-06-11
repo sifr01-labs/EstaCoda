@@ -1,6 +1,9 @@
 import type { RegisteredTool, SessionToolProvider, ToolExecutionContext, ToolsetName } from "../contracts/tool.js";
 import type { DelegateModelOverride, DelegateRole, DelegateTaskItem, DelegationConfig } from "../contracts/delegation.js";
-import { MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH } from "../contracts/delegation.js";
+import {
+  MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH,
+  MAX_DELEGATE_PROVIDER_OVERRIDE_ID_LENGTH
+} from "../contracts/delegation.js";
 import type { BatchDelegationSummary, DelegationManager } from "../delegation/delegation-manager.js";
 import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
 
@@ -399,11 +402,19 @@ function normalizeModelOverride(
   if (record.provider !== undefined && (typeof record.provider !== "string" || record.provider.trim().length === 0)) {
     return { ok: false, code: "invalid-model-override", message: `${path}.provider must be a non-empty string when provided.` };
   }
+  const provider = typeof record.provider === "string" ? record.provider.trim() : undefined;
+  if (provider !== undefined && provider.length > MAX_DELEGATE_PROVIDER_OVERRIDE_ID_LENGTH) {
+    return {
+      ok: false,
+      code: "invalid-model-override",
+      message: `${path}.provider must be ${MAX_DELEGATE_PROVIDER_OVERRIDE_ID_LENGTH} characters or fewer.`
+    };
+  }
   return {
     ok: true,
     value: {
       model,
-      provider: typeof record.provider === "string" ? record.provider.trim() : undefined
+      provider
     }
   };
 }
@@ -411,10 +422,10 @@ function normalizeModelOverride(
 function modelOverrideSchema() {
   return {
     type: "object",
-    description: "Optional same-provider child model override. provider may be supplied only to assert the parent provider; cross-provider overrides are rejected.",
+    description: "Optional child model override. Omit provider for the parent provider, or supply a configured runnable provider for a reviewed cross-provider override.",
     properties: {
-      model: { type: "string" },
-      provider: { type: "string" }
+      model: { type: "string", maxLength: MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH },
+      provider: { type: "string", maxLength: MAX_DELEGATE_PROVIDER_OVERRIDE_ID_LENGTH }
     },
     required: ["model"],
     additionalProperties: false

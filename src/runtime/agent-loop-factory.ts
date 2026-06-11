@@ -5,8 +5,11 @@ import type {
   DelegateRole,
   DelegationConfig
 } from "../contracts/delegation.js";
-import { MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH } from "../contracts/delegation.js";
-import type { ModelProfile, ResolvedModelRoute } from "../contracts/provider.js";
+import {
+  MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH,
+  MAX_DELEGATE_PROVIDER_OVERRIDE_ID_LENGTH
+} from "../contracts/delegation.js";
+import type { ModelProfile, ProviderAuthMethod, ProviderEndpoint, ProviderId, ResolvedModelRoute } from "../contracts/provider.js";
 import type { SecurityAssessment, SecurityPolicy, SecurityRequest } from "../contracts/security.js";
 import { assessSecurityPolicy, capabilityFirstDefaults } from "../contracts/security.js";
 import type { SessionDB, SessionRecord } from "../contracts/session.js";
@@ -21,6 +24,13 @@ import {
   resolveChildToolAccess,
   type ChildToolAccessResult
 } from "../delegation/toolset-security.js";
+import {
+  buildResolvedModelRoute,
+  getProviderMetadata,
+  validateResolvedRouteForModelSwitch
+} from "../providers/provider-metadata.js";
+import type { ProviderRegistry } from "../providers/provider-registry.js";
+import { resolveRuntimeCredential } from "../providers/runtime-credential-resolver.js";
 import { assessHardlineFloor } from "../security/command-safety.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { AgentLoop, type AgentLoopInput, type AgentLoopResponse } from "./agent-loop.js";
@@ -88,6 +98,9 @@ export class ChildModelOverrideError extends Error {
 export type DefaultChildAgentLoopFactoryOptions = {
   builder: AgentLoopBuilder;
   parentRoutes: AgentLoopRouteInput;
+  providerRegistry?: ProviderRegistry;
+  providerConfigs?: Record<string, ChildProviderRouteConfig>;
+  homeDir?: string;
   sessionDb: SessionDB;
   trajectoryRecorderFactory: (input: { profileId: string; sessionId: string }) => TrajectoryRecorder;
   responseLabel: string;
@@ -102,9 +115,22 @@ export type DefaultChildAgentLoopFactoryOptions = {
   id?: () => string;
 };
 
+export type ChildProviderRouteConfig = {
+  baseUrl?: string;
+  apiKeyEnv?: string;
+  apiMode?: ResolvedModelRoute["apiMode"];
+  authMethod?: ProviderAuthMethod;
+  enableNetwork?: boolean;
+  timeoutMs?: number;
+  staleTimeoutMs?: number;
+};
+
 export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
   readonly #builder: AgentLoopBuilder;
   readonly #parentRoutes: AgentLoopRouteInput;
+  readonly #providerRegistry: ProviderRegistry | undefined;
+  readonly #providerConfigs: Record<string, ChildProviderRouteConfig> | undefined;
+  readonly #homeDir: string | undefined;
   readonly #sessionDb: SessionDB;
   readonly #trajectoryRecorderFactory: (input: { profileId: string; sessionId: string }) => TrajectoryRecorder;
   readonly #responseLabel: string;
@@ -121,6 +147,9 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
   constructor(options: DefaultChildAgentLoopFactoryOptions) {
     this.#builder = options.builder;
     this.#parentRoutes = options.parentRoutes;
+    this.#providerRegistry = options.providerRegistry;
+    this.#providerConfigs = options.providerConfigs;
+    this.#homeDir = options.homeDir;
     this.#sessionDb = options.sessionDb;
     this.#trajectoryRecorderFactory = options.trajectoryRecorderFactory;
     this.#responseLabel = options.responseLabel;
@@ -141,7 +170,13 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
     const role = input.role ?? "leaf";
     const allowedToolsets = input.allowedToolsets ?? [];
     const allowedTools = input.allowedTools ?? [];
-    const modelOverride = deriveSameProviderChildRoutes(this.#parentRoutes, input.modelOverride);
+    const modelOverride = await deriveChildRoutes({
+      parentRoutes: this.#parentRoutes,
+      providerRegistry: this.#providerRegistry,
+      providerConfigs: this.#providerConfigs,
+      homeDir: this.#homeDir,
+      override: input.modelOverride
+    });
     const suppressedRuntimeFeatures = suppressedFeaturesFromConfig(this.#delegationConfig);
     const enabledRuntimeFeatures = [
       "agentLoop",
@@ -261,20 +296,24 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
   }
 }
 
-function deriveSameProviderChildRoutes(
-  parentRoutes: AgentLoopRouteInput,
-  override: DelegateModelOverride | undefined
-): { routes?: AgentLoopRouteInput; metadata?: DelegateModelOverrideMetadata } {
-  if (override === undefined) {
+async function deriveChildRoutes(input: {
+  parentRoutes: AgentLoopRouteInput;
+  providerRegistry: ProviderRegistry | undefined;
+  providerConfigs: Record<string, ChildProviderRouteConfig> | undefined;
+  homeDir: string | undefined;
+  override: DelegateModelOverride | undefined;
+}): Promise<{ routes?: AgentLoopRouteInput; metadata?: DelegateModelOverrideMetadata }> {
+  if (input.override === undefined) {
     return {};
   }
 
+  const { parentRoutes, override } = input;
   const requestedModel = override.model.trim();
   const parentPrimaryRoute = parentRoutes.primaryModelRoute ?? parentRoutes.mainRoute;
   const parentProvider = parentPrimaryRoute.provider;
   const requestedProvider = (override.provider ?? parentProvider).trim();
   const metadataModel = boundRouteMetadataText(requestedModel);
-  const metadataProvider = boundRouteMetadataText(requestedProvider);
+  const metadataProvider = boundProviderMetadataText(requestedProvider);
 
   if (requestedModel.length === 0) {
     throw new ChildModelOverrideError("Child model override requires a non-empty model.", {
@@ -295,13 +334,34 @@ function deriveSameProviderChildRoutes(
     });
   }
 
-  if (requestedProvider !== parentProvider) {
-    throw new ChildModelOverrideError("Child model override cannot change providers in this commit.", {
+  if (requestedProvider.length === 0) {
+    throw new ChildModelOverrideError("Child model override provider must be non-empty when provided.", {
+      requested: true,
+      status: "rejected",
+      reason: "invalid-model-override"
+    });
+  }
+
+  if (requestedProvider.length > MAX_DELEGATE_PROVIDER_OVERRIDE_ID_LENGTH) {
+    throw new ChildModelOverrideError(`Child model override provider must be ${MAX_DELEGATE_PROVIDER_OVERRIDE_ID_LENGTH} characters or fewer.`, {
       requested: true,
       status: "rejected",
       provider: metadataProvider,
       model: metadataModel,
-      reason: "cross-provider-unsupported"
+      reason: "invalid-model-override"
+    });
+  }
+
+  if (requestedProvider !== parentProvider) {
+    return await deriveCrossProviderChildRoutes({
+      parentRoutes,
+      providerRegistry: input.providerRegistry,
+      providerConfigs: input.providerConfigs,
+      homeDir: input.homeDir,
+      requestedProvider,
+      requestedModel,
+      metadataProvider,
+      metadataModel
     });
   }
 
@@ -328,6 +388,171 @@ function deriveSameProviderChildRoutes(
   };
 }
 
+async function deriveCrossProviderChildRoutes(input: {
+  parentRoutes: AgentLoopRouteInput;
+  providerRegistry: ProviderRegistry | undefined;
+  providerConfigs: Record<string, ChildProviderRouteConfig> | undefined;
+  homeDir: string | undefined;
+  requestedProvider: string;
+  requestedModel: string;
+  metadataProvider: string;
+  metadataModel: string;
+}): Promise<{ routes: AgentLoopRouteInput; metadata: DelegateModelOverrideMetadata }> {
+  const provider = input.requestedProvider as ProviderId;
+  const model = input.requestedModel;
+  const providerConfig = input.providerConfigs?.[provider];
+  if (input.providerConfigs !== undefined && providerConfig === undefined) {
+    throw rejectedModelOverride("Child model override provider is not configured.", {
+      provider: input.metadataProvider,
+      model: input.metadataModel,
+      reason: "unknown-provider"
+    });
+  }
+  const adapter = input.providerRegistry?.get(provider);
+  if (adapter === undefined) {
+    throw rejectedModelOverride("Child model override provider is not registered.", {
+      provider: input.metadataProvider,
+      model: input.metadataModel,
+      reason: "unknown-provider"
+    });
+  }
+
+  if (adapter.executable === false) {
+    throw rejectedModelOverride("Child model override provider is not executable.", {
+      provider: input.metadataProvider,
+      model: input.metadataModel,
+      reason: "provider-not-executable"
+    });
+  }
+
+  let models: ModelProfile[];
+  try {
+    models = await adapter.listModels();
+  } catch {
+    throw rejectedModelOverride("Child model override provider models could not be listed.", {
+      provider: input.metadataProvider,
+      model: input.metadataModel,
+      reason: "provider-not-executable"
+    });
+  }
+  const profile = models.find((candidate) => candidate.provider === provider && candidate.id === model)
+    ?? models.find((candidate) => candidate.id === model);
+  if (profile === undefined) {
+    throw rejectedModelOverride("Child model override model is not registered for the requested provider.", {
+      provider: input.metadataProvider,
+      model: input.metadataModel,
+      reason: "unknown-model"
+    });
+  }
+
+  const route = buildTargetProviderRoute({
+    provider,
+    model,
+    profile,
+    providerConfig,
+    adapterEndpoint: adapter.endpoint
+  });
+  if (providerConfig !== undefined && providerConfig.enableNetwork !== true) {
+    throw rejectedModelOverride("Child model override provider network execution is not enabled.", {
+      provider: input.metadataProvider,
+      model: input.metadataModel,
+      reason: "provider-network-disabled"
+    });
+  }
+  const gate = validateResolvedRouteForModelSwitch(route);
+  if (!gate.ok) {
+    throw rejectedModelOverride("Child model override route is not executable.", {
+      provider: input.metadataProvider,
+      model: input.metadataModel,
+      reason: "invalid-route"
+    });
+  }
+  const credential = await resolveRuntimeCredential({
+    providerId: provider,
+    route: { apiKeyEnv: route.apiKeyEnv, authMethod: route.authMethod },
+    metadata: getProviderMetadata(provider),
+    homeDir: input.homeDir
+  });
+  if (!credential.diagnostic.ok) {
+    throw rejectedModelOverride("Child model override provider credentials are not configured.", {
+      provider: input.metadataProvider,
+      model: input.metadataModel,
+      reason: "missing-credentials"
+    });
+  }
+
+  return {
+    routes: {
+      ...input.parentRoutes,
+      model: route.profile,
+      mainRoute: route,
+      primaryModelRoute: route,
+      modelFallbackRoutes: [],
+      providerPreferences: {
+        ...input.parentRoutes.providerPreferences,
+        providerOrder: [provider]
+      }
+    },
+    metadata: {
+      requested: true,
+      status: "applied",
+      provider: input.metadataProvider,
+      model: input.metadataModel,
+      fallbackBehavior: "disabled-for-override"
+    }
+  };
+}
+
+function buildTargetProviderRoute(input: {
+  provider: ProviderId;
+  model: string;
+  profile: ModelProfile;
+  providerConfig: ChildProviderRouteConfig | undefined;
+  adapterEndpoint: ProviderEndpoint | undefined;
+}): ResolvedModelRoute {
+  const metadata = getProviderMetadata(input.provider);
+  const endpoint = input.adapterEndpoint;
+  const providerConfig = input.providerConfig;
+  const baseUrl = providerConfig?.baseUrl ?? endpoint?.baseUrl ?? metadata.defaultBaseUrl;
+  const endpointAuth = endpoint?.apiKey;
+  if (endpointAuth?.kind === "literal") {
+    throw rejectedModelOverride("Child model override route cannot use literal provider credentials.", {
+      provider: boundProviderMetadataText(input.provider),
+      model: boundRouteMetadataText(input.model),
+      reason: "invalid-route"
+    });
+  }
+  if (endpointAuth?.kind === "none" && providerConfig?.authMethod !== "none" && metadata.defaultAuthMethod !== "none") {
+    throw rejectedModelOverride("Child model override provider credentials are not configured.", {
+      provider: boundProviderMetadataText(input.provider),
+      model: boundRouteMetadataText(input.model),
+      reason: "missing-credentials"
+    });
+  }
+
+  const authMethod: ProviderAuthMethod | undefined = providerConfig?.authMethod
+    ?? (endpointAuth?.kind === "none" ? "none" : metadata.defaultAuthMethod);
+  const apiKeyEnv = providerConfig?.apiKeyEnv
+    ?? (endpointAuth?.kind === "env" ? endpointAuth.name : undefined);
+  const profile: ModelProfile = {
+    ...input.profile,
+    id: input.model,
+    provider: input.provider
+  };
+
+  return buildResolvedModelRoute({
+    provider: input.provider,
+    model: input.model,
+    profile,
+    baseUrl,
+    apiKeyEnv,
+    apiMode: providerConfig?.apiMode ?? metadata.apiMode,
+    authMethod,
+    timeoutMs: providerConfig?.timeoutMs,
+    staleTimeoutMs: providerConfig?.staleTimeoutMs
+  });
+}
+
 function cloneRouteForModel(route: ResolvedModelRoute, modelId: string): ResolvedModelRoute {
   const profile: ModelProfile = {
     ...route.profile,
@@ -345,6 +570,23 @@ function boundRouteMetadataText(value: string): string {
   return value.length <= MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH
     ? value
     : `${value.slice(0, MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH - " [truncated]".length)} [truncated]`;
+}
+
+function boundProviderMetadataText(value: string): string {
+  return value.length <= MAX_DELEGATE_PROVIDER_OVERRIDE_ID_LENGTH
+    ? value
+    : `${value.slice(0, MAX_DELEGATE_PROVIDER_OVERRIDE_ID_LENGTH - " [truncated]".length)} [truncated]`;
+}
+
+function rejectedModelOverride(
+  message: string,
+  metadata: Pick<DelegateModelOverrideMetadata, "provider" | "model" | "reason">
+): ChildModelOverrideError {
+  return new ChildModelOverrideError(message, {
+    requested: true,
+    status: "rejected",
+    ...metadata
+  });
 }
 
 export function createChildFailClosedSecurityPolicy(): SecurityPolicy {

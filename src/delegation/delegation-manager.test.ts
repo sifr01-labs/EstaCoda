@@ -222,14 +222,14 @@ describe("DelegationManager", () => {
     expect(JSON.stringify(result.modelOverride)).not.toContain("KEY");
   });
 
-  it("returns structured blocked results for unsupported cross-provider overrides", async () => {
+  it("returns structured blocked results for rejected provider overrides", async () => {
     const harness = await createHarness({
       rejectModelOverride: {
         requested: true,
         status: "rejected",
         provider: "openai",
         model: "gpt-test",
-        reason: "cross-provider-unsupported"
+        reason: "missing-credentials"
       }
     });
 
@@ -250,7 +250,7 @@ describe("DelegationManager", () => {
         status: "rejected",
         provider: "openai",
         model: "gpt-test",
-        reason: "cross-provider-unsupported"
+        reason: "missing-credentials"
       }
     });
     expect(harness.handleInputs).toEqual([]);
@@ -1140,20 +1140,58 @@ describe("DelegationManager", () => {
       profileId: "default",
       tasks: [
         { task: "batch default" },
-        { task: "task override", modelOverride: { model: "task-model" } }
+        { task: "task override", modelOverride: { provider: "openai", model: "task-model" } }
       ],
-      modelOverride: { model: "batch-model" },
+      modelOverride: { provider: "deepseek", model: "batch-model" },
       trustedWorkspace: true
     });
 
     expect(harness.factory.createChild).toHaveBeenNthCalledWith(1, expect.objectContaining({
       task: "batch default",
-      modelOverride: { model: "batch-model" }
+      modelOverride: { provider: "deepseek", model: "batch-model" }
     }));
     expect(harness.factory.createChild).toHaveBeenNthCalledWith(2, expect.objectContaining({
       task: "task override",
-      modelOverride: { model: "task-model" }
+      modelOverride: { provider: "openai", model: "task-model" }
     }));
+  });
+
+  it("preserves structured per-child failure for invalid task-level provider overrides", async () => {
+    const harness = await createHarness({
+      maxConcurrentChildren: 1,
+      rejectModelOverrideWhenProvider: "missing-provider",
+      rejectModelOverride: {
+        requested: true,
+        status: "rejected",
+        provider: "missing-provider",
+        model: "missing-model",
+        reason: "unknown-provider"
+      }
+    });
+
+    const result = await harness.manager.delegateBatch({
+      parentSessionId: "parent",
+      profileId: "default",
+      tasks: [
+        { task: "valid", modelOverride: { provider: "deepseek", model: "deepseek-chat" } },
+        { task: "invalid", modelOverride: { provider: "missing-provider", model: "missing-model" } }
+      ],
+      trustedWorkspace: true
+    });
+
+    expect(result.status).toBe("blocked");
+    expect(result.results.map((child) => child.childStatus)).toEqual(["completed", "blocked"]);
+    expect(result.results[1]).toMatchObject({
+      childSessionId: "unavailable",
+      reason: "model-override-unsupported",
+      modelOverride: {
+        requested: true,
+        status: "rejected",
+        provider: "missing-provider",
+        model: "missing-model",
+        reason: "unknown-provider"
+      }
+    });
   });
 
   it("preserves per-child batch stale-file warnings and aggregate warning count", async () => {
@@ -1353,6 +1391,7 @@ async function createHarness(input: {
   fileStateTracker?: FileStateTracker;
   childModelOverrideMetadata?: DelegateModelOverrideMetadata;
   rejectModelOverride?: DelegateModelOverrideMetadata;
+  rejectModelOverrideWhenProvider?: string;
 } = {}) {
   const db = new InMemorySessionDB({ id: deterministicId() });
   const registry = input.registry ?? new SubagentRegistry();
@@ -1360,9 +1399,15 @@ async function createHarness(input: {
   const handleInputs: Array<{ text: string; signal?: AbortSignal }> = [];
   let childSequence = 0;
   const factory: ChildAgentLoopFactory = {
-    createChild: vi.fn(async () => {
-      if (input.rejectModelOverride !== undefined) {
-        throw new ChildModelOverrideError("Child model override cannot change providers in this commit.", input.rejectModelOverride);
+    createChild: vi.fn(async (childInput) => {
+      if (
+        input.rejectModelOverride !== undefined &&
+        (
+          input.rejectModelOverrideWhenProvider === undefined ||
+          childInput.modelOverride?.provider === input.rejectModelOverrideWhenProvider
+        )
+      ) {
+        throw new ChildModelOverrideError("Child model override was rejected.", input.rejectModelOverride);
       }
       childSequence += 1;
       const childSessionId = childSequence === 1 ? "child" : `child-${childSequence}`;

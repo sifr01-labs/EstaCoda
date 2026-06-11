@@ -3,6 +3,7 @@ import type { ToolRiskClass, ToolsetName } from "./tool.js";
 export type DelegateRole = "leaf" | "orchestrator";
 
 export const MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH = 200;
+export const MAX_DELEGATE_PROVIDER_OVERRIDE_ID_LENGTH = 100;
 
 export type DelegateModelOverride = {
   model: string;

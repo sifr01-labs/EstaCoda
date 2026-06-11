@@ -33,7 +33,7 @@ import { LocalMemoryProvider } from "../memory/local-memory-provider.js";
 import { MemoryPromptContextBuilder } from "../memory/memory-prompt-context-builder.js";
 import { createExternalMemoryProvidersFromConfig } from "../memory/external-memory-provider.js";
 import { MemoryPromotionStore } from "../memory/memory-promotion-store.js";
-import { normalizeExternalMemoryConfig, normalizeSessionCompressionConfig, type AgentProfileMode, type AgentResponseLanguage, type LoadedRuntimeConfig, type MCPServerConfig, type UiFlavor, type UiLanguage } from "../config/runtime-config.js";
+import { normalizeExternalMemoryConfig, normalizeSessionCompressionConfig, type AgentProfileMode, type AgentResponseLanguage, type EstaCodaConfig, type LoadedRuntimeConfig, type MCPServerConfig, type UiFlavor, type UiLanguage } from "../config/runtime-config.js";
 import { loadMcpServers, type MCPServerSnapshot } from "../mcp/mcp-tools.js";
 import { ProcessManager } from "../process/process-manager.js";
 import { resolveAuxiliaryModelRoute } from "../providers/auxiliary-model-resolver.js";
@@ -108,6 +108,7 @@ export type RuntimeOptions = {
   trustStore?: WorkspaceTrustStore;
   trustStorePath?: string;
   providerRegistry?: ProviderRegistry;
+  providerConfigs?: EstaCodaConfig["providers"];
   memoryProvider?: MemoryProvider;
   memory?: LoadedRuntimeConfig["memory"];
   externalMemory?: LoadedRuntimeConfig["externalMemory"];
@@ -770,6 +771,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const childFactory = new DefaultChildAgentLoopFactory({
     builder,
     parentRoutes: agentLoopRoutes,
+    providerRegistry,
+    providerConfigs: options.providerConfigs,
+    homeDir: options.homeDir,
     sessionDb,
     trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({
       profileId,
