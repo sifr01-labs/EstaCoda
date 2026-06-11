@@ -95,6 +95,23 @@ describe("runWhatsAppWizard", () => {
     expect(await configLoaded(tempDir)).toBe(false);
   });
 
+  it("fails QR pairing without writing config", async () => {
+    const deps = depsWithInstalledBridge({
+      pairDevice: vi.fn(async () => ({ ok: false as const, reason: "failed" as const, message: "socket closed" })),
+    });
+
+    const result = await runWhatsAppWizard({
+      workspaceRoot: tempDir,
+      homeDir: tempDir,
+      prompt: fakePrompt(["1", "971501234567"]),
+      dependencies: deps,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toContain("WhatsApp QR pairing failed: socket closed");
+    expect(await configLoaded(tempDir)).toBe(false);
+  });
+
   it("writes WhatsApp config only after successful QR pairing with an allowlist", async () => {
     const deps = depsWithInstalledBridge({ pairDevice: successfulPairDevice("QR CODE\n") });
 
