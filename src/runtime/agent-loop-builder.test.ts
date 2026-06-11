@@ -33,6 +33,7 @@ import { ChangeManifestStore } from "../skills/change-manifest-store.js";
 import { SkillLearningManager } from "../skills/skill-learning.js";
 import { SkillRegistry } from "../skills/skill-registry.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
+import { FileStateTracker } from "../delegation/file-state-tracker.js";
 import { createSessionRuntimeContext } from "./session-runtime-context.js";
 import { AgentLoopBuilder, defaultSkillVisibilityStrategy, type AgentLoopRuntimeSubstrate } from "./agent-loop-builder.js";
 
@@ -94,6 +95,34 @@ describe("AgentLoopBuilder", () => {
     await harness.builder.cleanupSession(first);
     await harness.builder.cleanupSession(second);
     expect(mcpTool.run).not.toHaveBeenCalled();
+  });
+
+  it("shares runtime-scoped file-state tracking across parent and child sessions", async () => {
+    const harness = await createBuilderHarness();
+    const parent = await harness.build("parent-session");
+    const child = await harness.build("child-session", { parentSessionId: "parent-session" });
+    const parentWrite = parent.toolRegistry.get("file.write");
+    const childRead = child.toolRegistry.get("file.read");
+
+    await parentWrite?.run({ path: "shared.txt", content: "parent content" });
+    await childRead?.run({ path: "shared.txt" });
+
+    expect(harness.fileStateTracker.listOperations()).toEqual([
+      expect.objectContaining({
+        sessionId: "parent-session",
+        parentSessionId: undefined,
+        childSessionId: undefined,
+        operation: "write",
+        normalizedPath: "shared.txt"
+      }),
+      expect.objectContaining({
+        sessionId: "child-session",
+        parentSessionId: "parent-session",
+        childSessionId: "child-session",
+        operation: "read",
+        normalizedPath: "shared.txt"
+      })
+    ]);
   });
 
   it("uses an explicit skill visibility strategy", async () => {
@@ -326,6 +355,7 @@ async function createBuilderHarness(input: {
     profileId
   });
   const skillRegistry = input.skillRegistry ?? new SkillRegistry();
+  const fileStateTracker = new FileStateTracker();
   const skillEvolutionStore = new SkillEvolutionStore({
     usagePath: join(workspaceRoot, "usage.json"),
     evolutionRoot: join(workspaceRoot, "evolution")
@@ -373,6 +403,7 @@ async function createBuilderHarness(input: {
       sessionDb,
       sessionId
     })),
+    fileStateTracker,
     memoryPersistenceService,
     memoryPersistencePaths: {
       "USER.md": join(workspaceRoot, "USER.md"),
@@ -417,6 +448,8 @@ async function createBuilderHarness(input: {
 
   return {
     builder,
+    fileStateTracker,
+    workspaceRoot,
     async build(sessionId: string, overrides: Partial<Parameters<AgentLoopBuilder["buildSession"]>[0]> = {}) {
       return await builder.buildSession({
         sessionId,

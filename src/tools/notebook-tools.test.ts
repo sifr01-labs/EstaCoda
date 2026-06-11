@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { FileStateTracker } from "../delegation/file-state-tracker.js";
 import { createNotebookTools, notebookToolProvider, type NotebookCell, type NotebookContent } from "./notebook-tools.js";
 
 const tempDirs: string[] = [];
@@ -209,6 +210,43 @@ describe("notebook.edit", () => {
     expect(notebook.cells.map((cell) => cell.id)).toEqual(["setup"]);
   });
 
+  it("records successful notebook edits as bounded file-state operations", async () => {
+    const root = await makeNotebookWorkspace();
+    const tracker = new FileStateTracker();
+    const tool = createNotebookTools({
+      workspaceRoot: root,
+      fileStateTracker: tracker,
+      sessionId: "child-session",
+      parentSessionId: "parent-session",
+      childSessionId: "child-session"
+    })[0]!;
+
+    const result = await tool.run({
+      notebook_path: "analysis.ipynb",
+      cell_id: "setup",
+      new_source: "answer = 99",
+      edit_mode: "replace"
+    });
+
+    expect(result.ok).toBe(true);
+    expect(tracker.listWrites("child-session")).toEqual([
+      expect.objectContaining({
+        sessionId: "child-session",
+        parentSessionId: "parent-session",
+        childSessionId: "child-session",
+        path: "analysis.ipynb",
+        normalizedPath: "analysis.ipynb",
+        operation: "replace",
+        sourceTool: "notebook.edit",
+        metadata: expect.objectContaining({
+          changed: true,
+          previewAvailable: true
+        })
+      })
+    ]);
+    expect(JSON.stringify(tracker.listOperations())).not.toContain("answer = 99");
+  });
+
   it("falls back to cell-N lookup when a real cell id is unavailable", async () => {
     const root = await makeTempDir();
     await writeNotebook(join(root, "legacy.ipynb"), createNotebook({
@@ -343,6 +381,29 @@ describe("notebook.edit", () => {
       currentMtimeMs: before.mtimeMs
     });
     expect(notebook.cells[0]?.source).toBe("answer = 42");
+  });
+
+  it("does not record failed notebook edits as successful file-state operations", async () => {
+    const root = await makeNotebookWorkspace();
+    const path = join(root, "analysis.ipynb");
+    const before = await stat(path);
+    const tracker = new FileStateTracker();
+    const tool = createNotebookTools({
+      workspaceRoot: root,
+      fileStateTracker: tracker,
+      sessionId: "session-1"
+    })[0]!;
+
+    const result = await tool.run({
+      notebook_path: "analysis.ipynb",
+      cell_id: "setup",
+      new_source: "answer = 100",
+      edit_mode: "replace",
+      expected_mtime_ms: before.mtimeMs + 1
+    });
+
+    expect(result.ok).toBe(false);
+    expect(tracker.listOperations()).toEqual([]);
   });
 
   it("writes through a temporary file and leaves valid notebook JSON behind", async () => {

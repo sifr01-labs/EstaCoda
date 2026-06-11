@@ -5,6 +5,7 @@ import { platform } from "node:os";
 import type { EnvironmentType } from "../contracts/security.js";
 import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
 import type { FileChangePreviewViewModel } from "../contracts/view-model.js";
+import type { FileStateOperationKind, FileStateTracker } from "../delegation/file-state-tracker.js";
 import { isLikelyBinary, isTextyPath } from "../context/context-security.js";
 import { assessHardlineFloor } from "../security/command-safety.js";
 import { errorResult, resolveWorkspacePath } from "./workspace-paths.js";
@@ -15,6 +16,10 @@ export type WorkspaceToolOptions = {
   maxSearchResults?: number;
   commandTimeoutMs?: number;
   fsAdapter?: WorkspaceFsAdapter;
+  fileStateTracker?: FileStateTracker;
+  sessionId?: string | (() => string);
+  parentSessionId?: string;
+  childSessionId?: string | (() => string | undefined);
 };
 
 export type WorkspaceFsAdapter = {
@@ -62,24 +67,35 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
           return path;
         }
 
+        let result: ToolResult;
         if (fsAdapter !== undefined) {
           const content = await fsAdapter.readTextFile({
             path: path.path,
             lineStart: input.lineStart,
             lineEnd: input.lineEnd
           });
-          return renderWorkspaceFile(canonicalRoot, path.path, content, {
+          result = renderWorkspaceFile(canonicalRoot, path.path, content, {
+            maxReadBytes,
+            lineStart: input.lineStart,
+            lineEnd: input.lineEnd
+          });
+        } else {
+          result = await readWorkspaceFile(canonicalRoot, path.path, {
             maxReadBytes,
             lineStart: input.lineStart,
             lineEnd: input.lineEnd
           });
         }
 
-        return readWorkspaceFile(canonicalRoot, path.path, {
-          maxReadBytes,
-          lineStart: input.lineStart,
-          lineEnd: input.lineEnd
+        recordFileStateOperation(options, {
+          operation: "read",
+          sourceTool: "file.read",
+          path: metadataPath(result, canonicalRoot, path.path),
+          bytes: metadataNumber(result.metadata?.bytes),
+          changed: undefined,
+          previewAvailable: false
         });
+        return result;
       }
     },
     {
@@ -125,20 +141,30 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
           await writeFile(path.path, input.content, "utf8");
         }
 
-        return {
+        const bytes = Buffer.byteLength(input.content);
+        const result: ToolResult = {
           ok: true,
-          content: `Wrote ${relativePath} (${Buffer.byteLength(input.content)} bytes).`,
+          content: `Wrote ${relativePath} (${bytes} bytes).`,
           metadata: {
             path: relativePath,
-            bytes: Buffer.byteLength(input.content),
+            bytes,
             fileChangePreview: buildFileWriteChangePreview({
               path: relativePath,
               before: existing,
               after: input.content,
-              bytes: Buffer.byteLength(input.content)
+              bytes
             })
           }
         };
+        recordFileStateOperation(options, {
+          operation: "write",
+          sourceTool: "file.write",
+          path: relativePath,
+          bytes,
+          changed: existing !== input.content,
+          previewAvailable: result.metadata?.fileChangePreview !== undefined
+        });
+        return result;
       }
     },
     {
@@ -193,7 +219,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
           await writeFile(path.path, next, "utf8");
         }
 
-        return {
+        const result: ToolResult = {
           ok: true,
           content: `Updated ${relativePath}.`,
           metadata: {
@@ -209,6 +235,15 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
             })
           }
         };
+        recordFileStateOperation(options, {
+          operation: "replace",
+          sourceTool: "file.replace",
+          path: relativePath,
+          bytes: Buffer.byteLength(next),
+          changed: next !== existing,
+          previewAvailable: result.metadata?.fileChangePreview !== undefined
+        });
+        return result;
       }
     },
     {
@@ -308,10 +343,57 @@ export const workspaceToolProvider: SessionToolProvider = {
   createTools(ctx) {
     return createWorkspaceTools({
       workspaceRoot: ctx.workspaceRoot,
-      fsAdapter: ctx.workspaceFsAdapter
+      fsAdapter: ctx.workspaceFsAdapter,
+      fileStateTracker: ctx.fileStateTracker,
+      sessionId: ctx.currentSessionId,
+      parentSessionId: ctx.parentSessionId,
+      childSessionId: ctx.childSessionId
     });
   }
 };
+
+function recordFileStateOperation(
+  options: WorkspaceToolOptions,
+  input: {
+    operation: FileStateOperationKind;
+    sourceTool: string;
+    path: string;
+    bytes?: number;
+    changed?: boolean;
+    previewAvailable?: boolean;
+  }
+): void {
+  const sessionId = resolveString(options.sessionId);
+  if (options.fileStateTracker === undefined || sessionId === undefined) {
+    return;
+  }
+  const childSessionId = resolveString(options.childSessionId);
+  options.fileStateTracker.recordOperation({
+    sessionId,
+    parentSessionId: options.parentSessionId,
+    childSessionId,
+    path: input.path,
+    operation: input.operation,
+    sourceTool: input.sourceTool,
+    metadata: {
+      bytes: input.bytes,
+      changed: input.changed,
+      previewAvailable: input.previewAvailable
+    }
+  });
+}
+
+function resolveString(value: string | (() => string | undefined) | undefined): string | undefined {
+  return typeof value === "function" ? value() : value;
+}
+
+function metadataPath(result: ToolResult, root: string, path: string): string {
+  return typeof result.metadata?.path === "string" ? result.metadata.path : relative(root, path);
+}
+
+function metadataNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
 
 async function ensureSafeParentDirectories(
   targetPath: string,

@@ -2,6 +2,7 @@ import { access, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { FileStateTracker } from "../delegation/file-state-tracker.js";
 import { createWorkspaceTools } from "./workspace-tools.js";
 
 let tempDir: string | undefined;
@@ -64,6 +65,131 @@ describe("workspace file change preview metadata", () => {
     const preview = result?.metadata?.fileChangePreview as { diff?: string } | undefined;
     expect(preview?.diff).toContain("- const value = 1;");
     expect(preview?.diff).toContain("+ const value = 2;");
+  });
+});
+
+describe("workspace file-state tracking", () => {
+  it("records successful file.read metadata without file contents", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "notes.md"), "secret file contents", "utf8");
+    const tracker = new FileStateTracker();
+    const tools = createWorkspaceTools({
+      workspaceRoot: root,
+      fileStateTracker: tracker,
+      sessionId: "session-1"
+    });
+    const read = tools.find((tool) => tool.name === "file.read");
+
+    const result = await read?.run({ path: "notes.md" });
+
+    expect(result?.ok).toBe(true);
+    expect(tracker.listOperations()).toEqual([
+      expect.objectContaining({
+        sessionId: "session-1",
+        path: "notes.md",
+        normalizedPath: "notes.md",
+        operation: "read",
+        sourceTool: "file.read",
+        metadata: {
+          bytes: 20,
+          previewAvailable: false
+        }
+      })
+    ]);
+    expect(JSON.stringify(tracker.listOperations())).not.toContain("secret file contents");
+  });
+
+  it("records successful file.write metadata with changed and preview flags", async () => {
+    const root = await makeTempDir();
+    const tracker = new FileStateTracker();
+    const tools = createWorkspaceTools({
+      workspaceRoot: root,
+      fileStateTracker: tracker,
+      sessionId: "session-1"
+    });
+    const write = tools.find((tool) => tool.name === "file.write");
+
+    const result = await write?.run({ path: "notes.md", content: "new content" });
+
+    expect(result?.ok).toBe(true);
+    expect(tracker.listWrites("session-1")).toEqual([
+      expect.objectContaining({
+        path: "notes.md",
+        operation: "write",
+        sourceTool: "file.write",
+        metadata: {
+          bytes: 11,
+          changed: true,
+          previewAvailable: true
+        }
+      })
+    ]);
+  });
+
+  it("records successful file.replace metadata", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "app.ts"), "const value = 1;\n", "utf8");
+    const tracker = new FileStateTracker();
+    const tools = createWorkspaceTools({
+      workspaceRoot: root,
+      fileStateTracker: tracker,
+      sessionId: "session-1"
+    });
+    const replace = tools.find((tool) => tool.name === "file.replace");
+
+    const result = await replace?.run({
+      path: "app.ts",
+      oldText: "const value = 1;",
+      newText: "const value = 2;"
+    });
+
+    expect(result?.ok).toBe(true);
+    expect(tracker.listWrites("session-1")).toEqual([
+      expect.objectContaining({
+        path: "app.ts",
+        operation: "replace",
+        sourceTool: "file.replace",
+        metadata: {
+          bytes: 17,
+          changed: true,
+          previewAvailable: true
+        }
+      })
+    ]);
+  });
+
+  it("does not record failed file operations as successful state", async () => {
+    const root = await makeTempDir();
+    const tracker = new FileStateTracker();
+    const tools = createWorkspaceTools({
+      workspaceRoot: root,
+      fileStateTracker: tracker,
+      sessionId: "session-1"
+    });
+    const read = tools.find((tool) => tool.name === "file.read");
+    const replace = tools.find((tool) => tool.name === "file.replace");
+
+    await read?.run({ path: "../outside.md" });
+    await replace?.run({ path: "missing.md", oldText: "a", newText: "b" });
+
+    expect(tracker.listOperations()).toEqual([]);
+  });
+
+  it("does not claim shell writes are tracked by structured file-state tracking", async () => {
+    const root = await makeTempDir();
+    const tracker = new FileStateTracker();
+    const tools = createWorkspaceTools({
+      workspaceRoot: root,
+      commandTimeoutMs: 1000,
+      fileStateTracker: tracker,
+      sessionId: "session-1"
+    });
+    const terminal = tools.find((tool) => tool.name === "terminal.run");
+
+    const result = await terminal?.run({ command: "printf shell > shell.txt" });
+
+    expect(result?.ok).toBe(true);
+    expect(tracker.listOperations()).toEqual([]);
   });
 });
 

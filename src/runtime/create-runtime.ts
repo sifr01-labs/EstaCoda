@@ -19,6 +19,7 @@ import { ContextReferenceExpander } from "../context/context-reference-expander.
 import { ProjectContextLoader, renderProjectContext } from "../context/project-context-loader.js";
 import { CronStore } from "../cron/cron-store.js";
 import { DelegationManager } from "../delegation/delegation-manager.js";
+import { FileStateTracker } from "../delegation/file-state-tracker.js";
 import { SubagentRegistry } from "../delegation/subagent-registry.js";
 import { MemoryFileCompactionService } from "../memory/memory-file-compaction-service.js";
 import { MemoryIndex } from "../memory/memory-index.js";
@@ -677,6 +678,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         });
     }
   };
+  const fileStateTracker = new FileStateTracker();
   const builder = new AgentLoopBuilder({
     substrate: {
       workspaceRoot,
@@ -727,6 +729,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         sessionDb,
         sessionId
       }),
+      fileStateTracker,
       memoryPersistenceService,
       memoryPersistencePaths,
       memoryIndexSync,

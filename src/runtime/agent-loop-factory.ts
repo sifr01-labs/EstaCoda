@@ -130,6 +130,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
     let builtSession: BuiltAgentLoopSession | undefined;
     builtSession = await this.#builder.buildSession({
       sessionId: childSessionId,
+      parentSessionId: input.parentSessionId,
       sessionRuntimeContext,
       sessionDb: this.#sessionDb,
       trajectoryRecorder,

@@ -11,6 +11,8 @@ export type SessionToolContext = {
   workspaceRoot: string;
   profileId: string;
   sessionId: string;
+  parentSessionId?: string;
+  childSessionId?: string;
   currentSessionId: () => string;
   sessionRuntimeContext?: {
     currentSessionId(): string;
@@ -44,6 +46,7 @@ export type SessionToolContext = {
   processManager?: import("../process/process-manager.js").ProcessManager;
   artifactStore?: import("../artifacts/artifact-store.js").ArtifactStore;
   memoryFileCompactionService?: import("../memory/memory-file-compaction-service.js").MemoryFileCompactionService;
+  fileStateTracker?: import("../delegation/file-state-tracker.js").FileStateTracker;
   sessionCompressionService?: import("../prompt/session-compression-service.js").SessionCompressionService;
   sessionRecallService?: import("../session/session-recall-service.js").SessionRecallService;
   contextReferenceExpander?: import("../context/context-reference-expander.js").ContextReferenceExpander;

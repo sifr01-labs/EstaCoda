@@ -15,6 +15,7 @@ import type { CronStore } from "../cron/cron-store.js";
 import type { DelegationConfig } from "../contracts/delegation.js";
 import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
 import type { DelegationManager } from "../delegation/delegation-manager.js";
+import type { FileStateTracker } from "../delegation/file-state-tracker.js";
 import type { MemoryFileCompactionService } from "../memory/memory-file-compaction-service.js";
 import type { MemoryIndexSync } from "../memory/memory-index-sync.js";
 import type { MemoryPersistenceService } from "../memory/memory-persistence-service.js";
@@ -123,6 +124,7 @@ export type AgentLoopRuntimeSubstrate = {
   memoryRetrievalService: LocalMemoryRetrievalService;
   sessionRecallServiceFactory: (input: AgentLoopSessionServiceInput) => import("../session/session-recall-service.js").SessionRecallService;
   memoryFileCompactionServiceFactory: (input: AgentLoopSessionServiceInput) => MemoryFileCompactionService;
+  fileStateTracker: FileStateTracker;
   memoryPersistenceService: MemoryPersistenceService;
   memoryPersistencePaths: Record<string, string>;
   memoryIndexSync: MemoryIndexSync | undefined;
@@ -168,6 +170,7 @@ export type AgentLoopSessionServiceInput = {
 export type AgentLoopSessionInput = {
   sessionId: string;
   sessionRuntimeContext?: SessionRuntimeContext;
+  parentSessionId?: string;
   sessionDb: SessionDB;
   trajectoryRecorder: TrajectoryRecorder;
   skillConfig?: Record<string, Record<string, unknown>>;
@@ -270,6 +273,8 @@ export class AgentLoopBuilder {
         workspaceRoot: substrate.workspaceRoot,
         profileId: substrate.profileId,
         sessionId: input.sessionId,
+        parentSessionId: input.parentSessionId,
+        childSessionId: input.parentSessionId === undefined ? undefined : input.sessionId,
         currentSessionId: () => sessionRuntimeContext.currentSessionId(),
         homeDir: substrate.homeDir,
         channelMediaRoot: substrate.channelMediaRoot,
@@ -292,6 +297,7 @@ export class AgentLoopBuilder {
         memoryIndexSync: substrate.memoryIndexSync,
         memoryRetrievalService: substrate.memoryRetrievalService,
         memoryFileCompactionService,
+        fileStateTracker: substrate.fileStateTracker,
         workspaceFsAdapter: substrate.workspaceFsAdapter,
         webFetch: substrate.webFetch,
         enableWebNetwork: substrate.enableWebNetwork,
@@ -583,6 +589,8 @@ function buildPreSkillVisibilityToolContext(input: SessionToolContext): SessionT
     workspaceRoot: input.workspaceRoot,
     profileId: input.profileId,
     sessionId: input.sessionId,
+    parentSessionId: input.parentSessionId,
+    childSessionId: input.childSessionId,
     currentSessionId: input.currentSessionId,
     homeDir: input.homeDir,
     channelMediaRoot: input.channelMediaRoot,
@@ -605,6 +613,7 @@ function buildPreSkillVisibilityToolContext(input: SessionToolContext): SessionT
     memoryIndexSync: input.memoryIndexSync,
     memoryRetrievalService: input.memoryRetrievalService,
     memoryFileCompactionService: input.memoryFileCompactionService,
+    fileStateTracker: input.fileStateTracker,
     workspaceFsAdapter: input.workspaceFsAdapter,
     webFetch: input.webFetch,
     enableWebNetwork: input.enableWebNetwork,

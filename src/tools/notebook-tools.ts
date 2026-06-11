@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
 import type { FileChangePreviewViewModel } from "../contracts/view-model.js";
+import type { FileStateOperationKind, FileStateTracker } from "../delegation/file-state-tracker.js";
 import { errorResult, resolveWorkspacePath } from "./workspace-paths.js";
 
 export type NotebookEditInput = {
@@ -34,6 +35,10 @@ export type NotebookContent = {
 
 export type NotebookToolOptions = {
   workspaceRoot: string;
+  fileStateTracker?: FileStateTracker;
+  sessionId?: string | (() => string);
+  parentSessionId?: string;
+  childSessionId?: string | (() => string | undefined);
 };
 
 type ToolFailure = ToolResult & { ok: false };
@@ -117,7 +122,7 @@ export function createNotebookTools(options: NotebookToolOptions): readonly Regi
         const afterStat = await stat(resolved.path);
         const relativePath = relative(canonicalRoot, resolved.path);
 
-        return {
+        const result: ToolResult = {
           ok: true,
           content: renderNotebookEditResult({
             path: relativePath,
@@ -143,6 +148,13 @@ export function createNotebookTools(options: NotebookToolOptions): readonly Regi
             })
           }
         };
+        recordNotebookFileStateOperation(options, {
+          operation: notebookOperationForMode(mode),
+          path: relativePath,
+          bytes: afterStat.size,
+          previewAvailable: result.metadata?.fileChangePreview !== undefined
+        });
+        return result;
       }
     }
   ];
@@ -153,10 +165,53 @@ export const notebookToolProvider: SessionToolProvider = {
   kind: "session",
   createTools(ctx) {
     return createNotebookTools({
-      workspaceRoot: ctx.workspaceRoot
+      workspaceRoot: ctx.workspaceRoot,
+      fileStateTracker: ctx.fileStateTracker,
+      sessionId: ctx.currentSessionId,
+      parentSessionId: ctx.parentSessionId,
+      childSessionId: ctx.childSessionId
     });
   }
 };
+
+function recordNotebookFileStateOperation(
+  options: NotebookToolOptions,
+  input: {
+    operation: FileStateOperationKind;
+    path: string;
+    bytes: number;
+    previewAvailable: boolean;
+  }
+): void {
+  const sessionId = resolveString(options.sessionId);
+  if (options.fileStateTracker === undefined || sessionId === undefined) {
+    return;
+  }
+  options.fileStateTracker.recordOperation({
+    sessionId,
+    parentSessionId: options.parentSessionId,
+    childSessionId: resolveString(options.childSessionId),
+    path: input.path,
+    operation: input.operation,
+    sourceTool: "notebook.edit",
+    metadata: {
+      bytes: input.bytes,
+      changed: true,
+      previewAvailable: input.previewAvailable
+    }
+  });
+}
+
+function notebookOperationForMode(mode: "replace" | "insert" | "delete"): FileStateOperationKind {
+  if (mode === "delete") {
+    return "delete";
+  }
+  return mode === "insert" ? "write" : "replace";
+}
+
+function resolveString(value: string | (() => string | undefined) | undefined): string | undefined {
+  return typeof value === "function" ? value() : value;
+}
 
 function validateInput(input: NotebookEditInput, mode: "replace" | "insert" | "delete"): ValidationResult {
   if (typeof input.notebook_path !== "string" || input.notebook_path.length === 0) {
