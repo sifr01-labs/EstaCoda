@@ -218,11 +218,15 @@ WhatsApp is experimental and gated behind `channels.whatsapp.experimental: true`
 estacoda whatsapp
 ```
 
-The wizard asks before repairing bridge dependencies, renders a QR code in the terminal, and writes profile config only after successful QR pairing. QR pairing times out after 120 seconds with `Pairing timed out - run estacoda whatsapp to try again.` WhatsApp device pairing-code setup is not exposed.
+WhatsApp setup can run from first-run onboarding optional capabilities, the existing-user Setup Editor, or the standalone `estacoda whatsapp` command. All three surfaces use the same shared QR setup flow: they ask before repairing bridge dependencies, render a QR code in the terminal, and write profile config/session state only after successful QR pairing. Dependency decline/failure or QR timeout/failure records WhatsApp as skipped or incomplete in setup and leaves WhatsApp config unchanged. QR pairing times out after 120 seconds with `Pairing timed out - run estacoda whatsapp to try again.` WhatsApp device pairing-code setup is not exposed.
 
 If no `allowedUsers` are entered, setup writes `dmPolicy: "pairing"`. That is a waiting state for secure user authorization, not open access. WhatsApp authorization codes are single-use, expire after 10 minutes, and are stored only as salted SHA-256 hashes. Telegram pairing remains config-backed and unchanged.
 
 `mode: "bot"` ignores `fromMe` messages. `mode: "self-chat"` accepts intentional self-chat input, prefixes bot replies with `replyPrefix`, and suppresses echoes. `groupPolicy` defaults to `"disabled"`; `"allowlist"` requires `allowedGroups`, and `"open"` must be configured explicitly.
+
+Normal rapid WhatsApp text messages from the same chat/sender are debounced into one runtime turn after a short quiet window. Commands, authorization/pairing codes, approvals, denials, `/stop`, `/status`, and messages with media or other attachments bypass debounce and execute immediately.
+
+Inbound image, video, normal audio, voice-note, and document messages are downloaded by the WhatsApp bridge into the selected profile's WhatsApp media cache, then exposed to the runtime as validated profile-local attachments. The cache lives under profile state, not in the workspace. Failed or oversized downloads surface as attachment failure metadata instead of dropping the whole text message.
 
 Outbound media is validated in the main runtime before the bridge receives a local path. Voice-hinted incompatible audio requires `ffmpeg` for WhatsApp voice/PTT conversion; if conversion is unavailable, EstaCoda sends normal audio with a fallback caption.
 

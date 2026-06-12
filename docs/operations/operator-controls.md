@@ -273,7 +273,7 @@ Channel status shows:
 estacoda whatsapp
 ```
 
-`estacoda whatsapp` is the only WhatsApp setup surface. It warns that WhatsApp support is experimental, unofficial, and Baileys-backed; checks the isolated `scripts/whatsapp-bridge/` npm package; asks before running bridge dependency repair; renders the QR code in the terminal; and writes profile config only after QR pairing succeeds. QR pairing times out after 120 seconds with `Pairing timed out - run estacoda whatsapp to try again.`
+`estacoda whatsapp` is the standalone WhatsApp setup surface. The same shared WhatsApp QR setup flow is also used when a user selects WhatsApp from first-run onboarding optional capabilities or from the existing-user Setup Editor. Each surface warns that WhatsApp support is experimental, unofficial, and Baileys-backed; checks the isolated `scripts/whatsapp-bridge/` npm package; asks before running bridge dependency repair; renders the QR code in the terminal; and writes profile config/session state only after QR pairing succeeds. Dependency decline/failure or QR timeout/failure leaves WhatsApp config unchanged. QR pairing times out after 120 seconds with `Pairing timed out - run estacoda whatsapp to try again.`
 
 The wizard supports QR-only device pairing. It does not expose WhatsApp device pairing-code setup. If existing auth is logged out or missing, re-pair reset is explicit and limited to the selected profile's dedicated WhatsApp auth directory. If no `allowedUsers` are entered, the wizard writes `dmPolicy: "pairing"` so the linked device is waiting for secure user authorization rather than open to arbitrary DMs.
 

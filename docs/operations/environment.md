@@ -90,7 +90,7 @@ WhatsApp:
 |----------|---------|
 | `ESTACODA_WHATSAPP_BRIDGE_INSTALL_TIMEOUT` | Optional timeout, in milliseconds, for the explicit `estacoda whatsapp` bridge dependency repair/install step. Defaults to the bridge installer timeout. |
 
-WhatsApp does not use a bot-token environment variable. Device authentication is QR-only through `estacoda whatsapp`; user authorization is controlled by `dmPolicy`, `allowedUsers`, `groupPolicy`, and `allowedGroups` in profile config. The isolated bridge dependencies stay under `scripts/whatsapp-bridge/` and are installed only after operator confirmation.
+WhatsApp does not use a bot-token environment variable. Device authentication is QR-only through the shared WhatsApp setup flow, available from first-run onboarding, the Setup Editor, and `estacoda whatsapp`; user authorization is controlled by `dmPolicy`, `allowedUsers`, `groupPolicy`, and `allowedGroups` in profile config. The isolated bridge dependencies stay under `scripts/whatsapp-bridge/` and are installed only after operator confirmation.
 
 Rules:
 - Do not hardcode secrets in repo files.

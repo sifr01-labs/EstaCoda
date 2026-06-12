@@ -151,7 +151,7 @@ Valid names: `telegram`, `discord`, `email`, `whatsapp` (case-insensitive).
 estacoda whatsapp
 ```
 
-`estacoda whatsapp` opens the single WhatsApp setup wizard. It warns about the experimental unofficial Baileys transport, keeps dependencies inside `scripts/whatsapp-bridge/`, asks before dependency repair, renders a QR code in the terminal, and writes config only after QR pairing succeeds. It supports QR-only device pairing; WhatsApp pairing-code setup is not exposed.
+WhatsApp setup uses one shared QR flow. It can be launched from first-run onboarding optional capabilities, the existing-user Setup Editor, or the standalone `estacoda whatsapp` command. Each surface warns about the experimental unofficial Baileys transport, keeps dependencies inside `scripts/whatsapp-bridge/`, checks bridge package readiness, asks before dependency repair, renders a QR code in the terminal, and writes config/session state only after QR pairing succeeds. Dependency decline/failure and QR timeout/failure leave WhatsApp config unchanged. WhatsApp pairing-code setup is not exposed.
 
 If no `allowedUsers` are entered, the wizard writes `dmPolicy: "pairing"` so the device is linked but waiting for secure user authorization. Logged-out state requires explicit re-pair/reset of only the selected profile's WhatsApp auth directory.
 

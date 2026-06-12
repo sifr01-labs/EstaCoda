@@ -83,7 +83,7 @@ These credentials satisfy Browserbase readiness only. They do not approve billab
 
 Email uses `passwordEnv` config keys that reference arbitrary env vars, for example `EMAIL_PASSWORD`.
 
-WhatsApp does not use a bot-token environment variable. Device authentication is QR-only through `estacoda whatsapp`, and bridge dependencies stay isolated under `scripts/whatsapp-bridge/`.
+WhatsApp does not use a bot-token environment variable. Device authentication is QR-only through the shared WhatsApp setup flow, available from first-run onboarding, the Setup Editor, and `estacoda whatsapp`. Bridge dependencies stay isolated under `scripts/whatsapp-bridge/`.
 
 ## Browser and web debug
 

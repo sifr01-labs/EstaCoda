@@ -151,7 +151,7 @@ estacoda channels disable telegram
 estacoda whatsapp
 ```
 
-يفتح `estacoda whatsapp` wizard إعداد WhatsApp الوحيد. يوضح أن النقل تجريبي وغير رسمي ومدعوم بـ Baileys، ويحافظ على الاعتمادات داخل `scripts/whatsapp-bridge/`، ويسأل قبل إصلاح الاعتمادات، ويعرض QR code في الطرفية، ولا يكتب الإعدادات إلا بعد نجاح QR pairing. يدعم QR فقط لربط الجهاز؛ لا توجد واجهة pairing code لجهاز WhatsApp.
+يستخدم إعداد ⁨WhatsApp⁩ تدفق ⁨QR⁩ مشتركاً. يمكن تشغيله من القدرات الاختيارية في onboarding الأول، أو من ⁨Setup Editor⁩، أو من الأمر المستقل ⁨estacoda whatsapp⁩. يوضح كل سطح أن النقل تجريبي وغير رسمي ومدعوم بـ ⁨Baileys⁩، ويحافظ على الاعتمادات داخل `scripts/whatsapp-bridge/`، ويفحص جاهزية حزمة الجسر، ويسأل قبل إصلاح الاعتمادات، ويعرض رمز ⁨QR⁩ في الطرفية، ولا يكتب الإعدادات أو حالة الجلسة إلا بعد نجاح الاقتران. رفض الاعتمادات أو فشلها، وانتهاء مهلة ⁨QR⁩ أو فشل الاقتران، يترك إعداد ⁨WhatsApp⁩ دون تغيير. لا توجد واجهة pairing code لجهاز ⁨WhatsApp⁩.
 
 إذا لم تُدخل `allowedUsers`، يكتب wizard القيمة `dmPolicy: "pairing"` بحيث يكون الجهاز مربوطاً لكن ينتظر تفويض مستخدم آمن. حالة logged-out تتطلب re-pair/reset صريحاً لدليل مصادقة WhatsApp الخاص بالملف الشخصي المحدد فقط.
 

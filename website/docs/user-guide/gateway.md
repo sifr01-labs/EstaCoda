@@ -56,6 +56,8 @@ When setup can install and start the gateway for a newly ready remote channel, t
 
 The prompt appears during first-run onboarding when a ready channel is configured. It also appears in the existing-user Setup Editor when that run newly configures the first ready channel.
 
+When the user chooses WhatsApp during onboarding or the Setup Editor, EstaCoda uses the same shared QR setup flow as `estacoda whatsapp`. It writes WhatsApp config/session state only after successful pairing; dependency decline/failure or QR timeout/failure leaves WhatsApp config unchanged.
+
 The prompt does not appear for non-channel setup changes, for editing a channel after a ready channel already existed, or when a managed gateway service is already installed or active.
 
 First-run onboarding may still offer launch after verification. Existing-user Setup Editor apply does not show the launch handoff after apply.
@@ -155,7 +157,7 @@ estacoda gateway status      # Full status: channels, approvals, cron, service m
 estacoda gateway diagnose    # Per-channel readiness check; exits 1 on warnings
 ```
 
-`gateway diagnose` checks token presence, host reachability, allowlist configuration, WhatsApp experimental gate, Baileys availability, and cron directory permissions.
+`gateway diagnose` checks token presence, host reachability, allowlist configuration, WhatsApp experimental gate, isolated WhatsApp bridge/package readiness, and cron directory permissions. Baileys and WhatsApp-specific Boom handling stay quarantined inside the bridge package; the root runtime does not depend on them directly.
 
 ## Service management (overview)
 

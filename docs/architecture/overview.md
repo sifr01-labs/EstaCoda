@@ -220,7 +220,7 @@ Email-specific behavior:
 
 WhatsApp-specific behavior (experimental):
 - Baileys linked-device model through the isolated `scripts/whatsapp-bridge/` helper
-- QR-only device login through `estacoda whatsapp`
+- QR-only device login through the shared WhatsApp setup flow (`estacoda whatsapp`, Setup Editor, or first-run onboarding)
 - DM-first (no group support)
 - Media download/upload
 - Message chunking
