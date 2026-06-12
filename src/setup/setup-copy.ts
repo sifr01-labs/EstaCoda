@@ -431,7 +431,7 @@ export const SETUP_COPY_ENTRIES = [
   copy("setupEditor.prompt.channels.telegram", "Telegram", "Telegram", [], "optional-capability"),
   copy("setupEditor.prompt.channels.telegram.description", "Configure Telegram for private and group chats", "اضبط Telegram للمحادثات الخاصة ومحادثات المجموعات", [], "optional-capability"),
   copy("setupEditor.prompt.channels.whatsapp", "WhatsApp beta", "WhatsApp تجريبي", [], "optional-capability"),
-  copy("setupEditor.prompt.channels.whatsapp.description", "Configure WhatsApp beta with an explicit allowed-user list.", "اضبط WhatsApp التجريبي مع قائمة مستخدمين مسموح بها بوضوح.", [], "optional-capability"),
+  copy("setupEditor.prompt.channels.whatsapp.description", "Run QR setup for WhatsApp beta with explicit allowed senders.", "شغّل إعداد QR لـ WhatsApp التجريبي مع مرسلين مسموحين بوضوح.", [], "optional-capability"),
   copy("setupEditor.prompt.channels.discord", "Discord beta", "Discord تجريبي", [], "optional-capability"),
   copy("setupEditor.prompt.channels.discord.description", "Configure Discord beta with explicit allowed users or channels.", "اضبط Discord التجريبي مع مستخدمين أو قنوات مسموح بها بوضوح.", [], "optional-capability"),
   copy(

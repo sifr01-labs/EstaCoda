@@ -88,6 +88,10 @@ import {
   type GatewayServiceActivationOptions,
   type GatewayServiceActivationResult,
 } from "../gateway-service-activation.js";
+import {
+  runWhatsAppSetupFlow,
+  type WhatsAppSetupDependencies,
+} from "../whatsapp-setup-flow.js";
 
 export type ConfigEditorRunnerOptions = CollectSetupRouteOptions & {
   readonly prompt: Prompt;
@@ -100,6 +104,7 @@ export type ConfigEditorRunnerOptions = CollectSetupRouteOptions & {
   readonly gatewayServiceActivation?: {
     readonly serviceActions?: GatewayServiceActivationOptions["serviceActions"];
   };
+  readonly whatsappSetupDependencies?: WhatsAppSetupDependencies;
 };
 
 export type ConfigEditorRunnerResult = {
@@ -445,6 +450,9 @@ async function handleOptionalCapabilityAction(
   const selectedChannel = action.id === "configure-channels"
     ? await promptChannelCapability(options.prompt, options.locale)
     : undefined;
+  if (selectedChannel === "whatsapp") {
+    return handleWhatsAppSetupFlowAction(options, initialDecision, action.id);
+  }
   const selectedVoiceMode = action.id === "configure-voice"
     ? await promptVoiceCapability(options.prompt, options.locale)
     : undefined;
@@ -506,6 +514,108 @@ async function handleOptionalCapabilityAction(
     bundle,
     ...(verificationBundle === undefined ? [] : [verificationBundle]),
   ], { pendingCredentialWrites });
+}
+
+async function handleWhatsAppSetupFlowAction(
+  options: LocalizedConfigEditorRunnerOptions,
+  initialDecision: SetupRouteDecision,
+  selectedActionId: string
+): Promise<ConfigEditorRunnerResult> {
+  const previouslyReadyGatewayChannelIds = await readyConfiguredGatewayChannelIds({
+    homeDir: options.homeDir,
+    profileId: options.profileId,
+    workspaceRoot: options.workspaceRoot,
+  });
+  const stateHome = resolveStateHome({ homeDir: options.homeDir });
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: stateHome.homeDir }).profileId ?? defaultProfileId();
+  const streamedOutput: string[] = [];
+  const result = await runWhatsAppSetupFlow({
+    workspaceRoot: options.workspaceRoot,
+    homeDir: stateHome.homeDir,
+    profileId,
+    prompt: options.prompt,
+    output: {
+      write: (chunk) => {
+        streamedOutput.push(chunk);
+        write(options, chunk);
+      },
+    },
+    dependencies: options.whatsappSetupDependencies,
+    source: "setup-editor",
+  });
+  const setupOutput = combineStreamedSetupOutput(streamedOutput, result.output);
+  write(options, `${result.output}\n`);
+
+  if (result.exitCode !== 0) {
+    return {
+      completed: true,
+      exitCode: 0,
+      output: setupOutput,
+      initialDecision,
+      selectedActionId,
+    };
+  }
+
+  const finalDecision = await collectSetupRoute(options);
+  const reviewManifest = await setupEditorWhatsAppReviewManifest(options, finalDecision);
+  const gatewayServiceActivationResult = await maybeOfferGatewayStartAfterChannelSetup({
+    prompt: options.prompt,
+    locale: options.locale,
+    homeDir: options.homeDir,
+    workspaceRoot: options.workspaceRoot,
+    profileId: options.profileId,
+    reviewManifest,
+    readinessGate: true,
+    previouslyReadyChannelIds: previouslyReadyGatewayChannelIds,
+    serviceActions: options.gatewayServiceActivation?.serviceActions,
+  });
+  const gatewayServiceActivationOutput = "output" in gatewayServiceActivationResult
+    ? gatewayServiceActivationResult.output
+    : undefined;
+  if (gatewayServiceActivationOutput !== undefined) {
+    write(options, `${gatewayServiceActivationOutput}\n`);
+  }
+  const output = [setupOutput, gatewayServiceActivationOutput].filter((line): line is string => line !== undefined).join("\n");
+  return {
+    completed: true,
+    exitCode: 0,
+    output,
+    initialDecision,
+    finalDecision,
+    selectedActionId,
+    reviewManifest,
+    gatewayServiceActivationResult,
+  };
+}
+
+function combineStreamedSetupOutput(streamedOutput: readonly string[], renderedOutput: string): string {
+  const streamed = streamedOutput.join("");
+  if (streamed.length === 0) return renderedOutput;
+  if (renderedOutput.length === 0) return streamed;
+  return `${streamed}${streamed.endsWith("\n") ? "" : "\n"}${renderedOutput}`;
+}
+
+async function setupEditorWhatsAppReviewManifest(
+  options: LocalizedConfigEditorRunnerOptions,
+  decision: SetupRouteDecision
+): Promise<SetupReviewManifest> {
+  const stateHome = resolveStateHome({ homeDir: options.homeDir });
+  const loaded = await loadRuntimeConfig(options);
+  const context = setupModuleContextFromDecision({
+    homeDir: options.homeDir,
+    profileId: options.profileId,
+    workspaceRoot: options.workspaceRoot,
+    trustStorePath: options.trustStorePath ?? stateHome.trustJsonPath,
+    configPath: activeProfileConfigPath(options),
+  }, decision, loaded.config);
+  const module = channelCapabilityModule("whatsapp");
+  const configuration = module.configure(context);
+  return buildSetupReviewManifest([
+    buildOptionalCapabilityDraftBundle(
+      "setup-editor.optional-capabilities.whatsapp",
+      module.toDrafts(context, configuration)
+    ),
+  ]);
 }
 
 async function handleProviderRouteAction(
