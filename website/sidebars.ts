@@ -8,7 +8,6 @@ const sidebars: SidebarsConfig = {
       items: [
         'getting-started/quickstart',
         'getting-started/installation',
-        'getting-started/first-run',
         'getting-started/updating',
         'getting-started/uninstall',
       ],
