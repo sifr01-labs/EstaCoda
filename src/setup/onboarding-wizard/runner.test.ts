@@ -27,6 +27,7 @@ import {
   type GatewayActivationServiceActions,
 } from "../gateway-service-activation.js";
 import type { SetupReviewManifest } from "../setup-review-manifest.js";
+import type { WhatsAppPairDeviceOptions, WhatsAppSetupDependencies } from "../whatsapp-setup-flow.js";
 import * as pythonEnvManager from "../../python-env/manager.js";
 
 async function makeTempDir(): Promise<string> {
@@ -272,6 +273,52 @@ function fakePrompt(
     }
   );
   return prompt as Prompt;
+}
+
+function whatsappDepsWithMissingBridge(options: { readonly installError?: unknown } = {}): WhatsAppSetupDependencies & {
+  readonly installDependencies: ReturnType<typeof vi.fn>;
+  readonly pairDevice: ReturnType<typeof vi.fn>;
+} {
+  return {
+    getDependencyStatus: async () => ({
+      bridgeDir: "/tmp/bridge",
+      packagePresent: true,
+      lockfilePresent: true,
+      entrypointPresent: true,
+      nodeModulesPresent: false,
+      missing: ["node_modules"],
+    }),
+    installDependencies: vi.fn(async () => {
+      if (options.installError !== undefined) throw options.installError;
+    }),
+    pairDevice: vi.fn<NonNullable<WhatsAppSetupDependencies["pairDevice"]>>(),
+  };
+}
+
+function whatsappDepsWithInstalledBridge(options: {
+  readonly pairDevice?: WhatsAppSetupDependencies["pairDevice"];
+} = {}): WhatsAppSetupDependencies & { readonly pairDevice: ReturnType<typeof vi.fn> } {
+  return {
+    getDependencyStatus: async () => ({
+      bridgeDir: "/tmp/bridge",
+      packagePresent: true,
+      lockfilePresent: true,
+      entrypointPresent: true,
+      nodeModulesPresent: true,
+      missing: [],
+    }),
+    installDependencies: vi.fn(),
+    pairDevice: vi.fn<NonNullable<WhatsAppSetupDependencies["pairDevice"]>>(options.pairDevice ?? successfulWhatsAppPairDevice()),
+  };
+}
+
+function successfulWhatsAppPairDevice(qr = ""): (options: WhatsAppPairDeviceOptions) => Promise<{ ok: true }> {
+  return async (options) => {
+    if (qr.length > 0) options.output.write(qr);
+    await mkdir(options.authDir, { recursive: true });
+    await writeFile(join(options.authDir, "creds.json"), "{}\n", "utf8");
+    return { ok: true };
+  };
 }
 
 function reviewedExecutor(homeDir: string, workspaceRoot: string, profileId?: string) {
@@ -870,6 +917,196 @@ describe("runFirstRunSetup", () => {
     expect(JSON.stringify(result.wizardState)).toContain("ESTACODA_TELEGRAM_BOT_TOKEN");
     expect(JSON.stringify(result.wizardState)).not.toContain("\u2066");
     expect(JSON.stringify(result.wizardState)).not.toContain("\u2069");
+  });
+
+  it("runs the shared WhatsApp QR setup flow from onboarding and records configured status", async () => {
+    const output: string[] = [];
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        [resolveSetupCopy("en", "onboarding.optionalCapabilities.title")]: true,
+        [resolveSetupCopy("en", "onboarding.optionalCapabilities.menu.title")]: "channels",
+        [resolveSetupCopy("en", "setupEditor.prompt.channels.title")]: "whatsapp",
+        [resolveSetupCopy("en", "onboarding.optionalCapabilities.more.title")]: false,
+        __prompt: ["", "1", "971501234567"],
+      }),
+      flowEngine: flowEngine({ credentialAction: "none" }),
+      whatsappSetupDependencies: whatsappDepsWithInstalledBridge({ pairDevice: successfulWhatsAppPairDevice("QR\n") }),
+      output: { write: (value) => output.push(value) },
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      channels?: {
+        whatsapp?: {
+          enabled?: boolean;
+          experimental?: boolean;
+          authDir?: string;
+          mode?: string;
+          dmPolicy?: string;
+          allowedUsers?: string[];
+          pairingMode?: string;
+        };
+      };
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.wizardState.optionalCapabilities?.channels?.whatsapp).toBe("configured");
+    expect(result.selections.optionalCapabilities).toEqual(["channels"]);
+    expect(output.join("")).toContain("QR");
+    expect(config.channels?.whatsapp).toEqual(expect.objectContaining({
+      enabled: true,
+      experimental: true,
+      mode: "bot",
+      dmPolicy: "allowlist",
+      allowedUsers: ["971501234567"],
+      pairingMode: "qr",
+    }));
+    expect(config.channels?.whatsapp?.authDir).toContain("/gateway/whatsapp-auth");
+    expect(JSON.stringify(config.channels?.whatsapp)).not.toContain("open");
+  });
+
+  it("continues onboarding when WhatsApp dependency install is declined without writing partial config", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        [resolveSetupCopy("en", "onboarding.optionalCapabilities.title")]: true,
+        [resolveSetupCopy("en", "onboarding.optionalCapabilities.menu.title")]: "channels",
+        [resolveSetupCopy("en", "setupEditor.prompt.channels.title")]: "whatsapp",
+        [resolveSetupCopy("en", "onboarding.optionalCapabilities.more.title")]: false,
+        __prompt: ["", "n"],
+      }),
+      flowEngine: flowEngine({ credentialAction: "none" }),
+      whatsappSetupDependencies: whatsappDepsWithMissingBridge(),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8").catch(() => "{}");
+    const config = JSON.parse(rawConfig) as { channels?: unknown };
+
+    expect(result.completed).toBe(true);
+    expect(result.wizardState.optionalCapabilities?.channels?.whatsapp).toBe("skipped");
+    expect(config.channels).toBeUndefined();
+  });
+
+  it("records localized WhatsApp dependency decline as skipped without writing partial config", async () => {
+    const output: string[] = [];
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        "Setup language": "العربية",
+        [resolveSetupCopy("ar", "onboarding.optionalCapabilities.title")]: true,
+        [resolveSetupCopy("ar", "onboarding.optionalCapabilities.menu.title")]: "channels",
+        [resolveSetupCopy("ar", "setupEditor.prompt.channels.title")]: "whatsapp",
+        [resolveSetupCopy("ar", "onboarding.optionalCapabilities.more.title")]: false,
+        __prompt: ["", "لا"],
+      }),
+      flowEngine: flowEngine({ credentialAction: "none" }),
+      whatsappSetupDependencies: whatsappDepsWithMissingBridge(),
+      output: { write: (value) => output.push(value) },
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8").catch(() => "{}");
+    const config = JSON.parse(rawConfig) as { channels?: unknown };
+
+    expect(result.completed).toBe(true);
+    expect(result.wizardState.interfacePreferences?.language).toBe("ar");
+    expect(result.wizardState.optionalCapabilities?.channels?.whatsapp).toBe("skipped");
+    expect(output.join("")).toContain(`تم إلغاء إعداد ${isolateLtr("WhatsApp")}`);
+    expect(config.channels).toBeUndefined();
+  });
+
+  it("continues onboarding when WhatsApp dependency install fails without writing partial config", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        [resolveSetupCopy("en", "onboarding.optionalCapabilities.title")]: true,
+        [resolveSetupCopy("en", "onboarding.optionalCapabilities.menu.title")]: "channels",
+        [resolveSetupCopy("en", "setupEditor.prompt.channels.title")]: "whatsapp",
+        [resolveSetupCopy("en", "onboarding.optionalCapabilities.more.title")]: false,
+        __prompt: ["", "y"],
+      }),
+      flowEngine: flowEngine({ credentialAction: "none" }),
+      whatsappSetupDependencies: whatsappDepsWithMissingBridge({ installError: new Error("offline") }),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8").catch(() => "{}");
+    const config = JSON.parse(rawConfig) as { channels?: unknown };
+
+    expect(result.completed).toBe(true);
+    expect(result.wizardState.optionalCapabilities?.channels?.whatsapp).toBe("incomplete");
+    expect(config.channels).toBeUndefined();
+  });
+
+  it("continues onboarding when WhatsApp QR pairing times out without writing partial config", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        [resolveSetupCopy("en", "onboarding.optionalCapabilities.title")]: true,
+        [resolveSetupCopy("en", "onboarding.optionalCapabilities.menu.title")]: "channels",
+        [resolveSetupCopy("en", "setupEditor.prompt.channels.title")]: "whatsapp",
+        [resolveSetupCopy("en", "onboarding.optionalCapabilities.more.title")]: false,
+        __prompt: ["", "1", "971501234567"],
+      }),
+      flowEngine: flowEngine({ credentialAction: "none" }),
+      whatsappSetupDependencies: whatsappDepsWithInstalledBridge({
+        pairDevice: vi.fn(async () => ({ ok: false as const, reason: "timeout" as const })),
+      }),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8").catch(() => "{}");
+    const config = JSON.parse(rawConfig) as { channels?: unknown };
+
+    expect(result.completed).toBe(true);
+    expect(result.wizardState.optionalCapabilities?.channels?.whatsapp).toBe("incomplete");
+    expect(config.channels).toBeUndefined();
+  });
+
+  it("continues onboarding when WhatsApp QR pairing fails without writing partial config", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        [resolveSetupCopy("en", "onboarding.optionalCapabilities.title")]: true,
+        [resolveSetupCopy("en", "onboarding.optionalCapabilities.menu.title")]: "channels",
+        [resolveSetupCopy("en", "setupEditor.prompt.channels.title")]: "whatsapp",
+        [resolveSetupCopy("en", "onboarding.optionalCapabilities.more.title")]: false,
+        __prompt: ["", "2", "971501234567"],
+      }),
+      flowEngine: flowEngine({ credentialAction: "none" }),
+      whatsappSetupDependencies: whatsappDepsWithInstalledBridge({
+        pairDevice: vi.fn(async () => ({ ok: false as const, reason: "failed" as const, message: "socket closed" })),
+      }),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8").catch(() => "{}");
+    const config = JSON.parse(rawConfig) as { channels?: unknown };
+
+    expect(result.completed).toBe(true);
+    expect(result.wizardState.optionalCapabilities?.channels?.whatsapp).toBe("incomplete");
+    expect(config.channels).toBeUndefined();
+  });
+
+  it("keeps blank WhatsApp onboarding allowlists in pairing-pending mode without opening access", async () => {
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        [resolveSetupCopy("en", "onboarding.optionalCapabilities.title")]: true,
+        [resolveSetupCopy("en", "onboarding.optionalCapabilities.menu.title")]: "channels",
+        [resolveSetupCopy("en", "setupEditor.prompt.channels.title")]: "whatsapp",
+        [resolveSetupCopy("en", "onboarding.optionalCapabilities.more.title")]: false,
+        __prompt: ["", "2", ""],
+      }),
+      flowEngine: flowEngine({ credentialAction: "none" }),
+      whatsappSetupDependencies: whatsappDepsWithInstalledBridge({ pairDevice: successfulWhatsAppPairDevice() }),
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      channels?: { whatsapp?: { dmPolicy?: string; allowedUsers?: string[] } };
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.wizardState.optionalCapabilities?.channels?.whatsapp).toBe("incomplete");
+    expect(config.channels?.whatsapp?.dmPolicy).toBe("pairing");
+    expect(config.channels?.whatsapp?.allowedUsers).toEqual([]);
+    expect(JSON.stringify(config.channels?.whatsapp)).not.toContain("open");
   });
 
   it("does not re-add Codex, catalog-only, or media providers filtered out by the shared flow", async () => {

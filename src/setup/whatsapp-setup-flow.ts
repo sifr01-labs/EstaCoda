@@ -38,7 +38,16 @@ export type WhatsAppSetupResult = {
   handled: true;
   exitCode: number;
   output: string;
+  failureReason?: WhatsAppSetupFailureReason;
 };
+
+export type WhatsAppSetupFailureReason =
+  | "dependency_declined"
+  | "dependency_failed"
+  | "repair_declined"
+  | "invalid_mode"
+  | "pairing_timeout"
+  | "pairing_failed";
 
 export type WhatsAppPairDeviceOptions = {
   authDir: string;
@@ -65,6 +74,7 @@ export type WhatsAppSetupFlowOptions = {
   output?: WhatsAppSetupOutput;
   dependencies?: WhatsAppSetupDependencies;
   source: WhatsAppSetupSource;
+  locale?: UiLanguage;
 };
 
 type ResolvedWhatsAppSetupCopy = {
@@ -103,7 +113,7 @@ export async function runWhatsAppSetupFlow(options: WhatsAppSetupFlowOptions): P
     homeDir: options.homeDir,
     profileId: options.profileId
   });
-  const locale = loaded.ui.language === "ar" ? "ar" : "en";
+  const locale = options.locale ?? (loaded.ui.language === "ar" ? "ar" : "en");
   const copy = setupFlowCopy(locale);
   const lines: string[] = [];
   const write = (chunk: string) => {
@@ -127,13 +137,13 @@ export async function runWhatsAppSetupFlow(options: WhatsAppSetupFlowOptions): P
   if (dependencyStatus.missing.length > 0) {
     if (!yes(await ask(options.prompt, copy.dependenciesMissingQuestion))) {
       say(copy.dependenciesDeclined);
-      return finish(1, lines);
+      return finish(1, lines, [], "dependency_declined");
     }
     try {
       await installDependencies({ bridgeDir, logPath: join(paths.logsPath, "whatsapp-bridge-install.log") });
     } catch (error) {
       say(copy.dependenciesFailed(installErrorMessage(error)));
-      return finish(1, lines);
+      return finish(1, lines, [], "dependency_failed");
     }
   }
 
@@ -144,7 +154,7 @@ export async function runWhatsAppSetupFlow(options: WhatsAppSetupFlowOptions): P
   if (state !== "fresh") {
     if (!yes(await ask(options.prompt, copy.repairQuestion))) {
       say(copy.repairDeclined);
-      return finish(1, lines);
+      return finish(1, lines, [], "repair_declined");
     }
     await clearProfileLocalAuthDir(authDir, paths.gatewayStatePath);
   }
@@ -152,7 +162,7 @@ export async function runWhatsAppSetupFlow(options: WhatsAppSetupFlowOptions): P
   const mode = normalizeMode(await ask(options.prompt, copy.modeBlock));
   if (mode === undefined) {
     say(copy.modeInvalid);
-    return finish(1, lines);
+    return finish(1, lines, [], "invalid_mode");
   }
   say(mode === "bot" ? copy.modeSelectedDedicated : copy.modeSelectedPersonal);
   say(mode === "bot" ? copy.dedicatedGuidance : copy.personalGuidance);
@@ -185,7 +195,7 @@ export async function runWhatsAppSetupFlow(options: WhatsAppSetupFlowOptions): P
   });
   if (!pairResult.ok) {
     say(pairResult.reason === "timeout" ? copy.pairingTimeout : copy.pairingFailed(pairResult.message ?? "unknown error"));
-    return finish(1, lines);
+    return finish(1, lines, [], pairResult.reason === "timeout" ? "pairing_timeout" : "pairing_failed");
   }
 
   await setupWhatsAppConfig({
@@ -258,9 +268,16 @@ async function ask(prompt: WhatsAppSetupPrompt | undefined, question: string): P
   return prompt(question);
 }
 
-function finish(exitCode: number, lines: string[], qrOutput: string[] = []): WhatsAppSetupResult {
+function finish(
+  exitCode: number,
+  lines: string[],
+  qrOutput: string[] = [],
+  failureReason?: WhatsAppSetupFailureReason
+): WhatsAppSetupResult {
   const output = [...qrOutput, lines.join("\n")].filter((part) => part.length > 0).join(qrOutput.length > 0 ? "\n" : "");
-  return { handled: true, exitCode, output };
+  return failureReason === undefined
+    ? { handled: true, exitCode, output }
+    : { handled: true, exitCode, output, failureReason };
 }
 
 function yes(value: string | undefined): boolean {

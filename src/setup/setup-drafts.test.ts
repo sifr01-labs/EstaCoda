@@ -271,6 +271,32 @@ describe("setup draft bundles", () => {
     });
   });
 
+  it("derives selected channel capability when onboarding configured WhatsApp", () => {
+    const bundle = buildOnboardingWizardDraftBundle(onboardingWizardState({
+      optionalCapabilities: {
+        channels: {
+          telegram: "not_set",
+          whatsapp: "configured",
+        },
+        voice: {
+          stt: "not_set",
+          tts: "not_set",
+        },
+        browser: "not_set",
+      },
+    }), {
+      configPath: "/tmp/home/.estacoda/config.json",
+      workspaceRoot: "/tmp/workspace",
+      trustStorePath: "/tmp/home/.estacoda/trust.json",
+    });
+    const optional = bundle.drafts.find((draft) => draft.kind === "optional-capability");
+
+    expect(optional?.review.values).toEqual({
+      skipped: false,
+      capabilities: ["channels"],
+    });
+  });
+
   it("keeps onboarding wizard credential data redacted through draft building", () => {
     const unsafeState = onboardingWizardState({
       credential: {

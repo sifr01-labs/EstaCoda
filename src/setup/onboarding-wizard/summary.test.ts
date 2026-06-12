@@ -32,6 +32,7 @@ describe("onboarding wizard summary", () => {
       optionalCapabilities: {
         channels: {
           telegram: "configured",
+          whatsapp: "configured",
         },
         voice: {
           stt: "configured",
@@ -54,6 +55,7 @@ describe("onboarding wizard summary", () => {
       "Agent Evolution: suggest",
       "Optional Capabilities:",
       "  - Channels / Telegram: Configured",
+      "  - Channels / WhatsApp: Configured",
       "  - Voice STT: Configured",
       "  - Voice TTS: Not set",
       "  - Browser: Configured",
@@ -83,6 +85,7 @@ describe("onboarding wizard summary", () => {
       optionalCapabilities: {
         channels: {
           telegram: "not_set",
+          whatsapp: "incomplete",
         },
         voice: {
           stt: "configured",
@@ -105,6 +108,7 @@ describe("onboarding wizard summary", () => {
     expect(rendered).toContain(`تطوّر الوكيل: ${isolateLtr("suggest")}`);
     expect(rendered).toContain("القدرات الاختيارية:");
     expect(rendered).toContain(`القنوات / ${isolateLtr("Telegram")}: غير مهيأ`);
+    expect(rendered).toContain(`القنوات / ${isolateLtr("WhatsApp")}: الإعداد غير مكتمل`);
     expect(rendered).toContain(`الصوت ${isolateLtr("STT")}: مهيأ`);
     expect(rendered).toContain(`الصوت ${isolateLtr("TTS")}: غير مهيأ`);
     expect(rendered).toContain("المتصفح: مهيأ");
@@ -126,6 +130,7 @@ describe("onboarding wizard summary", () => {
       "Agent Evolution: Not set",
       "Optional Capabilities:",
       "  - Channels / Telegram: Not set",
+      "  - Channels / WhatsApp: Not set",
       "  - Voice STT: Not set",
       "  - Voice TTS: Not set",
       "  - Browser: Not set",
@@ -168,12 +173,16 @@ describe("onboarding wizard summary", () => {
 
   it("renders optional capability and trust labels deterministically", () => {
     expect(optionalCapabilityStatusLabel("configured")).toBe("Configured");
+    expect(optionalCapabilityStatusLabel("skipped")).toBe("Skipped");
+    expect(optionalCapabilityStatusLabel("incomplete")).toBe("Setup incomplete");
     expect(optionalCapabilityStatusLabel("not_set")).toBe("Not set");
     expect(optionalCapabilityStatusLabel(undefined)).toBe("Not set");
     expect(workspaceTrustStatusLabel("trusted")).toBe("trusted");
     expect(workspaceTrustStatusLabel("untrusted")).toBe("untrusted");
     expect(workspaceTrustStatusLabel(undefined)).toBe("untrusted");
     expect(optionalCapabilityStatusLabel("configured", "ar")).toBe("مهيأ");
+    expect(optionalCapabilityStatusLabel("skipped", "ar")).toBe("تم التخطي");
+    expect(optionalCapabilityStatusLabel("incomplete", "ar")).toBe("الإعداد غير مكتمل");
     expect(optionalCapabilityStatusLabel("not_set", "ar")).toBe("غير مهيأ");
     expect(workspaceTrustStatusLabel("trusted", "ar")).toBe("موثوقة");
     expect(workspaceTrustStatusLabel("untrusted", "ar")).toBe("غير موثوقة");

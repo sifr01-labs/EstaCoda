@@ -33,6 +33,7 @@ export function renderOnboardingWizardSummary(
     `${label("onboarding.summary.labels.agentEvolution")}: ${value(state.agentEvolution)}`,
     `${label("onboarding.summary.labels.optionalCapabilities")}:`,
     `  - ${label("onboarding.summary.labels.channelsTelegram")}: ${optionalCapabilityStatusLabel(optionalCapabilities?.channels?.telegram, locale)}`,
+    `  - ${label("onboarding.summary.labels.channelsWhatsApp")}: ${optionalCapabilityStatusLabel(optionalCapabilities?.channels?.whatsapp, locale)}`,
     `  - ${label("onboarding.summary.labels.voiceStt")}: ${optionalCapabilityStatusLabel(optionalCapabilities?.voice?.stt, locale)}`,
     `  - ${label("onboarding.summary.labels.voiceTts")}: ${optionalCapabilityStatusLabel(optionalCapabilities?.voice?.tts, locale)}`,
     `  - ${label("onboarding.summary.labels.browser")}: ${optionalCapabilityStatusLabel(optionalCapabilities?.browser, locale)}`,
@@ -61,6 +62,10 @@ export function optionalCapabilityStatusLabel(
   switch (status) {
     case "configured":
       return summaryCopy(locale, "onboarding.summary.status.configured");
+    case "skipped":
+      return summaryCopy(locale, "onboarding.summary.status.skipped");
+    case "incomplete":
+      return summaryCopy(locale, "onboarding.summary.status.incomplete");
     case "not_set":
     case undefined:
       return summaryCopy(locale, "onboarding.summary.status.notSet");
@@ -92,6 +97,7 @@ type SummaryLabelKey =
   | "onboarding.summary.labels.agentEvolution"
   | "onboarding.summary.labels.optionalCapabilities"
   | "onboarding.summary.labels.channelsTelegram"
+  | "onboarding.summary.labels.channelsWhatsApp"
   | "onboarding.summary.labels.voiceStt"
   | "onboarding.summary.labels.voiceTts"
   | "onboarding.summary.labels.browser";

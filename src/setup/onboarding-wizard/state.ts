@@ -11,7 +11,7 @@ export type OnboardingCredentialSummaryStatus =
 
 export type OnboardingWorkspaceTrustStatus = "trusted" | "untrusted";
 
-export type OnboardingOptionalCapabilitySummaryStatus = "configured" | "not_set";
+export type OnboardingOptionalCapabilitySummaryStatus = "configured" | "not_set" | "skipped" | "incomplete";
 
 export type OnboardingSupportedOptionalCapabilityId = "channels" | "voice" | "browser";
 
@@ -54,6 +54,7 @@ export type OnboardingOptionalCapabilityDraftId = OnboardingSupportedOptionalCap
 export type OnboardingOptionalCapabilitySummaries = {
   readonly channels?: {
     readonly telegram?: OnboardingOptionalCapabilitySummaryStatus;
+    readonly whatsapp?: OnboardingOptionalCapabilitySummaryStatus;
   };
   readonly voice?: {
     readonly stt?: OnboardingOptionalCapabilitySummaryStatus;

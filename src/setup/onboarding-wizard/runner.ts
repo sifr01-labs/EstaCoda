@@ -14,6 +14,7 @@ import {
 } from "../../providers/provider-model-selection-flow.js";
 import type {
   OnboardingCredentialSummaryStatus,
+  OnboardingOptionalCapabilitySummaryStatus,
   OnboardingOptionalCapabilitySummaries,
   OnboardingSupportedOptionalCapabilityId,
   OnboardingWizardSelections,
@@ -59,6 +60,7 @@ import {
 } from "../setup-prompts.js";
 import {
   promptModelCandidate,
+  promptChannelCapability,
   promptProviderCandidate,
   promptVoiceCapability,
 } from "../config-editor/prompts.js";
@@ -74,9 +76,14 @@ import {
 import {
   browserSetupModule,
   telegramSetupModule,
+  whatsappSetupModule,
   voiceSetupModule,
   type SetupModuleContext,
 } from "../setup-modules.js";
+import {
+  runWhatsAppSetupFlow,
+  type WhatsAppSetupDependencies,
+} from "../whatsapp-setup-flow.js";
 
 export type FirstRunSetupRunnerOptions = CollectSetupEntryStateOptions & {
   readonly prompt: Prompt;
@@ -87,6 +94,7 @@ export type FirstRunSetupRunnerOptions = CollectSetupEntryStateOptions & {
   readonly gatewayServiceActivation?: {
     readonly serviceActions?: GatewayServiceActivationOptions["serviceActions"];
   };
+  readonly whatsappSetupDependencies?: WhatsAppSetupDependencies;
   readonly output?: {
     readonly write: (value: string) => void;
   };
@@ -116,6 +124,9 @@ type OnboardingOptionalCapabilityFlowResult = {
   readonly summaries: OnboardingOptionalCapabilitySummaries;
   readonly drafts: readonly SetupDraft[];
   readonly pendingCredentialWrites: readonly PendingCredentialWrite[];
+  readonly channelSummaries?: {
+    readonly whatsapp?: OnboardingOptionalCapabilitySummaryStatus;
+  };
 };
 
 export async function runFirstRunSetup(
@@ -699,6 +710,7 @@ async function chooseOptionalCapabilities(
   const selected = new Set<OnboardingSupportedOptionalCapabilityId>();
   const draftMap = new Map<OnboardingSupportedOptionalCapabilityId, readonly SetupDraft[]>();
   const pendingCredentialWrites: PendingCredentialWrite[] = [];
+  const channelSummaries: { whatsapp?: OnboardingOptionalCapabilitySummaryStatus } = {};
 
   if (!configureNow) {
     return onboardingOptionalCapabilityResult(context, selected, draftMap, pendingCredentialWrites);
@@ -714,8 +726,11 @@ async function chooseOptionalCapabilities(
     if (collected.kind === "configured") {
       context = collected.context;
       selected.add(action);
-      draftMap.set(action, collected.drafts);
+      draftMap.set(action, [...(draftMap.get(action) ?? []), ...collected.drafts]);
       pendingCredentialWrites.push(...collected.pendingCredentialWrites);
+    }
+    if (collected.channelSummaries?.whatsapp !== undefined) {
+      channelSummaries.whatsapp = collected.channelSummaries.whatsapp;
     }
 
     if (onboardingOptionalCapabilityActions(context).length === 0) {
@@ -746,7 +761,7 @@ async function chooseOptionalCapabilities(
     }
   }
 
-  return onboardingOptionalCapabilityResult(context, selected, draftMap, pendingCredentialWrites);
+  return onboardingOptionalCapabilityResult(context, selected, draftMap, pendingCredentialWrites, channelSummaries);
 }
 
 async function promptOnboardingOptionalCapabilityAction(
@@ -775,7 +790,10 @@ function onboardingOptionalCapabilityActions(
   context: SetupModuleContext
 ): readonly OnboardingSupportedOptionalCapabilityId[] {
   const actions: OnboardingSupportedOptionalCapabilityId[] = [];
-  if (telegramSetupModule.detect(context).status !== "configured") {
+  if (
+    telegramSetupModule.detect(context).status !== "configured" ||
+    whatsappSetupModule.detect(context).status !== "configured"
+  ) {
     actions.push("channels");
   }
   if (context.voice?.sttProvider === undefined || context.voice.ttsProvider === undefined) {
@@ -832,14 +850,49 @@ async function collectOnboardingOptionalCapability(
       readonly context: SetupModuleContext;
       readonly drafts: readonly SetupDraft[];
       readonly pendingCredentialWrites: readonly PendingCredentialWrite[];
+      readonly channelSummaries?: {
+        readonly whatsapp?: OnboardingOptionalCapabilitySummaryStatus;
+      };
     }
   | {
       readonly kind: "skip" | "unchanged";
+      readonly channelSummaries?: {
+        readonly whatsapp?: OnboardingOptionalCapabilitySummaryStatus;
+      };
     }
 > {
-  const module = action === "channels"
-    ? telegramSetupModule
-    : action === "voice" ? voiceSetupModule : browserSetupModule;
+  if (action === "channels") {
+    const channel = await promptChannelCapability(options.prompt, locale);
+    if (channel === "whatsapp") {
+      return collectOnboardingWhatsAppSetup(options, locale, context);
+    }
+    const module = telegramSetupModule;
+    const collected = await collectOptionalCapabilityContext({
+      homeDir: options.homeDir,
+      profileId: options.profileId,
+      workspaceRoot: context.workspaceRoot ?? options.workspaceRoot,
+      trustStorePath: context.trustStorePath,
+      configPath: context.configPath,
+      prompt: options.prompt,
+      locale,
+    }, context, module);
+
+    if (collected.kind !== "configured") {
+      return collected;
+    }
+
+    const configuration = module.configure(collected.context);
+    return {
+      kind: "configured",
+      context: collected.context,
+      drafts: module.toDrafts(collected.context, configuration),
+      pendingCredentialWrites: collected.pendingCredentialWrite === undefined
+        ? []
+        : [collected.pendingCredentialWrite],
+    };
+  }
+
+  const module = action === "voice" ? voiceSetupModule : browserSetupModule;
   const voiceMode = action === "voice"
     ? await promptVoiceCapability(options.prompt, locale)
     : undefined;
@@ -877,11 +930,90 @@ async function collectOnboardingOptionalCapability(
   };
 }
 
+async function collectOnboardingWhatsAppSetup(
+  options: FirstRunSetupRunnerOptions,
+  locale: SetupCopyLocale,
+  context: SetupModuleContext
+): Promise<
+  | {
+      readonly kind: "configured";
+      readonly context: SetupModuleContext;
+      readonly drafts: readonly SetupDraft[];
+      readonly pendingCredentialWrites: readonly PendingCredentialWrite[];
+      readonly channelSummaries?: { readonly whatsapp?: OnboardingOptionalCapabilitySummaryStatus };
+    }
+  | {
+      readonly kind: "skip" | "unchanged";
+      readonly channelSummaries?: { readonly whatsapp?: OnboardingOptionalCapabilitySummaryStatus };
+    }
+> {
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+  const stateHome = resolveStateHome({ homeDir: options.homeDir });
+  const result = await runWhatsAppSetupFlow({
+    workspaceRoot: context.workspaceRoot ?? options.workspaceRoot,
+    homeDir: stateHome.homeDir,
+    profileId,
+    prompt: options.prompt,
+    output: {
+      write: (chunk) => {
+        write(options, chunk);
+      },
+    },
+    dependencies: options.whatsappSetupDependencies,
+    source: "onboarding",
+    locale,
+  });
+  write(options, `${result.output}\n`);
+
+  if (result.exitCode !== 0) {
+    const status: OnboardingOptionalCapabilitySummaryStatus = (
+      result.failureReason === "dependency_declined" ||
+      result.failureReason === "repair_declined" ||
+      result.failureReason === "invalid_mode"
+    )
+      ? "skipped"
+      : "incomplete";
+    return {
+      kind: "skip",
+      channelSummaries: { whatsapp: status },
+    };
+  }
+
+  const loaded = await loadRuntimeConfig({
+    workspaceRoot: context.workspaceRoot ?? options.workspaceRoot,
+    homeDir: stateHome.homeDir,
+    profileId,
+  });
+  const updatedContext = setupModuleContextFromConfig({
+    homeDir: stateHome.homeDir,
+    profileId,
+    workspaceRoot: context.workspaceRoot ?? options.workspaceRoot,
+    trustStorePath: context.trustStorePath,
+    configPath: context.configPath,
+  }, loaded.config, {
+    provider: context.provider?.id,
+    model: context.provider?.model,
+    workspaceTrusted: context.workspaceTrust?.trusted,
+    securityMode: context.securityMode,
+    workflowLearning: context.workflowLearning,
+  });
+  const whatsappStatus: OnboardingOptionalCapabilitySummaryStatus =
+    (loaded.config.channels?.whatsapp?.allowedUsers?.length ?? 0) > 0 ? "configured" : "incomplete";
+  return {
+    kind: "configured",
+    context: updatedContext,
+    drafts: [],
+    pendingCredentialWrites: [],
+    channelSummaries: { whatsapp: whatsappStatus },
+  };
+}
+
 function onboardingOptionalCapabilityResult(
   context: SetupModuleContext,
   selected: ReadonlySet<OnboardingSupportedOptionalCapabilityId>,
   draftMap: ReadonlyMap<OnboardingSupportedOptionalCapabilityId, readonly SetupDraft[]>,
-  pendingCredentialWrites: readonly PendingCredentialWrite[]
+  pendingCredentialWrites: readonly PendingCredentialWrite[],
+  channelSummaries: { readonly whatsapp?: OnboardingOptionalCapabilitySummaryStatus } = {}
 ): OnboardingOptionalCapabilityFlowResult {
   return {
     selected: [...selected],
@@ -889,6 +1021,7 @@ function onboardingOptionalCapabilityResult(
       selected: [...selected],
       channels: {
         telegram: telegramSetupModule.detect(context).status === "configured" ? "configured" : "not_set",
+        whatsapp: channelSummaries.whatsapp ?? (whatsappSetupModule.detect(context).status === "configured" ? "configured" : "not_set"),
       },
       voice: {
         stt: context.voice?.sttProvider === undefined ? "not_set" : "configured",
