@@ -1,16 +1,17 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-06-12T03:30:25.390Z",
+  "generatedAt": "2026-06-12T03:42:29.730Z",
   "counts": {
-    "total": 3,
+    "total": 7,
     "bySource": {
-      "official": 3
+      "official": 7
     },
     "byTrust": {
-      "official": 3
+      "official": 7
     },
     "byConfirmation": {
-      "policy": 3
+      "policy": 4,
+      "ask": 3
     }
   }
 }

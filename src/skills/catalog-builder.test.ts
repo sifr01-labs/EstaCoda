@@ -76,11 +76,11 @@ describe("skills catalog builder", () => {
     await writeSkill(repoRoot, "skills/official/ascii-video/SKILL.md", validFrontmatter({
       name: "ascii-video"
     }));
-    await writeSkill(repoRoot, "skills/official/telegram-media-analysis/SKILL.md", validFrontmatter({
-      name: "telegram-media-analysis"
+    await writeSkill(repoRoot, "skills/official/product-builder/SKILL.md", validFrontmatter({
+      name: "product-builder"
     }));
-    await writeSkill(repoRoot, "skills/official/youtube-knowledge-base/SKILL.md", validFrontmatter({
-      name: "youtube-knowledge-base"
+    await writeSkill(repoRoot, "skills/official/skillify/SKILL.md", validFrontmatter({
+      name: "skillify"
     }));
 
     const result = await buildSkillsCatalog({ repoRoot, writeOutput: false });
@@ -92,14 +92,14 @@ describe("skills catalog builder", () => {
     }))).toEqual([
       { id: "official.ascii-video", slug: "ascii-video", name: "ASCII Video" },
       {
-        id: "official.telegram-media-analysis",
-        slug: "telegram-media-analysis",
-        name: "Telegram Media Analysis"
+        id: "official.product-builder",
+        slug: "product-builder",
+        name: "Product Builder"
       },
       {
-        id: "official.youtube-knowledge-base",
-        slug: "youtube-knowledge-base",
-        name: "YouTube Knowledge Base"
+        id: "official.skillify",
+        slug: "skillify",
+        name: "Skillify"
       }
     ]);
   });

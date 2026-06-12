@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-06-12T03:30:25.390Z",
+  "generatedAt": "2026-06-12T03:42:29.730Z",
   "skills": [
     {
       "id": "official.ascii-video",
@@ -47,38 +47,42 @@
       }
     },
     {
-      "id": "official.telegram-media-analysis",
-      "slug": "telegram-media-analysis",
-      "name": "Telegram Media Analysis",
-      "description": "Analyze media sent through a channel without asking the user for a local file path.",
-      "overview": "Use this skill when the user references media sent through Telegram or another channel.",
+      "id": "official.batch",
+      "slug": "batch",
+      "name": "Batch",
+      "description": "Research and plan a large-scale change across a codebase. Produces a decomposed plan with verification recipes, ready for user approval before execution.",
+      "overview": "Research and plan a large, parallelizable change across this codebase. This skill produces a decomposed plan ready for user approval. Actual execution happens in separate sessions or via `delegate_task` one unit at a time.",
       "labels": [
-        "attachment-analysis"
+        "batch-change",
+        "migration",
+        "large-refactor"
       ],
       "triggerPatterns": [
-        "image",
-        "document",
-        "file",
-        "audio",
-        "video",
-        "voice"
+        "/batch",
+        "migration across codebase",
+        "refactor across",
+        "bulk rename",
+        "replace all uses of"
       ],
       "requiredToolsets": [
-        "telegram",
-        "media",
-        "files"
+        "files",
+        "shell-readonly",
+        "research"
       ],
-      "optionalToolsets": [],
-      "playbookSteps": 3,
+      "optionalToolsets": [
+        "web",
+        "browser"
+      ],
+      "playbookSteps": 5,
       "evaluationCount": 1,
       "routing": {
-        "confirmation": "policy"
+        "confirmation": "ask"
       },
       "source": {
         "type": "official",
         "label": "Official",
-        "path": "skills/official/telegram-media-analysis/SKILL.md",
-        "githubUrl": "https://github.com/KemetResearch/EstaCoda/blob/main/skills/official/telegram-media-analysis/SKILL.md"
+        "path": "skills/official/batch/SKILL.md",
+        "githubUrl": "https://github.com/KemetResearch/EstaCoda/blob/main/skills/official/batch/SKILL.md"
       },
       "trust": {
         "level": "official",
@@ -87,29 +91,125 @@
       }
     },
     {
-      "id": "official.youtube-knowledge-base",
-      "slug": "youtube-knowledge-base",
-      "name": "YouTube Knowledge Base",
-      "description": "Extract video content and build a reusable knowledge base from a YouTube URL.",
-      "overview": "Use this skill when the user wants durable understanding from a YouTube video or similar video source.",
+      "id": "official.product-builder",
+      "slug": "product-builder",
+      "name": "Product Builder",
+      "description": "Guides non-technical builders through agent-assisted product development using decision maps, phased PRDs, vertical slices, reviewer-agent loops, and milestone control artifacts.",
+      "overview": "Use this skill when the user is building a product with AI agents and needs structured control over research, PRDs, builder-agent execution, reviewer-agent feedback, decision gates, documentation, dependency mapping, milestone reviews, or downstream product/architecture decisions.",
       "labels": [
-        "web-video",
-        "knowledge-base"
+        "product planning",
+        "prd creation",
+        "builder agent",
+        "reviewer agent",
+        "decision gate",
+        "milestone review"
       ],
       "triggerPatterns": [
-        "youtube.com",
-        "youtu.be",
-        "transcript"
+        "I want to build",
+        "turn this into a PRD",
+        "builder agent",
+        "reviewer agent",
+        "decision gate",
+        "vertical slice",
+        "product control",
+        "phase buildout",
+        "non technical founder",
+        "non-technical founder",
+        "product roadmap"
+      ],
+      "requiredToolsets": [
+        "core"
+      ],
+      "optionalToolsets": [
+        "files",
+        "shell-write",
+        "web",
+        "research"
+      ],
+      "playbookSteps": 12,
+      "evaluationCount": 4,
+      "routing": {
+        "confirmation": "policy"
+      },
+      "source": {
+        "type": "official",
+        "label": "Official",
+        "path": "skills/official/product-builder/SKILL.md",
+        "githubUrl": "https://github.com/KemetResearch/EstaCoda/blob/main/skills/official/product-builder/SKILL.md"
+      },
+      "trust": {
+        "level": "official",
+        "reviewed": true,
+        "governed": true
+      }
+    },
+    {
+      "id": "official.remember",
+      "slug": "remember",
+      "name": "Remember",
+      "description": "Review EstaCoda memory entries and propose promotions, cleanup, deduplication, and conflict fixes across memory layers.",
+      "overview": "Review the user's EstaCoda memory landscape and produce a clear report of proposed changes, grouped by action type. Do not apply changes until the user explicitly approves them.",
+      "labels": [
+        "memory-review",
+        "memory-hygiene",
+        "memory-promotion"
+      ],
+      "triggerPatterns": [
+        "/remember",
+        "review memory",
+        "clean up memory",
+        "promote memory",
+        "memory hygiene",
+        "dedupe memory"
+      ],
+      "requiredToolsets": [
+        "memory",
+        "research"
+      ],
+      "optionalToolsets": [],
+      "playbookSteps": 5,
+      "evaluationCount": 1,
+      "routing": {
+        "confirmation": "ask"
+      },
+      "source": {
+        "type": "official",
+        "label": "Official",
+        "path": "skills/official/remember/SKILL.md",
+        "githubUrl": "https://github.com/KemetResearch/EstaCoda/blob/main/skills/official/remember/SKILL.md"
+      },
+      "trust": {
+        "level": "official",
+        "reviewed": true,
+        "governed": true
+      }
+    },
+    {
+      "id": "official.simplify",
+      "slug": "simplify",
+      "name": "Simplify",
+      "description": "Review changed code for reuse, quality, and efficiency, then present findings for approval.",
+      "overview": "Review all changed files for reuse, quality, and efficiency. Present findings for approval before making any edits.",
+      "labels": [
+        "code-review",
+        "cleanup",
+        "refactor-review"
+      ],
+      "triggerPatterns": [
+        "/simplify",
+        "review my code",
+        "code review",
+        "review changes"
       ],
       "requiredToolsets": [
         "files",
-        "research"
+        "shell-readonly"
       ],
       "optionalToolsets": [
-        "web",
-        "browser"
+        "research",
+        "web"
       ],
-      "playbookSteps": 4,
+      "playbookSteps": 7,
       "evaluationCount": 1,
       "routing": {
         "confirmation": "policy"
@@ -117,8 +217,94 @@
       "source": {
         "type": "official",
         "label": "Official",
-        "path": "skills/official/youtube-knowledge-base/SKILL.md",
-        "githubUrl": "https://github.com/KemetResearch/EstaCoda/blob/main/skills/official/youtube-knowledge-base/SKILL.md"
+        "path": "skills/official/simplify/SKILL.md",
+        "githubUrl": "https://github.com/KemetResearch/EstaCoda/blob/main/skills/official/simplify/SKILL.md"
+      },
+      "trust": {
+        "level": "official",
+        "reviewed": true,
+        "governed": true
+      }
+    },
+    {
+      "id": "official.skillify",
+      "slug": "skillify",
+      "name": "Skillify",
+      "description": "Capture this session's repeatable process into an EstaCoda skill through a structured interview and review step, using governed skill creation tools.",
+      "overview": "Capture this session's repeatable process as a reusable EstaCoda skill, using governed skill creation tools.",
+      "labels": [
+        "skill-authoring",
+        "process-capture",
+        "agent-evolution"
+      ],
+      "triggerPatterns": [
+        "/skillify",
+        "turn this into a skill",
+        "save this as a skill",
+        "capture this workflow",
+        "make a skill from this",
+        "create a reusable skill"
+      ],
+      "requiredToolsets": [
+        "files",
+        "research"
+      ],
+      "optionalToolsets": [],
+      "playbookSteps": 5,
+      "evaluationCount": 1,
+      "routing": {
+        "confirmation": "ask"
+      },
+      "source": {
+        "type": "official",
+        "label": "Official",
+        "path": "skills/official/skillify/SKILL.md",
+        "githubUrl": "https://github.com/KemetResearch/EstaCoda/blob/main/skills/official/skillify/SKILL.md"
+      },
+      "trust": {
+        "level": "official",
+        "reviewed": true,
+        "governed": true
+      }
+    },
+    {
+      "id": "official.verify",
+      "slug": "verify",
+      "name": "Verify",
+      "description": "Verify a code change does what it should by running the app.",
+      "overview": "Verify a code change does what it should by running the app.",
+      "labels": [
+        "verification",
+        "testing",
+        "e2e-verify"
+      ],
+      "triggerPatterns": [
+        "/verify",
+        "test my change",
+        "did this work",
+        "check if it runs",
+        "run the tests",
+        "does it still work"
+      ],
+      "requiredToolsets": [
+        "files",
+        "shell-write",
+        "browser"
+      ],
+      "optionalToolsets": [
+        "web",
+        "shell-readonly"
+      ],
+      "playbookSteps": 3,
+      "evaluationCount": 1,
+      "routing": {
+        "confirmation": "policy"
+      },
+      "source": {
+        "type": "official",
+        "label": "Official",
+        "path": "skills/official/verify/SKILL.md",
+        "githubUrl": "https://github.com/KemetResearch/EstaCoda/blob/main/skills/official/verify/SKILL.md"
       },
       "trust": {
         "level": "official",

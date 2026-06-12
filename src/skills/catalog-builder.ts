@@ -387,7 +387,7 @@ function resolveDisplayName(frontmatter: UnknownRecord, slug: string, fieldPrefi
 
   const rawName = requireString(frontmatter.name, `${fieldPrefix}: name`);
   if (isMachineName(rawName)) {
-    return humanizeSkillName(rawName);
+    return isMachineName(slug) ? humanizeSkillName(slug) : humanizeSkillName(rawName);
   }
   if (isMachineName(slug)) {
     return humanizeSkillName(slug);
