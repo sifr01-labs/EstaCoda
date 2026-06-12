@@ -1,4 +1,4 @@
-import type { BrowserBackendKind } from "../contracts/browser.js";
+import type { BrowserBackendKind, BrowserCloudProviderKind } from "../contracts/browser.js";
 import type { ProviderId } from "../contracts/provider.js";
 import type { SecurityApprovalMode } from "../contracts/security.js";
 import type { ImageGenerationProvider, SttProvider, TtsProvider } from "../config/runtime-config.js";
@@ -71,12 +71,17 @@ export type SetupModuleContext = SetupDraftBundleOptions & {
   };
   readonly browser?: {
     readonly backend?: BrowserBackendKind;
+    readonly cloudProvider?: BrowserCloudProviderKind;
     readonly cdpUrl?: string;
     readonly launchCommand?: string;
     readonly launchExecutable?: string;
     readonly launchArgs?: readonly string[];
     readonly chromeFlags?: readonly string[];
     readonly autoLaunch?: boolean;
+    readonly supervised?: boolean;
+    readonly hybridRouting?: boolean;
+    readonly cloudFallback?: boolean;
+    readonly cloudSpendApproved?: boolean;
   };
   readonly voice?: {
     readonly ttsProvider?: TtsProvider;
@@ -436,11 +441,16 @@ export const browserSetupModule: SetupModule = optionalCapabilityModule({
   scope: ["browser"],
   value: (context) => ({
     backend: context.browser?.backend,
+    cloudProvider: context.browser?.cloudProvider,
     cdpUrl: context.browser?.cdpUrl,
     launchCommand: context.browser?.launchCommand,
     launchExecutable: context.browser?.launchExecutable,
     launchArgs: context.browser?.launchArgs,
     chromeFlags: context.browser?.chromeFlags,
+    supervised: context.browser?.supervised,
+    hybridRouting: context.browser?.hybridRouting,
+    cloudFallback: context.browser?.cloudFallback,
+    cloudSpendApproved: context.browser?.cloudSpendApproved,
     autoLaunchRequested: context.browser?.autoLaunch === true,
     autoLaunchWillRunNow: false,
   }),

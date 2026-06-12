@@ -1,6 +1,6 @@
 import type { Prompt } from "../../cli/readline-prompt.js";
 import { promptForApiKeyInput } from "../../cli/secret-prompt.js";
-import type { BrowserBackendKind } from "../../contracts/browser.js";
+import type { BrowserBackendKind, BrowserCloudProviderKind } from "../../contracts/browser.js";
 import type { AuxiliaryModelTask, ModelProfile } from "../../contracts/provider.js";
 import type { SecurityApprovalMode } from "../../contracts/security.js";
 import type { ImageGenerationProvider, SttProvider, TtsProvider } from "../../config/runtime-config.js";
@@ -40,6 +40,12 @@ export type VoiceCapabilityPromptId = "stt" | "tts";
 export type IncompleteTelegramCapabilityAction = "retry" | "skip" | "unchanged";
 
 export type CredentialReuseChoice = "existing" | "new";
+
+export type BrowserModeChoice =
+  | "local-supervised"
+  | "existing-cdp"
+  | "browserbase"
+  | "disabled";
 
 export type FallbackRouteChoice =
   | {
@@ -1042,36 +1048,143 @@ export async function promptBrowserCapability(
   prompt: Prompt,
   current: {
     readonly backend?: BrowserBackendKind;
+    readonly cloudProvider?: BrowserCloudProviderKind;
     readonly cdpUrl?: string;
     readonly launchExecutable?: string;
     readonly launchArgs?: readonly string[];
     readonly chromeFlags?: readonly string[];
     readonly launchCommand?: string;
+    readonly autoLaunch?: boolean;
+    readonly supervised?: boolean;
+    readonly hybridRouting?: boolean;
+    readonly cloudFallback?: boolean;
+    readonly cloudSpendApproved?: boolean;
   },
   locale: SetupCopyLocale = "en"
 ): Promise<{
   readonly backend: BrowserBackendKind;
-  readonly cdpUrl: string;
-  readonly launchExecutable: string;
+  readonly cloudProvider?: BrowserCloudProviderKind;
+  readonly cdpUrl?: string;
+  readonly launchExecutable?: string;
   readonly launchArgs: string[];
   readonly chromeFlags: string[];
   readonly launchCommand?: string;
-  readonly autoLaunch: false;
+  readonly autoLaunch: boolean;
+  readonly supervised?: boolean;
+  readonly hybridRouting?: boolean;
+  readonly cloudFallback?: boolean;
+  readonly cloudSpendApproved?: boolean;
 }> {
-  const backend = await promptSetupChoice(prompt, {
-    title: setupCopyText(locale, "setupModules.browser.title"),
-    message: `${setupCopyText(locale, "setupEditor.prompt.browser.summary")}\n${setupCopyText(locale, "setupEditor.prompt.browser.backend")}\n`,
-    choices: browserBackends.map((candidate) => ({
-      id: candidate,
-      label: candidate,
-      value: candidate,
-    })),
-    defaultValue: current.backend ?? "local-cdp",
+  const mode = await promptSetupChoice(prompt, {
+    title: setupCopyText(locale, "setupEditor.prompt.browser.mode.title"),
+    message: `${setupCopyText(locale, "setupEditor.prompt.browser.mode.body")}\n`,
+    choices: [
+      {
+        id: "browser-local-supervised",
+        label: setupCopyText(locale, "setupEditor.prompt.browser.mode.localSupervised"),
+        description: setupCopyText(locale, "setupEditor.prompt.browser.mode.localSupervised.description"),
+        value: "local-supervised" as const,
+      },
+      {
+        id: "browser-existing-cdp",
+        label: setupCopyText(locale, "setupEditor.prompt.browser.mode.existingCdp"),
+        description: setupCopyText(locale, "setupEditor.prompt.browser.mode.existingCdp.description"),
+        value: "existing-cdp" as const,
+      },
+      {
+        id: "browser-browserbase",
+        label: setupCopyText(locale, "setupEditor.prompt.browser.mode.browserbase"),
+        description: setupCopyText(locale, "setupEditor.prompt.browser.mode.browserbase.description"),
+        value: "browserbase" as const,
+      },
+      {
+        id: "browser-disabled",
+        label: setupCopyText(locale, "setupEditor.prompt.browser.mode.disable"),
+        description: setupCopyText(locale, "setupEditor.prompt.browser.mode.disable.description"),
+        value: "disabled" as const,
+      },
+    ],
+    defaultValue: browserModeFromCurrent(current),
+  });
+
+  if (mode === "disabled") {
+    return {
+      backend: "unconfigured",
+      launchArgs: [],
+      chromeFlags: [],
+      autoLaunch: false,
+      supervised: false,
+    };
+  }
+
+  if (mode === "browserbase") {
+    await showSetupCard(setupPromptContext(prompt, locale), {
+      title: setupCopyText(locale, "setupEditor.prompt.browser.cloud.title"),
+      bodyLines: [
+        setupCopyText(locale, "setupEditor.prompt.browser.cloud.body"),
+        "",
+        setupCopyText(locale, "setupEditor.prompt.browser.hybridRouting.description"),
+        setupCopyText(locale, "setupEditor.prompt.browser.cloudFallback.description"),
+      ],
+      options: [],
+    });
+    return {
+      backend: "browserbase",
+      cloudProvider: "browserbase",
+      launchArgs: [],
+      chromeFlags: [],
+      autoLaunch: false,
+      supervised: false,
+      hybridRouting: true,
+      cloudFallback: true,
+      cloudSpendApproved: false,
+    };
+  }
+
+  if (mode === "existing-cdp") {
+    const cdpUrl = await promptSetupStringWithDefault(
+      prompt,
+      setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.cdpUrl.required")),
+      current.cdpUrl ?? "http://127.0.0.1:9222"
+    );
+    return {
+      backend: "local-cdp",
+      cdpUrl: optionalTrimmedString(cdpUrl),
+      launchArgs: [],
+      chromeFlags: [],
+      launchCommand: current.launchCommand,
+      autoLaunch: false,
+      supervised: true,
+    };
+  }
+
+  const autoLaunch = await promptSetupChoice(prompt, {
+    title: setupCopyText(locale, "setupEditor.prompt.browser.local.title"),
+    message: [
+      setupCopyText(locale, "setupEditor.prompt.browser.local.body"),
+      setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch"),
+      "",
+    ].join("\n"),
+    choices: [
+      {
+        id: "browser-auto-launch-yes",
+        label: setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch.yes"),
+        description: setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch.description"),
+        value: true,
+      },
+      {
+        id: "browser-auto-launch-no",
+        label: setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch.no"),
+        description: setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch.no.description"),
+        value: false,
+      },
+    ],
+    defaultValue: current.autoLaunch ?? false,
   });
   const cdpUrl = await promptSetupStringWithDefault(
     prompt,
-    setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.cdpUrl")),
-    current.cdpUrl ?? "http://127.0.0.1:9222"
+    setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.cdpUrl.optional")),
+    current.cdpUrl ?? ""
   );
   const launchExecutable = await promptSetupStringWithDefault(
     prompt,
@@ -1090,20 +1203,38 @@ export async function promptBrowserCapability(
   );
 
   return {
-    backend,
-    cdpUrl,
-    launchExecutable: launchExecutable.trim(),
+    backend: "local-cdp",
+    cdpUrl: optionalTrimmedString(cdpUrl),
+    launchExecutable: optionalTrimmedString(launchExecutable),
     launchArgs: splitCsv(launchArgsInput),
     chromeFlags: splitCsv(chromeFlagsInput),
     launchCommand: current.launchCommand,
-    autoLaunch: false,
+    autoLaunch,
+    supervised: true,
   };
 }
 
 const ttsProviders: readonly TtsProvider[] = ["edge", "elevenlabs", "openai", "minimax", "mistral", "gemini", "xai", "neutts", "kittentts"];
 const sttProviders: readonly SttProvider[] = ["local", "groq", "openai", "mistral"];
 const imageProviders: readonly ImageGenerationProvider[] = ["fal", "byteplus"];
-const browserBackends: readonly BrowserBackendKind[] = ["local-cdp", "browserbase", "firecrawl", "camofox", "mock"];
+function browserModeFromCurrent(current: {
+  readonly backend?: BrowserBackendKind;
+  readonly cloudProvider?: BrowserCloudProviderKind;
+  readonly autoLaunch?: boolean;
+  readonly cdpUrl?: string;
+}): BrowserModeChoice {
+  if (current.backend === "unconfigured") return "disabled";
+  if (current.backend === "browserbase" || current.cloudProvider === "browserbase") return "browserbase";
+  if (current.backend === "local-cdp" && current.autoLaunch !== true && current.cdpUrl !== undefined && current.cdpUrl.trim().length > 0) {
+    return "existing-cdp";
+  }
+  return "local-supervised";
+}
+
+function optionalTrimmedString(value: string): string | undefined {
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? undefined : trimmed;
+}
 
 function splitCsv(value: string): string[] {
   return value

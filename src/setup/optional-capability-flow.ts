@@ -1,4 +1,4 @@
-import type { BrowserBackendKind } from "../contracts/browser.js";
+import type { BrowserBackendKind, BrowserCloudProviderKind } from "../contracts/browser.js";
 import type { ProviderId } from "../contracts/provider.js";
 import type {
   EstaCodaConfig,
@@ -132,12 +132,17 @@ export function setupModuleContextFromConfig(
       ? undefined
       : {
           backend: browserBackendValue(browser.backend),
+          cloudProvider: browserCloudProviderValue(browser.cloudProvider),
           cdpUrl: stringValue(browser.cdpUrl),
           launchCommand: stringValue(browser.launchCommand),
           launchExecutable: stringValue(browser.launchExecutable),
           launchArgs: stringArrayValue(browser.launchArgs),
           chromeFlags: stringArrayValue(browser.chromeFlags),
           autoLaunch: booleanValue(browser.autoLaunch),
+          supervised: booleanValue(browser.supervised),
+          hybridRouting: booleanValue(browser.hybridRouting),
+          cloudFallback: booleanValue(browser.cloudFallback),
+          cloudSpendApproved: booleanValue(browser.cloudSpendApproved),
         },
     voice,
     vision,
@@ -537,4 +542,8 @@ function browserBackendValue(value: unknown): BrowserBackendKind | undefined {
     value === "unconfigured"
     ? value
     : undefined;
+}
+
+function browserCloudProviderValue(value: unknown): BrowserCloudProviderKind | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value as BrowserCloudProviderKind : undefined;
 }

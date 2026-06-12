@@ -184,6 +184,41 @@ describe("setup modules", () => {
     expect(draft?.applyIntent.dryRunOnly).toBe(true);
   });
 
+  it("browser module carries browser mode review fields without secrets", () => {
+    const browserbaseDraft = browserSetupModule.toDrafts(context({
+      browser: {
+        backend: "browserbase",
+        cloudProvider: "browserbase",
+        hybridRouting: true,
+        cloudFallback: true,
+        cloudSpendApproved: false,
+      },
+    }))[0];
+    const disabledDraft = browserSetupModule.toDrafts(context({
+      browser: {
+        backend: "unconfigured",
+        autoLaunch: false,
+        supervised: false,
+      },
+    }))[0];
+
+    expect(browserbaseDraft?.review.values).toMatchObject({
+      backend: "browserbase",
+      cloudProvider: "browserbase",
+      hybridRouting: true,
+      cloudFallback: true,
+      cloudSpendApproved: false,
+      autoLaunchRequested: false,
+      autoLaunchWillRunNow: false,
+    });
+    expect(disabledDraft?.review.values).toMatchObject({
+      backend: "unconfigured",
+      supervised: false,
+      autoLaunchRequested: false,
+      autoLaunchWillRunNow: false,
+    });
+  });
+
   it("voice module does not print hosted secrets", () => {
     const draft = voiceSetupModule.toDrafts(context({
       voice: {

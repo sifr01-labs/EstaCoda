@@ -8,7 +8,7 @@ import type { ProviderId, ProviderApiMode, ProviderAuthMethod } from "../../cont
 import type { FlowEngine, ModelCandidate } from "../../providers/provider-model-selection-flow.js";
 import { createReviewedSetupApplyExecutor } from "../review/apply-executor.js";
 import { runConfigEditor } from "./runner.js";
-import { promptModelCandidate, setupEditorReviewSelectedAreaLabel } from "./prompts.js";
+import { promptBrowserCapability, promptModelCandidate, setupEditorReviewSelectedAreaLabel } from "./prompts.js";
 import type { SetupReviewManifest } from "../setup-review-manifest.js";
 import { resolveProfileStateHome, writeActiveProfile } from "../../config/profile-home.js";
 import { isolateLtr } from "../../ui/bidi.js";
@@ -2563,7 +2563,101 @@ describe("runConfigEditor", () => {
     expect(JSON.stringify(result)).not.toContain("sk-");
   });
 
-  it("configures browser without drafting other optional capabilities or auto-launching", async () => {
+  it("browser mode picker includes the four browser modes", async () => {
+    const seenOptions: string[] = [];
+    const prompt = fakePrompt({ values: ["disabled"] });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      if (input.title === "Browser mode") {
+        seenOptions.push(...input.options.map((option) => option.label));
+      }
+      return baseSelect(input);
+    };
+
+    const values = await promptBrowserCapability(prompt, {});
+
+    expect(values.backend).toBe("unconfigured");
+    expect(seenOptions).toEqual([
+      "Local supervised browser",
+      "Existing CDP browser",
+      "Browserbase cloud browser",
+      "Disable browser tools",
+    ]);
+  });
+
+  it("maps local supervised browser mode to flat browser config fields", async () => {
+    const values = await promptBrowserCapability(fakePrompt({
+      values: [
+        "local-supervised",
+        true,
+        "",
+        "/usr/bin/chromium",
+        "--headless=new",
+        "--no-first-run, --disable-gpu",
+      ],
+    }), {});
+
+    expect(values).toEqual({
+      backend: "local-cdp",
+      cdpUrl: undefined,
+      launchExecutable: "/usr/bin/chromium",
+      launchArgs: ["--headless=new"],
+      chromeFlags: ["--no-first-run", "--disable-gpu"],
+      launchCommand: undefined,
+      autoLaunch: true,
+      supervised: true,
+    });
+  });
+
+  it("maps existing CDP browser mode to flat browser config fields", async () => {
+    const values = await promptBrowserCapability(fakePrompt({
+      values: ["existing-cdp", "http://127.0.0.1:9222"],
+    }), {});
+
+    expect(values).toEqual({
+      backend: "local-cdp",
+      cdpUrl: "http://127.0.0.1:9222",
+      launchArgs: [],
+      chromeFlags: [],
+      launchCommand: undefined,
+      autoLaunch: false,
+      supervised: true,
+    });
+  });
+
+  it("maps Browserbase browser mode to flat browser config fields", async () => {
+    const values = await promptBrowserCapability(fakePrompt({
+      values: ["browserbase"],
+    }), {});
+
+    expect(values).toEqual({
+      backend: "browserbase",
+      cloudProvider: "browserbase",
+      launchArgs: [],
+      chromeFlags: [],
+      autoLaunch: false,
+      supervised: false,
+      hybridRouting: true,
+      cloudFallback: true,
+      cloudSpendApproved: false,
+    });
+  });
+
+  it("maps disabled browser mode to unconfigured backend", async () => {
+    const values = await promptBrowserCapability(fakePrompt({
+      values: ["disabled"],
+    }), {});
+
+    expect(values).toEqual({
+      backend: "unconfigured",
+      launchArgs: [],
+      chromeFlags: [],
+      autoLaunch: false,
+      supervised: false,
+    });
+  });
+
+  it("configures existing CDP browser without drafting other optional capabilities or auto-launching", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
 
@@ -2573,11 +2667,8 @@ describe("runConfigEditor", () => {
       prompt: fakePrompt({
         values: [
           "enable",
-          "local-cdp",
+          "existing-cdp",
           "http://127.0.0.1:1",
-          "/usr/bin/chromium",
-          "--headless=new",
-          "--no-first-run, --disable-gpu",
           true,
         ],
       }),
@@ -2601,6 +2692,7 @@ describe("runConfigEditor", () => {
         chromeFlags?: string[];
         launchCommand?: string;
         autoLaunch?: boolean;
+        supervised?: boolean;
       };
     };
     const browserLine = result.reviewManifest?.sections["enabled-optional-capabilities"]
@@ -2616,9 +2708,6 @@ describe("runConfigEditor", () => {
     expect(config.browser).toEqual({
       backend: "local-cdp",
       cdpUrl: "http://127.0.0.1:1",
-      launchExecutable: "/usr/bin/chromium",
-      launchArgs: ["--headless=new"],
-      chromeFlags: ["--no-first-run", "--disable-gpu"],
       autoLaunch: false,
     });
     expect(config.channels).toBeUndefined();
