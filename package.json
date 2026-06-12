@@ -41,6 +41,7 @@
     "estacoda": "./dist/index.js"
   },
   "scripts": {
+    "skills:catalog": "tsx scripts/build-skills-catalog.ts",
     "typecheck": "tsc --noEmit",
     "clean:dist": "node scripts/clean-dist.mjs",
     "build": "pnpm run clean:dist && tsc -p tsconfig.build.json",

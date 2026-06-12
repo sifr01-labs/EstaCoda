@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-06-12T03:30:25.390Z",
+  "skills": [
+    {
+      "id": "official.ascii-video",
+      "slug": "ascii-video",
+      "name": "ASCII Video",
+      "description": "Create ASCII art videos, animated logo treatments, and generative terminal-style motion pieces.",
+      "overview": "Use this skill when the user wants a finished ASCII animation or video artifact.",
+      "labels": [
+        "ascii-animation"
+      ],
+      "triggerPatterns": [
+        "ascii animation",
+        "terminal-style animation",
+        "animated terminal logo",
+        "ascii logo",
+        "ascii video",
+        "animated logo"
+      ],
+      "requiredToolsets": [
+        "media",
+        "files",
+        "shell-write"
+      ],
+      "optionalToolsets": [
+        "web",
+        "browser",
+        "research"
+      ],
+      "playbookSteps": 6,
+      "evaluationCount": 1,
+      "routing": {
+        "confirmation": "policy"
+      },
+      "source": {
+        "type": "official",
+        "label": "Official",
+        "path": "skills/official/ascii-video/SKILL.md",
+        "githubUrl": "https://github.com/KemetResearch/EstaCoda/blob/main/skills/official/ascii-video/SKILL.md"
+      },
+      "trust": {
+        "level": "official",
+        "reviewed": true,
+        "governed": true
+      }
+    },
+    {
+      "id": "official.telegram-media-analysis",
+      "slug": "telegram-media-analysis",
+      "name": "Telegram Media Analysis",
+      "description": "Analyze media sent through a channel without asking the user for a local file path.",
+      "overview": "Use this skill when the user references media sent through Telegram or another channel.",
+      "labels": [
+        "attachment-analysis"
+      ],
+      "triggerPatterns": [
+        "image",
+        "document",
+        "file",
+        "audio",
+        "video",
+        "voice"
+      ],
+      "requiredToolsets": [
+        "telegram",
+        "media",
+        "files"
+      ],
+      "optionalToolsets": [],
+      "playbookSteps": 3,
+      "evaluationCount": 1,
+      "routing": {
+        "confirmation": "policy"
+      },
+      "source": {
+        "type": "official",
+        "label": "Official",
+        "path": "skills/official/telegram-media-analysis/SKILL.md",
+        "githubUrl": "https://github.com/KemetResearch/EstaCoda/blob/main/skills/official/telegram-media-analysis/SKILL.md"
+      },
+      "trust": {
+        "level": "official",
+        "reviewed": true,
+        "governed": true
+      }
+    },
+    {
+      "id": "official.youtube-knowledge-base",
+      "slug": "youtube-knowledge-base",
+      "name": "YouTube Knowledge Base",
+      "description": "Extract video content and build a reusable knowledge base from a YouTube URL.",
+      "overview": "Use this skill when the user wants durable understanding from a YouTube video or similar video source.",
+      "labels": [
+        "web-video",
+        "knowledge-base"
+      ],
+      "triggerPatterns": [
+        "youtube.com",
+        "youtu.be",
+        "transcript"
+      ],
+      "requiredToolsets": [
+        "files",
+        "research"
+      ],
+      "optionalToolsets": [
+        "web",
+        "browser"
+      ],
+      "playbookSteps": 4,
+      "evaluationCount": 1,
+      "routing": {
+        "confirmation": "policy"
+      },
+      "source": {
+        "type": "official",
+        "label": "Official",
+        "path": "skills/official/youtube-knowledge-base/SKILL.md",
+        "githubUrl": "https://github.com/KemetResearch/EstaCoda/blob/main/skills/official/youtube-knowledge-base/SKILL.md"
+      },
+      "trust": {
+        "level": "official",
+        "reviewed": true,
+        "governed": true
+      }
+    }
+  ]
+}

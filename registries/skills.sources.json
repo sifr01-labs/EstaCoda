@@ -1,0 +1,9 @@
+[
+  {
+    "id": "estacoda-official",
+    "type": "local",
+    "path": "skills/official",
+    "sourceType": "official",
+    "label": "Official"
+  }
+]
