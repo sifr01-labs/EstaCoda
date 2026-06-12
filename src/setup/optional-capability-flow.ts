@@ -15,6 +15,7 @@ import type { SetupCopyLocale } from "./setup-copy.js";
 import { formatSetupCopy, setupCopyText, setupOutputLine, setupTechnicalToken } from "./setup-prompts.js";
 import type { SetupDeferredSecretWrite } from "./setup-apply-plan.js";
 import type { SetupDraft, SetupDraftBundle } from "./setup-drafts.js";
+import { BROWSERBASE_CREDENTIAL_ENV_VARS } from "./browser-diagnostics.js";
 import {
   browserSetupModule,
   discordSetupModule,
@@ -27,6 +28,7 @@ import {
 import type { SetupRouteDecision } from "./setup-router.js";
 import {
   promptBrowserCapability,
+  promptedBrowserCapabilityMode,
   promptDiscordCapability,
   promptIncompleteChannelCapabilityAction,
   promptIncompleteTelegramCapabilityAction,
@@ -352,6 +354,7 @@ export async function collectOptionalCapabilityContext(
           ...baseContext,
           browser: {
             ...values,
+            browserMode: promptedBrowserCapabilityMode(values),
             ...(browserbaseCredentials === undefined
               ? {}
               : {
@@ -370,11 +373,6 @@ export async function collectOptionalCapabilityContext(
       throw new Error(`Unsupported optional capability module: ${module.id}`);
   }
 }
-
-const BROWSERBASE_CREDENTIAL_ENV_VARS = [
-  "BROWSERBASE_API_KEY",
-  "BROWSERBASE_PROJECT_ID",
-] as const;
 
 async function collectBrowserbaseCredentials(options: OptionalCapabilityContextOptions & {
   readonly prompt: Prompt;

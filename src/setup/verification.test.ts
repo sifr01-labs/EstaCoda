@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect } from "vitest";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
@@ -12,6 +12,7 @@ import { setupVerificationCopy, setupVerificationCopyEn } from "./setup-verifica
 import type { ProviderDiagnostic } from "../config/provider-diagnostics.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { isolateLtr, isolateRtl } from "../ui/bidi.js";
+import type { Runtime } from "../runtime/create-runtime.js";
 
 function makeProviderDiagnostic(status: ProviderDiagnostic["status"], warnings: string[] = []): ProviderDiagnostic {
   return {
@@ -25,6 +26,10 @@ function profileEnvPath(homeDir: string): string {
   return resolveProfileStateHome({ homeDir, profileId: "default" }).envPath;
 }
 
+function profileConfigPath(homeDir: string): string {
+  return resolveProfileStateHome({ homeDir, profileId: "default" }).configPath;
+}
+
 function makeReport(overrides: Partial<SetupVerificationReport> = {}): SetupVerificationReport {
   return {
     stateWritable: true,
@@ -36,6 +41,12 @@ function makeReport(overrides: Partial<SetupVerificationReport> = {}): SetupVeri
     skillAutonomyLabel: "Suggest",
     skillAutonomyValue: "suggest",
     providerDiagnostic: makeProviderDiagnostic("ready"),
+    browserDiagnostic: {
+      status: "not-configured",
+      label: setupVerificationCopyEn.verification.browserStates.notConfigured,
+      lines: [],
+      warnings: [],
+    },
     toolStatus: "skipped",
     configSources: [],
     warnings: [],
@@ -146,6 +157,11 @@ describe("renderSetupVerificationReport", () => {
 });
 
 describe("collectSetupVerificationReport", () => {
+  afterEach(() => {
+    delete process.env.BROWSERBASE_API_KEY;
+    delete process.env.BROWSERBASE_PROJECT_ID;
+  });
+
   it("returns stateWritable true when state directory is writable", async () => {
     const tempHome = await mkdtemp(join(tmpdir(), "estacoda-verify-test-"));
     const workspaceRoot = join(tempHome, "workspace");
@@ -238,6 +254,143 @@ describe("collectSetupVerificationReport", () => {
     });
     expect(report.configSources.some((s) => s.includes(join(workspaceRoot, ".estacoda", "config.json")))).toBe(false);
   });
+
+  it("reports missing browser backend as not configured", async () => {
+    const { tempHome, workspaceRoot } = await setupVerificationFixture();
+    await writeProfileConfig(tempHome, { model: { provider: "unconfigured", id: "unconfigured" } });
+
+    const report = await collectSetupVerificationReport({ workspaceRoot, homeDir: tempHome });
+
+    expect(report.browserDiagnostic!.status).toBe("not-configured");
+    expect(report.browserDiagnostic!.label).toBe(setupVerificationCopyEn.verification.browserStates.notConfigured);
+  });
+
+  it("reports disabled browser backend as disabled", async () => {
+    const { tempHome, workspaceRoot } = await setupVerificationFixture();
+    await writeProfileConfig(tempHome, { browser: { backend: "unconfigured" } });
+
+    const report = await collectSetupVerificationReport({ workspaceRoot, homeDir: tempHome });
+
+    expect(report.browserDiagnostic!.status).toBe("disabled");
+    expect(report.browserDiagnostic!.label).toBe(setupVerificationCopyEn.verification.browserStates.disabled);
+  });
+
+  it("blocks existing CDP URLs that are missing or non-local", async () => {
+    const { tempHome, workspaceRoot } = await setupVerificationFixture();
+    await writeProfileConfig(tempHome, { browser: { backend: "local-cdp", autoLaunch: false, supervised: true } });
+
+    const missingUrl = await collectSetupVerificationReport({ workspaceRoot, homeDir: tempHome });
+    await writeProfileConfig(tempHome, { browser: { backend: "local-cdp", autoLaunch: false, supervised: true, cdpUrl: "http://example.com:9222" } });
+    const nonLocal = await collectSetupVerificationReport({ workspaceRoot, homeDir: tempHome });
+
+    expect(missingUrl.browserDiagnostic!.status).toBe("invalid");
+    expect(missingUrl.browserDiagnostic!.warnings).toContain(setupVerificationCopyEn.verification.browserWarnings.localSupervisedIncomplete);
+    expect(nonLocal.browserDiagnostic!.status).toBe("invalid");
+    expect(nonLocal.browserDiagnostic!.warnings).toContain(setupVerificationCopyEn.verification.browserWarnings.existingCdpNonLocal);
+  });
+
+  it("accepts localhost, 127.0.0.1, and ::1 CDP URLs in static validation", async () => {
+    const { tempHome, workspaceRoot } = await setupVerificationFixture();
+    const accepted = [
+      "http://localhost:9222",
+      "http://127.0.0.1:9222",
+      "http://[::1]:9222",
+    ];
+
+    for (const cdpUrl of accepted) {
+      await writeProfileConfig(tempHome, { browser: { backend: "local-cdp", autoLaunch: false, supervised: true, cdpUrl } });
+      const report = await collectSetupVerificationReport({ workspaceRoot, homeDir: tempHome });
+      expect(report.browserDiagnostic!.status).toBe("configured");
+      expect(report.browserDiagnostic!.label).toBe(setupVerificationCopyEn.verification.browserStates.configuredConnectionNotTested);
+      expect(report.browserDiagnostic!.warnings).toEqual([]);
+    }
+  });
+
+  it("blocks Browserbase when credential sources are missing", async () => {
+    const { tempHome, workspaceRoot } = await setupVerificationFixture();
+    await writeProfileConfig(tempHome, {
+      browser: {
+        backend: "browserbase",
+        cloudProvider: "browserbase",
+        hybridRouting: true,
+        cloudFallback: true,
+        cloudSpendApproved: false,
+      },
+    });
+
+    const report = await collectSetupVerificationReport({ workspaceRoot, homeDir: tempHome });
+
+    expect(report.browserDiagnostic!.status).toBe("invalid");
+    expect(JSON.stringify(report.browserDiagnostic!.warnings)).toContain("BROWSERBASE_API_KEY");
+    expect(JSON.stringify(report.browserDiagnostic!.warnings)).toContain("BROWSERBASE_PROJECT_ID");
+  });
+
+  it("reports Browserbase credentials with unapproved spend as runtime-blocked", async () => {
+    const { tempHome, workspaceRoot } = await setupVerificationFixture();
+    process.env.BROWSERBASE_API_KEY = "bb-api-secret";
+    process.env.BROWSERBASE_PROJECT_ID = "bb-project-secret";
+    await writeProfileConfig(tempHome, {
+      browser: {
+        backend: "browserbase",
+        cloudProvider: "browserbase",
+        hybridRouting: true,
+        cloudFallback: true,
+        cloudSpendApproved: false,
+      },
+    });
+
+    const report = await collectSetupVerificationReport({ workspaceRoot, homeDir: tempHome });
+
+    expect(report.browserDiagnostic!.status).toBe("runtime-blocked");
+    expect(report.browserDiagnostic!.label).toBe(setupVerificationCopyEn.verification.browserStates.configuredRuntimeBlocked);
+    expect(report.browserDiagnostic!.warnings).toContain(setupVerificationCopyEn.verification.browserWarnings.browserbaseSpendPending);
+    expect(JSON.stringify(report)).not.toContain("bb-api-secret");
+    expect(JSON.stringify(report)).not.toContain("bb-project-secret");
+  });
+
+  it("reports malformed browser config as invalid", async () => {
+    const { tempHome, workspaceRoot } = await setupVerificationFixture();
+    await writeProfileConfig(tempHome, { browser: { backend: "not-real" } });
+
+    const report = await collectSetupVerificationReport({ workspaceRoot, homeDir: tempHome });
+    const result = await runSetupVerification({ workspaceRoot, homeDir: tempHome });
+
+    expect(report.browserDiagnostic!.status).toBe("invalid");
+    expect(report.browserDiagnostic!.warnings[0]).toContain("Browser config is invalid");
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("Browser config is invalid");
+  });
+
+  it("keeps static browser verification away from browser tools and Browserbase sessions", async () => {
+    const { tempHome, workspaceRoot } = await setupVerificationFixture();
+    process.env.BROWSERBASE_API_KEY = "bb-api-secret";
+    process.env.BROWSERBASE_PROJECT_ID = "bb-project-secret";
+    await writeProfileConfig(tempHome, {
+      browser: {
+        backend: "browserbase",
+        cloudProvider: "browserbase",
+        hybridRouting: true,
+        cloudFallback: true,
+        cloudSpendApproved: false,
+      },
+    });
+    await writeFile(join(workspaceRoot, "package.json"), "{}\n", "utf8");
+    const toolCalls: string[] = [];
+
+    const report = await collectSetupVerificationReport({
+      workspaceRoot,
+      homeDir: tempHome,
+      runtime: {
+        executeTool: async (input: { readonly tool: string }) => {
+          toolCalls.push(input.tool);
+          return { result: { ok: true } };
+        },
+      } as unknown as Runtime,
+    });
+
+    expect(report.browserDiagnostic!.status).toBe("runtime-blocked");
+    expect(toolCalls).toEqual(["file.read"]);
+  });
 });
 
 describe("runSetupVerification", () => {
@@ -254,3 +407,16 @@ describe("runSetupVerification", () => {
     expect(result.output.length).toBeGreaterThan(0);
   });
 });
+
+async function setupVerificationFixture(): Promise<{ tempHome: string; workspaceRoot: string }> {
+  const tempHome = await mkdtemp(join(tmpdir(), "estacoda-verify-test-"));
+  const workspaceRoot = join(tempHome, "workspace");
+  await mkdir(workspaceRoot, { recursive: true });
+  return { tempHome, workspaceRoot };
+}
+
+async function writeProfileConfig(homeDir: string, config: unknown): Promise<void> {
+  const path = profileConfigPath(homeDir);
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+}

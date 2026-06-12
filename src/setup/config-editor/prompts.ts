@@ -47,6 +47,8 @@ export type BrowserModeChoice =
   | "browserbase"
   | "disabled";
 
+const promptedBrowserModes = new WeakMap<object, BrowserModeChoice>();
+
 export type FallbackRouteChoice =
   | {
       readonly id: "fallback-add";
@@ -1108,13 +1110,13 @@ export async function promptBrowserCapability(
   });
 
   if (mode === "disabled") {
-    return {
+    return browserCapabilityWithMode({
       backend: "unconfigured",
       launchArgs: [],
       chromeFlags: [],
       autoLaunch: false,
       supervised: false,
-    };
+    }, mode);
   }
 
   if (mode === "browserbase") {
@@ -1128,7 +1130,7 @@ export async function promptBrowserCapability(
       ],
       options: [],
     });
-    return {
+    return browserCapabilityWithMode({
       backend: "browserbase",
       cloudProvider: "browserbase",
       launchArgs: [],
@@ -1138,16 +1140,16 @@ export async function promptBrowserCapability(
       hybridRouting: true,
       cloudFallback: true,
       cloudSpendApproved: false,
-    };
+    }, mode);
   }
 
   if (mode === "existing-cdp") {
     const cdpUrl = await promptSetupStringWithDefault(
       prompt,
       setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.cdpUrl.required")),
-      current.cdpUrl ?? "http://127.0.0.1:9222"
+      current.cdpUrl ?? ""
     );
-    return {
+    return browserCapabilityWithMode({
       backend: "local-cdp",
       cdpUrl: optionalTrimmedString(cdpUrl),
       launchArgs: [],
@@ -1155,7 +1157,7 @@ export async function promptBrowserCapability(
       launchCommand: current.launchCommand,
       autoLaunch: false,
       supervised: true,
-    };
+    }, mode);
   }
 
   const autoLaunch = await promptSetupChoice(prompt, {
@@ -1202,7 +1204,7 @@ export async function promptBrowserCapability(
     current.chromeFlags?.join(", ") ?? ""
   );
 
-  return {
+  return browserCapabilityWithMode({
     backend: "local-cdp",
     cdpUrl: optionalTrimmedString(cdpUrl),
     launchExecutable: optionalTrimmedString(launchExecutable),
@@ -1211,7 +1213,16 @@ export async function promptBrowserCapability(
     launchCommand: current.launchCommand,
     autoLaunch,
     supervised: true,
-  };
+  }, mode);
+}
+
+export function promptedBrowserCapabilityMode(values: object): BrowserModeChoice | undefined {
+  return promptedBrowserModes.get(values);
+}
+
+function browserCapabilityWithMode<T extends object>(values: T, mode: BrowserModeChoice): T {
+  promptedBrowserModes.set(values, mode);
+  return values;
 }
 
 const ttsProviders: readonly TtsProvider[] = ["edge", "elevenlabs", "openai", "minimax", "mistral", "gemini", "xai", "neutts", "kittentts"];

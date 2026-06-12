@@ -9,6 +9,7 @@ import { formatSecurityMode, formatSkillAutonomy } from "../ui/settings-labels.j
 import type { Runtime } from "../runtime/create-runtime.js";
 import { setupVerificationCopy, type SetupVerificationCopy } from "./setup-verification-copy.js";
 import { setupOutputLine, setupTechnicalToken } from "./setup-prompts.js";
+import { diagnoseBrowserSetup, type BrowserSetupDiagnostic } from "./browser-diagnostics.js";
 
 export type SetupVerificationResult = {
   ok: boolean;
@@ -61,6 +62,7 @@ export type SetupVerificationReport = {
   readonly skillAutonomyLabel: string;
   readonly skillAutonomyValue: string;
   readonly providerDiagnostic: ProviderDiagnostic;
+  readonly browserDiagnostic?: BrowserSetupDiagnostic;
   readonly toolStatus: SetupVerificationToolStatus;
   readonly configSources: readonly string[];
   readonly warnings: readonly string[];
@@ -71,7 +73,17 @@ export async function collectSetupVerificationReport(
   options: SetupVerificationOptions
 ): Promise<SetupVerificationReport> {
   const homeDir = resolveHomeDir(options.homeDir);
-  const config = await loadRuntimeConfig({ ...options, homeDir });
+  let config: Awaited<ReturnType<typeof loadRuntimeConfig>>;
+  try {
+    config = await loadRuntimeConfig({ ...options, homeDir });
+  } catch (error) {
+    return invalidConfigVerificationReport({
+      homeDir,
+      workspaceRoot: options.workspaceRoot,
+      trustStorePath: options.trustStorePath,
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
   const locale = config.ui.language === "ar" ? "ar" : "en";
   const security = formatSecurityMode(config.security.approvalMode, locale);
   const autonomy = formatSkillAutonomy(config.skills.autonomy, locale);
@@ -92,6 +104,11 @@ export async function collectSetupVerificationReport(
   const warnings: string[] = [];
   const issueCodes: SetupVerificationIssueCode[] = [];
   const copy = setupVerificationCopy(locale);
+  const browser = await diagnoseBrowserSetup(config, {
+    homeDir,
+    profileId,
+    copy,
+  });
 
   try {
     await mkdir(stateRoot, { recursive: true });
@@ -127,6 +144,11 @@ export async function collectSetupVerificationReport(
     issueCodes.push("workspace-not-trusted");
   }
 
+  for (const warning of browser.warnings) {
+    warnings.push(warning);
+    issueCodes.push(...mapBrowserWarningToCodes(warning));
+  }
+
   if (options.runtime?.executeTool !== undefined) {
     const packageJson = join(options.workspaceRoot, "package.json");
     try {
@@ -156,6 +178,7 @@ export async function collectSetupVerificationReport(
     skillAutonomyLabel: autonomy.label,
     skillAutonomyValue: autonomy.value,
     providerDiagnostic: provider,
+    browserDiagnostic: browser,
     toolStatus,
     configSources: config.sources,
     warnings,
@@ -176,6 +199,7 @@ export function renderSetupVerificationReport(
   copy: SetupVerificationCopy
 ): string {
   const locale = copy.locale === "ar" ? "ar" : "en";
+  const browserDiagnostic = report.browserDiagnostic ?? defaultBrowserDiagnostic(copy);
   const lines: string[] = [
     renderVerificationLine(copy, copy.verification.title),
     renderVerificationLine(copy, copy.verification.body),
@@ -186,11 +210,14 @@ export function renderSetupVerificationReport(
     renderVerificationPair(copy, copy.verification.securityMode, `${setupTechnicalToken(locale, report.securityModeLabel)} (${setupTechnicalToken(locale, report.securityModeValue)})`),
     renderVerificationPair(copy, copy.verification.workflowLearning, `${setupTechnicalToken(locale, report.skillAutonomyLabel)} (${setupTechnicalToken(locale, report.skillAutonomyValue)})`),
     renderVerificationPair(copy, copy.verification.readOnlyToolCheck, renderToolStatus(report.toolStatus, copy)),
+    renderVerificationPair(copy, copy.verification.browserBackend, browserDiagnostic.label),
     renderVerificationPair(copy, copy.verification.configSources, report.configSources.length > 0
       ? report.configSources.map((source) => setupTechnicalToken(locale, source)).join(", ")
       : setupTechnicalToken(locale, "none")),
     "",
     renderVerificationBlock(copy, renderProviderDiagnostic(report.providerDiagnostic)),
+    "",
+    renderVerificationBlock(copy, renderBrowserDiagnostic(browserDiagnostic)),
     "",
   ];
 
@@ -213,10 +240,33 @@ export function renderSetupVerificationReport(
   return lines.join("\n");
 }
 
+function defaultBrowserDiagnostic(copy: SetupVerificationCopy): BrowserSetupDiagnostic {
+  return {
+    status: "not-configured",
+    label: copy.verification.browserStates.notConfigured,
+    lines: [],
+    warnings: [],
+  };
+}
+
+function renderBrowserDiagnostic(diagnostic: BrowserSetupDiagnostic): string {
+  return [
+    ...diagnostic.lines,
+    diagnostic.warnings.length === 0
+      ? `Browser status: ${diagnostic.label}`
+      : `Browser warnings:\n${diagnostic.warnings.map((warning) => `- ${warning}`).join("\n")}`
+  ].join("\n");
+}
+
 export async function runSetupVerification(options: SetupVerificationOptions): Promise<SetupVerificationResult> {
   const report = await collectSetupVerificationReport(options);
-  const config = await loadRuntimeConfig(options);
-  const locale = config.ui.language === "ar" ? "ar" : "en";
+  let locale: "en" | "ar" = "en";
+  try {
+    const config = await loadRuntimeConfig(options);
+    locale = config.ui.language === "ar" ? "ar" : "en";
+  } catch {
+    locale = "en";
+  }
   const copy = setupVerificationCopy(locale);
   const output = renderSetupVerificationReport(report, copy);
 
@@ -336,4 +386,103 @@ function mapProviderWarningToCodes(warning: string): SetupVerificationIssueCode[
     codes.push("small-context-window");
   }
   return codes;
+}
+
+function mapBrowserWarningToCodes(warning: string): SetupVerificationIssueCode[] {
+  const codes: SetupVerificationIssueCode[] = [];
+  if (/BROWSERBASE_[A-Z0-9_]+/u.test(warning)) {
+    codes.push("missing-api-key");
+  }
+  if (/runtime-blocked|spend|الإنفاق/u.test(warning)) {
+    codes.push("browser-runtime-blocked");
+  }
+  if (/CDP|Browser config|المتصفح/u.test(warning)) {
+    codes.push("browser-invalid");
+  }
+  return codes;
+}
+
+async function invalidConfigVerificationReport(input: {
+  readonly homeDir: string;
+  readonly workspaceRoot: string;
+  readonly trustStorePath?: string;
+  readonly message: string;
+}): Promise<SetupVerificationReport> {
+  const copy = setupVerificationCopy("en");
+  const trustStore = new WorkspaceTrustStore({
+    path: input.trustStorePath ?? join(input.homeDir, ".estacoda", "trust.json")
+  });
+  const stateRoot = join(input.homeDir, ".estacoda");
+  const verifyFile = join(stateRoot, ".verify");
+  const profileId = readActiveProfile({ homeDir: input.homeDir }).profileId ?? defaultProfileId();
+  const envPath = resolveProfileStateHome({ homeDir: input.homeDir, profileId }).envPath;
+  let stateWritable = false;
+  let envFilePresent = false;
+  let envMode: string | undefined;
+  let envFileSecure = true;
+  const browserConfigError = /\bbrowser(?:\.|\b)/iu.test(input.message);
+  const primaryWarning = browserConfigError
+    ? copy.verification.browserWarnings.invalidConfig(input.message)
+    : input.message;
+  const warnings: string[] = [primaryWarning];
+  const issueCodes: SetupVerificationIssueCode[] = browserConfigError ? ["browser-invalid"] : ["broken-config"];
+
+  try {
+    await mkdir(stateRoot, { recursive: true });
+    await writeFile(verifyFile, "ok\n", "utf8");
+    stateWritable = true;
+  } catch {
+    warnings.push(copy.verification.stateNotWritableWarning);
+    issueCodes.push("state-not-writable");
+  }
+
+  try {
+    const envStat = await stat(envPath);
+    envFilePresent = true;
+    envMode = (envStat.mode & 0o777).toString(8).padStart(3, "0");
+    envFileSecure = (envStat.mode & 0o777) === 0o600;
+    if (!envFileSecure) {
+      warnings.push(copy.verification.secretModeWarning);
+      issueCodes.push("secret-permissions");
+    }
+  } catch {
+    envFilePresent = false;
+    envMode = undefined;
+    envFileSecure = true;
+  }
+
+  const workspaceTrusted = await isWorkspaceTrusted(trustStore, input.workspaceRoot);
+  if (!workspaceTrusted) {
+    warnings.push(copy.verification.notTrustedWarning);
+    issueCodes.push("workspace-not-trusted");
+  }
+
+  return {
+    stateWritable,
+    envFilePresent,
+    envFileMode: envMode,
+    envFileSecure,
+    workspaceTrusted,
+    securityModeLabel: "Unknown",
+    securityModeValue: "unknown",
+    skillAutonomyLabel: "Unknown",
+    skillAutonomyValue: "unknown",
+    providerDiagnostic: {
+      status: "blocked",
+      lines: ["Provider check skipped because config could not load."],
+      warnings: [input.message],
+    },
+    browserDiagnostic: {
+      status: browserConfigError ? "invalid" : "not-configured",
+      label: browserConfigError
+        ? copy.verification.browserStates.invalid
+        : copy.verification.browserStates.notConfigured,
+      lines: ["Browser check skipped because config could not load."],
+      warnings: browserConfigError ? [primaryWarning] : [],
+    },
+    toolStatus: "skipped",
+    configSources: [],
+    warnings,
+    issueCodes,
+  };
 }

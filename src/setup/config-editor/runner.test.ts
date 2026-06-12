@@ -2090,7 +2090,7 @@ describe("runConfigEditor", () => {
       },
       {
         actionId: "configure-browser" as const,
-        values: ["enable", "local", "http://127.0.0.1:9222", "google-chrome --remote-debugging-port=9222", true],
+        values: ["enable", "existing-cdp", "http://127.0.0.1:9222", true],
       },
     ]) {
       await rm(tempDir, { recursive: true, force: true });
@@ -2718,6 +2718,78 @@ describe("runConfigEditor", () => {
     expect(config.imageGen).toBeUndefined();
     expect(rawConfig).not.toContain("sk-");
     expect(JSON.stringify(result)).not.toContain("sk-");
+  });
+
+  it("blocks existing CDP browser setup when the CDP URL is missing", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    let applyCalled = false;
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["enable", "existing-cdp", ""],
+      }),
+      defaultActionId: "configure-browser",
+      applyExecutor: {
+        apply: () => {
+          applyCalled = true;
+          return { ok: true, appliedOperationIds: [] };
+        },
+      },
+    });
+
+    expect(result.completed).toBe(false);
+    expect(result.applyPlanningResult?.kind).toBe("blocked");
+    expect(JSON.stringify(result.reviewManifest?.blockers)).toContain("Existing CDP browser requires a CDP URL.");
+    expect(applyCalled).toBe(false);
+  });
+
+  it("blocks existing CDP browser setup when the CDP URL is non-local", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["enable", "existing-cdp", "http://example.com:9222"],
+      }),
+      defaultActionId: "configure-browser",
+      applyExecutor: {
+        apply: () => ({ ok: true, appliedOperationIds: [] }),
+      },
+    });
+
+    expect(result.completed).toBe(false);
+    expect(result.applyPlanningResult?.kind).toBe("blocked");
+    expect(JSON.stringify(result.reviewManifest?.blockers)).toContain(
+      "Existing CDP browser requires a local CDP URL: localhost, 127.0.0.1, or ::1."
+    );
+  });
+
+  it("blocks local supervised browser setup without auto-launch or CDP URL", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["enable", "local-supervised", false, "", "", "", ""],
+      }),
+      defaultActionId: "configure-browser",
+      applyExecutor: {
+        apply: () => ({ ok: true, appliedOperationIds: [] }),
+      },
+    });
+
+    expect(result.completed).toBe(false);
+    expect(result.applyPlanningResult?.kind).toBe("blocked");
+    expect(JSON.stringify(result.reviewManifest?.blockers)).toContain(
+      "Local supervised browser requires auto-launch or a local CDP URL."
+    );
   });
 
   it("configures Browserbase credentials through reviewed deferred secret writes", async () => {

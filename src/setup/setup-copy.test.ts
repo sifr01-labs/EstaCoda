@@ -459,6 +459,7 @@ const SETUP_VERIFICATION_KEYS = [
   "setupVerification.securityMode",
   "setupVerification.workflowLearning",
   "setupVerification.readOnlyToolCheck",
+  "setupVerification.browserBackend",
   "setupVerification.configSources",
   "setupVerification.status.writable",
   "setupVerification.status.blocked",
@@ -466,6 +467,17 @@ const SETUP_VERIFICATION_KEYS = [
   "setupVerification.status.presentMode",
   "setupVerification.status.skipped",
   "setupVerification.status.ready",
+  "setupVerification.browser.status.notConfigured",
+  "setupVerification.browser.status.disabled",
+  "setupVerification.browser.status.configuredConnectionNotTested",
+  "setupVerification.browser.status.configuredRuntimeBlocked",
+  "setupVerification.browser.status.invalid",
+  "setupVerification.browser.warning.existingCdpMissingUrl",
+  "setupVerification.browser.warning.existingCdpNonLocal",
+  "setupVerification.browser.warning.localSupervisedIncomplete",
+  "setupVerification.browser.warning.missingBrowserbaseCredential",
+  "setupVerification.browser.warning.browserbaseSpendPending",
+  "setupVerification.browser.warning.invalidConfig",
   "setupVerification.status.trusted",
   "setupVerification.status.notTrusted",
   "setupVerification.warning.workspaceNotTrusted",
@@ -567,6 +579,24 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.mode.existingCdp")).toContain(isolateLtr("CDP"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.hybridRouting.description")).toContain(isolateLtr("Browserbase"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.hybridRouting.description")).toContain(isolateLtr("security.allowPrivateUrls"));
+    expect(resolveSetupCopy("ar", "setupVerification.browserBackend")).toBe("محرك المتصفح");
+    expect(resolveSetupCopy("ar", "setupVerification.browserBackend")).not.toContain("واجهة المتصفح");
+    expect(resolveSetupCopy("ar", "setupVerification.browser.warning.existingCdpMissingUrl")).toContain(isolateLtr("CDP"));
+    expect(resolveSetupCopy("ar", "setupVerification.browser.warning.existingCdpNonLocal")).toContain(isolateLtr("CDP"));
+    expect(resolveSetupCopy("ar", "setupVerification.browser.warning.existingCdpNonLocal")).toContain(isolateLtr("localhost"));
+    expect(resolveSetupCopy("ar", "setupVerification.browser.warning.existingCdpNonLocal")).toContain(isolateLtr("127.0.0.1"));
+    expect(resolveSetupCopy("ar", "setupVerification.browser.warning.existingCdpNonLocal")).toContain(isolateLtr("::1"));
+    expect(resolveSetupCopy("ar", "setupVerification.browser.warning.localSupervisedIncomplete")).toContain("المحلي المُشرف عليه");
+    expect(resolveSetupCopy("ar", "setupVerification.browser.warning.localSupervisedIncomplete")).toContain(isolateLtr("CDP"));
+    expect(resolveSetupCopy("ar", "setupVerification.browser.warning.browserbaseSpendPending")).toContain(isolateLtr("Browserbase"));
+    expect(resolveSetupCopy("ar", "setupVerification.browser.warning.missingBrowserbaseCredential")).toContain(isolateLtr("Browserbase"));
+    expect(resolveSetupCopy("ar", "setupVerification.browser.warning.missingBrowserbaseCredential")).toContain(isolateLtr("{envVar}"));
+    expect(formatSetupCopy("ar", "setupVerification.browser.warning.missingBrowserbaseCredential", {
+      envVar: setupTechnicalToken("ar", "BROWSERBASE_API_KEY"),
+    })).toContain(isolateLtr("BROWSERBASE_API_KEY"));
+    expect(formatSetupCopy("ar", "setupVerification.browser.warning.missingBrowserbaseCredential", {
+      envVar: setupTechnicalToken("ar", "BROWSERBASE_PROJECT_ID"),
+    })).toContain(isolateLtr("BROWSERBASE_PROJECT_ID"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.browserbaseCredential")).toContain(isolateLtr("{envVar}"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.browserbaseCredential")).toContain(isolateLtr("{serviceName}"));
     expect(formatSetupCopy("ar", "setupEditor.prompt.browser.browserbaseCredential", {

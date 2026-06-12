@@ -15,6 +15,8 @@ import type {
   SetupDraftSource,
   SetupDraftTarget,
 } from "./setup-drafts.js";
+import { browserSetupStaticBlockers } from "./browser-diagnostics.js";
+import { setupVerificationCopyEn } from "./setup-verification-copy.js";
 
 export type SetupModuleId =
   | "provider"
@@ -70,6 +72,7 @@ export type SetupModuleContext = SetupDraftBundleOptions & {
     readonly allowedUsers?: readonly string[];
   };
   readonly browser?: {
+    readonly browserMode?: "local-supervised" | "existing-cdp" | "browserbase" | "disabled";
     readonly backend?: BrowserBackendKind;
     readonly cloudProvider?: BrowserCloudProviderKind;
     readonly cdpUrl?: string;
@@ -463,7 +466,16 @@ export const browserSetupModule: SetupModule = optionalCapabilityModule({
     autoLaunchRequested: context.browser?.autoLaunch === true,
     autoLaunchWillRunNow: false,
   }),
-  blockers: (context) => context.browser?.credentialBlockers ?? [],
+  blockers: (context) => [
+    ...browserSetupStaticBlockers({
+      mode: context.browser?.browserMode,
+      backend: context.browser?.backend,
+      cdpUrl: context.browser?.cdpUrl,
+      autoLaunch: context.browser?.autoLaunch,
+      supervised: context.browser?.supervised,
+    }, setupVerificationCopyEn),
+    ...(context.browser?.credentialBlockers ?? []),
+  ],
   extraDrafts: (context) => context.browser?.credentialSurface === "browserbase" &&
     context.browser.credentialReady === true &&
     (context.browser.credentialEnvVars?.length ?? 0) > 0

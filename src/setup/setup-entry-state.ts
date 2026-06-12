@@ -271,6 +271,12 @@ function brokenVerificationReport(message: string): SetupVerificationReport {
       lines: ["Provider check skipped because config could not load."],
       warnings: [message],
     },
+    browserDiagnostic: {
+      status: "invalid",
+      label: "invalid",
+      lines: ["Browser check skipped because config could not load."],
+      warnings: [message],
+    },
     toolStatus: "skipped",
     configSources: [],
     warnings: [message],

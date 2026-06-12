@@ -16,6 +16,7 @@ export type SetupVerificationCopy = {
     readonly securityMode: string;
     readonly workflowLearning: string;
     readonly readOnlyToolCheck: string;
+    readonly browserBackend: string;
     readonly configSources: string;
     readonly writable: string;
     readonly blocked: string;
@@ -23,6 +24,21 @@ export type SetupVerificationCopy = {
     readonly presentMode: (mode: string) => string;
     readonly skipped: string;
     readonly ready: string;
+    readonly browserStates: {
+      readonly notConfigured: string;
+      readonly disabled: string;
+      readonly configuredConnectionNotTested: string;
+      readonly configuredRuntimeBlocked: string;
+      readonly invalid: string;
+    };
+    readonly browserWarnings: {
+      readonly existingCdpMissingUrl: string;
+      readonly existingCdpNonLocal: string;
+      readonly localSupervisedIncomplete: string;
+      readonly missingBrowserbaseCredential: (envName: string) => string;
+      readonly browserbaseSpendPending: string;
+      readonly invalidConfig: (reason: string) => string;
+    };
     readonly notTrustedWarning: string;
     readonly stateNotWritableWarning: string;
     readonly secretModeWarning: string;
@@ -62,6 +78,7 @@ export function setupVerificationCopy(locale: SetupCopyLocale | string): SetupVe
       securityMode: copy(locale, "setupVerification.securityMode"),
       workflowLearning: copy(locale, "setupVerification.workflowLearning"),
       readOnlyToolCheck: copy(locale, "setupVerification.readOnlyToolCheck"),
+      browserBackend: copy(locale, "setupVerification.browserBackend"),
       configSources: copy(locale, "setupVerification.configSources"),
       writable: copy(locale, "setupVerification.status.writable"),
       blocked: copy(locale, "setupVerification.status.blocked"),
@@ -69,6 +86,21 @@ export function setupVerificationCopy(locale: SetupCopyLocale | string): SetupVe
       presentMode: (mode) => format(locale, "setupVerification.status.presentMode", { mode }),
       skipped: copy(locale, "setupVerification.status.skipped"),
       ready: copy(locale, "setupVerification.status.ready"),
+      browserStates: {
+        notConfigured: copy(locale, "setupVerification.browser.status.notConfigured"),
+        disabled: copy(locale, "setupVerification.browser.status.disabled"),
+        configuredConnectionNotTested: copy(locale, "setupVerification.browser.status.configuredConnectionNotTested"),
+        configuredRuntimeBlocked: copy(locale, "setupVerification.browser.status.configuredRuntimeBlocked"),
+        invalid: copy(locale, "setupVerification.browser.status.invalid"),
+      },
+      browserWarnings: {
+        existingCdpMissingUrl: copy(locale, "setupVerification.browser.warning.existingCdpMissingUrl"),
+        existingCdpNonLocal: copy(locale, "setupVerification.browser.warning.existingCdpNonLocal"),
+        localSupervisedIncomplete: copy(locale, "setupVerification.browser.warning.localSupervisedIncomplete"),
+        missingBrowserbaseCredential: (envName) => format(locale, "setupVerification.browser.warning.missingBrowserbaseCredential", { envVar: envName }),
+        browserbaseSpendPending: copy(locale, "setupVerification.browser.warning.browserbaseSpendPending"),
+        invalidConfig: (reason) => format(locale, "setupVerification.browser.warning.invalidConfig", { reason }),
+      },
       notTrustedWarning: copy(locale, "setupVerification.warning.workspaceNotTrusted"),
       stateNotWritableWarning: copy(locale, "setupVerification.warning.stateNotWritable"),
       secretModeWarning: copy(locale, "setupVerification.warning.secretMode"),
