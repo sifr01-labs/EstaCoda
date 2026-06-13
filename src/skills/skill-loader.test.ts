@@ -164,6 +164,41 @@ describe("loadSkillsFromDirectory", () => {
     ]);
   });
 
+  it("preserves required base and optional group declarations for the same Python capability", async () => {
+    registerFakePythonCapability();
+
+    const result = await loadSkillWithPythonCapabilities([
+      { id: "fake-skill-python", required: true, groups: [] },
+      { id: "fake-skill-python", required: false, groups: ["extra", "extra"] }
+    ]);
+
+    expect(result.errors).toHaveLength(0);
+    expect(result.skills[0].pythonCapabilities).toEqual([
+      { id: "fake-skill-python", required: true, groups: [] },
+      { id: "fake-skill-python", required: false, groups: ["extra"] }
+    ]);
+  });
+
+  it("deduplicates exact Python capability declarations and rejects conflicting required values", async () => {
+    registerFakePythonCapability();
+
+    const duplicate = await loadSkillWithPythonCapabilities([
+      { id: "fake-skill-python", required: false, groups: ["extra"] },
+      { id: "fake-skill-python", required: false, groups: ["extra", "extra"] }
+    ]);
+    expect(duplicate.errors).toHaveLength(0);
+    expect(duplicate.skills[0].pythonCapabilities).toEqual([
+      { id: "fake-skill-python", required: false, groups: ["extra"] }
+    ]);
+
+    const conflicting = await loadSkillWithPythonCapabilities([
+      { id: "fake-skill-python", required: true, groups: ["extra"] },
+      { id: "fake-skill-python", required: false, groups: ["extra"] }
+    ]);
+    expect(conflicting.skills).toHaveLength(0);
+    expect(conflicting.errors[0].message).toContain("conflicts with another declaration");
+  });
+
   it("rejects unknown Python capability ids and optional groups", async () => {
     registerFakePythonCapability();
     const unknownId = await loadSkillWithPythonCapabilities([

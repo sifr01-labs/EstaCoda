@@ -42,6 +42,10 @@ function registerFakeCapability(): void {
       extra: {
         packages: ["demo-extra==2.0.0"],
         verifyImports: ["email"]
+      },
+      reports: {
+        packages: ["demo-reports==3.0.0"],
+        verifyImports: ["csv"]
       }
     }
   });
@@ -139,6 +143,39 @@ describe("python-env CLI commands", () => {
     expect(result.output).toContain(`Env path: ${paths.envPath}`);
     expect(result.output).toContain("Manifest: missing");
     expect(result.output).toContain("Repair hint: estacoda python-env setup fake-capability --yes");
+    expect(capabilityManagerMock.installManagedPythonCapabilityEnvironment).not.toHaveBeenCalled();
+  });
+
+  it("preserves a selected group in status repair hints", async () => {
+    const result = await runCliCommand({
+      argv: ["python-env", "status", "fake-capability", "--group", "extra"],
+      workspaceRoot: homeDir,
+      homeDir
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("Selected groups: extra");
+    expect(result.output).toContain("Repair hint: estacoda python-env setup fake-capability --group extra --yes");
+    expect(capabilityManagerMock.installManagedPythonCapabilityEnvironment).not.toHaveBeenCalled();
+  });
+
+  it("preserves selected groups in status repair hints", async () => {
+    capabilityManagerMock.checkManagedPythonCapabilityStatus.mockResolvedValue({
+      ok: false,
+      capabilityId: "fake-capability",
+      reason: "upgrade_required",
+      message: "Managed Python capability environment needs an upgrade."
+    });
+
+    const result = await runCliCommand({
+      argv: ["python-env", "status", "fake-capability", "--groups", "reports,extra"],
+      workspaceRoot: homeDir,
+      homeDir
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("Selected groups: extra, reports");
+    expect(result.output).toContain("Repair hint: estacoda python-env upgrade fake-capability --group extra --group reports --yes");
     expect(capabilityManagerMock.installManagedPythonCapabilityEnvironment).not.toHaveBeenCalled();
   });
 

@@ -513,7 +513,8 @@ function normalizePythonCapabilities(value: unknown): SkillPythonCapabilityRequi
     throw new Error("Skill field pythonCapabilities must be an array of objects");
   }
 
-  const byId = new Map<string, SkillPythonCapabilityRequirement>();
+  const byDeclaration = new Map<string, SkillPythonCapabilityRequirement>();
+  const requiredByIdAndGroups = new Map<string, boolean>();
   value.forEach((entry, index) => {
     if (!isRecord(entry)) {
       throw new Error(`Skill pythonCapabilities[${index}] must be an object`);
@@ -534,15 +535,31 @@ function normalizePythonCapabilities(value: unknown): SkillPythonCapabilityRequi
         throw new Error(`Skill pythonCapabilities[${index}].groups references unknown optional group '${groupId}' for managed Python capability '${entry.id}'`);
       }
     }
-    const existing = byId.get(entry.id);
-    byId.set(entry.id, {
+    const required = entry.required !== false;
+    const idAndGroupsKey = `${entry.id}\0${uniqueGroups.join("\0")}`;
+    const existingRequired = requiredByIdAndGroups.get(idAndGroupsKey);
+    if (existingRequired !== undefined && existingRequired !== required) {
+      throw new Error(`Skill pythonCapabilities[${index}] conflicts with another declaration for managed Python capability '${entry.id}' and the same groups`);
+    }
+    requiredByIdAndGroups.set(idAndGroupsKey, required);
+    byDeclaration.set(`${idAndGroupsKey}\0${required ? "required" : "optional"}`, {
       id: entry.id,
-      required: (existing?.required ?? false) || entry.required !== false,
-      groups: dedupeStrings([...(existing?.groups ?? []), ...uniqueGroups]).sort()
+      required,
+      groups: uniqueGroups
     });
   });
 
-  return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
+  return [...byDeclaration.values()].sort((left, right) => {
+    const idOrder = left.id.localeCompare(right.id);
+    if (idOrder !== 0) {
+      return idOrder;
+    }
+    const groupOrder = left.groups.join("\0").localeCompare(right.groups.join("\0"));
+    if (groupOrder !== 0) {
+      return groupOrder;
+    }
+    return Number(right.required) - Number(left.required);
+  });
 }
 
 function normalizePythonCapabilityGroups(value: unknown, index: number): string[] {

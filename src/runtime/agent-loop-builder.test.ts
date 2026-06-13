@@ -195,6 +195,24 @@ describe("AgentLoopBuilder", () => {
     expect(installSpy).not.toHaveBeenCalled();
   });
 
+  it("hides a skill when the required base Python capability declaration is unavailable even if a same-id optional group is present", async () => {
+    const spec = registerRuntimePythonCapability();
+    const installSpy = vi.spyOn(capabilityManager, "installManagedPythonCapabilityEnvironment");
+    const sourceSkills = new SkillRegistry();
+    sourceSkills.register(skill("needs-python-base", {
+      pythonCapabilities: [
+        { id: spec.id, required: true, groups: [] },
+        { id: spec.id, required: false, groups: ["extra"] }
+      ]
+    }));
+    const harness = await createBuilderHarness({ skillRegistry: sourceSkills });
+
+    const built = await harness.build("session-python-base-missing");
+
+    expect(built.sessionSkillCatalog.map((entry) => entry.name)).not.toContain("needs-python-base");
+    expect(installSpy).not.toHaveBeenCalled();
+  });
+
   it("keeps skills with verified required Python capabilities visible", async () => {
     const spec = registerRuntimePythonCapability();
     const sourceSkills = new SkillRegistry();
@@ -224,6 +242,29 @@ describe("AgentLoopBuilder", () => {
     expect(loaded).toMatchObject({
       loadWarnings: [expect.stringContaining("Optional Python capability")]
     });
+  });
+
+  it("keeps a skill visible when a same-id required base capability is verified and an optional group is unavailable", async () => {
+    const spec = registerRuntimePythonCapability();
+    const installSpy = vi.spyOn(capabilityManager, "installManagedPythonCapabilityEnvironment");
+    const sourceSkills = new SkillRegistry();
+    sourceSkills.register(skill("optional-python-group", {
+      pythonCapabilities: [
+        { id: spec.id, required: true, groups: [] },
+        { id: spec.id, required: false, groups: ["extra"] }
+      ]
+    }));
+    const harness = await createBuilderHarness({ skillRegistry: sourceSkills });
+    await writeVerifiedCapability(harness.stateRoot, spec, []);
+
+    const built = await harness.build("session-python-optional-group");
+    const loaded = built.sessionSkillRegistry.get("optional-python-group");
+
+    expect(built.sessionSkillCatalog.map((entry) => entry.name)).toContain("optional-python-group");
+    expect(loaded).toMatchObject({
+      loadWarnings: [expect.stringContaining("Optional Python capability")]
+    });
+    expect(installSpy).not.toHaveBeenCalled();
   });
 
   it("does not auto-install Python capabilities for gateway-style session builds", async () => {

@@ -284,12 +284,12 @@ async function renderPythonEnvStatus(
   }
   if (!status.ok) {
     lines.push(`Reason: ${status.reason}`);
-    lines.push(`Repair hint: ${repairHint(status.reason, capabilityId)}`);
+    lines.push(`Repair hint: ${repairHint(status.reason, capabilityId, groups)}`);
     if (status.diagnostic !== undefined) {
       lines.push(`Diagnostic: ${boundDiagnostic(status.diagnostic)}`);
     }
   } else if (status.status !== "verified") {
-    lines.push(`Repair hint: estacoda python-env verify ${capabilityId}`);
+    lines.push(`Repair hint: ${commandWithGroups("estacoda python-env verify", capabilityId, groups)}`);
   }
   return lines.join("\n");
 }
@@ -418,24 +418,28 @@ function statusLabel(status: ManagedPythonCapabilityInstallStatus): string {
   }
 }
 
-function repairHint(reason: ManagedPythonCapabilityFailure["reason"], capabilityId: string): string {
+function repairHint(reason: ManagedPythonCapabilityFailure["reason"], capabilityId: string, groups: string[]): string {
   switch (reason) {
     case "install_required":
-      return `estacoda python-env setup ${capabilityId} --yes`;
+      return `${commandWithGroups("estacoda python-env setup", capabilityId, groups)} --yes`;
     case "upgrade_required":
-      return `estacoda python-env upgrade ${capabilityId} --yes`;
+      return `${commandWithGroups("estacoda python-env upgrade", capabilityId, groups)} --yes`;
     case "broken_env":
     case "broken_manifest":
     case "venv_missing":
     case "import_verify_failed":
-      return `estacoda python-env verify ${capabilityId} or estacoda python-env setup ${capabilityId} --yes`;
+      return `${commandWithGroups("estacoda python-env verify", capabilityId, groups)} or ${commandWithGroups("estacoda python-env setup", capabilityId, groups)} --yes`;
     case "disk_insufficient":
       return "Free disk space before retrying setup.";
     case "python_missing":
       return "Install Python 3 before retrying setup.";
     default:
-      return `Inspect the diagnostic, then retry estacoda python-env setup ${capabilityId} --yes.`;
+      return `Inspect the diagnostic, then retry ${commandWithGroups("estacoda python-env setup", capabilityId, groups)} --yes.`;
   }
+}
+
+function commandWithGroups(command: string, capabilityId: string, groups: string[]): string {
+  return [command, capabilityId, ...groups.flatMap((group) => ["--group", group])].join(" ");
 }
 
 function renderActionResult(

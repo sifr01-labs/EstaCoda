@@ -5,7 +5,7 @@ import type { ExternalMemoryProvider, MemoryProvider, MemoryPromptContext } from
 import type { ModelProfile, ProviderRoutePreferences, ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
 import type { SecurityPolicy } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
-import type { LoadedSkill, SkillCatalogEntry, SkillDefinition, SkillLifecycleState } from "../contracts/skill.js";
+import type { LoadedSkill, SkillCatalogEntry, SkillDefinition, SkillLifecycleState, SkillPythonCapabilityRequirement } from "../contracts/skill.js";
 import type { RegisteredTool, ToolDefinition, ToolProvider, ToolsetName } from "../contracts/tool.js";
 import type { RuntimeToolContext, SessionToolContext } from "../contracts/tool-context.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
@@ -595,7 +595,7 @@ async function applyPythonCapabilityAvailability(input: {
       continue;
     }
 
-    const unavailable: Array<{ id: string; result: Exclude<CapabilityPythonEnvResolveResult, { ok: true }> }> = [];
+    const unavailable: Array<{ capability: SkillPythonCapabilityRequirement; result: Exclude<CapabilityPythonEnvResolveResult, { ok: true }> }> = [];
     for (const capability of capabilities) {
       const result = await resolveCapabilityPythonEnv(capability.id, {
         groups: capability.groups,
@@ -603,19 +603,17 @@ async function applyPythonCapabilityAvailability(input: {
         stateRoot: input.stateRoot
       });
       if (!result.ok) {
-        unavailable.push({ id: capability.id, result });
+        unavailable.push({ capability, result });
       }
     }
 
-    const requiredUnavailable = unavailable.filter(({ id }) =>
-      capabilities.find((capability) => capability.id === id)?.required !== false
-    );
+    const requiredUnavailable = unavailable.filter(({ capability }) => capability.required !== false);
     if (requiredUnavailable.length > 0) {
       continue;
     }
 
-    const optionalWarnings = unavailable.map(({ id, result }) =>
-      `Optional Python capability '${id}' is unavailable: ${result.reason}${result.repairCommand === undefined ? "" : `; repair with ${result.repairCommand}`}`
+    const optionalWarnings = unavailable.map(({ capability, result }) =>
+      `Optional Python capability '${capability.id}' is unavailable: ${result.reason}${result.repairCommand === undefined ? "" : `; repair with ${result.repairCommand}`}`
     );
     registry.register(optionalWarnings.length === 0
       ? skill
