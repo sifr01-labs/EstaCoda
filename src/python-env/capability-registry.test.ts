@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   FASTER_WHISPER_CAPABILITY_ID,
+  PDF_EDITOR_CAPABILITY_ID,
+  PDF_EXTRACTION_CAPABILITY_ID,
   getRegisteredPythonCapabilitySpec,
   listRegisteredPythonCapabilitySpecs
 } from "./capability-registry.js";
@@ -36,7 +38,7 @@ describe("managed Python capability substrate", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("registers faster-whisper as a runtime-owned capability spec", () => {
+  it("registers runtime-owned capability specs", () => {
     const specs = listRegisteredPythonCapabilitySpecs();
 
     expect(specs).toEqual([
@@ -45,6 +47,44 @@ describe("managed Python capability substrate", () => {
         version: "1.2.1",
         packages: ["faster-whisper==1.2.1"],
         verifyImports: ["faster_whisper"]
+      },
+      {
+        id: "pdf-extraction",
+        version: "0.1.0",
+        packages: [
+          "pymupdf==1.27.2.3",
+          "pymupdf4llm==1.27.2.3"
+        ],
+        verifyImports: [
+          "pymupdf",
+          "pymupdf4llm"
+        ],
+        estimatedInstallSizeMb: 120,
+        optionalGroups: {
+          tables: {
+            packages: [
+              "pandas==3.0.3",
+              "tabulate==0.10.0"
+            ],
+            verifyImports: [
+              "pandas",
+              "tabulate"
+            ],
+            estimatedInstallSizeMb: 160
+          },
+          advancedOcr: {
+            packages: ["marker-pdf==1.10.2"],
+            verifyImports: ["marker"],
+            estimatedInstallSizeMb: 5000
+          }
+        }
+      },
+      {
+        id: "pdf-editor",
+        version: "0.1.0",
+        packages: ["nano-pdf==0.2.1"],
+        verifyImports: ["nano_pdf"],
+        estimatedInstallSizeMb: 100
       }
     ]);
   });
@@ -57,6 +97,25 @@ describe("managed Python capability substrate", () => {
     expect(getRegisteredPythonCapabilitySpec(FASTER_WHISPER_CAPABILITY_ID)?.packages).toEqual([
       "faster-whisper==1.2.1"
     ]);
+  });
+
+  it("returns defensive copies of optional capability groups", () => {
+    const spec = getRegisteredPythonCapabilitySpec(PDF_EXTRACTION_CAPABILITY_ID);
+    expect(spec).toBeDefined();
+    spec?.optionalGroups?.tables?.packages.push("untrusted-package==0.0.1");
+
+    expect(getRegisteredPythonCapabilitySpec(PDF_EXTRACTION_CAPABILITY_ID)?.optionalGroups?.tables?.packages).toEqual([
+      "pandas==3.0.3",
+      "tabulate==0.10.0"
+    ]);
+  });
+
+  it("registers PDF editor capability with nano-pdf import verification", () => {
+    expect(getRegisteredPythonCapabilitySpec(PDF_EDITOR_CAPABILITY_ID)).toMatchObject({
+      id: "pdf-editor",
+      packages: ["nano-pdf==0.2.1"],
+      verifyImports: ["nano_pdf"]
+    });
   });
 
   it("resolves deterministic capability env, pip cache, manifest, and python paths under state root", () => {

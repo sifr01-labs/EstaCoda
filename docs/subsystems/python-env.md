@@ -121,15 +121,21 @@ This shape is valid:
 
 ```yaml
 pythonCapabilities:
-  - id: ocr-and-documents
+  - id: pdf-extraction
     required: true
     groups: []
-  - id: ocr-and-documents
+  - id: pdf-extraction
     required: false
     groups: ["advancedOcr"]
 ```
 
 The base capability is required. The `advancedOcr` group is optional. Failure to resolve the optional group must not make the required base capability unavailable.
+
+Registered built-in capability IDs include:
+
+- `faster-whisper`: local STT package support.
+- `pdf-extraction`: PyMuPDF/PyMuPDF4LLM extraction, with optional `tables` and `advancedOcr` groups.
+- `pdf-editor`: nano-pdf editing support.
 
 ## Operator commands
 
@@ -192,11 +198,11 @@ pythonCapabilities:
     groups: []
 ```
 
-For example, a future registered capability could expose an optional group:
+For example, a registered capability can expose an optional group:
 
 ```yaml
 pythonCapabilities:
-  - id: ocr-and-documents
+  - id: pdf-extraction
     required: false
     groups: ["advancedOcr"]
 ```

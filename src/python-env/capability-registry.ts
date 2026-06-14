@@ -15,6 +15,8 @@ export type ManagedPythonCapabilityEnvSpec = {
 };
 
 export const FASTER_WHISPER_CAPABILITY_ID = "faster-whisper";
+export const PDF_EXTRACTION_CAPABILITY_ID = "pdf-extraction";
+export const PDF_EDITOR_CAPABILITY_ID = "pdf-editor";
 
 const DEFAULT_REGISTERED_CAPABILITY_SPECS: ManagedPythonCapabilityEnvSpec[] = [
   {
@@ -22,6 +24,44 @@ const DEFAULT_REGISTERED_CAPABILITY_SPECS: ManagedPythonCapabilityEnvSpec[] = [
     version: "1.2.1",
     packages: ["faster-whisper==1.2.1"],
     verifyImports: ["faster_whisper"]
+  },
+  {
+    id: PDF_EXTRACTION_CAPABILITY_ID,
+    version: "0.1.0",
+    packages: [
+      "pymupdf==1.27.2.3",
+      "pymupdf4llm==1.27.2.3"
+    ],
+    verifyImports: [
+      "pymupdf",
+      "pymupdf4llm"
+    ],
+    estimatedInstallSizeMb: 120,
+    optionalGroups: {
+      tables: {
+        packages: [
+          "pandas==3.0.3",
+          "tabulate==0.10.0"
+        ],
+        verifyImports: [
+          "pandas",
+          "tabulate"
+        ],
+        estimatedInstallSizeMb: 160
+      },
+      advancedOcr: {
+        packages: ["marker-pdf==1.10.2"],
+        verifyImports: ["marker"],
+        estimatedInstallSizeMb: 5000
+      }
+    }
+  },
+  {
+    id: PDF_EDITOR_CAPABILITY_ID,
+    version: "0.1.0",
+    packages: ["nano-pdf==0.2.1"],
+    verifyImports: ["nano_pdf"],
+    estimatedInstallSizeMb: 100
   }
 ];
 

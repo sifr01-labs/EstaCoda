@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-06-12T03:42:29.730Z",
+  "generatedAt": "2026-06-14T20:16:43.624Z",
   "skills": [
     {
       "id": "official.ascii-video",
@@ -91,6 +91,214 @@
       }
     },
     {
+      "id": "official.dogfooding",
+      "slug": "dogfooding",
+      "name": "Dogfooding",
+      "description": "Run exploratory QA on web apps with Browser inspection, screenshots, console checks, and structured bug reports.",
+      "overview": "This skill guides you through systematic exploratory QA testing of web applications using the browser toolset. You will navigate the application, interact with elements, capture evidence of issues, and produce a structured bug report.",
+      "labels": [
+        "qa.exploratory",
+        "browser.testing",
+        "dogfooding"
+      ],
+      "triggerPatterns": [
+        "dogfooding",
+        "dogfooding",
+        "exploratory QA",
+        "test this website",
+        "find bugs in this app"
+      ],
+      "requiredToolsets": [
+        "browser",
+        "files"
+      ],
+      "optionalToolsets": [
+        "web",
+        "media"
+      ],
+      "playbookSteps": 4,
+      "evaluationCount": 1,
+      "routing": {
+        "confirmation": "policy"
+      },
+      "source": {
+        "type": "official",
+        "label": "Official",
+        "path": "skills/official/dogfooding/SKILL.md",
+        "githubUrl": "https://github.com/KemetResearch/EstaCoda/blob/main/skills/official/dogfooding/SKILL.md"
+      },
+      "trust": {
+        "level": "official",
+        "reviewed": true,
+        "governed": true
+      }
+    },
+    {
+      "id": "official.himalaya-email",
+      "slug": "himalaya-email",
+      "name": "Himalaya Email",
+      "description": "Use the Himalaya CLI for email tasks with explicit credential, send, delete, and download approvals.",
+      "overview": "Himalaya is a CLI email client that lets you manage emails from the terminal using IMAP, SMTP, Notmuch, or Sendmail backends.",
+      "labels": [
+        "email.cli",
+        "himalaya-email.email"
+      ],
+      "triggerPatterns": [
+        "himalaya email",
+        "himalaya-email",
+        "email cli",
+        "send email with himalaya"
+      ],
+      "requiredToolsets": [
+        "core"
+      ],
+      "optionalToolsets": [
+        "shell-readonly",
+        "shell-write",
+        "files"
+      ],
+      "playbookSteps": 3,
+      "evaluationCount": 1,
+      "routing": {
+        "confirmation": "ask"
+      },
+      "source": {
+        "type": "official",
+        "label": "Official",
+        "path": "skills/official/himalaya-email/SKILL.md",
+        "githubUrl": "https://github.com/KemetResearch/EstaCoda/blob/main/skills/official/himalaya-email/SKILL.md"
+      },
+      "trust": {
+        "level": "official",
+        "reviewed": true,
+        "governed": true
+      }
+    },
+    {
+      "id": "official.infographics",
+      "slug": "infographics",
+      "name": "Infographics",
+      "description": "Turn source material into structured infographic prompts and generate or prepare visual summaries using curated layouts and styles.",
+      "overview": "Adapted from [infographics](https://github.com/JimLiu/baoyu-skills) for EstaCoda's tool ecosystem.",
+      "labels": [
+        "image.infographic",
+        "visual.synthesis"
+      ],
+      "triggerPatterns": [
+        "infographic",
+        "infographics",
+        "visual summary",
+        "turn this into a graphic"
+      ],
+      "requiredToolsets": [
+        "files"
+      ],
+      "optionalToolsets": [
+        "media",
+        "web",
+        "browser"
+      ],
+      "playbookSteps": 4,
+      "evaluationCount": 1,
+      "routing": {
+        "confirmation": "policy"
+      },
+      "source": {
+        "type": "official",
+        "label": "Official",
+        "path": "skills/official/infographics/SKILL.md",
+        "githubUrl": "https://github.com/KemetResearch/EstaCoda/blob/main/skills/official/infographics/SKILL.md"
+      },
+      "trust": {
+        "level": "official",
+        "reviewed": true,
+        "governed": true
+      }
+    },
+    {
+      "id": "official.pdf-editor",
+      "slug": "pdf-editor",
+      "name": "Pdf Editor",
+      "description": "Edit PDFs through a managed pdf-editor environment with explicit approval, output-copy safety, and verification.",
+      "overview": "Edit PDFs using natural-language instructions. Point it at a page and describe what to change.",
+      "labels": [
+        "pdf.editing",
+        "document.edit"
+      ],
+      "triggerPatterns": [
+        "pdf editor",
+        "edit this pdf",
+        "modify this pdf",
+        "pdf-editor"
+      ],
+      "requiredToolsets": [
+        "files"
+      ],
+      "optionalToolsets": [
+        "shell-readonly",
+        "shell-write"
+      ],
+      "playbookSteps": 3,
+      "evaluationCount": 1,
+      "routing": {
+        "confirmation": "ask"
+      },
+      "source": {
+        "type": "official",
+        "label": "Official",
+        "path": "skills/official/pdf-editor/SKILL.md",
+        "githubUrl": "https://github.com/KemetResearch/EstaCoda/blob/main/skills/official/pdf-editor/SKILL.md"
+      },
+      "trust": {
+        "level": "official",
+        "reviewed": true,
+        "governed": true
+      }
+    },
+    {
+      "id": "official.pdf-extraction",
+      "slug": "pdf-extraction",
+      "name": "Pdf Extraction",
+      "description": "Extract text, tables, metadata, images, Markdown, and OCR-ready content from PDFs, scans, and document images using managed Python extractors.",
+      "overview": "For DOCX: use `python-docx` (parses actual document structure, far better than OCR). For PPTX: see the `powerpoint` skill (uses `python-pptx` with full slide/notes support). This skill covers **PDFs and scanned documents**.",
+      "labels": [
+        "document.ocr",
+        "pdf.extraction"
+      ],
+      "triggerPatterns": [
+        "pdf extraction",
+        "extract text from pdf",
+        "ocr",
+        "scanned pdf",
+        "document"
+      ],
+      "requiredToolsets": [
+        "files"
+      ],
+      "optionalToolsets": [
+        "web",
+        "shell-readonly",
+        "shell-write",
+        "research"
+      ],
+      "playbookSteps": 3,
+      "evaluationCount": 1,
+      "routing": {
+        "confirmation": "policy"
+      },
+      "source": {
+        "type": "official",
+        "label": "Official",
+        "path": "skills/official/pdf-extraction/SKILL.md",
+        "githubUrl": "https://github.com/KemetResearch/EstaCoda/blob/main/skills/official/pdf-extraction/SKILL.md"
+      },
+      "trust": {
+        "level": "official",
+        "reviewed": true,
+        "governed": true
+      }
+    },
+    {
       "id": "official.product-builder",
       "slug": "product-builder",
       "name": "Product Builder",
@@ -144,6 +352,46 @@
       }
     },
     {
+      "id": "official.product-design",
+      "slug": "product-design",
+      "name": "Product Design",
+      "description": "Author, review, and optionally lint DESIGN.md product specs for AI-assisted software planning.",
+      "overview": "DESIGN.md is Google's open spec (Apache-2.0, `google-labs-code/design.md`) for describing a visual identity to coding agents. One file combines:",
+      "labels": [
+        "planning.design-spec",
+        "product.design"
+      ],
+      "triggerPatterns": [
+        "product design",
+        "DESIGN.md",
+        "design doc",
+        "product spec"
+      ],
+      "requiredToolsets": [
+        "files"
+      ],
+      "optionalToolsets": [
+        "shell-readonly",
+        "web"
+      ],
+      "playbookSteps": 3,
+      "evaluationCount": 1,
+      "routing": {
+        "confirmation": "policy"
+      },
+      "source": {
+        "type": "official",
+        "label": "Official",
+        "path": "skills/official/product-design/SKILL.md",
+        "githubUrl": "https://github.com/KemetResearch/EstaCoda/blob/main/skills/official/product-design/SKILL.md"
+      },
+      "trust": {
+        "level": "official",
+        "reviewed": true,
+        "governed": true
+      }
+    },
+    {
       "id": "official.remember",
       "slug": "remember",
       "name": "Remember",
@@ -177,6 +425,94 @@
         "label": "Official",
         "path": "skills/official/remember/SKILL.md",
         "githubUrl": "https://github.com/KemetResearch/EstaCoda/blob/main/skills/official/remember/SKILL.md"
+      },
+      "trust": {
+        "level": "official",
+        "reviewed": true,
+        "governed": true
+      }
+    },
+    {
+      "id": "official.research-discovery",
+      "slug": "research-discovery",
+      "name": "Research Discovery",
+      "description": "Search arXiv and related research sources by keyword, author, category, or ID and retrieve abstracts, metadata, PDFs, and BibTeX links.",
+      "overview": "Search and retrieve academic papers from arXiv via their free REST API. No API key is required. Prefer EstaCoda web tools and `scripts/search_research_discovery.py`; use raw shell examples only when the user approves command execution or when no web tool is available.",
+      "labels": [
+        "research.discovery",
+        "research.paper-search"
+      ],
+      "triggerPatterns": [
+        "research discovery",
+        "research-discovery",
+        "find papers",
+        "paper search"
+      ],
+      "requiredToolsets": [
+        "web"
+      ],
+      "optionalToolsets": [
+        "files",
+        "shell-readonly",
+        "research"
+      ],
+      "playbookSteps": 3,
+      "evaluationCount": 1,
+      "routing": {
+        "confirmation": "policy"
+      },
+      "source": {
+        "type": "official",
+        "label": "Official",
+        "path": "skills/official/research-discovery/SKILL.md",
+        "githubUrl": "https://github.com/KemetResearch/EstaCoda/blob/main/skills/official/research-discovery/SKILL.md"
+      },
+      "trust": {
+        "level": "official",
+        "reviewed": true,
+        "governed": true
+      }
+    },
+    {
+      "id": "official.researcher",
+      "slug": "researcher",
+      "name": "Researcher",
+      "description": "Plan, execute, analyze, draft, review, and submit research papers with citation verification and experiment discipline.",
+      "overview": "Orchestrates the full ML/AI research lifecycle: project setup, literature review, experiment design, execution, analysis, drafting, review, and submission. This skill is intentionally thin. The detailed guidance lives in `references/` and is loaded progressively based on the current stage.",
+      "labels": [
+        "research.paper-writing",
+        "academic.workflow",
+        "researcher"
+      ],
+      "triggerPatterns": [
+        "researcher",
+        "research paper",
+        "write a paper",
+        "latex paper",
+        "paper submission"
+      ],
+      "requiredToolsets": [
+        "core",
+        "files",
+        "research"
+      ],
+      "optionalToolsets": [
+        "web",
+        "shell-readonly",
+        "shell-write",
+        "coding",
+        "memory"
+      ],
+      "playbookSteps": 4,
+      "evaluationCount": 2,
+      "routing": {
+        "confirmation": "policy"
+      },
+      "source": {
+        "type": "official",
+        "label": "Official",
+        "path": "skills/official/researcher/SKILL.md",
+        "githubUrl": "https://github.com/KemetResearch/EstaCoda/blob/main/skills/official/researcher/SKILL.md"
       },
       "trust": {
         "level": "official",
@@ -268,6 +604,90 @@
       }
     },
     {
+      "id": "official.system-diagram",
+      "slug": "system-diagram",
+      "name": "System Diagram",
+      "description": "Create dark-themed SVG system, cloud, infrastructure, and architecture diagrams as standalone HTML files.",
+      "overview": "Generate professional, dark-themed technical architecture diagrams as standalone HTML files with inline SVG graphics. No API keys or rendering libraries are required. Write the HTML file in the workspace and preview it with the Browser tool when available.",
+      "labels": [
+        "diagram.creation",
+        "system.visualization",
+        "architecture.visualization"
+      ],
+      "triggerPatterns": [
+        "system diagram",
+        "architecture diagram",
+        "cloud diagram",
+        "infra diagram"
+      ],
+      "requiredToolsets": [
+        "files"
+      ],
+      "optionalToolsets": [
+        "browser",
+        "coding"
+      ],
+      "playbookSteps": 3,
+      "evaluationCount": 1,
+      "routing": {
+        "confirmation": "policy"
+      },
+      "source": {
+        "type": "official",
+        "label": "Official",
+        "path": "skills/official/system-diagram/SKILL.md",
+        "githubUrl": "https://github.com/KemetResearch/EstaCoda/blob/main/skills/official/system-diagram/SKILL.md"
+      },
+      "trust": {
+        "level": "official",
+        "reviewed": true,
+        "governed": true
+      }
+    },
+    {
+      "id": "official.ui-design",
+      "slug": "ui-design",
+      "name": "UI Design",
+      "description": "Apply a strong product-design critique and implementation workflow for polished web interfaces and visual systems.",
+      "overview": "Use this skill when the user asks for design work that would normally fit Claude Design, but the agent is running in a CLI/API environment instead of the hosted Claude Design web UI.",
+      "labels": [
+        "frontend.design",
+        "ui.polish",
+        "ui.design"
+      ],
+      "triggerPatterns": [
+        "ui design",
+        "improve the design",
+        "make this UI better",
+        "visual polish"
+      ],
+      "requiredToolsets": [
+        "files"
+      ],
+      "optionalToolsets": [
+        "browser",
+        "web",
+        "coding",
+        "media"
+      ],
+      "playbookSteps": 3,
+      "evaluationCount": 1,
+      "routing": {
+        "confirmation": "policy"
+      },
+      "source": {
+        "type": "official",
+        "label": "Official",
+        "path": "skills/official/ui-design/SKILL.md",
+        "githubUrl": "https://github.com/KemetResearch/EstaCoda/blob/main/skills/official/ui-design/SKILL.md"
+      },
+      "trust": {
+        "level": "official",
+        "reviewed": true,
+        "governed": true
+      }
+    },
+    {
       "id": "official.verify",
       "slug": "verify",
       "name": "Verify",
@@ -305,6 +725,60 @@
         "label": "Official",
         "path": "skills/official/verify/SKILL.md",
         "githubUrl": "https://github.com/KemetResearch/EstaCoda/blob/main/skills/official/verify/SKILL.md"
+      },
+      "trust": {
+        "level": "official",
+        "reviewed": true,
+        "governed": true
+      }
+    },
+    {
+      "id": "official.wiki-builder",
+      "slug": "wiki-builder",
+      "name": "Wiki Builder",
+      "description": "Build, query, lint, and maintain a persistent markdown knowledge wiki with raw-source provenance, cross-links, schema discipline, and compounding synthesis.",
+      "overview": "Build and maintain a persistent, compounding knowledge base as interlinked markdown files.",
+      "labels": [
+        "knowledge-wiki",
+        "markdown-knowledge-base",
+        "research-notes",
+        "wiki-maintenance",
+        "source-ingest"
+      ],
+      "triggerPatterns": [
+        "wiki-builder",
+        "build a wiki",
+        "create a wiki",
+        "knowledge base",
+        "knowledge wiki",
+        "ingest this source",
+        "add this to my wiki",
+        "query my wiki",
+        "lint my wiki",
+        "audit my wiki"
+      ],
+      "requiredToolsets": [
+        "core",
+        "files",
+        "research"
+      ],
+      "optionalToolsets": [
+        "web",
+        "shell-readonly",
+        "shell-write",
+        "coding",
+        "memory"
+      ],
+      "playbookSteps": 5,
+      "evaluationCount": 3,
+      "routing": {
+        "confirmation": "policy"
+      },
+      "source": {
+        "type": "official",
+        "label": "Official",
+        "path": "skills/official/wiki-builder/SKILL.md",
+        "githubUrl": "https://github.com/KemetResearch/EstaCoda/blob/main/skills/official/wiki-builder/SKILL.md"
       },
       "trust": {
         "level": "official",
