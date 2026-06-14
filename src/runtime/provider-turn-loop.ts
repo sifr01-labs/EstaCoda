@@ -145,6 +145,8 @@ export class ProviderTurnLoop {
     preflightCompression?: PromptSemanticCompressionReport;
     fallbackText: string;
     onEvent?: RuntimeEventSink;
+    onDelta?: (text: string) => void;
+    onSegmentBreak?: (reason?: string) => void | Promise<void>;
     toolPlans: ToolCallPlan[];
     trustedWorkspace: boolean;
     initialRiskClass: ToolRiskClass;
@@ -518,6 +520,8 @@ export class ProviderTurnLoop {
     preflightCompression?: PromptSemanticCompressionReport;
     fallbackText: string;
     onEvent?: RuntimeEventSink;
+    onDelta?: (text: string) => void;
+    onSegmentBreak?: (reason?: string) => void | Promise<void>;
     toolPlans: ToolCallPlan[];
     iteration: number;
     loopStartedAt: number;
@@ -579,7 +583,9 @@ export class ProviderTurnLoop {
       iteration: input.iteration,
       loopStartedAt: input.loopStartedAt,
       signal: input.signal,
-      onEvent: input.onEvent
+      onEvent: input.onEvent,
+      onDelta: input.onDelta,
+      onSegmentBreak: input.onSegmentBreak
     });
     if (execution.response?.usage?.inputTokens !== undefined) {
       this.#lastActualPromptTokens = execution.response.usage.inputTokens;
@@ -636,6 +642,8 @@ export class ProviderTurnLoop {
     toolPlans: ToolCallPlan[];
     fallbackText: string;
     onEvent?: RuntimeEventSink;
+    onDelta?: (text: string) => void;
+    onSegmentBreak?: (reason?: string) => void | Promise<void>;
     iteration: number;
     loopStartedAt: number;
     emptyResponseNudge?: boolean;
@@ -710,7 +718,9 @@ export class ProviderTurnLoop {
       iteration: input.iteration,
       loopStartedAt: input.loopStartedAt,
       signal: input.signal,
-      onEvent: input.onEvent
+      onEvent: input.onEvent,
+      onDelta: input.onDelta,
+      onSegmentBreak: input.onSegmentBreak
     });
     if (execution.response?.usage?.inputTokens !== undefined) {
       this.#lastActualPromptTokens = execution.response.usage.inputTokens;
@@ -767,6 +777,8 @@ export class ProviderTurnLoop {
     loopStartedAt: number;
     signal?: AbortSignal;
     onEvent?: RuntimeEventSink;
+    onDelta?: (text: string) => void;
+    onSegmentBreak?: (reason?: string) => void | Promise<void>;
   }): Promise<ProviderExecutionResult> {
     const initial = await this.#completeProviderRequestWithTruncatedToolRetry(input);
     return await this.#continueLengthTruncatedTextResponse({
@@ -785,10 +797,16 @@ export class ProviderTurnLoop {
     fallbackChain?: ResolvedModelRoute[];
     signal?: AbortSignal;
     onEvent?: RuntimeEventSink;
+    onDelta?: (text: string) => void;
+    onSegmentBreak?: (reason?: string) => void | Promise<void>;
   }): Promise<ProviderExecutionResult> {
     const primaryRoute = input.primaryRoute ?? this.#primaryModelRoute;
     const fallbackChain = input.fallbackChain ?? this.#modelFallbackRoutes;
-    const initialEvents = createProviderToolCallEventBuffer(input.onEvent);
+    const initialEvents = createProviderToolCallEventBuffer({
+      sink: input.onEvent,
+      onDelta: input.onDelta,
+      onSegmentBreak: input.onSegmentBreak
+    });
     const execution = await this.#providerExecutor!.complete(input.request, input.preferences, {
       sessionId: input.sessionId,
       stream: true,
@@ -842,7 +860,11 @@ export class ProviderTurnLoop {
 
     const baseMaxTokens = input.request.maxTokens ?? (execution.route ?? retryPrimaryRoute).maxTokens ?? 4096;
     const retryMaxTokens = Math.min(baseMaxTokens * 2, 32768);
-    const retryEvents = createProviderToolCallEventBuffer(input.onEvent);
+    const retryEvents = createProviderToolCallEventBuffer({
+      sink: input.onEvent,
+      onDelta: input.onDelta,
+      onSegmentBreak: input.onSegmentBreak
+    });
     const retryExecutionRaw = await this.#providerExecutor!.complete({
       ...input.request,
       maxTokens: retryMaxTokens
@@ -880,6 +902,8 @@ export class ProviderTurnLoop {
     loopStartedAt: number;
     signal?: AbortSignal;
     onEvent?: RuntimeEventSink;
+    onDelta?: (text: string) => void;
+    onSegmentBreak?: (reason?: string) => void | Promise<void>;
   }): Promise<ProviderExecutionResult> {
     if (!isLengthTruncatedTextExecution(input.initial)) {
       return input.initial;
@@ -1505,7 +1529,11 @@ function providerIterationCost(execution: ProviderExecutionResult): number {
   return cost;
 }
 
-function createProviderToolCallEventBuffer(sink: RuntimeEventSink | undefined): {
+function createProviderToolCallEventBuffer(input: {
+  sink: RuntimeEventSink | undefined;
+  onDelta?: (text: string) => void;
+  onSegmentBreak?: (reason?: string) => void | Promise<void>;
+}): {
   onEvent: (event: ProviderRuntimeEvent) => Promise<void>;
   flushToolCalls: () => Promise<void>;
   discardToolCalls: () => void;
@@ -1518,11 +1546,17 @@ function createProviderToolCallEventBuffer(sink: RuntimeEventSink | undefined): 
         toolCallEvents.push(event);
         return;
       }
-      await emit(sink, mapProviderRuntimeEvent(event));
+      await emit(input.sink, mapProviderRuntimeEvent(event));
+      if (event.kind === "provider-token") {
+        safeProviderDelta(input.onDelta, event.text);
+      }
     },
     async flushToolCalls() {
+      if (toolCallEvents.length > 0) {
+        await safeProviderSegmentBreak(input.onSegmentBreak, "provider-tool-call");
+      }
       for (const event of toolCallEvents) {
-        await emit(sink, mapProviderRuntimeEvent(event));
+        await emit(input.sink, mapProviderRuntimeEvent(event));
       }
       toolCallEvents.length = 0;
     },
@@ -1530,6 +1564,25 @@ function createProviderToolCallEventBuffer(sink: RuntimeEventSink | undefined): 
       toolCallEvents.length = 0;
     }
   };
+}
+
+function safeProviderDelta(onDelta: ((text: string) => void) | undefined, text: string): void {
+  try {
+    onDelta?.(text);
+  } catch {
+    // Streaming observer failures must not alter provider turn execution.
+  }
+}
+
+async function safeProviderSegmentBreak(
+  onSegmentBreak: ((reason?: string) => void | Promise<void>) | undefined,
+  reason: string
+): Promise<void> {
+  try {
+    await onSegmentBreak?.(reason);
+  } catch {
+    // Streaming observer failures must not alter provider turn execution.
+  }
 }
 
 function resolvedRouteChain(

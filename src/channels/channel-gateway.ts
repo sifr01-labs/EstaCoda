@@ -495,14 +495,20 @@ export class ChannelGateway {
 
   async #handleStreamingEvent(
     streamHandle: ChannelStreamingTextHandle | undefined,
-    event: RuntimeEvent
+    event: RuntimeEvent,
+    options: {
+      deltasViaCallbacks?: boolean;
+      segmentBreaksViaCallbacks?: boolean;
+    } = {}
   ): Promise<boolean> {
     if (streamHandle === undefined) {
       return false;
     }
 
     if (event.kind === "provider-token") {
-      streamHandle.append(event.text);
+      if (options.deltasViaCallbacks !== true) {
+        streamHandle.append(event.text);
+      }
       return true;
     }
 
@@ -517,7 +523,9 @@ export class ChannelGateway {
     }
 
     if (event.kind === "provider-tool-call") {
-      streamHandle.segmentBreak("provider-tool-call");
+      if (options.segmentBreaksViaCallbacks !== true) {
+        streamHandle.segmentBreak("provider-tool-call");
+      }
       return false;
     }
 
@@ -1176,6 +1184,7 @@ export class ChannelGateway {
         : this.#trustedWorkspace;
       const debounceMetadata = readDebounceMetadata(message.metadata);
       streamHandle = this.#startStreamingTextIfEligible(adapter, normalizedSessionKey, controller.signal);
+      const streamCallbacksWired = streamHandle !== undefined;
 
       // Handle the turn
       const response = await runtime.handle({
@@ -1191,8 +1200,17 @@ export class ChannelGateway {
           origin: message.text.startsWith("/") ? "command" : "message",
           ...(debounceMetadata === undefined ? {} : debounceMetadata)
         },
+        ...(streamCallbacksWired
+          ? {
+              onDelta: (text) => streamHandle?.append(text),
+              onSegmentBreak: (reason) => streamHandle?.segmentBreak(reason)
+            }
+          : {}),
         onEvent: async (event) => {
-          if (await this.#handleStreamingEvent(streamHandle, event)) {
+          if (await this.#handleStreamingEvent(streamHandle, event, {
+            deltasViaCallbacks: streamCallbacksWired,
+            segmentBreaksViaCallbacks: streamCallbacksWired
+          })) {
             return;
           }
           progressCount += 1;

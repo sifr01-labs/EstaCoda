@@ -978,7 +978,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             text: input.text,
             channel: input.channel,
             signal: input.signal,
-            onEvent: input.onEvent
+            onEvent: input.onEvent,
+            onDelta: input.onDelta,
+            onSegmentBreak: input.onSegmentBreak
           });
           return turnResult.response;
         }

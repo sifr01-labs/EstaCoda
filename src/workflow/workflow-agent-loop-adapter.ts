@@ -20,6 +20,8 @@ export type WorkflowTurnInput = {
   channel: AgentLoopInput["channel"];
   signal?: AbortSignal;
   onEvent?: AgentLoopInput["onEvent"];
+  onDelta?: AgentLoopInput["onDelta"];
+  onSegmentBreak?: AgentLoopInput["onSegmentBreak"];
 };
 
 export type WorkflowTurnResult = {
@@ -85,6 +87,8 @@ export class WorkflowAgentLoopAdapter {
       channel: input.channel,
       signal: input.signal,
       onEvent: input.onEvent,
+      onDelta: input.onDelta,
+      onSegmentBreak: input.onSegmentBreak,
       workflow: {
         runId,
         ...(stepId === undefined ? {} : { stepId }),

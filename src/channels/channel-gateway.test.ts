@@ -231,6 +231,11 @@ function createStreamingGatewayHarness(input: {
   handle?: StreamingHandleSpy;
   runtimeResponse?: Awaited<ReturnType<Runtime["handle"]>>;
   events?: RuntimeEvent[];
+  actions?: Array<
+    | { kind: "event"; event: RuntimeEvent }
+    | { kind: "delta"; text: string }
+    | { kind: "segmentBreak"; reason?: string }
+  >;
   deliveryRouter?: ChannelGatewayOptions["deliveryRouter"];
 } = {}): StreamingGatewayHarness {
   const handle = input.handle ?? createStreamingHandleSpy();
@@ -239,8 +244,15 @@ function createStreamingGatewayHarness(input: {
     : createStreamingTelegramAdapter(handle);
   const runtime = createMinimalRuntime();
   runtime.handle = async (runtimeInput) => {
-    for (const event of input.events ?? []) {
-      await runtimeInput.onEvent?.(event);
+    const actions = input.actions ?? input.events?.map((event) => ({ kind: "event" as const, event })) ?? [];
+    for (const action of actions) {
+      if (action.kind === "event") {
+        await runtimeInput.onEvent?.(action.event);
+      } else if (action.kind === "delta") {
+        runtimeInput.onDelta?.(action.text);
+      } else {
+        await runtimeInput.onSegmentBreak?.(action.reason);
+      }
     }
     return input.runtimeResponse ?? runtimeResponse({
       text: "final answer",
@@ -359,7 +371,10 @@ describe("ChannelGateway Telegram streaming", () => {
 
   it("routes provider tokens to append and not progress", async () => {
     const { adapter, handle, gateway } = createStreamingGatewayHarness({
-      events: [providerToken("hello")]
+      actions: [
+        { kind: "event", event: providerToken("hello") },
+        { kind: "delta", text: "hello" }
+      ]
     });
 
     const result = await gateway.receive(makeMessage("hello"));
@@ -387,16 +402,22 @@ describe("ChannelGateway Telegram streaming", () => {
 
   it("segments at provider tool-call before delivering tool progress and appends continuation tokens", async () => {
     const { adapter, handle, gateway } = createStreamingGatewayHarness({
-      events: [
-        providerToken("pre"),
+      actions: [
+        { kind: "event", event: providerToken("pre") },
+        { kind: "delta", text: "pre" },
+        { kind: "segmentBreak", reason: "provider-tool-call" },
         {
-          kind: "provider-tool-call",
-          provider: "test",
-          model: "m",
-          name: "terminal.run"
+          kind: "event",
+          event: {
+            kind: "provider-tool-call",
+            provider: "test",
+            model: "m",
+            name: "terminal.run"
+          }
         },
-        { kind: "tool-start", tool: "terminal.run" },
-        providerToken("post")
+        { kind: "event", event: { kind: "tool-start", tool: "terminal.run" } },
+        { kind: "event", event: providerToken("post") },
+        { kind: "delta", text: "post" }
       ]
     });
 
@@ -414,7 +435,10 @@ describe("ChannelGateway Telegram streaming", () => {
 
   it("clean no-tool turn finalizes stream and skips normal sendText", async () => {
     const { adapter, handle, gateway } = createStreamingGatewayHarness({
-      events: [providerToken("answer")]
+      actions: [
+        { kind: "event", event: providerToken("answer") },
+        { kind: "delta", text: "answer" }
+      ]
     });
 
     await gateway.receive(makeMessage("hello"));
@@ -425,11 +449,14 @@ describe("ChannelGateway Telegram streaming", () => {
 
   it("tool turn with live final continuation finalizes stream and skips duplicate final text", async () => {
     const { adapter, handle, gateway } = createStreamingGatewayHarness({
-      events: [
-        providerToken("pre"),
-        { kind: "provider-tool-call", provider: "test", model: "m", name: "search" },
-        { kind: "tool-start", tool: "search" },
-        providerToken("post")
+      actions: [
+        { kind: "event", event: providerToken("pre") },
+        { kind: "delta", text: "pre" },
+        { kind: "segmentBreak", reason: "provider-tool-call" },
+        { kind: "event", event: { kind: "provider-tool-call", provider: "test", model: "m", name: "search" } },
+        { kind: "event", event: { kind: "tool-start", tool: "search" } },
+        { kind: "event", event: providerToken("post") },
+        { kind: "delta", text: "post" }
       ]
     });
 
@@ -441,10 +468,12 @@ describe("ChannelGateway Telegram streaming", () => {
 
   it("tool turn with no live final segment falls back to normal sendText", async () => {
     const { adapter, gateway } = createStreamingGatewayHarness({
-      events: [
-        providerToken("pre"),
-        { kind: "provider-tool-call", provider: "test", model: "m", name: "search" },
-        { kind: "tool-start", tool: "search" }
+      actions: [
+        { kind: "event", event: providerToken("pre") },
+        { kind: "delta", text: "pre" },
+        { kind: "segmentBreak", reason: "provider-tool-call" },
+        { kind: "event", event: { kind: "provider-tool-call", provider: "test", model: "m", name: "search" } },
+        { kind: "event", event: { kind: "tool-start", tool: "search" } }
       ],
       handle: createStreamingHandleSpy({ finishResult: { delivered: false, fallbackRequired: true } })
     });
