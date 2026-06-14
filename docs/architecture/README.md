@@ -21,4 +21,3 @@ All statements here are grounded in the current codebase. If a feature is not im
 | [Knowledge Map](./knowledge-map.md) | Runtime concept map with Mermaid visualization |
 | [Boundary Maps](./boundary-maps.md) | Cross-subsystem boundary analysis: memory, skills, provider loop, observability |
 | [Risk Register](./risk-register.md) | Architecture risks, severity, and mitigation |
-| [Node and pnpm Runtime ADR](./node-pnpm-runtime-adr.md) | PR 0 decision record and baseline for the Node/pnpm migration |

@@ -62,12 +62,14 @@ Telegram هي القناة البعيدة الحية المُثبتة لـ v0.1.
 | رموز الربط | `implemented` |
 | رموز التسليم | `implemented` |
 | ضغط التقدم | `implemented` |
+| بث النص التجريبي | `opt-in` |
 
 **السلوك:**
 
 - رسالة تقدم واحدة متطورة لكل دور نشط
 - أزرار الموافقة المضمنة تُعيّن إلى `/approve` و `/deny`
 - الردود النهائية مُنسقة بـ HTML آمن لـ Telegram
+- يمكن تفعيل بث اختياري يحرر رسائل Telegram تدريجيًا أثناء الدور؛ يبقى `response.text` النهائي هو المرجع
 - تسميات النشاط مُترجمة (`en`، `ar`)
 - جلسات المجموعات افتراضيًا لكل مستخدم
 - جلسات الخيوط مشتركة افتراضيًا
@@ -97,6 +99,63 @@ estacoda gateway start
 - `enabled: true`
 - `botTokenEnv` مُعيّن
 - متغير البيئة المُشار إليه موجود
+
+### بث Telegram (تجريبي)
+
+بث Telegram خيار لتجربة التوصيل فقط. لا يغير حقيقة الجلسة، أو الذاكرة، أو تنفيذ الأدوات، أو الموافقات، أو المنتجات، أو حالة سير العمل. ما زال runtime ينتج `response.text` نهائيًا، وهذا النص النهائي هو المرجع.
+
+عندما تكون `channels.telegram.streaming.enabled` بقيمة `true`، تُستخدم provider tokens لتحرير رسائل Telegram تدريجيًا. حدود الأدوات تغلق رسالة البث الحالية. provider tokens اللاحقة تبدأ رسالة Telegram جديدة تحت رسالة تقدم الأداة. الرسائل المبثوثة التي أُغلقت لا تُحرر لاحقًا لتصبح الرد النهائي.
+
+الترتيب المرئي هو:
+
+```text
+streamed text -> tool progress -> streamed continuation -> final edit
+```
+
+اضبطه تحت `channels.telegram.streaming`:
+
+```json
+{
+  "channels": {
+    "telegram": {
+      "streaming": {
+        "enabled": false,
+        "editIntervalMs": 750,
+        "minInitialChars": 24,
+        "cursor": "▌",
+        "maxFloodStrikes": 2,
+        "cleanupFailedAttempts": true
+      }
+    }
+  }
+}
+```
+
+| الإعداد | الافتراضي | السلوك |
+|---|---:|---|
+| `channels.telegram.streaming.enabled` | `false` | بوابة opt-in لبث Telegram. |
+| `channels.telegram.streaming.editIntervalMs` | `750` | يجمع تعديلات Telegram بعد أول رسالة مبثوثة. |
+| `channels.telegram.streaming.minInitialChars` | `24` | حد الأحرف المرئية بعد التصفية قبل إرسال أول رسالة بث. |
+| `channels.telegram.streaming.cursor` | `"▌"` | مؤشر مؤقت يُلحق بالرسائل الجزئية أثناء البث. |
+| `channels.telegram.streaming.maxFloodStrikes` | `2` | حد تدهور flood-control لمقبض البث النشط. |
+| `channels.telegram.streaming.cleanupFailedAttempts` | `true` | يحذف أو يحيد الرسائل المبثوثة المؤقتة بعد فشل المزود أو fallback. |
+
+الحدود التشغيلية:
+
+- البث يعمل لتوصيل Telegram فقط.
+- `DeliveryRouter` يعطل البث في v1.
+- يتطلب البث إشارة إلغاء دور من البوابة.
+- تستخدم تعديلات البث الجزئية HTML escaping خفيفًا، وليس تنسيق Telegram النهائي.
+- التوصيل النهائي ما زال يستخدم تنسيق Telegram وتقسيمه العاديين.
+- flood control أو الحمولات الجزئية الكبيرة تفرض fallback للنص النهائي لذلك الدور فقط. لا تُعطل أدوار بث Telegram المستقبلية عالميًا.
+
+أنماط الفشل والرجوع:
+
+- تنظيف provider fallback أو provider failure يحذف الرسالة المبثوثة المؤقتة الحالية عندما يمكن ذلك، أو يحيدها إذا فشل الحذف.
+- حدود الموافقة والمنتجات تفرض fallback للنص النهائي العادي لأن ترتيب التوصيل يصبح ملتبسًا.
+- الإلغاء يوقف مقبض البث ويزيل المؤشر عندما يمكن ذلك. فشل التنظيف لا يغير نتيجة الإلغاء.
+- لا يُتخطى النص النهائي المكرر إلا عندما ينجح التوصيل النهائي عبر البث ولا توجد حدود موافقة أو منتجات.
+- لتعطيل البث، اضبط `channels.telegram.streaming.enabled` على `false` وأعد تشغيل أو إعادة تحميل عملية البوابة لذلك profile.
 
 ---
 

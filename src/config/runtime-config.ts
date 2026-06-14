@@ -456,11 +456,21 @@ export type TelegramChannelConfig = {
   maxAttachmentBytes?: number;
   busyPolicy?: ChannelBusyPolicy;
   queueDepth?: number;
+  streaming?: TelegramStreamingConfig;
   pairing?: {
     code?: string;
     createdAt?: string;
     expiresAt?: string;
   };
+};
+
+export type TelegramStreamingConfig = {
+  enabled?: boolean;
+  editIntervalMs?: number;
+  minInitialChars?: number;
+  cursor?: string;
+  maxFloodStrikes?: number;
+  cleanupFailedAttempts?: boolean;
 };
 
 export type DiscordChannelConfig = {
@@ -958,7 +968,8 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
         ready: telegram.enabled === true && telegram.botTokenEnv !== undefined && telegramMissing.length === 0,
         missing: telegramMissing.length === 0 ? undefined : telegramMissing,
         busyPolicy: normalizeChannelBusyPolicy(telegram.busyPolicy, "telegram", warnedInvalidBusyPolicies),
-        queueDepth: normalizeQueueDepth(telegram.queueDepth)
+        queueDepth: normalizeQueueDepth(telegram.queueDepth),
+        streaming: normalizeTelegramStreamingConfig(telegram.streaming)
       },
       discord: {
         ...discord,
@@ -1085,7 +1096,15 @@ function patchConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
       ...(config.channels ?? {}),
       telegram: {
         ...(merged.channels?.telegram ?? {}),
-        ...(config.channels?.telegram ?? {})
+        ...(config.channels?.telegram ?? {}),
+        ...(merged.channels?.telegram?.streaming === undefined && config.channels?.telegram?.streaming === undefined
+          ? {}
+          : {
+              streaming: {
+                ...(merged.channels?.telegram?.streaming ?? {}),
+                ...(config.channels?.telegram?.streaming ?? {})
+              }
+            })
       },
       discord: {
         ...(merged.channels?.discord ?? {}),
@@ -1344,6 +1363,17 @@ function normalizeProfileConfig(value: EstaCodaConfig["profile"]): LoadedRuntime
     responseLanguage: value?.responseLanguage === "en" || value?.responseLanguage === "ar" || value?.responseLanguage === "match-user"
       ? value.responseLanguage
       : "match-user"
+  };
+}
+
+function normalizeTelegramStreamingConfig(value: TelegramStreamingConfig | undefined): Required<TelegramStreamingConfig> {
+  return {
+    enabled: value?.enabled === true,
+    editIntervalMs: normalizeOptionalPositiveInteger(value?.editIntervalMs) ?? 750,
+    minInitialChars: normalizeOptionalPositiveInteger(value?.minInitialChars) ?? 24,
+    cursor: normalizeOptionalNonEmptyString(value?.cursor, "channels.telegram.streaming.cursor") ?? "▌",
+    maxFloodStrikes: normalizeOptionalPositiveInteger(value?.maxFloodStrikes) ?? 2,
+    cleanupFailedAttempts: value?.cleanupFailedAttempts ?? true
   };
 }
 

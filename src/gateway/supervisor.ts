@@ -1187,6 +1187,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
             textDebounceMaxMessages: whatsapp.textDebounceMaxMessages ?? 10,
             textDebounceMaxChars: whatsapp.textDebounceMaxChars ?? 8_000
           },
+          telegramStreaming: config.channels.telegram.streaming,
           runtimeForSession: async ({ sessionId, securityPolicy, metadata }) => {
             const latestConfig = await loadConfig();
             return createGatewayRuntime(latestConfig, sessionDb, homeDir, trustStorePath, {
@@ -1258,6 +1259,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
             textDebounceMaxMessages: whatsapp.textDebounceMaxMessages ?? 10,
             textDebounceMaxChars: whatsapp.textDebounceMaxChars ?? 8_000
           },
+          telegramStreaming: config.channels.telegram.streaming,
           runtimeForSession: async ({ sessionId, securityPolicy, metadata }) => {
             const latestConfig = await loadConfig();
             return createGatewayRuntime(latestConfig, sessionDb, homeDir, trustStorePath, {

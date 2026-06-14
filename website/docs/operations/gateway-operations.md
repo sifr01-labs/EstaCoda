@@ -227,6 +227,35 @@ Telegram uses bot-token-based pairing. The bot token must be present in the prof
 estacoda channels status telegram
 ```
 
+## Telegram streaming
+
+Telegram streaming is an experimental delivery option under `channels.telegram.streaming.enabled`. It is disabled by default. When enabled, provider tokens edit Telegram messages during a turn, tool boundaries seal the current streamed message, tool progress appears below that sealed message, and later provider tokens start a new streamed message below the progress entry.
+
+The stream is delivery-only. Final `response.text` remains authoritative, and session state, memory, tool execution, approvals, artifacts, and workflow state are unchanged. Partial edits use lightweight HTML escaping. The final edit or fallback delivery uses the normal Telegram formatter.
+
+Operational constraints:
+
+- `DeliveryRouter` disables streaming in v1.
+- A turn abort signal is required.
+- Provider fallback/failure cleanup, Telegram flood-control degradation, oversized partial payloads, approval/artifact ambiguity, cancellation, or final edit failure can force normal final text fallback.
+- Active-turn degradation does not globally disable streaming for future turns.
+
+Rollback is a config change:
+
+```json
+{
+  "channels": {
+    "telegram": {
+      "streaming": {
+        "enabled": false
+      }
+    }
+  }
+}
+```
+
+Restart or reload the gateway process bound to that profile after changing the setting.
+
 ## Logs
 
 Gateway logs for the active profile:

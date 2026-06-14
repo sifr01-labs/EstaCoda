@@ -58,6 +58,8 @@ export type AgentLoopInput = {
   trustedWorkspace?: boolean;
   workspaceRoot?: string;
   onEvent?: RuntimeEventSink;
+  onDelta?: (text: string) => void;
+  onSegmentBreak?: (reason?: string) => void | Promise<void>;
   signal?: AbortSignal;
   inputMetadata?: Record<string, unknown>;
   workflow?: WorkflowRuntimeContext;
@@ -629,6 +631,8 @@ export class AgentLoop {
       preflightCompression,
       fallbackText: fallbackResponse.text,
       onEvent: input.onEvent,
+      onDelta: input.onDelta,
+      onSegmentBreak: input.onSegmentBreak,
       toolPlans,
       trustedWorkspace,
       initialRiskClass,

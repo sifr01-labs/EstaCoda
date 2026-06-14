@@ -108,10 +108,39 @@ export type ChannelReply = {
   metadata?: Record<string, unknown>;
 };
 
+export type ChannelStreamingTextResult = {
+  delivered: boolean;
+  fallbackRequired: boolean;
+  deliveredText?: string;
+};
+
+export type ChannelStreamingTextHandle = {
+  append(text: string): void;
+  segmentBreak(reason?: string): void;
+  providerAttemptResult(result: {
+    ok: boolean;
+    willFallback: boolean;
+    provider: string;
+    model: string;
+  }): void;
+  finish(finalText: string): Promise<ChannelStreamingTextResult>;
+  abort(reason?: string): Promise<void>;
+};
+
+export type ChannelStreamingTextOptions = {
+  signal?: AbortSignal;
+  editIntervalMs?: number;
+  minInitialChars?: number;
+  cursor?: string;
+  maxFloodStrikes?: number;
+  cleanupFailedAttempts?: boolean;
+};
+
 export type ChannelDelivery = {
   sendText(sessionKey: ChannelSessionKey, text: string, options?: ChannelTextOptions): Promise<void>;
   sendProgress?(sessionKey: ChannelSessionKey, event: RuntimeEvent): Promise<void>;
   sendArtifact?(sessionKey: ChannelSessionKey, artifact: ArtifactRecord): Promise<void>;
+  startStreamingText?(sessionKey: ChannelSessionKey, options?: ChannelStreamingTextOptions): ChannelStreamingTextHandle;
 };
 
 export type ChannelVoiceCommandResult = {

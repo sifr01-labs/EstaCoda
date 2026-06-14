@@ -13,6 +13,7 @@ Channels are the surfaces through which users interact with EstaCoda. v0.9 suppo
 |------|-------|------|
 | `src/channels/channel-gateway.ts` | ~1,400 | Gateway auth, session, command, approval, and pairing orchestration |
 | `src/channels/telegram-adapter.ts` | ~1,160 | Telegram-specific adapter |
+| `src/channels/telegram-stream-text.ts` | ~180 | Partial Telegram stream sanitizer for provider-token previews |
 | `src/channels/discord-adapter.ts` | ~400 | Discord-specific adapter |
 | `src/channels/email-adapter.ts` | ~350 | Email-specific adapter (IMAP/SMTP) |
 | `src/channels/whatsapp-adapter.ts` | ~900 | WhatsApp bridge-client adapter, identity policy, formatting, media validation, and final-only delivery |
@@ -76,6 +77,7 @@ Adapters only render or normalize channel-specific transport events. They must n
 - Long final replies are chunked after Telegram formatting, using Telegram's 4096 UTF-16 code-unit text payload limit
 - Chunk suffixes such as `(1/3)` count inside Telegram's payload limit
 - Inline actions are attached only to the final text chunk
+- Optional experimental response streaming edits Telegram messages during a turn; final `response.text` remains authoritative
 - Activity labels localized (`en`, `ar`)
 - Group sessions per-user by default
 - Thread sessions shared by default
@@ -98,6 +100,22 @@ Operator-facing setup steps:
 2. Use `@userinfobot` and `/start` to retrieve allowed Telegram user IDs.
 3. For group chats, add the EstaCoda bot plus `@getidsbot` or `@chatIDrobot` to the group. The ID bot replies with the group chat ID.
 4. Group chat IDs are usually long negative numbers.
+
+**Experimental streaming path:**
+
+Telegram streaming is a delivery-UX path, not runtime state. It is disabled by default and enabled per profile with `channels.telegram.streaming.enabled`. Provider-token events are consumed by the gateway and appended to a per-turn stream handle. Non-token runtime events continue through normal progress delivery.
+
+The intended visible order is:
+
+```text
+streamed text -> tool progress -> streamed continuation -> final edit
+```
+
+On a provider tool boundary, the gateway signals a segment break before delivering tool progress. The adapter seals the current streamed message, clears the progress message slot for that chat, and later provider tokens create a new streamed message below tool progress. Sealed streamed messages are not edited into the final answer. The final edit applies only to the current live streamed segment.
+
+The stream worker uses partial-only sanitization and lightweight HTML escaping. It does not run final Telegram formatting on partial edits. Final delivery still uses `formatTelegramReply()` and adapter-owned chunking. Flood-control retry exhaustion, oversized escaped partial payloads, provider fallback/failure cleanup, missing live final segments, approval boundaries, artifact boundaries, and final edit failures all require normal final text fallback. Active-handle degradation does not disable streaming globally for future turns.
+
+Streaming is not used when `DeliveryRouter` is present in v1, and the gateway starts it only for Telegram sessions with an abort signal. It does not change session transcripts, memory, tool execution, approvals, artifacts, security policy, or workflow state.
 
 ## Discord Adapter
 

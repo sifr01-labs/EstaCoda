@@ -19,6 +19,8 @@ website/i18n/ar/docusaurus-plugin-content-docs/current/
 
 These files are built into the Docusaurus site and shipped with the release. They are the only claims a user should encounter.
 
+Historical ADR pages were removed after they drifted; current subsystem documentation and code are canonical.
+
 ## Internal planning artifacts
 
 Raw planning docs live under:
@@ -38,7 +40,7 @@ These are working artifacts, not canonical documentation. They exist for enginee
 | Architecture docs | Execution plans |
 | Subsystem docs | Internal assessments |
 | Operations docs | Alpha runbooks |
-| ADRs | Call graphs, builder assessments |
+| Architecture and subsystem docs | Call graphs, builder assessments |
 | Release notes | Detailed milestone planning |
 | Security model | Vulnerability drafts |
 
@@ -62,7 +64,7 @@ When changing code:
 
 1. Check if the change affects a canonical public doc.
 2. Update the canonical doc. Do not create a parallel duplicate.
-3. If the change is a durable architectural decision, consider an ADR.
+3. If the change is a durable architectural decision, update the current architecture, subsystem, operations, or release documentation.
 4. If the change is internal planning detail, keep it in the private workspace.
 5. Run `pnpm run typecheck` and `pnpm run smoke` before committing doc changes that reference code.
 

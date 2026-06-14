@@ -9,6 +9,9 @@ import type {
   ChannelAttachmentStatus,
   ChannelMessage,
   ChannelSessionKey,
+  ChannelStreamingTextHandle,
+  ChannelStreamingTextOptions,
+  ChannelStreamingTextResult,
   ChannelTextOptions
 } from "../contracts/channel.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
@@ -16,6 +19,12 @@ import type { TelegramChannelConfig } from "../config/runtime-config.js";
 import { buildAdapterCapability } from "./adapter-capability.js";
 import { renderChannelProgressLabel, type ActivityLabelLocale } from "./activity-labels.js";
 import { formatTelegramReply } from "./telegram-format.js";
+import {
+  createTelegramStreamTextSanitizer,
+  escapeTelegramPartialHtml,
+  getUtf16Length,
+  type TelegramStreamTextSanitizer
+} from "./telegram-stream-text.js";
 
 export type TelegramFetch = (url: string, init?: {
   method?: string;
@@ -50,11 +59,42 @@ export type TelegramCommand = {
   description: string;
 };
 
+type TelegramApiErrorParameters = {
+  retry_after?: number;
+};
+
 type TelegramApiResponse<T> = {
   ok: boolean;
   result?: T;
+  error_code?: number;
   description?: string;
+  parameters?: TelegramApiErrorParameters;
 };
+
+export class TelegramApiError extends Error {
+  readonly method: string;
+  readonly httpStatus: number;
+  readonly telegramErrorCode: number | undefined;
+  readonly description: string | undefined;
+  readonly retryAfterSeconds: number | undefined;
+
+  constructor(input: {
+    method: string;
+    httpStatus: number;
+    statusText?: string;
+    telegramErrorCode?: number;
+    description?: string;
+    retryAfterSeconds?: number;
+  }) {
+    super(`Telegram ${input.method} failed: ${input.description ?? input.statusText ?? input.httpStatus}`);
+    this.name = "TelegramApiError";
+    this.method = input.method;
+    this.httpStatus = input.httpStatus;
+    this.telegramErrorCode = input.telegramErrorCode;
+    this.description = input.description;
+    this.retryAfterSeconds = input.retryAfterSeconds;
+  }
+}
 
 type TelegramFileInfo = {
   file_id: string;
@@ -139,6 +179,10 @@ type TelegramProgressState = {
 const DEFAULT_MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const TELEGRAM_MAX_TEXT_UTF16 = 4096;
 const TELEGRAM_HTML_BALANCE_RESERVE = 64;
+const DEFAULT_STREAM_EDIT_INTERVAL_MS = 750;
+const DEFAULT_STREAM_MIN_INITIAL_CHARS = 24;
+const DEFAULT_STREAM_CURSOR = "▌";
+const DEFAULT_STREAM_MAX_FLOOD_STRIKES = 2;
 
 export class TelegramAdapter implements ChannelAdapter {
   readonly id = "telegram";
@@ -200,6 +244,9 @@ export class TelegramAdapter implements ChannelAdapter {
         }
       }
       await this.#sendMessage(sessionKey.chatId, renderArtifactNotice(artifact));
+    },
+    startStreamingText: (sessionKey: ChannelSessionKey, options?: ChannelStreamingTextOptions) => {
+      return this.#startStreamingText(sessionKey, options);
     }
   };
 
@@ -277,6 +324,26 @@ export class TelegramAdapter implements ChannelAdapter {
     return this.#running;
   }
 
+  #startStreamingText(sessionKey: ChannelSessionKey, options?: ChannelStreamingTextOptions): ChannelStreamingTextHandle {
+    return new TelegramStreamingTextWorker({
+      chatId: sessionKey.chatId,
+      options,
+      sendMessage: async (text, textOptions) => this.#sendMessage(sessionKey.chatId, text, textOptions),
+      editMessageText: async (messageId, text, textOptions) => this.#editMessageText(sessionKey.chatId, messageId, text, textOptions),
+      deleteMessage: async (messageId) => this.#deleteMessage(sessionKey.chatId, messageId),
+      clearProgress: () => {
+        this.#progressByChat.delete(sessionKey.chatId);
+      },
+      formatFinalText: (text) => {
+        const formatted = formatTelegramReply(text);
+        return {
+          chunks: chunkTelegramText(formatted.text, formatted.format),
+          format: formatted.format
+        };
+      }
+    });
+  }
+
   async #sendMessage(chatId: string, text: string, options?: ChannelTextOptions): Promise<TelegramSentMessage> {
     return this.#call<TelegramSentMessage>("sendMessage", {
       chat_id: chatId,
@@ -320,12 +387,20 @@ export class TelegramAdapter implements ChannelAdapter {
     });
   }
 
-  async #editMessageText(chatId: string, messageId: number, text: string): Promise<TelegramSentMessage> {
+  async #editMessageText(chatId: string, messageId: number, text: string, options?: ChannelTextOptions): Promise<TelegramSentMessage> {
     return this.#call<TelegramSentMessage>("editMessageText", {
       chat_id: chatId,
       message_id: messageId,
       text,
-      disable_web_page_preview: true
+      disable_web_page_preview: true,
+      parse_mode: options?.format === "html" ? "HTML" : undefined
+    });
+  }
+
+  async #deleteMessage(chatId: string, messageId: number): Promise<void> {
+    await this.#call("deleteMessage", {
+      chat_id: chatId,
+      message_id: messageId
     });
   }
 
@@ -633,7 +708,7 @@ export class TelegramAdapter implements ChannelAdapter {
     const payload = await response.json() as TelegramApiResponse<T>;
 
     if (!response.ok || !payload.ok) {
-      throw new Error(`Telegram ${method} failed: ${payload.description ?? response.statusText ?? response.status}`);
+      throw telegramApiError(method, response, payload);
     }
 
     return payload.result as T;
@@ -647,11 +722,432 @@ export class TelegramAdapter implements ChannelAdapter {
     const payload = await response.json() as TelegramApiResponse<T>;
 
     if (!response.ok || !payload.ok) {
-      throw new Error(`Telegram ${method} failed: ${payload.description ?? response.statusText ?? response.status}`);
+      throw telegramApiError(method, response, payload);
     }
 
     return payload.result as T;
   }
+}
+
+function telegramApiError<T>(
+  method: string,
+  response: Pick<Awaited<ReturnType<TelegramFetch>>, "status" | "statusText">,
+  payload: TelegramApiResponse<T>
+): TelegramApiError {
+  return new TelegramApiError({
+    method,
+    httpStatus: response.status,
+    statusText: response.statusText,
+    telegramErrorCode: payload.error_code,
+    description: payload.description,
+    retryAfterSeconds: payload.parameters?.retry_after
+  });
+}
+
+type TelegramStreamingTextWorkerInput = {
+  chatId: string;
+  options?: ChannelStreamingTextOptions;
+  sendMessage(text: string, options: ChannelTextOptions): Promise<TelegramSentMessage>;
+  editMessageText(messageId: number, text: string, options: ChannelTextOptions): Promise<TelegramSentMessage>;
+  deleteMessage(messageId: number): Promise<void>;
+  clearProgress(): void;
+  formatFinalText(text: string): { chunks: string[]; format: "plain" | "html" };
+};
+
+type TelegramStreamingTextSegment = {
+  sanitizer: TelegramStreamTextSanitizer;
+  messageId?: number;
+  lastSentHtml?: string;
+  timer?: ReturnType<typeof setTimeout>;
+  retryTimer?: ReturnType<typeof setTimeout>;
+  sealed: boolean;
+  cleanupStarted: boolean;
+};
+
+class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
+  readonly #input: TelegramStreamingTextWorkerInput;
+  readonly #editIntervalMs: number;
+  readonly #minInitialChars: number;
+  readonly #cursorHtml: string;
+  readonly #maxFloodStrikes: number;
+  readonly #cleanupFailedAttempts: boolean;
+  #segment: TelegramStreamingTextSegment = createStreamingTextSegment();
+  #queue: Promise<void> = Promise.resolve();
+  #terminal: "active" | "finished" | "aborted" | "failed" = "active";
+  #fallbackRequired = false;
+  #finishPromise: Promise<ChannelStreamingTextResult> | undefined;
+  #abortPromise: Promise<void> | undefined;
+  #floodStrikes = 0;
+  readonly #errors: unknown[] = [];
+
+  constructor(input: TelegramStreamingTextWorkerInput) {
+    this.#input = input;
+    this.#editIntervalMs = input.options?.editIntervalMs ?? DEFAULT_STREAM_EDIT_INTERVAL_MS;
+    this.#minInitialChars = input.options?.minInitialChars ?? DEFAULT_STREAM_MIN_INITIAL_CHARS;
+    this.#cursorHtml = escapeTelegramPartialHtml(input.options?.cursor ?? DEFAULT_STREAM_CURSOR);
+    this.#maxFloodStrikes = Math.max(0, Math.trunc(input.options?.maxFloodStrikes ?? DEFAULT_STREAM_MAX_FLOOD_STRIKES));
+    this.#cleanupFailedAttempts = input.options?.cleanupFailedAttempts ?? true;
+
+    input.options?.signal?.addEventListener("abort", () => {
+      void this.abort("signal");
+    }, { once: true });
+  }
+
+  append(text: string): void {
+    if (!this.#canStream() || text.length === 0) {
+      return;
+    }
+
+    const segment = this.#segment;
+    segment.sanitizer.append(text);
+    const snapshot = segment.sanitizer.snapshot();
+
+    if (snapshot.visibleCharCount === 0) {
+      return;
+    }
+
+    this.#scheduleFlush(segment);
+  }
+
+  segmentBreak(_reason?: string): void {
+    if (!this.#canStream()) {
+      return;
+    }
+
+    const segment = this.#segment;
+    this.#clearSegmentTimers(segment);
+    this.#segment = createStreamingTextSegment();
+    this.#input.clearProgress();
+    this.#runSafely(async () => {
+      await this.#sealSegment(segment);
+    });
+  }
+
+  providerAttemptResult(result: {
+    ok: boolean;
+    willFallback: boolean;
+    provider: string;
+    model: string;
+  }): void {
+    if (!this.#canStream() || (result.ok && !result.willFallback)) {
+      return;
+    }
+
+    const segment = this.#segment;
+    this.#degrade(segment);
+    this.#runSafely(async () => {
+      await this.#cleanupFailedAttempt(segment);
+    });
+  }
+
+  finish(finalText: string): Promise<ChannelStreamingTextResult> {
+    if (this.#finishPromise !== undefined) {
+      return this.#finishPromise;
+    }
+
+    this.#terminal = "finished";
+    const segment = this.#segment;
+    this.#clearSegmentTimers(segment);
+    this.#finishPromise = this.#enqueue(async () => {
+      if (this.#fallbackRequired || segment.messageId === undefined) {
+        return {
+          delivered: false,
+          fallbackRequired: true
+        };
+      }
+
+      try {
+        const formatted = this.#input.formatFinalText(finalText);
+        const [firstChunk, ...remainingChunks] = formatted.chunks;
+
+        if (firstChunk === undefined) {
+          return {
+            delivered: false,
+            fallbackRequired: true
+          };
+        }
+
+        await this.#input.editMessageText(segment.messageId, firstChunk, { format: formatted.format });
+
+        for (const chunk of remainingChunks) {
+          await this.#input.sendMessage(chunk, { format: formatted.format });
+        }
+
+        this.#clearTimers();
+        segment.lastSentHtml = firstChunk;
+        return {
+          delivered: true,
+          fallbackRequired: false,
+          deliveredText: finalText
+        };
+      } catch (error) {
+        this.#captureError(error);
+        return {
+          delivered: false,
+          fallbackRequired: true
+        };
+      }
+    });
+    return this.#finishPromise;
+  }
+
+  abort(_reason?: string): Promise<void> {
+    if (this.#abortPromise !== undefined) {
+      return this.#abortPromise;
+    }
+
+    this.#terminal = "aborted";
+    const segment = this.#segment;
+    this.#clearTimers();
+    this.#abortPromise = this.#enqueue(async () => {
+      if (segment.messageId === undefined) {
+        return;
+      }
+
+      try {
+        await this.#editSegmentWithoutCursor(segment);
+      } catch (error) {
+        this.#captureError(error);
+      }
+    }).then(() => undefined, (error) => {
+      this.#captureError(error);
+    });
+    return this.#abortPromise;
+  }
+
+  #scheduleFlush(segment: TelegramStreamingTextSegment): void {
+    if (segment !== this.#segment || segment.timer !== undefined || segment.retryTimer !== undefined || !this.#canStream()) {
+      return;
+    }
+
+    const delay = segment.messageId === undefined ? 0 : this.#editIntervalMs;
+    segment.timer = setTimeout(() => {
+      segment.timer = undefined;
+      this.#runSafely(async () => {
+        if (segment !== this.#segment || !this.#canStream()) {
+          return;
+        }
+        await this.#flushSegment(segment, true);
+      });
+    }, delay);
+  }
+
+  async #sealSegment(segment: TelegramStreamingTextSegment): Promise<void> {
+    if (segment.sealed) {
+      return;
+    }
+
+    try {
+      await this.#flushSegment(segment, false);
+      if (segment.messageId !== undefined) {
+        await this.#editSegmentWithoutCursor(segment);
+      }
+      segment.sealed = true;
+    } catch (error) {
+      this.#captureError(error);
+      this.#fallbackRequired = true;
+    }
+  }
+
+  async #flushSegment(segment: TelegramStreamingTextSegment, includeCursor: boolean): Promise<void> {
+    if (segment.sealed || !this.#canStream()) {
+      return;
+    }
+
+    const snapshot = segment.sanitizer.snapshot();
+
+    if (snapshot.visibleCharCount === 0) {
+      return;
+    }
+
+    if (segment.messageId === undefined && snapshot.visibleCharCount < this.#minInitialChars) {
+      return;
+    }
+
+    const rendered = `${snapshot.escapedHtml}${includeCursor ? this.#cursorHtml : ""}`;
+    if (getUtf16Length(rendered) > TELEGRAM_MAX_TEXT_UTF16) {
+      this.#degrade(segment);
+      return;
+    }
+
+    if (segment.messageId === undefined) {
+      let message: TelegramSentMessage;
+      try {
+        message = await this.#input.sendMessage(rendered, { format: "html" });
+      } catch (error) {
+        if (this.#handleFloodControl(error, segment, includeCursor)) {
+          return;
+        }
+        throw error;
+      }
+      if (!this.#canStream() || segment.sealed) {
+        return;
+      }
+      segment.messageId = message.message_id;
+      segment.lastSentHtml = rendered;
+      this.#floodStrikes = 0;
+      return;
+    }
+
+    if (segment.lastSentHtml === rendered) {
+      return;
+    }
+
+    try {
+      await this.#input.editMessageText(segment.messageId, rendered, { format: "html" });
+    } catch (error) {
+      if (this.#handleFloodControl(error, segment, includeCursor)) {
+        return;
+      }
+      throw error;
+    }
+    if (!this.#canStream() || segment.sealed) {
+      return;
+    }
+    segment.lastSentHtml = rendered;
+    this.#floodStrikes = 0;
+  }
+
+  async #editSegmentWithoutCursor(segment: TelegramStreamingTextSegment): Promise<void> {
+    if (segment.messageId === undefined) {
+      return;
+    }
+
+    const rendered = segment.sanitizer.snapshot().escapedHtml;
+
+    if (rendered.length === 0 || segment.lastSentHtml === rendered) {
+      return;
+    }
+    if (getUtf16Length(rendered) > TELEGRAM_MAX_TEXT_UTF16) {
+      this.#degrade(segment);
+      return;
+    }
+
+    await this.#input.editMessageText(segment.messageId, rendered, { format: "html" });
+    segment.lastSentHtml = rendered;
+  }
+
+  async #cleanupFailedAttempt(segment: TelegramStreamingTextSegment): Promise<void> {
+    if (segment.cleanupStarted || segment.sealed || segment.messageId === undefined) {
+      return;
+    }
+    segment.cleanupStarted = true;
+
+    if (!this.#cleanupFailedAttempts) {
+      return;
+    }
+
+    try {
+      await this.#input.deleteMessage(segment.messageId);
+    } catch (deleteError) {
+      this.#captureError(deleteError);
+      try {
+        await this.#input.editMessageText(segment.messageId, "Response interrupted. A complete reply will follow.", { format: "html" });
+      } catch (editError) {
+        this.#captureError(editError);
+      }
+    }
+  }
+
+  #handleFloodControl(error: unknown, segment: TelegramStreamingTextSegment, includeCursor: boolean): boolean {
+    if (!(error instanceof TelegramApiError) || error.retryAfterSeconds === undefined) {
+      return false;
+    }
+
+    this.#captureError(error);
+    this.#floodStrikes += 1;
+    if (this.#floodStrikes > this.#maxFloodStrikes) {
+      this.#degrade(segment);
+      return true;
+    }
+
+    this.#scheduleRetry(segment, includeCursor, error.retryAfterSeconds);
+    return true;
+  }
+
+  #scheduleRetry(segment: TelegramStreamingTextSegment, includeCursor: boolean, retryAfterSeconds: number): void {
+    if (segment.sealed || !this.#canStream()) {
+      return;
+    }
+
+    this.#clearSegmentTimer(segment);
+    if (segment.retryTimer !== undefined) {
+      return;
+    }
+
+    const delayMs = Math.max(0, retryAfterSeconds * 1000);
+    segment.retryTimer = setTimeout(() => {
+      segment.retryTimer = undefined;
+      this.#runSafely(async () => {
+        if (segment !== this.#segment || segment.sealed || !this.#canStream()) {
+          return;
+        }
+        await this.#flushSegment(segment, includeCursor);
+      });
+    }, delayMs);
+  }
+
+  #degrade(segment?: TelegramStreamingTextSegment): void {
+    this.#fallbackRequired = true;
+    this.#terminal = "failed";
+    if (segment !== undefined) {
+      this.#clearSegmentTimers(segment);
+    }
+    this.#clearTimers();
+  }
+
+  #canStream(): boolean {
+    return this.#terminal === "active" && !this.#fallbackRequired;
+  }
+
+  #runSafely(operation: () => Promise<void>): void {
+    void this.#enqueue(operation).catch((error) => {
+      this.#captureError(error);
+    });
+  }
+
+  #enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.#queue.then(operation, operation);
+    this.#queue = result.then(() => undefined, (error) => {
+      this.#captureError(error);
+    });
+    return result;
+  }
+
+  #clearTimers(): void {
+    this.#clearSegmentTimers(this.#segment);
+  }
+
+  #clearSegmentTimer(segment: TelegramStreamingTextSegment): void {
+    if (segment.timer !== undefined) {
+      clearTimeout(segment.timer);
+      segment.timer = undefined;
+    }
+  }
+
+  #clearSegmentRetryTimer(segment: TelegramStreamingTextSegment): void {
+    if (segment.retryTimer !== undefined) {
+      clearTimeout(segment.retryTimer);
+      segment.retryTimer = undefined;
+    }
+  }
+
+  #clearSegmentTimers(segment: TelegramStreamingTextSegment): void {
+    this.#clearSegmentTimer(segment);
+    this.#clearSegmentRetryTimer(segment);
+  }
+
+  #captureError(error: unknown): void {
+    this.#errors.push(error);
+  }
+}
+
+function createStreamingTextSegment(): TelegramStreamingTextSegment {
+  return {
+    sanitizer: createTelegramStreamTextSanitizer(),
+    sealed: false,
+    cleanupStarted: false
+  };
 }
 
 export function updateToChannelMessage(update: TelegramUpdate, now: () => Date = () => new Date()): ChannelMessage | undefined {

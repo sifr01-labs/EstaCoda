@@ -33,6 +33,14 @@ Every channel object supports:
       "sessionIdleResetMinutes": 30,
       "pollTimeoutSeconds": 30,
       "maxAttachmentBytes": 10485760,
+      "streaming": {
+        "enabled": false,
+        "editIntervalMs": 750,
+        "minInitialChars": 24,
+        "cursor": "▌",
+        "maxFloodStrikes": 2,
+        "cleanupFailedAttempts": true
+      },
       "busyPolicy": "queue",
       "queueDepth": 5
     }
@@ -49,6 +57,44 @@ Guided setup asks for:
 Guided setup does not ask for the bot-token env-var name. The token is written to the selected profile `.env` as `ESTACODA_TELEGRAM_BOT_TOKEN`, and the profile config uses `botTokenEnv: "ESTACODA_TELEGRAM_BOT_TOKEN"`. Config review and setup output must redact the raw token.
 
 Use `@BotFather` and `/newbot` to get the bot API token. Use `@userinfobot` and `/start` to get Telegram user IDs. For group chats, add the EstaCoda bot and either `@getidsbot` or `@chatIDrobot` to the group; the ID bot replies with the group chat ID, usually a long negative number.
+
+### Telegram Streaming
+
+Telegram streaming is an experimental delivery option under `channels.telegram.streaming`. It is disabled by default. When enabled, provider tokens progressively edit Telegram messages during a turn, while `response.text` remains the authoritative final answer recorded by the runtime. Streaming does not change session truth, memory, tool execution, approvals, artifacts, or workflow state.
+
+The ordering model is:
+
+```text
+streamed text -> tool progress -> streamed continuation -> final edit
+```
+
+Tool boundaries seal the current streamed Telegram message. Later provider tokens start a new streamed Telegram message below the tool-progress message. Sealed streamed messages are never edited into the final answer. If streaming fails, degrades, or becomes ambiguous, the gateway falls back to normal final text delivery.
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `channels.telegram.streaming.enabled` | `false` | Opt-in gate for Telegram streaming. |
+| `channels.telegram.streaming.editIntervalMs` | `750` | Coalescing interval for Telegram edits after the first streamed message. |
+| `channels.telegram.streaming.minInitialChars` | `24` | Visible filtered character threshold before the first streamed message is sent. |
+| `channels.telegram.streaming.cursor` | `"▌"` | Temporary cursor appended to live partial messages and removed on finalize, abort, or segment seal. |
+| `channels.telegram.streaming.maxFloodStrikes` | `2` | Active-handle Telegram flood-control degradation limit. Reaching the limit forces final fallback for that turn. |
+| `channels.telegram.streaming.cleanupFailedAttempts` | `true` | Whether failed or fallback provider attempts delete or neutralize provisional streamed messages before final fallback. |
+
+Operational constraints:
+
+- Streaming runs only for Telegram delivery.
+- `DeliveryRouter` disables Telegram streaming in v1.
+- Streaming requires the gateway turn's abort signal.
+- Partial stream edits use lightweight HTML escaping, not final Telegram formatting.
+- Final delivery still uses normal authoritative Telegram formatting and chunking.
+- Telegram flood control or oversized escaped partial payloads degrade only the active stream handle and require final fallback. Future turns are not globally disabled.
+
+Failure and rollback behavior:
+
+- Provider failure or provider fallback marks the active stream handle as fallback-required. The adapter deletes the current provisional streamed message when possible, or neutralizes it if deletion fails.
+- Approval or artifact boundaries are treated as ambiguous at the gateway, so the final text is delivered normally even if streaming had partial output.
+- Cancellation aborts the live stream handle and removes the cursor when possible. Cleanup failures are secondary to the original cancellation outcome.
+- Duplicate final text is skipped only when final stream delivery succeeds and no approval or artifact boundary exists.
+- To roll back, set `channels.telegram.streaming.enabled` to `false` and restart or reload the gateway process that owns the profile.
 
 ## Discord
 

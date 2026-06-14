@@ -62,12 +62,14 @@ Telegram is the live-proven first-party remote channel for v0.1.0.
 | Pairing codes | `implemented` |
 | Handoff codes | `implemented` |
 | Progress compaction | `implemented` |
+| Experimental text streaming | `opt-in` |
 
 **Behavior:**
 
 - One evolving progress message per active turn
 - Inline approval buttons map to `/approve` and `/deny`
 - Final replies formatted in Telegram-safe HTML
+- Optional streaming progressively edits Telegram messages during a turn; final `response.text` remains authoritative
 - Activity labels localized (`en`, `ar`)
 - Group sessions are per-user by default
 - Thread sessions are shared by default
@@ -97,6 +99,63 @@ Use `@BotFather` and `/newbot` to create a bot and copy the API token. Use `@use
 - `enabled: true`
 - `botTokenEnv` set
 - Referenced environment variable present
+
+### Telegram Streaming (Experimental)
+
+Telegram streaming is a delivery UX option. It does not change session truth, memory, tool execution, approvals, artifacts, or workflow state. The runtime still produces a final `response.text`, and that final text remains authoritative.
+
+When `channels.telegram.streaming.enabled` is true, provider tokens progressively edit Telegram messages. Tool boundaries seal the current streamed message. Later provider tokens start a new streamed Telegram message below tool progress. Sealed streamed messages are never edited into the final answer.
+
+The visible order is:
+
+```text
+streamed text -> tool progress -> streamed continuation -> final edit
+```
+
+Configure it under `channels.telegram.streaming`:
+
+```json
+{
+  "channels": {
+    "telegram": {
+      "streaming": {
+        "enabled": false,
+        "editIntervalMs": 750,
+        "minInitialChars": 24,
+        "cursor": "▌",
+        "maxFloodStrikes": 2,
+        "cleanupFailedAttempts": true
+      }
+    }
+  }
+}
+```
+
+| Setting | Default | Behavior |
+|---|---:|---|
+| `channels.telegram.streaming.enabled` | `false` | Opt-in gate for Telegram streaming. |
+| `channels.telegram.streaming.editIntervalMs` | `750` | Coalesces Telegram edits after the first streamed message. |
+| `channels.telegram.streaming.minInitialChars` | `24` | Visible filtered character threshold before the first streamed message is sent. |
+| `channels.telegram.streaming.cursor` | `"▌"` | Temporary cursor appended to live partial messages. |
+| `channels.telegram.streaming.maxFloodStrikes` | `2` | Active-handle Telegram flood-control degradation limit. |
+| `channels.telegram.streaming.cleanupFailedAttempts` | `true` | Deletes or neutralizes provisional streamed messages after failed or fallback provider attempts. |
+
+Operational boundaries:
+
+- Streaming runs only for Telegram delivery.
+- `DeliveryRouter` disables streaming in v1.
+- Streaming requires the gateway turn's abort signal.
+- Partial stream edits use lightweight HTML escaping, not final Telegram formatting.
+- Final delivery still uses normal Telegram formatting and chunking.
+- Flood control or oversized partial payloads force fallback for the active turn only. Future Telegram streaming turns are not globally disabled.
+
+Failure behavior and rollback:
+
+- Provider fallback or failure cleanup deletes the current provisional streamed message when possible, or neutralizes it if deletion fails.
+- Approval and artifact boundaries force normal final text fallback because the delivery order is ambiguous.
+- Cancellation aborts the stream handle and removes the cursor when possible. Cleanup failure does not change the cancellation outcome.
+- Duplicate final text is skipped only when final stream delivery succeeds and no approval or artifact boundary exists.
+- To disable streaming, set `channels.telegram.streaming.enabled` to `false` and restart or reload the gateway process for that profile.
 
 ---
 

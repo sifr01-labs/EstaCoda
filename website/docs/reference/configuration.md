@@ -463,6 +463,14 @@ Channel adapter configuration. See [Channel Configuration](../user-guide/channel
     "telegram": {
       "enabled": true,
       "botTokenEnv": "ESTACODA_TELEGRAM_BOT_TOKEN",
+      "streaming": {
+        "enabled": false,
+        "editIntervalMs": 750,
+        "minInitialChars": 24,
+        "cursor": "▌",
+        "maxFloodStrikes": 2,
+        "cleanupFailedAttempts": true
+      },
       "busyPolicy": "reject",
       "queueDepth": 3
     }
@@ -471,6 +479,19 @@ Channel adapter configuration. See [Channel Configuration](../user-guide/channel
 ```
 
 Guided Telegram setup stores the bot token in the selected profile `.env` under `ESTACODA_TELEGRAM_BOT_TOKEN` and writes `botTokenEnv: "ESTACODA_TELEGRAM_BOT_TOKEN"` to config. The raw Telegram bot token must not appear in config review or setup output.
+
+Telegram streaming is configured under `channels.telegram.streaming`. It is disabled by default and affects Telegram delivery only. It does not change session state, memory, approvals, tool execution, artifacts, or final `response.text`.
+
+| Setting | Default | Notes |
+|---|---:|---|
+| `channels.telegram.streaming.enabled` | `false` | Opt-in gate for Telegram streaming. |
+| `channels.telegram.streaming.editIntervalMs` | `750` | Coalescing interval for Telegram partial edits. |
+| `channels.telegram.streaming.minInitialChars` | `24` | Visible filtered character threshold before first partial send. |
+| `channels.telegram.streaming.cursor` | `"▌"` | Temporary live cursor appended to partial messages. |
+| `channels.telegram.streaming.maxFloodStrikes` | `2` | Active-turn flood-control degradation limit. |
+| `channels.telegram.streaming.cleanupFailedAttempts` | `true` | Delete or neutralize provisional streamed messages after provider failure/fallback. |
+
+`DeliveryRouter` disables Telegram streaming in v1. Partial streaming uses lightweight HTML escaping; final delivery uses normal Telegram formatting. Flood control, oversized partial payloads, approval boundaries, artifact boundaries, or final edit failures force normal final text fallback for the active turn only.
 
 ## Secret handling
 

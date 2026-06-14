@@ -2,13 +2,27 @@ import { afterEach, describe, it, expect, vi } from "vitest";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { ChannelGateway, InMemoryChannelSessionStore, telegramGatewayCommands, authorizeChannelMessage } from "./channel-gateway.js";
+import {
+  ChannelGateway,
+  InMemoryChannelSessionStore,
+  telegramGatewayCommands,
+  authorizeChannelMessage,
+  type ChannelGatewayOptions
+} from "./channel-gateway.js";
 import { ChannelApprovalStore } from "./channel-approval-store.js";
 import { createFakeTelegramAdapter } from "../test/fakes/fake-telegram-adapter.js";
 import { InMemorySurfacePointerStore } from "./surface-pointer-store.js";
-import type { ChannelMessage, ChannelSessionKey } from "../contracts/channel.js";
+import type {
+  ChannelAdapter,
+  ChannelMessage,
+  ChannelSessionKey,
+  ChannelStreamingTextHandle,
+  ChannelStreamingTextOptions,
+  ChannelStreamingTextResult
+} from "../contracts/channel.js";
 import type { SecurityAssessment, SecurityPolicy, SecurityRequest } from "../contracts/security.js";
 import type { Runtime } from "../runtime/create-runtime.js";
+import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import { deriveAgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import { ActiveTurnRegistry } from "../gateway/active-turn-registry.js";
 import { RuntimeCache } from "../runtime/runtime-cache.js";
@@ -122,6 +136,444 @@ function runtimeResponse(input: {
     progress: []
   };
 }
+
+type StreamingHandleSpy = ChannelStreamingTextHandle & {
+  appended: string[];
+  segmentBreaks: Array<string | undefined>;
+  providerResults: Array<{ ok: boolean; willFallback: boolean; provider: string; model: string }>;
+  finishCalls: string[];
+  abortCalls: Array<string | undefined>;
+  order: string[];
+};
+
+function createStreamingHandleSpy(input: {
+  finishResult?: ChannelStreamingTextResult;
+  finishError?: Error;
+  abortError?: Error;
+} = {}): StreamingHandleSpy {
+  const handle: StreamingHandleSpy = {
+    appended: [],
+    segmentBreaks: [],
+    providerResults: [],
+    finishCalls: [],
+    abortCalls: [],
+    order: [],
+    append(text: string) {
+      this.order.push(`append:${text}`);
+      this.appended.push(text);
+    },
+    segmentBreak(reason?: string) {
+      this.order.push(`segmentBreak:${reason ?? ""}`);
+      this.segmentBreaks.push(reason);
+    },
+    providerAttemptResult(result) {
+      this.order.push(`providerAttemptResult:${result.ok}:${result.willFallback}`);
+      this.providerResults.push(result);
+    },
+    async finish(finalText: string) {
+      this.order.push(`finish:${finalText}`);
+      this.finishCalls.push(finalText);
+      if (input.finishError !== undefined) {
+        throw input.finishError;
+      }
+      return input.finishResult ?? {
+        delivered: true,
+        fallbackRequired: false,
+        deliveredText: finalText
+      };
+    },
+    async abort(reason?: string) {
+      this.order.push(`abort:${reason ?? ""}`);
+      this.abortCalls.push(reason);
+      if (input.abortError !== undefined) {
+        throw input.abortError;
+      }
+    }
+  };
+  return handle;
+}
+
+type StreamingGatewayHarness = {
+  adapter: FakeTelegramAdapter & {
+    streamStarts: Array<{ sessionKey: ChannelSessionKey; options?: ChannelStreamingTextOptions }>;
+    sendReplies: Array<{ conversationId: string; text?: string }>;
+  };
+  handle: StreamingHandleSpy;
+  gateway: ChannelGateway;
+  runtime: Runtime;
+};
+
+function createStreamingTelegramAdapter(handle: StreamingHandleSpy): StreamingGatewayHarness["adapter"] {
+  const adapter = createFakeTelegramAdapter() as StreamingGatewayHarness["adapter"];
+  const sendProgress = adapter.delivery!.sendProgress;
+  adapter.streamStarts = [];
+  adapter.sendReplies = [];
+  adapter.delivery!.sendProgress = async (sessionKey, event) => {
+    handle.order.push(`progress:${event.kind}`);
+    await sendProgress?.(sessionKey, event);
+  };
+  adapter.delivery!.startStreamingText = (sessionKey, options) => {
+    adapter.streamStarts.push({ sessionKey: { ...sessionKey }, options });
+    return handle;
+  };
+  adapter.send = async (reply) => {
+    adapter.sendReplies.push({
+      conversationId: reply.conversationId,
+      text: reply.text
+    });
+  };
+  return adapter;
+}
+
+function createStreamingGatewayHarness(input: {
+  enabled?: boolean;
+  channel?: "telegram" | "discord";
+  handle?: StreamingHandleSpy;
+  runtimeResponse?: Awaited<ReturnType<Runtime["handle"]>>;
+  events?: RuntimeEvent[];
+  actions?: Array<
+    | { kind: "event"; event: RuntimeEvent }
+    | { kind: "delta"; text: string }
+    | { kind: "segmentBreak"; reason?: string }
+  >;
+  deliveryRouter?: ChannelGatewayOptions["deliveryRouter"];
+} = {}): StreamingGatewayHarness {
+  const handle = input.handle ?? createStreamingHandleSpy();
+  const adapter = input.channel === "discord"
+    ? createFakeChannelAdapterWithStreaming("discord", handle)
+    : createStreamingTelegramAdapter(handle);
+  const runtime = createMinimalRuntime();
+  runtime.handle = async (runtimeInput) => {
+    const actions = input.actions ?? input.events?.map((event) => ({ kind: "event" as const, event })) ?? [];
+    for (const action of actions) {
+      if (action.kind === "event") {
+        await runtimeInput.onEvent?.(action.event);
+      } else if (action.kind === "delta") {
+        runtimeInput.onDelta?.(action.text);
+      } else {
+        await runtimeInput.onSegmentBreak?.(action.reason);
+      }
+    }
+    return input.runtimeResponse ?? runtimeResponse({
+      text: "final answer",
+      securityDecision: "allow"
+    });
+  };
+  const gateway = new ChannelGateway({
+    adapters: [adapter],
+    runtimeForSession: async ({ sessionId }) => ({ ...runtime, sessionId }),
+    sessionStore: new InMemoryChannelSessionStore(),
+    authPolicy: {
+      [input.channel ?? "telegram"]: { allowedUserIds: ["user-1"] }
+    },
+    telegramStreaming: {
+      enabled: input.enabled ?? true,
+      editIntervalMs: 111,
+      minInitialChars: 7,
+      cursor: "|",
+      maxFloodStrikes: 3,
+      cleanupFailedAttempts: false
+    },
+    deliveryRouter: input.deliveryRouter
+  });
+
+  return { adapter: adapter as StreamingGatewayHarness["adapter"], handle, gateway, runtime };
+}
+
+function createFakeChannelAdapterWithStreaming(kind: "discord", handle: StreamingHandleSpy): StreamingGatewayHarness["adapter"] {
+  const adapter = createFakeTelegramAdapter() as StreamingGatewayHarness["adapter"];
+  adapter.kind = kind;
+  adapter.id = kind;
+  adapter.delivery!.startStreamingText = () => handle;
+  adapter.streamStarts = [];
+  adapter.sendReplies = [];
+  return adapter;
+}
+
+function providerToken(text: string): RuntimeEvent {
+  return {
+    kind: "provider-token",
+    provider: "test",
+    model: "m",
+    text
+  };
+}
+
+function providerResult(input: { ok: boolean; willFallback: boolean }): RuntimeEvent {
+  return {
+    kind: "provider-result",
+    provider: "test",
+    model: "m",
+    ok: input.ok,
+    fallback: false,
+    willFallback: input.willFallback
+  };
+}
+
+describe("ChannelGateway Telegram streaming", () => {
+  it("starts streaming only for Telegram when config is enabled and passes config options", async () => {
+    const { adapter, gateway } = createStreamingGatewayHarness();
+
+    await gateway.receive(makeMessage("hello"));
+
+    expect(adapter.streamStarts).toHaveLength(1);
+    expect(adapter.streamStarts[0]?.sessionKey).toMatchObject({ platform: "telegram", chatId: "123456" });
+    expect(adapter.streamStarts[0]?.options).toMatchObject({
+      editIntervalMs: 111,
+      minInitialChars: 7,
+      cursor: "|",
+      maxFloodStrikes: 3,
+      cleanupFailedAttempts: false
+    });
+    expect(adapter.streamStarts[0]?.options?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("preserves existing behavior when Telegram streaming config is disabled", async () => {
+    const { adapter, handle, gateway } = createStreamingGatewayHarness({ enabled: false });
+
+    await gateway.receive(makeMessage("hello"));
+
+    expect(adapter.streamStarts).toHaveLength(0);
+    expect(handle.finishCalls).toEqual([]);
+    expect(adapter.records.filter((record) => record.kind === "text").map((record) => record.text)).toEqual(["final answer"]);
+  });
+
+  it("leaves non-Telegram behavior unchanged", async () => {
+    const { adapter, handle, gateway } = createStreamingGatewayHarness({ channel: "discord" });
+
+    await gateway.receive(makeMessage("hello", {
+      channel: "discord",
+      sessionKey: { platform: "discord", chatId: "discord-1", userId: "user-1" }
+    }));
+
+    expect(adapter.streamStarts).toHaveLength(0);
+    expect(handle.finishCalls).toEqual([]);
+    expect(adapter.records.filter((record) => record.kind === "text").map((record) => record.text)).toEqual(["final answer"]);
+  });
+
+  it("disables streaming when DeliveryRouter is present in v1", async () => {
+    const routedTexts: string[] = [];
+    const deliveryRouter = {
+      deliverText: async (_origins: unknown, text: string) => {
+        routedTexts.push(text);
+      },
+      deliverProgress: async () => {},
+      deliverArtifact: async () => {}
+    } as unknown as ChannelGatewayOptions["deliveryRouter"];
+    const { adapter, handle, gateway } = createStreamingGatewayHarness({ deliveryRouter });
+
+    await gateway.receive(makeMessage("hello"));
+
+    expect(adapter.streamStarts).toHaveLength(0);
+    expect(handle.finishCalls).toEqual([]);
+    expect(routedTexts).toEqual(["final answer"]);
+  });
+
+  it("routes provider tokens to append and not progress", async () => {
+    const { adapter, handle, gateway } = createStreamingGatewayHarness({
+      actions: [
+        { kind: "event", event: providerToken("hello") },
+        { kind: "delta", text: "hello" }
+      ]
+    });
+
+    const result = await gateway.receive(makeMessage("hello"));
+
+    expect(handle.appended).toEqual(["hello"]);
+    expect(adapter.records.filter((record) => record.kind === "progress")).toHaveLength(0);
+    expect(result.progressCount).toBe(0);
+  });
+
+  it("forwards provider-result attempt outcomes", async () => {
+    const { handle, gateway } = createStreamingGatewayHarness({
+      events: [providerResult({ ok: false, willFallback: true })],
+      handle: createStreamingHandleSpy({ finishResult: { delivered: false, fallbackRequired: true } })
+    });
+
+    await gateway.receive(makeMessage("hello"));
+
+    expect(handle.providerResults).toEqual([{
+      ok: false,
+      willFallback: true,
+      provider: "test",
+      model: "m"
+    }]);
+  });
+
+  it("segments at provider tool-call before delivering tool progress and appends continuation tokens", async () => {
+    const { adapter, handle, gateway } = createStreamingGatewayHarness({
+      actions: [
+        { kind: "event", event: providerToken("pre") },
+        { kind: "delta", text: "pre" },
+        { kind: "segmentBreak", reason: "provider-tool-call" },
+        {
+          kind: "event",
+          event: {
+            kind: "provider-tool-call",
+            provider: "test",
+            model: "m",
+            name: "terminal.run"
+          }
+        },
+        { kind: "event", event: { kind: "tool-start", tool: "terminal.run" } },
+        { kind: "event", event: providerToken("post") },
+        { kind: "delta", text: "post" }
+      ]
+    });
+
+    await gateway.receive(makeMessage("hello"));
+
+    expect(handle.appended).toEqual(["pre", "post"]);
+    expect(handle.segmentBreaks).toEqual(["provider-tool-call"]);
+    expect(handle.order.indexOf("segmentBreak:provider-tool-call")).toBeLessThan(handle.order.indexOf("progress:provider-tool-call"));
+    expect(handle.order.indexOf("progress:provider-tool-call")).toBeLessThan(handle.order.indexOf("progress:tool-start"));
+    expect(adapter.records.filter((record) => record.kind === "progress").map((record) => record.event?.kind)).toEqual([
+      "provider-tool-call",
+      "tool-start"
+    ]);
+  });
+
+  it("clean no-tool turn finalizes stream and skips normal sendText", async () => {
+    const { adapter, handle, gateway } = createStreamingGatewayHarness({
+      actions: [
+        { kind: "event", event: providerToken("answer") },
+        { kind: "delta", text: "answer" }
+      ]
+    });
+
+    await gateway.receive(makeMessage("hello"));
+
+    expect(handle.finishCalls).toEqual(["final answer"]);
+    expect(adapter.records.filter((record) => record.kind === "text")).toHaveLength(0);
+  });
+
+  it("tool turn with live final continuation finalizes stream and skips duplicate final text", async () => {
+    const { adapter, handle, gateway } = createStreamingGatewayHarness({
+      actions: [
+        { kind: "event", event: providerToken("pre") },
+        { kind: "delta", text: "pre" },
+        { kind: "segmentBreak", reason: "provider-tool-call" },
+        { kind: "event", event: { kind: "provider-tool-call", provider: "test", model: "m", name: "search" } },
+        { kind: "event", event: { kind: "tool-start", tool: "search" } },
+        { kind: "event", event: providerToken("post") },
+        { kind: "delta", text: "post" }
+      ]
+    });
+
+    await gateway.receive(makeMessage("hello"));
+
+    expect(handle.finishCalls).toEqual(["final answer"]);
+    expect(adapter.records.filter((record) => record.kind === "text")).toHaveLength(0);
+  });
+
+  it("tool turn with no live final segment falls back to normal sendText", async () => {
+    const { adapter, gateway } = createStreamingGatewayHarness({
+      actions: [
+        { kind: "event", event: providerToken("pre") },
+        { kind: "delta", text: "pre" },
+        { kind: "segmentBreak", reason: "provider-tool-call" },
+        { kind: "event", event: { kind: "provider-tool-call", provider: "test", model: "m", name: "search" } },
+        { kind: "event", event: { kind: "tool-start", tool: "search" } }
+      ],
+      handle: createStreamingHandleSpy({ finishResult: { delivered: false, fallbackRequired: true } })
+    });
+
+    await gateway.receive(makeMessage("hello"));
+
+    expect(adapter.records.filter((record) => record.kind === "text").map((record) => record.text)).toEqual(["final answer"]);
+  });
+
+  it("provider failure/fallback cleanup result causes final fallback delivery", async () => {
+    const { adapter, gateway } = createStreamingGatewayHarness({
+      events: [providerResult({ ok: false, willFallback: true })],
+      handle: createStreamingHandleSpy({ finishResult: { delivered: false, fallbackRequired: true } })
+    });
+
+    await gateway.receive(makeMessage("hello"));
+
+    expect(adapter.records.filter((record) => record.kind === "text").map((record) => record.text)).toEqual(["final answer"]);
+  });
+
+  it("approval boundaries force final text fallback", async () => {
+    const { adapter, handle, gateway } = createStreamingGatewayHarness({
+      runtimeResponse: runtimeResponse({
+        text: "needs approval",
+        securityDecision: "ask",
+        toolExecutions: [commandExecution("ask", "rm -rf ./build")]
+      })
+    });
+
+    await gateway.receive(makeMessage("hello"));
+
+    expect(handle.finishCalls).toEqual(["needs approval"]);
+    expect(adapter.records.some((record) => record.kind === "text" && record.text === "needs approval")).toBe(true);
+    expect(adapter.records.some((record) => record.kind === "text" && record.text?.includes("Approval Required"))).toBe(true);
+  });
+
+  it("artifact boundaries force final text fallback", async () => {
+    const { adapter, gateway } = createStreamingGatewayHarness({
+      runtimeResponse: runtimeResponse({
+        text: "with artifact",
+        securityDecision: "allow",
+        artifacts: [{
+          id: "artifact-1",
+          path: "/tmp/result.txt",
+          kind: "document",
+          bytes: 1,
+          createdAt: new Date().toISOString()
+        }]
+      })
+    });
+
+    await gateway.receive(makeMessage("hello"));
+
+    expect(adapter.records.some((record) => record.kind === "text" && record.text === "with artifact")).toBe(true);
+    expect(adapter.records.filter((record) => record.kind === "artifact")).toHaveLength(1);
+  });
+
+  it("agent cancellation calls stream abort", async () => {
+    const { handle, gateway } = createStreamingGatewayHarness({
+      events: [{ kind: "agent-cancelled", reason: "stop" }]
+    });
+
+    await gateway.receive(makeMessage("hello"));
+
+    expect(handle.abortCalls).toEqual(["stop"]);
+  });
+
+  it("agent cancellation stream abort failures do not mask the turn outcome", async () => {
+    const { adapter, handle, gateway } = createStreamingGatewayHarness({
+      events: [{ kind: "agent-cancelled", reason: "stop" }],
+      handle: createStreamingHandleSpy({ abortError: new Error("stream abort failed") })
+    });
+
+    const result = await gateway.receive(makeMessage("hello"));
+
+    expect(handle.abortCalls).toEqual(["stop"]);
+    expect(result.replyText).toBe("final answer");
+    expect(adapter.records.some((record) => record.kind === "text" && record.text?.includes("stream abort failed"))).toBe(false);
+  });
+
+  it("stream finish failure falls back to normal sendText", async () => {
+    const { adapter, gateway } = createStreamingGatewayHarness({
+      handle: createStreamingHandleSpy({ finishError: new Error("stream finish failed") })
+    });
+
+    await gateway.receive(makeMessage("hello"));
+
+    expect(adapter.records.filter((record) => record.kind === "text").map((record) => record.text)).toEqual(["final answer"]);
+  });
+
+  it("Telegram adapter.send no-op does not duplicate output", async () => {
+    const { adapter, gateway } = createStreamingGatewayHarness();
+    adapter.send = undefined;
+
+    await gateway.receive(makeMessage("hello"));
+
+    expect(adapter.records.filter((record) => record.kind === "text")).toHaveLength(0);
+    expect(adapter.sendReplies).toEqual([]);
+  });
+});
 
 function commandExecution(decision: "allow" | "ask" | "deny", command: string): Awaited<ReturnType<Runtime["handle"]>>["toolExecutions"][number] {
   return {

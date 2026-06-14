@@ -322,7 +322,11 @@ async function appendProviderToolHistory(db: InMemorySessionDB, sessionId: strin
 
 async function runBasicProviderTurn(
   loop: ProviderTurnLoop,
-  onEvent?: (event: RuntimeEvent) => void
+  callbacks: {
+    onEvent?: (event: RuntimeEvent) => void;
+    onDelta?: (text: string) => void;
+    onSegmentBreak?: (reason?: string) => void | Promise<void>;
+  } = {}
 ): Promise<Awaited<ReturnType<ProviderTurnLoop["run"]>>> {
   return await loop.run({
     userText: "current user request",
@@ -343,7 +347,9 @@ async function runBasicProviderTurn(
     toolPlans: [],
     trustedWorkspace: false,
     initialRiskClass: "read-only-local",
-    onEvent
+    onEvent: callbacks.onEvent,
+    onDelta: callbacks.onDelta,
+    onSegmentBreak: callbacks.onSegmentBreak
   });
 }
 
@@ -802,6 +808,167 @@ function forwardingSessionDb(db: InMemorySessionDB, overrides: Partial<SessionDB
   };
 }
 
+describe("ProviderTurnLoop streaming callbacks", () => {
+  it("continues emitting provider-token events when callbacks are omitted", async () => {
+    const harness = await createCompressionHarness();
+    harness.completeSpy.mockImplementation(async (_request, _preferences, options) => {
+      await options?.onEvent?.({
+        kind: "provider-token",
+        provider: "test-provider",
+        model: "test-model",
+        text: "hello"
+      });
+      return providerExecution("hello");
+    });
+    const events: RuntimeEvent[] = [];
+
+    await runBasicProviderTurn(harness.loop(), { onEvent: (event) => events.push(event) });
+
+    expect(events).toContainEqual({
+      kind: "provider-token",
+      provider: "test-provider",
+      model: "test-model",
+      text: "hello"
+    });
+  });
+
+  it("sends provider-token text to onDelta without changing provider-token event delivery", async () => {
+    const harness = await createCompressionHarness();
+    harness.completeSpy.mockImplementation(async (_request, _preferences, options) => {
+      await options?.onEvent?.({
+        kind: "provider-token",
+        provider: "test-provider",
+        model: "test-model",
+        text: "hel"
+      });
+      await options?.onEvent?.({
+        kind: "provider-token",
+        provider: "test-provider",
+        model: "test-model",
+        text: "lo"
+      });
+      return providerExecution("hello");
+    });
+    const events: RuntimeEvent[] = [];
+    const deltas: string[] = [];
+    const order: string[] = [];
+
+    await runBasicProviderTurn(harness.loop(), {
+      onEvent: (event) => {
+        events.push(event);
+        if (event.kind === "provider-token") {
+          order.push(`event:${event.text}`);
+        }
+      },
+      onDelta: (text) => {
+        deltas.push(text);
+        order.push(`delta:${text}`);
+      }
+    });
+
+    expect(deltas).toEqual(["hel", "lo"]);
+    expect(events.filter((event) => event.kind === "provider-token")).toHaveLength(2);
+    expect(order).toEqual(["event:hel", "delta:hel", "event:lo", "delta:lo"]);
+  });
+
+  it("does not fire a segment break for no-tool provider responses", async () => {
+    const harness = await createCompressionHarness();
+    harness.completeSpy.mockImplementation(async (_request, _preferences, options) => {
+      await options?.onEvent?.({
+        kind: "provider-token",
+        provider: "test-provider",
+        model: "test-model",
+        text: "hello"
+      });
+      return providerExecution("hello");
+    });
+    const events: RuntimeEvent[] = [];
+    const onSegmentBreak = vi.fn();
+
+    await runBasicProviderTurn(harness.loop(), {
+      onEvent: (event) => events.push(event),
+      onSegmentBreak
+    });
+
+    expect(onSegmentBreak).not.toHaveBeenCalled();
+    expect(events).toContainEqual({
+      kind: "provider-token",
+      provider: "test-provider",
+      model: "test-model",
+      text: "hello"
+    });
+  });
+
+  it("does not fail the provider turn when onDelta throws", async () => {
+    const harness = await createCompressionHarness();
+    harness.completeSpy.mockImplementation(async (_request, _preferences, options) => {
+      await options?.onEvent?.({
+        kind: "provider-token",
+        provider: "test-provider",
+        model: "test-model",
+        text: "hello"
+      });
+      return providerExecution("hello");
+    });
+
+    const result = await runBasicProviderTurn(harness.loop(), {
+      onDelta: () => {
+        throw new Error("observer failed");
+      }
+    });
+
+    expect(result.providerExecution?.response?.content).toBe("hello");
+  });
+
+  it("fires one provider-tool-call segment break before tool execution", async () => {
+    const order: string[] = [];
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [
+          providerToolCall("call-one"),
+          providerToolCall("call-two")
+        ]),
+        providerExecution("done")
+      ],
+      toolSteps: [
+        { executions: [toolExecution("call-one"), toolExecution("call-two")] }
+      ],
+      onExecutePlans: () => {
+        order.push("execute-tools");
+      }
+    });
+
+    await runBasicProviderTurn(harness.loop, {
+      onSegmentBreak: (reason) => {
+        order.push(`segment:${reason ?? ""}`);
+      }
+    });
+
+    expect(order.slice(0, 2)).toEqual(["segment:provider-tool-call", "execute-tools"]);
+    expect(order.filter((entry) => entry === "segment:provider-tool-call")).toHaveLength(1);
+  });
+
+  it("does not fail the provider turn when onSegmentBreak throws", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-one")]),
+        providerExecution("done")
+      ],
+      toolSteps: [
+        { executions: [toolExecution("call-one")] }
+      ]
+    });
+
+    const result = await runBasicProviderTurn(harness.loop, {
+      onSegmentBreak: () => {
+        throw new Error("observer failed");
+      }
+    });
+
+    expect(result.providerExecution?.response?.content).toContain("done");
+  });
+});
+
 describe("ProviderTurnLoop provider availability", () => {
   it("can run provider when executor and configured model are present", async () => {
     const loop = await createProviderTurnLoopForTest();
@@ -874,7 +1041,7 @@ describe("ProviderTurnLoop semantic session compression", () => {
     const harness = await createCompressionHarness();
     const events: RuntimeEvent[] = [];
 
-    await runBasicProviderTurn(harness.loop(), (event) => events.push(event));
+    await runBasicProviderTurn(harness.loop(), { onEvent: (event) => events.push(event) });
 
     const usageEvents = events.filter((event): event is Extract<RuntimeEvent, { kind: "context-usage" }> =>
       event.kind === "context-usage"
@@ -1848,7 +2015,7 @@ describe("ProviderTurnLoop reasoning-only response recovery", () => {
     });
     const events: RuntimeEvent[] = [];
 
-    const result = await runBasicProviderTurn(harness.loop, (event) => events.push(event));
+    const result = await runBasicProviderTurn(harness.loop, { onEvent: (event) => events.push(event) });
 
     expect(result.iterations).toBe(2);
     expect(result.providerExecution?.response?.content).toBe("Visible answer.");
@@ -2570,9 +2737,9 @@ describe("ProviderTurnLoop truncated tool-call safety", () => {
     });
     const events: RuntimeEvent[] = [];
 
-    const result = await runBasicProviderTurn(harness.loop, (event) => {
+    const result = await runBasicProviderTurn(harness.loop, { onEvent: (event) => {
       events.push(event);
-    });
+    } });
 
     expect(result.iterations).toBe(2);
     expect(result.toolExecutions.map((execution) => execution.toolCallId)).toEqual(["retry-call"]);
@@ -2671,9 +2838,9 @@ describe("ProviderTurnLoop truncated tool-call safety", () => {
     });
     const events: RuntimeEvent[] = [];
 
-    const result = await runBasicProviderTurn(harness.loop, (event) => {
+    const result = await runBasicProviderTurn(harness.loop, { onEvent: (event) => {
       events.push(event);
-    });
+    } });
 
     expect(result.iterations).toBe(2);
     expect(harness.completeSpy).toHaveBeenCalledTimes(2);

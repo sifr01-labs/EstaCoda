@@ -1231,6 +1231,60 @@ describe("loadRuntimeConfig browser provider compatibility", () => {
 });
 
 describe("loadRuntimeConfig channel readiness", () => {
+  it("normalizes Telegram streaming config as disabled by default", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: { telegram: { enabled: false } }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.channels.telegram.streaming).toEqual({
+      enabled: false,
+      editIntervalMs: 750,
+      minInitialChars: 24,
+      cursor: "▌",
+      maxFloodStrikes: 2,
+      cleanupFailedAttempts: true
+    });
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("preserves explicit Telegram streaming config", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: {
+        telegram: {
+          enabled: false,
+          streaming: {
+            enabled: true,
+            editIntervalMs: 1000,
+            minInitialChars: 10,
+            cursor: "*",
+            maxFloodStrikes: 4,
+            cleanupFailedAttempts: false
+          }
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.channels.telegram.streaming).toEqual({
+      enabled: true,
+      editIntervalMs: 1000,
+      minInitialChars: 10,
+      cursor: "*",
+      maxFloodStrikes: 4,
+      cleanupFailedAttempts: false
+    });
+    await rm(workspace, { recursive: true, force: true });
+  });
+
   it("discord ready = enabled && botTokenEnv plus allowlist present", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });

@@ -11,7 +11,7 @@ description: "Rules for keeping EstaCoda documentation accurate, navigable, and 
 2. **Repo docs should be public-ready unless explicitly marked otherwise.**
 3. **Generated artifacts should not be committed unless sanitized and intentionally useful.**
 4. **Canonical docs must be updated instead of creating parallel duplicate docs.**
-5. **ADRs are for durable architectural decisions only.**
+5. **Durable architectural decisions belong in current architecture, subsystem, operations, or release documentation.**
 6. **Handoff material must stay short and operational.** It is not a substitute for updating canonical documentation.
 
 ## Public/Private Boundary
@@ -21,13 +21,13 @@ description: "Rules for keeping EstaCoda documentation accurate, navigable, and 
 | Architecture docs | Execution plans |
 | Subsystem docs | Internal assessments |
 | Operations docs | Alpha runbooks |
-| ADRs | Call graphs, builder assessments |
+| Architecture and subsystem docs | Call graphs, builder assessments |
 | Release notes | Detailed milestone planning |
 | Security model | Vulnerability drafts |
 
 ## Planning Docs
 
-Planning documents are working artifacts, not canonical documentation. Execution plans should live in the private workspace and should not be committed to the public repo. Durable decisions must be promoted into architecture docs, ADRs, release notes, or public operations docs.
+Planning documents are working artifacts, not canonical documentation. Execution plans should live in the private workspace and should not be committed to the public repo. Durable decisions must be promoted into current architecture docs, subsystem docs, release notes, or public operations docs.
 
 ## Handoff Material
 
@@ -46,6 +46,6 @@ When changing code:
 
 1. Check if the change affects a canonical doc.
 2. Update the canonical doc, do not create a new one.
-3. If the change is a durable architectural decision, consider an ADR.
+3. If the change is a durable architectural decision, update the current architecture, subsystem, operations, or release documentation.
 4. If the change is internal planning detail, keep it in the private workspace.
 5. Run `pnpm run typecheck` and `pnpm run smoke` before committing doc changes that reference code.

@@ -72,6 +72,29 @@ describe("WorkflowAgentLoopAdapter workflow context", () => {
       }
     }));
   });
+
+  it("passes optional streaming callbacks through to AgentLoop", async () => {
+    const agentLoop = fakeAgentLoop();
+    const adapter = new WorkflowAgentLoopAdapter({
+      agentLoop: agentLoop.instance,
+      store: new FakeWorkflowStore()
+    });
+    const onDelta = vi.fn();
+    const onSegmentBreak = vi.fn();
+
+    await adapter.runTurn({
+      run: makeRun(),
+      text: "continue",
+      channel: "cli",
+      onDelta,
+      onSegmentBreak
+    });
+
+    expect(agentLoop.handle).toHaveBeenCalledWith(expect.objectContaining({
+      onDelta,
+      onSegmentBreak
+    }));
+  });
 });
 
 function fakeAgentLoop() {
