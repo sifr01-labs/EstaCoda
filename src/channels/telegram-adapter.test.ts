@@ -494,6 +494,21 @@ describe("TelegramAdapter", () => {
     expect(callsFor(calls, "sendMessage")).toHaveLength(0);
   });
 
+  it("delivery.startStreamingText defaults to auto transport in DMs", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123", chatType: "dm" }, {
+      minInitialChars: 1
+    });
+
+    handle.append("hello");
+    await flushTelegramStreamingTimers();
+
+    expect(callsFor(calls, "sendRichMessageDraft")).toHaveLength(1);
+    expect(callsFor(calls, "sendMessageDraft")).toHaveLength(0);
+    expect(callsFor(calls, "sendMessage")).toHaveLength(0);
+  });
+
   it("delivery.startStreamingText transport auto in groups uses edit streaming", async () => {
     vi.useFakeTimers();
     const { adapter, calls } = createTelegramStreamingHarness();
@@ -505,6 +520,37 @@ describe("TelegramAdapter", () => {
     handle.append("hello");
     await flushTelegramStreamingTimers();
 
+    expect(callsFor(calls, "sendMessageDraft")).toHaveLength(0);
+    expect(callsFor(calls, "sendMessage")[0]?.body.text).toBe("hello▌");
+  });
+
+  it("delivery.startStreamingText default auto transport in groups uses edit streaming", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123", chatType: "group" }, {
+      minInitialChars: 1
+    });
+
+    handle.append("hello");
+    await flushTelegramStreamingTimers();
+
+    expect(callsFor(calls, "sendRichMessageDraft")).toHaveLength(0);
+    expect(callsFor(calls, "sendMessageDraft")).toHaveLength(0);
+    expect(callsFor(calls, "sendMessage")[0]?.body.text).toBe("hello▌");
+  });
+
+  it("delivery.startStreamingText transport edit in DMs uses edit streaming", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123", chatType: "dm" }, {
+      minInitialChars: 1,
+      transport: "edit"
+    });
+
+    handle.append("hello");
+    await flushTelegramStreamingTimers();
+
+    expect(callsFor(calls, "sendRichMessageDraft")).toHaveLength(0);
     expect(callsFor(calls, "sendMessageDraft")).toHaveLength(0);
     expect(callsFor(calls, "sendMessage")[0]?.body.text).toBe("hello▌");
   });

@@ -62,14 +62,14 @@ Telegram هي القناة البعيدة الحية المُثبتة لـ v0.1.
 | رموز الربط | `implemented` |
 | رموز التسليم | `implemented` |
 | ضغط التقدم | `implemented` |
-| بث النص التجريبي | `opt-in` |
+| بث النص التجريبي | `default-on when Telegram is configured` |
 
 **السلوك:**
 
 - رسالة تقدم واحدة متطورة لكل دور نشط
 - أزرار الموافقة المضمنة تُعيّن إلى `/approve` و `/deny`
 - الردود النهائية مُنسقة بـ HTML آمن لـ Telegram
-- يمكن تفعيل بث اختياري يحرر رسائل Telegram تدريجيًا أثناء الدور؛ يبقى `response.text` النهائي هو المرجع
+- يكون البث مفعلاً افتراضيًا لقنوات Telegram المُعدّة ويحرر رسائل Telegram تدريجيًا أثناء الدور؛ يبقى `response.text` النهائي هو المرجع
 - تسميات النشاط مُترجمة (`en`، `ar`)
 - جلسات المجموعات افتراضيًا لكل مستخدم
 - جلسات الخيوط مشتركة افتراضيًا
@@ -104,7 +104,7 @@ estacoda gateway start
 
 بث Telegram خيار لتجربة التوصيل فقط. لا يغير حقيقة الجلسة، أو الذاكرة، أو تنفيذ الأدوات، أو الموافقات، أو المنتجات، أو حالة سير العمل. ما زال runtime ينتج `response.text` نهائيًا، وهذا النص النهائي هو المرجع.
 
-عندما تكون `channels.telegram.streaming.enabled` بقيمة `true`، تُستخدم provider tokens لتحرير رسائل Telegram تدريجيًا. حدود الأدوات تغلق رسالة البث الحالية. provider tokens اللاحقة تبدأ رسالة Telegram جديدة تحت رسالة تقدم الأداة. الرسائل المبثوثة التي أُغلقت لا تُحرر لاحقًا لتصبح الرد النهائي.
+يكون بث Telegram مفعلاً افتراضيًا لقنوات Telegram المُعدّة. عندما تكون `channels.telegram.streaming.enabled` بقيمة `true`، تُستخدم provider tokens لتحرير رسائل Telegram تدريجيًا. حدود الأدوات تغلق رسالة البث الحالية. provider tokens اللاحقة تبدأ رسالة Telegram جديدة تحت رسالة تقدم الأداة. الرسائل المبثوثة التي أُغلقت لا تُحرر لاحقًا لتصبح الرد النهائي. لتعطيله، اضبط `channels.telegram.streaming.enabled` على `false`.
 
 الترتيب المرئي هو:
 
@@ -119,13 +119,13 @@ streamed text -> tool progress -> streamed continuation -> final edit
   "channels": {
     "telegram": {
       "streaming": {
-        "enabled": false,
+        "enabled": true,
         "editIntervalMs": 750,
         "minInitialChars": 24,
         "cursor": "▌",
         "maxFloodStrikes": 2,
         "cleanupFailedAttempts": true,
-        "transport": "edit",
+        "transport": "auto",
         "freshFinalAfterSeconds": 0
       }
     }
@@ -135,26 +135,26 @@ streamed text -> tool progress -> streamed continuation -> final edit
 
 | الإعداد | الافتراضي | السلوك |
 |---|---:|---|
-| `channels.telegram.streaming.enabled` | `false` | بوابة opt-in لبث Telegram. |
+| `channels.telegram.streaming.enabled` | `true` | يفعّل بث Telegram للقنوات المُعدّة. اضبطه على `false` لتعطيله. |
 | `channels.telegram.streaming.editIntervalMs` | `750` | يجمع تعديلات Telegram بعد أول رسالة مبثوثة. |
 | `channels.telegram.streaming.minInitialChars` | `24` | حد الأحرف المرئية بعد التصفية قبل إرسال أول رسالة بث. |
 | `channels.telegram.streaming.cursor` | `"▌"` | مؤشر مؤقت يُلحق بالرسائل الجزئية أثناء البث. |
 | `channels.telegram.streaming.maxFloodStrikes` | `2` | حد تدهور flood-control لمقبض البث النشط. |
 | `channels.telegram.streaming.cleanupFailedAttempts` | `true` | يحذف أو يحيد الرسائل المبثوثة المؤقتة بعد فشل المزود أو fallback. |
-| `channels.telegram.streaming.transport` | `"edit"` | وضع التوصيل. يستخدم `"edit"` تعديلات الرسائل العادية. يستخدم `"draft"` معاينات مسودات Telegram في الرسائل المباشرة فقط عندما يدعمها Bot API. يختار `"auto"` معاينات المسودات للرسائل المباشرة عند دعمها، وإلا يستخدم edit streaming. |
+| `channels.telegram.streaming.transport` | `"auto"` | وضع التوصيل. يختار `"auto"` معاينات المسودات للرسائل المباشرة عند دعمها، وإلا يستخدم edit streaming. يستخدم `"edit"` تعديلات الرسائل العادية. يستخدم `"draft"` معاينات مسودات Telegram في الرسائل المباشرة فقط عندما يدعمها Bot API. |
 | `channels.telegram.streaming.freshFinalAfterSeconds` | `0` | القيمة `0` تعطل fresh-final delivery. القيمة الموجبة ترسل الرد المكتمل كرسالة جديدة بعد ظهور المعاينة لذلك العدد من الثواني، ثم تحذف المعاينة best-effort. |
 
 أوضاع التوصيل:
 
-- `edit` هو الافتراضي. يبث عبر إرسال رسالة Telegram ثم تعديلها عند وصول نص إضافي.
+- `auto` هو الافتراضي. يحاول استخدام معاينات المسودات للرسائل المباشرة عند دعمها ويستخدم edit streaming في غير ذلك.
+- `edit` يبث عبر إرسال رسالة Telegram ثم تعديلها عند وصول نص إضافي.
 - `draft` يستخدم معاينات مسودات Telegram للرسائل المباشرة فقط عندما يدعم Bot API عمليات المسودات. إذا لم يتوفر دعم المسودات، يرجع التوصيل إلى edit streaming.
-- `auto` يحاول استخدام معاينات المسودات للرسائل المباشرة عند دعمها ويستخدم edit streaming في غير ذلك.
 - rich message delivery انتهازي. يعتمد على دعم Telegram وBot API ويرجع إلى تنسيق Telegram العادي عندما يكون غير مدعوم، أو طويلًا جدًا، أو ملتبسًا.
 
 الحدود التشغيلية:
 
 - البث يعمل لتوصيل Telegram فقط.
-- `DeliveryRouter` يعطل البث في v1.
+- يعمل بث Telegram قبل توجيه النص النهائي العادي. إذا لم يتمكن البث من توصيل الرد المكتمل، يرجع `ChannelGateway` إلى توصيل `DeliveryRouter` العادي.
 - يتطلب البث إشارة إلغاء دور من البوابة.
 - تستخدم تعديلات البث الجزئية HTML escaping خفيفًا، وليس تنسيق Telegram النهائي.
 - التوصيل النهائي ما زال يستخدم تنسيق Telegram وتقسيمه العاديين إلا إذا نجح rich delivery الانتهازي.

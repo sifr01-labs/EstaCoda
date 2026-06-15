@@ -229,7 +229,7 @@ estacoda channels status telegram
 
 ## Telegram streaming
 
-Telegram streaming is an experimental delivery option under `channels.telegram.streaming.enabled`. It is disabled by default. When enabled, provider tokens edit Telegram messages during a turn, tool boundaries seal the current streamed message, tool progress appears below that sealed message, and later provider tokens start a new streamed message below the progress entry.
+Telegram streaming is an experimental delivery option under `channels.telegram.streaming.enabled`. It defaults to enabled for configured Telegram channels. Set `channels.telegram.streaming.enabled` to `false` to opt out. When enabled, provider tokens edit Telegram messages during a turn, tool boundaries seal the current streamed message, tool progress appears below that sealed message, and later provider tokens start a new streamed message below the progress entry.
 
 The stream is delivery-only. Final `response.text` remains authoritative, and session state, memory, tool execution, approvals, artifacts, and workflow state are unchanged. Partial edits use lightweight HTML escaping. The final edit or fallback delivery uses the normal Telegram formatter.
 

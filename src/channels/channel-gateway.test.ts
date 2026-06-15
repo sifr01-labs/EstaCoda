@@ -238,6 +238,7 @@ function createStreamingGatewayHarness(input: {
     | { kind: "segmentBreak"; reason?: string }
   >;
   deliveryRouter?: ChannelGatewayOptions["deliveryRouter"];
+  telegramStreaming?: ChannelGatewayOptions["telegramStreaming"];
 } = {}): StreamingGatewayHarness {
   const handle = input.handle ?? createStreamingHandleSpy();
   const adapter = input.channel === "discord"
@@ -267,7 +268,7 @@ function createStreamingGatewayHarness(input: {
     authPolicy: {
       [input.channel ?? "telegram"]: { allowedUserIds: ["user-1"] }
     },
-    telegramStreaming: {
+    telegramStreaming: input.telegramStreaming ?? {
       enabled: input.enabled ?? true,
       editIntervalMs: 111,
       minInitialChars: 7,
@@ -355,6 +356,27 @@ describe("ChannelGateway Telegram streaming", () => {
     expect(adapter.streamStarts).toHaveLength(0);
     expect(handle.finishCalls).toEqual([]);
     expect(adapter.records.filter((record) => record.kind === "text").map((record) => record.text)).toEqual(["final answer"]);
+  });
+
+  it("starts streaming by default when runtime config omits Telegram streaming settings", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-channel-test-"));
+    const configPath = resolveProfileStateHome({ homeDir: workspace, profileId: "default" }).configPath;
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: { telegram: { enabled: false } }
+    }));
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    const { adapter, handle, gateway } = createStreamingGatewayHarness({
+      telegramStreaming: loaded.channels.telegram.streaming,
+      actions: [{ kind: "delta", text: "streamed token" }]
+    });
+
+    await gateway.receive(makeMessage("hello"));
+
+    expect(adapter.streamStarts).toHaveLength(1);
+    expect(handle.appended).toEqual(["streamed token"]);
+    await rm(workspace, { recursive: true, force: true });
   });
 
   it("leaves non-Telegram behavior unchanged", async () => {

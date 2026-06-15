@@ -1231,7 +1231,7 @@ describe("loadRuntimeConfig browser provider compatibility", () => {
 });
 
 describe("loadRuntimeConfig channel readiness", () => {
-  it("normalizes Telegram streaming config as disabled by default", async () => {
+  it("normalizes Telegram streaming config as enabled with auto transport by default", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
     const configPath = profileConfigPath(workspace);
@@ -1242,15 +1242,36 @@ describe("loadRuntimeConfig channel readiness", () => {
 
     const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
     expect(loaded.channels.telegram.streaming).toEqual({
-      enabled: false,
+      enabled: true,
       editIntervalMs: 750,
       minInitialChars: 24,
       cursor: "▌",
       maxFloodStrikes: 2,
       cleanupFailedAttempts: true,
       freshFinalAfterSeconds: 0,
-      transport: "edit"
+      transport: "auto"
     });
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("preserves explicit Telegram streaming opt-out", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: { telegram: { enabled: false, streaming: { enabled: false } } }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    const streaming = loaded.channels.telegram.streaming;
+    expect(streaming).toBeDefined();
+    if (streaming === undefined) {
+      throw new Error("Expected Telegram streaming config to be normalized");
+    }
+    expect(streaming.enabled).toBe(false);
+    expect(streaming.transport).toBe("auto");
+    expect(streaming.freshFinalAfterSeconds).toBe(0);
     await rm(workspace, { recursive: true, force: true });
   });
 
@@ -1338,7 +1359,7 @@ describe("loadRuntimeConfig channel readiness", () => {
         throw new Error("Expected Telegram streaming config to be normalized");
       }
       expect(streaming.freshFinalAfterSeconds).toBe(0);
-      expect(streaming.transport).toBe("edit");
+      expect(streaming.transport).toBe("auto");
       await rm(workspace, { recursive: true, force: true });
     }
   });

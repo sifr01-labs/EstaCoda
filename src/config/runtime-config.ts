@@ -1370,7 +1370,7 @@ function normalizeProfileConfig(value: EstaCodaConfig["profile"]): LoadedRuntime
 
 function normalizeTelegramStreamingConfig(value: TelegramStreamingConfig | undefined): Required<TelegramStreamingConfig> {
   return {
-    enabled: value?.enabled === true,
+    enabled: value?.enabled ?? true,
     editIntervalMs: normalizeOptionalPositiveInteger(value?.editIntervalMs) ?? 750,
     minInitialChars: normalizeOptionalPositiveInteger(value?.minInitialChars) ?? 24,
     cursor: normalizeOptionalNonEmptyString(value?.cursor, "channels.telegram.streaming.cursor") ?? "▌",
@@ -1382,7 +1382,7 @@ function normalizeTelegramStreamingConfig(value: TelegramStreamingConfig | undef
 }
 
 function normalizeTelegramStreamingTransport(value: unknown): Required<TelegramStreamingConfig>["transport"] {
-  return value === "auto" || value === "edit" || value === "draft" ? value : "edit";
+  return value === "auto" || value === "edit" || value === "draft" ? value : "auto";
 }
 
 function normalizeBrowserConfig(value: EstaCodaConfig["browser"]): LoadedRuntimeConfig["browser"] {

@@ -62,14 +62,14 @@ Telegram is the live-proven first-party remote channel for v0.1.0.
 | Pairing codes | `implemented` |
 | Handoff codes | `implemented` |
 | Progress compaction | `implemented` |
-| Experimental text streaming | `opt-in` |
+| Experimental text streaming | `default-on when Telegram is configured` |
 
 **Behavior:**
 
 - One evolving progress message per active turn
 - Inline approval buttons map to `/approve` and `/deny`
 - Final replies formatted in Telegram-safe HTML
-- Optional streaming progressively edits Telegram messages during a turn; final `response.text` remains authoritative
+- Streaming defaults on for configured Telegram channels and progressively edits Telegram messages during a turn; final `response.text` remains authoritative
 - Activity labels localized (`en`, `ar`)
 - Group sessions are per-user by default
 - Thread sessions are shared by default
@@ -104,7 +104,7 @@ Use `@BotFather` and `/newbot` to create a bot and copy the API token. Use `@use
 
 Telegram streaming is a delivery UX option. It does not change session truth, memory, tool execution, approvals, artifacts, or workflow state. The runtime still produces a final `response.text`, and that final text remains authoritative.
 
-When `channels.telegram.streaming.enabled` is true, provider tokens progressively edit Telegram messages. Tool boundaries seal the current streamed message. Later provider tokens start a new streamed Telegram message below tool progress. Sealed streamed messages are never edited into the final answer.
+Telegram streaming defaults to enabled for configured Telegram channels. When `channels.telegram.streaming.enabled` is true, provider tokens progressively edit Telegram messages. Tool boundaries seal the current streamed message. Later provider tokens start a new streamed Telegram message below tool progress. Sealed streamed messages are never edited into the final answer. Set `channels.telegram.streaming.enabled` to `false` to opt out.
 
 The visible order is:
 
@@ -119,13 +119,13 @@ Configure it under `channels.telegram.streaming`:
   "channels": {
     "telegram": {
       "streaming": {
-        "enabled": false,
+        "enabled": true,
         "editIntervalMs": 750,
         "minInitialChars": 24,
         "cursor": "▌",
         "maxFloodStrikes": 2,
         "cleanupFailedAttempts": true,
-        "transport": "edit",
+        "transport": "auto",
         "freshFinalAfterSeconds": 0
       }
     }
@@ -135,20 +135,20 @@ Configure it under `channels.telegram.streaming`:
 
 | Setting | Default | Behavior |
 |---|---:|---|
-| `channels.telegram.streaming.enabled` | `false` | Opt-in gate for Telegram streaming. |
+| `channels.telegram.streaming.enabled` | `true` | Enables Telegram streaming for configured Telegram channels. Set to `false` to opt out. |
 | `channels.telegram.streaming.editIntervalMs` | `750` | Coalesces Telegram edits after the first streamed message. |
 | `channels.telegram.streaming.minInitialChars` | `24` | Visible filtered character threshold before the first streamed message is sent. |
 | `channels.telegram.streaming.cursor` | `"▌"` | Temporary cursor appended to live partial messages. |
 | `channels.telegram.streaming.maxFloodStrikes` | `2` | Active-handle Telegram flood-control degradation limit. |
 | `channels.telegram.streaming.cleanupFailedAttempts` | `true` | Deletes or neutralizes provisional streamed messages after failed or fallback provider attempts. |
-| `channels.telegram.streaming.transport` | `"edit"` | Delivery mode. `"edit"` uses ordinary message edits. `"draft"` uses Telegram draft previews in DMs only when supported by the Bot API. `"auto"` selects draft previews for DMs when supported and edit streaming otherwise. |
+| `channels.telegram.streaming.transport` | `"auto"` | Delivery mode. `"auto"` selects draft previews for DMs when supported and edit streaming otherwise. `"edit"` uses ordinary message edits. `"draft"` uses Telegram draft previews in DMs only when supported by the Bot API. |
 | `channels.telegram.streaming.freshFinalAfterSeconds` | `0` | `0` disables fresh-final delivery. A positive value sends the completed answer as a fresh message after a preview has been visible that many seconds, then deletes the preview best-effort. |
 
 Delivery modes:
 
-- `edit` is the default. It streams by sending a Telegram message and editing it as more text arrives.
+- `auto` is the default. It attempts draft previews for DMs when supported and uses edit streaming otherwise.
+- `edit` streams by sending a Telegram message and editing it as more text arrives.
 - `draft` uses Telegram draft previews for DMs only when the Bot API supports draft operations. If draft support is unavailable, delivery falls back to edit streaming.
-- `auto` attempts draft previews for DMs when supported and uses edit streaming elsewhere.
 - Rich message delivery is opportunistic. It depends on Telegram and Bot API support and falls back to normal Telegram formatting when unsupported, too long, or ambiguous.
 
 Operational boundaries:
