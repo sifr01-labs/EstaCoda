@@ -240,7 +240,6 @@ Supervised auto-launch uses an isolated temporary Chrome user data directory and
 
 - `engine: "agent-browser"` is accepted by config but not implemented.
 - Lightpanda support is not implemented.
-- Hermes parity harness and parity CI are not implemented.
 - browser-use, Firecrawl browser, and Camofox remain deferred providers.
 - Compact AX snapshots are a bounded actionable subset, not viewport-visible filtering.
 

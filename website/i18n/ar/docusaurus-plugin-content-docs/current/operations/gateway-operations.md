@@ -227,13 +227,13 @@ estacoda channels status telegram
 
 ## بث Telegram
 
-بث Telegram خيار توصيل تجريبي تحت `channels.telegram.streaming.enabled`. يكون معطلاً افتراضيًا. عند تفعيله، تحرر provider tokens رسائل Telegram أثناء الدور، وتغلق حدود الأدوات رسالة البث الحالية، ويظهر تقدم الأداة تحت تلك الرسالة المغلقة، ثم تبدأ provider tokens اللاحقة رسالة بث جديدة تحت رسالة التقدم.
+بث Telegram خيار توصيل تجريبي تحت `channels.telegram.streaming.enabled`. يكون مفعلاً افتراضيًا لقنوات Telegram المُعدّة. لتعطيله، اضبط `channels.telegram.streaming.enabled` على `false`. عند تفعيله، تحرر provider tokens رسائل Telegram أثناء الدور، وتغلق حدود الأدوات رسالة البث الحالية، ويظهر تقدم الأداة تحت تلك الرسالة المغلقة، ثم تبدأ provider tokens اللاحقة رسالة بث جديدة تحت رسالة التقدم.
 
 البث خاص بالتوصيل فقط. يبقى `response.text` النهائي هو المرجع، ولا تتغير حالة الجلسة، أو الذاكرة، أو تنفيذ الأدوات، أو الموافقات، أو المنتجات، أو حالة سير العمل. تستخدم التعديلات الجزئية HTML escaping خفيفًا. أما final edit أو fallback delivery فيستخدمان منسق Telegram العادي.
 
 الحدود التشغيلية:
 
-- `DeliveryRouter` يعطل البث في v1.
+- يعمل بث Telegram قبل توجيه النص النهائي العادي. إذا لم يتمكن البث من توصيل الرد المكتمل، يرجع `ChannelGateway` إلى توصيل `DeliveryRouter` العادي.
 - يتطلب الدور إشارة إلغاء.
 - تنظيف provider fallback/failure، أو تدهور Telegram flood-control، أو الحمولات الجزئية الكبيرة، أو التباس الموافقة/المنتجات، أو الإلغاء، أو فشل final edit يمكن أن يفرض fallback للنص النهائي العادي.
 - تدهور الدور النشط لا يعطل البث عالميًا للأدوار المستقبلية.

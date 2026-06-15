@@ -77,7 +77,7 @@ Adapters only render or normalize channel-specific transport events. They must n
 - Long final replies are chunked after Telegram formatting, using Telegram's 4096 UTF-16 code-unit text payload limit
 - Chunk suffixes such as `(1/3)` count inside Telegram's payload limit
 - Inline actions are attached only to the final text chunk
-- Optional experimental response streaming edits Telegram messages during a turn; final `response.text` remains authoritative
+- Experimental response streaming defaults on for configured Telegram channels and edits Telegram messages during a turn; final `response.text` remains authoritative
 - Activity labels localized (`en`, `ar`)
 - Group sessions per-user by default
 - Thread sessions shared by default
@@ -103,7 +103,7 @@ Operator-facing setup steps:
 
 **Experimental streaming path:**
 
-Telegram streaming is a delivery-UX path, not runtime state. It is disabled by default and enabled per profile with `channels.telegram.streaming.enabled`. Provider-token events are consumed by the gateway and appended to a per-turn stream handle. Non-token runtime events continue through normal progress delivery.
+Telegram streaming is a delivery-UX path, not runtime state. It defaults to enabled for configured Telegram channels and can be disabled per profile with `channels.telegram.streaming.enabled: false`. Provider-token events are consumed by the gateway and appended to a per-turn stream handle. Non-token runtime events continue through normal progress delivery.
 
 The intended visible order is:
 

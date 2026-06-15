@@ -413,7 +413,7 @@ describe("applySetAuxiliaryModelRoute", () => {
     const existing: EstaCodaConfig = {
       model: {
         provider: "local",
-        id: "hermes-local",
+        id: "local-test-model",
         fallbacks: [{ provider: "openai", id: "gpt-5.5" }]
       },
       security: {
@@ -489,7 +489,7 @@ describe("load/save wrappers", () => {
     await writeUserConfig(tmpDir, {
       model: {
         provider: "local",
-        id: "hermes-local",
+        id: "local-test-model",
         fallbacks: [{ provider: "openai", id: "gpt-5.5" }]
       },
       auxiliaryModels: {

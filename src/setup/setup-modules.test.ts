@@ -85,7 +85,7 @@ describe("setup modules", () => {
     const localContext = context({
       provider: {
         id: "local",
-        model: "hermes-local",
+        model: "local-test-model",
       },
       credentials: {
         values: {

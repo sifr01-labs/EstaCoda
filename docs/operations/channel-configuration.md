@@ -40,7 +40,7 @@ Every channel object supports:
         "cursor": "▌",
         "maxFloodStrikes": 2,
         "cleanupFailedAttempts": true,
-        "transport": "edit",
+        "transport": "auto",
         "freshFinalAfterSeconds": 0
       },
       "busyPolicy": "queue",
@@ -62,7 +62,7 @@ Use `@BotFather` and `/newbot` to get the bot API token. Use `@userinfobot` and 
 
 ### Telegram Streaming
 
-Telegram streaming is an experimental delivery option under `channels.telegram.streaming`. It is disabled by default. When enabled, provider tokens progressively edit Telegram messages during a turn, while `response.text` remains the authoritative final answer recorded by the runtime. Streaming does not change session truth, memory, tool execution, approvals, artifacts, or workflow state.
+Telegram streaming is an experimental delivery option under `channels.telegram.streaming`. It defaults to enabled for configured Telegram channels. Provider tokens progressively edit Telegram messages during a turn, while `response.text` remains the authoritative final answer recorded by the runtime. Streaming does not change session truth, memory, tool execution, approvals, artifacts, or workflow state. To opt out, set `channels.telegram.streaming.enabled` to `false`.
 
 The ordering model is:
 
@@ -74,19 +74,19 @@ Tool boundaries seal the current streamed Telegram message. Later provider token
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `channels.telegram.streaming.enabled` | `false` | Opt-in gate for Telegram streaming. |
+| `channels.telegram.streaming.enabled` | `true` | Enables Telegram streaming for configured Telegram channels. Set to `false` to opt out. |
 | `channels.telegram.streaming.editIntervalMs` | `750` | Coalescing interval for Telegram edits after the first streamed message. |
 | `channels.telegram.streaming.minInitialChars` | `24` | Visible filtered character threshold before the first streamed message is sent. |
 | `channels.telegram.streaming.cursor` | `"▌"` | Temporary cursor appended to live partial messages and removed on finalize, abort, or segment seal. |
 | `channels.telegram.streaming.maxFloodStrikes` | `2` | Active-handle Telegram flood-control degradation limit. Reaching the limit forces final fallback for that turn. |
 | `channels.telegram.streaming.cleanupFailedAttempts` | `true` | Whether failed or fallback provider attempts delete or neutralize provisional streamed messages before final fallback. |
-| `channels.telegram.streaming.transport` | `"edit"` | Streaming transport. `"edit"` uses ordinary message edits. `"draft"` uses Telegram draft previews in DMs only when supported by the Bot API. `"auto"` selects draft previews for DMs when supported and edit streaming otherwise. |
+| `channels.telegram.streaming.transport` | `"auto"` | Streaming transport. `"auto"` selects draft previews for DMs when supported and edit streaming otherwise. `"edit"` uses ordinary message edits. `"draft"` uses Telegram draft previews in DMs only when supported by the Bot API. |
 | `channels.telegram.streaming.freshFinalAfterSeconds` | `0` | Fresh-final delay in seconds. `0` disables fresh-final delivery. A positive value sends the completed answer as a fresh message after a preview has been visible that many seconds, then deletes the preview best-effort. |
 
 Operational constraints:
 
 - Streaming runs only for Telegram delivery.
-- `DeliveryRouter` disables Telegram streaming in v1.
+- Telegram streaming runs before normal final-text routing. If streaming cannot deliver the completed answer, `ChannelGateway` falls back to normal `DeliveryRouter` delivery.
 - Streaming requires the gateway turn's abort signal.
 - Partial stream edits use lightweight HTML escaping, not final Telegram formatting.
 - Final delivery still uses normal authoritative Telegram formatting and chunking.

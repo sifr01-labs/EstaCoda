@@ -70,7 +70,7 @@ describe("cli setup command", () => {
   it("preserves direct noninteractive provider setup flags", async () => {
     const workspaceRoot = join(tempDir, "workspace");
     const result = await runCliCommand({
-      argv: ["setup", "--provider", "local", "--model", "hermes-local", "--offline", "--user"],
+      argv: ["setup", "--provider", "local", "--model", "local-test-model", "--offline", "--user"],
       workspaceRoot,
       homeDir: tempDir,
       interactive: false,
@@ -82,10 +82,10 @@ describe("cli setup command", () => {
 
     expect(result.handled).toBe(true);
     expect(result.exitCode).toBe(0);
-    expect(result.output).toContain("Configured local/hermes-local.");
-    expect(config.model).toEqual({ provider: "local", id: "hermes-local" });
+    expect(result.output).toContain("Configured local/local-test-model.");
+    expect(config.model).toEqual({ provider: "local", id: "local-test-model" });
     expect(config.providers?.local?.enableNetwork).toBe(false);
-    expect(config.providers?.local?.models).toContain("hermes-local");
+    expect(config.providers?.local?.models).toContain("local-test-model");
   });
 
   it("preserves direct advanced provider setup flags", async () => {
@@ -550,7 +550,7 @@ async function trustWorkspace(homeDir: string, workspaceRoot: string): Promise<v
   }).grant(workspaceRoot, { label: "test" });
 }
 
-function localReadyConfig(modelId = "hermes-local"): unknown {
+function localReadyConfig(modelId = "local-test-model"): unknown {
   return {
     model: {
       provider: "local",

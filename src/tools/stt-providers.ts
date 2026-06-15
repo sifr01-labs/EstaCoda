@@ -74,7 +74,7 @@ export function checkSttProviderStatus(
     if (isFasterWhisperConfig(config)) {
       return { ready: true };
     }
-    const command = config.local?.command ?? process.env.HERMES_LOCAL_STT_COMMAND;
+    const command = config.local?.command ?? process.env.ESTACODA_LOCAL_STT_COMMAND;
     if (command === undefined || command.trim().length === 0) {
       return { ready: false, reason: "Local STT command not configured" };
     }
@@ -363,7 +363,7 @@ async function transcribeWithLocalCommand(input: SpeechTranscriptionInput): Prom
       ok: false,
       content: [
         "Local STT command is not configured.",
-        "Set stt.local.command or HERMES_LOCAL_STT_COMMAND with placeholders like {input_path}, {output_dir}, {language}, and {model}."
+        "Set stt.local.command or ESTACODA_LOCAL_STT_COMMAND with placeholders like {input_path}, {output_dir}, {language}, and {model}."
       ].join("\n"),
       metadata: { provider: "local", model }
     };

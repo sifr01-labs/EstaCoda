@@ -234,6 +234,16 @@ describe("hosted STT provider dispatch", () => {
 });
 
 describe("local command STT", () => {
+  it("honors ESTACODA_LOCAL_STT_COMMAND for local command readiness", async () => {
+    await withEnv({ ESTACODA_LOCAL_STT_COMMAND: "printf env-transcript" }, async () => {
+      expect(checkSttProviderStatus("local", {
+        provider: "local",
+        enabled: true,
+        local: { engine: "command" }
+      })).toEqual({ ready: true });
+    });
+  });
+
   it("prefers stdout transcripts", async () => {
     const path = await audioFile();
     const result = await transcribeSpeech({

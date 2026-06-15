@@ -877,32 +877,14 @@ exports[`Session surfaces — unknown-command fallback > renders in standard dar
 
 exports[`Session surfaces — unknown-command fallback > renders in standard light > unknown-command-standard light 1`] = `"• No slash commands or skills match "/nonexistent"."`;
 
-exports[`Session surfaces — user prompt rail > renders in narrow width > user-prompt-rail-narrow width 1`] = `
-"▸ Tell me about quantum computing
-+──────────────────────────────────────+"
-`;
+exports[`Session surfaces — user prompt rail > renders in narrow width > user-prompt-rail-narrow width 1`] = `"↳ Tell me about quantum computing"`;
 
-exports[`Session surfaces — user prompt rail > renders in no Unicode > user-prompt-rail-no Unicode 1`] = `
-"> Tell me about quantum computing
-+----------------------------------------------------------------------------------------------------------------------+"
-`;
+exports[`Session surfaces — user prompt rail > renders in no Unicode > user-prompt-rail-no Unicode 1`] = `"> Tell me about quantum computing"`;
 
-exports[`Session surfaces — user prompt rail > renders in no color > user-prompt-rail-no color 1`] = `
-"▸ Tell me about quantum computing
-+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────+"
-`;
+exports[`Session surfaces — user prompt rail > renders in no color > user-prompt-rail-no color 1`] = `"↳ Tell me about quantum computing"`;
 
-exports[`Session surfaces — user prompt rail > renders in plain > user-prompt-rail-plain 1`] = `
-"> Tell me about quantum computing
-+----------------------------------------------------------+"
-`;
+exports[`Session surfaces — user prompt rail > renders in plain > user-prompt-rail-plain 1`] = `"> Tell me about quantum computing"`;
 
-exports[`Session surfaces — user prompt rail > renders in standard dark > user-prompt-rail-standard dark 1`] = `
-"▸ Tell me about quantum computing
-+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────+"
-`;
+exports[`Session surfaces — user prompt rail > renders in standard dark > user-prompt-rail-standard dark 1`] = `"↳ Tell me about quantum computing"`;
 
-exports[`Session surfaces — user prompt rail > renders in standard light > user-prompt-rail-standard light 1`] = `
-"▸ Tell me about quantum computing
-+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────+"
-`;
+exports[`Session surfaces — user prompt rail > renders in standard light > user-prompt-rail-standard light 1`] = `"↳ Tell me about quantum computing"`;

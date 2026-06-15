@@ -26,7 +26,7 @@ async function trustWorkspace(homeDir: string, workspaceRoot: string): Promise<v
   }).grant(workspaceRoot, { label: "test" });
 }
 
-function localReadyConfig(modelId = "hermes-local"): unknown {
+function localReadyConfig(modelId = "local-test-model"): unknown {
   return {
     model: {
       provider: "local",
@@ -211,7 +211,7 @@ describe("collectSetupEntryState", () => {
     const configContent = await readFile(state.configSources[0]!, "utf8");
 
     expect(state.configPaths.profile).toBe(profileConfigPath(homeDir));
-    expect(configContent).toContain("hermes-local");
+    expect(configContent).toContain("local-test-model");
   });
 
   it("ignores workspace-local config in verification", async () => {

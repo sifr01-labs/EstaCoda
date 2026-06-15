@@ -477,7 +477,6 @@ export class ChannelGateway {
       sessionKey.platform !== "telegram" ||
       this.#telegramStreaming?.enabled !== true ||
       adapter.delivery?.startStreamingText === undefined ||
-      this.#deliveryRouter !== undefined ||
       signal === undefined
     ) {
       return undefined;

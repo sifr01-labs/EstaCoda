@@ -239,7 +239,6 @@ When enabled, debug data is attached to individual tool results only. It is reda
 - browser-use, Firecrawl browser, and Camofox browser providers remain deferred/stubbed.
 - Optional `agent-browser` engine support is not implemented.
 - Lightpanda support is not implemented.
-- Hermes parity harness and parity CI are not implemented.
 - Compact AX snapshots are a bounded actionable subset, not true viewport-visible filtering.
 - Browser can be selected as an optional reviewed setup capability, but setup records configuration intent and does not auto-launch the browser runtime.
 - Socket-level DNS rebinding and TOCTOU protection is not implemented.

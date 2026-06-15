@@ -50,7 +50,7 @@ function onboardingPlan(input: {
     },
     primaryRoute: {
       provider,
-      model: input.model ?? "hermes-local",
+      model: input.model ?? "local-test-model",
       baseUrl: input.baseUrl,
       contextWindowTokens: input.contextWindowTokens,
     },
@@ -435,7 +435,7 @@ describe("reviewed setup apply executor", () => {
       grants?: Array<{ root?: string }>;
     };
 
-    expect(config.model).toEqual({ provider: "local", id: "hermes-local" });
+    expect(config.model).toEqual({ provider: "local", id: "local-test-model" });
     expect(config.security?.approvalMode).toBe("strict");
     expect(config.skills?.autonomy).toBe("none");
     expect(trust.grants?.[0]?.root).toBe(await realpath(workspaceRoot));
@@ -444,7 +444,7 @@ describe("reviewed setup apply executor", () => {
   it("applies reviewed UI preferences through setupUiConfig while preserving unrelated config", async () => {
     await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
     await writeFile(profileConfigPath(tempDir), JSON.stringify({
-      model: { provider: "local", id: "hermes-local" },
+      model: { provider: "local", id: "local-test-model" },
       security: { approvalMode: "strict" },
       ui: { language: "en", flavor: "standard", activityLabels: "en" },
     }, null, 2), "utf8");
@@ -470,7 +470,7 @@ describe("reviewed setup apply executor", () => {
       flavor: "arabic-light",
       activityLabels: "ar",
     });
-    expect(config.model).toEqual({ provider: "local", id: "hermes-local" });
+    expect(config.model).toEqual({ provider: "local", id: "local-test-model" });
     expect(config.security).toEqual({ approvalMode: "strict" });
   });
 
@@ -655,7 +655,7 @@ describe("reviewed setup apply executor", () => {
   it("registers reviewed fallback provider config while appending fallback routes", async () => {
     await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
     await writeFile(profileConfigPath(tempDir), JSON.stringify({
-      model: { provider: "local", id: "hermes-local" },
+      model: { provider: "local", id: "local-test-model" },
       providers: {
         local: { kind: "openai-compatible", baseUrl: "http://localhost:11434/v1" },
       },
@@ -686,7 +686,7 @@ describe("reviewed setup apply executor", () => {
 
     expect(result.ok).toBe(true);
     expect(config.model?.provider).toBe("local");
-    expect(config.model?.id).toBe("hermes-local");
+    expect(config.model?.id).toBe("local-test-model");
     expect(config.model?.fallbacks).toEqual([
       expect.objectContaining({ provider: "deepseek", id: "deepseek-v4-pro", apiKeyEnv: "DEEPSEEK_API_KEY" }),
     ]);
@@ -706,7 +706,7 @@ describe("reviewed setup apply executor", () => {
   it("preserves existing fallback provider fields and avoids duplicate model IDs", async () => {
     await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
     await writeFile(profileConfigPath(tempDir), JSON.stringify({
-      model: { provider: "local", id: "hermes-local" },
+      model: { provider: "local", id: "local-test-model" },
       providers: {
         deepseek: {
           kind: "catalog",
@@ -766,7 +766,7 @@ describe("reviewed setup apply executor", () => {
     await writeFile(profileConfigPath(tempDir), JSON.stringify({
       model: {
         provider: "local",
-        id: "hermes-local",
+        id: "local-test-model",
         fallbacks: [
           { provider: "openai", id: "gpt-5.5" },
           { provider: "kimi", id: "kimi-k2" },
@@ -807,7 +807,7 @@ describe("reviewed setup apply executor", () => {
     await writeFile(profileConfigPath(tempDir), JSON.stringify({
       model: {
         provider: "local",
-        id: "hermes-local",
+        id: "local-test-model",
         fallbacks: [{ provider: "openai", id: "gpt-5.5" }],
       },
     }, null, 2), "utf8");
@@ -838,7 +838,7 @@ describe("reviewed setup apply executor", () => {
     await writeFile(profileConfigPath(tempDir), JSON.stringify({
       model: {
         provider: "local",
-        id: "hermes-local",
+        id: "local-test-model",
         fallbacks: [{ provider: "openai", id: "gpt-5.5" }],
       },
       auxiliaryModels: {
@@ -869,7 +869,7 @@ describe("reviewed setup apply executor", () => {
     expect(result.ok).toBe(true);
     expect(config.model).toEqual({
       provider: "local",
-      id: "hermes-local",
+      id: "local-test-model",
       fallbacks: [expect.objectContaining({ provider: "openai", id: "gpt-5.5" })],
     });
     expect(config.auxiliaryModels?.compression).toEqual(expect.objectContaining({
@@ -888,7 +888,7 @@ describe("reviewed setup apply executor", () => {
     await writeFile(profileConfigPath(tempDir), JSON.stringify({
       model: {
         provider: "local",
-        id: "hermes-local",
+        id: "local-test-model",
         fallbacks: [{ provider: "openai", id: "gpt-5.5" }],
       },
       auxiliaryModels: {
@@ -928,7 +928,7 @@ describe("reviewed setup apply executor", () => {
   it("rejects unsupported auxiliary task review values safely", async () => {
     await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
     await writeFile(profileConfigPath(tempDir), JSON.stringify({
-      model: { provider: "local", id: "hermes-local" },
+      model: { provider: "local", id: "local-test-model" },
       auxiliaryModels: {
         assessor: { provider: "local", id: "assessor-local", enabled: true },
       },
@@ -958,7 +958,7 @@ describe("reviewed setup apply executor", () => {
       configPath: profileConfigPath(tempDir),
       workspaceRoot,
       trustStorePath: join(tempDir, ".estacoda", "trust.json"),
-      provider: { id: "local", model: "hermes-local" },
+      provider: { id: "local", model: "local-test-model" },
       workspaceTrust: { trusted: true },
       securityMode: "adaptive",
       workflowLearning: "suggest",
@@ -1070,7 +1070,7 @@ describe("reviewed setup apply executor", () => {
   it("does not write local STT config when managed Python setup fails", async () => {
     await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
     const initialConfig = {
-      model: { provider: "local", id: "hermes-local" },
+      model: { provider: "local", id: "local-test-model" },
       stt: {
         provider: "openai",
         openai: { model: "gpt-4o-mini-transcribe", apiKeyEnv: "OPENAI_API_KEY" },
@@ -1102,7 +1102,7 @@ describe("reviewed setup apply executor", () => {
   it("preserves existing TTS and skips local STT when managed Python setup fails in first-run tolerant mode", async () => {
     await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
     const initialConfig = {
-      model: { provider: "local", id: "hermes-local" },
+      model: { provider: "local", id: "local-test-model" },
       tts: {
         provider: "openai",
         speed: 1,
@@ -1146,7 +1146,7 @@ describe("reviewed setup apply executor", () => {
   it("writes new TTS and skips local STT when managed Python setup fails in first-run tolerant mode", async () => {
     await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
     await writeFile(profileConfigPath(tempDir), JSON.stringify({
-      model: { provider: "local", id: "hermes-local" },
+      model: { provider: "local", id: "local-test-model" },
     }, null, 2), "utf8");
     vi.spyOn(pythonEnvManager, "createManagedEnvironment").mockResolvedValue({
       ok: false,
@@ -1198,7 +1198,7 @@ describe("reviewed setup apply executor", () => {
       openai: { model: "gpt-4o-mini-transcribe", apiKeyEnv: "OPENAI_API_KEY" },
     };
     await writeFile(profileConfigPath(tempDir), JSON.stringify({
-      model: { provider: "local", id: "hermes-local" },
+      model: { provider: "local", id: "local-test-model" },
       stt: initialStt,
     }, null, 2), "utf8");
     const createSpy = vi.spyOn(pythonEnvManager, "createManagedEnvironment").mockResolvedValue({
@@ -1301,7 +1301,7 @@ describe("reviewed setup apply executor", () => {
   it("applies reviewed Discord and WhatsApp beta channel config through channel dispatch", async () => {
     await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
     await writeFile(profileConfigPath(tempDir), JSON.stringify({
-      model: { provider: "local", id: "hermes-local" },
+      model: { provider: "local", id: "local-test-model" },
     }, null, 2), "utf8");
 
     const discordResult = await applyReviewedSetupPlanOperations(channelCapabilityPlan("setupModules.discord.draft", {

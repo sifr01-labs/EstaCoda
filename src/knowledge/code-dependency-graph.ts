@@ -33,7 +33,6 @@ const DEFAULT_IGNORE_DIRS = new Set([
   ".git",
   ".estacoda",
   "coverage",
-  ".hermes",
 ]);
 
 const SOURCE_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]);

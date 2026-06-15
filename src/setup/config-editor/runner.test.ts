@@ -840,7 +840,7 @@ describe("runConfigEditor", () => {
       "setup-editor.credentials.store-provider-credential-reference",
     ]);
     expect(config.model?.provider).toBe("local");
-    expect(config.model?.id).toBe("hermes-local");
+    expect(config.model?.id).toBe("local-test-model");
     expect(config.model?.fallbacks).toEqual([
       expect.objectContaining({ provider: "openai", id: "gpt-5.5", apiKeyEnv: "PR8_FALLBACK_KEY" }),
     ]);
@@ -853,7 +853,7 @@ describe("runConfigEditor", () => {
       ...localReadyConfig(),
       model: {
         provider: "local",
-        id: "hermes-local",
+        id: "local-test-model",
         fallbacks: [
           { provider: "openai", id: "gpt-5.5" },
           { provider: "kimi", id: "kimi-k2" },
@@ -901,7 +901,7 @@ describe("runConfigEditor", () => {
       ...localReadyConfig(),
       model: {
         provider: "local",
-        id: "hermes-local",
+        id: "local-test-model",
         fallbacks: [
           { provider: "openai", id: "gpt-5.5" },
           { provider: "kimi", id: "kimi-k2" },
@@ -942,7 +942,7 @@ describe("runConfigEditor", () => {
       model: "claude-sonnet-4-5",
     }));
     expect(config.model?.provider).toBe("local");
-    expect(config.model?.id).toBe("hermes-local");
+    expect(config.model?.id).toBe("local-test-model");
     expect(config.model?.fallbacks).toEqual([
       expect.objectContaining({ provider: "openai", id: "gpt-5.5" }),
       expect.objectContaining({ provider: "anthropic", id: "claude-sonnet-4-5" }),
@@ -1010,7 +1010,7 @@ describe("runConfigEditor", () => {
     expect(result.reviewManifest?.sections["secret-refs-to-store"][0]?.sourceDraftIds).toEqual([
       "setup-editor.credentials.store-provider-credential-reference",
     ]);
-    expect(config.model).toEqual({ provider: "local", id: "hermes-local" });
+    expect(config.model).toEqual({ provider: "local", id: "local-test-model" });
     expect(config.auxiliaryModels?.compression).toEqual(expect.objectContaining({
       provider: "openai",
       id: "gpt-5.5",
@@ -3213,7 +3213,7 @@ async function trustWorkspace(homeDir: string, workspaceRoot: string): Promise<v
   }).grant(workspaceRoot, { label: "test" });
 }
 
-function localReadyConfig(modelId = "hermes-local"): Record<string, unknown> {
+function localReadyConfig(modelId = "local-test-model"): Record<string, unknown> {
   return {
     model: {
       provider: "local",

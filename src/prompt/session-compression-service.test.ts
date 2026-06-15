@@ -876,7 +876,7 @@ describe("SessionCompressionService", () => {
     await expect(service.compactNow({ profileId: "profile", sessionId })).resolves.toMatchObject({ didCompress: true });
   });
 
-  it("returns Hermes-style user-facing message without wiring CLI commands", async () => {
+  it("returns a user-facing compression message without wiring CLI commands", async () => {
     const { db, sessionId } = await sessionDbWithMessages(8);
     const service = new SessionCompressionService({
       sessionDb: db,

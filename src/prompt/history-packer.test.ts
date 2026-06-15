@@ -65,13 +65,13 @@ describe("packSessionHistory", () => {
         id: "q1",
         sessionId: "s",
         role: "user" as const,
-        content: "okay i want you to go and research hermes agent"
+        content: "okay i want you to go and research agent architecture"
       },
       {
         id: "a1",
         sessionId: "s",
         role: "agent" as const,
-        content: "I will research Hermes agent for you."
+        content: "I will research agent architecture for you."
       },
       ...Array.from({ length: 9 }, (_, index) => ({
         id: `t${index + 1}`,
@@ -97,7 +97,7 @@ describe("packSessionHistory", () => {
 
     expect(packed.messages.some((message) => message.role === "system")).toBe(true);
     expect(toolCount).toBeLessThan(9);
-    expect(content).toContain("research hermes agent");
+    expect(content).toContain("research agent architecture");
   });
 
   it("evicts tool messages before session summaries when trimming", () => {
@@ -106,13 +106,13 @@ describe("packSessionHistory", () => {
         id: "q1",
         sessionId: "s",
         role: "user" as const,
-        content: "original question about Hermes agent architecture"
+        content: "original question about agent architecture"
       },
       {
         id: "a1",
         sessionId: "s",
         role: "agent" as const,
-        content: "Initial answer about Hermes."
+        content: "Initial answer about agent architecture."
       },
       {
         id: "q2",
@@ -155,7 +155,7 @@ describe("packSessionHistory", () => {
 
     expect(packed.messages.some((message) => message.role === "system")).toBe(true);
     expect(packed.messages.some((message) => message.role === "tool")).toBe(false);
-    expect(content).toContain("original question about Hermes agent architecture");
+    expect(content).toContain("original question about agent architecture");
   });
 
   it("keeps the latest user message directly when followed by many tool messages", () => {

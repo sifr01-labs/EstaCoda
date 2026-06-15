@@ -1688,12 +1688,12 @@ export class StandardRenderer {
   }
 
   renderUserPromptRail(vm: UserPromptRailViewModel): string {
-    const bullet = this.#useUnicode ? "\u25b8" : ">";
     const width = this.#capabilities.terminalWidth ?? 60;
-    const fill = this.#useUnicode ? "─" : "-";
-    const line = `+${fill.repeat(Math.max(0, width - 2))}+`;
-    const promptText = truncateVisible(`${bullet} ${vm.text}`, width);
-    return `${promptText}\n${line}`;
+    const marker = this.#useUnicode ? "↳" : ">";
+    return vm.text
+      .split(/\r\n|\r|\n/u)
+      .map((line, index) => truncateVisible(`${index === 0 ? marker : " "} ${line}`, width))
+      .join("\n");
   }
 
   renderActiveTurnSpinner(vm: ActiveTurnSpinnerViewModel): string {

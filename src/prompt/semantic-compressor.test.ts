@@ -92,7 +92,7 @@ describe("SemanticCompressor", () => {
     ]));
   });
 
-  it("uses Hermes-style per-message and tool-argument truncation before summarization", () => {
+  it("applies per-message and tool-argument truncation before summarization", () => {
     const longContent = "a".repeat(CONTENT_MAX + 200);
     const longToolArgs = { payload: "b".repeat(TOOL_ARGS_MAX + 200) };
     const serialized = serializeMessagesForSummary([
@@ -727,7 +727,7 @@ describe("SemanticCompressor", () => {
     expect(observedMaxTokens).not.toBe(1_200);
   });
 
-  it("computes Hermes-style summary budgets from source tokens, ratio, context cap, and ceiling", () => {
+  it("computes summary budgets from source tokens, ratio, context cap, and ceiling", () => {
     const small = computeSummaryBudget({
       sourceMessages: [message("small", "user", "small transcript")],
       targetRatio: 0.20,

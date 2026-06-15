@@ -124,7 +124,7 @@ describe("media capability setup does not render raw secrets", () => {
   });
 
   it("voice status reports provider readiness", async () => {
-    await withEnv({ VOICE_TOOLS_OPENAI_KEY: undefined, OPENAI_API_KEY: undefined, HERMES_LOCAL_STT_COMMAND: undefined }, async () => {
+    await withEnv({ VOICE_TOOLS_OPENAI_KEY: undefined, OPENAI_API_KEY: undefined, ESTACODA_LOCAL_STT_COMMAND: undefined }, async () => {
       const result = await runCliCommand({
         argv: ["voice", "status"],
         workspaceRoot: tempDir,

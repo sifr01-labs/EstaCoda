@@ -66,13 +66,13 @@ function localReadyConfigObject(): Record<string, unknown> {
   return {
     model: {
       provider: "local",
-      id: "hermes-local",
+      id: "local-test-model",
     },
     providers: {
       local: {
         kind: "openai-compatible",
         baseUrl: "http://localhost:11434/v1",
-        models: ["hermes-local"],
+        models: ["local-test-model"],
         enableNetwork: true,
       },
     },
@@ -111,10 +111,10 @@ function flowEngine(overrides: {
     ],
     listModelCandidates: async (providerId: ProviderId) => providerId === "local"
       ? [{
-          id: "hermes-local",
+          id: "local-test-model",
           provider: providerId,
           profile: {
-            id: "hermes-local",
+            id: "local-test-model",
             provider: providerId,
             supportsTools: false,
             supportsVision: false,
@@ -482,7 +482,7 @@ describe("runFirstRunSetup", () => {
     expect(result.selections.primaryAuthMethod).toBe("none");
     expect(result.wizardState.primaryRoute).toEqual(expect.objectContaining({
       provider: "local",
-      model: "hermes-local",
+      model: "local-test-model",
     }));
     expect(result.draftBundle.sourceKind).toBe("onboarding-wizard-state");
     expect(result.reviewManifest.sections["workspace-trust-grants"]).toHaveLength(1);
@@ -1813,7 +1813,7 @@ describe("runFirstRunSetup", () => {
     expect(result.output).toContain(resolveSetupCopy("en", "onboarding.optionalCapabilities.voice.localSttSkipped"));
     expect(result.output).not.toContain("ensurepip is not available");
     expect(result.output).not.toContain("Failing command");
-    expect(config.model).toEqual({ provider: "local", id: "hermes-local", contextWindowTokens: 8192 });
+    expect(config.model).toEqual({ provider: "local", id: "local-test-model", contextWindowTokens: 8192 });
     expect(config.stt).toBeUndefined();
   });
 
@@ -1948,7 +1948,7 @@ describe("runFirstRunSetup", () => {
     const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
       model?: { provider?: string; id?: string };
     };
-    expect(config.model).toEqual({ provider: "local", id: "hermes-local", contextWindowTokens: 8192 });
+    expect(config.model).toEqual({ provider: "local", id: "local-test-model", contextWindowTokens: 8192 });
   });
 
   it("prompts to install and start the gateway after ready Telegram onboarding before the launch prompt", async () => {
@@ -2197,7 +2197,7 @@ describe("runFirstRunSetup", () => {
       model?: { provider?: string; id?: string };
     };
     expect(defaultConfig.model).toEqual({ provider: "unconfigured", id: "unconfigured" });
-    expect(researchConfig.model).toEqual({ provider: "local", id: "hermes-local", contextWindowTokens: 8192 });
+    expect(researchConfig.model).toEqual({ provider: "local", id: "local-test-model", contextWindowTokens: 8192 });
   });
 
   it("keeps collected API key in memory during dry-run first-run", async () => {

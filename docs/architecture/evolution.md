@@ -86,7 +86,7 @@ Manifest ownership is explicit:
 
 ## AHE Alignment
 
-EstaCoda aligns with **Agentic Harness Engineering (AHE)** by Lin et al. (arXiv:2604.25850) and **Hermes Agent Self-Evolution** by Nous Research.
+EstaCoda aligns with **Agentic Harness Engineering (AHE)** by Lin et al. (arXiv:2604.25850).
 
 | AHE Pillar | EstaCoda Interpretation |
 |-----------|------------------------|
@@ -151,4 +151,3 @@ Routing remains deterministic in Phase 1A. Route telemetry, rejection/search-com
 ## Sources
 
 - Agentic Harness Engineering (AHE): https://arxiv.org/abs/2604.25850
-- Hermes Agent Self-Evolution: https://github.com/NousResearch/hermes-agent-self-evolution

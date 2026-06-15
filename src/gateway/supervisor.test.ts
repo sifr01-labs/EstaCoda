@@ -2242,6 +2242,7 @@ describe("supervisor lifecycle hooks", () => {
     try {
       const exited = fakeExit();
       const gateway = fakeChannelGateway();
+      const beforeSigterm = process.listenerCount("SIGTERM");
 
       const promise = runGatewaySupervisor({
         workspaceRoot: tmpDir,
@@ -2254,7 +2255,7 @@ describe("supervisor lifecycle hooks", () => {
         },
       });
 
-      await new Promise((r) => setTimeout(r, 50));
+      await waitForCondition(() => process.listenerCount("SIGTERM") > beforeSigterm);
       process.emit("SIGTERM");
       await promise;
 
@@ -2298,6 +2299,7 @@ describe("supervisor lifecycle hooks", () => {
     try {
       const exited = fakeExit();
       let capturedRegistry: ActiveTurnRegistry | undefined;
+      const beforeSigterm = process.listenerCount("SIGTERM");
       const gateway = {
         start: async () => {},
         stop: async () => {},
@@ -2319,7 +2321,7 @@ describe("supervisor lifecycle hooks", () => {
         },
       });
 
-      await waitForCondition(() => capturedRegistry !== undefined);
+      await waitForCondition(() => capturedRegistry !== undefined && process.listenerCount("SIGTERM") > beforeSigterm);
       const ac = new AbortController();
       capturedRegistry!.startTurn("test-key", ac);
 
@@ -2353,6 +2355,7 @@ describe("supervisor lifecycle hooks", () => {
     try {
       const exited = fakeExit();
       let capturedRegistry: ActiveTurnRegistry | undefined;
+      const beforeSigterm = process.listenerCount("SIGTERM");
       const gateway = {
         start: async () => {},
         stop: async () => {},
@@ -2374,12 +2377,12 @@ describe("supervisor lifecycle hooks", () => {
         },
       });
 
-      await waitForCondition(() => capturedRegistry !== undefined);
+      await waitForCondition(() => capturedRegistry !== undefined && process.listenerCount("SIGTERM") > beforeSigterm);
       const ac = new AbortController();
       capturedRegistry!.startTurn("test-key", ac);
 
       process.emit("SIGTERM");
-      await new Promise((r) => setTimeout(r, 100));
+      await waitForCondition(() => captured.some((e) => e.name === "supervisor:drain:start"));
       process.emit("SIGTERM");
 
       await promise;

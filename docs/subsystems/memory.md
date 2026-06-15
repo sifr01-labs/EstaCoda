@@ -40,7 +40,7 @@ Memory is durable execution context, so retrieved or generated memory is always 
 | `SOUL.md` | Profile agent identity and personality | Configurable | `~/.estacoda/profiles/<id>/SOUL.md` |
 | `MEMORY.md` | Profile facts, conventions, and lessons | 2,200 (~800 tokens) | `~/.estacoda/profiles/<id>/MEMORY.md` |
 
-`profiles/<id>/promotions.json` stores promotion metadata for that profile. There is no global `USER.md`, no global promotion store, and no `memory/default` path.
+`profiles/<id>/promotions.json` stores promotion metadata for that profile. There is no global `USER.md` and no global promotion store.
 
 Render order:
 
@@ -83,7 +83,7 @@ Local memory disk writes go through the drift-aware `MemoryPersistenceService`. 
 
 Protected memory remains protected even when indexed. `SOUL.md` is indexed as protected for parity, status, and rebuild checks, but it is excluded from read/search unless `includeProtected` is true. Semantic recall must never use `SOUL.md`, even if it is indexed, and protected entries must remain excluded from semantic-facing retrieval paths.
 
-Deterministic session search primitives are EstaCoda-native. `SessionDB` does not currently provide Hermes-style `getMessagesAround()` primitives. `SessionSearchService` implements deterministic browse/search/scroll behavior separately from `SessionRecallService`.
+Deterministic session search primitives are EstaCoda-native. `SessionDB` does not currently provide `getMessagesAround()` primitives. `SessionSearchService` implements deterministic browse/search/scroll behavior separately from `SessionRecallService`.
 
 ## Local Lexical Memory Retrieval
 

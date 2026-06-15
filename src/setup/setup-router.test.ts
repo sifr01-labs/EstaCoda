@@ -11,7 +11,7 @@ import { collectSetupRoute, renderSetupRouteDecision, routeSetupEntryState, type
 function providerDiagnostic(status: ProviderDiagnostic["status"] = "ready"): ProviderDiagnostic {
   return {
     status,
-    lines: ["Selected route: local/hermes-local"],
+    lines: ["Selected route: local/local-test-model"],
     warnings: status === "ready" ? [] : ["Configured model context window is below 64K tokens."],
   };
 }
@@ -60,7 +60,7 @@ function state(kind: SetupEntryStateKind, overrides: Partial<SetupEntryState> = 
     blockers: kind === "configured-ready" ? [] : [`${kind} blocker`],
     model: {
       provider: kind === "new-user" ? "unconfigured" : "local",
-      id: kind === "new-user" ? "unconfigured" : "hermes-local",
+      id: kind === "new-user" ? "unconfigured" : "local-test-model",
     },
     ...overrides,
   };

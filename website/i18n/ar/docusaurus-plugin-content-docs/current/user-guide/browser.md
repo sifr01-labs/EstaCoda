@@ -240,7 +240,6 @@ estacoda browser revoke-cloud
 
 - `engine: "agent-browser"` مقبول في الإعداد لكنه غير مُنفّذ.
 - دعم Lightpanda غير مُنفّذ.
-- حزمة تحقق Hermes للتكافؤ وCI التكافؤ غير مُنفّذين.
 - تبقى browser-use وFirecrawl browser وCamofox مزودات مؤجلة.
 - اللقطات المضغوطة عبر AX هي مجموعة محدودة قابلة للتنفيذ، وليست ترشيحًا للعناصر المرئية في منفذ العرض.
 

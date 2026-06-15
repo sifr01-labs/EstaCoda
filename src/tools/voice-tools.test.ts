@@ -181,7 +181,7 @@ describe("voice tool readiness", () => {
   });
 
   it("does not advertise local STT without a command in Stage 0", async () => {
-    await withEnv({ HERMES_LOCAL_STT_COMMAND: undefined }, async () => {
+    await withEnv({ ESTACODA_LOCAL_STT_COMMAND: undefined }, async () => {
       const roots = await createRoots();
       const stt: LoadedRuntimeConfig["stt"] = { provider: "local", enabled: true };
       const tools = createVoiceTools({

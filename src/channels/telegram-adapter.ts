@@ -967,7 +967,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
     this.#cleanupFailedAttempts = input.options?.cleanupFailedAttempts ?? true;
     this.#freshFinalAfterSeconds = Math.max(0, input.options?.freshFinalAfterSeconds ?? 0);
     this.#nowMs = input.nowMs ?? (() => performance.now());
-    const transport = input.options?.transport ?? "edit";
+    const transport = input.options?.transport ?? "auto";
     this.#useDraftStreaming = transport !== "edit" && input.chatType === "dm" && input.sendDraft !== undefined;
     if (this.#useDraftStreaming) {
       this.#assignNextDraftId();

@@ -13,15 +13,6 @@ Checked on 2026-06-07 against current Browserbase documentation:
 - https://docs.browserbase.com/reference/api/update-a-session
 - https://docs.browserbase.com/reference/api
 
-## Hermes Files Cross-Referenced
-
-The requested Hermes paths were not available in this environment:
-
-- `/home/idris/.hermes/hermes-agent/plugins/browser/browserbase/provider.py`
-- `/home/idris/.hermes/hermes-agent/tools/browser_tool.py`
-
-Additional local searches did not find a usable Hermes Browserbase provider implementation. The implementation below therefore uses the current official Browserbase docs as the source of truth.
-
 ## Session Create Endpoint
 
 Current docs use:
@@ -108,7 +99,6 @@ The response is `200` with a session object. The TypeScript client implements th
 ## Known Deviations Or Uncertainties
 
 - The task prompt mentioned `https://www.browserbase.com/v1/sessions` and `DELETE /v1/sessions/{id}`. Current official docs instead use `https://api.browserbase.com` and `POST /v1/sessions/{id}` with `status: "REQUEST_RELEASE"` to close a session.
-- The requested Hermes source files were not available here, so no Hermes behavior could be cross-checked.
 - The client implements `getSession()` because current docs include `GET /v1/sessions/{id}`.
 
 ## Implementation Notes For The TypeScript Client

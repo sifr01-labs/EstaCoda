@@ -60,6 +60,21 @@ function renderMessages(messages: ProviderMessage[]): string {
 }
 
 describe("assembleProviderPrompt", () => {
+  it("uses updated fallback identity when no custom soul is provided", () => {
+    const prompt = assembleProviderPrompt(basePromptInput());
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain("You are EstaCoda, a proactive agent.");
+    expect(rendered).toContain(
+      "If they do not fit the user’s request, follow the user’s request and avoid using irrelevant skills or tools."
+    );
+    expect(rendered).toContain(
+      "If native tools are available, call only the provided tool names. EstaCoda will map provider-safe tool names back to internal tools."
+    );
+    expect(rendered).not.toContain("proactive autonomous agent");
+    expect(rendered).not.toContain("skills-first");
+  });
+
   it("uses direct-response guidance instead of exposing no-skill fallback copy", () => {
     const prompt = assembleProviderPrompt({
       model,

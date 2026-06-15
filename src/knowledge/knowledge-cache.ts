@@ -33,7 +33,7 @@ export class KnowledgeCache {
       options.cachePath ??
       join(this.#workspaceRoot, ".estacoda", "code-dependency-graph.json");
     this.#ignoreDirs = options.ignoreDirs ?? new Set([
-      "node_modules", "dist", "build", ".git", ".estacoda", "coverage", ".hermes"
+      "node_modules", "dist", "build", ".git", ".estacoda", "coverage"
     ]);
   }
 
