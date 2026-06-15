@@ -1,200 +1,325 @@
 ---
 title: Runtime
-description: Runtime creation, provider resolution, tool execution boundaries, and startup failure modes.
+description: Runtime creation, provider resolution, execution boundaries, gateway caching, disposal, and startup failure modes.
 sidebar_position: 2
 ---
 
 # Runtime
 
-The EstaCoda runtime is the execution environment for a single session turn. It is created fresh for each turn in gateway mode and persisted across turns in CLI interactive mode. Everything the runtime needs — config, credentials, skills, memory, tools — is loaded at construction time from a single selected profile.
+The EstaCoda runtime is the execution environment that owns session execution. It loads one selected profile, builds shared runtime substrate, assembles session-bound components, executes provider and tool work under policy, and persists the resulting state.
 
-This page explains how the runtime is created, what it resolves, and where it can fail.
-
----
-
-## What the Runtime Is
-
-A runtime is a collection of initialized subsystems that cooperate to process one user turn:
-
-- One selected profile config
-- One provider registry with resolved primary and auxiliary routes
-- One tool registry with built-in and MCP-discovered tools
-- One skill registry with visible skills for this session
-- One security policy and approval controller
-- One session database connection
-- One memory store and provider
-- One agent loop that coordinates them all
-
-The runtime is not shared across profiles. Switching profiles means creating a new runtime with different config, credentials, and memory.
+This page explains how runtime creation works, what is reused, what is rebuilt per session, and where failures usually happen.
 
 ---
 
-## Profile Selection
+## What the runtime is
 
-Runtime config loads from exactly one selected profile:
+A runtime combines shared substrate with session-bound execution components.
 
-- Explicit `profileId` passed to the command
-- The active profile if no explicit ID is given
-- `default` if no active profile is set
+| Area | Examples |
+|---|---|
+| Profile state | Config, credentials, memory files, skills, gateway state |
+| Provider substrate | Provider registry, provider executor, primary route, fallback routes, auxiliary routes |
+| Tool substrate | Built-in tool providers, MCP-discovered tools, process manager, browser backend |
+| Memory substrate | Memory store, memory provider, memory index, retrieval service, prompt context builder |
+| Session-bound components | Tool registry, tool executor, tool planner, provider turn loop, runtime router, agent loop |
+| Persistence | Session DB, artifacts, trajectory, cron, workflow state where available |
+| Policy | Security mode, trust store, approval control, child fail-closed policy |
 
-There is no user/project config merge. Workspace trust is a behavioral gating input for local actions and MCP startup; it does not change which config file is loaded.
-
-Profile state lives under `~/.estacoda/profiles/<id>/`. See [Architecture](./architecture.md) for the full state boundary map.
-
----
-
-## Runtime Construction
-
-`createRuntime()` constructs subsystems in a fixed order:
-
-1. **Trust and approval stores** — `WorkspaceTrustStore`, `WorkspaceApprovalController`
-2. **Provider infrastructure** — `ProviderRegistry`, auxiliary model route resolver
-3. **Browser backend** — mock or real CDP
-4. **Context expander and project loader** — `ContextReferenceExpander`, `ProjectContextLoader`
-5. **Memory** — `MemoryStore`, `LocalMemoryProvider`
-6. **Persistence** — `CronStore`, `SessionDB`, `ArtifactStore`
-7. **Process manager**
-8. **Tool infrastructure** — `ToolRegistry`, `ToolExecutor`, `ToolCallPlanner`
-9. **Skill infrastructure** — `SkillRegistry`, `SkillLearningManager`, `SkillEvolutionStore`
-10. **Delegation manager**
-11. **Provider executor**
-12. **Extracted runtime components** — `RunRecorder`, `ToolPlanRunner`, `ProviderTurnLoop`, `SkillPlaybookRunner`, `NativeToolExecutor`, `RuntimeRouter`
-13. **AgentLoop** — the orchestration lifecycle
-
-Any constructor signature change cascades through this file. There is no DI container or plugin boundary.
-
-`SkillLearningManager` is an Agent Evolution evidence source in Phase 1A. It observes completed turns and emits evidence/candidates; governed proposals, manifests, promotion, and rollback remain separate review surfaces.
+Runtime config loads from exactly one selected profile. Workspace trust gates local action behavior and may affect trusted runtime capabilities such as MCP startup, but it does not change which profile config is loaded.
 
 ---
 
-## Provider Route Resolution
+## Profile selection
 
-The runtime resolves three kinds of provider routes:
+Runtime config loads from one profile, in this order:
 
-### Primary Route
+1. Explicit `profileId` passed to the command
+2. Active profile if no explicit profile ID is given
+3. `default` if no active profile is set
 
-Defined under `model` in profile config. Used for normal inference. If the primary route is non-runnable — missing credentials, stale model name, or provider failure — EstaCoda reports the failure. It does not silently fall back unless explicit fallback routes are configured.
+There is no user/project config merge. Profile state lives under:
 
-### Fallback Routes
+```text
+~/.estacoda/profiles/<id>/
+```
 
-Ordered list under `model.fallbacks`. Tried only when the primary route fails at execution time. Fallbacks preserve `apiKeyEnv`, `baseUrl`, `apiMode`, and `authMethod` when available. If all fallbacks fail, the turn reports the error and stops.
+Sessions are scoped by `profile_id` in the session database. `createRuntime()` rejects an existing session if that session belongs to a different profile than the runtime being created.
 
-### Auxiliary Routes
-
-Specialized routes for tasks like vision, compression, security assessment, web extraction, and session search. Configured under `auxiliaryModels`. They resolve through the same provider infrastructure as the primary route.
-
-| Slot | Purpose | Maturity |
-|---|---|---|
-| `vision` | Image analysis | `implemented` |
-| `compression` | Semantic session compression | `experimental` |
-| `assessor` | Smart approval classification | `implemented` |
-| `web_extract` | Web extraction | `implemented` |
-| `session_search` | Semantic session search | `implemented` |
-| `mcp` | MCP tool delegation | `implemented` |
-| `memory_flush` | Memory operations | `implemented` |
-| `delegation` | Subagent delegation | `implemented` |
-| `skills_library` | Skills distribution | `implemented` |
-| `title_generation` | Session title generation | `implemented` |
-| `curator` | Memory curation | `implemented` |
-| `memory_compaction` | Memory file compaction | `implemented` |
-| `profile_context` | Profile context generation | `implemented` |
-
-Unsupported auxiliary task names throw during config normalization.
+See [Architecture](./architecture.md) for the full state boundary map.
 
 ---
 
-## Tool Registry and Execution Boundary
+## Runtime construction
 
-`ToolRegistry` registers built-in tools at module load time and MCP-discovered tools at runtime creation. `ToolExecutor` runs concrete tool actions under the active security policy.
+Runtime construction has three practical phases.
 
-**Boundary rule:** The provider does not know about tools. The tool executor does not know about providers. Only the agent loop bridges them.
+### Phase A: shared substrate
 
-`ToolPlanRunner` converts provider tool calls into executable plans, manages safe-tool concurrency, handles failure caps, and builds result packets for continuation. Previously embedded in `AgentLoop`; now an extracted component.
+`createRuntime()` builds the shared substrate for the selected profile and session.
 
-Tool risk classes: `safe`, `caution`, `external-side-effect`, `irreversible`. The security policy gates on `targetKey`, not display summary.
+It creates or resolves:
+
+| Substrate | Examples |
+|---|---|
+| State paths | Global state home, profile state home, workspace root |
+| Stores | Memory store, artifact store, cron store, session DB |
+| Memory infrastructure | Memory index store, memory index sync, local memory retrieval, memory prompt context |
+| Provider infrastructure | Provider registry, provider executor, primary route, fallback routes, auxiliary routes |
+| Skill infrastructure | Official skills, profile skills, pack-materialized skills, skill evolution stores |
+| MCP infrastructure | Configured MCP servers and discovered MCP tools, gated by trusted runtime capability state |
+| Process and media state | Process manager, channel media root, audio cache, image cache |
+| Browser infrastructure | Browser backend, supervised local CDP lifecycle, emergency cleanup |
+| Voice infrastructure | Local Whisper worker when configured |
+| Prompt infrastructure | Project context loader, context reference expander, session compression service |
+| Delegation substrate | `FileStateTracker`, parent routes, shared provider/tool substrate |
+| Trajectory | `TrajectoryRecorder` for the active session |
+
+Approval control is injected into runtime creation and used by runtime methods that grant, inspect, or revoke approvals.
+
+### Phase B: session-bound components
+
+`AgentLoopBuilder.buildSession()` assembles the session-bound execution components.
+
+It creates:
+
+| Component | Role |
+|---|---|
+| `ToolRegistry` | Session-visible tool registry |
+| `ToolExecutor` | Executes tool actions under security policy |
+| `ToolCallPlanner` | Maps provider tool calls to executable tool plans |
+| `RunRecorder` | Records turn/tool/session events and trajectory data |
+| `MemoryRecallOrchestrator` | Prepares per-turn recall context |
+| `ToolPlanRunner` | Runs planned tools, handles concurrency, failure caps, and continuation packets |
+| `ProviderTurnLoop` | Runs provider iterations and finalizes provider output |
+| `SkillPlaybookRunner` | Executes skill playbook tool steps |
+| `NativeToolExecutor` | Executes native runtime intents |
+| `IntentRouter` | Routes user intent to runtime paths and skills |
+| `RuntimeRouter` | Selects native, skill, or provider-backed execution |
+| `AgentLoop` | Coordinates the turn boundary and persistence |
+
+Tool registration happens in phases so tools receive the right runtime and session context:
+
+1. `pre-skill-visibility`
+2. `post-skill-visibility`
+3. `post-memory-provider`
+4. `post-tool-executor`
+
+MCP-discovered tools are added to the session-visible tool registry during session construction, alongside built-in tool registration phases.
+
+### Phase C: workflow wiring
+
+After `AgentLoopBuilder.buildSession()` returns, `createRuntime()` wires workflow support when the session DB is `SQLiteSessionDB`.
+
+Workflow wiring includes:
+
+| Component | Role |
+|---|---|
+| `SQLiteWorkflowStore` | Persists workflow runs, steps, events, locks, and artifacts |
+| `WorkflowLockService` | Coordinates workflow locks |
+| `WorkflowEngine` | Executes workflow plans |
+| `WorkflowProcessRegistry` | Tracks workflow-related processes |
+| `WorkflowEventSummaryService` | Compacts workflow event history |
+| `WorkflowCommandDispatcher` | Handles workflow commands |
+| `WorkflowAgentLoopAdapter` | Routes active workflow turns through the agent loop |
+| `WorkflowRestartRecovery` | Marks interrupted runs and recovers stale locks |
+
+Workflow wiring is best effort. If workflow setup fails, runtime creation can continue without workflow support, and workflow-specific commands should report the missing capability.
 
 ---
 
-## Provider Finalization Boundary
+## Provider route resolution
 
-`ProviderTurnLoop` treats provider output as usable only after finalization. Streaming may emit live visible tokens, but executable tool calls, persisted assistant content, prompt-bound history, summaries, memory inputs, skill learning, and exports use finalized visible output only.
+The runtime resolves three kinds of provider routes.
+
+### Primary route
+
+The primary route comes from `model` in profile config. It is used for normal inference.
+
+If the primary route is not runnable because credentials are missing, the model is stale, or the provider fails, EstaCoda reports the failure. It does not silently fall back unless fallback routes are configured.
+
+### Fallback routes
+
+Fallback routes come from `model.fallbacks`. They are tried only when the primary route fails at execution time.
+
+Fallbacks preserve route metadata such as:
+
+| Metadata | Use |
+|---|---|
+| `apiKeyEnv` | Credential environment variable |
+| `baseUrl` | Provider endpoint |
+| `apiMode` | Adapter mode, such as OpenAI-compatible or OpenAI Responses |
+| `authMethod` | Credential/auth mode |
+
+If all fallback routes fail, the turn reports the error and stops.
+
+### Auxiliary routes
+
+Auxiliary routes are specialized model routes configured under `auxiliaryModels`. They use the same provider registry and executor path as primary routes.
+
+| Slot | Purpose |
+|---|---|
+| `vision` | Image analysis |
+| `compression` | Semantic session compression |
+| `assessor` | Smart approval classification |
+| `web_extract` | Web extraction |
+| `session_search` | Semantic session search |
+| `mcp` | MCP tool delegation |
+| `memory_flush` | Memory operations |
+| `delegation` | Subagent delegation |
+| `skills_library` | Skills distribution |
+| `title_generation` | Session title generation |
+| `curator` | Memory curation |
+| `memory_compaction` | Memory file compaction |
+| `profile_context` | Profile context generation |
+
+Unsupported auxiliary task names fail during config normalization.
+
+---
+
+## Provider execution boundary
+
+`ProviderTurnLoop` treats provider output as usable only after finalization. Streaming can emit live visible tokens, but these surfaces use finalized visible output only:
+
+| Surface | Uses finalized output |
+|---|---|
+| Executable tool calls | Yes |
+| Persisted assistant content | Yes |
+| Provider-bound history | Yes |
+| Summaries and compression | Yes |
+| Memory inputs | Yes |
+| Skill learning | Yes |
+| Exports | Yes |
 
 Stream safety rules:
 
-- streamed tool-call fragments are collected locally while the stream is open
-- stream errors discard fragments
-- incomplete streams remain provider failures
-- `[DONE]` is an internal transport marker, not user-visible output
-- visible-only transport completion may finalize as `finishReason: "unknown"`
-- transport completion with unfinished tool fragments fails as `incomplete-stream`
-- Responses streaming is not implemented
+- Streamed tool-call fragments are collected while the stream is open.
+- Stream errors discard collected fragments.
+- Incomplete streams remain provider failures.
+- `[DONE]` is an internal transport marker, not user-visible output.
+- Visible-only transport completion may finalize as `finishReason: "unknown"`.
+- Transport completion with unfinished tool fragments fails as `incomplete-stream`.
+- OpenAI-compatible chat completions support streaming.
+- OpenAI Responses execution is implemented. Responses streaming is not part of the current supported runtime baseline.
 
-`ProviderExecutionResult.toolCalls` is canonical. Length-truncated tool calls retry once on the successful route chain. If the retry is still length-truncated, the runtime returns deterministic refusal text and executes no tools. Malformed finalized tool JSON stays a tool-planning error.
+`ProviderExecutionResult.toolCalls` is canonical. Length-truncated tool calls retry once on the successful route chain. If the retry is still length-truncated, the runtime returns deterministic refusal text and executes no tools.
 
-Reasoning is hidden material. Raw reasoning is turn-local only. Safe metadata may include `present`, `chars`, and `format`; `reasoningTokens` is telemetry only. Visible output, provider-bound history, semantic compression, summaries, memory, skill learning, and exports strip raw reasoning and inline hidden reasoning blocks. Provider-bound reasoning echo-back remains deferred unless an explicit provider metadata opt-in is implemented and tested.
+Reasoning is hidden material. Raw reasoning is turn-local only. Visible output, provider-bound history, semantic compression, summaries, memory, skill learning, and exports strip raw reasoning and inline hidden reasoning blocks.
 
-Reasoning-only provider success reaches the turn loop. Non-length reasoning-only responses retry with a local-only visible-answer prefill. Length reasoning-only exhaustion returns safe visible guidance and does not text-continue.
-
-Visible text with `finishReason: "length"` can continue on the successful route chain. Synthetic continuation messages are local-only. Intermediate partials are not persisted. The final visible text is persisted once. Continuation uses exact overlap trimming, not semantic or fuzzy matching.
-
----
-
-## Delegation Runtime
-
-`delegate_task` builds real child `AgentLoop` instances through the shared agent-loop builder. Parent-owned substrate such as provider registry/executor, MCP registrations, stores, process manager, browser backend, artifact store, trust store, and loaded config is reused, while session-bound child components are fresh per child session.
-
-Child sessions are persisted with `parentSessionId`, role/depth, effective tool access, stripped/blocked diagnostics, model override metadata where present, and child runtime suppression metadata. Child prompt assembly uses the child session. Child transcripts are excluded from parent recall, session search, memory recall, and prompt packing by default.
-
-Child tool access is resolved before provider schemas are built. The default profile keeps parent-visible `read-only-local` and `read-only-network` tools only, strips exact/prefix blocked tools, and excludes browser, media, and MCP toolsets. `terminal.run` remains excluded. `terminal.inspect` is available as a read-only-local tool only through the same parent-visible policy.
-
-Child approvals are non-interactive fail-closed. Hardline denies run first; any action that would ask, use parent grants, use pending approval queues, or depend on persisted/session approvals is denied in the child runtime. Parent-mediated child approvals are not shipped.
-
-The delegation manager records `delegation-started`, `delegation-finished`, `delegation-heartbeat`, and `delegation-diagnostic` session events and relays bounded runtime `delegation-progress` events. Results carry structured status/reason metadata, child session ids, role/depth, timeout/cancelled details, effective tool diagnostics, stale-file warnings, and token usage when available. Batch results preserve per-child statuses and roll up usage. Durable or estimated USD cost accounting is not shipped.
-
-Outcome memory is opt-in and stores only bounded task preview plus deterministic status/reason metadata. File-state tracking snapshots parent reads before delegation and emits advisory stale-file warnings when tracked child writes touch those paths. Child model overrides support same-provider and reviewed cross-provider routes using existing provider config and `apiKeyEnv`; child fallbacks are disabled for overrides.
-
-## Gateway, Session, and Runtime Cache Boundaries
-
-### Gateway Mode
-
-In gateway mode, a fresh runtime is constructed for each incoming turn. This ensures:
-
-- Config changes take effect immediately
-- Session-scoped model overrides are revalidated
-- Runtime caches do not leak between users
-
-The tradeoff is construction overhead. Gateway runtime creation is optimized but not free.
-
-### CLI Mode
-
-In CLI interactive mode, the runtime persists across turns within a session. This reduces construction overhead and maintains session state in memory.
-
-### Session Database
-
-Sessions are stored in `~/.estacoda/sessions.sqlite`, scoped by `profile_id`. The session DB outlives any single runtime instance. Channel session context is persisted under the bound profile gateway state.
-
-### Runtime Cache
-
-Prompt cache layers (identity, safety, project context, skill resources) are rebuilt only when underlying data changes. Session history and live user context are rebuilt every turn.
+Visible text with `finishReason: "length"` can continue on the successful route chain. Synthetic continuation messages are local-only. Intermediate partials are not persisted. Final visible text is persisted once. Continuation uses exact overlap trimming.
 
 ---
 
-## Memory Prompt Assembly
+## Tool boundary
 
-Per-turn memory context is prepared by `MemoryRecallOrchestrator` and rendered by `MemoryPromptContextBuilder`. The prompt assembly pipeline includes:
+The provider does not know how to execute tools. The tool executor does not know how to call providers. The agent loop bridges the two.
+
+| Component | Responsibility |
+|---|---|
+| Provider | Returns visible text and finalized tool calls |
+| `ToolCallPlanner` | Resolves provider tool calls to known tool definitions |
+| `ToolExecutor` | Executes concrete tool actions under policy |
+| `ToolPlanRunner` | Runs tool plans and builds continuation packets |
+| `ProviderTurnLoop` | Feeds tool results back to the provider when needed |
+| `AgentLoop` | Coordinates the overall turn boundary |
+
+Tool risk classes drive gating:
+
+| Risk class | Meaning |
+|---|---|
+| `safe` | Low-risk read or local computation |
+| `caution` | Needs care or may expose local state |
+| `external-side-effect` | Can affect external systems |
+| `irreversible` | Can make hard-to-reverse changes |
+
+The security policy gates on normalized `targetKey`, not display summary.
+
+---
+
+## CLI runtime lifecycle
+
+In CLI interactive mode, the runtime persists across turns in the active session. This avoids rebuilding the full runtime after every message and keeps session-bound state available in memory.
+
+A CLI runtime is disposed when the session exits or the process shuts down. Disposal stops runtime-owned resources such as MCP servers, browser lifecycle resources, local Whisper workers, memory index sync, and session DB connections when the runtime owns them.
+
+---
+
+## Gateway runtime lifecycle
+
+Gateway mode uses `RuntimeCache`.
+
+A gateway runtime is not created fresh for every incoming turn. The gateway asks the cache for a runtime keyed by `sessionId` and the current runtime fingerprint.
+
+| Cache case | Behavior |
+|---|---|
+| No entry | Create runtime |
+| Cache hit | Reuse runtime |
+| Fingerprint mismatch | Create replacement runtime and retire the old entry |
+| Suspended entry | Create replacement runtime |
+| Explicit invalidation | Suspend and replace on next use |
+| Idle TTL exceeded | Dispose idle runtime |
+| LRU cap exceeded | Dispose least-recent idle runtimes |
+
+Current implementation defaults:
+
+| Setting | Default |
+|---|---|
+| Max cached runtimes | `50` |
+| Idle TTL | `30 minutes` |
+| Dispose timeout | `10 seconds` |
+
+These are implementation defaults, not public API guarantees. Inspect `RuntimeCache` for current values.
+
+The gateway invalidates cached runtimes when policy-affecting state changes, such as persistent approval grant/revoke or session model override changes.
+
+Runtime cache entries are keyed by `sessionId`. Session rows are scoped by `profile_id`, and `createRuntime()` rejects profile/session mismatches. Runtime cache documentation should still treat session identity as a sensitive boundary.
+
+---
+
+## Delegation runtime
+
+`delegate_task` builds child agent loops through `DefaultChildAgentLoopFactory`, which uses the shared `AgentLoopBuilder`.
+
+Parent-owned substrate is reused:
+
+| Reused from parent | Examples |
+|---|---|
+| Provider substrate | Provider registry, provider executor, routes |
+| Stores | Session DB, memory provider, artifact store |
+| Runtime substrate | Process manager, browser backend, trust store |
+| MCP substrate | MCP tool registrations |
+| Delegation state | `SubagentRegistry`, `FileStateTracker` |
+
+Session-bound child components are fresh per child session. Child sessions have their own tool registry, tool executor, provider turn loop, runtime router, and agent loop.
+
+Child sessions are persisted with parent session ID, role/depth, effective tool access, stripped or blocked diagnostics, model override metadata where present, and runtime suppression metadata.
+
+Child tool access is resolved before provider schemas are built. The default child profile keeps parent-visible `read-only-local` and `read-only-network` tools only, strips exact/prefix blocked tools, and excludes browser, media, and MCP toolsets. `terminal.run` remains excluded.
+
+Child approvals are non-interactive and fail closed. Hardline denies run first. Any action that would ask, use parent grants, use pending approval queues, or depend on persisted/session approvals is denied in the child runtime.
+
+File-state tracking snapshots parent reads before delegation and emits advisory stale-file warnings when tracked child writes touch those paths. Outcome memory is opt-in and stores bounded task preview plus deterministic status/reason metadata.
+
+---
+
+## Memory prompt assembly
+
+Per-turn memory context is prepared before provider prompt assembly. `MemoryRecallOrchestrator` gathers recall context, and `MemoryPromptContextBuilder` renders the canonical memory prompt context.
+
+The prompt assembly pipeline includes:
 
 1. Canonical memory prompt context
-2. Project context (including `AGENTS.md`)
+2. Project context, including `AGENTS.md`
 3. Optional compaction notice
 4. Session history
 5. Optional session recall and external recall
 6. Live user message
 7. Channel attachments
-8. Intent, skill instructions, skill setup, skill resources
+8. Intent, skill instructions, skill setup, and skill resources
 9. Workflow plan
 10. Tool menu
 11. Explicit reference context
-12. Tool results / continuation feedback
+12. Tool results or continuation feedback
 
 Recall, external recall, and compression summaries are reference-only context. They are included for continuity but are not treated as authoritative instructions.
 
@@ -202,23 +327,40 @@ Provider-turn semantic compression is owned by `AgentLoop`, not `ProviderTurnLoo
 
 ---
 
-## Runtime Startup Failures
+## Runtime disposal
 
-**Missing profile config:** `createRuntime` fails early if the selected profile directory or `config.json` does not exist. The CLI reports the missing profile and suggests `estacoda profile switch` or setup.
+Runtime disposal is responsible for cleaning up resources owned by the runtime.
 
-**Non-runnable primary route:** Missing API key, invalid model name, or provider failure. `estacoda model diagnose` reports the exact failure. `estacoda model setup` repairs the route.
+Disposal includes:
 
-**Missing auxiliary route:** Missing or malformed auxiliary route config. The calling subsystem falls back as documented (e.g., manual approval if `assessor` fails).
+| Resource | Cleanup |
+|---|---|
+| Browser lifecycle | Stop lifecycle, cleanup sessions, close owned backend |
+| Local Whisper | Dispose worker when present |
+| MCP servers | Stop loaded MCP servers |
+| Memory index sync | Dispose sync worker |
+| Session DB | Close when runtime owns the connection |
 
-**MCP server unreachable:** MCP tools are not registered. The runtime continues without MCP tools. Check `estacoda gateway diagnose` for MCP readiness.
-
-**Browser backend unavailable:** If `browser.backend` is `local-cdp` and Chrome is not running on the configured `cdpUrl`, browser operations report connection errors. Enable `autoLaunch` or start Chrome manually.
-
-**SQLite lock or corruption:** Session operations fail. `better-sqlite3` uses synchronous SQLite semantics. Check file permissions on `~/.estacoda/sessions.sqlite`.
+Gateway cached runtimes are disposed through `RuntimeCache.safeDispose()`, which applies a timeout so stuck disposal does not block cache cleanup forever.
 
 ---
 
-## How to Inspect Runtime State
+## Runtime startup failures
+
+| Failure | What happens | First inspection command |
+|---|---|---|
+| Missing profile config | Runtime creation fails early | `estacoda verify` |
+| Profile/session mismatch | Runtime creation rejects the session | `estacoda sessions list` |
+| Non-runnable primary route | Turn reports provider/model failure | `estacoda model diagnose` |
+| Missing auxiliary route | Calling subsystem falls back where supported | `estacoda model show` |
+| MCP server unreachable | MCP tools are not registered; runtime continues | `estacoda gateway diagnose` |
+| Browser backend unavailable | Browser tools report connection errors | `estacoda doctor` |
+| SQLite lock or corruption | Session or workflow operations fail | Check `~/.estacoda/sessions.sqlite` permissions |
+| Workflow wiring unavailable | Runtime continues without workflow support | Workflow-related commands and runtime logs |
+
+---
+
+## How to inspect runtime state
 
 ```bash
 # Current primary route and readiness
@@ -230,10 +372,16 @@ estacoda model diagnose
 # List catalog-known providers
 estacoda model list
 
-# Gateway readiness (includes MCP, channels, cron)
+# Full setup readiness
+estacoda verify
+
+# General diagnosis
+estacoda doctor
+
+# Gateway readiness
 estacoda gateway diagnose
 
-# Full gateway status
+# Full gateway status, including runtime cache state when available
 estacoda gateway status
 
 # Recent sessions
@@ -241,13 +389,18 @@ estacoda sessions list
 
 # Current session
 estacoda sessions current
+
+# Code dependency graph
+estacoda knowledge code summary
+estacoda knowledge code refresh
 ```
 
 ---
 
 ## Related
 
-- [Architecture](./architecture.md) — system structure and state boundaries
-- [Provider Reference](../reference/provider-reference.md) — provider maturity matrix
-- [Providers](../user-guide/providers.md) — user-facing provider setup
-- [Tools](../user-guide/tools.md) — tool overview
+- [Architecture](./architecture.md) - system structure and state boundaries
+- [Provider Reference](../reference/provider-reference.md) - provider maturity matrix
+- [Providers](../user-guide/providers.md) - user-facing provider setup
+- [Tools](../user-guide/tools.md) - tool overview
+- [Gateway Internals](./gateway-internals.md) - gateway routing, approvals, and channel behavior
