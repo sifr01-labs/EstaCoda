@@ -832,21 +832,177 @@ describe("TelegramAdapter", () => {
     expect(result.fallbackRequired).toBe(true);
   });
 
-  it("delivery.startStreamingText detects escaped partial HTML overflow safely", async () => {
+  it("delivery.startStreamingText overflowing edits split preview chunks and keeps the final tail live", async () => {
     vi.useFakeTimers();
     const { adapter, calls } = createTelegramStreamingHarness();
     const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
-      minInitialChars: 1
+      minInitialChars: 1,
+      cursor: "|"
     });
 
-    handle.append("<>&".repeat(400));
+    handle.append("seed");
     await flushTelegramStreamingTimers();
-    handle.append("ignored");
-    await flushTelegramStreamingTimers();
-    const result = await handle.finish("final");
+    handle.append("A".repeat(9_000));
+    await vi.advanceTimersByTimeAsync(750);
+    handle.append(" tail");
+    await vi.advanceTimersByTimeAsync(750);
 
-    expect(calls).toHaveLength(0);
-    expect(result).toEqual({ delivered: false, fallbackRequired: true });
+    const sends = callsFor(calls, "sendMessage");
+    const edits = callsFor(calls, "editMessageText");
+    expect(sends).toHaveLength(3);
+    expect(edits[0]?.body).toMatchObject({ message_id: 1, parse_mode: "HTML" });
+    expect(String(edits[0]?.body.text)).not.toContain("|");
+    expect(String(sends[1]?.body.text)).not.toContain("|");
+    expect(String(sends[2]?.body.text)).toContain("|");
+    expect(edits.at(-1)?.body).toMatchObject({ message_id: 3, parse_mode: "HTML" });
+    expect(String(edits.at(-1)?.body.text)).toContain(" tail|");
+  });
+
+  it("delivery.startStreamingText segmentBreak after overflow seals the live tail without cursor", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      minInitialChars: 1,
+      cursor: "|"
+    });
+
+    handle.append("seed");
+    await flushTelegramStreamingTimers();
+    handle.append("A".repeat(9_000));
+    await vi.advanceTimersByTimeAsync(750);
+    handle.segmentBreak("tool-start");
+    await flushTelegramStreamingTimers();
+
+    const lastEdit = callsFor(calls, "editMessageText").at(-1);
+    expect(lastEdit?.body.message_id).toBe(3);
+    expect(String(lastEdit?.body.text)).not.toContain("|");
+  });
+
+  it("delivery.startStreamingText abort after overflow strips cursor from the live tail", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      minInitialChars: 1,
+      cursor: "|"
+    });
+
+    handle.append("seed");
+    await flushTelegramStreamingTimers();
+    handle.append("A".repeat(9_000));
+    await vi.advanceTimersByTimeAsync(750);
+    await handle.abort("stop");
+
+    const lastEdit = callsFor(calls, "editMessageText").at(-1);
+    expect(lastEdit?.body.message_id).toBe(3);
+    expect(String(lastEdit?.body.text)).not.toContain("|");
+  });
+
+  it("delivery.startStreamingText failed provider attempt cleanup deletes every overflow preview message", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      minInitialChars: 1,
+      cursor: "|"
+    });
+
+    handle.append("seed");
+    await flushTelegramStreamingTimers();
+    handle.append("A".repeat(9_000));
+    await vi.advanceTimersByTimeAsync(750);
+    handle.providerAttemptResult({ ok: false, willFallback: false, provider: "p", model: "m" });
+    await flushTelegramStreamingTimers();
+
+    expect(callsFor(calls, "deleteMessage").map((call) => call.body.message_id)).toEqual([1, 2, 3]);
+  });
+
+  it("delivery.startStreamingText cleanup neutralizes every overflow preview when delete fails", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness({
+      failMethods: { deleteMessage: [1, 2, 3] }
+    });
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      minInitialChars: 1,
+      cursor: "|"
+    });
+
+    handle.append("seed");
+    await flushTelegramStreamingTimers();
+    handle.append("A".repeat(9_000));
+    await vi.advanceTimersByTimeAsync(750);
+    handle.providerAttemptResult({ ok: false, willFallback: false, provider: "p", model: "m" });
+    await flushTelegramStreamingTimers();
+
+    const neutralized = callsFor(calls, "editMessageText").filter((call) =>
+      call.body.text === "Response interrupted. A complete reply will follow."
+    );
+    expect(neutralized.map((call) => call.body.message_id)).toEqual([1, 2, 3]);
+  });
+
+  it("delivery.startStreamingText retries mid-overflow 429 without losing committed preview IDs", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness({
+      failResponses: {
+        sendMessage: {
+          2: { status: 429, errorCode: 429, description: "retry after 1", retryAfterSeconds: 1 }
+        }
+      }
+    });
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      minInitialChars: 1,
+      maxFloodStrikes: 2,
+      cursor: "|"
+    });
+
+    handle.append("seed");
+    await flushTelegramStreamingTimers();
+    handle.append("A".repeat(9_000));
+    await vi.advanceTimersByTimeAsync(750);
+
+    expect(callsFor(calls, "editMessageText").map((call) => call.body.message_id)).toEqual([1]);
+    expect(callsFor(calls, "sendMessage")).toHaveLength(2);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    handle.append(" after");
+    await vi.advanceTimersByTimeAsync(750);
+
+    expect(callsFor(calls, "editMessageText").map((call) => call.body.message_id)).toEqual([1, 3]);
+    expect(String(callsFor(calls, "editMessageText").at(-1)?.body.text)).toContain(" after|");
+
+    handle.providerAttemptResult({ ok: false, willFallback: false, provider: "p", model: "m" });
+    await flushTelegramStreamingTimers();
+
+    expect(callsFor(calls, "deleteMessage").map((call) => call.body.message_id)).toEqual([1, 2, 3]);
+  });
+
+  it("delivery.startStreamingText overflow splitting avoids escaped entities and surrogate pairs", async () => {
+    vi.useFakeTimers();
+    const { adapter: entityAdapter, calls: entityCalls } = createTelegramStreamingHarness();
+    const entityHandle = entityAdapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      minInitialChars: 1,
+      cursor: "|"
+    });
+
+    entityHandle.append(`${"A".repeat(4094)}&B`);
+    await flushTelegramStreamingTimers();
+
+    const entityTexts = callsFor(entityCalls, "sendMessage").map((call) => String(call.body.text));
+    expect(entityTexts).toHaveLength(2);
+    expect(entityTexts[0]).toBe("A".repeat(4094));
+    expect(entityTexts[1]?.startsWith("&amp;B")).toBe(true);
+
+    const { adapter: emojiAdapter, calls: emojiCalls } = createTelegramStreamingHarness();
+    const emojiHandle = emojiAdapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      minInitialChars: 1,
+      cursor: "|"
+    });
+
+    emojiHandle.append(`${"A".repeat(4095)}🙂B`);
+    await flushTelegramStreamingTimers();
+
+    const emojiTexts = callsFor(emojiCalls, "sendMessage").map((call) => String(call.body.text));
+    expect(emojiTexts).toHaveLength(2);
+    expect(emojiTexts[0]).toBe("A".repeat(4095));
+    expect(emojiTexts[1]?.startsWith("🙂B")).toBe(true);
   });
 
   it("delivery.startStreamingText failed provider attempt cleanup stops pending edits", async () => {

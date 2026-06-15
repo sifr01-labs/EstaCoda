@@ -761,6 +761,8 @@ type TelegramStreamingTextWorkerInput = {
 type TelegramStreamingTextSegment = {
   sanitizer: TelegramStreamTextSanitizer;
   messageId?: number;
+  committedEscapedLength: number;
+  committedMessageIds: number[];
   lastSentHtml?: string;
   timer?: ReturnType<typeof setTimeout>;
   retryTimer?: ReturnType<typeof setTimeout>;
@@ -862,7 +864,8 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
 
       try {
         const formatted = this.#input.formatFinalText(finalText);
-        const [firstChunk, ...remainingChunks] = formatted.chunks;
+        const finalChunks = formatted.chunks.flatMap((chunk) => splitStreamingTelegramText(chunk, TELEGRAM_MAX_TEXT_UTF16));
+        const [firstChunk, ...remainingChunks] = finalChunks;
 
         if (firstChunk === undefined) {
           return {
@@ -968,9 +971,11 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
       return;
     }
 
-    const rendered = `${snapshot.escapedHtml}${includeCursor ? this.#cursorHtml : ""}`;
+    const tailEscaped = snapshot.escapedHtml.slice(segment.committedEscapedLength);
+    const cursorSuffix = includeCursor ? this.#cursorHtml : "";
+    const rendered = `${tailEscaped}${cursorSuffix}`;
     if (getUtf16Length(rendered) > TELEGRAM_MAX_TEXT_UTF16) {
-      this.#degrade(segment);
+      await this.#flushOverflowSegment(segment, includeCursor);
       return;
     }
 
@@ -1012,18 +1017,118 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
     this.#floodStrikes = 0;
   }
 
+  async #flushOverflowSegment(segment: TelegramStreamingTextSegment, includeCursor: boolean): Promise<void> {
+    if (segment.sealed || !this.#canStream()) {
+      return;
+    }
+
+    const snapshot = segment.sanitizer.snapshot();
+    const tailEscaped = snapshot.escapedHtml.slice(segment.committedEscapedLength);
+    const cursorSuffix = includeCursor ? this.#cursorHtml : "";
+    const chunks = splitOverflowTail(tailEscaped, TELEGRAM_MAX_TEXT_UTF16, cursorSuffix);
+
+    if (chunks.length === 0) {
+      return;
+    }
+
+    const finalChunk = chunks.at(-1);
+    if (finalChunk === undefined) {
+      return;
+    }
+
+    const previewChunks = chunks.slice(0, -1);
+    let liveMessageId = segment.messageId;
+
+    for (const [index, chunk] of previewChunks.entries()) {
+      let previewMessageId: number;
+      if (index === 0 && liveMessageId !== undefined) {
+        try {
+          await this.#input.editMessageText(liveMessageId, chunk, { format: "html" });
+        } catch (error) {
+          if (this.#handleFloodControl(error, segment, includeCursor)) {
+            return;
+          }
+          throw error;
+        }
+        previewMessageId = liveMessageId;
+        liveMessageId = undefined;
+      } else {
+        let message: TelegramSentMessage;
+        try {
+          message = await this.#input.sendMessage(chunk, { format: "html" });
+        } catch (error) {
+          if (this.#handleFloodControl(error, segment, includeCursor)) {
+            return;
+          }
+          throw error;
+        }
+        previewMessageId = message.message_id;
+      }
+
+      if (!this.#canStream() || segment.sealed) {
+        return;
+      }
+
+      segment.committedEscapedLength += chunk.length;
+      segment.committedMessageIds.push(previewMessageId);
+      if (segment.messageId === previewMessageId) {
+        segment.messageId = undefined;
+        segment.lastSentHtml = undefined;
+      }
+      this.#floodStrikes = 0;
+    }
+
+    const renderedFinalChunk = `${finalChunk}${cursorSuffix}`;
+    if (getUtf16Length(renderedFinalChunk) > TELEGRAM_MAX_TEXT_UTF16) {
+      this.#degrade(segment);
+      return;
+    }
+
+    if (liveMessageId === undefined) {
+      let message: TelegramSentMessage;
+      try {
+        message = await this.#input.sendMessage(renderedFinalChunk, { format: "html" });
+      } catch (error) {
+        if (this.#handleFloodControl(error, segment, includeCursor)) {
+          return;
+        }
+        throw error;
+      }
+      if (!this.#canStream() || segment.sealed) {
+        return;
+      }
+      segment.messageId = message.message_id;
+    } else if (segment.lastSentHtml !== renderedFinalChunk) {
+      try {
+        await this.#input.editMessageText(liveMessageId, renderedFinalChunk, { format: "html" });
+      } catch (error) {
+        if (this.#handleFloodControl(error, segment, includeCursor)) {
+          return;
+        }
+        throw error;
+      }
+      if (!this.#canStream() || segment.sealed) {
+        return;
+      }
+      segment.messageId = liveMessageId;
+    }
+
+    segment.lastSentHtml = renderedFinalChunk;
+    this.#floodStrikes = 0;
+  }
+
   async #editSegmentWithoutCursor(segment: TelegramStreamingTextSegment): Promise<void> {
     if (segment.messageId === undefined) {
       return;
     }
 
-    const rendered = segment.sanitizer.snapshot().escapedHtml;
+    const rendered = segment.sanitizer.snapshot().escapedHtml.slice(segment.committedEscapedLength);
 
     if (rendered.length === 0 || segment.lastSentHtml === rendered) {
       return;
     }
     if (getUtf16Length(rendered) > TELEGRAM_MAX_TEXT_UTF16) {
-      this.#degrade(segment);
+      await this.#flushOverflowSegment(segment, false);
       return;
     }
 
@@ -1032,7 +1137,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
   }
 
   async #cleanupFailedAttempt(segment: TelegramStreamingTextSegment): Promise<void> {
-    if (segment.cleanupStarted || segment.sealed || segment.messageId === undefined) {
+    if (segment.cleanupStarted || segment.sealed) {
       return;
     }
     segment.cleanupStarted = true;
@@ -1041,14 +1146,21 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
       return;
     }
 
-    try {
-      await this.#input.deleteMessage(segment.messageId);
-    } catch (deleteError) {
-      this.#captureError(deleteError);
+    const messageIds = [
+      ...segment.committedMessageIds,
+      ...(segment.messageId === undefined ? [] : [segment.messageId])
+    ];
+
+    for (const messageId of messageIds) {
       try {
-        await this.#input.editMessageText(segment.messageId, "Response interrupted. A complete reply will follow.", { format: "html" });
-      } catch (editError) {
-        this.#captureError(editError);
+        await this.#input.deleteMessage(messageId);
+      } catch (deleteError) {
+        this.#captureError(deleteError);
+        try {
+          await this.#input.editMessageText(messageId, "Response interrupted. A complete reply will follow.", { format: "html" });
+        } catch (editError) {
+          this.#captureError(editError);
+        }
       }
     }
   }
@@ -1149,9 +1261,105 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
 function createStreamingTextSegment(): TelegramStreamingTextSegment {
   return {
     sanitizer: createTelegramStreamTextSanitizer(),
+    committedEscapedLength: 0,
+    committedMessageIds: [],
     sealed: false,
     cleanupStarted: false
   };
+}
+
+function splitOverflowTail(text: string, maxUtf16Length: number, cursorSuffix: string): string[] {
+  if (text.length === 0) {
+    return [];
+  }
+
+  const cursorLength = getUtf16Length(cursorSuffix);
+  const finalMaxLength = Math.max(1, maxUtf16Length - cursorLength);
+  const chunks: string[] = [];
+  let remaining = text;
+
+  if (cursorLength === 0) {
+    return splitStreamingTelegramText(text, maxUtf16Length);
+  }
+
+  while (getUtf16Length(remaining) > maxUtf16Length) {
+    const splitIndex = findSafeStreamingHtmlSplit(remaining, maxUtf16Length);
+    chunks.push(remaining.slice(0, splitIndex));
+    remaining = remaining.slice(splitIndex);
+  }
+
+  if (getUtf16Length(`${remaining}${cursorSuffix}`) > maxUtf16Length) {
+    const splitTarget = Math.max(1, remaining.length - finalMaxLength);
+    const splitIndex = findSafeStreamingHtmlSplit(remaining, splitTarget);
+    chunks.push(remaining.slice(0, splitIndex));
+    remaining = remaining.slice(splitIndex);
+  }
+
+  if (remaining.length > 0) {
+    chunks.push(remaining);
+  }
+
+  return chunks;
+}
+
+function splitStreamingTelegramText(text: string, maxLength: number): string[] {
+  const chunks: string[] = [];
+  let remaining = text;
+
+  while (getUtf16Length(remaining) > maxLength) {
+    const splitIndex = findSafeStreamingHtmlSplit(remaining, maxLength);
+    chunks.push(remaining.slice(0, splitIndex));
+    remaining = remaining.slice(splitIndex);
+  }
+
+  if (remaining.length > 0) {
+    chunks.push(remaining);
+  }
+
+  return chunks;
+}
+
+function findSafeStreamingHtmlSplit(text: string, targetIndex: number): number {
+  const boundedTarget = Math.max(1, Math.min(targetIndex, text.length));
+  const newlineIndex = text.lastIndexOf("\n", boundedTarget - 1);
+  if (newlineIndex >= 0) {
+    return newlineIndex + 1;
+  }
+
+  const spaceIndex = text.lastIndexOf(" ", boundedTarget - 1);
+  if (spaceIndex >= 0) {
+    return spaceIndex + 1;
+  }
+
+  return avoidHtmlEntitySplit(text, avoidSurrogateSplit(text, boundedTarget));
+}
+
+function avoidHtmlEntitySplit(text: string, index: number): number {
+  const entityStart = text.lastIndexOf("&", index - 1);
+  if (entityStart < 0) {
+    return index;
+  }
+
+  const entityEnd = text.indexOf(";", entityStart + 1);
+  if (entityEnd >= index && entityEnd - entityStart <= 10) {
+    return Math.max(1, avoidSurrogateSplit(text, entityStart));
+  }
+
+  return index;
+}
+
+function avoidSurrogateSplit(text: string, index: number): number {
+  if (index <= 0 || index >= text.length) {
+    return index;
+  }
+
+  const previous = text.charCodeAt(index - 1);
+  const current = text.charCodeAt(index);
+  if (previous >= 0xD800 && previous <= 0xDBFF && current >= 0xDC00 && current <= 0xDFFF) {
+    return index - 1;
+  }
+
+  return index;
 }
 
 export function updateToChannelMessage(update: TelegramUpdate, now: () => Date = () => new Date()): ChannelMessage | undefined {
