@@ -935,9 +935,10 @@ export function renderShortcutHintRail(vm: ShortcutHintRailViewModel, locale?: U
 }
 
 export function renderUserPromptRail(vm: UserPromptRailViewModel): string {
-  const width = 60;
-  const line = `+${"-".repeat(Math.max(0, width - 2))}+`;
-  return `> ${vm.text}\n${line}`;
+  return vm.text
+    .split(/\r\n|\r|\n/u)
+    .map((line, index) => `${index === 0 ? ">" : " "} ${line}`)
+    .join("\n");
 }
 
 export function renderActiveTurnSpinner(vm: ActiveTurnSpinnerViewModel, locale?: UiLocale): string {

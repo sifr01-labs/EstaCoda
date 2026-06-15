@@ -1798,22 +1798,18 @@ describe("StandardRenderer — prompt chrome rails", () => {
     }
   });
 
-  it("renders user prompt rail with Unicode bullet and horizontal rule", () => {
+  it("renders user prompt rail with Unicode marker", () => {
     const r = renderer("dark", fullCaps());
     const vm = buildUserPromptRailViewModel({ text: "Hello, world!" });
     const out = r.render(vm);
-    expect(out).toContain("\u25b8 Hello, world!");
-    expect(out).toContain(`+${"\u2500".repeat(118)}+`);
-    expect(out.split("\n")).toHaveLength(2);
+    expect(out).toBe("↳ Hello, world!");
   });
 
   it("renders user prompt rail with ASCII fallback when Unicode is disabled", () => {
     const r = renderer("dark", noUnicodeCaps());
     const vm = buildUserPromptRailViewModel({ text: "Hello, world!" });
     const out = r.render(vm);
-    expect(out).toContain("> Hello, world!");
-    expect(out).toContain(`+${"-".repeat(118)}+`);
-    expect(out.split("\n")).toHaveLength(2);
+    expect(out).toBe("> Hello, world!");
   });
 
   it("renders user prompt rail within narrow terminal width", () => {
@@ -1821,10 +1817,10 @@ describe("StandardRenderer — prompt chrome rails", () => {
     const vm = buildUserPromptRailViewModel({ text: "This is a very long user prompt that should be truncated to fit within the narrow terminal width of forty characters" });
     const out = r.render(vm);
     const lines = out.split("\n");
-    expect(lines).toHaveLength(2);
-    expect(lines[0]).toContain("\u25b8");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("↳");
     expect(lines[0].length).toBeLessThanOrEqual(40);
-    expect(lines[1]).toBe(`+${"\u2500".repeat(38)}+`);
+    expect(measureVisibleWidth(lines[0] ?? "")).toBeLessThanOrEqual(40);
   });
 
   it("produces no ANSI for user prompt rail in no-color mode", () => {
@@ -1832,7 +1828,14 @@ describe("StandardRenderer — prompt chrome rails", () => {
     const vm = buildUserPromptRailViewModel({ text: "Plain text" });
     const out = r.render(vm);
     assertNoAnsi(out);
-    expect(out).toContain("\u25b8 Plain text");
+    expect(out).toBe("↳ Plain text");
+  });
+
+  it("renders multiline user prompt rail with indented continuations", () => {
+    const r = renderer("dark", fullCaps());
+    const vm = buildUserPromptRailViewModel({ text: "line one\nline two" });
+    const out = r.render(vm);
+    expect(out).toBe("↳ line one\n  line two");
   });
 
   it("renders active turn spinner with brand eye and localized label", () => {

@@ -1272,10 +1272,10 @@ describe("PlainRenderer — prompt chrome rails", () => {
     expect(shortcuts).toContain(isolateRtl(`${isolateLtr("/help")} · ${isolateLtr("/tools")} · ${isolateLtr("/model")} · ${isolateLtr("/status")} · ${isolateLtr("Ctrl+C")} خروج`));
   });
 
-  it("renders user prompt rail with ASCII bullet and horizontal rule", () => {
+  it("renders user prompt rail with ASCII marker", () => {
     const vm = buildUserPromptRailViewModel({ text: "Hello, world!" });
     const out = renderUserPromptRail(vm);
-    expect(out).toBe("> Hello, world!\n" + `+${"-".repeat(58)}+`);
+    expect(out).toBe("> Hello, world!");
     assertNoAnsi(out);
     assertAsciiSafe(out);
   });
@@ -1283,7 +1283,15 @@ describe("PlainRenderer — prompt chrome rails", () => {
   it("dispatches user prompt rail through renderPlain", () => {
     const vm = buildUserPromptRailViewModel({ text: "Plain dispatch" });
     const out = renderPlain(vm);
-    expect(out).toBe("> Plain dispatch\n" + `+${"-".repeat(58)}+`);
+    expect(out).toBe("> Plain dispatch");
+    assertNoAnsi(out);
+    assertAsciiSafe(out);
+  });
+
+  it("renders multiline user prompt rail with indented continuations", () => {
+    const vm = buildUserPromptRailViewModel({ text: "line one\nline two" });
+    const out = renderUserPromptRail(vm);
+    expect(out).toBe("> line one\n  line two");
     assertNoAnsi(out);
     assertAsciiSafe(out);
   });

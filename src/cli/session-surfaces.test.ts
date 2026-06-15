@@ -681,10 +681,9 @@ describe("Session surfaces — user prompt rail", () => {
     expect(slashOutput).toContain("Commands");
     expect(slashOutput).toContain("/exit");
 
-    // User prompt rail renders as bullet + rule even when text starts with /
+    // User prompt rail rendering is independent of slash-menu command routing.
     const railOutput = renderer.render(userPromptRail);
-    expect(railOutput).toContain("\u25b8 /help");
-    expect(railOutput).toContain("\u2500");
+    expect(railOutput).toBe("↳ /help");
   });
 
   it("plain renderer produces no ANSI for user prompt rail", () => {
@@ -692,7 +691,6 @@ describe("Session surfaces — user prompt rail", () => {
     const vm = buildUserPromptRailViewModel({ text: "Hello" });
     const output = renderer.render(vm);
     expect(output).not.toMatch(/\x1b\[/);
-    expect(output).toContain("> Hello");
-    expect(output).toContain(`+${"-".repeat(58)}+`);
+    expect(output).toBe("> Hello");
   });
 });

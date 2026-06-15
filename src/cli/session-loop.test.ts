@@ -789,7 +789,7 @@ describe("runSessionLoop — user prompt rail behavior", () => {
 
     const rendered = outputChunks.join("");
     expect(rendered).toContain("> hello");
-    expect(rendered).toContain("+----------------------------------------------------------+");
+    expect(rendered).not.toContain("+----------------------------------------------------------+");
   });
 
   it("does not render a user prompt rail for slash commands", async () => {
@@ -1217,7 +1217,7 @@ describe("runSessionLoop — active turn spinner", () => {
     });
 
     const rendered = outputChunks.join("");
-    const userRailIndex = rendered.indexOf("▸ hello");
+    const userRailIndex = rendered.indexOf("↳ hello");
     const echoClearIndex = rendered.lastIndexOf("\x1b[1A\x1b[2K\r", userRailIndex);
     expect(echoClearIndex).toBeGreaterThan(-1);
     expect(echoClearIndex).toBeLessThan(userRailIndex);
@@ -1255,7 +1255,7 @@ describe("runSessionLoop — active turn spinner", () => {
     });
 
     const rendered = outputChunks.join("");
-    const userRailIndex = rendered.indexOf("▸ this is a delib...");
+    const userRailIndex = rendered.indexOf("↳ this is a delib...");
     const beforeUserRail = rendered.slice(0, userRailIndex);
     const chromeClearIndex = beforeUserRail.search(/\x1b\[\d+A\x1b\[2K/u);
     const echoClearIndex = rendered.lastIndexOf("\x1b[1A\x1b[2K\x1b[1A\x1b[2K\r", userRailIndex);
@@ -1297,7 +1297,7 @@ describe("runSessionLoop — active turn spinner", () => {
     });
 
     const rendered = outputChunks.join("");
-    const userRailIndex = rendered.indexOf("▸ x");
+    const userRailIndex = rendered.indexOf("↳ x");
     const echoClearIndex = rendered.lastIndexOf("\x1b[1A\x1b[2K\x1b[1A\x1b[2K\r", userRailIndex);
     expect(echoClearIndex).toBeGreaterThan(-1);
     expect(echoClearIndex).toBeLessThan(userRailIndex);
@@ -1335,10 +1335,10 @@ describe("runSessionLoop — active turn spinner", () => {
     });
 
     const rendered = stripAnsi(outputChunks.join(""));
-    expect(rendered).toContain("▸ hello\n+──────────────────────────────────────────────────────────────────────────────+");
+    expect(rendered).toContain("↳ hello");
     expect(rendered).toContain("mock-model");
     expect(rendered).toContain("contemplating");
-    expect(rendered).not.toContain("────────────────────────────────────────────────────────────────────────────────\n▸ hello\n────────────────────────────────────────────────────────────────────────────────");
+    expect(rendered).not.toContain("────────────────────────────────────────────────────────────────────────────────\n↳ hello\n────────────────────────────────────────────────────────────────────────────────");
   });
 
   it("brokers tool output above the redrawn bottom chrome", async () => {
@@ -1379,7 +1379,7 @@ describe("runSessionLoop — active turn spinner", () => {
     const redrawnChromeIndex = rendered.indexOf("mock-model", toolIndex);
     expect(toolIndex).toBeGreaterThan(-1);
     expect(redrawnChromeIndex).toBeGreaterThan(toolIndex);
-    expect(rendered.slice(toolIndex)).not.toContain("────────────────────────────────────────────────────────────────────────────────\n▸ hello\n────────────────────────────────────────────────────────────────────────────────");
+    expect(rendered.slice(toolIndex)).not.toContain("────────────────────────────────────────────────────────────────────────────────\n↳ hello\n────────────────────────────────────────────────────────────────────────────────");
   });
 
   it("routes bottom-chrome tool activity through live slots and flushes durable results before the response", async () => {
@@ -1545,7 +1545,7 @@ describe("runSessionLoop — active turn spinner", () => {
     const toolOffset = providerSpinnerChunk.indexOf("browser.status");
     const spinnerOffset = providerSpinnerChunk.indexOf("scribbling");
     const modelOffset = providerSpinnerChunk.indexOf("mock-model");
-    const promptOffset = providerSpinnerChunk.indexOf("▸ hello");
+    const promptOffset = providerSpinnerChunk.indexOf("↳ hello");
 
     expect(providerSpinnerChunkIndex).toBeGreaterThan(-1);
     expect(toolOffset).toBeGreaterThan(-1);
@@ -3950,10 +3950,10 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(rendered.slice(permissionIndex)).not.toContain("contemplating");
     const renderedPlain = stripAnsi(rendered);
     const plainPermissionIndex = renderedPlain.indexOf("Permission required");
-    const submittedRailIndex = renderedPlain.indexOf("▸ write file");
+    const submittedRailIndex = renderedPlain.indexOf("↳ write file");
     expect(submittedRailIndex).toBeGreaterThan(-1);
     expect(submittedRailIndex).toBeLessThan(plainPermissionIndex);
-    expect(renderedPlain.slice(plainPermissionIndex)).not.toContain("▸ write file");
+    expect(renderedPlain.slice(plainPermissionIndex)).not.toContain("↳ write file");
   });
 
   it("renders image setup secret flow above redrawn bottom chrome", async () => {
@@ -4090,12 +4090,12 @@ describe("runSessionLoop — active turn spinner", () => {
     const rendered = stripAnsi(outputChunks.join(""));
     const setupIndex = rendered.indexOf("Setup required");
     const resumedIndex = rendered.indexOf("Image setup verified");
-    const submittedRailIndex = rendered.indexOf("▸ make image");
+    const submittedRailIndex = rendered.indexOf("↳ make image");
     expect(setupIndex).toBeGreaterThan(-1);
     expect(submittedRailIndex).toBeGreaterThan(-1);
     expect(submittedRailIndex).toBeLessThan(setupIndex);
     expect(resumedIndex).toBeGreaterThan(setupIndex);
-    expect(rendered.slice(setupIndex)).not.toContain("▸ make image");
+    expect(rendered.slice(setupIndex)).not.toContain("↳ make image");
     expect(executeToolCalls).toEqual(["config.image.setup", "image.generate"]);
     expect(rendered).toContain("generated image");
     expect(secretPromptOptions).toHaveLength(1);
@@ -4160,10 +4160,10 @@ describe("runSessionLoop — active turn spinner", () => {
 
     const rendered = stripAnsi(outputChunks.join(""));
     const cancelIndex = rendered.indexOf("Cancelling current turn.");
-    const secondPromptIndex = rendered.indexOf("▸ second", cancelIndex);
+    const secondPromptIndex = rendered.indexOf("↳ second", cancelIndex);
     expect(cancelIndex).toBeGreaterThan(-1);
     expect(secondPromptIndex).toBeGreaterThan(cancelIndex);
-    expect(rendered.slice(cancelIndex, secondPromptIndex)).not.toContain("▸ first");
+    expect(rendered.slice(cancelIndex, secondPromptIndex)).not.toContain("↳ first");
     expect(rendered.slice(cancelIndex, secondPromptIndex)).not.toContain("scribbling");
     expect(rendered).toContain("Second response");
   });
