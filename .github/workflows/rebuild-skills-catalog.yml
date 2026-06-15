@@ -1,0 +1,67 @@
+name: Rebuild skills catalog
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "skills/**"
+      - "registries/skills.sources.json"
+      - "scripts/build-skills-catalog.ts"
+      - "src/skills/catalog-builder.ts"
+      - "src/contracts/skill.ts"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/rebuild-skills-catalog.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rebuild-skills-catalog-main
+  cancel-in-progress: true
+
+jobs:
+  rebuild-skills-catalog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.18.0"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Rebuild skills catalog
+        run: pnpm run skills:catalog
+
+      - name: Validate website build
+        run: pnpm --dir website run build
+
+      - name: Check generated changes
+        id: diff
+        run: |
+          git status --short
+          if [ -n "$(git status --short website/static/api/skills.json website/static/api/skills-meta.json)" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit regenerated skills catalog
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add website/static/api/skills.json website/static/api/skills-meta.json
+          git commit -m "chore(skills): rebuild generated catalog"
+          git push
