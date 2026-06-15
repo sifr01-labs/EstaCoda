@@ -2223,7 +2223,6 @@ async function local(options: CliOptions, args: string[]): Promise<CliCommandRes
       exitCode: 0,
       output: [
         "EstaCoda local models",
-        "Hermes-aligned path: local Ollama and custom local servers use an OpenAI-compatible endpoint.",
         "  estacoda local setup",
         "  estacoda local setup --base-url http://localhost:11434/v1 --model qwen2.5-coder:32b",
         "  estacoda local status",
@@ -2278,7 +2277,6 @@ async function voice(options: CliOptions, args: string[]): Promise<CliCommandRes
       exitCode: 0,
       output: [
         "EstaCoda voice",
-        "Hermes-aligned voice stack: TTS output plus STT transcription. Only ready providers are exposed to runtime tools.",
         "  estacoda voice status",
         "  estacoda voice mode [on|off|tts|status]",
         "  estacoda voice setup --tts-provider openai --tts-model gpt-4o-mini-tts --tts-voice alloy --tts-api-key-env VOICE_TOOLS_OPENAI_KEY",
@@ -2417,7 +2415,6 @@ async function image(options: CliOptions, args: string[]): Promise<CliCommandRes
       exitCode: 0,
       output: [
         "EstaCoda image generation",
-        "Hermes-aligned text-to-image stack. In normal use, describe the image and EstaCoda will call image.generate automatically.",
         "  estacoda image status",
         "  estacoda image models --provider byteplus",
         "  estacoda image verify",
@@ -3820,12 +3817,12 @@ function renderLocalDiscovery(discovery: OpenAIModelProbe): string {
 
 function renderLocalContextGuidance(model: ModelProfile | undefined): string {
   if (model === undefined) {
-    return "Context guidance: set local models to at least 64K tokens when possible; Hermes recommends this for long agent workflows.";
+    return "Context guidance: set local models to at least 64K tokens when possible for long agent workflows.";
   }
 
   return model.contextWindowTokens >= 64_000
     ? `Context guidance: ${model.contextWindowTokens} tokens looks suitable for long agent workflows.`
-    : `Context guidance: ${model.contextWindowTokens} tokens is below Hermes' 64K recommendation; increase Ollama/llama.cpp context if possible.`;
+    : `Context guidance: ${model.contextWindowTokens} tokens is below the 64K recommendation for long agent workflows; increase Ollama/llama.cpp context if possible.`;
 }
 
 function parseSetupArgs(args: string[]): Partial<ProviderSetupInput> {

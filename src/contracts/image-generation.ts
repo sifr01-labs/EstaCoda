@@ -18,7 +18,7 @@ export const IMAGE_MODEL_OPTIONS: Record<ImageGenerationProvider, readonly Image
       id: DEFAULT_FAL_IMAGE_MODEL,
       label: "Flux 2 Klein 9B",
       aliases: ["flux-2", "klein", "fal-default"],
-      description: "Hermes-aligned FAL default for text-to-image generation."
+      description: "Default FAL model for text-to-image generation."
     }
   ],
   byteplus: [
@@ -64,4 +64,3 @@ export function resolveImageModel(provider: ImageGenerationProvider, value: stri
   );
   return option?.id ?? value;
 }
-
