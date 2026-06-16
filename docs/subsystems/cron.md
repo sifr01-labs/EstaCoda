@@ -10,7 +10,7 @@ description: "Scheduled tasks, cron runner, job storage, execution history, and 
 | File | Lines | Role |
 |------|-------|------|
 | `src/cron/cron-store.ts` | ~340 | Persistent job storage |
-| `src/cron/cron-tools.ts` | ~280 | Agent-facing `cronjob` tool |
+| `src/tools/cron-tools.ts` | ~160 | Agent-facing `cronjob` tool |
 | `src/cron/cron-runner.ts` | ~280 | Scheduler tick execution |
 | `src/cron/cron-command.ts` | ~200 | CLI operator commands |
 | `src/cron/cron-execution-store.ts` | ~150 | SQLite execution history |
@@ -18,8 +18,10 @@ description: "Scheduled tasks, cron runner, job storage, execution history, and 
 
 ## Cron Store
 
-- Persistent storage at `~/.estacoda/profiles/<id>/cron/jobs.json`
-- Local cron outputs are written under `~/.estacoda/profiles/<id>/cron/`.
+- Persistent storage depends on the constructed `CronStore` / runtime path.
+- Profile-wired runtimes use profile cron storage such as `~/.estacoda/profiles/<id>/cron/jobs.json`.
+- Default/manual paths can still use top-level cron storage such as `~/.estacoda/cron/jobs.json`.
+- Local cron outputs follow the store output root, for example profile `~/.estacoda/profiles/<id>/cron/output` or default `~/.estacoda/cron/output`.
 - Atomic writes
 - Schedule parsing: relative delays, intervals, cron expressions, ISO timestamps
 - Prompt safety scanning
@@ -29,8 +31,8 @@ description: "Scheduled tasks, cron runner, job storage, execution history, and 
 ## Cron Execution Store
 
 - SQLite table `cron_executions` in `~/.estacoda/sessions.sqlite`
-- Execution rows are global DB state and carry session/profile context through the sessions they create.
-- Records: job ID, session ID, trajectory ID, scheduled/start/completed timestamps, status, output summary, delivery results, failure class, failure message
+- Execution rows are global DB state. The schema can store session and trajectory IDs, but current cron runner completion does not wire those IDs consistently from every execution path.
+- Records: job ID, optional session ID, optional trajectory ID, scheduled/start/completed timestamps, status, output summary, delivery results, failure class, failure message
 - Queryable by job ID or across all jobs
 - Used by `estacoda cron history` and `estacoda cron show`
 
@@ -57,12 +59,12 @@ The agent can manage scheduled tasks via the `cronjob` tool:
 - Per-job execution:
   - Acquires job-level lock.
   - Advances `nextRunAt` before execution (prevents duplicate runs on slow jobs).
-  - Creates a fresh session (`cron-${job.id}-${randomUUID()}`).
+  - Gateway cron creates a fresh runtime session (`cron-${job.id}-${randomUUID()}`); manual CLI tick paths currently reuse the caller runtime.
   - Runs script or prompt.
   - Records execution in `CronExecutionStore`.
 - PID/stale-lock recovery: on startup, checks for stale locks from crashed processes.
-- Recursion guard: `disableCronTools: true` in cron runtime prevents cron jobs from scheduling more cron jobs.
-- Delivery: uses `DeliveryRouter` for all channel delivery.
+- Recursion guard: gateway cron runtimes use `disableCronTools: true` to prevent cron jobs from scheduling more cron jobs.
+- Delivery: gateway cron uses `DeliveryRouter` for channel delivery; local output files are written by `CronStore`.
 
 ## Failure Classification
 

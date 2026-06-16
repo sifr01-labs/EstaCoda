@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { CronStore } from "./cron-store.js";
 import { CronExecutionStore } from "./cron-execution-store.js";
 import { createFileCronJobLock } from "./cron-lock.js";
-import { createRuntimeCronRunner, tickCron, type CronRunner } from "./cron-runner.js";
+import { buildCronPrompt, createRuntimeCronRunner, tickCron, type CronRunner } from "./cron-runner.js";
 import type { CronJob } from "./cron-store.js";
 import { HookRegistry } from "../gateway/hook-registry.js";
 import type { SQLiteDatabase } from "../storage/sqlite.js";
@@ -62,6 +62,16 @@ function fakeRuntime(text: string) {
 }
 
 describe("createRuntimeCronRunner", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "estacoda-cron-runtime-test-"));
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
   it("marks empty runtime responses as failures without attempting delivery", async () => {
     const job = fakeCronJob();
     const runtime = fakeRuntime("");
@@ -117,6 +127,43 @@ describe("createRuntimeCronRunner", () => {
     expect(result.deliveryResults.size).toBe(0);
     expect(result.output).toContain("[SILENT] Cron completed.");
     expect(deliver).not.toHaveBeenCalled();
+  });
+
+  it("injects script result into agent prompt and calls the runtime once", async () => {
+    const scriptPath = join(tmpDir, "status.sh");
+    await writeFile(scriptPath, "printf 'script-ok\\n'", "utf8");
+    const job = { ...fakeCronJob(), script: "status.sh" };
+    const runtime = fakeRuntime("Agent used script output.");
+    const runtimeFactory = vi.fn(async () => runtime as never);
+    const runner = createRuntimeCronRunner({
+      runtimeFactory,
+      workspaceRoot: tmpDir,
+      wrapResponse: false
+    });
+
+    const result = await runner.runJob(job, "exec-script");
+
+    expect(result.ok).toBe(true);
+    expect(runtimeFactory).toHaveBeenCalledTimes(1);
+    expect(runtime.handle).toHaveBeenCalledTimes(1);
+    expect(runtime.handle).toHaveBeenCalledWith(expect.objectContaining({
+      text: expect.stringContaining("Cron script result:")
+    }));
+    expect(runtime.handle).toHaveBeenCalledWith(expect.objectContaining({
+      text: expect.stringContaining("script-ok")
+    }));
+  });
+
+  it("keeps attached skills as labels only in the current cron prompt", () => {
+    const prompt = buildCronPrompt({
+      ...fakeCronJob(),
+      skills: ["daily-reporting"],
+      prompt: "Write the report."
+    });
+
+    expect(prompt).toContain("Attached skills: daily-reporting");
+    expect(prompt).not.toContain("Follow these skill instructions");
+    expect(prompt).not.toContain("## Attached Skill");
   });
 });
 
@@ -185,6 +232,38 @@ describe("tickCron with execution store and job lock", () => {
     expect(history.length).toBe(1);
     expect(history[0].status).toBe("success");
     expect(history[0].jobId).toBe(results[0].job.id);
+  });
+
+  it("currently completes runner-backed executions without session or trajectory linkage", async () => {
+    await store.create({
+      name: "Evidence baseline job",
+      schedule: "* * * * *",
+      prompt: "hello",
+      delivery: "local"
+    });
+    const runtime = {
+      ...fakeRuntime("done"),
+      sessionId: "cron-session-baseline",
+      trajectoryId: "trajectory-baseline"
+    };
+    const runner = createRuntimeCronRunner({
+      runtimeFactory: vi.fn(async () => runtime as never),
+      wrapResponse: false
+    });
+
+    const now = new Date("2030-01-01T00:00:00Z");
+    await tickCron({
+      store,
+      runner,
+      executionStore,
+      jobLock: createFileCronJobLock({ lockDir, staleTimeoutMs: 60_000 }),
+      now
+    });
+
+    const [record] = await executionStore.list();
+    expect(record?.status).toBe("success");
+    expect(record?.sessionId).toBeUndefined();
+    expect(record?.trajectoryId).toBeUndefined();
   });
 
   it("records execution history for a failed job", async () => {

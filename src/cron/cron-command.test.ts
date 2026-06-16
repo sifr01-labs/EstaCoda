@@ -6,6 +6,7 @@ import { runCronCommand } from "./cron-command.js";
 import { CronStore } from "./cron-store.js";
 import { CronExecutionStore } from "./cron-execution-store.js";
 import { openDefaultSQLiteDatabase } from "../storage/factory.js";
+import { createCronTools } from "../tools/cron-tools.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-cron-cmd-test-"));
@@ -67,6 +68,34 @@ describe("runCronCommand", () => {
     const result = await runCronCommand({ args: ["add", "--schedule", "*/5 * * * *"], store, executionStore });
     expect(result.ok).toBe(false);
     expect(result.output).toContain("cron add --schedule");
+  });
+
+  it("keeps cronjob create requiring prompt and schedule in agent mode", async () => {
+    const [tool] = createCronTools({ store });
+    expect(tool).toBeDefined();
+
+    await expect(tool!.run({ action: "create", prompt: "hello" })).resolves.toMatchObject({
+      ok: false,
+      content: "cronjob create requires prompt and schedule."
+    });
+    await expect(tool!.run({ action: "create", schedule: "1h" })).resolves.toMatchObject({
+      ok: false,
+      content: "cronjob create requires prompt and schedule."
+    });
+  });
+
+  it("delegates cron tick to the supplied tick callback", async () => {
+    const result = await runCronCommand({
+      args: ["tick"],
+      store,
+      executionStore,
+      tick: async () => "Cron tick complete. No due jobs."
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      output: "Cron tick complete. No due jobs."
+    });
   });
 
   it("lists jobs", async () => {

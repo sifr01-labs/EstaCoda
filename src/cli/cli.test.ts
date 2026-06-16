@@ -4,6 +4,9 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runCliCommand } from "./cli.js";
 import type { Prompt } from "./readline-prompt.js";
+import { CronStore } from "../cron/cron-store.js";
+import { InMemorySessionDB } from "../session/in-memory-session-db.js";
+import type { Runtime } from "../runtime/create-runtime.js";
 
 const readlineMock = vi.hoisted(() => ({
   prompt: vi.fn(),
@@ -80,6 +83,47 @@ describe("runCliCommand update dispatch", () => {
       gatewayMode: true,
       gatewayRestart: "never",
     }));
+  });
+});
+
+describe("runCliCommand cron dispatch", () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "estacoda-cli-cron-"));
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("currently reuses options.runtime for top-level estacoda cron tick", async () => {
+    const store = new CronStore({ homeDir: tempDir });
+    const job = await store.create({
+      name: "CLI tick baseline",
+      schedule: "* * * * *",
+      prompt: "run me"
+    });
+    await store.requestRun(job.id);
+    const handle = vi.fn(async () => ({ text: "cron reused runtime" }));
+    const runtime = {
+      handle,
+      dispose: vi.fn(async () => undefined),
+      sessionDb: new InMemorySessionDB(),
+      sessionId: "interactive-runtime"
+    } as unknown as Runtime;
+
+    const result = await runCliCommand({
+      argv: ["cron", "tick"],
+      workspaceRoot: tempDir,
+      homeDir: tempDir,
+      runtime
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("Cron tick complete. Ran 1 job(s).");
+    expect(handle).toHaveBeenCalledTimes(1);
   });
 });
 

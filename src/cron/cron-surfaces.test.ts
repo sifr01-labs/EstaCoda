@@ -204,6 +204,22 @@ describe("Cron surfaces — job detail", () => {
   }
 });
 
+describe("Cron surfaces — current capability labels", () => {
+  it("renders attached skills as labels without planned advanced controls", () => {
+    const output = renderPlain(buildCronJobDetailViewModel({
+      job: fakeCronJob({ skills: ["daily-reporting"] }),
+      executions: [],
+    }));
+
+    expect(output).toContain("Skills: daily-reporting");
+    expect(output).not.toContain("no-agent");
+    expect(output).not.toContain("contextFrom");
+    expect(output).not.toContain("Model override");
+    expect(output).not.toContain("Enabled toolsets");
+    expect(output).not.toContain("Workdir");
+  });
+});
+
 describe("Cron surfaces — execution history", () => {
   const vm = buildCronExecutionHistoryViewModel({
     executions: [

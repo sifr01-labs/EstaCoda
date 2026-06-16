@@ -17,6 +17,7 @@ import { renderPlain } from "../ui/renderers/plain-renderer.js";
 import { stripAnsi } from "../ui/renderers/layout.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { writeCliVoiceMode } from "./voice-mode.js";
+import { CronStore } from "../cron/cron-store.js";
 
 function interactiveCaps(overrides: Partial<TerminalCapabilities> = {}): TerminalCapabilities {
   return {
@@ -947,6 +948,60 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     const rendered = outputChunks.join("");
     expect(rendered).not.toContain("Show command help");
     expect(rendered).not.toContain("Commands");
+  });
+});
+
+describe("handleSlashCommand cron", () => {
+  it("currently reuses the interactive runtime for /cron tick", async () => {
+    const tmpHome = await mkdtemp(join(tmpdir(), "estacoda-session-cron-"));
+    const oldHome = process.env.HOME;
+    const oldEstacodaHome = process.env.ESTACODA_HOME;
+    try {
+      process.env.HOME = tmpHome;
+      delete process.env.ESTACODA_HOME;
+      const store = new CronStore({ homeDir: tmpHome });
+      const job = await store.create({
+        name: "Interactive tick baseline",
+        schedule: "* * * * *",
+        prompt: "run me"
+      });
+      await store.requestRun(job.id);
+      const handle = vi.fn(async () => ({
+        ...mockResponse(),
+        text: "cron reused interactive runtime"
+      }));
+      const runtime = createMockRuntime({ handle });
+      const outputChunks: string[] = [];
+
+      const handled = await handleSlashCommand({
+        text: "/cron tick",
+        runtime,
+        output: {
+          write(chunk: string | Uint8Array): boolean {
+            outputChunks.push(String(chunk));
+            return true;
+          }
+        } as NodeJS.WritableStream,
+        renderer: { render: renderPlain },
+        workspaceRoot: tmpHome
+      });
+
+      expect(handled).toBe(false);
+      expect(handle).toHaveBeenCalledTimes(1);
+      expect(outputChunks.join("")).toContain("Cron tick complete. Ran 1 job(s).");
+    } finally {
+      if (oldHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = oldHome;
+      }
+      if (oldEstacodaHome === undefined) {
+        delete process.env.ESTACODA_HOME;
+      } else {
+        process.env.ESTACODA_HOME = oldEstacodaHome;
+      }
+      await rm(tmpHome, { recursive: true, force: true });
+    }
   });
 });
 
