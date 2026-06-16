@@ -1,7 +1,7 @@
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { LocalMemoryProvider } from "./local-memory-provider.js";
 import { MemoryPromptContextBuilder } from "./memory-prompt-context-builder.js";
 import { MemoryPromotionStore } from "./memory-promotion-store.js";
@@ -284,6 +284,65 @@ describe("LocalMemoryProvider", () => {
     })).rejects.toThrow(MemoryPersistenceDriftError);
 
     expect(await readFile(userPath, "utf8")).toBe("- external edit stays on disk");
+    expect(store.read("USER.md")).toBe("- Prefer concise replies.");
+    expect(await promotionStore.list()).toEqual([
+      expect.objectContaining({
+        id: "pref-existing",
+        content: "Prefer concise replies.",
+        active: true
+      })
+    ]);
+    const promotionsJson = await readFile(promotionsPath, "utf8");
+    expect(promotionsJson).toContain("pref-existing");
+    expect(promotionsJson).not.toContain("pref-replacement");
+  });
+
+  it("rolls back promotion metadata when persisted markdown write fails", async () => {
+    const root = await makeTempDir();
+    const userPath = join(root, "USER.md");
+    const promotionsPath = join(root, "promotions.json");
+    await writeFile(userPath, "- Prefer concise replies.", "utf8");
+    const persistence = new MemoryPersistenceService();
+    await persistence.readFile({
+      path: userPath,
+      kind: "USER.md"
+    });
+    const store = new MemoryStore();
+    store.write("USER.md", "- Prefer concise replies.");
+    const promotionStore = new MemoryPromotionStore({
+      path: promotionsPath,
+      persistence
+    });
+    await promotionStore.applyUserPreference({
+      id: "pref-existing",
+      content: "Prefer concise replies.",
+      confidence: 0.8,
+      occurrences: 1,
+      source: "test",
+      sourceSessionIds: []
+    });
+    const originalWriteFile = persistence.writeFile.bind(persistence);
+    vi.spyOn(persistence, "writeFile").mockImplementation(async (options) => {
+      if (options.kind === "USER.md") {
+        throw new Error("simulated markdown write failure");
+      }
+      return await originalWriteFile(options);
+    });
+    const provider = new LocalMemoryProvider({
+      store,
+      saveRoot: root,
+      promotionStore,
+      persistence
+    });
+
+    await expect(provider.conclude({
+      id: "pref-replacement",
+      kind: "user-preference",
+      content: "Prefer detailed replies.",
+      confidence: 0.9
+    })).rejects.toThrow("simulated markdown write failure");
+
+    expect(await readFile(userPath, "utf8")).toBe("- Prefer concise replies.");
     expect(store.read("USER.md")).toBe("- Prefer concise replies.");
     expect(await promotionStore.list()).toEqual([
       expect.objectContaining({

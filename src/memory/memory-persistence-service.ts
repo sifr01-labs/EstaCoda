@@ -1,6 +1,6 @@
-import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { createHash } from "node:crypto";
-import { dirname } from "node:path";
+import { copyFile, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { createHash, randomBytes } from "node:crypto";
+import { basename, dirname, join } from "node:path";
 import type { MemoryFileKind } from "../contracts/memory.js";
 
 export type MemoryPersistenceKind = MemoryFileKind | "promotions.json";
@@ -90,8 +90,7 @@ export class MemoryPersistenceService {
       await copyFile(options.path, backupPath);
     }
 
-    await mkdir(dirname(options.path), { recursive: true });
-    await writeFile(options.path, options.content, "utf8");
+    await atomicWriteFile(options.path, options.content);
     const written = await readCurrentSnapshot(options.path, options.kind);
     this.#snapshots.set(options.path, written.snapshot);
     return backupPath === undefined
@@ -101,6 +100,25 @@ export class MemoryPersistenceService {
 
   snapshotFor(path: string): MemoryDiskSnapshot | undefined {
     return this.#snapshots.get(path);
+  }
+}
+
+async function atomicWriteFile(path: string, content: string): Promise<void> {
+  const directory = dirname(path);
+  await mkdir(directory, { recursive: true });
+  const tempPath = join(
+    directory,
+    `.${basename(path)}.${process.pid}.${Date.now()}.${randomBytes(8).toString("hex")}.tmp`
+  );
+  let renamed = false;
+  try {
+    await writeFile(tempPath, content, "utf8");
+    await rename(tempPath, path);
+    renamed = true;
+  } finally {
+    if (!renamed) {
+      await unlink(tempPath).catch(() => undefined);
+    }
   }
 }
 
