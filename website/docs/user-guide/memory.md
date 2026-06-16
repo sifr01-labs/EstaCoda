@@ -1,273 +1,380 @@
 ---
 title: Memory
-description: Memory files, promotion, curation, and compaction boundaries for v0.1.0.
+description: How EstaCoda stores, promotes, inspects, and repairs durable memory.
 sidebar_position: 7
 ---
 
 # Memory
 
-EstaCoda uses bounded, curated memory files that persist across sessions. Memory is durable execution context, but it is subordinate to system instructions, developer instructions, repo context, `AGENTS.md`, security policy, and the current user request.
+EstaCoda memory is durable context stored in files. It helps future sessions remember reviewed preferences, project facts, and operator-curated notes.
 
-This page explains what memory files exist, how they are populated, and where the boundaries are.
+Memory is not a hidden authority layer. System instructions, developer instructions, repo instructions, `AGENTS.md`, security policy, and the current user request still win.
+
+Use this page to understand what can be remembered, where it is stored, how promotion works, and how to inspect or repair it.
 
 ---
 
-## Memory Files
+## What Memory Is
 
-Memory lives in two scopes: profile-local and global shared.
+EstaCoda has several related stores. They are not interchangeable.
 
-### Profile-Local Memory
-
-`~/.estacoda/profiles/<id>/` contains:
-
-| File | Purpose | Char Budget |
+| Store | Where it lives | What it is for |
 |---|---|---|
-| `USER.md` | User preferences and communication style | 1,375 (~500 tokens) |
-| `SOUL.md` | Agent identity and personality | Configurable |
-| `MEMORY.md` | Facts, conventions, and lessons | 2,200 (~800 tokens) |
-| `promotions.json` | Promotion metadata | — |
+| Session history | Session database | Past turns and events. Used for transcripts, recall, and promotion evidence. |
+| Profile memory | `~/.estacoda/profiles/<id>/USER.md`, `MEMORY.md`, `SOUL.md` | Durable context for one profile. |
+| Project/workspace memory | Usually `MEMORY.md` plus repo context such as `AGENTS.md` | Project facts, conventions, and workflow notes. |
+| Shared memory | `~/.estacoda/memory/shared/` | Global snippets available across profiles. |
+| Promotion metadata | `~/.estacoda/profiles/<id>/promotions.json` | Tracks promoted facts, active/inactive state, source sessions, and confidence. |
 
-`AGENTS.md` is **not** a memory file. It is project context loaded from the workspace. It is never curated, compacted, promoted, or recalled as learned memory.
+`AGENTS.md` is not memory. It is workspace instruction context. It is not promoted, compacted, or edited by memory tools.
 
-Render order in the prompt:
+---
+
+## What Memory Is Not
+
+Memory does not:
+
+- learn broad semantic preferences from one sentence
+- promote assistant output, tool output, child-session output, resumes, or delegated text
+- let recalled history override security policy or the current user request
+- store secrets or prompt-injection-looking text
+- use a model to decide promotion eligibility, equivalence, or conflicts
+- automatically trust old session content as an instruction
+
+Session recall and external recall are reference context. They are labeled as untrusted historical context. Curated memory files are stronger than recall, but still below current instructions and safety policy.
+
+---
+
+## Profile Files
+
+Profile-local memory lives under:
+
+```text
+~/.estacoda/profiles/<id>/
+```
+
+Important files:
+
+| File | Purpose | Default budget |
+|---|---|---:|
+| `USER.md` | User preferences and communication style | 1,375 characters |
+| `MEMORY.md` | Project, workflow, and durable operational facts | 2,200 characters |
+| `SOUL.md` | Identity and safety guidance | Configurable |
+| `promotions.json` | Promotion metadata | No markdown budget |
+
+Shared memory lives under:
+
+```text
+~/.estacoda/memory/shared/
+```
+
+Prompt render order is:
 
 ```text
 memory/shared/ -> USER.md -> SOUL.md -> MEMORY.md
 ```
 
-### Global Shared Memory
-
-`~/.estacoda/memory/shared/` holds snippets available to all profiles. It is bounded by the renderer and loaded before profile-local memory.
-
 ---
 
-## Local Lexical Retrieval
+## How Promotion Works
 
-Local lexical memory retrieval is implemented as deterministic read/search over authoritative memory files. It is not semantic recall, vector search, session search, or a new memory authority layer.
+Promotion is deterministic. It runs after a turn and looks only at direct user input from the current turn plus matching historical root-session evidence.
 
-Implemented user/operator-facing surfaces:
+Promotion can create:
 
-| Surface | Purpose |
-|---|---|
-| `memory.read` | Read bounded local memory content by memory source/kind |
-| `memory.search` | Search local memory content lexically |
-| `estacoda memory index path` | Show the profile-state index path |
-| `estacoda memory index status` | Inspect local index path, health, and pending rebuild state |
-| `estacoda memory index rebuild` | Explicitly rebuild the local lexical memory index |
-| `estacoda memory search <query>` | Search local memory from the CLI |
-| `estacoda memory read <source>` | Read local memory from the CLI |
-
-The local lexical index is a rebuildable mirror stored under profile state:
-
-```text
-<profile-state-dir>/memory-index.sqlite
-```
-
-Deleting this SQLite file does not delete `USER.md`, `SOUL.md`, `MEMORY.md`, shared memory files, or `promotions.json`. Index status and rebuild commands are operator repair paths for the mirror. If the index is disabled, missing, or unavailable, `memory.read`, `memory.search`, and CLI read/search fall back to safe direct file read or substring search where possible while preserving protected-memory filtering.
-
-## Delegation outcome memory
-
-Delegation outcome memory is separate from child transcript recall and is disabled by default under `delegation.outcomeMemory.enabled`.
-
-When enabled, delegation records a bounded outcome observation: parent session id, child session id where available, role, depth, task index, batch id, status/reason, timestamp, provider token usage when available, and a bounded preview of the delegated task. The result summary is deterministic status metadata only, such as `completed`, `timeout`, `cancelled`, or `failed: provider-error`.
-
-It does not store raw child output, prompts, transcripts, tool arguments, file contents, diagnostic payloads, or credentials. Recording failures are non-fatal and do not change the delegation result. Child transcripts remain excluded from parent recall, session search, memory recall, and prompt packing by default.
-
-Authoritative source boundaries:
-
-- `USER.md`, `SOUL.md`, and `MEMORY.md` remain profile-local source files.
-- Shared memory files remain authoritative under global shared memory.
-- `promotions.json` remains authoritative for promotion metadata.
-- `AGENTS.md` is not memory and is never indexed as memory.
-- Shared memory may be mirrored for lexical retrieval, but the index must preserve its shared/global source boundary.
-
-Protected identity/safety memory remains protected. `SOUL.md` is indexed as protected for parity, status, and rebuild checks, but `memory.read`, `memory.search`, and CLI read/search exclude it unless `includeProtected` or `--include-protected` is explicit. Protected excerpts remain bounded. Semantic recall must never use protected identity/safety entries, and protected entries remain excluded from semantic-facing retrieval paths.
-
-`memory.read` and `memory.search` accept `maxChars` because they return memory content directly; the service bounds it internally. `memory.search` accepts bounded `maxResults`. `session_search` must not accept `maxChars`; its text-size caps remain system-controlled internally. Returned memory content is redacted, source-labeled, marked as local memory context, and is not a higher-priority instruction. Missing sources and empty results return structured diagnostics.
-
-CLI read supports:
-
-- `USER.md`
-- `MEMORY.md`
-- `SOUL.md` only with `--include-protected`
-- `shared` memory by key
-
-Operator recovery workflow:
-
-```bash
-estacoda memory index path
-estacoda memory index status
-# Stop the runtime before deleting the index file.
-rm <profile-state-dir>/memory-index.sqlite
-estacoda memory index status
-estacoda memory index rebuild
-estacoda memory index status
-```
-
-Missing index files report pending rebuild or empty diagnostics. Bounded startup backfill may recreate the file. Full rebuild is explicit through `estacoda memory index rebuild`, is idempotent, repopulates from authoritative memory files, and indexes `SOUL.md` as protected.
-
----
-
-## Trusted Learned Memory vs. Untrusted Recall
-
-Not all memory is treated the same way.
-
-**Trusted learned memory** — `USER.md`, `SOUL.md`, `MEMORY.md`, and shared memory. These are curated files the operator controls. They are injected as system context.
-
-**Untrusted historical context** — session recall, external recall, and semantic compression summaries. These are reference-only. They are labeled as historical and cannot override system instructions, `AGENTS.md`, security policy, local memory, or the current user request.
-
-Authority order:
-
-```text
-system/developer/repo/AGENTS/security/current user instructions > learned memory > reference-only recall/compression context
-```
-
----
-
-## Memory Write Safety
-
-Memory writes are not unconditional. The system checks for:
-
-- **Prompt-injection patterns** — blocked before write.
-- **Secret/API-key markers** — text that looks like credentials is rejected.
-- **Invisible/bidirectional controls** — malformed or suspicious control characters are sanitized or rejected.
-
-If a write fails the safety check, it is rejected and the file is not modified. Promotion overflow after an otherwise successful assistant response is non-fatal to the turn; a best-effort diagnostic is recorded without raw promoted text or secrets.
-
-Local memory writes also use drift-aware persistence. Before overwrite, the persistence path compares the current disk file against the snapshot loaded earlier. The snapshot includes path, memory kind, `mtimeMs`, size, and content hash. External edits fail closed by default, and drift refusal preserves the current disk file. `.bak.<timestamp>` backups are not created by default; they are created only when an operation policy explicitly enables them. Drift diagnostics do not expose raw memory content.
-
----
-
-## Promotion
-
-After each turn, `memory-promotion.ts` scans bounded session history for repeated patterns:
-
-| Pattern | Destination |
+| Promoted content | Destination |
 |---|---|
 | Repeated user preferences | `USER.md` |
 | Repeated project facts | `MEMORY.md` |
-| Skill outcomes | Memory store |
-| Manual conclusions | Memory store |
 
-Promotion handles contradictions (replacing outdated entries), strengthening (reinforcing existing entries), and forgetting (removing obsolete entries). If a markdown write fails after promotion metadata changes, `LocalMemoryProvider` rolls back both the markdown content and `promotions.json`.
+The runtime passes the original `input.text` to promotion. Resume-expanded text and runtime scaffolding are not promotion input.
 
-Promotion is **not** automatic self-healing. It is bounded, scanned, and fail-closed.
+Promotion requires:
 
----
+1. The current direct user input contains a supported promotion candidate.
+2. At least two matching prior root sessions contain the same deterministic candidate.
+3. The matching historical messages are user messages.
+4. The content passes memory safety scanning and file budget checks.
 
-## External Memory
-
-External memory is **disabled by default**. The only implemented provider is file-backed and profile-local.
-
-When enabled under `externalMemory`, it stores JSONL records beneath the selected profile's `external-memory/` directory. It can:
-
-- Return bounded untrusted external recall for explicit recall turns.
-- Mirror `memory.curate` writes when `mirrorWrites: true`.
-
-It cannot replace `USER.md`, `MEMORY.md`, `SOUL.md`, shared memory, or session recall. It cannot use absolute storage paths or write outside the profile's `external-memory/` directory.
-
-Audit events for external recall and mirror writes are metadata-only. They never store raw recalled content, raw mirrored memory content, credentials, or secrets.
+Child sessions are excluded from promotion evidence. Delegated work can be useful context, but it cannot teach durable user preferences by itself.
 
 ---
 
-## Session Compression
+## What Can Promote
 
-Semantic session compression is **experimental-only** in v0.1.0. It is **disabled by default** and requires both gates:
+Supported user preference patterns are intentionally narrow.
 
-```json
-{
-  "compression": {
-    "enabled": true,
-    "experimental": true
-  }
-}
+English examples:
+
+| Input | Promoted memory |
+|---|---|
+| `I prefer TypeScript` | `Prefer TypeScript.` |
+| `I'd prefer TypeScript` | `Prefer TypeScript.` |
+| `My preference is TypeScript` | `Prefer TypeScript.` |
+| `We prefer TypeScript` | `Prefer TypeScript.` |
+| `Default to TypeScript` | `Prefer TypeScript.` |
+| `Use TypeScript by default` | `Prefer TypeScript.` |
+| `Please switch to TypeScript by default` | `Prefer TypeScript.` |
+| `I prefer concise replies` | `Prefer concise replies.` |
+
+Arabic examples:
+
+| Input | Promoted memory |
+|---|---|
+| `أفضل TypeScript` | `Prefer TypeScript.` |
+| `أفضّل TypeScript` | `Prefer TypeScript.` |
+| `افضل TypeScript` | `Prefer TypeScript.` |
+| `استخدم pnpm افتراضياً` | `Prefer pnpm.` |
+| `استخدم pnpm افتراضيا` | `Prefer pnpm.` |
+| `استخدم pnpm كافتراضي` | `Prefer pnpm.` |
+| `خلّي الردود مختصرة` | `Prefer concise replies.` |
+| `خلي الردود مختصرة` | `Prefer concise replies.` |
+| `خلّي الردود مفصلة` | `Prefer detailed replies.` |
+| `خلي الردود مفصلة` | `Prefer detailed replies.` |
+
+Arabic mixed-language preference values are accepted only for bounded technical tokens, such as:
+
+- `TypeScript`
+- `pnpm test`
+- `~/.estacoda/foo`
+- `GPT-5`
+
+This preserves exact casing, spacing, paths, and provider/model tokens where supported. Natural-language Arabic or mixed-language phrases such as `أفضل لغة آمنة` or `استخدم careful release notes كافتراضي` do not promote.
+
+Project fact promotion remains separate from user preferences. Examples include:
+
+| Input | Promoted memory |
+|---|---|
+| `project uses TypeScript` | `Project uses TypeScript.` |
+| `run tests with pnpm test` | <code>Run tests with `pnpm test`.</code> |
+| `foo is stored under ~/.estacoda/foo` | <code>Foo is stored under `~/.estacoda/foo`.</code> |
+
+---
+
+## What Cannot Promote
+
+These inputs are rejected as promotion evidence:
+
+- quoted or backticked text
+- fenced code blocks
+- long incidental paragraphs
+- assistant notes
+- tool output
+- resume text
+- delegated or child-session text
+- prompt-injection-looking text
+- secret-looking content
+- text containing invisible or bidirectional control characters
+
+Examples that do not promote:
+
+```text
+Please summarize this: "I prefer concise replies."
+The attached resume says: "I prefer concise replies."
+Agent note: I prefer concise replies.
+Earlier assistant said: "User prefers concise replies."
+لخّص هذا: "أفضل TypeScript"
+لخّص هذا: «أفضل TypeScript»
+ملاحظة الوكيل: أفضل TypeScript
+السيرة تقول: أفضل TypeScript
+قال المساعد سابقاً: المستخدم يفضل TypeScript
 ```
 
-Unless both `compression.enabled` and `compression.experimental` are `true`, semantic compression does not run. There is no default-on path.
+Near-miss English phrases also do not promote:
 
-When enabled, compression turns older session history into reference-only summaries. It does not compact `USER.md`, `SOUL.md`, `MEMORY.md`, `AGENTS.md`, shared memory, or promotion metadata. Compressed summaries are untrusted historical context.
-
-Manual compression is available via `/compact [topic]` or `estacoda sessions compact <session-id>`. Gateway `/compact` preserves the parent transcript by creating a compacted child session. CLI `/compact` remains non-rotating in this implementation.
-
----
-
-## Memory File Compaction
-
-Memory File Compaction compacts `USER.md` and `MEMORY.md`. It does not compact `SOUL.md`, `AGENTS.md`, shared memory, or session history. It uses the `memory_compaction` auxiliary route.
-
-Tools:
-
-- `memory.file_compact` — manually compact a file; supports `dryRun`.
-- `memory.file_compaction_restore` — restore from a compaction backup.
-
-Applied compaction creates a timestamped backup under `.memory-file-compaction-backups/` before writing. Critical memory-file pressure is diagnostic only; it does not trigger automatic compaction.
+```text
+I like TypeScript
+It would be nice if TypeScript
+Maybe use TypeScript
+Could you use TypeScript
+Can we use TypeScript
+For this one, use TypeScript
+Try TypeScript
+Switch to TypeScript
+```
 
 ---
 
-## The Memory Curation Tool
+## Conflicts and Forgetting
 
-The agent-facing memory write surface is `memory.curate`. It accepts:
+Some preference categories are intentionally exclusive:
 
-| Kind | Action |
+| Category | Examples |
 |---|---|
-| `append` | Append a new entry |
-| `replace` | Replace an existing entry by substring match |
-| `remove` | Remove an entry by substring match |
+| Reply verbosity | `Prefer concise replies.`, `Prefer detailed replies.` |
+| Language default | `Prefer TypeScript.`, `Prefer JavaScript.` |
+| Test command | `Prefer pnpm test.`, `Prefer npm test.` |
+| Package manager | `Prefer pnpm.`, `Prefer npm.` |
+| Code style | `Always use strict mode.`, `Always use semicolons.` |
 
-Local lexical retrieval uses separate `memory.read` and `memory.search` tools instead of adding read behavior to `memory.curate`. These tools read/search local memory context only. They do not write memory, promote content, or change instruction priority.
+When a new active preference in one of these categories promotes, it supersedes the old active preference in that category. Unrelated preferences coexist. `Prefer TypeScript.` does not conflict with `Prefer careful release notes.`.
+
+Conflict categories are derived at runtime from canonical content. They are not stored as schema fields in `promotions.json`, so existing promotion records still load and participate in conflict handling.
+
+To forget a promoted preference, say a direct forget request such as:
+
+```text
+forget that i prefer concise replies
+```
+
+If the active promoted preference exists, EstaCoda marks it forgotten in `promotions.json` and removes the corresponding line from `USER.md`.
 
 ---
 
-## Inspection, Backup, and Recovery
+## Write Safety
+
+Memory writes pass through safety checks before persistence.
+
+The write path rejects:
+
+- credential-looking content, including env var names such as `OPENAI_API_KEY` when they would become durable memory
+- prompt-injection-looking content
+- unsafe compacted memory output
+- content that exceeds the target memory file budget
+
+Arabic input such as `استخدم OPENAI_API_KEY كافتراضي` can match the deterministic syntax, but the provider/store safety path rejects it before persistence.
+
+Memory writes use atomic replacement. EstaCoda writes a temporary file in the target directory and renames it into place. If a write fails, the previous file remains.
+
+Memory persistence is also drift-aware. Before overwriting a file, the persistence service compares the current disk file with the snapshot loaded earlier. If another process edited the file, EstaCoda refuses to overwrite it by default.
+
+Promotion writes roll back both markdown and `promotions.json` when a later step fails. This prevents stale active metadata from surviving a rejected markdown write.
+
+Backups are not created for ordinary writes by default. They are created only by operations that explicitly request them, such as applied memory file compaction.
+
+---
+
+## Inspect Memory
+
+Use CLI read/search first:
 
 ```bash
-# Inspect and repair the local lexical index
-estacoda memory index path
-estacoda memory index status
-estacoda memory index rebuild
-
-# Search/read local memory from the CLI
-estacoda memory search <query>
 estacoda memory read USER.md
 estacoda memory read MEMORY.md
+estacoda memory search <query>
 estacoda memory read shared <key>
-estacoda memory read SOUL.md --include-protected
-
-# Check memory budget pressure
-# (surfaced in diagnostics; no standalone CLI for v0.1.0)
-
-# Compact a memory file (via runtime tool)
-# memory.file_compact target=USER.md dryRun=true
-
-# Restore from backup (via runtime tool)
-# memory.file_compaction_restore target=USER.md
 ```
 
-Memory files are plain Markdown. You can back them up manually:
+`SOUL.md` is protected. Read it only with an explicit protected-memory flag:
+
+```bash
+estacoda memory read SOUL.md --include-protected
+```
+
+Inspect the files directly when you need to repair state:
+
+```bash
+ls ~/.estacoda/profiles/<id>/
+sed -n '1,160p' ~/.estacoda/profiles/<id>/USER.md
+sed -n '1,160p' ~/.estacoda/profiles/<id>/MEMORY.md
+sed -n '1,160p' ~/.estacoda/profiles/<id>/promotions.json
+```
+
+Do not edit `promotions.json` casually. It tracks active, superseded, and forgotten promotions. If it disagrees with the markdown files, rendering may suppress or restore entries in surprising ways.
+
+---
+
+## Edit Memory Safely
+
+Memory files are plain Markdown. Stop the runtime before manual edits when possible, then edit the relevant file:
+
+```bash
+$EDITOR ~/.estacoda/profiles/<id>/USER.md
+$EDITOR ~/.estacoda/profiles/<id>/MEMORY.md
+```
+
+Use one line per durable fact or preference. Keep entries short and reviewable.
+
+Back up files before larger edits:
 
 ```bash
 cp ~/.estacoda/profiles/<id>/USER.md ~/.estacoda/profiles/<id>/USER.md.bak
 cp ~/.estacoda/profiles/<id>/MEMORY.md ~/.estacoda/profiles/<id>/MEMORY.md.bak
 ```
 
-Do not edit `promotions.json` blindly. It tracks active promotion metadata. If it drifts from the markdown files, memory rendering may resurrect stale or rejected entries.
+If you remove a promoted line manually, inspect `promotions.json` as well. Prefer the explicit forget path for user preferences so metadata and markdown stay aligned.
 
 ---
 
-## Failure Modes
+## Local Lexical Retrieval
 
-**Promotion overflow:** Non-fatal to the turn. Diagnostic recorded with pressure metadata only. No raw text or secrets included.
+Local memory read/search is deterministic lexical retrieval over authoritative memory files. It is not semantic recall or vector search.
 
-**Scanner rejection:** Write blocked. Original file preserved. No active promotion metadata left behind.
+The rebuildable index is stored under profile state:
 
-**Memory File Compaction failure:** Original file preserved. Missing `memory_compaction` route returns `memory-file-compaction-route-unavailable`.
+```text
+<profile-state-dir>/memory-index.sqlite
+```
 
-**External memory failure:** Local memory remains authoritative. Failures surface as warnings.
+Deleting this SQLite file does not delete `USER.md`, `SOUL.md`, `MEMORY.md`, shared memory files, or `promotions.json`.
+
+Repair the index with:
+
+```bash
+estacoda memory index path
+estacoda memory index status
+estacoda memory index rebuild
+```
+
+If the index is disabled, missing, or unavailable, `memory.read`, `memory.search`, and CLI read/search fall back to bounded direct file reads or substring search where possible.
+
+---
+
+## Delegation Outcome Memory
+
+Delegation outcome memory is separate from child transcript recall. It is disabled by default under `delegation.outcomeMemory.enabled`.
+
+When enabled, it records bounded status metadata such as parent session id, child session id, role, depth, task index, status, reason, timestamp, token usage, and a bounded task preview.
+
+It does not store raw child output, prompts, transcripts, tool arguments, file contents, diagnostic payloads, or credentials. Child transcripts remain excluded from promotion evidence.
+
+---
+
+## Session Compression and Memory Compaction
+
+Session compression and memory file compaction are different operations.
+
+| Operation | What it changes |
+|---|---|
+| Session compression | Older session history. Produces untrusted historical summaries. |
+| Memory file compaction | `USER.md` or `MEMORY.md`. Produces replacement memory file content after checks. |
+
+Memory file compaction uses the `memory_compaction` auxiliary route, supports `dryRun`, and creates a timestamped backup before applying changes. It does not compact `SOUL.md`, `AGENTS.md`, shared memory, session history, or `promotions.json`.
+
+---
+
+## External Memory
+
+External memory is disabled by default. The implemented provider is file-backed and profile-local under:
+
+```text
+~/.estacoda/profiles/<id>/external-memory/
+```
+
+External recall is untrusted reference context. External memory cannot replace `USER.md`, `MEMORY.md`, `SOUL.md`, shared memory, `promotions.json`, or session recall.
+
+---
+
+## Troubleshooting
+
+| Symptom | Likely cause | First check |
+|---|---|---|
+| Expected preference did not promote | It was seen fewer than two prior root sessions, used an unsupported phrase, or appeared only in delegated/quoted/resume text | Check root-session history and phrase shape |
+| Arabic or mixed-language phrase did not promote | The value was natural-language text instead of a supported technical token, or contained bidi/invisible controls | Try a supported form such as `أفضل TypeScript` or `استخدم pnpm test افتراضياً` |
+| Wrong memory appeared | Active promotion metadata and markdown may disagree, or an old active promotion is still present | Inspect `USER.md`, `MEMORY.md`, and `promotions.json` |
+| Memory file changed externally | Drift detection refused the write | Restart the runtime or reconcile the manual edit before retrying |
+| Memory write failed | Scanner rejection, budget overflow, drift, or persistence error | Check diagnostics and file sizes; compact or edit memory if needed |
+| Secret-looking content did not save | Safety scanner rejected it | Keep credentials in `.env` or secret storage, not memory |
+| Index search is stale | Rebuildable lexical index is out of date | Run `estacoda memory index rebuild` |
+
+When debugging promotion, start with the current direct user input, then check matching root-session user messages, then inspect `promotions.json`.
 
 ---
 
 ## Related
 
-- [Architecture](../developer/architecture.md) — system structure and state boundaries
-- [Runtime](../developer/runtime.md) — runtime creation and memory prompt assembly
-- [Security and Approvals](./security-and-approvals.md) — memory trust boundaries
+- [Profiles](./profiles.md) - profile-local state and memory isolation
+- [Sessions](./sessions.md) - session history and recall boundaries
+- [Runtime](../developer/runtime.md) - runtime creation and prompt assembly
+- [Memory architecture](../developer/memory-architecture.md) - implementation details
+- [Security and Approvals](./security-and-approvals.md) - trust boundaries
