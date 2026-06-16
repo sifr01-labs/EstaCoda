@@ -1,0 +1,56 @@
+name: History Check
+
+# Reject PRs whose branch has no common ancestor with main.
+#
+# GitHub can merge unrelated histories. For a repository with long-lived
+# agent/runtime code, that can graft a second root into main and make blame
+# history misleading across the tree. This check keeps PR history connected.
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: history-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-common-ancestor:
+    name: Require common ancestor with main
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reject unrelated-history PRs
+        run: |
+          set -euo pipefail
+
+          git fetch --no-tags origin main
+
+          if ! BASE=$(git merge-base origin/main HEAD 2>/dev/null) || [ -z "$BASE" ]; then
+            echo "::error::This PR has no common ancestor with main."
+            echo ""
+            echo "Your branch history is disconnected from main. Common causes:"
+            echo "  - the branch was created with 'git checkout --orphan'"
+            echo "  - .git/ was re-initialized during the work"
+            echo "  - the branch was force-pushed from another repository"
+            echo ""
+            echo "Merging this would graft unrelated history into main and damage blame/history quality."
+            echo ""
+            echo "Fix by replaying the change on top of current main:"
+            echo "  git fetch origin main"
+            echo "  git checkout -b fixed-branch origin/main"
+            echo "  # re-apply or cherry-pick the intended changes"
+            echo "  git push -u origin fixed-branch"
+            exit 1
+          fi
+
+          echo "Common ancestor with main: $BASE"

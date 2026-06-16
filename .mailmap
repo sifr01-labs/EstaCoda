@@ -1,0 +1,10 @@
+# .mailmap — canonical author mapping for git shortlog / git log / GitHub
+# Format: Canonical Name <canonical@email> <commit@email>
+# See: https://git-scm.com/docs/gitmailmap
+#
+# Use GitHub noreply addresses as canonical when possible so GitHub can
+# attribute commits to the correct profile.
+
+# === Maintainer identity normalization ===
+0xAly <280280231+0xAly@users.noreply.github.com> <0xaly@users.noreply.github.com>
+0xAly <280280231+0xAly@users.noreply.github.com> <aly@kemetresearch.com>

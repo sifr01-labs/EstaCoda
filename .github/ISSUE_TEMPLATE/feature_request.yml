@@ -1,0 +1,136 @@
+name: "✨ Feature Request"
+description: Suggest a focused improvement to EstaCoda.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an improvement.
+
+        EstaCoda is agent infrastructure for trusted autonomous execution. The best feature requests describe the job you are trying to do, the current limitation, the trust boundary involved, and the smallest useful behavior change.
+
+        Arabic requests are welcome. You may write free-text sections in English or Arabic.
+        يمكنك كتابة الطلب بالعربية أو الإنجليزية. أبقِ الأوامر والمسارات وأسماء الملفات كما هي بالإنجليزية.
+
+        Before submitting:
+        - Search existing issues and discussions.
+        - Avoid broad rewrites. Prefer a narrow, testable capability.
+        - If this is a specialized workflow, consider whether it should be a skill instead of a core feature.
+        - Do not request behavior that bypasses approvals, weakens workspace trust, or stores secrets unsafely.
+
+  - type: dropdown
+    id: language
+    attributes:
+      label: Request language / لغة الطلب
+      options:
+        - English
+        - Arabic / العربية
+        - Mixed English and Arabic
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case / المشكلة أو حالة الاستخدام
+      description: What are you trying to do that EstaCoda cannot do well today?
+      placeholder: |
+        I am trying to...
+        Today, the problem is...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed solution / الحل المقترح
+      description: Describe the behavior you want. Include CLI commands, config keys, UI behavior, or workflow details if useful.
+      placeholder: |
+        Add `estacoda ...`
+        Or: Add a config option named ...
+        Or: In the setup UI, allow ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: trust-model
+    attributes:
+      label: Trust and safety considerations
+      description: Does this feature affect command execution, files, approvals, memory, gateways, skills, providers, browser access, or secrets?
+      placeholder: |
+        This should require approval when...
+        It should never expose...
+        It should store state under...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: feature-type
+    attributes:
+      label: Feature type
+      multiple: true
+      options:
+        - CLI improvement
+        - Setup or configuration
+        - Provider or model routing
+        - Tool behavior
+        - Skill or skill pack
+        - Memory or session recall
+        - Workflow learning or agent evolution
+        - Gateway or messaging integration
+        - Browser or web capability
+        - Cron / scheduled task
+        - Security, approvals, or workspace trust
+        - Documentation or website
+        - Arabic, bidi, or localization
+        - Developer experience, tests, or CI
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Expected scope
+      description: Best guess is fine.
+      options:
+        - Small: copy, docs, config, or one focused behavior
+        - Medium: a few files or one subsystem
+        - Large: new subsystem, broad workflow, or architectural change
+        - Unsure
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What workarounds, skills, configuration changes, or smaller approaches did you consider?
+
+  - type: textarea
+    id: examples
+    attributes:
+      label: Example interaction or expected output
+      description: Show what the user would type and what EstaCoda should do.
+      placeholder: |
+        User runs:
+        `estacoda ...`
+
+        Expected behavior:
+        ...
+      render: shell
+
+  - type: textarea
+    id: related
+    attributes:
+      label: Related docs, issues, or prior art
+      description: Link any related issues, docs pages, screenshots, tools, or workflows.
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I can help test this feature.
+        - label: I would like to implement this and submit a PR.
+        - label: I think this belongs as a skill or skills pack, not core runtime.
