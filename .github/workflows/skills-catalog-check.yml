@@ -1,0 +1,107 @@
+name: Skills Catalog Check
+
+# Generated catalog files are committed so the website can serve them as static
+# JSON. PRs that change skill sources or catalog-building code must regenerate
+# the catalog and commit the resulting files.
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: skills-catalog-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Detect catalog-relevant changes
+    runs-on: ubuntu-latest
+    outputs:
+      catalog: ${{ steps.filter.outputs.catalog }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+
+      - name: Check changed paths
+        id: filter
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+            HEAD="${{ github.event.pull_request.head.sha }}"
+          else
+            BASE="origin/main"
+            HEAD="HEAD"
+            git fetch --no-tags origin main
+          fi
+
+          CHANGED=$(git diff --name-only "$BASE"..."$HEAD" -- \
+            'skills/**' \
+            'registries/skills.sources.json' \
+            'scripts/build-skills-catalog.ts' \
+            'src/skills/catalog-builder.ts' \
+            'src/contracts/skill.ts' \
+            'package.json' \
+            'pnpm-lock.yaml' \
+            'website/static/api/skills.json' \
+            'website/static/api/skills-meta.json' \
+            '.github/workflows/skills-catalog-check.yml' \
+            '.github/workflows/rebuild-skills-catalog.yml' || true)
+
+          if [ -n "$CHANGED" ]; then
+            echo "catalog=true" >> "$GITHUB_OUTPUT"
+            echo "Catalog-relevant changes:"
+            echo "$CHANGED"
+          else
+            echo "catalog=false" >> "$GITHUB_OUTPUT"
+            echo "No catalog-relevant changes."
+          fi
+
+  validate:
+    name: Generated skills catalog is fresh
+    needs: changes
+    if: needs.changes.outputs.catalog == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22.18.0"
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            website/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Rebuild skills catalog
+        run: pnpm run skills:catalog
+
+      - name: Verify generated catalog is committed
+        run: |
+          set -euo pipefail
+          git diff -- website/static/api/skills.json website/static/api/skills-meta.json
+          git diff --exit-code -- website/static/api/skills.json website/static/api/skills-meta.json
+
+  validate-gate:
+    name: Generated skills catalog is fresh
+    needs: changes
+    if: always() && needs.changes.outputs.catalog != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "No catalog-relevant changes; skipping generated catalog freshness check."

@@ -1,0 +1,181 @@
+name: "🐛 Bug Report"
+description: Report a reproducible bug, crash, incorrect behavior, or regression in EstaCoda.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please include enough detail for maintainers to reproduce it safely.
+
+        Arabic reports are welcome. You may write the free-text sections in English or Arabic.
+        مرحبًا، يمكنك كتابة الوصف والخطوات بالعربية أو الإنجليزية. أبقِ الأوامر والمسارات وأسماء الملفات كما هي بالإنجليزية.
+
+        Before submitting:
+        - Search existing issues to avoid duplicates.
+        - Update to the latest EstaCoda version if possible and confirm the bug still exists.
+        - Remove secrets, API keys, bot tokens, private URLs, and private file contents from logs.
+        - If this is a security vulnerability, do not open a public issue. Use GitHub Security Advisories instead.
+
+  - type: dropdown
+    id: language
+    attributes:
+      label: Report language / لغة التقرير
+      description: Which language are you using for the free-text sections?
+      options:
+        - English
+        - Arabic / العربية
+        - Mixed English and Arabic
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug description / وصف المشكلة
+      description: What is broken? Include the visible symptom, error message, or screenshot description if relevant.
+      placeholder: |
+        What happened? What did you expect to happen instead?
+
+        ماذا حدث؟ وماذا كنت تتوقع أن يحدث بدلًا من ذلك؟
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce / خطوات إعادة المشكلة
+      description: Provide the smallest set of steps that triggers the bug.
+      placeholder: |
+        1. Run `estacoda ...`
+        2. Choose ...
+        3. Send the message "..."
+        4. See error: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior / السلوك المتوقع
+      description: What should have happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior / السلوك الفعلي
+      description: What actually happened? Paste the full error output if available, after redacting secrets.
+      render: shell
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected area
+      description: Which part of EstaCoda appears affected?
+      multiple: true
+      options:
+        - CLI / interactive session
+        - Setup / first-run configuration
+        - Provider or model routing
+        - Agent loop / runtime
+        - Tool execution
+        - Terminal or process management
+        - File operations or workspace trust
+        - Security approvals or sandboxing
+        - Skills or skill routing
+        - Memory, sessions, or persistence
+        - Browser or web tools
+        - Gateway / messaging integration
+        - Cron / scheduled tasks
+        - Documentation or website
+        - Build, packaging, or update flow
+        - Arabic, bidi, or terminal rendering
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where did this happen?
+      multiple: true
+      options:
+        - Local CLI
+        - Telegram gateway
+        - Discord gateway
+        - Other messaging gateway
+        - Browser tool
+        - Scheduled job / cron
+        - CI or release build
+        - Documentation site
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Paste relevant version and platform info. If a command is unavailable, write "not available".
+      placeholder: |
+        OS: Ubuntu 24.04 / macOS 15 / WSL2 / other
+        EstaCoda version: output of `estacoda --version` or `estacoda version`
+        Node: output of `node --version`
+        pnpm: output of `pnpm --version` if using a source checkout
+        Install method: install script / npm package / source checkout / Docker / other
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: config-context
+    attributes:
+      label: Relevant configuration, redacted
+      description: Include only settings needed to understand the issue. Do not paste secrets.
+      placeholder: |
+        Provider: OpenRouter / Anthropic / OpenAI / local / other
+        Model: ...
+        Security mode: strict / adaptive / open
+        Gateway enabled: yes/no
+        ESTACODA_HOME: custom path? yes/no
+      render: shell
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs, terminal output, or screenshots
+      description: Paste logs or describe screenshots. Redact tokens, API keys, private paths, private URLs, and personal content.
+      render: shell
+
+  - type: textarea
+    id: security-impact
+    attributes:
+      label: Possible security or data impact
+      description: Did this cross a trust boundary, expose data, run a command unexpectedly, bypass approval, or write somewhere unexpected?
+      placeholder: |
+        No known security impact.
+        Or: The agent wrote outside the trusted workspace after approval was denied.
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Workaround, if any
+      description: Have you found a temporary way around the bug?
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmation
+      options:
+        - label: I searched existing issues for duplicates.
+          required: true
+        - label: I removed secrets, tokens, and private user data from this report.
+          required: true
+        - label: This is not a private security vulnerability report.
+          required: true
+        - label: I can help test a fix or submit a PR.

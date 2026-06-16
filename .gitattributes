@@ -1,0 +1,21 @@
+# Normalize text files while preserving Git's normal platform behavior.
+* text=auto
+
+# Generated website skill catalog — collapse diffs and exclude from language stats.
+website/static/api/skills.json linguist-generated=true
+website/static/api/skills-meta.json linguist-generated=true
+
+# Shell scripts and container files must use LF.
+# CRLF can break Linux/container execution with "no such file or directory".
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.dockerfile text eol=lf
+*.Dockerfile text eol=lf
+
+# Binary assets.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary

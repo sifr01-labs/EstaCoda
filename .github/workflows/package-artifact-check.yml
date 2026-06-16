@@ -1,0 +1,138 @@
+name: Package Artifact Check
+
+# Validate that the source tree can produce a usable npm package artifact.
+# This is release-safety coverage, not publication: it builds, packs, installs
+# the local tarball in an isolated prefix, and verifies the estacoda binary.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: package-artifact-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Detect package-relevant changes
+    runs-on: ubuntu-latest
+    outputs:
+      package: ${{ steps.filter.outputs.package }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+
+      - name: Check changed paths
+        id: filter
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+            HEAD="${{ github.event.pull_request.head.sha }}"
+          elif [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            BASE="${{ github.event.before }}"
+            HEAD="${{ github.sha }}"
+          else
+            BASE="HEAD~1"
+            HEAD="HEAD"
+          fi
+
+          CHANGED=$(git diff --name-only "$BASE"..."$HEAD" -- \
+            'package.json' \
+            'pnpm-lock.yaml' \
+            'tsconfig.json' \
+            'tsconfig.build.json' \
+            'README.md' \
+            'LICENSE' \
+            'NOTICE' \
+            'src/**' \
+            'skills/**' \
+            'assets/**' \
+            'workers/**' \
+            'acp_registry/**' \
+            'scripts/clean-dist.mjs' \
+            'scripts/install.sh' \
+            'scripts/setup-estacoda.sh' \
+            'scripts/uninstall.sh' \
+            'scripts/estacoda-wrapper.sh' \
+            'scripts/verify-package-bin.sh' \
+            'scripts/validate-install-update.sh' \
+            'scripts/validate-source-install.sh' \
+            'scripts/whatsapp-bridge/**' \
+            '.github/workflows/package-artifact-check.yml' || true)
+
+          if [ -n "$CHANGED" ]; then
+            echo "package=true" >> "$GITHUB_OUTPUT"
+            echo "Package-relevant changes:"
+            echo "$CHANGED"
+          else
+            echo "package=false" >> "$GITHUB_OUTPUT"
+            echo "No package-relevant changes."
+          fi
+
+  validate:
+    name: Validate npm package artifact
+    needs: changes
+    if: needs.changes.outputs.package == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI: true
+      NODE_ENV: test
+      OPENAI_API_KEY: ""
+      ANTHROPIC_API_KEY: ""
+      OPENROUTER_API_KEY: ""
+      KIMI_API_KEY: ""
+      DEEPSEEK_API_KEY: ""
+      GOOGLE_API_KEY: ""
+      BYTEPLUS_ARK_API_KEY: ""
+      FAL_API_KEY: ""
+      ESTACODA_TELEGRAM_BOT_TOKEN: ""
+      TELEGRAM_BOT_TOKEN: ""
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22.18.0"
+          cache: pnpm
+
+      - name: Show tool versions
+        run: |
+          node --version
+          npm --version
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify local built binary
+        run: pnpm run verify:local-bin
+
+      - name: Dry-run npm package
+        run: pnpm run pack:dry-run
+
+      - name: Verify packed package binary
+        run: scripts/verify-package-bin.sh
+
+  validate-gate:
+    name: Validate npm package artifact
+    needs: changes
+    if: always() && needs.changes.outputs.package != 'true' && github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "No package-relevant changes; skipping package artifact validation."

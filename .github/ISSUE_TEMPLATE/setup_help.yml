@@ -1,0 +1,151 @@
+name: "🔧 Setup / Configuration Help"
+description: Get help installing, updating, configuring providers, or starting EstaCoda.
+title: "[Setup]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Sorry you are running into setup trouble. This template is for installation, update, provider configuration, first-run setup, and local environment problems.
+
+        Arabic reports are welcome. You may write free-text sections in English or Arabic.
+        يمكنك كتابة التفاصيل بالعربية أو الإنجليزية. أبقِ الأوامر والمسارات وأسماء الملفات كما هي بالإنجليزية.
+
+        Before submitting:
+        - Check the README and documentation for the install path you used.
+        - Try the latest version if possible.
+        - Do not paste API keys, provider tokens, bot tokens, `.env` files, or private config values.
+        - If the issue exposes secrets or bypasses approvals, use GitHub Security Advisories instead of a public issue.
+
+  - type: dropdown
+    id: language
+    attributes:
+      label: Report language / لغة التقرير
+      options:
+        - English
+        - Arabic / العربية
+        - Mixed English and Arabic
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: goal
+    attributes:
+      label: What are you trying to set up?
+      description: Describe the setup goal and where it fails.
+      placeholder: |
+        I am trying to install EstaCoda from source and configure OpenRouter.
+        It fails when I run `estacoda setup`...
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Exact steps taken
+      description: Paste the exact commands and choices you used.
+      placeholder: |
+        1. Ran `...`
+        2. Selected provider `...`
+        3. Ran `estacoda ...`
+        4. Got error `...`
+      render: shell
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: Installation or run method
+      multiple: true
+      options:
+        - Install script
+        - Release package or local tarball
+        - Source checkout with pnpm
+        - Docker
+        - Existing local install / update
+        - Development checkout with custom ESTACODA_HOME
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: setup-area
+    attributes:
+      label: Setup area
+      multiple: true
+      options:
+        - First-run setup
+        - Provider API key or model selection
+        - OpenRouter
+        - Anthropic
+        - OpenAI-compatible provider
+        - Local model provider
+        - Gateway / Telegram / messaging
+        - Browser or Browserbase
+        - Skills or skills pack
+        - Trust / approvals / workspace setup
+        - Update or uninstall
+        - Build from source
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Paste relevant version info. If a command fails, include the failure.
+      placeholder: |
+        OS: Ubuntu 24.04 / macOS 15 / WSL2 / other
+        Shell: bash / zsh / fish / PowerShell / other
+        EstaCoda version: `estacoda --version` or `estacoda version`
+        Node: `node --version`
+        pnpm: `pnpm --version`
+        Git: `git --version`
+        ESTACODA_HOME set? yes/no
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: error-output
+    attributes:
+      label: Full error output
+      description: Paste the complete error output after redacting secrets.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: redacted-config
+    attributes:
+      label: Relevant redacted config
+      description: Paste only non-secret settings. Replace keys/tokens with `<REDACTED>`.
+      placeholder: |
+        provider: openrouter
+        model: ...
+        security mode: adaptive
+        gateway enabled: false
+      render: shell
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: What have you already tried?
+      placeholder: |
+        - Re-ran setup
+        - Started a fresh shell
+        - Deleted dev state under ...
+        - Rebuilt with `pnpm run build`
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmation
+      options:
+        - label: I removed all secrets, API keys, tokens, and private values from this report.
+          required: true
+        - label: I included the exact command or setup step that failed.
+          required: true
+        - label: I can run follow-up diagnostic commands if maintainers ask.

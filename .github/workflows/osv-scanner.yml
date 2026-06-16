@@ -1,0 +1,39 @@
+name: OSV Scanner
+
+# Scan dependency lockfiles against the OSV vulnerability database.
+# Detection-only by default: findings do not block merges while the baseline is
+# still being established. SARIF/code-scanning upload is disabled while the repo
+# is private and GitHub Advanced Security/code scanning is unavailable.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    paths:
+      - "pnpm-lock.yaml"
+      - "website/pnpm-lock.yaml"
+      - "scripts/whatsapp-bridge/package-lock.json"
+      - "package.json"
+      - "website/package.json"
+      - "scripts/whatsapp-bridge/package.json"
+      - ".github/workflows/osv-scanner.yml"
+  schedule:
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  scan:
+    name: Scan lockfiles
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@9a498708959aeaef5ef730655706c5a1df1edbc2
+    with:
+      scan-args: |-
+        --lockfile=pnpm-lock.yaml
+        --lockfile=website/pnpm-lock.yaml
+        --lockfile=scripts/whatsapp-bridge/package-lock.json
+      fail-on-vuln: false
+      upload-sarif: false
