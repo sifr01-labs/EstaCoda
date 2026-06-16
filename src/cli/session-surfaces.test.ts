@@ -17,7 +17,7 @@ import { StandardRenderer } from "../ui/renderers/standard-renderer.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
 import { stripAnsi } from "../ui/renderers/layout.js";
 import { buildStartupViewModel, buildPickerViewModel, buildAssistantResponseViewModel, buildStartupDashboardViewModel, buildUserPromptRailViewModel } from "../ui/view-models/builders.js";
-import { renderHorizontalRule, colorPromptPrefix } from "./session-loop.js";
+import { renderBottomChromeRule, renderHorizontalRule, colorPromptPrefix } from "./session-loop.js";
 
 // ──────────────────────────────────────
 // Rendering context factories
@@ -640,6 +640,12 @@ describe("Session surfaces — input rail-frame", () => {
       expect(snapshotOutput(colored)).toMatchSnapshot(`prompt-prefix-${ctx.name}`);
     });
   }
+
+  it("renders bottom chrome rule with the secondary text token", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const rule = renderBottomChromeRule(tokens, true, true, 10);
+    expect(rule).toBe(`\x1B[38;2;176;176;176m${"─".repeat(10)}\x1B[0m`);
+  });
 });
 
 // ────────────────────────────────────────

@@ -24,6 +24,7 @@ export interface BottomChromeControllerOptions {
   readonly output: NodeJS.WritableStream;
   readonly capabilities: TerminalCapabilities;
   readonly renderViewModel: (vm: ViewModel) => string;
+  readonly renderHorizontalRule?: (width: number) => string;
   readonly enabled?: boolean;
   readonly tickMs?: number;
   readonly readlineTickMs?: number;
@@ -41,6 +42,7 @@ export class BottomChromeController {
   readonly #output: NodeJS.WritableStream;
   readonly #capabilities: TerminalCapabilities;
   readonly #renderViewModel: (vm: ViewModel) => string;
+  readonly #renderHorizontalRule?: (width: number) => string;
   readonly #enabled: boolean;
   readonly #tickMs: number;
   readonly #readlineTickMs: number;
@@ -61,6 +63,7 @@ export class BottomChromeController {
     this.#output = options.output;
     this.#capabilities = options.capabilities;
     this.#renderViewModel = options.renderViewModel;
+    this.#renderHorizontalRule = options.renderHorizontalRule;
     this.#enabled = options.enabled ?? detectEnabled(options.capabilities);
     this.#tickMs = options.tickMs ?? 200;
     this.#readlineTickMs = options.readlineTickMs ?? 1000;
@@ -530,6 +533,9 @@ export class BottomChromeController {
   }
 
   #horizontalRule(width: number): string {
+    if (this.#renderHorizontalRule !== undefined) {
+      return truncateVisible(this.#renderHorizontalRule(width), width);
+    }
     const fill = this.#capabilities.supportsUnicode ? "─" : "-";
     return fill.repeat(width);
   }

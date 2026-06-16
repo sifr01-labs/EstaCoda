@@ -365,7 +365,11 @@ export class StandardRenderer {
   }
 
   #truncateVisibleStable(value: string, maxWidth: number): string {
-    return closeOpenBidiIsolates(truncateVisible(value, maxWidth));
+    const truncated = closeOpenBidiIsolates(truncateVisible(value, maxWidth));
+    if (this.#useColor && /\x1b\[/u.test(truncated) && !truncated.endsWith("\x1b[0m")) {
+      return `${truncated}\x1b[0m`;
+    }
+    return truncated;
   }
 
   /** Hero panel for startup screen. */
@@ -1615,7 +1619,8 @@ export class StandardRenderer {
   #renderSessionStatusRailLtr(vm: SessionStatusRailViewModel): string {
     const eye = this.#useUnicode ? "𓂀" : "*";
     const modelLabel = vm.modelLabel;
-    const parts: string[] = [`${this.#brand(eye)}  ${this.#brand(this.#bold(modelLabel))}`];
+    const modelPart = `${this.#brand(eye)}  ${this.#brand(this.#bold(modelLabel))}`;
+    const parts: string[] = [];
 
     if (vm.contextUsage !== undefined) {
       const filled = formatContextCount(vm.contextUsage.filled);
@@ -1637,7 +1642,10 @@ export class StandardRenderer {
     if (vm.showTurnState !== false) {
       parts.push(this.#turnStateLabel(vm.turnState));
     }
-    return this.#truncateVisibleStable(parts.join(" | "), this.#capabilities.terminalWidth);
+    const rail = parts.length > 0
+      ? `${modelPart}${this.#secondary(` | ${parts.join(" | ")}`)}`
+      : modelPart;
+    return this.#truncateVisibleStable(rail, this.#capabilities.terminalWidth);
   }
 
   #renderSessionStatusRailRtl(vm: SessionStatusRailViewModel): string {
@@ -1665,8 +1673,11 @@ export class StandardRenderer {
       parts.push(`${isolateLtr(`${filled}/${total}`)} ${this.#copy.context}`);
     }
 
-    parts.push(`${this.#brand(this.#bold(isolateLtr(vm.modelLabel)))}  ${this.#brand(eye)}`);
-    return this.#truncateVisibleStable(parts.join(" | "), this.#capabilities.terminalWidth);
+    const modelPart = `${this.#brand(this.#bold(isolateLtr(vm.modelLabel)))}  ${this.#brand(eye)}`;
+    const rail = parts.length > 0
+      ? `${this.#secondary(parts.join(" | "))}${this.#secondary(" | ")}${modelPart}`
+      : modelPart;
+    return this.#truncateVisibleStable(rail, this.#capabilities.terminalWidth);
   }
 
   renderShortcutHintRail(vm: ShortcutHintRailViewModel): string {
@@ -1730,7 +1741,8 @@ export class StandardRenderer {
     if (!this.#useUnicode) {
       return `${percent}%`;
     }
-    return `${"◉".repeat(active)}${"·".repeat(10 - active)} ${percent}%`;
+    const blocks = Array.from({ length: 10 }, (_, index) => index < active ? "▰" : "▱").join(" ");
+    return `${blocks} ${percent}%`;
   }
 }
 

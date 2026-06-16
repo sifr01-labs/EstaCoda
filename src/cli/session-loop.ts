@@ -309,6 +309,12 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     output,
     capabilities: renderer.capabilities,
     renderViewModel: (vm) => renderer.render(vm),
+    renderHorizontalRule: (width) => renderBottomChromeRule(
+      renderer.tokens,
+      renderer.capabilities.supportsColor && renderer.tokens.contract.behavior.allowAnsiColor,
+      renderer.capabilities.supportsUnicode,
+      width
+    ),
     enabled: renderer.capabilities.isTTY && !renderer.capabilities.isCI && !renderer.capabilities.isDumb,
   });
   const chrome = new PromptChromeController({
@@ -3052,6 +3058,14 @@ export function renderHorizontalRule(tokens: ResolvedTokens, useColor: boolean, 
   const rule = ruleChar.repeat(ruleLen);
   if (!useColor) return rule;
   return ansiColor(rule, tokens.contract.surface.borderSubtle);
+}
+
+export function renderBottomChromeRule(tokens: ResolvedTokens, useColor: boolean, useUnicode: boolean, width: number): string {
+  const ruleChar = useUnicode ? "─" : "-";
+  const ruleLen = Math.max(0, width);
+  const rule = ruleChar.repeat(ruleLen);
+  if (!useColor) return rule;
+  return ansiColor(rule, tokens.contract.text.secondary);
 }
 
 export function colorPromptPrefix(prefix: string, tokens: ResolvedTokens, useColor: boolean): string {

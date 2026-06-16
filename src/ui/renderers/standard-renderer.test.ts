@@ -1633,7 +1633,8 @@ describe("StandardRenderer — conversation message", () => {
 
 describe("StandardRenderer — prompt chrome rails", () => {
   it("renders session status rail as one bounded line", () => {
-    const r = renderer("dark", fullCaps());
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const r = new StandardRenderer({ tokens, capabilities: fullCaps() });
     const vm = buildSessionStatusRailViewModel({
       modelLabel: "deepseek-reasoner",
       turnState: "idle",
@@ -1646,8 +1647,11 @@ describe("StandardRenderer — prompt chrome rails", () => {
     expect(out).toContain("deepseek-reasoner");
     expect(out).toMatch(/\x1b\[1mdeepseek-reasoner\x1b\[0m/u);
     expect(out).toContain("context 32.7k/128k");
+    expect(out).toContain("▰ ▰ ▰ ▱ ▱ ▱ ▱ ▱ ▱ ▱ 26%");
     expect(out).toContain("◷ 58s");
     expect(out).toContain("⧖ 5m 12s");
+    const { r: sr, g: sg, b: sb } = hexToRgbForTest(tokens.contract.text.secondary);
+    expect(out).toContain(`\x1b[38;2;${sr};${sg};${sb}m | context 32.7k/128k`);
     expect(out).not.toContain("idle");
     expect(out.split("\n")).toHaveLength(1);
   });
@@ -1684,12 +1688,13 @@ describe("StandardRenderer — prompt chrome rails", () => {
 
   it("keeps narrow status and shortcut rails bounded to one line", () => {
     const r = renderer("dark", narrowCaps());
-    const status = stripAnsi(r.render(buildSessionStatusRailViewModel({
+    const rawStatus = r.render(buildSessionStatusRailViewModel({
       modelLabel: "openrouter/deepseek-reasoner-with-a-very-long-route-name",
       turnState: "running",
       contextUsage: { filled: 98765, total: 128000 },
       sessionElapsedMs: 125000,
-    })));
+    }));
+    const status = stripAnsi(rawStatus);
     const shortcuts = stripAnsi(r.render(buildShortcutHintRailViewModel({ hints: [] })));
 
     for (const out of [status, shortcuts]) {
@@ -1697,6 +1702,7 @@ describe("StandardRenderer — prompt chrome rails", () => {
       expect(lines).toHaveLength(1);
       expect(measureVisibleWidth(lines[0] ?? "")).toBeLessThanOrEqual(40);
     }
+    expect(rawStatus).toMatch(/\x1b\[0m$/u);
     expect(status).toContain("...");
     expect(shortcuts).toContain("...");
   });
@@ -1759,7 +1765,7 @@ describe("StandardRenderer — prompt chrome rails", () => {
       sessionElapsedMs: 251000,
     })));
 
-    expect(out).toContain(`خامل | ◷ 4m 11s | ·········· 0% | ${isolateLtr("0/262k")} السياق | ${isolateLtr("kimi-k2.6")}  𓂀`);
+    expect(out).toContain(`خامل | ◷ 4m 11s | ▱ ▱ ▱ ▱ ▱ ▱ ▱ ▱ ▱ ▱ 0% | ${isolateLtr("0/262k")} السياق | ${isolateLtr("kimi-k2.6")}  𓂀`);
     expect(out.indexOf("خامل")).toBeLessThan(out.indexOf("◷ 4m 11s"));
     expect(out.indexOf("◷ 4m 11s")).toBeLessThan(out.indexOf(isolateLtr("0/262k")));
     expect(out.indexOf(isolateLtr("0/262k"))).toBeLessThan(out.indexOf(isolateLtr("kimi-k2.6")));

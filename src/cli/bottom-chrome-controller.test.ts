@@ -66,6 +66,20 @@ describe("BottomChromeController", () => {
     expect(chunks).toEqual(["deepseek | idle\n────────────────────────────────────────\n"]);
   });
 
+  it("uses an optional themed horizontal rule renderer", () => {
+    const { chunks, stream } = mockOutput();
+    const ctrl = new BottomChromeController({
+      output: stream,
+      capabilities: makeCaps(),
+      renderViewModel,
+      renderHorizontalRule: (width) => `\x1b[38;2;176;176;176m${"─".repeat(width)}\x1b[0m`,
+    });
+    ctrl.updateState({ statusRail: status("deepseek") });
+    expect(chunks).toEqual([
+      `deepseek | idle\n\x1b[38;2;176;176;176m${"─".repeat(40)}\x1b[0m\n`,
+    ]);
+  });
+
   it("bounds rendered chrome lines to terminal width", () => {
     const { chunks, stream } = mockOutput();
     const ctrl = makeController(stream, makeCaps({ terminalWidth: 12 }));
