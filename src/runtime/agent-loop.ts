@@ -43,6 +43,7 @@ import { SkillPlaybookRunner } from "./skill-playbook-runner.js";
 import { NativeToolExecutor } from "./native-tool-executor.js";
 import type { SessionRuntimeContext } from "./session-runtime-context.js";
 import { buildFallbackResponse, cancelledResponse, buildResumeNote, renderToolPlanProgress } from "./response-builders.js";
+import { renderProviderExecutionSummary, summarizeProviderExecution } from "./provider-execution-summary.js";
 import { emit, isAborted } from "../utils/runtime-helpers.js";
 import { appendArtifactSummary, renderArtifactProgress } from "../utils/artifact-formatting.js";
 import { summarizeProviderFailure } from "../providers/provider-diagnostics.js";
@@ -699,6 +700,13 @@ export class AgentLoop {
     const displayText = providerReturnedEmptyContent
       ? "I completed the requested actions but did not produce any visible output."
       : rawProviderContent;
+    const providerSummary = summarizeProviderExecution({
+      configuredModel: this.#model === undefined
+        ? undefined
+        : { provider: this.#model.provider, id: this.#model.id },
+      execution: effectiveProviderExecution
+    });
+    const providerProgress = renderProviderExecutionSummary(providerSummary);
     const response = effectiveProviderExecution?.ok === true && effectiveProviderExecution.response !== undefined
       ? {
           ...fallbackResponse,
@@ -712,8 +720,7 @@ export class AgentLoop {
             ...fallbackResponse.progress,
             ...renderArtifactProgress(artifacts),
             ...renderToolPlanProgress(toolPlans),
-            `provider: ${effectiveProviderExecution.response.provider}/${effectiveProviderExecution.response.model}`,
-            effectiveProviderExecution.fallbackUsed ? "provider fallback used" : "provider primary used",
+            ...providerProgress,
             providerLoop.iterations > 1 ? `provider iterations: ${providerLoop.iterations}` : "provider continuation: not needed"
           ]
         }
@@ -746,7 +753,7 @@ export class AgentLoop {
               ...fallbackResponse.progress,
               ...renderArtifactProgress(artifacts),
               ...renderToolPlanProgress(toolPlans),
-              `provider failed: ${effectiveProviderExecution.attempts.map((attempt) => `${attempt.provider}/${attempt.model}:${attempt.errorClass ?? "unknown"}`).join(", ") || "no route"}`
+              ...providerProgress
             ]
           };
 
@@ -804,9 +811,12 @@ export class AgentLoop {
           securityDecision,
           contextReferences: context?.references.map((reference) => reference.raw) ?? [],
           toolExecutions: toolExecutions.map((execution) => execution.tool.name),
-          provider: effectiveProviderExecution?.response === undefined
+          provider: providerSummary.actual === undefined
             ? undefined
-            : `${effectiveProviderExecution.response.provider}/${effectiveProviderExecution.response.model}`,
+            : `${providerSummary.actual.provider}/${providerSummary.actual.model}`,
+          providerExecution: providerSummary,
+          providerFallbackUsed: providerSummary.fallbackUsed,
+          providerPrimaryFailureClass: providerSummary.primaryFailureClass,
           toolPlans: toolPlans.map((plan) => ({
             id: plan.id,
             tool: plan.tool,

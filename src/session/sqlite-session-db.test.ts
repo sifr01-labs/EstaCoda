@@ -43,6 +43,81 @@ describe("SQLiteSessionDB", () => {
     }
   });
 
+  it("round-trips provider execution metadata on messages", async () => {
+    const db = new SQLiteSessionDB({ path: dbPath });
+    try {
+      await db.createSession({ id: "session-1", profileId: "default" });
+      await db.appendMessage({
+        id: "message-1",
+        sessionId: "session-1",
+        role: "agent",
+        content: "fallback answer",
+        metadata: {
+          provider: "deepseek/deepseek-v4-pro",
+          providerFallbackUsed: true,
+          providerPrimaryFailureClass: "rate-limit",
+          providerExecution: {
+            configuredPrimary: { provider: "kimi", model: "kimi-k2.7-code" },
+            actual: { provider: "deepseek", model: "deepseek-v4-pro" },
+            fallbackUsed: true,
+            primaryFailureClass: "rate-limit",
+            status: "fallback-success",
+            attempts: [
+              {
+                provider: "kimi",
+                model: "kimi-k2.7-code",
+                ok: false,
+                errorClass: "rate-limit",
+                routeRole: "primary",
+                attemptedRouteIndex: 0
+              },
+              {
+                provider: "deepseek",
+                model: "deepseek-v4-pro",
+                ok: true,
+                routeRole: "fallback",
+                attemptedRouteIndex: 1
+              }
+            ]
+          }
+        }
+      });
+
+      const messages = await db.listMessages("session-1");
+      expect(messages[0]?.metadata).toMatchObject({
+        provider: "deepseek/deepseek-v4-pro",
+        providerFallbackUsed: true,
+        providerPrimaryFailureClass: "rate-limit",
+        providerExecution: {
+          configuredPrimary: { provider: "kimi", model: "kimi-k2.7-code" },
+          actual: { provider: "deepseek", model: "deepseek-v4-pro" },
+          fallbackUsed: true,
+          primaryFailureClass: "rate-limit",
+          status: "fallback-success",
+          attempts: [
+            {
+              provider: "kimi",
+              model: "kimi-k2.7-code",
+              ok: false,
+              errorClass: "rate-limit",
+              routeRole: "primary",
+              attemptedRouteIndex: 0
+            },
+            {
+              provider: "deepseek",
+              model: "deepseek-v4-pro",
+              ok: true,
+              routeRole: "fallback",
+              attemptedRouteIndex: 1
+            }
+          ]
+        }
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it("persists a typed session model override in session metadata", async () => {
     const db = new SQLiteSessionDB({ path: dbPath });
     try {

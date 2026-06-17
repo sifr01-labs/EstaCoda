@@ -265,9 +265,11 @@ describe("provider execution summary", () => {
     const annotation = compactProviderExecutionAnnotation(summary) ?? "";
 
     expect(summary.attempts.map((summaryAttempt) => summaryAttempt.credentialId)).toEqual([
-      "KIMI_API_KEY",
-      "DEEPSEEK_API_KEY"
+      undefined,
+      undefined
     ]);
+    expect(JSON.stringify(summary)).not.toContain("KIMI_API_KEY");
+    expect(JSON.stringify(summary)).not.toContain("DEEPSEEK_API_KEY");
     expect(rendered).not.toContain("KIMI_API_KEY");
     expect(rendered).not.toContain("DEEPSEEK_API_KEY");
     expect(annotation).not.toContain("KIMI_API_KEY");

@@ -102,7 +102,6 @@ function summarizeAttempts(execution: ProviderExecutionResult): ProviderAttemptS
     model: attempt.model,
     ok: attempt.ok,
     ...(attempt.errorClass === undefined ? {} : { errorClass: attempt.errorClass }),
-    ...(attempt.credentialId === undefined ? {} : { credentialId: attempt.credentialId }),
     routeRole: index === 0 ? "primary" : "fallback",
     attemptedRouteIndex: index
   }));
