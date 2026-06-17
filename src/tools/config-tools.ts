@@ -771,7 +771,7 @@ function readProviderExecutionSummaryFromMessage(message: SessionMessage): Provi
     ...(readRoute(value.configuredPrimary) === undefined ? {} : { configuredPrimary: readRoute(value.configuredPrimary) }),
     ...(readRoute(value.actual) === undefined ? {} : { actual: readRoute(value.actual) }),
     fallbackUsed,
-    ...(typeof value.primaryFailureClass === "string" ? { primaryFailureClass: value.primaryFailureClass } : {}),
+    ...(safeLabelToken(value.primaryFailureClass) === undefined ? {} : { primaryFailureClass: safeLabelToken(value.primaryFailureClass) }),
     attempts: attemptsValue.map(readAttemptSummary).filter((attempt) => attempt !== undefined),
     status
   };
@@ -781,12 +781,14 @@ function readAttemptSummary(value: unknown): ProviderAttemptSummary | undefined 
   if (!isRecord(value) || typeof value.provider !== "string" || typeof value.model !== "string" || typeof value.ok !== "boolean") {
     return undefined;
   }
+  const provider = safeProviderToken(value.provider) ?? "unknown";
+  const model = safeLabelToken(value.model) ?? "unknown";
 
   return {
-    provider: value.provider,
-    model: value.model,
+    provider,
+    model,
     ok: value.ok,
-    ...(typeof value.errorClass === "string" ? { errorClass: value.errorClass } : {}),
+    ...(safeLabelToken(value.errorClass) === undefined ? {} : { errorClass: safeLabelToken(value.errorClass) }),
     ...(value.routeRole === "primary" || value.routeRole === "fallback" ? { routeRole: value.routeRole } : {}),
     ...(typeof value.attemptedRouteIndex === "number" ? { attemptedRouteIndex: value.attemptedRouteIndex } : {})
   };
@@ -796,10 +798,15 @@ function readRoute(value: unknown): { provider: string; model: string } | undefi
   if (!isRecord(value) || typeof value.provider !== "string" || typeof value.model !== "string") {
     return undefined;
   }
+  const provider = safeProviderToken(value.provider);
+  const model = safeLabelToken(value.model);
+  if (provider === undefined || model === undefined) {
+    return undefined;
+  }
 
   return {
-    provider: value.provider,
-    model: value.model
+    provider,
+    model
   };
 }
 
@@ -811,6 +818,14 @@ function readExecutionStatus(value: unknown): ProviderExecutionSummary["status"]
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function safeProviderToken(value: unknown): string | undefined {
+  return typeof value === "string" && /^[A-Za-z0-9_.:-]{1,80}$/u.test(value) ? value : undefined;
+}
+
+function safeLabelToken(value: unknown): string | undefined {
+  return typeof value === "string" && /^[A-Za-z0-9_.:-]{1,120}$/u.test(value) ? value : undefined;
 }
 
 function redactConfigToolInput<T extends Record<string, unknown>>(input: T): T {

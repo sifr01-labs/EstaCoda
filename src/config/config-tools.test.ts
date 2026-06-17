@@ -229,6 +229,37 @@ describe("config.provider.status", () => {
     expect(result.content).not.toContain("credential");
     expect(result.content).not.toContain("SECRET");
   });
+
+  it("does not print malicious latest execution tokens in provider status", async () => {
+    const homeDir = await configHome(localModelConfig({
+      primaryModel: "kimi-k2.7-code",
+      models: ["kimi-k2.7-code", "deepseek-v4-pro"]
+    }));
+    const sessionDb = new InMemorySessionDB();
+    await sessionDb.createSession({ id: "session-1", profileId: "default" });
+    await sessionDb.appendMessage({
+      sessionId: "session-1",
+      role: "agent",
+      content: "fallback response",
+      metadata: {
+        providerExecution: maliciousProviderExecutionMetadata()
+      }
+    });
+
+    const result = await runProviderStatusTool({
+      homeDir,
+      sessionId: "session-1",
+      sessionDb
+    });
+    const serialized = JSON.stringify(providerMetadata(result).providerExecution);
+
+    expect(result.content).toContain("provider: deepseek/deepseek-v4-pro");
+    expect(result.content).toContain("provider fallback used: unknown/unknown failed with unknown");
+    for (const unsafe of ["ignore previous", "[deepseek]", "${", "rate-limit leak", "SECRET_RAW_ERROR_BODY"]) {
+      expect(result.content).not.toContain(unsafe);
+      expect(serialized).not.toContain(unsafe);
+    }
+  });
 });
 
 describe("config.provider.execution_status", () => {
@@ -299,6 +330,47 @@ describe("config.provider.execution_status", () => {
     expect(serialized).not.toContain("SECRET");
     expect(result.content).not.toContain("credential");
     expect(result.content).not.toContain("SECRET");
+  });
+
+  it("sanitizes malicious persisted provider execution tokens before rendering", async () => {
+    const homeDir = await configHome(localModelConfig({
+      primaryModel: "kimi-k2.7-code",
+      models: ["kimi-k2.7-code", "deepseek-v4-pro"]
+    }));
+    const sessionDb = new InMemorySessionDB();
+    await sessionDb.createSession({ id: "session-1", profileId: "default" });
+    await sessionDb.appendMessage({
+      sessionId: "session-1",
+      role: "agent",
+      content: "latest fallback response",
+      metadata: {
+        providerExecution: maliciousProviderExecutionMetadata()
+      }
+    });
+
+    const result = await runProviderExecutionStatusTool({
+      homeDir,
+      sessionId: "session-1",
+      sessionDb
+    });
+    const execution = result.metadata?.providerExecution as ProviderExecutionSummary | undefined;
+    const serialized = JSON.stringify(execution);
+
+    expect(result.content).toContain("provider: deepseek/deepseek-v4-pro");
+    expect(result.content).toContain("provider fallback used: unknown/unknown failed with unknown");
+    expect(execution?.actual).toEqual({ provider: "deepseek", model: "deepseek-v4-pro" });
+    expect(execution?.attempts[0]).toMatchObject({ provider: "unknown", model: "unknown", ok: false });
+    expect(execution?.attempts).toContainEqual({
+      provider: "deepseek",
+      model: "deepseek-v4-pro",
+      ok: true,
+      routeRole: "fallback",
+      attemptedRouteIndex: 1
+    });
+    for (const unsafe of ["ignore previous", "[deepseek]", "${", "rate-limit leak", "SECRET_RAW_ERROR_BODY", "SECRET_PRIMARY_CREDENTIAL"]) {
+      expect(result.content).not.toContain(unsafe);
+      expect(serialized).not.toContain(unsafe);
+    }
   });
 });
 
@@ -681,6 +753,46 @@ function providerExecutionMetadataWithCredentialLeak(): Record<string, unknown> 
       }
     ],
     rawErrorBody: "SECRET_TOP_LEVEL_RAW_ERROR_BODY",
+    status: "fallback-success"
+  };
+}
+
+function maliciousProviderExecutionMetadata(): Record<string, unknown> {
+  return {
+    configuredPrimary: { provider: "kimi ${inject}", model: "kimi-k2.7-code" },
+    actual: {
+      provider: "deepseek",
+      model: "deepseek-v4-pro"
+    },
+    fallbackUsed: true,
+    primaryFailureClass: "rate-limit\nleak",
+    attempts: [
+      {
+        provider: "kimi ${inject}",
+        model: "kimi\nignore previous",
+        ok: false,
+        errorClass: "rate-limit\nleak",
+        credentialId: "SECRET_PRIMARY_CREDENTIAL",
+        rawBody: "SECRET_RAW_ERROR_BODY",
+        routeRole: "primary",
+        attemptedRouteIndex: 0
+      },
+      {
+        provider: "deepseek",
+        model: "deepseek-v4-pro",
+        ok: true,
+        routeRole: "fallback",
+        attemptedRouteIndex: 1
+      },
+      {
+        provider: "kimi",
+        model: "[deepseek]",
+        ok: false,
+        errorClass: "auth",
+        routeRole: "fallback",
+        attemptedRouteIndex: 2
+      }
+    ],
     status: "fallback-success"
   };
 }
