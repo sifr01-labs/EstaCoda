@@ -820,7 +820,9 @@ function buildNativePromptHistory(
             : "no_native_messages",
           skippedMalformedToolCalls: built.stats.skippedMalformedTurns,
           skippedUnsafeTurns: built.stats.skippedUnsafeTurns,
-          nativeReplayUnsafeTurns: built.stats.skippedUnsafeTurns
+          nativeReplayUnsafeTurns: built.stats.skippedUnsafeTurns,
+          historicalToolResultsLabeled: built.stats.historicalToolResultsLabeled,
+          mutableStateToolResultsLabeled: built.stats.mutableStateToolResultsLabeled
         }
       ]
     };
@@ -841,7 +843,9 @@ function buildNativePromptHistory(
         skippedMalformedToolCalls: built.stats.skippedMalformedTurns,
         skippedUnsafeTurns: built.stats.skippedUnsafeTurns,
         echoMessages: built.messages.filter((message) => message.role === "assistant" && message.providerReplayEcho !== undefined).length,
-        nativeReplayUnsafeTurns: built.stats.skippedUnsafeTurns
+        nativeReplayUnsafeTurns: built.stats.skippedUnsafeTurns,
+        historicalToolResultsLabeled: built.stats.historicalToolResultsLabeled,
+        mutableStateToolResultsLabeled: built.stats.mutableStateToolResultsLabeled
       }
     ]
   };
@@ -868,7 +872,9 @@ function nativeHistoryBuilderDiagnostics(
     mergedUsers: stats.mergedUserMessages,
     skippedMalformedToolCalls: stats.skippedMalformedTurns,
     skippedUnsafeTurns: stats.skippedUnsafeTurns,
-    nativeReplayUnsafeTurns: stats.skippedUnsafeTurns
+    nativeReplayUnsafeTurns: stats.skippedUnsafeTurns,
+    historicalToolResultsLabeled: stats.historicalToolResultsLabeled,
+    mutableStateToolResultsLabeled: stats.mutableStateToolResultsLabeled
   }];
 }
 

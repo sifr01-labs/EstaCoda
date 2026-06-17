@@ -17,6 +17,8 @@ export type NativeHistoryBuilderOptions = {
 export type NativeHistoryBuilderStats = {
   nativeToolTurns: number;
   nativeToolResults: number;
+  historicalToolResultsLabeled: number;
+  mutableStateToolResultsLabeled: number;
   injectedMissingResults: number;
   droppedToolMessages: number;
   skippedUnsafeTurns: number;
@@ -39,6 +41,8 @@ export function buildNativeHistoryMessages(
   const stats: NativeHistoryBuilderStats = {
     nativeToolTurns: 0,
     nativeToolResults: 0,
+    historicalToolResultsLabeled: 0,
+    mutableStateToolResultsLabeled: 0,
     injectedMissingResults: 0,
     droppedToolMessages: 0,
     skippedUnsafeTurns: 0,
@@ -94,6 +98,7 @@ function buildToolCallTurnMessages(
   }
 
   const expectedIds = new Set(toolCalls.map((toolCall) => toolCall.id));
+  const toolNameById = new Map(toolCalls.map((toolCall) => [toolCall.id, toolCall.name]));
   const matchingToolResults = toolResults.filter((message) => expectedIds.has(toolCallIdFromMetadata(message.metadata)));
   const matchingIds = new Set(matchingToolResults.map((message) => toolCallIdFromMetadata(message.metadata)));
   const missingIds = toolCalls.map((toolCall) => toolCall.id).filter((id) => !matchingIds.has(id));
@@ -127,7 +132,7 @@ function buildToolCallTurnMessages(
     if (resultsForCall.length === 0) {
       providerMessages.push({
         role: "tool",
-        content: MISSING_TOOL_RESULT_CONTENT,
+        content: labelHistoricalToolResultContent(sessionMessages[index]!, MISSING_TOOL_RESULT_CONTENT, toolNameById.get(toolCall.id), stats),
         toolCallId: toolCall.id
       });
       stats.injectedMissingResults += 1;
@@ -135,9 +140,10 @@ function buildToolCallTurnMessages(
     }
 
     for (const result of resultsForCall) {
+      const toolName = toolNameFromMetadata(result.metadata) ?? toolNameById.get(toolCall.id);
       providerMessages.push({
         role: "tool",
-        content: result.content,
+        content: labelHistoricalToolResultContent(result, result.content, toolName, stats),
         toolCallId: toolCall.id
       });
       stats.nativeToolResults += 1;
@@ -202,6 +208,60 @@ function safeSessionContent(message: SessionMessage): string {
     return "";
   }
   return message.content;
+}
+
+function labelHistoricalToolResultContent(
+  message: SessionMessage,
+  content: string,
+  toolName: string | undefined,
+  stats: NativeHistoryBuilderStats
+): string {
+  const prefix = historicalToolResultPrefix(message, toolName);
+  stats.historicalToolResultsLabeled += 1;
+  if (isMutableStateToolName(toolName)) {
+    stats.mutableStateToolResultsLabeled += 1;
+  }
+  return `${prefix}\n${content}`;
+}
+
+function historicalToolResultPrefix(message: SessionMessage, toolName: string | undefined): string {
+  const createdAt = message.createdAt || "unknown time";
+  const renderedToolName = toolName?.trim() || "unknown tool result";
+  if (isMutableStateToolName(toolName)) {
+    return `[Historical tool result from ${createdAt} via ${renderedToolName}. This may describe stale mutable filesystem/config/skill/process state. Verify with a current tool before asserting current state.]`;
+  }
+  return `[Historical tool result from ${createdAt} via ${renderedToolName}; reference only.]`;
+}
+
+function toolNameFromMetadata(metadata: SessionMessage["metadata"]): string | undefined {
+  const candidates = [
+    metadata?.tool_call_name,
+    metadata?.toolName,
+    metadata?.tool,
+    metadata?.name
+  ];
+  return candidates.find((candidate): candidate is string => typeof candidate === "string" && candidate.trim().length > 0);
+}
+
+function isMutableStateToolName(name: string | undefined): boolean {
+  if (name === undefined) {
+    return false;
+  }
+  const normalized = name.toLowerCase();
+  return [
+    "skill.list",
+    "terminal.inspect",
+    "shell",
+    "bash",
+    "filesystem",
+    "file",
+    "files.",
+    "git",
+    "process",
+    "config",
+    "service",
+    "network"
+  ].some((needle) => normalized === needle || normalized.startsWith(`${needle}.`) || normalized.includes(needle));
 }
 
 function stringifyProviderContent(content: ProviderMessage["content"]): string {

@@ -288,6 +288,8 @@ describe("RunRecorder", () => {
         injectedStubs: 0,
         mergedUsers: 1,
         echoMessages: 1,
+        historicalToolResultsLabeled: 2.9,
+        mutableStateToolResultsLabeled: Number.POSITIVE_INFINITY,
         reason: "missing_echo",
         rawArgs: "sk-secret",
         toolResult: "private result",
@@ -305,6 +307,8 @@ describe("RunRecorder", () => {
         injectedStubs: 0,
         mergedUsers: 1,
         echoMessages: 1,
+        historicalToolResultsLabeled: 2,
+        mutableStateToolResultsLabeled: 0,
         reason: "missing_echo"
       });
       const serialized = JSON.stringify(events);

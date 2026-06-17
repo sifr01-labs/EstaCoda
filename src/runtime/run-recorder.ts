@@ -726,6 +726,8 @@ function sanitizeStructuredToolHistoryDiagnostic(
     ...(input.echoMissing === undefined ? {} : { echoMissing: nonNegativeInteger(input.echoMissing) }),
     ...(input.echoOversized === undefined ? {} : { echoOversized: nonNegativeInteger(input.echoOversized) }),
     ...(input.nativeReplayUnsafeTurns === undefined ? {} : { nativeReplayUnsafeTurns: nonNegativeInteger(input.nativeReplayUnsafeTurns) }),
+    ...(input.historicalToolResultsLabeled === undefined ? {} : { historicalToolResultsLabeled: nonNegativeInteger(input.historicalToolResultsLabeled) }),
+    ...(input.mutableStateToolResultsLabeled === undefined ? {} : { mutableStateToolResultsLabeled: nonNegativeInteger(input.mutableStateToolResultsLabeled) }),
     ...(input.reason === undefined ? {} : { reason: input.reason })
   };
 }

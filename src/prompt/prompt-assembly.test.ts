@@ -749,6 +749,7 @@ describe("assembleProviderPrompt", () => {
 
     expect(rendered).toContain("Context summary: Command exited 0 with 1 line.");
     expect(rendered).toContain("Excerpt:\nactual command output");
+    expect(rendered).not.toContain("[Historical tool result");
     expect(rendered).not.toContain("_estacoda_context_summary=Command exited 0 with 1 line.");
   });
 });
@@ -830,15 +831,19 @@ describe("assembleProviderContinuationPrompt", () => {
       expect.objectContaining({
         role: "tool",
         toolCallId: "call-1",
-        content: "native tool result"
+        content: expect.stringContaining("native tool result")
       })
     ]));
+    expect(renderMessages(prompt.messages)).toContain("[Historical tool result");
+    expect(renderMessages(prompt.messages)).toContain("Verify with a current tool before asserting current state.");
     expect(renderMessages(prompt.messages)).not.toContain("flat native tool result fallback");
     expect(prompt.nativeHistoryDiagnostics).toEqual(expect.arrayContaining([
       expect.objectContaining({
         kind: "structured-tool-history-selected",
         nativePairs: 1,
-        routeRole: "primary"
+        routeRole: "primary",
+        historicalToolResultsLabeled: 1,
+        mutableStateToolResultsLabeled: 1
       })
     ]));
   });
@@ -901,13 +906,14 @@ describe("assembleProviderContinuationPrompt", () => {
       expect.objectContaining({
         role: "tool",
         toolCallId: "call-read",
-        content: "selected native result"
+        content: expect.stringContaining("selected native result")
       })
     ]));
     const finalContent = renderMessages([finalMessage!]);
     expect(finalContent).toContain("EstaCoda executed the requested tools.");
     expect(finalContent).toContain("Some tool results are already included as structured tool messages above.");
     expect(finalContent).not.toContain("selected native result");
+    expect(finalContent).not.toContain("[Historical tool result");
     expect(finalContent).toContain("non-selected flat result");
     expect(countOccurrences(JSON.stringify(prompt.messages), "selected native result")).toBe(1);
   });
@@ -996,7 +1002,7 @@ describe("assembleProviderContinuationPrompt", () => {
       expect.objectContaining({
         role: "tool",
         toolCallId: "call-1",
-        content: "native tool result"
+        content: expect.stringContaining("native tool result")
       })
     ]));
 
@@ -1005,6 +1011,7 @@ describe("assembleProviderContinuationPrompt", () => {
     expect(rendered).toContain("User message:\nInspect this.");
     expect(rendered).not.toContain("flat fallback should be replaced");
     expect(countOccurrences(rendered, "native tool result")).toBe(1);
+    expect(rendered).toContain("[Historical tool result");
     expect(prompt.messages.findIndex((message) => message.role === "assistant" && message.toolCalls !== undefined))
       .toBeLessThan(prompt.messages.length - 1);
   });

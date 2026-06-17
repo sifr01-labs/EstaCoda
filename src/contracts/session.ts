@@ -196,6 +196,8 @@ export type StructuredToolHistoryDiagnosticEvent = {
   echoMissing?: number;
   echoOversized?: number;
   nativeReplayUnsafeTurns?: number;
+  historicalToolResultsLabeled?: number;
+  mutableStateToolResultsLabeled?: number;
   reason?: StructuredToolHistoryDiagnosticReason;
 };
 

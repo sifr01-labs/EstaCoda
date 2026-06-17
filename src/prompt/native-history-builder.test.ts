@@ -67,12 +67,72 @@ describe("buildNativeHistoryMessages", () => {
       },
       {
         role: "tool",
-        content: "file contents",
+        content: expect.stringContaining("file contents"),
         toolCallId: "call-1"
       }
     ]);
+    expect(String(result.messages[2]?.content)).toContain("[Historical tool result from 2026-05-31T00:00:00.000Z via files.read.");
+    expect(String(result.messages[2]?.content)).toContain("Verify with a current tool before asserting current state.");
     expect(result.stats.nativeToolTurns).toBe(1);
     expect(result.stats.nativeToolResults).toBe(1);
+    expect(result.stats.historicalToolResultsLabeled).toBe(1);
+    expect(result.stats.mutableStateToolResultsLabeled).toBe(1);
+  });
+
+  it("labels non-mutable historical tool results as reference-only with timestamp and tool name", () => {
+    const result = buildNativeHistoryMessages([
+      providerToolTurn("agent-call", "", {
+        providerToolCalls: [
+          {
+            id: "call-calc",
+            name: "calculator.sum",
+            argumentsText: "{\"values\":[1,2]}"
+          }
+        ]
+      }),
+      message("tool-calc", "tool", "sum=3", {
+        tool_call_id: "call-calc",
+        tool_call_name: "calculator.sum"
+      })
+    ]);
+
+    expect(result.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: "tool",
+        toolCallId: "call-calc",
+        content: "[Historical tool result from 2026-05-31T00:00:00.000Z via calculator.sum; reference only.]\nsum=3"
+      })
+    ]));
+    expect(result.stats.historicalToolResultsLabeled).toBe(1);
+    expect(result.stats.mutableStateToolResultsLabeled).toBe(0);
+  });
+
+  it("derives historical tool result names from assistant metadata when result metadata only has an id", () => {
+    const result = buildNativeHistoryMessages([
+      providerToolTurn("agent-call", "", {
+        providerToolCalls: [
+          {
+            id: "call-skill-list",
+            name: "skill.list",
+            argumentsText: "{}"
+          }
+        ]
+      }),
+      message("tool-skill-list", "tool", "OldSkill\tworkflow\tlocal\told", {
+        tool_call_id: "call-skill-list"
+      })
+    ]);
+
+    expect(result.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: "tool",
+        toolCallId: "call-skill-list",
+        content: expect.stringContaining("via skill.list. This may describe stale mutable filesystem/config/skill/process state.")
+      })
+    ]));
+    expect(String(result.messages.at(-1)?.content)).toContain("OldSkill");
+    expect(result.stats.historicalToolResultsLabeled).toBe(1);
+    expect(result.stats.mutableStateToolResultsLabeled).toBe(1);
   });
 
   it("preserves assistant content alongside native tool calls", () => {
@@ -233,12 +293,12 @@ describe("buildNativeHistoryMessages", () => {
       },
       {
         role: "tool",
-        content: "file contents",
+        content: expect.stringContaining("file contents"),
         toolCallId: "call-1"
       },
       {
         role: "tool",
-        content: "[Tool result unavailable]",
+        content: expect.stringContaining("[Tool result unavailable]"),
         toolCallId: "call-2"
       },
       {
@@ -259,12 +319,12 @@ describe("buildNativeHistoryMessages", () => {
     expect(result.messages.filter((providerMessage) => providerMessage.role === "tool")).toEqual([
       {
         role: "tool",
-        content: "first chunk",
+        content: expect.stringContaining("first chunk"),
         toolCallId: "call-1"
       },
       {
         role: "tool",
-        content: "second chunk",
+        content: expect.stringContaining("second chunk"),
         toolCallId: "call-1"
       }
     ]);
