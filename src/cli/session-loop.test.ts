@@ -1225,6 +1225,35 @@ function providerExecutionFallbackSuccess(): ProviderExecutionResult {
   };
 }
 
+function providerExecutionFallbackSuccessWithModel(model: string): ProviderExecutionResult {
+  return {
+    ...providerExecutionFallbackSuccess(),
+    response: {
+      ok: true,
+      content: "Fallback response",
+      provider: "fallback-provider",
+      model,
+    },
+    attempts: [
+      {
+        provider: "mock",
+        model: "mock-model",
+        credentialId: "secret-primary-credential",
+        ok: false,
+        errorClass: "rate-limit",
+        content: "raw upstream body should not appear",
+      },
+      {
+        provider: "fallback-provider",
+        model,
+        credentialId: "secret-fallback-credential",
+        ok: true,
+        content: "Fallback response",
+      },
+    ],
+  };
+}
+
 function providerExecutionFailed(): ProviderExecutionResult {
   return {
     ok: false,
@@ -1241,6 +1270,46 @@ function providerExecutionFailed(): ProviderExecutionResult {
     ],
     toolCalls: [],
   };
+}
+
+async function runProviderExecutionSequence(
+  executions: ProviderExecutionResult[]
+): Promise<string> {
+  const outputChunks: string[] = [];
+  let handleIndex = 0;
+  const runtime = {
+    ...createMockRuntime(),
+    handle: async (): Promise<AgentLoopResponse> =>
+      mockResponse({ providerExecution: executions[Math.min(handleIndex++, executions.length - 1)] }),
+  };
+  let promptIndex = 0;
+
+  await runSessionLoop({
+    runtime,
+    output: {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 160,
+    } as unknown as NodeJS.WritableStream,
+    capabilities: interactiveCaps({ terminalWidth: 160, supportsAnimation: false }),
+    prompt: Object.assign(
+      async () => {
+        const values = [...executions.map((_, index) => `turn ${index + 1}`), "/exit"];
+        return values[promptIndex++] ?? "/exit";
+      },
+      { close: () => {} }
+    ),
+    close: () => {},
+  });
+
+  return stripAnsi(outputChunks.join(""));
+}
+
+function countOccurrences(text: string, pattern: string): number {
+  return text.split(pattern).length - 1;
 }
 
 function withModelInfo<T extends Runtime>(runtime: T): T {
@@ -3603,6 +3672,39 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(rendered).not.toContain("raw upstream body should not appear");
   });
 
+  it("renders fallback transition alert once and recovery once", async () => {
+    const rendered = await runProviderExecutionSequence([
+      providerExecutionFallbackSuccess(),
+      providerExecutionFallbackSuccess(),
+      providerExecutionPrimarySuccess("mock", "mock-model"),
+      providerExecutionPrimarySuccess("mock", "mock-model"),
+    ]);
+
+    expect(countOccurrences(rendered, "primary model failed: mock-model rate-limit; using fallback fallback-model")).toBe(1);
+    expect(countOccurrences(rendered, "primary model available again: mock-model")).toBe(1);
+    expect(rendered).not.toContain("secret-primary-credential");
+    expect(rendered).not.toContain("secret-fallback-credential");
+    expect(rendered).not.toContain("raw upstream body should not appear");
+    expect(rendered).not.toContain("mock/mock-model");
+    expect(rendered).not.toContain("fallback-provider/fallback-model");
+
+    const fallbackRail = rendered.split("\n").find((line) => line.includes("fallback-model") && line.includes("⧖"));
+    expect(fallbackRail).toBeDefined();
+    expect(fallbackRail).not.toContain("rate-limit");
+    expect(fallbackRail).not.toContain("fallback(");
+  });
+
+  it("does not render noisy provider transition alerts for clean primary success", async () => {
+    const rendered = await runProviderExecutionSequence([
+      providerExecutionPrimarySuccess("mock", "mock-model"),
+      providerExecutionPrimarySuccess("mock", "mock-model"),
+    ]);
+
+    expect(rendered).not.toContain("primary model failed:");
+    expect(rendered).not.toContain("primary model available again:");
+    expect(rendered).not.toContain("provider failed:");
+  });
+
   it("shows provider failure without pretending an actual serving model exists", async () => {
     const outputChunks: string[] = [];
     const runtime = {
@@ -3639,6 +3741,30 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(failureRail).not.toContain("->");
     expect(failureRail).not.toContain("network");
     expect(failureRail).not.toContain("provider-failed");
+    expect(rendered).not.toContain("secret-primary-credential");
+    expect(rendered).not.toContain("raw upstream body should not appear");
+  });
+
+  it("renders provider failed transition alert once without raw provider internals", async () => {
+    const rendered = await runProviderExecutionSequence([
+      providerExecutionFailed(),
+      providerExecutionFailed(),
+    ]);
+
+    expect(countOccurrences(rendered, "provider failed: mock-model network")).toBe(1);
+    expect(rendered).not.toContain("secret-primary-credential");
+    expect(rendered).not.toContain("raw upstream body should not appear");
+  });
+
+  it("renders failed to fallback recovery alert once", async () => {
+    const rendered = await runProviderExecutionSequence([
+      providerExecutionFailed(),
+      providerExecutionFallbackSuccess(),
+      providerExecutionFallbackSuccess(),
+    ]);
+
+    expect(countOccurrences(rendered, "provider failed: mock-model network")).toBe(1);
+    expect(countOccurrences(rendered, "provider recovered via fallback: fallback-model; primary mock-model failed with rate-limit")).toBe(1);
     expect(rendered).not.toContain("secret-primary-credential");
     expect(rendered).not.toContain("raw upstream body should not appear");
   });

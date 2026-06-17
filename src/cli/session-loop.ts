@@ -98,6 +98,20 @@ const MAX_ACTIVE_TURN_QUEUED_LINES = 3;
 type ContextUsageSnapshot = NonNullable<SessionStatusRailViewModel["contextUsage"]>;
 type RuntimeModelInfo = ReturnType<NonNullable<Runtime["getModelInfo"]>>;
 type StatusRailTimerMode = "idle" | "active-turn" | "last-turn";
+type ProviderServingStatus = "primary" | "fallback" | "failed";
+
+type ProviderRouteServingState = {
+  readonly status: ProviderServingStatus;
+  readonly primary?: {
+    readonly provider: string;
+    readonly model: string;
+  };
+  readonly actual?: {
+    readonly provider: string;
+    readonly model: string;
+  };
+  readonly reason?: string;
+};
 
 type StatusRailTiming = {
   readonly now: () => number;
@@ -361,6 +375,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     let lastCompletedTurnSeconds: number | undefined;
     let pendingCompactionPostTokens: number | undefined;
     let lastProviderExecutionSummary: ProviderExecutionSummary | undefined;
+    let providerServingState: ProviderRouteServingState | undefined;
     const resetTurnRailState = () => {
       timerMode = "idle";
       activeTurnStartedAtMs = undefined;
@@ -606,6 +621,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           runtime = shouldExit.runtime;
           latestContextUsage = undefined;
           lastProviderExecutionSummary = undefined;
+          providerServingState = undefined;
           resetTurnRailState();
           activityBuilder = new ToolActivityViewModelBuilder({
             tools: runtime.tools()
@@ -1141,6 +1157,13 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           continue;
         }
 
+        const providerServingAlert = lastProviderExecutionSummary === undefined
+          ? undefined
+          : providerServingTransitionAlert(providerServingState, lastProviderExecutionSummary);
+        if (lastProviderExecutionSummary !== undefined) {
+          providerServingState = providerServingStateFromSummary(lastProviderExecutionSummary);
+        }
+
         const assistantVm = buildAssistantResponseViewModel({
           label: response.label,
           text: response.text,
@@ -1148,6 +1171,11 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           progress: options.showResponseProgress === true ? response.progress : undefined,
         });
         flushCompletedToolRowsNoRestore();
+        if (providerServingAlert !== undefined) {
+          writeAboveChrome(() => {
+            output.write(`${providerServingAlert}\n`);
+          });
+        }
         writeAboveChrome(() => {
           output.write(renderer.render(assistantVm));
         });
@@ -3167,6 +3195,99 @@ function providerExecutionRailState(
     configuredModelLabel: summary.configuredPrimary?.model,
     servingModelLabel: summary.actual.model,
   };
+}
+
+function providerServingTransitionAlert(
+  previous: ProviderRouteServingState | undefined,
+  summary: ProviderExecutionSummary
+): string | undefined {
+  const next = providerServingStateFromSummary(summary);
+  if (next === undefined) {
+    return undefined;
+  }
+
+  if (next.status === "primary") {
+    if (previous?.status === "fallback" || previous?.status === "failed") {
+      return `primary model available again: ${routeModelLabel(next.actual ?? next.primary)}`;
+    }
+    return undefined;
+  }
+
+  if (next.status === "fallback") {
+    if (previous?.status === "failed") {
+      return `provider recovered via fallback: ${routeModelLabel(next.actual)}; primary ${routeModelLabel(next.primary)} failed with ${formatProviderFailureReason(next.reason)}`;
+    }
+    if (previous?.status !== "fallback") {
+      return `primary model failed: ${routeModelLabel(next.primary)} ${formatProviderFailureReason(next.reason)}; using fallback ${routeModelLabel(next.actual)}`;
+    }
+    return undefined;
+  }
+
+  if (previous?.status !== "failed") {
+    return `provider failed: ${routeModelLabel(next.primary ?? next.actual)} ${formatProviderFailureReason(next.reason)}`;
+  }
+
+  return undefined;
+}
+
+function providerServingStateFromSummary(
+  summary: ProviderExecutionSummary
+): ProviderRouteServingState | undefined {
+  if (summary.status === "not-run") {
+    return undefined;
+  }
+
+  if (summary.status === "failed") {
+    const primary = firstProviderSummaryRoute(summary) ?? summary.configuredPrimary;
+    return {
+      status: "failed",
+      primary,
+      reason: summary.primaryFailureClass ?? firstProviderFailureReason(summary),
+    };
+  }
+
+  if (summary.actual === undefined) {
+    return undefined;
+  }
+
+  if (summary.status === "fallback-success") {
+    return {
+      status: "fallback",
+      primary: firstProviderSummaryRoute(summary) ?? summary.configuredPrimary,
+      actual: summary.actual,
+      reason: summary.primaryFailureClass ?? firstProviderFailureReason(summary),
+    };
+  }
+
+  return {
+    status: "primary",
+    primary: summary.configuredPrimary,
+    actual: summary.actual,
+  };
+}
+
+function firstProviderSummaryRoute(
+  summary: ProviderExecutionSummary
+): { provider: string; model: string } | undefined {
+  const attempt = summary.attempts.find((candidate) => candidate.attemptedRouteIndex === 0) ?? summary.attempts[0];
+  return attempt === undefined
+    ? undefined
+    : {
+        provider: attempt.provider,
+        model: attempt.model,
+      };
+}
+
+function firstProviderFailureReason(summary: ProviderExecutionSummary): string | undefined {
+  return summary.attempts.find((attempt) => !attempt.ok)?.errorClass;
+}
+
+function routeModelLabel(route: { model: string } | undefined): string {
+  return route?.model ?? "unknown";
+}
+
+function formatProviderFailureReason(reason: string | undefined): string {
+  return reason ?? "unknown";
 }
 
 function modelContextWindow(

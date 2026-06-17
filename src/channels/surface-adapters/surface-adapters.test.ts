@@ -106,6 +106,21 @@ describe("PlainLogSurfaceAdapter", () => {
     assertNoEmoji(out);
   });
 
+  it("renders provider attempt progress labels without emoji", () => {
+    expect(adapter.renderProgressLabel({
+      kind: "provider-attempt",
+      provider: "openrouter",
+      model: "k2",
+      fallback: false,
+    })).toBe("Routing provider · k2");
+    expect(adapter.renderProgressLabel({
+      kind: "provider-attempt",
+      provider: "openrouter",
+      model: "deepseek-v4-pro",
+      fallback: true,
+    })).toBe("Routing fallback · deepseek-v4-pro");
+  });
+
   it("renders assistant response without ANSI or emoji", () => {
     const out = adapter.renderAssistantResponse("EstaCoda", "Hello world", {
       matchedSkills: ["web-search"],

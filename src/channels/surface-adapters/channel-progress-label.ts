@@ -81,13 +81,22 @@ export function renderPlainProgressLabel(
     case "tool-start":
       return plainActivityLabel(locale, plainActivityKeyForTool(event.tool));
     case "provider-attempt":
-      return plainActivityLabel(locale, "route_task");
+      return event.fallback
+        ? `${plainProviderRoutingLabel(locale, true)} · ${event.model}`
+        : `${plainProviderRoutingLabel(locale, false)} · ${event.model}`;
     case "agent-final":
     case "provider-token":
       return "";
     default:
       return "";
   }
+}
+
+function plainProviderRoutingLabel(locale: ActivityLabelLocale, fallback: boolean): string {
+  if (locale === "ar") {
+    return fallback ? "توجيه احتياطي" : "توجيه النموذج";
+  }
+  return fallback ? "Routing fallback" : "Routing provider";
 }
 
 export function plainActivityKeyForTool(tool: string): ActivityLabelKey {

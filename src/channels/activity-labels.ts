@@ -82,13 +82,22 @@ export function renderChannelProgressLabel(
         : `${toolEmoji(event.tool)} ${event.tool}: "${summary}"`;
     }
     case "provider-attempt":
-      return activityLabel(locale, "route_task");
+      return event.fallback
+        ? `${providerRoutingLabel(locale, true)} · ${event.model}`
+        : `${providerRoutingLabel(locale, false)} · ${event.model}`;
     case "agent-final":
     case "provider-token":
       return "";
     default:
       return "";
   }
+}
+
+function providerRoutingLabel(locale: ActivityLabelLocale, fallback: boolean): string {
+  if (locale === "ar") {
+    return fallback ? "✦ توجيه احتياطي" : "✦ توجيه النموذج";
+  }
+  return fallback ? "✦ Routing fallback" : "✦ Routing provider";
 }
 
 export function toolEmoji(tool: string): string {
