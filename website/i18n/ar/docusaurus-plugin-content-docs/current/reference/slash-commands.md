@@ -209,7 +209,8 @@ sidebar_position: 2
 
 ```bash
 /cron list
-/cron add ...
+/cron add --schedule <schedule> --command "<prompt>"
+/cron edit <job-id> [flags]
 /cron show <job-id>
 /cron history [job-id]
 /cron run <job-id>
@@ -223,7 +224,9 @@ sidebar_position: 2
 - `~/.estacoda/profiles/<id>/cron/jobs.json`
 - `~/.estacoda/sessions.sqlite`
 
-**السلوك:** يستخدم CronStore الملف التعريف النشط. الدورة اليدوية تشغّل المهام المستحقة فوراً.
+**السلوك:** يستخدم CronStore الملف التعريف النشط. الدورة اليدوية تشغّل المهام المستحقة فوراً داخل runtimes معزولة للـ cron. يدعم cron add/edit عناصر التحكم المتقدمة نفسها في CLI، ومنها skills وscripts ووضع no-agent وسلاسل contextFrom وتحكمات model/tool و`--workdir` الموثوق والمحصور.
+
+راجع [المهام المجدولة](../user-guide/cron.md) للتفاصيل.
 
 ---
 

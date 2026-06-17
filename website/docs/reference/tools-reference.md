@@ -291,7 +291,9 @@ Text-to-speech and speech-to-text.
 
 **Actions:** `create`, `list`, `update`, `pause`, `resume`, `run`, `remove`.
 
-**Behavior:** Cron jobs created through the tool use the same storage and validation as CLI cron commands. Prompt safety scanning applies. Recursion guard prevents cron jobs from scheduling more cron jobs.
+**Behavior:** Cron jobs created through the tool use the same storage and validation as CLI cron commands. Prompt safety scanning applies. The tool supports no-agent script jobs, skill labels/instructions, upstream `contextFrom`, model overrides, enabled toolsets, and trusted contained `workdir`. Runtime-backed jobs run in isolated cron runtimes where cron, messaging, and clarify toolsets are forced off. No-agent jobs do not create runtime trajectories.
+
+See [Scheduled Jobs](../user-guide/cron.md) for the full scheduled automation model.
 
 ### Memory tools
 

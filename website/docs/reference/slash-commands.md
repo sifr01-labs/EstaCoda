@@ -209,7 +209,8 @@ Manage scheduled tasks from within a session.
 
 ```bash
 /cron list
-/cron add ...
+/cron add --schedule <schedule> --command "<prompt>"
+/cron edit <job-id> [flags]
 /cron show <job-id>
 /cron history [job-id]
 /cron run <job-id>
@@ -223,7 +224,9 @@ Manage scheduled tasks from within a session.
 - `~/.estacoda/profiles/<id>/cron/jobs.json`
 - `~/.estacoda/sessions.sqlite`
 
-**Behavior:** Uses the active profile's CronStore. Manual tick runs due jobs immediately.
+**Behavior:** Uses the active profile's CronStore. Manual tick runs due jobs immediately in isolated cron runtimes. Cron add/edit supports the same advanced controls as CLI cron, including skills, scripts, no-agent mode, context chaining, model/tool controls, and trusted contained `--workdir`.
+
+See [Scheduled Jobs](../user-guide/cron.md) for details.
 
 ---
 

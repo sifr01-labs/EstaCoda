@@ -21,6 +21,7 @@ const sidebars: SidebarsConfig = {
         'user-guide/profiles',
         'user-guide/providers',
         'user-guide/tools',
+        'user-guide/cron',
         'user-guide/skills',
         'user-guide/memory',
         'user-guide/security-and-approvals',

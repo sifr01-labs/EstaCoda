@@ -254,6 +254,8 @@ Valid channel names: `telegram`, `discord`, `email`, `whatsapp` (case-insensitiv
 estacoda cron list                      # all jobs with schedule and next run
 estacoda cron show <job-id>             # job detail + last 5 executions
 estacoda cron history [job-id]          # execution history
+estacoda cron add --schedule <schedule> --command "<prompt>"
+estacoda cron edit <job-id> [flags]
 estacoda cron run <job-id>              # request a manual run
 estacoda cron pause <job-id>
 estacoda cron resume <job-id>
@@ -261,17 +263,23 @@ estacoda cron remove <job-id>
 estacoda cron tick                      # manual scheduler tick
 ```
 
+Useful add/edit flags include `--skill`, `--script`, `--script-arg`, `--script-timeout-ms`, `--no-agent`, `--agent`, `--context-from`, `--clear-context-from`, `--model`, `--provider`, `--clear-model`, `--toolset`, `--clear-toolsets`, `--workdir`, and `--clear-workdir`.
+
 **State touched:**
 - `~/.estacoda/profiles/<id>/cron/jobs.json`
 - `~/.estacoda/sessions.sqlite` (execution history)
 - `~/.estacoda/profiles/<id>/cron/output/`
 
-**Profile boundary:** Cron jobs are profile-scoped.
+**Profile boundary:** Cron jobs are profile-scoped. Storage can also use the default top-level cron directory when a default/manual `CronStore` is constructed.
 
 **Failure modes:**
 - Stale locks from crashed processes are recovered on startup.
-- Cron jobs cannot schedule more cron jobs (recursion guard).
+- Cron runtimes are isolated and cannot use cron, messaging, or clarify toolsets.
+- Invalid context, model/provider, toolset, workdir, and unsafe prompt inputs are rejected before persistence where validation context exists.
 - Delivery failures are classified and persisted in execution history.
+- No-agent jobs do not create runtime trajectories.
+
+See [Scheduled Jobs](../user-guide/cron.md) for the full cron behavior model.
 
 ---
 

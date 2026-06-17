@@ -291,7 +291,9 @@ sidebar_position: 6
 
 **الإجراءات:** `create`، `list`، `update`، `pause`، `resume`، `run`، `remove`.
 
-**السلوك:** المهام المُنشأة عبر الأداة تستخدم نفس التخزين والتحقق من أوامر cron CLI. يُطبّق فحص أمان الموجهات. يمنع حارس التكرار المهام من جدولة مهام cron إضافية.
+**السلوك:** المهام المُنشأة عبر الأداة تستخدم نفس التخزين والتحقق من أوامر cron CLI. يُطبّق فحص أمان الموجهات. تدعم الأداة مهام script في وضع no-agent، وتعليمات skills، و`contextFrom` من مهام سابقة، وmodel overrides، وenabled toolsets، و`workdir` موثوق ومحصور. المهام المدعومة بـ runtime تعمل داخل runtimes معزولة للـ cron حيث تكون toolsets: `cron` و`messaging` و`clarify` معطلة إجباريًا. مهام no-agent لا تنشئ runtime trajectories.
+
+راجع [المهام المجدولة](../user-guide/cron.md) للنموذج الكامل للأتمتة المجدولة.
 
 ### أدوات الذاكرة
 
