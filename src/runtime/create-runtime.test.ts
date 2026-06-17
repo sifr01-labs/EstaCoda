@@ -1793,6 +1793,7 @@ describe("createRuntime MCP trust gating", () => {
               "script_timeout_ms",
               "skill",
               "skills",
+              "workdir",
             ],
             "toolsets": [
               "core",
