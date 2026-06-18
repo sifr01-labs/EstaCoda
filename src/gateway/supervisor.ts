@@ -166,7 +166,8 @@ export function buildGatewayCronRuntimeOptions(input: GatewayCronRuntimeBaseInpu
       backend: latestConfig.web.backend,
       searchBackend: latestConfig.web.searchBackend,
       extractBackend: latestConfig.web.extractBackend,
-      crawlBackend: latestConfig.web.crawlBackend
+      crawlBackend: latestConfig.web.crawlBackend,
+      brave: latestConfig.web.brave
     },
     securityConfig: {
       allowPrivateUrls: latestConfig.security.allowPrivateUrls,
@@ -217,7 +218,8 @@ export function buildGatewayCronRuntimeOptions(input: GatewayCronRuntimeBaseInpu
       backend: latestConfig.web.backend,
       searchBackend: latestConfig.web.searchBackend,
       extractBackend: latestConfig.web.extractBackend,
-      crawlBackend: latestConfig.web.crawlBackend
+      crawlBackend: latestConfig.web.crawlBackend,
+      brave: latestConfig.web.brave
     },
     securityConfig: {
       allowPrivateUrls: latestConfig.security.allowPrivateUrls,
@@ -760,7 +762,8 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
         backend: latestConfig.web.backend,
         searchBackend: latestConfig.web.searchBackend,
         extractBackend: latestConfig.web.extractBackend,
-        crawlBackend: latestConfig.web.crawlBackend
+        crawlBackend: latestConfig.web.crawlBackend,
+        brave: latestConfig.web.brave
       },
       securityConfig: {
         allowPrivateUrls: latestConfig.security.allowPrivateUrls,

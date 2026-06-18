@@ -65,7 +65,7 @@ export type SessionToolContext = {
   cdpWebSocketFactory?: import("../browser/browser-backend.js").CdpWebSocketFactory;
   enableWebNetwork?: boolean;
   webMaxContentChars?: number;
-  webConfig?: Pick<import("../config/runtime-config.js").LoadedRuntimeConfig["web"], "backend" | "searchBackend" | "extractBackend" | "crawlBackend">;
+  webConfig?: Pick<import("../config/runtime-config.js").LoadedRuntimeConfig["web"], "backend" | "searchBackend" | "extractBackend" | "crawlBackend" | "brave">;
   securityConfig?: Pick<import("../config/runtime-config.js").LoadedRuntimeConfig["security"], "allowPrivateUrls" | "websiteBlocklist">;
   voiceFetch?: import("../tools/voice-tools.js").VoiceFetchLike;
   localWhisper?: import("../tools/stt-local-whisper.js").FasterWhisperWorker;

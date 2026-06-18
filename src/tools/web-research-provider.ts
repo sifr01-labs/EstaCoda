@@ -52,10 +52,15 @@ export type WebResearchProvider = {
     extract?: true;
     crawl?: true;
   };
+  configure?(context: WebResearchProviderContext): WebResearchProvider;
   getAvailability(): ProviderAvailability | Promise<ProviderAvailability>;
   search?(query: string, options?: WebSearchOptions): Promise<WebSearchResult[]>;
   extract?(url: string, options?: WebExtractOptions): Promise<WebExtractResult>;
   crawl?(url: string, options?: WebCrawlOptions): Promise<WebCrawlResult>;
+};
+
+export type WebResearchProviderContext = {
+  config: WebResearchConfig;
 };
 
 export type WebResearchConfig = {
@@ -63,4 +68,7 @@ export type WebResearchConfig = {
   searchBackend?: string;
   extractBackend?: string;
   crawlBackend?: string;
+  brave?: {
+    apiKeyEnv?: string;
+  };
 };

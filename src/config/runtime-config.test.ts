@@ -13,6 +13,7 @@ import {
   saveRuntimeConfig,
   addWhatsAppAllowedUser,
   setupAuxiliaryModelConfig,
+  setupWebConfig,
   setupVoiceConfig
 } from "./runtime-config.js";
 import { DEFAULT_DELEGATION_CONFIG } from "./delegation-defaults.js";
@@ -1288,6 +1289,127 @@ describe("loadRuntimeConfig browser provider compatibility", () => {
         snapshotSummarizeThreshold: "8000"
       }
     })).rejects.toThrow("browser.snapshotSummarizeThreshold must be a positive integer");
+  });
+});
+
+describe("setupWebConfig", () => {
+  it("writes web search backend and Brave credential env reference without raw secrets", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+    await writeFile(configPath, JSON.stringify({
+      web: {
+        maxContentChars: 10_000,
+        extractBackend: "fetch",
+        crawlBackend: "firecrawl"
+      }
+    }));
+
+    const result = await setupWebConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace,
+      input: {
+        searchBackend: "brave",
+        brave: {
+          apiKeyEnv: "BRAVE_SEARCH_API_KEY"
+        }
+      }
+    });
+    const saved = JSON.parse(await readFile(configPath, "utf8"));
+
+    expect(result.path).toBe(configPath);
+    expect(saved.web).toEqual({
+      enableNetwork: true,
+      maxContentChars: 10_000,
+      extractBackend: "fetch",
+      crawlBackend: "firecrawl",
+      searchBackend: "brave",
+      brave: {
+        apiKeyEnv: "BRAVE_SEARCH_API_KEY"
+      }
+    });
+    expect(JSON.stringify(saved)).not.toContain("sk-");
+
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("writes all non-secret web backend fields and preserves unrelated web settings", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+    await writeFile(configPath, JSON.stringify({
+      web: {
+        maxContentChars: 12_000,
+        brave: {
+          apiKeyEnv: "EXISTING_BRAVE_KEY"
+        }
+      }
+    }));
+
+    await setupWebConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace,
+      input: {
+        enableNetwork: false,
+        backend: "searxng",
+        searchBackend: "brave",
+        extractBackend: "fetch",
+        crawlBackend: "firecrawl"
+      }
+    });
+    const saved = JSON.parse(await readFile(configPath, "utf8"));
+
+    expect(saved.web).toEqual({
+      enableNetwork: false,
+      maxContentChars: 12_000,
+      brave: {
+        apiKeyEnv: "EXISTING_BRAVE_KEY"
+      },
+      backend: "searxng",
+      searchBackend: "brave",
+      extractBackend: "fetch",
+      crawlBackend: "firecrawl"
+    });
+
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("rejects invalid web backend ids and Brave credential env names", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+
+    await expect(setupWebConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace,
+      input: {
+        searchBackend: "../brave"
+      }
+    })).rejects.toThrow("Expected searchBackend to be a valid web research provider id");
+
+    await expect(setupWebConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace,
+      input: {
+        brave: {
+          apiKeyEnv: "bad-name"
+        }
+      }
+    })).rejects.toThrow("Expected brave.apiKeyEnv to be a valid environment variable name");
+
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("keeps maxContentChars positive integer validation", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+
+    await expect(setupWebConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace,
+      input: {
+        maxContentChars: 0
+      }
+    })).rejects.toThrow("Expected maxContentChars to be a positive integer");
+
+    await rm(workspace, { recursive: true, force: true });
   });
 });
 

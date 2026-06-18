@@ -328,6 +328,62 @@ describe("web and browser tools baselines", () => {
     });
   });
 
+  it("passes Brave credential env config through provider wiring for explicit search selection", async () => {
+    const configure = vi.fn((context: { config: { searchBackend?: string; brave?: { apiKeyEnv?: string } } }): WebResearchProvider => ({
+      name: "brave",
+      displayName: "Brave Search",
+      capabilities: { search: true },
+      getAvailability: () => ({
+        available: context.config.brave?.apiKeyEnv === "CUSTOM_BRAVE_KEY",
+        reason: context.config.brave?.apiKeyEnv
+      }),
+      search: async () => [{
+        title: "Configured Brave",
+        url: "https://example.com/brave",
+        snippet: context.config.brave?.apiKeyEnv
+      }]
+    }));
+    const tools = createWebTools({
+      webConfig: {
+        searchBackend: "brave",
+        brave: {
+          apiKeyEnv: "CUSTOM_BRAVE_KEY"
+        }
+      }
+    });
+    registerWebResearchProvider({
+      name: "brave",
+      displayName: "Brave Search",
+      capabilities: { search: true },
+      configure,
+      getAvailability: () => ({ available: false, reason: "not configured" })
+    });
+    const search = tool("web.search", tools);
+
+    await expect(search.isAvailable()).resolves.toBe(true);
+    const result = await search.run({ query: "estacoda" });
+
+    expect(configure).toHaveBeenCalledWith({
+      config: {
+        searchBackend: "brave",
+        brave: {
+          apiKeyEnv: "CUSTOM_BRAVE_KEY"
+        }
+      }
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      metadata: {
+        provider: "brave",
+        results: [{
+          title: "Configured Brave",
+          url: "https://example.com/brave",
+          snippet: "CUSTOM_BRAVE_KEY"
+        }]
+      }
+    });
+  });
+
   it("reports unavailable web.crawl when no backend is configured", async () => {
     const crawl = tool("web.crawl", createWebTools({ resolveHostname: publicResolver }));
 

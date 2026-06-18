@@ -262,6 +262,78 @@ describe("config.provider.status", () => {
   });
 });
 
+describe("config.web.setup", () => {
+  it("exposes only non-secret web backend and Brave env reference fields", () => {
+    const tool = configTool("config.web.setup");
+
+    expect(tool.inputSchema).toMatchObject({
+      properties: {
+        enableNetwork: { type: "boolean" },
+        maxContentChars: { type: "number" },
+        backend: { type: "string" },
+        searchBackend: { type: "string" },
+        extractBackend: { type: "string" },
+        crawlBackend: { type: "string" },
+        brave: {
+          type: "object",
+          properties: {
+            apiKeyEnv: { type: "string" }
+          }
+        }
+      }
+    });
+    expect(JSON.stringify(tool.inputSchema)).not.toContain("apiKey\"");
+    expect(JSON.stringify(tool.inputSchema)).not.toContain("token");
+  });
+
+  it("writes web backend fields and Brave credential env reference", async () => {
+    const homeDir = await configHome({
+      model: { provider: "local", id: "qwen2.5:3b" },
+      web: {
+        maxContentChars: 6_000,
+        extractBackend: "fetch"
+      }
+    });
+    const tool = configTool("config.web.setup", homeDir);
+
+    const result = await tool.run({
+      searchBackend: "brave",
+      crawlBackend: "firecrawl",
+      brave: {
+        apiKeyEnv: "BRAVE_SEARCH_API_KEY"
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain("Search backend: brave");
+    expect(result.content).toContain("Brave credential env: BRAVE_SEARCH_API_KEY");
+    expect(result.metadata).toMatchObject({
+      web: {
+        enableNetwork: true,
+        maxContentChars: 6_000,
+        extractBackend: "fetch",
+        searchBackend: "brave",
+        crawlBackend: "firecrawl",
+        brave: {
+          apiKeyEnv: "BRAVE_SEARCH_API_KEY"
+        }
+      }
+    });
+    expect(JSON.stringify(result.metadata)).not.toContain("sk-");
+  });
+
+  it("rejects raw-secret-shaped Brave keys because only env var references are accepted", async () => {
+    const homeDir = await configHome({ model: { provider: "local", id: "qwen2.5:3b" } });
+    const tool = configTool("config.web.setup", homeDir);
+
+    await expect(tool.run({
+      brave: {
+        apiKeyEnv: "sk-secret-value"
+      }
+    })).rejects.toThrow("Expected brave.apiKeyEnv to be a valid environment variable name");
+  });
+});
+
 describe("config.provider.execution_status", () => {
   it("reports no latest execution without making a live check", async () => {
     const homeDir = await configHome(localModelConfig({
@@ -615,6 +687,19 @@ async function configHome(config: Record<string, unknown>): Promise<string> {
   await mkdir(dirname(configPath), { recursive: true });
   await writeFile(configPath, JSON.stringify(config), "utf8");
   return homeDir;
+}
+
+function configTool(name: string, homeDir = "/tmp/home") {
+  const tools = createConfigTools({
+    workspaceRoot: homeDir,
+    homeDir,
+    profileId: "default"
+  });
+  const tool = tools.find((candidate) => candidate.name === name);
+  if (tool === undefined) {
+    throw new Error(`${name} tool not registered`);
+  }
+  return tool;
 }
 
 function localModelConfig(input: { primaryModel: string; models: string[] }): Record<string, unknown> {

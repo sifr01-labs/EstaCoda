@@ -59,7 +59,8 @@ export async function createIsolatedCronRuntime(input: {
       backend: latestConfig.web.backend,
       searchBackend: latestConfig.web.searchBackend,
       extractBackend: latestConfig.web.extractBackend,
-      crawlBackend: latestConfig.web.crawlBackend
+      crawlBackend: latestConfig.web.crawlBackend,
+      brave: latestConfig.web.brave
     },
     securityConfig: {
       allowPrivateUrls: latestConfig.security.allowPrivateUrls,

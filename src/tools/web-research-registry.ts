@@ -56,7 +56,7 @@ export async function selectWebResearchProvider(
 ): Promise<WebResearchProviderSelection> {
   const explicitName = explicitProviderName(capability, config);
   if (explicitName !== undefined) {
-    return selectExplicitProvider(capability, explicitName);
+    return selectExplicitProvider(capability, explicitName, config);
   }
 
   for (const name of AUTO_DETECT_ORDER) {
@@ -65,9 +65,10 @@ export async function selectWebResearchProvider(
       continue;
     }
 
-    const availability = await provider.getAvailability();
+    const configuredProvider = configureProvider(provider, config);
+    const availability = await configuredProvider.getAvailability();
     if (availability.available) {
-      return { provider, providerName: provider.name, availability, explicit: false, fallback: false };
+      return { provider: configuredProvider, providerName: configuredProvider.name, availability, explicit: false, fallback: false };
     }
   }
 
@@ -98,7 +99,8 @@ function explicitProviderName(capability: WebResearchCapability, config: WebRese
 
 async function selectExplicitProvider(
   capability: WebResearchCapability,
-  name: string
+  name: string,
+  config: WebResearchConfig
 ): Promise<WebResearchProviderSelection> {
   const provider = providers.get(name);
   if (provider === undefined) {
@@ -110,21 +112,26 @@ async function selectExplicitProvider(
     };
   }
 
-  if (provider.capabilities[capability] !== true) {
+  const configuredProvider = configureProvider(provider, config);
+  if (configuredProvider.capabilities[capability] !== true) {
     return {
-      provider,
-      providerName: provider.name,
-      availability: { available: false, reason: `Provider ${provider.name} does not support web ${capability}.` },
+      provider: configuredProvider,
+      providerName: configuredProvider.name,
+      availability: { available: false, reason: `Provider ${configuredProvider.name} does not support web ${capability}.` },
       explicit: true,
       fallback: false
     };
   }
 
   return {
-    provider,
-    providerName: provider.name,
-    availability: await provider.getAvailability(),
+    provider: configuredProvider,
+    providerName: configuredProvider.name,
+    availability: await configuredProvider.getAvailability(),
     explicit: true,
     fallback: false
   };
+}
+
+function configureProvider(provider: WebResearchProvider, config: WebResearchConfig): WebResearchProvider {
+  return provider.configure?.({ config }) ?? provider;
 }

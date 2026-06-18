@@ -155,7 +155,7 @@ export type AgentLoopRuntimeSubstrate = {
   webFetch?: WebFetchLike;
   enableWebNetwork?: boolean;
   webMaxContentChars?: number;
-  webConfig?: Pick<LoadedRuntimeConfig["web"], "backend" | "searchBackend" | "extractBackend" | "crawlBackend">;
+  webConfig?: Pick<LoadedRuntimeConfig["web"], "backend" | "searchBackend" | "extractBackend" | "crawlBackend" | "brave">;
   securityConfig?: Pick<LoadedRuntimeConfig["security"], "allowPrivateUrls" | "websiteBlocklist">;
   voiceFetch?: VoiceFetchLike;
   localWhisper?: FasterWhisperWorker;

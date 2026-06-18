@@ -383,6 +383,9 @@ export type EstaCodaConfig = {
     searchBackend?: string;
     extractBackend?: string;
     crawlBackend?: string;
+    brave?: {
+      apiKeyEnv?: string;
+    };
   };
   memory?: MemoryConfigInput;
   compression?: Partial<SessionCompressionConfig>;
@@ -553,6 +556,9 @@ export type LoadedRuntimeConfig = {
     searchBackend?: string;
     extractBackend?: string;
     crawlBackend?: string;
+    brave?: {
+      apiKeyEnv?: string;
+    };
   };
   compression: SessionCompressionConfig;
   memory: MemoryConfig;
@@ -653,6 +659,13 @@ export type ProviderSetupInput = {
 export type WebSetupInput = {
   enableNetwork?: boolean;
   maxContentChars?: number;
+  backend?: string;
+  searchBackend?: string;
+  extractBackend?: string;
+  crawlBackend?: string;
+  brave?: {
+    apiKeyEnv?: string;
+  };
 };
 
 export type BrowserSetupInput = {
@@ -946,7 +959,12 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
       backend: config.web?.backend,
       searchBackend: config.web?.searchBackend,
       extractBackend: config.web?.extractBackend,
-      crawlBackend: config.web?.crawlBackend
+      crawlBackend: config.web?.crawlBackend,
+      brave: config.web?.brave?.apiKeyEnv === undefined
+        ? undefined
+        : {
+            apiKeyEnv: config.web.brave.apiKeyEnv
+          }
     },
     compression: normalizeSessionCompressionConfig(config.compression),
     memory: normalizeMemoryConfig(config.memory),
@@ -2528,11 +2546,21 @@ export async function setupWebConfig(options: {
   validateWebSetupInput(options.input);
   const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
+  const webPatch: NonNullable<EstaCodaConfig["web"]> = {
+    enableNetwork: options.input.enableNetwork ?? true
+  };
+  if (options.input.maxContentChars !== undefined) webPatch.maxContentChars = options.input.maxContentChars;
+  if (options.input.backend !== undefined) webPatch.backend = options.input.backend;
+  if (options.input.searchBackend !== undefined) webPatch.searchBackend = options.input.searchBackend;
+  if (options.input.extractBackend !== undefined) webPatch.extractBackend = options.input.extractBackend;
+  if (options.input.crawlBackend !== undefined) webPatch.crawlBackend = options.input.crawlBackend;
+  if (options.input.brave?.apiKeyEnv !== undefined) {
+    webPatch.brave = {
+      apiKeyEnv: options.input.brave.apiKeyEnv
+    };
+  }
   const config = patchConfig(existing.config, {
-    web: {
-      enableNetwork: options.input.enableNetwork ?? true,
-      maxContentChars: options.input.maxContentChars
-    }
+    web: webPatch
   });
 
   await saveRuntimeConfig(targetPath, config);
@@ -3355,6 +3383,11 @@ function validateWebSetupInput(input: WebSetupInput): void {
   if (input.maxContentChars !== undefined && (!Number.isInteger(input.maxContentChars) || input.maxContentChars <= 0)) {
     throw new Error("Expected maxContentChars to be a positive integer");
   }
+  validateOptionalWebResearchProviderId(input.backend, "backend");
+  validateOptionalWebResearchProviderId(input.searchBackend, "searchBackend");
+  validateOptionalWebResearchProviderId(input.extractBackend, "extractBackend");
+  validateOptionalWebResearchProviderId(input.crawlBackend, "crawlBackend");
+  validateOptionalEnvName(input.brave?.apiKeyEnv, "brave.apiKeyEnv");
 }
 
 function validateBrowserSetupInput(input: BrowserSetupInput): void {
@@ -3541,6 +3574,16 @@ function validateOptionalEnvName(value: string | undefined, field: string): void
   requireNonEmpty(value, field);
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(value.trim())) {
     throw new Error(`Expected ${field} to be a valid environment variable name`);
+  }
+}
+
+function validateOptionalWebResearchProviderId(value: string | undefined, field: string): void {
+  if (value === undefined) {
+    return;
+  }
+  requireNonEmpty(value, field);
+  if (!/^[A-Za-z][A-Za-z0-9_-]*$/u.test(value.trim())) {
+    throw new Error(`Expected ${field} to be a valid web research provider id`);
   }
 }
 

@@ -784,7 +784,8 @@ export class AcpServer {
         backend: config.web.backend,
         searchBackend: config.web.searchBackend,
         extractBackend: config.web.extractBackend,
-        crawlBackend: config.web.crawlBackend
+        crawlBackend: config.web.crawlBackend,
+        brave: config.web.brave
       },
       securityConfig: {
         allowPrivateUrls: config.security.allowPrivateUrls,

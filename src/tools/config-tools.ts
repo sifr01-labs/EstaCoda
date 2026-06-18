@@ -302,12 +302,22 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
     },
     {
       name: "config.web.setup",
-      description: "Configure EstaCoda web extraction network access and extraction limits.",
+      description: "Configure EstaCoda web network access, extraction limits, and non-secret web provider references.",
       inputSchema: {
         type: "object",
         properties: {
           enableNetwork: { type: "boolean" },
           maxContentChars: { type: "number" },
+          backend: { type: "string" },
+          searchBackend: { type: "string" },
+          extractBackend: { type: "string" },
+          crawlBackend: { type: "string" },
+          brave: {
+            type: "object",
+            properties: {
+              apiKeyEnv: { type: "string" }
+            }
+          }
         }
       },
       riskClass: "shared-state-mutation",
@@ -328,7 +338,13 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
             `Wrote ${result.path}.`,
             result.config.web?.maxContentChars === undefined
               ? undefined
-              : `Max content chars: ${result.config.web.maxContentChars}`
+              : `Max content chars: ${result.config.web.maxContentChars}`,
+            result.config.web?.searchBackend === undefined
+              ? undefined
+              : `Search backend: ${result.config.web.searchBackend}`,
+            result.config.web?.brave?.apiKeyEnv === undefined
+              ? undefined
+              : `Brave credential env: ${result.config.web.brave.apiKeyEnv}`
           ].filter((line) => line !== undefined).join("\n"),
           metadata: {
             path: result.path,
