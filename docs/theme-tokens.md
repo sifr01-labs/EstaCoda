@@ -1,4 +1,4 @@
-# EstaCoda Theme & Token System (v0.95)
+# EstaCoda Theme & Token System
 
 > **Evidence:** `smoke-tested` for token resolution; `eval-tested` for plain/standard parity.
 
@@ -6,7 +6,7 @@
 
 ## 1. Model Overview
 
-The v0.95 UI uses a three-layer token model:
+The current UI uses a three-layer token model:
 
 ```
 Base Theme (light | dark)
@@ -72,7 +72,7 @@ ResolvedTokens
 - **Brand color = identity and live state**, not decoration.
 - **Turquoise = selection/action accent**.
 - **Amber = rare caution/approval accent**.
-- **Violet is not used** in v0.95.
+- **Violet is not used** in the current UI.
 - **Surfaces stay neutral**, not blue-heavy.
 - **Security severity uses semantic tokens**, not brand color.
 

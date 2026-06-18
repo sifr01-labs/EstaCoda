@@ -1,4 +1,4 @@
-# Rendering Guide for Contributors (v0.95)
+# Rendering Guide for Contributors
 
 > **Target audience:** Engineers adding new CLI surfaces, commands, or output formats to EstaCoda.
 

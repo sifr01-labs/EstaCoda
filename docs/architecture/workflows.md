@@ -167,7 +167,7 @@ On `createRuntime` with SQLite:
 
 ## Known Limitations
 
-- Checkpoints are recorded but not restorable in v0.8.
+- Checkpoints are recorded but not restorable in the current workflow implementation.
 - Workflow runs are scoped to a single session; no cross-session resumption.
 - Lock service is single-process SQLite only.
 - Automatic workflow event summaries are disabled by default.

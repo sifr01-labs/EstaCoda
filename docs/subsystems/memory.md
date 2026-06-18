@@ -11,25 +11,25 @@ Memory is durable execution context, so retrieved or generated memory is always 
 
 ## Files
 
-| File | Lines | Role |
-|------|-------|------|
-| `src/memory/memory-store.ts` | ~280 | Bounded memory file management |
-| `src/memory/local-memory-provider.ts` | ~240 | Read/write memory entries |
-| `src/memory/memory-renderer.ts` | ~180 | Render memory into prompt snapshots |
-| `src/memory/memory-prompt-context-builder.ts` | ~200 | Canonical prompt memory context builder |
-| `src/memory/memory-recall-orchestrator.ts` | ~230 | Per-turn recall and external-memory orchestration |
-| `src/memory/memory-promotion.ts` | ~260 | Promote repeated preferences and facts |
-| `src/memory/memory-persistence-service.ts` | ~300 | Drift-aware local memory write safety |
-| `src/memory/memory-tool.ts` | ~140 | Agent-facing `memory.curate` curation tool |
-| `src/memory/memory-index-store.ts` | ~260 | Profile-state SQLite schema/lifecycle for the local lexical index |
-| `src/memory/memory-index.ts` | ~560 | Local lexical index writes, read/search, status, and vacuum |
-| `src/memory/memory-index-sync.ts` | ~520 | Startup backfill and post-write index sync orchestration |
-| `src/memory/memory-retrieval-service.ts` | ~620 | Bounded local lexical memory read/search with fallback |
-| `src/cli/memory-commands.ts` | ~430 | CLI memory index/read/search commands |
-| `src/tools/memory-retrieval-tools.ts` | ~270 | Agent-facing `memory.read` and `memory.search` tools |
-| `src/memory/memory-file-compaction-service.ts` | ~540 | Manual memory-file compaction and restore service |
-| `src/memory/external-memory-provider.ts` | ~530 | External memory lifecycle helpers and file-backed provider |
-| `src/session/session-search-service.ts` | ~360 | Deterministic raw session browse/search/scroll |
+| File | Role |
+|------|------|
+| `src/memory/memory-store.ts` | Bounded memory file management |
+| `src/memory/local-memory-provider.ts` | Read/write memory entries |
+| `src/memory/memory-renderer.ts` | Render memory into prompt snapshots |
+| `src/memory/memory-prompt-context-builder.ts` | Canonical prompt memory context builder |
+| `src/memory/memory-recall-orchestrator.ts` | Per-turn recall and external-memory orchestration |
+| `src/memory/memory-promotion.ts` | Promote repeated preferences and facts |
+| `src/memory/memory-persistence-service.ts` | Drift-aware local memory write safety |
+| `src/tools/memory-tool.ts` | Agent-facing `memory.curate` curation tool |
+| `src/memory/memory-index-store.ts` | Profile-state SQLite schema/lifecycle for the local lexical index |
+| `src/memory/memory-index.ts` | Local lexical index writes, read/search, status, and vacuum |
+| `src/memory/memory-index-sync.ts` | Startup backfill and post-write index sync orchestration |
+| `src/memory/memory-retrieval-service.ts` | Bounded local lexical memory read/search with fallback |
+| `src/cli/memory-commands.ts` | CLI memory index/read/search commands |
+| `src/tools/memory-retrieval-tools.ts` | Agent-facing `memory.read` and `memory.search` tools |
+| `src/memory/memory-file-compaction-service.ts` | Manual memory-file compaction and restore service |
+| `src/memory/external-memory-provider.ts` | External memory lifecycle helpers and file-backed provider |
+| `src/session/session-search-service.ts` | Deterministic raw session browse/search/scroll |
 
 ## Memory Files
 

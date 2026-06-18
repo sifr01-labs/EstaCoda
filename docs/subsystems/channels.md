@@ -5,32 +5,32 @@ description: "Channel architecture: gateway, adapters, session management, and m
 
 # Channels
 
-Channels are the surfaces through which users interact with EstaCoda. v0.9 supports four channels: Telegram, Discord, Email, and WhatsApp (experimental).
+Channels are the surfaces through which users interact with EstaCoda. The current codebase includes Telegram, Discord, Email, and WhatsApp adapters. Telegram is the most mature first-party remote channel. WhatsApp is operationally supported through an isolated Baileys bridge, but the unofficial API remains an external account-risk boundary. Discord and Email are implemented and test-backed, but require operator validation before being treated as launch-grade in a deployment.
 
 ## Files
 
-| File | Lines | Role |
-|------|-------|------|
-| `src/channels/channel-gateway.ts` | ~1,400 | Gateway auth, session, command, approval, and pairing orchestration |
-| `src/channels/telegram-adapter.ts` | ~1,160 | Telegram-specific adapter |
-| `src/channels/telegram-stream-text.ts` | ~180 | Partial Telegram stream sanitizer for provider-token previews |
-| `src/channels/discord-adapter.ts` | ~400 | Discord-specific adapter |
-| `src/channels/email-adapter.ts` | ~350 | Email-specific adapter (IMAP/SMTP) |
-| `src/channels/whatsapp-adapter.ts` | ~900 | WhatsApp bridge-client adapter, identity policy, formatting, media validation, and final-only delivery |
-| `src/channels/whatsapp-bridge-lifecycle.ts` | ~500 | Managed isolated WhatsApp bridge lifecycle, dependency readiness, and logs |
-| `scripts/whatsapp-bridge/bridge.js` | ~450 | Standalone Baileys/Boom transport bridge package |
-| `src/channels/delivery-router.ts` | ~430 | Normalized delivery path |
-| `src/channels/voice-transcription.ts` | ~280 | Gateway voice attachment transcript injection and STT preprocessing handoff |
-| `src/gateway/voice-state.ts` | ~160 | Profile-local per-chat voice mode and duplicate transcript state |
-| `src/channels/discord-voice-bridge.ts` | ~430 | Optional Discord voice-channel join/listen/speak/leave bridge |
-| `src/channels/channel-session-store.ts` | ~240 | Persisted session mapping |
-| `src/channels/channel-approval-store.ts` | ~180 | Approval persistence per channel |
-| `src/gateway/approval-queue.ts` | ~320 | Durable pending gateway approvals |
-| `src/channels/surface-pointer-store.ts` | ~120 | Cross-surface session pointers |
-| `src/channels/handoff-store.ts` | ~150 | Short-lived handoff codes |
-| `src/channels/approval-actions.ts` | ~80 | Generic inline approval action values |
-| `src/channels/telegram-format.ts` | ~200 | Telegram-safe HTML formatting |
-| `src/channels/activity-labels.ts` | ~80 | Localized activity labels |
+| File | Role |
+|------|------|
+| `src/channels/channel-gateway.ts` | Gateway auth, session, command, approval, and pairing orchestration |
+| `src/channels/telegram-adapter.ts` | Telegram-specific adapter |
+| `src/channels/telegram-stream-text.ts` | Partial Telegram stream sanitizer for provider-token previews |
+| `src/channels/discord-adapter.ts` | Discord-specific adapter |
+| `src/channels/email-adapter.ts` | Email-specific adapter (IMAP/SMTP) |
+| `src/channels/whatsapp-adapter.ts` | WhatsApp bridge-client adapter, identity policy, formatting, media validation, and final-only delivery |
+| `src/channels/whatsapp-bridge-lifecycle.ts` | Managed isolated WhatsApp bridge lifecycle, dependency readiness, and logs |
+| `scripts/whatsapp-bridge/bridge.js` | Standalone Baileys/Boom transport bridge package |
+| `src/channels/delivery-router.ts` | Normalized delivery path |
+| `src/channels/voice-transcription.ts` | Gateway voice attachment transcript injection and STT preprocessing handoff |
+| `src/gateway/voice-state.ts` | Profile-local per-chat voice mode and duplicate transcript state |
+| `src/channels/discord-voice-bridge.ts` | Optional Discord voice-channel join/listen/speak/leave bridge |
+| `src/channels/channel-session-store.ts` | Persisted session mapping |
+| `src/channels/channel-approval-store.ts` | Approval persistence per channel |
+| `src/gateway/approval-queue.ts` | Durable pending gateway approvals |
+| `src/channels/surface-pointer-store.ts` | Cross-surface session pointers |
+| `src/channels/handoff-store.ts` | Short-lived handoff codes |
+| `src/channels/approval-actions.ts` | Generic inline approval action values |
+| `src/channels/telegram-format.ts` | Telegram-safe HTML formatting |
+| `src/channels/activity-labels.ts` | Localized activity labels |
 
 ## ChannelGateway
 
@@ -134,7 +134,7 @@ Streaming is not used when `DeliveryRouter` is present in v1, and the gateway st
 
 **Limitations:**
 
-- Slash commands are deferred to v0.9.1. Prefix-style text commands and tested button interactions work.
+- Discord text commands, delivery, attachments, and tested button interactions are implemented. Slash-command registration is not part of the current first-party setup flow.
 - Live credential smoke is optional/manual.
 
 **Voice channels:** Optional Discord voice-channel support is available only when `channels.discord.voiceChannel.enabled` is true and the optional Discord voice stack is installed in the operator environment. `ChannelGateway`, not the adapter, owns `/voice channel` and `/voice leave` parsing and delegates to adapter capability methods. Missing optional packages, `GuildVoiceStates` intent, or `Connect`/`Speak`/`UseVAD` permissions return setup errors before joining.
@@ -195,7 +195,7 @@ estacoda email configure \
 | Final-only replies | `experimental` |
 | Voice-bubble delivery | `ffmpeg` optional |
 
-**Important:** WhatsApp support is **experimental** and gated behind `channels.whatsapp.experimental: true`. The main runtime talks to a quarantined bridge package under `scripts/whatsapp-bridge/`; that bridge uses `@whiskeysockets/baileys`, which is an **unofficial API**. Meta may suspend WhatsApp accounts using unofficial libraries. Use at your own risk. See [Security](../security/handoff-preflight-report-v0.9.md) for risk details.
+**Important:** WhatsApp support is gated behind `channels.whatsapp.experimental: true`. The main runtime talks to a quarantined bridge package under `scripts/whatsapp-bridge/`; that bridge uses `@whiskeysockets/baileys`, which is an **unofficial API**. Meta may suspend WhatsApp accounts using unofficial libraries. Use a dedicated WhatsApp number and keep allowlists tight.
 
 **Limitations:**
 
@@ -455,9 +455,9 @@ Gateway `--global` writes fail closed. If channel authorization, runtime workspa
 
 ## Limitations
 
-- Telegram is the only live-proven channel.
-- Discord slash commands are deferred to v0.9.1.
-- WhatsApp is experimental and uses an unofficial API with account-risk implications.
+- Telegram is the strongest live-proven first-party remote channel.
+- Discord slash-command registration is not part of the current first-party setup flow.
+- WhatsApp is operational through the isolated bridge, but it is gated because the transport uses an unofficial API with account-risk implications.
 - Email live smoke is optional/manual.
 - Gateway status reports readiness, not background-process liveness.
 - Channel-specific safety rules are partial — general safety policy applies to all channels equally.

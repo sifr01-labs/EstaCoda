@@ -7,26 +7,26 @@ description: "CLI commands, interactive session loop, trace/eval inspection, and
 
 ## Files
 
-| File | Lines | Role |
-|------|-------|------|
-| `src/cli/cli.ts` | ~2,600 | CLI command surface and dispatch |
-| `src/cli/session-loop.ts` | ~2,650 | Interactive terminal loop |
-| `src/cli/cli-session-store.ts` | ~120 | Persisted active session pointer |
-| `src/cli/one-shot.ts` | ~140 | One-shot prompt execution |
-| `src/cli/readline-prompt.ts` | ~270 | Readline-backed idle prompt |
-| `src/cli/paste-interceptor.ts` | ~205 | Bracketed paste interception and newline restoration |
-| `src/cli/bottom-chrome-controller.ts` | ~455 | Managed terminal chrome below/above prompt regions |
-| `src/cli/active-turn-command-controller.ts` | ~150 | CLI-local active-turn command lane |
-| `src/cli/slash-menu.ts` | ~265 | Slash command menu rendering |
-| `src/cli/tool-activity-renderer.ts` | ~160 | Tool activity display |
-| `src/cli/trace-commands.ts` | ~275 | `estacoda trace` commands |
-| `src/cli/eval-commands.ts` | ~100 | `estacoda eval` commands |
-| `src/setup/setup-entry-state.ts` | 283 | Setup readiness classifier |
-| `src/setup/setup-router.ts` | 364 | Setup route planner |
-| `src/setup/onboarding-wizard/runner.ts` | 718 | Reviewed Onboarding Wizard runner |
-| `src/setup/review/apply-executor.ts` | 483 | Reviewed setup apply executor |
-| `src/setup/setup-copy.ts` | 372 | Token-based setup copy registry |
-| `src/setup/setup-verification-copy.ts` | 111 | Setup verification labels and actions |
+| File | Role |
+|------|------|
+| `src/cli/cli.ts` | CLI command surface and dispatch |
+| `src/cli/session-loop.ts` | Interactive terminal loop |
+| `src/cli/cli-session-store.ts` | Persisted active session pointer |
+| `src/cli/one-shot.ts` | One-shot prompt execution |
+| `src/cli/readline-prompt.ts` | Readline-backed idle prompt |
+| `src/cli/paste-interceptor.ts` | Bracketed paste interception and newline restoration |
+| `src/cli/bottom-chrome-controller.ts` | Managed terminal chrome below/above prompt regions |
+| `src/cli/active-turn-command-controller.ts` | CLI-local active-turn command lane |
+| `src/cli/slash-menu.ts` | Slash command menu rendering |
+| `src/cli/tool-activity-renderer.ts` | Tool activity display |
+| `src/cli/trace-commands.ts` | `estacoda trace` commands |
+| `src/cli/eval-commands.ts` | `estacoda eval` commands |
+| `src/setup/setup-entry-state.ts` | Setup readiness classifier |
+| `src/setup/setup-router.ts` | Setup route planner |
+| `src/setup/onboarding-wizard/runner.ts` | Reviewed Onboarding Wizard runner |
+| `src/setup/review/apply-executor.ts` | Reviewed setup apply executor |
+| `src/setup/setup-copy.ts` | Token-based setup copy registry |
+| `src/setup/setup-verification-copy.ts` | Setup verification labels and actions |
 
 ## Commands
 

@@ -116,7 +116,7 @@ estacoda gateway status           # Full gateway status
 - Telegram token presence, allowed users/chats
 - Discord token presence
 - Email IMAP/SMTP hosts, credentials, addresses
-- WhatsApp experimental gate, isolated bridge package/readiness, auth directory writability, device pairing, user authorization, `dmPolicy`, `groupPolicy`, `mode`, and queue pressure
+- WhatsApp unofficial-API gate, isolated bridge package/readiness, auth directory writability, device pairing, user authorization, `dmPolicy`, `groupPolicy`, `mode`, and queue pressure
 - Cron directory permissions
 
 Returns exit code 1 if any warnings exist.
@@ -151,7 +151,7 @@ Valid names: `telegram`, `discord`, `email`, `whatsapp` (case-insensitive).
 estacoda whatsapp
 ```
 
-WhatsApp setup uses one shared QR flow. It can be launched from first-run onboarding optional capabilities, the existing-user Setup Editor, or the standalone `estacoda whatsapp` command. Each surface warns about the experimental unofficial Baileys transport, keeps dependencies inside `scripts/whatsapp-bridge/`, checks bridge package readiness, asks before dependency repair, renders a QR code in the terminal, and writes config/session state only after QR pairing succeeds. Dependency decline/failure and QR timeout/failure leave WhatsApp config unchanged. WhatsApp pairing-code setup is not exposed.
+WhatsApp setup uses one shared QR flow. It can be launched from first-run onboarding optional capabilities, the existing-user Setup Editor, or the standalone `estacoda whatsapp` command. Each surface warns about the unofficial Baileys-backed transport, keeps dependencies inside `scripts/whatsapp-bridge/`, checks bridge package readiness, asks before dependency repair, renders a QR code in the terminal, and writes config/session state only after QR pairing succeeds. Dependency decline/failure and QR timeout/failure leave WhatsApp config unchanged. WhatsApp pairing-code setup is not exposed.
 
 If no allowed senders are entered, the wizard writes `dmPolicy: "pairing"` so the device is linked but waiting for secure user authorization. Logged-out state requires explicit re-pair/reset of only the selected profile's WhatsApp auth directory.
 
@@ -162,7 +162,7 @@ If no allowed senders are entered, the wizard writes `dmPolicy: "pairing"` so th
 | Telegram | Live-proven | First-party remote channel for v0.1.0 |
 | Discord | Present, not live-proven | Adapter exists; live validation incomplete |
 | Email | Present, not live-proven | Adapter exists; attachments not supported |
-| WhatsApp | Experimental-only | Gated behind `experimental: true`. Uses unofficial Baileys API. |
+| WhatsApp | Operational with external API risk | Gated behind `experimental: true`. Uses unofficial Baileys API. |
 
 ## Approval queue
 

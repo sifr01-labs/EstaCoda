@@ -24,15 +24,15 @@ In the selected profile `.env` file. Setup flows write secrets there with `0600`
 
 ## Which providers are live-proven?
 
-Kimi, OpenAI, DeepSeek, and OpenRouter are live-proven for v0.1.0. Codex is a public setup path but not live-proven. Google and Anthropic are configurable/catalog-known. MiniMax and Nous are catalog-known but not runnable in the current build.
+Kimi, OpenAI, DeepSeek, and OpenRouter are live-proven for v0.1.0. Codex is a public setup path but not live-proven. Google is configurable but not live-proven. Anthropic, MiniMax, and Nous are catalog-known but not runnable as primary LLM routes in the current build.
 
 ## Which channels are live-proven?
 
-Telegram is the only live-proven first-party remote channel for v0.1.0. Discord and Email are present but not live-proven. WhatsApp is experimental-only.
+Telegram is the strongest live-proven first-party remote channel for v0.1.0. Discord and Email are present but require deployment-specific operator validation. WhatsApp is setup-backed and operational, but it uses an unofficial Baileys bridge, so account risk remains outside EstaCoda's control.
 
 ## Is WhatsApp stable?
 
-No. WhatsApp is gated behind `experimental: true` and uses an unofficial library. Meta may suspend accounts that use it. Do not enable it in a production profile without understanding the risk.
+WhatsApp is operationally supported through an isolated bridge, but it is not risk-free. It is gated behind `experimental: true` and uses an unofficial library. Meta may suspend accounts that use it. Use a dedicated number and do not enable it in a production profile without understanding the risk.
 
 ## Are cloud browsers live-supported?
 
@@ -48,9 +48,9 @@ Brave needs `web.brave.apiKeyEnv`, defaulting to `BRAVE_SEARCH_API_KEY`. DDGS ne
 
 No. Session compression is experimental-only in v0.1.0. It requires both `compression.enabled` and `compression.experimental` to be `true`.
 
-## Can the docs claim final install/update behavior yet?
+## How do install and update work?
 
-No. Install and update docs remain blocked until the implementation PRs land. The docs site includes stubs with source-of-truth links and safety rules, but does not claim final curl, Homebrew, Docker, npm, or source-update behavior before that code is merged.
+Install and update behavior is implemented, but method-routed. The source installer creates a managed-source install that `estacoda update` can update in place after safety checks. Manual source, Homebrew, Docker, npm, and pnpm installs are routed to the appropriate external command instead of being mutated by EstaCoda. See [Installation](../getting-started/installation.md) and [Updating](../getting-started/updating.md).
 
 ## Related docs
 

@@ -7,12 +7,12 @@ description: "Browser backend, CDP integration, and structured browser tools."
 
 ## Files
 
-| File | Lines | Role |
-|------|-------|------|
-| `src/browser/browser-backend.ts` | current | Backend abstraction with mock, local CDP, Browserbase, and hybrid routing |
-| `src/browser/supervised-local-cdp-backend.ts` | current | Supervised local CDP backend, auto-launch, and session-stack ownership |
-| `src/browser/cdp-supervisor.ts` | current | CDP page supervisor, AX snapshots, dialogs, console history, screenshots |
-| `src/tools/web-tools.ts` | current | Browser tool schemas, session-key derivation, snapshot rendering, and summarization |
+| File | Role |
+|------|------|
+| `src/browser/browser-backend.ts` | Backend abstraction with mock, local CDP, Browserbase, and hybrid routing |
+| `src/browser/supervised-local-cdp-backend.ts` | Supervised local CDP backend, auto-launch, and session-stack ownership |
+| `src/browser/cdp-supervisor.ts` | CDP page supervisor, AX snapshots, dialogs, console history, screenshots |
+| `src/tools/web-tools.ts` | Browser tool schemas, session-key derivation, snapshot rendering, and summarization |
 
 ## Backends
 

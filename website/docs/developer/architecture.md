@@ -34,13 +34,13 @@ The loop is explicit construction, explicit delegation, and explicit persistence
 | `src/index.ts` | Boot flow, command dispatch, session restoration | `live-proven` |
 | `src/cli/cli.ts` | CLI command parsing and dispatch | `live-proven` |
 | `src/cli/session-loop.ts` | Interactive terminal session | `live-proven` |
-| `src/channels/gateway-runner.ts` | Channel gateway runtime | `live-proven` |
+| `src/channels/gateway-runner.ts` | Gateway diagnostics helpers | `smoke-tested` |
 | `src/channels/telegram-adapter.ts` | Telegram adapter | `live-proven` |
 | `src/channels/discord-adapter.ts` | Discord adapter | `present-not-live-proven` |
 | `src/channels/email-adapter.ts` | Email adapter | `present-not-live-proven` |
-| `src/channels/whatsapp-adapter.ts` | WhatsApp adapter | `experimental` |
+| `src/channels/whatsapp-adapter.ts` | WhatsApp adapter | `operational-with-external-risk` |
 
-CLI and Telegram are the live-proven surfaces for v0.1.0. Discord and Email adapter code exists, but live production use is not part of the v0.1.0 baseline. WhatsApp is gated as experimental.
+CLI and Telegram are the strongest live-proven surfaces for v0.1.0. Discord and Email adapter code exists and is test-backed, but live production validation is deployment-specific. WhatsApp is setup-backed and operational through an isolated bridge, but it remains gated because Baileys is an unofficial API.
 
 ---
 
@@ -359,7 +359,7 @@ A turn can also attach to larger orchestration:
 | Telegram | `live-proven` | First-party remote channel. |
 | Discord | `present-not-live-proven` | Adapter code exists; live production use is not part of the v0.1.0 baseline. |
 | Email | `present-not-live-proven` | Adapter code exists; live production use is not part of the v0.1.0 baseline. |
-| WhatsApp | `experimental` | QR-linked bridge, diagnostics, and setup flow exist; still gated as experimental. |
+| WhatsApp | `operational-with-external-risk` | QR-linked bridge, diagnostics, and setup flow exist; still gated because Baileys is an unofficial API. |
 | AgentLoop | `live-proven` | Core turn orchestration. |
 | AgentLoopBuilder | `live-proven` | Session-scoped runtime assembly. |
 | Provider execution | `live-proven` | Provider registry, executor, fallback, and auxiliary routes. |

@@ -69,9 +69,9 @@ First-run onboarding may still offer launch after verification. Existing-user Se
 | Telegram | Live-proven first-party remote channel |
 | Discord | Present, not live-proven |
 | Email | Present, not live-proven |
-| WhatsApp | Experimental-only; gated behind `experimental: true` |
+| WhatsApp | Operational through an isolated bridge; gated behind `experimental: true` because the API is unofficial |
 
-Telegram is the only channel that has been exercised in production-like conditions for v0.1.0. Discord and Email adapters compile, start, and pass automated checks, but they have not been validated against live credentials at the same depth. WhatsApp uses an unofficial library and requires an explicit experimental flag; Meta may suspend accounts that use it.
+Telegram is the strongest first-party remote channel for v0.1.0. Discord and Email adapters compile, start, and pass automated checks, but live credential validation is deployment-specific. WhatsApp uses an unofficial library and requires an explicit unofficial-API gate; Meta may suspend accounts that use it.
 
 Do not enable WhatsApp in a production profile without understanding the account-risk implications.
 
@@ -157,7 +157,7 @@ estacoda gateway status      # Full status: channels, approvals, cron, service m
 estacoda gateway diagnose    # Per-channel readiness check; exits 1 on warnings
 ```
 
-`gateway diagnose` checks token presence, host reachability, allowlist configuration, WhatsApp experimental gate, isolated WhatsApp bridge/package readiness, and cron directory permissions. Baileys and WhatsApp-specific Boom handling stay quarantined inside the bridge package; the root runtime does not depend on them directly.
+`gateway diagnose` checks token presence, host reachability, allowlist configuration, the WhatsApp unofficial-API gate, isolated WhatsApp bridge/package readiness, and cron directory permissions. Baileys and WhatsApp-specific Boom handling stay quarantined inside the bridge package; the root runtime does not depend on them directly.
 
 ## Service management (overview)
 

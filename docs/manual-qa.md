@@ -1,4 +1,4 @@
-# Manual QA Procedures (v0.95)
+# Manual QA Procedures
 
 > **Purpose:** Validation steps that require human judgment or environment-specific verification beyond automated tests.
 

@@ -9,36 +9,40 @@ The skill system is the most mature subsystem in EstaCoda. It provides procedura
 
 ## Files
 
-| File | Lines | Role |
-|------|-------|------|
-| `src/skills/skill-loader.ts` | 916 | Load skills from official, personal, project, and external roots |
-| `src/skills/skill-registry.ts` | ~180 | Hold loaded skills, filter visibility |
-| `src/skills/skill-tools.ts` | 2,292 | Agent-facing skill CRUD tools |
-| `src/skills/skill-evolution.ts` | ~1,100 | Store observations, candidates, proposals, experiments, evals, promotions, snapshots, and rollback metadata |
-| `src/skills/skill-learning.ts` | ~240 | Observe completed turns and emit evidence/candidates; not mutation authority |
-| `src/skills/skill-playbook-planner.ts` | ~140 | Compile skill playbook plans |
-| `src/skills/skill-usage-telemetry.ts` | ~120 | Usage tracking and route telemetry |
-| `src/skills/skill-bundled-sync.ts` | ~100 | Sync bundled official skills |
-| `src/skills/skill-visibility.ts` | ~80 | Runtime visibility filtering |
-| `src/skills/skill-mutation-policy.ts` | ~160 | Promotion gates and trust checks |
-| `src/skills/skill-curator-status.ts` | ~100 | Curator status and proposal listing |
+| File | Role |
+|------|------|
+| `src/skills/skill-loader.ts` | Load and validate skill directories |
+| `src/skills/skill-registry.ts` | Hold loaded skills, resolve source conflicts, and expose catalogs |
+| `src/tools/skill-tools.ts` | Agent-facing `skill.*` tools for inspection, mutation, proposals, eval gates, rollback, import, and export |
+| `src/skills/skill-evolution.ts` | Store observations, candidates, proposals, experiments, evals, promotions, snapshots, and rollback metadata |
+| `src/skills/skill-learning.ts` | Observe completed turns and emit evidence/candidates; not mutation authority |
+| `src/skills/skill-proposal-service.ts` | Convert candidates into governed proposals and run promotion gates |
+| `src/skills/change-manifest-store.ts` | Persist JSONL change manifests linked from proposals |
+| `src/skills/skill-playbook-planner.ts` | Compile skill playbook plans |
+| `src/skills/skill-usage-telemetry.ts` | Usage tracking and route telemetry |
+| `src/skills/skill-bundled-sync.ts` | Bundled-skill sync helper |
+| `src/skills/skill-visibility.ts` | Runtime visibility filtering |
+| `src/skills/skill-mutation-policy.ts` | Trust and mutation checks |
+| `src/skills/skill-curator-status.ts` | Curator status and proposal listing |
 
 ## Skill Sources
 
-| Source | Directory | Mutability | Evidence |
-|--------|-----------|------------|----------|
-| `official` | Bundled in repo | Read-only (local working copies for evolution) | `smoke-tested` |
-| `personal` | `~/.estacoda/skills/` | Mutable | `smoke-tested` |
-| `project` | `<workspace>/.estacoda/skills/` | Mutable | `smoke-tested` |
-| `external` | Configured `externalSkillRoots` | Read-only | `smoke-tested` |
+| Source | Directory | Mutability | Load order |
+|--------|-----------|------------|------------|
+| `external` packs | `~/.estacoda/profiles/<profile-id>/skills/packs/` | Managed/materialized by pack flows | Loaded first, lowest priority |
+| `bundled` | `skills/official/` in the package/repo | Read-only package content | Loaded after packs |
+| `local` | `~/.estacoda/profiles/<profile-id>/skills/` | Profile-local mutable skills | Loaded after bundled skills and can shadow lower-priority sources |
+| `external` configured roots | `skills.externalDirs` / runtime `externalSkillRoots` | Operator-controlled external roots | Loaded from configured directories |
+
+The runtime does not currently load `<workspace>/.estacoda/skills/` as a project-skill root. Workspace context is loaded separately from project context files.
 
 ## Execution Model
 
-**Provider-backed:** By default, skill instructions are injected into the system prompt and the provider executes the workflow. `implemented but not live-proven`
+**Provider-backed:** In normal provider-backed turns, selected skill instructions and resources are exposed through prompt/context assembly. The provider still chooses output and tool calls; deterministic safety gates remain outside the skill text.
 
-**Deterministic fallback:** If no provider is available, a deterministic path executes the workflow steps directly. `smoke-tested`
+**Playbook planning:** `src/skills/skill-playbook-planner.ts` compiles declared playbook steps for deterministic planning and inspection surfaces.
 
-**Resources:** `references/`, `templates/`, `scripts/`, and compatible `assets/` are indexed and loaded on demand. `smoke-tested`
+**Resources:** `references/`, `templates/`, `scripts/`, and compatible `assets/` are indexed and loaded on demand by the skill loader.
 
 ## Python Capabilities
 
@@ -77,25 +81,18 @@ Normal skill execution resolves only already-installed and verified environments
 
 ## Operations
 
-The agent can perform these operations via `skill-tools.ts`:
+The agent-facing surface is the `skill` toolset implemented in `src/tools/skill-tools.ts`. Current tool names include:
 
-| Operation | Evidence |
-|-----------|----------|
-| `list` | `smoke-tested` |
-| `view` | `smoke-tested` |
-| `inspect` | `smoke-tested` |
-| `create` | `smoke-tested` |
-| `patch` | `smoke-tested` |
-| `edit` | `smoke-tested` |
-| `delete` | `smoke-tested` |
-| `write_file` | `smoke-tested` |
-| `remove_file` | `smoke-tested` |
-| `import` | `smoke-tested` |
-| `export` | `smoke-tested` |
+| Area | Tools |
+|------|-------|
+| Read/inspect | `skill.list`, `skill.view`, `skill.inspect`, `skill.eval`, `skill.usage` |
+| Learning and proposals | `skill.observe`, `skill.propose_patch`, `skill.list_proposals`, `skill.review_proposals`, `skill.review_proposal`, `skill.approve_patch`, `skill.reject_patch`, `skill.promote_patch` |
+| Mutation | `skill.create`, `skill.patch`, `skill.edit`, `skill.delete`, `skill.rollback`, `skill.reset`, `skill.write_file`, `skill.remove_file` |
+| Portability | `skill.import`, `skill.export` |
 
 ## Evolution
 
-Skill evolution is **governed, not autonomous mutation**. In Phase 1A, Agent Evolution is the user-facing control plane for reviewable self-improvement: policy, route/outcome telemetry, evidence, learning candidates, governed proposals, experiment records, and review listings.
+Skill evolution is **governed, not autonomous mutation**. Agent Evolution is the user-facing control plane for reviewable self-improvement: policy, route/outcome telemetry, evidence, learning candidates, governed proposals, experiment records, and review listings.
 
 **Governed loop:**
 
@@ -137,19 +134,19 @@ observe → evidence/candidate → proposal → eval/review → manual promotion
 - Promotion runs eval gates; failing gates block the promotion.
 - No silent mutation — every change is logged, reviewable, and reversible.
 - Bundled and external skill assets are not mutated. Bundled skills can be shadowed only by local/profile-owned working copies.
-- Autonomous mode in Phase 1A is shadow-only: it records policy decisions and proposal metadata, but it does not auto-promote, auto-rollback, or bypass gates.
-- Routing remains deterministic in Phase 1A. Routing quality telemetry is evidence for Agent Evolution, not a new routing system.
+- Autonomous mode is shadow-only: it records policy decisions and proposal metadata, but it does not auto-promote, auto-rollback, or bypass gates.
+- Routing remains deterministic. Routing quality telemetry is evidence for Agent Evolution, not a new routing system.
 
 **Limitations:**
 
-- Skill evals are metadata/workflow-scoring only. No real task fixture execution yet.
+- Skill promotion eval gates are metadata/playbook assertions. The default deterministic eval fixtures test surrounding skill/evolution behavior, but proposal promotion does not execute open-ended task fixtures.
 - Tool-description and routing-metadata proposals are representable as manifest targets but not auto-applied.
 - No autonomous promotion or rollback automation.
 - No semantic retrieval, provider embeddings, compact skill index fallback, or LLM reranking.
 - No taskClass routing, supporting candidates, or advisory route tools such as `skill.reject_route` and `skill.search_routes`.
-- No skill fork/merge/archive governed proposal operations in Phase 1A.
+- No skill fork/merge/archive governed proposal operations.
 - No hygiene scanning loop for automatic proposal creation.
-- `skill` namespace CLI (`estacoda skill list`, `estacoda skill inspect`) is deferred to post-v0.7.
+- The primary shipped CLI surfaces are `estacoda skills`, `estacoda proposal`, `estacoda manifest`, `estacoda curator`, and `estacoda evolution`. Do not document a separate `estacoda skill` namespace unless the command registry exposes it.
 
 **CLI surface:**
 
@@ -174,7 +171,7 @@ Agent Evolution is the user-facing control plane for EstaCoda's reviewable self-
 | `none` | No Agent Evolution evidence or proposals |
 | `suggest` | Records evidence/candidates and creates reviewable proposal records; no promotion |
 | `proactive` | Prepares stronger review proposals and eval metadata; asks before promotion |
-| `autonomous` | Records shadow-only autonomous decisions and proposal metadata; no real auto-promotion or auto-rollback in Phase 1A |
+| `autonomous` | Records shadow-only autonomous decisions and proposal metadata; no real auto-promotion or auto-rollback |
 
 Roadmap behavior must remain labeled as planned until implemented: semantic/local retrieval, embeddings, reranking, compact skill index fallback, taskClass routing, supporting candidates, advisory route tools, real autonomous promotion, auto-rollback, skill fork/merge/archive, and hygiene scanning.
 

@@ -20,13 +20,13 @@ Do not assume a channel is release-proven because it is documented. Check the ma
 | **Telegram** | `live-proven` | polling | push | yes | yes | yes | yes |
 | **Discord** | `present-not-live-proven` | websocket | push | no | no | yes | no |
 | **Email** | `present-not-live-proven` | polling | push | no | yes | no | no |
-| **WhatsApp** | `experimental` | websocket | push | no | no | no | no |
+| **WhatsApp** | `operational-with-external-risk` | websocket | push | yes | limited | no | limited |
 
 **Definitions:**
 
 - `live-proven` — validated in realistic usage.
-- `present-not-live-proven` — code exists, adapters initialize, and local smoke tests pass. Live end-to-end validation has not been completed for v0.1.0.
-- `experimental` — gated behind `experimental: true`. Unofficial API. Account risk.
+- `present-not-live-proven` — code exists, adapters initialize, and local smoke tests pass. Live end-to-end validation depends on the operator's deployment.
+- `operational-with-external-risk` — code path is implemented and setup-backed, but it uses an unofficial API through an isolated bridge. Account risk remains outside EstaCoda's control.
 
 ---
 
@@ -189,7 +189,7 @@ Discord is present in code but not live-proven for v0.1.0.
 **Gaps:**
 
 - Discord attachments, threads, and progress streaming are not supported by the capability registry.
-- Slash commands are deferred post-v0.1.0.
+- Slash-command registration is not part of the current first-party setup flow.
 - Live credential smoke is optional and manual.
 
 **Voice channels:** Optional Discord voice-channel support exists only when `channels.discord.voiceChannel.enabled` is true and the optional Discord voice stack is installed. Missing packages or permissions return setup errors before joining.
@@ -257,21 +257,21 @@ estacoda email configure \
 
 ---
 
-## WhatsApp (Experimental)
+## WhatsApp
 
-WhatsApp is experimental and gated behind `channels.whatsapp.experimental: true`.
+WhatsApp is gated behind `channels.whatsapp.experimental: true` and runs through the isolated bridge under `scripts/whatsapp-bridge/`.
 
 **Capabilities:**
 
 | Capability | Status |
 |---|---|
-| Baileys linked-device login | `experimental` |
-| QR code login | `experimental` |
-| DM text delivery | `experimental` |
-| Group policy gating | `experimental` |
-| Media download/upload | `experimental` |
-| Message chunking | `experimental` |
-| Final-only replies | `experimental` |
+| Baileys linked-device login | `implemented` |
+| QR code login | `implemented` |
+| DM text delivery | `implemented` |
+| Group policy gating | `implemented` |
+| Media download/upload | `implemented` |
+| Message chunking | `implemented` |
+| Final-only replies | `implemented` |
 | Voice-bubble delivery | `ffmpeg` optional |
 
 **Important:** WhatsApp uses `@whiskeysockets/baileys` through the isolated `scripts/whatsapp-bridge/` npm package. Baileys is an unofficial API; Meta may suspend WhatsApp accounts using unofficial libraries. Use at your own risk. The root runtime does not install or import Baileys or WhatsApp-specific `@hapi/boom` handling.

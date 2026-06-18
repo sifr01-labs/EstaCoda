@@ -9,25 +9,31 @@ Tools are functions that extend the agent's capabilities. They are organized int
 
 ## Files
 
-| File | Lines | Role |
-|------|-------|------|
-| `src/tools/tool-registry.ts` | ~220 | Register and resolve tools |
-| `src/tools/tool-executor.ts` | ~340 | Execute tool calls |
-| `src/tools/tool-call-planner.ts` | 132 | Convert provider calls to plans |
-| `src/tools/tool-schema.ts` | ~180 | Build OpenAI-compatible schemas |
-| `src/tools/tool-result-packet.ts` | ~120 | Packetize tool results |
-| `src/tools/builtin-tools.ts` | ~400 | Built-in tool definitions |
-| `src/tools/workspace-tools.ts` | ~580 | File read/write/edit/simple search |
-| `src/tools/glob-tools.ts` | ~320 | Workspace file globbing |
-| `src/tools/grep-tools.ts` | ~430 | Bounded ripgrep-backed workspace grep |
-| `src/tools/notebook-tools.ts` | ~360 | Jupyter notebook cell edits |
-| `src/tools/web-tools.ts` | 731 | Web search and extraction |
-| `src/tools/execute-code-tool.ts` | ~240 | Code execution |
-| `src/tools/vision-tools.ts` | ~200 | Image analysis |
-| `src/tools/media-tools.ts` | ~280 | Media handling |
-| `src/tools/session-search-tool.ts` | ~200 | Deterministic raw historical session browse/search/scroll |
+| File | Role |
+|------|------|
+| `src/tools/tool-registry.ts` | Register and resolve tools |
+| `src/tools/tool-executor.ts` | Execute tool calls |
+| `src/tools/tool-call-planner.ts` | Convert provider calls to plans |
+| `src/tools/tool-schema.ts` | Build OpenAI-compatible schemas |
+| `src/tools/tool-result-packet.ts` | Packetize tool results |
+| `src/tools/builtin-tools.ts` | Built-in tool-provider assembly |
+| `src/tools/workspace-tools.ts` | File read/write/edit/simple search and bounded terminal commands |
+| `src/tools/glob-tools.ts` | Workspace file globbing |
+| `src/tools/grep-tools.ts` | Bounded ripgrep-backed workspace grep |
+| `src/tools/notebook-tools.ts` | Jupyter notebook cell edits |
+| `src/tools/web-tools.ts` | Web search/extraction/crawl wrappers and browser tool schemas |
+| `src/tools/execute-code-tool.ts` | Code execution |
+| `src/tools/vision-tools.ts` | Image analysis |
+| `src/tools/media-tools.ts` | Media handling |
+| `src/tools/session-search-tool.ts` | Deterministic raw historical session browse/search/scroll |
+| `src/tools/skill-tools.ts` | Agent-facing skill listing, review, proposal, edit, import, export, and rollback tools |
+| `src/tools/delegation-tools.ts` | Isolated child-session delegation |
+| `src/tools/memory-file-compaction-tools.ts` | Manual memory-file compaction and restore tools |
+| `src/tools/workspace-trust-tools.ts` | Workspace trust inspection and grant/revoke tools |
 
-## Builtin Tools
+## Representative Builtin Tools
+
+The runtime assembles tools from provider modules at startup. Treat this table as an operator map of important tool families; inspect the files above for the exact registered tool list in a given build.
 
 | Tool | Risk | Evidence |
 |------|------|----------|
@@ -37,6 +43,7 @@ Tools are functions that extend the agent's capabilities. They are organized int
 | `file.search` | `safe` | `smoke-tested` |
 | `file.glob` | `read-only-local` | `smoke-tested` |
 | `file.grep` | `read-only-local` | `smoke-tested` |
+| `terminal.run` | `workspace-write` | `smoke-tested` |
 | `notebook.edit` | `workspace-write` | `smoke-tested` |
 | `web.search` | `read-only-network` | `smoke-tested` |
 | `web.extract` | `read-only-network` | `smoke-tested` |
@@ -49,8 +56,11 @@ Tools are functions that extend the agent's capabilities. They are organized int
 | `memory.curate` | `workspace-write` | `smoke-tested` |
 | `memory.read` | `read-only-local` | `smoke-tested` |
 | `memory.search` | `read-only-local` | `smoke-tested` |
+| `memory.file_compact` | `workspace-write` | `smoke-tested` |
 | `session_search` | `read-only-local` | `smoke-tested` |
 | `skill.*` | `safe` | `smoke-tested` |
+| `delegate_task` | `shared-state-mutation` | `smoke-tested` |
+| `workspace.trust.*` | `read-only-local` / `shared-state-mutation` | `smoke-tested` |
 | `cronjob` | `caution` | `smoke-tested` |
 
 ## Workspace File Tools
@@ -268,4 +278,4 @@ When inspecting tool replay issues, check these fields:
 
 ## Tool Plan Dependency Model
 
-`tool-call-planner.ts` exists but has no DAG. Dependencies are linear. v0.4 target: explicit dependency representation.
+`tool-call-planner.ts` currently resolves tool calls linearly. There is no explicit DAG dependency model; add one only with tests that prove ordering, failure propagation, and replay behavior.

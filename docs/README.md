@@ -22,7 +22,7 @@ Historical ADRs were removed after they drifted; current subsystem documentation
 | [Operations](./operations/) | How to set up, test, run smoke, operate voice, hand off agent work, manage state, and validate release artifacts. |
 | [Memory Operator Readiness](./operations/memory-operator-readiness.md) | Operational guide for Memory Hardening phases 0-10. |
 | [Planning](./planning/) | Governance note: planning docs are private workspace artifacts. |
-| **UI / CLI (v0.95)** | |
+| **UI / CLI** | |
 | [UI Architecture](./ui-architecture.md) | ViewModel → Renderer → Surface Adapter pipeline. |
 | [Theme & Tokens](./theme-tokens.md) | Semantic token system, light/dark themes, KemetBlue skin, plain mode. |
 | [Rendering Guide](./rendering-guide.md) | Contributor guide for adding new CLI surfaces. |

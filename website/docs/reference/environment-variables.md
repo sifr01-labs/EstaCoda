@@ -31,7 +31,7 @@ Setup flows write secrets there with `0600` permissions. You can also reference 
 | `DEEPSEEK_API_KEY` | DeepSeek | Live-proven |
 | `OPENROUTER_API_KEY` | OpenRouter | Live-proven |
 | `GOOGLE_API_KEY` | Google | Configurable/catalog-known |
-| `ANTHROPIC_API_KEY` | Anthropic | Configurable/catalog-known |
+| `ANTHROPIC_API_KEY` | Anthropic | Catalog-known; not runnable as a primary LLM route |
 
 MiniMax and Nous are catalog-known but not runnable in the current build.
 

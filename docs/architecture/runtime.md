@@ -8,7 +8,6 @@ description: "Breakdown of EstaCoda's runtime: AgentLoop, createRuntime, registr
 ## AgentLoop
 
 **File:** `src/runtime/agent-loop.ts`
-**Size:** 809 lines
 **Exports:** `AgentLoop`, `AgentLoopInput`, `AgentLoopResponse`, `AgentLoopOptions`
 
 `AgentLoop` is the orchestration lifecycle. A single `handle()` call processes one user turn end to end, but delegates execution to specialized components.
@@ -35,7 +34,7 @@ description: "Breakdown of EstaCoda's runtime: AgentLoop, createRuntime, registr
 | `skillLearningManager` | `SkillLearningManager` | Observe and learn from workflows |
 | `skillEvolutionStore` | `SkillEvolutionStore` | Store proposed skill patches |
 
-### Internal phases (as they exist after v0.4 decomposition)
+### Internal Phases
 
 | Phase | Delegated to | Description |
 |-------|-------------|-------------|
@@ -51,7 +50,7 @@ description: "Breakdown of EstaCoda's runtime: AgentLoop, createRuntime, registr
 | Artifact collection | `AgentLoop` | Gather artifacts from tool results |
 | Response formatting | `AgentLoop` | Final text + progress + artifacts |
 
-> **Status:** v0.4 extracted provider loop, tool execution, skill playbooks, and native intents. `AgentLoop` retains orchestration, prompt assembly, security gating, memory promotion, and response formatting.
+> **Status:** Provider iteration, tool execution, skill playbooks, and native intents have separate runtime components. `AgentLoop` still owns the turn boundary, prompt preparation, security gating, memory promotion, artifact collection, and response shaping.
 
 ### CLI Active-Turn Control Boundary
 
@@ -75,10 +74,9 @@ This boundary matters for inspection and failure handling. The provider sees the
 ## createRuntime
 
 **File:** `src/runtime/create-runtime.ts`
-**Size:** 901 lines
 **Exports:** `createRuntime`, `RuntimeOptions`
 
-The composition root. Every subsystem is instantiated here with explicit constructor arguments. After v0.4, it also constructs six extracted runtime components before passing them to `AgentLoop`.
+The composition root. Every subsystem is instantiated here with explicit constructor arguments. It constructs runtime components before passing them to `AgentLoop`.
 
 Runtime config is loaded from exactly one selected profile: an explicit `profileId`, the active profile, or `default`. There is no user/project config merge. Workspace trust is only a behavioral gating input for local actions and MCP startup; it does not change which config file is loaded.
 
@@ -168,19 +166,19 @@ This shipped delegation path completes MVP functional parity and the full delega
 20. `SkillEvolutionStore`
 21. `DelegationManager`
 22. `ProviderExecutor`
-23. `RunRecorder` (extracted in v0.4)
-24. `ToolPlanRunner` (extracted in v0.4)
-25. `ProviderTurnLoop` (extracted in v0.4)
-26. `SkillPlaybookRunner` (extracted in v0.4)
-27. `NativeToolExecutor` (extracted in v0.4)
-28. `RuntimeRouter` (extracted in v0.4)
+23. `RunRecorder`
+24. `ToolPlanRunner`
+25. `ProviderTurnLoop`
+26. `SkillPlaybookRunner`
+27. `NativeToolExecutor`
+28. `RuntimeRouter`
 29. `AgentLoop`
 
-> **Risk:** Any constructor signature change cascades through this file. There is no DI container or plugin boundary. See `docs/planning/v0.4-builder-assessment.md` for assessment.
+> **Risk:** Any constructor signature change can cascade through this file. There is no DI container or plugin boundary.
 
 ---
 
-## Extracted Runtime Components (v0.4)
+## Runtime Components
 
 ### RuntimeRouter
 
@@ -277,7 +275,7 @@ Operational failure modes to check before changing this area:
 ### RunRecorder
 
 **File:** `src/runtime/run-recorder.ts`
-**Role:** Records run events, tool calls, outcomes, and artifacts to the session DB. Provides structured run history for v0.5 observability work.
+**Role:** Records run events, tool calls, outcomes, and artifacts to the session DB. Provides structured run history for trace inspection and Agent Evolution evidence.
 
 ---
 
@@ -322,5 +320,5 @@ Operational failure modes to check before changing this area:
 | HistoryPacker | `src/prompt/history-packer.ts` | Pack session history within budget |
 | ContextReferenceExpander | `src/context/context-reference-expander.ts` | Expand `@file:` / `@folder:` |
 | ProjectContextLoader | `src/context/project-context-loader.ts` | Load project context files |
-| TrajectoryRecorder | `src/trajectory/trajectory-recorder.ts` | Record events (97 lines, in-memory) |
-| ArtifactStore | `src/artifacts/artifact-store.ts` | Store artifacts (56 lines, in-memory) |
+| TrajectoryRecorder | `src/trajectory/trajectory-recorder.ts` | Record active-session trajectory events before persistence through the session DB |
+| ArtifactStore | `src/artifacts/artifact-store.ts` | Store prompt-safe artifact references in memory |

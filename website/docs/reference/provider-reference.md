@@ -18,7 +18,7 @@ A provider being "known" does not mean it is runnable. A provider being "registe
 |---|---|---|
 | `live-proven` | Configured, tested, and validated in realistic usage. | Set it as a primary route with confidence. |
 | `implemented` | Code exists, credentials resolve, and requests execute. Not yet validated in sustained live use. | Set it up and test it. Report gaps. |
-| `configurable` | Appears in the model catalog and can be selected in config. May lack a runnable adapter in this build. | Configure it if you are testing or extending. |
+| `configurable` | Appears in setup/model selection and has runnable adapter support, but may not be live-proven. | Configure it if you are testing or extending. |
 | `catalog-known` | Registered in the offline model catalog. No runnable inference adapter in the current build. | Not a primary route for v0.1.0. |
 | `experimental` | Gated behind feature flags or unstable by design. | Enable explicitly. Expect breakage. |
 | `unsupported` | No implementation. No adapter. No claim. | Do not configure. |
@@ -37,7 +37,7 @@ Labels are cumulative downward. A `live-proven` provider is also `implemented`. 
 | **OpenRouter** | `live-proven` | Runtime works. Tool-call exactness is occasionally inconsistent; monitor for routing edge cases. |
 | **Codex** | `implemented` | Public CLI setup path via `estacoda model setup codex`. OAuth device-code authentication, token storage in `~/.estacoda/auth.json`, `codex/o3` route configured. Excluded from onboarding wizard by design, not hidden. |
 | **Google** | `configurable` | Catalog-enriched. Inference adapter exists but live validation is limited in this build. |
-| **Anthropic** | `configurable` | Catalog-known. Not runnable as a primary LLM route in this build. |
+| **Anthropic** | `catalog-known` | Metadata and catalog entries exist, but it is not exposed as a setup/model-picker route and is not runnable as a primary LLM route in this build. |
 | **MiniMax** | `catalog-known` | Registered in model catalog. Not runnable in the current build. |
 | **Nous** | `catalog-known` | Registered in model catalog. Not runnable in the current build. |
 | **Custom (OpenAI-compatible)** | `implemented` | Any provider ID with an explicit `baseUrl` is treated as custom OpenAI-compatible. Requires `baseUrl`. Default API key env is `OPENAI_COMPATIBLE_API_KEY`. |

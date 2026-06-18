@@ -27,28 +27,15 @@ Location: `src/eval/eval-runner.ts`
 estacoda eval [fixture-id]
 ```
 
-Runs deterministic fixtures with pass/fail assertions. As of v0.7, **18 fixtures** cover:
+Runs deterministic fixtures with pass/fail assertions. The source of truth for the default fixture set is `src/eval/fixtures/index.ts`. Current fixture areas include:
 
-| Fixture | Scope |
-|---------|-------|
-| `provider-text-response` | Mock provider returns text without tool calls |
-| `tool-security-block` | Detects blocked `rm -rf /` |
-| `missing-tool-failure` | Handles unavailable tool gracefully |
-| `memory-promotion-provenance` | Memory carries source metadata |
-| `memory-deactivation` | Deactivated memory suppressed from context |
-| `memory-selective-renderer` | Selective render with fallback rules |
-| `memory-safety-files` | Safety files cannot be deactivated |
-| `dependency-forward` | Forward dependency lookup |
-| `dependency-reverse` | Reverse dependency lookup |
-| `dependency-affected` | Transitive affected-file lookup |
-| `dependency-summary` | Graph summary counts |
-| `dependency-cache-invalidation` | Cache invalidates on source change |
-| `manifest-from-observation` | Observation creates ChangeManifest |
-| `skill-proposal-manifest-bridge` | `skill.propose_patch` creates manifest |
-| `user-correction-recording` | User corrections recorded as events |
-| `tool-description-proposal` | Tool description manifest skeleton |
-| `routing-metadata-proposal` | Routing metadata manifest skeleton |
-| `evolution-export-shape` | OptimizationDataset schema validation |
+| Area | Scope |
+|------|-------|
+| Provider/tool baseline | Mock provider text responses, blocked-tool handling, missing-tool failure handling |
+| Memory | Promotion provenance, deactivation, selective rendering, protected safety files |
+| Knowledge/dependency graph | Forward/reverse dependencies, affected files, graph summaries, cache invalidation |
+| Agent Evolution | Manifest creation, proposal/manifest bridge, user-correction records, tool-description and routing-metadata proposal shapes, export shape |
+| Workflow | Run state transitions, locking, migrations, store atomicity, engine lifecycle, restart recovery, command control, event summaries, integration |
 
 ### Eval Substrate Scaffold
 
@@ -81,7 +68,7 @@ pnpm run eval:fixtures
 
 ## Future Direction
 
-- Golden flow comparison for regression detection
-- Scored automated benchmark (not just pass/fail)
-- Eval-linked skill evolution proposals
-- Constraint gate integration with manifest promotion
+- Scored automated benchmark, not only pass/fail fixture assertions
+- Broader historical regression tracking across runs
+- Richer eval-linked skill evolution proposals
+- Stronger constraint-gate integration with manifest promotion

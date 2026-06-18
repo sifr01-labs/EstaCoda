@@ -8,7 +8,7 @@ description: "Short operational note for incoming coding agents."
 ## Current State
 
 - **Branch:** `main`
-- **Version:** v0.7.0
+- **Release:** v0.1.0 docs and runtime baseline
 - **Working tree:** Clean expected before handoff
 
 ## Standard Validation
@@ -40,8 +40,8 @@ skills/
 - [Operations](../operations/)
 - [AGENTS.md](../../AGENTS.md)
 
-## Next Priority
+## Current Priority
 
-v0.8: Durable Workflow — state machines, wait/resume/cancel, workflow run persistence, approval gates.
+Keep this note aligned with the release-current architecture, setup, and operations docs. Durable Workflow is implemented as an explicit operator surface; use [Workflow CLI](./workflow-cli.md) and [Workflow Architecture](../architecture/workflows.md) for current behavior.
 
 See the Docusaurus operations docs for current public operator guidance.

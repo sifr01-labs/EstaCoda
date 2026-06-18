@@ -5,7 +5,7 @@ description: "High-level system map, entrypoints, runtime composition, and data 
 
 # Architecture Overview
 
-EstaCoda is a TypeScript-first agent runtime built for Node.js >= 22.18.0, pnpm/Corepack source workflows, and compiled `dist/` production execution. It executes provider-backed agent sessions through CLI and multiple channels (Telegram, Discord, Email, WhatsApp), with skills, tools, memory, and security policy as first-class surfaces. Bun is optional for explicitly named dev-speed lanes only.
+EstaCoda is a TypeScript-first agent runtime built for Node.js >= 22.18.0, pnpm/Corepack source workflows, and compiled `dist/` production execution. It executes provider-backed agent sessions through the CLI and configured channels, with skills, tools, memory, workflow state, session persistence, and security policy as first-class surfaces. Bun is optional for explicitly named dev-speed lanes only.
 
 ## Entrypoints
 
@@ -15,14 +15,14 @@ EstaCoda is a TypeScript-first agent runtime built for Node.js >= 22.18.0, pnpm/
 | `src/cli/cli.ts` | CLI command surface. Parses arguments and dispatches to subcommands. | `smoke-tested` |
 | `src/cli/session-loop.ts` | Interactive terminal loop. Handles in-session admin commands: `/sessions`, `/search`, `/switch`, `/reset`. | `smoke-tested` |
 | `src/cli/cli-session-store.ts` | Persisted active CLI session pointer keyed by workspace root. | `smoke-tested` |
-| `src/channels/gateway-runner.ts` | Telegram gateway runtime wrapper. | `live-proven` |
-| `src/channels/discord-adapter.ts` | Discord adapter. Receives messages, sends replies, handles attachments. | `implemented but not live-proven` |
-| `src/channels/email-adapter.ts` | Email adapter. IMAP receive, SMTP send, reply-in-thread. | `implemented but not live-proven` |
-| `src/channels/whatsapp-adapter.ts` | WhatsApp adapter (Baileys linked-device). Gated behind `experimental: true`. | `experimental` |
+| `src/channels/gateway-runner.ts` | Gateway diagnostics helpers for Telegram plus WhatsApp diagnostics export. Gateway orchestration lives in `ChannelGateway` and CLI gateway commands. | `smoke-tested` |
+| `src/channels/discord-adapter.ts` | Discord adapter. Receives messages, sends replies, handles attachments, and supports text delivery paths. | `implemented; operator validation required` |
+| `src/channels/email-adapter.ts` | Email adapter. IMAP receive, SMTP send, reply-in-thread, attachment ingestion, and sender filtering via Python worker. | `implemented; operator validation required` |
+| `src/channels/whatsapp-adapter.ts` | WhatsApp adapter through an isolated Baileys linked-device bridge. Gated behind `experimental: true`; account standing and upstream protocol stability are external risks. | `operational with external API risk` |
 
 ## Runtime Composition
 
-`createRuntime()` in `src/runtime/create-runtime.ts` is the composition root. It is a 901-line function with 69 imports that manually constructs 30+ subsystem objects.
+`createRuntime()` in `src/runtime/create-runtime.ts` is the composition root. It manually wires providers, tools, memory, skills, workflow integration, browser/web capability, MCP, security policy, session stores, and the `AgentLoop`.
 
 Construction order:
 
@@ -31,7 +31,7 @@ Construction order:
 3. Tool registry
 4. Skill registries (official → personal → project → external)
 5. Prompt dependencies (prompt cache, context expander)
-6. Extracted runtime components (`RunRecorder`, `ToolPlanRunner`, `ProviderTurnLoop`, `SkillPlaybookRunner`, `NativeToolExecutor`)
+6. Runtime components (`RunRecorder`, `ToolPlanRunner`, `ProviderTurnLoop`, `SkillPlaybookRunner`, `NativeToolExecutor`, `RuntimeRouter`)
 7. `AgentLoop`
 
 Key composition rules:
@@ -44,17 +44,18 @@ Key composition rules:
 
 ## Core Orchestration
 
-| File | Role | Lines | Evidence |
-|------|------|-------|----------|
-| `src/runtime/create-runtime.ts` | Composition root | 901 | `smoke-tested` |
-| `src/runtime/agent-loop.ts` | Core orchestration lifecycle | 809 | `live-proven` |
-| `src/runtime/runtime-router.ts` | Runtime routing (intent + skill) | ~120 | `smoke-tested` |
-| `src/runtime/provider-turn-loop.ts` | Provider streaming loop | ~585 | `live-proven` |
-| `src/runtime/tool-plan-runner.ts` | Tool plan execution | ~420 | `live-proven` |
-| `src/runtime/run-recorder.ts` | Run recording and trajectory | ~200 | `smoke-tested` |
-| `src/runtime/skill-playbook-runner.ts` | Skill playbook execution | ~267 | `live-proven` |
-| `src/runtime/native-tool-executor.ts` | Deterministic native intent execution | ~150 | `smoke-tested` |
-| `src/runtime/intent-router.ts` | Native intent classification | 175 | `smoke-tested` |
+| File | Role | Evidence |
+|------|------|----------|
+| `src/runtime/create-runtime.ts` | Composition root | `smoke-tested` |
+| `src/runtime/agent-loop.ts` | Core turn orchestration lifecycle | `live-proven` |
+| `src/runtime/agent-loop-builder.ts` / `agent-loop-factory.ts` | Shared parent/child loop construction for delegation | `test-backed` |
+| `src/runtime/runtime-router.ts` | Runtime routing for native intents and skills | `smoke-tested` |
+| `src/runtime/provider-turn-loop.ts` | Provider turn loop, finalization, continuation, and tool-call extraction | `live-proven` |
+| `src/runtime/tool-plan-runner.ts` | Tool plan execution and bounded concurrency/failure handling | `live-proven` |
+| `src/runtime/run-recorder.ts` | Run recording and trajectory/event linkage | `smoke-tested` |
+| `src/runtime/skill-playbook-runner.ts` | Skill playbook execution | `live-proven` |
+| `src/runtime/native-tool-executor.ts` | Deterministic native intent execution | `smoke-tested` |
+| `src/runtime/intent-router.ts` | Native intent classification | `smoke-tested` |
 
 ## Agent Loop Shape
 
@@ -85,7 +86,7 @@ Guardrails inside the loop:
 - Safe tool concurrency is bounded (enforced by `ToolPlanRunner`).
 - Security decisions are attached to tool executions, not just final replies.
 
-**Remaining coupling:** `AgentLoop` still assembles the full prompt, asks `MemoryRecallOrchestrator` for per-turn memory context, and coordinates between components. It does not execute provider iterations or tool plans directly.
+**Remaining coupling:** `AgentLoop` still coordinates prompt preparation, memory context injection, native routing, provider turns, tool plans, result persistence, artifacts, and response shaping. Provider iteration and tool execution are delegated, but the turn boundary remains a large integration point.
 
 Native intent routing handles product-owned paths before normal provider planning:
 
@@ -100,7 +101,7 @@ Two layers:
 **1. Registry / routing**
 - Offline-first model catalog (`src/model-catalog/models-dev-registry.ts`)
 - Provider registry with route selection by capability and preference
-- Direct credential lookup from provider `apiKeyEnv` to `process.env`
+- Runtime credential resolution from provider route metadata, selected-profile `.env`, OAuth/auth state, and process environment where supported
 
 **2. Execution**
 - `ProviderExecutor` — streaming token collection, tool-call fragment assembly, fallback handling
@@ -174,7 +175,7 @@ Skill operations: list, view, inspect, create, patch, edit, delete, write_file, 
 
 Execution: provider-backed by default; deterministic fallback path exists for no-provider sessions. Resources (`references/`, `templates/`, `scripts/`, compatible `assets/`) are indexed and loaded on demand.
 
-## Channel Architecture (v0.9)
+## Channel Architecture
 
 `ChannelGateway` is the generic adapter bridge. Responsibilities:
 
@@ -194,7 +195,7 @@ Execution: provider-backed by default; deterministic fallback path exists for no
 | Telegram | `live-proven` | `src/channels/telegram-adapter.ts` |
 | Discord | `implemented but not live-proven` | `src/channels/discord-adapter.ts` |
 | Email | `implemented but not live-proven` | `src/channels/email-adapter.ts` |
-| WhatsApp | `experimental` | `src/channels/whatsapp-adapter.ts` |
+| WhatsApp | `operational with external API risk` | `src/channels/whatsapp-adapter.ts` |
 
 Telegram-specific behavior:
 - Polling
@@ -208,7 +209,7 @@ Discord-specific behavior:
 - DM, guild channel, and thread support
 - Attachment download
 - Text delivery with chunking
-- Slash commands deferred to v0.9.1
+- Slash-command registration is not part of the current first-party setup flow
 
 Email-specific behavior:
 - IMAP poll for incoming mail
@@ -218,7 +219,7 @@ Email-specific behavior:
 - Allowed sender filtering
 - Home address configuration
 
-WhatsApp-specific behavior (experimental):
+WhatsApp-specific behavior:
 - Baileys linked-device model through the isolated `scripts/whatsapp-bridge/` helper
 - QR-only device login through the shared WhatsApp setup flow (`estacoda whatsapp`, Setup Editor, or first-run onboarding)
 - DM-first (no group support)
@@ -286,9 +287,9 @@ Security properties:
 - Cryptographically secure randomness.
 - 32^6 keyspace (~1.07 billion combinations).
 - Atomic file writes with `0o600` permissions.
-- No rate limiter in v0.9; mitigation relies on short TTL + single-use + keyspace + gateway allowlist.
+- No built-in handoff rate limiter; mitigation relies on short TTL, single-use codes, large keyspace, and gateway allowlist.
 
-## Cron Architecture (v0.9)
+## Cron Architecture
 
 ### Stores
 
@@ -335,10 +336,10 @@ Capability-first security boundary.
 - **Telegram:** allowlist by `userId` and `chatId`; optional pairing codes for unlisted users.
 - **Discord:** allowlist by `userId`, `guildId`, and `channelId`.
 - **Email:** allowlist by sender address (`allowedSenders`); `allowAllUsers` bypasses sender filtering. Uses global security policy — no email-specific approval friction.
-- **WhatsApp:** allowlist by `userId` (phone number/JID). Experimental gate (`experimental: true`) must be open for the adapter to initialize.
+- **WhatsApp:** allowlist by `userId` (phone number/JID). The unofficial-API gate (`experimental: true`) must be open for the adapter to initialize.
 - **Global policy:** all channels share the same runtime security policy. There is no channel-specific approval escalation.
 
-## Operator Surface (v0.9)
+## Operator Surface
 
 ### Gateway
 
@@ -418,11 +419,11 @@ The primary end-to-end path:
 
 ## Current Architectural Weak Spots
 
-1. **AgentLoop monolith** — Was 2,714 lines, now 809 lines. Core orchestration remains but provider loop, tool execution, skill playbooks, and native intents are extracted. Remaining coupling: prompt assembly, memory context injection, cross-component coordination.
-2. **create-runtime.ts god factory** — 901 lines, 69 imports, 36 constructor calls, no DI boundary. Assessment in `docs/planning/v0.4-builder-assessment.md` recommends deferring a builder pattern.
-3. **Trajectory/Artifact skeletons** — 97 and 56 lines, in-memory only.
+1. **AgentLoop integration size** — Provider turns, tool execution, skill playbooks, and native intents are separated, but `AgentLoop` remains a large turn-level coordinator.
+2. **create-runtime.ts god factory** — Runtime construction still centralizes many subsystem objects and has no DI/plugin boundary.
+3. **Artifact store is still thin** — Trajectories persist through SQLite, but `ArtifactStore` remains an in-memory prompt-reference store.
 4. **Native SQLite distribution** — `better-sqlite3` provides stable synchronous SQLite semantics behind the internal adapter, but native bindings require install and packaging validation on supported platforms.
 5. **Gateway liveness** — readiness-focused, not daemon-tracking.
 6. **Remaining cross-component state** — `AgentLoop` constructor still receives 20+ dependencies. Some (e.g., `memoryContext`, `projectContext`) are only used for prompt assembly and could move to a dedicated `PromptAssembler`.
-7. **Discord slash commands** — deferred to v0.9.1.
-8. **WhatsApp experimental** — Baileys is an unofficial API; Meta may suspend accounts using it.
+7. **Discord slash commands** — slash-command registration is not part of current first-party setup.
+8. **WhatsApp external API risk** — Baileys is an unofficial API; Meta may suspend accounts using it.

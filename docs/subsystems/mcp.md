@@ -7,10 +7,10 @@ description: "MCP client transport, discovery, and trust metadata."
 
 ## Files
 
-| File | Lines | Role |
-|------|-------|------|
-| `src/mcp/mcp-client.ts` | ~420 | stdio and HTTP transport |
-| `src/mcp/mcp-tools.ts` | ~517 | Discovery, registration, trust mapping |
+| File | Role |
+|------|------|
+| `src/mcp/mcp-client.ts` | stdio and HTTP transport |
+| `src/mcp/mcp-tools.ts` | Discovery, registration, trust mapping |
 
 ## Transports
 

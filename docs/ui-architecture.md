@@ -1,4 +1,4 @@
-# EstaCoda UI Architecture (v0.95)
+# EstaCoda UI Architecture
 
 > **Evidence:** `live-proven` for core pipeline; `smoke-tested` for runtime integration.
 
@@ -157,7 +157,7 @@ Channel adapters must never emit ANSI escape codes. The `PlainLogSurfaceAdapter`
 
 ### 5.1 Detected Capabilities
 
-`detectTerminalCapabilities()` in `src/ui/capabilities.ts` checks:
+`detectTerminalCapabilities()` in `src/ui/terminal-capabilities.ts` checks:
 
 | Capability | Source |
 |------------|--------|
@@ -329,7 +329,7 @@ The interactive picker in `src/cli/interactive-select.ts` gates ANSI cursor cont
 
 ## 13. Compatibility Wrappers
 
-v0.95 preserves backward-compatible string-returning functions:
+The current UI preserves backward-compatible string-returning functions:
 
 | Legacy Function | What It Does Today |
 |-----------------|-------------------|

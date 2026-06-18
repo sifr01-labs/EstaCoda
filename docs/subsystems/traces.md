@@ -11,21 +11,21 @@ Trajectory recording is **persisted to SQLite**, inspectable from the CLI, and p
 
 ## Files
 
-| File | Lines | Role |
-|------|-------|------|
-| `src/contracts/trajectory.ts` | 60 | Event kinds and type definitions |
-| `src/contracts/trajectory-store.ts` | ~20 | `TrajectoryStore` contract |
-| `src/contracts/failure.ts` | ~40 | `FailureClass` (13 types) and `FailureRecord` |
-| `src/contracts/evolution.ts` | ~37 | `EvolutionChangeManifest` type |
-| `src/trajectory/trajectory-recorder.ts` | ~120 | In-memory event recorder (session scope) |
-| `src/trajectory/failure-classifier.ts` | 325 | Heuristic failure classification |
-| `src/session/sqlite-session-db.ts` | ~700 | SQLite persistence for trajectories + failures |
-| `src/cli/trace-commands.ts` | ~275 | `estacoda trace` CLI surface |
-| `src/utils/redaction.ts` | 96 | Safe redaction engine for trace export |
+| File | Role |
+|------|------|
+| `src/contracts/trajectory.ts` | Event kinds and trajectory type definitions |
+| `src/contracts/trajectory-store.ts` | `TrajectoryStore` contract |
+| `src/contracts/failure.ts` | `FailureClass` and `FailureRecord` contract |
+| `src/contracts/evolution.ts` | `EvolutionChangeManifest` type |
+| `src/trajectory/trajectory-recorder.ts` | In-memory event recorder for one runtime trajectory |
+| `src/trajectory/failure-classifier.ts` | Heuristic failure classification |
+| `src/session/sqlite-session-db.ts` | SQLite persistence for trajectories and failures |
+| `src/cli/trace-commands.ts` | `estacoda trace` CLI surface |
+| `src/utils/redaction.ts` | Function-based redaction helpers for trace export |
 
 ## Event Kinds
 
-The contract defines 32 event kinds:
+The event-kind source of truth is the `TrajectoryEventKind` union in `src/contracts/trajectory.ts`. Keep this table aligned with that union when new event families are added.
 
 | Category | Events |
 |----------|--------|
@@ -34,11 +34,11 @@ The contract defines 32 event kinds:
 | Skills | `skill-selected`, `skill-playbook-planned`, `skill-playbook-step`, `skill-route-usage`, `skill-route-telemetry`, `skill-lifecycle-changed` |
 | Tools | `tool-plan`, `tool-call`, `tool-gated`, `tool-result` |
 | Provider | `provider-completion`, `provider-continuation`, `provider-iteration`, `provider-budget-exhausted` |
-| Memory | `memory-write`, `memory-conclusion` |
+| Memory | `memory-write`, `memory-conclusion`, `memory-promotion`, `memory-promotion-failed`, `memory-file-compaction`, `session-recall-decision`, `external-memory-recall`, `external-memory-mirror-write` |
 | Security | `security-risk-escalated` |
 | Artifacts | `artifact-created` |
-| Delegation | `delegation-started`, `delegation-finished`, `delegation-heartbeat`, `delegation-diagnostic`, runtime `delegation-progress` |
-| Prompt | `prompt-assembled`, `session-history-packed` |
+| Delegation | `delegation-started`, `delegation-finished` |
+| Prompt and history | `prompt-assembled`, `session-history-packed`, `session-history-compressed`, `session-compression-state` |
 | Progress | `progress`, `fallback`, `assistant-output`, `user-correction` |
 | Cancel | `agent-cancelled` |
 
@@ -46,7 +46,7 @@ The contract defines 32 event kinds:
 
 Delegation events are additive and bounded. `delegation-started` / `delegation-finished` are persisted session events for child lifecycle summaries. `delegation-heartbeat` keeps long-running child work visible to the parent without raw token streams. `delegation-diagnostic` points at bounded timeout/stale-heartbeat diagnostics. Runtime `delegation-progress` relays selected child activity such as tool start/result and provider attempt/result summaries with child metadata.
 
-`user-correction` is a structured trajectory event kind introduced in v0.7. When the user provides corrective feedback (e.g., "no, do it this way"), the runtime records:
+`user-correction` is a structured trajectory event kind. When the user provides corrective feedback (e.g., "no, do it this way"), the runtime records:
 
 - `correctionText`: what the user said
 - `skillName`: the skill that produced the incorrect behavior (if identified)
@@ -70,7 +70,7 @@ class TrajectoryRecorder {
 - Records events with timestamp and ID
 - Completes with success/failure outcome
 - Compresses to summary + preserved event IDs
-- Snapshot includes failure tracking (post-v0.5)
+- Snapshot includes failure tracking
 
 ## Persistence
 
@@ -96,14 +96,15 @@ estacoda trace failures <trajectory-id>
 
 ## Redaction
 
-Default policy (applied unless `--raw`):
-- Scrubs 25+ sensitive key patterns (`apiKey`, `password`, `token`, etc.)
-- `strict` mode redacts high-entropy strings (>32 chars, high entropy)
-- Never mutates input; returns a cloned/redacted copy
+`estacoda trace dump <id>` redacts by default. `--raw` returns the stored JSON without redaction.
+
+Redaction is implemented by functions in `src/utils/redaction.ts`, not by a stateful redaction engine. The default object path redacts sensitive key names such as API keys, tokens, passwords, credentials, OAuth tokens, cookies, and related variants. String values are also scanned for common secret shapes such as bearer/basic auth headers, JWTs, URL credentials, environment-style secret assignments, password assignments, and common API-key patterns.
+
+`strict` mode exists in the helper API for unknown high-entropy strings, but the trace CLI currently calls `redactObject(trajectory)` with default options.
 
 ## Failure Classification
 
-`FailureClassifier` maps runtime events to 13 coarse classes:
+The failure-class source of truth is the `FailureClass` union in `src/contracts/failure.ts`. `FailureClassifier` maps runtime events and errors to these coarse classes:
 
 | Class | Source |
 |-------|--------|
@@ -115,18 +116,18 @@ Default policy (applied unless `--raw`):
 | `tool-invalid-args` | Schema validation failed |
 | `tool-timeout` | Execution exceeded limit |
 | `plan-dependency-error` | Dependency resolution failed |
-| `workflow-step-error` | Skill playbook step failed |
+| `skill-playbook-step-error` | Skill playbook step failed |
 | `budget-exhausted` | Token/wall-clock/tool-call budget |
 | `security-escalation` | Risk escalation aborted run |
 | `user-cancelled` | Agent cancelled by user |
-| `loop-exhausted` | Max iterations reached |
+| `agent-loop-exhausted` | Max iterations reached |
+| `unknown` | Unclassified failure |
 
 Classified failures are stored in `trajectory_failures` and surfaced via `estacoda trace failures`.
 
 ## ArtifactStore
 
 **File:** `src/artifacts/artifact-store.ts`
-**Size:** 56 lines
 
 Stores artifact records in memory with `artifact://<id>` prompt-safe references.
 
@@ -135,7 +136,7 @@ Stores artifact records in memory with `artifact://<id>` prompt-safe references.
 - No linkage to trajectory events
 - No artifact lineage
 
-## v0.5 Completion Status
+## Current Completion Status
 
 | Target | Status |
 |--------|--------|
@@ -144,9 +145,9 @@ Stores artifact records in memory with `artifact://<id>` prompt-safe references.
 | Tool-call timeline | ✅ `estacoda trace timeline` |
 | Decision/event log | ✅ Events captured per trajectory |
 | Run metadata | ✅ Trajectory record with model/session IDs |
-| Failure classification | ✅ 13 classes + SQLite storage |
-| Basic eval runner | ✅ `src/eval/eval-runner.ts` + 3 fixtures |
-| Regression fixtures | ✅ `src/eval/fixtures/` (3 deterministic) |
+| Failure classification | ✅ `FailureClass` contract + SQLite storage |
+| Basic eval runner | ✅ `src/eval/eval-runner.ts` |
+| Regression fixtures | ✅ `src/eval/fixtures/` deterministic fixtures |
 | Run replay | ⚠️ Skeleton only (load trajectory, no re-execution) |
 | Evidence corpus | ✅ Trajectories + failures + eval results |
 | Change-manifest skeleton | ✅ `EvolutionChangeManifest` + `ChangeManifestStore` |

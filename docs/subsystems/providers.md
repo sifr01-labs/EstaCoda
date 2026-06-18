@@ -9,14 +9,16 @@ EstaCoda supports multiple LLM providers with capability-based routing, direct `
 
 ## Files
 
-| File | Lines | Role |
-|------|-------|------|
-| `src/providers/provider-executor.ts` | ~340 | Streaming execution and tool-call assembly |
-| `src/providers/openai-compatible-provider.ts` | 838 | Primary inference adapter |
-| `src/providers/provider-registry.ts` | ~180 | Provider registration and discovery |
-| `src/providers/auxiliary-model-resolver.ts` | ~160 | Resolve auxiliary model routes |
-| `src/providers/model-catalog.ts` | ~180 | Model profile resolution |
-| `src/model-catalog/models-dev-registry.ts` | 695 | models.dev metadata registry |
+| File | Role |
+|------|------|
+| `src/providers/provider-executor.ts` | Streaming execution, fallback handling, and provider result normalization |
+| `src/providers/openai-compatible-provider.ts` | Chat Completions-compatible inference adapter |
+| `src/providers/openai-responses-provider.ts` | Responses-compatible provider path used by Codex |
+| `src/providers/provider-registry.ts` | Provider registration and discovery |
+| `src/providers/provider-metadata.ts` | Provider capability, visibility, configurability, and auth metadata |
+| `src/providers/auxiliary-model-resolver.ts` | Resolve auxiliary model routes |
+| `src/providers/model-catalog.ts` | Model profile resolution |
+| `src/model-catalog/models-dev-registry.ts` | models.dev metadata registry |
 
 ## Supported Providers
 
@@ -28,7 +30,7 @@ EstaCoda supports multiple LLM providers with capability-based routing, direct `
 | OpenRouter | Runtime works; exactness partial | `live-proven` |
 | Ollama (local) | Architectural; unproven in this env | `implemented but not live-proven` |
 | Google | Configurable | `implemented but not live-proven` |
-| Anthropic | Configurable | `implemented but not live-proven` |
+| Anthropic | Catalog-known, not runnable | `catalog-known` |
 
 ## Architecture
 

@@ -20,13 +20,13 @@ sidebar_position: 10
 | **Telegram** | `live-proven` | polling | push | نعم | نعم | نعم | نعم |
 | **Discord** | `present-not-live-proven` | websocket | push | لا | لا | نعم | لا |
 | **Email** | `present-not-live-proven` | polling | push | لا | نعم | لا | لا |
-| **WhatsApp** | `experimental` | websocket | push | لا | لا | لا | لا |
+| **WhatsApp** | `operational-with-external-risk` | websocket | push | نعم | محدود | لا | محدود |
 
 **التعريفات:**
 
 - `live-proven` — مُختبر في استخدام واقعي.
-- `present-not-live-proven` — الكود موجود، والمحولات تبدأ، واختبارات الدخان المحلية تنجح. الاختبار النهائي الشامل لم يكتمل لـ v0.1.0.
-- `experimental` — محصور بـ `experimental: true`. واجهة برمجة غير رسمية. مخاطر على الحساب.
+- `present-not-live-proven` — الكود موجود، والمحولات تبدأ، واختبارات الدخان المحلية تنجح. التحقق النهائي الحي يعتمد على نشر المشغل.
+- `operational-with-external-risk` — المسار مُنفذ ومدعوم في الإعداد، لكنه يستخدم واجهة غير رسمية عبر bridge معزول. مخاطر الحساب خارج سيطرة EstaCoda.
 
 ---
 
@@ -189,7 +189,7 @@ Discord موجود في الكود لكنه غير مُثبت حيًا لـ v0.1
 **الثغرات:**
 
 - مرفقات Discord والخيوط وتدفق التقدم غير مدعومة في سجل القدرات.
-- أوامر الشرطة المائلة مؤجلة بعد v0.1.0.
+- تسجيل أوامر الشرطة المائلة ليس جزءًا من مسار الإعداد الرسمي الحالي.
 - اختبار الدخان الحي للاعتمادات اختياري ويدوي.
 
 **القنوات الصوتية:** دعم قنوات Discord الصوتية الاختياري موجود فقط عندما يكون `channels.discord.voiceChannel.enabled` صحيحًا ويكون مكدس Discord الصوتي الاختياري مثبتًا. الحزم أو الصلاحيات المفقودة تعيد أخطاء إعداد قبل الانضمام.
@@ -257,21 +257,21 @@ estacoda email configure \
 
 ---
 
-## WhatsApp (تجريبي)
+## WhatsApp
 
-WhatsApp تجريبي ومحصور بـ `channels.whatsapp.experimental: true`.
+WhatsApp محصور بـ `channels.whatsapp.experimental: true` ويعمل عبر bridge معزول تحت `scripts/whatsapp-bridge/`.
 
 **القدرات:**
 
 | القدرة | الحالة |
 |---|---|
-| تسجيل دخول Baileys كجهاز مرتبط | `experimental` |
-| تسجيل دخول برمز QR | `experimental` |
-| توصيل نصي مباشر | `experimental` |
-| ضبط سياسة المجموعات | `experimental` |
-| تحميل/رفع الوسائط | `experimental` |
-| تقسيم الرسائل | `experimental` |
-| ردود نهائية فقط | `experimental` |
+| تسجيل دخول Baileys كجهاز مرتبط | `implemented` |
+| تسجيل دخول برمز QR | `implemented` |
+| توصيل نصي مباشر | `implemented` |
+| ضبط سياسة المجموعات | `implemented` |
+| تحميل/رفع الوسائط | `implemented` |
+| تقسيم الرسائل | `implemented` |
+| ردود نهائية فقط | `implemented` |
 | توصيل voice bubble | يتطلب `ffmpeg` اختيارياً |
 
 **هام:** يستخدم WhatsApp الحزمة `@whiskeysockets/baileys` عبر حزمة npm المعزولة `scripts/whatsapp-bridge/`. Baileys واجهة غير رسمية؛ قد تُعلّق Meta حسابات WhatsApp التي تستخدم مكتبات غير رسمية. استخدمها على مسؤوليتك. لا يثبت runtime الجذري Baileys أو معالجة `@hapi/boom` الخاصة بـ WhatsApp ولا يستوردهما.

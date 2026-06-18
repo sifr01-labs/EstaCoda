@@ -201,7 +201,7 @@ WhatsApp media delivery accepts only main-runtime validated local paths. The tru
 
 For WhatsApp voice bubbles, install `ffmpeg` in the operator environment. Voice-hinted audio that is already OGG/Opus is sent as voice/PTT. Incompatible provider audio converts to OGG/Opus in the main runtime under profile-local temp/media roots; if `ffmpeg` is unavailable or conversion fails, EstaCoda falls back to normal audio delivery with a clear fallback caption.
 
-**Important:** WhatsApp requires `experimental: true`. The transport uses the unofficial Baileys API through the isolated bridge package, so account suspension risk remains. See [Security](../security/handoff-preflight-report-v0.9.md) for unofficial-API risk.
+**Important:** WhatsApp requires `experimental: true`. The transport uses the unofficial Baileys API through the isolated bridge package, so account suspension risk remains. See [Security](../subsystems/security.md#channel-security) for the channel authorization and unofficial-API boundaries.
 
 ## Defaults
 

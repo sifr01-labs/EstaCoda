@@ -430,7 +430,7 @@ Skill loading and Agent Evolution policy.
 
 Autonomy modes: `none`, `suggest`, `proactive`, `autonomous`.
 
-`skills.autonomy` is the persisted compatibility key for Agent Evolution. In Phase 1A it controls reviewable evidence/proposal behavior only. `autonomous` is shadow-only: it records decisions for review but does not auto-promote, auto-rollback, or mutate skill files.
+`skills.autonomy` is the persisted compatibility key for Agent Evolution. It controls reviewable evidence/proposal behavior. `autonomous` is shadow-only: it records decisions for review but does not auto-promote, auto-rollback, or mutate skill files.
 
 ### ui
 

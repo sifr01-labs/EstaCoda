@@ -9,17 +9,17 @@ EstaCoda uses a capability-first security model where tool risk classes, approva
 
 ## Files
 
-| File | Lines | Role |
-|------|-------|------|
-| `src/security/security-policy-factory.ts` | ~180 | Create policy for approval mode |
-| `src/security/workspace-trust-store.ts` | ~160 | Persist workspace trust grants |
-| `src/security/workspace-approval-controller.ts` | ~240 | Manage approval grants and scopes |
-| `src/security/command-safety.ts` | ~200 | Command classification and hard floor |
-| `src/security/smart-approval-assessor.ts` | ~150 | Shared smart approval classifier path |
-| `src/contracts/security.ts` | ~120 | Security types and defaults |
-| `src/channels/channel-approval-store.ts` | ~180 | Approval persistence per channel |
-| `src/gateway/approval-queue.ts` | ~320 | Durable gateway pending approval queue |
-| `src/channels/handoff-store.ts` | ~150 | Short-lived handoff codes |
+| File | Role |
+|------|------|
+| `src/security/security-policy-factory.ts` | Create policy for approval mode |
+| `src/security/workspace-trust-store.ts` | Persist workspace trust grants |
+| `src/security/workspace-approval-controller.ts` | Manage approval grants and scopes |
+| `src/security/command-safety.ts` | Command classification and hard floor |
+| `src/security/smart-approval-assessor.ts` | Shared smart approval classifier path |
+| `src/contracts/security.ts` | Security types and defaults |
+| `src/channels/channel-approval-store.ts` | Approval persistence per channel |
+| `src/gateway/approval-queue.ts` | Durable gateway pending approval queue |
+| `src/channels/handoff-store.ts` | Short-lived handoff codes |
 
 ## Approval Modes
 
@@ -172,7 +172,7 @@ Gateway approvals use a durable `pending_approvals` table in the session databas
 
 **Email `allowAllUsers`:** When `true`, sender filtering is bypassed. All email senders are treated as allowed. This is useful for public-facing email bots but increases exposure.
 
-**WhatsApp experimental gate:** The WhatsApp adapter only initializes when `channels.whatsapp.experimental: true`. This is a deliberate gate to prevent accidental use of the unofficial Baileys API.
+**WhatsApp unofficial-API gate:** The WhatsApp adapter only initializes when `channels.whatsapp.experimental: true`. This is a deliberate gate to prevent accidental use of the unofficial Baileys API.
 
 **WhatsApp user authorization:** `dmPolicy: "pairing"` is a locked waiting state, not an open policy. WhatsApp user authorization codes are single-use, expire after 10 minutes, and are persisted only as salted SHA-256 hashes in profile-local state; a redeemed code adds only the redeeming sender to `channels.whatsapp.allowedUsers`.
 
@@ -193,9 +193,9 @@ CLI↔Telegram handoff uses short-lived, single-use codes:
 - **Single-use:** Codes are marked redeemed after first successful use.
 - **Atomic writes:** `handoff-codes.json` is written via temp-file + rename with `0o600` permissions.
 - **No leakage on failure:** Failed redemption returns generic messages; no session ID is revealed.
-- **No rate limiter in v0.9:** Brute-force mitigation relies on short TTL + keyspace + single-use + gateway allowlist.
+- **No rate limiter:** Brute-force mitigation relies on short TTL, a large code keyspace, single-use redemption, and the gateway allowlist.
 
-See [Handoff Preflight Report](../security/handoff-preflight-report-v0.9.md) for full audit details.
+Handoff security is covered by this subsystem document and the channel/session tests around `HandoffStore`, surface pointers, and gateway authorization.
 
 ### Surface Pointer Behavior
 

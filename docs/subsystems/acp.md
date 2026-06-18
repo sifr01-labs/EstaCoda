@@ -7,9 +7,9 @@ description: "ACP stdio JSON-RPC server for editor integration."
 
 ## Files
 
-| File | Lines | Role |
-|------|-------|------|
-| `src/acp/server.ts` | 1,716 | ACP stdio JSON-RPC server |
+| File | Role |
+|------|------|
+| `src/acp/server.ts` | ACP stdio JSON-RPC server |
 
 ## Capabilities
 

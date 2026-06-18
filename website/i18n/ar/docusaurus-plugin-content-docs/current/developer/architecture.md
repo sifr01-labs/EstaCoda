@@ -23,12 +23,12 @@ EstaCoda هو بيئة تشغيل لوكيل مكتوبة بـ TypeScript وتع
 | `src/index.ts` | تدفق الإقلاع، توجيه الأوامر، واستعادة الجلسات | `live-proven` |
 | `src/cli/cli.ts` | تحليل أوامر CLI وتوجيهها | `live-proven` |
 | `src/cli/session-loop.ts` | جلسة الطرفية التفاعلية | `live-proven` |
-| `src/channels/gateway-runner.ts` | بيئة تشغيل بوابة القنوات | `live-proven` |
+| `src/channels/gateway-runner.ts` | مساعدات تشخيص البوابة | `smoke-tested` |
 | `src/channels/telegram-adapter.ts` | موائم Telegram | `live-proven` |
 | `src/channels/discord-adapter.ts` | موائم Discord | `present-not-live-proven` |
 | `src/channels/email-adapter.ts` | موائم Email | `present-not-live-proven` |
-| `src/channels/whatsapp-adapter.ts` | موائم WhatsApp | `experimental` |
-CLI وTelegram هما الواجهتان المثبتتان عمليًا في v0.1.0. كود موائمَي Discord وEmail موجود، لكن الاستخدام الإنتاجي الحي ليس جزءًا من خط أساس v0.1.0. WhatsApp مقيّد كواجهة تجريبية.
+| `src/channels/whatsapp-adapter.ts` | موائم WhatsApp | `operational-with-external-risk` |
+CLI وTelegram هما أقوى واجهتين مثبتتين عمليًا في v0.1.0. كود موائمَي Discord وEmail موجود ومدعوم بالاختبارات، لكن التحقق الإنتاجي الحي يعتمد على النشر. WhatsApp مدعوم في الإعداد ويعمل عبر bridge معزول، لكنه يبقى مقيّداً لأن Baileys واجهة غير رسمية.
 ---
 ## حدود الملف الشخصي والحالة
 ينظم EstaCoda إعدادات المشغّل حول **الملفات الشخصية التشغيلية**. يمثّل الملف الشخصي الحزمة النشطة من مسارات المزوّدين، والاعتمادات، وملفات الذاكرة، والمهارات المثبتة، وحالة القنوات، والسجلات، وذاكرات التخزين المؤقت لسياق مشغّل واحد.
@@ -255,7 +255,7 @@ CLI وTelegram هما الواجهتان المثبتتان عمليًا في v0
 | Telegram | `live-proven` | قناة بعيدة من الطرف الأول. |
 | Discord | `present-not-live-proven` | كود الموائم موجود؛ الاستخدام الإنتاجي الحي ليس جزءًا من خط أساس v0.1.0. |
 | Email | `present-not-live-proven` | كود الموائم موجود؛ الاستخدام الإنتاجي الحي ليس جزءًا من خط أساس v0.1.0. |
-| WhatsApp | `experimental` | جسر مرتبط عبر QR، وتشخيصات، وتدفق إعداد موجود؛ ما زال مقيّدًا كتجريبي. |
+| WhatsApp | `operational-with-external-risk` | جسر مرتبط عبر QR، وتشخيصات، وتدفق إعداد موجود؛ ما زال مقيّداً لأن Baileys واجهة غير رسمية. |
 | AgentLoop | `live-proven` | تنسيق الجولة الأساسي. |
 | AgentLoopBuilder | `live-proven` | تجميع بيئة التشغيل المقيّد بالجلسة. |
 | تنفيذ المزوّدين | `live-proven` | سجل المزوّدين، المنفّذ، الرجوع الاحتياطي، والمسارات المساعدة. |

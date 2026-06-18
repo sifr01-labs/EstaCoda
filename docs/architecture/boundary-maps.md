@@ -44,7 +44,7 @@ description: "Cross-subsystem boundary analysis for memory, skills, provider loo
 │  SkillLoader → skill-loader.ts                          │
 │  SkillEvolutionStore → skill-evolution.ts                │
 │  SkillLearningManager → skill-learning.ts               │
-│  SkillTools → skill-tools.ts                            │
+│  SkillTools → src/tools/skill-tools.ts                  │
 ├───────────────────────────────────────────────────────┤
 │  Consumers: AgentLoop, CLI slash commands, skill-tools    │
 └───────────────────────────────────────────────────────┘
@@ -52,8 +52,8 @@ description: "Cross-subsystem boundary analysis for memory, skills, provider loo
 
 **Inbound boundaries:**
 - `SkillLoader` loads from official, personal, project, and external roots.
-- `SkillEvolutionStore` receives proposed patches from usage telemetry.
-- `SkillLearningManager` observes workflow execution and creates project skills.
+- `SkillEvolutionStore` receives observations, candidates, proposals, promotion records, snapshots, and rollback metadata.
+- `SkillLearningManager` observes completed turns and emits evidence/candidates; it does not create or promote live skills directly.
 
 **Outbound boundaries:**
 - `AgentLoop` reads selected skill instructions and resources.
@@ -90,13 +90,13 @@ description: "Cross-subsystem boundary analysis for memory, skills, provider loo
 
 ```
 ┌───────────────────────────────────────────────────────┐
-│  TrajectoryRecorder (101 lines, in-memory per session)     │
+│  TrajectoryRecorder (in-memory recorder per trajectory)     │
 │  SQLiteSessionDB (persistent trajectories + failures)      │
-│  FailureClassifier (325 lines, 13 classes)                 │
-│  RedactionEngine (130 lines, safe-by-default)              │
-│  EvalRunner (118 lines, 3 deterministic fixtures)          │
-│  GoldenFlowCompare (65 lines, baseline assertion)          │
-│  ChangeManifestStore (137 lines, JSONL proposals)          │
+│  FailureClassifier (maps events/errors to FailureClass)    │
+│  redaction helpers (function-based trace export redaction) │
+│  EvalRunner (runs the default deterministic fixture set)   │
+│  GoldenFlowCompare (baseline comparison helper)            │
+│  ChangeManifestStore (JSONL change manifests)              │
 │  ───────────────────────────────────────────────────────  │
 │  Events captured:                                          │
 │    - session-start, user-input, context-expanded           │
@@ -112,6 +112,6 @@ description: "Cross-subsystem boundary analysis for memory, skills, provider loo
 └───────────────────────────────────────────────────────┘
 ```
 
-**Current state:** Contracts define 32 event kinds. Trajectories persist to SQLite. Failures are classified. Traces are inspectable via CLI. Eval fixtures run automatically. Golden flows provide baselines. Change manifests prepare for v0.7 evolution.
+**Current state:** Contracts define trajectory event kinds and failure classes. Trajectories and classified failures persist to SQLite. Trace data is inspectable from the CLI with redacted output by default. The eval runner executes the fixture set exported by `src/eval/fixtures/index.ts`; golden-flow comparison and change manifests provide supporting evidence for governed evolution work.
 
-**Remaining gap:** No visual dashboard. No real-time streaming. No automated regression detection across runs. No self-evolution pipeline (candidate generation, evaluation, promotion).
+**Remaining gap:** No visual dashboard. No real-time trace streaming. No scored benchmark or automated regression gate across historical runs. Agent Evolution remains governed: evidence and proposals are recorded, but live promotion remains review-gated.

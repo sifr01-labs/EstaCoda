@@ -31,7 +31,7 @@ sidebar_position: 4
 | `DEEPSEEK_API_KEY` | DeepSeek | مثبت عمليًا |
 | `OPENROUTER_API_KEY` | OpenRouter | مثبت عمليًا |
 | `GOOGLE_API_KEY` | Google | قابل للإعداد/معروف في الكتالوج |
-| `ANTHROPIC_API_KEY` | Anthropic | قابل للإعداد/معروف في الكتالوج |
+| `ANTHROPIC_API_KEY` | Anthropic | معروف في الكتالوج؛ غير قابل للتشغيل كمسار LLM رئيسي |
 
 MiniMax وNous معروفان في الكتالوج لكن غير قابلين للتشغيل في البنية الحالية.
 

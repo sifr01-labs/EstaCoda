@@ -33,9 +33,9 @@ Rollback remains manual/snapshot-backed where implemented
 
 **Critical rule:** The runtime does not silently rewrite itself during normal user work.
 
-## Phase 1A State
+## Current State
 
-Implemented in Phase 1A:
+Implemented now:
 
 - Agent Evolution policy derivation from `skills.autonomy`.
 - Additive route/outcome telemetry fields for routing evidence, future correction signals, and final outcomes.
@@ -45,7 +45,7 @@ Implemented in Phase 1A:
 - Durable `EvolutionExperiment` records.
 - `estacoda proposal list` and `estacoda proposal inspect <id>` review surfaces for pending proposals and linked evidence/candidates/experiments/evals.
 
-Phase 1A autonomous behavior is shadow-only. It may record policy decisions and proposal metadata, but it does not auto-promote, auto-rollback, bypass approval gates, or mutate bundled/external skills.
+Autonomous behavior is shadow-only. It may record policy decisions and proposal metadata, but it does not auto-promote, auto-rollback, bypass approval gates, or mutate bundled/external skills.
 
 ## Change Manifest
 
@@ -81,8 +81,8 @@ Manifest ownership is explicit:
 | 2 | Tool descriptions and routing hints | manifest/proposal skeletons implemented; application is future work |
 | 3 | Memory promotion/rendering policy | planned |
 | 4 | Eval fixtures and golden flows | partially implemented; richer eval execution is planned |
-| 5 | Middleware/runtime strategy | post-v0.10 |
-| 6 | Runtime code evolution | post-MVP, PR-only |
+| 5 | Middleware/runtime strategy | future work |
+| 6 | Runtime code evolution | future PR-only work |
 
 ## AHE Alignment
 
@@ -100,7 +100,7 @@ The `OptimizationDataset` type provides clean JSON for external optimization pip
 
 ```typescript
 {
-  version: "v0.7";
+  version: "v0.1.0";
   generatedAt: string;
   meta: { skillCount, proposalCount, manifestCount, observationCount, evalRunCount };
   traces: [...];
@@ -124,15 +124,15 @@ Produced by `estacoda evolution export --dataset <path>`. No Python dependency.
 7. No enforced workflow for every skill.
 8. No bypassing security/approval layers.
 9. No broad semantic architecture inference.
-10. No automatic memory policy evolution in v0.7.
+10. No automatic memory policy evolution in the current release.
 11. No embedding/vector search.
-12. No semantic retrieval, compact skill index fallback, LLM reranking, taskClass routing, or supporting-candidate routing in Phase 1A.
-13. No advisory route tools such as `skill.reject_route` or `skill.search_routes` in Phase 1A.
-14. No real autonomous promotion, auto-rollback, skill fork/merge/archive, or hygiene scanning loop in Phase 1A.
+12. No semantic retrieval, compact skill index fallback, LLM reranking, taskClass routing, or supporting-candidate routing in the current implementation.
+13. No advisory route tools such as `skill.reject_route` or `skill.search_routes` in the current implementation.
+14. No real autonomous promotion, auto-rollback, skill fork/merge/archive, or hygiene scanning loop in the current implementation.
 
 ## Routing Boundary
 
-Routing remains deterministic in Phase 1A. Route telemetry, rejection/search-compatible contracts, and routing baseline metrics exist so Agent Evolution can later evaluate routing quality. They do not enable semantic retrieval, provider embeddings, reranking, compact skill indexes, supporting candidates, or advisory route tools yet.
+Routing remains deterministic. Route telemetry, rejection/search-compatible contracts, and routing baseline metrics exist so Agent Evolution can evaluate routing quality, but they do not enable semantic retrieval, provider embeddings, reranking, compact skill indexes, supporting candidates, or advisory route tools.
 
 ## CLI Commands
 

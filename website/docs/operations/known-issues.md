@@ -30,7 +30,7 @@ These features are code-gated or maturity-marked. Enable them only if you unders
 | Feature | Gate | Risk |
 |---------|------|------|
 | Session compression | `compression.enabled` and `compression.experimental` both `true` | Experimental-only. Disabled by default. |
-| Agent Evolution autonomy above `suggest` | `skills.autonomy` modes above `suggest` | Phase 1A records reviewable evidence/proposals and shadow-only decisions. Real auto-promotion, auto-rollback, and automatic local skill creation are planned, not active. |
+| Agent Evolution autonomy above `suggest` | `skills.autonomy` modes above `suggest` | Records reviewable evidence/proposals and shadow-only decisions. Real auto-promotion, auto-rollback, and automatic local skill creation are not active. |
 | Skill evolution/proposal/promotion workflows | `skill.propose_patch`, `skill.rollback` | Governed but not fully autonomous. Promotion runs eval gates. |
 | Workflow runtime integration | SQLite session DB required | Best-effort. Wires only when the session database is SQLite. |
 | Local TTS | Deferred | No local TTS provider is implemented. |
@@ -47,7 +47,7 @@ These channels and providers exist in code but lack live validation evidence for
 |---------|----------|------|
 | Discord channel | Experimental | Adapter is present; live validation is incomplete. |
 | Google LLM provider | Configurable/catalog-known | Config path exists but not live-proven in this build. |
-| Anthropic LLM provider | Configurable/catalog-known | Config path exists but not runnable in this build. |
+| Anthropic LLM provider | Catalog-known | Metadata and catalog entries exist, but it is not exposed as a setup/model-picker route and is not runnable in this build. |
 
 ## Known runtime limitations
 
@@ -67,7 +67,7 @@ These channels and providers exist in code but lack live validation evidence for
 - Live provider capability detection deserves an explicit operator signal.
 - Session recall works, but richer lineage/history management is missing.
 - Profile effects beyond prompt guidance remain incomplete.
-- npm global install requires the package to be published to npm. `private: true` remains in `package.json` until the final release PR.
+- npm global install requires the package to be published to npm. Package metadata is publish-ready, but publication happens through the release process.
 - Homebrew install depends on an external tap (`KemetResearch/homebrew-tap`) that is not part of this repository.
 - Docker install depends on GHCR image availability and tag publishing.
 - Auto-stash on dirty worktree is not implemented.

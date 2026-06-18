@@ -8,7 +8,7 @@ Open-source runtime for Agent Evolution — the first of its kind built in the A
 
 EstaCoda is a terminal-native AI agent that gets better from real work. It uses tools, remembers across sessions, runs through messaging channels, schedules recurring jobs, and turns repeated execution patterns into reusable skills and workflows.
 
-Bring your own model. Run it locally, on a server, through Docker, or from WSL2. Use it from the terminal, Telegram, and WhatsApp, with more channels coming soon.
+Bring your own model. Run it locally, on a server, through Docker, or from WSL2. Use it from the terminal, Telegram, and gated WhatsApp. Discord and Email adapters are present for operators who validate them in their own deployment.
 
 EstaCoda is built with Arabic as a first-class operating language, including shaped, bidirectional Arabic rendering for terminal workflows.
 
@@ -24,7 +24,7 @@ Built by Kemet Research.
 |---|---|
 | An agent that improves over time | Skills, memory, workflows, and reviewable improvement proposals based on real execution patterns. |
 | A real operator terminal | CLI sessions with tool execution, approvals, profile state, durable history, and shaped bidirectional Arabic rendering. |
-| An agent that follows you | CLI, Telegram, and WhatsApp today, with more channels on the way. |
+| An agent that follows you | CLI and Telegram as the strongest channels, gated WhatsApp through an isolated bridge, and Discord/Email adapters for operator-validated deployments. |
 | Work that runs without babysitting | Cron jobs and durable workflows that can run unattended and deliver results back to you. |
 | Model freedom | OpenRouter, Kimi, DeepSeek, OpenAI, Google, local/self-hosted endpoints, and other configured providers. |
 | More than chat | Web research, browser automation, hosted voice providers, image generation, files, shell commands, and tool workflows. |
@@ -126,7 +126,7 @@ EstaCoda distinguishes between live-proven, configurable, experimental, and emer
 | Google | Configurable |
 | Local / self-hosted | Supported through local OpenAI-compatible endpoints |
 
-Custom OpenAI-compatible providers work with an explicit `baseUrl`. Additional providers are available through configuration, with more coming soon.
+Custom OpenAI-compatible providers work with an explicit `baseUrl`. Catalog-known providers are not automatically runnable; check the provider reference before treating one as a primary route.
 
 ### Channels
 
@@ -134,8 +134,9 @@ Custom OpenAI-compatible providers work with an explicit `baseUrl`. Additional p
 |---|---|
 | CLI | Primary |
 | Telegram | Live-proven |
-| WhatsApp | Live-proven |
-| More channels | Coming soon |
+| WhatsApp | Operational with external API risk; gated by `channels.whatsapp.experimental: true` |
+| Discord | Implemented and test-backed; operator validation required |
+| Email | Implemented and test-backed; operator validation required |
 
 WhatsApp uses an isolated Baileys bridge under `scripts/whatsapp-bridge/`. The bridge dependencies are managed separately and are not part of the root pnpm workspace. See the channel docs for setup, authorization, pairing, and delivery behavior.
 
