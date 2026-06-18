@@ -1087,9 +1087,15 @@ describe("ProviderTurnLoop semantic session compression", () => {
       expect.objectContaining({
         role: "tool",
         toolCallId: "call-native-history",
-        content: "native replay tool result"
+        content: expect.stringContaining("native replay tool result")
       })
     ]));
+    const nativeReplayToolMessage = request.messages.find((message) =>
+      message.role === "tool" && message.toolCallId === "call-native-history"
+    );
+    expect(String(nativeReplayToolMessage?.content)).toContain("[Historical tool result from ");
+    expect(String(nativeReplayToolMessage?.content)).toContain("via test.tool; reference only.");
+    expect(String(nativeReplayToolMessage?.content)).toContain("native replay tool result");
     const events = await harness.sessionDb.listEvents(harness.sessionId);
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -1240,9 +1246,15 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       expect.objectContaining({
         role: "tool",
         toolCallId: "call-live",
-        content: "live tool result"
+        content: expect.stringContaining("live tool result")
       })
     ]));
+    const liveReplayToolMessage = continuationRequest.messages.find((message) =>
+      message.role === "tool" && message.toolCallId === "call-live"
+    );
+    expect(String(liveReplayToolMessage?.content)).toContain("[Historical tool result from ");
+    expect(String(liveReplayToolMessage?.content)).toContain("via test.tool; reference only.");
+    expect(String(liveReplayToolMessage?.content)).toContain("live tool result");
     const events = await harness.sessionDb.listEvents(harness.sessionId);
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({
