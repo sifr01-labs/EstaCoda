@@ -81,11 +81,7 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
             enum: ["leaf", "orchestrator"]
           },
           modelOverride: modelOverrideSchema()
-        },
-        anyOf: [
-          { required: ["task"] },
-          { required: ["tasks"] }
-        ]
+        }
       },
       riskClass: "shared-state-mutation",
       toolsets: ["core", "research", "coding"],

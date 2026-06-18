@@ -18,10 +18,6 @@ describe("createDelegationTools", () => {
     expect(tool?.name).toBe("delegate_task");
     expect(tool?.inputSchema).toMatchObject({
       type: "object",
-      anyOf: [
-        { required: ["task"] },
-        { required: ["tasks"] }
-      ],
       properties: {
         task: { type: "string" },
         tasks: expect.objectContaining({
@@ -46,6 +42,7 @@ describe("createDelegationTools", () => {
         }
       }
     });
+    expect((tool?.inputSchema as { anyOf?: unknown }).anyOf).toBeUndefined();
   });
 
   it("passes tool execution AbortSignal and event sink into DelegationManager.delegate", async () => {
