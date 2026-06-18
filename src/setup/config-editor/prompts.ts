@@ -476,14 +476,9 @@ export async function promptWebSearchCapability(
   }
 
   if (provider === "brave") {
-    const envVar = await promptSetupStringWithDefault(
-      prompt,
-      setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.webSearch.brave.apiKeyEnv")),
-      current.braveApiKeyEnv ?? "BRAVE_SEARCH_API_KEY"
-    );
     return {
       provider,
-      braveApiKeyEnv: envVar,
+      braveApiKeyEnv: current.braveApiKeyEnv ?? "BRAVE_SEARCH_API_KEY",
     };
   }
 

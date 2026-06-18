@@ -2932,7 +2932,7 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["enable", "brave", "BRAVE_SEARCH_API_KEY", true],
+        values: ["enable", "brave", true],
         secret: "brave-secret",
       }),
       defaultActionId: "configure-web-search",

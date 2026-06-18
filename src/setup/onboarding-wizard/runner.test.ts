@@ -1808,7 +1808,7 @@ describe("runFirstRunSetup", () => {
       prompt: fakePrompt(searchPromptOverrides(
         resolveSetupCopy("en", "setupEditor.prompt.webSearch.provider.brave"),
         {
-          __prompt: ["", "BRAVE_SEARCH_API_KEY"],
+          __prompt: [""],
           __secret: "brave-secret-value",
         }
       )),

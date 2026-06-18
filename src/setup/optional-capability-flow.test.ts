@@ -63,7 +63,7 @@ describe("optional Search capability flow", () => {
     process.env.BRAVE_SEARCH_API_KEY = "env-brave-secret";
 
     const collected = await collectOptionalCapabilityContext(options({
-      values: ["brave", "BRAVE_SEARCH_API_KEY"],
+      values: ["brave"],
       secret: "should-not-be-read",
     }), baseContext(), webSearchSetupModule);
 
@@ -82,9 +82,11 @@ describe("optional Search capability flow", () => {
   });
 
   it("collects a reviewed deferred Brave secret write when no source exists", async () => {
+    const seenQuestions: { question: string; secret: boolean }[] = [];
     const collected = await collectOptionalCapabilityContext(options({
-      values: ["brave", "BRAVE_SEARCH_API_KEY"],
+      values: ["brave"],
       secret: "brave-secret",
+      seenQuestions,
     }), baseContext(), webSearchSetupModule);
 
     expect(collected.kind).toBe("configured");
@@ -99,6 +101,42 @@ describe("optional Search capability flow", () => {
       ]);
       expect(JSON.stringify(collected.context)).not.toContain("brave-secret");
     }
+    expect(seenQuestions).toContainEqual({
+      question: "Enter Brave Search API key: ",
+      secret: true,
+    });
+  });
+
+  it("preserves a custom existing Brave credential env ref when collecting a secret", async () => {
+    const seenQuestions: { question: string; secret: boolean }[] = [];
+    const collected = await collectOptionalCapabilityContext(options({
+      values: ["brave"],
+      secret: "custom-brave-secret",
+      seenQuestions,
+    }), baseContext({
+      web: {
+        searchBackend: "brave",
+        braveApiKeyEnv: "CUSTOM_BRAVE_SEARCH_KEY",
+      },
+    }), webSearchSetupModule);
+
+    expect(collected.kind).toBe("configured");
+    if (collected.kind === "configured") {
+      expect(collected.context.web).toMatchObject({
+        searchBackend: "brave",
+        braveApiKeyEnv: "CUSTOM_BRAVE_SEARCH_KEY",
+        braveCredentialReady: true,
+      });
+      expect(collected.pendingCredentialWrites).toEqual([
+        { envVarName: "CUSTOM_BRAVE_SEARCH_KEY", value: "custom-brave-secret" },
+      ]);
+      expect(JSON.stringify(collected.context)).not.toContain("custom-brave-secret");
+      expect(JSON.stringify(collected)).not.toContain("apiKey");
+    }
+    expect(seenQuestions).toContainEqual({
+      question: "Enter Brave Search API key: ",
+      secret: true,
+    });
   });
 
   it("configures DDGS when the registered managed Python capability is ready", async () => {
@@ -169,7 +207,11 @@ describe("optional Search capability flow", () => {
     expect(skipped).toEqual({ kind: "skip" });
   });
 
-  function options(input: { readonly values?: readonly unknown[]; readonly secret?: string }): Parameters<typeof collectOptionalCapabilityContext>[0] {
+  function options(input: {
+    readonly values?: readonly unknown[];
+    readonly secret?: string;
+    readonly seenQuestions?: { question: string; secret: boolean }[];
+  }): Parameters<typeof collectOptionalCapabilityContext>[0] {
     return {
       homeDir: tempDir,
       workspaceRoot,
@@ -188,9 +230,14 @@ describe("optional Search capability flow", () => {
   }
 });
 
-function fakePrompt(options: { readonly values?: readonly unknown[]; readonly secret?: string } = {}): Prompt {
+function fakePrompt(options: {
+  readonly values?: readonly unknown[];
+  readonly secret?: string;
+  readonly seenQuestions?: { question: string; secret: boolean }[];
+} = {}): Prompt {
   const values = [...(options.values ?? [])];
-  const prompt = (async (_question: string, promptOptions?: { secret?: boolean }) => {
+  const prompt = (async (question: string, promptOptions?: { secret?: boolean }) => {
+    options.seenQuestions?.push({ question, secret: promptOptions?.secret === true });
     if (promptOptions?.secret === true) return options.secret ?? "";
     const next = values.shift();
     return next === undefined ? "" : String(next);
