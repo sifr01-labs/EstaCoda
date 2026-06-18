@@ -1663,6 +1663,13 @@ describe("gateway commands", () => {
       const marker = await readGatewayRestartPlannedMarker(profilePaths);
       expect(marker?.reason).toBe("gateway-restart");
       expect(typeof marker?.plannedAt).toBe("string");
+      const persisted = JSON.parse(await readFile(join(profilePaths.gatewayStatePath, "restart-planned.json"), "utf8")) as Record<string, unknown>;
+      expect(Object.keys(persisted).sort()).toEqual(["plannedAt", "reason"]);
+      expect(persisted).not.toHaveProperty("chatId");
+      expect(persisted).not.toHaveProperty("threadId");
+      expect(persisted).not.toHaveProperty("sessionId");
+      expect(persisted).not.toHaveProperty("resume");
+      expect(persisted).not.toHaveProperty("channels");
     });
 
     it("does not write a planned restart marker when lifecycle notifications are absent", async () => {

@@ -35,7 +35,24 @@ describe("gateway restart planned marker", () => {
     await writeGatewayRestartPlannedMarker(profilePaths, marker);
 
     await expect(readGatewayRestartPlannedMarker(profilePaths)).resolves.toEqual(marker);
-    expect(JSON.parse(await readFile(gatewayRestartPlannedMarkerPath(profilePaths), "utf8"))).toEqual(marker);
+    const persisted = JSON.parse(await readFile(gatewayRestartPlannedMarkerPath(profilePaths), "utf8")) as Record<string, unknown>;
+    expect(persisted).toEqual(marker);
+    expect(Object.keys(persisted).sort()).toEqual(["plannedAt", "reason"]);
+    for (const forbiddenKey of [
+      "recipient",
+      "recipients",
+      "thread",
+      "threadId",
+      "chat",
+      "chatId",
+      "session",
+      "sessionId",
+      "resume",
+      "channel",
+      "channels",
+    ]) {
+      expect(persisted).not.toHaveProperty(forbiddenKey);
+    }
   });
 
   it("clears an existing marker", async () => {

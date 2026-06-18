@@ -72,6 +72,13 @@ describe("resolveGatewayLifecycleNotificationTargets", () => {
       { kind: "channel", platform: "whatsapp", chatId: "g1" },
     ]);
     expect(targets.every((target) => target.kind === "channel")).toBe(true);
+    for (const target of targets) {
+      expect(target).not.toHaveProperty("originalSessionKey");
+      expect(target).not.toHaveProperty("path");
+      expect(target.kind).not.toBe("origin");
+      expect(target.kind).not.toBe("local");
+      expect(target.kind).not.toBe("silent");
+    }
   });
 
   it("does not infer targets from channels that are not ready", () => {
@@ -139,6 +146,26 @@ describe("sendGatewayLifecycleNotification", () => {
 
     expect(seenTargets).toEqual([{ kind: "channel", platform: "telegram", chatId: "123" }]);
     expect(seenText).toBe("🟢 EstaCoda: Gateway online — agent ready.");
+    expect(summary).toEqual({ attempted: 1, delivered: 1, failed: 0 });
+  });
+
+  it("delivers exact Arabic lifecycle copy when profile language is Arabic", async () => {
+    let seenText = "";
+
+    const summary = await sendGatewayLifecycleNotification({
+      config: config({ ui: { language: "ar" } }),
+      phase: "shutdown",
+      state: "restarting",
+      router: {
+        deliverText: async (_targets, text) => {
+          seenText = text;
+          return new Map([["telegram:123", { success: true }]]);
+        },
+      },
+    });
+
+    expect(seenText).toBe("⚠️ البوابة تُعاد تشغيلها — ستتوقف المهام الجارية. أرسل أي شيء بعد إعادة التشغيل للمتابعة من نفس المحادثة.");
+    expect(seenText).not.toContain("EstaCoda:");
     expect(summary).toEqual({ attempted: 1, delivered: 1, failed: 0 });
   });
 

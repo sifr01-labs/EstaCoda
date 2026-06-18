@@ -339,6 +339,96 @@ describe("runUpdateCommand install-method routing", () => {
       const marker = await readGatewayRestartPlannedMarker(profilePaths);
       expect(marker?.reason).toBe("update");
       expect(typeof marker?.plannedAt).toBe("string");
+      const persisted = JSON.parse(readFileSync(join(profilePaths.gatewayStatePath, "restart-planned.json"), "utf8")) as Record<string, unknown>;
+      expect(Object.keys(persisted).sort()).toEqual(["plannedAt", "reason"]);
+      expect(persisted).not.toHaveProperty("chatId");
+      expect(persisted).not.toHaveProperty("threadId");
+      expect(persisted).not.toHaveProperty("sessionId");
+      expect(persisted).not.toHaveProperty("resume");
+      expect(persisted).not.toHaveProperty("channels");
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("default managed-source changed update does not write a planned restart marker when lifecycle notifications are absent", async () => {
+    const homeDir = mkdtempSync(join(tmpdir(), "estacoda-update-command-"));
+    try {
+      const profilePaths = resolveProfileStateHome({ homeDir, profileId: "default" });
+      serviceManagerMock.probeServiceState.mockResolvedValue({
+        kind: "systemd-user",
+        installed: true,
+        scope: "user",
+        activeState: "active",
+        unitName: "estacoda-gateway.service",
+        profileId: "default",
+      });
+
+      const result = await runUpdateCommand({
+        dryRun: false,
+        apply: true,
+        homeDir,
+        installMethodInfo: installInfo("managed-source", {
+          source: "stamp",
+          installDir: "/repo",
+          sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+          expectedBranch: "main"
+        }),
+        applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => ({
+          kind: "success",
+          changed: true,
+          message: "Update applied."
+        }),
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(serviceManagerMock.restartService).toHaveBeenCalledTimes(1);
+      await expect(readGatewayRestartPlannedMarker(profilePaths)).resolves.toBeUndefined();
+      expect(existsSync(join(profilePaths.gatewayStatePath, "restart-planned.json"))).toBe(false);
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("default managed-source changed update clears planned marker when service restart fails", async () => {
+    const homeDir = mkdtempSync(join(tmpdir(), "estacoda-update-command-"));
+    try {
+      const profilePaths = resolveProfileStateHome({ homeDir, profileId: "default" });
+      mkdirSync(dirname(profilePaths.configPath), { recursive: true });
+      writeFileSync(profilePaths.configPath, JSON.stringify({
+        gateway: { lifecycleNotifications: { enabled: true } }
+      }), "utf8");
+      serviceManagerMock.probeServiceState.mockResolvedValue({
+        kind: "systemd-user",
+        installed: true,
+        scope: "user",
+        activeState: "active",
+        unitName: "estacoda-gateway.service",
+        profileId: "default",
+      });
+      serviceManagerMock.restartService.mockResolvedValueOnce({ ok: false, error: "restart failed" });
+
+      const result = await runUpdateCommand({
+        dryRun: false,
+        apply: true,
+        homeDir,
+        installMethodInfo: installInfo("managed-source", {
+          source: "stamp",
+          installDir: "/repo",
+          sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+          expectedBranch: "main"
+        }),
+        applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => ({
+          kind: "success",
+          changed: true,
+          message: "Update applied."
+        }),
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("Gateway restart failed");
+      await expect(readGatewayRestartPlannedMarker(profilePaths)).resolves.toBeUndefined();
+      expect(existsSync(join(profilePaths.gatewayStatePath, "restart-planned.json"))).toBe(false);
     } finally {
       rmSync(homeDir, { recursive: true, force: true });
     }
