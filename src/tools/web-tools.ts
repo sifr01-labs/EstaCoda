@@ -4,6 +4,7 @@ import type { RegisteredTool } from "../contracts/tool.js";
 import type { SessionToolProvider } from "../contracts/tool.js";
 import type { BrowserActionInput, BrowserBackend, BrowserNavigateInput, BrowserSnapshot, WebExtractionResult } from "../contracts/browser.js";
 import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
+import { resolveGlobalStateHome } from "../config/profile-home.js";
 import { createBrowserDebugSession, type BrowserDebugSession } from "../browser/browser-debug.js";
 import { createUnconfiguredBrowserBackend } from "../browser/browser-backend.js";
 import { deriveBrowserSessionKey } from "../browser/session-key.js";
@@ -15,12 +16,24 @@ import { analyzeImageWithVision } from "./vision-tools.js";
 import { createTimeoutSignal } from "../utils/timeout-signal.js";
 import {
   registerDefaultWebResearchProviders,
-  selectWebResearchProvider
+  selectWebResearchProvider,
+  type WebResearchProviderSelectionOptions
 } from "./web-research-registry.js";
-import type { WebResearchConfig, WebResearchProvider, WebSearchResult } from "./web-research-provider.js";
+import type {
+  WebResearchConfig,
+  WebResearchProvider,
+  WebResearchPythonCapabilityPathResolver,
+  WebResearchPythonCapabilityStatusChecker,
+  WebResearchSubprocessSpawn,
+  WebSearchResult
+} from "./web-research-provider.js";
 
 export type WebToolOptions = {
   fetch?: FetchLike;
+  pythonStateRoot?: string;
+  pythonCapabilityStatusChecker?: WebResearchPythonCapabilityStatusChecker;
+  pythonCapabilityPathResolver?: WebResearchPythonCapabilityPathResolver;
+  subprocessSpawn?: WebResearchSubprocessSpawn;
   browserBackend?: BrowserBackend;
   enableNetwork?: boolean;
   maxContentChars?: number;
@@ -91,7 +104,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
     withDerivedBrowserSessionId(input, options.currentSessionId);
 
   return [
-    createWebSearchTool(options.webConfig, options.fetch),
+    createWebSearchTool(options.webConfig, options),
     {
       name: "web.extract",
       description: "Fetch and extract readable text from a URL for research workflows.",
@@ -151,7 +164,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
           return withDebug(guardFailure, debug);
         }
 
-        const providerSelection = await selectWebResearchProvider("extract", options.webConfig);
+        const providerSelection = await selectWebResearchProvider("extract", options.webConfig, webResearchSelectionOptions(options));
         debug.log("web.extract.provider", {
           provider: providerSelection.providerName,
           fallback: providerSelection.fallback,
@@ -209,7 +222,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         });
       }
     },
-    createWebCrawlTool(options.webConfig, urlGuard),
+    createWebCrawlTool(options.webConfig, urlGuard, options),
     {
       name: "browser.status",
       description: "Check configured browser backend availability and endpoint details.",
@@ -731,6 +744,7 @@ export const webToolProvider: SessionToolProvider = {
       enableNetwork: ctx.enableWebNetwork,
       maxContentChars: ctx.webMaxContentChars,
       webConfig: ctx.webConfig,
+      pythonStateRoot: resolveGlobalStateHome({ homeDir: ctx.homeDir }).stateRoot,
       browserConfig: ctx.browserConfig,
       workspaceRoot: ctx.workspaceRoot,
       currentSessionId: () => ctx.currentSessionId(),
@@ -758,7 +772,17 @@ function requireProviderDependency<T>(provider: string, dependency: string, valu
   return value;
 }
 
-function createWebSearchTool(webConfig: WebResearchConfig | undefined, fetch: FetchLike | undefined): RegisteredTool {
+function webResearchSelectionOptions(options: WebToolOptions): WebResearchProviderSelectionOptions {
+  return {
+    fetch: options.fetch,
+    pythonStateRoot: options.pythonStateRoot,
+    pythonCapabilityStatusChecker: options.pythonCapabilityStatusChecker,
+    pythonCapabilityPathResolver: options.pythonCapabilityPathResolver,
+    subprocessSpawn: options.subprocessSpawn
+  };
+}
+
+function createWebSearchTool(webConfig: WebResearchConfig | undefined, options: WebToolOptions): RegisteredTool {
   return {
     name: "web.search",
     description: "Search the web using a configured research provider.",
@@ -774,7 +798,7 @@ function createWebSearchTool(webConfig: WebResearchConfig | undefined, fetch: Fe
     toolsets: ["web", "research"],
     progressLabel: "searching web",
     maxResultSizeChars: 8000,
-    isAvailable: async () => (await selectWebResearchProvider("search", webConfig, { fetch })).availability.available,
+    isAvailable: async () => (await selectWebResearchProvider("search", webConfig, webResearchSelectionOptions(options))).availability.available,
     run: async (input: { query?: string; maxResults?: number }, context) => {
       const query = input.query?.trim();
       if (query === undefined || query.length === 0) {
@@ -785,7 +809,7 @@ function createWebSearchTool(webConfig: WebResearchConfig | undefined, fetch: Fe
         };
       }
 
-      const providerSelection = await selectWebResearchProvider("search", webConfig, { fetch });
+      const providerSelection = await selectWebResearchProvider("search", webConfig, webResearchSelectionOptions(options));
       if (!providerSelection.availability.available) {
         return unavailableWebResearchResult("web.search", "search", providerSelection);
       }
@@ -835,7 +859,7 @@ function createWebSearchTool(webConfig: WebResearchConfig | undefined, fetch: Fe
   };
 }
 
-function createWebCrawlTool(webConfig: WebResearchConfig | undefined, guardUrl: UrlGuard): RegisteredTool {
+function createWebCrawlTool(webConfig: WebResearchConfig | undefined, guardUrl: UrlGuard, options: WebToolOptions): RegisteredTool {
   return {
     name: "web.crawl",
     description: "Crawl a URL using a configured research provider.",
@@ -852,7 +876,7 @@ function createWebCrawlTool(webConfig: WebResearchConfig | undefined, guardUrl: 
     toolsets: ["web", "research"],
     progressLabel: "crawling web",
     maxResultSizeChars: 12000,
-    isAvailable: async () => (await selectWebResearchProvider("crawl", webConfig)).availability.available,
+    isAvailable: async () => (await selectWebResearchProvider("crawl", webConfig, webResearchSelectionOptions(options))).availability.available,
     run: async (input: { url?: string; text?: string; maxPages?: number; maxContentChars?: number }, context) => {
       const url = normalizeUrl(input.url ?? extractFirstUrl(input.text ?? ""));
       if (url === undefined) {
@@ -876,7 +900,7 @@ function createWebCrawlTool(webConfig: WebResearchConfig | undefined, guardUrl: 
         return guardFailure;
       }
 
-      const providerSelection = await selectWebResearchProvider("crawl", webConfig);
+      const providerSelection = await selectWebResearchProvider("crawl", webConfig, webResearchSelectionOptions(options));
       if (!providerSelection.availability.available) {
         return unavailableWebResearchResult("web.crawl", "crawl", providerSelection);
       }

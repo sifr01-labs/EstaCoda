@@ -9,12 +9,17 @@ import { tavilyProvider } from "./web-research-providers/tavily-provider.js";
 import {
   defaultWebResearchCredentialResolver,
   defaultWebResearchFetch,
+  defaultWebResearchPythonCapabilityPathResolver,
+  defaultWebResearchPythonCapabilityStatusChecker,
   type ProviderAvailability,
   type WebResearchCapability,
   type WebResearchConfig,
   type WebResearchCredentialResolver,
   type WebResearchFetch,
-  type WebResearchProvider
+  type WebResearchPythonCapabilityPathResolver,
+  type WebResearchPythonCapabilityStatusChecker,
+  type WebResearchProvider,
+  type WebResearchSubprocessSpawn
 } from "./web-research-provider.js";
 
 const providers = new Map<string, WebResearchProvider>();
@@ -31,6 +36,10 @@ export type WebResearchProviderSelection = {
 export type WebResearchProviderSelectionOptions = {
   fetch?: WebResearchFetch;
   credentialResolver?: WebResearchCredentialResolver;
+  pythonStateRoot?: string;
+  pythonCapabilityStatusChecker?: WebResearchPythonCapabilityStatusChecker;
+  pythonCapabilityPathResolver?: WebResearchPythonCapabilityPathResolver;
+  subprocessSpawn?: WebResearchSubprocessSpawn;
 };
 
 export function registerWebResearchProvider(provider: WebResearchProvider): void {
@@ -156,6 +165,10 @@ function configureProvider(
   return provider.configure?.({
     config,
     fetch: options.fetch ?? defaultWebResearchFetch(),
-    credentialResolver: options.credentialResolver ?? defaultWebResearchCredentialResolver()
+    credentialResolver: options.credentialResolver ?? defaultWebResearchCredentialResolver(),
+    pythonStateRoot: options.pythonStateRoot,
+    pythonCapabilityStatusChecker: options.pythonCapabilityStatusChecker ?? defaultWebResearchPythonCapabilityStatusChecker(),
+    pythonCapabilityPathResolver: options.pythonCapabilityPathResolver ?? defaultWebResearchPythonCapabilityPathResolver(),
+    subprocessSpawn: options.subprocessSpawn
   }) ?? provider;
 }

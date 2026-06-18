@@ -1,5 +1,9 @@
 import type { RuntimeCredentialResolution, RuntimeCredentialResolverOptions } from "../providers/runtime-credential-resolver.js";
 import { resolveRuntimeCredential } from "../providers/runtime-credential-resolver.js";
+import type { ManagedPythonCapabilityInstallStatus } from "../python-env/capability-manager.js";
+import { checkManagedPythonCapabilityStatus } from "../python-env/capability-manager.js";
+import type { ManagedPythonCapabilityEnvPaths, ManagedPythonCapabilityPathOptions } from "../python-env/capability-paths.js";
+import { resolveManagedPythonCapabilityPaths } from "../python-env/capability-paths.js";
 
 export type WebResearchCapability = "search" | "extract" | "crawl";
 
@@ -59,6 +63,29 @@ export type WebResearchFetch = (url: string, init?: {
 }>;
 
 export type WebResearchCredentialResolver = (options: RuntimeCredentialResolverOptions) => Promise<RuntimeCredentialResolution>;
+export type WebResearchSubprocess = {
+  stdin: NodeJS.WritableStream;
+  stdout: NodeJS.ReadableStream;
+  stderr: NodeJS.ReadableStream;
+  kill(signal?: NodeJS.Signals | number): boolean;
+  on(event: "close", listener: (code: number | null, signal: NodeJS.Signals | null) => void): WebResearchSubprocess;
+  on(event: "error", listener: (error: Error) => void): WebResearchSubprocess;
+};
+export type WebResearchSubprocessSpawn = (
+  command: string,
+  args: string[],
+  options: {
+    shell: false;
+    stdio: ["pipe", "pipe", "pipe"];
+  }
+) => WebResearchSubprocess;
+export type WebResearchPythonCapabilityStatusChecker = (options: {
+  stateRoot: string;
+  capabilityId: string;
+}) => Promise<ManagedPythonCapabilityInstallStatus>;
+export type WebResearchPythonCapabilityPathResolver = (
+  options: ManagedPythonCapabilityPathOptions
+) => ManagedPythonCapabilityEnvPaths;
 
 export type WebResearchProvider = {
   name: string;
@@ -79,6 +106,10 @@ export type WebResearchProviderContext = {
   config: WebResearchConfig;
   fetch: WebResearchFetch;
   credentialResolver: WebResearchCredentialResolver;
+  pythonStateRoot?: string;
+  pythonCapabilityStatusChecker?: WebResearchPythonCapabilityStatusChecker;
+  pythonCapabilityPathResolver?: WebResearchPythonCapabilityPathResolver;
+  subprocessSpawn?: WebResearchSubprocessSpawn;
 };
 
 export type WebResearchConfig = {
@@ -102,4 +133,12 @@ export function defaultWebResearchFetch(): WebResearchFetch {
 
 export function defaultWebResearchCredentialResolver(): WebResearchCredentialResolver {
   return resolveRuntimeCredential;
+}
+
+export function defaultWebResearchPythonCapabilityStatusChecker(): WebResearchPythonCapabilityStatusChecker {
+  return checkManagedPythonCapabilityStatus;
+}
+
+export function defaultWebResearchPythonCapabilityPathResolver(): WebResearchPythonCapabilityPathResolver {
+  return resolveManagedPythonCapabilityPaths;
 }

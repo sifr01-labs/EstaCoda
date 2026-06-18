@@ -1,14 +1,18 @@
+import { EventEmitter } from "node:events";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
+import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BrowserActionInput, BrowserBackend, BrowserNavigateInput } from "../contracts/browser.js";
 import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
+import type { ManagedPythonCapabilityInstallStatus } from "../python-env/capability-manager.js";
+import { DDGS_CAPABILITY_ID } from "../python-env/capability-registry.js";
 import type { ProviderExecutor, ProviderExecutionResult } from "../providers/provider-executor.js";
 import { createMockBrowserBackend, createUnconfiguredBrowserBackend } from "../browser/browser-backend.js";
 import { createWebTools, webToolProvider, type FetchLike, type WebToolOptions } from "./web-tools.js";
 import { registerWebResearchProvider, resetWebResearchProvidersForTest } from "./web-research-registry.js";
-import type { WebResearchProvider } from "./web-research-provider.js";
+import type { WebResearchProvider, WebResearchSubprocess, WebResearchSubprocessSpawn } from "./web-research-provider.js";
 
 const expectedToolNames = [
   "web.search",
@@ -29,6 +33,19 @@ const expectedToolNames = [
   "browser.dialog",
   "browser.navigate"
 ];
+
+class FakeWebResearchSubprocess extends EventEmitter implements WebResearchSubprocess {
+  readonly stdin = new PassThrough();
+  readonly stdout = new PassThrough();
+  readonly stderr = new PassThrough();
+  readonly kill = vi.fn(() => true);
+
+  override on(event: "close", listener: (code: number | null, signal: NodeJS.Signals | null) => void): this;
+  override on(event: "error", listener: (error: Error) => void): this;
+  override on(event: string, listener: (...args: any[]) => void): this {
+    return super.on(event, listener);
+  }
+}
 
 function tool(name: string, tools = createWebTools()) {
   const found = tools.find((candidate) => candidate.name === name);
@@ -69,6 +86,43 @@ function createFetchResponse(input: {
     text: async () => {
       input.onText?.();
       return input.body;
+    }
+  };
+}
+
+function createDdgsSpawn(response: { results: unknown[] }): WebResearchSubprocessSpawn {
+  return vi.fn<WebResearchSubprocessSpawn>(() => {
+    const child = new FakeWebResearchSubprocess();
+    queueMicrotask(() => {
+      child.stdout.write(JSON.stringify(response));
+      child.emit("close", 0, null);
+    });
+    return child;
+  });
+}
+
+function installedDdgsStatus(status: "installed" | "verified"): ManagedPythonCapabilityInstallStatus {
+  return {
+    ok: true,
+    status,
+    capabilityId: DDGS_CAPABILITY_ID,
+    version: "9.14.4",
+    specHash: "hash",
+    installedGroups: [],
+    installedPackages: ["ddgs==9.14.4"],
+    pythonPath: "/managed/python",
+    envPath: "/managed/env",
+    manifest: {
+      id: DDGS_CAPABILITY_ID,
+      version: "9.14.4",
+      specHash: "hash",
+      installedPackages: ["ddgs==9.14.4"],
+      installedGroups: [],
+      pythonPath: "/managed/python",
+      envPath: "/managed/env",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      status
     }
   };
 }
@@ -421,6 +475,51 @@ describe("web and browser tools baselines", () => {
         title: "Brave Result",
         url: "https://example.com/brave-result",
         snippet: "Brave snippet from API"
+      }]
+    });
+  });
+
+  it("uses mocked DDGS web.search and formats snippets and metadata", async () => {
+    const spawnProcess = createDdgsSpawn({
+      results: [{
+        title: "DDGS Result",
+        href: "https://example.com/ddgs-result",
+        body: "DDGS snippet from Python"
+      }]
+    });
+    const search = tool("web.search", createWebTools({
+      webConfig: {
+        searchBackend: "ddgs"
+      },
+      pythonStateRoot: "/state",
+      pythonCapabilityStatusChecker: vi.fn(async () => installedDdgsStatus("verified")),
+      pythonCapabilityPathResolver: vi.fn(() => ({
+        envPath: "/managed/env",
+        pythonPath: "/managed/python",
+        pipCacheDir: "/managed/pip-cache",
+        manifestPath: "/managed/env/env.json"
+      })),
+      subprocessSpawn: spawnProcess
+    }));
+
+    await expect(search.isAvailable()).resolves.toBe(true);
+    const result = await search.run({ query: "estacoda", maxResults: 3 });
+
+    expect(spawnProcess).toHaveBeenCalledWith("/managed/python", expect.any(Array), {
+      shell: false,
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain("1. DDGS Result");
+    expect(result.content).toContain("https://example.com/ddgs-result");
+    expect(result.content).toContain("DDGS snippet from Python");
+    expect(result.metadata).toMatchObject({
+      provider: "ddgs",
+      _estacoda_context_summary: "Web search returned 1 result(s). Top sources: DDGS Result (example.com).",
+      results: [{
+        title: "DDGS Result",
+        url: "https://example.com/ddgs-result",
+        snippet: "DDGS snippet from Python"
       }]
     });
   });

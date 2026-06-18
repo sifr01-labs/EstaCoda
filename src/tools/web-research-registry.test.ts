@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ManagedPythonCapabilityInstallStatus } from "../python-env/capability-manager.js";
+import { DDGS_CAPABILITY_ID } from "../python-env/capability-registry.js";
 import {
   getWebResearchProvider,
   listWebResearchProviders,
@@ -154,6 +156,64 @@ describe("web research provider registry", () => {
     });
   });
 
+  it("auto-detect can select DDGS when installed and Brave is unavailable", async () => {
+    registerDefaultWebResearchProviders();
+
+    await expect(selectWebResearchProvider("search", {}, {
+      pythonStateRoot: "/state",
+      pythonCapabilityStatusChecker: vi.fn(async () => installedDdgsStatus("verified"))
+    })).resolves.toMatchObject({
+      providerName: "ddgs",
+      explicit: false,
+      fallback: false,
+      availability: {
+        available: true
+      }
+    });
+  });
+
+  it("explicit DDGS selection returns capability availability status", async () => {
+    registerDefaultWebResearchProviders();
+
+    await expect(selectWebResearchProvider("search", {
+      searchBackend: "ddgs"
+    }, {
+      pythonStateRoot: "/state",
+      pythonCapabilityStatusChecker: vi.fn(async () => installedDdgsStatus("verified"))
+    })).resolves.toMatchObject({
+      providerName: "ddgs",
+      explicit: true,
+      fallback: false,
+      availability: {
+        available: true
+      }
+    });
+  });
+
+  it("explicit unavailable DDGS returns a setup hint", async () => {
+    registerDefaultWebResearchProviders();
+
+    await expect(selectWebResearchProvider("search", {
+      searchBackend: "ddgs"
+    }, {
+      pythonStateRoot: "/state",
+      pythonCapabilityStatusChecker: vi.fn(async (): Promise<ManagedPythonCapabilityInstallStatus> => ({
+        ok: false,
+        capabilityId: DDGS_CAPABILITY_ID,
+        reason: "install_required",
+        message: "Managed Python capability environment has not been installed."
+      }))
+    })).resolves.toMatchObject({
+      providerName: "ddgs",
+      explicit: true,
+      fallback: false,
+      availability: {
+        available: false,
+        reason: "Managed Python capability environment has not been installed. Run estacoda python-env setup ddgs."
+      }
+    });
+  });
+
   it("explicit Brave selection preserves credential config", async () => {
     registerDefaultWebResearchProviders();
     vi.stubEnv("CUSTOM_BRAVE_KEY", "configured");
@@ -198,7 +258,33 @@ describe("web research provider registry", () => {
 
     expect(await getWebResearchProvider("ddgs")?.getAvailability()).toEqual({
       available: false,
-      reason: "DDGS provider is not yet implemented."
+      reason: "Managed Python state is not available for DDGS search. Run estacoda python-env setup ddgs."
     });
   });
 });
+
+function installedDdgsStatus(status: "installed" | "verified"): ManagedPythonCapabilityInstallStatus {
+  return {
+    ok: true,
+    status,
+    capabilityId: DDGS_CAPABILITY_ID,
+    version: "9.14.4",
+    specHash: "hash",
+    installedGroups: [],
+    installedPackages: ["ddgs==9.14.4"],
+    pythonPath: "/managed/python",
+    envPath: "/managed/env",
+    manifest: {
+      id: DDGS_CAPABILITY_ID,
+      version: "9.14.4",
+      specHash: "hash",
+      installedPackages: ["ddgs==9.14.4"],
+      installedGroups: [],
+      pythonPath: "/managed/python",
+      envPath: "/managed/env",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      status
+    }
+  };
+}
