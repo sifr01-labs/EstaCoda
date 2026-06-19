@@ -221,6 +221,7 @@ export function buildOpenAICompatibleRequest(endpoint: ProviderEndpoint, request
       messages,
       temperature: normalized.temperature,
       stream: normalized.stream,
+      ...(shouldRequestStreamingUsage(provider, normalized) ? { stream_options: { include_usage: true } } : {}),
       tools: normalized.tools,
       response_format: normalized.responseFormat,
       ...(maxTokens === undefined ? {} : { [maxTokenParam]: maxTokens })
@@ -241,6 +242,10 @@ export function normalizeOpenAICompatibleRequest(request: ProviderRequest, provi
   };
 
   return normalized;
+}
+
+function shouldRequestStreamingUsage(provider: ProviderId, request: ProviderRequest): boolean {
+  return request.stream === true && getProviderMetadata(provider).apiMode === "openai_chat_completions";
 }
 
 type OpenAICompatibleChatMessage = {

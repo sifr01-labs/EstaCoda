@@ -307,6 +307,39 @@ describe("buildOpenAICompatibleRequest", () => {
     }
   });
 
+  it("requests usage chunks for streaming OpenAI-compatible chat providers", () => {
+    for (const provider of ["openai", "deepseek", "kimi", "google", "openrouter"] as const) {
+      const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
+        model: "chat-model",
+        messages: [{ role: "user", content: "Hello" }],
+        stream: true
+      }, undefined, provider);
+
+      expect(prepared.body.stream_options).toEqual({ include_usage: true });
+    }
+  });
+
+  it("does not request streaming usage for non-streaming chat requests", () => {
+    const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
+      model: "gpt-4o",
+      messages: [{ role: "user", content: "Hello" }]
+    }, undefined, "openai");
+
+    expect(prepared.body).not.toHaveProperty("stream_options");
+  });
+
+  it("does not request streaming usage for local or custom OpenAI-compatible backends", () => {
+    for (const provider of ["local", "custom-corp"] as const) {
+      const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
+        model: "chat-model",
+        messages: [{ role: "user", content: "Hello" }],
+        stream: true
+      }, undefined, provider as any);
+
+      expect(prepared.body).not.toHaveProperty("stream_options");
+    }
+  });
+
   it("serializes assistant native tool calls for tested Chat Completions providers", () => {
     const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
       model: "gpt-4o",
@@ -842,6 +875,38 @@ function bodyMessages(prepared: ReturnType<typeof buildOpenAICompatibleRequest>)
 describe("createOpenAICompatibleProvider streaming", () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("sends stream options that request final usage chunks", async () => {
+    let requestBody: Record<string, unknown> | undefined;
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      fetch: async (_url, init) => {
+        requestBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => ({}),
+          text: async () => "",
+          body: sseStream([
+            sseData({ choices: [{ delta: { content: "Hello" }, finish_reason: null }] }),
+            sseData({ choices: [{ delta: {}, finish_reason: "stop" }] })
+          ])
+        };
+      }
+    });
+
+    await collectStreamEvents(provider.stream?.({
+      provider: "openai" as any,
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    }) ?? []);
+
+    expect(requestBody?.stream).toBe(true);
+    expect(requestBody?.stream_options).toEqual({ include_usage: true });
   });
 
   it("classifies streaming stale timeout before the first byte", async () => {
