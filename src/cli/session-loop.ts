@@ -96,6 +96,7 @@ const MAX_ACTIVE_TURN_PREVIEW_LINES = 4;
 const MAX_ACTIVE_TURN_QUEUED_LINES = 3;
 
 type ContextUsageSnapshot = NonNullable<SessionStatusRailViewModel["contextUsage"]>;
+type ContextUsageSource = Extract<RuntimeEvent, { kind: "context-usage" }>["source"];
 type RuntimeModelInfo = ReturnType<NonNullable<Runtime["getModelInfo"]>>;
 type StatusRailTimerMode = "idle" | "active-turn" | "last-turn";
 type ProviderServingStatus = "primary" | "fallback" | "failed";
@@ -370,6 +371,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     let slashCompletionLine = "";
     let slashCompletionSelectedIndex = 0;
     let latestContextUsage: ContextUsageSnapshot | undefined;
+    let activeTurnContextUsageSource: ContextUsageSource | undefined;
     let timerMode: StatusRailTimerMode = "idle";
     let activeTurnStartedAtMs: number | undefined;
     let lastCompletedTurnSeconds: number | undefined;
@@ -391,6 +393,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     });
     const applyCompactionRailReset = (postTokens?: number) => {
       resetTurnRailState();
+      activeTurnContextUsageSource = undefined;
       const contextWindow = modelContextWindow(runtime);
       if (postTokens === undefined) {
         latestContextUsage = undefined;
@@ -620,6 +623,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           await runtime.dispose();
           runtime = shouldExit.runtime;
           latestContextUsage = undefined;
+          activeTurnContextUsageSource = undefined;
           lastProviderExecutionSummary = undefined;
           providerServingState = undefined;
           resetTurnRailState();
@@ -659,6 +663,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       let steeringRetryUsed = false;
       while (retryText !== undefined) {
         activeTurn = new AbortController();
+        activeTurnContextUsageSource = undefined;
         const turnStartedAtMs = now();
         activeTurnStartedAtMs = turnStartedAtMs;
         lastCompletedTurnSeconds = undefined;
@@ -1040,14 +1045,22 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             channel: "cli",
             signal: activeTurn.signal,
             onEvent: (event) => {
-              if (event.kind === "context-usage" && event.source === "provider-actual") {
-                latestContextUsage = { filled: event.filled, total: event.total };
-                if ((bottomChrome.enabled || chrome.enabled) && turnOutput.spinnerPhase !== undefined) {
-                  renderSpinner(turnOutput.spinnerPhase);
+              if (event.kind === "context-usage") {
+                const currentPriority = activeTurnContextUsageSource === undefined
+                  ? 0
+                  : contextUsagePriority(activeTurnContextUsageSource);
+                const incomingPriority = contextUsagePriority(event.source);
+                if (incomingPriority >= currentPriority) {
+                  latestContextUsage = { filled: event.filled, total: event.total };
+                  activeTurnContextUsageSource = event.source;
+                  if ((bottomChrome.enabled || chrome.enabled) && turnOutput.spinnerPhase !== undefined) {
+                    renderSpinner(turnOutput.spinnerPhase);
+                  }
                 }
               }
               if (event.kind === "session-compacted") {
                 pendingCompactionPostTokens = event.postTokens;
+                activeTurnContextUsageSource = undefined;
                 const contextWindow = modelContextWindow(runtime);
                 const total = contextWindow ?? latestContextUsage?.total;
                 latestContextUsage = total === undefined ? undefined : { filled: event.postTokens, total };
@@ -2944,6 +2957,17 @@ function truncateSingleLine(value: string, maxLength: number): string {
 function clearTranscriptBlock(lineCount: number): string {
   const count = Math.max(1, Math.ceil(lineCount));
   return `\x1b[${count}A\x1b[0J`;
+}
+
+function contextUsagePriority(source: ContextUsageSource): number {
+  switch (source) {
+    case "provider-actual":
+      return 3;
+    case "assembled-prompt":
+      return 2;
+    case "live-estimate":
+      return 1;
+  }
 }
 
 function buildPromptChromeState(
