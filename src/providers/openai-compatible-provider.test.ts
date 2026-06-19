@@ -1041,6 +1041,145 @@ describe("createOpenAICompatibleProvider streaming", () => {
     ]));
   });
 
+  it("usage-only chunk with transport-done triggers non-streaming fallback", async () => {
+    const requestBodies: Array<Record<string, unknown>> = [];
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      fetch: async (_url, init) => {
+        requestBodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+        if (requestBodies.length === 1) {
+          return {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            json: async () => ({}),
+            text: async () => "",
+            body: sseStream([
+              sseData({ choices: [], usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } }),
+              "data: [DONE]\n\n"
+            ])
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => ({
+            choices: [
+              {
+                finish_reason: "stop",
+                message: { content: "fallback ok" }
+              }
+            ]
+          }),
+          text: async () => "",
+          body: null
+        };
+      }
+    });
+
+    const events = await collectStreamEvents(provider.stream?.({
+      provider: "openai" as any,
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    }) ?? []);
+
+    expect(requestBodies).toHaveLength(2);
+    expect(requestBodies[0]?.stream).toBe(true);
+    expect(requestBodies[1]?.stream).toBe(false);
+    expect(requestBodies[1]).not.toHaveProperty("stream_options");
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "token", text: "fallback ok" }),
+      expect.objectContaining({
+        kind: "done",
+        response: expect.objectContaining({
+          content: "fallback ok",
+          usage: {
+            inputTokens: 10,
+            outputTokens: 5,
+            totalTokens: 15
+          }
+        })
+      })
+    ]));
+  });
+
+  it("usage-only chunk without transport-done leaves stream incomplete", async () => {
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      fetch: async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({}),
+        text: async () => "",
+        body: sseStream([
+          sseData({ choices: [], usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } })
+        ])
+      })
+    });
+
+    const events = await collectStreamEvents(provider.stream?.({
+      provider: "openai" as any,
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    }) ?? []);
+
+    expect(events).toEqual([
+      expect.objectContaining({ kind: "start" })
+    ]);
+  });
+
+  it("visible tokens followed by usage-only chunk returns content with usage", async () => {
+    let fetchCalls = 0;
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      fetch: async () => {
+        fetchCalls += 1;
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => ({}),
+          text: async () => "",
+          body: sseStream([
+            sseData({ choices: [{ delta: { content: "Hello" }, finish_reason: null }] }),
+            sseData({ choices: [], usage: { prompt_tokens: 4, completion_tokens: 1, total_tokens: 5 } }),
+            "data: [DONE]\n\n"
+          ])
+        };
+      }
+    });
+
+    const events = await collectStreamEvents(provider.stream?.({
+      provider: "openai" as any,
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    }) ?? []);
+
+    expect(fetchCalls).toBe(1);
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "token", text: "Hello" }),
+      expect.objectContaining({
+        kind: "done",
+        response: expect.objectContaining({
+          content: "Hello",
+          usage: {
+            inputTokens: 4,
+            outputTokens: 1,
+            totalTokens: 5
+          }
+        })
+      })
+    ]));
+  });
+
   it("finalizes transport-only visible text with unknown finish reason", async () => {
     const provider = createOpenAICompatibleProvider({
       id: "openai" as any,
@@ -1110,6 +1249,323 @@ describe("createOpenAICompatibleProvider streaming", () => {
         response: expect.objectContaining({
           content: "Visible",
           finishReason: "stop"
+        })
+      })
+    ]));
+  });
+
+  it("visible tokens followed by finish_reason and usage preserves usage", async () => {
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      fetch: async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({}),
+        text: async () => "",
+        body: sseStream([
+          sseData({ choices: [{ delta: { content: "Done" }, finish_reason: null }] }),
+          sseData({
+            choices: [{ delta: {}, finish_reason: "stop" }],
+            usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 }
+          }),
+          "data: [DONE]\n\n"
+        ])
+      })
+    });
+
+    const events = await collectStreamEvents(provider.stream?.({
+      provider: "openai" as any,
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    }) ?? []);
+
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "token", text: "Done" }),
+      expect.objectContaining({
+        kind: "done",
+        response: expect.objectContaining({
+          content: "Done",
+          finishReason: "stop",
+          usage: {
+            inputTokens: 5,
+            outputTokens: 2,
+            totalTokens: 7
+          }
+        })
+      })
+    ]));
+  });
+
+  it("tool-call stream followed by usage and terminal tool_calls finish preserves tool call", async () => {
+    let fetchCalls = 0;
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      fetch: async () => {
+        fetchCalls += 1;
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => ({}),
+          text: async () => "",
+          body: sseStream([
+            sseData({
+              choices: [{
+                delta: {
+                  tool_calls: [{
+                    index: 0,
+                    id: "call-1",
+                    function: {
+                      name: "test.tool",
+                      arguments: "{\"path\":\"README.md\"}"
+                    }
+                  }]
+                },
+                finish_reason: null
+              }]
+            }),
+            sseData({ choices: [], usage: { prompt_tokens: 9, completion_tokens: 3, total_tokens: 12 } }),
+            sseData({ choices: [{ delta: {}, finish_reason: "tool_calls" }] }),
+            "data: [DONE]\n\n"
+          ])
+        };
+      }
+    });
+
+    const events = await collectStreamEvents(provider.stream?.({
+      provider: "openai" as any,
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    }) ?? []);
+
+    expect(fetchCalls).toBe(1);
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "tool-call",
+        id: "call-1",
+        name: "test.tool",
+        argumentsText: "{\"path\":\"README.md\"}"
+      }),
+      expect.objectContaining({
+        kind: "done",
+        response: expect.objectContaining({
+          content: "",
+          finishReason: "tool_calls",
+          usage: {
+            inputTokens: 9,
+            outputTokens: 3,
+            totalTokens: 12
+          }
+        })
+      })
+    ]));
+  });
+
+  it("reasoning-only stream followed by usage-only chunk preserves reasoning and usage", async () => {
+    let fetchCalls = 0;
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      fetch: async () => {
+        fetchCalls += 1;
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => ({}),
+          text: async () => "",
+          body: sseStream([
+            sseData({ choices: [{ delta: { reasoning_content: "hidden" }, finish_reason: null }] }),
+            sseData({ choices: [], usage: { prompt_tokens: 7, completion_tokens: 4, total_tokens: 11 } }),
+            "data: [DONE]\n\n"
+          ])
+        };
+      }
+    });
+
+    const events = await collectStreamEvents(provider.stream?.({
+      provider: "openai" as any,
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    }) ?? []);
+
+    expect(fetchCalls).toBe(1);
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "done",
+        response: expect.objectContaining({
+          content: "",
+          reasoning: "hidden",
+          reasoningMetadata: {
+            present: true,
+            chars: "hidden".length,
+            format: "reasoning_content"
+          },
+          usage: {
+            inputTokens: 7,
+            outputTokens: 4,
+            totalTokens: 11
+          }
+        })
+      })
+    ]));
+  });
+
+  it("finish-reason-only empty stream triggers fallback", async () => {
+    const requestBodies: Array<Record<string, unknown>> = [];
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      fetch: async (_url, init) => {
+        requestBodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+        if (requestBodies.length === 1) {
+          return {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            json: async () => ({}),
+            text: async () => "",
+            body: sseStream([
+              sseData({ choices: [{ delta: {}, finish_reason: "stop" }] }),
+              "data: [DONE]\n\n"
+            ])
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => ({
+            choices: [
+              {
+                finish_reason: "stop",
+                message: { content: "fallback after empty finish" }
+              }
+            ]
+          }),
+          text: async () => "",
+          body: null
+        };
+      }
+    });
+
+    const events = await collectStreamEvents(provider.stream?.({
+      provider: "openai" as any,
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    }) ?? []);
+
+    expect(requestBodies).toHaveLength(2);
+    expect(requestBodies[0]?.stream).toBe(true);
+    expect(requestBodies[1]?.stream).toBe(false);
+    expect(requestBodies[1]).not.toHaveProperty("stream_options");
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "token", text: "fallback after empty finish" }),
+      expect.objectContaining({
+        kind: "done",
+        response: expect.objectContaining({
+          content: "fallback after empty finish"
+        })
+      })
+    ]));
+  });
+
+  it("empty content_filter finish does not fallback", async () => {
+    let fetchCalls = 0;
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      fetch: async () => {
+        fetchCalls += 1;
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => ({
+            choices: [
+              {
+                finish_reason: "stop",
+                message: { content: "fallback should not run" }
+              }
+            ]
+          }),
+          text: async () => "",
+          body: sseStream([
+            sseData({ choices: [{ delta: {}, finish_reason: "content_filter" }] }),
+            "data: [DONE]\n\n"
+          ])
+        };
+      }
+    });
+
+    const events = await collectStreamEvents(provider.stream?.({
+      provider: "openai" as any,
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    }) ?? []);
+
+    expect(fetchCalls).toBe(1);
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "done",
+        response: expect.objectContaining({
+          content: "",
+          finishReason: "content_filter"
+        })
+      })
+    ]));
+  });
+
+  it("empty length finish does not fallback", async () => {
+    let fetchCalls = 0;
+    const provider = createOpenAICompatibleProvider({
+      id: "openai" as any,
+      endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+      enableNetwork: true,
+      fetch: async () => {
+        fetchCalls += 1;
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => ({
+            choices: [
+              {
+                finish_reason: "stop",
+                message: { content: "fallback should not run" }
+              }
+            ]
+          }),
+          text: async () => "",
+          body: sseStream([
+            sseData({ choices: [{ delta: {}, finish_reason: "length" }] }),
+            "data: [DONE]\n\n"
+          ])
+        };
+      }
+    });
+
+    const events = await collectStreamEvents(provider.stream?.({
+      provider: "openai" as any,
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Hello" }]
+    }) ?? []);
+
+    expect(fetchCalls).toBe(1);
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "done",
+        response: expect.objectContaining({
+          content: "",
+          finishReason: "length"
         })
       })
     ]));

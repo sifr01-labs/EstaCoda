@@ -7,6 +7,7 @@ import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolDefinition } from "../contracts/tool.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
+import { createOpenAICompatibleProvider } from "../providers/openai-compatible-provider.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
 import { SessionCompressionService, type CompactResult } from "../prompt/session-compression-service.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
@@ -562,6 +563,22 @@ function toolPlan(id: string, status: ToolCallPlan["status"] = "executed"): Tool
         }
       : undefined
   };
+}
+
+function sseData(payload: unknown): string {
+  return `data: ${JSON.stringify(payload)}\n\n`;
+}
+
+function sseStream(chunks: string[]): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(encoder.encode(chunk));
+      }
+      controller.close();
+    }
+  });
 }
 
 async function createPostToolNudgeHarness(input: {
@@ -1135,6 +1152,136 @@ describe("ProviderTurnLoop semantic session compression", () => {
         reason: "provider_unsupported"
       })
     ]));
+  });
+});
+
+describe("ProviderTurnLoop OpenAI-compatible stream recovery", () => {
+  it("returns recovered visible content instead of an empty successful stream", async () => {
+    const previousOpenAIKey = process.env.OPENAI_API_KEY;
+    process.env.OPENAI_API_KEY = "test-key";
+    try {
+      const requestBodies: Array<Record<string, unknown>> = [];
+      const registry = new ProviderRegistry();
+      registry.register(createOpenAICompatibleProvider({
+        id: "openai" as any,
+        endpoint: { baseUrl: "https://api.openai.example/v1", apiKey: { kind: "none" } },
+        enableNetwork: true,
+        fetch: async (_url, init) => {
+          requestBodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+          if (requestBodies.length === 1) {
+            return {
+              ok: true,
+              status: 200,
+              statusText: "OK",
+              json: async () => ({}),
+              text: async () => "",
+              body: sseStream([
+                sseData({ choices: [], usage: { prompt_tokens: 12, completion_tokens: 4, total_tokens: 16 } }),
+                "data: [DONE]\n\n"
+              ])
+            };
+          }
+          return {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            json: async () => ({
+              choices: [
+                {
+                  finish_reason: "stop",
+                  message: { content: "Recovered visible answer." }
+                }
+              ]
+            }),
+            text: async () => "",
+            body: null
+          };
+        }
+      }));
+
+      const providerExecutor = new ProviderExecutor({ registry });
+      const openAIModel: ModelProfile = {
+        id: "gpt-test",
+        provider: "openai",
+        contextWindowTokens: 128_000,
+        supportsTools: true,
+        supportsVision: false,
+        supportsStructuredOutput: true
+      };
+      const openAIRoute: ResolvedModelRoute = {
+        provider: "openai",
+        id: "gpt-test",
+        profile: openAIModel,
+        baseUrl: "https://api.openai.example/v1",
+        apiKeyEnv: "OPENAI_API_KEY",
+        apiMode: "openai_chat_completions"
+      };
+      const sessionDb = new InMemorySessionDB();
+      const sessionId = `openai-stream-session-${Date.now()}-${Math.random()}`;
+      await sessionDb.createSession({ id: sessionId, profileId: "default", title: "openai-stream" });
+      const trajectoryRecorder = new TrajectoryRecorder({
+        profileId: "default",
+        sessionId,
+        modelId: "gpt-test"
+      });
+      const runRecorder = new RunRecorder({
+        sessionDb,
+        sessionId,
+        trajectoryRecorder,
+        profileId: "default"
+      });
+      const toolPlanRunner = new ToolPlanRunner({
+        toolCallPlanner: undefined,
+        toolExecutor: {} as any,
+        runRecorder,
+        sessionId,
+        maxConcurrentSafeTools: 4
+      });
+      const openAILoop = new ProviderTurnLoop({
+        providerExecutor,
+        model: openAIModel,
+        primaryModelRoute: openAIRoute,
+        modelFallbackRoutes: [],
+        providerPreferences: { providerOrder: ["openai"] },
+        sessionDb,
+        sessionId,
+        profileId: "default",
+        trajectoryRecorder,
+        runRecorder,
+        toolPlanRunner,
+        soul: undefined,
+        memoryPromptContext: undefined,
+        skillsIndex: [],
+        ui: undefined,
+        agentProfile: undefined,
+        budgets: {
+          maxProviderIterations: 3,
+          maxProviderToolCalls: 4,
+          maxRepeatedToolFailures: 2,
+          maxProviderWallClockMs: 10_000
+        }
+      });
+
+      const result = await runBasicProviderTurn(openAILoop);
+
+      expect(requestBodies).toHaveLength(2);
+      expect(requestBodies[0]?.stream).toBe(true);
+      expect(requestBodies[1]?.stream).toBe(false);
+      expect(requestBodies[1]).not.toHaveProperty("stream_options");
+      expect(result.iterations).toBe(1);
+      expect(result.providerExecution?.response?.content).toBe("Recovered visible answer.");
+      expect(result.providerExecution?.response?.usage).toEqual({
+        inputTokens: 12,
+        outputTokens: 4,
+        totalTokens: 16
+      });
+    } finally {
+      if (previousOpenAIKey === undefined) {
+        delete process.env.OPENAI_API_KEY;
+      } else {
+        process.env.OPENAI_API_KEY = previousOpenAIKey;
+      }
+    }
   });
 });
 

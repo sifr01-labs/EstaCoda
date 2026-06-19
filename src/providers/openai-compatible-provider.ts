@@ -691,6 +691,11 @@ export async function* streamOpenAICompatibleRequest(input: {
         continue;
       }
 
+      if (event.kind === "usage") {
+        usage = event.usage ?? usage;
+        continue;
+      }
+
       if (event.kind === "tool-call") {
         sawToolCall = true;
       }
@@ -702,6 +707,21 @@ export async function* streamOpenAICompatibleRequest(input: {
 
       if (event.kind === "done") {
         usage = event.response.usage ?? usage;
+        const hasSubstantiveOutput =
+          content.trim().length > 0 ||
+          reasoningParts.length > 0 ||
+          sawToolCall ||
+          event.response.content.trim().length > 0 ||
+          event.response.reasoning !== undefined ||
+          event.response.reasoningMetadata?.present === true;
+        const ignorableEmptyFinish =
+          event.response.finishReason === undefined ||
+          event.response.finishReason === "stop" ||
+          event.response.finishReason === "tool_calls" ||
+          event.response.finishReason === "unknown";
+        if (event.response.content.trim().length === 0 && !hasSubstantiveOutput && ignorableEmptyFinish) {
+          continue;
+        }
         finalResponse = finalResponse === undefined
           ? event.response
           : {
@@ -782,13 +802,15 @@ export async function* streamOpenAICompatibleRequest(input: {
     }
 
     if (sawTransportDone && content.length === 0 && !sawToolCall) {
+      const fallbackBody = { ...input.preparedRequest.body };
+      delete fallbackBody.stream_options;
       const fallback = await executeOpenAICompatibleRequest({
         provider: input.provider,
         model: input.model,
         preparedRequest: {
           ...input.preparedRequest,
           body: {
-            ...input.preparedRequest.body,
+            ...fallbackBody,
             stream: false
           }
         },
@@ -825,7 +847,10 @@ export async function* streamOpenAICompatibleRequest(input: {
           kind: "done",
           provider: input.provider,
           model: input.model,
-          response: fallback
+          response: {
+            ...fallback,
+            ...(fallback.usage === undefined && usage !== undefined ? { usage } : {})
+          }
         };
         return;
       }
@@ -1099,6 +1124,11 @@ type OpenAICompatibleParsedStreamEvent = ProviderStreamEvent | {
   model: string;
   text: string;
   format: Extract<ProviderReasoningFormat, "reasoning" | "reasoning_content">;
+} | {
+  kind: "usage";
+  provider: ProviderId;
+  model: string;
+  usage?: ProviderUsage;
 };
 
 async function* parseOpenAICompatibleStream(
@@ -1263,7 +1293,16 @@ function parseOpenAICompatibleStreamChunk(data: string, provider: ProviderId, mo
       }
     }
 
-    if (payload.usage !== undefined || finishReason !== undefined) {
+    if (payload.usage !== undefined) {
+      events.push({
+        kind: "usage",
+        provider,
+        model,
+        usage: normalizeOpenAICompatibleUsage(payload.usage)
+      });
+    }
+
+    if (finishReason !== undefined) {
       events.push({
         kind: "done",
         provider,
@@ -1273,8 +1312,8 @@ function parseOpenAICompatibleStreamChunk(data: string, provider: ProviderId, mo
           content: "",
           model,
           provider,
-          ...(finishReason === undefined ? {} : { finishReason: normalizeChatFinishReason(finishReason) }),
-          usage: normalizeOpenAICompatibleUsage(payload.usage),
+          finishReason: normalizeChatFinishReason(finishReason),
+          ...(payload.usage === undefined ? {} : { usage: normalizeOpenAICompatibleUsage(payload.usage) }),
           raw: payload
         }
       });
