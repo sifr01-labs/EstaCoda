@@ -7,6 +7,7 @@ import { resetModelsDevRegistryForTest } from "../providers/model-selection-cata
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import type { Prompt } from "./readline-prompt.js";
 import type { SelectPromptInput } from "./interactive-select.js";
+import type { ModelCatalogOverrideRegistry } from "../model-catalog/model-catalog-policy.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-cli-model-test-"));
@@ -88,6 +89,7 @@ describe("cli model", () => {
       expect(result.output).toContain("Bare `estacoda model` opens the picker interactively or prints an overview noninteractively.");
       expect(result.output).toContain("`estacoda model set` is deprecated and disabled.");
       expect(result.output).toContain("estacoda model fallback <status|add|remove|reorder|clear>");
+      expect(result.output).toContain("--include-retired");
       expect(result.output).not.toContain("Unexpected token");
       expect(result.output).not.toContain("unknown model");
     });
@@ -1157,6 +1159,17 @@ describe("cli model", () => {
             status: "deprecated"
           },
           {
+            id: "gpt-retired",
+            provider_id: "openai",
+            context_window: 128000,
+            input_modalities: ["text"],
+            output_modalities: ["text"],
+            reasoning: false,
+            tool_call: true,
+            structured_output: true,
+            status: "stable"
+          },
+          {
             id: "dall-e-3",
             provider_id: "openai",
             context_window: 0,
@@ -1192,6 +1205,19 @@ describe("cli model", () => {
         ],
         fetchedAt: "2099-01-01T00:00:00.000Z",
         source: "bundled"
+      };
+    }
+
+    function lifecycleOverrides(): ModelCatalogOverrideRegistry {
+      return {
+        version: 1,
+        models: [{
+          provider: "openai",
+          model: "gpt-retired",
+          lifecycle: "retired",
+          usageClass: "primary-chat",
+          note: "Retired by reviewed test policy."
+        }]
       };
     }
 
@@ -1236,6 +1262,113 @@ describe("cli model", () => {
       expect(result.exitCode).toBe(0);
       expect(result.output).toContain("claude-3-opus");
       expect(result.output).not.toContain("gpt-4o");
+    });
+
+    it("search follows default retired, deprecated, and non-chat filters", async () => {
+      const fixturePath = await writeBundledSnapshot(tmpDir, mockSnapshot());
+      await writeUserConfig(tmpDir, {
+        providers: { openai: { kind: "openai-compatible", models: ["gpt-4o"] } },
+        model: { provider: "openai", id: "gpt-4o" }
+      });
+
+      const retired = await runCliCommand({
+        argv: ["model", "search", "retired"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false },
+        modelCatalogOverrides: lifecycleOverrides()
+      });
+      const deprecated = await runCliCommand({
+        argv: ["model", "search", "deprecated"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false },
+        modelCatalogOverrides: lifecycleOverrides()
+      });
+      const nonChat = await runCliCommand({
+        argv: ["model", "search", "dall"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false },
+        modelCatalogOverrides: lifecycleOverrides()
+      });
+
+      expect(retired.output).not.toContain("gpt-retired");
+      expect(deprecated.output).not.toContain("gpt-4o-deprecated");
+      expect(nonChat.output).not.toContain("dall-e-3");
+    });
+
+    it("search includes retired with --include-retired", async () => {
+      const fixturePath = await writeBundledSnapshot(tmpDir, mockSnapshot());
+      await writeUserConfig(tmpDir, {
+        providers: { openai: { kind: "openai-compatible", models: ["gpt-4o"] } },
+        model: { provider: "openai", id: "gpt-4o" }
+      });
+
+      const result = await runCliCommand({
+        argv: ["model", "search", "retired", "--include-retired"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false },
+        modelCatalogOverrides: lifecycleOverrides()
+      });
+
+      expect(result.output).toContain("gpt-retired");
+    });
+
+    it("search includes deprecated with --include-deprecated", async () => {
+      const fixturePath = await writeBundledSnapshot(tmpDir, mockSnapshot());
+      await writeUserConfig(tmpDir, {
+        providers: { openai: { kind: "openai-compatible", models: ["gpt-4o"] } },
+        model: { provider: "openai", id: "gpt-4o" }
+      });
+
+      const result = await runCliCommand({
+        argv: ["model", "search", "deprecated", "--include-deprecated"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false },
+        modelCatalogOverrides: lifecycleOverrides()
+      });
+
+      expect(result.output).toContain("gpt-4o-deprecated");
+    });
+
+    it("search includes non-chat with --include-non-chat", async () => {
+      const fixturePath = await writeBundledSnapshot(tmpDir, mockSnapshot());
+      await writeUserConfig(tmpDir, {
+        providers: { openai: { kind: "openai-compatible", models: ["gpt-4o"] } },
+        model: { provider: "openai", id: "gpt-4o" }
+      });
+
+      const result = await runCliCommand({
+        argv: ["model", "search", "dall", "--include-non-chat"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false },
+        modelCatalogOverrides: lifecycleOverrides()
+      });
+
+      expect(result.output).toContain("dall-e-3");
+    });
+
+    it("search composes lifecycle flags", async () => {
+      const fixturePath = await writeBundledSnapshot(tmpDir, mockSnapshot());
+      await writeUserConfig(tmpDir, {
+        providers: { openai: { kind: "openai-compatible", models: ["gpt-4o"] } },
+        model: { provider: "openai", id: "gpt-4o" }
+      });
+
+      const result = await runCliCommand({
+        argv: ["model", "search", "gpt", "--include-deprecated", "--include-retired"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false },
+        modelCatalogOverrides: lifecycleOverrides()
+      });
+
+      expect(result.output).toContain("gpt-4o-deprecated");
+      expect(result.output).toContain("gpt-retired");
     });
 
     it("providers shows curated and configured providers", async () => {
@@ -1449,7 +1582,7 @@ describe("cli model", () => {
     it("includes deprecated with --include-deprecated", async () => {
       const fixturePath = await writeBundledSnapshot(tmpDir, mockSnapshot());
       await writeUserConfig(tmpDir, {
-        providers: { openai: { kind: "openai-compatible", models: ["gpt-4o", "gpt-4o-deprecated"] } },
+        providers: { openai: { kind: "openai-compatible", models: ["gpt-4o"] } },
         model: { provider: "openai", id: "gpt-4o" }
       });
       const without = await runCliCommand({
@@ -1466,6 +1599,70 @@ describe("cli model", () => {
       });
       expect(without.output).not.toContain("gpt-4o-deprecated");
       expect(withFlag.output).toContain("gpt-4o-deprecated");
+    });
+
+    it("hides retired by default and includes it with --include-retired", async () => {
+      const fixturePath = await writeBundledSnapshot(tmpDir, mockSnapshot());
+      await writeUserConfig(tmpDir, {
+        providers: { openai: { kind: "openai-compatible", models: ["gpt-4o"] } },
+        model: { provider: "openai", id: "gpt-4o" }
+      });
+
+      const without = await runCliCommand({
+        argv: ["model", "list"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false },
+        modelCatalogOverrides: lifecycleOverrides()
+      });
+      const withFlag = await runCliCommand({
+        argv: ["model", "list", "--include-retired"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false },
+        modelCatalogOverrides: lifecycleOverrides()
+      });
+
+      expect(without.output).not.toContain("gpt-retired");
+      expect(withFlag.output).toContain("gpt-retired");
+    });
+
+    it("composes --include-retired with --include-non-chat", async () => {
+      const fixturePath = await writeBundledSnapshot(tmpDir, mockSnapshot());
+      await writeUserConfig(tmpDir, {
+        providers: { openai: { kind: "openai-compatible", models: ["gpt-4o"] } },
+        model: { provider: "openai", id: "gpt-4o" }
+      });
+
+      const result = await runCliCommand({
+        argv: ["model", "list", "--include-retired", "--include-non-chat"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false },
+        modelCatalogOverrides: lifecycleOverrides()
+      });
+
+      expect(result.output).toContain("gpt-retired");
+      expect(result.output).toContain("dall-e-3");
+    });
+
+    it("composes --include-deprecated with --include-retired", async () => {
+      const fixturePath = await writeBundledSnapshot(tmpDir, mockSnapshot());
+      await writeUserConfig(tmpDir, {
+        providers: { openai: { kind: "openai-compatible", models: ["gpt-4o"] } },
+        model: { provider: "openai", id: "gpt-4o" }
+      });
+
+      const result = await runCliCommand({
+        argv: ["model", "list", "--include-deprecated", "--include-retired"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        modelsDevOptions: { bundledSnapshotPath: fixturePath, allowNetwork: false },
+        modelCatalogOverrides: lifecycleOverrides()
+      });
+
+      expect(result.output).toContain("gpt-4o-deprecated");
+      expect(result.output).toContain("gpt-retired");
     });
 
     it("includes beta with --include-beta", async () => {

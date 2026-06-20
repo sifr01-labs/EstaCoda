@@ -168,7 +168,8 @@ import { isBackupReady } from "../lifecycle/state-preservation.js";
 import type { ModelsDevRegistryOptions } from "../model-catalog/models-dev-registry.js";
 import {
   createModelSelectionCatalog,
-  type CatalogListOptions
+  type CatalogListOptions,
+  type CreateModelSelectionCatalogOptions
 } from "../providers/model-selection-catalog.js";
 import { produceModelStatusReport } from "../diagnostics/model-diagnostics.js";
 import {
@@ -204,6 +205,7 @@ export type CliOptions = {
   runtime?: Runtime;
   cronRuntimeFactory?: CronRuntimeFactory;
   modelsDevOptions?: ModelsDevRegistryOptions;
+  modelCatalogOverrides?: CreateModelSelectionCatalogOptions["modelCatalogOverrides"];
   profileContextGenerator?: ProfileContextGenerator;
   output?: { write(chunk: string): void };
   voiceModeEnv?: CliVoiceEnvironmentOptions;
@@ -797,6 +799,7 @@ async function model(options: CliOptions, args: string[]): Promise<CliCommandRes
       providerRegistry: config.providerRegistry,
       homeDir: options.homeDir,
       modelsDevOptions: options.modelsDevOptions,
+      modelCatalogOverrides: options.modelCatalogOverrides,
       allowNetwork: flags.live
     });
     const { live: _liveList, ...listOpts } = flags;
@@ -817,6 +820,7 @@ async function model(options: CliOptions, args: string[]): Promise<CliCommandRes
       providerRegistry: config.providerRegistry,
       homeDir: options.homeDir,
       modelsDevOptions: options.modelsDevOptions,
+      modelCatalogOverrides: options.modelCatalogOverrides,
       allowNetwork: flags.live
     });
     const { live: _liveSearch, ...searchOpts } = flags;
@@ -1474,8 +1478,8 @@ function renderModelHelp(args: string[]): string {
     "  estacoda model",
     "  estacoda model status",
     "  estacoda model diagnose",
-    "  estacoda model list [--provider <id>] [--configured] [--live]",
-    "  estacoda model search <query> [--provider <id>] [--configured] [--live]",
+    "  estacoda model list [--provider <id>] [--configured] [--live] [--include-retired]",
+    "  estacoda model search <query> [--provider <id>] [--configured] [--live] [--include-retired]",
     "  estacoda model providers",
     "  estacoda model refresh",
     "  estacoda model setup <local|custom|codex>",
@@ -4383,6 +4387,7 @@ function parseCatalogListFlags(rawArgs: string[]): { live?: boolean } & CatalogL
     else if (arg === "--configured") flags.configuredOnly = true;
     else if (arg === "--include-beta") flags.includeBeta = true;
     else if (arg === "--include-deprecated") flags.includeDeprecated = true;
+    else if (arg === "--include-retired") flags.includeRetired = true;
     else if (arg === "--include-non-chat") flags.includeNonChat = true;
     else if (arg === "--executable-only") flags.executableOnly = true;
     i++;
