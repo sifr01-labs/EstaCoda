@@ -3,6 +3,7 @@ import type {
   ChannelAuthPolicies,
   ChannelGatewayResult,
   ChannelMessage,
+  ChannelTextAction,
   ChannelStreamingTextHandle,
   ChannelStreamingTextOptions,
   ChannelStreamingTextResult,
@@ -48,7 +49,13 @@ import {
   type ApprovalActionScope
 } from "./approval-actions.js";
 import {
+  MODEL_PICKER_MODEL_PAGE_SIZE,
   MODEL_PICKER_MAX_CHOICE_ACTIONS,
+  modelPickerBackActionValue,
+  modelPickerCancelActionValue,
+  modelPickerClearActionValue,
+  modelPickerPageActionKey,
+  modelPickerPageActionValue,
   modelPickerProviderActionKey,
   modelPickerSelectActionKey,
   parseModelPickerAction,
@@ -1835,6 +1842,7 @@ export class ChannelGateway {
     const renderedChoices = choices.slice(0, MODEL_PICKER_MAX_CHOICE_ACTIONS);
     const truncated = choices.length > renderedChoices.length;
     const currentModel = await this.#describeCurrentModelSelection(sessionId, message, context);
+    const currentModelLines = renderModelPickerCurrentLines(currentModel, providers);
 
     const text = providers.length === 0
       ? [
@@ -1842,22 +1850,23 @@ export class ChannelGateway {
           "Run estacoda model setup from a terminal to configure credentials."
         ].join("\n")
       : [
-          "Session model picker",
-          `Current: ${currentModel}`,
-          "Choose a provider:",
-          ...providers.slice(0, MODEL_PICKER_MAX_CHOICE_ACTIONS).map((provider) => `model-select ${provider.id}`),
+          "Model Configuration",
+          ...currentModelLines,
+          "Select a provider:",
           truncated
-            ? `Showing ${MODEL_PICKER_MAX_CHOICE_ACTIONS} of ${providers.length} providers. Reply with model-select <provider>/<model> for hidden choices.`
-            : undefined,
-          "",
-          "Clear override: model-clear",
-          "Direct set: model-select <provider>/<model>"
+            ? `Showing ${renderedChoices.length} of ${providers.length} providers.`
+            : undefined
         ].filter((line) => line !== undefined).join("\n");
     await this.#deliverText(
       adapter,
       message.sessionKey,
       text,
-      choices.length === 0 ? undefined : { actions: renderModelPickerActions(renderedChoices) }
+      choices.length === 0 ? undefined : {
+        actions: [
+          ...renderModelPickerActions(renderedChoices, { columns: 2 }),
+          ...modelPickerProviderControlRows()
+        ]
+      }
     );
     return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
   }
@@ -1866,7 +1875,8 @@ export class ChannelGateway {
     message: ChannelMessage,
     adapter: ChannelAdapter,
     sessionId: string,
-    providerId: string
+    providerId: string,
+    page = 0
   ): Promise<ChannelGatewayResult> {
     const context = await this.#loadModelSwitchContext();
     if (context === undefined) {
@@ -1893,8 +1903,11 @@ export class ChannelGateway {
       actionKey: modelPickerSelectActionKey(model.provider, model.id),
       kind: "select" as const
     }));
-    const renderedChoices = choices.slice(0, MODEL_PICKER_MAX_CHOICE_ACTIONS);
-    const truncated = choices.length > renderedChoices.length;
+    const totalPages = Math.max(1, Math.ceil(choices.length / MODEL_PICKER_MODEL_PAGE_SIZE));
+    const safePage = clampModelPickerPage(page, totalPages);
+    const start = safePage * MODEL_PICKER_MODEL_PAGE_SIZE;
+    const renderedChoices = choices.slice(start, start + MODEL_PICKER_MODEL_PAGE_SIZE);
+    const end = start + renderedChoices.length;
 
     const text = choices.length === 0
       ? [
@@ -1902,22 +1915,24 @@ export class ChannelGateway {
           `Run estacoda model setup ${provider.id} from a terminal.`
         ].join("\n")
       : [
-          `Session model picker: ${provider.displayName}`,
-          "Choose a model:",
-          ...models.slice(0, MODEL_PICKER_MAX_CHOICE_ACTIONS).map((model) => `model-select ${model.provider}/${model.id}`),
-          truncated
-            ? `Showing ${MODEL_PICKER_MAX_CHOICE_ACTIONS} of ${models.length} models. Reply with model-select ${provider.id}/<model> for hidden choices.`
-            : undefined,
-          "",
-          "Clear override: model-clear",
-          "Cancel: reply /model to choose another provider."
+          "Model Configuration",
+          `Provider: ${provider.displayName} (${start + 1}-${end} of ${choices.length})`,
+          "Select a model:"
         ].filter((line) => line !== undefined).join("\n");
 
     await this.#deliverText(
       adapter,
       message.sessionKey,
       text,
-      choices.length === 0 ? undefined : { actions: renderModelPickerActions(renderedChoices) }
+      choices.length === 0 ? undefined : {
+        actions: [
+          ...renderModelPickerActions(renderedChoices, {
+            columns: 2,
+            maxChoices: MODEL_PICKER_MODEL_PAGE_SIZE
+          }),
+          ...modelPickerModelNavigationRows(provider.id, safePage, totalPages)
+        ]
+      }
     );
     return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
   }
@@ -1993,6 +2008,25 @@ export class ChannelGateway {
     return matches.length === 1 ? matches[0] : undefined;
   }
 
+  async #resolvePageActionKey(
+    actionKey: string,
+    context: ModelSwitchContext
+  ): Promise<{ providerId: string; page: number } | undefined> {
+    const flow = await this.#createGatewayModelFlow(context);
+    const providers = await flow.listProviderCandidates();
+    const matches: Array<{ providerId: string; page: number }> = [];
+    for (const provider of providers) {
+      const models = await this.#listRunnableModelChoices(flow, provider.id);
+      const totalPages = Math.max(1, Math.ceil(models.length / MODEL_PICKER_MODEL_PAGE_SIZE));
+      for (let page = 0; page < totalPages; page += 1) {
+        if (modelPickerPageActionKey(provider.id, page) === actionKey) {
+          matches.push({ providerId: provider.id, page });
+        }
+      }
+    }
+    return matches.length === 1 ? matches[0] : undefined;
+  }
+
   async #loadModelSwitchContext(): Promise<ModelSwitchContext | undefined> {
     if (this.#modelSwitchContext === undefined) {
       return undefined;
@@ -2045,6 +2079,23 @@ export class ChannelGateway {
           return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
         }
         return this.#showModelProviderPicker(message, adapter, sessionId, providerId);
+      }
+
+      if (modelAction.action.kind === "page") {
+        const context = await this.#loadModelSwitchContext();
+        const pageTarget = context === undefined
+          ? undefined
+          : await this.#resolvePageActionKey(modelAction.action.actionKey, context);
+        if (pageTarget === undefined) {
+          const text = "Model picker action is no longer available. Run /model again.";
+          await this.#deliverText(adapter, message.sessionKey, text);
+          return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+        }
+        return this.#showModelProviderPicker(message, adapter, sessionId, pageTarget.providerId, pageTarget.page);
+      }
+
+      if (modelAction.action.kind === "back") {
+        return this.#showModelPicker(message, adapter, sessionId);
       }
 
       let command: GatewayModelCommand;
@@ -3344,6 +3395,84 @@ function yoloSessionKey(stableKey: string, sessionId: string): string {
 function tokenizeCommandArgs(text: string): string[] {
   const matches = text.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/gu);
   return [...matches].map((match) => match[1] ?? match[2] ?? match[3] ?? "");
+}
+
+function renderModelPickerCurrentLines(
+  currentModel: string,
+  providers: Array<{ id: string; displayName: string }>
+): string[] {
+  const route = parseModelPickerRouteDescription(currentModel);
+  if (route === undefined) {
+    return [`Current model: ${currentModel}`];
+  }
+
+  const provider = providers.find((candidate) => candidate.id === route.providerId);
+  return [
+    `Current model: ${route.modelId}`,
+    `Provider: ${provider?.displayName ?? route.providerId}`
+  ];
+}
+
+function parseModelPickerRouteDescription(
+  currentModel: string
+): { providerId: string; modelId: string } | undefined {
+  const routeText = currentModel.replace(/\s+\([^)]+\)$/u, "");
+  const slashIndex = routeText.indexOf("/");
+  if (slashIndex <= 0 || slashIndex === routeText.length - 1) {
+    return undefined;
+  }
+
+  return {
+    providerId: routeText.slice(0, slashIndex),
+    modelId: routeText.slice(slashIndex + 1)
+  };
+}
+
+function modelPickerProviderControlRows(): ChannelTextAction[][] {
+  return [[
+    { label: "Clear", value: modelPickerClearActionValue() },
+    { label: "Cancel", value: modelPickerCancelActionValue() }
+  ]];
+}
+
+function modelPickerModelNavigationRows(providerId: string, page: number, totalPages: number): ChannelTextAction[][] {
+  const safeTotalPages = Math.max(1, totalPages);
+  const safePage = clampModelPickerPage(page, safeTotalPages);
+  const rows: ChannelTextAction[][] = [];
+
+  if (safeTotalPages > 1) {
+    const currentPage = {
+      label: `${safePage + 1}/${safeTotalPages}`,
+      value: modelPickerPageActionValue(modelPickerPageActionKey(providerId, safePage))
+    };
+    const previousPage = safePage > 0
+      ? {
+          label: "< Prev",
+          value: modelPickerPageActionValue(modelPickerPageActionKey(providerId, safePage - 1))
+        }
+      : currentPage;
+    const nextPage = safePage < safeTotalPages - 1
+      ? {
+          label: "Next >",
+          value: modelPickerPageActionValue(modelPickerPageActionKey(providerId, safePage + 1))
+        }
+      : currentPage;
+
+    rows.push([previousPage, nextPage]);
+  }
+
+  rows.push([
+    { label: "< Back", value: modelPickerBackActionValue() },
+    { label: "Cancel", value: modelPickerCancelActionValue() }
+  ]);
+  return rows;
+}
+
+function clampModelPickerPage(page: number, totalPages: number): number {
+  if (!Number.isFinite(page)) {
+    return 0;
+  }
+  return Math.min(Math.max(Math.trunc(page), 0), Math.max(totalPages - 1, 0));
 }
 
 type GatewayModelCommand =

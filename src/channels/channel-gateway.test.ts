@@ -40,7 +40,11 @@ import { loadRuntimeConfig } from "../config/runtime-config.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { resolveEffectiveSessionModelOverride } from "../providers/model-switch-resolver.js";
 import { stableSessionKey } from "./channel-session-store.js";
-import { modelPickerCancelActionValue, modelPickerClearActionValue } from "./model-picker-actions.js";
+import {
+  compactModelPickerLabel,
+  modelPickerCancelActionValue,
+  modelPickerClearActionValue
+} from "./model-picker-actions.js";
 import { VoiceStateManager } from "../gateway/voice-state.js";
 import { AdapterResilienceSupervisor } from "../gateway/adapter-resilience.js";
 
@@ -1572,13 +1576,15 @@ describe("ChannelGateway commands", () => {
 
       const result = await gateway.receive(makeMessage("/model"));
 
-      expect(result.replyText).toContain("Session model picker");
-      expect(result.replyText).toContain("Current: local/qwen2.5:3b (global)");
-      expect(result.replyText).toContain("Choose a provider:");
-      expect(result.replyText).toContain("model-select local");
-      expect(result.replyText).toContain("Direct set: model-select <provider>/<model>");
+      expect(result.replyText).toContain("Model Configuration");
+      expect(result.replyText).toContain("Current model: qwen2.5:3b");
+      expect(result.replyText).toContain("Provider: Local");
+      expect(result.replyText).toContain("Select a provider:");
+      expect(result.replyText).not.toContain("model-select local");
+      expect(result.replyText).not.toContain("Direct set: model-select <provider>/<model>");
       expect(result.replyText).not.toContain("model-select local/qwen2.5:3b");
       const actions = adapter.records.at(-1)?.options?.actions;
+      expect(actions?.every((row) => row.length <= 2)).toBe(true);
       const labels = actions?.flat().map((action) => action.label) ?? [];
       expect(labels).toContain("Local");
       expect(labels.at(-2)).toBe("Clear");
@@ -1590,15 +1596,20 @@ describe("ChannelGateway commands", () => {
       const localAction = actions?.flat().find((action) => action.label === "Local");
       expect(localAction).toBeDefined();
       const providerResult = await gateway.receive(makeMessage(localAction?.value ?? ""));
-      expect(providerResult.replyText).toContain("Session model picker: Local");
-      const qwenIndex = providerResult.replyText.indexOf("model-select local/qwen2.5:3b");
-      const phiIndex = providerResult.replyText.indexOf("model-select local/phi4:latest");
-      expect(phiIndex).toBeGreaterThanOrEqual(0);
-      expect(qwenIndex).toBeGreaterThan(phiIndex);
+      expect(providerResult.replyText).toContain("Model Configuration");
+      expect(providerResult.replyText).toMatch(/Provider: Local \(1-\d+ of \d+\)/u);
+      expect(providerResult.replyText).toContain("Select a model:");
+      expect(providerResult.replyText).not.toContain("model-select local/qwen2.5:3b");
+      expect(providerResult.replyText).not.toContain("model-select local/phi4:latest");
       const modelLabels = adapter.records.at(-1)?.options?.actions?.flat().map((action) => action.label) ?? [];
       expect(modelLabels).toContain("phi4:latest");
       expect(modelLabels).toContain("qwen2.5:3b");
       expect(modelLabels).not.toContain("Local");
+      expect(modelLabels.at(-2)).toBe("< Back");
+      expect(modelLabels.at(-1)).toBe("Cancel");
+
+      await gateway.receive(makeMessage("model-select local/phi4:latest"));
+      expect(adapter.records.at(-1)?.text).toContain("Session model override set: local/phi4:latest");
     } finally {
       await rm(tempHome, { recursive: true, force: true });
     }
@@ -1947,18 +1958,50 @@ describe("ChannelGateway commands", () => {
       expect(localProvider).toBeDefined();
       const modelPicker = await gateway.receive(makeMessage(localProvider?.value ?? ""));
 
-      expect(modelPicker.replyText).toContain("Showing 20 of");
-      expect(modelPicker.replyText).toContain("Reply with model-select local/<model> for hidden choices.");
+      expect(modelPicker.replyText).toMatch(/Provider: Local \(1-8 of \d+\)/u);
+      expect(modelPicker.replyText).toContain("Select a model:");
+      expect(modelPicker.replyText).not.toContain("model-select local/");
       const actions = adapter.records.at(-1)?.options?.actions?.flat() ?? [];
-      expect(actions).toHaveLength(22);
+      expect(actions).toHaveLength(12);
       expect(actions.every((action) => action.value.length <= 64)).toBe(true);
       expect(JSON.stringify(actions.map((action) => action.value))).not.toContain(longModel);
+      expect(actions.map((action) => action.label)).toContain("1/4");
+      expect(actions.map((action) => action.label)).toContain("Next >");
 
-      const longAction = actions.find((action) => action.label === longModel);
+      const longAction = actions.find((action) => action.label === compactModelPickerLabel(longModel));
       expect(longAction).toBeDefined();
+      expect(longAction?.label).not.toBe(longModel);
+
+      const nextAction = actions.find((action) => action.label === "Next >");
+      expect(nextAction).toBeDefined();
+      const nextPage = await gateway.receive(makeMessage(nextAction?.value ?? ""));
+      expect(nextPage.replyText).toMatch(/Provider: Local \(9-16 of \d+\)/u);
+      expect(adapter.records.at(-1)?.options?.actions?.flat().map((action) => action.label)).toContain("< Prev");
+
+      const backAction = adapter.records.at(-1)?.options?.actions?.flat()
+        .find((action) => action.label === "< Back");
+      expect(backAction).toBeDefined();
+      const backResult = await gateway.receive(makeMessage(backAction?.value ?? ""));
+      expect(backResult.replyText).toContain("Select a provider:");
+
       const selected = await gateway.receive(makeMessage(longAction?.value ?? ""));
       expect(selected.replyText).toContain(`Session model override set: local/${longModel}`);
       expect((await db.getSessionModelOverride(selected.sessionId))?.route.id).toBe(longModel);
+
+      await writeGatewayModelConfig(tempHome, {
+        providers: {
+          local: {
+            kind: "openai-compatible",
+            baseUrl: "http://localhost:11434/v1",
+            models: ["qwen2.5:3b", "phi4:latest"],
+            enableNetwork: true
+          }
+        },
+        model: { provider: "local", id: "qwen2.5:3b" }
+      });
+      const stalePage = await gateway.receive(makeMessage(nextAction?.value ?? ""));
+      expect(stalePage.replyText).toContain("Model picker action is no longer available. Run /model again.");
+      expect((await db.getSessionModelOverride(stalePage.sessionId))?.route.id).toBe(longModel);
     } finally {
       await rm(tempHome, { recursive: true, force: true });
     }
@@ -2001,12 +2044,12 @@ describe("ChannelGateway commands", () => {
       expect(cancelResult.replyText).toContain("Model picker canceled");
 
       const picker = await gateway.receive(makeMessage("/model"));
-      expect(picker.replyText).toContain("Session model picker");
+      expect(picker.replyText).toContain("Model Configuration");
       const localProvider = adapter.records.at(-1)?.options?.actions?.flat()
         .find((action) => action.label === "Local");
       expect(localProvider).toBeDefined();
       const providerResult = await gateway.receive(makeMessage(localProvider?.value ?? ""));
-      expect(providerResult.replyText).toContain("Session model picker: Local");
+      expect(providerResult.replyText).toMatch(/Provider: Local \(1-\d+ of \d+\)/u);
       const selectQwen = adapter.records.at(-1)?.options?.actions?.flat()
         .find((action) => action.label === "qwen2.5:3b");
       expect(selectQwen).toBeDefined();
