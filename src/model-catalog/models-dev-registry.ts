@@ -287,6 +287,10 @@ export function normalizeProviderIdForEstaCoda(providerId: string): ProviderId {
       return "kimi";
     case "ollama":
       return "local";
+    case "zai":
+    case "zhipuai":
+    case "zhipu":
+      return "zai";
     default:
       return normalized as ProviderId;
   }
@@ -563,9 +567,11 @@ function dedupeProviders(providers: ProviderInfo[]): ProviderInfo[] {
 
   for (const provider of providers) {
     if (provider.id.length === 0) continue;
-    seen.set(provider.id, {
-      ...(seen.get(provider.id) ?? {}),
-      ...provider
+    const id = normalizeProviderIdForEstaCoda(provider.id);
+    seen.set(id, {
+      ...(seen.get(id) ?? {}),
+      ...provider,
+      id
     });
   }
 

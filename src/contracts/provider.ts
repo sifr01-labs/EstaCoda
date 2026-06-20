@@ -9,6 +9,7 @@ export type ProviderId =
   | "openai"
   | "openrouter"
   | "nous"
+  | "zai"
   | "unconfigured"
   | (string & {});
 

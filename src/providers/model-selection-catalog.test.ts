@@ -678,6 +678,44 @@ describe("ModelSelectionCatalog report shape", () => {
     expect(typeof gpt4o!.live).toBe("boolean");
   }));
 
+  it("lists first-class Z.ai provider and fallback models as executable with adapter support", withFixture(async (fixturePath, cachePath) => {
+    const registry = new ProviderRegistry();
+    registry.register({
+      id: "zai" as ProviderId,
+      name: "Z.AI",
+      executable: true,
+      health(_endpointOverride?: ProviderEndpoint) {
+        return { available: true };
+      },
+      listModels() {
+        return [];
+      },
+      async complete() {
+        return { ok: true, content: "", model: "", provider: "zai" };
+      }
+    });
+
+    const catalog = await createModelSelectionCatalog(buildOptions(fixturePath, cachePath, {
+      registry
+    }));
+
+    const providers = await catalog.listProviders({ includeCatalogOnly: false });
+    const zaiProvider = providers.find((p) => p.id === "zai");
+    expect(zaiProvider).toBeDefined();
+    expect(zaiProvider!.name).toBe("Z.AI");
+    expect(zaiProvider!.executable).toBe(true);
+    expect(zaiProvider!.catalogOnly).toBe(false);
+    expect(zaiProvider!.modelsCount).toBeGreaterThanOrEqual(4);
+
+    const models = await catalog.listModels({ provider: "zai", includeCatalogOnly: false });
+    const glm = models.find((m) => m.id === "glm-5.2");
+    expect(glm).toBeDefined();
+    expect(glm!.provider).toBe("zai");
+    expect(glm!.executable).toBe(true);
+    expect(glm!.catalogOnly).toBe(false);
+    expect(glm!.source).toBe("fallback-known");
+  }));
+
   it("sets endpointType to custom for local providers", withFixture(async (fixturePath, cachePath) => {
     const registry = new ProviderRegistry();
     registry.register({

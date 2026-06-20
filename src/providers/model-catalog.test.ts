@@ -53,6 +53,21 @@ describe("buildProfileResolutionContext", () => {
   });
 });
 
+describe("fallbackKnownModelProfiles", () => {
+  it("includes first-class Z.ai GLM fallback profiles", () => {
+    const zaiModels = fallbackKnownModelProfiles
+      .filter((profile) => profile.provider === "zai")
+      .map((profile) => profile.id);
+
+    expect(zaiModels).toEqual(expect.arrayContaining([
+      "glm-5.2",
+      "glm-5.1",
+      "glm-5",
+      "glm-4.7-flash"
+    ]));
+  });
+});
+
 describe("resolveModelProfile", () => {
   it("returns snapshot profile when model exists in snapshot", () => {
     const snapshot = makeSnapshot([

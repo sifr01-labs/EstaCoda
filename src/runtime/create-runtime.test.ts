@@ -3926,6 +3926,29 @@ describe("createDefaultProviderRegistry", () => {
     expect(local).toBeDefined();
     expect(local!.executable).not.toBe(false);
     expect(local!.endpoint?.baseUrl).toBe("http://localhost:11434/v1");
+
+    const zai = registry.get("zai");
+    expect(zai).toBeDefined();
+    expect(zai!.executable).not.toBe(false);
+    expect(zai!.endpoint?.baseUrl).toBe("https://api.z.ai/api/paas/v4");
+  });
+
+  it("registers selected zai model through the OpenAI-compatible adapter path", () => {
+    const registry = createDefaultProviderRegistry({
+      id: "glm-5.2",
+      provider: "zai",
+      contextWindowTokens: 128000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true,
+      supportsReasoning: true
+    });
+
+    const zai = registry.get("zai");
+    expect(zai).toBeDefined();
+    expect(zai!.executable).not.toBe(false);
+    expect(zai!.endpoint?.baseUrl).toBe("https://api.z.ai/api/paas/v4");
+    expect(zai!.endpoint?.apiKey).toEqual({ kind: "env", name: "ZAI_API_KEY" });
   });
 
   it("does not use placeholder endpoints in executable provider adapters", () => {

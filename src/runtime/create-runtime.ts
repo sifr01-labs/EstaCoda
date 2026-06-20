@@ -1401,7 +1401,8 @@ function isOpenAICompatibleProvider(provider: string): boolean {
     "google",
     "openai",
     "openrouter",
-    "nous"
+    "nous",
+    "zai"
   ].includes(provider);
 }
 

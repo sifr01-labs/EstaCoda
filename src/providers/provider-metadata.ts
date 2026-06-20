@@ -152,6 +152,25 @@ const BUILT_IN_METADATA: Record<string, ProviderMetadata> = {
     allowsCustomBaseUrl: true,
     requiresModelSelection: true
   },
+  zai: {
+    id: "zai",
+    displayName: "Z.AI",
+    catalogKnown: true,
+    configurable: true,
+    runnable: true,
+    visibility: {
+      modelPicker: true,
+      setup: true,
+      catalogExplore: true
+    },
+    apiMode: "openai_chat_completions",
+    defaultBaseUrl: "https://api.z.ai/api/paas/v4",
+    defaultApiKeyEnv: "ZAI_API_KEY",
+    authMethods: ["api_key"],
+    defaultAuthMethod: "api_key",
+    allowsCustomBaseUrl: true,
+    requiresModelSelection: true
+  },
   local: {
     id: "local",
     displayName: "Local",

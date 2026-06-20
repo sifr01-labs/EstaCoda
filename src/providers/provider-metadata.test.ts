@@ -28,6 +28,7 @@ describe("provider-metadata", () => {
       ["kimi", "Kimi For Coding", "https://api.moonshot.ai/v1", "KIMI_API_KEY", true, true, "api_key", "openai_chat_completions"],
       ["google", "Google", "https://generativelanguage.googleapis.com/v1beta/openai", "GOOGLE_API_KEY", true, true, "api_key", "openai_chat_completions"],
       ["openrouter", "OpenRouter", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY", true, true, "api_key", "openai_chat_completions"],
+      ["zai", "Z.AI", "https://api.z.ai/api/paas/v4", "ZAI_API_KEY", true, true, "api_key", "openai_chat_completions"],
       ["local", "Local", "http://localhost:11434/v1", undefined, true, true, "none", "custom_openai_compatible"],
       ["anthropic", "Anthropic", "https://api.anthropic.com/v1", "ANTHROPIC_API_KEY", true, false, "api_key", "anthropic_messages"],
       ["codex", "OpenAI Codex", "https://chatgpt.com/backend-api/codex", undefined, true, true, "oauth_device_pkce", "openai_responses"],
@@ -64,6 +65,7 @@ describe("provider-metadata", () => {
       expect(getProviderDefaultBaseUrl("kimi")).toBe("https://api.moonshot.ai/v1");
       expect(getProviderDefaultBaseUrl("google")).toBe("https://generativelanguage.googleapis.com/v1beta/openai");
       expect(getProviderDefaultBaseUrl("openrouter")).toBe("https://openrouter.ai/api/v1");
+      expect(getProviderDefaultBaseUrl("zai")).toBe("https://api.z.ai/api/paas/v4");
       expect(getProviderDefaultBaseUrl("local")).toBe("http://localhost:11434/v1");
       expect(getProviderDefaultBaseUrl("unknown-provider" as ProviderId)).toBeUndefined();
       expect(getProviderDefaultBaseUrl("nous")).toBeUndefined();
@@ -75,6 +77,7 @@ describe("provider-metadata", () => {
       expect(getDefaultApiKeyEnv("kimi")).toBe("KIMI_API_KEY");
       expect(getDefaultApiKeyEnv("google")).toBe("GOOGLE_API_KEY");
       expect(getDefaultApiKeyEnv("openrouter")).toBe("OPENROUTER_API_KEY");
+      expect(getDefaultApiKeyEnv("zai")).toBe("ZAI_API_KEY");
       expect(getDefaultApiKeyEnv("local")).toBe("OPENAI_COMPATIBLE_API_KEY");
       expect(getDefaultApiKeyEnv("anthropic")).toBe("ANTHROPIC_API_KEY");
       expect(getDefaultApiKeyEnv("unknown-provider" as ProviderId)).toBe("OPENAI_COMPATIBLE_API_KEY");
@@ -108,7 +111,7 @@ describe("provider-metadata", () => {
     });
 
     it("defaults native tool history support off for custom and deferred providers", () => {
-      for (const id of ["custom-corp", "codex", "anthropic", "minimax", "nous", "local", "google", "openrouter"] as const) {
+      for (const id of ["custom-corp", "codex", "anthropic", "minimax", "nous", "local", "google", "openrouter", "zai"] as const) {
         const metadata = getProviderMetadata(id as ProviderId);
         expect(metadata.supportsNativeToolHistory).not.toBe(true);
         expect(metadata.allowReasoningEchoPlaceholder).not.toBe(true);
@@ -138,6 +141,10 @@ describe("provider-metadata", () => {
       });
       expect(getProviderMetadata("codex").apiMode).toBe("openai_responses");
       expect(getProviderMetadata("codex").supportsNativeToolHistory).not.toBe(true);
+      expect(getProviderMetadata("zai")).toMatchObject({
+        apiMode: "openai_chat_completions"
+      });
+      expect(getProviderMetadata("zai").supportsNativeToolHistory).toBeUndefined();
       expect(getProviderMetadata("anthropic").apiMode).toBe("anthropic_messages");
       expect(getProviderMetadata("anthropic").supportsNativeToolHistory).not.toBe(true);
     });
@@ -162,6 +169,7 @@ describe("provider-metadata", () => {
       expect(setupVisible).toContain("kimi");
       expect(setupVisible).toContain("google");
       expect(setupVisible).toContain("openrouter");
+      expect(setupVisible).toContain("zai");
       expect(setupVisible).toContain("local");
       expect(setupVisible).toContain("codex");
 
@@ -170,6 +178,7 @@ describe("provider-metadata", () => {
       expect(pickerVisible).toContain("kimi");
       expect(pickerVisible).toContain("google");
       expect(pickerVisible).toContain("openrouter");
+      expect(pickerVisible).toContain("zai");
       expect(pickerVisible).toContain("local");
       expect(pickerVisible).toContain("codex");
     });
@@ -212,6 +221,7 @@ describe("provider-metadata", () => {
       expect(isProviderRunnable("kimi")).toBe(true);
       expect(isProviderRunnable("google")).toBe(true);
       expect(isProviderRunnable("openrouter")).toBe(true);
+      expect(isProviderRunnable("zai")).toBe(true);
       expect(isProviderRunnable("local")).toBe(true);
       expect(isProviderRunnable("codex")).toBe(true);
     });
@@ -260,6 +270,7 @@ describe("provider-metadata", () => {
       expect(isProviderMediaOnly("kimi")).toBe(false);
       expect(isProviderMediaOnly("google")).toBe(false);
       expect(isProviderMediaOnly("openrouter")).toBe(false);
+      expect(isProviderMediaOnly("zai")).toBe(false);
       expect(isProviderMediaOnly("local")).toBe(false);
       expect(isProviderMediaOnly("anthropic")).toBe(false);
       expect(isProviderMediaOnly("codex")).toBe(false);
@@ -274,6 +285,7 @@ describe("provider-metadata", () => {
       expect(known).toContain("kimi");
       expect(known).toContain("google");
       expect(known).toContain("openrouter");
+      expect(known).toContain("zai");
       expect(known).toContain("local");
       expect(known).toContain("anthropic");
       expect(known).toContain("codex");

@@ -56,7 +56,7 @@ describe("provider architecture invariants", () => {
     it("unsupported apiMode cannot be runnable except codex openai_responses", () => {
       const knownProviders = [
         "openai", "deepseek", "kimi", "google", "openrouter",
-        "local", "anthropic", "codex", "minimax", "nous"
+        "local", "anthropic", "codex", "minimax", "nous", "zai"
       ] as ProviderId[];
       for (const id of knownProviders) {
         const meta = getProviderMetadata(id);
@@ -355,7 +355,7 @@ describe("provider architecture invariants", () => {
     it("provider metadata never stores raw API key values", () => {
       const knownProviders = [
         "openai", "deepseek", "kimi", "google", "openrouter",
-        "local", "anthropic", "codex", "minimax", "nous"
+        "local", "anthropic", "codex", "minimax", "nous", "zai"
       ] as ProviderId[];
       for (const id of knownProviders) {
         const meta = getProviderMetadata(id);
