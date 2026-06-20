@@ -253,6 +253,31 @@ export class TelegramAdapter implements ChannelAdapter {
           return;
         }
       }
+      // Telegram Bot API limits:
+      // - Multipart uploads: 50 MB for documents, videos, and other non-photo files
+      // - URL-based sending: 20 MB for other types of content, enforced server-side
+      const TELEGRAM_MAX_MULTIPART_BYTES = 50 * 1024 * 1024;
+      const effectiveLimit = Math.min(this.#maxAttachmentBytes, TELEGRAM_MAX_MULTIPART_BYTES);
+      const filePath = artifact.localPath ?? artifact.path;
+      let exceedsLimit = false;
+      if (filePath && !isHttpUrl(filePath)) {
+        const info = await stat(filePath).catch(() => undefined);
+        exceedsLimit = (info?.size ?? 0) > effectiveLimit;
+      }
+      if (!exceedsLimit) {
+        if (artifact.kind === "video") {
+          const delivered = await this.#sendVideoArtifact(sessionKey.chatId, artifact);
+          if (delivered) {
+            return;
+          }
+        }
+        if (artifact.kind === "document" || artifact.kind === "data" || artifact.kind === "other") {
+          const delivered = await this.#sendDocumentArtifact(sessionKey.chatId, artifact);
+          if (delivered) {
+            return;
+          }
+        }
+      }
       await this.#sendMessage(sessionKey.chatId, renderArtifactNotice(artifact));
     },
     startStreamingText: (sessionKey: ChannelSessionKey, options?: ChannelStreamingTextOptions) => {
@@ -514,7 +539,7 @@ export class TelegramAdapter implements ChannelAdapter {
     });
   }
 
-  async #sendChatAction(chatId: string, action: "typing" | "upload_document" | "upload_photo" | "upload_voice"): Promise<void> {
+  async #sendChatAction(chatId: string, action: "typing" | "upload_document" | "upload_photo" | "upload_voice" | "upload_video"): Promise<void> {
     await this.#call("sendChatAction", {
       chat_id: chatId,
       action
@@ -831,6 +856,52 @@ export class TelegramAdapter implements ChannelAdapter {
       }
       await this.#sendChatAction(chatId, "upload_photo");
       await this.#callMultipart<TelegramSentMessage>("sendPhoto", form);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async #sendDocumentArtifact(chatId: string, artifact: ArtifactRecord): Promise<boolean> {
+    try {
+      const form = new FormData();
+      form.set("chat_id", chatId);
+      if (isHttpUrl(artifact.path)) {
+        form.set("document", artifact.path);
+      } else {
+        const localPath = artifact.localPath ?? artifact.path;
+        const bytes = await readFile(localPath);
+        form.set("document", new Blob([bytes], { type: artifact.mimeType ?? "application/octet-stream" }), basename(localPath));
+      }
+      const caption = renderDocumentArtifactCaption(artifact);
+      if (caption.length > 0) {
+        form.set("caption", caption);
+      }
+      await this.#sendChatAction(chatId, "upload_document");
+      await this.#callMultipart<TelegramSentMessage>("sendDocument", form);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async #sendVideoArtifact(chatId: string, artifact: ArtifactRecord): Promise<boolean> {
+    try {
+      const form = new FormData();
+      form.set("chat_id", chatId);
+      if (isHttpUrl(artifact.path)) {
+        form.set("video", artifact.path);
+      } else {
+        const localPath = artifact.localPath ?? artifact.path;
+        const bytes = await readFile(localPath);
+        form.set("video", new Blob([bytes], { type: artifact.mimeType ?? "video/mp4" }), basename(localPath));
+      }
+      const caption = renderVideoArtifactCaption(artifact);
+      if (caption.length > 0) {
+        form.set("caption", caption);
+      }
+      await this.#sendChatAction(chatId, "upload_video");
+      await this.#callMultipart<TelegramSentMessage>("sendVideo", form);
       return true;
     } catch {
       return false;
@@ -1946,6 +2017,20 @@ function renderAudioArtifactCaption(artifact: ArtifactRecord): string {
 function renderImageArtifactCaption(artifact: ArtifactRecord): string {
   return [
     artifact.summary ?? "Generated image",
+    `Artifact: ${artifact.id}`
+  ].join("\n").slice(0, 1024);
+}
+
+function renderDocumentArtifactCaption(artifact: ArtifactRecord): string {
+  return [
+    artifact.summary ?? `Generated ${artifact.kind}`,
+    `Artifact: ${artifact.id}`
+  ].join("\n").slice(0, 1024);
+}
+
+function renderVideoArtifactCaption(artifact: ArtifactRecord): string {
+  return [
+    artifact.summary ?? `Generated ${artifact.kind}`,
     `Artifact: ${artifact.id}`
   ].join("\n").slice(0, 1024);
 }

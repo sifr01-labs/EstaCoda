@@ -1,7 +1,7 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { countUnicodeCodePoints, TelegramAdapter, TelegramApiError, updateToChannelMessage } from "./telegram-adapter.js";
 import { buildAdapterCapability } from "./adapter-capability.js";
 import { AdapterRegistry } from "./adapter-registry.js";
@@ -133,6 +133,63 @@ async function flushTelegramStreamingTimers(): Promise<void> {
 }
 
 function callsFor(calls: TelegramHarnessCall[], method: string): TelegramHarnessCall[] {
+  return calls.filter((call) => call.method === method);
+}
+
+type TelegramArtifactHarnessCall = {
+  method: string;
+  body: unknown;
+};
+
+function createTelegramArtifactHarness(options: {
+  failMethods?: string[];
+  maxAttachmentBytes?: number;
+} = {}): {
+  adapter: TelegramAdapter;
+  calls: TelegramArtifactHarnessCall[];
+} {
+  const calls: TelegramArtifactHarnessCall[] = [];
+  const fetch = vi.fn(async (url: string, init?: { body?: unknown }) => {
+    const method = url.split("/").at(-1) ?? "";
+    calls.push({ method, body: init?.body });
+
+    if (options.failMethods?.includes(method)) {
+      return {
+        ok: false,
+        status: 400,
+        statusText: "Bad Request",
+        json: async () => ({ ok: false, description: `${method} failed` })
+      };
+    }
+
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, result: { message_id: 1 } })
+    };
+  });
+
+  return {
+    adapter: new TelegramAdapter({
+      botToken: "test-token",
+      fetch,
+      maxAttachmentBytes: options.maxAttachmentBytes
+    }),
+    calls
+  };
+}
+
+function formDataBody(call: TelegramArtifactHarnessCall | undefined): FormData {
+  expect(call?.body).toBeInstanceOf(FormData);
+  return call?.body as FormData;
+}
+
+function jsonBody(call: TelegramArtifactHarnessCall | undefined): Record<string, unknown> {
+  expect(typeof call?.body).toBe("string");
+  return JSON.parse(String(call?.body)) as Record<string, unknown>;
+}
+
+function callsForArtifactMethod(calls: TelegramArtifactHarnessCall[], method: string): TelegramArtifactHarnessCall[] {
   return calls.filter((call) => call.method === method);
 }
 
@@ -2030,6 +2087,218 @@ describe("TelegramAdapter", () => {
 
     expect(message?.text).toBe(value);
     expect(message?.sessionKey.platform).toBe("telegram");
+  });
+
+  it("delivery.sendArtifact uploads document artifacts via sendDocument", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "estacoda-telegram-doc-"));
+    try {
+      const path = join(tempDir, "report.pdf");
+      await writeFile(path, "pdf");
+      const { adapter, calls } = createTelegramArtifactHarness();
+      const artifact: ArtifactRecord = {
+        id: "doc-1",
+        path,
+        localPath: path,
+        kind: "document",
+        bytes: 3,
+        createdAt: new Date().toISOString(),
+        mimeType: "application/pdf"
+      };
+
+      await adapter.delivery.sendArtifact({ platform: "telegram", chatId: "123" }, artifact);
+
+      const form = formDataBody(callsForArtifactMethod(calls, "sendDocument")[0]);
+      const document = form.get("document");
+      expect(document).toBeInstanceOf(Blob);
+      expect((document as Blob).type).toBe("application/pdf");
+      expect((document as { name?: string }).name).toBe(basename(path));
+      expect(form.get("caption")).toBe("Generated document\nArtifact: doc-1");
+      expect(callsForArtifactMethod(calls, "sendMessage")).toHaveLength(0);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("delivery.sendArtifact uploads video artifacts via sendVideo", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "estacoda-telegram-video-"));
+    try {
+      const path = join(tempDir, "clip.mp4");
+      await writeFile(path, "video");
+      const { adapter, calls } = createTelegramArtifactHarness();
+      const artifact: ArtifactRecord = {
+        id: "video-1",
+        path,
+        localPath: path,
+        kind: "video",
+        bytes: 5,
+        createdAt: new Date().toISOString(),
+        mimeType: "video/mp4"
+      };
+
+      await adapter.delivery.sendArtifact({ platform: "telegram", chatId: "123" }, artifact);
+
+      expect(callsForArtifactMethod(calls, "sendVideo")).toHaveLength(1);
+      expect(jsonBody(callsForArtifactMethod(calls, "sendChatAction")[0])).toMatchObject({
+        chat_id: "123",
+        action: "upload_video"
+      });
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("delivery.sendArtifact routes data artifacts to sendDocument", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "estacoda-telegram-data-"));
+    try {
+      const path = join(tempDir, "table.json");
+      await writeFile(path, "{}");
+      const { adapter, calls } = createTelegramArtifactHarness();
+
+      await adapter.delivery.sendArtifact({ platform: "telegram", chatId: "123" }, {
+        id: "data-1",
+        path,
+        localPath: path,
+        kind: "data",
+        bytes: 2,
+        createdAt: new Date().toISOString(),
+        mimeType: "application/json"
+      });
+
+      expect(callsForArtifactMethod(calls, "sendDocument")).toHaveLength(1);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("delivery.sendArtifact routes other artifacts to sendDocument", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "estacoda-telegram-other-"));
+    try {
+      const path = join(tempDir, "artifact.bin");
+      await writeFile(path, "bin");
+      const { adapter, calls } = createTelegramArtifactHarness();
+
+      await adapter.delivery.sendArtifact({ platform: "telegram", chatId: "123" }, {
+        id: "other-1",
+        path,
+        localPath: path,
+        kind: "other",
+        bytes: 3,
+        createdAt: new Date().toISOString()
+      });
+
+      expect(callsForArtifactMethod(calls, "sendDocument")).toHaveLength(1);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("delivery.sendArtifact passes HTTP document URLs as strings", async () => {
+    const { adapter, calls } = createTelegramArtifactHarness();
+
+    await adapter.delivery.sendArtifact({ platform: "telegram", chatId: "123" }, {
+      id: "remote-doc",
+      path: "https://example.com/file.pdf",
+      kind: "document",
+      bytes: 10,
+      createdAt: new Date().toISOString(),
+      mimeType: "application/pdf"
+    });
+
+    const form = formDataBody(callsForArtifactMethod(calls, "sendDocument")[0]);
+    expect(form.get("document")).toBe("https://example.com/file.pdf");
+  });
+
+  it("delivery.sendArtifact falls back to a text notice for unsupported HTTP document URLs", async () => {
+    const { adapter, calls } = createTelegramArtifactHarness({ failMethods: ["sendDocument"] });
+
+    await adapter.delivery.sendArtifact({ platform: "telegram", chatId: "123" }, {
+      id: "remote-text",
+      path: "https://example.com/file.txt",
+      kind: "document",
+      bytes: 10,
+      createdAt: new Date().toISOString(),
+      mimeType: "text/plain"
+    });
+
+    const fallback = jsonBody(callsForArtifactMethod(calls, "sendMessage")[0]);
+    expect(fallback.text).toContain("Artifact ready");
+    expect(fallback.text).toContain("Path: https://example.com/file.txt");
+  });
+
+  it("delivery.sendArtifact falls back to a text notice for oversized local documents", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "estacoda-telegram-large-"));
+    try {
+      const path = join(tempDir, "large.pdf");
+      await writeFile(path, "larger than one byte");
+      const { adapter, calls } = createTelegramArtifactHarness({ maxAttachmentBytes: 1 });
+
+      await adapter.delivery.sendArtifact({ platform: "telegram", chatId: "123" }, {
+        id: "large-doc",
+        path,
+        localPath: path,
+        kind: "document",
+        bytes: 20,
+        createdAt: new Date().toISOString(),
+        mimeType: "application/pdf"
+      });
+
+      expect(callsForArtifactMethod(calls, "sendDocument")).toHaveLength(0);
+      const fallback = jsonBody(callsForArtifactMethod(calls, "sendMessage")[0]);
+      expect(fallback.text).toContain("Artifact ready");
+      expect(fallback.text).toContain(`Path: ${path}`);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("delivery.sendArtifact falls back to a text notice when document upload fails", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "estacoda-telegram-doc-fail-"));
+    try {
+      const path = join(tempDir, "report.pdf");
+      await writeFile(path, "pdf");
+      const { adapter, calls } = createTelegramArtifactHarness({ failMethods: ["sendDocument"] });
+
+      await adapter.delivery.sendArtifact({ platform: "telegram", chatId: "123" }, {
+        id: "doc-fail",
+        path,
+        localPath: path,
+        kind: "document",
+        bytes: 3,
+        createdAt: new Date().toISOString(),
+        mimeType: "application/pdf"
+      });
+
+      const fallback = jsonBody(callsForArtifactMethod(calls, "sendMessage")[0]);
+      expect(fallback.text).toContain("Artifact ready");
+      expect(fallback.text).toContain(`Path: ${path}`);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("delivery.sendArtifact falls back to a text notice when video upload fails", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "estacoda-telegram-video-fail-"));
+    try {
+      const path = join(tempDir, "clip.mp4");
+      await writeFile(path, "video");
+      const { adapter, calls } = createTelegramArtifactHarness({ failMethods: ["sendVideo"] });
+
+      await adapter.delivery.sendArtifact({ platform: "telegram", chatId: "123" }, {
+        id: "video-fail",
+        path,
+        localPath: path,
+        kind: "video",
+        bytes: 5,
+        createdAt: new Date().toISOString(),
+        mimeType: "video/mp4"
+      });
+
+      const fallback = jsonBody(callsForArtifactMethod(calls, "sendMessage")[0]);
+      expect(fallback.text).toContain("Artifact ready");
+      expect(fallback.text).toContain(`Path: ${path}`);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
   });
 
   it("delivers voice-hinted OGG audio as a Telegram voice bubble", async () => {

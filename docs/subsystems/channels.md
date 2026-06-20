@@ -82,6 +82,7 @@ Adapters only render or normalize channel-specific transport events. They must n
 - Group sessions per-user by default
 - Thread sessions shared by default
 - Active chat → session mapping persists across gateway restarts
+- Artifact delivery uploads images, audio, documents, videos, data, and other file artifacts natively when possible; unsupported, oversized, pathless, or rejected uploads fall back to a text artifact notice.
 
 **Setup:**
 
