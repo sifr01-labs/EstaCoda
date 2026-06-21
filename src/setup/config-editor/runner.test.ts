@@ -499,6 +499,7 @@ describe("runConfigEditor", () => {
       group: "navigation",
     }));
     expect(input?.options.find((option) => option.id === "back")?.current).toBeUndefined();
+    expect(input?.options.find((option) => option.id === "back")?.badges).toBeUndefined();
   });
 
   it("shows current security and Agent Evolution state with current rows", async () => {
@@ -949,7 +950,7 @@ describe("runConfigEditor", () => {
     await writeUserConfig(tempDir, initialConfig);
     await trustWorkspace(tempDir, workspaceRoot);
     const promptTitles: string[] = [];
-    const prompt = fakePrompt({ values: ["back", "exit"] });
+    const prompt = fakePrompt({ values: ["Back", "exit"] });
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
       promptTitles.push(input.title);

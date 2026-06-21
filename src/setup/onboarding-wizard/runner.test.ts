@@ -56,7 +56,7 @@ async function readProfileConfig(homeDir: string): Promise<Record<string, unknow
 function browserPromptOverrides(modeLabel: string, extra: Record<string, FakePromptOverrideValue> = {}): Record<string, FakePromptOverrideValue> {
   return {
     [resolveSetupCopy("en", "onboarding.optionalCapabilities.title")]: true,
-    [resolveSetupCopy("en", "onboarding.optionalCapabilities.menu.title")]: "Configure browser",
+    [resolveSetupCopy("en", "onboarding.optionalCapabilities.menu.title")]: "Browser",
     [resolveSetupCopy("en", "setupEditor.prompt.browser.mode.title")]: modeLabel,
     [resolveSetupCopy("en", "onboarding.optionalCapabilities.more.title")]: false,
     ...extra,
@@ -1200,7 +1200,7 @@ describe("runFirstRunSetup", () => {
       prompt: fakePrompt({
         "Primary provider": "OpenAI",
         "Optional capabilities": "Yes",
-        "Configure optional capability": "Configure voice",
+        "Configure optional capability": "Voice",
         "Configure other capabilities now": "Skip",
       }, seenOptions),
       flowEngine: flowEngine({
@@ -1231,13 +1231,13 @@ describe("runFirstRunSetup", () => {
       "Vision and Image Generation",
     ]));
     expect(seenOptions["Configure optional capability"]).toEqual([
-      "Configure channels",
-      "Configure voice",
-      "Configure browser",
+      "Channels",
+      "Voice",
+      "Browser",
       "Search",
       "Skip",
     ]);
-    expect(seenOptions["Configure optional capability"]).not.toContain("Configure image generation");
+    expect(seenOptions["Configure optional capability"]).not.toContain("Image generation");
     expect(result.selections.primaryProvider).toBe("openai");
     expect(result.selections.primaryModel).toBe("gpt-5.5");
     expect(result.selections.optionalCapabilities).toEqual(["voice"]);
@@ -1516,7 +1516,7 @@ describe("runFirstRunSetup", () => {
       workspaceRoot,
       prompt: fakePrompt({
         "Optional capabilities": "Yes",
-        "Configure optional capability": ["Configure channels", "Configure browser"],
+        "Configure optional capability": ["Channels", "Browser"],
         "Configure other capabilities now": ["Yes", "Skip"],
         [resolveSetupCopy("en", "setupEditor.prompt.browser.mode.title")]: resolveSetupCopy("en", "setupEditor.prompt.browser.mode.localSupervised"),
         [resolveSetupCopy("en", "setupEditor.prompt.browser.local.title")]: resolveSetupCopy("en", "setupEditor.prompt.browser.autoLaunch.yes"),
@@ -1542,7 +1542,7 @@ describe("runFirstRunSetup", () => {
       workspaceRoot,
       prompt: fakePrompt({
         "Optional capabilities": "Yes",
-        "Configure optional capability": ["Configure browser", "Skip"],
+        "Configure optional capability": ["Browser", "Skip"],
         "Configure other capabilities now": "Yes",
         [resolveSetupCopy("en", "setupEditor.prompt.browser.mode.title")]: resolveSetupCopy("en", "setupEditor.prompt.browser.mode.localSupervised"),
         [resolveSetupCopy("en", "setupEditor.prompt.browser.local.title")]: resolveSetupCopy("en", "setupEditor.prompt.browser.autoLaunch.yes"),
@@ -1553,8 +1553,8 @@ describe("runFirstRunSetup", () => {
 
     expect(result.selections.optionalCapabilities).toEqual(["browser"]);
     expect(seenOptions["Configure optional capability"]).toEqual([
-      "Configure channels",
-      "Configure voice",
+      "Channels",
+      "Voice",
       "Search",
       "Skip",
     ]);
@@ -2001,7 +2001,7 @@ describe("runFirstRunSetup", () => {
       workspaceRoot,
       prompt: fakePrompt({
         "Optional capabilities": "Yes",
-        "Configure optional capability": "Configure voice",
+        "Configure optional capability": "Voice",
         "Configure other capabilities now": "Skip",
         __prompt: ["", ""],
       }),
@@ -2027,7 +2027,7 @@ describe("runFirstRunSetup", () => {
       workspaceRoot,
       prompt: fakePrompt({
         "Optional capabilities": "Yes",
-        "Configure optional capability": "Configure voice",
+        "Configure optional capability": "Voice",
         "Configure voice": "Set Text to Speech (TTS) Provider",
         "Configure other capabilities now": "Skip",
         __prompt: ["", ""],
@@ -2059,7 +2059,7 @@ describe("runFirstRunSetup", () => {
       workspaceRoot,
       prompt: fakePrompt({
         "Optional capabilities": "Yes",
-        "Configure optional capability": "Configure voice",
+        "Configure optional capability": "Voice",
         "Configure voice": "Set Speech to Text (STT) Provider",
         "Voice": "Local (via faster-whisper)",
         "Configure STT": "base",
@@ -2094,7 +2094,7 @@ describe("runFirstRunSetup", () => {
       workspaceRoot,
       prompt: fakePrompt({
         "Optional capabilities": "Yes",
-        "Configure optional capability": ["Configure voice", "Configure voice"],
+        "Configure optional capability": ["Voice", "Voice"],
         "Configure voice": ["Set Speech to Text (STT) Provider", "Set Text to Speech (TTS) Provider"],
         "Voice": ["Local (via faster-whisper)", "openai"],
         "Configure STT": "base",
@@ -2180,6 +2180,7 @@ describe("runFirstRunSetup", () => {
     expect(result.selections.language).toBe("ar");
     expect(result.selections.interfaceFlavor).toBe("arabic-light");
     expect(result.selections.activityLabels).toBe("ar");
+    expect(seenOptions["Setup language"]).toEqual(["English", "العربية"]);
     expect(seenOptions[resolveSetupCopy("ar", "onboarding.interfaceStyle.title")]).toBeUndefined();
     const selectedWorkspaceRoot = result.selections.workspaceRoot;
     expect(selectedWorkspaceRoot).toBeDefined();
@@ -2222,7 +2223,7 @@ describe("runFirstRunSetup", () => {
     const promptOrder: string[] = [];
     const prompt = fakePrompt({
       "Optional capabilities": "Yes",
-      "Configure optional capability": "Configure channels",
+      "Configure optional capability": "Channels",
       [gatewayServiceActivationPromptTitle]: "Yes",
       [resolveSetupCopy("en", "onboarding.launch.startNow")]: "No",
       __prompt: ["", "42", ""],
@@ -2269,7 +2270,7 @@ describe("runFirstRunSetup", () => {
       workspaceRoot,
       prompt: fakePrompt({
         "Optional capabilities": "Yes",
-        "Configure optional capability": "Configure channels",
+        "Configure optional capability": "Channels",
         [gatewayServiceActivationPromptTitle]: "Not now",
         [resolveSetupCopy("en", "onboarding.launch.startNow")]: "No",
         __prompt: ["", "42", ""],
@@ -2370,7 +2371,7 @@ describe("runFirstRunSetup", () => {
     const promptTitles: string[] = [];
     const prompt = fakePrompt({
       "Optional capabilities": "Yes",
-      "Configure optional capability": "Configure channels",
+      "Configure optional capability": "Channels",
       [resolveSetupCopy("en", "onboarding.launch.startNow")]: "No",
       __prompt: ["", "", ""],
       __secret: "123456:telegram-token",
@@ -2401,7 +2402,7 @@ describe("runFirstRunSetup", () => {
     const promptTitles: string[] = [];
     const prompt = fakePrompt({
       "Optional capabilities": "Yes",
-      "Configure optional capability": "Configure channels",
+      "Configure optional capability": "Channels",
       __prompt: ["", "42", ""],
       __secret: "123456:telegram-token",
     });

@@ -28,6 +28,10 @@ export type SetupChoice<T> = {
   readonly value: T;
 };
 
+export type SetupChoiceResult<T> =
+  | { readonly kind: "selected"; readonly value: T }
+  | { readonly kind: "back" };
+
 export type SetupChoiceColumn = {
   readonly key: string;
   readonly header: string;
@@ -73,7 +77,7 @@ const REVIEW_SECTION_COPY_KEYS: Record<SetupReviewManifestSection, SetupCopyKey>
 
 type SetupPromptTarget = Prompt | SetupPromptContext;
 
-export async function promptSetupChoice<T>(target: SetupPromptTarget, input: {
+export type PromptSetupChoiceInput<T> = {
   readonly title: string;
   readonly message: string;
   readonly bodyLineStyles?: readonly PromptCardBodyLineStyle[];
@@ -84,7 +88,14 @@ export async function promptSetupChoice<T>(target: SetupPromptTarget, input: {
   readonly hint?: string;
   readonly showCurrentBadge?: boolean;
   readonly showColumnHeaders?: boolean;
-}): Promise<T> {
+};
+
+const SETUP_BACK_CHOICE_VALUE = Symbol("setup-back-choice");
+
+export async function promptSetupChoice<T>(
+  target: SetupPromptTarget,
+  input: PromptSetupChoiceInput<T>
+): Promise<T> {
   if (input.choices.length === 0) {
     throw new Error(`${input.title} has no choices.`);
   }
@@ -124,6 +135,36 @@ export async function promptSetupChoice<T>(target: SetupPromptTarget, input: {
   const raw = await prompt(`${input.message}${options}\nChoose [${(defaultIndex === -1 ? 0 : defaultIndex) + 1}]: `);
   const selectedIndex = Number.parseInt(raw.trim(), 10) - 1;
   return input.choices[selectedIndex]?.value ?? input.choices[defaultIndex === -1 ? 0 : defaultIndex]!.value;
+}
+
+export async function promptSetupChoiceResult<T>(
+  target: SetupPromptTarget,
+  input: PromptSetupChoiceInput<T> & {
+    readonly allowBack?: boolean;
+  }
+): Promise<SetupChoiceResult<T>> {
+  const { uiContext } = resolveSetupPromptTarget(target);
+  const choices: readonly SetupChoice<T | typeof SETUP_BACK_CHOICE_VALUE>[] = input.allowBack === true
+    ? [...input.choices, setupBackChoice(uiContext.locale)]
+    : input.choices;
+  const selected = await promptSetupChoice<T | typeof SETUP_BACK_CHOICE_VALUE>(target, {
+    ...input,
+    choices,
+    defaultValue: input.defaultValue,
+  });
+  if (selected === SETUP_BACK_CHOICE_VALUE) {
+    return { kind: "back" };
+  }
+  return { kind: "selected", value: selected };
+}
+
+function setupBackChoice(locale: SetupCopyLocale): SetupChoice<typeof SETUP_BACK_CHOICE_VALUE> {
+  return setupNavigationChoice({
+    id: "back",
+    label: locale === "ar" ? "رجوع" : "Back",
+    description: setupCopyText(locale, "onboarding.providers.navigation.back.description"),
+    value: SETUP_BACK_CHOICE_VALUE,
+  });
 }
 
 export function setupChoiceColumns(locale: SetupCopyLocale): readonly SetupChoiceColumn[] {

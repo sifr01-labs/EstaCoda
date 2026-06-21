@@ -3,10 +3,10 @@ import type { ActivityLabelsLocale, UiFlavor, UiLanguage } from "../config/runti
 import type { SetupCopyKey, SetupCopyLocale } from "./setup-copy.js";
 import {
   promptSetupChoice,
+  promptSetupChoiceResult,
   setupPromptContext,
   setupCopyText,
   setupCurrentStatusLines,
-  setupNavigationChoice,
   type SetupChoice,
 } from "./setup-prompts.js";
 
@@ -49,8 +49,7 @@ export async function promptInterfaceLanguageAndStyle(
 ): Promise<InterfaceLanguageAndStyleSelection | InterfaceLanguageAndStylePromptResult> {
   const initialLocale = input.initialLocale ?? input.currentLanguage ?? "en";
   const defaultLanguage = input.currentLanguage ?? "en";
-  type LanguageChoiceValue = UiLanguage | "back";
-  const languageChoices: SetupChoice<LanguageChoiceValue>[] = [
+  const languageChoices: SetupChoice<UiLanguage>[] = [
     {
       id: "en",
       label: setupCopyText(initialLocale, "onboarding.interfaceLanguage.options.en.label"),
@@ -65,17 +64,9 @@ export async function promptInterfaceLanguageAndStyle(
       value: "ar" as const,
       current: input.showCurrentState === true && defaultLanguage === "ar",
     },
-    ...(input.allowBack === true
-      ? [setupNavigationChoice({
-          id: "back",
-          label: initialLocale === "ar" ? "رجوع" : "Back",
-          description: setupCopyText(initialLocale, "onboarding.providers.navigation.back.description"),
-          value: "back" as const,
-        })]
-      : []),
   ];
   const currentLanguageLabel = languageChoices.find((choice) => choice.value === defaultLanguage)?.label;
-  const language = await promptSetupChoice(setupPromptContext(prompt, initialLocale), {
+  const languagePrompt = {
     title: setupCopyText(initialLocale, "onboarding.interfaceLanguage.title"),
     message: `${setupCopyText(initialLocale, "onboarding.interfaceLanguage")}\n`,
     statusLines: setupCurrentStatusLines(
@@ -85,9 +76,17 @@ export async function promptInterfaceLanguageAndStyle(
     showCurrentBadge: input.showCurrentState === true ? false : undefined,
     choices: languageChoices,
     defaultValue: defaultLanguage,
-  });
-  if (language === "back") {
-    return { kind: "back" };
+  };
+  let language: UiLanguage;
+  if (input.allowBack === true) {
+    const result = await promptSetupChoiceResult(setupPromptContext(prompt, initialLocale), {
+      ...languagePrompt,
+      allowBack: true,
+    });
+    if (result.kind === "back") return result;
+    language = result.value;
+  } else {
+    language = await promptSetupChoice(setupPromptContext(prompt, initialLocale), languagePrompt);
   }
 
   const style = defaultInterfacePreferencesForLanguage(language);

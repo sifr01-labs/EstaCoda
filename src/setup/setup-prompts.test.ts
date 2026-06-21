@@ -5,6 +5,7 @@ import { isolateLtr, isolateRtl } from "../ui/bidi.js";
 import type { SetupVerificationReport } from "./verification.js";
 import {
   promptSetupChoice,
+  promptSetupChoiceResult,
   promptSetupYesNo,
   renderSetupApplyEndState,
   setupChoiceColumns,
@@ -49,6 +50,67 @@ describe("setup prompt context", () => {
     expect(seen?.columns).toBeUndefined();
     expect(seen?.hint).toBe("↑↓ navigate   ENTER select   CTRL+C exit");
     expect(seen?.options[0]?.id).toBe("yes");
+  });
+
+  it("returns a structured Back result only when explicitly enabled", async () => {
+    let seen: SelectPromptInput<string | symbol> | undefined;
+    const prompt = Object.assign(
+      async () => "",
+      {
+        select: async <T>(input: SelectPromptInput<T>): Promise<T> => {
+          seen = input as SelectPromptInput<string | symbol>;
+          return input.options.find((option) => option.id === "back")!.value;
+        },
+        close: () => undefined,
+      }
+    ) as Prompt;
+
+    const result = await promptSetupChoiceResult(setupPromptContext(prompt, "en"), {
+      title: "Choose mode",
+      message: "Pick a mode.\n",
+      choices: [
+        { id: "alpha", label: "Alpha", description: "First option", value: "alpha" },
+      ],
+      defaultValue: "alpha",
+      allowBack: true,
+    });
+
+    expect(result).toEqual({ kind: "back" });
+    expect(seen?.options.map((option) => option.id)).toEqual(["alpha", "back"]);
+    expect(seen?.options[1]).toMatchObject({
+      id: "back",
+      label: "Back",
+      description: "Return to the previous step.",
+      group: "navigation",
+    });
+    expect(seen?.options[1]?.current).toBeUndefined();
+    expect(seen?.options[1]?.badges).toBeUndefined();
+  });
+
+  it("keeps structured setup choice results selected-only when Back is disabled", async () => {
+    let seen: SelectPromptInput<string> | undefined;
+    const prompt = Object.assign(
+      async () => "",
+      {
+        select: async <T>(input: SelectPromptInput<T>): Promise<T> => {
+          seen = input as SelectPromptInput<string>;
+          return input.options[0]!.value;
+        },
+        close: () => undefined,
+      }
+    ) as Prompt;
+
+    const result = await promptSetupChoiceResult(setupPromptContext(prompt, "ar"), {
+      title: "اختر",
+      message: "اختر.\n",
+      choices: [
+        { id: "alpha", label: "الأول", value: "alpha" },
+      ],
+      defaultValue: "alpha",
+    });
+
+    expect(result).toEqual({ kind: "selected", value: "alpha" });
+    expect(seen?.options.map((option) => option.id)).toEqual(["alpha"]);
   });
 
   it("passes opt-in prompt-card fields through setup choice selectors", async () => {
