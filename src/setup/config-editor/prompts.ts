@@ -18,6 +18,7 @@ import {
   setupPromptWithDefault,
   setupPromptContext,
   setupTechnicalToken,
+  setupChoiceColumns,
   showSetupCard,
   setupTelegramAllowedChatIdsQuestion,
   setupTelegramAllowedUserIdsQuestion,
@@ -95,6 +96,7 @@ export async function promptConfigEditorAction(
   return promptSetupChoice(prompt, {
     title: setupCopyText(locale, "setupEditor.prompt.action.title"),
     message: `${setupCopyText(locale, "setupEditor.prompt.action.body")}\n`,
+    columns: setupChoiceColumns(locale),
     choices: actions.map((action) => ({
       id: action.id,
       label: action.label,
@@ -317,6 +319,7 @@ export async function promptChannelCapability(
   return promptSetupChoice(prompt, {
     title: setupCopyText(locale, "setupEditor.prompt.channels.title"),
     message: `${setupCopyText(locale, "setupEditor.prompt.channels.body")}\n`,
+    columns: setupChoiceColumns(locale),
     choices: [
       {
         id: "channel-telegram",
@@ -393,6 +396,7 @@ export async function promptWebSearchCapability(
   const provider = await promptSetupChoice<WebSearchProviderChoice>(prompt, {
     title: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.title"),
     message: `${setupCopyText(locale, "setupEditor.prompt.webSearch.provider.body")}\n`,
+    columns: setupChoiceColumns(locale),
     choices: [
       {
         id: "web-search-brave",
@@ -511,6 +515,7 @@ export async function promptAuxiliaryModelTask(
   return promptSetupChoice(prompt, {
     title: setupCopyText(locale, "setupEditor.prompt.auxiliaryRoute.title"),
     message: `${setupCopyText(locale, "setupEditor.prompt.auxiliaryRoute.body")}\n`,
+    columns: setupChoiceColumns(locale),
     choices: [
       {
         id: "assessor",
@@ -620,6 +625,7 @@ export async function promptOptionalCapabilityAction(
   return promptSetupChoice(prompt, {
     title: input.title,
     message: `${input.title}\n`,
+    columns: setupChoiceColumns(locale),
     choices: [
       {
         id: `${input.id}-enable`,
@@ -826,6 +832,7 @@ export async function promptIncompleteChannelCapabilityAction(
       setupCopyText(locale, input.bodyKey),
       "",
     ].join("\n"),
+    columns: setupChoiceColumns(locale),
     choices: [
       {
         id: "channel-incomplete-retry",
@@ -861,6 +868,7 @@ export async function promptIncompleteTelegramCapabilityAction(
       setupCopyText(locale, "setupEditor.prompt.telegram.incomplete.body"),
       "",
     ].join("\n"),
+    columns: setupChoiceColumns(locale),
     choices: [
       {
         id: "telegram-incomplete-retry",
@@ -892,6 +900,7 @@ export async function promptVoiceCapability(
   return promptSetupChoice(prompt, {
     title: setupCopyText(locale, "setupEditor.prompt.voice.mode.title"),
     message: `${setupCopyText(locale, "setupEditor.prompt.voice.mode.body")}\n`,
+    columns: setupChoiceColumns(locale),
     choices: [
       {
         id: "voice-stt",
@@ -926,6 +935,7 @@ export async function promptTtsCapability(
   const ttsProvider = await promptSetupChoice(prompt, {
     title: setupCopyText(locale, "setupModules.voice.title"),
     message: `${setupCopyText(locale, "setupEditor.prompt.voice.summary")}\n${setupCopyText(locale, "setupEditor.prompt.voice.ttsProvider")}\n`,
+    columns: setupChoiceColumns(locale),
     choices: ttsProviders.map((provider) => ({
       id: `tts-${provider}`,
       label: provider,
@@ -967,6 +977,7 @@ export async function promptSttCapability(
   const sttProvider = await promptSetupChoice(prompt, {
     title: setupCopyText(locale, "setupModules.voice.title"),
     message: `${setupCopyText(locale, "setupEditor.prompt.voice.summary")}\n${setupCopyText(locale, "setupEditor.prompt.voice.sttProvider")}\n`,
+    columns: setupChoiceColumns(locale),
     choices: sttProviders.map((provider) => ({
       id: `stt-${provider}`,
       label: provider === "local" ? setupCopyText(locale, "setupEditor.prompt.voice.sttProvider.local") : provider,
@@ -983,6 +994,7 @@ export async function promptSttCapability(
     sttModel = await promptSetupChoice(prompt, {
       title: setupCopyText(locale, "setupEditor.prompt.voice.localModel.title"),
       message: `${setupCopyText(locale, "setupEditor.prompt.voice.localModel")}\n`,
+      columns: setupChoiceColumns(locale),
       choices: localSttModelChoices(locale),
       defaultValue: defaultLocalModel,
     });
@@ -1062,6 +1074,7 @@ export async function promptVisionCapability(
   const provider = await promptSetupChoice(prompt, {
     title: setupCopyText(locale, "setupModules.vision.title"),
     message: `${setupCopyText(locale, "setupEditor.prompt.vision.summary")}\n${setupCopyText(locale, "setupEditor.prompt.vision.provider")}\n`,
+    columns: setupChoiceColumns(locale),
     choices: imageProviders.map((candidate) => ({
       id: candidate,
       label: candidate,
@@ -1133,6 +1146,7 @@ export async function promptBrowserCapability(
   const mode = await promptSetupChoice(prompt, {
     title: setupCopyText(locale, "setupEditor.prompt.browser.mode.title"),
     message: `${setupCopyText(locale, "setupEditor.prompt.browser.mode.body")}\n`,
+    columns: setupChoiceColumns(locale),
     choices: [
       {
         id: "browser-recommended",

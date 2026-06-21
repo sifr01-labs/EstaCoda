@@ -9,10 +9,29 @@ import type { ProviderId, ProviderApiMode, ProviderAuthMethod } from "../../cont
 import type { FlowEngine } from "../../providers/provider-model-selection-flow.js";
 import { createReviewedSetupApplyExecutor } from "../review/apply-executor.js";
 import { __decideConfigEditorLoopForTest, runConfigEditor } from "./runner.js";
-import { promptBrowserCapability, promptedBrowserCapabilityMode, setupEditorReviewSelectedAreaLabel } from "./prompts.js";
+import {
+  promptAuxiliaryModelTask,
+  promptBrowserCapability,
+  promptChannelCapability,
+  promptConfigEditorAction,
+  promptConfigEditorPostApplyAction,
+  promptConfigEditorReviewApproval,
+  promptIncompleteChannelCapabilityAction,
+  promptIncompleteTelegramCapabilityAction,
+  promptOptionalCapabilityAction,
+  promptedBrowserCapabilityMode,
+  promptSttCapability,
+  promptTtsCapability,
+  promptVisionCapability,
+  promptVoiceCapability,
+  promptWebSearchCapability,
+  promptWorkspaceTrustConfirmation,
+  setupEditorReviewSelectedAreaLabel,
+} from "./prompts.js";
 import type { SetupReviewManifest } from "../setup-review-manifest.js";
 import type { SetupRouteDecision } from "../setup-router.js";
 import { resolveProfileStateHome, writeActiveProfile } from "../../config/profile-home.js";
+import { promptInterfaceLanguageAndStyle } from "../interface-preferences.js";
 import { isolateLtr } from "../../ui/bidi.js";
 import {
   gatewayServiceActivationNotNowGuidance,
@@ -162,6 +181,177 @@ describe("runConfigEditor", () => {
     expect(prompts[0]?.body).toBe("اختار اللي تحب تضبطه.");
     expect(prompts[0]?.labels).toContain("اخرج بدون تغييرات");
     expect(prompts[0]?.descriptions).toContain("اخرج من الإعداد من غير تعديل أي شيء.");
+  });
+
+  it("opts comparative setup editor selectors into columns without changing selected values", async () => {
+    const prompt = fakePrompt({
+      values: [
+        "configure-channels",
+        "whatsapp",
+        "brave",
+        "compression",
+        "tts",
+        "openai",
+        "",
+        "",
+        "local",
+        "small",
+        "fal",
+        "",
+        "",
+        false,
+        "disabled",
+        "unchanged",
+        "skip",
+        "unchanged",
+      ],
+    });
+    const selectInputs: SelectPromptInput<unknown>[] = [];
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      selectInputs.push(input as SelectPromptInput<unknown>);
+      return baseSelect(input);
+    };
+
+    const selectedAction = await promptConfigEditorAction(prompt, [
+      {
+        id: "configure-channels",
+        label: "Configure channels",
+        description: "Configure remote-control channels.",
+        readOnly: false,
+        source: "editor",
+      },
+    ]);
+    const channel = await promptChannelCapability(prompt);
+    const webSearch = await promptWebSearchCapability(prompt, { ddgsCapabilityStatus: "ready" });
+    const auxiliaryTask = await promptAuxiliaryModelTask(prompt);
+    const voiceMode = await promptVoiceCapability(prompt);
+    const tts = await promptTtsCapability(prompt, {});
+    const stt = await promptSttCapability(prompt, {});
+    const vision = await promptVisionCapability(prompt, {});
+    const browser = await promptBrowserCapability(prompt, {});
+    const optionalAction = await promptOptionalCapabilityAction(prompt, {
+      id: "voice",
+      title: "Voice",
+      configured: false,
+    });
+    const incompleteChannelAction = await promptIncompleteChannelCapabilityAction(prompt, {
+      title: "WhatsApp beta",
+      bodyKey: "setupEditor.prompt.whatsapp.incomplete.body",
+    });
+    const incompleteTelegramAction = await promptIncompleteTelegramCapabilityAction(prompt);
+
+    expect(selectedAction?.id).toBe("configure-channels");
+    expect(channel).toBe("whatsapp");
+    expect(webSearch).toEqual({ provider: "brave", braveApiKeyEnv: "BRAVE_SEARCH_API_KEY" });
+    expect(auxiliaryTask).toBe("compression");
+    expect(voiceMode).toBe("tts");
+    expect(tts.ttsProvider).toBe("openai");
+    expect(stt.sttProvider).toBe("local");
+    expect(stt.sttModel).toBe("small");
+    expect(vision.provider).toBe("fal");
+    expect(vision.useGateway).toBe(false);
+    expect(browser.backend).toBe("unconfigured");
+    expect(optionalAction).toBe("unchanged");
+    expect(incompleteChannelAction).toBe("skip");
+    expect(incompleteTelegramAction).toBe("unchanged");
+
+    const columnTitles = selectInputs
+      .filter((input) => input.columns !== undefined)
+      .map((input) => input.title);
+    expect(columnTitles).toEqual([
+      "Setup editor",
+      "Choose channel",
+      "Search provider",
+      "Choose auxiliary model.",
+      "Configure voice",
+      "Voice",
+      "Voice",
+      "Configure STT",
+      "Vision and Image Generation",
+      "Browser configuration",
+      "Voice",
+      "WhatsApp beta",
+      "Telegram",
+    ]);
+    for (const input of selectInputs.filter((item) => item.columns !== undefined)) {
+      expect(input.columns).toEqual([
+        { key: "name", header: "Name" },
+        { key: "description", header: "Details" },
+      ]);
+      expect(input.options.every((option) => option.cells === undefined)).toBe(true);
+    }
+    expect(selectInputs.find((input) =>
+      input.title === "Image generation" &&
+      input.options.some((option) => option.id === "gateway-no")
+    )?.columns).toBeUndefined();
+  });
+
+  it("keeps language and confirmation setup prompts stacked", async () => {
+    const prompt = fakePrompt({
+      values: [
+        "ar",
+        false,
+        false,
+        "exit",
+        "ddgs",
+        false,
+        "local-supervised",
+        false,
+        "",
+        "",
+        "",
+        "",
+        "fal",
+        "",
+        "",
+        true,
+      ],
+    });
+    const selectInputs: SelectPromptInput<unknown>[] = [];
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      selectInputs.push(input as SelectPromptInput<unknown>);
+      return baseSelect(input);
+    };
+
+    const language = await promptInterfaceLanguageAndStyle(prompt);
+    const trust = await promptWorkspaceTrustConfirmation(prompt, {
+      workspaceRoot,
+      trustStorePath: join(tempDir, ".estacoda", "trust.json"),
+    });
+    const review = await promptConfigEditorReviewApproval(prompt, {
+      selectedActionId: "edit-security-mode",
+      reviewManifest: minimalManifest(),
+    });
+    const postApply = await promptConfigEditorPostApplyAction(prompt, {
+      state: "ready",
+      launchEligible: false,
+      limitedModeEligible: false,
+    });
+    const ddgs = await promptWebSearchCapability(prompt, { ddgsCapabilityStatus: "missing" });
+    const browser = await promptBrowserCapability(prompt, {});
+    const vision = await promptVisionCapability(prompt, {});
+
+    expect(language.language).toBe("ar");
+    expect(trust).toBe(false);
+    expect(review).toBe(false);
+    expect(postApply).toBe("exit");
+    expect(ddgs).toEqual({ provider: "ddgs", ddgsSetupConfirmed: false });
+    expect(browser.backend).toBe("local-cdp");
+    expect(browser.autoLaunch).toBe(false);
+    expect(vision.useGateway).toBe(true);
+
+    expect(selectInputs.find((input) => input.title === "Interface language")?.columns).toBeUndefined();
+    expect(selectInputs.find((input) => input.title === "Workspace trust")?.columns).toBeUndefined();
+    expect(selectInputs.find((input) => input.title === "Finalize configuration")?.columns).toBeUndefined();
+    expect(selectInputs.find((input) => input.title === "Setup next action")?.columns).toBeUndefined();
+    expect(selectInputs.find((input) => input.title === "Install DDGS Search support")?.columns).toBeUndefined();
+    expect(selectInputs.find((input) => input.title === "Local supervised browser")?.columns).toBeUndefined();
+    expect(selectInputs.find((input) =>
+      input.title === "Image generation" &&
+      input.options.some((option) => option.id === "gateway-yes")
+    )?.columns).toBeUndefined();
   });
 
   it("prepares the read-only verification route without applying changes", async () => {
