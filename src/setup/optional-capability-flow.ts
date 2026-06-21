@@ -42,8 +42,13 @@ import {
   promptVisionCapability,
   promptWebSearchCapability,
   promptWhatsAppCapability,
+  type BrowserCapabilityResult,
   type OptionalCapabilityPromptId,
+  type SttCapabilityResult,
+  type TtsCapabilityResult,
+  type VisionCapabilityResult,
   type VoiceCapabilityPromptId,
+  type WebSearchCapabilityResult,
 } from "./config-editor/prompts.js";
 
 export type OptionalCapabilityModule =
@@ -70,6 +75,10 @@ export type OptionalCapabilityCollectionResult =
   | {
       readonly kind: "skip" | "unchanged";
     };
+
+export type OptionalCapabilityCollectionBackResult = {
+  readonly kind: "back";
+};
 
 export type OptionalCapabilityContextOptions = {
   readonly homeDir?: string;
@@ -224,6 +233,26 @@ export function channelCapabilityModule(moduleId: "telegram" | "whatsapp" | "dis
   }
 }
 
+export function collectOptionalCapabilityContext(
+  options: OptionalCapabilityContextOptions & {
+    readonly prompt: Prompt;
+    readonly locale: SetupCopyLocale;
+  },
+  baseContext: SetupModuleContext,
+  module: OptionalCapabilityModule,
+  voiceMode: VoiceCapabilityPromptId | undefined,
+  navigation: { readonly allowBack: true }
+): Promise<OptionalCapabilityCollectionResult | OptionalCapabilityCollectionBackResult>;
+export function collectOptionalCapabilityContext(
+  options: OptionalCapabilityContextOptions & {
+    readonly prompt: Prompt;
+    readonly locale: SetupCopyLocale;
+  },
+  baseContext: SetupModuleContext,
+  module: OptionalCapabilityModule,
+  voiceMode?: VoiceCapabilityPromptId,
+  navigation?: { readonly allowBack?: false }
+): Promise<OptionalCapabilityCollectionResult>;
 export async function collectOptionalCapabilityContext(
   options: OptionalCapabilityContextOptions & {
     readonly prompt: Prompt;
@@ -231,8 +260,9 @@ export async function collectOptionalCapabilityContext(
   },
   baseContext: SetupModuleContext,
   module: OptionalCapabilityModule,
-  voiceMode?: VoiceCapabilityPromptId
-): Promise<OptionalCapabilityCollectionResult> {
+  voiceMode?: VoiceCapabilityPromptId,
+  navigation: { readonly allowBack?: boolean } = {}
+): Promise<OptionalCapabilityCollectionResult | OptionalCapabilityCollectionBackResult> {
   switch (module.id) {
     case "telegram": {
       for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -342,8 +372,11 @@ export async function collectOptionalCapabilityContext(
         throw new Error("Configure voice must select STT or TTS before collecting provider settings.");
       }
       const values = voiceMode === "stt"
-        ? await promptSttCapability(options.prompt, baseContext.voice ?? {}, options.locale)
-        : await promptTtsCapability(options.prompt, baseContext.voice ?? {}, options.locale);
+        ? await promptSttCapabilityWithOptionalBack(options, baseContext.voice ?? {}, navigation)
+        : await promptTtsCapabilityWithOptionalBack(options, baseContext.voice ?? {}, navigation);
+      if (isOptionalCapabilityBack(values)) {
+        return values;
+      }
       return {
         kind: "configured",
         context: {
@@ -353,7 +386,10 @@ export async function collectOptionalCapabilityContext(
       };
     }
     case "vision": {
-      const values = await promptVisionCapability(options.prompt, baseContext.vision ?? {}, options.locale);
+      const values = await promptVisionCapabilityWithOptionalBack(options, baseContext.vision ?? {}, navigation);
+      if (isOptionalCapabilityBack(values)) {
+        return values;
+      }
       return {
         kind: "configured",
         context: {
@@ -364,10 +400,13 @@ export async function collectOptionalCapabilityContext(
     }
     case "web-search": {
       const ddgsCapabilityStatus = await detectDdgsCapabilityStatus(options);
-      const values = await promptWebSearchCapability(options.prompt, {
+      const values = await promptWebSearchCapabilityWithOptionalBack(options, {
         ...baseContext.web,
         ddgsCapabilityStatus,
-      }, options.locale);
+      }, navigation);
+      if (isOptionalCapabilityBack(values)) {
+        return values;
+      }
 
       if (values.provider === "none") {
         return { kind: "skip" };
@@ -423,7 +462,10 @@ export async function collectOptionalCapabilityContext(
       };
     }
     case "browser": {
-      const values = await promptBrowserCapability(options.prompt, baseContext.browser ?? {}, options.locale);
+      const values = await promptBrowserCapabilityWithOptionalBack(options, baseContext.browser ?? {}, navigation);
+      if (isOptionalCapabilityBack(values)) {
+        return values;
+      }
       const browserbaseCredentials = values.backend === "browserbase"
         ? await collectBrowserbaseCredentials(options)
         : undefined;
@@ -451,6 +493,80 @@ export async function collectOptionalCapabilityContext(
     default:
       throw new Error(`Unsupported optional capability module: ${module.id}`);
   }
+}
+
+function isOptionalCapabilityBack(value: unknown): value is OptionalCapabilityCollectionBackResult {
+  return typeof value === "object" && value !== null && "kind" in value && value.kind === "back";
+}
+
+async function promptTtsCapabilityWithOptionalBack(
+  options: OptionalCapabilityContextOptions & {
+    readonly prompt: Prompt;
+    readonly locale: SetupCopyLocale;
+  },
+  current: NonNullable<SetupModuleContext["voice"]> | Record<string, never>,
+  navigation: { readonly allowBack?: boolean }
+): Promise<TtsCapabilityResult | OptionalCapabilityCollectionBackResult> {
+  if (navigation.allowBack === true) {
+    return promptTtsCapability(options.prompt, current, options.locale, { allowBack: true });
+  }
+  return promptTtsCapability(options.prompt, current, options.locale);
+}
+
+async function promptSttCapabilityWithOptionalBack(
+  options: OptionalCapabilityContextOptions & {
+    readonly prompt: Prompt;
+    readonly locale: SetupCopyLocale;
+  },
+  current: NonNullable<SetupModuleContext["voice"]> | Record<string, never>,
+  navigation: { readonly allowBack?: boolean }
+): Promise<SttCapabilityResult | OptionalCapabilityCollectionBackResult> {
+  if (navigation.allowBack === true) {
+    return promptSttCapability(options.prompt, current, options.locale, { allowBack: true });
+  }
+  return promptSttCapability(options.prompt, current, options.locale);
+}
+
+async function promptVisionCapabilityWithOptionalBack(
+  options: OptionalCapabilityContextOptions & {
+    readonly prompt: Prompt;
+    readonly locale: SetupCopyLocale;
+  },
+  current: NonNullable<SetupModuleContext["vision"]> | Record<string, never>,
+  navigation: { readonly allowBack?: boolean }
+): Promise<VisionCapabilityResult | OptionalCapabilityCollectionBackResult> {
+  if (navigation.allowBack === true) {
+    return promptVisionCapability(options.prompt, current, options.locale, { allowBack: true });
+  }
+  return promptVisionCapability(options.prompt, current, options.locale);
+}
+
+async function promptWebSearchCapabilityWithOptionalBack(
+  options: OptionalCapabilityContextOptions & {
+    readonly prompt: Prompt;
+    readonly locale: SetupCopyLocale;
+  },
+  current: NonNullable<SetupModuleContext["web"]>,
+  navigation: { readonly allowBack?: boolean }
+): Promise<WebSearchCapabilityResult | OptionalCapabilityCollectionBackResult> {
+  if (navigation.allowBack === true) {
+    return promptWebSearchCapability(options.prompt, current, options.locale, { allowBack: true });
+  }
+  return promptWebSearchCapability(options.prompt, current, options.locale);
+}
+
+async function promptBrowserCapabilityWithOptionalBack(
+  options: OptionalCapabilityContextOptions & {
+    readonly prompt: Prompt;
+    readonly locale: SetupCopyLocale;
+  },
+  current: NonNullable<SetupModuleContext["browser"]> | Record<string, never>,
+  navigation: { readonly allowBack?: boolean }
+): Promise<BrowserCapabilityResult | OptionalCapabilityCollectionBackResult> {
+  if (navigation.allowBack === true) {
+    return promptBrowserCapability(options.prompt, current, options.locale, { allowBack: true });
+  }
+  return promptBrowserCapability(options.prompt, current, options.locale);
 }
 
 async function collectBrowserbaseCredentials(options: OptionalCapabilityContextOptions & {

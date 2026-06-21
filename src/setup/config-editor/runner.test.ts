@@ -979,6 +979,266 @@ describe("runConfigEditor", () => {
     expect(promptTitles).toEqual(["Setup language", "Setup editor"]);
   });
 
+  it("returns from first-level setup editor choices to the action menu without drafting", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const cases = [
+      {
+        actionId: "edit-security-mode" as const,
+        expectedFirstTitle: "Security mode",
+      },
+      {
+        actionId: "edit-workflow-learning" as const,
+        expectedFirstTitle: "Agent Evolution",
+      },
+      {
+        actionId: "configure-channels" as const,
+        expectedFirstTitle: "Choose channel",
+      },
+      {
+        actionId: "edit-auxiliary-model-route" as const,
+        expectedFirstTitle: "Choose auxiliary model.",
+      },
+    ];
+
+    for (const { actionId, expectedFirstTitle } of cases) {
+      const promptTitles: string[] = [];
+      const prompt = fakePrompt({ values: ["Back", "exit"] });
+      const baseSelect = prompt.select!;
+      prompt.select = async (input) => {
+        promptTitles.push(input.title);
+        return baseSelect(input);
+      };
+      const apply = vi.fn();
+
+      const result = await runConfigEditor({
+        homeDir: tempDir,
+        workspaceRoot,
+        prompt,
+        defaultActionId: actionId,
+        applyExecutor: { apply },
+      });
+
+      expect(result.completed).toBe(true);
+      expect(result.selectedActionId).toBe("exit");
+      expect(result.reviewManifest).toBeUndefined();
+      expect(result.applyPlanningResult).toBeUndefined();
+      expect(apply).not.toHaveBeenCalled();
+      expect(promptTitles).toEqual([expectedFirstTitle, "Setup editor"]);
+    }
+  });
+
+  it("returns from channel optional action Back to the channel selector", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const promptTitles: string[] = [];
+    const prompt = fakePrompt({ values: ["Telegram", "Back", "Back", "exit"] });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      promptTitles.push(input.title);
+      return baseSelect(input);
+    };
+    const apply = vi.fn();
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "configure-channels",
+      applyExecutor: { apply },
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("exit");
+    expect(result.reviewManifest).toBeUndefined();
+    expect(apply).not.toHaveBeenCalled();
+    expect(promptTitles).toEqual(["Choose channel", "Telegram/channels", "Choose channel", "Setup editor"]);
+  });
+
+  it("returns from browser mode Back to the optional action card", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const promptTitles: string[] = [];
+    const prompt = fakePrompt({ values: ["Configure", "Back", "Back", "exit"] });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      promptTitles.push(input.title);
+      return baseSelect(input);
+    };
+    const apply = vi.fn();
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "configure-browser",
+      applyExecutor: { apply },
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("exit");
+    expect(result.reviewManifest).toBeUndefined();
+    expect(apply).not.toHaveBeenCalled();
+    expect(promptTitles).toEqual(["Browser", "Browser configuration", "Browser", "Setup editor"]);
+  });
+
+  it("returns from web search provider Back to the action menu without drafting", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const before = await readFile(profileConfigPath(tempDir), "utf8");
+    const selectInputs: SelectPromptInput<unknown>[] = [];
+    const prompt = fakePrompt({ values: ["Configure", "Back", "exit"] });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      selectInputs.push(input as SelectPromptInput<unknown>);
+      return baseSelect(input);
+    };
+    const apply = vi.fn();
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "configure-web-search",
+      applyExecutor: { apply },
+    });
+
+    const searchProviderInput = selectInputs.find((input) => input.title === "Search provider");
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("exit");
+    expect(result.reviewManifest).toBeUndefined();
+    expect(result.applyPlanningResult).toBeUndefined();
+    expect(apply).not.toHaveBeenCalled();
+    await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
+    expect(searchProviderInput?.options.find((option) => option.label === "Back")?.group).toBe("navigation");
+    expect(selectInputs.map((input) => input.title)).toEqual(["Search", "Search provider", "Setup editor"]);
+  });
+
+  it("returns from DDGS install Back to the web search provider card without drafting", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    vi.spyOn(capabilityManager, "checkManagedPythonCapabilityStatus").mockResolvedValue({
+      ok: false,
+      capabilityId: DDGS_CAPABILITY_ID,
+      reason: "install_required",
+      message: "Managed Python capability environment has not been installed.",
+    });
+    const before = await readFile(profileConfigPath(tempDir), "utf8");
+    const selectInputs: SelectPromptInput<unknown>[] = [];
+    const prompt = fakePrompt({ values: ["Configure", "ddgs", "Back", "Back", "exit"] });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      selectInputs.push(input as SelectPromptInput<unknown>);
+      return baseSelect(input);
+    };
+    const apply = vi.fn();
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "configure-web-search",
+      applyExecutor: { apply },
+    });
+
+    const ddgsInstallInput = selectInputs.find((input) => input.title === "DDGS setup");
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("exit");
+    expect(result.reviewManifest).toBeUndefined();
+    expect(result.applyPlanningResult).toBeUndefined();
+    expect(apply).not.toHaveBeenCalled();
+    await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
+    expect(ddgsInstallInput?.options.find((option) => option.label === "Back")?.group).toBe("navigation");
+    expect(selectInputs.map((input) => input.title)).toEqual([
+      "Search",
+      "Search provider",
+      "DDGS setup",
+      "Search provider",
+      "Setup editor",
+    ]);
+  });
+
+  it("returns from image generation provider Back to the action menu without drafting", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const before = await readFile(profileConfigPath(tempDir), "utf8");
+    const selectInputs: SelectPromptInput<unknown>[] = [];
+    const prompt = fakePrompt({ values: ["Configure", "Back", "exit"] });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      selectInputs.push(input as SelectPromptInput<unknown>);
+      return baseSelect(input);
+    };
+    const apply = vi.fn();
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "configure-image-generation",
+      applyExecutor: { apply },
+    });
+
+    const imageProviderInput = selectInputs.find((input) => input.title === "Vision and Image Generation");
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("exit");
+    expect(result.reviewManifest).toBeUndefined();
+    expect(result.applyPlanningResult).toBeUndefined();
+    expect(apply).not.toHaveBeenCalled();
+    await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
+    expect(imageProviderInput?.options.find((option) => option.label === "Back")?.group).toBe("navigation");
+    expect(selectInputs.map((input) => input.title)).toEqual([
+      "Vision and image generation",
+      "Vision and Image Generation",
+      "Setup editor",
+    ]);
+  });
+
+  it("returns from local STT model Back to STT provider and then voice mode", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const promptTitles: string[] = [];
+    const prompt = fakePrompt({
+      values: [
+        "Set Speech to Text (STT) Provider",
+        "Configure",
+        "Local (via faster-whisper)",
+        "Back",
+        "Back",
+        "Back",
+        "exit",
+      ],
+    });
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      promptTitles.push(input.title);
+      return baseSelect(input);
+    };
+    const apply = vi.fn();
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "configure-voice",
+      applyExecutor: { apply },
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("exit");
+    expect(result.reviewManifest).toBeUndefined();
+    expect(apply).not.toHaveBeenCalled();
+    expect(promptTitles).toEqual([
+      "Configure voice",
+      "Voice",
+      "Voice",
+      "Configure STT",
+      "Voice",
+      "Configure voice",
+      "Setup editor",
+    ]);
+  });
+
   it("resets Arabic activity labels when changing language back to English", async () => {
     await writeUserConfig(tempDir, {
       ...localReadyConfig(),
@@ -1564,6 +1824,7 @@ describe("runConfigEditor", () => {
       "Edit fallback 1: openai/gpt-5.5",
       "Edit fallback 2: kimi/kimi-k2",
       "Add another fallback model",
+      "Back",
     ]]);
     expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values).toEqual(expect.objectContaining({
       fallbackOperation: "add",
@@ -1671,10 +1932,15 @@ describe("runConfigEditor", () => {
     expect(result.completed).toBe(true);
     expect(result.selectedActionId).toBe("edit-auxiliary-model-route");
     expect(promptTitles).toEqual(["Choose auxiliary model.", "Auxiliary provider", "Auxiliary model"]);
-    expect(taskOptions).toEqual([{
-      labels: ["Assessor", "Compression", "Session search", "Memory compaction", "Profile context"],
-      values: ["assessor", "compression", "session_search", "memory_compaction", "profile_context"],
-    }]);
+    expect(taskOptions[0]?.labels).toEqual(["Assessor", "Compression", "Session search", "Memory compaction", "Profile context", "Back"]);
+    expect(taskOptions[0]?.values.slice(0, 5)).toEqual([
+      "assessor",
+      "compression",
+      "session_search",
+      "memory_compaction",
+      "profile_context",
+    ]);
+    expect(typeof taskOptions[0]?.values[5]).toBe("symbol");
     expect(result.reviewManifest?.sections["provider-model-network"][0]?.review).toEqual(expect.objectContaining({
       summaryKey: "setupDrafts.auxiliaryModelRoute.summary",
       values: expect.objectContaining({
@@ -2097,8 +2363,8 @@ describe("runConfigEditor", () => {
     });
 
     expect(result.completed).toBe(true);
-    expect(optionLabels[0]).toEqual(["Telegram", "WhatsApp beta", "Discord beta"]);
-    expect(optionLabels[1]).toEqual(["Configure", "Leave unchanged"]);
+    expect(optionLabels[0]).toEqual(["Telegram", "WhatsApp beta", "Discord beta", "Back"]);
+    expect(optionLabels[1]).toEqual(["Configure", "Leave unchanged", "Back"]);
     expect(defaultLabels[1]).toBe("Configure");
     expect(optionLabels).toHaveLength(2);
     expect(result.reviewManifest).toBeUndefined();
@@ -2134,7 +2400,7 @@ describe("runConfigEditor", () => {
       });
 
       expect(result.completed).toBe(true);
-      expect(optionLabels.at(-1)).toEqual(["Configure", "Leave unchanged", "Skip"]);
+      expect(optionLabels.at(-1)).toEqual(["Configure", "Leave unchanged", "Skip", "Back"]);
       expect(defaultLabels.at(-1)).toBe("Configure");
       expect(result.reviewManifest).toBeUndefined();
     }
@@ -3186,13 +3452,16 @@ describe("runConfigEditor", () => {
       "Base (recommended for everyday use)",
       "Small",
       "Medium",
+      "Back",
     ]);
     expect(localModelPrompt?.descriptions).toEqual([
       "Balanced speed and accuracy for most voice notes.",
       "Better accuracy than Base, with higher CPU and memory use.",
       "Higher accuracy for difficult audio, but slower and heavier.",
+      "Return to the previous step.",
     ]);
-    expect(localModelPrompt?.values).toEqual(["base", "small", "medium"]);
+    expect(localModelPrompt?.values.slice(0, 3)).toEqual(["base", "small", "medium"]);
+    expect(typeof localModelPrompt?.values[3]).toBe("symbol");
     expect(rawConfig).not.toContain("sk-");
     expect(JSON.stringify(result)).not.toContain("sk-");
   });

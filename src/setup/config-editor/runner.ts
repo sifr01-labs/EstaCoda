@@ -472,14 +472,18 @@ async function handleSecurityModeAction(
   const securityMode = await promptSecurityMode(
     options.prompt,
     securityModeValue(initialDecision.state.setupVerification.securityModeValue),
-    options.locale
+    options.locale,
+    { allowBack: true }
   );
+  if (securityMode.kind === "back") {
+    return menuBackResult(initialDecision, action.id);
+  }
 
   return reviewAndApplyAction(options, initialDecision, session, {
     ...editorAction,
     reviewValues: {
       ...editorAction.reviewValues,
-      securityMode,
+      securityMode: securityMode.value,
     },
   });
 }
@@ -494,14 +498,18 @@ async function handleWorkflowLearningAction(
   const workflowLearning = await promptWorkflowLearning(
     options.prompt,
     skillAutonomyValue(initialDecision.state.setupVerification.skillAutonomyValue),
-    options.locale
+    options.locale,
+    { allowBack: true }
   );
+  if (workflowLearning.kind === "back") {
+    return menuBackResult(initialDecision, action.id);
+  }
 
   return reviewAndApplyAction(options, initialDecision, session, {
     ...editorAction,
     reviewValues: {
       ...editorAction.reviewValues,
-      workflowLearning,
+      workflowLearning: workflowLearning.value,
     },
   });
 }
@@ -561,73 +569,110 @@ async function handleOptionalCapabilityAction(
     trustStorePath: options.trustStorePath ?? stateHome.trustJsonPath,
     configPath: activeProfileConfigPath(options),
   }, initialDecision, loaded.config);
-  const selectedChannel = action.id === "configure-channels"
-    ? await promptChannelCapability(options.prompt, options.locale)
-    : undefined;
-  if (selectedChannel === "whatsapp") {
-    return handleWhatsAppSetupFlowAction(options, initialDecision, action.id);
-  }
-  const selectedVoiceMode = action.id === "configure-voice"
-    ? await promptVoiceCapability(options.prompt, options.locale)
-    : undefined;
-  const module = selectedChannel === undefined
-    ? optionalCapabilityModuleForAction(action.id)
-    : channelCapabilityModule(selectedChannel);
-  const promptContext = optionalCapabilityPromptContext(
-    baseContext,
-    module,
-    options.locale
-  );
-  const selectedDrafts: SetupDraft[] = [];
-  const pendingCredentialWrites: PendingCredentialWrite[] = [];
-  const selected = await promptOptionalCapabilityAction(options.prompt, {
-    id: optionalPromptId(promptContext.module.id),
-    title: promptContext.title,
-    configured: promptContext.configured,
-  }, options.locale);
-
-  if (selected === "skip") {
-    const configuration = promptContext.module.configure(baseContext, { skip: true });
-    selectedDrafts.push(...promptContext.module.toDrafts(baseContext, configuration));
-  }
-
-  if (selected === "enable") {
-    const collected = await collectOptionalCapabilityContext(options, baseContext, promptContext.module, selectedVoiceMode);
-    if (collected.kind === "skip") {
-      const configuration = promptContext.module.configure(baseContext, { skip: true });
-      selectedDrafts.push(...promptContext.module.toDrafts(baseContext, configuration));
+  while (true) {
+    const selectedChannelResult = action.id === "configure-channels"
+      ? await promptChannelCapability(options.prompt, options.locale, { allowBack: true })
+      : undefined;
+    if (selectedChannelResult?.kind === "back") {
+      return menuBackResult(initialDecision, action.id);
+    }
+    const selectedChannel = typeof selectedChannelResult === "object"
+      ? selectedChannelResult.value
+      : selectedChannelResult;
+    if (selectedChannel === "whatsapp") {
+      return handleWhatsAppSetupFlowAction(options, initialDecision, action.id);
     }
 
-    if (collected.kind === "configured") {
-      if (collected.pendingCredentialWrites !== undefined) {
-        pendingCredentialWrites.push(...collected.pendingCredentialWrites);
+    const selectedVoiceModeResult = action.id === "configure-voice"
+      ? await promptVoiceCapability(options.prompt, options.locale, { allowBack: true })
+      : undefined;
+    if (selectedVoiceModeResult?.kind === "back") {
+      return menuBackResult(initialDecision, action.id);
+    }
+    const selectedVoiceMode = typeof selectedVoiceModeResult === "object"
+      ? selectedVoiceModeResult.value
+      : selectedVoiceModeResult;
+
+    const module = selectedChannel === undefined
+      ? optionalCapabilityModuleForAction(action.id)
+      : channelCapabilityModule(selectedChannel);
+    const promptContext = optionalCapabilityPromptContext(
+      baseContext,
+      module,
+      options.locale
+    );
+    const selectedDrafts: SetupDraft[] = [];
+    const pendingCredentialWrites: PendingCredentialWrite[] = [];
+
+    while (true) {
+      const selectedResult = await promptOptionalCapabilityAction(options.prompt, {
+        id: optionalPromptId(promptContext.module.id),
+        title: promptContext.title,
+        configured: promptContext.configured,
+      }, options.locale, { allowBack: true });
+      if (selectedResult.kind === "back") {
+        if (action.id === "configure-channels" || action.id === "configure-voice") {
+          break;
+        }
+        return menuBackResult(initialDecision, action.id);
       }
-      const configuration = promptContext.module.configure(collected.context);
-      selectedDrafts.push(...promptContext.module.toDrafts(collected.context, configuration));
+      const selected = selectedResult.value;
+
+      if (selected === "skip") {
+        const configuration = promptContext.module.configure(baseContext, { skip: true });
+        selectedDrafts.push(...promptContext.module.toDrafts(baseContext, configuration));
+      }
+
+      if (selected === "enable") {
+        const collected = await collectOptionalCapabilityContext(options, baseContext, promptContext.module, selectedVoiceMode, {
+          allowBack: true,
+        });
+        if (collected.kind === "back") {
+          if (action.id === "configure-voice") {
+            break;
+          }
+          if (action.id === "configure-web-search" || action.id === "configure-image-generation") {
+            return menuBackResult(initialDecision, action.id);
+          }
+          continue;
+        }
+        if (collected.kind === "skip") {
+          const configuration = promptContext.module.configure(baseContext, { skip: true });
+          selectedDrafts.push(...promptContext.module.toDrafts(baseContext, configuration));
+        }
+
+        if (collected.kind === "configured") {
+          if (collected.pendingCredentialWrites !== undefined) {
+            pendingCredentialWrites.push(...collected.pendingCredentialWrites);
+          }
+          const configuration = promptContext.module.configure(collected.context);
+          selectedDrafts.push(...promptContext.module.toDrafts(collected.context, configuration));
+        }
+      }
+
+      if (selectedDrafts.length === 0) {
+        const output = `${promptContext.title} left unchanged. No setup changes were drafted.`;
+        write(options, `${output}\n`);
+        return {
+          completed: true,
+          exitCode: 0,
+          output,
+          initialDecision,
+          selectedActionId: action.id,
+        };
+      }
+
+      const bundle = buildOptionalCapabilityDraftBundle(
+        `setup-editor.optional-capabilities.${promptContext.module.id}`,
+        selectedDrafts
+      );
+      const verificationBundle = verificationDraftBundle(options, initialDecision, session, stateHome);
+      return reviewAndApplyBundles(options, initialDecision, action.id, [
+        bundle,
+        ...(verificationBundle === undefined ? [] : [verificationBundle]),
+      ], { pendingCredentialWrites });
     }
   }
-
-  if (selectedDrafts.length === 0) {
-    const output = `${promptContext.title} left unchanged. No setup changes were drafted.`;
-    write(options, `${output}\n`);
-    return {
-      completed: true,
-      exitCode: 0,
-      output,
-      initialDecision,
-      selectedActionId: action.id,
-    };
-  }
-
-  const bundle = buildOptionalCapabilityDraftBundle(
-    `setup-editor.optional-capabilities.${promptContext.module.id}`,
-    selectedDrafts
-  );
-  const verificationBundle = verificationDraftBundle(options, initialDecision, session, stateHome);
-  return reviewAndApplyBundles(options, initialDecision, action.id, [
-    bundle,
-    ...(verificationBundle === undefined ? [] : [verificationBundle]),
-  ], { pendingCredentialWrites });
 }
 
 async function handleWhatsAppSetupFlowAction(
@@ -760,9 +805,13 @@ async function handleFallbackRouteAction(
   const editorAction = requireEditorAction(action);
   const loaded = await loadRuntimeConfig(options);
   const fallbacks = loaded.config.model?.fallbacks ?? [];
-  const choice = fallbacks.length === 0
+  const choiceResult = fallbacks.length === 0
     ? { id: "fallback-add" as const, fallbackOperation: "add" as const }
-    : await promptFallbackRouteAction(options.prompt, fallbacks, options.locale);
+    : await promptFallbackRouteAction(options.prompt, fallbacks, options.locale, { allowBack: true });
+  if ("kind" in choiceResult && choiceResult.kind === "back") {
+    return menuBackResult(initialDecision, action.id);
+  }
+  const choice = "kind" in choiceResult ? choiceResult.value : choiceResult;
   const currentFallback = choice.fallbackOperation === "replace" ? choice.fallback : undefined;
   const resolved = await selectResolvedProviderRoute(options, "fallback", {
     currentProviderId: currentFallback?.provider,
@@ -795,7 +844,11 @@ async function handleAuxiliaryRouteAction(
   action: ConfigEditorRenderedAction
 ): Promise<RunOnceResult> {
   const editorAction = requireEditorAction(action);
-  const auxiliaryTask = await promptAuxiliaryModelTask(options.prompt, options.locale);
+  const auxiliaryTaskResult = await promptAuxiliaryModelTask(options.prompt, options.locale, { allowBack: true });
+  if (auxiliaryTaskResult.kind === "back") {
+    return menuBackResult(initialDecision, action.id);
+  }
+  const auxiliaryTask = auxiliaryTaskResult.value;
   const loaded = await loadRuntimeConfig(options);
   const currentAuxiliaryRoute = auxiliaryRouteFromSlot(loaded.config.auxiliaryModels?.[auxiliaryTask]);
   const resolved = await selectResolvedProviderRoute(options, "auxiliary", {
@@ -1429,6 +1482,20 @@ function diagnosticResult(
   };
 }
 
+function menuBackResult(
+  initialDecision: SetupRouteDecision,
+  selectedActionId: string
+): RunOnceResult {
+  return {
+    completed: false,
+    exitCode: 0,
+    output: "",
+    initialDecision,
+    selectedActionId,
+    menuBackRequested: true,
+  };
+}
+
 function handleProviderRoutePromptExit(
   options: LocalizedConfigEditorRunnerOptions,
   initialDecision: SetupRouteDecision,
@@ -1439,14 +1506,7 @@ function handleProviderRoutePromptExit(
     return diagnosticResult(options, initialDecision, selectedActionId, result.output);
   }
   if (result.kind === "back") {
-    return {
-      completed: false,
-      exitCode: 0,
-      output: "",
-      initialDecision,
-      selectedActionId,
-      menuBackRequested: true,
-    };
+    return menuBackResult(initialDecision, selectedActionId);
   }
 
   const output = setupCopyText(options.locale, "setupEditor.result.exitWithoutChanges");
