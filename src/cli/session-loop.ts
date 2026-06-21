@@ -48,7 +48,7 @@ import { PromptChromeController } from "./prompt-chrome-controller.js";
 import { BottomChromeController, type BottomChromeState } from "./bottom-chrome-controller.js";
 import type { SessionStatusRailViewModel, ShortcutHintRailViewModel, SlashMenuViewModel, ToolActivityRailEvent, ViewModel } from "../contracts/view-model.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
-import { measureVisibleWidth, truncateVisible, wrapText } from "../ui/renderers/layout.js";
+import { centerVisibleBlock, measureVisibleWidth, truncateVisible, wrapText } from "../ui/renderers/layout.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
 import { promptUiContextForLocale } from "../contracts/ui.js";
 import { resolveHomeDir } from "../config/home-dir.js";
@@ -308,6 +308,24 @@ async function buildSessionStartupViewModel(runtime: Runtime): Promise<ViewModel
   }
 }
 
+function formatStartupScreenText(input: {
+  viewModel: ViewModel;
+  rendered: string;
+  capabilities: TerminalCapabilities;
+}): string {
+  if (
+    input.viewModel.kind !== "startupDashboard" ||
+    !input.capabilities.isTTY ||
+    input.capabilities.isCI ||
+    input.capabilities.isDumb ||
+    !input.capabilities.supportsColor
+  ) {
+    return input.rendered;
+  }
+
+  return `\x1b[2J\x1b[H${centerVisibleBlock(input.rendered, input.capabilities.terminalWidth)}`;
+}
+
 export async function runSessionLoop(options: SessionLoopOptions): Promise<void> {
   const output = options.output ?? defaultOutput;
   const renderer = createSessionRenderer({ output, locale: options.locale, capabilities: options.capabilities });
@@ -403,7 +421,12 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       latestContextUsage = total === undefined ? undefined : { filled: postTokens, total };
     };
     const startupVm = await buildSessionStartupViewModel(runtime);
-    const startupText = renderer.render(startupVm);
+    const renderedStartupText = renderer.render(startupVm);
+    const startupText = formatStartupScreenText({
+      viewModel: startupVm,
+      rendered: renderedStartupText,
+      capabilities: renderer.capabilities,
+    });
     output.write(`${startupText}\n\n`);
     if (!bottomChrome.enabled) {
       output.write(`${chromeCopy(renderer.locale).startupPromptHint}\n\n`);

@@ -15,10 +15,15 @@ import type { CompactResult } from "../prompt/session-compression-service.js";
 import { isolateLtr } from "../ui/bidi.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
 import { stripAnsi } from "../ui/renderers/layout.js";
+import { StandardRenderer } from "../ui/renderers/standard-renderer.js";
+import { buildStartupDashboardViewModel } from "../ui/view-models/builders.js";
+import { resolveTokens } from "../theme/token-resolver.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { writeCliVoiceMode } from "./voice-mode.js";
 import { CronStore } from "../cron/cron-store.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
+
+const STARTUP_VISIBLE_SCREEN_CLEAR = "\x1b[2J\x1b[H";
 
 function interactiveCaps(overrides: Partial<TerminalCapabilities> = {}): TerminalCapabilities {
   return {
@@ -137,6 +142,38 @@ function createMockRuntime(overrides: Partial<Runtime> = {}): Runtime {
     trajectoryId: "test-trajectory",
   };
   return { ...runtime, ...overrides };
+}
+
+async function captureStartupSession(options: {
+  runtime?: Runtime;
+  capabilities?: TerminalCapabilities;
+} = {}): Promise<{ raw: string; chunks: string[]; promptOptions?: PromptOptions }> {
+  const outputChunks: string[] = [];
+  const capabilities = options.capabilities ?? interactiveCaps({ supportsAnimation: false });
+  let promptOptions: PromptOptions | undefined;
+
+  await runSessionLoop({
+    runtime: options.runtime ?? createMockRuntime(),
+    output: {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: capabilities.isTTY,
+      columns: capabilities.terminalWidth,
+    } as unknown as NodeJS.WritableStream,
+    capabilities,
+    prompt: Object.assign(
+      async (_question: string, options?: PromptOptions) => {
+        promptOptions = options;
+        return "/exit";
+      },
+      { close: () => {} }
+    ),
+    close: () => {},
+  });
+
+  return { raw: outputChunks.join(""), chunks: outputChunks, promptOptions };
 }
 
 type ApprovalGrantInput = Parameters<NonNullable<Runtime["grantApproval"]>>[0];
@@ -545,6 +582,124 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     expect(rendered).toContain("╭");
     expect(rendered).toContain("𓂀  mock-model");
     expect(rendered).toContain("/tools");
+  });
+
+  it("clears the visible screen before TTY startup dashboard output", async () => {
+    const { raw } = await captureStartupSession({
+      capabilities: interactiveCaps({ supportsAnimation: false }),
+    });
+
+    expect(raw.startsWith(STARTUP_VISIBLE_SCREEN_CLEAR)).toBe(true);
+    expect(raw).not.toContain("\x1b[3J");
+  });
+
+  it("horizontally pads TTY startup dashboard lines", async () => {
+    const { raw } = await captureStartupSession({
+      capabilities: interactiveCaps({ terminalWidth: 160, supportsAnimation: false }),
+    });
+
+    const plain = stripAnsi(raw.slice(STARTUP_VISIBLE_SCREEN_CLEAR.length));
+    const frameLine = plain.split("\n").find((line) => line.includes("╭"));
+    expect(frameLine).toMatch(/^ +╭/u);
+  });
+
+  it("does not clear the screen for non-TTY startup output", async () => {
+    const { raw } = await captureStartupSession({
+      capabilities: interactiveCaps({ isTTY: false, supportsAnimation: false }),
+    });
+
+    expect(raw).not.toContain(STARTUP_VISIBLE_SCREEN_CLEAR);
+  });
+
+  it("does not clear the screen for CI startup output", async () => {
+    const { raw } = await captureStartupSession({
+      capabilities: interactiveCaps({ isCI: true, supportsAnimation: false }),
+    });
+
+    expect(raw).not.toContain(STARTUP_VISIBLE_SCREEN_CLEAR);
+  });
+
+  it("does not clear the screen for dumb terminal startup output", async () => {
+    const { raw } = await captureStartupSession({
+      capabilities: interactiveCaps({ isDumb: true, supportsAnimation: false }),
+    });
+
+    expect(raw).not.toContain(STARTUP_VISIBLE_SCREEN_CLEAR);
+  });
+
+  it("does not clear the screen for no-color startup output", async () => {
+    const { raw } = await captureStartupSession({
+      capabilities: interactiveCaps({
+        supportsColor: false,
+        supportsTrueColor: false,
+        supportsAnimation: false,
+      }),
+    });
+
+    expect(raw).not.toContain(STARTUP_VISIBLE_SCREEN_CLEAR);
+  });
+
+  it("leaves legacy startup fallback output uncleared and uncentered", async () => {
+    const capabilities = interactiveCaps({ terminalWidth: 160, supportsAnimation: false });
+    const runtime = createMockRuntime({
+      getStartupReadiness: vi.fn(async () => {
+        throw new Error("readiness failed");
+      }),
+    });
+    const { raw } = await captureStartupSession({ runtime, capabilities });
+    const renderer = new StandardRenderer({
+      tokens: resolveTokens("standard", "dark", "kemetBlue"),
+      capabilities,
+    });
+    const expectedStartup = renderer.render(runtime.getStartup());
+
+    expect(raw).not.toContain(STARTUP_VISIBLE_SCREEN_CLEAR);
+    expect(raw.startsWith(`${expectedStartup}\n\n`)).toBe(true);
+  });
+
+  it("keeps startup hint and bottom chrome behavior ordered after dashboard output", async () => {
+    const fallback = await captureStartupSession({
+      capabilities: interactiveCaps({ isTTY: false, supportsAnimation: false }),
+    });
+    const fallbackPlain = stripAnsi(fallback.raw);
+    const dashboardIndex = fallbackPlain.indexOf("EstaCoda");
+    const hintIndex = fallbackPlain.indexOf("Type a message.");
+
+    expect(dashboardIndex).toBeGreaterThanOrEqual(0);
+    expect(hintIndex).toBeGreaterThan(dashboardIndex);
+
+    const tty = await captureStartupSession({
+      capabilities: interactiveCaps({ supportsAnimation: false }),
+    });
+    expect(tty.raw).not.toContain("Type a message.");
+    expect(tty.promptOptions?.placeholder).toContain("/help");
+  });
+
+  it("keeps StandardRenderer startup dashboard output uncentered", () => {
+    const capabilities = interactiveCaps({ terminalWidth: 160, supportsAnimation: false });
+    const renderer = new StandardRenderer({
+      tokens: resolveTokens("standard", "dark", "kemetBlue"),
+      capabilities,
+    });
+    const rendered = renderer.render(buildStartupDashboardViewModel({
+      agentName: "EstaCoda",
+      taglines: [],
+      version: "v0.0.5",
+      sessionId: "test-session",
+      model: { provider: "mock", id: "mock-model" },
+      workspaceTrust: "trusted",
+      workspaceVerification: "verified",
+      workspaceDirectory: "/tmp",
+      securityMode: "open",
+      providerReadiness: "ready",
+      versionStatus: "unknown",
+      availableCommands: [],
+      warnings: [],
+    }));
+    const frameLine = stripAnsi(rendered).split("\n").find((line) => line.includes("╭"));
+
+    expect(rendered).not.toContain(STARTUP_VISIBLE_SCREEN_CLEAR);
+    expect(frameLine).toMatch(/^╭/u);
   });
 
   it("shows configured model only before the first provider call", async () => {
