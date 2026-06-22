@@ -467,7 +467,10 @@ function firstRunPrompt(options: FirstRunPromptOptions): Prompt {
     if (title.includes("setup editor") && options.setupEditorActionId !== undefined) {
       return valueWithIdOrDefault(selection, options.setupEditorActionId);
     }
-    if (title.includes("configuration summary") || title.includes("review") || title.includes("finalize configuration")) {
+    if (title.includes("configuration summary")) {
+      return valueWithIdOrDefault(selection, options.reviewAccepted ? "confirm" : "cancel");
+    }
+    if (title.includes("review") || title.includes("finalize configuration")) {
       return valueOrDefault(selection, options.reviewAccepted);
     }
     if (title.includes("start estacoda")) {

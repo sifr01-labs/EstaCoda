@@ -8,6 +8,7 @@ import type { Prompt } from "../../cli/readline-prompt.js";
 import { withPromptUiContext } from "../../cli/readline-prompt.js";
 import { promptUiContextForLocale } from "../../contracts/ui.js";
 import { promptForApiKeyInput } from "../../cli/secret-prompt.js";
+import { isolateLtr } from "../../ui/bidi.js";
 import {
   createProviderModelSelectionFlow,
   type FlowEngine,
@@ -52,12 +53,15 @@ import type { SetupCopyLocale } from "../setup-copy.js";
 import {
   formatSetupCopy,
   promptSetupChoice,
+  promptSetupChoiceResult,
   promptSetupStringWithDefault,
   renderSetupApplyEndState,
   renderSetupApplyPlanningResult,
+  setupNavigationChoice,
   setupProviderCredentialQuestion,
   setupPromptWithDefault,
   setupPromptContext,
+  type SetupChoiceResult,
   type SetupPromptContext,
   setupCopyText,
   showSetupCard,
@@ -122,6 +126,10 @@ type PendingCredentialWrite = SetupDeferredSecretWrite;
 
 type WorkspaceTrustAction = "trust" | "change-workspace" | "decide-later";
 
+type CredentialAction = "enter-api-key" | "reuse-existing-env" | "configure-later";
+
+type SummaryAction = "confirm" | "back" | "cancel";
+
 type OnboardingStep =
   | "language"
   | "workspace"
@@ -154,7 +162,8 @@ type OnboardingWizardDraft = {
   primaryRoute?: ProviderModelSelectionResult;
   primaryCredential?: OnboardingWizardSelections["primaryCredential"];
   credentialStatus: OnboardingCredentialSummaryStatus;
-  pendingCredentialWrites: PendingCredentialWrite[];
+  primaryPendingCredentialWrites: PendingCredentialWrite[];
+  optionalPendingCredentialWrites: PendingCredentialWrite[];
   securityMode?: NonNullable<OnboardingWizardSelections["securityMode"]>;
   workflowLearning?: NonNullable<OnboardingWizardSelections["workflowLearning"]>;
   profileId?: string;
@@ -167,6 +176,7 @@ type OnboardingWizardDraft = {
   summaryText?: string;
   reviewAccepted?: boolean;
   finalSelections?: OnboardingWizardSelections;
+  summaryBackTarget?: OnboardingStep;
 };
 
 export async function runFirstRunSetup(
@@ -188,7 +198,8 @@ export async function runFirstRunSetup(
 
   const draft: OnboardingWizardDraft = {
     credentialStatus: "not_set",
-    pendingCredentialWrites: [],
+    primaryPendingCredentialWrites: [],
+    optionalPendingCredentialWrites: [],
   };
   let step: OnboardingStep = "language";
   let setupReviewReady = false;
@@ -216,7 +227,7 @@ export async function runFirstRunSetup(
       case "workspace": {
         const interfaceChoice = requireDraftValue(draft.interfaceChoice, "interface choice");
         const localizedOptions = requireDraftValue(draft.localizedOptions, "localized setup options");
-        draft.workspaceRoot = await promptForCanonicalWorkspaceRoot(localizedOptions, interfaceChoice.language);
+        draft.workspaceRoot = await promptForCanonicalWorkspaceRoot(localizedOptions, interfaceChoice.language, draft.workspaceRoot);
         step = "workspace-trust";
         break;
       }
@@ -226,11 +237,16 @@ export async function runFirstRunSetup(
         const localizedOptions = requireDraftValue(draft.localizedOptions, "localized setup options");
         const workspaceRoot = requireDraftValue(draft.workspaceRoot, "workspace root");
         const action = await promptForWorkspaceTrustAction(localizedOptions, interfaceChoice.language, workspaceRoot);
-        if (action === "change-workspace") {
+        if (action.kind === "back") {
+          step = "language";
+          break;
+        }
+        const trustAction = action.value;
+        if (trustAction === "change-workspace") {
           step = "workspace";
           break;
         }
-        draft.workspaceTrusted = action === "trust";
+        draft.workspaceTrusted = trustAction === "trust";
         step = "primary-route";
         break;
       }
@@ -242,12 +258,16 @@ export async function runFirstRunSetup(
           prompt: localizedOptions.prompt,
           flowEngine,
           locale: interfaceChoice.language,
-          currentProviderId: options.defaultSelections?.primaryProvider,
-          currentModelId: options.defaultSelections?.primaryModel,
-          allowBack: false,
+          currentProviderId: draft.primaryRoute?.provider ?? options.defaultSelections?.primaryProvider,
+          currentModelId: draft.primaryRoute?.model ?? options.defaultSelections?.primaryModel,
+          allowBack: true,
           allowCancel: false,
           mode: "onboarding",
         });
+        if (routeSelection.kind === "back") {
+          step = "workspace-trust";
+          break;
+        }
         if (routeSelection.kind !== "selected") {
           throw new Error(routeSelection.kind === "diagnostic"
             ? routeSelection.output
@@ -263,7 +283,7 @@ export async function runFirstRunSetup(
         const localizedOptions = requireDraftValue(draft.localizedOptions, "localized setup options");
         const resolution = requireDraftValue(draft.primaryRoute, "primary provider/model route");
         draft.credentialStatus = "not_set";
-        draft.pendingCredentialWrites = [];
+        draft.primaryPendingCredentialWrites = [];
 
         switch (resolution.credentialAction.kind) {
           case "none": {
@@ -277,14 +297,61 @@ export async function runFirstRunSetup(
               throw new Error(`Malformed reuse credential reference: ${ref}`);
             }
             const envVarName = ref.slice(4);
+            const action = await promptOnboardingCredentialAction(localizedOptions.prompt, interfaceChoice.language, {
+              envVarName,
+              allowReuseExistingEnv: true,
+              defaultValue: "reuse-existing-env",
+            });
+            if (action.kind === "back") {
+              step = "primary-route";
+              continue;
+            }
             draft.primaryCredential = { kind: "env", name: envVarName };
-            draft.credentialStatus = "existing_detected";
-            write(options, `Using existing credential from ${envVarName}.\n`);
+            if (action.value === "enter-api-key") {
+              const promptResult = await promptForApiKeyInput({
+                prompt: localizedOptions.prompt,
+                providerId: resolution.provider,
+                envVarName,
+                question: setupProviderCredentialQuestion(interfaceChoice.language, {
+                  providerName: getProviderMetadata(resolution.provider).displayName,
+                  envVarName,
+                }),
+              });
+
+              if (promptResult.kind === "skipped") {
+                write(options, `Config will expect ${envVarName} to be available externally.\n`);
+              } else {
+                draft.credentialStatus = "new_pending";
+                draft.primaryPendingCredentialWrites.push({
+                  envVarName: promptResult.envVarName,
+                  value: promptResult.value,
+                });
+              }
+            } else if (action.value === "reuse-existing-env") {
+              draft.credentialStatus = "existing_detected";
+              write(options, `Using existing credential from ${envVarName}.\n`);
+            } else {
+              write(options, `Config will expect ${envVarName} to be available externally.\n`);
+            }
             break;
           }
           case "collect": {
             const envVarName = resolution.credentialAction.envVarName;
+            const action = await promptOnboardingCredentialAction(localizedOptions.prompt, interfaceChoice.language, {
+              envVarName,
+              allowReuseExistingEnv: false,
+              defaultValue: "enter-api-key",
+            });
+            if (action.kind === "back") {
+              step = "primary-route";
+              continue;
+            }
             draft.primaryCredential = { kind: "env", name: envVarName };
+            if (action.value === "configure-later") {
+              write(options, `Config will expect ${envVarName} to be available externally.\n`);
+              break;
+            }
+
             const promptResult = await promptForApiKeyInput({
               prompt: localizedOptions.prompt,
               providerId: resolution.provider,
@@ -294,12 +361,11 @@ export async function runFirstRunSetup(
                 envVarName,
               }),
             });
-
             if (promptResult.kind === "skipped") {
               write(options, `Config will expect ${envVarName} to be available externally.\n`);
             } else {
               draft.credentialStatus = "new_pending";
-              draft.pendingCredentialWrites.push({
+              draft.primaryPendingCredentialWrites.push({
                 envVarName: promptResult.envVarName,
                 value: promptResult.value,
               });
@@ -315,7 +381,7 @@ export async function runFirstRunSetup(
       case "security": {
         const interfaceChoice = requireDraftValue(draft.interfaceChoice, "interface choice");
         const promptContext = requireDraftValue(draft.promptContext, "setup prompt context");
-        draft.securityMode = await promptSetupChoice(promptContext, {
+        const securityResult = await promptSetupChoiceResult(promptContext, {
           title: setupCopyText(interfaceChoice.language, "onboarding.security.title"),
           message: `${setupCopyText(interfaceChoice.language, "onboarding.security")}\n`,
           choices: [
@@ -338,8 +404,14 @@ export async function runFirstRunSetup(
               value: "open" as const,
             },
           ],
-          defaultValue: options.defaultSelections?.securityMode ?? "adaptive",
+          defaultValue: draft.securityMode ?? options.defaultSelections?.securityMode ?? "adaptive",
+          allowBack: true,
         });
+        if (securityResult.kind === "back") {
+          step = draft.primaryRoute?.credentialAction.kind === "none" ? "primary-route" : "credential";
+          break;
+        }
+        draft.securityMode = securityResult.value;
         step = "agent-evolution";
         break;
       }
@@ -347,7 +419,7 @@ export async function runFirstRunSetup(
       case "agent-evolution": {
         const interfaceChoice = requireDraftValue(draft.interfaceChoice, "interface choice");
         const promptContext = requireDraftValue(draft.promptContext, "setup prompt context");
-        draft.workflowLearning = await promptSetupChoice(promptContext, {
+        const workflowResult = await promptSetupChoiceResult(promptContext, {
           title: setupCopyText(interfaceChoice.language, "onboarding.workflowLearning.title"),
           message: `${setupCopyText(interfaceChoice.language, "onboarding.workflowLearning")}\n`,
           choices: [
@@ -376,8 +448,14 @@ export async function runFirstRunSetup(
               value: "none" as const,
             },
           ],
-          defaultValue: options.defaultSelections?.workflowLearning ?? "suggest",
+          defaultValue: draft.workflowLearning ?? options.defaultSelections?.workflowLearning ?? "suggest",
+          allowBack: true,
         });
+        if (workflowResult.kind === "back") {
+          step = "security";
+          break;
+        }
+        draft.workflowLearning = workflowResult.value;
         step = "optional-start";
         break;
       }
@@ -411,7 +489,8 @@ export async function runFirstRunSetup(
           workflowLearning,
         });
         draft.optionalCapabilityFlow = optionalCapabilityFlow;
-        draft.pendingCredentialWrites.push(...optionalCapabilityFlow.pendingCredentialWrites);
+        draft.optionalPendingCredentialWrites = [...optionalCapabilityFlow.pendingCredentialWrites];
+        draft.summaryBackTarget = "optional-menu";
         step = "summary";
         break;
       }
@@ -456,26 +535,13 @@ export async function runFirstRunSetup(
         const summaryText = renderOnboardingWizardSummary(wizardState, interfaceChoice.language);
         write(options, `${summaryText}\n`);
 
-        const reviewAccepted = await promptSetupChoice(promptContext, {
-          title: setupCopyText(interfaceChoice.language, "onboarding.summary.confirmTitle"),
-          message: `${summaryText}\n\n${setupCopyText(interfaceChoice.language, "onboarding.summary.confirmMessage")}\n`,
-          choices: [
-            {
-              id: "confirm",
-              label: setupCopyText(interfaceChoice.language, "onboarding.summary.confirmAction"),
-              description: setupCopyText(interfaceChoice.language, "setupApply.review.approved"),
-              value: true,
-            },
-            {
-              id: "cancel",
-              label: setupCopyText(interfaceChoice.language, "onboarding.summary.cancelAction"),
-              description: setupCopyText(interfaceChoice.language, "setupApply.review.cancelled"),
-              value: false,
-            },
-          ],
-          defaultValue: options.defaultSelections?.reviewAccepted ?? true,
-        });
+        const summaryAction = await promptOnboardingSummaryAction(promptContext, interfaceChoice.language, summaryText, options.defaultSelections?.reviewAccepted ?? true);
+        if (summaryAction === "back") {
+          step = draft.summaryBackTarget ?? "optional-start";
+          break;
+        }
 
+        const reviewAccepted = summaryAction === "confirm";
         draft.selections = selections;
         draft.wizardState = wizardState;
         draft.draftBundle = draftBundle;
@@ -507,12 +573,16 @@ export async function runFirstRunSetup(
   const applyPlanningResult = planSetupApply(reviewAccepted
     ? { kind: "approved-review-result", manifest: reviewManifest }
     : { kind: "cancelled-review-result", manifest: reviewManifest, reason: "User cancelled summary confirmation." });
+  const pendingCredentialWrites = [
+    ...draft.primaryPendingCredentialWrites,
+    ...draft.optionalPendingCredentialWrites,
+  ];
   const applyEndState = applyPlanningResult.kind === "apply-plan-ready" && options.applyExecutor !== undefined
       ? await executeSetupApplyPlan(applyPlanningResult.applyPlan, options.applyExecutor, {
         ...options.applyFlowOptions,
         mode: "firstRunTolerant",
-        ...(draft.pendingCredentialWrites.length > 0
-          ? { deferredSecretWrites: draft.pendingCredentialWrites }
+        ...(pendingCredentialWrites.length > 0
+          ? { deferredSecretWrites: pendingCredentialWrites }
           : {}),
       })
     : undefined;
@@ -672,8 +742,8 @@ async function promptForWorkspaceTrustAction(
   options: FirstRunSetupRunnerOptions,
   language: SetupCopyLocale,
   workspaceRoot: string
-): Promise<WorkspaceTrustAction> {
-  return promptSetupChoice<WorkspaceTrustAction>(options.prompt, {
+): Promise<SetupChoiceResult<WorkspaceTrustAction>> {
+  return promptSetupChoiceResult<WorkspaceTrustAction>(options.prompt, {
     title: setupCopyText(language, "onboarding.workspace.trust.title"),
     message: `${formatSetupCopy(language, "onboarding.workspace.trust", { workspacePath: workspaceRoot })}\n`,
     choices: [
@@ -697,14 +767,102 @@ async function promptForWorkspaceTrustAction(
       },
     ],
     defaultValue: options.defaultSelections?.workspaceTrusted === false ? "decide-later" : "trust",
+    allowBack: true,
+  });
+}
+
+async function promptOnboardingCredentialAction(
+  prompt: Prompt,
+  locale: SetupCopyLocale,
+  input: {
+    readonly envVarName: string;
+    readonly allowReuseExistingEnv: boolean;
+    readonly defaultValue: CredentialAction;
+  }
+): Promise<SetupChoiceResult<CredentialAction>> {
+  const envVarName = locale === "ar" ? isolateLtr(input.envVarName) : input.envVarName;
+  const reuseChoices = input.allowReuseExistingEnv
+    ? [{
+        id: "reuse-existing-env",
+        label: locale === "ar" ? "استخدام متغير بيئة موجود" : "Reuse existing env var",
+        description: envVarName,
+        technical: true,
+        value: "reuse-existing-env" as const,
+      }]
+    : [];
+
+  return promptSetupChoiceResult(prompt, {
+    title: locale === "ar" ? "بيانات الاعتماد" : "Credential handling",
+    message: `${setupProviderCredentialPromptMessage(locale, input.envVarName)}\n`,
+    choices: [
+      {
+        id: "enter-api-key",
+        label: locale === "ar" ? "إدخال مفتاح API" : "Enter API key",
+        description: locale === "ar" ? "احفظ المفتاح بعد مراجعة خطة الإعداد." : "Store the key after the setup review is approved.",
+        value: "enter-api-key" as const,
+      },
+      ...reuseChoices,
+      {
+        id: "configure-later",
+        label: locale === "ar" ? "الضبط لاحقًا" : "Configure later",
+        description: locale === "ar"
+          ? `سيستخدم الإعداد ${envVarName} عندما يتوفر خارج المعالج.`
+          : `Config will use ${envVarName} when it is available outside the wizard.`,
+        technical: true,
+        value: "configure-later" as const,
+      },
+    ],
+    defaultValue: input.defaultValue,
+    allowBack: true,
+  });
+}
+
+function setupProviderCredentialPromptMessage(locale: SetupCopyLocale, envVarName: string): string {
+  const renderedEnvVarName = locale === "ar" ? isolateLtr(envVarName) : envVarName;
+  return locale === "ar"
+    ? `اختر كيفية التعامل مع متغير بيانات الاعتماد ${renderedEnvVarName}.`
+    : `Choose how to handle the credential environment variable ${renderedEnvVarName}.`;
+}
+
+async function promptOnboardingSummaryAction(
+  promptContext: SetupPromptContext,
+  locale: SetupCopyLocale,
+  summaryText: string,
+  defaultReviewAccepted: boolean
+): Promise<SummaryAction> {
+  return promptSetupChoice(promptContext, {
+    title: setupCopyText(locale, "onboarding.summary.confirmTitle"),
+    message: `${summaryText}\n\n${setupCopyText(locale, "onboarding.summary.confirmMessage")}\n`,
+    choices: [
+      {
+        id: "confirm",
+        label: setupCopyText(locale, "onboarding.summary.confirmAction"),
+        description: setupCopyText(locale, "setupApply.review.approved"),
+        value: "confirm" as const,
+      },
+      setupNavigationChoice({
+        id: "back",
+        label: locale === "ar" ? "رجوع" : "Back",
+        description: setupCopyText(locale, "onboarding.providers.navigation.back.description"),
+        value: "back" as const,
+      }),
+      setupNavigationChoice({
+        id: "cancel",
+        label: setupCopyText(locale, "onboarding.summary.cancelAction"),
+        description: setupCopyText(locale, "setupApply.review.cancelled"),
+        value: "cancel" as const,
+      }),
+    ],
+    defaultValue: defaultReviewAccepted ? "confirm" : "cancel",
   });
 }
 
 async function promptForCanonicalWorkspaceRoot(
   options: FirstRunSetupRunnerOptions,
-  language: SetupCopyLocale
+  language: SetupCopyLocale,
+  currentWorkspaceRoot?: string
 ): Promise<string> {
-  let defaultWorkspaceRoot = options.defaultSelections?.workspaceRoot ?? options.workspaceRoot;
+  let defaultWorkspaceRoot = currentWorkspaceRoot ?? options.defaultSelections?.workspaceRoot ?? options.workspaceRoot;
 
   while (true) {
     await showSetupCard(setupPromptContext(options.prompt, language), {
