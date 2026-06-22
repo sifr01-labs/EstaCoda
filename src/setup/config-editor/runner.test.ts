@@ -438,6 +438,10 @@ describe("runConfigEditor", () => {
       "English",
       "العربية",
     ]);
+    expect(languageInput?.options.map((option) => option.description)).toEqual([
+      undefined,
+      undefined,
+    ]);
     expect(languageInput?.options.some((option) => option.group === "navigation")).toBe(false);
     expect(selectInputs.find((input) => input.title === "Workspace trust")?.columns).toBeUndefined();
     expect(selectInputs.find((input) => input.title === "Workspace trust")?.hint).toBe(
@@ -523,7 +527,13 @@ describe("runConfigEditor", () => {
     expect(securityInput?.options.find((option) => option.id === "strict")?.current).toBe(true);
     expect(workflowInput?.statusLines).toEqual([{ text: "Current: Proactive", tone: "active", direction: "ltr" }]);
     expect(workflowInput?.showCurrentBadge).toBe(false);
-    expect(workflowInput?.defaultIndex).toBe(2);
+    expect(workflowInput?.options.map((option) => option.id)).toEqual([
+      "suggest",
+      "proactive",
+      "autonomous",
+      "none",
+    ]);
+    expect(workflowInput?.defaultIndex).toBe(1);
     expect(workflowInput?.options.find((option) => option.id === "proactive")?.current).toBe(true);
   });
 
@@ -1204,7 +1214,7 @@ describe("runConfigEditor", () => {
     const promptTitles: string[] = [];
     const prompt = fakePrompt({
       values: [
-        "Set Speech to Text (STT) Provider",
+        "Speech to Text (STT)",
         "Configure",
         "Local (via faster-whisper)",
         "Back",

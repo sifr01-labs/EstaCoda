@@ -53,14 +53,12 @@ export async function promptInterfaceLanguageAndStyle(
     {
       id: "en",
       label: setupCopyText(initialLocale, "onboarding.interfaceLanguage.options.en.label"),
-      description: setupCopyText(initialLocale, "onboarding.interfaceLanguage.options.en.description"),
       value: "en" as const,
       current: input.showCurrentState === true && defaultLanguage === "en",
     },
     {
       id: "ar",
       label: setupCopyText(initialLocale, "onboarding.interfaceLanguage.options.ar.label"),
-      description: setupCopyText(initialLocale, "onboarding.interfaceLanguage.options.ar.description"),
       value: "ar" as const,
       current: input.showCurrentState === true && defaultLanguage === "ar",
     },

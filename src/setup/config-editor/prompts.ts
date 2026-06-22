@@ -272,13 +272,6 @@ export async function promptWorkflowLearning(
 ): Promise<SkillAutonomy | SetupChoiceResult<SkillAutonomy>> {
   const choices = [
     {
-      id: "none",
-      label: setupCopyText(locale, "onboarding.workflowLearning.options.none.label"),
-      description: setupCopyText(locale, "onboarding.workflowLearning.options.none.description"),
-      value: "none" as const,
-      current: currentValue === "none",
-    },
-    {
       id: "suggest",
       label: setupCopyText(locale, "onboarding.workflowLearning.options.suggest.label"),
       description: setupCopyText(locale, "onboarding.workflowLearning.options.suggest.description"),
@@ -298,6 +291,13 @@ export async function promptWorkflowLearning(
       description: setupCopyText(locale, "onboarding.workflowLearning.options.autonomous.description"),
       value: "autonomous" as const,
       current: currentValue === "autonomous",
+    },
+    {
+      id: "none",
+      label: setupCopyText(locale, "onboarding.workflowLearning.options.none.label"),
+      description: setupCopyText(locale, "onboarding.workflowLearning.options.none.description"),
+      value: "none" as const,
+      current: currentValue === "none",
     },
   ] as const;
   const currentLabel = choices.find((choice) => choice.value === currentValue)?.label ?? currentValue;

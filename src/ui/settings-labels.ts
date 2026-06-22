@@ -70,11 +70,11 @@ export const SKILL_AUTONOMY_LABELS = {
   autonomous: {
     en: {
       label: "Autonomous",
-      description: "Records shadow-only autonomous decisions for review. Real auto-promotion is not active in Phase 1A."
+      description: "Records shadow-only autonomous decisions for review. Real auto-promotion is not active in v0.1.0."
     },
     ar: {
       label: "ذاتي",
-      description: "يسجّل قرارات ذاتية في وضع ظل فقط للمراجعة. الترقية التلقائية الفعلية غير مفعّلة في Phase 1A."
+      description: "يسجّل قرارات ذاتية في وضع ظل فقط للمراجعة. الترقية التلقائية الفعلية غير مفعّلة في v0.1.0."
     }
   }
 } as const;

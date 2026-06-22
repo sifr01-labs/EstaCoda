@@ -712,7 +712,7 @@ export class StandardRenderer {
 
     if (vm.hint !== undefined && vm.hint.length > 0) {
       const hint = this.#muted(this.#localizedTechnical(vm.hint, locale, contentWidth));
-      lines.push(`  ${direction === "rtl" ? padVisibleStart(hint, contentWidth) : hint}`);
+      lines.push(`  ${padVisibleStart(hint, contentWidth)}`);
     }
 
     lines.push(bottom);

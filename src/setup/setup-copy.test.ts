@@ -679,8 +679,16 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.chromeFlags")).toContain(`خيارات ${isolateLtr("Chrome")} المتقدمة`);
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.chromeFlags")).not.toContain("أعلام Chrome");
     expect(resolveSetupCopy("ar", "setupEditor.prompt.vision.useGateway")).toContain(isolateLtr("image gateway"));
-    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.mode.stt")).toContain(isolateLtr("STT"));
-    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.mode.tts")).toContain(isolateLtr("TTS"));
+    expect(rawSetupCopy("en", "setupEditor.prompt.voice.mode.body")).toBe("Choose a voice capability to configure:");
+    expect(rawSetupCopy("en", "setupEditor.prompt.voice.mode.stt")).toBe("Speech to Text (STT)");
+    expect(rawSetupCopy("en", "setupEditor.prompt.voice.mode.stt.description")).toBe("Convert spoken audio into text.");
+    expect(rawSetupCopy("en", "setupEditor.prompt.voice.mode.tts")).toBe("Text to Speech (TTS)");
+    expect(rawSetupCopy("en", "setupEditor.prompt.voice.mode.tts.description")).toBe("Convert text into spoken audio.");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.voice.mode.body")).toBe("اختر قدرة الصوت التي تريد ضبطها:");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.voice.mode.stt.description")).toBe("تحويل الصوت المنطوق إلى نص.");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.voice.mode.tts.description")).toBe("تحويل النص إلى صوت منطوق.");
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.mode.stt")).toBe(`Speech to Text (${isolateLtr("STT")})`);
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.mode.tts")).toBe(`Text to Speech (${isolateLtr("TTS")})`);
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.ttsProvider")).toContain(isolateLtr("TTS"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.summary")).toContain(isolateLtr("faster-whisper"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.summary")).toContain(isolateLtr("pythonBinary"));
@@ -912,6 +920,10 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "onboarding.workflowLearning")).toBe("Agent Evolution controls EstaCoda's reviewable self-improvement: evidence, proposals, evals, and manual promotion.");
     expect(rawSetupCopy("en", "setupEditor.actions.editWorkflowLearning")).toBe("Agent Evolution");
     expect(rawSetupCopy("en", "setupEditor.actions.editWorkflowLearning.description")).toBe("Reviewable self-improvement proposals.");
+    expect(rawSetupCopy("en", "onboarding.workflowLearning.options.autonomous.description")).toBe(
+      "Record shadow-only autonomous decisions for review. No automatic promotion is active in v0.1.0."
+    );
+    expect(rawSetupCopy("ar", "onboarding.workflowLearning.options.autonomous.description")).toContain("v0.1.0");
     expect(rawSetupCopy("ar", "setupEditor.actions.editWorkflowLearning.description")).toBe("مقترحات تحسين ذاتي قابلة للمراجعة.");
     expect(resolveSetupCopy("ar", "setupEditor.actions.editWorkflowLearning")).toBe(isolateLtr("Agent Evolution"));
     expect(rawSetupCopy("en", "setupEditor.actions.chooseLanguage")).toBe("Language");

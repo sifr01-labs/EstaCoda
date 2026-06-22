@@ -274,12 +274,6 @@ export async function runFirstRunSetup(
         value: "suggest" as const,
       },
       {
-        id: "none",
-        label: setupCopyText(language, "onboarding.workflowLearning.options.none.label"),
-        description: setupCopyText(language, "onboarding.workflowLearning.options.none.description"),
-        value: "none" as const,
-      },
-      {
         id: "proactive",
         label: setupCopyText(language, "onboarding.workflowLearning.options.proactive.label"),
         description: setupCopyText(language, "onboarding.workflowLearning.options.proactive.description"),
@@ -290,6 +284,12 @@ export async function runFirstRunSetup(
         label: setupCopyText(language, "onboarding.workflowLearning.options.autonomous.label"),
         description: setupCopyText(language, "onboarding.workflowLearning.options.autonomous.description"),
         value: "autonomous" as const,
+      },
+      {
+        id: "none",
+        label: setupCopyText(language, "onboarding.workflowLearning.options.none.label"),
+        description: setupCopyText(language, "onboarding.workflowLearning.options.none.description"),
+        value: "none" as const,
       },
     ],
     defaultValue: options.defaultSelections?.workflowLearning ?? "suggest",

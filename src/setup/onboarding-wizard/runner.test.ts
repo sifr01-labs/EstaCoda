@@ -574,6 +574,39 @@ describe("runFirstRunSetup", () => {
     await expect(readFile(join(tempDir, ".estacoda", "trust.json"), "utf8")).rejects.toThrow();
   });
 
+  it("presents onboarding Agent Evolution choices in the configured order", async () => {
+    const seenSelectInputs: Record<string, SelectPromptInput<unknown>> = {};
+
+    const result = await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({}, {}, {}, [], seenSelectInputs),
+      flowEngine: flowEngine(),
+    });
+
+    const workflowInput = seenSelectInputs[resolveSetupCopy("en", "onboarding.workflowLearning.title")];
+    expect(workflowInput?.options.map((option) => option.label)).toEqual([
+      "Suggest",
+      "Proactive",
+      "Autonomous",
+      "Off",
+    ]);
+    expect(workflowInput?.options.map((option) => option.id)).toEqual([
+      "suggest",
+      "proactive",
+      "autonomous",
+      "none",
+    ]);
+    expect(workflowInput?.options.map((option) => option.value)).toEqual([
+      "suggest",
+      "proactive",
+      "autonomous",
+      "none",
+    ]);
+    expect(workflowInput?.defaultIndex).toBe(0);
+    expect(result.selections.workflowLearning).toBe("suggest");
+  });
+
   it("blocks a missing workspace path before the trust prompt", async () => {
     const missingWorkspace = join(tempDir, "missing-workspace");
     const seenOptions: Record<string, readonly string[]> = {};
@@ -2028,7 +2061,7 @@ describe("runFirstRunSetup", () => {
       prompt: fakePrompt({
         "Optional capabilities": "Yes",
         "Configure optional capability": "Voice",
-        "Configure voice": "Set Text to Speech (TTS) Provider",
+        "Configure voice": "Text to Speech (TTS)",
         "Configure other capabilities now": "Skip",
         __prompt: ["", ""],
       }),
@@ -2060,7 +2093,7 @@ describe("runFirstRunSetup", () => {
       prompt: fakePrompt({
         "Optional capabilities": "Yes",
         "Configure optional capability": "Voice",
-        "Configure voice": "Set Speech to Text (STT) Provider",
+        "Configure voice": "Speech to Text (STT)",
         "Voice": "Local (via faster-whisper)",
         "Configure STT": "base",
         "Configure other capabilities now": "Skip",
@@ -2095,7 +2128,7 @@ describe("runFirstRunSetup", () => {
       prompt: fakePrompt({
         "Optional capabilities": "Yes",
         "Configure optional capability": ["Voice", "Voice"],
-        "Configure voice": ["Set Speech to Text (STT) Provider", "Set Text to Speech (TTS) Provider"],
+        "Configure voice": ["Speech to Text (STT)", "Text to Speech (TTS)"],
         "Voice": ["Local (via faster-whisper)", "openai"],
         "Configure STT": "base",
         "Configure other capabilities now": ["Yes", "Skip"],

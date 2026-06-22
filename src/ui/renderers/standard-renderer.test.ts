@@ -960,6 +960,25 @@ describe("StandardRenderer — dark theme", () => {
     expect(hintLine).toMatch(/^  /u);
   });
 
+  it("right-aligns English prompt-card hints", () => {
+    const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: fullCaps(), locale: "en" });
+    const hint = "↑↓ navigate   ENTER select   CTRL+C exit";
+    const plain = stripAnsi(r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "Choose mode",
+      bodyLines: ["Pick a mode from this wider prompt card so hint alignment is visible."],
+      options: [{ id: "alpha", label: "Alpha" }],
+      selectedOptionIndex: 0,
+      hint,
+      locale: "en",
+      direction: "ltr",
+    })));
+
+    const hintLine = plain.split("\n").find((line) => line.includes(hint));
+    expect(hintLine).toBeDefined();
+    expect(hintLine!.trim()).toBe(hint);
+    expect(hintLine!.indexOf(hint)).toBeGreaterThan(2);
+  });
+
   it("renders Arabic onboarding selected marker after the label without Unicode", () => {
     const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: noUnicodeCaps(), locale: "ar" });
     const plain = stripAnsi(r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
