@@ -151,6 +151,7 @@ describe("runConfigEditor", () => {
       groups: Array<string | undefined>;
       bodyLineStyles: SelectPromptInput<unknown>["bodyLineStyles"];
       columns: SelectPromptInput<unknown>["columns"];
+      tableDirection: SelectPromptInput<unknown>["tableDirection"];
       showColumnHeaders: SelectPromptInput<unknown>["showColumnHeaders"];
       hint: string | undefined;
       values: unknown[];
@@ -165,6 +166,7 @@ describe("runConfigEditor", () => {
         groups: input.options.map((option) => option.group),
         bodyLineStyles: input.bodyLineStyles,
         columns: input.columns,
+        tableDirection: input.tableDirection,
         showColumnHeaders: input.showColumnHeaders,
         hint: input.hint,
         values: input.options.map((option) => option.value),
@@ -201,9 +203,10 @@ describe("runConfigEditor", () => {
     expect(prompts[0]?.body).not.toContain("\x1b[");
     expect(prompts[0]?.bodyLineStyles).toEqual([{ emphasis: "strong" }]);
     expect(prompts[0]?.columns).toEqual([
-      { key: "name", header: "الاسم" },
-      { key: "description", header: "التفاصيل" },
+      { key: "description", header: "التفاصيل", align: "right" },
+      { key: "name", header: "الاسم", align: "right" },
     ]);
+    expect(prompts[0]?.tableDirection).toBe("rtl");
     expect(prompts[0]?.showColumnHeaders).toBe(false);
     expect(prompts[0]?.hint).toBe("↑↓ navigate   ENTER select   CTRL+C exit");
     expect(prompts[0]?.labels).toContain("النموذج الأساسي");
@@ -334,9 +337,10 @@ describe("runConfigEditor", () => {
     ]);
     for (const input of selectInputs.filter((item) => item.columns !== undefined)) {
       expect(input.columns).toEqual([
-        { key: "name", header: "Name" },
-        { key: "description", header: "Details" },
+        { key: "name", header: "Name", align: "left" },
+        { key: "description", header: "Details", align: "left" },
       ]);
+      expect(input.tableDirection).toBe("ltr");
       expect(input.showColumnHeaders).toBe(false);
       expect(input.options.every((option) => option.cells === undefined)).toBe(true);
     }

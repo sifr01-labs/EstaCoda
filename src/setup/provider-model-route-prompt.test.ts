@@ -233,6 +233,8 @@ describe("selectProviderModelRoute", () => {
       { key: "name", header: "Name" },
       { key: "details", header: "Details" },
     ]);
+    expect(providerPrompt.tableDirection).toBeUndefined();
+    expect(modelPrompt.tableDirection).toBeUndefined();
     expect(providerPrompt.showColumnHeaders).toBeUndefined();
     expect(providerPrompt.options[0]).toMatchObject({
       id: "openai",

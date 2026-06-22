@@ -35,6 +35,7 @@ export type SetupChoiceResult<T> =
 export type SetupChoiceColumn = {
   readonly key: string;
   readonly header: string;
+  readonly align?: "left" | "right";
 };
 
 export type SetupPromptValue = string | number | readonly string[] | boolean | undefined;
@@ -88,6 +89,7 @@ export type PromptSetupChoiceInput<T> = {
   readonly hint?: string;
   readonly showCurrentBadge?: boolean;
   readonly showColumnHeaders?: boolean;
+  readonly tableDirection?: "ltr" | "rtl";
 };
 
 const SETUP_BACK_CHOICE_VALUE = Symbol("setup-back-choice");
@@ -126,6 +128,7 @@ export async function promptSetupChoice<T>(
       hint: input.hint ?? setupNavigationHint(uiContext.locale),
       showCurrentBadge: input.showCurrentBadge,
       showColumnHeaders: input.showColumnHeaders,
+      tableDirection: input.tableDirection,
       locale: uiContext.locale,
       direction: uiContext.direction,
     } satisfies SelectPromptInput<T>);
@@ -168,10 +171,21 @@ function setupBackChoice(locale: SetupCopyLocale): SetupChoice<typeof SETUP_BACK
 }
 
 export function setupChoiceColumns(locale: SetupCopyLocale): readonly SetupChoiceColumn[] {
+  if (locale === "ar") {
+    return [
+      { key: "description", header: "التفاصيل", align: "right" },
+      { key: "name", header: "الاسم", align: "right" },
+    ];
+  }
+
   return [
-    { key: "name", header: locale === "ar" ? "الاسم" : "Name" },
-    { key: "description", header: locale === "ar" ? "التفاصيل" : "Details" },
+    { key: "name", header: "Name", align: "left" },
+    { key: "description", header: "Details", align: "left" },
   ];
+}
+
+export function setupChoiceTableDirection(locale: SetupCopyLocale): "ltr" | "rtl" {
+  return locale === "ar" ? "rtl" : "ltr";
 }
 
 export function setupNavigationHint(_locale: SetupCopyLocale): string {

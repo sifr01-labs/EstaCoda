@@ -9,6 +9,7 @@ import {
   promptSetupYesNo,
   renderSetupApplyEndState,
   setupChoiceColumns,
+  setupChoiceTableDirection,
   setupCopyText,
   setupCsvPromptLabel,
   setupCurrentStatusLine,
@@ -136,6 +137,7 @@ describe("setup prompt context", () => {
       hint: "Use arrows.",
       showCurrentBadge: false,
       showColumnHeaders: false,
+      tableDirection: setupChoiceTableDirection("en"),
       choices: [
         {
           id: "alpha",
@@ -160,13 +162,14 @@ describe("setup prompt context", () => {
     expect(selected).toBe("alpha");
     expect(seen?.bodyLineStyles).toEqual([{ emphasis: "strong" }]);
     expect(seen?.columns).toEqual([
-      { key: "name", header: "Name" },
-      { key: "description", header: "Details" },
+      { key: "name", header: "Name", align: "left" },
+      { key: "description", header: "Details", align: "left" },
     ]);
     expect(seen?.statusLines).toEqual([statusLine]);
     expect(seen?.hint).toBe("Use arrows.");
     expect(seen?.showCurrentBadge).toBe(false);
     expect(seen?.showColumnHeaders).toBe(false);
+    expect(seen?.tableDirection).toBe("ltr");
     expect(seen?.options[0]).toMatchObject({
       id: "alpha",
       label: "Alpha",
@@ -207,6 +210,7 @@ describe("setup prompt context", () => {
 
     expect(selected).toBe(false);
     expect(seen?.columns).toBeUndefined();
+    expect(seen?.tableDirection).toBeUndefined();
     expect(seen?.statusLines).toBeUndefined();
     expect(seen?.hint).toBe(setupNavigationHint("en"));
     expect(seen?.showCurrentBadge).toBeUndefined();
@@ -218,9 +222,15 @@ describe("setup prompt context", () => {
 
   it("localizes generic setup prompt helper columns and status lines", () => {
     expect(setupChoiceColumns("ar")).toEqual([
-      { key: "name", header: "الاسم" },
-      { key: "description", header: "التفاصيل" },
+      { key: "description", header: "التفاصيل", align: "right" },
+      { key: "name", header: "الاسم", align: "right" },
     ]);
+    expect(setupChoiceColumns("en")).toEqual([
+      { key: "name", header: "Name", align: "left" },
+      { key: "description", header: "Details", align: "left" },
+    ]);
+    expect(setupChoiceTableDirection("ar")).toBe("rtl");
+    expect(setupChoiceTableDirection("en")).toBe("ltr");
     expect(setupCurrentStatusLine("ar", "English")).toEqual({
       text: "الحالي: English",
       tone: "active",

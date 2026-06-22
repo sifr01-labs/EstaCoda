@@ -22,6 +22,7 @@ import {
   setupPromptContext,
   setupTechnicalToken,
   setupChoiceColumns,
+  setupChoiceTableDirection,
   setupCurrentStatusLines,
   setupNavigationChoice,
   showSetupCard,
@@ -159,6 +160,7 @@ export async function promptConfigEditorAction(
     message: `${setupCopyText(locale, "setupEditor.prompt.action.body")}\n`,
     bodyLineStyles: [{ emphasis: "strong" }],
     columns: setupChoiceColumns(locale),
+    tableDirection: setupChoiceTableDirection(locale),
     showColumnHeaders: false,
     choices: actions.map((action) => ({
       id: action.id,
@@ -463,6 +465,7 @@ export async function promptChannelCapability(
     title: setupCopyText(locale, "setupEditor.prompt.channels.title"),
     message: `${setupCopyText(locale, "setupEditor.prompt.channels.body")}\n`,
     columns: setupChoiceColumns(locale),
+    tableDirection: setupChoiceTableDirection(locale),
     showColumnHeaders: false,
     choices: [
       {
@@ -578,6 +581,7 @@ export async function promptWebSearchCapability(
       title: setupCopyText(locale, "setupEditor.prompt.webSearch.provider.title"),
       message: `${setupCopyText(locale, "setupEditor.prompt.webSearch.provider.body")}\n`,
       columns: setupChoiceColumns(locale),
+      tableDirection: setupChoiceTableDirection(locale),
       showColumnHeaders: false,
       statusLines: setupCurrentStatusLines(locale, currentProviderLabel),
       showCurrentBadge: currentProviderLabel === undefined ? undefined : false,
@@ -714,6 +718,7 @@ export async function promptAuxiliaryModelTask(
     title: setupCopyText(locale, "setupEditor.prompt.auxiliaryRoute.title"),
     message: `${setupCopyText(locale, "setupEditor.prompt.auxiliaryRoute.body")}\n`,
     columns: setupChoiceColumns(locale),
+    tableDirection: setupChoiceTableDirection(locale),
     showColumnHeaders: false,
     choices: [
       {
@@ -846,6 +851,7 @@ export async function promptOptionalCapabilityAction(
     title: input.title,
     message: `${input.title}\n`,
     columns: setupChoiceColumns(locale),
+    tableDirection: setupChoiceTableDirection(locale),
     showColumnHeaders: false,
     choices: [
       {
@@ -1054,6 +1060,7 @@ export async function promptIncompleteChannelCapabilityAction(
       "",
     ].join("\n"),
     columns: setupChoiceColumns(locale),
+    tableDirection: setupChoiceTableDirection(locale),
     showColumnHeaders: false,
     choices: [
       setupNavigationChoice({
@@ -1091,6 +1098,7 @@ export async function promptIncompleteTelegramCapabilityAction(
       "",
     ].join("\n"),
     columns: setupChoiceColumns(locale),
+    tableDirection: setupChoiceTableDirection(locale),
     showColumnHeaders: false,
     choices: [
       setupNavigationChoice({
@@ -1135,6 +1143,7 @@ export async function promptVoiceCapability(
     title: setupCopyText(locale, "setupEditor.prompt.voice.mode.title"),
     message: `${setupCopyText(locale, "setupEditor.prompt.voice.mode.body")}\n`,
     columns: setupChoiceColumns(locale),
+    tableDirection: setupChoiceTableDirection(locale),
     showColumnHeaders: false,
     choices: [
       {
@@ -1192,6 +1201,7 @@ export async function promptTtsCapability(
     title: setupCopyText(locale, "setupModules.voice.title"),
     message: `${setupCopyText(locale, "setupEditor.prompt.voice.summary")}\n${setupCopyText(locale, "setupEditor.prompt.voice.ttsProvider")}\n`,
     columns: setupChoiceColumns(locale),
+    tableDirection: setupChoiceTableDirection(locale),
     showColumnHeaders: false,
     statusLines: setupCurrentStatusLines(locale, currentTtsRoute),
     showCurrentBadge: currentTtsRoute === undefined ? undefined : false,
@@ -1264,6 +1274,7 @@ export async function promptSttCapability(
       title: setupCopyText(locale, "setupModules.voice.title"),
       message: `${setupCopyText(locale, "setupEditor.prompt.voice.summary")}\n${setupCopyText(locale, "setupEditor.prompt.voice.sttProvider")}\n`,
       columns: setupChoiceColumns(locale),
+      tableDirection: setupChoiceTableDirection(locale),
       showColumnHeaders: false,
       statusLines: setupCurrentStatusLines(locale, currentSttRoute),
       showCurrentBadge: currentSttRoute === undefined ? undefined : false,
@@ -1292,6 +1303,7 @@ export async function promptSttCapability(
         title: setupCopyText(locale, "setupEditor.prompt.voice.localModel.title"),
         message: `${setupCopyText(locale, "setupEditor.prompt.voice.localModel")}\n`,
         columns: setupChoiceColumns(locale),
+        tableDirection: setupChoiceTableDirection(locale),
         showColumnHeaders: false,
         statusLines: setupCurrentStatusLines(locale, currentLocalModelLabel),
         showCurrentBadge: currentLocalModelLabel === undefined ? undefined : false,
@@ -1405,6 +1417,7 @@ export async function promptVisionCapability(
     title: setupCopyText(locale, "setupModules.vision.title"),
     message: `${setupCopyText(locale, "setupEditor.prompt.vision.summary")}\n${setupCopyText(locale, "setupEditor.prompt.vision.provider")}\n`,
     columns: setupChoiceColumns(locale),
+    tableDirection: setupChoiceTableDirection(locale),
     showColumnHeaders: false,
     statusLines: setupCurrentStatusLines(locale, currentVisionRoute),
     showCurrentBadge: currentVisionRoute === undefined ? undefined : false,
@@ -1553,6 +1566,7 @@ export async function promptBrowserCapability(
       title: setupCopyText(locale, "setupEditor.prompt.browser.mode.title"),
       message: `${setupCopyText(locale, "setupEditor.prompt.browser.mode.body")}\n`,
       columns: setupChoiceColumns(locale),
+      tableDirection: setupChoiceTableDirection(locale),
       showColumnHeaders: false,
       statusLines: setupCurrentStatusLines(locale, hasCurrentBrowserState ? currentModeLabel : undefined),
       showCurrentBadge: hasCurrentBrowserState ? false : undefined,
