@@ -97,16 +97,26 @@ function isValidProviderReplayEcho(value: unknown): value is ProviderReplayEcho 
     return false;
   }
   const record = value as Record<string, unknown>;
+  const provenance = providerReplayEchoProvenance(record.provenance);
   return record.field === "reasoning_content" &&
     typeof record.value === "string" &&
     isProviderReplayEchoFamily(record.providerFamily) &&
     record.apiMode === "openai_chat_completions" &&
     typeof record.chars === "number" &&
-    record.chars === record.value.length;
+    record.chars === record.value.length &&
+    provenance !== false &&
+    (provenance !== "protocol-placeholder" || (record.value === " " && record.chars === 1));
 }
 
 function isProviderReplayEchoFamily(value: unknown): value is ProviderReplayEcho["providerFamily"] {
   return value === "deepseek" || value === "kimi" || value === "mimo";
+}
+
+function providerReplayEchoProvenance(value: unknown): ProviderReplayEcho["provenance"] | undefined | false {
+  if (value === undefined) {
+    return undefined;
+  }
+  return value === "provider" || value === "protocol-placeholder" ? value : false;
 }
 
 function isReadyImageAttachmentMetadata(value: unknown): boolean {

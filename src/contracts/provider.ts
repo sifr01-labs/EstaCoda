@@ -97,6 +97,7 @@ export type ProviderReplayEcho = {
   providerFamily: "deepseek" | "kimi" | "mimo";
   apiMode: "openai_chat_completions";
   chars: number;
+  provenance?: "provider" | "protocol-placeholder";
 };
 
 export type ProviderMessage = {

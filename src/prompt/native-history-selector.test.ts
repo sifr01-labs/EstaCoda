@@ -261,4 +261,33 @@ describe("selectNativeHistoryWindow", () => {
     expect(statsJson).not.toContain("sensitive tool result");
     expect(statsJson).not.toContain("src/index.ts");
   });
+
+  it("does not count invalid protocol placeholder replay echo when budgeting tool groups", () => {
+    const noEchoTurn = providerToolTurn("tool-turn", undefined, {
+      providerReplayEcho: undefined
+    });
+    const noEchoSelection = selectNativeHistoryWindow([
+      noEchoTurn,
+      toolResult("tool-result", "call-1")
+    ], { maxTokens: 10_000 });
+    const noEchoCost = noEchoSelection.stats.estimatedTokens;
+    const invalidPlaceholderValue = "not blank ".repeat(1000);
+    const invalidPlaceholderTurn = providerToolTurn("tool-turn", undefined, {
+      providerReplayEcho: {
+        field: "reasoning_content",
+        value: invalidPlaceholderValue,
+        providerFamily: "deepseek",
+        apiMode: "openai_chat_completions",
+        chars: invalidPlaceholderValue.length,
+        provenance: "protocol-placeholder"
+      }
+    });
+
+    const selection = selectNativeHistoryWindow([
+      invalidPlaceholderTurn,
+      toolResult("tool-result", "call-1")
+    ], { maxTokens: noEchoCost });
+
+    expect(ids(selection.selectedUnits)).toEqual(["tool-turn", "tool-result"]);
+  });
 });

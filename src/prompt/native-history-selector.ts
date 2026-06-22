@@ -193,13 +193,16 @@ function providerReplayEcho(value: unknown): ProviderReplayEcho | undefined {
     return undefined;
   }
   const record = value as Record<string, unknown>;
+  const provenance = providerReplayEchoProvenance(record.provenance);
   if (
     record.field !== "reasoning_content" ||
     typeof record.value !== "string" ||
     !isProviderReplayEchoFamily(record.providerFamily) ||
     record.apiMode !== "openai_chat_completions" ||
     typeof record.chars !== "number" ||
-    record.chars !== record.value.length
+    record.chars !== record.value.length ||
+    provenance === false ||
+    (provenance === "protocol-placeholder" && (record.value !== " " || record.chars !== 1))
   ) {
     return undefined;
   }
@@ -208,12 +211,20 @@ function providerReplayEcho(value: unknown): ProviderReplayEcho | undefined {
     value: record.value,
     providerFamily: record.providerFamily,
     apiMode: "openai_chat_completions",
-    chars: record.chars
+    chars: record.chars,
+    ...(provenance === undefined ? {} : { provenance })
   };
 }
 
 function isProviderReplayEchoFamily(value: unknown): value is ProviderReplayEcho["providerFamily"] {
   return value === "deepseek" || value === "kimi" || value === "mimo";
+}
+
+function providerReplayEchoProvenance(value: unknown): ProviderReplayEcho["provenance"] | undefined | false {
+  if (value === undefined) {
+    return undefined;
+  }
+  return value === "provider" || value === "protocol-placeholder" ? value : false;
 }
 
 function countUnitMessages(units: NativeHistoryUnit[]): number {

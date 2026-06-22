@@ -205,6 +205,87 @@ describe("buildNativeHistoryMessages", () => {
     expect(crossProvider.stats.strippedProviderReplayEcho).toBe(1);
   });
 
+  it("preserves valid provider replay echo provenance when carrying echo", () => {
+    const echoes = [
+      {
+        field: "reasoning_content",
+        value: "old provider reasoning",
+        providerFamily: "kimi",
+        apiMode: "openai_chat_completions",
+        chars: "old provider reasoning".length
+      },
+      {
+        field: "reasoning_content",
+        value: "provider reasoning",
+        providerFamily: "kimi",
+        apiMode: "openai_chat_completions",
+        chars: "provider reasoning".length,
+        provenance: "provider"
+      },
+      {
+        field: "reasoning_content",
+        value: " ",
+        providerFamily: "kimi",
+        apiMode: "openai_chat_completions",
+        chars: 1,
+        provenance: "protocol-placeholder"
+      }
+    ];
+
+    for (const echo of echoes) {
+      const result = buildNativeHistoryMessages([
+        providerToolTurn("agent-call", "", { providerReplayEcho: echo }),
+        toolResult("tool-1", "call-1")
+      ], {
+        targetProviderFamily: "kimi",
+        targetApiMode: "openai_chat_completions"
+      });
+
+      expect(result.messages[0]?.providerReplayEcho).toEqual(echo);
+    }
+  });
+
+  it("drops invalid provider replay echo provenance", () => {
+    const invalidEchoes = [
+      {
+        field: "reasoning_content",
+        value: "not blank",
+        providerFamily: "kimi",
+        apiMode: "openai_chat_completions",
+        chars: "not blank".length,
+        provenance: "protocol-placeholder"
+      },
+      {
+        field: "reasoning_content",
+        value: " ",
+        providerFamily: "kimi",
+        apiMode: "openai_chat_completions",
+        chars: 2,
+        provenance: "protocol-placeholder"
+      },
+      {
+        field: "reasoning_content",
+        value: "old provider reasoning",
+        providerFamily: "kimi",
+        apiMode: "openai_chat_completions",
+        chars: "old provider reasoning".length,
+        provenance: "historical"
+      }
+    ];
+
+    for (const providerReplayEcho of invalidEchoes) {
+      const result = buildNativeHistoryMessages([
+        providerToolTurn("agent-call", "", { providerReplayEcho }),
+        toolResult("tool-1", "call-1")
+      ], {
+        targetProviderFamily: "kimi",
+        targetApiMode: "openai_chat_completions"
+      });
+
+      expect(result.messages[0]).not.toHaveProperty("providerReplayEcho");
+    }
+  });
+
   it("drops orphan tool messages", () => {
     const result = buildNativeHistoryMessages([
       toolResult("orphan", "missing-call", "orphaned"),

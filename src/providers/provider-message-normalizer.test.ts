@@ -86,6 +86,81 @@ describe("sanitizeProviderBoundMessage", () => {
     expect(sanitized).not.toHaveProperty("raw");
   });
 
+  it("preserves valid provider replay echo provenance", () => {
+    const oldEcho = {
+      field: "reasoning_content",
+      value: "old provider reasoning",
+      providerFamily: "kimi",
+      apiMode: "openai_chat_completions",
+      chars: "old provider reasoning".length
+    };
+    const providerEcho = {
+      ...oldEcho,
+      value: "new provider reasoning",
+      chars: "new provider reasoning".length,
+      provenance: "provider"
+    };
+    const placeholderEcho = {
+      field: "reasoning_content",
+      value: " ",
+      providerFamily: "kimi",
+      apiMode: "openai_chat_completions",
+      chars: 1,
+      provenance: "protocol-placeholder"
+    };
+
+    for (const providerReplayEcho of [oldEcho, providerEcho, placeholderEcho]) {
+      const sanitized = sanitizeProviderBoundMessage({
+        role: "assistant",
+        content: "",
+        toolCalls: [{ id: "call-1", name: "files.read", argumentsText: "{}" }],
+        providerReplayEcho
+      } as ProviderMessage) as ProviderMessage;
+
+      expect(sanitized.providerReplayEcho).toEqual(providerReplayEcho);
+    }
+  });
+
+  it("drops invalid provider replay echo provenance", () => {
+    const invalidEchoes = [
+      {
+        field: "reasoning_content",
+        value: "not blank",
+        providerFamily: "kimi",
+        apiMode: "openai_chat_completions",
+        chars: "not blank".length,
+        provenance: "protocol-placeholder"
+      },
+      {
+        field: "reasoning_content",
+        value: " ",
+        providerFamily: "kimi",
+        apiMode: "openai_chat_completions",
+        chars: 2,
+        provenance: "protocol-placeholder"
+      },
+      {
+        field: "reasoning_content",
+        value: "old provider reasoning",
+        providerFamily: "kimi",
+        apiMode: "openai_chat_completions",
+        chars: "old provider reasoning".length,
+        provenance: "historical"
+      }
+    ];
+
+    for (const providerReplayEcho of invalidEchoes) {
+      const sanitized = sanitizeProviderBoundMessage({
+        role: "assistant",
+        content: "",
+        toolCalls: [{ id: "call-1", name: "files.read", argumentsText: "{}" }],
+        providerReplayEcho
+      } as ProviderMessage) as ProviderMessage;
+
+      expect(sanitized).not.toHaveProperty("providerReplayEcho");
+    }
+  });
+
   it("strips provider replay echo outside assistant messages with tool calls", () => {
     const providerReplayEcho = {
       field: "reasoning_content",

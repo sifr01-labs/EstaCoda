@@ -170,6 +170,41 @@ describe("rough token estimator", () => {
     })).toBe(MESSAGE_FRAMING_TOKEN_ESTIMATE);
   });
 
+  it("counts protocol placeholder replay echo as one character", () => {
+    const placeholderEcho = {
+      field: "reasoning_content" as const,
+      value: " ",
+      providerFamily: "kimi" as const,
+      apiMode: "openai_chat_completions" as const,
+      chars: 1,
+      provenance: "protocol-placeholder" as const
+    };
+    const invalidPlaceholderEcho = {
+      ...placeholderEcho,
+      value: "not blank",
+      chars: "not blank".length
+    };
+    const toolCall = {
+      id: "call-1",
+      name: "files.read",
+      argumentsText: "{}"
+    };
+    const baseChars = toolCall.id.length + toolCall.name.length + toolCall.argumentsText.length;
+
+    expect(estimateMessageTokensRough({
+      role: "assistant",
+      content: "",
+      toolCalls: [toolCall],
+      providerReplayEcho: placeholderEcho
+    })).toBe(MESSAGE_FRAMING_TOKEN_ESTIMATE + estimateChars(baseChars + 1));
+    expect(estimateMessageTokensRough({
+      role: "assistant",
+      content: "",
+      toolCalls: [toolCall],
+      providerReplayEcho: invalidPlaceholderEcho
+    })).toBe(MESSAGE_FRAMING_TOKEN_ESTIMATE + estimateChars(baseChars));
+  });
+
   it("ignores raw reasoning and runtime-only provider fields", () => {
     const unsafeMessage = {
       role: "assistant",
