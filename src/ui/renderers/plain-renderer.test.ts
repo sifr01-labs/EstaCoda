@@ -1915,9 +1915,11 @@ describe("PlainRenderer — prompt chrome rails", () => {
       modelLabel: "openai/gpt-4.1",
       turnState: "idle",
       contextUsage: { filled: 1024, total: 128000 },
+      sessionElapsedMs: 86_000,
     });
     const out = renderSessionStatusRail(vm, "ar");
-    expect(out).toContain(`خامل | 1% | ${isolateLtr("1.0k/128k")} السياق | ${isolateLtr("openai/gpt-4.1")} *`);
+    expect(out).toContain(isolateLtr(`* ${isolateLtr("openai/gpt-4.1")} | ${isolateRtl("السياق")} ${isolateLtr("1.0k/128k")} | 1% | ${isolateLtr("الجلسة 1د 26ث")} | ${isolateRtl("خامل")}`));
+    expect(out).not.toContain("1m 26s");
     assertNoAnsi(out);
   });
 

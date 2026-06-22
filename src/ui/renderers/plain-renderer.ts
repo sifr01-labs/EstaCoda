@@ -358,7 +358,28 @@ function formatDuration(ms: number): string {
   return `${(ms / 1000).toFixed(ms >= 10000 ? 0 : 1)}s`;
 }
 
-function formatRailDuration(ms: number): string {
+function formatRailDuration(ms: number, locale: UiLocale = "en"): string {
+  if (locale === "ar") {
+    if (ms >= 3_600_000) {
+      const totalMinutes = Math.floor(ms / 60_000);
+      const hours = Math.floor(totalMinutes / 60);
+      const minutes = totalMinutes % 60;
+      return minutes === 0 ? `${hours}س` : `${hours}س ${minutes}د`;
+    }
+
+    if (ms >= 60_000) {
+      const totalSeconds = Math.floor(ms / 1_000);
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      return seconds === 0 ? `${minutes}د` : `${minutes}د ${seconds}ث`;
+    }
+
+    if (ms < 1000) {
+      return `${Math.max(0, ms)}ملث`;
+    }
+    return `${(ms / 1000).toFixed(ms >= 10000 ? 0 : 1)}ث`;
+  }
+
   if (ms >= 3_600_000) {
     const totalMinutes = Math.floor(ms / 60_000);
     const hours = Math.floor(totalMinutes / 60);
@@ -1217,29 +1238,28 @@ function renderArabicSessionStatusRail(
   vm: SessionStatusRailViewModel,
   copy: ReturnType<typeof chromeCopy>
 ): string {
-  const parts: string[] = [];
-
-  if (vm.showTurnState !== false) {
-    parts.push(turnStateLabel(vm.turnState, copy));
-  }
-
-  if (vm.sessionElapsedMs !== undefined) {
-    parts.push(`session ${formatRailDuration(vm.sessionElapsedMs)}`);
-  }
-
-  if (vm.currentTurnSeconds !== undefined) {
-    parts.push(`turn ${formatRailDuration(vm.currentTurnSeconds * 1000)}`);
-  }
+  const parts: string[] = [`* ${isolateLtr(vm.modelLabel)}`];
 
   if (vm.contextUsage !== undefined) {
     const filled = formatContextCount(vm.contextUsage.filled);
     const total = formatContextCount(vm.contextUsage.total);
+    parts.push(`${isolateRtl(copy.context)} ${isolateLtr(`${filled}/${total}`)}`);
     parts.push(`${vm.contextUsage.total > 0 ? Math.round((vm.contextUsage.filled / vm.contextUsage.total) * 100) : 0}%`);
-    parts.push(`${isolateLtr(`${filled}/${total}`)} ${copy.context}`);
   }
 
-  parts.push(`${isolateLtr(vm.modelLabel)} *`);
-  return parts.join(" | ");
+  if (vm.sessionElapsedMs !== undefined) {
+    parts.push(isolateLtr(`الجلسة ${formatRailDuration(vm.sessionElapsedMs, "ar")}`));
+  }
+
+  if (vm.currentTurnSeconds !== undefined) {
+    parts.push(isolateLtr(`الدور ${formatRailDuration(vm.currentTurnSeconds * 1000, "ar")}`));
+  }
+
+  if (vm.showTurnState !== false) {
+    parts.push(isolateRtl(turnStateLabel(vm.turnState, copy)));
+  }
+
+  return isolateLtr(parts.join(" | "));
 }
 
 export function renderShortcutHintRail(vm: ShortcutHintRailViewModel, locale?: UiLocale): string {

@@ -2065,34 +2065,34 @@ export class StandardRenderer {
 
   #renderSessionStatusRailRtl(vm: SessionStatusRailViewModel): string {
     const eye = this.#useUnicode ? "𓂀" : "*";
+    const modelPart = `${this.#brand(eye)}  ${this.#sessionStatusModelLabel({ ...vm, modelLabel: isolateLtr(vm.modelLabel) })}`;
     const parts: string[] = [];
-
-    if (vm.showTurnState !== false) {
-      parts.push(this.#turnStateLabel(vm.turnState));
-    }
-
-    if (vm.sessionElapsedMs !== undefined) {
-      const glyph = this.#useUnicode ? "◷" : "session";
-      parts.push(`${glyph} ${formatRailDuration(vm.sessionElapsedMs)}`);
-    }
-
-    if (vm.currentTurnSeconds !== undefined) {
-      const glyph = this.#useUnicode ? "⧖" : "turn";
-      parts.push(`${glyph} ${formatRailDuration(vm.currentTurnSeconds * 1000)}`);
-    }
 
     if (vm.contextUsage !== undefined) {
       const filled = formatContextCount(vm.contextUsage.filled);
       const total = formatContextCount(vm.contextUsage.total);
+      parts.push(`${isolateRtl(this.#copy.context)} ${isolateLtr(`${filled}/${total}`)}`);
       parts.push(this.#contextBeads(vm.contextUsage.filled, vm.contextUsage.total));
-      parts.push(`${isolateLtr(`${filled}/${total}`)} ${this.#copy.context}`);
     }
 
-    const modelPart = `${this.#sessionStatusModelLabel({ ...vm, modelLabel: isolateLtr(vm.modelLabel) })}  ${this.#brand(eye)}`;
+    if (vm.sessionElapsedMs !== undefined) {
+      const glyph = this.#useUnicode ? "◷" : "session";
+      parts.push(isolateLtr(`${glyph} ${formatRailDuration(vm.sessionElapsedMs, this.#locale)}`));
+    }
+
+    if (vm.currentTurnSeconds !== undefined) {
+      const glyph = this.#useUnicode ? "⧖" : "turn";
+      parts.push(isolateLtr(`${glyph} ${formatRailDuration(vm.currentTurnSeconds * 1000, this.#locale)}`));
+    }
+
+    if (vm.showTurnState !== false) {
+      parts.push(isolateRtl(this.#turnStateLabel(vm.turnState)));
+    }
+
     const rail = parts.length > 0
-      ? `${this.#secondary(parts.join(" | "))}${this.#secondary(" | ")}${modelPart}`
+      ? `${modelPart}${this.#secondary(` | ${parts.join(" | ")}`)}`
       : modelPart;
-    return this.#truncateVisibleStable(rail, this.#capabilities.terminalWidth);
+    return this.#truncateVisibleStable(isolateLtr(rail), this.#capabilities.terminalWidth);
   }
 
   renderShortcutHintRail(vm: ShortcutHintRailViewModel): string {
@@ -2329,7 +2329,28 @@ function formatDuration(ms: number): string {
   return `${(ms / 1000).toFixed(ms >= 10000 ? 0 : 1)}s`;
 }
 
-function formatRailDuration(ms: number): string {
+function formatRailDuration(ms: number, locale: UiLocale = "en"): string {
+  if (locale === "ar") {
+    if (ms >= 3_600_000) {
+      const totalMinutes = Math.floor(ms / 60_000);
+      const hours = Math.floor(totalMinutes / 60);
+      const minutes = totalMinutes % 60;
+      return minutes === 0 ? `${hours}س` : `${hours}س ${minutes}د`;
+    }
+
+    if (ms >= 60_000) {
+      const totalSeconds = Math.floor(ms / 1_000);
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      return seconds === 0 ? `${minutes}د` : `${minutes}د ${seconds}ث`;
+    }
+
+    if (ms < 1000) {
+      return `${Math.max(0, ms)}ملث`;
+    }
+    return `${(ms / 1000).toFixed(ms >= 10000 ? 0 : 1)}ث`;
+  }
+
   if (ms >= 3_600_000) {
     const totalMinutes = Math.floor(ms / 60_000);
     const hours = Math.floor(totalMinutes / 60);
