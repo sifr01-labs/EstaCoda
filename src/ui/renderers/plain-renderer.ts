@@ -600,7 +600,10 @@ function renderPlainStructuredOnboardingOptions(vm: OnboardingPromptCardViewMode
     ? []
     : [tableDirection === "rtl"
       ? plainAlignStructuredLine(
-        `  ${plainStructuredRow(columns, Object.fromEntries(columns.map((column) => [column.key, column.header])), [], layout.widths, locale)}  `,
+        plainStructuredRtlPhysicalLine(
+          plainStructuredCells(columns, Object.fromEntries(columns.map((column) => [column.key, column.header])), [], layout.widths, locale),
+          "  "
+        ),
         layout.lineWidth,
         vm.tableAlign
       )
@@ -620,14 +623,11 @@ function renderPlainStructuredOnboardingOptions(vm: OnboardingPromptCardViewMode
     const marker = i === vm.selectedOptionIndex
       ? (tableDirection === "rtl" ? "<" : ">")
       : " ";
-    const row = plainStructuredRow(
-      columns,
-      plainStructuredOptionCells(option, columns),
-      plainOptionBadges(option, vm.showCurrentBadge),
-      layout.widths,
-      locale
-    );
-    const line = tableDirection === "rtl" ? `${row} ${marker}` : `${marker} ${row}`;
+    const cells = plainStructuredCells(columns, plainStructuredOptionCells(option, columns), plainOptionBadges(option, vm.showCurrentBadge), layout.widths, locale);
+    const row = cells.join("  ");
+    const line = tableDirection === "rtl"
+      ? plainStructuredRtlPhysicalLine(cells, ` ${marker}`)
+      : `${marker} ${row}`;
     lines.push(plainAlignStructuredLine(line, layout.lineWidth, vm.tableAlign));
   }
 
@@ -787,6 +787,16 @@ function plainStructuredRow(
   widths: readonly number[],
   locale: UiLocale
 ): string {
+  return plainStructuredCells(columns, cells, badges, widths, locale).join("  ");
+}
+
+function plainStructuredCells(
+  columns: readonly OnboardingPromptColumn[],
+  cells: Readonly<Record<string, string>>,
+  badges: readonly string[],
+  widths: readonly number[],
+  locale: UiLocale
+): string[] {
   return columns.map((column, index) => {
     const width = widths[index] ?? 1;
     const value = cells[column.key] ?? "";
@@ -795,7 +805,11 @@ function plainStructuredRow(
     }
     const localized = locale === "ar" ? plainStructuredArabicCell(value) : value;
     return plainStructuredPadCell(truncateVisible(localized, width), width, column.align);
-  }).join("  ");
+  });
+}
+
+function plainStructuredRtlPhysicalLine(cells: readonly string[], markerCell: string): string {
+  return `${cells.map((cell) => isolateLtr(cell)).join(isolateLtr("  "))}${isolateLtr(markerCell)}`;
 }
 
 function plainStructuredPadCell(text: string, width: number, align?: OnboardingPromptColumn["align"]): string {

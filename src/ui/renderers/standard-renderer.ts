@@ -795,7 +795,7 @@ export class StandardRenderer {
     const lines: string[] = [];
 
     if (vm.showColumnHeaders !== false) {
-      const header = this.#structuredPromptRow(
+      const headerCells = this.#structuredPromptRenderedCells(
         columns,
         Object.fromEntries(columns.map((column) => [column.key, column.header])),
         [],
@@ -804,8 +804,9 @@ export class StandardRenderer {
         "ltr",
         "header"
       );
+      const header = headerCells.join("  ");
       const line = tableDirection === "rtl"
-        ? `  ${header}${" ".repeat(optionMarkerSlotWidth)}`
+        ? this.#structuredPromptRtlPhysicalLine(headerCells, " ".repeat(optionMarkerSlotWidth))
         : `  ${" ".repeat(optionMarkerSlotWidth)}${header}`;
       lines.push(this.#alignStructuredPromptTableLine(line, contentWidth, layout.lineWidth, vm.tableAlign));
     }
@@ -819,7 +820,7 @@ export class StandardRenderer {
       }
       const isSelected = i === vm.selectedOptionIndex;
       const marker = isSelected ? this.#action(tableSelectedMarker) : " ";
-      const row = this.#structuredPromptRow(
+      const cells = this.#structuredPromptRenderedCells(
         columns,
         this.#structuredPromptOptionCells(option, columns),
         this.#onboardingOptionBadges(option, vm.showCurrentBadge),
@@ -828,8 +829,9 @@ export class StandardRenderer {
         "ltr",
         "option"
       );
+      const row = tableDirection === "rtl" ? "" : cells.join("  ");
       const line = tableDirection === "rtl"
-        ? `  ${row}${optionMarkerGap}${marker}`
+        ? this.#structuredPromptRtlPhysicalLine(cells, `${optionMarkerGap}${marker}`)
         : `  ${marker}${optionMarkerGap}${row}`;
       lines.push(this.#alignStructuredPromptTableLine(line, contentWidth, layout.lineWidth, vm.tableAlign));
     }
@@ -1008,7 +1010,7 @@ export class StandardRenderer {
     return columns.find((_, index) => index !== primaryIndex) ?? columns[columns.length - 1];
   }
 
-  #structuredPromptRow(
+  #structuredPromptRenderedCells(
     columns: readonly OnboardingPromptColumn[],
     cells: Readonly<Record<string, string>>,
     badges: readonly string[],
@@ -1016,8 +1018,8 @@ export class StandardRenderer {
     locale: UiLocale,
     direction: TextDirection,
     kind: "header" | "option"
-  ): string {
-    const renderedCells = columns.map((column, index) => {
+  ): string[] {
+    return columns.map((column, index) => {
       const rawValue = cells[column.key] ?? "";
       const width = widths[index] ?? 1;
       if (kind === "option" && index === columns.length - 1 && badges.length > 0) {
@@ -1031,7 +1033,11 @@ export class StandardRenderer {
           : this.#muted(this.#localizedPromptCell(rawValue, locale, direction, width));
       return this.#padStructuredPromptCell(text, width, column.align);
     });
-    return renderedCells.join("  ");
+  }
+
+  #structuredPromptRtlPhysicalLine(cells: readonly string[], markerCell: string): string {
+    const physicalCells = cells.map((cell) => isolateLtr(cell));
+    return `  ${physicalCells.join(isolateLtr("  "))}${isolateLtr(markerCell)}`;
   }
 
   #structuredPromptCellWithBadges(
