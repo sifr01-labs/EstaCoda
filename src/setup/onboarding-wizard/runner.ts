@@ -11,6 +11,7 @@ import { promptForApiKeyInput } from "../../cli/secret-prompt.js";
 import {
   createProviderModelSelectionFlow,
   type FlowEngine,
+  type ProviderModelSelectionResult,
 } from "../../providers/provider-model-selection-flow.js";
 import { getProviderMetadata } from "../../providers/provider-metadata.js";
 import { selectProviderModelRoute } from "../provider-model-route-prompt.js";
@@ -27,7 +28,7 @@ import {
   validateOnboardingWorkspacePath,
   type OnboardingInvalidWorkspaceAction,
 } from "./workspace.js";
-import { promptInterfaceLanguageAndStyle } from "../interface-preferences.js";
+import { promptInterfaceLanguageAndStyle, type InterfaceLanguageAndStyleSelection } from "../interface-preferences.js";
 import { buildOnboardingWizardDraftBundle, type SetupDraft, type SetupDraftBundle } from "../setup-drafts.js";
 import {
   buildSetupReviewManifest,
@@ -57,6 +58,7 @@ import {
   setupProviderCredentialQuestion,
   setupPromptWithDefault,
   setupPromptContext,
+  type SetupPromptContext,
   setupCopyText,
   showSetupCard,
 } from "../setup-prompts.js";
@@ -120,6 +122,18 @@ type PendingCredentialWrite = SetupDeferredSecretWrite;
 
 type WorkspaceTrustAction = "trust" | "change-workspace" | "decide-later";
 
+type OnboardingStep =
+  | "language"
+  | "workspace"
+  | "workspace-trust"
+  | "primary-route"
+  | "credential"
+  | "security"
+  | "agent-evolution"
+  | "optional-start"
+  | "optional-menu"
+  | "summary";
+
 type OnboardingOptionalCapabilityFlowResult = {
   readonly selected: readonly OnboardingSupportedOptionalCapabilityId[];
   readonly summaries: OnboardingOptionalCapabilitySummaries;
@@ -129,6 +143,30 @@ type OnboardingOptionalCapabilityFlowResult = {
     readonly whatsapp?: OnboardingOptionalCapabilitySummaryStatus;
     readonly webSearch?: OnboardingOptionalCapabilitySummaryStatus;
   };
+};
+
+type OnboardingWizardDraft = {
+  localizedOptions?: FirstRunSetupRunnerOptions;
+  promptContext?: SetupPromptContext;
+  interfaceChoice?: InterfaceLanguageAndStyleSelection;
+  workspaceRoot?: string;
+  workspaceTrusted?: boolean;
+  primaryRoute?: ProviderModelSelectionResult;
+  primaryCredential?: OnboardingWizardSelections["primaryCredential"];
+  credentialStatus: OnboardingCredentialSummaryStatus;
+  pendingCredentialWrites: PendingCredentialWrite[];
+  securityMode?: NonNullable<OnboardingWizardSelections["securityMode"]>;
+  workflowLearning?: NonNullable<OnboardingWizardSelections["workflowLearning"]>;
+  profileId?: string;
+  configPath?: string;
+  optionalCapabilityFlow?: OnboardingOptionalCapabilityFlowResult;
+  selections?: OnboardingWizardSelections;
+  wizardState?: OnboardingWizardState;
+  draftBundle?: SetupDraftBundle;
+  reviewManifest?: SetupReviewManifest;
+  summaryText?: string;
+  reviewAccepted?: boolean;
+  finalSelections?: OnboardingWizardSelections;
 };
 
 export async function runFirstRunSetup(
@@ -148,221 +186,324 @@ export async function runFirstRunSetup(
     options: [{ id: "begin", label: setupCopyText(initialLocale, "onboarding.common.begin") }],
   });
 
-  const interfaceChoice = await promptInterfaceLanguageAndStyle(prompt, {
-    initialLocale,
-    currentLanguage: options.defaultSelections?.language ?? "en",
-    currentFlavor: options.defaultSelections?.interfaceFlavor,
-  });
-  const language = interfaceChoice.language;
-  const localizedOptions: FirstRunSetupRunnerOptions = {
-    ...options,
-    prompt: withPromptUiContext(prompt, promptUiContextForLocale(language)),
+  const draft: OnboardingWizardDraft = {
+    credentialStatus: "not_set",
+    pendingCredentialWrites: [],
   };
-  const promptContext = setupPromptContext(localizedOptions.prompt, language);
+  let step: OnboardingStep = "language";
+  let setupReviewReady = false;
 
-  const workspaceSelection = await promptForWorkspaceAndTrust(localizedOptions, language);
-  const workspaceRoot = workspaceSelection.workspaceRoot;
-  const workspaceTrusted = workspaceSelection.workspaceTrusted;
-
-  const routeSelection = await selectProviderModelRoute({
-    prompt: localizedOptions.prompt,
-    flowEngine,
-    locale: language,
-    currentProviderId: options.defaultSelections?.primaryProvider,
-    currentModelId: options.defaultSelections?.primaryModel,
-    allowBack: false,
-    allowCancel: false,
-    mode: "onboarding",
-  });
-  if (routeSelection.kind !== "selected") {
-    throw new Error(routeSelection.kind === "diagnostic"
-      ? routeSelection.output
-      : "Provider/model selection was not completed.");
-  }
-
-  const resolution = routeSelection.selection;
-  const primaryProvider = resolution.provider;
-  const primaryModel = resolution.model;
-
-  const primaryBaseUrl = resolution.baseUrl;
-  const primaryContextWindowTokens = resolution.profile.contextWindowTokens;
-  const primaryApiMode = resolution.apiMode;
-  const primaryAuthMethod = resolution.authMethod;
-
-  let primaryCredential: OnboardingWizardSelections["primaryCredential"];
-  const pendingCredentialWrites: PendingCredentialWrite[] = [];
-  let credentialStatus: OnboardingCredentialSummaryStatus = "not_set";
-
-  switch (resolution.credentialAction.kind) {
-    case "none": {
-      primaryCredential = { kind: "none" };
-      write(options, `${setupCopyText(language, "onboarding.providers.primaryCredential.localProviderSkip")}\n`);
-      break;
-    }
-    case "reuse": {
-      const ref = resolution.credentialAction.reference;
-      if (!ref.startsWith("env:")) {
-        throw new Error(`Malformed reuse credential reference: ${ref}`);
-      }
-      const envVarName = ref.slice(4);
-      primaryCredential = { kind: "env", name: envVarName };
-      credentialStatus = "existing_detected";
-      write(options, `Using existing credential from ${envVarName}.\n`);
-      break;
-    }
-    case "collect": {
-      const envVarName = resolution.credentialAction.envVarName;
-      primaryCredential = { kind: "env", name: envVarName };
-      const promptResult = await promptForApiKeyInput({
-        prompt: localizedOptions.prompt,
-        providerId: primaryProvider,
-        envVarName,
-        question: setupProviderCredentialQuestion(language, {
-          providerName: getProviderMetadata(primaryProvider).displayName,
-          envVarName,
-        }),
-      });
-
-      if (promptResult.kind === "skipped") {
-        write(options, `Config will expect ${envVarName} to be available externally.\n`);
-      } else {
-        credentialStatus = "new_pending";
-        pendingCredentialWrites.push({
-          envVarName: promptResult.envVarName,
-          value: promptResult.value,
+  while (!setupReviewReady) {
+    switch (step) {
+      case "language": {
+        const interfaceChoice = await promptInterfaceLanguageAndStyle(prompt, {
+          initialLocale,
+          currentLanguage: options.defaultSelections?.language ?? "en",
+          currentFlavor: options.defaultSelections?.interfaceFlavor,
         });
+        const language = interfaceChoice.language;
+        const localizedOptions: FirstRunSetupRunnerOptions = {
+          ...options,
+          prompt: withPromptUiContext(prompt, promptUiContextForLocale(language)),
+        };
+        draft.interfaceChoice = interfaceChoice;
+        draft.localizedOptions = localizedOptions;
+        draft.promptContext = setupPromptContext(localizedOptions.prompt, language);
+        step = "workspace";
+        break;
       }
-      break;
-    }
 
+      case "workspace": {
+        const interfaceChoice = requireDraftValue(draft.interfaceChoice, "interface choice");
+        const localizedOptions = requireDraftValue(draft.localizedOptions, "localized setup options");
+        draft.workspaceRoot = await promptForCanonicalWorkspaceRoot(localizedOptions, interfaceChoice.language);
+        step = "workspace-trust";
+        break;
+      }
+
+      case "workspace-trust": {
+        const interfaceChoice = requireDraftValue(draft.interfaceChoice, "interface choice");
+        const localizedOptions = requireDraftValue(draft.localizedOptions, "localized setup options");
+        const workspaceRoot = requireDraftValue(draft.workspaceRoot, "workspace root");
+        const action = await promptForWorkspaceTrustAction(localizedOptions, interfaceChoice.language, workspaceRoot);
+        if (action === "change-workspace") {
+          step = "workspace";
+          break;
+        }
+        draft.workspaceTrusted = action === "trust";
+        step = "primary-route";
+        break;
+      }
+
+      case "primary-route": {
+        const interfaceChoice = requireDraftValue(draft.interfaceChoice, "interface choice");
+        const localizedOptions = requireDraftValue(draft.localizedOptions, "localized setup options");
+        const routeSelection = await selectProviderModelRoute({
+          prompt: localizedOptions.prompt,
+          flowEngine,
+          locale: interfaceChoice.language,
+          currentProviderId: options.defaultSelections?.primaryProvider,
+          currentModelId: options.defaultSelections?.primaryModel,
+          allowBack: false,
+          allowCancel: false,
+          mode: "onboarding",
+        });
+        if (routeSelection.kind !== "selected") {
+          throw new Error(routeSelection.kind === "diagnostic"
+            ? routeSelection.output
+            : "Provider/model selection was not completed.");
+        }
+        draft.primaryRoute = routeSelection.selection;
+        step = "credential";
+        break;
+      }
+
+      case "credential": {
+        const interfaceChoice = requireDraftValue(draft.interfaceChoice, "interface choice");
+        const localizedOptions = requireDraftValue(draft.localizedOptions, "localized setup options");
+        const resolution = requireDraftValue(draft.primaryRoute, "primary provider/model route");
+        draft.credentialStatus = "not_set";
+        draft.pendingCredentialWrites = [];
+
+        switch (resolution.credentialAction.kind) {
+          case "none": {
+            draft.primaryCredential = { kind: "none" };
+            write(options, `${setupCopyText(interfaceChoice.language, "onboarding.providers.primaryCredential.localProviderSkip")}\n`);
+            break;
+          }
+          case "reuse": {
+            const ref = resolution.credentialAction.reference;
+            if (!ref.startsWith("env:")) {
+              throw new Error(`Malformed reuse credential reference: ${ref}`);
+            }
+            const envVarName = ref.slice(4);
+            draft.primaryCredential = { kind: "env", name: envVarName };
+            draft.credentialStatus = "existing_detected";
+            write(options, `Using existing credential from ${envVarName}.\n`);
+            break;
+          }
+          case "collect": {
+            const envVarName = resolution.credentialAction.envVarName;
+            draft.primaryCredential = { kind: "env", name: envVarName };
+            const promptResult = await promptForApiKeyInput({
+              prompt: localizedOptions.prompt,
+              providerId: resolution.provider,
+              envVarName,
+              question: setupProviderCredentialQuestion(interfaceChoice.language, {
+                providerName: getProviderMetadata(resolution.provider).displayName,
+                envVarName,
+              }),
+            });
+
+            if (promptResult.kind === "skipped") {
+              write(options, `Config will expect ${envVarName} to be available externally.\n`);
+            } else {
+              draft.credentialStatus = "new_pending";
+              draft.pendingCredentialWrites.push({
+                envVarName: promptResult.envVarName,
+                value: promptResult.value,
+              });
+            }
+            break;
+          }
+        }
+
+        step = "security";
+        break;
+      }
+
+      case "security": {
+        const interfaceChoice = requireDraftValue(draft.interfaceChoice, "interface choice");
+        const promptContext = requireDraftValue(draft.promptContext, "setup prompt context");
+        draft.securityMode = await promptSetupChoice(promptContext, {
+          title: setupCopyText(interfaceChoice.language, "onboarding.security.title"),
+          message: `${setupCopyText(interfaceChoice.language, "onboarding.security")}\n`,
+          choices: [
+            {
+              id: "adaptive",
+              label: setupCopyText(interfaceChoice.language, "onboarding.security.options.adaptive.label"),
+              description: setupCopyText(interfaceChoice.language, "onboarding.security.options.adaptive.description"),
+              value: "adaptive" as const,
+            },
+            {
+              id: "strict",
+              label: setupCopyText(interfaceChoice.language, "onboarding.security.options.strict.label"),
+              description: setupCopyText(interfaceChoice.language, "onboarding.security.options.strict.description"),
+              value: "strict" as const,
+            },
+            {
+              id: "open",
+              label: setupCopyText(interfaceChoice.language, "onboarding.security.options.open.label"),
+              description: setupCopyText(interfaceChoice.language, "onboarding.security.options.open.description"),
+              value: "open" as const,
+            },
+          ],
+          defaultValue: options.defaultSelections?.securityMode ?? "adaptive",
+        });
+        step = "agent-evolution";
+        break;
+      }
+
+      case "agent-evolution": {
+        const interfaceChoice = requireDraftValue(draft.interfaceChoice, "interface choice");
+        const promptContext = requireDraftValue(draft.promptContext, "setup prompt context");
+        draft.workflowLearning = await promptSetupChoice(promptContext, {
+          title: setupCopyText(interfaceChoice.language, "onboarding.workflowLearning.title"),
+          message: `${setupCopyText(interfaceChoice.language, "onboarding.workflowLearning")}\n`,
+          choices: [
+            {
+              id: "suggest",
+              label: setupCopyText(interfaceChoice.language, "onboarding.workflowLearning.options.suggest.label"),
+              description: setupCopyText(interfaceChoice.language, "onboarding.workflowLearning.options.suggest.description"),
+              value: "suggest" as const,
+            },
+            {
+              id: "proactive",
+              label: setupCopyText(interfaceChoice.language, "onboarding.workflowLearning.options.proactive.label"),
+              description: setupCopyText(interfaceChoice.language, "onboarding.workflowLearning.options.proactive.description"),
+              value: "proactive" as const,
+            },
+            {
+              id: "autonomous",
+              label: setupCopyText(interfaceChoice.language, "onboarding.workflowLearning.options.autonomous.label"),
+              description: setupCopyText(interfaceChoice.language, "onboarding.workflowLearning.options.autonomous.description"),
+              value: "autonomous" as const,
+            },
+            {
+              id: "none",
+              label: setupCopyText(interfaceChoice.language, "onboarding.workflowLearning.options.none.label"),
+              description: setupCopyText(interfaceChoice.language, "onboarding.workflowLearning.options.none.description"),
+              value: "none" as const,
+            },
+          ],
+          defaultValue: options.defaultSelections?.workflowLearning ?? "suggest",
+        });
+        step = "optional-start";
+        break;
+      }
+
+      case "optional-start": {
+        const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+        draft.profileId = profileId;
+        draft.configPath = resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
+        step = "optional-menu";
+        break;
+      }
+
+      case "optional-menu": {
+        const interfaceChoice = requireDraftValue(draft.interfaceChoice, "interface choice");
+        const localizedOptions = requireDraftValue(draft.localizedOptions, "localized setup options");
+        const configPath = requireDraftValue(draft.configPath, "profile config path");
+        const profileId = requireDraftValue(draft.profileId, "profile id");
+        const workspaceRoot = requireDraftValue(draft.workspaceRoot, "workspace root");
+        const workspaceTrusted = requireDraftValue(draft.workspaceTrusted, "workspace trust decision");
+        const primaryRoute = requireDraftValue(draft.primaryRoute, "primary provider/model route");
+        const securityMode = requireDraftValue(draft.securityMode, "security mode");
+        const workflowLearning = requireDraftValue(draft.workflowLearning, "Agent Evolution mode");
+        const optionalCapabilityFlow = await chooseOptionalCapabilities(localizedOptions, interfaceChoice.language, {
+          configPath,
+          profileId,
+          workspaceRoot,
+          workspaceTrusted,
+          primaryProvider: primaryRoute.provider,
+          primaryModel: primaryRoute.model,
+          securityMode,
+          workflowLearning,
+        });
+        draft.optionalCapabilityFlow = optionalCapabilityFlow;
+        draft.pendingCredentialWrites.push(...optionalCapabilityFlow.pendingCredentialWrites);
+        step = "summary";
+        break;
+      }
+
+      case "summary": {
+        const interfaceChoice = requireDraftValue(draft.interfaceChoice, "interface choice");
+        const promptContext = requireDraftValue(draft.promptContext, "setup prompt context");
+        const workspaceRoot = requireDraftValue(draft.workspaceRoot, "workspace root");
+        const workspaceTrusted = requireDraftValue(draft.workspaceTrusted, "workspace trust decision");
+        const primaryRoute = requireDraftValue(draft.primaryRoute, "primary provider/model route");
+        const primaryCredential = requireDraftValue(draft.primaryCredential, "primary credential");
+        const securityMode = requireDraftValue(draft.securityMode, "security mode");
+        const workflowLearning = requireDraftValue(draft.workflowLearning, "Agent Evolution mode");
+        const optionalCapabilityFlow = requireDraftValue(draft.optionalCapabilityFlow, "optional capability flow");
+        const configPath = requireDraftValue(draft.configPath, "profile config path");
+
+        const selections: OnboardingWizardSelections = {
+          language: interfaceChoice.language,
+          interfaceFlavor: interfaceChoice.flavor,
+          activityLabels: interfaceChoice.activityLabels,
+          workspaceRoot,
+          workspaceTrusted,
+          primaryProvider: primaryRoute.provider,
+          primaryModel: primaryRoute.model,
+          primaryBaseUrl: primaryRoute.baseUrl,
+          primaryContextWindowTokens: primaryRoute.profile.contextWindowTokens,
+          primaryApiMode: primaryRoute.apiMode,
+          primaryAuthMethod: primaryRoute.authMethod,
+          primaryCredential,
+          securityMode,
+          workflowLearning,
+          optionalCapabilities: optionalCapabilityFlow.selected,
+        };
+
+        const wizardState = onboardingWizardStateFromSelections(selections, draft.credentialStatus, optionalCapabilityFlow);
+        const draftBundle = buildOnboardingWizardDraftBundle(wizardState, {
+          configPath,
+          workspaceRoot,
+          trustStorePath: stateHome.trustJsonPath,
+        });
+        const reviewManifest = buildSetupReviewManifest([draftBundle]);
+        const summaryText = renderOnboardingWizardSummary(wizardState, interfaceChoice.language);
+        write(options, `${summaryText}\n`);
+
+        const reviewAccepted = await promptSetupChoice(promptContext, {
+          title: setupCopyText(interfaceChoice.language, "onboarding.summary.confirmTitle"),
+          message: `${summaryText}\n\n${setupCopyText(interfaceChoice.language, "onboarding.summary.confirmMessage")}\n`,
+          choices: [
+            {
+              id: "confirm",
+              label: setupCopyText(interfaceChoice.language, "onboarding.summary.confirmAction"),
+              description: setupCopyText(interfaceChoice.language, "setupApply.review.approved"),
+              value: true,
+            },
+            {
+              id: "cancel",
+              label: setupCopyText(interfaceChoice.language, "onboarding.summary.cancelAction"),
+              description: setupCopyText(interfaceChoice.language, "setupApply.review.cancelled"),
+              value: false,
+            },
+          ],
+          defaultValue: options.defaultSelections?.reviewAccepted ?? true,
+        });
+
+        draft.selections = selections;
+        draft.wizardState = wizardState;
+        draft.draftBundle = draftBundle;
+        draft.reviewManifest = reviewManifest;
+        draft.summaryText = summaryText;
+        draft.reviewAccepted = reviewAccepted;
+        draft.finalSelections = {
+          ...selections,
+          reviewAccepted,
+          saveAccepted: reviewAccepted,
+        };
+        setupReviewReady = true;
+        break;
+      }
+    }
   }
 
-  const securityMode = await promptSetupChoice(promptContext, {
-    title: setupCopyText(language, "onboarding.security.title"),
-    message: `${setupCopyText(language, "onboarding.security")}\n`,
-    choices: [
-      {
-        id: "adaptive",
-        label: setupCopyText(language, "onboarding.security.options.adaptive.label"),
-        description: setupCopyText(language, "onboarding.security.options.adaptive.description"),
-        value: "adaptive" as const,
-      },
-      {
-        id: "strict",
-        label: setupCopyText(language, "onboarding.security.options.strict.label"),
-        description: setupCopyText(language, "onboarding.security.options.strict.description"),
-        value: "strict" as const,
-      },
-      {
-        id: "open",
-        label: setupCopyText(language, "onboarding.security.options.open.label"),
-        description: setupCopyText(language, "onboarding.security.options.open.description"),
-        value: "open" as const,
-      },
-    ],
-    defaultValue: options.defaultSelections?.securityMode ?? "adaptive",
-  });
-
-  const workflowLearning = await promptSetupChoice(promptContext, {
-    title: setupCopyText(language, "onboarding.workflowLearning.title"),
-    message: `${setupCopyText(language, "onboarding.workflowLearning")}\n`,
-    choices: [
-      {
-        id: "suggest",
-        label: setupCopyText(language, "onboarding.workflowLearning.options.suggest.label"),
-        description: setupCopyText(language, "onboarding.workflowLearning.options.suggest.description"),
-        value: "suggest" as const,
-      },
-      {
-        id: "proactive",
-        label: setupCopyText(language, "onboarding.workflowLearning.options.proactive.label"),
-        description: setupCopyText(language, "onboarding.workflowLearning.options.proactive.description"),
-        value: "proactive" as const,
-      },
-      {
-        id: "autonomous",
-        label: setupCopyText(language, "onboarding.workflowLearning.options.autonomous.label"),
-        description: setupCopyText(language, "onboarding.workflowLearning.options.autonomous.description"),
-        value: "autonomous" as const,
-      },
-      {
-        id: "none",
-        label: setupCopyText(language, "onboarding.workflowLearning.options.none.label"),
-        description: setupCopyText(language, "onboarding.workflowLearning.options.none.description"),
-        value: "none" as const,
-      },
-    ],
-    defaultValue: options.defaultSelections?.workflowLearning ?? "suggest",
-  });
-
-  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
-  const configPath = resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
-  const optionalCapabilityFlow = await chooseOptionalCapabilities(localizedOptions, language, {
-    configPath,
-    profileId,
-    workspaceRoot,
-    workspaceTrusted,
-    primaryProvider,
-    primaryModel,
-    securityMode,
-    workflowLearning,
-  });
-  pendingCredentialWrites.push(...optionalCapabilityFlow.pendingCredentialWrites);
-  const optionalCapabilities = optionalCapabilityFlow.selected;
-
-  const selections: OnboardingWizardSelections = {
-    language,
-    interfaceFlavor: interfaceChoice.flavor,
-    activityLabels: interfaceChoice.activityLabels,
-    workspaceRoot,
-    workspaceTrusted,
-    primaryProvider,
-    primaryModel,
-    primaryBaseUrl,
-    primaryContextWindowTokens,
-    primaryApiMode,
-    primaryAuthMethod,
-    primaryCredential,
-    securityMode,
-    workflowLearning,
-    optionalCapabilities,
-  };
-
-  const wizardState = onboardingWizardStateFromSelections(selections, credentialStatus, optionalCapabilityFlow);
-  const draftBundle = buildOnboardingWizardDraftBundle(wizardState, {
-    configPath,
-    workspaceRoot,
-    trustStorePath: stateHome.trustJsonPath,
-  });
-  const reviewManifest = buildSetupReviewManifest([draftBundle]);
-  const summaryText = renderOnboardingWizardSummary(wizardState, language);
-  write(options, `${summaryText}\n`);
-
-  const reviewAccepted = await promptSetupChoice(promptContext, {
-    title: setupCopyText(language, "onboarding.summary.confirmTitle"),
-    message: `${summaryText}\n\n${setupCopyText(language, "onboarding.summary.confirmMessage")}\n`,
-    choices: [
-      {
-        id: "confirm",
-        label: setupCopyText(language, "onboarding.summary.confirmAction"),
-        description: setupCopyText(language, "setupApply.review.approved"),
-        value: true,
-      },
-      {
-        id: "cancel",
-        label: setupCopyText(language, "onboarding.summary.cancelAction"),
-        description: setupCopyText(language, "setupApply.review.cancelled"),
-        value: false,
-      },
-    ],
-    defaultValue: options.defaultSelections?.reviewAccepted ?? true,
-  });
-
-  const finalSelections = {
-    ...selections,
-    reviewAccepted,
-    saveAccepted: reviewAccepted,
-  };
+  const interfaceChoice = requireDraftValue(draft.interfaceChoice, "interface choice");
+  const language = interfaceChoice.language;
+  const localizedOptions = requireDraftValue(draft.localizedOptions, "localized setup options");
+  const workspaceRoot = requireDraftValue(draft.workspaceRoot, "workspace root");
+  const workspaceTrusted = requireDraftValue(draft.workspaceTrusted, "workspace trust decision");
+  const profileId = requireDraftValue(draft.profileId, "profile id");
+  const reviewManifest = requireDraftValue(draft.reviewManifest, "setup review manifest");
+  const reviewAccepted = requireDraftValue(draft.reviewAccepted, "setup review decision");
+  const finalSelections = requireDraftValue(draft.finalSelections, "final onboarding selections");
+  const wizardState = requireDraftValue(draft.wizardState, "onboarding wizard state");
+  const draftBundle = requireDraftValue(draft.draftBundle, "onboarding draft bundle");
   const applyPlanningResult = planSetupApply(reviewAccepted
     ? { kind: "approved-review-result", manifest: reviewManifest }
     : { kind: "cancelled-review-result", manifest: reviewManifest, reason: "User cancelled summary confirmation." });
@@ -370,8 +511,8 @@ export async function runFirstRunSetup(
       ? await executeSetupApplyPlan(applyPlanningResult.applyPlan, options.applyExecutor, {
         ...options.applyFlowOptions,
         mode: "firstRunTolerant",
-        ...(pendingCredentialWrites.length > 0
-          ? { deferredSecretWrites: pendingCredentialWrites }
+        ...(draft.pendingCredentialWrites.length > 0
+          ? { deferredSecretWrites: draft.pendingCredentialWrites }
           : {}),
       })
     : undefined;
@@ -527,50 +668,36 @@ function onboardingWizardStateFromSelections(
   };
 }
 
-async function promptForWorkspaceAndTrust(
+async function promptForWorkspaceTrustAction(
   options: FirstRunSetupRunnerOptions,
-  language: SetupCopyLocale
-): Promise<{
-  readonly workspaceRoot: string;
-  readonly workspaceTrusted: boolean;
-}> {
-  while (true) {
-    const workspaceRoot = await promptForCanonicalWorkspaceRoot(options, language);
-    const action = await promptSetupChoice<WorkspaceTrustAction>(options.prompt, {
-      title: setupCopyText(language, "onboarding.workspace.trust.title"),
-      message: `${formatSetupCopy(language, "onboarding.workspace.trust", { workspacePath: workspaceRoot })}\n`,
-      choices: [
-        {
-          id: "trust",
-          label: setupCopyText(language, "onboarding.workspace.trustAction.label"),
-          description: setupCopyText(language, "onboarding.workspace.trustAction.description"),
-          value: "trust",
-        },
-        {
-          id: "change-workspace",
-          label: setupCopyText(language, "onboarding.workspace.changeWorkspaceAction.label"),
-          description: setupCopyText(language, "onboarding.workspace.changeWorkspaceAction.description"),
-          value: "change-workspace",
-        },
-        {
-          id: "decide-later",
-          label: setupCopyText(language, "onboarding.workspace.deferTrustAction.label"),
-          description: setupCopyText(language, "onboarding.workspace.deferTrustAction.description"),
-          value: "decide-later",
-        },
-      ],
-      defaultValue: options.defaultSelections?.workspaceTrusted === false ? "decide-later" : "trust",
-    });
-
-    if (action === "change-workspace") {
-      continue;
-    }
-
-    return {
-      workspaceRoot,
-      workspaceTrusted: action === "trust",
-    };
-  }
+  language: SetupCopyLocale,
+  workspaceRoot: string
+): Promise<WorkspaceTrustAction> {
+  return promptSetupChoice<WorkspaceTrustAction>(options.prompt, {
+    title: setupCopyText(language, "onboarding.workspace.trust.title"),
+    message: `${formatSetupCopy(language, "onboarding.workspace.trust", { workspacePath: workspaceRoot })}\n`,
+    choices: [
+      {
+        id: "trust",
+        label: setupCopyText(language, "onboarding.workspace.trustAction.label"),
+        description: setupCopyText(language, "onboarding.workspace.trustAction.description"),
+        value: "trust",
+      },
+      {
+        id: "change-workspace",
+        label: setupCopyText(language, "onboarding.workspace.changeWorkspaceAction.label"),
+        description: setupCopyText(language, "onboarding.workspace.changeWorkspaceAction.description"),
+        value: "change-workspace",
+      },
+      {
+        id: "decide-later",
+        label: setupCopyText(language, "onboarding.workspace.deferTrustAction.label"),
+        description: setupCopyText(language, "onboarding.workspace.deferTrustAction.description"),
+        value: "decide-later",
+      },
+    ],
+    defaultValue: options.defaultSelections?.workspaceTrusted === false ? "decide-later" : "trust",
+  });
 }
 
 async function promptForCanonicalWorkspaceRoot(
@@ -1100,4 +1227,11 @@ function onboardingOptionalCapabilityResult(
 
 function write(options: FirstRunSetupRunnerOptions, value: string): void {
   options.output?.write(value);
+}
+
+function requireDraftValue<T>(value: T | undefined, label: string): T {
+  if (value === undefined) {
+    throw new Error(`Onboarding draft missing ${label}.`);
+  }
+  return value;
 }
