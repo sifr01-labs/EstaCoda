@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import type { ProviderResponse } from "../contracts/provider.js";
 import type { ProviderExecutionResult, ProviderAttempt } from "../providers/provider-executor.js";
 import {
-  compactProviderExecutionAnnotation,
   renderProviderExecutionSummary,
   summarizeProviderExecution
 } from "./provider-execution-summary.js";
@@ -62,7 +61,6 @@ describe("provider execution summary", () => {
       attempts: [],
       status: "not-run"
     });
-    expect(compactProviderExecutionAnnotation(summary)).toBeUndefined();
     expect(renderProviderExecutionSummary(summary)).toEqual([]);
   });
 
@@ -220,25 +218,7 @@ describe("provider execution summary", () => {
     });
   });
 
-  it("renders compact fallback annotation with served-by, fallback-from, and reason", () => {
-    const summary = summarizeProviderExecution({
-      execution: execution({
-        ok: true,
-        response: response("deepseek", "deepseek-v4-pro"),
-        fallbackUsed: true,
-        attempts: [
-          attempt({ provider: "kimi", model: "kimi-k2.7-code", ok: false, errorClass: "rate-limit" }),
-          attempt({ provider: "deepseek", model: "deepseek-v4-pro", ok: true })
-        ]
-      })
-    });
-
-    expect(compactProviderExecutionAnnotation(summary)).toBe(
-      "served_by=deepseek/deepseek-v4-pro fallback_from=kimi/kimi-k2.7-code reason=rate-limit"
-    );
-  });
-
-  it("does not leak credential IDs in rendered output or compact annotations", () => {
+  it("does not leak credential IDs in rendered output", () => {
     const summary = summarizeProviderExecution({
       execution: execution({
         ok: true,
@@ -262,7 +242,6 @@ describe("provider execution summary", () => {
       })
     });
     const rendered = renderProviderExecutionSummary(summary).join("\n");
-    const annotation = compactProviderExecutionAnnotation(summary) ?? "";
 
     expect(summary.attempts.map((summaryAttempt) => summaryAttempt.credentialId)).toEqual([
       undefined,
@@ -272,7 +251,5 @@ describe("provider execution summary", () => {
     expect(JSON.stringify(summary)).not.toContain("DEEPSEEK_API_KEY");
     expect(rendered).not.toContain("KIMI_API_KEY");
     expect(rendered).not.toContain("DEEPSEEK_API_KEY");
-    expect(annotation).not.toContain("KIMI_API_KEY");
-    expect(annotation).not.toContain("DEEPSEEK_API_KEY");
   });
 });

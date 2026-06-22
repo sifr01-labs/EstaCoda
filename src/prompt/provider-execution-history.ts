@@ -2,7 +2,6 @@ import type {
   ProviderAttemptSummary,
   ProviderExecutionSummary
 } from "../contracts/provider.js";
-import { compactProviderExecutionAnnotation } from "../runtime/provider-execution-summary.js";
 
 export function sanitizeProviderExecutionMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
   if (metadata === undefined) {
@@ -17,29 +16,6 @@ export function sanitizeProviderExecutionMetadata(metadata: Record<string, unkno
   return {
     providerExecution: sanitized
   };
-}
-
-export function providerExecutionHistoryAnnotation(metadata: Record<string, unknown> | undefined): string | undefined {
-  const summary = sanitizeProviderExecutionSummary(metadata?.providerExecution);
-  if (summary === undefined) {
-    return undefined;
-  }
-
-  if (summary.status === "failed") {
-    const failures = summary.attempts
-      .filter((attempt) => !attempt.ok)
-      .map((attempt) => `${attempt.model}:${attempt.errorClass ?? "unknown"}`);
-    return `provider_failed=${failures.join(",") || "no-route"}`;
-  }
-
-  const annotation = compactProviderExecutionAnnotation(summary);
-  if (annotation === undefined) {
-    return undefined;
-  }
-
-  return annotation
-    .replace(routeToken("served_by", summary.actual), routeReplacement("served_by", summary.actual))
-    .replace(routeToken("fallback_from", firstPrimaryFailure(summary.attempts)), routeReplacement("fallback_from", firstPrimaryFailure(summary.attempts)));
 }
 
 function sanitizeProviderExecutionSummary(value: unknown): ProviderExecutionSummary | undefined {
@@ -108,18 +84,6 @@ function readExecutionStatus(value: unknown): ProviderExecutionSummary["status"]
   return value === "not-run" || value === "primary-success" || value === "fallback-success" || value === "failed"
     ? value
     : undefined;
-}
-
-function firstPrimaryFailure(attempts: ProviderAttemptSummary[]): ProviderAttemptSummary | undefined {
-  return attempts.find((attempt) => !attempt.ok && (attempt.routeRole === "primary" || attempt.attemptedRouteIndex === 0));
-}
-
-function routeToken(key: string, route: { provider: string; model: string } | undefined): string {
-  return route === undefined ? "" : `${key}=${route.provider}/${route.model}`;
-}
-
-function routeReplacement(key: string, route: { model: string } | undefined): string {
-  return route === undefined ? "" : `${key}=${route.model}`;
 }
 
 function safeProviderToken(value: unknown): string | undefined {

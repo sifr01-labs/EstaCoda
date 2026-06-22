@@ -559,7 +559,7 @@ describe("assembleProviderPrompt", () => {
     expect(rendered).not.toContain("<reasoning>");
   });
 
-  it("renders compact provider execution annotations for assistant history", () => {
+  it("does not render provider execution annotations for assistant history", () => {
     const prompt = assembleProviderPrompt(basePromptInput({
       sessionHistory: [
         {
@@ -580,11 +580,11 @@ describe("assembleProviderPrompt", () => {
     }));
     const rendered = renderMessages(prompt.messages);
 
-    expect(rendered).toContain("assistant [served_by=kimi-k2.7-code]: Primary answer");
-    expect(rendered).toContain("assistant [served_by=deepseek-v4-pro fallback_from=kimi-k2.7-code reason=rate-limit]: Fallback answer");
-    expect(rendered.match(/served_by=deepseek-v4-pro/gu)).toHaveLength(1);
-    expect(rendered).not.toContain("kimi/");
-    expect(rendered).not.toContain("deepseek/");
+    expect(rendered).toContain("assistant: Primary answer");
+    expect(rendered).toContain("assistant: Fallback answer");
+    expect(rendered).not.toContain("served_by");
+    expect(rendered).not.toContain("fallback_from");
+    expect(rendered).not.toContain("reason=rate-limit");
   });
 
   it("leaves unannotated history unchanged and ignores provider metadata on user messages", () => {
@@ -620,7 +620,7 @@ describe("assembleProviderPrompt", () => {
     expect(rendered).not.toContain("SECRET_RAW_ERROR_BODY");
   });
 
-  it("does not leak provider credentials or raw error bodies in history annotations", () => {
+  it("does not leak provider credentials, raw error bodies, or provider annotations in history", () => {
     const prompt = assembleProviderPrompt(basePromptInput({
       sessionHistory: [
         {
@@ -634,7 +634,10 @@ describe("assembleProviderPrompt", () => {
     }));
     const rendered = renderMessages(prompt.messages);
 
-    expect(rendered).toContain("assistant [served_by=deepseek-v4-pro fallback_from=kimi-k2.7-code reason=rate-limit]: Fallback answer");
+    expect(rendered).toContain("assistant: Fallback answer");
+    expect(rendered).not.toContain("served_by");
+    expect(rendered).not.toContain("fallback_from");
+    expect(rendered).not.toContain("reason=rate-limit");
     expect(rendered).not.toContain("SECRET");
     expect(rendered).not.toContain("credentialId");
     expect(rendered).not.toContain("raw");
@@ -732,6 +735,7 @@ describe("assembleProviderPrompt", () => {
     expect(rendered).not.toContain("inject");
     expect(rendered).not.toContain("served_by=");
     expect(rendered).not.toContain("fallback_from=");
+    expect(rendered).not.toContain("reason=");
   });
 
   it("renders tool context summaries without replacing bounded excerpts", () => {
@@ -846,6 +850,27 @@ describe("assembleProviderContinuationPrompt", () => {
         mutableStateToolResultsLabeled: 1
       })
     ]));
+  });
+
+  it("does not prepend provider execution annotations to native assistant history", () => {
+    const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
+      model: toolModel,
+      rawSessionHistory: [
+        sessionMessage("provider-meta", "agent", "Provider metadata answer", {
+          providerExecution: fallbackProviderExecutionMetadata()
+        }),
+        providerToolTurn("tool-turn"),
+        sessionMessage("tool-result", "tool", "native tool result", { tool_call_id: "call-1" })
+      ],
+      nativeHistoryRoute: supportedNativeRoute,
+      nativeHistoryRouteRole: "primary"
+    }));
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain("Provider metadata answer");
+    expect(rendered).not.toContain("[served_by");
+    expect(rendered).not.toContain("fallback_from");
+    expect(rendered).not.toContain("reason=rate-limit");
   });
 
   it("does not duplicate selected native tool results in flat continuation text", () => {

@@ -23,7 +23,6 @@ import { countImageLikeMetadata, estimateTextTokensRough, IMAGE_TOKEN_ESTIMATE }
 import type { AgentProfileMode, AgentResponseLanguage, UiFlavor, UiLanguage } from "../config/runtime-config.js";
 import { buildNativeHistoryMessages } from "./native-history-builder.js";
 import { selectNativeHistoryWindow, type NativeHistoryUnit } from "./native-history-selector.js";
-import { providerExecutionHistoryAnnotation } from "./provider-execution-history.js";
 import {
   isAcknowledgementContinuation,
   renderActiveTaskPrompt,
@@ -1289,10 +1288,7 @@ function renderSessionHistory(messages: PromptSessionHistoryMessage[] | undefine
 }
 
 function renderHistoryRole(message: PromptSessionHistoryMessage): string {
-  const annotation = message.role === "assistant"
-    ? providerExecutionHistoryAnnotation(message.metadata)
-    : undefined;
-  return annotation === undefined ? message.role : `${message.role} [${annotation}]`;
+  return message.role;
 }
 
 function renderHistoryContent(message: PromptSessionHistoryMessage): string {
@@ -1300,11 +1296,7 @@ function renderHistoryContent(message: PromptSessionHistoryMessage): string {
 }
 
 function renderNativeHistoryContent(message: PromptSessionHistoryMessage): string {
-  const content = stripInlineReasoning(stringifyProviderMessageContent(message.content));
-  const annotation = message.role === "assistant"
-    ? providerExecutionHistoryAnnotation(message.metadata)
-    : undefined;
-  return annotation === undefined ? content : `[${annotation}]\n${content}`;
+  return stripInlineReasoning(stringifyProviderMessageContent(message.content));
 }
 
 function estimateSessionHistoryImageTokens(messages: PromptSessionHistoryMessage[] | undefined): number {

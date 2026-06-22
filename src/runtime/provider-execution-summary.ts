@@ -74,28 +74,6 @@ export function renderProviderExecutionSummary(summary: ProviderExecutionSummary
   }
 }
 
-export function compactProviderExecutionAnnotation(summary: ProviderExecutionSummary): string | undefined {
-  if (summary.status === "not-run" || summary.actual === undefined) {
-    return undefined;
-  }
-
-  const servedBy = `served_by=${formatRoute(summary.actual)}`;
-  if (summary.status !== "fallback-success") {
-    return servedBy;
-  }
-
-  const primaryFailure = firstPrimaryFailure(summary.attempts);
-  if (primaryFailure === undefined) {
-    return `${servedBy} fallback=true`;
-  }
-
-  return [
-    servedBy,
-    `fallback_from=${formatRoute(primaryFailure)}`,
-    `reason=${formatErrorClass(primaryFailure.errorClass)}`
-  ].join(" ");
-}
-
 function summarizeAttempts(execution: ProviderExecutionResult): ProviderAttemptSummary[] {
   return execution.attempts.map((attempt, index) => ({
     provider: attempt.provider,
