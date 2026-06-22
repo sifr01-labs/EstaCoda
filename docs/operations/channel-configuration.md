@@ -101,6 +101,21 @@ Failure and rollback behavior:
 - Duplicate final text is skipped only when final stream delivery succeeds and no approval or artifact boundary exists.
 - To roll back, set `channels.telegram.streaming.enabled` to `false` and restart or reload the gateway process that owns the profile.
 
+### Telegram Voice Replies
+
+Telegram `/voice` commands are parsed by `ChannelGateway` before runtime routing:
+
+- `/voice on` speaks replies only after incoming voice messages that produced a transcript.
+- `/voice all` speaks eligible non-command text replies in the current chat.
+- `/voice off` disables spoken replies for the current chat.
+- `/voice status` reports the resolved mode.
+
+Spoken replies use the configured TTS provider. Edge TTS requires no API key, but it sends synthesis text over the network to Microsoft's Edge speech service and is not local/offline TTS.
+
+For an incoming Telegram voice message with `/voice on`, the path is: Telegram voice message -> STT transcript -> agent text response -> configured TTS provider -> Telegram voice/audio reply. With Edge TTS, the response text is sent to Microsoft's Edge speech service and Edge returns MP3 (`audio/mpeg`).
+
+Telegram auto-TTS artifacts are ephemeral delivery media. They are not durable artifact history, prompt context, model-visible attachments, or normal long-term artifacts. Telegram tries to deliver them as native voice bubbles. Edge MP3 output usually needs ffmpeg conversion to OGG/Opus; with ffmpeg, Telegram gets a native voice bubble. If ffmpeg is unavailable or conversion fails, Telegram falls back to a normal audio file.
+
 ## Discord
 
 ```json

@@ -33,7 +33,7 @@ These features are code-gated or maturity-marked. Enable them only if you unders
 | Agent Evolution autonomy above `suggest` | `skills.autonomy` modes above `suggest` | Records reviewable evidence/proposals and shadow-only decisions. Real auto-promotion, auto-rollback, and automatic local skill creation are not active. |
 | Skill evolution/proposal/promotion workflows | `skill.propose_patch`, `skill.rollback` | Governed but not fully autonomous. Promotion runs eval gates. |
 | Workflow runtime integration | SQLite session DB required | Best-effort. Wires only when the session database is SQLite. |
-| Local TTS | Deferred | No local TTS provider is implemented. |
+| Local TTS providers `neutts` and `kittentts` | Deferred | These local/offline TTS providers are not implemented. Edge TTS is implemented separately as a networked provider. |
 | Mistral TTS/STT | Deferred | Not implemented. |
 | Gateway auto-TTS | `voice.autoTts: true` | Per-reply and per-hour caps apply. |
 | Deferred browser cloud providers | `browser.backend` accepts legacy names | Firecrawl and Camofox browser backends report unavailable status. browser-use remains a deferred cloud provider. |

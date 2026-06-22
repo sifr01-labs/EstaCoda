@@ -16,12 +16,13 @@ Voice is an optional media capability. It is separate from the primary LLM provi
 | Hosted TTS | MiniMax | Implemented | Decodes base64 JSON audio responses. |
 | Hosted TTS | Gemini | Implemented | Uses `speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName`. |
 | Hosted TTS | xAI | Implemented | Uses native `{baseUrl}/tts`, not an OpenAI-compatible shape. |
+| Hosted TTS | Edge | Implemented | Uses Microsoft Edge's online speech service through `@bestcodes/edge-tts`. No API key is required, but synthesis text is sent over the network to Microsoft's Edge speech service and this is not local/offline TTS. |
 | Hosted STT | OpenAI | Implemented | Uses the shared OpenAI audio credential resolver. |
 | Hosted STT | Groq | Implemented | Direct environment key lookup. |
 | Hosted STT | xAI | Implemented | Uses native `{baseUrl}/stt`, not an OpenAI-compatible shape. |
 | Local STT | faster-whisper | Implemented | Default for `stt.provider: "local"` in v0.1.0. Uses EstaCoda's managed Python environment unless a custom Python is configured. |
 | Local STT | command | Implemented | Explicit `stt.local.engine: "command"` opt-in. Preserves command-template rendering and prefers stdout transcript text. |
-| Local TTS | Deferred | Not implemented | Do not configure as available in v0.1.0. |
+| Local TTS | neutts, kittentts | Deferred | Not implemented. Do not configure as available in v0.1.0. |
 | Mistral TTS/STT | Deferred | Not implemented | Config shape may exist, but execution is unavailable in v0.1.0. |
 
 ## Configuration
@@ -59,7 +60,7 @@ Core fields:
 
 | Field | Meaning |
 |-------|---------|
-| `tts.provider` | Selected TTS provider. Implemented hosted values are `openai`, `elevenlabs`, `minimax`, `gemini`, and `xai`. |
+| `tts.provider` | Selected TTS provider. Implemented values are `openai`, `elevenlabs`, `minimax`, `gemini`, `xai`, and `edge`. |
 | `tts.enabled` | When `false`, TTS readiness fails even if credentials are present. |
 | `stt.provider` | Selected STT provider. Implemented values are `openai`, `groq`, `xai`, and `local`. |
 | `stt.enabled` | When `false`, STT readiness fails before transcription side effects. |
@@ -83,6 +84,7 @@ Provider-specific notes:
 - xAI TTS uses `voiceId`, `language`, `sampleRate`, `bitRate`, `baseUrl`, `apiKeyEnv`, and optional `speed`. It does not use `tts.xai.model`.
 - xAI STT uses `baseUrl`/`base_url`, `apiKeyEnv`/`api_key_env`, optional `language`, `format`, `diarize`/`diarization`, `keyterms`/`key_terms`, `fillerWords`/`filler_words`, and raw-audio hints where needed. It does not use `stt.xai.model`.
 - Gemini TTS sends `speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName`.
+- Edge TTS uses `tts.edge.voice`, optional `tts.edge.speed`, and provider-level `tts.speed` fallback. It does not use an API key. Edge synthesis is a networked external side effect because request text is sent to Microsoft's Edge speech service, and provider output is MP3 (`audio/mpeg`).
 
 ## faster-whisper
 
@@ -258,6 +260,10 @@ Gateway auto-TTS is opt-in and text-first:
 - `voice.autoTts` defaults to `false`.
 - If no per-chat override exists, `voice.autoTts: true` maps to `voice_only`, not `all`.
 - Text delivery remains primary.
+- Telegram `/voice on` enables spoken replies only after incoming voice messages, `/voice all` speaks eligible text replies too, `/voice off` disables spoken replies, and `/voice status` reports the resolved mode.
+- With `/voice on`, an incoming Telegram voice message follows this path: Telegram voice message -> STT transcript -> agent text response -> configured TTS provider -> Telegram voice/audio reply.
+- Telegram auto-TTS creates ephemeral delivery audio. It is not written into durable artifact history, prompt context, model-visible attachments, or normal long-term artifacts.
+- Telegram tries to deliver spoken replies as a native voice bubble. Edge returns MP3, so native voice bubbles usually require ffmpeg conversion to OGG/Opus; with ffmpeg, Telegram receives a native voice bubble, and without ffmpeg, Telegram receives a normal audio file instead.
 - Auto-TTS is best-effort and fail-open to text.
 - Provider and delivery failures log safe warnings/events and leave text intact.
 

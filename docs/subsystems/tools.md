@@ -120,10 +120,10 @@ Unknown notebook-level and cell-level fields are preserved. Replacing a code cel
 
 Implemented voice providers and security boundaries are documented in [Voice](./voice.md). In short:
 
-- Hosted TTS: OpenAI, ElevenLabs, MiniMax, Gemini, and xAI.
+- Hosted TTS: OpenAI, ElevenLabs, MiniMax, Gemini, xAI, and Edge. Edge does not require an API key, but it sends synthesis text to Microsoft's Edge speech service and is not local/offline.
 - Hosted STT: OpenAI, Groq, and xAI.
 - Local STT: managed faster-whisper by default for `stt.provider: "local"`; command mode only with explicit `stt.local.engine: "command"`.
-- Deferred: local TTS providers and Mistral TTS/STT.
+- Deferred: local TTS providers `neutts` and `kittentts`, and Mistral TTS/STT.
 
 Voice credentials are direct environment-variable lookups only. Tool errors use stable provider/reason metadata and bounded sanitized snippets.
 

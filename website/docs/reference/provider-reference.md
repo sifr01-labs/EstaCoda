@@ -81,9 +81,9 @@ Precedence is route-specific: `model` or fallback route value, then `providers.<
 | **MiniMax** | `live-proven` | Hosted TTS. |
 | **Gemini** | `live-proven` | Hosted TTS. |
 | **xAI** | `live-proven` | Hosted TTS. |
-| **Edge** | `implemented` | Microsoft Edge TTS. No API key required. |
+| **Edge** | `implemented` | Microsoft Edge TTS. No API key required, but synthesis text is sent over the network to Microsoft's Edge speech service. Not local/offline. |
 | **Mistral** | `experimental` | Deferred for v0.1.0. Gated. |
-| **Local TTS** | `unsupported` | No local TTS adapter in this build. |
+| **Local TTS** | `unsupported` | `neutts` and `kittentts` are deferred in this build. |
 
 ### STT (Speech to Text)
 

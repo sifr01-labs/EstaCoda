@@ -301,17 +301,16 @@ Browserbase مُنفّذ عبر خلفية المتصفح، ويتطلب `BROWSE
 {
   "tts": {
     "enabled": true,
-    "provider": "openai",
-    "openai": {
-      "model": "gpt-4o-mini-tts",
-      "voice": "alloy",
-      "apiKeyEnv": "VOICE_TOOLS_OPENAI_KEY"
+    "provider": "edge",
+    "edge": {
+      "voice": "en-US-AriaNeural",
+      "speed": 1.0
     }
   }
 }
 ```
 
-TTS المستضاف المستقر: OpenAI، ElevenLabs، MiniMax، Gemini، xAI. TTS المحلي وMistral مؤجلان.
+TTS المُنفذ: OpenAI، ElevenLabs، MiniMax، Gemini، xAI، و Edge. لا يتطلب Edge مفتاح API، لكنه شبكي: يُرسل نص التوليف إلى خدمة Microsoft Edge speech، ويكون الخرج MP3 (`audio/mpeg`). مزودا TTS المحليان/offline `neutts` و `kittentts`، و Mistral TTS، مؤجلون.
 
 ### stt
 

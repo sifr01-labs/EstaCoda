@@ -30,6 +30,7 @@ sidebar_position: 12
 | MiniMax | يفك تشفير استجابات الصوت base64 JSON. |
 | Gemini | يرسل `speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName`. |
 | xAI | يستخدم نقطة النهاية الأصلية `{baseUrl}/tts`؛ غير متوافق مع OpenAI. |
+| Edge | لا يتطلب مفتاح API. يستخدم خدمة Microsoft Edge speech على الإنترنت، لذلك يُرسل نص التوليف عبر الشبكة، وليس هذا TTS محليًا/offline. يُرجع MP3 (`audio/mpeg`). |
 
 ### STT المستضاف — مستقر
 
@@ -48,7 +49,7 @@ sidebar_position: 12
 
 ### مؤجل أو تجريبي
 
-- مزودات TTS المحلية — غير مُنفذة في v0.1.0.
+- مزودا TTS المحليان/offline `neutts` و `kittentts` — غير مُنفذين في v0.1.0.
 - Mistral TTS/STT — قد توجد أشكال الإعدادات، لكن التنفيذ غير متاح.
 
 لا تُعد مزودات مؤجلة للإنتاج.
@@ -94,7 +95,7 @@ sidebar_position: 12
 
 | الحقل | المعنى |
 |-------|--------|
-| `tts.provider` | القيم المستضافة المنفذة: `openai`، `elevenlabs`، `minimax`، `gemini`، `xai`. |
+| `tts.provider` | القيم المنفذة: `openai`، `elevenlabs`، `minimax`، `gemini`، `xai`، `edge`. |
 | `tts.enabled` | عند `false`، يفشل TTS حتى لو كانت البيانات الاعتماد موجودة. |
 | `stt.provider` | القيم المنفذة: `openai`، `groq`، `xai`، `local`. |
 | `stt.enabled` | عند `false`، يفشل STT قبل آثار النسخ. |
@@ -105,6 +106,8 @@ sidebar_position: 12
 ### بيانات الاعتماد
 
 بيانات اعتماد الصوت هي متغيرات بيئة مباشرة فقط. لا توجد مجمعات بيانات اعتماد أو وسطاء بوابة أو بدائل.
+
+Edge TTS لا يستخدم مفتاح API. لكنه ما زال ينفذ طلبًا شبكيًا إلى خدمة Microsoft Edge speech ويرسل نص التوليف إلى تلك الخدمة.
 
 ترتيب محلل بيانات اعتماد OpenAI الصوتي:
 
@@ -119,6 +122,7 @@ sidebar_position: 12
 - xAI TTS يستخدم `voiceId`، `language`، `sampleRate`، `bitRate`، `baseUrl`، `apiKeyEnv`، و `speed` الاختياري. لا يستخدم `tts.xai.model`.
 - xAI STT يستخدم `baseUrl`/`base_url`، `apiKeyEnv`/`api_key_env`، `language` الاختياري، `format`، `diarize`، `keyterms`، `fillerWords`، وتلميحات raw-audio. لا يستخدم `stt.xai.model`.
 - Gemini TTS يرسل `speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName`.
+- Edge TTS يستخدم `tts.edge.voice` و `tts.edge.speed` الاختياري و fallback من `tts.speed`. الصوت الافتراضي هو `en-US-AriaNeural`.
 
 ## CLI push-to-talk
 
@@ -220,6 +224,8 @@ Auto-TTS في البوابة اختياري والنص أولًا:
 - توصيل النص يبقى أساسيًا.
 - Auto-TTS هو أفضل جهد وفتح للفشل إلى النص.
 - فشل المزود أو التوصيل يسجل تحذيرات آمنة ويترك النص سليمًا.
+- في Telegram، يفعّل `/voice on` الردود المنطوقة فقط بعد الرسائل الصوتية الواردة، ويجعل `/voice all` الردود النصية المؤهلة منطوقة أيضًا، ويعطل `/voice off` الردود المنطوقة، ويعرض `/voice status` الوضع المحلول.
+- مع `/voice on`، تتبع رسالة Telegram الصوتية الواردة هذا المسار: Telegram voice message -> STT transcript -> agent text response -> configured TTS provider -> Telegram voice/audio reply.
 
 Auto-TTS يتخطى:
 
@@ -235,7 +241,9 @@ Auto-TTS يتخطى:
 - تجاوز `voice.autoTtsMaxCharsPerHourPerChat`
 - فشل جاهزية المزود
 
-وسائط Auto-TTS مؤقتة. تُكتب الملفات في مساحة temp audio الخاصة بالملف الشخصي، تُسلَّم ككائنات Artifact مع `metadata.deliveryHint: "voice"` و `metadata.ephemeral: true`، وتُحذف في كتلة `finally` على أفضل وجه بعد نجاح أو فشل التوصيل.
+وسائط Auto-TTS مؤقتة. تُكتب الملفات في مساحة temp audio الخاصة بالملف الشخصي، تُسلَّم ككائنات Artifact مع `metadata.deliveryHint: "voice"` و `metadata.ephemeral: true`، وتُحذف في كتلة `finally` على أفضل وجه بعد نجاح أو فشل التوصيل. لا تُحفظ في durable artifact history، ولا تدخل في prompt context، ولا تصبح model-visible attachments أو artifacts طويلة الأجل عادية.
+
+يحاول Telegram تسليم Auto-TTS كـ voice bubble أصلي. يُرجع Edge ملف MP3 (`audio/mpeg`)، لذلك يتطلب توصيل voice bubble عادةً تحويل ffmpeg إلى OGG/Opus. مع ffmpeg، يحصل Telegram على voice bubble أصلي؛ وبدون ffmpeg، يتلقى Telegram ملفًا صوتيًا عاديًا بدلًا من ذلك.
 
 نص `MEDIA:/path` الصادر عن النموذج بشكل عشوائي ليس إشارة auto-TTS.
 

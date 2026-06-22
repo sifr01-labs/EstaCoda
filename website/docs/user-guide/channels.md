@@ -63,6 +63,7 @@ Telegram is the live-proven first-party remote channel for v0.1.0.
 | Handoff codes | `implemented` |
 | Progress compaction | `implemented` |
 | Experimental text streaming | `default-on when Telegram is configured` |
+| Spoken replies with `/voice` | `implemented when TTS is configured` |
 
 **Behavior:**
 
@@ -70,6 +71,11 @@ Telegram is the live-proven first-party remote channel for v0.1.0.
 - Inline approval buttons map to `/approve` and `/deny`
 - Final replies formatted in Telegram-safe HTML
 - Streaming defaults on for configured Telegram channels and progressively edits Telegram messages during a turn; final `response.text` remains authoritative
+- `/voice on`, `/voice all`, `/voice off`, and `/voice status` control spoken replies for the current chat
+- Spoken replies use configured TTS. Edge TTS requires no API key, but sends synthesis text to Microsoft's Edge speech service and is not local/offline
+- Auto-TTS audio is ephemeral delivery media; it is not durable artifact history, prompt context, model-visible attachments, or normal long-term artifacts
+- With `/voice on`, the path is Telegram voice message -> STT transcript -> agent text response -> configured TTS provider -> Telegram voice/audio reply
+- Telegram tries native voice-bubble delivery; Edge returns MP3 (`audio/mpeg`), so voice bubbles usually require ffmpeg conversion to OGG/Opus. With ffmpeg, Telegram gets a native voice bubble; without ffmpeg, Telegram receives a normal audio file
 - Activity labels localized (`en`, `ar`)
 - Group sessions are per-user by default
 - Thread sessions are shared by default

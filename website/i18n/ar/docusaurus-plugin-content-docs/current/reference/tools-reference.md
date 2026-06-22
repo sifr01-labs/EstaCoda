@@ -263,13 +263,13 @@ sidebar_position: 6
 | `voice.speak` | `external-side-effect` | قد يشغّل صوتًا أو يكتب ملفات |
 | `voice.transcribe` | `safe` | لا شيء |
 
-**التوفر:** TTS المستضاف يتطلب مفتاح مزود. STT المحلي يستخدم `faster-whisper` المُدار تحت `~/.estacoda/python-env` افتراضياً، أو محرك أمر صريح. جاهزية الصوت تُعرض من خلال أسطح حالة CLI، وليس من خلال `isAvailable()`.
+**التوفر:** مزودو TTS المستضافون الذين يحتاجون بيانات اعتماد يستخدمون مفاتيح مزود. Edge TTS لا يتطلب مفتاح API، لكنه شبكي ويرسل نص التوليف إلى خدمة Microsoft Edge speech. STT المحلي يستخدم `faster-whisper` المُدار تحت `~/.estacoda/python-env` افتراضياً، أو محرك أمر صريح. جاهزية الصوت تُعرض من خلال أسطح حالة CLI، وليس من خلال `isAvailable()`.
 
 **المزودون المُطبّقون:**
-- TTS مستضاف: OpenAI، ElevenLabs، MiniMax، Gemini، xAI
+- TTS: OpenAI، ElevenLabs، MiniMax، Gemini، xAI، Edge
 - STT مستضاف: OpenAI، Groq، xAI
 - STT محلي: faster-whisper مُدار افتراضياً، وcommand عند ضبط `stt.local.engine: "command"` صراحةً
-- مؤجل: مزودو TTS المحليون، Mistral TTS/STT
+- مؤجل: مزودا TTS المحليان/offline `neutts` و `kittentts`، و Mistral TTS/STT
 
 ### تنفيذ الكود
 
@@ -443,10 +443,10 @@ sidebar_position: 6
 
 ### جاهزية المزود
 
-الأدوات التي تعتمد على مسار مزود تتطلب أن يكون المسار مُهيّأً وجاهزًا من حيث بيانات الاعتماد.
+الأدوات التي تعتمد على مسار مزود تتطلب أن يكون المسار مُهيّأً. جاهزية بيانات الاعتماد تعتمد على المزود.
 - `web.search` يتطلب مزود بحث متاحًا: Brave يحتاج مرجع اعتماد بيئي، بينما DDGS يحتاج قدرة Python المُدارة `ddgs`.
 - `image.generate` يتطلب مفتاح مزود توليد صور.
-- `voice.speak` يتطلب مفتاح مزود TTS.
+- `voice.speak` يتطلب TTS مُعدًا؛ Edge لا يحتاج مفتاح API، بينما المزودون ذوو بيانات الاعتماد يحتاجون مفتاح المزود.
 - `voice.transcribe` يتطلب مزود STT، أو faster-whisper محلياً مُداراً، أو أمراً محلياً صريحاً.
 
 ### ثقة workspace

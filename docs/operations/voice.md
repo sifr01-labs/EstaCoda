@@ -23,6 +23,7 @@ Common setup examples:
 ```bash
 estacoda voice status
 estacoda voice setup --tts-provider openai --tts-model gpt-4o-mini-tts --tts-voice alloy --tts-api-key-env VOICE_TOOLS_OPENAI_KEY
+estacoda voice setup --tts-provider edge --tts-voice en-US-AriaNeural
 estacoda voice setup --stt-provider openai --stt-model gpt-4o-mini-transcribe --stt-api-key-env VOICE_TOOLS_OPENAI_KEY
 estacoda voice setup --stt-provider local --stt-model base
 estacoda voice setup --stt-provider local --python-binary /path/to/python
@@ -82,6 +83,8 @@ Voice state is profile-local:
 
 Group-chat command handling follows existing gateway authorization, mention, and free-response gating. Unauthorized users cannot mutate per-chat voice state.
 
+For an incoming Telegram voice message with `/voice on`, the path is: Telegram voice message -> STT transcript -> agent text response -> configured TTS provider -> Telegram voice/audio reply. With Edge TTS, the response text is sent to Microsoft's Edge speech service and Edge returns MP3 (`audio/mpeg`).
+
 ## Provider Setup
 
 Implemented hosted TTS providers:
@@ -91,6 +94,7 @@ Implemented hosted TTS providers:
 - MiniMax
 - Gemini
 - xAI
+- Edge
 
 Implemented hosted STT providers:
 
@@ -105,10 +109,10 @@ Implemented local STT:
 
 Deferred in v0.1.0:
 
-- local TTS providers
+- local TTS providers `neutts` and `kittentts`
 - Mistral TTS/STT
 
-Voice credentials are direct environment variables only. Put real keys in the selected profile `.env` or an environment source for the service process. Do not put raw keys in `config.json`.
+Voice credentials are direct environment variables only for providers that require keys. Put real keys in the selected profile `.env` or an environment source for the service process. Do not put raw keys in `config.json`. Edge TTS does not require an API key, but it is not local/offline: synthesis text is sent over the network to Microsoft's Edge speech service and must be treated as an external side effect.
 
 OpenAI audio credential lookup:
 
@@ -228,7 +232,7 @@ ffmpeg is optional but recommended:
 ffmpeg -i input -c:a libopus -b:a 24k output.ogg
 ```
 
-If ffmpeg is missing or conversion fails, Telegram and WhatsApp fall back to normal audio delivery instead of voice-bubble delivery. WhatsApp fallback captions state that voice-bubble conversion was unavailable.
+Telegram auto-TTS tries native voice-bubble delivery. Edge TTS returns MP3 (`audio/mpeg`), so Telegram voice-bubble delivery usually needs ffmpeg conversion to OGG/Opus. If ffmpeg is missing or conversion fails, Telegram and WhatsApp fall back to normal audio delivery instead of voice-bubble delivery. WhatsApp fallback captions state that voice-bubble conversion was unavailable.
 
 Existing `.ogg`, `.opus`, and `audio/ogg` artifacts continue to use voice-bubble delivery where the channel supports it. Arbitrary model-emitted `MEDIA:/path` response text is not treated as auto-TTS or a voice conversion request.
 

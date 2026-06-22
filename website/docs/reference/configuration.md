@@ -301,17 +301,16 @@ Text-to-speech provider and voice settings.
 {
   "tts": {
     "enabled": true,
-    "provider": "openai",
-    "openai": {
-      "model": "gpt-4o-mini-tts",
-      "voice": "alloy",
-      "apiKeyEnv": "VOICE_TOOLS_OPENAI_KEY"
+    "provider": "edge",
+    "edge": {
+      "voice": "en-US-AriaNeural",
+      "speed": 1.0
     }
   }
 }
 ```
 
-Stable hosted TTS: OpenAI, ElevenLabs, MiniMax, Gemini, xAI. Local TTS and Mistral TTS are deferred.
+Implemented TTS: OpenAI, ElevenLabs, MiniMax, Gemini, xAI, and Edge. Edge requires no API key, but it is networked: synthesis text is sent to Microsoft's Edge speech service, and output is MP3 (`audio/mpeg`). Local/offline TTS providers `neutts` and `kittentts`, and Mistral TTS, are deferred.
 
 ### stt
 

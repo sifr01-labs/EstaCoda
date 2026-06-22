@@ -81,9 +81,9 @@ sidebar_position: 5
 | **MiniMax** | `live-proven` | TTS مستضاف. |
 | **Gemini** | `live-proven` | TTS مستضاف. |
 | **xAI** | `live-proven` | TTS مستضاف. |
-| **Edge** | `implemented` | Microsoft Edge TTS. لا يتطلب مفتاح API. |
+| **Edge** | `implemented` | Microsoft Edge TTS. لا يتطلب مفتاح API، لكن نص التوليف يُرسل عبر الشبكة إلى خدمة Microsoft Edge speech. ليس محليًا/offline. |
 | **Mistral** | `experimental` | مؤجل لـ v0.1.0. محصور. |
-| **Local TTS** | `unsupported` | لا يوجد محوّل TTS محلي في هذا الإصدار. |
+| **Local TTS** | `unsupported` | `neutts` و `kittentts` مؤجلان في هذا الإصدار. |
 
 ### STT (الملف الصوتي إلى نص)
 

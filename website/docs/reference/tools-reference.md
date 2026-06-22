@@ -263,13 +263,13 @@ Text-to-speech and speech-to-text.
 | `voice.speak` | `external-side-effect` | May play audio or write files |
 | `voice.transcribe` | `safe` | None |
 
-**Availability:** Hosted TTS requires a provider key. Local STT defaults to managed `faster-whisper` under `~/.estacoda/python-env`, or an explicit command engine. Voice readiness is exposed through CLI status surfaces, not through `isAvailable()` human-readable reasons.
+**Availability:** Hosted TTS providers that require credentials use provider keys. Edge TTS requires no API key, but it is networked and sends synthesis text to Microsoft's Edge speech service. Local STT defaults to managed `faster-whisper` under `~/.estacoda/python-env`, or an explicit command engine. Voice readiness is exposed through CLI status surfaces, not through `isAvailable()` human-readable reasons.
 
 **Implemented providers:**
-- Hosted TTS: OpenAI, ElevenLabs, MiniMax, Gemini, xAI
+- TTS: OpenAI, ElevenLabs, MiniMax, Gemini, xAI, Edge
 - Hosted STT: OpenAI, Groq, xAI
 - Local STT: managed faster-whisper by default, command with explicit `stt.local.engine: "command"`
-- Deferred: local TTS providers, Mistral TTS/STT
+- Deferred: local/offline TTS providers `neutts` and `kittentts`, Mistral TTS/STT
 
 ### Code execution
 
@@ -445,10 +445,10 @@ A tool may be registered but unavailable. The runtime checks `isAvailable()` bef
 
 ### Provider readiness
 
-Tools that depend on a provider route require the route to be configured and credential-ready.
+Tools that depend on a provider route require the route to be configured. Credential readiness depends on the provider.
 - `web.search` requires an available Search provider: Brave needs a credential env reference, while DDGS needs the managed Python capability `ddgs`.
 - `image.generate` requires an image generation provider key.
-- `voice.speak` requires a TTS provider key.
+- `voice.speak` requires configured TTS; Edge needs no API key, while credentialed providers need their provider key.
 - `voice.transcribe` requires an STT provider, managed local faster-whisper, or an explicit local command.
 
 ### Workspace trust

@@ -63,6 +63,7 @@ Telegram هي القناة البعيدة الحية المُثبتة لـ v0.1.
 | رموز التسليم | `implemented` |
 | ضغط التقدم | `implemented` |
 | بث النص التجريبي | `default-on when Telegram is configured` |
+| الردود المنطوقة عبر `/voice` | `implemented when TTS is configured` |
 
 **السلوك:**
 
@@ -70,6 +71,11 @@ Telegram هي القناة البعيدة الحية المُثبتة لـ v0.1.
 - أزرار الموافقة المضمنة تُعيّن إلى `/approve` و `/deny`
 - الردود النهائية مُنسقة بـ HTML آمن لـ Telegram
 - يكون البث مفعلاً افتراضيًا لقنوات Telegram المُعدّة ويحرر رسائل Telegram تدريجيًا أثناء الدور؛ يبقى `response.text` النهائي هو المرجع
+- تتحكم `/voice on` و `/voice all` و `/voice off` و `/voice status` في الردود المنطوقة للمحادثة الحالية
+- تستخدم الردود المنطوقة TTS المُعد. لا يتطلب Edge TTS مفتاح API، لكنه يرسل نص التوليف إلى خدمة Microsoft Edge speech وليس محليًا/offline
+- صوت Auto-TTS هو وسيط توصيل مؤقت؛ ليس durable artifact history، ولا prompt context، ولا model-visible attachments، ولا artifact عاديًا طويل الأجل
+- مع `/voice on`، يكون المسار: Telegram voice message -> STT transcript -> agent text response -> configured TTS provider -> Telegram voice/audio reply
+- يحاول Telegram التوصيل كـ voice bubble أصلي؛ يُرجع Edge ملف MP3 (`audio/mpeg`)، لذلك يتطلب voice bubble عادةً تحويل ffmpeg إلى OGG/Opus. مع ffmpeg، يحصل Telegram على voice bubble أصلي؛ وبدون ffmpeg، يتلقى Telegram ملفًا صوتيًا عاديًا
 - تسميات النشاط مُترجمة (`en`، `ar`)
 - جلسات المجموعات افتراضيًا لكل مستخدم
 - جلسات الخيوط مشتركة افتراضيًا
