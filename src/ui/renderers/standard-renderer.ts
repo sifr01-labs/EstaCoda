@@ -712,7 +712,7 @@ export class StandardRenderer {
 
     if (vm.hint !== undefined && vm.hint.length > 0) {
       const hint = this.#muted(this.#localizedTechnical(vm.hint, locale, contentWidth));
-      lines.push(`  ${padVisibleStart(hint, contentWidth)}`);
+      lines.push(`  ${direction === "rtl" ? hint : padVisibleStart(hint, contentWidth)}`);
     }
 
     lines.push(bottom);
@@ -783,6 +783,9 @@ export class StandardRenderer {
     const tableDirection = vm.tableDirection ?? "ltr";
     const dataWidth = Math.max(8, contentWidth - optionMarkerSlotWidth);
     const layout = this.#structuredPromptColumnLayout(columns, vm.options, dataWidth);
+    const tableSelectedMarker = tableDirection === "rtl"
+      ? (this.#useUnicode ? "◂" : "<")
+      : selectedMarker;
     const lines: string[] = [];
 
     if (vm.showColumnHeaders !== false) {
@@ -808,7 +811,7 @@ export class StandardRenderer {
         renderedNavigationSeparator = true;
       }
       const isSelected = i === vm.selectedOptionIndex;
-      const marker = isSelected ? this.#action(selectedMarker) : " ";
+      const marker = isSelected ? this.#action(tableSelectedMarker) : " ";
       const row = this.#structuredPromptRow(
         columns,
         this.#structuredPromptOptionCells(option, columns),
@@ -960,7 +963,9 @@ export class StandardRenderer {
   #localizedPromptCell(value: string, locale: UiLocale, direction: TextDirection, maxWidth: number): string {
     const truncated = truncateVisible(value, maxWidth);
     if (locale === "ar") {
-      return /[A-Za-z0-9][._/-]?[A-Za-z0-9]*|^[A-Z0-9_]+$/u.test(value)
+      return containsArabicScript(value)
+        ? isolateRtl(closeOpenBidiIsolates(truncated))
+        : /[A-Za-z0-9]/u.test(value)
         ? isolateLtr(truncated)
         : isolateRtl(closeOpenBidiIsolates(truncated));
     }
@@ -2161,6 +2166,10 @@ function computeRtlOnboardingBodyBlockWidth(bodyLines: readonly string[], conten
   }));
   const preferredWidth = Math.min(88, Math.max(56, widestLine));
   return Math.max(8, Math.min(contentWidth, preferredWidth));
+}
+
+function containsArabicScript(value: string): boolean {
+  return /\p{Script=Arabic}/u.test(value);
 }
 
 function boundedFileChangePreviewLines(

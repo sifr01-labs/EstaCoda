@@ -599,7 +599,9 @@ function renderPlainStructuredOnboardingOptions(vm: OnboardingPromptCardViewMode
       lines.push("");
       renderedNavigationSeparator = true;
     }
-    const marker = i === vm.selectedOptionIndex ? ">" : " ";
+    const marker = i === vm.selectedOptionIndex
+      ? (tableDirection === "rtl" ? "<" : ">")
+      : " ";
     const row = plainStructuredRow(
       columns,
       plainStructuredOptionCells(option, columns),
@@ -722,9 +724,16 @@ function plainStructuredCellWithBadges(
 
 function plainStructuredArabicCell(value: string): string {
   if (value.length === 0) return value;
+  if (containsArabicScript(value)) {
+    return isolateRtl(closeOpenBidiIsolates(value));
+  }
   return /[A-Za-z0-9]/u.test(value)
     ? isolateLtr(value)
     : isolateRtl(closeOpenBidiIsolates(value));
+}
+
+function containsArabicScript(value: string): boolean {
+  return /\p{Script=Arabic}/u.test(value);
 }
 
 function plainOptionBadges(option: OnboardingPromptOption, showCurrentBadge = true): readonly string[] {

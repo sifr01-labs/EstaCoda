@@ -57,7 +57,7 @@ import {
   renderActiveTurnSpinner,
   renderFileChangePreview,
 } from "./plain-renderer.js";
-import { isolateLtr, isolateRtl, RLI } from "../bidi.js";
+import { closeOpenBidiIsolates, isolateLtr, isolateRtl, RLI } from "../bidi.js";
 import { measureVisibleWidth } from "./layout.js";
 
 function assertNoAnsi(text: string): void {
@@ -529,8 +529,8 @@ describe("PlainRenderer — renderOnboardingPromptCard", () => {
     const selectedLine = out.split("\n").find((line) => line.includes("ألفا"));
     expect(selectedLine).toBeDefined();
     expect(selectedLine!.indexOf("خيار عام")).toBeLessThan(selectedLine!.indexOf("ألفا"));
-    expect(selectedLine!.indexOf("ألفا")).toBeLessThan(selectedLine!.indexOf(">"));
-    expect(selectedLine!.trimEnd().endsWith(">")).toBe(true);
+    expect(selectedLine!.indexOf("ألفا")).toBeLessThan(selectedLine!.indexOf("<"));
+    expect(selectedLine!.trimEnd().endsWith("<")).toBe(true);
     expect(out).toContain(isolateLtr("CLI"));
     const lines = out.split("\n");
     const backIndex = lines.findIndex((line) => line.includes("رجوع"));
@@ -567,10 +567,41 @@ describe("PlainRenderer — renderOnboardingPromptCard", () => {
     expect(descriptionIndex).toBeGreaterThanOrEqual(0);
     expect(labelIndex).toBeGreaterThan(descriptionIndex);
     expect(labelIndex - descriptionIndex).toBeGreaterThan(20);
-    const markerIndex = selectedLine!.indexOf(">");
+    const markerIndex = selectedLine!.indexOf("<");
     expect(markerIndex).toBeGreaterThan(labelIndex);
     expect(markerIndex - labelIndex).toBeLessThan(12);
-    expect(selectedLine!.trimEnd().endsWith(">")).toBe(true);
+    expect(selectedLine!.trimEnd().endsWith("<")).toBe(true);
+  });
+
+  it("keeps Arabic descriptions with technical tokens in the RTL description column", () => {
+    const description = `اضبط كيف تعثر ${isolateLtr("EstaCoda")} على نتائج الويب وتسترجعها.`;
+    const out = renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "محرر الإعدادات",
+      bodyLines: [],
+      showColumnHeaders: false,
+      tableDirection: "rtl",
+      columns: [
+        { key: "description", header: "التفاصيل", align: "right" },
+        { key: "name", header: "الاسم", align: "right" },
+      ],
+      options: [
+        {
+          id: "search",
+          label: "البحث",
+          description,
+        },
+      ],
+      selectedOptionIndex: 0,
+      locale: "ar",
+      direction: "rtl",
+    }), "ar");
+
+    const selectedLine = out.split("\n").find((line) => line.includes("البحث"));
+    expect(selectedLine).toBeDefined();
+    expect(selectedLine).toContain(isolateRtl(closeOpenBidiIsolates(description)));
+    expect(selectedLine).not.toContain(isolateLtr(description));
+    expect(selectedLine!.indexOf("اضبط كيف")).toBeLessThan(selectedLine!.indexOf("البحث"));
+    expect(selectedLine!.trimEnd().endsWith("<")).toBe(true);
   });
 
   it("renders Arabic prompt-card hints as LTR technical text", () => {

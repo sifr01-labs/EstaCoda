@@ -37,7 +37,7 @@ import {
   slashMenuOption,
 } from "../view-models/builders.js";
 import { StandardRenderer } from "./standard-renderer.js";
-import { isolateLtr, isolateRtl, LRI, PDI, RLI } from "../bidi.js";
+import { closeOpenBidiIsolates, isolateLtr, isolateRtl, LRI, PDI, RLI } from "../bidi.js";
 import { measureVisibleWidth, stripAnsi } from "./layout.js";
 
 function fullCaps(): TerminalCapabilities {
@@ -777,8 +777,8 @@ describe("StandardRenderer — dark theme", () => {
     const selectedLine = plain.split("\n").find((line) => line.includes("ألفا"));
     expect(selectedLine).toBeDefined();
     expect(selectedLine!.indexOf("خيار عام")).toBeLessThan(selectedLine!.indexOf("ألفا"));
-    expect(selectedLine!.indexOf("ألفا")).toBeLessThan(selectedLine!.indexOf("▸"));
-    expect(selectedLine!.trimEnd().endsWith("▸")).toBe(true);
+    expect(selectedLine!.indexOf("ألفا")).toBeLessThan(selectedLine!.indexOf("◂"));
+    expect(selectedLine!.trimEnd().endsWith("◂")).toBe(true);
     expect(plain).toContain(isolateLtr("CLI"));
     expect(plain).toContain(isolateLtr("↑↓ navigate   ENTER select   CTRL+C exit"));
     const lines = plain.split("\n");
@@ -817,10 +817,42 @@ describe("StandardRenderer — dark theme", () => {
     expect(descriptionIndex).toBeGreaterThanOrEqual(0);
     expect(labelIndex).toBeGreaterThan(descriptionIndex);
     expect(labelIndex - descriptionIndex).toBeGreaterThan(20);
-    const markerIndex = selectedLine!.indexOf("▸");
+    const markerIndex = selectedLine!.indexOf("◂");
     expect(markerIndex).toBeGreaterThan(labelIndex);
     expect(markerIndex - labelIndex).toBeLessThan(12);
-    expect(selectedLine!.trimEnd().endsWith("▸")).toBe(true);
+    expect(selectedLine!.trimEnd().endsWith("◂")).toBe(true);
+  });
+
+  it("keeps Arabic descriptions with technical tokens in the RTL description column", () => {
+    const r = renderer("dark", noColorCaps());
+    const description = `اضبط كيف تعثر ${isolateLtr("EstaCoda")} على نتائج الويب وتسترجعها.`;
+    const plain = stripAnsi(r.renderOnboardingPromptCard(buildOnboardingPromptCardViewModel({
+      title: "محرر الإعدادات",
+      bodyLines: [],
+      showColumnHeaders: false,
+      tableDirection: "rtl",
+      columns: [
+        { key: "description", header: "التفاصيل", align: "right" },
+        { key: "name", header: "الاسم", align: "right" },
+      ],
+      options: [
+        {
+          id: "search",
+          label: "البحث",
+          description,
+        },
+      ],
+      selectedOptionIndex: 0,
+      locale: "ar",
+      direction: "rtl",
+    })));
+
+    const selectedLine = plain.split("\n").find((line) => line.includes("البحث"));
+    expect(selectedLine).toBeDefined();
+    expect(selectedLine).toContain(isolateRtl(closeOpenBidiIsolates(description)));
+    expect(selectedLine).not.toContain(isolateLtr(description));
+    expect(selectedLine!.indexOf("اضبط كيف")).toBeLessThan(selectedLine!.indexOf("البحث"));
+    expect(selectedLine!.trimEnd().endsWith("◂")).toBe(true);
   });
 
   it("keeps explicit RTL structured prompt-card rows bounded with no Unicode fallback", () => {
@@ -850,7 +882,7 @@ describe("StandardRenderer — dark theme", () => {
 
     const selectedLine = plain.split("\n").find((line) => line.includes("ألفا"));
     expect(selectedLine).toBeDefined();
-    expect(selectedLine!.trimEnd().endsWith(">")).toBe(true);
+    expect(selectedLine!.trimEnd().endsWith("<")).toBe(true);
     expect(plain).not.toContain("▸");
     for (const line of plain.split("\n")) {
       expect(measureVisibleWidth(line)).toBeLessThanOrEqual(narrowCaps().terminalWidth);
@@ -958,6 +990,7 @@ describe("StandardRenderer — dark theme", () => {
     expect(hintLine).toBeDefined();
     expect(hintLine!.trim()).toBe(hint);
     expect(hintLine).toMatch(/^  /u);
+    expect(hintLine!.indexOf(hint)).toBe(2);
   });
 
   it("right-aligns English prompt-card hints", () => {

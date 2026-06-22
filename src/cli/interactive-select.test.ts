@@ -240,7 +240,7 @@ describe("interactive-select prompt card surface", () => {
     const selectedLine = rendered.split("\n").find((line) => line.includes("ألفا"));
     expect(selectedLine).toBeDefined();
     expect(selectedLine).toContain("خيار عام");
-    expect(selectedLine!.trimEnd().endsWith(">")).toBe(true);
+    expect(selectedLine!.trimEnd().endsWith("<")).toBe(true);
   });
 
   it("localizes and bolds Arabic selected output", async () => {
