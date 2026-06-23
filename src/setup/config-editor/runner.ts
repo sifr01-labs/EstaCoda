@@ -1431,6 +1431,11 @@ async function resolveCredentialForReview(
           : undefined,
       };
     }
+    case "endpoint":
+      return {
+        kind: "diagnostic",
+        output: "Endpoint credential setup is not supported in the setup editor yet.",
+      };
   }
 }
 

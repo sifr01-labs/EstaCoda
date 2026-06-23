@@ -83,6 +83,14 @@ describe("provider-metadata", () => {
       expect(getDefaultApiKeyEnv("unknown-provider" as ProviderId)).toBe("OPENAI_COMPATIBLE_API_KEY");
     });
 
+    it("local provider keeps no-auth as default while allowing optional API keys", () => {
+      const local = getProviderMetadata("local");
+      expect(local.defaultApiKeyEnv).toBeUndefined();
+      expect(local.authMethods).toContain("api_key");
+      expect(local.defaultAuthMethod).toBe("none");
+      expect(getDefaultApiKeyEnv("local")).toBe("OPENAI_COMPATIBLE_API_KEY");
+    });
+
     it("exposes optional provider finalization metadata knobs without enabling reasoning echo by default", () => {
       const openai = getProviderMetadata("openai");
       const codex = getProviderMetadata("codex");

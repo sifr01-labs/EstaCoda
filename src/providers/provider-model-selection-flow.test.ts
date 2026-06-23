@@ -769,7 +769,7 @@ describe("provider-model-selection-flow", () => {
     );
 
     it(
-      "returns none for local provider",
+      "returns endpoint configuration action for local provider",
       withFixture(async (fixturePath, cachePath) => {
         const flow = await createProviderModelSelectionFlow(
           buildOptions(fixturePath, cachePath, {
@@ -780,7 +780,11 @@ describe("provider-model-selection-flow", () => {
         const result = await flow.resolveSelection("local", "llama3");
         expect(result.kind).toBe("selected");
         if (result.kind !== "selected") return;
-        expect(result.credentialAction.kind).toBe("none");
+        expect(result.credentialAction).toEqual({
+          kind: "endpoint",
+          baseUrl: "http://localhost:11434/v1",
+          apiKeyEnv: "OPENAI_COMPATIBLE_API_KEY"
+        });
       })
     );
 
@@ -949,6 +953,7 @@ describe("provider-model-selection-flow", () => {
 
         const result = await flow.resolveSelection("custom-corp" as ProviderId, "custom-model");
         expect(result.kind).toBe("diagnostic");
+        expect(result.kind).not.toBe("selected");
         if (result.kind !== "diagnostic") return;
         expect(result.reason).toContain("requires an explicit base URL");
       })

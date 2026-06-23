@@ -13,6 +13,7 @@ import {
   type CreateModelSelectionCatalogOptions
 } from "./model-selection-catalog.js";
 import {
+  getDefaultApiKeyEnv,
   getProviderMetadata,
   isProviderMediaOnly,
   isProviderRunnable,
@@ -68,7 +69,8 @@ export type ModelCandidate = {
 export type CredentialAction =
   | { kind: "none" }
   | { kind: "reuse"; reference: `env:${string}` }
-  | { kind: "collect"; envVarName: string };
+  | { kind: "collect"; envVarName: string }
+  | { kind: "endpoint"; baseUrl?: string; apiKeyEnv: string };
 
 export type ProviderModelSelectionResult = {
   kind: "selected";
@@ -371,6 +373,14 @@ async function determineCredentialAction(
   apiKeyEnv: string | undefined,
   meta: ProviderMetadata
 ): Promise<CredentialAction> {
+  if (providerId === "local") {
+    return {
+      kind: "endpoint",
+      baseUrl: meta.defaultBaseUrl,
+      apiKeyEnv: apiKeyEnv ?? getDefaultApiKeyEnv(providerId)
+    };
+  }
+
   // No-auth providers never need credentials
   if (meta.authMethods.includes("none") && meta.defaultAuthMethod === "none") {
     return { kind: "none" };
