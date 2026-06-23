@@ -32,10 +32,41 @@ describe("buildSkillContract", () => {
     expect(first?.summary).toContain("Description: A large test skill.");
     expect(first?.summary).toContain(`Original root instruction chars: ${skill.instructions.length}`);
     expect(first?.summary).toContain(`Inline prompt cap: ${SKILL_ROOT_INLINE_MAX_CHARS}`);
+    expect(first?.summary).toContain("Contract status: root instructions are truncated from the selected prompt and represented by a bounded contract, not the full root body.");
     expect(first?.summary).toContain("skill.read({ \"name\": \"large-skill\", \"mode\": \"full\" })");
     expect(first?.summary).toContain("Reference/resource contents are not included in this contract.");
     expect(first?.summary.length).toBeLessThanOrEqual(SKILL_CONTRACT_MAX_CHARS);
     expect(first?.originalChars).toBe(skill.instructions.length);
+  });
+
+  it("includes required toolsets and playbook summary in large-skill contracts", () => {
+    const skill = makeLoadedSkill({
+      name: "metadata-skill",
+      instructions: largeInstructions(["# Metadata"]),
+      requiredToolsets: ["files", "core"],
+      playbook: [
+        {
+          id: "inspect",
+          description: "Inspect the source material.",
+          toolsets: ["files"],
+          preferredTool: "file.read"
+        },
+        {
+          id: "write",
+          description: "Write the final artifact.",
+          toolsets: ["core", "files"]
+        }
+      ]
+    });
+
+    const contract = buildSkillContract(skill);
+
+    expect(contract?.summary).toContain("Required toolsets:");
+    expect(contract?.summary).toContain("- core");
+    expect(contract?.summary).toContain("- files");
+    expect(contract?.summary).toContain("Playbook summary:");
+    expect(contract?.summary).toContain("- 1. inspect: Inspect the source material. · toolsets=files · preferredTool=file.read");
+    expect(contract?.summary).toContain("- 2. write: Write the final artifact. · toolsets=core,files");
   });
 
   it("extracts headings and ignores headings inside fenced code blocks", () => {

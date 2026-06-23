@@ -63,6 +63,17 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
       return skill;
     }
     const foundSkill = skill.skill;
+    return readSkillContent(foundSkill, input, options.skillConfig?.[foundSkill.name]);
+  };
+  const runSkillView = async (input: SkillReadInput): Promise<ToolResult> => {
+    const skill = getSkill(options.registry, input.name);
+    if (!skill.ok) {
+      return skill;
+    }
+    const foundSkill = skill.skill;
+    // skill.read intentionally avoids retrieval usage recording in PR 1;
+    // retrieval traces belong with PR 2 routing evidence. Preserve the
+    // legacy viewed counter for the deprecated skill.view compatibility alias.
     await options.skillEvolutionStore?.recordSkillViewed({
       skillName: foundSkill.name,
       source: isLoadedSkill(foundSkill) ? foundSkill.sourceKind : undefined,
@@ -188,7 +199,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
       progressLabel: "reading skill",
       maxResultSizeChars: 24_000,
       isAvailable: () => true,
-      run: runSkillRead
+      run: runSkillView
     },
     {
       name: "skill.inspect",

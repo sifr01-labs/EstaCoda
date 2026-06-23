@@ -79,9 +79,16 @@ function buildContractSummary(input: {
     `Description: ${input.skill.description}`,
     `Original root instruction chars: ${input.skill.instructions.length}`,
     `Inline prompt cap: ${SKILL_ROOT_INLINE_MAX_CHARS}`,
+    "Contract status: root instructions are truncated from the selected prompt and represented by a bounded contract, not the full root body.",
     "The root SKILL.md instructions exceed the inline prompt cap. This contract is an index, not the full skill body.",
     `Load full root instructions later with: ${loadInstruction}`,
     "Reference/resource contents are not included in this contract.",
+    "",
+    "Required toolsets:",
+    ...formatRequiredToolsets(input.skill.requiredToolsets),
+    "",
+    "Playbook summary:",
+    ...formatPlaybookSummary(input.skill.playbook),
     "",
     "Heading index:",
     ...formatHeadingIndex(input.sectionIndex),
@@ -102,9 +109,16 @@ function fallbackContractSummary(skill: LoadedSkill, loadInstruction: string): s
     `Description: ${skill.description}`,
     `Original root instruction chars: ${skill.instructions.length}`,
     `Inline prompt cap: ${SKILL_ROOT_INLINE_MAX_CHARS}`,
+    "Contract status: root instructions are truncated from the selected prompt and represented by a bounded contract, not the full root body.",
     "The root SKILL.md instructions exceed the inline prompt cap. This contract is an index, not the full skill body.",
     `Load full root instructions later with: ${loadInstruction}`,
-    "Reference/resource contents are not included in this contract."
+    "Reference/resource contents are not included in this contract.",
+    "",
+    "Required toolsets:",
+    ...formatRequiredToolsets(skill.requiredToolsets),
+    "",
+    "Playbook summary:",
+    ...formatPlaybookSummary(skill.playbook)
   ].join("\n"));
 }
 
@@ -182,6 +196,33 @@ function formatHeadingIndex(sections: SkillSectionIndexEntry[]): string[] {
   return displayedSections
     .slice(0, 12)
     .map((section) => `- ${"#".repeat(section.level)} ${section.heading} @${section.charOffset}`);
+}
+
+function formatRequiredToolsets(toolsets: readonly string[] | undefined): string[] {
+  if (toolsets === undefined || toolsets.length === 0) {
+    return ["- None declared."];
+  }
+
+  return [...toolsets]
+    .sort((left, right) => left.localeCompare(right))
+    .map((toolset) => `- ${toolset}`);
+}
+
+function formatPlaybookSummary(playbook: LoadedSkill["playbook"]): string[] {
+  if (playbook.length === 0) {
+    return ["- No playbook steps declared."];
+  }
+
+  return playbook.slice(0, 12).map((step, index) => {
+    const labels = [
+      `${index + 1}. ${step.id}: ${step.description}`,
+      step.toolsets === undefined || step.toolsets.length === 0
+        ? undefined
+        : `toolsets=${[...step.toolsets].sort((left, right) => left.localeCompare(right)).join(",")}`,
+      step.preferredTool === undefined ? undefined : `preferredTool=${step.preferredTool}`
+    ].filter((label): label is string => label !== undefined);
+    return `- ${labels.join(" · ")}`;
+  });
 }
 
 function formatResourceIndex(resources: SkillReferenceIndexEntry[]): string[] {

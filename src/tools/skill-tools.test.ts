@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { LoadedSkill, SkillDefinition } from "../contracts/skill.js";
 import type { ToolResult } from "../contracts/tool.js";
@@ -12,6 +12,7 @@ import {
   SKILL_SEARCH_MAX_RESULTS
 } from "../skills/skill-limits.js";
 import { SkillRegistry } from "../skills/skill-registry.js";
+import type { SkillEvolutionStore } from "../skills/skill-evolution.js";
 import { RuntimeRouter } from "../runtime/runtime-router.js";
 import type { IntentRouter } from "../runtime/intent-router.js";
 import { createSkillTools } from "./skill-tools.js";
@@ -67,6 +68,7 @@ describe("skill.read", () => {
       expect(result.ok).toBe(true);
       expect(result.content).toContain("Skill contract: large-skill");
       expect(result.content).toContain("Load full root instructions later with: skill.read");
+      expect(result.content).toContain("Contract status: root instructions are truncated from the selected prompt and represented by a bounded contract, not the full root body.");
       expect(result.content).not.toContain("LARGE_ROOT_TAIL_MARKER");
       expect(result.metadata).toMatchObject({
         mode: "contract",
@@ -209,6 +211,35 @@ describe("skill.read", () => {
     expect(view.ok).toBe(true);
     expect(view.content).toBe(read.content);
     expect(view.metadata).toEqual(read.metadata);
+  });
+
+  it("does not record usage telemetry for canonical skill.read", async () => {
+    const recordSkillViewed = vi.fn().mockResolvedValue(undefined);
+    const harness = await skillToolHarness([loadedSkill({ name: "read-telemetry" })], {
+      skillEvolutionStore: { recordSkillViewed } as unknown as SkillEvolutionStore
+    });
+
+    const result = await harness.run("skill.read", { name: "read-telemetry" });
+
+    expect(result.ok).toBe(true);
+    expect(recordSkillViewed).not.toHaveBeenCalled();
+  });
+
+  it("preserves legacy viewed usage recording for skill.view compatibility", async () => {
+    const recordSkillViewed = vi.fn().mockResolvedValue(undefined);
+    const harness = await skillToolHarness([loadedSkill({ name: "view-telemetry" })], {
+      skillEvolutionStore: { recordSkillViewed } as unknown as SkillEvolutionStore
+    });
+
+    const result = await harness.run("skill.view", { name: "view-telemetry" });
+
+    expect(result.ok).toBe(true);
+    expect(recordSkillViewed).toHaveBeenCalledTimes(1);
+    expect(recordSkillViewed).toHaveBeenCalledWith({
+      skillName: "view-telemetry",
+      source: "local",
+      provenanceKind: undefined
+    });
   });
 
   it("uses the same setup helper for runtime setup context and skill.read readiness metadata", async () => {
@@ -476,6 +507,7 @@ async function skillToolHarness(
   options: {
     files?: Record<string, string | Buffer>;
     skillConfig?: Record<string, Record<string, unknown>>;
+    skillEvolutionStore?: SkillEvolutionStore;
   } = {}
 ): Promise<{ run(toolName: "skill.read" | "skill.search" | "skill.view", input: Record<string, unknown>): Promise<ToolResult> }> {
   const root = await mkdtemp(join(tmpdir(), "skill-tools-test-"));
@@ -506,7 +538,8 @@ async function skillToolHarness(
   const tools = createSkillTools({
     registry,
     localSkillsRoot: root,
-    skillConfig: options.skillConfig
+    skillConfig: options.skillConfig,
+    skillEvolutionStore: options.skillEvolutionStore
   });
   return {
     async run(toolName, input) {
