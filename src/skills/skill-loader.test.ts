@@ -68,6 +68,46 @@ describe("loadSkillsFromDirectory", () => {
     expect(result.skills[0].name).toBe("valid-skill");
   });
 
+  it("builds large-skill contracts after resource hydration", async () => {
+    const root = await makeTempDir();
+    const skillDir = join(root, "large-skill");
+    await mkdir(join(skillDir, "references"), { recursive: true });
+    await mkdir(join(skillDir, "scripts"), { recursive: true });
+    await writeFile(join(skillDir, "references", "guide.md"), "# Guide\n\nReference details.", "utf8");
+    await writeFile(join(skillDir, "scripts", "run.sh"), "#!/usr/bin/env bash\n", "utf8");
+    await writeFile(
+      join(skillDir, "SKILL.md"),
+      [
+        "---",
+        "name: large-skill",
+        "description: A large test skill",
+        "version: 1.0.0",
+        "category: test",
+        "---",
+        "# Large Skill",
+        "Use the large skill.",
+        "Detailed instructions.\n".repeat(420)
+      ].join("\n"),
+      "utf8"
+    );
+
+    const result = await loadSkillsFromDirectory(root, {
+      sourceKind: "local",
+      sourceRoot: root
+    });
+
+    expect(result.errors).toHaveLength(0);
+    expect(result.skills[0].contract).toBeDefined();
+    expect(result.skills[0].resources?.map((resource) => resource.path)).toEqual([
+      "references/guide.md",
+      "scripts/run.sh"
+    ]);
+    expect(result.skills[0].contract?.referenceIndex.map((entry) => entry.path))
+      .toContain("references/guide.md");
+    expect(result.skills[0].contract?.scriptIndex.map((entry) => entry.path))
+      .toContain("scripts/run.sh");
+  });
+
   it("loads playbook frontmatter", async () => {
     const root = await makeTempDir();
     const skillDir = join(root, "playbook-skill");

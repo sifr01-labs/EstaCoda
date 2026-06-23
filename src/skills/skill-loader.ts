@@ -18,6 +18,7 @@ import type {
 import type { NativeIntent } from "../contracts/intent.js";
 import type { ToolsetName } from "../contracts/tool.js";
 import { getRegisteredPythonCapabilitySpec } from "../python-env/capability-registry.js";
+import { buildSkillContract } from "./skill-contract.js";
 import {
   assertKnownToolsetName,
   MAX_SKILL_FILES,
@@ -154,9 +155,14 @@ export function truncateContextDocument(input: string, maxChars = MAX_SKILL_MD_C
 }
 
 export async function hydrateSkillResources(skill: LoadedSkill): Promise<LoadedSkill> {
-  return {
+  const hydrated = {
     ...skill,
     resources: await loadSkillResourceIndex(skill)
+  };
+
+  return {
+    ...hydrated,
+    contract: buildSkillContract(hydrated)
   };
 }
 
