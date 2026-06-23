@@ -878,14 +878,21 @@ async function model(options: CliOptions, args: string[]): Promise<CliCommandRes
       return runModelSetupCustom(options, args.slice(2));
     }
     if (args[1] === "codex") {
-      return runModelSetupCodex({
-        homeDir: options.homeDir,
-        profileId: options.profileId,
-        workspaceRoot: options.workspaceRoot,
-        prompt: options.prompt,
-        fetchLike: options.providerFetch,
-        output: options.output
-      });
+      const createdPrompt = options.prompt === undefined && canRunInteractive() ? createReadlinePrompt({
+        uiContext: promptUiContextForLocale(localeForConfig(config)),
+      }) : undefined;
+      try {
+        return await runModelSetupCodex({
+          homeDir: options.homeDir,
+          profileId: options.profileId,
+          workspaceRoot: options.workspaceRoot,
+          prompt: options.prompt ?? createdPrompt,
+          fetchLike: options.providerFetch,
+          output: options.output
+        });
+      } finally {
+        createdPrompt?.close?.();
+      }
     }
     return {
       handled: true,

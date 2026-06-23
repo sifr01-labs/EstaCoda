@@ -129,8 +129,7 @@ function hasOpenAiCodexChoice(
   candidates: readonly ProviderCandidate[]
 ): boolean {
   return options.openAiCodexChoice === true &&
-    candidates.some((candidate) => candidate.id === "openai") &&
-    candidates.some((candidate) => candidate.id === "codex");
+    candidates.some((candidate) => candidate.id === "openai");
 }
 
 function shouldPromptOpenAiCodexChoice(

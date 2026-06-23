@@ -173,7 +173,7 @@ describe("cli model", () => {
 
       const selectInputs: Array<SelectPromptInput<unknown>> = [];
       const prompt = createMockPrompt({
-        selects: ["openai", "gpt-4o"],
+        selects: ["openai", "openai-api-key", "gpt-4o"],
         onSelect: (input) => selectInputs.push(input)
       });
 
@@ -201,6 +201,15 @@ describe("cli model", () => {
         },
         {
           surface: "promptCard",
+          title: "OpenAI setup",
+          body: "Choose how to configure OpenAI.\n",
+          columns: [
+            { key: "name", header: "Name" },
+            { key: "details", header: "Details" }
+          ]
+        },
+        {
+          surface: "promptCard",
           title: "Primary model",
           body: "Choose the primary model for openai.\n",
           columns: [
@@ -213,10 +222,13 @@ describe("cli model", () => {
         expect.arrayContaining(["openai", "back", "cancel"])
       );
       expect(selectInputs[1]?.options.map((option) => option.id)).toEqual(
+        expect.arrayContaining(["openai-api-key", "codex-oauth", "back", "cancel"])
+      );
+      expect(selectInputs[2]?.options.map((option) => option.id)).toEqual(
         expect.arrayContaining(["gpt-4o", "back", "cancel"])
       );
       const openAiOption = selectInputs[0]?.options.find((option) => option.id === "openai");
-      const gpt4oOption = selectInputs[1]?.options.find((option) => option.id === "gpt-4o");
+      const gpt4oOption = selectInputs[2]?.options.find((option) => option.id === "gpt-4o");
       expect(openAiOption).toMatchObject({
         label: "OpenAI",
         cells: { name: "OpenAI", details: "Frontier models for high-quality primary reasoning. Direct API." },
@@ -231,8 +243,9 @@ describe("cli model", () => {
       expect(gpt4oOption?.badges).toBeUndefined();
       expect(selectInputs[0]?.showCurrentBadge).toBe(false);
       expect(selectInputs[1]?.showCurrentBadge).toBe(false);
+      expect(selectInputs[2]?.showCurrentBadge).toBe(false);
       expect(selectInputs[0]?.defaultIndex).toBe(selectInputs[0]?.options.findIndex((option) => option.id === "openai"));
-      expect(selectInputs[1]?.defaultIndex).toBe(selectInputs[1]?.options.findIndex((option) => option.id === "gpt-4o"));
+      expect(selectInputs[2]?.defaultIndex).toBe(selectInputs[2]?.options.findIndex((option) => option.id === "gpt-4o"));
 
       const config = await readUserConfig(tmpDir) as any;
       expect(config.model?.provider).toBe("openai");
@@ -421,7 +434,7 @@ describe("cli model", () => {
 
       const selectTitles: string[] = [];
       const prompt = createMockPrompt({
-        selects: ["openai", "back", "back"],
+        selects: ["openai", "openai-api-key", "back", "back"],
         onSelect: (input) => selectTitles.push(input.title)
       });
 
@@ -435,7 +448,7 @@ describe("cli model", () => {
       expect(result.handled).toBe(true);
       expect(result.exitCode).toBe(0);
       expect(result.output).toContain("No changes were made.");
-      expect(selectTitles).toEqual(["Primary provider", "Primary model", "Primary provider"]);
+      expect(selectTitles).toEqual(["Primary provider", "OpenAI setup", "Primary model", "Primary provider"]);
       expect(await readUserConfig(tmpDir)).toEqual(original);
     });
 
@@ -463,7 +476,7 @@ describe("cli model", () => {
         await writeFile(envPath, "OPENAI_API_KEY=sk-existing\n", "utf8");
 
         const prompt = createMockPrompt({
-          selects: ["openai", "gpt-4o"]
+          selects: ["openai", "openai-api-key", "gpt-4o"]
         });
 
         const result = await runCliCommand({
@@ -501,7 +514,7 @@ describe("cli model", () => {
       });
 
       const prompt = createMockPrompt({
-        selects: ["openai", "gpt-4o"],
+        selects: ["openai", "openai-api-key", "gpt-4o"],
         secrets: ["sk-test-key"]
       });
 
@@ -541,7 +554,7 @@ describe("cli model", () => {
       });
 
       const prompt = createMockPrompt({
-        selects: ["openai", "gpt-4o"],
+        selects: ["openai", "openai-api-key", "gpt-4o"],
         secrets: [""]
       });
 
@@ -630,7 +643,7 @@ describe("cli model", () => {
       });
 
       const prompt = createMockPrompt({
-        selects: ["openai", "gpt-4o"],
+        selects: ["openai", "openai-api-key", "gpt-4o"],
         secrets: ["sk-test-key"]
       });
 

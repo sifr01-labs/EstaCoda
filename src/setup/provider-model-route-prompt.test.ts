@@ -182,7 +182,6 @@ describe("selectProviderModelRoute", () => {
     const flow = fakeFlow({
       providers: [
         providerCandidate("openai", "OpenAI", 1),
-        providerCandidate("codex", "Codex", 1),
         providerCandidate("local", "Local", 1),
       ],
     });

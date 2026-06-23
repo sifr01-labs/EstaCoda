@@ -165,6 +165,50 @@ describe("runCliCommand cron dispatch", () => {
   });
 });
 
+describe("runCliCommand model setup codex dispatch", () => {
+  let tempDir: string;
+  let originalStdinIsTty: boolean | undefined;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "estacoda-cli-codex-"));
+    originalStdinIsTty = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, "isTTY", {
+      configurable: true,
+      value: true,
+    });
+    readlineMock.prompt.mockReset();
+    readlineMock.close.mockReset();
+    readlineMock.createReadlinePrompt.mockReset();
+    readlineMock.createReadlinePrompt.mockReturnValue(Object.assign(readlineMock.prompt, {
+      close: readlineMock.close,
+    }));
+  });
+
+  afterEach(async () => {
+    Object.defineProperty(process.stdin, "isTTY", {
+      configurable: true,
+      value: originalStdinIsTty,
+    });
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("creates an interactive prompt for direct Codex setup instead of silently cancelling", async () => {
+    readlineMock.prompt.mockResolvedValue("2");
+
+    const result = await runCliCommand({
+      argv: ["model", "setup", "codex"],
+      workspaceRoot: tempDir,
+      homeDir: tempDir,
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.output).toBe("Cancelled. No changes were made.");
+    expect(readlineMock.createReadlinePrompt).toHaveBeenCalledOnce();
+    expect(readlineMock.prompt).toHaveBeenCalledWith(expect.stringContaining("Codex requires OAuth authentication."));
+    expect(readlineMock.close).toHaveBeenCalledOnce();
+  });
+});
+
 describe("runCliCommand WhatsApp dispatch", () => {
   let tempDir: string;
 

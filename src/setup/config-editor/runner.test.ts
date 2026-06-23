@@ -1514,7 +1514,7 @@ describe("runConfigEditor", () => {
     });
     await trustWorkspace(tempDir, workspaceRoot);
 
-    const prompt = fakePrompt({ values: ["OpenAI", "gpt-5.5", true], secret: "sk-pr8-provider-route" });
+    const prompt = fakePrompt({ values: ["OpenAI", "OpenAI Models", "gpt-5.5", true], secret: "sk-pr8-provider-route" });
     const routePrompts: SelectPromptInput<unknown>[] = [];
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
@@ -1981,7 +1981,7 @@ describe("runConfigEditor", () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
 
-    const prompt = fakePrompt({ values: ["OpenAI", "Back", "OpenAI", "gpt-5.5", true], secret: "sk-pr8-provider-route" });
+    const prompt = fakePrompt({ values: ["OpenAI", "OpenAI Models", "Back", "OpenAI", "OpenAI Models", "gpt-5.5", true], secret: "sk-pr8-provider-route" });
     const routePrompts: SelectPromptInput<unknown>[] = [];
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
@@ -2023,7 +2023,7 @@ describe("runConfigEditor", () => {
     await chmod(profileEnvPath(tempDir), 0o600);
     await trustWorkspace(tempDir, workspaceRoot);
     const prompt = trackingPrompt({
-      values: ["OpenAI", "gpt-5.5", "existing", true],
+      values: ["OpenAI", "OpenAI Models", "gpt-5.5", "existing", true],
       secret: "sk-should-not-be-read",
     });
     const reuseChoiceLabels: string[][] = [];
@@ -2065,7 +2065,7 @@ describe("runConfigEditor", () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
     const prompt = trackingPrompt({
-      values: ["OpenAI", "gpt-5.5", true],
+      values: ["OpenAI", "OpenAI Models", "gpt-5.5", true],
       secret: "sk-fallback-add-secret",
     });
     const promptTitles: string[] = [];
@@ -2356,7 +2356,7 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["OpenAI", "gpt-5.5", "new", true],
+        values: ["OpenAI", "OpenAI Models", "gpt-5.5", "new", true],
         secret: "sk-pr8-replacement-secret",
       }),
       defaultActionId: "edit-primary-model-route",
@@ -2392,7 +2392,7 @@ describe("runConfigEditor", () => {
     const result = await runConfigEditor({
       homeDir: tempDir,
       workspaceRoot,
-      prompt: fakePrompt({ values: ["OpenAI", "gpt-5.5", "new"], secret: "" }),
+      prompt: fakePrompt({ values: ["OpenAI", "OpenAI Models", "gpt-5.5", "new"], secret: "" }),
       defaultActionId: "edit-primary-model-route",
       flowEngine: flowEngine({ credentialAction: "reuse", envVarName: "PR8_EMPTY_REUSE_KEY" }),
       applyExecutor: {
@@ -2414,7 +2414,7 @@ describe("runConfigEditor", () => {
     process.env.PR8_SHELL_ONLY_KEY = "sk-shell-only-secret";
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
-    const prompt = trackingPrompt({ values: ["OpenAI", "gpt-5.5", true] });
+    const prompt = trackingPrompt({ values: ["OpenAI", "OpenAI Models", "gpt-5.5", true] });
     const reuseChoiceLabels: string[][] = [];
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
@@ -2575,7 +2575,7 @@ describe("runConfigEditor", () => {
     const result = await runConfigEditor({
       homeDir: tempDir,
       workspaceRoot,
-      prompt: fakePrompt({ values: ["OpenAI", "gpt-5.5"] }),
+      prompt: fakePrompt({ values: ["OpenAI", "OpenAI Models", "gpt-5.5"] }),
       defaultActionId: "edit-primary-model-route",
       flowEngine: flowEngine({ diagnostic: "Provider OpenAI is not runnable." }),
       applyExecutor: {
@@ -3417,7 +3417,7 @@ describe("runConfigEditor", () => {
     for (const scenario of [
       {
         actionId: "edit-primary-model-route" as const,
-        values: ["OpenAI", "gpt-5.5", true],
+        values: ["OpenAI", "OpenAI Models", "gpt-5.5", true],
         secret: "sk-provider-only-secret",
         flowEngine: flowEngine({ credentialAction: "collect", envVarName: "PR8_PROVIDER_ONLY_KEY" }),
       },
