@@ -3,8 +3,9 @@ import { dirname, isAbsolute } from "node:path";
 import type { ChannelAttachment, ChannelKind } from "../contracts/channel.js";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { ModelProfile } from "../contracts/provider.js";
-import type { LoadedSkill, SkillDefinition } from "../contracts/skill.js";
+import type { LoadedSkill, SelectedSkillPromptContent, SkillDefinition } from "../contracts/skill.js";
 import { resolveOsHomeDir } from "../config/home-dir.js";
+import { selectSkillPromptContent } from "../skills/skill-contract.js";
 import type { IntentRouter } from "./intent-router.js";
 
 export type SkillSetupContext = {
@@ -23,6 +24,7 @@ export type SkillSetupContext = {
 export type RuntimeRouteResult = {
   intent: IntentRoute;
   selectedSkill: LoadedSkill | SkillDefinition | undefined;
+  selectedSkillPromptContent: SelectedSkillPromptContent | undefined;
   selectedSkillInstructions: string | undefined;
   selectedSkillResources: LoadedSkill["resources"] | undefined;
   selectedSkillSetup: SkillSetupContext | undefined;
@@ -58,6 +60,7 @@ export class RuntimeRouter {
       return {
         intent: directAttachmentFailureIntent(),
         selectedSkill: undefined,
+        selectedSkillPromptContent: undefined,
         selectedSkillInstructions: undefined,
         selectedSkillResources: undefined,
         selectedSkillSetup: undefined,
@@ -75,10 +78,11 @@ export class RuntimeRouter {
     });
 
     const selectedSkill = intent.suggestedSkills[0];
-    const selectedSkillInstructions =
+    const selectedSkillPromptContent =
       selectedSkill === undefined || !isLoadedSkill(selectedSkill)
         ? undefined
-        : selectedSkill.providerInstructions?.content ?? selectedSkill.instructions;
+        : selectSkillPromptContent(selectedSkill);
+    const selectedSkillInstructions = selectedSkillPromptContent?.content;
     const selectedSkillResources =
       selectedSkill === undefined || !isLoadedSkill(selectedSkill)
         ? undefined
@@ -91,6 +95,7 @@ export class RuntimeRouter {
     return {
       intent,
       selectedSkill,
+      selectedSkillPromptContent,
       selectedSkillInstructions,
       selectedSkillResources,
       selectedSkillSetup,
