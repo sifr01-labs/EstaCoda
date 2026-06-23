@@ -35,8 +35,10 @@ describe("channel activity labels", () => {
 
   it("uses mixed EstaCoda glyphs for selected tool families", () => {
     expect(toolEmoji("skill.read")).toBe("☥");
+    expect(toolEmoji("skill.search")).toBe("🔎");
     expect(toolEmoji("skill.view")).toBe("☥");
     expect(activityKeyForTool("skill.read")).toBe("load_skill");
+    expect(activityKeyForTool("skill.search")).toBe("load_skill");
     expect(activityKeyForTool("skill.view")).toBe("load_skill");
     expect(toolEmoji("skill.create")).toBe("✦");
     expect(toolEmoji("config.image.setup")).toBe("🎨");

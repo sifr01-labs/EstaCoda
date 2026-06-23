@@ -172,6 +172,7 @@ const CHANNEL_TOOL_EMOJI: Record<string, string> = {
   "memory.file_compaction_restore": "↩️",
   "skill.list": "📜",
   "skill.read": "☥",
+  "skill.search": "🔎",
   "skill.view": "☥",
   "skill.inspect": "𓂀",
   "skill.eval": "⚖️",
@@ -222,7 +223,7 @@ export function activityKeyForTool(tool: string): ActivityLabelKey {
   if (tool === "execute_code" || tool === "python.probe" || tool === "process.logs" || tool === "process.list") {
     return "run_checks";
   }
-  if (tool === "skill.read" || tool === "skill.view" || tool === "playbook.plan" || tool === "skill.inspect") return "load_skill";
+  if (tool === "skill.read" || tool === "skill.search" || tool === "skill.view" || tool === "playbook.plan" || tool === "skill.inspect") return "load_skill";
   if (tool === "media.inspect" || tool === "media.extract-frame") return "inspect_media";
   if (tool === "vision.analyze") return "inspect_media";
   if (tool === "document.probe") return "process_attachment";

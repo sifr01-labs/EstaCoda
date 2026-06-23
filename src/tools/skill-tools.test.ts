@@ -5,7 +5,12 @@ import { describe, expect, it } from "vitest";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { LoadedSkill, SkillDefinition } from "../contracts/skill.js";
 import type { ToolResult } from "../contracts/tool.js";
-import { SKILL_READ_MAX_CHARS } from "../skills/skill-limits.js";
+import {
+  MAX_SKILL_RESOURCE_BYTES,
+  SKILL_READ_MAX_CHARS,
+  SKILL_SEARCH_DEFAULT_RESULTS,
+  SKILL_SEARCH_MAX_RESULTS
+} from "../skills/skill-limits.js";
 import { SkillRegistry } from "../skills/skill-registry.js";
 import { RuntimeRouter } from "../runtime/runtime-router.js";
 import type { IntentRouter } from "../runtime/intent-router.js";
@@ -240,13 +245,239 @@ describe("skill.read", () => {
   });
 });
 
+describe("skill.search", () => {
+  it("searches named skill root instructions with path, line, heading, and deterministic excerpts", async () => {
+    const harness = await skillToolHarness([loadedSkill({
+      name: "search-root",
+      instructions: [
+        "# Troubleshooting",
+        "First line.",
+        "TransformMatchingTex error happens here.",
+        "Next line."
+      ].join("\n")
+    })]);
+
+    const result = await harness.run("skill.search", {
+      name: "search-root",
+      query: "transformmatchingtex"
+    });
+    const payload = parseSearchPayload(result);
+
+    expect(result.ok).toBe(true);
+    expect(payload).toMatchObject({
+      name: "search-root",
+      query: "transformmatchingtex",
+      maxResults: SKILL_SEARCH_DEFAULT_RESULTS,
+      matchCount: 1,
+      truncated: false,
+      results: [
+        {
+          path: "SKILL.md",
+          heading: "Troubleshooting",
+          line: 3
+        }
+      ]
+    });
+    expect(payload.results[0]?.excerpt).toContain("3: TransformMatchingTex error happens here.");
+  });
+
+  it("searches only indexed skill resources and returns deterministic path excerpts", async () => {
+    const harness = await skillToolHarness([loadedSkill({
+      name: "search-resources",
+      instructions: "# Root\n\nNo match here.",
+      resources: [
+        { kind: "reference", path: "references/guide.md" },
+        { kind: "template", path: "templates/example.md" }
+      ]
+    })], {
+      files: {
+        "references/guide.md": "# Guide\n\nA latex error appears in the reference.",
+        "templates/example.md": "# Template\n\nAnother latex error appears in template."
+      }
+    });
+
+    const result = await harness.run("skill.search", {
+      name: "search-resources",
+      query: "latex error",
+      maxResults: 10
+    });
+    const payload = parseSearchPayload(result);
+
+    expect(payload.results.map((entry) => entry.path)).toEqual([
+      "references/guide.md",
+      "templates/example.md"
+    ]);
+    expect(payload.results[0]).toMatchObject({
+      heading: "Guide",
+      line: 3
+    });
+    expect(payload.results[1]).toMatchObject({
+      heading: "Template",
+      line: 3
+    });
+  });
+
+  it("clamps maxResults and marks result truncation", async () => {
+    const instructions = Array.from({ length: SKILL_SEARCH_MAX_RESULTS + 2 }, (_, index) =>
+      `needle occurrence ${index + 1}`
+    ).join("\n");
+    const harness = await skillToolHarness([loadedSkill({
+      name: "search-clamp",
+      instructions
+    })]);
+
+    const result = await harness.run("skill.search", {
+      name: "search-clamp",
+      query: "needle",
+      maxResults: 999
+    });
+    const payload = parseSearchPayload(result);
+
+    expect(payload.maxResults).toBe(SKILL_SEARCH_MAX_RESULTS);
+    expect(payload.results).toHaveLength(SKILL_SEARCH_MAX_RESULTS);
+    expect(payload.matchCount).toBe(SKILL_SEARCH_MAX_RESULTS + 2);
+    expect(payload.truncated).toBe(true);
+  });
+
+  it("uses default max results when maxResults is absent", async () => {
+    const instructions = Array.from({ length: SKILL_SEARCH_DEFAULT_RESULTS + 1 }, (_, index) =>
+      `default needle ${index + 1}`
+    ).join("\n");
+    const harness = await skillToolHarness([loadedSkill({
+      name: "search-default",
+      instructions
+    })]);
+
+    const result = await harness.run("skill.search", {
+      name: "search-default",
+      query: "needle"
+    });
+    const payload = parseSearchPayload(result);
+
+    expect(payload.maxResults).toBe(SKILL_SEARCH_DEFAULT_RESULTS);
+    expect(payload.results).toHaveLength(SKILL_SEARCH_DEFAULT_RESULTS);
+    expect(payload.matchCount).toBe(SKILL_SEARCH_DEFAULT_RESULTS + 1);
+    expect(payload.truncated).toBe(true);
+  });
+
+  it("rejects missing or empty required search inputs without global fallback", async () => {
+    const harness = await skillToolHarness([loadedSkill({
+      name: "other-skill",
+      instructions: "latex error should not be found without a name"
+    })]);
+
+    await expectSearchFailure(harness, { query: "latex" }, "skill name is required");
+    await expectSearchFailure(harness, { name: "", query: "latex" }, "skill name is required");
+    await expectSearchFailure(harness, { name: "other-skill" }, "skill.search requires a non-empty query.");
+    await expectSearchFailure(harness, { name: "other-skill", query: "   " }, "skill.search requires a non-empty query.");
+    await expectSearchFailure(harness, { name: "missing-skill", query: "latex" }, "Skill not found: missing-skill");
+  });
+
+  it("rejects unloaded skills instead of searching all skills", async () => {
+    const definition: SkillDefinition = {
+      name: "definition-only-search",
+      description: "Definition only.",
+      version: "0.1.0",
+      whenToUse: [],
+      requiredToolsets: [],
+      playbook: [],
+      permissionExpectations: [],
+      examples: [],
+      evaluations: []
+    };
+    const harness = await skillToolHarness([definition, loadedSkill({
+      name: "loaded-other",
+      instructions: "needle exists elsewhere"
+    })]);
+
+    const result = await harness.run("skill.search", {
+      name: "definition-only-search",
+      query: "needle"
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.metadata).toMatchObject({
+      code: "skill-search-unloaded-skill",
+      name: "definition-only-search"
+    });
+  });
+
+  it("blocks traversal resources and skips binary or oversized resources safely", async () => {
+    const harness = await skillToolHarness([loadedSkill({
+      name: "search-safety",
+      instructions: "No matching root text.",
+      resources: [
+        { kind: "reference", path: "../outside.txt" },
+        { kind: "reference", path: "references/binary.bin" },
+        { kind: "reference", path: "references/huge.md" }
+      ]
+    })], {
+      files: {
+        "../outside.txt": "needle outside skill directory",
+        "references/binary.bin": Buffer.from([0, 1, 2, 3, 4]),
+        "references/huge.md": Buffer.alloc(MAX_SKILL_RESOURCE_BYTES + 1, "n")
+      }
+    });
+
+    const result = await harness.run("skill.search", {
+      name: "search-safety",
+      query: "needle",
+      maxResults: 10
+    });
+    const payload = parseSearchPayload(result);
+
+    expect(result.ok).toBe(true);
+    expect(payload.results).toEqual([]);
+    expect(payload.skippedResources).toEqual([
+      { path: "../outside.txt", reason: "outside-skill-directory" },
+      { path: "references/binary.bin", reason: "binary" },
+      { path: "references/huge.md", reason: "oversized" }
+    ]);
+  });
+
+  it("caps excerpts and marks excerpt truncation", async () => {
+    const longLine = `${"a".repeat(1_000)} needle ${"b".repeat(1_000)}`;
+    const harness = await skillToolHarness([loadedSkill({
+      name: "search-excerpt-cap",
+      instructions: `# Long\n${longLine}`
+    })]);
+
+    const result = await harness.run("skill.search", {
+      name: "search-excerpt-cap",
+      query: "needle"
+    });
+    const payload = parseSearchPayload(result);
+
+    expect(payload.results[0]?.truncated).toBe(true);
+    expect(payload.results[0]?.excerpt).toContain("[TRUNCATED:");
+  });
+
+  it("does not alter skill.read or skill.view behavior", async () => {
+    const harness = await skillToolHarness([loadedSkill({
+      name: "search-alias-check",
+      instructions: "# Root\n\nneedle"
+    })]);
+
+    const read = await harness.run("skill.read", { name: "search-alias-check" });
+    const view = await harness.run("skill.view", { name: "search-alias-check" });
+    const search = await harness.run("skill.search", {
+      name: "search-alias-check",
+      query: "needle"
+    });
+
+    expect(read.ok).toBe(true);
+    expect(view.metadata).toEqual(read.metadata);
+    expect(parseSearchPayload(search).results[0]?.path).toBe("SKILL.md");
+  });
+});
+
 async function skillToolHarness(
   skills: Array<LoadedSkill | SkillDefinition>,
   options: {
-    files?: Record<string, string>;
+    files?: Record<string, string | Buffer>;
     skillConfig?: Record<string, Record<string, unknown>>;
   } = {}
-): Promise<{ run(toolName: "skill.read" | "skill.view", input: Record<string, unknown>): Promise<ToolResult> }> {
+): Promise<{ run(toolName: "skill.read" | "skill.search" | "skill.view", input: Record<string, unknown>): Promise<ToolResult> }> {
   const root = await mkdtemp(join(tmpdir(), "skill-tools-test-"));
   const registry = new SkillRegistry();
   for (const skill of skills) {
@@ -257,7 +488,7 @@ async function skillToolHarness(
       for (const [path, content] of Object.entries(options.files ?? {})) {
         const absolute = join(skillRoot, path);
         await mkdir(dirname(absolute), { recursive: true });
-        await writeFile(absolute, content, "utf8");
+        await writeFile(absolute, content);
       }
       registry.register({
         ...skill,
@@ -286,6 +517,37 @@ async function skillToolHarness(
       return await tool.run(input);
     }
   };
+}
+
+type ParsedSkillSearchPayload = {
+  name: string;
+  query: string;
+  maxResults: number;
+  results: Array<{
+    path: string;
+    excerpt: string;
+    heading?: string;
+    line?: number;
+    truncated?: boolean;
+  }>;
+  matchCount: number;
+  truncated: boolean;
+  skippedResources?: Array<{ path: string; reason: string }>;
+};
+
+function parseSearchPayload(result: ToolResult): ParsedSkillSearchPayload {
+  expect(result.ok).toBe(true);
+  return JSON.parse(result.content) as ParsedSkillSearchPayload;
+}
+
+async function expectSearchFailure(
+  harness: { run(toolName: "skill.search", input: Record<string, unknown>): Promise<ToolResult> },
+  input: Record<string, unknown>,
+  message: string
+): Promise<void> {
+  const result = await harness.run("skill.search", input);
+  expect(result.ok).toBe(false);
+  expect(result.content).toContain(message);
 }
 
 function loadedSkill(overrides: Partial<LoadedSkill> = {}): LoadedSkill {

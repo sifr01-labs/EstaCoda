@@ -1815,6 +1815,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
           executions: [
             toolExecutionForTool("call-memory", "memory.curate"),
             toolExecutionForTool("call-skill-read", "skill.read"),
+            toolExecutionForTool("call-skill-search", "skill.search"),
             toolExecutionForTool("call-skill-view", "skill.view")
           ]
         },

@@ -4,7 +4,14 @@ import type { LoadedSkill, SkillDefinition, SkillEvaluation } from "../contracts
 import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
 import { SkillEvolutionStore, type SkillEvalRunRecord, type SkillObservationRecord, type SkillPatchOperation, type SkillPatchProposal, type SkillPatchRiskLevel, type SkillSourceTrust } from "../skills/skill-evolution.js";
 import { resetBundledSkill } from "../skills/skill-bundled-sync.js";
-import { MAX_SKILL_RESOURCE_BYTES, MAX_SKILL_RESOURCE_CHARS, SKILL_READ_MAX_CHARS } from "../skills/skill-limits.js";
+import {
+  MAX_SKILL_RESOURCE_BYTES,
+  MAX_SKILL_RESOURCE_CHARS,
+  SKILL_READ_MAX_CHARS,
+  SKILL_SEARCH_DEFAULT_RESULTS,
+  SKILL_SEARCH_EXCERPT_MAX_CHARS,
+  SKILL_SEARCH_MAX_RESULTS
+} from "../skills/skill-limits.js";
 import { hydrateSkillResources, loadSkillsFromDirectory, parseSkillFile, truncateContextDocument } from "../skills/skill-loader.js";
 import { assertSkillContentMutationAllowed, assertSkillMutable } from "../skills/skill-mutation-policy.js";
 import { ensureContainedDirectory, isSafeRelativeSkillPath } from "../skills/skill-path-safety.js";
@@ -64,6 +71,34 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
 
     return readSkillContent(foundSkill, input, options.skillConfig?.[foundSkill.name]);
   };
+  const runSkillSearch = async (input: SkillSearchInput): Promise<ToolResult> => {
+    if (!isNonEmptyString(input.query)) {
+      return {
+        ok: false,
+        content: "skill.search requires a non-empty query.",
+        metadata: {
+          code: "skill-search-query-required"
+        }
+      };
+    }
+
+    const skill = getSkill(options.registry, input.name);
+    if (!skill.ok) {
+      return skill;
+    }
+    if (!isLoadedSkill(skill.skill)) {
+      return {
+        ok: false,
+        content: "skill.search requires a loaded file-backed skill.",
+        metadata: {
+          code: "skill-search-unloaded-skill",
+          name: skill.skill.name
+        }
+      };
+    }
+
+    return searchSkillContent(skill.skill, input);
+  };
 
   return [
     {
@@ -116,6 +151,25 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
       maxResultSizeChars: 24_000,
       isAvailable: () => true,
       run: runSkillRead
+    },
+    {
+      name: "skill.search",
+      description: "Search within one named loaded skill's root instructions and indexed resources. Requires an explicit skill name.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          query: { type: "string" },
+          maxResults: { type: "number" }
+        },
+        required: ["name", "query"]
+      },
+      riskClass: "read-only-local",
+      toolsets: ["core", "research"],
+      progressLabel: "searching skill",
+      maxResultSizeChars: 16_000,
+      isAvailable: () => true,
+      run: runSkillSearch
     },
     {
       name: "skill.view",
@@ -1232,6 +1286,30 @@ type SkillReadInput = {
   mode?: "contract" | "full";
 };
 
+type SkillSearchInput = {
+  name?: string;
+  query?: string;
+  maxResults?: number;
+};
+
+type SkillSearchResult = {
+  path: string;
+  excerpt: string;
+  heading?: string;
+  line?: number;
+  truncated?: boolean;
+};
+
+type SkillSearchResponse = {
+  name: string;
+  query: string;
+  maxResults: number;
+  results: SkillSearchResult[];
+  matchCount: number;
+  truncated: boolean;
+  skippedResources?: Array<{ path: string; reason: string }>;
+};
+
 function getSkill(registry: SkillRegistry, name: string | undefined): GetSkillResult {
   if (!isNonEmptyString(name)) {
     return skillError("skill name is required");
@@ -1277,6 +1355,160 @@ function toSkillMetadata(skill: LoadedSkill | SkillDefinition): Record<string, u
     sourcePath: "sourcePath" in skill ? skill.sourcePath : undefined,
     sourceKind: "sourceKind" in skill ? skill.sourceKind : undefined,
     sourceRoot: "sourceRoot" in skill ? skill.sourceRoot : undefined
+  };
+}
+
+async function searchSkillContent(
+  skill: LoadedSkill,
+  input: SkillSearchInput
+): Promise<ToolResult> {
+  const query = input.query?.trim() ?? "";
+  const maxResults = clampSearchMaxResults(input.maxResults);
+  const response: SkillSearchResponse = {
+    name: skill.name,
+    query,
+    maxResults,
+    results: [],
+    matchCount: 0,
+    truncated: false
+  };
+  const lowerQuery = query.toLowerCase();
+
+  addSearchMatches({
+    path: "SKILL.md",
+    content: skill.instructions,
+    lowerQuery,
+    response,
+    maxResults
+  });
+
+  const resourcePaths = [...new Set((skill.resources ?? []).map((resource) => resource.path))]
+    .sort((left, right) => left.localeCompare(right));
+  for (const resourcePath of resourcePaths) {
+    const resource = await readSkillResourceTextForSearch(skill, resourcePath);
+    if (!resource.ok) {
+      response.skippedResources = [
+        ...(response.skippedResources ?? []),
+        { path: resourcePath, reason: resource.reason }
+      ];
+      continue;
+    }
+
+    addSearchMatches({
+      path: resource.path,
+      content: resource.content,
+      lowerQuery,
+      response,
+      maxResults
+    });
+  }
+
+  response.truncated = response.truncated || response.matchCount > response.results.length;
+
+  return {
+    ok: true,
+    content: JSON.stringify(response, null, 2),
+    metadata: response
+  };
+}
+
+function clampSearchMaxResults(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value)) {
+    return SKILL_SEARCH_DEFAULT_RESULTS;
+  }
+
+  return Math.min(SKILL_SEARCH_MAX_RESULTS, Math.max(1, Math.trunc(value)));
+}
+
+function addSearchMatches(input: {
+  path: string;
+  content: string;
+  lowerQuery: string;
+  response: SkillSearchResponse;
+  maxResults: number;
+}): void {
+  const lines = input.content.split(/\r?\n/u);
+  let heading: string | undefined;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
+    const parsedHeading = /^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/u.exec(line);
+    if (parsedHeading !== null) {
+      heading = parsedHeading[1]?.trim();
+    }
+    if (!line.toLowerCase().includes(input.lowerQuery)) {
+      continue;
+    }
+
+    input.response.matchCount += 1;
+    if (input.response.results.length >= input.maxResults) {
+      input.response.truncated = true;
+      continue;
+    }
+
+    input.response.results.push({
+      path: input.path,
+      ...buildSearchExcerpt(lines, index, heading)
+    });
+  }
+}
+
+function buildSearchExcerpt(
+  lines: string[],
+  matchIndex: number,
+  heading: string | undefined
+): Omit<SkillSearchResult, "path"> {
+  const start = Math.max(0, matchIndex - 1);
+  const end = Math.min(lines.length, matchIndex + 2);
+  const rawExcerpt = lines
+    .slice(start, end)
+    .map((line, offset) => `${start + offset + 1}: ${line}`)
+    .join("\n");
+  const truncated = truncateContextDocument(rawExcerpt, SKILL_SEARCH_EXCERPT_MAX_CHARS);
+
+  return {
+    excerpt: truncated.content,
+    heading,
+    line: matchIndex + 1,
+    truncated: truncated.truncated
+  };
+}
+
+async function readSkillResourceTextForSearch(
+  skill: LoadedSkill,
+  path: string
+): Promise<{ ok: true; path: string; content: string } | { ok: false; reason: string }> {
+  const skillRoot = await realpath(dirname(skill.sourcePath));
+  const candidate = resolve(skillRoot, path);
+  const canonical = await realpath(candidate).catch(() => undefined);
+
+  if (canonical === undefined) {
+    return { ok: false, reason: "not-found" };
+  }
+
+  const relativePath = relative(skillRoot, canonical);
+  if (relativePath.startsWith("..") || relativePath.startsWith("/")) {
+    return { ok: false, reason: "outside-skill-directory" };
+  }
+
+  const metadata = await stat(canonical).catch(() => undefined);
+  if (metadata === undefined || !metadata.isFile()) {
+    return { ok: false, reason: "not-file" };
+  }
+  if (metadata.size > MAX_SKILL_RESOURCE_BYTES) {
+    return { ok: false, reason: "oversized" };
+  }
+
+  const content = await readFile(canonical);
+  if (!isProbablyText(content)) {
+    return { ok: false, reason: "binary" };
+  }
+
+  const decoded = content.toString("utf8");
+  const truncated = truncateContextDocument(decoded, MAX_SKILL_RESOURCE_CHARS);
+  return {
+    ok: true,
+    path: relativePath,
+    content: truncated.content
   };
 }
 

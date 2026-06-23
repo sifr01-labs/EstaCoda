@@ -119,7 +119,7 @@ export function plainActivityKeyForTool(tool: string): ActivityLabelKey {
   ) {
     return "run_checks";
   }
-  if (tool === "skill.read" || tool === "skill.view" || tool === "playbook.plan" || tool === "skill.inspect") return "load_skill";
+  if (tool === "skill.read" || tool === "skill.search" || tool === "skill.view" || tool === "playbook.plan" || tool === "skill.inspect") return "load_skill";
   if (tool === "media.inspect" || tool === "media.extract-frame") return "inspect_media";
   if (tool === "vision.analyze") return "inspect_media";
   if (tool === "document.probe") return "process_attachment";
