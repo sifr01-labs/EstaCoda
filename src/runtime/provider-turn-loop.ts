@@ -1108,6 +1108,10 @@ export class ProviderTurnLoop {
         ? (secretIndexes.has(index) ? { argumentsRedacted: true as const } : {})
         : toolCall.argumentsText === undefined ? {} : { argumentsText: toolCall.argumentsText })
     }));
+    // This persists protocol material required by some native tool-call replay APIs.
+    // It is not semantic permission to replay hidden reasoning historically; prompt
+    // assembly/native history must later prove an exact active continuation group
+    // before real echo can be reused, otherwise it is stripped or placeholdered.
     const providerReplayEcho = nativeReplaySafe &&
       echoEligibility.required &&
       echoEligibility.providerFamily !== undefined &&
