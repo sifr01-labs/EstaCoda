@@ -585,7 +585,7 @@ describe("loadRuntimeConfig auxiliaryModels", () => {
         homeDir: workspace,
         input: {
           provider: "codex",
-          model: "o3",
+          model: "gpt-5.5",
           baseUrl: "https://chatgpt.com/backend-api/codex",
           apiMode: "openai_responses",
           authMethod: "oauth_device_pkce",
@@ -594,7 +594,7 @@ describe("loadRuntimeConfig auxiliaryModels", () => {
       });
 
       const saved = JSON.parse(await readFile(result.path, "utf8"));
-      expect(saved.model).toEqual({ provider: "codex", id: "o3" });
+      expect(saved.model).toEqual({ provider: "codex", id: "gpt-5.5" });
       expect(saved.providers?.codex).toEqual(expect.objectContaining({
         apiMode: "openai_responses",
         authMethod: "oauth_device_pkce"
@@ -3006,7 +3006,7 @@ describe("buildProviderRegistry custom provider baseUrl behavior", () => {
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
     // Exact shape emitted by model-setup-codex.ts (no kind field)
     await writeFile(profileConfigPath(workspace), JSON.stringify({
-      model: { provider: "codex", id: "o3" },
+      model: { provider: "codex", id: "gpt-5.5" },
       providers: {
         codex: {
           baseUrl: "https://chatgpt.com/backend-api/codex",

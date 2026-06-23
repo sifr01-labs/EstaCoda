@@ -4,7 +4,7 @@ import { isCodexTokenExpired } from "./codex-oauth.js";
 import { loadOAuthStore } from "./oauth-store.js";
 import type { OAuthAuthStore, OAuthTokenRecord } from "./oauth-types.js";
 
-export const CODEX_DEFAULT_MODEL = "o3";
+export const CODEX_DEFAULT_MODEL = "gpt-5.5";
 export const CODEX_DEFAULT_BASE_URL = "https://chatgpt.com/backend-api/codex";
 export const CODEX_OAUTH_AUTH_METHOD = "oauth_device_pkce" as const satisfies ProviderAuthMethod;
 

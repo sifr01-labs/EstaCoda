@@ -297,7 +297,7 @@ describe("setup apply plan", () => {
   it("suppresses hosted credential-required blockers with a reviewed Codex OAuth credential", () => {
     const manifest = buildSetupReviewManifest([
       blockerOnlyBundle("Hosted providers require a credential environment-variable reference."),
-      providerModelRouteBundle("codex", "o3", {
+      providerModelRouteBundle("codex", "gpt-5.5", {
         authMethod: "oauth_device_pkce",
         oauthCredentialStatus: "pending",
       }),

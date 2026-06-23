@@ -1631,7 +1631,7 @@ describe("runConfigEditor", () => {
     );
     expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values).toEqual(expect.objectContaining({
       provider: "codex",
-      model: "o3",
+      model: "gpt-5.5",
       authMethod: "oauth_device_pkce",
       oauthCredentialStatus: "ready",
     }));
@@ -1641,7 +1641,7 @@ describe("runConfigEditor", () => {
       authMethod: "oauth_device_pkce",
       oauthCredentialStatus: "ready",
     }));
-    expect(config.model).toEqual({ provider: "codex", id: "o3", contextWindowTokens: 128000 });
+    expect(config.model).toEqual({ provider: "codex", id: "gpt-5.5", contextWindowTokens: 128000 });
     expect(config.providers?.codex).toEqual(expect.objectContaining({
       apiMode: "custom_openai_compatible",
       authMethod: "oauth_device_pkce",
@@ -4875,7 +4875,7 @@ function baseUrlForProvider(providerId: ProviderId): string {
 
 function modelCandidateForProvider(providerId: ProviderId) {
   const id = providerId === "codex"
-    ? "o3"
+    ? "gpt-5.5"
     : providerId === "anthropic"
     ? "claude-sonnet-4-5"
     : providerId === "kimi"

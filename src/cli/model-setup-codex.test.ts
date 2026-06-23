@@ -120,7 +120,7 @@ function createMockFetch(scenarios: {
 
 function expectCodexRouteConfig(config: any): void {
   expect(config.model.provider).toBe("codex");
-  expect(config.model.id).toBe("o3");
+  expect(config.model.id).toBe("gpt-5.5");
   expect(config.providers.codex.baseUrl).toBe("https://chatgpt.com/backend-api/codex");
   expect(config.providers.codex.apiMode).toBe("openai_responses");
   expect(config.providers.codex.authMethod).toBe("oauth_device_pkce");
@@ -655,7 +655,7 @@ describe("model setup codex", () => {
       // Config should now exist
       const config = await readUserConfig(tmpDir) as any;
       expect(config.model.provider).toBe("codex");
-      expect(config.model.id).toBe("o3");
+      expect(config.model.id).toBe("gpt-5.5");
     });
   });
 

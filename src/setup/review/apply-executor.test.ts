@@ -163,7 +163,7 @@ function codexOAuthPlan(values: ReviewValues = {}): SetupApplyPlan {
           redacted: true,
           values: {
             provider: "codex",
-            model: "o3",
+            model: "gpt-5.5",
             baseUrl: "https://chatgpt.com/backend-api/codex",
             apiMode: "custom_openai_compatible",
             authMethod: "oauth_device_pkce",
@@ -192,7 +192,7 @@ function codexOAuthPlan(values: ReviewValues = {}): SetupApplyPlan {
           redacted: true,
           values: {
             provider: "codex",
-            model: "o3",
+            model: "gpt-5.5",
             credentialSurface: "oauth",
             authMethod: "oauth_device_pkce",
             oauthCredentialStatus: "pending",
@@ -790,7 +790,7 @@ describe("reviewed setup apply executor", () => {
     expect(JSON.parse(rawConfig)).toMatchObject({
       model: {
         provider: "codex",
-        id: "o3",
+        id: "gpt-5.5",
       },
       providers: {
         codex: {

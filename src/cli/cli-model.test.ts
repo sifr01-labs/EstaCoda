@@ -251,7 +251,7 @@ describe("cli model", () => {
             baseUrl: "https://chatgpt.com/backend-api/codex",
             apiMode: "custom_openai_compatible",
             authMethod: "oauth_device_pkce",
-            models: ["o3"]
+            models: ["gpt-5.5"]
           }
         },
         model: {
@@ -299,7 +299,7 @@ describe("cli model", () => {
       );
 
       const config = await readUserConfig(tmpDir) as any;
-      expect(config.model).toEqual({ provider: "codex", id: "o3", contextWindowTokens: expect.any(Number) });
+      expect(config.model).toEqual({ provider: "codex", id: "gpt-5.5", contextWindowTokens: expect.any(Number) });
       expect(config.providers?.codex).toEqual(expect.objectContaining({
         authMethod: "oauth_device_pkce",
         apiMode: "custom_openai_compatible"

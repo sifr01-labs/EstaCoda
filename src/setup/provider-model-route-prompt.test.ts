@@ -200,7 +200,7 @@ describe("selectProviderModelRoute", () => {
 
     expect(result).toEqual({
       kind: "selected",
-      selection: selectionResult("codex", "o3"),
+      selection: selectionResult("codex", "gpt-5.5"),
     });
     expect(prompt.calls.map((call) => call.title)).toEqual([
       "Primary provider",
@@ -219,7 +219,7 @@ describe("selectProviderModelRoute", () => {
       "cancel",
     ]);
     expect(flow.modelListCount).toBe(0);
-    expect(flow.resolved).toEqual([{ providerId: "codex", modelId: "o3" }]);
+    expect(flow.resolved).toEqual([{ providerId: "codex", modelId: "gpt-5.5" }]);
   });
 
   it("continues to normal OpenAI model selection from the OpenAI sub-choice", async () => {
@@ -263,10 +263,10 @@ describe("selectProviderModelRoute", () => {
         providerCandidate("codex", "Codex", 1),
       ],
       models: {
-        codex: [modelCandidate("codex", "o3")],
+        codex: [modelCandidate("codex", "gpt-5.5")],
       },
     });
-    const prompt = fakePrompt(["codex", "o3"]);
+    const prompt = fakePrompt(["codex", "gpt-5.5"]);
 
     const result = await selectProviderModelRoute({
       prompt,
@@ -279,7 +279,7 @@ describe("selectProviderModelRoute", () => {
 
     expect(result).toEqual({
       kind: "selected",
-      selection: selectionResult("codex", "o3"),
+      selection: selectionResult("codex", "gpt-5.5"),
     });
     expect(prompt.calls[0]?.options.map((option) => option.id)).toEqual([
       "openai",
@@ -287,7 +287,7 @@ describe("selectProviderModelRoute", () => {
       "back",
       "cancel",
     ]);
-    expect(flow.resolved).toEqual([{ providerId: "codex", modelId: "o3" }]);
+    expect(flow.resolved).toEqual([{ providerId: "codex", modelId: "gpt-5.5" }]);
   });
 
   it("omits Back rows from provider and model cards when Back is disabled", async () => {
