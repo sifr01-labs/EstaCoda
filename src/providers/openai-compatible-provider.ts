@@ -417,15 +417,14 @@ function providerReasoningEchoForMessage(
   }
 
   const echo = message.providerReplayEcho;
-  if (
-    message.role === "assistant" &&
-    Array.isArray(message.toolCalls) &&
-    message.toolCalls.length > 0 &&
-    echo?.field === "reasoning_content" &&
-    echo.providerFamily === metadata.reasoningEchoProviderFamily &&
-    echo.apiMode === "openai_chat_completions"
-  ) {
-    return { ok: true, value: echo.value };
+  if (hasSerializableReasoningEchoLocation(message) && echo !== undefined && echoTargetsMetadata(echo, metadata)) {
+    if (echo.provenance === "protocol-placeholder") {
+      if (isValidProtocolPlaceholderEcho(echo)) {
+        return { ok: true, value: " " };
+      }
+    } else if ((echo.provenance === undefined || echo.provenance === "provider") && isValidProviderOriginatedEcho(echo)) {
+      return { ok: true, value: echo.value };
+    }
   }
 
   if (metadata.allowReasoningEchoPlaceholder === true) {
@@ -433,6 +432,35 @@ function providerReasoningEchoForMessage(
   }
 
   return { ok: false };
+}
+
+function hasSerializableReasoningEchoLocation(
+  message: Pick<ProviderMessage, "providerReplayEcho" | "toolCalls" | "role">
+): boolean {
+  return message.role === "assistant" &&
+    Array.isArray(message.toolCalls) &&
+    message.toolCalls.length > 0;
+}
+
+function echoTargetsMetadata(
+  echo: NonNullable<ProviderMessage["providerReplayEcho"]>,
+  metadata: ProviderMetadata
+): boolean {
+  return echo.field === "reasoning_content" &&
+    echo.providerFamily === metadata.reasoningEchoProviderFamily &&
+    echo.apiMode === metadata.apiMode;
+}
+
+function isValidProtocolPlaceholderEcho(echo: NonNullable<ProviderMessage["providerReplayEcho"]>): boolean {
+  return echo.field === "reasoning_content" &&
+    echo.value === " " &&
+    echo.chars === 1;
+}
+
+function isValidProviderOriginatedEcho(echo: NonNullable<ProviderMessage["providerReplayEcho"]>): boolean {
+  return echo.field === "reasoning_content" &&
+    echo.value.length > 0 &&
+    echo.chars === echo.value.length;
 }
 
 function hasNativeAssistantToolCalls(

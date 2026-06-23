@@ -448,7 +448,8 @@ describe("buildOpenAICompatibleRequest", () => {
           value: "private replay echo",
           providerFamily: "deepseek",
           apiMode: "openai_chat_completions",
-          chars: "private replay echo".length
+          chars: "private replay echo".length,
+          provenance: "provider"
         }
       }, {
         role: "tool",
@@ -465,7 +466,41 @@ describe("buildOpenAICompatibleRequest", () => {
     });
   });
 
-  it("serializes Kimi provider replay echo for matching echo-required routes", () => {
+  it("serializes Kimi protocol placeholder replay echo for matching echo-required routes", () => {
+    const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
+      model: "kimi-k2-thinking",
+      messages: [{
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call_1",
+          name: "search",
+          argumentsText: "{\"query\":\"native history\"}"
+        }],
+        providerReplayEcho: {
+          field: "reasoning_content",
+          value: " ",
+          providerFamily: "kimi",
+          apiMode: "openai_chat_completions",
+          chars: 1,
+          provenance: "protocol-placeholder"
+        }
+      }, {
+        role: "tool",
+        content: "search result",
+        toolCallId: "call_1"
+      }]
+    }, undefined, "kimi");
+
+    expect(bodyMessages(prepared)[0]).toMatchObject({
+      role: "assistant",
+      content: null,
+      reasoning_content: " ",
+      tool_calls: [expect.objectContaining({ id: "call_1" })]
+    });
+  });
+
+  it("serializes Kimi provider replay echo without provenance for matching echo-required routes", () => {
     const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
       model: "kimi-k2-thinking",
       messages: [{
@@ -496,6 +531,71 @@ describe("buildOpenAICompatibleRequest", () => {
       reasoning_content: "kimi private replay echo",
       tool_calls: [expect.objectContaining({ id: "call_1" })]
     });
+  });
+
+  it("fails closed for invalid protocol placeholder replay echo on echo-required providers", () => {
+    const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
+      model: "kimi-k2-thinking",
+      messages: [{
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call_1",
+          name: "search",
+          argumentsText: "{\"query\":\"native history\"}"
+        }],
+        providerReplayEcho: {
+          field: "reasoning_content",
+          value: "not blank",
+          providerFamily: "kimi",
+          apiMode: "openai_chat_completions",
+          chars: "not blank".length,
+          provenance: "protocol-placeholder"
+        }
+      }, {
+        role: "tool",
+        content: "search result",
+        toolCallId: "call_1"
+      }]
+    }, undefined, "kimi");
+
+    const serialized = JSON.stringify(prepared.body);
+    expect(serialized).not.toContain("tool_calls");
+    expect(serialized).not.toContain("tool_call_id");
+    expect(serialized).not.toContain("reasoning_content");
+    expect(serialized).not.toContain("not blank");
+  });
+
+  it("fails closed for protocol placeholder replay echo with invalid chars on echo-required providers", () => {
+    const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
+      model: "kimi-k2-thinking",
+      messages: [{
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call_1",
+          name: "search",
+          argumentsText: "{\"query\":\"native history\"}"
+        }],
+        providerReplayEcho: {
+          field: "reasoning_content",
+          value: " ",
+          providerFamily: "kimi",
+          apiMode: "openai_chat_completions",
+          chars: 2,
+          provenance: "protocol-placeholder"
+        }
+      }, {
+        role: "tool",
+        content: "search result",
+        toolCallId: "call_1"
+      }]
+    }, undefined, "kimi");
+
+    const serialized = JSON.stringify(prepared.body);
+    expect(serialized).not.toContain("tool_calls");
+    expect(serialized).not.toContain("tool_call_id");
+    expect(serialized).not.toContain("reasoning_content");
   });
 
   it("fails closed for echo-required providers when replay echo is missing", () => {
@@ -590,6 +690,37 @@ describe("buildOpenAICompatibleRequest", () => {
     expect(bodyMessages(prepared)[0]).toHaveProperty("tool_calls");
     expect(serialized).not.toContain("reasoning_content");
     expect(serialized).not.toContain("private replay echo");
+  });
+
+  it("does not serialize protocol placeholder echo for providers that do not require echo", () => {
+    const prepared = buildOpenAICompatibleRequest(DEFAULT_ENDPOINT, {
+      model: "gpt-4o",
+      messages: [{
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call_1",
+          name: "search",
+          argumentsText: "{\"query\":\"native history\"}"
+        }],
+        providerReplayEcho: {
+          field: "reasoning_content",
+          value: " ",
+          providerFamily: "kimi",
+          apiMode: "openai_chat_completions",
+          chars: 1,
+          provenance: "protocol-placeholder"
+        }
+      }, {
+        role: "tool",
+        content: "search result",
+        toolCallId: "call_1"
+      }]
+    }, undefined, "openai");
+
+    const serialized = JSON.stringify(prepared.body);
+    expect(bodyMessages(prepared)[0]).toHaveProperty("tool_calls");
+    expect(serialized).not.toContain("reasoning_content");
   });
 
   it("serializes complete multi-call native tool groups atomically", () => {
