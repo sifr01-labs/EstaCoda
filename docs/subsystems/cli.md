@@ -263,7 +263,7 @@ Fallback routes unchanged.
 
 The notice must not replay the startup dashboard or runtime status fields such as `EstaCoda is ready`, `profile:`, or `tools:`. Plain, CI, and non-TTY output remains unstyled. Standard interactive terminals with styling capability may bold notice labels.
 
-The picker only presents ready, runnable model choices. Providers missing credentials are rejected with terminal setup guidance; active sessions do not collect API keys, OAuth tokens, or other credential values. Session overrides persist with the session and are revalidated when a runtime is created. Stale or invalid overrides are ignored non-fatally and the runtime falls back to the configured primary route. Fallback routes and auxiliary routes are preserved by session switching.
+The picker only presents ready, runnable model choices. Credentialed routes missing required credentials are rejected with terminal setup guidance; active sessions do not collect API keys, OAuth tokens, or other credential values. Session overrides persist with the session and are revalidated when a runtime is created. Stale or invalid overrides are ignored non-fatally and the runtime falls back to the configured primary route. Fallback routes and auxiliary routes are preserved by session switching.
 
 `/model --global <provider>/<model>` and `/model set --global <provider>/<model>` are explicit global forms. They persist the selected route as the profile-level primary model only after the existing local workspace/profile trust path authorizes the write. They do not collect credentials. `/model --global clear` is rejected because clearing the profile primary route has no product-defined meaning. Use `estacoda model setup` for credentials and primary setup, and `estacoda model fallback` for fallback route management.
 
@@ -369,9 +369,15 @@ After existing-user Setup Editor apply and verification, the flow returns with a
 
 Primary provider/model setup and repair use the shared provider/model flow. That flow applies provider visibility, runnable/configurable gates, and credential boundaries owned by the provider layer.
 
-Codex OAuth setup is implemented on the model setup surface (`estacoda model setup codex`), not in the Onboarding Wizard. Onboarding Wizard copy must not imply it can complete Codex OAuth until it deliberately delegates to that flow.
+The built-in `local` provider is displayed and documented as Local / private endpoint. It accepts local or private OpenAI-compatible endpoints such as Ollama, LM Studio, llama.cpp, vLLM, LiteLLM, or internal gateways. Local endpoint setup keeps no-auth as the default and adds a credential-reference draft only when an optional API key is entered. Endpoint/base URL changes are provider-route changes, not credential-only mutations.
 
-`estacoda model setup codex` authenticates through OAuth device code, stores tokens in `~/.estacoda/auth.json`, and configures the `codex/o3` route. Raw OAuth tokens are not printed. Route config remains separate from token storage.
+Codex OAuth setup is implemented on the model setup and Setup Editor route surfaces, not in the Onboarding Wizard. Onboarding Wizard copy must not imply it can complete Codex OAuth until it deliberately delegates to that flow.
+
+The interactive model picker can configure Codex where the nested OpenAI choice is enabled: choose `OpenAI`, then choose `Codex`. `OpenAI Models` remains the API-key OpenAI path. `Codex` is the OAuth path and configures provider `codex`, default model `gpt-5.5`, auth method `oauth_device_pkce`, and Responses API mode (`openai_responses`) with no `apiKeyEnv`.
+
+`estacoda model setup codex` remains the direct CLI setup path. It authenticates through OAuth device code, stores tokens in the selected profile's `auth.json`, and configures the `codex/gpt-5.5` route. Raw OAuth tokens are not printed. Route config remains separate from token storage.
+
+The Setup Editor can configure Codex for primary and fallback model routes through reviewed apply. OAuth tokens from the Setup Editor are written only after review approval; cancelling review after OAuth does not persist tokens. Auxiliary model routes remain unchanged in this pass and do not introduce Codex OAuth setup.
 
 Optional capabilities stay separate from the primary LLM route. In the Onboarding Wizard, the menu is limited to Channels, Voice STT/TTS, Browser, and Skip. Vision/image generation is intentionally absent from that menu.
 

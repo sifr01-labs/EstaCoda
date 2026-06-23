@@ -178,6 +178,118 @@ describe("selectProviderModelRoute", () => {
     expect(flow.resolved).toEqual([{ providerId: "local", modelId: "local-model" }]);
   });
 
+  it("shows Codex as an OpenAI sub-choice when the nested choice is enabled", async () => {
+    const flow = fakeFlow({
+      providers: [
+        providerCandidate("openai", "OpenAI", 1),
+        providerCandidate("codex", "Codex", 1),
+        providerCandidate("local", "Local", 1),
+      ],
+    });
+    const prompt = fakePrompt(["openai", "codex-oauth"]);
+
+    const result = await selectProviderModelRoute({
+      prompt,
+      flowEngine: flow.engine,
+      locale: "en",
+      mode: "primary",
+      allowBack: true,
+      allowCancel: true,
+      openAiCodexChoice: true,
+    });
+
+    expect(result).toEqual({
+      kind: "selected",
+      selection: selectionResult("codex", "gpt-5.5"),
+    });
+    expect(prompt.calls.map((call) => call.title)).toEqual([
+      "Primary provider",
+      "OpenAI setup",
+    ]);
+    expect(prompt.calls[0]?.options.map((option) => option.id)).toEqual([
+      "openai",
+      "local",
+      "back",
+      "cancel",
+    ]);
+    expect(prompt.calls[1]?.options.map((option) => option.id)).toEqual([
+      "openai-api-key",
+      "codex-oauth",
+      "back",
+      "cancel",
+    ]);
+    expect(flow.modelListCount).toBe(0);
+    expect(flow.resolved).toEqual([{ providerId: "codex", modelId: "gpt-5.5" }]);
+  });
+
+  it("continues to normal OpenAI model selection from the OpenAI sub-choice", async () => {
+    const flow = fakeFlow({
+      providers: [
+        providerCandidate("openai", "OpenAI", 1),
+        providerCandidate("codex", "Codex", 1),
+      ],
+      models: {
+        openai: [modelCandidate("openai", "gpt-5.5")],
+      },
+    });
+    const prompt = fakePrompt(["openai", "openai-api-key", "gpt-5.5"]);
+
+    const result = await selectProviderModelRoute({
+      prompt,
+      flowEngine: flow.engine,
+      locale: "en",
+      mode: "primary",
+      allowBack: true,
+      allowCancel: true,
+      openAiCodexChoice: true,
+    });
+
+    expect(result).toEqual({
+      kind: "selected",
+      selection: selectionResult("openai", "gpt-5.5"),
+    });
+    expect(prompt.calls.map((call) => call.title)).toEqual([
+      "Primary provider",
+      "OpenAI setup",
+      "Primary model",
+    ]);
+    expect(flow.resolved).toEqual([{ providerId: "openai", modelId: "gpt-5.5" }]);
+  });
+
+  it("leaves Codex as a top-level provider when the nested choice is disabled", async () => {
+    const flow = fakeFlow({
+      providers: [
+        providerCandidate("openai", "OpenAI", 1),
+        providerCandidate("codex", "Codex", 1),
+      ],
+      models: {
+        codex: [modelCandidate("codex", "gpt-5.5")],
+      },
+    });
+    const prompt = fakePrompt(["codex", "gpt-5.5"]);
+
+    const result = await selectProviderModelRoute({
+      prompt,
+      flowEngine: flow.engine,
+      locale: "en",
+      mode: "primary",
+      allowBack: true,
+      allowCancel: true,
+    });
+
+    expect(result).toEqual({
+      kind: "selected",
+      selection: selectionResult("codex", "gpt-5.5"),
+    });
+    expect(prompt.calls[0]?.options.map((option) => option.id)).toEqual([
+      "openai",
+      "codex",
+      "back",
+      "cancel",
+    ]);
+    expect(flow.resolved).toEqual([{ providerId: "codex", modelId: "gpt-5.5" }]);
+  });
+
   it("omits Back rows from provider and model cards when Back is disabled", async () => {
     const flow = fakeFlow();
     const prompt = fakePrompt();
@@ -466,7 +578,7 @@ describe("selectProviderModelRoute", () => {
     expect(providerCandidateDescription("en", providerCandidate("deepseek", "DeepSeek", 1))).toBe("Cost-efficient models for primary or auxiliary use. Direct API.");
     expect(providerCandidateDescription("en", providerCandidate("google", "Google", 1))).toBe("Gemini models with strong utility and multimodal coverage. Direct API.");
     expect(providerCandidateDescription("en", providerCandidate("kimi", "Kimi", 1))).toBe("Moonshot Kimi models with strong quality/cost balance. Direct API.");
-    expect(providerCandidateDescription("en", providerCandidate("local", "Local", 1))).toBe("Local OpenAI-compatible models running on your machine.");
+    expect(providerCandidateDescription("en", providerCandidate("local", "Local / Private", 1))).toBe("OpenAI-compatible local or private endpoint. API key optional.");
     expect(providerCandidateDescription("en", providerCandidate("openai", "OpenAI", 1))).toBe("Frontier models for high-quality primary reasoning. Direct API.");
     expect(providerCandidateDescription("en", providerCandidate("openrouter", "OpenRouter", 1))).toBe("Pay-per-use aggregator for routing across many model providers.");
     expect(providerCandidateDescription("en", providerCandidate("zai", "Z.AI", 1))).toBe("GLM models with strong quality/cost balance. Direct API.");

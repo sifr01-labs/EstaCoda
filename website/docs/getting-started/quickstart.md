@@ -69,8 +69,8 @@ The Onboarding Wizard walks through the setup in this order:
 | Language and interface style | Chooses setup language and terminal style | Setup uses the selected UI mode |
 | Workspace | Selects the workspace path | EstaCoda knows where it is allowed to operate |
 | Workspace trust | Sets trust for the selected directory | Tool behavior follows the trust decision |
-| Provider and model | Chooses the primary provider/model setup | A usable model configuration is ready |
-| Credential reference | Stores or reuses credential configuration | Secrets remain out of review output |
+| Provider endpoint and model | Chooses the primary provider/model setup, including local/private endpoint URL when needed | A usable model configuration is ready |
+| Credential handling | Stores, reuses, or skips credentials depending on provider auth | Secrets remain out of review output |
 | Security mode | Chooses approval behavior | Risky actions require the configured approval level |
 | Agent Evolution | Chooses learning behavior | Evolution behavior follows review settings |
 | Optional capabilities | Channels, voice, Search, and browser setup | Extra surfaces are configured only when selected |
@@ -85,7 +85,7 @@ First-run onboarding can configure Channels, Voice, Search, and Browser. Image g
 
 ## 3. Configure one working model
 
-Choose one working provider/model pair first. Do not configure fallback models, channels, or optional capabilities until the base setup verifies.
+Choose one working provider/model pair first. For local or private OpenAI-compatible servers such as Ollama, LM Studio, llama.cpp, or vLLM, select the Local / private endpoint path and enter the endpoint URL when prompted. API keys are optional for that path. Do not configure fallback models, channels, or optional capabilities until the base setup verifies.
 
 After setup, inspect the active model configuration:
 

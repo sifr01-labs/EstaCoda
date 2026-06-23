@@ -650,6 +650,8 @@ export type ProviderSetupInput = {
   baseUrl?: string;
   apiKeyEnv?: string;
   apiKey?: string;
+  apiMode?: ProviderApiMode;
+  authMethod?: ProviderAuthMethod;
   enableNetwork?: boolean;
   primary?: boolean;
   contextWindowTokens?: number;
@@ -2305,7 +2307,8 @@ export async function setupProviderConfig(options: {
   const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
   const explicitlyProvidesCredential = options.input.apiKeyEnv !== undefined || options.input.apiKey !== undefined;
-  const forceCredential = options.input.requiresCredential !== false && options.input.provider !== "local";
+  const usesApiKeyCredential = options.input.authMethod === undefined || options.input.authMethod === "api_key";
+  const forceCredential = usesApiKeyCredential && options.input.requiresCredential !== false && options.input.provider !== "local";
   const requiresCredential = explicitlyProvidesCredential || forceCredential;
   const envName = requiresCredential ? options.input.apiKeyEnv ?? getDefaultApiKeyEnv(options.input.provider) : undefined;
   const profileId = resolveSelectedProfileId(options);
@@ -2334,10 +2337,20 @@ export async function setupProviderConfig(options: {
   const providerConfig: Record<string, unknown> = {
     ...existingProvider,
     kind: "openai-compatible" as const,
-    apiKeyEnv: envName,
     models: nextModels,
     enableNetwork: options.input.enableNetwork ?? true
   };
+  if (envName !== undefined) {
+    providerConfig.apiKeyEnv = envName;
+  } else if (options.input.authMethod !== undefined && options.input.authMethod !== "api_key") {
+    delete providerConfig.apiKeyEnv;
+  }
+  if (options.input.apiMode !== undefined) {
+    providerConfig.apiMode = options.input.apiMode;
+  }
+  if (options.input.authMethod !== undefined) {
+    providerConfig.authMethod = options.input.authMethod;
+  }
   if (options.input.baseUrl !== undefined) {
     if (shouldPersistProviderBaseUrl(options.input.provider, options.input.baseUrl)) {
       providerConfig.baseUrl = options.input.baseUrl;

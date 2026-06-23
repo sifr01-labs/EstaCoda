@@ -35,12 +35,13 @@ Labels are cumulative downward. A `live-proven` provider is also `implemented`. 
 | **OpenAI** | `live-proven` | Chat completions and responses modes both supported. |
 | **DeepSeek** | `live-proven` | Validated for chat completions with tool schema. |
 | **OpenRouter** | `live-proven` | Runtime works. Tool-call exactness is occasionally inconsistent; monitor for routing edge cases. |
-| **Codex** | `implemented` | Public CLI setup path via `estacoda model setup codex`. OAuth device-code authentication, token storage in `~/.estacoda/auth.json`, `codex/o3` route configured. Excluded from onboarding wizard by design, not hidden. |
+| **Codex** | `implemented` | Configure from the model picker by choosing **OpenAI** -> **Codex**, from Setup Editor primary/fallback route edits, or via `estacoda model setup codex`. Uses OAuth, provider `codex`, default model `gpt-5.5`, auth method `oauth_device_pkce`, and API mode `openai_responses`. Excluded from first-run onboarding and auxiliary route OAuth setup in this pass. |
 | **Google** | `configurable` | Catalog-enriched. Inference adapter exists but live validation is limited in this build. |
 | **Anthropic** | `catalog-known` | Metadata and catalog entries exist, but it is not exposed as a setup/model-picker route and is not runnable as a primary LLM route in this build. |
 | **MiniMax** | `catalog-known` | Registered in model catalog. Not runnable in the current build. |
 | **Nous** | `catalog-known` | Registered in model catalog. Not runnable in the current build. |
-| **Custom (OpenAI-compatible)** | `implemented` | Any provider ID with an explicit `baseUrl` is treated as custom OpenAI-compatible. Requires `baseUrl`. Default API key env is `OPENAI_COMPATIBLE_API_KEY`. |
+| **Local / private endpoint** | `implemented` | Built-in `local` provider for Ollama, LM Studio, llama.cpp, vLLM, LiteLLM, or another OpenAI-compatible local/private endpoint. Defaults to `http://localhost:11434/v1`, `authMethod: "none"`, and optional API key env `OPENAI_COMPATIBLE_API_KEY`. |
+| **Custom (OpenAI-compatible)** | `implemented` | Any non-built-in provider ID with an explicit `baseUrl` is treated as custom OpenAI-compatible. Requires `baseUrl`. Default API key env is `OPENAI_COMPATIBLE_API_KEY`. Use this when you need a separate named provider identity instead of `local`. |
 | **unconfigured** | `unsupported` | Placeholder. Not runnable. |
 
 ### API Execution Modes
@@ -55,7 +56,7 @@ The following API modes are executable by current code:
 
 - `apiKey` — read from `apiKeyEnv` at runtime
 - `none` — no credentials required
-- `codex_oauth_device_pkce` — Codex-specific OAuth device-code flow
+- `oauth_device_pkce` — Codex OAuth device-code flow
 
 ### Request Timeouts
 

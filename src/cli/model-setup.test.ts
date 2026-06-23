@@ -28,6 +28,10 @@ function profileConfigPath(homeDir: string): string {
   return resolveProfileStateHome({ homeDir, profileId: "default" }).configPath;
 }
 
+function profileEnvPath(homeDir: string): string {
+  return resolveProfileStateHome({ homeDir, profileId: "default" }).envPath;
+}
+
 function mockFetchForModels(models: string[] | "fail" | "empty"): FetchLike {
   return async (url: string, _init: { method: string; headers: Record<string, string>; body: string; signal?: AbortSignal }) => {
     if (url.endsWith("/models")) {
@@ -76,6 +80,7 @@ describe("model setup local", () => {
   });
 
   afterEach(async () => {
+    delete process.env.OPENAI_COMPATIBLE_API_KEY;
     await rm(tmpDir, { recursive: true, force: true });
   });
 
@@ -90,11 +95,38 @@ describe("model setup local", () => {
     expect(result.handled).toBe(true);
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain("Model: qwen2.5:3b");
+    expect(result.output).toContain("Base URL: http://localhost:11434/v1");
+    expect(result.output).toContain("API key: none");
 
     const config = await readUserConfig(tmpDir) as any;
     expect(config.model?.provider).toBe("local");
     expect(config.model?.id).toBe("qwen2.5:3b");
     expect(config.providers?.local?.models).toContain("qwen2.5:3b");
+    expect(config.providers?.local?.baseUrl).toBeUndefined();
+    expect(config.providers?.local?.apiKeyEnv).toBeUndefined();
+  });
+
+  it("stores optional API key for local setup without printing the raw value", async () => {
+    const rawKey = "sk-local-secret-value-12345";
+    const result = await runCliCommand({
+      argv: ["model", "setup", "local", "--model", "private-model", "--api-key", rawKey],
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      providerFetch: mockFetchForModels(["private-model"])
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("API key: stored as OPENAI_COMPATIBLE_API_KEY");
+    expect(result.output).not.toContain(rawKey);
+
+    const configContent = await readFile(profileConfigPath(tmpDir), "utf8");
+    const config = JSON.parse(configContent) as any;
+    expect(config.providers?.local?.apiKeyEnv).toBe("OPENAI_COMPATIBLE_API_KEY");
+    expect(configContent).not.toContain(rawKey);
+
+    const envContent = await readFile(profileEnvPath(tmpDir), "utf8");
+    expect(envContent).toContain(`OPENAI_COMPATIBLE_API_KEY="${rawKey}"`);
   });
 
   it("saves manual model when probing fails and --model is provided", async () => {
@@ -112,6 +144,27 @@ describe("model setup local", () => {
     const config = await readUserConfig(tmpDir) as any;
     expect(config.model?.id).toBe("manual-model");
     expect(config.providers?.local?.models).toContain("manual-model");
+  });
+
+  it("keeps manual model selection warning when probe discovers different models", async () => {
+    const result = await runCliCommand({
+      argv: ["model", "setup", "local", "--model", "manual-model"],
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      providerFetch: mockFetchForModels(["discovered-model"])
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("Model: manual-model");
+    expect(result.output).toContain('Warning: "manual-model" was not found in the discovered models.');
+
+    const config = await readUserConfig(tmpDir) as any;
+    expect(config.model?.id).toBe("manual-model");
+    expect(config.providers?.local?.models).toEqual(expect.arrayContaining([
+      "discovered-model",
+      "manual-model"
+    ]));
   });
 
   it("fails with rerun guidance when multiple models discovered without --model", async () => {

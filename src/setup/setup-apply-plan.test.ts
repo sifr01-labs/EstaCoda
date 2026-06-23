@@ -294,6 +294,28 @@ describe("setup apply plan", () => {
     expect(result.kind).toBe("apply-plan-ready");
   });
 
+  it("suppresses hosted credential-required blockers with a reviewed Codex OAuth credential", () => {
+    const manifest = buildSetupReviewManifest([
+      blockerOnlyBundle("Hosted providers require a credential environment-variable reference."),
+      providerModelRouteBundle("codex", "gpt-5.5", {
+        authMethod: "oauth_device_pkce",
+        oauthCredentialStatus: "pending",
+      }),
+      oauthCredentialReferenceBundle("codex", "oauth_device_pkce", "pending"),
+    ]);
+    const result = planSetupApply({
+      kind: "approved-review-result",
+      manifest,
+    });
+
+    expect(result.kind).toBe("apply-plan-ready");
+    if (result.kind !== "apply-plan-ready") throw new Error("expected apply plan");
+    expect(result.applyPlan.operations.some((operation) =>
+      operation.kind === "credential-reference" &&
+      operation.review.values.credentialSurface === "oauth"
+    )).toBe(true);
+  });
+
   it("keeps hosted credential-required blockers blocked with a provider-unspecified credential reference", () => {
     const manifest = buildSetupReviewManifest([
       blockerOnlyBundle("Hosted providers require a credential environment-variable reference."),
@@ -941,7 +963,11 @@ function blockerOnlyBundle(blocker: string): SetupDraftBundle {
   };
 }
 
-function providerModelRouteBundle(provider: string, model: string): SetupDraftBundle {
+function providerModelRouteBundle(
+  provider: string,
+  model: string,
+  values: Record<string, string | readonly string[] | boolean | number | undefined> = {}
+): SetupDraftBundle {
   const draft: SetupDraft = {
     id: `provider-route.${provider}.${model}`,
     kind: "provider-model-route",
@@ -964,6 +990,7 @@ function providerModelRouteBundle(provider: string, model: string): SetupDraftBu
       values: {
         provider,
         model,
+        ...values,
       },
     },
     applyIntent: {
@@ -983,6 +1010,67 @@ function providerModelRouteBundle(provider: string, model: string): SetupDraftBu
     kind: "setup-draft-bundle",
     sourceKind: "setup-editor-plan-session",
     sourceId: `provider-route:${provider}:${model}`,
+    drafts: [draft],
+    blockers: [],
+    warnings: [],
+    safeToApplyLater: true,
+    metadata: {
+      draftCount: 1,
+      requiresReviewCount: 1,
+      readOnlyCount: 0,
+    },
+  };
+}
+
+function oauthCredentialReferenceBundle(
+  provider: string,
+  authMethod: string,
+  status: "ready" | "pending"
+): SetupDraftBundle {
+  const draft: SetupDraft = {
+    id: `oauth-credential.${provider}.${authMethod}`,
+    kind: "credential-reference",
+    source: {
+      kind: "setup-editor",
+      sectionId: "credentials",
+      actionId: "repair-missing-credential",
+    },
+    riskSurface: "credential-reference",
+    target: {
+      kind: "config-scope",
+      scope: ["provider.credentialReference"],
+      path: "/tmp/home/.estacoda/config.json",
+      preserveUnrelatedConfig: true,
+    },
+    review: {
+      copyKey: "setupDrafts.review",
+      summaryKey: "setupDrafts.credentialReference.summary",
+      redacted: true,
+      values: {
+        provider,
+        credentialSurface: "oauth",
+        authMethod,
+        oauthCredentialStatus: status,
+        credentialValuesIncluded: false,
+      },
+    },
+    applyIntent: {
+      kind: "dry-run-apply-intent",
+      effect: "credential-reference",
+      dryRunOnly: true,
+      writesConfig: false,
+      writesTrustStore: false,
+    },
+    preserveUnrelatedConfig: true,
+    requiresReview: true,
+    readOnly: false,
+    blockers: [],
+    warnings: [],
+  };
+  return {
+    kind: "setup-draft-bundle",
+    sourceKind: "setup-editor-plan-session",
+    sourceId: `oauth-credential:${provider}:${authMethod}`,
     drafts: [draft],
     blockers: [],
     warnings: [],

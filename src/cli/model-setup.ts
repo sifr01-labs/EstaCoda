@@ -136,6 +136,7 @@ export function validateCustomProviderId(config: EstaCodaConfig, providerId: Pro
 export type ModelSetupLocalArgs = {
   baseUrl?: string;
   model?: string;
+  apiKey?: string;
   contextWindow?: number;
 };
 
@@ -157,6 +158,9 @@ export function parseModelSetupLocalArgs(args: string[]): ModelSetupLocalArgs {
       i += 1;
     } else if (arg === "--model") {
       parsed.model = next;
+      i += 1;
+    } else if (arg === "--api-key") {
+      parsed.apiKey = next;
       i += 1;
     } else if (arg === "--context-window") {
       parsed.contextWindow = Number(next);
@@ -244,6 +248,7 @@ export async function runModelSetupLocal(options: CliOptions, args: string[]): P
     model: selectedModel,
     models: probe.models,
     baseUrl,
+    apiKey: parsed.apiKey,
     enableNetwork: true,
     requiresCredential: false,
     contextWindowTokens: parsed.contextWindow
@@ -258,7 +263,9 @@ export async function runModelSetupLocal(options: CliOptions, args: string[]): P
     "Configured local OpenAI-compatible provider.",
     `Base URL: ${baseUrl}`,
     `Model: ${selectedModel}`,
-    "API key: none",
+    parsed.apiKey === undefined
+      ? "API key: none"
+      : "API key: stored as OPENAI_COMPATIBLE_API_KEY",
     `Config: ${setupResult.path}`
   ];
 

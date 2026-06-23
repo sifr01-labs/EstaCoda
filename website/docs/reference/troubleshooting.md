@@ -46,7 +46,7 @@ grep VOICE_TOOLS_OPENAI_KEY ~/.estacoda/profiles/<id>/.env
 **Repair:**
 
 ```bash
-estacoda model setup --provider openai --api-key <key>
+estacoda model setup
 # or edit ~/.estacoda/profiles/<id>/.env directly
 ```
 
@@ -54,7 +54,7 @@ estacoda model setup --provider openai --api-key <key>
 
 **Symptom:** Model responds with unavailable or the route is skipped silently.
 
-**Likely cause:** Catalog-only provider selected, missing credentials, or provider endpoint unreachable.
+**Likely cause:** Catalog-only provider selected, missing credentials for a credentialed route, or provider endpoint unreachable. For the built-in `local` provider, an API key is optional; endpoint reachability and the configured `baseUrl` are usually the first things to check.
 
 **Inspect:**
 

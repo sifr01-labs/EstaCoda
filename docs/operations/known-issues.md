@@ -52,7 +52,7 @@ These channels and providers exist in code but lack live validation evidence for
 
 - `doctor --live` can succeed with `[empty]` response text for some providers.
 - OpenRouter works at runtime but can miss exact-content fidelity checks.
-- Ollama/local support is architecturally present but unproven in this environment.
+- Local / private OpenAI-compatible endpoint support is implemented but not live-proven in this environment.
 - MCP stdio is live-proven; HTTP and broader third-party coverage need operator validation.
 - MCP workspace-trust ergonomics are coarse-grained.
 - Memory rendering is selective but not ranked. Freshness/staleness handling is narrow.

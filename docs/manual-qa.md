@@ -445,10 +445,12 @@ HOME=/tmp/estacoda-qa-first-run pnpm run dev -- setup --interactive
 
 **Verify:**
 - The Onboarding Wizard starts because no usable config exists.
-- The visible sequence is setup detection, profile bootstrap, welcome, language/style, workspace, workspace trust, model route, safety, Agent Evolution, optional capabilities, summary, apply, launch.
+- The visible sequence is setup detection, profile bootstrap, welcome, language/style, workspace, workspace trust, model route, endpoint/credential handling as needed, safety, Agent Evolution, optional capabilities, summary, apply, launch.
 - Primary provider/model setup uses the shared provider/model picker.
+- Choosing the built-in local provider uses Local / private endpoint behavior: endpoint URL is prompted with a default, blank keeps the default, invalid URLs retry before review, and the API key prompt is optional.
 - `Back` appears selectively on structured choice prompts where it prevents dead ends: workspace trust, provider/model, credential handling, security mode, Agent Evolution, optional capabilities, nested optional capability choices, and the final summary. Verify that `Back` returns to the previous meaningful step, preserves already entered values as current/default selections, and does not add `/back` handling to raw text or secret prompts.
 - Hosted provider credential input is masked.
+- Local / private endpoint no-auth leaves credential state as none; entering an optional API key shows only the env-var reference and writes the raw key only after reviewed apply.
 - Credential summary shows only `Not set`, `Existing credential detected`, or `New credential pending`.
 - Cancelling before apply leaves no config, trust, state, or `.env` mutation from the cancelled plan.
 - Deferring workspace trust may save setup but must show `Setup saved. Workspace trust is still required before EstaCoda can run here.` and must not offer launch.
@@ -492,7 +494,7 @@ HOME=/tmp/estacoda-qa-partial-provider pnpm run dev -- setup --interactive
 **Verify:**
 - Setup opens repair-first Setup Editor behavior.
 - Provider/model repair uses the shared provider/model flow.
-- Review/apply drafts route/auth-shaped config changes.
+- Review/apply drafts route/auth-shaped config changes. Endpoint/base URL changes appear in provider-route review values, not credential-only drafts.
 - Direct setup compatibility is not presented as the preferred repair path.
 
 ### 10.5 Missing Credential

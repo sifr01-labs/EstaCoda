@@ -1,6 +1,7 @@
 import type { SetupVerificationReport } from "./verification.js";
-import type { ProviderId } from "../contracts/provider.js";
+import type { ProviderAuthMethod, ProviderId } from "../contracts/provider.js";
 import { getProviderMetadata } from "../providers/provider-metadata.js";
+import type { OAuthTokenRecord } from "../providers/oauth/oauth-types.js";
 import type {
   SetupReviewManifest,
   SetupReviewManifestLine,
@@ -154,9 +155,21 @@ export type SetupDeferredSecretWrite = {
   readonly value: string;
 };
 
+export type SetupDeferredOAuthWrite = {
+  readonly providerId: ProviderId;
+  readonly authMethod: ProviderAuthMethod;
+  readonly tokenRecord: OAuthTokenRecord;
+};
+
 export type SetupDeferredSecretApplyResult = {
   readonly ok: boolean;
   readonly appliedSecretCount: number;
+  readonly error?: string;
+};
+
+export type SetupDeferredOAuthApplyResult = {
+  readonly ok: boolean;
+  readonly appliedOAuthCount: number;
   readonly error?: string;
 };
 
@@ -169,6 +182,10 @@ export type SetupApplyExecutor = {
     plan: SetupApplyPlan,
     writes: readonly SetupDeferredSecretWrite[]
   ) => Promise<SetupDeferredSecretApplyResult> | SetupDeferredSecretApplyResult;
+  readonly applyDeferredOAuth?: (
+    plan: SetupApplyPlan,
+    writes: readonly SetupDeferredOAuthWrite[]
+  ) => Promise<SetupDeferredOAuthApplyResult> | SetupDeferredOAuthApplyResult;
   readonly verify?: (request: SetupPostSaveVerificationRequest) => Promise<SetupVerificationReport> | SetupVerificationReport;
 };
 
@@ -177,6 +194,7 @@ export type SetupApplyFlowOptions = {
   readonly acceptDegraded?: boolean;
   readonly allowAutomaticLaunch?: boolean;
   readonly deferredSecretWrites?: readonly SetupDeferredSecretWrite[];
+  readonly deferredOAuthWrites?: readonly SetupDeferredOAuthWrite[];
 };
 
 export type SetupVerificationClassification = "ready" | "degraded" | "blocked";
@@ -352,6 +370,7 @@ export async function executeSetupApplyPlan(
 ): Promise<SetupApplyEndState> {
   const allowAutomaticLaunch = options.allowAutomaticLaunch !== false;
   const deferredSecretWrites = options.deferredSecretWrites ?? [];
+  const deferredOAuthWrites = options.deferredOAuthWrites ?? [];
   const mode = options.mode ?? "strict";
   const saveResult = await executor.apply(plan, { mode });
   if (!saveResult.ok) {
@@ -374,6 +393,26 @@ export async function executeSetupApplyPlan(
     : { ok: true, appliedSecretCount: 0 };
   if (!deferredSecretResult.ok) {
     const error = deferredSecretResult.error ?? "Deferred secret persistence failed.";
+    return {
+      kind: "blocked",
+      reason: "save-failed",
+      blockers: [error],
+      repairIntents: [{
+        kind: "manual-review",
+        sourceLineIds: [],
+        blockers: [error],
+      }],
+      ...(deferredSecretResult.appliedSecretCount > 0
+        ? { persistedSecretCount: deferredSecretResult.appliedSecretCount }
+        : {}),
+    };
+  }
+
+  const deferredOAuthResult = deferredOAuthWrites.length > 0
+    ? await applyDeferredOAuthWrites(plan, executor, deferredOAuthWrites)
+    : { ok: true, appliedOAuthCount: 0 };
+  if (!deferredOAuthResult.ok) {
+    const error = deferredOAuthResult.error ?? "Deferred OAuth persistence failed.";
     return {
       kind: "blocked",
       reason: "save-failed",
@@ -487,6 +526,21 @@ async function applyDeferredSecretWrites(
     };
   }
   return executor.applyDeferredSecrets(plan, writes);
+}
+
+async function applyDeferredOAuthWrites(
+  plan: SetupApplyPlan,
+  executor: SetupApplyExecutor,
+  writes: readonly SetupDeferredOAuthWrite[]
+): Promise<SetupDeferredOAuthApplyResult> {
+  if (executor.applyDeferredOAuth === undefined) {
+    return {
+      ok: false,
+      appliedOAuthCount: 0,
+      error: "Deferred OAuth apply requires reviewed apply executor support.",
+    };
+  }
+  return executor.applyDeferredOAuth(plan, writes);
 }
 
 export function classifySetupVerificationReport(report: SetupVerificationReport): SetupVerificationClassification {
@@ -609,6 +663,8 @@ function hasCompleteProviderModelRoute(manifest: SetupReviewManifest): boolean {
 type SelectedProviderRouteForApply = {
   readonly provider: ProviderId;
   readonly model: string;
+  readonly authMethod?: ProviderAuthMethod;
+  readonly oauthCredentialStatus?: string;
 };
 
 function selectedProviderRouteFromManifest(manifest: SetupReviewManifest): SelectedProviderRouteForApply | undefined {
@@ -624,6 +680,8 @@ function selectedProviderRouteFromManifest(manifest: SetupReviewManifest): Selec
       return {
         provider: provider as ProviderId,
         model,
+        authMethod: stringReviewValue(line.review.values.authMethod) as ProviderAuthMethod | undefined,
+        oauthCredentialStatus: stringReviewValue(line.review.values.oauthCredentialStatus),
       };
     }
   }
@@ -634,6 +692,11 @@ function hasResolvedHostedCredentialRequirement(manifest: SetupReviewManifest): 
   const route = selectedProviderRouteFromManifest(manifest);
   if (route === undefined) return false;
   if (providerUsesNoCredential(route.provider)) return true;
+  if (route.authMethod !== undefined && providerUsesOAuthCredential(route.provider, route.authMethod)) {
+    if (route.oauthCredentialStatus === "ready") return true;
+    return route.oauthCredentialStatus === "pending" &&
+      hasOAuthCredentialReferenceForSelectedProvider(manifest, route.provider, route.authMethod);
+  }
   if (!providerUsesEnvCredential(route.provider)) return false;
   return hasCredentialReferenceForSelectedProvider(manifest, route.provider);
 }
@@ -647,9 +710,19 @@ function providerUsesEnvCredential(provider: ProviderId): boolean {
   return getProviderMetadata(provider).authMethods.includes("api_key");
 }
 
+function providerUsesOAuthCredential(provider: ProviderId, authMethod: ProviderAuthMethod): boolean {
+  return getProviderMetadata(provider).authMethods.includes(authMethod);
+}
+
 type CredentialReferenceForApply = {
   readonly envVar: string;
   readonly provider?: string;
+};
+
+type OAuthCredentialReferenceForApply = {
+  readonly provider: string;
+  readonly authMethod: string;
+  readonly status?: string;
 };
 
 function hasCredentialReferenceForBlocker(
@@ -681,11 +754,37 @@ function hasCredentialReferenceForSelectedProvider(
   );
 }
 
+function hasOAuthCredentialReferenceForSelectedProvider(
+  manifest: SetupReviewManifest,
+  provider: ProviderId,
+  authMethod: ProviderAuthMethod
+): boolean {
+  return oauthCredentialReferencesFromManifest(manifest).some((reference) =>
+    reference.provider === provider &&
+    reference.authMethod === authMethod &&
+    (reference.status === "ready" || reference.status === "pending")
+  );
+}
+
 function credentialReferencesFromManifest(manifest: SetupReviewManifest): CredentialReferenceForApply[] {
   return manifest.sections["secret-refs-to-store"].flatMap((line) => {
     const provider = stringReviewValue(line.review.values.provider ?? line.review.values.providerId);
     return stringArrayReviewValue(line.review.values.envVars)
       .map((envVar) => ({ envVar, provider }));
+  });
+}
+
+function oauthCredentialReferencesFromManifest(manifest: SetupReviewManifest): OAuthCredentialReferenceForApply[] {
+  return manifest.sections["secret-refs-to-store"].flatMap((line) => {
+    if (line.review.values.credentialSurface !== "oauth") return [];
+    const provider = stringReviewValue(line.review.values.provider ?? line.review.values.providerId);
+    const authMethod = stringReviewValue(line.review.values.authMethod);
+    if (provider === undefined || authMethod === undefined) return [];
+    return [{
+      provider,
+      authMethod,
+      status: stringReviewValue(line.review.values.oauthCredentialStatus),
+    }];
   });
 }
 

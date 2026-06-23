@@ -59,6 +59,7 @@ Provider keys (configure at least one):
 | `DEEPSEEK_API_KEY` | DeepSeek |
 | `OPENROUTER_API_KEY` | OpenRouter |
 | `OPENAI_API_KEY` | OpenAI |
+| `OPENAI_COMPATIBLE_API_KEY` | Optional key for Local / private and custom OpenAI-compatible endpoints |
 | `GOOGLE_API_KEY` | Google |
 | `ANTHROPIC_API_KEY` | Anthropic |
 

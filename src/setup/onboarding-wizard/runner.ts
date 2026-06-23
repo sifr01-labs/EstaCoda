@@ -387,6 +387,42 @@ export async function runFirstRunSetup(
             }
             break;
           }
+          case "endpoint": {
+            const baseUrl = await promptOnboardingLocalEndpointBaseUrl(
+              localizedOptions,
+              interfaceChoice.language,
+              resolution.credentialAction.baseUrl ?? resolution.baseUrl ?? ""
+            );
+            draft.primaryRoute = {
+              ...resolution,
+              baseUrl,
+            };
+            const envVarName = resolution.credentialAction.apiKeyEnv;
+            const promptResult = await promptForApiKeyInput({
+              prompt: localizedOptions.prompt,
+              providerId: resolution.provider,
+              envVarName,
+              question: formatSetupCopy(interfaceChoice.language, "onboarding.providers.localEndpoint.apiKeyOptional", {
+                envVar: envVarName,
+              }),
+            });
+            if (promptResult.kind === "skipped") {
+              draft.primaryCredential = { kind: "none" };
+            } else {
+              draft.primaryCredential = { kind: "env", name: envVarName };
+              draft.credentialStatus = "new_pending";
+              draft.primaryPendingCredentialWrites.push({
+                envVarName: promptResult.envVarName,
+                value: promptResult.value,
+              });
+            }
+            break;
+          }
+          case "oauth": {
+            write(options, `OAuth setup for ${resolution.provider}/${resolution.model} is not available in onboarding. Run estacoda model setup ${resolution.provider}.\n`);
+            step = "primary-route";
+            continue;
+          }
         }
 
         step = "security";
@@ -721,6 +757,37 @@ function renderOnboardingOptionalCapabilityWarnings(
 function isPostSetupLaunchOfferableEndState(endState: SetupApplyEndState): boolean {
   return endState.kind === "verified-ready" ||
     (endState.kind === "saved-not-launched" && endState.verification !== undefined);
+}
+
+async function promptOnboardingLocalEndpointBaseUrl(
+  options: FirstRunSetupRunnerOptions,
+  locale: SetupCopyLocale,
+  defaultBaseUrl: string
+): Promise<string> {
+  let question = formatSetupCopy(locale, "onboarding.providers.localEndpoint.baseUrl", {
+    baseUrl: defaultBaseUrl,
+  });
+  for (;;) {
+    const raw = (await options.prompt(question)).trim();
+    const baseUrl = raw.length > 0 ? raw : defaultBaseUrl;
+    if (isValidEndpointBaseUrl(baseUrl)) {
+      return baseUrl;
+    }
+    question = `${formatSetupCopy(locale, "onboarding.providers.localEndpoint.invalidBaseUrl", {
+      baseUrl: defaultBaseUrl,
+    })}\n${formatSetupCopy(locale, "onboarding.providers.localEndpoint.baseUrl", {
+      baseUrl: defaultBaseUrl,
+    })}`;
+  }
+}
+
+function isValidEndpointBaseUrl(value: string): boolean {
+  try {
+    new URL(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function onboardingWizardStateFromSelections(

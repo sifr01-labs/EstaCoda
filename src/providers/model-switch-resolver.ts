@@ -28,6 +28,7 @@ export type ModelSwitchContext = {
   config: EstaCodaConfig;
   providerRegistry: ProviderRegistry;
   homeDir?: string;
+  profileId?: string;
   modelsDevOptions?: ModelsDevRegistryOptions;
 };
 
@@ -335,6 +336,7 @@ async function resolveExecutableRoute(
     config: seededConfig,
     providerRegistry: context.providerRegistry,
     homeDir: context.homeDir,
+    profileId: context.profileId,
     modelsDevOptions: context.modelsDevOptions,
     allowNetwork: false,
     mode: "normal"
@@ -349,6 +351,16 @@ async function resolveExecutableRoute(
       "missing-credentials",
       `Credentials are not configured for ${resolution.provider}/${resolution.model}.`,
       `Run estacoda model setup ${resolution.provider} from a terminal to configure credentials.`
+    );
+  }
+  if (
+    resolution.credentialAction.kind === "oauth" &&
+    resolution.credentialAction.status !== "ready"
+  ) {
+    return reject(
+      "missing-credentials",
+      `OAuth credentials are not configured for ${resolution.provider}/${resolution.model}.`,
+      `Run estacoda model setup ${resolution.provider} from a terminal to authenticate.`
     );
   }
 

@@ -173,7 +173,7 @@ const BUILT_IN_METADATA: Record<string, ProviderMetadata> = {
   },
   local: {
     id: "local",
-    displayName: "Local",
+    displayName: "Local / Private",
     catalogKnown: true,
     configurable: true,
     runnable: true,
@@ -185,7 +185,7 @@ const BUILT_IN_METADATA: Record<string, ProviderMetadata> = {
     apiMode: "custom_openai_compatible",
     defaultBaseUrl: "http://localhost:11434/v1",
     defaultApiKeyEnv: undefined,
-    authMethods: ["none"],
+    authMethods: ["none", "api_key"],
     defaultAuthMethod: "none",
     allowsCustomBaseUrl: true,
     requiresModelSelection: true

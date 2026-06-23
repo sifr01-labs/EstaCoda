@@ -117,6 +117,49 @@ Additional provider routes, fallbacks, and metadata.
 }
 ```
 
+The built-in `local` provider can point at a local or private OpenAI-compatible endpoint. It defaults to `http://localhost:11434/v1` and no auth, so `apiKeyEnv` is optional:
+
+```json
+{
+  "model": {
+    "provider": "local",
+    "id": "qwen2.5-coder"
+  },
+  "providers": {
+    "local": {
+      "baseUrl": "http://localhost:1234/v1",
+      "authMethod": "none"
+    }
+  }
+}
+```
+
+If the endpoint requires a key, store the raw key in the selected profile `.env` and reference it from config:
+
+```json
+{
+  "providers": {
+    "local": {
+      "baseUrl": "https://private-model-gateway.example/v1",
+      "apiKeyEnv": "OPENAI_COMPATIBLE_API_KEY"
+    }
+  }
+}
+```
+
+Use a custom provider ID only when you need a separate named OpenAI-compatible route identity:
+
+```json
+{
+  "providers": {
+    "lmstudio": {
+      "baseUrl": "http://localhost:1234/v1",
+      "apiKeyEnv": "OPENAI_COMPATIBLE_API_KEY"
+    }
+  }
+}
+```
+
 ### auxiliaryModels
 
 Specialized routes for non-primary tasks. Unsupported auxiliary names throw during config normalization.
@@ -525,7 +568,7 @@ Telegram streaming runs before normal final-text routing. If streaming cannot de
 
 ## Secret handling
 
-- Provider setup writes raw API keys only to the selected profile `.env`, never to `config.json`.
+- Provider setup writes raw API keys only to the selected profile `.env`, never to `config.json`. Local / private endpoints are no-auth by default and write a key only when one is provided.
 - Voice setup review manifests show env-var references only. Raw Voice API keys are not stored in config, shown in review manifests, or inserted into prompt context.
 - Profile `.env` is chmodded to `0600` when written by the env secret store.
 - Runtime config loads the selected profile `.env` before execution.

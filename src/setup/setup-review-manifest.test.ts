@@ -7,6 +7,7 @@ import type { SetupDraft, SetupDraftBundle } from "./setup-drafts.js";
 import { buildOnboardingWizardDraftBundle } from "./setup-drafts.js";
 import { buildSetupModuleDraftBundle, type SetupModuleContext } from "./setup-modules.js";
 import { buildSetupReviewManifest } from "./setup-review-manifest.js";
+import { renderSetupReviewManifest } from "./setup-prompts.js";
 import type { OnboardingWizardState } from "./onboarding-wizard/state.js";
 
 function onboardingBundle(overrides: Partial<OnboardingWizardState> = {}): SetupDraftBundle {
@@ -170,8 +171,74 @@ describe("setup review manifest", () => {
     expect(line?.review.values.model).toBe("gpt-4.1-mini");
     expect(line?.target).toEqual(expect.objectContaining({
       kind: "config-scope",
-      scope: ["model.provider", "model.id"],
+      scope: ["model.provider", "model.id", "provider.route"],
     }));
+  });
+
+  it("renders endpoint/baseUrl in provider-route review lines", () => {
+    const manifest = buildSetupReviewManifest([onboardingBundle({
+      primaryRoute: {
+        provider: "local",
+        model: "llama3",
+        baseUrl: "http://localhost:11434/v1",
+      },
+    })]);
+    const line = manifest.sections["provider-model-network"][0];
+    const rendered = renderSetupReviewManifest(manifest, "en");
+
+    expect(line?.review.summaryKey).toBe("setupDrafts.providerModelEndpointRoute.summary");
+    expect(line?.review.values).toEqual(expect.objectContaining({
+      provider: "local",
+      model: "llama3",
+      baseUrl: "http://localhost:11434/v1",
+    }));
+    expect(line?.target).toEqual(expect.objectContaining({
+      kind: "config-scope",
+      scope: ["model.provider", "model.id", "provider.route"],
+    }));
+    expect(rendered).toContain("Update provider/model to local / llama3 at http://localhost:11434/v1.");
+  });
+
+  it("does not expose endpoint/baseUrl through credential-only review lines", () => {
+    const manifest = buildSetupReviewManifest([singleDraftBundle({
+      id: "setup-editor.credentials.store-provider-credential-reference",
+      kind: "credential-reference",
+      source: {
+        kind: "setup-editor",
+        sectionId: "credentials",
+        actionId: "store-provider-credential-reference",
+      },
+      riskSurface: "credential-reference",
+      target: {
+        kind: "config-scope",
+        scope: ["provider.credentialReference"],
+        path: "/tmp/home/.estacoda/config.json",
+        preserveUnrelatedConfig: true,
+      },
+      review: {
+        copyKey: "setupDrafts.review",
+        summaryKey: "setupDrafts.credentialReference.summary",
+        redacted: true,
+        values: {
+          provider: "local",
+          model: "llama3",
+          envVars: ["OPENAI_COMPATIBLE_API_KEY"],
+          credentialValuesIncluded: false,
+        },
+      },
+      applyIntent: credentialIntent(),
+      preserveUnrelatedConfig: true,
+      requiresReview: true,
+      readOnly: false,
+      blockers: [],
+      warnings: [],
+    })]);
+    const secretLine = manifest.sections["secret-refs-to-store"][0];
+    const json = JSON.stringify(secretLine);
+
+    expect(secretLine?.review.summaryKey).toBe("setupDrafts.credentialReference.summary");
+    expect(json).not.toContain("baseUrl");
+    expect(json).not.toContain("http://localhost:11434/v1");
   });
 
   it("lists fallback provider/model drafts as provider/model/network changes", () => {
@@ -570,6 +637,16 @@ function configPatchIntent(): SetupDraft["applyIntent"] {
   return {
     kind: "dry-run-apply-intent",
     effect: "config-patch",
+    dryRunOnly: true,
+    writesConfig: false,
+    writesTrustStore: false,
+  };
+}
+
+function credentialIntent(): SetupDraft["applyIntent"] {
+  return {
+    kind: "dry-run-apply-intent",
+    effect: "credential-reference",
     dryRunOnly: true,
     writesConfig: false,
     writesTrustStore: false,

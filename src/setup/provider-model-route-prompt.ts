@@ -7,6 +7,9 @@ import type {
   ProviderModelSelectionResult,
 } from "../providers/provider-model-selection-flow.js";
 import type { ProviderId, ModelProfile } from "../contracts/provider.js";
+import {
+  CODEX_DEFAULT_MODEL,
+} from "../providers/oauth/codex-setup.js";
 import { isolateLtr } from "../ui/bidi.js";
 import {
   formatSetupCopy,
@@ -29,6 +32,7 @@ export type SelectProviderModelRouteOptions = {
   readonly allowBack?: boolean;
   readonly allowCancel?: boolean;
   readonly mode: ProviderModelRoutePromptMode;
+  readonly openAiCodexChoice?: boolean;
 };
 
 export type ProviderModelPromptResult =
@@ -47,12 +51,19 @@ type ModelPromptAction =
   | { readonly kind: "back" }
   | { readonly kind: "cancel" };
 
+type OpenAiCodexPromptAction =
+  | { readonly kind: "openai" }
+  | { readonly kind: "codex" }
+  | { readonly kind: "back" }
+  | { readonly kind: "cancel" };
+
 const PROMPT_HINT = "↑↓ navigate   ENTER select";
 
 export async function selectProviderModelRoute(
   options: SelectProviderModelRouteOptions
 ): Promise<ProviderModelPromptResult> {
-  const providers = await options.flowEngine.listProviderCandidates();
+  const allProviders = await options.flowEngine.listProviderCandidates();
+  const providers = providerPromptCandidates(options, allProviders);
   if (providers.length === 0) {
     return { kind: "diagnostic", output: "No setup-visible provider candidates are available." };
   }
@@ -64,6 +75,23 @@ export async function selectProviderModelRoute(
     }
 
     const provider = providerAction.provider;
+    if (shouldPromptOpenAiCodexChoice(options, allProviders, provider)) {
+      const choiceAction = await promptOpenAiCodexChoice(options);
+      if (choiceAction.kind === "back") {
+        continue;
+      }
+      if (choiceAction.kind === "cancel") {
+        return { kind: "cancel" };
+      }
+      if (choiceAction.kind === "codex") {
+        const resolved = await options.flowEngine.resolveSelection("codex", CODEX_DEFAULT_MODEL);
+        if (resolved.kind === "diagnostic") {
+          return { kind: "diagnostic", output: `Provider/model selection failed: ${resolved.reason}` };
+        }
+        return { kind: "selected", selection: resolved };
+      }
+    }
+
     const models = await options.flowEngine.listModelCandidates(provider.id);
     if (models.length === 0) {
       return { kind: "diagnostic", output: `No setup-visible models are available for ${provider.displayName}.` };
@@ -84,6 +112,33 @@ export async function selectProviderModelRoute(
 
     return { kind: "selected", selection: resolved };
   }
+}
+
+function providerPromptCandidates(
+  options: SelectProviderModelRouteOptions,
+  candidates: readonly ProviderCandidate[]
+): readonly ProviderCandidate[] {
+  if (!hasOpenAiCodexChoice(options, candidates)) {
+    return candidates;
+  }
+  return candidates.filter((candidate) => candidate.id !== "codex");
+}
+
+function hasOpenAiCodexChoice(
+  options: SelectProviderModelRouteOptions,
+  candidates: readonly ProviderCandidate[]
+): boolean {
+  return options.openAiCodexChoice === true &&
+    candidates.some((candidate) => candidate.id === "openai") &&
+    candidates.some((candidate) => candidate.id === "codex");
+}
+
+function shouldPromptOpenAiCodexChoice(
+  options: SelectProviderModelRouteOptions,
+  allProviders: readonly ProviderCandidate[],
+  provider: ProviderCandidate
+): boolean {
+  return provider.id === "openai" && hasOpenAiCodexChoice(options, allProviders);
 }
 
 async function promptProvider(
@@ -164,6 +219,49 @@ async function promptModel(
   });
 }
 
+async function promptOpenAiCodexChoice(
+  options: SelectProviderModelRouteOptions
+): Promise<OpenAiCodexPromptAction> {
+  const promptOptions: Array<SelectPromptInput<OpenAiCodexPromptAction>["options"][number]> = [
+    {
+      id: "openai-api-key",
+      label: openAiModelsLabel(options.locale),
+      value: { kind: "openai" },
+      cells: {
+        name: openAiModelsLabel(options.locale),
+        details: openAiModelsDetails(options.locale),
+      },
+      current: options.currentProviderId === "openai",
+    },
+    {
+      id: "codex-oauth",
+      label: codexOauthLabel(options.locale),
+      value: { kind: "codex" },
+      cells: {
+        name: codexOauthLabel(options.locale),
+        details: codexOauthDetails(options.locale),
+      },
+      current: options.currentProviderId === "codex",
+    },
+    ...navigationOptions<OpenAiCodexPromptAction>(options),
+  ];
+
+  return selectStructuredOption(options.prompt, {
+    title: openAiCodexTitle(options.locale),
+    body: `${openAiCodexBody(options.locale)}\n`,
+    statusLines: currentRouteStatusLines(options.locale, options.currentProviderId, options.currentModelId),
+    columns: promptColumns(options.locale),
+    options: promptOptions,
+    defaultIndex: options.currentProviderId === "codex" ? 1 : 0,
+    fallbackPrompt: "Choose: ",
+    surface: "promptCard",
+    hint: PROMPT_HINT,
+    showCurrentBadge: false,
+    locale: options.locale,
+    direction: options.locale === "ar" ? "rtl" : "ltr",
+  });
+}
+
 async function selectStructuredOption<T>(
   prompt: Prompt,
   input: SelectPromptInput<T>
@@ -214,6 +312,30 @@ function promptColumns(locale: SetupCopyLocale): SelectPromptInput<unknown>["col
     { key: "name", header: locale === "ar" ? "الاسم" : "Name" },
     { key: "details", header: locale === "ar" ? "التفاصيل" : "Details" },
   ];
+}
+
+function openAiCodexTitle(locale: SetupCopyLocale): string {
+  return setupCopyText(locale, "setupEditor.prompt.openAiRoute.title");
+}
+
+function openAiCodexBody(locale: SetupCopyLocale): string {
+  return setupCopyText(locale, "setupEditor.prompt.openAiRoute.body");
+}
+
+function openAiModelsLabel(locale: SetupCopyLocale): string {
+  return setupCopyText(locale, "setupEditor.prompt.openAiRoute.openAiModels");
+}
+
+function openAiModelsDetails(locale: SetupCopyLocale): string {
+  return setupCopyText(locale, "setupEditor.prompt.openAiRoute.openAiModels.description");
+}
+
+function codexOauthLabel(locale: SetupCopyLocale): string {
+  return setupCopyText(locale, "setupEditor.prompt.openAiRoute.codex");
+}
+
+function codexOauthDetails(locale: SetupCopyLocale): string {
+  return setupCopyText(locale, "setupEditor.prompt.openAiRoute.codex.description");
 }
 
 export function providerCandidateDescription(locale: SetupCopyLocale, candidate: ProviderCandidate): string {

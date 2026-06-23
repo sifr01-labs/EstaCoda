@@ -12,6 +12,7 @@ import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ModelCatalogOverrideRegistry } from "../model-catalog/model-catalog-policy.js";
+import { CODEX_OAUTH_AUTH_METHOD } from "./oauth/codex-setup.js";
 
 function createMockSnapshot(): Record<string, unknown> {
   return {
@@ -22,7 +23,7 @@ function createMockSnapshot(): Record<string, unknown> {
       { id: "kimi", name: "Kimi" },
       { id: "google", name: "Google" },
       { id: "openrouter", name: "OpenRouter" },
-      { id: "local", name: "Local" },
+      { id: "local", name: "Local / Private" },
       { id: "codex", name: "OpenAI Codex" },
       { id: "fal", name: "Fal" }
     ],
@@ -164,6 +165,25 @@ function lifecycleOverrides(): ModelCatalogOverrideRegistry {
   };
 }
 
+function writeCodexAuth(homeDir: string, input: {
+  readonly accessToken: string;
+  readonly expiresAt?: string;
+}): void {
+  const profileDir = join(homeDir, ".estacoda", "profiles", "default");
+  mkdirSync(profileDir, { recursive: true });
+  writeFileSync(join(profileDir, "auth.json"), JSON.stringify({
+    version: 1,
+    providers: {
+      codex: {
+        authMethod: CODEX_OAUTH_AUTH_METHOD,
+        accessToken: input.accessToken,
+        ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
+        source: "estacoda"
+      }
+    }
+  }, null, 2) + "\n", "utf8");
+}
+
 function openaiAdapter(): {
   id: ProviderId;
   name: string;
@@ -222,7 +242,7 @@ function localAdapter(): {
 } {
   return {
     id: "local" as ProviderId,
-    name: "Local",
+    name: "Local / Private",
     executable: true,
     health() {
       return { available: true };
@@ -769,7 +789,7 @@ describe("provider-model-selection-flow", () => {
     );
 
     it(
-      "returns none for local provider",
+      "returns endpoint configuration action for local provider",
       withFixture(async (fixturePath, cachePath) => {
         const flow = await createProviderModelSelectionFlow(
           buildOptions(fixturePath, cachePath, {
@@ -780,7 +800,11 @@ describe("provider-model-selection-flow", () => {
         const result = await flow.resolveSelection("local", "llama3");
         expect(result.kind).toBe("selected");
         if (result.kind !== "selected") return;
-        expect(result.credentialAction.kind).toBe("none");
+        expect(result.credentialAction).toEqual({
+          kind: "endpoint",
+          baseUrl: "http://localhost:11434/v1",
+          apiKeyEnv: "OPENAI_COMPATIBLE_API_KEY"
+        });
       })
     );
 
@@ -859,6 +883,97 @@ describe("provider-model-selection-flow", () => {
         if (result.kind !== "selected") return;
         expect(result.credentialAction.kind).toBe("collect");
         expect(result.credentialAction).toHaveProperty("envVarName", "OPENAI_API_KEY");
+      })
+    );
+
+    it(
+      "returns OAuth required for Codex when auth is missing",
+      withFixture(async (fixturePath, cachePath) => {
+        const homeDir = mkdtempSync(join(tmpdir(), "estacoda-home-"));
+        try {
+          const flow = await createProviderModelSelectionFlow({
+            ...buildOptions(fixturePath, cachePath, {
+              mode: "setup"
+            }),
+            homeDir
+          });
+
+          const result = await flow.resolveSelection("codex" as ProviderId, "codex-model");
+          expect(result.kind).toBe("selected");
+          if (result.kind !== "selected") return;
+          expect(result.credentialAction).toEqual({
+            kind: "oauth",
+            providerId: "codex",
+            authMethod: "oauth_device_pkce",
+            status: "required"
+          });
+        } finally {
+          rmSync(homeDir, { recursive: true, force: true });
+        }
+      })
+    );
+
+    it(
+      "returns OAuth expired for Codex when auth is expired",
+      withFixture(async (fixturePath, cachePath) => {
+        const homeDir = mkdtempSync(join(tmpdir(), "estacoda-home-"));
+        try {
+          writeCodexAuth(homeDir, {
+            accessToken: "eyJfake.codex.expired-token",
+            expiresAt: new Date(Date.now() - 60_000).toISOString()
+          });
+          const flow = await createProviderModelSelectionFlow({
+            ...buildOptions(fixturePath, cachePath, {
+              mode: "setup"
+            }),
+            homeDir
+          });
+
+          const result = await flow.resolveSelection("codex" as ProviderId, "codex-model");
+          expect(result.kind).toBe("selected");
+          if (result.kind !== "selected") return;
+          expect(result.credentialAction).toEqual({
+            kind: "oauth",
+            providerId: "codex",
+            authMethod: "oauth_device_pkce",
+            status: "expired"
+          });
+          expect(JSON.stringify(result)).not.toContain("eyJfake.codex.expired-token");
+        } finally {
+          rmSync(homeDir, { recursive: true, force: true });
+        }
+      })
+    );
+
+    it(
+      "returns OAuth ready for Codex when valid auth exists",
+      withFixture(async (fixturePath, cachePath) => {
+        const homeDir = mkdtempSync(join(tmpdir(), "estacoda-home-"));
+        try {
+          writeCodexAuth(homeDir, {
+            accessToken: "eyJfake.codex.valid-token",
+            expiresAt: new Date(Date.now() + 3600_000).toISOString()
+          });
+          const flow = await createProviderModelSelectionFlow({
+            ...buildOptions(fixturePath, cachePath, {
+              mode: "setup"
+            }),
+            homeDir
+          });
+
+          const result = await flow.resolveSelection("codex" as ProviderId, "codex-model");
+          expect(result.kind).toBe("selected");
+          if (result.kind !== "selected") return;
+          expect(result.credentialAction).toEqual({
+            kind: "oauth",
+            providerId: "codex",
+            authMethod: "oauth_device_pkce",
+            status: "ready"
+          });
+          expect(JSON.stringify(result)).not.toContain("eyJfake.codex.valid-token");
+        } finally {
+          rmSync(homeDir, { recursive: true, force: true });
+        }
       })
     );
 
@@ -949,6 +1064,7 @@ describe("provider-model-selection-flow", () => {
 
         const result = await flow.resolveSelection("custom-corp" as ProviderId, "custom-model");
         expect(result.kind).toBe("diagnostic");
+        expect(result.kind).not.toBe("selected");
         if (result.kind !== "diagnostic") return;
         expect(result.reason).toContain("requires an explicit base URL");
       })

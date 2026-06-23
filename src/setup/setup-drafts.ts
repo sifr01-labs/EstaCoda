@@ -228,9 +228,9 @@ function onboardingProviderModelDraft(
     kind: "provider-model-route",
     source: { kind: "onboarding-wizard", stepId: "primary-model" },
     riskSurface: "provider-selection",
-    scope: ["model.provider", "model.id"],
+    scope: ["model.provider", "model.id", "provider.route"],
     configPath: options.configPath,
-    summaryKey: "setupDrafts.providerModelRoute.summary",
+    summaryKey: providerModelRouteSummaryKey(route),
     values: {
       provider: route?.provider,
       model: route?.model,
@@ -431,9 +431,9 @@ function draftFromEditorAction(
       kind: "provider-model-route",
       source,
       riskSurface: "provider-selection",
-      scope: action.patch?.fields ?? ["provider.route"],
+      scope: providerModelRouteScope(action),
       configPath: options.configPath,
-      summaryKey: "setupDrafts.providerModelRoute.summary",
+      summaryKey: providerModelRouteSummaryKey(action.reviewValues),
       values: action.reviewValues ?? {},
     });
   }
@@ -516,6 +516,7 @@ function draftFromEditorAction(
       envVars: envVar === undefined ? credentialRefs : [envVar],
       provider: stringReviewValue(action.reviewValues?.provider),
       model: stringReviewValue(action.reviewValues?.model),
+      values: action.reviewValues,
     });
   }
 
@@ -571,6 +572,7 @@ function credentialDraft(input: {
   readonly envVars: readonly string[];
   readonly provider?: string;
   readonly model?: string;
+  readonly values?: SetupDraftReviewMetadata["values"];
 }): SetupDraft {
   return {
     id: input.id,
@@ -588,6 +590,7 @@ function credentialDraft(input: {
       credentialValuesIncluded: false,
       provider: input.provider,
       model: input.model,
+      ...credentialExtraReviewValues(input.values),
     }),
     applyIntent: intent("credential-reference"),
     preserveUnrelatedConfig: true,
@@ -595,6 +598,17 @@ function credentialDraft(input: {
     readOnly: false,
     blockers: [],
     warnings: [],
+  };
+}
+
+function credentialExtraReviewValues(
+  values: SetupDraftReviewMetadata["values"] | undefined
+): SetupDraftReviewMetadata["values"] {
+  if (values?.credentialSurface !== "oauth") return {};
+  return {
+    credentialSurface: "oauth",
+    authMethod: values.authMethod,
+    oauthCredentialStatus: values.oauthCredentialStatus,
   };
 }
 
@@ -606,6 +620,22 @@ function fallbackRouteSummaryKey(reviewValues: SetupEditorActionDraft["reviewVal
   return reviewValues?.fallbackOperation === "replace"
     ? "setupDrafts.fallbackModelRoute.replace.summary"
     : "setupDrafts.fallbackModelRoute.add.summary";
+}
+
+function providerModelRouteSummaryKey(
+  reviewValues: { readonly baseUrl?: unknown } | undefined
+): string {
+  return stringReviewValue(reviewValues?.baseUrl) === undefined
+    ? "setupDrafts.providerModelRoute.summary"
+    : "setupDrafts.providerModelEndpointRoute.summary";
+}
+
+function providerModelRouteScope(action: SetupEditorActionDraft): readonly SetupEditorPatchField[] {
+  const fields = action.patch?.fields ?? ["provider.route"];
+  if (stringReviewValue(action.reviewValues?.baseUrl) === undefined || fields.includes("provider.route")) {
+    return fields;
+  }
+  return [...fields, "provider.route"];
 }
 
 function workspaceTrustDraft(input: {

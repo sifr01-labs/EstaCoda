@@ -120,13 +120,13 @@ describe("provider architecture invariants", () => {
         providers: {
           codex: {
             kind: "catalog",
-            models: ["o3"]
+            models: ["gpt-5.5"]
           }
         }
       }, registry);
 
       const models = await catalog.listModels();
-      const codex = models.find((m) => m.provider === "codex" && m.id === "o3");
+      const codex = models.find((m) => m.provider === "codex" && m.id === "gpt-5.5");
       expect(codex).toBeDefined();
       expect(codex!.executable).toBe(true);
       expect(codex!.catalogOnly).toBe(false);
@@ -152,7 +152,7 @@ describe("provider architecture invariants", () => {
         providers: {
           codex: {
             kind: "catalog",
-            models: ["o3"]
+            models: ["gpt-5.5"]
           }
         }
       }, registry);
@@ -181,13 +181,13 @@ describe("provider architecture invariants", () => {
         providers: {
           codex: {
             kind: "catalog",
-            models: ["o3"]
+            models: ["gpt-5.5"]
           }
         }
       }, registry);
 
       const models = await catalog.listModels();
-      const codexModel = models.find((m) => m.provider === "codex" && m.id === "o3");
+      const codexModel = models.find((m) => m.provider === "codex" && m.id === "gpt-5.5");
       if (codexModel !== undefined) {
         expect(codexModel.executable).toBe(true);
         expect(codexModel.catalogOnly).toBe(false);

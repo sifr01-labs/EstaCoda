@@ -118,6 +118,15 @@ function createMockFetch(scenarios: {
   };
 }
 
+function expectCodexRouteConfig(config: any): void {
+  expect(config.model.provider).toBe("codex");
+  expect(config.model.id).toBe("gpt-5.5");
+  expect(config.providers.codex.baseUrl).toBe("https://chatgpt.com/backend-api/codex");
+  expect(config.providers.codex.apiMode).toBe("openai_responses");
+  expect(config.providers.codex.authMethod).toBe("oauth_device_pkce");
+  expect(config.providers.codex.apiKeyEnv).toBeUndefined();
+}
+
 describe("model setup codex", () => {
   let tmpDir: string;
 
@@ -195,10 +204,7 @@ describe("model setup codex", () => {
 
       // Verify config.json
       const config = await readUserConfig(tmpDir) as any;
-      expect(config.model.provider).toBe("codex");
-      expect(config.model.id).toBe("o3");
-      expect(config.providers.codex.baseUrl).toBe("https://chatgpt.com/backend-api/codex");
-      expect(config.providers.codex.authMethod).toBe("oauth_device_pkce");
+      expectCodexRouteConfig(config);
     });
 
     it("cancellation prints exactly the required message and exit code 0", async () => {
@@ -419,9 +425,7 @@ describe("model setup codex", () => {
       expect(result.exitCode).toBe(0);
 
       const selectedConfig = await readUserConfig(tmpDir, "work") as any;
-      expect(selectedConfig.model.provider).toBe("codex");
-      expect(selectedConfig.model.id).toBe("o3");
-      expect(selectedConfig.providers.codex.authMethod).toBe("oauth_device_pkce");
+      expectCodexRouteConfig(selectedConfig);
 
       const defaultConfig = await readUserConfig(tmpDir) as any;
       expect(defaultConfig.model.provider).toBe("local");
@@ -457,9 +461,7 @@ describe("model setup codex", () => {
 
       // Verify config.json was written
       const config = await readUserConfig(tmpDir) as any;
-      expect(config.model.provider).toBe("codex");
-      expect(config.model.id).toBe("o3");
-      expect(config.providers.codex.authMethod).toBe("oauth_device_pkce");
+      expectCodexRouteConfig(config);
 
       // Verify auth.json was NOT overwritten (still has original tokens)
       const auth = await readAuthJson(tmpDir) as any;
@@ -653,7 +655,7 @@ describe("model setup codex", () => {
       // Config should now exist
       const config = await readUserConfig(tmpDir) as any;
       expect(config.model.provider).toBe("codex");
-      expect(config.model.id).toBe("o3");
+      expect(config.model.id).toBe("gpt-5.5");
     });
   });
 

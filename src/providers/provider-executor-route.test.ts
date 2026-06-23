@@ -454,9 +454,9 @@ describe("ProviderExecutor route-based execution", () => {
 
     const route: ResolvedModelRoute = {
       provider: "codex",
-      id: "o3",
+      id: "gpt-5.5",
       profile: {
-        id: "o3",
+        id: "gpt-5.5",
         provider: "codex",
         contextWindowTokens: 128_000,
         supportsTools: true,
@@ -494,9 +494,9 @@ describe("ProviderExecutor route-based execution", () => {
 
     const route: ResolvedModelRoute = {
       provider: "codex",
-      id: "o3",
+      id: "gpt-5.5",
       profile: {
-        id: "o3",
+        id: "gpt-5.5",
         provider: "codex",
         contextWindowTokens: 128_000,
         supportsTools: true,
@@ -548,9 +548,9 @@ describe("ProviderExecutor route-based execution", () => {
     const primaryRoute = createDefaultRoute({ apiKeyEnv: "OPENAI_API_KEY" });
     const fallbackRoute: ResolvedModelRoute = {
       provider: "codex",
-      id: "o3",
+      id: "gpt-5.5",
       profile: {
-        id: "o3",
+        id: "gpt-5.5",
         provider: "codex",
         contextWindowTokens: 128_000,
         supportsTools: true,
@@ -595,7 +595,7 @@ describe("ProviderExecutor route-based execution", () => {
       completeResponse: {
         ok: false,
         content: "Auth failed",
-        model: "o3",
+        model: "gpt-5.5",
         provider: "codex",
         errorClass: "auth"
       }
@@ -606,9 +606,9 @@ describe("ProviderExecutor route-based execution", () => {
 
     const primaryRoute: ResolvedModelRoute = {
       provider: "codex",
-      id: "o3",
+      id: "gpt-5.5",
       profile: {
-        id: "o3",
+        id: "gpt-5.5",
         provider: "codex",
         contextWindowTokens: 128_000,
         supportsTools: true,
@@ -654,9 +654,9 @@ describe("ProviderExecutor route-based execution", () => {
 
     const primaryRoute: ResolvedModelRoute = {
       provider: "codex",
-      id: "o3",
+      id: "gpt-5.5",
       profile: {
-        id: "o3",
+        id: "gpt-5.5",
         provider: "codex",
         contextWindowTokens: 128_000,
         supportsTools: true,
@@ -696,9 +696,9 @@ describe("ProviderExecutor route-based execution", () => {
   it("Codex primary/fallback route config uses same route schema as API-key providers with authMethod instead of apiKeyEnv", async () => {
     const codexRoute: ResolvedModelRoute = {
       provider: "codex",
-      id: "o3",
+      id: "gpt-5.5",
       profile: {
-        id: "o3",
+        id: "gpt-5.5",
         provider: "codex",
         contextWindowTokens: 128_000,
         supportsTools: true,

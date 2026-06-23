@@ -35,12 +35,13 @@ sidebar_position: 5
 | **OpenAI** | `live-proven` | يدعم وضعي المحادثات ووضعي الإجابات. |
 | **DeepSeek** | `live-proven` | مؤهّل للمحادثات مع دعم الأدوات. |
 | **OpenRouter** | `live-proven` | يعمل في وقت التشغيل. دقة الإجراءات الأدواتية قد تكون غير متساقية أحيانًا. |
-| **Codex** | `implemented` | مسار إعداد عبر CLI عام: `estacoda model setup codex`. مصادقة OAuth عبر رمز الجهاز، تخزين الرموز في `~/.estacoda/auth.json`، إعداد مسار `codex/o3`. مستبعد عن معالج التهيئة بتصميم، ليس مخفيًا. |
+| **Codex** | `implemented` | يُعدّ من منتقي النماذج باختيار **OpenAI** ثم **Codex**، أو من تعديلات المسار الأساسي/الاحتياطي في محرّر الإعدادات، أو عبر `estacoda model setup codex`. يستخدم OAuth، والمزوّد `codex`، والنموذج الافتراضي `gpt-5.5`، وطريقة المصادقة `oauth_device_pkce`، ونمط API `openai_responses`. مستبعد عن onboarding الأولي وعن إعداد OAuth للمسارات المساعدة في هذا المرور. |
 | **Google** | `configurable` | مؤهّل في الكاتالوغ. الاختبار الحيّ محدود في هذا الإصدار. |
 | **Anthropic** | `catalog-known` | توجد بياناته الوصفية ومدخلاته في الكاتالوغ، لكنه غير ظاهر كمسار إعداد/اختيار نموذج وغير قابل للتشغيل كمسار لغوي رئيس في هذا الإصدار. |
 | **MiniMax** | `catalog-known` | مسجّل في كاتالوغ النماذج. غير قابل للتشغيل في الإصدار الحالي. |
 | **Nous** | `catalog-known` | مسجّل في كاتالوغ النماذج. غير قابل للتشغيل في الإصدار الحالي. |
-| **Custom (OpenAI-compatible)** | `implemented` | أي معرف مزوّد مع `baseUrl` صريح يعامل كمزوّد OpenAI-compatible. يتطلب `baseUrl`. متغير مفتاح API الافتراضي هو `OPENAI_COMPATIBLE_API_KEY`. |
+| **نقطة نهاية محلية / خاصة** | `implemented` | المزود المدمج `local` لـ Ollama وLM Studio وllama.cpp وvLLM وLiteLLM أو نقطة نهاية محلية/خاصة أخرى متوافقة مع OpenAI. القيمة الافتراضية `http://localhost:11434/v1`، و`authMethod: "none"`، ومفتاح API الاختياري `OPENAI_COMPATIBLE_API_KEY`. |
+| **Custom (OpenAI-compatible)** | `implemented` | أي معرف مزوّد غير مدمج مع `baseUrl` صريح يعامل كمزوّد OpenAI-compatible مخصص. يتطلب `baseUrl`. متغير مفتاح API الافتراضي هو `OPENAI_COMPATIBLE_API_KEY`. استخدمه عندما تحتاج هوية مزود منفصلة بدل `local`. |
 | **unconfigured** | `unsupported` | نائب. غير قابل للتشغيل. |
 
 ### أنماط تنفيذ API
@@ -55,7 +56,7 @@ sidebar_position: 5
 
 - `apiKey` — يُقرَّأ من `apiKeyEnv` في وقت التشغيل
 - `none` — لا تلزم بيانات الاعتماد
-- `codex_oauth_device_pkce` — تدفق محدّد رمز الجهاز الخاص بـ Codex
+- `oauth_device_pkce` — تدفق OAuth عبر رمز الجهاز الخاص بـ Codex
 
 ### مهلات الطلب
 

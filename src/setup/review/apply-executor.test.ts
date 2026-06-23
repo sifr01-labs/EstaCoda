@@ -31,6 +31,10 @@ function profileEnvPath(homeDir: string): string {
   return resolveProfileStateHome({ homeDir, profileId: "default" }).envPath;
 }
 
+function profileAuthPath(homeDir: string): string {
+  return resolveProfileStateHome({ homeDir, profileId: "default" }).authJsonPath;
+}
+
 function onboardingPlan(input: {
   readonly homeDir: string;
   readonly workspaceRoot: string;
@@ -134,6 +138,87 @@ function fallbackPlan(values: ReviewValues): SetupApplyPlan {
       configOperationCount: 1,
       trustOperationCount: 0,
       credentialOperationCount: 0,
+    },
+  };
+}
+
+function codexOAuthPlan(values: ReviewValues = {}): SetupApplyPlan {
+  return {
+    kind: "setup-save-apply-plan",
+    manifestSourceBundleIds: ["test-codex-oauth-bundle"],
+    operations: [
+      {
+        id: "test-codex-route",
+        kind: "config-patch",
+        sourceLineIds: ["test-codex-route-line"],
+        target: {
+          kind: "config-scope",
+          scope: ["model.provider", "model.id", "provider.route"],
+          path: "/tmp/test/config.json",
+          preserveUnrelatedConfig: true,
+        },
+        review: {
+          copyKey: "setupDrafts.review",
+          summaryKey: "setupDrafts.providerModelEndpointRoute.summary",
+          redacted: true,
+          values: {
+            provider: "codex",
+            model: "gpt-5.5",
+            baseUrl: "https://chatgpt.com/backend-api/codex",
+            apiMode: "custom_openai_compatible",
+            authMethod: "oauth_device_pkce",
+            oauthCredentialStatus: "pending",
+            ...values,
+          },
+        },
+        preserveUnrelatedConfig: true,
+        writesConfig: false,
+        writesTrustStore: false,
+        dryRunOnly: true,
+      },
+      {
+        id: "test-codex-oauth-credential",
+        kind: "credential-reference",
+        sourceLineIds: ["test-codex-oauth-line"],
+        target: {
+          kind: "config-scope",
+          scope: ["provider.credentialReference"],
+          path: "/tmp/test/config.json",
+          preserveUnrelatedConfig: true,
+        },
+        review: {
+          copyKey: "setupDrafts.review",
+          summaryKey: "setupDrafts.credentialReference.summary",
+          redacted: true,
+          values: {
+            provider: "codex",
+            model: "gpt-5.5",
+            credentialSurface: "oauth",
+            authMethod: "oauth_device_pkce",
+            oauthCredentialStatus: "pending",
+            credentialValuesIncluded: false,
+          },
+        },
+        preserveUnrelatedConfig: true,
+        writesConfig: false,
+        writesTrustStore: false,
+        dryRunOnly: true,
+      },
+    ],
+    eligibility: {
+      eligible: true,
+      blockers: [],
+      repairIntents: [],
+    },
+    preservesUnrelatedConfig: true,
+    writesConfig: false,
+    writesTrustStore: false,
+    dryRunOnly: true,
+    metadata: {
+      operationCount: 2,
+      configOperationCount: 1,
+      trustOperationCount: 0,
+      credentialOperationCount: 1,
     },
   };
 }
@@ -687,6 +772,80 @@ describe("reviewed setup apply executor", () => {
     expect(secretResult.appliedSecretCount).toBe(0);
     expect(secretResult.error).toContain("UNREVIEWED_KEY");
     await expect(readFile(profileEnvPath(tempDir), "utf8")).rejects.toThrow();
+  });
+
+  it("persists deferred Codex OAuth only through the reviewed apply execution hook", async () => {
+    const plan = codexOAuthPlan();
+    const executor = createReviewedSetupApplyExecutor({
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+
+    const applyResult = await executor.apply(plan);
+
+    expect(applyResult.ok).toBe(true);
+    await expect(readFile(profileAuthPath(tempDir), "utf8")).rejects.toThrow();
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    expect(rawConfig).not.toContain("codex-access-token");
+    expect(JSON.parse(rawConfig)).toMatchObject({
+      model: {
+        provider: "codex",
+        id: "gpt-5.5",
+      },
+      providers: {
+        codex: {
+          apiMode: "custom_openai_compatible",
+          authMethod: "oauth_device_pkce",
+        },
+      },
+    });
+
+    const oauthResult = await executor.applyDeferredOAuth!(plan, [{
+      providerId: "codex",
+      authMethod: "oauth_device_pkce",
+      tokenRecord: {
+        authMethod: "oauth_device_pkce",
+        accessToken: "codex-access-token",
+        refreshToken: "codex-refresh-token",
+        expiresAt: "2999-01-01T00:00:00.000Z",
+        scopes: ["user"],
+        source: "estacoda",
+      },
+    }]);
+
+    expect(oauthResult).toEqual({
+      ok: true,
+      appliedOAuthCount: 1,
+    });
+    const authStore = JSON.parse(await readFile(profileAuthPath(tempDir), "utf8")) as {
+      providers?: Record<string, { accessToken?: string; authMethod?: string }>;
+    };
+    expect(authStore.providers?.codex).toEqual(expect.objectContaining({
+      authMethod: "oauth_device_pkce",
+      accessToken: "codex-access-token",
+    }));
+  });
+
+  it("rejects deferred OAuth writes that were not present in the reviewed credential plan", async () => {
+    const plan = codexOAuthPlan();
+    const executor = createReviewedSetupApplyExecutor({
+      homeDir: tempDir,
+      workspaceRoot,
+    });
+
+    const oauthResult = await executor.applyDeferredOAuth!(plan, [{
+      providerId: "openai",
+      authMethod: "oauth_device_pkce",
+      tokenRecord: {
+        authMethod: "oauth_device_pkce",
+        accessToken: "unreviewed-access-token",
+      },
+    }]);
+
+    expect(oauthResult.ok).toBe(false);
+    expect(oauthResult.appliedOAuthCount).toBe(0);
+    expect(oauthResult.error).toContain("openai:oauth_device_pkce");
+    await expect(readFile(profileAuthPath(tempDir), "utf8")).rejects.toThrow();
   });
 
   it("rejects unreviewed Browserbase deferred secret writes", async () => {

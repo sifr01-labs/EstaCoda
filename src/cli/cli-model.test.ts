@@ -33,6 +33,10 @@ function profileEnvPath(homeDir: string): string {
   return resolveProfileStateHome({ homeDir, profileId: "default" }).envPath;
 }
 
+function profileAuthPath(homeDir: string): string {
+  return resolveProfileStateHome({ homeDir, profileId: "default" }).authJsonPath;
+}
+
 function createMockPrompt(responses: {
   selects?: string[];
   secrets?: string[];
@@ -233,6 +237,75 @@ describe("cli model", () => {
       const config = await readUserConfig(tmpDir) as any;
       expect(config.model?.provider).toBe("openai");
       expect(config.model?.id).toBe("gpt-4o");
+    });
+
+    it("opens Codex as an OpenAI sub-choice and reuses existing OAuth without API-key collection", async () => {
+      await writeUserConfig(tmpDir, {
+        providers: {
+          openai: {
+            kind: "openai-compatible",
+            models: ["gpt-4o"]
+          },
+          codex: {
+            kind: "openai-compatible",
+            baseUrl: "https://chatgpt.com/backend-api/codex",
+            apiMode: "custom_openai_compatible",
+            authMethod: "oauth_device_pkce",
+            models: ["gpt-5.5"]
+          }
+        },
+        model: {
+          provider: "openai",
+          id: "gpt-4o"
+        }
+      });
+      await mkdir(dirname(profileAuthPath(tmpDir)), { recursive: true });
+      await writeFile(profileAuthPath(tmpDir), JSON.stringify({
+        version: 1,
+        providers: {
+          codex: {
+            authMethod: "oauth_device_pkce",
+            accessToken: "existing-codex-access-token",
+            expiresAt: "2999-01-01T00:00:00.000Z",
+            source: "estacoda"
+          }
+        }
+      }, null, 2), "utf8");
+
+      const selectInputs: Array<SelectPromptInput<unknown>> = [];
+      const prompt = createMockPrompt({
+        selects: ["openai", "codex-oauth"],
+        onSelect: (input) => selectInputs.push(input)
+      });
+
+      const result = await runCliCommand({
+        argv: ["model"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        prompt
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("Provider: codex");
+      expect(result.output).not.toContain("API key");
+      expect(selectInputs.map((input) => input.title)).toEqual([
+        "Primary provider",
+        "OpenAI setup",
+      ]);
+      expect(selectInputs[0]?.options.map((option) => option.id)).not.toContain("codex");
+      expect(selectInputs[1]?.options.map((option) => option.id)).toEqual(
+        expect.arrayContaining(["openai-api-key", "codex-oauth"])
+      );
+
+      const config = await readUserConfig(tmpDir) as any;
+      expect(config.model).toEqual({ provider: "codex", id: "gpt-5.5", contextWindowTokens: expect.any(Number) });
+      expect(config.providers?.codex).toEqual(expect.objectContaining({
+        authMethod: "oauth_device_pkce",
+        apiMode: "custom_openai_compatible"
+      }));
+      expect(config.providers?.codex?.apiKeyEnv).toBeUndefined();
+      expect(JSON.stringify(config)).not.toContain("existing-codex-access-token");
     });
 
     it("cancel at provider step writes nothing", async () => {
@@ -2354,7 +2427,7 @@ describe("cli model", () => {
       expect(result.handled).toBe(true);
       expect(result.exitCode).toBe(0);
       expect(result.output).toContain("EstaCoda model setup");
-      expect(result.output).toContain("estacoda model setup local");
+      expect(result.output).toContain("estacoda model setup local [--base-url <url>] [--model <id>] [--api-key <key>] [--context-window <n>]");
       expect(result.output).toContain("estacoda model setup custom");
       expect(result.output).toContain("estacoda model setup codex");
       expect(result.output).not.toContain("Unexpected token");
@@ -2370,7 +2443,7 @@ describe("cli model", () => {
       expect(result.handled).toBe(true);
       expect(result.exitCode).toBe(0);
       expect(result.output).toContain("EstaCoda local model setup");
-      expect(result.output).toContain("estacoda model setup local");
+      expect(result.output).toContain("estacoda model setup local [--base-url <url>] [--model <id>] [--api-key <key>] [--context-window <n>]");
       expect(result.output).not.toContain("Endpoint check:");
       expect(result.output).not.toContain("Could not discover models");
     });

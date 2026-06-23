@@ -7,6 +7,8 @@ import {
   executeSetupApplyPlan,
   type OptionalCapabilityApplyWarning,
   type SetupApplyEndState,
+  type SetupDeferredOAuthApplyResult,
+  type SetupDeferredOAuthWrite,
   type SetupDeferredSecretApplyResult,
   type SetupDeferredSecretWrite,
   type SetupApplyExecutionResult,
@@ -56,11 +58,12 @@ import {
   storeProviderCredential,
 } from "../../config/provider-config-mutations.js";
 import type { BrowserBackendKind, BrowserCloudProviderKind } from "../../contracts/browser.js";
-import type { AuxiliaryModelTask, ProviderId } from "../../contracts/provider.js";
+import type { AuxiliaryModelTask, ProviderApiMode, ProviderAuthMethod, ProviderId } from "../../contracts/provider.js";
 import type { SecurityApprovalMode } from "../../contracts/security.js";
 import { WorkspaceTrustStore } from "../../security/workspace-trust-store.js";
 import type { SkillAutonomy } from "../../skills/skill-learning.js";
 import { resolveSetupCopy } from "../setup-copy.js";
+import { loadOAuthStore, writeOAuthStore } from "../../providers/oauth/oauth-store.js";
 
 export type ReviewedSetupApplyExecutorOptions = {
   readonly workspaceRoot: string;
@@ -94,6 +97,7 @@ export function createReviewedSetupApplyExecutor(
       mode: context?.mode ?? mode,
     }),
     applyDeferredSecrets: (plan, writes) => applyReviewedSetupDeferredSecrets(plan, writes, normalizedOptions),
+    applyDeferredOAuth: (plan, writes) => applyReviewedSetupDeferredOAuth(plan, writes, normalizedOptions),
     verify: (request) => verifyReviewedSetup(request, normalizedOptions),
   };
 }
@@ -214,6 +218,59 @@ export async function applyReviewedSetupDeferredSecrets(
   }
 }
 
+export async function applyReviewedSetupDeferredOAuth(
+  plan: SetupApplyPlan,
+  writes: readonly SetupDeferredOAuthWrite[],
+  options: ReviewedSetupApplyExecutorOptions
+): Promise<SetupDeferredOAuthApplyResult> {
+  const allowedCredentials = new Set(reviewedOAuthCredentialsFromPlan(plan));
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+  let appliedOAuthCount = 0;
+
+  try {
+    for (const write of writes) {
+      const credentialKey = oauthCredentialKey(write.providerId, write.authMethod);
+      if (!allowedCredentials.has(credentialKey)) {
+        return {
+          ok: false,
+          appliedOAuthCount,
+          error: `Deferred OAuth write is not part of the reviewed credential plan: ${credentialKey}`,
+        };
+      }
+      if (write.tokenRecord.authMethod !== write.authMethod) {
+        return {
+          ok: false,
+          appliedOAuthCount,
+          error: `Deferred OAuth write auth method does not match reviewed credential plan: ${credentialKey}`,
+        };
+      }
+      const loaded = await loadOAuthStore({ homeDir: options.homeDir, profileId });
+      await writeOAuthStore({
+        ...loaded.store,
+        providers: {
+          ...loaded.store.providers,
+          [write.providerId]: write.tokenRecord,
+        },
+      }, { homeDir: options.homeDir, profileId });
+      appliedOAuthCount += 1;
+    }
+
+    return {
+      ok: true,
+      appliedOAuthCount,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Deferred OAuth persistence failed.";
+    return {
+      ok: false,
+      appliedOAuthCount,
+      error: appliedOAuthCount > 0
+        ? `Deferred OAuth persistence failed after ${appliedOAuthCount} OAuth write(s) succeeded: ${message}`
+        : message,
+    };
+  }
+}
+
 async function verifyReviewedSetup(
   _request: SetupPostSaveVerificationRequest,
   options: ReviewedSetupApplyExecutorOptions
@@ -236,6 +293,7 @@ async function applyConfigPatch(
 ): Promise<readonly OptionalCapabilityApplyWarning[]> {
   switch (operation.review.summaryKey) {
     case "setupDrafts.providerModelRoute.summary":
+    case "setupDrafts.providerModelEndpointRoute.summary":
     case "setupModules.provider.draft":
       await applyProviderRoute(operation, context, options);
       return [];
@@ -299,6 +357,7 @@ async function applyProviderRoute(
   }
   const baseUrl = stringValue(operation.review.values.baseUrl);
   const contextWindowTokens = numberValue(operation.review.values.contextWindowTokens);
+  const authMethod = providerAuthMethodValue(operation.review.values.authMethod);
   const target = configApplyTarget(operation, options);
   await registerProviderConfig({
     ...target,
@@ -307,6 +366,10 @@ async function applyProviderRoute(
       baseUrl,
       kind: "openai-compatible",
       enableNetwork: true,
+      apiMode: authMethod === undefined || authMethod === "api_key"
+        ? undefined
+        : providerApiModeValue(operation.review.values.apiMode),
+      authMethod: authMethod === "api_key" ? undefined : authMethod,
     },
   });
   if (context.credentialEnv !== undefined) {
@@ -352,6 +415,8 @@ async function applyFallbackRoute(
   const baseUrl = stringValue(operation.review.values.baseUrl);
   const apiKeyEnv = stringValue(operation.review.values.apiKeyEnv) ?? context.credentialEnv;
   const contextWindowTokens = numberValue(operation.review.values.contextWindowTokens);
+  const apiMode = providerApiModeValue(operation.review.values.apiMode);
+  const authMethod = providerAuthMethodValue(operation.review.values.authMethod);
   const nextFallback: ModelFallbackConfig = {
     provider,
     id: model,
@@ -375,6 +440,8 @@ async function applyFallbackRoute(
       baseUrl,
       kind: "openai-compatible",
       enableNetwork: true,
+      apiMode: authMethod === undefined || authMethod === "api_key" ? undefined : apiMode,
+      authMethod: authMethod === "api_key" ? undefined : authMethod,
     },
   });
   if (apiKeyEnv !== undefined) {
@@ -446,6 +513,9 @@ async function applyCredentialReference(
   options: ReviewedSetupApplyExecutorOptions
 ): Promise<void> {
   ensureCredentialReferenceCanApply(operation, context);
+  if (operation.review.values.credentialSurface === "oauth") {
+    return;
+  }
   const provider = providerIdValue(operation.review.values.provider) ?? context.provider;
   const envVar = arrayValue(operation.review.values.envVars)[0] ?? stringValue(operation.review.values.envVar) ?? context.credentialEnv;
   if (provider === undefined || envVar === undefined) {
@@ -897,6 +967,14 @@ function ensureCredentialReferenceCanApply(
   operation: SetupApplyOperation,
   context: PlanContext
 ): void {
+  if (operation.review.values.credentialSurface === "oauth") {
+    const provider = providerIdValue(operation.review.values.provider ?? operation.review.values.providerId);
+    const authMethod = stringValue(operation.review.values.authMethod);
+    if (provider === undefined || authMethod === undefined) {
+      throw new Error("OAuth credential reference apply requires provider and auth method review values.");
+    }
+    return;
+  }
   if (arrayValue(operation.review.values.envVars).length === 0) {
     throw new Error("Credential reference apply requires env-var review values.");
   }
@@ -960,6 +1038,28 @@ function reviewedSecretEnvVarsFromPlan(plan: SetupApplyPlan): string[] {
   return [...envVars];
 }
 
+function reviewedOAuthCredentialsFromPlan(plan: SetupApplyPlan): string[] {
+  const credentials = new Set<string>();
+  for (const operation of plan.operations) {
+    if (operation.review.values.credentialSurface !== "oauth") continue;
+    const provider = providerIdValue(operation.review.values.provider ?? operation.review.values.providerId);
+    const authMethod = providerAuthMethodValue(operation.review.values.authMethod);
+    const status = stringValue(operation.review.values.oauthCredentialStatus);
+    if (
+      provider !== undefined &&
+      authMethod !== undefined &&
+      (status === "ready" || status === "pending")
+    ) {
+      credentials.add(oauthCredentialKey(provider, authMethod));
+    }
+  }
+  return [...credentials];
+}
+
+function oauthCredentialKey(provider: ProviderId, authMethod: string): string {
+  return `${provider}:${authMethod}`;
+}
+
 function configApplyTarget(
   _operation: SetupApplyOperation,
   options: ReviewedSetupApplyExecutorOptions
@@ -999,6 +1099,14 @@ function numberValue(value: unknown): number | undefined {
 
 function providerIdValue(value: unknown): ProviderId | undefined {
   return stringValue(value) as ProviderId | undefined;
+}
+
+function providerApiModeValue(value: unknown): ProviderApiMode | undefined {
+  return stringValue(value) as ProviderApiMode | undefined;
+}
+
+function providerAuthMethodValue(value: unknown): ProviderAuthMethod | undefined {
+  return stringValue(value) as ProviderAuthMethod | undefined;
 }
 
 function auxiliaryTaskValue(value: unknown): AuxiliaryModelTask | undefined {

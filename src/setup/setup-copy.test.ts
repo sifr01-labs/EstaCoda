@@ -50,6 +50,9 @@ const FIRST_RUN_KEYS = [
   "onboarding.providers.description.codex",
   "onboarding.providers.description.custom",
   "onboarding.providers.description.customBaseUrl",
+  "onboarding.providers.localEndpoint.baseUrl",
+  "onboarding.providers.localEndpoint.apiKeyOptional",
+  "onboarding.providers.localEndpoint.invalidBaseUrl",
   "onboarding.catalog.model.features.tools",
   "onboarding.catalog.model.features.vision",
   "onboarding.catalog.model.features.reasoning",
@@ -250,6 +253,15 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.prompt.credentialReuse.existing.description",
   "setupEditor.prompt.credentialReuse.new",
   "setupEditor.prompt.credentialReuse.new.description",
+  "setupEditor.prompt.localEndpoint.baseUrl",
+  "setupEditor.prompt.localEndpoint.apiKeyOptional",
+  "setupEditor.result.localEndpointInvalid",
+  "setupEditor.prompt.openAiRoute.title",
+  "setupEditor.prompt.openAiRoute.body",
+  "setupEditor.prompt.openAiRoute.openAiModels",
+  "setupEditor.prompt.openAiRoute.openAiModels.description",
+  "setupEditor.prompt.openAiRoute.codex",
+  "setupEditor.prompt.openAiRoute.codex.description",
   "setupEditor.prompt.fallbackRoute.title",
   "setupEditor.prompt.fallbackRoute.body",
   "setupEditor.prompt.fallbackRoute.edit",
@@ -491,6 +503,7 @@ const REVIEW_MANIFEST_KEYS = [
   "setupReview.sections.warnings",
   "setupDrafts.review",
   "setupDrafts.providerModelRoute.summary",
+  "setupDrafts.providerModelEndpointRoute.summary",
   "setupDrafts.fallbackModelRoute.add.summary",
   "setupDrafts.fallbackModelRoute.replace.summary",
   "setupDrafts.auxiliaryModelRoute.summary",
@@ -642,6 +655,12 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "onboarding.providers.currentRoute")).toContain(isolateLtr("{route}"));
     expect(resolveSetupCopy("ar", "onboarding.providers.currentModelNotShown")).toContain(isolateLtr("{route}"));
     expect(resolveSetupCopy("ar", "onboarding.providers.description.customBaseUrl")).toContain(isolateLtr("{baseUrl}"));
+    expect(resolveSetupCopy("ar", "onboarding.providers.localEndpoint.baseUrl")).toContain(isolateLtr("URL"));
+    expect(resolveSetupCopy("ar", "onboarding.providers.localEndpoint.baseUrl")).toContain(isolateLtr("{baseUrl}"));
+    expect(resolveSetupCopy("ar", "onboarding.providers.localEndpoint.apiKeyOptional")).toContain(isolateLtr("API"));
+    expect(resolveSetupCopy("ar", "onboarding.providers.localEndpoint.apiKeyOptional")).toContain(isolateLtr("{envVar}"));
+    expect(resolveSetupCopy("ar", "onboarding.providers.localEndpoint.invalidBaseUrl")).toContain(isolateLtr("URL"));
+    expect(resolveSetupCopy("ar", "onboarding.providers.localEndpoint.invalidBaseUrl")).toContain(isolateLtr("{baseUrl}"));
     expect(resolveSetupCopy("ar", "setupModules.telegram.title")).toBe(isolateLtr("Telegram"));
     expect(resolveSetupCopy("ar", "onboarding.providers.primaryCredential.localProviderSkip")).toContain(isolateLtr("API"));
     expect(resolveSetupCopy("ar", "setupRouter.configured.title")).toContain(isolateLtr("EstaCoda"));
@@ -774,7 +793,7 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("en", "onboarding.providers.description.deepseek")).toBe("Cost-efficient models for primary or auxiliary use. Direct API.");
     expect(resolveSetupCopy("en", "onboarding.providers.description.google")).toBe("Gemini models with strong utility and multimodal coverage. Direct API.");
     expect(resolveSetupCopy("en", "onboarding.providers.description.kimi")).toBe("Moonshot Kimi models with strong quality/cost balance. Direct API.");
-    expect(resolveSetupCopy("en", "onboarding.providers.description.local")).toBe("Local OpenAI-compatible models running on your machine.");
+    expect(resolveSetupCopy("en", "onboarding.providers.description.local")).toBe("OpenAI-compatible local or private endpoint. API key optional.");
     expect(resolveSetupCopy("en", "onboarding.providers.description.openai")).toBe("Frontier models for high-quality primary reasoning. Direct API.");
     expect(resolveSetupCopy("en", "onboarding.providers.description.openrouter")).toBe("Pay-per-use aggregator for routing across many model providers.");
     expect(resolveSetupCopy("en", "onboarding.providers.description.zai")).toBe("GLM models with strong quality/cost balance. Direct API.");
@@ -783,6 +802,7 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "onboarding.providers.description.google")).toContain(isolateLtr("Gemini"));
     expect(resolveSetupCopy("ar", "onboarding.providers.description.kimi")).toContain(isolateLtr("Moonshot"));
     expect(resolveSetupCopy("ar", "onboarding.providers.description.local")).toContain(isolateLtr("OpenAI"));
+    expect(resolveSetupCopy("ar", "onboarding.providers.description.local")).toContain(isolateLtr("API"));
     expect(resolveSetupCopy("ar", "onboarding.providers.description.zai")).toContain(isolateLtr("GLM"));
   });
 
@@ -979,6 +999,12 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "setupEditor.actions.exitWithoutChanges")).toBe("Exit without changes");
     expect(rawSetupCopy("en", "setupEditor.actions.exitWithoutChanges.description")).toBe("Leave setup without modifying config.");
     expect(rawSetupCopy("en", "setupEditor.actions.storeProviderCredentialReference")).toBe("Store provider credential reference.");
+    expect(getSetupCopyEntry("setupDrafts.providerModelEndpointRoute.summary")?.placeholders).toEqual(["{providerId}", "{modelId}", "{baseUrl}"]);
+    expect(rawSetupCopy("en", "setupDrafts.providerModelEndpointRoute.summary")).toBe("Update provider/model to {providerId} / {modelId} at {baseUrl}.");
+    expect(rawSetupCopy("ar", "setupDrafts.providerModelEndpointRoute.summary")).toContain("{baseUrl}");
+    expect(resolveSetupCopy("ar", "setupDrafts.providerModelEndpointRoute.summary")).toContain(isolateLtr("{providerId}"));
+    expect(resolveSetupCopy("ar", "setupDrafts.providerModelEndpointRoute.summary")).toContain(isolateLtr("{modelId}"));
+    expect(resolveSetupCopy("ar", "setupDrafts.providerModelEndpointRoute.summary")).toContain(isolateLtr("{baseUrl}"));
     expect(rawSetupCopy("en", "setupDrafts.fallbackModelRoute.add.summary")).toBe("Add fallback model {providerId} / {modelId}.");
     expect(rawSetupCopy("en", "setupDrafts.fallbackModelRoute.replace.summary")).toBe("Replace fallback model {previousProviderId} / {previousModelId} with {providerId} / {modelId}.");
     expect(rawSetupCopy("en", "setupDrafts.auxiliaryModelRoute.summary")).toBe("Set auxiliary {auxiliaryTask} model to {providerId} / {modelId}.");
@@ -998,6 +1024,12 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "setupEditor.prompt.webSearch.brave.secretValue")).toBe("Enter Brave Search API key:");
     expect(rawSetupCopy("en", "setupEditor.prompt.voice.ttsSecretValue")).toBe("Enter TTS provider API key for {envVar}:");
     expect(rawSetupCopy("en", "setupEditor.prompt.voice.sttSecretValue")).toBe("Enter STT provider API key for {envVar}:");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openAiRoute.title")).toBe("OpenAI setup");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openAiRoute.body")).toBe("Choose how to configure OpenAI.");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openAiRoute.openAiModels")).toBe("OpenAI Models");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openAiRoute.openAiModels.description")).toBe("Use API-key OpenAI models.");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openAiRoute.codex")).toBe("Codex");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openAiRoute.codex.description")).toBe("Use OpenAI Codex with OAuth. Default model: gpt-5.5.");
 
     expect(rawSetupCopy("ar", "setupEditor.shell.title")).toBe("محرّر الإعدادات");
     expect(rawSetupCopy("ar", "setupEditor.prompt.action.body")).toBe("اختار اللي تحب تضبطه:");
@@ -1008,6 +1040,9 @@ describe("setup copy", () => {
     expect(rawSetupCopy("ar", "setupEditor.prompt.webSearch.brave.secretValue")).toBe("أدخل مفتاح API لـ Brave Search:");
     expect(rawSetupCopy("ar", "setupEditor.prompt.voice.ttsSecretValue")).toBe("أدخل مفتاح API لمزوّد TTS لـ {envVar}:");
     expect(rawSetupCopy("ar", "setupEditor.prompt.voice.sttSecretValue")).toBe("أدخل مفتاح API لمزوّد STT لـ {envVar}:");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.openAiRoute.title")).toBe("إعداد OpenAI");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.openAiRoute.openAiModels.description")).toBe("استخدم نماذج OpenAI عبر مفتاح API.");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.openAiRoute.codex.description")).toBe("استخدم OpenAI Codex عبر OAuth. النموذج الافتراضي: gpt-5.5.");
     expect(rawSetupCopy("ar", "setupEditor.actions.editPrimaryModelRoute")).toBe("النموذج الأساسي");
     expect(rawSetupCopy("ar", "setupEditor.actions.editPrimaryModelRoute.description")).toBe("النموذج الافتراضي الذي يستخدمه الوكيل.");
     expect(rawSetupCopy("ar", "setupEditor.actions.editFallbackModelRoute")).toBe("النماذج الاحتياطية");
@@ -1044,6 +1079,14 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupEditor.prompt.webSearch.brave.secretValue")).toContain(isolateLtr("Brave Search"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.ttsSecretValue")).toContain(isolateLtr("{envVar}"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.sttSecretValue")).toContain(isolateLtr("{envVar}"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openAiRoute.title")).toContain(isolateLtr("OpenAI"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openAiRoute.openAiModels")).toContain(isolateLtr("OpenAI Models"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openAiRoute.openAiModels.description")).toContain(isolateLtr("OpenAI"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openAiRoute.openAiModels.description")).toContain(isolateLtr("API"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openAiRoute.codex")).toContain(isolateLtr("Codex"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openAiRoute.codex.description")).toContain(isolateLtr("OpenAI Codex"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openAiRoute.codex.description")).toContain(isolateLtr("OAuth"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.openAiRoute.codex.description")).toContain(isolateLtr("gpt-5.5"));
     expect(rawSetupCopy("ar", "setupEditor.prompt.auxiliaryRoute.assessor.description")).toContain("assessor");
     expect(rawSetupCopy("ar", "setupEditor.prompt.auxiliaryRoute.compression.description")).toContain("compression");
     expect(rawSetupCopy("ar", "setupEditor.prompt.auxiliaryRoute.sessionSearch.description")).toContain("session_search");
@@ -1061,6 +1104,47 @@ describe("setup copy", () => {
     expect(rawSetupCopy("ar", "setupEditor.prompt.credentialReuse.new")).toContain("API");
     expect(rawSetupCopy("ar", "setupEditor.prompt.credentialReuse.existing").length).toBeGreaterThan(0);
     expect(rawSetupCopy("ar", "setupEditor.prompt.credentialReuse.new.description").length).toBeGreaterThan(0);
+  });
+
+  it("contains setup editor local endpoint prompt copy", () => {
+    expect(getSetupCopyEntry("setupEditor.prompt.localEndpoint.baseUrl")?.placeholders).toEqual(["{baseUrl}", "URL"]);
+    expect(getSetupCopyEntry("setupEditor.prompt.localEndpoint.apiKeyOptional")?.placeholders).toEqual(["API", "{envVar}"]);
+    expect(getSetupCopyEntry("setupEditor.result.localEndpointInvalid")?.placeholders).toEqual(["URL", "{baseUrl}"]);
+    expect(rawSetupCopy("en", "setupEditor.prompt.localEndpoint.baseUrl")).toBe("Local endpoint base URL [{baseUrl}]:");
+    expect(rawSetupCopy("en", "setupEditor.prompt.localEndpoint.apiKeyOptional")).toBe("Optional API key for {envVar}. Leave blank for no local auth:");
+    expect(rawSetupCopy("en", "setupEditor.result.localEndpointInvalid")).toBe("Invalid endpoint URL. Enter an absolute URL such as {baseUrl}.");
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.localEndpoint.baseUrl")).toContain(isolateLtr("{baseUrl}"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.localEndpoint.baseUrl")).toContain(isolateLtr("URL"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.localEndpoint.apiKeyOptional")).toContain(isolateLtr("API"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.localEndpoint.apiKeyOptional")).toContain(isolateLtr("{envVar}"));
+    expect(resolveSetupCopy("ar", "setupEditor.result.localEndpointInvalid")).toContain(isolateLtr("URL"));
+    expect(resolveSetupCopy("ar", "setupEditor.result.localEndpointInvalid")).toContain(isolateLtr("{baseUrl}"));
+  });
+
+  it("contains onboarding local endpoint prompt copy", () => {
+    expect(getSetupCopyEntry("onboarding.providers.localEndpoint.baseUrl")?.placeholders).toEqual(["{baseUrl}", "URL"]);
+    expect(getSetupCopyEntry("onboarding.providers.localEndpoint.apiKeyOptional")?.placeholders).toEqual(["API", "{envVar}"]);
+    expect(getSetupCopyEntry("onboarding.providers.localEndpoint.invalidBaseUrl")?.placeholders).toEqual(["URL", "{baseUrl}"]);
+    expect(rawSetupCopy("en", "onboarding.providers.localEndpoint.baseUrl")).toBe("Local endpoint base URL [{baseUrl}]:");
+    expect(rawSetupCopy("en", "onboarding.providers.localEndpoint.apiKeyOptional")).toBe("Optional API key for {envVar}. Leave blank for no local auth:");
+    expect(rawSetupCopy("en", "onboarding.providers.localEndpoint.invalidBaseUrl")).toBe("Invalid endpoint URL. Enter an absolute URL such as {baseUrl}.");
+    expect(rawSetupCopy("ar", "onboarding.providers.localEndpoint.baseUrl")).toContain("{baseUrl}");
+    expect(rawSetupCopy("ar", "onboarding.providers.localEndpoint.apiKeyOptional")).toContain("{envVar}");
+    expect(formatSetupCopy("ar", "onboarding.providers.localEndpoint.baseUrl", {
+      baseUrl: "http://localhost:11434/v1",
+    })).toContain(isolateLtr("http://localhost:11434/v1"));
+    expect(formatSetupCopy("ar", "onboarding.providers.localEndpoint.apiKeyOptional", {
+      envVar: "OPENAI_COMPATIBLE_API_KEY",
+    })).toContain(isolateLtr("OPENAI_COMPATIBLE_API_KEY"));
+    expect(formatSetupCopy("ar", "onboarding.providers.localEndpoint.apiKeyOptional", {
+      envVar: "OPENAI_COMPATIBLE_API_KEY",
+    })).toContain(isolateLtr("API"));
+    expect(formatSetupCopy("ar", "onboarding.providers.localEndpoint.invalidBaseUrl", {
+      baseUrl: "http://localhost:11434/v1",
+    })).toContain(isolateLtr("URL"));
+    expect(formatSetupCopy("ar", "onboarding.providers.localEndpoint.invalidBaseUrl", {
+      baseUrl: "http://localhost:11434/v1",
+    })).toContain(isolateLtr("http://localhost:11434/v1"));
   });
 
   it("contains review manifest copy keys", () => {

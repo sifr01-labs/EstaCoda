@@ -6,7 +6,7 @@ sidebar_position: 4
 
 # Providers
 
-The provider configuration decides which model EstaCoda uses, how credentials are loaded, and what happens when the primary route fails. There is no hidden provider logic. Every route is inspectable, every credential is env-backed, and every fallback is explicit.
+The provider configuration decides which model EstaCoda uses, how credentials are loaded, and what happens when the primary route fails. There is no hidden provider logic. Every route is inspectable, every credentialed route is env-backed, and every fallback is explicit.
 
 This page explains how provider configuration behaves, not which provider is "best." The best provider is the one you have credentials for, that supports the mode you need, and that passes a live test.
 
@@ -18,7 +18,8 @@ EstaCoda loads provider configuration from the active profile's `config.json`. A
 
 - `provider` — the provider ID
 - `model` — the model name
-- `apiKeyEnv` — the environment variable that holds the API key
+
+Credentialed routes also need `apiKeyEnv`, the environment variable that holds the API key. No-auth routes, such as the default `local` provider path, can omit it.
 
 Example primary route:
 
@@ -32,7 +33,29 @@ Example primary route:
 }
 ```
 
-At runtime, EstaCoda reads `process.env[apiKeyEnv]` and passes it to the provider executor. The key is never stored in `config.json`. If the environment variable is missing, the route is non-runnable and the setup flow will tell you exactly which variable is absent.
+At runtime, EstaCoda reads `process.env[apiKeyEnv]` for credentialed routes and passes it to the provider executor. The key is never stored in `config.json`. If a credentialed route references a missing environment variable, the route is non-runnable and the setup flow will tell you exactly which variable is absent. Routes configured with `authMethod: "none"` do not require credentials.
+
+---
+
+## Local / Private Endpoint
+
+The built-in `local` provider is the simple path for OpenAI-compatible local or private endpoints. It works for tools such as Ollama, LM Studio, llama.cpp server, vLLM, LiteLLM, or an internal OpenAI-compatible gateway when that endpoint exposes the expected `/v1` API shape.
+
+Defaults:
+
+- provider ID: `local`
+- base URL: `http://localhost:11434/v1`
+- auth: no API key required
+- optional API key env: `OPENAI_COMPATIBLE_API_KEY`
+
+```bash
+estacoda model setup local --base-url http://localhost:1234/v1 --model qwen2.5-coder
+estacoda model setup local --base-url http://localhost:1234/v1 --model private-model --api-key <key>
+```
+
+When `--api-key` is provided, setup stores the raw key only in the selected profile `.env` as `OPENAI_COMPATIBLE_API_KEY` and stores only the env-var reference in config. When no key is provided, local remains a no-auth route.
+
+Use `estacoda model setup custom` instead when you need a separate named OpenAI-compatible provider ID rather than the built-in `local` route.
 
 ---
 
@@ -215,15 +238,24 @@ To clear a session override:
 
 ## Codex Setup Path
 
-Codex is not an option in the onboarding wizard. It is a public CLI setup path for advanced users who want to use the Codex CLI model.
+Codex can be configured from the model picker where the nested OpenAI choice is enabled:
+
+1. Choose **OpenAI**.
+2. Choose **Codex**.
+
+The **OpenAI Models** choice is the API-key path for normal OpenAI models. The **Codex** choice is the OAuth path. Codex configuration uses provider `codex`, default model `gpt-5.5`, auth method `oauth_device_pkce`, and Responses API mode (`openai_responses`). It does not use `apiKeyEnv`.
+
+The direct CLI setup command remains available:
 
 ```bash
 estacoda model setup codex
 ```
 
-This command runs OAuth device-code authentication, stores tokens in `~/.estacoda/auth.json`, and configures the `codex/o3` route. Raw OAuth tokens are not printed. Route config remains separate from token storage.
+This command runs OAuth device-code authentication, stores tokens in the selected profile's `auth.json`, and configures the `codex/gpt-5.5` route. Raw OAuth tokens are not printed. Route config remains separate from token storage.
 
-Codex is excluded from the onboarding wizard by design. If you need Codex, run the setup command explicitly.
+The Setup Editor can configure Codex for the primary model route and fallback model routes through reviewed apply. OAuth tokens collected through the Setup Editor are written only after review approval; cancelling review after OAuth does not persist tokens.
+
+Codex setup uses the fixed default model `gpt-5.5`. EstaCoda does not fetch a live Codex model list in this pass, and it does not maintain or apply a fallback Codex model list in this pass. First-run onboarding is unchanged and does not introduce Codex OAuth setup. Auxiliary model routes are unchanged too; they do not introduce Codex OAuth setup in this pass.
 
 ---
 
@@ -280,7 +312,9 @@ estacoda model setup
 
 ## Failure Modes and Recovery
 
-**Missing API key:** The route is non-runnable. Run `estacoda model setup` or set the environment variable.
+**Missing API key:** A credentialed route is non-runnable. Run `estacoda model setup` or set the environment variable. The default `local` route does not require an API key unless you configured one.
+
+**Local endpoint unreachable:** Check that the local/private OpenAI-compatible server is running, that the configured `baseUrl` includes the `/v1` path when required by the server, and that any optional key is present in the selected profile `.env`.
 
 **Invalid model name:** The catalog does not recognize the model. Check the provider's documentation and update `config.json`.
 

@@ -13,6 +13,7 @@ import {
   type CreateModelSelectionCatalogOptions
 } from "./model-selection-catalog.js";
 import {
+  getDefaultApiKeyEnv,
   getProviderMetadata,
   isProviderMediaOnly,
   isProviderRunnable,
@@ -20,6 +21,8 @@ import {
 } from "./provider-metadata.js";
 import { inferModelProfile } from "./model-catalog.js";
 import { resolveRuntimeCredential } from "./runtime-credential-resolver.js";
+import { readCodexOAuthStatus, type CodexOAuthStatusValue } from "./oauth/codex-setup.js";
+import { isOAuthAuthMethod } from "./oauth/oauth-types.js";
 import type {
   ModelLifecycle,
   ModelUsageClass
@@ -34,6 +37,7 @@ export type ProviderModelSelectionFlowOptions = {
   config: EstaCodaConfig;
   providerRegistry: ProviderRegistry;
   homeDir?: string;
+  profileId?: string;
   modelsDevOptions?: CreateModelSelectionCatalogOptions["modelsDevOptions"];
   modelCatalogOverrides?: CreateModelSelectionCatalogOptions["modelCatalogOverrides"];
   allowNetwork?: boolean;
@@ -68,7 +72,14 @@ export type ModelCandidate = {
 export type CredentialAction =
   | { kind: "none" }
   | { kind: "reuse"; reference: `env:${string}` }
-  | { kind: "collect"; envVarName: string };
+  | { kind: "collect"; envVarName: string }
+  | { kind: "endpoint"; baseUrl?: string; apiKeyEnv: string }
+  | {
+      kind: "oauth";
+      providerId: ProviderId;
+      authMethod: ProviderAuthMethod;
+      status: CodexOAuthStatusValue;
+    };
 
 export type ProviderModelSelectionResult = {
   kind: "selected";
@@ -117,7 +128,7 @@ export async function createProviderModelSelectionFlow(
 
   // Load the protected .env boundary so credential readiness checks
   // reflect secrets stored in ~/.estacoda/.env, not just shell env.
-  await loadDotEnvSecrets({ homeDir: options.homeDir });
+  await loadDotEnvSecrets({ homeDir: options.homeDir, profileId: options.profileId });
 
   const catalog = await createModelSelectionCatalog({
     config: options.config,
@@ -343,9 +354,13 @@ async function resolveSelectionImpl(
   const providerConfig = config.providers?.[providerId];
   const apiKeyEnv = providerConfig?.apiKeyEnv ?? meta.defaultApiKeyEnv;
   const apiMode = providerConfig?.apiMode ?? meta.apiMode;
+  const authMethod = providerConfig?.authMethod ?? meta.defaultAuthMethod;
 
   // Check credential readiness without exposing secret values
-  const credentialAction = await determineCredentialAction(providerId, apiKeyEnv, meta);
+  const credentialAction = await determineCredentialAction(providerId, apiKeyEnv, {
+    ...meta,
+    defaultAuthMethod: authMethod,
+  }, options.homeDir, options.profileId);
 
   return {
     kind: "selected",
@@ -353,7 +368,7 @@ async function resolveSelectionImpl(
     model: modelId,
     baseUrl,
     apiMode,
-    authMethod: meta.defaultAuthMethod,
+    authMethod,
     credentialAction,
     profile
   };
@@ -369,8 +384,36 @@ async function resolveSelectionImpl(
 async function determineCredentialAction(
   providerId: ProviderId,
   apiKeyEnv: string | undefined,
-  meta: ProviderMetadata
+  meta: ProviderMetadata,
+  homeDir?: string,
+  profileId?: string
 ): Promise<CredentialAction> {
+  if (isOAuthAuthMethod(meta.defaultAuthMethod)) {
+    if (providerId === "codex") {
+      const status = await readCodexOAuthStatus({ homeDir, profileId });
+      return {
+        kind: "oauth",
+        providerId,
+        authMethod: status.authMethod,
+        status: status.status
+      };
+    }
+    return {
+      kind: "oauth",
+      providerId,
+      authMethod: meta.defaultAuthMethod,
+      status: "required"
+    };
+  }
+
+  if (providerId === "local") {
+    return {
+      kind: "endpoint",
+      baseUrl: meta.defaultBaseUrl,
+      apiKeyEnv: apiKeyEnv ?? getDefaultApiKeyEnv(providerId)
+    };
+  }
+
   // No-auth providers never need credentials
   if (meta.authMethods.includes("none") && meta.defaultAuthMethod === "none") {
     return { kind: "none" };

@@ -12,6 +12,7 @@ import {
   redactExternalMemoryConfig,
   saveRuntimeConfig,
   addWhatsAppAllowedUser,
+  setupProviderConfig,
   setupAuxiliaryModelConfig,
   setupWebConfig,
   setupVoiceConfig
@@ -22,6 +23,10 @@ import type { SessionEvent } from "../contracts/session.js";
 
 function profileConfigPath(homeDir: string): string {
   return resolveProfileStateHome({ homeDir, profileId: "default" }).configPath;
+}
+
+function profileEnvPath(homeDir: string): string {
+  return resolveProfileStateHome({ homeDir, profileId: "default" }).envPath;
 }
 
 function whatsappAuthDir(homeDir: string): string {
@@ -541,6 +546,99 @@ describe("loadRuntimeConfig auxiliaryModels", () => {
     const saved = JSON.parse(await readFile(configPath, "utf8"));
     expect(saved.auxiliaryProviders).toBeUndefined();
     expect(saved.auxiliaryModels).toBeUndefined();
+  });
+
+  it("setupProviderConfig stores local API key in profile env and only references it from config", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    const rawKey = "sk-test-local-secret";
+    try {
+      const result = await setupProviderConfig({
+        workspaceRoot: workspace,
+        homeDir: workspace,
+        input: {
+          provider: "local",
+          model: "local-test",
+          apiKey: rawKey,
+          enableNetwork: true,
+          requiresCredential: false
+        }
+      });
+
+      const configContent = await readFile(result.path, "utf8");
+      const saved = JSON.parse(configContent);
+      const envContent = await readFile(profileEnvPath(workspace), "utf8");
+
+      expect(saved.providers?.local?.apiKeyEnv).toBe("OPENAI_COMPATIBLE_API_KEY");
+      expect(configContent).not.toContain(rawKey);
+      expect(envContent).toContain(`OPENAI_COMPATIBLE_API_KEY="${rawKey}"`);
+    } finally {
+      delete process.env.OPENAI_COMPATIBLE_API_KEY;
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("setupProviderConfig preserves OAuth auth method without inventing an API-key env ref", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    try {
+      const result = await setupProviderConfig({
+        workspaceRoot: workspace,
+        homeDir: workspace,
+        input: {
+          provider: "codex",
+          model: "gpt-5.5",
+          baseUrl: "https://chatgpt.com/backend-api/codex",
+          apiMode: "openai_responses",
+          authMethod: "oauth_device_pkce",
+          enableNetwork: true
+        }
+      });
+
+      const saved = JSON.parse(await readFile(result.path, "utf8"));
+      expect(saved.model).toEqual({ provider: "codex", id: "gpt-5.5" });
+      expect(saved.providers?.codex).toEqual(expect.objectContaining({
+        apiMode: "openai_responses",
+        authMethod: "oauth_device_pkce"
+      }));
+      expect(saved.providers?.codex?.apiKeyEnv).toBeUndefined();
+      expect(result.secretPath).toBeUndefined();
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("setupProviderConfig stores custom local baseUrl and omits the default", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    try {
+      const customResult = await setupProviderConfig({
+        workspaceRoot: workspace,
+        homeDir: workspace,
+        input: {
+          provider: "local",
+          model: "local-test",
+          baseUrl: "http://localhost:9999/v1",
+          enableNetwork: true,
+          requiresCredential: false
+        }
+      });
+      let saved = JSON.parse(await readFile(customResult.path, "utf8"));
+      expect(saved.providers?.local?.baseUrl).toBe("http://localhost:9999/v1");
+
+      const defaultResult = await setupProviderConfig({
+        workspaceRoot: workspace,
+        homeDir: workspace,
+        input: {
+          provider: "local",
+          model: "local-test",
+          baseUrl: "http://localhost:11434/v1",
+          enableNetwork: true,
+          requiresCredential: false
+        }
+      });
+      saved = JSON.parse(await readFile(defaultResult.path, "utf8"));
+      expect(saved.providers?.local?.baseUrl).toBeUndefined();
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
   });
 
   it("setupAuxiliaryModelConfig writes normalized auxiliary config", async () => {
@@ -2908,10 +3006,11 @@ describe("buildProviderRegistry custom provider baseUrl behavior", () => {
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
     // Exact shape emitted by model-setup-codex.ts (no kind field)
     await writeFile(profileConfigPath(workspace), JSON.stringify({
-      model: { provider: "codex", id: "o3" },
+      model: { provider: "codex", id: "gpt-5.5" },
       providers: {
         codex: {
           baseUrl: "https://chatgpt.com/backend-api/codex",
+          apiMode: "openai_responses",
           authMethod: "oauth_device_pkce"
         }
       }

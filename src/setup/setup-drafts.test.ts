@@ -246,6 +246,7 @@ describe("setup draft bundles", () => {
       apiMode: "custom_openai_compatible",
       authMethod: "api_key",
     }));
+    expect(route?.review.summaryKey).toBe("setupDrafts.providerModelEndpointRoute.summary");
     expect(credential?.review.values).toEqual(expect.objectContaining({
       provider: "openai",
       model: "gpt-5.5",
@@ -388,7 +389,7 @@ describe("setup draft bundles", () => {
 
     expect(draft?.target).toEqual({
       kind: "config-scope",
-      scope: ["model.provider", "model.id"],
+      scope: ["model.provider", "model.id", "provider.route"],
       path: "/tmp/home/.estacoda/config.json",
       preserveUnrelatedConfig: true,
     });
@@ -410,6 +411,7 @@ describe("setup draft bundles", () => {
     expect(draft?.review.values.contextWindowTokens).toBe(256000);
     expect(draft?.review.values.apiMode).toBe("custom_openai_compatible");
     expect(draft?.review.values.authMethod).toBe("api_key");
+    expect(draft?.review.summaryKey).toBe("setupDrafts.providerModelEndpointRoute.summary");
   });
 
   it("redacts credential drafts and shows env var refs only", () => {
@@ -421,6 +423,7 @@ describe("setup draft bundles", () => {
     expect(json).not.toContain("sk-");
     expect(json).not.toContain("raw");
     expect(json).not.toContain("secretValue");
+    expect(json).not.toContain("baseUrl");
   });
 
   it("creates workspace trust drafts with exact paths without granting trust", () => {
@@ -598,6 +601,7 @@ describe("setup draft bundles", () => {
           provider: "openai",
           model: "gpt-5.5",
           apiKeyEnv: "OPENAI_API_KEY",
+          baseUrl: "https://api.openai.com/v1",
         },
       }),
     ], {
@@ -613,6 +617,8 @@ describe("setup draft bundles", () => {
       credentialValuesIncluded: false,
     }));
     expect(JSON.stringify(draft)).not.toContain("sk-");
+    expect(JSON.stringify(draft)).not.toContain("baseUrl");
+    expect(JSON.stringify(draft)).not.toContain("https://api.openai.com/v1");
   });
 
   it("builds fallback provider/model drafts scoped to model fallbacks", () => {
@@ -777,6 +783,41 @@ describe("setup draft bundles", () => {
       kind: "config-scope",
       scope: ["model.provider", "model.id"],
     }));
+  });
+
+  it("adds provider route scope when primary provider/model draft includes an endpoint", () => {
+    const decision = routeSetupEntryState(state("configured-ready"));
+    if (decision.setupEditorPlanSession === undefined) {
+      throw new Error("Expected setup editor plan session");
+    }
+
+    const bundle = buildSetupEditorActionDraftBundle(decision.setupEditorPlanSession, [
+      setupEditorAction({
+        id: "edit-primary-model-route",
+        copyKey: "setupEditor.actions.editPrimaryModelRoute",
+        sectionId: "model-route",
+        effect: "draft-config-patch",
+        readOnly: false,
+        requiresExplicitApply: true,
+        patch: scopedPatch(["model.provider", "model.id"]),
+        reviewValues: {
+          provider: "local",
+          model: "llama3",
+          baseUrl: "http://localhost:11434/v1",
+        },
+      }),
+    ], {
+      configPath: "/tmp/home/.estacoda/config.json",
+    });
+    const draft = bundle.drafts[0];
+
+    expect(draft?.kind).toBe("provider-model-route");
+    expect(draft?.target).toEqual(expect.objectContaining({
+      kind: "config-scope",
+      scope: ["model.provider", "model.id", "provider.route"],
+    }));
+    expect(draft?.review.summaryKey).toBe("setupDrafts.providerModelEndpointRoute.summary");
+    expect(draft?.review.values.baseUrl).toBe("http://localhost:11434/v1");
   });
 
   it("keeps optional capability drafts independent and skippable", () => {

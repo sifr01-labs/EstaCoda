@@ -892,7 +892,7 @@ async function model(options: CliOptions, args: string[]): Promise<CliCommandRes
       exitCode: 0,
       output: [
         "Model setup commands:",
-        "  estacoda model setup local [--base-url <url>] [--model <id>] [--context-window <n>]",
+        "  estacoda model setup local [--base-url <url>] [--model <id>] [--api-key <key>] [--context-window <n>]",
         "  estacoda model setup custom --base-url <url> [--provider-id <id>] [--model <id>] [--api-key-env <env>] [--context-window <n>]",
         "  estacoda model setup codex"
       ].join("\n")
@@ -1145,6 +1145,29 @@ async function persistModelSelection(
       }
       break;
     }
+    case "endpoint": {
+      break;
+    }
+    case "oauth": {
+      if (resolution.provider !== "codex") {
+        return {
+          handled: true,
+          exitCode: 1,
+          output: `OAuth setup for ${resolution.provider} is not supported by this model picker yet.`
+        };
+      }
+      if (resolution.credentialAction.status !== "ready") {
+        return runModelSetupCodex({
+          workspaceRoot: options.workspaceRoot,
+          homeDir: options.homeDir,
+          profileId: options.profileId,
+          prompt: options.prompt,
+          fetchLike: options.providerFetch,
+          output: options.output,
+        });
+      }
+      break;
+    }
   }
 
   // ── Config mutation (pure, in-memory) ──
@@ -1152,7 +1175,8 @@ async function persistModelSelection(
     provider: resolution.provider,
     baseUrl: resolution.baseUrl,
     apiKeyEnv: envVarName,
-    apiMode: resolution.apiMode
+    apiMode: resolution.apiMode,
+    authMethod: resolution.authMethod === "api_key" ? undefined : resolution.authMethod
   });
 
   mutated = applyRegisterProviderModel(mutated, {
@@ -1229,6 +1253,7 @@ async function runBareModelPicker(
     config: config.config,
     providerRegistry: config.providerRegistry,
     homeDir: options.homeDir,
+    profileId: options.profileId,
     modelsDevOptions: options.modelsDevOptions,
     allowNetwork: false,
     mode: "setup"
@@ -1248,6 +1273,7 @@ async function runBareModelPicker(
     allowBack: true,
     allowCancel: true,
     mode: "primary",
+    openAiCodexChoice: true,
   });
 
   if (routeSelection.kind === "selected") {
@@ -1282,7 +1308,7 @@ function renderModelOverview(config: Awaited<ReturnType<typeof loadRuntimeConfig
   diagnosticLines.push("Commands:");
   diagnosticLines.push("  estacoda model status");
   diagnosticLines.push("  estacoda model diagnose");
-  diagnosticLines.push("  estacoda model setup local [--base-url <url>] [--model <id>] [--context-window <n>]");
+  diagnosticLines.push("  estacoda model setup local [--base-url <url>] [--model <id>] [--api-key <key>] [--context-window <n>]");
   diagnosticLines.push("  estacoda model setup custom --base-url <url> [--provider-id <id>] [--model <id>] [--api-key-env <env>] [--context-window <n>]");
   diagnosticLines.push("  estacoda model setup codex");
   diagnosticLines.push("  estacoda model set <provider>/<model> (deprecated; disabled)");
@@ -1349,7 +1375,7 @@ function renderModelSetupHelp(args: string[]): string {
       "EstaCoda local model setup",
       "",
       "Usage:",
-      "  estacoda model setup local [--base-url <url>] [--model <id>] [--context-window <n>]",
+      "  estacoda model setup local [--base-url <url>] [--model <id>] [--api-key <key>] [--context-window <n>]",
       "",
       "Configures a local OpenAI-compatible endpoint such as Ollama or llama.cpp.",
       "",
@@ -1395,7 +1421,7 @@ function renderModelSetupHelp(args: string[]): string {
     "EstaCoda model setup",
     "",
     "Usage:",
-    "  estacoda model setup local [--base-url <url>] [--model <id>] [--context-window <n>]",
+    "  estacoda model setup local [--base-url <url>] [--model <id>] [--api-key <key>] [--context-window <n>]",
     "  estacoda model setup custom --base-url <url> [--provider-id <id>] [--model <id>] [--api-key-env <env>] [--context-window <n>]",
     "  estacoda model setup codex",
     "",

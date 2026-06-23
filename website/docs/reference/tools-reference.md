@@ -481,7 +481,7 @@ Some providers are catalog-known but not runnable:
 
 ### Unavailable tool
 
-The tool is registered but `isAvailable()` returned false. Causes: missing provider key, missing workspace trust, unconfigured backend, unreachable MCP server.
+The tool is registered but `isAvailable()` returned false. Causes: missing required provider key, missing workspace trust, unconfigured backend, unreachable endpoint, or unreachable MCP server.
 
 **Recovery:** Check `estacoda doctor`, `estacoda settings provider`, or `estacoda mcp status`.
 
@@ -497,9 +497,9 @@ The tool call matched a hard safety rule and was rejected regardless of mode or 
 
 **Recovery:** Hard blocks are intentional. The action is unsafe. Reformulate the request or run the operation manually.
 
-### Missing provider key
+### Missing Provider Key
 
-The tool requires an API key or token that is not present in the environment or `.env`.
+The tool requires an API key or token that is not present in the environment or `.env`. No-auth routes, such as the default Local / private endpoint route, do not require a key; for those routes, check endpoint reachability and `baseUrl` instead.
 
 **Recovery:** Set the expected env var or run `estacoda setup` / `estacoda model setup` for the provider.
 
