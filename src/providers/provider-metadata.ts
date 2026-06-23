@@ -173,7 +173,7 @@ const BUILT_IN_METADATA: Record<string, ProviderMetadata> = {
   },
   local: {
     id: "local",
-    displayName: "Local",
+    displayName: "Local / Private",
     catalogKnown: true,
     configurable: true,
     runnable: true,

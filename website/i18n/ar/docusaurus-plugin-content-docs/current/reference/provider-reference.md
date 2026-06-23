@@ -40,7 +40,8 @@ sidebar_position: 5
 | **Anthropic** | `catalog-known` | توجد بياناته الوصفية ومدخلاته في الكاتالوغ، لكنه غير ظاهر كمسار إعداد/اختيار نموذج وغير قابل للتشغيل كمسار لغوي رئيس في هذا الإصدار. |
 | **MiniMax** | `catalog-known` | مسجّل في كاتالوغ النماذج. غير قابل للتشغيل في الإصدار الحالي. |
 | **Nous** | `catalog-known` | مسجّل في كاتالوغ النماذج. غير قابل للتشغيل في الإصدار الحالي. |
-| **Custom (OpenAI-compatible)** | `implemented` | أي معرف مزوّد مع `baseUrl` صريح يعامل كمزوّد OpenAI-compatible. يتطلب `baseUrl`. متغير مفتاح API الافتراضي هو `OPENAI_COMPATIBLE_API_KEY`. |
+| **نقطة نهاية محلية / خاصة** | `implemented` | المزود المدمج `local` لـ Ollama وLM Studio وllama.cpp وvLLM وLiteLLM أو نقطة نهاية محلية/خاصة أخرى متوافقة مع OpenAI. القيمة الافتراضية `http://localhost:11434/v1`، و`authMethod: "none"`، ومفتاح API الاختياري `OPENAI_COMPATIBLE_API_KEY`. |
+| **Custom (OpenAI-compatible)** | `implemented` | أي معرف مزوّد غير مدمج مع `baseUrl` صريح يعامل كمزوّد OpenAI-compatible مخصص. يتطلب `baseUrl`. متغير مفتاح API الافتراضي هو `OPENAI_COMPATIBLE_API_KEY`. استخدمه عندما تحتاج هوية مزود منفصلة بدل `local`. |
 | **unconfigured** | `unsupported` | نائب. غير قابل للتشغيل. |
 
 ### أنماط تنفيذ API

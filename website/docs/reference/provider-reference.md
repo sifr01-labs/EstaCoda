@@ -40,7 +40,8 @@ Labels are cumulative downward. A `live-proven` provider is also `implemented`. 
 | **Anthropic** | `catalog-known` | Metadata and catalog entries exist, but it is not exposed as a setup/model-picker route and is not runnable as a primary LLM route in this build. |
 | **MiniMax** | `catalog-known` | Registered in model catalog. Not runnable in the current build. |
 | **Nous** | `catalog-known` | Registered in model catalog. Not runnable in the current build. |
-| **Custom (OpenAI-compatible)** | `implemented` | Any provider ID with an explicit `baseUrl` is treated as custom OpenAI-compatible. Requires `baseUrl`. Default API key env is `OPENAI_COMPATIBLE_API_KEY`. |
+| **Local / private endpoint** | `implemented` | Built-in `local` provider for Ollama, LM Studio, llama.cpp, vLLM, LiteLLM, or another OpenAI-compatible local/private endpoint. Defaults to `http://localhost:11434/v1`, `authMethod: "none"`, and optional API key env `OPENAI_COMPATIBLE_API_KEY`. |
+| **Custom (OpenAI-compatible)** | `implemented` | Any non-built-in provider ID with an explicit `baseUrl` is treated as custom OpenAI-compatible. Requires `baseUrl`. Default API key env is `OPENAI_COMPATIBLE_API_KEY`. Use this when you need a separate named provider identity instead of `local`. |
 | **unconfigured** | `unsupported` | Placeholder. Not runnable. |
 
 ### API Execution Modes

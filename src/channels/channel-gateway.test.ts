@@ -1818,7 +1818,7 @@ describe("ChannelGateway commands", () => {
 
       expect(result.replyText).toContain("**Model Configuration**");
       expect(result.replyText).toContain("Current model: qwen2.5:3b");
-      expect(result.replyText).toContain("Provider: Local");
+      expect(result.replyText).toContain("Provider: Local / Private");
       expect(result.replyText).toContain("Select a provider:");
       expect(result.replyText).not.toContain("model-select local");
       expect(result.replyText).not.toContain("Direct set: model-select <provider>/<model>");
@@ -1826,7 +1826,7 @@ describe("ChannelGateway commands", () => {
       const actions = adapter.records.at(-1)?.options?.actions;
       expect(actions?.every((row) => row.length <= 2)).toBe(true);
       const labels = actions?.flat().map((action) => action.label) ?? [];
-      expect(labels).toContain("Local");
+      expect(labels).toContain("Local / Private");
       expect(labels.at(-2)).toBe("Clear");
       expect(labels.at(-1)).toBe("Cancel");
       const values = actions?.flat().map((action) => action.value) ?? [];
@@ -1834,18 +1834,18 @@ describe("ChannelGateway commands", () => {
       expect(JSON.stringify(actions)).not.toContain("sk-secret");
       expect(adapter.records.at(-1)?.options?.editMessageId).toBeUndefined();
 
-      const localAction = actions?.flat().find((action) => action.label === "Local");
+      const localAction = actions?.flat().find((action) => action.label === "Local / Private");
       expect(localAction).toBeDefined();
       const providerResult = await gateway.receive(makeTelegramCallbackMessage(localAction?.value ?? "", "81"));
       expect(providerResult.replyText).toContain("**Model Configuration**");
-      expect(providerResult.replyText).toMatch(/Provider: Local \(1-\d+ of \d+\)/u);
+      expect(providerResult.replyText).toMatch(/Provider: Local \/ Private \(1-\d+ of \d+\)/u);
       expect(providerResult.replyText).toContain("Select a model:");
       expect(providerResult.replyText).not.toContain("model-select local/qwen2.5:3b");
       expect(providerResult.replyText).not.toContain("model-select local/phi4:latest");
       const modelLabels = adapter.records.at(-1)?.options?.actions?.flat().map((action) => action.label) ?? [];
       expect(modelLabels).toContain("phi4:latest");
       expect(modelLabels).toContain("qwen2.5:3b");
-      expect(modelLabels).not.toContain("Local");
+      expect(modelLabels).not.toContain("Local / Private");
       expect(modelLabels.at(-2)).toBe("< Back");
       expect(modelLabels.at(-1)).toBe("Cancel");
       expect(adapter.records.at(-1)?.options?.editMessageId).toBe("81");
@@ -2132,7 +2132,7 @@ describe("ChannelGateway commands", () => {
 
       const picker = await gateway.receive(makeMessage("/model"));
       const providerActions = adapter.records.at(-1)?.options?.actions?.flat() ?? [];
-      const localProvider = providerActions.find((action) => action.label === "Local");
+      const localProvider = providerActions.find((action) => action.label === "Local / Private");
       expect(localProvider).toBeDefined();
 
       await gateway.receive(makeTelegramCallbackMessage(localProvider?.value ?? "", "82"));
@@ -2147,7 +2147,7 @@ describe("ChannelGateway commands", () => {
       expect(selected.replyText).toBe([
         "**Model Configuration**",
         "Current model: phi4:latest",
-        "Provider: Local",
+        "Provider: Local / Private",
         "Session override updated."
       ].join("\n"));
       const callbackOverride = await db.getSessionModelOverride(picker.sessionId);
@@ -2220,11 +2220,11 @@ describe("ChannelGateway commands", () => {
 
       await gateway.receive(makeMessage("/model"));
       const localProvider = adapter.records.at(-1)?.options?.actions?.flat()
-        .find((action) => action.label === "Local");
+        .find((action) => action.label === "Local / Private");
       expect(localProvider).toBeDefined();
       const modelPicker = await gateway.receive(makeTelegramCallbackMessage(localProvider?.value ?? "", "83"));
 
-      expect(modelPicker.replyText).toMatch(/Provider: Local \(1-8 of \d+\)/u);
+      expect(modelPicker.replyText).toMatch(/Provider: Local \/ Private \(1-8 of \d+\)/u);
       expect(modelPicker.replyText).toContain("Select a model:");
       expect(modelPicker.replyText).not.toContain("model-select local/");
       const actions = adapter.records.at(-1)?.options?.actions?.flat() ?? [];
@@ -2242,7 +2242,7 @@ describe("ChannelGateway commands", () => {
       const nextAction = actions.find((action) => action.label === "Next >");
       expect(nextAction).toBeDefined();
       const nextPage = await gateway.receive(makeTelegramCallbackMessage(nextAction?.value ?? "", "83", "callback-2"));
-      expect(nextPage.replyText).toMatch(/Provider: Local \(9-16 of \d+\)/u);
+      expect(nextPage.replyText).toMatch(/Provider: Local \/ Private \(9-16 of \d+\)/u);
       expect(adapter.records.at(-1)?.options?.actions?.flat().map((action) => action.label)).toContain("< Prev");
       expect(adapter.records.at(-1)?.options?.editMessageId).toBe("83");
 
@@ -2257,7 +2257,7 @@ describe("ChannelGateway commands", () => {
       expect(selected.replyText).toBe([
         "**Model Configuration**",
         `Current model: ${longModel}`,
-        "Provider: Local",
+        "Provider: Local / Private",
         "Session override updated."
       ].join("\n"));
       expect(adapter.records.at(-1)?.options?.editMessageId).toBe("83");
@@ -2324,10 +2324,10 @@ describe("ChannelGateway commands", () => {
       const picker = await gateway.receive(makeMessage("/model"));
       expect(picker.replyText).toContain("**Model Configuration**");
       const localProvider = adapter.records.at(-1)?.options?.actions?.flat()
-        .find((action) => action.label === "Local");
+        .find((action) => action.label === "Local / Private");
       expect(localProvider).toBeDefined();
       const providerResult = await gateway.receive(makeMessage(localProvider?.value ?? ""));
-      expect(providerResult.replyText).toMatch(/Provider: Local \(1-\d+ of \d+\)/u);
+      expect(providerResult.replyText).toMatch(/Provider: Local \/ Private \(1-\d+ of \d+\)/u);
       const selectQwen = adapter.records.at(-1)?.options?.actions?.flat()
         .find((action) => action.label === "qwen2.5:3b");
       expect(selectQwen).toBeDefined();
@@ -2335,7 +2335,7 @@ describe("ChannelGateway commands", () => {
       expect(selectResult.replyText).toBe([
         "**Model Configuration**",
         "Current model: qwen2.5:3b",
-        "Provider: Local",
+        "Provider: Local / Private",
         "Session override updated."
       ].join("\n"));
 

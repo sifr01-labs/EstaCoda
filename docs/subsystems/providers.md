@@ -5,7 +5,7 @@ description: "Provider architecture: registry, routing, execution, and credentia
 
 # Providers
 
-EstaCoda supports multiple LLM providers with capability-based routing, direct `apiKeyEnv` credential resolution, and auxiliary routes for specialized tasks.
+EstaCoda supports multiple LLM providers with capability-based routing, direct `apiKeyEnv` credential resolution for credentialed routes, `authMethod: "none"` for no-auth routes, and auxiliary routes for specialized tasks.
 
 ## Files
 
@@ -28,7 +28,7 @@ EstaCoda supports multiple LLM providers with capability-based routing, direct `
 | OpenAI | Full pass | `live-proven` |
 | DeepSeek | Full pass | `live-proven` |
 | OpenRouter | Runtime works; exactness partial | `live-proven` |
-| Ollama (local) | Architectural; unproven in this env | `implemented but not live-proven` |
+| Local / private endpoint | Built-in `local` provider for Ollama, LM Studio, llama.cpp, vLLM, LiteLLM, or another OpenAI-compatible endpoint. Default no-auth, optional `OPENAI_COMPATIBLE_API_KEY`. | `implemented but not live-proven` |
 | Google | Configurable | `implemented but not live-proven` |
 | Anthropic | Catalog-known, not runnable | `catalog-known` |
 
@@ -39,7 +39,8 @@ Two layers:
 **1. Registry / Routing**
 - Offline-first model catalog enriched from models.dev metadata
 - Provider registry with route selection by capability and preference
-- Direct credential lookup from provider `apiKeyEnv` to `process.env`
+- Direct credential lookup from provider `apiKeyEnv` to `process.env` for credentialed routes
+- Explicit no-auth handling for routes such as the default `local` provider
 
 **2. Execution**
 - `ProviderExecutor`: streaming token collection, tool-call fragment assembly, fallback handling
@@ -430,6 +431,8 @@ Cloud browser providers are separate from web research providers. Browserbase is
 - Smart approval does not build a legacy provider/model assessor fallback. It requires the resolved `auxiliaryModels.assessor` route, the main route, and a provider executor; missing route/config fails safe to manual approval.
 - `estacoda model setup codex` authenticates through OAuth device code, stores tokens in `~/.estacoda/auth.json`, and configures the `codex/o3` route. Raw OAuth tokens are not printed. Route config remains separate from token storage.
 - Codex OAuth setup lives on the model setup surface, not in the Onboarding Wizard. If the Onboarding Wizard later offers Codex OAuth, it must delegate to that model setup/OAuth boundary.
+- `estacoda model setup local` configures the built-in Local / private endpoint route. It prompts for or accepts a `baseUrl`, keeps no-auth as the default, and stores an optional key as `OPENAI_COMPATIBLE_API_KEY` through the normal profile `.env` boundary. Endpoint/base URL changes must be reviewed and applied through provider-route drafts, not credential-only drafts.
+- `estacoda model setup custom` remains the separate named-provider path for OpenAI-compatible endpoints that should not use the built-in `local` provider ID.
 
 ## Provider Hardening
 

@@ -6,7 +6,7 @@ sidebar_position: 4
 
 # Providers
 
-The provider configuration decides which model EstaCoda uses, how credentials are loaded, and what happens when the primary route fails. There is no hidden provider logic. Every route is inspectable, every credential is env-backed, and every fallback is explicit.
+The provider configuration decides which model EstaCoda uses, how credentials are loaded, and what happens when the primary route fails. There is no hidden provider logic. Every route is inspectable, every credentialed route is env-backed, and every fallback is explicit.
 
 This page explains how provider configuration behaves, not which provider is "best." The best provider is the one you have credentials for, that supports the mode you need, and that passes a live test.
 
@@ -18,7 +18,8 @@ EstaCoda loads provider configuration from the active profile's `config.json`. A
 
 - `provider` — the provider ID
 - `model` — the model name
-- `apiKeyEnv` — the environment variable that holds the API key
+
+Credentialed routes also need `apiKeyEnv`, the environment variable that holds the API key. No-auth routes, such as the default `local` provider path, can omit it.
 
 Example primary route:
 
@@ -32,7 +33,29 @@ Example primary route:
 }
 ```
 
-At runtime, EstaCoda reads `process.env[apiKeyEnv]` and passes it to the provider executor. The key is never stored in `config.json`. If the environment variable is missing, the route is non-runnable and the setup flow will tell you exactly which variable is absent.
+At runtime, EstaCoda reads `process.env[apiKeyEnv]` for credentialed routes and passes it to the provider executor. The key is never stored in `config.json`. If a credentialed route references a missing environment variable, the route is non-runnable and the setup flow will tell you exactly which variable is absent. Routes configured with `authMethod: "none"` do not require credentials.
+
+---
+
+## Local / Private Endpoint
+
+The built-in `local` provider is the simple path for OpenAI-compatible local or private endpoints. It works for tools such as Ollama, LM Studio, llama.cpp server, vLLM, LiteLLM, or an internal OpenAI-compatible gateway when that endpoint exposes the expected `/v1` API shape.
+
+Defaults:
+
+- provider ID: `local`
+- base URL: `http://localhost:11434/v1`
+- auth: no API key required
+- optional API key env: `OPENAI_COMPATIBLE_API_KEY`
+
+```bash
+estacoda model setup local --base-url http://localhost:1234/v1 --model qwen2.5-coder
+estacoda model setup local --base-url http://localhost:1234/v1 --model private-model --api-key <key>
+```
+
+When `--api-key` is provided, setup stores the raw key only in the selected profile `.env` as `OPENAI_COMPATIBLE_API_KEY` and stores only the env-var reference in config. When no key is provided, local remains a no-auth route.
+
+Use `estacoda model setup custom` instead when you need a separate named OpenAI-compatible provider ID rather than the built-in `local` route.
 
 ---
 
@@ -280,7 +303,9 @@ estacoda model setup
 
 ## Failure Modes and Recovery
 
-**Missing API key:** The route is non-runnable. Run `estacoda model setup` or set the environment variable.
+**Missing API key:** A credentialed route is non-runnable. Run `estacoda model setup` or set the environment variable. The default `local` route does not require an API key unless you configured one.
+
+**Local endpoint unreachable:** Check that the local/private OpenAI-compatible server is running, that the configured `baseUrl` includes the `/v1` path when required by the server, and that any optional key is present in the selected profile `.env`.
 
 **Invalid model name:** The catalog does not recognize the model. Check the provider's documentation and update `config.json`.
 

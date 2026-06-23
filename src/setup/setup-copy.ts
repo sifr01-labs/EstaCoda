@@ -221,7 +221,7 @@ export const SETUP_COPY_ENTRIES = [
   copy("onboarding.providers.description.kimi", "Moonshot Kimi models with strong quality/cost balance. Direct API.", "نماذج Kimi من Moonshot بتوازن قوي بين الجودة والتكلفة. واجهة API مباشرة.", [], "provider-selection"),
   copy("onboarding.providers.description.openrouter", "Pay-per-use aggregator for routing across many model providers.", "مجمّع دفع حسب الاستخدام يتيح التوجيه عبر عدة مزوّدين.", [], "provider-selection"),
   copy("onboarding.providers.description.zai", "GLM models with strong quality/cost balance. Direct API.", "نماذج GLM بتوازن قوي بين الجودة والتكلفة. واجهة API مباشرة.", [], "provider-selection"),
-  copy("onboarding.providers.description.local", "Local OpenAI-compatible models running on your machine.", "نماذج محلية متوافقة مع OpenAI تعمل على جهازك.", [], "provider-selection"),
+  copy("onboarding.providers.description.local", "OpenAI-compatible local or private endpoint. API key optional.", "نقطة نهاية محلية أو خاصة متوافقة مع OpenAI. مفتاح API اختياري.", ["OpenAI", "API"], "provider-selection"),
   copy("onboarding.providers.description.codex", "OpenAI Codex CLI model route.", "مسار نموذج OpenAI Codex CLI.", [], "provider-selection"),
   copy("onboarding.providers.description.custom", "Custom OpenAI-compatible provider.", "مزوّد مخصص متوافق مع OpenAI.", [], "provider-selection"),
   copy("onboarding.providers.description.customBaseUrl", "Custom OpenAI-compatible provider at {baseUrl}.", "مزوّد مخصص متوافق مع OpenAI على {baseUrl}.", ["{baseUrl}"], "provider-selection"),

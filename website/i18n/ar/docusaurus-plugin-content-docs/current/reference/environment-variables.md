@@ -30,6 +30,7 @@ sidebar_position: 4
 | `OPENAI_API_KEY` | OpenAI | مثبت عمليًا |
 | `DEEPSEEK_API_KEY` | DeepSeek | مثبت عمليًا |
 | `OPENROUTER_API_KEY` | OpenRouter | مثبت عمليًا |
+| `OPENAI_COMPATIBLE_API_KEY` | نقطة نهاية محلية / خاصة أو مخصصة متوافقة مع OpenAI | اختياري لـ `local`؛ افتراضي لمسارات OpenAI-compatible المخصصة |
 | `GOOGLE_API_KEY` | Google | قابل للإعداد/معروف في الكتالوج |
 | `ANTHROPIC_API_KEY` | Anthropic | معروف في الكتالوج؛ غير قابل للتشغيل كمسار LLM رئيسي |
 

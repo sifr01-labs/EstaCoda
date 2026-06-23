@@ -271,13 +271,13 @@ A tool is available only when:
 
 ## Failure Modes
 
-**Tool unavailable:** The tool is not registered or its configuration is missing. Check `/tools` for availability. Verify provider credentials, browser backend config, or MCP server status.
+**Tool unavailable:** The tool is not registered or its configuration is missing. Check `/tools` for availability. Verify required provider credentials, endpoint reachability, browser backend config, or MCP server status.
 
 **Approval required:** The tool's risk class triggered an approval gate. Respond to the prompt or use `/approvals` to inspect pending grants.
 
 **Denied by hard safety block:** The command matched a hardline pattern. The tool does not execute. Change the command; the block is unconditional.
 
-**Missing provider key:** A provider-backed tool requires credentials that are not configured. Run `estacoda model setup` or set the required env var in the profile `.env`.
+**Missing provider key:** A credentialed provider-backed tool requires credentials that are not configured. Run `estacoda model setup` or set the required env var in the profile `.env`. No-auth provider routes do not need a key.
 
 **Unsupported provider stub:** The provider advertises tool calling but the runtime does not yet implement the tool schema for that provider. Use a different provider or a built-in tool.
 

@@ -91,7 +91,7 @@ Set a session-scoped model override.
 - Session-scoped by default. The override persists with the session and is revalidated when a runtime is created.
 - Stale or invalid overrides are ignored non-fatally; the runtime falls back to the configured primary route.
 - Fallback routes and auxiliary routes are preserved by session switching.
-- The picker only presents ready, runnable model choices. Providers missing credentials are rejected with terminal setup guidance.
+- The picker only presents ready, runnable model choices. Credentialed routes missing required credentials are rejected with terminal setup guidance.
 
 ### `/model --global <provider>/<model>` or `/model set --global <provider>/<model>`
 

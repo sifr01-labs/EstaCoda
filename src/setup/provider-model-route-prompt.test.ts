@@ -466,7 +466,7 @@ describe("selectProviderModelRoute", () => {
     expect(providerCandidateDescription("en", providerCandidate("deepseek", "DeepSeek", 1))).toBe("Cost-efficient models for primary or auxiliary use. Direct API.");
     expect(providerCandidateDescription("en", providerCandidate("google", "Google", 1))).toBe("Gemini models with strong utility and multimodal coverage. Direct API.");
     expect(providerCandidateDescription("en", providerCandidate("kimi", "Kimi", 1))).toBe("Moonshot Kimi models with strong quality/cost balance. Direct API.");
-    expect(providerCandidateDescription("en", providerCandidate("local", "Local", 1))).toBe("Local OpenAI-compatible models running on your machine.");
+    expect(providerCandidateDescription("en", providerCandidate("local", "Local / Private", 1))).toBe("OpenAI-compatible local or private endpoint. API key optional.");
     expect(providerCandidateDescription("en", providerCandidate("openai", "OpenAI", 1))).toBe("Frontier models for high-quality primary reasoning. Direct API.");
     expect(providerCandidateDescription("en", providerCandidate("openrouter", "OpenRouter", 1))).toBe("Pay-per-use aggregator for routing across many model providers.");
     expect(providerCandidateDescription("en", providerCandidate("zai", "Z.AI", 1))).toBe("GLM models with strong quality/cost balance. Direct API.");

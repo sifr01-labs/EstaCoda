@@ -29,7 +29,7 @@ describe("provider-metadata", () => {
       ["google", "Google", "https://generativelanguage.googleapis.com/v1beta/openai", "GOOGLE_API_KEY", true, true, "api_key", "openai_chat_completions"],
       ["openrouter", "OpenRouter", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY", true, true, "api_key", "openai_chat_completions"],
       ["zai", "Z.AI", "https://api.z.ai/api/paas/v4", "ZAI_API_KEY", true, true, "api_key", "openai_chat_completions"],
-      ["local", "Local", "http://localhost:11434/v1", undefined, true, true, "none", "custom_openai_compatible"],
+      ["local", "Local / Private", "http://localhost:11434/v1", undefined, true, true, "none", "custom_openai_compatible"],
       ["anthropic", "Anthropic", "https://api.anthropic.com/v1", "ANTHROPIC_API_KEY", true, false, "api_key", "anthropic_messages"],
       ["codex", "OpenAI Codex", "https://chatgpt.com/backend-api/codex", undefined, true, true, "oauth_device_pkce", "openai_responses"],
       ["minimax", "MiniMax", undefined, undefined, true, false, "api_key", "openai_chat_completions"],

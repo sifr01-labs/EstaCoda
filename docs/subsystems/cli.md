@@ -263,7 +263,7 @@ Fallback routes unchanged.
 
 The notice must not replay the startup dashboard or runtime status fields such as `EstaCoda is ready`, `profile:`, or `tools:`. Plain, CI, and non-TTY output remains unstyled. Standard interactive terminals with styling capability may bold notice labels.
 
-The picker only presents ready, runnable model choices. Providers missing credentials are rejected with terminal setup guidance; active sessions do not collect API keys, OAuth tokens, or other credential values. Session overrides persist with the session and are revalidated when a runtime is created. Stale or invalid overrides are ignored non-fatally and the runtime falls back to the configured primary route. Fallback routes and auxiliary routes are preserved by session switching.
+The picker only presents ready, runnable model choices. Credentialed routes missing required credentials are rejected with terminal setup guidance; active sessions do not collect API keys, OAuth tokens, or other credential values. Session overrides persist with the session and are revalidated when a runtime is created. Stale or invalid overrides are ignored non-fatally and the runtime falls back to the configured primary route. Fallback routes and auxiliary routes are preserved by session switching.
 
 `/model --global <provider>/<model>` and `/model set --global <provider>/<model>` are explicit global forms. They persist the selected route as the profile-level primary model only after the existing local workspace/profile trust path authorizes the write. They do not collect credentials. `/model --global clear` is rejected because clearing the profile primary route has no product-defined meaning. Use `estacoda model setup` for credentials and primary setup, and `estacoda model fallback` for fallback route management.
 
@@ -368,6 +368,8 @@ After existing-user Setup Editor apply and verification, the flow returns with a
 ### Provider And Optional Capability Boundaries
 
 Primary provider/model setup and repair use the shared provider/model flow. That flow applies provider visibility, runnable/configurable gates, and credential boundaries owned by the provider layer.
+
+The built-in `local` provider is displayed and documented as Local / private endpoint. It accepts local or private OpenAI-compatible endpoints such as Ollama, LM Studio, llama.cpp, vLLM, LiteLLM, or internal gateways. Local endpoint setup keeps no-auth as the default and adds a credential-reference draft only when an optional API key is entered. Endpoint/base URL changes are provider-route changes, not credential-only mutations.
 
 Codex OAuth setup is implemented on the model setup surface (`estacoda model setup codex`), not in the Onboarding Wizard. Onboarding Wizard copy must not imply it can complete Codex OAuth until it deliberately delegates to that flow.
 

@@ -133,20 +133,24 @@ estacoda model refresh                  # refresh provider catalog from network
 estacoda model diagnose                 # full diagnostic with executable status
 estacoda model auxiliary status         # auxiliary route readiness
 estacoda model fallback                 # manage fallback chain
-estacoda model setup local              # configure local Ollama/OpenAI-compatible endpoint
-estacoda model setup custom             # configure custom OpenAI-compatible endpoint
+estacoda model setup local [--base-url <url>] [--model <id>] [--api-key <key>] [--context-window <n>]
+                                        # configure Local / private OpenAI-compatible endpoint
+estacoda model setup custom --base-url <url> [--provider-id <id>] [--model <id>] [--api-key-env <env>] [--context-window <n>]
+                                        # configure named custom OpenAI-compatible provider
 estacoda model setup codex              # OAuth device-code setup for Codex
 ```
 
 **State touched:**
 - `~/.estacoda/profiles/<id>/config.json` (primary route, fallback chain, provider registration)
-- `~/.estacoda/profiles/<id>/.env` (env var references)
+- `~/.estacoda/profiles/<id>/.env` (optional raw API key values after reviewed setup)
 - `~/.estacoda/auth.json` (Codex OAuth tokens)
 
 **Profile boundary:** All model config is profile-scoped.
 
 **Behavior:**
 - Bare `estacoda model` opens an interactive picker in setup mode when a TTY is available; otherwise prints an overview.
+- `model setup local` configures the built-in `local` provider for Ollama, LM Studio, llama.cpp, vLLM, or another OpenAI-compatible local/private endpoint. It defaults to `http://localhost:11434/v1`, requires no API key by default, and stores an optional `--api-key` as `OPENAI_COMPATIBLE_API_KEY`.
+- `model setup custom` configures a separate named OpenAI-compatible provider ID with an explicit `baseUrl`; use it when you need more than the built-in `local` provider identity.
 - `model setup codex` authenticates through OAuth device code flow, stores tokens in `~/.estacoda/auth.json`, and configures the `codex/o3` route.
 - `model fallback` manages the ordered fallback chain and is also accessible through the Setup Editor (`edit-fallback-model-route`). `estacoda model set` is deprecated and rejected.
 

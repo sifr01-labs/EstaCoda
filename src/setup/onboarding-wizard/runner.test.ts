@@ -103,7 +103,7 @@ function flowEngine(overrides: {
     listProviderCandidates: async () => overrides.providerCandidates ?? [
       {
         id: "local" as ProviderId,
-        displayName: "Local",
+        displayName: "Local / Private",
         catalogOnly: false,
         configurable: true,
         runnable: true,
@@ -1008,7 +1008,7 @@ describe("runFirstRunSetup", () => {
     const result = await runFirstRunSetup({
       homeDir: tempDir,
       workspaceRoot,
-      prompt: fakePrompt({ "Primary provider": "Local", __prompt: "", __secret: "" }, {}, {}, seenQuestions),
+      prompt: fakePrompt({ "Primary provider": "Local / Private", __prompt: "", __secret: "" }, {}, {}, seenQuestions),
       flowEngine: flowEngine({ credentialAction: "endpoint" }),
     });
     const providerRouteReview = result.reviewManifest.sections["provider-model-network"][0]?.review;
@@ -1042,7 +1042,7 @@ describe("runFirstRunSetup", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        "Primary provider": "Local",
+        "Primary provider": "Local / Private",
         __prompt: ["", "not a url", "http://127.0.0.1:9999/v1"],
         __secret: "",
       }, {}, {}, seenQuestions),
@@ -1419,7 +1419,7 @@ describe("runFirstRunSetup", () => {
     const providers: ProviderCandidate[] = [
       {
         id: "local" as ProviderId,
-        displayName: "Local",
+        displayName: "Local / Private",
         catalogOnly: false,
         configurable: true,
         runnable: true,
@@ -1448,9 +1448,9 @@ describe("runFirstRunSetup", () => {
       flowEngine: flowEngine({ providerCandidates: providers }),
     });
 
-    expect(onboardingOptions["Primary provider"]).toEqual(["Local", "OpenAI", "Back"]);
+    expect(onboardingOptions["Primary provider"]).toEqual(["Local / Private", "OpenAI", "Back"]);
     expect(onboardingDescriptions["Primary provider"]).toEqual([
-      "Local OpenAI-compatible models running on your machine.",
+      "OpenAI-compatible local or private endpoint. API key optional.",
       "Frontier models for high-quality primary reasoning. Direct API.",
       "Return to the previous step.",
     ]);
@@ -1469,7 +1469,7 @@ describe("runFirstRunSetup", () => {
       workspaceRoot,
       prompt: fakePrompt({
         "Workspace trust": ["Trust", "Decide Later"],
-        "Primary provider": ["Back", "Local"],
+        "Primary provider": ["Back", "Local / Private"],
       }),
       flowEngine: flowEngine(),
     });
@@ -1536,7 +1536,7 @@ describe("runFirstRunSetup", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        "Primary provider": ["OpenAI", "Local"],
+        "Primary provider": ["OpenAI", "Local / Private"],
         "Primary model": ["Back", "local-test-model"],
       }),
       flowEngine: flowEngine(),
@@ -1551,7 +1551,7 @@ describe("runFirstRunSetup", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        "Primary provider": ["OpenAI", "Local"],
+        "Primary provider": ["OpenAI", "Local / Private"],
         "Credential handling": "Back",
       }),
       flowEngine: flowEngine(),
@@ -3133,7 +3133,7 @@ describe("runFirstRunSetup", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        "Primary provider": "Local",
+        "Primary provider": "Local / Private",
         __prompt: ["", "https://private.local/v1"],
         __secret: "sk-local-onboarding",
       }),

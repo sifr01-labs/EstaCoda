@@ -30,6 +30,7 @@ Setup flows write secrets there with `0600` permissions. You can also reference 
 | `OPENAI_API_KEY` | OpenAI | Live-proven |
 | `DEEPSEEK_API_KEY` | DeepSeek | Live-proven |
 | `OPENROUTER_API_KEY` | OpenRouter | Live-proven |
+| `OPENAI_COMPATIBLE_API_KEY` | Local / private or custom OpenAI-compatible endpoint | Optional for `local`; default for custom OpenAI-compatible routes |
 | `GOOGLE_API_KEY` | Google | Configurable/catalog-known |
 | `ANTHROPIC_API_KEY` | Anthropic | Catalog-known; not runnable as a primary LLM route |
 
