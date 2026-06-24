@@ -2,12 +2,13 @@
 // Handles Unicode width measurement, wrapping, truncation, frames, and rails.
 // ANSI-aware variants strip escape codes before measuring visible width.
 
-import { stringWidth } from "../papyrus/screen/stringWidth.js";
+import { stringWidth, stripAnsi as stripAnsiForWidth } from "../papyrus/screen/stringWidth.js";
 
-const ANSI_REGEX = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
+const graphemeSegmenter =
+  typeof Intl.Segmenter === "function" ? new Intl.Segmenter(undefined, { granularity: "grapheme" }) : undefined;
 
 export function stripAnsi(text: string): string {
-  return text.replace(ANSI_REGEX, "");
+  return stripAnsiForWidth(text);
 }
 
 export function measureTextWidth(text: string): number {
@@ -66,24 +67,7 @@ export function truncateText(
   if (maxWidth <= ellipsisWidth) return ellipsis.slice(0, maxWidth);
   if (measureTextWidth(text) <= maxWidth) return text;
 
-  let width = 0;
-  let result = "";
-
-  for (const ch of text) {
-    const cp = ch.codePointAt(0) ?? 0;
-    let charWidth = 1;
-    if (isFullWidthChar(cp) || isEmoji(cp)) charWidth = 2;
-    if (isCombiningChar(cp) || isBidiControl(cp)) charWidth = 0;
-
-    if (width + charWidth + ellipsisWidth > maxWidth) {
-      return result + ellipsis;
-    }
-
-    width += charWidth;
-    result += ch;
-  }
-
-  return result;
+  return truncatePreservingControls(text, maxWidth, ellipsis, ellipsisWidth);
 }
 
 export function truncateVisible(
@@ -96,50 +80,7 @@ export function truncateVisible(
   if (maxWidth <= ellipsisWidth) return ellipsis.slice(0, maxWidth);
   if (measureVisibleWidth(text) <= maxWidth) return text;
 
-  let width = 0;
-  let result = "";
-  let state: "normal" | "afterEsc" | "inCsi" = "normal";
-
-  for (const ch of text) {
-    if (state === "afterEsc") {
-      if (ch === "[") {
-        state = "inCsi";
-      } else {
-        state = "normal";
-      }
-      result += ch;
-      continue;
-    }
-
-    if (state === "inCsi") {
-      result += ch;
-      const code = ch.charCodeAt(0);
-      if (code >= 0x40 && code <= 0x7E) {
-        state = "normal";
-      }
-      continue;
-    }
-
-    if (ch === "\x1b") {
-      state = "afterEsc";
-      result += ch;
-      continue;
-    }
-
-    const cp = ch.codePointAt(0) ?? 0;
-    let charWidth = 1;
-    if (isFullWidthChar(cp) || isEmoji(cp)) charWidth = 2;
-    if (isCombiningChar(cp) || isBidiControl(cp)) charWidth = 0;
-
-    if (width + charWidth + ellipsisWidth > maxWidth) {
-      return result + ellipsis;
-    }
-
-    width += charWidth;
-    result += ch;
-  }
-
-  return result;
+  return truncatePreservingControls(text, maxWidth, ellipsis, ellipsisWidth);
 }
 
 export function padVisibleEnd(
@@ -267,45 +208,69 @@ export function renderBeads(
   return filledChar.repeat(clampedFilled) + emptyChar.repeat(total - clampedFilled);
 }
 
-function isCombiningChar(cp: number): boolean {
-  return (
-    (cp >= 0x0300 && cp <= 0x036f) ||
-    (cp >= 0x1ab0 && cp <= 0x1aff) ||
-    (cp >= 0x1dc0 && cp <= 0x1dff) ||
-    (cp >= 0x20d0 && cp <= 0x20ff) ||
-    (cp >= 0xfe20 && cp <= 0xfe2f) ||
-    // Arabic diacritics (tashkeel / harakat)
-    (cp >= 0x064b && cp <= 0x065f) ||
-    (cp === 0x0670)
-  );
+function truncatePreservingControls(
+  text: string,
+  maxWidth: number,
+  ellipsis: string,
+  ellipsisWidth: number
+): string {
+  let width = 0;
+  let result = "";
+  let index = 0;
+
+  while (index < text.length) {
+    const ansi = readAnsiSequence(text, index);
+    if (ansi !== undefined) {
+      result += ansi;
+      index += ansi.length;
+      continue;
+    }
+
+    const grapheme = readGrapheme(text, index);
+    const graphemeWidth = stringWidth(grapheme);
+    if (width + graphemeWidth + ellipsisWidth > maxWidth) {
+      return result + ellipsis;
+    }
+
+    result += grapheme;
+    width += graphemeWidth;
+    index += grapheme.length;
+  }
+
+  return result;
 }
 
-function isBidiControl(cp: number): boolean {
-  return (
-    (cp >= 0x200e && cp <= 0x200f) ||
-    (cp >= 0x202a && cp <= 0x202e) ||
-    (cp >= 0x2066 && cp <= 0x2069)
-  );
+function readAnsiSequence(text: string, index: number): string | undefined {
+  if (text.charCodeAt(index) !== 0x1b) return undefined;
+  const next = text[index + 1];
+  if (next === undefined) return text[index];
+
+  if (next === "[") {
+    for (let cursor = index + 2; cursor < text.length; cursor += 1) {
+      const code = text.charCodeAt(cursor);
+      if (code >= 0x40 && code <= 0x7e) return text.slice(index, cursor + 1);
+    }
+    return text.slice(index);
+  }
+
+  if (next === "]") {
+    for (let cursor = index + 2; cursor < text.length; cursor += 1) {
+      if (text.charCodeAt(cursor) === 0x07) return text.slice(index, cursor + 1);
+      if (text.charCodeAt(cursor) === 0x1b && text[cursor + 1] === "\\") {
+        return text.slice(index, cursor + 2);
+      }
+    }
+    return text.slice(index);
+  }
+
+  return text.slice(index, Math.min(text.length, index + 2));
 }
 
-function isFullWidthChar(cp: number): boolean {
-  return (
-    (cp >= 0x1100 && cp <= 0x115f) ||
-    (cp >= 0x2e80 && cp <= 0x9fff) ||
-    (cp >= 0xa960 && cp <= 0xa97f) ||
-    (cp >= 0xac00 && cp <= 0xd7af) ||
-    (cp >= 0xf900 && cp <= 0xfaff) ||
-    (cp >= 0xfe10 && cp <= 0xfe19) ||
-    (cp >= 0xfe30 && cp <= 0xfe6f) ||
-    (cp >= 0xff00 && cp <= 0xff60) ||
-    (cp >= 0xffe0 && cp <= 0xffe6)
-  );
-}
-
-function isEmoji(cp: number): boolean {
-  return (
-    (cp >= 0x1f300 && cp <= 0x1f9ff) ||
-    (cp >= 0x2600 && cp <= 0x26ff) ||
-    (cp >= 0x2700 && cp <= 0x27bf)
-  );
+function readGrapheme(text: string, index: number): string {
+  const value = text.slice(index);
+  if (graphemeSegmenter !== undefined) {
+    const next = graphemeSegmenter.segment(value)[Symbol.iterator]().next();
+    if (!next.done) return next.value.segment;
+  }
+  return Array.from(value)[0] ?? "";
 }
