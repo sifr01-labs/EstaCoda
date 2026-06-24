@@ -73,8 +73,6 @@ export class RawPromptController {
       throw error;
     }
 
-    this.#input.resume?.();
-
     return await new Promise<RawPromptResult>((resolve, reject) => {
       let state = createLineEditorState();
       let settled = false;
@@ -126,6 +124,7 @@ export class RawPromptController {
       };
 
       this.#input.on("data", onData);
+      this.#input.resume?.();
     });
   }
 }

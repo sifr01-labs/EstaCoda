@@ -388,18 +388,20 @@ Current PR 2 scope:
 
 ## Input Mode Flag
 
-`ESTACODA_INPUT_MODE=readline|raw` is reserved for the raw-input migration
-track. The default remains `readline`; unset, empty, or invalid values keep the
-existing readline prompt path. `ESTACODA_INPUT_MODE=raw` is accepted by the
-configuration parser for later PR 4 commits, but it does not change live input
-behavior yet.
+`ESTACODA_INPUT_MODE=readline|raw` controls the prompt input implementation.
+The default remains `readline`; unset, empty, or invalid values keep the
+existing readline prompt path. `ESTACODA_INPUT_MODE=raw` enables the opt-in raw
+prompt controller MVP.
 
-Current PR 4 Commit 1 scope:
+Current raw input MVP scope:
 
-- Adds only the narrow input-mode parser/resolver.
-- Does not enable raw mode.
-- Does not change readline, paste, history, suspend/resume, or terminal
-  lifecycle behavior.
+- Uses the raw prompt controller for prompt submission only when explicitly
+  selected.
+- Keeps autocomplete, shell history, clipboard/image paste, Vim mode, and
+  mouse/focus handling deferred.
+- Keeps renderer rollout and runtime/provider/session behavior unchanged.
+- Escape hatch: unset `ESTACODA_INPUT_MODE` or set
+  `ESTACODA_INPUT_MODE=readline`.
 
 ---
 

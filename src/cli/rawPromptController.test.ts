@@ -19,6 +19,18 @@ class FakeInput extends EventEmitter implements RawPromptInput {
   }
 }
 
+class BufferedResumeInput extends FakeInput {
+  readonly #buffered: string;
+
+  constructor(buffered: string) {
+    super();
+    this.#buffered = buffered;
+    this.resume = vi.fn(() => {
+      this.send(this.#buffered);
+    });
+  }
+}
+
 function fakeOutput(): RawPromptOutput & { writes: string[] } {
   const writes: string[] = [];
   return {
@@ -133,6 +145,17 @@ describe("raw prompt controller", () => {
 
     expect(result).toEqual({ type: "submit", text: "hello" });
     expect(output.writes).toEqual(["> ", "\n"]);
+    expect(lifecycle.calls).toEqual(["start", "stop"]);
+  });
+
+  it("captures input that becomes readable immediately on resume", async () => {
+    const input = new BufferedResumeInput("buffered\r");
+    const output = fakeOutput();
+    const lifecycle = fakeLifecycle();
+    const controller = new RawPromptController({ input, output, lifecycle: lifecycle.lifecycle });
+
+    await expect(controller.read("> ")).resolves.toEqual({ type: "submit", text: "buffered" });
+    expect(input.resume).toHaveBeenCalledOnce();
     expect(lifecycle.calls).toEqual(["start", "stop"]);
   });
 
