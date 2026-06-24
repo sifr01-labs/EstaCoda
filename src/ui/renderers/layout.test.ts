@@ -102,6 +102,12 @@ describe("measureVisibleWidth", () => {
   it("measures Arabic text through the visible width helper", () => {
     expect(measureVisibleWidth("\x1b[32mالعربية\x1b[0m")).toBe(7);
   });
+
+  it("keeps mixed-token status-rail-like strings deterministic", () => {
+    const rail = "\u2067النموذج\u2069: \x1b[36m/model\x1b[0m ❤️ 表 ok";
+    expect(measureVisibleWidth(rail)).toBe(24);
+    expect(measureVisibleWidth(rail)).toBe(measureVisibleWidth(rail));
+  });
 });
 
 describe("wrapText", () => {
@@ -145,6 +151,14 @@ describe("wrapText", () => {
     expect(lines[0]).toContain("\x1b[31m");
     expect(lines[0]).toContain("\x1b[0m");
   });
+
+  it("wraps mixed CJK and ASCII using visible cell width", () => {
+    const lines = wrapText("表abc 表de", 5);
+    expect(lines).toEqual(["表abc", "表de"]);
+    for (const line of lines) {
+      expect(measureVisibleWidth(line)).toBeLessThanOrEqual(5);
+    }
+  });
 });
 
 describe("truncateText", () => {
@@ -167,6 +181,12 @@ describe("truncateText", () => {
   it("handles full-width chars in truncation", () => {
     const text = "中文测试"; // 4 CJK chars = 8 width
     expect(truncateText(text, 6)).toBe("中..."); // 2 + 3 = 5, fits in 6
+  });
+
+  it("preserves CJK text at exact visible width boundaries", () => {
+    expect(truncateText("中文", 4)).toBe("中文");
+    expect(truncateText("中文a", 5)).toBe("中文a");
+    expect(truncateText("中文a", 4)).toBe("...");
   });
 
   it("handles emoji in truncation", () => {
@@ -194,6 +214,13 @@ describe("truncateText", () => {
     const truncated = truncateText("\u2067العربية\u2069 token", 10);
     expect(truncated).toBe("\u2067العربية\u2069...");
     expect(measureTextWidth(truncated)).toBeLessThanOrEqual(10);
+  });
+
+  it("truncates mixed Arabic, English, and emoji deterministically", () => {
+    const text = "\u2067مرحبا\u2069 status ❤️ running";
+    const truncated = truncateText(text, 15);
+    expect(truncated).toBe("\u2067مرحبا\u2069 status...");
+    expect(measureTextWidth(truncated)).toBeLessThanOrEqual(15);
   });
 
   it("returns empty string for maxWidth 0", () => {
@@ -244,6 +271,14 @@ describe("truncateVisible", () => {
     expect(truncated).toBe("\x1b[32m中文...");
     expect(stripAnsi(truncated)).toBe("中文...");
     expect(measureVisibleWidth(truncated)).toBeLessThanOrEqual(7);
+  });
+
+  it("preserves complete OSC hyperlink sequences while truncating visible text", () => {
+    const link = "\x1b]8;;https://example.com\x07click here\x1b]8;;\x07";
+    const truncated = truncateVisible(link, 8);
+    expect(truncated).toBe("\x1b]8;;https://example.com\x07click...");
+    expect(stripAnsi(truncated)).toBe("click...");
+    expect(measureVisibleWidth(truncated)).toBeLessThanOrEqual(8);
   });
 
   it("keeps mixed Arabic, LTR, ANSI, and emoji tokens within visible width", () => {

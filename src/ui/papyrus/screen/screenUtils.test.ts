@@ -36,6 +36,27 @@ describe("Papyrus screen string width utilities", () => {
     expect(stringWidth("\u2067العربية\u2069")).toBe(7);
     expect(stringWidth("\u2066/model\u2069")).toBe(6);
   });
+
+  it("keeps Arabic and Latin text stable with styling and isolates", () => {
+    const text = "\u2067مرحبا\u2069 \x1b[36m/model\x1b[0m";
+    expect(stringWidth(text)).toBe(12);
+    expect(stringWidth(text)).toBe(stringWidth(text));
+  });
+
+  it("measures multi-codepoint emoji clusters as one emoji cell", () => {
+    expect(stringWidth("👨‍👩‍👧‍👦")).toBe(2);
+    expect(stringWidth("\x1b[35m👩🏽‍💻\x1b[0m")).toBe(2);
+  });
+
+  it("handles mixed CJK, ASCII, and ANSI styling", () => {
+    expect(stringWidth("表abc")).toBe(5);
+    expect(stringWidth("\x1b[32m表abc\x1b[0m")).toBe(5);
+  });
+
+  it("measures combining-mark clusters with surrounding text", () => {
+    expect(stringWidth("Cafe\u0301")).toBe(4);
+    expect(stringWidth("\x1b[33me\u0301\x1b[0m ok")).toBe(4);
+  });
 });
 
 describe("Papyrus line width cache", () => {
