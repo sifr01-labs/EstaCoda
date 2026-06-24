@@ -366,12 +366,25 @@ Idle placeholder copy is not a separate shortcut rail and must not include a pro
 
 `ESTACODA_UI_RENDERER=legacy|papyrus` controls the first Papyrus renderer
 rollout seam. The default remains `legacy`; unset, empty, or invalid values keep
-the existing bottom chrome path.
+the existing bottom chrome path. To return to the legacy renderer, unset the
+environment variable or set `ESTACODA_UI_RENDERER=legacy`.
 
 `ESTACODA_UI_RENDERER=papyrus` opts the bottom chrome/status rail surface into
-the Papyrus surface controller. This is not a full renderer replacement:
-transcript rendering, width/wrap behavior, spinners outside the status rail
-seam, and readline/raw input remain on the existing implementation.
+the Papyrus surface controller. This is not a full renderer replacement.
+
+Current PR 2 scope:
+
+- Bottom chrome/status rail rendering can use Papyrus only when explicitly
+  opted in with `ESTACODA_UI_RENDERER=papyrus`.
+- Raw input remains readline-owned.
+- Transcript rendering remains on the legacy renderer.
+- Width and wrap migration is deferred to PR 3.
+- Spinner/tool rail coverage is limited to the existing status-bearing bottom
+  chrome path; spinner-only and unrelated tool rail surfaces are not broadly
+  migrated here.
+- Until a later full-surface integration exists, the Papyrus bottom-chrome path
+  extracts managed-region-compatible rows instead of writing full-screen
+  absolute diff output.
 
 ---
 
