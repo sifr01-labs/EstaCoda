@@ -313,9 +313,13 @@ export class BottomChromeController {
       sequence += `\x1b[${Math.abs(lineDelta)}M`;
     }
 
-    for (let index = 0; index < nextManagedLines.length; index += 1) {
-      sequence += `\x1b[2K\r${nextManagedLines[index]}`;
-      if (index < nextManagedLines.length - 1) {
+    const renderedManagedLines = this.#shouldUsePapyrusChrome()
+      ? this.#renderChromeRowsWithPapyrus(nextManagedLines)
+      : nextManagedLines;
+
+    for (let index = 0; index < renderedManagedLines.length; index += 1) {
+      sequence += `\x1b[2K\r${renderedManagedLines[index]}`;
+      if (index < renderedManagedLines.length - 1) {
         sequence += "\x1b[1B";
       }
     }

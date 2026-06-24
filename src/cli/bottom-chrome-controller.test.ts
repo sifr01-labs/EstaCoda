@@ -66,7 +66,9 @@ function slashMenu() {
   });
 }
 
-function fakePapyrusFactory() {
+function fakePapyrusFactory(options: {
+  renderRows?: (frame: PapyrusSurfaceFrame) => readonly string[];
+} = {}) {
   const calls: {
     created: Array<{ rendererMode: "legacy" | "papyrus"; size: { width: number; height: number } }>;
     initialized: Array<{ width: number; height: number }>;
@@ -105,7 +107,7 @@ function fakePapyrusFactory() {
             frame: undefined as never,
             diff: [],
             output: "",
-            rows: frame.surfaces.map((surface) => surface.text),
+            rows: options.renderRows?.(frame) ?? frame.surfaces.map((surface) => surface.text),
           };
         },
         reset: () => {
@@ -253,11 +255,15 @@ describe("BottomChromeController", () => {
 
   it("clears stale Papyrus bottom chrome rows when the managed region shrinks", () => {
     const { chunks, stream } = mockOutput();
+    const papyrus = fakePapyrusFactory({
+      renderRows: (frame) => frame.surfaces.map((surface) => `papyrus:${surface.text}`),
+    });
     const ctrl = new BottomChromeController({
       output: stream,
       capabilities: makeCaps(),
       renderViewModel,
       rendererMode: "papyrus",
+      createPapyrusSurfaceControllerForMode: papyrus.factory,
     });
 
     ctrl.updateManagedRegionAboveReadline({
@@ -274,11 +280,70 @@ describe("BottomChromeController", () => {
     });
 
     const rendered = chunks.join("");
+    expect(papyrus.calls.rendered).toHaveLength(2);
+    expect(papyrus.calls.rendered[1]?.surfaces.map((surface) => surface.text)).toEqual([
+      "status | idle",
+      "────────────────────────────────────────",
+    ]);
     expect(rendered).toContain("\x1b[5M");
-    expect(rendered).toContain("status | idle");
+    expect(rendered).toContain("papyrus:status | idle");
     expect(rendered).not.toContain("/help Show command help");
     expect(rendered).not.toContain("paste preview");
     expectManagedRegionSafeOutput(rendered);
+  });
+
+  it("routes readline-managed status chrome through Papyrus in papyrus mode", () => {
+    const { chunks, stream } = mockOutput();
+    const papyrus = fakePapyrusFactory({
+      renderRows: (frame) => frame.surfaces.map((surface) => `papyrus:${surface.text}`),
+    });
+    const ctrl = new BottomChromeController({
+      output: stream,
+      capabilities: makeCaps(),
+      renderViewModel,
+      rendererMode: "papyrus",
+      createPapyrusSurfaceControllerForMode: papyrus.factory,
+    });
+
+    ctrl.updateManagedRegionAboveReadline({
+      state: { statusRail: status("status") },
+      transientLines: [],
+      promptLineCount: 1,
+    });
+
+    const rendered = chunks.join("");
+    expect(papyrus.calls.created).toHaveLength(1);
+    expect(papyrus.calls.rendered).toHaveLength(1);
+    expect(papyrus.calls.rendered[0]?.surfaces.map((surface) => surface.text)).toEqual([
+      "status | idle",
+      "────────────────────────────────────────",
+    ]);
+    expect(rendered).toContain("papyrus:status | idle");
+    expect(rendered).toContain(`papyrus:${"─".repeat(40)}`);
+    expectManagedRegionSafeOutput(rendered);
+  });
+
+  it("keeps legacy readline-managed status chrome unchanged without constructing Papyrus", () => {
+    const { chunks, stream } = mockOutput();
+    const papyrus = fakePapyrusFactory();
+    const ctrl = new BottomChromeController({
+      output: stream,
+      capabilities: makeCaps(),
+      renderViewModel,
+      rendererMode: "legacy",
+      createPapyrusSurfaceControllerForMode: papyrus.factory,
+    });
+
+    ctrl.updateManagedRegionAboveReadline({
+      state: { statusRail: status("status") },
+      transientLines: [],
+      promptLineCount: 1,
+    });
+
+    expect(papyrus.calls.created).toEqual([]);
+    expect(chunks).toEqual([
+      `\x1b7\x1b[2L\x1b[2K\rstatus | idle\x1b[1B\x1b[2K\r${"─".repeat(40)}\x1b8\x1b[2B`,
+    ]);
   });
 
   it("does not route spinner-only chrome through Papyrus", () => {
