@@ -56,7 +56,10 @@ describe("Papyrus substrate boundaries", () => {
     expect(read("index.ts").trim()).toBe("export {};");
     expect(read("input/index.ts").trim()).toBe("export {};");
     expect(exportedModules(read("widgets/index.ts"))).toEqual([
+      "./dialogModel.js",
+      "./multiSelectModel.js",
       "./optionMap.js",
+      "./overlayStack.js",
       "./selectKeymap.js",
       "./selectModel.js",
       "./selectRenderRows.js",
