@@ -8,6 +8,11 @@ import type { ApprovalPromptAdapter } from "./approval-prompt-adapter.js";
 import { APPROVAL_WIDGET_MODE_ENV_VAR } from "./approval-widget-mode.js";
 import { UI_INPUT_MODE_ENV_VAR } from "../ui/input-mode.js";
 import { UI_RENDERER_ENV_VAR } from "../ui/renderer-mode.js";
+import { SHELL_HISTORY_MODE_ENV_VAR } from "./shell-history-mode.js";
+import { CLIPBOARD_MODE_ENV_VAR } from "./clipboard-mode.js";
+import { MCP_SUGGESTIONS_MODE_ENV_VAR } from "./mcp-suggestions-mode.js";
+import { SKILL_SUGGESTIONS_MODE_ENV_VAR } from "./skill-suggestions-mode.js";
+import { INPUT_KEYMAP_MODE_ENV_VAR } from "./input-keymap-mode.js";
 import type { PromptOptions } from "./readline-prompt.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import type { Runtime } from "../runtime/create-runtime.js";
@@ -377,6 +382,62 @@ async function runApprovalPromptScenario(
 }
 
 describe("runSessionLoop — user prompt rail behavior", () => {
+  it("reports optional Papyrus capabilities as disabled by default in /status", async () => {
+    const outputChunks: string[] = [];
+
+    await handleSlashCommand({
+      text: "/status",
+      runtime: createMockRuntime(),
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+      } as NodeJS.WritableStream,
+      renderer: { render: renderPlain },
+      env: {},
+    });
+
+    const rendered = outputChunks.join("");
+    expect(rendered).toContain("Papyrus optional capabilities");
+    expect(rendered).toContain("shell history suggestions: off");
+    expect(rendered).toContain("clipboard reads: off");
+    expect(rendered).toContain("MCP resource suggestions: off");
+    expect(rendered).toContain("skill suggestions: off");
+    expect(rendered).toContain("Vim keymap: off");
+  });
+
+  it("reports explicitly enabled optional Papyrus capabilities in /status diagnostics", async () => {
+    const outputChunks: string[] = [];
+
+    await handleSlashCommand({
+      text: "/status",
+      runtime: createMockRuntime(),
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+      } as NodeJS.WritableStream,
+      renderer: { render: renderPlain },
+      env: {
+        [SHELL_HISTORY_MODE_ENV_VAR]: "1",
+        [CLIPBOARD_MODE_ENV_VAR]: "true",
+        [MCP_SUGGESTIONS_MODE_ENV_VAR]: "on",
+        [SKILL_SUGGESTIONS_MODE_ENV_VAR]: "1",
+        [INPUT_KEYMAP_MODE_ENV_VAR]: "vim",
+      },
+    });
+
+    const rendered = outputChunks.join("");
+    expect(rendered).toContain("Papyrus optional capabilities");
+    expect(rendered).toContain("shell history suggestions: on");
+    expect(rendered).toContain("clipboard reads: on");
+    expect(rendered).toContain("MCP resource suggestions: on");
+    expect(rendered).toContain("skill suggestions: on");
+    expect(rendered).toContain("Vim keymap: on");
+  });
+
   it("renders /skills as a skills-only table", async () => {
     const outputChunks: string[] = [];
     const runtime = createMockRuntime({

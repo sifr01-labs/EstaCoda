@@ -39,6 +39,7 @@ import { resolveCoreSessionApprovalWidgetMode } from "./approval-widget-mode.js"
 import {
   buildActiveTurnSpinnerViewModel,
   buildAssistantResponseViewModel,
+  buildKeyValueBlockViewModel,
   buildStartupDashboardViewModel,
   buildSessionStatusRailViewModel,
   buildUserPromptRailViewModel,
@@ -48,12 +49,17 @@ import { createSessionRenderer, type SessionRenderer } from "./session-renderer.
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
 import { PromptChromeController } from "./prompt-chrome-controller.js";
 import { BottomChromeController, type BottomChromeState } from "./bottom-chrome-controller.js";
-import type { SessionStatusRailViewModel, ShortcutHintRailViewModel, SlashMenuViewModel, ToolActivityRailEvent, ViewModel } from "../contracts/view-model.js";
+import type { SessionStatusRailViewModel, ShortcutHintRailViewModel, SlashMenuViewModel, StatusViewModel, ToolActivityRailEvent, ViewModel } from "../contracts/view-model.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import { centerVisibleBlock, measureVisibleWidth, truncateVisible, wrapText } from "../ui/renderers/layout.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
 import { resolveUiRendererMode } from "../ui/renderer-mode.js";
 import { resolveCoreSessionUiInputMode } from "../ui/input-mode.js";
+import { resolveShellHistoryMode } from "./shell-history-mode.js";
+import { resolveClipboardMode } from "./clipboard-mode.js";
+import { resolveMcpSuggestionsMode } from "./mcp-suggestions-mode.js";
+import { resolveSkillSuggestionsMode } from "./skill-suggestions-mode.js";
+import { resolveInputKeymapMode } from "./input-keymap-mode.js";
 import { promptUiContextForLocale } from "../contracts/ui.js";
 import { resolveHomeDir } from "../config/home-dir.js";
 import { resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
@@ -656,6 +662,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           switchRuntime: options.switchRuntime,
           modelSwitchContext: options.modelSwitchContext,
           prompt,
+          env: options.env,
           workspaceRoot: options.workspaceRoot,
           homeDir: options.homeDir,
           cronRuntimeFactory: options.cronRuntimeFactory,
@@ -1522,6 +1529,7 @@ export async function handleSlashCommand(input: {
   switchRuntime?: (sessionId: string) => Promise<Runtime>;
   modelSwitchContext?: () => Promise<ModelSwitchContext>;
   prompt?: Prompt;
+  env?: Record<string, string | undefined>;
   output: NodeJS.WritableStream;
   renderer: {
     render(viewModel: import("../contracts/view-model.js").ViewModel): string;
@@ -1544,7 +1552,10 @@ export async function handleSlashCommand(input: {
       input.output.write(`${input.renderer.render(buildSessionHelpViewModel())}\n\n`);
       return false;
     case "status":
-      input.output.write(`${input.renderer.render(input.runtime.getStatus())}\n\n`);
+      input.output.write(`${input.renderer.render(withOptionalPapyrusCapabilityDiagnostics(
+        input.runtime.getStatus(),
+        input.env
+      ))}\n\n`);
       return false;
     case "model": {
       const modelCommand = parseSessionModelCommand(args);
@@ -1872,6 +1883,27 @@ export async function handleSlashCommand(input: {
       input.output.write(`Unknown command: /${command}\nUse /help to see available commands.\n\n`);
       return false;
   }
+}
+
+function withOptionalPapyrusCapabilityDiagnostics(
+  status: StatusViewModel,
+  env?: Record<string, string | undefined>
+): StatusViewModel {
+  const optionalCapabilities = buildKeyValueBlockViewModel({
+    title: "Papyrus optional capabilities",
+    entries: [
+      { key: "shell history suggestions", value: resolveShellHistoryMode({ env }) },
+      { key: "clipboard reads", value: resolveClipboardMode({ env }) },
+      { key: "MCP resource suggestions", value: resolveMcpSuggestionsMode({ env }) },
+      { key: "skill suggestions", value: resolveSkillSuggestionsMode({ env }) },
+      { key: "Vim keymap", value: resolveInputKeymapMode({ env }) === "vim" ? "on" : "off" },
+    ],
+  });
+
+  return {
+    ...status,
+    sections: [...(status.sections ?? []), optionalCapabilities],
+  };
 }
 
 type HandleSlashCommandInput = Parameters<typeof handleSlashCommand>[0];
