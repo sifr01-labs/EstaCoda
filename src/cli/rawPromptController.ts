@@ -1,7 +1,7 @@
 import type { Readable, Writable } from "node:stream";
 import { promptUiContextForLocale, type PromptUiContext } from "../contracts/ui.js";
 import { commandRegistry } from "./command-registry.js";
-import { parseKeypress } from "../ui/input/parseKeypress.js";
+import { parseKeypress, type ParsedKeypress } from "../ui/input/parseKeypress.js";
 import { applyKeypress, createLineEditorState, type LineEditorState } from "../ui/input/lineEditor.js";
 import { createTerminalLifecycle, type TerminalLifecycle } from "../ui/input/terminalLifecycle.js";
 import type { UiInputMode } from "../ui/input-mode.js";
@@ -10,7 +10,10 @@ import {
   applyTypeaheadResult,
   createTypeaheadControllerState,
   dismissTypeahead,
+  focusNextSuggestion,
+  focusPreviousSuggestion,
   requestTypeaheadSuggestions,
+  selectFocusedSuggestion,
   type TypeaheadState,
 } from "../ui/papyrus/input/typeaheadController.js";
 import {
@@ -132,7 +135,10 @@ export class RawPromptController {
 
       const dismissCurrentTypeahead = () => {
         if (this.#typeahead === undefined) return;
-        typeaheadState = dismissTypeahead(typeaheadState).state;
+        typeaheadState = dismissTypeahead({
+          ...typeaheadState,
+          generation: typeaheadState.generation + 1,
+        }).state;
         notifyTypeahead();
       };
 
@@ -161,6 +167,59 @@ export class RawPromptController {
           notifyTypeahead();
           render();
         });
+      };
+
+      const isTypeaheadActive = () => {
+        return this.#typeahead !== undefined
+          && typeaheadState.status !== "closed"
+          && typeaheadState.status !== "dismissed"
+          && typeaheadState.status !== "canceled";
+      };
+
+      const acceptFocusedTypeaheadSuggestion = () => {
+        const selected = selectFocusedSuggestion(typeaheadState);
+        if (selected.intent?.type !== "replace") return false;
+        const nextState = createLineEditorState(
+          selected.intent.nextInput,
+          selected.intent.replacementRange.start + selected.intent.replacementText.length
+        );
+        if (nextState.text !== state.text) {
+          options?.onInputChange?.(nextState.text);
+        }
+        state = nextState;
+        closeTypeahead();
+        render();
+        return true;
+      };
+
+      const handleTypeaheadKeypress = (event: ParsedKeypress) => {
+        if (this.#typeahead === undefined || event.type !== "key" || !isTypeaheadActive()) return false;
+
+        if (event.key === "escape") {
+          dismissCurrentTypeahead();
+          render();
+          return true;
+        }
+
+        if (event.key === "up") {
+          typeaheadState = focusPreviousSuggestion(typeaheadState);
+          notifyTypeahead();
+          render();
+          return true;
+        }
+
+        if (event.key === "down") {
+          typeaheadState = focusNextSuggestion(typeaheadState);
+          notifyTypeahead();
+          render();
+          return true;
+        }
+
+        if (event.key === "enter" || event.key === "tab") {
+          return acceptFocusedTypeaheadSuggestion();
+        }
+
+        return false;
       };
 
       const cleanup = () => {
@@ -199,6 +258,7 @@ export class RawPromptController {
         if (settled) return;
         const text = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
         for (const event of parseKeypress(text)) {
+          if (handleTypeaheadKeypress(event)) continue;
           const result = applyKeypress(state, event);
           updateState(result.state);
           if (result.intent?.type === "submit") {
