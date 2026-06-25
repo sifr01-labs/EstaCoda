@@ -66,6 +66,20 @@ describe("Papyrus scroll pane model", () => {
     expect(getVisibleScrollPaneRows(state)).toEqual(rows);
   });
 
+  it("keeps resize behavior safe for zero and negative viewport heights", () => {
+    let state = createScrollPaneState(rows, { viewportHeight: 3, scrollOffset: 2 });
+
+    state = resizeScrollPaneViewport(state, 0);
+    expect(state.viewportHeight).toBe(0);
+    expect(state.scrollOffset).toBe(2);
+    expect(getVisibleScrollPaneRows(state)).toEqual([]);
+
+    state = resizeScrollPaneViewport(state, -10);
+    expect(state.viewportHeight).toBe(0);
+    expect(state.scrollOffset).toBe(2);
+    expect(getVisibleScrollPaneRows(state)).toEqual([]);
+  });
+
   it("sticks to bottom on append only when configured and already at bottom", () => {
     const sticky = createScrollPaneState(["a", "b", "c"], {
       viewportHeight: 2,

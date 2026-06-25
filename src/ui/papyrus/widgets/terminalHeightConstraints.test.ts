@@ -52,6 +52,29 @@ describe("Papyrus terminal height constraints", () => {
     });
   });
 
+  it("reserves fixed rows first when they exhaust the available height", () => {
+    const result = calculateTerminalHeightConstraints({
+      availableHeight: 2,
+      searchRows: 1,
+      hintRows: 1,
+      statusRows: 1,
+      listMinRows: 2,
+      previewEnabled: true,
+      previewMinRows: 1,
+    });
+
+    expect(result).toMatchObject({
+      searchRows: 1,
+      hintRows: 1,
+      statusRows: 0,
+      contentRows: 0,
+      listRows: 0,
+      previewRows: 0,
+      usedRows: 2,
+      overflowRows: 0,
+    });
+  });
+
   it("handles zero and negative heights without producing negative rows", () => {
     for (const height of [0, -10, Number.NEGATIVE_INFINITY]) {
       const result = calculateTerminalHeightConstraints({

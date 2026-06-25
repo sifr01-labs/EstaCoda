@@ -6,6 +6,7 @@ import {
   createFuzzyPickerState,
   createPreviewPaneState,
   getVisiblePreviewRows,
+  moveFuzzyPickerFocus,
   previewPaneForFocusedFuzzyItem,
   previewPaneHasContent,
   resizePreviewPaneViewport,
@@ -111,6 +112,45 @@ describe("Papyrus preview pane model", () => {
     expect(preview.title).toBe("LICENSE");
     expect(preview.status).toBe("plain text");
     expect(getVisiblePreviewRows(preview)).toEqual(["MIT"]);
+  });
+
+  it("returns safe empty preview when focused item has no preview data", () => {
+    const picker = createFuzzyPickerState([
+      { value: "readme", label: "README.md" },
+      { value: "missing", label: "missing.txt" },
+    ], { focusedResultIndex: 1 });
+    const preview = previewPaneForFocusedFuzzyItem(
+      picker,
+      new Map([["readme", { title: "README.md", rows: ["Read me"] }]]),
+      { viewportHeight: 2 }
+    );
+
+    expect(preview.title).toBeUndefined();
+    expect(preview.rows).toEqual([]);
+    expect(buildPreviewPaneRenderRows(preview)).toEqual([{ kind: "empty", text: "No preview" }]);
+  });
+
+  it("rebuilds preview content safely when fuzzy focus changes", () => {
+    const picker = createFuzzyPickerState([
+      { value: "short", label: "short.txt" },
+      { value: "long", label: "long.txt" },
+    ], { viewportHeight: 2 });
+    const previews = new Map([
+      ["short", { title: "short.txt", rows: ["one"] }],
+      ["long", { title: "long.txt", rows: ["alpha", "bravo", "charlie"] }],
+    ]);
+
+    const shortPreview = previewPaneForFocusedFuzzyItem(picker, previews, { viewportHeight: 2 });
+    const longPreview = previewPaneForFocusedFuzzyItem(moveFuzzyPickerFocus(picker, 1), previews, {
+      viewportHeight: 2,
+      scrollOffset: 99,
+    });
+
+    expect(shortPreview.title).toBe("short.txt");
+    expect(getVisiblePreviewRows(shortPreview)).toEqual(["one"]);
+    expect(longPreview.title).toBe("long.txt");
+    expect(longPreview.scroll.scrollOffset).toBe(1);
+    expect(getVisiblePreviewRows(longPreview)).toEqual(["bravo", "charlie"]);
   });
 
   it("keeps implementation free of external coupling and terminal writes", async () => {

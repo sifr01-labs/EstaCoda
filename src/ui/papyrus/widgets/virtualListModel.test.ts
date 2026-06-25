@@ -128,6 +128,22 @@ describe("Papyrus virtual list model", () => {
     expect(getVirtualListRange(state)).toEqual({ start: 2, end: 10, count: 8 });
   });
 
+  it("keeps focused item and range safe when resized to zero height", () => {
+    const state = resizeVirtualListViewport(
+      createVirtualListState({
+        itemCount: 10,
+        viewportHeight: 3,
+        focusedIndex: 5,
+      }),
+      0
+    );
+
+    expect(state.focusedIndex).toBe(5);
+    expect(state.viewportHeight).toBe(0);
+    expect(state.scrollOffset).toBe(3);
+    expect(getVirtualListRange(state)).toEqual({ start: 0, end: 0, count: 0 });
+  });
+
   it("clamps explicit focus requests and non-finite movement", () => {
     let state = createVirtualListState({ itemCount: 4, viewportHeight: 2 });
 

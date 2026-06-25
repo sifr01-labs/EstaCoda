@@ -92,6 +92,16 @@ describe("Papyrus fuzzy picker model", () => {
     expect(buildFuzzyPickerRenderRows(state)[0]).toMatchObject({ kind: "empty", query: "zzzz" });
   });
 
+  it("restores safe focus when an empty query follows an empty result set", () => {
+    let state = createFuzzyPickerState(items, { query: "zzzz", viewportHeight: 2 });
+    expect(state.focusedResultIndex).toBeUndefined();
+
+    state = updateFuzzyPickerQuery(state, "");
+    expect(state.focusedResultIndex).toBe(0);
+    expect(focusedFuzzyPickerResult(state)?.item.value).toBe("alpha");
+    expect(state.viewport.scrollOffset).toBe(0);
+  });
+
   it("moves focus up, down, page, home, and end while preserving viewport", () => {
     let state = createFuzzyPickerState(items, { query: "", viewportHeight: 2 });
 
