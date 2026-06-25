@@ -1,12 +1,35 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
-import { createPromptForInputMode, createRawPrompt, RawPromptController, type RawPromptInput, type RawPromptOutput } from "./rawPromptController.js";
+import { createPromptForInputMode, createRawPrompt, RawPromptController, type RawPromptControllerOptions, type RawPromptInput, type RawPromptOutput } from "./rawPromptController.js";
 import { RawPromptOverlayHost } from "./rawPromptRenderLoop.js";
 import type { TerminalLifecycle } from "../ui/input/terminalLifecycle.js";
+import {
+  SLASH_COMMAND_SUGGESTION_PROVIDER_ID,
+} from "../ui/papyrus/input/providers/slashCommandProvider.js";
+import {
+  createSuggestionTokenContext,
+  normalizeSuggestionProviderResult,
+  type SuggestionItem,
+  type SuggestionProvider,
+  type SuggestionProviderResult,
+} from "../ui/papyrus/input/suggestionTypes.js";
+import type { TypeaheadState } from "../ui/papyrus/input/typeaheadController.js";
+import type {
+  TypeaheadProviderRouter,
+  TypeaheadProviderSelection,
+} from "../ui/papyrus/input/typeaheadProviderRouter.js";
 
 const PASTE_START = "\x1b[200~";
 const PASTE_END = "\x1b[201~";
 const forbiddenManagedRegionOutput = /\x1b\[3J|\x1b\[2J|\x1b\[H|\x1b\[\d+;\d+H/u;
+const slashSuggestion: SuggestionItem = {
+  id: "slash.help",
+  label: "/help",
+  replacementText: "/help",
+  replacementRange: { start: 0, end: 2 },
+  providerId: SLASH_COMMAND_SUGGESTION_PROVIDER_ID,
+  kind: "slash",
+};
 
 class FakeInput extends EventEmitter implements RawPromptInput {
   isTTY = true;
@@ -127,7 +150,11 @@ describe("raw prompt controller", () => {
     const output = fakeOutput();
     const rawPrompt = Object.assign(vi.fn(async () => "raw"), { close: vi.fn() });
     const createReadline = vi.fn(() => Object.assign(vi.fn(async () => "legacy"), { close: vi.fn() }));
-    const createRaw = vi.fn(() => rawPrompt);
+    let rawOptions: RawPromptControllerOptions | undefined;
+    const createRaw = vi.fn((options: RawPromptControllerOptions) => {
+      rawOptions = options;
+      return rawPrompt;
+    });
 
     const prompt = createPromptForInputMode({
       mode: "raw",
@@ -139,6 +166,7 @@ describe("raw prompt controller", () => {
 
     expect(await prompt("> ")).toBe("raw");
     expect(createRaw).toHaveBeenCalledOnce();
+    expect(rawOptions?.typeahead).toBeDefined();
     expect(createReadline).not.toHaveBeenCalled();
   });
 
@@ -402,4 +430,162 @@ describe("raw prompt controller", () => {
     expect(await pending).toEqual({ type: "submit", text: "aب" });
     expect(changes).toEqual(["a", "aب"]);
   });
+
+  it("updates typeahead for slash input through an explicit router", async () => {
+    const provider = providerFor(SLASH_COMMAND_SUGGESTION_PROVIDER_ID, [slashSuggestion]);
+    const typeahead = fakeTypeahead(provider);
+    const input = new FakeInput();
+    const output = fakeOutput();
+    const lifecycle = fakeLifecycle();
+    const states: TypeaheadState[] = [];
+    const controller = new RawPromptController({
+      input,
+      output,
+      lifecycle: lifecycle.lifecycle,
+      typeahead: {
+        router: typeahead.router,
+        onStateChange: (state) => states.push(state),
+      },
+    });
+    const pending = controller.read("> ");
+
+    input.send("/h");
+    await flushPromises();
+    input.send("\r");
+
+    expect(await pending).toEqual({ type: "submit", text: "/h" });
+    expect(typeahead.route).toHaveBeenCalled();
+    expect(provider.getSuggestions).toHaveBeenCalled();
+    expect(states.some((state) => state.status === "open" && state.providerId === SLASH_COMMAND_SUGGESTION_PROVIDER_ID)).toBe(true);
+    expect(states.at(-1)?.status).toBe("dismissed");
+  });
+
+  it("does not trigger the slash provider for non-slash input", async () => {
+    const provider = providerFor(SLASH_COMMAND_SUGGESTION_PROVIDER_ID, [slashSuggestion]);
+    const typeahead = fakeTypeahead(provider);
+    const input = new FakeInput();
+    const output = fakeOutput();
+    const lifecycle = fakeLifecycle();
+    const controller = new RawPromptController({
+      input,
+      output,
+      lifecycle: lifecycle.lifecycle,
+      typeahead: {
+        router: typeahead.router,
+      },
+    });
+    const pending = controller.read("> ");
+
+    input.send("hello\r");
+
+    expect(await pending).toEqual({ type: "submit", text: "hello" });
+    expect(provider.getSuggestions).not.toHaveBeenCalled();
+  });
+
+  it("ignores stale async typeahead results after input changes", async () => {
+    const pendingProviders: Array<(suggestions: readonly SuggestionItem[]) => void> = [];
+    const provider: SuggestionProvider = {
+      id: SLASH_COMMAND_SUGGESTION_PROVIDER_ID,
+      name: "Slash",
+      getSuggestions: vi.fn(() => new Promise<SuggestionProviderResult>((resolve) => {
+        pendingProviders.push((suggestions) => {
+          resolve(normalizeSuggestionProviderResult(SLASH_COMMAND_SUGGESTION_PROVIDER_ID, { suggestions }));
+        });
+      })),
+    };
+    const typeahead = fakeTypeahead(provider);
+    const input = new FakeInput();
+    const output = fakeOutput();
+    const lifecycle = fakeLifecycle();
+    const states: TypeaheadState[] = [];
+    const controller = new RawPromptController({
+      input,
+      output,
+      lifecycle: lifecycle.lifecycle,
+      typeahead: {
+        router: typeahead.router,
+        onStateChange: (state) => states.push(state),
+      },
+    });
+    const prompt = controller.read("> ");
+
+    input.send("/h");
+    input.send("\x7f\x7fabc");
+    for (const resolve of pendingProviders) resolve([slashSuggestion]);
+    await flushPromises();
+    input.send("\r");
+
+    expect(await prompt).toEqual({ type: "submit", text: "abc" });
+    expect(states.at(-2)?.status).not.toBe("open");
+    expect(states.filter((state) => state.status === "open")).toEqual([]);
+  });
+
+  it("represents provider errors as data without crashing the prompt", async () => {
+    const provider: SuggestionProvider = {
+      id: SLASH_COMMAND_SUGGESTION_PROVIDER_ID,
+      name: "Slash",
+      getSuggestions: vi.fn(() => {
+        throw new Error("provider failed");
+      }),
+    };
+    const typeahead = fakeTypeahead(provider);
+    const input = new FakeInput();
+    const output = fakeOutput();
+    const lifecycle = fakeLifecycle();
+    const states: TypeaheadState[] = [];
+    const controller = new RawPromptController({
+      input,
+      output,
+      lifecycle: lifecycle.lifecycle,
+      typeahead: {
+        router: typeahead.router,
+        onStateChange: (state) => states.push(state),
+      },
+    });
+    const prompt = controller.read("> ");
+
+    input.send("/h");
+    await flushPromises();
+    input.send("\r");
+
+    expect(await prompt).toEqual({ type: "submit", text: "/h" });
+    expect(states.some((state) => state.status === "error" && state.error?.message === "provider failed")).toBe(true);
+  });
 });
+
+function providerFor(id: string, suggestions: readonly SuggestionItem[]): SuggestionProvider {
+  return {
+    id,
+    name: id,
+    getSuggestions: vi.fn(() => normalizeSuggestionProviderResult(id, { suggestions })),
+  };
+}
+
+function fakeTypeahead(provider: SuggestionProvider): {
+  readonly router: TypeaheadProviderRouter;
+  readonly route: ReturnType<typeof vi.fn>;
+} {
+  const route = vi.fn((input: { readonly input: string; readonly cursorOffset: number }) => {
+    if (!input.input.startsWith("/")) return undefined;
+    const context = createSuggestionTokenContext({
+      input: input.input,
+      cursorOffset: input.cursorOffset,
+      tokenRange: { start: 0, end: input.input.length },
+      triggerKind: "slash",
+    });
+    return {
+      triggerKind: "slash",
+      context,
+      provider,
+    } satisfies TypeaheadProviderSelection;
+  });
+  return {
+    router: { route },
+    route,
+  };
+}
+
+async function flushPromises(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
