@@ -484,6 +484,71 @@ describe("raw prompt controller", () => {
     expect(output.writes.join("")).not.toMatch(forbiddenManagedRegionOutput);
   });
 
+  it("opens slash autocomplete after / and refreshes rows for a partial query", async () => {
+    const provider: SuggestionProvider<SlashCommandSuggestionMetadata> = {
+      id: SLASH_COMMAND_SUGGESTION_PROVIDER_ID,
+      name: "Slash",
+      getSuggestions: vi.fn((context) => {
+        const suggestions = context.token === "/"
+          ? [slashSuggestion, statusSlashSuggestion]
+          : [statusSlashSuggestion];
+        return normalizeSuggestionProviderResult(SLASH_COMMAND_SUGGESTION_PROVIDER_ID, {
+          suggestions: suggestions.map((suggestion) => ({
+            ...suggestion,
+            replacementRange: context.tokenRange,
+          })),
+        });
+      }),
+    };
+    const typeahead = fakeTypeahead(provider);
+    const input = new FakeInput();
+    const output = fakeOutput();
+    const lifecycle = fakeLifecycle();
+    const overlayHost = new RawPromptOverlayHost();
+    const states: TypeaheadState[] = [];
+    const controller = new RawPromptController({
+      input,
+      output,
+      lifecycle: lifecycle.lifecycle,
+      overlayHost,
+      typeahead: {
+        router: typeahead.router,
+        onStateChange: (state) => states.push(state),
+      },
+    });
+    const pending = controller.read("> ");
+
+    input.send("/");
+    await flushPromises();
+
+    expect(provider.getSuggestions).toHaveBeenLastCalledWith(
+      expect.objectContaining({ token: "/" }),
+      undefined
+    );
+    expect(overlayHost.getRows().map((row) => row.text)).toEqual([
+      "> /help - Show help",
+      "  /status - Show status",
+    ]);
+
+    input.send("s");
+    await flushPromises();
+
+    expect(provider.getSuggestions).toHaveBeenLastCalledWith(
+      expect.objectContaining({ token: "/s" }),
+      undefined
+    );
+    expect(overlayHost.getRows().map((row) => row.text)).toEqual([
+      "> /status - Show status",
+    ]);
+    expect(states.some((state) => state.status === "open")).toBe(true);
+
+    input.send("\r");
+    input.send("\r");
+
+    expect(await pending).toEqual({ type: "submit", text: "/status" });
+    expect(output.writes.join("")).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
   it("accepts the focused slash suggestion with Enter without submitting", async () => {
     const provider = providerFor(SLASH_COMMAND_SUGGESTION_PROVIDER_ID, [slashSuggestion]);
     const typeahead = fakeTypeahead(provider);
@@ -544,6 +609,35 @@ describe("raw prompt controller", () => {
     expect(output.writes.join("")).not.toMatch(forbiddenManagedRegionOutput);
   });
 
+  it("accepts slash suggestions as text only without executing commands", async () => {
+    const executeCommand = vi.fn();
+    const provider = providerFor(SLASH_COMMAND_SUGGESTION_PROVIDER_ID, [slashSuggestion]);
+    const typeahead = fakeTypeahead(provider);
+    const input = new FakeInput();
+    const output = fakeOutput();
+    const lifecycle = fakeLifecycle();
+    const controller = new RawPromptController({
+      input,
+      output,
+      lifecycle: lifecycle.lifecycle,
+      typeahead: {
+        router: typeahead.router,
+      },
+    });
+    const pending = controller.read("> ");
+
+    input.send("/h");
+    await flushPromises();
+    input.send("\t");
+    await flushPromises();
+
+    expect(executeCommand).not.toHaveBeenCalled();
+    input.send("\r");
+
+    expect(await pending).toEqual({ type: "submit", text: "/help" });
+    expect(executeCommand).not.toHaveBeenCalled();
+  });
+
   it("applies accepted slash replacement to only the active token range", async () => {
     const provider = providerFor(SLASH_COMMAND_SUGGESTION_PROVIDER_ID, [slashSuggestion]);
     const typeahead = fakeTypeahead(provider);
@@ -568,6 +662,45 @@ describe("raw prompt controller", () => {
 
     expect(await pending).toEqual({ type: "submit", text: "run /help tail" });
     expect(output.writes.join("")).toContain("> run /help tail");
+    expect(output.writes.join("")).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
+  it("keeps pasted slash text from auto-accepting or auto-submitting", async () => {
+    const provider = providerFor(SLASH_COMMAND_SUGGESTION_PROVIDER_ID, [slashSuggestion]);
+    const typeahead = fakeTypeahead(provider);
+    const input = new FakeInput();
+    const output = fakeOutput();
+    const lifecycle = fakeLifecycle();
+    const overlayHost = new RawPromptOverlayHost();
+    const controller = new RawPromptController({
+      input,
+      output,
+      lifecycle: lifecycle.lifecycle,
+      overlayHost,
+      typeahead: {
+        router: typeahead.router,
+      },
+    });
+    let resolved = false;
+    const pending = controller.read("> ").then((result) => {
+      resolved = true;
+      return result;
+    });
+
+    input.send(`${PASTE_START}/h${PASTE_END}`);
+    await flushPromises();
+
+    expect(resolved).toBe(false);
+    expect(output.writes.join("")).toContain("> /h");
+    expect(overlayHost.getRows().map((row) => row.text)).toEqual([
+      "> /help - Show help",
+    ]);
+
+    input.send("\x1b");
+    await flushPromises();
+    input.send("\r");
+
+    expect(await pending).toEqual({ type: "submit", text: "/h" });
     expect(output.writes.join("")).not.toMatch(forbiddenManagedRegionOutput);
   });
 
