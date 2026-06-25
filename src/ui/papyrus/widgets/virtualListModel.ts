@@ -11,6 +11,10 @@ export type VirtualListRange = {
   readonly count: number;
 };
 
+export type VirtualListOverscanOptions = {
+  readonly overscan?: number;
+};
+
 export type CreateVirtualListStateOptions = {
   readonly itemCount: number;
   readonly viewportHeight?: number;
@@ -42,6 +46,22 @@ export function getVirtualListRange(state: VirtualListState): VirtualListRange {
   }
   const start = clampScrollOffset(state.scrollOffset, state.itemCount, state.viewportHeight);
   const end = Math.min(state.itemCount, start + state.viewportHeight);
+  return {
+    start,
+    end,
+    count: end - start,
+  };
+}
+
+export function getVirtualListOverscanRange(
+  state: VirtualListState,
+  options: VirtualListOverscanOptions = {}
+): VirtualListRange {
+  const range = getVirtualListRange(state);
+  if (range.count === 0) return range;
+  const overscan = normalizeOverscan(options.overscan);
+  const start = Math.max(0, range.start - overscan);
+  const end = Math.min(state.itemCount, range.end + overscan);
   return {
     start,
     end,
@@ -154,6 +174,11 @@ function normalizeFocusedIndex(value: number | undefined, itemCount: number): nu
 function normalizeDelta(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.trunc(value);
+}
+
+function normalizeOverscan(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.floor(value));
 }
 
 function clampScrollOffset(value: number, itemCount: number, viewportHeight: number): number {

@@ -2,6 +2,7 @@ import {
   createVirtualListState,
   focusVirtualListFirst,
   focusVirtualListLast,
+  getVirtualListOverscanRange,
   getVirtualListRange,
   moveVirtualListFocus,
   pageVirtualListFocusDown,
@@ -41,12 +42,14 @@ export type FuzzyPickerState<TValue = string, TMetadata = unknown> = {
   readonly results: readonly FuzzyPickerResult<TValue, TMetadata>[];
   readonly focusedResultIndex?: number;
   readonly viewport: VirtualListState;
+  readonly loading: boolean;
 };
 
 export type CreateFuzzyPickerStateOptions = {
   readonly query?: string;
   readonly focusedResultIndex?: number;
   readonly viewportHeight?: number;
+  readonly loading?: boolean;
 };
 
 export type FuzzyPickerIntent<TValue = string> =
@@ -76,6 +79,12 @@ export type FuzzyPickerRenderRow<TValue = string> =
       readonly kind: "empty";
       readonly query: string;
       readonly text: string;
+    }
+  | {
+      readonly kind: "loading";
+      readonly query: string;
+      readonly text: string;
+      readonly selectable: false;
     };
 
 export function createFuzzyPickerState<TValue = string, TMetadata = unknown>(
@@ -87,6 +96,7 @@ export function createFuzzyPickerState<TValue = string, TMetadata = unknown>(
     query: options.query ?? "",
     focusedResultIndex: options.focusedResultIndex,
     viewportHeight: options.viewportHeight,
+    loading: options.loading,
   });
 }
 
@@ -99,7 +109,18 @@ export function updateFuzzyPickerQuery<TValue, TMetadata>(
     query,
     focusedResultIndex: 0,
     viewportHeight: state.viewport.viewportHeight,
+    loading: state.loading,
   });
+}
+
+export function setFuzzyPickerLoading<TValue, TMetadata>(
+  state: FuzzyPickerState<TValue, TMetadata>,
+  loading: boolean
+): FuzzyPickerState<TValue, TMetadata> {
+  return {
+    ...state,
+    loading,
+  };
 }
 
 export function reconcileFuzzyPickerItems<TValue, TMetadata>(
@@ -116,6 +137,7 @@ export function reconcileFuzzyPickerItems<TValue, TMetadata>(
     query: state.query,
     focusedResultIndex: focusedResultIndex === -1 ? state.focusedResultIndex : focusedResultIndex,
     viewportHeight: state.viewport.viewportHeight,
+    loading: state.loading,
   });
 }
 
@@ -140,6 +162,14 @@ export function visibleFuzzyPickerResults<TValue, TMetadata>(
   state: FuzzyPickerState<TValue, TMetadata>
 ): readonly FuzzyPickerResult<TValue, TMetadata>[] {
   const range = getVirtualListRange(state.viewport);
+  return state.results.slice(range.start, range.end);
+}
+
+export function overscannedFuzzyPickerResults<TValue, TMetadata>(
+  state: FuzzyPickerState<TValue, TMetadata>,
+  overscan: number
+): readonly FuzzyPickerResult<TValue, TMetadata>[] {
+  const range = getVirtualListOverscanRange(state.viewport, { overscan });
   return state.results.slice(range.start, range.end);
 }
 
@@ -224,6 +254,14 @@ export function applyFuzzyPickerKey<TValue, TMetadata>(
 export function buildFuzzyPickerRenderRows<TValue, TMetadata>(
   state: FuzzyPickerState<TValue, TMetadata>
 ): readonly FuzzyPickerRenderRow<TValue>[] {
+  if (state.loading) {
+    return [{
+      kind: "loading",
+      query: state.query,
+      text: state.query.trim().length === 0 ? "Loading items" : `Loading matches for ${state.query}`,
+      selectable: false,
+    }];
+  }
   const rows = visibleFuzzyPickerResults(state).map((result) => ({
     kind: "item" as const,
     value: result.item.value,
@@ -246,6 +284,7 @@ function buildFuzzyPickerState<TValue, TMetadata>(input: {
   readonly query: string;
   readonly focusedResultIndex?: number;
   readonly viewportHeight?: number;
+  readonly loading?: boolean;
 }): FuzzyPickerState<TValue, TMetadata> {
   const results = rankFuzzyPickerItems(input.items, input.query);
   const focusedResultIndex = normalizeFocusedResultIndex(input.focusedResultIndex, results);
@@ -260,6 +299,7 @@ function buildFuzzyPickerState<TValue, TMetadata>(input: {
     results,
     focusedResultIndex,
     viewport,
+    loading: input.loading ?? false,
   };
 }
 

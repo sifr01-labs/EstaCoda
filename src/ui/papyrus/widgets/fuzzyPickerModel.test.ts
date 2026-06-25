@@ -7,11 +7,13 @@ import {
   createFuzzyPickerState,
   focusedFuzzyPickerResult,
   moveFuzzyPickerFocus,
+  overscannedFuzzyPickerResults,
   pageFuzzyPickerFocusDown,
   pageFuzzyPickerFocusUp,
   reconcileFuzzyPickerItems,
   resizeFuzzyPickerViewport,
   selectFocusedFuzzyPickerItem,
+  setFuzzyPickerLoading,
   updateFuzzyPickerQuery,
   visibleFuzzyPickerResults,
   type FuzzyPickerItem,
@@ -153,6 +155,70 @@ describe("Papyrus fuzzy picker model", () => {
     expect(state.focusedResultIndex).toBe(3);
     expect(state.viewport.scrollOffset).toBe(2);
     expect(visibleFuzzyPickerResults(state).map((result) => result.item.value)).toEqual(["betamax", "delta"]);
+  });
+
+  it("uses virtual-list range behavior as the scalable picker result substrate", () => {
+    const state = createFuzzyPickerState(items, { query: "", viewportHeight: 2, focusedResultIndex: 2 });
+
+    expect(visibleFuzzyPickerResults(state).map((result) => result.item.value)).toEqual(["alphabet", "betamax"]);
+    expect(overscannedFuzzyPickerResults(state, 1).map((result) => result.item.value)).toEqual([
+      "alpha",
+      "alphabet",
+      "betamax",
+      "delta",
+    ]);
+    expect(overscannedFuzzyPickerResults(state, -1).map((result) => result.item.value)).toEqual([
+      "alphabet",
+      "betamax",
+    ]);
+    expect(state.focusedResultIndex).toBe(2);
+    expect(state.viewport.scrollOffset).toBe(1);
+  });
+
+  it("represents loading as inert render-row data without provider side effects", () => {
+    let state = createFuzzyPickerState(items, {
+      query: "alpha",
+      loading: true,
+      viewportHeight: 2,
+    });
+
+    expect(state.results.map((result) => result.item.value)).toEqual(["alpha", "alphabet"]);
+    expect(buildFuzzyPickerRenderRows(state)).toEqual([
+      {
+        kind: "loading",
+        query: "alpha",
+        text: "Loading matches for alpha",
+        selectable: false,
+      },
+    ]);
+    expect(selectFocusedFuzzyPickerItem(state).intent).toEqual({
+      type: "selected",
+      value: "alpha",
+    });
+
+    state = setFuzzyPickerLoading(state, false);
+    expect(buildFuzzyPickerRenderRows(state)[0]).toMatchObject({
+      kind: "item",
+      value: "alpha",
+    });
+  });
+
+  it("renders a safe non-selectable loading row for empty loading state", () => {
+    const state = createFuzzyPickerState([], {
+      loading: true,
+      viewportHeight: 2,
+    });
+
+    expect(state.focusedResultIndex).toBeUndefined();
+    expect(buildFuzzyPickerRenderRows(state)).toEqual([
+      {
+        kind: "loading",
+        query: "",
+        text: "Loading items",
+        selectable: false,
+      },
+    ]);
+    expect(selectFocusedFuzzyPickerItem(state).intent).toBeUndefined();
   });
 
   it("returns selected and cancel intent data without side effects", () => {

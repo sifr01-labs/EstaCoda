@@ -4,6 +4,7 @@ import {
   createVirtualListState,
   focusVirtualListFirst,
   focusVirtualListLast,
+  getVirtualListOverscanRange,
   getVirtualListRange,
   moveVirtualListFocus,
   pageVirtualListFocusDown,
@@ -21,6 +22,32 @@ describe("Papyrus virtual list model", () => {
       start: 25,
       end: 35,
       count: 10,
+    });
+  });
+
+  it("calculates clamped overscanned ranges without changing focus or scroll state", () => {
+    const state = createVirtualListState({
+      itemCount: 10,
+      viewportHeight: 3,
+      scrollOffset: 4,
+      focusedIndex: 5,
+    });
+
+    expect(getVirtualListOverscanRange(state, { overscan: 2 })).toEqual({
+      start: 2,
+      end: 9,
+      count: 7,
+    });
+    expect(getVirtualListOverscanRange(state, { overscan: -2 })).toEqual(getVirtualListRange(state));
+    expect(getVirtualListOverscanRange(state, { overscan: Number.NaN })).toEqual(getVirtualListRange(state));
+    expect(state.focusedIndex).toBe(5);
+    expect(state.scrollOffset).toBe(4);
+
+    const nearStart = createVirtualListState({ itemCount: 4, viewportHeight: 2, scrollOffset: 0 });
+    expect(getVirtualListOverscanRange(nearStart, { overscan: 99 })).toEqual({
+      start: 0,
+      end: 4,
+      count: 4,
     });
   });
 
