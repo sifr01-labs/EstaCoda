@@ -4,6 +4,7 @@ export * from "./providers/fileProvider.js";
 export * from "./providers/mcpResourceProvider.js";
 export * from "./providers/slashCommandProvider.js";
 export * from "./providers/shellHistoryProvider.js";
+export * from "./providers/skillSuggestionProvider.js";
 export * from "./ghostTextController.js";
 export * from "./suggestionTypes.js";
 export * from "./typeaheadController.js";
