@@ -6,6 +6,13 @@ import {
   type PapyrusVimOperator,
   type PapyrusVimState,
 } from "./vimTypes.js";
+import type { LineEditorState } from "../../../input/lineEditor.js";
+import {
+  isPapyrusVimMotionKey,
+  resolvePapyrusVimMotion,
+  type PapyrusVimMotionIntent,
+  type PapyrusVimMotionKey,
+} from "./vimMotions.js";
 
 export type PapyrusVimCursorIntent = "right" | "start" | "end";
 
@@ -16,6 +23,7 @@ export type PapyrusVimTransitionInput =
 export type PapyrusVimActionIntent =
   | { readonly type: "set-mode"; readonly mode: PapyrusVimMode }
   | { readonly type: "move-cursor"; readonly target: PapyrusVimCursorIntent }
+  | PapyrusVimMotionIntent
   | { readonly type: "passthrough-key"; readonly key: string }
   | { readonly type: "reset-pending-command" }
   | { readonly type: "noop" };
@@ -23,6 +31,10 @@ export type PapyrusVimActionIntent =
 export type PapyrusVimTransitionResult = {
   readonly state: PapyrusVimState;
   readonly actions: readonly PapyrusVimActionIntent[];
+};
+
+export type PapyrusVimTransitionOptions = {
+  readonly line?: LineEditorState;
 };
 
 const operatorByKey: Readonly<Record<string, PapyrusVimOperator>> = {
@@ -33,7 +45,8 @@ const operatorByKey: Readonly<Record<string, PapyrusVimOperator>> = {
 
 export function transitionPapyrusVimState(
   state: PapyrusVimState,
-  input: PapyrusVimTransitionInput
+  input: PapyrusVimTransitionInput,
+  options: PapyrusVimTransitionOptions = {}
 ): PapyrusVimTransitionResult {
   if (input.type === "escape") {
     return transitionEscape(state);
@@ -46,7 +59,7 @@ export function transitionPapyrusVimState(
     };
   }
 
-  return transitionNormalKey(state, input.key);
+  return transitionNormalKey(state, input.key, options);
 }
 
 function transitionEscape(state: PapyrusVimState): PapyrusVimTransitionResult {
@@ -66,7 +79,11 @@ function transitionEscape(state: PapyrusVimState): PapyrusVimTransitionResult {
   };
 }
 
-function transitionNormalKey(state: PapyrusVimState, key: string): PapyrusVimTransitionResult {
+function transitionNormalKey(
+  state: PapyrusVimState,
+  key: string,
+  options: PapyrusVimTransitionOptions
+): PapyrusVimTransitionResult {
   if (key.length !== 1) return resetNormalState(state);
 
   if (isCountStart(state, key)) {
@@ -92,6 +109,10 @@ function transitionNormalKey(state: PapyrusVimState, key: string): PapyrusVimTra
     };
   }
 
+  if (isPapyrusVimMotionKey(key)) {
+    return transitionMotion(state, key, options);
+  }
+
   const operator = operatorByKey[key];
   if (operator !== undefined) {
     return {
@@ -114,6 +135,27 @@ function transitionNormalKey(state: PapyrusVimState, key: string): PapyrusVimTra
   if (key === "A") return enterInsert(state, { type: "move-cursor", target: "end" });
 
   return resetNormalState(state);
+}
+
+function transitionMotion(
+  state: PapyrusVimState,
+  key: PapyrusVimMotionKey,
+  options: PapyrusVimTransitionOptions
+): PapyrusVimTransitionResult {
+  const reset = resetPapyrusVimCommandState(state);
+  if (options.line === undefined) {
+    return {
+      state: reset,
+      actions: pendingChanged(state.command, reset.command)
+        ? [{ type: "reset-pending-command" }]
+        : [{ type: "noop" }],
+    };
+  }
+
+  return {
+    state: reset,
+    actions: [resolvePapyrusVimMotion(options.line, key, countFromCommand(state.command))],
+  };
 }
 
 function enterInsert(

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { createLineEditorState } from "../../../input/lineEditor.js";
 import { createInitialPapyrusVimState, type PapyrusVimState } from "./vimTypes.js";
 import { transitionPapyrusVimState } from "./vimStateMachine.js";
 
@@ -99,6 +100,69 @@ describe("Papyrus Vim state machine", () => {
         operator: "delete",
         count: 3,
       },
+      countBuffer: "",
+    });
+    expect(result.actions).toEqual([{ type: "noop" }]);
+  });
+
+  it("emits cursor offset intent for normal-mode motions", () => {
+    const result = transitionPapyrusVimState(
+      createInitialPapyrusVimState("normal"),
+      { type: "key", key: "w" },
+      { line: createLineEditorState("one two", 0) }
+    );
+
+    expect(result.state).toMatchObject({
+      mode: "normal",
+      command: { type: "idle" },
+      countBuffer: "",
+    });
+    expect(result.actions).toEqual([
+      { type: "move-cursor-to", motion: "w", count: 1, cursor: "one ".length },
+    ]);
+  });
+
+  it("applies counts to motions and resets count state afterward", () => {
+    const count = transitionPapyrusVimState(createInitialPapyrusVimState("normal"), {
+      type: "key",
+      key: "3",
+    });
+    const result = transitionPapyrusVimState(
+      count.state,
+      { type: "key", key: "l" },
+      { line: createLineEditorState("abcdef", 0) }
+    );
+
+    expect(result.state).toMatchObject({
+      mode: "normal",
+      command: { type: "idle" },
+      countBuffer: "",
+    });
+    expect(result.actions).toEqual([{ type: "move-cursor-to", motion: "l", count: 3, cursor: 3 }]);
+  });
+
+  it("treats 0 as a start motion, not a leading count", () => {
+    const result = transitionPapyrusVimState(
+      createInitialPapyrusVimState("normal"),
+      { type: "key", key: "0" },
+      { line: createLineEditorState("abc", 2) }
+    );
+
+    expect(result.state).toMatchObject({
+      command: { type: "idle" },
+      countBuffer: "",
+    });
+    expect(result.actions).toEqual([{ type: "move-cursor-to", motion: "0", count: 1, cursor: 0 }]);
+  });
+
+  it("does not execute motions without line state", () => {
+    const result = transitionPapyrusVimState(createInitialPapyrusVimState("normal"), {
+      type: "key",
+      key: "$",
+    });
+
+    expect(result.state).toMatchObject({
+      command: { type: "idle" },
       countBuffer: "",
     });
     expect(result.actions).toEqual([{ type: "noop" }]);
