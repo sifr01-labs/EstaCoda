@@ -6,6 +6,7 @@ import {
   buildApprovalCardRenderRows,
   createApprovalCardState,
   selectFocusedApprovalCardAction,
+  updateApprovalCardFeedback,
 } from "./approvalCardModel.js";
 
 describe("Papyrus approval card model", () => {
@@ -134,6 +135,7 @@ describe("Papyrus approval card model", () => {
         value: "approve",
         label: "Approve",
         description: "Allow once",
+        actionKind: undefined,
         focused: true,
         disabled: false,
       },
@@ -142,10 +144,192 @@ describe("Papyrus approval card model", () => {
         value: "reject",
         label: "Reject",
         description: undefined,
+        actionKind: undefined,
         focused: false,
         disabled: true,
       },
       { kind: "keyboardHint", key: "Esc", label: "Cancel" },
+    ]);
+  });
+
+  it("updates feedback input and returns trimmed feedback intent data", () => {
+    const state = createApprovalCardState({
+      title: "Permission required",
+      feedbackInput: {
+        label: "Feedback",
+        placeholder: "Tell the agent what to change",
+        value: "  use a safer command  ",
+      },
+      focusedAction: "feedback",
+      actions: [
+        { value: "approve", label: "Approve", intentKind: "approve-once" },
+        { value: "feedback", label: "Give feedback", intentKind: "feedback" },
+      ],
+    });
+
+    expect(state.feedbackInput).toMatchObject({
+      label: "Feedback",
+      placeholder: "Tell the agent what to change",
+      value: "  use a safer command  ",
+      disabled: false,
+      emptyBehavior: "allow",
+    });
+    expect(applyApprovalCardKey(state, { key: "enter" }).intent).toEqual({
+      type: "action",
+      value: "feedback",
+      actionKind: "feedback",
+      feedbackText: "use a safer command",
+    });
+
+    const updated = updateApprovalCardFeedback(state, "  try read-only first  ");
+    expect(updated.feedbackInput?.value).toBe("  try read-only first  ");
+    expect(applyApprovalCardKey(updated, { key: "enter" }).intent).toEqual({
+      type: "action",
+      value: "feedback",
+      actionKind: "feedback",
+      feedbackText: "try read-only first",
+    });
+  });
+
+  it("makes empty feedback behavior explicit", () => {
+    const allowEmpty = createApprovalCardState({
+      title: "Permission required",
+      feedbackInput: { value: "   " },
+      focusedAction: "feedback",
+      actions: [{ value: "feedback", label: "Feedback", intentKind: "feedback" }],
+    });
+    expect(applyApprovalCardKey(allowEmpty, { key: "enter" }).intent).toEqual({
+      type: "action",
+      value: "feedback",
+      actionKind: "feedback",
+      feedbackText: "",
+    });
+
+    const blockEmpty = createApprovalCardState({
+      title: "Permission required",
+      feedbackInput: { emptyBehavior: "block", value: "   " },
+      focusedAction: "feedback",
+      actions: [{ value: "feedback", label: "Feedback", intentKind: "feedback" }],
+    });
+    expect(applyApprovalCardKey(blockEmpty, { key: "enter" }).intent).toEqual({
+      type: "emptyFeedback",
+      value: "feedback",
+    });
+  });
+
+  it("returns amend, ask-user, and dont-ask-again as action data only", () => {
+    const state = createApprovalCardState({
+      title: "Permission required",
+      actions: [
+        { value: "amend", label: "Amend", intentKind: "amend" },
+        { value: "ask", label: "Ask user", intentKind: "ask-user" },
+        { value: "always", label: "Don't ask again", intentKind: "dont-ask-again" },
+      ],
+    });
+
+    expect(applyApprovalCardKey(state, { key: "enter" }).intent).toEqual({
+      type: "action",
+      value: "amend",
+      actionKind: "amend",
+    });
+    const askUser = applyApprovalCardKey(applyApprovalCardKey(state, { key: "arrowRight" }).state, { key: "enter" });
+    expect(askUser.intent).toEqual({
+      type: "action",
+      value: "ask",
+      actionKind: "ask-user",
+    });
+    const dontAskAgain = applyApprovalCardKey(applyApprovalCardKey(askUser.state, { key: "arrowRight" }).state, {
+      key: "enter",
+    });
+    expect(dontAskAgain.intent).toEqual({
+      type: "action",
+      value: "always",
+      actionKind: "dont-ask-again",
+    });
+  });
+
+  it("does not synthesize absent rich actions", () => {
+    const state = createApprovalCardState({
+      title: "Permission required",
+      actions: [{ value: "approve", label: "Approve", intentKind: "approve-once" }],
+    });
+
+    const missingFeedback = selectFocusedApprovalCardAction({
+      ...state,
+      focusedAction: "feedback",
+    });
+    expect(missingFeedback).toEqual({
+      state: {
+        ...state,
+        focusedAction: "feedback",
+      },
+    });
+  });
+
+  it("keeps disabled rich actions unselectable", () => {
+    const state = createApprovalCardState({
+      title: "Permission required",
+      focusedAction: "feedback",
+      feedbackInput: { value: "please explain" },
+      actions: [
+        { value: "approve", label: "Approve", intentKind: "approve-once" },
+        { value: "feedback", label: "Feedback", intentKind: "feedback", disabled: true },
+      ],
+    });
+
+    expect(state.focusedAction).toBe("approve");
+    expect(selectFocusedApprovalCardAction({
+      ...state,
+      focusedAction: "feedback",
+    })).toEqual({
+      state: {
+        ...state,
+        focusedAction: "feedback",
+      },
+    });
+  });
+
+  it("renders feedback input and rich action metadata as inert rows", () => {
+    const state = createApprovalCardState({
+      title: "Permission required",
+      feedbackInput: {
+        label: "Feedback",
+        placeholder: "What should change?",
+        value: "use a safer path",
+      },
+      actions: [
+        { value: "feedback", label: "Give feedback", intentKind: "feedback" },
+        { value: "amend", label: "Amend", intentKind: "amend" },
+      ],
+    });
+
+    expect(buildApprovalCardRenderRows(state)).toEqual([
+      { kind: "title", text: "Permission required", severity: undefined, riskLabel: undefined },
+      {
+        kind: "feedbackInput",
+        label: "Feedback",
+        placeholder: "What should change?",
+        value: "use a safer path",
+        disabled: false,
+      },
+      {
+        kind: "action",
+        value: "feedback",
+        label: "Give feedback",
+        description: undefined,
+        actionKind: "feedback",
+        focused: true,
+        disabled: false,
+      },
+      {
+        kind: "action",
+        value: "amend",
+        label: "Amend",
+        description: undefined,
+        actionKind: "amend",
+        focused: false,
+        disabled: false,
+      },
     ]);
   });
 

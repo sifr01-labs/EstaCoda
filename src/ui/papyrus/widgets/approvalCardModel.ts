@@ -1,9 +1,20 @@
 export type ApprovalCardSeverity = "info" | "warning" | "danger";
 
+export type ApprovalCardActionKind =
+  | "approve-once"
+  | "reject"
+  | "cancel"
+  | "feedback"
+  | "amend"
+  | "ask-user"
+  | "dont-ask-again"
+  | "custom";
+
 export type ApprovalCardAction<TValue = string> = {
   readonly value: TValue;
   readonly label: string;
   readonly description?: string;
+  readonly intentKind?: ApprovalCardActionKind;
   readonly disabled?: boolean;
 };
 
@@ -17,12 +28,31 @@ export type ApprovalCardKeyboardHint = {
   readonly label: string;
 };
 
+export type ApprovalCardFeedbackEmptyBehavior = "allow" | "block";
+
+export type ApprovalCardFeedbackInput = {
+  readonly label?: string;
+  readonly placeholder?: string;
+  readonly value?: string;
+  readonly disabled?: boolean;
+  readonly emptyBehavior?: ApprovalCardFeedbackEmptyBehavior;
+};
+
+export type ApprovalCardFeedbackInputState = {
+  readonly label?: string;
+  readonly placeholder?: string;
+  readonly value: string;
+  readonly disabled: boolean;
+  readonly emptyBehavior: ApprovalCardFeedbackEmptyBehavior;
+};
+
 export type ApprovalCardState<TValue = string> = {
   readonly title: string;
   readonly body?: string;
   readonly severity?: ApprovalCardSeverity;
   readonly riskLabel?: string;
   readonly details: readonly ApprovalCardDetailRow[];
+  readonly feedbackInput?: ApprovalCardFeedbackInputState;
   readonly actions: readonly ApprovalCardAction<TValue>[];
   readonly focusedAction?: TValue;
   readonly cancelable: boolean;
@@ -30,8 +60,14 @@ export type ApprovalCardState<TValue = string> = {
 };
 
 export type ApprovalCardIntent<TValue = string> =
-  | { readonly type: "action"; readonly value: TValue }
-  | { readonly type: "cancel" };
+  | {
+      readonly type: "action";
+      readonly value: TValue;
+      readonly actionKind?: ApprovalCardActionKind;
+      readonly feedbackText?: string;
+    }
+  | { readonly type: "cancel" }
+  | { readonly type: "emptyFeedback"; readonly value: TValue };
 
 export type ApprovalCardResult<TValue = string> = {
   readonly state: ApprovalCardState<TValue>;
@@ -57,7 +93,15 @@ export type ApprovalCardRenderRow<TValue = string> =
       readonly value: TValue;
       readonly label: string;
       readonly description?: string;
+      readonly actionKind?: ApprovalCardActionKind;
       readonly focused: boolean;
+      readonly disabled: boolean;
+    }
+  | {
+      readonly kind: "feedbackInput";
+      readonly label?: string;
+      readonly placeholder?: string;
+      readonly value: string;
       readonly disabled: boolean;
     }
   | {
@@ -72,6 +116,7 @@ export function createApprovalCardState<TValue = string>(input: {
   readonly severity?: ApprovalCardSeverity;
   readonly riskLabel?: string;
   readonly details?: readonly ApprovalCardDetailRow[];
+  readonly feedbackInput?: ApprovalCardFeedbackInput;
   readonly actions: readonly ApprovalCardAction<TValue>[];
   readonly focusedAction?: TValue;
   readonly cancelable?: boolean;
@@ -85,6 +130,7 @@ export function createApprovalCardState<TValue = string>(input: {
     severity: input.severity,
     riskLabel: input.riskLabel,
     details: input.details ?? [],
+    feedbackInput: normalizeFeedbackInput(input.feedbackInput),
     actions: input.actions,
     focusedAction,
     cancelable: input.cancelable ?? true,
@@ -116,6 +162,20 @@ export function applyApprovalCardKey<TValue = string>(
   }
 }
 
+export function updateApprovalCardFeedback<TValue>(
+  state: ApprovalCardState<TValue>,
+  value: string
+): ApprovalCardState<TValue> {
+  if (state.feedbackInput === undefined || state.feedbackInput.disabled) return state;
+  return {
+    ...state,
+    feedbackInput: {
+      ...state.feedbackInput,
+      value,
+    },
+  };
+}
+
 export function setFocusedApprovalCardAction<TValue>(
   state: ApprovalCardState<TValue>,
   value: TValue | undefined
@@ -133,11 +193,33 @@ export function selectFocusedApprovalCardAction<TValue>(
 ): ApprovalCardResult<TValue> {
   const action = enabledApprovalAction(state.actions, state.focusedAction);
   if (action === undefined) return { state };
+  if (action.intentKind === "feedback" && state.feedbackInput !== undefined) {
+    const feedbackText = state.feedbackInput.value.trim();
+    if (feedbackText.length === 0 && state.feedbackInput.emptyBehavior === "block") {
+      return {
+        state,
+        intent: {
+          type: "emptyFeedback",
+          value: action.value,
+        },
+      };
+    }
+    return {
+      state,
+      intent: {
+        type: "action",
+        value: action.value,
+        actionKind: action.intentKind,
+        feedbackText,
+      },
+    };
+  }
   return {
     state,
     intent: {
       type: "action",
       value: action.value,
+      ...(action.intentKind === undefined ? {} : { actionKind: action.intentKind }),
     },
   };
 }
@@ -154,11 +236,21 @@ export function buildApprovalCardRenderRows<TValue = string>(
     },
     ...(state.body === undefined ? [] : [{ kind: "body" as const, text: state.body }]),
     ...state.details,
+    ...(state.feedbackInput === undefined
+      ? []
+      : [{
+          kind: "feedbackInput" as const,
+          label: state.feedbackInput.label,
+          placeholder: state.feedbackInput.placeholder,
+          value: state.feedbackInput.value,
+          disabled: state.feedbackInput.disabled,
+        }]),
     ...state.actions.map((action) => ({
       kind: "action" as const,
       value: action.value,
       label: action.label,
       description: action.description,
+      actionKind: action.intentKind,
       focused: action.value === state.focusedAction,
       disabled: action.disabled === true,
     })),
@@ -168,6 +260,19 @@ export function buildApprovalCardRenderRows<TValue = string>(
       label: hint.label,
     })),
   ];
+}
+
+function normalizeFeedbackInput(
+  input: ApprovalCardFeedbackInput | undefined
+): ApprovalCardFeedbackInputState | undefined {
+  if (input === undefined) return undefined;
+  return {
+    label: input.label,
+    placeholder: input.placeholder,
+    value: input.value ?? "",
+    disabled: input.disabled ?? false,
+    emptyBehavior: input.emptyBehavior ?? "allow",
+  };
 }
 
 function focusApprovalCardAction<TValue>(
