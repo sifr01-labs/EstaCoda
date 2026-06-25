@@ -6,6 +6,8 @@ import { PassThrough } from "node:stream";
 import { handleSlashCommand, runSessionLoop } from "./session-loop.js";
 import type { ApprovalPromptAdapter } from "./approval-prompt-adapter.js";
 import { APPROVAL_WIDGET_MODE_ENV_VAR } from "./approval-widget-mode.js";
+import { UI_INPUT_MODE_ENV_VAR } from "../ui/input-mode.js";
+import { UI_RENDERER_ENV_VAR } from "../ui/renderer-mode.js";
 import type { PromptOptions } from "./readline-prompt.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import type { Runtime } from "../runtime/create-runtime.js";
@@ -2036,6 +2038,10 @@ describe("runSessionLoop — active turn spinner", () => {
       runtime,
       output,
       capabilities: interactiveCaps({ terminalWidth: 100, supportsAnimation: false }),
+      env: {
+        [UI_INPUT_MODE_ENV_VAR]: "readline",
+        [UI_RENDERER_ENV_VAR]: "legacy",
+      },
       prompt: Object.assign(
         async () => {
           const values = ["hello", "/exit"];

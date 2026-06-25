@@ -53,7 +53,7 @@ import type { TerminalCapabilities } from "../contracts/ui.js";
 import { centerVisibleBlock, measureVisibleWidth, truncateVisible, wrapText } from "../ui/renderers/layout.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
 import { resolveUiRendererMode } from "../ui/renderer-mode.js";
-import { resolveUiInputMode } from "../ui/input-mode.js";
+import { resolveCoreSessionUiInputMode } from "../ui/input-mode.js";
 import { promptUiContextForLocale } from "../contracts/ui.js";
 import { resolveHomeDir } from "../config/home-dir.js";
 import { resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
@@ -336,7 +336,11 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   const output = options.output ?? defaultOutput;
   const renderer = createSessionRenderer({ output, locale: options.locale, capabilities: options.capabilities });
   const rendererMode = resolveUiRendererMode({ env: options.env });
-  const inputMode = resolveUiInputMode({ env: options.env });
+  const cliInput = (options.input as NodeJS.ReadStream | undefined) ?? defaultInput;
+  const inputMode = resolveCoreSessionUiInputMode({
+    env: options.env,
+    isInteractiveTty: cliInput.isTTY === true && renderer.capabilities.isTTY,
+  });
   const approvalWidgetMode = resolveApprovalWidgetMode({ env: options.env });
   const approvalPromptAdapter = options.approvalPromptAdapter ?? approvalPromptAdapterForMode(approvalWidgetMode);
   let runtime = options.runtime;
@@ -348,7 +352,6 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   let activeTurn: AbortController | undefined;
   let currentAnimator: ToolActivityAnimator | undefined;
   let clearActiveTurnChrome: () => void = () => undefined;
-  const cliInput = (options.input as NodeJS.ReadStream | undefined) ?? defaultInput;
   const prompt = options.prompt ?? createPromptForInputMode({
     mode: inputMode,
     input: cliInput,
