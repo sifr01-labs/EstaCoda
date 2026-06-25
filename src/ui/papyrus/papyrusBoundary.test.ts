@@ -58,6 +58,7 @@ describe("Papyrus substrate boundaries", () => {
       "./clipboardHelper.js",
       "./providers/directoryProvider.js",
       "./providers/fileProvider.js",
+      "./providers/mcpResourceProvider.js",
       "./providers/slashCommandProvider.js",
       "./providers/shellHistoryProvider.js",
       "./ghostTextController.js",
