@@ -65,6 +65,7 @@ describe("Papyrus substrate boundaries", () => {
     expect(exportedModules(read("widgets/index.ts"))).toEqual([
       "./approvalCardModel.js",
       "./dialogModel.js",
+      "./fuzzyPickerModel.js",
       "./multiSelectModel.js",
       "./optionMap.js",
       "./overlayStack.js",

@@ -1,5 +1,6 @@
 export * from "./approvalCardModel.js";
 export * from "./dialogModel.js";
+export * from "./fuzzyPickerModel.js";
 export * from "./multiSelectModel.js";
 export * from "./optionMap.js";
 export * from "./overlayStack.js";
