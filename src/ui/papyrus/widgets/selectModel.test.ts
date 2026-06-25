@@ -200,6 +200,104 @@ describe("Papyrus select navigation model", () => {
     expect(state.viewportStart).toBe(2);
   });
 
+  it("keeps the focused row visible when the viewport shrinks", () => {
+    const state = createSelectNavigationState(options, {
+      focusedValue: "foxtrot",
+      viewportSize: 5,
+    });
+
+    const resized = createSelectNavigationState(options, {
+      focusedValue: state.focusedValue,
+      selectedValue: state.selectedValue,
+      inputValues: state.inputValues,
+      viewportStart: state.viewportStart,
+      viewportSize: 2,
+      wrap: state.wrap,
+    });
+
+    expect(resized.focusedValue).toBe("foxtrot");
+    expect(getVisibleOptions(resized).map((item) => item.value)).toEqual(["echo", "foxtrot"]);
+  });
+
+  it("keeps the focused row visible when the viewport grows", () => {
+    const state = createSelectNavigationState(options, {
+      focusedValue: "delta",
+      viewportSize: 2,
+    });
+
+    const resized = createSelectNavigationState(options, {
+      focusedValue: state.focusedValue,
+      selectedValue: state.selectedValue,
+      inputValues: state.inputValues,
+      viewportStart: state.viewportStart,
+      viewportSize: 5,
+      wrap: state.wrap,
+    });
+
+    expect(resized.focusedValue).toBe("delta");
+    expect(resized.viewportStart).toBe(1);
+    expect(getVisibleOptions(resized).map((item) => item.value)).toEqual([
+      "bravo",
+      "charlie",
+      "delta",
+      "echo",
+      "foxtrot",
+    ]);
+  });
+
+  it("clamps viewport start when the viewport becomes larger than the option count", () => {
+    const state = createSelectNavigationState(options, {
+      focusedValue: "delta",
+      viewportStart: 99,
+      viewportSize: 99,
+    });
+
+    expect(state.viewportStart).toBe(0);
+    expect(getVisibleOptions(state).map((item) => item.value)).toEqual([
+      "alpha",
+      "bravo",
+      "charlie",
+      "delta",
+      "echo",
+      "foxtrot",
+    ]);
+  });
+
+  it("keeps disabled and all-disabled focus state safe after viewport resize", () => {
+    const disabledFocused = createSelectNavigationState(options, {
+      focusedValue: "bravo",
+      viewportStart: 4,
+      viewportSize: 2,
+    });
+    const resizedDisabledFocused = createSelectNavigationState(options, {
+      focusedValue: disabledFocused.focusedValue,
+      viewportStart: disabledFocused.viewportStart,
+      viewportSize: 10,
+    });
+
+    expect(resizedDisabledFocused.focusedValue).toBe("alpha");
+    expect(resizedDisabledFocused.viewportStart).toBe(0);
+
+    const allDisabledOptions = [
+      { value: "a", label: "A", disabled: true },
+      { value: "b", label: "B", disabled: true },
+    ];
+    const allDisabled = createSelectNavigationState(allDisabledOptions, {
+      focusedValue: "a",
+      viewportStart: 1,
+      viewportSize: 1,
+    });
+    const resizedAllDisabled = createSelectNavigationState(allDisabledOptions, {
+      focusedValue: allDisabled.focusedValue,
+      viewportStart: allDisabled.viewportStart,
+      viewportSize: 5,
+    });
+
+    expect(resizedAllDisabled.focusedValue).toBeUndefined();
+    expect(resizedAllDisabled.viewportStart).toBe(0);
+    expect(getVisibleOptions(resizedAllDisabled).map((item) => item.value)).toEqual(["a", "b"]);
+  });
+
   it("reconciles focus and viewport after option list changes", () => {
     const state = createSelectNavigationState(options, {
       focusedValue: "delta",
@@ -487,6 +585,40 @@ describe("Papyrus select render rows", () => {
       "echo",
       "foxtrot",
     ]);
+  });
+
+  it("recalculates visible render rows after viewport size changes", () => {
+    const state = createSelectNavigationState(options, {
+      focusedValue: "foxtrot",
+      selectedValue: "foxtrot",
+      viewportSize: 2,
+    });
+
+    expect(buildSelectRenderRows(state).map((row) => row.kind === "empty" ? row.label : row.value)).toEqual([
+      "echo",
+      "foxtrot",
+    ]);
+
+    const resized = createSelectNavigationState(options, {
+      focusedValue: state.focusedValue,
+      selectedValue: state.selectedValue,
+      inputValues: state.inputValues,
+      viewportStart: state.viewportStart,
+      viewportSize: 4,
+      wrap: state.wrap,
+    });
+
+    expect(buildSelectRenderRows(resized).map((row) => row.kind === "empty" ? row.label : row.value)).toEqual([
+      "charlie",
+      "delta",
+      "echo",
+      "foxtrot",
+    ]);
+    expect(buildSelectRenderRows(resized).at(-1)).toMatchObject({
+      value: "foxtrot",
+      focused: true,
+      selected: true,
+    });
   });
 
   it("returns safe empty row data for empty option lists", () => {
