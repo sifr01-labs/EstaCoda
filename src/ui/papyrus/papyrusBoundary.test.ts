@@ -66,6 +66,7 @@ describe("Papyrus substrate boundaries", () => {
       "./suggestionTypes.js",
       "./typeaheadController.js",
       "./typeaheadProviderRouter.js",
+      "./vim/index.js",
     ]);
     expect(exportedModules(read("widgets/index.ts"))).toEqual([
       "./approvalCardModel.js",

@@ -9,3 +9,4 @@ export * from "./ghostTextController.js";
 export * from "./suggestionTypes.js";
 export * from "./typeaheadController.js";
 export * from "./typeaheadProviderRouter.js";
+export * from "./vim/index.js";
