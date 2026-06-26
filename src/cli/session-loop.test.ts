@@ -33,6 +33,13 @@ import { CronStore } from "../cron/cron-store.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
 
 const STARTUP_VISIBLE_SCREEN_CLEAR = "\x1b[2J\x1b[H";
+const MANAGED_REGION_CLEAR_PATTERN = /\x1b\[\d+A\x1b\[1G\x1b\[0J/u;
+
+function managedRegionClearIndex(input: string, endIndex?: number): number {
+  const haystack = endIndex === undefined ? input : input.slice(0, endIndex);
+  const match = haystack.match(MANAGED_REGION_CLEAR_PATTERN);
+  return match?.index ?? -1;
+}
 
 function interactiveCaps(overrides: Partial<TerminalCapabilities> = {}): TerminalCapabilities {
   return {
@@ -65,8 +72,8 @@ function makeTtyInput(): NodeJS.ReadStream & {
     input.rawModes.push(mode);
     return input;
   };
-  input.press = (chunk, key = {}) => {
-    input.emit("keypress", chunk, key);
+  input.press = (chunk) => {
+    input.emit("data", chunk);
   };
   return input;
 }
@@ -1189,7 +1196,7 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     expect(rendered).not.toContain("> /help");
   });
 
-  it("renders slash completion chrome for submitted slash prefix without table transcript", async () => {
+  it("does not render slash completion chrome for submitted slash prefix", async () => {
     const outputChunks: string[] = [];
     const runtime = createMockRuntime();
     let promptIndex = 0;
@@ -1217,18 +1224,15 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     });
 
     const rendered = outputChunks.join("");
-    expect(rendered).toContain("/help");
-    expect(rendered).toContain("Show command help");
+    expect(rendered).not.toContain("Show command help");
     expect(rendered).not.toContain("Name  Description");
-    const completionIndexInOutput = outputChunks.findIndex((chunk) => String(chunk).includes("Show command help"));
+    expect(rendered).toContain("Use /help to see available commands.");
     const promptIndexInOutput = outputChunks.findIndex((chunk) => String(chunk).includes("hello"));
-    expect(completionIndexInOutput).toBeGreaterThanOrEqual(0);
     expect(promptIndexInOutput).toBeGreaterThanOrEqual(0);
-    expect(outputChunks.slice(completionIndexInOutput, promptIndexInOutput).join("")).not.toContain("Commands");
     expect(outputChunks.slice(promptIndexInOutput).join("")).not.toContain("Show command help");
   });
 
-  it("filters slash completion chrome for submitted partial slash input", async () => {
+  it("does not render slash completion chrome for submitted partial slash input", async () => {
     const outputChunks: string[] = [];
     const runtime = createMockRuntime();
     let promptIndex = 0;
@@ -1256,12 +1260,13 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     });
 
     const rendered = outputChunks.join("");
-    expect(rendered).toContain("/model");
-    expect(rendered).toContain("Show active model");
-    expect(rendered).not.toContain("Show command help");
+    const commandOutput = rendered.slice(rendered.indexOf("Unknown command: /mo"));
+    expect(rendered).toContain("Unknown command: /mo");
+    expect(commandOutput).not.toContain("Show active model");
+    expect(commandOutput).not.toContain("Show command help");
   });
 
-  it("renders slash completion empty state for unknown slash input", async () => {
+  it("renders unknown command text for unknown slash input", async () => {
     const outputChunks: string[] = [];
     const runtime = createMockRuntime();
     let promptIndex = 0;
@@ -1288,7 +1293,8 @@ describe("runSessionLoop — user prompt rail behavior", () => {
       close: () => {},
     });
 
-    expect(outputChunks.join("")).toContain('No slash commands match "/zzzz".');
+    expect(outputChunks.join("")).toContain("Unknown command: /zzzz");
+    expect(outputChunks.join("")).not.toContain("No slash commands");
   });
 
   it("keeps slash completion out of plain non-TTY transcript fallback", async () => {
@@ -1889,14 +1895,14 @@ describe("runSessionLoop — active turn spinner", () => {
     });
 
     const rendered = outputChunks.join("");
-    const clearIndex = rendered.indexOf("\x1b[1A\x1b[2K\r");
+    const clearIndex = managedRegionClearIndex(rendered);
     const assistantIndex = rendered.indexOf("Mock response");
     expect(clearIndex).toBeGreaterThan(-1);
     expect(assistantIndex).toBeGreaterThan(-1);
     expect(clearIndex).toBeLessThan(assistantIndex);
   });
 
-  it("clears the readline echo before rendering the submitted user prompt rail", async () => {
+  it("lets raw prompt cleanup own submitted prompt rows before rendering the user rail", async () => {
     const outputChunks: string[] = [];
     const output = {
       write(chunk: string | Uint8Array): boolean {
@@ -1929,89 +1935,8 @@ describe("runSessionLoop — active turn spinner", () => {
 
     const rendered = outputChunks.join("");
     const userRailIndex = rendered.indexOf("↳ hello");
-    const echoClearIndex = rendered.lastIndexOf("\x1b[1A\x1b[2K\r", userRailIndex);
-    expect(echoClearIndex).toBeGreaterThan(-1);
-    expect(echoClearIndex).toBeLessThan(userRailIndex);
-  });
-
-  it("clears every wrapped readline echo row before the submitted user prompt rail", async () => {
-    const outputChunks: string[] = [];
-    const output = {
-      write(chunk: string | Uint8Array): boolean {
-        outputChunks.push(String(chunk));
-        return true;
-      },
-      isTTY: true,
-      columns: 20,
-    } as unknown as NodeJS.WritableStream;
-    const longText = "this is a deliberately long prompt";
-    const runtime = createEventEmittingMockRuntime([
-      { kind: "agent-start", sessionId: "test-session", input: longText },
-      { kind: "agent-final", text: "Mock response" },
-    ]);
-
-    let promptIndex = 0;
-    await runSessionLoop({
-      runtime,
-      output,
-      capabilities: interactiveCaps({ terminalWidth: 20, supportsAnimation: false }),
-      prompt: Object.assign(
-        async () => {
-          const values = [longText, "/exit"];
-          return values[promptIndex++] ?? "/exit";
-        },
-        { close: () => {} }
-      ),
-      close: () => {},
-    });
-
-    const rendered = outputChunks.join("");
-    const userRailIndex = rendered.indexOf("↳ this is a delib...");
-    const beforeUserRail = rendered.slice(0, userRailIndex);
-    const chromeClearIndex = beforeUserRail.search(/\x1b\[\d+A\x1b\[2K/u);
-    const echoClearIndex = rendered.lastIndexOf("\x1b[1A\x1b[2K\x1b[1A\x1b[2K\r", userRailIndex);
-    expect(chromeClearIndex).toBeGreaterThan(-1);
-    expect(echoClearIndex).toBeGreaterThan(-1);
-    expect(chromeClearIndex).toBeLessThan(echoClearIndex);
-    expect(echoClearIndex).toBeLessThan(userRailIndex);
-  });
-
-  it("uses the raw echoed readline text when clearing trailing-space wraps", async () => {
-    const outputChunks: string[] = [];
-    const output = {
-      write(chunk: string | Uint8Array): boolean {
-        outputChunks.push(String(chunk));
-        return true;
-      },
-      isTTY: true,
-      columns: 20,
-    } as unknown as NodeJS.WritableStream;
-    const rawText = "x".padEnd(35, " ");
-    const runtime = createEventEmittingMockRuntime([
-      { kind: "agent-start", sessionId: "test-session", input: "x" },
-      { kind: "agent-final", text: "Mock response" },
-    ]);
-
-    let promptIndex = 0;
-    await runSessionLoop({
-      runtime,
-      output,
-      capabilities: interactiveCaps({ terminalWidth: 20, supportsAnimation: false }),
-      prompt: Object.assign(
-        async () => {
-          const values = [rawText, "/exit"];
-          return values[promptIndex++] ?? "/exit";
-        },
-        { close: () => {} }
-      ),
-      close: () => {},
-    });
-
-    const rendered = outputChunks.join("");
-    const userRailIndex = rendered.indexOf("↳ x");
-    const echoClearIndex = rendered.lastIndexOf("\x1b[1A\x1b[2K\x1b[1A\x1b[2K\r", userRailIndex);
-    expect(echoClearIndex).toBeGreaterThan(-1);
-    expect(echoClearIndex).toBeLessThan(userRailIndex);
+    expect(userRailIndex).toBeGreaterThan(-1);
+    expect(rendered.slice(0, userRailIndex)).not.toContain("\x1b[1A\x1b[2K");
   });
 
   it("renders active-turn bottom chrome without a read-only prompt box", async () => {
@@ -2093,7 +2018,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(rendered.slice(toolIndex)).not.toContain("────────────────────────────────────────────────────────────────────────────────\n↳ hello\n────────────────────────────────────────────────────────────────────────────────");
   });
 
-  it("routes bottom-chrome tool activity through live slots and flushes durable results before the response", async () => {
+  it("routes bottom-chrome tool activity through live slots after removed fallback flags are ignored", async () => {
     const outputChunks: string[] = [];
     const output = {
       write(chunk: string | Uint8Array): boolean {
@@ -2156,7 +2081,7 @@ describe("runSessionLoop — active turn spinner", () => {
       chunk.includes("mock-model")
     );
     expect(liveStartChunk).toBeDefined();
-    expect(liveStartChunk?.split("\n").filter((line) => line.includes("old-start-only") || line === "\u00A0")).toHaveLength(5);
+    expect(liveStartChunk?.split("\n").filter((line) => line.includes("old-start-only") || line === "\u00A0")).toHaveLength(1);
 
     const finalLiveHudChunk = strippedChunks.reduce<string | undefined>(
       (latest, chunk) =>
@@ -2323,13 +2248,13 @@ describe("runSessionLoop — active turn spinner", () => {
     while (resolvePrompt === undefined) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
-    expect(input.listenerCount("keypress")).toBe(0);
+    expect(input.listenerCount("data")).toBe(0);
     resolvePrompt("hello");
     await handleStartedPromise;
-    expect(input.listenerCount("keypress")).toBe(1);
+    expect(input.listenerCount("data")).toBe(1);
     releaseTurn?.();
     await loop;
-    expect(input.listenerCount("keypress")).toBe(0);
+    expect(input.listenerCount("data")).toBe(0);
     expect(input.rawModes).toEqual([true, false]);
   });
 
@@ -2935,7 +2860,7 @@ describe("runSessionLoop — active turn spinner", () => {
     input.press("/steerx", { name: "text", sequence: "/steerx" });
     expect(stripAnsi(outputChunks.join(""))).toContain("⌘ active command: /steerx");
     expect(stripAnsi(outputChunks.join(""))).not.toContain("↯ Steer: /steerx");
-    input.press("", { name: "escape" });
+    input.press("\x1b", { name: "escape" });
     const afterEscapeIndex = outputChunks.length;
     input.press("/interrupt now", { name: "text", sequence: "/interrupt now" });
     const afterInterruptNow = stripAnsi(outputChunks.slice(afterEscapeIndex).join(""));
@@ -2994,7 +2919,7 @@ describe("runSessionLoop — active turn spinner", () => {
       input.press(char, { name: char, sequence: char });
     }
     expect(stripAnsi(outputChunks.join(""))).toContain("x Interrupt");
-    input.press("", { name: "escape" });
+    input.press("\x1b", { name: "escape" });
     const afterEscapeIndex = outputChunks.length;
     for (const char of "queued follow up") {
       input.press(char, { name: char, sequence: char });
@@ -3343,7 +3268,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(rendered).toContain("◷ 1m 1s");
   });
 
-  it("uses live wrapped prompt rows when ticking the idle session timer", async () => {
+  it("ticks the idle session timer through Papyrus-managed chrome", async () => {
     const outputChunks: string[] = [];
     const output = {
       write(chunk: string | Uint8Array): boolean {
@@ -3356,10 +3281,10 @@ describe("runSessionLoop — active turn spinner", () => {
 
     let nowMs = 0;
     let resolvePrompt: ((value: string) => void) | undefined;
-    let promptOptions: { onRowsChange?: (rows: number) => void } | undefined;
+    let promptStarted = false;
     const prompt = Object.assign(
-      vi.fn(async (_question: string, options?: { onRowsChange?: (rows: number) => void }) => {
-        promptOptions = options;
+      vi.fn(async () => {
+        promptStarted = true;
         return await new Promise<string>((resolve) => {
           resolvePrompt = resolve;
         });
@@ -3376,19 +3301,18 @@ describe("runSessionLoop — active turn spinner", () => {
       now: () => nowMs,
     });
 
-    while (resolvePrompt === undefined || promptOptions === undefined) {
+    while (resolvePrompt === undefined || !promptStarted) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
-    promptOptions.onRowsChange?.(3);
     nowMs = 61_000;
     await new Promise((resolve) => setTimeout(resolve, 1050));
     resolvePrompt("/exit");
     await loop;
 
-    expect(outputChunks.some((chunk) => /\x1b7\x1b\[\d+A/u.test(chunk))).toBe(true);
+    expect(outputChunks.some((chunk) => MANAGED_REGION_CLEAR_PATTERN.test(chunk))).toBe(true);
   });
 
-  it("renders slash completion chrome while typing idle input", async () => {
+  it("does not install idle prompt slash or transient chrome callbacks", async () => {
     const outputChunks: string[] = [];
     let resolvePrompt: ((value: string) => void) | undefined;
     let promptOptions: PromptOptions | undefined;
@@ -3420,245 +3344,16 @@ describe("runSessionLoop — active turn spinner", () => {
     while (resolvePrompt === undefined || promptOptions === undefined) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
-    promptOptions.onInputChange?.("/h");
-    expect(outputChunks.join("")).toContain("/help");
-    expect(outputChunks.join("")).toContain("Show command help");
+    expect(promptOptions.onInputChange).toBeUndefined();
+    expect(promptOptions.specialKeyController).toBeUndefined();
+    expect(promptOptions.onPastePreview).toBeUndefined();
+    expect(stripAnsi(outputChunks.join(""))).not.toContain("Show command help");
 
     resolvePrompt("/exit");
     await loop;
   });
 
-  it("moves idle slash completion selection with special arrow keys", async () => {
-    const outputChunks: string[] = [];
-    let resolvePrompt: ((value: string) => void) | undefined;
-    let promptOptions: PromptOptions | undefined;
-    const prompt = Object.assign(
-      vi.fn(async (_question: string, options?: PromptOptions) => {
-        promptOptions = options;
-        return await new Promise<string>((resolve) => {
-          resolvePrompt = resolve;
-        });
-      }),
-      { close: () => {} }
-    );
-
-    const loop = runSessionLoop({
-      runtime: createMockRuntime(),
-      output: {
-        write(chunk: string | Uint8Array): boolean {
-          outputChunks.push(String(chunk));
-          return true;
-        },
-        isTTY: true,
-        columns: 120,
-      } as unknown as NodeJS.WritableStream,
-      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
-      prompt,
-      close: () => {},
-    });
-
-    while (resolvePrompt === undefined || promptOptions === undefined) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    promptOptions.onInputChange?.("/");
-    const beforeMove = outputChunks.length;
-    const result = promptOptions.specialKeyController?.onSpecialKey("down", {
-      getInputLine: () => "/",
-      setInputLine: () => undefined,
-    });
-
-    expect(result).toBe("handled");
-    expect(stripAnsi(outputChunks.slice(beforeMove).join(""))).toContain("> /status");
-
-    resolvePrompt("/exit");
-    await loop;
-  });
-
-  it("applies idle slash completion on Tab", async () => {
-    const outputChunks: string[] = [];
-    let resolvePrompt: ((value: string) => void) | undefined;
-    let promptOptions: PromptOptions | undefined;
-    let inputLine = "/h";
-    const prompt = Object.assign(
-      vi.fn(async (_question: string, options?: PromptOptions) => {
-        promptOptions = options;
-        return await new Promise<string>((resolve) => {
-          resolvePrompt = resolve;
-        });
-      }),
-      { close: () => {} }
-    );
-
-    const loop = runSessionLoop({
-      runtime: createMockRuntime(),
-      output: {
-        write(chunk: string | Uint8Array): boolean {
-          outputChunks.push(String(chunk));
-          return true;
-        },
-        isTTY: true,
-        columns: 120,
-      } as unknown as NodeJS.WritableStream,
-      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
-      prompt,
-      close: () => {},
-    });
-
-    while (resolvePrompt === undefined || promptOptions === undefined) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    promptOptions.onInputChange?.(inputLine);
-    const result = promptOptions.specialKeyController?.onSpecialKey("tab", {
-      getInputLine: () => inputLine,
-      setInputLine: (nextLine) => {
-        inputLine = nextLine;
-        promptOptions?.onInputChange?.(nextLine);
-      },
-    });
-
-    expect(result).toBe("handled");
-    expect(inputLine).toBe("/help");
-
-    resolvePrompt("/exit");
-    await loop;
-  });
-
-  it("lets Tab fall through for no-match idle slash completion", async () => {
-    const outputChunks: string[] = [];
-    let resolvePrompt: ((value: string) => void) | undefined;
-    let promptOptions: PromptOptions | undefined;
-    let inputLine = "/zzzz";
-    const prompt = Object.assign(
-      vi.fn(async (_question: string, options?: PromptOptions) => {
-        promptOptions = options;
-        return await new Promise<string>((resolve) => {
-          resolvePrompt = resolve;
-        });
-      }),
-      { close: () => {} }
-    );
-
-    const loop = runSessionLoop({
-      runtime: createMockRuntime(),
-      output: {
-        write(chunk: string | Uint8Array): boolean {
-          outputChunks.push(String(chunk));
-          return true;
-        },
-        isTTY: true,
-        columns: 120,
-      } as unknown as NodeJS.WritableStream,
-      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
-      prompt,
-      close: () => {},
-    });
-
-    while (resolvePrompt === undefined || promptOptions === undefined) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    promptOptions.onInputChange?.(inputLine);
-    const result = promptOptions.specialKeyController?.onSpecialKey("tab", {
-      getInputLine: () => inputLine,
-      setInputLine: (nextLine) => {
-        inputLine = nextLine;
-      },
-    });
-
-    expect(result).toBeUndefined();
-    expect(inputLine).toBe("/zzzz");
-
-    resolvePrompt("/exit");
-    await loop;
-  });
-
-  it("closes no-match idle slash completion on Escape", async () => {
-    const outputChunks: string[] = [];
-    let resolvePrompt: ((value: string) => void) | undefined;
-    let promptOptions: PromptOptions | undefined;
-    const prompt = Object.assign(
-      vi.fn(async (_question: string, options?: PromptOptions) => {
-        promptOptions = options;
-        return await new Promise<string>((resolve) => {
-          resolvePrompt = resolve;
-        });
-      }),
-      { close: () => {} }
-    );
-
-    const loop = runSessionLoop({
-      runtime: createMockRuntime(),
-      output: {
-        write(chunk: string | Uint8Array): boolean {
-          outputChunks.push(String(chunk));
-          return true;
-        },
-        isTTY: true,
-        columns: 120,
-      } as unknown as NodeJS.WritableStream,
-      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
-      prompt,
-      close: () => {},
-    });
-
-    while (resolvePrompt === undefined || promptOptions === undefined) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    promptOptions.onInputChange?.("/zzzz");
-    const result = promptOptions.specialKeyController?.onSpecialKey("escape", {
-      getInputLine: () => "/zzzz",
-      setInputLine: () => undefined,
-    });
-
-    expect(result).toBe("handled");
-
-    resolvePrompt("/exit");
-    await loop;
-  });
-
-  it("clears live slash completion chrome when idle input is no longer slash-prefixed", async () => {
-    const outputChunks: string[] = [];
-    let resolvePrompt: ((value: string) => void) | undefined;
-    let promptOptions: PromptOptions | undefined;
-    const prompt = Object.assign(
-      vi.fn(async (_question: string, options?: PromptOptions) => {
-        promptOptions = options;
-        return await new Promise<string>((resolve) => {
-          resolvePrompt = resolve;
-        });
-      }),
-      { close: () => {} }
-    );
-
-    const loop = runSessionLoop({
-      runtime: createMockRuntime(),
-      output: {
-        write(chunk: string | Uint8Array): boolean {
-          outputChunks.push(String(chunk));
-          return true;
-        },
-        isTTY: true,
-        columns: 120,
-      } as unknown as NodeJS.WritableStream,
-      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
-      prompt,
-      close: () => {},
-    });
-
-    while (resolvePrompt === undefined || promptOptions === undefined) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    promptOptions.onInputChange?.("/h");
-    const afterSlashHint = outputChunks.length;
-    promptOptions.onInputChange?.("hello");
-    const clearChunks = outputChunks.slice(afterSlashHint).join("");
-    expect(clearChunks).not.toContain("/help");
-    expect(clearChunks).toContain("mock-model");
-
-    resolvePrompt("/exit");
-    await loop;
-  });
-
-  it("shows idle shortcuts only for empty bottom-chrome input and gives slash menu priority", async () => {
+  it("passes idle prompt placeholder without installing prompt slash chrome", async () => {
     const outputChunks: string[] = [];
     let resolvePrompt: ((value: string) => void) | undefined;
     let promptOptions: PromptOptions | undefined;
@@ -3700,120 +3395,11 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(initial).not.toContain("/help · /tools · /model · /status · Ctrl+C exit");
     expect(initial).not.toContain("Type a message.");
 
-    const afterInitial = outputChunks.length;
-    promptOptions.onInputChange?.("hello");
-    const afterTyping = stripAnsi(outputChunks.slice(afterInitial).join(""));
-    expect(afterTyping).not.toContain("Ctrl+C exit");
-    expect(afterTyping).not.toContain("Show command help");
-
-    const afterTypingIndex = outputChunks.length;
-    promptOptions.onInputChange?.("/");
-    const afterSlash = stripAnsi(outputChunks.slice(afterTypingIndex).join(""));
-    expect(afterSlash).toContain("Show command help");
-    expect(afterSlash).not.toContain("Ctrl+C exit");
-
-    const afterSlashIndex = outputChunks.length;
-    promptOptions.onInputChange?.("");
-    const afterEmpty = stripAnsi(outputChunks.slice(afterSlashIndex).join(""));
-    expect(promptOptions.placeholder).toContain("/help · /tools · /model · /status · Ctrl+C exit");
-    expect(afterEmpty).not.toContain("/help · /tools · /model · /status · Ctrl+C exit");
-    expect(afterEmpty).not.toContain("Show command help");
-
     resolvePrompt("/exit");
     await loop;
   });
 
-  it("renders and clears paste preview chrome around idle readline submission", async () => {
-    const outputChunks: string[] = [];
-    let resolvePrompt: ((value: string) => void) | undefined;
-    let promptOptions: PromptOptions | undefined;
-    const prompt = Object.assign(
-      vi.fn(async (_question: string, options?: PromptOptions) => {
-        promptOptions = options;
-        return await new Promise<string>((resolve) => {
-          resolvePrompt = resolve;
-        });
-      }),
-      { close: () => {} }
-    );
-
-    const loop = runSessionLoop({
-      runtime: createMockRuntime(),
-      output: {
-        write(chunk: string | Uint8Array): boolean {
-          outputChunks.push(String(chunk));
-          return true;
-        },
-        isTTY: true,
-        columns: 120,
-      } as unknown as NodeJS.WritableStream,
-      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
-      prompt,
-      close: () => {},
-    });
-
-    while (resolvePrompt === undefined || promptOptions === undefined) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    promptOptions.onPastePreview?.("line one\nline two", "line one ↵ line two");
-    const previewOutput = outputChunks.join("");
-    expect(previewOutput).toContain("line one");
-    expect(previewOutput).toContain("line two");
-    const afterPreview = outputChunks.length;
-
-    resolvePrompt("/exit");
-    await loop;
-
-    expect(outputChunks.slice(afterPreview).join("")).not.toContain("line one");
-    expect(outputChunks.slice(afterPreview).join("")).not.toContain("line two");
-  });
-
-  it("renders compact paste references in preview chrome without exposing original paste content", async () => {
-    const outputChunks: string[] = [];
-    let resolvePrompt: ((value: string) => void) | undefined;
-    let promptOptions: PromptOptions | undefined;
-    const prompt = Object.assign(
-      vi.fn(async (_question: string, options?: PromptOptions) => {
-        promptOptions = options;
-        return await new Promise<string>((resolve) => {
-          resolvePrompt = resolve;
-        });
-      }),
-      { close: () => {} }
-    );
-
-    const loop = runSessionLoop({
-      runtime: createMockRuntime(),
-      output: {
-        write(chunk: string | Uint8Array): boolean {
-          outputChunks.push(String(chunk));
-          return true;
-        },
-        isTTY: true,
-        columns: 120,
-      } as unknown as NodeJS.WritableStream,
-      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
-      prompt,
-      close: () => {},
-    });
-
-    while (resolvePrompt === undefined || promptOptions === undefined) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    promptOptions.onPastePreview?.(
-      "do not echo this pasted body\nsecond line",
-      "[Pasted text #1: 2 lines → /tmp/estacoda-test-paste.txt]"
-    );
-    const previewOutput = outputChunks.join("");
-    expect(previewOutput).toContain("[Pasted text #1: 2 lines");
-    expect(previewOutput).not.toContain("do not echo this pasted body");
-    expect(previewOutput).not.toContain("second line");
-
-    resolvePrompt("/exit");
-    await loop;
-  });
-
-  it("keeps submitted multiline text intact after paste preview", async () => {
+  it("keeps submitted multiline text intact", async () => {
     const handledTexts: string[] = [];
     const runtime = createMockRuntime({
       handle: async (input: Parameters<Runtime["handle"]>[0]) => {
@@ -3854,14 +3440,13 @@ describe("runSessionLoop — active turn spinner", () => {
     while (resolvePrompt === undefined || promptOptions === undefined) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
-    promptOptions.onPastePreview?.("line one\nline two", "line one ↵ line two");
     resolvePrompt("line one\nline two");
     await loop;
 
     expect(handledTexts).toEqual(["line one\nline two"]);
   });
 
-  it("provides a profile-local paste reference store to idle readline prompts", async () => {
+  it("provides a profile-local paste reference store to idle prompts", async () => {
     const homeDir = await mkdtemp(join(tmpdir(), "estacoda-session-paste-home-"));
     try {
       let promptOptions: PromptOptions | undefined;
@@ -3897,45 +3482,6 @@ describe("runSessionLoop — active turn spinner", () => {
     } finally {
       await rm(homeDir, { recursive: true, force: true });
     }
-  });
-
-  it("keeps live slash callbacks out of disabled bottom chrome output", async () => {
-    const outputChunks: string[] = [];
-    let resolvePrompt: ((value: string) => void) | undefined;
-    let promptOptions: PromptOptions | undefined;
-    const prompt = Object.assign(
-      vi.fn(async (_question: string, options?: PromptOptions) => {
-        promptOptions = options;
-        return await new Promise<string>((resolve) => {
-          resolvePrompt = resolve;
-        });
-      }),
-      { close: () => {} }
-    );
-
-    const loop = runSessionLoop({
-      runtime: createMockRuntime(),
-      output: {
-        write(chunk: string | Uint8Array): boolean {
-          outputChunks.push(String(chunk));
-          return true;
-        },
-        isTTY: false,
-        columns: 120,
-      } as unknown as NodeJS.WritableStream,
-      capabilities: interactiveCaps({ isTTY: false, supportsAnimation: false }),
-      prompt,
-      close: () => {},
-    });
-
-    while (resolvePrompt === undefined || promptOptions === undefined) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    promptOptions.onInputChange?.("/h");
-    resolvePrompt("/exit");
-    await loop;
-
-    expect(stripAnsi(outputChunks.join(""))).not.toContain("Show command help");
   });
 
   it("updates chrome status rail from provider-actual context usage events", async () => {
@@ -4870,7 +4416,7 @@ describe("runSessionLoop — active turn spinner", () => {
     // Tool output should be present
     expect(rendered).toContain("browser.status");
     // The ANSI clear sequence should appear before tool output
-    const clearIndex = rendered.indexOf("\x1b[1A\x1b[2K\r");
+    const clearIndex = managedRegionClearIndex(rendered);
     const toolIndex = rendered.indexOf("browser.status");
     expect(clearIndex).toBeGreaterThan(-1);
     expect(toolIndex).toBeGreaterThan(-1);
@@ -4957,8 +4503,8 @@ describe("runSessionLoop — active turn spinner", () => {
     });
 
     const rendered = outputChunks.join("");
-    const clearIndex = rendered.indexOf("\x1b[1A\x1b[2K\r");
-    const permissionIndex = rendered.indexOf("Permission required");
+    const clearIndex = managedRegionClearIndex(rendered);
+    const permissionIndex = rendered.indexOf("[Approval] Approval required");
     expect(clearIndex).toBeGreaterThan(-1);
     expect(permissionIndex).toBeGreaterThan(-1);
     expect(clearIndex).toBeLessThan(permissionIndex);
@@ -4967,7 +4513,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(rendered).toContain("Permission denied.");
     expect(rendered.slice(permissionIndex)).not.toContain("contemplating");
     const renderedPlain = stripAnsi(rendered);
-    const plainPermissionIndex = renderedPlain.indexOf("Permission required");
+    const plainPermissionIndex = renderedPlain.indexOf("[Approval] Approval required");
     const submittedRailIndex = renderedPlain.indexOf("↳ write file");
     expect(submittedRailIndex).toBeGreaterThan(-1);
     expect(submittedRailIndex).toBeLessThan(plainPermissionIndex);
@@ -5324,7 +4870,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(result.rendered).toContain("Approval granted (persistent for this workspace). Retrying now.");
   });
 
-  it("keeps explicit legacy approval widget mode on the current adapter path", async () => {
+  it("ignores the removed legacy approval widget fallback in core sessions", async () => {
     const result = await runApprovalPromptScenario(["once"], {
       env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "legacy" },
       response: approvalAskResponse(),
@@ -5336,7 +4882,7 @@ describe("runSessionLoop — active turn spinner", () => {
       toolName: "workspace.write",
       scope: "once",
     });
-    expect(result.rendered).not.toContain("[Approval] Approval required:");
+    expect(result.rendered).toContain("[Approval] Approval required:");
   });
 
   it("defaults promptable approvals to Papyrus cards in raw Papyrus core sessions", async () => {
@@ -5359,7 +4905,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(result.rendered).toContain("Approval granted (once). Retrying now.");
   });
 
-  it("keeps approval prompts legacy when core sessions use the readline escape hatch", async () => {
+  it("ignores removed readline input fallback for default approval widgets", async () => {
     const result = await runApprovalPromptScenario(["once"], {
       env: { [UI_INPUT_MODE_ENV_VAR]: "readline" },
       response: approvalAskResponse(),
@@ -5371,10 +4917,10 @@ describe("runSessionLoop — active turn spinner", () => {
       toolName: "workspace.write",
       scope: "once",
     });
-    expect(result.rendered).not.toContain("[Approval] Approval required:");
+    expect(result.rendered).toContain("[Approval] Approval required:");
   });
 
-  it("keeps approval prompts legacy when readline fallback conflicts with the Papyrus approval flag", async () => {
+  it("ignores removed readline input fallback when Papyrus approval widgets are explicit", async () => {
     const result = await runApprovalPromptScenario(["once"], {
       env: {
         [UI_INPUT_MODE_ENV_VAR]: "readline",
@@ -5389,10 +4935,10 @@ describe("runSessionLoop — active turn spinner", () => {
       toolName: "workspace.write",
       scope: "once",
     });
-    expect(result.rendered).not.toContain("[Approval] Approval required:");
+    expect(result.rendered).toContain("[Approval] Approval required:");
   });
 
-  it("keeps approval prompts legacy when core sessions use the legacy renderer fallback", async () => {
+  it("ignores removed legacy renderer fallback for default approval widgets", async () => {
     const result = await runApprovalPromptScenario(["once"], {
       env: { [UI_RENDERER_ENV_VAR]: "legacy" },
       response: approvalAskResponse(),
@@ -5404,12 +4950,11 @@ describe("runSessionLoop — active turn spinner", () => {
       toolName: "workspace.write",
       scope: "once",
     });
-    expect(result.rendered).not.toContain("[Approval] Approval required:");
+    expect(result.rendered).toContain("[Approval] Approval required:");
   });
 
-  it("routes promptable command approvals through Papyrus adapter behind the explicit flag", async () => {
+  it("routes promptable command approvals through Papyrus adapter", async () => {
     const result = await runApprovalPromptScenario(["approve-once"], {
-      env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
       response: commandApprovalAskResponse(),
       ttyCoreSession: true,
     });
@@ -5428,9 +4973,8 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(result.rendered).toContain("Approval granted (once). Retrying now.");
   });
 
-  it("routes promptable file approvals through Papyrus adapter behind the explicit flag", async () => {
+  it("routes promptable file approvals through Papyrus adapter", async () => {
     const result = await runApprovalPromptScenario(["reject"], {
-      env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
       response: approvalAskResponse(),
       ttyCoreSession: true,
     });
@@ -5448,7 +4992,6 @@ describe("runSessionLoop — active turn spinner", () => {
       ["always", "always"],
     ] as const) {
       const result = await runApprovalPromptScenario([answer], {
-        env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
         response: approvalAskResponse(),
         ttyCoreSession: true,
       });
@@ -5467,7 +5010,6 @@ describe("runSessionLoop — active turn spinner", () => {
 
   it("keeps Papyrus cancel and unsupported rich answers on the existing invalid-answer path", async () => {
     const result = await runApprovalPromptScenario(["cancel", "feedback", "approve-once"], {
-      env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
       response: approvalAskResponse(),
       ttyCoreSession: true,
     });
@@ -5478,10 +5020,9 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(result.rendered.split("Enter one of: once, session, always, deny.")).toHaveLength(3);
   });
 
-  it("prefers an injected approval prompt adapter over the Papyrus approval widget flag", async () => {
+  it("prefers an injected approval prompt adapter over the core Papyrus approval adapter", async () => {
     const adapter = vi.fn<ApprovalPromptAdapter>(async () => "deny");
     const result = await runApprovalPromptScenario([], {
-      env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
       approvalPromptAdapter: adapter,
       response: approvalAskResponse(),
     });
@@ -5623,9 +5164,8 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(result.handleInputs).toEqual(["write file"]);
   });
 
-  it("does not call the Papyrus approval adapter for policy-denied file executions when the flag is enabled", async () => {
+  it("does not call the Papyrus approval adapter for policy-denied file executions", async () => {
     const result = await runApprovalPromptScenario([], {
-      env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
       response: approvalDenyResponse(),
       ttyCoreSession: true,
     });
@@ -5635,9 +5175,8 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(result.rendered).not.toContain("[Approval] Approval required:");
   });
 
-  it("does not call the Papyrus approval adapter for hardline or policy-denied command executions when the flag is enabled", async () => {
+  it("does not call the Papyrus approval adapter for hardline or policy-denied command executions", async () => {
     const result = await runApprovalPromptScenario([], {
-      env: { [APPROVAL_WIDGET_MODE_ENV_VAR]: "papyrus" },
       response: commandApprovalDenyResponse(),
       ttyCoreSession: true,
     });
@@ -5713,7 +5252,7 @@ describe("runSessionLoop — active turn spinner", () => {
     const rendered = outputChunks.join("");
     expect(rendered).toContain("cancelled: user interrupt");
     // The clear sequence should appear before the cancellation message
-    const clearIndex = rendered.indexOf("\x1b[1A\x1b[2K\r");
+    const clearIndex = managedRegionClearIndex(rendered);
     const cancelIndex = rendered.indexOf("cancelled: user interrupt");
     expect(clearIndex).toBeGreaterThan(-1);
     expect(cancelIndex).toBeGreaterThan(-1);
@@ -5756,7 +5295,7 @@ describe("runSessionLoop — active turn spinner", () => {
     const rendered = outputChunks.join("");
     expect(rendered).toContain("provider budget: token limit reached");
     // The clear sequence should appear before the budget message
-    const clearIndex = rendered.indexOf("\x1b[1A\x1b[2K\r");
+    const clearIndex = managedRegionClearIndex(rendered);
     const budgetIndex = rendered.indexOf("provider budget: token limit reached");
     expect(clearIndex).toBeGreaterThan(-1);
     expect(budgetIndex).toBeGreaterThan(-1);
@@ -5874,7 +5413,7 @@ describe("runSessionLoop — animated spinner behavior", () => {
     });
 
     const rendered = outputChunks.join("");
-    const clearIndex = rendered.indexOf("\x1b[1A\x1b[2K\r");
+    const clearIndex = managedRegionClearIndex(rendered);
     const assistantIndex = rendered.indexOf("Mock response");
     expect(clearIndex).toBeGreaterThan(-1);
     expect(assistantIndex).toBeGreaterThan(-1);
@@ -5924,7 +5463,7 @@ describe("runSessionLoop — animated spinner behavior", () => {
     // Tool output should be present
     expect(rendered).toContain("browser.status");
     // The ANSI clear sequence should appear before tool output
-    const clearIndex = rendered.indexOf("\x1b[1A\x1b[2K\r");
+    const clearIndex = managedRegionClearIndex(rendered);
     const toolIndex = rendered.indexOf("browser.status");
     expect(clearIndex).toBeGreaterThan(-1);
     expect(toolIndex).toBeGreaterThan(-1);
@@ -5971,7 +5510,7 @@ describe("runSessionLoop — animated spinner behavior", () => {
 
     const rendered = outputChunks.join("");
     expect(rendered).toContain("cancelled: user interrupt");
-    const clearIndex = rendered.indexOf("\x1b[1A\x1b[2K\r");
+    const clearIndex = managedRegionClearIndex(rendered);
     const cancelIndex = rendered.indexOf("cancelled: user interrupt");
     expect(clearIndex).toBeGreaterThan(-1);
     expect(cancelIndex).toBeGreaterThan(-1);
@@ -6013,7 +5552,7 @@ describe("runSessionLoop — animated spinner behavior", () => {
 
     const rendered = outputChunks.join("");
     expect(rendered).toContain("provider budget: token limit reached");
-    const clearIndex = rendered.indexOf("\x1b[1A\x1b[2K\r");
+    const clearIndex = managedRegionClearIndex(rendered);
     const budgetIndex = rendered.indexOf("provider budget: token limit reached");
     expect(clearIndex).toBeGreaterThan(-1);
     expect(budgetIndex).toBeGreaterThan(-1);

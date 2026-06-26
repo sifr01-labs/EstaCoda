@@ -10,68 +10,71 @@ function fakePrompt(answer: string): Prompt {
 }
 
 describe("createInteractivePrompt", () => {
-  it("selects the Papyrus prompt by default when interactive capabilities allow", async () => {
+  it("selects the Papyrus prompt by default", async () => {
     const papyrusPrompt = fakePrompt("papyrus");
-    const readlinePrompt = fakePrompt("readline");
     const createPapyrus = vi.fn(() => papyrusPrompt);
-    const createReadline = vi.fn(() => readlinePrompt);
 
     const prompt = createInteractivePrompt({
-      canRunInteractive: () => true,
       createPapyrus,
-      createReadline,
     });
 
     await expect(prompt("> ")).resolves.toBe("papyrus");
     expect(createPapyrus).toHaveBeenCalledOnce();
-    expect(createReadline).not.toHaveBeenCalled();
   });
 
-  it("selects readline when the input mode fallback flag requests it", async () => {
+  it("keeps non-TTY prompt construction on the Papyrus prompt seam", async () => {
+    const input = { isTTY: false } as NodeJS.ReadStream;
+    const output = { isTTY: false, write: vi.fn() } as unknown as NodeJS.WriteStream;
+    const papyrusPrompt = fakePrompt("plain");
+    const createPapyrus = vi.fn(() => papyrusPrompt);
+
+    const prompt = createInteractivePrompt({
+      input,
+      output,
+      createPapyrus,
+    });
+
+    await expect(prompt("> ")).resolves.toBe("plain");
+    expect(createPapyrus).toHaveBeenCalledWith({
+      input,
+      output,
+      env: undefined,
+      uiContext: undefined,
+    });
+  });
+
+  it("keeps removed input mode fallback flags on the Papyrus prompt path", async () => {
     const createPapyrus = vi.fn(() => fakePrompt("papyrus"));
-    const createReadline = vi.fn(() => fakePrompt("readline"));
 
     const prompt = createInteractivePrompt({
       env: { [UI_INPUT_MODE_ENV_VAR]: "readline" },
-      canRunInteractive: () => true,
       createPapyrus,
-      createReadline,
     });
 
-    await expect(prompt("> ")).resolves.toBe("readline");
-    expect(createPapyrus).not.toHaveBeenCalled();
-    expect(createReadline).toHaveBeenCalledOnce();
+    await expect(prompt("> ")).resolves.toBe("papyrus");
+    expect(createPapyrus).toHaveBeenCalledWith({
+      input: expect.anything(),
+      output: expect.anything(),
+      env: { [UI_INPUT_MODE_ENV_VAR]: "readline" },
+      uiContext: undefined,
+    });
   });
 
-  it("selects readline when the renderer fallback flag requests it", async () => {
+  it("keeps removed renderer fallback flags on the Papyrus prompt path", async () => {
     const createPapyrus = vi.fn(() => fakePrompt("papyrus"));
-    const createReadline = vi.fn(() => fakePrompt("readline"));
 
     const prompt = createInteractivePrompt({
       env: { [UI_RENDERER_ENV_VAR]: "legacy" },
-      canRunInteractive: () => true,
       createPapyrus,
-      createReadline,
     });
 
-    await expect(prompt("> ")).resolves.toBe("readline");
-    expect(createPapyrus).not.toHaveBeenCalled();
-    expect(createReadline).toHaveBeenCalledOnce();
-  });
-
-  it("selects readline when interactive capabilities are unavailable", async () => {
-    const createPapyrus = vi.fn(() => fakePrompt("papyrus"));
-    const createReadline = vi.fn(() => fakePrompt("readline"));
-
-    const prompt = createInteractivePrompt({
-      canRunInteractive: () => false,
-      createPapyrus,
-      createReadline,
+    await expect(prompt("> ")).resolves.toBe("papyrus");
+    expect(createPapyrus).toHaveBeenCalledWith({
+      input: expect.anything(),
+      output: expect.anything(),
+      env: { [UI_RENDERER_ENV_VAR]: "legacy" },
+      uiContext: undefined,
     });
-
-    await expect(prompt("> ")).resolves.toBe("readline");
-    expect(createPapyrus).not.toHaveBeenCalled();
-    expect(createReadline).toHaveBeenCalledOnce();
   });
 
   it("forwards env, streams, and UI context to the selected prompt factory", () => {
@@ -86,9 +89,7 @@ describe("createInteractivePrompt", () => {
       output,
       env,
       uiContext,
-      canRunInteractive: () => true,
       createPapyrus,
-      createReadline: vi.fn(() => fakePrompt("readline")),
     });
 
     expect(createPapyrus).toHaveBeenCalledWith({

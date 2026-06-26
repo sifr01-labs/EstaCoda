@@ -6,7 +6,6 @@ import {
   type ApprovalCardAction,
   type ApprovalCardRenderRow,
 } from "../ui/papyrus/widgets/approvalCardModel.js";
-import type { ApprovalWidgetMode } from "./approval-widget-mode.js";
 import { buildApprovalPromptViewModel } from "./tool-activity-view-models.js";
 
 export type ApprovalPromptChrome = {
@@ -27,33 +26,8 @@ export type ApprovalPromptAdapterInput = {
 
 export type ApprovalPromptAdapter = (input: ApprovalPromptAdapterInput) => Promise<string>;
 
-export function approvalPromptAdapterForMode(mode: ApprovalWidgetMode): ApprovalPromptAdapter {
-  return mode === "papyrus" ? papyrusApprovalPromptAdapter : defaultApprovalPromptAdapter;
-}
-
-export const defaultApprovalPromptAdapter: ApprovalPromptAdapter = async (input) => {
-  const promptText = "approval > ";
-  const cardText = renderApprovalPromptCard(input.execution, input.renderer, input.allowPersistentApproval);
-  if (input.chrome.suspendForPrompt !== undefined) {
-    return await input.chrome.suspendForPrompt(async () => {
-      input.output.write(`${cardText}\n`);
-      return await input.prompt(promptText);
-    });
-  }
-
-  input.chrome.clearInlineSpinner();
-  if (input.chrome.enabled) {
-    await input.chrome.suspendChromeForTranscript(() => {
-      input.output.write(`${cardText}\n`);
-    });
-  } else {
-    input.output.write(`${cardText}\n`);
-  }
-  return await input.prompt(promptText);
-};
-
 export const papyrusApprovalPromptAdapter: ApprovalPromptAdapter = async (input) => {
-  const promptText = "approval > ";
+  const promptText = "approval action > ";
   const cardText = renderPapyrusApprovalPromptCard(input.execution, input.allowPersistentApproval);
   if (input.chrome.suspendForPrompt !== undefined) {
     return await input.chrome.suspendForPrompt(async () => {
@@ -72,15 +46,6 @@ export const papyrusApprovalPromptAdapter: ApprovalPromptAdapter = async (input)
   }
   return mapPapyrusApprovalAnswer(await input.prompt(promptText), input.allowPersistentApproval);
 };
-
-function renderApprovalPromptCard(
-  execution: ToolExecutionRecord,
-  renderer: { render(viewModel: ViewModel): string },
-  allowPersistentApproval: boolean
-): string {
-  const vm = buildApprovalPromptViewModel(execution, { allowPersistentApproval });
-  return renderer.render(vm);
-}
 
 function renderPapyrusApprovalPromptCard(
   execution: ToolExecutionRecord,

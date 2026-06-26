@@ -1,75 +1,38 @@
 # Papyrus
 
-Papyrus is EstaCoda's no-React terminal surface substrate. It is the bounded
-home for terminal cells, frame diffing, raw prompt input later, terminal
-lifecycle later, overlays and widgets later, and scrollable transcript regions
-later.
+Papyrus is EstaCoda’s native terminal UI substrate.
 
-Papyrus must not become a catch-all for view-model builders, product copy,
-provider or runtime behavior, session logic, or unrelated CLI commands. Existing
-view-model construction and renderer-facing product decisions stay outside this
-namespace unless a later integration PR explicitly moves a terminal-surface
-concern here.
+## Owns
+- screen buffer and frame diffing
+- terminal control primitives
+- text measurement, wrapping, bidi-safe rendering
+- raw prompt rendering
+- widget state models and render helpers
+- overlays, select menus, fuzzy pickers, approval cards
+- suggestion UI plumbing and ghost text state
 
-## PR 1 Boundary
+## Does not own
+- approval/security decisions
+- workspace trust policy
+- provider/model routing semantics
+- command execution
+- gateway approval queues
+- persistence of secrets
+- model/runtime behavior
 
-The first Papyrus PR is inert. It establishes the namespace and porting notes
-only; it must not change live CLI behavior, replace the current root
-`src/ui/bidi.ts`, route renderer output through Papyrus, or migrate prompt
-chrome, readline, provider, runtime, or session logic.
+## Boundaries
+- `src/ui/papyrus/screen` owns cells, frames, output, compositor.
+- `src/ui/papyrus/termio` owns ANSI/CSI/OSC/SGR primitives.
+- `src/ui/papyrus/input` owns prompt-local input state, typeahead, secret input, ghost text.
+- `src/ui/papyrus/widgets` owns pure widget models and render helpers.
+- `src/cli` maps product flows into Papyrus surfaces.
+- `src/security` remains authoritative for permission decisions.
 
-Renderer substrate work and raw input work should stay separate. The first PR
-may add inert substrate modules and tests for those modules, but raw stdin,
-terminal lifecycle, suspend/resume handling, autocomplete, widgets, clipboard,
-filesystem providers, and command/provider features belong to later scoped PRs.
+## Security rules
+- Secret values must never enter render state.
+- Approval widgets display decisions; they do not grant authority.
+- Suggestions must respect workspace/profile/capability gates.
+- Clipboard and shell-history features remain opt-in.
 
-Current root UI behavior remains untouched until the later renderer integration
-PRs intentionally opt into Papyrus behind reviewed rollout paths.
-
-## Current Substrate Surface
-
-This PR may expose only the intentional inert substrate APIs under this
-namespace: terminal I/O sequence primitives, screen-local geometry and width
-helpers, cell buffers, frame snapshots, pure frame diffs, an inert compositor
-bridge, and an inert border primitive.
-
-The root `src/ui/papyrus/index.ts` remains intentionally inert for this PR so
-future integration can choose a reviewed public import surface. Nested barrels
-may expose local substrate modules for tests and later integration work, but
-they should not export product view-model builders, provider/runtime/session
-types, prompt chrome, CLI commands, raw input handlers, or live terminal
-lifecycle managers.
-
-Raw input, widgets beyond the inert border primitive, autocomplete, clipboard,
-shell-history, Slack/MCP integration, focus/mouse tracking, terminal lifecycle,
-Vim-style editing, and live renderer adoption remain outside this PR.
-
-## Porting Rules
-
-Reference material is adapted from the Papyrus/Ink renderer substrate inventory.
-Files must not be copied blindly. Each future file port needs an import and
-dependency audit for React, Yoga or DOM assumptions, Bun-only APIs, source-app
-absolute imports, analytics, source-app config or state, subprocess helpers, and
-missing utilities.
-
-Dependencies are added only in the commit that first consumes them. Do not add
-packages for planned files before a live imported module requires them.
-
-Terminal lifecycle files must prove cleanup behavior before live use, including
-raw mode, cursor visibility, bracketed paste, focus or mouse modes,
-suspend/resume, normal exit, and error paths.
-
-Filesystem, command, shell-history, clipboard, provider, Slack/MCP, and other
-external or privacy-sensitive features are outside PR 1 unless explicitly
-scoped and reviewed.
-
-Implementation files under `src/ui/papyrus` must not write to stdout or stderr,
-toggle raw mode, spawn subprocesses, execute shell helpers, mutate terminal
-state at module load, or introduce clipboard behavior. Dependency files should
-change only in the same commit that first consumes the dependency and documents
-why it is needed.
-
-Part 2 widget, suggestion, and approval-card porting boundaries are tracked in
-`PART2.md`. Those notes are behavior guidance only; React, Ink, Yoga, and
-source-app reference files must be decontaminated into EstaCoda-owned pure state
-machines before any implementation is added.
+## No React / No Ink component layer
+Papyrus uses terminal state machines and a compositor, not React, Yoga, or Ink’s component runtime.

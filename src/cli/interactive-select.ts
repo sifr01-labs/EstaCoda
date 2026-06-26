@@ -1,4 +1,3 @@
-import { emitKeypressEvents } from "node:readline";
 import { createInterface as createPromptInterface } from "node:readline/promises";
 import type { Readable, Writable } from "node:stream";
 import { buildOnboardingPromptCardViewModel, buildPickerViewModel } from "../ui/view-models/builders.js";
@@ -16,6 +15,7 @@ import {
   type SelectKeyEvent,
 } from "../ui/papyrus/widgets/selectKeymap.js";
 import type { PapyrusOption } from "../ui/papyrus/widgets/optionMap.js";
+import { parseKeypress, type ParsedKeypress } from "../ui/input/parseKeypress.js";
 
 export type SelectPromptInput<T> = {
   title: string;
@@ -100,7 +100,7 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
     };
 
     const restoreTerminal = () => {
-      ttyInput.off("keypress", onKeypress);
+      ttyInput.off("data", onData);
       if (!wasRaw) {
         ttyInput.setRawMode(false);
       }
@@ -117,31 +117,33 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
       resolve(value);
     };
 
-    const onKeypress = (_chunk: string, key: { name?: string; ctrl?: boolean }) => {
-      if (key.ctrl === true && key.name === "c") {
-        restoreTerminal();
-        output.write("\n");
-        process.emit("SIGINT");
-        return;
-      }
-      const event = selectKeyEventFromKeypress(_chunk, key);
-      if (event === undefined) {
-        return;
-      }
-      const result = applySelectKey(selectState, event);
-      selectState = result.state;
-      if (result.intent?.type === "selected") {
-        const selectedIndex = focusedSelectionIndex(selectState);
-        finish(selection.options[selectedIndex]?.value ?? selection.options[0]!.value, selectedIndex);
-        return;
-      }
-      if (result.intent?.type === "focus-changed" || result.intent === undefined) {
-        render();
+    const onData = (chunk: string | Buffer | Uint8Array) => {
+      const text = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+      for (const keypress of parseKeypress(text)) {
+        if (keypress.type === "key" && keypress.ctrl === true && keypress.key === "c") {
+          restoreTerminal();
+          output.write("\n");
+          process.emit("SIGINT");
+          return;
+        }
+        const event = selectKeyEventFromParsedKeypress(keypress);
+        if (event === undefined) {
+          continue;
+        }
+        const result = applySelectKey(selectState, event);
+        selectState = result.state;
+        if (result.intent?.type === "selected") {
+          const selectedIndex = focusedSelectionIndex(selectState);
+          finish(selection.options[selectedIndex]?.value ?? selection.options[0]!.value, selectedIndex);
+          return;
+        }
+        if (result.intent?.type === "focus-changed" || result.intent === undefined) {
+          render();
+        }
       }
     };
 
-    emitKeypressEvents(ttyInput);
-    ttyInput.on("keypress", onKeypress);
+    ttyInput.on("data", onData);
     ttyInput.setRawMode(true);
     ttyInput.resume();
 
@@ -185,24 +187,28 @@ function optionValueForIndex(index: number): string {
   return String(index);
 }
 
-function selectKeyEventFromKeypress(
-  chunk: string,
-  key: { name?: string; shift?: boolean }
-): SelectKeyEvent | undefined {
-  if (key.name === "up" || key.name === "k") return { key: "arrowUp" };
-  if (key.name === "down" || key.name === "j") return { key: "arrowDown" };
-  if (key.name === "return" || key.name === "enter") return { key: "enter" };
-  if (key.name === "pageup") return { key: "pageUp" };
-  if (key.name === "pagedown") return { key: "pageDown" };
-  if (key.name === "home") return { key: "home" };
-  if (key.name === "end") return { key: "end" };
-  if (key.name === "tab") return { key: key.shift === true ? "backtab" : "tab" };
-  const digit = digitFromKeypress(chunk, key.name);
+function selectKeyEventFromParsedKeypress(event: ParsedKeypress): SelectKeyEvent | undefined {
+  if (event.type === "key") {
+    if (event.key === "up") return { key: "arrowUp" };
+    if (event.key === "down") return { key: "arrowDown" };
+    if (event.key === "enter") return { key: "enter" };
+    if (event.key === "pageup") return { key: "pageUp" };
+    if (event.key === "pagedown") return { key: "pageDown" };
+    if (event.key === "home") return { key: "home" };
+    if (event.key === "end") return { key: "end" };
+    if (event.key === "tab") return { key: event.shift === true ? "backtab" : "tab" };
+    return undefined;
+  }
+  if (event.type !== "text") {
+    return undefined;
+  }
+  if (event.text === "k") return { key: "arrowUp" };
+  if (event.text === "j") return { key: "arrowDown" };
+  const digit = digitFromKeypress(event.text);
   return digit === undefined ? undefined : { key: "digit", digit };
 }
 
-function digitFromKeypress(chunk: string, keyName: string | undefined): number | undefined {
-  const value = keyName ?? chunk;
+function digitFromKeypress(value: string): number | undefined {
   if (!/^[1-9]$/u.test(value)) return undefined;
   return Number.parseInt(value, 10);
 }

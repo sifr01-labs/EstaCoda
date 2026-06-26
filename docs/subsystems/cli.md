@@ -13,7 +13,7 @@ description: "CLI commands, interactive session loop, trace/eval inspection, and
 | `src/cli/session-loop.ts` | Interactive terminal loop |
 | `src/cli/cli-session-store.ts` | Persisted active session pointer |
 | `src/cli/one-shot.ts` | One-shot prompt execution |
-| `src/cli/readline-prompt.ts` | Readline-backed idle prompt |
+| `src/cli/papyrus-prompt.ts` | Papyrus-capable interactive prompt factory |
 | `src/cli/paste-interceptor.ts` | Bracketed paste interception and newline restoration |
 | `src/cli/bottom-chrome-controller.ts` | Managed terminal chrome below/above prompt regions |
 | `src/cli/active-turn-command-controller.ts` | CLI-local active-turn command lane |
@@ -187,9 +187,13 @@ In-session commands:
 
 Interactive `/compact [topic]` is semantic session compression for the current session, but it is non-rotating in this implementation. Gateway `/compact` has separate adoption logic and can preserve the parent transcript by switching the channel to a compacted child session.
 
-### Readline Prompt And Active-Turn Controls
+### Papyrus Prompt And Active-Turn Controls
 
-The idle CLI prompt is real readline input. `ReadlinePrompt` owns the input stream while the user is composing a normal message, and the bottom chrome is redrawn around that prompt instead of replacing it with an application-owned text box.
+The idle CLI prompt is Papyrus-owned raw input. The Papyrus prompt factory owns
+interactive setup/operator prompts, core session input, slash autocomplete,
+approval cards, paste references, and terminal cleanup. The bottom chrome is
+redrawn around the Papyrus-managed prompt region instead of treating the prompt
+row as an ad hoc output line.
 
 The terminal regions are intentionally separate:
 
@@ -210,13 +214,13 @@ Tool-start and tool-result rows are durable transcript output above bottom chrom
 
 Bracketed paste is enabled only for TTY prompts that run through the paste interceptor. Small single-line pastes remain inline. Multiline and large pastes display as compact `[Pasted text #...]` references when a paste reference store is available. Paste files are written under the active profile temp state, not the workspace, and are temporary operational artifacts, not a permanent knowledge store. The submitted runtime input restores the original pasted content. Secret prompts bypass paste preview and paste reference storage; pasted secret content must not be logged, echoed in chrome/status text, or mirrored outside the prompt answer path.
 
-Shortcut hints are shown as input-lane placeholder copy while the idle input line is empty. The prompt row owns the prompt marker, so placeholder copy must not include its own `>` or `›`. The hint disappears as soon as the user starts typing. Slash hints take priority when idle input starts with `/`; the hint model is built from the current line before submit, rendered through the readline-aware bottom chrome path, and cleared when the line no longer starts with `/` or the prompt resolves. Slash completions render in a fixed-height prompt-region panel, so fewer matches do not shrink the panel. Plain, non-TTY, or non-bottom-chrome sessions keep the direct startup hint fallback.
+Shortcut hints are shown as input-lane placeholder copy while the idle input line is empty. The prompt row owns the prompt marker, so placeholder copy must not include its own `>` or `›`. The hint disappears as soon as the user starts typing. Slash hints take priority when idle input starts with `/`; the hint model is built from the current line before submit, rendered through the Papyrus bottom chrome path, and cleared when the line no longer starts with `/` or the prompt resolves. Slash completions render in a fixed-height prompt-region panel, so fewer matches do not shrink the panel. Plain, non-TTY, or non-bottom-chrome sessions keep the direct startup hint fallback.
 
 Arabic setup chrome is direction-aware for localized setup selectors, rails, onboarding summaries, prompt cards, raw setup prompts, verification reports, and the startup dashboard. Arabic picker rows are RTL/right-aligned as full option rows; selected output uses `تم تحديد`, and technical selected values are LTR-isolated. The Arabic startup dashboard uses two RTL-aware columns at normal terminal widths and falls back to a bounded stacked layout on narrow terminals. Technical tokens such as paths, env vars, provider/model IDs, slash commands, and version numbers remain untranslated and isolated. Do not describe this as full runtime Arabic localization.
 
 Onboarding provider credential prompts and Telegram token prompts share the setup editor prompt copy. Arabic display strings isolate product names, provider names, `Telegram`, env vars, and other technical tokens. Stored config, env, auth, and state values remain raw; secret prompts remain masked.
 
-After a normal message is submitted, the readline prompt is gone. The active turn shows status, timing, spinner, durable tool activity, approval/setup output, and transient active-lane messages; it does not show a fake read-only prompt box containing the submitted user text. The submitted prompt remains visible in the transcript rail/history.
+After a normal message is submitted, the idle prompt is gone. The active turn shows status, timing, spinner, durable tool activity, approval/setup output, and transient active-lane messages; it does not show a fake read-only prompt box containing the submitted user text. The submitted prompt remains visible in the transcript rail/history.
 
 While `runtime.handle()` is active in a local interactive CLI session, the active prompt lane accepts visible input. Normal text submitted mid-turn is queued for the next turn, does not interrupt the current turn, and is sent only after the current response completes. Slash commands in this lane remain control input and are not persisted as user transcript/history content.
 

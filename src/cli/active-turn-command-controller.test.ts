@@ -6,11 +6,11 @@ type ActiveInputPreview = { kind: "message" | "command"; text: string } | undefi
 
 function makeInput(): NodeJS.ReadStream & {
   readonly rawModes: boolean[];
-  press(chunk: unknown, key?: { name?: string; ctrl?: boolean; sequence?: string }): void;
+  press(chunk: string | Buffer | Uint8Array): void;
 } {
   const input = new PassThrough() as unknown as NodeJS.ReadStream & {
     rawModes: boolean[];
-    press(chunk: unknown, key?: { name?: string; ctrl?: boolean; sequence?: string }): void;
+    press(chunk: string | Buffer | Uint8Array): void;
   };
   input.isTTY = true;
   input.isRaw = false;
@@ -20,8 +20,8 @@ function makeInput(): NodeJS.ReadStream & {
     input.rawModes.push(mode);
     return input;
   };
-  input.press = (chunk, key = {}) => {
-    input.emit("keypress", chunk, key);
+  input.press = (chunk) => {
+    input.emit("data", chunk);
   };
   return input;
 }
@@ -52,11 +52,11 @@ describe("ActiveTurnCommandController", () => {
     const { input, controller } = createController();
 
     controller.start();
-    expect(input.listenerCount("keypress")).toBe(1);
+    expect(input.listenerCount("data")).toBe(1);
     expect(input.rawModes).toEqual([true]);
 
     controller.dispose();
-    expect(input.listenerCount("keypress")).toBe(0);
+    expect(input.listenerCount("data")).toBe(0);
     expect(input.rawModes).toEqual([true, false]);
   });
 
@@ -64,8 +64,8 @@ describe("ActiveTurnCommandController", () => {
     const { input, controller, previews, inputLines } = createController();
     controller.start();
 
-    input.press("h", { name: "h" });
-    input.press("i", { name: "i" });
+    input.press("h");
+    input.press("i");
 
     expect(previews).toEqual([
       { kind: "message", text: "h" },
@@ -79,9 +79,9 @@ describe("ActiveTurnCommandController", () => {
     controller.start();
 
     for (const char of "hello while busy") {
-      input.press(char, { name: char });
+      input.press(char);
     }
-    input.press("\r", { name: "return" });
+    input.press("\r");
 
     expect(queuedTexts).toEqual(["hello while busy"]);
     expect(abort).not.toHaveBeenCalled();
@@ -92,7 +92,7 @@ describe("ActiveTurnCommandController", () => {
     const { input, controller, previews } = createController();
     controller.start();
 
-    input.press("/", { sequence: "/" });
+    input.press("/");
 
     expect(previews).toEqual([{ kind: "command", text: "/" }]);
   });
@@ -101,9 +101,9 @@ describe("ActiveTurnCommandController", () => {
     const { input, controller, previews } = createController();
     controller.start();
 
-    input.press("/", { sequence: "/" });
-    input.press("i", { name: "i" });
-    input.press("n", { name: "n" });
+    input.press("/");
+    input.press("i");
+    input.press("n");
 
     expect(previews).toEqual([
       { kind: "command", text: "/" },
@@ -112,17 +112,17 @@ describe("ActiveTurnCommandController", () => {
     ]);
   });
 
-  it("ignores undefined chunks from unsupported special keys while buffering active commands", () => {
+  it("ignores unsupported navigation key data while buffering active commands", () => {
     const { input, controller, previews, inputLines, queuedTexts, statuses, abort, steer } = createController();
     controller.start();
 
-    input.press("/", { sequence: "/" });
-    input.press(undefined, { name: "down" });
-    input.press(undefined, { name: "up" });
-    input.press(undefined, { name: "pagedown" });
-    input.press(undefined, { name: "pageup" });
-    input.press(undefined, { name: "tab" });
-    input.press(undefined);
+    input.press("/");
+    input.press("\x1b[B");
+    input.press("\x1b[A");
+    input.press("\x1b[6~");
+    input.press("\x1b[5~");
+    input.press("\t");
+    input.press("\x1b[999~");
 
     expect(previews).toEqual([{ kind: "command", text: "/" }]);
     expect(inputLines).toEqual(["/"]);
@@ -132,13 +132,13 @@ describe("ActiveTurnCommandController", () => {
     expect(steer).not.toHaveBeenCalled();
   });
 
-  it("ignores non-string keypress chunks while buffering active commands", () => {
+  it("ignores unknown control data while buffering active commands", () => {
     const { input, controller, previews, inputLines, queuedTexts, statuses } = createController();
     controller.start();
 
-    input.press("/", { sequence: "/" });
-    input.press(null, { name: "unknown-special" });
-    input.emit("keypress", Buffer.from([0x1b]), { name: "unknown-special" });
+    input.press("/");
+    input.press("\x00");
+    input.press(Buffer.from("\x1b[999~"));
 
     expect(previews).toEqual([{ kind: "command", text: "/" }]);
     expect(inputLines).toEqual(["/"]);
@@ -146,15 +146,15 @@ describe("ActiveTurnCommandController", () => {
     expect(statuses).toEqual([]);
   });
 
-  it("ignores undefined chunks from unsupported special keys while buffering follow-up text", () => {
+  it("ignores unsupported navigation key data while buffering follow-up text", () => {
     const { input, controller, previews, inputLines, queuedTexts, statuses } = createController();
     controller.start();
 
-    input.press("h", { name: "h" });
-    input.press(undefined, { name: "down" });
-    input.press(undefined, { name: "tab" });
-    input.press(undefined);
-    input.press("i", { name: "i" });
+    input.press("h");
+    input.press("\x1b[B");
+    input.press("\t");
+    input.press("\x1b[999~");
+    input.press("i");
 
     expect(previews).toEqual([
       { kind: "message", text: "h" },
@@ -169,9 +169,9 @@ describe("ActiveTurnCommandController", () => {
     const { input, controller, previews } = createController();
     controller.start();
 
-    input.press("/", { sequence: "/" });
-    input.press("x", { name: "x" });
-    input.press("", { name: "backspace" });
+    input.press("/");
+    input.press("x");
+    input.press("\x7f");
 
     expect(previews).toEqual([
       { kind: "command", text: "/" },
@@ -185,9 +185,9 @@ describe("ActiveTurnCommandController", () => {
     controller.start();
 
     for (const char of "/interrupt") {
-      input.press(char, { name: char });
+      input.press(char);
     }
-    input.press("\r", { name: "return" });
+    input.press("\r");
 
     expect(abort).toHaveBeenCalledTimes(1);
     expect(previews.at(-1)).toBeUndefined();
@@ -204,9 +204,9 @@ describe("ActiveTurnCommandController", () => {
     controller.start();
 
     for (const char of "/interrupt") {
-      input.press(char, { name: char });
+      input.press(char);
     }
-    input.press("\r", { name: "return" });
+    input.press("\r");
 
     expect(abortController.signal.aborted).toBe(true);
     expect(abortController.signal.reason).toBe("CLI interrupt");
@@ -217,9 +217,9 @@ describe("ActiveTurnCommandController", () => {
     controller.start();
 
     for (const char of "/unknown") {
-      input.press(char, { name: char });
+      input.press(char);
     }
-    input.press("\r", { name: "return" });
+    input.press("\r");
 
     expect(abort).not.toHaveBeenCalled();
     expect(statuses).toEqual(["Unknown active command: /unknown"]);
@@ -229,8 +229,8 @@ describe("ActiveTurnCommandController", () => {
     const { input, controller, statuses, abort } = createController();
     controller.start();
 
-    input.press("/", { sequence: "/" });
-    input.press("\r", { name: "return" });
+    input.press("/");
+    input.press("\r");
 
     expect(abort).not.toHaveBeenCalled();
     expect(statuses).toEqual([]);
@@ -241,9 +241,9 @@ describe("ActiveTurnCommandController", () => {
     controller.start();
 
     for (const char of "/steer go left") {
-      input.press(char, { name: char });
+      input.press(char);
     }
-    input.press("\r", { name: "return" });
+    input.press("\r");
 
     expect(abort).not.toHaveBeenCalled();
     expect(steer).toHaveBeenCalledWith("go left");
@@ -255,9 +255,9 @@ describe("ActiveTurnCommandController", () => {
     controller.start();
 
     for (const char of "/steer   ") {
-      input.press(char, { name: char });
+      input.press(char);
     }
-    input.press("\r", { name: "return" });
+    input.press("\r");
 
     expect(abort).not.toHaveBeenCalled();
     expect(steer).not.toHaveBeenCalled();
@@ -269,9 +269,9 @@ describe("ActiveTurnCommandController", () => {
     controller.start();
 
     for (const char of "/steer <note>") {
-      input.press(char, { name: char });
+      input.press(char);
     }
-    input.press("\r", { name: "return" });
+    input.press("\r");
 
     expect(steer).toHaveBeenCalledWith("<note>");
   });
@@ -281,9 +281,9 @@ describe("ActiveTurnCommandController", () => {
     controller.start();
 
     for (const char of "/steer go left") {
-      input.press(char, { name: char });
+      input.press(char);
     }
-    input.press("\r", { name: "return" });
+    input.press("\r");
 
     expect(previews.at(-1)).toBeUndefined();
   });
@@ -292,8 +292,8 @@ describe("ActiveTurnCommandController", () => {
     const { input, controller, previews } = createController();
     controller.start();
 
-    input.press("/", { sequence: "/" });
-    input.press("", { name: "escape" });
+    input.press("/");
+    input.press("\x1b");
 
     expect(previews).toEqual([{ kind: "command", text: "/" }, undefined]);
   });
@@ -302,8 +302,8 @@ describe("ActiveTurnCommandController", () => {
     const { input, controller, previews } = createController();
     controller.start();
 
-    input.press("/", { sequence: "/" });
-    input.press("", { name: "u", ctrl: true });
+    input.press("/");
+    input.press("\x15");
 
     expect(previews).toEqual([{ kind: "command", text: "/" }, undefined]);
   });
@@ -312,17 +312,30 @@ describe("ActiveTurnCommandController", () => {
     const { input, controller, abort, emitSigint } = createController();
     controller.start();
 
-    input.press("/", { sequence: "/" });
-    input.press("\u0003", { name: "c", ctrl: true });
+    input.press("/");
+    input.press("\x03");
 
     expect(emitSigint).toHaveBeenCalledTimes(1);
     expect(abort).not.toHaveBeenCalled();
   });
 
+  it("Ctrl+D is ignored as data and does not submit an active command", () => {
+    const { input, controller, abort, emitSigint, queuedTexts, statuses } = createController();
+    controller.start();
+
+    input.press("/");
+    input.press("\x04");
+
+    expect(emitSigint).not.toHaveBeenCalled();
+    expect(abort).not.toHaveBeenCalled();
+    expect(queuedTexts).toEqual([]);
+    expect(statuses).toEqual([]);
+  });
+
   it("dispose clears buffered state and command lane", () => {
     const { input, controller, previews } = createController();
     controller.start();
-    input.press("/", { sequence: "/" });
+    input.press("/");
 
     controller.dispose();
 
@@ -341,9 +354,9 @@ describe("ActiveTurnCommandController", () => {
     controller.start();
 
     for (const char of "hello") {
-      input.press(char, { name: char });
+      input.press(char);
     }
-    input.press("\r", { name: "return" });
+    input.press("\r");
 
     expect(events.at(-2)).toBe("preview:clear");
     expect(events.at(-1)).toBe("queue:hello");
@@ -360,9 +373,9 @@ describe("ActiveTurnCommandController", () => {
     controller.start();
 
     for (const char of "/interrupt") {
-      input.press(char, { name: char });
+      input.press(char);
     }
-    input.press("\r", { name: "return" });
+    input.press("\r");
 
     expect(events.at(-2)).toBe("preview:clear");
     expect(events.at(-1)).toBe("interrupt");
@@ -380,9 +393,9 @@ describe("ActiveTurnCommandController", () => {
     controller.start();
 
     for (const char of "/steer go left") {
-      input.press(char, { name: char });
+      input.press(char);
     }
-    input.press("\r", { name: "return" });
+    input.press("\r");
 
     expect(events.at(-2)).toBe("preview:clear");
     expect(events.at(-1)).toBe("steer:go left");

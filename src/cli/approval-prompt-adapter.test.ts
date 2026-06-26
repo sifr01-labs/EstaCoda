@@ -1,8 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import {
-  approvalPromptAdapterForMode,
-  defaultApprovalPromptAdapter,
   papyrusApprovalPromptAdapter,
   type ApprovalPromptAdapterInput,
 } from "./approval-prompt-adapter.js";
@@ -57,11 +55,6 @@ function adapterInput(answer: string, options: { allowPersistentApproval?: boole
 }
 
 describe("approval prompt adapter routing", () => {
-  it("selects legacy and Papyrus adapters explicitly", () => {
-    expect(approvalPromptAdapterForMode("legacy")).toBe(defaultApprovalPromptAdapter);
-    expect(approvalPromptAdapterForMode("papyrus")).toBe(papyrusApprovalPromptAdapter);
-  });
-
   it("maps Papyrus approve/reject/cancel selections to existing answer semantics", async () => {
     await expect(papyrusApprovalPromptAdapter(adapterInput("approve-once").input)).resolves.toBe("once");
     await expect(papyrusApprovalPromptAdapter(adapterInput("1").input)).resolves.toBe("once");

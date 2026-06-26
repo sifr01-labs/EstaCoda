@@ -6,6 +6,7 @@ export * from "./providers/slashCommandProvider.js";
 export * from "./providers/shellHistoryProvider.js";
 export * from "./providers/skillSuggestionProvider.js";
 export * from "./ghostTextController.js";
+export * from "./secretPromptController.js";
 export * from "./suggestionTypes.js";
 export * from "./typeaheadController.js";
 export * from "./typeaheadProviderRouter.js";

@@ -1,10 +1,9 @@
-import type { Readable, Writable } from "node:stream";
+import type { Writable } from "node:stream";
 import { promptUiContextForLocale, type PromptUiContext } from "../contracts/ui.js";
 import { commandRegistry } from "./command-registry.js";
 import { parseKeypress, type ParsedKeypress } from "../ui/input/parseKeypress.js";
 import { applyKeypress, createLineEditorState, type LineEditorState } from "../ui/input/lineEditor.js";
 import { createTerminalLifecycle, type TerminalLifecycle } from "../ui/input/terminalLifecycle.js";
-import type { UiInputMode } from "../ui/input-mode.js";
 import { createSlashCommandSuggestionProvider, type SlashCommandSuggestionMetadata } from "../ui/papyrus/input/providers/slashCommandProvider.js";
 import {
   applyTypeaheadResult,
@@ -21,10 +20,7 @@ import {
   type TypeaheadProviderRouter,
 } from "../ui/papyrus/input/typeaheadProviderRouter.js";
 import { RawPromptOverlayHost, RawPromptRenderLoop } from "./rawPromptRenderLoop.js";
-import { resolveGhostTextMode } from "./ghost-text-mode.js";
-import { resolveInputKeymapMode } from "./input-keymap-mode.js";
 import { buildRawPromptSlashAutocompleteRows } from "./rawPromptSlashAutocomplete.js";
-import { createReadlinePrompt, type CreateReadlinePromptOptions } from "./readline-prompt.js";
 import type { Prompt, PromptOptions } from "./prompt-contract.js";
 import { type GhostTextState, isGhostTextVisible } from "../ui/papyrus/input/ghostTextController.js";
 import {
@@ -83,15 +79,6 @@ export type RawPromptGhostTextOptions = {
 
 export type RawPromptKeymapOptions = {
   readonly mode: "vim";
-};
-
-export type CreatePromptForInputModeOptions = Omit<CreateReadlinePromptOptions, "input" | "output"> & {
-  mode: UiInputMode;
-  input?: Readable | RawPromptInput;
-  output?: Writable | RawPromptOutput;
-  env?: Record<string, string | undefined>;
-  createReadline?: (options: CreateReadlinePromptOptions) => Prompt;
-  createRaw?: (options: RawPromptControllerOptions & { uiContext?: PromptUiContext }) => Prompt;
 };
 
 export class RawPromptController {
@@ -334,36 +321,6 @@ export function createRawPrompt(options: RawPromptControllerOptions & { uiContex
       close: () => undefined,
     }
   );
-}
-
-export function createPromptForInputMode(options: CreatePromptForInputModeOptions): Prompt {
-  const { mode, env, createReadline = createReadlinePrompt, createRaw = createRawPrompt, ...promptOptions } = options;
-  if (mode !== "raw") {
-    return createReadline({
-      ...promptOptions,
-      input: promptOptions.input as Readable | undefined,
-      output: promptOptions.output as Writable | undefined,
-    });
-  }
-
-  const input = promptOptions.input;
-  const output = promptOptions.output;
-  if (input === undefined || output === undefined) {
-    return createReadline({
-      ...promptOptions,
-      input: input as Readable | undefined,
-      output: output as Writable | undefined,
-    });
-  }
-
-  return createRaw({
-    input: input as RawPromptInput,
-    output: output as RawPromptOutput,
-    uiContext: promptOptions.uiContext,
-    typeahead: createDefaultRawPromptTypeahead(),
-    ghostText: resolveGhostTextMode({ env }) === "on" ? { enabled: true } : undefined,
-    keymap: resolveInputKeymapMode({ env }) === "vim" ? { mode: "vim" } : undefined,
-  });
 }
 
 export function createDefaultRawPromptTypeahead(): RawPromptTypeaheadOptions {

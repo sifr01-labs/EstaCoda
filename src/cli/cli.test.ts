@@ -9,12 +9,6 @@ import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import type { Runtime } from "../runtime/create-runtime.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 
-const readlineMock = vi.hoisted(() => ({
-  prompt: vi.fn(),
-  close: vi.fn(),
-  createReadlinePrompt: vi.fn(),
-}));
-
 const interactivePromptMock = vi.hoisted(() => ({
   prompt: vi.fn(),
   close: vi.fn(),
@@ -29,14 +23,6 @@ const setupFlowMock = vi.hoisted(() => ({
 const updateCommandMock = vi.hoisted(() => ({
   runUpdateCommand: vi.fn(),
 }));
-
-vi.mock("./readline-prompt.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./readline-prompt.js")>();
-  return {
-    ...actual,
-    createReadlinePrompt: readlineMock.createReadlinePrompt,
-  };
-});
 
 vi.mock("./create-interactive-prompt.js", () => ({
   createInteractivePrompt: interactivePromptMock.createInteractivePrompt,

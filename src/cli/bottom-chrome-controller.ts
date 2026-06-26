@@ -12,7 +12,6 @@ import type {
 } from "../contracts/view-model.js";
 import type { PapyrusSurfaceFrame, PapyrusSurfaceRenderResult, PapyrusSurfaceRowsResult } from "../ui/papyrus/papyrus-surface-controller.js";
 import { createPapyrusSurfaceControllerForMode } from "../ui/papyrus/papyrus-surface-controller.js";
-import type { UiRendererMode } from "../ui/renderer-mode.js";
 import { truncateVisible } from "../ui/renderers/layout.js";
 
 export interface BottomChromeState {
@@ -28,24 +27,9 @@ export interface BottomChromeControllerOptions {
   readonly capabilities: TerminalCapabilities;
   readonly renderViewModel: (vm: ViewModel) => string;
   readonly renderHorizontalRule?: (width: number) => string;
-  readonly rendererMode?: UiRendererMode;
   readonly createPapyrusSurfaceControllerForMode?: PapyrusSurfaceControllerFactory;
-  readonly onRendererFallback?: (diagnostic: BottomChromeRendererFallbackDiagnostic) => void;
   readonly enabled?: boolean;
   readonly tickMs?: number;
-  readonly readlineTickMs?: number;
-}
-
-export interface BottomChromeRendererFallbackDiagnostic {
-  readonly requestedMode: "papyrus";
-  readonly fallbackMode: "legacy";
-  readonly reason: "papyrus-surface-controller-unavailable";
-}
-
-export interface UpdateManagedRegionAboveReadlineInput {
-  readonly state: BottomChromeState;
-  readonly transientLines: readonly string[];
-  readonly promptLineCount?: number;
 }
 
 type WritableWrite = (chunk: unknown, ...args: unknown[]) => boolean;
@@ -58,7 +42,7 @@ type PapyrusSurfaceControllerLike = {
 };
 
 type PapyrusSurfaceControllerFactory = (
-  rendererMode: UiRendererMode,
+  rendererMode: "papyrus",
   size: { width: number; height: number }
 ) => PapyrusSurfaceControllerLike | undefined;
 
@@ -69,7 +53,6 @@ export class BottomChromeController {
   readonly #renderHorizontalRule?: (width: number) => string;
   readonly #enabled: boolean;
   readonly #tickMs: number;
-  readonly #readlineTickMs: number;
   readonly #papyrusSurfaceController?: PapyrusSurfaceControllerLike;
   #activeLineCount = 0;
   #renderedTransientLineCount = 0;
@@ -79,7 +62,6 @@ export class BottomChromeController {
   #currentState: BottomChromeState = {};
   #ticker?: ReturnType<typeof setInterval>;
   #stateFactory?: () => BottomChromeState;
-  #readlinePromptLineCountFactory?: () => number;
   #isDrawing = false;
   #writingAboveChrome = false;
   #disposed = false;
@@ -91,20 +73,9 @@ export class BottomChromeController {
     this.#renderHorizontalRule = options.renderHorizontalRule;
     this.#enabled = options.enabled ?? detectEnabled(options.capabilities);
     this.#tickMs = options.tickMs ?? 200;
-    this.#readlineTickMs = options.readlineTickMs ?? 1000;
-    const rendererMode = options.rendererMode ?? "papyrus";
-    if (rendererMode === "papyrus") {
-      this.#papyrusSurfaceController = (
-        options.createPapyrusSurfaceControllerForMode ?? createPapyrusSurfaceControllerForMode
-      )(rendererMode, { width: Math.max(1, options.capabilities.terminalWidth), height: 0 });
-      if (this.#papyrusSurfaceController === undefined) {
-        options.onRendererFallback?.({
-          requestedMode: "papyrus",
-          fallbackMode: "legacy",
-          reason: "papyrus-surface-controller-unavailable",
-        });
-      }
-    }
+    this.#papyrusSurfaceController = (
+      options.createPapyrusSurfaceControllerForMode ?? createPapyrusSurfaceControllerForMode
+    )("papyrus", { width: Math.max(1, options.capabilities.terminalWidth), height: 0 });
   }
 
   get enabled(): boolean {
@@ -115,28 +86,6 @@ export class BottomChromeController {
     if (!this.#enabled || this.#disposed) return;
     this.#currentState = state;
     this.#redraw();
-  }
-
-  clearForReadline(promptLineCount = 1): void {
-    if (!this.#enabled || this.#disposed || this.#managedLineCount() === 0) return;
-    const chromeLines = this.#activeLineCount;
-    const transientLines = this.#renderedTransientLineCount;
-    const promptRows = Math.max(1, Math.ceil(promptLineCount));
-    const managedLines = transientLines + chromeLines;
-    let sequence = `\x1b[${managedLines + promptRows}A`;
-    for (let index = 0; index < managedLines; index += 1) {
-      sequence += "\x1b[2K";
-      if (index < managedLines - 1) {
-        sequence += "\x1b[1B";
-      }
-    }
-    sequence += `\x1b[${promptRows + 1}B`;
-    this.#output.write(sequence);
-    this.#activeLineCount = 0;
-    this.#renderedTransientLineCount = 0;
-    this.#lastRenderedTransientLines = undefined;
-    this.#lastRenderedLines = undefined;
-    this.#resetPapyrusChromeFrame();
   }
 
   writeAboveChromeSync<T>(fn: () => T): T {
@@ -270,93 +219,6 @@ export class BottomChromeController {
   setStateFactory(stateFactory: (() => BottomChromeState) | undefined): void {
     if (!this.#enabled || this.#disposed) return;
     this.#stateFactory = stateFactory;
-  }
-
-  startReadlineTicker(stateFactory: () => BottomChromeState, promptLineCountFactory: () => number = () => 1): void {
-    if (!this.#enabled || this.#disposed) return;
-    this.#stateFactory = stateFactory;
-    this.#readlinePromptLineCountFactory = promptLineCountFactory;
-    this.stopTicker();
-    this.#ticker = setInterval(() => {
-      if (this.#stateFactory === undefined) return;
-      this.updateManagedRegionAboveReadline({
-        state: this.#stateFactory(),
-        transientLines: this.#transientLines,
-        promptLineCount: this.#readlinePromptLineCountFactory?.() ?? 1,
-      });
-    }, this.#readlineTickMs);
-  }
-
-  updateManagedRegionAboveReadline(input: UpdateManagedRegionAboveReadlineInput): void {
-    if (!this.#enabled || this.#disposed) return;
-    const nextTransientLines = this.#boundedTransientLines(input.transientLines);
-    this.#currentState = input.state;
-    this.#transientLines = nextTransientLines;
-    const nextChromeLines = this.#buildChromeLines();
-    const nextManagedLines = [...nextTransientLines, ...nextChromeLines];
-    const previousManagedLineCount = this.#managedLineCount();
-    const nextManagedLineCount = nextManagedLines.length;
-
-    if (
-      linesEqual(nextTransientLines, this.#lastRenderedTransientLines) &&
-      linesEqual(nextChromeLines, this.#lastRenderedLines)
-    ) {
-      return;
-    }
-
-    if (previousManagedLineCount === 0 && nextManagedLineCount === 0) {
-      this.#activeLineCount = 0;
-      this.#renderedTransientLineCount = 0;
-      this.#lastRenderedTransientLines = nextTransientLines;
-      this.#lastRenderedLines = nextChromeLines;
-      return;
-    }
-
-    const promptRows = Math.max(1, Math.ceil(input.promptLineCount ?? 1));
-    const lineDelta = nextManagedLineCount - previousManagedLineCount;
-    let sequence = "\x1b7";
-    const rowsAboveCursor = previousManagedLineCount > 0
-      ? previousManagedLineCount + promptRows - 1
-      : promptRows - 1;
-    if (rowsAboveCursor > 0) {
-      sequence += `\x1b[${rowsAboveCursor}A`;
-    }
-    if (lineDelta > 0) {
-      sequence += `\x1b[${lineDelta}L`;
-    } else if (lineDelta < 0) {
-      sequence += `\x1b[${Math.abs(lineDelta)}M`;
-    }
-
-    const renderedManagedLines = this.#shouldUsePapyrusChrome()
-      ? this.#renderChromeRowsWithPapyrus(nextManagedLines)
-      : nextManagedLines;
-
-    for (let index = 0; index < renderedManagedLines.length; index += 1) {
-      sequence += `\x1b[2K\r${renderedManagedLines[index]}`;
-      if (index < renderedManagedLines.length - 1) {
-        sequence += "\x1b[1B";
-      }
-    }
-
-    sequence += "\x1b8";
-    if (lineDelta > 0) {
-      sequence += `\x1b[${lineDelta}B`;
-    } else if (lineDelta < 0) {
-      sequence += `\x1b[${Math.abs(lineDelta)}A`;
-    }
-    this.#output.write(sequence);
-    this.#renderedTransientLineCount = nextTransientLines.length;
-    this.#activeLineCount = nextChromeLines.length;
-    this.#lastRenderedTransientLines = nextTransientLines;
-    this.#lastRenderedLines = nextChromeLines;
-  }
-
-  updateStateAboveReadline(state: BottomChromeState, promptLineCount = 1): void {
-    this.updateManagedRegionAboveReadline({
-      state,
-      transientLines: this.#transientLines,
-      promptLineCount,
-    });
   }
 
   updateStateInPlace(state: BottomChromeState): void {

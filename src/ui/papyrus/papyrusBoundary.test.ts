@@ -63,6 +63,7 @@ describe("Papyrus substrate boundaries", () => {
       "./providers/shellHistoryProvider.js",
       "./providers/skillSuggestionProvider.js",
       "./ghostTextController.js",
+      "./secretPromptController.js",
       "./suggestionTypes.js",
       "./typeaheadController.js",
       "./typeaheadProviderRouter.js",

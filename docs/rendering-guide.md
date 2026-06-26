@@ -240,15 +240,23 @@ pnpm run test -- --update
 
 ---
 
-## 3. Readline-Owned Cursor Surfaces
+## 3. Papyrus-Owned Interactive Surfaces
 
-When readline owns the cursor, do not write ad hoc terminal output around it. The prompt row is not a free output line; readline may repaint it after every keypress, paste, resize, or submit.
+Papyrus owns live interactive CLI sessions. Core sessions, setup/operator prompts,
+slash autocomplete, approval cards, active-turn command input, paste notices, and
+terminal overlays must route through the Papyrus prompt/surface controllers rather
+than ad hoc terminal writes.
 
-Use `BottomChromeController.updateManagedRegionAboveReadline({ state, transientLines, promptLineCount })` for live prompt-adjacent UI. This is the path for idle shortcut hints, live slash hints, paste preview lines, and readline ticker updates. The call must include the current `promptLineCount`; wrapped prompts occupy more than one terminal row.
+The prompt row is not a free output line. The Papyrus raw prompt and surface
+controllers own cursor movement, managed regions, slash overlay rows, paste
+reference rows, active status chrome, and cleanup on submit/cancel/error.
 
 Operational rules:
 
-- Do not mix `updateTransientLines()` and `updateStateAboveReadline()` manually for live readline UI.
+- Do not reintroduce direct `readline.emitKeypressEvents()` handling for
+  interactive prompt/key paths.
+- Do not mix old readline-managed transient/chrome calls into Papyrus-managed
+  prompt regions.
 - Account for managed-region line-count growth and shrink.
 - Show shortcut hints only while the editable line is empty; hide them on non-empty input and let slash hints take priority for `/`.
 - Clear stale managed lines when shortcut hints, slash hints, paste previews, or transient messages disappear.
@@ -332,7 +340,7 @@ buildApprovalSecurityViewModel({
 | `output.write(`┌${`─`.repeat(w)}┐`)` | Use `#framedPanel()` in `StandardRenderer` or plain text blocks in `PlainRenderer`. |
 | `const lines = ["header", `  ${key}: ${value}`]` | Build a `KeyValueBlockViewModel` and render it. |
 | Hardcoding command names in `/help` | Register commands in `CommandRegistry`, read from registry. |
-| Writing terminal output while readline owns the prompt row | Use `updateManagedRegionAboveReadline(...)` and pass the current prompt line count. |
+| Writing terminal output into the live prompt region | Route through the Papyrus raw prompt, surface controller, or bottom chrome controller. |
 | Mirroring secret prompt input into preview/status chrome | Keep secret prompt content inside the prompt answer path only. |
 | Rendering tool activity inside bottom chrome redraws | Render tool-start/tool-result rows as durable transcript output above the bottom prompt region. |
 | Putting a prompt marker inside placeholder copy | Let the prompt row own `>`/`›`; placeholder copy starts with the hint text. |
@@ -362,21 +370,21 @@ Idle placeholder copy is not a separate shortcut rail and must not include a pro
 
 ---
 
-## Papyrus Default Rollout
+## Papyrus Full Interactive Migration
 
-Core interactive TTY sessions now default to the Papyrus session surface:
+Papyrus is now the interactive CLI architecture for live TTY use:
 
-- `ESTACODA_UI_RENDERER` defaults to `papyrus`.
-- Core TTY sessions default to raw prompt input.
-- Raw prompt sessions show the Papyrus slash autocomplete overlay by default.
-- Raw Papyrus sessions use Papyrus approval cards for promptable approvals.
+- Core interactive TTY sessions use the Papyrus session renderer.
+- Core TTY prompts use raw Papyrus input.
+- Slash autocomplete renders as the Papyrus overlay.
+- Promptable approvals render as Papyrus approval cards.
+- Setup/operator prompts route through the Papyrus-capable prompt factory.
+- Shared interactive menus use Papyrus select widgets.
+- Active-turn command input uses the Papyrus/raw key parser.
 
-Non-TTY one-shot and pipe-driven sessions keep the plain/readline-safe fallback
-behavior.
+Non-TTY one-shot and pipe-driven sessions remain plain and deterministic. They do
+not activate raw prompt behavior or cursor-managed overlays.
 
-PR6A extends the Papyrus rollout to setup and operator-owned interactive prompt
-paths by routing prompt construction through the Papyrus-capable prompt factory
-and replacing the shared interactive select path with Papyrus select widgets.
 The migrated prompt surfaces include:
 
 - `estacoda setup`, `estacoda setup --interactive`, and
@@ -393,22 +401,21 @@ The migrated prompt surfaces include:
 - Python environment setup/reset prompts.
 - Shared interactive select menus.
 
-The legacy readline prompt implementation still exists during PR6A and remains
-available through fallback selection until the PR6B cleanup removes the
-temporary escape hatches. Secret prompts stay no-echo, do not expose paste
-previews, and must not mirror secret input into logs, status chrome, or prompt
-callbacks. Non-interactive command paths remain plain and deterministic.
+The legacy readline prompt implementation may still exist internally for isolated
+secret-input safety or tests, but it is not the normal live interactive prompt
+architecture. Secret prompts stay no-echo, do not expose paste previews, and must
+not mirror secret input into logs, status chrome, or prompt callbacks.
 
-Temporary fallback flags remain available during soak:
+`ESTACODA_UI_RENDERER=legacy` and `ESTACODA_INPUT_MODE=readline` no longer
+activate legacy interactive modes. Non-interactive command paths remain plain and
+deterministic.
+
+Removed renderer/input rollout flags are ignored deterministically:
 
 | Flag | Effect |
 |------|--------|
-| `ESTACODA_UI_RENDERER=legacy` | Use the legacy session renderer/bottom-chrome path. |
-| `ESTACODA_INPUT_MODE=readline` | Use the legacy readline prompt path. |
-| `ESTACODA_APPROVAL_WIDGETS=legacy` | Use the plain text approval prompt in core sessions. |
-
-These fallback flags are temporary rollout controls and are expected to be
-removed in PR6B after the Papyrus defaults have soaked.
+| `ESTACODA_UI_RENDERER=legacy` | Ignored; live interactive sessions still use Papyrus rendering. |
+| `ESTACODA_INPUT_MODE=readline` | Ignored for interactive sessions; raw Papyrus input remains active. |
 
 Optional Papyrus capabilities remain opt-in. They are not enabled by the default
 renderer/input rollout:
@@ -420,6 +427,7 @@ renderer/input rollout:
 | clipboard reads | `ESTACODA_CLIPBOARD=1` |
 | MCP resource suggestions | `ESTACODA_MCP_SUGGESTIONS=1` |
 | skill suggestions | `ESTACODA_SKILL_SUGGESTIONS=1` |
+| Slack suggestions | no default Slack suggestion provider is enabled |
 
 `/status` reports these optional Papyrus capability states so operators can
 confirm whether a session is using only the default rollout surface or additional
