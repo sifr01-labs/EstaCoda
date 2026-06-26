@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { stringWidth } from "../screen/stringWidth.js";
 import {
   createInitialOperatorConsoleState,
   createOperatorConsoleLayout,
@@ -36,16 +37,24 @@ describe("Papyrus operator console renderer", () => {
     expect(output).not.toMatch(/\[[0-9;?]*[A-Za-z]/);
   });
 
-  it("renders prompt and status placeholders for minimal state", () => {
+  it("renders prompt before status rail", () => {
+    const state = createState();
+    const layout = createOperatorConsoleLayout(state, { width: 80, height: 8, isTty: true });
+    const output = renderOperatorConsoleTextLines(state, layout);
+
+    expect(output[0]).toContain("Prompt");
+    expect(output.at(-1)).toContain("session 00:00");
+  });
+
+  it("renders boxed prompt and status rail for minimal state", () => {
     const state = createState();
     const layout = createOperatorConsoleLayout(state, { width: 80, height: 8, isTty: true });
 
-    expect(renderOperatorConsoleTextLines(state, layout)).toEqual([
-      "Prompt: >",
-      "prompt",
-      "prompt",
-      "model pending | ctx 0 | session 00:00",
-    ]);
+    const output = renderOperatorConsoleTextLines(state, layout);
+    expect(output[0]).toMatch(/^╭─ Prompt ─+╮$/u);
+    expect(output[1]).toContain("│ ›");
+    expect(output[2]).toMatch(/^╰─+╯$/u);
+    expect(output[3]).toBe("model pending ○ │ ctx [▱▱▱▱▱▱▱▱▱▱] 0 0% │ session 00:00");
   });
 
   it("keeps rendered line widths within the terminal width", () => {
@@ -54,7 +63,7 @@ describe("Papyrus operator console renderer", () => {
     const output = renderOperatorConsoleTextLines(state, layout);
 
     expect(output.length).toBeGreaterThan(0);
-    expect(output.every((line) => line.length <= 20)).toBe(true);
+    expect(output.every((line) => stringWidth(line) <= 20)).toBe(true);
   });
 
   it("does not render hidden regions", () => {
@@ -63,8 +72,34 @@ describe("Papyrus operator console renderer", () => {
 
     expect(renderOperatorConsoleTextLines(state, layout)).toEqual([
       "Prompt: tell EstaCoda what to do",
-      "kimi-k2.7-code | ctx 18400/262000 7% | session 01:12",
+      "kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ session 01:12",
     ]);
+  });
+
+  it("keeps prompt and status visible under constrained layout", () => {
+    const state = createFullState();
+    const layout = createOperatorConsoleLayout(state, { width: 80, height: 2, isTty: true });
+    const output = renderOperatorConsoleTextLines(state, layout);
+
+    expect(output).toHaveLength(2);
+    expect(output[0]).toContain("Prompt:");
+    expect(output[1]).toContain("session 01:12");
+  });
+
+  it("hidden optional regions do not affect prompt and status render", () => {
+    const state = createFullState();
+    const constrained = createOperatorConsoleLayout(state, { width: 80, height: 2, isTty: true });
+    const withoutOptional = createOperatorConsoleLayout(createState({
+      prompt: state.prompt,
+      status: state.status,
+    }), { width: 80, height: 2, isTty: true });
+
+    expect(renderOperatorConsoleTextLines(state, constrained)).toEqual(
+      renderOperatorConsoleTextLines(createState({
+        prompt: state.prompt,
+        status: state.status,
+      }), withoutOptional)
+    );
   });
 
   it("does not mutate state", () => {

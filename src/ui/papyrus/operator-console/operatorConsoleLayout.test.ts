@@ -91,6 +91,25 @@ describe("Papyrus operator console layout", () => {
     expect(region(layout, "statusRail")).toMatchObject({ height: 1, visible: true });
   });
 
+  it("allocates prompt height from prompt surface content within terminal constraints", () => {
+    const layout = createOperatorConsoleLayout(createState({
+      prompt: {
+        value: [
+          "write a migration plan for:",
+          "- approval cards",
+          "- pasted attachments",
+          "- tool activity",
+        ].join("\n"),
+        cursorOffset: 0,
+        multiline: true,
+        scrollOffset: 0,
+        mode: "prompt",
+      },
+    }), { width: 80, height: 20, isTty: true });
+
+    expect(region(layout, "prompt")?.height).toBe(6);
+  });
+
   it("hides optional regions before prompt and status rail under constrained height", () => {
     const layout = createOperatorConsoleLayout(createFullState(), { width: 60, height: 2, isTty: true });
 

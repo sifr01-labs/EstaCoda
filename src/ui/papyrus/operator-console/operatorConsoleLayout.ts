@@ -3,6 +3,7 @@ import type {
   OperatorConsoleSurface,
   TerminalMetrics,
 } from "./operatorConsoleState.js";
+import { getPromptSurfaceDesiredHeight } from "./promptSurface.js";
 
 export type OperatorConsoleRegionKind = OperatorConsoleSurface;
 
@@ -41,7 +42,7 @@ export function createOperatorConsoleLayout(
 ): OperatorConsoleLayout {
   const width = normalizeTerminalDimension(terminal.width);
   const height = normalizeTerminalDimension(terminal.height);
-  const descriptors = createRegionDescriptors(state);
+  const descriptors = createRegionDescriptors(state, { width, height, isTty: terminal.isTty });
   const allocatedHeights = allocateRegionHeights(descriptors, height);
 
   let y = 0;
@@ -66,7 +67,10 @@ export function createOperatorConsoleLayout(
   };
 }
 
-function createRegionDescriptors(state: OperatorConsoleState): readonly RegionDescriptor[] {
+function createRegionDescriptors(
+  state: OperatorConsoleState,
+  terminal: TerminalMetrics
+): readonly RegionDescriptor[] {
   const descriptors: RegionDescriptor[] = [];
 
   if (state.transcript.length > 0) {
@@ -109,7 +113,7 @@ function createRegionDescriptors(state: OperatorConsoleState): readonly RegionDe
     kind: "prompt",
     priority: PROMPT_PRIORITY,
     minHeight: 1,
-    desiredHeight: 3,
+    desiredHeight: getPromptSurfaceDesiredHeight(state.prompt, terminal),
   });
 
   if (state.slash !== undefined) {

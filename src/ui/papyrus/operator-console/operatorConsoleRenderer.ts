@@ -4,8 +4,9 @@ import type {
 } from "./operatorConsoleLayout.js";
 import type {
   OperatorConsoleState,
-  StatusRailState,
 } from "./operatorConsoleState.js";
+import { renderPromptSurface } from "./promptSurface.js";
+import { renderStatusRailSurface } from "./statusRailSurface.js";
 
 export type OperatorConsoleRenderedLine = {
   readonly region: OperatorConsoleRegion["kind"];
@@ -31,6 +32,16 @@ function renderRegionLines(
   region: OperatorConsoleRegion
 ): readonly OperatorConsoleRenderedLine[] {
   if (!region.visible || region.height <= 0 || region.width <= 0) return [];
+  if (region.kind === "prompt") {
+    return renderPromptSurface(state.prompt, {
+      width: region.width,
+      height: region.height,
+      terminalHeight: layoutHeightForRegion(region),
+    }).map((text) => ({ region: region.kind, text }));
+  }
+  if (region.kind === "statusRail") {
+    return [{ region: region.kind, text: renderStatusRailSurface(state.status, { width: region.width }) }];
+  }
   const lines: OperatorConsoleRenderedLine[] = [];
   for (let row = 0; row < region.height; row += 1) {
     lines.push({
@@ -61,24 +72,8 @@ function regionLabel(
     case "slashMenu":
       return `Slash menu: ${state.slash?.query ?? ""}`;
     case "statusRail":
-      return formatStatusRail(state.status);
+      return renderStatusRailSurface(state.status, { width: region.width });
   }
-}
-
-function formatStatusRail(status: StatusRailState): string {
-  const model = status.model.label.length > 0 ? status.model.label : "model pending";
-  const context = status.context.totalTokens === undefined
-    ? `${status.context.usedTokens}`
-    : `${status.context.usedTokens}/${status.context.totalTokens}`;
-  const percent = status.context.percent === undefined ? "" : ` ${status.context.percent}%`;
-  return `${model} | ctx ${context}${percent} | session ${formatElapsed(status.sessionTimer.elapsedMs)}`;
-}
-
-function formatElapsed(elapsedMs: number): string {
-  const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
 function truncateLine(line: string, width: number): string {
@@ -89,4 +84,8 @@ function truncateLine(line: string, width: number): string {
 
 function plural(count: number): string {
   return count === 1 ? "" : "s";
+}
+
+function layoutHeightForRegion(region: OperatorConsoleRegion): number {
+  return region.y + region.height;
 }
