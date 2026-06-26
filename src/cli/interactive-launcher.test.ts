@@ -8,12 +8,22 @@ import { setupProviderConfig, setupUiConfig } from "../config/runtime-config.js"
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import type { Prompt } from "./prompt-contract.js";
 
+const interactivePromptMock = vi.hoisted(() => ({
+  createInteractivePrompt: vi.fn()
+}));
+
+vi.mock("./create-interactive-prompt.js", () => ({
+  createInteractivePrompt: interactivePromptMock.createInteractivePrompt
+}));
+
 describe("launchInteractiveSession", () => {
   const originalIsTTY = process.stdin.isTTY;
   let tempDir: string;
 
   beforeEach(async () => {
     tempDir = await mkdtemp(join(tmpdir(), "estacoda-launch-locale-test-"));
+    interactivePromptMock.createInteractivePrompt.mockReset();
+    interactivePromptMock.createInteractivePrompt.mockReturnValue(confirmationPrompt("y"));
   });
 
   afterEach(async () => {
@@ -77,6 +87,64 @@ describe("launchInteractiveSession", () => {
     expect(result.exitCode).toBe(0);
     expect(result.locale).toBe("en");
     expect(result.output).toContain("estacoda setup --interactive");
+  });
+
+  it("uses the Papyrus-capable prompt factory for degraded launch confirmation", async () => {
+    Object.defineProperty(process.stdin, "isTTY", {
+      value: true,
+      configurable: true
+    });
+    const prompt = confirmationPrompt("n");
+    interactivePromptMock.createInteractivePrompt.mockReturnValue(prompt);
+
+    const result = await launchInteractiveSession({
+      workspaceRoot: join(tempDir, "workspace"),
+      homeDir: tempDir,
+      collectSetupRoute: async () => setupRouteDecision("configured-degraded", "Setup has warnings."),
+      loadRuntimeConfig: async () => ({ ui: { language: "en" } }) as any
+    });
+
+    expect(interactivePromptMock.createInteractivePrompt).toHaveBeenCalledOnce();
+    expect(result.launched).toBe(false);
+    expect(result.output).toContain("Launch skipped");
+  });
+
+  it("uses the Papyrus-capable prompt factory for incomplete setup launch prompts", async () => {
+    Object.defineProperty(process.stdin, "isTTY", {
+      value: true,
+      configurable: true
+    });
+
+    const result = await launchInteractiveSession({
+      workspaceRoot: join(tempDir, "workspace"),
+      homeDir: tempDir,
+      collectSetupRoute: async () => setupRouteDecision("new-user", "Setup is missing."),
+      loadRuntimeConfig: async () => ({ ui: { language: "en" } }) as any
+    });
+
+    expect(interactivePromptMock.createInteractivePrompt).toHaveBeenCalledOnce();
+    expect(result.launched).toBe(false);
+    expect(result.output).toContain("estacoda setup --interactive");
+  });
+
+  it("preserves injected launch prompts without creating a factory prompt", async () => {
+    Object.defineProperty(process.stdin, "isTTY", {
+      value: true,
+      configurable: true
+    });
+    const prompt = confirmationPrompt("n");
+
+    const result = await launchInteractiveSession({
+      workspaceRoot: join(tempDir, "workspace"),
+      homeDir: tempDir,
+      prompt,
+      collectSetupRoute: async () => setupRouteDecision("configured-degraded", "Setup has warnings."),
+      loadRuntimeConfig: async () => ({ ui: { language: "en" } }) as any
+    });
+
+    expect(interactivePromptMock.createInteractivePrompt).not.toHaveBeenCalled();
+    expect(result.launched).toBe(false);
+    expect(result.output).toContain("Launch skipped");
   });
 
   it("routes broken config to setup instead of throwing during launch locale loading", async () => {
@@ -246,4 +314,17 @@ function confirmationPrompt(answer: string): Prompt {
     async () => answer,
     { close: () => undefined }
   ) as Prompt;
+}
+
+function setupRouteDecision(stateKind: string, summary: string): any {
+  return {
+    kind: stateKind === "configured-degraded" ? "configured-degraded-menu" : "first-run-onboarding",
+    title: "Setup",
+    summary,
+    state: { kind: stateKind },
+    actions: [],
+    warnings: [],
+    blockers: [],
+    readOnly: false
+  };
 }

@@ -1,5 +1,5 @@
 import { loadRuntimeConfig, type LoadedRuntimeConfig } from "../config/runtime-config.js";
-import { createReadlinePrompt } from "./readline-prompt.js";
+import { createInteractivePrompt } from "./create-interactive-prompt.js";
 import type { Prompt } from "./prompt-contract.js";
 import { canRunInteractive } from "../ui/terminal-capabilities.js";
 import type { UiLocale } from "../contracts/ui.js";
@@ -46,7 +46,7 @@ export async function launchInteractiveSession(options: LaunchOptions): Promise<
   const currentLocale = await loadLaunchLocale(options);
 
   if (setupRoute.state.kind === "configured-degraded") {
-    const prompt = options.prompt ?? createReadlinePrompt();
+    const prompt = options.prompt ?? createInteractivePrompt();
     const answer = await prompt(`${setupRoute.summary}\nContinue in limited mode? [y/N]: `);
     if (options.prompt === undefined) {
       prompt.close?.();
@@ -81,7 +81,7 @@ export async function launchInteractiveSession(options: LaunchOptions): Promise<
   }
 
   if (!canLaunchWithoutSetup(setupRoute)) {
-    const prompt = options.prompt ?? createReadlinePrompt();
+    const prompt = options.prompt ?? createInteractivePrompt();
     const answer = await prompt(`${setupRoute.summary}\nRun setup now? [Y/n]: `);
     if (options.prompt === undefined) {
       prompt.close?.();
