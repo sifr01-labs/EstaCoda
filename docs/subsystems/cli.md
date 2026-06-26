@@ -14,7 +14,6 @@ description: "CLI commands, interactive session loop, trace/eval inspection, and
 | `src/cli/cli-session-store.ts` | Persisted active session pointer |
 | `src/cli/one-shot.ts` | One-shot prompt execution |
 | `src/cli/papyrus-prompt.ts` | Papyrus-capable interactive prompt factory |
-| `src/cli/readline-prompt.ts` | Isolated legacy/no-echo prompt implementation retained for cleanup and secret-input safety |
 | `src/cli/paste-interceptor.ts` | Bracketed paste interception and newline restoration |
 | `src/cli/bottom-chrome-controller.ts` | Managed terminal chrome below/above prompt regions |
 | `src/cli/active-turn-command-controller.ts` | CLI-local active-turn command lane |
