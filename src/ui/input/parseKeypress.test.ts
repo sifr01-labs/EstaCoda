@@ -24,6 +24,12 @@ describe("parseKeypress", () => {
     expect(parseKeypress("\x1b")).toEqual([{ type: "key", key: "escape" }]);
   });
 
+  it("distinguishes normal Enter from Alt+Enter", () => {
+    expect(parseKeypress("\r")).toEqual([{ type: "key", key: "enter" }]);
+    expect(parseKeypress("\x1b\r")).toEqual([{ type: "key", key: "enter", alt: true }]);
+    expect(parseKeypress("\x1b\r\n")).toEqual([{ type: "key", key: "enter", alt: true }]);
+  });
+
   it("parses Ctrl-C, Ctrl-D, and Ctrl-A", () => {
     expect(parseKeypress("\x03\x04\x01")).toEqual([
       { type: "key", key: "c", ctrl: true },

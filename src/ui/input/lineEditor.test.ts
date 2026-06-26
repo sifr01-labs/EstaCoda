@@ -108,6 +108,36 @@ describe("raw input line editor", () => {
     });
   });
 
+  it("inserts a newline for Alt+Enter without submitting", () => {
+    expect(applyKeypress(createLineEditorState("abc"), { type: "key", key: "enter", alt: true })).toEqual({
+      state: { text: "abc\n", cursor: 4 },
+    });
+  });
+
+  it("inserts Alt+Enter newlines at the start, middle, and end of text", () => {
+    expect(applyKeypress(createLineEditorState("abc", 0), { type: "key", key: "enter", alt: true }).state).toEqual({
+      text: "\nabc",
+      cursor: 1,
+    });
+    expect(applyKeypress(createLineEditorState("abcd", 2), { type: "key", key: "enter", alt: true }).state).toEqual({
+      text: "ab\ncd",
+      cursor: 3,
+    });
+    expect(applyKeypress(createLineEditorState("abc", 3), { type: "key", key: "enter", alt: true }).state).toEqual({
+      text: "abc\n",
+      cursor: 4,
+    });
+  });
+
+  it("keeps Unicode cursor math intact when inserting newlines", () => {
+    const text = "a👩🏽‍💻b";
+    const beforeB = applyKeypress(createLineEditorState(text), { type: "key", key: "left" }).state;
+    const inserted = applyKeypress(beforeB, { type: "key", key: "enter", alt: true }).state;
+
+    expect(inserted).toEqual({ text: "a👩🏽‍💻\nb", cursor: "a👩🏽‍💻\n".length });
+    expect(isCursorAtGraphemeBoundary(inserted.text, inserted.cursor)).toBe(true);
+  });
+
   it("returns cancel intent for Ctrl-C and Escape", () => {
     expect(applyKeypress(createLineEditorState("draft"), { type: "key", key: "c", ctrl: true }).intent).toEqual({
       type: "cancel",

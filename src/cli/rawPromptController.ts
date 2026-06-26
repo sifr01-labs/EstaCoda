@@ -231,7 +231,7 @@ export class RawPromptController {
           return true;
         }
 
-        if (event.key === "enter" || event.key === "tab") {
+        if ((event.key === "enter" && event.alt !== true) || event.key === "tab") {
           return acceptFocusedTypeaheadSuggestion();
         }
 

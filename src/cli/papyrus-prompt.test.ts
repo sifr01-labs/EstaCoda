@@ -109,6 +109,24 @@ describe("createPapyrusPrompt", () => {
     await expect(pending).resolves.toBe("y");
   });
 
+  it("preserves Alt+Enter multiline input through the raw prompt path", async () => {
+    const input = new FakeInput();
+    const output = fakeOutput();
+    const lifecycle = fakeLifecycle();
+    const prompt = createPapyrusPrompt({
+      input,
+      output,
+      createRaw: (options) => createRawPrompt({ ...options, lifecycle: lifecycle.lifecycle }),
+      createSecretPrompt: () => fakeSecretPrompt().prompt,
+    });
+
+    const pending = prompt("> ");
+    input.send("hello\x1b\rworld\r");
+
+    await expect(pending).resolves.toBe("hello\nworld");
+    expect(lifecycle.calls).toEqual(["start", "stop"]);
+  });
+
   it("routes secret input through the Papyrus-native no-echo path without paste previews", async () => {
     const input = new FakeInput();
     const output = fakeOutput();

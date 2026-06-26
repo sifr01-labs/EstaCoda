@@ -200,6 +200,26 @@ describe("raw prompt controller", () => {
     expect(result).toEqual({ type: "submit", text: "مرحبا 🚀" });
   });
 
+  it("inserts Alt+Enter as a newline without submitting", async () => {
+    const read = startPendingRead();
+
+    read.input.send("hello\x1b\rworld");
+    await Promise.resolve();
+
+    expect(read.isResolved()).toBe(false);
+    expect(read.output.writes.join("")).toContain("> hello");
+    expect(read.output.writes.join("")).toContain("world");
+
+    read.input.send("\r");
+    expect(await read.pending).toEqual({ type: "submit", text: "hello\nworld" });
+  });
+
+  it("keeps Alt+Enter newline insertion editable before submit", async () => {
+    const { result } = await readWithFakeInput("abcd\x1b[D\x1b[D\x1b\ref\r");
+
+    expect(result).toEqual({ type: "submit", text: "ab\nefcd" });
+  });
+
   it("applies backspace and delete edits before submit", async () => {
     expect((await readWithFakeInput("abc\x7f\r")).result).toEqual({ type: "submit", text: "ab" });
     expect((await readWithFakeInput("abc\x1b[D\x1b[3~\r")).result).toEqual({ type: "submit", text: "ab" });
@@ -778,6 +798,42 @@ describe("raw prompt controller", () => {
 
     input.send("\r");
     expect(await pending).toEqual({ type: "submit", text: "/help" });
+    expect(output.writes.join("")).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
+  it("inserts Alt+Enter instead of accepting an open slash suggestion", async () => {
+    const provider = providerFor(SLASH_COMMAND_SUGGESTION_PROVIDER_ID, [slashSuggestion]);
+    const typeahead = fakeTypeahead(provider);
+    const input = new FakeInput();
+    const output = fakeOutput();
+    const lifecycle = fakeLifecycle();
+    const overlayHost = new RawPromptOverlayHost();
+    let resolved = false;
+    const controller = new RawPromptController({
+      input,
+      output,
+      lifecycle: lifecycle.lifecycle,
+      overlayHost,
+      typeahead: {
+        router: typeahead.router,
+      },
+    });
+    const pending = controller.read("> ").then((result) => {
+      resolved = true;
+      return result;
+    });
+
+    input.send("/h");
+    await flushPromises();
+    input.send("\x1b\r");
+    await flushPromises();
+
+    expect(resolved).toBe(false);
+    expect(output.writes.join("")).toContain("> /h");
+    expect(overlayHost.getRows()).toEqual([]);
+
+    input.send("\r");
+    expect(await pending).toEqual({ type: "submit", text: "/h\n" });
     expect(output.writes.join("")).not.toMatch(forbiddenManagedRegionOutput);
   });
 

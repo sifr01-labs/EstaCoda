@@ -51,6 +51,10 @@ export function applyKeypress(state: LineEditorState, event: ParsedKeypress): Li
     return { state: normalized };
   }
 
+  if (event.key === "enter" && event.alt === true) {
+    return { state: insertText(normalized, "\n") };
+  }
+
   if (event.key === "enter") {
     return { state: normalized, intent: { type: "submit", text: normalized.text } };
   }
