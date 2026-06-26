@@ -31,7 +31,11 @@ import { resolveProfileStateHome } from "../config/profile-home.js";
 import { writeCliVoiceMode } from "./voice-mode.js";
 import { CronStore } from "../cron/cron-store.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
-import { createOperatorConsoleRuntimeHost } from "../ui/papyrus/operator-console/index.js";
+import {
+  createOperatorConsoleRuntimeHost,
+  formatActiveWorkSummary,
+  sortActiveWorkItems,
+} from "../ui/papyrus/operator-console/index.js";
 
 const STARTUP_VISIBLE_SCREEN_CLEAR = "\x1b[2J\x1b[H";
 const MANAGED_REGION_CLEAR_PATTERN = /\x1b\[\d+A\x1b\[1G\x1b\[0J/u;
@@ -2158,13 +2162,46 @@ describe("runSessionLoop — active turn spinner", () => {
     const setActiveWorkSpy = vi.spyOn(host, "setActiveWork");
     const events: RuntimeEvent[] = [
       { kind: "agent-start", sessionId: "test-session", input: "hello" },
-      ...Array.from({ length: 10 }, (_, index): RuntimeEvent => ({
+      {
         kind: "tool-start",
         tool: "read_file",
-        stepId: `s${index}`,
-        targetSummary: `src/file-${index}.ts`,
-        activityId: `activity-${index}`,
+        stepId: "running-0",
+        targetSummary: "src/running-0.ts",
+        activityId: "running-0",
+      },
+      {
+        kind: "tool-start",
+        tool: "rg",
+        stepId: "running-1",
+        targetSummary: "\"createReadlinePrompt\" src",
+        activityId: "running-1",
+      },
+      {
+        kind: "tool-result",
+        tool: "shell",
+        decision: "ask",
+        riskClass: "destructive-local",
+        targetSummary: "approval required",
+        activityId: "approval-0",
+      },
+      ...Array.from({ length: 8 }, (_, index): RuntimeEvent => ({
+        kind: "tool-result",
+        tool: "read_file",
+        ok: true,
+        chars: 10,
+        sentChars: 10,
+        targetSummary: `src/completed-${index}.ts`,
+        activityId: `completed-${index}`,
       })),
+      {
+        kind: "tool-result",
+        tool: "typecheck",
+        ok: false,
+        chars: 0,
+        sentChars: 0,
+        targetSummary: "failed",
+        activityId: "failed-0",
+      },
       {
         kind: "tool-result",
         tool: "write_file",
@@ -2205,11 +2242,26 @@ describe("runSessionLoop — active turn spinner", () => {
       ...setActiveWorkSpy.mock.calls.map(([state]) => state.items.length)
     );
     expect(maxActiveWorkItems).toBeGreaterThan(8);
+    const maxActiveWorkState = setActiveWorkSpy.mock.calls
+      .map(([state]) => state)
+      .reduce((largest, state) => state.items.length > largest.items.length ? state : largest);
+    expect(maxActiveWorkState.items).toHaveLength(13);
+    expect(maxActiveWorkState.items.map((item) => item.status)).toEqual(
+      expect.arrayContaining(["running", "awaitingApproval", "succeeded", "failed"])
+    );
+    expect(sortActiveWorkItems(maxActiveWorkState).slice(0, 3).map((item) => item.status)).toEqual([
+      "running",
+      "running",
+      "awaitingApproval",
+    ]);
+    expect(formatActiveWorkSummary(maxActiveWorkState)).toBe(
+      "Completed tool work: 3 running steps resolved, 13 total tool events, 1 file change inspected."
+    );
 
     const strippedChunks = outputChunks.map((chunk) => stripAnsi(chunk));
     const activeWorkChunk = strippedChunks.reduce<string | undefined>((latest, chunk) =>
       chunk.includes("Active work") &&
-      chunk.includes("read_file") &&
+      chunk.includes("src/running-0.ts") &&
       chunk.includes("mock-model")
         ? chunk
         : latest,
@@ -2217,11 +2269,17 @@ describe("runSessionLoop — active turn spinner", () => {
     );
     expect(activeWorkChunk).toBeDefined();
     expect(activeWorkChunk).toContain("more completed this turn");
+    expect(activeWorkChunk).toContain("approval required");
+    expect(activeWorkChunk).toContain("src/completed-0.ts");
+    expect(activeWorkChunk).not.toContain("src/completed-7.ts");
 
     const activeWorkIndex = activeWorkChunk?.indexOf("Active work") ?? -1;
     const statusRailIndex = activeWorkChunk?.indexOf("mock-model") ?? -1;
     expect(activeWorkIndex).toBeGreaterThanOrEqual(0);
     expect(statusRailIndex).toBeGreaterThan(activeWorkIndex);
+    expect(activeWorkChunk?.indexOf("src/running-0.ts")).toBeLessThan(
+      activeWorkChunk?.indexOf("src/completed-0.ts") ?? -1
+    );
 
     const statusRailLine = activeWorkChunk
       ?.split("\n")
@@ -2229,6 +2287,12 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(statusRailLine).toBeDefined();
     expect(statusRailLine).not.toContain("read_file");
     expect(statusRailLine).not.toContain("Active work");
+
+    const durableResponseChunk = strippedChunks.find((chunk) => chunk.includes("Mock response"));
+    expect(durableResponseChunk).toBeDefined();
+    expect(durableResponseChunk).not.toContain("src/completed-0.ts");
+    expect(durableResponseChunk).not.toContain("src/completed-7.ts");
+    expect(durableResponseChunk).not.toContain("approval required");
   });
 
   it("renders provider spinner below the most recent tool row in bottom chrome mode", async () => {

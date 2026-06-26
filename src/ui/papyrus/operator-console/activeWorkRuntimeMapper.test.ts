@@ -64,6 +64,36 @@ describe("active work runtime mapper", () => {
     );
   });
 
+  it("formats collapsed summaries from uncapped mapped live events", () => {
+    let state = createActiveWorkRuntimeState();
+    state = applyActiveWorkRuntimeEvent(state, { id: "run", toolName: "read_file", status: "running" });
+    state = applyActiveWorkRuntimeEvent(state, { id: "queue", toolName: "rg", status: "pending" });
+    state = applyActiveWorkRuntimeEvent(state, { id: "approval", toolName: "shell", status: "gated" });
+    for (let index = 0; index < 38; index += 1) {
+      state = applyActiveWorkRuntimeEvent(state, {
+        id: `done-${index}`,
+        toolName: "read_file",
+        status: "done",
+        target: `src/done-${index}.ts`,
+      });
+    }
+    state = applyActiveWorkRuntimeEvent(state, {
+      id: "edit",
+      toolName: "write_file",
+      status: "done",
+      target: "src/generated.ts",
+      fileChangeInspected: true,
+    });
+
+    expect(state.items).toHaveLength(42);
+    expect(formatActiveWorkSummary(state)).toBe(
+      "Completed tool work: 3 running steps resolved, 42 total tool events, 1 file change inspected."
+    );
+    expect(renderActiveWorkSurface(state, { width: 80, height: 8 }).join("\n")).toContain(
+      "more completed this turn"
+    );
+  });
+
   it("maps queued, running, awaiting approval, and terminal statuses for active-work sorting", () => {
     let state = createActiveWorkRuntimeState();
     state = applyActiveWorkRuntimeEvent(state, { id: "done", toolName: "typecheck", status: "done" });
