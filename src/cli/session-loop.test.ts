@@ -2614,6 +2614,490 @@ describe("runSessionLoop — active turn spinner", () => {
     ]);
   });
 
+  it("routes Operator Console active-turn typing into a steer draft", async () => {
+    const input = makeTtyInput();
+    const outputChunks: string[] = [];
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 96, height: 16, isTty: true },
+    });
+    let releaseTurn: (() => void) | undefined;
+    let handleStarted: (() => void) | undefined;
+    const handleStartedPromise = new Promise<void>((resolve) => {
+      handleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async () => {
+        handleStarted?.();
+        await new Promise<void>((resolve) => {
+          releaseTurn = resolve;
+        });
+        return mockResponse();
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 96,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 96, supportsAnimation: false }),
+      operatorConsole: { enabled: true, runtimeHost: host },
+      prompt: Object.assign(
+        async () => {
+          const values = ["build feature", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await handleStartedPromise;
+    for (const char of "focus only on approval cards") {
+      input.press(char, { name: char, sequence: char });
+    }
+    expect(host.getState().steer).toMatchObject({
+      mode: "drafting",
+      draft: "focus only on approval cards",
+    });
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("Steer current turn");
+    expect(rendered).toContain("focus only on approval cards");
+    expect(rendered).not.toContain("╭─ Prompt");
+
+    releaseTurn?.();
+    await loop;
+  });
+
+  it("submits Operator Console steer draft as active-turn guidance", async () => {
+    const input = makeTtyInput();
+    const outputChunks: string[] = [];
+    const handleInputs: string[] = [];
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 96, height: 16, isTty: true },
+    });
+    let abortReason: unknown;
+    let firstHandleStarted: (() => void) | undefined;
+    let secondHandleStarted: (() => void) | undefined;
+    const firstHandleStartedPromise = new Promise<void>((resolve) => {
+      firstHandleStarted = resolve;
+    });
+    const secondHandleStartedPromise = new Promise<void>((resolve) => {
+      secondHandleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async ({ text, signal, onEvent }: { text: string; channel: string; signal?: AbortSignal; onEvent?: (event: RuntimeEvent) => void }) => {
+        handleInputs.push(text);
+        if (handleInputs.length === 1) {
+          onEvent?.({ kind: "agent-start", sessionId: "test-session", input: text });
+          firstHandleStarted?.();
+          await new Promise<void>((resolve) => {
+            signal?.addEventListener("abort", () => {
+              abortReason = signal.reason;
+              resolve();
+            }, { once: true });
+          });
+          onEvent?.({ kind: "agent-cancelled", reason: String(abortReason) });
+          return {
+            ...mockResponse(),
+            text: "Interrupted response",
+          };
+        }
+        secondHandleStarted?.();
+        return {
+          ...mockResponse(),
+          text: "Retried response",
+        };
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 96,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 96, supportsAnimation: false }),
+      operatorConsole: { enabled: true, runtimeHost: host },
+      prompt: Object.assign(
+        async () => {
+          const values = ["build feature", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await firstHandleStartedPromise;
+    for (const char of "focus only on approval cards") {
+      input.press(char, { name: char, sequence: char });
+    }
+    input.press("\r", { name: "return" });
+    expect(host.getState().steer).toMatchObject({
+      mode: "queued",
+      queued: expect.objectContaining({
+        status: "queued",
+        text: "focus only on approval cards",
+      }),
+    });
+    await secondHandleStartedPromise;
+    await loop;
+
+    expect(abortReason).toBe("CLI steer");
+    expect(handleInputs).toEqual([
+      "build feature",
+      "build feature\n\n[Steering note while previous turn was interrupted]\nfocus only on approval cards",
+    ]);
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("Queued steer");
+    expect(rendered).toContain("User steer:\nfocus only on approval cards");
+    expect(rendered).not.toContain("Waiting for approval");
+  });
+
+  it("does not submit whitespace-only Operator Console steer drafts", async () => {
+    const input = makeTtyInput();
+    const outputChunks: string[] = [];
+    const handleInputs: string[] = [];
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 96, height: 16, isTty: true },
+    });
+    let aborted = false;
+    let releaseTurn: (() => void) | undefined;
+    let handleStarted: (() => void) | undefined;
+    const handleStartedPromise = new Promise<void>((resolve) => {
+      handleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async ({ text, signal }: { text: string; channel: string; signal?: AbortSignal }) => {
+        handleInputs.push(text);
+        handleStarted?.();
+        signal?.addEventListener("abort", () => {
+          aborted = true;
+        }, { once: true });
+        await new Promise<void>((resolve) => {
+          releaseTurn = resolve;
+        });
+        return mockResponse();
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 96,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 96, supportsAnimation: false }),
+      operatorConsole: { enabled: true, runtimeHost: host },
+      prompt: Object.assign(
+        async () => {
+          const values = ["build feature", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await handleStartedPromise;
+    for (const char of "   ") {
+      input.press(char, { name: char, sequence: char });
+    }
+    input.press("\r", { name: "return" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    releaseTurn?.();
+    await loop;
+
+    expect(aborted).toBe(false);
+    expect(handleInputs).toEqual(["build feature"]);
+    expect(stripAnsi(outputChunks.join(""))).not.toContain("User steer:");
+  });
+
+  it("cancels Operator Console steer draft with Escape", async () => {
+    const input = makeTtyInput();
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 96, height: 16, isTty: true },
+    });
+    let releaseTurn: (() => void) | undefined;
+    let handleStarted: (() => void) | undefined;
+    const handleStartedPromise = new Promise<void>((resolve) => {
+      handleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async () => {
+        handleStarted?.();
+        await new Promise<void>((resolve) => {
+          releaseTurn = resolve;
+        });
+        return mockResponse();
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(): boolean {
+          return true;
+        },
+        isTTY: true,
+        columns: 96,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 96, supportsAnimation: false }),
+      operatorConsole: { enabled: true, runtimeHost: host },
+      prompt: Object.assign(
+        async () => {
+          const values = ["build feature", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await handleStartedPromise;
+    for (const char of "focus") {
+      input.press(char, { name: char, sequence: char });
+    }
+    expect(host.getState().steer?.mode).toBe("drafting");
+    input.press("\u001b", { name: "escape" });
+    expect(host.getState().steer).toBeUndefined();
+    releaseTurn?.();
+    await loop;
+  });
+
+  it("cancels queued Operator Console steer without applying retry", async () => {
+    const input = makeTtyInput();
+    const outputChunks: string[] = [];
+    const handleInputs: string[] = [];
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 96, height: 16, isTty: true },
+    });
+    let abortReason: unknown;
+    let releaseTurn: (() => void) | undefined;
+    let firstHandleStarted: (() => void) | undefined;
+    const firstHandleStartedPromise = new Promise<void>((resolve) => {
+      firstHandleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async ({ text, signal, onEvent }: { text: string; channel: string; signal?: AbortSignal; onEvent?: (event: RuntimeEvent) => void }) => {
+        handleInputs.push(text);
+        onEvent?.({ kind: "agent-start", sessionId: "test-session", input: text });
+        firstHandleStarted?.();
+        signal?.addEventListener("abort", () => {
+          abortReason = signal.reason;
+        }, { once: true });
+        await new Promise<void>((resolve) => {
+          releaseTurn = resolve;
+        });
+        return {
+          ...mockResponse(),
+          text: "Cancelled without retry",
+        };
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 96,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 96, supportsAnimation: false }),
+      operatorConsole: { enabled: true, runtimeHost: host },
+      prompt: Object.assign(
+        async () => {
+          const values = ["build feature", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await firstHandleStartedPromise;
+    for (const char of "focus only on approvals") {
+      input.press(char, { name: char, sequence: char });
+    }
+    input.press("\r", { name: "return" });
+    expect(host.getState().steer?.queued).toMatchObject({
+      status: "queued",
+      text: "focus only on approvals",
+    });
+    input.press("\u001b", { name: "escape" });
+    expect(host.getState().steer).toBeUndefined();
+    releaseTurn?.();
+    await loop;
+
+    expect(abortReason).toBe("CLI steer");
+    expect(handleInputs).toEqual(["build feature"]);
+    expect(stripAnsi(outputChunks.join(""))).not.toContain("[Steering note while previous turn was interrupted]");
+  });
+
+  it("keeps one queued Operator Console steer without silent replacement", async () => {
+    const input = makeTtyInput();
+    const handleInputs: string[] = [];
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 96, height: 16, isTty: true },
+    });
+    let releaseTurn: (() => void) | undefined;
+    let firstHandleStarted: (() => void) | undefined;
+    let secondHandleStarted: (() => void) | undefined;
+    const firstHandleStartedPromise = new Promise<void>((resolve) => {
+      firstHandleStarted = resolve;
+    });
+    const secondHandleStartedPromise = new Promise<void>((resolve) => {
+      secondHandleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async ({ text, signal }: { text: string; channel: string; signal?: AbortSignal }) => {
+        handleInputs.push(text);
+        if (handleInputs.length === 1) {
+          firstHandleStarted?.();
+          signal?.addEventListener("abort", () => undefined, { once: true });
+          await new Promise<void>((resolve) => {
+            releaseTurn = resolve;
+          });
+          return mockResponse();
+        }
+        secondHandleStarted?.();
+        return mockResponse();
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(): boolean {
+          return true;
+        },
+        isTTY: true,
+        columns: 96,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 96, supportsAnimation: false }),
+      operatorConsole: { enabled: true, runtimeHost: host },
+      prompt: Object.assign(
+        async () => {
+          const values = ["build feature", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await firstHandleStartedPromise;
+    for (const char of "first steer") {
+      input.press(char, { name: char, sequence: char });
+    }
+    input.press("\r", { name: "return" });
+    const queuedId = host.getState().steer?.queued?.id;
+    for (const char of "second steer") {
+      input.press(char, { name: char, sequence: char });
+    }
+    input.press("\r", { name: "return" });
+    expect(host.getState().steer?.queued).toMatchObject({
+      id: queuedId,
+      text: "first steer",
+      status: "queued",
+    });
+    releaseTurn?.();
+    await secondHandleStartedPromise;
+    await loop;
+
+    expect(handleInputs).toEqual([
+      "build feature",
+      "build feature\n\n[Steering note while previous turn was interrupted]\nfirst steer",
+    ]);
+  });
+
+  it("keeps Ctrl+C as hard interrupt in the Operator Console active-turn path", async () => {
+    const input = makeTtyInput();
+    const outputChunks: string[] = [];
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 96, height: 16, isTty: true },
+    });
+    let abortReason: unknown;
+    let handleStarted: (() => void) | undefined;
+    const handleStartedPromise = new Promise<void>((resolve) => {
+      handleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      handle: async ({ signal, onEvent }: { text: string; channel: string; signal?: AbortSignal; onEvent?: (event: RuntimeEvent) => void }) => {
+        onEvent?.({ kind: "agent-start", sessionId: "test-session", input: "build feature" });
+        handleStarted?.();
+        await new Promise<void>((resolve) => {
+          signal?.addEventListener("abort", () => {
+            abortReason = signal.reason;
+            resolve();
+          }, { once: true });
+        });
+        onEvent?.({ kind: "agent-cancelled", reason: String(abortReason) });
+        return {
+          ...mockResponse(),
+          text: "Interrupted response",
+        };
+      },
+    });
+    let promptIndex = 0;
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 96,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 96, supportsAnimation: false }),
+      operatorConsole: { enabled: true, runtimeHost: host },
+      prompt: Object.assign(
+        async () => {
+          const values = ["build feature", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    await handleStartedPromise;
+    for (const char of "focus") {
+      input.press(char, { name: char, sequence: char });
+    }
+    input.press("\u0003", { name: "c", ctrl: true });
+    await loop;
+
+    expect(abortReason).toBe("SIGINT");
+    expect(stripAnsi(outputChunks.join(""))).toContain("Cancelling current turn");
+    expect(stripAnsi(outputChunks.join(""))).not.toContain("User steer:");
+  });
+
   it("empty /steer shows usage and does not abort", async () => {
     const input = makeTtyInput();
     const outputChunks: string[] = [];

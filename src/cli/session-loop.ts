@@ -52,11 +52,17 @@ import type { TerminalCapabilities } from "../contracts/ui.js";
 import {
   applyActiveWorkRuntimeEvent,
   createActiveWorkRuntimeState,
+  createSubmittedSteerTranscriptBlock,
   createOperatorConsoleRuntimeHost,
+  renderOperatorConsoleLines,
+  routeSteerKey,
   type ActiveWorkRuntimeEvent,
   type OperatorConsoleRuntimeHost,
+  type QueuedSteerState,
+  type SteerState,
   type ToolActivityState,
 } from "../ui/papyrus/operator-console/index.js";
+import { parseKeypress, type ParsedKeypress } from "../ui/input/parseKeypress.js";
 import { centerVisibleBlock, measureVisibleWidth, truncateVisible, wrapText } from "../ui/renderers/layout.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
 import { resolveShellHistoryMode } from "./shell-history-mode.js";
@@ -610,6 +616,9 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         let bottomChromeToolActivityLines: string[] = [];
         let operatorConsoleActiveWorkState = createActiveWorkRuntimeState();
         let operatorConsoleActiveWorkLines: string[] = [];
+        let operatorConsoleSteerState: SteerState | undefined;
+        let operatorConsoleSteerSequence = 0;
+        let disposeOperatorConsoleSteerInput: (() => void) | undefined;
         const completedBottomChromeToolRows: string[] = [];
         let completedToolRowsFlushed = false;
         let skippedPreResponseBottomChromeStateUpdate = false;
@@ -682,8 +691,17 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           ];
         }
 
-        function renderOperatorConsoleActiveWorkLines(state: ToolActivityState): string[] {
-          if (operatorConsoleRuntimeHost === undefined || !bottomChrome.enabled || state.items.length === 0) {
+        function operatorConsoleSteerVisible(state: SteerState | undefined): boolean {
+          return state?.mode === "drafting" || state?.mode === "queued";
+        }
+
+        function renderOperatorConsoleTransientSurfaceLines(state: ToolActivityState): string[] {
+          const steerVisible = operatorConsoleSteerVisible(operatorConsoleSteerState);
+          if (
+            operatorConsoleRuntimeHost === undefined ||
+            !bottomChrome.enabled ||
+            (state.items.length === 0 && !steerVisible)
+          ) {
             return [];
           }
           operatorConsoleRuntimeHost.clear();
@@ -697,14 +715,33 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             cursorOffset: 0,
             multiline: false,
             scrollOffset: 0,
-            mode: "prompt",
+            mode: steerVisible ? "steer" : "prompt",
           });
           operatorConsoleRuntimeHost.setActiveWork(state);
+          operatorConsoleRuntimeHost.setSteer(operatorConsoleSteerState);
 
           const frame = operatorConsoleRuntimeHost.render();
-          const activeWorkRegion = frame.layout.regions.find((region) => region.kind === "activeWork");
-          if (activeWorkRegion === undefined || !activeWorkRegion.visible) return [];
-          return frame.lines.slice(0, activeWorkRegion.height);
+          const transientRegions = new Set(["activeWork"]);
+          if (steerVisible) {
+            transientRegions.add("queuedSteer");
+            transientRegions.add("prompt");
+          }
+          return renderOperatorConsoleLines(frame.state, frame.layout)
+            .filter((line) => transientRegions.has(line.region))
+            .map((line) => line.text);
+        }
+
+        function refreshOperatorConsoleTransientSurface(): void {
+          operatorConsoleActiveWorkLines = renderOperatorConsoleTransientSurfaceLines(operatorConsoleActiveWorkState);
+        }
+
+        function setOperatorConsoleSteerState(state: SteerState | undefined): void {
+          operatorConsoleSteerState = state;
+          if (state === undefined) {
+            operatorConsoleRuntimeHost?.setSteer(undefined);
+          }
+          refreshOperatorConsoleTransientSurface();
+          updateActiveTurnTransientLinesUnlessSuppressed();
         }
 
         const updateActiveTurnTransientLines = () => {
@@ -757,6 +794,135 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           event: RuntimeEvent
         ): event is Extract<RuntimeEvent, { kind: "tool-start" | "tool-result" }> {
           return event.kind === "tool-start" || event.kind === "tool-result";
+        }
+
+        function createQueuedSteerState(text: string): QueuedSteerState {
+          operatorConsoleSteerSequence += 1;
+          return {
+            id: `active-turn-steer-${turnStartedAtMs}-${operatorConsoleSteerSequence}`,
+            text,
+            status: "queued",
+            submittedAtMs: now(),
+          };
+        }
+
+        function writeSubmittedSteerTranscript(text: string): void {
+          const block = createSubmittedSteerTranscriptBlock({
+            id: `active-turn-steer-transcript-${turnStartedAtMs}-${operatorConsoleSteerSequence}`,
+            text,
+            createdAtMs: now(),
+          });
+          bottomChrome.writeAboveChromeSync(() => {
+            writeTurnBoundaryRows(block.text.split("\n"));
+          });
+        }
+
+        function currentDraftSteerState(draft: string): SteerState {
+          return {
+            draft,
+            cursorOffset: draft.length,
+            mode: "drafting",
+          };
+        }
+
+        function currentQueuedSteerState(queued: QueuedSteerState): SteerState {
+          return {
+            draft: "",
+            cursorOffset: 0,
+            mode: "queued",
+            queued,
+          };
+        }
+
+        function handleOperatorConsoleSteerKey(event: ParsedKeypress): void {
+          if (event.type === "key" && event.ctrl === true && event.key === "c") {
+            process.emit("SIGINT");
+            return;
+          }
+
+          const current = operatorConsoleSteerState;
+          const queued = current?.queued?.status === "queued" ? current.queued : undefined;
+
+          if (event.type === "key" && event.key === "escape") {
+            if (queued !== undefined) {
+              pendingSteeringNote = undefined;
+              setOperatorConsoleSteerState(undefined);
+              return;
+            }
+            if (current?.mode === "drafting") {
+              setOperatorConsoleSteerState(undefined);
+            }
+            return;
+          }
+
+          if (event.type === "key" && event.key === "backspace") {
+            if (current?.mode !== "drafting") return;
+            const nextDraft = current.draft.slice(0, -1);
+            setOperatorConsoleSteerState(nextDraft.length === 0 ? undefined : currentDraftSteerState(nextDraft));
+            return;
+          }
+
+          if (event.type === "key" && event.ctrl === true && event.key === "u") {
+            if (current?.mode === "drafting") {
+              setOperatorConsoleSteerState(undefined);
+            }
+            return;
+          }
+
+          if (event.type === "key" && event.key === "enter") {
+            if (current === undefined) return;
+            const intent = routeSteerKey(current, event);
+            if (intent.type !== "submit") return;
+            if (queued !== undefined || steeringRetryUsed || pendingSteeringNote !== undefined) {
+              setOperatorConsoleSteerState(currentQueuedSteerState(queued ?? createQueuedSteerState(pendingSteeringNote ?? intent.text)));
+              return;
+            }
+            const queuedSteer = createQueuedSteerState(intent.text);
+            pendingSteeringNote = intent.text;
+            setOperatorConsoleSteerState(currentQueuedSteerState(queuedSteer));
+            writeSubmittedSteerTranscript(intent.text);
+            activeTurn?.abort("CLI steer");
+            return;
+          }
+
+          if (event.type !== "text" && event.type !== "paste") {
+            return;
+          }
+          if (queued !== undefined) {
+            setOperatorConsoleSteerState(currentQueuedSteerState(queued));
+            return;
+          }
+          const nextDraft = `${current?.mode === "drafting" ? current.draft : ""}${event.text}`;
+          setOperatorConsoleSteerState(currentDraftSteerState(nextDraft));
+        }
+
+        function startOperatorConsoleSteerInput(): (() => void) | undefined {
+          if (
+            operatorConsoleRuntimeHost === undefined ||
+            !bottomChrome.enabled ||
+            cliInput.isTTY !== true ||
+            renderer.capabilities.isCI ||
+            renderer.capabilities.isDumb
+          ) {
+            return undefined;
+          }
+
+          const wasRaw = cliInput.isRaw === true;
+          const onData = (chunk: string | Buffer | Uint8Array) => {
+            const textChunk = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+            for (const event of parseKeypress(textChunk)) {
+              handleOperatorConsoleSteerKey(event);
+            }
+          };
+          cliInput.on("data", onData);
+          cliInput.setRawMode?.(true);
+          cliInput.resume();
+          return () => {
+            cliInput.off("data", onData);
+            if (!wasRaw) {
+              cliInput.setRawMode?.(false);
+            }
+          };
         }
 
         function flushCompletedToolRowsNoRestore(): void {
@@ -888,97 +1054,115 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         }
         renderSpinner("thinking");
 
-        activeTurnCommandController = new ActiveTurnCommandController({
-          input: cliInput,
-          enabled: renderer.capabilities.isTTY && !renderer.capabilities.isCI && !renderer.capabilities.isDumb,
-          onActiveInputPreviewChange: (preview) => {
-            if (!bottomChrome.enabled) {
-              clearActiveTurnVisualLines();
-              return;
-            }
-            if (preview?.kind === "message") {
-              setActiveTurnPromptLines(renderActiveTurnLabeledLines({
-                label: "> Follow up:",
-                text: preview.text,
-                terminalWidth: termWidth,
-                maxLines: MAX_ACTIVE_TURN_PREVIEW_LINES,
-                overflow: "tail",
-              }));
-            } else if (preview?.kind === "command") {
-              setActiveTurnCommandLines(renderActiveTurnCommandPreviewLines({
-                command: preview.text,
-                renderer,
-                terminalWidth: termWidth,
-              }));
-            } else {
-              clearActiveTurnVisualLines();
-            }
-            updateActiveTurnTransientLinesUnlessSuppressed();
-          },
-          onStatusMessage: (message) => {
-            if (!bottomChrome.enabled) {
-              clearActiveTurnVisualLines();
-              return;
-            }
-            setActiveTurnStatusLines(renderActiveTurnLabeledLines({
-              label: `${activeTurnGlyph(renderer, "command")} active command:`,
-              text: message,
-              terminalWidth: termWidth,
-              maxLines: 2,
-              overflow: "head",
-            }));
-            updateActiveTurnTransientLinesUnlessSuppressed();
-          },
-          onInputLineChange: (line) => {
-            activeTurnSlashCompletion = line?.startsWith("/") === true
-              ? buildActiveTurnSlashCompletionViewModel(runtime, line)
-              : undefined;
-            updateBottomChromeStateInPlaceUnlessSuppressed();
-          },
-          onQueueText: (queuedText) => {
-            if (queuedSubmittedInput !== undefined) {
-              if (bottomChrome.enabled) {
-                setActiveTurnStatusLines(renderActiveTurnLabeledLines({
-                  label: `${activeTurnGlyph(renderer, "queued")} Queued:`,
-                  text: "A message is already queued for the next turn.",
+        if (operatorConsoleRuntimeHost !== undefined) {
+          disposeOperatorConsoleSteerInput = startOperatorConsoleSteerInput();
+        } else {
+          activeTurnCommandController = new ActiveTurnCommandController({
+            input: cliInput,
+            enabled: renderer.capabilities.isTTY && !renderer.capabilities.isCI && !renderer.capabilities.isDumb,
+            onActiveInputPreviewChange: (preview) => {
+              if (!bottomChrome.enabled) {
+                clearActiveTurnVisualLines();
+                return;
+              }
+              if (preview?.kind === "message") {
+                setActiveTurnPromptLines(renderActiveTurnLabeledLines({
+                  label: "> Follow up:",
+                  text: preview.text,
                   terminalWidth: termWidth,
-                  maxLines: 2,
-                  overflow: "head",
+                  maxLines: MAX_ACTIVE_TURN_PREVIEW_LINES,
+                  overflow: "tail",
+                }));
+              } else if (preview?.kind === "command") {
+                setActiveTurnCommandLines(renderActiveTurnCommandPreviewLines({
+                  command: preview.text,
+                  renderer,
+                  terminalWidth: termWidth,
                 }));
               } else {
                 clearActiveTurnVisualLines();
               }
               updateActiveTurnTransientLinesUnlessSuppressed();
-              return;
-            }
-            queuedSubmittedInput = {
-              text: queuedText,
-              echoedPromptPrefix: "",
-              echoedText: queuedText,
-              clearSubmittedPrompt: false
-            };
-            if (bottomChrome.enabled) {
+            },
+            onStatusMessage: (message) => {
+              if (!bottomChrome.enabled) {
+                clearActiveTurnVisualLines();
+                return;
+              }
               setActiveTurnStatusLines(renderActiveTurnLabeledLines({
-                label: `${activeTurnGlyph(renderer, "queued")} Queued:`,
-                text: queuedText,
+                label: `${activeTurnGlyph(renderer, "command")} active command:`,
+                text: message,
                 terminalWidth: termWidth,
-                maxLines: MAX_ACTIVE_TURN_QUEUED_LINES,
+                maxLines: 2,
                 overflow: "head",
               }));
-            } else {
-              clearActiveTurnVisualLines();
-            }
-            updateActiveTurnTransientLines();
-          },
-          onInterrupt: () => {
-            activeTurn?.abort("CLI interrupt");
-          },
-          onSteer: (note) => {
-            if (steeringRetryUsed || pendingSteeringNote !== undefined) {
+              updateActiveTurnTransientLinesUnlessSuppressed();
+            },
+            onInputLineChange: (line) => {
+              activeTurnSlashCompletion = line?.startsWith("/") === true
+                ? buildActiveTurnSlashCompletionViewModel(runtime, line)
+                : undefined;
+              updateBottomChromeStateInPlaceUnlessSuppressed();
+            },
+            onQueueText: (queuedText) => {
+              if (queuedSubmittedInput !== undefined) {
+                if (bottomChrome.enabled) {
+                  setActiveTurnStatusLines(renderActiveTurnLabeledLines({
+                    label: `${activeTurnGlyph(renderer, "queued")} Queued:`,
+                    text: "A message is already queued for the next turn.",
+                    terminalWidth: termWidth,
+                    maxLines: 2,
+                    overflow: "head",
+                  }));
+                } else {
+                  clearActiveTurnVisualLines();
+                }
+                updateActiveTurnTransientLinesUnlessSuppressed();
+                return;
+              }
+              queuedSubmittedInput = {
+                text: queuedText,
+                echoedPromptPrefix: "",
+                echoedText: queuedText,
+                clearSubmittedPrompt: false
+              };
               if (bottomChrome.enabled) {
                 setActiveTurnStatusLines(renderActiveTurnLabeledLines({
-                  label: `${activeTurnGlyph(renderer, "command")} active command:`,
-                  text: "Steering already queued for this turn.",
+                  label: `${activeTurnGlyph(renderer, "queued")} Queued:`,
+                  text: queuedText,
+                  terminalWidth: termWidth,
+                  maxLines: MAX_ACTIVE_TURN_QUEUED_LINES,
+                  overflow: "head",
+                }));
+              } else {
+                clearActiveTurnVisualLines();
+              }
+              updateActiveTurnTransientLines();
+            },
+            onInterrupt: () => {
+              activeTurn?.abort("CLI interrupt");
+            },
+            onSteer: (note) => {
+              if (steeringRetryUsed || pendingSteeringNote !== undefined) {
+                if (bottomChrome.enabled) {
+                  setActiveTurnStatusLines(renderActiveTurnLabeledLines({
+                    label: `${activeTurnGlyph(renderer, "command")} active command:`,
+                    text: "Steering already queued for this turn.",
+                    terminalWidth: termWidth,
+                    maxLines: 2,
+                    overflow: "head",
+                  }));
+                } else {
+                  clearActiveTurnVisualLines();
+                }
+                updateActiveTurnTransientLines();
+                return;
+              }
+              pendingSteeringNote = note;
+              if (bottomChrome.enabled) {
+                setActiveTurnStatusLines(renderActiveTurnLabeledLines({
+                  label: `${activeTurnGlyph(renderer, "steer")} Steer:`,
+                  text: "Steering note queued; interrupting turn.",
                   terminalWidth: termWidth,
                   maxLines: 2,
                   overflow: "head",
@@ -987,24 +1171,10 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
                 clearActiveTurnVisualLines();
               }
               updateActiveTurnTransientLines();
-              return;
-            }
-            pendingSteeringNote = note;
-            if (bottomChrome.enabled) {
-              setActiveTurnStatusLines(renderActiveTurnLabeledLines({
-                label: `${activeTurnGlyph(renderer, "steer")} Steer:`,
-                text: "Steering note queued; interrupting turn.",
-                terminalWidth: termWidth,
-                maxLines: 2,
-                overflow: "head",
-              }));
-            } else {
-              clearActiveTurnVisualLines();
-            }
-            updateActiveTurnTransientLines();
-            activeTurn?.abort("CLI steer");
-          },
-        });
+              activeTurn?.abort("CLI steer");
+            },
+          });
+        }
         const responsePromise = runtime.handle({
             text: retryText,
             channel: "cli",
@@ -1046,7 +1216,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
                     operatorConsoleActiveWorkState,
                     activeWorkEventFromToolRail(railEvent, event)
                   );
-                  operatorConsoleActiveWorkLines = renderOperatorConsoleActiveWorkLines(operatorConsoleActiveWorkState);
+                  refreshOperatorConsoleTransientSurface();
                 } else {
                   const lines = renderToolActivityLines(railEvent);
 
@@ -1081,18 +1251,22 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             activeTurnStartedAtMs = undefined;
             suppressActiveTurnChromeUpdates = bottomChrome.enabled;
             try {
+              disposeOperatorConsoleSteerInput?.();
               activeTurnCommandController?.dispose();
             } finally {
               suppressActiveTurnChromeUpdates = false;
             }
+            disposeOperatorConsoleSteerInput = undefined;
             activeTurnCommandController = undefined;
             clearActiveTurnVisualLines();
             activeTurnSlashCompletion = undefined;
+            operatorConsoleSteerState = undefined;
             bottomChromeToolActivityActive = false;
             bottomChromeToolActivityLines = [];
             operatorConsoleActiveWorkState = createActiveWorkRuntimeState();
             operatorConsoleActiveWorkLines = [];
             operatorConsoleRuntimeHost?.setActiveWork(operatorConsoleActiveWorkState);
+            operatorConsoleRuntimeHost?.setSteer(undefined);
             if (bottomChrome.enabled) {
               stopBottomChromeActiveChromeTicker();
               resetBottomChromeTransientSpinnerState();
@@ -1107,7 +1281,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             clearBottomChromeTranscriptSpinner = () => undefined;
             clearActiveTurnChrome = () => undefined;
           });
-        activeTurnCommandController.start();
+        activeTurnCommandController?.start();
         const response = await responsePromise;
         lastProviderExecutionSummary = response.providerExecution === undefined
           ? undefined
