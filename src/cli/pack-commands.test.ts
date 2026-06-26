@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -8,6 +8,16 @@ import { packCommand } from "./pack-commands.js";
 import { installPack } from "../packs/pack-installer.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import type { PackManifest } from "../contracts/pack.js";
+import type { Prompt } from "./prompt-contract.js";
+
+const interactivePromptMock = vi.hoisted(() => ({
+  prompt: vi.fn(),
+  createInteractivePrompt: vi.fn()
+}));
+
+vi.mock("./create-interactive-prompt.js", () => ({
+  createInteractivePrompt: interactivePromptMock.createInteractivePrompt
+}));
 
 function makeManifest(overrides?: Partial<PackManifest>): PackManifest {
   return {
@@ -53,6 +63,9 @@ describe("packCommand", () => {
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), "estacoda-packs-cmd-test-"));
     sourceDir = join(tmpDir, "source-pack");
+    interactivePromptMock.prompt.mockReset();
+    interactivePromptMock.createInteractivePrompt.mockReset();
+    interactivePromptMock.createInteractivePrompt.mockReturnValue(interactivePromptMock.prompt);
   });
 
   afterEach(() => {
@@ -162,6 +175,39 @@ describe("packCommand", () => {
     expect(result.output).toContain("Installed pack");
   });
 
+  it("routes owned install confirmation prompts through the interactive prompt factory", async () => {
+    const manifest = makeManifest({
+      provenance: { origin: "external", trustLevel: "external_reviewed" }
+    });
+    writePack(sourceDir, manifest);
+    interactivePromptMock.prompt.mockResolvedValue("yes");
+
+    const result = await packCommand(
+      { argv: ["packs", "install"], workspaceRoot: process.cwd(), homeDir: tmpDir },
+      ["install", sourceDir]
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(interactivePromptMock.createInteractivePrompt).toHaveBeenCalledOnce();
+    expect(interactivePromptMock.prompt).toHaveBeenCalledWith(expect.stringContaining("Do you want to install this pack?"));
+  });
+
+  it("keeps injected install prompts on the explicit prompt path", async () => {
+    const manifest = makeManifest({
+      provenance: { origin: "external", trustLevel: "external_reviewed" }
+    });
+    writePack(sourceDir, manifest);
+    const prompt = fakePrompt(["yes"]);
+
+    const result = await packCommand(
+      { argv: ["packs", "install"], workspaceRoot: process.cwd(), homeDir: tmpDir, prompt },
+      ["install", sourceDir]
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(interactivePromptMock.createInteractivePrompt).not.toHaveBeenCalled();
+  });
+
   it("returns error for missing install path", async () => {
     const result = await packCommand(
       { argv: ["packs", "install"], workspaceRoot: process.cwd(), homeDir: tmpDir },
@@ -191,6 +237,25 @@ describe("packCommand", () => {
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain("Enabled pack");
     expect(existsSync(join(tmpDir, ".estacoda", "packs", "cli-sp"))).toBe(true);
+  });
+
+  it("routes owned enable prompt creation through the interactive prompt factory", async () => {
+    const manifest = makeManifest();
+    writePack(sourceDir, manifest);
+    await installPack({ homeDir: tmpDir, sourcePath: sourceDir, actor: "test" });
+    await packCommand(
+      { argv: ["packs", "disable"], workspaceRoot: process.cwd(), homeDir: tmpDir },
+      ["disable", "cli-sp"]
+    );
+    interactivePromptMock.createInteractivePrompt.mockClear();
+
+    const result = await packCommand(
+      { argv: ["packs", "enable"], workspaceRoot: process.cwd(), homeDir: tmpDir },
+      ["enable", "cli-sp"]
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(interactivePromptMock.createInteractivePrompt).toHaveBeenCalledOnce();
   });
 
   it("disables an enabled pack", async () => {
@@ -248,6 +313,11 @@ describe("packCommand", () => {
     expect(result.output).toContain("Usage: estacoda packs <subcommand>");
   });
 });
+
+function fakePrompt(answers: string[]): Prompt {
+  const prompt = vi.fn(async () => answers.shift() ?? "");
+  return prompt as unknown as Prompt;
+}
 
 type EntrypointResult = {
   readonly code: number | null;

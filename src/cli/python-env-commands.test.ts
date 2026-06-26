@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { mkdtemp } from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runCliCommand } from "./cli.js";
+import type { Prompt } from "./prompt-contract.js";
 import {
   DDGS_CAPABILITY_ID,
   registerPythonCapabilitySpecForTest,
@@ -19,6 +20,12 @@ const capabilityManagerMock = vi.hoisted(() => ({
   verifyManagedPythonCapabilityEnvironment: vi.fn()
 }));
 
+const interactivePromptMock = vi.hoisted(() => ({
+  prompt: vi.fn(),
+  close: vi.fn(),
+  createInteractivePrompt: vi.fn()
+}));
+
 vi.mock("../python-env/capability-manager.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../python-env/capability-manager.js")>();
   return {
@@ -28,6 +35,10 @@ vi.mock("../python-env/capability-manager.js", async (importOriginal) => {
     verifyManagedPythonCapabilityEnvironment: capabilityManagerMock.verifyManagedPythonCapabilityEnvironment
   };
 });
+
+vi.mock("./create-interactive-prompt.js", () => ({
+  createInteractivePrompt: interactivePromptMock.createInteractivePrompt
+}));
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-python-env-cli-test-"));
@@ -89,6 +100,12 @@ describe("python-env CLI commands", () => {
     capabilityManagerMock.checkManagedPythonCapabilityStatus.mockReset();
     capabilityManagerMock.installManagedPythonCapabilityEnvironment.mockReset();
     capabilityManagerMock.verifyManagedPythonCapabilityEnvironment.mockReset();
+    interactivePromptMock.prompt.mockReset();
+    interactivePromptMock.close.mockReset();
+    interactivePromptMock.createInteractivePrompt.mockReset();
+    interactivePromptMock.createInteractivePrompt.mockReturnValue(Object.assign(interactivePromptMock.prompt, {
+      close: interactivePromptMock.close
+    }));
     capabilityManagerMock.checkManagedPythonCapabilityStatus.mockImplementation(async ({ capabilityId }: { capabilityId: string }) => ({
       ok: false,
       capabilityId,
@@ -216,6 +233,70 @@ describe("python-env CLI commands", () => {
       capabilityId: "fake-capability",
       groups: ["extra"]
     }));
+  });
+
+  it("routes owned setup confirmations through the interactive prompt factory", async () => {
+    const originalStdinIsTty = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, "isTTY", {
+      configurable: true,
+      value: true
+    });
+    interactivePromptMock.prompt.mockResolvedValue("yes");
+    capabilityManagerMock.installManagedPythonCapabilityEnvironment.mockResolvedValue({
+      ok: true,
+      capabilityId: "fake-capability",
+      version: "0.1.0",
+      specHash: "hash-current",
+      installedGroups: [],
+      installedPackages: ["demo-package==1.2.3"],
+      pythonPath: "/state/python-envs/fake-capability/bin/python",
+      envPath: "/state/python-envs/fake-capability",
+      manifest: manifest(homeDir)
+    });
+
+    try {
+      const result = await runCliCommand({
+        argv: ["python-env", "setup", "fake-capability"],
+        workspaceRoot: homeDir,
+        homeDir
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(interactivePromptMock.createInteractivePrompt).toHaveBeenCalledOnce();
+      expect(interactivePromptMock.prompt).toHaveBeenCalledWith("Install pinned Python packages for 'fake-capability'? [y/N] ");
+      expect(interactivePromptMock.close).toHaveBeenCalledOnce();
+    } finally {
+      Object.defineProperty(process.stdin, "isTTY", {
+        configurable: true,
+        value: originalStdinIsTty
+      });
+    }
+  });
+
+  it("keeps injected setup prompts on the explicit prompt path", async () => {
+    const prompt = Object.assign(fakePrompt(["yes"]), { close: vi.fn() });
+    capabilityManagerMock.installManagedPythonCapabilityEnvironment.mockResolvedValue({
+      ok: true,
+      capabilityId: "fake-capability",
+      version: "0.1.0",
+      specHash: "hash-current",
+      installedGroups: [],
+      installedPackages: ["demo-package==1.2.3"],
+      pythonPath: "/state/python-envs/fake-capability/bin/python",
+      envPath: "/state/python-envs/fake-capability",
+      manifest: manifest(homeDir)
+    });
+
+    const result = await runCliCommand({
+      argv: ["python-env", "setup", "fake-capability"],
+      workspaceRoot: homeDir,
+      homeDir,
+      prompt
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(interactivePromptMock.createInteractivePrompt).not.toHaveBeenCalled();
+    expect(prompt.close).not.toHaveBeenCalled();
   });
 
   it("runs verify without installing packages", async () => {
@@ -478,3 +559,8 @@ describe("python-env CLI commands", () => {
     expect(result.output).toContain("[truncated]");
   });
 });
+
+function fakePrompt(answers: string[]): Prompt {
+  const prompt = vi.fn(async () => answers.shift() ?? "");
+  return prompt as unknown as Prompt;
+}

@@ -7,7 +7,7 @@ import {
 } from "../packs/pack-installer.js";
 import type { CliOptions, CliCommandResult } from "./cli.js";
 import { resolveHomeDir } from "../config/home-dir.js";
-import { createReadlinePrompt } from "./readline-prompt.js";
+import { createInteractivePrompt } from "./create-interactive-prompt.js";
 
 export async function packCommand(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const subcommand = args[0];
@@ -108,7 +108,7 @@ async function installCommand(
     return { handled: true, exitCode: 1, output: "Usage: estacoda packs install <path> [--force]" };
   }
 
-  const prompt = options.interactive !== false ? options.prompt ?? createReadlinePrompt() : undefined;
+  const prompt = options.interactive !== false ? options.prompt ?? createInteractivePrompt() : undefined;
   const result = await installPack({
     homeDir,
     sourcePath: path,
@@ -165,7 +165,7 @@ async function enableCommand(
     return { handled: true, exitCode: 1, output: "Usage: estacoda packs enable <id> [--force]" };
   }
 
-  const prompt = options.interactive !== false ? options.prompt ?? createReadlinePrompt() : undefined;
+  const prompt = options.interactive !== false ? options.prompt ?? createInteractivePrompt() : undefined;
   const result = await enablePack({
     homeDir,
     id,
