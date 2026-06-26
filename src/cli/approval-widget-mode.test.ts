@@ -20,16 +20,6 @@ describe("approval widget mode", () => {
       inputMode: "raw",
       rendererMode: "papyrus",
     })).toBe("papyrus");
-    expect(resolveCoreSessionApprovalWidgetMode({
-      env: {},
-      inputMode: "readline",
-      rendererMode: "papyrus",
-    })).toBe("papyrus");
-    expect(resolveCoreSessionApprovalWidgetMode({
-      env: {},
-      inputMode: "raw",
-      rendererMode: "legacy",
-    })).toBe("papyrus");
   });
 
   it("defaults unset, empty, invalid, and removed legacy values to Papyrus", () => {

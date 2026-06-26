@@ -27,8 +27,7 @@ describe("Papyrus surface controller", () => {
     expect(controller.getSize()).toEqual({ width: 4, height: 2 });
   });
 
-  it("only creates the adapter for papyrus mode", () => {
-    expect(createPapyrusSurfaceControllerForMode("legacy", { width: 4, height: 1 })).toBeUndefined();
+  it("creates the adapter for the only supported renderer mode", () => {
     expect(createPapyrusSurfaceControllerForMode("papyrus", { width: 4, height: 1 })).toBeDefined();
   });
 

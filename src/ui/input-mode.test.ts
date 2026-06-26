@@ -21,7 +21,7 @@ describe("UI input mode", () => {
     expect(resolveCoreSessionUiInputMode({
       env: {},
       isInteractiveTty: false,
-    })).toBe("readline");
+    })).toBe("raw");
   });
 
   it("defaults unset values to raw", () => {
@@ -78,11 +78,11 @@ describe("UI input mode", () => {
     })).toBe("raw");
   });
 
-  it("preserves readline for non-TTY core sessions", () => {
+  it("keeps non-TTY core sessions on the only supported mode value", () => {
     expect(resolveCoreSessionUiInputMode({
       env: {},
       isInteractiveTty: false,
-    })).toBe("readline");
+    })).toBe("raw");
   });
 
   it("ignores explicit readline for core sessions", () => {

@@ -10,8 +10,8 @@ export type ResolveApprovalWidgetModeOptions = {
 };
 
 export type ResolveCoreSessionApprovalWidgetModeOptions = Omit<ResolveApprovalWidgetModeOptions, "defaultMode"> & {
-  inputMode: "readline" | "raw";
-  rendererMode: "legacy" | "papyrus";
+  inputMode: "raw";
+  rendererMode: "papyrus";
 };
 
 export function parseApprovalWidgetMode(
