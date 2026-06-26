@@ -2093,7 +2093,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(rendered.slice(toolIndex)).not.toContain("────────────────────────────────────────────────────────────────────────────────\n↳ hello\n────────────────────────────────────────────────────────────────────────────────");
   });
 
-  it("routes bottom-chrome tool activity through live slots and flushes durable results before the response", async () => {
+  it("routes bottom-chrome tool activity through live slots after removed fallback flags are ignored", async () => {
     const outputChunks: string[] = [];
     const output = {
       write(chunk: string | Uint8Array): boolean {
@@ -2156,7 +2156,7 @@ describe("runSessionLoop — active turn spinner", () => {
       chunk.includes("mock-model")
     );
     expect(liveStartChunk).toBeDefined();
-    expect(liveStartChunk?.split("\n").filter((line) => line.includes("old-start-only") || line === "\u00A0")).toHaveLength(5);
+    expect(liveStartChunk?.split("\n").filter((line) => line.includes("old-start-only") || line === "\u00A0")).toHaveLength(1);
 
     const finalLiveHudChunk = strippedChunks.reduce<string | undefined>(
       (latest, chunk) =>
@@ -5359,7 +5359,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(result.rendered).toContain("Approval granted (once). Retrying now.");
   });
 
-  it("keeps approval prompts legacy when core sessions use the readline escape hatch", async () => {
+  it("ignores removed readline input fallback for default approval widgets", async () => {
     const result = await runApprovalPromptScenario(["once"], {
       env: { [UI_INPUT_MODE_ENV_VAR]: "readline" },
       response: approvalAskResponse(),
@@ -5371,10 +5371,10 @@ describe("runSessionLoop — active turn spinner", () => {
       toolName: "workspace.write",
       scope: "once",
     });
-    expect(result.rendered).not.toContain("[Approval] Approval required:");
+    expect(result.rendered).toContain("[Approval] Approval required:");
   });
 
-  it("keeps approval prompts legacy when readline fallback conflicts with the Papyrus approval flag", async () => {
+  it("ignores removed readline input fallback when Papyrus approval widgets are explicit", async () => {
     const result = await runApprovalPromptScenario(["once"], {
       env: {
         [UI_INPUT_MODE_ENV_VAR]: "readline",
@@ -5389,10 +5389,10 @@ describe("runSessionLoop — active turn spinner", () => {
       toolName: "workspace.write",
       scope: "once",
     });
-    expect(result.rendered).not.toContain("[Approval] Approval required:");
+    expect(result.rendered).toContain("[Approval] Approval required:");
   });
 
-  it("keeps approval prompts legacy when core sessions use the legacy renderer fallback", async () => {
+  it("ignores removed legacy renderer fallback for default approval widgets", async () => {
     const result = await runApprovalPromptScenario(["once"], {
       env: { [UI_RENDERER_ENV_VAR]: "legacy" },
       response: approvalAskResponse(),
@@ -5404,7 +5404,7 @@ describe("runSessionLoop — active turn spinner", () => {
       toolName: "workspace.write",
       scope: "once",
     });
-    expect(result.rendered).not.toContain("[Approval] Approval required:");
+    expect(result.rendered).toContain("[Approval] Approval required:");
   });
 
   it("routes promptable command approvals through Papyrus adapter behind the explicit flag", async () => {

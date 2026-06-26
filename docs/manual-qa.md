@@ -131,19 +131,26 @@ terminal lifecycle cleanup.
 | Scenario | Command | Verify |
 |----------|---------|--------|
 | Default launch | `estacoda` | Startup and bottom chrome use the Papyrus session surface. Input uses the raw prompt path. `/status` shows shell history, clipboard, MCP suggestions, skill suggestions, and Vim keymap as `off` unless explicitly enabled. |
-| Legacy renderer escape hatch | `ESTACODA_UI_RENDERER=legacy estacoda` | Session output uses the legacy renderer/bottom-chrome path. Raw input may still be active unless `ESTACODA_INPUT_MODE=readline` is also set. |
-| Readline escape hatch | `ESTACODA_INPUT_MODE=readline estacoda` | The prompt uses the legacy readline path. Readline slash behavior remains available only in this fallback path. |
+| Removed renderer flag | `ESTACODA_UI_RENDERER=legacy estacoda` | The flag is ignored. Session output still uses the Papyrus renderer/bottom-chrome path. |
+| Removed input flag | `ESTACODA_INPUT_MODE=readline estacoda` | The flag is ignored for interactive sessions. The prompt still uses the raw Papyrus input path. |
 | Slash autocomplete | `estacoda` then type `/` | The Papyrus slash autocomplete overlay appears in the raw prompt. Arrow keys and `Ctrl-N`/`Ctrl-P` move focus. `Escape` dismisses the overlay without cancelling the prompt. |
 | Approval ask | `estacoda` then run a prompt that triggers a command or file approval | Promptable approvals render as Papyrus approval cards. `ESTACODA_APPROVAL_WIDGETS=legacy estacoda` uses the plain text approval prompt. Hardline/policy-denied actions do not render approval cards. |
 | Paste | `estacoda` then paste single-line and multiline text | Small single-line paste remains inline. Multiline/large paste uses the existing compact paste reference behavior and submits the original pasted content. |
 | Resize | `estacoda` then resize narrower and wider while idle, during slash autocomplete, and during active-turn chrome | Prompt rows, slash overlay rows, and bottom chrome reflow without full-screen clear, scrollback clear, or overlapping text. Focused slash rows remain visible. |
 | Cancel/EOF | `estacoda`, then press `Ctrl-C`; relaunch and press `Ctrl-D` on an empty prompt | `Ctrl-C` cancels/cleans up the raw prompt. `Ctrl-D` exits cleanly from an empty prompt. Terminal raw mode is restored after each exit path. |
 
-The rollout fallback flags are temporary and expected to be removed in PR6B:
+The renderer/input rollout flags are removed and should no longer activate
+legacy interactive modes:
 
 ```bash
 ESTACODA_UI_RENDERER=legacy estacoda
 ESTACODA_INPUT_MODE=readline estacoda
+```
+
+The plain approval prompt fallback remains temporary until its later PR6B
+cleanup:
+
+```bash
 ESTACODA_APPROVAL_WIDGETS=legacy estacoda
 ```
 
@@ -810,17 +817,21 @@ fallback prompt selection. Use disposable homes and fake credentials only.
 | Back/cancel behavior | Use `Back`, `Cancel`, `Esc`, or `Ctrl-C` in setup/editor prompts | `Back` returns to the previous meaningful structured step where supported. Cancel before apply leaves config, trust, and `.env` unchanged. Terminal state is restored. |
 | Non-TTY summary/plain output | Pipe setup/help output, for example `estacoda setup --help \| cat` or run a non-interactive setup path in CI | Output remains plain and deterministic, with no cursor controls, raw prompt behavior, or Papyrus select cursor movement. |
 
-During PR6A, legacy readline fallback still exists and these temporary fallback
-flags still work:
+During PR6B cleanup, legacy readline implementation files may still exist, but
+the renderer/input flags no longer activate legacy interactive modes:
 
 ```bash
 ESTACODA_UI_RENDERER=legacy estacoda setup --interactive
 ESTACODA_INPUT_MODE=readline estacoda setup --interactive
+```
+
+The approval fallback remains available until its later PR6B cleanup:
+
+```bash
 ESTACODA_APPROVAL_WIDGETS=legacy estacoda
 ```
 
-These flags remain temporary rollout controls and are expected to be removed in
-PR6B. Optional Papyrus helpers remain opt-in during this migration:
+Optional Papyrus helpers remain opt-in during this migration:
 
 ```bash
 ESTACODA_INPUT_KEYMAP=vim estacoda

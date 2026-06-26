@@ -1,8 +1,8 @@
 export const UI_INPUT_MODE_ENV_VAR = "ESTACODA_INPUT_MODE";
 
-export const UI_INPUT_MODES = ["readline", "raw"] as const;
+export const UI_INPUT_MODES = ["raw"] as const;
 
-export type UiInputMode = typeof UI_INPUT_MODES[number];
+export type UiInputMode = "readline" | typeof UI_INPUT_MODES[number];
 
 export type ResolveUiInputModeOptions = {
   env?: Record<string, string | undefined>;
@@ -13,9 +13,9 @@ export type ResolveCoreSessionUiInputModeOptions = Omit<ResolveUiInputModeOption
   isInteractiveTty: boolean;
 };
 
-export function parseUiInputMode(value: string | undefined, defaultMode: UiInputMode = "readline"): UiInputMode {
+export function parseUiInputMode(value: string | undefined, defaultMode: UiInputMode = "raw"): UiInputMode {
   const normalized = value?.trim().toLowerCase();
-  if (normalized === "readline") return "readline";
+  if (normalized === "readline") return "raw";
   if (normalized === "raw") return "raw";
   return defaultMode;
 }

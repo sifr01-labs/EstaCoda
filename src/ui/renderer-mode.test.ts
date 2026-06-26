@@ -8,9 +8,9 @@ import {
 } from "./renderer-mode.js";
 
 describe("UI renderer mode", () => {
-  it("covers the rollout matrix default and explicit legacy override", () => {
+  it("covers the full-migration matrix default and removed legacy flag", () => {
     expect(resolveUiRendererMode({ env: {} })).toBe("papyrus");
-    expect(resolveUiRendererMode({ env: { [UI_RENDERER_ENV_VAR]: "legacy" } })).toBe("legacy");
+    expect(resolveUiRendererMode({ env: { [UI_RENDERER_ENV_VAR]: "legacy" } })).toBe("papyrus");
   });
 
   it("defaults unset values to papyrus", () => {
@@ -23,8 +23,8 @@ describe("UI renderer mode", () => {
     expect(parseUiRendererMode("   ")).toBe("papyrus");
   });
 
-  it("accepts explicit legacy as an escape hatch", () => {
-    expect(parseUiRendererMode("legacy")).toBe("legacy");
+  it("ignores removed explicit legacy values", () => {
+    expect(parseUiRendererMode("legacy")).toBe("papyrus");
   });
 
   it("accepts papyrus", () => {
@@ -33,12 +33,12 @@ describe("UI renderer mode", () => {
 
   it("trims whitespace", () => {
     expect(parseUiRendererMode("  papyrus  ")).toBe("papyrus");
-    expect(parseUiRendererMode("\nlegacy\t")).toBe("legacy");
+    expect(parseUiRendererMode("\nlegacy\t")).toBe("papyrus");
   });
 
   it("accepts modes case-insensitively", () => {
     expect(parseUiRendererMode("PAPYRUS")).toBe("papyrus");
-    expect(parseUiRendererMode("Legacy")).toBe("legacy");
+    expect(parseUiRendererMode("Legacy")).toBe("papyrus");
   });
 
   it("falls back to papyrus for invalid values", () => {
@@ -48,7 +48,7 @@ describe("UI renderer mode", () => {
 
   it("resolves ESTACODA_UI_RENDERER from a passed env object", () => {
     expect(resolveUiRendererMode({ env: { [UI_RENDERER_ENV_VAR]: "papyrus" } })).toBe("papyrus");
-    expect(resolveUiRendererMode({ env: { [UI_RENDERER_ENV_VAR]: "legacy" } })).toBe("legacy");
+    expect(resolveUiRendererMode({ env: { [UI_RENDERER_ENV_VAR]: "legacy" } })).toBe("papyrus");
   });
 
   it("does not mutate env objects", () => {
@@ -60,6 +60,6 @@ describe("UI renderer mode", () => {
 
   it("exports only the narrow supported modes", () => {
     const modes = [...UI_RENDERER_MODES] satisfies UiRendererMode[];
-    expect(modes).toEqual(["legacy", "papyrus"]);
+    expect(modes).toEqual(["papyrus"]);
   });
 });

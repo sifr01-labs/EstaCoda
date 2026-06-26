@@ -27,7 +27,7 @@ describe("createInteractivePrompt", () => {
     expect(createReadline).not.toHaveBeenCalled();
   });
 
-  it("selects readline when the input mode fallback flag requests it", async () => {
+  it("ignores the removed input mode fallback flag", async () => {
     const createPapyrus = vi.fn(() => fakePrompt("papyrus"));
     const createReadline = vi.fn(() => fakePrompt("readline"));
 
@@ -38,12 +38,12 @@ describe("createInteractivePrompt", () => {
       createReadline,
     });
 
-    await expect(prompt("> ")).resolves.toBe("readline");
-    expect(createPapyrus).not.toHaveBeenCalled();
-    expect(createReadline).toHaveBeenCalledOnce();
+    await expect(prompt("> ")).resolves.toBe("papyrus");
+    expect(createPapyrus).toHaveBeenCalledOnce();
+    expect(createReadline).not.toHaveBeenCalled();
   });
 
-  it("selects readline when the renderer fallback flag requests it", async () => {
+  it("ignores the removed renderer fallback flag", async () => {
     const createPapyrus = vi.fn(() => fakePrompt("papyrus"));
     const createReadline = vi.fn(() => fakePrompt("readline"));
 
@@ -54,9 +54,9 @@ describe("createInteractivePrompt", () => {
       createReadline,
     });
 
-    await expect(prompt("> ")).resolves.toBe("readline");
-    expect(createPapyrus).not.toHaveBeenCalled();
-    expect(createReadline).toHaveBeenCalledOnce();
+    await expect(prompt("> ")).resolves.toBe("papyrus");
+    expect(createPapyrus).toHaveBeenCalledOnce();
+    expect(createReadline).not.toHaveBeenCalled();
   });
 
   it("selects readline when interactive capabilities are unavailable", async () => {

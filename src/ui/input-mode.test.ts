@@ -9,7 +9,7 @@ import {
 } from "./input-mode.js";
 
 describe("UI input mode", () => {
-  it("covers the rollout matrix for core TTY, readline override, and non-TTY sessions", () => {
+  it("covers the full-migration matrix for core TTY, removed readline flag, and non-TTY sessions", () => {
     expect(resolveCoreSessionUiInputMode({
       env: {},
       isInteractiveTty: true,
@@ -17,25 +17,25 @@ describe("UI input mode", () => {
     expect(resolveCoreSessionUiInputMode({
       env: { [UI_INPUT_MODE_ENV_VAR]: "readline" },
       isInteractiveTty: true,
-    })).toBe("readline");
+    })).toBe("raw");
     expect(resolveCoreSessionUiInputMode({
       env: {},
       isInteractiveTty: false,
     })).toBe("readline");
   });
 
-  it("defaults unset values to readline", () => {
-    expect(resolveUiInputMode({ env: {} })).toBe("readline");
-    expect(parseUiInputMode(undefined)).toBe("readline");
+  it("defaults unset values to raw", () => {
+    expect(resolveUiInputMode({ env: {} })).toBe("raw");
+    expect(parseUiInputMode(undefined)).toBe("raw");
   });
 
-  it("defaults empty values to readline", () => {
-    expect(parseUiInputMode("")).toBe("readline");
-    expect(parseUiInputMode("   ")).toBe("readline");
+  it("defaults empty values to raw", () => {
+    expect(parseUiInputMode("")).toBe("raw");
+    expect(parseUiInputMode("   ")).toBe("raw");
   });
 
-  it("accepts readline", () => {
-    expect(parseUiInputMode("readline")).toBe("readline");
+  it("ignores removed explicit readline values", () => {
+    expect(parseUiInputMode("readline")).toBe("raw");
   });
 
   it("accepts raw", () => {
@@ -44,17 +44,17 @@ describe("UI input mode", () => {
 
   it("trims whitespace", () => {
     expect(parseUiInputMode("  raw  ")).toBe("raw");
-    expect(parseUiInputMode("\nreadline\t")).toBe("readline");
+    expect(parseUiInputMode("\nreadline\t")).toBe("raw");
   });
 
   it("accepts modes case-insensitively", () => {
     expect(parseUiInputMode("RAW")).toBe("raw");
-    expect(parseUiInputMode("Readline")).toBe("readline");
+    expect(parseUiInputMode("Readline")).toBe("raw");
   });
 
-  it("falls back to readline for invalid values", () => {
-    expect(parseUiInputMode("papyrus")).toBe("readline");
-    expect(parseUiInputMode("raw-beta")).toBe("readline");
+  it("falls back to raw for invalid values", () => {
+    expect(parseUiInputMode("papyrus")).toBe("raw");
+    expect(parseUiInputMode("raw-beta")).toBe("raw");
   });
 
   it("can use raw as an injected default for TTY core sessions", () => {
@@ -64,11 +64,11 @@ describe("UI input mode", () => {
     expect(parseUiInputMode("invalid", "raw")).toBe("raw");
   });
 
-  it("keeps explicit readline as an escape hatch when raw is the default", () => {
+  it("does not let explicit readline override raw defaults", () => {
     expect(resolveUiInputMode({
       env: { [UI_INPUT_MODE_ENV_VAR]: "readline" },
       defaultMode: "raw",
-    })).toBe("readline");
+    })).toBe("raw");
   });
 
   it("defaults core TTY sessions to raw", () => {
@@ -85,11 +85,11 @@ describe("UI input mode", () => {
     })).toBe("readline");
   });
 
-  it("keeps explicit readline as the core session soak escape hatch", () => {
+  it("ignores explicit readline for core sessions", () => {
     expect(resolveCoreSessionUiInputMode({
       env: { [UI_INPUT_MODE_ENV_VAR]: "readline" },
       isInteractiveTty: true,
-    })).toBe("readline");
+    })).toBe("raw");
   });
 
   it("resolves ESTACODA_INPUT_MODE from a passed env object", () => {
@@ -105,6 +105,6 @@ describe("UI input mode", () => {
 
   it("exports only the narrow supported modes", () => {
     const modes = [...UI_INPUT_MODES] satisfies UiInputMode[];
-    expect(modes).toEqual(["readline", "raw"]);
+    expect(modes).toEqual(["raw"]);
   });
 });

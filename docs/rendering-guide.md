@@ -393,22 +393,22 @@ The migrated prompt surfaces include:
 - Python environment setup/reset prompts.
 - Shared interactive select menus.
 
-The legacy readline prompt implementation still exists during PR6A and remains
-available through fallback selection until the PR6B cleanup removes the
-temporary escape hatches. Secret prompts stay no-echo, do not expose paste
+The legacy readline prompt implementation still exists during PR6B cleanup, but
+`ESTACODA_UI_RENDERER=legacy` and `ESTACODA_INPUT_MODE=readline` no longer
+activate legacy interactive modes. Secret prompts stay no-echo, do not expose paste
 previews, and must not mirror secret input into logs, status chrome, or prompt
 callbacks. Non-interactive command paths remain plain and deterministic.
 
-Temporary fallback flags remain available during soak:
+Removed renderer/input rollout flags are ignored deterministically:
 
 | Flag | Effect |
 |------|--------|
-| `ESTACODA_UI_RENDERER=legacy` | Use the legacy session renderer/bottom-chrome path. |
-| `ESTACODA_INPUT_MODE=readline` | Use the legacy readline prompt path. |
+| `ESTACODA_UI_RENDERER=legacy` | Ignored; live interactive sessions still use Papyrus rendering. |
+| `ESTACODA_INPUT_MODE=readline` | Ignored for interactive sessions; raw Papyrus input remains active. |
 | `ESTACODA_APPROVAL_WIDGETS=legacy` | Use the plain text approval prompt in core sessions. |
 
-These fallback flags are temporary rollout controls and are expected to be
-removed in PR6B after the Papyrus defaults have soaked.
+`ESTACODA_APPROVAL_WIDGETS=legacy` remains a temporary approval prompt fallback
+until the approval fallback removal lands later in PR6B.
 
 Optional Papyrus capabilities remain opt-in. They are not enabled by the default
 renderer/input rollout:
