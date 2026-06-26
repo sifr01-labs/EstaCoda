@@ -1,5 +1,5 @@
 import type { SelectPromptInput } from "../cli/interactive-select.js";
-import type { Prompt } from "../cli/readline-prompt.js";
+import type { Prompt } from "../cli/prompt-contract.js";
 import type {
   PromptCardBodyLineStyle,
   PromptCardStatusLine,

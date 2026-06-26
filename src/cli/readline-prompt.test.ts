@@ -7,7 +7,8 @@ import { describe, expect, it, vi } from "vitest";
 import { promptUiContextForLocale } from "../contracts/ui.js";
 import { isolateLtr } from "../ui/bidi.js";
 import { createFilePasteReferenceStore } from "./paste-interceptor.js";
-import { createReadlinePrompt, withPromptUiContext, type Prompt } from "./readline-prompt.js";
+import type { Prompt } from "./prompt-contract.js";
+import { createReadlinePrompt, withPromptUiContext } from "./readline-prompt.js";
 
 describe("readline prompt UI context", () => {
   it("applies default locale and direction to select rendering", async () => {

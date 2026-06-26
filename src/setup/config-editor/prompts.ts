@@ -1,4 +1,4 @@
-import type { Prompt } from "../../cli/readline-prompt.js";
+import type { Prompt } from "../../cli/prompt-contract.js";
 import { promptForApiKeyInput } from "../../cli/secret-prompt.js";
 import type { BrowserBackendKind, BrowserCloudProviderKind } from "../../contracts/browser.js";
 import type { AuxiliaryModelTask } from "../../contracts/provider.js";

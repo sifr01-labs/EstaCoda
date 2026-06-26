@@ -22,7 +22,7 @@ import { CronStore } from "../cron/cron-store.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { storeCapabilitySecret, type SetupNeededMetadata } from "../capabilities/capability-setup.js";
 import { defaultImageModel } from "../contracts/image-generation.js";
-import type { Prompt, PromptOptions, PromptSpecialKeyControl } from "./readline-prompt.js";
+import type { Prompt, PromptOptions, PromptSpecialKeyControl } from "./prompt-contract.js";
 import { createPromptForInputMode } from "./rawPromptController.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { renderSlashMenu, renderToolsMenu, buildSlashMenuViewModel, buildSlashCompletionViewModel, buildToolsMenuViewModel, buildSkillsMenuViewModel, isImplementedSlashCommand } from "./slash-menu.js";

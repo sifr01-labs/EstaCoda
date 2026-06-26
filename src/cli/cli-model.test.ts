@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { runCliCommand } from "./cli.js";
 import { resetModelsDevRegistryForTest } from "../providers/model-selection-catalog.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
-import type { Prompt } from "./readline-prompt.js";
+import type { Prompt } from "./prompt-contract.js";
 import type { SelectPromptInput } from "./interactive-select.js";
 import type { ModelCatalogOverrideRegistry } from "../model-catalog/model-catalog-policy.js";
 

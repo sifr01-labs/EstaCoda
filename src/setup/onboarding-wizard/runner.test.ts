@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import type { Prompt } from "../../cli/readline-prompt.js";
+import type { Prompt } from "../../cli/prompt-contract.js";
 import type { SelectPromptInput } from "../../cli/interactive-select.js";
 import type { ProviderId, ProviderApiMode, ProviderAuthMethod } from "../../contracts/provider.js";
 import { resolveSetupCopy } from "../setup-copy.js";

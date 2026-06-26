@@ -783,6 +783,53 @@ HOME=/tmp/estacoda-setup-qa-home-ar pnpm run dev -- setup --interactive
 
 Choose Arabic and verify that commands, provider names, paths, and env vars remain readable with LTR isolation. This checks setup-owned localized surfaces only; full runtime CLI localization is not complete.
 
+### 10.17 Papyrus Operator Prompt Migration Matrix
+
+Run these checks in a real interactive TTY after changing setup/operator prompt
+construction, the Papyrus prompt factory, interactive select widgets, or
+fallback prompt selection. Use disposable homes and fake credentials only.
+
+| Scenario | Command | Verify |
+|----------|---------|--------|
+| Default setup command | `estacoda setup` | Owned prompts route through the Papyrus-capable prompt factory. Existing first-run, configured, degraded, and repair routing behavior stays the same. |
+| Explicit interactive setup | `estacoda setup --interactive` | Interactive setup uses the same Papyrus-capable prompt factory as the default setup path. `Back`, cancel, review, apply, and launch-after-verify behavior remain unchanged. |
+| Advanced setup | `estacoda setup --advanced` | Advanced options remain available. Prompt implementation selection changes only through the factory; setup business logic does not change. |
+| First-run disposable home | `ESTACODA_HOME=/tmp/estacoda-pr6a-first-run estacoda setup --interactive` | First-run onboarding appears, language/style selection stays early, workspace trust is explicit, and summary/review appears before any config or secret write. |
+| Configured or degraded setup | `ESTACODA_HOME=/tmp/estacoda-pr6a-ready estacoda setup --interactive` | Configured-ready opens the Setup Editor. Degraded state shows warnings and repair choices. Verification remains read-only until an explicit apply path. |
+| Untrusted workspace | `ESTACODA_HOME=/tmp/estacoda-pr6a-untrusted estacoda setup --interactive` | Workspace trust remains a separate explicit prompt. Cancelling trust review does not update the trust store. |
+| Codex model setup | `estacoda model setup codex` | Model/OAuth/device-code behavior is unchanged. Any owned confirmation or text prompt uses the factory, while OAuth codes and URLs remain visible only where intended. |
+| Voice setup | `estacoda voice setup` | Voice setup confirmations route through the factory. STT/TTS choices do not change the primary LLM route. |
+| Image setup | `estacoda image setup` | Image setup secret prompts stay no-echo, do not expose paste previews, and do not print raw API keys in review, logs, or final output. |
+| Telegram setup | `estacoda telegram setup` | Telegram risk copy, allowed user/chat prompts, and token handling remain unchanged. Token input is secret and review shows env-var references only. |
+| WhatsApp wizard | `estacoda whatsapp` | The wizard uses the migrated prompt path where it owns prompts. Cancellation leaves profile config unchanged, and QR/pairing behavior remains unchanged. |
+| Pack install/enable prompts | `estacoda pack install <pack>` and `estacoda pack enable <id>` | Confirmation/cancellation behavior is unchanged. Non-interactive output remains plain, and injected prompts in tests/internal callers still bypass factory creation. |
+| Python environment prompts | `estacoda python-env setup <capability>` and `estacoda python-env reset <capability>` | Setup/reset confirmations route through the factory. Capability install/reset semantics and cancellation behavior are unchanged. |
+| Interactive select menus | Any setup/editor menu with choices | TTY menus use Papyrus select widgets. Numeric fallback selection, selected output line, badges, table columns, back/cancel, narrow width, Arabic, and mixed LTR technical-token rendering remain stable. |
+| Arabic setup path | Choose Arabic during `estacoda setup --interactive` | Arabic setup copy remains direction-aware. Commands, paths, provider names, env vars, and technical tokens remain readable with LTR isolation. |
+| Secret no-echo check | Enter a fake API key/token in any setup credential prompt | Typed or pasted secret text does not echo, does not produce paste preview rows, and does not appear in review, logs, output, or final result text. |
+| Back/cancel behavior | Use `Back`, `Cancel`, `Esc`, or `Ctrl-C` in setup/editor prompts | `Back` returns to the previous meaningful structured step where supported. Cancel before apply leaves config, trust, and `.env` unchanged. Terminal state is restored. |
+| Non-TTY summary/plain output | Pipe setup/help output, for example `estacoda setup --help \| cat` or run a non-interactive setup path in CI | Output remains plain and deterministic, with no cursor controls, raw prompt behavior, or Papyrus select cursor movement. |
+
+During PR6A, legacy readline fallback still exists and these temporary fallback
+flags still work:
+
+```bash
+ESTACODA_UI_RENDERER=legacy estacoda setup --interactive
+ESTACODA_INPUT_MODE=readline estacoda setup --interactive
+ESTACODA_APPROVAL_WIDGETS=legacy estacoda
+```
+
+These flags remain temporary rollout controls and are expected to be removed in
+PR6B. Optional Papyrus helpers remain opt-in during this migration:
+
+```bash
+ESTACODA_INPUT_KEYMAP=vim estacoda
+ESTACODA_SHELL_HISTORY=1 estacoda
+ESTACODA_CLIPBOARD=1 estacoda
+ESTACODA_MCP_SUGGESTIONS=1 estacoda
+ESTACODA_SKILL_SUGGESTIONS=1 estacoda
+```
+
 ---
 
 ## 11. Package Installability QA

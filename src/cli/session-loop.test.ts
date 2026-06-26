@@ -13,7 +13,7 @@ import { CLIPBOARD_MODE_ENV_VAR } from "./clipboard-mode.js";
 import { MCP_SUGGESTIONS_MODE_ENV_VAR } from "./mcp-suggestions-mode.js";
 import { SKILL_SUGGESTIONS_MODE_ENV_VAR } from "./skill-suggestions-mode.js";
 import { INPUT_KEYMAP_MODE_ENV_VAR } from "./input-keymap-mode.js";
-import type { PromptOptions } from "./readline-prompt.js";
+import type { PromptOptions } from "./prompt-contract.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import type { Runtime } from "../runtime/create-runtime.js";
 import { deriveAgentEvolutionPolicy } from "../contracts/agent-evolution.js";

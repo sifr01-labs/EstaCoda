@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SelectPromptInput } from "../cli/interactive-select.js";
-import type { Prompt } from "../cli/readline-prompt.js";
+import type { Prompt } from "../cli/prompt-contract.js";
 import { isolateLtr, isolateRtl } from "../ui/bidi.js";
 import type { SetupVerificationReport } from "./verification.js";
 import {

@@ -4,7 +4,7 @@ import {
 } from "../../config/runtime-config.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../../config/profile-home.js";
 import { ensureDefaultProfileState } from "../../cli/profile-state.js";
-import type { Prompt } from "../../cli/readline-prompt.js";
+import type { Prompt } from "../../cli/prompt-contract.js";
 import { withPromptUiContext } from "../../cli/readline-prompt.js";
 import { promptUiContextForLocale } from "../../contracts/ui.js";
 import { promptForApiKeyInput } from "../../cli/secret-prompt.js";

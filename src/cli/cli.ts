@@ -36,7 +36,9 @@ import {
   type VoiceSetupInput,
   type WebSetupInput
 } from "../config/runtime-config.js";
-import { canRunInteractive, createReadlinePrompt, type Prompt } from "./readline-prompt.js";
+import type { Prompt } from "./prompt-contract.js";
+import { canRunInteractive } from "../ui/terminal-capabilities.js";
+import { createInteractivePrompt } from "./create-interactive-prompt.js";
 import { promptUiContextForLocale } from "../contracts/ui.js";
 import { runFirstRunSetup } from "../setup/onboarding-wizard/runner.js";
 import { runConfigEditorSetup } from "../setup/config-editor/runner.js";
@@ -422,7 +424,7 @@ async function setup(options: CliOptions, args: string[]): Promise<CliCommandRes
 }
 
 async function interactiveSetup(options: CliOptions, input: { readonly advanced: boolean }): Promise<CliCommandResult> {
-  const prompt = options.prompt ?? createReadlinePrompt();
+  const prompt = options.prompt ?? createInteractivePrompt();
   try {
     const decision = await collectSetupRoute(options);
     if (decision.kind === "first-run-onboarding") {
@@ -878,7 +880,7 @@ async function model(options: CliOptions, args: string[]): Promise<CliCommandRes
       return runModelSetupCustom(options, args.slice(2));
     }
     if (args[1] === "codex") {
-      const createdPrompt = options.prompt === undefined && canRunInteractive() ? createReadlinePrompt({
+      const createdPrompt = options.prompt === undefined && canRunInteractive() ? createInteractivePrompt({
         uiContext: promptUiContextForLocale(localeForConfig(config)),
       }) : undefined;
       try {
@@ -1266,7 +1268,7 @@ async function runBareModelPicker(
     mode: "setup"
   });
 
-  const prompt = options.prompt ?? createReadlinePrompt({
+  const prompt = options.prompt ?? createInteractivePrompt({
     uiContext: promptUiContextForLocale(localeForConfig(config)),
   });
   const interactiveOptions: CliOptions = { ...options, prompt };
@@ -2241,7 +2243,7 @@ async function voice(options: CliOptions, args: string[]): Promise<CliCommandRes
       if (!status.ok) {
         const disclosure = "Edge TTS setup uses EstaCoda's managed Python capability and sends synthesis text to Microsoft's Edge speech service.";
         if (options.interactive !== false && (options.prompt !== undefined || canRunInteractive())) {
-          const prompt = options.prompt ?? createReadlinePrompt();
+          const prompt = options.prompt ?? createInteractivePrompt();
           const answer = await prompt(`${disclosure} Install edge-tts now? [Y/n] `);
           if (!answer.trim().toLowerCase().startsWith("n")) {
             const install = await installManagedPythonCapabilityEnvironment({
@@ -2286,7 +2288,7 @@ async function voice(options: CliOptions, args: string[]): Promise<CliCommandRes
       if (status.kind !== "ready") {
         const disclosure = "Local STT setup will create EstaCoda's managed Python environment and install pinned faster-whisper==1.2.1.";
         if (options.interactive !== false && (options.prompt !== undefined || canRunInteractive())) {
-          const prompt = options.prompt ?? createReadlinePrompt();
+          const prompt = options.prompt ?? createInteractivePrompt();
           const answer = await prompt(`${disclosure} Continue? [Y/n] `);
           if (answer.trim().toLowerCase().startsWith("n")) {
             return {
@@ -2910,7 +2912,7 @@ async function whatsapp(options: CliOptions, args: string[]): Promise<CliCommand
       output: "WhatsApp setup uses a single command: estacoda whatsapp",
     };
   }
-  const prompt = options.prompt ?? createReadlinePrompt();
+  const prompt = options.prompt ?? createInteractivePrompt();
   const closePrompt = options.prompt === undefined;
   try {
     const result = await runWhatsAppWizard({
@@ -3045,7 +3047,7 @@ async function telegram(options: CliOptions, args: string[]): Promise<CliCommand
 }
 
 async function telegramSetup(options: CliOptions): Promise<CliCommandResult> {
-  const prompt = options.prompt ?? createReadlinePrompt();
+  const prompt = options.prompt ?? createInteractivePrompt();
   const closePrompt = options.prompt === undefined;
 
   try {

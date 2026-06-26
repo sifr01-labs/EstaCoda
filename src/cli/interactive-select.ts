@@ -6,6 +6,16 @@ import type { OnboardingPromptOption, PickerOption, PromptCardBodyLineStyle, Pro
 import type { Locale, TextDirection } from "../contracts/ui.js";
 import { createSessionRenderer } from "./session-renderer.js";
 import { isolateLtr, isolateRtl } from "../ui/bidi.js";
+import {
+  createSelectNavigationState,
+  getFocusedOption,
+  type SelectNavigationState,
+} from "../ui/papyrus/widgets/selectModel.js";
+import {
+  applySelectKey,
+  type SelectKeyEvent,
+} from "../ui/papyrus/widgets/selectKeymap.js";
+import type { PapyrusOption } from "../ui/papyrus/widgets/optionMap.js";
 
 export type SelectPromptInput<T> = {
   title: string;
@@ -71,7 +81,7 @@ async function plainFallback<T>(input: Readable, output: Writable, selection: Se
 async function ttySelect<T>(input: Readable, output: Writable, selection: SelectPromptInput<T>): Promise<T> {
   return await new Promise<T>((resolve) => {
     const ttyInput = input as NodeJS.ReadStream;
-    let selectedIndex = clampIndex(selection.defaultIndex ?? 0, selection.options.length);
+    let selectState = createPapyrusSelectState(selection);
     let settled = false;
     const wasRaw = ttyInput.isRaw === true;
     const saveCursor = "\x1B7";
@@ -81,6 +91,7 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
     const renderer = createSessionRenderer({ output: output as NodeJS.WriteStream, locale: selection.locale });
 
     const render = () => {
+      const selectedIndex = focusedSelectionIndex(selectState);
       const vm = buildSelectionViewModel(selection, selectedIndex);
       const text = renderer.render(vm);
 
@@ -96,7 +107,7 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
       output.write("\x1B[?25h");
     };
 
-    const finish = (value: T) => {
+    const finish = (value: T, selectedIndex: number) => {
       if (settled) {
         return;
       }
@@ -113,18 +124,19 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
         process.emit("SIGINT");
         return;
       }
-      if (key.name === "up" || key.name === "k") {
-        selectedIndex = selectedIndex <= 0 ? selection.options.length - 1 : selectedIndex - 1;
-        render();
+      const event = selectKeyEventFromKeypress(_chunk, key);
+      if (event === undefined) {
         return;
       }
-      if (key.name === "down" || key.name === "j") {
-        selectedIndex = selectedIndex >= selection.options.length - 1 ? 0 : selectedIndex + 1;
-        render();
+      const result = applySelectKey(selectState, event);
+      selectState = result.state;
+      if (result.intent?.type === "selected") {
+        const selectedIndex = focusedSelectionIndex(selectState);
+        finish(selection.options[selectedIndex]?.value ?? selection.options[0]!.value, selectedIndex);
         return;
       }
-      if (key.name === "return" || key.name === "enter") {
-        finish(selection.options[selectedIndex]?.value ?? selection.options[0]!.value);
+      if (result.intent?.type === "focus-changed" || result.intent === undefined) {
+        render();
       }
     };
 
@@ -133,7 +145,7 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
     ttyInput.setRawMode(true);
     ttyInput.resume();
 
-    const vm = buildSelectionViewModel(selection, selectedIndex);
+    const vm = buildSelectionViewModel(selection, focusedSelectionIndex(selectState));
     const initialText = renderer.render(vm);
     const reserveLines = Math.max(1, initialText.split("\n").length - 1);
     output.write("\n".repeat(reserveLines));
@@ -141,6 +153,58 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
     output.write(`\x1B[?25l${saveCursor}`);
     render();
   });
+}
+
+type SelectMetadata = {
+  readonly index: number;
+};
+
+function createPapyrusSelectState<T>(
+  selection: SelectPromptInput<T>
+): SelectNavigationState<string, SelectMetadata> {
+  return createSelectNavigationState<string, SelectMetadata>(
+    selection.options.map((option, index): PapyrusOption<string, SelectMetadata> => ({
+      value: optionValueForIndex(index),
+      label: option.label,
+      description: option.description,
+      metadata: { index },
+    })),
+    {
+      focusedValue: optionValueForIndex(clampIndex(selection.defaultIndex ?? 0, selection.options.length)),
+      viewportSize: Math.max(1, selection.options.length),
+      wrap: true,
+    }
+  );
+}
+
+function focusedSelectionIndex(state: SelectNavigationState<string, SelectMetadata>): number {
+  return getFocusedOption(state)?.metadata?.index ?? 0;
+}
+
+function optionValueForIndex(index: number): string {
+  return String(index);
+}
+
+function selectKeyEventFromKeypress(
+  chunk: string,
+  key: { name?: string; shift?: boolean }
+): SelectKeyEvent | undefined {
+  if (key.name === "up" || key.name === "k") return { key: "arrowUp" };
+  if (key.name === "down" || key.name === "j") return { key: "arrowDown" };
+  if (key.name === "return" || key.name === "enter") return { key: "enter" };
+  if (key.name === "pageup") return { key: "pageUp" };
+  if (key.name === "pagedown") return { key: "pageDown" };
+  if (key.name === "home") return { key: "home" };
+  if (key.name === "end") return { key: "end" };
+  if (key.name === "tab") return { key: key.shift === true ? "backtab" : "tab" };
+  const digit = digitFromKeypress(chunk, key.name);
+  return digit === undefined ? undefined : { key: "digit", digit };
+}
+
+function digitFromKeypress(chunk: string, keyName: string | undefined): number | undefined {
+  const value = keyName ?? chunk;
+  if (!/^[1-9]$/u.test(value)) return undefined;
+  return Number.parseInt(value, 10);
 }
 
 function buildSelectionViewModel<T>(selection: SelectPromptInput<T>, selectedIndex: number): ViewModel {

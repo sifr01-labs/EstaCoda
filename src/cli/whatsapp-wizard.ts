@@ -7,7 +7,7 @@ import {
   type WhatsAppSetupDependencies,
   type WhatsAppSetupResult,
 } from "../setup/whatsapp-setup-flow.js";
-import type { Prompt } from "./readline-prompt.js";
+import type { Prompt } from "./prompt-contract.js";
 
 export type WhatsAppWizardResult = WhatsAppSetupResult;
 export type { WhatsAppPairDeviceOptions, WhatsAppPairDeviceResult };

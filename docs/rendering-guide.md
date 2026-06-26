@@ -372,8 +372,32 @@ Core interactive TTY sessions now default to the Papyrus session surface:
 - Raw Papyrus sessions use Papyrus approval cards for promptable approvals.
 
 Non-TTY one-shot and pipe-driven sessions keep the plain/readline-safe fallback
-behavior. Setup and operator prompts are not part of this rollout; they continue
-to use their existing prompt paths.
+behavior.
+
+PR6A extends the Papyrus rollout to setup and operator-owned interactive prompt
+paths by routing prompt construction through the Papyrus-capable prompt factory
+and replacing the shared interactive select path with Papyrus select widgets.
+The migrated prompt surfaces include:
+
+- `estacoda setup`, `estacoda setup --interactive`, and
+  `estacoda setup --advanced`.
+- First-run onboarding.
+- Setup Editor and config editor prompts.
+- Model setup prompts, including Codex model setup.
+- Secret/API-key prompts.
+- Voice setup confirmations.
+- Image setup secret prompts.
+- Telegram setup prompts.
+- WhatsApp wizard prompts.
+- Pack install/enable prompts.
+- Python environment setup/reset prompts.
+- Shared interactive select menus.
+
+The legacy readline prompt implementation still exists during PR6A and remains
+available through fallback selection until the PR6B cleanup removes the
+temporary escape hatches. Secret prompts stay no-echo, do not expose paste
+previews, and must not mirror secret input into logs, status chrome, or prompt
+callbacks. Non-interactive command paths remain plain and deterministic.
 
 Temporary fallback flags remain available during soak:
 

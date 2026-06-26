@@ -12,7 +12,7 @@ import {
 } from "../../cli/whatsapp-wizard.js";
 import { WhatsAppAdapter } from "../../channels/whatsapp-adapter.js";
 import type { WhatsAppBridgeInboundMessage } from "../../channels/whatsapp-bridge-client.js";
-import type { Prompt } from "../../cli/readline-prompt.js";
+import type { Prompt } from "../../cli/prompt-contract.js";
 import { ChannelGateway, InMemoryChannelSessionStore } from "../../channels/channel-gateway.js";
 import type { Runtime } from "../../runtime/create-runtime.js";
 

@@ -6,7 +6,7 @@ import { defaultProfileId, readActiveProfile } from "./config/profile-home.js";
 import { PersistentCliSessionStore } from "./cli/cli-session-store.js";
 import { parseGlobalCliOptions, runCliCommand } from "./cli/cli.js";
 import type { SessionDB } from "./contracts/session.js";
-import { canRunInteractive } from "./cli/readline-prompt.js";
+import { canRunInteractive } from "./ui/terminal-capabilities.js";
 import { createRuntime } from "./runtime/create-runtime.js";
 import { runSessionLoop, handleSlashCommand } from "./cli/session-loop.js";
 import { runOneShotPrompt } from "./cli/one-shot.js";

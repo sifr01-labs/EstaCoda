@@ -68,6 +68,75 @@ describe("interactive-select prompt card surface", () => {
     expect(emitSpy).toHaveBeenCalledWith("SIGINT");
   });
 
+  it("selects TTY digit shortcuts through the Papyrus select keymap", async () => {
+    clearCiEnv();
+    const { input, output } = makeTtyStreams();
+    const pending = selectOption(input, output, {
+      ...promptCardSelection(),
+      options: [
+        { value: "trust", label: "Trust workspace" },
+        { value: "skip", label: "Not now" },
+        { value: "back", label: "Back", group: "navigation" },
+      ],
+    });
+
+    await Promise.resolve();
+    input.emit("keypress", "3", { name: "3" });
+
+    await expect(pending).resolves.toBe("back");
+    expect(stripAnsi(output.getText())).toContain("Selected: Back");
+  });
+
+  it("preserves setup-style cancel navigation through the Papyrus select keymap", async () => {
+    clearCiEnv();
+    const { input, output } = makeTtyStreams();
+    const pending = selectOption(input, output, {
+      ...promptCardSelection(),
+      options: [
+        { value: "trust", label: "Trust workspace" },
+        { value: "back", label: "Back", group: "navigation" },
+        { value: "cancel", label: "Cancel", group: "navigation" },
+      ],
+    });
+
+    await Promise.resolve();
+    input.emit("keypress", "", { name: "down" });
+    input.emit("keypress", "", { name: "down" });
+    input.emit("keypress", "", { name: "return" });
+
+    await expect(pending).resolves.toBe("cancel");
+    expect(stripAnsi(output.getText())).toContain("Selected: Cancel");
+  });
+
+  it("supports Papyrus home and end navigation in TTY mode", async () => {
+    clearCiEnv();
+    const { input, output } = makeTtyStreams();
+    const pending = selectOption(input, output, promptCardSelection());
+
+    await Promise.resolve();
+    input.emit("keypress", "", { name: "end" });
+    input.emit("keypress", "", { name: "home" });
+    input.emit("keypress", "", { name: "end" });
+    input.emit("keypress", "", { name: "return" });
+
+    await expect(pending).resolves.toBe("skip");
+    expect(stripAnsi(output.getText())).toContain("Selected: Not now");
+  });
+
+  it("keeps Papyrus TTY rendering usable in narrow terminals", async () => {
+    clearCiEnv();
+    const { input, output } = makeTtyStreams(32);
+    const pending = selectOption(input, output, promptCardSelection());
+
+    await Promise.resolve();
+    input.emit("keypress", "", { name: "return" });
+
+    await expect(pending).resolves.toBe("trust");
+    const rendered = stripAnsi(output.getText());
+    expect(rendered).toContain("Workspace trust");
+    expect(rendered).toContain("Trust workspace");
+  });
+
   it("renders no-color prompt cards without ANSI leakage", async () => {
     process.env.FORCE_COLOR = "0";
     const input = Readable.from(["\n"]);
@@ -364,15 +433,15 @@ function clearCiEnv(): void {
   delete process.env.CIRCLECI;
 }
 
-function makeTtyStreams(): { input: TtyInput; output: CapturingOutput } {
+function makeTtyStreams(columns = 80): { input: TtyInput; output: CapturingOutput } {
   const input = new PassThrough() as TtyInput;
   input.isTTY = true;
   input.setRawMode = vi.fn();
   input.resume = vi.fn(() => input);
-  return { input, output: makeOutput(true) };
+  return { input, output: makeOutput(true, columns) };
 }
 
-function makeOutput(isTTY: boolean): CapturingOutput {
+function makeOutput(isTTY: boolean, columns = 80): CapturingOutput {
   let text = "";
   const output = new Writable({
     write(chunk, _encoding, callback) {
@@ -381,7 +450,7 @@ function makeOutput(isTTY: boolean): CapturingOutput {
     }
   }) as CapturingOutput;
   output.isTTY = isTTY;
-  output.columns = 80;
+  output.columns = columns;
   output.getText = () => text;
   return output;
 }

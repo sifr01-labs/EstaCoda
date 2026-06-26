@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { runCliCommand } from "./cli.js";
 import { runModelSetupCodex, type ModelSetupCodexOptions } from "./model-setup-codex.js";
-import type { Prompt } from "./readline-prompt.js";
+import type { Prompt } from "./prompt-contract.js";
 import type { FetchLike } from "../providers/openai-compatible-provider.js";
 import { loadOAuthStore } from "../providers/oauth/oauth-store.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";

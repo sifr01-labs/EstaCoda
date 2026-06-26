@@ -12,7 +12,7 @@ import { FakeWorkflowStore } from "../workflow/fake-workflow-store.js";
 import { WorkflowEngine } from "../workflow/workflow-engine.js";
 import { WorkflowLockService } from "../workflow/workflow-lock-service.js";
 import type { WorkflowStep } from "../workflow/types.js";
-import type { Prompt } from "./readline-prompt.js";
+import type { Prompt } from "./prompt-contract.js";
 import type { SelectPromptInput } from "./interactive-select.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import type { SkillDefinition } from "../contracts/skill.js";

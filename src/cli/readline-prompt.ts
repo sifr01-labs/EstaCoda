@@ -11,39 +11,13 @@ import {
   promptUiContextForLocale,
   type PromptUiContext,
 } from "../contracts/ui.js";
-
-export type PromptOptions = {
-  secret?: boolean;
-  onRowsChange?: (rows: number) => void;
-  onPastePreview?: (original: string, displayed: string) => void;
-  onInputChange?: (line: string) => void;
-  specialKeyController?: PromptSpecialKeyController;
-  placeholder?: string;
-  pasteReferenceStore?: PasteReferenceStore;
-  pasteReferenceThresholdChars?: number;
-};
-
-export type PromptSpecialKey = "up" | "down" | "tab" | "escape";
-
-export type PromptSpecialKeyControl = {
-  getInputLine(): string;
-  setInputLine(nextLine: string): void;
-};
-
-export type PromptSpecialKeyController = {
-  shouldHandleSpecialKey(): boolean;
-  onSpecialKey(
-    key: PromptSpecialKey,
-    control: PromptSpecialKeyControl
-  ): "handled" | undefined;
-};
-
-export type Prompt = ((question: string, options?: PromptOptions) => Promise<string>) & {
-  uiContext?: PromptUiContext;
-  select?: <T>(input: SelectPromptInput<T>) => Promise<T>;
-  onboardingCard?: (input: BuildOnboardingPromptCardInput) => Promise<void> | void;
-  close?: () => void;
-};
+import type {
+  Prompt,
+  PromptOptions,
+  PromptSpecialKey,
+  PromptSpecialKeyControl,
+  PromptSpecialKeyController,
+} from "./prompt-contract.js";
 
 export type CreateReadlinePromptOptions = {
   readonly input?: Readable;
@@ -117,10 +91,6 @@ function applyPromptUiContext<T extends { readonly locale?: PromptUiContext["loc
 
 function isCreateReadlinePromptOptions(value: Readable | CreateReadlinePromptOptions): value is CreateReadlinePromptOptions {
   return typeof value === "object" && value !== null && ("input" in value || "output" in value || "uiContext" in value);
-}
-
-export function canRunInteractive(input: NodeJS.ReadStream = defaultInput): boolean {
-  return input.isTTY === true;
 }
 
 async function plainQuestion(input: Readable, output: Writable, question: string, options?: PromptOptions): Promise<string> {

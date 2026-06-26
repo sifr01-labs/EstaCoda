@@ -1,7 +1,7 @@
 import type { ProviderId } from "../contracts/provider.js";
 import { writeEnvSecret, type EnvSecretWriteResult } from "../config/env-secret-store.js";
 import { defaultProfileId, readActiveProfile } from "../config/profile-home.js";
-import type { Prompt } from "./readline-prompt.js";
+import type { Prompt } from "./prompt-contract.js";
 
 export type PromptForApiKeyResult =
   | { kind: "stored"; envVarName: string; envPath: string }

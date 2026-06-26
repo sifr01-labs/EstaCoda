@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runCliCommand } from "./cli.js";
-import type { Prompt } from "./readline-prompt.js";
+import type { Prompt } from "./prompt-contract.js";
 import { CronStore } from "../cron/cron-store.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import type { Runtime } from "../runtime/create-runtime.js";
@@ -15,6 +15,17 @@ const readlineMock = vi.hoisted(() => ({
   createReadlinePrompt: vi.fn(),
 }));
 
+const interactivePromptMock = vi.hoisted(() => ({
+  prompt: vi.fn(),
+  close: vi.fn(),
+  createInteractivePrompt: vi.fn(),
+}));
+
+const setupFlowMock = vi.hoisted(() => ({
+  collectSetupRoute: vi.fn(),
+  runFirstRunSetup: vi.fn(),
+}));
+
 const updateCommandMock = vi.hoisted(() => ({
   runUpdateCommand: vi.fn(),
 }));
@@ -24,6 +35,26 @@ vi.mock("./readline-prompt.js", async (importOriginal) => {
   return {
     ...actual,
     createReadlinePrompt: readlineMock.createReadlinePrompt,
+  };
+});
+
+vi.mock("./create-interactive-prompt.js", () => ({
+  createInteractivePrompt: interactivePromptMock.createInteractivePrompt,
+}));
+
+vi.mock("../setup/setup-router.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../setup/setup-router.js")>();
+  return {
+    ...actual,
+    collectSetupRoute: setupFlowMock.collectSetupRoute,
+  };
+});
+
+vi.mock("../setup/onboarding-wizard/runner.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../setup/onboarding-wizard/runner.js")>();
+  return {
+    ...actual,
+    runFirstRunSetup: setupFlowMock.runFirstRunSetup,
   };
 });
 
@@ -176,11 +207,11 @@ describe("runCliCommand model setup codex dispatch", () => {
       configurable: true,
       value: true,
     });
-    readlineMock.prompt.mockReset();
-    readlineMock.close.mockReset();
-    readlineMock.createReadlinePrompt.mockReset();
-    readlineMock.createReadlinePrompt.mockReturnValue(Object.assign(readlineMock.prompt, {
-      close: readlineMock.close,
+    interactivePromptMock.prompt.mockReset();
+    interactivePromptMock.close.mockReset();
+    interactivePromptMock.createInteractivePrompt.mockReset();
+    interactivePromptMock.createInteractivePrompt.mockReturnValue(Object.assign(interactivePromptMock.prompt, {
+      close: interactivePromptMock.close,
     }));
   });
 
@@ -193,7 +224,7 @@ describe("runCliCommand model setup codex dispatch", () => {
   });
 
   it("creates an interactive prompt for direct Codex setup instead of silently cancelling", async () => {
-    readlineMock.prompt.mockResolvedValue("2");
+    interactivePromptMock.prompt.mockResolvedValue("2");
 
     const result = await runCliCommand({
       argv: ["model", "setup", "codex"],
@@ -203,9 +234,117 @@ describe("runCliCommand model setup codex dispatch", () => {
 
     expect(result.handled).toBe(true);
     expect(result.output).toBe("Cancelled. No changes were made.");
-    expect(readlineMock.createReadlinePrompt).toHaveBeenCalledOnce();
-    expect(readlineMock.prompt).toHaveBeenCalledWith(expect.stringContaining("Codex requires OAuth authentication."));
-    expect(readlineMock.close).toHaveBeenCalledOnce();
+    expect(interactivePromptMock.createInteractivePrompt).toHaveBeenCalledOnce();
+    expect(interactivePromptMock.prompt).toHaveBeenCalledWith(expect.stringContaining("Codex requires OAuth authentication."));
+    expect(interactivePromptMock.close).toHaveBeenCalledOnce();
+  });
+
+  it("keeps injected Codex setup prompts on the explicit prompt path", async () => {
+    const prompt = fakePrompt(["2"]);
+
+    const result = await runCliCommand({
+      argv: ["model", "setup", "codex"],
+      workspaceRoot: tempDir,
+      homeDir: tempDir,
+      prompt,
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.output).toBe("Cancelled. No changes were made.");
+    expect(interactivePromptMock.createInteractivePrompt).not.toHaveBeenCalled();
+  });
+});
+
+describe("runCliCommand setup prompt factory dispatch", () => {
+  let tempDir: string;
+  let originalStdinIsTty: boolean | undefined;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "estacoda-cli-setup-factory-"));
+    originalStdinIsTty = process.stdin.isTTY;
+    setupFlowMock.collectSetupRoute.mockReset();
+    setupFlowMock.collectSetupRoute.mockResolvedValue({ kind: "first-run-onboarding" });
+    setupFlowMock.runFirstRunSetup.mockReset();
+    setupFlowMock.runFirstRunSetup.mockResolvedValue({
+      exitCode: 0,
+      output: "setup ok",
+      launchRequested: false,
+    });
+    interactivePromptMock.prompt.mockReset();
+    interactivePromptMock.close.mockReset();
+    interactivePromptMock.createInteractivePrompt.mockReset();
+    interactivePromptMock.createInteractivePrompt.mockReturnValue(Object.assign(interactivePromptMock.prompt, {
+      close: interactivePromptMock.close,
+    }));
+  });
+
+  afterEach(async () => {
+    Object.defineProperty(process.stdin, "isTTY", {
+      configurable: true,
+      value: originalStdinIsTty,
+    });
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("routes setup --interactive prompt creation through the Papyrus-capable factory", async () => {
+    const result = await runCliCommand({
+      argv: ["setup", "--interactive"],
+      workspaceRoot: tempDir,
+      homeDir: tempDir,
+    });
+
+    expect(result).toMatchObject({
+      handled: true,
+      exitCode: 0,
+      output: "setup ok",
+    });
+    expect(interactivePromptMock.createInteractivePrompt).toHaveBeenCalledOnce();
+    expect(setupFlowMock.runFirstRunSetup).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: interactivePromptMock.prompt,
+    }));
+    expect(interactivePromptMock.close).toHaveBeenCalledOnce();
+  });
+
+  it("routes bare interactive setup through the Papyrus-capable factory when TTY input is available", async () => {
+    Object.defineProperty(process.stdin, "isTTY", {
+      configurable: true,
+      value: true,
+    });
+
+    const result = await runCliCommand({
+      argv: ["setup"],
+      workspaceRoot: tempDir,
+      homeDir: tempDir,
+    });
+
+    expect(result).toMatchObject({
+      handled: true,
+      exitCode: 0,
+      output: "setup ok",
+    });
+    expect(interactivePromptMock.createInteractivePrompt).toHaveBeenCalledOnce();
+    expect(setupFlowMock.runFirstRunSetup).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: interactivePromptMock.prompt,
+    }));
+    expect(interactivePromptMock.close).toHaveBeenCalledOnce();
+  });
+
+  it("keeps injected setup prompts on the existing explicit prompt path", async () => {
+    const prompt = Object.assign(vi.fn(async () => ""), { close: vi.fn() });
+
+    const result = await runCliCommand({
+      argv: ["setup", "--interactive"],
+      workspaceRoot: tempDir,
+      homeDir: tempDir,
+      prompt,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(interactivePromptMock.createInteractivePrompt).not.toHaveBeenCalled();
+    expect(setupFlowMock.runFirstRunSetup).toHaveBeenCalledWith(expect.objectContaining({
+      prompt,
+    }));
+    expect(prompt.close).not.toHaveBeenCalled();
   });
 });
 
@@ -214,11 +353,11 @@ describe("runCliCommand WhatsApp dispatch", () => {
 
   beforeEach(async () => {
     tempDir = await mkdtemp(join(tmpdir(), "estacoda-cli-whatsapp-"));
-    readlineMock.prompt.mockReset();
-    readlineMock.close.mockReset();
-    readlineMock.createReadlinePrompt.mockReset();
-    readlineMock.createReadlinePrompt.mockReturnValue(Object.assign(readlineMock.prompt, {
-      close: readlineMock.close
+    interactivePromptMock.prompt.mockReset();
+    interactivePromptMock.close.mockReset();
+    interactivePromptMock.createInteractivePrompt.mockReset();
+    interactivePromptMock.createInteractivePrompt.mockReturnValue(Object.assign(interactivePromptMock.prompt, {
+      close: interactivePromptMock.close
     }));
   });
 
@@ -249,10 +388,11 @@ describe("runCliCommand WhatsApp dispatch", () => {
     expect(result.handled).toBe(true);
     expect(result.exitCode).toBe(1);
     expect(result.output).toContain("⌘ WhatsApp Setup");
+    expect(interactivePromptMock.createInteractivePrompt).not.toHaveBeenCalled();
   });
 
   it("creates and closes a prompt for estacoda whatsapp when none is injected", async () => {
-    readlineMock.prompt.mockResolvedValue("n");
+    interactivePromptMock.prompt.mockResolvedValue("n");
 
     const result = await runCliCommand({
       argv: ["whatsapp"],
@@ -274,9 +414,9 @@ describe("runCliCommand WhatsApp dispatch", () => {
 
     expect(result.handled).toBe(true);
     expect(result.exitCode).toBe(1);
-    expect(readlineMock.createReadlinePrompt).toHaveBeenCalledOnce();
-    expect(readlineMock.prompt).toHaveBeenCalledWith(expect.stringContaining("npm ci"));
-    expect(readlineMock.close).toHaveBeenCalledOnce();
+    expect(interactivePromptMock.createInteractivePrompt).toHaveBeenCalledOnce();
+    expect(interactivePromptMock.prompt).toHaveBeenCalledWith(expect.stringContaining("npm ci"));
+    expect(interactivePromptMock.close).toHaveBeenCalledOnce();
   });
 
   it("does not close an injected WhatsApp prompt", async () => {
@@ -305,6 +445,7 @@ describe("runCliCommand WhatsApp dispatch", () => {
     expect(result.handled).toBe(true);
     expect(result.exitCode).toBe(1);
     expect(close).not.toHaveBeenCalled();
+    expect(interactivePromptMock.createInteractivePrompt).not.toHaveBeenCalled();
   });
 
   it("does not expose WhatsApp subcommands", async () => {

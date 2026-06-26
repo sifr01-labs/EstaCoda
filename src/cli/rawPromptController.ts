@@ -24,7 +24,8 @@ import { RawPromptOverlayHost, RawPromptRenderLoop } from "./rawPromptRenderLoop
 import { resolveGhostTextMode } from "./ghost-text-mode.js";
 import { resolveInputKeymapMode } from "./input-keymap-mode.js";
 import { buildRawPromptSlashAutocompleteRows } from "./rawPromptSlashAutocomplete.js";
-import { createReadlinePrompt, type CreateReadlinePromptOptions, type Prompt, type PromptOptions } from "./readline-prompt.js";
+import { createReadlinePrompt, type CreateReadlinePromptOptions } from "./readline-prompt.js";
+import type { Prompt, PromptOptions } from "./prompt-contract.js";
 import { type GhostTextState, isGhostTextVisible } from "../ui/papyrus/input/ghostTextController.js";
 import {
   applyPapyrusVimKeymap,

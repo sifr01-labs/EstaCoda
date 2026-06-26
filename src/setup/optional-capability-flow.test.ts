@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import type { Prompt } from "../cli/readline-prompt.js";
+import type { Prompt } from "../cli/prompt-contract.js";
 import * as capabilityManager from "../python-env/capability-manager.js";
 import { DDGS_CAPABILITY_ID, EDGE_TTS_CAPABILITY_ID } from "../python-env/capability-registry.js";
 import {

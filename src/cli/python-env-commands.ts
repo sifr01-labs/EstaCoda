@@ -1,6 +1,7 @@
 import { rm } from "node:fs/promises";
 import type { CliCommandResult, CliOptions } from "./cli.js";
-import { canRunInteractive, createReadlinePrompt } from "./readline-prompt.js";
+import { createInteractivePrompt } from "./create-interactive-prompt.js";
+import { canRunInteractive } from "../ui/terminal-capabilities.js";
 import { resolveGlobalStateHome } from "../config/profile-home.js";
 import {
   getRegisteredPythonCapabilitySpec,
@@ -308,7 +309,7 @@ async function approvePackageInstallIfNeeded(
   if (packages.packages.length === 0 || yes) {
     return { ok: true };
   }
-  const prompt = options.prompt ?? (options.interactive !== false && canRunInteractive() ? createReadlinePrompt() : undefined);
+  const prompt = options.prompt ?? (options.interactive !== false && canRunInteractive() ? createInteractivePrompt() : undefined);
   if (prompt === undefined) {
     return {
       ok: false,
@@ -342,7 +343,7 @@ async function approveReset(
   if (yes) {
     return { ok: true };
   }
-  const prompt = options.prompt ?? (options.interactive !== false && canRunInteractive() ? createReadlinePrompt() : undefined);
+  const prompt = options.prompt ?? (options.interactive !== false && canRunInteractive() ? createInteractivePrompt() : undefined);
   if (prompt === undefined) {
     return {
       ok: false,

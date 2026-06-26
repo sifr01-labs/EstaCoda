@@ -1,7 +1,7 @@
 import { resolveHomeDir, resolveOsHomeDir } from "../config/home-dir.js";
 import { defaultProfileId, readActiveProfile } from "../config/profile-home.js";
 import { loadRuntimeConfig, type LoadedRuntimeConfig } from "../config/runtime-config.js";
-import type { Prompt } from "../cli/readline-prompt.js";
+import type { Prompt } from "../cli/prompt-contract.js";
 import {
   installService,
   probeServiceState,

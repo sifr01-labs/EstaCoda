@@ -1,3 +1,4 @@
+import { stdin as defaultInput } from "node:process";
 import type { TerminalCapabilities } from "../contracts/ui.js";
 
 export interface DetectOptions {
@@ -122,4 +123,8 @@ export function shouldUseEmoji(
   if (!capabilities.supportsEmoji) return false;
   if (skinAllowsEmoji === false) return false;
   return true;
+}
+
+export function canRunInteractive(input: NodeJS.ReadStream = defaultInput): boolean {
+  return input.isTTY === true;
 }

@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { promptForApiKey, promptForApiKeyInput, maskSecret, redactInObject } from "./secret-prompt.js";
-import type { Prompt } from "./readline-prompt.js";
+import type { Prompt, PromptOptions } from "./prompt-contract.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 
 async function makeTempDir(): Promise<string> {
@@ -125,6 +125,29 @@ describe("promptForApiKeyInput", () => {
       value: "sk-deferred-key-1234",
     });
     await expect(readFile(profileEnvPath(tempDir), "utf8")).rejects.toThrow();
+  });
+
+  it("requests no-echo secret input without paste preview hooks", async () => {
+    const seenOptions: PromptOptions[] = [];
+    const prompt = (async (_question: string, options?: PromptOptions) => {
+      seenOptions.push(options ?? {});
+      return "sk-no-echo-secret";
+    }) as Prompt;
+
+    const result = await promptForApiKeyInput({
+      prompt,
+      providerId: "openai",
+      envVarName: "OPENAI_API_KEY",
+    });
+
+    expect(result).toEqual({
+      kind: "entered",
+      envVarName: "OPENAI_API_KEY",
+      value: "sk-no-echo-secret",
+    });
+    expect(seenOptions).toEqual([{ secret: true }]);
+    expect(seenOptions[0]?.onPastePreview).toBeUndefined();
+    expect(seenOptions[0]?.onInputChange).toBeUndefined();
   });
 
   it("preserves non-empty user-entered secret values exactly", async () => {

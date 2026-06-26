@@ -11,7 +11,7 @@ import {
   type WhatsAppPairDeviceOptions,
   type WhatsAppWizardDependencies,
 } from "./whatsapp-wizard.js";
-import type { Prompt } from "./readline-prompt.js";
+import type { Prompt } from "./prompt-contract.js";
 
 describe("runWhatsAppWizard", () => {
   let tempDir: string;

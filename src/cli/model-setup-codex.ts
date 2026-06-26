@@ -16,7 +16,7 @@ import {
   type OutputSink,
 } from "../providers/oauth/codex-setup.js";
 import { getProviderMetadata } from "../providers/provider-metadata.js";
-import type { Prompt } from "./readline-prompt.js";
+import type { Prompt } from "./prompt-contract.js";
 import type { CliOptions, CliCommandResult } from "./cli.js";
 
 const CODEX_API_MODE = getProviderMetadata("codex").apiMode;

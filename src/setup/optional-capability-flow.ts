@@ -11,7 +11,7 @@ import { hasSavedEnvSecret } from "../config/env-secret-store.js";
 import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
 import { DDGS_CAPABILITY_ID, EDGE_TTS_CAPABILITY_ID } from "../python-env/capability-registry.js";
 import { checkManagedPythonCapabilityStatus } from "../python-env/capability-manager.js";
-import type { Prompt } from "../cli/readline-prompt.js";
+import type { Prompt } from "../cli/prompt-contract.js";
 import type { SecurityApprovalMode } from "../contracts/security.js";
 import type { SkillAutonomy } from "../skills/skill-learning.js";
 import type { SetupCopyLocale } from "./setup-copy.js";

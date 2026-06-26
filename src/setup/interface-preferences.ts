@@ -1,4 +1,4 @@
-import type { Prompt } from "../cli/readline-prompt.js";
+import type { Prompt } from "../cli/prompt-contract.js";
 import type { ActivityLabelsLocale, UiFlavor, UiLanguage } from "../config/runtime-config.js";
 import type { SetupCopyKey, SetupCopyLocale } from "./setup-copy.js";
 import {
