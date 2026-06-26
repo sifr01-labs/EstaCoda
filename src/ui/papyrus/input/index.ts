@@ -3,3 +3,4 @@ export * from "./providers/fileProvider.js";
 export * from "./providers/slashCommandProvider.js";
 export * from "./suggestionTypes.js";
 export * from "./typeaheadController.js";
+export * from "./typeaheadProviderRouter.js";

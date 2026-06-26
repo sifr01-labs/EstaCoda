@@ -60,6 +60,7 @@ describe("Papyrus substrate boundaries", () => {
       "./providers/slashCommandProvider.js",
       "./suggestionTypes.js",
       "./typeaheadController.js",
+      "./typeaheadProviderRouter.js",
     ]);
     expect(exportedModules(read("widgets/index.ts"))).toEqual([
       "./dialogModel.js",

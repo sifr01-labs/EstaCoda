@@ -1,9 +1,27 @@
 import type { Readable, Writable } from "node:stream";
 import { promptUiContextForLocale, type PromptUiContext } from "../contracts/ui.js";
-import { parseKeypress } from "../ui/input/parseKeypress.js";
+import { commandRegistry } from "./command-registry.js";
+import { parseKeypress, type ParsedKeypress } from "../ui/input/parseKeypress.js";
 import { applyKeypress, createLineEditorState, type LineEditorState } from "../ui/input/lineEditor.js";
 import { createTerminalLifecycle, type TerminalLifecycle } from "../ui/input/terminalLifecycle.js";
 import type { UiInputMode } from "../ui/input-mode.js";
+import { createSlashCommandSuggestionProvider, type SlashCommandSuggestionMetadata } from "../ui/papyrus/input/providers/slashCommandProvider.js";
+import {
+  applyTypeaheadResult,
+  createTypeaheadControllerState,
+  dismissTypeahead,
+  focusNextSuggestion,
+  focusPreviousSuggestion,
+  requestTypeaheadSuggestions,
+  selectFocusedSuggestion,
+  type TypeaheadState,
+} from "../ui/papyrus/input/typeaheadController.js";
+import {
+  createTypeaheadProviderRouter,
+  type TypeaheadProviderRouter,
+} from "../ui/papyrus/input/typeaheadProviderRouter.js";
+import { RawPromptOverlayHost, RawPromptRenderLoop } from "./rawPromptRenderLoop.js";
+import { buildRawPromptSlashAutocompleteRows } from "./rawPromptSlashAutocomplete.js";
 import { createReadlinePrompt, type CreateReadlinePromptOptions, type Prompt, type PromptOptions } from "./readline-prompt.js";
 
 type RawPromptDataListener = (chunk: string | Buffer | Uint8Array) => void;
@@ -38,6 +56,13 @@ export type RawPromptControllerOptions = {
   input: RawPromptInput;
   output: RawPromptOutput;
   lifecycle?: TerminalLifecycle;
+  overlayHost?: RawPromptOverlayHost;
+  typeahead?: RawPromptTypeaheadOptions;
+};
+
+export type RawPromptTypeaheadOptions = {
+  readonly router: TypeaheadProviderRouter<SlashCommandSuggestionMetadata>;
+  readonly onStateChange?: (state: TypeaheadState<SlashCommandSuggestionMetadata>) => void;
 };
 
 export type CreatePromptForInputModeOptions = Omit<CreateReadlinePromptOptions, "input" | "output"> & {
@@ -52,10 +77,14 @@ export class RawPromptController {
   readonly #input: RawPromptInput;
   readonly #output: RawPromptOutput;
   readonly #lifecycle: TerminalLifecycle;
+  readonly #overlayHost: RawPromptOverlayHost;
+  readonly #typeahead: RawPromptTypeaheadOptions | undefined;
 
   constructor(options: RawPromptControllerOptions) {
     this.#input = options.input;
     this.#output = options.output;
+    this.#overlayHost = options.overlayHost ?? new RawPromptOverlayHost();
+    this.#typeahead = options.typeahead;
     this.#lifecycle = options.lifecycle ?? createTerminalLifecycle({
       stdin: options.input,
       stdout: options.output,
@@ -63,22 +92,142 @@ export class RawPromptController {
   }
 
   async read(question: string, options?: PromptOptions): Promise<RawPromptResult> {
-    this.#output.write(question);
-    options?.onRowsChange?.(1);
+    const renderLoop = new RawPromptRenderLoop(this.#output);
+    let state = createLineEditorState();
+    let typeaheadState: TypeaheadState<SlashCommandSuggestionMetadata> = createTypeaheadControllerState();
+    const render = () => {
+      const rows = renderLoop.render({
+        prompt: question,
+        state,
+        overlayRows: this.#overlayHost.getRows(),
+      });
+      options?.onRowsChange?.(rows);
+    };
+
+    render();
 
     try {
       this.#lifecycle.start();
     } catch (error) {
+      renderLoop.clear();
       this.#lifecycle.stop();
       throw error;
     }
 
     return await new Promise<RawPromptResult>((resolve, reject) => {
-      let state = createLineEditorState();
       let settled = false;
+
+      const notifyTypeahead = () => {
+        this.#overlayHost.setRows(buildRawPromptSlashAutocompleteRows(typeaheadState));
+        this.#typeahead?.onStateChange?.(typeaheadState);
+      };
+
+      const closeTypeahead = () => {
+        if (this.#typeahead === undefined) return;
+        typeaheadState = {
+          ...createTypeaheadControllerState({
+            generation: typeaheadState.generation + 1,
+          }),
+          status: "closed",
+        };
+        notifyTypeahead();
+      };
+
+      const dismissCurrentTypeahead = () => {
+        if (this.#typeahead === undefined) return;
+        typeaheadState = dismissTypeahead({
+          ...typeaheadState,
+          generation: typeaheadState.generation + 1,
+        }).state;
+        notifyTypeahead();
+      };
+
+      const updateTypeahead = (nextState: LineEditorState) => {
+        if (this.#typeahead === undefined) return;
+        const selection = this.#typeahead.router.route({
+          input: nextState.text,
+          cursorOffset: nextState.cursor,
+        });
+        if (selection === undefined) {
+          closeTypeahead();
+          return;
+        }
+
+        const request = requestTypeaheadSuggestions(
+          typeaheadState,
+          selection.context,
+          [selection.provider] as const
+        );
+        typeaheadState = request.state;
+        notifyTypeahead();
+
+        void request.result.then((result) => {
+          if (settled) return;
+          typeaheadState = applyTypeaheadResult(typeaheadState, request.generation, result);
+          notifyTypeahead();
+          render();
+        });
+      };
+
+      const isTypeaheadActive = () => {
+        return this.#typeahead !== undefined
+          && typeaheadState.status !== "closed"
+          && typeaheadState.status !== "dismissed"
+          && typeaheadState.status !== "canceled";
+      };
+
+      const acceptFocusedTypeaheadSuggestion = () => {
+        const selected = selectFocusedSuggestion(typeaheadState);
+        if (selected.intent?.type !== "replace") return false;
+        const nextState = createLineEditorState(
+          selected.intent.nextInput,
+          selected.intent.replacementRange.start + selected.intent.replacementText.length
+        );
+        if (nextState.text !== state.text) {
+          options?.onInputChange?.(nextState.text);
+        }
+        state = nextState;
+        closeTypeahead();
+        render();
+        return true;
+      };
+
+      const handleTypeaheadKeypress = (event: ParsedKeypress) => {
+        if (this.#typeahead === undefined || event.type !== "key" || !isTypeaheadActive()) return false;
+
+        if (event.key === "escape") {
+          dismissCurrentTypeahead();
+          render();
+          return true;
+        }
+
+        if (event.key === "up" || (event.ctrl === true && event.key === "p")) {
+          typeaheadState = focusPreviousSuggestion(typeaheadState);
+          notifyTypeahead();
+          render();
+          return true;
+        }
+
+        if (event.key === "down" || (event.ctrl === true && event.key === "n")) {
+          typeaheadState = focusNextSuggestion(typeaheadState);
+          notifyTypeahead();
+          render();
+          return true;
+        }
+
+        if (event.key === "enter" || event.key === "tab") {
+          return acceptFocusedTypeaheadSuggestion();
+        }
+
+        return false;
+      };
 
       const cleanup = () => {
         detachDataListener(this.#input, onData);
+        dismissCurrentTypeahead();
+        this.#overlayHost.clear();
+        renderLoop.clear();
+        options?.onRowsChange?.(1);
         const stopResult = this.#lifecycle.stop();
         if (stopResult.errors.length > 0) {
           reject(stopResult.errors[0]);
@@ -90,8 +239,10 @@ export class RawPromptController {
       const finish = (result: RawPromptResult) => {
         if (settled) return;
         settled = true;
-        this.#output.write("\n");
-        if (cleanup()) resolve(result);
+        if (cleanup()) {
+          this.#output.write("\n");
+          resolve(result);
+        }
       };
 
       const updateState = (nextState: LineEditorState) => {
@@ -99,13 +250,15 @@ export class RawPromptController {
           options?.onInputChange?.(nextState.text);
         }
         state = nextState;
-        options?.onRowsChange?.(1);
+        updateTypeahead(nextState);
+        render();
       };
 
       const onData = (chunk: string | Buffer | Uint8Array) => {
         if (settled) return;
         const text = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
         for (const event of parseKeypress(text)) {
+          if (handleTypeaheadKeypress(event)) continue;
           const result = applyKeypress(state, event);
           updateState(result.state);
           if (result.intent?.type === "submit") {
@@ -170,7 +323,20 @@ export function createPromptForInputMode(options: CreatePromptForInputModeOption
     input: input as RawPromptInput,
     output: output as RawPromptOutput,
     uiContext: promptOptions.uiContext,
+    typeahead: createDefaultRawPromptTypeahead(),
   });
+}
+
+export function createDefaultRawPromptTypeahead(): RawPromptTypeaheadOptions {
+  return {
+    router: createTypeaheadProviderRouter({
+      providers: [
+        createSlashCommandSuggestionProvider({
+          registry: commandRegistry,
+        }),
+      ],
+    }),
+  };
 }
 
 function detachDataListener(input: RawPromptInput, listener: RawPromptDataListener): void {
