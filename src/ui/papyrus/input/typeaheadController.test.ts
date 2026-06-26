@@ -19,12 +19,20 @@ import {
   requestTypeaheadSuggestions,
   selectFocusedSuggestion,
 } from "./typeaheadController.js";
+import { createMcpResourceSuggestionProvider } from "./providers/mcpResourceProvider.js";
+import { createSkillSuggestionProvider } from "./providers/skillSuggestionProvider.js";
 
 const context = createSuggestionTokenContext({
   input: "run /he now",
   cursorOffset: 7,
   tokenRange: { start: 4, end: 7 },
   triggerKind: "slash",
+});
+const optionalProviderContext = createSuggestionTokenContext({
+  input: "",
+  cursorOffset: 0,
+  tokenRange: { start: 0, end: 0 },
+  triggerKind: "custom",
 });
 
 const helpItem = item("help", "/help");
@@ -183,6 +191,114 @@ describe("Papyrus typeahead controller", () => {
     expect(afterStaleCancel.generation).toBe(2);
     expect(afterStaleCancel.requestId).toBe("next-req");
     expect(afterStaleCancel.items.map((suggestion) => suggestion.id)).toEqual(["help"]);
+  });
+
+  it("keeps optional MCP provider canceled and stale results data-only", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const canceledProvider = createMcpResourceSuggestionProvider({
+      source: {
+        listResources: () => [{ label: "Project notes" }],
+      },
+      enabled: true,
+      isAuthorized: () => true,
+    });
+    const canceledRequest = requestTypeaheadSuggestions(
+      createTypeaheadControllerState(),
+      optionalProviderContext,
+      [canceledProvider],
+      { signal: controller.signal }
+    );
+    const canceledState = applyTypeaheadResult(
+      canceledRequest.state,
+      canceledRequest.generation,
+      await canceledRequest.result
+    );
+
+    expect(canceledState.status).toBe("canceled");
+    expect(canceledState.items).toEqual([]);
+
+    let resolveOld: (() => void) | undefined;
+    const staleProvider = createMcpResourceSuggestionProvider({
+      source: {
+        listResources: () => new Promise((resolve) => {
+          resolveOld = () => resolve([{ label: "Stale MCP resource" }]);
+        }),
+      },
+      enabled: true,
+      isAuthorized: () => true,
+    });
+    const freshProvider = createMcpResourceSuggestionProvider({
+      source: {
+        listResources: () => [{ label: "Fresh MCP resource" }],
+      },
+      enabled: true,
+      isAuthorized: () => true,
+    });
+    const oldRequest = requestTypeaheadSuggestions(createTypeaheadControllerState(), optionalProviderContext, [staleProvider]);
+    const freshRequest = requestTypeaheadSuggestions(oldRequest.state, optionalProviderContext, [freshProvider]);
+    const freshState = applyTypeaheadResult(freshRequest.state, freshRequest.generation, await freshRequest.result);
+
+    resolveOld?.();
+    const afterStale = applyTypeaheadResult(freshState, oldRequest.generation, await oldRequest.result);
+
+    expect(afterStale.status).toBe("open");
+    expect(afterStale.generation).toBe(freshRequest.generation);
+    expect(afterStale.items.map((suggestion) => suggestion.label)).toEqual(["Fresh MCP resource"]);
+  });
+
+  it("keeps optional skill provider canceled and stale results data-only", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const canceledProvider = createSkillSuggestionProvider({
+      source: {
+        listSkills: () => [{ label: "Code review" }],
+      },
+      enabled: true,
+      isAuthorized: () => true,
+    });
+    const canceledRequest = requestTypeaheadSuggestions(
+      createTypeaheadControllerState(),
+      optionalProviderContext,
+      [canceledProvider],
+      { signal: controller.signal }
+    );
+    const canceledState = applyTypeaheadResult(
+      canceledRequest.state,
+      canceledRequest.generation,
+      await canceledRequest.result
+    );
+
+    expect(canceledState.status).toBe("canceled");
+    expect(canceledState.items).toEqual([]);
+
+    let resolveOld: (() => void) | undefined;
+    const staleProvider = createSkillSuggestionProvider({
+      source: {
+        listSkills: () => new Promise((resolve) => {
+          resolveOld = () => resolve([{ label: "Stale skill" }]);
+        }),
+      },
+      enabled: true,
+      isAuthorized: () => true,
+    });
+    const freshProvider = createSkillSuggestionProvider({
+      source: {
+        listSkills: () => [{ label: "Fresh skill" }],
+      },
+      enabled: true,
+      isAuthorized: () => true,
+    });
+    const oldRequest = requestTypeaheadSuggestions(createTypeaheadControllerState(), optionalProviderContext, [staleProvider]);
+    const freshRequest = requestTypeaheadSuggestions(oldRequest.state, optionalProviderContext, [freshProvider]);
+    const freshState = applyTypeaheadResult(freshRequest.state, freshRequest.generation, await freshRequest.result);
+
+    resolveOld?.();
+    const afterStale = applyTypeaheadResult(freshState, oldRequest.generation, await oldRequest.result);
+
+    expect(afterStale.status).toBe("open");
+    expect(afterStale.generation).toBe(freshRequest.generation);
+    expect(afterStale.items.map((suggestion) => suggestion.label)).toEqual(["Fresh skill"]);
   });
 
   it("moves focus next and previous through items", async () => {
