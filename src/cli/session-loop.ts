@@ -22,7 +22,8 @@ import { CronStore } from "../cron/cron-store.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { storeCapabilitySecret, type SetupNeededMetadata } from "../capabilities/capability-setup.js";
 import { defaultImageModel } from "../contracts/image-generation.js";
-import { createReadlinePrompt, type Prompt, type PromptOptions, type PromptSpecialKeyControl } from "./readline-prompt.js";
+import type { Prompt, PromptOptions, PromptSpecialKeyControl } from "./readline-prompt.js";
+import { createPromptForInputMode } from "./rawPromptController.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { renderSlashMenu, renderToolsMenu, buildSlashMenuViewModel, buildSlashCompletionViewModel, buildToolsMenuViewModel, buildSkillsMenuViewModel, isImplementedSlashCommand } from "./slash-menu.js";
 import { renderSessionHelp, buildSessionHelpViewModel } from "./session-help.js";
@@ -51,6 +52,7 @@ import type { TerminalCapabilities } from "../contracts/ui.js";
 import { centerVisibleBlock, measureVisibleWidth, truncateVisible, wrapText } from "../ui/renderers/layout.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
 import { resolveUiRendererMode } from "../ui/renderer-mode.js";
+import { resolveUiInputMode } from "../ui/input-mode.js";
 import { promptUiContextForLocale } from "../contracts/ui.js";
 import { resolveHomeDir } from "../config/home-dir.js";
 import { resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
@@ -332,6 +334,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   const output = options.output ?? defaultOutput;
   const renderer = createSessionRenderer({ output, locale: options.locale, capabilities: options.capabilities });
   const rendererMode = resolveUiRendererMode({ env: options.env });
+  const inputMode = resolveUiInputMode({ env: options.env });
   let runtime = options.runtime;
   const now = options.now ?? (() => Date.now());
   const sessionStartedAtMs = now();
@@ -342,7 +345,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   let currentAnimator: ToolActivityAnimator | undefined;
   let clearActiveTurnChrome: () => void = () => undefined;
   const cliInput = (options.input as NodeJS.ReadStream | undefined) ?? defaultInput;
-  const prompt = options.prompt ?? createReadlinePrompt({
+  const prompt = options.prompt ?? createPromptForInputMode({
+    mode: inputMode,
     input: cliInput,
     output: output as NodeJS.WriteStream,
     uiContext: promptUiContextForLocale(renderer.locale),
