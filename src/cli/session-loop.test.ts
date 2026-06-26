@@ -33,6 +33,13 @@ import { CronStore } from "../cron/cron-store.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
 
 const STARTUP_VISIBLE_SCREEN_CLEAR = "\x1b[2J\x1b[H";
+const MANAGED_REGION_CLEAR_PATTERN = /\x1b\[\d+A\x1b\[1G\x1b\[0J/u;
+
+function managedRegionClearIndex(input: string, endIndex?: number): number {
+  const haystack = endIndex === undefined ? input : input.slice(0, endIndex);
+  const match = haystack.match(MANAGED_REGION_CLEAR_PATTERN);
+  return match?.index ?? -1;
+}
 
 function interactiveCaps(overrides: Partial<TerminalCapabilities> = {}): TerminalCapabilities {
   return {
@@ -1888,14 +1895,14 @@ describe("runSessionLoop — active turn spinner", () => {
     });
 
     const rendered = outputChunks.join("");
-    const clearIndex = rendered.indexOf("\x1b[1A\x1b[2K\r");
+    const clearIndex = managedRegionClearIndex(rendered);
     const assistantIndex = rendered.indexOf("Mock response");
     expect(clearIndex).toBeGreaterThan(-1);
     expect(assistantIndex).toBeGreaterThan(-1);
     expect(clearIndex).toBeLessThan(assistantIndex);
   });
 
-  it("clears the readline echo before rendering the submitted user prompt rail", async () => {
+  it("lets raw prompt cleanup own submitted prompt rows before rendering the user rail", async () => {
     const outputChunks: string[] = [];
     const output = {
       write(chunk: string | Uint8Array): boolean {
@@ -1928,89 +1935,8 @@ describe("runSessionLoop — active turn spinner", () => {
 
     const rendered = outputChunks.join("");
     const userRailIndex = rendered.indexOf("↳ hello");
-    const echoClearIndex = rendered.lastIndexOf("\x1b[1A\x1b[2K\r", userRailIndex);
-    expect(echoClearIndex).toBeGreaterThan(-1);
-    expect(echoClearIndex).toBeLessThan(userRailIndex);
-  });
-
-  it("clears every wrapped readline echo row before the submitted user prompt rail", async () => {
-    const outputChunks: string[] = [];
-    const output = {
-      write(chunk: string | Uint8Array): boolean {
-        outputChunks.push(String(chunk));
-        return true;
-      },
-      isTTY: true,
-      columns: 20,
-    } as unknown as NodeJS.WritableStream;
-    const longText = "this is a deliberately long prompt";
-    const runtime = createEventEmittingMockRuntime([
-      { kind: "agent-start", sessionId: "test-session", input: longText },
-      { kind: "agent-final", text: "Mock response" },
-    ]);
-
-    let promptIndex = 0;
-    await runSessionLoop({
-      runtime,
-      output,
-      capabilities: interactiveCaps({ terminalWidth: 20, supportsAnimation: false }),
-      prompt: Object.assign(
-        async () => {
-          const values = [longText, "/exit"];
-          return values[promptIndex++] ?? "/exit";
-        },
-        { close: () => {} }
-      ),
-      close: () => {},
-    });
-
-    const rendered = outputChunks.join("");
-    const userRailIndex = rendered.indexOf("↳ this is a delib...");
-    const beforeUserRail = rendered.slice(0, userRailIndex);
-    const chromeClearIndex = beforeUserRail.search(/\x1b\[\d+A\x1b\[2K/u);
-    const echoClearIndex = rendered.lastIndexOf("\x1b[1A\x1b[2K\x1b[1A\x1b[2K\r", userRailIndex);
-    expect(chromeClearIndex).toBeGreaterThan(-1);
-    expect(echoClearIndex).toBeGreaterThan(-1);
-    expect(chromeClearIndex).toBeLessThan(echoClearIndex);
-    expect(echoClearIndex).toBeLessThan(userRailIndex);
-  });
-
-  it("uses the raw echoed readline text when clearing trailing-space wraps", async () => {
-    const outputChunks: string[] = [];
-    const output = {
-      write(chunk: string | Uint8Array): boolean {
-        outputChunks.push(String(chunk));
-        return true;
-      },
-      isTTY: true,
-      columns: 20,
-    } as unknown as NodeJS.WritableStream;
-    const rawText = "x".padEnd(35, " ");
-    const runtime = createEventEmittingMockRuntime([
-      { kind: "agent-start", sessionId: "test-session", input: "x" },
-      { kind: "agent-final", text: "Mock response" },
-    ]);
-
-    let promptIndex = 0;
-    await runSessionLoop({
-      runtime,
-      output,
-      capabilities: interactiveCaps({ terminalWidth: 20, supportsAnimation: false }),
-      prompt: Object.assign(
-        async () => {
-          const values = [rawText, "/exit"];
-          return values[promptIndex++] ?? "/exit";
-        },
-        { close: () => {} }
-      ),
-      close: () => {},
-    });
-
-    const rendered = outputChunks.join("");
-    const userRailIndex = rendered.indexOf("↳ x");
-    const echoClearIndex = rendered.lastIndexOf("\x1b[1A\x1b[2K\x1b[1A\x1b[2K\r", userRailIndex);
-    expect(echoClearIndex).toBeGreaterThan(-1);
-    expect(echoClearIndex).toBeLessThan(userRailIndex);
+    expect(userRailIndex).toBeGreaterThan(-1);
+    expect(rendered.slice(0, userRailIndex)).not.toContain("\x1b[1A\x1b[2K");
   });
 
   it("renders active-turn bottom chrome without a read-only prompt box", async () => {
@@ -3342,7 +3268,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(rendered).toContain("◷ 1m 1s");
   });
 
-  it("uses live wrapped prompt rows when ticking the idle session timer", async () => {
+  it("ticks the idle session timer through Papyrus-managed chrome", async () => {
     const outputChunks: string[] = [];
     const output = {
       write(chunk: string | Uint8Array): boolean {
@@ -3355,10 +3281,10 @@ describe("runSessionLoop — active turn spinner", () => {
 
     let nowMs = 0;
     let resolvePrompt: ((value: string) => void) | undefined;
-    let promptOptions: { onRowsChange?: (rows: number) => void } | undefined;
+    let promptStarted = false;
     const prompt = Object.assign(
-      vi.fn(async (_question: string, options?: { onRowsChange?: (rows: number) => void }) => {
-        promptOptions = options;
+      vi.fn(async () => {
+        promptStarted = true;
         return await new Promise<string>((resolve) => {
           resolvePrompt = resolve;
         });
@@ -3375,16 +3301,15 @@ describe("runSessionLoop — active turn spinner", () => {
       now: () => nowMs,
     });
 
-    while (resolvePrompt === undefined || promptOptions === undefined) {
+    while (resolvePrompt === undefined || !promptStarted) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
-    promptOptions.onRowsChange?.(3);
     nowMs = 61_000;
     await new Promise((resolve) => setTimeout(resolve, 1050));
     resolvePrompt("/exit");
     await loop;
 
-    expect(outputChunks.some((chunk) => /\x1b7\x1b\[\d+A/u.test(chunk))).toBe(true);
+    expect(outputChunks.some((chunk) => MANAGED_REGION_CLEAR_PATTERN.test(chunk))).toBe(true);
   });
 
   it("does not install idle prompt slash or transient chrome callbacks", async () => {
@@ -4491,7 +4416,7 @@ describe("runSessionLoop — active turn spinner", () => {
     // Tool output should be present
     expect(rendered).toContain("browser.status");
     // The ANSI clear sequence should appear before tool output
-    const clearIndex = rendered.indexOf("\x1b[1A\x1b[2K\r");
+    const clearIndex = managedRegionClearIndex(rendered);
     const toolIndex = rendered.indexOf("browser.status");
     expect(clearIndex).toBeGreaterThan(-1);
     expect(toolIndex).toBeGreaterThan(-1);
@@ -4578,7 +4503,7 @@ describe("runSessionLoop — active turn spinner", () => {
     });
 
     const rendered = outputChunks.join("");
-    const clearIndex = rendered.indexOf("\x1b[1A\x1b[2K\r");
+    const clearIndex = managedRegionClearIndex(rendered);
     const permissionIndex = rendered.indexOf("[Approval] Approval required");
     expect(clearIndex).toBeGreaterThan(-1);
     expect(permissionIndex).toBeGreaterThan(-1);
@@ -5327,7 +5252,7 @@ describe("runSessionLoop — active turn spinner", () => {
     const rendered = outputChunks.join("");
     expect(rendered).toContain("cancelled: user interrupt");
     // The clear sequence should appear before the cancellation message
-    const clearIndex = rendered.indexOf("\x1b[1A\x1b[2K\r");
+    const clearIndex = managedRegionClearIndex(rendered);
     const cancelIndex = rendered.indexOf("cancelled: user interrupt");
     expect(clearIndex).toBeGreaterThan(-1);
     expect(cancelIndex).toBeGreaterThan(-1);
@@ -5370,7 +5295,7 @@ describe("runSessionLoop — active turn spinner", () => {
     const rendered = outputChunks.join("");
     expect(rendered).toContain("provider budget: token limit reached");
     // The clear sequence should appear before the budget message
-    const clearIndex = rendered.indexOf("\x1b[1A\x1b[2K\r");
+    const clearIndex = managedRegionClearIndex(rendered);
     const budgetIndex = rendered.indexOf("provider budget: token limit reached");
     expect(clearIndex).toBeGreaterThan(-1);
     expect(budgetIndex).toBeGreaterThan(-1);
@@ -5488,7 +5413,7 @@ describe("runSessionLoop — animated spinner behavior", () => {
     });
 
     const rendered = outputChunks.join("");
-    const clearIndex = rendered.indexOf("\x1b[1A\x1b[2K\r");
+    const clearIndex = managedRegionClearIndex(rendered);
     const assistantIndex = rendered.indexOf("Mock response");
     expect(clearIndex).toBeGreaterThan(-1);
     expect(assistantIndex).toBeGreaterThan(-1);
@@ -5538,7 +5463,7 @@ describe("runSessionLoop — animated spinner behavior", () => {
     // Tool output should be present
     expect(rendered).toContain("browser.status");
     // The ANSI clear sequence should appear before tool output
-    const clearIndex = rendered.indexOf("\x1b[1A\x1b[2K\r");
+    const clearIndex = managedRegionClearIndex(rendered);
     const toolIndex = rendered.indexOf("browser.status");
     expect(clearIndex).toBeGreaterThan(-1);
     expect(toolIndex).toBeGreaterThan(-1);
@@ -5585,7 +5510,7 @@ describe("runSessionLoop — animated spinner behavior", () => {
 
     const rendered = outputChunks.join("");
     expect(rendered).toContain("cancelled: user interrupt");
-    const clearIndex = rendered.indexOf("\x1b[1A\x1b[2K\r");
+    const clearIndex = managedRegionClearIndex(rendered);
     const cancelIndex = rendered.indexOf("cancelled: user interrupt");
     expect(clearIndex).toBeGreaterThan(-1);
     expect(cancelIndex).toBeGreaterThan(-1);
@@ -5627,7 +5552,7 @@ describe("runSessionLoop — animated spinner behavior", () => {
 
     const rendered = outputChunks.join("");
     expect(rendered).toContain("provider budget: token limit reached");
-    const clearIndex = rendered.indexOf("\x1b[1A\x1b[2K\r");
+    const clearIndex = managedRegionClearIndex(rendered);
     const budgetIndex = rendered.indexOf("provider budget: token limit reached");
     expect(clearIndex).toBeGreaterThan(-1);
     expect(budgetIndex).toBeGreaterThan(-1);
