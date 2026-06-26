@@ -65,12 +65,17 @@ describe("Papyrus substrate boundaries", () => {
     expect(exportedModules(read("widgets/index.ts"))).toEqual([
       "./approvalCardModel.js",
       "./dialogModel.js",
+      "./fuzzyPickerModel.js",
       "./multiSelectModel.js",
       "./optionMap.js",
       "./overlayStack.js",
+      "./previewPaneModel.js",
+      "./scrollPaneModel.js",
       "./selectKeymap.js",
       "./selectModel.js",
       "./selectRenderRows.js",
+      "./terminalHeightConstraints.js",
+      "./virtualListModel.js",
     ]);
   });
 
