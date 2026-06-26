@@ -1,4 +1,4 @@
-import { emitKeypressEvents } from "node:readline";
+import { parseKeypress, type ParsedKeypress } from "../ui/input/parseKeypress.js";
 
 export type ActiveTurnCommandControllerOptions = {
   readonly input: NodeJS.ReadStream;
@@ -14,12 +14,6 @@ export type ActiveTurnCommandControllerOptions = {
   readonly emitSigint?: () => void;
 };
 
-type Keypress = {
-  readonly name?: string;
-  readonly ctrl?: boolean;
-  readonly sequence?: string;
-};
-
 export class ActiveTurnCommandController {
   readonly #input: NodeJS.ReadStream;
   readonly #enabled: boolean;
@@ -32,7 +26,7 @@ export class ActiveTurnCommandController {
   readonly #onSteer?: (note: string) => void;
   readonly #onStatusMessage?: (message: string) => void;
   readonly #emitSigint: () => void;
-  readonly #onKeypress = (chunk: unknown, key: Keypress = {}) => this.#handleKeypress(chunk, key);
+  readonly #onData = (chunk: string | Buffer | Uint8Array) => this.#handleData(chunk);
   #buffer: string | undefined;
   #attached = false;
   #disposed = false;
@@ -55,8 +49,7 @@ export class ActiveTurnCommandController {
       return;
     }
     this.#wasRaw = this.#input.isRaw === true;
-    emitKeypressEvents(this.#input);
-    this.#input.on("keypress", this.#onKeypress);
+    this.#input.on("data", this.#onData);
     this.#input.setRawMode?.(true);
     this.#input.resume();
     this.#attached = true;
@@ -67,29 +60,36 @@ export class ActiveTurnCommandController {
     this.#disposed = true;
     this.#clearBuffer();
     if (!this.#attached) return;
-    this.#input.off("keypress", this.#onKeypress);
+    this.#input.off("data", this.#onData);
     if (!this.#wasRaw) {
       this.#input.setRawMode?.(false);
     }
     this.#attached = false;
   }
 
-  #handleKeypress(chunk: unknown, key: Keypress): void {
+  #handleData(chunk: string | Buffer | Uint8Array): void {
+    const text = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+    for (const event of parseKeypress(text)) {
+      this.#handleKeypress(event);
+    }
+  }
+
+  #handleKeypress(event: ParsedKeypress): void {
     if (this.#disposed) return;
-    if (key.ctrl === true && key.name === "c") {
+    if (event.type === "key" && event.ctrl === true && event.key === "c") {
       this.#emitSigint();
       return;
     }
 
-    if (key.name === "escape") {
+    if (event.type === "key" && event.key === "escape") {
       this.#clearBuffer();
       return;
     }
-    if (key.ctrl === true && key.name === "u") {
+    if (event.type === "key" && event.ctrl === true && event.key === "u") {
       this.#clearBuffer();
       return;
     }
-    if (key.name === "backspace") {
+    if (event.type === "key" && event.key === "backspace") {
       if (this.#buffer === undefined) {
         return;
       }
@@ -101,17 +101,17 @@ export class ActiveTurnCommandController {
       }
       return;
     }
-    if (key.name === "return" || key.name === "enter") {
+    if (event.type === "key" && event.key === "enter") {
       const command = this.#buffer ?? "";
       this.#clearBuffer();
       this.#submit(command);
       return;
     }
-    if (!isPrintableInput(chunk)) {
+    if (event.type !== "text" && event.type !== "paste") {
       return;
     }
 
-    this.#buffer = `${this.#buffer ?? ""}${chunk}`;
+    this.#buffer = `${this.#buffer ?? ""}${event.text}`;
     this.#renderBuffer();
   }
 
@@ -162,10 +162,4 @@ export class ActiveTurnCommandController {
     this.#onActiveInputPreviewChange?.(undefined);
     this.#onInputLineChange?.(undefined);
   }
-}
-
-function isPrintableInput(value: unknown): value is string {
-  return typeof value === "string" &&
-    value.length > 0 &&
-    !/[\u0000-\u001f\u007f]/u.test(value);
 }

@@ -46,8 +46,8 @@ describe("interactive-select prompt card surface", () => {
     const pending = selectOption(input, output, promptCardSelection());
 
     await Promise.resolve();
-    input.emit("keypress", "", { name: "down" });
-    input.emit("keypress", "", { name: "return" });
+    press(input, "\x1b[B");
+    press(input, "\r");
 
     await expect(pending).resolves.toBe("skip");
     const rendered = stripAnsi(output.getText());
@@ -63,7 +63,7 @@ describe("interactive-select prompt card surface", () => {
     void selectOption(input, makeTtyStreams().output, promptCardSelection());
 
     await Promise.resolve();
-    input.emit("keypress", "", { name: "c", ctrl: true });
+    press(input, "\x03");
 
     expect(emitSpy).toHaveBeenCalledWith("SIGINT");
   });
@@ -81,7 +81,7 @@ describe("interactive-select prompt card surface", () => {
     });
 
     await Promise.resolve();
-    input.emit("keypress", "3", { name: "3" });
+    press(input, "3");
 
     await expect(pending).resolves.toBe("back");
     expect(stripAnsi(output.getText())).toContain("Selected: Back");
@@ -100,9 +100,9 @@ describe("interactive-select prompt card surface", () => {
     });
 
     await Promise.resolve();
-    input.emit("keypress", "", { name: "down" });
-    input.emit("keypress", "", { name: "down" });
-    input.emit("keypress", "", { name: "return" });
+    press(input, "\x1b[B");
+    press(input, "\x1b[B");
+    press(input, "\r");
 
     await expect(pending).resolves.toBe("cancel");
     expect(stripAnsi(output.getText())).toContain("Selected: Cancel");
@@ -114,10 +114,10 @@ describe("interactive-select prompt card surface", () => {
     const pending = selectOption(input, output, promptCardSelection());
 
     await Promise.resolve();
-    input.emit("keypress", "", { name: "end" });
-    input.emit("keypress", "", { name: "home" });
-    input.emit("keypress", "", { name: "end" });
-    input.emit("keypress", "", { name: "return" });
+    press(input, "\x1b[F");
+    press(input, "\x1b[H");
+    press(input, "\x1b[F");
+    press(input, "\r");
 
     await expect(pending).resolves.toBe("skip");
     expect(stripAnsi(output.getText())).toContain("Selected: Not now");
@@ -129,7 +129,7 @@ describe("interactive-select prompt card surface", () => {
     const pending = selectOption(input, output, promptCardSelection());
 
     await Promise.resolve();
-    input.emit("keypress", "", { name: "return" });
+    press(input, "\r");
 
     await expect(pending).resolves.toBe("trust");
     const rendered = stripAnsi(output.getText());
@@ -159,7 +159,7 @@ describe("interactive-select prompt card surface", () => {
     const pending = selectOption(input, output, promptCardSelection());
 
     await Promise.resolve();
-    input.emit("keypress", "", { name: "return" });
+    press(input, "\r");
 
     await expect(pending).resolves.toBe("trust");
     const rendered = stripAnsi(output.getText());
@@ -328,7 +328,7 @@ describe("interactive-select prompt card surface", () => {
     const pending = selectOption(input, output, arabicPromptCardSelection());
 
     await Promise.resolve();
-    input.emit("keypress", "", { name: "return" });
+    press(input, "\r");
 
     await expect(pending).resolves.toBe("yes");
     const rendered = output.getText();
@@ -349,7 +349,7 @@ describe("interactive-select prompt card surface", () => {
     });
 
     await Promise.resolve();
-    input.emit("keypress", "", { name: "return" });
+    press(input, "\r");
 
     await expect(pending).resolves.toBe("model");
     expect(stripAnsi(output.getText())).toContain(isolateRtl(`تم تحديد: ${isolateLtr("deepseek-v4-pro")}`));
@@ -366,7 +366,7 @@ describe("interactive-select prompt card surface", () => {
     });
 
     await Promise.resolve();
-    input.emit("keypress", "", { name: "return" });
+    press(input, "\r");
 
     await expect(pending).resolves.toBe("telegram");
     expect(stripAnsi(output.getText())).toContain(isolateRtl(`تم تحديد: ${isolateLtr("Telegram")}`));
@@ -379,7 +379,7 @@ describe("interactive-select prompt card surface", () => {
     const pending = selectOption(input, output, promptCardSelection());
 
     await Promise.resolve();
-    input.emit("keypress", "", { name: "return" });
+    press(input, "\r");
 
     await expect(pending).resolves.toBe("trust");
     const rendered = output.getText();
@@ -439,6 +439,10 @@ function makeTtyStreams(columns = 80): { input: TtyInput; output: CapturingOutpu
   input.setRawMode = vi.fn();
   input.resume = vi.fn(() => input);
   return { input, output: makeOutput(true, columns) };
+}
+
+function press(input: TtyInput, sequence: string): void {
+  input.emit("data", sequence);
 }
 
 function makeOutput(isTTY: boolean, columns = 80): CapturingOutput {
