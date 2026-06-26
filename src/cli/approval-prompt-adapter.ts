@@ -1,6 +1,14 @@
 import type { ViewModel } from "../contracts/view-model.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import {
+  approvalCardStateFromToolExecution,
+  createApprovalFocusTarget,
+  createInitialOperatorConsoleState,
+  routeApprovalKey,
+  type ApprovalIntent,
+  type OperatorConsoleRuntimeHost,
+} from "../ui/papyrus/operator-console/index.js";
+import {
   buildApprovalCardRenderRows,
   createApprovalCardState,
   type ApprovalCardAction,
@@ -22,11 +30,16 @@ export type ApprovalPromptAdapterInput = {
   readonly chrome: ApprovalPromptChrome;
   readonly execution: ToolExecutionRecord;
   readonly allowPersistentApproval: boolean;
+  readonly operatorConsoleHost?: OperatorConsoleRuntimeHost;
 };
 
 export type ApprovalPromptAdapter = (input: ApprovalPromptAdapterInput) => Promise<string>;
 
 export const papyrusApprovalPromptAdapter: ApprovalPromptAdapter = async (input) => {
+  if (input.operatorConsoleHost !== undefined) {
+    return await operatorConsoleApprovalPromptAdapter(input);
+  }
+
   const promptText = "approval action > ";
   const cardText = renderPapyrusApprovalPromptCard(input.execution, input.allowPersistentApproval);
   if (input.chrome.suspendForPrompt !== undefined) {
@@ -46,6 +59,71 @@ export const papyrusApprovalPromptAdapter: ApprovalPromptAdapter = async (input)
   }
   return mapPapyrusApprovalAnswer(await input.prompt(promptText), input.allowPersistentApproval);
 };
+
+async function operatorConsoleApprovalPromptAdapter(input: ApprovalPromptAdapterInput): Promise<string> {
+  const host = input.operatorConsoleHost;
+  if (host === undefined) {
+    return mapPapyrusApprovalAnswer(await input.prompt("approval action > "), input.allowPersistentApproval);
+  }
+
+  const approval = approvalCardStateFromToolExecution(input.execution, { focused: true });
+  host.setApprovals([approval]);
+  const frame = host.render();
+  input.output.write(`${frame.lines.join("\n")}\n`);
+
+  const answer = await input.prompt("approval action > ");
+  const intent = approvalIntentFromAnswer(answer, approval.id);
+  if (intent !== undefined) {
+    return mapOperatorConsoleApprovalIntent(intent);
+  }
+  return mapPapyrusApprovalAnswer(answer, input.allowPersistentApproval);
+}
+
+function approvalIntentFromAnswer(answer: string, approvalId: string): ApprovalIntent | undefined {
+  const normalized = answer.trim().toLowerCase().replace(/\s+/gu, " ");
+  const key = normalized === "1" || normalized === "approve" || normalized === "approve once" || normalized === "approve-once"
+    ? "enter"
+    : normalized === "2" || normalized === "reject" || normalized === "deny"
+      ? "enter"
+      : normalized === "3" || normalized === "inspect"
+        ? "enter"
+        : normalized === "escape" || normalized === "esc" || normalized === "cancel"
+          ? "escape"
+          : undefined;
+  if (key === undefined) return undefined;
+
+  const focusedControl = normalized === "2" || normalized === "reject" || normalized === "deny"
+    ? "reject"
+    : normalized === "3" || normalized === "inspect"
+      ? "inspect"
+      : "approve";
+  const state = createInitialOperatorConsoleState({
+    approvals: [{
+      id: approvalId,
+      status: "pending",
+      action: "approval",
+      target: "approval",
+      focusedControl,
+    }],
+    focus: {
+      target: createApprovalFocusTarget(approvalId, focusedControl),
+    },
+  });
+  return routeApprovalKey(state, { type: "key", key }).intent;
+}
+
+function mapOperatorConsoleApprovalIntent(intent: ApprovalIntent): string {
+  switch (intent.type) {
+    case "approve":
+      return "once";
+    case "reject":
+      return "deny";
+    case "inspect":
+      return "inspect";
+    case "none":
+      return "";
+  }
+}
 
 function renderPapyrusApprovalPromptCard(
   execution: ToolExecutionRecord,

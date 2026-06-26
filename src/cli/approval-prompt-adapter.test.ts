@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
+import { createOperatorConsoleRuntimeHost } from "../ui/papyrus/operator-console/index.js";
 import {
   papyrusApprovalPromptAdapter,
   type ApprovalPromptAdapterInput,
@@ -101,5 +102,47 @@ describe("approval prompt adapter routing", () => {
     await papyrusApprovalPromptAdapter(input);
 
     expect(outputChunks.join("")).not.toContain("Always allow");
+  });
+
+  it("renders inline Operator Console approval cards when a runtime host is provided", async () => {
+    const { input, outputChunks } = adapterInput("approve once");
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 72, height: 14, isTty: true },
+    });
+
+    await expect(papyrusApprovalPromptAdapter({
+      ...input,
+      operatorConsoleHost: host,
+    })).resolves.toBe("once");
+
+    const rendered = outputChunks.join("");
+    expect(rendered).toContain("Approval required");
+    expect(rendered).toContain("Action: terminal.run");
+    expect(rendered).toContain("Target: npm install left-pad");
+    expect(rendered).toContain("Risk: destructive-local");
+    expect(rendered).toContain("❯ Approve once");
+    expect(rendered).toContain("Reject");
+    expect(rendered).toContain("Inspect");
+    expect(rendered).not.toContain("Allow for this session");
+    expect(rendered).not.toContain("Always allow");
+    expect(rendered).not.toContain("Feedback");
+    expect(rendered).not.toContain("Amend");
+    expect(host.getState().approvals).toHaveLength(1);
+    expect(host.getState().status).not.toHaveProperty("approvals");
+  });
+
+  it("maps Operator Console reject, escape, and inspect intents without adding approval scope semantics", async () => {
+    await expect(papyrusApprovalPromptAdapter({
+      ...adapterInput("reject").input,
+      operatorConsoleHost: createOperatorConsoleRuntimeHost(),
+    })).resolves.toBe("deny");
+    await expect(papyrusApprovalPromptAdapter({
+      ...adapterInput("esc").input,
+      operatorConsoleHost: createOperatorConsoleRuntimeHost(),
+    })).resolves.toBe("deny");
+    await expect(papyrusApprovalPromptAdapter({
+      ...adapterInput("inspect").input,
+      operatorConsoleHost: createOperatorConsoleRuntimeHost(),
+    })).resolves.toBe("inspect");
   });
 });

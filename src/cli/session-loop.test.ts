@@ -35,6 +35,7 @@ import {
   createOperatorConsoleRuntimeHost,
   formatActiveWorkSummary,
   sortActiveWorkItems,
+  type OperatorConsoleRuntimeHost,
 } from "../ui/papyrus/operator-console/index.js";
 
 const STARTUP_VISIBLE_SCREEN_CLEAR = "\x1b[2J\x1b[H";
@@ -323,6 +324,7 @@ async function runApprovalPromptScenario(
     response?: AgentLoopResponse;
     env?: Record<string, string | undefined>;
     ttyCoreSession?: boolean;
+    operatorConsoleHost?: OperatorConsoleRuntimeHost;
   } = {}
 ): Promise<{
   grants: ApprovalGrantInput[];
@@ -383,6 +385,9 @@ async function runApprovalPromptScenario(
     close: () => {},
     env: options.env,
     approvalPromptAdapter,
+    ...(options.operatorConsoleHost === undefined
+      ? {}
+      : { operatorConsole: { enabled: true, runtimeHost: options.operatorConsoleHost } }),
   });
 
   return {
@@ -5023,6 +5028,92 @@ describe("runSessionLoop — active turn spinner", () => {
     ]);
     expect(result.handleInputs).toEqual(["write file", "write file"]);
     expect(result.rendered).toContain("Approval granted (persistent for this workspace). Retrying now.");
+  });
+
+  it("routes Operator Console enabled approval prompts through inline approval cards", async () => {
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 96, height: 16, isTty: true },
+    });
+    const setApprovalsSpy = vi.spyOn(host, "setApprovals");
+
+    const result = await runApprovalPromptScenario(["approve once"], {
+      response: commandApprovalAskResponse(),
+      operatorConsoleHost: host,
+      ttyCoreSession: true,
+    });
+
+    expect(setApprovalsSpy).toHaveBeenCalledWith([
+      expect.objectContaining({
+        status: "pending",
+        action: "terminal.run",
+        target: "npm install left-pad",
+        risk: "destructive-local",
+        focusedControl: "approve",
+      }),
+    ]);
+    expect(result.grants).toEqual([
+      {
+        toolName: "terminal.run",
+        riskClass: "destructive-local",
+        targetKey: "npm install left-pad",
+        targetSummary: "npm install left-pad",
+        scope: "once",
+      },
+    ]);
+    expect(result.rendered).toContain("Approval required");
+    expect(result.rendered).toContain("Action: terminal.run");
+    expect(result.rendered).toContain("Target: npm install left-pad");
+    expect(result.rendered).toContain("Risk: destructive-local");
+    expect(result.rendered).toContain("❯ Approve once");
+    expect(result.rendered).toContain("Reject");
+    expect(result.rendered).toContain("Inspect");
+    expect(result.rendered).not.toContain("Allow for this session");
+    expect(result.rendered).not.toContain("Always allow");
+    expect(result.rendered).not.toContain("Feedback");
+    expect(result.rendered).not.toContain("Amend");
+    expect(result.rendered).toContain("Approval granted (once). Retrying now.");
+    const statusRailLine = result.rendered.split("\n").find((line) => line.includes("mock-model"));
+    expect(statusRailLine).toBeDefined();
+    expect(statusRailLine).not.toMatch(/\b(approval|tool|workspace|trust|setup|steer|channel)\b/iu);
+  });
+
+  it("keeps Operator Console inspect intent on the existing no-grant invalid-answer path", async () => {
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 96, height: 16, isTty: true },
+    });
+
+    const result = await runApprovalPromptScenario(["inspect", "approve once"], {
+      response: approvalAskResponse(),
+      operatorConsoleHost: host,
+      ttyCoreSession: true,
+    });
+
+    expect(result.grants).toHaveLength(1);
+    expect(result.grants[0]).toMatchObject({
+      toolName: "workspace.write",
+      scope: "once",
+    });
+    expect(result.rendered).toContain("Enter one of: once, session, always, deny.");
+  });
+
+  it("does not render actionable Operator Console cards for hardline or policy denials", async () => {
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 96, height: 16, isTty: true },
+    });
+    const setApprovalsSpy = vi.spyOn(host, "setApprovals");
+
+    const result = await runApprovalPromptScenario([], {
+      response: commandApprovalDenyResponse(),
+      operatorConsoleHost: host,
+      ttyCoreSession: true,
+    });
+
+    expect(setApprovalsSpy).not.toHaveBeenCalledWith([
+      expect.objectContaining({ status: "pending" }),
+    ]);
+    expect(result.grants).toEqual([]);
+    expect(result.rendered).not.toContain("Approve once");
+    expect(result.rendered).not.toContain("Approval required");
   });
 
   it("ignores the removed legacy approval widget fallback in core sessions", async () => {

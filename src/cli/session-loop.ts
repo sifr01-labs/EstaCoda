@@ -1222,6 +1222,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           renderer,
           chrome: bottomChrome,
           approvalPromptAdapter,
+          operatorConsoleHost: operatorConsoleRuntimeHost,
           execution: response.toolExecutions.find((execution) => execution.decision === "ask")
         });
 
@@ -2286,6 +2287,7 @@ async function maybeHandleApprovalGate(input: {
   renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string };
   chrome: TranscriptChrome;
   approvalPromptAdapter: ApprovalPromptAdapter;
+  operatorConsoleHost?: OperatorConsoleRuntimeHost;
   execution: ToolExecutionRecord | undefined;
 }): Promise<{
   retry: boolean;
@@ -2308,6 +2310,7 @@ async function maybeHandleApprovalGate(input: {
         chrome: input.chrome,
         execution,
         allowPersistentApproval,
+        operatorConsoleHost: input.operatorConsoleHost,
       })
     );
     if (answer?.kind === "deny") {
