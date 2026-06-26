@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 import { GHOST_TEXT_ENV_VAR } from "./ghost-text-mode.js";
+import { INPUT_KEYMAP_MODE_ENV_VAR } from "./input-keymap-mode.js";
 import { createPromptForInputMode, createRawPrompt, RawPromptController, type RawPromptControllerOptions, type RawPromptInput, type RawPromptOutput } from "./rawPromptController.js";
 import { RawPromptOverlayHost } from "./rawPromptRenderLoop.js";
 import type { TerminalLifecycle } from "../ui/input/terminalLifecycle.js";
@@ -127,6 +128,33 @@ async function readWithFakeInput(inputText: string) {
   };
 }
 
+async function readWithVimInput(inputText: string, options: Partial<RawPromptControllerOptions> = {}) {
+  return await readWithVimChunks([inputText], options);
+}
+
+async function readWithVimChunks(chunks: readonly string[], options: Partial<RawPromptControllerOptions> = {}) {
+  const input = new FakeInput();
+  const output = fakeOutput();
+  const lifecycle = fakeLifecycle();
+  const controller = new RawPromptController({
+    input,
+    output,
+    lifecycle: lifecycle.lifecycle,
+    keymap: { mode: "vim" },
+    ...options,
+  });
+
+  const pending = controller.read("> ");
+  for (const chunk of chunks) input.send(chunk);
+
+  return {
+    result: await pending,
+    input,
+    output,
+    lifecycle,
+  };
+}
+
 function startPendingRead() {
   const input = new FakeInput();
   const output = fakeOutput();
@@ -239,6 +267,48 @@ describe("raw prompt controller", () => {
     expect(createReadline).not.toHaveBeenCalled();
   });
 
+  it("passes Vim keymap options to raw prompt only when explicitly selected", async () => {
+    const input = new FakeInput();
+    const output = fakeOutput();
+    const rawPrompt = Object.assign(vi.fn(async () => "raw"), { close: vi.fn() });
+    const createReadline = vi.fn(() => Object.assign(vi.fn(async () => "legacy"), { close: vi.fn() }));
+    const rawOptions: RawPromptControllerOptions[] = [];
+    const createRaw = vi.fn((options: RawPromptControllerOptions) => {
+      rawOptions.push(options);
+      return rawPrompt;
+    });
+
+    await createPromptForInputMode({
+      mode: "raw",
+      input,
+      output,
+      env: {},
+      createReadline,
+      createRaw,
+    })("> ");
+    await createPromptForInputMode({
+      mode: "raw",
+      input,
+      output,
+      env: { [INPUT_KEYMAP_MODE_ENV_VAR]: "invalid" },
+      createReadline,
+      createRaw,
+    })("> ");
+    await createPromptForInputMode({
+      mode: "raw",
+      input,
+      output,
+      env: { [INPUT_KEYMAP_MODE_ENV_VAR]: "vim" },
+      createReadline,
+      createRaw,
+    })("> ");
+
+    expect(rawOptions[0]?.keymap).toBeUndefined();
+    expect(rawOptions[1]?.keymap).toBeUndefined();
+    expect(rawOptions[2]?.keymap).toEqual({ mode: "vim" });
+    expect(createReadline).not.toHaveBeenCalled();
+  });
+
   it("submits ASCII text", async () => {
     const { result, output, lifecycle } = await readWithFakeInput("hello\r");
 
@@ -347,6 +417,98 @@ describe("raw prompt controller", () => {
 
     expect(result).toEqual({ type: "submit", text: "abXc" });
     expect(lifecycle.calls).toEqual(["start", "stop"]);
+  });
+
+  it("routes Vim insert and normal mode transitions behind the raw keymap option", async () => {
+    expect((await readWithVimChunks(["abc", "\x1b", "0iX\r"])).result).toEqual({
+      type: "submit",
+      text: "Xabc",
+    });
+    expect((await readWithVimChunks(["ab", "\x1b", "0aX\r"])).result).toEqual({
+      type: "submit",
+      text: "aXb",
+    });
+    expect((await readWithVimChunks(["ab", "\x1b", "IX\r"])).result).toEqual({
+      type: "submit",
+      text: "Xab",
+    });
+    expect((await readWithVimChunks(["ab", "\x1b", "AX\r"])).result).toEqual({
+      type: "submit",
+      text: "abX",
+    });
+  });
+
+  it("routes Vim motions and counts through the raw prompt adapter", async () => {
+    expect((await readWithVimChunks(["abc", "\x1b", "hhiX\r"])).result).toEqual({
+      type: "submit",
+      text: "aXbc",
+    });
+    expect((await readWithVimChunks(["abc", "\x1b", "0$iX\r"])).result).toEqual({
+      type: "submit",
+      text: "abcX",
+    });
+    expect((await readWithVimChunks(["  abc", "\x1b", "^iX\r"])).result).toEqual({
+      type: "submit",
+      text: "  Xabc",
+    });
+    expect((await readWithVimChunks(["one two three", "\x1b", "02wiX\r"])).result).toEqual({
+      type: "submit",
+      text: "one two Xthree",
+    });
+    expect((await readWithVimChunks(["one two", "\x1b", "$biX\r"])).result).toEqual({
+      type: "submit",
+      text: "one Xtwo",
+    });
+    expect((await readWithVimChunks(["one two", "\x1b", "0eiX\r"])).result).toEqual({
+      type: "submit",
+      text: "oneX two",
+    });
+  });
+
+  it("routes Vim x, dw, and cw operators through the raw prompt adapter", async () => {
+    expect((await readWithVimChunks(["abcdef", "\x1b", "02x\r"])).result).toEqual({
+      type: "submit",
+      text: "cdef",
+    });
+    expect((await readWithVimChunks(["one two three four", "\x1b", "03dw\r"])).result).toEqual({
+      type: "submit",
+      text: "four",
+    });
+    expect((await readWithVimChunks(["one two three", "\x1b", "02cwX\r"])).result).toEqual({
+      type: "submit",
+      text: "X three",
+    });
+  });
+
+  it("preserves submit and cancel invariants in Vim keymap mode", async () => {
+    expect((await readWithVimInput("insert\r")).result).toEqual({
+      type: "submit",
+      text: "insert",
+    });
+    expect((await readWithVimChunks(["normal", "\x1b", "\r"])).result).toEqual({
+      type: "submit",
+      text: "normal",
+    });
+    expect((await readWithVimChunks(["cancel", "\x1b", "\x03"])).result).toEqual({ type: "cancel" });
+  });
+
+  it("keeps ghost text rendering unaffected by Vim keymap mode", async () => {
+    const ghost = setGhostTextSuggestion(
+      createGhostTextState({ input: "", cursorOffset: 0 }),
+      {
+        suggestionText: "hello",
+        replacementRange: { start: 0, end: 0 },
+      }
+    );
+    const read = await readWithVimInput("\x03", {
+      ghostText: {
+        enabled: true,
+        getState: () => ghost,
+      },
+    });
+
+    expect(read.result).toEqual({ type: "cancel" });
+    expect(read.output.writes.join("")).toContain("> hello");
   });
 
   it("redraws after editing and cursor movement through the render loop", async () => {
@@ -1033,6 +1195,37 @@ describe("raw prompt controller", () => {
     input.send("\r");
 
     expect(await pending).toEqual({ type: "submit", text: "/help" });
+    expect(output.writes.join("")).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
+  it("lets slash autocomplete consume Escape before Vim mode handling", async () => {
+    const provider = providerFor(SLASH_COMMAND_SUGGESTION_PROVIDER_ID, [slashSuggestion]);
+    const typeahead = fakeTypeahead(provider);
+    const input = new FakeInput();
+    const output = fakeOutput();
+    const lifecycle = fakeLifecycle();
+    const states: TypeaheadState[] = [];
+    const controller = new RawPromptController({
+      input,
+      output,
+      lifecycle: lifecycle.lifecycle,
+      keymap: { mode: "vim" },
+      typeahead: {
+        router: typeahead.router,
+        onStateChange: (state) => states.push(state),
+      },
+    });
+    const pending = controller.read("> ");
+
+    input.send("/h");
+    await flushPromises();
+    input.send("\x1b");
+    await flushPromises();
+
+    expect(states.at(-1)?.status).toBe("dismissed");
+    input.send("\r");
+
+    expect(await pending).toEqual({ type: "submit", text: "/h" });
     expect(output.writes.join("")).not.toMatch(forbiddenManagedRegionOutput);
   });
 

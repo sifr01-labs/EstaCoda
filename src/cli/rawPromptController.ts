@@ -22,9 +22,15 @@ import {
 } from "../ui/papyrus/input/typeaheadProviderRouter.js";
 import { RawPromptOverlayHost, RawPromptRenderLoop } from "./rawPromptRenderLoop.js";
 import { resolveGhostTextMode } from "./ghost-text-mode.js";
+import { resolveInputKeymapMode } from "./input-keymap-mode.js";
 import { buildRawPromptSlashAutocompleteRows } from "./rawPromptSlashAutocomplete.js";
 import { createReadlinePrompt, type CreateReadlinePromptOptions, type Prompt, type PromptOptions } from "./readline-prompt.js";
 import { type GhostTextState, isGhostTextVisible } from "../ui/papyrus/input/ghostTextController.js";
+import {
+  applyPapyrusVimKeymap,
+  createPapyrusVimKeymapState,
+  type PapyrusVimKeymapState,
+} from "../ui/papyrus/input/vim/vimKeymap.js";
 
 type RawPromptDataListener = (chunk: string | Buffer | Uint8Array) => void;
 
@@ -61,6 +67,7 @@ export type RawPromptControllerOptions = {
   overlayHost?: RawPromptOverlayHost;
   typeahead?: RawPromptTypeaheadOptions;
   ghostText?: RawPromptGhostTextOptions;
+  keymap?: RawPromptKeymapOptions;
 };
 
 export type RawPromptTypeaheadOptions = {
@@ -71,6 +78,10 @@ export type RawPromptTypeaheadOptions = {
 export type RawPromptGhostTextOptions = {
   readonly enabled: boolean;
   readonly getState?: (state: LineEditorState) => GhostTextState | undefined;
+};
+
+export type RawPromptKeymapOptions = {
+  readonly mode: "vim";
 };
 
 export type CreatePromptForInputModeOptions = Omit<CreateReadlinePromptOptions, "input" | "output"> & {
@@ -89,6 +100,7 @@ export class RawPromptController {
   readonly #overlayHost: RawPromptOverlayHost;
   readonly #typeahead: RawPromptTypeaheadOptions | undefined;
   readonly #ghostText: RawPromptGhostTextOptions | undefined;
+  readonly #keymap: RawPromptKeymapOptions | undefined;
 
   constructor(options: RawPromptControllerOptions) {
     this.#input = options.input;
@@ -96,6 +108,7 @@ export class RawPromptController {
     this.#overlayHost = options.overlayHost ?? new RawPromptOverlayHost();
     this.#typeahead = options.typeahead;
     this.#ghostText = options.ghostText;
+    this.#keymap = options.keymap;
     this.#lifecycle = options.lifecycle ?? createTerminalLifecycle({
       stdin: options.input,
       stdout: options.output,
@@ -105,6 +118,8 @@ export class RawPromptController {
   async read(question: string, options?: PromptOptions): Promise<RawPromptResult> {
     const renderLoop = new RawPromptRenderLoop(this.#output);
     let state = createLineEditorState();
+    let vimKeymapState: PapyrusVimKeymapState | undefined =
+      this.#keymap?.mode === "vim" ? createPapyrusVimKeymapState() : undefined;
     let typeaheadState: TypeaheadState<SlashCommandSuggestionMetadata> = createTypeaheadControllerState();
     const render = () => {
       const overlayRows = this.#overlayHost.getRows();
@@ -272,6 +287,14 @@ export class RawPromptController {
         const text = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
         for (const event of parseKeypress(text)) {
           if (handleTypeaheadKeypress(event)) continue;
+          if (vimKeymapState !== undefined) {
+            const vimResult = applyPapyrusVimKeymap(vimKeymapState, state, event);
+            vimKeymapState = vimResult.state;
+            if (vimResult.handled) {
+              updateState(vimResult.line);
+              continue;
+            }
+          }
           const result = applyKeypress(state, event);
           updateState(result.state);
           if (result.intent?.type === "submit") {
@@ -338,6 +361,7 @@ export function createPromptForInputMode(options: CreatePromptForInputModeOption
     uiContext: promptOptions.uiContext,
     typeahead: createDefaultRawPromptTypeahead(),
     ghostText: resolveGhostTextMode({ env }) === "on" ? { enabled: true } : undefined,
+    keymap: resolveInputKeymapMode({ env }) === "vim" ? { mode: "vim" } : undefined,
   });
 }
 
