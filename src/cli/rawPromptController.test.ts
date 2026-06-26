@@ -371,6 +371,43 @@ describe("raw prompt controller", () => {
     });
   });
 
+  it("redacts secret-like Operator Console paste previews while preserving full attachment content", async () => {
+    const attachmentsSeen: Array<readonly AttachmentCardState[]> = [];
+    const pasted = "OPENAI_API_KEY=super-secret-value\ncontext after secret";
+    const read = startPendingOperatorConsoleRead({
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 16, isTty: true },
+        onAttachmentsChange: (attachments) => {
+          attachmentsSeen.push(attachments);
+        },
+      },
+    });
+
+    read.input.send("summarize");
+    read.input.send(`${PASTE_START}${pasted}${PASTE_END}`);
+    await Promise.resolve();
+
+    const rendered = read.output.writes.join("");
+    expect(rendered).toContain("OPENAI_API_KEY=[REDACTED]");
+    expect(rendered).not.toContain("super-secret-value");
+    expect(attachmentsSeen.at(-1)?.[0]?.content).toBe(pasted);
+
+    read.input.send("\r");
+    const result = await read.pending;
+    expect(result.type).toBe("submit");
+    if (result.type !== "submit") throw new Error("expected submit result");
+    expect(result).toEqual({
+      type: "submit",
+      text: [
+        "summarize",
+        "Attachments:",
+        `- pasted text · ${pasted.length} chars`,
+      ].join("\n"),
+    });
+    expect(result.text).not.toContain("super-secret-value");
+  });
+
   it("allows multiple Operator Console paste attachments and does not dump payloads into the result", async () => {
     const attachmentsSeen: Array<readonly AttachmentCardState[]> = [];
     const read = startPendingOperatorConsoleRead({
@@ -402,6 +439,26 @@ describe("raw prompt controller", () => {
         "- pasted text · 21 chars",
       ].join("\n"),
     });
+  });
+
+  it("does not remove Operator Console attachments when Escape cancels from prompt focus", async () => {
+    const attachmentsSeen: Array<readonly AttachmentCardState[]> = [];
+    const read = startPendingOperatorConsoleRead({
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 16, isTty: true },
+        onAttachmentsChange: (attachments) => {
+          attachmentsSeen.push(attachments);
+        },
+      },
+    });
+
+    read.input.send(`${PASTE_START}full pasted payload${PASTE_END}`);
+    await Promise.resolve();
+    read.input.send("\x1b");
+
+    expect(await read.pending).toEqual({ type: "cancel" });
+    expect(attachmentsSeen.at(-1)?.map((attachment) => attachment.content)).toEqual(["full pasted payload"]);
   });
 
   it("returns cancel for Ctrl-C and Escape", async () => {

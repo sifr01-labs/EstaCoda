@@ -117,6 +117,28 @@ describe("Papyrus operator console attachment surface", () => {
     expect(text).toContain(`${attachment.content.length} chars`);
   });
 
+  it("redacts secret-like values from generated and provided previews while preserving content", () => {
+    const generated = createPastedTextAttachment({
+      id: "paste-secret-generated",
+      content: "OPENAI_API_KEY=super-secret-value\nkeep this context",
+    });
+    const provided = createPastedTextAttachment({
+      id: "paste-secret-provided",
+      content: "full payload still contains super-secret-value",
+      preview: "Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456",
+    });
+    const output = renderAttachmentSurface([generated, provided], { width: 120 }).join("\n");
+
+    expect(generated.content).toContain("super-secret-value");
+    expect(provided.content).toContain("super-secret-value");
+    expect(generated.preview).toContain("OPENAI_API_KEY=[REDACTED]");
+    expect(provided.preview).toContain("Authorization: Bearer [REDACTED]");
+    expect(output).not.toContain("super-secret-value");
+    expect(output).not.toContain("abcdefghijklmnopqrstuvwxyz123456");
+    expect(output).toContain("OPENAI_API_KEY=[REDACTED]");
+    expect(output).toContain("Authorization: Bearer [REDACTED]");
+  });
+
   it("truncates long file paths safely", () => {
     const output = renderAttachmentSurface([
       fileAttachment("file-long", "src/runtime/deeply/nested/provider-turn-loop-with-a-very-long-name.ts", 184),

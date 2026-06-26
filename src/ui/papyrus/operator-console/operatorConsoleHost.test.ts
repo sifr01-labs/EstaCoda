@@ -4,6 +4,7 @@ import { stringWidth } from "../screen/stringWidth.js";
 import {
   buildOperatorConsoleRawPromptFrame,
   buildOperatorConsoleStateFromRawPrompt,
+  createPastedTextAttachment,
 } from "./index.js";
 
 describe("Papyrus operator console raw prompt host", () => {
@@ -113,6 +114,37 @@ describe("Papyrus operator console raw prompt host", () => {
     expect(promptIndex).toBeGreaterThanOrEqual(0);
     expect(overlayIndex).toBeGreaterThan(promptIndex);
     expect(statusIndex).toBeGreaterThan(overlayIndex);
+  });
+
+  it("maps raw prompt attachments into state and renders them above the prompt without status pollution", () => {
+    const attachment = createPastedTextAttachment({
+      id: "paste-1",
+      content: "OPENAI_API_KEY=super-secret-value\ncontext after secret",
+    });
+    const frame = buildOperatorConsoleRawPromptFrame({
+      prompt: "> ",
+      state: createLineEditorState("summarize this"),
+      terminal: { width: 80, height: 16, isTty: true },
+      status: {
+        model: { label: "kimi-k2.7-code", state: "working" },
+        context: { usedTokens: 18400, totalTokens: 262000, percent: 7 },
+        sessionTimer: { elapsedMs: 72_000 },
+      },
+      attachments: [attachment],
+    });
+    const attachmentIndex = frame.rows.findIndex((line) => line === "Attachments");
+    const promptIndex = frame.rows.findIndex((line) => line.includes("Prompt"));
+    const status = frame.rows.at(-1) ?? "";
+    const text = frame.rows.join("\n");
+
+    expect(frame.state.attachments).toEqual([attachment]);
+    expect(frame.state.attachments[0]?.content).toContain("super-secret-value");
+    expect(attachmentIndex).toBeGreaterThanOrEqual(0);
+    expect(attachmentIndex).toBeLessThan(promptIndex);
+    expect(text).toContain("OPENAI_API_KEY=[REDACTED]");
+    expect(text).not.toContain("super-secret-value");
+    expect(status).toContain("kimi-k2.7-code");
+    expect(status).not.toMatch(/\b(attachment|pasted text|OPENAI_API_KEY|secret)\b/iu);
   });
 
   it("is deterministic and emits no ANSI or cursor-control sequences", () => {

@@ -1,4 +1,5 @@
 import type { ParsedKeypress } from "../../input/parseKeypress.js";
+import { redactSensitiveText } from "../../../utils/redaction.js";
 import { stringWidth } from "../screen/stringWidth.js";
 import { setFocus } from "./focusModel.js";
 import type {
@@ -38,7 +39,7 @@ export function createPastedTextAttachment(input: {
     id: input.id,
     kind: "pastedText",
     title: input.title ?? "pasted text",
-    preview: input.preview ?? createAttachmentPreview(input.content),
+    preview: createAttachmentPreview(input.preview ?? input.content),
     content: input.content,
     metadata: {
       chars: input.content.length,
@@ -57,7 +58,7 @@ export function createFileExcerptAttachment(input: {
     id: input.id,
     kind: "fileExcerpt",
     title: input.title ?? "file excerpt",
-    preview: input.preview ?? input.path,
+    preview: createAttachmentPreview(input.preview ?? input.path),
     content: input.content,
     metadata: {
       path: input.path,
@@ -269,7 +270,7 @@ function formatAttachmentMetadata(attachment: AttachmentCardState): string {
 }
 
 function createAttachmentPreview(content: string): string {
-  const collapsed = content.replace(/\s+/gu, " ").trim();
+  const collapsed = redactSensitiveText(content).replace(/\s+/gu, " ").trim();
   return collapsed.length === 0 ? "(empty)" : collapsed;
 }
 

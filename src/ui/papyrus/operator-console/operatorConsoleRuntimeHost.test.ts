@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { stringWidth } from "../screen/stringWidth.js";
+import { createPastedTextAttachment } from "./attachmentSurface.js";
 import {
   createOperatorConsoleRuntimeHost,
   type OperatorConsoleRuntimeHost,
@@ -108,6 +109,28 @@ describe("OperatorConsoleRuntimeHost", () => {
     expect(text).toContain("Attachments");
     expect(text).toContain("Active work");
     expect(text).toContain("Approval required");
+  });
+
+  it("preserves full pasted attachment content while rendering redacted previews outside the status rail", () => {
+    const host = createHost({ width: 80, height: 16 });
+    const pasted = createPastedTextAttachment({
+      id: "paste-secret",
+      content: "Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456\ncontext",
+    });
+
+    host.setAttachments([pasted]);
+    host.setPrompt({ text: "summarize", cursorOffset: 9 });
+
+    const lines = host.render().lines;
+    const text = lines.join("\n");
+    const status = lines.at(-1) ?? "";
+
+    expect(host.getState().attachments[0]?.content).toContain("abcdefghijklmnopqrstuvwxyz123456");
+    expect(host.getState().attachments[0]?.preview).toContain("Authorization: Bearer [REDACTED]");
+    expect(text).toContain("Authorization: Bearer [REDACTED]");
+    expect(text).not.toContain("abcdefghijklmnopqrstuvwxyz123456");
+    expect(status).toContain("session");
+    expect(status).not.toMatch(/\b(Authorization|Bearer|attachment|pasted text)\b/iu);
   });
 
   it("renders queued steer above attachments and prompt while active work stays above queued steer", () => {

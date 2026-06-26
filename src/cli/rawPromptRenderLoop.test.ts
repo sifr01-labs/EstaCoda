@@ -212,6 +212,45 @@ describe("raw prompt render loop", () => {
     expect(host.getState().attachments[0]?.content).toContain("store outside the prompt");
   });
 
+  it("passes multiple Operator Console attachments through the persistent runtime host", () => {
+    const output = fakeOutput();
+    const host = createOperatorConsoleRuntimeHost();
+    const loop = new RawPromptRenderLoop(output, {
+      operatorConsoleHostFactory: () => host,
+    });
+
+    loop.render({
+      prompt: "> ",
+      state: createLineEditorState("summarize"),
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 120, height: 18, isTty: true },
+        status: status({ usedTokens: 18000, elapsedMs: 72000 }),
+        attachments: [
+          createPastedTextAttachment({
+            id: "paste-1",
+            content: "first pasted payload",
+          }),
+          createPastedTextAttachment({
+            id: "paste-2",
+            content: "second pasted payload",
+          }),
+        ],
+      },
+    });
+    const text = output.text();
+
+    expect(host.getState().attachments.map((attachment) => attachment.content)).toEqual([
+      "first pasted payload",
+      "second pasted payload",
+    ]);
+    expect(text.match(/╭─ pasted text/gu)).toHaveLength(2);
+    expect(text.indexOf("╭─ pasted text")).toBeLessThan(text.indexOf("╭─ Prompt"));
+    expect(text).toContain("20 chars");
+    expect(text).toContain("21 chars");
+    expect(text).not.toMatch(/\b(attachment|pasted text)\b.*session/iu);
+  });
+
   it("redraws after edits without full-screen or scrollback clear sequences", () => {
     const output = fakeOutput();
     const loop = new RawPromptRenderLoop(output);
