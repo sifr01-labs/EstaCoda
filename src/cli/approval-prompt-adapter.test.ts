@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { PassThrough } from "node:stream";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { createOperatorConsoleRuntimeHost } from "../ui/papyrus/operator-console/index.js";
 import {
@@ -57,6 +58,28 @@ function adapterInput(answer: string, options: {
   };
 }
 
+function makeTtyInput(): NodeJS.ReadStream & {
+  readonly rawModes: boolean[];
+  press(chunk: string): void;
+} {
+  const input = new PassThrough() as unknown as NodeJS.ReadStream & {
+    rawModes: boolean[];
+    press(chunk: string): void;
+  };
+  input.isTTY = true;
+  input.isRaw = false;
+  input.rawModes = [];
+  input.setRawMode = (mode: boolean) => {
+    input.isRaw = mode;
+    input.rawModes.push(mode);
+    return input;
+  };
+  input.press = (chunk: string) => {
+    input.emit("data", Buffer.from(chunk, "utf8"));
+  };
+  return input;
+}
+
 describe("approval prompt adapter routing", () => {
   it("maps Papyrus approve/reject/cancel selections to existing answer semantics", async () => {
     await expect(papyrusApprovalPromptAdapter(adapterInput("approve-once").input)).resolves.toBe("once");
@@ -106,16 +129,20 @@ describe("approval prompt adapter routing", () => {
     expect(outputChunks.join("")).not.toContain("Always allow");
   });
 
-  it("renders inline Operator Console approval cards when a runtime host is provided", async () => {
+  it("renders inline Operator Console approval cards and accepts focused approve without typed prompt", async () => {
     const { input, outputChunks } = adapterInput("approve once");
+    const ttyInput = makeTtyInput();
     const host = createOperatorConsoleRuntimeHost({
       terminal: { width: 72, height: 14, isTty: true },
     });
 
-    await expect(papyrusApprovalPromptAdapter({
+    const result = papyrusApprovalPromptAdapter({
       ...input,
+      input: ttyInput,
       operatorConsoleHost: host,
-    })).resolves.toBe("once");
+    });
+    ttyInput.press("\r");
+    await expect(result).resolves.toBe("once");
 
     const rendered = outputChunks.join("");
     expect(rendered).toContain("Approval required");
@@ -131,8 +158,10 @@ describe("approval prompt adapter routing", () => {
     expect(rendered).not.toContain("Amend");
     expect(rendered).not.toContain("Ask user");
     expect(rendered).not.toContain("Don't ask again");
-    expect(host.getState().approvals).toHaveLength(1);
+    expect(input.prompt).not.toHaveBeenCalled();
+    expect(host.getState().approvals).toHaveLength(0);
     expect(host.getState().status).not.toHaveProperty("approvals");
+    expect(ttyInput.rawModes).toEqual([true, false]);
   });
 
   it("renders inline Operator Console file diff stats without prompt-region suspension", async () => {
@@ -168,11 +197,15 @@ describe("approval prompt adapter routing", () => {
     const host = createOperatorConsoleRuntimeHost({
       terminal: { width: 88, height: 14, isTty: true },
     });
+    const ttyInput = makeTtyInput();
 
-    await expect(papyrusApprovalPromptAdapter({
+    const result = papyrusApprovalPromptAdapter({
       ...input,
+      input: ttyInput,
       operatorConsoleHost: host,
-    })).resolves.toBe("once");
+    });
+    ttyInput.press("\r");
+    await expect(result).resolves.toBe("once");
 
     const rendered = outputChunks.join("");
     expect(rendered).toContain("Action: workspace.write");
@@ -180,20 +213,74 @@ describe("approval prompt adapter routing", () => {
     expect(rendered).toContain("Risk: workspace-write");
     expect(rendered).toContain("+2 lines  -1 lines");
     expect(input.chrome?.clearInlineSpinner).not.toHaveBeenCalled();
+    expect(input.prompt).not.toHaveBeenCalled();
   });
 
   it("maps Operator Console reject, escape, and inspect intents without adding approval scope semantics", async () => {
-    await expect(papyrusApprovalPromptAdapter({
-      ...adapterInput("reject").input,
+    const rejectInput = makeTtyInput();
+    const reject = papyrusApprovalPromptAdapter({
+      ...adapterInput("").input,
+      input: rejectInput,
       operatorConsoleHost: createOperatorConsoleRuntimeHost(),
-    })).resolves.toBe("deny");
-    await expect(papyrusApprovalPromptAdapter({
-      ...adapterInput("esc").input,
+    });
+    rejectInput.press("\t");
+    rejectInput.press("\r");
+    await expect(reject).resolves.toBe("deny");
+
+    const escapeInput = makeTtyInput();
+    const escape = papyrusApprovalPromptAdapter({
+      ...adapterInput("").input,
+      input: escapeInput,
       operatorConsoleHost: createOperatorConsoleRuntimeHost(),
-    })).resolves.toBe("deny");
-    await expect(papyrusApprovalPromptAdapter({
-      ...adapterInput("inspect").input,
+    });
+    escapeInput.press("\x1b");
+    await expect(escape).resolves.toBe("deny");
+
+    const inspectInput = makeTtyInput();
+    const inspect = papyrusApprovalPromptAdapter({
+      ...adapterInput("").input,
+      input: inspectInput,
       operatorConsoleHost: createOperatorConsoleRuntimeHost(),
-    })).resolves.toBe("inspect");
+    });
+    inspectInput.press("\x1b[C");
+    inspectInput.press("\x1b[C");
+    inspectInput.press("\r");
+    await expect(inspect).resolves.toBe("inspect");
+  });
+
+  it("cycles Operator Console approval focus with tab and arrow keys", async () => {
+    const { input, outputChunks } = adapterInput("");
+    const ttyInput = makeTtyInput();
+    const result = papyrusApprovalPromptAdapter({
+      ...input,
+      input: ttyInput,
+      operatorConsoleHost: createOperatorConsoleRuntimeHost({
+        terminal: { width: 72, height: 14, isTty: true },
+      }),
+    });
+
+    ttyInput.press("\t");
+    ttyInput.press("\x1b[C");
+    ttyInput.press("\x1b[D");
+    ttyInput.press("\r");
+    await expect(result).resolves.toBe("deny");
+
+    const rendered = outputChunks.join("");
+    expect(rendered).toContain("❯ Approve once");
+    expect(rendered).toContain("❯ Reject");
+    expect(rendered).toContain("❯ Inspect");
+    expect(input.prompt).not.toHaveBeenCalled();
+  });
+
+  it("falls back to typed approval prompt when Operator Console has no TTY input", async () => {
+    const { input, outputChunks } = adapterInput("approve once");
+
+    await expect(papyrusApprovalPromptAdapter({
+      ...input,
+      operatorConsoleHost: createOperatorConsoleRuntimeHost(),
+    })).resolves.toBe("once");
+
+    expect(input.prompt).toHaveBeenCalledWith("approval action > ");
+    expect(outputChunks.join("")).toContain("Approval required");
   });
 });

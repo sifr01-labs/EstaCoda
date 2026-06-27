@@ -897,6 +897,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         const approvalResolution = await maybeHandleApprovalGate({
           runtime,
 	          prompt,
+          input: cliInput,
 	          output,
 	          renderer,
 	          approvalPromptAdapter,
@@ -1956,6 +1957,7 @@ async function maybeHandleApprovalGate(input: {
   runtime: Runtime;
   prompt: (question: string) => Promise<string>;
   output: NodeJS.WritableStream;
+  input?: NodeJS.ReadStream;
   renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string };
   approvalPromptAdapter: ApprovalPromptAdapter;
   operatorConsoleHost?: OperatorConsoleRuntimeHost;
@@ -1976,6 +1978,7 @@ async function maybeHandleApprovalGate(input: {
     const answer = normalizeApprovalPromptAnswer(
       await input.approvalPromptAdapter({
         prompt: input.prompt,
+        input: input.input,
         output: input.output,
         renderer: input.renderer,
         execution,

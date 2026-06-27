@@ -367,7 +367,19 @@ async function runApprovalPromptScenario(
         isTTY: false,
         supportsAnimation: false,
       });
-  await runSessionLoop({
+  const input = options.ttyCoreSession ? makeTtyInput() : undefined;
+  const driveApprovalKeypresses = async () => {
+    if (input === undefined || options.operatorConsoleHost === undefined) return;
+    for (const answer of approvalAnswers) {
+      await waitForTtyDataListener(input);
+      for (const chunk of approvalAnswerKeypresses(answer)) {
+        input.press(chunk);
+      }
+      await waitForNoTtyDataListener(input);
+    }
+  };
+  await Promise.all([
+    runSessionLoop({
     runtime,
     output: {
       write(chunk: string | Uint8Array): boolean {
@@ -378,10 +390,14 @@ async function runApprovalPromptScenario(
       columns: 120,
     } as unknown as NodeJS.WritableStream,
     capabilities,
-    input: options.ttyCoreSession ? makeTtyInput() : undefined,
+    input,
     prompt: Object.assign(
       async () => {
-        const values = ["write file", ...approvalAnswers, "/exit"];
+        const values = [
+          "write file",
+          ...(options.operatorConsoleHost === undefined ? approvalAnswers : []),
+          "/exit",
+        ];
         return values[promptIndex++] ?? "/exit";
       },
       { close: () => {} }
@@ -392,7 +408,9 @@ async function runApprovalPromptScenario(
     ...(options.operatorConsoleHost === undefined
       ? {}
       : { operatorConsole: { enabled: true, runtimeHost: options.operatorConsoleHost } }),
-  });
+    }),
+    driveApprovalKeypresses(),
+  ]);
 
   return {
     grants,
@@ -400,6 +418,26 @@ async function runApprovalPromptScenario(
     rendered: outputChunks.join(""),
     adapterCalls,
   };
+}
+
+async function waitForTtyDataListener(input: NodeJS.ReadStream): Promise<void> {
+  while (input.listenerCount("data") === 0) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
+async function waitForNoTtyDataListener(input: NodeJS.ReadStream): Promise<void> {
+  while (input.listenerCount("data") > 0) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
+function approvalAnswerKeypresses(answer: string): readonly string[] {
+  const normalized = answer.trim().toLowerCase().replace(/\s+/gu, " ");
+  if (normalized === "inspect") return ["\x1b[C", "\x1b[C", "\r"];
+  if (normalized === "reject" || normalized === "deny" || normalized === "no") return ["\t", "\r"];
+  if (normalized === "escape" || normalized === "esc" || normalized === "cancel") return ["\x1b"];
+  return ["\r"];
 }
 
 describe("runSessionLoop — user prompt rail behavior", () => {
