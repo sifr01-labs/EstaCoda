@@ -219,8 +219,7 @@ function mapTtySetupSelection<T>(
 ) {
   if (
     selection.surface !== "promptCard" ||
-    selection.columns === undefined ||
-    !selection.options.some((option) => option.cells !== undefined)
+    selection.columns === undefined
   ) {
     return undefined;
   }
@@ -229,10 +228,12 @@ function mapTtySetupSelection<T>(
     body: selection.body,
     hint: selection.hint ?? selection.instruction,
     locale: selection.locale === "ar" ? "ar" : "en",
+    columns: selection.columns,
     options: selection.options.map((option) => ({
       id: option.id,
       label: option.label,
       description: option.description,
+      group: option.group,
       cells: option.cells,
       badges: option.badges,
       current: option.current,

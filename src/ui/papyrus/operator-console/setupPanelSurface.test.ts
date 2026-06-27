@@ -82,6 +82,61 @@ describe("Papyrus operator console setup panel surface", () => {
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 
+  it("renders Arabic two-column setup choices as a stable Papyrus menu", () => {
+    const output = renderSetupPanelSurface({
+      kind: "table",
+      layout: "choiceMenu",
+      title: "محرّر الإعدادات",
+      description: "اختار اللي تحب تضبطه:",
+      locale: "ar",
+      rows: [
+        {
+          id: "primary",
+          provider: "النموذج الأساسي",
+          model: "",
+          status: "النموذج الافتراضي الذي يستخدمه الوكيل.",
+          notes: "",
+        },
+        {
+          id: "fallback",
+          provider: "النماذج الاحتياطية",
+          model: "",
+          status: "نماذج احتياطية تُستخدم إذا فشل النموذج الأساسي.",
+          notes: "",
+        },
+        {
+          id: "search",
+          provider: "البحث",
+          model: "",
+          status: "اضبط كيف تعثر EstaCoda على نتائج الويب وتسترجعها.",
+          notes: "",
+        },
+        {
+          id: "exit",
+          provider: "الخروج دون تغييرات",
+          model: "",
+          status: "غادر الإعداد دون تعديل التكوين.",
+          notes: "",
+          group: "navigation",
+        },
+      ],
+      selectedRowId: "fallback",
+    }, { width: 120 });
+    const text = output.join("\n");
+    const primaryLine = output.find((line) => line.includes("النموذج الافتراضي")) ?? "";
+    const fallbackLine = output.find((line) => line.includes("نماذج احتياطية")) ?? "";
+    const searchLine = output.find((line) => line.includes("EstaCoda")) ?? "";
+
+    expect(text).toContain("محرّر الإعدادات");
+    expect(text).toContain("◂");
+    expect(text).not.toContain("المزود");
+    expect(text).not.toContain("الحالة");
+    expect(visibleColumn(searchLine, "اضبط كيف")).toBe(visibleColumn(primaryLine, "النموذج الافتراضي"));
+    expect(visibleColumn(fallbackLine, "◂")).toBeGreaterThan(visibleTextEndColumn(fallbackLine, "النماذج الاحتياطية"));
+    expect(visibleTextEndColumn(searchLine, "البحث")).toBe(visibleTextEndColumn(primaryLine, "النموذج الأساسي"));
+    expect(output.every((line) => stringWidth(line) <= 120)).toBe(true);
+  });
+
   it("renders required API key panel with masked value and env var only", () => {
     const output = renderSetupPanelSurface(requiredSecretPanel(), { width: 72 });
     const text = output.join("\n");
@@ -139,6 +194,16 @@ describe("Papyrus operator console setup panel surface", () => {
     expect(JSON.stringify(state)).toBe(before);
   });
 });
+
+function visibleColumn(line: string, text: string): number {
+  const index = line.indexOf(text);
+  expect(index).toBeGreaterThanOrEqual(0);
+  return stringWidth(line.slice(0, index));
+}
+
+function visibleTextEndColumn(line: string, text: string): number {
+  return visibleColumn(line, text) + stringWidth(text);
+}
 
 function modelRoutePanel(): SetupPanelState {
   return {

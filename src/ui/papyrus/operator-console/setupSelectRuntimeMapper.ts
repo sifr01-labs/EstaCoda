@@ -5,9 +5,16 @@ export type SetupSelectRuntimeOption = {
   readonly id?: string;
   readonly label: string;
   readonly description?: string;
+  readonly group?: "main" | "navigation";
   readonly cells?: Readonly<Record<string, string>>;
   readonly badges?: readonly string[];
   readonly current?: boolean;
+};
+
+export type SetupSelectRuntimeColumn = {
+  readonly key: string;
+  readonly header: string;
+  readonly align?: "left" | "right";
 };
 
 export type SetupSelectRuntimeMapperInput = {
@@ -15,6 +22,7 @@ export type SetupSelectRuntimeMapperInput = {
   readonly body?: string;
   readonly hint?: string;
   readonly locale?: OperatorConsoleLocale;
+  readonly columns?: readonly SetupSelectRuntimeColumn[];
   readonly options: readonly SetupSelectRuntimeOption[];
   readonly selectedIndex: number;
 };
@@ -26,6 +34,7 @@ export function mapSetupSelectToSetupPanelState(
   const selectedIndex = clampIndex(input.selectedIndex, input.options.length);
   return {
     kind: "table",
+    layout: isChoiceMenu(input.columns) ? "choiceMenu" : "routeTable",
     title: input.title,
     description: firstBodyLine(input.body),
     locale: input.locale,
@@ -43,7 +52,14 @@ function mapOptionToRow(option: SetupSelectRuntimeOption, index: number): SetupP
     model: firstNonEmpty(cells.model, cells.route, cells.value),
     status: firstNonEmpty(cells.status, cells.state, option.description, cells.details),
     notes: firstNonEmpty(cells.notes, cells.description, badgesText(option), option.current === true ? "current" : ""),
+    ...(option.group === undefined ? {} : { group: option.group }),
   };
+}
+
+function isChoiceMenu(columns: readonly SetupSelectRuntimeColumn[] | undefined): boolean {
+  if (columns === undefined || columns.length !== 2) return false;
+  const keys = new Set(columns.map((column) => column.key));
+  return keys.has("name") && (keys.has("description") || keys.has("details"));
 }
 
 function optionId(option: SetupSelectRuntimeOption | undefined, index: number): string {

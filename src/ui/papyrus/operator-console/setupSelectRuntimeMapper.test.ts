@@ -33,6 +33,7 @@ describe("Operator Console setup select runtime mapper", () => {
 
     expect(state).toEqual({
       kind: "table",
+      layout: "routeTable",
       title: "Model route",
       description: "Choose the active provider and model route.",
       locale: undefined,
@@ -41,6 +42,61 @@ describe("Operator Console setup select runtime mapper", () => {
       rows: [
         { id: "openai", provider: "OpenAI", model: "gpt-5.5", status: "ready", notes: "API key set" },
         { id: "local", provider: "Local", model: "qwen3-coder", status: "offline", notes: "endpoint unset" },
+      ],
+    });
+  });
+
+  it("maps two-column setup choices without cells into a choice menu", () => {
+    const state = mapSetupSelectToSetupPanelState({
+      title: "محرّر الإعدادات",
+      body: "اختار اللي تحب تضبطه:\n",
+      locale: "ar",
+      columns: [
+        { key: "description", header: "التفاصيل", align: "left" },
+        { key: "name", header: "الاسم", align: "right" },
+      ],
+      selectedIndex: 1,
+      options: [
+        {
+          id: "primary",
+          label: "النموذج الأساسي",
+          description: "النموذج الافتراضي الذي يستخدمه الوكيل.",
+        },
+        {
+          id: "fallback",
+          label: "النماذج الاحتياطية",
+          description: "نماذج احتياطية تُستخدم إذا فشل النموذج الأساسي.",
+        },
+        {
+          id: "exit",
+          label: "الخروج دون تغييرات",
+          description: "غادر الإعداد دون تعديل التكوين.",
+          group: "navigation",
+        },
+      ],
+    });
+
+    expect(state).toMatchObject({
+      kind: "table",
+      layout: "choiceMenu",
+      selectedRowId: "fallback",
+      rows: [
+        {
+          id: "primary",
+          provider: "النموذج الأساسي",
+          status: "النموذج الافتراضي الذي يستخدمه الوكيل.",
+        },
+        {
+          id: "fallback",
+          provider: "النماذج الاحتياطية",
+          status: "نماذج احتياطية تُستخدم إذا فشل النموذج الأساسي.",
+        },
+        {
+          id: "exit",
+          provider: "الخروج دون تغييرات",
+          status: "غادر الإعداد دون تعديل التكوين.",
+          group: "navigation",
+        },
       ],
     });
   });

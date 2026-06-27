@@ -41,13 +41,67 @@ function renderSetupTablePanel(state: SetupPanelState, width: number): readonly 
     renderContentRow(description, contentWidth, width),
     renderContentRow("", contentWidth, width),
     ...(width >= WIDE_TABLE_MIN_WIDTH
-      ? renderWideTableRows(state, copy, contentWidth, width)
+      ? state.layout === "choiceMenu"
+        ? renderChoiceMenuRows(state, contentWidth, width)
+        : renderWideTableRows(state, copy, contentWidth, width)
       : renderNarrowTableRows(state, contentWidth, width)),
     renderContentRow("", contentWidth, width),
     renderContentRow(footer, contentWidth, width),
     renderBottomBorder(width),
   ];
   return rows;
+}
+
+function renderChoiceMenuRows(
+  state: SetupPanelState,
+  contentWidth: number,
+  width: number
+): readonly string[] {
+  const markerWidth = 2;
+  const gap = 2;
+  const labelNaturalWidth = Math.max(
+    10,
+    ...state.rows.map((row) => stringWidth(row.provider))
+  );
+  const labelWidth = Math.min(Math.max(12, labelNaturalWidth), Math.max(12, Math.floor(contentWidth * 0.34)));
+  const detailWidth = Math.max(1, contentWidth - labelWidth - markerWidth - gap * 2);
+  const selectedMarker = state.locale === "ar" ? "◂" : "❯";
+  const rows: string[] = [];
+  let renderedNavigationSeparator = false;
+
+  for (const row of state.rows) {
+    if (row.group === "navigation" && !renderedNavigationSeparator && rows.length > 0) {
+      rows.push(renderContentRow("", contentWidth, width));
+      renderedNavigationSeparator = true;
+    }
+
+    const marker = row.id === state.selectedRowId ? selectedMarker : "";
+    const detail = choiceMenuDetail(row);
+    const line = state.locale === "ar"
+      ? [
+        padVisibleEnd(detail, detailWidth),
+        " ".repeat(gap),
+        padVisibleStart(row.provider, labelWidth),
+        " ".repeat(gap),
+        padVisibleEnd(marker, markerWidth),
+      ].join("")
+      : [
+        padVisibleEnd(marker, markerWidth),
+        " ".repeat(gap),
+        padVisibleEnd(row.provider, labelWidth),
+        " ".repeat(gap),
+        padVisibleEnd(detail, detailWidth),
+      ].join("");
+    rows.push(renderContentRow(line, contentWidth, width));
+  }
+
+  return rows;
+}
+
+function choiceMenuDetail(row: SetupPanelState["rows"][number]): string {
+  if (row.notes.length === 0 || row.notes === row.status) return row.status;
+  if (row.status.length === 0) return row.notes;
+  return `${row.status} · ${row.notes}`;
 }
 
 function renderWideTableRows(
@@ -183,6 +237,12 @@ function padVisibleEnd(value: string, width: number): string {
   const truncated = truncateVisibleCells(value, width);
   const padCells = Math.max(0, width - stringWidth(truncated));
   return `${truncated}${" ".repeat(padCells)}`;
+}
+
+function padVisibleStart(value: string, width: number): string {
+  const truncated = truncateVisibleCells(value, width);
+  const padCells = Math.max(0, width - stringWidth(truncated));
+  return `${" ".repeat(padCells)}${truncated}`;
 }
 
 function truncateVisibleCells(value: string, maxCells: number): string {

@@ -241,6 +241,28 @@ describe("interactive-select prompt card surface", () => {
     expect(latestFrame).toContain("Esc");
   });
 
+  it("routes two-column setup choices without cells through the Papyrus setup menu", async () => {
+    clearCiEnv();
+    process.env.LANG = "ar_EG.UTF-8";
+    const { input, output } = makeTtyStreams(120);
+    const pending = selectOption(input, output, arabicSetupChoiceMenuSelection());
+
+    await Promise.resolve();
+    press(input, "\x1b[B");
+    press(input, "\r");
+
+    await expect(pending).resolves.toBe("fallback");
+    const latestFrame = stripAnsi(latestRenderedFrame(output.getText()));
+    expect(latestFrame).toContain("╭─ محرّر الإعدادات");
+    expect(latestFrame).toContain("اختار اللي تحب تضبطه:");
+    expect(latestFrame).toContain("النموذج الافتراضي الذي يستخدمه الوكيل.");
+    expect(latestFrame).toContain("النموذج الأساسي");
+    expect(latestFrame).toContain("◂");
+    expect(latestFrame).not.toContain("𓂀");
+    expect(latestFrame).not.toContain("المزود");
+    expect(latestFrame.split("\n").every((line) => measureVisibleWidth(line) <= 120)).toBe(true);
+  });
+
   it("keeps Back and Cancel setup semantics on the Papyrus setup panel path", async () => {
     clearCiEnv();
     const { input, output } = makeTtyStreams(96);
@@ -623,6 +645,45 @@ function arabicSetupPanelSelection(): SelectPromptInput<string> {
         cells: { provider: "Local", model: "qwen3-coder", status: "غير متصل", notes: "URL غير مضبوط" },
       },
     ],
+  };
+}
+
+function arabicSetupChoiceMenuSelection(): SelectPromptInput<string> {
+  return {
+    surface: "promptCard",
+    locale: "ar",
+    direction: "rtl",
+    title: "محرّر الإعدادات",
+    body: "اختار اللي تحب تضبطه:",
+    defaultIndex: 0,
+    columns: [
+      { key: "description", header: "التفاصيل", align: "left" },
+      { key: "name", header: "الاسم", align: "right" },
+    ],
+    tableDirection: "rtl",
+    showColumnHeaders: false,
+    options: [
+      {
+        id: "primary",
+        value: "primary",
+        label: "النموذج الأساسي",
+        description: "النموذج الافتراضي الذي يستخدمه الوكيل.",
+      },
+      {
+        id: "fallback",
+        value: "fallback",
+        label: "النماذج الاحتياطية",
+        description: "نماذج احتياطية تُستخدم إذا فشل النموذج الأساسي.",
+      },
+      {
+        id: "exit",
+        value: "exit",
+        label: "الخروج دون تغييرات",
+        description: "غادر الإعداد دون تعديل التكوين.",
+        group: "navigation",
+      },
+    ],
+    fallbackPrompt: "اختر: ",
   };
 }
 

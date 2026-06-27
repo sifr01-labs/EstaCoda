@@ -176,6 +176,7 @@ export type SetupSurfaceState = SetupPanelState | SecretEntryPanelState;
 
 export type SetupPanelState = {
   readonly kind: "table";
+  readonly layout?: "routeTable" | "choiceMenu";
   readonly title: string;
   readonly description?: string;
   readonly locale?: OperatorConsoleLocale;
@@ -190,6 +191,7 @@ export type SetupTableRow = {
   readonly model: string;
   readonly status: string;
   readonly notes: string;
+  readonly group?: "main" | "navigation";
 };
 
 export type SecretEntryPanelState = {
