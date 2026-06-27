@@ -128,6 +128,12 @@ export class RawPromptController {
     let vimKeymapState: PapyrusVimKeymapState | undefined =
       this.#keymap?.mode === "vim" ? createPapyrusVimKeymapState() : undefined;
     let typeaheadState: TypeaheadState<SlashCommandSuggestionMetadata> = createTypeaheadControllerState();
+    let statusTicker: ReturnType<typeof setInterval> | undefined;
+    const stopStatusTicker = () => {
+      if (statusTicker === undefined) return;
+      clearInterval(statusTicker);
+      statusTicker = undefined;
+    };
     const render = () => {
       const slashMenu = this.#operatorConsole?.enabled === true
         ? typeaheadStateToSlashMenu(typeaheadState)
@@ -160,9 +166,13 @@ export class RawPromptController {
     try {
       this.#lifecycle.start();
     } catch (error) {
+      stopStatusTicker();
       renderLoop.clear();
       this.#lifecycle.stop();
       throw error;
+    }
+    if (this.#operatorConsole?.enabled === true && this.#operatorConsole.getStatus !== undefined) {
+      statusTicker = setInterval(render, 1000);
     }
 
     return await new Promise<RawPromptResult>((resolve, reject) => {
@@ -278,6 +288,7 @@ export class RawPromptController {
       };
 
       const cleanup = () => {
+        stopStatusTicker();
         detachDataListener(this.#input, onData);
         dismissCurrentTypeahead();
         this.#overlayHost.clear();

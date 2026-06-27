@@ -38,6 +38,7 @@ export type CreatePapyrusPromptOptions = {
   readonly createRaw?: (options: RawPromptControllerOptions & { uiContext?: PromptUiContext }) => Prompt;
   readonly createSecretPrompt?: (options: CreatePapyrusSecretPromptOptions) => Prompt;
   readonly useOperatorConsole?: boolean;
+  readonly operatorConsole?: RawPromptControllerOptions["operatorConsole"];
 };
 
 export function createPapyrusPrompt(options: CreatePapyrusPromptOptions = {}): Prompt {
@@ -51,7 +52,7 @@ export function createPapyrusPrompt(options: CreatePapyrusPromptOptions = {}): P
     typeahead: createDefaultRawPromptTypeahead(),
     ghostText: resolveGhostTextMode({ env: options.env }) === "on" ? { enabled: true } : undefined,
     keymap: resolveInputKeymapMode({ env: options.env }) === "vim" ? { mode: "vim" } : undefined,
-    operatorConsole: options.useOperatorConsole === true ? { enabled: true } : undefined,
+    operatorConsole: options.operatorConsole ?? (options.useOperatorConsole === true ? { enabled: true } : undefined),
   });
   const secretPrompt = (options.createSecretPrompt ?? createPapyrusSecretPrompt)({
     input: input as Readable,

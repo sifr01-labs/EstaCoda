@@ -3,6 +3,7 @@ import type { Readable, Writable } from "node:stream";
 import type { PromptUiContext } from "../contracts/ui.js";
 import type { Prompt } from "./prompt-contract.js";
 import { createPapyrusPrompt, type CreatePapyrusPromptOptions } from "./papyrus-prompt.js";
+import type { RawPromptControllerOptions } from "./rawPromptController.js";
 
 export type CreateInteractivePromptOptions = {
   readonly input?: Readable;
@@ -10,6 +11,7 @@ export type CreateInteractivePromptOptions = {
   readonly env?: Record<string, string | undefined>;
   readonly uiContext?: PromptUiContext;
   readonly useOperatorConsole?: boolean;
+  readonly operatorConsole?: RawPromptControllerOptions["operatorConsole"];
   readonly createPapyrus?: (options: CreatePapyrusPromptOptions) => Prompt;
 };
 
@@ -21,6 +23,7 @@ export function createInteractivePrompt(options: CreateInteractivePromptOptions 
     output,
     env: options.env,
     uiContext: options.uiContext,
+    ...(options.operatorConsole === undefined ? {} : { operatorConsole: options.operatorConsole }),
     ...(options.useOperatorConsole === true ? { useOperatorConsole: true } : {}),
   });
 }

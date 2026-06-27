@@ -220,6 +220,36 @@ describe("raw prompt controller", () => {
     expect(lifecycle.calls).toEqual(["start", "stop"]);
   });
 
+  it("refreshes Operator Console status from the live supplier while idle", async () => {
+    vi.useFakeTimers();
+    try {
+      let elapsedMs = 0;
+      const { input, output, pending } = startPendingOperatorConsoleRead({
+        operatorConsole: {
+          enabled: true,
+          terminal: { width: 72, height: 16, isTty: true },
+          getStatus: () => ({
+            model: { label: "live-model", state: "idle" },
+            context: { usedTokens: 42, totalTokens: 100, percent: 42 },
+            sessionTimer: { elapsedMs },
+          }),
+        },
+      });
+
+      elapsedMs = 61_000;
+      vi.advanceTimersByTime(1000);
+      input.send("\r");
+
+      await expect(pending).resolves.toEqual({ type: "submit", text: "" });
+      const rendered = output.writes.join("");
+      expect(rendered).toContain("live-model");
+      expect(rendered).toContain("42%");
+      expect(rendered).toContain("01:01");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("captures input that becomes readable immediately on resume", async () => {
     const input = new BufferedResumeInput("buffered\r");
     const output = fakeOutput();

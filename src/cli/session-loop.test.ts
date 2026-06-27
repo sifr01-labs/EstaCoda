@@ -2628,7 +2628,7 @@ describe("runSessionLoop — active turn spinner", () => {
     const rendered = stripAnsi(outputChunks.join(""));
     expect(rendered).toContain("Steer current turn");
     expect(rendered).toContain("focus only on approval cards");
-    expect(rendered).not.toContain("╭─ Prompt");
+    expect(host.getState().prompt.mode).toBe("steer");
 
     releaseTurn?.();
     await loop;
@@ -4807,6 +4807,79 @@ describe("runSessionLoop — active turn spinner", () => {
     const statusRailLine = result.rendered.split("\n").find((line) => line.includes("mock-model"));
     expect(statusRailLine).toBeDefined();
     expect(statusRailLine).not.toMatch(/\b(approval|tool|workspace|trust|setup|steer|channel)\b/iu);
+  });
+
+  it("keeps the Operator Console prompt and status rail visible during plain provider turns", async () => {
+    const outputChunks: string[] = [];
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 96, height: 16, isTty: true },
+    });
+    const setStatusSpy = vi.spyOn(host, "setStatus");
+    const runtime = {
+      ...createEventEmittingMockRuntime([
+        { kind: "agent-start", sessionId: "test-session", input: "hello" },
+        { kind: "context-usage", filled: 1024, total: 64_000, source: "provider-actual" },
+        { kind: "provider-token", provider: "mock", model: "mock-model", text: "raw streamed token should stay hidden" },
+        { kind: "agent-final", text: "Final framed response" },
+      ]),
+      handle: async ({ onEvent }: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
+        onEvent?.({ kind: "agent-start", sessionId: "test-session", input: "hello" });
+        onEvent?.({ kind: "context-usage", filled: 1024, total: 64_000, source: "provider-actual" });
+        onEvent?.({ kind: "provider-token", provider: "mock", model: "mock-model", text: "raw streamed token should stay hidden" });
+        onEvent?.({ kind: "agent-final", text: "Final framed response" });
+        return {
+          ...mockResponse(),
+          text: "Final framed response",
+        };
+      },
+      getModelInfo: () => ({
+        kind: "kv" as const,
+        title: "Model",
+        entries: [
+          { key: "provider", value: "mock" },
+          { key: "model", value: "mock-model" },
+          { key: "context window", value: "64000" },
+        ],
+      }),
+    } as Runtime;
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 96,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 96, supportsAnimation: false }),
+      operatorConsole: { enabled: true, runtimeHost: host },
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("Prompt");
+    expect(rendered).toContain("Final framed response");
+    expect(rendered).not.toContain("raw streamed token should stay hidden");
+    expect(setStatusSpy).toHaveBeenCalledWith(expect.objectContaining({
+      context: expect.objectContaining({
+        usedTokens: 1024,
+        totalTokens: 64_000,
+        percent: 2,
+      }),
+      model: expect.objectContaining({
+        label: "mock-model",
+      }),
+    }));
   });
 
   it("keeps Operator Console inspect intent on the existing no-grant invalid-answer path", async () => {

@@ -35,37 +35,29 @@ import {
   buildSetupNeededViewModel,
 } from "./tool-activity-view-models.js";
 import { papyrusApprovalPromptAdapter, type ApprovalPromptAdapter } from "./approval-prompt-adapter.js";
-import { RawPromptRenderLoop } from "./rawPromptRenderLoop.js";
 import {
   buildActiveTurnSpinnerViewModel,
   buildAssistantResponseViewModel,
   buildKeyValueBlockViewModel,
   buildStartupDashboardViewModel,
-  buildSessionStatusRailViewModel,
   buildUserPromptRailViewModel,
   buildToolActivityRailViewModel,
 } from "../ui/view-models/builders.js";
 import { createSessionRenderer, type SessionRenderer } from "./session-renderer.js";
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
-import type { SessionStatusRailViewModel, StartupDashboardViewModel, StatusViewModel, ToolActivityRailEvent, ViewModel } from "../contracts/view-model.js";
+import type { StartupDashboardViewModel, StatusViewModel, ToolActivityRailEvent, ViewModel } from "../contracts/view-model.js";
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import {
-  applyActiveWorkRuntimeEvent,
-  createActiveWorkRuntimeState,
   createSubmittedSteerTranscriptBlock,
   createOperatorConsoleRuntimeHost,
-  formatActiveWorkSummary,
   mapStartupDashboardViewModelToOperatorConsoleState,
   renderOperatorConsoleLines,
   routeSteerKey,
   type ActiveWorkRuntimeEvent,
   type OperatorConsoleRuntimeHost,
   type QueuedSteerState,
-  type StatusRailState,
   type SteerState,
-  type ToolActivityState,
 } from "../ui/papyrus/operator-console/index.js";
-import { createLineEditorState } from "../ui/input/lineEditor.js";
 import { parseKeypress, type ParsedKeypress } from "../ui/input/parseKeypress.js";
 import { centerVisibleBlock, measureVisibleWidth, truncateVisible } from "../ui/renderers/layout.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
@@ -90,6 +82,19 @@ import {
 import { createFilePasteReferenceStore } from "./paste-interceptor.js";
 import { beginExplicitWorkflowRun, beginSkillPlaybookWorkflowRun } from "../workflow/workflow-begin.js";
 import { summarizeProviderExecution } from "../runtime/provider-execution-summary.js";
+import { LiveOperatorConsoleController } from "./live-operator-console-controller.js";
+import {
+  configuredModelForRuntime,
+  elapsedSeconds,
+  modelContextWindow,
+  operatorConsoleStatusRailState,
+  providerServingStateFromSummary,
+  providerServingTransitionAlert,
+  sessionStatusRailViewModel,
+  type ContextUsageSnapshot,
+  type ProviderRouteServingState,
+  type StatusRailTiming,
+} from "./session-status-rail.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -122,32 +127,8 @@ export type SessionLoopOptions = {
 
 const OPERATOR_CONSOLE_ACTIVE_WORK_TERMINAL_HEIGHT = 16;
 
-type ContextUsageSnapshot = NonNullable<SessionStatusRailViewModel["contextUsage"]>;
 type ContextUsageSource = Extract<RuntimeEvent, { kind: "context-usage" }>["source"];
-type RuntimeModelInfo = ReturnType<NonNullable<Runtime["getModelInfo"]>>;
 type StatusRailTimerMode = "idle" | "active-turn" | "last-turn";
-type ProviderServingStatus = "primary" | "fallback" | "failed";
-
-type ProviderRouteServingState = {
-  readonly status: ProviderServingStatus;
-  readonly primary?: {
-    readonly provider: string;
-    readonly model: string;
-  };
-  readonly actual?: {
-    readonly provider: string;
-    readonly model: string;
-  };
-  readonly reason?: string;
-};
-
-type StatusRailTiming = {
-  readonly now: () => number;
-  readonly sessionStartedAtMs: number;
-  readonly mode: StatusRailTimerMode;
-  readonly activeTurnStartedAtMs?: number;
-  readonly lastCompletedTurnSeconds?: number;
-};
 
 type SubmittedCliInput = {
   text: string;
@@ -298,12 +279,47 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       },
     })
     : undefined;
+  let latestContextUsage: ContextUsageSnapshot | undefined;
+  let activeTurnContextUsageSource: ContextUsageSource | undefined;
+  let timerMode: StatusRailTimerMode = "idle";
+  let activeTurnStartedAtMs: number | undefined;
+  let lastCompletedTurnSeconds: number | undefined;
+  let pendingCompactionPostTokens: number | undefined;
+  let lastProviderExecutionSummary: ProviderExecutionSummary | undefined;
+  let providerServingState: ProviderRouteServingState | undefined;
+  const railTiming = (): StatusRailTiming => ({
+    now,
+    sessionStartedAtMs,
+    mode: timerMode,
+    activeTurnStartedAtMs,
+    lastCompletedTurnSeconds
+  });
+  const getOperatorConsoleStatus = () => operatorConsoleStatusRailState({
+    runtime,
+    renderer,
+    contextUsage: latestContextUsage,
+    timing: railTiming(),
+    providerExecutionSummary: lastProviderExecutionSummary
+  });
   const prompt = options.prompt ?? createInteractivePrompt({
     input: cliInput,
     output: output as NodeJS.WriteStream,
     env: options.env,
     uiContext: promptUiContextForLocale(renderer.locale),
     useOperatorConsole: operatorConsoleEnabled,
+    ...(operatorConsoleRuntimeHost === undefined
+      ? {}
+      : {
+        operatorConsole: {
+          enabled: true,
+          terminal: {
+            width: renderer.capabilities.terminalWidth,
+            height: OPERATOR_CONSOLE_ACTIVE_WORK_TERMINAL_HEIGHT,
+            isTty: renderer.capabilities.isTTY,
+          },
+          getStatus: getOperatorConsoleStatus,
+        },
+      }),
   });
   const close = options.close ?? (() => prompt.close?.());
   const onSigint = () => {
@@ -322,27 +338,12 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   process.once("SIGINT", onSigint);
 
   try {
-    let latestContextUsage: ContextUsageSnapshot | undefined;
-    let activeTurnContextUsageSource: ContextUsageSource | undefined;
-    let timerMode: StatusRailTimerMode = "idle";
-    let activeTurnStartedAtMs: number | undefined;
-    let lastCompletedTurnSeconds: number | undefined;
-    let pendingCompactionPostTokens: number | undefined;
-    let lastProviderExecutionSummary: ProviderExecutionSummary | undefined;
-    let providerServingState: ProviderRouteServingState | undefined;
     const resetTurnRailState = () => {
       timerMode = "idle";
       activeTurnStartedAtMs = undefined;
       lastCompletedTurnSeconds = undefined;
       pendingCompactionPostTokens = undefined;
     };
-    const railTiming = (): StatusRailTiming => ({
-      now,
-      sessionStartedAtMs,
-      mode: timerMode,
-      activeTurnStartedAtMs,
-      lastCompletedTurnSeconds
-    });
     const applyCompactionRailReset = (postTokens?: number) => {
       resetTurnRailState();
       activeTurnContextUsageSource = undefined;
@@ -500,69 +501,34 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         timerMode = "active-turn";
         const streamState = { lastWriteEndedWithNewline: true };
         const turnOutput = { spinnerPhase: undefined as string | undefined, hasOutput: false, lastOutputWasSpinner: false };
-        let operatorConsoleActiveWorkState = createActiveWorkRuntimeState();
         let operatorConsoleSteerState: SteerState | undefined;
         let operatorConsoleSteerSequence = 0;
         let disposeOperatorConsoleSteerInput: (() => void) | undefined;
-        const operatorConsoleActiveTurnRenderLoop = operatorConsoleRuntimeHost === undefined
+        const operatorConsoleLiveFrame = operatorConsoleRuntimeHost === undefined
           ? undefined
-          : new RawPromptRenderLoop(output, {
-            operatorConsoleHostFactory: () => operatorConsoleRuntimeHost,
+          : new LiveOperatorConsoleController({
+            output,
+            runtimeHost: operatorConsoleRuntimeHost,
+            terminal: {
+              width: termWidth,
+              height: OPERATOR_CONSOLE_ACTIVE_WORK_TERMINAL_HEIGHT,
+              isTty: renderer.capabilities.isTTY,
+            },
+            getStatus: getOperatorConsoleStatus,
           });
         let turnWasCancelled = false;
 
-        function operatorConsoleSteerVisible(state: SteerState | undefined): boolean {
-          return state?.mode === "drafting" || state?.mode === "queued";
-        }
-
-        function renderOperatorConsoleLiveFrame(state: ToolActivityState): void {
-          const steerVisible = operatorConsoleSteerVisible(operatorConsoleSteerState);
-          if (
-            operatorConsoleRuntimeHost === undefined ||
-            operatorConsoleActiveTurnRenderLoop === undefined ||
-            (state.items.length === 0 && !steerVisible)
-          ) {
-            clearOperatorConsoleLiveFrame();
-            return;
-          }
-          operatorConsoleActiveTurnRenderLoop.render({
-            prompt: "",
-            state: createLineEditorState(operatorConsoleSteerState?.mode === "drafting" ? operatorConsoleSteerState.draft : ""),
-            operatorConsole: {
-              enabled: true,
-              terminal: {
-                width: termWidth,
-                height: OPERATOR_CONSOLE_ACTIVE_WORK_TERMINAL_HEIGHT,
-                isTty: renderer.capabilities.isTTY,
-              },
-              status: operatorConsoleStatusRailState({
-                runtime,
-                renderer,
-                contextUsage: latestContextUsage,
-                timing: railTiming(),
-                providerExecutionSummary: lastProviderExecutionSummary
-              }),
-              activeWork: state,
-              steer: operatorConsoleSteerState,
-              promptMode: steerVisible ? "steer" : "prompt",
-            },
-          });
-        }
-
         function clearOperatorConsoleLiveFrame(): void {
-          operatorConsoleActiveTurnRenderLoop?.clear();
+          operatorConsoleLiveFrame?.clear();
         }
 
         function refreshOperatorConsoleTransientSurface(): void {
-          renderOperatorConsoleLiveFrame(operatorConsoleActiveWorkState);
+          operatorConsoleLiveFrame?.refresh();
         }
 
         function setOperatorConsoleSteerState(state: SteerState | undefined): void {
           operatorConsoleSteerState = state;
-          if (state === undefined) {
-            operatorConsoleRuntimeHost?.setSteer(undefined);
-          }
-          refreshOperatorConsoleTransientSurface();
+          operatorConsoleLiveFrame?.setSteer(state);
         }
 
         function activeWorkEventFromToolRail(
@@ -584,15 +550,18 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 
         function writeTurnBoundaryRows(rows: readonly string[], options: { readonly redrawLiveFrame?: boolean } = {}): void {
           if (rows.length === 0) return;
-          clearOperatorConsoleLiveFrame();
-          if (!streamState.lastWriteEndedWithNewline) {
-            output.write("\n");
+          const writeRows = () => {
+            if (!streamState.lastWriteEndedWithNewline) {
+              output.write("\n");
+            }
+            output.write(`${rows.join("\n")}\n`);
+            streamState.lastWriteEndedWithNewline = true;
+          };
+          if (operatorConsoleLiveFrame === undefined) {
+            writeRows();
+            return;
           }
-          output.write(`${rows.join("\n")}\n`);
-          streamState.lastWriteEndedWithNewline = true;
-          if (options.redrawLiveFrame === true) {
-            refreshOperatorConsoleTransientSurface();
-          }
+          operatorConsoleLiveFrame.withDurableWrite(writeRows, { redraw: options.redrawLiveFrame === true });
         }
 
         function isToolActivityRuntimeEvent(
@@ -731,7 +700,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           if (turnOutput.spinnerPhase === phase) {
             return;
           }
-          if (operatorConsoleActiveTurnRenderLoop !== undefined) {
+          if (operatorConsoleLiveFrame !== undefined) {
             turnOutput.spinnerPhase = phase;
             refreshOperatorConsoleTransientSurface();
             return;
@@ -788,18 +757,19 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	                turnWasCancelled = true;
 	              }
 	              let newPhase: string | undefined;
-	              if (operatorConsoleRuntimeHost !== undefined && isToolActivityRuntimeEvent(event)) {
+	              if (operatorConsoleLiveFrame !== undefined && isToolActivityRuntimeEvent(event)) {
 	                const railEvent = activityBuilder.buildToolActivityRailEvent(event);
-	                operatorConsoleActiveWorkState = applyActiveWorkRuntimeEvent(
-	                  operatorConsoleActiveWorkState,
-	                  activeWorkEventFromToolRail(railEvent, event)
-	                );
-	                refreshOperatorConsoleTransientSurface();
+	                operatorConsoleLiveFrame.applyActiveWorkEvent(activeWorkEventFromToolRail(railEvent, event));
 	                newPhase = "tool";
-	              } else {
-                  if (operatorConsoleActiveTurnRenderLoop !== undefined) {
+	              } else if (operatorConsoleLiveFrame !== undefined) {
+                  const operatorConsolePhase = operatorConsoleTransientPhaseForRuntimeEvent(event);
+                  if (operatorConsolePhase === null) {
                     clearOperatorConsoleLiveFrame();
+                    newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, undefined, turnOutput);
+                  } else {
+                    newPhase = operatorConsolePhase;
                   }
+	              } else {
 	                newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, undefined, turnOutput);
 	              }
               if (newPhase !== undefined) {
@@ -813,15 +783,15 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	            disposeOperatorConsoleSteerInput?.();
 	            disposeOperatorConsoleSteerInput = undefined;
 	            operatorConsoleSteerState = undefined;
-	            operatorConsoleRuntimeHost?.setSteer(undefined);
+	            operatorConsoleLiveFrame?.setSteer(undefined);
 	            clearSpinner();
 	            clearActiveTurnChrome = () => undefined;
 	          });
         const response = await responsePromise;
-        if (operatorConsoleRuntimeHost !== undefined && operatorConsoleActiveWorkState.items.length > 0) {
-          writeTurnBoundaryRows([formatActiveWorkSummary(operatorConsoleActiveWorkState)]);
-          operatorConsoleActiveWorkState = createActiveWorkRuntimeState();
-          operatorConsoleRuntimeHost.setActiveWork(operatorConsoleActiveWorkState);
+        const activeWorkSummary = operatorConsoleLiveFrame?.activeWorkSummary();
+        if (activeWorkSummary !== undefined) {
+          writeTurnBoundaryRows([activeWorkSummary]);
+          operatorConsoleLiveFrame?.resetActiveWork();
         }
         lastProviderExecutionSummary = response.providerExecution === undefined
           ? undefined
@@ -2501,6 +2471,28 @@ export function renderRuntimeEvent(
   }
 }
 
+function operatorConsoleTransientPhaseForRuntimeEvent(event: RuntimeEvent): string | undefined | null {
+  switch (event.kind) {
+    case "agent-start":
+      return "thinking";
+    case "intent":
+      return "routing";
+    case "provider-attempt":
+    case "provider-token":
+      return "provider";
+    case "provider-tool-call":
+      return "tool";
+    case "provider-result":
+      return event.ok || !event.willFallback ? "finalizing" : "provider";
+    case "context-usage":
+    case "session-compacted":
+    case "agent-final":
+      return undefined;
+    default:
+      return null;
+  }
+}
+
 function truncateSingleLine(value: string, maxLength: number): string {
   const singleLine = value.replace(/\s+/gu, " ").trim();
   if (singleLine.length <= maxLength) {
@@ -2521,71 +2513,6 @@ function contextUsagePriority(source: ContextUsageSource): number {
   }
 }
 
-function operatorConsoleStatusRailState(input: {
-  runtime: Runtime;
-  renderer: SessionRenderer;
-  contextUsage?: ContextUsageSnapshot;
-  timing?: StatusRailTiming;
-  providerExecutionSummary?: ProviderExecutionSummary;
-}): StatusRailState {
-  const { runtime, timing, providerExecutionSummary } = input;
-  const modelInfo = typeof runtime.getModelInfo === "function" ? runtime.getModelInfo() : undefined;
-  const configuredModel = configuredModelFromInfo(modelInfo);
-  const providerRail = providerExecutionRailState(configuredModel, providerExecutionSummary);
-  const contextWindow = modelContextWindow(runtime, modelInfo);
-  const sessionElapsedMs = timing === undefined
-    ? undefined
-    : Math.max(0, timing.now() - timing.sessionStartedAtMs);
-  const contextUsage = input.contextUsage ?? (contextWindow !== undefined
-    ? { filled: 0, total: contextWindow }
-    : undefined);
-
-  return {
-    model: {
-      label: providerRail.servingModelLabel ?? providerRail.modelLabel,
-      state: providerRail.modelState === "failed" ? "degraded" : timing?.mode === "active-turn" ? "working" : "idle",
-    },
-    context: {
-      usedTokens: contextUsage?.filled ?? 0,
-      ...(contextUsage?.total === undefined ? {} : { totalTokens: contextUsage.total }),
-      ...(contextUsage === undefined ? {} : { percent: contextUsage.total > 0 ? Math.round((contextUsage.filled / contextUsage.total) * 100) : 0 }),
-    },
-    sessionTimer: {
-      elapsedMs: sessionElapsedMs ?? 0,
-      startedAtMs: timing?.sessionStartedAtMs,
-    },
-  };
-}
-
-function sessionStatusRailViewModel(input: {
-  runtime: Runtime;
-  renderer: SessionRenderer;
-  contextUsage?: ContextUsageSnapshot;
-  timing?: StatusRailTiming;
-  providerExecutionSummary?: ProviderExecutionSummary;
-}): SessionStatusRailViewModel {
-  const modelInfo = typeof input.runtime.getModelInfo === "function" ? input.runtime.getModelInfo() : undefined;
-  const configuredModel = configuredModelFromInfo(modelInfo);
-  const providerRail = providerExecutionRailState(configuredModel, input.providerExecutionSummary);
-  const contextWindow = modelContextWindow(input.runtime, modelInfo);
-  const sessionElapsedMs = input.timing === undefined
-    ? undefined
-    : Math.max(0, input.timing.now() - input.timing.sessionStartedAtMs);
-  const currentTurnSeconds = currentTurnSecondsForTiming(input.timing);
-  const showTurnState = input.timing === undefined || input.timing.mode === "idle";
-
-  return buildSessionStatusRailViewModel({
-    ...providerRail,
-    turnState: "idle",
-    showTurnState,
-    sessionElapsedMs,
-    currentTurnSeconds,
-    contextUsage: input.contextUsage ?? (contextWindow !== undefined
-      ? { filled: 0, total: contextWindow }
-      : undefined),
-  });
-}
-
 function promptInputPlaceholder(
   renderer: SessionRenderer,
   promptPrefix: string,
@@ -2598,195 +2525,6 @@ function promptInputPlaceholder(
   }
   const text = truncateVisible(chromeCopy(renderer.locale).inputPlaceholder, availableWidth);
   return colorPromptPlaceholder(text, renderer.tokens, useColor);
-}
-
-function currentTurnSecondsForTiming(timing: StatusRailTiming | undefined): number | undefined {
-  if (timing === undefined) {
-    return undefined;
-  }
-  if (timing.mode === "active-turn" && timing.activeTurnStartedAtMs !== undefined) {
-    return elapsedSeconds(timing.activeTurnStartedAtMs, timing.now());
-  }
-  if (timing.mode === "last-turn") {
-    return timing.lastCompletedTurnSeconds;
-  }
-  return undefined;
-}
-
-function elapsedSeconds(startedAtMs: number, finishedAtMs: number): number {
-  return Math.max(0, Math.floor((finishedAtMs - startedAtMs) / 1000));
-}
-
-function configuredModelForRuntime(runtime: Runtime): { provider: string; id: string } | undefined {
-  const modelInfo = typeof runtime.getModelInfo === "function" ? runtime.getModelInfo() : undefined;
-  const configured = configuredModelFromInfo(modelInfo);
-  if (configured.id === "unknown" && configured.provider === undefined) {
-    return undefined;
-  }
-  return {
-    provider: configured.provider ?? "unknown",
-    id: configured.id,
-  };
-}
-
-function configuredModelFromInfo(modelInfo?: RuntimeModelInfo): {
-  provider?: string;
-  id: string;
-  label: string;
-} {
-  if (modelInfo?.kind !== "kv") {
-    return { id: "unknown", label: "unknown" };
-  }
-
-  const model = String(modelInfo.entries.find((entry) => entry.key === "model")?.value ?? "unknown");
-  const providerValue = modelInfo.entries.find((entry) => entry.key === "provider")?.value;
-  const provider = providerValue === undefined ? undefined : String(providerValue);
-  return {
-    provider,
-    id: model,
-    label: model,
-  };
-}
-
-function providerExecutionRailState(
-  configuredModel: { label: string },
-  summary?: ProviderExecutionSummary
-): {
-  modelLabel: string;
-  modelState: NonNullable<SessionStatusRailViewModel["modelState"]>;
-  configuredModelLabel?: string;
-  servingModelLabel?: string;
-} {
-  if (summary === undefined || summary.status === "not-run") {
-    return {
-      modelLabel: configuredModel.label,
-      modelState: "configured",
-    };
-  }
-
-  if (summary.status === "failed") {
-    return {
-      modelLabel: configuredModel.label,
-      modelState: "failed",
-    };
-  }
-
-  if (summary.actual === undefined) {
-    return {
-      modelLabel: configuredModel.label,
-      modelState: "configured",
-    };
-  }
-
-  return {
-    modelLabel: summary.actual.model,
-    modelState: summary.status === "fallback-success" ? "fallback-serving" : "primary-serving",
-    configuredModelLabel: summary.configuredPrimary?.model,
-    servingModelLabel: summary.actual.model,
-  };
-}
-
-function providerServingTransitionAlert(
-  previous: ProviderRouteServingState | undefined,
-  summary: ProviderExecutionSummary
-): string | undefined {
-  const next = providerServingStateFromSummary(summary);
-  if (next === undefined) {
-    return undefined;
-  }
-
-  if (next.status === "primary") {
-    if (previous?.status === "fallback" || previous?.status === "failed") {
-      return `primary model available again: ${routeModelLabel(next.actual ?? next.primary)}`;
-    }
-    return undefined;
-  }
-
-  if (next.status === "fallback") {
-    if (previous?.status === "failed") {
-      return `provider recovered via fallback: ${routeModelLabel(next.actual)}; primary ${routeModelLabel(next.primary)} failed with ${formatProviderFailureReason(next.reason)}`;
-    }
-    if (previous?.status !== "fallback") {
-      return `primary model failed: ${routeModelLabel(next.primary)} ${formatProviderFailureReason(next.reason)}; using fallback ${routeModelLabel(next.actual)}`;
-    }
-    return undefined;
-  }
-
-  if (previous?.status !== "failed") {
-    return `provider failed: ${routeModelLabel(next.primary ?? next.actual)} ${formatProviderFailureReason(next.reason)}`;
-  }
-
-  return undefined;
-}
-
-function providerServingStateFromSummary(
-  summary: ProviderExecutionSummary
-): ProviderRouteServingState | undefined {
-  if (summary.status === "not-run") {
-    return undefined;
-  }
-
-  if (summary.status === "failed") {
-    const primary = firstProviderSummaryRoute(summary) ?? summary.configuredPrimary;
-    return {
-      status: "failed",
-      primary,
-      reason: summary.primaryFailureClass ?? firstProviderFailureReason(summary),
-    };
-  }
-
-  if (summary.actual === undefined) {
-    return undefined;
-  }
-
-  if (summary.status === "fallback-success") {
-    return {
-      status: "fallback",
-      primary: firstProviderSummaryRoute(summary) ?? summary.configuredPrimary,
-      actual: summary.actual,
-      reason: summary.primaryFailureClass ?? firstProviderFailureReason(summary),
-    };
-  }
-
-  return {
-    status: "primary",
-    primary: summary.configuredPrimary,
-    actual: summary.actual,
-  };
-}
-
-function firstProviderSummaryRoute(
-  summary: ProviderExecutionSummary
-): { provider: string; model: string } | undefined {
-  const attempt = summary.attempts.find((candidate) => candidate.attemptedRouteIndex === 0) ?? summary.attempts[0];
-  return attempt === undefined
-    ? undefined
-    : {
-        provider: attempt.provider,
-        model: attempt.model,
-      };
-}
-
-function firstProviderFailureReason(summary: ProviderExecutionSummary): string | undefined {
-  return summary.attempts.find((attempt) => !attempt.ok)?.errorClass;
-}
-
-function routeModelLabel(route: { model: string } | undefined): string {
-  return route?.model ?? "unknown";
-}
-
-function formatProviderFailureReason(reason: string | undefined): string {
-  return reason ?? "unknown";
-}
-
-function modelContextWindow(
-  runtime: Runtime,
-  modelInfo = typeof runtime.getModelInfo === "function" ? runtime.getModelInfo() : undefined
-): number | undefined {
-  const contextWindow = modelInfo?.kind === "kv"
-    ? Number(modelInfo.entries.find((e) => e.key === "context window")?.value)
-    : Number.NaN;
-  return Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : undefined;
 }
 
 export function renderHorizontalRule(tokens: ResolvedTokens, useColor: boolean, useUnicode: boolean, width: number): string {

@@ -45,6 +45,7 @@ export type RawPromptOperatorConsoleOptions = Omit<OperatorConsoleRawPromptSnaps
   readonly enabled: boolean;
   readonly onAttachmentsChange?: (attachments: readonly AttachmentCardState[]) => void;
   readonly onAttachmentPreview?: (attachment: AttachmentCardState) => void;
+  readonly getStatus?: () => OperatorConsoleRawPromptSnapshot["status"];
   readonly focus?: FocusState;
   readonly slash?: SlashMenuState;
   readonly activeWork?: ToolActivityState;
@@ -88,7 +89,7 @@ export class RawPromptRenderLoop {
       ? buildOperatorConsoleRawPromptFrameWithRuntimeHost(this.#getOperatorConsoleHost(), {
         prompt: snapshot.prompt,
         state: snapshot.state,
-        status: snapshot.operatorConsole.status,
+        status: snapshot.operatorConsole.getStatus?.() ?? snapshot.operatorConsole.status,
         terminal: snapshot.operatorConsole.terminal,
         attachments: snapshot.operatorConsole.attachments,
         slash: snapshot.operatorConsole.slash,
