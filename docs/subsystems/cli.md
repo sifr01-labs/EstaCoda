@@ -185,13 +185,15 @@ In-session commands:
 
 Interactive `/compact [topic]` is semantic session compression for the current session, but it is non-rotating in this implementation. Gateway `/compact` has separate adoption logic and can preserve the parent transcript by switching the channel to a compacted child session.
 
-### Papyrus Prompt And Active-Turn Controls
+### Operator Console Prompt And Active-Turn Controls
 
-The idle CLI prompt is Papyrus-owned raw input. The Papyrus prompt factory owns
-interactive setup/operator prompts, core session input, slash autocomplete,
-approval cards, paste references, and terminal cleanup. The Operator Console
-owns the managed prompt/status frame instead of treating the prompt row as an
-ad hoc output line.
+The idle CLI prompt is Papyrus-owned raw input rendered inside the Operator
+Console. Production interactive `estacoda` enables the Operator Console by
+default for supported TTY sessions. The Papyrus prompt factory owns interactive
+setup/operator prompts, core session input, slash autocomplete, approval cards,
+paste attachments, and terminal cleanup. The Operator Console owns the live
+prompt/status/slash/attachment frame instead of treating the prompt row as an ad
+hoc output line.
 
 The terminal regions are intentionally separate:
 
@@ -202,23 +204,33 @@ Transcript area:
   durable tool activity rows
 
 Operator Console region:
+  startup dashboard, when rendering launch
+  approvals, if present
+  active work, if present
+  queued steer, if present
+  attachments, if present
+  prompt / steer input
+  slash menu, if present
   status rail
-  input row / placeholder
-  fixed-height slash completion panel
-  compact paste notice/reference when applicable
+  setup/select panels where applicable
 ```
 
-Tool-start and tool-result rows route through the Operator Console active-work surface when available, with durable/plain fallbacks outside TTY console rendering. The active spinner and status rail stay in the managed prompt/status region.
+Tool-start and tool-result events route through the Operator Console active-work
+surface when available, with durable/plain fallbacks outside TTY console
+rendering. Active work is uncapped in model storage and viewport-limited in
+rendering. The persistent status rail contains only model, context usage/bar,
+and session timer; tools, approvals, workspace/trust, setup, steering, channel
+state, and active-turn noise must stay out of it.
 
 Bracketed paste is enabled only for TTY prompts that run through the paste interceptor. Small single-line pastes remain inline. Multiline and large pastes display as compact `[Pasted text #...]` references when a paste reference store is available. Paste files are written under the active profile temp state, not the workspace, and are temporary operational artifacts, not a permanent knowledge store. The submitted runtime input restores the original pasted content. Secret prompts bypass paste preview and paste reference storage; pasted secret content must not be logged, echoed in chrome/status text, or mirrored outside the prompt answer path.
 
-Shortcut hints are shown as input-lane placeholder copy while the idle input line is empty. The prompt row owns the prompt marker, so placeholder copy must not include its own `>` or `›`. The hint disappears as soon as the user starts typing. Slash hints take priority when idle input starts with `/`; the hint model is built from the current line before submit, rendered through the Papyrus prompt/Operator Console path, and cleared when the line no longer starts with `/` or the prompt resolves. Slash completions render in a fixed-height prompt-region panel, so fewer matches do not shrink the panel. Plain, non-TTY, or unsupported terminal sessions keep the direct startup hint fallback.
+Shortcut hints are shown as input-lane placeholder copy while the idle input line is empty. The prompt row owns the prompt marker, so placeholder copy must not include its own `>` or `›`. The hint disappears as soon as the user starts typing. Slash hints take priority when idle input starts with `/`; the hint model is built from the current line before submit, rendered through the Operator Console slash menu, and cleared when the line no longer starts with `/` or the prompt resolves. Plain, non-TTY, or unsupported terminal sessions keep the direct startup hint fallback.
 
 Arabic setup chrome is direction-aware for localized setup selectors, rails, onboarding summaries, prompt cards, raw setup prompts, verification reports, and the startup dashboard. Arabic picker rows are RTL/right-aligned as full option rows; selected output uses `تم تحديد`, and technical selected values are LTR-isolated. The Arabic startup dashboard uses two RTL-aware columns at normal terminal widths and falls back to a bounded stacked layout on narrow terminals. Technical tokens such as paths, env vars, provider/model IDs, slash commands, and version numbers remain untranslated and isolated. Do not describe this as full runtime Arabic localization.
 
 Onboarding provider credential prompts and Telegram token prompts share the setup editor prompt copy. Arabic display strings isolate product names, provider names, `Telegram`, env vars, and other technical tokens. Stored config, env, auth, and state values remain raw; secret prompts remain masked.
 
-After a normal message is submitted, the idle prompt is gone. The active turn shows status, timing, spinner, durable tool activity, approval/setup output, and Operator Console active-work/steer surfaces; it does not show a fake read-only prompt box containing the submitted user text. The submitted prompt remains visible in the transcript rail/history.
+After a normal message is submitted, the idle prompt is gone. The active turn shows durable transcript output plus Operator Console active-work, approval, and steer surfaces; it does not show a fake read-only prompt box containing the submitted user text. The submitted prompt remains visible in the transcript rail/history.
 
 While `runtime.handle()` is active in a local interactive CLI session, visible typing routes through the Operator Console `Steer current turn` surface. Non-empty steer text is submitted as active-turn guidance, rendered as a `User steer:` transcript block, and applied by aborting the current turn with `CLI steer` before queueing one retry using the original submitted text plus an explicit steering note block. `Ctrl+C` remains the hard interrupt path and aborts the current turn with `SIGINT`; it is not modeled as steer submission or cancellation.
 

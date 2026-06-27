@@ -183,38 +183,53 @@ CI environment    → supportsAnimation=false
 
 ---
 
-## 6. Papyrus Prompt And Bottom Chrome Ownership
+## 6. Papyrus And Operator Console Ownership
 
 ### 6.1 Idle Prompt Ownership
 
-Papyrus owns idle CLI input. The raw prompt composes the editable line, tracks
-rows as wrapping changes, routes slash autocomplete through Papyrus typeahead,
-and owns terminal cleanup on submit, cancel, and error. Gateway, one-shot,
-non-TTY, and non-CLI channel input do not use this interactive prompt path.
+Papyrus is the terminal UI substrate. The Operator Console is the live
+interactive CLI frame built on Papyrus and enabled by default for production
+interactive TTY launches. The raw prompt tracks editable text and key semantics,
+then maps prompt, slash, attachment, and status state into the Operator Console.
+Gateway, one-shot, non-TTY, and non-CLI channel input do not use this
+interactive prompt path.
 
 Secret prompts are a hard boundary. They may accept pasted bytes as input, but they must not publish paste preview callbacks, paste reference files, live slash hints, or temporary chrome containing secret text.
 
-### 6.2 Managed Prompt Region
+### 6.2 Operator Console Region
 
-The Operator Console and Papyrus surface controllers own the managed prompt
-region around live interactive input. The transcript area owns durable user rails,
-assistant cards, and tool activity rows. The managed prompt/status region owns
-the status rail, input row/placeholder, fixed-height slash completion panel, and
-compact paste notice/reference when applicable.
+The Operator Console owns the cursor-managed live TTY region around interactive
+input. The transcript area owns durable user rails and assistant cards. The
+Operator Console region is composed from semantic surfaces in this order:
 
-Do not manually combine old readline-era transient-region calls with Papyrus
-prompt rendering. The controller tracks managed-region height across growth,
-shrink, and disappearance; stale lines are cleared before the prompt row is
-restored. Slash completions reserve a fixed panel height so changing match counts
-do not resize the prompt region.
+```text
+startup/transcript
+approvals, if present
+active work, if present
+queued steer, if present
+attachments, if present
+prompt / steer input
+slash menu, if present
+status rail
+setup/select panels where applicable
+```
 
-### 6.3 Active-Turn Chrome
+The persistent status rail contains only model, context usage/bar, and session
+timer. Tools, approvals, workspace/trust, setup, steering, channel state, and
+active-turn noise belong in contextual surfaces and must not be smuggled into
+the rail.
 
-After submit, the idle prompt no longer owns the cursor. Active-turn surfaces show
-status, timing, spinner, setup/approval output, and transient active-lane
-messages. Tool activity rows route through the Operator Console active-work
-surface when available. Active-turn surfaces must not recreate the removed fake
-read-only prompt box.
+Do not manually combine removed transient-region calls with Papyrus prompt
+rendering. The raw prompt render loop is only a terminal diff/write/cursor
+cleanup adapter; it does not build prompt/status/slash/attachment frames.
+
+### 6.3 Active-Turn Steering And Work
+
+After submit, the idle prompt no longer owns the cursor. Active-turn surfaces
+show active work, approvals, queued steer, and the steer input surface. Tool
+activity maps into the uncapped Operator Console active-work model and rendering
+is viewport-limited. Active-turn surfaces must not recreate a read-only prompt
+box containing the submitted user text.
 
 The active-turn input lane is Operator Console-owned in interactive TTY sessions. Normal typed text opens the `Steer current turn` surface, and non-empty submitted steer text aborts the current turn with `CLI steer` before scheduling one CLI-layer retry with an explicit steering note. `Ctrl+C` remains the hard interrupt path and is not modeled as steer submission or cancellation. Steering is not a runtime/provider in-flight steering primitive.
 

@@ -9,20 +9,24 @@ This document is the surface contract for the EstaCoda Operator Console.
 
 ## Purpose
 
-The EstaCoda Operator Console is the Papyrus-owned interactive CLI
-surface. It replaces legacy bottom-region redraws, prompt echo clearing,
-active-turn side channels, fixed tool rails, and manual readline-era terminal row
-management.
+The EstaCoda Operator Console is the Papyrus-owned live interactive CLI frame.
+Production interactive `estacoda` launches enable it by default for supported
+TTY sessions. It owns the prompt, status rail, slash menu, attachment cards,
+active work, approvals, steering, startup dashboard, and setup/select panels
+where applicable.
 
-The redesign keeps the existing CLI product semantics while moving live
-terminal composition into Papyrus.
+Papyrus is the terminal UI substrate. The Operator Console is the product frame
+built on top of that substrate. The session loop and setup/input controllers
+emit semantic state and events; they do not patch terminal rows around prompt
+implementation details.
 
 ```text
-session/runtime events
+session/runtime/setup/input events
+-> OperatorConsoleRuntimeHost
 -> OperatorConsoleState
--> Papyrus surfaces
--> compositor
--> terminal diff
+-> Operator Console surfaces
+-> Papyrus layout/renderer
+-> terminal diff adapter
 ```
 
 Core rules:
@@ -30,7 +34,7 @@ Core rules:
 - Papyrus owns pixels.
 - Runtime owns meaning.
 - Security policy remains authoritative.
-- No session-loop ANSI surgery.
+- No session-loop ANSI surgery or terminal row ownership.
 - UI components collect user intent; they do not grant permissions, mutate
   trust, or bypass policy.
 
@@ -40,12 +44,11 @@ The console splits responsibility across three layers:
 
 | Layer | Owns | Must Not Own |
 |------|------|--------------|
-| Runtime/session | messages, runtime events, tool activity, approval requests, model/context state | terminal row accounting or ANSI cursor patches |
-| Operator console state | focus, surface ordering, prompt/attachment/tool/approval/steer UI state | provider routing, approval grants, workspace trust |
-| Papyrus renderer/compositor | measurement, wrapping, truncation, bidi-safe terminal layout, frame diffing | security decisions or runtime semantics |
-
-The session loop should eventually feed semantic changes into the console
-instead of drawing transient terminal regions directly.
+| Runtime/session/setup/input | messages, runtime events, tool activity, approval requests, prompt text, setup/select choices, model/context state | terminal row accounting or ANSI cursor patches |
+| `OperatorConsoleRuntimeHost` | persistent live console state updates and deterministic frame rendering | stdout/stderr writes or security decisions |
+| `OperatorConsoleState` | focus, surface ordering, prompt/attachment/tool/approval/steer/startup/setup UI state | provider routing, approval grants, workspace trust |
+| Papyrus layout/renderer | measurement, wrapping, truncation, bidi-safe terminal layout, surface composition | security decisions or runtime semantics |
+| Raw prompt render loop | terminal diff/write/cursor cleanup adapter | prompt/status/slash/attachment frame construction |
 
 ## Surface Order
 
@@ -53,12 +56,14 @@ The live console must support this vertical order:
 
 ```text
 startup/transcript
+approvals, if present
 active work, if present
 queued steer, if present
 attachments, if present
 prompt / steer input
 slash menu, if present
 status rail
+setup/select panels where applicable
 ```
 
 The persistent status rail contains only:
@@ -67,8 +72,9 @@ The persistent status rail contains only:
 - context usage / context bar
 - session timer
 
-Tools, approvals, attachments, steering, workspace/trust, and setup state must
-not be added to the persistent rail by default. They get contextual surfaces.
+Tools, approvals, attachments, steering, workspace/trust, setup state, channel
+state, and active-turn noise must not be added to the persistent rail. They get
+contextual surfaces.
 
 ## State Model Sketch
 
@@ -78,6 +84,7 @@ implementation.
 ```ts
 type OperatorConsoleState = {
   transcript: TranscriptBlock[];
+  startup?: StartupDashboardState;
   prompt: PromptSurfaceState;
   status: StatusRailState;
   attachments: AttachmentCardState[];
@@ -85,6 +92,7 @@ type OperatorConsoleState = {
   approvals: ApprovalCardState[];
   slash?: SlashMenuState;
   steer?: SteerState;
+  setup?: SetupPanelState;
   focus: FocusState;
   terminal: TerminalMetrics;
 };
@@ -438,7 +446,8 @@ kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 7% │ session 00:13
 ```
 
 Slash suggestions are anchored to prompt input. The command registry remains
-semantic; Papyrus renders it.
+semantic; the Operator Console renders the slash menu below the prompt and above
+the status rail. It is not inserted as raw prompt overlay rows.
 
 ### Phase I: Steering And Interrupt
 
@@ -491,8 +500,8 @@ Steering semantics:
 User:
 review the Papyrus rollout plan
 Assistant:
-The structure is sound. The critical change is that Papyrus must own the
-interactive frame instead of patching rows around readline.
+The structure is sound. The critical change is that Papyrus owns the interactive
+frame while runtime and setup code send semantic state into the Operator Console.
 ╭─ Active work ─────────────────────────────────────────────────────────╮
 │ ✓ searched operator console files                              00:01  │
 │ ◷ reading setup editor tests                                   00:04  │
@@ -508,83 +517,63 @@ Attachments
 kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ session 01:12
 ```
 
-## Implementation Phases
+## Current Source Responsibility Map
 
-1. Add Operator Console docs and contracts.
-2. Add console state, focus model, layout, and renderer shell.
-3. Render boxed prompt with status rail below.
-4. Support `Alt+Enter` multiline insertion and prompt scrolling.
-5. Add paste attachment cards and focus routing.
-6. Add uncapped active work model and scrollable active work box.
-7. Add inline approval cards for approve once, reject, and inspect.
-8. Add active-turn steer surface and queued steer state.
-9. Rebuild startup dashboard and setup panels with the same console language.
-10. Route the session loop through the Operator Console.
-11. Remove obsolete terminal controllers and transient terminal machinery.
+| Area | Files |
+|------|-------|
+| Runtime host and state | `src/ui/papyrus/operator-console/operatorConsoleRuntimeHost.ts`, `src/ui/papyrus/operator-console/operatorConsoleState.ts` |
+| Layout and deterministic text render | `src/ui/papyrus/operator-console/operatorConsoleLayout.ts`, `src/ui/papyrus/operator-console/operatorConsoleRenderer.ts` |
+| Prompt/status surfaces | `src/ui/papyrus/operator-console/promptSurface.ts`, `src/ui/papyrus/operator-console/statusRailSurface.ts` |
+| Active work | `src/ui/papyrus/operator-console/activeWorkSurface.ts`, `src/ui/papyrus/operator-console/activeWorkRuntimeMapper.ts` |
+| Approvals | `src/ui/papyrus/operator-console/approvalSurface.ts`, `src/ui/papyrus/operator-console/approvalRuntimeMapper.ts` |
+| Steering | `src/ui/papyrus/operator-console/steerSurface.ts` |
+| Attachments | `src/ui/papyrus/operator-console/attachmentSurface.ts` |
+| Slash menu | `src/ui/papyrus/operator-console/slashSurface.ts` |
+| Startup dashboard | `src/ui/papyrus/operator-console/startupDashboardSurface.ts`, `src/ui/papyrus/operator-console/startupRuntimeMapper.ts` |
+| Setup/select panels | `src/ui/papyrus/operator-console/setupPanelSurface.ts`, `src/ui/papyrus/operator-console/setupSelectRuntimeMapper.ts`, `src/cli/interactive-select.ts` |
+| Session integration | `src/cli/session-loop.ts`, `src/cli/create-interactive-prompt.ts`, `src/cli/rawPromptController.ts`, `src/cli/rawPromptRenderLoop.ts` |
 
-## Non-Goals For This Commit
+`src/cli/rawPromptRenderLoop.ts` is now a terminal diff adapter. It may write
+cursor movement and clear-line escape sequences as part of the managed TTY
+adapter, but it does not own prompt/status/slash/attachment composition.
 
-This documentation-only commit does not:
+## Removed Legacy Pieces
 
-- change runtime behavior;
-- change the interactive CLI path;
-- add `OperatorConsoleState` implementation files;
-- add or remove feature flags;
-- delete active-turn or select controllers;
-- change approval policy or grant handling;
-- change setup behavior;
-- update snapshots.
+The live interactive CLI no longer uses the removed bottom-region controller,
+the removed active-turn command controller, fixed live tool slots, spinner
+tickers, the exported prompt-only raw frame builder, or the old interactive
+prompt implementation.
 
-## Legacy Code Intended For Later Deletion
+Operational docs must not point contributors to removed implementation files.
+Historical notes may mention the migration only when clearly labeled as history.
 
-After the Operator Console owns more of the remaining interaction lanes, later
-implementation PRs may delete or heavily reduce:
+Do not reintroduce:
 
-- manual active-turn transient line arrays
-- terminal row clearing helpers that only exist for live chrome patches
-- terminal renderer portions of `src/cli/interactive-select.ts` after setup
-  panels use console widgets
-- old approval text prompt shells once inline approval cards own focus/input
-- `rawPromptRenderLoop.ts` if the console renderer fully replaces it, or reduce
-  it to a compatibility wrapper
+- session-loop terminal row surgery;
+- raw slash menu insertion above a status rail;
+- tool activity caps in the live active-work model;
+- approval controls that grant permission directly from UI state;
+- steering paths that treat `Ctrl+C` as steer submit/cancel;
+- workspace/trust/setup/tool/approval/steer/channel data in the persistent rail.
 
-Do not delete:
+## Failure, Debug, And Audit Guidance
 
-- semantic view-model builders;
-- slash command registry;
-- approval/security policy;
-- plain/no-color/no-Unicode renderers;
-- Arabic/bidi helpers;
-- `parseKeypress`;
-- line editor/cursor utilities;
-- Papyrus widgets and screen primitives;
-- non-interactive command output paths.
+- State mapping problems usually start in the runtime mappers under
+  `src/ui/papyrus/operator-console/*RuntimeMapper.ts` or the session integration
+  in `src/cli/session-loop.ts`.
+- Surface rendering problems usually start in the specific `*Surface.ts` file,
+  `operatorConsoleLayout.ts`, or `operatorConsoleRenderer.ts`.
+- Terminal write/cursor cleanup problems are isolated to
+  `src/cli/rawPromptRenderLoop.ts`.
+- Prompt editing, paste, slash typeahead, and attachment submission behavior
+  start in `src/cli/rawPromptController.ts`.
+- Setup/select TTY shell routing starts in `src/cli/interactive-select.ts` and
+  maps into Papyrus setup panels.
+- Approval policy and grant behavior remain outside the UI. Inspect
+  `src/cli/approval-prompt-adapter.ts` and `src/security/` before changing
+  approval semantics.
 
 ## Validation Expectations
-
-Baseline before implementation work:
-
-```bash
-pnpm exec vitest run src/cli/session-loop.test.ts src/cli/rawPromptController.test.ts src/cli/papyrus-prompt.test.ts src/cli/approval-prompt-adapter.test.ts src/ui/papyrus src/ui/renderers
-```
-
-Focused implementation validation should add or update tests for:
-
-- `Alt+Enter` newline insertion;
-- `Enter` submit behavior;
-- paste preserving newlines;
-- multiline prompt expansion and internal scroll;
-- prompt cursor visibility after resize;
-- slash menu anchoring;
-- persistent rail containing only model/context/session timer;
-- attachment focus, preview, removal, overflow, and submitted transcript refs;
-- uncapped tool activity and collapsed turn-end summary;
-- approval card focus and approve/reject/inspect intent mapping;
-- hardline and policy-denied approval safety;
-- queued steer, cancellation, and `Ctrl+C` interrupt invariants;
-- Arabic startup/status/setup layout with isolated technical tokens;
-- narrow terminal fallbacks;
-- no stale/ghost lines after setup page navigation.
 
 Full validation before shipping an implementation PR:
 

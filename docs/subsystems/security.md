@@ -208,16 +208,33 @@ Handoff security is covered by this subsystem document and the channel/session t
 
 ### CLI Active-Turn Control Boundary
 
-Active-turn commands are local CLI control input. They are available only while an interactive TTY CLI turn is running and are handled by the CLI command lane, not by gateway adapters, channel messages, approval queues, or the provider prompt.
+Active-turn control is local CLI-only control input. It is available only while a
+supported interactive TTY CLI turn is running and is routed through the Operator
+Console steer surface plus the normal hard-interrupt path. Gateway adapters,
+channel messages, approval queues, and provider prompts do not gain this input
+lane.
 
-Current active-turn commands:
+Current active-turn behavior:
 
-- `/interrupt` aborts the current CLI active turn.
-- `/steer <note>` aborts the current CLI active turn and queues one CLI-layer retry with the original submitted text plus an explicit steering note block.
+- Typing during an active turn opens `Steer current turn`.
+- Non-empty steer text submits guidance, writes a transcript-visible
+  `User steer:` block, aborts the current CLI turn with `CLI steer`, and queues
+  one CLI-layer retry with the original submitted text plus an explicit steering
+  note block.
+- Empty or whitespace-only steer text does nothing.
+- `Esc` cancels a steer draft or queued steer.
+- `Ctrl+C` remains the hard interrupt path and aborts the current turn with
+  `SIGINT`; it is not modeled as steer submit/cancel.
 
-These commands do not change gateway approval semantics. Gateway and non-CLI channels remain on their existing control paths: remote approvals still go through `ChannelGateway`, durable approval queues remain ask-only, and adapters do not gain an active-turn command lane.
+These controls do not change gateway approval semantics. Gateway and non-CLI
+channels remain on their existing control paths: remote approvals still go
+through `ChannelGateway`, durable approval queues remain ask-only, and adapters
+do not gain an active-turn steer lane.
 
-The active prompt lane must keep control input and user messages distinct. Normal active-turn text is visible and can be submitted, but it is queued as the next user turn and is not sent to `runtime.handle()` until the current response completes. It does not interrupt the active turn. Slash commands such as `/interrupt` and `/steer <note>` are control input, not user transcript/history content. The visible transcript should continue to show the original submitted user prompt, while retry text is inspectable through the explicit steering marker when `/steer` is used. `<note>` is documentation notation; actual use is free-form text after the command, such as `/steer try the safer approach instead`.
+The active prompt lane must keep control input and user messages distinct. The
+visible transcript continues to show the original submitted user prompt, while
+retry text is inspectable through the explicit steering marker when steer is
+used.
 
 Secret prompts are outside this console path. Pasted secret content must not appear in paste previews, paste reference files, transient console surfaces, slash hints, status rails, logs, or active-turn command messages.
 

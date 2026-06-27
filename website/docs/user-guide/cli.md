@@ -148,29 +148,57 @@ Plain, CI, and non-TTY output remains unstyled. Interactive terminals that suppo
 
 ---
 
-## Readline Prompt And Active-Turn Controls
+## Operator Console And Active-Turn Controls
 
-The idle CLI prompt is real `readline` input. `ReadlinePrompt` owns the input stream while the user is composing a normal message, and the bottom chrome is redrawn around that prompt instead of replacing it with an application-owned text box.
+Papyrus is the terminal UI substrate. The Operator Console is the live
+interactive CLI frame built on Papyrus and enabled by default for supported TTY
+sessions. The session loop, setup flows, and raw prompt input send semantic
+state to `OperatorConsoleRuntimeHost`; Papyrus lays out and renders the frame,
+and the raw prompt render loop applies only terminal diff/cursor cleanup.
 
-The transcript area owns durable user rails, assistant cards, and tool activity rows. The bottom prompt region owns the status rail, input row/placeholder, fixed-height slash completion panel, and compact paste notice/reference when applicable. Tool-start and tool-result rows render above bottom chrome; the active spinner/status stays in the prompt region.
+The live TTY frame is composed from these surfaces:
 
-Managed bottom chrome shows shortcut hints as input-lane placeholder copy while the input line is empty. The prompt row owns the prompt marker, so placeholder copy does not include its own marker. The hint disappears as soon as the user starts typing. Slash hints take priority when the line starts with `/`, reserve a fixed-height panel, and clear when the line no longer starts with `/` or the prompt resolves. Plain, non-TTY, or non-bottom-chrome sessions keep the direct startup hint fallback.
+- startup dashboard
+- approvals
+- active work
+- queued steer
+- attachments
+- prompt / steer input
+- slash menu
+- status rail
+- setup/select panels where applicable
 
-Bracketed paste is enabled only for TTY prompts that run through the paste interceptor. Small single-line pastes remain inline. Multiline and large pastes display as compact `[Pasted text #...]` references when paste storage is available. Paste files live under active profile temp state, not the workspace, and are temporary operational artifacts. Submitted runtime input restores the original pasted content. Secret prompts bypass paste preview/storage and do not emit shortcut hints or live slash hints.
+The persistent status rail contains only model, context usage/bar, and session
+timer. Tools, approvals, workspace/trust, setup, steering, channel state, and
+active-turn noise render in contextual surfaces, not in the rail.
+
+Slash autocomplete renders as an Operator Console menu below the prompt and
+above the status rail. Paste references render as attachment cards above the
+prompt; full pasted content is stored for submission and is not dumped into
+prompt chrome. Active work is uncapped in model storage and viewport-limited in
+rendering. Approval cards emit approve/reject/inspect intent only; approval and
+security policy remain authoritative.
+
+Bracketed paste is enabled only for supported TTY prompts. Small single-line
+pastes remain inline. Multiline and large pastes become attachment cards. Secret
+prompts bypass paste preview/storage and do not emit shortcut hints or live
+slash hints.
 
 Arabic setup chrome is direction-aware for localized setup selectors, rails, onboarding summaries, prompt cards, raw setup prompts, verification reports, and the startup dashboard. Arabic picker rows are RTL/right-aligned, selected output uses `تم تحديد`, and technical selected values are LTR-isolated. The Arabic startup dashboard uses two RTL-aware columns at normal widths and a bounded stacked layout at narrow widths. This is not full runtime Arabic localization.
 
 Onboarding provider credential prompts and Telegram token prompts share setup editor prompt copy. Arabic display strings isolate technical tokens, while stored config, env, auth, and state values remain raw. Secret prompts remain masked.
 
-After a normal message is submitted, the readline prompt is gone. The active turn shows status, timing, spinner, approval/setup output, durable tool activity above chrome, and transient active-lane messages. It does not show a fake read-only prompt box containing the submitted user text.
+After a normal message is submitted, the idle prompt is gone. The active turn
+shows durable transcript output plus Operator Console active-work, approval, and
+steer surfaces. It does not show a fake read-only prompt box containing the
+submitted user text.
 
-While EstaCoda is responding, the active prompt lane accepts visible input. Normal text submitted mid-turn is queued for the next turn, does not interrupt the current turn, and is sent only after the current response completes. `/interrupt` cancels the active turn. `/steer <note>` aborts and retries once with a steering note; `<note>` is documentation notation only. Actual use is free-form:
-
-```text
-/steer try the safer approach instead
-```
-
-An empty `/steer` shows usage and does not abort.
+While EstaCoda is responding, typing opens `Steer current turn`. Non-empty steer
+text writes a transcript-visible `User steer:` block, aborts the current CLI turn
+with `CLI steer`, and queues one retry with the original submitted text plus an
+explicit steering note. Empty or whitespace-only steer input does nothing.
+`Esc` cancels a steer draft or queued steer. `Ctrl+C` remains the hard interrupt
+path and is not modeled as steer submit/cancel.
 
 ---
 

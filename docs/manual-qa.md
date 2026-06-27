@@ -825,15 +825,14 @@ fallback prompt selection. Use disposable homes and fake credentials only.
 | Back/cancel behavior | Use `Back`, `Cancel`, `Esc`, or `Ctrl-C` in setup/editor prompts | `Back` returns to the previous meaningful structured step where supported. Cancel before apply leaves config, trust, and `.env` unchanged. Terminal state is restored. |
 | Non-TTY summary/plain output | Pipe setup/help output, for example `estacoda setup --help \| cat` or run a non-interactive setup path in CI | Output remains plain and deterministic, with no cursor controls, raw prompt behavior, or Papyrus select cursor movement. |
 
-During PR6B cleanup, legacy readline implementation files may still exist, but
-the renderer/input flags no longer activate legacy interactive modes:
+The renderer/input rollout flags no longer activate alternate interactive modes:
 
 ```bash
 ESTACODA_UI_RENDERER=legacy estacoda setup --interactive
 ESTACODA_INPUT_MODE=readline estacoda setup --interactive
 ```
 
-Optional Papyrus helpers remain opt-in during this migration:
+Optional Papyrus helpers remain opt-in:
 
 ```bash
 ESTACODA_INPUT_KEYMAP=vim estacoda

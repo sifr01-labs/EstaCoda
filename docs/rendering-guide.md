@@ -242,10 +242,12 @@ pnpm run test -- --update
 
 ## 3. Papyrus-Owned Interactive Surfaces
 
-Papyrus owns live interactive CLI sessions. Core sessions, setup/operator prompts,
-slash autocomplete, approval cards, active-turn command input, paste notices, and
-terminal overlays must route through the Papyrus prompt/surface controllers rather
-than ad hoc terminal writes.
+Papyrus is the terminal UI substrate for live interactive CLI sessions. The
+Operator Console is the live frame built on Papyrus. Core sessions,
+setup/operator prompts, slash autocomplete, approval cards, active-turn steer
+input, paste attachments, startup, and setup/select panels must route through
+the Operator Console or Papyrus prompt/surface controllers rather than ad hoc
+terminal writes.
 
 The prompt row is not a free output line. The Papyrus raw prompt and surface
 controllers own cursor movement, managed regions, slash surfaces, paste
@@ -253,17 +255,22 @@ reference rows, active status chrome, and cleanup on submit/cancel/error.
 
 Operational rules:
 
-- Do not reintroduce direct `readline.emitKeypressEvents()` handling for
-  interactive prompt/key paths.
-- Do not mix old readline-managed transient/chrome calls into Papyrus-managed
-  prompt regions.
+- Do not reintroduce direct terminal input ownership outside the Papyrus raw
+  prompt/key paths.
+- Do not mix removed transient/chrome row calls into Papyrus-managed prompt
+  regions.
 - Account for managed-region line-count growth and shrink.
 - Show shortcut hints only while the editable line is empty; hide them on non-empty input and let slash hints take priority for `/`.
-- Clear stale managed lines when shortcut hints, slash hints, paste previews, or transient messages disappear.
+- Clear stale managed lines when prompt, slash, attachment, approval, active
+  work, or steer surfaces disappear.
 - Treat terminal width as mutable; prompt wrapping can change while the user is editing.
-- Never mirror secret prompt content into paste previews, transient lines, status rails, logs, or debug chrome.
-- Keep active-turn command-lane rendering in Operator Console transient/status surfaces. Do not write command buffers directly to the terminal.
-- Do not reintroduce a fake prompt box after submit. The submitted user text belongs in transcript/history rendering; active-turn chrome is status and control chrome.
+- Never mirror secret prompt content into attachment previews, status rails,
+  logs, or debug chrome.
+- Keep active-turn steering in the Operator Console steer surface. Do not write
+  steer buffers directly to the terminal.
+- Do not reintroduce a fake prompt box after submit. The submitted user text
+  belongs in transcript/history rendering; active-turn UI is semantic console
+  state.
 - Arabic setup chrome is direction-aware for setup selectors, rails, and onboarding summaries. Raw setup string prompts are still a follow-up RTL surface; do not claim full runtime Arabic localization.
 
 Cursor-control changes need real terminal smoke in addition to unit tests. Tests can prove line accounting for known streams; a real terminal catches emulator behavior around cursor save/restore, wrapping, scrollback, and bracketed paste mode.
@@ -342,12 +349,12 @@ buildApprovalSecurityViewModel({
 | Hardcoding command names in `/help` | Register commands in `CommandRegistry`, read from registry. |
 | Writing terminal output into the live prompt region | Route through the Papyrus raw prompt, surface controller, or Operator Console host. |
 | Mirroring secret prompt input into preview/status chrome | Keep secret prompt content inside the prompt answer path only. |
-| Rendering tool activity inside legacy redraws | Route tool-start/tool-result rows through the Operator Console active-work surface, with durable/plain fallbacks outside TTY console rendering. |
+| Rendering tool activity with fixed live slots or timers | Route tool-start/tool-result rows through the Operator Console active-work surface, with durable/plain fallbacks outside TTY console rendering. |
 | Putting a prompt marker inside placeholder copy | Let the prompt row own `>`/`›`; placeholder copy starts with the hint text. |
 
 ---
 
-## 6. Prompt Region Stability
+## 6. Operator Console Region Stability
 
 The CLI renderer treats terminal regions as exclusive ownership zones:
 
@@ -357,16 +364,27 @@ Transcript area:
   durable assistant cards
   durable tool activity rows
 
-Managed prompt/status region:
+Operator Console region:
+  active work, if present
+  approvals, if present
+  queued steer, if present
+  attachments, if present
+  prompt / steer input
+  slash menu, if present
   status rail
-  input row / placeholder
-  fixed-height slash completion panel
-  compact paste notice/reference when applicable
 ```
 
-The transcript area is append-oriented. Tool-start and tool-result rows belong there. The managed prompt/status region is cursor-managed and should contain only the active status/spinner, the current input row, prompt placeholder text, slash completions, and paste reference notices.
+The transcript area is append-oriented. The Operator Console region is
+cursor-managed and composed from `OperatorConsoleState`. Its persistent status
+rail contains only model, context usage/bar, and session timer. Tools,
+approvals, workspace/trust, setup, steering, channel state, and active-turn
+noise belong in contextual surfaces, not in the rail.
 
-Idle placeholder copy is not a separate shortcut rail and must not include a prompt marker. Slash completion panels reserve stable height; fewer matches should not shrink the managed prompt region. Arabic prompt-region surfaces must measure visible width, keep technical tokens LTR-isolated, and preserve balanced bidi isolates after truncation or padding.
+Idle placeholder copy is not a separate shortcut rail and must not include a
+prompt marker. The slash menu is an Operator Console region below the prompt and
+above the status rail. Arabic console surfaces must measure visible width, keep
+technical tokens LTR-isolated, and preserve balanced bidi isolates after
+truncation or padding.
 
 ---
 
@@ -374,16 +392,17 @@ Idle placeholder copy is not a separate shortcut rail and must not include a pro
 
 Papyrus is now the interactive CLI architecture for live TTY use:
 
-- Core interactive TTY sessions use the Papyrus session renderer.
+- Core interactive TTY sessions use the Operator Console by default.
 - Core TTY prompts use raw Papyrus input.
-- Slash autocomplete renders as the Papyrus overlay.
+- Slash autocomplete renders as the Operator Console slash menu.
 - Promptable approvals render as Papyrus approval cards.
 - Setup/operator prompts route through the Papyrus-capable prompt factory.
 - Shared interactive menus use Papyrus select widgets.
-- Active-turn command input uses the Papyrus/raw key parser.
+- Active-turn steering uses Operator Console steer state; `Ctrl+C` remains hard
+  interrupt.
 
-Non-TTY one-shot and pipe-driven sessions remain plain and deterministic. They do
-not activate raw prompt behavior or cursor-managed overlays.
+Non-TTY one-shot and pipe-driven sessions remain plain and deterministic. They
+do not activate raw prompt behavior or cursor-managed console regions.
 
 The migrated prompt surfaces include:
 
@@ -401,10 +420,8 @@ The migrated prompt surfaces include:
 - Python environment setup/reset prompts.
 - Shared interactive select menus.
 
-The legacy readline prompt implementation may still exist internally for isolated
-secret-input safety or tests, but it is not the normal live interactive prompt
-architecture. Secret prompts stay no-echo, do not expose paste previews, and must
-not mirror secret input into logs, status chrome, or prompt callbacks.
+Secret prompts stay no-echo, do not expose paste previews, and must not mirror
+secret input into logs, status rail text, or prompt callbacks.
 
 `ESTACODA_UI_RENDERER=legacy` and `ESTACODA_INPUT_MODE=readline` no longer
 activate legacy interactive modes. Non-interactive command paths remain plain and
