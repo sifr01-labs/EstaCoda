@@ -506,21 +506,21 @@ exports[`tool-activity > Tool activity rail > renders long path truncated in sta
 
 exports[`tool-activity > Tool activity rail > renders multiple mixed in narrow width > tool-rail-mixed-narrow width 1`] = `
 "│ ◰  read  /workspace/Stage-9B-plan.m...
-│ [38;2;76;138;224m⌦[0m  preparing  /workspace/Stage-9B-p...
+│ [38;2;64;224;208m⣾[0m  preparing  /workspace/Stage-9B-p...
 │ [38;2;239;83;80m✗[0m  run  npm test  [2m500ms[0m
 │ ◇  review  diff  [2m1.2s[0m"
 `;
 
 exports[`tool-activity > Tool activity rail > renders multiple mixed in no Unicode > tool-rail-mixed-no Unicode 1`] = `
 "| R  read  /workspace/Stage-9B-plan.md  [2m1.4s[0m
-| [38;2;76;138;224m[>][0m  preparing  /workspace/Stage-9B-plan.md
+| [38;2;64;224;208m[>][0m  preparing  /workspace/Stage-9B-plan.md
 | [-]  run  npm test  [2m500ms[0m
 | S  review  diff  [2m1.2s[0m"
 `;
 
 exports[`tool-activity > Tool activity rail > renders multiple mixed in no color > tool-rail-mixed-no color 1`] = `
 "│ ◰  read  /workspace/Stage-9B-plan.md  1.4s
-│ ⌦  preparing  /workspace/Stage-9B-plan.md
+│ ⣾  preparing  /workspace/Stage-9B-plan.md
 │ ✗  run  npm test  500ms
 │ ◇  review  diff  1.2s"
 `;
@@ -534,14 +534,14 @@ exports[`tool-activity > Tool activity rail > renders multiple mixed in plain > 
 
 exports[`tool-activity > Tool activity rail > renders multiple mixed in standard dark > tool-rail-mixed-standard dark 1`] = `
 "│ ◰  read  /workspace/Stage-9B-plan.md  [2m1.4s[0m
-│ [38;2;76;138;224m⌦[0m  preparing  /workspace/Stage-9B-plan.md
+│ [38;2;64;224;208m⣾[0m  preparing  /workspace/Stage-9B-plan.md
 │ [38;2;239;83;80m✗[0m  run  npm test  [2m500ms[0m
 │ ◇  review  diff  [2m1.2s[0m"
 `;
 
 exports[`tool-activity > Tool activity rail > renders multiple mixed in standard light > tool-rail-mixed-standard light 1`] = `
 "│ ◰  read  /workspace/Stage-9B-plan.md  [2m1.4s[0m
-│ [38;2;0;87;217m⌦[0m  preparing  /workspace/Stage-9B-plan.md
+│ [38;2;0;140;149m⣾[0m  preparing  /workspace/Stage-9B-plan.md
 │ [38;2;198;40;40m✗[0m  run  npm test  [2m500ms[0m
 │ ◇  review  diff  [2m1.2s[0m"
 `;
@@ -582,17 +582,17 @@ exports[`tool-activity > Tool activity rail > renders single gated in standard d
 
 exports[`tool-activity > Tool activity rail > renders single gated in standard light > tool-rail-gated-standard light 1`] = `"│ [38;2;180;83;9m⚠[0m  write  src/index.ts  [2m50ms[0m"`;
 
-exports[`tool-activity > Tool activity rail > renders single running in narrow width > tool-rail-running-narrow width 1`] = `"│ [38;2;76;138;224m⌦[0m  preparing  /workspace/Stage-9B-p..."`;
+exports[`tool-activity > Tool activity rail > renders single running in narrow width > tool-rail-running-narrow width 1`] = `"│ [38;2;64;224;208m⣾[0m  preparing  /workspace/Stage-9B-p..."`;
 
-exports[`tool-activity > Tool activity rail > renders single running in no Unicode > tool-rail-running-no Unicode 1`] = `"| [38;2;76;138;224m[>][0m  preparing  /workspace/Stage-9B-plan.md"`;
+exports[`tool-activity > Tool activity rail > renders single running in no Unicode > tool-rail-running-no Unicode 1`] = `"| [38;2;64;224;208m[>][0m  preparing  /workspace/Stage-9B-plan.md"`;
 
-exports[`tool-activity > Tool activity rail > renders single running in no color > tool-rail-running-no color 1`] = `"│ ⌦  preparing  /workspace/Stage-9B-plan.md"`;
+exports[`tool-activity > Tool activity rail > renders single running in no color > tool-rail-running-no color 1`] = `"│ ⣾  preparing  /workspace/Stage-9B-plan.md"`;
 
 exports[`tool-activity > Tool activity rail > renders single running in plain > tool-rail-running-plain 1`] = `"| [>] preparing  /workspace/Stage-9B-plan.md"`;
 
-exports[`tool-activity > Tool activity rail > renders single running in standard dark > tool-rail-running-standard dark 1`] = `"│ [38;2;76;138;224m⌦[0m  preparing  /workspace/Stage-9B-plan.md"`;
+exports[`tool-activity > Tool activity rail > renders single running in standard dark > tool-rail-running-standard dark 1`] = `"│ [38;2;64;224;208m⣾[0m  preparing  /workspace/Stage-9B-plan.md"`;
 
-exports[`tool-activity > Tool activity rail > renders single running in standard light > tool-rail-running-standard light 1`] = `"│ [38;2;0;87;217m⌦[0m  preparing  /workspace/Stage-9B-plan.md"`;
+exports[`tool-activity > Tool activity rail > renders single running in standard light > tool-rail-running-standard light 1`] = `"│ [38;2;0;140;149m⣾[0m  preparing  /workspace/Stage-9B-plan.md"`;
 
 exports[`tool-activity > Tool activity timeline > renders empty in narrow width > timeline-empty-narrow width 1`] = `"[2mNo activity.[0m"`;
 

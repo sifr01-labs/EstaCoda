@@ -46,6 +46,8 @@ export interface TokenInteractive {
 export interface TokenSpinner {
   waiting: readonly string[];
   thinking: readonly string[];
+  tool: readonly string[];
+  background: readonly string[];
 }
 
 export interface TokenGlyph {

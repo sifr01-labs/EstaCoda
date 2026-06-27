@@ -21,6 +21,7 @@ import {
   type SteerState,
   type TerminalMetrics,
   type ToolActivityState,
+  type TurnActivityState,
   type TranscriptBlock,
 } from "./operatorConsoleState.js";
 
@@ -72,6 +73,14 @@ export class OperatorConsoleRuntimeHost {
     this.#state = {
       ...this.#state,
       status: cloneStatusRailState(status),
+    };
+  }
+
+  setTurnActivity(turnActivity: TurnActivityState | undefined): void {
+    if (this.#disposed) return;
+    this.#state = {
+      ...this.#state,
+      ...(turnActivity === undefined ? { turnActivity: undefined } : { turnActivity: cloneTurnActivityState(turnActivity) }),
     };
   }
 
@@ -202,6 +211,7 @@ function cloneOperatorConsoleState(state: OperatorConsoleState): OperatorConsole
     transcript: state.transcript.map(cloneTranscriptBlock),
     prompt: clonePromptSurfaceState(state.prompt),
     status: cloneStatusRailState(state.status),
+    turnActivity: state.turnActivity === undefined ? undefined : cloneTurnActivityState(state.turnActivity),
     attachments: state.attachments.map(cloneAttachmentCardState),
     activeWork: cloneToolActivityState(state.activeWork),
     approvals: state.approvals.map(cloneApprovalCardState),
@@ -211,6 +221,10 @@ function cloneOperatorConsoleState(state: OperatorConsoleState): OperatorConsole
     terminal: cloneTerminalMetrics(state.terminal),
     style: state.style,
   });
+}
+
+function cloneTurnActivityState(turnActivity: TurnActivityState): TurnActivityState {
+  return { ...turnActivity };
 }
 
 function cloneFocusState(focus: FocusState): FocusState {

@@ -233,6 +233,19 @@ function snapshotOutput(output: string): string {
   return output.split("\n").map((line) => line.trimEnd()).join("\n");
 }
 
+function ansiBgForHex(hex: string): string {
+  const normalized = hex.replace(/^#/u, "");
+  const r = Number.parseInt(normalized.slice(0, 2), 16);
+  const g = Number.parseInt(normalized.slice(2, 4), 16);
+  const b = Number.parseInt(normalized.slice(4, 6), 16);
+  return `\u001b[48;2;${r};${g};${b}m`;
+}
+
+function tokensForSnapshotContext(name: string) {
+  if (name === "plain") return resolveTokens("plain", "light", "kemetBlue");
+  return resolveTokens("standard", name === "standard light" ? "light" : "dark", "kemetBlue");
+}
+
 // ──────────────────────────────────────
 // Test suites
 // ──────────────────────────────────────
@@ -668,7 +681,12 @@ describe("Session surfaces — user prompt rail", () => {
     it(`renders in ${ctx.name}`, () => {
       const vm = buildUserPromptRailViewModel({ text: "Tell me about quantum computing" });
       const output = ctx.renderer.render(vm);
-      expect(snapshotOutput(output)).toMatchSnapshot(`user-prompt-rail-${ctx.name}`);
+      expect(snapshotOutput(stripAnsi(output))).toMatchSnapshot(`user-prompt-rail-${ctx.name}`);
+
+      if (ctx.name !== "plain" && ctx.name !== "no color") {
+        const tokens = tokensForSnapshotContext(ctx.name);
+        expect(output).toContain(ansiBgForHex(tokens.contract.surface.bgElevated));
+      }
     });
   }
 
@@ -684,7 +702,7 @@ describe("Session surfaces — user prompt rail", () => {
 
     // User prompt rail rendering is independent of slash-menu command routing.
     const railOutput = renderer.render(userPromptRail);
-    expect(railOutput).toBe("↳ /help");
+    expect(stripAnsi(railOutput)).toBe("↳ /help");
   });
 
   it("plain renderer produces no ANSI for user prompt rail", () => {

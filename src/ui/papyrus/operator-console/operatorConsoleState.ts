@@ -40,6 +40,30 @@ export type StatusRailState = {
   };
 };
 
+export type TurnActivityPhase =
+  | "thinking"
+  | "routing"
+  | "provider"
+  | "finalizing"
+  | "background";
+
+export type BackgroundActivityKind =
+  | "indexingSkills"
+  | "indexingFiles"
+  | "loadingWorkspaceMap"
+  | "refreshingModelCatalog"
+  | "syncingSessionState"
+  | "compactingTranscript"
+  | "rebuildingSearchIndex"
+  | "scanningAttachments";
+
+export type TurnActivityState = {
+  readonly phase: TurnActivityPhase;
+  readonly backgroundKind?: BackgroundActivityKind;
+  readonly label?: string;
+  readonly frameIndex?: number;
+};
+
 export type StartupDashboardState = {
   readonly productName: string;
   readonly orgName: string;
@@ -103,6 +127,7 @@ export type ToolActivityState = {
   readonly items: readonly ActiveWorkItem[];
   readonly scrollOffset: number;
   readonly expanded: boolean;
+  readonly frameIndex?: number;
 };
 
 export type ApprovalControl = ApprovalFocusControl;
@@ -192,6 +217,7 @@ export type OperatorConsoleState = {
   readonly transcript: readonly TranscriptBlock[];
   readonly prompt: PromptSurfaceState;
   readonly status: StatusRailState;
+  readonly turnActivity?: TurnActivityState;
   readonly attachments: readonly AttachmentCardState[];
   readonly activeWork: ToolActivityState;
   readonly approvals: readonly ApprovalCardState[];
@@ -207,6 +233,7 @@ export type OperatorConsoleSurface =
   | "setupPanel"
   | "transcript"
   | "approvals"
+  | "turnActivity"
   | "activeWork"
   | "queuedSteer"
   | "attachments"
@@ -219,6 +246,7 @@ export const OPERATOR_CONSOLE_SURFACE_ORDER: readonly OperatorConsoleSurface[] =
   "setupPanel",
   "transcript",
   "approvals",
+  "turnActivity",
   "activeWork",
   "queuedSteer",
   "attachments",
@@ -234,6 +262,7 @@ export type CreateInitialOperatorConsoleStateInput = {
   readonly transcript?: readonly TranscriptBlock[];
   readonly prompt?: PromptSurfaceState;
   readonly status?: StatusRailState;
+  readonly turnActivity?: TurnActivityState;
   readonly attachments?: readonly AttachmentCardState[];
   readonly activeWork?: ToolActivityState;
   readonly approvals?: readonly ApprovalCardState[];
@@ -258,6 +287,7 @@ export function createInitialOperatorConsoleState(
     transcript: input.transcript ?? [],
     prompt: input.prompt ?? createDefaultPromptSurfaceState(),
     status: input.status ?? createDefaultStatusRailState(),
+    ...(input.turnActivity === undefined ? {} : { turnActivity: input.turnActivity }),
     attachments: input.attachments ?? [],
     activeWork: input.activeWork ?? createDefaultToolActivityState(),
     approvals: input.approvals ?? [],

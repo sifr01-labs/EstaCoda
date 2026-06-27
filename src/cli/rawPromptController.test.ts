@@ -707,7 +707,6 @@ describe("raw prompt controller", () => {
 
     expect(await read.pending).toEqual({ type: "submit", text: "review the Papyrus rollout plan" });
     const output = read.output.writes.join("");
-    expect(output).toContain("╭─ Prompt");
     expect(output).toContain("› review the Papyrus rollout plan");
     expect(output).toContain("kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ ◷ 01:12");
     expect(output).not.toMatch(/\b(tool|approval|workspace|trust|steering|setup|channel)\b/iu);
@@ -730,7 +729,6 @@ describe("raw prompt controller", () => {
     await flushPromises();
 
     expect(read.isResolved()).toBe(false);
-    expect(read.output.writes.join("")).toContain("Prompt · multiline");
     expect(read.output.writes.join("")).toContain("› hello");
     expect(read.output.writes.join("")).toContain("  world");
 
@@ -1270,8 +1268,7 @@ describe("raw prompt controller", () => {
 
     expect(read.isResolved()).toBe(false);
     const multilineRender = read.output.writes.join("");
-    const finalFrame = multilineRender.slice(multilineRender.lastIndexOf("╭─ Prompt · multiline"));
-    expect(finalFrame).toContain("Prompt · multiline");
+    const finalFrame = multilineRender.slice(multilineRender.lastIndexOf("› /h"));
     expect(finalFrame).toContain("› /h");
     expect(finalFrame).not.toContain("❯ /help");
     expect(overlayHost.getRows()).toEqual([]);

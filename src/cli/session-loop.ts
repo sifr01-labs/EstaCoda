@@ -59,6 +59,7 @@ import {
   type OperatorConsoleRuntimeHost,
   type QueuedSteerState,
   type SteerState,
+  type TurnActivityState,
 } from "../ui/papyrus/operator-console/index.js";
 import { parseKeypress, type ParsedKeypress } from "../ui/input/parseKeypress.js";
 import { centerVisibleBlock, measureVisibleWidth, truncateVisible } from "../ui/renderers/layout.js";
@@ -711,12 +712,12 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         }
 
         const renderSpinner = (phase: string) => {
-          if (turnOutput.spinnerPhase === phase) {
-            return;
-          }
           if (operatorConsoleLiveFrame !== undefined) {
             turnOutput.spinnerPhase = phase;
-            refreshOperatorConsoleTransientSurface();
+            operatorConsoleLiveFrame.setTurnActivity(operatorConsoleTurnActivityForPhase(phase));
+            return;
+          }
+          if (turnOutput.spinnerPhase === phase) {
             return;
           }
           const spinnerText = renderer.render(buildActiveTurnSpinnerViewModel({ phase }));
@@ -2499,11 +2500,29 @@ function operatorConsoleTransientPhaseForRuntimeEvent(event: RuntimeEvent): stri
     case "provider-result":
       return event.ok || !event.willFallback ? "finalizing" : "provider";
     case "context-usage":
+      return undefined;
     case "session-compacted":
+      return "background";
     case "agent-final":
       return undefined;
     default:
       return null;
+  }
+}
+
+function operatorConsoleTurnActivityForPhase(phase: string): TurnActivityState | undefined {
+  switch (phase) {
+    case "thinking":
+    case "routing":
+    case "provider":
+    case "finalizing":
+      return { phase };
+    case "background":
+      return { phase: "background", backgroundKind: "compactingTranscript" };
+    case "tool":
+      return undefined;
+    default:
+      return undefined;
   }
 }
 

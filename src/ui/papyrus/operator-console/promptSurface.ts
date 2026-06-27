@@ -16,6 +16,7 @@ export type PromptSurfaceMetrics = {
   readonly overflow: boolean;
   readonly scrollOffset: number;
   readonly cursorRow: number;
+  readonly cursorColumn: number;
 };
 
 export const PREFERRED_PROMPT_INPUT_ROWS = 8;
@@ -23,9 +24,9 @@ export const MAX_PROMPT_HEIGHT_RATIO = 0.3;
 
 export function getPromptSurfaceDesiredHeight(
   state: PromptSurfaceState,
-  terminal: Pick<TerminalMetrics, "height">
+  terminal: Pick<TerminalMetrics, "height"> & Partial<Pick<TerminalMetrics, "width">>
 ): number {
-  const logicalRows = getPromptLogicalRows(state).length;
+  const logicalRows = getPromptLogicalRows(state, terminal.width).length;
   const preferredInputRows = Math.min(PREFERRED_PROMPT_INPUT_ROWS, logicalRows);
   const absoluteInputRows = Math.max(1, Math.floor(terminal.height * MAX_PROMPT_HEIGHT_RATIO) - 2);
   return Math.max(3, Math.min(preferredInputRows, Math.max(1, absoluteInputRows)) + 2);
@@ -40,27 +41,28 @@ export function renderPromptSurface(
 
   const height = normalizeDimension(options.height ?? getPromptSurfaceDesiredHeight(state, {
     height: options.terminalHeight ?? 24,
+    width,
   }));
   if (height <= 0) return [];
   if (height < 3) return [truncateVisibleCells(renderPromptFallbackLine(state), width)];
 
   const contentWidth = width;
   const inputRows = Math.max(1, height - 2);
-  const logicalRows = getPromptLogicalRows(state);
+  const logicalRows = getPromptLogicalRows(state, width);
   const overflow = logicalRows.length > inputRows;
-  const scrollOffset = getCursorVisibleScrollOffset(state, logicalRows.length, inputRows, overflow);
+  const cursor = getPromptCursorPosition(state, logicalRows);
+  const scrollOffset = getCursorVisibleScrollOffset(state, logicalRows.length, inputRows, overflow, cursor.row);
   const visibleRows = getVisiblePromptRows(logicalRows, scrollOffset, inputRows, overflow);
-  const title = state.multiline || logicalRows.length > 1 ? "Prompt · multiline" : "Prompt";
 
   return [
-    renderTopBorder(title, width),
+    renderHorizontalBorder(width),
     ...visibleRows.map((row, index) => renderContentRow(
-      row,
+      row.content,
       contentWidth,
       width,
       shouldStylePlaceholderRow(state, scrollOffset, index) ? options.style : undefined
     )),
-    renderBottomBorder(width),
+    renderHorizontalBorder(width),
   ];
 }
 
@@ -70,32 +72,68 @@ export function getPromptSurfaceMetrics(
 ): PromptSurfaceMetrics {
   const height = normalizeDimension(options.height ?? getPromptSurfaceDesiredHeight(state, {
     height: options.terminalHeight ?? 24,
+    width: options.width,
   }));
-  const logicalRows = getPromptLogicalRows(state).length;
+  const logicalRows = getPromptLogicalRows(state, options.width);
   const visibleRows = Math.max(1, Math.max(0, height - 2));
-  const overflow = logicalRows > visibleRows;
+  const overflow = logicalRows.length > visibleRows;
+  const cursor = getPromptCursorPosition(state, logicalRows);
   return {
-    logicalRows,
-    visibleRows: Math.min(logicalRows, visibleRows),
+    logicalRows: logicalRows.length,
+    visibleRows: Math.min(logicalRows.length, visibleRows),
     overflow,
-    scrollOffset: getCursorVisibleScrollOffset(state, logicalRows, visibleRows, overflow),
-    cursorRow: getPromptCursorRow(state),
+    scrollOffset: getCursorVisibleScrollOffset(state, logicalRows.length, visibleRows, overflow, cursor.row),
+    cursorRow: cursor.row,
+    cursorColumn: cursor.column,
   };
 }
 
-function getPromptLogicalRows(state: PromptSurfaceState): readonly string[] {
+type PromptLogicalRow = {
+  readonly content: string;
+  readonly text: string;
+  readonly prefix: string;
+  readonly startOffset: number;
+  readonly endOffset: number;
+};
+
+function getPromptLogicalRows(state: PromptSurfaceState, width: number | undefined): readonly PromptLogicalRow[] {
   const value = state.value.length === 0 ? state.placeholder ?? "" : state.value;
-  const lines = value.split(/\r\n|\n|\r/u);
-  if (lines.length === 0) return [formatFirstPromptRow("")];
-  return lines.map((line, index) => index === 0 ? formatFirstPromptRow(line) : formatContinuationPromptRow(line));
+  const rows: PromptLogicalRow[] = [];
+  const normalizedWidth = width === undefined ? Number.POSITIVE_INFINITY : normalizeDimension(width);
+  const maxTextCells = Number.isFinite(normalizedWidth)
+    ? Math.max(1, normalizedWidth - 2)
+    : Number.POSITIVE_INFINITY;
+
+  for (const explicitLine of splitExplicitLines(value)) {
+    for (const segment of wrapPromptLine(explicitLine.text, explicitLine.startOffset, maxTextCells)) {
+      const prefix = rows.length === 0 ? "› " : "  ";
+      rows.push({
+        ...segment,
+        prefix,
+        content: `${prefix}${segment.text}`,
+      });
+    }
+  }
+
+  if (rows.length === 0) {
+    return [{
+      content: "› ",
+      text: "",
+      prefix: "› ",
+      startOffset: 0,
+      endOffset: 0,
+    }];
+  }
+
+  return rows;
 }
 
 function getVisiblePromptRows(
-  logicalRows: readonly string[],
+  logicalRows: readonly PromptLogicalRow[],
   scrollOffset: number,
   inputRows: number,
   overflow: boolean
-): readonly string[] {
+): readonly PromptLogicalRow[] {
   if (!overflow) return padRows(logicalRows, inputRows);
 
   const indicatorRows = 1;
@@ -105,7 +143,7 @@ function getVisiblePromptRows(
   const visible = logicalRows.slice(offset, offset + contentRows);
   return padRows([
     ...visible,
-    `${logicalRows.length} lines · ↑↓ scroll within prompt`,
+    staticPromptRow(`${logicalRows.length} lines · ↑↓ scroll within prompt`),
   ], inputRows);
 }
 
@@ -113,14 +151,15 @@ function getCursorVisibleScrollOffset(
   state: PromptSurfaceState,
   logicalRowCount: number,
   inputRows: number,
-  overflow: boolean
+  overflow: boolean,
+  cursorRowInput?: number
 ): number {
   if (!overflow) return clampInteger(state.scrollOffset, 0, Math.max(0, logicalRowCount - inputRows));
 
   const indicatorRows = 1;
   const contentRows = Math.max(1, inputRows - indicatorRows);
   const maxOffset = Math.max(0, logicalRowCount - contentRows);
-  const cursorRow = clampInteger(getPromptCursorRow(state), 0, Math.max(0, logicalRowCount - 1));
+  const cursorRow = clampInteger(cursorRowInput ?? getPromptCursorPosition(state).row, 0, Math.max(0, logicalRowCount - 1));
   const scrollOffset = clampInteger(state.scrollOffset, 0, maxOffset);
 
   if (cursorRow < scrollOffset) return cursorRow;
@@ -128,27 +167,29 @@ function getCursorVisibleScrollOffset(
   return scrollOffset;
 }
 
-function getPromptCursorRow(state: PromptSurfaceState): number {
-  if (state.value.length === 0) return 0;
+function getPromptCursorPosition(
+  state: PromptSurfaceState,
+  rows = getPromptLogicalRows(state, undefined)
+): { readonly row: number; readonly column: number } {
   const cursor = clampInteger(state.cursorOffset, 0, state.value.length);
-  return state.value.slice(0, cursor).split(/\r\n|\n|\r/u).length - 1;
+  const index = rows.findIndex((row) => cursor >= row.startOffset && cursor <= row.endOffset);
+  const rowIndex = index < 0 ? Math.max(0, rows.length - 1) : index;
+  const row = rows[rowIndex];
+  if (row === undefined) return { row: 0, column: 0 };
+  const cursorText = row.text.slice(0, Math.max(0, Math.min(cursor, row.endOffset) - row.startOffset));
+  return {
+    row: rowIndex,
+    column: stringWidth(row.prefix) + stringWidth(cursorText),
+  };
 }
 
-function padRows(rows: readonly string[], count: number): readonly string[] {
+function padRows(rows: readonly PromptLogicalRow[], count: number): readonly PromptLogicalRow[] {
   if (rows.length >= count) return rows.slice(0, count);
-  return [...rows, ...Array.from({ length: count - rows.length }, () => "")];
+  return [...rows, ...Array.from({ length: count - rows.length }, () => staticPromptRow(""))];
 }
 
-function renderTopBorder(title: string, width: number): string {
-  if (width <= 1) return "╭".slice(0, width);
-  const label = `─ ${title} `;
-  const remaining = Math.max(0, width - 2 - stringWidth(label));
-  return truncateVisibleCells(`╭${label}${"─".repeat(remaining)}╮`, width);
-}
-
-function renderBottomBorder(width: number): string {
-  if (width <= 1) return "╰".slice(0, width);
-  return `╰${"─".repeat(Math.max(0, width - 2))}╯`;
+function renderHorizontalBorder(width: number): string {
+  return "─".repeat(Math.max(0, width));
 }
 
 function renderContentRow(
@@ -168,14 +209,6 @@ function renderContentRow(
 function renderPromptFallbackLine(state: PromptSurfaceState): string {
   const content = state.value.length === 0 ? state.placeholder ?? ">" : state.value.replace(/\r\n|\n|\r/gu, " ");
   return `Prompt: ${content.length === 0 ? ">" : content}`;
-}
-
-function formatFirstPromptRow(text: string): string {
-  return `› ${text}`;
-}
-
-function formatContinuationPromptRow(text: string): string {
-  return `  ${text}`;
 }
 
 function shouldStylePlaceholderRow(
@@ -199,6 +232,96 @@ function truncateVisibleCells(value: string, maxCells: number): string {
   const width = normalizeDimension(maxCells);
   if (width <= 0) return "";
   return truncateVisible(value, width, "");
+}
+
+function splitExplicitLines(value: string): readonly { readonly text: string; readonly startOffset: number }[] {
+  const lines: { text: string; startOffset: number }[] = [];
+  const newlinePattern = /\r\n|\n|\r/gu;
+  let lastIndex = 0;
+  for (const match of value.matchAll(newlinePattern)) {
+    const index = match.index ?? lastIndex;
+    lines.push({ text: value.slice(lastIndex, index), startOffset: lastIndex });
+    lastIndex = index + match[0].length;
+  }
+  lines.push({ text: value.slice(lastIndex), startOffset: lastIndex });
+  return lines;
+}
+
+function wrapPromptLine(
+  text: string,
+  startOffset: number,
+  maxTextCells: number
+): readonly Pick<PromptLogicalRow, "text" | "startOffset" | "endOffset">[] {
+  if (text.length === 0) return [{ text: "", startOffset, endOffset: startOffset }];
+  const rows: Pick<PromptLogicalRow, "text" | "startOffset" | "endOffset">[] = [];
+  let current = "";
+  let currentStartOffset = startOffset;
+  let lastBreakBefore = -1;
+  let lastBreakAfter = -1;
+  let offset = startOffset;
+
+  for (const char of text) {
+    const next = `${current}${char}`;
+    if (current.length > 0 && stringWidth(next) > maxTextCells) {
+      if (lastBreakBefore > 0 && lastBreakAfter > lastBreakBefore) {
+        const rowText = current.slice(0, lastBreakBefore);
+        rows.push({
+          text: rowText,
+          startOffset: currentStartOffset,
+          endOffset: currentStartOffset + rowText.length,
+        });
+        current = `${current.slice(lastBreakAfter)}${char}`;
+        currentStartOffset += lastBreakAfter;
+        const breakPoint = findLastWhitespaceBreak(current);
+        lastBreakBefore = breakPoint.before;
+        lastBreakAfter = breakPoint.after;
+      } else {
+        rows.push({ text: current, startOffset: currentStartOffset, endOffset: offset });
+        current = char;
+        currentStartOffset = offset;
+        lastBreakBefore = -1;
+        lastBreakAfter = -1;
+      }
+    } else {
+      current = next;
+      if (isWhitespace(char)) {
+        lastBreakBefore = current.length - char.length;
+        lastBreakAfter = current.length;
+      }
+    }
+    offset += char.length;
+  }
+
+  rows.push({ text: current, startOffset: currentStartOffset, endOffset: offset });
+  return rows;
+}
+
+function findLastWhitespaceBreak(text: string): { readonly before: number; readonly after: number } {
+  let before = -1;
+  let after = -1;
+  let index = 0;
+  for (const char of text) {
+    if (isWhitespace(char)) {
+      before = index;
+      after = index + char.length;
+    }
+    index += char.length;
+  }
+  return { before, after };
+}
+
+function isWhitespace(char: string): boolean {
+  return /\s/u.test(char);
+}
+
+function staticPromptRow(content: string): PromptLogicalRow {
+  return {
+    content,
+    text: content,
+    prefix: "",
+    startOffset: 0,
+    endOffset: 0,
+  };
 }
 
 function clampInteger(value: number, min: number, max: number): number {

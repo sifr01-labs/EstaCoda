@@ -11,7 +11,9 @@ export const kemetBlueSkin: ThemeAwareSkin = {
       prompt: "›",
       spinner: {
         waiting: ["⌦", "◈", "✦", "◉", "☥"],
-        thinking: ["⌦", "◐", "◑", "◒"],
+        thinking: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
+        tool: ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"],
+        background: ["⡀", "⠄", "⠂", "⠁", "⠈", "⠐", "⠠", "⢀"],
       },
     },
     toolIcon: {

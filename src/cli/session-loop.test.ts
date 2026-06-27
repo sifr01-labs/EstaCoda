@@ -492,7 +492,7 @@ describe("runSessionLoop — user prompt rail behavior", () => {
 
     for (let attempt = 0; attempt < 30; attempt += 1) {
       const rendered = stripAnsi(outputChunks.join(""));
-      if (input.listenerCount("data") > 0 && rendered.includes("Prompt")) break;
+      if (input.listenerCount("data") > 0 && rendered.includes("›")) break;
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
 
@@ -500,7 +500,7 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     await loop;
 
     const rendered = stripAnsi(outputChunks.join(""));
-    expect(rendered).toContain("╭─ Prompt");
+    expect(rendered).toContain("› /exit");
     expect(rendered).toContain("mock-model");
   });
 
@@ -2148,7 +2148,8 @@ describe("runSessionLoop — active turn spinner", () => {
     });
 
     const rendered = outputChunks.join("");
-    const userRailIndex = rendered.indexOf("↳ hello");
+    expect(stripAnsi(rendered)).toContain("↳ hello");
+    const userRailIndex = rendered.indexOf("↳ ");
     expect(userRailIndex).toBeGreaterThan(-1);
     expect(rendered.slice(0, userRailIndex)).not.toContain("\x1b[1A\x1b[2K");
   });
@@ -4867,7 +4868,7 @@ describe("runSessionLoop — active turn spinner", () => {
     });
 
     const rendered = stripAnsi(outputChunks.join(""));
-    expect(rendered).toContain("Prompt");
+    expect(rendered).toContain("›");
     expect(rendered).toContain("Final framed response");
     expect(rendered).not.toContain("raw streamed token should stay hidden");
     expect(setStatusSpy).toHaveBeenCalledWith(expect.objectContaining({

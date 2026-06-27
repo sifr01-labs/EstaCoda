@@ -49,18 +49,18 @@ describe("Papyrus operator console renderer", () => {
     const layout = createOperatorConsoleLayout(state, { width: 80, height: 8, isTty: true });
     const output = renderOperatorConsoleTextLines(state, layout);
 
-    expect(output[0]).toContain("Prompt");
+    expect(output[0]).toMatch(/^─+$/u);
     expect(output.at(-1)).toContain("◷ 00:00");
   });
 
-  it("renders boxed prompt and status rail for minimal state", () => {
+  it("renders minimal prompt frame and status rail for minimal state", () => {
     const state = createState();
     const layout = createOperatorConsoleLayout(state, { width: 80, height: 8, isTty: true });
 
     const output = renderOperatorConsoleTextLines(state, layout);
-    expect(output[0]).toMatch(/^╭─ Prompt ─+╮$/u);
+    expect(output[0]).toMatch(/^─+$/u);
     expect(output[1]).toContain("›");
-    expect(output[2]).toMatch(/^╰─+╯$/u);
+    expect(output[2]).toMatch(/^─+$/u);
     expect(output[3]).toBe("model pending ○ │ ctx [▱▱▱▱▱▱▱▱▱▱] 0 0% │ ◷ 00:00");
   });
 
@@ -87,7 +87,7 @@ describe("Papyrus operator console renderer", () => {
     const layout = createOperatorConsoleLayout(state, { width: 72, height: 20, isTty: true });
 
     const output = renderOperatorConsoleTextLines(state, layout);
-    expect(output[0]).toContain("Prompt · multiline");
+    expect(output[0]).toMatch(/^─+$/u);
     expect(output).toContainEqual(expect.stringContaining("› write a migration plan for:"));
     expect(output).toContainEqual(expect.stringContaining("  - approval cards"));
     expect(output.at(-1)).toBe("kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ ◷ 01:12");
@@ -108,7 +108,7 @@ describe("Papyrus operator console renderer", () => {
       createOperatorConsoleLayout(state, { width: 80, height: 24, isTty: true })
     );
     const startupIndex = output.findIndex((line) => line.includes("EstaCoda"));
-    const promptIndex = output.findIndex((line) => line.includes("Prompt"));
+    const promptIndex = output.findIndex((line) => line.includes("›"));
     const statusIndex = output.findIndex((line) => line.includes("◷ 01:12"));
 
     expect(startupIndex).toBeGreaterThanOrEqual(0);
@@ -129,7 +129,7 @@ describe("Papyrus operator console renderer", () => {
     const first = renderOperatorConsoleTextLines(state, layout);
     const second = renderOperatorConsoleTextLines(state, layout);
     const setupIndex = first.findIndex((line) => line.includes("Model route"));
-    const promptIndex = first.findIndex((line) => line.includes("Prompt"));
+    const promptIndex = first.findIndex((line) => line.includes("›"));
 
     expect(first).toEqual(second);
     expect(setupIndex).toBeGreaterThanOrEqual(0);
@@ -200,7 +200,7 @@ describe("Papyrus operator console renderer", () => {
     const approvalIndex = output.findIndex((line) => line.includes("Approval required"));
     const activeWorkIndex = output.findIndex((line) => line.includes("Active work"));
     const attachmentsIndex = output.findIndex((line) => line === "Attachments");
-    const promptIndex = output.findIndex((line) => line.includes("Prompt"));
+    const promptIndex = output.findIndex((line) => line.includes("›"));
     const statusIndex = output.findIndex((line) => line.includes("◷ 01:12"));
 
     expect(approvalIndex).toBeGreaterThanOrEqual(0);
@@ -373,7 +373,7 @@ describe("Papyrus operator console renderer", () => {
     const output = renderOperatorConsoleTextLines(state, layout);
 
     expect(output).not.toContainEqual(expect.stringContaining("Active work"));
-    expect(output[0]).toContain("Prompt");
+    expect(output[0]).toMatch(/^─+$/u);
   });
 
   it("does not reserve attachment rows when attachments are absent", () => {
@@ -382,7 +382,7 @@ describe("Papyrus operator console renderer", () => {
     const output = renderOperatorConsoleTextLines(state, layout);
 
     expect(output).not.toContain("Attachments");
-    expect(output[0]).toContain("Prompt");
+    expect(output[0]).toMatch(/^─+$/u);
   });
 
   it("renders slash menu between prompt and status rail", () => {
@@ -407,7 +407,7 @@ describe("Papyrus operator console renderer", () => {
       state,
       createOperatorConsoleLayout(state, { width: 72, height: 10, isTty: true })
     );
-    const promptIndex = output.findIndex((line) => line.includes("Prompt"));
+    const promptIndex = output.findIndex((line) => line.includes("› /mo"));
     const slashIndex = output.findIndex((line) => line.includes("Commands"));
     const statusIndex = output.findIndex((line) => line.includes("◷ 00:00"));
 

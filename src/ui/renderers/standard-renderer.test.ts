@@ -151,6 +151,11 @@ function ansiFgForHex(hex: string): string {
   return `\x1b[38;2;${r};${g};${b}m`;
 }
 
+function ansiBgForHex(hex: string): string {
+  const { r, g, b } = hexToRgbForTest(hex);
+  return `\x1b[48;2;${r};${g};${b}m`;
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
@@ -2704,17 +2709,21 @@ describe("StandardRenderer — prompt chrome rails", () => {
   });
 
   it("renders user prompt rail with Unicode marker", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
     const r = renderer("dark", fullCaps());
     const vm = buildUserPromptRailViewModel({ text: "Hello, world!" });
     const out = r.render(vm);
-    expect(out).toBe("↳ Hello, world!");
+    expect(stripAnsi(out)).toBe("↳ Hello, world!");
+    expect(out).toContain(ansiBgForHex(tokens.contract.surface.bgElevated));
   });
 
   it("renders user prompt rail with ASCII fallback when Unicode is disabled", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
     const r = renderer("dark", noUnicodeCaps());
     const vm = buildUserPromptRailViewModel({ text: "Hello, world!" });
     const out = r.render(vm);
-    expect(out).toBe("> Hello, world!");
+    expect(stripAnsi(out)).toBe("> Hello, world!");
+    expect(out).toContain(ansiBgForHex(tokens.contract.surface.bgElevated));
   });
 
   it("renders user prompt rail within narrow terminal width", () => {
@@ -2722,10 +2731,9 @@ describe("StandardRenderer — prompt chrome rails", () => {
     const vm = buildUserPromptRailViewModel({ text: "This is a very long user prompt that should be truncated to fit within the narrow terminal width of forty characters" });
     const out = r.render(vm);
     const lines = out.split("\n");
-    expect(lines).toHaveLength(1);
+    expect(lines.length).toBeGreaterThan(1);
     expect(lines[0]).toContain("↳");
-    expect(lines[0].length).toBeLessThanOrEqual(40);
-    expect(measureVisibleWidth(lines[0] ?? "")).toBeLessThanOrEqual(40);
+    expect(lines.every((line) => measureVisibleWidth(line) <= 40)).toBe(true);
   });
 
   it("produces no ANSI for user prompt rail in no-color mode", () => {
@@ -2740,14 +2748,14 @@ describe("StandardRenderer — prompt chrome rails", () => {
     const r = renderer("dark", fullCaps());
     const vm = buildUserPromptRailViewModel({ text: "line one\nline two" });
     const out = r.render(vm);
-    expect(out).toBe("↳ line one\n  line two");
+    expect(stripAnsi(out)).toBe("↳ line one\n  line two");
   });
 
   it("renders active turn spinner with brand eye and localized label", () => {
     const r = renderer("dark", { ...fullCaps(), supportsAnimation: false });
     const vm = buildActiveTurnSpinnerViewModel({ phase: "thinking" });
     const out = stripAnsi(r.render(vm));
-    expect(out).toContain("⌦");
+    expect(out).toContain("⠋");
     expect(out).not.toContain("𓇠");
     expect(out).toContain("contemplating");
   });
@@ -2777,13 +2785,13 @@ describe("StandardRenderer — prompt chrome rails", () => {
     expect(hasAnsi(out)).toBe(true);
   });
 
-  it("renders running tool activity with tokenized waiting spinner", () => {
+  it("renders running tool activity with tokenized tool spinner", () => {
     const r = renderer("dark", { ...fullCaps(), supportsAnimation: false });
     const vm = buildToolActivityRailViewModel({
       events: [toolActivityRailEvent("readFile", "running", { label: "preparing" })],
     });
     const out = stripAnsi(r.render(vm));
-    expect(out).toContain("⌦");
+    expect(out).toContain("⣾");
     expect(out).not.toContain("𓇠");
     expect(out).toContain("preparing");
   });

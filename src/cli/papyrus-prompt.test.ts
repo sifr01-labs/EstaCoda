@@ -377,7 +377,6 @@ describe("createPapyrusPrompt", () => {
     input.send("hello\r");
 
     await expect(pending).resolves.toBe("hello");
-    expect(output.writes.join("")).toContain("╭─ Prompt");
     expect(output.writes.join("")).toContain("› hello");
     expect(output.writes.join("")).toContain("◷ 00:00");
     expect(lifecycle.calls).toEqual(["start", "stop"]);

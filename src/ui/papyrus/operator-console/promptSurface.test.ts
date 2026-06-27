@@ -11,15 +11,15 @@ import {
 } from "./index.js";
 
 describe("Papyrus operator console prompt surface", () => {
-  it("renders a boxed single-line prompt", () => {
+  it("renders a minimal upper/lower prompt frame", () => {
     const output = renderPromptSurface(prompt({ value: "review the Papyrus rollout plan" }), {
       width: 72,
       height: 3,
     });
 
-    expect(output[0]).toMatch(/^╭─ Prompt ─+╮$/u);
+    expect(output[0]).toMatch(/^─+$/u);
     expect(output[1]).toContain("› review the Papyrus rollout plan");
-    expect(output[2]).toMatch(/^╰─+╯$/u);
+    expect(output[2]).toMatch(/^─+$/u);
     expect(output).toHaveLength(3);
   });
 
@@ -35,13 +35,32 @@ describe("Papyrus operator console prompt surface", () => {
     expect(output[1]).toContain("› /mo");
   });
 
-  it("uses multiline title for multiline prompt state", () => {
+  it("renders multiline content without a title", () => {
     const output = renderPromptSurface(prompt({
       multiline: true,
       value: "write a migration plan for:\n- approval cards",
     }), { width: 72, height: 4 });
 
-    expect(output[0]).toContain("Prompt · multiline");
+    expect(output[0]).toMatch(/^─+$/u);
+    expect(output[1]).toContain("› write a migration plan for:");
+    expect(output[2]).toContain("  - approval cards");
+  });
+
+  it("soft-wraps long typed lines and keeps the cursor on the wrapped row", () => {
+    const value = "review our src code and explain memory compaction";
+    const state = prompt({
+      value,
+      cursorOffset: value.length,
+    });
+    const output = renderPromptSurface(state, { width: 24, height: 5 });
+    const metrics = getPromptSurfaceMetrics(state, { width: 24, height: 5 });
+
+    expect(output).toHaveLength(5);
+    expect(output.join("\n")).toContain("› review our src code");
+    expect(output.join("\n")).toContain("  and explain memory");
+    expect(metrics.cursorRow).toBeGreaterThan(0);
+    expect(metrics.cursorColumn).toBeGreaterThan(2);
+    expect(output.every((line) => stringWidth(line) <= 24)).toBe(true);
   });
 
   it("expands multiline prompts by visible rows", () => {

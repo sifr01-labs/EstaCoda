@@ -2,9 +2,11 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { resolveTokens } from "../../../theme/token-resolver.js";
 import { stringWidth } from "../screen/stringWidth.js";
 import {
   ACTIVE_WORK_STATUS_SYMBOLS,
+  createOperatorConsoleStyle,
   createDefaultToolActivityState,
   formatActiveWorkSummary,
   hasActiveWork,
@@ -203,6 +205,26 @@ describe("Papyrus operator console active work surface", () => {
       cancelled: "×",
       awaitingApproval: "!",
     });
+  });
+
+  it("animates running tool rows from the active work frame index", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const style = createOperatorConsoleStyle({
+      tokens,
+      capabilities: {
+        supportsColor: true,
+        supportsTrueColor: true,
+      },
+    });
+    const state = createState({
+      frameIndex: 1,
+      items: [item("run", "running", { toolName: "read_file" })],
+    });
+
+    const output = renderActiveWorkSurface(state, { width: 72, height: 4, style }).join("\n");
+
+    expect(output).toContain("⣽");
+    expect(output).not.toContain("⣾ read_file");
   });
 
   it("truncates long tool names and targets safely", () => {

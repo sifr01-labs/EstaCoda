@@ -43,7 +43,7 @@ describe("OperatorConsoleRuntimeHost", () => {
 
     const lines = host.render().lines;
 
-    expect(lines.join("\n")).toContain("Prompt");
+    expect(lines.join("\n")).toContain("›");
     expect(lines.join("\n")).toContain("ctx");
     expect(lines.at(-1)).toContain("◷");
   });
@@ -58,7 +58,8 @@ describe("OperatorConsoleRuntimeHost", () => {
       cursorOffset: 23,
       multiline: true,
     });
-    expect(host.render().lines.join("\n")).toContain("Prompt · multiline");
+    expect(host.render().lines.join("\n")).toContain("› write plan:");
+    expect(host.render().lines.join("\n")).toContain("  - approvals");
   });
 
   it("updates status with only model, context, and session timer fields", () => {
@@ -147,7 +148,7 @@ describe("OperatorConsoleRuntimeHost", () => {
     });
 
     const lines = host.render().lines;
-    const promptIndex = lines.findIndex((line) => line.includes("Prompt"));
+    const promptIndex = lines.findIndex((line) => line.includes("› /mo"));
     const slashIndex = lines.findIndex((line) => line.includes("Commands"));
     const status = lines.at(-1) ?? "";
 

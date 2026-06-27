@@ -17,6 +17,8 @@ export const plainOverlay: TokenOverlay = {
     spinner: {
       waiting: ["|", "/", "-", "\\"],
       thinking: ["o", "O", "o", "."],
+      tool: ["|", "/", "-", "\\"],
+      background: [".", "..", "...", "...."],
     },
     progress: {
       filled: "#",

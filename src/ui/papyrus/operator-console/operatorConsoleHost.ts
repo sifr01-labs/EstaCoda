@@ -1,6 +1,5 @@
 import type { LineEditorState } from "../../input/lineEditor.js";
 import type { FocusState } from "./focusModel.js";
-import { stringWidth } from "../screen/stringWidth.js";
 import {
   createInitialOperatorConsoleState,
   type AttachmentCardState,
@@ -11,6 +10,7 @@ import {
   type SteerState,
   type TerminalMetrics,
   type ToolActivityState,
+  type TurnActivityState,
 } from "./operatorConsoleState.js";
 import { createOperatorConsoleLayout } from "./operatorConsoleLayout.js";
 import { getPromptSurfaceMetrics } from "./promptSurface.js";
@@ -27,6 +27,7 @@ export type OperatorConsoleRawPromptSnapshot = {
   readonly status?: StatusRailState;
   readonly terminal?: Partial<TerminalMetrics>;
   readonly attachments?: readonly AttachmentCardState[];
+  readonly turnActivity?: TurnActivityState;
   readonly slash?: SlashMenuState;
   readonly activeWork?: ToolActivityState;
   readonly steer?: SteerState;
@@ -64,6 +65,7 @@ export function buildOperatorConsoleStateFromRawPrompt(
       ...(snapshot.placeholder === undefined ? {} : { placeholder: snapshot.placeholder }),
     },
     status: snapshot.status ?? createDefaultOperatorConsoleRawPromptStatus(),
+    turnActivity: snapshot.turnActivity,
     attachments: snapshot.attachments ?? [],
     activeWork: snapshot.activeWork,
     steer: snapshot.steer,
@@ -100,6 +102,7 @@ export function buildOperatorConsoleRawPromptFrameWithRuntimeHost(
   host.clear();
   host.setTerminal(terminal);
   host.setStatus(snapshot.status ?? createDefaultOperatorConsoleRawPromptStatus());
+  host.setTurnActivity(snapshot.turnActivity);
   host.setAttachments(snapshot.attachments ?? []);
   host.setSlash(snapshot.slash);
   host.setActiveWork(snapshot.activeWork ?? createInitialOperatorConsoleState().activeWork);
@@ -163,15 +166,8 @@ function getPromptCursorPosition(
   const visibleCursorRow = Math.max(0, metrics.cursorRow - metrics.scrollOffset);
   return {
     row: promptRegionY + 1 + visibleCursorRow,
-    column: promptLogicalCursorColumn(state.prompt.value, state.prompt.cursorOffset),
+    column: metrics.cursorColumn,
   };
-}
-
-function promptLogicalCursorColumn(value: string, cursorOffset: number): number {
-  const cursor = clampInteger(cursorOffset, 0, value.length);
-  const beforeCursor = value.slice(0, cursor);
-  const currentLine = beforeCursor.split(/\r\n|\n|\r/u).at(-1) ?? "";
-  return 2 + stringWidth(currentLine);
 }
 
 function normalizeTerminal(input: Partial<TerminalMetrics> | undefined): TerminalMetrics {

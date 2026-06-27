@@ -31,6 +31,14 @@ export interface CliUiChromeCopy {
   readonly provider: string;
   readonly tool: string;
   readonly finalizing: string;
+  readonly indexingSkills: string;
+  readonly indexingFiles: string;
+  readonly loadingWorkspaceMap: string;
+  readonly refreshingModelCatalog: string;
+  readonly syncingSessionState: string;
+  readonly compactingTranscript: string;
+  readonly rebuildingSearchIndex: string;
+  readonly scanningAttachments: string;
 
   // Permission card (Pass 10+)
   readonly permissionRequired: string;
@@ -123,6 +131,14 @@ const en: CliUiChromeCopy = {
   provider: "scribbling",
   tool: "tinkering",
   finalizing: "polishing",
+  indexingSkills: "indexing skills",
+  indexingFiles: "indexing files",
+  loadingWorkspaceMap: "loading workspace map",
+  refreshingModelCatalog: "refreshing model catalog",
+  syncingSessionState: "syncing session state",
+  compactingTranscript: "compacting transcript",
+  rebuildingSearchIndex: "rebuilding search index",
+  scanningAttachments: "scanning attachments",
 
   permissionRequired: "Permission required",
   cardTool: "Tool",
@@ -211,6 +227,14 @@ const ar: CliUiChromeCopy = {
   provider: "بكتب",
   tool: "شغال",
   finalizing: "بخلص",
+  indexingSkills: "بفهرس المهارات",
+  indexingFiles: "بفهرس الملفات",
+  loadingWorkspaceMap: "بحمّل خريطة مساحة العمل",
+  refreshingModelCatalog: "بحدّث كتالوج النماذج",
+  syncingSessionState: "بزامن حالة الجلسة",
+  compactingTranscript: "بضغط سياق الجلسة",
+  rebuildingSearchIndex: "بعيد بناء فهرس البحث",
+  scanningAttachments: "بفحص المرفقات",
 
   permissionRequired: "مطلوب إذن",
   cardTool: "الأداة",

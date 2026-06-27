@@ -1,4 +1,5 @@
 import { stringWidth } from "../screen/stringWidth.js";
+import { truncateVisible } from "../../renderers/layout.js";
 import {
   resolveActiveWorkCopy,
   type OperatorConsoleLocale,
@@ -8,11 +9,13 @@ import type {
   ActiveWorkItemStatus,
   ToolActivityState,
 } from "./operatorConsoleState.js";
+import { styleColor, type OperatorConsoleStyle } from "./operatorConsoleStyle.js";
 
 export type ActiveWorkSurfaceRenderOptions = {
   readonly width: number;
   readonly height?: number;
   readonly locale?: OperatorConsoleLocale;
+  readonly style?: OperatorConsoleStyle;
 };
 
 export type ActiveWorkSummaryOptions = {
@@ -77,7 +80,7 @@ export function renderActiveWorkSurface(
 
   return [
     renderTopBorder(title, width),
-    ...renderActiveWorkContentRows(state, sorted, contentRows, contentWidth, options.locale)
+    ...renderActiveWorkContentRows(state, sorted, contentRows, contentWidth, options.locale, options.style)
       .map((row) => renderContentRow(row, contentWidth, width)),
     renderBottomBorder(width),
   ];
@@ -105,7 +108,8 @@ function renderActiveWorkContentRows(
   sortedItems: readonly ActiveWorkItem[],
   contentRows: number,
   contentWidth: number,
-  locale: OperatorConsoleLocale | undefined
+  locale: OperatorConsoleLocale | undefined,
+  style: OperatorConsoleStyle | undefined
 ): readonly string[] {
   if (state.expanded) {
     const footerRows = contentRows >= 3 ? 2 : 0;
@@ -113,7 +117,7 @@ function renderActiveWorkContentRows(
     const maxOffset = Math.max(0, sortedItems.length - itemRows);
     const offset = clampInteger(state.scrollOffset, 0, maxOffset);
     const visibleItems = sortedItems.slice(offset, offset + itemRows);
-    const rows = visibleItems.map((item) => formatActiveWorkRow(item, contentWidth, locale));
+    const rows = visibleItems.map((item) => formatActiveWorkRow(item, state, contentWidth, locale, style));
     if (footerRows > 0) {
       rows.push("");
       rows.push(formatExpandedFooter(contentWidth, locale));
@@ -124,7 +128,7 @@ function renderActiveWorkContentRows(
   const overflow = sortedItems.length > contentRows;
   const itemRows = overflow ? Math.max(1, contentRows - 1) : contentRows;
   const visibleItems = sortedItems.slice(0, itemRows);
-  const rows = visibleItems.map((item) => formatActiveWorkRow(item, contentWidth, locale));
+  const rows = visibleItems.map((item) => formatActiveWorkRow(item, state, contentWidth, locale, style));
   if (overflow) {
     const visibleIds = new Set(visibleItems.map((item) => item.id));
     const remainingCompleted = sortedItems
@@ -137,13 +141,15 @@ function renderActiveWorkContentRows(
 
 function formatActiveWorkRow(
   item: ActiveWorkItem,
+  state: ToolActivityState,
   contentWidth: number,
-  locale: OperatorConsoleLocale | undefined
+  locale: OperatorConsoleLocale | undefined,
+  style: OperatorConsoleStyle | undefined
 ): string {
   const width = normalizeDimension(contentWidth);
   if (width <= 0) return "";
 
-  const symbol = ACTIVE_WORK_STATUS_SYMBOLS[item.status];
+  const symbol = activeWorkStatusSymbol(item.status, state.frameIndex, style);
   const rawTool = item.toolName.trim().length === 0 ? "tool" : item.toolName.trim();
   const rawDetail = (item.target ?? item.summary).trim();
   const duration = formatDuration(resolveDurationMs(item));
@@ -164,6 +170,36 @@ function formatActiveWorkRow(
   if (durationPartCells === 0) return truncateVisibleCells(left, width);
   const row = `${left} ${isolateIfNeeded(duration, locale)}`;
   return truncateVisibleCells(row, width);
+}
+
+function activeWorkStatusSymbol(
+  status: ActiveWorkItemStatus,
+  frameIndex: number | undefined,
+  style: OperatorConsoleStyle | undefined
+): string {
+  const symbol = status === "running"
+    ? style?.tokens.contract.glyph.spinner.tool[spinnerFrameIndex(frameIndex, style?.tokens.contract.glyph.spinner.tool.length ?? 0)] ?? ACTIVE_WORK_STATUS_SYMBOLS.running
+    : ACTIVE_WORK_STATUS_SYMBOLS[status];
+  const tokens = style?.tokens.contract;
+  if (tokens === undefined) return symbol;
+  switch (status) {
+    case "running":
+    case "queued":
+      return styleColor(style, symbol, tokens.palette.action);
+    case "succeeded":
+      return styleColor(style, symbol, tokens.severity.ok);
+    case "failed":
+    case "cancelled":
+      return styleColor(style, symbol, tokens.severity.error);
+    case "awaitingApproval":
+      return styleColor(style, symbol, tokens.palette.caution);
+  }
+}
+
+function spinnerFrameIndex(input: number | undefined, length: number): number {
+  if (length <= 0) return 0;
+  if (input === undefined || !Number.isFinite(input)) return 0;
+  return Math.abs(Math.floor(input)) % length;
 }
 
 function formatCollapsedOverflow(
@@ -254,14 +290,7 @@ function isolateIfNeeded(value: string, locale: OperatorConsoleLocale | undefine
 function truncateVisibleCells(value: string, maxCells: number): string {
   const width = normalizeDimension(maxCells);
   if (width <= 0) return "";
-  if (stringWidth(value) <= width) return value;
-
-  let output = "";
-  for (const char of value) {
-    if (stringWidth(output + char) > width) break;
-    output += char;
-  }
-  return output;
+  return truncateVisible(value, width, "");
 }
 
 function clampInteger(value: number, min: number, max: number): number {

@@ -42,7 +42,9 @@ export const lightTheme: UiTokenContract = {
     arrow: "→",
     spinner: {
       waiting: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
-      thinking: ["◐", "◓", "◑", "◒"],
+      thinking: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
+      tool: ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"],
+      background: ["⡀", "⠄", "⠂", "⠁", "⠈", "⠐", "⠠", "⢀"],
     },
     progress: {
       filled: "█",

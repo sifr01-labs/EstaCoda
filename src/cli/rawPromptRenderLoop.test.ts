@@ -47,7 +47,6 @@ describe("raw prompt render loop", () => {
     });
 
     expect(rows).toBe(4);
-    expect(output.text()).toContain("╭─ Prompt");
     expect(output.text()).toContain("› review the Papyrus rollout plan");
     expect(output.text()).toContain("kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ ◷ 01:12");
     expect(output.text()).not.toMatch(forbiddenManagedRegionOutput);
@@ -283,9 +282,9 @@ describe("raw prompt render loop", () => {
     const text = output.text();
 
     expect(rows).toBe(4);
-    expect(text).toContain("╭─ Prompt");
+    expect(text).toContain("› /h");
     expect(text).not.toContain("> /help - Show help");
-    expect(text.indexOf("╭─ Prompt")).toBeLessThan(text.indexOf("◷ 00:00"));
+    expect(text.indexOf("› /h")).toBeLessThan(text.indexOf("◷ 00:00"));
     expect(text).not.toMatch(forbiddenManagedRegionOutput);
   });
 
@@ -319,7 +318,7 @@ describe("raw prompt render loop", () => {
     expect(rows).toBeGreaterThan(4);
     expect(setSlash).toHaveBeenCalledWith(expect.objectContaining({ query: "/mo" }));
     expect(host.getState().slash?.activeItemId).toBe("slash.model");
-    expect(text.indexOf("╭─ Prompt")).toBeLessThan(text.indexOf("╭─ Commands"));
+    expect(text.indexOf("› /mo")).toBeLessThan(text.indexOf("╭─ Commands"));
     expect(text.indexOf("╭─ Commands")).toBeLessThan(text.indexOf("◷ 00:13"));
     expect(text).toContain("❯ /model  show or change active model route");
     expect(text).not.toMatch(/\b(command palette|slash|model setup)\b.*session/iu);
@@ -351,7 +350,7 @@ describe("raw prompt render loop", () => {
     const text = output.text();
 
     expect(rows).toBeGreaterThan(4);
-    expect(text.indexOf("Attachments")).toBeLessThan(text.indexOf("╭─ Prompt"));
+    expect(text.indexOf("Attachments")).toBeLessThan(text.indexOf("› summarize this"));
     expect(text).toContain("MVP known issue...");
     expect(text).toContain("› summarize this");
     expect(text).toContain("kimi-k2.7-code ● │ ctx");
@@ -392,7 +391,7 @@ describe("raw prompt render loop", () => {
       "second pasted payload",
     ]);
     expect(text.match(/╭─ pasted text/gu)).toHaveLength(2);
-    expect(text.indexOf("╭─ pasted text")).toBeLessThan(text.indexOf("╭─ Prompt"));
+    expect(text.indexOf("╭─ pasted text")).toBeLessThan(text.indexOf("› summarize"));
     expect(text).toContain("20 chars");
     expect(text).toContain("21 chars");
     expect(text).not.toMatch(/\b(attachment|pasted text)\b.*session/iu);

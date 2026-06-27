@@ -1394,9 +1394,9 @@ export class StandardRenderer {
     }
     if (event.status === "running") {
       const frames = this.#useUnicode
-        ? this.#tokens.contract.glyph.spinner.waiting
+        ? this.#tokens.contract.glyph.spinner.tool
         : ["[>]", "[>.]", "[>..]", "[>...]", "[>..]", "[>.]"];
-      return this.#brand(this.#spinnerFrame(frames));
+      return this.#action(this.#spinnerFrame(frames));
     }
     const icon = this.#tokens.contract.toolIcon[event.tool];
     if (icon) {
@@ -2116,9 +2116,16 @@ export class StandardRenderer {
   renderUserPromptRail(vm: UserPromptRailViewModel): string {
     const width = this.#capabilities.terminalWidth ?? 60;
     const marker = this.#useUnicode ? "↳" : ">";
-    return vm.text
+    const textWidth = Math.max(1, width - measureVisibleWidth(`${marker} `));
+    const rows = vm.text
       .split(/\r\n|\r|\n/u)
-      .map((line, index) => truncateVisible(`${index === 0 ? marker : " "} ${line}`, width))
+      .flatMap((line) => wrapText(line, textWidth));
+    return rows
+      .map((line, index) => {
+        const prefix = `${index === 0 ? marker : " "} `;
+        const content = this.#bgColor(line, this.#tokens.contract.surface.bgElevated);
+        return truncateVisible(`${prefix}${content}`, width);
+      })
       .join("\n");
   }
 

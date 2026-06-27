@@ -18,6 +18,7 @@ import {
 import { renderSlashSurface } from "./slashSurface.js";
 import { renderStartupDashboardSurface } from "./startupDashboardSurface.js";
 import { renderStatusRailSurface } from "./statusRailSurface.js";
+import { renderTurnActivitySurface } from "./turnActivitySurface.js";
 
 export type OperatorConsoleRenderedLine = {
   readonly region: OperatorConsoleRegion["kind"];
@@ -82,6 +83,14 @@ function renderRegionLines(
       width: region.width,
       height: region.height,
       locale: state.locale,
+      style: state.style,
+    }).map((text) => ({ region: region.kind, text }));
+  }
+  if (region.kind === "turnActivity") {
+    return renderTurnActivitySurface(state.turnActivity, {
+      width: region.width,
+      locale: state.locale,
+      style: state.style,
     }).map((text) => ({ region: region.kind, text }));
   }
   if (region.kind === "approvals") {
@@ -131,6 +140,8 @@ function regionLabel(
       return `Transcript: ${state.transcript.length} block${plural(state.transcript.length)}`;
     case "approvals":
       return `Approvals: ${state.approvals.length}`;
+    case "turnActivity":
+      return `Turn activity: ${state.turnActivity?.phase ?? ""}`;
     case "queuedSteer":
       return `Queued steer: ${state.steer?.queued?.text ?? ""}`;
     case "attachments":

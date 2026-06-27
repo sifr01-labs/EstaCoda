@@ -20,3 +20,4 @@ export * from "./steerSurface.js";
 export * from "./startupDashboardSurface.js";
 export * from "./startupRuntimeMapper.js";
 export * from "./statusRailSurface.js";
+export * from "./turnActivitySurface.js";
