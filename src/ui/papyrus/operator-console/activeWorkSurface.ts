@@ -131,7 +131,8 @@ export function formatActiveWorkSummary(
   if (inspectedFileChanges > 0) {
     parts.push(`${formatNumber(inspectedFileChanges)} ${copy.fileChangeInspected}`);
   }
-  return `${copy.completedToolWork}: ${parts.join(", ")}.`;
+  const separator = options.locale === "ar" ? "، " : ", ";
+  return `${copy.completedToolWork}: ${parts.join(separator)}.`;
 }
 
 function renderCompletedActiveWorkContentRows(
@@ -166,7 +167,14 @@ function formatCompletionFooterRows(
 ): readonly string[] {
   const copy = resolveActiveWorkCopy(locale);
   const summary = formatActiveWorkSummary(state, { locale });
-  const duration = `${copy.workedFor} ${formatHumanDuration(resolveActiveWorkElapsedMs(state))}`;
+  const durationValue = formatHumanDuration(resolveActiveWorkElapsedMs(state));
+  const duration = `${copy.workedFor} ${isolateIfNeeded(durationValue, locale)}`;
+  if (locale === "ar") {
+    return [
+      truncateVisibleCells(summary, contentWidth),
+      formatRowWithRight("", duration, contentWidth),
+    ];
+  }
   if (stringWidth(summary) + 1 + stringWidth(duration) <= contentWidth) {
     return [formatRowWithRight(summary, duration, contentWidth)];
   }

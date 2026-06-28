@@ -259,11 +259,14 @@ describe("Papyrus operator console active work surface", () => {
       ],
     }), { width: 72, locale: "ar" });
     const text = output.join("\n");
+    const logicalText = text.replace(/[\u2068\u2069]/gu, "");
 
     expect(output[0]).toContain("عمل الأدوات المكتمل");
-    expect(text).toContain("عمل لمدة 1m05s");
-    expect(text).toContain("read_file");
-    expect(text).toContain("shell");
+    expect(logicalText).toContain("عمل الأدوات المكتمل: 0 خطوات نشطة حُلّت، 2 إجمالي أحداث الأدوات.");
+    expect(logicalText).toContain("عمل لمدة 1m05s");
+    expect(logicalText).toContain("read_file");
+    expect(logicalText).toContain("shell");
+    expect(output.some((line) => line.includes("عمل الأدوات المكتمل:") && line.includes("عمل لمدة"))).toBe(false);
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 
@@ -373,7 +376,7 @@ describe("Papyrus operator console active work surface", () => {
     });
 
     expect(formatActiveWorkSummary(state, { locale: "ar" })).toBe(
-      "عمل الأدوات المكتمل: 1 خطوات نشطة حُلّت, 2 إجمالي أحداث الأدوات, 1 تغيير ملف مفحوص."
+      "عمل الأدوات المكتمل: 1 خطوات نشطة حُلّت، 2 إجمالي أحداث الأدوات، 1 تغيير ملف مفحوص."
     );
   });
 
