@@ -20,6 +20,33 @@ describe("Papyrus operator console slash surface", () => {
     expect(output[0]).toContain("Command palette");
   });
 
+  it("shows up to twelve command rows by default", () => {
+    const output = renderSlashSurface(slashMenu({
+      items: manySlashItems(16),
+      activeItemId: "slash.cmd1",
+    }), { width: 72 });
+    const text = output.join("\n");
+
+    expect(output).toHaveLength(14);
+    expect(text).toContain("/cmd1");
+    expect(text).toContain("/cmd12");
+    expect(text).not.toContain("/cmd13");
+  });
+
+  it("windows visible commands around the active item", () => {
+    const output = renderSlashSurface(slashMenu({
+      items: manySlashItems(16),
+      activeItemId: "slash.cmd16",
+    }), { width: 72 });
+    const text = output.join("\n");
+
+    expect(output).toHaveLength(14);
+    expect(output).not.toContainEqual(expect.stringMatching(/\/cmd1\s+command 1\b/u));
+    expect(text).toContain("/cmd5");
+    expect(text).toContain("❯ /cmd16");
+    expect(text).toContain("/cmd16");
+  });
+
   it("keeps narrow slash menu lines bounded and truncates safely", () => {
     const output = renderSlashSurface(slashMenu({
       items: [{
@@ -92,6 +119,17 @@ function slashMenu(input: Partial<SlashMenuState> = {}): SlashMenuState {
     ],
     ...input,
   };
+}
+
+function manySlashItems(count: number): SlashMenuState["items"] {
+  return Array.from({ length: count }, (_, index) => {
+    const number = index + 1;
+    return {
+      id: `slash.cmd${number}`,
+      label: `/cmd${number}`,
+      detail: `command ${number}`,
+    };
+  });
 }
 
 function ansiFg(hex: string): string {

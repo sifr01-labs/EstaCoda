@@ -152,6 +152,20 @@ describe("Papyrus operator console layout", () => {
     expect(regionKinds(layout)).toContain("slashMenu");
   });
 
+  it("allocates up to fourteen slash menu rows when enough commands match", () => {
+    const layout = createOperatorConsoleLayout(createState({
+      slash: {
+        query: "/",
+        items: Array.from({ length: 16 }, (_, index) => ({
+          id: `cmd-${index + 1}`,
+          label: `/cmd${index + 1}`,
+        })),
+      },
+    }), { width: 80, height: 24, isTty: true });
+
+    expect(region(layout, "slashMenu")).toMatchObject({ height: 14, visible: true });
+  });
+
   it("keeps prompt and status rail allocated under constrained height", () => {
     const layout = createOperatorConsoleLayout(createFullState(), { width: 60, height: 2, isTty: true });
 

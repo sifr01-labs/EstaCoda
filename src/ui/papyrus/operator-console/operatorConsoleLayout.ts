@@ -11,6 +11,7 @@ import { getApprovalSurfaceDesiredHeight } from "./approvalSurface.js";
 import { getAttachmentSurfaceDesiredHeight } from "./attachmentSurface.js";
 import { getPromptSurfaceDesiredHeight } from "./promptSurface.js";
 import { getSetupPanelSurfaceDesiredHeight } from "./setupPanelSurface.js";
+import { getSlashSurfaceDesiredHeight } from "./slashSurface.js";
 import { getStartupDashboardSurfaceDesiredHeight } from "./startupDashboardSurface.js";
 import { getTurnActivitySurfaceDesiredHeight } from "./turnActivitySurface.js";
 import {
@@ -177,7 +178,7 @@ function createRegionDescriptors(
       kind: "slashMenu",
       priority: INTERACTIVE_OPTIONAL_PRIORITY,
       minHeight: 1,
-      desiredHeight: Math.min(6, Math.max(3, state.slash.items.length + 2)),
+      desiredHeight: getSlashSurfaceDesiredHeight(state.slash),
     });
   }
 

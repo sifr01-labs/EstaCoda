@@ -9,6 +9,13 @@ export type SlashSurfaceRenderOptions = {
   readonly style?: OperatorConsoleStyle;
 };
 
+const MAX_SLASH_MENU_HEIGHT = 14;
+
+export function getSlashSurfaceDesiredHeight(state: SlashMenuState | undefined): number {
+  if (state === undefined) return 0;
+  return Math.max(3, Math.min(MAX_SLASH_MENU_HEIGHT, state.items.length + 2));
+}
+
 export function renderSlashSurface(
   state: SlashMenuState | undefined,
   options: SlashSurfaceRenderOptions
@@ -16,14 +23,15 @@ export function renderSlashSurface(
   const width = normalizeDimension(options.width);
   if (width <= 0 || state === undefined) return [];
 
-  const desiredHeight = Math.max(3, Math.min(6, state.items.length + 2));
+  const desiredHeight = getSlashSurfaceDesiredHeight(state);
   const height = normalizeDimension(options.height ?? desiredHeight);
   if (height <= 0) return [];
   if (height < 3) return [truncateVisibleCells(renderFallbackLine(state), width)];
 
   const contentWidth = Math.max(0, width - 4);
   const itemRows = Math.max(1, height - 2);
-  const visibleItems = state.items.slice(0, itemRows);
+  const startIndex = slashViewportStartIndex(state, itemRows);
+  const visibleItems = state.items.slice(startIndex, startIndex + itemRows);
   const commandColumnCells = slashCommandColumnCells(visibleItems, contentWidth);
   const rows = [
     renderTopBorder(titleForSlashMenu(state), width),
@@ -36,6 +44,16 @@ export function renderSlashSurface(
   ];
 
   return rows.slice(0, height);
+}
+
+function slashViewportStartIndex(state: SlashMenuState, itemRows: number): number {
+  if (state.items.length <= itemRows) return 0;
+  const activeIndex = state.activeItemId === undefined
+    ? 0
+    : state.items.findIndex((item) => item.id === state.activeItemId);
+  if (activeIndex < 0) return 0;
+  if (activeIndex < itemRows) return 0;
+  return Math.min(activeIndex - itemRows + 1, state.items.length - itemRows);
 }
 
 function titleForSlashMenu(state: SlashMenuState): string {
