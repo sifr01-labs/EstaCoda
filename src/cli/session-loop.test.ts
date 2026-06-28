@@ -3352,6 +3352,70 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(handledTexts).toEqual(["line one\nline two"]);
   });
 
+  it("renders submitted display text while sending full submitted text to the runtime", async () => {
+    const handledTexts: string[] = [];
+    const outputChunks: string[] = [];
+    const runtime = createMockRuntime({
+      handle: async (input: Parameters<Runtime["handle"]>[0]) => {
+        handledTexts.push(input.text);
+        return mockResponse();
+      },
+    });
+    const fullText = [
+      "review this",
+      "",
+      "[Pasted text 1]",
+      "line one",
+      "line two",
+      "line three should only reach runtime",
+      "line four",
+    ].join("\n");
+    const displayText = [
+      "review this",
+      "",
+      "Pasted text · 4 lines · 68 chars",
+      "line one",
+      "line two",
+      "...",
+      "line four",
+    ].join("\n");
+    let promptIndex = 0;
+    const prompt = Object.assign(
+      vi.fn(async () => "/exit"),
+      {
+        submit: vi.fn(async () => {
+          if (promptIndex++ === 0) {
+            return { text: fullText, displayText };
+          }
+          return { text: "/exit" };
+        }),
+        close: () => {},
+      }
+    );
+
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      prompt,
+      close: () => {},
+    });
+
+    expect(handledTexts).toEqual([fullText]);
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("Pasted text · 4 lines · 68 chars");
+    expect(rendered).toContain("line one");
+    expect(rendered).toContain("line four");
+    expect(rendered).not.toContain("line three should only reach runtime");
+  });
+
   it("provides a profile-local paste reference store to idle prompts", async () => {
     const homeDir = await mkdtemp(join(tmpdir(), "estacoda-session-paste-home-"));
     try {

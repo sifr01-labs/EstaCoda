@@ -136,6 +136,7 @@ type StatusRailTimerMode = "idle" | "active-turn" | "last-turn";
 
 type SubmittedCliInput = {
   text: string;
+  displayText?: string;
   echoedPromptPrefix: string;
   echoedText: string;
   clearSubmittedPrompt: boolean;
@@ -500,7 +501,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       }
 
       // Render submitted non-slash user prompts as lightweight transcript rails
-      const userPromptRail = buildUserPromptRailViewModel({ text });
+      const userPromptRail = buildUserPromptRailViewModel({ text: submittedInput.displayText ?? text });
       const userPromptRailText = renderer.render(userPromptRail);
       output.write(`${userPromptRailText}\n`);
 
@@ -957,13 +958,17 @@ async function readNextCliInput(input: {
         directory: join(profilePaths.tempPath, "pastes"),
       }),
     };
-    const rawText = await input.prompt(echoedPromptPrefix, promptOptions);
+    const submission = input.prompt.submit === undefined
+      ? { text: await input.prompt(echoedPromptPrefix, promptOptions) }
+      : await input.prompt.submit(echoedPromptPrefix, promptOptions);
     input.onPromptResolved?.();
-    const text = rawText.trim();
+    const text = submission.text.trim();
+    const displayText = (submission.displayText ?? submission.text).trim();
     return {
       text,
+      ...(displayText === text ? {} : { displayText }),
       echoedPromptPrefix,
-      echoedText: rawText,
+      echoedText: submission.text,
       clearSubmittedPrompt: text.length > 0
     };
   }

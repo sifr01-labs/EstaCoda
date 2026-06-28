@@ -348,7 +348,8 @@ describe("raw prompt controller", () => {
 
   it("routes Operator Console bracketed paste into attachment cards instead of prompt text", async () => {
     const read = startPendingOperatorConsoleRead();
-    const pasted = `${"MVP known issue ".repeat(20)}\nSECRET full pasted payload should stay out of prompt chrome`;
+    const firstPastedLine = "MVP known issue ".repeat(20);
+    const pasted = `${firstPastedLine}\nSECRET full pasted payload should stay out of prompt chrome`;
 
     read.input.send("summarize this");
     read.input.send(`${PASTE_START}${pasted}${PASTE_END}`);
@@ -366,8 +367,16 @@ describe("raw prompt controller", () => {
       type: "submit",
       text: [
         "summarize this",
-        "Attachments:",
-        `- pasted text · ${pasted.length.toLocaleString("en-US")} chars`,
+        "",
+        "[Pasted text 1]",
+        pasted,
+      ].join("\n"),
+      displayText: [
+        "summarize this",
+        "",
+        `Pasted text · 2 lines · ${pasted.length.toLocaleString("en-US")} chars`,
+        `${firstPastedLine.slice(0, 157)}...`,
+        "SECRET full pasted payload should stay out of prompt chrome",
       ].join("\n"),
     });
   });
@@ -390,7 +399,8 @@ describe("raw prompt controller", () => {
 
     expect(await read.pending).toEqual({
       type: "submit",
-      text: ["Attachments:", "- pasted text · 17 chars"].join("\n"),
+      text: ["[Pasted text 1]", "line one\nline two"].join("\n"),
+      displayText: ["Pasted text · 2 lines · 17 chars", "line one", "line two"].join("\n"),
     });
     expect(attachmentsSeen.at(-1)).toHaveLength(1);
     expect(attachmentsSeen.at(-1)?.[0]).toMatchObject({
@@ -431,14 +441,23 @@ describe("raw prompt controller", () => {
       type: "submit",
       text: [
         "summarize",
-        "Attachments:",
-        `- pasted text · ${pasted.length} chars`,
+        "",
+        "[Pasted text 1]",
+        pasted,
+      ].join("\n"),
+      displayText: [
+        "summarize",
+        "",
+        `Pasted text · 2 lines · ${pasted.length} chars`,
+        "OPENAI_API_KEY=[REDACTED]",
+        "context after secret",
       ].join("\n"),
     });
-    expect(result.text).not.toContain("super-secret-value");
+    expect(result.text).toContain("super-secret-value");
+    expect(result.displayText).not.toContain("super-secret-value");
   });
 
-  it("allows multiple Operator Console paste attachments and does not dump payloads into the result", async () => {
+  it("allows multiple Operator Console paste attachments and submits full payloads with compact display text", async () => {
     const attachmentsSeen: Array<readonly AttachmentCardState[]> = [];
     const read = startPendingOperatorConsoleRead({
       operatorConsole: {
@@ -464,9 +483,19 @@ describe("raw prompt controller", () => {
       type: "submit",
       text: [
         "summarize",
-        "Attachments:",
-        "- pasted text · 20 chars",
-        "- pasted text · 21 chars",
+        "",
+        "[Pasted text 1]",
+        "first pasted payload",
+        "[Pasted text 2]",
+        "second pasted payload",
+      ].join("\n"),
+      displayText: [
+        "summarize",
+        "",
+        "Pasted text · 1 line · 20 chars",
+        "first pasted payload",
+        "Pasted text · 1 line · 21 chars",
+        "second pasted payload",
       ].join("\n"),
     });
   });
@@ -502,7 +531,8 @@ describe("raw prompt controller", () => {
 
     expect(await read.pending).toEqual({
       type: "submit",
-      text: ["summarize", "Attachments:", "- pasted text · 19 chars"].join("\n"),
+      text: ["summarize", "", "[Pasted text 1]", "full pasted payload"].join("\n"),
+      displayText: ["summarize", "", "Pasted text · 1 line · 19 chars", "full pasted payload"].join("\n"),
     });
   });
 
@@ -537,8 +567,15 @@ describe("raw prompt controller", () => {
       type: "submit",
       text: [
         "summarize",
-        "Attachments:",
-        "- pasted text · 21 chars",
+        "",
+        "[Pasted text 1]",
+        "second pasted payload",
+      ].join("\n"),
+      displayText: [
+        "summarize",
+        "",
+        "Pasted text · 1 line · 21 chars",
+        "second pasted payload",
       ].join("\n"),
     });
   });
@@ -752,7 +789,8 @@ describe("raw prompt controller", () => {
     read.input.send("\r");
     expect(await read.pending).toEqual({
       type: "submit",
-      text: ["Attachments:", "- pasted text · 17 chars"].join("\n"),
+      text: ["[Pasted text 1]", "line one\nline two"].join("\n"),
+      displayText: ["Pasted text · 2 lines · 17 chars", "line one", "line two"].join("\n"),
     });
   });
 
