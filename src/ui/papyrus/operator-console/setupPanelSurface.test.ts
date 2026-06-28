@@ -159,10 +159,12 @@ describe("Papyrus operator console setup panel surface", () => {
     const selectedDetailLine = output.find((line) => line.includes("نماذج احتياطية")) ?? "";
 
     expect(selectedLine).toContain(ansiFg(tokens.contract.palette.action));
+    expect(selectedLine).toContain("\x1b[1m");
     expect(selectedLine).toContain(`${RLI}النماذج الاحتياطية`);
     expect(selectedLine).toMatch(/النماذج الاحتياطية.*◂.*\x1b\[0m/u);
     expect(selectedDetailLine).toContain(ansiFg(tokens.contract.text.secondary));
     expect(selectedDetailLine).not.toContain(ansiFg(tokens.contract.palette.action));
+    expect(selectedDetailLine).not.toContain("\x1b[1m");
     expect(selectedDetailLine).toContain(`${RLI}نماذج احتياطية`);
   });
 
@@ -198,7 +200,7 @@ describe("Papyrus operator console setup panel surface", () => {
       }),
     }).join("\n");
 
-    expect(output).toContain(`${ansiFg(tokens.contract.palette.brand)}𓂀  Model Route\x1b[0m`);
+    expect(output).toContain(`${ansiFg(tokens.contract.palette.brand)}\x1b[1m𓂀  Model Route\x1b[0m\x1b[0m`);
     expect(output).toContain(`${ansiFg(tokens.contract.severity.ok)}Current: OpenAI\x1b[0m`);
     expect(output).toContain(`${ansiFg(tokens.contract.text.secondary)}↑↓ navigate   ENTER select   CTRL+C exit\x1b[0m`);
   });

@@ -6,7 +6,7 @@ import type {
   SetupPanelStatusLine,
   SetupSurfaceState,
 } from "./operatorConsoleState.js";
-import { styleColor, type OperatorConsoleStyle } from "./operatorConsoleStyle.js";
+import { styleBold, styleColor, type OperatorConsoleStyle } from "./operatorConsoleStyle.js";
 
 export type SetupPanelRenderOptions = {
   readonly width: number;
@@ -86,7 +86,7 @@ function renderArabicStackedRows(
     }
 
     const selected = row.id === state.selectedRowId;
-    rows.push(renderSelectedRightContentRow(
+    rows.push(renderPrimaryRightContentRow(
       formatArabicOptionLabel(row.provider, selected),
       selected,
       style,
@@ -179,7 +179,7 @@ function renderSelectedContentRow(
   return renderContentRow(styleSelectedChoiceRow(content, selected, style), contentWidth, width);
 }
 
-function renderSelectedRightContentRow(
+function renderPrimaryRightContentRow(
   row: string,
   selected: boolean,
   style: OperatorConsoleStyle | undefined,
@@ -187,7 +187,7 @@ function renderSelectedRightContentRow(
   width: number
 ): string {
   const content = padVisibleStart(truncateVisibleCells(row, contentWidth), contentWidth);
-  return renderContentRow(styleSelectedChoiceRow(content, selected, style), contentWidth, width);
+  return renderContentRow(stylePrimaryChoiceRow(content, selected, style), contentWidth, width);
 }
 
 function renderSecondaryRightContentRow(
@@ -376,7 +376,7 @@ function renderSetupPanelTopBorder(
   style: OperatorConsoleStyle | undefined
 ): string {
   return renderTopBorder(
-    styleBrand(`𓂀  ${formatFrameTitle(title, locale)}`, style),
+    styleBrand(styleBold(style, `𓂀  ${formatFrameTitle(title, locale)}`), style),
     width,
     locale === "ar" ? "right" : "left"
   );
@@ -452,6 +452,14 @@ function styleFooter(text: string, style: OperatorConsoleStyle | undefined): str
 function styleSecondary(text: string, style: OperatorConsoleStyle | undefined): string {
   const secondary = style?.tokens.contract.text.secondary;
   return secondary === undefined ? text : styleColor(style, text, secondary);
+}
+
+function stylePrimaryChoiceRow(
+  line: string,
+  selected: boolean,
+  style: OperatorConsoleStyle | undefined
+): string {
+  return styleSelectedChoiceRow(styleBold(style, line), selected, style);
 }
 
 function formatFrameTitle(title: string, locale: SetupPanelState["locale"]): string {
