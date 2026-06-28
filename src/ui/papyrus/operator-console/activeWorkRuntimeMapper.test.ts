@@ -4,10 +4,10 @@ import {
   applyActiveWorkRuntimeEvent,
   createActiveWorkRuntimeState,
 } from "./activeWorkRuntimeMapper.js";
-import { formatActiveWorkSummary, renderActiveWorkSurface } from "./activeWorkSurface.js";
+import { formatActiveWorkSummary, getActiveWorkSurfaceDesiredHeight, renderActiveWorkSurface } from "./activeWorkSurface.js";
 
 describe("active work runtime mapper", () => {
-  it("keeps the active work model uncapped while rendering remains viewport-limited", () => {
+  it("keeps the active work model and default rendering uncapped", () => {
     let state = createActiveWorkRuntimeState();
     for (let index = 0; index < 12; index += 1) {
       state = applyActiveWorkRuntimeEvent(state, {
@@ -22,10 +22,11 @@ describe("active work runtime mapper", () => {
 
     expect(state.items).toHaveLength(12);
 
-    const lines = renderActiveWorkSurface(state, { width: 80, height: 8 });
-    expect(lines).toHaveLength(8);
+    const lines = renderActiveWorkSurface(state, { width: 80 });
+    expect(lines).toHaveLength(getActiveWorkSurfaceDesiredHeight(state));
     expect(lines.join("\n")).toContain("Running tools");
-    expect(lines.join("\n")).toContain("... 7 more completed this turn");
+    expect(lines.join("\n")).toContain("src/file-11.ts");
+    expect(lines.join("\n")).not.toContain("more completed this turn");
     expect(lines.every((line) => stringWidth(line) <= 80)).toBe(true);
   });
 
@@ -89,9 +90,10 @@ describe("active work runtime mapper", () => {
     expect(formatActiveWorkSummary(state)).toBe(
       "39 completed · 3 active · 0 failed · Worked for 00:00"
     );
-    expect(renderActiveWorkSurface(state, { width: 80, height: 8 }).join("\n")).toContain(
-      "more completed this turn"
-    );
+    const rendered = renderActiveWorkSurface(state, { width: 80 }).join("\n");
+    expect(rendered).toContain("src/done-37.ts");
+    expect(rendered).toContain("src/generated.ts");
+    expect(rendered).not.toContain("more completed this turn");
   });
 
   it("maps queued, running, awaiting approval, and terminal statuses for active-work sorting", () => {

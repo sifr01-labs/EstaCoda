@@ -13,6 +13,9 @@ export type StartupDashboardRenderOptions = {
 };
 
 const WIDE_LAYOUT_MIN_WIDTH = 72;
+const ARABIC_WIDE_FRAME_MAX_WIDTH = 92;
+const ARABIC_STACKED_BLOCK_MAX_WIDTH = 60;
+const ARABIC_STACKED_LABEL_MAX_WIDTH = 24;
 
 export function createDefaultStartupDashboardState(): StartupDashboardState {
   return {
@@ -114,18 +117,20 @@ function renderWideArabicStartupDashboard(
   width: number,
   style: OperatorConsoleStyle | undefined
 ): readonly string[] {
-  const bodyWidth = Math.max(0, width - 4);
-  const blockWidth = Math.min(bodyWidth, 56);
-  const sectionGap = renderOuterRow("", bodyWidth, width);
+  const frameWidth = Math.min(width, ARABIC_WIDE_FRAME_MAX_WIDTH);
+  const framePadding = " ".repeat(Math.floor(Math.max(0, width - frameWidth) / 2));
+  const bodyWidth = Math.max(0, frameWidth - 4);
+  const blockWidth = Math.min(bodyWidth, ARABIC_STACKED_BLOCK_MAX_WIDTH);
+  const sectionGap = renderOuterRow("", bodyWidth, frameWidth);
   const output = [
-    renderTopBorder(`${state.productName}  𓂀  ${state.version}`, width, style),
+    renderTopBorder(`${state.productName}  𓂀  ${state.version}`, frameWidth, style),
     sectionGap,
     ...renderArabicStackedSection(
       startupLabel("ar", "Session", "الجلسة"),
       arabicSessionRowsForStackedSurface(state, style),
       blockWidth,
       bodyWidth,
-      width,
+      frameWidth,
       style
     ),
     sectionGap,
@@ -134,7 +139,7 @@ function renderWideArabicStartupDashboard(
       arabicCommandRowsForStackedSurface(state.commands),
       blockWidth,
       bodyWidth,
-      width,
+      frameWidth,
       style
     ),
     sectionGap,
@@ -143,7 +148,7 @@ function renderWideArabicStartupDashboard(
       arabicUpdateRowsForStackedSurface(state),
       blockWidth,
       bodyWidth,
-      width,
+      frameWidth,
       style
     ),
     sectionGap,
@@ -152,15 +157,15 @@ function renderWideArabicStartupDashboard(
       arabicTipRowsForStackedSurface(),
       blockWidth,
       bodyWidth,
-      width,
+      frameWidth,
       style
     ),
     sectionGap,
-    renderOuterRow(padVisibleStart(styleSecondaryText(`☥ ${state.orgName} ☥`, style), bodyWidth), bodyWidth, width),
-    renderBottomBorder(width),
+    renderOuterRow(centerVisible(styleSecondaryText(`☥ ${state.orgName} ☥`, style), bodyWidth), bodyWidth, frameWidth),
+    renderBottomBorder(frameWidth),
   ];
 
-  return output;
+  return output.map((line) => `${framePadding}${line}`);
 }
 
 type ArabicStackedRow = {
@@ -221,9 +226,10 @@ function renderArabicStackedSection(
   width: number,
   style: OperatorConsoleStyle | undefined
 ): readonly string[] {
+  const labelWidth = resolveArabicStackedLabelWidth(rows);
   return [
     renderArabicStackedLine(styleSectionLabel(title, style), blockWidth, bodyWidth, width),
-    ...rows.map((row) => renderArabicStackedLine(formatArabicStackedRow(row, blockWidth), blockWidth, bodyWidth, width)),
+    ...rows.map((row) => renderArabicStackedLine(formatArabicStackedRow(row, blockWidth, labelWidth), blockWidth, bodyWidth, width)),
   ];
 }
 
@@ -233,13 +239,12 @@ function renderArabicStackedLine(
   bodyWidth: number,
   width: number
 ): string {
-  return renderOuterRow(padVisibleStart(truncateVisibleCells(row, blockWidth), bodyWidth), bodyWidth, width);
+  return renderOuterRow(centerVisible(padVisibleEnd(truncateVisibleCells(row, blockWidth), blockWidth), bodyWidth), bodyWidth, width);
 }
 
-function formatArabicStackedRow(row: ArabicStackedRow, blockWidth: number): string {
-  if (row.label === undefined) return row.value;
+function formatArabicStackedRow(row: ArabicStackedRow, blockWidth: number, labelWidth: number): string {
+  if (row.label === undefined) return centerVisible(row.value, blockWidth);
   const gapWidth = 4;
-  const labelWidth = 24;
   const valueWidth = Math.max(1, blockWidth - labelWidth - gapWidth);
   const value = truncateVisibleCells(row.value, valueWidth);
   const label = truncateVisibleCells(row.label, labelWidth);
@@ -247,6 +252,11 @@ function formatArabicStackedRow(row: ArabicStackedRow, blockWidth: number): stri
     return `${padVisibleEnd(label, labelWidth)}${" ".repeat(gapWidth)}${padVisibleStart(value, valueWidth)}`;
   }
   return `${padVisibleStart(value, valueWidth)}${" ".repeat(gapWidth)}${padVisibleStart(label, labelWidth)}`;
+}
+
+function resolveArabicStackedLabelWidth(rows: readonly ArabicStackedRow[]): number {
+  const widestLabel = Math.max(0, ...rows.map((row) => row.label === undefined ? 0 : stringWidth(row.label)));
+  return Math.min(ARABIC_STACKED_LABEL_MAX_WIDTH, widestLabel);
 }
 
 function localizeApprovalValue(value: string): string {
@@ -516,6 +526,14 @@ function renderContentRow(row: string, contentWidth: number, width: number): str
   if (width <= 1) return "│".slice(0, width);
   const content = padVisibleEnd(truncateVisibleCells(row, contentWidth), contentWidth);
   return truncateVisibleCells(`│ ${content} │`, width);
+}
+
+function centerVisible(value: string, width: number): string {
+  const clipped = truncateVisibleCells(value, width);
+  const remaining = Math.max(0, width - stringWidth(clipped));
+  const left = Math.floor(remaining / 2);
+  const right = remaining - left;
+  return `${" ".repeat(left)}${clipped}${" ".repeat(right)}`;
 }
 
 function renderOuterRow(row: string, contentWidth: number, width: number): string {

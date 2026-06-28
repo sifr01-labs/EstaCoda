@@ -55,9 +55,44 @@ describe("LiveOperatorConsoleController", () => {
 
     expect(output.text()).toBe("");
   });
+
+  it("times active work from prompt submission until turn completion", () => {
+    const output = createOutput();
+    let nowMs = 5_000;
+    const controller = createController(output, {
+      now: () => nowMs,
+      turnStartedAtMs: 1_000,
+    });
+
+    controller.applyActiveWorkEvent({
+      id: "read",
+      toolName: "read_file",
+      status: "running",
+      target: "src/app.ts",
+    });
+    expect(stripAnsi(output.text())).toContain("Running tools  ◷ 00:04");
+
+    output.clear();
+    nowMs = 7_000;
+    controller.applyActiveWorkEvent({
+      id: "read",
+      toolName: "read_file",
+      status: "done",
+      target: "src/app.ts",
+      durationMs: 100,
+    });
+    expect(stripAnsi(output.text())).toContain("Running tools  ◷ 00:06");
+
+    nowMs = 9_000;
+    const completed = controller.completeActiveWork();
+    expect(completed?.completedAtMs).toBe(9_000);
+  });
 });
 
-function createController(output: ReturnType<typeof createOutput>): LiveOperatorConsoleController {
+function createController(
+  output: ReturnType<typeof createOutput>,
+  options: Pick<ConstructorParameters<typeof LiveOperatorConsoleController>[0], "now" | "turnStartedAtMs"> = {}
+): LiveOperatorConsoleController {
   const status = createDefaultStatusRailState();
   const tokens = resolveTokens("standard", "dark", "kemetBlue");
   const runtimeHost = createOperatorConsoleRuntimeHost({
@@ -75,6 +110,7 @@ function createController(output: ReturnType<typeof createOutput>): LiveOperator
     capabilities: { supportsAnimation: true },
     animationIntervalMs: 90,
     getStatus: () => status,
+    ...options,
   });
 }
 

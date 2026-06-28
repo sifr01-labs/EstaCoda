@@ -11,10 +11,6 @@ export type ActiveWorkCopy = {
   readonly failed: string;
   readonly queued: string;
   readonly awaitingApproval: string;
-  readonly moreCompletedThisTurn: (count: number) => string;
-  readonly scroll: string;
-  readonly inspect: string;
-  readonly collapse: string;
 };
 
 const ENGLISH_ACTIVE_WORK_COPY: ActiveWorkCopy = {
@@ -28,10 +24,6 @@ const ENGLISH_ACTIVE_WORK_COPY: ActiveWorkCopy = {
   failed: "failed",
   queued: "queued",
   awaitingApproval: "awaiting approval",
-  moreCompletedThisTurn: (count) => `${formatNumber(count)} more completed this turn`,
-  scroll: "scroll",
-  inspect: "inspect",
-  collapse: "collapse",
 };
 
 const ARABIC_ACTIVE_WORK_COPY: ActiveWorkCopy = {
@@ -45,16 +37,8 @@ const ARABIC_ACTIVE_WORK_COPY: ActiveWorkCopy = {
   failed: "فشلت",
   queued: "في الانتظار",
   awaitingApproval: "بانتظار الموافقة",
-  moreCompletedThisTurn: (count) => `${formatNumber(count)} أخرى مكتملة في هذه الجولة`,
-  scroll: "تمرير",
-  inspect: "فحص",
-  collapse: "طي",
 };
 
 export function resolveActiveWorkCopy(locale: OperatorConsoleLocale = "en"): ActiveWorkCopy {
   return locale === "ar" ? ARABIC_ACTIVE_WORK_COPY : ENGLISH_ACTIVE_WORK_COPY;
-}
-
-function formatNumber(value: number): string {
-  return Math.max(0, Math.floor(value)).toLocaleString("en-US");
 }

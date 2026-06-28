@@ -32,7 +32,8 @@ import {
   createInitialFocusState,
   createInitialOperatorConsoleState,
   createPastedTextAttachment,
-  formatSubmittedPromptWithAttachmentReferences,
+  formatSubmittedPromptWithAttachmentContent,
+  formatSubmittedPromptWithAttachmentPreview,
   removeAttachmentAndRepairFocus,
   routeAttachmentKey,
   type AttachmentCardState,
@@ -62,6 +63,7 @@ export type RawPromptResult =
   | {
       type: "submit";
       text: string;
+      displayText?: string;
     }
   | {
       type: "cancel";
@@ -370,14 +372,19 @@ export class RawPromptController {
           return true;
         }
 
-        finish({ type: "submit", text: formatSubmittedText(state.text) });
+        finish(formatSubmittedText(state.text));
         return true;
       };
 
-      const formatSubmittedText = (text: string) => {
-        return this.#operatorConsole?.enabled === true && attachments.length > 0
-          ? formatSubmittedPromptWithAttachmentReferences(text, attachments)
-          : text;
+      const formatSubmittedText = (text: string): RawPromptResult => {
+        if (this.#operatorConsole?.enabled !== true || attachments.length === 0) {
+          return { type: "submit", text };
+        }
+        return {
+          type: "submit",
+          text: formatSubmittedPromptWithAttachmentContent(text, attachments),
+          displayText: formatSubmittedPromptWithAttachmentPreview(text, attachments),
+        };
       };
 
       const onData = (chunk: string | Buffer | Uint8Array) => {
@@ -404,7 +411,7 @@ export class RawPromptController {
           }
           const result = applyKeypress(state, event);
           if (result.intent?.type === "submit") {
-            finish({ type: "submit", text: formatSubmittedText(result.intent.text) });
+            finish(formatSubmittedText(result.intent.text));
             return;
           }
           if (result.intent?.type === "cancel") {
@@ -428,15 +435,24 @@ export class RawPromptController {
 export function createRawPrompt(options: RawPromptControllerOptions & { uiContext?: PromptUiContext }): Prompt {
   const controller = new RawPromptController(options);
   const uiContext = options.uiContext ?? promptUiContextForLocale("en");
+  const submit = async (question: string, promptOptions?: PromptOptions) => {
+    const result = await controller.read(question, promptOptions);
+    if (result.type === "submit") {
+      return {
+        text: result.text,
+        ...(result.displayText === undefined ? {} : { displayText: result.displayText }),
+      };
+    }
+    return { text: "/exit" };
+  };
 
   return Object.assign(
     async (question: string, promptOptions?: PromptOptions) => {
-      const result = await controller.read(question, promptOptions);
-      if (result.type === "submit") return result.text;
-      return "/exit";
+      return (await submit(question, promptOptions)).text;
     },
     {
       uiContext,
+      submit,
       close: () => undefined,
     }
   );

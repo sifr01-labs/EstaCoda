@@ -29,6 +29,7 @@ const CARD_GAP = 1;
 const CARD_HEIGHT = 4;
 const DEFAULT_MAX_CARD_ROWS = 2;
 const MIN_CARD_WIDTH = 24;
+const SUBMITTED_PREVIEW_LINE_MAX_CELLS = 160;
 
 export function createPastedTextAttachment(input: {
   readonly id: string;
@@ -212,6 +213,38 @@ export function formatSubmittedPromptWithAttachmentReferences(
   ].join("\n");
 }
 
+export function formatSubmittedPromptWithAttachmentContent(
+  prompt: string,
+  attachments: readonly AttachmentCardState[]
+): string {
+  const trimmedPrompt = prompt.trimEnd();
+  if (attachments.length === 0) return trimmedPrompt;
+  const promptRows = trimmedPrompt.length === 0 ? [] : [trimmedPrompt, ""];
+  return [
+    ...promptRows,
+    ...attachments.flatMap((attachment, index) => {
+      const filePath = attachment.kind === "fileExcerpt" ? attachment.metadata.path : undefined;
+      const title = attachment.kind === "fileExcerpt"
+        ? `File excerpt ${index + 1}${filePath === undefined ? "" : `: ${filePath}`}`
+        : `Pasted text ${index + 1}`;
+      return [`[${title}]`, attachment.content];
+    }),
+  ].join("\n");
+}
+
+export function formatSubmittedPromptWithAttachmentPreview(
+  prompt: string,
+  attachments: readonly AttachmentCardState[]
+): string {
+  const trimmedPrompt = prompt.trimEnd();
+  if (attachments.length === 0) return trimmedPrompt;
+  const promptRows = trimmedPrompt.length === 0 ? [] : [trimmedPrompt, ""];
+  return [
+    ...promptRows,
+    ...attachments.flatMap((attachment) => formatAttachmentPreviewBlock(attachment)),
+  ].join("\n");
+}
+
 function formatSubmittedAttachmentReference(attachment: AttachmentCardState): string {
   if (attachment.kind === "fileExcerpt") {
     return [
@@ -319,8 +352,45 @@ function formatCharCount(chars: number): string {
   return `${formatNumber(chars)} chars`;
 }
 
+function formatAttachmentPreviewBlock(attachment: AttachmentCardState): string[] {
+  const lines = splitLines(attachment.content);
+  const filePath = attachment.kind === "fileExcerpt" ? attachment.metadata.path : undefined;
+  const metadata = [
+    attachment.kind === "fileExcerpt" ? attachment.title : "Pasted text",
+    formatLineCount(lines.length),
+    formatCharCount(attachment.content.length),
+  ];
+  if (filePath !== undefined && filePath.length > 0) {
+    metadata.splice(1, 0, filePath);
+  }
+  return [
+    metadata.join(" · "),
+    ...previewLines(lines).map((line) => truncateSubmittedPreviewLine(redactSensitiveText(line))),
+  ];
+}
+
+function splitLines(content: string): string[] {
+  if (content.length === 0) return [""];
+  return content.split(/\r\n|\n|\r/u);
+}
+
+function previewLines(lines: readonly string[]): string[] {
+  if (lines.length <= 4) return [...lines];
+  return [
+    ...lines.slice(0, 2),
+    "...",
+    ...lines.slice(-2),
+  ];
+}
+
+function truncateSubmittedPreviewLine(value: string): string {
+  if (stringWidth(value) <= SUBMITTED_PREVIEW_LINE_MAX_CELLS) return value;
+  const suffix = "...";
+  return `${truncateVisibleCells(value, SUBMITTED_PREVIEW_LINE_MAX_CELLS - stringWidth(suffix))}${suffix}`;
+}
+
 function formatLineCount(lines: number): string {
-  return `${formatNumber(lines)} lines`;
+  return `${formatNumber(lines)} ${lines === 1 ? "line" : "lines"}`;
 }
 
 function formatNumber(value: number): string {

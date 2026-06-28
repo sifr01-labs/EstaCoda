@@ -6,6 +6,8 @@ import {
   createPastedTextAttachment,
   focusNextAttachment,
   focusPreviousAttachment,
+  formatSubmittedPromptWithAttachmentContent,
+  formatSubmittedPromptWithAttachmentPreview,
   formatSubmittedPromptWithAttachmentReferences,
   getFocusedAttachment,
   renderAttachmentSurface,
@@ -338,6 +340,61 @@ describe("Papyrus operator console attachment surface", () => {
       "Attachments:",
       "- pasted text · 17 chars",
     ].join("\n"));
+  });
+
+  it("formats full runtime content separately from compact pasted previews", () => {
+    const pasted = createPastedTextAttachment({
+      id: "paste-1",
+      content: [
+        "line one",
+        "OPENAI_API_KEY=super-secret-value",
+        "line three",
+        "line four",
+        "line five",
+        "line six",
+      ].join("\n"),
+    });
+
+    expect(formatSubmittedPromptWithAttachmentContent("review this", [pasted])).toBe([
+      "review this",
+      "",
+      "[Pasted text 1]",
+      "line one",
+      "OPENAI_API_KEY=super-secret-value",
+      "line three",
+      "line four",
+      "line five",
+      "line six",
+    ].join("\n"));
+
+    expect(formatSubmittedPromptWithAttachmentPreview("review this", [pasted])).toBe([
+      "review this",
+      "",
+      "Pasted text · 6 lines · 82 chars",
+      "line one",
+      "OPENAI_API_KEY=[REDACTED]",
+      "...",
+      "line five",
+      "line six",
+    ].join("\n"));
+  });
+
+  it("truncates long submitted preview lines without changing runtime content", () => {
+    const longLine = "A".repeat(240);
+    const pasted = createPastedTextAttachment({
+      id: "paste-1",
+      content: longLine,
+    });
+
+    expect(formatSubmittedPromptWithAttachmentContent("", [pasted])).toBe([
+      "[Pasted text 1]",
+      longLine,
+    ].join("\n"));
+
+    const preview = formatSubmittedPromptWithAttachmentPreview("", [pasted]);
+    expect(preview).toContain("Pasted text · 1 line · 240 chars");
+    expect(preview).not.toContain(longLine);
+    expect(preview).toContain(`${"A".repeat(157)}...`);
   });
 
   it("emits no ANSI escape sequences or cursor-control strings", () => {

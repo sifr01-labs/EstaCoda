@@ -9,6 +9,7 @@ import {
   createOperatorConsoleStyle,
   createDefaultToolActivityState,
   formatActiveWorkSummary,
+  getActiveWorkSurfaceDesiredHeight,
   hasActiveWork,
   renderCompletedActiveWorkSurface,
   renderActiveWorkSurface,
@@ -112,24 +113,27 @@ describe("Papyrus operator console active work surface", () => {
     expect(output).toContain("passed");
   });
 
-  it("renders collapsed active work as a viewport-limited box with completed overflow", () => {
-    const output = renderActiveWorkSurface(createLiveState(), { width: 80, height: 8 });
+  it("renders active work at full desired height without completed overflow", () => {
+    const state = createLiveState();
+    const output = renderActiveWorkSurface(state, { width: 80 });
 
     expect(output[0]).toMatch(/^╭─ Running tools ─+╮$/u);
     expect(output).toContainEqual(expect.stringContaining("read_file"));
-    expect(output).toContainEqual(expect.stringContaining("... 18 more completed this turn"));
+    expect(output).toContainEqual(expect.stringContaining("tool_18"));
+    expect(output.join("\n")).not.toContain("more completed this turn");
+    expect(output).toHaveLength(getActiveWorkSurfaceDesiredHeight(state));
     expect(output.at(-1)).toMatch(/^╰─+╯$/u);
     expect(output.every((line) => stringWidth(line) <= 80)).toBe(true);
   });
 
-  it("limits collapsed rows to the requested viewport height", () => {
+  it("honors an explicit constrained height without adding overflow summary rows", () => {
     const output = renderActiveWorkSurface(createLiveState(), { width: 80, height: 5 });
 
     expect(output).toHaveLength(5);
-    expect(output).toContainEqual(expect.stringContaining("more completed this turn"));
+    expect(output.join("\n")).not.toContain("more completed this turn");
   });
 
-  it("reports overflow by hidden completed items, not total model size", () => {
+  it("does not summarize hidden completed items when a caller constrains height", () => {
     const output = renderActiveWorkSurface(createState({
       items: [
         item("run", "running"),
@@ -138,10 +142,10 @@ describe("Papyrus operator console active work surface", () => {
       ],
     }), { width: 80, height: 6 });
 
-    expect(output).toContainEqual(expect.stringContaining("... 4 more completed this turn"));
+    expect(output.join("\n")).not.toContain("more completed this turn");
   });
 
-  it("renders expanded active work with viewport scrolling and footer controls", () => {
+  it("renders expanded active work at full height without scroll footer controls", () => {
     const state = createState({
       expanded: true,
       scrollOffset: 2,
@@ -152,36 +156,39 @@ describe("Papyrus operator console active work surface", () => {
         ...manyItems(42, "succeeded"),
       ],
     });
-    const output = renderActiveWorkSurface(state, { width: 80, height: 10 });
+    const output = renderActiveWorkSurface(state, { width: 80 });
+    const text = output.join("\n");
 
     expect(output[0]).toContain("Running tools");
-    expect(output.join("\n")).not.toContain("terminal.exec");
-    expect(output.join("\n")).toContain("rg");
-    expect(output.at(-2)).toContain("↑↓ scroll · Enter inspect · Esc collapse");
+    expect(text).toContain("terminal.exec");
+    expect(text).toContain("rg");
+    expect(text).toContain("tool_42");
+    expect(text).not.toContain("↑↓ scroll · Enter inspect · Esc collapse");
+    expect(output).toHaveLength(getActiveWorkSurfaceDesiredHeight(state));
     expect(output.every((line) => stringWidth(line) <= 80)).toBe(true);
   });
 
-  it("limits expanded rows to the requested viewport height", () => {
+  it("keeps constrained expanded renders bounded without scroll footer rows", () => {
     const output = renderActiveWorkSurface(createState({
       expanded: true,
       items: manyItems(20, "running"),
     }), { width: 80, height: 7 });
 
     expect(output).toHaveLength(7);
-    expect(output.at(-2)).toContain("↑↓ scroll");
+    expect(output.join("\n")).not.toContain("↑↓ scroll");
   });
 
-  it("changes expanded visible rows when scrollOffset changes", () => {
+  it("ignores expanded scroll offset when full height can show every row", () => {
     const base = createState({
       expanded: true,
       items: manyItems(12, "running"),
     });
-    const top = renderActiveWorkSurface({ ...base, scrollOffset: 0 }, { width: 80, height: 8 }).join("\n");
-    const scrolled = renderActiveWorkSurface({ ...base, scrollOffset: 4 }, { width: 80, height: 8 }).join("\n");
+    const top = renderActiveWorkSurface({ ...base, scrollOffset: 0 }, { width: 80 }).join("\n");
+    const scrolled = renderActiveWorkSurface({ ...base, scrollOffset: 4 }, { width: 80 }).join("\n");
 
     expect(top).toContain("tool_1");
-    expect(top).not.toContain("tool_7");
-    expect(scrolled).not.toContain("tool_1");
+    expect(top).toContain("tool_12");
+    expect(scrolled).toContain("tool_1");
     expect(scrolled).toContain("tool_7");
   });
 
@@ -447,16 +454,17 @@ describe("Papyrus operator console active work surface", () => {
     expect(text).toContain("typecheck");
     expect(text).toContain("passed");
     expect(text).toContain("00:18");
-    expect(text).toContain("↑↓ تمرير · Enter فحص · Esc طي");
+    expect(text).not.toContain("↑↓ تمرير");
     expect(output.every((line) => stringWidth(line) <= 80)).toBe(true);
   });
 
-  it("renders Arabic collapsed overflow with bounded widths", () => {
-    const output = renderActiveWorkSurface(createLiveState(), { width: 80, height: 8, locale: "ar" });
+  it("renders Arabic full active work without collapsed overflow copy", () => {
+    const output = renderActiveWorkSurface(createLiveState(), { width: 80, locale: "ar" });
     const text = output.join("\n");
 
     expect(text).toContain("تنفيذ الأدوات");
-    expect(text).toContain("... 18 أخرى مكتملة في هذه الجولة");
+    expect(text).toContain("tool_18");
+    expect(text).not.toContain("أخرى مكتملة في هذه الجولة");
     expect(output.every((line) => stringWidth(line) <= 80)).toBe(true);
   });
 });

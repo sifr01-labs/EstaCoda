@@ -94,9 +94,11 @@ describe("Papyrus operator console startup dashboard surface", () => {
     expect(text).toContain("لتغيير المسارات استخدم");
     expect(text).toContain("/model");
     expect(output.some((line) => line.includes("الأوامر") && line.includes("الجلسة"))).toBe(false);
-    expect(output.find((line) => line.includes("kimi-k2.7-code"))?.endsWith(`النموذج${PDI}`)).toBe(true);
-    expect(output.find((line) => line.includes("53007044"))?.endsWith(`الجلسة${PDI}`)).toBe(true);
-    expect(output.find((line) => line.includes("/home/idris/estacoda"))?.endsWith(`مساحة العمل${PDI}`)).toBe(true);
+    expect(stripBidi(output[0]).startsWith("  ╭")).toBe(true);
+    expect(stringWidth(stripBidi(output[0]).trimStart())).toBeLessThan(96);
+    expect(stripBidi(output.find((line) => line.includes("kimi-k2.7-code")) ?? "").trimEnd().endsWith("النموذج")).toBe(true);
+    expect(stripBidi(output.find((line) => line.includes("53007044")) ?? "").trimEnd().endsWith("الجلسة")).toBe(true);
+    expect(stripBidi(output.find((line) => line.includes("/home/idris/estacoda")) ?? "").trimEnd().endsWith("مساحة العمل")).toBe(true);
     const approvalLine = output.find((line) => line.includes("الموافقة")) ?? "";
     const evolutionLine = output.find((line) => line.includes("تطوّر الوكيل")) ?? "";
     expect(approvalLine.indexOf("الموافقة")).toBeLessThan(approvalLine.indexOf("مفتوحة"));
@@ -204,4 +206,8 @@ function ansiFg(hex: string): string {
   const g = (bigint >> 8) & 255;
   const b = bigint & 255;
   return `\x1b[38;2;${r};${g};${b}m`;
+}
+
+function stripBidi(value: string): string {
+  return value.replaceAll(LRI, "").replaceAll(PDI, "");
 }

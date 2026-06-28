@@ -4,6 +4,7 @@ import { createLineEditorState } from "../ui/input/lineEditor.js";
 import {
   applyActiveWorkRuntimeEvent,
   createActiveWorkRuntimeState,
+  getActiveWorkSurfaceDesiredHeight,
   type ActiveWorkRuntimeEvent,
   type OperatorConsoleRuntimeHost,
   type StatusRailState,
@@ -25,6 +26,7 @@ export type LiveOperatorConsoleControllerOptions = {
   readonly capabilities?: Pick<TerminalCapabilities, "supportsAnimation">;
   readonly animationIntervalMs?: number;
   readonly getStatus: () => StatusRailState;
+  readonly turnStartedAtMs?: number;
   readonly now?: () => number;
 };
 
@@ -37,6 +39,7 @@ export class LiveOperatorConsoleController {
   readonly #supportsAnimation: boolean;
   readonly #animationIntervalMs: number;
   readonly #getStatus: () => StatusRailState;
+  readonly #turnStartedAtMs: number | undefined;
   readonly #now: () => number;
   #activeWork: ToolActivityState = createActiveWorkRuntimeState();
   #activeWorkFrameIndex = 0;
@@ -54,6 +57,7 @@ export class LiveOperatorConsoleController {
       DEFAULT_OPERATOR_CONSOLE_ANIMATION_INTERVAL_MS
     );
     this.#getStatus = options.getStatus;
+    this.#turnStartedAtMs = options.turnStartedAtMs;
     this.#now = options.now ?? Date.now;
     this.#renderLoop = new RawPromptRenderLoop(options.output, {
       operatorConsoleHostFactory: () => options.runtimeHost,
@@ -74,15 +78,12 @@ export class LiveOperatorConsoleController {
       items: this.#activeWork.items,
       scrollOffset: this.#activeWork.scrollOffset,
       expanded: this.#activeWork.expanded,
-      startedAtMs: this.#activeWork.startedAtMs ?? timestamp,
+      startedAtMs: this.#activeWork.startedAtMs ?? this.#turnStartedAtMs ?? timestamp,
       updatedAtMs: timestamp,
       ...(this.#activeWork.frameIndex === undefined ? {} : { frameIndex: this.#activeWork.frameIndex }),
     };
     const next = applyActiveWorkRuntimeEvent(baseState, event);
-    this.#activeWork = {
-      ...next,
-      ...(hasOpenActiveWork(next) ? {} : { completedAtMs: timestamp }),
-    };
+    this.#activeWork = next;
     this.refresh();
     return this.#activeWork;
   }
@@ -153,7 +154,7 @@ export class LiveOperatorConsoleController {
       state: createLineEditorState(this.#steer?.mode === "drafting" ? this.#steer.draft : ""),
       operatorConsole: {
         enabled: true,
-        terminal: this.#terminal,
+        terminal: this.#terminalSnapshotForRender(activeWork),
         status: this.#getStatus(),
         turnActivity: this.#turnActivity,
         activeWork,
@@ -174,7 +175,7 @@ export class LiveOperatorConsoleController {
   }
 
   #activeWorkSnapshotForRender(): ToolActivityState {
-    if (!hasRunningActiveWork(this.#activeWork)) {
+    if (!hasUnfinishedActiveWork(this.#activeWork)) {
       this.#activeWorkFrameIndex = 0;
       return this.#activeWork;
     }
@@ -186,6 +187,17 @@ export class LiveOperatorConsoleController {
     };
     this.#activeWorkFrameIndex += 1;
     return snapshot;
+  }
+
+  #terminalSnapshotForRender(activeWork: ToolActivityState): Partial<TerminalMetrics> {
+    const requestedHeight = getActiveWorkSurfaceDesiredHeight(activeWork);
+    if (requestedHeight <= 0) return this.#terminal;
+    const surroundingChromeRows = 32;
+    const currentHeight = this.#terminal.height ?? 0;
+    return {
+      ...this.#terminal,
+      height: Math.max(currentHeight, requestedHeight + surroundingChromeRows),
+    };
   }
 
   #advanceAnimationFrame(): void {
@@ -223,7 +235,7 @@ export class LiveOperatorConsoleController {
     if (!this.#supportsAnimation) return false;
     const styleAllowsAnimation = this.#runtimeHost.getState().style?.tokens.contract.behavior.allowAnimation ?? true;
     if (!styleAllowsAnimation) return false;
-    return this.#turnActivity !== undefined || hasRunningActiveWork(this.#activeWork);
+    return this.#turnActivity !== undefined || hasUnfinishedActiveWork(this.#activeWork);
   }
 }
 
@@ -236,16 +248,8 @@ function isSameTurnActivity(
     current.label === next.label;
 }
 
-function hasRunningActiveWork(state: ToolActivityState): boolean {
-  return state.items.some((item) => item.status === "running");
-}
-
-function hasOpenActiveWork(state: ToolActivityState): boolean {
-  return state.items.some((item) =>
-    item.status === "running" ||
-    item.status === "queued" ||
-    item.status === "awaitingApproval"
-  );
+function hasUnfinishedActiveWork(state: ToolActivityState): boolean {
+  return state.items.length > 0 && state.completedAtMs === undefined;
 }
 
 function normalizePositiveInteger(value: number, fallback: number): number {

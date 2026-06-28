@@ -14,6 +14,11 @@ export type PromptOptions = {
   pasteReferenceThresholdChars?: number;
 };
 
+export type PromptSubmission = {
+  text: string;
+  displayText?: string;
+};
+
 export type PromptSpecialKey = "up" | "down" | "tab" | "escape";
 
 export type PromptSpecialKeyControl = {
@@ -31,6 +36,7 @@ export type PromptSpecialKeyController = {
 
 export type Prompt = ((question: string, options?: PromptOptions) => Promise<string>) & {
   uiContext?: PromptUiContext;
+  submit?: (question: string, options?: PromptOptions) => Promise<PromptSubmission>;
   select?: <T>(input: SelectPromptInput<T>) => Promise<T>;
   onboardingCard?: (input: BuildOnboardingPromptCardInput) => Promise<void> | void;
   close?: () => void;
@@ -41,6 +47,9 @@ export function withPromptUiContext(prompt: Prompt, uiContext: PromptUiContext):
     async (question: string, options?: PromptOptions) => prompt(question, options),
     {
       uiContext,
+      submit: prompt.submit === undefined
+        ? undefined
+        : async (question: string, options?: PromptOptions) => prompt.submit!(question, options),
       select: prompt.select === undefined
         ? undefined
         : async <T>(selection: SelectPromptInput<T>) => prompt.select!(applyPromptUiContext(selection, uiContext)),

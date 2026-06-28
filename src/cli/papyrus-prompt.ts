@@ -7,7 +7,7 @@ import { parseKeypress } from "../ui/input/parseKeypress.js";
 import { createTerminalLifecycle, type TerminalLifecycle } from "../ui/input/terminalLifecycle.js";
 import { SecretPromptController } from "../ui/papyrus/input/secretPromptController.js";
 import { buildOnboardingPromptCardViewModel, type BuildOnboardingPromptCardInput } from "../ui/view-models/builders.js";
-import { applyPromptUiContext, type Prompt, type PromptOptions } from "./prompt-contract.js";
+import { applyPromptUiContext, type Prompt, type PromptOptions, type PromptSubmission } from "./prompt-contract.js";
 import { resolveGhostTextMode } from "./ghost-text-mode.js";
 import { resolveInputKeymapMode } from "./input-keymap-mode.js";
 import { selectOption, type SelectPromptInput } from "./interactive-select.js";
@@ -70,6 +70,15 @@ export function createPapyrusPrompt(options: CreatePapyrusPromptOptions = {}): P
     },
     {
       uiContext,
+      submit: async (question: string, promptOptions?: PromptOptions): Promise<PromptSubmission> => {
+        if (promptOptions?.secret === true) {
+          return { text: await secretPrompt(question, { secret: true }) };
+        }
+        if (rawPrompt.submit !== undefined) {
+          return await rawPrompt.submit(question, promptOptions);
+        }
+        return { text: await rawPrompt(question, promptOptions) };
+      },
       select: async <T>(selection: SelectPromptInput<T>) =>
         selectOption(input as Readable, output as Writable, applyPromptUiContext(selection, uiContext)),
       onboardingCard: (card: BuildOnboardingPromptCardInput) => {
