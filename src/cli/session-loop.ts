@@ -52,6 +52,7 @@ import {
   createOperatorConsoleRuntimeHost,
   createOperatorConsoleStyle,
   mapStartupDashboardViewModelToOperatorConsoleState,
+  renderCompletedActiveWorkSurface,
   renderOperatorConsoleLines,
   routeSteerKey,
   type ActiveWorkRuntimeEvent,
@@ -807,9 +808,14 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	            clearActiveTurnChrome = () => undefined;
 	          });
         const response = await responsePromise;
-        const activeWorkSummary = operatorConsoleLiveFrame?.activeWorkSummary();
-        if (activeWorkSummary !== undefined) {
-          writeTurnBoundaryRows([activeWorkSummary]);
+        const completedActiveWork = operatorConsoleLiveFrame?.completeActiveWork();
+        if (completedActiveWork !== undefined) {
+          const completedRows = renderCompletedActiveWorkSurface(completedActiveWork, {
+            width: termWidth,
+            locale: renderer.locale,
+            style: operatorConsoleStyle,
+          });
+          writeTurnBoundaryRows(completedRows.length === 0 ? [] : completedRows);
           operatorConsoleLiveFrame?.resetActiveWork();
         }
         lastProviderExecutionSummary = response.providerExecution === undefined

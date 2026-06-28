@@ -2,6 +2,8 @@ export type OperatorConsoleLocale = "en" | "ar";
 
 export type ActiveWorkCopy = {
   readonly activeWork: string;
+  readonly working: string;
+  readonly workedFor: string;
   readonly running: string;
   readonly completed: string;
   readonly queued: string;
@@ -18,6 +20,8 @@ export type ActiveWorkCopy = {
 
 const ENGLISH_ACTIVE_WORK_COPY: ActiveWorkCopy = {
   activeWork: "Active work",
+  working: "Working",
+  workedFor: "Worked for",
   running: "running",
   completed: "completed",
   queued: "queued",
@@ -34,6 +38,8 @@ const ENGLISH_ACTIVE_WORK_COPY: ActiveWorkCopy = {
 
 const ARABIC_ACTIVE_WORK_COPY: ActiveWorkCopy = {
   activeWork: "العمل النشط",
+  working: "يعمل",
+  workedFor: "عمل لمدة",
   running: "قيد التشغيل",
   completed: "مكتملة",
   queued: "في الانتظار",

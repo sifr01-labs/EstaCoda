@@ -106,7 +106,7 @@ describe("OperatorConsoleRuntimeHost", () => {
 
     const text = host.render().lines.join("\n");
     expect(text).toContain("EstaCoda");
-    expect(text).toContain("Model route");
+    expect(text).toContain("Model Route");
     expect(text).toContain("Attachments");
     expect(text).toContain("Active work");
     expect(text).toContain("Approval required");
@@ -155,7 +155,7 @@ describe("OperatorConsoleRuntimeHost", () => {
     expect(host.getState().slash?.query).toBe("/mo");
     expect(promptIndex).toBeGreaterThanOrEqual(0);
     expect(slashIndex).toBeGreaterThan(promptIndex);
-    expect(lines).toContainEqual(expect.stringContaining("❯ /model  show or change active model route"));
+    expect(lines).toContainEqual(expect.stringContaining("❯ /model        show or change active model route"));
     expect(status).toContain("◷");
     expect(status).not.toMatch(/\b(slash|Commands|model setup)\b/iu);
 

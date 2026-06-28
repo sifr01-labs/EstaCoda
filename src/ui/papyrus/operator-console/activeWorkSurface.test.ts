@@ -10,6 +10,7 @@ import {
   createDefaultToolActivityState,
   formatActiveWorkSummary,
   hasActiveWork,
+  renderCompletedActiveWorkSurface,
   renderActiveWorkSurface,
   resolveActiveWorkCopy,
   sortActiveWorkItems,
@@ -194,6 +195,76 @@ describe("Papyrus operator console active work surface", () => {
 
     expect(output).toContain("00:03");
     expect(output).toContain("00:18");
+  });
+
+  it("shows a live working timer in the active work header when turn timing is available", () => {
+    const output = renderActiveWorkSurface(createState({
+      startedAtMs: 1_000,
+      updatedAtMs: 2_900,
+      items: [
+        item("read", "running", { toolName: "read_file", target: "src/app.ts" }),
+      ],
+    }), { width: 72, height: 4 });
+
+    expect(output[0]).toContain("Active work");
+    expect(output[0]).toContain("Working 00:01");
+    expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
+  });
+
+  it("keeps the live working timer visible for queued and approval work", () => {
+    const output = renderActiveWorkSurface(createState({
+      startedAtMs: 1_000,
+      updatedAtMs: 62_000,
+      items: [
+        item("queued", "queued", { toolName: "read_file", target: "src/app.ts" }),
+        item("approval", "awaitingApproval", { toolName: "shell", target: "pnpm run build" }),
+      ],
+    }), { width: 72, height: 5 });
+    const text = output.join("\n");
+
+    expect(output[0]).toContain("Working 01:01");
+    expect(text).toContain("! shell");
+    expect(text).toContain("pnpm run build");
+    expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
+  });
+
+  it("renders completed tool logs with the summary and worked duration at the bottom", () => {
+    const output = renderCompletedActiveWorkSurface(createState({
+      startedAtMs: 0,
+      completedAtMs: 1_532_000,
+      items: [
+        item("read", "succeeded", { toolName: "read_file", target: "src/app.ts", durationMs: 1_000 }),
+        item("test", "failed", { toolName: "test", target: "failed", durationMs: 18_000 }),
+      ],
+    }), { width: 96 });
+    const text = output.join("\n");
+
+    expect(output[0]).toContain("Completed tool work");
+    expect(text).toContain("read_file");
+    expect(text).toContain("src/app.ts");
+    expect(text).toContain("test");
+    expect(text).toContain("failed");
+    expect(text).toContain("Completed tool work: 0 running steps resolved, 2 total tool events.");
+    expect(text).toContain("Worked for 25m32s");
+    expect(output.every((line) => stringWidth(line) <= 96)).toBe(true);
+  });
+
+  it("renders Arabic completed tool logs with localized duration copy within bounds", () => {
+    const output = renderCompletedActiveWorkSurface(createState({
+      startedAtMs: 0,
+      completedAtMs: 65_000,
+      items: [
+        item("read", "succeeded", { toolName: "read_file", target: "src/app.ts", durationMs: 1_000 }),
+        item("approval", "failed", { toolName: "shell", target: "approval required", durationMs: 8_000 }),
+      ],
+    }), { width: 72, locale: "ar" });
+    const text = output.join("\n");
+
+    expect(output[0]).toContain("عمل الأدوات المكتمل");
+    expect(text).toContain("عمل لمدة 1m05s");
+    expect(text).toContain("read_file");
+    expect(text).toContain("shell");
+    expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 
   it("keeps status symbols mapped in one deterministic table", () => {

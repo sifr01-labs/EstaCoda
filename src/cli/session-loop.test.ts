@@ -2445,12 +2445,17 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(durableResponseChunk).not.toContain("src/completed-0.ts");
     expect(durableResponseChunk).not.toContain("src/completed-7.ts");
     expect(durableResponseChunk).not.toContain("approval required");
+    const durableOutput = strippedChunks.join("");
+    expect(durableOutput).toContain("Completed tool work");
+    expect(durableOutput).toContain("src/completed-0.ts");
+    expect(durableOutput).toContain("src/completed-7.ts");
+    expect(durableOutput).toContain("approval required");
+    expect(durableOutput).toContain("failed");
+    expect(durableOutput).toContain("Worked for");
     const summaryChunks = strippedChunks.filter((chunk) => chunk.includes("Completed tool work:"));
-    expect(summaryChunks).toEqual([
-      "Completed tool work: 3 running steps resolved, 13 total tool events, 1 file change inspected.\n",
-    ]);
-    expect(summaryChunks[0]).not.toContain("src/completed-0.ts");
-    expect(summaryChunks[0]).not.toContain("approval required");
+    expect(summaryChunks.join("")).toContain(
+      "Completed tool work: 3 running steps resolved, 13 total tool events, 1 file change inspected."
+    );
   });
 
   it("renders provider spinner below the most recent tool row in managed TTY mode", async () => {

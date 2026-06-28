@@ -4,7 +4,6 @@ import { createLineEditorState } from "../ui/input/lineEditor.js";
 import {
   applyActiveWorkRuntimeEvent,
   createActiveWorkRuntimeState,
-  formatActiveWorkSummary,
   type ActiveWorkRuntimeEvent,
   type OperatorConsoleRuntimeHost,
   type StatusRailState,
@@ -26,6 +25,7 @@ export type LiveOperatorConsoleControllerOptions = {
   readonly capabilities?: Pick<TerminalCapabilities, "supportsAnimation">;
   readonly animationIntervalMs?: number;
   readonly getStatus: () => StatusRailState;
+  readonly now?: () => number;
 };
 
 const DEFAULT_OPERATOR_CONSOLE_ANIMATION_INTERVAL_MS = 90;
@@ -37,6 +37,7 @@ export class LiveOperatorConsoleController {
   readonly #supportsAnimation: boolean;
   readonly #animationIntervalMs: number;
   readonly #getStatus: () => StatusRailState;
+  readonly #now: () => number;
   #activeWork: ToolActivityState = createActiveWorkRuntimeState();
   #activeWorkFrameIndex = 0;
   #steer: SteerState | undefined;
@@ -53,6 +54,7 @@ export class LiveOperatorConsoleController {
       DEFAULT_OPERATOR_CONSOLE_ANIMATION_INTERVAL_MS
     );
     this.#getStatus = options.getStatus;
+    this.#now = options.now ?? Date.now;
     this.#renderLoop = new RawPromptRenderLoop(options.output, {
       operatorConsoleHostFactory: () => options.runtimeHost,
     });
@@ -67,7 +69,20 @@ export class LiveOperatorConsoleController {
   }
 
   applyActiveWorkEvent(event: ActiveWorkRuntimeEvent): ToolActivityState {
-    this.#activeWork = applyActiveWorkRuntimeEvent(this.#activeWork, event);
+    const timestamp = this.#now();
+    const baseState: ToolActivityState = {
+      items: this.#activeWork.items,
+      scrollOffset: this.#activeWork.scrollOffset,
+      expanded: this.#activeWork.expanded,
+      startedAtMs: this.#activeWork.startedAtMs ?? timestamp,
+      updatedAtMs: timestamp,
+      ...(this.#activeWork.frameIndex === undefined ? {} : { frameIndex: this.#activeWork.frameIndex }),
+    };
+    const next = applyActiveWorkRuntimeEvent(baseState, event);
+    this.#activeWork = {
+      ...next,
+      ...(hasOpenActiveWork(next) ? {} : { completedAtMs: timestamp }),
+    };
     this.refresh();
     return this.#activeWork;
   }
@@ -79,8 +94,18 @@ export class LiveOperatorConsoleController {
     this.#syncAnimationTimer();
   }
 
-  activeWorkSummary(): string | undefined {
-    return this.#activeWork.items.length === 0 ? undefined : formatActiveWorkSummary(this.#activeWork);
+  completeActiveWork(): ToolActivityState | undefined {
+    if (this.#activeWork.items.length === 0) return undefined;
+    const timestamp = this.#now();
+    this.#activeWork = {
+      ...this.#activeWork,
+      updatedAtMs: timestamp,
+      completedAtMs: this.#activeWork.completedAtMs ?? timestamp,
+      frameIndex: undefined,
+    };
+    this.#runtimeHost.setActiveWork(this.#activeWork);
+    this.#syncAnimationTimer();
+    return this.#activeWork;
   }
 
   setSteer(state: SteerState | undefined): void {
@@ -153,8 +178,10 @@ export class LiveOperatorConsoleController {
       this.#activeWorkFrameIndex = 0;
       return this.#activeWork;
     }
+    const timestamp = this.#now();
     const snapshot = {
       ...this.#activeWork,
+      updatedAtMs: timestamp,
       frameIndex: this.#activeWorkFrameIndex,
     };
     this.#activeWorkFrameIndex += 1;
@@ -211,6 +238,14 @@ function isSameTurnActivity(
 
 function hasRunningActiveWork(state: ToolActivityState): boolean {
   return state.items.some((item) => item.status === "running");
+}
+
+function hasOpenActiveWork(state: ToolActivityState): boolean {
+  return state.items.some((item) =>
+    item.status === "running" ||
+    item.status === "queued" ||
+    item.status === "awaitingApproval"
+  );
 }
 
 function normalizePositiveInteger(value: number, fallback: number): number {

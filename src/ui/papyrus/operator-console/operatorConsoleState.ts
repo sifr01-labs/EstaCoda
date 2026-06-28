@@ -128,6 +128,9 @@ export type ToolActivityState = {
   readonly items: readonly ActiveWorkItem[];
   readonly scrollOffset: number;
   readonly expanded: boolean;
+  readonly startedAtMs?: number;
+  readonly updatedAtMs?: number;
+  readonly completedAtMs?: number;
   readonly frameIndex?: number;
 };
 
