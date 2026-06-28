@@ -78,6 +78,67 @@ describe("withSetupConsolePrompt", () => {
     expect(text).not.toContain("Selected:");
   });
 
+  it("routes setup secret input through a masked setup console panel", async () => {
+    const input = createInput();
+    const output = createOutput();
+    const prompt = createPrompt({ select: createSelect("base").select });
+    const wrapped = withSetupConsolePrompt(prompt, { input, output });
+
+    const pending = wrapped("Enter API key for OpenAI as OPENAI_API_KEY: ", { secret: true });
+    await Promise.resolve();
+    input.write("sk-live-setup-console-secret\r");
+    const result = await pending;
+    const text = stripAnsi(output.text());
+
+    expect(result).toBe("sk-live-setup-console-secret");
+    expect(text).toContain("API Key");
+    expect(text).toContain("Enter API key for OpenAI as OPENAI_API_KEY");
+    expect(text).toContain("Stored as: OPENAI_API_KEY");
+    expect(text).toContain("••••••••");
+    expect(text).not.toContain("sk-live-setup-console-secret");
+    expect(output.text()).toContain("\x1b[?25l");
+    expect(output.text()).toContain("\x1b[?25h");
+    expect(input.rawModes).toEqual([true, false]);
+    expect(output.text()).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
+  it("renders Arabic setup secret panel copy while keeping env vars stable", async () => {
+    const input = createInput();
+    const output = createOutput();
+    const prompt = createPrompt({
+      select: createSelect("base").select,
+      uiContext: { locale: "ar", direction: "rtl" },
+    });
+    const wrapped = withSetupConsolePrompt(prompt, { input, output });
+
+    const pending = wrapped("أدخل مفتاح API لـ Brave Search as BRAVE_SEARCH_API_KEY: ", { secret: true });
+    await Promise.resolve();
+    input.write("brave-arabic-secret\r");
+    const result = await pending;
+    const text = stripAnsi(output.text());
+
+    expect(result).toBe("brave-arabic-secret");
+    expect(text).toContain("مفتاح API");
+    expect(text).toContain("BRAVE_SEARCH_API_KEY");
+    expect(text).toContain("Enter حفظ");
+    expect(text).not.toContain("brave-arabic-secret");
+  });
+
+  it("returns /exit for setup secret cancellation without rendering typed secret text", async () => {
+    const input = createInput();
+    const output = createOutput();
+    const prompt = createPrompt({ select: createSelect("base").select });
+    const wrapped = withSetupConsolePrompt(prompt, { input, output });
+
+    const pending = wrapped("Enter API key: ", { secret: true });
+    await Promise.resolve();
+    input.write("cancel-secret\x1b");
+
+    await expect(pending).resolves.toBe("/exit");
+    expect(stripAnsi(output.text())).not.toContain("cancel-secret");
+    expect(input.rawModes).toEqual([true, false]);
+  });
+
   it("keeps non-TTY setup selects on the existing prompt behavior", async () => {
     const input = createInput({ isTTY: false });
     const output = createOutput();
@@ -92,6 +153,40 @@ describe("withSetupConsolePrompt", () => {
     expect(baseSelectCalls).toHaveBeenCalledWith(selection);
     expect(createController).not.toHaveBeenCalled();
     expect(output.text()).toBe("");
+  });
+
+  it("keeps non-TTY setup secrets on the existing prompt behavior", async () => {
+    const input = createInput({ isTTY: false });
+    const output = createOutput();
+    const createController = vi.fn();
+    const prompt = createPrompt({
+      select: createSelect("base").select,
+      answer: "base-secret",
+    });
+    const wrapped = withSetupConsolePrompt(prompt, { input, output, createController });
+
+    await expect(wrapped("Secret: ", { secret: true })).resolves.toBe("base-secret");
+
+    expect(createController).not.toHaveBeenCalled();
+    expect(output.text()).toBe("");
+  });
+
+  it("routes setup secret submit through a masked setup console panel", async () => {
+    const input = createInput();
+    const output = createOutput();
+    const prompt = createPrompt({
+      select: createSelect("base").select,
+      submit: vi.fn(async () => ({ text: "base-submit" })),
+    });
+    const wrapped = withSetupConsolePrompt(prompt, { input, output });
+
+    const pending = wrapped.submit!("Enter API key for OpenAI as OPENAI_API_KEY: ", { secret: true });
+    await Promise.resolve();
+    input.write("sk-submit-secret\r");
+
+    await expect(pending).resolves.toEqual({ text: "sk-submit-secret" });
+    expect(stripAnsi(output.text())).not.toContain("sk-submit-secret");
+    expect(stripAnsi(output.text())).toContain("Stored as: OPENAI_API_KEY");
   });
 
   it("settles Ctrl+C interruption after restoring the terminal", async () => {
@@ -253,11 +348,13 @@ function createPrompt(input: {
   readonly submit?: Prompt["submit"];
   readonly onboardingCard?: Prompt["onboardingCard"];
   readonly close?: Prompt["close"];
+  readonly answer?: string;
+  readonly uiContext?: Prompt["uiContext"];
 } = {}): Prompt {
   return Object.assign(
-    async () => "answer",
+    async () => input.answer ?? "answer",
     {
-      uiContext: { locale: "en" as const, direction: "ltr" as const },
+      uiContext: input.uiContext ?? { locale: "en" as const, direction: "ltr" as const },
       ...input,
     }
   );

@@ -2,6 +2,7 @@ import type { Readable, Writable } from "node:stream";
 import type { SelectPromptInput } from "../../cli/interactive-select.js";
 import type { Prompt, PromptOptions, PromptSubmission } from "../../cli/prompt-contract.js";
 import { parseKeypress, type ParsedKeypress } from "../../ui/input/parseKeypress.js";
+import { SecretPromptController } from "../../ui/papyrus/input/secretPromptController.js";
 import { mapSetupSelectToSetupPanelState } from "../../ui/papyrus/operator-console/setupSelectRuntimeMapper.js";
 import {
   applySelectKey,
@@ -66,13 +67,22 @@ export function withSetupConsolePrompt(
     };
 
   return Object.assign(
-    async (question: string, promptOptions?: PromptOptions) => prompt(question, promptOptions),
+    async (question: string, promptOptions?: PromptOptions) => {
+      if (promptOptions?.secret === true && hasLiveSetupConsole(options.input, options.output)) {
+        return readSecretWithSetupConsole(question, options, getController(), prompt.uiContext?.locale);
+      }
+      return prompt(question, promptOptions);
+    },
     {
       uiContext: prompt.uiContext,
       submit: prompt.submit === undefined
         ? undefined
-        : async (question: string, promptOptions?: PromptOptions): Promise<PromptSubmission> =>
-          prompt.submit!(question, promptOptions),
+        : async (question: string, promptOptions?: PromptOptions): Promise<PromptSubmission> => {
+          if (promptOptions?.secret === true && hasLiveSetupConsole(options.input, options.output)) {
+            return { text: await readSecretWithSetupConsole(question, options, getController(), prompt.uiContext?.locale) };
+          }
+          return prompt.submit!(question, promptOptions);
+        },
       select,
       onboardingCard: prompt.onboardingCard === undefined
         ? undefined
@@ -219,6 +229,101 @@ async function selectWithSetupConsole<T>(
   });
 }
 
+async function readSecretWithSetupConsole(
+  question: string,
+  options: SetupConsolePromptAdapterOptions,
+  controller: SetupOperatorConsoleController,
+  locale: string | undefined
+): Promise<string> {
+  const ttyInput = options.input as TtyReadable;
+  const secret = new SecretPromptController({
+    label: question,
+    maskCharacter: "•",
+  });
+  let settled = false;
+  let restored = false;
+  let cursorHidden = false;
+  const wasRaw = ttyInput.isRaw === true;
+  const normalizedLocale = locale === "ar" ? "ar" : "en";
+
+  const render = () => {
+    const renderState = secret.renderState;
+    const copy = secretPanelCopy(normalizedLocale);
+    controller.render({
+      kind: "secret",
+      title: secretPanelTitle(question, normalizedLocale),
+      description: secretPanelDescription(question, copy),
+      maskedValue: renderState.maskedText,
+      envVar: secretPanelEnvVar(question),
+      optional: true,
+      emptyLabel: copy.emptyLabel,
+      footer: copy.footer,
+    });
+  };
+
+  const restoreTerminal = () => {
+    if (restored) return;
+    restored = true;
+    ttyInput.off("data", onData);
+    if (!wasRaw) {
+      ttyInput.setRawMode?.(false);
+    }
+    if (cursorHidden) {
+      options.output.write(SHOW_CURSOR);
+      cursorHidden = false;
+    }
+  };
+
+  const finish = (value: string, resolve: (value: string) => void) => {
+    if (settled) return;
+    settled = true;
+    restoreTerminal();
+    controller.clear();
+    resolve(value);
+  };
+
+  const onData = (chunk: string | Buffer | Uint8Array) => {
+    const text = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+    pendingKeypresses.push(...parseKeypress(text));
+    drainKeypresses();
+  };
+
+  const pendingKeypresses: ParsedKeypress[] = [];
+  let resolveSecret: ((value: string) => void) | undefined;
+
+  const drainKeypresses = () => {
+    if (resolveSecret === undefined || settled) return;
+    for (const keypress of pendingKeypresses.splice(0)) {
+      const result = secret.apply(keypress);
+      render();
+      if (result.intent?.type === "submit") {
+        finish(result.intent.value, resolveSecret);
+        return;
+      }
+      if (result.intent?.type === "cancel" || result.intent?.type === "eof") {
+        finish("/exit", resolveSecret);
+        return;
+      }
+    }
+  };
+
+  return await new Promise<string>((resolve) => {
+    resolveSecret = resolve;
+    ttyInput.on("data", onData);
+    ttyInput.setRawMode?.(true);
+    ttyInput.resume?.();
+    options.output.write(HIDE_CURSOR);
+    cursorHidden = true;
+    render();
+    drainKeypresses();
+  }).finally(() => {
+    if (!settled) {
+      restoreTerminal();
+      controller.clear();
+    }
+  });
+}
+
 function shouldUseSetupConsole<T>(
   selection: SelectPromptInput<T>,
   input: Readable,
@@ -234,6 +339,55 @@ function hasLiveSetupConsole(
   output: SetupOperatorConsoleOutput
 ): boolean {
   return Boolean((input as TtyReadable).isTTY && output.isTTY);
+}
+
+function secretPanelTitle(question: string, locale: "en" | "ar"): string {
+  const normalized = normalizeSecretQuestion(question);
+  if (/api key|مفتاح\s*api/iu.test(normalized)) {
+    return locale === "ar" ? "مفتاح API" : "API key";
+  }
+  return locale === "ar" ? "إدخال سرّي" : "Secret entry";
+}
+
+function secretPanelDescription(
+  question: string,
+  copy: ReturnType<typeof secretPanelCopy>
+): string {
+  return normalizeSecretQuestion(question) || copy.description;
+}
+
+function secretPanelEnvVar(question: string): string | undefined {
+  const normalized = normalizeSecretQuestion(question);
+  const candidates = normalized.match(/\b[A-Z][A-Z0-9_]{2,}\b/gu) ?? [];
+  return candidates.find((candidate) => candidate.includes("_") && /(?:API|KEY|TOKEN|SECRET|PROJECT)/u.test(candidate)) ??
+    candidates.find((candidate) => /(?:KEY|TOKEN|SECRET|PROJECT)/u.test(candidate));
+}
+
+function normalizeSecretQuestion(question: string): string {
+  return question
+    .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/gu, "")
+    .replace(/[\u2066\u2067\u2069]/gu, "")
+    .replace(/\s+/gu, " ")
+    .replace(/\s*[:：]\s*$/u, "")
+    .trim();
+}
+
+function secretPanelCopy(locale: "en" | "ar"): {
+  readonly description: string;
+  readonly emptyLabel: string;
+  readonly footer: string;
+} {
+  return locale === "ar"
+    ? {
+        description: "أدخل القيمة السرّية دون عرضها.",
+        emptyLabel: "[اتركه فارغًا]",
+        footer: "Enter حفظ · Esc إلغاء · Ctrl+C إلغاء",
+      }
+    : {
+        description: "Enter the secret value without showing it.",
+        emptyLabel: "[leave empty]",
+        footer: "Enter save · Esc cancel · Ctrl+C cancel",
+      };
 }
 
 function createSetupSelectState<T>(selection: SelectPromptInput<T>): SelectNavigationState<string, number> {
