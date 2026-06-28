@@ -79,7 +79,7 @@ describe("Papyrus operator console startup dashboard surface", () => {
     expect(text).toContain("النموذج");
     expect(text).toContain("مساحة العمل");
     expect(text).toContain("الموافقة");
-    expect(text).toContain("تطوّر الوكيل");
+    expect(text).toContain("تطور الوكيل");
     expect(text).toContain("مفتوحة");
     expect(text).toContain("مفعّل");
     expect(text).toContain("فحص الأدوات");
@@ -94,15 +94,15 @@ describe("Papyrus operator console startup dashboard surface", () => {
     expect(text).toContain("لتغيير المسارات استخدم");
     expect(text).toContain("/model");
     expect(output.some((line) => line.includes("الأوامر") && line.includes("الجلسة"))).toBe(false);
-    expect(stripBidi(output[0]).startsWith("  ╭")).toBe(true);
+    expect(stripBidi(output[0])).toMatch(/^ +╭/u);
     expect(stringWidth(stripBidi(output[0]).trimStart())).toBeLessThan(96);
     expect(stripBidi(output.find((line) => line.includes("kimi-k2.7-code")) ?? "").trimEnd().endsWith("النموذج")).toBe(true);
     expect(stripBidi(output.find((line) => line.includes("53007044")) ?? "").trimEnd().endsWith("الجلسة")).toBe(true);
     expect(stripBidi(output.find((line) => line.includes("/home/idris/estacoda")) ?? "").trimEnd().endsWith("مساحة العمل")).toBe(true);
     const approvalLine = output.find((line) => line.includes("الموافقة")) ?? "";
-    const evolutionLine = output.find((line) => line.includes("تطوّر الوكيل")) ?? "";
-    expect(approvalLine.indexOf("الموافقة")).toBeLessThan(approvalLine.indexOf("مفتوحة"));
-    expect(evolutionLine.indexOf("تطوّر الوكيل")).toBeLessThan(evolutionLine.indexOf("مفعّل"));
+    const evolutionLine = output.find((line) => line.includes("تطور الوكيل")) ?? "";
+    expect(approvalLine.indexOf("مفتوحة")).toBeLessThan(approvalLine.indexOf("الموافقة"));
+    expect(evolutionLine.indexOf("مفعّل")).toBeLessThan(evolutionLine.indexOf("تطور الوكيل"));
     expect(output.every((line) => stringWidth(line) <= 96)).toBe(true);
     expect(output.every((line) => line.startsWith(LRI) && line.endsWith(PDI))).toBe(true);
   });

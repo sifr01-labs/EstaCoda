@@ -97,11 +97,12 @@ function createRegionDescriptors(
   const descriptors: RegionDescriptor[] = [];
 
   if (state.startup !== undefined) {
+    const surfaceHeight = getStartupDashboardSurfaceDesiredHeight(state.startup, terminal.width, state.locale);
     descriptors.push({
       kind: "startupDashboard",
       priority: STARTUP_PRIORITY,
       minHeight: 1,
-      desiredHeight: getStartupDashboardSurfaceDesiredHeight(state.startup, terminal.width, state.locale),
+      desiredHeight: state.locale === "ar" ? Math.max(surfaceHeight, terminal.height - 2) : surfaceHeight,
     });
   }
 

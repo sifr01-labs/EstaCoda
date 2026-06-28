@@ -13,8 +13,8 @@ export type StartupDashboardRenderOptions = {
 };
 
 const WIDE_LAYOUT_MIN_WIDTH = 72;
-const ARABIC_WIDE_FRAME_MAX_WIDTH = 92;
-const ARABIC_STACKED_BLOCK_MAX_WIDTH = 60;
+const ARABIC_WIDE_FRAME_MAX_WIDTH = 78;
+const ARABIC_STACKED_BLOCK_MAX_WIDTH = 54;
 const ARABIC_STACKED_LABEL_MAX_WIDTH = 24;
 
 export function createDefaultStartupDashboardState(): StartupDashboardState {
@@ -72,7 +72,8 @@ export function renderStartupDashboardSurface(
     ? renderWideStartupDashboard(state, width, locale, options.style)
     : renderNarrowStartupDashboard(state, width, locale, options.style);
   const height = options.height === undefined ? rows.length : normalizeDimension(options.height);
-  const visibleRows = rows.slice(0, height);
+  const centeredRows = locale === "ar" ? centerRowsVertically(rows, height) : rows;
+  const visibleRows = centeredRows.slice(0, height);
   return locale === "ar" ? visibleRows.map(stabilizeTerminalBidiLine) : visibleRows;
 }
 
@@ -182,8 +183,8 @@ function arabicSessionRowsForStackedSurface(
     { label: "النموذج", value: formatModelValueForSurface(state.session.model, state.session.modelRoute, style) },
     { label: "الجلسة", value: state.sessionId },
     { label: "مساحة العمل", value: state.session.workspace },
-    { label: "الموافقة", value: localizeApprovalValue(state.session.security), order: "label-value" },
-    { label: "تطوّر الوكيل", value: localizeStackedEvolutionValue(state.session.autonomy), order: "label-value" },
+    { label: "الموافقة", value: localizeApprovalValue(state.session.security) },
+    { label: "تطور الوكيل", value: localizeStackedEvolutionValue(state.session.autonomy) },
   ];
 }
 
@@ -228,9 +229,18 @@ function renderArabicStackedSection(
 ): readonly string[] {
   const labelWidth = resolveArabicStackedLabelWidth(rows);
   return [
-    renderArabicStackedLine(styleSectionLabel(title, style), blockWidth, bodyWidth, width),
+    renderArabicCenteredLine(styleSectionLabel(title, style), bodyWidth, width),
+    renderOuterRow("", bodyWidth, width),
     ...rows.map((row) => renderArabicStackedLine(formatArabicStackedRow(row, blockWidth, labelWidth), blockWidth, bodyWidth, width)),
   ];
+}
+
+function renderArabicCenteredLine(
+  row: string,
+  bodyWidth: number,
+  width: number
+): string {
+  return renderOuterRow(centerVisible(row, bodyWidth), bodyWidth, width);
 }
 
 function renderArabicStackedLine(
@@ -534,6 +544,18 @@ function centerVisible(value: string, width: number): string {
   const left = Math.floor(remaining / 2);
   const right = remaining - left;
   return `${" ".repeat(left)}${clipped}${" ".repeat(right)}`;
+}
+
+function centerRowsVertically(rows: readonly string[], height: number): readonly string[] {
+  if (height <= rows.length) return rows;
+  const extraRows = height - rows.length;
+  const topRows = Math.floor(extraRows / 2);
+  const bottomRows = extraRows - topRows;
+  return [
+    ...Array.from({ length: topRows }, () => ""),
+    ...rows,
+    ...Array.from({ length: bottomRows }, () => ""),
+  ];
 }
 
 function renderOuterRow(row: string, contentWidth: number, width: number): string {
