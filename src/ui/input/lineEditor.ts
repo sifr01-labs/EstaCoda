@@ -59,8 +59,12 @@ export function applyKeypress(state: LineEditorState, event: ParsedKeypress): Li
     return { state: normalized, intent: { type: "submit", text: normalized.text } };
   }
 
-  if (event.key === "escape" || (event.ctrl === true && event.key === "c")) {
+  if (event.ctrl === true && event.key === "c") {
     return { state: normalized, intent: { type: "cancel" } };
+  }
+
+  if (event.key === "escape") {
+    return { state: normalized };
   }
 
   if (event.ctrl === true && event.key === "a") {
@@ -74,6 +78,10 @@ export function applyKeypress(state: LineEditorState, event: ParsedKeypress): Li
   if (event.ctrl === true && event.key === "d") {
     if (normalized.text.length === 0) return { state: normalized, intent: { type: "eof" } };
     return { state: deleteNext(normalized) };
+  }
+
+  if (event.ctrl === true && event.key === "u") {
+    return { state: deleteToLineStart(normalized) };
   }
 
   if (event.key === "left") {
@@ -128,5 +136,15 @@ function deleteNext(state: LineEditorState): LineEditorState {
   return {
     text: `${state.text.slice(0, next.start)}${state.text.slice(next.end)}`,
     cursor: next.start,
+  };
+}
+
+function deleteToLineStart(state: LineEditorState): LineEditorState {
+  const cursor = normalizeCursorIndex(state.text, state.cursor);
+  const lineStart = state.text.lastIndexOf("\n", cursor - 1) + 1;
+  if (cursor === lineStart) return state;
+  return {
+    text: `${state.text.slice(0, lineStart)}${state.text.slice(cursor)}`,
+    cursor: lineStart,
   };
 }

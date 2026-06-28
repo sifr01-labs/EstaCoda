@@ -138,12 +138,24 @@ describe("raw input line editor", () => {
     expect(isCursorAtGraphemeBoundary(inserted.text, inserted.cursor)).toBe(true);
   });
 
-  it("returns cancel intent for Ctrl-C and Escape", () => {
+  it("returns cancel intent for Ctrl-C and leaves Escape to the active surface", () => {
     expect(applyKeypress(createLineEditorState("draft"), { type: "key", key: "c", ctrl: true }).intent).toEqual({
       type: "cancel",
     });
-    expect(applyKeypress(createLineEditorState("draft"), { type: "key", key: "escape" }).intent).toEqual({
-      type: "cancel",
+    expect(applyKeypress(createLineEditorState("draft"), { type: "key", key: "escape" })).toEqual({
+      state: { text: "draft", cursor: 5 },
+    });
+  });
+
+  it("deletes from the cursor back to the beginning of the line with Ctrl-U", () => {
+    expect(applyKeypress(createLineEditorState("hello world", "hello wor".length), { type: "key", key: "u", ctrl: true })).toEqual({
+      state: { text: "ld", cursor: 0 },
+    });
+    expect(applyKeypress(createLineEditorState("سلام عالم", "سلام ".length), { type: "key", key: "u", ctrl: true })).toEqual({
+      state: { text: "عالم", cursor: 0 },
+    });
+    expect(applyKeypress(createLineEditorState("first\nsecond line", "first\nsecond".length), { type: "key", key: "u", ctrl: true })).toEqual({
+      state: { text: "first\n line", cursor: "first\n".length },
     });
   });
 

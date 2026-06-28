@@ -399,6 +399,25 @@ describe("createPapyrusPrompt", () => {
     expect(lifecycle.calls).toEqual(["start", "stop"]);
   });
 
+  it("does not treat Escape as a raw prompt session exit", async () => {
+    const input = new FakeInput();
+    const output = fakeOutput();
+    const lifecycle = fakeLifecycle();
+    const prompt = createPapyrusPrompt({
+      input,
+      output,
+      createRaw: (options) => createRawPrompt({ ...options, lifecycle: lifecycle.lifecycle }),
+    });
+
+    const pending = prompt("> ");
+    input.send("draft");
+    input.send("\x1b");
+    input.send("\r");
+
+    await expect(pending).resolves.toBe("draft");
+    expect(lifecycle.calls).toEqual(["start", "stop"]);
+  });
+
   it("runs raw prompt cleanup when startup errors", async () => {
     const input = new FakeInput();
     const output = fakeOutput();
