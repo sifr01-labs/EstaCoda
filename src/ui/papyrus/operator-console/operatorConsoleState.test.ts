@@ -22,8 +22,17 @@ describe("Papyrus operator console state model", () => {
   it("creates initial state with prompt focus", () => {
     const state = createInitialOperatorConsoleState();
 
+    expect(state.mode).toBe("session");
     expect(state.focus).toEqual({ target: { kind: "prompt" } });
     expect(isPromptFocused(state.focus)).toBe(true);
+  });
+
+  it("supports setup mode without changing the default session mode", () => {
+    const setupState = createInitialOperatorConsoleState({ mode: "setup" });
+    const sessionState = createInitialOperatorConsoleState();
+
+    expect(setupState.mode).toBe("setup");
+    expect(sessionState.mode).toBe("session");
   });
 
   it("keeps the canonical surface order stable", () => {
@@ -177,6 +186,7 @@ describe("Papyrus operator console state model", () => {
   it("starts with inert optional surface state", () => {
     const state = createInitialOperatorConsoleState();
 
+    expect(state.mode).toBe("session");
     expect(state.attachments).toEqual([]);
     expect(state.activeWork).toEqual({
       items: [],

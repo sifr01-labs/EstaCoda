@@ -25,6 +25,7 @@ describe("OperatorConsoleRuntimeHost", () => {
     const host = createOperatorConsoleRuntimeHost();
     const state = host.getState();
 
+    expect(state.mode).toBe("session");
     expect(state.prompt.value).toBe("");
     expect(state.attachments).toEqual([]);
     expect(state.activeWork.items).toEqual([]);
@@ -34,6 +35,26 @@ describe("OperatorConsoleRuntimeHost", () => {
       context: { usedTokens: 0 },
       sessionTimer: { elapsedMs: 0 },
     });
+  });
+
+  it("preserves setup mode through updates, render, and clear", () => {
+    const host = createOperatorConsoleRuntimeHost({
+      mode: "setup",
+      terminal: { width: 72, height: 12, isTty: true },
+    });
+
+    host.setSetupPanel(setupPanel());
+    host.setPrompt({ text: "ignored by setup layout later", cursorOffset: 29 });
+    host.setTerminal({ width: 80 });
+
+    expect(host.getState().mode).toBe("setup");
+    expect(host.render().state.mode).toBe("setup");
+
+    host.clear();
+
+    expect(host.getState().mode).toBe("setup");
+    expect(host.getState().setupPanel).toBeUndefined();
+    expect(host.getState().terminal.width).toBe(80);
   });
 
   it("renders an initial prompt and status rail", () => {
