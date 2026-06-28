@@ -2349,6 +2349,29 @@ describe("loadRuntimeConfig modelFallbackRoutes resolution", () => {
     expect(loaded.primaryModelRoute.apiMode).toBe("custom_openai_compatible");
   });
 
+  it("preserves provider-configured authMethod on primaryModelRoute", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+
+    await writeFile(configPath, JSON.stringify({
+      providers: {
+        codex: {
+          kind: "openai-compatible",
+          authMethod: "oauth_device_pkce"
+        }
+      },
+      model: { provider: "codex", id: "gpt-5.5" }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace
+    });
+
+    expect(loaded.primaryModelRoute.authMethod).toBe("oauth_device_pkce");
+  });
+
   it("enriches each modelFallbackRoute with apiMode from provider metadata", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
@@ -2373,6 +2396,35 @@ describe("loadRuntimeConfig modelFallbackRoutes resolution", () => {
     expect(loaded.modelFallbackRoutes.length).toBe(2);
     expect(loaded.modelFallbackRoutes[0].apiMode).toBe("openai_chat_completions");
     expect(loaded.modelFallbackRoutes[1].apiMode).toBe("openai_chat_completions");
+  });
+
+  it("preserves provider-configured authMethod on fallback routes", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    const configPath = profileConfigPath(workspace);
+
+    await writeFile(configPath, JSON.stringify({
+      model: {
+        provider: "openai",
+        id: "gpt-4o",
+        fallbacks: [
+          { provider: "codex", id: "gpt-5.5" }
+        ]
+      },
+      providers: {
+        codex: {
+          kind: "openai-compatible",
+          authMethod: "oauth_device_pkce"
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace
+    });
+
+    expect(loaded.modelFallbackRoutes[0].authMethod).toBe("oauth_device_pkce");
   });
 
   it("preserves explicit apiMode on a route and does not overwrite it", async () => {

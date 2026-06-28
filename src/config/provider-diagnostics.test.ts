@@ -44,12 +44,14 @@ function route(overrides: Partial<ResolvedModelRoute> = {}): ResolvedModelRoute 
 
 function loadedConfig(input: {
   registry: ProviderRegistry;
+  model?: ModelProfile;
   primaryRoute?: ResolvedModelRoute;
   providerConfig?: LoadedRuntimeConfig["config"]["providers"];
 }): LoadedRuntimeConfig {
+  const selectedModel = input.model ?? modelProfile;
   return {
     config: {
-      model: { provider: "openai", id: "gpt-5" },
+      model: { provider: selectedModel.provider, id: selectedModel.id },
       providers: input.providerConfig ?? {
         openai: {
           enableNetwork: true,
@@ -58,7 +60,7 @@ function loadedConfig(input: {
       }
     },
     sources: [],
-    model: modelProfile,
+    model: selectedModel,
     primaryModelRoute: input.primaryRoute ?? route(),
     modelFallbackRoutes: [],
     providerRegistry: input.registry,
@@ -140,6 +142,59 @@ describe("provider diagnostics", () => {
     expect(diagnostic.warnings).toContain(
       "Max output tokens is below 2,048. Long answers and tool calls are more likely to truncate."
     );
+  });
+
+  it("does not require apiKeyEnv for Codex OAuth routes", async () => {
+    const codexProfile: ModelProfile = {
+      ...modelProfile,
+      id: "gpt-5.5",
+      provider: "codex"
+    };
+    const registry = new ProviderRegistry();
+    registry.register(adapter("codex", [codexProfile]));
+
+    const diagnostic = await diagnoseProviderConfig(loadedConfig({
+      registry,
+      model: codexProfile,
+      primaryRoute: route({
+        provider: "codex",
+        id: "gpt-5.5",
+        profile: codexProfile,
+        apiKeyEnv: undefined,
+        authMethod: "oauth_device_pkce"
+      }),
+      providerConfig: {
+        codex: {
+          enableNetwork: true,
+          authMethod: "oauth_device_pkce"
+        }
+      }
+    }));
+
+    expect(diagnostic.status).toBe("ready");
+    expect(diagnostic.warnings).not.toContain("No apiKeyEnv is configured for codex.");
+  });
+
+  it("blocks unsupported authMethod overrides instead of suppressing credential warnings", async () => {
+    const registry = new ProviderRegistry();
+    registry.register(adapter("openai"));
+
+    const diagnostic = await diagnoseProviderConfig(loadedConfig({
+      registry,
+      primaryRoute: route({
+        apiKeyEnv: undefined,
+        authMethod: "none"
+      }),
+      providerConfig: {
+        openai: {
+          enableNetwork: true,
+          authMethod: "none"
+        }
+      }
+    }));
+
+    expect(diagnostic.status).toBe("blocked");
+    expect(diagnostic.warnings).toContain("Provider openai has unsupported authMethod none.");
   });
 
   it("uses provider-aware token naming for live diagnostic request maxTokens", async () => {

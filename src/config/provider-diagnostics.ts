@@ -1,6 +1,7 @@
 import type { LoadedRuntimeConfig } from "./runtime-config.js";
 import type { ProviderExecutionSummary } from "../contracts/provider.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
+import { getProviderMetadata } from "../providers/provider-metadata.js";
 import { renderProviderExecutionSummary } from "../runtime/provider-execution-summary.js";
 
 export type ProviderDiagnostic = {
@@ -83,8 +84,17 @@ export async function diagnoseProviderConfig(config: LoadedRuntimeConfig): Promi
     lines.push("Network inference: local OpenAI-compatible route");
   }
 
-  if (selectedProvider !== "local" && selectedProvider !== "unconfigured" && route?.apiKeyEnv === undefined) {
-    warnings.push(`No apiKeyEnv is configured for ${selectedProvider}.`);
+  const selectedProviderMetadata = getProviderMetadata(selectedProvider);
+  const effectiveAuthMethod = route?.authMethod
+    ?? selectedProviderConfig?.authMethod
+    ?? selectedProviderMetadata.defaultAuthMethod;
+  const expectsApiKey = effectiveAuthMethod === undefined || effectiveAuthMethod === "api_key";
+  if (selectedProvider !== "local" && selectedProvider !== "unconfigured") {
+    if (effectiveAuthMethod !== undefined && !selectedProviderMetadata.authMethods.includes(effectiveAuthMethod)) {
+      warnings.push(`Provider ${selectedProvider} has unsupported authMethod ${effectiveAuthMethod}.`);
+    } else if (expectsApiKey && route?.apiKeyEnv === undefined) {
+      warnings.push(`No apiKeyEnv is configured for ${selectedProvider}.`);
+    }
   }
 
   const fallbackRoutes = config.modelFallbackRoutes;
@@ -92,7 +102,7 @@ export async function diagnoseProviderConfig(config: LoadedRuntimeConfig): Promi
 
   const status = warnings.length === 0
     ? "ready"
-    : warnings.some((warning) => /incomplete|missing|blocked|disabled|No provider|No credential|No available credential/iu.test(warning))
+    : warnings.some((warning) => /incomplete|missing|blocked|disabled|unsupported|No provider|No credential|No available credential/iu.test(warning))
       ? "blocked"
       : "warning";
 

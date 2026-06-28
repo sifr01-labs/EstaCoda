@@ -154,6 +154,7 @@ function expectCodexRouteConfig(config: any): void {
   expect(config.providers.codex.baseUrl).toBe("https://chatgpt.com/backend-api/codex");
   expect(config.providers.codex.apiMode).toBe("openai_responses");
   expect(config.providers.codex.authMethod).toBe("oauth_device_pkce");
+  expect(config.providers.codex.enableNetwork).toBe(true);
   expect(config.providers.codex.apiKeyEnv).toBeUndefined();
 }
 

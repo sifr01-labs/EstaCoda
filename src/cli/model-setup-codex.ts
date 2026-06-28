@@ -234,7 +234,8 @@ async function configureCodexRoute(
           ...(existing.config.providers?.codex ?? {}),
           baseUrl: CODEX_DEFAULT_BASE_URL,
           apiMode: CODEX_API_MODE,
-          authMethod: CODEX_OAUTH_AUTH_METHOD
+          authMethod: CODEX_OAUTH_AUTH_METHOD,
+          enableNetwork: true
         }
       }
     };
