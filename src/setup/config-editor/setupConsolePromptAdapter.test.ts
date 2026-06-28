@@ -41,6 +41,38 @@ describe("withSetupConsolePrompt", () => {
     expect(output.text()).not.toMatch(forbiddenManagedRegionOutput);
   });
 
+  it("clears the active setup panel between consecutive setup selects", async () => {
+    const input = createInput();
+    const output = createOutput();
+    const controller = createSetupOperatorConsoleController({ output });
+    const clear = vi.spyOn(controller, "clear");
+    const { select: baseSelect, calls: baseSelectCalls } = createSelect("base");
+    const prompt = createPrompt({ select: baseSelect });
+    const wrapped = withSetupConsolePrompt(prompt, { input, output, controller });
+
+    const provider = wrapped.select!(setupSelection());
+    await Promise.resolve();
+    input.write("\r");
+    await expect(provider).resolves.toBe("primary");
+
+    const model = wrapped.select!({
+      ...setupSelection(),
+      title: "Select Model",
+      options: [
+        { id: "kimi", label: "kimi-k2.6", description: "tools · vision", value: "kimi" },
+        { id: "cancel", label: "Cancel", description: "Keep current model", value: "cancel", group: "navigation" },
+      ],
+    });
+    await Promise.resolve();
+    input.write("\r");
+    await expect(model).resolves.toBe("kimi");
+
+    expect(baseSelectCalls).not.toHaveBeenCalled();
+    expect(clear).toHaveBeenCalledTimes(2);
+    expect(stripAnsi(output.text())).not.toContain("Selected:");
+    expect(output.text()).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
   it("leaves non-setup prompt selects on the base prompt", async () => {
     const input = createInput();
     const output = createOutput();

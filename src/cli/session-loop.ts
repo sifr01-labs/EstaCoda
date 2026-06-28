@@ -1,5 +1,6 @@
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
 import { join } from "node:path";
+import type { Readable } from "node:stream";
 import type { Runtime } from "../runtime/create-runtime.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { SessionEvent } from "../contracts/session.js";
@@ -102,6 +103,11 @@ import {
   type ProviderRouteServingState,
   type StatusRailTiming,
 } from "./session-status-rail.js";
+import {
+  isSetupConsoleExit,
+  withSetupConsolePrompt,
+  type SetupConsolePromptAdapterOptions,
+} from "../setup/config-editor/setupConsolePromptAdapter.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -465,21 +471,36 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       }
 
       if (text.startsWith("/")) {
-        const shouldExit = await handleSlashCommand({
-          text,
-          runtime,
-          output,
-          renderer,
-          refreshRuntime: options.refreshRuntime,
-          switchRuntime: options.switchRuntime,
-          modelSwitchContext: options.modelSwitchContext,
-          prompt,
-          env: options.env,
-          workspaceRoot: options.workspaceRoot,
-          homeDir: options.homeDir,
-          cronRuntimeFactory: options.cronRuntimeFactory,
-          onSessionCompacted: ({ postTokens }) => applyCompactionRailReset(postTokens)
-        });
+        const slashPrompt = operatorConsoleEnabled
+          ? withSetupConsolePrompt(prompt, {
+              input: cliInput as unknown as Readable,
+              output: output as unknown as SetupConsolePromptAdapterOptions["output"],
+              style: operatorConsoleStyle,
+            })
+          : prompt;
+        let shouldExit: Awaited<ReturnType<typeof handleSlashCommand>>;
+        try {
+          shouldExit = await handleSlashCommand({
+            text,
+            runtime,
+            output,
+            renderer,
+            refreshRuntime: options.refreshRuntime,
+            switchRuntime: options.switchRuntime,
+            modelSwitchContext: options.modelSwitchContext,
+            prompt: slashPrompt,
+            env: options.env,
+            workspaceRoot: options.workspaceRoot,
+            homeDir: options.homeDir,
+            cronRuntimeFactory: options.cronRuntimeFactory,
+            onSessionCompacted: ({ postTokens }) => applyCompactionRailReset(postTokens)
+          });
+        } catch (error) {
+          if (isSetupConsoleExit(error)) {
+            continue;
+          }
+          throw error;
+        }
 
         if (typeof shouldExit !== "boolean") {
           await runtime.dispose();
