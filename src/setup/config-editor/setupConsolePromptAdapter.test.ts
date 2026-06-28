@@ -1,5 +1,5 @@
 import { PassThrough, Writable } from "node:stream";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SelectPromptInput } from "../../cli/interactive-select.js";
 import type { Prompt } from "../../cli/prompt-contract.js";
 import { withSetupConsolePrompt } from "./setupConsolePromptAdapter.js";
@@ -8,6 +8,10 @@ import { createSetupOperatorConsoleController } from "./setupOperatorConsoleCont
 const forbiddenManagedRegionOutput = /\x1b\[3J|\x1b\[2J|\x1b\[H|\x1b\[\d+;\d+H/u;
 
 describe("withSetupConsolePrompt", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("intercepts setup prompt-card selects on TTY and returns the selected value", async () => {
     const input = createInput();
     const output = createOutput();
@@ -63,6 +67,26 @@ describe("withSetupConsolePrompt", () => {
     expect(baseSelectCalls).toHaveBeenCalledWith(selection);
     expect(createController).not.toHaveBeenCalled();
     expect(output.text()).toBe("");
+  });
+
+  it("settles Ctrl+C interruption after restoring the terminal", async () => {
+    const input = createInput();
+    const output = createOutput();
+    const emit = vi.spyOn(process, "emit").mockImplementation(((event: string) => event === "SIGINT") as typeof process.emit);
+    const controller = createSetupOperatorConsoleController({ output });
+    const clear = vi.spyOn(controller, "clear");
+    const prompt = createPrompt({ select: createSelect("base").select });
+    const wrapped = withSetupConsolePrompt(prompt, { input, output, controller });
+
+    const pending = wrapped.select!(setupSelection());
+    await Promise.resolve();
+    input.write("\x03");
+
+    await expect(pending).rejects.toThrow("Setup console selection interrupted.");
+    expect(emit).toHaveBeenCalledWith("SIGINT");
+    expect(output.text()).toContain("\x1b[?25h");
+    expect(clear).toHaveBeenCalled();
+    expect(input.rawModes).toEqual([true, false]);
   });
 
   it("preserves prompt methods and clears setup frames on close", async () => {

@@ -305,6 +305,49 @@ describe("runConfigEditor", () => {
     expect(output.join("")).toContain("Exited setup editor without applying changes.");
   });
 
+  it("routes provider Back through setup console and returns to the setup menu in place", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const output: string[] = [];
+    const input = createTtyInput();
+    const setupOutput = createTtyOutput();
+    const prompt = fakePrompt();
+    const select = vi.fn(async () => {
+      throw new Error("base prompt select should not run for setup console route cards");
+    });
+    prompt.select = select;
+
+    const pending = runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      setupConsole: { input, output: setupOutput },
+      defaultActionId: "edit-primary-model-route",
+      flowEngine: flowEngine({ credentialAction: "collect", envVarName: "PR8_OPENAI_KEY" }),
+      output: { write: (value) => output.push(value) },
+    });
+    await Promise.resolve();
+    input.write("\x1b[F\x1b[A\r");
+    await vi.waitFor(() => {
+      expect(stripAnsi(setupOutput.text())).toContain("Setup Editor");
+    });
+    input.write("\x1b[F\r");
+
+    const result = await pending;
+    const liveText = stripAnsi(setupOutput.text());
+
+    expect(result.completed).toBe(true);
+    expect(result.selectedActionId).toBe("exit");
+    expect(select).not.toHaveBeenCalled();
+    expect(liveText).toContain("Primary Provider");
+    expect(liveText).toContain("Back");
+    expect(liveText).toContain("Setup Editor");
+    expect(liveText).toContain("Exit without changes");
+    expect(liveText).not.toContain("Selected:");
+    expect(setupOutput.text()).not.toMatch(/\x1b\[3J|\x1b\[2J|\x1b\[H|\x1b\[\d+;\d+H/u);
+    await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toContain("\"provider\": \"local\"");
+  });
+
   it("opts comparative setup editor selectors into columns without changing selected values", async () => {
     const prompt = fakePrompt({
       values: [

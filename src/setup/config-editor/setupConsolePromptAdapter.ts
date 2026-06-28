@@ -135,6 +135,16 @@ async function selectWithSetupConsole<T>(
     resolve(selection.options[selectedIndex]?.value ?? selection.options[0]!.value);
   };
 
+  const interrupt = (reject: (error: Error) => void) => {
+    if (settled) return;
+    settled = true;
+    restoreTerminal();
+    controller.clear();
+    options.output.write("\n");
+    process.emit("SIGINT");
+    reject(new Error("Setup console selection interrupted."));
+  };
+
   const onData = (chunk: string | Buffer | Uint8Array) => {
     const text = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
     pendingKeypresses.push(...parseKeypress(text));
@@ -143,15 +153,15 @@ async function selectWithSetupConsole<T>(
 
   const pendingKeypresses: ParsedKeypress[] = [];
   let resolveSelection: ((value: T) => void) | undefined;
+  let rejectSelection: ((error: Error) => void) | undefined;
 
   const drainKeypresses = () => {
     if (resolveSelection === undefined || settled) return;
     for (const keypress of pendingKeypresses.splice(0)) {
       if (keypress.type === "key" && keypress.ctrl === true && keypress.key === "c") {
-        restoreTerminal();
-        controller.clear();
-        options.output.write("\n");
-        process.emit("SIGINT");
+        if (rejectSelection !== undefined) {
+          interrupt(rejectSelection);
+        }
         return;
       }
       const event = selectKeyEventFromParsedKeypress(keypress);
@@ -168,8 +178,9 @@ async function selectWithSetupConsole<T>(
     }
   };
 
-  return await new Promise<T>((resolve) => {
+  return await new Promise<T>((resolve, reject) => {
     resolveSelection = resolve;
+    rejectSelection = reject;
     ttyInput.on("data", onData);
     ttyInput.setRawMode?.(true);
     ttyInput.resume?.();
