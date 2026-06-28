@@ -53,6 +53,7 @@ export function createPapyrusPrompt(options: CreatePapyrusPromptOptions = {}): P
     ghostText: resolveGhostTextMode({ env: options.env }) === "on" ? { enabled: true } : undefined,
     keymap: resolveInputKeymapMode({ env: options.env }) === "vim" ? { mode: "vim" } : undefined,
     operatorConsole: options.operatorConsole ?? (options.useOperatorConsole === true ? { enabled: true } : undefined),
+    escapeCancels: false,
   });
   const secretPrompt = (options.createSecretPrompt ?? createPapyrusSecretPrompt)({
     input: input as Readable,

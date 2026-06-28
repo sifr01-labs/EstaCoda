@@ -79,6 +79,7 @@ export type RawPromptControllerOptions = {
   ghostText?: RawPromptGhostTextOptions;
   keymap?: RawPromptKeymapOptions;
   operatorConsole?: RawPromptOperatorConsoleOptions;
+  escapeCancels?: boolean;
 };
 
 export type RawPromptTypeaheadOptions = {
@@ -104,6 +105,7 @@ export class RawPromptController {
   readonly #ghostText: RawPromptGhostTextOptions | undefined;
   readonly #keymap: RawPromptKeymapOptions | undefined;
   readonly #operatorConsole: RawPromptOperatorConsoleOptions | undefined;
+  readonly #escapeCancels: boolean;
 
   constructor(options: RawPromptControllerOptions) {
     this.#input = options.input;
@@ -113,6 +115,7 @@ export class RawPromptController {
     this.#ghostText = options.ghostText;
     this.#keymap = options.keymap;
     this.#operatorConsole = options.operatorConsole;
+    this.#escapeCancels = options.escapeCancels ?? true;
     this.#lifecycle = options.lifecycle ?? createTerminalLifecycle({
       stdin: options.input,
       stdout: options.output,
@@ -394,6 +397,10 @@ export class RawPromptController {
               updateState(vimResult.line);
               continue;
             }
+          }
+          if (this.#escapeCancels && event.type === "key" && event.key === "escape") {
+            finish({ type: "cancel" });
+            return;
           }
           const result = applyKeypress(state, event);
           if (result.intent?.type === "submit") {

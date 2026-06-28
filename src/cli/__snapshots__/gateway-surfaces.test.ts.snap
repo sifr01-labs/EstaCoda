@@ -9,7 +9,7 @@ exports[`Gateway surfaces — channels list > renders in narrow width > channels
 • whatsapp  : disabled
 
 [1mCapabilities[0m
-[38;2;76;138;224mChannel [0m  [38;2;76;138;224mEnabled[0m  [38;2;76;138;224mConfigured[0m  [38;2;76;138;224mInbound  [0m  [38;2;76;138;224mOutbound[0m  [38;2;76;138;224mAttachments[0m  [38;2;76;138;224mThreads[0m  [38;2;76;138;224mExperimental[0m  [38;2;76;138;224mStatus                 [0m
+[38;2;67;137;215mChannel [0m  [38;2;67;137;215mEnabled[0m  [38;2;67;137;215mConfigured[0m  [38;2;67;137;215mInbound  [0m  [38;2;67;137;215mOutbound[0m  [38;2;67;137;215mAttachments[0m  [38;2;67;137;215mThreads[0m  [38;2;67;137;215mExperimental[0m  [38;2;67;137;215mStatus                 [0m
 [2m────────  ───────  ──────────  ─────────  ────────  ───────────  ───────  ────────────  ───────────────────────[0m
 telegram  no       no          polling    push      yes          yes      no            live_proven
 discord   no       no          websocket  push      no           no       no            present_not_live_proven
@@ -26,7 +26,7 @@ exports[`Gateway surfaces — channels list > renders in no Unicode > channels-l
 - whatsapp  : disabled
 
 [1mCapabilities[0m
-[38;2;76;138;224mChannel [0m  [38;2;76;138;224mEnabled[0m  [38;2;76;138;224mConfigured[0m  [38;2;76;138;224mInbound  [0m  [38;2;76;138;224mOutbound[0m  [38;2;76;138;224mAttachments[0m  [38;2;76;138;224mThreads[0m  [38;2;76;138;224mExperimental[0m  [38;2;76;138;224mStatus                 [0m
+[38;2;67;137;215mChannel [0m  [38;2;67;137;215mEnabled[0m  [38;2;67;137;215mConfigured[0m  [38;2;67;137;215mInbound  [0m  [38;2;67;137;215mOutbound[0m  [38;2;67;137;215mAttachments[0m  [38;2;67;137;215mThreads[0m  [38;2;67;137;215mExperimental[0m  [38;2;67;137;215mStatus                 [0m
 [2m--------  -------  ----------  ---------  --------  -----------  -------  ------------  -----------------------[0m
 telegram  no       no          polling    push      yes          yes      no            live_proven
 discord   no       no          websocket  push      no           no       no            present_not_live_proven
@@ -77,7 +77,7 @@ exports[`Gateway surfaces — channels list > renders in standard dark > channel
 • whatsapp  : disabled
 
 [1mCapabilities[0m
-[38;2;76;138;224mChannel [0m  [38;2;76;138;224mEnabled[0m  [38;2;76;138;224mConfigured[0m  [38;2;76;138;224mInbound  [0m  [38;2;76;138;224mOutbound[0m  [38;2;76;138;224mAttachments[0m  [38;2;76;138;224mThreads[0m  [38;2;76;138;224mExperimental[0m  [38;2;76;138;224mStatus                 [0m
+[38;2;67;137;215mChannel [0m  [38;2;67;137;215mEnabled[0m  [38;2;67;137;215mConfigured[0m  [38;2;67;137;215mInbound  [0m  [38;2;67;137;215mOutbound[0m  [38;2;67;137;215mAttachments[0m  [38;2;67;137;215mThreads[0m  [38;2;67;137;215mExperimental[0m  [38;2;67;137;215mStatus                 [0m
 [2m────────  ───────  ──────────  ─────────  ────────  ───────────  ───────  ────────────  ───────────────────────[0m
 telegram  no       no          polling    push      yes          yes      no            live_proven
 discord   no       no          websocket  push      no           no       no            present_not_live_proven
@@ -94,7 +94,7 @@ exports[`Gateway surfaces — channels list > renders in standard light > channe
 • whatsapp  : disabled
 
 [1mCapabilities[0m
-[38;2;0;87;217mChannel [0m  [38;2;0;87;217mEnabled[0m  [38;2;0;87;217mConfigured[0m  [38;2;0;87;217mInbound  [0m  [38;2;0;87;217mOutbound[0m  [38;2;0;87;217mAttachments[0m  [38;2;0;87;217mThreads[0m  [38;2;0;87;217mExperimental[0m  [38;2;0;87;217mStatus                 [0m
+[38;2;67;137;215mChannel [0m  [38;2;67;137;215mEnabled[0m  [38;2;67;137;215mConfigured[0m  [38;2;67;137;215mInbound  [0m  [38;2;67;137;215mOutbound[0m  [38;2;67;137;215mAttachments[0m  [38;2;67;137;215mThreads[0m  [38;2;67;137;215mExperimental[0m  [38;2;67;137;215mStatus                 [0m
 [2m────────  ───────  ──────────  ─────────  ────────  ───────────  ───────  ────────────  ───────────────────────[0m
 telegram  no       no          polling    push      yes          yes      no            live_proven
 discord   no       no          websocket  push      no           no       no            present_not_live_proven

@@ -247,7 +247,7 @@ security mode: adaptive"
 `;
 
 exports[`Session surfaces — /status > renders in narrow width > status-narrow width 1`] = `
-"[38;2;76;138;224mEstaCoda is ready[0m
+"[38;2;67;137;215mEstaCoda is ready[0m
 │ model: [2munconfigured/smoke-model[0m
 │ security: [38;2;76;175;80madaptive[0m
 │ skills: 3 (suggest)
@@ -258,7 +258,7 @@ exports[`Session surfaces — /status > renders in narrow width > status-narrow 
 `;
 
 exports[`Session surfaces — /status > renders in no Unicode > status-no Unicode 1`] = `
-"[38;2;76;138;224mEstaCoda is ready[0m
+"[38;2;67;137;215mEstaCoda is ready[0m
 | model: [2munconfigured/smoke-model[0m
 | security: [38;2;76;175;80madaptive[0m
 | skills: 3 (suggest)
@@ -291,7 +291,7 @@ workflow run: inactive"
 `;
 
 exports[`Session surfaces — /status > renders in standard dark > status-standard dark 1`] = `
-"[38;2;76;138;224mEstaCoda is ready[0m
+"[38;2;67;137;215mEstaCoda is ready[0m
 │ model: [2munconfigured/smoke-model[0m
 │ security: [38;2;76;175;80madaptive[0m
 │ skills: 3 (suggest)
@@ -302,7 +302,7 @@ exports[`Session surfaces — /status > renders in standard dark > status-standa
 `;
 
 exports[`Session surfaces — /status > renders in standard light > status-standard light 1`] = `
-"[38;2;0;87;217mEstaCoda is ready[0m
+"[38;2;67;137;215mEstaCoda is ready[0m
 │ model: [2munconfigured/smoke-model[0m
 │ security: [38;2;46;125;50madaptive[0m
 │ skills: 3 (suggest)
@@ -326,7 +326,7 @@ exports[`Session surfaces — /tools > renders in standard light > tools-standar
 
 exports[`Session surfaces — assistant response > renders in narrow width > assistant-response-narrow width 1`] = `
 "
-[38;2;237;237;237m╭────────────[0m[38;2;76;138;224m[1m 𓂀  EstaCoda [0m[0m[38;2;237;237;237m─────────────╮[0m
+[38;2;237;237;237m╭────────────[0m[38;2;67;137;215m[1m 𓂀  EstaCoda [0m[0m[38;2;237;237;237m─────────────╮[0m
   [38;2;255;255;255mHere is the analysis you requested.[0m
 
   [38;2;255;255;255mThe codebase is well-structured.[0m
@@ -337,7 +337,7 @@ exports[`Session surfaces — assistant response > renders in narrow width > ass
 
 exports[`Session surfaces — assistant response > renders in no Unicode > assistant-response-no Unicode 1`] = `
 "
-[38;2;237;237;237m+------------[0m[38;2;76;138;224m[1m *  EstaCoda [0m[0m[38;2;237;237;237m-------------+[0m
+[38;2;237;237;237m+------------[0m[38;2;67;137;215m[1m *  EstaCoda [0m[0m[38;2;237;237;237m-------------+[0m
   [38;2;255;255;255mHere is the analysis you requested.[0m
 
   [38;2;255;255;255mThe codebase is well-structured.[0m
@@ -369,7 +369,7 @@ progress: intent routed -> security assessed -> tools executed"
 
 exports[`Session surfaces — assistant response > renders in standard dark > assistant-response-standard dark 1`] = `
 "
-[38;2;237;237;237m╭────────────[0m[38;2;76;138;224m[1m 𓂀  EstaCoda [0m[0m[38;2;237;237;237m─────────────╮[0m
+[38;2;237;237;237m╭────────────[0m[38;2;67;137;215m[1m 𓂀  EstaCoda [0m[0m[38;2;237;237;237m─────────────╮[0m
   [38;2;255;255;255mHere is the analysis you requested.[0m
 
   [38;2;255;255;255mThe codebase is well-structured.[0m
@@ -380,7 +380,7 @@ exports[`Session surfaces — assistant response > renders in standard dark > as
 
 exports[`Session surfaces — assistant response > renders in standard light > assistant-response-standard light 1`] = `
 "
-[38;2;224;224;224m╭────────────[0m[38;2;0;87;217m[1m 𓂀  EstaCoda [0m[0m[38;2;224;224;224m─────────────╮[0m
+[38;2;224;224;224m╭────────────[0m[38;2;67;137;215m[1m 𓂀  EstaCoda [0m[0m[38;2;224;224;224m─────────────╮[0m
   [38;2;26;26;26mHere is the analysis you requested.[0m
 
   [38;2;26;26;26mThe codebase is well-structured.[0m
@@ -477,7 +477,7 @@ exports[`Session surfaces — slash menu > renders in narrow width > slash-menu-
 "[38;2;76;175;80m[OK][0m [1m[0m
 
 [1mCommands[0m
-[38;2;76;138;224mName                   [0m  [38;2;76;138;224mDescription                                                           [0m
+[38;2;67;137;215mName                   [0m  [38;2;67;137;215mDescription                                                           [0m
 [2m───────────────────────  ──────────────────────────────────────────────────────────────────────[0m
 /help                    Show command help
 /status                  Show runtime, model, context, trust, memory, and skill status
@@ -512,7 +512,7 @@ exports[`Session surfaces — slash menu > renders in no Unicode > slash-menu-no
 "[38;2;76;175;80m[OK][0m [1m[0m
 
 [1mCommands[0m
-[38;2;76;138;224mName                   [0m  [38;2;76;138;224mDescription                                                           [0m
+[38;2;67;137;215mName                   [0m  [38;2;67;137;215mDescription                                                           [0m
 [2m-----------------------  ----------------------------------------------------------------------[0m
 /help                    Show command help
 /status                  Show runtime, model, context, trust, memory, and skill status
@@ -617,7 +617,7 @@ exports[`Session surfaces — slash menu > renders in standard dark > slash-menu
 "[38;2;76;175;80m[OK][0m [1m[0m
 
 [1mCommands[0m
-[38;2;76;138;224mName                   [0m  [38;2;76;138;224mDescription                                                           [0m
+[38;2;67;137;215mName                   [0m  [38;2;67;137;215mDescription                                                           [0m
 [2m───────────────────────  ──────────────────────────────────────────────────────────────────────[0m
 /help                    Show command help
 /status                  Show runtime, model, context, trust, memory, and skill status
@@ -652,7 +652,7 @@ exports[`Session surfaces — slash menu > renders in standard light > slash-men
 "[38;2;46;125;50m[OK][0m [1m[0m
 
 [1mCommands[0m
-[38;2;0;87;217mName                   [0m  [38;2;0;87;217mDescription                                                           [0m
+[38;2;67;137;215mName                   [0m  [38;2;67;137;215mDescription                                                           [0m
 [2m───────────────────────  ──────────────────────────────────────────────────────────────────────[0m
 /help                    Show command help
 /status                  Show runtime, model, context, trust, memory, and skill status
@@ -685,7 +685,7 @@ exports[`Session surfaces — slash menu > renders in standard light > slash-men
 
 exports[`Session surfaces — startup > renders in narrow width > startup-narrow width 1`] = `
 "
-[38;2;76;138;224m[1mEstaCoda[0m[0m
+[38;2;67;137;215m[1mEstaCoda[0m[0m
 
 [2mKemet Research[0m
 [2mالسيادة التكنولوجية العربية[0m
@@ -696,7 +696,7 @@ exports[`Session surfaces — startup > renders in narrow width > startup-narrow
 
 exports[`Session surfaces — startup > renders in no Unicode > startup-no Unicode 1`] = `
 "
-[38;2;76;138;224m[1mEstaCoda[0m[0m
+[38;2;67;137;215m[1mEstaCoda[0m[0m
 
 [2mKemet Research[0m
 [2mالسيادة التكنولوجية العربية[0m
@@ -726,7 +726,7 @@ readiness: ready"
 
 exports[`Session surfaces — startup > renders in standard dark > startup-standard dark 1`] = `
 "
-[38;2;76;138;224m[1mEstaCoda[0m[0m
+[38;2;67;137;215m[1mEstaCoda[0m[0m
 
 [2mKemet Research[0m
 [2mالسيادة التكنولوجية العربية[0m
@@ -737,7 +737,7 @@ exports[`Session surfaces — startup > renders in standard dark > startup-stand
 
 exports[`Session surfaces — startup > renders in standard light > startup-standard light 1`] = `
 "
-[38;2;0;87;217m[1mEstaCoda[0m[0m
+[38;2;67;137;215m[1mEstaCoda[0m[0m
 
 [2mKemet Research[0m
 [2mالسيادة التكنولوجية العربية[0m
@@ -747,12 +747,12 @@ exports[`Session surfaces — startup > renders in standard light > startup-stan
 `;
 
 exports[`Session surfaces — startup dashboard > renders in narrow width > startup-dashboard-narrow width 1`] = `
-"                [38;2;76;138;224m[1mEstaCoda[0m[0m
+"                [38;2;67;137;215m[1mEstaCoda[0m[0m
 
              [2mKemet Research[0m
       [2mالسيادة التكنولوجية العربية[0m
 
-[38;2;237;237;237m╭────[0m[38;2;76;138;224m[1m v0.0.5  𓂀  session 4c6d7f55 [0m[0m[38;2;237;237;237m─────╮[0m
+[38;2;237;237;237m╭────[0m[38;2;67;137;215m[1m v0.0.5  𓂀  session 4c6d7f55 [0m[0m[38;2;237;237;237m─────╮[0m
   [38;2;76;175;80m●[0m [1mdeepseek-reasoner[0m  ·  [38;2;76;175;80mready[0m
 
   Workspace Trust        :  trusted
@@ -772,12 +772,12 @@ exports[`Session surfaces — startup dashboard > renders in narrow width > star
 `;
 
 exports[`Session surfaces — startup dashboard > renders in no Unicode > startup-dashboard-no Unicode 1`] = `
-"                                 [38;2;76;138;224m[1mEstaCoda[0m[0m
+"                                 [38;2;67;137;215m[1mEstaCoda[0m[0m
 
                               [2mKemet Research[0m
                         [2mالسيادة التكنولوجية العربية[0m
 
-[38;2;237;237;237m+----------------------[0m[38;2;76;138;224m[1m v0.0.5  *  session 4c6d7f55 [0m[0m[38;2;237;237;237m----------------------+[0m
+[38;2;237;237;237m+----------------------[0m[38;2;67;137;215m[1m v0.0.5  *  session 4c6d7f55 [0m[0m[38;2;237;237;237m----------------------+[0m
   [38;2;76;175;80m●[0m [1mdeepseek-reasoner[0m  ·  [38;2;76;175;80mready[0m
 
   Workspace Trust        :  trusted         [1mInteractive Commands:[0m
@@ -830,12 +830,12 @@ Interactive commands:
 `;
 
 exports[`Session surfaces — startup dashboard > renders in standard dark > startup-dashboard-standard dark 1`] = `
-"                                 [38;2;76;138;224m[1mEstaCoda[0m[0m
+"                                 [38;2;67;137;215m[1mEstaCoda[0m[0m
 
                               [2mKemet Research[0m
                         [2mالسيادة التكنولوجية العربية[0m
 
-[38;2;237;237;237m╭──────────────────────[0m[38;2;76;138;224m[1m v0.0.5  𓂀  session 4c6d7f55 [0m[0m[38;2;237;237;237m──────────────────────╮[0m
+[38;2;237;237;237m╭──────────────────────[0m[38;2;67;137;215m[1m v0.0.5  𓂀  session 4c6d7f55 [0m[0m[38;2;237;237;237m──────────────────────╮[0m
   [38;2;76;175;80m●[0m [1mdeepseek-reasoner[0m  ·  [38;2;76;175;80mready[0m
 
   Workspace Trust        :  trusted         [1mInteractive Commands:[0m
@@ -848,12 +848,12 @@ exports[`Session surfaces — startup dashboard > renders in standard dark > sta
 `;
 
 exports[`Session surfaces — startup dashboard > renders in standard light > startup-dashboard-standard light 1`] = `
-"                                 [38;2;0;87;217m[1mEstaCoda[0m[0m
+"                                 [38;2;67;137;215m[1mEstaCoda[0m[0m
 
                               [2mKemet Research[0m
                         [2mالسيادة التكنولوجية العربية[0m
 
-[38;2;224;224;224m╭──────────────────────[0m[38;2;0;87;217m[1m v0.0.5  𓂀  session 4c6d7f55 [0m[0m[38;2;224;224;224m──────────────────────╮[0m
+[38;2;224;224;224m╭──────────────────────[0m[38;2;67;137;215m[1m v0.0.5  𓂀  session 4c6d7f55 [0m[0m[38;2;224;224;224m──────────────────────╮[0m
   [38;2;46;125;50m●[0m [1mdeepseek-reasoner[0m  ·  [38;2;46;125;50mready[0m
 
   Workspace Trust        :  trusted         [1mInteractive Commands:[0m
