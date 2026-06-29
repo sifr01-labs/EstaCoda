@@ -7,7 +7,7 @@ import {
   type RawPromptRenderOutput,
 } from "./rawPromptRenderLoop.js";
 import { createOperatorConsoleRuntimeHost } from "../ui/papyrus/operator-console/operatorConsoleRuntimeHost.js";
-import type { SetupSurfaceState, StatusRailState } from "../ui/papyrus/operator-console/operatorConsoleState.js";
+import type { SetupSurfaceState, StatusRailState, StreamingState } from "../ui/papyrus/operator-console/operatorConsoleState.js";
 import { createPastedTextAttachment } from "../ui/papyrus/operator-console/index.js";
 
 const forbiddenManagedRegionOutput = /\x1b\[3J|\x1b\[2J|\x1b\[H|\x1b\[\d+;\d+H/u;
@@ -211,6 +211,38 @@ describe("raw prompt render loop", () => {
     expect(text.indexOf("╭─ Running tools")).toBeLessThan(text.indexOf("╭─ Steer current turn"));
     expect(text.indexOf("╭─ Steer current turn")).toBeLessThan(text.indexOf("◷ 00:13"));
     expect(text).toContain("› focus approvals");
+    expect(text).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
+  it("passes streaming state through the persistent Operator Console host", () => {
+    const output = fakeOutput();
+    const host = createOperatorConsoleRuntimeHost();
+    const setStreaming = vi.spyOn(host, "setStreaming");
+    const loop = new RawPromptRenderLoop(output, {
+      operatorConsoleHostFactory: () => host,
+    });
+
+    const rows = loop.render({
+      prompt: "> ",
+      state: createLineEditorState("continue"),
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 96, height: 18, isTty: true },
+        status: status({ usedTokens: 18000, elapsedMs: 13000 }),
+        streaming: streamingState({
+          tail: "Streaming through raw prompt frame",
+        }),
+      },
+    });
+    const text = output.text();
+
+    expect(rows).toBeGreaterThan(4);
+    expect(setStreaming).toHaveBeenCalledWith(expect.objectContaining({
+      tail: "Streaming through raw prompt frame",
+    }));
+    expect(host.getState().streaming?.tail).toBe("Streaming through raw prompt frame");
+    expect(text).toContain("Assistant stream");
+    expect(text).toContain("Streaming through raw prompt frame");
     expect(text).not.toMatch(forbiddenManagedRegionOutput);
   });
 
@@ -652,5 +684,17 @@ function setupPanel(): SetupSurfaceState {
     ],
     selectedRowId: "primary",
     footer: "↑↓ navigate   ENTER select",
+  };
+}
+
+function streamingState(input: Partial<StreamingState> = {}): StreamingState {
+  return {
+    segments: input.segments ?? [{
+      id: "segment-1",
+      role: "assistant",
+      text: "Settled streamed text",
+    }],
+    tail: input.tail ?? "Live streamed tail",
+    isStreaming: input.isStreaming ?? true,
   };
 }

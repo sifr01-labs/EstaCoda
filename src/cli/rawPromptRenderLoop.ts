@@ -13,6 +13,7 @@ import type {
   PromptSurfaceState,
   SlashMenuState,
   SteerState,
+  StreamingState,
   ToolActivityState,
   TurnActivityState,
 } from "../ui/papyrus/operator-console/operatorConsoleState.js";
@@ -50,6 +51,7 @@ export type RawPromptOperatorConsoleOptions = Omit<OperatorConsoleRawPromptSnaps
   readonly focus?: FocusState;
   readonly slash?: SlashMenuState;
   readonly activeWork?: ToolActivityState;
+  readonly streaming?: StreamingState;
   readonly turnActivity?: TurnActivityState;
   readonly steer?: SteerState;
   readonly promptMode?: PromptSurfaceState["mode"];
@@ -99,6 +101,7 @@ export class RawPromptRenderLoop {
         attachments: snapshot.operatorConsole.attachments,
         slash: snapshot.operatorConsole.slash,
         activeWork: snapshot.operatorConsole.activeWork,
+        streaming: snapshot.operatorConsole.streaming,
         steer: snapshot.operatorConsole.steer,
         promptMode: snapshot.operatorConsole.promptMode,
         placeholder: snapshot.operatorConsole.placeholder,

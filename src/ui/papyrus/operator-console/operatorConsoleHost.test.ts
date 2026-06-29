@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { resolveTokens } from "../../../theme/token-resolver.js";
 import { createLineEditorState } from "../../input/lineEditor.js";
 import { stringWidth } from "../screen/stringWidth.js";
@@ -10,6 +10,7 @@ import {
   createOperatorConsoleStyle,
   createPastedTextAttachment,
   type SetupSurfaceState,
+  type StreamingState,
 } from "./index.js";
 
 describe("Papyrus operator console raw prompt host", () => {
@@ -180,6 +181,24 @@ describe("Papyrus operator console raw prompt host", () => {
     expect(status).not.toMatch(/\b(attachment|pasted text|OPENAI_API_KEY|secret)\b/iu);
   });
 
+  it("maps raw prompt streaming state into the Operator Console frame", () => {
+    const frame = buildOperatorConsoleRawPromptFrame({
+      prompt: "> ",
+      state: createLineEditorState("continue"),
+      terminal: { width: 80, height: 18, isTty: true },
+      streaming: streamingState({
+        tail: "Still composing the response",
+      }),
+      turnActivity: { phase: "provider" },
+    });
+    const text = frame.rows.join("\n");
+
+    expect(frame.state.streaming?.tail).toBe("Still composing the response");
+    expect(text).toContain("Assistant stream");
+    expect(text).toContain("Still composing the response");
+    expect(frame.rows.every((line) => stringWidth(line) <= 80)).toBe(true);
+  });
+
   it("is deterministic and emits no ANSI or cursor-control sequences", () => {
     const input = {
       prompt: "> ",
@@ -223,6 +242,31 @@ describe("Papyrus operator console raw prompt host", () => {
 
     expect(frame.state.style).toBe(style);
     expect(frame.rows.join("\n")).toContain(`${ansiFg(tokens.contract.palette.caution)}●\x1b[0m`);
+  });
+
+  it("restores streaming after clearing a persistent runtime host", () => {
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 80, height: 18, isTty: true },
+    });
+    const clear = vi.spyOn(host, "clear");
+    const setStreaming = vi.spyOn(host, "setStreaming");
+
+    const frame = buildOperatorConsoleRawPromptFrameWithRuntimeHost(host, {
+      prompt: "> ",
+      state: createLineEditorState("draft"),
+      terminal: { width: 80, height: 18, isTty: true },
+      streaming: streamingState({
+        tail: "Streaming survives host rebuild",
+      }),
+    });
+
+    expect(clear).toHaveBeenCalledOnce();
+    expect(setStreaming).toHaveBeenCalledWith(expect.objectContaining({
+      tail: "Streaming survives host rebuild",
+    }));
+    expect(clear.mock.invocationCallOrder[0]).toBeLessThan(setStreaming.mock.invocationCallOrder[0] ?? 0);
+    expect(frame.state.streaming?.tail).toBe("Streaming survives host rebuild");
+    expect(frame.rows.join("\n")).toContain("Streaming survives host rebuild");
   });
 
   it("renders setup panel through a persistent runtime host without session chrome", () => {
@@ -308,5 +352,17 @@ function setupPanel(): SetupSurfaceState {
     ],
     selectedRowId: "primary",
     footer: "↑↓ navigate   ENTER select",
+  };
+}
+
+function streamingState(input: Partial<StreamingState> = {}): StreamingState {
+  return {
+    segments: input.segments ?? [{
+      id: "segment-1",
+      role: "assistant",
+      text: "Settled streamed text",
+    }],
+    tail: input.tail ?? "Live streamed tail",
+    isStreaming: input.isStreaming ?? true,
   };
 }

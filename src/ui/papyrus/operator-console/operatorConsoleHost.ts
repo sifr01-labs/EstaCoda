@@ -10,6 +10,7 @@ import {
   type SlashMenuState,
   type StatusRailState,
   type SteerState,
+  type StreamingState,
   type TerminalMetrics,
   type ToolActivityState,
   type TurnActivityState,
@@ -34,6 +35,7 @@ export type OperatorConsoleRawPromptSnapshot = {
   readonly turnActivity?: TurnActivityState;
   readonly slash?: SlashMenuState;
   readonly activeWork?: ToolActivityState;
+  readonly streaming?: StreamingState;
   readonly steer?: SteerState;
   readonly promptMode?: PromptSurfaceState["mode"];
   readonly placeholder?: string;
@@ -74,6 +76,7 @@ export function buildOperatorConsoleStateFromRawPrompt(
     turnActivity: snapshot.turnActivity,
     attachments: snapshot.attachments ?? [],
     activeWork: snapshot.activeWork,
+    streaming: snapshot.streaming,
     steer: snapshot.steer,
     focus: snapshot.focus,
     style: snapshot.style,
@@ -114,6 +117,7 @@ export function buildOperatorConsoleRawPromptFrameWithRuntimeHost(
   host.setAttachments(snapshot.attachments ?? []);
   host.setSlash(snapshot.slash);
   host.setActiveWork(snapshot.activeWork ?? createInitialOperatorConsoleState().activeWork);
+  host.setStreaming(snapshot.streaming);
   host.setSteer(snapshot.steer);
   host.setFocus(snapshot.focus ?? createInitialOperatorConsoleState().focus);
   if (snapshot.style !== undefined) {
