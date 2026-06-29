@@ -382,8 +382,8 @@ Streaming contract:
   any delta reaches the Operator Console.
 - Papyrus consumes visible deltas only. The streaming surface must not parse,
   infer, recover, or render hidden reasoning from provider events.
-- Live streaming and settled assistant transcript blocks share the same
-  EstaCoda assistant-message frame. User-visible debug chrome such as
+- Live streaming and settled assistant responses share the same EstaCoda
+  assistant-message frame language. User-visible debug chrome such as
   `Assistant stream` or `assistant:` must not appear in normal rendering. The
   live-only marker is the trailing cursor on incomplete text.
 - Inline tool trails render inside that shared assistant-message frame using
@@ -416,9 +416,11 @@ Streaming contract:
 - Raw prompt frame rebuilds must restore streaming after `host.clear()`. The
   ordering is part of the contract because `clear()` removes transient host
   state before the snapshot is replayed into the new frame.
-- Completing streaming is atomic: flush the current tail into transcript blocks,
-  append those transcript blocks, clear live streaming state, stop the streaming
-  refresh timer, and refresh once.
+- CLI streaming settlement is atomic: clear the live frame, discard live
+  streaming state without redrawing it as a height-constrained transcript
+  surface, stop the streaming refresh timer, and print the finalized assistant
+  response through the durable assistant renderer. This keeps final answers in
+  scrollback and avoids clipping them to live-frame height.
 - Streaming refreshes share the Operator Console refresh path with animation
   ticks. Back-to-back timer wakeups should be coalesced or dropped rather than
   fighting over terminal writes.

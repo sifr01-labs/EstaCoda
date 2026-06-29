@@ -166,8 +166,10 @@ Papyrus هو substrate واجهة الطرفية. Operator Console هو الإط
 وضجيج active-turn تظهر في أسطح سياقية، لا داخل status rail.
 
 في أدوار `TTY` التفاعلية المدعومة، يبث النص المرئي من المزود داخل
-`Operator Console` ثم يدمج في `transcript` عند اكتمال الدور. جلسات `plain`
-و`CI` وغير `TTY` تُبقي البث `append-only` عبر `stdout`.
+`Operator Console` كمعاينة مباشرة. عند اكتمال الدور، يُمسح الإطار المباشر
+ويُطبع رد المساعد النهائي عبر مصيّر المساعد الدائم حتى لا تُقصّ الردود الطويلة
+بحدود الإطار المباشر. جلسات `plain` و`CI` وغير `TTY` تُبقي البث
+`append-only` عبر `stdout`.
 
 يعرض slash autocomplete كقائمة Operator Console تحت المحث وفوق status rail.
 تظهر مراجع اللصق كبطاقات attachments فوق المحث؛ ويُحفظ المحتوى الملصوق الكامل

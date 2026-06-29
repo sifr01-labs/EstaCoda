@@ -174,8 +174,10 @@ timer. Tools, approvals, workspace/trust, setup, steering, channel state, and
 active-turn noise render in contextual surfaces, not in the rail.
 
 During supported interactive TTY turns, visible provider text streams inside the
-Operator Console and is folded into the transcript when the turn completes.
-Plain, CI, and non-TTY sessions keep append-only stdout streaming.
+Operator Console as a live preview. When the turn completes, the live frame is
+cleared and the finalized assistant response is printed through the durable
+assistant renderer so long answers are not clipped by the live frame. Plain,
+CI, and non-TTY sessions keep append-only stdout streaming.
 
 Slash autocomplete renders as an Operator Console menu below the prompt and
 above the status rail. Paste references render as attachment cards above the
