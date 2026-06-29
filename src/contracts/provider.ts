@@ -160,6 +160,32 @@ export type ProviderRouteRole =
   | "override"
   | "unknown";
 
+export type ProviderStreamFinish =
+  | "done"
+  | "error"
+  | "cancelled"
+  | "incomplete-stream"
+  | "empty-response";
+
+export type ProviderStreamDiagnostics = {
+  stream: true;
+  startedAtMs: number;
+  endedAtMs: number;
+  durationMs: number;
+  firstEventMs?: number;
+  firstTokenMs?: number;
+  eventCount: number;
+  tokenChunks: number;
+  visibleChars: number;
+  toolCallChunks: number;
+  transportDone: boolean;
+  finish: ProviderStreamFinish;
+  errorClass?: ProviderErrorClass | string;
+  finishReason?: ProviderFinishReason;
+  incompleteReason?: string;
+  reasoningMetadata?: ProviderReasoningMetadata;
+};
+
 export type ProviderLoopRuntimeMetadata = {
   reasoning?: ProviderReasoningMetadata;
   continuation?: {

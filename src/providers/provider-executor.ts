@@ -11,6 +11,8 @@ import type {
   ProviderLoopRuntimeMetadata,
   ProviderReasoningMetadata,
   ProviderRouteRole,
+  ProviderStreamDiagnostics,
+  ProviderStreamFinish,
   ProviderUsage
 } from "../contracts/provider.js";
 import { stripThinkBlocks } from "./provider-reasoning.js";
@@ -33,6 +35,7 @@ export type ProviderAttempt = {
   incompleteReason?: string;
   usage?: ProviderUsage;
   reasoningMetadata?: ProviderReasoningMetadata;
+  streamDiagnostics?: ProviderStreamDiagnostics;
 };
 
 export type ProviderExecutionResult = {
@@ -100,6 +103,7 @@ export type ProviderExecutionOptions = {
   primaryRoute?: ResolvedModelRoute;
   fallbackChain?: ResolvedModelRoute[];
   onEvent?: (event: ProviderRuntimeEvent) => void | Promise<void>;
+  now?: () => number;
 };
 
 export type ProviderExecutorOptions = {
@@ -316,11 +320,13 @@ export class ProviderExecutor {
               model: route.id,
               stream: provider.stream(buildRouteProviderRequest(request, route, { stream: true }), completionOptions),
               onEvent: options.onEvent,
-              signal: options.signal
+              signal: options.signal,
+              now: options.now
             })
           : {
               response: await provider.complete(buildRouteProviderRequest(request, route), completionOptions),
-              toolCalls: []
+              toolCalls: [],
+              streamDiagnostics: undefined
             };
         const callResponse = callResult.response;
 
@@ -335,6 +341,7 @@ export class ProviderExecutor {
           errorClass: callResponse.errorClass,
           content: callResponse.content,
           ...(callResponse.partialContent === undefined ? {} : { partialContent: callResponse.partialContent }),
+          ...(callResult.streamDiagnostics === undefined ? {} : { streamDiagnostics: callResult.streamDiagnostics }),
           ...attemptMetadataFromResponse(callResponse)
         });
 
@@ -425,7 +432,12 @@ export class ProviderExecutor {
             ...attempts[attempts.length - 1],
             ok: false,
             errorClass: "empty-response",
-            content: "Provider returned empty content with no tool calls."
+            content: "Provider returned empty content with no tool calls.",
+            streamDiagnostics: reclassifyStreamDiagnostics(
+              attempts[attempts.length - 1]?.streamDiagnostics,
+              "empty-response",
+              { errorClass: "empty-response" }
+            )
           };
 
           await options.onEvent?.({
@@ -613,6 +625,7 @@ function buildRouteProviderRequest(
 type CollectedProviderStream = {
   response: ProviderResponse;
   toolCalls: ProviderExecutionResult["toolCalls"];
+  streamDiagnostics: ProviderStreamDiagnostics;
 };
 
 async function collectProviderStream(input: {
@@ -621,24 +634,69 @@ async function collectProviderStream(input: {
   stream: AsyncIterable<ProviderStreamEvent>;
   onEvent?: (event: ProviderRuntimeEvent) => void | Promise<void>;
   signal?: AbortSignal;
+  now?: () => number;
 }): Promise<CollectedProviderStream> {
+  const now = input.now ?? Date.now;
+  const startedAtMs = now();
   let content = "";
   let finalResponse: ProviderResponse | undefined;
   let errorResponse: ProviderResponse | undefined;
   let sawTransportDone = false;
+  let firstEventMs: number | undefined;
+  let firstTokenMs: number | undefined;
+  let eventCount = 0;
+  let tokenChunks = 0;
+  let visibleChars = 0;
+  let toolCallChunks = 0;
   const toolCallFragments = new Map<string, ProviderExecutionResult["toolCalls"][number]>();
 
+  const markEvent = (event: ProviderStreamEvent) => {
+    eventCount += 1;
+    if (event.kind !== "start" && firstEventMs === undefined) {
+      firstEventMs = Math.max(0, now() - startedAtMs);
+    }
+  };
+
+  const finishDiagnostics = (
+    finish: ProviderStreamFinish,
+    response?: ProviderResponse
+  ): ProviderStreamDiagnostics => {
+    const endedAtMs = now();
+    const reasoningMetadata = response === undefined ? undefined : safeReasoningMetadataFromResponse(response);
+    return {
+      stream: true,
+      startedAtMs,
+      endedAtMs,
+      durationMs: Math.max(0, endedAtMs - startedAtMs),
+      ...(firstEventMs === undefined ? {} : { firstEventMs }),
+      ...(firstTokenMs === undefined ? {} : { firstTokenMs }),
+      eventCount,
+      tokenChunks,
+      visibleChars,
+      toolCallChunks,
+      transportDone: sawTransportDone,
+      finish,
+      ...(response?.errorClass === undefined ? {} : { errorClass: response.errorClass }),
+      ...(response?.finishReason === undefined ? {} : { finishReason: response.finishReason }),
+      ...(response?.incompleteReason === undefined ? {} : { incompleteReason: response.incompleteReason }),
+      ...(reasoningMetadata === undefined ? {} : { reasoningMetadata })
+    };
+  };
+
   for await (const event of input.stream) {
+    markEvent(event);
     if (input.signal?.aborted === true) {
+      const response: ProviderResponse = {
+        ok: false,
+        content: "Provider stream cancelled.",
+        model: input.model,
+        provider: input.provider,
+        errorClass: "timeout"
+      };
       return {
-        response: {
-          ok: false,
-          content: "Provider stream cancelled.",
-          model: input.model,
-          provider: input.provider,
-          errorClass: "timeout"
-        },
-        toolCalls: []
+        response,
+        toolCalls: [],
+        streamDiagnostics: finishDiagnostics("cancelled", response)
       };
     }
 
@@ -646,6 +704,11 @@ async function collectProviderStream(input: {
       case "start":
         break;
       case "token":
+        tokenChunks += 1;
+        visibleChars += event.text.length;
+        if (firstTokenMs === undefined) {
+          firstTokenMs = Math.max(0, now() - startedAtMs);
+        }
         content += event.text;
         await input.onEvent?.({
           kind: "provider-token",
@@ -655,6 +718,7 @@ async function collectProviderStream(input: {
         });
         break;
       case "tool-call":
+        toolCallChunks += 1;
         mergeToolCallFragment(toolCallFragments, event);
         break;
       case "done":
@@ -677,43 +741,62 @@ async function collectProviderStream(input: {
   if (errorResponse !== undefined) {
     return {
       response: errorResponse,
-      toolCalls: []
+      toolCalls: [],
+      streamDiagnostics: finishDiagnostics("error", errorResponse)
     };
   }
 
   if (finalResponse !== undefined) {
     return {
       response: finalResponse,
-      toolCalls: [...toolCallFragments.values()]
+      toolCalls: [...toolCallFragments.values()],
+      streamDiagnostics: finishDiagnostics("done", finalResponse)
     };
   }
 
   if (sawTransportDone && toolCallFragments.size === 0 && content.length > 0) {
+    const response: ProviderResponse = {
+      ok: true,
+      content,
+      model: input.model,
+      provider: input.provider,
+      finishReason: "unknown"
+    };
     return {
-      response: {
-        ok: true,
-        content,
-        model: input.model,
-        provider: input.provider,
-        finishReason: "unknown"
-      },
-      toolCalls: []
+      response,
+      toolCalls: [],
+      streamDiagnostics: finishDiagnostics("done", response)
     };
   }
 
   const partialContent = partialContentFromIncompleteStream(content);
+  const response: ProviderResponse = {
+    ok: false,
+    content: content.length === 0
+      ? "Provider stream ended before a done or error event."
+      : `Provider stream ended before completion after partial output:\n${content}`,
+    ...(partialContent === undefined ? {} : { partialContent }),
+    model: input.model,
+    provider: input.provider,
+    errorClass: "incomplete-stream"
+  };
   return {
-    response: {
-      ok: false,
-      content: content.length === 0
-        ? "Provider stream ended before a done or error event."
-        : `Provider stream ended before completion after partial output:\n${content}`,
-      ...(partialContent === undefined ? {} : { partialContent }),
-      model: input.model,
-      provider: input.provider,
-      errorClass: "incomplete-stream"
-    },
-    toolCalls: []
+    response,
+    toolCalls: [],
+    streamDiagnostics: finishDiagnostics("incomplete-stream", response)
+  };
+}
+
+function reclassifyStreamDiagnostics(
+  diagnostics: ProviderStreamDiagnostics | undefined,
+  finish: ProviderStreamFinish,
+  metadata: Pick<ProviderStreamDiagnostics, "errorClass"> = {}
+): ProviderStreamDiagnostics | undefined {
+  if (diagnostics === undefined) return undefined;
+  return {
+    ...diagnostics,
+    finish,
+    ...metadata
   };
 }
 

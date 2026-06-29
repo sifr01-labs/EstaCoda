@@ -435,6 +435,203 @@ describe("ProviderExecutor route-based execution", () => {
     expect(adapter.calls[0].options?.endpoint?.baseUrl).toBe("https://stream.example.com/v1");
   });
 
+  it("captures safe streaming diagnostics for a successful streamed attempt", async () => {
+    const adapter = createMockAdapter({
+      id: "test-provider",
+      streamEvents: [
+        { kind: "start", provider: "test-provider", model: "gpt-4o" },
+        { kind: "token", provider: "test-provider", model: "gpt-4o", text: "hello" },
+        {
+          kind: "tool-call",
+          provider: "test-provider",
+          model: "gpt-4o",
+          index: 0,
+          id: "tool-1",
+          name: "read_file",
+          argumentsText: "{\"path\":\"src/index.ts\"}"
+        },
+        { kind: "token", provider: "test-provider", model: "gpt-4o", text: " world" },
+        {
+          kind: "done",
+          provider: "test-provider",
+          model: "gpt-4o",
+          response: {
+            ok: true,
+            content: "hello world",
+            model: "gpt-4o",
+            provider: "test-provider",
+            finishReason: "stop",
+            reasoning: "hidden chain of thought",
+            reasoningMetadata: {
+              present: true,
+              chars: "hidden chain of thought".length,
+              format: "reasoning"
+            }
+          }
+        }
+      ]
+    });
+    registry.register(adapter);
+
+    let nowMs = 1_000;
+    const result = await executor.complete({ messages: [] }, {}, {
+      primaryRoute: createDefaultRoute({ provider: "test-provider" }),
+      stream: true,
+      now: () => {
+        const value = nowMs;
+        nowMs += 5;
+        return value;
+      }
+    });
+
+    const diagnostics = result.attempts[0]?.streamDiagnostics;
+    expect(result.ok).toBe(true);
+    expect(diagnostics).toEqual(expect.objectContaining({
+      stream: true,
+      startedAtMs: 1_000,
+      eventCount: 5,
+      tokenChunks: 2,
+      visibleChars: "hello world".length,
+      toolCallChunks: 1,
+      transportDone: false,
+      finish: "done",
+      finishReason: "stop",
+      reasoningMetadata: {
+        present: true,
+        chars: "hidden chain of thought".length,
+        format: "reasoning"
+      }
+    }));
+    expect(diagnostics?.durationMs).toBeGreaterThan(0);
+    expect(diagnostics?.firstEventMs).toBeGreaterThan(0);
+    expect(diagnostics?.firstTokenMs).toBeGreaterThan(0);
+    expect(JSON.stringify(diagnostics)).not.toContain("hidden chain of thought");
+  });
+
+  it("captures incomplete streaming diagnostics with bounded visible counters", async () => {
+    const adapter = createMockAdapter({
+      id: "test-provider",
+      streamEvents: [
+        { kind: "start", provider: "test-provider", model: "gpt-4o" },
+        { kind: "token", provider: "test-provider", model: "gpt-4o", text: "partial" }
+      ]
+    });
+    registry.register(adapter);
+
+    const result = await executor.complete({ messages: [] }, {}, {
+      primaryRoute: createDefaultRoute({ provider: "test-provider" }),
+      stream: true
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.attempts[0]?.streamDiagnostics).toEqual(expect.objectContaining({
+      finish: "incomplete-stream",
+      errorClass: "incomplete-stream",
+      tokenChunks: 1,
+      visibleChars: "partial".length,
+      transportDone: false
+    }));
+  });
+
+  it("keeps stream diagnostics separate across fallback attempts", async () => {
+    const primaryAdapter = createMockAdapter({
+      id: "primary",
+      streamEvents: [
+        { kind: "start", provider: "primary", model: "primary-model" },
+        {
+          kind: "error",
+          provider: "primary",
+          model: "primary-model",
+          response: {
+            ok: false,
+            content: "Rate limited",
+            model: "primary-model",
+            provider: "primary",
+            errorClass: "rate-limit"
+          }
+        }
+      ]
+    });
+    const fallbackAdapter = createMockAdapter({
+      id: "fallback",
+      streamEvents: [
+        { kind: "start", provider: "fallback", model: "fallback-model" },
+        { kind: "token", provider: "fallback", model: "fallback-model", text: "fallback ok" },
+        {
+          kind: "done",
+          provider: "fallback",
+          model: "fallback-model",
+          response: {
+            ok: true,
+            content: "fallback ok",
+            model: "fallback-model",
+            provider: "fallback"
+          }
+        }
+      ]
+    });
+    registry.register(primaryAdapter);
+    registry.register(fallbackAdapter);
+
+    const result = await executor.complete({ messages: [] }, {}, {
+      primaryRoute: createDefaultRoute({ provider: "primary", id: "primary-model" }),
+      fallbackChain: [createDefaultRoute({ provider: "fallback", id: "fallback-model" })],
+      stream: true
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.fallbackUsed).toBe(true);
+    expect(result.attempts[0]?.streamDiagnostics).toEqual(expect.objectContaining({
+      finish: "error",
+      errorClass: "rate-limit",
+      tokenChunks: 0,
+      visibleChars: 0
+    }));
+    expect(result.attempts[1]?.streamDiagnostics).toEqual(expect.objectContaining({
+      finish: "done",
+      tokenChunks: 1,
+      visibleChars: "fallback ok".length
+    }));
+  });
+
+  it("captures cancelled streaming diagnostics without counting the aborted token as visible", async () => {
+    const controller = new AbortController();
+    const calls: MockCall[] = [];
+    const adapter: ProviderAdapter & { calls: MockCall[] } = {
+      id: "test-provider",
+      name: "test-provider mock",
+      executable: true,
+      health: () => ({ available: true }),
+      listModels: () => [],
+      complete: async (request, options) => {
+        calls.push({ request, options });
+        return { ok: true, content: "unused", model: request.model, provider: "test-provider" };
+      },
+      stream: async function* (request, options) {
+        calls.push({ request, options });
+        yield { kind: "start", provider: "test-provider", model: request.model };
+        controller.abort("test cancellation");
+        yield { kind: "token", provider: "test-provider", model: request.model, text: "should not count" };
+      },
+      calls
+    };
+    registry.register(adapter);
+
+    const result = await executor.complete({ messages: [] }, {}, {
+      primaryRoute: createDefaultRoute({ provider: "test-provider" }),
+      stream: true,
+      signal: controller.signal
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.attempts[0]?.streamDiagnostics).toEqual(expect.objectContaining({
+      finish: "cancelled",
+      errorClass: "timeout",
+      tokenChunks: 0,
+      visibleChars: 0
+    }));
+  });
+
   it("openai_responses route executes without runnable=false rejection after metadata flip", async () => {
     tmpDir = await makeTempDir();
     await writeAuthJson(tmpDir, {
