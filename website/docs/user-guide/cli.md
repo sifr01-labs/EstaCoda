@@ -159,6 +159,7 @@ and the raw prompt render loop applies only terminal diff/cursor cleanup.
 The live TTY frame is composed from these surfaces:
 
 - startup dashboard
+- live assistant streaming
 - approvals
 - active work
 - queued steer
@@ -171,6 +172,10 @@ The live TTY frame is composed from these surfaces:
 The persistent status rail contains only model, context usage/bar, and session
 timer. Tools, approvals, workspace/trust, setup, steering, channel state, and
 active-turn noise render in contextual surfaces, not in the rail.
+
+During supported interactive TTY turns, visible provider text streams inside the
+Operator Console and is folded into the transcript when the turn completes.
+Plain, CI, and non-TTY sessions keep append-only stdout streaming.
 
 Slash autocomplete renders as an Operator Console menu below the prompt and
 above the status rail. Paste references render as attachment cards above the
