@@ -35,6 +35,35 @@ describe("selectProviderModelRoute", () => {
     expect(prompt.calls).toHaveLength(2);
   });
 
+  it("defers primary local model selection to the endpoint-first setup flow", async () => {
+    const flow = fakeFlow({
+      providers: [providerCandidate("local", "Local", 2)],
+      models: {
+        local: [
+          modelCandidate("local", "seed-model"),
+          modelCandidate("local", "other-local-model"),
+        ],
+      },
+    });
+    const prompt = fakePrompt(["local"]);
+
+    const result = await selectProviderModelRoute({
+      prompt,
+      flowEngine: flow.engine,
+      locale: "en",
+      mode: "primary",
+      endpointFirstProviderIds: ["local"],
+      allowCancel: true,
+    });
+
+    expect(result).toEqual({
+      kind: "selected",
+      selection: selectionResult("local", "seed-model"),
+    });
+    expect(flow.resolved).toEqual([{ providerId: "local", modelId: "seed-model" }]);
+    expect(prompt.calls.map((call) => call.title)).toEqual(["Primary provider"]);
+  });
+
   it("returns diagnostic when no providers are available", async () => {
     const flow = fakeFlow({ providers: [] });
     const prompt = fakePrompt();

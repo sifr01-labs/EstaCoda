@@ -15,6 +15,7 @@ import {
   type FlowEngine,
   type ProviderModelSelectionResult,
 } from "../../providers/provider-model-selection-flow.js";
+import type { FetchLike as OpenAICompatibleFetchLike } from "../../providers/openai-compatible-provider.js";
 import {
   selectProviderModelRoute,
   type ProviderModelPromptResult,
@@ -51,6 +52,10 @@ import {
 import type { SetupVerificationReport } from "../verification.js";
 import type { SetupCopyKey, SetupCopyLocale } from "../setup-copy.js";
 import {
+  collectOpenAICompatibleEndpointFlow,
+  type OpenAICompatibleEndpointFlowResult,
+} from "../openai-compatible-endpoint-flow.js";
+import {
   formatSetupCopy,
   promptSetupChoice,
   renderSetupApplyEndState,
@@ -60,6 +65,7 @@ import {
 } from "../setup-prompts.js";
 import { isolateLtr } from "../../ui/bidi.js";
 import {
+  createOpenAICompatibleEndpointFlowUi,
   promptConfigEditorAction,
   promptConfigEditorReviewApproval,
   promptAuxiliaryModelTask,
@@ -1001,7 +1007,90 @@ async function handleProviderRouteAction(
     return handleProviderRoutePromptExit(options, initialDecision, action.id, resolved);
   }
 
+  if (resolved.selection.credentialAction.kind === "endpoint") {
+    return reviewAndApplyOpenAICompatibleEndpointFlow(options, initialDecision, session, editorAction, resolved.selection);
+  }
+
   return reviewAndApplyResolvedRoute(options, initialDecision, session, editorAction, resolved.selection);
+}
+
+async function reviewAndApplyOpenAICompatibleEndpointFlow(
+  options: LocalizedConfigEditorRunnerOptions,
+  initialDecision: SetupRouteDecision,
+  session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
+  editorAction: SetupEditorActionDraft,
+  resolution: ProviderModelSelectionResult
+): Promise<RunOnceResult> {
+  if (resolution.credentialAction.kind !== "endpoint") {
+    throw new Error("OpenAI-compatible endpoint setup requires an endpoint credential action.");
+  }
+  const flowResult = await collectOpenAICompatibleEndpointFlow({
+    providerId: resolution.provider,
+    defaultBaseUrl: resolution.credentialAction.baseUrl ?? resolution.baseUrl ?? "http://localhost:11434/v1",
+    defaultApiKeyEnv: resolution.credentialAction.apiKeyEnv,
+    locale: options.locale,
+    ui: createOpenAICompatibleEndpointFlowUi(options.prompt, options.locale),
+    fetch: openAICompatibleSetupFetch(options),
+    initialEnv: process.env,
+  });
+
+  if (flowResult.kind !== "ready") {
+    if (flowResult.kind === "back") {
+      return menuBackResult(initialDecision, editorAction.id);
+    }
+    const output = setupCopyText(options.locale, "setupEditor.result.exitWithoutChanges");
+    write(options, `${output}\n`);
+    return {
+      completed: true,
+      exitCode: 0,
+      output,
+      initialDecision,
+      selectedActionId: editorAction.id,
+    };
+  }
+
+  return reviewAndApplyOpenAICompatibleEndpointResult(options, initialDecision, session, editorAction, flowResult);
+}
+
+async function reviewAndApplyOpenAICompatibleEndpointResult(
+  options: LocalizedConfigEditorRunnerOptions,
+  initialDecision: SetupRouteDecision,
+  session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
+  editorAction: SetupEditorActionDraft,
+  flowResult: Extract<OpenAICompatibleEndpointFlowResult, { readonly kind: "ready" }>
+): Promise<RunOnceResult> {
+  const verificationAction = session.plan.actions.find((candidate) => candidate.id === "run-readonly-verification");
+  const draftActions = [
+    flowResult.routeAction,
+    ...(flowResult.credentialAction === undefined ? [] : [flowResult.credentialAction]),
+    ...(verificationAction === undefined ? [] : [verificationAction]),
+  ];
+  const stateHome = resolveStateHome({ homeDir: options.homeDir });
+  const profileConfigPath = activeProfileConfigPath(options);
+  const draftBundle = buildSetupEditorActionDraftBundle(session, draftActions, {
+    configPath: profileConfigPath,
+    workspaceRoot: options.workspaceRoot,
+    trustStorePath: options.trustStorePath ?? stateHome.trustJsonPath,
+  });
+  const reviewManifest = buildSetupReviewManifest([draftBundle]);
+  const reviewAccepted = await promptConfigEditorReviewApproval(options.prompt, {
+    selectedActionId: editorAction.id,
+    reviewManifest,
+  }, options.locale);
+  const applyPlanningResult = planSetupApply(reviewAccepted
+    ? { kind: "approved-review-result", manifest: reviewManifest }
+    : { kind: "cancelled-review-result", manifest: reviewManifest, reason: "User cancelled review." });
+
+  return finalizeReviewedApply({
+    options,
+    initialDecision,
+    selectedActionId: editorAction.id,
+    reviewManifest,
+    applyPlanningResult,
+    deferredSecretWrites: flowResult.pendingCredentialWrite === undefined
+      ? undefined
+      : [flowResult.pendingCredentialWrite],
+  });
 }
 
 async function handleFallbackRouteAction(
@@ -1426,6 +1515,27 @@ function activeProfileConfigPath(options: Pick<ConfigEditorRunnerOptions, "homeD
   return resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
 }
 
+function openAICompatibleSetupFetch(
+  options: Pick<ConfigEditorRunnerOptions, "providerFetch">
+): OpenAICompatibleFetchLike | undefined {
+  if (options.providerFetch === undefined) return undefined;
+  return async (url, init) => {
+    const response = await options.providerFetch!(url, {
+      method: init.method,
+      headers: init.headers,
+      body: init.body,
+    });
+    return {
+      ok: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      json: response.json,
+      text: async () => "",
+      body: null,
+    };
+  };
+}
+
 async function reviewAndApplyResolvedRoute(
   options: LocalizedConfigEditorRunnerOptions,
   initialDecision: SetupRouteDecision,
@@ -1516,6 +1626,7 @@ async function selectResolvedProviderRoute(
     locale: options.locale,
     currentProviderId: currentRoute.currentProviderId,
     currentModelId: currentRoute.currentModelId,
+    endpointFirstProviderIds: mode === "primary" ? ["local", "openai-compatible"] : [],
     allowBack: true,
     allowCancel: true,
     mode,

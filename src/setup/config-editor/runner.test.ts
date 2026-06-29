@@ -2182,10 +2182,22 @@ describe("runConfigEditor", () => {
     await expect(readFile(profileAuthPath(tempDir), "utf8")).rejects.toThrow();
   });
 
-  it("prompts for local endpoint and uses the default base URL when blank with no API key", async () => {
+  it("discovers local endpoint models before review when configuring the primary route", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
-    const basePrompt = fakePrompt({ values: ["Local", "local-test-model", "", true] });
+    const basePrompt = fakePrompt({
+      values: [
+        "Local",
+        "",
+        "Check endpoint",
+        "local-test-model",
+        "",
+        "No API key",
+        "Skip test",
+        "Review changes",
+        true,
+      ],
+    });
     const questions: string[] = [];
     const prompt = ((question: string, options?: { secret?: boolean }) => {
       questions.push(question);
@@ -2201,6 +2213,12 @@ describe("runConfigEditor", () => {
       prompt,
       defaultActionId: "edit-primary-model-route",
       flowEngine: flowEngine({ credentialAction: "endpoint", envVarName: "OPENAI_COMPATIBLE_API_KEY", providers: ["local"] }),
+      providerFetch: async (url) => {
+        if (url.endsWith("/models")) {
+          return fetchResponse({ data: [{ id: "local-test-model" }] });
+        }
+        return fetchResponse({});
+      },
       applyExecutor: createReviewedSetupApplyExecutor({
         homeDir: tempDir,
         workspaceRoot,
@@ -2213,13 +2231,16 @@ describe("runConfigEditor", () => {
 
     expect(result.completed).toBe(true);
     expect(questions).toEqual([
-      "Local endpoint base URL [http://localhost:11434/v1]:",
-      "Optional API key for OPENAI_COMPATIBLE_API_KEY. Leave blank for no local auth:",
+      "Endpoint URL [http://localhost:11434/v1]:",
+      "Context window tokens [infer]: ",
     ]);
     expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values).toEqual(expect.objectContaining({
       provider: "local",
       model: "local-test-model",
       baseUrl: "http://localhost:11434/v1",
+      modelSource: "discovered",
+      modelListStatus: "passed",
+      chatCompletionStatus: "skipped",
     }));
     expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.summaryKey).toBe("setupDrafts.providerModelEndpointRoute.summary");
     expect(result.reviewManifest?.sections["secret-refs-to-store"]).toHaveLength(0);
@@ -2231,14 +2252,30 @@ describe("runConfigEditor", () => {
   it("retries invalid local endpoint URLs before review and writes no secret for a blank API key", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
-    const basePrompt = fakePrompt({ values: ["Local", "local-test-model", "not a url", "http://127.0.0.1:9999/v1", true] });
+    const basePrompt = fakePrompt({
+      values: [
+        "Local",
+        "not a url",
+        "http://127.0.0.1:9999/v1",
+        "Continue manually",
+        "manual-local-model",
+        "",
+        "No API key",
+        "Skip test",
+        "Review changes",
+        true,
+      ],
+    });
     const questions: string[] = [];
+    const cards: string[][] = [];
     const prompt = ((question: string, options?: { secret?: boolean }) => {
       questions.push(question);
       return basePrompt(question, options);
     }) as Prompt;
     prompt.select = basePrompt.select;
-    prompt.onboardingCard = basePrompt.onboardingCard;
+    prompt.onboardingCard = (input) => {
+      cards.push([...input.bodyLines]);
+    };
     prompt.close = basePrompt.close;
 
     const result = await runConfigEditor({
@@ -2258,8 +2295,15 @@ describe("runConfigEditor", () => {
     };
 
     expect(result.completed).toBe(true);
-    expect(questions[1]).toContain("Invalid endpoint URL.");
-    expect(questions[1]).toContain("Local endpoint base URL [http://localhost:11434/v1]:");
+    expect(questions[0]).toBe("Endpoint URL [http://localhost:11434/v1]:");
+    expect(questions[1]).toBe("Endpoint URL [http://localhost:11434/v1]:");
+    expect(cards.flat()).toContain("Invalid endpoint URL. Enter an absolute URL such as http://localhost:11434/v1.");
+    expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values).toEqual(expect.objectContaining({
+      model: "manual-local-model",
+      modelSource: "manual",
+      modelListStatus: "notTested",
+      chatCompletionStatus: "skipped",
+    }));
     expect(config.providers?.local?.baseUrl).toBe("http://127.0.0.1:9999/v1");
     expect(config.providers?.local?.apiKeyEnv).toBeUndefined();
     await expect(readFile(profileEnvPath(tempDir), "utf8")).rejects.toThrow();
@@ -2278,7 +2322,18 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["Local", "local-test-model", "https://private.local/v1", true],
+        values: [
+          "Local",
+          "https://private.local/v1",
+          "Continue manually",
+          "private-local-model",
+          "",
+          "Enter API key now",
+          "",
+          "Skip test",
+          "Review changes",
+          true,
+        ],
         secret: "sk-local-endpoint",
       }),
       defaultActionId: "edit-primary-model-route",
@@ -2301,7 +2356,10 @@ describe("runConfigEditor", () => {
     expect(deferredWrites).toEqual([[{ envVarName: "OPENAI_COMPATIBLE_API_KEY", value: "sk-local-endpoint" }]]);
     expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values).toEqual(expect.objectContaining({
       baseUrl: "https://private.local/v1",
-      apiKeyEnv: "OPENAI_COMPATIBLE_API_KEY",
+      model: "private-local-model",
+      modelSource: "manual",
+      modelListStatus: "notTested",
+      chatCompletionStatus: "skipped",
     }));
     expect(result.reviewManifest?.sections["secret-refs-to-store"]).toHaveLength(1);
     expect(config.providers?.local?.baseUrl).toBe("https://private.local/v1");
@@ -2309,6 +2367,63 @@ describe("runConfigEditor", () => {
     expect(envFile).toContain("OPENAI_COMPATIBLE_API_KEY=");
     expect(rawConfig).not.toContain("sk-local-endpoint");
     expect(JSON.stringify(result)).not.toContain("sk-local-endpoint");
+  });
+
+  it("stores local endpoint env-var auth without writing a new secret", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const previousKey = process.env.CUSTOM_LOCAL_KEY;
+    process.env.CUSTOM_LOCAL_KEY = "sk-existing-env";
+    try {
+      const result = await runConfigEditor({
+        homeDir: tempDir,
+        workspaceRoot,
+        prompt: fakePrompt({
+          values: [
+            "Local",
+            "https://private.local/v1",
+            "Continue manually",
+            "env-local-model",
+            "",
+            "Use API key from environment",
+            "CUSTOM_LOCAL_KEY",
+            "Skip test",
+            "Review changes",
+            true,
+          ],
+        }),
+        defaultActionId: "edit-primary-model-route",
+        flowEngine: flowEngine({ credentialAction: "endpoint", envVarName: "OPENAI_COMPATIBLE_API_KEY", providers: ["local"] }),
+        applyExecutor: createReviewedSetupApplyExecutor({
+          homeDir: tempDir,
+          workspaceRoot,
+        }),
+      });
+      const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+      const config = JSON.parse(rawConfig) as {
+        providers?: Record<string, { baseUrl?: string; apiKeyEnv?: string }>;
+      };
+
+      expect(result.completed).toBe(true);
+      expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values).toEqual(expect.objectContaining({
+        baseUrl: "https://private.local/v1",
+        model: "env-local-model",
+        modelSource: "manual",
+        modelListStatus: "notTested",
+        chatCompletionStatus: "skipped",
+      }));
+      expect(result.reviewManifest?.sections["secret-refs-to-store"][0]?.review.values.envVars).toEqual(["CUSTOM_LOCAL_KEY"]);
+      expect(config.providers?.local?.baseUrl).toBe("https://private.local/v1");
+      expect(config.providers?.local?.apiKeyEnv).toBe("CUSTOM_LOCAL_KEY");
+      await expect(readFile(profileEnvPath(tempDir), "utf8")).rejects.toThrow();
+      expect(JSON.stringify(result)).not.toContain("sk-existing-env");
+    } finally {
+      if (previousKey === undefined) {
+        delete process.env.CUSTOM_LOCAL_KEY;
+      } else {
+        process.env.CUSTOM_LOCAL_KEY = previousKey;
+      }
+    }
   });
 
   it("routes credential-only endpoint repair through provider-route review without a credential-only endpoint apply", async () => {

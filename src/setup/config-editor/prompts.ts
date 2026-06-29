@@ -8,6 +8,14 @@ import type { BrowserEngineKind, ImageGenerationProvider, SttProvider, TtsProvid
 import type { ModelFallbackConfig } from "../../config/runtime-config.js";
 import type { SkillAutonomy } from "../../skills/skill-learning.js";
 import type { SetupReviewManifest } from "../setup-review-manifest.js";
+import type {
+  OpenAICompatibleAuthSelection,
+  OpenAICompatibleChatTestSelection,
+  OpenAICompatibleEndpointAction,
+  OpenAICompatibleEndpointFlowUi,
+  OpenAICompatibleModelSelection,
+  OpenAICompatibleSummaryDecision,
+} from "../openai-compatible-endpoint-flow.js";
 import {
   formatSetupCopy,
   promptSetupChoice,
@@ -178,6 +186,240 @@ export async function promptConfigEditorAction(
     })),
     defaultValue: defaultAction,
   });
+}
+
+export function createOpenAICompatibleEndpointFlowUi(
+  prompt: Prompt,
+  locale: SetupCopyLocale
+): OpenAICompatibleEndpointFlowUi {
+  const target = setupPromptContext(prompt, locale);
+  return {
+    promptBaseUrl: async ({ defaultBaseUrl, text, error }) => {
+      if (error !== undefined) {
+        await showSetupCard(target, {
+          title: text.title,
+          bodyLines: [error],
+          options: [],
+        });
+      }
+      return promptSetupStringWithDefault(prompt, setupOutputLine(locale, text.baseUrlQuestion), defaultBaseUrl);
+    },
+    selectEndpointAction: ({ baseUrl, authConfigured, text }) => promptSetupChoice(prompt, {
+      title: text.title,
+      message: `${text.body}\n${text.destination}\n`,
+      columns: setupChoiceColumns(locale),
+      tableDirection: setupChoiceTableDirection(locale),
+      tableWidth: setupChoiceTableWidth(locale),
+      tableMaxWidth: setupChoiceTableMaxWidth(locale),
+      tableAlign: setupChoiceTableAlign(locale),
+      showColumnHeaders: false,
+      choices: [
+        {
+          id: "check-endpoint",
+          label: text.check,
+          description: authConfigured
+            ? setupCopyText(locale, "setupEditor.prompt.openaiCompatible.models.discoveredBadge")
+            : setupCopyText(locale, "setupEditor.prompt.openaiCompatible.endpoint.destination").replace("{baseUrl}", baseUrl),
+          value: "check" as const,
+        },
+        {
+          id: "continue-manually",
+          label: text.manual,
+          description: setupCopyText(locale, "setupEditor.prompt.openaiCompatible.models.enterManual"),
+          value: "manual" as const,
+        },
+        {
+          id: "configure-authentication",
+          label: text.auth,
+          description: setupCopyText(locale, "setupEditor.prompt.openaiCompatible.auth.body"),
+          value: "auth" as const,
+        },
+        setupNavigationChoice({
+          id: "cancel",
+          label: setupCopyText(locale, "setupEditor.review.cancel"),
+          description: setupCopyText(locale, "setupEditor.review.cancel.description"),
+          value: "cancel" as const,
+        }),
+      ],
+      defaultValue: "check" as const,
+    }),
+    showChecking: ({ message }) => {
+      void showSetupCard(target, {
+        title: setupCopyText(locale, "setupEditor.prompt.openaiCompatible.endpoint.title"),
+        bodyLines: [message],
+        options: [],
+      });
+    },
+    selectModel: ({ probe, choices, text }) => promptSetupChoice<OpenAICompatibleModelSelection>(prompt, {
+      title: text.title,
+      message: [
+        probe.ok ? text.discovered : text.failed,
+        ...(text.failureReason === undefined ? [] : [text.failureReason]),
+        ...(!probe.ok || probe.models.length === 0 ? [text.possibleCauses] : []),
+        "",
+      ].join("\n"),
+      columns: setupChoiceColumns(locale),
+      tableDirection: setupChoiceTableDirection(locale),
+      tableWidth: setupChoiceTableWidth(locale),
+      tableMaxWidth: setupChoiceTableMaxWidth(locale),
+      tableAlign: setupChoiceTableAlign(locale),
+      showColumnHeaders: false,
+      choices: [
+        ...choices.map((choice) => ({
+          id: `model-${choice.modelId}`,
+          label: choice.label,
+          description: choice.description,
+          value: { kind: "model" as const, modelId: choice.modelId },
+        })),
+        {
+          id: "manual-model-id",
+          label: text.enterManual,
+          description: setupCopyText(locale, "setupEditor.prompt.openaiCompatible.summary.sourceManual"),
+          value: { kind: "manual" as const },
+        },
+        {
+          id: "configure-authentication",
+          label: setupCopyText(locale, "setupEditor.prompt.openaiCompatible.endpoint.auth"),
+          description: setupCopyText(locale, "setupEditor.prompt.openaiCompatible.auth.body"),
+          value: { kind: "configure-auth" as const },
+        },
+        {
+          id: "change-endpoint",
+          label: text.changeEndpoint,
+          description: setupCopyText(locale, "setupEditor.prompt.openaiCompatible.endpoint.baseUrl").replace("{baseUrl}", probe.baseUrl),
+          value: { kind: "change-endpoint" as const },
+        },
+        setupNavigationChoice({
+          id: "cancel",
+          label: setupCopyText(locale, "setupEditor.review.cancel"),
+          description: setupCopyText(locale, "setupEditor.review.cancel.description"),
+          value: { kind: "cancel" as const },
+        }),
+      ],
+      defaultValue: choices.length > 0
+        ? { kind: "model" as const, modelId: choices[0]!.modelId }
+        : { kind: "manual" as const },
+    }) as Promise<OpenAICompatibleModelSelection>,
+    promptManualModelId: async ({ text }) => prompt(setupOutputLine(locale, `${text.question} `)),
+    promptContextWindowTokens: async ({ text }) => {
+      for (;;) {
+        const raw = (await prompt(setupOutputLine(locale, `${text.question} `))).trim();
+        if (raw.length === 0) return undefined;
+        const tokens = Number.parseInt(raw, 10);
+        if (Number.isFinite(tokens) && tokens > 0) return tokens;
+        await showSetupCard(target, {
+          title: text.question,
+          bodyLines: [text.hint],
+          options: [],
+        });
+      }
+    },
+    selectAuth: ({ defaultEnvVar, text }) => promptSetupChoice<OpenAICompatibleAuthSelection>(prompt, {
+      title: text.title,
+      message: `${text.body}\n`,
+      columns: setupChoiceColumns(locale),
+      tableDirection: setupChoiceTableDirection(locale),
+      tableWidth: setupChoiceTableWidth(locale),
+      tableMaxWidth: setupChoiceTableMaxWidth(locale),
+      tableAlign: setupChoiceTableAlign(locale),
+      showColumnHeaders: false,
+      choices: [
+        {
+          id: "no-api-key",
+          label: text.none,
+          description: setupCopyText(locale, "setupEditor.prompt.openaiCompatible.summary.authNone"),
+          value: "none" as const,
+        },
+        {
+          id: "env-api-key",
+          label: text.env,
+          description: formatSetupCopy(locale, "setupEditor.prompt.openaiCompatible.summary.authEnv", {
+            envVar: defaultEnvVar,
+          }),
+          value: "env" as const,
+        },
+        {
+          id: "enter-api-key",
+          label: text.enter,
+          description: text.secretStorage,
+          value: "enter" as const,
+        },
+        setupNavigationChoice({
+          id: "cancel",
+          label: setupCopyText(locale, "setupEditor.review.cancel"),
+          description: setupCopyText(locale, "setupEditor.review.cancel.description"),
+          value: "cancel" as const,
+        }),
+      ],
+      defaultValue: "none" as const,
+    }) as Promise<OpenAICompatibleAuthSelection>,
+    promptAuthEnvVar: async ({ defaultEnvVar, text }) =>
+      promptSetupStringWithDefault(prompt, setupOutputLine(locale, text.envQuestion), defaultEnvVar),
+    promptSecret: async ({ text }) => {
+      await showSetupCard(target, {
+        title: text.title,
+        bodyLines: [text.secretStorage],
+        options: [],
+      });
+      return prompt(setupOutputLine(locale, `${text.secretQuestion} `), { secret: true });
+    },
+    selectChatCompletionTest: ({ text }) => promptSetupChoice<OpenAICompatibleChatTestSelection>(prompt, {
+      title: text.title,
+      message: `${text.body}\n`,
+      columns: setupChoiceColumns(locale),
+      tableDirection: setupChoiceTableDirection(locale),
+      tableWidth: setupChoiceTableWidth(locale),
+      tableMaxWidth: setupChoiceTableMaxWidth(locale),
+      tableAlign: setupChoiceTableAlign(locale),
+      showColumnHeaders: false,
+      choices: [
+        {
+          id: "run-chat-test",
+          label: text.run,
+          description: text.body,
+          value: "run" as const,
+        },
+        {
+          id: "skip-chat-test",
+          label: text.skip,
+          description: setupCopyText(locale, "setupEditor.prompt.openaiCompatible.test.notTested"),
+          value: "skip" as const,
+        },
+      ],
+      defaultValue: "run" as const,
+    }) as Promise<OpenAICompatibleChatTestSelection>,
+    confirmSummary: ({ text }) => promptSetupChoice<OpenAICompatibleSummaryDecision>(prompt, {
+      title: text.title,
+      message: `${text.lines.join("\n")}\n`,
+      columns: setupChoiceColumns(locale),
+      tableDirection: setupChoiceTableDirection(locale),
+      tableWidth: setupChoiceTableWidth(locale),
+      tableMaxWidth: setupChoiceTableMaxWidth(locale),
+      tableAlign: setupChoiceTableAlign(locale),
+      showColumnHeaders: false,
+      choices: [
+        {
+          id: "review-openai-compatible",
+          label: text.review,
+          description: setupCopyText(locale, "setupEditor.prompt.openaiCompatible.summary.review"),
+          value: "review" as const,
+        },
+        setupNavigationChoice({
+          id: "back",
+          label: locale === "ar" ? "رجوع" : "Back",
+          description: setupCopyText(locale, "onboarding.providers.navigation.back.description"),
+          value: "back" as const,
+        }),
+        setupNavigationChoice({
+          id: "cancel",
+          label: setupCopyText(locale, "setupEditor.review.cancel"),
+          description: setupCopyText(locale, "setupEditor.review.cancel.description"),
+          value: "cancel" as const,
+        }),
+      ],
+      defaultValue: "review" as const,
+    }) as Promise<OpenAICompatibleSummaryDecision>,
+  };
 }
 
 async function promptSetupChoiceMaybeBack<T>(

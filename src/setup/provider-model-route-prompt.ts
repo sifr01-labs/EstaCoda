@@ -29,6 +29,7 @@ export type SelectProviderModelRouteOptions = {
   readonly locale: SetupCopyLocale;
   readonly currentProviderId?: string;
   readonly currentModelId?: string;
+  readonly endpointFirstProviderIds?: readonly ProviderId[];
   readonly allowBack?: boolean;
   readonly allowCancel?: boolean;
   readonly mode: ProviderModelRoutePromptMode;
@@ -97,6 +98,15 @@ export async function selectProviderModelRoute(
       return { kind: "diagnostic", output: `No setup-visible models are available for ${provider.displayName}.` };
     }
 
+    if (shouldDeferModelSelectionToEndpointFlow(options, provider)) {
+      const seedModel = models.find((model) => model.id === options.currentModelId) ?? models[0]!;
+      const resolved = await options.flowEngine.resolveSelection(provider.id, seedModel.id);
+      if (resolved.kind === "diagnostic") {
+        return { kind: "diagnostic", output: `Provider/model selection failed: ${resolved.reason}` };
+      }
+      return { kind: "selected", selection: resolved };
+    }
+
     const modelAction = await promptModel(options, provider, models);
     if (modelAction.kind === "back") {
       continue;
@@ -112,6 +122,14 @@ export async function selectProviderModelRoute(
 
     return { kind: "selected", selection: resolved };
   }
+}
+
+function shouldDeferModelSelectionToEndpointFlow(
+  options: SelectProviderModelRouteOptions,
+  provider: ProviderCandidate
+): boolean {
+  return options.mode === "primary" &&
+    options.endpointFirstProviderIds?.some((providerId) => providerId === provider.id) === true;
 }
 
 function providerPromptCandidates(
