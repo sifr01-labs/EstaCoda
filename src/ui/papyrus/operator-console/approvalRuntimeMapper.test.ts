@@ -7,10 +7,29 @@ describe("approval runtime mapper", () => {
     expect(approvalCardStateFromToolExecution(execution(), { focused: true })).toMatchObject({
       id: "src/app.ts",
       status: "pending",
-      action: "workspace.write",
+      action: "Workspace Write",
       target: "src/app.ts",
       risk: "workspace-write",
       focusedControl: "approve",
+    });
+  });
+
+  it("localizes approval card actions without changing stable approval identity", () => {
+    expect(approvalCardStateFromToolExecution(execution({
+      tool: {
+        ...execution().tool,
+        name: "terminal.run",
+        progressLabel: "running",
+      },
+      input: {
+        command: "cd app && export CI=true && pnpm test && echo done",
+      },
+      targetKey: "terminal.run:cd app && export CI=true && pnpm test && echo done",
+      targetSummary: "cd app && export CI=true && pnpm test && echo done",
+    }), { locale: "ar" })).toMatchObject({
+      id: "terminal.run:cd app && export CI=true && pnpm test && echo done",
+      action: "تشغيل أمر",
+      target: "pnpm test",
     });
   });
 

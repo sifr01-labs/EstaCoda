@@ -1,5 +1,6 @@
 import type { ViewModel } from "../contracts/view-model.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
+import type { ToolDisplayLocale } from "../ui/tool-display.js";
 import {
   approvalCardStateFromToolExecution,
   createApprovalFocusTarget,
@@ -17,7 +18,6 @@ import {
   type ApprovalCardAction,
   type ApprovalCardRenderRow,
 } from "../ui/papyrus/widgets/approvalCardModel.js";
-import { buildApprovalPromptViewModel } from "./tool-activity-view-models.js";
 
 export type ApprovalPromptChrome = {
   readonly enabled: boolean;
@@ -32,6 +32,7 @@ export type ApprovalPromptAdapterInput = {
   readonly chrome?: ApprovalPromptChrome;
   readonly execution: ToolExecutionRecord;
   readonly allowPersistentApproval: boolean;
+  readonly locale?: ToolDisplayLocale;
   readonly operatorConsoleHost?: OperatorConsoleRuntimeHost;
 };
 
@@ -43,7 +44,7 @@ export const papyrusApprovalPromptAdapter: ApprovalPromptAdapter = async (input)
   }
 
   const promptText = "approval action > ";
-  const cardText = renderPapyrusApprovalPromptCard(input.execution, input.allowPersistentApproval);
+  const cardText = renderPapyrusApprovalPromptCard(input.execution, input.allowPersistentApproval, input.locale);
   input.chrome?.clearInlineSpinner();
   input.output.write(`${cardText}\n`);
   return mapPapyrusApprovalAnswer(await input.prompt(promptText), input.allowPersistentApproval);
@@ -55,7 +56,10 @@ async function operatorConsoleApprovalPromptAdapter(input: ApprovalPromptAdapter
     return mapPapyrusApprovalAnswer(await input.prompt("approval action > "), input.allowPersistentApproval);
   }
 
-  const approval = approvalCardStateFromToolExecution(input.execution, { focused: true });
+  const approval = approvalCardStateFromToolExecution(input.execution, {
+    focused: true,
+    locale: input.locale,
+  });
   if (input.input?.isTTY === true) {
     return await readInlineOperatorConsoleApproval({
       input: input.input,
@@ -218,9 +222,10 @@ function mapOperatorConsoleApprovalIntent(intent: ApprovalIntent): string {
 
 function renderPapyrusApprovalPromptCard(
   execution: ToolExecutionRecord,
-  allowPersistentApproval: boolean
+  allowPersistentApproval: boolean,
+  locale: ToolDisplayLocale | undefined
 ): string {
-  const vm = buildApprovalPromptViewModel(execution, { allowPersistentApproval });
+  const approval = approvalCardStateFromToolExecution(execution, { locale });
   const actions: Array<ApprovalCardAction<"once" | "session" | "always" | "deny" | "cancel">> = [
     { value: "once", label: "Allow once", intentKind: "approve-once" },
     { value: "session", label: "Allow for this session", intentKind: "custom" },
@@ -234,11 +239,11 @@ function renderPapyrusApprovalPromptCard(
   );
 
   const state = createApprovalCardState({
-    title: `Approval required: ${vm.toolName}`,
-    body: vm.targetSummary,
-    severity: vm.severity === "error" ? "danger" : vm.severity === "warn" ? "warning" : "info",
-    riskLabel: vm.riskClass,
-    details: (vm.details ?? []).map((detail) => ({ kind: "detail" as const, label: "Detail", value: detail })),
+    title: `Approval required: ${approval.action}`,
+    body: approval.target,
+    severity: approval.status === "rejected" ? "danger" : "warning",
+    riskLabel: approval.risk,
+    details: [{ kind: "detail" as const, label: "Detail", value: `Target: ${approval.target}` }],
     actions,
     keyboardHints: [
       { key: "1", label: "once" },

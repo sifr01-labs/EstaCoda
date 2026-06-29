@@ -4540,7 +4540,7 @@ describe("runSessionLoop — active turn spinner", () => {
     const rendered = outputChunks.join("");
     const permissionIndex = rendered.indexOf("[Approval] Approval required");
     expect(permissionIndex).toBeGreaterThan(-1);
-    expect(rendered).toContain("workspace.write");
+    expect(rendered).toContain("Workspace Write");
     expect(rendered).toContain("src/app.ts");
     expect(rendered).toContain("Permission denied.");
     expect(rendered.slice(permissionIndex)).not.toContain("contemplating");
@@ -4917,7 +4917,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(setApprovalsSpy).toHaveBeenCalledWith([
       expect.objectContaining({
         status: "pending",
-        action: "terminal.run",
+        action: "Run Command",
         target: "npm install left-pad",
         risk: "destructive-local",
         focusedControl: "approve",
@@ -4933,7 +4933,7 @@ describe("runSessionLoop — active turn spinner", () => {
       },
     ]);
     expect(result.rendered).toContain("Approval required");
-    expect(result.rendered).toContain("Action: terminal.run");
+    expect(result.rendered).toContain("Action: Run Command");
     expect(result.rendered).toContain("Target: npm install left-pad");
     expect(result.rendered).toContain("Risk: destructive-local");
     expect(result.rendered).toContain("❯ Approve once");
@@ -5111,7 +5111,7 @@ describe("runSessionLoop — active turn spinner", () => {
       },
     ]);
     expect(result.handleInputs).toEqual(["write file", "write file"]);
-    expect(result.rendered).toContain("[Approval] Approval required: workspace.write");
+    expect(result.rendered).toContain("[Approval] Approval required: Workspace Write");
     expect(result.rendered).toContain("Approval granted (once). Retrying now.");
   });
 
@@ -5179,7 +5179,7 @@ describe("runSessionLoop — active turn spinner", () => {
       },
     ]);
     expect(result.handleInputs).toEqual(["write file", "write file"]);
-    expect(result.rendered).toContain("[Approval] Approval required: terminal.run");
+    expect(result.rendered).toContain("[Approval] Approval required: Run Command");
     expect(result.rendered).toContain("Approval granted (once). Retrying now.");
   });
 
@@ -5191,7 +5191,7 @@ describe("runSessionLoop — active turn spinner", () => {
 
     expect(result.grants).toEqual([]);
     expect(result.handleInputs).toEqual(["write file"]);
-    expect(result.rendered).toContain("[Approval] Approval required: workspace.write");
+    expect(result.rendered).toContain("[Approval] Approval required: Workspace Write");
     expect(result.rendered).toContain("Permission denied.");
   });
 

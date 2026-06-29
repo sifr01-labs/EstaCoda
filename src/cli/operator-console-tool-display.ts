@@ -10,7 +10,8 @@ export function activeWorkEventFromToolRail(input: {
 }): ActiveWorkRuntimeEvent {
   return {
     id: input.railEvent.activityId,
-    toolName: toolDisplayLabel(input.railEvent.tool, input.locale),
+    toolName: input.railEvent.tool,
+    displayLabel: toolDisplayLabel(input.railEvent.tool, input.locale),
     status: input.railEvent.status,
     summary: input.railEvent.label,
     target: input.runtimeEvent.displayPreview ?? input.railEvent.target,

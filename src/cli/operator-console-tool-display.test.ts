@@ -22,7 +22,8 @@ describe("operator console tool display", () => {
 
     expect(event).toMatchObject({
       id: "read-1",
-      toolName: "Read File",
+      toolName: "file.read",
+      displayLabel: "Read File",
       status: "running",
       summary: "preparing",
       target: "src/main.ts",
@@ -49,7 +50,8 @@ describe("operator console tool display", () => {
     });
 
     expect(event).toMatchObject({
-      toolName: "تشغيل أمر",
+      toolName: "terminal.run",
+      displayLabel: "تشغيل أمر",
       status: "done",
       target: "pnpm run test",
       durationMs: 1200,
@@ -74,7 +76,8 @@ describe("operator console tool display", () => {
     });
 
     expect(event).toMatchObject({
-      toolName: "Run Command",
+      toolName: "terminal.run",
+      displayLabel: "Run Command",
       target: "pnpm test",
     });
   });
@@ -107,7 +110,8 @@ describe("operator console tool display", () => {
 
     expect(event).toMatchObject({
       id: "write-1",
-      toolName: "Write File",
+      toolName: "file.write",
+      displayLabel: "Write File",
       status: "gated",
       target: "src/app.ts",
       riskClass: "workspace-write",

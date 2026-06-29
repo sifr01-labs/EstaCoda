@@ -103,7 +103,7 @@ describe("approval prompt adapter routing", () => {
     await papyrusApprovalPromptAdapter(input);
 
     const rendered = outputChunks.join("");
-    expect(rendered).toContain("[Approval] Approval required: terminal.run");
+    expect(rendered).toContain("[Approval] Approval required: Run Command");
     expect(rendered).toContain("Allow once");
     expect(rendered).toContain("Allow for this session");
     expect(rendered).toContain("Deny");
@@ -146,7 +146,7 @@ describe("approval prompt adapter routing", () => {
 
     const rendered = outputChunks.join("");
     expect(rendered).toContain("Approval required");
-    expect(rendered).toContain("Action: terminal.run");
+    expect(rendered).toContain("Action: Run Command");
     expect(rendered).toContain("Target: npm install left-pad");
     expect(rendered).toContain("Risk: destructive-local");
     expect(rendered).toContain("❯ Approve once");
@@ -208,7 +208,7 @@ describe("approval prompt adapter routing", () => {
     await expect(result).resolves.toBe("once");
 
     const rendered = outputChunks.join("");
-    expect(rendered).toContain("Action: workspace.write");
+    expect(rendered).toContain("Action: Workspace Write");
     expect(rendered).toContain("Target: src/runtime/provider-turn-loop.ts");
     expect(rendered).toContain("Risk: workspace-write");
     expect(rendered).toContain("+2 lines  -1 lines");

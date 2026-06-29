@@ -184,7 +184,8 @@ function formatActiveWorkRow(
   if (width <= 0) return "";
 
   const symbol = activeWorkStatusSymbol(item.status, state.frameIndex, style);
-  const rawTool = item.toolName.trim().length === 0 ? "tool" : item.toolName.trim();
+  const renderedTool = item.displayLabel ?? item.toolName;
+  const rawTool = renderedTool.trim().length === 0 ? "tool" : renderedTool.trim();
   const rawDetail = (item.target ?? item.summary).trim();
   const duration = formatDuration(resolveDurationMs(item));
   if (width <= 8) return truncateVisibleCells(`${symbol} ${rawTool}`, width);

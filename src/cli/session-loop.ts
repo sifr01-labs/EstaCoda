@@ -917,6 +917,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	          output,
 	          renderer,
 	          approvalPromptAdapter,
+	          locale: renderer.locale === "ar" ? "ar" : "en",
 	          operatorConsoleHost: operatorConsoleRuntimeHost,
 	          execution: response.toolExecutions.find((execution) => execution.decision === "ask")
         });
@@ -2039,6 +2040,7 @@ async function maybeHandleApprovalGate(input: {
   input?: NodeJS.ReadStream;
   renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string };
   approvalPromptAdapter: ApprovalPromptAdapter;
+  locale?: import("../ui/tool-display.js").ToolDisplayLocale;
   operatorConsoleHost?: OperatorConsoleRuntimeHost;
   execution: ToolExecutionRecord | undefined;
 }): Promise<{
@@ -2062,6 +2064,7 @@ async function maybeHandleApprovalGate(input: {
         renderer: input.renderer,
         execution,
         allowPersistentApproval,
+        locale: input.locale,
         operatorConsoleHost: input.operatorConsoleHost,
       })
     );

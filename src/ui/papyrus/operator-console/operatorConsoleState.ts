@@ -114,6 +114,7 @@ export type ActiveWorkItemStatus =
 export type ActiveWorkItem = {
   readonly id: string;
   readonly toolName: string;
+  readonly displayLabel?: string;
   readonly status: ActiveWorkItemStatus;
   readonly summary: string;
   readonly target?: string;

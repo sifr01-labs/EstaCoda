@@ -16,6 +16,7 @@ export type ActiveWorkRuntimeEventStatus =
 export type ActiveWorkRuntimeEvent = {
   readonly id?: string;
   readonly toolName: string;
+  readonly displayLabel?: string;
   readonly status: ActiveWorkRuntimeEventStatus;
   readonly summary?: string;
   readonly target?: string;
@@ -63,6 +64,9 @@ function createActiveWorkItem(
     ...(existing ?? {}),
     id,
     toolName: normalizeText(event.toolName, "tool"),
+    ...(event.displayLabel === undefined && existing?.displayLabel === undefined
+      ? {}
+      : { displayLabel: event.displayLabel ?? existing?.displayLabel }),
     status: mapRuntimeStatus(event.status),
     summary: normalizeText(event.summary, event.status),
     ...(event.target === undefined && existing?.target === undefined ? {} : { target: event.target ?? existing?.target }),
