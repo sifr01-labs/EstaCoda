@@ -200,8 +200,30 @@ describe("Papyrus operator console active work surface", () => {
       ],
     }), { width: 72, height: 6 }).join("\n");
 
-    expect(output).toContain("00:03");
-    expect(output).toContain("00:18");
+    expect(output).toContain("3.4s");
+    expect(output).toContain("19s");
+  });
+
+  it("formats row durations as compact elapsed values", () => {
+    const output = renderActiveWorkSurface(createState({
+      items: [
+        item("zero", "succeeded", { durationMs: 0 }),
+        item("subsecond", "succeeded", { durationMs: 100 }),
+        item("one-second", "succeeded", { durationMs: 1_000 }),
+        item("one-half", "succeeded", { durationMs: 1_500 }),
+        item("fifty-eight", "succeeded", { durationMs: 58_000 }),
+        item("minute", "succeeded", { durationMs: 81_000 }),
+        item("long", "succeeded", { durationMs: 3_936_000 }),
+      ],
+    }), { width: 96, height: 9 }).join("\n");
+
+    expect(output).toContain("0s");
+    expect(output).toContain("0.1s");
+    expect(output).toContain("1s");
+    expect(output).toContain("1.5s");
+    expect(output).toContain("58s");
+    expect(output).toContain("1m21s");
+    expect(output).toContain("65m36s");
   });
 
   it("shows a live working timer in the active work header when turn timing is available", () => {
@@ -450,10 +472,10 @@ describe("Papyrus operator console active work surface", () => {
     expect(text).toContain("تنفيذ الأدوات");
     expect(text).toContain("read_file");
     expect(text).toContain("src/ui/papyrus/screen/output.ts");
-    expect(text).toContain("00:03");
+    expect(text).toContain("3s");
     expect(text).toContain("typecheck");
     expect(text).toContain("passed");
-    expect(text).toContain("00:18");
+    expect(text).toContain("18s");
     expect(text).not.toContain("↑↓ تمرير");
     expect(output.every((line) => stringWidth(line) <= 80)).toBe(true);
   });

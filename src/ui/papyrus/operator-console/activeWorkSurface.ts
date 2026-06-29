@@ -31,7 +31,6 @@ export const ACTIVE_WORK_STATUS_SYMBOLS: Readonly<Record<ActiveWorkItemStatus, s
   awaitingApproval: "!",
 };
 
-const DURATION_CELLS = 5;
 const LTR_ISOLATE_START = "\u2068";
 const LTR_ISOLATE_END = "\u2069";
 
@@ -191,7 +190,7 @@ function formatActiveWorkRow(
   if (width <= 8) return truncateVisibleCells(`${symbol} ${rawTool}`, width);
 
   const prefixCells = stringWidth(symbol) + 1;
-  const durationPartCells = width >= 16 ? DURATION_CELLS + 1 : 0;
+  const durationPartCells = width >= 16 ? stringWidth(duration) + 1 : 0;
   const availableMainCells = Math.max(0, width - prefixCells - durationPartCells);
   if (availableMainCells <= 0) return truncateVisibleCells(`${symbol} ${rawTool}`, width);
 
@@ -280,7 +279,20 @@ function formatClockDuration(durationMs: number): string {
 }
 
 function formatDuration(durationMs: number): string {
-  return formatClockDuration(durationMs);
+  const safeMs = Math.max(0, Number.isFinite(durationMs) ? durationMs : 0);
+  if (safeMs < 60_000) {
+    const roundedTenths = Math.round(safeMs / 100);
+    if (roundedTenths === 0) return "0s";
+    if (roundedTenths < 100 && roundedTenths % 10 !== 0) {
+      return `${(roundedTenths / 10).toFixed(1)}s`;
+    }
+    return `${Math.round(safeMs / 1000)}s`;
+  }
+
+  const totalSeconds = Math.floor(safeMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m${seconds}s`;
 }
 
 function renderTopBorder(title: string, width: number, rightLabel?: string): string {

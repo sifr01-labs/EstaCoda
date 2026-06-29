@@ -156,7 +156,7 @@ describe("active work runtime mapper", () => {
     expect(rendered).toContain("تنفيذ الأدوات");
     expect(rendered).toContain("read_file");
     expect(rendered).toContain("src/ui/papyrus/screen/output.ts");
-    expect(rendered).toContain("00:03");
+    expect(rendered).toContain("3s");
     expect(rendered.split("\n").every((line) => stringWidth(line) <= 80)).toBe(true);
   });
 });
