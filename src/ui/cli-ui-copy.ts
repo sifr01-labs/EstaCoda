@@ -105,9 +105,21 @@ export interface CliUiChromeCopy {
   readonly slashCommandHelpDescription: string;
   readonly slashCommandStatusDescription: string;
   readonly slashCommandModelDescription: string;
+  readonly slashCommandProvidersDescription: string;
   readonly slashCommandToolsDescription: string;
   readonly slashCommandSkillsDescription: string;
   readonly slashCommandExitDescription: string;
+
+  // Providers surface
+  readonly providersTitle: string;
+  readonly providersActiveRoute: string;
+  readonly providersConfiguredProviders: string;
+  readonly providersLocalSetupHint: string;
+  readonly providersDiagnosticsTitle: string;
+  readonly providersStatusReady: string;
+  readonly providersStatusMissingCredential: string;
+  readonly providersStatusEndpointFailed: string;
+  readonly providersStatusNotConfigured: string;
 }
 
 const en: CliUiChromeCopy = {
@@ -200,9 +212,20 @@ const en: CliUiChromeCopy = {
   slashCommandHelpDescription: "Show command help",
   slashCommandStatusDescription: "Show runtime, model, context, and session status",
   slashCommandModelDescription: "Show active model",
+  slashCommandProvidersDescription: "Browse providers, endpoints, credentials, and model readiness",
   slashCommandToolsDescription: "Browse runtime tools",
   slashCommandSkillsDescription: "Browse skills",
   slashCommandExitDescription: "Exit session",
+
+  providersTitle: "Providers",
+  providersActiveRoute: "Active route",
+  providersConfiguredProviders: "Configured providers",
+  providersLocalSetupHint: "Run /providers local setup to configure a local endpoint.",
+  providersDiagnosticsTitle: "Provider Diagnostics",
+  providersStatusReady: "ready",
+  providersStatusMissingCredential: "missing credential",
+  providersStatusEndpointFailed: "endpoint check failed",
+  providersStatusNotConfigured: "not configured",
 };
 
 const ar: CliUiChromeCopy = {
@@ -296,9 +319,20 @@ const ar: CliUiChromeCopy = {
   slashCommandHelpDescription: "اعرض مساعدة الأوامر",
   slashCommandStatusDescription: "اعرض حالة التشغيل والنموذج والسياق والجلسة",
   slashCommandModelDescription: "اعرض النموذج النشط",
+  slashCommandProvidersDescription: "استعرض المزوّدين ونقاط النهاية وبيانات الاعتماد وجاهزية النماذج",
   slashCommandToolsDescription: "استعرض أدوات التشغيل",
   slashCommandSkillsDescription: "استعرض المهارات",
   slashCommandExitDescription: "غادر الجلسة",
+
+  providersTitle: "المزوّدون",
+  providersActiveRoute: "المسار النشط",
+  providersConfiguredProviders: "المزوّدون المضبوطون",
+  providersLocalSetupHint: `شغّل ${isolateLtr("/providers local setup")} لضبط نقطة نهاية محلية.`,
+  providersDiagnosticsTitle: "تشخيص المزوّدين",
+  providersStatusReady: "جاهز",
+  providersStatusMissingCredential: "بيانات الاعتماد ناقصة",
+  providersStatusEndpointFailed: "فشل فحص نقطة النهاية",
+  providersStatusNotConfigured: "غير مضبوط",
 };
 
 export const cliUiChromeCopy: Record<UiLocale, CliUiChromeCopy> = {

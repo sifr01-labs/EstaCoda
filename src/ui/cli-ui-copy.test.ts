@@ -35,6 +35,20 @@ describe("chromeCopy — en", () => {
     expect(copy.startupInteractiveCommands).toBe("Interactive Commands:");
     expect(copy.startupPromptHint).toBe("Type a message. Use /help for commands or /exit to leave.");
   });
+
+  it("returns English providers chrome copy", () => {
+    const copy = chromeCopy("en");
+    expect(copy.slashCommandProvidersDescription).toBe("Browse providers, endpoints, credentials, and model readiness");
+    expect(copy.providersTitle).toBe("Providers");
+    expect(copy.providersActiveRoute).toBe("Active route");
+    expect(copy.providersConfiguredProviders).toBe("Configured providers");
+    expect(copy.providersLocalSetupHint).toBe("Run /providers local setup to configure a local endpoint.");
+    expect(copy.providersDiagnosticsTitle).toBe("Provider Diagnostics");
+    expect(copy.providersStatusReady).toBe("ready");
+    expect(copy.providersStatusMissingCredential).toBe("missing credential");
+    expect(copy.providersStatusEndpointFailed).toBe("endpoint check failed");
+    expect(copy.providersStatusNotConfigured).toBe("not configured");
+  });
 });
 
 describe("chromeCopy — ar", () => {
@@ -79,6 +93,20 @@ describe("chromeCopy — ar", () => {
     expect(copy.startupCommandModel).toBe("\u0627\u0639\u0631\u0636 \u0627\u0644\u0646\u0645\u0648\u0630\u062c \u0627\u0644\u0646\u0634\u0637");
     expect(copy.startupPromptHint).toContain(isolateLtr("/help"));
     expect(copy.startupPromptHint).toContain(isolateLtr("/exit"));
+  });
+
+  it("returns Arabic providers chrome copy with isolated command hints", () => {
+    const copy = chromeCopy("ar");
+    expect(copy.slashCommandProvidersDescription).toBe("استعرض المزوّدين ونقاط النهاية وبيانات الاعتماد وجاهزية النماذج");
+    expect(copy.providersTitle).toBe("المزوّدون");
+    expect(copy.providersActiveRoute).toBe("المسار النشط");
+    expect(copy.providersConfiguredProviders).toBe("المزوّدون المضبوطون");
+    expect(copy.providersLocalSetupHint).toContain(isolateLtr("/providers local setup"));
+    expect(copy.providersDiagnosticsTitle).toBe("تشخيص المزوّدين");
+    expect(copy.providersStatusReady).toBe("جاهز");
+    expect(copy.providersStatusMissingCredential).toBe("بيانات الاعتماد ناقصة");
+    expect(copy.providersStatusEndpointFailed).toBe("فشل فحص نقطة النهاية");
+    expect(copy.providersStatusNotConfigured).toBe("غير مضبوط");
   });
 });
 
