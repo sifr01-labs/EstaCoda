@@ -13,6 +13,7 @@ import {
   type StreamingState,
   type TerminalMetrics,
   type ToolActivityState,
+  type TranscriptBlock,
   type TurnActivityState,
 } from "./operatorConsoleState.js";
 import { createOperatorConsoleLayout } from "./operatorConsoleLayout.js";
@@ -31,6 +32,7 @@ export type OperatorConsoleRawPromptSnapshot = {
   readonly status?: StatusRailState;
   readonly setupPanel?: SetupSurfaceState;
   readonly terminal?: Partial<TerminalMetrics>;
+  readonly transcript?: readonly TranscriptBlock[];
   readonly attachments?: readonly AttachmentCardState[];
   readonly turnActivity?: TurnActivityState;
   readonly slash?: SlashMenuState;
@@ -73,6 +75,7 @@ export function buildOperatorConsoleStateFromRawPrompt(
       ...(snapshot.placeholder === undefined ? {} : { placeholder: snapshot.placeholder }),
     },
     status: snapshot.status ?? createDefaultOperatorConsoleRawPromptStatus(),
+    transcript: snapshot.transcript ?? [],
     turnActivity: snapshot.turnActivity,
     attachments: snapshot.attachments ?? [],
     activeWork: snapshot.activeWork,
@@ -113,6 +116,7 @@ export function buildOperatorConsoleRawPromptFrameWithRuntimeHost(
   host.setTerminal(terminal);
   host.setStatus(snapshot.status ?? createDefaultOperatorConsoleRawPromptStatus());
   host.setSetupPanel(snapshot.setupPanel);
+  host.setTranscript(snapshot.transcript ?? []);
   host.setTurnActivity(snapshot.turnActivity);
   host.setAttachments(snapshot.attachments ?? []);
   host.setSlash(snapshot.slash);
