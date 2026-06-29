@@ -891,15 +891,14 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           matchedSkills: response.matchedSkills,
 	          progress: options.showResponseProgress === true ? response.progress : undefined,
 	        });
+	        if (hasVisibleStreamingOutput) {
+	          clearOperatorConsoleLiveFrame();
+	          operatorConsoleLiveFrame?.discardStreaming();
+	        }
 	        if (providerServingAlert !== undefined) {
 	          output.write(`${providerServingAlert}\n`);
 	        }
-	        if (hasVisibleStreamingOutput) {
-	          operatorConsoleLiveFrame?.completeStreaming();
-	        }
-	        if (!hasVisibleStreamingOutput) {
-	          output.write(renderer.render(assistantVm));
-	        }
+	        output.write(renderer.render(assistantVm));
         if (turnVoiceMode === "tts") {
           const playback = await playCliResponseIfEnabled({
             runtime,

@@ -2894,8 +2894,8 @@ describe("runSessionLoop — active turn spinner", () => {
     const cancelledIndex = rendered.indexOf("cancelled: CLI steer");
     expect(cancelledIndex).toBeGreaterThan(-1);
     expect(rendered.slice(cancelledIndex)).not.toContain("first partial should clear");
-    expect(rendered).not.toContain("  retry final");
-    expect(host.getState().transcript.map((block) => block.text)).toEqual(["retry final"]);
+    expect(rendered).toContain("  retry final");
+    expect(host.getState().transcript).toEqual([]);
   });
 
   it("does not submit whitespace-only Operator Console steer drafts", async () => {
@@ -5114,7 +5114,7 @@ describe("runSessionLoop — active turn spinner", () => {
     }));
   });
 
-  it("streams provider deltas into Operator Console transcript and skips duplicate final assistant output", async () => {
+  it("settles visible Operator Console streaming as durable assistant output once", async () => {
     const outputChunks: string[] = [];
     const host = createOperatorConsoleRuntimeHost({
       terminal: { width: 96, height: 16, isTty: true },
@@ -5159,8 +5159,58 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(rendered).toContain("EstaCoda");
     expect(rendered).toContain("Hello there");
     expect(rendered).not.toContain("Assistant stream");
-    expect(rendered).not.toContain("  Hello there");
-    expect(host.getState().transcript.map((block) => block.text)).toEqual(["Hello there"]);
+    expect(rendered).toContain("  Hello there");
+    expect(host.getState().streaming).toBeUndefined();
+    expect(host.getState().transcript).toEqual([]);
+  });
+
+  it("does not clip settled streaming output to the Operator Console live frame height", async () => {
+    const outputChunks: string[] = [];
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 96, height: 16, isTty: true },
+    });
+    const answerLines = Array.from({ length: 24 }, (_, index) => `settled streaming line ${String(index + 1).padStart(2, "0")}`);
+    const answer = answerLines.join("\n");
+    const runtime = {
+      ...createMockRuntime(),
+      handle: async ({ onDelta, onEvent }: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
+        onEvent?.({ kind: "agent-start", sessionId: "test-session", input: "hello" });
+        onDelta?.(answer);
+        onEvent?.({ kind: "agent-final", text: answer });
+        return mockResponse({ text: answer });
+      },
+    } as Runtime;
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 96,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 96, supportsAnimation: false }),
+      operatorConsole: { enabled: true, runtimeHost: host },
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("settled streaming line 01");
+    expect(rendered).toContain("settled streaming line 12");
+    expect(rendered).toContain("settled streaming line 24");
+    expect(rendered.slice(rendered.indexOf("settled streaming line 01"))).not.toContain("▍");
+    expect(host.getState().streaming).toBeUndefined();
+    expect(host.getState().transcript).toEqual([]);
   });
 
   it("renders final assistant output when Operator Console streaming is whitespace-only", async () => {
@@ -5252,7 +5302,8 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(rendered).toContain("First segment.");
     expect(rendered).toContain("Second segment.");
     expect(rendered).not.toContain("Assistant stream");
-    expect(rendered).not.toContain("  First segment. Second segment.");
+    expect(rendered).toContain("  First segment. Second segment.");
+    expect(host.getState().transcript).toEqual([]);
   });
 
   it("resets Operator Console streaming output when a provider fallback is announced", async () => {
@@ -5307,7 +5358,8 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(rendered).toContain("fallback wins");
     expect(rendered).not.toContain("Assistant stream");
     expect(rendered).not.toContain("primary failed");
-    expect(rendered).not.toContain("  fallback wins");
+    expect(rendered).toContain("  fallback wins");
+    expect(host.getState().transcript).toEqual([]);
   });
 
   it("clears Operator Console streaming output when the active turn is cancelled", async () => {
@@ -5453,7 +5505,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(rendered).not.toContain("hidden forever");
     expect(rendered).not.toContain("still hidden");
     expect(rendered).not.toContain("<reasoning>");
-    expect(host.getState().transcript.map((block) => block.text)).toEqual(["Visible "]);
+    expect(host.getState().transcript).toEqual([]);
   });
 
   it("keeps Operator Console inspect intent on the existing no-grant invalid-answer path", async () => {

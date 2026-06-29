@@ -152,14 +152,12 @@ export class LiveOperatorConsoleController {
     return blocks;
   }
 
+  discardStreaming(): void {
+    this.#clearStreamingState();
+  }
+
   resetStreaming(): void {
-    this.#streamingSegments = [];
-    this.#streamingCurrentSegmentText = "";
-    this.#streamingTail = "";
-    this.#streamingToolTrail = [];
-    this.#streamingToolTrailSequence = 0;
-    this.#stopStreamingRefreshTimer();
-    this.#runtimeHost.setStreaming(undefined);
+    this.#clearStreamingState();
     this.refresh();
   }
 
@@ -362,6 +360,16 @@ export class LiveOperatorConsoleController {
 
   #syncStreamingState(): void {
     this.#runtimeHost.setStreaming(this.#streamingSnapshotForRender());
+  }
+
+  #clearStreamingState(): void {
+    this.#streamingSegments = [];
+    this.#streamingCurrentSegmentText = "";
+    this.#streamingTail = "";
+    this.#streamingToolTrail = [];
+    this.#streamingToolTrailSequence = 0;
+    this.#stopStreamingRefreshTimer();
+    this.#runtimeHost.setStreaming(undefined);
   }
 
   #flushStreamingSegment(): StreamingSegment | undefined {

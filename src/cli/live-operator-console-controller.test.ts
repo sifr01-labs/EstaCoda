@@ -312,6 +312,25 @@ describe("LiveOperatorConsoleController", () => {
     expect(stripAnsi(output.text())).not.toContain("▍");
   });
 
+  it("discards streaming state without redrawing stale live transcript rows", () => {
+    const output = createOutput();
+    const { controller, runtimeHost } = createControllerFixture(output);
+
+    controller.appendStreamingText("live preview only");
+    controller.refresh();
+    expect(stripAnsi(output.text())).toContain("live preview only");
+    output.clear();
+
+    controller.clear();
+    output.clear();
+    controller.discardStreaming();
+
+    expect(output.text()).toBe("");
+    expect(runtimeHost.getState().streaming).toBeUndefined();
+    expect(runtimeHost.getState().transcript).toEqual([]);
+    expect(controller.hasStreamingOutput()).toBe(false);
+  });
+
   it("coalesces streaming refresh and animation timer renders", () => {
     vi.useFakeTimers();
     const output = createOutput();
