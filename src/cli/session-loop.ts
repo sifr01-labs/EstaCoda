@@ -110,6 +110,7 @@ import {
 } from "../setup/config-editor/setupConsolePromptAdapter.js";
 import { runConfigEditor } from "../setup/config-editor/runner.js";
 import { createReviewedSetupApplyExecutor } from "../setup/review/apply-executor.js";
+import { buildProvidersStatusViewModel } from "./provider-status-view-models.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -1501,13 +1502,14 @@ type HandleSlashCommandInput = Parameters<typeof handleSlashCommand>[0];
 type SlashCommandRuntimeRefresh = Exclude<Awaited<ReturnType<typeof handleSlashCommand>>, boolean>;
 
 type ProvidersCommand =
+  | { readonly kind: "status" }
   | { readonly kind: "setup"; readonly scope: "all" | "local" | "custom" }
   | { readonly kind: "invalid"; readonly message: string };
 
 function parseProvidersCommand(args: string[]): ProvidersCommand {
   const normalized = args.map((arg) => arg.toLowerCase());
   if (normalized.length === 0) {
-    return { kind: "setup", scope: "all" };
+    return { kind: "status" };
   }
   if (
     normalized.length === 1 &&
@@ -1544,6 +1546,22 @@ async function handleProvidersCommand(
     return false;
   }
 
+  const workspaceRoot = input.workspaceRoot ?? process.cwd();
+  const profileId = await runtimeProfileId(input.runtime);
+
+  if (command.kind === "status") {
+    const loaded = await loadRuntimeConfig({
+      workspaceRoot,
+      homeDir: input.homeDir,
+      profileId,
+    });
+    input.output.write(`${input.renderer.render(await buildProvidersStatusViewModel(
+      loaded,
+      loaded.ui.language
+    ))}\n\n`);
+    return false;
+  }
+
   if (input.prompt === undefined) {
     input.output.write([
       "This session cannot open reviewed provider setup here.",
@@ -1553,8 +1571,6 @@ async function handleProvidersCommand(
     return false;
   }
 
-  const workspaceRoot = input.workspaceRoot ?? process.cwd();
-  const profileId = await runtimeProfileId(input.runtime);
   const flowEngine = command.scope === "local"
     ? await createProvidersCommandFlowEngine(input, profileId, ["local"])
     : undefined;

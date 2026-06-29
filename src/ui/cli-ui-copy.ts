@@ -116,6 +116,14 @@ export interface CliUiChromeCopy {
   readonly providersConfiguredProviders: string;
   readonly providersLocalSetupHint: string;
   readonly providersDiagnosticsTitle: string;
+  readonly providersEndpoint: string;
+  readonly providersCredential: string;
+  readonly providersEndpointCheck: string;
+  readonly providersCredentialCheck: string;
+  readonly providersSetup: string;
+  readonly providersEndpointCheckConfigOnly: string;
+  readonly providersCredentialCheckConfigOnly: string;
+  readonly providersModelCount: (count: number) => string;
   readonly providersStatusReady: string;
   readonly providersStatusMissingCredential: string;
   readonly providersStatusEndpointFailed: string;
@@ -222,6 +230,14 @@ const en: CliUiChromeCopy = {
   providersConfiguredProviders: "Configured providers",
   providersLocalSetupHint: "Run /providers local setup to configure a local endpoint.",
   providersDiagnosticsTitle: "Provider Diagnostics",
+  providersEndpoint: "Endpoint",
+  providersCredential: "Credential",
+  providersEndpointCheck: "Endpoint check",
+  providersCredentialCheck: "Credential check",
+  providersSetup: "Setup",
+  providersEndpointCheckConfigOnly: "config only; no live network probe",
+  providersCredentialCheckConfigOnly: "environment/profile references only",
+  providersModelCount: (count) => `${count} model${count === 1 ? "" : "s"}`,
   providersStatusReady: "ready",
   providersStatusMissingCredential: "missing credential",
   providersStatusEndpointFailed: "endpoint check failed",
@@ -329,6 +345,14 @@ const ar: CliUiChromeCopy = {
   providersConfiguredProviders: "المزوّدون المضبوطون",
   providersLocalSetupHint: `شغّل ${isolateLtr("/providers local setup")} لضبط نقطة نهاية محلية.`,
   providersDiagnosticsTitle: "تشخيص المزوّدين",
+  providersEndpoint: "نقطة النهاية",
+  providersCredential: "بيانات الاعتماد",
+  providersEndpointCheck: "فحص نقطة النهاية",
+  providersCredentialCheck: "فحص بيانات الاعتماد",
+  providersSetup: "الإعداد",
+  providersEndpointCheckConfigOnly: "من الإعدادات فقط؛ لا يوجد فحص شبكة مباشر",
+  providersCredentialCheckConfigOnly: "مراجع البيئة/الملف الشخصي فقط",
+  providersModelCount: (count) => `${count} نموذج`,
   providersStatusReady: "جاهز",
   providersStatusMissingCredential: "بيانات الاعتماد ناقصة",
   providersStatusEndpointFailed: "فشل فحص نقطة النهاية",

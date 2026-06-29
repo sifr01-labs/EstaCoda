@@ -115,7 +115,26 @@ describe("session-loop /model", () => {
     expect(outputChunks.join("")).toContain("model: qwen2.5:3b");
   });
 
-  it("/providers uses reviewed setup guards for non-interactive provider setup", async () => {
+  it("/providers renders read-only provider status without mutating config", async () => {
+    await writeProfileConfig(tempHome, {
+      providers: {
+        local: {
+          kind: "openai-compatible",
+          models: ["qwen2.5:3b"],
+          enableNetwork: true
+        },
+        "enterprise-gateway": {
+          kind: "openai-compatible",
+          baseUrl: "https://gateway.example.com/v1",
+          apiKeyEnv: "ENTERPRISE_GATEWAY_API_KEY",
+          models: ["enterprise-model"],
+          enableNetwork: true
+        }
+      },
+      model: { provider: "local", id: "qwen2.5:3b" }
+    });
+    const configPath = resolveProfileStateHome({ homeDir: tempHome, profileId: "default" }).configPath;
+    const before = readFileSync(configPath, "utf8");
     const runtime = fakeRuntime({
       provider: "local",
       model: "qwen2.5:3b",
@@ -135,6 +154,36 @@ describe("session-loop /model", () => {
     });
 
     expect(noPromptResult).toBe(false);
+    const rendered = outputChunks.join("");
+    expect(rendered).toContain("[OK] Providers");
+    expect(rendered).toContain("Active route: local/qwen2.5:3b");
+    expect(rendered).toContain("Configured providers");
+    expect(rendered).toContain("- [OK] local: ready");
+    expect(rendered).toContain("- [WARN] enterprise-gateway: missing credential");
+    expect(rendered).toContain("Provider Diagnostics");
+    expect(readFileSync(configPath, "utf8")).toBe(before);
+  });
+
+  it("/providers setup subcommands use reviewed setup guards when non-interactive", async () => {
+    const runtime = fakeRuntime({
+      provider: "local",
+      model: "qwen2.5:3b",
+      contextWindowTokens: 128000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    });
+
+    const localNoPromptResult = await handleSlashCommand({
+      text: "/providers local setup",
+      runtime,
+      output,
+      renderer: { render: renderPlain },
+      workspaceRoot: tempHome,
+      homeDir: tempHome
+    });
+
+    expect(localNoPromptResult).toBe(false);
     expect(outputChunks.join("")).toContain("cannot open reviewed provider setup");
 
     outputChunks = [];
@@ -149,6 +198,40 @@ describe("session-loop /model", () => {
 
     expect(customNoPromptResult).toBe(false);
     expect(outputChunks.join("")).toContain("cannot open reviewed provider setup");
+  });
+
+  it("/help lists /providers and /models remains unknown", async () => {
+    const runtime = fakeRuntime({
+      provider: "local",
+      model: "qwen2.5:3b",
+      contextWindowTokens: 128000,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true
+    });
+
+    const helpResult = await handleSlashCommand({
+      text: "/help",
+      runtime,
+      output,
+      renderer: { render: renderPlain },
+      workspaceRoot: tempHome,
+      homeDir: tempHome
+    });
+    expect(helpResult).toBe(false);
+    expect(outputChunks.join("")).toContain("/providers");
+
+    outputChunks = [];
+    const modelsResult = await handleSlashCommand({
+      text: "/models",
+      runtime,
+      output,
+      renderer: { render: renderPlain },
+      workspaceRoot: tempHome,
+      homeDir: tempHome
+    });
+    expect(modelsResult).toBe(false);
+    expect(outputChunks.join("")).toContain("Unknown command: /models");
   });
 
   it("/model picker uses prompt card selects for session provider and model", async () => {

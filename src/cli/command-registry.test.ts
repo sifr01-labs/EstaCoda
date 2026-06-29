@@ -385,6 +385,7 @@ describe("global commandRegistry", () => {
     expect(commandRegistry.resolve("help")?.scope).toBe("both");
     expect(commandRegistry.resolve("status")?.scope).toBe("slash");
     expect(commandRegistry.resolve("model")?.scope).toBe("both");
+    expect(commandRegistry.resolve("providers")?.scope).toBe("slash");
     expect(commandRegistry.resolve("exit")?.scope).toBe("slash");
   });
 
@@ -410,6 +411,7 @@ describe("global commandRegistry", () => {
 
   it("does not resolve removed aliases", () => {
     expect(commandRegistry.resolve("load")).toBeUndefined();
+    expect(commandRegistry.resolve("models")).toBeUndefined();
     expect(commandRegistry.resolve("status")?.name).toBe("status");
     expect(commandRegistry.resolve("model")?.name).toBe("model");
   });
@@ -459,6 +461,7 @@ describe("global commandRegistry", () => {
     expect(names).toContain("help");
     expect(names).toContain("status");
     expect(names).toContain("model");
+    expect(names).toContain("providers");
     expect(names).toContain("exit");
     expect(names).toContain("yolo");
     expect(names).toContain("cron");

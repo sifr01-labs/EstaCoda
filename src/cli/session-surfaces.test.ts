@@ -435,8 +435,8 @@ describe("Session surfaces — slash completion list", () => {
     const vm = buildSlashCompletionViewModel(fakeRuntime, "/", { selectedIndex: 4, visibleRows: 3 });
     const output = standardDarkRenderer().render(vm);
 
-    expect(vm.options.map((option) => option.label)).toEqual(["/tools", "/skills", "/exit"]);
-    expect(stripAnsi(output)).toContain("> /skills");
+    expect(vm.options.map((option) => option.label)).toEqual(["/providers", "/tools", "/skills"]);
+    expect(stripAnsi(output)).toContain("> /tools");
     expect(output).not.toContain("/help");
   });
 

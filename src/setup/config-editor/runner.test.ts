@@ -2328,6 +2328,78 @@ describe("runConfigEditor", () => {
     expect(JSON.stringify(result)).not.toContain("sk-");
   });
 
+  it("edits an existing custom provider when the custom provider ID conflicts", async () => {
+    const baseConfig = localReadyConfig();
+    await writeUserConfig(tempDir, {
+      ...baseConfig,
+      providers: {
+        ...(baseConfig.providers as Record<string, unknown>),
+        "enterprise-gateway": {
+          kind: "openai-compatible",
+          baseUrl: "https://gateway.example.com/v1",
+          apiKeyEnv: "ENTERPRISE_GATEWAY_API_KEY",
+          models: ["old-enterprise-model"],
+          enableNetwork: true,
+        },
+      },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+    const prompt = fakePrompt({
+      values: [
+        "enterprise-gateway",
+        "Edit existing provider",
+        "",
+        "Continue manually",
+        "new-enterprise-model",
+        "",
+        "Use API key from environment",
+        "",
+        "Skip test",
+        "Review changes",
+        true,
+      ],
+    });
+    const selectInputs = captureSelectInputs(prompt);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "add-custom-provider-route",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+        collectVerification: () => readyVerification(profileConfigPath(tempDir)),
+      }),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      model?: { provider?: string; id?: string };
+      providers?: Record<string, { baseUrl?: string; apiKeyEnv?: string; models?: string[] }>;
+    };
+
+    expect(result.completed).toBe(true);
+    expect(selectInputs.some((input) =>
+      input.title === "Custom OpenAI-Compatible Provider" &&
+      input.options.some((option) => option.label === "Edit existing provider") &&
+      input.options.some((option) => option.label === "Use different provider ID")
+    )).toBe(true);
+    expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values).toEqual(expect.objectContaining({
+      provider: "enterprise-gateway",
+      model: "new-enterprise-model",
+      baseUrl: "https://gateway.example.com/v1",
+      authMethod: "api_key",
+      modelSource: "manual",
+    }));
+    expect(config.model).toEqual({ provider: "enterprise-gateway", id: "new-enterprise-model" });
+    expect(config.providers?.["enterprise-gateway"]?.baseUrl).toBe("https://gateway.example.com/v1");
+    expect(config.providers?.["enterprise-gateway"]?.apiKeyEnv).toBe("ENTERPRISE_GATEWAY_API_KEY");
+    expect(config.providers?.["enterprise-gateway"]?.models).toEqual(expect.arrayContaining([
+      "old-enterprise-model",
+      "new-enterprise-model",
+    ]));
+  });
+
   it("retries invalid local endpoint URLs before review and writes no secret for a blank API key", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);

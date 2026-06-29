@@ -5,6 +5,7 @@ exports[`Session surfaces — /help > renders in narrow width > help-narrow widt
 • /help: Show command help
 • /status: Show runtime, model, context, trust, memory, and skill status
 • /model: Show the active model and provider without changing saved setup state.
+• /providers: Configure local, private, or custom providers through reviewed setup.
 • /switch: Switch to an existing session
 • /search: Search session history
 • /compact: Compact this in-session context
@@ -38,6 +39,7 @@ exports[`Session surfaces — /help > renders in no Unicode > help-no Unicode 1`
 - /help: Show command help
 - /status: Show runtime, model, context, trust, memory, and skill status
 - /model: Show the active model and provider without changing saved setup state.
+- /providers: Configure local, private, or custom providers through reviewed setup.
 - /switch: Switch to an existing session
 - /search: Search session history
 - /compact: Compact this in-session context
@@ -71,6 +73,7 @@ exports[`Session surfaces — /help > renders in no color > help-no color 1`] = 
 • /help: Show command help
 • /status: Show runtime, model, context, trust, memory, and skill status
 • /model: Show the active model and provider without changing saved setup state.
+• /providers: Configure local, private, or custom providers through reviewed setup.
 • /switch: Switch to an existing session
 • /search: Search session history
 • /compact: Compact this in-session context
@@ -104,6 +107,7 @@ exports[`Session surfaces — /help > renders in plain > help-plain 1`] = `
 - /help: Show command help
 - /status: Show runtime, model, context, trust, memory, and skill status
 - /model: Show the active model and provider without changing saved setup state.
+- /providers: Configure local, private, or custom providers through reviewed setup.
 - /switch: Switch to an existing session
 - /search: Search session history
 - /compact: Compact this in-session context
@@ -137,6 +141,7 @@ exports[`Session surfaces — /help > renders in standard dark > help-standard d
 • /help: Show command help
 • /status: Show runtime, model, context, trust, memory, and skill status
 • /model: Show the active model and provider without changing saved setup state.
+• /providers: Configure local, private, or custom providers through reviewed setup.
 • /switch: Switch to an existing session
 • /search: Search session history
 • /compact: Compact this in-session context
@@ -170,6 +175,7 @@ exports[`Session surfaces — /help > renders in standard light > help-standard 
 • /help: Show command help
 • /status: Show runtime, model, context, trust, memory, and skill status
 • /model: Show the active model and provider without changing saved setup state.
+• /providers: Configure local, private, or custom providers through reviewed setup.
 • /switch: Switch to an existing session
 • /search: Search session history
 • /compact: Compact this in-session context
@@ -482,6 +488,7 @@ exports[`Session surfaces — slash menu > renders in narrow width > slash-menu-
 /help                    Show command help
 /status                  Show runtime, model, context, trust, memory, and skill status
 /model                   Show the active model and provider without changing saved setup state.
+/providers               Configure local, private, or custom providers through reviewed setup.
 /switch                  Switch to an existing session
 /search                  Search session history
 /compact                 Compact this in-session context
@@ -517,6 +524,7 @@ exports[`Session surfaces — slash menu > renders in no Unicode > slash-menu-no
 /help                    Show command help
 /status                  Show runtime, model, context, trust, memory, and skill status
 /model                   Show the active model and provider without changing saved setup state.
+/providers               Configure local, private, or custom providers through reviewed setup.
 /switch                  Switch to an existing session
 /search                  Search session history
 /compact                 Compact this in-session context
@@ -552,6 +560,7 @@ Name                     Description
 /help                    Show command help
 /status                  Show runtime, model, context, trust, memory, and skill status
 /model                   Show the active model and provider without changing saved setup state.
+/providers               Configure local, private, or custom providers through reviewed setup.
 /switch                  Switch to an existing session
 /search                  Search session history
 /compact                 Compact this in-session context
@@ -587,6 +596,7 @@ Name                     Description
 /help                    Show command help
 /status                  Show runtime, model, context, trust, memory, and skill status
 /model                   Show the active model and provider without changing saved setup state.
+/providers               Configure local, private, or custom providers through reviewed setup.
 /switch                  Switch to an existing session
 /search                  Search session history
 /compact                 Compact this in-session context
@@ -622,6 +632,7 @@ exports[`Session surfaces — slash menu > renders in standard dark > slash-menu
 /help                    Show command help
 /status                  Show runtime, model, context, trust, memory, and skill status
 /model                   Show the active model and provider without changing saved setup state.
+/providers               Configure local, private, or custom providers through reviewed setup.
 /switch                  Switch to an existing session
 /search                  Search session history
 /compact                 Compact this in-session context
@@ -657,6 +668,7 @@ exports[`Session surfaces — slash menu > renders in standard light > slash-men
 /help                    Show command help
 /status                  Show runtime, model, context, trust, memory, and skill status
 /model                   Show the active model and provider without changing saved setup state.
+/providers               Configure local, private, or custom providers through reviewed setup.
 /switch                  Switch to an existing session
 /search                  Search session history
 /compact                 Compact this in-session context
