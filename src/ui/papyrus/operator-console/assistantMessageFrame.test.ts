@@ -30,7 +30,7 @@ describe("Papyrus operator console assistant message frame", () => {
     expect(rows.at(-1)).toMatch(/^╰─+╯$/u);
   });
 
-  it("uses the brand palette token for the assistant title when styled", () => {
+  it("uses the plain brand palette token for the assistant title when styled", () => {
     const tokens = resolveTokens("standard", "dark", "kemetBlue");
     const style = createOperatorConsoleStyle({
       tokens,
@@ -41,7 +41,8 @@ describe("Papyrus operator console assistant message frame", () => {
     }, { width: 72, style });
 
     expect(rows[0]).toContain(ansiFg(tokens.contract.palette.brand));
-    expect(rows[0]).toContain("\x1b[1m𓂀  EstaCoda\x1b[0m");
+    expect(rows[0]).toContain(`${ansiFg(tokens.contract.palette.brand)}𓂀  EstaCoda\x1b[0m`);
+    expect(rows[0]).not.toContain("\x1b[1m𓂀  EstaCoda");
   });
 
   it("adds the live cursor only when requested", () => {

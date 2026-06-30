@@ -3,7 +3,7 @@ import { closeOpenBidiIsolates, isolateLtr } from "../../bidi.js";
 import type { UiLocale } from "../../cli-ui-copy.js";
 import { padVisibleEnd, padVisibleStart, truncateVisible } from "../../renderers/layout.js";
 import type { StartupCommandState, StartupDashboardState } from "./operatorConsoleState.js";
-import { styleBold, styleColor, type OperatorConsoleStyle } from "./operatorConsoleStyle.js";
+import { styleColor, type OperatorConsoleStyle } from "./operatorConsoleStyle.js";
 
 export type StartupDashboardRenderOptions = {
   readonly width: number;
@@ -427,7 +427,7 @@ function renderTopBorder(
   style: OperatorConsoleStyle | undefined
 ): string {
   if (width <= 1) return "╭".slice(0, width);
-  const styledLabel = styleColor(style, styleBold(style, labelText), style?.tokens.contract.palette.brand ?? "");
+  const styledLabel = styleColor(style, labelText, style?.tokens.contract.palette.brand ?? "");
   const label = ` ${styledLabel} `;
   const remaining = Math.max(0, width - 2 - stringWidth(label));
   const left = Math.floor(remaining / 2);

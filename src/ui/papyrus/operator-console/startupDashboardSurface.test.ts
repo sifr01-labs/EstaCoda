@@ -147,7 +147,7 @@ describe("Papyrus operator console startup dashboard surface", () => {
     expect(output).toContain("/tools");
   });
 
-  it("uses token colors for brand title, section labels, and model route dot when styled", () => {
+  it("uses token colors for plain brand title, section labels, and model route dot when styled", () => {
     const tokens = resolveTokens("standard", "dark", "kemetBlue");
     const style = createOperatorConsoleStyle({
       tokens,
@@ -162,6 +162,8 @@ describe("Papyrus operator console startup dashboard surface", () => {
     }, { width: 80, style }).join("\n");
 
     expect(output).toContain(ansiFg(tokens.contract.palette.brand));
+    expect(output).toContain(`${ansiFg(tokens.contract.palette.brand)}EstaCoda  𓂀  v0.1.0\x1b[0m`);
+    expect(output).not.toContain("\x1b[1mEstaCoda  𓂀  v0.1.0");
     expect(output).toContain(`${ansiFg(tokens.contract.palette.accent)}Session\x1b[0m`);
     expect(output).toContain(`${ansiFg(tokens.contract.palette.accent)}Commands\x1b[0m`);
     expect(output).toContain(`${ansiFg(tokens.contract.palette.accent)}Update\x1b[0m`);

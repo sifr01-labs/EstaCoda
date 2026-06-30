@@ -212,7 +212,7 @@ describe("Papyrus operator console setup panel surface", () => {
     expect(unselectedLine).not.toContain(ansiFg(tokens.contract.palette.action));
   });
 
-  it("colors setup shell title, current status, and footer when styled", () => {
+  it("colors setup shell title with plain brand color, current status, and footer when styled", () => {
     const tokens = resolveTokens("standard", "dark", "kemetBlue");
     const output = renderSetupPanelSurface({
       ...modelRoutePanel(),
@@ -227,7 +227,8 @@ describe("Papyrus operator console setup panel surface", () => {
     }).join("\n");
     const footerLine = output.split("\n").find((line) => line.includes("↑↓ navigate")) ?? "";
 
-    expect(output).toContain(`${ansiFg(tokens.contract.palette.brand)}\x1b[1m𓂀  Model Route\x1b[0m\x1b[0m`);
+    expect(output).toContain(`${ansiFg(tokens.contract.palette.brand)}𓂀  Model Route\x1b[0m`);
+    expect(output).not.toContain("\x1b[1m𓂀  Model Route");
     expect(output).toContain(`${ansiFg(tokens.contract.severity.ok)}Current: OpenAI\x1b[0m`);
     expect(footerLine).toContain(ansiFg(tokens.contract.text.secondary));
     expect(footerLine).toContain("↑↓ navigate   ENTER select   CTRL+C exit");

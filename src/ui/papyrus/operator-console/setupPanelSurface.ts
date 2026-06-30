@@ -7,7 +7,7 @@ import type {
   SetupSurfaceState,
   TextEntryPanelState,
 } from "./operatorConsoleState.js";
-import { styleBold, styleColor, type OperatorConsoleStyle } from "./operatorConsoleStyle.js";
+import { styleColor, type OperatorConsoleStyle } from "./operatorConsoleStyle.js";
 
 export type SetupPanelRenderOptions = {
   readonly width: number;
@@ -476,7 +476,7 @@ function renderSetupPanelTopBorder(
   style: OperatorConsoleStyle | undefined
 ): string {
   return renderTopBorder(
-    styleBrand(styleBold(style, `𓂀  ${formatFrameTitle(title, locale)}`), style),
+    styleBrand(`𓂀  ${formatFrameTitle(title, locale)}`, style),
     width,
     locale === "ar" ? "right" : "left"
   );
