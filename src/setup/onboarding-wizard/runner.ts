@@ -8,6 +8,10 @@ import type { Prompt } from "../../cli/prompt-contract.js";
 import { withPromptUiContext } from "../../cli/prompt-contract.js";
 import { promptUiContextForLocale } from "../../contracts/ui.js";
 import { promptForApiKeyInput } from "../../cli/secret-prompt.js";
+import {
+  withSetupConsolePrompt,
+  type SetupConsolePromptAdapterOptions,
+} from "../config-editor/setupConsolePromptAdapter.js";
 import { isolateLtr } from "../../ui/bidi.js";
 import {
   createProviderModelSelectionFlow,
@@ -94,6 +98,7 @@ import {
 
 export type FirstRunSetupRunnerOptions = CollectSetupEntryStateOptions & {
   readonly prompt: Prompt;
+  readonly setupConsole?: SetupConsolePromptAdapterOptions;
   readonly flowEngine?: FlowEngine;
   readonly defaultSelections?: OnboardingWizardSelections;
   readonly applyExecutor?: SetupApplyExecutor;
@@ -121,6 +126,16 @@ export type FirstRunSetupRunnerResult = {
   readonly applyEndState?: SetupApplyEndState;
   readonly gatewayServiceActivationResult?: GatewayServiceActivationResult;
 };
+
+function onboardingPromptForLocale(
+  options: FirstRunSetupRunnerOptions,
+  locale: SetupCopyLocale
+): Prompt {
+  const localizedPrompt = withPromptUiContext(options.prompt, promptUiContextForLocale(locale));
+  return options.setupConsole === undefined
+    ? localizedPrompt
+    : withSetupConsolePrompt(localizedPrompt, options.setupConsole);
+}
 
 type PendingCredentialWrite = SetupDeferredSecretWrite;
 
@@ -197,12 +212,12 @@ type OnboardingWizardDraft = {
 export async function runFirstRunSetup(
   options: FirstRunSetupRunnerOptions
 ): Promise<FirstRunSetupRunnerResult> {
-  const prompt = options.prompt;
   const state = await collectSetupEntryState(options);
   await ensureDefaultProfileState({ homeDir: options.homeDir, profileId: options.profileId ?? defaultProfileId() });
   const stateHome = resolveStateHome({ homeDir: options.homeDir });
   const flowEngine = options.flowEngine ?? await createDefaultFlowEngine(options);
   const initialLocale = options.defaultSelections?.language ?? "en";
+  const prompt = onboardingPromptForLocale(options, initialLocale);
   const initialPromptContext = setupPromptContext(prompt, initialLocale);
 
   await showSetupCard(initialPromptContext, {
@@ -230,7 +245,7 @@ export async function runFirstRunSetup(
         const language = interfaceChoice.language;
         const localizedOptions: FirstRunSetupRunnerOptions = {
           ...options,
-          prompt: withPromptUiContext(prompt, promptUiContextForLocale(language)),
+          prompt: onboardingPromptForLocale(options, language),
         };
         draft.interfaceChoice = interfaceChoice;
         draft.localizedOptions = localizedOptions;

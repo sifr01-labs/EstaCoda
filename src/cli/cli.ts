@@ -45,7 +45,10 @@ import { createSessionRenderer } from "./session-renderer.js";
 import { promptUiContextForLocale } from "../contracts/ui.js";
 import { runFirstRunSetup } from "../setup/onboarding-wizard/runner.js";
 import { runConfigEditorSetup } from "../setup/config-editor/runner.js";
-import { isSetupConsoleExit } from "../setup/config-editor/setupConsolePromptAdapter.js";
+import {
+  isSetupConsoleExit,
+  type SetupConsolePromptAdapterOptions,
+} from "../setup/config-editor/setupConsolePromptAdapter.js";
 import { selectProviderModelRoute } from "../setup/provider-model-route-prompt.js";
 import { createReviewedSetupApplyExecutor } from "../setup/review/apply-executor.js";
 import { collectSetupEntryState } from "../setup/setup-entry-state.js";
@@ -431,12 +434,14 @@ async function setup(options: CliOptions, args: string[]): Promise<CliCommandRes
 
 async function interactiveSetup(options: CliOptions, input: { readonly advanced: boolean }): Promise<CliCommandResult> {
   const prompt = options.prompt ?? createInteractivePrompt();
+  const setupConsole = interactiveSetupConsole(options);
   try {
     const decision = await collectSetupRoute(options);
     if (decision.kind === "first-run-onboarding") {
       const result = await runFirstRunSetup({
         ...options,
         prompt,
+        ...(setupConsole === undefined ? {} : { setupConsole }),
         applyExecutor: createReviewedSetupApplyExecutor({
           workspaceRoot: options.workspaceRoot,
           homeDir: options.homeDir,
@@ -459,19 +464,6 @@ async function interactiveSetup(options: CliOptions, input: { readonly advanced:
       decision.kind === "repair-first-menu"
     ) {
       const chunks: string[] = [];
-      const setupRenderer = options.prompt === undefined && options.output === undefined && canRunInteractive()
-        ? createSessionRenderer({ output: stdout })
-        : undefined;
-      const setupConsole = setupRenderer === undefined
-        ? undefined
-        : {
-            input: stdin,
-            output: stdout,
-            style: createOperatorConsoleStyle({
-              tokens: setupRenderer.tokens,
-              capabilities: setupRenderer.capabilities,
-            }),
-          };
       const result = await runConfigEditorSetup({
         ...options,
         prompt,
@@ -519,6 +511,22 @@ async function interactiveSetup(options: CliOptions, input: { readonly advanced:
       prompt.close?.();
     }
   }
+}
+
+function interactiveSetupConsole(options: CliOptions): SetupConsolePromptAdapterOptions | undefined {
+  const setupRenderer = options.prompt === undefined && options.output === undefined && canRunInteractive()
+    ? createSessionRenderer({ output: stdout })
+    : undefined;
+  return setupRenderer === undefined
+    ? undefined
+    : {
+        input: stdin,
+        output: stdout,
+        style: createOperatorConsoleStyle({
+          tokens: setupRenderer.tokens,
+          capabilities: setupRenderer.capabilities,
+        }),
+      };
 }
 
 async function verify(options: CliOptions): Promise<CliCommandResult> {
