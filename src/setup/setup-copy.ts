@@ -1,4 +1,4 @@
-import { isolateLtr, LRI, PDI, RLI } from "../ui/bidi.js";
+import { isolateLtr, isolateRtl, LRI, PDI, RLI } from "../ui/bidi.js";
 
 export type SetupCopyLocale = "en" | "ar";
 
@@ -189,7 +189,7 @@ export const SETUP_COPY_ENTRIES = [
   copy("onboarding.welcome.title", "EstaCoda Onboarding Wizard", "معالج تهيئة EstaCoda", [], "none"),
   copy("onboarding.common.begin", "Begin", "ابدأ", [], "none"),
   copy("onboarding.welcome.validation.acknowledged", "Confirm to continue setup.", "أكّد للمتابعة في الإعداد.", [], "none"),
-  copy("onboarding.interfaceLanguage", "Choose the setup language and how EstaCoda speaks while working. Same engine, different style.", "اختر لغة الإعداد وكيف تتحدث EstaCoda أثناء العمل. نفس المحرك، أسلوب مختلف.", [], "interface-preference"),
+  copy("onboarding.interfaceLanguage", `Choose the language EstaCoda uses for setup and CLI guidance.\n${isolateRtl(`اختر اللغة التي تستخدمها ${isolateLtr("EstaCoda")} للإعداد وإرشادات الطرفية.`)}`, `Choose the language EstaCoda uses for setup and CLI guidance.\n${isolateRtl(`اختر اللغة التي تستخدمها ${isolateLtr("EstaCoda")} للإعداد وإرشادات الطرفية.`)}`, [], "interface-preference"),
   copy("onboarding.interfaceLanguage.title", "Setup language", "لغة الإعداد", [], "interface-preference"),
   copy("onboarding.interfaceLanguage.options.en.label", "English", "English", [], "interface-preference"),
   copy("onboarding.interfaceLanguage.options.ar.label", "العربية", "العربية", [], "interface-preference"),
@@ -202,7 +202,9 @@ export const SETUP_COPY_ENTRIES = [
   copy("onboarding.interfaceStyle.arabicLight.description", "Arabic labels with stable technical tokens.", "تسميات عربية مع رموز تقنية مستقرة.", [], "interface-preference"),
   copy("onboarding.interfaceStyle.arabicStandard.description", "Standard interface style with Arabic setup copy.", "أسلوب واجهة قياسي مع نصوص إعداد عربية.", [], "interface-preference"),
   copy("onboarding.interfaceStyle.englishArabicLight.description", "English setup copy with Arabic-light visual flavor.", "نصوص إعداد إنجليزية مع لمسة بصرية عربية خفيفة.", [], "interface-preference"),
-  copy("onboarding.workspace.root", "Select the workspace EstaCoda should use.", "اختر مساحة العمل التي ستعمل فيها EstaCoda.", [], "workspace-path"),
+  copy("onboarding.workspace.root", "Select the workspace EstaCoda should use.", "اختر مساحة العمل التي سيستخدمها EstaCoda.", [], "workspace-path"),
+  copy("onboarding.workspace.root.defaultInstruction", "Press Enter to use the current default, or type another path.", "اضغط Enter لاستخدام الافتراضي الحالي، أو اكتب مسارًا آخر.", [], "workspace-path"),
+  copy("onboarding.workspace.root.currentDefault", "Current default: {workspacePath}", "الافتراضي الحالي: {workspacePath}", ["{workspacePath}"], "workspace-path"),
   copy("onboarding.workspace.title", "Workspace", "مساحة العمل", [], "workspace-path"),
   copy("onboarding.workspace.root.validation.selected", "Choose a workspace path.", "اختر مسار مساحة العمل.", [], "workspace-path"),
   copy("onboarding.workspace.trust", "Confirm that you want to trust the workspace: {workspacePath}", "أكّد أنك تريد الوثوق بمساحة العمل: {workspacePath}", ["{workspacePath}"], "workspace-trust"),
@@ -212,7 +214,7 @@ export const SETUP_COPY_ENTRIES = [
   copy("onboarding.workspace.changeWorkspaceAction.label", "Change Workspace", "غيّر مساحة العمل", [], "workspace-path"),
   copy("onboarding.workspace.changeWorkspaceAction.description", "Return to workspace selection.", "ارجع إلى اختيار مساحة العمل.", [], "workspace-path"),
   copy("onboarding.workspace.deferTrustAction.label", "Decide Later", "قرّر لاحقًا", [], "workspace-trust"),
-  copy("onboarding.workspace.deferTrustAction.description", "Warning: the agent cannot operate in this workspace until workspace trust is granted.", "تحذير: لا يستطيع الوكيل العمل في مساحة العمل هذه حتى يتم منح الثقة.", [], "workspace-trust"),
+  copy("onboarding.workspace.deferTrustAction.description", "The agent cannot operate in this workspace until workspace trust is granted.", "لا يستطيع الوكيل العمل في مساحة العمل هذه حتى يتم منح الثقة.", [], "workspace-trust"),
   copy("onboarding.workspace.trust.deferredFinal", "Setup saved. Workspace trust is still required before EstaCoda can run here.", "تم حفظ الإعداد. لا تزال ثقة مساحة العمل مطلوبة قبل أن تتمكن EstaCoda من العمل هنا.", [], "workspace-trust"),
   copy("onboarding.workspace.invalid.title", "Workspace path unavailable", "مسار مساحة العمل غير متاح", [], "workspace-path"),
   copy("onboarding.workspace.invalid.tryAgain", "Try again", "حاول مرة أخرى", [], "workspace-path"),
@@ -908,6 +910,7 @@ export const SETUP_COPY_ENTRIES = [
   copy("setupApply.review.approved", "Review approved. An apply plan can be prepared without executing it.", "تمت الموافقة على المراجعة. يمكن تجهيز خطة تطبيق دون تنفيذ.", [], "setup-review"),
   copy("setupApply.review.cancelled", "Review cancelled. No apply plan, config write, or trust grant will be created.", "أُلغيت المراجعة. لن تُنشأ خطة تطبيق أو كتابة إعدادات أو منح ثقة.", [], "none"),
   copy("setupApply.review.blocked", "Review is blocked by {blockerCount} item(s).", "المراجعة محظورة بسبب {blockerCount} عنصر/عناصر.", ["{blockerCount}"], "config-repair"),
+  copy("setupApply.result.title", "Setup result", "نتيجة الإعداد", [], "setup-review"),
   copy("setupApply.plan.ready", "Dry-run apply plan prepared from structured review data.", "تم تجهيز خطة تطبيق دون تنفيذ من بيانات مراجعة منظمة.", [], "config-write"),
   copy("setupApply.operations.configPatch", "Scoped config patch for {scope} in {configPath}.", "تعديل إعدادات محدود لـ {scope} داخل {configPath}.", ["{scope}", "{configPath}"], "config-write"),
   copy("setupApply.operations.credentialReference", "Credential reference operation for {envVar}.", "عملية مرجع بيانات اعتماد لـ {envVar}.", ["{envVar}"], "credential-reference"),

@@ -212,7 +212,7 @@ export type QueuedSteerState = {
   readonly submittedAtMs?: number;
 };
 
-export type SetupSurfaceState = SetupPanelState | SecretEntryPanelState;
+export type SetupSurfaceState = SetupPanelState | SecretEntryPanelState | TextEntryPanelState;
 
 export type SetupPanelState = {
   readonly kind: "table";
@@ -251,6 +251,16 @@ export type SecretEntryPanelState = {
   readonly envVar?: string;
   readonly optional?: boolean;
   readonly emptyLabel?: string;
+  readonly footer: string;
+};
+
+export type TextEntryPanelState = {
+  readonly kind: "textInput";
+  readonly title: string;
+  readonly description: string;
+  readonly locale?: OperatorConsoleLocale;
+  readonly value: string;
+  readonly placeholder?: string;
   readonly footer: string;
 };
 

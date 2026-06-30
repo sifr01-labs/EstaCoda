@@ -111,6 +111,38 @@ describe("withSetupConsolePrompt", () => {
     expect(text).not.toContain("Selected:");
   });
 
+  it("renders onboarding cards through the setup console when live", async () => {
+    const input = createInput();
+    const output = createOutput();
+    const onboardingCard = vi.fn();
+    const prompt = createPrompt({ onboardingCard });
+    const wrapped = withSetupConsolePrompt(prompt, { input, output });
+
+    await wrapped.onboardingCard?.(onboardingCardInput());
+    const text = stripAnsi(output.text());
+
+    expect(onboardingCard).not.toHaveBeenCalled();
+    expect(text).toContain("Welcome");
+    expect(text).toContain("Start guided setup.");
+    expect(text).toContain("~/.estacoda/profiles/default/config.json");
+    expect(text).toContain("Begin");
+    expect(output.text()).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
+  it("keeps non-TTY onboarding cards on the base prompt behavior", async () => {
+    const input = createInput({ isTTY: false });
+    const output = createOutput();
+    const onboardingCard = vi.fn();
+    const prompt = createPrompt({ onboardingCard });
+    const wrapped = withSetupConsolePrompt(prompt, { input, output });
+    const card = onboardingCardInput();
+
+    await wrapped.onboardingCard?.(card);
+
+    expect(onboardingCard).toHaveBeenCalledWith(card);
+    expect(output.text()).toBe("");
+  });
+
   it("routes setup secret input through a masked setup console panel", async () => {
     const input = createInput();
     const output = createOutput();
@@ -204,6 +236,85 @@ describe("withSetupConsolePrompt", () => {
     expect(output.text()).toBe("");
   });
 
+  it("routes visible setup text input through a setup console panel", async () => {
+    const input = createInput();
+    const output = createOutput();
+    const prompt = createPrompt({
+      select: createSelect("base").select,
+      answer: "base-answer",
+    });
+    const wrapped = withSetupConsolePrompt(prompt, { input, output });
+    const onInputChange = vi.fn();
+
+    const pending = wrapped("Workspace path: ", {
+      placeholder: "/Users/ahnwy/project",
+      onInputChange,
+    });
+    await Promise.resolve();
+    input.write("/tmp/estacoda-workspace\r");
+    const result = await pending;
+    const text = stripAnsi(output.text());
+
+    expect(result).toBe("/tmp/estacoda-workspace");
+    expect(text).toContain("Workspace");
+    expect(text).toContain("Workspace path");
+    expect(text).toContain("/Users/ahnwy/project");
+    expect(text).toContain("/tmp/estacoda-workspace");
+    expect(text).toContain("Enter save · Ctrl+C cancel");
+    expect(text).not.toContain("••••");
+    expect(output.text()).toContain("\x1b[?25l");
+    expect(output.text()).toContain("\x1b[?25h");
+    expect(input.rawModes).toEqual([true, false]);
+    expect(onInputChange).toHaveBeenCalledWith("/tmp/estacoda-workspace");
+  });
+
+  it("clears the previous setup card before redrawing visible text input", async () => {
+    const input = createInput();
+    const output = createOutput();
+    const prompt = createPrompt({
+      select: createSelect("base").select,
+      onboardingCard: () => undefined,
+    });
+    const wrapped = withSetupConsolePrompt(prompt, { input, output });
+
+    await wrapped.onboardingCard?.({
+      title: "Workspace",
+      bodyLines: ["Select the workspace EstaCoda should use."],
+      options: [{ id: "workspace", label: "/tmp/project" }],
+      selectedOptionIndex: 0,
+      locale: "en",
+      direction: "ltr",
+    });
+
+    const pending = wrapped("Workspace path: ");
+    await Promise.resolve();
+    input.write("/tmp/other");
+    await Promise.resolve();
+
+    const finalScreen = replayTerminal(output.text()).join("\n");
+    expect(finalScreen.match(/𓂀  Workspace/gu) ?? []).toHaveLength(1);
+    expect(finalScreen).toContain("/tmp/other");
+
+    input.write("\r");
+    await expect(pending).resolves.toBe("/tmp/other");
+  });
+
+  it("keeps non-TTY visible setup text on the existing prompt behavior", async () => {
+    const input = createInput({ isTTY: false });
+    const output = createOutput();
+    const createController = vi.fn();
+    const prompt = createPrompt({
+      select: createSelect("base").select,
+      answer: "base-answer",
+    });
+    const wrapped = withSetupConsolePrompt(prompt, { input, output, createController });
+
+    await expect(wrapped("Workspace path: ")).resolves.toBe("base-answer");
+
+    expect(createController).not.toHaveBeenCalled();
+    expect(output.text()).toBe("");
+  });
+
   it("routes setup secret submit through a masked setup console panel", async () => {
     const input = createInput();
     const output = createOutput();
@@ -240,24 +351,31 @@ describe("withSetupConsolePrompt", () => {
     expect(input.rawModes).toEqual([true, false]);
   });
 
-  it("preserves prompt methods and clears setup frames on close", async () => {
+  it("clears setup frames on close after setup console prompt surfaces", async () => {
     const input = createInput();
     const output = createOutput();
     const controller = createSetupOperatorConsoleController({ output });
     const clear = vi.spyOn(controller, "clear");
-    const submit = vi.fn(async () => ({ text: "submitted" }));
     const onboardingCard = vi.fn();
     const close = vi.fn();
     const prompt = createPrompt({
       select: createSelect("base").select,
-      submit,
+      submit: vi.fn(async () => ({ text: "base-submit" })),
       onboardingCard,
       close,
     });
     const wrapped = withSetupConsolePrompt(prompt, { input, output, controller });
 
-    await expect(wrapped("Question?")).resolves.toBe("answer");
-    await expect(wrapped.submit!("Submit?")).resolves.toEqual({ text: "submitted" });
+    const textPrompt = wrapped("Question?");
+    await Promise.resolve();
+    input.write("typed answer\r");
+    await expect(textPrompt).resolves.toBe("typed answer");
+
+    const submitPrompt = wrapped.submit!("Submit?");
+    await Promise.resolve();
+    input.write("submitted answer\r");
+    await expect(submitPrompt).resolves.toEqual({ text: "submitted answer" });
+
     const onboardingInput = {
       title: "Welcome",
       bodyLines: ["Body"],
@@ -272,8 +390,8 @@ describe("withSetupConsolePrompt", () => {
 
     wrapped.close?.();
 
-    expect(submit).toHaveBeenCalledWith("Submit?", undefined);
-    expect(onboardingCard).toHaveBeenCalledWith(onboardingInput);
+    expect(onboardingCard).not.toHaveBeenCalled();
+    expect(stripAnsi(output.text())).toContain("Welcome");
     expect(clear).toHaveBeenCalled();
     expect(close).toHaveBeenCalledOnce();
   });
@@ -374,6 +492,24 @@ function choiceMenuSelection(): SelectPromptInput<string> {
   };
 }
 
+function onboardingCardInput() {
+  return {
+    title: "Welcome",
+    bodyLines: ["Start guided setup."],
+    technicalLines: ["~/.estacoda/profiles/default/config.json"],
+    options: [
+      {
+        id: "begin",
+        label: "Begin",
+        description: "Open the first setup step.",
+      },
+    ],
+    selectedOptionIndex: 0,
+    locale: "en" as const,
+    direction: "ltr" as const,
+  };
+}
+
 function createPrompt(input: {
   readonly select?: Prompt["select"];
   readonly submit?: Prompt["submit"];
@@ -457,4 +593,58 @@ function createOutput(): Writable & {
 
 function stripAnsi(value: string): string {
   return value.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/gu, "");
+}
+
+function replayTerminal(output: string): readonly string[] {
+  const lines = [""];
+  let row = 0;
+  let column = 0;
+  let index = 0;
+
+  const ensureRow = () => {
+    while (lines.length <= row) lines.push("");
+  };
+
+  while (index < output.length) {
+    const char = output[index]!;
+    if (char === "\x1b") {
+      const match = /^\x1b\[([0-9;?]*)([A-Za-z])/u.exec(output.slice(index));
+      if (match !== null) {
+        const parameters = match[1] ?? "";
+        const command = match[2];
+        if (command === "A") {
+          const amount = Number.parseInt(parameters, 10);
+          row = Math.max(0, row - (Number.isFinite(amount) ? amount : 1));
+          ensureRow();
+        } else if (command === "K") {
+          ensureRow();
+          lines[row] = lines[row]!.slice(0, column);
+        }
+        index += match[0].length;
+        continue;
+      }
+    }
+
+    if (char === "\r") {
+      column = 0;
+      index += 1;
+      continue;
+    }
+
+    if (char === "\n") {
+      row += 1;
+      column = 0;
+      ensureRow();
+      index += 1;
+      continue;
+    }
+
+    ensureRow();
+    const line = lines[row]!;
+    lines[row] = `${line.slice(0, column)}${char}${line.slice(column + 1)}`;
+    column += 1;
+    index += 1;
+  }
+
+  return lines.map((line) => stripAnsi(line).trimEnd()).filter((line) => line.trim().length > 0);
 }

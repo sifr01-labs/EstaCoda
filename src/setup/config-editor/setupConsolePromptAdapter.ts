@@ -1,10 +1,12 @@
 import type { Readable, Writable } from "node:stream";
 import type { SelectPromptInput } from "../../cli/interactive-select.js";
 import type { Prompt, PromptOptions, PromptSubmission } from "../../cli/prompt-contract.js";
+import type { BuildOnboardingPromptCardInput } from "../../ui/view-models/builders.js";
 import { createKeypressStreamDispatcher } from "../../ui/input/keyPressStreamDispatcher.js";
+import { applyKeypress, createLineEditorState, type LineEditorState } from "../../ui/input/lineEditor.js";
 import type { ParsedKeypress } from "../../ui/input/parseKeypress.js";
 import { SecretPromptController } from "../../ui/papyrus/input/secretPromptController.js";
-import type { OperatorConsoleStyle } from "../../ui/papyrus/operator-console/index.js";
+import type { OperatorConsoleStyle, SetupPanelState } from "../../ui/papyrus/operator-console/index.js";
 import { mapSetupSelectToSetupPanelState } from "../../ui/papyrus/operator-console/setupSelectRuntimeMapper.js";
 import {
   applySelectKey,
@@ -82,8 +84,11 @@ export function withSetupConsolePrompt(
 
   return Object.assign(
     async (question: string, promptOptions?: PromptOptions) => {
-      if (promptOptions?.secret === true && hasLiveSetupConsole(options.input, options.output)) {
-        return readSecretWithSetupConsole(question, options, getController(), prompt.uiContext?.locale);
+      if (hasLiveSetupConsole(options.input, options.output)) {
+        if (promptOptions?.secret === true) {
+          return readSecretWithSetupConsole(question, options, getController(), prompt.uiContext?.locale);
+        }
+        return readTextWithSetupConsole(question, promptOptions, options, getController(), prompt.uiContext?.locale);
       }
       return prompt(question, promptOptions);
     },
@@ -92,15 +97,24 @@ export function withSetupConsolePrompt(
       submit: prompt.submit === undefined
         ? undefined
         : async (question: string, promptOptions?: PromptOptions): Promise<PromptSubmission> => {
-          if (promptOptions?.secret === true && hasLiveSetupConsole(options.input, options.output)) {
-            return { text: await readSecretWithSetupConsole(question, options, getController(), prompt.uiContext?.locale) };
+          if (hasLiveSetupConsole(options.input, options.output)) {
+            if (promptOptions?.secret === true) {
+              return { text: await readSecretWithSetupConsole(question, options, getController(), prompt.uiContext?.locale) };
+            }
+            return { text: await readTextWithSetupConsole(question, promptOptions, options, getController(), prompt.uiContext?.locale) };
           }
           return prompt.submit!(question, promptOptions);
         },
       select,
       onboardingCard: prompt.onboardingCard === undefined
         ? undefined
-        : prompt.onboardingCard,
+        : async (card: BuildOnboardingPromptCardInput): Promise<void> => {
+          if (!hasLiveSetupConsole(options.input, options.output)) {
+            await prompt.onboardingCard!(card);
+            return;
+          }
+          renderOnboardingCardWithSetupConsole(card, getController());
+        },
       close: () => {
         if (!preserveOnClose) {
           options.controller?.clear();
@@ -350,6 +364,109 @@ async function readSecretWithSetupConsole(
   });
 }
 
+async function readTextWithSetupConsole(
+  question: string,
+  promptOptions: PromptOptions | undefined,
+  options: SetupConsolePromptAdapterOptions,
+  controller: SetupOperatorConsoleController,
+  locale: string | undefined
+): Promise<string> {
+  const ttyInput = options.input as TtyReadable;
+  let state: LineEditorState = createLineEditorState();
+  let settled = false;
+  let restored = false;
+  let cursorHidden = false;
+  const wasRaw = ttyInput.isRaw === true;
+  const normalizedLocale = locale === "ar" ? "ar" : "en";
+  const copy = textPanelCopy(normalizedLocale);
+
+  const render = () => {
+    controller.render({
+      kind: "textInput",
+      title: textPanelTitle(question, normalizedLocale),
+      description: textPanelDescription(question, copy),
+      value: state.text,
+      placeholder: promptOptions?.placeholder ?? copy.emptyLabel,
+      locale: normalizedLocale,
+      footer: copy.footer,
+    });
+  };
+
+  const restoreTerminal = () => {
+    if (restored) return;
+    restored = true;
+    keypressDispatcher.dispose();
+    ttyInput.off("data", onData);
+    if (!wasRaw) {
+      ttyInput.setRawMode?.(false);
+    }
+    if (cursorHidden) {
+      options.output.write(SHOW_CURSOR);
+      cursorHidden = false;
+    }
+  };
+
+  const finish = (value: string, resolve: (value: string) => void) => {
+    if (settled) return;
+    settled = true;
+    restoreTerminal();
+    controller.clear();
+    resolve(value);
+  };
+
+  const onData = (chunk: string | Buffer | Uint8Array) => {
+    keypressDispatcher.handle(chunk);
+  };
+
+  const pendingKeypresses: ParsedKeypress[] = [];
+  let resolveText: ((value: string) => void) | undefined;
+
+  const drainKeypresses = () => {
+    if (resolveText === undefined || settled) return;
+    for (const keypress of pendingKeypresses.splice(0)) {
+      const previousText = state.text;
+      const result = applyKeypress(state, keypress);
+      state = result.state;
+      if (state.text !== previousText) {
+        promptOptions?.onInputChange?.(state.text);
+      }
+      render();
+      if (result.intent?.type === "submit") {
+        finish(result.intent.text, resolveText);
+        return;
+      }
+      if (result.intent?.type === "cancel" || result.intent?.type === "eof") {
+        finish("", resolveText);
+        return;
+      }
+    }
+  };
+
+  const keypressDispatcher = createKeypressStreamDispatcher({
+    onEvents: (events) => {
+      pendingKeypresses.push(...events);
+      drainKeypresses();
+    },
+  });
+
+  return await new Promise<string>((resolve) => {
+    resolveText = resolve;
+    ttyInput.on("data", onData);
+    ttyInput.setRawMode?.(true);
+    ttyInput.resume?.();
+    controller.clear();
+    options.output.write(HIDE_CURSOR);
+    cursorHidden = true;
+    render();
+    drainKeypresses();
+  }).finally(() => {
+    if (!settled) {
+      restoreTerminal();
+      controller.clear();
+    }
+  });
+}
+
 function shouldUseSetupConsole<T>(
   selection: SelectPromptInput<T>,
   input: Readable,
@@ -367,8 +484,64 @@ function hasLiveSetupConsole(
   return Boolean((input as TtyReadable).isTTY && output.isTTY);
 }
 
+function renderOnboardingCardWithSetupConsole(
+  card: BuildOnboardingPromptCardInput,
+  controller: SetupOperatorConsoleController
+): void {
+  controller.render(onboardingCardToSetupPanel(card));
+}
+
+function onboardingCardToSetupPanel(card: BuildOnboardingPromptCardInput): SetupPanelState {
+  const locale = card.locale === "ar" ? "ar" : "en";
+  const bodyLines = card.bodyLines
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const description = bodyLines.join("\n");
+  const technicalStatusLines = (card.technicalLines ?? [])
+    .filter((line) => line.trim().length > 0)
+    .map((line) => ({ text: line, tone: "muted" as const, direction: "ltr" as const }));
+  const selectedIndex = normalizeIndex(card.selectedOptionIndex, card.options.length);
+  const selected = card.options[selectedIndex];
+  const descriptionFields = description.length > 0 ? { description } : {};
+  const selectedRowFields = selected === undefined ? {} : { selectedRowId: onboardingCardOptionId(selected, selectedIndex) };
+  return {
+    kind: "table",
+    layout: "choiceMenu",
+    title: card.title,
+    ...descriptionFields,
+    locale,
+    statusLines: [
+      ...(card.statusLines ?? []),
+      ...technicalStatusLines,
+    ],
+    rows: card.options.map((option, index) => {
+      const details = option.description ?? option.cells?.details ?? option.badges?.join(" · ") ?? "";
+      const badges = option.description === undefined && option.cells?.details === undefined
+        ? ""
+        : option.badges?.join(" · ") ?? "";
+      return {
+        id: onboardingCardOptionId(option, index),
+        provider: option.label,
+        model: "",
+        status: details,
+        notes: badges,
+        ...(option.group === undefined ? {} : { group: option.group }),
+      };
+    }),
+    ...selectedRowFields,
+    footer: card.hint ?? "",
+  };
+}
+
+function onboardingCardOptionId(
+  option: BuildOnboardingPromptCardInput["options"][number],
+  index: number
+): string {
+  return option.id || `option-${index}`;
+}
+
 function secretPanelTitle(question: string, locale: "en" | "ar"): string {
-  const normalized = normalizeSecretQuestion(question);
+  const normalized = normalizePromptQuestion(question);
   if (/api key|مفتاح\s*api/iu.test(normalized)) {
     return locale === "ar" ? "مفتاح API" : "API key";
   }
@@ -379,23 +552,65 @@ function secretPanelDescription(
   question: string,
   copy: ReturnType<typeof secretPanelCopy>
 ): string {
-  return normalizeSecretQuestion(question) || copy.description;
+  return normalizePromptQuestion(question) || copy.description;
 }
 
 function secretPanelEnvVar(question: string): string | undefined {
-  const normalized = normalizeSecretQuestion(question);
+  const normalized = normalizePromptQuestion(question);
   const candidates = normalized.match(/\b[A-Z][A-Z0-9_]{2,}\b/gu) ?? [];
   return candidates.find((candidate) => candidate.includes("_") && /(?:API|KEY|TOKEN|SECRET|PROJECT)/u.test(candidate)) ??
     candidates.find((candidate) => /(?:KEY|TOKEN|SECRET|PROJECT)/u.test(candidate));
 }
 
-function normalizeSecretQuestion(question: string): string {
+function textPanelTitle(question: string, locale: "en" | "ar"): string {
+  const normalized = normalizePromptQuestion(question);
+  if (/workspace|مساحة\s*العمل|مجلد\s*العمل/iu.test(normalized)) {
+    return locale === "ar" ? "مساحة العمل" : "Workspace";
+  }
+  if (/\b(?:base url|endpoint|url)\b|الرابط|نقطة\s*النهاية/iu.test(normalized)) {
+    return locale === "ar" ? "الرابط" : "Endpoint";
+  }
+  if (/\bmodel\b|النموذج/iu.test(normalized)) {
+    return locale === "ar" ? "النموذج" : "Model";
+  }
+  if (/\benv(?:ironment)?\b|متغير/iu.test(normalized)) {
+    return locale === "ar" ? "متغير بيئة" : "Environment variable";
+  }
+  return locale === "ar" ? "إدخال نص" : "Text input";
+}
+
+function textPanelDescription(
+  question: string,
+  copy: ReturnType<typeof textPanelCopy>
+): string {
+  return normalizePromptQuestion(question) || copy.description;
+}
+
+function normalizePromptQuestion(question: string): string {
   return question
     .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/gu, "")
     .replace(/[\u2066\u2067\u2069]/gu, "")
     .replace(/\s+/gu, " ")
     .replace(/\s*[:：]\s*$/u, "")
     .trim();
+}
+
+function textPanelCopy(locale: "en" | "ar"): {
+  readonly description: string;
+  readonly emptyLabel: string;
+  readonly footer: string;
+} {
+  return locale === "ar"
+    ? {
+        description: "أدخل القيمة المطلوبة.",
+        emptyLabel: "[اتركه فارغًا]",
+        footer: "Enter حفظ · Ctrl+C إلغاء",
+      }
+    : {
+        description: "Enter the requested value.",
+        emptyLabel: "[leave empty]",
+        footer: "Enter save · Ctrl+C cancel",
+      };
 }
 
 function secretPanelCopy(locale: "en" | "ar"): {

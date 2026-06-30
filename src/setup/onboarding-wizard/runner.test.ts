@@ -683,6 +683,31 @@ describe("runFirstRunSetup", () => {
     expect(JSON.stringify(result.reviewManifest)).toContain(canonicalWorkspace);
   });
 
+  it("prompts for workspace changes with the current default on its own line", async () => {
+    const seenQuestions: { question: string; secret: boolean }[] = [];
+
+    await runFirstRunSetup({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({}, {}, {}, seenQuestions),
+      flowEngine: flowEngine(),
+    });
+
+    const workspaceQuestion = seenQuestions.find((entry) =>
+      entry.question.includes("Select the workspace EstaCoda should use.")
+    );
+    expect(workspaceQuestion).toEqual({
+      question: [
+        "Select the workspace EstaCoda should use.",
+        "Press Enter to use the current default, or type another path.",
+        "",
+        `Current default: ${workspaceRoot}`,
+        "",
+      ].join("\n"),
+      secret: false,
+    });
+  });
+
   it("lets Change Workspace loop back to workspace selection", async () => {
     const secondWorkspace = join(tempDir, "second-workspace");
     await mkdir(secondWorkspace, { recursive: true });

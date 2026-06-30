@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isolateLtr } from "../ui/bidi.js";
+import { isolateLtr, isolateRtl } from "../ui/bidi.js";
 import {
   getSetupCopyEntry,
   hasSetupCopyKey,
@@ -19,6 +19,8 @@ const FIRST_RUN_KEYS = [
   "onboarding.interfaceLanguage",
   "onboarding.interfaceLanguage.validation.languageSelected",
   "onboarding.workspace.root",
+  "onboarding.workspace.root.defaultInstruction",
+  "onboarding.workspace.root.currentDefault",
   "onboarding.workspace.root.validation.selected",
   "onboarding.workspace.trust",
   "onboarding.workspace.changeWorkspaceAction.label",
@@ -689,6 +691,10 @@ describe("setup copy", () => {
 
     expect(copy["onboarding.welcome"]).toContain("اضبط مساحة العمل");
     expect(copy["onboarding.welcome"]).toContain(isolateLtr("EstaCoda"));
+    expect(rawSetupCopy("en", "onboarding.interfaceLanguage")).toContain("Choose the language EstaCoda uses for setup and CLI guidance.");
+    expect(rawSetupCopy("en", "onboarding.interfaceLanguage")).toContain(isolateRtl(`اختر اللغة التي تستخدمها ${isolateLtr("EstaCoda")} للإعداد وإرشادات الطرفية.`));
+    expect(rawSetupCopy("ar", "onboarding.workspace.root")).toBe("اختر مساحة العمل التي سيستخدمها EstaCoda.");
+    expect(rawSetupCopy("en", "onboarding.workspace.deferTrustAction.description")).not.toContain("Warning:");
     expect(copy["setupEditor.summary.repairFirst"]).toContain("لا جدوى من تلميع إعداد لا يعمل");
     expect(copy["setupModules.telegram.review"]).toContain("التحكم عن بعد لا يستجيب إلا للقائمة المسموح بها");
   });

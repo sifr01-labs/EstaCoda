@@ -37,7 +37,7 @@ export function mapSetupSelectToSetupPanelState(
     kind: "table",
     layout: isChoiceMenu(input.columns, input.options) ? "choiceMenu" : "routeTable",
     title: input.title,
-    description: firstBodyLine(input.body),
+    description: bodyDescription(input.body),
     ...(input.statusLines === undefined ? {} : { statusLines: input.statusLines }),
     locale: input.locale,
     rows: input.options.map((option, index) => mapOptionToRow(option, index)),
@@ -88,8 +88,9 @@ function badgesText(option: SetupSelectRuntimeOption): string {
   return option.badges?.join(", ") ?? "";
 }
 
-function firstBodyLine(body: string | undefined): string | undefined {
-  return body?.split("\n").map((line) => line.trim()).find((line) => line.length > 0);
+function bodyDescription(body: string | undefined): string | undefined {
+  const lines = body?.split("\n").map((line) => line.trim()).filter((line) => line.length > 0) ?? [];
+  return lines.length === 0 ? undefined : lines.join("\n");
 }
 
 function firstNonEmpty(...values: readonly (string | undefined)[]): string {

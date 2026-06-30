@@ -329,11 +329,26 @@ describe("runCliCommand setup prompt factory dispatch", () => {
     expect(interactivePromptMock.createInteractivePrompt).toHaveBeenCalledOnce();
     expect(setupFlowMock.runFirstRunSetup).toHaveBeenCalledWith(expect.objectContaining({
       prompt: interactivePromptMock.prompt,
+      setupConsole: expect.objectContaining({
+        input: process.stdin,
+        output: process.stdout,
+        style: expect.objectContaining({
+          supportsColor: expect.any(Boolean),
+          tokens: expect.objectContaining({
+            contract: expect.objectContaining({
+              palette: expect.objectContaining({
+                brand: expect.any(String),
+                action: expect.any(String),
+              }),
+            }),
+          }),
+        }),
+      }),
     }));
     expect(interactivePromptMock.close).toHaveBeenCalledOnce();
   });
 
-  it("passes setup console wiring only to the setup editor path", async () => {
+  it("passes setup console wiring to the setup editor path", async () => {
     Object.defineProperty(process.stdin, "isTTY", {
       configurable: true,
       value: true,
@@ -374,6 +389,39 @@ describe("runCliCommand setup prompt factory dispatch", () => {
   });
 
   it("does not duplicate setup-console final output as plain command output", async () => {
+    Object.defineProperty(process.stdin, "isTTY", {
+      configurable: true,
+      value: true,
+    });
+    setupFlowMock.collectSetupRoute.mockResolvedValue({ kind: "first-run-onboarding" });
+    setupFlowMock.runFirstRunSetup.mockResolvedValue({
+      completed: true,
+      exitCode: 0,
+      output: "Verification passed. Setup is ready.",
+      setupConsoleRenderedOutput: true,
+    });
+
+    const result = await runCliCommand({
+      argv: ["setup"],
+      workspaceRoot: tempDir,
+      homeDir: tempDir,
+    });
+
+    expect(result).toMatchObject({
+      handled: true,
+      exitCode: 0,
+      output: "",
+    });
+    expect(setupFlowMock.runFirstRunSetup).toHaveBeenCalledWith(expect.objectContaining({
+      setupConsole: expect.objectContaining({
+        input: process.stdin,
+        output: process.stdout,
+      }),
+    }));
+    expect(interactivePromptMock.close).toHaveBeenCalledOnce();
+  });
+
+  it("does not duplicate setup-editor setup-console final output as plain command output", async () => {
     Object.defineProperty(process.stdin, "isTTY", {
       configurable: true,
       value: true,

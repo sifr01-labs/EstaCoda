@@ -381,7 +381,7 @@ function cloneStartupDashboardState(startup: StartupDashboardState): StartupDash
 }
 
 function cloneSetupSurfaceState(setup: SetupSurfaceState): SetupSurfaceState {
-  if (setup.kind === "secret") return { ...setup };
+  if (setup.kind !== "table") return { ...setup };
   return {
     ...setup,
     rows: setup.rows.map((row) => ({ ...row })),

@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { stringWidth } from "../screen/stringWidth.js";
 import { resolveTokens } from "../../../theme/token-resolver.js";
-import { LRI, RLI } from "../../../ui/bidi.js";
+import { isolateLtr, isolateRtl, LRI, RLI } from "../../../ui/bidi.js";
 import {
   createOperatorConsoleStyle,
   renderSetupPanelSurface,
   type SecretEntryPanelState,
   type SetupPanelState,
+  type TextEntryPanelState,
 } from "./index.js";
 
 describe("Papyrus operator console setup panel surface", () => {
@@ -39,6 +40,25 @@ describe("Papyrus operator console setup panel surface", () => {
     expect(text).toContain("gpt-5.5");
     expect(text).toContain("ready · API key set");
     expect(output.every((line) => stringWidth(line) <= 44)).toBe(true);
+  });
+
+  it("renders intentional multiline setup descriptions", () => {
+    const output = renderSetupPanelSurface({
+      kind: "table",
+      layout: "choiceMenu",
+      title: "Setup language",
+      description: `Choose the language EstaCoda uses for setup and CLI guidance.\n${isolateRtl(`اختر اللغة التي تستخدمها ${isolateLtr("EstaCoda")} للإعداد وإرشادات الطرفية.`)}`,
+      rows: [
+        { id: "en", provider: "English", model: "", status: "", notes: "" },
+        { id: "ar", provider: "العربية", model: "", status: "", notes: "" },
+      ],
+      selectedRowId: "en",
+    }, { width: 96 });
+    const text = output.join("\n");
+
+    expect(text).toContain("Choose the language EstaCoda uses for setup and CLI guidance.");
+    expect(text).toContain(isolateRtl(`اختر اللغة التي تستخدمها ${isolateLtr("EstaCoda")} للإعداد وإرشادات الطرفية.`));
+    expect(output.every((line) => stringWidth(line) <= 96)).toBe(true);
   });
 
   it("truncates long provider, model, status, and notes safely", () => {
@@ -259,6 +279,45 @@ describe("Papyrus operator console setup panel surface", () => {
     expect(text).toContain("Enter continue without key · Esc back");
   });
 
+  it("renders visible text entry panels without masking typed values", () => {
+    const output = renderSetupPanelSurface(textEntryPanel(), { width: 72 });
+    const text = output.join("\n");
+
+    expect(output[0]).toContain("Workspace");
+    expect(text).toContain("Enter workspace path.");
+    expect(text).toContain("Press Enter to use the current default");
+    expect(text).toContain("Current default: /Users/ahnwy/project");
+    expect(text).toContain("/Users/ahnwy/project child");
+    expect(text).not.toContain("/Users/ahnwy/project\nchild");
+    expect(text).toContain("Enter save · Ctrl+C cancel");
+    expect(text).not.toContain("••••");
+    expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
+  });
+
+  it("wraps full-width setup output rows without truncating long blockers", () => {
+    const message = "Verification blocked setup because of Missing env var DEEPSEEK_API_KEY for route deepseek/deepseek-v4.";
+    const output = renderSetupPanelSurface({
+      kind: "table",
+      layout: "choiceMenu",
+      title: "Setup result",
+      description: "Review setup output without applying changes.",
+      rows: [{
+        id: "line-0",
+        provider: "",
+        model: "",
+        status: message,
+        notes: "",
+      }],
+      footer: "Read-only output",
+    }, { width: 72 });
+    const text = output.join("\n");
+
+    expect(text).toContain("DEEPSEEK_API_KEY");
+    expect(text).toContain("deepseek/deepseek-v4.");
+    expect(text).not.toContain("route..");
+    expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
+  });
+
   it("never renders raw secret when raw value is modeled without a masked value", () => {
     const output = renderSetupPanelSurface({
       ...requiredSecretPanel(),
@@ -354,5 +413,16 @@ function requiredSecretPanel(): SecretEntryPanelState {
     rawValue: "sk-live-raw-secret",
     envVar: "OPENAI_API_KEY",
     footer: "Enter save · Esc back · Ctrl+C exit",
+  };
+}
+
+function textEntryPanel(): TextEntryPanelState {
+  return {
+    kind: "textInput",
+    title: "Workspace",
+    description: "Enter workspace path.\nPress Enter to use the current default.\n\nCurrent default: /Users/ahnwy/project",
+    value: "/Users/ahnwy/project\nchild",
+    placeholder: "[leave empty]",
+    footer: "Enter save · Ctrl+C cancel",
   };
 }
