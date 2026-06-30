@@ -4,6 +4,7 @@ import { createLineEditorState } from "../ui/input/lineEditor.js";
 import {
   applyActiveWorkRuntimeEvent,
   createActiveWorkRuntimeState,
+  getActiveWorkSurfaceDesiredHeight,
   normalizeActiveWorkRuntimeEventId,
   type ActiveWorkItem,
   type ActiveWorkRuntimeEvent,
@@ -42,6 +43,7 @@ const MIN_TIMER_REFRESH_INTERVAL_MS = 16;
 const MAX_STREAMING_TAIL_CHARS = 4_000;
 
 export class LiveOperatorConsoleController {
+  readonly #output: LiveOperatorConsoleControllerOptions["output"];
   readonly #renderLoop: RawPromptRenderLoop;
   readonly #runtimeHost: OperatorConsoleRuntimeHost;
   readonly #terminal: Partial<TerminalMetrics>;
@@ -68,6 +70,7 @@ export class LiveOperatorConsoleController {
   #lastTimerRefreshAtMs = Number.NEGATIVE_INFINITY;
 
   constructor(options: LiveOperatorConsoleControllerOptions) {
+    this.#output = options.output;
     this.#runtimeHost = options.runtimeHost;
     this.#terminal = options.terminal;
     this.#supportsAnimation = options.capabilities?.supportsAnimation ?? options.terminal.isTty ?? false;
@@ -232,7 +235,7 @@ export class LiveOperatorConsoleController {
       state: createLineEditorState(this.#steer?.mode === "drafting" ? this.#steer.draft : ""),
       operatorConsole: {
         enabled: true,
-        terminal: this.#terminal,
+        terminal: this.#terminalSnapshotForRender(activeWork),
         status: this.#getStatus(),
         transcript: this.#transcript,
         turnActivity: this.#turnActivity,
@@ -268,6 +271,21 @@ export class LiveOperatorConsoleController {
     };
     this.#activeWorkFrameIndex += 1;
     return snapshot;
+  }
+
+  #terminalSnapshotForRender(activeWork: ToolActivityState): Partial<TerminalMetrics> {
+    const requestedHeight = getActiveWorkSurfaceDesiredHeight(activeWork);
+    if (requestedHeight <= 0) return this.#terminal;
+    const surroundingChromeRows = 32;
+    const currentHeight = this.#terminal.height ?? 0;
+    const expandedHeight = Math.max(currentHeight, requestedHeight + surroundingChromeRows);
+    const viewportHeight = normalizeOptionalPositiveInteger(this.#output.rows);
+    return {
+      ...this.#terminal,
+      height: viewportHeight === undefined
+        ? expandedHeight
+        : Math.min(viewportHeight, expandedHeight),
+    };
   }
 
   #advanceAnimationFrame(): void {
@@ -482,6 +500,12 @@ function normalizePositiveInteger(value: number, fallback: number): number {
   if (!Number.isFinite(value)) return fallback;
   const normalized = Math.floor(value);
   return normalized > 0 ? normalized : fallback;
+}
+
+function normalizeOptionalPositiveInteger(value: number | undefined): number | undefined {
+  if (value === undefined || !Number.isFinite(value)) return undefined;
+  const normalized = Math.floor(value);
+  return normalized > 0 ? normalized : undefined;
 }
 
 function clampStreamingTail(text: string): string {

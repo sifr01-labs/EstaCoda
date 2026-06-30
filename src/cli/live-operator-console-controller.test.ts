@@ -352,9 +352,11 @@ describe("LiveOperatorConsoleController", () => {
     expect(text).not.toContain("Assistant stream");
   });
 
-  it("keeps live active work renders bounded to the configured terminal height", () => {
+  it("keeps expanded live active work bounded while preserving streaming output", () => {
     const output = createOutput();
     const { controller, runtimeHost } = createControllerFixture(output);
+
+    controller.appendStreamingText("I will inspect the memory files.");
 
     for (let index = 0; index < 20; index += 1) {
       controller.applyActiveWorkEvent({
@@ -365,9 +367,13 @@ describe("LiveOperatorConsoleController", () => {
       });
     }
 
-    expect(runtimeHost.getState().terminal.height).toBe(12);
-    expect(runtimeHost.render().lines.length).toBeLessThanOrEqual(12);
-    expect(stripAnsi(output.text())).toContain("Running tools");
+    const lines = runtimeHost.render().lines;
+    const text = stripAnsi(lines.join("\n"));
+
+    expect(runtimeHost.getState().terminal.height).toBe(24);
+    expect(lines.length).toBeLessThanOrEqual(24);
+    expect(text).toContain("Running tools");
+    expect(text).toContain("I will inspect the memory files.");
   });
 });
 
