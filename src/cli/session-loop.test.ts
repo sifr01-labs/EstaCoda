@@ -4134,7 +4134,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(completedRail).not.toContain("idle");
   });
 
-  it("clears the completed turn timer after /reset swaps to a fresh runtime", async () => {
+  it("clears the completed turn timer after /new swaps to a fresh runtime", async () => {
     const outputChunks: string[] = [];
     const output = {
       write(chunk: string | Uint8Array): boolean {
@@ -4156,6 +4156,20 @@ describe("runSessionLoop — active turn spinner", () => {
     const refreshedRuntime = withModelInfo({
       ...createMockRuntime(),
       sessionId: "fresh-session",
+      getStatus: () => ({
+        kind: "status" as const,
+        agentName: "EstaCoda",
+        model: { provider: "kimi", id: "kimi-k2.7-code" },
+        profileId: "default",
+        securityMode: "open",
+        skillCount: 17,
+        skillAutonomy: "autonomous",
+        toolCount: 96,
+        mcp: { active: 0, total: 0 },
+        workflowAvailable: false,
+        workflowRunActive: false,
+        warnings: [],
+      }),
     });
 
     let promptIndex = 0;
@@ -4167,7 +4181,7 @@ describe("runSessionLoop — active turn spinner", () => {
       capabilities: interactiveCaps({ supportsAnimation: false }),
       prompt: Object.assign(
         async () => {
-          const values = ["hello", "/reset", "/exit"];
+          const values = ["hello", "/new", "/exit"];
           return values[promptIndex++] ?? "/exit";
         },
         { close: () => {} }
@@ -4177,10 +4191,44 @@ describe("runSessionLoop — active turn spinner", () => {
 
     const rendered = stripAnsi(outputChunks.join(""));
     expect(rendered).toContain("⧖ 5m 12s");
-    const afterReset = rendered.slice(rendered.indexOf("Started fresh session fresh-session."));
+    const afterReset = rendered.slice(rendered.indexOf("New session fresh-session"));
+    expect(afterReset).toContain("𓂀  EstaCoda ready");
+    expect(afterReset).toContain("default profile · kimi/kimi-k2.7-code");
+    expect(afterReset).toContain("security   Open | ↯ YOLO mode");
+    expect(afterReset).toContain("skills     17 autonomous");
+    expect(afterReset).toContain("tools      96");
+    expect(afterReset).not.toContain("MCP");
     const resetRail = afterReset.split("\n").find((line) => line.includes("idle"));
     expect(resetRail).toBeDefined();
     expect(resetRail).not.toContain("⧖");
+  });
+
+  it("keeps /reset as an alias for the fresh session command", async () => {
+    const refreshedRuntime = createMockRuntime({ sessionId: "alias-fresh-session" });
+
+    const result = await handleSlashCommand({
+      text: "/reset",
+      runtime: createMockRuntime(),
+      refreshRuntime: async () => refreshedRuntime,
+      output: {
+        write(): boolean {
+          return true;
+        },
+      } as unknown as NodeJS.WritableStream,
+      renderer: {
+        render: renderPlain,
+        capabilities: interactiveCaps({ supportsColor: false, supportsUnicode: false }),
+      },
+    });
+
+    expect(typeof result).toBe("object");
+    if (typeof result === "object") {
+      const notice = stripAnsi(result.notice(refreshedRuntime));
+      expect(notice).toContain("New session alias-fresh-session");
+      expect(notice).toContain("EstaCoda ready");
+      expect(notice).toContain("default profile - mock/mock-model");
+      expect(notice).toContain("security   Open | YOLO mode");
+    }
   });
 
   it("clears the completed turn timer after /switch swaps to another session", async () => {

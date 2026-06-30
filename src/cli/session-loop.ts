@@ -1130,6 +1130,7 @@ export async function handleSlashCommand(input: {
   renderer: {
     render(viewModel: import("../contracts/view-model.js").ViewModel): string;
     capabilities?: TerminalCapabilities;
+    tokens?: ResolvedTokens;
   };
   workspaceRoot?: string;
   homeDir?: string;
@@ -1219,7 +1220,7 @@ export async function handleSlashCommand(input: {
     }
     case "providers":
       return handleProvidersCommand(input, args);
-    case "reset":
+    case "new":
       if (input.refreshRuntime === undefined) {
         input.output.write("This session cannot reset itself here. Start a new EstaCoda session to refresh skills and config.\n\n");
         return false;
@@ -1227,12 +1228,7 @@ export async function handleSlashCommand(input: {
 
       return {
         runtime: await input.refreshRuntime({ preserveSession: false }),
-        notice: (runtime) => [
-          `Started fresh session ${runtime.sessionId}.`,
-          "Skills and config were refreshed for this new session.",
-          "",
-          runtime.describe()
-        ].join("\n")
+        notice: (runtime) => renderFreshSessionNotice(runtime, input.renderer)
       };
     case "tools":
       input.output.write(`${input.renderer.render(buildToolsMenuViewModel(input.runtime, args.join(" ")))}\n\n`);
@@ -2852,6 +2848,52 @@ export function colorPromptPrefix(prefix: string, tokens: ResolvedTokens, useCol
 export function colorPromptPlaceholder(value: string, tokens: ResolvedTokens, useColor: boolean): string {
   if (!useColor) return value;
   return ansiColor(value, tokens.contract.text.muted);
+}
+
+function renderFreshSessionNotice(
+  runtime: Runtime,
+  renderer: {
+    readonly capabilities?: TerminalCapabilities;
+    readonly tokens?: ResolvedTokens;
+  }
+): string {
+  const status = runtime.getStatus();
+  const useUnicode = renderer.capabilities?.supportsUnicode === true;
+  const useColor = renderer.capabilities?.supportsColor === true &&
+    renderer.tokens?.contract.behavior.allowAnsiColor === true;
+  const brandLine = `${useUnicode ? "𓂀  " : ""}${status.agentName} ready`;
+  const profileSeparator = useUnicode ? "·" : "-";
+  const lines = [
+    `New session ${runtime.sessionId}`,
+    "",
+    useColor && renderer.tokens !== undefined
+      ? ansiColor(brandLine, renderer.tokens.contract.palette.brand)
+      : brandLine,
+    `${status.profileId ?? "default"} profile ${profileSeparator} ${status.model.provider}/${status.model.id}`,
+    "",
+    freshSessionRow(
+      "security",
+      status.securityMode === "open"
+        ? `${formatSecurityMode(status.securityMode)} | ${useUnicode ? "↯ " : ""}YOLO mode`
+        : formatSecurityMode(status.securityMode)
+    ),
+    freshSessionRow(
+      "skills",
+      `${status.skillCount}${status.skillAutonomy === undefined ? "" : ` ${status.skillAutonomy}`}`
+    ),
+    freshSessionRow("tools", String(status.toolCount)),
+    status.mcp.total > 0 ? freshSessionRow("MCP", `${status.mcp.active}/${status.mcp.total}`) : undefined,
+  ];
+
+  return lines.filter((line): line is string => line !== undefined).join("\n");
+}
+
+function freshSessionRow(label: string, value: string): string {
+  return `${label.padEnd(10, " ")} ${value}`;
+}
+
+function formatSecurityMode(mode: string): string {
+  return mode.length === 0 ? mode : `${mode[0]?.toUpperCase() ?? ""}${mode.slice(1)}`;
 }
 
 function ansiColor(text: string, hex: string): string {

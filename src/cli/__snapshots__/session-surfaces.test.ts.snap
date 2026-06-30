@@ -9,7 +9,7 @@ exports[`Session surfaces — /help > renders in narrow width > help-narrow widt
 • /switch: Switch to an existing session
 • /search: Search session history
 • /compact: Compact this in-session context
-• /reset: Start a fresh session and refresh the skill/config snapshot
+• /new: Start a fresh session and refresh the skill/config snapshot
 • /memory: Inspect memory state
 • /tools: Browse available tools
 • /browser: Manage local browser/CDP connection
@@ -43,7 +43,7 @@ exports[`Session surfaces — /help > renders in no Unicode > help-no Unicode 1`
 - /switch: Switch to an existing session
 - /search: Search session history
 - /compact: Compact this in-session context
-- /reset: Start a fresh session and refresh the skill/config snapshot
+- /new: Start a fresh session and refresh the skill/config snapshot
 - /memory: Inspect memory state
 - /tools: Browse available tools
 - /browser: Manage local browser/CDP connection
@@ -77,7 +77,7 @@ exports[`Session surfaces — /help > renders in no color > help-no color 1`] = 
 • /switch: Switch to an existing session
 • /search: Search session history
 • /compact: Compact this in-session context
-• /reset: Start a fresh session and refresh the skill/config snapshot
+• /new: Start a fresh session and refresh the skill/config snapshot
 • /memory: Inspect memory state
 • /tools: Browse available tools
 • /browser: Manage local browser/CDP connection
@@ -111,7 +111,7 @@ exports[`Session surfaces — /help > renders in plain > help-plain 1`] = `
 - /switch: Switch to an existing session
 - /search: Search session history
 - /compact: Compact this in-session context
-- /reset: Start a fresh session and refresh the skill/config snapshot
+- /new: Start a fresh session and refresh the skill/config snapshot
 - /memory: Inspect memory state
 - /tools: Browse available tools
 - /browser: Manage local browser/CDP connection
@@ -145,7 +145,7 @@ exports[`Session surfaces — /help > renders in standard dark > help-standard d
 • /switch: Switch to an existing session
 • /search: Search session history
 • /compact: Compact this in-session context
-• /reset: Start a fresh session and refresh the skill/config snapshot
+• /new: Start a fresh session and refresh the skill/config snapshot
 • /memory: Inspect memory state
 • /tools: Browse available tools
 • /browser: Manage local browser/CDP connection
@@ -179,7 +179,7 @@ exports[`Session surfaces — /help > renders in standard light > help-standard 
 • /switch: Switch to an existing session
 • /search: Search session history
 • /compact: Compact this in-session context
-• /reset: Start a fresh session and refresh the skill/config snapshot
+• /new: Start a fresh session and refresh the skill/config snapshot
 • /memory: Inspect memory state
 • /tools: Browse available tools
 • /browser: Manage local browser/CDP connection
@@ -492,7 +492,7 @@ exports[`Session surfaces — slash menu > renders in narrow width > slash-menu-
 /switch                  Switch to an existing session
 /search                  Search session history
 /compact                 Compact this in-session context
-/reset                   Start a fresh session and refresh the skill/config snapshot
+/new                     Start a fresh session and refresh the skill/config snapshot
 /memory                  Inspect memory state
 /tools                   Browse available tools
 /browser                 Manage local browser/CDP connection
@@ -528,7 +528,7 @@ exports[`Session surfaces — slash menu > renders in no Unicode > slash-menu-no
 /switch                  Switch to an existing session
 /search                  Search session history
 /compact                 Compact this in-session context
-/reset                   Start a fresh session and refresh the skill/config snapshot
+/new                     Start a fresh session and refresh the skill/config snapshot
 /memory                  Inspect memory state
 /tools                   Browse available tools
 /browser                 Manage local browser/CDP connection
@@ -564,7 +564,7 @@ Name                     Description
 /switch                  Switch to an existing session
 /search                  Search session history
 /compact                 Compact this in-session context
-/reset                   Start a fresh session and refresh the skill/config snapshot
+/new                     Start a fresh session and refresh the skill/config snapshot
 /memory                  Inspect memory state
 /tools                   Browse available tools
 /browser                 Manage local browser/CDP connection
@@ -600,7 +600,7 @@ Name                     Description
 /switch                  Switch to an existing session
 /search                  Search session history
 /compact                 Compact this in-session context
-/reset                   Start a fresh session and refresh the skill/config snapshot
+/new                     Start a fresh session and refresh the skill/config snapshot
 /memory                  Inspect memory state
 /tools                   Browse available tools
 /browser                 Manage local browser/CDP connection
@@ -636,7 +636,7 @@ exports[`Session surfaces — slash menu > renders in standard dark > slash-menu
 /switch                  Switch to an existing session
 /search                  Search session history
 /compact                 Compact this in-session context
-/reset                   Start a fresh session and refresh the skill/config snapshot
+/new                     Start a fresh session and refresh the skill/config snapshot
 /memory                  Inspect memory state
 /tools                   Browse available tools
 /browser                 Manage local browser/CDP connection
@@ -672,7 +672,7 @@ exports[`Session surfaces — slash menu > renders in standard light > slash-men
 /switch                  Switch to an existing session
 /search                  Search session history
 /compact                 Compact this in-session context
-/reset                   Start a fresh session and refresh the skill/config snapshot
+/new                     Start a fresh session and refresh the skill/config snapshot
 /memory                  Inspect memory state
 /tools                   Browse available tools
 /browser                 Manage local browser/CDP connection

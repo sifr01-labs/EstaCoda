@@ -111,7 +111,7 @@ Normal skill execution resolves only already-installed and verified environments
 
 - Visibility is **session-stable**. Once a session starts, the visible skill catalog does not change.
 - Filtered by runtime conditions (provider capability, trust level, etc.).
-- Refreshed on `/reset` or new session.
+- Refreshed on `/new` or new session. `/reset` remains a deprecated alias.
 
 ## Operations
 

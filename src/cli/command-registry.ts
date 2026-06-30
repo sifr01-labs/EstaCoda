@@ -173,8 +173,8 @@ function registerAll(): void {
     scope: "slash",
   });
   commandRegistry.register({
-    name: "reset",
-    aliases: ["new"],
+    name: "new",
+    aliases: ["reset"],
     category: "Session",
     description: "Start a fresh session and refresh the skill/config snapshot",
     visibility: "public",
