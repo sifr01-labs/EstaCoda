@@ -24,7 +24,6 @@ import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { storeCapabilitySecret, type SetupNeededMetadata } from "../capabilities/capability-setup.js";
 import { defaultImageModel } from "../contracts/image-generation.js";
 import type { Prompt, PromptOptions } from "./prompt-contract.js";
-import type { SelectPromptInput } from "./interactive-select.js";
 import { createInteractivePrompt } from "./create-interactive-prompt.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { buildToolsMenuViewModel, buildSkillsMenuViewModel } from "./slash-menu.js";
@@ -111,6 +110,7 @@ import {
 import { runConfigEditor } from "../setup/config-editor/runner.js";
 import { createReviewedSetupApplyExecutor } from "../setup/review/apply-executor.js";
 import { buildProvidersStatusViewModel } from "./provider-status-view-models.js";
+import { selectProviderModelRoute } from "../setup/provider-model-route-prompt.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -1781,114 +1781,33 @@ async function handleSessionModelPicker(
     mode: "normal"
   });
 
-  const providers = await flow.listProviderCandidates();
-  if (providers.length === 0) {
-    input.output.write("No configured runnable model providers are ready. Run estacoda model setup from a terminal.\n\n");
-    return false;
-  }
-
-  const cancel = "__cancel__";
+  const readyProviders = await flow.listProviderCandidates();
+  const cachedFlow: FlowEngine = {
+    ...flow,
+    listProviderCandidates: async () => readyProviders,
+  };
   const currentRoute = runtimeModelRoute(input.runtime);
-  const provider = await input.prompt.select<string>({
-    title: "Select provider",
-    body: "Select the provider to use for this session only.",
-    columns: sessionModelPickerColumns(),
-    options: [
-      ...providers.map((candidate) => ({
-        id: candidate.id,
-        value: candidate.id,
-        label: candidate.displayName,
-        description: candidate.baseUrl ?? candidate.id,
-        cells: {
-          name: candidate.displayName,
-          details: candidate.baseUrl ?? candidate.id,
-        },
-        current: candidate.id === currentRoute?.provider,
-      })),
-      {
-        id: "cancel",
-        value: cancel,
-        label: "Cancel",
-        description: "Keep the current session model",
-        cells: {
-          name: "Cancel",
-          details: "Keep the current session model",
-        },
-        group: "navigation",
-      }
-    ],
-    fallbackPrompt: "Provider number > ",
-    selectedLabel: "Provider",
-    surface: "promptCard",
-    hint: "↑↓ navigate   ENTER select   CTRL+C exit",
-    showColumnHeaders: false,
+  const routeSelection = await selectProviderModelRoute({
+    prompt: input.prompt,
+    flowEngine: cachedFlow,
+    locale: context.config.ui?.language === "ar" ? "ar" : "en",
+    currentProviderId: currentRoute?.provider,
+    currentModelId: currentRoute?.model,
+    allowCancel: true,
+    mode: "session",
+    openAiCodexChoice: readyProviders.some((candidate) => candidate.id === "codex"),
   });
-  if (provider === cancel) {
+
+  if (routeSelection.kind === "cancel" || routeSelection.kind === "back") {
     input.output.write("No changes were made.\n\n");
     return false;
   }
-
-  const models = await flow.listModelCandidates(provider);
-  if (models.length === 0) {
-    input.output.write(`No runnable models are configured for ${provider}. Run estacoda model setup ${provider} from a terminal.\n\n`);
+  if (routeSelection.kind === "diagnostic") {
+    input.output.write(`${routeSelection.output}\n\n`);
     return false;
   }
 
-  const model = await input.prompt.select<string>({
-    title: "Select model",
-    body: "Select the model to use for this session only.",
-    columns: sessionModelPickerColumns(),
-    options: [
-      ...models.map((candidate) => ({
-        id: candidate.id,
-        value: candidate.id,
-        label: candidate.id,
-        description: [
-          candidate.profile.supportsTools ? "tools" : undefined,
-          candidate.profile.supportsVision ? "vision" : undefined,
-          `${candidate.profile.contextWindowTokens} tokens`
-        ].filter((part) => part !== undefined).join(" · "),
-        cells: {
-          name: candidate.id,
-          details: [
-            candidate.profile.supportsTools ? "tools" : undefined,
-            candidate.profile.supportsVision ? "vision" : undefined,
-            `${candidate.profile.contextWindowTokens} tokens`
-          ].filter((part) => part !== undefined).join(" · "),
-        },
-        current: provider === currentRoute?.provider && candidate.id === currentRoute?.model,
-      })),
-      {
-        id: "cancel",
-        value: cancel,
-        label: "Cancel",
-        description: "Keep the current session model",
-        cells: {
-          name: "Cancel",
-          details: "Keep the current session model",
-        },
-        group: "navigation",
-      }
-    ],
-    fallbackPrompt: "Model number > ",
-    selectedLabel: "Model",
-    surface: "promptCard",
-    hint: "↑↓ navigate   ENTER select   CTRL+C exit",
-    showColumnHeaders: false,
-  });
-  if (model === cancel) {
-    input.output.write("No changes were made.\n\n");
-    return false;
-  }
-
-  return handleSessionModelSet(input, `${provider}/${model}`);
-}
-
-function sessionModelPickerColumns(): NonNullable<SelectPromptInput<string>["columns"]> {
-  return [
-    { key: "name", header: "Name" },
-    { key: "details", header: "Details" },
-  ];
+  return handleSessionModelSet(input, `${routeSelection.selection.provider}/${routeSelection.selection.model}`);
 }
 
 function runtimeModelRoute(runtime: Runtime): { readonly provider: string; readonly model: string } | undefined {

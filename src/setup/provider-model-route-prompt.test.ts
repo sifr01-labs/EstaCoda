@@ -85,6 +85,50 @@ describe("selectProviderModelRoute", () => {
     expect(flow.resolved).toHaveLength(0);
   });
 
+  it("uses session-specific copy for session model switching", async () => {
+    const flow = fakeFlow();
+    const prompt = fakePrompt(["cancel"]);
+
+    const result = await selectProviderModelRoute({
+      prompt,
+      flowEngine: flow.engine,
+      locale: "en",
+      mode: "session",
+      allowCancel: true,
+    });
+
+    expect(result).toEqual({ kind: "cancel" });
+    expect(prompt.calls[0]).toMatchObject({
+      title: "Session provider",
+      body: "Choose the provider to use for this session only.\n",
+    });
+    expect(prompt.calls[0]?.options.find((option) => option.id === "cancel")).toMatchObject({
+      cells: {
+        name: "Cancel",
+        details: "Keep the current session model.",
+      },
+    });
+  });
+
+  it("returns session-specific diagnostics when no ready providers are available", async () => {
+    const flow = fakeFlow({ providers: [] });
+    const prompt = fakePrompt();
+
+    const result = await selectProviderModelRoute({
+      prompt,
+      flowEngine: flow.engine,
+      locale: "en",
+      mode: "session",
+    });
+
+    expect(result).toEqual({
+      kind: "diagnostic",
+      output: "No configured runnable model providers are ready. Run estacoda model setup from a terminal.",
+    });
+    expect(prompt.calls).toHaveLength(0);
+    expect(flow.resolved).toHaveLength(0);
+  });
+
   it("returns diagnostic when selected provider has no models", async () => {
     const flow = fakeFlow({ models: { openai: [] } });
     const prompt = fakePrompt();

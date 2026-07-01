@@ -270,9 +270,10 @@ describe("session-loop /model", () => {
     const prompt = (async () => "") as Prompt;
     prompt.select = async <T>(input: SelectPromptInput<T>): Promise<T> => {
       selectInputs.push(input as SelectPromptInput<unknown>);
-      const value = selections[selectionIndex] as T;
+      const id = selections[selectionIndex];
       selectionIndex++;
-      return value;
+      const selected = input.options.find((option) => option.id === id);
+      return (selected ?? input.options[input.defaultIndex ?? 0] ?? input.options[0])!.value;
     };
 
     const result = await handleSlashCommand({
@@ -294,25 +295,25 @@ describe("session-loop /model", () => {
     expect(selectInputs).toMatchObject([
       {
         surface: "promptCard",
-        title: "Select provider",
-        body: "Select the provider to use for this session only.",
+        title: "Session provider",
+        body: "Choose the provider to use for this session only.\n",
         columns: [
           { key: "name", header: "Name" },
           { key: "details", header: "Details" },
         ],
-        hint: "↑↓ navigate   ENTER select   CTRL+C exit",
-        showColumnHeaders: false,
+        hint: "↑↓ navigate   ENTER select",
+        showCurrentBadge: false,
       },
       {
         surface: "promptCard",
-        title: "Select model",
-        body: "Select the model to use for this session only.",
+        title: "Session model",
+        body: "Choose the model to use for this session only from local.\n",
         columns: [
           { key: "name", header: "Name" },
           { key: "details", header: "Details" },
         ],
-        hint: "↑↓ navigate   ENTER select   CTRL+C exit",
-        showColumnHeaders: false,
+        hint: "↑↓ navigate   ENTER select",
+        showCurrentBadge: false,
       }
     ]);
     expect(selectInputs[0]?.options).toMatchObject([
@@ -320,7 +321,7 @@ describe("session-loop /model", () => {
         id: "local",
         cells: {
           name: "Local / Custom",
-          details: "http://localhost:11434/v1",
+          details: "OpenAI-compatible local or custom endpoint. API key optional.",
         },
         current: true,
       },
@@ -329,21 +330,21 @@ describe("session-loop /model", () => {
         group: "navigation",
         cells: {
           name: "Cancel",
-          details: "Keep the current session model",
+          details: "Keep the current session model.",
         },
       },
     ]);
     expect(selectInputs[1]?.options.find((option) => option.id === "qwen2.5:3b")).toMatchObject({
       cells: {
         name: "qwen2.5:3b",
-        details: "tools · 128000 tokens",
+        details: "128K context | Tools",
       },
       current: true,
     });
     expect(selectInputs[1]?.options.find((option) => option.id === "phi4:latest")).toMatchObject({
       cells: {
         name: "phi4:latest",
-        details: "128000 tokens",
+        details: "128K context | Model is not a primary chat model",
       },
       current: false,
     });
@@ -351,7 +352,7 @@ describe("session-loop /model", () => {
       group: "navigation",
       cells: {
         name: "Cancel",
-        details: "Keep the current session model",
+        details: "Keep the current session model.",
       },
     });
     const override = await sessionDb.getSessionModelOverride("test-session");

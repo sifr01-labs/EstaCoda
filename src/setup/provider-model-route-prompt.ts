@@ -21,7 +21,8 @@ export type ProviderModelRoutePromptMode =
   | "primary"
   | "fallback"
   | "auxiliary"
-  | "onboarding";
+  | "onboarding"
+  | "session";
 
 export type SelectProviderModelRouteOptions = {
   readonly prompt: Prompt;
@@ -74,7 +75,7 @@ export async function selectProviderModelRoute(
   const allProviders = await options.flowEngine.listProviderCandidates();
   const providers = providerPromptCandidates(options, allProviders);
   if (providers.length === 0) {
-    return { kind: "diagnostic", output: "No setup-visible provider candidates are available." };
+    return { kind: "diagnostic", output: noProviderCandidatesMessage(options.locale, options.mode) };
   }
 
   while (true) {
@@ -103,7 +104,7 @@ export async function selectProviderModelRoute(
 
     const models = await options.flowEngine.listModelCandidates(provider.id);
     if (models.length === 0) {
-      return { kind: "diagnostic", output: `No setup-visible models are available for ${provider.displayName}.` };
+      return { kind: "diagnostic", output: noModelCandidatesMessage(options.locale, options.mode, provider.displayName) };
     }
 
     if (shouldDeferModelSelectionToEndpointFlow(options, provider)) {
@@ -446,7 +447,7 @@ function navigationOptions<T extends { readonly kind: string }>(
       group: "navigation",
       cells: {
         name: setupCopyText(options.locale, "onboarding.review.cancelAction"),
-        details: cancelDetails(options.locale),
+        details: cancelDetails(options.locale, options.mode),
       },
     });
   }
@@ -635,24 +636,28 @@ function formatRoute(providerId: string, modelId: string): string {
 function providerTitle(locale: SetupCopyLocale, mode: ProviderModelRoutePromptMode): string {
   if (mode === "fallback") return locale === "ar" ? "المزوّد الاحتياطي" : "Fallback provider";
   if (mode === "auxiliary") return locale === "ar" ? "المزوّد المساعد" : "Auxiliary provider";
+  if (mode === "session") return locale === "ar" ? "مزوّد الجلسة" : "Session provider";
   return setupCopyText(locale, "onboarding.providers.primary.title");
 }
 
 function providerBody(locale: SetupCopyLocale, mode: ProviderModelRoutePromptMode): string {
   if (mode === "fallback") return locale === "ar" ? "اختر مزوّدًا احتياطيًا." : "Choose a fallback provider.";
   if (mode === "auxiliary") return locale === "ar" ? "اختر مزوّدًا مساعدًا." : "Choose an auxiliary provider.";
+  if (mode === "session") return locale === "ar" ? "اختر المزوّد الذي سيُستخدم لهذه الجلسة فقط." : "Choose the provider to use for this session only.";
   return setupCopyText(locale, "onboarding.providers.primary");
 }
 
 function modelTitle(locale: SetupCopyLocale, mode: ProviderModelRoutePromptMode): string {
   if (mode === "fallback") return locale === "ar" ? "النموذج الاحتياطي" : "Fallback model";
   if (mode === "auxiliary") return locale === "ar" ? "النموذج المساعد" : "Auxiliary model";
+  if (mode === "session") return locale === "ar" ? "نموذج الجلسة" : "Session model";
   return setupCopyText(locale, "onboarding.providers.primaryModel.title");
 }
 
 function modelBody(locale: SetupCopyLocale, mode: ProviderModelRoutePromptMode): string {
   if (mode === "fallback") return locale === "ar" ? "اختر النموذج الاحتياطي للمزوّد {providerId}." : "Choose the fallback model for {providerId}.";
   if (mode === "auxiliary") return locale === "ar" ? "اختر النموذج المساعد للمزوّد {providerId}." : "Choose the auxiliary model for {providerId}.";
+  if (mode === "session") return locale === "ar" ? "اختر النموذج الذي سيُستخدم لهذه الجلسة فقط من {providerId}." : "Choose the model to use for this session only from {providerId}.";
   return setupCopyText(locale, "onboarding.providers.primaryModel");
 }
 
@@ -664,6 +669,31 @@ function backDetails(locale: SetupCopyLocale): string {
   return setupCopyText(locale, "onboarding.providers.navigation.back.description");
 }
 
-function cancelDetails(locale: SetupCopyLocale): string {
+function cancelDetails(locale: SetupCopyLocale, mode: ProviderModelRoutePromptMode): string {
+  if (mode === "session") {
+    return locale === "ar" ? "احتفظ بنموذج الجلسة الحالي." : "Keep the current session model.";
+  }
   return locale === "ar" ? "اخرج بدون تغيير الإعداد." : "Exit without changing setup.";
+}
+
+function noProviderCandidatesMessage(locale: SetupCopyLocale, mode: ProviderModelRoutePromptMode): string {
+  if (mode === "session") {
+    return locale === "ar"
+      ? `لا توجد مزوّدات نماذج مهيأة وقابلة للتشغيل. شغّل ${isolateLtr("estacoda model setup")} من الطرفية.`
+      : "No configured runnable model providers are ready. Run estacoda model setup from a terminal.";
+  }
+  return "No setup-visible provider candidates are available.";
+}
+
+function noModelCandidatesMessage(
+  locale: SetupCopyLocale,
+  mode: ProviderModelRoutePromptMode,
+  providerName: string
+): string {
+  if (mode === "session") {
+    return locale === "ar"
+      ? `لا توجد نماذج قابلة للتشغيل مهيأة لـ ${isolateLtr(providerName)}. شغّل ${isolateLtr("estacoda model setup")} من الطرفية.`
+      : `No runnable models are configured for ${providerName}. Run estacoda model setup from a terminal.`;
+  }
+  return `No setup-visible models are available for ${providerName}.`;
 }
