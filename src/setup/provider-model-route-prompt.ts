@@ -280,7 +280,12 @@ function modelPageSize(
   }
 
   if (provider.id === "openrouter" &&
-    (options.mode === "primary" || options.mode === "fallback" || options.mode === "auxiliary") &&
+    (
+      options.mode === "primary" ||
+      options.mode === "fallback" ||
+      options.mode === "auxiliary" ||
+      options.mode === "onboarding"
+    ) &&
     candidates.length > ENGLISH_OPENROUTER_MODEL_PAGE_SIZE) {
     return ENGLISH_OPENROUTER_MODEL_PAGE_SIZE;
   }

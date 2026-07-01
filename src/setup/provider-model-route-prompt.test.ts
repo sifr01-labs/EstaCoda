@@ -472,8 +472,8 @@ describe("selectProviderModelRoute", () => {
     expect(modelPrompt.options[0]?.group).toBeUndefined();
   });
 
-  it("paginates OpenRouter model choices for setup editor route modes", async () => {
-    for (const mode of ["primary", "fallback", "auxiliary"] as const) {
+  it("paginates OpenRouter model choices for setup editor and onboarding route modes", async () => {
+    for (const mode of ["primary", "fallback", "auxiliary", "onboarding"] as const) {
       const openRouterModels = Array.from({ length: 30 }, (_, index) =>
         modelCandidate("openrouter", `openrouter-model-${String(index + 1).padStart(2, "0")}`));
       const flow = fakeFlow({
