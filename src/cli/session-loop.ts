@@ -1776,6 +1776,7 @@ async function handleSessionModelPicker(
     config: context.config,
     providerRegistry: context.providerRegistry,
     homeDir: context.homeDir,
+    profileId: context.profileId,
     modelsDevOptions: context.modelsDevOptions,
     allowNetwork: false,
     mode: "normal"

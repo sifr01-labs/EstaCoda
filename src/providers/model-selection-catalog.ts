@@ -17,6 +17,8 @@ import {
   getProviderMetadata,
   isProviderRunnable as metadataIsProviderRunnable
 } from "./provider-metadata.js";
+import { readCodexOAuthStatus } from "./oauth/codex-setup.js";
+import { isOAuthAuthMethod } from "./oauth/oauth-types.js";
 import type {
   ModelInfo,
   ModelsDevRegistryOptions,
@@ -89,6 +91,7 @@ export type CreateModelSelectionCatalogOptions = {
   config: EstaCodaConfig;
   providerRegistry: ProviderRegistry;
   homeDir?: string;
+  profileId?: string;
   modelsDevOptions?: ModelsDevRegistryOptions;
   modelCatalogOverrides?: ModelCatalogOverrideRegistry;
   allowNetwork?: boolean;
@@ -165,6 +168,7 @@ async function listProvidersImpl(
   const registry = options.providerRegistry;
   const seen = new Map<ProviderId, CatalogProvider>();
   const modelCounts = buildProviderModelCounts(config, snapshot);
+  const credentialReady = createCredentialReadyResolver(options);
 
   // Configured providers always appear
   for (const [providerId, providerConfig] of Object.entries(config.providers ?? {})) {
@@ -189,7 +193,7 @@ async function listProvidersImpl(
       executable,
       catalogOnly,
       modelsCount,
-      credentialReady: isCredentialReady(id, apiKeyEnv),
+      credentialReady: await credentialReady(id, apiKeyEnv),
       endpointReady: isEndpointReady(baseUrl)
     });
   }
@@ -216,7 +220,7 @@ async function listProvidersImpl(
       executable,
       catalogOnly,
       modelsCount,
-      credentialReady: isCredentialReady(id),
+      credentialReady: await credentialReady(id),
       endpointReady: false
     });
   }
@@ -241,7 +245,7 @@ async function listProvidersImpl(
       executable,
       catalogOnly,
       modelsCount: modelCounts.get(id) ?? 0,
-      credentialReady: isCredentialReady(id),
+      credentialReady: await credentialReady(id),
       endpointReady: false
     });
   }
@@ -309,6 +313,7 @@ async function listModelsImpl(
 
   const entries = new Map<string, SelectableModelDraft>();
   const sourceKinds = new Map<string, Set<SelectableModelSource>>();
+  const credentialReady = createCredentialReadyResolver(options);
 
   // 1. Snapshot models
   for (const model of snapshot.models) {
@@ -329,7 +334,7 @@ async function listModelsImpl(
       continue;
     }
 
-    entries.set(key, buildSelectableModel({
+    entries.set(key, await buildSelectableModel({
       key,
       provider,
       id,
@@ -339,7 +344,8 @@ async function listModelsImpl(
       configured: config.providers?.[provider]?.models?.includes(id) ?? false,
       executable,
       apiKeyEnv,
-      providerInfo: snapshotProviderMap.get(provider)
+      providerInfo: snapshotProviderMap.get(provider),
+      credentialReady
     }));
     addSourceKind(sourceKinds, key, "models-dev");
   }
@@ -364,7 +370,7 @@ async function listModelsImpl(
       continue;
     }
 
-    entries.set(key, buildSelectableModel({
+    entries.set(key, await buildSelectableModel({
       key,
       provider,
       id,
@@ -374,7 +380,8 @@ async function listModelsImpl(
       configured: config.providers?.[provider]?.models?.includes(id) ?? false,
       executable,
       apiKeyEnv,
-      providerInfo: snapshotProviderMap.get(provider)
+      providerInfo: snapshotProviderMap.get(provider),
+      credentialReady
     }));
     addSourceKind(sourceKinds, key, "fallback-known");
   }
@@ -408,7 +415,7 @@ async function listModelsImpl(
         continue;
       }
 
-      entries.set(key, buildSelectableModel({
+      entries.set(key, await buildSelectableModel({
         key,
         provider,
         id: modelId,
@@ -418,7 +425,8 @@ async function listModelsImpl(
         configured: true,
         executable,
         apiKeyEnv,
-        providerInfo: snapshotProviderMap.get(provider)
+        providerInfo: snapshotProviderMap.get(provider),
+        credentialReady
       }));
       addSourceKind(sourceKinds, key, "configured");
     }
@@ -470,7 +478,7 @@ async function listModelsImpl(
       continue;
     }
 
-    entries.set(key, buildSelectableModel({
+    entries.set(key, await buildSelectableModel({
       key,
       provider: route.provider,
       id: route.id,
@@ -480,7 +488,8 @@ async function listModelsImpl(
       configured: false,
       executable,
       apiKeyEnv: route.apiKeyEnv,
-      providerInfo: snapshotProviderMap.get(route.provider)
+      providerInfo: snapshotProviderMap.get(route.provider),
+      credentialReady
     }));
     addSourceKind(sourceKinds, key, "manual");
     if (route.current) {
@@ -566,7 +575,9 @@ async function refreshImpl(
   };
 }
 
-function buildSelectableModel(params: {
+type CredentialReadyResolver = (providerId: ProviderId, apiKeyEnv?: string) => Promise<boolean>;
+
+async function buildSelectableModel(params: {
   key: string;
   provider: ProviderId;
   id: string;
@@ -577,8 +588,9 @@ function buildSelectableModel(params: {
   executable: boolean;
   apiKeyEnv?: string;
   providerInfo?: ProviderInfo;
-}): SelectableModelDraft {
-  const credentialReady = isCredentialReady(params.provider, params.apiKeyEnv);
+  credentialReady: CredentialReadyResolver;
+}): Promise<SelectableModelDraft> {
+  const credentialReady = await params.credentialReady(params.provider, params.apiKeyEnv);
   const endpointReady = isEndpointReady(params.baseUrl);
   return {
     routeKey: params.key,
@@ -759,8 +771,35 @@ function providerDisplayName(providerId: ProviderId, snapshot: ModelsDevSnapshot
   return info?.name || meta.displayName;
 }
 
-function isCredentialReady(providerId: ProviderId, apiKeyEnv?: string): boolean {
+function createCredentialReadyResolver(
+  options: Pick<CreateModelSelectionCatalogOptions, "homeDir" | "profileId">
+): CredentialReadyResolver {
+  const cache = new Map<string, Promise<boolean>>();
+  return (providerId, apiKeyEnv) => {
+    const key = routeKey(providerId, apiKeyEnv ?? "");
+    const cached = cache.get(key);
+    if (cached !== undefined) return cached;
+
+    const resolved = resolveCredentialReady(providerId, apiKeyEnv, options);
+    cache.set(key, resolved);
+    return resolved;
+  };
+}
+
+async function resolveCredentialReady(
+  providerId: ProviderId,
+  apiKeyEnv: string | undefined,
+  options: Pick<CreateModelSelectionCatalogOptions, "homeDir" | "profileId">
+): Promise<boolean> {
   const meta = getProviderMetadata(providerId);
+  if (isOAuthAuthMethod(meta.defaultAuthMethod)) {
+    if (providerId !== "codex") return false;
+    const status = await readCodexOAuthStatus({
+      homeDir: options.homeDir,
+      profileId: options.profileId
+    });
+    return status.status === "ready";
+  }
   if (meta.defaultAuthMethod === "none" && apiKeyEnv === undefined) return true;
   const envKey = apiKeyEnv ?? meta.defaultApiKeyEnv;
   if (envKey !== undefined) return process.env[envKey] !== undefined;

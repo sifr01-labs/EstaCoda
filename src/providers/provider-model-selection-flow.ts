@@ -134,6 +134,7 @@ export async function createProviderModelSelectionFlow(
     config: options.config,
     providerRegistry: options.providerRegistry,
     homeDir: options.homeDir,
+    profileId: options.profileId,
     modelsDevOptions: options.modelsDevOptions,
     modelCatalogOverrides: options.modelCatalogOverrides,
     allowNetwork: options.allowNetwork ?? false

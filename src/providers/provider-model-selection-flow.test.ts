@@ -256,6 +256,30 @@ function localAdapter(): {
   };
 }
 
+function codexAdapter(): {
+  id: ProviderId;
+  name: string;
+  executable: boolean;
+  health: (_endpointOverride?: ProviderEndpoint) => { available: boolean };
+  listModels: () => [];
+  complete: () => Promise<{ ok: boolean; content: string; model: string; provider: ProviderId }>;
+} {
+  return {
+    id: "codex" as ProviderId,
+    name: "OpenAI Codex",
+    executable: true,
+    health() {
+      return { available: true };
+    },
+    listModels() {
+      return [];
+    },
+    async complete() {
+      return { ok: true, content: "", model: "", provider: "codex" };
+    }
+  };
+}
+
 describe("provider-model-selection-flow", () => {
   const originalEnv = process.env;
 
@@ -395,6 +419,44 @@ describe("provider-model-selection-flow", () => {
         const providers = await flow.listProviderCandidates();
         const ids = providers.map((p) => p.id);
         expect(ids).not.toContain("codex");
+      })
+    );
+
+    it(
+      "includes Codex in normal mode when OAuth is ready",
+      withFixture(async (fixturePath, cachePath) => {
+        const homeDir = mkdtempSync(join(tmpdir(), "estacoda-home-"));
+        try {
+          writeCodexAuth(homeDir, {
+            accessToken: "eyJfake.codex.valid-token",
+            expiresAt: new Date(Date.now() + 3600_000).toISOString()
+          });
+          const registry = new ProviderRegistry();
+          registry.register(codexAdapter());
+
+          const flow = await createProviderModelSelectionFlow({
+            ...buildOptions(fixturePath, cachePath, {
+              registry,
+              mode: "normal",
+              config: {
+                providers: {
+                  codex: {
+                    kind: "catalog",
+                    models: ["codex-model"]
+                  }
+                }
+              }
+            }),
+            homeDir
+          });
+
+          const providers = await flow.listProviderCandidates();
+          const codex = providers.find((p) => p.id === "codex");
+          expect(codex).toBeDefined();
+          expect(codex!.credentialReady).toBe(true);
+        } finally {
+          rmSync(homeDir, { recursive: true, force: true });
+        }
       })
     );
 
