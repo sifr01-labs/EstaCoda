@@ -291,6 +291,7 @@ function cloneStatusRailState(status: StatusRailState): StatusRailState {
         ? {}
         : { startedAtMs: normalizeNonNegativeNumber(status.sessionTimer.startedAtMs) }),
     },
+    ...(status.security?.yolo === true ? { security: { yolo: true } } : {}),
   };
 }
 

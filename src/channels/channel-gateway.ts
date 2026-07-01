@@ -2773,10 +2773,7 @@ export class ChannelGateway {
       this.#pendingApprovals.delete(key);
       this.#approvalGrants.delete(key);
       const sessionId = await this.#resetSession(message.sessionKey, message.receivedAt);
-      const text = [
-        "Started a fresh EstaCoda session for this chat.",
-        `Session: ${sessionId}`
-      ].join("\n");
+      const text = this.#renderFreshSessionNotice(sessionId);
       await this.#deliverText(adapter, message.sessionKey, text);
 
       return {
@@ -3550,10 +3547,39 @@ export class ChannelGateway {
 
     return enabled;
   }
+
+  #renderFreshSessionNotice(sessionId: string): string {
+    const model = this.#runtimeFingerprint === undefined
+      ? "unknown"
+      : `${this.#runtimeFingerprint.modelProvider}/${this.#runtimeFingerprint.modelId}`;
+
+    return [
+      "𓂀 Fresh EstaCoda session",
+      "",
+      `◈ Model: ${model}`,
+      `◈ Session: ${shortGatewaySessionId(sessionId)}`,
+      `◈ Profile: ${this.#profileId}`,
+      `◈ Security: ${formatGatewayFreshSessionSecurity(this.#securityMode)}`
+    ].join("\n");
+  }
 }
 
 function yoloSessionKey(stableKey: string, sessionId: string): string {
   return `${stableKey}:${sessionId}`;
+}
+
+function shortGatewaySessionId(sessionId: string): string {
+  const compact = sessionId.replace(/[^a-z0-9]/giu, "");
+  const source = compact.length > 0 ? compact : sessionId;
+  return source.slice(-8);
+}
+
+function formatGatewayFreshSessionSecurity(mode: SecurityApprovalMode): string {
+  return mode === "open" ? "↯ YOLO mode" : formatGatewaySecurityMode(mode);
+}
+
+function formatGatewaySecurityMode(mode: SecurityApprovalMode): string {
+  return `${mode[0]?.toUpperCase() ?? ""}${mode.slice(1)}`;
 }
 
 function tokenizeCommandArgs(text: string): string[] {

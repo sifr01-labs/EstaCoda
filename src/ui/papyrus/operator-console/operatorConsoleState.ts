@@ -41,6 +41,9 @@ export type StatusRailState = {
     readonly elapsedMs: number;
     readonly startedAtMs?: number;
   };
+  readonly security?: {
+    readonly yolo: boolean;
+  };
 };
 
 export type TurnActivityPhase =

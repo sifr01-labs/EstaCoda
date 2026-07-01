@@ -51,6 +51,7 @@ import type { StartupDashboardViewModel, StatusViewModel, ViewModel } from "../c
 import type { TerminalCapabilities } from "../contracts/ui.js";
 import {
   createSubmittedSteerTranscriptBlock,
+  ActiveWorkRuntimeEventMapper,
   createOperatorConsoleRuntimeHost,
   createOperatorConsoleStyle,
   mapStartupDashboardViewModelToOperatorConsoleState,
@@ -63,7 +64,6 @@ import {
   type SteerState,
   type TurnActivityState,
 } from "../ui/papyrus/operator-console/index.js";
-import { activeWorkEventFromToolRail } from "./operator-console-tool-display.js";
 import type { ParsedKeypress } from "../ui/input/parseKeypress.js";
 import { createKeypressStreamDispatcher } from "../ui/input/keyPressStreamDispatcher.js";
 import { createTerminalLifecycle } from "../ui/input/terminalLifecycle.js";
@@ -285,6 +285,9 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   const sessionStartedAtMs = now();
   let activityBuilder = new ToolActivityViewModelBuilder({
     tools: runtime.tools()
+  });
+  let activeWorkEventMapper = new ActiveWorkRuntimeEventMapper({
+    locale: renderer.locale === "ar" ? "ar" : "en",
   });
   let activeTurn: AbortController | undefined;
   let clearActiveTurnChrome: () => void = () => undefined;
@@ -515,6 +518,9 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           resetTurnRailState();
           activityBuilder = new ToolActivityViewModelBuilder({
             tools: runtime.tools()
+          });
+          activeWorkEventMapper = new ActiveWorkRuntimeEventMapper({
+            locale: renderer.locale === "ar" ? "ar" : "en",
           });
           output.write(`${shouldExit.notice(runtime)}\n\n`);
           continue;
@@ -810,16 +816,11 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	              if (operatorConsoleLiveFrame !== undefined && event.kind === "provider-result" && event.willFallback) {
 	                operatorConsoleLiveFrame.resetStreaming();
 	              }
-	              let newPhase: string | undefined;
-	              if (operatorConsoleLiveFrame !== undefined && isToolActivityRuntimeEvent(event)) {
-	                const railEvent = activityBuilder.buildToolActivityRailEvent(event);
-	                operatorConsoleLiveFrame.applyActiveWorkEvent(activeWorkEventFromToolRail({
-	                  railEvent,
-	                  runtimeEvent: event,
-	                  locale: renderer.locale === "ar" ? "ar" : "en",
-	                }));
-	                newPhase = "tool";
-	              } else if (operatorConsoleLiveFrame !== undefined) {
+              let newPhase: string | undefined;
+              if (operatorConsoleLiveFrame !== undefined && isToolActivityRuntimeEvent(event)) {
+                operatorConsoleLiveFrame.applyActiveWorkEvent(activeWorkEventMapper.build(event));
+                newPhase = "tool";
+              } else if (operatorConsoleLiveFrame !== undefined) {
                   const operatorConsolePhase = operatorConsoleTransientPhaseForRuntimeEvent(event);
                   if (operatorConsolePhase === null) {
                     clearOperatorConsoleLiveFrame();
@@ -1129,6 +1130,7 @@ export async function handleSlashCommand(input: {
   renderer: {
     render(viewModel: import("../contracts/view-model.js").ViewModel): string;
     capabilities?: TerminalCapabilities;
+    tokens?: ResolvedTokens;
   };
   workspaceRoot?: string;
   homeDir?: string;
@@ -1218,7 +1220,7 @@ export async function handleSlashCommand(input: {
     }
     case "providers":
       return handleProvidersCommand(input, args);
-    case "reset":
+    case "new":
       if (input.refreshRuntime === undefined) {
         input.output.write("This session cannot reset itself here. Start a new EstaCoda session to refresh skills and config.\n\n");
         return false;
@@ -1226,12 +1228,7 @@ export async function handleSlashCommand(input: {
 
       return {
         runtime: await input.refreshRuntime({ preserveSession: false }),
-        notice: (runtime) => [
-          `Started fresh session ${runtime.sessionId}.`,
-          "Skills and config were refreshed for this new session.",
-          "",
-          runtime.describe()
-        ].join("\n")
+        notice: (runtime) => renderFreshSessionNotice(runtime, input.renderer)
       };
     case "tools":
       input.output.write(`${input.renderer.render(buildToolsMenuViewModel(input.runtime, args.join(" ")))}\n\n`);
@@ -2851,6 +2848,61 @@ export function colorPromptPrefix(prefix: string, tokens: ResolvedTokens, useCol
 export function colorPromptPlaceholder(value: string, tokens: ResolvedTokens, useColor: boolean): string {
   if (!useColor) return value;
   return ansiColor(value, tokens.contract.text.muted);
+}
+
+function renderFreshSessionNotice(
+  runtime: Runtime,
+  renderer: {
+    readonly capabilities?: TerminalCapabilities;
+    readonly tokens?: ResolvedTokens;
+  }
+): string {
+  const status = runtime.getStatus();
+  const useUnicode = renderer.capabilities?.supportsUnicode === true;
+  const useColor = renderer.capabilities?.supportsColor === true &&
+    renderer.tokens?.contract.behavior.allowAnsiColor === true;
+  const brandLine = `${useUnicode ? "𓂀  " : ""}${freshSessionAgentName(status.agentName)} ready`;
+  const profileSeparator = useUnicode ? "·" : "-";
+  const lines = [
+    `New session ${runtime.sessionId}`,
+    "",
+    useColor && renderer.tokens !== undefined
+      ? ansiColor(brandLine, renderer.tokens.contract.palette.brand)
+      : brandLine,
+    `${status.profileId ?? "default"} profile ${profileSeparator} ${status.model.provider}/${status.model.id}`,
+    "",
+    freshSessionRow(
+      "security",
+      formatFreshSessionSecurity(status.securityMode, useUnicode)
+    ),
+    freshSessionRow(
+      "skills",
+      `${status.skillCount}${status.skillAutonomy === undefined ? "" : ` ${status.skillAutonomy}`}`
+    ),
+    freshSessionRow("tools", String(status.toolCount)),
+    status.mcp.total > 0 ? freshSessionRow("MCP", `${status.mcp.active}/${status.mcp.total}`) : undefined,
+  ];
+
+  return lines.filter((line): line is string => line !== undefined).join("\n");
+}
+
+function freshSessionRow(label: string, value: string): string {
+  return `${label.padEnd(10, " ")} ${value}`;
+}
+
+function freshSessionAgentName(agentName: string): string {
+  return agentName.replace(/^𓂀\s*/u, "").trimStart();
+}
+
+function formatFreshSessionSecurity(mode: string, useUnicode: boolean): string {
+  const baseMode = mode.replace(/\s+\(YOLO\)$/u, "");
+  return baseMode === "open"
+    ? `${formatSecurityMode(baseMode)} | ${useUnicode ? "↯ " : ""}YOLO mode`
+    : formatSecurityMode(mode);
+}
+
+function formatSecurityMode(mode: string): string {
+  return mode.length === 0 ? mode : `${mode[0]?.toUpperCase() ?? ""}${mode.slice(1)}`;
 }
 
 function ansiColor(text: string, hex: string): string {

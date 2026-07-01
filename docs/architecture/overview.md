@@ -13,7 +13,7 @@ EstaCoda is a TypeScript-first agent runtime built for Node.js >= 22.18.0, pnpm/
 |------|------|----------|
 | `src/index.ts` | Boot flow. Dispatches CLI commands, uses setup-route launch gating for incomplete setup, then starts interactive session or one-shot prompt. Also restores the active CLI workspace session from persisted store before interactive launch. | `smoke-tested` |
 | `src/cli/cli.ts` | CLI command surface. Parses arguments and dispatches to subcommands. | `smoke-tested` |
-| `src/cli/session-loop.ts` | Interactive terminal loop. Handles in-session admin commands: `/sessions`, `/search`, `/switch`, `/reset`. | `smoke-tested` |
+| `src/cli/session-loop.ts` | Interactive terminal loop. Handles in-session admin commands: `/sessions`, `/search`, `/switch`, `/new` (`/reset` alias). | `smoke-tested` |
 | `src/cli/cli-session-store.ts` | Persisted active CLI session pointer keyed by workspace root. | `smoke-tested` |
 | `src/channels/gateway-runner.ts` | Gateway diagnostics helpers for Telegram plus WhatsApp diagnostics export. Gateway orchestration lives in `ChannelGateway` and CLI gateway commands. | `smoke-tested` |
 | `src/channels/discord-adapter.ts` | Discord adapter. Receives messages, sends replies, handles attachments, and supports text delivery paths. | `implemented; operator validation required` |
@@ -169,7 +169,7 @@ Skill sources:
 | `profile` | `~/.estacoda/profiles/<id>/skills/` | Mutable |
 | `external` | Configured external roots | Read-only |
 
-Visibility is session-stable, filtered by runtime conditions, and refreshed on `/reset` or new session.
+Visibility is session-stable, filtered by runtime conditions, and refreshed on `/new` or new session. `/reset` remains a deprecated alias.
 
 Skill operations: list, view, inspect, create, patch, edit, delete, write_file, remove_file, import, export.
 

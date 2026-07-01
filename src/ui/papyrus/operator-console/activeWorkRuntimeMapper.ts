@@ -1,3 +1,5 @@
+import type { RuntimeEvent } from "../../../contracts/runtime-event.js";
+import { toolDisplayLabel, type ToolDisplayLocale } from "../../tool-display.js";
 import type {
   ActiveWorkItem,
   ActiveWorkItemStatus,
@@ -26,6 +28,79 @@ export type ActiveWorkRuntimeEvent = {
   readonly approvalRef?: string;
   readonly fileChangeInspected?: boolean;
 };
+
+export type ActiveWorkRuntimeEventMapperOptions = {
+  readonly locale?: ToolDisplayLocale;
+  readonly now?: () => number;
+};
+
+export class ActiveWorkRuntimeEventMapper {
+  readonly #starts = new Map<string, number[]>();
+  readonly #locale: ToolDisplayLocale;
+  readonly #now: () => number;
+
+  constructor(options: ActiveWorkRuntimeEventMapperOptions = {}) {
+    this.#locale = options.locale ?? "en";
+    this.#now = options.now ?? (() => Date.now());
+  }
+
+  build(
+    event: Extract<RuntimeEvent, { kind: "tool-start" | "tool-result" }>
+  ): ActiveWorkRuntimeEvent {
+    if (event.kind === "tool-start") {
+      this.#pushStart(this.#eventKey(event));
+      return {
+        id: event.activityId,
+        toolName: event.tool,
+        displayLabel: toolDisplayLabel(event.tool, this.#locale),
+        status: "running",
+        summary: "preparing",
+        target: event.displayPreview ?? event.targetSummary ?? toolDisplayLabel(event.tool),
+        detailsRef: event.activityId,
+      };
+    }
+
+    const elapsedMs = this.#popElapsed(this.#eventKey(event));
+    const gated = event.decision !== undefined && event.decision !== "allow";
+    const failed = event.ok === false;
+    const status: ActiveWorkRuntimeEventStatus = gated ? "gated" : failed ? "failed" : "done";
+
+    return {
+      id: event.activityId,
+      toolName: event.tool,
+      displayLabel: toolDisplayLabel(event.tool, this.#locale),
+      status,
+      summary: gated ? "gated" : failed ? "failed" : activeWorkSummaryKeyForTool(event.tool),
+      target: event.displayPreview ?? event.targetSummary ?? toolDisplayLabel(event.tool),
+      ...(elapsedMs === undefined ? {} : { durationMs: elapsedMs }),
+      detailsRef: event.activityId,
+      ...(gated ? { riskClass: event.riskClass } : {}),
+      ...(event.fileChangePreview === undefined ? {} : { fileChangeInspected: true }),
+    };
+  }
+
+  #pushStart(key: string): void {
+    const starts = this.#starts.get(key) ?? [];
+    starts.push(this.#now());
+    this.#starts.set(key, starts);
+  }
+
+  #popElapsed(key: string): number | undefined {
+    const starts = this.#starts.get(key);
+    const startedAt = starts?.shift();
+
+    if (starts !== undefined && starts.length === 0) {
+      this.#starts.delete(key);
+    }
+
+    if (startedAt === undefined) return undefined;
+    return this.#now() - startedAt;
+  }
+
+  #eventKey(event: Extract<RuntimeEvent, { kind: "tool-start" | "tool-result" }>): string {
+    return event.activityId ?? `${event.tool}\0${event.targetSummary ?? ""}`;
+  }
+}
 
 export function createActiveWorkRuntimeState(
   input: Partial<ToolActivityState> = {}
@@ -139,4 +214,18 @@ function normalizeText(value: string | undefined, fallback: string): string {
 function normalizeDuration(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.floor(value));
+}
+
+function activeWorkSummaryKeyForTool(tool: string): string {
+  if (tool.includes("read") || tool.includes("workspace") || tool.includes("file")) return "read";
+  if (tool.includes("write") || tool.includes("artifact") || tool.includes("trajectory")) return "write";
+  if (tool.includes("terminal") || tool.includes("process") || tool.includes("execute") || tool.includes("python")) return "run";
+  if (tool.includes("web") || tool.includes("browser")) return "fetch";
+  if (tool.includes("review")) return "review";
+  if (tool.includes("memory")) return "memo";
+  if (tool.includes("delegate")) return "delegate";
+  if (tool.includes("config") || tool.includes("onboarding")) return "config";
+  if (tool.includes("media")) return "media";
+  if (tool.includes("skill") || tool.includes("workflow")) return "plan";
+  return "run";
 }

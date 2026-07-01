@@ -28,6 +28,13 @@ describe("Papyrus screen string width utilities", () => {
     expect(stringWidth("1️")).toBe(1);
   });
 
+  it("measures active-work terminal status symbols as single-cell glyphs", () => {
+    expect(stringWidth("✓")).toBe(1);
+    expect(stringWidth("✗")).toBe(1);
+    expect(stringWidth("×")).toBe(1);
+    expect(stringWidth("◷")).toBe(1);
+  });
+
   it("does not add width for combining marks", () => {
     expect(stringWidth("e\u0301")).toBe(1);
   });

@@ -212,7 +212,7 @@ describe("Papyrus operator console setup panel surface", () => {
     expect(unselectedLine).not.toContain(ansiFg(tokens.contract.palette.action));
   });
 
-  it("colors setup shell title, current status, and footer when styled", () => {
+  it("colors setup shell title with bold brand color, current status, and footer when styled", () => {
     const tokens = resolveTokens("standard", "dark", "kemetBlue");
     const output = renderSetupPanelSurface({
       ...modelRoutePanel(),

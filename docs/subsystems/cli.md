@@ -170,7 +170,8 @@ In-session commands:
 | `/model clear` | Clear the session-scoped model override |
 | `/model --global <provider>/<model>` | Persist the selected route as the profile primary model after trust checks |
 | `/switch <session-id>` | Switch to another session |
-| `/reset` | Start fresh session |
+| `/new` | Start a fresh session |
+| `/reset` | Deprecated alias for `/new` |
 | `/trust` | Show workspace trust status |
 | `/yolo` | Toggle open approval mode |
 | `/skills` | List visible skills |

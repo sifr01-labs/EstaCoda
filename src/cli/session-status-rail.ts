@@ -65,6 +65,9 @@ export function operatorConsoleStatusRailState(input: {
       elapsedMs: sessionElapsedMs ?? 0,
       startedAtMs: timing?.sessionStartedAtMs,
     },
+    ...(runtime.securityMode?.() === "open"
+      ? { security: { yolo: true } }
+      : {}),
   };
 }
 

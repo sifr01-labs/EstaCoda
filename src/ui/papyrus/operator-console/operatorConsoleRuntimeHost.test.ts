@@ -106,6 +106,22 @@ describe("OperatorConsoleRuntimeHost", () => {
     expect(host.render().lines.at(-1)).not.toMatch(/\b(tool|approval|workspace|trust|setup|steer|channel|active)\b/iu);
   });
 
+  it("preserves the status rail YOLO badge while filtering noisy status fields", () => {
+    const host = createHost();
+    const noisyStatus = {
+      ...status(),
+      security: { yolo: true },
+      tools: ["rg"],
+      approvals: ["approval-1"],
+    } as unknown as StatusRailState;
+
+    host.setStatus(noisyStatus);
+
+    expect(host.getState().status.security).toEqual({ yolo: true });
+    expect(host.render().lines.at(-1)).toContain("↯ YOLO");
+    expect(host.render().lines.at(-1)).not.toMatch(/\b(tool|approval)\b/iu);
+  });
+
   it("updates terminal metrics and keeps rendered lines width-bounded", () => {
     const host = createHost();
 

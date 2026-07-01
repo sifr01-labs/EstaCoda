@@ -401,7 +401,7 @@ describe("global commandRegistry", () => {
     expect(commandRegistry.resolve("continue")?.name).toBe("resume");
     expect(commandRegistry.resolve("cls")?.name).toBe("clear");
     expect(commandRegistry.resolve("quit")?.name).toBe("exit");
-    expect(commandRegistry.resolve("new")?.name).toBe("reset");
+    expect(commandRegistry.resolve("reset")?.name).toBe("new");
   });
 
   it("has deprecated backward-compat aliases that resolve", () => {

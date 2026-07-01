@@ -3217,7 +3217,7 @@ async function telegramSyncCommands(options: CliOptions): Promise<CliCommandResu
         { command: "start", description: "Start EstaCoda" },
         { command: "help", description: "Show available commands" },
         { command: "status", description: "Show gateway status" },
-        { command: "reset", description: "Reset this chat session" }
+        { command: "new", description: "Start a fresh session" }
       ]
     }
   });

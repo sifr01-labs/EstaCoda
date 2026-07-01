@@ -1,5 +1,6 @@
 const ANSI_PATTERN =
   /(?:\x1b\][^\x07]*(?:\x07|\x1b\\))|(?:\x1b\[[0-?]*[ -/]*[@-~])|(?:\x1b[ -/]*[@-~])/gu;
+const SINGLE_CELL_TERMINAL_SYMBOLS = new Set(["✓", "✗", "×"]);
 
 const graphemeSegmenter =
   typeof Intl.Segmenter === "function" ? new Intl.Segmenter(undefined, { granularity: "grapheme" }) : undefined;
@@ -75,6 +76,7 @@ function emojiWidth(grapheme: string): number {
 }
 
 function isEmojiGrapheme(grapheme: string): boolean {
+  if (SINGLE_CELL_TERMINAL_SYMBOLS.has(grapheme)) return false;
   for (const char of grapheme) {
     const codePoint = char.codePointAt(0)!;
     if (

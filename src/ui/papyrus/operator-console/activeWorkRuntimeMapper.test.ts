@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { stringWidth } from "../screen/stringWidth.js";
 import {
+  ActiveWorkRuntimeEventMapper,
   applyActiveWorkRuntimeEvent,
   createActiveWorkRuntimeState,
   normalizeActiveWorkRuntimeEventId,
@@ -8,6 +9,107 @@ import {
 import { formatActiveWorkSummary, getActiveWorkSurfaceDesiredHeight, renderActiveWorkSurface } from "./activeWorkSurface.js";
 
 describe("active work runtime mapper", () => {
+  it("maps runtime tool starts directly into localized active-work events", () => {
+    const mapper = new ActiveWorkRuntimeEventMapper({ locale: "ar" });
+
+    expect(mapper.build({
+      kind: "tool-start",
+      tool: "file.read",
+      targetSummary: "src/main.ts",
+      activityId: "read-1",
+    })).toMatchObject({
+      id: "read-1",
+      toolName: "file.read",
+      displayLabel: "قراءة ملف",
+      status: "running",
+      summary: "preparing",
+      target: "src/main.ts",
+      detailsRef: "read-1",
+    });
+  });
+
+  it("maps paired runtime tool results with elapsed time and result metadata", () => {
+    let now = 1_000;
+    const mapper = new ActiveWorkRuntimeEventMapper({ now: () => now });
+
+    mapper.build({
+      kind: "tool-start",
+      tool: "file.write",
+      targetSummary: "src/app.ts",
+      activityId: "write-1",
+    });
+    now = 2_800;
+
+    expect(mapper.build({
+      kind: "tool-result",
+      tool: "file.write",
+      ok: true,
+      targetSummary: "src/app.ts",
+      activityId: "write-1",
+      fileChangePreview: {
+        kind: "fileChangePreview",
+        path: "src/app.ts",
+        changeType: "modified",
+        hunks: [],
+      },
+    })).toMatchObject({
+      id: "write-1",
+      toolName: "file.write",
+      displayLabel: "Write File",
+      status: "done",
+      summary: "read",
+      target: "src/app.ts",
+      durationMs: 1800,
+      detailsRef: "write-1",
+      fileChangeInspected: true,
+    });
+  });
+
+  it("maps gated and failed runtime tool results without old rail view models", () => {
+    const mapper = new ActiveWorkRuntimeEventMapper();
+
+    expect(mapper.build({
+      kind: "tool-result",
+      tool: "terminal.run",
+      decision: "ask",
+      riskClass: "workspace-write",
+      targetSummary: "pnpm run build",
+    })).toMatchObject({
+      toolName: "terminal.run",
+      status: "gated",
+      summary: "gated",
+      target: "pnpm run build",
+      riskClass: "workspace-write",
+    });
+
+    expect(mapper.build({
+      kind: "tool-result",
+      tool: "terminal.run",
+      ok: false,
+      targetSummary: "pnpm run test",
+    })).toMatchObject({
+      toolName: "terminal.run",
+      status: "failed",
+      summary: "failed",
+      target: "pnpm run test",
+    });
+  });
+
+  it("prefers display previews over security target summaries", () => {
+    const mapper = new ActiveWorkRuntimeEventMapper();
+
+    expect(mapper.build({
+      kind: "tool-start",
+      tool: "terminal.run",
+      targetSummary: "cd app && export CI=true && pnpm test && echo done",
+      displayPreview: "pnpm test",
+    })).toMatchObject({
+      toolName: "terminal.run",
+      displayLabel: "Run Command",
+      target: "pnpm test",
+    });
+  });
+
   it("normalizes runtime event identity for active work and tool trails", () => {
     expect(normalizeActiveWorkRuntimeEventId({
       id: " read-1 ",

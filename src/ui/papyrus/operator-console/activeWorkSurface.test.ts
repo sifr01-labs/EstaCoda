@@ -242,6 +242,51 @@ describe("Papyrus operator console active work surface", () => {
     expect(output).toContain("0.1s");
   });
 
+  it("keeps long English targets from crowding the duration and right frame edge", () => {
+    const output = renderActiveWorkSurface(createState({
+      items: [
+        item("search-tools", "succeeded", {
+          toolName: "terminal.run",
+          displayLabel: "Run Command",
+          target: "git log --oneline -20 -- 'src/**/tool*' 'src/**/native-tool*' 'src/**/mcp*'",
+          durationMs: 200,
+        }),
+      ],
+    }), { width: 96, height: 3 });
+    const row = output.find((line) => line.includes("Run Command")) ?? "";
+
+    expect(row).toMatch(/ {3,}0\.2s\s+│$/u);
+    expect(output.every((line) => stringWidth(line) <= 96)).toBe(true);
+  });
+
+  it("keeps right frame edges aligned for completed read-file rows", () => {
+    const output = renderActiveWorkSurface(createState({
+      expanded: true,
+      startedAtMs: 0,
+      updatedAtMs: 55_000,
+      items: [
+        "docs/subsystems/tools.md",
+        "src/contracts/tool.ts",
+        "src/contracts/tool-context.ts",
+        "src/contracts/tool-plan.ts",
+        "src/tools/tool-registry.ts",
+        "src/tools/tool-call-planner.ts",
+        "src/tools/tool-executor.ts",
+        "src/tools/tool-schema.ts",
+        "src/runtime/native-tool-executor.ts",
+        "src/delegation/toolset-security.ts",
+      ].map((target, index) => item(`read-${index}`, "succeeded", {
+        displayLabel: "Read File",
+        target,
+        durationMs: index % 3 === 0 ? 100 : 0,
+      })),
+    }), { width: 154, height: 12 });
+
+    expect(output).toHaveLength(12);
+    expect(output.every((line) => stringWidth(line) === 154)).toBe(true);
+    expect(output.every((line) => line.endsWith(line.startsWith("╭") ? "╮" : line.startsWith("╰") ? "╯" : "│"))).toBe(true);
+  });
+
   it("shows a live working timer in the active work header when turn timing is available", () => {
     const output = renderActiveWorkSurface(createState({
       startedAtMs: 1_000,
@@ -283,7 +328,7 @@ describe("Papyrus operator console active work surface", () => {
     const logicalHeader = output[0].replace(/[\u2068\u2069]/gu, "");
 
     expect(output[0]).toContain("⁨00:12⁩");
-    expect(logicalHeader).toContain("تنفيذ الأدوات  ◷ 00:12");
+    expect(logicalHeader).toContain("00:12 ◷ تنفيذ الأدوات");
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 
@@ -324,6 +369,70 @@ describe("Papyrus operator console active work surface", () => {
     expect(logicalText).toContain("read_file");
     expect(logicalText).toContain("shell");
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
+  });
+
+  it("mirrors Arabic active tool rows with duration, target, then action", () => {
+    const output = renderActiveWorkSurface(createState({
+      items: [
+        item("read", "succeeded", {
+          toolName: "file.read",
+          displayLabel: "قراءة ملف",
+          target: "src/app.ts",
+          durationMs: 100,
+        }),
+      ],
+    }), { width: 72, height: 3, locale: "ar" });
+    const row = stripBidiIsolates(output.find((line) => line.includes("src/app.ts")) ?? "");
+
+    expect(row).toContain("0.1s");
+    expect(row).toContain("src/app.ts");
+    expect(row).toContain("قراءة ملف");
+    expect(row).toContain("✓");
+    expect(row.indexOf("0.1s")).toBeLessThan(row.indexOf("src/app.ts"));
+    expect(row).toMatch(/0\.1s {7,}src\/app\.ts/u);
+    expect(row.indexOf("src/app.ts")).toBeLessThan(row.indexOf("قراءة ملف"));
+    expect(row.indexOf("قراءة ملف")).toBeLessThan(row.indexOf("✓"));
+    expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
+  });
+
+  it("mirrors Arabic completed tool rows with duration, target, then action", () => {
+    const output = renderCompletedActiveWorkSurface(createState({
+      items: [
+        item("read", "succeeded", {
+          toolName: "file.read",
+          displayLabel: "قراءة ملف",
+          target: "src/done.ts",
+          durationMs: 100,
+        }),
+      ],
+    }), { width: 72, locale: "ar" });
+    const row = stripBidiIsolates(output.find((line) => line.includes("src/done.ts")) ?? "");
+
+    expect(row).toContain("0.1s");
+    expect(row).toContain("src/done.ts");
+    expect(row).toContain("قراءة ملف");
+    expect(row).toContain("✓");
+    expect(row.indexOf("0.1s")).toBeLessThan(row.indexOf("src/done.ts"));
+    expect(row).toMatch(/0\.1s {7,}src\/done\.ts/u);
+    expect(row.indexOf("src/done.ts")).toBeLessThan(row.indexOf("قراءة ملف"));
+    expect(row.indexOf("قراءة ملف")).toBeLessThan(row.indexOf("✓"));
+    expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
+  });
+
+  it("keeps narrow Arabic mirrored rows bounded", () => {
+    const output = renderActiveWorkSurface(createState({
+      items: [
+        item("run", "running", {
+          toolName: "terminal.run",
+          displayLabel: "تشغيل أمر",
+          target: "pnpm exec vitest run src/runtime/deeply/nested/example.test.ts",
+          durationMs: 1_500,
+        }),
+      ],
+    }), { width: 36, height: 3, locale: "ar" });
+
+    expect(output.join("\n")).not.toContain("src/runtime/deeply/nested/example.test.ts");
+    expect(output.every((line) => stringWidth(line) <= 36)).toBe(true);
   });
 
   it("keeps status symbols mapped in one deterministic table", () => {
@@ -577,4 +686,8 @@ function item(
     ...(input.approvalRef === undefined ? {} : { approvalRef: input.approvalRef }),
     ...(input.fileChangeInspected === undefined ? {} : { fileChangeInspected: input.fileChangeInspected }),
   };
+}
+
+function stripBidiIsolates(value: string): string {
+  return value.replace(/[\u2068\u2069]/gu, "");
 }

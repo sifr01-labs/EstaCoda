@@ -16,6 +16,14 @@ describe("Papyrus operator console status rail surface", () => {
     );
   });
 
+  it("renders YOLO badge between model and context when active", () => {
+    expect(renderStatusRailSurface(status({
+      security: { yolo: true },
+    }), { width: 80 })).toBe(
+      "kimi-k2.7-code ● │ ↯ YOLO │ ctx [▰▱▱▱▱▱▱▱▱▱] 18.4k/262k 7% │ ◷ 01:12"
+    );
+  });
+
   it("contains no tools, approvals, workspace, trust, steer, setup, or channel fields", () => {
     const output = renderStatusRailSurface(status(), { width: 80 });
 
@@ -33,6 +41,12 @@ describe("Papyrus operator console status rail surface", () => {
     const compact = renderStatusRailSurface(status(), { width: 55 });
     expect(compact).toContain("[▰▱▱▱▱▱▱▱▱▱]");
     expect(compact).not.toContain("18.4k/262k");
+
+    const compactWithoutBadge = renderStatusRailSurface(status({
+      security: { yolo: true },
+    }), { width: 55 });
+    expect(compactWithoutBadge).not.toContain("YOLO");
+    expect(compactWithoutBadge).toContain("[▰▱▱▱▱▱▱▱▱▱]");
 
     const narrow = renderStatusRailSurface(status(), { width: 30 });
     expect(narrow).toBe("kimi-k2.7 ● │ ctx 7% │ 01:12");
@@ -83,6 +97,18 @@ describe("Papyrus operator console status rail surface", () => {
     expect(renderStatusRailSurface(status({
       model: { label: "kimi-k2.7-code", state: "idle", route: "fallback" },
     }), { width: 80, style })).toContain(`${ansiFg(tokens.contract.palette.caution)}●\x1b[0m`);
+  });
+
+  it("colors the YOLO badge with the caution token when styled", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const style = createOperatorConsoleStyle({
+      tokens,
+      capabilities: { supportsColor: true, supportsTrueColor: true },
+    });
+
+    expect(renderStatusRailSurface(status({
+      security: { yolo: true },
+    }), { width: 80, style })).toContain(`${ansiFg(tokens.contract.palette.caution)}↯ YOLO\x1b[0m`);
   });
 });
 

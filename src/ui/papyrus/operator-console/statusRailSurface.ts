@@ -26,12 +26,17 @@ export function renderStatusRailSurface(
   const bar = renderContextBar(resolveContextPercent(state));
   const numbers = formatContextNumbers(state);
   const symbol = modelStateSymbol(state.model.state, state.model.route, options.style);
+  const securityBadge = formatSecurityBadge(state, options.style);
+  const securitySegment = securityBadge === undefined ? "" : ` │ ${securityBadge}`;
 
-  const full = `${model} │ ctx ${bar} ${numbers} ${percent} │ ${sessionIcon} ${timer}`;
+  const full = `${model}${securitySegment} │ ctx ${bar} ${numbers} ${percent} │ ${sessionIcon} ${timer}`;
   if (stringWidth(full) <= width) return full;
 
-  const compact = `${model} │ ctx ${bar} ${percent} │ ${sessionIcon} ${timer}`;
+  const compact = `${model}${securitySegment} │ ctx ${bar} ${percent} │ ${sessionIcon} ${timer}`;
   if (stringWidth(compact) <= width) return compact;
+
+  const compactWithoutSecurity = `${model} │ ctx ${bar} ${percent} │ ${sessionIcon} ${timer}`;
+  if (stringWidth(compactWithoutSecurity) <= width) return compactWithoutSecurity;
 
   const narrow = `${narrowModel} ${symbol} │ ctx ${percent} │ ${timer}`;
   if (stringWidth(narrow) <= width) return narrow;
@@ -92,6 +97,16 @@ function rawModelStateSymbol(state: StatusRailState["model"]["state"]): string {
     case "idle":
       return "●";
   }
+}
+
+function formatSecurityBadge(
+  state: StatusRailState,
+  style: OperatorConsoleStyle | undefined
+): string | undefined {
+  if (state.security?.yolo !== true) return undefined;
+  const badge = "↯ YOLO";
+  const tokens = style?.tokens.contract;
+  return tokens === undefined ? badge : styleColor(style, badge, tokens.palette.caution);
 }
 
 function formatPercent(percent: number): string {

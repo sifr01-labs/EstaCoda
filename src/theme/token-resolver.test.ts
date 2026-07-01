@@ -19,7 +19,7 @@ describe("resolveTokens", () => {
     const r = resolveTokens("standard", "dark", "kemetBlue");
     expect(r.theme).toBe("dark");
     expect(r.contract.palette.brand).toBe("#4389D7");
-    expect(r.contract.palette.accent).toBe("#4C8AE0");
+    expect(r.contract.palette.accent).toBe("#4EA1FF");
     expect(r.contract.palette.action).toBe("#40E0D0");
     expect(r.contract.palette.caution).toBe("#FFB454");
     expect(r.contract.surface.bg).toBe("#1A1A1A");
@@ -164,7 +164,7 @@ describe("kemetBlue skin overlay", () => {
   it("overrides neutral base brand color in dark", () => {
     const r = resolveTokens("standard", "dark", "kemetBlue");
     expect(r.contract.palette.brand).toBe("#4389D7");
-    expect(r.contract.palette.accent).toBe("#4C8AE0");
+    expect(r.contract.palette.accent).toBe("#4EA1FF");
   });
 
   it("overrides branding", () => {
@@ -206,7 +206,7 @@ describe("kemetBlue skin overlay", () => {
     expect(light.contract.palette.brand).toBe("#4389D7");
     expect(dark.contract.palette.brand).toBe("#4389D7");
     expect(light.contract.palette.accent).toBe("#0057D9");
-    expect(dark.contract.palette.accent).toBe("#4C8AE0");
+    expect(dark.contract.palette.accent).toBe("#4EA1FF");
     expect(light.contract.palette.accent).not.toBe(dark.contract.palette.accent);
   });
 });

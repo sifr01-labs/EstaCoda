@@ -3336,7 +3336,7 @@ describe("ChannelGateway commands", () => {
       };
     }
 
-    function createFakeFingerprint(): RuntimeFingerprint {
+    function createFakeFingerprint(overrides: Partial<RuntimeFingerprint> = {}): RuntimeFingerprint {
       return {
         modelProvider: "test",
         modelId: "test",
@@ -3376,6 +3376,7 @@ describe("ChannelGateway commands", () => {
         sttHash: "hash",
         telegramReady: false,
         currentPlatform: "test",
+        ...overrides,
       };
     }
 
@@ -4118,6 +4119,82 @@ describe("ChannelGateway commands", () => {
       expect(cache.invalidateCalls[0]).toBe(first.sessionId);
     });
 
+    it.each([
+      { securityMode: "open" as const, expectedSecurity: "↯ YOLO mode" },
+      { securityMode: "adaptive" as const, expectedSecurity: "Adaptive" },
+      { securityMode: "strict" as const, expectedSecurity: "Strict" },
+    ])("renders Telegram fresh session notice for $securityMode security", async ({ securityMode, expectedSecurity }) => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const sessionStore: ChannelSessionStore = {
+        async getOrCreateSessionId() {
+          return "old-chat-session-00000000";
+        },
+        async resetSessionId() {
+          return "telegram-fresh-session-abcdef1234567890";
+        }
+      };
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => createMinimalRuntime(),
+        sessionStore,
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        profileId: "default",
+        securityMode,
+        runtimeFingerprint: createFakeFingerprint({
+          modelProvider: "kimi",
+          modelId: "kimi-k2.7-code",
+          securityMode,
+        })
+      });
+
+      const result = await gateway.receive(makeMessage("/new"));
+
+      expect(result.replyText).toBe([
+        "𓂀 Fresh EstaCoda session",
+        "",
+        "◈ Model: kimi/kimi-k2.7-code",
+        "◈ Session: 34567890",
+        "◈ Profile: default",
+        `◈ Security: ${expectedSecurity}`
+      ].join("\n"));
+      expect(result.replyText).not.toContain("telegram-fresh-session-abcdef1234567890");
+    });
+
+    it("does not carry a temporary Telegram YOLO toggle into /new", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      let currentSessionId = "old-yolo-session-11111111";
+      const sessionStore: ChannelSessionStore = {
+        async getOrCreateSessionId() {
+          return currentSessionId;
+        },
+        async resetSessionId() {
+          currentSessionId = "new-yolo-session-22222222";
+          return currentSessionId;
+        }
+      };
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => createMinimalRuntime(),
+        sessionStore,
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        securityMode: "adaptive",
+        runtimeFingerprint: createFakeFingerprint({
+          modelProvider: "kimi",
+          modelId: "kimi-k2.7-code",
+          securityMode: "adaptive",
+        })
+      });
+
+      const yolo = await gateway.receive(makeMessage("/yolo"));
+      expect(yolo.replyText).toContain("YOLO mode ON");
+
+      const result = await gateway.receive(makeMessage("/new"));
+      expect(result.replyText).toContain("◈ Security: Adaptive");
+      expect(result.replyText).not.toContain("YOLO mode");
+    });
+
     it("session reset /switch invalidates old session in cache", async () => {
       const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
       const cache = createFakeRuntimeCache();
@@ -4194,7 +4271,7 @@ describe("ChannelGateway commands", () => {
 
       await gateway.receive(makeMessage("hello"));
       const result = await gateway.receive(makeMessage("/new"));
-      expect(result.replyText).toContain("Started a fresh");
+      expect(result.replyText).toContain("𓂀 Fresh EstaCoda session");
     });
 
     it("invalidate failure during /switch does not break switch", async () => {

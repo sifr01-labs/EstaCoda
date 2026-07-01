@@ -10,7 +10,7 @@ const implementedSlashCommands = new Set([
   "status",
   "model",
   "providers",
-  "reset",
+  "new",
   "tools",
   "browser",
   "memory",
