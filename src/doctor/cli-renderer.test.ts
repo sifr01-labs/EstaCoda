@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { LRI, PDI } from "../ui/bidi.js";
-import { renderDoctorReport } from "./cli-renderer.js";
+import { renderDoctorJsonReport, renderDoctorReport } from "./cli-renderer.js";
 import type { DoctorReport } from "./types.js";
 
 describe("renderDoctorReport", () => {
@@ -32,6 +32,67 @@ describe("renderDoctorReport", () => {
     expect(output).toContain("0 blocked · 1 warnings · 2 healthy");
     expect(output).toContain("OpenRouter API key is missing");
     expect(output).toContain("Fix: estacoda model setup");
+  });
+
+  it("renders provider route rows when present", () => {
+    const output = renderDoctorReport(baseReport({
+      providerRoutes: [
+        {
+          id: "primary:primary",
+          kind: "primary",
+          label: "primary",
+          provider: "openrouter",
+          model: "anthropic/claude-sonnet",
+          status: "ready",
+          summary: "ready",
+          details: []
+        },
+        {
+          id: "fallback:fallback 1",
+          kind: "fallback",
+          label: "fallback 1",
+          provider: "openai",
+          model: "gpt-5-mini",
+          status: "warning",
+          summary: "missing env var OPENAI_API_KEY",
+          details: []
+        }
+      ]
+    }));
+
+    expect(output).toContain("◇ Provider Routes");
+    expect(output).toContain("primary");
+    expect(output).toContain("openrouter/anthropic/claude-sonnet");
+    expect(output).toContain("fallback 1");
+    expect(output).toContain("missing env var OPENAI_API_KEY");
+  });
+
+  it("renders JSON as the DoctorReport object without Papyrus framing", () => {
+    const output = renderDoctorJsonReport(baseReport({
+      providerRoutes: [
+        {
+          id: "primary:primary",
+          kind: "primary",
+          label: "primary",
+          provider: "local",
+          model: "local-test",
+          status: "ready",
+          summary: "ready",
+          details: []
+        }
+      ]
+    }));
+    const parsed = JSON.parse(output) as DoctorReport;
+
+    expect(output).not.toContain("╭─");
+    expect(parsed.profile).toBe("default");
+    expect(parsed.providerRoutes).toEqual([
+      expect.objectContaining({
+        kind: "primary",
+        provider: "local",
+        model: "local-test"
+      })
+    ]);
   });
 
   it("renders blocked config diagnostics", () => {
@@ -123,6 +184,7 @@ function baseReport(overrides: Partial<DoctorReport> = {}): DoctorReport {
         ]
       }
     ],
+    providerRoutes: overrides.providerRoutes ?? [],
     verdict: overrides.verdict ?? {
       status: "warning",
       title: locale === "ar" ? "جاهز مع تحذيرات" : "Ready with warnings",

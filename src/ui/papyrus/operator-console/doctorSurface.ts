@@ -11,6 +11,7 @@ import type {
   DoctorCheck,
   DoctorCheckSeverity,
   DoctorLocale,
+  DoctorProviderRoute,
   DoctorReport
 } from "../../../doctor/types.js";
 
@@ -36,6 +37,7 @@ export function renderDoctorSurface(
     "",
     ...renderChecks(report, contentWidth),
     "",
+    ...renderProviderRoutesSection(report.providerRoutes, report.locale, contentWidth, copy),
     ...renderVerdict(report, width, contentWidth, copy),
     "",
     sectionHeading(copy.actions),
@@ -48,6 +50,21 @@ export function renderDoctorSurface(
   }
 
   return rows.join("\n");
+}
+
+function renderProviderRoutesSection(
+  routes: readonly DoctorProviderRoute[],
+  locale: DoctorLocale,
+  contentWidth: number,
+  copy: DoctorSurfaceCopy
+): readonly string[] {
+  if (routes.length === 0) return [];
+  return [
+    sectionHeading(copy.providerRoutes),
+    "",
+    ...renderProviderRoutes(routes, locale, contentWidth),
+    ""
+  ];
 }
 
 function renderHeader(
@@ -122,6 +139,43 @@ function renderActions(
   return rows;
 }
 
+function renderProviderRoutes(
+  routes: readonly DoctorProviderRoute[],
+  locale: DoctorLocale,
+  contentWidth: number
+): readonly string[] {
+  const labelWidth = Math.min(18, Math.max(8, ...routes.map((route) => visibleLengthEstimate(route.label))));
+  const rows: string[] = [];
+  for (const route of routes) {
+    const labelText = locale === "ar"
+      ? padVisibleStart(route.label, labelWidth)
+      : padVisibleEnd(route.label, labelWidth);
+    const hasConcreteRoute = route.provider !== undefined && route.model !== undefined;
+    const model = hasConcreteRoute ? `${route.provider}/${route.model}` : route.summary;
+    const prefix = `  ${routeStatusIcon(route.status)} ${labelText}  `;
+    const modelText = localizeDynamicText(model, locale);
+    const summary = hasConcreteRoute ? localizeDynamicText(route.summary, locale) : "";
+    const fullLine = `${prefix}${modelText}${summary.length === 0 ? "" : `  ${summary}`}`;
+    if (visibleLengthEstimate(fullLine) <= contentWidth) {
+      rows.push(fullLine);
+      continue;
+    }
+
+    const routeWidth = Math.max(8, contentWidth - visibleLengthEstimate(prefix));
+    const routeLines = wrapText(modelText, routeWidth);
+    rows.push(`${prefix}${routeLines[0] ?? ""}`);
+    for (const continuation of routeLines.slice(1)) {
+      rows.push(`${" ".repeat(visibleLengthEstimate(prefix))}${continuation}`);
+    }
+    if (summary.length > 0 && summary !== modelText) {
+      for (const line of wrapText(summary, Math.max(8, contentWidth - 4))) {
+        rows.push(`    ${line}`);
+      }
+    }
+  }
+  return rows;
+}
+
 function frameRows(
   title: string,
   rows: readonly string[],
@@ -173,6 +227,19 @@ function severityIcon(severity: DoctorCheckSeverity | DoctorAction["severity"]):
   }
 }
 
+function routeStatusIcon(status: DoctorProviderRoute["status"]): string {
+  switch (status) {
+    case "ready":
+      return "✓";
+    case "warning":
+      return "▲";
+    case "blocked":
+      return "✕";
+    case "disabled":
+      return "•";
+  }
+}
+
 function technical(value: string, locale: DoctorLocale): string {
   return locale === "ar" ? isolateLtr(value) : value;
 }
@@ -200,6 +267,7 @@ type DoctorSurfaceCopy = {
   readonly home: string;
   readonly model: string;
   readonly checks: string;
+  readonly providerRoutes: string;
   readonly verdict: string;
   readonly actions: string;
   readonly notes: string;
@@ -219,6 +287,7 @@ function doctorSurfaceCopy(locale: DoctorLocale): DoctorSurfaceCopy {
       home: "المنزل",
       model: "النموذج",
       checks: "الفحوصات",
+      providerRoutes: "مسارات المزوّد",
       verdict: "النتيجة",
       actions: "الإجراءات",
       notes: "ملاحظات",
@@ -237,6 +306,7 @@ function doctorSurfaceCopy(locale: DoctorLocale): DoctorSurfaceCopy {
     home: "Home",
     model: "Model",
     checks: "Checks",
+    providerRoutes: "Provider Routes",
     verdict: "Verdict",
     actions: "Actions",
     notes: "Notes",

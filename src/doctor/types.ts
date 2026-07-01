@@ -23,6 +23,19 @@ export type DoctorSection = {
   readonly checks: readonly DoctorCheck[];
 };
 
+export type DoctorProviderRouteStatus = "ready" | "warning" | "blocked" | "disabled";
+
+export type DoctorProviderRoute = {
+  readonly id: string;
+  readonly kind: "primary" | "fallback" | "auxiliary";
+  readonly label: string;
+  readonly provider?: string;
+  readonly model?: string;
+  readonly status: DoctorProviderRouteStatus;
+  readonly summary: string;
+  readonly details: readonly string[];
+};
+
 export type DoctorAction = {
   readonly id: string;
   readonly severity: Exclude<DoctorCheckSeverity, "healthy">;
@@ -47,6 +60,7 @@ export type DoctorReport = {
   readonly model: string;
   readonly configSources: readonly string[];
   readonly sections: readonly DoctorSection[];
+  readonly providerRoutes: readonly DoctorProviderRoute[];
   readonly verdict: DoctorVerdict;
   readonly actions: readonly DoctorAction[];
   readonly notes: readonly string[];

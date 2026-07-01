@@ -22,8 +22,9 @@ import { diagnoseExternalTools, type ExternalToolDiagnostic } from "./checks/ext
 import { diagnoseLiveToolCall } from "./checks/live-tool.js";
 import { diagnoseMcpSecurity, type McpSecurityDiagnostic } from "./checks/mcp-security.js";
 import { diagnoseOAuthStatus, type OAuthStatusDiagnostic } from "./checks/oauth-status.js";
+import { diagnoseProviderChain, type ProviderChainDiagnostic } from "./checks/provider-chain.js";
 import { diagnoseSQLiteHealth, type SQLiteHealthDiagnostic } from "./checks/sqlite-health.js";
-import { renderDoctorReport } from "./cli-renderer.js";
+import { renderDoctorJsonReport, renderDoctorReport } from "./cli-renderer.js";
 import { runDoctorFix } from "./fix-engine.js";
 import { renderDoctorFixReport } from "./fix-renderer.js";
 import type {
@@ -80,6 +81,7 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
   const liveProviderDiagnostic = config !== undefined && hasFlag(args, "--live")
     ? await diagnoseProviderLive(config)
     : undefined;
+  const providerChain = await diagnoseProviderChain(config);
   const liveToolDiagnostic = hasFlag(args, "--live-tools", "--live-tool")
     ? await diagnoseLiveToolCall({
         runtime: options.runtime,
@@ -115,6 +117,7 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
   warnings.push(...oauthStatus.warnings);
   warnings.push(...mcpSecurity.warnings);
   warnings.push(...externalTools.warnings);
+  warnings.push(...providerChain.warnings);
   warnings.push(...configHygiene.warnings);
   warnings.push(...providerDiagnostic.warnings);
   warnings.push(...(liveProviderDiagnostic?.warnings ?? []));
@@ -174,6 +177,7 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
     warnings,
     notes,
     providerDiagnostic,
+    providerChain,
     liveProviderDiagnostic,
     liveToolDiagnostic,
     configSyntaxError,
@@ -203,7 +207,7 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
       liveToolDiagnostic?.status !== "blocked"
       ? 0
       : 1,
-    output: renderDoctorReport(report)
+    output: hasFlag(args, "--json") ? renderDoctorJsonReport(report) : renderDoctorReport(report)
   };
 }
 
@@ -217,6 +221,7 @@ type BuildDoctorReportInput = {
   readonly warnings: readonly string[];
   readonly notes: readonly string[];
   readonly providerDiagnostic: ProviderDiagnostic;
+  readonly providerChain: ProviderChainDiagnostic;
   readonly liveProviderDiagnostic?: ProviderLiveDiagnostic;
   readonly liveToolDiagnostic?: LiveToolDiagnostic;
   readonly configSyntaxError?: string;
@@ -264,7 +269,7 @@ function buildDoctorReport(input: BuildDoctorReportInput): DoctorReport {
       "providers",
       label(input.locale, "providers"),
       providerSeverity(input.providerDiagnostic),
-      firstOrReady(input.providerDiagnostic.warnings, input.locale)
+      providerSummary(input.providerDiagnostic, input.providerChain, input.locale)
     ),
     check(
       "oauth",
@@ -340,10 +345,22 @@ function buildDoctorReport(input: BuildDoctorReportInput): DoctorReport {
         checks
       }
     ],
+    providerRoutes: input.providerChain.routes,
     verdict,
     actions: [...new Set(input.warnings)].map((warning, index) => warningAction(warning, index, input.locale)),
     notes: input.notes
   };
+}
+
+function providerSummary(
+  diagnostic: ProviderDiagnostic,
+  chain: ProviderChainDiagnostic,
+  locale: DoctorLocale
+): string {
+  if (chain.unavailableCount > 0) {
+    return locale === "ar" ? `${chain.unavailableCount} مسار غير متاح` : `${chain.unavailableCount} route(s) unavailable`;
+  }
+  return firstOrReady(diagnostic.warnings, locale);
 }
 
 function check(
@@ -515,6 +532,7 @@ function warningDetailLines(warning: string, locale: DoctorLocale): readonly str
 function warningCommand(warning: string): string | undefined {
   if (/Config syntax error/iu.test(warning)) return "estacoda setup --interactive";
   if (/OAuth credentials are expired/iu.test(warning)) return "estacoda model setup";
+  if (/Provider route .*missing (?:env var|apiKeyEnv)|Provider route .*provider setup incomplete/iu.test(warning)) return "estacoda model setup";
   if (/Provider setup is incomplete|missing required values|Missing API key/iu.test(warning)) return "estacoda model setup";
   return undefined;
 }
@@ -530,6 +548,7 @@ function localizeWarningTitle(warning: string, locale: DoctorLocale): string {
   if (/Selected profile .* is not private/iu.test(warning)) return "ملف خاص في الملف الشخصي أذوناته واسعة";
   if (/auth\.json/iu.test(warning)) return "ملف OAuth غير صالح";
   if (/OAuth credentials are expired/iu.test(warning)) return "اعتمادات OAuth منتهية";
+  if (/Provider route .*unavailable/iu.test(warning)) return "مسار مزوّد غير متاح";
   if (/MCP server .* shell wrapper/iu.test(warning)) return "خادم MCP يستخدم غلاف shell";
   if (/MCP server .* shell execution flags/iu.test(warning)) return "خادم MCP يمرر أعلام تنفيذ shell";
   if (/MCP server .* secret-looking env keys/iu.test(warning)) return "خادم MCP يمرر أسماء متغيرات تبدو سرية";

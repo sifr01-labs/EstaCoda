@@ -501,6 +501,36 @@ describe("cli setup command", () => {
     expect(result.output).not.toContain("super-secret-mcp-token");
   });
 
+  it("doctor --json returns the structured DoctorReport without Papyrus framing", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    await writeUserConfig(tempDir, localReadyConfig());
+
+    const result = await runCliCommand({
+      argv: ["doctor", "--json"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+    const report = JSON.parse(result.output) as {
+      profile: string;
+      sections: Array<{ checks: Array<{ id: string }> }>;
+      providerRoutes: Array<{ kind: string; label: string; provider?: string; model?: string }>;
+    };
+
+    expect(result.handled).toBe(true);
+    expect(result.output).not.toContain("╭─");
+    expect(report.profile).toBe("default");
+    expect(report.sections.flatMap((section) => section.checks).map((check) => check.id)).toContain("providers");
+    expect(report.providerRoutes).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "primary",
+        label: "primary",
+        provider: "local",
+        model: "local-test-model"
+      })
+    ]));
+  });
+
   it("doctor --fix creates only safe local state skeleton repairs", async () => {
     const workspaceRoot = join(tempDir, "workspace");
     const globalPaths = resolveGlobalStateHome({ homeDir: tempDir });
