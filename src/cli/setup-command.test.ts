@@ -455,6 +455,25 @@ describe("cli setup command", () => {
     await expect(stat(join(tempDir, ".estacoda", ".backups"))).rejects.toThrow();
   });
 
+  it("doctor keeps dependency audit opt-in by default", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runCliCommand({
+      argv: ["doctor"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.output).toContain("Dependencies");
+    expect(result.output).toContain("audit not run");
+    expect(result.output).toContain("Run: estacoda doctor --audit");
+    expect(result.output).not.toContain("Dependency audit found");
+  });
+
   it("doctor renders operational diagnostics without leaking OAuth or MCP secrets", async () => {
     const workspaceRoot = join(tempDir, "workspace");
     const profilePaths = resolveProfileStateHome({ homeDir: tempDir, profileId: "default" });

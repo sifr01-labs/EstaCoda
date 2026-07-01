@@ -26,6 +26,7 @@ import { diagnoseExternalTools, type ExternalToolDiagnostic } from "./checks/ext
 import { diagnoseLiveToolCall } from "./checks/live-tool.js";
 import { diagnoseMemoryHealth, type MemoryHealthDiagnostic } from "./checks/memory-health.js";
 import { diagnoseMcpSecurity, type McpSecurityDiagnostic } from "./checks/mcp-security.js";
+import { diagnoseNpmAudit, type NpmAuditDiagnostic } from "./checks/npm-audit.js";
 import { diagnoseOAuthStatus, type OAuthStatusDiagnostic } from "./checks/oauth-status.js";
 import { diagnoseProviderChain, type ProviderChainDiagnostic } from "./checks/provider-chain.js";
 import { diagnoseSQLiteHealth, type SQLiteHealthDiagnostic } from "./checks/sqlite-health.js";
@@ -72,6 +73,10 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
   const oauthStatus = await diagnoseOAuthStatus({ homeDir: options.homeDir, profileId: selectedProfile });
   const externalTools = await diagnoseExternalTools();
   const memoryHealth = await diagnoseMemoryHealth({ homeDir: options.homeDir, profileId: selectedProfile });
+  const npmAudit = await diagnoseNpmAudit({
+    enabled: hasFlag(args, "--audit", "--security-audit"),
+    cwd: options.workspaceRoot
+  });
 
   try {
     config = await loadRuntimeConfig(effectiveOptions);
@@ -124,6 +129,7 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
   warnings.push(...mcpSecurity.warnings);
   warnings.push(...externalTools.warnings);
   warnings.push(...memoryHealth.warnings);
+  warnings.push(...npmAudit.warnings);
   warnings.push(...providerChain.warnings);
   warnings.push(...configHygiene.warnings);
   warnings.push(...providerDiagnostic.warnings);
@@ -135,6 +141,7 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
   notes.push(...mcpSecurity.notes);
   notes.push(...externalTools.notes);
   notes.push(...memoryHealth.notes);
+  notes.push(...npmAudit.notes);
 
   if (configSyntaxError !== undefined) {
     warnings.push(`Config syntax error: ${configSyntaxError}`);
@@ -196,6 +203,7 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
     mcpSecurity,
     externalTools,
     memoryHealth,
+    npmAudit,
     activeProfileMissing,
     selectedProfileConfigMissing,
     trustStoreOk,
@@ -241,6 +249,7 @@ type BuildDoctorReportInput = {
   readonly mcpSecurity: McpSecurityDiagnostic;
   readonly externalTools: ExternalToolDiagnostic;
   readonly memoryHealth: MemoryHealthDiagnostic;
+  readonly npmAudit: NpmAuditDiagnostic;
   readonly activeProfileMissing: boolean;
   readonly selectedProfileConfigMissing: boolean;
   readonly trustStoreOk: boolean;
@@ -307,6 +316,12 @@ function buildDoctorReport(input: BuildDoctorReportInput): DoctorReport {
       externalToolsSummary(input.externalTools, input.locale)
     ),
     check(
+      "dependencies",
+      label(input.locale, "dependencies"),
+      dependencyAuditSeverity(input.npmAudit),
+      dependencyAuditSummary(input.npmAudit, input.locale)
+    ),
+    check(
       "memory",
       label(input.locale, "memory"),
       memorySeverity(input.memoryHealth),
@@ -346,6 +361,15 @@ function buildDoctorReport(input: BuildDoctorReportInput): DoctorReport {
   }
 
   const verdict = doctorVerdict(checks, input.locale);
+  const actions = [...new Set(input.warnings)].map((warning, index) => warningAction(warning, index, input.locale));
+  if (input.npmAudit.status === "not-run") {
+    actions.push({
+      id: "dependency-audit",
+      severity: "info",
+      title: input.locale === "ar" ? "تشغيل فحص أمان الاعتماديات" : "Run dependency security audit",
+      command: "estacoda doctor --audit"
+    });
+  }
   return {
     locale: input.locale,
     profile: input.selectedProfile,
@@ -362,7 +386,7 @@ function buildDoctorReport(input: BuildDoctorReportInput): DoctorReport {
     ],
     providerRoutes: input.providerChain.routes,
     verdict,
-    actions: [...new Set(input.warnings)].map((warning, index) => warningAction(warning, index, input.locale)),
+    actions,
     notes: input.notes
   };
 }
@@ -461,6 +485,31 @@ function externalToolsSummary(diagnostic: ExternalToolDiagnostic, locale: Doctor
     return locale === "ar" ? `${diagnostic.missingRequired.length} مفقودة` : `${diagnostic.missingRequired.length} missing`;
   }
   return locale === "ar" ? `${diagnostic.available.length} متاحة` : `${diagnostic.available.length} available`;
+}
+
+function dependencyAuditSeverity(diagnostic: NpmAuditDiagnostic): DoctorCheckSeverity {
+  if (diagnostic.status === "not-run") return "info";
+  if (diagnostic.status === "warning") return "warning";
+  return "healthy";
+}
+
+function dependencyAuditSummary(diagnostic: NpmAuditDiagnostic, locale: DoctorLocale): string {
+  if (diagnostic.status === "not-run") {
+    return locale === "ar" ? "لم يتم تشغيل الفحص" : "audit not run";
+  }
+  if (diagnostic.timedOut) {
+    return locale === "ar" ? "انتهت مهلة الفحص" : "audit timed out";
+  }
+  if (diagnostic.totalVulnerabilities === 0) {
+    return locale === "ar" ? "لا توجد ثغرات" : "0 advisories";
+  }
+  const highCount = diagnostic.severityCounts.critical + diagnostic.severityCounts.high;
+  if (highCount > 0) {
+    return locale === "ar" ? `${highCount} عالية/حرجة` : `${highCount} high/critical`;
+  }
+  return locale === "ar"
+    ? `${diagnostic.totalVulnerabilities} تنبيهات`
+    : `${diagnostic.totalVulnerabilities} advisories`;
 }
 
 function memorySeverity(diagnostic: MemoryHealthDiagnostic): DoctorCheckSeverity {
@@ -589,6 +638,11 @@ function localizeWarningTitle(warning: string, locale: DoctorLocale): string {
   if (/MCP server .* explicit resource risk class/iu.test(warning)) return "خادم MCP يعرّض موارد دون فئة مخاطر";
   if (/MCP server .* explicit prompt risk class/iu.test(warning)) return "خادم MCP يعرّض مطالبات دون فئة مخاطر";
   if (/Required external tools are missing/iu.test(warning)) return "أدوات خارجية مطلوبة غير موجودة";
+  if (/Dependency audit found/iu.test(warning)) return "فحص الاعتماديات وجد تنبيهات أمنية";
+  if (/Dependency audit timed out/iu.test(warning)) return "انتهت مهلة فحص الاعتماديات";
+  if (/Dependency audit could not run because pnpm was not found/iu.test(warning)) return "تعذر تشغيل فحص الاعتماديات لأن pnpm غير موجود";
+  if (/Dependency audit output could not be parsed/iu.test(warning)) return "تعذر قراءة ناتج فحص الاعتماديات";
+  if (/Dependency audit could not run/iu.test(warning)) return "تعذر تشغيل فحص الاعتماديات";
   if (/Memory profile root is missing or invalid/iu.test(warning)) return "جذر ذاكرة الملف الشخصي غير موجود أو غير صالح";
   if (/Memory file .* is not usable/iu.test(warning)) return "ملف ذاكرة غير قابل للاستخدام";
   if (/SQLite session DB schema is missing required tables/iu.test(warning)) return "قاعدة بيانات الجلسات تنقصها جداول مطلوبة";
@@ -623,6 +677,7 @@ type DoctorLabelKey =
   | "capabilities"
   | "mcp"
   | "externalTools"
+  | "dependencies"
   | "memory"
   | "sessions"
   | "skills"
@@ -642,6 +697,7 @@ const DOCTOR_LABELS: Record<DoctorLabelKey, Record<DoctorLocale, string>> = {
   capabilities: { en: "Capabilities", ar: "القدرات" },
   mcp: { en: "MCP", ar: "MCP" },
   externalTools: { en: "External tools", ar: "الأدوات الخارجية" },
+  dependencies: { en: "Dependencies", ar: "الاعتماديات" },
   memory: { en: "Memory", ar: "الذاكرة" },
   sessions: { en: "Sessions", ar: "الجلسات" },
   skills: { en: "Skills", ar: "المهارات" },

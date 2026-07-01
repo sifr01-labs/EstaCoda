@@ -141,7 +141,8 @@ function renderActions(
       }
     }
     if (action.command !== undefined) {
-      rows.push(`    ${copy.fixLabel}: ${technical(action.command, locale)}`);
+      const commandLabel = action.severity === "info" ? copy.runLabel : copy.fixLabel;
+      rows.push(`    ${commandLabel}: ${technical(action.command, locale)}`);
     }
     rows.push("");
   }
@@ -239,6 +240,8 @@ function severityIcon(severity: DoctorCheckSeverity | DoctorAction["severity"], 
   switch (severity) {
     case "healthy":
       return styleColor(style, "✓", style?.tokens.contract.severity.ok ?? "");
+    case "info":
+      return "•";
     case "warning":
       return styleColor(style, "▲", style?.tokens.contract.palette.caution ?? "");
     case "blocked":
@@ -306,6 +309,7 @@ type DoctorSurfaceCopy = {
   readonly notes: string;
   readonly noteMarker: string;
   readonly fixLabel: string;
+  readonly runLabel: string;
   readonly noActions: string;
   readonly counts: (verdict: DoctorReport["verdict"]) => string;
 };
@@ -326,6 +330,7 @@ function doctorSurfaceCopy(locale: DoctorLocale): DoctorSurfaceCopy {
       notes: "ملاحظات",
       noteMarker: "•",
       fixLabel: "الإصلاح",
+      runLabel: "تشغيل",
       noActions: "لا توجد إجراءات مطلوبة",
       counts: (verdict) => `${verdict.blockedCount} محظور · ${verdict.warningCount} تحذيرات · ${verdict.healthyCount} سليمة`,
     };
@@ -345,6 +350,7 @@ function doctorSurfaceCopy(locale: DoctorLocale): DoctorSurfaceCopy {
     notes: "Notes",
     noteMarker: "•",
     fixLabel: "Fix",
+    runLabel: "Run",
     noActions: "No actions needed",
     counts: (verdict) => `${verdict.blockedCount} blocked · ${verdict.warningCount} warnings · ${verdict.healthyCount} healthy`,
   };

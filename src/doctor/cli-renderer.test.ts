@@ -108,6 +108,37 @@ describe("renderDoctorReport", () => {
     expect(output).toContain("missing env var OPENAI_API_KEY");
   });
 
+  it("renders informational actions with Run labels", () => {
+    const output = renderDoctorReport(baseReport({
+      sections: [
+        {
+          id: "checks",
+          title: "Checks",
+          checks: [
+            {
+              id: "dependencies",
+              label: "Dependencies",
+              severity: "info",
+              summary: "audit not run"
+            }
+          ]
+        }
+      ],
+      actions: [
+        {
+          id: "dependency-audit",
+          severity: "info",
+          title: "Run dependency security audit",
+          command: "estacoda doctor --audit"
+        }
+      ]
+    }));
+
+    expect(output).toContain("• Dependencies");
+    expect(output).toContain("Run dependency security audit");
+    expect(output).toContain("Run: estacoda doctor --audit");
+  });
+
   it("renders JSON as the DoctorReport object without Papyrus framing", () => {
     const output = renderDoctorJsonReport(baseReport({
       providerRoutes: [

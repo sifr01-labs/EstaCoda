@@ -6,7 +6,7 @@ export type LiveToolDiagnostic = {
 
 export type DoctorLocale = "en" | "ar";
 
-export type DoctorCheckSeverity = "healthy" | "warning" | "blocked";
+export type DoctorCheckSeverity = "healthy" | "info" | "warning" | "blocked";
 
 export type DoctorVerdictStatus = "ready" | "warning" | "blocked";
 
