@@ -1,4 +1,3 @@
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { stdin, stdout } from "node:process";
 import {
@@ -51,7 +50,6 @@ import {
 } from "../setup/config-editor/setupConsolePromptAdapter.js";
 import { selectProviderModelRoute } from "../setup/provider-model-route-prompt.js";
 import { createReviewedSetupApplyExecutor } from "../setup/review/apply-executor.js";
-import { collectSetupEntryState } from "../setup/setup-entry-state.js";
 import { collectSetupRoute } from "../setup/setup-router.js";
 import { renderSetupRouteSummary } from "../setup/setup-state-renderer.js";
 import { runSetupVerification } from "../setup/verification.js";
@@ -92,9 +90,7 @@ import { runHandoffCommand } from "./handoff-commands.js";
 import { createFileCronJobLock } from "../cron/cron-lock.js";
 import {
   diagnoseProviderConfig,
-  diagnoseProviderLive,
-  renderProviderDiagnostic,
-  renderProviderLiveDiagnostic
+  renderProviderDiagnostic
 } from "../config/provider-diagnostics.js";
 import { runGatewaySupervisor } from "../gateway/supervisor.js";
 import type { TelegramFetch } from "../channels/telegram-adapter.js";
@@ -199,6 +195,7 @@ import { profileCommand } from "./profile-commands.js";
 import { runPythonEnvCommand } from "./python-env-commands.js";
 import type { ProfileContextGenerator } from "./profile-state.js";
 import { runWhatsAppWizard, type WhatsAppWizardDependencies } from "./whatsapp-wizard.js";
+import { runDoctor } from "../doctor/index.js";
 
 export type CliCommandResult = {
   handled: boolean;
@@ -316,7 +313,7 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
     case "tools":
       return tools(options);
     case "doctor":
-      return doctor(options, args);
+      return runDoctor(options, args);
     case "verify":
       return verify(options);
     case "settings":
@@ -1810,247 +1807,6 @@ async function tools(options: CliOptions): Promise<CliCommandResult> {
       ...[...grouped.entries()].map(([toolset, names]) => `${toolset}: ${names.join(", ")}`)
     ].join("\n")
   };
-}
-
-async function doctor(options: CliOptions, args: string[] = []): Promise<CliCommandResult> {
-  const setupState = await collectSetupEntryState(options);
-  let config: Awaited<ReturnType<typeof loadRuntimeConfig>> | undefined;
-  let configSyntaxError: string | undefined;
-  const activeProfileId = readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
-  const selectedProfile = selectedProfileId(options);
-  const selectedProfilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId: selectedProfile });
-  const activeProfilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId: activeProfileId });
-  const stateHome = resolveStateHome({ homeDir: options.homeDir });
-
-  try {
-    config = await loadRuntimeConfig(options);
-  } catch (error) {
-    configSyntaxError = error instanceof Error ? error.message : String(error);
-  }
-
-  const providerDiagnostic = config === undefined
-    ? setupState.setupVerification.providerDiagnostic
-    : await diagnoseProviderConfig(config);
-  const liveProviderDiagnostic = config !== undefined && hasFlag(args, "--live")
-    ? await diagnoseProviderLive(config)
-    : undefined;
-  const liveToolDiagnostic = hasFlag(args, "--live-tools", "--live-tool")
-    ? await diagnoseLiveToolCall({
-        runtime: options.runtime,
-        workspaceRoot: options.workspaceRoot
-      })
-    : undefined;
-  const warnings: string[] = [];
-  const notes: string[] = [];
-
-  if (!await pathExists(activeProfilePaths.profileRoot)) {
-    warnings.push(`Active profile is missing: ${activeProfileId}`);
-  }
-  if (!await pathExists(selectedProfilePaths.configPath)) {
-    warnings.push(`Selected profile config is missing: ${selectedProfilePaths.configPath}`);
-  }
-  if (!await trustStoreHealthy(stateHome.trustJsonPath)) {
-    warnings.push(`Global trust store is not valid JSON: ${stateHome.trustJsonPath}`);
-  }
-
-  if (config !== undefined && config.model.contextWindowTokens > 0 && config.model.contextWindowTokens < 64_000) {
-    warnings.push("Configured model context window is below 64K tokens.");
-  }
-
-  if (setupState.kind !== "configured-ready" && setupState.kind !== "configured-degraded") {
-    warnings.push(...setupState.blockers);
-  }
-
-  warnings.push(...providerDiagnostic.warnings);
-  warnings.push(...(liveProviderDiagnostic?.warnings ?? []));
-  warnings.push(...(liveToolDiagnostic?.warnings ?? []));
-
-  if (configSyntaxError !== undefined) {
-    warnings.push(`Config syntax error: ${configSyntaxError}`);
-  }
-
-  if (config !== undefined) {
-    const missingProfileEnv = collectMissingProfileEnv(config);
-    if (missingProfileEnv.length > 0) {
-      warnings.push(`Selected profile .env is missing required values: ${missingProfileEnv.join(", ")}`);
-    }
-  }
-
-  // State directory backup integrity
-  const homeDir = resolveHomeDir(options.homeDir);
-  const backupReady = await isBackupReady(homeDir);
-  if (!backupReady.ok) {
-    warnings.push(`State backup not ready: ${backupReady.reason}`);
-  }
-
-  // pack registry health
-  const spRegistry = new PackRegistry({ homeDir });
-  const spEntries = await spRegistry.list();
-  if (spEntries.length === 0) {
-    notes.push("pack registry: no packs installed");
-  } else {
-    notes.push(`pack registry: ${spEntries.length} installed`);
-    const spErrors = await spRegistry.getErrors();
-    const errorCount = spErrors.length;
-    const disabledCount = spEntries.filter((e) => e.status === "disabled").length;
-    if (errorCount > 0) {
-      warnings.push(`${errorCount} pack(s) have status error`);
-    }
-    if (disabledCount > 0) {
-      notes.push(`${disabledCount} pack(s) disabled`);
-    }
-  }
-
-  return {
-    handled: true,
-    exitCode: warnings.length === 0 &&
-      liveProviderDiagnostic?.status !== "blocked" &&
-      liveToolDiagnostic?.status !== "blocked"
-      ? 0
-      : 1,
-    output: [
-      "EstaCoda doctor",
-      `Profile: ${selectedProfile}`,
-      `Profile config: ${selectedProfilePaths.configPath}`,
-      `Profile secrets: ${selectedProfilePaths.envPath}`,
-      `Global trust: ${stateHome.trustJsonPath}`,
-      `Model: ${config === undefined ? "unknown/unknown" : `${config.model.provider}/${config.model.id}`}`,
-      `Web extraction: ${config === undefined ? "unknown" : config.web.enableNetwork ? "enabled" : "disabled"}`,
-      `Browser backend: ${config?.browser.backend ?? "unknown"}`,
-      `Config sources: ${(config?.sources ?? setupState.configSources).join(", ") || "none"}`,
-      "",
-      renderProviderDiagnostic(providerDiagnostic),
-      liveProviderDiagnostic === undefined ? undefined : "",
-      liveProviderDiagnostic === undefined ? undefined : renderProviderLiveDiagnostic(liveProviderDiagnostic),
-      liveToolDiagnostic === undefined ? undefined : "",
-      liveToolDiagnostic === undefined ? undefined : renderLiveToolDiagnostic(liveToolDiagnostic),
-      "",
-      warnings.length === 0 ? "Status: ready" : `Warnings:\n${warnings.map((warning) => `- ${warning}`).join("\n")}`,
-      notes.length === 0 ? undefined : `\nNotes:\n${notes.map((note) => `- ${note}`).join("\n")}`
-    ].filter((line) => line !== undefined).join("\n")
-  };
-}
-
-type LiveToolDiagnostic = {
-  status: "ready" | "blocked";
-  lines: string[];
-  warnings: string[];
-};
-
-async function diagnoseLiveToolCall(input: {
-  runtime: Runtime | undefined;
-  workspaceRoot: string;
-}): Promise<LiveToolDiagnostic> {
-  if (input.runtime === undefined) {
-    return {
-      status: "blocked",
-      lines: ["Live tool check: skipped"],
-      warnings: ["Runtime was not provided to the doctor command."]
-    };
-  }
-
-  const doctorDir = join(input.workspaceRoot, ".estacoda", "doctor");
-  const probePath = join(doctorDir, "live-tool-smoke.ts");
-  const relativeProbePath = ".estacoda/doctor/live-tool-smoke.ts";
-  const expectedName = "estacodaDoctorToolSmoke";
-  const expectedValue = "live-tool-ok";
-
-  await mkdir(doctorDir, { recursive: true });
-  await writeFile(probePath, `export const ${expectedName} = '${expectedValue}';\n`, "utf8");
-
-  try {
-    const response = await input.runtime.handle({
-      text: `Use the file.read tool to read ${relativeProbePath}, then tell me the exported constant name and value.`,
-      channel: "cli",
-      trustedWorkspace: true
-    });
-    const fileRead = response.toolExecutions.find((execution) => execution.tool.name === "file.read");
-    const usedProviderToolCall = response.providerExecution?.toolCalls.some((toolCall) =>
-      toolCall.name === "file_read" || toolCall.name === "file.read"
-    ) === true;
-    const finalAnswerIncludedProbe = response.text.includes(expectedName) && response.text.includes(expectedValue);
-    const warnings: string[] = [];
-
-    if (response.providerExecution?.ok !== true) {
-      warnings.push("Provider did not complete successfully during the live tool check.");
-    }
-
-    if (!usedProviderToolCall) {
-      warnings.push("Provider did not request the file_read tool.");
-    }
-
-    if (fileRead?.result?.ok !== true) {
-      warnings.push("file.read did not execute successfully during the live tool check.");
-    }
-
-    if (!finalAnswerIncludedProbe) {
-      warnings.push("Final provider answer did not include the probe constant name and value.");
-    }
-
-    return {
-      status: warnings.length === 0 ? "ready" : "blocked",
-      lines: [
-        `Live tool check: ${warnings.length === 0 ? "ready" : "blocked"}`,
-        `Probe file: ${relativeProbePath}`,
-        `Provider: ${response.providerExecution?.response?.provider ?? "unknown"}/${response.providerExecution?.response?.model ?? "unknown"}`,
-        `Provider requested file_read: ${usedProviderToolCall ? "yes" : "no"}`,
-        `file.read executed: ${fileRead?.result?.ok === true ? "yes" : "no"}`,
-        `Final answer used tool result: ${finalAnswerIncludedProbe ? "yes" : "no"}`
-      ],
-      warnings
-    };
-  } finally {
-    await rm(probePath, { force: true });
-  }
-}
-
-function renderLiveToolDiagnostic(diagnostic: LiveToolDiagnostic): string {
-  return [
-    ...diagnostic.lines,
-    diagnostic.warnings.length === 0
-      ? "Live tool status: ready"
-      : `Live tool warnings:\n${diagnostic.warnings.map((warning) => `- ${warning}`).join("\n")}`
-  ].join("\n");
-}
-
-function collectMissingProfileEnv(config: Awaited<ReturnType<typeof loadRuntimeConfig>>): string[] {
-  const envVars = new Set<string>();
-  if (config.primaryModelRoute.apiKeyEnv !== undefined) {
-    envVars.add(config.primaryModelRoute.apiKeyEnv);
-  }
-  for (const route of config.modelFallbackRoutes) {
-    if (route.apiKeyEnv !== undefined) {
-      envVars.add(route.apiKeyEnv);
-    }
-  }
-  for (const missing of config.channels.telegram.missing ?? []) {
-    envVars.add(missing);
-  }
-  return [...envVars].filter((envVar) => process.env[envVar] === undefined).sort();
-}
-
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await stat(path);
-    return true;
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-      return false;
-    }
-    throw error;
-  }
-}
-
-async function trustStoreHealthy(path: string): Promise<boolean> {
-  try {
-    JSON.parse(await readFile(path, "utf8"));
-    return true;
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-      return true;
-    }
-    return false;
-  }
 }
 
 async function browser(options: CliOptions, args: string[]): Promise<CliCommandResult> {
