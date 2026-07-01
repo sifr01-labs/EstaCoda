@@ -67,7 +67,8 @@ type OpenAiCodexPromptAction =
   | { readonly kind: "cancel" };
 
 const PROMPT_HINT = "↑↓ navigate   ENTER select";
-const OPENROUTER_MODEL_PAGE_SIZE = 25;
+const ARABIC_MODEL_PAGE_SIZE = 15;
+const ENGLISH_OPENROUTER_MODEL_PAGE_SIZE = 25;
 
 export async function selectProviderModelRoute(
   options: SelectProviderModelRouteOptions
@@ -213,15 +214,15 @@ async function promptModel(
   const currentModelIndex = currentModelInProviderList
     ? candidates.findIndex((candidate) => candidate.id === options.currentModelId)
     : -1;
-  const paginate = shouldPaginateModels(options, provider, candidates);
-  const totalPages = paginate ? Math.ceil(candidates.length / OPENROUTER_MODEL_PAGE_SIZE) : 1;
-  let pageIndex = paginate && currentModelIndex >= 0
-    ? Math.floor(currentModelIndex / OPENROUTER_MODEL_PAGE_SIZE)
+  const pageSize = modelPageSize(options, provider, candidates);
+  const totalPages = pageSize !== undefined ? Math.ceil(candidates.length / pageSize) : 1;
+  let pageIndex = pageSize !== undefined && currentModelIndex >= 0
+    ? Math.floor(currentModelIndex / pageSize)
     : 0;
 
   while (true) {
-    const pageStart = paginate ? pageIndex * OPENROUTER_MODEL_PAGE_SIZE : 0;
-    const pageEnd = paginate ? Math.min(pageStart + OPENROUTER_MODEL_PAGE_SIZE, candidates.length) : candidates.length;
+    const pageStart = pageSize !== undefined ? pageIndex * pageSize : 0;
+    const pageEnd = pageSize !== undefined ? Math.min(pageStart + pageSize, candidates.length) : candidates.length;
     const visibleCandidates = candidates.slice(pageStart, pageEnd);
     const currentModelPageIndex = currentModelIndex >= pageStart && currentModelIndex < pageEnd
       ? currentModelIndex - pageStart
@@ -245,7 +246,7 @@ async function promptModel(
       title: modelTitle(options.locale, options.mode),
       body: `${modelBody(options.locale, options.mode).replace("{providerId}", provider.id)}\n`,
       statusLines: currentRouteStatusLines(options.locale, options.currentProviderId, options.currentModelId),
-      technicalLines: modelTechnicalLines(options.locale, provider, options, candidates, pageStart, pageEnd, currentModelInProviderList, paginate),
+      technicalLines: modelTechnicalLines(options.locale, provider, options, candidates, pageStart, pageEnd, currentModelInProviderList, pageSize !== undefined),
       columns: promptColumns(options.locale),
       options: promptOptions,
       defaultIndex: currentModelPageIndex >= 0 ? currentModelPageIndex : 0,
@@ -269,14 +270,22 @@ async function promptModel(
   }
 }
 
-function shouldPaginateModels(
+function modelPageSize(
   options: SelectProviderModelRouteOptions,
   provider: ProviderCandidate,
   candidates: readonly ModelCandidate[]
-): boolean {
-  return provider.id === "openrouter" &&
+): number | undefined {
+  if (options.locale === "ar" && candidates.length > ARABIC_MODEL_PAGE_SIZE) {
+    return ARABIC_MODEL_PAGE_SIZE;
+  }
+
+  if (provider.id === "openrouter" &&
     (options.mode === "primary" || options.mode === "fallback" || options.mode === "auxiliary") &&
-    candidates.length > OPENROUTER_MODEL_PAGE_SIZE;
+    candidates.length > ENGLISH_OPENROUTER_MODEL_PAGE_SIZE) {
+    return ENGLISH_OPENROUTER_MODEL_PAGE_SIZE;
+  }
+
+  return undefined;
 }
 
 function modelPageNavigationOptions(
