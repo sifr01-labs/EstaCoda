@@ -60,8 +60,8 @@ describe("diagnoseOAuthStatus", () => {
 
     expect(diagnostic.status).toBe("warning");
     expect(diagnostic.providerStatuses).toEqual([
-      { providerId: "codex", status: "expired" },
-      { providerId: "research", status: "ready" }
+      { providerId: "codex", authMethod: "oauth_device_pkce", status: "expired" },
+      { providerId: "research", authMethod: "oauth_external", status: "ready" }
     ]);
     expect(diagnostic.warnings).toEqual(["OAuth credentials are expired for providers: codex"]);
     expect(diagnostic.warnings.join("\n")).not.toContain("secret-access-token");

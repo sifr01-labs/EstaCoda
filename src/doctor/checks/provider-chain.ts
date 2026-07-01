@@ -1,8 +1,10 @@
 import type { LoadedRuntimeConfig } from "../../config/runtime-config.js";
 import type { ModelProfile, ProviderEndpoint, ResolvedModelRoute } from "../../contracts/provider.js";
+import { isOAuthAuthMethod } from "../../providers/oauth/oauth-types.js";
 import { resolveAllAuxiliaryRoutes } from "../../providers/auxiliary-model-resolver.js";
 import { getProviderMetadata } from "../../providers/provider-metadata.js";
 import type { DoctorProviderRoute } from "../types.js";
+import type { OAuthStatusDiagnostic } from "./oauth-status.js";
 
 export type ProviderChainDiagnostic = {
   readonly status: "ready" | "warning";
@@ -11,7 +13,10 @@ export type ProviderChainDiagnostic = {
   readonly unavailableCount: number;
 };
 
-export async function diagnoseProviderChain(config: LoadedRuntimeConfig | undefined): Promise<ProviderChainDiagnostic> {
+export async function diagnoseProviderChain(
+  config: LoadedRuntimeConfig | undefined,
+  options: { readonly oauthStatus?: OAuthStatusDiagnostic } = {}
+): Promise<ProviderChainDiagnostic> {
   if (config === undefined) {
     return {
       status: "ready",
@@ -28,7 +33,8 @@ export async function diagnoseProviderChain(config: LoadedRuntimeConfig | undefi
     label: "primary",
     route: config.primaryModelRoute,
     config,
-    providerModels
+    providerModels,
+    oauthStatus: options.oauthStatus
   }));
 
   for (const [index, route] of config.modelFallbackRoutes.entries()) {
@@ -37,7 +43,8 @@ export async function diagnoseProviderChain(config: LoadedRuntimeConfig | undefi
       label: `fallback ${index + 1}`,
       route,
       config,
-      providerModels
+      providerModels,
+      oauthStatus: options.oauthStatus
     }));
   }
 
@@ -75,15 +82,16 @@ export async function diagnoseProviderChain(config: LoadedRuntimeConfig | undefi
         route: auxiliaryRoute.route,
         config,
         providerModels,
+        oauthStatus: options.oauthStatus,
         extraDetails: auxiliaryRoute.diagnostics
       }));
     }
   }
 
   const unavailableRoutes = routes.filter((route) => route.status === "blocked" || route.status === "warning");
-  const warnings = unavailableRoutes.filter((route) => route.kind !== "primary").map((route) =>
-    `Provider route ${route.label} is unavailable: ${route.summary}`
-  );
+  const warnings = unavailableRoutes
+    .filter((route) => route.kind !== "primary" || route.summary.includes("OAuth"))
+    .map((route) => `Provider route ${route.label} is unavailable: ${route.summary}`);
 
   return {
     status: unavailableRoutes.length > 0 ? "warning" : "ready",
@@ -99,6 +107,7 @@ async function describeRoute(input: {
   readonly route: ResolvedModelRoute;
   readonly config: LoadedRuntimeConfig;
   readonly providerModels: readonly ModelProfile[];
+  readonly oauthStatus?: OAuthStatusDiagnostic;
   readonly extraDetails?: readonly string[];
 }): Promise<DoctorProviderRoute> {
   const route = input.route;
@@ -135,6 +144,15 @@ async function describeRoute(input: {
       issues.push("missing apiKeyEnv");
     } else if (process.env[route.apiKeyEnv] === undefined) {
       issues.push(`missing env var ${route.apiKeyEnv}`);
+    }
+  } else if (isOAuthAuthMethod(authMethod) && route.provider !== "unconfigured") {
+    const oauthProvider = input.oauthStatus?.providerStatuses.find((providerStatus) =>
+      providerStatus.providerId === route.provider
+    );
+    if (oauthProvider === undefined) {
+      issues.push(`missing OAuth credentials for ${route.provider}`);
+    } else if (oauthProvider.status === "expired") {
+      issues.push(`OAuth credentials expired for ${route.provider}`);
     }
   }
 

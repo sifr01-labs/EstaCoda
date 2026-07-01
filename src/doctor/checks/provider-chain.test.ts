@@ -21,6 +21,12 @@ const fallbackProfile: ModelProfile = {
   provider: "openrouter"
 };
 
+const codexProfile: ModelProfile = {
+  ...primaryProfile,
+  id: "gpt-5.5",
+  provider: "codex"
+};
+
 function adapter(id: ProviderId, models: ModelProfile[]): ProviderAdapter {
   return {
     id,
@@ -191,6 +197,50 @@ describe("diagnoseProviderChain", () => {
     expect(diagnostic.warnings).toEqual([]);
     expect(serializedRoutes).toContain("TEST_OPENAI_KEY");
     expect(serializedRoutes).not.toContain("sk-test");
+  });
+
+  it("blocks an OAuth primary route when profile credentials are missing", async () => {
+    const registry = new ProviderRegistry();
+    registry.register(adapter("codex", [codexProfile]));
+
+    const diagnostic = await diagnoseProviderChain(loadedConfig({
+      registry,
+      providers: {
+        codex: {
+          baseUrl: "https://chatgpt.com/backend-api/codex",
+          authMethod: "oauth_device_pkce",
+          enableNetwork: true
+        }
+      },
+      primaryRoute: route({
+        provider: "codex",
+        id: "gpt-5.5",
+        profile: codexProfile,
+        authMethod: "oauth_device_pkce",
+        apiKeyEnv: undefined
+      })
+    }), {
+      oauthStatus: {
+        status: "ready",
+        providerStatuses: [],
+        warnings: [],
+        notes: ["OAuth auth store has no provider records."]
+      }
+    });
+
+    expect(diagnostic.status).toBe("warning");
+    expect(diagnostic.unavailableCount).toBe(1);
+    expect(diagnostic.routes).toEqual([
+      expect.objectContaining({
+        kind: "primary",
+        label: "primary",
+        status: "blocked",
+        summary: "missing OAuth credentials for codex"
+      })
+    ]);
+    expect(diagnostic.warnings).toEqual([
+      "Provider route primary is unavailable: missing OAuth credentials for codex"
+    ]);
   });
 });
 

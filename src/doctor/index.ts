@@ -81,7 +81,7 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
   const liveProviderDiagnostic = config !== undefined && hasFlag(args, "--live")
     ? await diagnoseProviderLive(config)
     : undefined;
-  const providerChain = await diagnoseProviderChain(config);
+  const providerChain = await diagnoseProviderChain(config, { oauthStatus });
   const liveToolDiagnostic = hasFlag(args, "--live-tools", "--live-tool")
     ? await diagnoseLiveToolCall({
         runtime: options.runtime,
@@ -268,7 +268,7 @@ function buildDoctorReport(input: BuildDoctorReportInput): DoctorReport {
     check(
       "providers",
       label(input.locale, "providers"),
-      providerSeverity(input.providerDiagnostic),
+      providerSeverity(input.providerDiagnostic, input.providerChain),
       providerSummary(input.providerDiagnostic, input.providerChain, input.locale)
     ),
     check(
@@ -448,9 +448,10 @@ function externalToolsSummary(diagnostic: ExternalToolDiagnostic, locale: Doctor
   return locale === "ar" ? `${diagnostic.available.length} متاحة` : `${diagnostic.available.length} available`;
 }
 
-function providerSeverity(diagnostic: ProviderDiagnostic): DoctorCheckSeverity {
+function providerSeverity(diagnostic: ProviderDiagnostic, chain: ProviderChainDiagnostic): DoctorCheckSeverity {
   if (diagnostic.status === "blocked") return "blocked";
-  if (diagnostic.status === "warning") return "warning";
+  if (chain.routes.some((route) => route.kind === "primary" && route.status === "blocked")) return "blocked";
+  if (diagnostic.status === "warning" || chain.unavailableCount > 0) return "warning";
   return "healthy";
 }
 
@@ -512,7 +513,7 @@ function warningAction(warning: string, index: number, locale: DoctorLocale): Do
 }
 
 function warningSeverity(warning: string): DoctorAction["severity"] {
-  return /Config syntax error|Provider setup is incomplete|not writable|blocked|SQLite session DB (?:could not be opened|schema is missing required|FTS index is unavailable|path is not a file)/iu.test(warning)
+  return /Config syntax error|Provider setup is incomplete|Provider route primary is unavailable|not writable|blocked|SQLite session DB (?:could not be opened|schema is missing required|FTS index is unavailable|path is not a file)/iu.test(warning)
     ? "blocked"
     : "warning";
 }
@@ -532,7 +533,7 @@ function warningDetailLines(warning: string, locale: DoctorLocale): readonly str
 function warningCommand(warning: string): string | undefined {
   if (/Config syntax error/iu.test(warning)) return "estacoda setup --interactive";
   if (/OAuth credentials are expired/iu.test(warning)) return "estacoda model setup";
-  if (/Provider route .*missing (?:env var|apiKeyEnv)|Provider route .*provider setup incomplete/iu.test(warning)) return "estacoda model setup";
+  if (/Provider route .*(?:missing (?:env var|apiKeyEnv|OAuth credentials)|OAuth credentials expired|provider setup incomplete)/iu.test(warning)) return "estacoda model setup";
   if (/Provider setup is incomplete|missing required values|Missing API key/iu.test(warning)) return "estacoda model setup";
   return undefined;
 }

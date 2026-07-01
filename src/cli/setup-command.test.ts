@@ -531,6 +531,59 @@ describe("cli setup command", () => {
     ]));
   });
 
+  it("doctor --json marks OAuth primary route failures as provider blockers", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    await writeUserConfig(tempDir, {
+      model: {
+        provider: "codex",
+        id: "gpt-5.5",
+      },
+      providers: {
+        codex: {
+          baseUrl: "https://chatgpt.com/backend-api/codex",
+          apiMode: "openai_responses",
+          authMethod: "oauth_device_pkce",
+          enableNetwork: true,
+        },
+      },
+    });
+
+    const result = await runCliCommand({
+      argv: ["doctor", "--json"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+    const report = JSON.parse(result.output) as {
+      sections: Array<{ checks: Array<{ id: string; severity: string; summary?: string }> }>;
+      providerRoutes: Array<{ kind: string; label: string; status: string; summary: string }>;
+      actions: Array<{ title: string; command?: string; severity: string }>;
+      verdict: { status: string };
+    };
+    const providerCheck = report.sections.flatMap((section) => section.checks).find((check) => check.id === "providers");
+
+    expect(providerCheck).toEqual(expect.objectContaining({
+      severity: "blocked",
+      summary: "1 route(s) unavailable"
+    }));
+    expect(report.verdict.status).toBe("blocked");
+    expect(report.providerRoutes).toEqual([
+      expect.objectContaining({
+        kind: "primary",
+        label: "primary",
+        status: "blocked",
+        summary: expect.stringContaining("missing OAuth credentials for codex")
+      })
+    ]);
+    expect(report.actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        title: expect.stringContaining("missing OAuth credentials for codex"),
+        command: "estacoda model setup",
+        severity: "blocked"
+      })
+    ]));
+  });
+
   it("doctor --fix creates only safe local state skeleton repairs", async () => {
     const workspaceRoot = join(tempDir, "workspace");
     const globalPaths = resolveGlobalStateHome({ homeDir: tempDir });

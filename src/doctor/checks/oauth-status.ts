@@ -1,7 +1,9 @@
 import { loadOAuthStore } from "../../providers/oauth/oauth-store.js";
+import type { ProviderAuthMethod } from "../../contracts/provider.js";
 
 export type OAuthProviderStatus = {
   readonly providerId: string;
+  readonly authMethod: ProviderAuthMethod;
   readonly status: "ready" | "expired";
 };
 
@@ -22,6 +24,7 @@ export async function diagnoseOAuthStatus(options: {
   const providerStatuses = Object.entries(result.store.providers)
     .map(([providerId, record]): OAuthProviderStatus => ({
       providerId,
+      authMethod: record.authMethod,
       status: isExpired(record.expiresAt, now) ? "expired" : "ready"
     }))
     .sort((left, right) => left.providerId.localeCompare(right.providerId));
