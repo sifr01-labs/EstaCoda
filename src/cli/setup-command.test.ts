@@ -416,7 +416,7 @@ describe("cli setup command", () => {
     expect(result.handled).toBe(true);
     expect(result.exitCode).toBe(1);
     expect(result.output).toContain("Config syntax error:");
-    expect(result.output).toContain("Model: unknown/unknown");
+    expect(result.output).toMatch(/Model:\s+unknown\/unknown/u);
   });
 
   it("keeps live CLI entrypoints free of the legacy interactive onboarding runner", async () => {
