@@ -470,6 +470,7 @@ describe("cli setup command", () => {
     expect(result.handled).toBe(true);
     expect(result.output).toContain("Dependencies");
     expect(result.output).toContain("audit not run");
+    expect(result.output).toContain("Python Environments");
     expect(result.output).toContain("Run: estacoda doctor --audit");
     expect(result.output).not.toContain("Dependency audit found");
   });
