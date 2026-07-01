@@ -634,6 +634,10 @@ function warningDetailLines(warning: string, locale: DoctorLocale): readonly str
   if (mcpServer !== undefined) {
     return [locale === "ar" ? `الخادم: ${mcpServer}` : `Server: ${mcpServer}`];
   }
+  const pythonCapability = pythonCapabilityFromWarning(warning);
+  if (pythonCapability !== undefined) {
+    return [locale === "ar" ? `القدرة: ${pythonCapability}` : `Capability: ${pythonCapability}`];
+  }
   return undefined;
 }
 
@@ -642,7 +646,17 @@ function warningCommand(warning: string): string | undefined {
   if (/OAuth credentials are expired/iu.test(warning)) return "estacoda model setup";
   if (/Provider route .*(?:missing (?:env var|apiKeyEnv|OAuth credentials)|OAuth credentials expired|provider setup incomplete)/iu.test(warning)) return "estacoda model setup";
   if (/Provider setup is incomplete|missing required values|Missing API key/iu.test(warning)) return "estacoda model setup";
+  const pythonCapability = pythonCapabilityFromWarning(warning);
+  if (pythonCapability !== undefined) return `estacoda python-env setup ${pythonCapability}`;
   return undefined;
+}
+
+function pythonCapabilityFromWarning(warning: string): string | undefined {
+  const capabilityId = /^Managed Python capability ([^ ]+) is not ready:/iu.exec(warning)?.[1];
+  if (capabilityId === undefined || !/^[a-z0-9][a-z0-9._-]*$/iu.test(capabilityId)) {
+    return undefined;
+  }
+  return capabilityId;
 }
 
 function localizeWarningTitle(warning: string, locale: DoctorLocale): string {

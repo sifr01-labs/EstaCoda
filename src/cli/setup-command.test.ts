@@ -604,6 +604,41 @@ describe("cli setup command", () => {
     ]));
   });
 
+  it("doctor maps missing managed Python capabilities to explicit setup commands", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    await writeUserConfig(tempDir, {
+      ...(localReadyConfig() as Record<string, unknown>),
+      web: {
+        searchBackend: "ddgs"
+      }
+    });
+
+    const result = await runCliCommand({
+      argv: ["doctor", "--json"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+    const report = JSON.parse(result.output) as {
+      sections: Array<{ checks: Array<{ id: string; severity: string; summary?: string }> }>;
+      actions: Array<{ title: string; command?: string; detailLines?: string[]; severity: string }>;
+    };
+    const pythonCheck = report.sections.flatMap((section) => section.checks).find((check) => check.id === "python-environments");
+
+    expect(pythonCheck).toEqual(expect.objectContaining({
+      severity: "warning",
+      summary: "ddgs"
+    }));
+    expect(report.actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        title: expect.stringContaining("Managed Python capability ddgs is not ready"),
+        detailLines: ["Capability: ddgs"],
+        command: "estacoda python-env setup ddgs",
+        severity: "warning"
+      })
+    ]));
+  });
+
   it("doctor --fix creates only safe local state skeleton repairs", async () => {
     const workspaceRoot = join(tempDir, "workspace");
     const globalPaths = resolveGlobalStateHome({ homeDir: tempDir });
@@ -635,6 +670,8 @@ describe("cli setup command", () => {
     await expect(stat(globalPaths.trustJsonPath)).rejects.toThrow();
     await expect(stat(globalPaths.workspaceApprovalsPath)).rejects.toThrow();
     await expect(stat(globalPaths.sessionsSqlitePath)).rejects.toThrow();
+    await expect(stat(join(globalPaths.stateRoot, "python-env"))).rejects.toThrow();
+    await expect(stat(join(globalPaths.stateRoot, "python-envs"))).rejects.toThrow();
     expect(await readFile(profilePaths.envPath, "utf8")).toBe("");
     expect(await readFile(profilePaths.authJsonPath, "utf8")).toBe("{}\n");
   });
