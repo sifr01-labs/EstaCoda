@@ -268,8 +268,50 @@ function technical(value: string, locale: DoctorLocale): string {
 
 function localizeDynamicText(value: string, locale: DoctorLocale): string {
   if (locale !== "ar") return value;
+  const translated = translateDoctorDynamicText(value);
+  if (translated !== undefined) return translated;
   if (/[\u0600-\u06ff]/u.test(value)) return isolateRtl(value);
   return isolateLtr(value);
+}
+
+function translateDoctorDynamicText(value: string): string | undefined {
+  const memoryFile = /^Memory file will be created on first write: (.+)$/u.exec(value)?.[1];
+  if (memoryFile !== undefined) {
+    return isolateRtl(`سيتم إنشاء ملف الذاكرة عند أول كتابة: ${isolateLtr(memoryFile)}`);
+  }
+  const memoryState = /^Memory supporting state will be created by doctor --fix: (.+)$/u.exec(value)?.[1];
+  if (memoryState !== undefined) {
+    return isolateRtl(`سيتم إنشاء حالة الذاكرة المساندة عبر ${isolateLtr("doctor --fix")}: ${isolateLtr(memoryState)}`);
+  }
+  const sqlitePath = /^SQLite session DB is not initialized: (.+)$/u.exec(value)?.[1];
+  if (sqlitePath !== undefined) {
+    return isolateRtl(`قاعدة بيانات الجلسات غير مهيأة: ${isolateLtr(sqlitePath)}`);
+  }
+  const optionalPython = /^Optional managed Python capabilities not installed: (.+)$/u.exec(value)?.[1];
+  if (optionalPython !== undefined) {
+    return isolateRtl(`قدرات Python المُدارة الاختيارية غير مثبتة: ${isolateLtr(optionalPython)}`);
+  }
+  if (value === "Dependency audit not run.") {
+    return isolateRtl("لم يتم تشغيل فحص أمان الاعتماديات.");
+  }
+  if (value === "System Python 3 was not found; managed Python setup would require Python 3.") {
+    return isolateRtl(`لم يتم العثور على ${isolateLtr("Python 3")}؛ إعداد بيئة Python المُدارة يتطلب ${isolateLtr("Python 3")}.`);
+  }
+  if (value === "No configured feature currently requires a managed Python environment.") {
+    return isolateRtl("لا توجد ميزة مفعّلة تتطلب بيئة Python مُدارة حاليًا.");
+  }
+  if (value === "pack registry: no packs installed") {
+    return isolateRtl("سجل الحزم: لا توجد حزم مثبتة");
+  }
+  const packInstalled = /^pack registry: (\d+) installed$/u.exec(value)?.[1];
+  if (packInstalled !== undefined) {
+    return isolateRtl(`سجل الحزم: ${isolateLtr(packInstalled)} مثبتة`);
+  }
+  const packsDisabled = /^(\d+) pack\(s\) disabled$/u.exec(value)?.[1];
+  if (packsDisabled !== undefined) {
+    return isolateRtl(`${isolateLtr(packsDisabled)} حزم معطلة`);
+  }
+  return undefined;
 }
 
 function clampWidth(width: number): number {

@@ -70,14 +70,59 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
   const activeProfilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId: activeProfileId });
   const stateHome = resolveStateHome({ homeDir: options.homeDir });
   const directoryDiagnostic = await diagnoseDirectoryStructure({ homeDir: options.homeDir, profileId: selectedProfile });
-  const sqliteHealth = await diagnoseSQLiteHealth({ homeDir: options.homeDir });
+  const sqliteHealth = await safeDoctorDiagnostic(
+    "sessions",
+    () => diagnoseSQLiteHealth({ homeDir: options.homeDir }),
+    (warning): SQLiteHealthDiagnostic => ({
+      path: stateHome.sessionsSqlitePath,
+      status: "warning",
+      walSizeBytes: 0,
+      schemaValid: false,
+      ftsHealthy: false,
+      ftsWriteHealthy: "not-run",
+      missingTables: [],
+      missingColumns: [],
+      warnings: [warning],
+      notes: []
+    })
+  );
   const oauthStatus = await diagnoseOAuthStatus({ homeDir: options.homeDir, profileId: selectedProfile });
   const externalTools = await diagnoseExternalTools();
-  const memoryHealth = await diagnoseMemoryHealth({ homeDir: options.homeDir, profileId: selectedProfile });
-  const npmAudit = await diagnoseNpmAudit({
-    enabled: hasFlag(args, "--audit", "--security-audit"),
-    cwd: options.workspaceRoot
-  });
+  const memoryHealth = await safeDoctorDiagnostic(
+    "memory",
+    () => diagnoseMemoryHealth({ homeDir: options.homeDir, profileId: selectedProfile }),
+    (warning): MemoryHealthDiagnostic => ({
+      status: "warning",
+      provider: "file",
+      readyFiles: [],
+      missingFiles: [],
+      readySupportingPaths: [],
+      missingSupportingPaths: [],
+      problemFiles: [],
+      warnings: [warning],
+      notes: []
+    })
+  );
+  const npmAudit = await safeDoctorDiagnostic(
+    "dependencies",
+    () => diagnoseNpmAudit({
+      enabled: hasFlag(args, "--audit", "--security-audit"),
+      cwd: options.workspaceRoot
+    }),
+    (warning): NpmAuditDiagnostic => ({
+      status: "warning",
+      command: ["pnpm", "audit", "--json"],
+      timeoutMs: 30_000,
+      totalVulnerabilities: 0,
+      severityCounts: { info: 0, low: 0, moderate: 0, high: 0, critical: 0 },
+      runtimeVulnerabilities: 0,
+      devVulnerabilities: 0,
+      unknownVulnerabilities: 0,
+      timedOut: false,
+      warnings: [warning],
+      notes: []
+    })
+  );
 
   try {
     config = await loadRuntimeConfig(effectiveOptions);
@@ -86,10 +131,21 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
   }
   const configHygiene = await diagnoseConfigHygiene(selectedProfilePaths.configPath);
   const mcpSecurity = diagnoseMcpSecurity(config);
-  const pythonEnvironments = await diagnosePythonEnvironments({
-    stateRoot: stateHome.stateRoot,
-    config
-  });
+  const pythonEnvironments = await safeDoctorDiagnostic(
+    "python environments",
+    () => diagnosePythonEnvironments({
+      stateRoot: stateHome.stateRoot,
+      config
+    }),
+    (warning): PythonEnvironmentDiagnostic => ({
+      status: "warning",
+      systemPython: undefined,
+      requiredCapabilities: [],
+      optionalCapabilities: [],
+      warnings: [warning],
+      notes: []
+    })
+  );
 
   const providerDiagnostic = config === undefined
     ? setupState.setupVerification.providerDiagnostic
@@ -271,6 +327,18 @@ type BuildDoctorReportInput = {
   readonly browserBackend: string;
   readonly missingProfileEnv: readonly string[];
 };
+
+async function safeDoctorDiagnostic<T>(
+  name: string,
+  diagnose: () => Promise<T>,
+  fallback: (warning: string) => T
+): Promise<T> {
+  try {
+    return await diagnose();
+  } catch (error) {
+    return fallback(`Doctor ${name} diagnostic failed: ${errorMessage(error)}`);
+  }
+}
 
 function buildDoctorReport(input: BuildDoctorReportInput): DoctorReport {
   const checks: DoctorCheck[] = [
@@ -470,6 +538,9 @@ function sqliteSeverity(diagnostic: SQLiteHealthDiagnostic): DoctorCheckSeverity
 }
 
 function sqliteSummary(diagnostic: SQLiteHealthDiagnostic, locale: DoctorLocale): string {
+  if (diagnosticFailed(diagnostic.warnings)) {
+    return locale === "ar" ? "فشل الفحص" : "diagnostic failed";
+  }
   if (diagnostic.status === "not-initialized") {
     return locale === "ar" ? "غير مهيأ" : "not initialized";
   }
@@ -515,6 +586,9 @@ function dependencyAuditSeverity(diagnostic: NpmAuditDiagnostic): DoctorCheckSev
 }
 
 function dependencyAuditSummary(diagnostic: NpmAuditDiagnostic, locale: DoctorLocale): string {
+  if (diagnosticFailed(diagnostic.warnings)) {
+    return locale === "ar" ? "فشل الفحص" : "diagnostic failed";
+  }
   if (diagnostic.status === "not-run") {
     return locale === "ar" ? "لم يتم تشغيل الفحص" : "audit not run";
   }
@@ -534,6 +608,9 @@ function dependencyAuditSummary(diagnostic: NpmAuditDiagnostic, locale: DoctorLo
 }
 
 function pythonEnvironmentsSummary(diagnostic: PythonEnvironmentDiagnostic, locale: DoctorLocale): string {
+  if (diagnosticFailed(diagnostic.warnings)) {
+    return locale === "ar" ? "فشل الفحص" : "diagnostic failed";
+  }
   const missingRequired = diagnostic.requiredCapabilities.filter((capability) => capability.status !== "ready");
   if (missingRequired.length > 0) {
     return missingRequired.length === 1
@@ -553,6 +630,9 @@ function memorySeverity(diagnostic: MemoryHealthDiagnostic): DoctorCheckSeverity
 }
 
 function memorySummary(diagnostic: MemoryHealthDiagnostic, locale: DoctorLocale): string {
+  if (diagnosticFailed(diagnostic.warnings)) {
+    return locale === "ar" ? "فشل الفحص" : "diagnostic failed";
+  }
   if (diagnostic.problemFiles.length > 0) {
     return locale === "ar"
       ? `${diagnostic.problemFiles.length} مشاكل في ملفات الذاكرة`
@@ -571,6 +651,10 @@ function providerSeverity(diagnostic: ProviderDiagnostic, chain: ProviderChainDi
 function firstOrReady(warnings: readonly string[], locale: DoctorLocale): string {
   if (warnings.length > 0) return warnings[0]!;
   return locale === "ar" ? "جاهز" : "ready";
+}
+
+function diagnosticFailed(warnings: readonly string[]): boolean {
+  return warnings.some((warning) => /^Doctor .* diagnostic failed:/u.test(warning));
 }
 
 function packSummary(input: BuildDoctorReportInput): string {
@@ -693,6 +777,7 @@ function localizeWarningTitle(warning: string, locale: DoctorLocale): string {
   if (/Dependency audit could not run/iu.test(warning)) return "تعذر تشغيل فحص الاعتماديات";
   if (/System Python 3 was not found/iu.test(warning)) return "لم يتم العثور على Python 3 للنظام";
   if (/Managed Python capability .* is not ready/iu.test(warning)) return "قدرة Python المُدارة غير جاهزة";
+  if (/Doctor .* diagnostic failed/iu.test(warning)) return "تعذر تشغيل أحد فحوصات الطبيب";
   if (/Memory profile root is missing or invalid/iu.test(warning)) return "جذر ذاكرة الملف الشخصي غير موجود أو غير صالح";
   if (/Memory file .* is not usable/iu.test(warning)) return "ملف ذاكرة غير قابل للاستخدام";
   if (/SQLite session DB schema is missing required tables/iu.test(warning)) return "قاعدة بيانات الجلسات تنقصها جداول مطلوبة";

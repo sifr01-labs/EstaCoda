@@ -212,12 +212,22 @@ describe("renderDoctorReport", () => {
           detailLines: ["المتغيرات: OPENROUTER_API_KEY"],
           command: "estacoda model setup"
         }
+      ],
+      notes: [
+        "Memory file will be created on first write: /tmp/USER.md",
+        "Dependency audit not run.",
+        "Optional managed Python capabilities not installed: ddgs"
       ]
     }));
 
     expect(output).toContain("فحص صحة النظام");
     expect(output).toContain("◇ الفحوصات");
     expect(output).toContain("◇ الإجراءات");
+    expect(output).toContain("سيتم إنشاء ملف الذاكرة عند أول كتابة");
+    expect(output).toContain("لم يتم تشغيل فحص أمان الاعتماديات");
+    expect(output).toContain("قدرات Python المُدارة الاختيارية غير مثبتة");
+    expect(output).toContain(`${LRI}/tmp/USER.md${PDI}`);
+    expect(output).toContain(`${LRI}ddgs${PDI}`);
     expect(output).toContain(`${LRI}openrouter/anthropic/claude-sonnet${PDI}`);
     expect(output).toContain(`${LRI}estacoda model setup${PDI}`);
   });
