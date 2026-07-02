@@ -6,7 +6,9 @@ export type SecurityAdvisory = {
   readonly affectedVersions: string;
   readonly severity: SecurityAdvisorySeverity;
   readonly title: string;
+  readonly titleAr?: string;
   readonly recommendation: string;
+  readonly recommendationAr?: string;
 };
 
 export const BUNDLED_SECURITY_ADVISORIES: readonly SecurityAdvisory[] = [];

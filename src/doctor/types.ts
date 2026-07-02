@@ -42,6 +42,7 @@ export type DoctorAction = {
   readonly title: string;
   readonly detailLines?: readonly string[];
   readonly command?: string;
+  readonly commandLabel?: string;
 };
 
 export type DoctorVerdict = {

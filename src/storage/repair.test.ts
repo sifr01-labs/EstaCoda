@@ -61,6 +61,27 @@ describe("repairSQLiteSchema", () => {
     await expect(stat(`${path}.bak-2026-07-02T00-00-00-000Z`)).rejects.toThrow();
   });
 
+  it("rebuilds FTS when search is healthy but the write probe fails", async () => {
+    const path = await tempPath();
+    await createSessionDb(path);
+
+    const report = await repairSQLiteSchema({
+      path,
+      now: () => new Date("2026-07-02T00:00:00.000Z"),
+      writeHealthProbe: () => ({ ok: false, reason: "synthetic write failure" })
+    });
+
+    expect(report).toEqual(expect.objectContaining({
+      path,
+      status: "repaired",
+      repaired: true,
+      strategy: "fts-rebuild",
+      backupPath: `${path}.bak-2026-07-02T00-00-00-000Z`
+    }));
+    expect(report.notes).toContain("SQLite session DB FTS write probe failed before repair: synthetic write failure");
+    await expect(ftsSearch(path, "repairable")).resolves.toEqual(["message-1"]);
+  });
+
   it("blocks bad SQLite files without deleting or rewriting the original", async () => {
     const path = await tempPath();
     await mkdir(dirname(path), { recursive: true });

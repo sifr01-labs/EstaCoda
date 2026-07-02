@@ -11,6 +11,7 @@ import { resolveGlobalStateHome, resolveProfileStateHome } from "../config/profi
 import { runInitCommand } from "./init-command.js";
 import { CURRENT_OAUTH_STORE_VERSION } from "../providers/oauth/oauth-types.js";
 import { openSQLiteDatabase } from "../storage/factory.js";
+import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-cli-setup-test-"));
@@ -795,6 +796,30 @@ describe("cli setup command", () => {
     expect(report.actions.filter((action) => action.id === "sqlite-session-repair")).toHaveLength(1);
   });
 
+  it("doctor --sqlite-write-probe runs the explicit SQLite write probe", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    await writeUserConfig(tempDir, localReadyConfig());
+    const sessionPath = resolveGlobalStateHome({ homeDir: tempDir }).sessionsSqlitePath;
+    await createHealthySessionDb(sessionPath);
+
+    const result = await runCliCommand({
+      argv: ["doctor", "--json", "--sqlite-write-probe"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+    const report = JSON.parse(result.output) as {
+      sections: Array<{ checks: Array<{ id: string; severity: string; summary?: string }> }>;
+    };
+    const sessionsCheck = report.sections.flatMap((section) => section.checks).find((check) => check.id === "sessions");
+
+    expect(result.handled).toBe(true);
+    expect(sessionsCheck).toEqual(expect.objectContaining({
+      severity: "healthy",
+      summary: "1 sessions · write probe healthy"
+    }));
+  });
+
   it("doctor --repair-sessions backs up and rebuilds broken SQLite FTS", async () => {
     const workspaceRoot = join(tempDir, "workspace");
     await writeUserConfig(tempDir, localReadyConfig());
@@ -1113,6 +1138,22 @@ async function trustWorkspace(homeDir: string, workspaceRoot: string): Promise<v
   await new WorkspaceTrustStore({
     path: join(homeDir, ".estacoda", "trust.json"),
   }).grant(workspaceRoot, { label: "test" });
+}
+
+async function createHealthySessionDb(path: string): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  const db = new SQLiteSessionDB({ path });
+  try {
+    await db.createSession({ id: "session-1", profileId: "default" });
+    await db.appendMessage({
+      id: "message-1",
+      sessionId: "session-1",
+      role: "user",
+      content: "doctor sqlite write probe"
+    });
+  } finally {
+    db.close();
+  }
 }
 
 async function createBrokenFtsSessionDb(path: string): Promise<void> {

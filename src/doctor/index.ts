@@ -35,6 +35,7 @@ import { diagnoseOAuthStatus, type OAuthStatusDiagnostic } from "./checks/oauth-
 import { diagnoseProviderChain, type ProviderChainDiagnostic } from "./checks/provider-chain.js";
 import { diagnosePythonEnvironments, type PythonEnvironmentDiagnostic } from "./checks/python-env.js";
 import {
+  type ActiveSecurityAdvisory,
   diagnoseSecurityAdvisories,
   type SecurityAdvisoryDiagnostic
 } from "./checks/security-advisories.js";
@@ -152,7 +153,10 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
   const directoryDiagnostic = await diagnoseDirectoryStructure({ homeDir: options.homeDir, profileId: selectedProfile });
   const sqliteHealth = await safeDoctorDiagnostic(
     "sessions",
-    () => diagnoseSQLiteHealth({ homeDir: options.homeDir }),
+    () => diagnoseSQLiteHealth({
+      homeDir: options.homeDir,
+      includeWriteProbe: hasFlag(args, "--sqlite-write-probe")
+    }),
     (warning): SQLiteHealthDiagnostic => ({
       path: stateHome.sessionsSqlitePath,
       status: "warning",
@@ -558,7 +562,9 @@ function buildDoctorReport(input: BuildDoctorReportInput): DoctorReport {
   const verdict = doctorVerdict(checks, input.locale);
   const actions = [...new Set(input.warnings)]
     .filter((warning) => !isSQLiteRepairWarning(warning, input.sqliteHealth))
+    .filter((warning) => securityAdvisoryFromWarning(warning) === undefined)
     .map((warning, index) => warningAction(warning, index, input.locale));
+  actions.push(...input.securityAdvisories.active.map((advisory) => securityAdvisoryAction(advisory, input.locale)));
   if (input.sqliteHealth.repairPlan !== undefined) {
     actions.push(sqliteRepairAction(input.sqliteHealth, input.locale));
   }
@@ -667,6 +673,9 @@ function sqliteSummary(diagnostic: SQLiteHealthDiagnostic, locale: DoctorLocale)
   }
   if (!diagnostic.schemaValid) return locale === "ar" ? "انحراف في المخطط" : "schema drift";
   const count = diagnostic.sessionsCount ?? 0;
+  if (diagnostic.ftsWriteHealthy === true) {
+    return locale === "ar" ? `${count} جلسات · اختبار الكتابة سليم` : `${count} sessions · write probe healthy`;
+  }
   return locale === "ar" ? `${count} جلسات` : `${count} sessions`;
 }
 
@@ -867,6 +876,31 @@ function warningAction(warning: string, index: number, locale: DoctorLocale): Do
     title: localizeWarningTitle(warning, locale),
     detailLines: warningDetailLines(warning, locale),
     command: warningCommand(warning)
+  };
+}
+
+function securityAdvisoryAction(advisory: ActiveSecurityAdvisory, locale: DoctorLocale): DoctorAction {
+  const title = locale === "ar" ? advisory.titleAr ?? advisory.title : advisory.title;
+  const recommendation = locale === "ar" ? advisory.recommendationAr ?? advisory.recommendation : advisory.recommendation;
+  return {
+    id: `advisory:${advisory.id}`,
+    severity: advisory.severity === "critical" ? "blocked" : "warning",
+    title: locale === "ar" ? `تنبيه أمني ${advisory.id}` : `Advisory ${advisory.id}`,
+    detailLines: locale === "ar"
+      ? [
+          `الحزمة: ${advisory.packageName}@${advisory.installedVersion}`,
+          `العنوان: ${title}`,
+          `الشدة: ${advisory.severity}`,
+          `التوصية: ${recommendation}`
+        ]
+      : [
+          `Package: ${advisory.packageName}@${advisory.installedVersion}`,
+          `Title: ${title}`,
+          `Severity: ${advisory.severity}`,
+          `Recommendation: ${recommendation}`
+        ],
+    command: `estacoda doctor --ack ${advisory.id}`,
+    commandLabel: locale === "ar" ? "تأكيد" : "Acknowledge"
   };
 }
 

@@ -19,6 +19,7 @@ export type SQLiteRepairReport = {
 export async function repairSQLiteSchema(options: {
   readonly path: string;
   readonly now?: () => Date;
+  readonly writeHealthProbe?: (db: SQLiteDatabase) => SQLiteWriteRepairProbeResult;
 }): Promise<SQLiteRepairReport> {
   const path = options.path;
   const notes: string[] = [];
@@ -36,14 +37,18 @@ export async function repairSQLiteSchema(options: {
       return blocked(path, "SQLite session DB cannot be safely repaired: required session/message tables are missing.", notes);
     }
     if (isFtsSearchHealthy(db)) {
-      notes.push("SQLite session DB FTS index is already healthy.");
-      return {
-        path,
-        status: "not-needed",
-        repaired: false,
-        strategy: "none",
-        notes
-      };
+      const writeProbe = await probeFtsWriteHealth(path, options.writeHealthProbe);
+      if (writeProbe.ok) {
+        notes.push("SQLite session DB FTS index is already healthy.");
+        return {
+          path,
+          status: "not-needed",
+          repaired: false,
+          strategy: "none",
+          notes
+        };
+      }
+      notes.push(`SQLite session DB FTS write probe failed before repair: ${writeProbe.reason}`);
     }
   } catch (error) {
     return blocked(path, `SQLite session DB could not be opened for repair: ${errorMessage(error)}`, notes);
@@ -99,6 +104,71 @@ function isFtsSearchHealthy(db: SQLiteDatabase): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+type SQLiteWriteRepairProbeResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: string };
+
+async function probeFtsWriteHealth(
+  path: string,
+  probe: ((db: SQLiteDatabase) => SQLiteWriteRepairProbeResult) | undefined
+): Promise<SQLiteWriteRepairProbeResult> {
+  let db: SQLiteDatabase | undefined;
+  try {
+    db = await openSQLiteDatabase({ path, readonly: false, timeoutMs: 1_000 });
+    return (probe ?? defaultWriteHealthProbe)(db);
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  } finally {
+    db?.close();
+  }
+}
+
+function defaultWriteHealthProbe(db: SQLiteDatabase): SQLiteWriteRepairProbeResult {
+  const now = new Date().toISOString();
+  const id = `doctor-sqlite-repair-probe-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  try {
+    db.exec("savepoint doctor_sqlite_repair_probe");
+    db.query(
+      `insert into sessions (
+        id,
+        profile_id,
+        created_at,
+        updated_at
+      ) values (?, ?, ?, ?)`
+    ).run(id, "__doctor__", now, now);
+    db.query(
+      `insert into messages (
+        id,
+        session_id,
+        role,
+        content,
+        created_at
+      ) values (?, ?, ?, ?, ?)`
+    ).run(`${id}-message`, id, "system", "doctor sqlite repair probe", now);
+    db.query("insert into messages_fts(rowid, message_id, content) values ((select rowid from messages where id = ?), ?, ?)")
+      .run(`${id}-message`, `${id}-message`, "doctor sqlite repair probe");
+    db.exec("rollback to doctor_sqlite_repair_probe");
+    db.exec("release doctor_sqlite_repair_probe");
+    return { ok: true };
+  } catch (error) {
+    rollbackWriteProbe(db);
+    return { ok: false, reason: errorMessage(error) };
+  }
+}
+
+function rollbackWriteProbe(db: SQLiteDatabase): void {
+  try {
+    db.exec("rollback to doctor_sqlite_repair_probe");
+  } catch {
+    // The savepoint may not exist if the probe failed before it was created.
+  }
+  try {
+    db.exec("release doctor_sqlite_repair_probe");
+  } catch {
+    // Preserve the original probe failure as the actionable repair reason.
   }
 }
 

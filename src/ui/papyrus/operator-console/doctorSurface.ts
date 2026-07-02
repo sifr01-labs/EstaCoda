@@ -141,7 +141,7 @@ function renderActions(
       }
     }
     if (action.command !== undefined) {
-      const commandLabel = action.severity === "info" ? copy.runLabel : copy.fixLabel;
+      const commandLabel = action.commandLabel ?? (action.severity === "info" ? copy.runLabel : copy.fixLabel);
       rows.push(`    ${commandLabel}: ${technical(action.command, locale)}`);
     }
     rows.push("");

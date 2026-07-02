@@ -12,7 +12,9 @@ export type ActiveSecurityAdvisory = {
   readonly affectedVersions: string;
   readonly severity: SecurityAdvisorySeverity;
   readonly title: string;
+  readonly titleAr?: string;
   readonly recommendation: string;
+  readonly recommendationAr?: string;
 };
 
 export type SecurityAdvisoryDiagnostic = {
@@ -58,7 +60,9 @@ export async function diagnoseSecurityAdvisories(options: {
       affectedVersions: advisory.affectedVersions,
       severity: advisory.severity,
       title: advisory.title,
-      recommendation: advisory.recommendation
+      titleAr: advisory.titleAr,
+      recommendation: advisory.recommendation,
+      recommendationAr: advisory.recommendationAr
     }];
   }).sort((a, b) => severityRank(b.severity) - severityRank(a.severity) || a.id.localeCompare(b.id));
   const acknowledgedCount = advisories.filter((advisory) => acknowledgedIds.has(advisory.id)).length;

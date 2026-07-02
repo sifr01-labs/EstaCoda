@@ -139,6 +139,26 @@ describe("renderDoctorReport", () => {
     expect(output).toContain("Run: estacoda doctor --audit");
   });
 
+  it("renders custom command labels for acknowledgement actions", () => {
+    const output = renderDoctorReport(baseReport({
+      actions: [
+        {
+          id: "advisory:GHSA-fixture",
+          severity: "warning",
+          title: "Advisory GHSA-fixture",
+          detailLines: ["Recommendation: upgrade fixture-vuln"],
+          command: "estacoda doctor --ack GHSA-fixture",
+          commandLabel: "Acknowledge"
+        }
+      ]
+    }));
+
+    expect(output).toContain("Advisory GHSA-fixture");
+    expect(output).toContain("Recommendation: upgrade fixture-vuln");
+    expect(output).toContain("Acknowledge: estacoda doctor --ack GHSA-fixture");
+    expect(output).not.toContain("Fix: estacoda doctor --ack GHSA-fixture");
+  });
+
   it("renders JSON as the DoctorReport object without Papyrus framing", () => {
     const output = renderDoctorJsonReport(baseReport({
       providerRoutes: [
