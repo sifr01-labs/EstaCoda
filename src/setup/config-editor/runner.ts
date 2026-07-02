@@ -879,6 +879,47 @@ async function handleOptionalCapabilityAction(
       ], { pendingCredentialWrites });
     }
 
+    if (action.id === "configure-web-search" || action.id === "configure-browser") {
+      const collected = await collectOptionalCapabilityContext(options, baseContext, promptContext.module, selectedVoiceMode, {
+        allowBack: true,
+      });
+      if (collected.kind === "back") {
+        return menuBackResult(initialDecision, action.id);
+      }
+      if (collected.kind === "skip") {
+        const configuration = promptContext.module.configure(baseContext, { skip: true });
+        selectedDrafts.push(...promptContext.module.toDrafts(baseContext, configuration));
+      }
+      if (collected.kind === "configured") {
+        if (collected.pendingCredentialWrites !== undefined) {
+          pendingCredentialWrites.push(...collected.pendingCredentialWrites);
+        }
+        const configuration = promptContext.module.configure(collected.context);
+        selectedDrafts.push(...promptContext.module.toDrafts(collected.context, configuration));
+      }
+      if (selectedDrafts.length === 0) {
+        const output = `${promptContext.title} left unchanged. No setup changes were drafted.`;
+        write(options, `${output}\n`);
+        return {
+          completed: true,
+          exitCode: 0,
+          output,
+          initialDecision,
+          selectedActionId: action.id,
+        };
+      }
+
+      const bundle = buildOptionalCapabilityDraftBundle(
+        `setup-editor.optional-capabilities.${promptContext.module.id}`,
+        selectedDrafts
+      );
+      const verificationBundle = verificationDraftBundle(options, initialDecision, session, stateHome);
+      return reviewAndApplyBundles(options, initialDecision, action.id, [
+        bundle,
+        ...(verificationBundle === undefined ? [] : [verificationBundle]),
+      ], { pendingCredentialWrites });
+    }
+
     while (true) {
       const selectedResult = await promptOptionalCapabilityAction(options.prompt, {
         id: optionalPromptId(promptContext.module.id),
@@ -905,9 +946,6 @@ async function handleOptionalCapabilityAction(
         if (collected.kind === "back") {
           if (action.id === "configure-voice") {
             break;
-          }
-          if (action.id === "configure-web-search") {
-            return menuBackResult(initialDecision, action.id);
           }
           continue;
         }

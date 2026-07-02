@@ -681,7 +681,7 @@ describe("runConfigEditor", () => {
       "Voice",
       "Vision and Image Generation",
       "Image model",
-      "Browser configuration",
+      "Browser",
       "Voice",
       "WhatsApp beta",
       "Telegram",
@@ -948,7 +948,7 @@ describe("runConfigEditor", () => {
     const searchInput = selectInputs.find((input) => input.title === "Search provider");
     const voiceInputs = selectInputs.filter((input) => input.title === "Voice");
     const visionInput = selectInputs.find((input) => input.title === "Vision and Image Generation");
-    const browserInput = selectInputs.find((input) => input.title === "Browser configuration");
+    const browserInput = selectInputs.find((input) => input.title === "Browser");
     const allStatusText = selectInputs.flatMap((input) => input.statusLines ?? []).map((line) => line.text).join("\n");
 
     expect(searchInput?.statusLines).toEqual([{ text: "Current: Brave Search", tone: "active", direction: "ltr" }]);
@@ -1466,11 +1466,11 @@ describe("runConfigEditor", () => {
     expect(promptTitles).toEqual(["Choose channel", "Telegram/channels", "Choose channel", "Setup editor"]);
   });
 
-  it("returns from browser mode Back to the optional action card", async () => {
+  it("returns from browser mode Back to the setup editor without an optional action card", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
     const promptTitles: string[] = [];
-    const prompt = fakePrompt({ values: ["Configure", "Back", "Back", "exit"] });
+    const prompt = fakePrompt({ values: ["Back", "exit"] });
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
       promptTitles.push(input.title);
@@ -1490,15 +1490,15 @@ describe("runConfigEditor", () => {
     expect(result.selectedActionId).toBe("exit");
     expect(result.reviewManifest).toBeUndefined();
     expect(apply).not.toHaveBeenCalled();
-    expect(promptTitles).toEqual(["Browser", "Browser configuration", "Browser", "Setup editor"]);
+    expect(promptTitles).toEqual(["Browser", "Setup editor"]);
   });
 
-  it("returns from web search provider Back to the action menu without drafting", async () => {
+  it("returns from web search provider Back to the setup editor without drafting", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
     const before = await readFile(profileConfigPath(tempDir), "utf8");
     const selectInputs: SelectPromptInput<unknown>[] = [];
-    const prompt = fakePrompt({ values: ["Configure", "Back", "exit"] });
+    const prompt = fakePrompt({ values: ["Back", "exit"] });
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
       selectInputs.push(input as SelectPromptInput<unknown>);
@@ -1522,7 +1522,7 @@ describe("runConfigEditor", () => {
     expect(apply).not.toHaveBeenCalled();
     await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
     expect(searchProviderInput?.options.find((option) => option.label === "Back")?.group).toBe("navigation");
-    expect(selectInputs.map((input) => input.title)).toEqual(["Search", "Search provider", "Setup editor"]);
+    expect(selectInputs.map((input) => input.title)).toEqual(["Search provider", "Setup editor"]);
   });
 
   it("returns from DDGS install Back to the web search provider card without drafting", async () => {
@@ -1536,7 +1536,7 @@ describe("runConfigEditor", () => {
     });
     const before = await readFile(profileConfigPath(tempDir), "utf8");
     const selectInputs: SelectPromptInput<unknown>[] = [];
-    const prompt = fakePrompt({ values: ["Configure", "ddgs", "Back", "Back", "exit"] });
+    const prompt = fakePrompt({ values: ["ddgs", "Back", "Back", "exit"] });
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
       selectInputs.push(input as SelectPromptInput<unknown>);
@@ -1561,7 +1561,6 @@ describe("runConfigEditor", () => {
     await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
     expect(ddgsInstallInput?.options.find((option) => option.label === "Back")?.group).toBe("navigation");
     expect(selectInputs.map((input) => input.title)).toEqual([
-      "Search",
       "Search provider",
       "DDGS setup",
       "Search provider",
@@ -3677,14 +3676,12 @@ describe("runConfigEditor", () => {
     expect(result.reviewManifest).toBeUndefined();
   });
 
-  it("uses configure-first optional action ordering for unconfigured capabilities", async () => {
+  it("uses configure-first optional action ordering for channel and voice capabilities", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
     const actions = [
       { actionId: "configure-channels" as const, values: ["telegram", "unchanged"] },
       { actionId: "configure-voice" as const, values: ["stt", "unchanged"] },
-      { actionId: "configure-web-search" as const, values: ["unchanged"] },
-      { actionId: "configure-browser" as const, values: ["unchanged"] },
     ];
 
     for (const { actionId, values } of actions) {
@@ -3730,6 +3727,36 @@ describe("runConfigEditor", () => {
     expect(imageOptionLabels[0]).toEqual(["fal.ai", "BytePlus / ModelArk", "OpenAI", "Back"]);
     expect(imageOptionLabels.some((labels) => labels.includes("Configure"))).toBe(false);
     expect(imageResult.reviewManifest).toBeUndefined();
+  });
+
+  it("opens Search and Browser directly without the optional action card", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    for (const actionId of ["configure-web-search", "configure-browser"] as const) {
+      const selectInputs: SelectPromptInput<unknown>[] = [];
+      const prompt = fakePrompt({ values: ["Back", "exit"] });
+      const baseSelect = prompt.select!;
+      prompt.select = async (input) => {
+        selectInputs.push(input as SelectPromptInput<unknown>);
+        return baseSelect(input);
+      };
+
+      const result = await runConfigEditor({
+        homeDir: tempDir,
+        workspaceRoot,
+        prompt,
+        defaultActionId: actionId,
+      });
+
+      expect(result.completed).toBe(true);
+      expect(result.reviewManifest).toBeUndefined();
+      expect(selectInputs[0]?.options.map((option) => option.label)).not.toContain("Configure");
+      expect(selectInputs.map((input) => input.title)).toEqual([
+        actionId === "configure-web-search" ? "Search provider" : "Browser",
+        "Setup editor",
+      ]);
+    }
   });
 
   it("lets incomplete Telegram optional capability setup skip instead of drafting blockers", async () => {
@@ -4414,7 +4441,7 @@ describe("runConfigEditor", () => {
       },
       {
         actionId: "configure-browser" as const,
-        values: ["enable", "existing-cdp", "http://127.0.0.1:9222", true],
+        values: ["existing-cdp", "http://127.0.0.1:9222", true],
       },
     ]) {
       await rm(tempDir, { recursive: true, force: true });
@@ -4909,7 +4936,7 @@ describe("runConfigEditor", () => {
     const prompt = fakePrompt({ values: ["disabled"] });
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
-      if (input.title === "Browser configuration") {
+      if (input.title === "Browser") {
         seenOptions.push(...input.options.map((option) => option.label));
       }
       return baseSelect(input);
@@ -4954,7 +4981,7 @@ describe("runConfigEditor", () => {
       hybridRouting: false,
     });
     expect(promptedBrowserCapabilityMode(values)).toBe("local-supervised");
-    expect(selectedTitles).toEqual(["Browser configuration"]);
+    expect(selectedTitles).toEqual(["Browser"]);
     expect(textPrompts).toEqual([]);
   });
 
@@ -5039,7 +5066,6 @@ describe("runConfigEditor", () => {
       workspaceRoot,
       prompt: fakePrompt({
         values: [
-          "enable",
           "existing-cdp",
           "http://127.0.0.1:1",
           true,
@@ -5101,7 +5127,7 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["enable", "existing-cdp", ""],
+        values: ["existing-cdp", ""],
       }),
       defaultActionId: "configure-browser",
       applyExecutor: {
@@ -5126,7 +5152,7 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["enable", "existing-cdp", "http://example.com:9222"],
+        values: ["existing-cdp", "http://example.com:9222"],
       }),
       defaultActionId: "configure-browser",
       applyExecutor: {
@@ -5149,7 +5175,7 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["enable", "local-supervised", false, "", "", "", ""],
+        values: ["local-supervised", false, "", "", "", ""],
       }),
       defaultActionId: "configure-browser",
       applyExecutor: {
@@ -5172,7 +5198,7 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["enable", "browserbase", true],
+        values: ["browserbase", true],
         secret: ["bb-api-secret", "bb-project-secret"],
       }),
       defaultActionId: "configure-browser",
@@ -5210,7 +5236,7 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["enable", "browserbase", true],
+        values: ["browserbase", true],
         secret: "should-not-be-read",
       }),
       defaultActionId: "configure-browser",
@@ -5239,7 +5265,7 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["enable", "browserbase", true],
+        values: ["browserbase", true],
         secret: ["", ""],
       }),
       defaultActionId: "configure-browser",
@@ -5268,7 +5294,7 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["enable", "brave", true],
+        values: ["brave", true],
         secret: "brave-secret",
       }),
       defaultActionId: "configure-web-search",
@@ -5313,7 +5339,7 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["enable", "ddgs", true],
+        values: ["ddgs", true],
       }),
       defaultActionId: "configure-web-search",
       applyExecutor: createReviewedSetupApplyExecutor({
@@ -5346,7 +5372,7 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["enable", "ddgs", true, true],
+        values: ["ddgs", true, true],
       }),
       defaultActionId: "configure-web-search",
       applyExecutor: createReviewedSetupApplyExecutor({
