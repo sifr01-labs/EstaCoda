@@ -130,8 +130,9 @@ describe("runConfigEditor", () => {
     expect(output.join("")).toContain("configure-browser");
     expect(output.join("")).not.toContain("edit-primary-credential-reference");
     expect(output.join("")).not.toContain("review-optional-capabilities");
-    expect(output.join("")).toContain("verify-setup - Setup verification");
-    expect(output.join("")).toContain("show-diagnostics - Diagnostics");
+    expect(output.join("")).toContain("run-doctor - EstaCoda Doctor");
+    expect(output.join("")).not.toContain("verify-setup - Setup verification");
+    expect(output.join("")).not.toContain("show-diagnostics - Diagnostics");
     expect(output.join("")).toContain("exit - Exit without changes");
     await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
   });
@@ -229,8 +230,10 @@ describe("runConfigEditor", () => {
     expect(prompts[0]?.descriptions).toContain("النموذج الافتراضي الذي يستخدمه الوكيل.");
     expect(prompts[0]?.labels).toContain("القنوات");
     expect(prompts[0]?.descriptions).toContain(resolveSetupCopy("ar", "setupEditor.actions.configureChannels.description"));
-    expect(prompts[0]?.labels).toContain("التحقق من الإعداد");
-    expect(prompts[0]?.labels).toContain("التشخيصات");
+    expect(prompts[0]?.labels).toContain(resolveSetupCopy("ar", "setupEditor.actions.runDoctor"));
+    expect(prompts[0]?.descriptions).toContain("افحص حالة الإعداد واعرض الإصلاحات المطلوبة.");
+    expect(prompts[0]?.labels).not.toContain("التحقق من الإعداد");
+    expect(prompts[0]?.labels).not.toContain("التشخيصات");
     expect(prompts[0]?.labels).toContain("الخروج دون تغييرات");
     expect(prompts[0]?.descriptions).toContain("غادر الإعداد دون تعديل التكوين.");
     expect(prompts[0]?.labels).not.toContain("مزوّد مخصص متوافق مع OpenAI");
@@ -248,14 +251,16 @@ describe("runConfigEditor", () => {
       "edit-security-mode",
       "edit-workflow-learning",
       "edit-language",
-      "verify-setup",
-      "show-diagnostics",
+      "run-doctor",
       "exit",
     ]);
     const exitActionIndex = prompts[0]?.labels.indexOf("الخروج دون تغييرات") ?? -1;
     expect(prompts[0]?.groups[exitActionIndex]).toBe("navigation");
-    expect(prompts[0]?.groups[prompts[0]?.labels.indexOf("التحقق من الإعداد") ?? -1]).toBeUndefined();
-    expect(prompts[0]?.groups[prompts[0]?.labels.indexOf("التشخيصات") ?? -1]).toBeUndefined();
+    expect(prompts[0]?.labels).toContain(resolveSetupCopy("ar", "setupEditor.actions.runDoctor"));
+    expect(prompts[0]?.descriptions).toContain("افحص حالة الإعداد واعرض الإصلاحات المطلوبة.");
+    expect(prompts[0]?.labels).not.toContain("التحقق من الإعداد");
+    expect(prompts[0]?.labels).not.toContain("التشخيصات");
+    expect(prompts[0]?.groups[prompts[0]?.labels.indexOf(resolveSetupCopy("ar", "setupEditor.actions.runDoctor")) ?? -1]).toBeUndefined();
   });
 
   it("routes setup editor action selection through setup console when provided", async () => {
@@ -398,7 +403,7 @@ describe("runConfigEditor", () => {
     expect(config.security?.approvalMode).toBe("strict");
   });
 
-  it("renders read-only verification output through setup console without changing command output", async () => {
+  it("routes the legacy read-only verification alias to Doctor", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
     const output: string[] = [];
@@ -417,58 +422,38 @@ describe("runConfigEditor", () => {
     const liveText = stripAnsi(setupOutput.text());
 
     expect(result.completed).toBe(true);
-    expect(result.selectedActionId).toBe("verify-setup");
-    expect(result.finalDecision?.kind).toBe("verify-readonly");
-    expect(result.setupConsoleRenderedOutput).toBe(true);
-    expect(result.output).toContain("Setup verification prepared");
-    expect(output.join("")).toBe("Setup verification prepared.\n");
-    expect(liveText).toContain("EstaCoda Verify");
-    expect(liveText).toContain("Review setup output without applying changes.");
-    expect(liveText).toContain("Read-only diagnostics");
-    expect(liveText).toContain("State");
-    expect(liveText).toContain("configured-ready");
-    expect(liveText).toContain("Setup path");
-    expect(liveText).toContain("verify-readonly");
-    expect(liveText).toContain("Read-only output");
+    expect(result.selectedActionId).toBe("run-doctor");
+    expect(result.finalDecision).toBeUndefined();
+    expect(result.setupConsoleRenderedOutput).toBeUndefined();
+    expect(result.output).toContain("EstaCoda Doctor");
+    expect(result.output).toContain("System health inspection");
+    expect(output.join("")).toContain("EstaCoda Doctor");
+    expect(liveText).not.toContain("EstaCoda Verify");
     expect(liveText).not.toContain("Selected:");
     expect(setupOutput.text()).not.toMatch(/\x1b\[3J|\x1b\[2J|\x1b\[H|\x1b\[\d+;\d+H/u);
   });
 
-  it("renders diagnostics output through setup console without changing diagnostic text", async () => {
+  it("runs doctor from the setup editor", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
     const output: string[] = [];
-    const input = createTtyInput();
-    const setupOutput = createTtyOutput();
 
     const result = await runConfigEditor({
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt(),
-      setupConsole: { input, output: setupOutput },
-      defaultActionId: "show-diagnostics",
+      defaultActionId: "run-doctor",
       renderInitialOverview: false,
       output: { write: (value) => output.push(value) },
     });
-    const liveText = stripAnsi(setupOutput.text());
 
     expect(result.completed).toBe(true);
-    expect(result.selectedActionId).toBe("show-diagnostics");
-    expect(result.setupConsoleRenderedOutput).toBe(true);
-    expect(result.output).toContain("Setup diagnostics");
-    expect(result.output).toContain("State: configured-ready");
-    expect(output.join("")).toContain("Setup diagnostics");
-    expect(output.join("")).toContain("State: configured-ready");
-    expect(liveText).toContain("Setup Diagnostics");
-    expect(liveText).toContain("Review setup output without applying changes.");
-    expect(liveText).toContain("Read-only diagnostics");
-    expect(liveText).toContain("State");
-    expect(liveText).toContain("configured-ready");
-    expect(liveText).toContain("Setup path");
-    expect(liveText).toContain("configured-menu");
-    expect(liveText).toContain("Read-only output");
-    expect(liveText).not.toContain("Selected:");
-    expect(setupOutput.text()).not.toMatch(/\x1b\[3J|\x1b\[2J|\x1b\[H|\x1b\[\d+;\d+H/u);
+    expect(result.selectedActionId).toBe("run-doctor");
+    expect(result.setupConsoleRenderedOutput).toBeUndefined();
+    expect(result.output).toContain("EstaCoda Doctor");
+    expect(result.output).toContain("System health inspection");
+    expect(output.join("")).toContain("EstaCoda Doctor");
+    expect(output.join("")).toContain("System health inspection");
   });
 
   it("routes setup credential entry through masked setup console secret panel", async () => {
@@ -696,7 +681,7 @@ describe("runConfigEditor", () => {
       "Voice",
       "Vision and Image Generation",
       "Image model",
-      "Browser configuration",
+      "Browser",
       "Voice",
       "WhatsApp beta",
       "Telegram",
@@ -963,7 +948,7 @@ describe("runConfigEditor", () => {
     const searchInput = selectInputs.find((input) => input.title === "Search provider");
     const voiceInputs = selectInputs.filter((input) => input.title === "Voice");
     const visionInput = selectInputs.find((input) => input.title === "Vision and Image Generation");
-    const browserInput = selectInputs.find((input) => input.title === "Browser configuration");
+    const browserInput = selectInputs.find((input) => input.title === "Browser");
     const allStatusText = selectInputs.flatMap((input) => input.statusLines ?? []).map((line) => line.text).join("\n");
 
     expect(searchInput?.statusLines).toEqual([{ text: "Current: Brave Search", tone: "active", direction: "ltr" }]);
@@ -1081,7 +1066,7 @@ describe("runConfigEditor", () => {
     expect(searchInput?.options.find((option) => option.id === "web-search-none")?.current).toBe(false);
   });
 
-  it("prepares the read-only verification route without applying changes", async () => {
+  it("routes direct read-only verification selections to Doctor", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
 
@@ -1094,13 +1079,13 @@ describe("runConfigEditor", () => {
 
     expect(result.completed).toBe(true);
     expect(result.exitCode).toBe(0);
-    expect(result.selectedActionId).toBe("verify-setup");
-    expect(result.finalDecision?.kind).toBe("verify-readonly");
-    expect(result.finalDecision?.setupEditorPlanSession).toBeUndefined();
-    expect(result.output).toContain("Setup verification prepared");
+    expect(result.selectedActionId).toBe("run-doctor");
+    expect(result.finalDecision).toBeUndefined();
+    expect(result.output).toContain("EstaCoda Doctor");
+    expect(result.output).toContain("System health inspection");
   });
 
-  it("shows diagnostics for configured states without requiring a repair route action", async () => {
+  it("runs doctor for configured states without requiring a repair route action", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
 
@@ -1108,15 +1093,15 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt(),
-      defaultActionId: "show-diagnostics",
+      defaultActionId: "run-doctor",
     });
 
     expect(result.completed).toBe(true);
     expect(result.exitCode).toBe(0);
     expect(result.initialDecision.kind).toBe("configured-menu");
-    expect(result.selectedActionId).toBe("show-diagnostics");
-    expect(result.output).toContain("Setup diagnostics");
-    expect(result.output).toContain("State: configured-ready");
+    expect(result.selectedActionId).toBe("run-doctor");
+    expect(result.output).toContain("EstaCoda Doctor");
+    expect(result.output).toContain("System health inspection");
   });
 
   it("rejects unsupported route actions in the guided editor", async () => {
@@ -1481,11 +1466,11 @@ describe("runConfigEditor", () => {
     expect(promptTitles).toEqual(["Choose channel", "Telegram/channels", "Choose channel", "Setup editor"]);
   });
 
-  it("returns from browser mode Back to the optional action card", async () => {
+  it("returns from browser mode Back to the setup editor without an optional action card", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
     const promptTitles: string[] = [];
-    const prompt = fakePrompt({ values: ["Configure", "Back", "Back", "exit"] });
+    const prompt = fakePrompt({ values: ["Back", "exit"] });
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
       promptTitles.push(input.title);
@@ -1505,15 +1490,15 @@ describe("runConfigEditor", () => {
     expect(result.selectedActionId).toBe("exit");
     expect(result.reviewManifest).toBeUndefined();
     expect(apply).not.toHaveBeenCalled();
-    expect(promptTitles).toEqual(["Browser", "Browser configuration", "Browser", "Setup editor"]);
+    expect(promptTitles).toEqual(["Browser", "Setup editor"]);
   });
 
-  it("returns from web search provider Back to the action menu without drafting", async () => {
+  it("returns from web search provider Back to the setup editor without drafting", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
     const before = await readFile(profileConfigPath(tempDir), "utf8");
     const selectInputs: SelectPromptInput<unknown>[] = [];
-    const prompt = fakePrompt({ values: ["Configure", "Back", "exit"] });
+    const prompt = fakePrompt({ values: ["Back", "exit"] });
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
       selectInputs.push(input as SelectPromptInput<unknown>);
@@ -1537,7 +1522,7 @@ describe("runConfigEditor", () => {
     expect(apply).not.toHaveBeenCalled();
     await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
     expect(searchProviderInput?.options.find((option) => option.label === "Back")?.group).toBe("navigation");
-    expect(selectInputs.map((input) => input.title)).toEqual(["Search", "Search provider", "Setup editor"]);
+    expect(selectInputs.map((input) => input.title)).toEqual(["Search provider", "Setup editor"]);
   });
 
   it("returns from DDGS install Back to the web search provider card without drafting", async () => {
@@ -1551,7 +1536,7 @@ describe("runConfigEditor", () => {
     });
     const before = await readFile(profileConfigPath(tempDir), "utf8");
     const selectInputs: SelectPromptInput<unknown>[] = [];
-    const prompt = fakePrompt({ values: ["Configure", "ddgs", "Back", "Back", "exit"] });
+    const prompt = fakePrompt({ values: ["ddgs", "Back", "Back", "exit"] });
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
       selectInputs.push(input as SelectPromptInput<unknown>);
@@ -1576,7 +1561,6 @@ describe("runConfigEditor", () => {
     await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
     expect(ddgsInstallInput?.options.find((option) => option.label === "Back")?.group).toBe("navigation");
     expect(selectInputs.map((input) => input.title)).toEqual([
-      "Search",
       "Search provider",
       "DDGS setup",
       "Search provider",
@@ -3692,14 +3676,12 @@ describe("runConfigEditor", () => {
     expect(result.reviewManifest).toBeUndefined();
   });
 
-  it("uses configure-first optional action ordering for unconfigured capabilities", async () => {
+  it("uses configure-first optional action ordering for channel and voice capabilities", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
     const actions = [
       { actionId: "configure-channels" as const, values: ["telegram", "unchanged"] },
       { actionId: "configure-voice" as const, values: ["stt", "unchanged"] },
-      { actionId: "configure-web-search" as const, values: ["unchanged"] },
-      { actionId: "configure-browser" as const, values: ["unchanged"] },
     ];
 
     for (const { actionId, values } of actions) {
@@ -3745,6 +3727,36 @@ describe("runConfigEditor", () => {
     expect(imageOptionLabels[0]).toEqual(["fal.ai", "BytePlus / ModelArk", "OpenAI", "Back"]);
     expect(imageOptionLabels.some((labels) => labels.includes("Configure"))).toBe(false);
     expect(imageResult.reviewManifest).toBeUndefined();
+  });
+
+  it("opens Search and Browser directly without the optional action card", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    for (const actionId of ["configure-web-search", "configure-browser"] as const) {
+      const selectInputs: SelectPromptInput<unknown>[] = [];
+      const prompt = fakePrompt({ values: ["Back", "exit"] });
+      const baseSelect = prompt.select!;
+      prompt.select = async (input) => {
+        selectInputs.push(input as SelectPromptInput<unknown>);
+        return baseSelect(input);
+      };
+
+      const result = await runConfigEditor({
+        homeDir: tempDir,
+        workspaceRoot,
+        prompt,
+        defaultActionId: actionId,
+      });
+
+      expect(result.completed).toBe(true);
+      expect(result.reviewManifest).toBeUndefined();
+      expect(selectInputs[0]?.options.map((option) => option.label)).not.toContain("Configure");
+      expect(selectInputs.map((input) => input.title)).toEqual([
+        actionId === "configure-web-search" ? "Search provider" : "Browser",
+        "Setup editor",
+      ]);
+    }
   });
 
   it("lets incomplete Telegram optional capability setup skip instead of drafting blockers", async () => {
@@ -4429,7 +4441,7 @@ describe("runConfigEditor", () => {
       },
       {
         actionId: "configure-browser" as const,
-        values: ["enable", "existing-cdp", "http://127.0.0.1:9222", true],
+        values: ["existing-cdp", "http://127.0.0.1:9222", true],
       },
     ]) {
       await rm(tempDir, { recursive: true, force: true });
@@ -4924,7 +4936,7 @@ describe("runConfigEditor", () => {
     const prompt = fakePrompt({ values: ["disabled"] });
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
-      if (input.title === "Browser configuration") {
+      if (input.title === "Browser") {
         seenOptions.push(...input.options.map((option) => option.label));
       }
       return baseSelect(input);
@@ -4969,7 +4981,7 @@ describe("runConfigEditor", () => {
       hybridRouting: false,
     });
     expect(promptedBrowserCapabilityMode(values)).toBe("local-supervised");
-    expect(selectedTitles).toEqual(["Browser configuration"]);
+    expect(selectedTitles).toEqual(["Browser"]);
     expect(textPrompts).toEqual([]);
   });
 
@@ -5054,7 +5066,6 @@ describe("runConfigEditor", () => {
       workspaceRoot,
       prompt: fakePrompt({
         values: [
-          "enable",
           "existing-cdp",
           "http://127.0.0.1:1",
           true,
@@ -5116,7 +5127,7 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["enable", "existing-cdp", ""],
+        values: ["existing-cdp", ""],
       }),
       defaultActionId: "configure-browser",
       applyExecutor: {
@@ -5141,7 +5152,7 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["enable", "existing-cdp", "http://example.com:9222"],
+        values: ["existing-cdp", "http://example.com:9222"],
       }),
       defaultActionId: "configure-browser",
       applyExecutor: {
@@ -5164,7 +5175,7 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["enable", "local-supervised", false, "", "", "", ""],
+        values: ["local-supervised", false, "", "", "", ""],
       }),
       defaultActionId: "configure-browser",
       applyExecutor: {
@@ -5187,7 +5198,7 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["enable", "browserbase", true],
+        values: ["browserbase", true],
         secret: ["bb-api-secret", "bb-project-secret"],
       }),
       defaultActionId: "configure-browser",
@@ -5225,7 +5236,7 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["enable", "browserbase", true],
+        values: ["browserbase", true],
         secret: "should-not-be-read",
       }),
       defaultActionId: "configure-browser",
@@ -5254,7 +5265,7 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["enable", "browserbase", true],
+        values: ["browserbase", true],
         secret: ["", ""],
       }),
       defaultActionId: "configure-browser",
@@ -5283,7 +5294,7 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["enable", "brave", true],
+        values: ["brave", true],
         secret: "brave-secret",
       }),
       defaultActionId: "configure-web-search",
@@ -5328,7 +5339,7 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["enable", "ddgs", true],
+        values: ["ddgs", true],
       }),
       defaultActionId: "configure-web-search",
       applyExecutor: createReviewedSetupApplyExecutor({
@@ -5361,7 +5372,7 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt({
-        values: ["enable", "ddgs", true, true],
+        values: ["ddgs", true, true],
       }),
       defaultActionId: "configure-web-search",
       applyExecutor: createReviewedSetupApplyExecutor({
@@ -5388,7 +5399,7 @@ describe("runConfigEditor", () => {
     await writeFile(profileConfigPath(tempDir), "{not-json", "utf8");
     const output: string[] = [];
     const selectInputs: SelectPromptInput<unknown>[] = [];
-    const prompt = fakePrompt({ values: ["show-diagnostics"] });
+    const prompt = fakePrompt({ values: ["run-doctor"] });
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
       selectInputs.push(input as SelectPromptInput<unknown>);
@@ -5410,14 +5421,13 @@ describe("runConfigEditor", () => {
     expect(output.join("")).toContain("Setup Editor");
     expect(output.join("")).toContain("Available actions:");
     expect(output.join("")).not.toContain("محرّر الإعدادات");
-    expect(result.output).toContain("Setup diagnostics");
-    expect(result.output).toContain("State: broken-config");
-    expect(result.output).toContain(profileConfigPath(tempDir));
-    expect(result.output).toContain("Error:");
-    expect(result.output).toContain("Normal config edits are blocked until the config file can be parsed.");
-    expect(result.output).toContain("Only diagnostics, verification, and exit are available");
-    expect(output.join("")).toContain("verify-setup - Setup verification");
-    expect(output.join("")).toContain("show-diagnostics - Diagnostics");
+    expect(result.output).toContain("EstaCoda Doctor");
+    expect(result.output).toContain("System health inspection");
+    expect(result.output).toContain("Config syntax error");
+    expect(result.output).toContain("Expected property name");
+    expect(output.join("")).toContain("run-doctor - EstaCoda Doctor");
+    expect(output.join("")).not.toContain("verify-setup - Setup verification");
+    expect(output.join("")).not.toContain("show-diagnostics - Diagnostics");
     expect(output.join("")).toContain("exit - Exit without changes");
     expect(output.join("")).not.toContain("edit-primary-model-route");
     expect(output.join("")).not.toContain("edit-security-mode");
@@ -5425,9 +5435,8 @@ describe("runConfigEditor", () => {
     const menuInput = selectInputs[0];
     expect(menuInput?.options.map((option) =>
       typeof option.value === "object" && option.value !== null && "id" in option.value ? option.value.id : option.id
-    )).toEqual(["verify-setup", "show-diagnostics", "exit"]);
-    expect(menuInput?.options.find((option) => option.id === "verify-setup")?.group).toBeUndefined();
-    expect(menuInput?.options.find((option) => option.id === "show-diagnostics")?.group).toBeUndefined();
+    )).toEqual(["run-doctor", "exit"]);
+    expect(menuInput?.options.find((option) => option.id === "run-doctor")?.group).toBeUndefined();
     expect(menuInput?.options.find((option) => option.id === "exit")?.group).toBe("navigation");
   });
 
@@ -5440,7 +5449,7 @@ describe("runConfigEditor", () => {
       homeDir: tempDir,
       workspaceRoot,
       prompt: fakePrompt(),
-      defaultActionId: "show-diagnostics",
+      defaultActionId: "run-doctor",
     });
 
     expect(result.completed).toBe(true);
@@ -5448,14 +5457,9 @@ describe("runConfigEditor", () => {
     expect(result.initialDecision.kind).toBe("repair-first-menu");
     expect(result.initialDecision.state.kind).toBe("state-not-writable");
     expect(result.initialDecision.setupEditorPlanSession?.metadata.mode).toBe("repair-first");
-    expect(result.output).toContain("State: state-not-writable");
-    expect(result.output).toContain(profileConfigPath(tempDir));
+    expect(result.output).toContain("EstaCoda Doctor");
+    expect(result.output).toContain("System health inspection");
     expect(result.output).toContain("not writable");
-    expect(result.output).toContain("write permission");
-    expect(result.output).toContain("Restore write permission");
-    expect(result.output).toContain("read-only verification again");
-    expect(result.output).toContain("Normal writes are blocked until the state/config path is writable.");
-    expect(result.output).toContain("Only diagnostics, verification, and exit are available");
     expect(result.output).not.toContain("Config cannot be edited normally until it can be parsed safely");
     expect(result.output).not.toContain("parse safety");
     expect(result.output).not.toContain("config parse failure");

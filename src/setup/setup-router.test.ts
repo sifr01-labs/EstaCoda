@@ -99,8 +99,8 @@ describe("routeSetupEntryState", () => {
     { kind: "configured-degraded", route: "configured-degraded-menu", firstAction: "repair-setup" },
     { kind: "partial-provider", route: "repair-first-menu", firstAction: "repair-setup" },
     { kind: "missing-secret", route: "repair-first-menu", firstAction: "repair-setup" },
-    { kind: "broken-config", route: "repair-first-menu", firstAction: "show-diagnostics" },
-    { kind: "state-not-writable", route: "repair-first-menu", firstAction: "show-diagnostics" },
+    { kind: "broken-config", route: "repair-first-menu", firstAction: "run-doctor" },
+    { kind: "state-not-writable", route: "repair-first-menu", firstAction: "run-doctor" },
     { kind: "untrusted-workspace", route: "configured-menu", firstAction: "trust-workspace" },
   ];
 
@@ -146,11 +146,11 @@ describe("routeSetupEntryState", () => {
       "launch-agent",
       "review-edit-config",
       "run-guided-onboarding",
-      "verify-setup",
+      "run-doctor",
       "exit",
     ]);
     expect(decision.actions.find((action) => action.id === "launch-agent")?.mutatesConfig).toBe(false);
-    expect(decision.actions.find((action) => action.id === "verify-setup")?.mutatesConfig).toBe(false);
+    expect(decision.actions.find((action) => action.id === "run-doctor")?.mutatesConfig).toBe(false);
     expect(decision.actions.find((action) => action.id === "exit")?.mutatesConfig).toBe(false);
   });
 
@@ -165,8 +165,9 @@ describe("routeSetupEntryState", () => {
       } else {
         expect(actionIds).toContain("repair-setup");
       }
-      expect(actionIds).toContain("show-diagnostics");
-      expect(actionIds).toContain("verify-setup");
+      expect(actionIds).toContain("run-doctor");
+      expect(actionIds).not.toContain("show-diagnostics");
+      expect(actionIds).not.toContain("verify-setup");
       expect(actionIds).not.toContain("launch-agent");
     }
   });
@@ -248,7 +249,7 @@ describe("routeSetupEntryState", () => {
     expect(first).toBe(second);
     expect(first).toContain("EstaCoda is configured with warnings");
     expect(first).toContain("State: configured-degraded");
-    expect(first).toContain("- verify-setup: Run read-only verification");
+    expect(first).toContain("- run-doctor: EstaCoda Doctor");
   });
 });
 

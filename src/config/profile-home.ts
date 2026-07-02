@@ -23,6 +23,7 @@ export type ProfileStatePaths = {
   configPath: string;
   envPath: string;
   authJsonPath: string;
+  advisoriesAckedPath: string;
   soulMdPath: string;
   memoryMdPath: string;
   userMdPath: string;
@@ -70,6 +71,7 @@ export function resolveProfileStateHome(options: { homeDir?: string; profileId: 
     configPath: join(profileRoot, "config.json"),
     envPath: join(profileRoot, ".env"),
     authJsonPath: join(profileRoot, "auth.json"),
+    advisoriesAckedPath: join(profileRoot, "advisories-acked.json"),
     soulMdPath: join(profileRoot, "SOUL.md"),
     memoryMdPath: join(profileRoot, "MEMORY.md"),
     userMdPath: join(profileRoot, "USER.md"),

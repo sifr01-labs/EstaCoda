@@ -39,7 +39,7 @@ estacoda setup --provider <p> --model <m> --api-key-env <env>
 
 **Profile boundary:** Uses the active profile, or the profile selected via `--profile`.
 
-**Behavior:** Routes through a deterministic setup decision based on current state (`first-run`, configured-ready, configured-degraded, partial-provider, missing-credential, broken-config, untrusted-workspace, state-not-writable). The internal `first-run` state opens the Onboarding Wizard. Normal onboarding uses `summary -> confirm -> apply -> verify`; the redacted manifest and apply plan remain internal/operator-inspectable. Configured-ready state opens the Setup Editor with primary model route edit, fallback route edit, auxiliary route edit, optional capability configuration, security mode edit, Agent Evolution edit, read-only verification, launch after verification, and exit. Cancelling review or summary confirmation produces no mutation. Raw secrets are never displayed in review metadata.
+**Behavior:** Routes through a deterministic setup decision based on current state (`first-run`, configured-ready, configured-degraded, partial-provider, missing-credential, broken-config, untrusted-workspace, state-not-writable). The internal `first-run` state opens the Onboarding Wizard. Normal onboarding uses `summary -> confirm -> apply -> verify`; the redacted manifest and apply plan remain internal/operator-inspectable. Configured-ready state opens the Setup Editor with primary model route edit, fallback route edit, auxiliary route edit, optional capability configuration, security mode edit, Agent Evolution edit, EstaCoda Doctor, and exit. Doctor is the read-only health action for required fixes and provider route status. Cancelling review or summary confirmation produces no mutation. Raw secrets are never displayed in review metadata.
 
 **Failure modes:**
 - Broken config blocks normal edits until parsing is safe.
@@ -425,11 +425,17 @@ estacoda mcp reload                     # reload MCP config
 ## Diagnostics
 
 ```bash
-estacoda doctor                         # config readiness and provider diagnostics
+estacoda doctor                         # health report and required fixes
 estacoda doctor --live                  # includes live provider endpoint probes
+estacoda doctor --json                  # structured DoctorReport for automation
+estacoda doctor --fix                   # safe local state skeleton repairs
 ```
 
-**Exit code:** 0 if ready, 1 if warnings exist.
+**State touched:** None by default. `--fix`, `--fix-config`, `--repair-sessions`, and `--ack` are explicit repair or acknowledgement paths.
+
+**Exit code:** 0 if ready, 1 if warnings or blockers exist.
+
+**More:** [Doctor](../user-guide/doctor.md).
 
 ---
 

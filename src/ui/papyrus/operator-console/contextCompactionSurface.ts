@@ -32,12 +32,12 @@ export type ContextCompactionSurfaceRenderOptions = {
   readonly style?: OperatorConsoleStyle;
 };
 
-const TITLE_GLYPH = "𓂀";
-const TITLE_COMPACTED = `${TITLE_GLYPH} Context Compacted`;
-const TITLE_UNCHANGED = `${TITLE_GLYPH} Context Unchanged`;
-const TITLE_CANCELLED = `${TITLE_GLYPH} Context Compaction Cancelled`;
-const TITLE_FAILED = `${TITLE_GLYPH} Context Compaction Failed`;
-const TITLE_UNAVAILABLE = `${TITLE_GLYPH} Context Compaction Unavailable`;
+const TITLE_PREFIX = "𓂀  ";
+const TITLE_COMPACTED = `${TITLE_PREFIX}Context Compacted`;
+const TITLE_UNCHANGED = `${TITLE_PREFIX}Context Unchanged`;
+const TITLE_CANCELLED = `${TITLE_PREFIX}Context Compaction Cancelled`;
+const TITLE_FAILED = `${TITLE_PREFIX}Context Compaction Failed`;
+const TITLE_UNAVAILABLE = `${TITLE_PREFIX}Context Compaction Unavailable`;
 const LABEL_WIDTH = 10;
 
 export function getContextCompactionSurfaceDesiredHeight(

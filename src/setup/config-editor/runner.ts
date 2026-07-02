@@ -123,6 +123,7 @@ import {
   runCodexOAuthFlowWithDeviceCodeNotice,
 } from "../../providers/oauth/codex-setup.js";
 import { codexDeviceVerificationUrl, type FetchLike as CodexOAuthFetchLike } from "../../providers/oauth/codex-oauth.js";
+import { runDoctor } from "../../doctor/index.js";
 
 export type ConfigEditorRunnerOptions = CollectSetupRouteOptions & {
   readonly prompt: Prompt;
@@ -482,6 +483,22 @@ async function handleAction(
   action: ConfigEditorRenderedAction
 ): Promise<RunOnceResult> {
   switch (action.id) {
+    case "run-doctor": {
+      const result = await runDoctor({
+        argv: ["doctor"],
+        workspaceRoot: options.workspaceRoot,
+        homeDir: options.homeDir,
+        profileId: options.profileId,
+      });
+      write(options, result.output);
+      return {
+        completed: true,
+        exitCode: 0,
+        output: result.output,
+        initialDecision,
+        selectedActionId: action.id,
+      };
+    }
     case "verify-setup": {
       const finalDecision = await collectSetupRoute({ ...options, selection: "verify" });
       const output = setupCopyText(options.locale, "setupEditor.result.verifyPrepared");
@@ -862,6 +879,47 @@ async function handleOptionalCapabilityAction(
       ], { pendingCredentialWrites });
     }
 
+    if (action.id === "configure-web-search" || action.id === "configure-browser") {
+      const collected = await collectOptionalCapabilityContext(options, baseContext, promptContext.module, selectedVoiceMode, {
+        allowBack: true,
+      });
+      if (collected.kind === "back") {
+        return menuBackResult(initialDecision, action.id);
+      }
+      if (collected.kind === "skip") {
+        const configuration = promptContext.module.configure(baseContext, { skip: true });
+        selectedDrafts.push(...promptContext.module.toDrafts(baseContext, configuration));
+      }
+      if (collected.kind === "configured") {
+        if (collected.pendingCredentialWrites !== undefined) {
+          pendingCredentialWrites.push(...collected.pendingCredentialWrites);
+        }
+        const configuration = promptContext.module.configure(collected.context);
+        selectedDrafts.push(...promptContext.module.toDrafts(collected.context, configuration));
+      }
+      if (selectedDrafts.length === 0) {
+        const output = `${promptContext.title} left unchanged. No setup changes were drafted.`;
+        write(options, `${output}\n`);
+        return {
+          completed: true,
+          exitCode: 0,
+          output,
+          initialDecision,
+          selectedActionId: action.id,
+        };
+      }
+
+      const bundle = buildOptionalCapabilityDraftBundle(
+        `setup-editor.optional-capabilities.${promptContext.module.id}`,
+        selectedDrafts
+      );
+      const verificationBundle = verificationDraftBundle(options, initialDecision, session, stateHome);
+      return reviewAndApplyBundles(options, initialDecision, action.id, [
+        bundle,
+        ...(verificationBundle === undefined ? [] : [verificationBundle]),
+      ], { pendingCredentialWrites });
+    }
+
     while (true) {
       const selectedResult = await promptOptionalCapabilityAction(options.prompt, {
         id: optionalPromptId(promptContext.module.id),
@@ -888,9 +946,6 @@ async function handleOptionalCapabilityAction(
         if (collected.kind === "back") {
           if (action.id === "configure-voice") {
             break;
-          }
-          if (action.id === "configure-web-search") {
-            return menuBackResult(initialDecision, action.id);
           }
           continue;
         }
@@ -2414,14 +2469,14 @@ function requireEditorAction(action: ConfigEditorRenderedAction): SetupEditorAct
 function normalizeConfigEditorActionId(id: SetupEditorActionId | SetupRouteActionId): string {
   switch (id) {
     case "run-readonly-verification":
-      return "verify-setup";
+      return "run-doctor";
     case "cancel-setup-editor":
       return "exit";
     case "trust-workspace":
       return "repair-workspace-trust";
     case "repair-broken-config":
     case "repair-state-directory":
-      return "show-diagnostics";
+      return "run-doctor";
     default:
       return id;
   }

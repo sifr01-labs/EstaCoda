@@ -200,6 +200,7 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.actions.configureImageGeneration",
   "setupEditor.actions.configureWebSearch",
   "setupEditor.actions.configureBrowser",
+  "setupEditor.actions.runDoctor",
   "setupEditor.actions.runReadonlyVerification",
   "setupEditor.actions.showDiagnostics",
   "setupEditor.actions.exitWithoutChanges",
@@ -223,6 +224,7 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.actions.configureImageGeneration.description",
   "setupEditor.actions.configureWebSearch.description",
   "setupEditor.actions.configureBrowser.description",
+  "setupEditor.actions.runDoctor.description",
   "setupEditor.actions.runReadonlyVerification.description",
   "setupEditor.actions.showDiagnostics.description",
   "setupEditor.actions.exitWithoutChanges.description",
@@ -987,8 +989,10 @@ describe("setup copy", () => {
   });
 
   it("defines setup editor browser configuration prompt copy", () => {
-    expect(rawSetupCopy("en", "setupEditor.prompt.browser.mode.title")).toBe("Browser configuration");
-    expect(rawSetupCopy("ar", "setupEditor.prompt.browser.mode.title")).toBe("إعداد المتصفح");
+    expect(rawSetupCopy("en", "setupEditor.prompt.browser.mode.title")).toBe("Browser");
+    expect(rawSetupCopy("en", "setupEditor.prompt.browser.mode.body")).toBe("Choose how EstaCoda should run browser tools.");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.browser.mode.title")).toBe("المتصفح");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.browser.mode.body")).toBe("اختر كيف تشغّل EstaCoda أدوات المتصفح.");
     expect(rawSetupCopy("ar", "setupEditor.prompt.browser.mode.recommended")).toBe("إعداد المتصفح الموصى به");
     expect(rawSetupCopy("ar", "setupEditor.prompt.browser.mode.recommended.description")).toBe(
       "يشغّل Chrome محلياً وتلقائياً تحت إشراف EstaCoda، مع إعدادات آمنة مناسبة لمعظم المستخدمين."
@@ -1120,6 +1124,8 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupEditor.actions.editWorkflowLearning")).toBe(isolateLtr("Agent Evolution"));
     expect(rawSetupCopy("en", "setupEditor.actions.chooseLanguage")).toBe("Language");
     expect(rawSetupCopy("en", "setupEditor.actions.chooseLanguage.description")).toBe("Interface language and Arabic beta support.");
+    expect(rawSetupCopy("en", "setupEditor.actions.runDoctor")).toBe("EstaCoda Doctor");
+    expect(rawSetupCopy("en", "setupEditor.actions.runDoctor.description")).toBe("Check setup health and show required fixes.");
     expect(rawSetupCopy("en", "setupEditor.actions.runReadonlyVerification")).toBe("Setup verification");
     expect(rawSetupCopy("en", "setupEditor.actions.runReadonlyVerification.description")).toBe("Check setup state without changing config.");
     expect(rawSetupCopy("en", "setupEditor.actions.showDiagnostics")).toBe("Diagnostics");
@@ -1148,7 +1154,8 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "setupEditor.prompt.auxiliaryRoute.assessor.description")).toContain("approval assessment");
     expect(rawSetupCopy("en", "setupEditor.prompt.optionalCapabilityAction.enableConfigure")).toBe("Configure");
     expect(rawSetupCopy("en", "setupEditor.prompt.webSearch.provider.brave.description")).toBe("Use the Brave Search API with an API key");
-    expect(rawSetupCopy("en", "setupEditor.prompt.webSearch.provider.ddgs.description")).toBe("Use DuckDuckGo (free). Setup requires installing the registered DDGS capability via Python review.");
+    expect(rawSetupCopy("en", "setupEditor.prompt.webSearch.provider.body")).toBe("Choose the provider EstaCoda should use to search the web.");
+    expect(rawSetupCopy("en", "setupEditor.prompt.webSearch.provider.ddgs.description")).toBe("Free web search through DuckDuckGo. Installs the DDGS capability.");
     expect(rawSetupCopy("en", "setupEditor.prompt.webSearch.brave.secretValue")).toBe("Enter Brave Search API key:");
     expect(rawSetupCopy("en", "setupEditor.prompt.voice.ttsSecretValue")).toBe("Enter TTS provider API key for {envVar}:");
     expect(rawSetupCopy("en", "setupEditor.prompt.voice.sttSecretValue")).toBe("Enter STT provider API key for {envVar}:");
@@ -1164,7 +1171,8 @@ describe("setup copy", () => {
     expect(rawSetupCopy("ar", "setupEditor.actions.configureWebSearch")).toBe("البحث");
     expect(rawSetupCopy("ar", "setupEditor.prompt.optionalCapabilityAction.enableConfigure")).toBe("اضبط");
     expect(rawSetupCopy("ar", "setupEditor.prompt.webSearch.provider.brave.description")).toBe("استخدم Brave Search API مع مفتاح API.");
-    expect(rawSetupCopy("ar", "setupEditor.prompt.webSearch.provider.ddgs.description")).toBe("استخدم DuckDuckGo مجانًا. يتطلب الإعداد تثبيت قدرة DDGS المسجلة عبر مراجعة Python.");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.webSearch.provider.body")).toBe("اختر المزوّد الذي ستستخدمه EstaCoda للبحث في الويب.");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.webSearch.provider.ddgs.description")).toBe("بحث ويب مجاني عبر DuckDuckGo. يثبّت قدرة DDGS.");
     expect(rawSetupCopy("ar", "setupEditor.prompt.webSearch.brave.secretValue")).toBe("أدخل مفتاح API لـ Brave Search:");
     expect(rawSetupCopy("ar", "setupEditor.prompt.voice.ttsSecretValue")).toBe("أدخل مفتاح API لمزوّد TTS لـ {envVar}:");
     expect(rawSetupCopy("ar", "setupEditor.prompt.voice.sttSecretValue")).toBe("أدخل مفتاح API لمزوّد STT لـ {envVar}:");
@@ -1193,6 +1201,8 @@ describe("setup copy", () => {
     expect(rawSetupCopy("ar", "setupEditor.actions.editWorkflowLearning")).toBe("Agent Evolution");
     expect(rawSetupCopy("ar", "setupEditor.actions.chooseLanguage")).toBe("اللغة");
     expect(rawSetupCopy("ar", "setupEditor.actions.chooseLanguage.description")).toBe("لغة الواجهة ودعم العربية التجريبي.");
+    expect(rawSetupCopy("ar", "setupEditor.actions.runDoctor")).toBe("طبيب EstaCoda");
+    expect(rawSetupCopy("ar", "setupEditor.actions.runDoctor.description")).toBe("افحص حالة الإعداد واعرض الإصلاحات المطلوبة.");
     expect(rawSetupCopy("ar", "setupEditor.actions.runReadonlyVerification")).toBe("التحقق من الإعداد");
     expect(rawSetupCopy("ar", "setupEditor.actions.runReadonlyVerification.description")).toBe("افحص حالة الإعداد دون تغيير التكوين.");
     expect(rawSetupCopy("ar", "setupEditor.actions.showDiagnostics")).toBe("التشخيصات");
@@ -1201,11 +1211,11 @@ describe("setup copy", () => {
     expect(rawSetupCopy("ar", "setupEditor.actions.exitWithoutChanges.description")).toBe("غادر الإعداد دون تعديل التكوين.");
     expect(resolveSetupCopy("ar", "setupEditor.actions.configureChannels.description")).toContain(isolateLtr("Telegram"));
     expect(resolveSetupCopy("ar", "setupEditor.actions.configureChannels.description")).toContain(isolateLtr("WhatsApp"));
+    expect(resolveSetupCopy("ar", "setupEditor.actions.runDoctor")).toContain(isolateLtr("EstaCoda"));
     expect(resolveSetupCopy("ar", "setupEditor.actions.configureWebSearch.description")).toContain(isolateLtr("EstaCoda"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.webSearch.provider.brave.description")).toContain(isolateLtr("Brave Search"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.webSearch.provider.ddgs.description")).toContain(isolateLtr("DuckDuckGo"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.webSearch.provider.ddgs.description")).toContain(isolateLtr("DDGS"));
-    expect(resolveSetupCopy("ar", "setupEditor.prompt.webSearch.provider.ddgs.description")).toContain(isolateLtr("Python"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.webSearch.brave.secretValue")).toContain(isolateLtr("Brave Search"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.ttsSecretValue")).toContain(isolateLtr("{envVar}"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.voice.sttSecretValue")).toContain(isolateLtr("{envVar}"));

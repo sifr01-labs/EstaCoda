@@ -14,7 +14,7 @@ describe("Papyrus operator console context compaction surface", () => {
     const rows = renderContextCompactionSurface(compactedState(), { width: 120 });
     const text = rows.join("\n");
 
-    expect(rows[0]).toContain("╭─ 𓂀 Context Compacted ");
+    expect(rows[0]).toContain("╭─ 𓂀  Context Compacted ");
     expect(text).toContain("│ Messages   39 → 29");
     expect(text).toContain("│ Tokens     8,248 → 6,923");
     expect(text).toContain("│ Saved      ~1,325 tokens · 16%");
@@ -33,7 +33,7 @@ describe("Papyrus operator console context compaction surface", () => {
     });
     const rows = renderContextCompactionSurface(compactedState(), { width: 80, style });
 
-    expect(rows[0]).toContain(`${ansiFg(tokens.contract.palette.brand)}\x1b[1m𓂀 Context Compacted\x1b[0m\x1b[0m`);
+    expect(rows[0]).toContain(`${ansiFg(tokens.contract.palette.brand)}\x1b[1m𓂀  Context Compacted\x1b[0m\x1b[0m`);
     expect(rows[1]).not.toContain(ansiFg(tokens.contract.palette.brand));
   });
 
@@ -50,7 +50,7 @@ describe("Papyrus operator console context compaction surface", () => {
     }, { width: 52 });
     const text = rows.join("\n");
 
-    expect(rows[0]).toContain("𓂀 Context Unchanged");
+    expect(rows[0]).toContain("𓂀  Context Unchanged");
     expect(text).toContain("│ Saved      ~0 tokens · 0%");
     expect(text).toContain("│ Note       Compaction skipped: below-threshold.");
     expect(rows.every((line) => stringWidth(line) <= 52)).toBe(true);
@@ -96,7 +96,7 @@ describe("Papyrus operator console context compaction surface", () => {
       warningCount: 1,
     }, { width: 80, style });
 
-    expect(rows[0]).toContain(`${ansiFg(tokens.contract.palette.caution)}\x1b[1m𓂀 Context Compacted\x1b[0m\x1b[0m`);
+    expect(rows[0]).toContain(`${ansiFg(tokens.contract.palette.caution)}\x1b[1m𓂀  Context Compacted\x1b[0m\x1b[0m`);
     expect(rows[0]).not.toContain(ansiFg(tokens.contract.palette.brand));
   });
 
@@ -117,15 +117,15 @@ describe("Papyrus operator console context compaction surface", () => {
       kind: "cancelled",
     }, { width: 80, style }).join("\n");
 
-    expect(failed).toContain("𓂀 Context Compaction Failed");
-    expect(failed).toContain(`${ansiFg(tokens.contract.severity.error)}\x1b[1m𓂀 Context Compaction Failed\x1b[0m\x1b[0m`);
+    expect(failed).toContain("𓂀  Context Compaction Failed");
+    expect(failed).toContain(`${ansiFg(tokens.contract.severity.error)}\x1b[1m𓂀  Context Compaction Failed\x1b[0m\x1b[0m`);
     expect(failed).toContain("│ Status     Compaction failed.");
     expect(failed).toContain("│ Detail     provider timed out");
-    expect(unavailable).toContain("𓂀 Context Compaction Unavailable");
-    expect(unavailable).toContain(`${ansiFg(tokens.contract.palette.caution)}\x1b[1m𓂀 Context Compaction Unavailable\x1b[0m\x1b[0m`);
+    expect(unavailable).toContain("𓂀  Context Compaction Unavailable");
+    expect(unavailable).toContain(`${ansiFg(tokens.contract.palette.caution)}\x1b[1m𓂀  Context Compaction Unavailable\x1b[0m\x1b[0m`);
     expect(unavailable).toContain("│ Status     Compaction is unavailable in this runtime.");
-    expect(cancelled).toContain("𓂀 Context Compaction Cancelled");
-    expect(cancelled).toContain(`${ansiFg(tokens.contract.palette.caution)}\x1b[1m𓂀 Context Compaction Cancelled\x1b[0m\x1b[0m`);
+    expect(cancelled).toContain("𓂀  Context Compaction Cancelled");
+    expect(cancelled).toContain(`${ansiFg(tokens.contract.palette.caution)}\x1b[1m𓂀  Context Compaction Cancelled\x1b[0m\x1b[0m`);
     expect(cancelled).toContain("│ Status     Compaction was cancelled.");
   });
 });

@@ -333,7 +333,7 @@ The Onboarding Wizard silently creates and selects the default profile before wr
 | State | Route behavior |
 |-------|----------------|
 | `first-run` / no usable config | Runs the Onboarding Wizard. `first-run` is the internal route state; the user-facing surface is the Onboarding Wizard. |
-| configured ready | Opens the Setup Editor with primary model route edit, fallback route edit, auxiliary route edit, optional capability configuration, security mode edit, Agent Evolution edit, read-only verification, launch after verification, and exit choices. |
+| configured ready | Opens the Setup Editor with primary model route edit, fallback route edit, auxiliary route edit, optional capability configuration, security mode edit, Agent Evolution edit, EstaCoda Doctor, and exit choices. |
 | configured degraded | Shows verification warnings; repair or explicit limited-mode acceptance is required before launch. |
 | partial provider / broken route | Runs guided provider/model repair through the shared provider/model selection flow. |
 | missing credential | Repairs the active route credential reference; review shows env var references only. |
@@ -341,7 +341,7 @@ The Onboarding Wizard silently creates and selects the default profile before wr
 | untrusted workspace | Offers an explicit workspace trust grant through reviewed apply. |
 | state-not-writable | Shows state/config path permission guidance and blocks normal writes until state is writable. |
 
-Configured, degraded, untrusted, and repair states use the Setup Editor. The internal `first-run` state uses the Onboarding Wizard runner. Read-only verification remains a separate route and does not write config, trust, state, or `.env`.
+Configured, degraded, untrusted, and repair states use the Setup Editor. The internal `first-run` state uses the Onboarding Wizard runner. EstaCoda Doctor is the user-facing read-only health action in the Setup Editor. Internal read-only verification remains a separate route for setup apply/verify flows and does not write config, trust, state, or `.env`.
 
 ### Review, Apply, And Launch Safety
 

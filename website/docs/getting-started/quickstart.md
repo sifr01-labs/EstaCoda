@@ -220,7 +220,7 @@ For all install paths, see [Installation](./installation.md).
 | `estacoda setup` | Run reviewed onboarding, setup, or repair |
 | `estacoda verify` | Check setup readiness |
 | `estacoda model status` | Inspect active provider/model configuration |
-| `estacoda doctor` | Diagnose config/runtime readiness |
+| `estacoda doctor` | Health report and required fixes |
 | `estacoda doctor --live` | Include live provider checks |
 | `estacoda --help` | Show CLI help |
 
@@ -228,6 +228,7 @@ For all install paths, see [Installation](./installation.md).
 
 - [Installation](./installation.md) — install paths, OS support, and runtime requirements
 - [CLI](../user-guide/cli.md) — sessions, slash commands, and terminal behavior
+- [Doctor](../user-guide/doctor.md) — setup health checks and safe repairs
 - [Providers](../user-guide/providers.md) — provider setup and maturity
 - [Channels](../user-guide/channels.md) — Telegram and WhatsApp
 - [State and Files](../reference/state-and-files.md) — where profile state lives

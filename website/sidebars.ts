@@ -17,6 +17,7 @@ const sidebars: SidebarsConfig = {
       label: 'User Guide',
       items: [
         'user-guide/cli',
+        'user-guide/doctor',
         'user-guide/sessions',
         'user-guide/profiles',
         'user-guide/providers',

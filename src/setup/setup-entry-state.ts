@@ -65,6 +65,7 @@ export type CollectSetupEntryStateOptions = {
   readonly modelsDevOptions?: ModelsDevRegistryOptions;
   readonly runtime?: Runtime;
   readonly trustStorePath?: string;
+  readonly readOnly?: boolean;
 };
 
 export async function collectSetupEntryState(
@@ -100,6 +101,7 @@ export async function collectSetupEntryState(
     profileId: options.profileId,
     runtime: options.runtime,
     trustStorePath: options.trustStorePath,
+    readOnly: options.readOnly,
   });
   const startup = collectStartupReadinessSnapshot({
     workspaceRoot: options.workspaceRoot,

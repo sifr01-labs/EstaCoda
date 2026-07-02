@@ -1,14 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { spawn } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { runCliCommand } from "./cli.js";
 import type { Prompt } from "./prompt-contract.js";
 import type { SelectPromptInput } from "./interactive-select.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
-import { resolveProfileStateHome } from "../config/profile-home.js";
+import { resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
 import { runInitCommand } from "./init-command.js";
+import { CURRENT_OAUTH_STORE_VERSION } from "../providers/oauth/oauth-types.js";
+import { openSQLiteDatabase } from "../storage/factory.js";
+import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-cli-setup-test-"));
@@ -257,14 +260,13 @@ describe("cli setup command", () => {
       argv: ["setup", "--interactive"],
       workspaceRoot,
       homeDir: tempDir,
-      prompt: firstRunPrompt({ reviewAccepted: true, setupEditorActionId: "show-diagnostics" }),
+      prompt: firstRunPrompt({ reviewAccepted: true, setupEditorActionId: "run-doctor" }),
     });
 
     expect(result.handled).toBe(true);
     expect(result.exitCode).toBe(0);
-    expect(result.output).toContain("Setup diagnostics");
-    expect(result.output).toContain("State: configured-degraded");
-    expect(result.output).toContain("Setup path: configured-degraded-menu");
+    expect(result.output).toContain("EstaCoda Doctor");
+    expect(result.output).toContain("System health inspection");
     expect(result.output).toContain("Configured model context window is below 64K tokens.");
     expect(result.output).not.toContain("Available actions:");
     expect(result.output).not.toContain("Sections:");
@@ -296,14 +298,12 @@ describe("cli setup command", () => {
         argv: ["setup", "--interactive"],
         workspaceRoot,
         homeDir: tempDir,
-        prompt: firstRunPrompt({ reviewAccepted: true, setupEditorActionId: "show-diagnostics" }),
+        prompt: firstRunPrompt({ reviewAccepted: true, setupEditorActionId: "run-doctor" }),
       });
 
       expect(result.handled).toBe(true);
-      expect(result.output).toContain("Setup diagnostics");
-      expect(result.output).toContain("State: missing-secret");
-      expect(result.output).toContain("Setup path: repair-first-menu");
-      expect(result.output).toContain("Blockers:");
+      expect(result.output).toContain("EstaCoda Doctor");
+      expect(result.output).toContain("System health inspection");
       expect(result.output).toContain("OPENAI_API_KEY");
       expect(result.output).not.toContain("Available actions:");
       expect(result.output).not.toContain("Sections:");
@@ -328,17 +328,15 @@ describe("cli setup command", () => {
       argv: ["setup", "--interactive"],
       workspaceRoot,
       homeDir: tempDir,
-      prompt: firstRunPrompt({ reviewAccepted: true, setupEditorActionId: "show-diagnostics" }),
+      prompt: firstRunPrompt({ reviewAccepted: true, setupEditorActionId: "run-doctor" }),
     });
 
     expect(result.handled).toBe(true);
     expect(result.exitCode).toBe(0);
-    expect(result.output).toContain("Setup diagnostics");
-    expect(result.output).toContain("State: broken-config");
-    expect(result.output).toContain("Setup path: repair-first-menu");
-    expect(result.output).toContain(configPath);
-    expect(result.output).toContain("Normal config edits are blocked until the config file can be parsed.");
-    expect(result.output).toContain("Only diagnostics, verification, and exit are available");
+    expect(result.output).toContain("EstaCoda Doctor");
+    expect(result.output).toContain("System health inspection");
+    expect(result.output).toContain("Config syntax error");
+    expect(result.output).toContain("Expected property name");
     expect(result.output).not.toContain("Available actions:");
     expect(result.output).not.toContain("Sections:");
     expect(result.output).not.toContain("repair-setup - Repair setup");
@@ -381,17 +379,14 @@ describe("cli setup command", () => {
       argv: ["setup", "--interactive"],
       workspaceRoot,
       homeDir: tempDir,
-      prompt: firstRunPrompt({ reviewAccepted: true, setupEditorActionId: "show-diagnostics" }),
+      prompt: firstRunPrompt({ reviewAccepted: true, setupEditorActionId: "run-doctor" }),
     });
 
     expect(result.handled).toBe(true);
-    expect(result.output).toContain("Setup diagnostics");
-    expect(result.output).toContain("State: state-not-writable");
-    expect(result.output).toContain("Setup path: repair-first-menu");
-    expect(result.output).toContain(profileConfigPath(tempDir));
-    expect(result.output).toContain("fix-state-directory");
-    expect(result.output).toContain("Restore write permission");
-    expect(result.output).toContain("Only diagnostics, verification, and exit are available");
+    expect(result.output).toContain("EstaCoda Doctor");
+    expect(result.output).toContain("System health inspection");
+    expect(result.output).toContain("EstaCoda state directory is not writable.");
+    expect(result.output).toContain("State backup not ready");
     expect(result.output).not.toContain("Available actions:");
     expect(result.output).not.toContain("Sections:");
     expect(result.output).not.toContain("repair-setup - Repair setup");
@@ -416,7 +411,569 @@ describe("cli setup command", () => {
     expect(result.handled).toBe(true);
     expect(result.exitCode).toBe(1);
     expect(result.output).toContain("Config syntax error:");
-    expect(result.output).toContain("Model: unknown/unknown");
+    expect(result.output).toMatch(/Model:\s+unknown\/unknown/u);
+  });
+
+  it("doctor reports invalid active profile state instead of throwing", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    await writeUserConfig(tempDir, localReadyConfig());
+    await writeFile(join(tempDir, ".estacoda", "active-profile.json"), "{", "utf8");
+
+    const result = await runCliCommand({
+      argv: ["doctor"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toContain("Active profile state is invalid:");
+    expect(result.output).toMatch(/Profile:\s+default/u);
+  });
+
+  it("doctor does not create setup or backup probe files", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runCliCommand({
+      argv: ["doctor"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+
+    expect(result.handled).toBe(true);
+    await expect(stat(join(tempDir, ".estacoda", ".verify"))).rejects.toThrow();
+    await expect(stat(join(tempDir, ".estacoda", ".backups"))).rejects.toThrow();
+  });
+
+  it("doctor keeps dependency audit opt-in by default", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+
+    const result = await runCliCommand({
+      argv: ["doctor"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.output).toContain("Dependencies");
+    expect(result.output).toContain("audit not run");
+    expect(result.output).toContain("Python Environments");
+    expect(result.output).toContain("Run: estacoda doctor --audit");
+    expect(result.output).not.toContain("Dependency audit found");
+  });
+
+  it("doctor renders operational diagnostics without leaking OAuth or MCP secrets", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    const profilePaths = resolveProfileStateHome({ homeDir: tempDir, profileId: "default" });
+    await writeUserConfig(tempDir, {
+      ...(localReadyConfig() as Record<string, unknown>),
+      mcpServers: {
+        localDev: {
+          command: "sh",
+          args: ["-c", "node server.js"],
+          env: {
+            API_TOKEN: "super-secret-mcp-token"
+          }
+        }
+      }
+    });
+    await mkdir(dirname(profilePaths.authJsonPath), { recursive: true });
+    await writeFile(profilePaths.authJsonPath, `${JSON.stringify({
+      version: CURRENT_OAUTH_STORE_VERSION,
+      providers: {
+        codex: {
+          authMethod: "oauth_device_pkce",
+          accessToken: "secret-access-token",
+          refreshToken: "secret-refresh-token",
+          expiresAt: "2025-01-01T00:00:00.000Z"
+        }
+      }
+    })}\n`, "utf8");
+
+    const result = await runCliCommand({
+      argv: ["doctor"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.output).toContain("OAuth");
+    expect(result.output).toContain("MCP");
+    expect(result.output).toContain("External tools");
+    expect(result.output).toContain("OAuth credentials are expired for providers: codex");
+    expect(result.output).toContain("MCP server localDev passes secret-looking env keys: API_TOKEN");
+    expect(result.output).not.toContain("secret-access-token");
+    expect(result.output).not.toContain("secret-refresh-token");
+    expect(result.output).not.toContain("super-secret-mcp-token");
+  });
+
+  it("doctor --json returns the structured DoctorReport without Papyrus framing", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    await writeUserConfig(tempDir, localReadyConfig());
+
+    const result = await runCliCommand({
+      argv: ["doctor", "--json"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+    const report = JSON.parse(result.output) as {
+      profile: string;
+      sections: Array<{ checks: Array<{ id: string }> }>;
+      providerRoutes: Array<{ kind: string; label: string; provider?: string; model?: string }>;
+    };
+
+    expect(result.handled).toBe(true);
+    expect(result.output).not.toContain("╭─");
+    expect(report.profile).toBe("default");
+    expect(report.sections.flatMap((section) => section.checks).map((check) => check.id)).toContain("providers");
+    expect(report.providerRoutes).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "primary",
+        label: "primary",
+        provider: "local",
+        model: "local-test-model"
+      })
+    ]));
+  });
+
+  it("doctor --json reports config drift with a future safe fix command", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    const profilePaths = resolveProfileStateHome({ homeDir: tempDir, profileId: "default" });
+    await writeUserConfig(tempDir, {
+      ...(localReadyConfig() as Record<string, unknown>),
+      provider: "local",
+      baseUrl: "http://legacy.local/v1"
+    });
+    await writeFile(profilePaths.envPath, "UNUSED_API_KEY=ghost-secret\n", "utf8");
+
+    const result = await runCliCommand({
+      argv: ["doctor", "--json"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+    const report = JSON.parse(result.output) as {
+      sections: Array<{ checks: Array<{ id: string; severity: string; summary?: string }> }>;
+      actions: Array<{ title: string; detailLines?: string[]; command?: string; severity: string }>;
+    };
+    const configurationCheck = report.sections.flatMap((section) => section.checks).find((check) => check.id === "configuration");
+
+    expect(configurationCheck).toEqual(expect.objectContaining({
+      severity: "warning",
+      summary: "3 config drift item(s)"
+    }));
+    expect(report.actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        title: "Config contains stale root-level key",
+        detailLines: ["provider → model.provider"],
+        command: "estacoda doctor --fix-config",
+        severity: "warning"
+      }),
+      expect.objectContaining({
+        title: "Profile .env contains unreferenced credential key",
+        detailLines: ["Env: UNUSED_API_KEY"],
+        command: "estacoda doctor --fix-config --remove-env-ghosts",
+        severity: "warning"
+      })
+    ]));
+    expect(result.output).not.toContain("ghost-secret");
+  });
+
+  it("doctor --fix-config backs up and migrates stale config keys", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    await writeUserConfig(tempDir, {
+      ...(localReadyConfig() as Record<string, unknown>),
+      provider: "local",
+      baseUrl: "http://legacy.local/v1"
+    });
+
+    const result = await runCliCommand({
+      argv: ["doctor", "--fix-config"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      provider?: string;
+      baseUrl?: string;
+      providers?: Record<string, { baseUrl?: string }>;
+    };
+
+    expect(result.handled).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("EstaCoda Doctor Config Repair");
+    expect(result.output).toContain("Applied config migration");
+    expect(result.output).toContain("Config backup");
+    expect(config.provider).toBeUndefined();
+    expect(config.baseUrl).toBeUndefined();
+    expect(config.providers?.local?.baseUrl).toBe("http://localhost:11434/v1");
+  });
+
+  it("doctor --ack stores advisory acknowledgements under the selected profile", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    const researchPaths = resolveProfileStateHome({ homeDir: tempDir, profileId: "research" });
+    const defaultPaths = resolveProfileStateHome({ homeDir: tempDir, profileId: "default" });
+
+    const result = await runCliCommand({
+      argv: ["doctor", "--ack", "GHSA-abcd-1234"],
+      workspaceRoot,
+      homeDir: tempDir,
+      profileId: "research",
+      interactive: false,
+    });
+    const ackFile = JSON.parse(await readFile(researchPaths.advisoriesAckedPath, "utf8")) as {
+      acknowledgements: Array<{ id: string }>;
+    };
+
+    expect(result.handled).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("EstaCoda Doctor Advisory");
+    expect(result.output).toContain("Advisory acknowledgement recorded");
+    expect(result.output).toContain("Profile:         research");
+    expect(ackFile.acknowledgements).toEqual([
+      expect.objectContaining({ id: "GHSA-abcd-1234" })
+    ]);
+    await expect(readFile(defaultPaths.advisoriesAckedPath, "utf8")).rejects.toThrow();
+  });
+
+  it("doctor --ack requires an advisory id", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+
+    const result = await runCliCommand({
+      argv: ["doctor", "--ack="],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toBe("Usage: estacoda doctor --ack <advisory-id>\n");
+  });
+
+  it("doctor --json marks OAuth primary route failures as provider blockers", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    await writeUserConfig(tempDir, {
+      model: {
+        provider: "codex",
+        id: "gpt-5.5",
+      },
+      providers: {
+        codex: {
+          baseUrl: "https://chatgpt.com/backend-api/codex",
+          apiMode: "openai_responses",
+          authMethod: "oauth_device_pkce",
+          enableNetwork: true,
+        },
+      },
+    });
+
+    const result = await runCliCommand({
+      argv: ["doctor", "--json"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+    const report = JSON.parse(result.output) as {
+      sections: Array<{ checks: Array<{ id: string; severity: string; summary?: string }> }>;
+      providerRoutes: Array<{ kind: string; label: string; status: string; summary: string }>;
+      actions: Array<{ title: string; command?: string; severity: string }>;
+      verdict: { status: string };
+    };
+    const providerCheck = report.sections.flatMap((section) => section.checks).find((check) => check.id === "providers");
+
+    expect(providerCheck).toEqual(expect.objectContaining({
+      severity: "blocked",
+      summary: "1 route(s) unavailable"
+    }));
+    expect(report.verdict.status).toBe("blocked");
+    expect(report.providerRoutes).toEqual([
+      expect.objectContaining({
+        kind: "primary",
+        label: "primary",
+        status: "blocked",
+        summary: expect.stringContaining("missing OAuth credentials for codex")
+      })
+    ]);
+    expect(report.actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        title: expect.stringContaining("missing OAuth credentials for codex"),
+        command: "estacoda model setup",
+        severity: "blocked"
+      })
+    ]));
+  });
+
+  it("doctor maps missing managed Python capabilities to explicit setup commands", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    await writeUserConfig(tempDir, {
+      ...(localReadyConfig() as Record<string, unknown>),
+      web: {
+        searchBackend: "ddgs"
+      }
+    });
+
+    const result = await runCliCommand({
+      argv: ["doctor", "--json"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+    const report = JSON.parse(result.output) as {
+      sections: Array<{ checks: Array<{ id: string; severity: string; summary?: string }> }>;
+      actions: Array<{ title: string; command?: string; detailLines?: string[]; severity: string }>;
+    };
+    const pythonCheck = report.sections.flatMap((section) => section.checks).find((check) => check.id === "python-environments");
+
+    expect(pythonCheck).toEqual(expect.objectContaining({
+      severity: "warning",
+      summary: "ddgs"
+    }));
+    expect(report.actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        title: expect.stringContaining("Managed Python capability ddgs is not ready"),
+        detailLines: ["Capability: ddgs"],
+        command: "estacoda python-env setup ddgs",
+        severity: "warning"
+      })
+    ]));
+  });
+
+  it("doctor --json surfaces a backup-gated SQLite repair action for blocked session DBs", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    await writeUserConfig(tempDir, localReadyConfig());
+    const sessionPath = resolveGlobalStateHome({ homeDir: tempDir }).sessionsSqlitePath;
+    await mkdir(dirname(sessionPath), { recursive: true });
+    const db = await openSQLiteDatabase({ path: sessionPath });
+    try {
+      db.exec("create table sessions (id text primary key)");
+    } finally {
+      db.close();
+    }
+
+    const result = await runCliCommand({
+      argv: ["doctor", "--json"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+    const report = JSON.parse(result.output) as {
+      sections: Array<{ checks: Array<{ id: string; severity: string; summary?: string }> }>;
+      actions: Array<{ id: string; title: string; command?: string; detailLines?: string[]; severity: string }>;
+    };
+    const sessionsCheck = report.sections.flatMap((section) => section.checks).find((check) => check.id === "sessions");
+
+    expect(sessionsCheck).toEqual(expect.objectContaining({
+      severity: "blocked",
+      summary: "schema invalid"
+    }));
+    expect(report.actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: "sqlite-session-repair",
+        title: "SQLite session DB needs repair",
+        detailLines: ["Backup required before repair"],
+        command: "estacoda doctor --repair-sessions",
+        severity: "blocked"
+      })
+    ]));
+    expect(report.actions.filter((action) => action.id === "sqlite-session-repair")).toHaveLength(1);
+  });
+
+  it("doctor --sqlite-write-probe runs the explicit SQLite write probe", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    await writeUserConfig(tempDir, localReadyConfig());
+    const sessionPath = resolveGlobalStateHome({ homeDir: tempDir }).sessionsSqlitePath;
+    await createHealthySessionDb(sessionPath);
+
+    const result = await runCliCommand({
+      argv: ["doctor", "--json", "--sqlite-write-probe"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+    const report = JSON.parse(result.output) as {
+      sections: Array<{ checks: Array<{ id: string; severity: string; summary?: string }> }>;
+    };
+    const sessionsCheck = report.sections.flatMap((section) => section.checks).find((check) => check.id === "sessions");
+
+    expect(result.handled).toBe(true);
+    expect(sessionsCheck).toEqual(expect.objectContaining({
+      severity: "healthy",
+      summary: "1 sessions · write probe healthy"
+    }));
+  });
+
+  it("doctor --repair-sessions backs up and rebuilds broken SQLite FTS", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    await writeUserConfig(tempDir, localReadyConfig());
+    const sessionPath = resolveGlobalStateHome({ homeDir: tempDir }).sessionsSqlitePath;
+    await createBrokenFtsSessionDb(sessionPath);
+
+    const result = await runCliCommand({
+      argv: ["doctor", "--repair-sessions"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("EstaCoda Doctor Repair");
+    expect(result.output).toContain("Repaired session database");
+    expect(result.output).toContain("Backup");
+    await expect(ftsSearch(sessionPath, "repairable")).resolves.toEqual(["message-1"]);
+  });
+
+  it("doctor --fix does not repair broken SQLite FTS", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    await writeUserConfig(tempDir, localReadyConfig());
+    const sessionPath = resolveGlobalStateHome({ homeDir: tempDir }).sessionsSqlitePath;
+    await createBrokenFtsSessionDb(sessionPath);
+
+    const result = await runCliCommand({
+      argv: ["doctor", "--fix"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.exitCode).toBe(0);
+    await expect(ftsSearch(sessionPath, "repairable")).rejects.toThrow();
+  });
+
+  it("doctor --fix creates only safe local state skeleton repairs", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    const globalPaths = resolveGlobalStateHome({ homeDir: tempDir });
+    const profilePaths = resolveProfileStateHome({ homeDir: tempDir, profileId: "default" });
+
+    const result = await runCliCommand({
+      argv: ["doctor", "--fix"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("EstaCoda Doctor Fix");
+    expect(result.output).toContain("Applied safe repairs");
+    expect(result.output).toContain("◇ Fixed");
+    expect(result.output).toContain("◇ Not Changed");
+    expect(result.output).toContain("Workspace trust requires explicit user approval");
+    expect(result.output).toContain("Provider credentials were not created");
+    expect(result.output).toContain("Config migrations were not applied");
+    await expect(stat(globalPaths.sharedMemoryPath)).resolves.toMatchObject({ });
+    await expect(stat(globalPaths.packsPath)).resolves.toMatchObject({ });
+    await expect(stat(profilePaths.userMdPath)).resolves.toMatchObject({ });
+    await expect(stat(profilePaths.soulMdPath)).resolves.toMatchObject({ });
+    await expect(stat(profilePaths.memoryMdPath)).resolves.toMatchObject({ });
+    await expect(stat(profilePaths.envPath)).resolves.toMatchObject({ });
+    await expect(stat(profilePaths.authJsonPath)).resolves.toMatchObject({ });
+    await expect(stat(globalPaths.trustJsonPath)).rejects.toThrow();
+    await expect(stat(globalPaths.workspaceApprovalsPath)).rejects.toThrow();
+    await expect(stat(globalPaths.sessionsSqlitePath)).rejects.toThrow();
+    await expect(stat(join(globalPaths.stateRoot, "python-env"))).rejects.toThrow();
+    await expect(stat(join(globalPaths.stateRoot, "python-envs"))).rejects.toThrow();
+    expect(await readFile(profilePaths.envPath, "utf8")).toBe("");
+    expect(await readFile(profilePaths.authJsonPath, "utf8")).toBe("{}\n");
+  });
+
+  it("doctor --fix repairs private auth file modes without creating credentials", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    const profilePaths = resolveProfileStateHome({ homeDir: tempDir, profileId: "default" });
+    await mkdir(dirname(profilePaths.envPath), { recursive: true });
+    await writeFile(profilePaths.envPath, "", "utf8");
+    await writeFile(profilePaths.authJsonPath, "{}\n", "utf8");
+    await chmod(profilePaths.envPath, 0o644);
+    await chmod(profilePaths.authJsonPath, 0o644);
+
+    const result = await runCliCommand({
+      argv: ["doctor", "--fix"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.output).toContain("mode to 0600");
+    expect((await stat(profilePaths.envPath)).mode & 0o777).toBe(0o600);
+    expect((await stat(profilePaths.authJsonPath)).mode & 0o777).toBe(0o600);
+    expect(await readFile(profilePaths.envPath, "utf8")).toBe("");
+    expect(await readFile(profilePaths.authJsonPath, "utf8")).toBe("{}\n");
+  });
+
+  it("doctor --fix does not overwrite malformed config", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    const configPath = profileConfigPath(tempDir);
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, "{not-json", "utf8");
+
+    const result = await runCliCommand({
+      argv: ["doctor", "--fix"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(await readFile(configPath, "utf8")).toBe("{not-json");
+    expect(result.output).toContain("Config migrations were not applied");
+  });
+
+  it("doctor --fix is idempotent after safe repairs are applied", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    await runCliCommand({
+      argv: ["doctor", "--fix"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+
+    const second = await runCliCommand({
+      argv: ["doctor", "--fix"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+
+    expect(second.handled).toBe(true);
+    expect(second.exitCode).toBe(0);
+    expect(second.output).toContain("No safe repairs needed");
+    expect(second.output).toContain("No safe repairs were needed");
+    expect(second.output).not.toContain("✓ Created");
+    expect(second.output).not.toContain("mode to 0600");
+  });
+
+  it("doctor --fix reports the default skeleton created for a non-default selected profile", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    const researchPaths = resolveProfileStateHome({ homeDir: tempDir, profileId: "research" });
+    const defaultPaths = resolveProfileStateHome({ homeDir: tempDir, profileId: "default" });
+
+    const result = await runCliCommand({
+      argv: ["doctor", "--fix"],
+      workspaceRoot,
+      homeDir: tempDir,
+      profileId: "research",
+      interactive: false,
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("~/.estacoda/profiles/research/");
+    expect(result.output).toContain("~/.estacoda/profiles/default/");
+    await expect(stat(researchPaths.userMdPath)).resolves.toMatchObject({ });
+    await expect(stat(defaultPaths.userMdPath)).resolves.toMatchObject({ });
   });
 
   it("keeps live CLI entrypoints free of the legacy interactive onboarding runner", async () => {
@@ -573,6 +1130,65 @@ async function trustWorkspace(homeDir: string, workspaceRoot: string): Promise<v
   await new WorkspaceTrustStore({
     path: join(homeDir, ".estacoda", "trust.json"),
   }).grant(workspaceRoot, { label: "test" });
+}
+
+async function createHealthySessionDb(path: string): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  const db = new SQLiteSessionDB({ path });
+  try {
+    await db.createSession({ id: "session-1", profileId: "default" });
+    await db.appendMessage({
+      id: "message-1",
+      sessionId: "session-1",
+      role: "user",
+      content: "doctor sqlite write probe"
+    });
+  } finally {
+    db.close();
+  }
+}
+
+async function createBrokenFtsSessionDb(path: string): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  const db = await openSQLiteDatabase({ path });
+  try {
+    db.exec(`
+      create table sessions (
+        id text primary key,
+        profile_id text not null default 'default',
+        created_at text not null,
+        updated_at text not null
+      );
+      create table messages (
+        id text primary key,
+        session_id text not null,
+        role text not null,
+        content text not null,
+        created_at text not null
+      );
+      create table messages_fts (
+        message_id text,
+        content text
+      );
+      insert into sessions (id, profile_id, created_at, updated_at)
+      values ('session-1', 'default', '2026-07-02T00:00:00.000Z', '2026-07-02T00:00:00.000Z');
+      insert into messages (id, session_id, role, content, created_at)
+      values ('message-1', 'session-1', 'user', 'repairable search needle', '2026-07-02T00:00:00.000Z');
+    `);
+  } finally {
+    db.close();
+  }
+}
+
+async function ftsSearch(path: string, query: string): Promise<readonly string[]> {
+  const db = await openSQLiteDatabase({ path, readonly: true });
+  try {
+    return db.query<{ message_id: string }>(
+      "select message_id from messages_fts where messages_fts match ? order by rowid"
+    ).all(query).map((row) => row.message_id);
+  } finally {
+    db.close();
+  }
 }
 
 function localReadyConfig(modelId = "local-test-model"): unknown {

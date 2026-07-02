@@ -4382,7 +4382,7 @@ describe("runSessionLoop — active turn spinner", () => {
     const rendered = stripAnsi(outputChunks.join(""));
     expect(rendered).toContain("compacting transcript");
     expect(rendered).toContain("Compacting session history... Ctrl+C to cancel");
-    expect(rendered).toContain("𓂀 Context Compacted");
+    expect(rendered).toContain("𓂀  Context Compacted");
     expect(rendered).toContain("│ Messages   39 → 29");
     expect(rendered).toContain("│ Tokens     8,248 → 6,923");
     expect(rendered).toContain("│ Saved      ~1,325 tokens · 16%");
@@ -4439,12 +4439,12 @@ describe("runSessionLoop — active turn spinner", () => {
       },
     }));
 
-    expect(unavailable).toContain("𓂀 Context Compaction Unavailable");
+    expect(unavailable).toContain("𓂀  Context Compaction Unavailable");
     expect(unavailable).toContain("│ Status     Compaction is unavailable in this runtime.");
-    expect(cancelled).toContain("𓂀 Context Compaction Cancelled");
+    expect(cancelled).toContain("𓂀  Context Compaction Cancelled");
     expect(cancelled).toContain("│ Status     Compaction was cancelled.");
-    expect(cancelled).not.toContain("𓂀 Context Compaction Failed");
-    expect(failed).toContain("𓂀 Context Compaction Failed");
+    expect(cancelled).not.toContain("𓂀  Context Compaction Failed");
+    expect(failed).toContain("𓂀  Context Compaction Failed");
     expect(failed).toContain("│ Status     Compaction failed.");
     expect(failed).toContain("│ Detail     provider timed out");
     expect(failed).not.toContain("Session compaction failed:");

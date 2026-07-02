@@ -46,6 +46,7 @@ CLI startup restores the active workspace session from the session store. Fresh 
 estacoda setup              # Canonical setup entrypoint
 estacoda verify             # Verify configuration
 estacoda settings           # Show current settings
+estacoda doctor             # Health report and required fixes
 estacoda doctor --live      # Live provider check
 ```
 
@@ -64,6 +65,8 @@ Workspace trust is required before EstaCoda can run in a workspace. If trust is 
 Existing users who run the Setup Editor get a different post-apply path. The final review prompt is titled `Finalize configuration`, shows `Confirm selected configuration`, and includes a dynamic selected area such as `Channels · Telegram` or `Security`. `Confirm` updates the selected profile configuration. `Cancel` keeps the existing configuration unchanged and writes no config or secret changes. The technical review manifest remains internal and is not printed as user-facing setup output.
 
 After an existing-user Setup Editor apply, EstaCoda reports the apply and verification result and exits the setup flow. It does not show `Setup next action`, does not output `Selected: Launch EstaCoda`, and does not hand off to `Launch EstaCoda`. First-run onboarding still owns the launch prompt after verified setup.
+
+The Setup Editor exposes `EstaCoda Doctor` as the read-only health action. Use it when you want setup health, required fixes, and provider route status without changing configuration. See [Doctor](./doctor.md) for the full command behavior and repair flags.
 
 ---
 

@@ -220,7 +220,7 @@ cd EstaCoda
 | `estacoda setup` | تشغيل الإعداد أو الإصلاح المُراجع |
 | `estacoda verify` | فحص جاهزية الإعداد |
 | `estacoda model status` | فحص إعدادات المزوّد/النموذج النشطة |
-| `estacoda doctor` | تشخيص جاهزية الإعداد والتشغيل |
+| `estacoda doctor` | تقرير الصحة والإصلاحات المطلوبة |
 | `estacoda doctor --live` | إضافة فحوصات اتصال حية للمزوّد |
 | `estacoda --help` | عرض مساعدة `CLI` |
 
@@ -228,6 +228,7 @@ cd EstaCoda
 
 - [التثبيت](./installation.md) — مسارات التثبيت، دعم أنظمة التشغيل، ومتطلبات التشغيل
 - [CLI](../user-guide/cli.md) — الجلسات، أوامر slash، وسلوك الطرفية
+- [الطبيب](../user-guide/doctor.md) — فحوصات صحة الإعداد والإصلاحات الآمنة
 - [المزوّدون](../user-guide/providers.md) — إعداد المزوّدين ومستوى النضج
 - [القنوات](../user-guide/channels.md) — `Telegram` و `WhatsApp`
 - [الحالة والملفات](../reference/state-and-files.md) — أين تعيش حالة الملف الشخصي

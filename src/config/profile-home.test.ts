@@ -44,6 +44,7 @@ describe("profile home paths", () => {
       configPath: join(profileRoot, "config.json"),
       envPath: join(profileRoot, ".env"),
       authJsonPath: join(profileRoot, "auth.json"),
+      advisoriesAckedPath: join(profileRoot, "advisories-acked.json"),
       soulMdPath: join(profileRoot, "SOUL.md"),
       memoryMdPath: join(profileRoot, "MEMORY.md"),
       userMdPath: join(profileRoot, "USER.md"),

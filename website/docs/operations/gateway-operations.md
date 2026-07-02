@@ -57,7 +57,7 @@ The prompt appears:
 
 The prompt does not appear for non-channel setup changes, for channel edits when a ready channel already existed before that Setup Editor run, or when a managed gateway service is already installed or active.
 
-First-run onboarding may still offer launch after verification. Existing-user Setup Editor apply reports apply/verification state and exits the setup flow without a launch handoff.
+First-run onboarding may still offer a post-apply launch prompt. Existing-user Setup Editor apply reports apply/verify state and exits the setup flow without a launch handoff. Use `EstaCoda Doctor` in the Setup Editor when you want read-only health checks and required fixes.
 
 ## Stop
 

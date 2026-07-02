@@ -516,9 +516,9 @@ HOME=/tmp/estacoda-qa-ready pnpm run dev -- setup --interactive
 
 **Verify:**
 - The Setup Editor opens instead of the Onboarding Wizard.
-- Available actions include primary model route edit, fallback route edit, auxiliary route edit, optional capability configuration, security mode edit, Agent Evolution edit, read-only verification, launch after verification, and exit.
+- Available actions include primary model route edit, fallback route edit, auxiliary route edit, optional capability configuration, security mode edit, Agent Evolution edit, EstaCoda Doctor, and exit.
 - Exiting writes nothing.
-- Running verification is read-only.
+- Choosing EstaCoda Doctor is read-only and shows setup health, required fixes, and provider route status.
 
 ### 10.3 Configured Degraded
 
@@ -574,9 +574,9 @@ HOME=/tmp/estacoda-qa-broken-config pnpm run dev -- setup --interactive
 ```
 
 **Verify:**
-- Output shows config path(s) and parse/load error.
+- Output shows EstaCoda Doctor with the config syntax/load error.
 - Normal provider/model/security/workflow edits are not offered.
-- Only diagnostics, read-only verification, manual repair guidance, and exit are available.
+- Only EstaCoda Doctor and exit are available.
 - No normal config patch is drafted while config is unsafe.
 
 ### 10.7 Untrusted Workspace

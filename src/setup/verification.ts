@@ -1,4 +1,4 @@
-import { mkdir, stat, writeFile } from "node:fs/promises";
+import { access, constants, mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { resolveHomeDir } from "../config/home-dir.js";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
@@ -22,6 +22,7 @@ export type SetupVerificationOptions = {
   profileId?: string;
   runtime?: Runtime;
   trustStorePath?: string;
+  readOnly?: boolean;
 };
 
 export type SetupVerificationIssueCode =
@@ -110,13 +111,21 @@ export async function collectSetupVerificationReport(
     copy,
   });
 
-  try {
-    await mkdir(stateRoot, { recursive: true });
-    await writeFile(verifyFile, "ok\n", "utf8");
-    stateWritable = true;
-  } catch {
-    warnings.push(copy.verification.stateNotWritableWarning);
-    issueCodes.push("state-not-writable");
+  if (options.readOnly === true) {
+    stateWritable = await checkStateWritableReadOnly(stateRoot, homeDir);
+    if (!stateWritable) {
+      warnings.push(copy.verification.stateNotWritableWarning);
+      issueCodes.push("state-not-writable");
+    }
+  } else {
+    try {
+      await mkdir(stateRoot, { recursive: true });
+      await writeFile(verifyFile, "ok\n", "utf8");
+      stateWritable = true;
+    } catch {
+      warnings.push(copy.verification.stateNotWritableWarning);
+      issueCodes.push("state-not-writable");
+    }
   }
 
   try {
@@ -149,7 +158,7 @@ export async function collectSetupVerificationReport(
     issueCodes.push(...mapBrowserWarningToCodes(warning));
   }
 
-  if (options.runtime?.executeTool !== undefined) {
+  if (options.readOnly !== true && options.runtime?.executeTool !== undefined) {
     const packageJson = join(options.workspaceRoot, "package.json");
     try {
       await stat(packageJson);
@@ -184,6 +193,31 @@ export async function collectSetupVerificationReport(
     warnings,
     issueCodes,
   };
+}
+
+async function checkStateWritableReadOnly(stateRoot: string, homeDir: string): Promise<boolean> {
+  try {
+    const stateRootStat = await stat(stateRoot);
+    return stateRootStat.isDirectory() && await canWrite(stateRoot);
+  } catch (error) {
+    if (isNodeErrorCode(error, "ENOENT")) {
+      return canWrite(homeDir);
+    }
+    return false;
+  }
+}
+
+async function canWrite(path: string): Promise<boolean> {
+  try {
+    await access(path, constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isNodeErrorCode(error: unknown, code: string): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === code;
 }
 
 async function isWorkspaceTrusted(store: WorkspaceTrustStore, workspaceRoot: string): Promise<boolean> {

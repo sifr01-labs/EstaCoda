@@ -13,7 +13,7 @@ export type ConfigEditorRenderedAction = {
   readonly editorAction?: SetupEditorActionDraft;
 };
 
-const PR4_ACTION_ORDER: readonly SetupRouteActionId[] = ["verify-setup", "show-diagnostics", "exit"];
+const PR4_ACTION_ORDER: readonly SetupRouteActionId[] = ["run-doctor", "exit"];
 const PR6_EDITOR_ACTION_ORDER: readonly SetupEditorActionId[] = [
   "repair-primary-provider",
   "edit-primary-model-route",
@@ -220,6 +220,14 @@ function renderEditorAction(
 function syntheticAction(id: SetupRouteActionId, locale: SetupCopyLocale): ConfigEditorRenderedAction {
   const localized = routeActionCopy(id, locale);
   switch (id) {
+    case "run-doctor":
+      return {
+        id,
+        label: localized.label,
+        description: localized.description,
+        readOnly: true,
+        source: "synthetic",
+      };
     case "verify-setup":
       return {
         id,
@@ -255,6 +263,11 @@ function routeActionCopy(
   locale: SetupCopyLocale
 ): { readonly label: string; readonly description: string } {
   switch (id) {
+    case "run-doctor":
+      return {
+        label: setupCopyText(locale, "setupEditor.actions.runDoctor"),
+        description: setupCopyText(locale, "setupEditor.actions.runDoctor.description"),
+      };
     case "verify-setup":
       return {
         label: setupCopyText(locale, "setupEditor.actions.runReadonlyVerification"),

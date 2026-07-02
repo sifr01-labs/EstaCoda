@@ -60,7 +60,7 @@ When the user chooses WhatsApp during onboarding or the Setup Editor, EstaCoda u
 
 The prompt does not appear for non-channel setup changes, for editing a channel after a ready channel already existed, or when a managed gateway service is already installed or active.
 
-First-run onboarding may still offer launch after verification. Existing-user Setup Editor apply does not show the launch handoff after apply.
+First-run onboarding may still offer a post-apply launch prompt. Existing-user Setup Editor apply does not show the launch handoff after apply. Use `EstaCoda Doctor` in the Setup Editor when you want read-only health checks and required fixes.
 
 ## Channel maturity
 
