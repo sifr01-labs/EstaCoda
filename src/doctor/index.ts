@@ -34,6 +34,8 @@ import { diagnoseProviderChain, type ProviderChainDiagnostic } from "./checks/pr
 import { diagnosePythonEnvironments, type PythonEnvironmentDiagnostic } from "./checks/python-env.js";
 import { diagnoseSQLiteHealth, type SQLiteHealthDiagnostic } from "./checks/sqlite-health.js";
 import { renderDoctorJsonReport, renderDoctorReport } from "./cli-renderer.js";
+import { runDoctorConfigRepair } from "./config-repair.js";
+import { renderDoctorConfigRepairReport } from "./config-repair-renderer.js";
 import { runDoctorFix } from "./fix-engine.js";
 import { renderDoctorFixReport } from "./fix-renderer.js";
 import { renderDoctorSessionRepairReport } from "./session-repair-renderer.js";
@@ -63,6 +65,22 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
         home: globalPaths.stateRoot,
         report: repairReport
       })
+    };
+  }
+
+  if (hasFlag(args, "--fix-config")) {
+    const activeProfile = readActiveProfileForDoctor({ homeDir: options.homeDir });
+    const selectedProfile = options.profileId ?? activeProfile.profileId;
+    const configRepairResult = await runDoctorConfigRepair({
+      homeDir: options.homeDir,
+      profileId: selectedProfile,
+      locale: await detectDoctorLocale({ ...options, profileId: selectedProfile }),
+      removeEnvGhosts: hasFlag(args, "--remove-env-ghosts")
+    });
+    return {
+      handled: true,
+      exitCode: configRepairResult.status === "blocked" ? 1 : 0,
+      output: renderDoctorConfigRepairReport(configRepairResult)
     };
   }
 
@@ -783,7 +801,8 @@ function warningDetailLines(warning: string, locale: DoctorLocale): readonly str
 function warningCommand(warning: string): string | undefined {
   if (/Config syntax error/iu.test(warning)) return "estacoda setup --interactive";
   if (/Config drift could not be planned/iu.test(warning)) return "estacoda setup --interactive";
-  if (/Config contains stale root-level key|Profile \.env contains unreferenced credential key/iu.test(warning)) return "estacoda doctor --fix-config";
+  if (/Profile \.env contains unreferenced credential key/iu.test(warning)) return "estacoda doctor --fix-config --remove-env-ghosts";
+  if (/Config contains stale root-level key/iu.test(warning)) return "estacoda doctor --fix-config";
   if (/OAuth credentials are expired/iu.test(warning)) return "estacoda model setup";
   if (/Provider route .*(?:missing (?:env var|apiKeyEnv|OAuth credentials)|OAuth credentials expired|provider setup incomplete)/iu.test(warning)) return "estacoda model setup";
   if (/Provider setup is incomplete|missing required values|Missing API key/iu.test(warning)) return "estacoda model setup";

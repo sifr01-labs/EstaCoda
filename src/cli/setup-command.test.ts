@@ -588,11 +588,41 @@ describe("cli setup command", () => {
       expect.objectContaining({
         title: "Profile .env contains unreferenced credential key",
         detailLines: ["Env: UNUSED_API_KEY"],
-        command: "estacoda doctor --fix-config",
+        command: "estacoda doctor --fix-config --remove-env-ghosts",
         severity: "warning"
       })
     ]));
     expect(result.output).not.toContain("ghost-secret");
+  });
+
+  it("doctor --fix-config backs up and migrates stale config keys", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    await writeUserConfig(tempDir, {
+      ...(localReadyConfig() as Record<string, unknown>),
+      provider: "local",
+      baseUrl: "http://legacy.local/v1"
+    });
+
+    const result = await runCliCommand({
+      argv: ["doctor", "--fix-config"],
+      workspaceRoot,
+      homeDir: tempDir,
+      interactive: false,
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      provider?: string;
+      baseUrl?: string;
+      providers?: Record<string, { baseUrl?: string }>;
+    };
+
+    expect(result.handled).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("EstaCoda Doctor Config Repair");
+    expect(result.output).toContain("Applied config migration");
+    expect(result.output).toContain("Config backup");
+    expect(config.provider).toBeUndefined();
+    expect(config.baseUrl).toBeUndefined();
+    expect(config.providers?.local?.baseUrl).toBe("http://localhost:11434/v1");
   });
 
   it("doctor --json marks OAuth primary route failures as provider blockers", async () => {
