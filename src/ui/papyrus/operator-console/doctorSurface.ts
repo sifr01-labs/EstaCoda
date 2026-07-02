@@ -294,6 +294,10 @@ function translateDoctorDynamicText(value: string): string | undefined {
   if (value === "Dependency audit not run.") {
     return isolateRtl("لم يتم تشغيل فحص أمان الاعتماديات.");
   }
+  const advisoryAcks = /^(\d+) security advisory acknowledgement\(s\) active\.$/u.exec(value)?.[1];
+  if (advisoryAcks !== undefined) {
+    return isolateRtl(`${isolateLtr(advisoryAcks)} تأكيدات تنبيه أمني نشطة.`);
+  }
   if (value === "System Python 3 was not found; managed Python setup would require Python 3.") {
     return isolateRtl(`لم يتم العثور على ${isolateLtr("Python 3")}؛ إعداد بيئة Python المُدارة يتطلب ${isolateLtr("Python 3")}.`);
   }

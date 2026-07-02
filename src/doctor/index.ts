@@ -34,6 +34,10 @@ import { diagnoseNpmAudit, type NpmAuditDiagnostic } from "./checks/npm-audit.js
 import { diagnoseOAuthStatus, type OAuthStatusDiagnostic } from "./checks/oauth-status.js";
 import { diagnoseProviderChain, type ProviderChainDiagnostic } from "./checks/provider-chain.js";
 import { diagnosePythonEnvironments, type PythonEnvironmentDiagnostic } from "./checks/python-env.js";
+import {
+  diagnoseSecurityAdvisories,
+  type SecurityAdvisoryDiagnostic
+} from "./checks/security-advisories.js";
 import { diagnoseSQLiteHealth, type SQLiteHealthDiagnostic } from "./checks/sqlite-health.js";
 import { renderDoctorJsonReport, renderDoctorReport } from "./cli-renderer.js";
 import { runDoctorConfigRepair } from "./config-repair.js";
@@ -82,7 +86,7 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
       return {
         handled: true,
         exitCode: 1,
-        output: `Doctor advisory acknowledgement failed: ${errorMessage(error)}\n`
+        output: `Doctor advisory acknowledgement failed: ${advisoryAckErrorMessage(error)}\n`
       };
     }
   }
@@ -199,6 +203,20 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
       notes: []
     })
   );
+  const securityAdvisories = await safeDoctorDiagnostic(
+    "security advisories",
+    () => diagnoseSecurityAdvisories({
+      workspaceRoot: options.workspaceRoot,
+      ackStore: new AdvisoryAckStore({ path: selectedProfilePaths.advisoriesAckedPath })
+    }),
+    (warning): SecurityAdvisoryDiagnostic => ({
+      status: "warning",
+      active: [],
+      acknowledgedCount: 0,
+      warnings: [warning],
+      notes: []
+    })
+  );
 
   try {
     config = await loadRuntimeConfig(effectiveOptions);
@@ -272,6 +290,7 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
   warnings.push(...externalTools.warnings);
   warnings.push(...memoryHealth.warnings);
   warnings.push(...npmAudit.warnings);
+  warnings.push(...securityAdvisories.warnings);
   warnings.push(...pythonEnvironments.warnings);
   warnings.push(...providerChain.warnings);
   warnings.push(...configHygieneWarnings(configHygiene, configDrift));
@@ -286,6 +305,7 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
   notes.push(...externalTools.notes);
   notes.push(...memoryHealth.notes);
   notes.push(...npmAudit.notes);
+  notes.push(...securityAdvisories.notes);
   notes.push(...pythonEnvironments.notes);
 
   if (configSyntaxError !== undefined) {
@@ -350,6 +370,7 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
     externalTools,
     memoryHealth,
     npmAudit,
+    securityAdvisories,
     pythonEnvironments,
     activeProfileMissing,
     selectedProfileConfigMissing,
@@ -398,6 +419,7 @@ type BuildDoctorReportInput = {
   readonly externalTools: ExternalToolDiagnostic;
   readonly memoryHealth: MemoryHealthDiagnostic;
   readonly npmAudit: NpmAuditDiagnostic;
+  readonly securityAdvisories: SecurityAdvisoryDiagnostic;
   readonly pythonEnvironments: PythonEnvironmentDiagnostic;
   readonly activeProfileMissing: boolean;
   readonly selectedProfileConfigMissing: boolean;
@@ -481,6 +503,12 @@ function buildDoctorReport(input: BuildDoctorReportInput): DoctorReport {
       label(input.locale, "dependencies"),
       dependencyAuditSeverity(input.npmAudit),
       dependencyAuditSummary(input.npmAudit, input.locale)
+    ),
+    check(
+      "advisories",
+      label(input.locale, "advisories"),
+      securityAdvisorySeverity(input.securityAdvisories),
+      securityAdvisorySummary(input.securityAdvisories, input.locale)
     ),
     check(
       "python-environments",
@@ -695,6 +723,43 @@ function dependencyAuditSummary(diagnostic: NpmAuditDiagnostic, locale: DoctorLo
     : `${diagnostic.totalVulnerabilities} advisories`;
 }
 
+function securityAdvisorySeverity(diagnostic: SecurityAdvisoryDiagnostic): DoctorCheckSeverity {
+  if (diagnostic.status === "blocked") return "blocked";
+  if (diagnostic.status === "warning") return "warning";
+  return "healthy";
+}
+
+function securityAdvisorySummary(diagnostic: SecurityAdvisoryDiagnostic, locale: DoctorLocale): string {
+  if (diagnosticFailed(diagnostic.warnings)) {
+    return locale === "ar" ? "فشل الفحص" : "diagnostic failed";
+  }
+  if (diagnostic.warnings.some((warning) => /^Security advisory acknowledgements could not be read\.$/u.test(warning))) {
+    return locale === "ar" ? "تعذر قراءة التأكيدات" : "acknowledgements unreadable";
+  }
+  if (diagnostic.active.length === 0) {
+    return locale === "ar" ? "لا توجد تنبيهات نشطة" : "no active advisories";
+  }
+  const highest = diagnostic.active.reduce((severity, advisory) => {
+    return securityAdvisoryRank(advisory.severity) > securityAdvisoryRank(severity) ? advisory.severity : severity;
+  }, diagnostic.active[0]!.severity);
+  return locale === "ar"
+    ? `${diagnostic.active.length} تنبيه ${highest} غير مؤكد`
+    : `${diagnostic.active.length} unacked ${highest} advisory`;
+}
+
+function securityAdvisoryRank(severity: "low" | "moderate" | "high" | "critical"): number {
+  switch (severity) {
+    case "critical":
+      return 4;
+    case "high":
+      return 3;
+    case "moderate":
+      return 2;
+    case "low":
+      return 1;
+  }
+}
+
 function pythonEnvironmentsSummary(diagnostic: PythonEnvironmentDiagnostic, locale: DoctorLocale): string {
   if (diagnosticFailed(diagnostic.warnings)) {
     return locale === "ar" ? "فشل الفحص" : "diagnostic failed";
@@ -806,12 +871,24 @@ function warningAction(warning: string, index: number, locale: DoctorLocale): Do
 }
 
 function warningSeverity(warning: string): DoctorAction["severity"] {
-  return /Config syntax error|Config drift could not be planned|Provider setup is incomplete|Provider route primary is unavailable|not writable|blocked|SQLite session DB (?:could not be opened|schema is missing required|FTS index is unavailable|FTS write probe failed|path is not a file)/iu.test(warning)
+  return /Config syntax error|Config drift could not be planned|Provider setup is incomplete|Provider route primary is unavailable|not writable|blocked|Security advisory .* \(critical\)|SQLite session DB (?:could not be opened|schema is missing required|FTS index is unavailable|FTS write probe failed|path is not a file)/iu.test(warning)
     ? "blocked"
     : "warning";
 }
 
 function warningDetailLines(warning: string, locale: DoctorLocale): readonly string[] | undefined {
+  const advisory = securityAdvisoryFromWarning(warning);
+  if (advisory !== undefined) {
+    return locale === "ar"
+      ? [
+          `الحزمة: ${advisory.packageVersion}`,
+          `التوصية: ${advisory.recommendation}`
+        ]
+      : [
+          `Package: ${advisory.packageVersion}`,
+          `Recommendation: ${advisory.recommendation}`
+        ];
+  }
   const staleConfigKey = /^Config contains stale root-level key: (.+)$/iu.exec(warning)?.[1];
   if (staleConfigKey !== undefined) {
     return [staleConfigKey.replace("->", "→")];
@@ -836,6 +913,8 @@ function warningDetailLines(warning: string, locale: DoctorLocale): readonly str
 }
 
 function warningCommand(warning: string): string | undefined {
+  const advisory = securityAdvisoryFromWarning(warning);
+  if (advisory !== undefined) return `estacoda doctor --ack ${advisory.id}`;
   if (/Config syntax error/iu.test(warning)) return "estacoda setup --interactive";
   if (/Config drift could not be planned/iu.test(warning)) return "estacoda setup --interactive";
   if (/Profile \.env contains unreferenced credential key/iu.test(warning)) return "estacoda doctor --fix-config --remove-env-ghosts";
@@ -858,6 +937,8 @@ function pythonCapabilityFromWarning(warning: string): string | undefined {
 
 function localizeWarningTitle(warning: string, locale: DoctorLocale): string {
   if (locale !== "ar") {
+    const advisory = securityAdvisoryFromWarning(warning);
+    if (advisory !== undefined) return `Advisory ${advisory.id}`;
     if (/Config contains stale root-level key/iu.test(warning)) return "Config contains stale root-level key";
     if (/Profile \.env contains unreferenced credential key/iu.test(warning)) return "Profile .env contains unreferenced credential key";
     return warning;
@@ -889,6 +970,10 @@ function localizeWarningTitle(warning: string, locale: DoctorLocale): string {
   if (/Dependency audit could not run because pnpm was not found/iu.test(warning)) return "تعذر تشغيل فحص الاعتماديات لأن pnpm غير موجود";
   if (/Dependency audit output could not be parsed/iu.test(warning)) return "تعذر قراءة ناتج فحص الاعتماديات";
   if (/Dependency audit could not run/iu.test(warning)) return "تعذر تشغيل فحص الاعتماديات";
+  if (/Security advisory/iu.test(warning)) {
+    const advisory = securityAdvisoryFromWarning(warning);
+    return advisory === undefined ? "تنبيه أمني" : `تنبيه أمني ${advisory.id}`;
+  }
   if (/System Python 3 was not found/iu.test(warning)) return "لم يتم العثور على Python 3 للنظام";
   if (/Managed Python capability .* is not ready/iu.test(warning)) return "قدرة Python المُدارة غير جاهزة";
   if (/Doctor .* diagnostic failed/iu.test(warning)) return "تعذر تشغيل أحد فحوصات الطبيب";
@@ -910,6 +995,20 @@ function localizeWarningTitle(warning: string, locale: DoctorLocale): string {
   if (/State backup not ready/iu.test(warning)) return "نسخ الحالة الاحتياطي غير جاهز";
   if (/Configured model context window is below 64K tokens/iu.test(warning)) return "نافذة سياق النموذج أقل من 64K رمز";
   return warning;
+}
+
+function securityAdvisoryFromWarning(warning: string): {
+  readonly id: string;
+  readonly packageVersion: string;
+  readonly recommendation: string;
+} | undefined {
+  const match = /^Security advisory ([A-Za-z0-9._:-]+) \((low|moderate|high|critical)\) affects ([^:]+): .+\. Recommendation: (.+)$/iu.exec(warning);
+  if (match === null) return undefined;
+  return {
+    id: match[1]!,
+    packageVersion: match[3]!,
+    recommendation: match[4]!
+  };
 }
 
 function isSQLiteRepairWarning(warning: string, diagnostic: SQLiteHealthDiagnostic): boolean {
@@ -947,6 +1046,7 @@ type DoctorLabelKey =
   | "mcp"
   | "externalTools"
   | "dependencies"
+  | "advisories"
   | "pythonEnvironments"
   | "memory"
   | "sessions"
@@ -968,6 +1068,7 @@ const DOCTOR_LABELS: Record<DoctorLabelKey, Record<DoctorLocale, string>> = {
   mcp: { en: "MCP", ar: "MCP" },
   externalTools: { en: "External tools", ar: "الأدوات الخارجية" },
   dependencies: { en: "Dependencies", ar: "الاعتماديات" },
+  advisories: { en: "Advisories", ar: "التنبيهات" },
   pythonEnvironments: { en: "Python Environments", ar: "بيئات Python" },
   memory: { en: "Memory", ar: "الذاكرة" },
   sessions: { en: "Sessions", ar: "الجلسات" },
@@ -1054,6 +1155,13 @@ function fallbackSetupEntryState(
     blockers: [message],
     error: message
   };
+}
+
+function advisoryAckErrorMessage(error: unknown): string {
+  if (/Invalid advisory acknowledgement store/iu.test(errorMessage(error))) {
+    return "advisory acknowledgement store is invalid";
+  }
+  return errorMessage(error);
 }
 
 function errorMessage(error: unknown): string {

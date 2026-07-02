@@ -216,6 +216,7 @@ describe("renderDoctorReport", () => {
       notes: [
         "Memory file will be created on first write: /tmp/USER.md",
         "Dependency audit not run.",
+        "1 security advisory acknowledgement(s) active.",
         "Optional managed Python capabilities not installed: ddgs"
       ]
     }));
@@ -225,6 +226,7 @@ describe("renderDoctorReport", () => {
     expect(output).toContain("◇ الإجراءات");
     expect(output).toContain("سيتم إنشاء ملف الذاكرة عند أول كتابة");
     expect(output).toContain("لم يتم تشغيل فحص أمان الاعتماديات");
+    expect(output).toContain("تأكيدات تنبيه أمني نشطة");
     expect(output).toContain("قدرات Python المُدارة الاختيارية غير مثبتة");
     expect(output).toContain(`${LRI}/tmp/USER.md${PDI}`);
     expect(output).toContain(`${LRI}ddgs${PDI}`);
