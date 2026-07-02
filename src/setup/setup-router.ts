@@ -23,6 +23,7 @@ export type SetupRouteActionId =
   | "review-edit-config"
   | "run-guided-onboarding"
   | "verify-setup"
+  | "run-doctor"
   | "repair-setup"
   | "show-diagnostics"
   | "trust-workspace"
@@ -141,7 +142,7 @@ function firstRunDecision(
     state,
     actions: [
       action("run-guided-onboarding", "Start first-run setup", "Choose language, trust, provider, security, optional capabilities, review, verify, and launch.", true),
-      action("verify-setup", setupCopyText("en", "setupRoute.action.verifySetup"), "Run read-only setup verification before changing anything.", false),
+      doctorAction(),
       action("exit", setupCopyText("en", "setupRoute.action.exit"), "Leave setup without changing config.", false),
     ],
     warnings: state.warnings,
@@ -172,7 +173,7 @@ function configuredDegradedDecision(state: SetupEntryState): SetupRouteDecision 
     state,
     actions: [
       action("repair-setup", "Fix now", "Open the guided repair path for the reported warnings.", true),
-      action("verify-setup", setupCopyText("en", "setupRoute.action.verifySetup"), "Run read-only setup verification again.", false),
+      doctorAction(),
       action("launch-agent", setupCopyText("en", "setupRoute.action.acceptLimitedMode"), "Launch the agent while accepting the current degraded state.", false),
       action("review-edit-config", "Review/edit config", "Inspect guided configuration sections.", true),
       action("exit", setupCopyText("en", "setupRoute.action.exit"), "Leave setup without changing config.", false),
@@ -201,8 +202,7 @@ function repairFirstDecision(state: SetupEntryState): SetupRouteDecision {
 function repairFirstActions(state: SetupEntryState): SetupRouteAction[] {
   if (state.kind === "broken-config" || state.kind === "state-not-writable") {
     return [
-      action("show-diagnostics", "Show diagnostics", "Show structured blockers and warnings without changing config.", false),
-      action("verify-setup", setupCopyText("en", "setupRoute.action.verifySetup"), "Run read-only setup verification again.", false),
+      doctorAction(),
       action("exit", setupCopyText("en", "setupRoute.action.exit"), "Leave setup without changing config.", false),
     ];
   }
@@ -211,8 +211,7 @@ function repairFirstActions(state: SetupEntryState): SetupRouteAction[] {
     action("repair-setup", "Repair setup", "Start the guided repair path for the current blockers.", true),
     action("review-edit-config", "Open config editor", "Inspect or edit guided configuration sections.", true),
     action("run-guided-onboarding", "Run full onboarding", "Restart the guided setup flow from the beginning.", true),
-    action("show-diagnostics", "Show diagnostics", "Show structured blockers and warnings without changing config.", false),
-    action("verify-setup", setupCopyText("en", "setupRoute.action.verifySetup"), "Run read-only setup verification again.", false),
+    doctorAction(),
     action("exit", setupCopyText("en", "setupRoute.action.exit"), "Leave setup without changing config.", false),
   ];
 }
@@ -272,9 +271,13 @@ function configuredActions(): SetupRouteAction[] {
     action("launch-agent", setupCopyText("en", "setupRoute.action.launchAgent"), "Start the interactive EstaCoda agent session.", false),
     action("review-edit-config", "Review/edit config", "Inspect guided configuration sections.", true),
     action("run-guided-onboarding", "Run guided onboarding again", "Run guided setup again intentionally.", true),
-    action("verify-setup", setupCopyText("en", "setupRoute.action.verifySetup"), "Run read-only setup verification.", false),
+    doctorAction(),
     action("exit", setupCopyText("en", "setupRoute.action.exit"), "Leave setup without changing config.", false),
   ];
+}
+
+function doctorAction(): SetupRouteAction {
+  return action("run-doctor", "EstaCoda Doctor", "Check setup health and show required fixes.", false);
 }
 
 function action(

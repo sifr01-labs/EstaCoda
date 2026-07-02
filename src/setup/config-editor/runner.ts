@@ -123,6 +123,7 @@ import {
   runCodexOAuthFlowWithDeviceCodeNotice,
 } from "../../providers/oauth/codex-setup.js";
 import { codexDeviceVerificationUrl, type FetchLike as CodexOAuthFetchLike } from "../../providers/oauth/codex-oauth.js";
+import { runDoctor } from "../../doctor/index.js";
 
 export type ConfigEditorRunnerOptions = CollectSetupRouteOptions & {
   readonly prompt: Prompt;
@@ -482,6 +483,22 @@ async function handleAction(
   action: ConfigEditorRenderedAction
 ): Promise<RunOnceResult> {
   switch (action.id) {
+    case "run-doctor": {
+      const result = await runDoctor({
+        argv: ["doctor"],
+        workspaceRoot: options.workspaceRoot,
+        homeDir: options.homeDir,
+        profileId: options.profileId,
+      });
+      write(options, result.output);
+      return {
+        completed: true,
+        exitCode: 0,
+        output: result.output,
+        initialDecision,
+        selectedActionId: action.id,
+      };
+    }
     case "verify-setup": {
       const finalDecision = await collectSetupRoute({ ...options, selection: "verify" });
       const output = setupCopyText(options.locale, "setupEditor.result.verifyPrepared");
@@ -2414,14 +2431,14 @@ function requireEditorAction(action: ConfigEditorRenderedAction): SetupEditorAct
 function normalizeConfigEditorActionId(id: SetupEditorActionId | SetupRouteActionId): string {
   switch (id) {
     case "run-readonly-verification":
-      return "verify-setup";
+      return "run-doctor";
     case "cancel-setup-editor":
       return "exit";
     case "trust-workspace":
       return "repair-workspace-trust";
     case "repair-broken-config":
     case "repair-state-directory":
-      return "show-diagnostics";
+      return "run-doctor";
     default:
       return id;
   }

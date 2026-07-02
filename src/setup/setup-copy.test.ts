@@ -200,6 +200,7 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.actions.configureImageGeneration",
   "setupEditor.actions.configureWebSearch",
   "setupEditor.actions.configureBrowser",
+  "setupEditor.actions.runDoctor",
   "setupEditor.actions.runReadonlyVerification",
   "setupEditor.actions.showDiagnostics",
   "setupEditor.actions.exitWithoutChanges",
@@ -223,6 +224,7 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.actions.configureImageGeneration.description",
   "setupEditor.actions.configureWebSearch.description",
   "setupEditor.actions.configureBrowser.description",
+  "setupEditor.actions.runDoctor.description",
   "setupEditor.actions.runReadonlyVerification.description",
   "setupEditor.actions.showDiagnostics.description",
   "setupEditor.actions.exitWithoutChanges.description",
@@ -1120,6 +1122,8 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupEditor.actions.editWorkflowLearning")).toBe(isolateLtr("Agent Evolution"));
     expect(rawSetupCopy("en", "setupEditor.actions.chooseLanguage")).toBe("Language");
     expect(rawSetupCopy("en", "setupEditor.actions.chooseLanguage.description")).toBe("Interface language and Arabic beta support.");
+    expect(rawSetupCopy("en", "setupEditor.actions.runDoctor")).toBe("EstaCoda Doctor");
+    expect(rawSetupCopy("en", "setupEditor.actions.runDoctor.description")).toBe("Check setup health and show required fixes.");
     expect(rawSetupCopy("en", "setupEditor.actions.runReadonlyVerification")).toBe("Setup verification");
     expect(rawSetupCopy("en", "setupEditor.actions.runReadonlyVerification.description")).toBe("Check setup state without changing config.");
     expect(rawSetupCopy("en", "setupEditor.actions.showDiagnostics")).toBe("Diagnostics");
@@ -1193,6 +1197,8 @@ describe("setup copy", () => {
     expect(rawSetupCopy("ar", "setupEditor.actions.editWorkflowLearning")).toBe("Agent Evolution");
     expect(rawSetupCopy("ar", "setupEditor.actions.chooseLanguage")).toBe("اللغة");
     expect(rawSetupCopy("ar", "setupEditor.actions.chooseLanguage.description")).toBe("لغة الواجهة ودعم العربية التجريبي.");
+    expect(rawSetupCopy("ar", "setupEditor.actions.runDoctor")).toBe("طبيب EstaCoda");
+    expect(rawSetupCopy("ar", "setupEditor.actions.runDoctor.description")).toBe("افحص حالة الإعداد واعرض الإصلاحات المطلوبة.");
     expect(rawSetupCopy("ar", "setupEditor.actions.runReadonlyVerification")).toBe("التحقق من الإعداد");
     expect(rawSetupCopy("ar", "setupEditor.actions.runReadonlyVerification.description")).toBe("افحص حالة الإعداد دون تغيير التكوين.");
     expect(rawSetupCopy("ar", "setupEditor.actions.showDiagnostics")).toBe("التشخيصات");
@@ -1201,6 +1207,7 @@ describe("setup copy", () => {
     expect(rawSetupCopy("ar", "setupEditor.actions.exitWithoutChanges.description")).toBe("غادر الإعداد دون تعديل التكوين.");
     expect(resolveSetupCopy("ar", "setupEditor.actions.configureChannels.description")).toContain(isolateLtr("Telegram"));
     expect(resolveSetupCopy("ar", "setupEditor.actions.configureChannels.description")).toContain(isolateLtr("WhatsApp"));
+    expect(resolveSetupCopy("ar", "setupEditor.actions.runDoctor")).toContain(isolateLtr("EstaCoda"));
     expect(resolveSetupCopy("ar", "setupEditor.actions.configureWebSearch.description")).toContain(isolateLtr("EstaCoda"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.webSearch.provider.brave.description")).toContain(isolateLtr("Brave Search"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.webSearch.provider.ddgs.description")).toContain(isolateLtr("DuckDuckGo"));

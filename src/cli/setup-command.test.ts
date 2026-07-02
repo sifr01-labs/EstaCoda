@@ -260,14 +260,13 @@ describe("cli setup command", () => {
       argv: ["setup", "--interactive"],
       workspaceRoot,
       homeDir: tempDir,
-      prompt: firstRunPrompt({ reviewAccepted: true, setupEditorActionId: "show-diagnostics" }),
+      prompt: firstRunPrompt({ reviewAccepted: true, setupEditorActionId: "run-doctor" }),
     });
 
     expect(result.handled).toBe(true);
     expect(result.exitCode).toBe(0);
-    expect(result.output).toContain("Setup diagnostics");
-    expect(result.output).toContain("State: configured-degraded");
-    expect(result.output).toContain("Setup path: configured-degraded-menu");
+    expect(result.output).toContain("EstaCoda Doctor");
+    expect(result.output).toContain("System health inspection");
     expect(result.output).toContain("Configured model context window is below 64K tokens.");
     expect(result.output).not.toContain("Available actions:");
     expect(result.output).not.toContain("Sections:");
@@ -299,14 +298,12 @@ describe("cli setup command", () => {
         argv: ["setup", "--interactive"],
         workspaceRoot,
         homeDir: tempDir,
-        prompt: firstRunPrompt({ reviewAccepted: true, setupEditorActionId: "show-diagnostics" }),
+        prompt: firstRunPrompt({ reviewAccepted: true, setupEditorActionId: "run-doctor" }),
       });
 
       expect(result.handled).toBe(true);
-      expect(result.output).toContain("Setup diagnostics");
-      expect(result.output).toContain("State: missing-secret");
-      expect(result.output).toContain("Setup path: repair-first-menu");
-      expect(result.output).toContain("Blockers:");
+      expect(result.output).toContain("EstaCoda Doctor");
+      expect(result.output).toContain("System health inspection");
       expect(result.output).toContain("OPENAI_API_KEY");
       expect(result.output).not.toContain("Available actions:");
       expect(result.output).not.toContain("Sections:");
@@ -331,17 +328,15 @@ describe("cli setup command", () => {
       argv: ["setup", "--interactive"],
       workspaceRoot,
       homeDir: tempDir,
-      prompt: firstRunPrompt({ reviewAccepted: true, setupEditorActionId: "show-diagnostics" }),
+      prompt: firstRunPrompt({ reviewAccepted: true, setupEditorActionId: "run-doctor" }),
     });
 
     expect(result.handled).toBe(true);
     expect(result.exitCode).toBe(0);
-    expect(result.output).toContain("Setup diagnostics");
-    expect(result.output).toContain("State: broken-config");
-    expect(result.output).toContain("Setup path: repair-first-menu");
-    expect(result.output).toContain(configPath);
-    expect(result.output).toContain("Normal config edits are blocked until the config file can be parsed.");
-    expect(result.output).toContain("Only diagnostics, verification, and exit are available");
+    expect(result.output).toContain("EstaCoda Doctor");
+    expect(result.output).toContain("System health inspection");
+    expect(result.output).toContain("Config syntax error");
+    expect(result.output).toContain("Expected property name");
     expect(result.output).not.toContain("Available actions:");
     expect(result.output).not.toContain("Sections:");
     expect(result.output).not.toContain("repair-setup - Repair setup");
@@ -384,17 +379,14 @@ describe("cli setup command", () => {
       argv: ["setup", "--interactive"],
       workspaceRoot,
       homeDir: tempDir,
-      prompt: firstRunPrompt({ reviewAccepted: true, setupEditorActionId: "show-diagnostics" }),
+      prompt: firstRunPrompt({ reviewAccepted: true, setupEditorActionId: "run-doctor" }),
     });
 
     expect(result.handled).toBe(true);
-    expect(result.output).toContain("Setup diagnostics");
-    expect(result.output).toContain("State: state-not-writable");
-    expect(result.output).toContain("Setup path: repair-first-menu");
-    expect(result.output).toContain(profileConfigPath(tempDir));
-    expect(result.output).toContain("fix-state-directory");
-    expect(result.output).toContain("Restore write permission");
-    expect(result.output).toContain("Only diagnostics, verification, and exit are available");
+    expect(result.output).toContain("EstaCoda Doctor");
+    expect(result.output).toContain("System health inspection");
+    expect(result.output).toContain("EstaCoda state directory is not writable.");
+    expect(result.output).toContain("State backup not ready");
     expect(result.output).not.toContain("Available actions:");
     expect(result.output).not.toContain("Sections:");
     expect(result.output).not.toContain("repair-setup - Repair setup");
