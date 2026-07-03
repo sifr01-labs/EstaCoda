@@ -1,7 +1,7 @@
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-const GITHUB_BLOB_BASE_URL = "https://github.com/KemetResearch/EstaCoda/blob/main";
+const GITHUB_BLOB_BASE_URL = "https://github.com/sifr01-labs/EstaCoda/blob/main";
 const SOURCE_PRIORITIES = ["official", "optional", "community", "experimental"] as const;
 
 type SourceType = (typeof SOURCE_PRIORITIES)[number];

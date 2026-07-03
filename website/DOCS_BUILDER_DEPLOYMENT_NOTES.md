@@ -4,7 +4,7 @@
 
 - **Domain:** `estacoda.kemetresearch.com`
 - **Host:** Replit
-- **Repo:** `KemetResearch/EstaCoda`
+- **Repo:** `sifr01-labs/EstaCoda`
 - **Docs site root:** `website/`
 
 ## Scope of This Handoff

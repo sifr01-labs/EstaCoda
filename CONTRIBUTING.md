@@ -90,7 +90,7 @@ script writes a wrapper to `~/.local/bin/estacoda` and initializes state in
 For isolated dev state, use `ESTACODA_HOME`:
 
 ```bash
-git clone https://github.com/KemetResearch/EstaCoda.git
+git clone https://github.com/sifr01-labs/EstaCoda.git
 cd EstaCoda
 corepack enable
 pnpm install

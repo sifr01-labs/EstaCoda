@@ -32,9 +32,9 @@ describe("package installability metadata", () => {
     expect(pkg.type).toBe("module");
     expect(pkg.repository).toEqual({
       type: "git",
-      url: "git+https://github.com/KemetResearch/EstaCoda.git"
+      url: "git+https://github.com/sifr01-labs/EstaCoda.git"
     });
-    expect(pkg.bugs?.url).toBe("https://github.com/KemetResearch/EstaCoda/issues");
+    expect(pkg.bugs?.url).toBe("https://github.com/sifr01-labs/EstaCoda/issues");
     expect(pkg.homepage).toBe("https://estacoda.kemetresearch.com");
     expect(pkg.publishConfig?.access).toBe("public");
     expect(pkg.bin?.estacoda).toBe("./dist/index.js");

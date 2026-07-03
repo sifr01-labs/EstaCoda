@@ -12,7 +12,7 @@ function installMethod(overrides: Partial<InstallMethodInfo> = {}): InstallMetho
     method: "managed-source",
     source: "stamp",
     installDir: "/repo",
-    sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+    sourceUrl: "https://github.com/sifr01-labs/EstaCoda.git",
     branch: "main",
     expectedBranch: "main",
     recommendedUpdateCommand: "estacoda update",

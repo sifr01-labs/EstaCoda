@@ -2,7 +2,7 @@
 set -euo pipefail
 
 INSTALLER_VERSION="v0.1.0-prerelease"
-DEFAULT_SOURCE_URL="https://github.com/KemetResearch/EstaCoda.git"
+DEFAULT_SOURCE_URL="https://github.com/sifr01-labs/EstaCoda.git"
 SOURCE_URL="${ESTACODA_SOURCE_URL:-$DEFAULT_SOURCE_URL}"
 BRANCH="${ESTACODA_BRANCH:-main}"
 INSTALL_DIR=""
@@ -14,7 +14,9 @@ usage() {
 EstaCoda source installer
 
 Usage:
-  curl -fsSL https://raw.githubusercontent.com/KemetResearch/EstaCoda/main/scripts/install.sh | bash
+  curl -fsSLO https://raw.githubusercontent.com/sifr01-labs/EstaCoda/main/scripts/install.sh
+  less install.sh
+  bash install.sh
   bash scripts/install.sh [--branch <branch>] [--dir <path>] [--skip-init] [--fhs]
 
 Options:

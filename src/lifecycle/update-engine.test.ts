@@ -274,7 +274,7 @@ describe("applyManagedSourceUpdate", () => {
       pathExists: async () => true,
       commandRunner: runnerFor(calls, {
         "git rev-parse --show-toplevel": ok("/repo\n"),
-        "git remote get-url origin": ok("https://github.com/KemetResearch/EstaCoda.git\n"),
+        "git remote get-url origin": ok("https://github.com/sifr01-labs/EstaCoda.git\n"),
         "git rev-parse --abbrev-ref HEAD": ok("main\n"),
         "git status --porcelain": ok(""),
         "git rev-parse HEAD": ok("abc1234\n"),
@@ -306,7 +306,7 @@ describe("applyManagedSourceUpdate", () => {
       pathExists: async () => true,
       commandRunner: runnerFor(calls, {
         "git rev-parse --show-toplevel": ok("/repo\n"),
-        "git remote get-url origin": ok("https://github.com/KemetResearch/EstaCoda.git\n"),
+        "git remote get-url origin": ok("https://github.com/sifr01-labs/EstaCoda.git\n"),
         "git rev-parse --abbrev-ref HEAD": ok("main\n"),
         "git status --porcelain": ok(""),
         "git rev-parse HEAD": ok("abc1234\n"),
@@ -367,7 +367,7 @@ describe("applyManagedSourceUpdate", () => {
       },
       commandRunner: runnerFor(calls, {
         "git rev-parse --show-toplevel": ok("/repo\n"),
-        "git remote get-url origin": ok("https://github.com/KemetResearch/EstaCoda.git\n"),
+        "git remote get-url origin": ok("https://github.com/sifr01-labs/EstaCoda.git\n"),
         "git rev-parse --abbrev-ref HEAD": ok("main\n"),
         "git status --porcelain": ok(""),
         "git rev-parse HEAD": ok("abc1234\n"),
@@ -421,7 +421,7 @@ describe("applyManagedSourceUpdate", () => {
       },
       commandRunner: runnerFor(calls, {
         "git rev-parse --show-toplevel": ok("/repo\n"),
-        "git remote get-url origin": ok("https://github.com/KemetResearch/EstaCoda.git\n"),
+        "git remote get-url origin": ok("https://github.com/sifr01-labs/EstaCoda.git\n"),
         "git rev-parse --abbrev-ref HEAD": ok("main\n"),
         "git status --porcelain": ok(""),
         "git rev-parse HEAD": ok("abc1234\n"),
@@ -448,7 +448,7 @@ describe("applyManagedSourceUpdate", () => {
       },
       commandRunner: runnerFor(calls, {
         "git rev-parse --show-toplevel": ok("/repo\n"),
-        "git remote get-url origin": ok("https://github.com/KemetResearch/EstaCoda.git\n"),
+        "git remote get-url origin": ok("https://github.com/sifr01-labs/EstaCoda.git\n"),
         "git rev-parse --abbrev-ref HEAD": ok("main\n"),
         "git status --porcelain": ok(""),
         "git rev-parse HEAD": ok("abc1234\n")
@@ -480,7 +480,7 @@ describe("applyManagedSourceUpdate", () => {
       },
       commandRunner: runnerFor(calls, {
         "git rev-parse --show-toplevel": ok("/repo\n"),
-        "git remote get-url origin": ok("https://github.com/KemetResearch/EstaCoda.git\n"),
+        "git remote get-url origin": ok("https://github.com/sifr01-labs/EstaCoda.git\n"),
         "git rev-parse --abbrev-ref HEAD": ok("main\n"),
         "git status --porcelain": ok(""),
         "git rev-parse HEAD": ok("abc1234\n")
@@ -507,7 +507,7 @@ describe("applyManagedSourceUpdate", () => {
       },
       commandRunner: runnerFor(calls, {
         "git rev-parse --show-toplevel": ok("/repo\n"),
-        "git remote get-url origin": ok("https://github.com/KemetResearch/EstaCoda.git\n"),
+        "git remote get-url origin": ok("https://github.com/sifr01-labs/EstaCoda.git\n"),
         "git rev-parse --abbrev-ref HEAD": ok("main\n"),
         "git status --porcelain": ok(""),
         "git rev-parse HEAD": ok("abc1234\n"),
@@ -538,7 +538,7 @@ describe("applyManagedSourceUpdate", () => {
       }),
       commandRunner: runnerFor(calls, {
         "git rev-parse --show-toplevel": ok("/repo\n"),
-        "git remote get-url origin": ok("https://github.com/KemetResearch/EstaCoda.git\n"),
+        "git remote get-url origin": ok("https://github.com/sifr01-labs/EstaCoda.git\n"),
         "git rev-parse --abbrev-ref HEAD": ok("main\n"),
         "git status --porcelain": ok(""),
         "git rev-parse HEAD": ok("abc1234\n")
@@ -560,7 +560,7 @@ describe("applyManagedSourceUpdate", () => {
       pathExists: async () => true,
       commandRunner: runnerFor(calls, {
         "git rev-parse --show-toplevel": ok("/repo\n"),
-        "git remote get-url origin": ok("https://github.com/KemetResearch/EstaCoda.git\n"),
+        "git remote get-url origin": ok("https://github.com/sifr01-labs/EstaCoda.git\n"),
         "git rev-parse --abbrev-ref HEAD": ok("main\n"),
         "git status --porcelain": ok(" M src/index.ts\n")
       })
@@ -582,7 +582,7 @@ describe("applyManagedSourceUpdate", () => {
       pathExists: async () => true,
       commandRunner: runnerFor(calls, {
         "git rev-parse --show-toplevel": ok("/repo\n"),
-        "git remote get-url origin": ok("https://github.com/KemetResearch/EstaCoda.git\n"),
+        "git remote get-url origin": ok("https://github.com/sifr01-labs/EstaCoda.git\n"),
         "git rev-parse --abbrev-ref HEAD": ok("feature\n")
       })
     });
@@ -613,13 +613,13 @@ describe("applyManagedSourceUpdate", () => {
   });
 
   it.each([
-    "https://github.com/KemetResearch/EstaCoda",
-    "git@github.com:KemetResearch/EstaCoda.git"
+    "https://github.com/sifr01-labs/EstaCoda",
+    "git@github.com:sifr01-labs/EstaCoda.git"
   ])("accepts equivalent GitHub source URL form %s", async (originUrl) => {
     const calls: string[] = [];
     const result = await applyManagedSourceUpdate({
       installMethod: managedSourceInfo({
-        sourceUrl: "https://github.com/KemetResearch/EstaCoda.git"
+        sourceUrl: "https://github.com/sifr01-labs/EstaCoda.git"
       }),
       homeDir: "/tmp/home",
       backupMode: "skip",
@@ -648,7 +648,7 @@ describe("applyManagedSourceUpdate", () => {
       pathExists: async () => true,
       commandRunner: runnerFor(calls, {
         "git rev-parse --show-toplevel": ok("/repo\n"),
-        "git remote get-url origin": ok("https://github.com/KemetResearch/EstaCoda.git\n"),
+        "git remote get-url origin": ok("https://github.com/sifr01-labs/EstaCoda.git\n"),
         "git rev-parse --abbrev-ref HEAD": ok("main\n"),
         "git status --porcelain": ok(""),
         "git rev-parse HEAD": ok("abc1234\n"),
@@ -687,7 +687,7 @@ describe("applyManagedSourceUpdate", () => {
       pathExists: async () => true,
       commandRunner: runnerFor(calls, {
         "git rev-parse --show-toplevel": ok("/repo\n"),
-        "git remote get-url origin": ok("https://github.com/KemetResearch/EstaCoda.git\n"),
+        "git remote get-url origin": ok("https://github.com/sifr01-labs/EstaCoda.git\n"),
         "git rev-parse --abbrev-ref HEAD": ok("main\n"),
         "git status --porcelain": ok(""),
         "git rev-parse HEAD": ok("abc1234\n"),
@@ -714,7 +714,7 @@ describe("applyManagedSourceUpdate", () => {
       pathExists: async () => true,
       commandRunner: runnerFor(calls, {
         "git rev-parse --show-toplevel": ok("/repo\n"),
-        "git remote get-url origin": ok("https://github.com/KemetResearch/EstaCoda.git\n"),
+        "git remote get-url origin": ok("https://github.com/sifr01-labs/EstaCoda.git\n"),
         "git rev-parse --abbrev-ref HEAD": ok("main\n"),
         "git status --porcelain": ok(""),
         "git rev-parse HEAD": ok("abc1234\n"),
@@ -743,7 +743,7 @@ describe("applyManagedSourceUpdate", () => {
       pathExists: async () => true,
       commandRunner: runnerFor(calls, {
         "git rev-parse --show-toplevel": ok("/repo\n"),
-        "git remote get-url origin": ok("https://github.com/KemetResearch/EstaCoda.git\n"),
+        "git remote get-url origin": ok("https://github.com/sifr01-labs/EstaCoda.git\n"),
         "git rev-parse --abbrev-ref HEAD": ok("main\n"),
         "git status --porcelain": ok(""),
         "git rev-parse HEAD": ok("abc1234\n"),
@@ -774,7 +774,7 @@ describe("applyManagedSourceUpdate", () => {
       pathExists: async () => true,
       commandRunner: runnerFor(calls, {
         "git rev-parse --show-toplevel": ok("/repo\n"),
-        "git remote get-url origin": ok("https://github.com/KemetResearch/EstaCoda.git\n"),
+        "git remote get-url origin": ok("https://github.com/sifr01-labs/EstaCoda.git\n"),
         "git rev-parse --abbrev-ref HEAD": ok("main\n"),
         "git status --porcelain": ok(""),
         "git rev-parse HEAD": ok("abc1234\n"),
@@ -801,7 +801,7 @@ describe("applyManagedSourceUpdate", () => {
       pathExists: async () => true,
       commandRunner: runnerFor(calls, {
         "git rev-parse --show-toplevel": ok("/repo\n"),
-        "git remote get-url origin": ok("https://github.com/KemetResearch/EstaCoda.git\n"),
+        "git remote get-url origin": ok("https://github.com/sifr01-labs/EstaCoda.git\n"),
         "git rev-parse --abbrev-ref HEAD": ok("main\n"),
         "git status --porcelain": ok(""),
         "git rev-parse HEAD": ok("abc1234\n"),
@@ -829,7 +829,7 @@ describe("applyManagedSourceUpdate", () => {
       pathExists: async () => true,
       commandRunner: runnerFor(calls, {
         "git rev-parse --show-toplevel": ok("/repo\n"),
-        "git remote get-url origin": ok("https://github.com/KemetResearch/EstaCoda.git\n"),
+        "git remote get-url origin": ok("https://github.com/sifr01-labs/EstaCoda.git\n"),
         "git rev-parse --abbrev-ref HEAD": ok("main\n"),
         "git status --porcelain": ok(""),
         "git rev-parse HEAD": ok("abc1234\n"),
@@ -858,7 +858,7 @@ describe("applyManagedSourceUpdate", () => {
       pathExists: async () => true,
       commandRunner: runnerFor(calls, {
         "git rev-parse --show-toplevel": ok("/repo\n"),
-        "git remote get-url origin": ok("https://github.com/KemetResearch/EstaCoda.git\n"),
+        "git remote get-url origin": ok("https://github.com/sifr01-labs/EstaCoda.git\n"),
         "git rev-parse --abbrev-ref HEAD": ok("main\n"),
         "git status --porcelain": ok(""),
         "git rev-parse HEAD": ok("abc1234\n"),
@@ -888,7 +888,7 @@ function managedSourceInfo(overrides: Partial<InstallMethodInfo> = {}): InstallM
     method: "managed-source",
     source: "stamp",
     installDir: "/repo",
-    sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+    sourceUrl: "https://github.com/sifr01-labs/EstaCoda.git",
     branch: "main",
     expectedBranch: "main",
     recommendedUpdateCommand: "estacoda update",

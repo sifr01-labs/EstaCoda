@@ -16,7 +16,7 @@ EstaCoda هو نظام وكيل أمر سطري يملك تصليحاً صريح
 |---|---|---|
 | نقطة الدخول العامة | العنوان المستقر الذي يُعلن في المستندات | `https://estacoda.kemetresearch.com/install.sh` |
 | مثبت المستودعات | منطق التثبيت الفعلي | `scripts/install.sh` في مستودعات EstaCoda |
-| التراجع المباشر من المصدر | رابط GitHub المباشر للتصحيح والاختبار قبل الإصدار | `https://raw.githubusercontent.com/KemetResearch/EstaCoda/main/scripts/install.sh` |
+| التراجع المباشر من المصدر | رابط GitHub المباشر للتصحيح والاختبار قبل الإصدار | `https://raw.githubusercontent.com/sifr01-labs/EstaCoda/main/scripts/install.sh` |
 
 نقطة الدخول العامة هي مشغّل رقيق يقوم بتنزيل `scripts/install.sh` من المستودعات وتشغيله. لا يعتمد تنفيذ التثبيت على `estacoda.kemetresearch.com` في تنفيذه. هذا يخلق دائرة تبعية مغلقة.
 
@@ -71,7 +71,7 @@ curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash -s -- --dir <pat
 **التراجع المباشر من المصدر** (للتصحيح والاختبار قبل الإصدار):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/KemetResearch/EstaCoda/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/sifr01-labs/EstaCoda/main/scripts/install.sh | bash
 ```
 
 ### git clone + سيوم التهيئة (مسار المساهمين)
@@ -79,7 +79,7 @@ curl -fsSL https://raw.githubusercontent.com/KemetResearch/EstaCoda/main/scripts
 للمطورين الذين يريدون العمل على المصدر:
 
 ```bash
-git clone https://github.com/KemetResearch/EstaCoda.git
+git clone https://github.com/sifr01-labs/EstaCoda.git
 cd EstaCoda
 ./scripts/setup-estacoda.sh
 ```

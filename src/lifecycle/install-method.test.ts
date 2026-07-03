@@ -19,7 +19,7 @@ describe("detectInstallMethod", () => {
     await withTempDir(async (dir) => {
       await writeFile(join(dir, ".install-method.json"), JSON.stringify({
         method: "managed-source",
-        sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+        sourceUrl: "https://github.com/sifr01-labs/EstaCoda.git",
         branch: "main",
         installDir: dir
       }));
@@ -29,7 +29,7 @@ describe("detectInstallMethod", () => {
       expect(result.method).toBe("managed-source");
       expect(result.source).toBe("stamp");
       expect(result.canSelfUpdate).toBe(true);
-      expect(result.sourceUrl).toBe("https://github.com/KemetResearch/EstaCoda.git");
+      expect(result.sourceUrl).toBe("https://github.com/sifr01-labs/EstaCoda.git");
       expect(result.branch).toBe("main");
       expect(result.expectedBranch).toBe("main");
       expect(result.installDir).toBe(dir);
@@ -41,7 +41,7 @@ describe("detectInstallMethod", () => {
     await withTempDir(async (dir) => {
       await writeFile(join(dir, ".install-method.json"), JSON.stringify({
         method: "manual-source",
-        sourceUrl: "git@github.com:KemetResearch/EstaCoda.git",
+        sourceUrl: "git@github.com:sifr01-labs/EstaCoda.git",
         branch: "feature/local",
         installDir: dir
       }));
@@ -149,7 +149,7 @@ describe("detectInstallMethod", () => {
       await writeFile(dockerEnv, "");
       await writeFile(join(dir, ".install-method.json"), JSON.stringify({
         method: "managed-source",
-        sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+        sourceUrl: "https://github.com/sifr01-labs/EstaCoda.git",
         branch: "main"
       }));
 

@@ -203,7 +203,7 @@ curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash -s -- --dir <pat
 إذا كنت تنوي تعديل المصدر، استنسخ المستودع وشغّل سكربت الإعداد:
 
 ```bash
-git clone https://github.com/KemetResearch/EstaCoda.git
+git clone https://github.com/sifr01-labs/EstaCoda.git
 cd EstaCoda
 ./scripts/setup-estacoda.sh
 ```

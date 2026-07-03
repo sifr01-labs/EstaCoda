@@ -22,7 +22,7 @@ Until a later release formalizes long-term support, security fixes target `main`
 
 Do not open a public issue for a security vulnerability.
 
-Report privately via [GitHub Security Advisories](https://github.com/KemetResearch/EstaCoda/security/advisories/new).
+Report privately via [GitHub Security Advisories](https://github.com/sifr01-labs/EstaCoda/security/advisories/new).
 
 A security contact email will be listed here once its monitoring status is confirmed.
 

@@ -9,7 +9,7 @@ usage() {
 EstaCoda manual source setup
 
 Usage:
-  git clone https://github.com/KemetResearch/EstaCoda.git
+  git clone https://github.com/sifr01-labs/EstaCoda.git
   cd EstaCoda
   ./scripts/setup-estacoda.sh [--skip-init]
 

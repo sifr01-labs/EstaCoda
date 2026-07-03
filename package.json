@@ -6,10 +6,10 @@
   "packageManager": "pnpm@10.33.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/KemetResearch/EstaCoda.git"
+    "url": "git+https://github.com/sifr01-labs/EstaCoda.git"
   },
   "bugs": {
-    "url": "https://github.com/KemetResearch/EstaCoda/issues"
+    "url": "https://github.com/sifr01-labs/EstaCoda/issues"
   },
   "homepage": "https://estacoda.kemetresearch.com",
   "engines": {

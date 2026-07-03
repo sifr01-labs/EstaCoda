@@ -16,7 +16,7 @@ The installation surface has three layers:
 |---|---|---|
 | Public entrypoint | Stable URL advertised in docs | `https://estacoda.kemetresearch.com/install.sh` |
 | Repo installer | Actual installer logic | `scripts/install.sh` in the EstaCoda repository |
-| Direct-source fallback | Raw GitHub URL for debug/pre-release | `https://raw.githubusercontent.com/KemetResearch/EstaCoda/main/scripts/install.sh` |
+| Direct-source fallback | Raw GitHub URL for debug/pre-release | `https://raw.githubusercontent.com/sifr01-labs/EstaCoda/main/scripts/install.sh` |
 
 The public entrypoint is a thin launcher that downloads `scripts/install.sh` from the repo and executes it. The installer implementation does not depend on `estacoda.kemetresearch.com`. That would create circular ownership.
 
@@ -71,7 +71,7 @@ If the directory already contains a managed-source install with a matching stamp
 **Direct-source fallback** (for debug or pre-release testing):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/KemetResearch/EstaCoda/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/sifr01-labs/EstaCoda/main/scripts/install.sh | bash
 ```
 
 ### git clone + setup script (contributor path)
@@ -79,7 +79,7 @@ curl -fsSL https://raw.githubusercontent.com/KemetResearch/EstaCoda/main/scripts
 For developers who want to work on the source:
 
 ```bash
-git clone https://github.com/KemetResearch/EstaCoda.git
+git clone https://github.com/sifr01-labs/EstaCoda.git
 cd EstaCoda
 ./scripts/setup-estacoda.sh
 ```
