@@ -76,7 +76,7 @@ const config: Config = {
       respectPrefersColorScheme: true,
     },
     navbar: {
-      title: 'estacoda',
+      title: 'EstaCoda',
       logo: {
         alt: 'EstaCoda',
         src: 'img/logo-light.svg',

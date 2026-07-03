@@ -249,7 +249,7 @@ h3, .markdown h3 { font-weight: 600; }
   color: var(--estacoda-ink);
 }
 .navbar__title::after {
-  content: 'BY KEMET RESEARCH';
+  content: 'BY SIFR01';
   margin-top: 0.18rem;
   font-family: var(--estacoda-mono);
   font-size: 0.42rem;
