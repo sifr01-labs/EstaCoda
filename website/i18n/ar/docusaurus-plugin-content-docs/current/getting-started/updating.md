@@ -66,7 +66,7 @@ estacoda update --gateway
 | `managed-source` | تحديث مصدر محمي: جلب origin، التحقق من سلامة fast-forward، فحص نظافة شجرة العمل، pull، تثبيت التبعيات، build، التحقق. الاستعادة إلى pre-pull SHA عند فشل build. |
 | `manual-source` | فحص وتوجيه فقط. يطبع `git fetch origin && git status`. لا تعديل ذاتي. |
 | `homebrew` | يطبع `brew upgrade kemetresearch/tap/estacoda`. لا تعديل ذاتي. |
-| `docker` | يطبع `docker pull ghcr.io/kemetresearch/estacoda:latest`. لا تعديل ذاتي. |
+| `docker` | يطبع `docker pull ghcr.io/sifr01-labs/estacoda:latest`. لا تعديل ذاتي. |
 | `npm-global` | يطبع `npm install -g estacoda@latest`. لا تعديل ذاتي. |
 | `pnpm-global` | يطبع `pnpm add -g estacoda@latest`. لا تعديل ذاتي. |
 | `unknown` | يطبع توجيهات إعادة التثبيت. لا تعديل ذاتي. |

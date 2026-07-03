@@ -563,7 +563,7 @@ estacoda update --gateway               # non-interactive gateway/service update
 | `managed-source` | Guarded source update: fetch, ff-only check, worktree check, pull, install deps, build, validate. Rollback on failure. |
 | `manual-source` | Check and advise only. No self-mutation. |
 | `homebrew` | Print `brew upgrade kemetresearch/tap/estacoda`. |
-| `docker` | Print `docker pull ghcr.io/kemetresearch/estacoda:latest`. |
+| `docker` | Print `docker pull ghcr.io/sifr01-labs/estacoda:latest`. |
 | `npm-global` | Print `npm install -g estacoda@latest`. |
 | `pnpm-global` | Print `pnpm add -g estacoda@latest`. |
 | `unknown` | Print reinstall guidance. |

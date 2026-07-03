@@ -66,7 +66,7 @@ EstaCoda detects your install method at runtime and routes update behavior accor
 | `managed-source` | Guarded source update: fetch origin, verify fast-forward safety, check worktree cleanliness, pull, install dependencies, build, validate. Rollback to pre-pull SHA on build failure. |
 | `manual-source` | Check and advise only. Prints `git fetch origin && git status`. No self-mutation. |
 | `homebrew` | Prints `brew upgrade kemetresearch/tap/estacoda`. No self-mutation. |
-| `docker` | Prints `docker pull ghcr.io/kemetresearch/estacoda:latest`. No self-mutation. |
+| `docker` | Prints `docker pull ghcr.io/sifr01-labs/estacoda:latest`. No self-mutation. |
 | `npm-global` | Prints `npm install -g estacoda@latest`. No self-mutation. |
 | `pnpm-global` | Prints `pnpm add -g estacoda@latest`. No self-mutation. |
 | `unknown` | Prints reinstall guidance. No self-mutation. |

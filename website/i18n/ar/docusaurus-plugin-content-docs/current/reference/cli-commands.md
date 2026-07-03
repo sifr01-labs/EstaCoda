@@ -560,7 +560,7 @@ estacoda update --gateway               # وضع تحديث غير تفاعلي 
 | `managed-source` | تحديث مصدري محمي: fetch، فحص ff-only، فحص شجرة العمل، pull، تثبيت التبعيات، build، تحقق. استعادة عند الفشل. |
 | `manual-source` | فحص وتوجيه فقط. لا تعديل ذاتي. |
 | `homebrew` | يطبع `brew upgrade kemetresearch/tap/estacoda`. |
-| `docker` | يطبع `docker pull ghcr.io/kemetresearch/estacoda:latest`. |
+| `docker` | يطبع `docker pull ghcr.io/sifr01-labs/estacoda:latest`. |
 | `npm-global` | يطبع `npm install -g estacoda@latest`. |
 | `pnpm-global` | يطبع `pnpm add -g estacoda@latest`. |
 | `unknown` | يطبع توجيه إعادة التثبيت. |

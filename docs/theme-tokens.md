@@ -110,7 +110,7 @@ The KemetBlue skin overrides glyphs, branding, tool icons, and selected dark-mod
 | `agentName` | `EstaCoda` | `EstaCoda` |
 | `responseLabel` | `EstaCoda` | `𓂀 EstaCoda` |
 | `helpHeader` | `Available Commands` | `𓂀 Available Commands` |
-| `taglinePrimary` | (empty) | `☥ Kemet Research ☥` |
+| `taglinePrimary` | (empty) | `⟡ SIFR01 ⟡` |
 | `taglineSecondary` | (empty) | `السيادة التكنولوجية العربية` |
 | `promptPrefix` | (none) | `𓂀 > ` |
 

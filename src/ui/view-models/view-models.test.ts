@@ -341,7 +341,7 @@ describe("ViewModel builders", () => {
   it("buildStartupViewModel produces plain structured object", () => {
     const vm = buildStartupViewModel({
       agentName: "EstaCoda",
-      taglines: ["Kemet Research", "Autonomous Engineering"],
+      taglines: ["⟡ SIFR01 ⟡", "Autonomous Engineering"],
       model: { provider: "openrouter", id: "claude-sonnet-4" },
       readiness: "ready",
       warnings: [],
@@ -349,7 +349,7 @@ describe("ViewModel builders", () => {
 
     expect(vm.kind).toBe("startup");
     expect(vm.agentName).toBe("EstaCoda");
-    expect(vm.taglines).toEqual(["Kemet Research", "Autonomous Engineering"]);
+    expect(vm.taglines).toEqual(["⟡ SIFR01 ⟡", "Autonomous Engineering"]);
     expect(vm.model.id).toBe("claude-sonnet-4");
     expect(vm.readiness).toBe("ready");
     expect(vm.warnings).toEqual([]);
@@ -399,7 +399,7 @@ describe("ViewModel builders", () => {
   it("buildStartupDashboardViewModel produces plain structured object", () => {
     const vm = buildStartupDashboardViewModel({
       agentName: "EstaCoda",
-      taglines: ["Kemet Research", "السيادة التكنولوجية العربية"],
+      taglines: ["⟡ SIFR01 ⟡", "السيادة التكنولوجية العربية"],
       version: "v0.0.5",
       sessionId: "sess-9f7a2c1b",
       model: { provider: "openrouter", id: "deepseek-reasoner" },

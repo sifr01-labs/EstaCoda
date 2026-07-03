@@ -232,9 +232,9 @@ describe("buildStartupUpdateHint", () => {
         method: "docker",
         source: "container",
         canSelfUpdate: false,
-        recommendedUpdateCommand: "docker pull ghcr.io/kemetresearch/estacoda:latest"
+        recommendedUpdateCommand: "docker pull ghcr.io/sifr01-labs/estacoda:latest"
       }),
       versionStatus: "update-available"
-    })).toBe("Docker/container install detected. Update with: docker pull ghcr.io/kemetresearch/estacoda:latest");
+    })).toBe("Docker/container install detected. Update with: docker pull ghcr.io/sifr01-labs/estacoda:latest");
   });
 });

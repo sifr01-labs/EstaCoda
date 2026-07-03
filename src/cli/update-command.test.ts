@@ -32,7 +32,7 @@ function installInfo(method: InstallMethod, overrides: Partial<InstallMethodInfo
     "managed-source": "estacoda update",
     "manual-source": "git fetch origin && git status",
     homebrew: "brew upgrade kemetresearch/tap/estacoda",
-    docker: "docker pull ghcr.io/kemetresearch/estacoda:latest",
+    docker: "docker pull ghcr.io/sifr01-labs/estacoda:latest",
     "npm-global": "npm install -g estacoda@latest",
     "pnpm-global": "pnpm add -g estacoda@latest",
     unknown: "reinstall using documented install path"
@@ -66,7 +66,7 @@ describe("runUpdateCommand install-method routing", () => {
   it.each([
     ["manual-source", "git fetch origin && git status"],
     ["homebrew", "brew upgrade kemetresearch/tap/estacoda"],
-    ["docker", "docker pull ghcr.io/kemetresearch/estacoda:latest"],
+    ["docker", "docker pull ghcr.io/sifr01-labs/estacoda:latest"],
     ["npm-global", "npm install -g estacoda@latest"],
     ["pnpm-global", "pnpm add -g estacoda@latest"],
     ["unknown", "reinstall using documented install path"]
@@ -93,7 +93,7 @@ describe("runUpdateCommand install-method routing", () => {
 
   it.each([
     ["homebrew", "Homebrew install detected. Run: brew upgrade kemetresearch/tap/estacoda"],
-    ["docker", "Docker/container install detected. Run: docker pull ghcr.io/kemetresearch/estacoda:latest"],
+    ["docker", "Docker/container install detected. Run: docker pull ghcr.io/sifr01-labs/estacoda:latest"],
     ["npm-global", "npm global install detected. Run: npm install -g estacoda@latest"],
     ["pnpm-global", "pnpm global install detected. Run: pnpm add -g estacoda@latest"],
     ["unknown", "Unknown install method. Run: reinstall using documented install path"]
@@ -788,7 +788,7 @@ describe("runUpdateCommand install-method routing", () => {
   it.each([
     ["manual-source", "git fetch origin && git status"],
     ["homebrew", "brew upgrade kemetresearch/tap/estacoda"],
-    ["docker", "docker pull ghcr.io/kemetresearch/estacoda:latest"],
+    ["docker", "docker pull ghcr.io/sifr01-labs/estacoda:latest"],
     ["npm-global", "npm install -g estacoda@latest"],
     ["pnpm-global", "pnpm add -g estacoda@latest"],
     ["unknown", "reinstall using documented install path"]

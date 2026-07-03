@@ -699,7 +699,7 @@ exports[`Session surfaces — startup > renders in narrow width > startup-narrow
 "
 [38;2;67;137;215m[1mEstaCoda[0m[0m
 
-[2mKemet Research[0m
+[2m⟡ SIFR01 ⟡[0m
 [2mالسيادة التكنولوجية العربية[0m
 
 │ model: [2mopenrouter/claude-sonnet-4[0m
@@ -710,7 +710,7 @@ exports[`Session surfaces — startup > renders in no Unicode > startup-no Unico
 "
 [38;2;67;137;215m[1mEstaCoda[0m[0m
 
-[2mKemet Research[0m
+[2m⟡ SIFR01 ⟡[0m
 [2mالسيادة التكنولوجية العربية[0m
 
 | model: [2mopenrouter/claude-sonnet-4[0m
@@ -721,7 +721,7 @@ exports[`Session surfaces — startup > renders in no color > startup-no color 1
 "
 EstaCoda
 
-Kemet Research
+⟡ SIFR01 ⟡
 السيادة التكنولوجية العربية
 
 │ model: openrouter/claude-sonnet-4
@@ -730,7 +730,7 @@ Kemet Research
 
 exports[`Session surfaces — startup > renders in plain > startup-plain 1`] = `
 "EstaCoda
-Kemet Research
+⟡ SIFR01 ⟡
 السيادة التكنولوجية العربية
 model: openrouter/claude-sonnet-4
 readiness: ready"
@@ -740,7 +740,7 @@ exports[`Session surfaces — startup > renders in standard dark > startup-stand
 "
 [38;2;67;137;215m[1mEstaCoda[0m[0m
 
-[2mKemet Research[0m
+[2m⟡ SIFR01 ⟡[0m
 [2mالسيادة التكنولوجية العربية[0m
 
 │ model: [2mopenrouter/claude-sonnet-4[0m
@@ -751,7 +751,7 @@ exports[`Session surfaces — startup > renders in standard light > startup-stan
 "
 [38;2;67;137;215m[1mEstaCoda[0m[0m
 
-[2mKemet Research[0m
+[2m⟡ SIFR01 ⟡[0m
 [2mالسيادة التكنولوجية العربية[0m
 
 │ model: [2mopenrouter/claude-sonnet-4[0m
@@ -761,7 +761,7 @@ exports[`Session surfaces — startup > renders in standard light > startup-stan
 exports[`Session surfaces — startup dashboard > renders in narrow width > startup-dashboard-narrow width 1`] = `
 "                [38;2;67;137;215m[1mEstaCoda[0m[0m
 
-             [2mKemet Research[0m
+               [2m⟡ SIFR01 ⟡[0m
       [2mالسيادة التكنولوجية العربية[0m
 
 [38;2;237;237;237m╭────[0m[38;2;67;137;215m[1m v0.0.5  𓂀  session 4c6d7f55 [0m[0m[38;2;237;237;237m─────╮[0m
@@ -786,7 +786,7 @@ exports[`Session surfaces — startup dashboard > renders in narrow width > star
 exports[`Session surfaces — startup dashboard > renders in no Unicode > startup-dashboard-no Unicode 1`] = `
 "                                 [38;2;67;137;215m[1mEstaCoda[0m[0m
 
-                              [2mKemet Research[0m
+                                [2m⟡ SIFR01 ⟡[0m
                         [2mالسيادة التكنولوجية العربية[0m
 
 [38;2;237;237;237m+----------------------[0m[38;2;67;137;215m[1m v0.0.5  *  session 4c6d7f55 [0m[0m[38;2;237;237;237m----------------------+[0m
@@ -804,7 +804,7 @@ exports[`Session surfaces — startup dashboard > renders in no Unicode > startu
 exports[`Session surfaces — startup dashboard > renders in no color > startup-dashboard-no color 1`] = `
 "                                 EstaCoda
 
-                              Kemet Research
+                                ⟡ SIFR01 ⟡
                         السيادة التكنولوجية العربية
 
 ╭────────────────────── v0.0.5  𓂀  session 4c6d7f55 ──────────────────────╮
@@ -821,7 +821,7 @@ exports[`Session surfaces — startup dashboard > renders in no color > startup-
 
 exports[`Session surfaces — startup dashboard > renders in plain > startup-dashboard-plain 1`] = `
 "EstaCoda
-Kemet Research
+⟡ SIFR01 ⟡
 السيادة التكنولوجية العربية
 
 version: v0.0.5
@@ -844,7 +844,7 @@ Interactive commands:
 exports[`Session surfaces — startup dashboard > renders in standard dark > startup-dashboard-standard dark 1`] = `
 "                                 [38;2;67;137;215m[1mEstaCoda[0m[0m
 
-                              [2mKemet Research[0m
+                                [2m⟡ SIFR01 ⟡[0m
                         [2mالسيادة التكنولوجية العربية[0m
 
 [38;2;237;237;237m╭──────────────────────[0m[38;2;67;137;215m[1m v0.0.5  𓂀  session 4c6d7f55 [0m[0m[38;2;237;237;237m──────────────────────╮[0m
@@ -862,7 +862,7 @@ exports[`Session surfaces — startup dashboard > renders in standard dark > sta
 exports[`Session surfaces — startup dashboard > renders in standard light > startup-dashboard-standard light 1`] = `
 "                                 [38;2;67;137;215m[1mEstaCoda[0m[0m
 
-                              [2mKemet Research[0m
+                                [2m⟡ SIFR01 ⟡[0m
                         [2mالسيادة التكنولوجية العربية[0m
 
 [38;2;224;224;224m╭──────────────────────[0m[38;2;67;137;215m[1m v0.0.5  𓂀  session 4c6d7f55 [0m[0m[38;2;224;224;224m──────────────────────╮[0m

@@ -115,10 +115,10 @@ Homebrew builds from the GitHub source tarball using Node and Corepack/pnpm. The
 ### Docker
 
 ```bash
-docker run ghcr.io/kemetresearch/estacoda:v0.1.0
+docker run ghcr.io/sifr01-labs/estacoda:v0.1.0
 ```
 
-Docker images are published to GHCR. `estacoda update` routes Docker installs to `docker pull ghcr.io/kemetresearch/estacoda:latest`. The CLI does not mutate the container filesystem.
+Docker images are published to GHCR. `estacoda update` routes Docker installs to `docker pull ghcr.io/sifr01-labs/estacoda:latest`. The CLI does not mutate the container filesystem.
 
 ## Install ownership modes
 

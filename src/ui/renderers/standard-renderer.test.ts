@@ -1532,13 +1532,13 @@ describe("StandardRenderer — dark theme", () => {
     const r = renderer("dark", fullCaps());
     const vm = buildStartupViewModel({
       agentName: "EstaCoda",
-      taglines: ["Kemet Research"],
+      taglines: ["⟡ SIFR01 ⟡"],
       model: { provider: "p", id: "i" },
       readiness: "ready",
     });
     const out = r.renderStartup(vm);
     expect(out).toContain("EstaCoda");
-    expect(out).toContain("Kemet Research");
+    expect(out).toContain("⟡ SIFR01 ⟡");
     expect(out).toContain("readiness:");
     expect(hasAnsi(out)).toBe(true);
   });
@@ -1854,13 +1854,13 @@ describe("StandardRenderer — visual primitives", () => {
     const r = renderer("dark", fullCaps());
     const vm = buildStartupViewModel({
       agentName: "EstaCoda",
-      taglines: ["Kemet Research"],
+      taglines: ["⟡ SIFR01 ⟡"],
       model: { provider: "p", id: "i" },
       readiness: "ready",
     });
     const out = r.renderStartup(vm);
     expect(out).toContain("EstaCoda");
-    expect(out).toContain("Kemet Research");
+    expect(out).toContain("⟡ SIFR01 ⟡");
   });
 
   it("renders legacy startup chrome in Arabic with isolated technical tokens", () => {
@@ -1885,7 +1885,7 @@ describe("StandardRenderer — startup dashboard", () => {
     const r = renderer("dark", fullCaps());
     const vm = buildStartupDashboardViewModel({
       agentName: "EstaCoda",
-      taglines: ["Kemet Research", "السيادة التكنولوجية العربية"],
+      taglines: ["⟡ SIFR01 ⟡", "السيادة التكنولوجية العربية"],
       version: "v0.0.5",
       sessionId: "4c6d7f55-7e8b-4f4f-8f39-111111111111",
       model: { provider: "openrouter", id: "deepseek-reasoner" },
@@ -1901,7 +1901,7 @@ describe("StandardRenderer — startup dashboard", () => {
     });
     const out = r.renderStartupDashboard(vm);
     expect(out).toContain("EstaCoda");
-    expect(out).toContain("Kemet Research");
+    expect(out).toContain("⟡ SIFR01 ⟡");
     expect(out).toContain("v0.0.5");
     expect(out).toContain("session 4c6d7f55");
     expect(out).toContain("deepseek-reasoner");
@@ -1994,7 +1994,7 @@ describe("StandardRenderer — startup dashboard", () => {
     const r = renderer("dark", noColorCaps());
     const vm = buildStartupDashboardViewModel({
       agentName: "EstaCoda",
-      taglines: ["Kemet Research"],
+      taglines: ["⟡ SIFR01 ⟡"],
       version: "v0.0.5",
       model: { provider: "p", id: "i" },
       workspaceTrust: "trusted",
@@ -2015,7 +2015,7 @@ describe("StandardRenderer — startup dashboard", () => {
     const r = renderer("dark", noUnicodeCaps());
     const vm = buildStartupDashboardViewModel({
       agentName: "EstaCoda",
-      taglines: ["Kemet Research"],
+      taglines: ["⟡ SIFR01 ⟡"],
       version: "v0.0.5",
       sessionId: "sess-abc",
       model: { provider: "p", id: "i" },
@@ -2063,7 +2063,7 @@ describe("StandardRenderer — startup dashboard", () => {
     const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: fullCaps(), locale: "ar" });
     const vm = buildStartupDashboardViewModel({
       agentName: "EstaCoda",
-      taglines: ["Kemet Research"],
+      taglines: ["⟡ SIFR01 ⟡"],
       version: "v0.0.5",
       sessionId: "sess-9f7a2c1b",
       model: { provider: "openrouter", id: "deepseek-reasoner" },
@@ -2155,7 +2155,7 @@ describe("StandardRenderer — startup dashboard", () => {
     const r = new StandardRenderer({ tokens: resolveTokens("standard", "dark", "kemetBlue"), capabilities: narrowCaps(), locale: "ar" });
     const vm = buildStartupDashboardViewModel({
       agentName: "EstaCoda",
-      taglines: ["Kemet Research"],
+      taglines: ["⟡ SIFR01 ⟡"],
       version: "v0.0.5",
       sessionId: "session-id-that-is-long-enough-to-truncate",
       model: { provider: "openrouter", id: "deepseek-reasoner-with-a-long-name" },

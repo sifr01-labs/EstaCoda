@@ -47,7 +47,7 @@ export const plainOverlay: TokenOverlay = {
   branding: {
     responseLabel: "EstaCoda",
     helpHeader: "Available Commands",
-    taglinePrimary: "Kemet Research",
+    taglinePrimary: "⟡ SIFR01 ⟡",
     taglineSecondary: "",
     promptPrefix: "> ",
   },

@@ -139,7 +139,7 @@ describe("detectInstallMethod", () => {
 
       expect(result.method).toBe("docker");
       expect(result.source).toBe("container");
-      expect(result.recommendedUpdateCommand).toBe("docker pull ghcr.io/kemetresearch/estacoda:latest");
+      expect(result.recommendedUpdateCommand).toBe("docker pull ghcr.io/sifr01-labs/estacoda:latest");
     });
   });
 

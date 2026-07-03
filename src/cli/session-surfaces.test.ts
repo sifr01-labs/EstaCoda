@@ -570,7 +570,7 @@ describe("Session surfaces — startup", () => {
     it(`renders in ${ctx.name}`, () => {
       const vm = buildStartupViewModel({
         agentName: "EstaCoda",
-        taglines: ["Kemet Research", "السيادة التكنولوجية العربية"],
+        taglines: ["⟡ SIFR01 ⟡", "السيادة التكنولوجية العربية"],
         model: { provider: "openrouter", id: "claude-sonnet-4" },
         readiness: "ready",
       });
@@ -589,7 +589,7 @@ describe("Session surfaces — startup dashboard", () => {
     it(`renders in ${ctx.name}`, () => {
       const vm = buildStartupDashboardViewModel({
         agentName: "EstaCoda",
-        taglines: ["Kemet Research", "السيادة التكنولوجية العربية"],
+        taglines: ["⟡ SIFR01 ⟡", "السيادة التكنولوجية العربية"],
         version: "v0.0.5",
         sessionId: "4c6d7f55-7e8b-4f4f-8f39-111111111111",
         model: { provider: "openrouter", id: "deepseek-reasoner" },

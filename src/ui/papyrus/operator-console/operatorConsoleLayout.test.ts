@@ -373,7 +373,7 @@ function createFullState(input: Partial<OperatorConsoleState> = {}): OperatorCon
 function startupDashboard() {
   return {
     productName: "EstaCoda",
-    orgName: "Kemet Research",
+    orgName: "⟡ SIFR01 ⟡",
     tagline: "sovereign agentic infrastructure",
     version: "v0.1.0",
     sessionId: "20ea8195",

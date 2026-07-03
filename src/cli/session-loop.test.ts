@@ -993,7 +993,7 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     expect(setStartupDashboard).toHaveBeenCalledTimes(1);
     expect(setStartupDashboard.mock.calls[0]?.[0]).toMatchObject({
       productName: "EstaCoda",
-      orgName: "Kemet Research",
+      orgName: "⟡ SIFR01 ⟡",
       sessionId: "20ea8195",
       session: {
         model: "kimi-k2.6 ◐",
@@ -1004,7 +1004,7 @@ describe("runSessionLoop — user prompt rail behavior", () => {
       },
     });
     expect(plain).toContain("EstaCoda");
-    expect(plain).toContain("Kemet Research");
+    expect(plain).toContain("⟡ SIFR01 ⟡");
     expect(plain).not.toContain("sovereign agentic infrastructure");
     expect(plain).toContain("EstaCoda  𓂀");
     expect(plain).toContain("session    20ea8195");
