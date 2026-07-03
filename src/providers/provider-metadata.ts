@@ -149,7 +149,7 @@ const BUILT_IN_METADATA: Record<string, ProviderMetadata> = {
     defaultBaseUrl: "https://openrouter.ai/api/v1",
     defaultApiKeyEnv: "OPENROUTER_API_KEY",
     defaultHeaders: {
-      "HTTP-Referer": "https://estacoda.kemetresearch.com",
+      "HTTP-Referer": "https://www.estacoda.com",
       "X-Title": "EstaCoda"
     },
     authMethods: ["api_key"],

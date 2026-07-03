@@ -11,7 +11,7 @@
   "bugs": {
     "url": "https://github.com/sifr01-labs/EstaCoda/issues"
   },
-  "homepage": "https://estacoda.kemetresearch.com",
+  "homepage": "https://www.estacoda.com",
   "engines": {
     "node": ">=22.18.0"
   },

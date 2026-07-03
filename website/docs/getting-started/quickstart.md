@@ -41,7 +41,7 @@ If a normal local CLI session does not work, do not enable channels, voice, brow
 The default install path uses the public installer:
 
 ```bash
-curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash
+curl -fsSL https://www.estacoda.com/install.sh | bash
 ```
 
 This creates a managed-source install under `~/.estacoda/estacoda`, builds the project, writes a wrapper to `~/.local/bin/estacoda`, and runs `estacoda init`.
@@ -197,7 +197,7 @@ Use `estacoda doctor --live` after that only if provider connectivity is still t
 Install to a custom directory and skip the initial state bootstrap:
 
 ```bash
-curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash -s -- --dir <path> --skip-init
+curl -fsSL https://www.estacoda.com/install.sh | bash -s -- --dir <path> --skip-init
 ```
 
 If you plan to modify the source, clone the repo and run the setup script:

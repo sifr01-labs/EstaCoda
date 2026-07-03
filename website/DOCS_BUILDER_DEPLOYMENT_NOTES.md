@@ -2,7 +2,7 @@
 
 ## Hosting Context
 
-- **Domain:** `estacoda.kemetresearch.com`
+- **Domain:** `www.estacoda.com`
 - **Host:** Replit
 - **Repo:** `sifr01-labs/EstaCoda`
 - **Docs site root:** `website/`

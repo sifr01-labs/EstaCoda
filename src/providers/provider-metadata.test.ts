@@ -73,7 +73,7 @@ describe("provider-metadata", () => {
 
     it("keeps OpenRouter attribution defaults in provider metadata", () => {
       expect(getProviderMetadata("openrouter").defaultHeaders).toEqual({
-        "HTTP-Referer": "https://estacoda.kemetresearch.com",
+        "HTTP-Referer": "https://www.estacoda.com",
         "X-Title": "EstaCoda"
       });
       expect(getProviderMetadata("openai").defaultHeaders).toBeUndefined();

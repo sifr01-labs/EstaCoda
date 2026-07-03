@@ -51,7 +51,7 @@ export PATH="$HOME/.estacoda/bin:$PATH"
 The intended launch install direction is the hosted curl installer:
 
 ```bash
-curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash
+curl -fsSL https://www.estacoda.com/install.sh | bash
 ```
 
 Do not treat this as a verified public path until the hosted installer is live and release validation has passed.
