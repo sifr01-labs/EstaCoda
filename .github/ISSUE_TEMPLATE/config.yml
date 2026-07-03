@@ -1,11 +1,11 @@
 blank_issues_enabled: true
 contact_links:
   - name: "🔐 Private security vulnerability"
-    url: "https://github.com/KemetResearch/EstaCoda/security/advisories/new"
+    url: "https://github.com/sifr01-labs/EstaCoda/security/advisories/new"
     about: "Use this for exploitable vulnerabilities, approval bypasses, secret exposure, or private security reports."
   - name: "📖 Documentation"
-    url: "https://estacoda.kemetresearch.com/docs"
+    url: "https://www.estacoda.com/docs"
     about: "Check the user and reference docs before opening an issue."
   - name: "🤝 Contributing Guide"
-    url: "https://github.com/KemetResearch/EstaCoda/blob/main/CONTRIBUTING.md"
+    url: "https://github.com/sifr01-labs/EstaCoda/blob/main/CONTRIBUTING.md"
     about: "Read this before submitting a PR or proposing implementation work."

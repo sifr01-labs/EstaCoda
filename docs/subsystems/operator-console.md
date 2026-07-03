@@ -172,7 +172,7 @@ Wide startup dashboard:
 
 ```text
                          EstaCoda
-                    𓋹 Kemet Research 𓋹
+                     ⟡ SIFR01 ⟡
                  sovereign agentic infrastructure
 ────────────── v0.1.0  ☂ session 20ea8195 ──────────────
 ╭──────────────────────────────────────────────────────────────────────────────╮
@@ -198,7 +198,7 @@ Narrow startup dashboard:
 
 ```text
                          EstaCoda
-                    Kemet Research
+                     ⟡ SIFR01 ⟡
                  sovereign agentic infrastructure
 v0.1.0 · session 20ea8195
 ╭────────────────────────────────────────────╮

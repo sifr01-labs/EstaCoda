@@ -344,7 +344,7 @@ pnpm run dev
 
 **Verify standard mode:**
 - Hero panel shows `𓂀 EstaCoda` in brand color.
-- Taglines render (Kemet Research + Arabic tagline in KemetBlue skin).
+- Taglines render (`⟡ SIFR01 ⟡` + Arabic tagline in KemetBlue skin).
 - Model info shows on a rail line (`| model: provider/model-id`).
 - Readiness state is color-coded: green `ready`, amber `degraded`, red `missing-config`.
 
