@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  IMAGE_NAME: ghcr.io/kemetresearch/estacoda
+  IMAGE_NAME: ghcr.io/sifr01-labs/estacoda
 
 jobs:
   validate:

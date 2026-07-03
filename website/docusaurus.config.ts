@@ -76,7 +76,7 @@ const config: Config = {
       respectPrefersColorScheme: true,
     },
     navbar: {
-      title: 'estacoda',
+      title: 'EstaCoda',
       logo: {
         alt: 'EstaCoda',
         src: 'img/logo-light.svg',
@@ -143,7 +143,7 @@ const config: Config = {
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} KemetResearch.`,
+      copyright: `Copyright © ${new Date().getFullYear()} SIFR01.`,
     },
     prism: {
       theme: prismThemes.github,

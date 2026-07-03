@@ -14,7 +14,7 @@ EstaCoda is built with Arabic as a first-class operating language, including sha
 
 When EstaCoda proposes changes to its own harness, they stay reviewable: evidence, hypothesis, approval, and rollback — not silent mutation.
 
-Built by Kemet Research.
+Built by SIFR01.
 
 ---
 
