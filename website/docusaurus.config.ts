@@ -143,7 +143,7 @@ const config: Config = {
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} KemetResearch.`,
+      copyright: `Copyright © ${new Date().getFullYear()} SIFR01.`,
     },
     prism: {
       theme: prismThemes.github,
