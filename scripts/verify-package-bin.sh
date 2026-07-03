@@ -60,10 +60,10 @@ process.stdin.on("end", () => {
   if (pkg.publishConfig?.access !== "public") {
     metadataFailures.push("expected publishConfig.access to be public");
   }
-  if (pkg.repository?.type !== "git" || pkg.repository?.url !== "git+https://github.com/KemetResearch/EstaCoda.git") {
-    metadataFailures.push("expected repository metadata for KemetResearch/EstaCoda");
+  if (pkg.repository?.type !== "git" || pkg.repository?.url !== "git+https://github.com/sifr01-labs/EstaCoda.git") {
+    metadataFailures.push("expected repository metadata for sifr01-labs/EstaCoda");
   }
-  if (pkg.bugs?.url !== "https://github.com/KemetResearch/EstaCoda/issues") {
+  if (pkg.bugs?.url !== "https://github.com/sifr01-labs/EstaCoda/issues") {
     metadataFailures.push("expected bugs.url to point at GitHub issues");
   }
   if (pkg.homepage !== "https://estacoda.kemetresearch.com") {

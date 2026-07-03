@@ -145,7 +145,7 @@ describe("runUpdateCommand install-method routing", () => {
       installMethodInfo: installInfo("managed-source", {
         source: "stamp",
         installDir: "/repo",
-        sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+        sourceUrl: "https://github.com/sifr01-labs/EstaCoda.git",
         expectedBranch: "main"
       }),
       canApplyUpdate: () => {
@@ -184,7 +184,7 @@ describe("runUpdateCommand install-method routing", () => {
         installMethodInfo: installInfo("managed-source", {
           source: "stamp",
           installDir: "/repo",
-          sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+          sourceUrl: "https://github.com/sifr01-labs/EstaCoda.git",
           expectedBranch: "main"
         }),
         applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => ({
@@ -213,7 +213,7 @@ describe("runUpdateCommand install-method routing", () => {
       installMethodInfo: installInfo("managed-source", {
         source: "stamp",
         installDir: "/repo",
-        sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+        sourceUrl: "https://github.com/sifr01-labs/EstaCoda.git",
         expectedBranch: "main"
       }),
       runUpdateWithResilience: async (input) => ({
@@ -246,7 +246,7 @@ describe("runUpdateCommand install-method routing", () => {
         installMethodInfo: installInfo("managed-source", {
           source: "stamp",
           installDir: "/repo",
-          sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+          sourceUrl: "https://github.com/sifr01-labs/EstaCoda.git",
           expectedBranch: "main"
         }),
         applyManagedSourceUpdate: async (input): Promise<UpdateApplyResult> => {
@@ -272,7 +272,7 @@ describe("runUpdateCommand install-method routing", () => {
       installMethodInfo: installInfo("managed-source", {
         source: "stamp",
         installDir: "/repo",
-        sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+        sourceUrl: "https://github.com/sifr01-labs/EstaCoda.git",
         expectedBranch: "main"
       }),
       applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => ({
@@ -321,7 +321,7 @@ describe("runUpdateCommand install-method routing", () => {
         installMethodInfo: installInfo("managed-source", {
           source: "stamp",
           installDir: "/repo",
-          sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+          sourceUrl: "https://github.com/sifr01-labs/EstaCoda.git",
           expectedBranch: "main"
         }),
         applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => ({
@@ -371,7 +371,7 @@ describe("runUpdateCommand install-method routing", () => {
         installMethodInfo: installInfo("managed-source", {
           source: "stamp",
           installDir: "/repo",
-          sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+          sourceUrl: "https://github.com/sifr01-labs/EstaCoda.git",
           expectedBranch: "main"
         }),
         applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => ({
@@ -415,7 +415,7 @@ describe("runUpdateCommand install-method routing", () => {
         installMethodInfo: installInfo("managed-source", {
           source: "stamp",
           installDir: "/repo",
-          sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+          sourceUrl: "https://github.com/sifr01-labs/EstaCoda.git",
           expectedBranch: "main"
         }),
         applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => ({
@@ -443,7 +443,7 @@ describe("runUpdateCommand install-method routing", () => {
       installMethodInfo: installInfo("managed-source", {
         source: "stamp",
         installDir: "/repo",
-        sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+        sourceUrl: "https://github.com/sifr01-labs/EstaCoda.git",
         expectedBranch: "main"
       }),
       applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => ({
@@ -478,7 +478,7 @@ describe("runUpdateCommand install-method routing", () => {
       installMethodInfo: installInfo("managed-source", {
         source: "stamp",
         installDir: "/repo",
-        sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+        sourceUrl: "https://github.com/sifr01-labs/EstaCoda.git",
         expectedBranch: "main"
       }),
       applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => ({
@@ -508,7 +508,7 @@ describe("runUpdateCommand install-method routing", () => {
       installMethodInfo: installInfo("managed-source", {
         source: "stamp",
         installDir: "/repo",
-        sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+        sourceUrl: "https://github.com/sifr01-labs/EstaCoda.git",
         expectedBranch: "main"
       }),
       applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => ({
@@ -537,7 +537,7 @@ describe("runUpdateCommand install-method routing", () => {
       installMethodInfo: installInfo("managed-source", {
         source: "stamp",
         installDir: "/repo",
-        sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+        sourceUrl: "https://github.com/sifr01-labs/EstaCoda.git",
         expectedBranch: "main"
       }),
       applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => ({
@@ -568,7 +568,7 @@ describe("runUpdateCommand install-method routing", () => {
       installMethodInfo: installInfo("managed-source", {
         source: "stamp",
         installDir: "/repo",
-        sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+        sourceUrl: "https://github.com/sifr01-labs/EstaCoda.git",
         expectedBranch: "main"
       }),
       applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => ({
@@ -599,7 +599,7 @@ describe("runUpdateCommand install-method routing", () => {
       installMethodInfo: installInfo("managed-source", {
         source: "stamp",
         installDir: "/repo",
-        sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+        sourceUrl: "https://github.com/sifr01-labs/EstaCoda.git",
         expectedBranch: "main"
       }),
       runUpdateWithResilience: async (input) => {
@@ -644,7 +644,7 @@ describe("runUpdateCommand install-method routing", () => {
       installMethodInfo: installInfo("managed-source", {
         source: "stamp",
         installDir: "/repo",
-        sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+        sourceUrl: "https://github.com/sifr01-labs/EstaCoda.git",
         expectedBranch: "main"
       }),
       applyManagedSourceUpdate: async (): Promise<UpdateApplyResult> => ({
@@ -836,7 +836,7 @@ describe("runUpdateCommand install-method routing", () => {
         homeDir,
         installMethodInfo: installInfo("managed-source", {
           installDir: "/repo",
-          sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+          sourceUrl: "https://github.com/sifr01-labs/EstaCoda.git",
           expectedBranch: "main"
         }),
         checkGitUpdate: async (info, options): Promise<GitUpdateResolverResult> => {

@@ -36,7 +36,7 @@ export type GitUpdateResolverResult =
   | { ok: true; kind: "available"; info: GitUpdateInfo }
   | { ok: false; error: string };
 
-const GITHUB_API_LATEST = "https://api.github.com/repos/kemetresearch/estacoda/releases/latest";
+const GITHUB_API_LATEST = "https://api.github.com/repos/sifr01-labs/EstaCoda/releases/latest";
 
 export async function getLocalVersion(options: {
   cwd?: string;

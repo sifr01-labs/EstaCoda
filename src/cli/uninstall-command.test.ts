@@ -45,7 +45,7 @@ function managedSource(installDir: string): InstallMethodInfo {
     method: "managed-source",
     source: "stamp",
     installDir,
-    sourceUrl: "https://github.com/KemetResearch/EstaCoda.git",
+    sourceUrl: "https://github.com/sifr01-labs/EstaCoda.git",
     branch: "main",
     expectedBranch: "main",
     stampPath: join(installDir, ".install-method.json"),

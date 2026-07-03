@@ -19,7 +19,7 @@ const config: Config = {
   baseUrl: '/docs/',
   trailingSlash: true,
 
-  organizationName: 'KemetResearch',
+  organizationName: 'sifr01-labs',
   projectName: 'EstaCoda',
 
   onBrokenLinks: 'throw',
@@ -98,7 +98,7 @@ const config: Config = {
           position: 'left',
         },
         {
-          href: 'https://github.com/KemetResearch/EstaCoda',
+          href: 'https://github.com/sifr01-labs/EstaCoda',
           label: 'GitHub',
           position: 'right',
         },
@@ -129,7 +129,7 @@ const config: Config = {
           items: [
             {
               label: 'GitHub',
-              href: 'https://github.com/KemetResearch/EstaCoda',
+              href: 'https://github.com/sifr01-labs/EstaCoda',
             },
           ],
         },
@@ -138,7 +138,7 @@ const config: Config = {
           items: [
             {
               label: 'Security Policy',
-              href: 'https://github.com/KemetResearch/EstaCoda/blob/main/SECURITY.md',
+              href: 'https://github.com/sifr01-labs/EstaCoda/blob/main/SECURITY.md',
             },
           ],
         },

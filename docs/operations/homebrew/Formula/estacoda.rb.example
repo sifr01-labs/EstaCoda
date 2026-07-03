@@ -8,7 +8,7 @@ class Estacoda < Formula
   homepage "https://estacoda.kemetresearch.com"
 
   # TODO: Replace v0.1.0 with the release tag being published.
-  url "https://github.com/KemetResearch/EstaCoda/archive/refs/tags/v0.1.0.tar.gz"
+  url "https://github.com/sifr01-labs/EstaCoda/archive/refs/tags/v0.1.0.tar.gz"
   # TODO: Replace with the SHA-256 of the GitHub source tarball for the release tag.
   sha256 "TODO"
   license "Apache-2.0"

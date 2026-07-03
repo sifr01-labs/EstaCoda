@@ -249,7 +249,7 @@ All documentation lives at [estacoda.kemetresearch.com/docs](https://estacoda.ke
 ## Contributor Install
 
 ```bash
-git clone https://github.com/KemetResearch/EstaCoda.git
+git clone https://github.com/sifr01-labs/EstaCoda.git
 cd EstaCoda
 ./scripts/setup-estacoda.sh
 ```
