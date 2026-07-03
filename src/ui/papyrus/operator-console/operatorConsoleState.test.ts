@@ -206,7 +206,7 @@ describe("Papyrus operator console state model", () => {
     const state = createInitialOperatorConsoleState({
       startup: {
         productName: "EstaCoda",
-        orgName: "Kemet Research",
+        orgName: "⟡ SIFR01 ⟡",
         tagline: "sovereign agentic infrastructure",
         version: "v0.1.0",
         sessionId: "20ea8195",

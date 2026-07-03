@@ -11,7 +11,7 @@ describe("Operator Console startup runtime mapper", () => {
 
     expect(state).toMatchObject({
       productName: "EstaCoda",
-      orgName: "Kemet Research",
+      orgName: "⟡ SIFR01 ⟡",
       tagline: "sovereign agentic infrastructure",
       version: "v0.1.0",
       sessionId: "20ea8195",

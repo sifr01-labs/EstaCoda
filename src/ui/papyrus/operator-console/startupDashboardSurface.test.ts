@@ -34,7 +34,7 @@ describe("Papyrus operator console startup dashboard surface", () => {
     expect(text).toContain("Tips");
     expect(text).toContain("Paste large context as attachments.");
     expect(text).not.toContain("╭─ Tips");
-    expect(output.at(-2)).toContain("☥ Kemet Research ☥");
+    expect(output.at(-2)).toContain("⟡ SIFR01 ⟡");
     expect(output.every((line) => stringWidth(line) <= 80)).toBe(true);
   });
 
@@ -45,7 +45,7 @@ describe("Papyrus operator console startup dashboard surface", () => {
     const commandsIndex = output.findIndex((line) => line.includes("Commands"));
 
     expect(text).toContain("EstaCoda");
-    expect(text).toContain("Kemet Research");
+    expect(text).toContain("⟡ SIFR01 ⟡");
     expect(text).toContain("EstaCoda  𓂀  v0.1.0");
     expect(sessionIndex).toBeGreaterThanOrEqual(0);
     expect(commandsIndex).toBeGreaterThan(sessionIndex);
@@ -167,7 +167,7 @@ describe("Papyrus operator console startup dashboard surface", () => {
     expect(output).toContain(`${ansiFg(tokens.contract.palette.accent)}Commands\x1b[0m`);
     expect(output).toContain(`${ansiFg(tokens.contract.palette.accent)}Update\x1b[0m`);
     expect(output).toContain(`${ansiFg(tokens.contract.palette.accent)}Tips\x1b[0m`);
-    expect(output).toContain(`${ansiFg(tokens.contract.text.secondary)}☥ Kemet Research ☥\x1b[0m`);
+    expect(output).toContain(`${ansiFg(tokens.contract.text.secondary)}⟡ SIFR01 ⟡\x1b[0m`);
     expect(output).toContain(`${ansiFg(tokens.contract.palette.caution)}◐\x1b[0m`);
   });
 });
@@ -175,7 +175,7 @@ describe("Papyrus operator console startup dashboard surface", () => {
 function startupState(): StartupDashboardState {
   return {
     productName: "EstaCoda",
-    orgName: "Kemet Research",
+    orgName: "⟡ SIFR01 ⟡",
     tagline: "sovereign agentic infrastructure",
     version: "v0.1.0",
     sessionId: "20ea8195",

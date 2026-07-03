@@ -115,7 +115,7 @@ describe("Papyrus operator console renderer", () => {
     const statusIndex = output.findIndex((line) => line.includes("◷ 01:12"));
 
     expect(startupIndex).toBeGreaterThanOrEqual(0);
-    expect(output).toContainEqual(expect.stringContaining("☥ Kemet Research ☥"));
+    expect(output).toContainEqual(expect.stringContaining("⟡ SIFR01 ⟡"));
     expect(output).toContainEqual(expect.stringContaining("Session"));
     expect(output).toContainEqual(expect.stringContaining("Commands"));
     expect(output).toContainEqual(expect.stringContaining("/setup"));
@@ -690,7 +690,7 @@ function ansiFg(hex: string): string {
 function startupDashboard() {
   return {
     productName: "EstaCoda",
-    orgName: "Kemet Research",
+    orgName: "⟡ SIFR01 ⟡",
     tagline: "sovereign agentic infrastructure",
     version: "v0.1.0",
     sessionId: "20ea8195",

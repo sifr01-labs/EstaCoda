@@ -38,7 +38,7 @@ export const kemetBlueSkin: ThemeAwareSkin = {
       agentName: "EstaCoda",
       responseLabel: "𓂀 EstaCoda",
       helpHeader: "𓂀 Available Commands",
-      taglinePrimary: "☥ Kemet Research ☥",
+      taglinePrimary: "⟡ SIFR01 ⟡",
       taglineSecondary: "السيادة التكنولوجية العربية",
       promptPrefix: "> ",
     },

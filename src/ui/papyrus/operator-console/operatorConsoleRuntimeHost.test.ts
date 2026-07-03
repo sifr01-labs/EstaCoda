@@ -507,7 +507,7 @@ function steer(input: Partial<SteerState> = {}): SteerState {
 function startup(): StartupDashboardState {
   return {
     productName: "EstaCoda",
-    orgName: "Kemet Research",
+    orgName: "⟡ SIFR01 ⟡",
     tagline: "sovereign agentic infrastructure",
     version: "v0.1.0",
     sessionId: "session-1",

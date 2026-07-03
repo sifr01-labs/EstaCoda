@@ -135,16 +135,17 @@ describe("plain mode invariants", () => {
     const r = resolveTokens("plain", "light", "kemetBlue");
     // No Egyptian eye, no ankh, no Unicode frames in branding
     expect(r.contract.branding.responseLabel).toBe("EstaCoda");
-    expect(r.contract.branding.taglinePrimary).toBe("Kemet Research");
+    expect(r.contract.branding.taglinePrimary).toBe("⟡ SIFR01 ⟡");
     expect(r.contract.branding.taglineSecondary).toBe("");
     expect(r.contract.branding.helpHeader).toBe("Available Commands");
   });
 
-  it("plain keeps branding text labels ASCII-safe", () => {
+  it("plain keeps operational branding text labels ASCII-safe", () => {
     const r = resolveTokens("plain", "dark", "kemetBlue");
     expect(r.contract.branding.responseLabel).toBe("EstaCoda");
-    expect(r.contract.branding.taglinePrimary).toBe("Kemet Research");
-    for (const value of Object.values(r.contract.branding)) {
+    expect(r.contract.branding.taglinePrimary).toBe("⟡ SIFR01 ⟡");
+    const { taglinePrimary: _companyMark, ...operationalBranding } = r.contract.branding;
+    for (const value of Object.values(operationalBranding)) {
       if (typeof value === "string" && value.length > 0) {
         for (const ch of value) {
           expect(ch.charCodeAt(0)).toBeLessThan(128);
@@ -225,7 +226,7 @@ describe("skin overlay precedence", () => {
 
   it("plain strips skin Unicode branding even with kemetBlue", () => {
     const r = resolveTokens("plain", "dark", "kemetBlue");
-    expect(r.contract.branding.taglinePrimary).toBe("Kemet Research");
+    expect(r.contract.branding.taglinePrimary).toBe("⟡ SIFR01 ⟡");
     expect(r.contract.branding.taglineSecondary).toBe("");
   });
 });

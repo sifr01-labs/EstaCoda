@@ -12,7 +12,7 @@ export function mapStartupDashboardViewModelToOperatorConsoleState(
   const viewModel = input.viewModel;
   return {
     productName: viewModel.agentName,
-    orgName: "Kemet Research",
+    orgName: "⟡ SIFR01 ⟡",
     tagline: firstNonEmpty(viewModel.taglines) ?? "sovereign agentic infrastructure",
     version: viewModel.version,
     sessionId: formatStartupSessionId(viewModel.sessionId ?? "pending"),

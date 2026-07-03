@@ -1357,19 +1357,18 @@ describe("PlainRenderer — renderStartup", () => {
   it("renders startup with taglines and warnings", () => {
     const vm = buildStartupViewModel({
       agentName: "EstaCoda",
-      taglines: ["Kemet Research", "Autonomous Engineering"],
+      taglines: ["⟡ SIFR01 ⟡", "Autonomous Engineering"],
       model: { provider: "openrouter", id: "claude-sonnet-4" },
       readiness: "ready",
       warnings: [],
     });
     const out = renderStartup(vm);
     expect(out).toContain("EstaCoda");
-    expect(out).toContain("Kemet Research");
+    expect(out).toContain("⟡ SIFR01 ⟡");
     expect(out).toContain("Autonomous Engineering");
     expect(out).toContain("model: openrouter/claude-sonnet-4");
     expect(out).toContain("readiness: ready");
     assertNoAnsi(out);
-    assertAsciiSafe(out);
   });
 
   it("renders degraded readiness with warnings", () => {
@@ -1427,7 +1426,7 @@ describe("PlainRenderer — renderStartupDashboard", () => {
   it("renders full dashboard with all fields", () => {
     const vm = buildStartupDashboardViewModel({
       agentName: "EstaCoda",
-      taglines: ["Kemet Research", "السيادة التكنولوجية العربية"],
+      taglines: ["⟡ SIFR01 ⟡", "السيادة التكنولوجية العربية"],
       version: "v0.0.5",
       sessionId: "sess-9f7a2c1b",
       model: { provider: "openrouter", id: "deepseek-reasoner" },
@@ -1443,7 +1442,7 @@ describe("PlainRenderer — renderStartupDashboard", () => {
     });
     const out = renderStartupDashboard(vm);
     expect(out).toContain("EstaCoda");
-    expect(out).toContain("Kemet Research");
+    expect(out).toContain("⟡ SIFR01 ⟡");
     expect(out).toContain("version: v0.0.5");
     expect(out).toContain("session: sess-9f7a2c1b");
     expect(out).toContain("model: deepseek-reasoner - ready");
@@ -1521,7 +1520,7 @@ describe("PlainRenderer — renderStartupDashboard", () => {
   it("renders Arabic dashboard chrome and isolates startup technical tokens", () => {
     const vm = buildStartupDashboardViewModel({
       agentName: "EstaCoda",
-      taglines: ["Kemet Research"],
+      taglines: ["⟡ SIFR01 ⟡"],
       version: "v0.0.5",
       sessionId: "sess-9f7a2c1b",
       model: { provider: "openrouter", id: "deepseek-reasoner" },

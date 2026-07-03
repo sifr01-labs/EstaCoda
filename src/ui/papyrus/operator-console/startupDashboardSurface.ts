@@ -21,7 +21,7 @@ const ARABIC_TWO_COLUMN_ROW_LEFT_BIAS = 8;
 export function createDefaultStartupDashboardState(): StartupDashboardState {
   return {
     productName: "EstaCoda",
-    orgName: "Kemet Research",
+    orgName: "⟡ SIFR01 ⟡",
     tagline: "sovereign agentic infrastructure",
     version: "v0.1.0",
     sessionId: "pending",
@@ -109,7 +109,7 @@ function renderWideStartupDashboard(
   for (const row of renderInfoColumns(state, locale, leftWidth, rightWidth, gapWidth, bodyWidth, width, style)) {
     output.push(row);
   }
-  output.push(renderOuterRow(styleSecondaryText(`☥ ${state.orgName} ☥`, style), bodyWidth, width));
+  output.push(renderOuterRow(styleSecondaryText(state.orgName, style), bodyWidth, width));
   output.push(renderBottomBorder(width));
   return output;
 }
@@ -163,7 +163,7 @@ function renderWideArabicStartupDashboard(
       style
     ),
     sectionGap,
-    renderOuterRow(centerVisible(styleSecondaryText(`☥ ${state.orgName} ☥`, style), bodyWidth), bodyWidth, frameWidth),
+    renderOuterRow(centerVisible(styleSecondaryText(state.orgName, style), bodyWidth), bodyWidth, frameWidth),
     renderBottomBorder(frameWidth),
   ];
 
@@ -332,7 +332,7 @@ function renderNarrowStartupDashboard(
   }
   output.push(renderOuterRow(styleSectionLabel(startupLabel(locale, "Tips", "تلميحات"), style), bodyWidth, width));
   if (tipRows(state, locale)[0] !== undefined) output.push(renderOuterRow(tipRows(state, locale)[0], bodyWidth, width));
-  output.push(renderOuterRow(styleSecondaryText(`☥ ${state.orgName} ☥`, style), bodyWidth, width));
+  output.push(renderOuterRow(styleSecondaryText(state.orgName, style), bodyWidth, width));
   output.push(renderBottomBorder(width));
   return output;
 }
