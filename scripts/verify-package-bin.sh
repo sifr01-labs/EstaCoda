@@ -66,8 +66,8 @@ process.stdin.on("end", () => {
   if (pkg.bugs?.url !== "https://github.com/sifr01-labs/EstaCoda/issues") {
     metadataFailures.push("expected bugs.url to point at GitHub issues");
   }
-  if (pkg.homepage !== "https://estacoda.kemetresearch.com") {
-    metadataFailures.push("expected homepage to point at estacoda.kemetresearch.com");
+  if (pkg.homepage !== "https://www.estacoda.com") {
+    metadataFailures.push("expected homepage to point at www.estacoda.com");
   }
   const rootDeps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
   for (const dependency of ["@whiskeysockets/baileys", "@hapi/boom"]) {

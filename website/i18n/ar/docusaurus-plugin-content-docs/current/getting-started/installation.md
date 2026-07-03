@@ -14,11 +14,11 @@ EstaCoda هو نظام وكيل أمر سطري يملك تصليحاً صريح
 
 | الطبقة | الدور | الرابط |
 |---|---|---|
-| نقطة الدخول العامة | العنوان المستقر الذي يُعلن في المستندات | `https://estacoda.kemetresearch.com/install.sh` |
+| نقطة الدخول العامة | العنوان المستقر الذي يُعلن في المستندات | `https://www.estacoda.com/install.sh` |
 | مثبت المستودعات | منطق التثبيت الفعلي | `scripts/install.sh` في مستودعات EstaCoda |
 | التراجع المباشر من المصدر | رابط GitHub المباشر للتصحيح والاختبار قبل الإصدار | `https://raw.githubusercontent.com/sifr01-labs/EstaCoda/main/scripts/install.sh` |
 
-نقطة الدخول العامة هي مشغّل رقيق يقوم بتنزيل `scripts/install.sh` من المستودعات وتشغيله. لا يعتمد تنفيذ التثبيت على `estacoda.kemetresearch.com` في تنفيذه. هذا يخلق دائرة تبعية مغلقة.
+نقطة الدخول العامة هي مشغّل رقيق يقوم بتنزيل `scripts/install.sh` من المستودعات وتشغيله. لا يعتمد تنفيذ التثبيت على `www.estacoda.com` في تنفيذه. هذا يخلق دائرة تبعية مغلقة.
 
 ## المنصات المدعومة
 
@@ -47,13 +47,13 @@ EstaCoda هو نظام وكيل أمر سطري يملك تصليحاً صريح
 الأمر العام المستخدم في المستندات:
 
 ```bash
-curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash
+curl -fsSL https://www.estacoda.com/install.sh | bash
 ```
 
 مع الخيارات:
 
 ```bash
-curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash -s -- --dir <path> --skip-init
+curl -fsSL https://www.estacoda.com/install.sh | bash -s -- --dir <path> --skip-init
 ```
 
 ينشئ هذا تثبيتًا من نوع **managed-source**. المثبت:

@@ -3101,7 +3101,7 @@ describe("buildProviderRegistry custom provider baseUrl behavior", () => {
       const adapter = loaded.providerRegistry.get("openrouter");
       expect(adapter).toBeDefined();
       expect(adapter?.endpoint?.headers).toMatchObject({
-        "HTTP-Referer": "https://estacoda.kemetresearch.com",
+        "HTTP-Referer": "https://www.estacoda.com",
         "X-Title": "EstaCoda"
       });
     } finally {

@@ -3998,7 +3998,7 @@ describe("createDefaultProviderRegistry", () => {
     expect(openrouter).toBeDefined();
     expect(openrouter!.executable).not.toBe(false);
     expect(openrouter!.endpoint?.headers).toMatchObject({
-      "HTTP-Referer": "https://estacoda.kemetresearch.com",
+      "HTTP-Referer": "https://www.estacoda.com",
       "X-Title": "EstaCoda"
     });
   });

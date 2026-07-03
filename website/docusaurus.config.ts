@@ -15,7 +15,7 @@ const config: Config = {
     },
   ],
 
-  url: 'https://estacoda.kemetresearch.com',
+  url: 'https://www.estacoda.com',
   baseUrl: '/docs/',
   trailingSlash: true,
 
@@ -82,7 +82,7 @@ const config: Config = {
         src: 'img/logo-light.svg',
         srcDark: 'img/logo-dark.svg',
         // Point the brand mark at the main marketing site, not the docs root.
-        href: 'https://estacoda.kemetresearch.com/',
+        href: 'https://www.estacoda.com/',
         target: '_self',
       },
       items: [
@@ -93,7 +93,7 @@ const config: Config = {
           activeBaseRegex: '^/$|^/(?!ar(?:/|$)).*$',
         },
         {
-          href: 'https://estacoda.kemetresearch.com/skills',
+          href: 'https://www.estacoda.com/skills',
           label: '/skills',
           position: 'left',
         },

@@ -249,6 +249,6 @@ This distinction matches the current repository layout: the root package artifac
 
 ## Documentation
 
-For the user-facing security and approvals guide, see [Security and Approvals](https://estacoda.kemetresearch.com/docs/user-guide/security-and-approvals).
+For the user-facing security and approvals guide, see [Security and Approvals](https://www.estacoda.com/docs/user-guide/security-and-approvals).
 
-For CLI gateway approval commands, see [CLI Commands](https://estacoda.kemetresearch.com/docs/reference/cli-commands).
+For CLI gateway approval commands, see [CLI Commands](https://www.estacoda.com/docs/reference/cli-commands).

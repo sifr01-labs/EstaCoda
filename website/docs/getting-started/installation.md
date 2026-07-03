@@ -14,11 +14,11 @@ The installation surface has three layers:
 
 | Layer | Role | URL |
 |---|---|---|
-| Public entrypoint | Stable URL advertised in docs | `https://estacoda.kemetresearch.com/install.sh` |
+| Public entrypoint | Stable URL advertised in docs | `https://www.estacoda.com/install.sh` |
 | Repo installer | Actual installer logic | `scripts/install.sh` in the EstaCoda repository |
 | Direct-source fallback | Raw GitHub URL for debug/pre-release | `https://raw.githubusercontent.com/sifr01-labs/EstaCoda/main/scripts/install.sh` |
 
-The public entrypoint is a thin launcher that downloads `scripts/install.sh` from the repo and executes it. The installer implementation does not depend on `estacoda.kemetresearch.com`. That would create circular ownership.
+The public entrypoint is a thin launcher that downloads `scripts/install.sh` from the repo and executes it. The installer implementation does not depend on `www.estacoda.com`. That would create circular ownership.
 
 ## Supported platforms
 
@@ -47,13 +47,13 @@ The public entrypoint is a thin launcher that downloads `scripts/install.sh` fro
 The canonical quickstart command:
 
 ```bash
-curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash
+curl -fsSL https://www.estacoda.com/install.sh | bash
 ```
 
 With flags:
 
 ```bash
-curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash -s -- --dir <path> --skip-init
+curl -fsSL https://www.estacoda.com/install.sh | bash -s -- --dir <path> --skip-init
 ```
 
 This creates a **managed-source** install. The installer:

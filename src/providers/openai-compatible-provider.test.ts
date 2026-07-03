@@ -286,7 +286,7 @@ describe("buildOpenAICompatibleRequest", () => {
     const prepared = buildOpenAICompatibleRequest({
       ...DEFAULT_ENDPOINT,
       headers: {
-        "HTTP-Referer": "https://estacoda.kemetresearch.com",
+        "HTTP-Referer": "https://www.estacoda.com",
         "X-Title": "EstaCoda"
       }
     }, {
@@ -294,7 +294,7 @@ describe("buildOpenAICompatibleRequest", () => {
       messages: [{ role: "user", content: "Hello" }]
     }, undefined, "openrouter");
 
-    expect(prepared.headers["HTTP-Referer"]).toBe("https://estacoda.kemetresearch.com");
+    expect(prepared.headers["HTTP-Referer"]).toBe("https://www.estacoda.com");
     expect(prepared.headers["X-Title"]).toBe("EstaCoda");
   });
 

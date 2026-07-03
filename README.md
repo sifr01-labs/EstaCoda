@@ -73,12 +73,12 @@ Built by Kemet Research.
 macOS, Linux, WSL2, and Termux:
 
 ```bash
-curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash
+curl -fsSL https://www.estacoda.com/install.sh | bash
 ```
 
 The installer creates a managed-source install, symlinks a wrapper to `~/.local/bin/estacoda`, and adds PATH to your shell rc if needed. After installation, reload your shell or open a new terminal.
 
-For the full setup flow, see the [Quickstart](https://estacoda.kemetresearch.com/docs/getting-started/quickstart).
+For the full setup flow, see the [Quickstart](https://www.estacoda.com/docs/getting-started/quickstart).
 
 ---
 
@@ -107,7 +107,7 @@ estacoda uninstall --purge     # remove install code and user data
 estacoda whatsapp              # start the WhatsApp setup wizard
 ```
 
-For the full command surface, see [CLI Commands](https://estacoda.kemetresearch.com/docs/reference/cli-commands).
+For the full command surface, see [CLI Commands](https://www.estacoda.com/docs/reference/cli-commands).
 
 ---
 
@@ -203,7 +203,7 @@ The active profile is selected in:
 
 Profiles own their configuration, credentials, memory, gateway state, and logs.
 
-See [State and Files](https://estacoda.kemetresearch.com/docs/reference/state-and-files) for the full state model.
+See [State and Files](https://www.estacoda.com/docs/reference/state-and-files) for the full state model.
 
 ---
 
@@ -219,30 +219,30 @@ EstaCoda is designed for powerful agent workflows, but it keeps high-impact chan
 - User data is preserved by default during uninstall.
 - Harness improvements require reviewable proposals rather than silent self-mutation.
 
-See [Security and Approvals](https://estacoda.kemetresearch.com/docs/user-guide/security-and-approvals) for the full model.
+See [Security and Approvals](https://www.estacoda.com/docs/user-guide/security-and-approvals) for the full model.
 
 ---
 
 ## Documentation
 
-All documentation lives at [estacoda.kemetresearch.com/docs](https://estacoda.kemetresearch.com/docs/).
+All documentation lives at [www.estacoda.com/docs](https://www.estacoda.com/docs/).
 
 | Section | What's Covered |
 |---|---|
-| [Quickstart](https://estacoda.kemetresearch.com/docs/getting-started/quickstart) | Install, setup, and first session |
-| [Installation](https://estacoda.kemetresearch.com/docs/getting-started/installation) | Install paths and OS support |
-| [Updating](https://estacoda.kemetresearch.com/docs/getting-started/updating) | Update commands, routing, and safety |
-| [Uninstall](https://estacoda.kemetresearch.com/docs/getting-started/uninstall) | Removal behavior and data boundaries |
-| [CLI Usage](https://estacoda.kemetresearch.com/docs/user-guide/cli) | Commands, sessions, profiles |
-| [Providers](https://estacoda.kemetresearch.com/docs/user-guide/providers) | Provider setup, maturity, and routing |
-| [Channels](https://estacoda.kemetresearch.com/docs/user-guide/channels) | Telegram, WhatsApp, and channel setup |
-| [Gateway](https://estacoda.kemetresearch.com/docs/user-guide/gateway) | Service mode, diagnostics, approvals |
-| [Skills](https://estacoda.kemetresearch.com/docs/user-guide/skills) | Loading, evolution, and proposals |
-| [Memory](https://estacoda.kemetresearch.com/docs/user-guide/memory) | Profile memory, promotion, and limits |
-| [Security and Approvals](https://estacoda.kemetresearch.com/docs/user-guide/security-and-approvals) | Modes, trust boundaries, and hard blocks |
-| [Configuration](https://estacoda.kemetresearch.com/docs/reference/configuration) | Config file reference |
-| [CLI Commands](https://estacoda.kemetresearch.com/docs/reference/cli-commands) | Full command and flag reference |
-| [Troubleshooting](https://estacoda.kemetresearch.com/docs/reference/troubleshooting) | Common failures and recovery |
+| [Quickstart](https://www.estacoda.com/docs/getting-started/quickstart) | Install, setup, and first session |
+| [Installation](https://www.estacoda.com/docs/getting-started/installation) | Install paths and OS support |
+| [Updating](https://www.estacoda.com/docs/getting-started/updating) | Update commands, routing, and safety |
+| [Uninstall](https://www.estacoda.com/docs/getting-started/uninstall) | Removal behavior and data boundaries |
+| [CLI Usage](https://www.estacoda.com/docs/user-guide/cli) | Commands, sessions, profiles |
+| [Providers](https://www.estacoda.com/docs/user-guide/providers) | Provider setup, maturity, and routing |
+| [Channels](https://www.estacoda.com/docs/user-guide/channels) | Telegram, WhatsApp, and channel setup |
+| [Gateway](https://www.estacoda.com/docs/user-guide/gateway) | Service mode, diagnostics, approvals |
+| [Skills](https://www.estacoda.com/docs/user-guide/skills) | Loading, evolution, and proposals |
+| [Memory](https://www.estacoda.com/docs/user-guide/memory) | Profile memory, promotion, and limits |
+| [Security and Approvals](https://www.estacoda.com/docs/user-guide/security-and-approvals) | Modes, trust boundaries, and hard blocks |
+| [Configuration](https://www.estacoda.com/docs/reference/configuration) | Config file reference |
+| [CLI Commands](https://www.estacoda.com/docs/reference/cli-commands) | Full command and flag reference |
+| [Troubleshooting](https://www.estacoda.com/docs/reference/troubleshooting) | Common failures and recovery |
 
 ---
 
@@ -294,7 +294,7 @@ estacoda update --gateway  # run in non-interactive service mode
 
 Startup update checks are enabled by default. They run as non-blocking background prefetches in interactive CLI sessions, use a six-hour cache, and fail silently on network errors.
 
-See [Updating](https://estacoda.kemetresearch.com/docs/getting-started/updating) for the full update surface.
+See [Updating](https://www.estacoda.com/docs/getting-started/updating) for the full update surface.
 
 ---
 
@@ -309,7 +309,7 @@ Default uninstall preserves `~/.estacoda`.
 
 Managed-source directories are removed only when a valid installer stamp proves ownership. Manual-source checkouts are preserved. Package-manager and container installs are routed to their respective tools rather than self-mutated.
 
-See [Uninstall](https://estacoda.kemetresearch.com/docs/getting-started/uninstall) for method-specific behavior and ownership rules.
+See [Uninstall](https://www.estacoda.com/docs/getting-started/uninstall) for method-specific behavior and ownership rules.
 
 ---
 

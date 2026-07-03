@@ -41,7 +41,7 @@ sidebar_position: 2
 مسار التثبيت الافتراضي يستخدم المثبّت العام:
 
 ```bash
-curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash
+curl -fsSL https://www.estacoda.com/install.sh | bash
 ```
 
 ينشئ هذا تثبيتًا مُدار المصدر تحت `~/.estacoda/estacoda`، ثم يبني المشروع، ويكتب ملف تشغيل إلى `~/.local/bin/estacoda`، ويشغّل `estacoda init`.
@@ -197,7 +197,7 @@ estacoda setup
 ثبّت في مجلد مخصص وتجاوز تهيئة الحالة الأولى:
 
 ```bash
-curl -fsSL https://estacoda.kemetresearch.com/install.sh | bash -s -- --dir <path> --skip-init
+curl -fsSL https://www.estacoda.com/install.sh | bash -s -- --dir <path> --skip-init
 ```
 
 إذا كنت تنوي تعديل المصدر، استنسخ المستودع وشغّل سكربت الإعداد:
