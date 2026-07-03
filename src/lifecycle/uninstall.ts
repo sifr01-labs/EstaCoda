@@ -378,7 +378,7 @@ function packageManagerGuidance(method: Exclude<InstallMethodInfo["method"], "ma
     case "docker":
       return [
         "Docker/container install detected. EstaCoda will not mutate containers, images, or volumes automatically.",
-        "Run: docker pull ghcr.io/kemetresearch/estacoda:latest for updates, or remove containers/images manually when safe.",
+        "Run: docker pull ghcr.io/sifr01-labs/estacoda:latest for updates, or remove containers/images manually when safe.",
         "Named or bind-mounted state volumes are preserved by default."
       ];
   }

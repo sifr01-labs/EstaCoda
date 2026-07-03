@@ -115,10 +115,10 @@ Homebrew يبني من شجرة المصدر على GitHub باستخدام Node
 ### Docker
 
 ```bash
-docker run ghcr.io/kemetresearch/estacoda:v0.1.0
+docker run ghcr.io/sifr01-labs/estacoda:v0.1.0
 ```
 
-الصور منشورة على GHCR. امر `estacoda update` يوجّه تثبيتات Docker إلى `docker pull ghcr.io/kemetresearch/estacoda:latest`. الواجهة الترمية لا تقوم بتعديل نظام ملفات الحاوية.
+الصور منشورة على GHCR. امر `estacoda update` يوجّه تثبيتات Docker إلى `docker pull ghcr.io/sifr01-labs/estacoda:latest`. الواجهة الترمية لا تقوم بتعديل نظام ملفات الحاوية.
 
 ## أنماط التثبيت
 

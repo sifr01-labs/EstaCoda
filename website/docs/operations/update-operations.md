@@ -126,7 +126,7 @@ For installs that are not self-updating, `estacoda update` prints the recommende
 | Method | Command |
 |---|---|
 | Homebrew | `brew upgrade kemetresearch/tap/estacoda` |
-| Docker | `docker pull ghcr.io/kemetresearch/estacoda:latest` |
+| Docker | `docker pull ghcr.io/sifr01-labs/estacoda:latest` |
 | npm global | `npm install -g estacoda@latest` |
 | pnpm global | `pnpm add -g estacoda@latest` |
 

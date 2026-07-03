@@ -320,7 +320,7 @@ function packageMethod(method: "npm-global" | "pnpm-global" | "homebrew" | "dock
         ? "pnpm add -g estacoda@latest"
         : method === "homebrew"
           ? "brew upgrade kemetresearch/tap/estacoda"
-          : "docker pull ghcr.io/kemetresearch/estacoda:latest",
+          : "docker pull ghcr.io/sifr01-labs/estacoda:latest",
     canSelfUpdate: false,
     reason: "Detected by test."
   };
