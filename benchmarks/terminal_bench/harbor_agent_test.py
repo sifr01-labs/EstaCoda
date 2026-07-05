@@ -4,13 +4,18 @@ from types import SimpleNamespace
 
 from benchmarks.terminal_bench.harbor_agent import (
     AdapterConfigError,
+    EstaCodaHarborAgent,
     build_bench_args,
     build_config,
     build_installed_agent_command,
 )
+from benchmarks.terminal_bench.estacoda_harbor_agent import EstaCodaAgent
 
 
 class EstaCodaHarborAgentTest(unittest.TestCase):
+    def test_compatibility_import_reexports_agent_class(self):
+        self.assertIs(EstaCodaAgent, EstaCodaHarborAgent)
+
     def test_builds_bench_run_args_with_terminal_bench_identity(self):
         config = build_config({
             "ESTACODA_BENCH_COMMAND": "node --import tsx src/index.ts",

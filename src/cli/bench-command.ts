@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { aggregateBenchmarkMetrics } from "../benchmark/metrics.js";
 import {
@@ -37,6 +37,10 @@ const execFileAsync = promisify(execFile);
 type BenchRunArgs = {
   workspace: string;
   outDir: string;
+  artifactPaths: {
+    summary?: string;
+    eventLog?: string;
+  };
   instruction: string;
   homeDir?: string;
   homeMode: BenchmarkHomeMode;
@@ -112,7 +116,7 @@ async function runBenchRun(
 ): Promise<CliCommandResult> {
   const now = dependencies.now ?? (() => new Date());
   const startedAt = now();
-  const artifacts = benchmarkArtifactPaths(args.outDir);
+  const artifacts = benchmarkArtifactPaths(args.outDir, args.artifactPaths);
   const events: RuntimeEvent[] = [];
   let runtime: Runtime | undefined;
   let finalAnswer = "";
@@ -128,7 +132,7 @@ async function runBenchRun(
   };
   const benchmarkHome = args.homeDir ?? await (dependencies.makeTempHome ?? defaultMakeTempHome)();
 
-  await mkdir(args.outDir, { recursive: true });
+  await prepareBenchmarkArtifactDirs(artifacts);
   await writeBenchmarkEventLogArtifact(artifacts.eventLog, [], { redact: args.redact });
 
   try {
@@ -315,6 +319,8 @@ async function loadBenchmarkConfig(input: {
 async function parseBenchRunArgs(args: string[]): Promise<{ ok: true; args: BenchRunArgs } | { ok: false; error: string }> {
   let workspace: string | undefined;
   let outDir: string | undefined;
+  let summaryPath: string | undefined;
+  let eventLogPath: string | undefined;
   let instruction: string | undefined;
   let instructionFile: string | undefined;
   let homeDir: string | undefined;
@@ -340,6 +346,12 @@ async function parseBenchRunArgs(args: string[]): Promise<{ ok: true; args: Benc
         case "--out":
         case "--output-dir":
           outDir = requiredValue(args, ++index, arg);
+          break;
+        case "--json-output":
+          summaryPath = requiredValue(args, ++index, arg);
+          break;
+        case "--event-log":
+          eventLogPath = requiredValue(args, ++index, arg);
           break;
         case "--instruction":
           instruction = requiredValue(args, ++index, arg);
@@ -403,8 +415,8 @@ async function parseBenchRunArgs(args: string[]): Promise<{ ok: true; args: Benc
   if (workspace === undefined) {
     return { ok: false, error: "bench run requires --workspace <dir>." };
   }
-  if (outDir === undefined) {
-    return { ok: false, error: "bench run requires --out <dir>." };
+  if (outDir === undefined && summaryPath === undefined && eventLogPath === undefined) {
+    return { ok: false, error: "bench run requires --out <dir> or --json-output/--event-log artifact paths." };
   }
   if (instruction !== undefined && instructionFile !== undefined) {
     return { ok: false, error: "Use only one of --instruction or --instruction-file." };
@@ -433,11 +445,21 @@ async function parseBenchRunArgs(args: string[]): Promise<{ ok: true; args: Benc
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 
+  const resolvedSummaryPath = summaryPath === undefined ? undefined : resolve(summaryPath);
+  const resolvedEventLogPath = eventLogPath === undefined ? undefined : resolve(eventLogPath);
+  const resolvedOutDir = outDir === undefined
+    ? dirname(resolvedSummaryPath ?? resolvedEventLogPath!)
+    : resolve(outDir);
+
   return {
     ok: true,
     args: {
       workspace: resolve(workspace),
-      outDir: resolve(outDir),
+      outDir: resolvedOutDir,
+      artifactPaths: {
+        ...(resolvedSummaryPath === undefined ? {} : { summary: resolvedSummaryPath }),
+        ...(resolvedEventLogPath === undefined ? {} : { eventLog: resolvedEventLogPath })
+      },
       instruction: resolvedInstruction,
       homeDir: homeDir === undefined ? undefined : resolve(homeDir),
       homeMode: homeDir === undefined ? "generated" : "explicit",
@@ -553,14 +575,30 @@ async function defaultMakeTempHome(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-bench-home-"));
 }
 
-function benchmarkArtifactPaths(outDir: string): BenchmarkArtifactSummary & { stdout: string; stderr: string } {
+function benchmarkArtifactPaths(
+  outDir: string,
+  overrides: BenchRunArgs["artifactPaths"] = {}
+): BenchmarkArtifactSummary & { stdout: string; stderr: string } {
   return {
-    summary: join(outDir, "summary.json"),
-    eventLog: join(outDir, "events.ndjson"),
+    summary: overrides.summary ?? join(outDir, "summary.json"),
+    eventLog: overrides.eventLog ?? join(outDir, "events.ndjson"),
     trajectory: null,
     stdout: join(outDir, "stdout.txt"),
     stderr: join(outDir, "stderr.txt")
   };
+}
+
+async function prepareBenchmarkArtifactDirs(
+  artifacts: BenchmarkArtifactSummary & { stdout: string; stderr: string }
+): Promise<void> {
+  await Promise.all(
+    Array.from(new Set([
+      dirname(artifacts.summary),
+      dirname(artifacts.eventLog),
+      dirname(artifacts.stdout),
+      dirname(artifacts.stderr)
+    ])).map((dir) => mkdir(dir, { recursive: true }))
+  );
 }
 
 function renderBenchmarkStdout(summary: ReturnType<typeof buildBenchmarkRunManifest>): string {
@@ -612,6 +650,7 @@ function renderBenchHelp(): string {
     "Usage:",
     "  estacoda bench run --workspace <dir> --instruction <text> --out <dir>",
     "  estacoda bench run --workspace <dir> --instruction-file <path> --out <dir>",
+    "  estacoda bench run --workspace <dir> --instruction-file <path> --json-output <path> --event-log <path>",
     "",
     "Run EstaCoda headlessly for benchmark harnesses."
   ].join("\n");
@@ -623,12 +662,15 @@ function renderBenchRunHelp(): string {
     "",
     "Usage:",
     "  estacoda bench run --workspace <dir> --instruction <text> --out <dir> [--model <provider/model>]",
+    "  estacoda bench run --workspace <dir> --instruction-file <path> --json-output <path> --event-log <path>",
     "",
     "Options:",
     "  --workspace <dir>              Explicit benchmark workspace",
     "  --instruction <text>           Task instruction",
     "  --instruction-file <path>      Read task instruction from a file",
     "  --out, --output-dir <dir>      Artifact output directory",
+    "  --json-output <path>           Write summary JSON to an explicit path",
+    "  --event-log <path>             Write event log JSONL/NDJSON to an explicit path",
     "  --home <dir>                   Explicit EstaCoda home for this run",
     "  --isolated-home                Use a generated isolated home (default)",
     "  --model <provider/model>       Command-local model override",

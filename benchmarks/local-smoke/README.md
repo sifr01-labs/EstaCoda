@@ -11,3 +11,12 @@ pnpm run benchmark:smoke
 ```
 
 This catches harness regressions before running Terminal-Bench or Harbor-backed adapters.
+
+The operator-facing simple file task lives at:
+
+```text
+benchmarks/local-smoke/simple-file-task/instruction.txt
+benchmarks/local-smoke/simple-file-task/verify.sh
+```
+
+Use it for artifact/control smoke runs that validate CLI artifact writing without provider credentials. An unconfigured isolated home may return `config_error`; that is expected for control smoke. Live local smoke runs should pass provider/model configuration and then verify the workspace with `verify.sh`.

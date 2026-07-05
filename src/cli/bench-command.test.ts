@@ -208,6 +208,66 @@ describe("benchCommand", () => {
     });
   });
 
+  it("writes config_error artifacts to explicit summary and event paths", async () => {
+    const root = await makeTempDir();
+    const workspace = join(root, "workspace");
+    const summaryPath = join(root, "explicit", "summary.json");
+    const eventLogPath = join(root, "logs", "events.jsonl");
+    await mkdir(workspace);
+
+    const result = await benchCommand(
+      {
+        argv: [],
+        workspaceRoot: workspace,
+        homeDir: join(root, "caller-home")
+      },
+      [
+        "run",
+        "--workspace", workspace,
+        "--instruction", "solve the task",
+        "--json-output", summaryPath,
+        "--event-log", eventLogPath
+      ],
+      {
+        loadConfig: async () => fakeLoadedConfig("unconfigured", "unconfigured"),
+        makeTempHome: async () => join(root, "home"),
+        getPackageVersion: async () => "0.1.test",
+        getGitCommit: async () => null,
+        now: sequentialNow([
+          new Date("2026-07-05T00:00:00.000Z"),
+          new Date("2026-07-05T00:00:01.000Z")
+        ])
+      }
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toContain(`Summary: ${summaryPath}`);
+    expect(result.output).toContain(`Events: ${eventLogPath}`);
+
+    const summary = JSON.parse(await readFile(summaryPath, "utf8"));
+    expect(summary).toMatchObject({
+      benchmark: null,
+      execution: {
+        status: "config_error"
+      },
+      metrics: {
+        estimatedCostUsd: null
+      },
+      finalAnswer: "",
+      artifacts: {
+        summary: summaryPath,
+        eventLog: eventLogPath,
+        stdout: join(root, "explicit", "stdout.txt"),
+        stderr: join(root, "explicit", "stderr.txt")
+      }
+    });
+
+    const eventLog = await readFile(eventLogPath, "utf8");
+    expect(eventLog).toBe("");
+    expect(await readFile(join(root, "explicit", "stdout.txt"), "utf8")).toContain("status=config_error");
+    expect(await readFile(join(root, "explicit", "stderr.txt"), "utf8")).toContain("No benchmark model is configured");
+  });
+
   it("streams benchmark events before the run finishes", async () => {
     const root = await makeTempDir();
     const workspace = join(root, "workspace");

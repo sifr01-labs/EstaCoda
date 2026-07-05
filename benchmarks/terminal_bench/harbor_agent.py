@@ -204,6 +204,9 @@ class EstaCodaHarborAgent(BaseInstalledAgent):
         record_context(context, config, result)
 
 
+EstaCodaAgent = EstaCodaHarborAgent
+
+
 def record_context(context: Any, config: EstaCodaHarborConfig, result: Any) -> None:
     output = extract_command_output(result)
     set_context_field(context, "output", output)

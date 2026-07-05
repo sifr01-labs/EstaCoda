@@ -31,7 +31,7 @@ Current benchmark surfaces:
 |---|---|---|
 | `estacoda bench run` | Headless benchmark execution with isolated home, fixed model settings, artifacts, and status taxonomy | Covered by unit tests |
 | `pnpm run benchmark:smoke` | Local fake benchmark task with no live provider or external harness | CI-safe |
-| `benchmarks/terminal_bench/harbor_agent.py` | Harbor installed-agent adapter for Terminal-Bench | Manual Harbor use |
+| `benchmarks/terminal_bench/estacoda_harbor_agent.py` | Compatibility Harbor installed-agent adapter path for Terminal-Bench | Manual Harbor use |
 | `pnpm run benchmark:terminal-bench:adapter-test` | Local adapter tests with no Harbor install required | CI-safe |
 
 Full Terminal-Bench runs are manual. Do not run Harbor, Docker-backed benchmark jobs, or live provider baselines in ordinary CI.
@@ -55,6 +55,30 @@ This verifies that `estacoda bench run` can:
 
 The local smoke does not call a live model and does not prove Terminal-Bench scoring.
 
+## Local Artifact Control Smoke
+
+Use this when validating the public artifact contract without provider credentials:
+
+```bash
+rm -rf /tmp/estacoda-bench-app /tmp/estacoda-summary.json /tmp/estacoda-events.jsonl
+mkdir -p /tmp/estacoda-bench-app
+
+estacoda bench run \
+  --instruction-file benchmarks/local-smoke/simple-file-task/instruction.txt \
+  --workspace /tmp/estacoda-bench-app \
+  --isolated-home \
+  --json-output /tmp/estacoda-summary.json \
+  --event-log /tmp/estacoda-events.jsonl
+```
+
+With an unconfigured isolated home, this may exit with `config_error`. That is valid for the artifact/control smoke. It should still produce valid JSON artifacts, keep `benchmark` as `null`, include `estimatedCostUsd`, apply default redaction, and avoid touching normal user config or session state. A final answer is not expected in this mode.
+
+For a live local smoke, pass provider/model credentials through an explicit benchmark home or environment and expect the run to reach model execution and capture a final answer. The fixture verifier is:
+
+```bash
+benchmarks/local-smoke/simple-file-task/verify.sh /tmp/estacoda-bench-app
+```
+
 ## Harbor Adapter Tests
 
 Run the adapter tests before trying Harbor:
@@ -64,6 +88,8 @@ pnpm run benchmark:terminal-bench:adapter-test
 ```
 
 These tests validate command construction, benchmark identity mapping, isolated-home behavior, provider budget flags, and instruction-file handling without requiring Harbor.
+
+If Harbor is unavailable in the validation environment, stop after the local smoke and adapter tests. The Terminal-Bench adapter is unit-tested and compile-checked locally. End-to-end Harbor validation must be run in an environment with Harbor installed before publishing benchmark results.
 
 ## Terminal-Bench Harbor Smoke
 
@@ -77,7 +103,7 @@ export ESTACODA_BENCH_HOME="/tmp/estacoda-home"
 
 harbor run \
   -d terminal-bench/terminal-bench-2 \
-  -a benchmarks.terminal_bench.harbor_agent:EstaCodaHarborAgent \
+  -a benchmarks.terminal_bench.estacoda_harbor_agent:EstaCodaAgent \
   -n 5
 ```
 
@@ -101,7 +127,7 @@ export ESTACODA_BENCH_TEMPERATURE="0"
 
 harbor run \
   -d terminal-bench/terminal-bench-2 \
-  -a benchmarks.terminal_bench.harbor_agent:EstaCodaHarborAgent
+  -a benchmarks.terminal_bench.estacoda_harbor_agent:EstaCodaAgent
 ```
 
 Record:
@@ -140,12 +166,33 @@ If a fix changes normal runtime behavior, it needs the same review, tests, and s
 
 ## Artifact Contract
 
+The canonical compact form is:
+
+```bash
+estacoda bench run \
+  --workspace /tmp/estacoda-bench-app \
+  --instruction-file benchmarks/local-smoke/simple-file-task/instruction.txt \
+  --out /tmp/estacoda-artifacts
+```
+
+This writes all artifacts under `--out`. For harnesses that need exact paths, use:
+
+```bash
+estacoda bench run \
+  --workspace /tmp/estacoda-bench-app \
+  --instruction-file benchmarks/local-smoke/simple-file-task/instruction.txt \
+  --json-output /tmp/summary.json \
+  --event-log /tmp/events.jsonl
+```
+
+`--out` remains the compact canonical mode. `--json-output` and `--event-log` are explicit-path aliases for the summary and event log; stdout and stderr still use `--out` or the derived default artifact directory.
+
 Each `estacoda bench run` writes:
 
 | Artifact | Meaning |
 |---|---|
 | `summary.json` | Structured run manifest with benchmark identity, EstaCoda identity, execution status, model settings, metrics, artifact paths, final answer, and failure details |
-| `events.ndjson` | Redacted runtime event stream, one event per line |
+| `events.ndjson` or explicit `--event-log` path | Redacted runtime event stream, one event per line |
 | `stdout.txt` | Redacted benchmark stdout summary plus final answer |
 | `stderr.txt` | Redacted failure message when the run fails |
 

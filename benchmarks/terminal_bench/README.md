@@ -28,8 +28,10 @@ export ESTACODA_BENCH_HOME="/tmp/estacoda-home"
 
 harbor run \
   -d terminal-bench/terminal-bench-2 \
-  -a benchmarks.terminal_bench.harbor_agent:EstaCodaHarborAgent
+  -a benchmarks.terminal_bench.estacoda_harbor_agent:EstaCodaAgent
 ```
+
+The importable compatibility path is `benchmarks.terminal_bench.estacoda_harbor_agent:EstaCodaAgent`. The internal implementation remains in `benchmarks.terminal_bench.harbor_agent`.
 
 If `estacoda` is not already available in the task container, provide an install command controlled by the benchmark operator:
 
@@ -70,4 +72,5 @@ The local adapter tests do not require Harbor:
 
 ```bash
 python3 -m unittest benchmarks.terminal_bench.harbor_agent_test
+python3 -m py_compile benchmarks/terminal_bench/estacoda_harbor_agent.py
 ```
