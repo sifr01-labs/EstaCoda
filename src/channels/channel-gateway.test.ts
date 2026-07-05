@@ -34,7 +34,7 @@ import { HookRegistry } from "../gateway/hook-registry.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { GatewayApprovalQueue } from "../gateway/approval-queue.js";
 import { WorkspaceApprovalController, WorkspaceApprovalStore } from "../security/workspace-approval-controller.js";
-import { renderApprovalActions } from "./approval-actions.js";
+import { renderApprovalActions, renderSetupApprovalActions } from "./approval-actions.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
@@ -47,11 +47,16 @@ import {
 } from "./model-picker-actions.js";
 import { VoiceStateManager } from "../gateway/voice-state.js";
 import { AdapterResilienceSupervisor } from "../gateway/adapter-resilience.js";
-import { EDGE_TTS_CAPABILITY_ID, requireRegisteredPythonCapabilitySpec } from "../python-env/capability-registry.js";
+import {
+  EDGE_TTS_CAPABILITY_ID,
+  PDF_EXTRACTION_CAPABILITY_ID,
+  requireRegisteredPythonCapabilitySpec
+} from "../python-env/capability-registry.js";
 import { resolveManagedPythonCapabilityPaths } from "../python-env/capability-paths.js";
 import { writeManagedPythonCapabilityManifest } from "../python-env/manifest.js";
 import { fingerprintManagedPythonCapabilitySpec } from "../python-env/spec-hash.js";
 import type { EdgeTtsRunInput, EdgeTtsRunner } from "../tools/tts-providers.js";
+import type { ManagedPythonCapabilityInstallOptions, ManagedPythonCapabilityInstallResult } from "../python-env/capability-manager.js";
 
 type FakeTelegramAdapter = ReturnType<typeof createFakeTelegramAdapter> & { records: FakeDeliveryRecord[]; clearRecords(): void };
 
@@ -130,6 +135,7 @@ function runtimeResponse(input: {
   securityDecision: "allow" | "ask" | "deny";
   toolExecutions?: Awaited<ReturnType<Runtime["handle"]>>["toolExecutions"];
   artifacts?: Awaited<ReturnType<Runtime["handle"]>>["artifacts"];
+  setupApprovals?: Awaited<ReturnType<Runtime["handle"]>>["setupApprovals"];
 }): Awaited<ReturnType<Runtime["handle"]>> {
   return {
     label: "test",
@@ -143,6 +149,7 @@ function runtimeResponse(input: {
     artifacts: input.artifacts ?? [],
     context: undefined,
     projectContext: undefined,
+    setupApprovals: input.setupApprovals,
     progress: []
   };
 }
@@ -858,6 +865,69 @@ function createGrantProbeRuntime(securityPolicy: () => SecurityPolicy) {
   };
 
   return { runtime, calls: () => calls };
+}
+
+function createPythonCapabilitySetupRuntime(input: { isInstalled: () => boolean }) {
+  let calls = 0;
+  const runtime = createMinimalRuntime();
+  runtime.handle = async () => {
+    calls += 1;
+    if (!input.isInstalled()) {
+      return runtimeResponse({
+        text: "pdf extraction needs setup",
+        securityDecision: "allow",
+        setupApprovals: [
+          {
+            kind: "managed-python-capability-install",
+            skillName: "pdf-extraction",
+            capabilityId: PDF_EXTRACTION_CAPABILITY_ID,
+            groups: [],
+            packages: ["pymupdf==1.27.2.3", "pymupdf4llm==1.27.2.3"],
+            estimatedInstallSizeMb: 120,
+            reason: "Managed Python capability environment has not been installed.",
+            repairCommand: "estacoda python-env setup pdf-extraction"
+          }
+        ]
+      });
+    }
+
+    return runtimeResponse({
+      text: "pdf extraction resumed",
+      securityDecision: "allow"
+    });
+  };
+
+  return { runtime, calls: () => calls };
+}
+
+function readyCapabilityInstallResult(
+  stateRoot: string,
+  capabilityId = PDF_EXTRACTION_CAPABILITY_ID
+): ManagedPythonCapabilityInstallResult {
+  const spec = requireRegisteredPythonCapabilitySpec(capabilityId);
+  const paths = resolveManagedPythonCapabilityPaths({ stateRoot, capabilityId });
+  return {
+    ok: true,
+    capabilityId,
+    version: spec.version,
+    specHash: fingerprintManagedPythonCapabilitySpec(spec),
+    installedGroups: [],
+    installedPackages: spec.packages,
+    pythonPath: paths.pythonPath,
+    envPath: paths.envPath,
+    manifest: {
+      id: capabilityId,
+      version: spec.version,
+      specHash: fingerprintManagedPythonCapabilitySpec(spec),
+      installedGroups: [],
+      installedPackages: spec.packages,
+      pythonPath: paths.pythonPath,
+      envPath: paths.envPath,
+      status: "installed",
+      createdAt: new Date("2026-01-01T00:00:00.000Z").toISOString(),
+      updatedAt: new Date("2026-01-01T00:00:00.000Z").toISOString()
+    }
+  };
 }
 
 function createTerminalDecisionRuntime(decision: "ask" | "deny", command: string) {
@@ -4423,6 +4493,124 @@ describe("ChannelGateway commands", () => {
           commandPreview: "rm -rf ./build",
           commandPayload: undefined
         });
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it("approves managed Python capability setup through the gateway and resumes the request", async () => {
+      const { queue, cleanup, directory } = await setupGatewayApprovalQueue();
+      let installed = false;
+      const runtime = createPythonCapabilitySetupRuntime({ isInstalled: () => installed });
+      const runtimeCache = new RuntimeCache({
+        createRuntime: async () => runtime.runtime
+      });
+      const installer = vi.fn(async (options: ManagedPythonCapabilityInstallOptions) => {
+        installed = true;
+        return readyCapabilityInstallResult(options.stateRoot, options.capabilityId);
+      });
+
+      try {
+        const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+        const gateway = new ChannelGateway({
+          adapters: [adapter],
+          runtimeForSession: async () => createMinimalRuntime(),
+          sessionStore: new InMemoryChannelSessionStore(),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          profileId: "profile-a",
+          approvalQueue: queue,
+          runtimeCache,
+          runtimeFingerprint: createFakeFingerprint(),
+          pythonCapabilityStateRoot: directory,
+          pythonCapabilityInstaller: installer
+        });
+
+        const first = await gateway.receive(makeMessage("extract this pdf"));
+        const [pending] = await queue.listPending({ profileId: "profile-a" });
+        const approvalPrompt = adapter.records.find((record) =>
+          record.kind === "text" && record.text?.includes("Capability Setup Approval Required")
+        );
+
+        expect(first.replyText).toBe("pdf extraction needs setup");
+        expect(pending).toMatchObject({
+          id: "gateway-approval-1",
+          approvalKind: "managed_python_capability_install",
+          toolName: "python-env.setup",
+          commandPreview: "Install managed Python capability pdf-extraction; groups=none; packages=pymupdf==1.27.2.3, pymupdf4llm==1.27.2.3"
+        });
+        expect(approvalPrompt?.options?.actions).toEqual(renderSetupApprovalActions(pending.id));
+
+        const approveResult = await gateway.receive(makeMessage("/approve"));
+        const durable = await queue.getApproval(pending.id, { profileId: "profile-a", sessionId: pending.sessionId });
+
+        expect(installer).toHaveBeenCalledWith(expect.objectContaining({
+          stateRoot: directory,
+          capabilityId: PDF_EXTRACTION_CAPABILITY_ID,
+          groups: []
+        }));
+        expect(durable?.status).toBe("approved");
+        expect(runtimeCache.stats().totalInvalidated).toBe(1);
+        expect(runtime.calls()).toBe(2);
+        expect(approveResult.replyText).toContain("Capability setup complete");
+        expect(approveResult.replyText).toContain("pdf extraction resumed");
+      } finally {
+        await runtimeCache.disposeAll();
+        await cleanup();
+      }
+    });
+
+    it("restores durable managed Python setup approval after gateway restart", async () => {
+      const { queue, cleanup, directory } = await setupGatewayApprovalQueue();
+      const sessionStore = new InMemoryChannelSessionStore();
+      let installed = false;
+      const runtime = createPythonCapabilitySetupRuntime({ isInstalled: () => installed });
+      const installer = vi.fn(async (options: ManagedPythonCapabilityInstallOptions) => {
+        installed = true;
+        return readyCapabilityInstallResult(options.stateRoot, options.capabilityId);
+      });
+
+      try {
+        const adapterBeforeRestart = createFakeTelegramAdapter() as FakeTelegramAdapter;
+        const gatewayBeforeRestart = new ChannelGateway({
+          adapters: [adapterBeforeRestart],
+          runtimeForSession: async () => runtime.runtime,
+          sessionStore,
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          profileId: "profile-a",
+          approvalQueue: queue,
+          pythonCapabilityStateRoot: directory,
+          pythonCapabilityInstaller: installer
+        });
+
+        await gatewayBeforeRestart.receive(makeMessage("extract this pdf", {
+          attachments: [{ id: "pdf-1", kind: "document", status: "ready", path: "/tmp/test.pdf" }]
+        }));
+        const [pending] = await queue.listPending({ profileId: "profile-a" });
+
+        const adapterAfterRestart = createFakeTelegramAdapter() as FakeTelegramAdapter;
+        const gatewayAfterRestart = new ChannelGateway({
+          adapters: [adapterAfterRestart],
+          runtimeForSession: async () => runtime.runtime,
+          sessionStore,
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          profileId: "profile-a",
+          approvalQueue: queue,
+          pythonCapabilityStateRoot: directory,
+          pythonCapabilityInstaller: installer
+        });
+
+        const approveResult = await gatewayAfterRestart.receive(makeMessage("/approve"));
+        const durable = await queue.getApproval(pending.id, { profileId: "profile-a", sessionId: pending.sessionId });
+
+        expect(installer).toHaveBeenCalledWith(expect.objectContaining({
+          stateRoot: directory,
+          capabilityId: PDF_EXTRACTION_CAPABILITY_ID,
+          groups: []
+        }));
+        expect(durable?.status).toBe("approved");
+        expect(runtime.calls()).toBe(2);
+        expect(approveResult.replyText).toContain("Capability setup complete");
+        expect(approveResult.replyText).toContain("pdf extraction resumed");
       } finally {
         await cleanup();
       }

@@ -106,6 +106,8 @@ WhatsApp user authorization is separate from WhatsApp device pairing: `estacoda 
 
 Gateway approvals use a durable `pending_approvals` table in the session database. Rows are profile-scoped. Pending approvals are ask-only: deterministic `deny` results and hardline results never become approvable queue rows. Command payloads are redacted after approval, denial, or expiry.
 
+Managed Python capability setup can also use gateway approvals. When a selected skill needs a missing required registered capability, Telegram and other gateway surfaces can ask the operator to approve installing that capability. Approval installs only the registered capability packages and selected groups, then resumes the original request. Denial or expiry leaves the capability uninstalled.
+
 ### Handoff Codes
 
 CLI↔Telegram handoff uses short-lived, single-use codes:

@@ -218,7 +218,7 @@ describe("createSQLiteSessionDB", () => {
     const sessionPath = join(stateDir, "sessions.sqlite");
     const initial = await createSQLiteSessionDB({ path: sessionPath });
     try {
-      expect(initial.db.query<{ version: number }>("select max(version) as version from schema_version").get()).toEqual({ version: 6 });
+      expect(initial.db.query<{ version: number }>("select max(version) as version from schema_version").get()).toEqual({ version: 7 });
     } finally {
       initial.close();
     }
@@ -228,7 +228,7 @@ describe("createSQLiteSessionDB", () => {
     for (const _ of Array.from({ length: 3 })) {
       const reopened = await createSQLiteSessionDB({ path: sessionPath });
       try {
-        expect(reopened.db.query<{ version: number }>("select max(version) as version from schema_version").get()).toEqual({ version: 6 });
+        expect(reopened.db.query<{ version: number }>("select max(version) as version from schema_version").get()).toEqual({ version: 7 });
       } finally {
         reopened.close();
       }

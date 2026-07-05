@@ -5,7 +5,7 @@ import type { ExternalMemoryProvider, MemoryProvider, MemoryPromptContext } from
 import type { ModelProfile, ProviderRoutePreferences, ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
 import type { SecurityPolicy } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
-import type { LoadedSkill, SkillCatalogEntry, SkillDefinition, SkillLifecycleState, SkillPythonCapabilityRequirement } from "../contracts/skill.js";
+import type { LoadedSkill, SkillCatalogEntry, SkillDefinition, SkillLifecycleState, SkillPythonCapabilityRequirement, SkillPythonCapabilitySetupStatus } from "../contracts/skill.js";
 import type { RegisteredTool, ToolDefinition, ToolProvider, ToolsetName } from "../contracts/tool.js";
 import type { RuntimeToolContext, SessionToolContext } from "../contracts/tool-context.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
@@ -608,6 +608,7 @@ async function applyPythonCapabilityAvailability(input: {
     }
 
     const unavailable: Array<{ capability: SkillPythonCapabilityRequirement; result: Exclude<CapabilityPythonEnvResolveResult, { ok: true }> }> = [];
+    const setupStatus: SkillPythonCapabilitySetupStatus[] = [];
     for (const capability of capabilities) {
       const result = await resolveCapabilityPythonEnv(capability.id, {
         groups: capability.groups,
@@ -616,23 +617,32 @@ async function applyPythonCapabilityAvailability(input: {
       });
       if (!result.ok) {
         unavailable.push({ capability, result });
-      }
-    }
-
-    const requiredUnavailable = unavailable.filter(({ capability }) => capability.required !== false);
-    if (requiredUnavailable.length > 0) {
-      continue;
-    }
-
-    const optionalWarnings = unavailable.map(({ capability, result }) =>
-      `Optional Python capability '${capability.id}' is unavailable: ${result.reason}${result.repairCommand === undefined ? "" : `; repair with ${result.repairCommand}`}`
-    );
-    registry.register(optionalWarnings.length === 0
-      ? skill
-      : {
-          ...skill,
-          loadWarnings: [...("loadWarnings" in skill ? skill.loadWarnings ?? [] : []), ...optionalWarnings]
+        setupStatus.push({
+          ...capability,
+          status: "unavailable",
+          reason: result.reason,
+          message: result.message,
+          repairCommand: result.repairCommand,
+          expectedSpecHash: result.expectedSpecHash,
+          installedGroups: result.installedGroups
         });
+        continue;
+      }
+      setupStatus.push({
+        ...capability,
+        status: "available",
+        installedGroups: result.installedGroups
+      });
+    }
+
+    const pythonWarnings = unavailable.map(({ capability, result }) =>
+      `${capability.required === false ? "Optional" : "Required"} Python capability '${capability.id}' is unavailable: ${result.reason}${result.repairCommand === undefined ? "" : `; repair with ${result.repairCommand}`}`
+    );
+    registry.register({
+      ...skill,
+      pythonCapabilitySetup: setupStatus,
+      loadWarnings: [...("loadWarnings" in skill ? skill.loadWarnings ?? [] : []), ...pythonWarnings]
+    });
   }
   return registry;
 }

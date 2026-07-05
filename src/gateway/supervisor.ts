@@ -1341,6 +1341,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           },
           autoTtsTempRoot: join(profilePaths.tempPath, "audio"),
           autoTtsPythonStateRoot: globalPaths.stateRoot,
+          pythonCapabilityStateRoot: globalPaths.stateRoot,
         })
       : new ChannelGateway({
           adapters: wrappers,
@@ -1414,6 +1415,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           },
           autoTtsTempRoot: join(profilePaths.tempPath, "audio"),
           autoTtsPythonStateRoot: globalPaths.stateRoot,
+          pythonCapabilityStateRoot: globalPaths.stateRoot,
         });
 
     state.channelGateway = gateway;

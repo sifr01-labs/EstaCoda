@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseApprovalAction, renderApprovalActions } from "./approval-actions.js";
+import { parseApprovalAction, renderApprovalActions, renderSetupApprovalActions } from "./approval-actions.js";
 
 describe("approval actions", () => {
   it("renders approve and deny action rows without command text", () => {
@@ -26,6 +26,18 @@ describe("approval actions", () => {
       { approvalId: "approval:id/with spaces", decision: "approved", scope: "session" },
       { approvalId: "approval:id/with spaces", decision: "approved", scope: "always" },
       { approvalId: "approval:id/with spaces", decision: "denied", scope: undefined }
+    ]);
+  });
+
+  it("renders setup actions with one-time install and deny choices", () => {
+    const actions = renderSetupApprovalActions("gateway-approval-1");
+    const flat = actions.flat();
+
+    expect(actions).toHaveLength(1);
+    expect(flat.map((action) => action.label)).toEqual(["Install", "Deny"]);
+    expect(flat.map((action) => parseApprovalAction(action.value))).toEqual([
+      { approvalId: "gateway-approval-1", decision: "approved", scope: "once" },
+      { approvalId: "gateway-approval-1", decision: "denied", scope: undefined }
     ]);
   });
 

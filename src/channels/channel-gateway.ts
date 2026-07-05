@@ -18,6 +18,10 @@ import { runCronCommand } from "../cron/cron-command.js";
 import { originFromSessionKey } from "../cron/cron-runner.js";
 import { CronStore } from "../cron/cron-store.js";
 import type { Runtime } from "../runtime/create-runtime.js";
+import type {
+  AgentLoopPythonCapabilitySetupApprovalRequest,
+  AgentLoopSetupApprovalRequest
+} from "../runtime/agent-loop.js";
 import type { SecurityAssessorRuntimeConfig } from "../security/security-policy-factory.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
@@ -35,6 +39,8 @@ import {
   createCommandHash,
   createCommandPreview,
   type GatewayApprovalQueue,
+  type ManagedPythonCapabilityApprovalPayload,
+  type PendingApproval,
   type PendingApprovalChannel
 } from "../gateway/approval-queue.js";
 import { HookRegistry, sanitizeHookError } from "../gateway/hook-registry.js";
@@ -47,6 +53,7 @@ import type { DeliveryRouter } from "./delivery-router.js";
 import {
   parseApprovalAction,
   renderApprovalActions,
+  renderSetupApprovalActions,
   type ApprovalActionScope
 } from "./approval-actions.js";
 import {
@@ -78,6 +85,11 @@ import {
   type VoiceFetchLike
 } from "../tools/voice-tools.js";
 import { getTtsTextCap, type EdgeTtsRunner } from "../tools/tts-providers.js";
+import {
+  installManagedPythonCapabilityEnvironment,
+  type ManagedPythonCapabilityInstallOptions,
+  type ManagedPythonCapabilityInstallResult
+} from "../python-env/capability-manager.js";
 import {
   normalizeWhatsAppAllowlist,
   normalizeWhatsAppGroupAllowlist,
@@ -208,6 +220,10 @@ export type ChannelGatewayOptions = {
   autoTtsTempRoot?: string;
   autoTtsPythonStateRoot?: string;
   autoTtsEdgeTtsRunner?: EdgeTtsRunner;
+  pythonCapabilityStateRoot?: string;
+  pythonCapabilityInstaller?: (
+    options: ManagedPythonCapabilityInstallOptions
+  ) => Promise<ManagedPythonCapabilityInstallResult>;
   autoTtsFetch?: VoiceFetchLike;
   autoTtsNow?: () => number;
   autoTtsId?: () => string;
@@ -244,7 +260,8 @@ type ProviderServingState =
       model: string;
     };
 
-type PendingApprovalContinuation = {
+type CommandPendingApprovalContinuation = {
+  kind: "command";
   approvalId?: string;
   toolName: string;
   riskClass: string;
@@ -253,6 +270,22 @@ type PendingApprovalContinuation = {
   sessionId: string;
   originalMessage: ChannelMessage;
 };
+
+type PythonCapabilityPendingApprovalContinuation = {
+  kind: "managed-python-capability-install";
+  approvalId?: string;
+  toolName: "python-env.setup";
+  riskClass: "external-side-effect";
+  targetKey: string;
+  targetSummary: string;
+  capability: AgentLoopPythonCapabilitySetupApprovalRequest;
+  sessionId: string;
+  originalMessage: ChannelMessage;
+};
+
+type PendingApprovalContinuation =
+  | CommandPendingApprovalContinuation
+  | PythonCapabilityPendingApprovalContinuation;
 
 type ApprovalGrant = {
   toolName: string;
@@ -385,6 +418,10 @@ export class ChannelGateway {
   readonly #autoTtsTempRoot: string | undefined;
   readonly #autoTtsPythonStateRoot: string | undefined;
   readonly #autoTtsEdgeTtsRunner: EdgeTtsRunner | undefined;
+  readonly #pythonCapabilityStateRoot: string | undefined;
+  readonly #pythonCapabilityInstaller: (
+    options: ManagedPythonCapabilityInstallOptions
+  ) => Promise<ManagedPythonCapabilityInstallResult>;
   readonly #autoTtsFetch: VoiceFetchLike | undefined;
   readonly #autoTtsNow: () => number;
   readonly #autoTtsId: (() => string) | undefined;
@@ -435,6 +472,8 @@ export class ChannelGateway {
     this.#autoTtsTempRoot = options.autoTtsTempRoot;
     this.#autoTtsPythonStateRoot = options.autoTtsPythonStateRoot;
     this.#autoTtsEdgeTtsRunner = options.autoTtsEdgeTtsRunner;
+    this.#pythonCapabilityStateRoot = options.pythonCapabilityStateRoot ?? options.autoTtsPythonStateRoot;
+    this.#pythonCapabilityInstaller = options.pythonCapabilityInstaller ?? installManagedPythonCapabilityEnvironment;
     this.#autoTtsFetch = options.autoTtsFetch;
     this.#autoTtsNow = options.autoTtsNow ?? Date.now;
     this.#autoTtsId = options.autoTtsId;
@@ -789,15 +828,23 @@ export class ChannelGateway {
       return pending;
     }
 
-    const payload = pending.targetSummary ?? pending.targetKey ?? pending.toolName;
+    const payload = pending.kind === "managed-python-capability-install"
+      ? managedPythonCapabilityApprovalPreview(pending.capability)
+      : pending.targetSummary ?? pending.targetKey ?? pending.toolName;
     const requestedAt = dateOrNow(pending.originalMessage.receivedAt);
     const durable = await this.#approvalQueue.createPendingApproval({
       sessionId: pending.sessionId,
       profileId: this.#profileId,
       commandPreview: createCommandPreview(payload),
       commandHash: createCommandHash(payload),
-      commandPayload: payload,
+      commandPayload: pending.kind === "command" ? payload : undefined,
       toolName: pending.toolName,
+      approvalKind: pending.kind === "managed-python-capability-install"
+        ? "managed_python_capability_install"
+        : "command",
+      requestPayload: pending.kind === "managed-python-capability-install"
+        ? managedPythonCapabilityApprovalPayload(pending.capability, pending.originalMessage)
+        : undefined,
       requestedAt,
       expiresAt: new Date(requestedAt.getTime() + DEFAULT_GATEWAY_APPROVAL_TTL_MS),
       channel: toPendingApprovalChannel(adapter.kind),
@@ -1329,7 +1376,8 @@ export class ChannelGateway {
       }) ?? sessionId;
 
       const pendingApproval = await this.#createPendingApprovalContinuation(
-        firstPendingApproval(response.toolExecutions, message, sessionId),
+        firstPendingSetupApproval(response.setupApprovals, message, sessionId) ??
+          firstPendingApproval(response.toolExecutions, message, sessionId),
         adapter
       );
       if (pendingApproval !== undefined) {
@@ -1386,7 +1434,7 @@ export class ChannelGateway {
               : undefined
             : {
                 format: adapter.kind === "telegram" ? "html" : undefined,
-                actions: renderApprovalActions(pendingApproval.approvalId)
+                actions: renderPendingApprovalActions(pendingApproval)
               }
         );
         await adapter.send?.({
@@ -3154,6 +3202,10 @@ export class ChannelGateway {
 
     const { key, pending } = pendingResult;
     const scope = action?.scope ?? parseApprovalScope(message.text);
+    if (pending.kind === "managed-python-capability-install") {
+      return await this.#approvePythonCapabilitySetup(key, pending, adapter, message);
+    }
+
     if (pending.approvalId !== undefined && this.#approvalQueue !== undefined) {
       try {
         await this.#approvalQueue.resolveApproval(
@@ -3231,6 +3283,100 @@ export class ChannelGateway {
     );
   }
 
+  async #approvePythonCapabilitySetup(
+    key: string,
+    pending: PythonCapabilityPendingApprovalContinuation,
+    adapter: ChannelAdapter,
+    approvingMessage: ChannelMessage
+  ): Promise<ChannelGatewayResult> {
+    if (pending.approvalId !== undefined && this.#approvalQueue !== undefined) {
+      try {
+        await this.#approvalQueue.resolveApproval(
+          pending.approvalId,
+          "approved",
+          approvingMessage.sender.id,
+          { profileId: this.#profileId, sessionId: pending.sessionId }
+        );
+      } catch (error) {
+        const text = error instanceof Error ? error.message : String(error);
+        await this.#deliverText(adapter, approvingMessage.sessionKey, text);
+        return {
+          sessionId: pending.sessionId,
+          replyText: text,
+          artifactCount: 0,
+          progressCount: 0
+        };
+      }
+    }
+
+    if (this.#pythonCapabilityStateRoot === undefined) {
+      const text = [
+        "Capability setup could not start",
+        `Capability: ${pending.capability.capabilityId}`,
+        "Managed Python state is not configured for this gateway."
+      ].join("\n");
+      this.#pendingApprovals.delete(key);
+      await this.#deliverText(adapter, pending.originalMessage.sessionKey, text);
+      return {
+        sessionId: pending.sessionId,
+        replyText: text,
+        artifactCount: 0,
+        progressCount: 0
+      };
+    }
+
+    const install = await this.#pythonCapabilityInstaller({
+      stateRoot: this.#pythonCapabilityStateRoot,
+      capabilityId: pending.capability.capabilityId,
+      groups: pending.capability.groups,
+      onProgress: (progress) => this.#logWarning?.(`Managed Python setup ${pending.capability.capabilityId}: ${progress}`)
+    });
+
+    if (!install.ok) {
+      const text = [
+        "Capability setup failed",
+        `Capability: ${pending.capability.capabilityId}`,
+        install.message
+      ].join("\n");
+      this.#pendingApprovals.delete(key);
+      await this.#refreshCachedRuntimePolicy(pending.sessionId, "Managed Python capability setup failed");
+      await this.#deliverText(adapter, pending.originalMessage.sessionKey, text);
+      return {
+        sessionId: pending.sessionId,
+        replyText: text,
+        artifactCount: 0,
+        progressCount: 0
+      };
+    }
+
+    await this.#refreshCachedRuntimePolicy(pending.sessionId, "Managed Python capability setup completed");
+    this.#pendingApprovals.delete(key);
+
+    const approvalText = [
+      "✅ Capability setup complete",
+      `Capability: ${install.capabilityId}`,
+      "EstaCoda is resuming the blocked request now."
+    ].join("\n");
+
+    await this.#deliverText(adapter, pending.originalMessage.sessionKey, approvalText);
+
+    const resumed = await this.receive({
+      ...pending.originalMessage,
+      id: `${pending.originalMessage.id}-capability-approved-${Date.now()}`,
+      metadata: {
+        ...(pending.originalMessage.metadata ?? {}),
+        capabilitySetupApproved: pending.capability.capabilityId
+      }
+    });
+
+    return {
+      sessionId: resumed.sessionId,
+      replyText: [approvalText, "", resumed.replyText].join("\n"),
+      artifactCount: resumed.artifactCount,
+      progressCount: resumed.progressCount
+    };
+  }
+
   async #pendingApprovalForMessage(
     message: ChannelMessage,
     adapter: ChannelAdapter,
@@ -3245,16 +3391,50 @@ export class ChannelGateway {
     const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
     let text = "There is no pending approval request for this chat.";
     if (approvalId !== undefined && this.#approvalQueue !== undefined) {
-      const durable = await this.#approvalQueue.getApproval(approvalId, {
+      const durable = await this.#approvalQueue.getApprovalRequest(approvalId, {
         profileId: this.#profileId,
         sessionId
       });
+      const restored = this.#restorePendingSetupApprovalFromDurable({
+        durable,
+        message,
+        adapter,
+        key
+      });
+      if (restored !== undefined) {
+        return restored;
+      }
       if (durable?.status === "approved") {
         text = "Pending approval is already approved.";
       } else if (durable?.status === "denied") {
         text = "Pending approval is already denied.";
       } else if (durable?.status === "expired") {
         text = "Pending approval has expired.";
+      }
+    } else if (this.#approvalQueue !== undefined) {
+      const durableApprovals = await this.#approvalQueue.listPending({
+        profileId: this.#profileId,
+        sessionId
+      });
+      const restorable = durableApprovals.filter((approval) =>
+        approval.approvalKind === "managed_python_capability_install" &&
+        approval.channel === toPendingApprovalChannel(adapter.kind) &&
+        approval.chatId === message.sessionKey.chatId
+      );
+      if (restorable.length === 1) {
+        const durable = await this.#approvalQueue.getApprovalRequest(restorable[0]!.id, {
+          profileId: this.#profileId,
+          sessionId
+        });
+        const restored = this.#restorePendingSetupApprovalFromDurable({
+          durable,
+          message,
+          adapter,
+          key
+        });
+        if (restored !== undefined) {
+          return restored;
+        }
       }
     }
 
@@ -3264,6 +3444,55 @@ export class ChannelGateway {
       replyText: text,
       artifactCount: 0,
       progressCount: 0
+    };
+  }
+
+  #restorePendingSetupApprovalFromDurable(input: {
+    durable: PendingApproval | undefined;
+    message: ChannelMessage;
+    adapter: ChannelAdapter;
+    key: string;
+  }): { key: string; pending: PendingApprovalContinuation } | undefined {
+    const { durable, message, adapter, key } = input;
+    if (
+      durable === undefined ||
+      durable.status !== "pending" ||
+      durable.approvalKind !== "managed_python_capability_install" ||
+      durable.requestPayload === undefined ||
+      durable.requestPayload.originalMessage === undefined ||
+      durable.channel !== toPendingApprovalChannel(adapter.kind) ||
+      durable.chatId !== message.sessionKey.chatId
+    ) {
+      return undefined;
+    }
+
+    const originalMessage = channelMessageFromApprovalPayload(durable.requestPayload.originalMessage);
+    if (originalMessage === undefined) {
+      return undefined;
+    }
+    const capability: AgentLoopPythonCapabilitySetupApprovalRequest = {
+      kind: "managed-python-capability-install",
+      skillName: durable.requestPayload.skillName,
+      capabilityId: durable.requestPayload.capabilityId,
+      groups: [...durable.requestPayload.groups],
+      packages: [...durable.requestPayload.packages],
+      estimatedInstallSizeMb: durable.requestPayload.estimatedInstallSizeMb,
+      reason: durable.requestPayload.reason,
+      repairCommand: durable.requestPayload.repairCommand
+    };
+    return {
+      key,
+      pending: {
+        kind: "managed-python-capability-install",
+        approvalId: durable.id,
+        toolName: "python-env.setup",
+        riskClass: "external-side-effect",
+        targetKey: `python-env.setup:${capability.capabilityId}:${capability.groups.join(",")}`,
+        targetSummary: durable.commandPreview,
+        capability,
+        sessionId: durable.sessionId,
+        originalMessage
+      }
     };
   }
 
@@ -4018,10 +4247,36 @@ function firstPendingApproval(
   }
 
   return {
+    kind: "command",
     toolName: blocked.tool.name,
     riskClass: blocked.riskClass,
     targetKey: blocked.targetKey,
     targetSummary: blocked.targetSummary,
+    sessionId,
+    originalMessage
+  };
+}
+
+function firstPendingSetupApproval(
+  requests: AgentLoopSetupApprovalRequest[] | undefined,
+  originalMessage: ChannelMessage,
+  sessionId: string
+): PendingApprovalContinuation | undefined {
+  const request = requests?.find((item): item is AgentLoopPythonCapabilitySetupApprovalRequest =>
+    item.kind === "managed-python-capability-install"
+  );
+  if (request === undefined) {
+    return undefined;
+  }
+
+  const targetSummary = managedPythonCapabilityApprovalPreview(request);
+  return {
+    kind: "managed-python-capability-install",
+    toolName: "python-env.setup",
+    riskClass: "external-side-effect",
+    targetKey: `python-env.setup:${request.capabilityId}:${request.groups.join(",")}`,
+    targetSummary,
+    capability: request,
     sessionId,
     originalMessage
   };
@@ -4051,6 +4306,10 @@ function hardlineAssessmentForRequest(
 }
 
 function renderApprovalPrompt(input: PendingApprovalContinuation, format: "plain" | "html" = "plain"): string {
+  if (input.kind === "managed-python-capability-install") {
+    return renderPythonCapabilityApprovalPrompt(input, format);
+  }
+
   const reason = deriveApprovalReason(input);
   const preview = truncateForApprovalPreview(input.targetSummary ?? input.toolName, 320);
 
@@ -4079,6 +4338,121 @@ function renderApprovalPrompt(input: PendingApprovalContinuation, format: "plain
     "",
     "Use /approvals to review current trust state."
   ].join("\n");
+}
+
+function renderPendingApprovalActions(input: PendingApprovalContinuation): ChannelTextAction[][] {
+  if (input.approvalId === undefined) {
+    return [];
+  }
+  return input.kind === "managed-python-capability-install"
+    ? renderSetupApprovalActions(input.approvalId)
+    : renderApprovalActions(input.approvalId);
+}
+
+function renderPythonCapabilityApprovalPrompt(
+  input: PythonCapabilityPendingApprovalContinuation,
+  format: "plain" | "html"
+): string {
+  const capability = input.capability;
+  const packages = capability.packages.length === 0 ? "registered packages" : capability.packages.join(", ");
+  const groups = capability.groups.length === 0 ? "none" : capability.groups.join(", ");
+  const size = capability.estimatedInstallSizeMb === undefined
+    ? undefined
+    : `${capability.estimatedInstallSizeMb} MB estimated`;
+  const reason = capability.reason ?? "Required by the selected skill before it can run.";
+
+  if (format === "html") {
+    return [
+      "<b>⚠️ Capability Setup Approval Required</b>",
+      `<b>${escapeHtml(capability.capabilityId)}</b>`,
+      capability.skillName === undefined ? undefined : `<b>Skill:</b> ${escapeHtml(capability.skillName)}`,
+      `<b>Packages:</b> ${escapeHtml(packages)}`,
+      `<b>Groups:</b> ${escapeHtml(groups)}`,
+      size === undefined ? undefined : `<b>Size:</b> ${escapeHtml(size)}`,
+      `<b>Reason:</b> ${escapeHtml(reason)}`,
+      "Approve only if you want EstaCoda to download and install this managed Python capability."
+    ].filter((line): line is string => line !== undefined).join("\n");
+  }
+
+  return [
+    "⚠️ Capability setup approval required",
+    `Capability: ${capability.capabilityId}`,
+    capability.skillName === undefined ? undefined : `Skill: ${capability.skillName}`,
+    `Packages: ${packages}`,
+    `Groups: ${groups}`,
+    size === undefined ? undefined : `Size: ${size}`,
+    `Reason: ${reason}`,
+    "",
+    "Choose one:",
+    "• /approve - download and install this managed capability",
+    "• /deny - keep it uninstalled"
+  ].filter((line): line is string => line !== undefined).join("\n");
+}
+
+function managedPythonCapabilityApprovalPreview(
+  request: AgentLoopPythonCapabilitySetupApprovalRequest
+): string {
+  const groups = request.groups.length === 0 ? "none" : request.groups.join(",");
+  const packages = request.packages.length === 0 ? "registered packages" : request.packages.join(", ");
+  return [
+    `Install managed Python capability ${request.capabilityId}`,
+    `groups=${groups}`,
+    `packages=${packages}`
+  ].join("; ");
+}
+
+function managedPythonCapabilityApprovalPayload(
+  request: AgentLoopPythonCapabilitySetupApprovalRequest,
+  originalMessage: ChannelMessage
+): ManagedPythonCapabilityApprovalPayload {
+  return {
+    capabilityId: request.capabilityId,
+    groups: [...request.groups],
+    packages: [...request.packages],
+    estimatedInstallSizeMb: request.estimatedInstallSizeMb,
+    skillName: request.skillName,
+    reason: request.reason,
+    repairCommand: request.repairCommand,
+    originalMessage: {
+      id: originalMessage.id,
+      channel: originalMessage.channel,
+      sessionKey: { ...originalMessage.sessionKey },
+      sender: { ...originalMessage.sender },
+      text: originalMessage.text,
+      receivedAt: originalMessage.receivedAt,
+      attachments: originalMessage.attachments?.map((attachment) => ({ ...attachment })),
+      metadata: cloneJsonObject(originalMessage.metadata)
+    }
+  };
+}
+
+function channelMessageFromApprovalPayload(
+  payload: NonNullable<ManagedPythonCapabilityApprovalPayload["originalMessage"]>
+): ChannelMessage | undefined {
+  if (payload.sessionKey.chatId.trim() === "" || payload.sender.id.trim() === "") {
+    return undefined;
+  }
+  return {
+    id: payload.id,
+    channel: payload.channel,
+    sessionKey: { ...payload.sessionKey },
+    sender: { ...payload.sender },
+    text: payload.text,
+    receivedAt: payload.receivedAt,
+    attachments: payload.attachments?.map((attachment) => ({ ...attachment })),
+    metadata: cloneJsonObject(payload.metadata)
+  };
+}
+
+function cloneJsonObject<T extends Record<string, unknown> | undefined>(value: T): T {
+  if (value === undefined) {
+    return undefined as T;
+  }
+  try {
+    return JSON.parse(JSON.stringify(value)) as T;
+  } catch {
+    return undefined as T;
+  }
 }
 
 function parseApprovalScope(text: string): ApprovalScope {

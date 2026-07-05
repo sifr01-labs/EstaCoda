@@ -152,6 +152,15 @@ export type SkillPythonCapabilityRequirement = {
   groups: string[];
 };
 
+export type SkillPythonCapabilitySetupStatus = SkillPythonCapabilityRequirement & {
+  status: "available" | "unavailable";
+  reason?: string;
+  message?: string;
+  repairCommand?: string;
+  expectedSpecHash?: string;
+  installedGroups?: string[];
+};
+
 export type SkillDefinition = {
   name: string;
   description: string;
@@ -170,6 +179,7 @@ export type SkillDefinition = {
   requiredEnvironmentVariables?: string[];
   requiredCredentialFiles?: string[];
   pythonCapabilities?: SkillPythonCapabilityRequirement[];
+  pythonCapabilitySetup?: SkillPythonCapabilitySetupStatus[];
   configFields?: SkillConfigField[];
   visibility?: SkillVisibilityRules;
   inputs?: Record<string, unknown>;

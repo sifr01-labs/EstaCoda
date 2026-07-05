@@ -79,6 +79,8 @@ Do not enable WhatsApp in a production profile without understanding the account
 
 When a tool call requires explicit approval, the gateway creates a durable row in `pending_approvals`. The row includes the profile ID, session ID, command preview, tool name, status, expiry, and channel context.
 
+The same queue can hold managed Python capability setup approvals. If a selected skill needs a missing required registered capability, the gateway can send a native channel approval prompt such as Telegram Install/Deny buttons. This approval is for a capability ID and selected groups, not an arbitrary shell command.
+
 Approval invariants:
 
 - Pending approvals are ask-only. Deterministic `deny` results and hard safety blocks never create rows.
@@ -86,6 +88,7 @@ Approval invariants:
 - Session-scoped operations cannot resolve another session's approval.
 - Expired or already-resolved approvals cannot be approved later.
 - Approved, denied, and expired rows redact the raw command payload where practical.
+- Managed Python setup approvals install only registered capability packages, invalidate the cached runtime for the session, and replay the original message after approval.
 
 Remote `/approve` and `/deny`, inline buttons, and CLI operator resolution all route through the same `ChannelGateway` path. Adapters render the UI sugar; they do not authorize approvals or invalidate runtime caches.
 
