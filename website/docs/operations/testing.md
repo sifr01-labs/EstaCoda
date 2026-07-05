@@ -48,6 +48,7 @@ Use targeted lanes to reduce feedback time, then run the core validation lane be
 | Cross-subsystem runtime behavior | `pnpm run smoke`, then `pnpm run smoke:dist` after build |
 | Agent/eval logic | `pnpm run eval:fixtures` |
 | Provider routing, reasoning, continuation, or message normalization | `pnpm run provider:hardening` plus targeted Vitest tests for the touched provider/runtime files |
+| Benchmark harness or adapter changes | `pnpm run benchmark:smoke`, `pnpm run benchmark:terminal-bench:adapter-test`, targeted tests under `src/benchmark` and `src/cli/bench-command.test.ts` |
 | Install/update behavior | `pnpm run validate:install`, `pnpm run validate:source-install` |
 | Uninstall behavior | `pnpm run validate:uninstall` |
 | npm/package readiness | `pnpm run verify:local-bin`, `pnpm run pack:dry-run`, `pnpm run verify:package-bin` |
@@ -112,6 +113,19 @@ Smoke tests mock or simulate several external surfaces. Treat these as testing b
 - Real microphone capture, live Discord voice sessions, and first-run faster-whisper downloads
 
 Live behavior still needs operator validation when a change touches a live provider, channel, browser backend, voice path, installer, update path, or package artifact.
+
+## Benchmark checks
+
+Benchmark checks are operator validation lanes, not normal user UX. The CI-safe lanes are:
+
+```bash
+pnpm run benchmark:smoke
+pnpm run benchmark:terminal-bench:adapter-test
+```
+
+Use Harbor manually for Terminal-Bench smoke and full baseline runs. Do not run full Terminal-Bench in ordinary CI.
+
+See [Benchmarking](./benchmarking.md) for the reproducible runbook, artifact contract, no-tuning rule, and public reporting guidance.
 
 ## Eval fixtures
 
