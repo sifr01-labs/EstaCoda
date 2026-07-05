@@ -1,0 +1,628 @@
+import { execFile } from "node:child_process";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { promisify } from "node:util";
+import { aggregateBenchmarkMetrics } from "../benchmark/metrics.js";
+import {
+  buildBenchmarkExecutionSummary,
+  buildBenchmarkRunManifest
+} from "../benchmark/run-manifest.js";
+import type {
+  BenchmarkArtifactSummary,
+  BenchmarkFailureSummary,
+  BenchmarkHomeMode,
+  BenchmarkIdentity,
+  BenchmarkModelSummary,
+  BenchmarkRunStatus,
+  EstaCodaBenchmarkIdentity
+} from "../benchmark/schema.js";
+import {
+  writeBenchmarkEventLogArtifact,
+  writeBenchmarkSummaryArtifact
+} from "../benchmark/artifacts.js";
+import { loadRuntimeConfig, type LoadedRuntimeConfig } from "../config/runtime-config.js";
+import type { RuntimeEvent } from "../contracts/runtime-event.js";
+import { InMemorySessionDB } from "../session/in-memory-session-db.js";
+import { resolveTokens } from "../theme/token-resolver.js";
+import { createRuntime, type Runtime } from "../runtime/create-runtime.js";
+import { normalizeModelInput } from "../providers/model-normalization.js";
+import { getPackageVersion } from "./version-command.js";
+import type { CliCommandResult, CliOptions } from "./cli.js";
+
+const execFileAsync = promisify(execFile);
+
+type BenchRunArgs = {
+  workspace: string;
+  outDir: string;
+  instruction: string;
+  homeDir?: string;
+  homeMode: BenchmarkHomeMode;
+  benchmark: BenchmarkIdentity | null;
+  modelInput?: string;
+  temperature: number;
+  maxTokens: number | null;
+  timeoutMs: number;
+  redact: boolean;
+  providerBudgets: {
+    maxProviderIterations?: number;
+    maxProviderToolCalls?: number;
+    maxRepeatedToolFailures?: number;
+    maxProviderWallClockMs?: number;
+  };
+};
+
+export type BenchCommandDependencies = {
+  loadConfig?: typeof loadRuntimeConfig;
+  createRuntime?: typeof createRuntime;
+  getPackageVersion?: typeof getPackageVersion;
+  getGitCommit?: (workspaceRoot: string) => Promise<string | null>;
+  makeTempHome?: () => Promise<string>;
+  now?: () => Date;
+};
+
+export async function benchCommand(
+  options: CliOptions,
+  args: string[],
+  dependencies: BenchCommandDependencies = {}
+): Promise<CliCommandResult> {
+  const subcommand = args[0];
+  if (subcommand === undefined || subcommand === "--help" || subcommand === "-h") {
+    return {
+      handled: true,
+      exitCode: 0,
+      output: renderBenchHelp()
+    };
+  }
+
+  if (subcommand !== "run") {
+    return {
+      handled: true,
+      exitCode: 1,
+      output: `Unknown bench command: ${subcommand}\n\n${renderBenchHelp()}`
+    };
+  }
+
+  if (hasFlag(args.slice(1), "--help", "-h")) {
+    return {
+      handled: true,
+      exitCode: 0,
+      output: renderBenchRunHelp()
+    };
+  }
+
+  const parsed = await parseBenchRunArgs(args.slice(1));
+  if (!parsed.ok) {
+    return {
+      handled: true,
+      exitCode: 1,
+      output: parsed.error
+    };
+  }
+
+  return runBenchRun(options, parsed.args, dependencies);
+}
+
+async function runBenchRun(
+  options: CliOptions,
+  args: BenchRunArgs,
+  dependencies: BenchCommandDependencies
+): Promise<CliCommandResult> {
+  const now = dependencies.now ?? (() => new Date());
+  const startedAt = now();
+  const artifacts = benchmarkArtifactPaths(args.outDir);
+  const events: RuntimeEvent[] = [];
+  let runtime: Runtime | undefined;
+  let finalAnswer = "";
+  let status: BenchmarkRunStatus = "success";
+  let failure: BenchmarkFailureSummary | null = null;
+  let modelSummary: BenchmarkModelSummary = {
+    provider: args.modelInput?.split("/", 1)[0] ?? "unconfigured",
+    id: args.modelInput?.includes("/") === true ? args.modelInput.slice(args.modelInput.indexOf("/") + 1) : args.modelInput ?? "unconfigured",
+    settings: {
+      temperature: args.temperature,
+      maxTokens: args.maxTokens
+    }
+  };
+  const benchmarkHome = args.homeDir ?? await (dependencies.makeTempHome ?? defaultMakeTempHome)();
+
+  try {
+    const config = await loadBenchmarkConfig({
+      workspaceRoot: args.workspace,
+      homeDir: benchmarkHome,
+      profileId: options.profileId,
+      loadConfig: dependencies.loadConfig ?? loadRuntimeConfig
+    });
+    const route = await resolveBenchmarkModelRoute(config, args.modelInput);
+    if (route === undefined) {
+      throw benchmarkError(
+        "config_error",
+        "No benchmark model is configured. Pass --model <provider/model> or configure the selected benchmark home."
+      );
+    }
+
+    modelSummary = {
+      provider: route.provider,
+      id: route.id,
+      settings: {
+        temperature: args.temperature,
+        maxTokens: args.maxTokens
+      }
+    };
+
+    runtime = await (dependencies.createRuntime ?? createRuntime)({
+      tokens: resolveTokens("standard", "dark", "kemetBlue"),
+      model: route.profile,
+      primaryModelRoute: route,
+      modelFallbackRoutes: config.modelFallbackRoutes,
+      homeDir: benchmarkHome,
+      profileId: options.profileId ?? config.profileId,
+      workspaceRoot: args.workspace,
+      sessionDb: new InMemorySessionDB(),
+      externalSkillRoots: config.skills.externalDirs,
+      skillAutonomy: config.skills.autonomy,
+      skillConfig: config.skills.config,
+      ui: config.ui,
+      agentProfile: config.profile,
+      providerRegistry: config.providerRegistry,
+      providerConfigs: config.config.providers,
+      auxiliaryModels: config.auxiliaryModels,
+      compression: config.compression,
+      memory: config.memory,
+      externalMemory: config.externalMemory,
+      mcpServers: config.mcp.servers,
+      browser: config.browser,
+      imageGen: config.imageGen,
+      tts: config.tts,
+      stt: config.stt,
+      telegramReady: false,
+      enableWebNetwork: config.web.enableNetwork,
+      webMaxContentChars: config.web.maxContentChars,
+      webConfig: {
+        backend: config.web.backend,
+        searchBackend: config.web.searchBackend,
+        extractBackend: config.web.extractBackend,
+        crawlBackend: config.web.crawlBackend,
+        brave: config.web.brave
+      },
+      securityConfig: {
+        allowPrivateUrls: config.security.allowPrivateUrls,
+        websiteBlocklist: config.security.websiteBlocklist
+      },
+      securityMode: "open",
+      workspaceTrusted: true,
+      executionControls: {
+        providerBudgets: args.providerBudgets,
+        providerRequestDefaults: {
+          temperature: args.temperature,
+          ...(args.maxTokens === null ? {} : { maxTokens: args.maxTokens })
+        },
+        childProcessEnv: {
+          mode: "isolated",
+          homeDir: benchmarkHome
+        }
+      }
+    });
+
+    const response = await runWithTimeout(
+      args.timeoutMs,
+      (signal) => runtime!.handle({
+        text: args.instruction,
+        channel: "cli",
+        trustedWorkspace: true,
+        signal,
+        onEvent: (event) => {
+          events.push(event);
+        }
+      })
+    );
+    finalAnswer = response.text;
+  } catch (error) {
+    const classified = classifyBenchmarkError(error);
+    status = classified.status;
+    failure = classified.failure;
+  } finally {
+    await runtime?.dispose();
+  }
+
+  const endedAt = now();
+  const estacoda = await buildEstaCodaBenchmarkIdentity(args.workspace, dependencies);
+  const summary = buildBenchmarkRunManifest({
+    benchmark: args.benchmark,
+    estacoda,
+    execution: buildBenchmarkExecutionSummary({
+      status,
+      startedAt,
+      endedAt,
+      workspace: args.workspace,
+      home: benchmarkHome,
+      homeMode: args.homeMode,
+      sessionId: runtime?.sessionId ?? null,
+      trajectoryId: runtime?.trajectoryId ?? null
+    }),
+    model: modelSummary,
+    metrics: aggregateBenchmarkMetrics(events),
+    finalAnswer,
+    artifacts: {
+      summary: artifacts.summary,
+      eventLog: artifacts.eventLog,
+      trajectory: null,
+      stdout: artifacts.stdout,
+      stderr: failure === null ? null : artifacts.stderr
+    },
+    failure
+  });
+
+  await mkdir(args.outDir, { recursive: true });
+  await writeBenchmarkEventLogArtifact(artifacts.eventLog, events, { redact: args.redact });
+  await writeBenchmarkSummaryArtifact(artifacts.summary, summary, { redact: args.redact });
+  await writeFile(artifacts.stdout, renderBenchmarkStdout(summary), "utf8");
+  if (failure !== null) {
+    await writeFile(artifacts.stderr, `${failure.message}\n`, "utf8");
+  }
+
+  return {
+    handled: true,
+    exitCode: status === "success" ? 0 : 1,
+    output: [
+      `Benchmark run: ${status}`,
+      `Summary: ${artifacts.summary}`,
+      `Events: ${artifacts.eventLog}`,
+      `Home: ${benchmarkHome}`,
+      failure === null ? undefined : `Error: ${failure.message}`
+    ].filter((line) => line !== undefined).join("\n")
+  };
+}
+
+async function resolveBenchmarkModelRoute(
+  config: LoadedRuntimeConfig,
+  modelInput: string | undefined
+): Promise<LoadedRuntimeConfig["primaryModelRoute"] | undefined> {
+  if (modelInput === undefined) {
+    return config.primaryModelRoute.provider === "unconfigured" || config.primaryModelRoute.id === "unconfigured"
+      ? undefined
+      : config.primaryModelRoute;
+  }
+
+  const normalized = await normalizeModelInput(modelInput, { config: config.config });
+  if (normalized.kind !== "exact") {
+    throw benchmarkError("config_error", `Unable to resolve model '${modelInput}': ${normalized.reason}`);
+  }
+  return normalized.route;
+}
+
+async function loadBenchmarkConfig(input: {
+  workspaceRoot: string;
+  homeDir: string;
+  profileId: string | undefined;
+  loadConfig: typeof loadRuntimeConfig;
+}): Promise<LoadedRuntimeConfig> {
+  try {
+    return await input.loadConfig({
+      workspaceRoot: input.workspaceRoot,
+      homeDir: input.homeDir,
+      profileId: input.profileId
+    });
+  } catch (error) {
+    throw benchmarkError("config_error", error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function parseBenchRunArgs(args: string[]): Promise<{ ok: true; args: BenchRunArgs } | { ok: false; error: string }> {
+  let workspace: string | undefined;
+  let outDir: string | undefined;
+  let instruction: string | undefined;
+  let instructionFile: string | undefined;
+  let homeDir: string | undefined;
+  let isolatedHome = false;
+  let modelInput: string | undefined;
+  let benchmarkName: string | undefined;
+  let benchmarkVersion: string | undefined;
+  let taskId: string | undefined;
+  let attempt = 1;
+  let temperature = 0;
+  let maxTokens: number | null = null;
+  let timeoutMs = 30 * 60_000;
+  let redact = true;
+  const providerBudgets: BenchRunArgs["providerBudgets"] = {};
+
+  try {
+    for (let index = 0; index < args.length; index += 1) {
+      const arg = args[index];
+      switch (arg) {
+        case "--workspace":
+          workspace = requiredValue(args, ++index, arg);
+          break;
+        case "--out":
+        case "--output-dir":
+          outDir = requiredValue(args, ++index, arg);
+          break;
+        case "--instruction":
+          instruction = requiredValue(args, ++index, arg);
+          break;
+        case "--instruction-file":
+          instructionFile = requiredValue(args, ++index, arg);
+          break;
+        case "--home":
+          homeDir = requiredValue(args, ++index, arg);
+          break;
+        case "--isolated-home":
+          isolatedHome = true;
+          break;
+        case "--model":
+          modelInput = requiredValue(args, ++index, arg);
+          break;
+        case "--benchmark-name":
+          benchmarkName = requiredValue(args, ++index, arg);
+          break;
+        case "--benchmark-version":
+          benchmarkVersion = requiredValue(args, ++index, arg);
+          break;
+        case "--task-id":
+          taskId = requiredValue(args, ++index, arg);
+          break;
+        case "--attempt":
+          attempt = parsePositiveInteger(requiredValue(args, ++index, arg), arg);
+          break;
+        case "--temperature":
+          temperature = parseFiniteNumber(requiredValue(args, ++index, arg), arg);
+          break;
+        case "--max-tokens":
+          maxTokens = parsePositiveInteger(requiredValue(args, ++index, arg), arg);
+          break;
+        case "--timeout-ms":
+          timeoutMs = parsePositiveInteger(requiredValue(args, ++index, arg), arg);
+          break;
+        case "--max-provider-iterations":
+          providerBudgets.maxProviderIterations = parsePositiveInteger(requiredValue(args, ++index, arg), arg);
+          break;
+        case "--max-provider-tool-calls":
+          providerBudgets.maxProviderToolCalls = parsePositiveInteger(requiredValue(args, ++index, arg), arg);
+          break;
+        case "--max-repeated-tool-failures":
+          providerBudgets.maxRepeatedToolFailures = parsePositiveInteger(requiredValue(args, ++index, arg), arg);
+          break;
+        case "--max-provider-wall-clock-ms":
+          providerBudgets.maxProviderWallClockMs = parsePositiveInteger(requiredValue(args, ++index, arg), arg);
+          break;
+        case "--no-redact":
+          redact = false;
+          break;
+        default:
+          return { ok: false, error: `Unknown bench run option: ${arg}\n\n${renderBenchRunHelp()}` };
+      }
+    }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+
+  if (workspace === undefined) {
+    return { ok: false, error: "bench run requires --workspace <dir>." };
+  }
+  if (outDir === undefined) {
+    return { ok: false, error: "bench run requires --out <dir>." };
+  }
+  if (instruction !== undefined && instructionFile !== undefined) {
+    return { ok: false, error: "Use only one of --instruction or --instruction-file." };
+  }
+  if (instruction === undefined && instructionFile === undefined) {
+    return { ok: false, error: "bench run requires --instruction <text> or --instruction-file <path>." };
+  }
+  if (homeDir !== undefined && isolatedHome) {
+    return { ok: false, error: "Use only one of --home or --isolated-home." };
+  }
+
+  const identityFields = [benchmarkName, benchmarkVersion, taskId].filter((value) => value !== undefined).length;
+  if (identityFields !== 0 && identityFields !== 3) {
+    return {
+      ok: false,
+      error: "Benchmark identity requires --benchmark-name, --benchmark-version, and --task-id together."
+    };
+  }
+
+  let resolvedInstruction: string;
+  try {
+    resolvedInstruction = instructionFile === undefined
+      ? instruction!
+      : await readFile(instructionFile, "utf8");
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+
+  return {
+    ok: true,
+    args: {
+      workspace: resolve(workspace),
+      outDir: resolve(outDir),
+      instruction: resolvedInstruction,
+      homeDir: homeDir === undefined ? undefined : resolve(homeDir),
+      homeMode: homeDir === undefined ? "generated" : "explicit",
+      benchmark: benchmarkName === undefined || benchmarkVersion === undefined || taskId === undefined
+        ? null
+        : { name: benchmarkName, version: benchmarkVersion, taskId, attempt },
+      modelInput,
+      temperature,
+      maxTokens,
+      timeoutMs,
+      redact,
+      providerBudgets
+    }
+  };
+}
+
+async function runWithTimeout<T>(
+  timeoutMs: number,
+  run: (signal: AbortSignal) => Promise<T>
+): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(new BenchmarkTimeoutError(timeoutMs)), timeoutMs);
+  try {
+    return await run(controller.signal);
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new BenchmarkTimeoutError(timeoutMs);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function classifyBenchmarkError(error: unknown): {
+  status: BenchmarkRunStatus;
+  failure: BenchmarkFailureSummary;
+} {
+  if (error instanceof BenchmarkCliError) {
+    return {
+      status: error.status,
+      failure: {
+        status: error.status,
+        message: error.message
+      }
+    };
+  }
+  if (error instanceof BenchmarkTimeoutError) {
+    return {
+      status: "timeout",
+      failure: {
+        status: "timeout",
+        message: `Benchmark run exceeded ${error.timeoutMs}ms.`,
+        code: "timeout"
+      }
+    };
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  const status: BenchmarkRunStatus = /provider|model/iu.test(message) ? "provider_error" : "runtime_error";
+  return {
+    status,
+    failure: {
+      status,
+      message
+    }
+  };
+}
+
+function benchmarkError(status: BenchmarkRunStatus, message: string): BenchmarkCliError {
+  return new BenchmarkCliError(status, message);
+}
+
+class BenchmarkCliError extends Error {
+  constructor(readonly status: BenchmarkRunStatus, message: string) {
+    super(message);
+  }
+}
+
+class BenchmarkTimeoutError extends Error {
+  constructor(readonly timeoutMs: number) {
+    super(`Benchmark timed out after ${timeoutMs}ms.`);
+  }
+}
+
+async function buildEstaCodaBenchmarkIdentity(
+  workspaceRoot: string,
+  dependencies: BenchCommandDependencies
+): Promise<EstaCodaBenchmarkIdentity> {
+  const version = await (dependencies.getPackageVersion ?? getPackageVersion)();
+  const gitCommit = await (dependencies.getGitCommit ?? defaultGetGitCommit)(workspaceRoot);
+  return { version, gitCommit };
+}
+
+async function defaultGetGitCommit(workspaceRoot: string): Promise<string | null> {
+  try {
+    const result = await execFileAsync("git", ["-C", workspaceRoot, "rev-parse", "--short", "HEAD"]);
+    return result.stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+async function defaultMakeTempHome(): Promise<string> {
+  return mkdtemp(join(tmpdir(), "estacoda-bench-home-"));
+}
+
+function benchmarkArtifactPaths(outDir: string): BenchmarkArtifactSummary & { stdout: string; stderr: string } {
+  return {
+    summary: join(outDir, "summary.json"),
+    eventLog: join(outDir, "events.ndjson"),
+    trajectory: null,
+    stdout: join(outDir, "stdout.txt"),
+    stderr: join(outDir, "stderr.txt")
+  };
+}
+
+function renderBenchmarkStdout(summary: ReturnType<typeof buildBenchmarkRunManifest>): string {
+  return [
+    `status=${summary.execution.status}`,
+    `session=${summary.execution.sessionId ?? ""}`,
+    `trajectory=${summary.execution.trajectoryId ?? ""}`,
+    "",
+    summary.finalAnswer
+  ].join("\n");
+}
+
+function requiredValue(args: string[], index: number, flag: string): string {
+  const value = args[index];
+  if (value === undefined || value.startsWith("--")) {
+    throw new Error(`${flag} requires a value.`);
+  }
+  return value;
+}
+
+function parsePositiveInteger(value: string, flag: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`${flag} must be a positive integer.`);
+  }
+  return parsed;
+}
+
+function parseFiniteNumber(value: string, flag: string): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`${flag} must be a finite number.`);
+  }
+  return parsed;
+}
+
+function hasFlag(args: readonly string[], ...flags: string[]): boolean {
+  return args.some((arg) => flags.includes(arg));
+}
+
+function renderBenchHelp(): string {
+  return [
+    "EstaCoda benchmark",
+    "",
+    "Usage:",
+    "  estacoda bench run --workspace <dir> --instruction <text> --out <dir>",
+    "  estacoda bench run --workspace <dir> --instruction-file <path> --out <dir>",
+    "",
+    "Run EstaCoda headlessly for benchmark harnesses."
+  ].join("\n");
+}
+
+function renderBenchRunHelp(): string {
+  return [
+    "EstaCoda benchmark run",
+    "",
+    "Usage:",
+    "  estacoda bench run --workspace <dir> --instruction <text> --out <dir> [--model <provider/model>]",
+    "",
+    "Options:",
+    "  --workspace <dir>              Explicit benchmark workspace",
+    "  --instruction <text>           Task instruction",
+    "  --instruction-file <path>      Read task instruction from a file",
+    "  --out, --output-dir <dir>      Artifact output directory",
+    "  --home <dir>                   Explicit EstaCoda home for this run",
+    "  --isolated-home                Use a generated isolated home (default)",
+    "  --model <provider/model>       Command-local model override",
+    "  --temperature <n>              Provider temperature (default: 0)",
+    "  --max-tokens <n>               Provider max tokens",
+    "  --timeout-ms <n>               Run timeout in milliseconds",
+    "  --benchmark-name <name>        Benchmark identity name",
+    "  --benchmark-version <version>  Benchmark identity version",
+    "  --task-id <id>                 Benchmark task id",
+    "  --attempt <n>                  Benchmark attempt number (default: 1)",
+    "  --no-redact                    Write artifacts without default redaction",
+    "  --help, -h                    Show this help"
+  ].join("\n");
+}

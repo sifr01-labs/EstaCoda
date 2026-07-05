@@ -530,6 +530,14 @@ function registerAll(): void {
     scope: "cli",
   });
   commandRegistry.register({
+    name: "bench",
+    aliases: [],
+    category: "Development",
+    description: "Run headless benchmark tasks and write reproducible artifacts",
+    visibility: "public",
+    scope: "cli",
+  });
+  commandRegistry.register({
     name: "proposal",
     aliases: [],
     category: "Development",

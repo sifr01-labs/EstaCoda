@@ -110,6 +110,7 @@ import { evolutionCommand } from "./evolution-commands.js";
 import { workflowCommand } from "./workflow-commands.js";
 import { packCommand } from "./pack-commands.js";
 import { skillsCommand } from "./skill-commands.js";
+import { benchCommand } from "./bench-command.js";
 import { memoryCommand } from "./memory-commands.js";
 import { commandRegistry } from "./command-registry.js";
 import { promptForApiKey } from "./secret-prompt.js";
@@ -288,6 +289,8 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
       return web(options, args);
     case "browser":
       return browser(options, args);
+    case "bench":
+      return benchCommand(options, args);
     case "local":
       return local(options, args);
     case "voice":
