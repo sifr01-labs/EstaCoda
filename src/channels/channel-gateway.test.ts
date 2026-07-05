@@ -4559,6 +4559,63 @@ describe("ChannelGateway commands", () => {
       }
     });
 
+    it("restores durable managed Python setup approval after gateway restart", async () => {
+      const { queue, cleanup, directory } = await setupGatewayApprovalQueue();
+      const sessionStore = new InMemoryChannelSessionStore();
+      let installed = false;
+      const runtime = createPythonCapabilitySetupRuntime({ isInstalled: () => installed });
+      const installer = vi.fn(async (options: ManagedPythonCapabilityInstallOptions) => {
+        installed = true;
+        return readyCapabilityInstallResult(options.stateRoot, options.capabilityId);
+      });
+
+      try {
+        const adapterBeforeRestart = createFakeTelegramAdapter() as FakeTelegramAdapter;
+        const gatewayBeforeRestart = new ChannelGateway({
+          adapters: [adapterBeforeRestart],
+          runtimeForSession: async () => runtime.runtime,
+          sessionStore,
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          profileId: "profile-a",
+          approvalQueue: queue,
+          pythonCapabilityStateRoot: directory,
+          pythonCapabilityInstaller: installer
+        });
+
+        await gatewayBeforeRestart.receive(makeMessage("extract this pdf", {
+          attachments: [{ id: "pdf-1", kind: "document", status: "ready", path: "/tmp/test.pdf" }]
+        }));
+        const [pending] = await queue.listPending({ profileId: "profile-a" });
+
+        const adapterAfterRestart = createFakeTelegramAdapter() as FakeTelegramAdapter;
+        const gatewayAfterRestart = new ChannelGateway({
+          adapters: [adapterAfterRestart],
+          runtimeForSession: async () => runtime.runtime,
+          sessionStore,
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          profileId: "profile-a",
+          approvalQueue: queue,
+          pythonCapabilityStateRoot: directory,
+          pythonCapabilityInstaller: installer
+        });
+
+        const approveResult = await gatewayAfterRestart.receive(makeMessage("/approve"));
+        const durable = await queue.getApproval(pending.id, { profileId: "profile-a", sessionId: pending.sessionId });
+
+        expect(installer).toHaveBeenCalledWith(expect.objectContaining({
+          stateRoot: directory,
+          capabilityId: PDF_EXTRACTION_CAPABILITY_ID,
+          groups: []
+        }));
+        expect(durable?.status).toBe("approved");
+        expect(runtime.calls()).toBe(2);
+        expect(approveResult.replyText).toContain("Capability setup complete");
+        expect(approveResult.replyText).toContain("pdf extraction resumed");
+      } finally {
+        await cleanup();
+      }
+    });
+
     it("approval prompts include generic actions for the durable approval id", async () => {
       const { queue, cleanup } = await setupGatewayApprovalQueue();
       try {

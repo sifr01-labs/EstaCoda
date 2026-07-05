@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { SQLiteDatabase } from "../storage/sqlite.js";
 import type { WorkspaceApprovalController } from "../security/workspace-approval-controller.js";
 import { assessHardlineFloor } from "../security/command-safety.js";
+import type { ChannelAttachment, ChannelSessionKey } from "../contracts/channel.js";
 
 export type PendingApprovalStatus = "pending" | "approved" | "denied" | "expired";
 export type PendingApprovalChannel = "telegram" | "discord" | "email" | "cli";
@@ -15,6 +16,21 @@ export type ManagedPythonCapabilityApprovalPayload = {
   skillName?: string;
   reason?: string;
   repairCommand?: string;
+  originalMessage?: ManagedPythonCapabilityApprovalMessagePayload;
+};
+
+export type ManagedPythonCapabilityApprovalMessagePayload = {
+  id: string;
+  channel: string;
+  sessionKey: ChannelSessionKey;
+  sender: {
+    id: string;
+    displayName?: string;
+  };
+  text: string;
+  receivedAt: string;
+  attachments?: ChannelAttachment[];
+  metadata?: Record<string, unknown>;
 };
 
 export type PendingApproval = {
@@ -237,6 +253,18 @@ export class GatewayApprovalQueue {
     return row === null ? undefined : rowToPendingApproval(row, { includePayload: false });
   }
 
+  async getApprovalRequest(
+    id: string,
+    scope: { profileId: string; sessionId?: string }
+  ): Promise<PendingApproval | undefined> {
+    const profileId = requireScopeValue(scope.profileId, "profileId");
+    const row = this.#getScopedRow(id, { profileId, sessionId: scope.sessionId });
+    return row === null ? undefined : rowToPendingApproval(row, {
+      includePayload: false,
+      includeRequestPayload: true
+    });
+  }
+
   async resolveApproval(
     id: string,
     decision: "approved" | "denied",
@@ -386,7 +414,7 @@ export function createCommandPreview(command: string, maxLength = 160): string {
 
 function rowToPendingApproval(
   row: PendingApprovalRow,
-  options: { includePayload: boolean }
+  options: { includePayload: boolean; includeRequestPayload?: boolean }
 ): PendingApproval {
   return {
     id: row.id,
@@ -397,7 +425,7 @@ function rowToPendingApproval(
     commandPayload: options.includePayload ? row.command_payload ?? undefined : undefined,
     toolName: row.tool_name,
     approvalKind: row.approval_kind ?? "command",
-    requestPayload: options.includePayload && row.request_payload !== null
+    requestPayload: options.includeRequestPayload === true && row.request_payload !== null
       ? parseManagedPythonCapabilityApprovalPayload(row.request_payload)
       : undefined,
     requestedAt: new Date(row.requested_at),
@@ -430,11 +458,84 @@ function parseManagedPythonCapabilityApprovalPayload(
         : undefined,
       skillName: typeof parsed.skillName === "string" ? parsed.skillName : undefined,
       reason: typeof parsed.reason === "string" ? parsed.reason : undefined,
-      repairCommand: typeof parsed.repairCommand === "string" ? parsed.repairCommand : undefined
+      repairCommand: typeof parsed.repairCommand === "string" ? parsed.repairCommand : undefined,
+      originalMessage: parseApprovalMessagePayload(parsed.originalMessage)
     };
   } catch {
     return undefined;
   }
+}
+
+function parseApprovalMessagePayload(value: unknown): ManagedPythonCapabilityApprovalMessagePayload | undefined {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.id !== "string" ||
+    typeof record.channel !== "string" ||
+    typeof record.text !== "string" ||
+    typeof record.receivedAt !== "string"
+  ) {
+    return undefined;
+  }
+  const sessionKey = parseApprovalSessionKey(record.sessionKey);
+  const sender = parseApprovalSender(record.sender);
+  if (sessionKey === undefined || sender === undefined) {
+    return undefined;
+  }
+
+  return {
+    id: record.id,
+    channel: record.channel,
+    sessionKey,
+    sender,
+    text: record.text,
+    receivedAt: record.receivedAt,
+    attachments: Array.isArray(record.attachments)
+      ? record.attachments.filter((item): item is ChannelAttachment => typeof item === "object" && item !== null)
+      : undefined,
+    metadata: typeof record.metadata === "object" && record.metadata !== null && !Array.isArray(record.metadata)
+      ? record.metadata as Record<string, unknown>
+      : undefined
+  };
+}
+
+function parseApprovalSessionKey(value: unknown): ChannelSessionKey | undefined {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record.platform !== "string" || typeof record.chatId !== "string") {
+    return undefined;
+  }
+  return {
+    platform: record.platform,
+    chatId: record.chatId,
+    accountId: typeof record.accountId === "string" ? record.accountId : undefined,
+    userId: typeof record.userId === "string" ? record.userId : undefined,
+    chatType: record.chatType === "dm" ||
+      record.chatType === "group" ||
+      record.chatType === "channel" ||
+      record.chatType === "thread"
+      ? record.chatType
+      : undefined,
+    threadId: typeof record.threadId === "string" ? record.threadId : undefined
+  };
+}
+
+function parseApprovalSender(value: unknown): ManagedPythonCapabilityApprovalMessagePayload["sender"] | undefined {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record.id !== "string") {
+    return undefined;
+  }
+  return {
+    id: record.id,
+    displayName: typeof record.displayName === "string" ? record.displayName : undefined
+  };
 }
 
 function requireScopeValue(value: string | undefined, name: string): string {

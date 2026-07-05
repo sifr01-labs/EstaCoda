@@ -341,6 +341,55 @@ describe("GatewayApprovalQueue", () => {
     }
   });
 
+  it("exposes setup request payload without command payload and redacts it after resolution", async () => {
+    const { sessionDb, queue } = await setup();
+    try {
+      const pending = await queue.createPendingApproval(approval({
+        toolName: "python-env.setup",
+        commandPreview: "Install managed Python capability pdf-extraction",
+        commandHash: createCommandHash("Install managed Python capability pdf-extraction"),
+        commandPayload: undefined,
+        approvalKind: "managed_python_capability_install",
+        requestPayload: {
+          capabilityId: "pdf-extraction",
+          groups: [],
+          packages: ["pymupdf==1.27.2.3"],
+          originalMessage: {
+            id: "msg-1",
+            channel: "telegram",
+            sessionKey: { platform: "telegram", chatId: "chat-a", userId: "user-1" },
+            sender: { id: "user-1", displayName: "Test User" },
+            text: "extract this pdf",
+            receivedAt: "2026-05-18T10:00:00.000Z"
+          }
+        }
+      }));
+
+      const withRequestPayload = await queue.getApprovalRequest(pending.id, {
+        profileId: "profile-a",
+        sessionId: "session-a"
+      });
+
+      expect(withRequestPayload?.commandPayload).toBeUndefined();
+      expect(withRequestPayload?.requestPayload?.capabilityId).toBe("pdf-extraction");
+      expect(withRequestPayload?.requestPayload?.originalMessage?.text).toBe("extract this pdf");
+
+      await queue.resolveApproval(pending.id, "approved", "tester", {
+        profileId: "profile-a",
+        sessionId: "session-a"
+      });
+      const resolved = await queue.getApprovalRequest(pending.id, {
+        profileId: "profile-a",
+        sessionId: "session-a"
+      });
+
+      expect(resolved?.status).toBe("approved");
+      expect(resolved?.requestPayload).toBeUndefined();
+    } finally {
+      sessionDb.close();
+    }
+  });
+
   it("does not queue hardline commands for later approval", async () => {
     const { sessionDb, queue } = await setup();
     try {

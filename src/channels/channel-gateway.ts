@@ -40,6 +40,7 @@ import {
   createCommandPreview,
   type GatewayApprovalQueue,
   type ManagedPythonCapabilityApprovalPayload,
+  type PendingApproval,
   type PendingApprovalChannel
 } from "../gateway/approval-queue.js";
 import { HookRegistry, sanitizeHookError } from "../gateway/hook-registry.js";
@@ -842,7 +843,7 @@ export class ChannelGateway {
         ? "managed_python_capability_install"
         : "command",
       requestPayload: pending.kind === "managed-python-capability-install"
-        ? managedPythonCapabilityApprovalPayload(pending.capability)
+        ? managedPythonCapabilityApprovalPayload(pending.capability, pending.originalMessage)
         : undefined,
       requestedAt,
       expiresAt: new Date(requestedAt.getTime() + DEFAULT_GATEWAY_APPROVAL_TTL_MS),
@@ -3390,16 +3391,50 @@ export class ChannelGateway {
     const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
     let text = "There is no pending approval request for this chat.";
     if (approvalId !== undefined && this.#approvalQueue !== undefined) {
-      const durable = await this.#approvalQueue.getApproval(approvalId, {
+      const durable = await this.#approvalQueue.getApprovalRequest(approvalId, {
         profileId: this.#profileId,
         sessionId
       });
+      const restored = this.#restorePendingSetupApprovalFromDurable({
+        durable,
+        message,
+        adapter,
+        key
+      });
+      if (restored !== undefined) {
+        return restored;
+      }
       if (durable?.status === "approved") {
         text = "Pending approval is already approved.";
       } else if (durable?.status === "denied") {
         text = "Pending approval is already denied.";
       } else if (durable?.status === "expired") {
         text = "Pending approval has expired.";
+      }
+    } else if (this.#approvalQueue !== undefined) {
+      const durableApprovals = await this.#approvalQueue.listPending({
+        profileId: this.#profileId,
+        sessionId
+      });
+      const restorable = durableApprovals.filter((approval) =>
+        approval.approvalKind === "managed_python_capability_install" &&
+        approval.channel === toPendingApprovalChannel(adapter.kind) &&
+        approval.chatId === message.sessionKey.chatId
+      );
+      if (restorable.length === 1) {
+        const durable = await this.#approvalQueue.getApprovalRequest(restorable[0]!.id, {
+          profileId: this.#profileId,
+          sessionId
+        });
+        const restored = this.#restorePendingSetupApprovalFromDurable({
+          durable,
+          message,
+          adapter,
+          key
+        });
+        if (restored !== undefined) {
+          return restored;
+        }
       }
     }
 
@@ -3409,6 +3444,55 @@ export class ChannelGateway {
       replyText: text,
       artifactCount: 0,
       progressCount: 0
+    };
+  }
+
+  #restorePendingSetupApprovalFromDurable(input: {
+    durable: PendingApproval | undefined;
+    message: ChannelMessage;
+    adapter: ChannelAdapter;
+    key: string;
+  }): { key: string; pending: PendingApprovalContinuation } | undefined {
+    const { durable, message, adapter, key } = input;
+    if (
+      durable === undefined ||
+      durable.status !== "pending" ||
+      durable.approvalKind !== "managed_python_capability_install" ||
+      durable.requestPayload === undefined ||
+      durable.requestPayload.originalMessage === undefined ||
+      durable.channel !== toPendingApprovalChannel(adapter.kind) ||
+      durable.chatId !== message.sessionKey.chatId
+    ) {
+      return undefined;
+    }
+
+    const originalMessage = channelMessageFromApprovalPayload(durable.requestPayload.originalMessage);
+    if (originalMessage === undefined) {
+      return undefined;
+    }
+    const capability: AgentLoopPythonCapabilitySetupApprovalRequest = {
+      kind: "managed-python-capability-install",
+      skillName: durable.requestPayload.skillName,
+      capabilityId: durable.requestPayload.capabilityId,
+      groups: [...durable.requestPayload.groups],
+      packages: [...durable.requestPayload.packages],
+      estimatedInstallSizeMb: durable.requestPayload.estimatedInstallSizeMb,
+      reason: durable.requestPayload.reason,
+      repairCommand: durable.requestPayload.repairCommand
+    };
+    return {
+      key,
+      pending: {
+        kind: "managed-python-capability-install",
+        approvalId: durable.id,
+        toolName: "python-env.setup",
+        riskClass: "external-side-effect",
+        targetKey: `python-env.setup:${capability.capabilityId}:${capability.groups.join(",")}`,
+        targetSummary: durable.commandPreview,
+        capability,
+        sessionId: durable.sessionId,
+        originalMessage
+      }
     };
   }
 
@@ -4318,7 +4402,8 @@ function managedPythonCapabilityApprovalPreview(
 }
 
 function managedPythonCapabilityApprovalPayload(
-  request: AgentLoopPythonCapabilitySetupApprovalRequest
+  request: AgentLoopPythonCapabilitySetupApprovalRequest,
+  originalMessage: ChannelMessage
 ): ManagedPythonCapabilityApprovalPayload {
   return {
     capabilityId: request.capabilityId,
@@ -4327,8 +4412,47 @@ function managedPythonCapabilityApprovalPayload(
     estimatedInstallSizeMb: request.estimatedInstallSizeMb,
     skillName: request.skillName,
     reason: request.reason,
-    repairCommand: request.repairCommand
+    repairCommand: request.repairCommand,
+    originalMessage: {
+      id: originalMessage.id,
+      channel: originalMessage.channel,
+      sessionKey: { ...originalMessage.sessionKey },
+      sender: { ...originalMessage.sender },
+      text: originalMessage.text,
+      receivedAt: originalMessage.receivedAt,
+      attachments: originalMessage.attachments?.map((attachment) => ({ ...attachment })),
+      metadata: cloneJsonObject(originalMessage.metadata)
+    }
   };
+}
+
+function channelMessageFromApprovalPayload(
+  payload: NonNullable<ManagedPythonCapabilityApprovalPayload["originalMessage"]>
+): ChannelMessage | undefined {
+  if (payload.sessionKey.chatId.trim() === "" || payload.sender.id.trim() === "") {
+    return undefined;
+  }
+  return {
+    id: payload.id,
+    channel: payload.channel,
+    sessionKey: { ...payload.sessionKey },
+    sender: { ...payload.sender },
+    text: payload.text,
+    receivedAt: payload.receivedAt,
+    attachments: payload.attachments?.map((attachment) => ({ ...attachment })),
+    metadata: cloneJsonObject(payload.metadata)
+  };
+}
+
+function cloneJsonObject<T extends Record<string, unknown> | undefined>(value: T): T {
+  if (value === undefined) {
+    return undefined as T;
+  }
+  try {
+    return JSON.parse(JSON.stringify(value)) as T;
+  } catch {
+    return undefined as T;
+  }
 }
 
 function parseApprovalScope(text: string): ApprovalScope {
