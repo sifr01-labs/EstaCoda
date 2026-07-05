@@ -182,6 +182,8 @@ Pending gateway approvals are ask-only. Deterministic denies and hard safety blo
 
 Channel adapters should not mutate the approval queue directly. Approval orchestration belongs in `ChannelGateway` and the queue.
 
+Approval rows may represent command execution or managed Python capability setup. Managed Python setup approvals use `managed_python_capability_install`, carry only registered capability metadata, and are resolved by `ChannelGateway` through the trusted Python capability installer. They must not store provider-generated package lists or shell commands. After approval, the gateway invalidates the runtime cache entry for the session before replaying the original channel message.
+
 ---
 
 ## Service management

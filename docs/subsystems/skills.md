@@ -107,6 +107,8 @@ The runtime registry owns package names, package versions, import checks, instal
 
 Normal skill execution resolves only already-installed and verified environments. It does not run `pip`, create virtualenvs, or repair missing dependencies.
 
+Missing required capabilities do not silently remove the skill from the loaded session catalog. The skill keeps setup/readiness metadata so prompt assembly, routing, and `skill.read` can explain the blocker and show the local repair command. Gateway surfaces can convert that setup state into an explicit managed Python capability setup approval when the selected skill needs it.
+
 ## Visibility
 
 - Visibility is **session-stable**. Once a session starts, the visible skill catalog does not change.

@@ -47,7 +47,7 @@ Managed Python environments are a local operator-controlled dependency surface.
 
 Skills may request a registered capability by ID, but skills cannot define packages, imports, install commands, paths, or versions. Provider output and generated shell text are never accepted as package installation instructions.
 
-Package installation is explicit through `estacoda python-env setup`, `estacoda python-env upgrade`, or a reviewed setup apply step that includes a managed Python capability install. Normal skill execution and gateway-triggered execution do not auto-install dependencies.
+Package installation is explicit through `estacoda python-env setup`, `estacoda python-env upgrade`, a reviewed setup apply step, or a gateway-mediated managed Python capability setup approval. Normal skill execution does not auto-install dependencies. Gateway-triggered execution may request approval for a missing required registered capability, but it must not install silently and must not use provider-generated package names or shell commands.
 
 Edge TTS follows the same boundary. Choosing Edge TTS in the Setup Editor or first-run Onboarding Wizard is an explicit setup choice. After the user reviews and confirms the setup plan, apply may install the global managed Python `edge-tts` capability without a second package-install prompt. Setup Editor apply is strict and fails the Edge TTS apply if setup fails; first-run onboarding is tolerant and warns while skipping only the Edge TTS portion. Direct interactive `estacoda voice setup --tts-provider edge` may offer installation after explicit confirmation, while non-interactive setup prints the repair commands instead of installing silently. Runtime voice synthesis and gateway auto-TTS only resolve the already-installed global capability under `<stateRoot>/python-envs/edge-tts/`. If it is missing, they return or log `estacoda python-env setup edge-tts --yes` and `estacoda python-env verify edge-tts` instead of installing. Remote Telegram or gateway messages must not trigger hidden package installation.
 
@@ -162,6 +162,8 @@ Known limits: there is no socket-level DNS rebinding or TOCTOU protection, runti
 All channels share the **same runtime security policy**. There is no channel-specific approval escalation. Email does not add email-specific approval friction; Discord does not add Discord-specific friction; WhatsApp does not add WhatsApp-specific friction. The configured `strict`/`adaptive`/`open` mode applies uniformly.
 
 Gateway approvals use a durable `pending_approvals` table in the session database. Rows are profile-scoped by `profile_id`; list and resolve operations are also scoped by profile and may be scoped by session. Pending approvals are ask-only: deterministic `deny` results and hardline results never become approvable queue rows. Command payloads are transient and are redacted after approval, denial, or expiry; list and history surfaces use command preview/hash rather than raw payload.
+
+Managed Python capability setup approvals use the same durable queue but a distinct `managed_python_capability_install` kind. They carry only a registered capability ID, selected groups, registered package summary, and bounded replay context. On approval, `ChannelGateway` calls the managed Python capability installer directly, invalidates the cached runtime for that session, and replays the original channel message. On denial or expiry, no installation happens.
 
 ### Channel Allowlists
 

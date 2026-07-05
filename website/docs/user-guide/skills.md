@@ -82,7 +82,7 @@ pythonCapabilities:
 
 The declaration is intentionally small. A skill can name a registered capability and selected groups. It cannot define packages, imports, paths, versions, or install commands.
 
-If a required capability is missing, the skill is unavailable until the operator sets up the environment. If an optional capability is missing, the skill can remain available with reduced behavior.
+If a required capability is missing, the skill stays visible with setup/readiness metadata instead of disappearing from the session. The agent can explain the blocker and show the repair command. If an optional capability is missing, the skill can remain available with reduced behavior.
 
 Set up a capability from the terminal:
 
@@ -96,7 +96,7 @@ Check status:
 estacoda python-env status <id>
 ```
 
-Normal skill execution does not install Python packages automatically.
+Normal skill execution does not install Python packages automatically. On gateway surfaces such as Telegram, EstaCoda can ask the operator to approve installing a missing required managed Python capability for a selected skill. Approving installs only the registered capability packages and resumes the original request; denying leaves the capability uninstalled.
 
 ---
 

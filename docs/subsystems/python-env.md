@@ -202,6 +202,22 @@ estacoda python-env verify edge-tts
 
 Remote Telegram and gateway messages must not trigger hidden package installation.
 
+### Gateway-mediated capability setup
+
+When a selected skill needs a missing required managed Python capability, the runtime keeps the skill visible and returns structured setup state instead of silently dropping the skill from the session.
+
+For local CLI users, the repair path remains the explicit operator command:
+
+```bash
+estacoda python-env setup <capability-id>
+```
+
+For gateway users, such as Telegram operators who may not have terminal access, `ChannelGateway` can turn the missing capability into a durable setup approval. The approval is not a provider-generated shell command. It is a typed `managed_python_capability_install` approval for a registered capability ID and selected groups.
+
+If the operator approves, the gateway calls the trusted managed Python installer for that registered capability, invalidates the cached runtime for the session, and replays the original channel message. If the operator denies or the approval expires, no package installation happens and the skill remains blocked by the missing capability.
+
+Setup approval rows are scoped like other gateway approvals. They are profile/session aware, expire like normal gateway approvals, and redact setup payload details after approval, denial, or expiry.
+
 ## Runtime resolver
 
 Normal skill execution uses the resolver in non-installing mode.
@@ -297,11 +313,12 @@ The subsystem follows these rules:
 - install exact pinned packages only
 - install only from runtime-registered capability specs
 - require explicit local approval before network package installation
+- require explicit gateway approval before channel-mediated capability installation
 - keep pip cache under EstaCoda state
 - never mutate system Python
 - never mutate user-owned virtualenvs
 - never install during normal skill execution
-- never auto-install from gateway-triggered execution
+- never perform hidden installation from gateway-triggered execution
 - never install from provider-generated shell text
 - bound and redact diagnostics before printing
 - treat reset as destructive local operator action
