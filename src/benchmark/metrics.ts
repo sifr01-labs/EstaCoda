@@ -27,11 +27,29 @@ export function aggregateBenchmarkMetrics(
       case "tool-start":
         metrics.toolCalls += 1;
         break;
+      case "tool-result":
+        if (event.ok === false) {
+          metrics.toolFailures += 1;
+        }
+        break;
+      case "provider-budget-exhausted":
+        metrics.providerBudgetExhaustions += 1;
+        break;
+      case "security-risk-escalated":
+        metrics.securityEscalations += 1;
+        break;
+      case "context-usage":
+        metrics.contextUsageEvents += 1;
+        break;
       case "delegation-progress":
         if (event.childEvent.kind === "provider-result") {
           metrics.providerCalls += 1;
         } else if (event.childEvent.kind === "tool-start") {
           metrics.toolCalls += 1;
+        } else if (event.childEvent.kind === "tool-result" && event.childEvent.ok === false) {
+          metrics.toolFailures += 1;
+        } else if (event.childEvent.kind === "provider-budget-exhausted") {
+          metrics.providerBudgetExhaustions += 1;
         }
         break;
     }

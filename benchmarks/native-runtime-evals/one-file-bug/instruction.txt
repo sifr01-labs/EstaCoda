@@ -1,0 +1,1 @@
+Fix the failing totals test. Diagnose the root cause, patch the one-file bug, and verify the scenario passes.

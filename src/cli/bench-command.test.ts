@@ -60,6 +60,30 @@ describe("benchCommand", () => {
       {
         kind: "tool-start",
         tool: "terminal.run"
+      },
+      {
+        kind: "tool-result",
+        tool: "terminal.run",
+        ok: false
+      },
+      {
+        kind: "provider-budget-exhausted",
+        budget: "iterations",
+        limit: 4,
+        observed: 5,
+        reason: "benchmark loop limit reached"
+      },
+      {
+        kind: "security-risk-escalated",
+        from: "read-only-local",
+        to: "workspace-write",
+        reason: "write requested after inspection"
+      },
+      {
+        kind: "context-usage",
+        filled: 2048,
+        total: 8192,
+        source: "assembled-prompt"
       }
     ]);
 
@@ -160,6 +184,10 @@ describe("benchCommand", () => {
       metrics: {
         providerCalls: 1,
         toolCalls: 1,
+        toolFailures: 1,
+        providerBudgetExhaustions: 1,
+        securityEscalations: 1,
+        contextUsageEvents: 1,
         inputTokens: 100,
         outputTokens: 25,
         totalTokens: 125,
@@ -170,6 +198,9 @@ describe("benchCommand", () => {
 
     const events = await readFile(join(outDir, "events.ndjson"), "utf8");
     expect(events).toContain("\"provider-result\"");
+    expect(events).toContain("\"provider-budget-exhausted\"");
+    expect(events).toContain("\"security-risk-escalated\"");
+    expect(events).toContain("\"context-usage\"");
     expect(await readFile(join(outDir, "stdout.txt"), "utf8")).toContain("done");
   });
 
