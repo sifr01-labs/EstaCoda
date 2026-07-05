@@ -410,6 +410,7 @@ function canDispatchBeforeRuntime(argv: readonly string[]): boolean {
     return false;
   }
   return new Set([
+    "bench",
     "browser",
     "channels",
     "curator",

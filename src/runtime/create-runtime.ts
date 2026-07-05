@@ -80,7 +80,7 @@ import type { FetchLike as WebFetchLike } from "../tools/web-tools.js";
 import type { WorkspaceFsAdapter } from "../tools/workspace-tools.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { AgentLoopInput, AgentLoopResponse } from "./agent-loop.js";
-import { AgentLoopBuilder } from "./agent-loop-builder.js";
+import { AgentLoopBuilder, type AgentLoopExecutionControls } from "./agent-loop-builder.js";
 import { DefaultChildAgentLoopFactory } from "./agent-loop-factory.js";
 import { createSessionRuntimeContext } from "./session-runtime-context.js";
 import { buildStatusViewModel, buildKeyValueBlockViewModel, kv, buildWarningErrorViewModel, buildStartupViewModel, buildTableViewModel } from "../ui/view-models/builders.js";
@@ -101,6 +101,7 @@ export type RuntimeOptions = {
   sessionDb?: SessionDB;
   closeSessionDbOnDispose?: boolean;
   workspaceRoot?: string;
+  executionControls?: AgentLoopExecutionControls;
   localSkillsRoot?: string;
   externalSkillRoots?: string[];
   mcpServers?: Record<string, MCPServerConfig>;
@@ -801,7 +802,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       imageGen: options.imageGen,
       imageGenerationFetch: options.imageGenerationFetch,
       telegramReady: options.telegramReady,
-      currentPlatform: options.currentPlatform
+      currentPlatform: options.currentPlatform,
+      executionControls: options.executionControls
     }
   });
   const subagentRegistry = new SubagentRegistry();

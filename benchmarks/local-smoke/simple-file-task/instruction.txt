@@ -1,0 +1,3 @@
+Create a file named answer.txt in the workspace containing exactly:
+
+benchmark smoke passed

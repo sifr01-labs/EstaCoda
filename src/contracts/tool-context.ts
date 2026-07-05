@@ -23,6 +23,10 @@ export type SessionToolContext = {
     rotateSession(sessionId: string): void;
   };
   homeDir?: string;
+  childProcessEnv?: {
+    mode: "inherit" | "isolated";
+    homeDir?: string;
+  };
   pythonStateRoot?: string;
   channelMediaRoot?: string;
   audioCacheRoot?: string;

@@ -1027,6 +1027,33 @@ describe("ProviderTurnLoop provider availability", () => {
   });
 });
 
+describe("ProviderTurnLoop request defaults", () => {
+  it("uses the normal default provider temperature", async () => {
+    const harness = await createCompressionHarness();
+
+    await runBasicProviderTurn(harness.loop());
+
+    const request = harness.completeSpy.mock.calls[0]?.[0] as ProviderRequest;
+    expect(request.temperature).toBe(0.2);
+    expect(request.maxTokens).toBeUndefined();
+  });
+
+  it("passes configured benchmark request defaults to the provider", async () => {
+    const harness = await createCompressionHarness();
+
+    await runBasicProviderTurn(harness.loop({
+      providerRequestDefaults: {
+        temperature: 0,
+        maxTokens: 1200
+      }
+    }));
+
+    const request = harness.completeSpy.mock.calls[0]?.[0] as ProviderRequest;
+    expect(request.temperature).toBe(0);
+    expect(request.maxTokens).toBe(1200);
+  });
+});
+
 describe("ProviderTurnLoop semantic session compression", () => {
   it("does not own persistent semantic compression or session forking", async () => {
     const harness = await createCompressionHarness();

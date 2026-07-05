@@ -363,4 +363,78 @@ describe("terminal.run hardline floor", () => {
     expect(result?.ok).toBe(false);
     expect(result?.content).toContain("privilege escalation");
   });
+
+  it("still rejects hardBlock commands when child env isolation is enabled", async () => {
+    const root = await makeTempDir();
+    const isolatedHome = join(root, "home");
+    const tools = createWorkspaceTools({
+      workspaceRoot: root,
+      childProcessEnv: {
+        mode: "isolated",
+        homeDir: isolatedHome
+      }
+    });
+    const terminal = tools.find((tool) => tool.name === "terminal.run");
+
+    const result = await terminal?.run({ command: "rm -rf /" });
+
+    expect(result?.ok).toBe(false);
+    expect(result?.content).toContain("filesystem root");
+  });
+});
+
+describe("terminal.run child process environment", () => {
+  it("inherits the parent process environment by default", async () => {
+    const root = await makeTempDir();
+    const previous = process.env.ESTACODA_BENCHMARK_TEST_SECRET;
+    process.env.ESTACODA_BENCHMARK_TEST_SECRET = "visible-parent-env";
+    const tools = createWorkspaceTools({ workspaceRoot: root, commandTimeoutMs: 2000 });
+    const terminal = tools.find((tool) => tool.name === "terminal.run");
+
+    try {
+      const result = await terminal?.run({
+        command: "node -e \"process.stdout.write(process.env.ESTACODA_BENCHMARK_TEST_SECRET || 'missing')\""
+      });
+
+      expect(result?.ok).toBe(true);
+      expect(result?.content).toBe("visible-parent-env");
+    } finally {
+      if (previous === undefined) {
+        delete process.env.ESTACODA_BENCHMARK_TEST_SECRET;
+      } else {
+        process.env.ESTACODA_BENCHMARK_TEST_SECRET = previous;
+      }
+    }
+  });
+
+  it("uses an isolated HOME and omits parent secrets when requested", async () => {
+    const root = await makeTempDir();
+    const isolatedHome = join(root, "isolated-home");
+    const previous = process.env.ESTACODA_BENCHMARK_TEST_SECRET;
+    process.env.ESTACODA_BENCHMARK_TEST_SECRET = "hidden-parent-env";
+    const tools = createWorkspaceTools({
+      workspaceRoot: root,
+      commandTimeoutMs: 2000,
+      childProcessEnv: {
+        mode: "isolated",
+        homeDir: isolatedHome
+      }
+    });
+    const terminal = tools.find((tool) => tool.name === "terminal.run");
+
+    try {
+      const result = await terminal?.run({
+        command: "node -e \"process.stdout.write([process.env.HOME, process.env.ESTACODA_BENCHMARK_TEST_SECRET || 'missing'].join('\\n'))\""
+      });
+
+      expect(result?.ok).toBe(true);
+      expect(result?.content).toBe(`${isolatedHome}\nmissing`);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.ESTACODA_BENCHMARK_TEST_SECRET;
+      } else {
+        process.env.ESTACODA_BENCHMARK_TEST_SECRET = previous;
+      }
+    }
+  });
 });

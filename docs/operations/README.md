@@ -8,6 +8,7 @@ description: "How to set up, test, maintain, and hand off work on EstaCoda."
 | Doc | Purpose |
 |-----|---------|
 | [Testing](./testing.md) | Smoke tests, eval fixtures, and verification commands |
+| [Benchmark Operations](./benchmarks.md) | Reproducible Terminal-Bench and SWE-bench run guidance |
 | [Environment](./environment.md) | Development environment setup |
 | [Voice Operations](./voice.md) | Voice provider setup, gateway commands, local STT, Discord voice, troubleshooting |
 | [Known Issues](./known-issues.md) | Blunt accounting of current limitations |
