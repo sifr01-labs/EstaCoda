@@ -48,6 +48,7 @@ pnpm run smoke:dist
 | سلوك عابر للأنظمة الفرعية | `pnpm run smoke`، ثم `pnpm run smoke:dist` بعد البناء |
 | منطق الوكيل أو eval | `pnpm run eval:fixtures` |
 | توجيه المزوّدين أو التفكير أو continuation أو message normalization | `pnpm run provider:hardening` مع اختبارات Vitest المستهدفة للملفات التي تغيّرت |
+| تغييرات benchmark harness أو adapter | `pnpm run benchmark:smoke`، `pnpm run benchmark:terminal-bench:adapter-test`، والاختبارات المستهدفة تحت `src/benchmark` و`src/cli/bench-command.test.ts` |
 | سلوك التثبيت أو التحديث | `pnpm run validate:install`، `pnpm run validate:source-install` |
 | سلوك إزالة التثبيت | `pnpm run validate:uninstall` |
 | جاهزية npm أو الحزمة | `pnpm run verify:local-bin`، `pnpm run pack:dry-run`، `pnpm run verify:package-bin` |
@@ -111,6 +112,19 @@ pnpm run smoke --fail-fast --json
 - التقاط ميكروفون حقيقي، جلسات Discord voice حية، وتنزيلات faster-whisper عند التشغيل الأول
 
 السلوك الحي يحتاج تحقق مشغّل عندما يمس التغيير مزوّدًا حيًا، قناة، backend للمتصفح، مسار صوت، مثبّتًا، مسار تحديث، أو أثر حزمة.
+
+## فحوصات Benchmark
+
+فحوصات benchmark هي مسارات تحقق للمشغّل، وليست UX عاديًا للمستخدم. المسارات الآمنة لـ CI هي:
+
+```bash
+pnpm run benchmark:smoke
+pnpm run benchmark:terminal-bench:adapter-test
+```
+
+استخدم Harbor يدويًا لتشغيل Terminal-Bench smoke وbaseline الكامل. لا تشغّل Terminal-Bench الكامل في CI العادي.
+
+راجع [Benchmarking](./benchmarking.md) للحصول على runbook قابل للإعادة، وعقد artifacts، وقاعدة no-tuning، وإرشادات الإبلاغ العام.
 
 ## Eval fixtures
 
