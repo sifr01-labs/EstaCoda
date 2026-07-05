@@ -5,6 +5,17 @@ import { assessHardlineFloor } from "../security/command-safety.js";
 
 export type PendingApprovalStatus = "pending" | "approved" | "denied" | "expired";
 export type PendingApprovalChannel = "telegram" | "discord" | "email" | "cli";
+export type PendingApprovalKind = "command" | "managed_python_capability_install";
+
+export type ManagedPythonCapabilityApprovalPayload = {
+  capabilityId: string;
+  groups: string[];
+  packages: string[];
+  estimatedInstallSizeMb?: number;
+  skillName?: string;
+  reason?: string;
+  repairCommand?: string;
+};
 
 export type PendingApproval = {
   id: string;
@@ -14,6 +25,8 @@ export type PendingApproval = {
   commandHash: string;
   commandPayload?: string;
   toolName: string;
+  approvalKind?: PendingApprovalKind;
+  requestPayload?: ManagedPythonCapabilityApprovalPayload;
   requestedAt: Date;
   expiresAt: Date;
   status: PendingApprovalStatus;
@@ -36,6 +49,8 @@ type PendingApprovalRow = {
   command_hash: string;
   command_payload: string | null;
   tool_name: string;
+  approval_kind: PendingApprovalKind;
+  request_payload: string | null;
   requested_at: string;
   expires_at: string;
   status: PendingApprovalStatus;
@@ -96,38 +111,45 @@ export class GatewayApprovalQueue {
   ): Promise<PendingApproval> {
     const profileId = requireScopeValue(approval.profileId, "profileId");
     const sessionId = requireScopeValue(approval.sessionId, "sessionId");
-    const command = approval.commandPayload ?? approval.commandPreview;
-    const hardline = assessHardlineFloor(command);
-    if (hardline !== undefined) {
-      return {
-        ...approval,
-        id: this.#idFactory(),
-        profileId,
-        sessionId,
-        commandPayload: undefined,
-        status: "denied",
-        resolvedAt: this.#now(),
-        resolvedBy: "security-policy"
-      };
-    }
+    const approvalKind = approval.approvalKind ?? "command";
+    if (approvalKind === "command") {
+      const command = approval.commandPayload ?? approval.commandPreview;
+      const hardline = assessHardlineFloor(command);
+      if (hardline !== undefined) {
+        return {
+          ...approval,
+          id: this.#idFactory(),
+          profileId,
+          sessionId,
+          approvalKind,
+          commandPayload: undefined,
+          requestPayload: undefined,
+          status: "denied",
+          resolvedAt: this.#now(),
+          resolvedBy: "security-policy"
+        };
+      }
 
-    const preflight = this.#controller.preflightGatewayApproval({
-      toolName: approval.toolName,
-      commandPreview: approval.commandPreview,
-      commandPayload: approval.commandPayload
-    });
+      const preflight = this.#controller.preflightGatewayApproval({
+        toolName: approval.toolName,
+        commandPreview: approval.commandPreview,
+        commandPayload: approval.commandPayload
+      });
 
-    if (preflight?.decision === "deny") {
-      return {
-        ...approval,
-        id: this.#idFactory(),
-        profileId,
-        sessionId,
-        commandPayload: undefined,
-        status: "denied",
-        resolvedAt: this.#now(),
-        resolvedBy: "security-policy"
-      };
+      if (preflight?.decision === "deny") {
+        return {
+          ...approval,
+          id: this.#idFactory(),
+          profileId,
+          sessionId,
+          approvalKind,
+          commandPayload: undefined,
+          requestPayload: undefined,
+          status: "denied",
+          resolvedAt: this.#now(),
+          resolvedBy: "security-policy"
+        };
+      }
     }
 
     const id = this.#idFactory();
@@ -141,6 +163,8 @@ export class GatewayApprovalQueue {
           command_hash,
           command_payload,
           tool_name,
+          approval_kind,
+          request_payload,
           requested_at,
           expires_at,
           status,
@@ -148,7 +172,7 @@ export class GatewayApprovalQueue {
           resolved_by,
           channel,
           chat_id
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', null, null, ?, ?)`
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', null, null, ?, ?)`
       )
       .run(
         id,
@@ -158,6 +182,8 @@ export class GatewayApprovalQueue {
         approval.commandHash,
         approval.commandPayload ?? null,
         approval.toolName,
+        approvalKind,
+        approval.requestPayload === undefined ? null : JSON.stringify(approval.requestPayload),
         approval.requestedAt.toISOString(),
         approval.expiresAt.toISOString(),
         approval.channel,
@@ -226,7 +252,8 @@ export class GatewayApprovalQueue {
             set status = ?,
                 resolved_at = ?,
                 resolved_by = ?,
-                command_payload = null
+                command_payload = null,
+                request_payload = null
             where id = ?
               and profile_id = ?
               and status = 'pending'
@@ -239,7 +266,8 @@ export class GatewayApprovalQueue {
             set status = ?,
                 resolved_at = ?,
                 resolved_by = ?,
-                command_payload = null
+                command_payload = null,
+                request_payload = null
             where id = ?
               and profile_id = ?
               and session_id = ?
@@ -262,7 +290,8 @@ export class GatewayApprovalQueue {
         set status = 'expired',
             resolved_at = ?,
             resolved_by = coalesce(resolved_by, 'system-expiry'),
-            command_payload = null
+            command_payload = null,
+            request_payload = null
         where status = 'pending' and expires_at <= ?`
       )
       .run(this.#now().toISOString(), this.#now().toISOString());
@@ -315,7 +344,8 @@ export class GatewayApprovalQueue {
         set status = 'expired',
             resolved_at = ?,
             resolved_by = coalesce(resolved_by, 'system-expiry'),
-            command_payload = null
+            command_payload = null,
+            request_payload = null
         where id = ? and status = 'pending'`
       )
       .run(this.#now().toISOString(), id);
@@ -366,6 +396,10 @@ function rowToPendingApproval(
     commandHash: row.command_hash,
     commandPayload: options.includePayload ? row.command_payload ?? undefined : undefined,
     toolName: row.tool_name,
+    approvalKind: row.approval_kind ?? "command",
+    requestPayload: options.includePayload && row.request_payload !== null
+      ? parseManagedPythonCapabilityApprovalPayload(row.request_payload)
+      : undefined,
     requestedAt: new Date(row.requested_at),
     expiresAt: new Date(row.expires_at),
     status: row.status,
@@ -374,6 +408,33 @@ function rowToPendingApproval(
     channel: row.channel,
     chatId: row.chat_id ?? undefined
   };
+}
+
+function parseManagedPythonCapabilityApprovalPayload(
+  value: string
+): ManagedPythonCapabilityApprovalPayload | undefined {
+  try {
+    const parsed = JSON.parse(value) as Partial<ManagedPythonCapabilityApprovalPayload>;
+    if (typeof parsed.capabilityId !== "string" || parsed.capabilityId.trim() === "") {
+      return undefined;
+    }
+    if (!Array.isArray(parsed.groups) || !Array.isArray(parsed.packages)) {
+      return undefined;
+    }
+    return {
+      capabilityId: parsed.capabilityId,
+      groups: parsed.groups.filter((item): item is string => typeof item === "string"),
+      packages: parsed.packages.filter((item): item is string => typeof item === "string"),
+      estimatedInstallSizeMb: typeof parsed.estimatedInstallSizeMb === "number"
+        ? parsed.estimatedInstallSizeMb
+        : undefined,
+      skillName: typeof parsed.skillName === "string" ? parsed.skillName : undefined,
+      reason: typeof parsed.reason === "string" ? parsed.reason : undefined,
+      repairCommand: typeof parsed.repairCommand === "string" ? parsed.repairCommand : undefined
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 function requireScopeValue(value: string | undefined, name: string): string {

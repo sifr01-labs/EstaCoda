@@ -37,6 +37,16 @@ export function renderApprovalActions(approvalId: string): ChannelTextAction[][]
   ];
 }
 
+export function renderSetupApprovalActions(approvalId: string): ChannelTextAction[][] {
+  const actions = renderApprovalActions(approvalId);
+  return [
+    [
+      { label: "Install", value: actions[0]?.[0]?.value ?? approvalActionValue(approvalId, "approved", "once") },
+      { label: "Deny", value: actions[1]?.[1]?.value ?? approvalActionValue(approvalId, "denied") }
+    ]
+  ];
+}
+
 export function parseApprovalAction(value: string):
   | { approvalId: string; decision: ApprovalActionDecision; scope?: ApprovalActionScope }
   | undefined {

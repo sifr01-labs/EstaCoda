@@ -86,6 +86,21 @@ export type AgentLoopResponse = {
   projectContext: ProjectContextSnapshot | undefined;
   providerExecution?: ProviderExecutionResult;
   progress: string[];
+  setupApprovals?: AgentLoopSetupApprovalRequest[];
+};
+
+export type AgentLoopSetupApprovalRequest =
+  | AgentLoopPythonCapabilitySetupApprovalRequest;
+
+export type AgentLoopPythonCapabilitySetupApprovalRequest = {
+  kind: "managed-python-capability-install";
+  skillName?: string;
+  capabilityId: string;
+  groups: string[];
+  packages: string[];
+  estimatedInstallSizeMb?: number;
+  reason?: string;
+  repairCommand?: string;
 };
 
 export type AgentLoopOptions = {
@@ -617,6 +632,7 @@ export class AgentLoop {
       context,
       projectContext: this.#projectContext
     });
+    const setupApprovals = buildSetupApprovalRequests(selectedSkillSetup, selectedSkill?.name);
     const deterministicImageGenerationRan = deterministicNativeTools.executions.some((execution) => execution.tool.name === "image.generate");
     const providerTools = this.#model?.supportsTools === true ? this.#providerTools : [];
     const preflightCompression = await this.#compactBeforeProviderTurn(input.signal, input.onEvent);
@@ -741,6 +757,7 @@ export class AgentLoop {
           skillOutcomes,
           artifacts,
           providerExecution: effectiveProviderExecution,
+          setupApprovals,
           progress: [
             ...fallbackResponse.progress,
             ...renderArtifactProgress(artifacts),
@@ -756,6 +773,7 @@ export class AgentLoop {
             toolPlans,
             skillOutcomes,
             artifacts,
+            setupApprovals,
             text: appendArtifactSummary(fallbackResponse.text, artifacts),
             progress: [
               ...fallbackResponse.progress,
@@ -774,6 +792,7 @@ export class AgentLoop {
             skillOutcomes,
             artifacts,
             providerExecution: effectiveProviderExecution,
+            setupApprovals,
             progress: [
               ...fallbackResponse.progress,
               ...renderArtifactProgress(artifacts),
@@ -1346,6 +1365,28 @@ function inferInitialRiskClass(skill: LoadedSkill | SkillDefinition | undefined)
   }
 
   return "workspace-write";
+}
+
+function buildSetupApprovalRequests(
+  setup: SkillSetupContext | undefined,
+  skillName: string | undefined
+): AgentLoopSetupApprovalRequest[] {
+  if (setup === undefined) {
+    return [];
+  }
+
+  return setup.pythonCapabilities
+    .filter((capability) => capability.required && capability.status !== "available")
+    .map((capability) => ({
+      kind: "managed-python-capability-install" as const,
+      skillName,
+      capabilityId: capability.id,
+      groups: [...capability.groups],
+      packages: [...capability.packages],
+      estimatedInstallSizeMb: capability.estimatedInstallSizeMb,
+      reason: capability.reason ?? capability.message,
+      repairCommand: capability.repairCommand
+    }));
 }
 
 function outcomeFromResponse(response: AgentLoopResponse): {

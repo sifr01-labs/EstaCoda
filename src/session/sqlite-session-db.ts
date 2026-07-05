@@ -680,6 +680,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     this.#runMigrationStep(4, "v0.9-schema-v4-cron-executions", () => this.#migrateV4());
     this.#runMigrationStep(5, "v0.9-schema-v5-pending-approvals", () => this.#migrateV5());
     this.#runMigrationStep(6, "v0.9-schema-v6-session-lineage", () => this.#migrateV6());
+    this.#runMigrationStep(7, "v0.9-schema-v7-typed-pending-approvals", () => this.#migrateV7());
   }
 
   #withMigrationLock(migrate: () => void): void {
@@ -827,6 +828,17 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     }
     if (!colNames.has("end_reason")) {
       this.#db.exec("alter table sessions add column end_reason text");
+    }
+  }
+
+  #migrateV7(): void {
+    const rows = this.#db.query("pragma table_info(pending_approvals)").all() as Array<{ name: string }>;
+    const colNames = new Set(rows.map((row) => row.name));
+    if (!colNames.has("approval_kind")) {
+      this.#db.exec("alter table pending_approvals add column approval_kind text not null default 'command'");
+    }
+    if (!colNames.has("request_payload")) {
+      this.#db.exec("alter table pending_approvals add column request_payload text");
     }
   }
 
