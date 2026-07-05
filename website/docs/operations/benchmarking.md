@@ -74,6 +74,15 @@ harbor run \
 
 The goal is harness proof, not a score.
 
+### Harbor Sharp Edges
+
+- Harbor needs Docker or an equivalent container runtime. On macOS/Colima, keep Harbor's host-side job and result directory on a Docker-shared workspace path, such as a checkout-local `.harbor-jobs/` directory. Avoid host `/tmp` for verifier-bearing runs if Harbor reports `RewardFileNotFoundError`.
+- `ESTACODA_BENCH_COMMAND` runs inside the Terminal-Bench task container. Do not point it at macOS `node_modules`, host-native binaries, or a host-only checkout path. Use a Linux-built runtime or build/install EstaCoda inside the container.
+- Live model runs need explicit provider configuration: model id, credentials, temperature, and any max-token setting. Do not rely on a real user `~/.estacoda` home.
+- Some providers constrain temperature. Record the actual value and set `ESTACODA_BENCH_TEMPERATURE` to the provider-supported value.
+- Long tasks may need explicit provider-loop budgets. Use `ESTACODA_BENCH_MAX_PROVIDER_ITERATIONS`, `ESTACODA_BENCH_MAX_PROVIDER_TOOL_CALLS`, and `ESTACODA_BENCH_MAX_PROVIDER_WALL_CLOCK_MS` when those limits are part of the run configuration.
+- For one-task probes, prefer passing `ESTACODA_BENCH_TASK_ID` if Harbor does not supply task identity to the installed-agent context.
+
 ## Full Baseline
 
 After the smoke passes, run the full Terminal-Bench 2.0 baseline with the same model settings:

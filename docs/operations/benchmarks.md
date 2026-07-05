@@ -118,6 +118,17 @@ export ESTACODA_BENCH_COMMAND="node /path/to/estacoda/dist/index.js"
 
 The smoke goal is not a public score. The goal is to prove that EstaCoda can run under Harbor without harness failures and produce reproducible artifacts.
 
+### Harbor Sharp Edges
+
+Document these details in every reproducible run note:
+
+- Harbor needs a working Docker-capable runtime. On macOS/Colima, keep Harbor's host-side job and result directory on a Docker-shared workspace path, such as a checkout-local `.harbor-jobs/` directory. Avoid host `/tmp` for verifier-bearing runs if the verifier reports `RewardFileNotFoundError`; that failure can mean the task container wrote the reward file but the host-side verifier cannot see the mounted result.
+- The EstaCoda process runs inside the Terminal-Bench task container. Do not point `ESTACODA_BENCH_COMMAND` at macOS `node_modules`, host-native binaries, or a host-only checkout path. Use a Linux-built runtime available in the task container, or build/install EstaCoda inside the container with `ESTACODA_HARBOR_INSTALL_COMMAND`.
+- Live runs need explicit provider configuration. Pass `ESTACODA_BENCH_MODEL`, provider credentials, `ESTACODA_BENCH_TEMPERATURE`, and any max-token setting through the Harbor agent environment or an explicit benchmark home. Do not rely on a real user `~/.estacoda` home.
+- Some providers constrain temperature. Record the actual value and set `ESTACODA_BENCH_TEMPERATURE` accordingly.
+- Long tasks may exhaust default provider-loop budgets before Harbor verification. Use `ESTACODA_BENCH_MAX_PROVIDER_ITERATIONS`, `ESTACODA_BENCH_MAX_PROVIDER_TOOL_CALLS`, and `ESTACODA_BENCH_MAX_PROVIDER_WALL_CLOCK_MS` when a run intentionally needs larger limits.
+- Prefer explicit task identity for one-task probes. If Harbor does not expose the task id to the installed-agent context, pass `ESTACODA_BENCH_TASK_ID` so artifacts and summaries do not fall back to `unknown-task`.
+
 ## Full Baseline
 
 After the smoke passes, run all Terminal-Bench 2.0 tasks with the same settings:

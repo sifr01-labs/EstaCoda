@@ -43,6 +43,15 @@ export ESTACODA_HARBOR_INSTALL_COMMAND="corepack enable && pnpm install --frozen
 export ESTACODA_BENCH_COMMAND="node /path/to/estacoda/dist/index.js"
 ```
 
+## Harbor Sharp Edges
+
+- Harbor requires a working Docker-capable environment. On macOS/Colima, keep Harbor's host-side job and result directory on a Docker-shared workspace path, such as a checkout-local `.harbor-jobs/` directory. Avoid host `/tmp` for verifier-bearing runs if the verifier reports `RewardFileNotFoundError`; the task container may write the reward file while the host-side verifier cannot see it.
+- The EstaCoda command runs inside the Terminal-Bench task container. Do not point `ESTACODA_BENCH_COMMAND` at macOS `node_modules` or host-native binaries. Use a Linux-built runtime available in the task container, or install/build EstaCoda inside the container through `ESTACODA_HARBOR_INSTALL_COMMAND`.
+- Live model runs need explicit provider configuration. Set `ESTACODA_BENCH_MODEL`, provider credentials, temperature, and any required max-token setting through the Harbor agent environment instead of relying on a real user home.
+- Some providers constrain temperature. Keep the temperature in the recorded run configuration and override `ESTACODA_BENCH_TEMPERATURE` when the provider requires a specific value.
+- Long Terminal-Bench tasks may need explicit provider budgets. Use `ESTACODA_BENCH_MAX_PROVIDER_ITERATIONS`, `ESTACODA_BENCH_MAX_PROVIDER_TOOL_CALLS`, and `ESTACODA_BENCH_MAX_PROVIDER_WALL_CLOCK_MS` to make those limits intentional and reproducible.
+- Prefer explicit task identity when probing a single task. If Harbor does not supply a task id to the installed-agent context, pass `ESTACODA_BENCH_TASK_ID` so EstaCoda artifacts do not fall back to `unknown-task`.
+
 ## Configuration
 
 Supported environment variables:

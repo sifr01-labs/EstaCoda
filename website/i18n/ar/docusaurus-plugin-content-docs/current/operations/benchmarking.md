@@ -74,6 +74,15 @@ harbor run \
 
 الهدف هو إثبات سلامة harness، لا الحصول على score.
 
+### نقاط Harbor الحادة
+
+- يحتاج Harbor إلى Docker أو runtime حاويات مكافئ. على macOS/Colima، اجعل job/result directory الخاص بـ Harbor على مسار workspace مشترك مع Docker، مثل `.harbor-jobs/` داخل checkout. تجنب host `/tmp` في تشغيلات verifier إذا ظهر `RewardFileNotFoundError`.
+- يعمل `ESTACODA_BENCH_COMMAND` داخل حاوية مهمة Terminal-Bench. لا تجعله يشير إلى `node_modules` الخاصة بـ macOS، أو binaries خاصة بالمضيف، أو مسار checkout غير موجود داخل الحاوية. استخدم runtime مبنيًا لـ Linux أو ابن/ثبّت EstaCoda داخل الحاوية.
+- تحتاج تشغيلات النموذج الحية إلى إعداد provider صريح: model id، credentials، temperature، وأي max-token setting. لا تعتمد على real user `~/.estacoda` home.
+- بعض providers تفرض قيمة temperature محددة. سجّل القيمة الفعلية واضبط `ESTACODA_BENCH_TEMPERATURE` على قيمة يدعمها provider.
+- قد تحتاج المهام الطويلة إلى provider-loop budgets صريحة. استخدم `ESTACODA_BENCH_MAX_PROVIDER_ITERATIONS` و`ESTACODA_BENCH_MAX_PROVIDER_TOOL_CALLS` و`ESTACODA_BENCH_MAX_PROVIDER_WALL_CLOCK_MS` عندما تكون هذه الحدود جزءًا من run configuration.
+- في one-task probes، فضّل تمرير `ESTACODA_BENCH_TASK_ID` إذا لم يمرر Harbor task identity إلى installed-agent context.
+
 ## Full Baseline
 
 بعد نجاح smoke، شغّل baseline الكامل لـ Terminal-Bench 2.0 بالإعدادات نفسها:
