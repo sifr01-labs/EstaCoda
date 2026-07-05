@@ -796,6 +796,10 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
   }
 
   #migrateV5(): void {
+    this.#ensurePendingApprovalsTable();
+  }
+
+  #ensurePendingApprovalsTable(): void {
     this.#db.exec(`
       create table if not exists pending_approvals (
         id text primary key,
@@ -832,6 +836,8 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
   }
 
   #migrateV7(): void {
+    this.#ensurePendingApprovalsTable();
+
     const rows = this.#db.query("pragma table_info(pending_approvals)").all() as Array<{ name: string }>;
     const colNames = new Set(rows.map((row) => row.name));
     if (!colNames.has("approval_kind")) {

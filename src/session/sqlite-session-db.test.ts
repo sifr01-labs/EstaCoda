@@ -268,6 +268,12 @@ describe("SQLiteSessionDB", () => {
         endedAt: expect.any(String),
         endReason: "compression"
       });
+
+      const pendingApprovalColumns = new Set(
+        (migrated.db.query("pragma table_info(pending_approvals)").all() as Array<{ name: string }>).map((row) => row.name)
+      );
+      expect(pendingApprovalColumns.has("approval_kind")).toBe(true);
+      expect(pendingApprovalColumns.has("request_payload")).toBe(true);
     } finally {
       migrated.close();
     }
