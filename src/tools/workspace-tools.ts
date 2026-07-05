@@ -3,11 +3,13 @@ import { lstat, mkdir, readdir, readFile, realpath, stat, writeFile } from "node
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { platform } from "node:os";
 import type { EnvironmentType } from "../contracts/security.js";
+import type { SessionToolContext } from "../contracts/tool-context.js";
 import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
 import type { FileChangePreviewViewModel } from "../contracts/view-model.js";
 import type { FileStateOperationKind, FileStateTracker } from "../delegation/file-state-tracker.js";
 import { isLikelyBinary, isTextyPath } from "../context/context-security.js";
 import { assessHardlineFloor } from "../security/command-safety.js";
+import { buildSafeChildEnv } from "../security/process-env.js";
 import { createTerminalInspectTool } from "./terminal-inspect-tool.js";
 import { errorResult, resolveWorkspacePath } from "./workspace-paths.js";
 
@@ -21,6 +23,7 @@ export type WorkspaceToolOptions = {
   sessionId?: string | (() => string);
   parentSessionId?: string;
   childSessionId?: string | (() => string | undefined);
+  childProcessEnv?: SessionToolContext["childProcessEnv"];
 };
 
 export type WorkspaceFsAdapter = {
@@ -336,7 +339,12 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
           return errorResult(blockedReason);
         }
 
-        return runCommand(await realpath(root), input.command, Math.min(input.timeoutMs ?? commandTimeoutMs, commandTimeoutMs));
+        return runCommand(
+          await realpath(root),
+          input.command,
+          Math.min(input.timeoutMs ?? commandTimeoutMs, commandTimeoutMs),
+          options.childProcessEnv
+        );
       }
     }
   ];
@@ -352,7 +360,8 @@ export const workspaceToolProvider: SessionToolProvider = {
       fileStateTracker: ctx.fileStateTracker,
       sessionId: ctx.currentSessionId,
       parentSessionId: ctx.parentSessionId,
-      childSessionId: ctx.childSessionId
+      childSessionId: ctx.childSessionId,
+      childProcessEnv: ctx.childProcessEnv
     });
   }
 };
@@ -711,15 +720,17 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return typeof error === "object" && error !== null && "code" in error;
 }
 
-async function runCommand(root: string, command: string, timeoutMs: number): Promise<ToolResult> {
+async function runCommand(
+  root: string,
+  command: string,
+  timeoutMs: number,
+  childProcessEnv: WorkspaceToolOptions["childProcessEnv"]
+): Promise<ToolResult> {
   return new Promise((resolveResult) => {
     const shell = resolveShell();
     const child = spawn(shell.command, [...shell.args, command], {
       cwd: root,
-      env: {
-        ...process.env,
-        PWD: root
-      },
+      env: buildTerminalRunEnv(root, childProcessEnv),
       stdio: ["ignore", "pipe", "pipe"]
     });
     const chunks: Buffer[] = [];
@@ -773,6 +784,23 @@ async function runCommand(root: string, command: string, timeoutMs: number): Pro
       });
     });
   });
+}
+
+function buildTerminalRunEnv(
+  root: string,
+  childProcessEnv: WorkspaceToolOptions["childProcessEnv"]
+): NodeJS.ProcessEnv {
+  if (childProcessEnv?.mode === "isolated") {
+    return buildSafeChildEnv({
+      homeDir: childProcessEnv.homeDir,
+      extra: { PWD: root }
+    });
+  }
+
+  return {
+    ...process.env,
+    PWD: root
+  };
 }
 
 function terminalContextSummary(input: {

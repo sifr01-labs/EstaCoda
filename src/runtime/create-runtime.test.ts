@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import { DEFAULT_PROVIDER_TURN_BUDGETS } from "./agent-loop-builder.js";
 import { createRuntime, createDefaultProviderRegistry, type RuntimeOptions } from "./create-runtime.js";
 import { normalizeMemoryConfig } from "../config/memory-config.js";
 import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
@@ -312,10 +313,13 @@ async function writeProfileMemoryFixture(
 }
 
 describe("createRuntime provider turn budgets", () => {
-  it("passes the expanded default budgets to ProviderTurnLoop", async () => {
-    const source = await readFile(new URL("./agent-loop-builder.ts", import.meta.url), "utf8");
-
-    expect(source).toMatch(/new ProviderTurnLoop\(options\)[\s\S]*?budgets: \{\s*maxProviderIterations: 45,\s*maxProviderToolCalls: 100,\s*maxRepeatedToolFailures: 5,\s*maxProviderWallClockMs: 300_000\s*\}/u);
+  it("keeps the expanded default budgets explicit", () => {
+    expect(DEFAULT_PROVIDER_TURN_BUDGETS).toEqual({
+      maxProviderIterations: 45,
+      maxProviderToolCalls: 100,
+      maxRepeatedToolFailures: 5,
+      maxProviderWallClockMs: 300_000
+    });
   });
 });
 

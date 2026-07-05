@@ -367,6 +367,52 @@ describe("AgentLoopBuilder", () => {
     ]);
   });
 
+  it("passes explicit benchmark execution controls to the provider turn loop", async () => {
+    const captured: Array<{
+      budgets: unknown;
+      providerRequestDefaults: unknown;
+    }> = [];
+    const harness = await createBuilderHarness({
+      executionControls: {
+        providerBudgets: {
+          maxProviderIterations: 7,
+          maxProviderWallClockMs: 42_000
+        },
+        providerRequestDefaults: {
+          temperature: 0,
+          maxTokens: 1200
+        }
+      },
+      factories: {
+        providerTurnLoop(options) {
+          captured.push({
+            budgets: options.budgets,
+            providerRequestDefaults: options.providerRequestDefaults
+          });
+          return { run: vi.fn() } as never;
+        },
+        agentLoop: () => ({ handle: vi.fn() }) as never
+      }
+    });
+
+    await harness.build("benchmark-session");
+
+    expect(captured).toEqual([
+      {
+        budgets: {
+          maxProviderIterations: 7,
+          maxProviderToolCalls: 100,
+          maxRepeatedToolFailures: 5,
+          maxProviderWallClockMs: 42_000
+        },
+        providerRequestDefaults: {
+          temperature: 0,
+          maxTokens: 1200
+        }
+      }
+    ]);
+  });
+
   it("uses per-session provider routes without mutating shared substrate routes", async () => {
     const parentPrimaryRoute = { ...mainRoute, id: "parent-primary" };
     const childPrimaryRoute = {
@@ -547,6 +593,7 @@ async function createBuilderHarness(input: {
   mcpTools?: RegisteredTool[];
   skillRegistry?: SkillRegistry;
   routes?: AgentLoopRuntimeSubstrate["routes"];
+  executionControls?: AgentLoopRuntimeSubstrate["executionControls"];
   factories?: ConstructorParameters<typeof AgentLoopBuilder>[0]["factories"];
   sessionRecallServiceFactory?: AgentLoopRuntimeSubstrate["sessionRecallServiceFactory"];
   memoryFileCompactionServiceFactory?: AgentLoopRuntimeSubstrate["memoryFileCompactionServiceFactory"];
@@ -600,6 +647,7 @@ async function createBuilderHarness(input: {
       mainRoute,
       providerPreferences: { providerOrder: ["openai"] }
     },
+    executionControls: input.executionControls,
     mcpTools: input.mcpTools ?? [],
     skillRegistry,
     localSkillsRoot: join(workspaceRoot, "skills"),

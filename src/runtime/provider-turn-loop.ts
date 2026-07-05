@@ -53,6 +53,11 @@ export type ProviderTurnLoopBudgets = {
   maxProviderWallClockMs: number;
 };
 
+export type ProviderTurnLoopRequestDefaults = {
+  temperature?: number;
+  maxTokens?: number;
+};
+
 export type ProviderTurnLoopOptions = {
   providerExecutor: ProviderExecutor | undefined;
   model: ModelProfile | undefined;
@@ -79,6 +84,7 @@ export type ProviderTurnLoopOptions = {
     responseLanguage: AgentResponseLanguage;
   } | undefined;
   budgets: ProviderTurnLoopBudgets;
+  providerRequestDefaults?: ProviderTurnLoopRequestDefaults;
 };
 
 export class ProviderTurnLoop {
@@ -99,6 +105,7 @@ export class ProviderTurnLoop {
   readonly #ui: ProviderTurnLoopOptions["ui"];
   readonly #agentProfile: ProviderTurnLoopOptions["agentProfile"];
   readonly #budgets: ProviderTurnLoopBudgets;
+  readonly #providerRequestDefaults: ProviderTurnLoopRequestDefaults;
   #lastPromptTokens = 0;
   #lastActualPromptTokens: number | undefined;
 
@@ -120,6 +127,7 @@ export class ProviderTurnLoop {
     this.#ui = options.ui;
     this.#agentProfile = options.agentProfile;
     this.#budgets = options.budgets;
+    this.#providerRequestDefaults = options.providerRequestDefaults ?? {};
   }
 
   canRunProvider(): boolean {
@@ -570,7 +578,7 @@ export class ProviderTurnLoop {
       provider: this.#model.provider,
       model: this.#model.id,
       messages: prompt.messages,
-      temperature: 0.2,
+      ...this.#providerRequestOptions(),
       tools: this.#model.supportsTools && input.providerTools.length > 0
         ? input.providerTools
         : undefined
@@ -708,7 +716,7 @@ export class ProviderTurnLoop {
       provider: this.#model.provider,
       model: this.#model.id,
       messages: prompt.messages,
-      temperature: 0.2,
+      ...this.#providerRequestOptions(),
       tools: this.#model.supportsTools && input.providerTools.length > 0
         ? input.providerTools
         : undefined
@@ -776,6 +784,15 @@ export class ProviderTurnLoop {
     }
 
     return execution;
+  }
+
+  #providerRequestOptions(): Pick<ProviderRequest, "temperature" | "maxTokens"> {
+    return {
+      temperature: this.#providerRequestDefaults.temperature ?? 0.2,
+      ...(this.#providerRequestDefaults.maxTokens === undefined
+        ? {}
+        : { maxTokens: this.#providerRequestDefaults.maxTokens })
+    };
   }
 
   async #completeProviderRequestWithFinalizationRetries(input: {

@@ -49,7 +49,7 @@ import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { AgentLoop, type AgentLoopOptions } from "./agent-loop.js";
 import { IntentRouter } from "./intent-router.js";
 import { NativeToolExecutor } from "./native-tool-executor.js";
-import { ProviderTurnLoop, type ProviderTurnLoopOptions } from "./provider-turn-loop.js";
+import { ProviderTurnLoop, type ProviderTurnLoopBudgets, type ProviderTurnLoopOptions, type ProviderTurnLoopRequestDefaults } from "./provider-turn-loop.js";
 import { RunRecorder } from "./run-recorder.js";
 import { RuntimeRouter } from "./runtime-router.js";
 import { SkillPlaybookRunner } from "./skill-playbook-runner.js";
@@ -68,6 +68,19 @@ export type AgentLoopRouteInput = {
 };
 
 export type AgentLoopSessionRouteOverride = AgentLoopRouteInput;
+
+export const DEFAULT_PROVIDER_TURN_BUDGETS: ProviderTurnLoopBudgets = {
+  maxProviderIterations: 45,
+  maxProviderToolCalls: 100,
+  maxRepeatedToolFailures: 5,
+  maxProviderWallClockMs: 300_000
+};
+
+export type AgentLoopExecutionControls = {
+  providerBudgets?: Partial<ProviderTurnLoopBudgets>;
+  providerRequestDefaults?: ProviderTurnLoopRequestDefaults;
+  childProcessEnv?: SessionToolContext["childProcessEnv"];
+};
 
 export type AgentLoopSkillVisibilityInput = {
   skillRegistry: SkillRegistry;
@@ -167,6 +180,7 @@ export type AgentLoopRuntimeSubstrate = {
   imageGenerationFetch?: ImageGenerationFetchLike;
   telegramReady?: boolean;
   currentPlatform?: string;
+  executionControls?: AgentLoopExecutionControls;
 };
 
 export type AgentLoopSessionServiceInput = {
@@ -289,6 +303,7 @@ export class AgentLoopBuilder {
         childSessionId: input.parentSessionId === undefined ? undefined : input.sessionId,
         currentSessionId: () => sessionRuntimeContext.currentSessionId(),
         homeDir: substrate.homeDir,
+        childProcessEnv: substrate.executionControls?.childProcessEnv,
         pythonStateRoot: substrate.pythonStateRoot,
         channelMediaRoot: substrate.channelMediaRoot,
         audioCacheRoot: substrate.audioCacheRoot,
@@ -483,11 +498,10 @@ export class AgentLoopBuilder {
       ui: input.ui,
       agentProfile: input.agentProfile,
       budgets: {
-        maxProviderIterations: 45,
-        maxProviderToolCalls: 100,
-        maxRepeatedToolFailures: 5,
-        maxProviderWallClockMs: 300_000
-      }
+        ...DEFAULT_PROVIDER_TURN_BUDGETS,
+        ...substrate.executionControls?.providerBudgets
+      },
+      providerRequestDefaults: substrate.executionControls?.providerRequestDefaults
     });
     const skillPlaybookRunner = (this.#factories.skillPlaybookRunner ?? ((options) => new SkillPlaybookRunner(options)))({
       toolExecutor,
@@ -668,6 +682,7 @@ function buildPreSkillVisibilityToolContext(input: SessionToolContext): SessionT
     childSessionId: input.childSessionId,
     currentSessionId: input.currentSessionId,
     homeDir: input.homeDir,
+    childProcessEnv: input.childProcessEnv,
     pythonStateRoot: input.pythonStateRoot,
     channelMediaRoot: input.channelMediaRoot,
     audioCacheRoot: input.audioCacheRoot,
