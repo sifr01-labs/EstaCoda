@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "file-create",
+  "benchmark": {
+    "name": "local-smoke",
+    "version": "0.1.0",
+    "taskId": "file-create"
+  },
+  "model": "openai/gpt-test",
+  "instruction": "Create a file named answer.txt containing exactly: benchmark smoke passed",
+  "workspace": {
+    "files": {
+      "README.md": "Local benchmark smoke workspace.\n"
+    }
+  },
+  "expected": {
+    "files": [
+      {
+        "path": "answer.txt",
+        "content": "benchmark smoke passed\n"
+      }
+    ]
+  }
+}

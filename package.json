@@ -59,6 +59,7 @@
     "smoke": "node --import tsx src/smoke.ts",
     "smoke:dist": "node dist/smoke.js",
     "smoke:bun": "bun src/smoke.ts",
+    "benchmark:smoke": "vitest run --config vitest.node.config.ts src/benchmark/local-smoke.test.ts",
     "audit:esm": "node scripts/audit-esm.mjs dist",
     "audit:runtime-imports": "node scripts/audit-runtime-imports.mjs",
     "test": "vitest run --config vitest.node.config.ts",
