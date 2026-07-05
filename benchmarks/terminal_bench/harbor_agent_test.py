@@ -9,6 +9,7 @@ from benchmarks.terminal_bench.harbor_agent import (
     build_bench_args,
     build_config,
     build_installed_agent_command,
+    resolve_agent_config_env,
 )
 from benchmarks.terminal_bench.estacoda_harbor_agent import EstaCodaAgent
 
@@ -60,6 +61,21 @@ class EstaCodaHarborAgentTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("--isolated-home", args)
         self.assertNotIn("--home", args)
 
+    def test_agent_extra_env_overrides_host_env_for_config(self):
+        agent = SimpleNamespace(_extra_env={
+            "ESTACODA_BENCH_COMMAND": "/estacoda/node dist/index.js",
+            "ESTACODA_BENCH_TASK_ID": "from-extra-env",
+        })
+
+        with patch.dict("os.environ", {
+            "ESTACODA_BENCH_COMMAND": "estacoda",
+            "ESTACODA_BENCH_TASK_ID": "from-host-env",
+        }, clear=True):
+            config = build_config(resolve_agent_config_env(agent))
+
+        self.assertEqual(config.estacoda_command, ("/estacoda/node", "dist/index.js"))
+        self.assertEqual(config.task_id, "from-extra-env")
+
     def test_command_writes_instruction_file_without_raw_instruction_argument(self):
         config = build_config({
             "ESTACODA_BENCH_TASK_ID": "file-create",
@@ -72,6 +88,8 @@ class EstaCodaHarborAgentTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("estacoda", parts)
         self.assertIn("--instruction-file", parts)
         self.assertNotIn("Create answer.txt && do not run this as shell", command)
+        self.assertNotIn("python3", command)
+        self.assertIn("base64 -d", command)
         self.assertIn("&&", command)
 
     def test_command_copies_artifacts_even_when_bench_run_fails(self):
@@ -85,7 +103,7 @@ class EstaCodaHarborAgentTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("cp -R /tmp/estacoda-terminal-bench/file-create/attempt-1 /logs/artifacts/estacoda/", command)
         self.assertIn("exit \"$estacoda_status\"", command)
 
-    async def test_run_records_nonzero_exit_without_raising(self):
+    async def test_run_records_successful_exit_context(self):
         class FakeEnvironment:
             def __init__(self):
                 self.command = None
@@ -93,8 +111,8 @@ class EstaCodaHarborAgentTest(unittest.IsolatedAsyncioTestCase):
             async def exec(self, command):
                 self.command = command
                 return SimpleNamespace(
-                    return_code=1,
-                    stdout="Benchmark run: config_error",
+                    return_code=0,
+                    stdout="Benchmark run: success",
                     stderr="",
                 )
 
@@ -109,9 +127,31 @@ class EstaCodaHarborAgentTest(unittest.IsolatedAsyncioTestCase):
             await agent.run("Create answer.txt", environment, context)
 
         self.assertIn("estacoda bench run", environment.command)
-        self.assertEqual(context.estacoda_exit_code, "1")
-        self.assertEqual(context.metadata["estacoda_exit_code"], "1")
-        self.assertIn("config_error", context.output)
+        self.assertEqual(context.estacoda_exit_code, "0")
+        self.assertEqual(context.metadata["estacoda_exit_code"], "0")
+        self.assertIn("success", context.output)
+
+    async def test_run_raises_on_nonzero_exit(self):
+        class FakeEnvironment:
+            async def exec(self, command):
+                return SimpleNamespace(
+                    return_code=1,
+                    stdout="Benchmark run: config_error",
+                    stderr="",
+                )
+
+        context = SimpleNamespace(metadata={})
+        environment = FakeEnvironment()
+        agent = EstaCodaHarborAgent()
+
+        with patch.dict("os.environ", {
+            "ESTACODA_BENCH_TASK_ID": "file-create",
+            "ESTACODA_BENCH_COMMAND": "estacoda",
+        }, clear=True):
+            with self.assertRaises(RuntimeError):
+                await agent.run("Create answer.txt", environment, context)
+
+        self.assertFalse(hasattr(context, "estacoda_exit_code"))
 
     def test_reads_task_identity_from_context_when_env_is_absent(self):
         context = SimpleNamespace(

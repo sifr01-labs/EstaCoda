@@ -109,6 +109,11 @@ describe("benchCommand", () => {
     expect(capturedRuntimeOptions[0]).toMatchObject({
       workspaceRoot: workspace,
       homeDir: generatedHome,
+      providerConfigs: {
+        openai: {
+          enableNetwork: true
+        }
+      },
       securityMode: "open",
       workspaceTrusted: true,
       executionControls: {

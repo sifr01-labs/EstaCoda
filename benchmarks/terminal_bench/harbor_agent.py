@@ -16,7 +16,11 @@ try:
     from harbor.models.agent.context import AgentContext
 except ImportError:  # pragma: no cover - exercised by local unit tests without Harbor installed.
     class BaseInstalledAgent:  # type: ignore[no-redef]
-        pass
+        async def exec_as_agent(self, environment: Any, command: str, **kwargs: Any) -> Any:
+            result = await environment.exec(command=command, **kwargs)
+            if getattr(result, "return_code", 0) != 0:
+                raise RuntimeError(f"Command failed with exit code {getattr(result, 'return_code', 'unknown')}")
+            return result
 
     def with_prompt_template(fn):  # type: ignore[no-redef]
         return fn
@@ -116,6 +120,13 @@ def build_config(
     )
 
 
+def resolve_agent_config_env(agent: Any) -> Mapping[str, str]:
+    extra_env = getattr(agent, "_extra_env", None)
+    if isinstance(extra_env, Mapping):
+        return {**os.environ, **extra_env}
+    return os.environ
+
+
 def build_bench_args(config: EstaCodaHarborConfig, instruction_file: str) -> list[str]:
     args = [
         *config.estacoda_command,
@@ -158,18 +169,11 @@ def build_bench_args(config: EstaCodaHarborConfig, instruction_file: str) -> lis
 def build_installed_agent_command(config: EstaCodaHarborConfig, instruction: str) -> str:
     instruction_file = str(PurePosixPath(config.out_dir) / "instruction.txt")
     instruction_payload = base64.b64encode(instruction.encode("utf-8")).decode("ascii")
-    write_instruction = shlex.join([
-        "python3",
-        "-c",
-        (
-            "import base64,pathlib,sys;"
-            "path=pathlib.Path(sys.argv[1]);"
-            "path.parent.mkdir(parents=True,exist_ok=True);"
-            "path.write_bytes(base64.b64decode(sys.argv[2]))"
-        ),
-        instruction_file,
-        instruction_payload,
-    ])
+    instruction_dir = str(PurePosixPath(instruction_file).parent)
+    write_instruction = (
+        f"{shlex.join(['mkdir', '-p', instruction_dir])} && "
+        f"printf %s {shlex.quote(instruction_payload)} | base64 -d > {shlex.quote(instruction_file)}"
+    )
     bench_command = shlex.join(build_bench_args(config, instruction_file))
     copy_artifacts = (
         f"{shlex.join(['mkdir', '-p', HARBOR_ARTIFACTS_DIR])} && "
@@ -208,9 +212,9 @@ class EstaCodaHarborAgent(BaseInstalledAgent):
         environment: BaseEnvironment,
         context: AgentContext,
     ) -> None:
-        config = build_config(os.environ, context)
+        config = build_config(resolve_agent_config_env(self), context)
         command = build_installed_agent_command(config, instruction)
-        result = await environment.exec(command=command)
+        result = await self.exec_as_agent(environment, command=command)
         record_context(context, config, result)
 
 

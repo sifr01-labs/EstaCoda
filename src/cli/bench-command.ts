@@ -23,7 +23,9 @@ import {
   writeBenchmarkSummaryArtifact
 } from "../benchmark/artifacts.js";
 import { redactBenchmarkText } from "../benchmark/redaction.js";
-import { loadRuntimeConfig, type LoadedRuntimeConfig } from "../config/runtime-config.js";
+import { buildProviderRegistry, loadRuntimeConfig, type LoadedRuntimeConfig } from "../config/runtime-config.js";
+import { applyRegisterProviderConfig, applyRegisterProviderModel } from "../config/provider-config-mutations.js";
+import type { ResolvedModelRoute } from "../contracts/provider.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { resolveTokens } from "../theme/token-resolver.js";
@@ -149,6 +151,9 @@ async function runBenchRun(
         "No benchmark model is configured. Pass --model <provider/model> or configure the selected benchmark home."
       );
     }
+    const runtimeConfig = args.modelInput === undefined
+      ? config
+      : enableBenchmarkModelProvider(config, route);
 
     modelSummary = {
       provider: route.provider,
@@ -163,40 +168,40 @@ async function runBenchRun(
       tokens: resolveTokens("standard", "dark", "kemetBlue"),
       model: route.profile,
       primaryModelRoute: route,
-      modelFallbackRoutes: config.modelFallbackRoutes,
+      modelFallbackRoutes: runtimeConfig.modelFallbackRoutes,
       homeDir: benchmarkHome,
-      profileId: options.profileId ?? config.profileId,
+      profileId: options.profileId ?? runtimeConfig.profileId,
       workspaceRoot: args.workspace,
       sessionDb: new InMemorySessionDB(),
-      externalSkillRoots: config.skills.externalDirs,
-      skillAutonomy: config.skills.autonomy,
-      skillConfig: config.skills.config,
-      ui: config.ui,
-      agentProfile: config.profile,
-      providerRegistry: config.providerRegistry,
-      providerConfigs: config.config.providers,
-      auxiliaryModels: config.auxiliaryModels,
-      compression: config.compression,
-      memory: config.memory,
-      externalMemory: config.externalMemory,
-      mcpServers: config.mcp.servers,
-      browser: config.browser,
-      imageGen: config.imageGen,
-      tts: config.tts,
-      stt: config.stt,
+      externalSkillRoots: runtimeConfig.skills.externalDirs,
+      skillAutonomy: runtimeConfig.skills.autonomy,
+      skillConfig: runtimeConfig.skills.config,
+      ui: runtimeConfig.ui,
+      agentProfile: runtimeConfig.profile,
+      providerRegistry: runtimeConfig.providerRegistry,
+      providerConfigs: runtimeConfig.config.providers,
+      auxiliaryModels: runtimeConfig.auxiliaryModels,
+      compression: runtimeConfig.compression,
+      memory: runtimeConfig.memory,
+      externalMemory: runtimeConfig.externalMemory,
+      mcpServers: runtimeConfig.mcp.servers,
+      browser: runtimeConfig.browser,
+      imageGen: runtimeConfig.imageGen,
+      tts: runtimeConfig.tts,
+      stt: runtimeConfig.stt,
       telegramReady: false,
-      enableWebNetwork: config.web.enableNetwork,
-      webMaxContentChars: config.web.maxContentChars,
+      enableWebNetwork: runtimeConfig.web.enableNetwork,
+      webMaxContentChars: runtimeConfig.web.maxContentChars,
       webConfig: {
-        backend: config.web.backend,
-        searchBackend: config.web.searchBackend,
-        extractBackend: config.web.extractBackend,
-        crawlBackend: config.web.crawlBackend,
-        brave: config.web.brave
+        backend: runtimeConfig.web.backend,
+        searchBackend: runtimeConfig.web.searchBackend,
+        extractBackend: runtimeConfig.web.extractBackend,
+        crawlBackend: runtimeConfig.web.crawlBackend,
+        brave: runtimeConfig.web.brave
       },
       securityConfig: {
-        allowPrivateUrls: config.security.allowPrivateUrls,
-        websiteBlocklist: config.security.websiteBlocklist
+        allowPrivateUrls: runtimeConfig.security.allowPrivateUrls,
+        websiteBlocklist: runtimeConfig.security.websiteBlocklist
       },
       securityMode: "open",
       workspaceTrusted: true,
@@ -297,6 +302,28 @@ async function resolveBenchmarkModelRoute(
     throw benchmarkError("config_error", `Unable to resolve model '${modelInput}': ${normalized.reason}`);
   }
   return normalized.route;
+}
+
+function enableBenchmarkModelProvider(
+  config: LoadedRuntimeConfig,
+  route: ResolvedModelRoute
+): LoadedRuntimeConfig {
+  const providerConfig = applyRegisterProviderConfig(config.config, {
+    provider: route.provider,
+    ...(route.baseUrl === undefined ? {} : { baseUrl: route.baseUrl }),
+    ...(route.apiKeyEnv === undefined ? {} : { apiKeyEnv: route.apiKeyEnv }),
+    enableNetwork: true
+  });
+  const patchedConfig = applyRegisterProviderModel(providerConfig, {
+    provider: route.provider,
+    models: [route.id]
+  });
+
+  return {
+    ...config,
+    config: patchedConfig,
+    providerRegistry: buildProviderRegistry(patchedConfig)
+  };
 }
 
 async function loadBenchmarkConfig(input: {
