@@ -361,12 +361,13 @@ describe("benchCommand", () => {
         "--out", successOutDir,
         "--model", "openai/gpt-test"
       ],
-      dependenciesForRuntime(root, fakeRuntime([], `final ${secret}`))
+      dependenciesForRuntime(root, fakeRuntime([], `\u001b[32mfinal\u001b[0m ${secret}`))
     );
 
     const stdout = await readFile(join(successOutDir, "stdout.txt"), "utf8");
     expect(stdout).not.toContain(secret);
     expect(stdout).toContain("[REDACTED]");
+    expect(stdout).not.toMatch(/\u001b\[/u);
 
     await benchCommand(
       { argv: [], workspaceRoot: workspace, homeDir: join(root, "caller-home") },
@@ -383,6 +384,7 @@ describe("benchCommand", () => {
     const stderr = await readFile(join(failureOutDir, "stderr.txt"), "utf8");
     expect(stderr).not.toContain(secret);
     expect(stderr).toContain("[REDACTED]");
+    expect(stderr).not.toMatch(/\u001b\[/u);
   });
 
   it("hard-enforces benchmark timeout when runtime ignores abort", async () => {

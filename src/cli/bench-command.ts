@@ -18,15 +18,20 @@ import type {
   EstaCodaBenchmarkIdentity
 } from "../benchmark/schema.js";
 import {
+  buildBenchmarkTrajectorySummary,
   writeBenchmarkEventArtifact,
   writeBenchmarkEventLogArtifact,
-  writeBenchmarkSummaryArtifact
+  writeBenchmarkSummaryArtifact,
+  writeBenchmarkTrajectoryArtifact,
+  writeBenchmarkTrajectorySummaryArtifact
 } from "../benchmark/artifacts.js";
-import { redactBenchmarkText } from "../benchmark/redaction.js";
+import { redactBenchmarkText, stripBenchmarkAnsi } from "../benchmark/redaction.js";
 import { buildProviderRegistry, loadRuntimeConfig, type LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { applyRegisterProviderConfig, applyRegisterProviderModel } from "../config/provider-config-mutations.js";
 import type { ResolvedModelRoute } from "../contracts/provider.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
+import type { SessionDB } from "../contracts/session.js";
+import type { TrajectoryStore } from "../contracts/trajectory-store.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { resolveTokens } from "../theme/token-resolver.js";
 import { createRuntime, type Runtime } from "../runtime/create-runtime.js";
@@ -63,6 +68,7 @@ type BenchRunArgs = {
 export type BenchCommandDependencies = {
   loadConfig?: typeof loadRuntimeConfig;
   createRuntime?: typeof createRuntime;
+  createSessionDb?: (input: { homeDir: string; workspaceRoot: string }) => SessionDB;
   getPackageVersion?: typeof getPackageVersion;
   getGitCommit?: (workspaceRoot: string) => Promise<string | null>;
   makeTempHome?: () => Promise<string>;
@@ -133,6 +139,10 @@ async function runBenchRun(
     }
   };
   const benchmarkHome = args.homeDir ?? await (dependencies.makeTempHome ?? defaultMakeTempHome)();
+  const sessionDb = dependencies.createSessionDb?.({
+    homeDir: benchmarkHome,
+    workspaceRoot: args.workspace
+  }) ?? new InMemorySessionDB();
 
   await prepareBenchmarkArtifactDirs(artifacts);
   await writeBenchmarkEventLogArtifact(artifacts.eventLog, [], { redact: args.redact });
@@ -172,7 +182,7 @@ async function runBenchRun(
       homeDir: benchmarkHome,
       profileId: options.profileId ?? runtimeConfig.profileId,
       workspaceRoot: args.workspace,
-      sessionDb: new InMemorySessionDB(),
+      sessionDb,
       externalSkillRoots: runtimeConfig.skills.externalDirs,
       skillAutonomy: runtimeConfig.skills.autonomy,
       skillConfig: runtimeConfig.skills.config,
@@ -242,6 +252,16 @@ async function runBenchRun(
 
   const endedAt = now();
   const estacoda = await buildEstaCodaBenchmarkIdentity(args.workspace, dependencies);
+  const trajectory = await loadBenchmarkTrajectory(sessionDb, runtime?.trajectoryId);
+  const metrics = aggregateBenchmarkMetrics(events, undefined, trajectory);
+  if (trajectory !== undefined) {
+    await writeBenchmarkTrajectoryArtifact(artifacts.trajectory, trajectory, { redact: args.redact });
+    await writeBenchmarkTrajectorySummaryArtifact(
+      artifacts.trajectorySummary,
+      buildBenchmarkTrajectorySummary(trajectory, metrics),
+      { redact: args.redact }
+    );
+  }
   const summary = buildBenchmarkRunManifest({
     benchmark: args.benchmark,
     estacoda,
@@ -256,12 +276,13 @@ async function runBenchRun(
       trajectoryId: runtime?.trajectoryId ?? null
     }),
     model: modelSummary,
-    metrics: aggregateBenchmarkMetrics(events),
+    metrics,
     finalAnswer,
     artifacts: {
       summary: artifacts.summary,
       eventLog: artifacts.eventLog,
-      trajectory: null,
+      trajectory: trajectory === undefined ? null : artifacts.trajectory,
+      trajectorySummary: trajectory === undefined ? null : artifacts.trajectorySummary,
       stdout: artifacts.stdout,
       stderr: failure === null ? null : artifacts.stderr
     },
@@ -605,23 +626,26 @@ async function defaultMakeTempHome(): Promise<string> {
 function benchmarkArtifactPaths(
   outDir: string,
   overrides: BenchRunArgs["artifactPaths"] = {}
-): BenchmarkArtifactSummary & { stdout: string; stderr: string } {
+): BenchmarkArtifactSummary & { trajectory: string; trajectorySummary: string; stdout: string; stderr: string } {
   return {
     summary: overrides.summary ?? join(outDir, "summary.json"),
     eventLog: overrides.eventLog ?? join(outDir, "events.ndjson"),
-    trajectory: null,
+    trajectory: join(outDir, "trajectory.jsonl"),
+    trajectorySummary: join(outDir, "trajectory-summary.json"),
     stdout: join(outDir, "stdout.txt"),
     stderr: join(outDir, "stderr.txt")
   };
 }
 
 async function prepareBenchmarkArtifactDirs(
-  artifacts: BenchmarkArtifactSummary & { stdout: string; stderr: string }
+  artifacts: BenchmarkArtifactSummary & { trajectory: string; trajectorySummary: string; stdout: string; stderr: string }
 ): Promise<void> {
   await Promise.all(
     Array.from(new Set([
       dirname(artifacts.summary),
       dirname(artifacts.eventLog),
+      dirname(artifacts.trajectory),
+      dirname(artifacts.trajectorySummary),
       dirname(artifacts.stdout),
       dirname(artifacts.stderr)
     ])).map((dir) => mkdir(dir, { recursive: true }))
@@ -639,7 +663,23 @@ function renderBenchmarkStdout(summary: ReturnType<typeof buildBenchmarkRunManif
 }
 
 async function writeTextBenchmarkArtifact(path: string, content: string, redact: boolean): Promise<void> {
-  await writeFile(path, redact ? redactBenchmarkText(content) : content, "utf8");
+  const cleanContent = stripBenchmarkAnsi(content);
+  await writeFile(path, redact ? redactBenchmarkText(cleanContent) : cleanContent, "utf8");
+}
+
+async function loadBenchmarkTrajectory(
+  sessionDb: SessionDB,
+  trajectoryId: string | undefined
+): Promise<import("../contracts/trajectory.js").Trajectory | undefined> {
+  if (trajectoryId === undefined || !isTrajectoryStore(sessionDb)) {
+    return undefined;
+  }
+
+  return sessionDb.loadTrajectory(trajectoryId);
+}
+
+function isTrajectoryStore(db: SessionDB): db is SessionDB & Pick<TrajectoryStore, "loadTrajectory"> {
+  return typeof (db as { loadTrajectory?: unknown }).loadTrajectory === "function";
 }
 
 function requiredValue(args: string[], index: number, flag: string): string {

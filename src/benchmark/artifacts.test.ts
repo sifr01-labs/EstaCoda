@@ -3,7 +3,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
-import { writeBenchmarkEventArtifact, writeBenchmarkEventLogArtifact, writeBenchmarkSummaryArtifact } from "./artifacts.js";
+import type { Trajectory } from "../contracts/trajectory.js";
+import {
+  buildBenchmarkTrajectorySummary,
+  writeBenchmarkEventArtifact,
+  writeBenchmarkEventLogArtifact,
+  writeBenchmarkSummaryArtifact,
+  writeBenchmarkTrajectoryArtifact,
+  writeBenchmarkTrajectorySummaryArtifact
+} from "./artifacts.js";
+import { createEmptyBenchmarkMetrics } from "./schema.js";
 import { createBenchmarkRunSummary } from "./schema.js";
 
 describe("benchmark artifact writers", () => {
@@ -26,7 +35,7 @@ describe("benchmark artifact writers", () => {
       },
       model: { provider: "openai", id: "gpt-5", settings: { temperature: 0, maxTokens: null } },
       finalAnswer: "OPENAI_API_KEY=super-secret-value",
-      artifacts: { summary: path, eventLog: join(dir, "events.jsonl"), trajectory: null, stdout: null, stderr: null },
+      artifacts: { summary: path, eventLog: join(dir, "events.jsonl"), trajectory: null, trajectorySummary: null, stdout: null, stderr: null },
       failure: { status: "runtime_error", message: "Bearer abcdefghijklmnopqrstuvwxyz123456" }
     });
 
@@ -57,9 +66,56 @@ describe("benchmark artifact writers", () => {
     const dir = await mkdtemp(join(tmpdir(), "estacoda-benchmark-event-append-"));
     const path = join(dir, "events.jsonl");
 
-    await writeBenchmarkEventArtifact(path, { kind: "tool-start", tool: "terminal.run" });
+    await writeBenchmarkEventArtifact(path, { kind: "tool-start", tool: "terminal.run", targetSummary: "\u001b[31mverify\u001b[0m" });
     await writeBenchmarkEventArtifact(path, { kind: "tool-result", tool: "terminal.run", ok: true });
 
-    expect((await readFile(path, "utf8")).trim().split("\n")).toHaveLength(2);
+    const text = await readFile(path, "utf8");
+    expect(text.trim().split("\n")).toHaveLength(2);
+    expect(text).not.toMatch(/\u001b\[/u);
+    expect(text).not.toContain("\\u001b");
+  });
+
+  it("writes redacted trajectory JSONL and ANSI-free trajectory summary artifacts", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "estacoda-benchmark-trajectory-"));
+    const trajectoryPath = join(dir, "trajectory.jsonl");
+    const summaryPath = join(dir, "trajectory-summary.json");
+    const trajectory: Trajectory = {
+      id: "trajectory-1",
+      profileId: "default",
+      sessionId: "session-1",
+      modelId: "gpt-test",
+      events: [
+        {
+          id: "event-1",
+          kind: "memory-write",
+          timestamp: "2026-07-06T00:00:00.000Z",
+          data: {
+            note: "\u001b[31msecret token=abcdefghijklmnopqrstuvwxyz1234567890abcdef\u001b[0m"
+          }
+        }
+      ],
+      outcome: {
+        success: true,
+        summary: "done"
+      }
+    };
+    const summary = buildBenchmarkTrajectorySummary(trajectory, createEmptyBenchmarkMetrics());
+
+    await writeBenchmarkTrajectoryArtifact(trajectoryPath, trajectory);
+    await writeBenchmarkTrajectorySummaryArtifact(summaryPath, summary);
+
+    const trajectoryText = await readFile(trajectoryPath, "utf8");
+    const summaryText = await readFile(summaryPath, "utf8");
+    expect(trajectoryText).not.toMatch(/\u001b\[/u);
+    expect(summaryText).not.toMatch(/\u001b\[/u);
+    expect(trajectoryText).not.toContain("\\u001b");
+    expect(summaryText).not.toContain("\\u001b");
+    expect(trajectoryText).toContain("[REDACTED]");
+    expect(JSON.parse(summaryText)).toMatchObject({
+      id: "trajectory-1",
+      eventKinds: {
+        "memory-write": 1
+      }
+    });
   });
 });
