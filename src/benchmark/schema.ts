@@ -40,6 +40,10 @@ export type BenchmarkMetrics = {
   providerCalls: number;
   providerToolCalls: number;
   toolCalls: number;
+  toolFailures: number;
+  providerBudgetExhaustions: number;
+  securityEscalations: number;
+  contextUsageEvents: number;
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
@@ -101,6 +105,10 @@ export function createEmptyBenchmarkMetrics(): BenchmarkMetrics {
     providerCalls: 0,
     providerToolCalls: 0,
     toolCalls: 0,
+    toolFailures: 0,
+    providerBudgetExhaustions: 0,
+    securityEscalations: 0,
+    contextUsageEvents: 0,
     inputTokens: 0,
     outputTokens: 0,
     totalTokens: 0,

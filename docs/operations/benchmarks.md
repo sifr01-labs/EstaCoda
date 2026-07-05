@@ -30,7 +30,7 @@ Current benchmark surfaces:
 | Surface | Purpose | CI status |
 |---|---|---|
 | `estacoda bench run` | Headless benchmark execution with isolated home, fixed model settings, artifacts, and status taxonomy | Covered by unit tests |
-| `pnpm run benchmark:smoke` | Local fake benchmark task with no live provider or external harness | CI-safe |
+| `pnpm run benchmark:smoke` | Local fake benchmark task plus deterministic native runtime eval scenario, with no live provider or external harness | CI-safe |
 | `benchmarks/terminal_bench/estacoda_harbor_agent.py` | Compatibility Harbor installed-agent adapter path for Terminal-Bench | Manual Harbor use |
 | `pnpm run benchmark:terminal-bench:adapter-test` | Local adapter tests with no Harbor install required | CI-safe |
 
@@ -52,6 +52,7 @@ This verifies that `estacoda bench run` can:
 - capture runtime events
 - write the expected workspace result
 - produce benchmark artifacts
+- report native runtime eval metrics for deterministic scenario evidence
 
 The local smoke does not call a live model and does not prove Terminal-Bench scoring.
 
