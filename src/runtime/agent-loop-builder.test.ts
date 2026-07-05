@@ -180,7 +180,7 @@ describe("AgentLoopBuilder", () => {
     expect(sessionSkills.catalog().map((entry) => entry.name)).toEqual(["web-visible"]);
   });
 
-  it("hides skills with unavailable required Python capabilities without installing", async () => {
+  it("keeps skills with unavailable required Python capabilities routeable without installing", async () => {
     const spec = registerRuntimePythonCapability();
     const installSpy = vi.spyOn(capabilityManager, "installManagedPythonCapabilityEnvironment");
     const sourceSkills = new SkillRegistry();
@@ -190,12 +190,26 @@ describe("AgentLoopBuilder", () => {
     const harness = await createBuilderHarness({ skillRegistry: sourceSkills });
 
     const built = await harness.build("session-python-missing");
+    const loaded = built.sessionSkillRegistry.get("needs-python");
 
-    expect(built.sessionSkillCatalog.map((entry) => entry.name)).not.toContain("needs-python");
+    expect(built.sessionSkillCatalog.map((entry) => entry.name)).toContain("needs-python");
+    expect(loaded).toMatchObject({
+      pythonCapabilitySetup: [
+        expect.objectContaining({
+          id: spec.id,
+          required: true,
+          groups: [],
+          status: "unavailable",
+          reason: "install_required",
+          repairCommand: `estacoda python-env setup ${spec.id}`
+        })
+      ],
+      loadWarnings: [expect.stringContaining("Required Python capability")]
+    });
     expect(installSpy).not.toHaveBeenCalled();
   });
 
-  it("hides a skill when the required base Python capability declaration is unavailable even if a same-id optional group is present", async () => {
+  it("keeps required base and optional group setup state when both are unavailable", async () => {
     const spec = registerRuntimePythonCapability();
     const installSpy = vi.spyOn(capabilityManager, "installManagedPythonCapabilityEnvironment");
     const sourceSkills = new SkillRegistry();
@@ -208,8 +222,23 @@ describe("AgentLoopBuilder", () => {
     const harness = await createBuilderHarness({ skillRegistry: sourceSkills });
 
     const built = await harness.build("session-python-base-missing");
+    const loaded = built.sessionSkillRegistry.get("needs-python-base");
 
-    expect(built.sessionSkillCatalog.map((entry) => entry.name)).not.toContain("needs-python-base");
+    expect(built.sessionSkillCatalog.map((entry) => entry.name)).toContain("needs-python-base");
+    expect(loaded?.pythonCapabilitySetup).toEqual([
+      expect.objectContaining({
+        id: spec.id,
+        required: true,
+        groups: [],
+        status: "unavailable"
+      }),
+      expect.objectContaining({
+        id: spec.id,
+        required: false,
+        groups: ["extra"],
+        status: "unavailable"
+      })
+    ]);
     expect(installSpy).not.toHaveBeenCalled();
   });
 
@@ -223,8 +252,18 @@ describe("AgentLoopBuilder", () => {
     await writeVerifiedCapability(harness.stateRoot, spec, ["extra"]);
 
     const built = await harness.build("session-python-ready");
+    const loaded = built.sessionSkillRegistry.get("ready-python");
 
     expect(built.sessionSkillCatalog.map((entry) => entry.name)).toContain("ready-python");
+    expect(loaded?.pythonCapabilitySetup).toEqual([
+      expect.objectContaining({
+        id: spec.id,
+        required: true,
+        groups: ["extra"],
+        status: "available",
+        installedGroups: ["extra"]
+      })
+    ]);
   });
 
   it("keeps optional unavailable Python capabilities as degraded load warnings", async () => {
@@ -267,7 +306,7 @@ describe("AgentLoopBuilder", () => {
     expect(installSpy).not.toHaveBeenCalled();
   });
 
-  it("does not auto-install Python capabilities for gateway-style session builds", async () => {
+  it("keeps setup-needed Python skills routeable for gateway-style session builds without installing", async () => {
     const spec = registerRuntimePythonCapability();
     const installSpy = vi.spyOn(capabilityManager, "installManagedPythonCapabilityEnvironment");
     const sourceSkills = new SkillRegistry();
@@ -278,7 +317,10 @@ describe("AgentLoopBuilder", () => {
 
     const built = await harness.build("telegram-session");
 
-    expect(built.sessionSkillCatalog.map((entry) => entry.name)).not.toContain("gateway-python");
+    expect(built.sessionSkillCatalog.map((entry) => entry.name)).toContain("gateway-python");
+    expect(built.sessionSkillRegistry.get("gateway-python")).toMatchObject({
+      pythonCapabilitySetup: [expect.objectContaining({ status: "unavailable" })]
+    });
     expect(installSpy).not.toHaveBeenCalled();
   });
 

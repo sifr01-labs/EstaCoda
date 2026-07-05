@@ -1,7 +1,8 @@
 import { existsSync } from "node:fs";
 import { dirname } from "node:path";
-import type { LoadedSkill, SkillDefinition } from "../contracts/skill.js";
+import type { LoadedSkill, SkillDefinition, SkillPythonCapabilitySetupStatus } from "../contracts/skill.js";
 import { resolveOsHomeDir } from "../config/home-dir.js";
+import { getRegisteredPythonCapabilitySpec } from "../python-env/capability-registry.js";
 
 export type SkillConfiguredValues = Record<string, unknown> | undefined;
 
@@ -9,6 +10,18 @@ export type SkillSetupContext = {
   skillDirectory?: string;
   requiredEnvironmentVariables: Array<{ name: string; present: boolean }>;
   requiredCredentialFiles: Array<{ path: string; present: boolean; resolvedPath?: string }>;
+  pythonCapabilities: Array<{
+    id: string;
+    required: boolean;
+    groups: string[];
+    status: "available" | "unavailable" | "unknown";
+    reason?: string;
+    message?: string;
+    repairCommand?: string;
+    packages: string[];
+    estimatedInstallSizeMb?: number;
+    installedGroups?: string[];
+  }>;
   configFields: Array<{
     key: string;
     description?: string;
@@ -33,6 +46,7 @@ export function resolveSkillSetupContext(
       present: credentialFileExists(path),
       resolvedPath: expandUserEnvPath(path)
     })),
+    pythonCapabilities: resolvePythonCapabilitySetup(skill),
     configFields: (skill.configFields ?? []).map((field) => {
       const configuredValue = resolveConfiguredSkillValue(configuredValues, field.key);
       if (configuredValue !== undefined) {
@@ -74,6 +88,7 @@ export function buildSkillReadinessMetadata(
   missing_required_environment_variables: string[];
   missing_required_credential_files: string[];
   missing_config_fields: string[];
+  missing_required_python_capabilities: string[];
   setup_note?: string;
 } {
   const missingRequiredEnvironmentVariables = setup.requiredEnvironmentVariables
@@ -85,9 +100,13 @@ export function buildSkillReadinessMetadata(
   const missingConfigFields = setup.configFields
     .filter((field) => field.required === true && field.source === "missing")
     .map((field) => field.key);
+  const missingRequiredPythonCapabilities = setup.pythonCapabilities
+    .filter((capability) => capability.required && capability.status !== "available")
+    .map((capability) => capability.id);
   const missingCount = missingRequiredEnvironmentVariables.length +
     missingRequiredCredentialFiles.length +
-    missingConfigFields.length;
+    missingConfigFields.length +
+    missingRequiredPythonCapabilities.length;
   const setupNeeded = missingCount > 0;
 
   return {
@@ -96,10 +115,61 @@ export function buildSkillReadinessMetadata(
     missing_required_environment_variables: missingRequiredEnvironmentVariables,
     missing_required_credential_files: missingRequiredCredentialFiles,
     missing_config_fields: missingConfigFields,
+    missing_required_python_capabilities: missingRequiredPythonCapabilities,
     setup_note: setupNeeded
       ? `Missing ${missingCount} required setup item${missingCount === 1 ? "" : "s"}.`
       : undefined
   };
+}
+
+function resolvePythonCapabilitySetup(skill: LoadedSkill | SkillDefinition): SkillSetupContext["pythonCapabilities"] {
+  const runtimeByDeclaration = new Map<string, SkillPythonCapabilitySetupStatus>();
+  for (const status of skill.pythonCapabilitySetup ?? []) {
+    runtimeByDeclaration.set(capabilityDeclarationKey(status.id, status.groups), status);
+  }
+
+  return (skill.pythonCapabilities ?? []).map((capability) => {
+    const runtime = runtimeByDeclaration.get(capabilityDeclarationKey(capability.id, capability.groups));
+    const packageInfo = packagesForCapability(capability.id, capability.groups);
+    return {
+      id: capability.id,
+      required: capability.required,
+      groups: [...capability.groups],
+      status: runtime?.status ?? "unknown",
+      reason: runtime?.reason,
+      message: runtime?.message,
+      repairCommand: runtime?.repairCommand,
+      packages: packageInfo.packages,
+      estimatedInstallSizeMb: packageInfo.estimatedInstallSizeMb,
+      installedGroups: runtime?.installedGroups
+    };
+  });
+}
+
+function packagesForCapability(capabilityId: string, groups: string[]): { packages: string[]; estimatedInstallSizeMb?: number } {
+  const spec = getRegisteredPythonCapabilitySpec(capabilityId);
+  if (spec === undefined) {
+    return { packages: [] };
+  }
+  const selectedGroups = [...new Set(groups)].sort();
+  const packages = [
+    ...spec.packages,
+    ...selectedGroups.flatMap((group) => spec.optionalGroups?.[group]?.packages ?? [])
+  ];
+  const estimates = [
+    spec.estimatedInstallSizeMb,
+    ...selectedGroups.map((group) => spec.optionalGroups?.[group]?.estimatedInstallSizeMb)
+  ].filter((value): value is number => typeof value === "number");
+  return {
+    packages,
+    estimatedInstallSizeMb: estimates.length === 0
+      ? undefined
+      : estimates.reduce((sum, value) => sum + value, 0)
+  };
+}
+
+function capabilityDeclarationKey(id: string, groups: string[]): string {
+  return `${id}\0${[...groups].sort().join("\0")}`;
 }
 
 function isLoadedSkill(skill: LoadedSkill | SkillDefinition): skill is LoadedSkill {

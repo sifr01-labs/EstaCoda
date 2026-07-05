@@ -5,6 +5,7 @@ import type { IntentRoute } from "../contracts/intent.js";
 import type { LoadedSkill, SkillDefinition } from "../contracts/skill.js";
 import type { IntentRouter } from "./intent-router.js";
 import { buildSkillContract } from "../skills/skill-contract.js";
+import { PDF_EXTRACTION_CAPABILITY_ID } from "../python-env/capability-registry.js";
 
 function withHomeEnv<T>(env: { HOME?: string; ESTACODA_HOME?: string }, run: () => T): T {
   const previousHome = process.env.HOME;
@@ -159,6 +160,46 @@ describe("RuntimeRouter", () => {
 
     expect(result.selectedSkillSetup?.requiredCredentialFiles[0]?.resolvedPath)
       .toBe(join("/tmp/prod-home", "credentials.json"));
+  });
+
+  it("includes Python capability setup state for selected skills", () => {
+    const skill: SkillDefinition = {
+      name: "pdf-work",
+      description: "Tests Python capability setup.",
+      version: "0.1.0",
+      whenToUse: [],
+      requiredToolsets: [],
+      pythonCapabilities: [{ id: PDF_EXTRACTION_CAPABILITY_ID, required: true, groups: [] }],
+      pythonCapabilitySetup: [{
+        id: PDF_EXTRACTION_CAPABILITY_ID,
+        required: true,
+        groups: [],
+        status: "unavailable",
+        reason: "install_required",
+        message: "Managed Python capability environment has not been installed.",
+        repairCommand: "estacoda python-env setup pdf-extraction"
+      }],
+      playbook: [],
+      permissionExpectations: [],
+      examples: [],
+      evaluations: []
+    };
+    const router = routerForSkill(skill);
+
+    const result = router.route({ text: "extract this pdf", channel: "telegram" });
+
+    expect(result.selectedSkillSetup?.pythonCapabilities).toEqual([
+      expect.objectContaining({
+        id: PDF_EXTRACTION_CAPABILITY_ID,
+        required: true,
+        groups: [],
+        status: "unavailable",
+        reason: "install_required",
+        repairCommand: "estacoda python-env setup pdf-extraction",
+        packages: ["pymupdf==1.27.2.3", "pymupdf4llm==1.27.2.3"],
+        estimatedInstallSizeMb: 120
+      })
+    ]);
   });
 });
 

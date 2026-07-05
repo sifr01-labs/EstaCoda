@@ -128,6 +128,36 @@ describe("assembleProviderPrompt", () => {
     expect(rendered).not.toMatch(/I would answer directly/i);
   });
 
+  it("renders selected skill Python capability setup state", () => {
+    const prompt = assembleProviderPrompt(basePromptInput({
+      selectedSkill: selectedTestSkill(),
+      selectedSkillSetup: {
+        skillDirectory: "/skills/pdf-work",
+        requiredEnvironmentVariables: [],
+        requiredCredentialFiles: [],
+        pythonCapabilities: [{
+          id: "pdf-extraction",
+          required: true,
+          groups: [],
+          status: "unavailable",
+          reason: "install_required",
+          repairCommand: "estacoda python-env setup pdf-extraction",
+          packages: ["pymupdf==1.27.2.3", "pymupdf4llm==1.27.2.3"],
+          estimatedInstallSizeMb: 120
+        }],
+        configFields: []
+      }
+    }));
+
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain("Python capabilities:");
+    expect(rendered).toContain("Unavailable Python capabilities are setup blockers for local skill execution.");
+    expect(rendered).toContain("pdf-extraction · unavailable · required · groups=base");
+    expect(rendered).toContain("repair=estacoda python-env setup pdf-extraction");
+    expect(rendered).toContain("packages=pymupdf==1.27.2.3,pymupdf4llm==1.27.2.3");
+  });
+
   it("includes mutable-state grounding guidance in protected cached system context without a selected skill", () => {
     const prompt = assembleProviderPrompt(basePromptInput({
       userText: "What files are here?",

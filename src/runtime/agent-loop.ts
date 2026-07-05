@@ -152,6 +152,18 @@ export type SkillSetupContext = {
     present: boolean;
     resolvedPath?: string;
   }>;
+  pythonCapabilities: Array<{
+    id: string;
+    required: boolean;
+    groups: string[];
+    status: "available" | "unavailable" | "unknown";
+    reason?: string;
+    message?: string;
+    repairCommand?: string;
+    packages: string[];
+    estimatedInstallSizeMb?: number;
+    installedGroups?: string[];
+  }>;
   configFields: Array<{
     key: string;
     description?: string;
@@ -1273,6 +1285,15 @@ function estimateSkillSetupTokens(setup: SkillSetupContext | undefined): number 
       path: item.path,
       present: item.present,
       resolvedPath: item.resolvedPath
+    })),
+    pythonCapabilities: setup.pythonCapabilities.map((capability) => ({
+      id: capability.id,
+      required: capability.required,
+      groups: capability.groups,
+      status: capability.status,
+      reason: capability.reason,
+      repairCommand: capability.repairCommand,
+      packages: capability.packages
     })),
     configFields: setup.configFields.map((field) => ({
       key: field.key,

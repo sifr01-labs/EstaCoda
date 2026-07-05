@@ -80,6 +80,18 @@ export type ProviderPromptInput = {
     skillDirectory?: string;
     requiredEnvironmentVariables: Array<{ name: string; present: boolean }>;
     requiredCredentialFiles: Array<{ path: string; present: boolean; resolvedPath?: string }>;
+    pythonCapabilities: Array<{
+      id: string;
+      required: boolean;
+      groups: string[];
+      status: "available" | "unavailable" | "unknown";
+      reason?: string;
+      message?: string;
+      repairCommand?: string;
+      packages: string[];
+      estimatedInstallSizeMb?: number;
+      installedGroups?: string[];
+    }>;
     configFields: Array<{
       key: string;
       description?: string;
@@ -730,6 +742,24 @@ function renderSkillSetup(input: ProviderPromptInput["selectedSkillSetup"]): str
           ? `- ${entry.path}: present at ${entry.resolvedPath}`
           : `- ${entry.path}: ${entry.present ? "present" : "missing"}`
       );
+  const pythonCapabilityLines = input.pythonCapabilities.length === 0
+    ? ["No Python capabilities declared."]
+    : input.pythonCapabilities.map((capability) => {
+        const labels = [
+          capability.id,
+          capability.status,
+          capability.required ? "required" : "optional",
+          capability.groups.length === 0 ? "groups=base" : `groups=${capability.groups.join(",")}`,
+          capability.reason === undefined ? undefined : `reason=${capability.reason}`,
+          capability.repairCommand === undefined ? undefined : `repair=${capability.repairCommand}`,
+          capability.estimatedInstallSizeMb === undefined ? undefined : `estimatedInstallSizeMb=${capability.estimatedInstallSizeMb}`,
+          capability.packages.length === 0 ? undefined : `packages=${capability.packages.join(",")}`
+        ].filter((value) => value !== undefined);
+        return `- ${labels.join(" · ")}`;
+      });
+  const pythonCapabilityGuidance = input.pythonCapabilities.some((capability) => capability.status !== "available")
+    ? ["Unavailable Python capabilities are setup blockers for local skill execution. Use only registry-provided repair commands, and only after user approval."]
+    : [];
   const runtimeLines = input.skillDirectory === undefined
     ? ["No selected skill directory was available."]
     : [
@@ -747,6 +777,10 @@ function renderSkillSetup(input: ProviderPromptInput["selectedSkillSetup"]): str
     "",
     "Credential files:",
     ...credentialLines,
+    "",
+    "Python capabilities:",
+    ...pythonCapabilityGuidance,
+    ...pythonCapabilityLines,
     "",
     "Config:",
     ...configLines
