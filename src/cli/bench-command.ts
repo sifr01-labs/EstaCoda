@@ -18,9 +18,11 @@ import type {
   EstaCodaBenchmarkIdentity
 } from "../benchmark/schema.js";
 import {
+  writeBenchmarkEventArtifact,
   writeBenchmarkEventLogArtifact,
   writeBenchmarkSummaryArtifact
 } from "../benchmark/artifacts.js";
+import { redactBenchmarkText } from "../benchmark/redaction.js";
 import { loadRuntimeConfig, type LoadedRuntimeConfig } from "../config/runtime-config.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
@@ -126,6 +128,9 @@ async function runBenchRun(
   };
   const benchmarkHome = args.homeDir ?? await (dependencies.makeTempHome ?? defaultMakeTempHome)();
 
+  await mkdir(args.outDir, { recursive: true });
+  await writeBenchmarkEventLogArtifact(artifacts.eventLog, [], { redact: args.redact });
+
   try {
     const config = await loadBenchmarkConfig({
       workspaceRoot: args.workspace,
@@ -211,8 +216,9 @@ async function runBenchRun(
         channel: "cli",
         trustedWorkspace: true,
         signal,
-        onEvent: (event) => {
+        onEvent: async (event) => {
           events.push(event);
+          await writeBenchmarkEventArtifact(artifacts.eventLog, event, { redact: args.redact });
         }
       })
     );
@@ -253,12 +259,10 @@ async function runBenchRun(
     failure
   });
 
-  await mkdir(args.outDir, { recursive: true });
-  await writeBenchmarkEventLogArtifact(artifacts.eventLog, events, { redact: args.redact });
   await writeBenchmarkSummaryArtifact(artifacts.summary, summary, { redact: args.redact });
-  await writeFile(artifacts.stdout, renderBenchmarkStdout(summary), "utf8");
+  await writeTextBenchmarkArtifact(artifacts.stdout, renderBenchmarkStdout(summary), args.redact);
   if (failure !== null) {
-    await writeFile(artifacts.stderr, `${failure.message}\n`, "utf8");
+    await writeTextBenchmarkArtifact(artifacts.stderr, `${failure.message}\n`, args.redact);
   }
 
   return {
@@ -455,16 +459,25 @@ async function runWithTimeout<T>(
   run: (signal: AbortSignal) => Promise<T>
 ): Promise<T> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(new BenchmarkTimeoutError(timeoutMs)), timeoutMs);
+  let timedOut = false;
+  const runPromise = run(controller.signal);
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort(new BenchmarkTimeoutError(timeoutMs));
+      reject(new BenchmarkTimeoutError(timeoutMs));
+    }, timeoutMs);
+  });
   try {
-    return await run(controller.signal);
-  } catch (error) {
-    if (controller.signal.aborted) {
-      throw new BenchmarkTimeoutError(timeoutMs);
-    }
-    throw error;
+    return await Promise.race([runPromise, timeoutPromise]);
   } finally {
-    clearTimeout(timeout);
+    if (timeout !== undefined) {
+      clearTimeout(timeout);
+    }
+    if (timedOut) {
+      runPromise.catch(() => {});
+    }
   }
 }
 
@@ -558,6 +571,10 @@ function renderBenchmarkStdout(summary: ReturnType<typeof buildBenchmarkRunManif
     "",
     summary.finalAnswer
   ].join("\n");
+}
+
+async function writeTextBenchmarkArtifact(path: string, content: string, redact: boolean): Promise<void> {
+  await writeFile(path, redact ? redactBenchmarkText(content) : content, "utf8");
 }
 
 function requiredValue(args: string[], index: number, flag: string): string {

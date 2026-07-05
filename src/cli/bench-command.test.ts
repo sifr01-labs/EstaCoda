@@ -207,9 +207,117 @@ describe("benchCommand", () => {
       status: "config_error"
     });
   });
+
+  it("streams benchmark events before the run finishes", async () => {
+    const root = await makeTempDir();
+    const workspace = join(root, "workspace");
+    const outDir = join(root, "artifacts");
+    const eventLog = join(outDir, "events.ndjson");
+    await mkdir(workspace);
+    let sawStreamedEvent = false;
+    const runtime = {
+      ...fakeRuntime([]),
+      handle: vi.fn(async (input) => {
+        await input.onEvent?.({
+          kind: "tool-start",
+          tool: "terminal.run"
+        });
+        sawStreamedEvent = (await readFile(eventLog, "utf8")).includes("\"tool-start\"");
+        return {
+          label: "EstaCoda",
+          text: "done",
+          providerExecution: undefined,
+          toolExecutions: [],
+          progress: []
+        } as unknown as Awaited<ReturnType<Runtime["handle"]>>;
+      })
+    } as Runtime;
+
+    await benchCommand(
+      { argv: [], workspaceRoot: workspace, homeDir: join(root, "caller-home") },
+      [
+        "run",
+        "--workspace", workspace,
+        "--instruction", "solve the task",
+        "--out", outDir,
+        "--model", "openai/gpt-test"
+      ],
+      dependenciesForRuntime(root, runtime)
+    );
+
+    expect(sawStreamedEvent).toBe(true);
+  });
+
+  it("redacts stdout and stderr artifacts by default", async () => {
+    const root = await makeTempDir();
+    const workspace = join(root, "workspace");
+    const successOutDir = join(root, "success-artifacts");
+    const failureOutDir = join(root, "failure-artifacts");
+    await mkdir(workspace);
+    const secret = "sk-123456789012345678901234";
+
+    await benchCommand(
+      { argv: [], workspaceRoot: workspace, homeDir: join(root, "caller-home") },
+      [
+        "run",
+        "--workspace", workspace,
+        "--instruction", "solve the task",
+        "--out", successOutDir,
+        "--model", "openai/gpt-test"
+      ],
+      dependenciesForRuntime(root, fakeRuntime([], `final ${secret}`))
+    );
+
+    const stdout = await readFile(join(successOutDir, "stdout.txt"), "utf8");
+    expect(stdout).not.toContain(secret);
+    expect(stdout).toContain("[REDACTED]");
+
+    await benchCommand(
+      { argv: [], workspaceRoot: workspace, homeDir: join(root, "caller-home") },
+      [
+        "run",
+        "--workspace", workspace,
+        "--instruction", "solve the task",
+        "--out", failureOutDir,
+        "--model", "openai/gpt-test"
+      ],
+      dependenciesForRuntime(root, throwingRuntime(`provider failed API_KEY=${secret}`))
+    );
+
+    const stderr = await readFile(join(failureOutDir, "stderr.txt"), "utf8");
+    expect(stderr).not.toContain(secret);
+    expect(stderr).toContain("[REDACTED]");
+  });
+
+  it("hard-enforces benchmark timeout when runtime ignores abort", async () => {
+    const root = await makeTempDir();
+    const workspace = join(root, "workspace");
+    const outDir = join(root, "artifacts");
+    await mkdir(workspace);
+    const runtime = hangingRuntime();
+
+    const result = await benchCommand(
+      { argv: [], workspaceRoot: workspace, homeDir: join(root, "caller-home") },
+      [
+        "run",
+        "--workspace", workspace,
+        "--instruction", "solve the task",
+        "--out", outDir,
+        "--model", "openai/gpt-test",
+        "--timeout-ms", "10"
+      ],
+      dependenciesForRuntime(root, runtime)
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toContain("Benchmark run: timeout");
+    expect(runtime.dispose).toHaveBeenCalled();
+    const summary = JSON.parse(await readFile(join(outDir, "summary.json"), "utf8"));
+    expect(summary.execution.status).toBe("timeout");
+  });
 });
 
-function fakeRuntime(events: RuntimeEvent[]): Runtime {
+function fakeRuntime(events: RuntimeEvent[], finalText = "done"): Runtime {
   return {
     sessionId: "session-1",
     trajectoryId: "trajectory-1",
@@ -219,7 +327,7 @@ function fakeRuntime(events: RuntimeEvent[]): Runtime {
       }
       return {
         label: "EstaCoda",
-        text: "done",
+        text: finalText,
         providerExecution: undefined,
         toolExecutions: [],
         progress: []
@@ -242,6 +350,32 @@ function fakeRuntime(events: RuntimeEvent[]): Runtime {
     revokeWorkspaceTrust: async () => false,
     sessionDb: {} as never
   } as Runtime;
+}
+
+function throwingRuntime(message: string): Runtime {
+  return {
+    ...fakeRuntime([]),
+    handle: vi.fn(async () => {
+      throw new Error(message);
+    })
+  } as Runtime;
+}
+
+function hangingRuntime(): Runtime {
+  return {
+    ...fakeRuntime([]),
+    handle: vi.fn(() => new Promise<Awaited<ReturnType<Runtime["handle"]>>>(() => {}))
+  } as Runtime;
+}
+
+function dependenciesForRuntime(root: string, runtime: Runtime) {
+  return {
+    loadConfig: async () => fakeLoadedConfig("unconfigured", "unconfigured"),
+    createRuntime: (async () => runtime) as typeof import("../runtime/create-runtime.js").createRuntime,
+    makeTempHome: async () => join(root, "home"),
+    getPackageVersion: async () => "0.1.test",
+    getGitCommit: async () => null
+  };
 }
 
 function fakeLoadedConfig(provider: string, id: string): LoadedRuntimeConfig {
