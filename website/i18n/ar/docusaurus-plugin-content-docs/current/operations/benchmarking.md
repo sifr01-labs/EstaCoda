@@ -63,10 +63,12 @@ estacoda bench run \
 ```bash
 export ESTACODA_BENCH_MODEL="anthropic/claude-sonnet"
 export ESTACODA_BENCH_HOME="/tmp/estacoda-home"
+export PYTHONPATH="/path/to/estacoda:${PYTHONPATH:-}"
 
 harbor run \
   -d terminal-bench/terminal-bench-2 \
   -a benchmarks.terminal_bench.estacoda_harbor_agent:EstaCodaAgent \
+  --artifact /tmp/estacoda-terminal-bench \
   -n 5
 ```
 
@@ -80,10 +82,12 @@ harbor run \
 export ESTACODA_BENCH_MODEL="anthropic/claude-sonnet"
 export ESTACODA_BENCH_HOME="/tmp/estacoda-home"
 export ESTACODA_BENCH_TEMPERATURE="0"
+export PYTHONPATH="/path/to/estacoda:${PYTHONPATH:-}"
 
 harbor run \
   -d terminal-bench/terminal-bench-2 \
-  -a benchmarks.terminal_bench.estacoda_harbor_agent:EstaCodaAgent
+  -a benchmarks.terminal_bench.estacoda_harbor_agent:EstaCodaAgent \
+  --artifact /tmp/estacoda-terminal-bench
 ```
 
 أبلِغ عن:
@@ -100,6 +104,8 @@ harbor run \
 - الأمر الدقيق ومتغيرات البيئة
 
 استخدم صياغة محافظة: baseline مبكر، وليس ادعاء leaderboard.
+
+عند تشغيل adapter من source checkout محلي، اجعل `PYTHONPATH` يشير إلى checkout root. استخدم `--artifact /tmp/estacoda-terminal-bench` كي يجمع Harbor artifacts الخاصة بـ EstaCoda.
 
 ## قاعدة المقارنة
 

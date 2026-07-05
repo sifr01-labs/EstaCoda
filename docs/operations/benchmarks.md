@@ -100,10 +100,12 @@ Example:
 ```bash
 export ESTACODA_BENCH_MODEL="anthropic/claude-sonnet"
 export ESTACODA_BENCH_HOME="/tmp/estacoda-home"
+export PYTHONPATH="/path/to/estacoda:${PYTHONPATH:-}"
 
 harbor run \
   -d terminal-bench/terminal-bench-2 \
   -a benchmarks.terminal_bench.estacoda_harbor_agent:EstaCodaAgent \
+  --artifact /tmp/estacoda-terminal-bench \
   -n 5
 ```
 
@@ -124,10 +126,12 @@ After the smoke passes, run all Terminal-Bench 2.0 tasks with the same settings:
 export ESTACODA_BENCH_MODEL="anthropic/claude-sonnet"
 export ESTACODA_BENCH_HOME="/tmp/estacoda-home"
 export ESTACODA_BENCH_TEMPERATURE="0"
+export PYTHONPATH="/path/to/estacoda:${PYTHONPATH:-}"
 
 harbor run \
   -d terminal-bench/terminal-bench-2 \
-  -a benchmarks.terminal_bench.estacoda_harbor_agent:EstaCodaAgent
+  -a benchmarks.terminal_bench.estacoda_harbor_agent:EstaCodaAgent \
+  --artifact /tmp/estacoda-terminal-bench
 ```
 
 Record:
@@ -235,6 +239,8 @@ We report pass rate, cost, time, and the full run configuration.
 ```
 
 Include links or attachments for run artifacts and the exact configuration used.
+
+When running the adapter from a local checkout, set `PYTHONPATH` to the checkout root so Harbor can import `benchmarks.terminal_bench.estacoda_harbor_agent`. Add `--artifact /tmp/estacoda-terminal-bench` so Harbor collects EstaCoda's `summary.json`, `events.ndjson`, `stdout.txt`, and `stderr.txt` from the task container.
 
 ## SWE-bench Later
 

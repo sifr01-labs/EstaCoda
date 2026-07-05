@@ -30,6 +30,7 @@ DEFAULT_BENCHMARK_VERSION = "2.0"
 DEFAULT_WORKSPACE = "/app"
 DEFAULT_OUT_ROOT = "/tmp/estacoda-terminal-bench"
 DEFAULT_TIMEOUT_MS = 30 * 60 * 1000
+HARBOR_ARTIFACTS_DIR = "/logs/artifacts/estacoda"
 
 
 class AdapterConfigError(ValueError):
@@ -169,10 +170,19 @@ def build_installed_agent_command(config: EstaCodaHarborConfig, instruction: str
         instruction_file,
         instruction_payload,
     ])
+    bench_command = shlex.join(build_bench_args(config, instruction_file))
+    copy_artifacts = (
+        f"{shlex.join(['mkdir', '-p', HARBOR_ARTIFACTS_DIR])} && "
+        f"{shlex.join(['cp', '-R', config.out_dir, HARBOR_ARTIFACTS_DIR + '/'])} || true"
+    )
+    run_and_collect = (
+        f"{{ {bench_command}; estacoda_status=$?; "
+        f"{copy_artifacts}; exit \"$estacoda_status\"; }}"
+    )
     return " && ".join([
         shlex.join(["mkdir", "-p", config.out_dir]),
         write_instruction,
-        shlex.join(build_bench_args(config, instruction_file)),
+        run_and_collect,
     ])
 
 
@@ -200,7 +210,7 @@ class EstaCodaHarborAgent(BaseInstalledAgent):
     ) -> None:
         config = build_config(os.environ, context)
         command = build_installed_agent_command(config, instruction)
-        result = await self.exec_as_agent(environment, command=command)
+        result = await environment.exec(command=command)
         record_context(context, config, result)
 
 
@@ -213,6 +223,9 @@ def record_context(context: Any, config: EstaCodaHarborConfig, result: Any) -> N
     set_context_field(context, "final_answer", output)
     set_context_field(context, "estacoda_artifacts_dir", config.out_dir)
     set_context_field(context, "estacoda_summary_path", str(PurePosixPath(config.out_dir) / "summary.json"))
+    exit_code = getattr(result, "return_code", None)
+    if exit_code is not None:
+        set_context_field(context, "estacoda_exit_code", str(exit_code))
 
 
 def extract_command_output(result: Any) -> str:

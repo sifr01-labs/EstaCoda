@@ -25,13 +25,16 @@ Use the Python module path when running Harbor:
 ```bash
 export ESTACODA_BENCH_MODEL="anthropic/claude-sonnet"
 export ESTACODA_BENCH_HOME="/tmp/estacoda-home"
+export PYTHONPATH="/path/to/estacoda:${PYTHONPATH:-}"
 
 harbor run \
   -d terminal-bench/terminal-bench-2 \
-  -a benchmarks.terminal_bench.estacoda_harbor_agent:EstaCodaAgent
+  -a benchmarks.terminal_bench.estacoda_harbor_agent:EstaCodaAgent \
+  --artifact /tmp/estacoda-terminal-bench
 ```
 
 The importable compatibility path is `benchmarks.terminal_bench.estacoda_harbor_agent:EstaCodaAgent`. The internal implementation remains in `benchmarks.terminal_bench.harbor_agent`.
+When running from a source checkout, `PYTHONPATH` must include the checkout root. The explicit `--artifact /tmp/estacoda-terminal-bench` flag lets Harbor collect EstaCoda's benchmark artifacts from the task container.
 
 If `estacoda` is not already available in the task container, provide an install command controlled by the benchmark operator:
 

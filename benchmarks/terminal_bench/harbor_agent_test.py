@@ -1,6 +1,7 @@
 import shlex
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from benchmarks.terminal_bench.harbor_agent import (
     AdapterConfigError,
@@ -12,7 +13,7 @@ from benchmarks.terminal_bench.harbor_agent import (
 from benchmarks.terminal_bench.estacoda_harbor_agent import EstaCodaAgent
 
 
-class EstaCodaHarborAgentTest(unittest.TestCase):
+class EstaCodaHarborAgentTest(unittest.IsolatedAsyncioTestCase):
     def test_compatibility_import_reexports_agent_class(self):
         self.assertIs(EstaCodaAgent, EstaCodaHarborAgent)
 
@@ -72,6 +73,45 @@ class EstaCodaHarborAgentTest(unittest.TestCase):
         self.assertIn("--instruction-file", parts)
         self.assertNotIn("Create answer.txt && do not run this as shell", command)
         self.assertIn("&&", command)
+
+    def test_command_copies_artifacts_even_when_bench_run_fails(self):
+        config = build_config({
+            "ESTACODA_BENCH_TASK_ID": "file-create",
+        })
+
+        command = build_installed_agent_command(config, "Create answer.txt")
+
+        self.assertIn("estacoda_status=$?", command)
+        self.assertIn("cp -R /tmp/estacoda-terminal-bench/file-create/attempt-1 /logs/artifacts/estacoda/", command)
+        self.assertIn("exit \"$estacoda_status\"", command)
+
+    async def test_run_records_nonzero_exit_without_raising(self):
+        class FakeEnvironment:
+            def __init__(self):
+                self.command = None
+
+            async def exec(self, command):
+                self.command = command
+                return SimpleNamespace(
+                    return_code=1,
+                    stdout="Benchmark run: config_error",
+                    stderr="",
+                )
+
+        context = SimpleNamespace(metadata={})
+        environment = FakeEnvironment()
+        agent = EstaCodaHarborAgent()
+
+        with patch.dict("os.environ", {
+            "ESTACODA_BENCH_TASK_ID": "file-create",
+            "ESTACODA_BENCH_COMMAND": "estacoda",
+        }, clear=True):
+            await agent.run("Create answer.txt", environment, context)
+
+        self.assertIn("estacoda bench run", environment.command)
+        self.assertEqual(context.estacoda_exit_code, "1")
+        self.assertEqual(context.metadata["estacoda_exit_code"], "1")
+        self.assertIn("config_error", context.output)
 
     def test_reads_task_identity_from_context_when_env_is_absent(self):
         context = SimpleNamespace(

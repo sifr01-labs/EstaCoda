@@ -63,10 +63,12 @@ Before a full run, use a tiny Harbor smoke: five tasks, one model, one temperatu
 ```bash
 export ESTACODA_BENCH_MODEL="anthropic/claude-sonnet"
 export ESTACODA_BENCH_HOME="/tmp/estacoda-home"
+export PYTHONPATH="/path/to/estacoda:${PYTHONPATH:-}"
 
 harbor run \
   -d terminal-bench/terminal-bench-2 \
   -a benchmarks.terminal_bench.estacoda_harbor_agent:EstaCodaAgent \
+  --artifact /tmp/estacoda-terminal-bench \
   -n 5
 ```
 
@@ -80,10 +82,12 @@ After the smoke passes, run the full Terminal-Bench 2.0 baseline with the same m
 export ESTACODA_BENCH_MODEL="anthropic/claude-sonnet"
 export ESTACODA_BENCH_HOME="/tmp/estacoda-home"
 export ESTACODA_BENCH_TEMPERATURE="0"
+export PYTHONPATH="/path/to/estacoda:${PYTHONPATH:-}"
 
 harbor run \
   -d terminal-bench/terminal-bench-2 \
-  -a benchmarks.terminal_bench.estacoda_harbor_agent:EstaCodaAgent
+  -a benchmarks.terminal_bench.estacoda_harbor_agent:EstaCodaAgent \
+  --artifact /tmp/estacoda-terminal-bench
 ```
 
 Report:
@@ -100,6 +104,8 @@ Report:
 - exact command and environment variables
 
 Use conservative wording: early baseline, not a leaderboard claim.
+
+When running the adapter from a local checkout, set `PYTHONPATH` to the checkout root. Use `--artifact /tmp/estacoda-terminal-bench` so Harbor collects EstaCoda's benchmark artifacts.
 
 ## Comparison Rule
 
