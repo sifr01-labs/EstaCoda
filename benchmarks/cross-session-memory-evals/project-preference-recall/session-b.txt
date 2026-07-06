@@ -1,0 +1,1 @@
+Start a fresh session and prepare the next status update using the prior project context and preferences from memory.

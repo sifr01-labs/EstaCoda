@@ -46,6 +46,8 @@ export type BenchmarkMetrics = {
   promptAssemblies: number;
   skillRouteEvents: number;
   sessionRecallTriggered: boolean;
+  sessionRecallCount: number;
+  sessionRecallWarningCount: number;
   externalMemoryRecallCount: number;
   memoryWrites: number;
   memoryPromotions: number;
@@ -120,6 +122,8 @@ export function createEmptyBenchmarkMetrics(): BenchmarkMetrics {
     promptAssemblies: 0,
     skillRouteEvents: 0,
     sessionRecallTriggered: false,
+    sessionRecallCount: 0,
+    sessionRecallWarningCount: 0,
     externalMemoryRecallCount: 0,
     memoryWrites: 0,
     memoryPromotions: 0,

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
+import type { Trajectory } from "../contracts/trajectory.js";
 import { aggregateBenchmarkMetrics, estimateBenchmarkCostUsd } from "./metrics.js";
 
 describe("aggregateBenchmarkMetrics", () => {
@@ -22,6 +23,8 @@ describe("aggregateBenchmarkMetrics", () => {
       promptAssemblies: 0,
       skillRouteEvents: 0,
       sessionRecallTriggered: false,
+      sessionRecallCount: 0,
+      sessionRecallWarningCount: 0,
       externalMemoryRecallCount: 0,
       memoryWrites: 0,
       memoryPromotions: 0,
@@ -101,4 +104,59 @@ describe("aggregateBenchmarkMetrics", () => {
   it("keeps cost null when rates are unavailable", () => {
     expect(estimateBenchmarkCostUsd({ inputTokens: 1_000, outputTokens: 1_000 })).toBeNull();
   });
+
+  it("counts trajectory-backed session recall and memory signals without double-counting runtime recall", () => {
+    const events: RuntimeEvent[] = [
+      {
+        kind: "session-recall-decision",
+        triggered: true,
+        reason: "prior project context matched",
+        sourceSessionIds: ["session-a"]
+      }
+    ];
+    const trajectory: Trajectory = {
+      id: "trajectory-b",
+      profileId: "default",
+      sessionId: "session-b",
+      modelId: "gpt-test",
+      events: [
+        event("session-recall-decision", {
+          triggered: true,
+          reason: "prior project context matched",
+          sourceSessionIds: ["session-a"],
+          warningCount: 2
+        }),
+        event("external-memory-recall", {
+          providerIds: ["scenario-memory"],
+          enabled: true,
+          attempted: true,
+          resultCount: 1,
+          totalChars: 64,
+          warningCount: 0,
+          failureCount: 0
+        }),
+        event("memory-write", { content: "project context" }),
+        event("memory-promotion", { content: "project context" })
+      ]
+    };
+
+    expect(aggregateBenchmarkMetrics(events, undefined, trajectory)).toMatchObject({
+      sessionRecallTriggered: true,
+      sessionRecallCount: 1,
+      sessionRecallWarningCount: 2,
+      externalMemoryRecallCount: 1,
+      memoryWrites: 1,
+      memoryPromotions: 1,
+      estimatedCostUsd: null
+    });
+  });
 });
+
+function event(kind: Trajectory["events"][number]["kind"], data: Record<string, unknown>): Trajectory["events"][number] {
+  return {
+    id: `event-${kind}`,
+    kind,
+    timestamp: "2026-07-06T00:00:00.000Z",
+    data
+  };
+}

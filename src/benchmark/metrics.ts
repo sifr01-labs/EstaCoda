@@ -16,6 +16,7 @@ export function aggregateBenchmarkMetrics(
   const metrics = createEmptyBenchmarkMetrics();
   let runtimeProviderBudgetExhaustions = 0;
   let runtimeSecurityEscalations = 0;
+  let runtimeSessionRecallCount = 0;
 
   for (const event of events) {
     switch (event.kind) {
@@ -49,6 +50,8 @@ export function aggregateBenchmarkMetrics(
         break;
       case "session-recall-decision":
         metrics.sessionRecallTriggered ||= event.triggered;
+        runtimeSessionRecallCount += 1;
+        metrics.sessionRecallCount = runtimeSessionRecallCount;
         break;
       case "agent-cancelled":
         metrics.agentCancelled = true;
@@ -73,7 +76,8 @@ export function aggregateBenchmarkMetrics(
   if (trajectory !== undefined) {
     applyTrajectoryMetrics(metrics, trajectory, {
       runtimeProviderBudgetExhaustions,
-      runtimeSecurityEscalations
+      runtimeSecurityEscalations,
+      runtimeSessionRecallCount
     });
   }
 
@@ -116,10 +120,13 @@ function applyTrajectoryMetrics(
   runtimeCounts: {
     runtimeProviderBudgetExhaustions: number;
     runtimeSecurityEscalations: number;
+    runtimeSessionRecallCount: number;
   }
 ): void {
   let trajectoryProviderBudgetExhaustions = 0;
   let trajectorySecurityEscalations = 0;
+  let trajectorySessionRecallCount = 0;
+  let trajectorySessionRecallWarningCount = 0;
 
   for (const event of trajectory.events) {
     switch (event.kind) {
@@ -138,6 +145,8 @@ function applyTrajectoryMetrics(
         break;
       case "session-recall-decision":
         metrics.sessionRecallTriggered ||= readBoolean(event.data.triggered);
+        trajectorySessionRecallCount += 1;
+        trajectorySessionRecallWarningCount += readNonNegativeInteger(event.data.warningCount);
         break;
       case "external-memory-recall":
         metrics.externalMemoryRecallCount += 1;
@@ -167,8 +176,18 @@ function applyTrajectoryMetrics(
     runtimeCounts.runtimeSecurityEscalations,
     trajectorySecurityEscalations
   );
+  metrics.sessionRecallCount = Math.max(
+    metrics.sessionRecallCount,
+    runtimeCounts.runtimeSessionRecallCount,
+    trajectorySessionRecallCount
+  );
+  metrics.sessionRecallWarningCount = trajectorySessionRecallWarningCount;
 }
 
 function readBoolean(value: unknown): boolean {
   return value === true;
+}
+
+function readNonNegativeInteger(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 }
