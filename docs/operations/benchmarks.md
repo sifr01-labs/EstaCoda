@@ -37,6 +37,8 @@ Current benchmark surfaces:
 
 Full Terminal-Bench runs are manual. Do not run Harbor, Docker-backed benchmark jobs, or live provider baselines in ordinary CI.
 
+`estacoda bench run` wraps task instructions with a benchmark execution contract before entering the runtime. The contract tells the agent that benchmark success is judged by workspace, process, or verifier state rather than prose alone, and that it should use available file and terminal tools when the task requires workspace changes. This wrapper is limited to the benchmark CLI path and does not affect ordinary EstaCoda sessions.
+
 ## Local Smoke
 
 Run the local fake benchmark first:
