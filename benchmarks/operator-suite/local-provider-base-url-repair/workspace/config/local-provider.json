@@ -1,0 +1,5 @@
+{
+  "provider": "local-openai",
+  "baseUrl": "http://127.0.0.1:11434",
+  "model": "dev-coder"
+}

@@ -31,6 +31,7 @@ Current benchmark surfaces:
 |---|---|---|
 | `estacoda bench run` | Headless benchmark execution with isolated home, fixed model settings, artifacts, and status taxonomy | Covered by unit tests |
 | `estacoda bench compare` | Warning-only comparison of benchmark history or summary artifacts with markdown regression reports | Covered by unit tests |
+| `pnpm run benchmark:operator-smoke` | Deterministic EstaCoda Operator Suite scenarios with no live provider or network requirement | CI-safe |
 | `pnpm run benchmark:smoke` | Local fake benchmark task plus deterministic native runtime, trajectory-backed, and cross-session memory scenario evals, with no live provider or external harness | CI-safe |
 | `benchmarks/terminal_bench/estacoda_harbor_agent.py` | Compatibility Harbor installed-agent adapter path for Terminal-Bench | Manual Harbor use |
 | `pnpm run benchmark:terminal-bench:adapter-test` | Local adapter tests with no Harbor install required | CI-safe |
@@ -60,6 +61,16 @@ This verifies that `estacoda bench run` can:
 - exercise cross-session memory recall with isolated home, workspace, and SQLite state
 
 The local smoke does not call a live model and does not prove Terminal-Bench scoring.
+
+## Operator Suite Smoke
+
+Run deterministic operator-runtime scenarios with:
+
+```bash
+pnpm run benchmark:operator-smoke
+```
+
+This suite covers the first bug-fix, config-repair, failure-recovery, workspace-isolation, and repo-discovery scenarios. It uses the normal benchmark runner, trajectory artifacts, evidence assertions, and history artifacts while avoiding live provider or network requirements. See [Operator Suite](./operator-suite.md) for scenario authoring guidance.
 
 ## Local Artifact Control Smoke
 

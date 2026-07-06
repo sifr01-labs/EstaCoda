@@ -1,0 +1,1 @@
+Identify the repository entry point, major components, and request flow. Cite inspected files.

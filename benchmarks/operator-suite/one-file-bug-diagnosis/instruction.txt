@@ -1,0 +1,1 @@
+Diagnose the failing totals test, apply the smallest fix, and report the root cause.
