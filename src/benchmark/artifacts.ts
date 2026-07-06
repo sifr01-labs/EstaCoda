@@ -2,6 +2,7 @@ import { mkdir, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { Trajectory } from "../contracts/trajectory.js";
+import type { BenchmarkHistoryRecord } from "./history.js";
 import type { BenchmarkMetrics, BenchmarkRunSummary } from "./schema.js";
 import { redactBenchmarkArtifact, stripBenchmarkAnsi } from "./redaction.js";
 
@@ -35,6 +36,16 @@ export async function writeBenchmarkEventArtifact(
   await mkdir(dirname(path), { recursive: true });
   const record = maybeRedact(event, options);
   await writeFile(path, `${stripBenchmarkAnsi(JSON.stringify(record))}\n`, { encoding: "utf8", flag: "a" });
+}
+
+export async function writeBenchmarkHistoryArtifact(
+  path: string,
+  record: BenchmarkHistoryRecord,
+  options: BenchmarkArtifactWriteOptions = {}
+): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  const cleanRecord = maybeRedact(record, options);
+  await writeFile(path, `${stripBenchmarkAnsi(JSON.stringify(cleanRecord))}\n`, { encoding: "utf8", flag: "a" });
 }
 
 export type BenchmarkTrajectorySummary = {

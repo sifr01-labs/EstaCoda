@@ -38,7 +38,7 @@ describe("benchmark run manifest", () => {
       estacoda: { version: "0.1.0", gitCommit: "abc123" },
       execution,
       model: { provider: "openai", id: "gpt-5", settings: { temperature: 0, maxTokens: 1200 } },
-      artifacts: { summary: "/tmp/summary.json", eventLog: "/tmp/events.jsonl", trajectory: null, trajectorySummary: null, stdout: null, stderr: null },
+      artifacts: { summary: "/tmp/summary.json", eventLog: "/tmp/events.jsonl", trajectory: null, trajectorySummary: null, history: null, stdout: null, stderr: null },
       finalAnswer: "done"
     });
 

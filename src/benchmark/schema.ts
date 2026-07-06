@@ -78,6 +78,7 @@ export type BenchmarkArtifactSummary = {
   eventLog: string;
   trajectory: string | null;
   trajectorySummary: string | null;
+  history: string | null;
   stdout: string | null;
   stderr: string | null;
 };
