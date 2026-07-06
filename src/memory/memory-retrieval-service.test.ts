@@ -592,6 +592,7 @@ function memoryConfig(input: {
     index: {
       ...DEFAULT_MEMORY_CONFIG.index,
       ...input.index
-    }
+    },
+    curation: DEFAULT_MEMORY_CONFIG.curation
   };
 }

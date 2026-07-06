@@ -470,7 +470,8 @@ function memoryConfig(index: Partial<MemoryConfig["index"]>): MemoryConfig {
     index: {
       ...DEFAULT_MEMORY_CONFIG.index,
       ...index
-    }
+    },
+    curation: DEFAULT_MEMORY_CONFIG.curation
   };
 }
 
