@@ -31,6 +31,7 @@ describe("benchmark schema", () => {
         summary: "/tmp/summary.json",
         eventLog: "/tmp/events.jsonl",
         trajectory: null,
+        trajectorySummary: null,
         stdout: null,
         stderr: null
       }
@@ -69,6 +70,7 @@ describe("benchmark schema", () => {
         summary: "/tmp/summary.json",
         eventLog: "/tmp/events.jsonl",
         trajectory: "/tmp/trajectory.json",
+        trajectorySummary: "/tmp/trajectory-summary.json",
         stdout: "/tmp/stdout.log",
         stderr: "/tmp/stderr.log"
       },

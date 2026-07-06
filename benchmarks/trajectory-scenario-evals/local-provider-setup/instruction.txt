@@ -1,0 +1,1 @@
+Diagnose why the local OpenAI-compatible provider setup fails. Inspect the config and verifier, identify the root cause, apply the minimal fix, and verify the provider setup state passes.

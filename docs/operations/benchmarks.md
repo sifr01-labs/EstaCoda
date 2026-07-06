@@ -30,7 +30,7 @@ Current benchmark surfaces:
 | Surface | Purpose | CI status |
 |---|---|---|
 | `estacoda bench run` | Headless benchmark execution with isolated home, fixed model settings, artifacts, and status taxonomy | Covered by unit tests |
-| `pnpm run benchmark:smoke` | Local fake benchmark task plus deterministic native runtime eval scenario, with no live provider or external harness | CI-safe |
+| `pnpm run benchmark:smoke` | Local fake benchmark task plus deterministic native runtime and trajectory-backed scenario evals, with no live provider or external harness | CI-safe |
 | `benchmarks/terminal_bench/estacoda_harbor_agent.py` | Compatibility Harbor installed-agent adapter path for Terminal-Bench | Manual Harbor use |
 | `pnpm run benchmark:terminal-bench:adapter-test` | Local adapter tests with no Harbor install required | CI-safe |
 
@@ -53,6 +53,7 @@ This verifies that `estacoda bench run` can:
 - write the expected workspace result
 - produce benchmark artifacts
 - report native runtime eval metrics for deterministic scenario evidence
+- write trajectory artifacts when a scenario run uses a persistent trajectory store
 
 The local smoke does not call a live model and does not prove Terminal-Bench scoring.
 
@@ -209,6 +210,8 @@ Each `estacoda bench run` writes:
 |---|---|
 | `summary.json` | Structured run manifest with benchmark identity, EstaCoda identity, execution status, model settings, metrics, artifact paths, final answer, and failure details |
 | `events.ndjson` or explicit `--event-log` path | Redacted runtime event stream, one event per line |
+| `trajectory.jsonl` | Redacted persisted trajectory event stream, one event per line, when a trajectory store is available |
+| `trajectory-summary.json` | Redacted compact trajectory summary and trajectory-backed metrics, when a trajectory store is available |
 | `stdout.txt` | Redacted benchmark stdout summary plus final answer |
 | `stderr.txt` | Redacted failure message when the run fails |
 

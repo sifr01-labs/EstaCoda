@@ -59,7 +59,7 @@
     "smoke": "node --import tsx src/smoke.ts",
     "smoke:dist": "node dist/smoke.js",
     "smoke:bun": "bun src/smoke.ts",
-    "benchmark:smoke": "vitest run --config vitest.node.config.ts src/benchmark/local-smoke.test.ts src/benchmark/native-runtime-evals.test.ts",
+    "benchmark:smoke": "vitest run --config vitest.node.config.ts src/benchmark/local-smoke.test.ts src/benchmark/native-runtime-evals.test.ts src/benchmark/trajectory-scenario-evals.test.ts",
     "benchmark:terminal-bench:adapter-test": "python3 -m unittest benchmarks.terminal_bench.harbor_agent_test",
     "audit:esm": "node scripts/audit-esm.mjs dist",
     "audit:runtime-imports": "node scripts/audit-runtime-imports.mjs",

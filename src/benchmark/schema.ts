@@ -41,8 +41,16 @@ export type BenchmarkMetrics = {
   providerToolCalls: number;
   toolCalls: number;
   toolFailures: number;
+  providerIterations: number;
   providerBudgetExhaustions: number;
+  promptAssemblies: number;
+  skillRouteEvents: number;
+  sessionRecallTriggered: boolean;
+  externalMemoryRecallCount: number;
+  memoryWrites: number;
+  memoryPromotions: number;
   securityEscalations: number;
+  agentCancelled: boolean;
   contextUsageEvents: number;
   inputTokens: number;
   outputTokens: number;
@@ -67,6 +75,7 @@ export type BenchmarkArtifactSummary = {
   summary: string;
   eventLog: string;
   trajectory: string | null;
+  trajectorySummary: string | null;
   stdout: string | null;
   stderr: string | null;
 };
@@ -106,8 +115,16 @@ export function createEmptyBenchmarkMetrics(): BenchmarkMetrics {
     providerToolCalls: 0,
     toolCalls: 0,
     toolFailures: 0,
+    providerIterations: 0,
     providerBudgetExhaustions: 0,
+    promptAssemblies: 0,
+    skillRouteEvents: 0,
+    sessionRecallTriggered: false,
+    externalMemoryRecallCount: 0,
+    memoryWrites: 0,
+    memoryPromotions: 0,
     securityEscalations: 0,
+    agentCancelled: false,
     contextUsageEvents: 0,
     inputTokens: 0,
     outputTokens: 0,
