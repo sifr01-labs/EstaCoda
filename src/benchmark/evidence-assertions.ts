@@ -75,6 +75,14 @@ export function assertFinalAnswerContainsRootCause(
   return assertion(`final answer contains root cause: ${rootCause}`, present, rootCause, present ? undefined : context.finalAnswer);
 }
 
+export function assertFinalAnswerContainsText(
+  context: BenchmarkEvidenceContext,
+  text: string
+): BenchmarkEvidenceAssertion {
+  const present = context.finalAnswer.includes(text);
+  return assertion(`final answer contains text: ${text}`, present, text, present ? undefined : context.finalAnswer);
+}
+
 export function assertMetricLessThan(
   context: BenchmarkEvidenceContext,
   metric: keyof BenchmarkMetrics,
@@ -99,6 +107,49 @@ export function assertTrajectoryEventKindAbsent(
 ): BenchmarkEvidenceAssertion {
   const absent = context.trajectory?.events.some((event) => event.kind === kind) !== true;
   return assertion(`trajectory event absent: ${kind}`, absent, "absent", absent ? undefined : "present");
+}
+
+export function assertSessionRecallTriggered(context: BenchmarkEvidenceContext): BenchmarkEvidenceAssertion {
+  const triggered = context.events.some((event) =>
+    event.kind === "session-recall-decision" && event.triggered
+  ) || context.trajectory?.events.some((event) =>
+    event.kind === "session-recall-decision" && readBoolean(event.data.triggered)
+  ) === true;
+
+  return assertion("session recall triggered", triggered, "triggered", triggered ? undefined : "not triggered");
+}
+
+export function assertRecalledSourceSession(
+  context: BenchmarkEvidenceContext,
+  sessionId: string
+): BenchmarkEvidenceAssertion {
+  const present = context.events.some((event) =>
+    event.kind === "session-recall-decision" && event.sourceSessionIds.includes(sessionId)
+  ) || context.trajectory?.events.some((event) =>
+    event.kind === "session-recall-decision" && readStringArray(event.data.sourceSessionIds).includes(sessionId)
+  ) === true;
+
+  return assertion(`recalled source session: ${sessionId}`, present, sessionId, present ? undefined : evidenceSummary(context));
+}
+
+export function assertTrajectoryContainsText(
+  context: BenchmarkEvidenceContext,
+  text: string
+): BenchmarkEvidenceAssertion {
+  const present = context.trajectory?.events.some((event) =>
+    JSON.stringify(event.data).includes(text)
+  ) === true;
+  return assertion(`trajectory contains text: ${text}`, present, text, present ? undefined : trajectoryTextSummary(context));
+}
+
+export function assertTrajectoryExcludesText(
+  context: BenchmarkEvidenceContext,
+  text: string
+): BenchmarkEvidenceAssertion {
+  const absent = context.trajectory?.events.some((event) =>
+    JSON.stringify(event.data).includes(text)
+  ) !== true;
+  return assertion(`trajectory excludes text: ${text}`, absent, `no ${text}`, absent ? undefined : trajectoryTextSummary(context));
 }
 
 export function assertAllEvidence(assertions: readonly BenchmarkEvidenceAssertion[]): void {
@@ -133,4 +184,16 @@ function evidenceSummary(context: BenchmarkEvidenceContext): string {
 
 function readString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+function readBoolean(value: unknown): boolean {
+  return value === true;
+}
+
+function readStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function trajectoryTextSummary(context: BenchmarkEvidenceContext): string {
+  return context.trajectory?.events.map((event) => JSON.stringify(event.data)).join("\n") ?? "";
 }

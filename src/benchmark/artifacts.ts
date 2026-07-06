@@ -45,6 +45,14 @@ export type BenchmarkTrajectorySummary = {
   eventCount: number;
   outcome: Trajectory["outcome"] | null;
   eventKinds: Record<string, number>;
+  recall: {
+    sourceSessionIds: string[];
+    warningCount: number;
+    snippets: string[];
+  };
+  memory: {
+    snippets: string[];
+  };
   metrics: BenchmarkMetrics;
 };
 
@@ -53,8 +61,19 @@ export function buildBenchmarkTrajectorySummary(
   metrics: BenchmarkMetrics
 ): BenchmarkTrajectorySummary {
   const eventKinds: Record<string, number> = {};
+  const recallSourceSessionIds = new Set<string>();
+  let recallWarningCount = 0;
+  const recallSnippets: string[] = [];
+  const memorySnippets: string[] = [];
   for (const event of trajectory.events) {
     eventKinds[event.kind] = (eventKinds[event.kind] ?? 0) + 1;
+    if (event.kind === "session-recall-decision") {
+      readStringArray(event.data.sourceSessionIds).forEach((sessionId) => recallSourceSessionIds.add(sessionId));
+      recallWarningCount += readNonNegativeInteger(event.data.warningCount);
+      collectSummarySnippets(event.data, recallSnippets);
+    } else if (event.kind === "memory-write" || event.kind === "memory-promotion" || event.kind === "external-memory-recall") {
+      collectSummarySnippets(event.data, memorySnippets);
+    }
   }
 
   return {
@@ -65,6 +84,14 @@ export function buildBenchmarkTrajectorySummary(
     eventCount: trajectory.events.length,
     outcome: trajectory.outcome ?? null,
     eventKinds,
+    recall: {
+      sourceSessionIds: Array.from(recallSourceSessionIds).sort(),
+      warningCount: recallWarningCount,
+      snippets: recallSnippets.slice(0, 8)
+    },
+    memory: {
+      snippets: memorySnippets.slice(0, 8)
+    },
     metrics
   };
 }
@@ -100,4 +127,35 @@ async function writeTextArtifact(path: string, content: string): Promise<void> {
 
 function maybeRedact<T>(value: T, options: BenchmarkArtifactWriteOptions): T {
   return options.redact === false ? value : redactBenchmarkArtifact(value);
+}
+
+function collectSummarySnippets(value: unknown, snippets: string[]): void {
+  if (snippets.length >= 8) {
+    return;
+  }
+  if (typeof value === "string") {
+    if (value.trim().length > 0) {
+      snippets.push(value.length > 240 ? `${value.slice(0, 237)}...` : value);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectSummarySnippets(item, snippets);
+    }
+    return;
+  }
+  if (value !== null && typeof value === "object") {
+    for (const item of Object.values(value)) {
+      collectSummarySnippets(item, snippets);
+    }
+  }
+}
+
+function readStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function readNonNegativeInteger(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 }

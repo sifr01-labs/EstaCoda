@@ -1,0 +1,1 @@
+Remember this project context for future sessions: the release codename is NORTHSTAR, and status updates for this workspace must use concise bullet points.
