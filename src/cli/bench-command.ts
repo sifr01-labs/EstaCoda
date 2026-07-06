@@ -3,7 +3,10 @@ import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
+import { compareBenchmarkHistories } from "../benchmark/compare.js";
+import { createBenchmarkHistoryRecord, readBenchmarkHistoryRecords } from "../benchmark/history.js";
 import { aggregateBenchmarkMetrics } from "../benchmark/metrics.js";
+import { renderBenchmarkComparisonMarkdown } from "../benchmark/report.js";
 import {
   buildBenchmarkExecutionSummary,
   buildBenchmarkRunManifest
@@ -21,6 +24,7 @@ import {
   buildBenchmarkTrajectorySummary,
   writeBenchmarkEventArtifact,
   writeBenchmarkEventLogArtifact,
+  writeBenchmarkHistoryArtifact,
   writeBenchmarkSummaryArtifact,
   writeBenchmarkTrajectoryArtifact,
   writeBenchmarkTrajectorySummaryArtifact
@@ -65,12 +69,26 @@ type BenchRunArgs = {
   };
 };
 
+type BenchCompareArgs = {
+  baseline: string;
+  current: string;
+};
+
+type BenchArtifactPaths = BenchmarkArtifactSummary & {
+  trajectory: string;
+  trajectorySummary: string;
+  history: string;
+  stdout: string;
+  stderr: string;
+};
+
 export type BenchCommandDependencies = {
   loadConfig?: typeof loadRuntimeConfig;
   createRuntime?: typeof createRuntime;
   createSessionDb?: (input: { homeDir: string; workspaceRoot: string }) => SessionDB;
   getPackageVersion?: typeof getPackageVersion;
   getGitCommit?: (workspaceRoot: string) => Promise<string | null>;
+  getGitBranch?: (workspaceRoot: string) => Promise<string | null>;
   makeTempHome?: () => Promise<string>;
   now?: () => Date;
 };
@@ -87,6 +105,26 @@ export async function benchCommand(
       exitCode: 0,
       output: renderBenchHelp()
     };
+  }
+
+  if (subcommand === "compare") {
+    if (hasFlag(args.slice(1), "--help", "-h")) {
+      return {
+        handled: true,
+        exitCode: 0,
+        output: renderBenchCompareHelp()
+      };
+    }
+
+    const parsedCompare = parseBenchCompareArgs(args.slice(1));
+    if (!parsedCompare.ok) {
+      return {
+        handled: true,
+        exitCode: 1,
+        output: parsedCompare.error
+      };
+    }
+    return runBenchCompare(parsedCompare.args);
   }
 
   if (subcommand !== "run") {
@@ -115,6 +153,27 @@ export async function benchCommand(
   }
 
   return runBenchRun(options, parsed.args, dependencies);
+}
+
+async function runBenchCompare(args: BenchCompareArgs): Promise<CliCommandResult> {
+  try {
+    const [baseline, current] = await Promise.all([
+      readBenchmarkHistoryRecords(args.baseline),
+      readBenchmarkHistoryRecords(args.current)
+    ]);
+    const comparison = compareBenchmarkHistories({ baseline, current });
+    return {
+      handled: true,
+      exitCode: 0,
+      output: renderBenchmarkComparisonMarkdown(comparison)
+    };
+  } catch (error) {
+    return {
+      handled: true,
+      exitCode: 1,
+      output: error instanceof Error ? error.message : String(error)
+    };
+  }
 }
 
 async function runBenchRun(
@@ -252,6 +311,7 @@ async function runBenchRun(
 
   const endedAt = now();
   const estacoda = await buildEstaCodaBenchmarkIdentity(args.workspace, dependencies);
+  const gitBranch = await (dependencies.getGitBranch ?? defaultGetGitBranch)(args.workspace);
   const trajectory = await loadBenchmarkTrajectory(sessionDb, runtime?.trajectoryId);
   const metrics = aggregateBenchmarkMetrics(events, undefined, trajectory);
   if (trajectory !== undefined) {
@@ -283,12 +343,18 @@ async function runBenchRun(
       eventLog: artifacts.eventLog,
       trajectory: trajectory === undefined ? null : artifacts.trajectory,
       trajectorySummary: trajectory === undefined ? null : artifacts.trajectorySummary,
+      history: artifacts.history,
       stdout: artifacts.stdout,
       stderr: failure === null ? null : artifacts.stderr
     },
     failure
   });
 
+  await writeBenchmarkHistoryArtifact(
+    artifacts.history,
+    createBenchmarkHistoryRecord(summary, { timestamp: endedAt, branch: gitBranch }),
+    { redact: args.redact }
+  );
   await writeBenchmarkSummaryArtifact(artifacts.summary, summary, { redact: args.redact });
   await writeTextBenchmarkArtifact(artifacts.stdout, renderBenchmarkStdout(summary), args.redact);
   if (failure !== null) {
@@ -306,6 +372,48 @@ async function runBenchRun(
       failure === null ? undefined : `Error: ${failure.message}`
     ].filter((line) => line !== undefined).join("\n")
   };
+}
+
+function parseBenchCompareArgs(args: string[]): { ok: true; args: BenchCompareArgs } | { ok: false; error: string } {
+  let baseline: string | undefined;
+  let current: string | undefined;
+  const positional: string[] = [];
+
+  try {
+    for (let index = 0; index < args.length; index += 1) {
+      const arg = args[index];
+      switch (arg) {
+        case "--baseline":
+          baseline = requiredValue(args, ++index, arg);
+          break;
+        case "--current":
+          current = requiredValue(args, ++index, arg);
+          break;
+        default:
+          if (arg.startsWith("--")) {
+            return { ok: false, error: `Unknown bench compare option: ${arg}\n\n${renderBenchCompareHelp()}` };
+          }
+          positional.push(arg);
+      }
+    }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+
+  if (baseline !== undefined || current !== undefined) {
+    if (positional.length > 0) {
+      return { ok: false, error: "Use either positional runs or --baseline/--current, not both." };
+    }
+    if (baseline === undefined || current === undefined) {
+      return { ok: false, error: "bench compare requires both --baseline <run> and --current <run>." };
+    }
+    return { ok: true, args: { baseline: resolve(baseline), current: resolve(current) } };
+  }
+
+  if (positional.length !== 2) {
+    return { ok: false, error: `bench compare requires two run artifacts.\n\n${renderBenchCompareHelp()}` };
+  }
+  return { ok: true, args: { baseline: resolve(positional[0]!), current: resolve(positional[1]!) } };
 }
 
 async function resolveBenchmarkModelRoute(
@@ -619,6 +727,16 @@ async function defaultGetGitCommit(workspaceRoot: string): Promise<string | null
   }
 }
 
+async function defaultGetGitBranch(workspaceRoot: string): Promise<string | null> {
+  try {
+    const result = await execFileAsync("git", ["-C", workspaceRoot, "rev-parse", "--abbrev-ref", "HEAD"]);
+    const branch = result.stdout.trim();
+    return branch.length === 0 || branch === "HEAD" ? null : branch;
+  } catch {
+    return null;
+  }
+}
+
 async function defaultMakeTempHome(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-bench-home-"));
 }
@@ -626,19 +744,20 @@ async function defaultMakeTempHome(): Promise<string> {
 function benchmarkArtifactPaths(
   outDir: string,
   overrides: BenchRunArgs["artifactPaths"] = {}
-): BenchmarkArtifactSummary & { trajectory: string; trajectorySummary: string; stdout: string; stderr: string } {
+): BenchArtifactPaths {
   return {
     summary: overrides.summary ?? join(outDir, "summary.json"),
     eventLog: overrides.eventLog ?? join(outDir, "events.ndjson"),
     trajectory: join(outDir, "trajectory.jsonl"),
     trajectorySummary: join(outDir, "trajectory-summary.json"),
+    history: join(outDir, "history.jsonl"),
     stdout: join(outDir, "stdout.txt"),
     stderr: join(outDir, "stderr.txt")
   };
 }
 
 async function prepareBenchmarkArtifactDirs(
-  artifacts: BenchmarkArtifactSummary & { trajectory: string; trajectorySummary: string; stdout: string; stderr: string }
+  artifacts: BenchArtifactPaths
 ): Promise<void> {
   await Promise.all(
     Array.from(new Set([
@@ -646,6 +765,7 @@ async function prepareBenchmarkArtifactDirs(
       dirname(artifacts.eventLog),
       dirname(artifacts.trajectory),
       dirname(artifacts.trajectorySummary),
+      dirname(artifacts.history),
       dirname(artifacts.stdout),
       dirname(artifacts.stderr)
     ])).map((dir) => mkdir(dir, { recursive: true }))
@@ -718,8 +838,22 @@ function renderBenchHelp(): string {
     "  estacoda bench run --workspace <dir> --instruction <text> --out <dir>",
     "  estacoda bench run --workspace <dir> --instruction-file <path> --out <dir>",
     "  estacoda bench run --workspace <dir> --instruction-file <path> --json-output <path> --event-log <path>",
+    "  estacoda bench compare <baseline-run> <current-run>",
+    "  estacoda bench compare --baseline <run> --current <run>",
     "",
-    "Run EstaCoda headlessly for benchmark harnesses."
+    "Run EstaCoda headlessly for benchmark harnesses and compare historical runs."
+  ].join("\n");
+}
+
+function renderBenchCompareHelp(): string {
+  return [
+    "EstaCoda benchmark compare",
+    "",
+    "Usage:",
+    "  estacoda bench compare <baseline-run> <current-run>",
+    "  estacoda bench compare --baseline <run> --current <run>",
+    "",
+    "Compares benchmark history JSONL or summary JSON artifacts and prints a warning-only markdown report."
   ].join("\n");
 }
 

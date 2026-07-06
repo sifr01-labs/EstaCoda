@@ -8,6 +8,7 @@ import {
   buildBenchmarkTrajectorySummary,
   writeBenchmarkEventArtifact,
   writeBenchmarkEventLogArtifact,
+  writeBenchmarkHistoryArtifact,
   writeBenchmarkSummaryArtifact,
   writeBenchmarkTrajectoryArtifact,
   writeBenchmarkTrajectorySummaryArtifact
@@ -35,7 +36,7 @@ describe("benchmark artifact writers", () => {
       },
       model: { provider: "openai", id: "gpt-5", settings: { temperature: 0, maxTokens: null } },
       finalAnswer: "OPENAI_API_KEY=super-secret-value",
-      artifacts: { summary: path, eventLog: join(dir, "events.jsonl"), trajectory: null, trajectorySummary: null, stdout: null, stderr: null },
+      artifacts: { summary: path, eventLog: join(dir, "events.jsonl"), trajectory: null, trajectorySummary: null, history: null, stdout: null, stderr: null },
       failure: { status: "runtime_error", message: "Bearer abcdefghijklmnopqrstuvwxyz123456" }
     });
 
@@ -115,6 +116,35 @@ describe("benchmark artifact writers", () => {
       id: "trajectory-1",
       eventKinds: {
         "memory-write": 1
+      }
+    });
+  });
+
+  it("appends redacted ANSI-free history records", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "estacoda-benchmark-history-"));
+    const path = join(dir, "history.jsonl");
+
+    await writeBenchmarkHistoryArtifact(path, {
+      schemaVersion: 1,
+      kind: "benchmark-history-record",
+      timestamp: "2026-07-06T00:00:00.000Z",
+      estacoda: { version: "0.1.0", gitCommit: "abc123", branch: "main" },
+      benchmark: { name: "fixture", version: "1", taskId: "task-a", attempt: 1 },
+      provider: "openai",
+      model: "gpt-test",
+      executionSettings: { temperature: 0, maxTokens: null },
+      execution: { status: "success", durationSeconds: 1, wallClockMs: 1000 },
+      metrics: { ...createEmptyBenchmarkMetrics(), totalTokens: 5 },
+      tokenCounts: { inputTokens: 2, outputTokens: 3, totalTokens: 5 },
+      estimatedCostUsd: null
+    });
+
+    const text = await readFile(path, "utf8");
+    expect(text).not.toMatch(/\u001b\[/u);
+    expect(JSON.parse(text)).toMatchObject({
+      kind: "benchmark-history-record",
+      tokenCounts: {
+        totalTokens: 5
       }
     });
   });

@@ -30,6 +30,7 @@ Current benchmark surfaces:
 | Surface | Purpose | CI status |
 |---|---|---|
 | `estacoda bench run` | Headless benchmark execution with isolated home, fixed model settings, artifacts, and status taxonomy | Covered by unit tests |
+| `estacoda bench compare` | Warning-only comparison of benchmark history or summary artifacts with markdown regression reports | Covered by unit tests |
 | `pnpm run benchmark:smoke` | Local fake benchmark task plus deterministic native runtime, trajectory-backed, and cross-session memory scenario evals, with no live provider or external harness | CI-safe |
 | `benchmarks/terminal_bench/estacoda_harbor_agent.py` | Compatibility Harbor installed-agent adapter path for Terminal-Bench | Manual Harbor use |
 | `pnpm run benchmark:terminal-bench:adapter-test` | Local adapter tests with no Harbor install required | CI-safe |
@@ -213,6 +214,7 @@ Each `estacoda bench run` writes:
 | `events.ndjson` or explicit `--event-log` path | Redacted runtime event stream, one event per line |
 | `trajectory.jsonl` | Redacted persisted trajectory event stream, one event per line, when a trajectory store is available |
 | `trajectory-summary.json` | Redacted compact trajectory summary and trajectory-backed metrics, when a trajectory store is available |
+| `history.jsonl` | Redacted stable run-history record for regression tracking and cross-commit comparison |
 | `stdout.txt` | Redacted benchmark stdout summary plus final answer |
 | `stderr.txt` | Redacted failure message when the run fails |
 
@@ -229,6 +231,18 @@ The summary status is one of:
 - `config_error`
 
 `estimatedCostUsd` is always present and may be `null` when pricing data is unavailable.
+
+Compare two run-history or summary artifacts with:
+
+```bash
+estacoda bench compare baseline-history.jsonl current-history.jsonl
+
+estacoda bench compare \
+  --baseline baseline-summary.json \
+  --current current-summary.json
+```
+
+Comparison reports are markdown and warning-only. They show aggregate and per-scenario deltas for success status, duration, token counts, estimated cost when available, tool/runtime failure metrics, memory activity, session recall, external memory recall, and security escalations. Token counts remain the primary measurement; cost is a nullable derived estimate.
 
 ## Isolation Rules
 

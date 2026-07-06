@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -114,6 +114,7 @@ describe("benchCommand", () => {
         makeTempHome: async () => generatedHome,
         getPackageVersion: async () => "0.1.test",
         getGitCommit: async () => "abc123",
+        getGitBranch: async () => "ame/benchmark-regression-tracking",
         now: sequentialNow([
           new Date("2026-07-05T00:00:00.000Z"),
           new Date("2026-07-05T00:00:03.000Z")
@@ -193,7 +194,32 @@ describe("benchCommand", () => {
         totalTokens: 125,
         estimatedCostUsd: null
       },
+      artifacts: {
+        history: join(outDir, "history.jsonl")
+      },
       finalAnswer: "done"
+    });
+
+    const history = JSON.parse(await readFile(join(outDir, "history.jsonl"), "utf8"));
+    expect(history).toMatchObject({
+      kind: "benchmark-history-record",
+      timestamp: "2026-07-05T00:00:03.000Z",
+      estacoda: {
+        version: "0.1.test",
+        gitCommit: "abc123",
+        branch: "ame/benchmark-regression-tracking"
+      },
+      benchmark: {
+        name: "terminal-bench",
+        version: "2.0",
+        taskId: "task-a"
+      },
+      tokenCounts: {
+        inputTokens: 100,
+        outputTokens: 25,
+        totalTokens: 125
+      },
+      estimatedCostUsd: null
     });
 
     const events = await readFile(join(outDir, "events.ndjson"), "utf8");
@@ -293,6 +319,7 @@ describe("benchCommand", () => {
       artifacts: {
         summary: summaryPath,
         eventLog: eventLogPath,
+        history: join(root, "explicit", "history.jsonl"),
         stdout: join(root, "explicit", "stdout.txt"),
         stderr: join(root, "explicit", "stderr.txt")
       }
@@ -302,6 +329,7 @@ describe("benchCommand", () => {
     expect(eventLog).toBe("");
     expect(await readFile(join(root, "explicit", "stdout.txt"), "utf8")).toContain("status=config_error");
     expect(await readFile(join(root, "explicit", "stderr.txt"), "utf8")).toContain("No benchmark model is configured");
+    expect(await readFile(join(root, "explicit", "history.jsonl"), "utf8")).toContain("\"status\":\"config_error\"");
   });
 
   it("streams benchmark events before the run finishes", async () => {
@@ -413,6 +441,41 @@ describe("benchCommand", () => {
     const summary = JSON.parse(await readFile(join(outDir, "summary.json"), "utf8"));
     expect(summary.execution.status).toBe("timeout");
   });
+
+  it("compares benchmark history artifacts with positional paths", async () => {
+    const root = await makeTempDir();
+    const baseline = join(root, "baseline.jsonl");
+    const current = join(root, "current.jsonl");
+    await writeHistoryFixture(baseline, { taskId: "task-a", durationSeconds: 10, totalTokens: 100, toolFailures: 0 });
+    await writeHistoryFixture(current, { taskId: "task-a", durationSeconds: 14, totalTokens: 160, toolFailures: 1 });
+
+    const result = await benchCommand(
+      { argv: [], workspaceRoot: root, homeDir: join(root, "caller-home") },
+      ["compare", baseline, current]
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("# Benchmark Comparison");
+    expect(result.output).toContain("aggregate: duration increased by 40%.");
+    expect(result.output).toContain("aggregate: tool failures increased by 1.");
+  });
+
+  it("compares benchmark summary artifacts with --baseline and --current", async () => {
+    const root = await makeTempDir();
+    const baseline = join(root, "baseline-summary.json");
+    const current = join(root, "current-summary.json");
+    await writeSummaryFixture(baseline, { taskId: "task-a", totalTokens: 100, toolFailures: 1 });
+    await writeSummaryFixture(current, { taskId: "task-a", totalTokens: 90, toolFailures: 0 });
+
+    const result = await benchCommand(
+      { argv: [], workspaceRoot: root, homeDir: join(root, "caller-home") },
+      ["compare", "--baseline", baseline, "--current", current]
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("| fixture-suite/1/task-a | success -> success |");
+    expect(result.output).toContain("tool failures improved by 1");
+  });
 });
 
 function fakeRuntime(events: RuntimeEvent[], finalText = "done"): Runtime {
@@ -472,7 +535,8 @@ function dependenciesForRuntime(root: string, runtime: Runtime) {
     createRuntime: (async () => runtime) as typeof import("../runtime/create-runtime.js").createRuntime,
     makeTempHome: async () => join(root, "home"),
     getPackageVersion: async () => "0.1.test",
-    getGitCommit: async () => null
+    getGitCommit: async () => null,
+    getGitBranch: async () => null
   };
 }
 
@@ -558,4 +622,95 @@ function fakeLoadedConfig(provider: string, id: string): LoadedRuntimeConfig {
 function sequentialNow(values: Date[]): () => Date {
   let index = 0;
   return () => values[Math.min(index++, values.length - 1)]!;
+}
+
+async function writeHistoryFixture(
+  path: string,
+  input: { taskId: string; durationSeconds: number; totalTokens: number; toolFailures: number }
+): Promise<void> {
+  await writeFile(path, `${JSON.stringify({
+    schemaVersion: 1,
+    kind: "benchmark-history-record",
+    timestamp: "2026-07-06T00:00:00.000Z",
+    estacoda: { version: "0.1.test", gitCommit: "abc123", branch: "main" },
+    benchmark: { name: "fixture-suite", version: "1", taskId: input.taskId, attempt: 1 },
+    provider: "openai",
+    model: "gpt-test",
+    executionSettings: { temperature: 0, maxTokens: null },
+    execution: { status: "success", durationSeconds: input.durationSeconds, wallClockMs: input.durationSeconds * 1000 },
+    metrics: {
+      ...emptyMetricFixture(),
+      totalTokens: input.totalTokens,
+      toolFailures: input.toolFailures
+    },
+    tokenCounts: { inputTokens: input.totalTokens, outputTokens: 0, totalTokens: input.totalTokens },
+    estimatedCostUsd: null
+  })}\n`, "utf8");
+}
+
+async function writeSummaryFixture(
+  path: string,
+  input: { taskId: string; totalTokens: number; toolFailures: number }
+): Promise<void> {
+  await writeFile(path, `${JSON.stringify({
+    schemaVersion: 1,
+    runMode: "headless-benchmark",
+    benchmark: { name: "fixture-suite", version: "1", taskId: input.taskId, attempt: 1 },
+    estacoda: { version: "0.1.test", gitCommit: "abc123" },
+    execution: {
+      status: "success",
+      startedAt: "2026-07-06T00:00:00.000Z",
+      endedAt: "2026-07-06T00:00:01.000Z",
+      wallClockMs: 1000,
+      workspace: "/tmp/workspace",
+      home: "/tmp/home",
+      homeMode: "generated",
+      policy: "container-benchmark",
+      sessionId: "session-1",
+      trajectoryId: null
+    },
+    model: { provider: "openai", id: "gpt-test", settings: { temperature: 0, maxTokens: null } },
+    metrics: {
+      ...emptyMetricFixture(),
+      totalTokens: input.totalTokens,
+      toolFailures: input.toolFailures
+    },
+    finalAnswer: "done",
+    artifacts: {
+      summary: path,
+      eventLog: "/tmp/events.jsonl",
+      trajectory: null,
+      trajectorySummary: null,
+      history: null,
+      stdout: null,
+      stderr: null
+    },
+    failure: null
+  })}\n`, "utf8");
+}
+
+function emptyMetricFixture() {
+  return {
+    providerCalls: 0,
+    providerToolCalls: 0,
+    toolCalls: 0,
+    toolFailures: 0,
+    providerIterations: 0,
+    providerBudgetExhaustions: 0,
+    promptAssemblies: 0,
+    skillRouteEvents: 0,
+    sessionRecallTriggered: false,
+    sessionRecallCount: 0,
+    sessionRecallWarningCount: 0,
+    externalMemoryRecallCount: 0,
+    memoryWrites: 0,
+    memoryPromotions: 0,
+    securityEscalations: 0,
+    agentCancelled: false,
+    contextUsageEvents: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    estimatedCostUsd: null
+  };
 }
