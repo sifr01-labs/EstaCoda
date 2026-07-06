@@ -22,6 +22,8 @@ Use this order:
 
 Terminal-Bench comes first because it tests the whole terminal-native agent loop: shell use, setup, debugging, iteration, recovery, and workspace changes.
 
+`estacoda bench run` wraps task instructions with a benchmark execution contract before entering the runtime. The contract tells the agent that benchmark success is judged by workspace, process, or verifier state rather than prose alone, and that it should use available file and terminal tools when the task requires workspace changes. This wrapper is limited to the benchmark CLI path and does not affect ordinary EstaCoda sessions.
+
 ## Local Checks
 
 Run the CI-safe local smoke:

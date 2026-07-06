@@ -4,5 +4,6 @@ overrides:
 allowBuilds:
   '@whiskeysockets/baileys': false
   better-sqlite3: true
+  esbuild: true
   protobufjs: false
   sharp: false

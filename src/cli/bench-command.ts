@@ -290,7 +290,7 @@ async function runBenchRun(
     const response = await runWithTimeout(
       args.timeoutMs,
       (signal) => runtime!.handle({
-        text: args.instruction,
+        text: renderBenchmarkExecutionInstruction(args.instruction),
         channel: "cli",
         trustedWorkspace: true,
         signal,
@@ -372,6 +372,20 @@ async function runBenchRun(
       failure === null ? undefined : `Error: ${failure.message}`
     ].filter((line) => line !== undefined).join("\n")
   };
+}
+
+function renderBenchmarkExecutionInstruction(instruction: string): string {
+  return [
+    "Benchmark execution contract:",
+    "You are running inside an isolated benchmark workspace or container.",
+    "The task is evaluated by filesystem, process, or benchmark-verifier state, not by prose alone.",
+    "Use available file and terminal tools to inspect, edit, run, and verify when the task requires workspace changes.",
+    "Do not answer with a plan only when the benchmark requires action in the workspace.",
+    "Only provide the final answer after you have attempted the required workspace changes and verification, or after you have determined that the task cannot be completed.",
+    "",
+    "Task instruction:",
+    instruction
+  ].join("\n");
 }
 
 function parseBenchCompareArgs(args: string[]): { ok: true; args: BenchCompareArgs } | { ok: false; error: string } {

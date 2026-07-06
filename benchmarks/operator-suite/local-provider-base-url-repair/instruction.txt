@@ -1,0 +1,1 @@
+Find why the local OpenAI-compatible provider setup fails, apply a minimal config fix, and report the root cause.

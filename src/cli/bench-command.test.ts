@@ -127,10 +127,16 @@ describe("benchCommand", () => {
       exitCode: 0
     });
     expect(result.output).toContain("Benchmark run: success");
-    expect(runtime.handle).toHaveBeenCalledWith(expect.objectContaining({
-      text: "solve the task",
+    const runtimeInput = vi.mocked(runtime.handle).mock.calls[0]?.[0];
+    expect(runtimeInput).toEqual(expect.objectContaining({
       trustedWorkspace: true
     }));
+    expect(runtimeInput?.text).toContain("Benchmark execution contract:");
+    expect(runtimeInput?.text).toContain("isolated benchmark workspace or container");
+    expect(runtimeInput?.text).toContain("The task is evaluated by filesystem, process, or benchmark-verifier state, not by prose alone.");
+    expect(runtimeInput?.text).toContain("Do not answer with a plan only");
+    expect(runtimeInput?.text).toContain("Task instruction:\nsolve the task");
+    expect(runtimeInput?.text).not.toContain("task-a");
     expect(capturedRuntimeOptions[0]).toMatchObject({
       workspaceRoot: workspace,
       homeDir: generatedHome,
@@ -370,6 +376,54 @@ describe("benchCommand", () => {
     );
 
     expect(sawStreamedEvent).toBe(true);
+  });
+
+  it("does not retry or add a corrective nudge when a benchmark run returns without tool calls", async () => {
+    const root = await makeTempDir();
+    const workspace = join(root, "workspace");
+    const outDir = join(root, "artifacts");
+    await mkdir(workspace);
+    const runtime = fakeRuntime([
+      {
+        kind: "provider-result",
+        provider: "openai",
+        model: "gpt-test",
+        ok: true,
+        fallback: false,
+        willFallback: false
+      }
+    ], "Implementation plan only.");
+
+    const result = await benchCommand(
+      { argv: [], workspaceRoot: workspace, homeDir: join(root, "caller-home") },
+      [
+        "run",
+        "--workspace", workspace,
+        "--instruction", "solve the task",
+        "--out", outDir,
+        "--model", "openai/gpt-test",
+        "--benchmark-name", "terminal-bench",
+        "--benchmark-version", "2.0",
+        "--task-id", "make-mips-interpreter"
+      ],
+      dependenciesForRuntime(root, runtime)
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(runtime.handle).toHaveBeenCalledTimes(1);
+    const runtimeInput = vi.mocked(runtime.handle).mock.calls[0]?.[0];
+    expect(runtimeInput?.text).toContain("Benchmark execution contract:");
+    expect(runtimeInput?.text).toContain("Task instruction:\nsolve the task");
+    expect(runtimeInput?.text).not.toContain("You did not use tools");
+    expect(runtimeInput?.text).not.toContain("make-mips-interpreter");
+
+    const summary = JSON.parse(await readFile(join(outDir, "summary.json"), "utf8"));
+    expect(summary.metrics).toMatchObject({
+      providerCalls: 1,
+      providerToolCalls: 0,
+      toolCalls: 0
+    });
+    expect(summary.finalAnswer).toBe("Implementation plan only.");
   });
 
   it("redacts stdout and stderr artifacts by default", async () => {

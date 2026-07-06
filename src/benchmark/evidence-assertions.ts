@@ -93,6 +93,22 @@ export function assertMetricLessThan(
   return assertion(`metric ${String(metric)} < ${threshold}`, passed, `< ${threshold}`, String(value));
 }
 
+export function assertRuntimeEventKindPresent(
+  context: BenchmarkEvidenceContext,
+  kind: RuntimeEvent["kind"]
+): BenchmarkEvidenceAssertion {
+  const present = context.events.some((event) => event.kind === kind);
+  return assertion(`runtime event present: ${kind}`, present, "present", present ? undefined : "absent");
+}
+
+export function assertRuntimeEventKindAbsent(
+  context: BenchmarkEvidenceContext,
+  kind: RuntimeEvent["kind"]
+): BenchmarkEvidenceAssertion {
+  const absent = !context.events.some((event) => event.kind === kind);
+  return assertion(`runtime event absent: ${kind}`, absent, "absent", absent ? undefined : "present");
+}
+
 export function assertTrajectoryEventKindPresent(
   context: BenchmarkEvidenceContext,
   kind: TrajectoryEventKind
@@ -150,6 +166,61 @@ export function assertTrajectoryExcludesText(
     JSON.stringify(event.data).includes(text)
   ) !== true;
   return assertion(`trajectory excludes text: ${text}`, absent, `no ${text}`, absent ? undefined : trajectoryTextSummary(context));
+}
+
+export function assertForbiddenPathUntouched(
+  context: BenchmarkEvidenceContext,
+  path: string
+): BenchmarkEvidenceAssertion {
+  const touched = context.events.some((event) =>
+    "targetSummary" in event &&
+    typeof event.targetSummary === "string" &&
+    event.targetSummary.includes(path) &&
+    event.kind === "tool-start" &&
+    /write|edit|patch/u.test(event.tool)
+  ) || context.trajectory?.events.some((event) =>
+    readString(event.data.targetSummary)?.includes(path) === true &&
+    /write|edit|patch/u.test(readString(event.data.tool) ?? "")
+  ) === true;
+
+  return assertion(`forbidden path untouched: ${path}`, !touched, `no writes to ${path}`, touched ? evidenceSummary(context) : undefined);
+}
+
+export function assertNoUnrelatedContextInjected(
+  context: BenchmarkEvidenceContext,
+  marker: string
+): BenchmarkEvidenceAssertion {
+  const combined = [
+    context.finalAnswer,
+    ...context.events.map((event) => JSON.stringify(event)),
+    ...(context.trajectory?.events.map((event) => JSON.stringify(event.data)) ?? [])
+  ].join("\n");
+  const absent = !combined.includes(marker);
+  return assertion(`no unrelated context injected: ${marker}`, absent, `no ${marker}`, absent ? undefined : marker);
+}
+
+export function assertWorkspacePathScoped(
+  context: BenchmarkEvidenceContext,
+  allowedPathPrefix: string,
+  forbiddenPathPrefix: string
+): BenchmarkEvidenceAssertion {
+  const targets = [
+    ...context.events
+      .map((event) => "targetSummary" in event ? event.targetSummary : undefined)
+      .filter((value): value is string => value !== undefined),
+    ...(context.trajectory?.events
+      .map((event) => readString(event.data.targetSummary))
+      .filter((value): value is string => value !== undefined) ?? [])
+  ];
+  const usedAllowed = targets.some((target) => target.startsWith(allowedPathPrefix));
+  const usedForbidden = targets.some((target) => target.startsWith(forbiddenPathPrefix));
+  const passed = usedAllowed && !usedForbidden;
+  return assertion(
+    `workspace path scoped: ${allowedPathPrefix}`,
+    passed,
+    `${allowedPathPrefix} used and ${forbiddenPathPrefix} absent`,
+    passed ? undefined : targets.join(", ")
+  );
 }
 
 export function assertAllEvidence(assertions: readonly BenchmarkEvidenceAssertion[]): void {

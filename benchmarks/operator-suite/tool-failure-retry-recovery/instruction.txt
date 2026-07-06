@@ -1,0 +1,1 @@
+Run the local verification, recover if a transient tool failure occurs, and leave an audit note.
