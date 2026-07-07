@@ -22,6 +22,7 @@ import type { MemoryIndexSync } from "../memory/memory-index-sync.js";
 import type { MemoryPersistenceService } from "../memory/memory-persistence-service.js";
 import type { LocalMemoryProvider } from "../memory/local-memory-provider.js";
 import { MemoryRecallOrchestrator } from "../memory/memory-recall-orchestrator.js";
+import type { MemoryCurationService } from "../memory/memory-curation-service.js";
 import type { LocalMemoryRetrievalService } from "../memory/memory-retrieval-service.js";
 import type { MemoryStore } from "../memory/memory-store.js";
 import type { ProviderExecutor } from "../providers/provider-executor.js";
@@ -142,6 +143,7 @@ export type AgentLoopRuntimeSubstrate = {
   memoryRetrievalService: LocalMemoryRetrievalService;
   sessionRecallServiceFactory: (input: AgentLoopSessionServiceInput) => import("../session/session-recall-service.js").SessionRecallService;
   memoryFileCompactionServiceFactory: (input: AgentLoopSessionServiceInput) => MemoryFileCompactionService;
+  memoryCurationServiceFactory?: (input: AgentLoopSessionServiceInput) => MemoryCurationService;
   fileStateTracker: FileStateTracker;
   memoryPersistenceService: MemoryPersistenceService;
   memoryPersistencePaths: Record<string, string>;
@@ -238,6 +240,7 @@ export type BuiltAgentLoopSession = {
   delegationManager: DelegationManager;
   sessionRecallService: import("../session/session-recall-service.js").SessionRecallService;
   memoryFileCompactionService: MemoryFileCompactionService;
+  memoryCurationService?: MemoryCurationService;
   toolFilterResult?: AgentLoopToolRegistryFilterResult;
 };
 
@@ -286,6 +289,9 @@ export class AgentLoopBuilder {
     };
     const sessionRecallService = substrate.sessionRecallServiceFactory(sessionServiceInput);
     const memoryFileCompactionService = substrate.memoryFileCompactionServiceFactory(sessionServiceInput);
+    const memoryCurationService = input.parentSessionId === undefined
+      ? substrate.memoryCurationServiceFactory?.(sessionServiceInput)
+      : undefined;
 
     for (const tool of substrate.mcpTools) {
       toolRegistry.register(tool);
@@ -544,6 +550,7 @@ export class AgentLoopBuilder {
       memoryPromptContext: substrate.memoryPromptContext,
       memoryRecallOrchestrator,
       sessionCompressionService: input.sessionCompression === "disabled" ? undefined : substrate.sessionCompressionService,
+      memoryCurationService,
       compressionConfig: input.sessionCompression === "disabled" ? undefined : substrate.compressionConfig,
       model: routes.model,
       providerPreferences: routes.providerPreferences,
@@ -580,6 +587,7 @@ export class AgentLoopBuilder {
       delegationManager,
       sessionRecallService,
       memoryFileCompactionService,
+      memoryCurationService,
       toolFilterResult
     };
   }

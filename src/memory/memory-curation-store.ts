@@ -30,6 +30,8 @@ export type MemoryCurationRecord = {
   sessionId: string;
   trigger: MemoryCurationTrigger;
   status: MemoryCurationStatus;
+  sourceMessageCount?: number;
+  sourceMessageIds?: string[];
   extractedFactIds: string[];
   operations: MemoryCurationOperationRecord[];
   reason: string;
@@ -158,6 +160,12 @@ function normalizeRecord(value: unknown): MemoryCurationRecord[] {
     status,
     reason,
     createdAt,
+    ...(typeof value.sourceMessageCount === "number" && Number.isFinite(value.sourceMessageCount)
+      ? { sourceMessageCount: Math.max(0, Math.trunc(value.sourceMessageCount)) }
+      : {}),
+    sourceMessageIds: Array.isArray(value.sourceMessageIds)
+      ? value.sourceMessageIds.filter((entry): entry is string => typeof entry === "string")
+      : [],
     extractedFactIds: Array.isArray(value.extractedFactIds)
       ? value.extractedFactIds.filter((entry): entry is string => typeof entry === "string")
       : [],

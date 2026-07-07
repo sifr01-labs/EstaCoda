@@ -487,6 +487,42 @@ describe("createRuntime token branding", () => {
     }
   });
 
+  it("exposes a memory curation checkpoint on the runtime", async () => {
+    const options = await minimalRuntimeOptions();
+    const sessionDb = new InMemorySessionDB();
+    const runtime = await createRuntime({
+      ...options,
+      sessionDb,
+      memory: normalizeMemoryConfig({
+        curation: { mode: "review" }
+      })
+    });
+
+    try {
+      await sessionDb.appendMessage({
+        id: "m1",
+        sessionId: runtime.sessionId,
+        role: "user",
+        content: "Remember I use pnpm."
+      });
+
+      const result = await runtime.auditMemoryCuration?.({ trigger: "manual" });
+
+      expect(result).toMatchObject({
+        trigger: "manual",
+        status: "ignored",
+        reviewedMessageCount: 1
+      });
+      await expect(sessionDb.listEvents(runtime.sessionId)).resolves.toContainEqual(expect.objectContaining({
+        kind: "memory-curation",
+        trigger: "manual",
+        status: "ignored"
+      }));
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("fails closed when tokens are missing", async () => {
     const { tokens: _tokens, ...options } = await minimalRuntimeOptions();
 

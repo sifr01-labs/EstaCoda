@@ -33,6 +33,7 @@ import type { SkillPlaybookRunner } from "./skill-playbook-runner.js";
 import type { ToolPlanRunner } from "./tool-plan-runner.js";
 import { createSessionRuntimeContext } from "./session-runtime-context.js";
 import { normalizeSessionCompressionConfig, type SessionCompressionConfig } from "../config/runtime-config.js";
+import type { MemoryCurationService } from "../memory/memory-curation-service.js";
 
 const memoryPromotionMocks = vi.hoisted(() => ({
   resolveUserPreferencePromotion: vi.fn(),
@@ -272,6 +273,7 @@ async function createAgentLoop(input: {
   failSessionRecallDecisionEvent?: boolean;
   failSessionEventKinds?: string[];
   sessionCompressionService?: Pick<SessionCompressionService, "compactIfNeeded">;
+  memoryCurationService?: Pick<MemoryCurationService, "observeCompletedTurn" | "checkpoint">;
   compressionConfig?: SessionCompressionConfig;
   memoryProvider?: MemoryProvider;
   trajectoryStore?: Pick<TrajectoryStore, "saveTrajectory">;
@@ -375,6 +377,7 @@ async function createAgentLoop(input: {
     memoryProvider: input.memoryProvider,
     memoryRecallOrchestrator,
     sessionCompressionService: input.sessionCompressionService,
+    memoryCurationService: input.memoryCurationService,
     compressionConfig: input.compressionConfig,
     skillLearningManager: input.skillLearningManager,
     agentEvolutionPolicy: deriveAgentEvolutionPolicy("suggest")
@@ -1061,6 +1064,27 @@ describe("AgentLoop provider availability gating", () => {
     expect(saveTrajectory).toHaveBeenCalledTimes(1);
   });
 
+  it("runs memory curation after completed turns", async () => {
+    const observeCompletedTurn = vi.fn(async () => undefined as never);
+    const { loop } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("done"),
+      memoryCurationService: {
+        observeCompletedTurn,
+        checkpoint: vi.fn(async () => undefined as never)
+      }
+    });
+
+    await loop.handle({
+      text: "use the test skill",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(observeCompletedTurn).toHaveBeenCalledTimes(1);
+  });
+
   it("rotates session context before provider turn and appends final response to the child", async () => {
     const runSkillPlaybook = vi.fn(async () => []);
     const compactIfNeeded = vi.fn(async (input: { sessionId: string }): Promise<CompactResult> => {
@@ -1168,6 +1192,76 @@ describe("AgentLoop provider availability gating", () => {
     await expect(sessionDb.listMessages(childSessionId)).resolves.toEqual(expect.arrayContaining([
       expect.objectContaining({ role: "agent", content: expect.stringContaining("test-skill") })
     ]));
+  });
+
+  it("runs a memory curation checkpoint before session compression", async () => {
+    const checkpoint = vi.fn(async () => undefined as never);
+    const compactIfNeeded = vi.fn(async (input: { sessionId: string }): Promise<CompactResult> => ({
+      didCompress: false,
+      originalSessionId: input.sessionId,
+      activeSessionId: input.sessionId,
+      rotated: false,
+      messages: await sessionDb.listMessages(input.sessionId),
+      diagnostics: {
+        shouldCompress: false,
+        reason: "not-needed",
+        summaryFormatVersion: "v1",
+        preTokens: 1_000,
+        postTokens: 1_000,
+        estimatedSavingsTokens: 0,
+        estimatedSavingsRatio: 0,
+        sourceMessageCount: 2,
+        summarizedMessageCount: 0,
+        protectedMessageCount: 2,
+        protectedFirstN: 0,
+        protectedLastN: 2,
+        protectedSpans: [],
+        protectedCategories: [],
+        summaryChars: 0,
+        prunedToolResults: 0,
+        prunedToolResultChars: 0,
+        protectedToolResultsKept: 0,
+        scopeKey: "default",
+        ineffectiveCompressionCount: 0,
+        recentSavingsRatios: [],
+        warnings: [],
+        eventWarnings: [],
+        fallbackUsed: false
+      },
+      userFacingMessage: "Session history unchanged"
+    }));
+    const { loop, sessionDb, sessionId } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      sessionCompressionService: { compactIfNeeded },
+      compressionConfig: normalizeSessionCompressionConfig({
+        enabled: true,
+        experimental: true,
+        summaryModelContextLength: 50,
+        threshold: 0.10
+      }),
+      memoryCurationService: {
+        observeCompletedTurn: vi.fn(async () => undefined as never),
+        checkpoint
+      }
+    });
+    await sessionDb.appendMessage({
+      sessionId,
+      role: "user",
+      content: "older history ".repeat(200)
+    });
+
+    await loop.handle({
+      text: "use the test skill",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(checkpoint).toHaveBeenCalledWith(expect.objectContaining({
+      trigger: "compact",
+      sessionId
+    }));
+    expect(compactIfNeeded).toHaveBeenCalledTimes(1);
   });
 
   it("keeps successful preflight compression when session-compacted event emission fails", async () => {

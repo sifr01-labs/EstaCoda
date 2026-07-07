@@ -109,6 +109,18 @@ export type RuntimeEvent =
       postTokens: number;
     }
   | {
+      kind: "memory-curation";
+      trigger: "turn-count" | "compact" | "handoff" | "runtime-dispose" | "manual";
+      status: "auto-applied" | "pending-review" | "ignored" | "failed";
+      extractedFactCount: number;
+      candidateCount: number;
+      autoAppliedCount: number;
+      pendingReviewCount: number;
+      ignoredCount: number;
+      failedCount: number;
+      warningCount: number;
+    }
+  | {
       kind: "security-risk-escalated";
       from: string;
       to: string;

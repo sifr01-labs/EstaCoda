@@ -1532,6 +1532,10 @@ export async function handleSlashCommand(input: {
       const profileId = await runtimeProfileId(input.runtime);
       const profilePaths = resolveProfileStateHome({ homeDir: resolveHomeDir(input.homeDir), profileId });
       const store = new FileHandoffStore({ path: join(profilePaths.gatewayStatePath, "handoff-codes.json") });
+      await input.runtime.auditMemoryCuration?.({
+        trigger: "handoff",
+        sessionId: input.runtime.sessionId
+      }).catch(() => undefined);
       const handoff = await store.create({
         sessionId: input.runtime.sessionId,
         surfaceType: surface,

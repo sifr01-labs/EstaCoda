@@ -570,6 +570,20 @@ export type SessionEvent =
       restoredChars?: number;
     }
   | {
+      kind: "memory-curation";
+      trigger: "turn-count" | "compact" | "handoff" | "runtime-dispose" | "manual";
+      status: "auto-applied" | "pending-review" | "ignored" | "failed";
+      sourceMessageCount: number;
+      extractedFactCount: number;
+      candidateCount: number;
+      autoAppliedCount: number;
+      pendingReviewCount: number;
+      ignoredCount: number;
+      failedCount: number;
+      warningCount: number;
+      warnings?: string[];
+    }
+  | {
       kind: "skill-learned";
       action: "observed" | "candidate" | "created";
       record: {

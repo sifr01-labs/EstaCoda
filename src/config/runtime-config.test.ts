@@ -19,6 +19,7 @@ import {
   setupVoiceConfig
 } from "./runtime-config.js";
 import { DEFAULT_DELEGATION_CONFIG } from "./delegation-defaults.js";
+import { DEFAULT_MEMORY_CONFIG } from "./memory-config.js";
 import { resolveProfileStateHome } from "./profile-home.js";
 import type { SessionEvent } from "../contracts/session.js";
 
@@ -876,7 +877,8 @@ describe("loadRuntimeConfig external memory", () => {
         backfillOnStartup: "bounded",
         reindexOnStartup: false,
         vacuumIntervalDays: 7
-      }
+      },
+      curation: DEFAULT_MEMORY_CONFIG.curation
     });
   });
 
@@ -914,7 +916,8 @@ describe("loadRuntimeConfig external memory", () => {
         backfillOnStartup: "off",
         reindexOnStartup: true,
         vacuumIntervalDays: 30
-      }
+      },
+      curation: DEFAULT_MEMORY_CONFIG.curation
     });
     expect(loaded.externalMemory).toEqual({
       enabled: false,

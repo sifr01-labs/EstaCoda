@@ -57,6 +57,7 @@ import type { SessionCompressionService } from "../prompt/session-compression-se
 import { estimateMessagesTokensRough, estimateTextTokensRough } from "../prompt/token-estimator.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 import type { WorkflowRuntimeContext } from "../contracts/workflow-context.js";
+import type { MemoryCurationService } from "../memory/memory-curation-service.js";
 
 export type AgentLoopInput = {
   text: string;
@@ -124,6 +125,7 @@ export type AgentLoopOptions = {
   memoryPromptContext?: MemoryPromptContext;
   memoryRecallOrchestrator?: Pick<MemoryRecallOrchestrator, "prepareForTurn">;
   sessionCompressionService?: Pick<SessionCompressionService, "compactIfNeeded">;
+  memoryCurationService?: Pick<MemoryCurationService, "observeCompletedTurn" | "checkpoint">;
   compressionConfig?: SessionCompressionConfig;
   model?: ModelProfile;
   providerPreferences?: ProviderRoutePreferences;
@@ -206,6 +208,7 @@ export class AgentLoop {
   readonly #memoryPromptContext: MemoryPromptContext | undefined;
   readonly #memoryRecallOrchestrator: Pick<MemoryRecallOrchestrator, "prepareForTurn"> | undefined;
   readonly #sessionCompressionService: Pick<SessionCompressionService, "compactIfNeeded"> | undefined;
+  readonly #memoryCurationService: Pick<MemoryCurationService, "observeCompletedTurn" | "checkpoint"> | undefined;
   readonly #compressionConfig: SessionCompressionConfig | undefined;
   readonly #model: ModelProfile | undefined;
   readonly #providerPreferences: ProviderRoutePreferences;
@@ -243,6 +246,7 @@ export class AgentLoop {
     this.#memoryPromptContext = options.memoryPromptContext;
     this.#memoryRecallOrchestrator = options.memoryRecallOrchestrator;
     this.#sessionCompressionService = options.sessionCompressionService;
+    this.#memoryCurationService = options.memoryCurationService;
     this.#compressionConfig = options.compressionConfig;
     this.#model = options.model;
     this.#providerPreferences = options.providerPreferences ?? {};
@@ -891,6 +895,10 @@ export class AgentLoop {
     });
 
     await this.#promoteRepeatedPreferences(input.text, userInputEvent.id);
+    await this.#memoryCurationService?.observeCompletedTurn({
+      signal: input.signal,
+      onEvent: input.onEvent
+    }).catch(() => undefined);
 
     return await this.#completeAndReturn(response, outcomeFromResponse(response));
   }
@@ -1046,6 +1054,12 @@ export class AgentLoop {
     }
 
     try {
+      await this.#memoryCurationService?.checkpoint({
+        trigger: "compact",
+        sessionId,
+        signal,
+        onEvent
+      }).catch(() => undefined);
       const result = await this.#sessionCompressionService.compactIfNeeded({
         profileId: this.#profileId,
         sessionId,
