@@ -1,6 +1,6 @@
 ---
 title: Memory architecture
-description: Memory files, promotion, retrieval, persistence, and prompt assembly boundaries.
+description: Memory files, curation, promotion, retrieval, persistence, and prompt assembly boundaries.
 sidebar_position: 5
 ---
 
@@ -8,7 +8,7 @@ sidebar_position: 5
 
 EstaCoda memory is durable runtime context assembled from profile files, shared files, promotion metadata, and optional recall sources. It is not session history, and it is not a hidden policy channel.
 
-This page is for maintainers debugging memory reads, writes, promotion, recall, compaction, or persistence. User-facing behavior is documented in [Memory](../user-guide/memory.md).
+This page is for maintainers debugging memory reads, writes, curation, promotion, recall, compaction, or persistence. User-facing behavior is documented in [Memory](../user-guide/memory.md).
 
 ---
 
@@ -24,7 +24,12 @@ This page is for maintainers debugging memory reads, writes, promotion, recall, 
 | `MemoryRecallOrchestrator` | Decides when session or external recall should be added to a turn. |
 | `LocalMemoryRetrievalService` | Lexical read/search over authoritative memory files and shared memory. |
 | `MemoryFileCompactionService` | Explicit compaction path for `USER.md` and `MEMORY.md`. |
-| `AgentLoop` | Calls promotion after a direct user turn and records promotion diagnostics/events. |
+| `MemoryFactExtractor` | Model-assisted extraction of durable facts from bounded transcript slices. |
+| `MemoryReviewer` | Deterministic runtime policy that turns extracted facts into memory candidates. |
+| `MemoryCurationService` | Runs checkpoint audits, applies eligible candidates, records curation history, and emits events. |
+| `MemoryCurationStore` | Profile-local curation history in `memory-curation.json`. |
+| `MemoryOperatorCommands` | Shared CLI, slash, and gateway curation controls. |
+| `AgentLoop` | Calls curation checkpoints and promotion after direct user turns, then records diagnostics/events. |
 
 Important state paths come from `src/config/profile-home.ts`.
 
@@ -37,6 +42,7 @@ Important state paths come from `src/config/profile-home.ts`.
     ├── SOUL.md
     ├── MEMORY.md
     ├── promotions.json
+    ├── memory-curation.json
     ├── external-memory/
     └── temp/
 ```
@@ -56,6 +62,38 @@ Prompt assembly separates trusted learned memory from untrusted recall.
 | Session compression summaries | Untrusted reference context | Not learned memory. |
 
 Retrieved recall must never override security policy, approval state, repo instructions, or current direct user input.
+
+---
+
+## Runtime Curation Flow
+
+Memory curation is the proactive learned-memory path. It deliberately separates extraction from policy:
+
+```text
+Transcript slice
+  -> ExtractedFact[]
+  -> runtime memory policy
+  -> CuratedMemoryCandidate[]
+  -> memory.curate-style local write or review/ignore record
+```
+
+The extractor uses the existing auxiliary execution path, preferring the semantic compression route when available. It returns structured facts with exact evidence spans. The model does not decide whether a fact is written.
+
+Runtime policy in `MemoryReviewer` decides disposition:
+
+| Disposition | Meaning |
+|---|---|
+| `auto-apply` | Eligible for immediate write to `USER.md` or `MEMORY.md`. |
+| `pending-review` | Recorded for review/history; no memory file mutation in this slice. |
+| `ignore` | Duplicate, not useful, or intentionally skipped. |
+
+Default `auto` mode auto-applies only explicit, non-sensitive, low-risk facts that pass evidence, duplicate, scanner, budget, and confidence gates. The default `autoApplyMinConfidence` is `0.7`, and `autoApplyMaxRisk` is `low`.
+
+Natural checkpoint triggers are `turn-count`, `compact`, `handoff`, `runtime-dispose`, and explicit `manual` runs from `memory populate` / `/memory populate`.
+
+Curation records store ids, trigger/status, source message ids/counts, extracted fact ids, operation hashes, and reasons. They do not store raw pending candidate diffs, so `memory review` is currently an inspectable queue/history view rather than an approval UI.
+
+Operator controls are implemented once in `MemoryOperatorCommands` and reused by the top-level CLI, interactive slash commands, and authorized gateway surfaces such as Telegram. Keep Telegram behavior in parity with CLI behavior for `/memory mode`, `/memory populate`, `/memory recent`, `/memory review`, and `/memory edit`.
 
 ---
 
@@ -122,9 +160,9 @@ The current threshold is two matching prior root sessions. The current turn must
 
 ---
 
-## Deterministic Detectors
+## Deterministic Promotion Detectors
 
-Promotion logic must remain deterministic. Do not call a model or LLM to decide:
+Promotion logic must remain deterministic. Do not call a model or LLM inside deterministic promotion to decide:
 
 - eligibility
 - statement splitting
@@ -251,7 +289,7 @@ The path rejects or strips:
 
 Detector syntax can recognize an input before the provider/store rejects it. For example, Arabic syntax can produce `Prefer OPENAI_API_KEY.`, but the safety path rejects it before persistence.
 
-Do not weaken the scanner to make promotion tests pass. Tests should assert rejection and rollback.
+Do not weaken the scanner to make curation or promotion tests pass. Tests should assert rejection and rollback.
 
 ---
 
@@ -292,9 +330,24 @@ pnpm exec vitest run src/memory/memory-store.test.ts
 pnpm exec vitest run src/memory/memory-prompt-context-builder.test.ts
 pnpm exec vitest run src/memory/memory-retrieval-service.test.ts
 pnpm exec vitest run src/memory/memory-file-compaction-service.test.ts
+pnpm exec vitest run src/memory/memory-curation-service.test.ts
+pnpm exec vitest run src/memory/memory-reviewer.test.ts
+pnpm exec vitest run src/memory/memory-curation-store.test.ts
+pnpm exec vitest run src/cli/cli-memory.test.ts
+pnpm exec vitest run src/channels/channel-gateway.test.ts
 ```
 
-When debugging promotion, inspect in this order:
+When debugging curation, inspect in this order:
+
+1. Curation mode and checkpoint trigger.
+2. Source message ids and transcript slice.
+3. Extracted facts and exact evidence spans.
+4. Runtime policy disposition/reason.
+5. Scanner, duplicate, confidence, risk, and budget gates.
+6. `memory-curation.json`.
+7. `USER.md` or `MEMORY.md` writes and index sync warnings.
+
+When debugging deterministic promotion, inspect in this order:
 
 1. Current direct `input.text`.
 2. Extracted direct candidates.
@@ -304,7 +357,7 @@ When debugging promotion, inspect in this order:
 6. `promotions.json`.
 7. Markdown file write and rollback behavior.
 
-Treat any LLM/model call in promotion eligibility, equivalence, conflict, or category logic as a regression.
+Treat any LLM/model call in deterministic promotion eligibility, equivalence, conflict, or category logic as a regression. Model use belongs in curation extraction; policy still belongs in code.
 
 ---
 

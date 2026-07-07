@@ -38,7 +38,7 @@ EstaCoda is organized by runtime domain. Common top-level directories include:
 | `src/providers/` | Provider adapters, provider metadata, model route resolution, provider execution helpers |
 | `src/tools/` | Native tool definitions, tool providers, tool registration plan |
 | `src/prompt/` | Prompt assembly, provider history preparation, compression, context packing |
-| `src/memory/` | Local memory, external memory integration, retrieval, indexing, compaction |
+| `src/memory/` | Local memory, curation, external memory integration, retrieval, indexing, compaction |
 | `src/security/` | Workspace trust, approvals, command assessment, security policy construction |
 | `src/channels/` | Channel adapters, channel gateway, delivery helpers |
 | `src/gateway/` | Gateway supervisor, hooks, resilience, service lifecycle |

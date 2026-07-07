@@ -46,11 +46,11 @@ description: "Breakdown of EstaCoda's runtime: AgentLoop, createRuntime, registr
 | Provider loop | `ProviderTurnLoop` | Streaming, tool-call extraction, iteration |
 | Tool execution | `ToolPlanRunner` | Plan conversion, execution, result packets |
 | Native intent execution | `NativeToolExecutor` | Deterministic paths (image-gen, voice, attachments) |
-| Memory promotion | `AgentLoop` | Post-run preference/fact promotion |
+| Memory curation/promotion | `AgentLoop` | Checkpoint curation and post-run preference/fact promotion |
 | Artifact collection | `AgentLoop` | Gather artifacts from tool results |
 | Response formatting | `AgentLoop` | Final text + progress + artifacts |
 
-> **Status:** Provider iteration, tool execution, skill playbooks, and native intents have separate runtime components. `AgentLoop` still owns the turn boundary, prompt preparation, security gating, memory promotion, artifact collection, and response shaping.
+> **Status:** Provider iteration, tool execution, skill playbooks, and native intents have separate runtime components. `AgentLoop` still owns the turn boundary, prompt preparation, security gating, memory curation/promotion, artifact collection, and response shaping.
 
 ### CLI Active-Turn Control Boundary
 

@@ -75,6 +75,7 @@ sidebar_position: 7
 | `SOUL.md` | هوية وذاكرة الأمان للملف الشخصي | `memory.curate` |
 | `MEMORY.md` | الحقائق والاتفاقيات المكتسبة للملف الشخصي | ترقية الذاكرة، `memory.curate` |
 | `promotions.json` | بيانات وصفية للترقية | ترقية الذاكرة |
+| `memory-curation.json` | سجل نقاط تنظيم الذاكرة | نقاط تنظيم runtime، `/memory populate` |
 | `gateway/` | حالة البوابة: الجلسات، الموافقات، وضع الصوت، رموز التسليم | تشغيل البوابة |
 | `cron/jobs.json` | تعريفات مهام Cron | `estacoda cron create` |
 | `skills/` | المهارات المثبتة للملف الشخصي | عمليات المهارة، التعلم |

@@ -189,9 +189,22 @@ sidebar_position: 2
 
 ### `/memory`
 
-يفحص استنتاجات الذاكرة المرقّى.
+يفحص ويدير تنظيم الذاكرة.
 
-**الحالة المُعدّلة:** لا شيء (قراءة فقط).
+```bash
+/memory mode [auto|review|manual]
+/memory recent [limit]
+/memory review [limit]
+/memory populate
+/memory edit
+```
+
+**الحالة المُعدّلة:**
+- `~/.estacoda/profiles/<id>/config.json` عند تغيير الوضع
+- `USER.md` / `MEMORY.md` عند نجاح كتابات populate
+- `memory-curation.json` لسجل التنظيم
+
+**السلوك:** يستخدم مسار المشغل المشترك نفسه مثل `estacoda memory ...` وTelegram `/memory ...`. الوضع الافتراضي هو `auto`. يشغّل `populate` نقطة تنظيم صريحة للجلسة النشطة. يعرض `review` سجلات pending-review؛ وليس بعد واجهة approve/reject.
 
 ### `/resume` أو `/continue`
 

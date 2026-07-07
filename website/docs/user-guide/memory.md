@@ -6,11 +6,11 @@ sidebar_position: 7
 
 # Memory
 
-EstaCoda memory is durable context stored in files. It helps future sessions remember reviewed preferences, project facts, and operator-curated notes.
+EstaCoda memory is durable context stored in files. It helps future sessions remember durable preferences, project facts, operating style, recurring constraints, and operator-curated notes.
 
 Memory is not a hidden authority layer. System instructions, developer instructions, repo instructions, `AGENTS.md`, security policy, and the current user request still win.
 
-Use this page to understand what can be remembered, where it is stored, how promotion works, and how to inspect or repair it.
+Use this page to understand what can be remembered, where it is stored, how curation and promotion work, and how to inspect or repair it.
 
 ---
 
@@ -20,11 +20,12 @@ EstaCoda has several related stores. They are not interchangeable.
 
 | Store | Where it lives | What it is for |
 |---|---|---|
-| Session history | Session database | Past turns and events. Used for transcripts, recall, and promotion evidence. |
+| Session history | Session database | Past turns and events. Used for transcripts, recall, curation checkpoints, and promotion evidence. |
 | Profile memory | `~/.estacoda/profiles/<id>/USER.md`, `MEMORY.md`, `SOUL.md` | Durable context for one profile. |
 | Project/workspace memory | Usually `MEMORY.md` plus repo context such as `AGENTS.md` | Project facts, conventions, and workflow notes. |
 | Shared memory | `~/.estacoda/memory/shared/` | Global snippets available across profiles. |
 | Promotion metadata | `~/.estacoda/profiles/<id>/promotions.json` | Tracks promoted facts, active/inactive state, source sessions, and confidence. |
+| Curation history | `~/.estacoda/profiles/<id>/memory-curation.json` | Tracks memory curation checkpoints, triggers, outcomes, and hashed operation metadata. |
 
 `AGENTS.md` is not memory. It is workspace instruction context. It is not promoted, compacted, or edited by memory tools.
 
@@ -34,11 +35,11 @@ EstaCoda has several related stores. They are not interchangeable.
 
 Memory does not:
 
-- learn broad semantic preferences from one sentence
+- save every interesting sentence
 - promote assistant output, tool output, child-session output, resumes, or delegated text
 - let recalled history override security policy or the current user request
 - store secrets or prompt-injection-looking text
-- use a model to decide promotion eligibility, equivalence, or conflicts
+- let the extraction model enforce write policy
 - automatically trust old session content as an instruction
 
 Session recall and external recall are reference context. They are labeled as untrusted historical context. Curated memory files are stronger than recall, but still below current instructions and safety policy.
@@ -73,6 +74,68 @@ Prompt render order is:
 ```text
 memory/shared/ -> USER.md -> SOUL.md -> MEMORY.md
 ```
+
+---
+
+## How Curation Works
+
+Memory curation is the proactive memory path. It reviews recent transcript slices at natural checkpoints, asks an auxiliary model to extract structured durable facts with evidence, then applies deterministic policy in the runtime.
+
+The model extracts facts. The runtime decides what happens to them.
+
+Each extracted fact includes:
+
+| Field | Meaning |
+|---|---|
+| `statement` | The durable fact in plain language. |
+| `evidence` | Exact spans from source messages. |
+| `category` | Work, project, preference, operating style, recurring constraint, technical default, personal, or other. |
+| `explicitness` | `explicit`, `strongly-implied`, or `inferred`. |
+| `sensitivity` | `none`, `private`, `sensitive`, or `secret`. |
+| `confidence` | A normalized score used by runtime policy. |
+
+Default mode is `auto`. Auto mode is still conservative: it auto-applies only explicit, non-sensitive, low-risk facts that pass evidence, duplicate, scanner, budget, and confidence gates. The default confidence gate is `0.7`.
+
+Other modes:
+
+| Mode | Behavior |
+|---|---|
+| `auto` | Auto-apply low-risk eligible facts; queue or ignore the rest. |
+| `review` | Record pending-review curation records without writing memory. |
+| `manual` | Skip background checkpoints; explicit manual curation commands still work. |
+
+Curation runs at configured natural checkpoints:
+
+- every `memory.curation.checkpointEveryTurns` completed root-session turns
+- `/compact` and session compaction when enabled
+- `/handoff` when enabled
+- runtime dispose when enabled and minimum message/interval gates pass
+- explicit `memory populate` or `/memory populate`
+
+When curation writes memory, it targets `USER.md` or `MEMORY.md`. It does not write `SOUL.md`, shared memory, `AGENTS.md`, or session history. Auto-writes are recorded in curation history and runtime/session events; they are visible without interrupting every turn.
+
+Shared controls are available from the top-level CLI, in-session slash commands, and authorized gateway surfaces such as Telegram:
+
+```bash
+estacoda memory mode [auto|review|manual]
+estacoda memory recent [--limit N]
+estacoda memory review [--limit N]
+estacoda memory populate
+estacoda memory edit
+estacoda memory clear [USER.md|MEMORY.md|all] --yes
+```
+
+Inside a session or Telegram chat, use the same subcommands through `/memory`:
+
+```text
+/memory mode review
+/memory populate
+/memory recent
+/memory review
+/memory edit
+```
+
+`memory review` currently shows pending-review/history records. It does not yet provide an approve/reject UI for stored candidate diffs, because this slice stores audit metadata and operation hashes rather than raw candidate patches.
 
 ---
 
@@ -246,7 +309,15 @@ Backups are not created for ordinary writes by default. They are created only by
 
 ## Inspect Memory
 
-Use CLI read/search first:
+Use curation history when you want to understand what the agent recently remembered or queued:
+
+```bash
+estacoda memory recent
+estacoda memory review
+estacoda memory mode
+```
+
+Use CLI read/search when you want the current authoritative memory content:
 
 ```bash
 estacoda memory read USER.md
@@ -276,9 +347,10 @@ Do not edit `promotions.json` casually. It tracks active, superseded, and forgot
 
 ## Edit Memory Safely
 
-Memory files are plain Markdown. Stop the runtime before manual edits when possible, then edit the relevant file:
+Memory files are plain Markdown. Use the memory edit helper or stop the runtime before manual edits when possible:
 
 ```bash
+estacoda memory edit
 $EDITOR ~/.estacoda/profiles/<id>/USER.md
 $EDITOR ~/.estacoda/profiles/<id>/MEMORY.md
 ```
@@ -293,6 +365,16 @@ cp ~/.estacoda/profiles/<id>/MEMORY.md ~/.estacoda/profiles/<id>/MEMORY.md.bak
 ```
 
 If you remove a promoted line manually, inspect `promotions.json` as well. Prefer the explicit forget path for user preferences so metadata and markdown stay aligned.
+
+To clear learned profile memory through the guarded command path:
+
+```bash
+estacoda memory clear USER.md --yes
+estacoda memory clear MEMORY.md --yes
+estacoda memory clear all --yes
+```
+
+`memory clear` never clears `SOUL.md` or shared memory. Existing live sessions may need `/new` or restart to reload prompt memory after manual edits or clears.
 
 ---
 
@@ -362,12 +444,14 @@ External recall is untrusted reference context. External memory cannot replace `
 | Expected preference did not promote | It was seen fewer than two prior root sessions, used an unsupported phrase, or appeared only in delegated/quoted/resume text | Check root-session history and phrase shape |
 | Arabic or mixed-language phrase did not promote | The value was natural-language text instead of a supported technical token, or contained bidi/invisible controls | Try a supported form such as `أفضل TypeScript` or `استخدم pnpm test افتراضياً` |
 | Wrong memory appeared | Active promotion metadata and markdown may disagree, or an old active promotion is still present | Inspect `USER.md`, `MEMORY.md`, and `promotions.json` |
+| Auto memory did not write | Curation mode is `review` or `manual`, the fact was not explicit, was sensitive, duplicated existing memory, failed the scanner, exceeded budget, lacked evidence, or had confidence below `0.7` | Run `estacoda memory recent`, `estacoda memory review`, and `estacoda memory mode` |
+| `/memory populate` says no active runtime | The top-level command was run outside an attached runtime | Run `/memory populate` inside an active CLI session or authorized Telegram session |
 | Memory file changed externally | Drift detection refused the write | Restart the runtime or reconcile the manual edit before retrying |
 | Memory write failed | Scanner rejection, budget overflow, drift, or persistence error | Check diagnostics and file sizes; compact or edit memory if needed |
 | Secret-looking content did not save | Safety scanner rejected it | Keep credentials in `.env` or secret storage, not memory |
 | Index search is stale | Rebuildable lexical index is out of date | Run `estacoda memory index rebuild` |
 
-When debugging promotion, start with the current direct user input, then check matching root-session user messages, then inspect `promotions.json`.
+When debugging curation, start with `memory recent` and `memory review`, then inspect `USER.md` or `MEMORY.md`. When debugging deterministic promotion, start with the current direct user input, then check matching root-session user messages, then inspect `promotions.json`.
 
 ---
 

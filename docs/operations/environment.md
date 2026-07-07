@@ -160,6 +160,7 @@ Profile root: `~/.estacoda/profiles/<id>/`
 | `SOUL.md` | Profile identity/persona |
 | `MEMORY.md` | Profile learned facts |
 | `promotions.json` | Profile memory promotion metadata |
+| `memory-curation.json` | Profile memory curation history |
 | `skills/` | Profile-installed skills |
 | `cron/` | Profile cron/workflow state |
 | `logs/` | Profile logs |

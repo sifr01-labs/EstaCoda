@@ -1,6 +1,6 @@
 ---
 title: "Memory"
-description: "Memory system: stores, promotion, rendering, and persistence."
+description: "Memory system: stores, curation, promotion, rendering, and persistence."
 ---
 
 # Memory
@@ -285,6 +285,8 @@ Startup memory initializes the runtime `MemoryStore` from profile files and shar
 
 When `memory.curate` changes memory during a session, the mutation updates the runtime memory store and persists to disk. Those changes can affect later turns in the same runtime, and the durable file changes remain available to future sessions.
 
+Checkpoint memory curation uses the same local persistence boundaries, but it is not a model-visible tool call. The runtime extracts facts from transcript slices, applies policy in code, then writes eligible `USER.md` / `MEMORY.md` operations or records review/ignore history in `memory-curation.json`.
+
 ## Promotion
 
 `memory-promotion.ts` runs after the response path and uses **bounded session search** instead of scanning every session/message.
@@ -325,7 +327,7 @@ Local lexical retrieval uses separate `memory.read` and `memory.search` tools in
 
 `memory.read` reads bounded local memory content by source. `memory.search` performs deterministic lexical search. Both tools accept `maxChars`; `memory.search` also accepts `maxResults`. Returned content is redacted, source-labeled, marked as `local-memory-context`, and treated as context rather than instruction. If the local index is disabled or unavailable, the retrieval service uses safe substring read/search fallback while preserving protected filtering.
 
-`memory.curate` can write `USER.md`, `MEMORY.md`, and `SOUL.md`. It does not manage `AGENTS.md`. If external memory mirror writes are enabled, local writes remain authoritative and mirror failures are returned as warnings without failing the local write.
+`memory.curate` can write `USER.md`, `MEMORY.md`, and `SOUL.md`. Checkpoint curation writes only learned-memory targets, `USER.md` and `MEMORY.md`. Neither path manages `AGENTS.md`. If external memory mirror writes are enabled, local writes remain authoritative and mirror failures are returned as warnings without failing the local write.
 
 ## Budget Pressure
 

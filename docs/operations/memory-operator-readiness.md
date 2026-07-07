@@ -11,7 +11,7 @@ This guide summarizes the implemented Memory Hardening behavior for operators an
 
 Canonical docs updated for Memory Hardening:
 
-- [Memory](../subsystems/memory.md) — local memory, prompt builder, orchestrator, recall, Memory File Compaction, external memory.
+- [Memory](../subsystems/memory.md) — local memory, curation, prompt builder, orchestrator, recall, Memory File Compaction, external memory.
 - [Semantic Session Compression](../subsystems/semantic-compression.md) — `/compact`, `estacoda sessions compact`, gateway hygiene, fallback, and events.
 - [Providers](../subsystems/providers.md) — auxiliary route boundaries and file-backed external memory config.
 - [Security](../subsystems/security.md) — trust boundaries for memory, recall, compression, and external providers.
@@ -31,6 +31,7 @@ Canonical docs updated for Memory Hardening:
 | 8 | `MemoryRecallOrchestrator` | Owns per-turn local/session/external recall decisions and diagnostics. |
 | 9 | External provider lifecycle hooks | Contract is present; active runtime paths are recall and opt-in mirror writes. `afterTurn` and `flushSession` are reserved hooks and are not actively invoked by runtime orchestration. External recall and mirror-write attempts emit metadata-only audit events best-effort. |
 | 10 | File-backed external memory provider | Profile-local JSONL storage beneath `external-memory/`. |
+| Curation | Checkpoint memory curation | Extracted facts are reviewed by runtime policy, then auto-applied, queued for review, or ignored. Default mode is conservative `auto`. |
 
 ## Enabling And Disabling
 
@@ -69,6 +70,27 @@ External memory is off unless a provider id is set:
 
 `externalMemory.file.path` is relative to the selected profile's `external-memory/` directory. Absolute paths and paths escaping that directory are rejected.
 
+Memory curation is enabled by default in conservative auto mode:
+
+```json
+{
+  "memory": {
+    "curation": {
+      "mode": "auto",
+      "checkpointEveryTurns": 25,
+      "auditOnCompact": true,
+      "auditOnHandoff": true,
+      "auditOnRuntimeDispose": true,
+      "autoApplyMaxRisk": "low",
+      "autoApplyMinConfidence": 0.7,
+      "autoWriteVisibility": "activity"
+    }
+  }
+}
+```
+
+Use `estacoda memory mode review` for a fully inspectable pending-review workflow, or `estacoda memory mode manual` to skip background checkpoints.
+
 Memory File Compaction is manual/tool-driven by default. It requires a configured `auxiliaryModels.memory_compaction` route to generate compacted content. Memory-file critical pressure is diagnostic only; it does not trigger automatic Memory File Compaction. Overflow fails closed with structured errors. Other auto-compaction paths use their own thresholds, not `MemoryBudgetPressure.critical`.
 
 ## Commands And Tools
@@ -79,6 +101,12 @@ Implemented user-facing commands:
 estacoda session recall <query>
 estacoda sessions recall <query>
 estacoda sessions compact <session-id> [--topic <topic>]
+estacoda memory mode [auto|review|manual]
+estacoda memory recent [--limit N]
+estacoda memory review [--limit N]
+estacoda memory populate
+estacoda memory edit
+estacoda memory clear [USER.md|MEMORY.md|all] --yes
 ```
 
 Implemented interactive slash surfaces where the runtime exposes them:
@@ -88,12 +116,22 @@ Implemented interactive slash surfaces where the runtime exposes them:
 /sessions recall <query>
 /compact [topic]
 /workflow summarize <runId>
+/memory mode [auto|review|manual]
+/memory recent [limit]
+/memory review [limit]
+/memory populate
+/memory edit
 ```
 
 Implemented gateway slash surface from this set:
 
 ```text
 /compact [topic]
+/memory mode [auto|review|manual]
+/memory recent [limit]
+/memory review [limit]
+/memory populate
+/memory edit
 ```
 
 Implemented memory runtime tools:
@@ -106,6 +144,8 @@ memory.curate
 ```
 
 `memory.curate` is the implemented memory write surface. Its `kind` field accepts `append`, `replace`, or `remove`; docs should not treat a generic `add` memory action as an available command or tool.
+
+Memory curation operator commands are not raw `memory.curate` calls. They run the shared curation pipeline and write profile-local history to `memory-curation.json`. `memory review` is currently a history/queue view; it does not apply or reject stored candidate diffs.
 
 `config.compression.status` is read-only. It reports normalized semantic compression config, auxiliary `compression` route status, and latest session compression state/event summary where a session context is available. It does not enable compression, write config, append session events, expose raw summaries, or expose credentials. There is no `config.compression.setup` command or tool.
 
@@ -134,6 +174,7 @@ Key event kinds:
 - `external-memory-recall` — metadata-only external provider recall audit.
 - `external-memory-mirror-write` — metadata-only external provider mirror-write audit.
 - `session-compaction-forked` — best-effort parent-side lineage/audit event when preserving semantic compaction creates a child.
+- `memory-curation` — checkpoint trigger/status, source counts, extracted fact count, operation count, and warning metadata without raw candidate content.
 
 Compression command output reports message counts, token estimates, optional focus topic, fallback status, and warnings.
 

@@ -284,6 +284,9 @@ Important memory trust rules:
 - Semantic compression summaries are reference-only historical context. They are redacted and prefixed, but they are not trusted as active instructions.
 - Transcript-preserving semantic compaction keeps the parent transcript available for audit/history and continues work in the compacted child only on surfaces that adopt the child session.
 - External memory recall is untrusted historical context. It cannot replace local memory or session recall.
+- Memory curation separates model extraction from runtime policy. The extractor may propose structured facts, but code decides whether a candidate is auto-applied, queued for review, or ignored.
+- Default curation mode is `auto`, but auto-apply is limited to explicit, non-sensitive, low-risk, evidence-backed facts that pass duplicate, scanner, budget, and confidence gates.
+- `review` mode records pending-review history without mutating memory. `manual` mode skips background checkpoints and preserves explicit commands.
 - Memory File Compaction can target only `USER.md` and `MEMORY.md`; it must never compact `SOUL.md`, `AGENTS.md`, session history, shared memory, or promotion metadata.
 - Memory-file critical pressure is diagnostic only. Overflow fails closed with structured errors; Memory File Compaction remains manual/tool-driven by default and is not automatic self-healing.
 
@@ -297,6 +300,7 @@ Secret handling:
 
 - Transcript-grade redaction is used for semantic compression and external memory recall/mirroring paths.
 - Scanner/safety rejection prevents secret-looking text from being promoted into local memory. Failed promotion persistence rolls back markdown and promotion metadata so rejected or stale promotion records are not rendered into prompt memory context.
+- Scanner/safety rejection also prevents curation writes. Pending curation history stores ids, source references, operation hashes, and reasons; it must not store raw secret-looking candidate text.
 - Promotion overflow after an otherwise successful response is non-fatal to the user turn and is reported through best-effort `memory-promotion-failed` diagnostics. Those diagnostics carry pressure/remediation metadata only and must not include raw promoted text or secrets.
 - Semantic compression failure diagnostics, fallback diagnostics, and status output are redacted and bounded. Status output omits raw summaries and `previousSummary` content.
 - Semantic compression may prune old large tool results before summarization, but that pruning is compression-input-only and must not mutate persisted session history.
@@ -307,6 +311,8 @@ Secret handling:
 - Provider failures, mirror-write failures, compression event failures, external audit event failures, and status diagnostic failures surface as warnings rather than weakening local memory or security policy.
 
 Prompt injection from historical or external memory is expected input. Retrieved text must be treated as data about prior context, not executable instruction.
+
+CLI and Telegram memory controls share the same operator path. Channel output may be compacted for delivery, but authorized `/memory ...` behavior must preserve the same policy, profile scoping, and memory-file boundaries as `estacoda memory ...`.
 
 ## Adaptive Assessor
 

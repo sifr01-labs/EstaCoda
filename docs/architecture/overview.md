@@ -383,7 +383,7 @@ Capability-first security boundary.
 ### Memory persistence
 
 - Global shared memory in `~/.estacoda/memory/shared/`
-- Profile-local `USER.md`, `SOUL.md`, `MEMORY.md`, and `promotions.json` under `~/.estacoda/profiles/<id>/`
+- Profile-local `USER.md`, `SOUL.md`, `MEMORY.md`, `promotions.json`, and `memory-curation.json` under `~/.estacoda/profiles/<id>/`
 - Workspace `AGENTS.md` is context/instruction input, not profile memory
 - Bounded budgets enforced by `MemoryStore`
 - `LocalMemoryProvider` persists: manual conclusions, promoted user preferences, promoted project facts/conventions, skill outcomes
@@ -394,6 +394,7 @@ Capability-first security boundary.
   - Persona/identity → profile-local `SOUL.md`
   - Reusable procedures → profile skills
   - Promotion metadata → profile-local `promotions.json`
+  - Curation history → profile-local `memory-curation.json`
 - `skills.autonomy`: `none` | `suggest` | `proactive` | `autonomous`
 
 ### Trajectory persistence

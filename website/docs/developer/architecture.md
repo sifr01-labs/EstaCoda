@@ -63,6 +63,7 @@ A typical profile directory contains:
 | `SOUL.md` | Protected identity and safety guidance |
 | `MEMORY.md` | Durable working memory and promoted facts |
 | `promotions.json` | Memory promotion metadata |
+| `memory-curation.json` | Memory curation checkpoint history |
 | `skills/` | Profile-installed skills |
 | `cron/` | Profile-local scheduled jobs |
 | `gateway/` | Channel session state, gateway handoff state, and adapter state |

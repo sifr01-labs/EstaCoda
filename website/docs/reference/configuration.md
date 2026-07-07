@@ -180,6 +180,42 @@ Specialized routes for non-primary tasks. Unsupported auxiliary names throw duri
 | `memory_compaction` | Memory file compaction |
 | `profile_context` | Profile context generation |
 
+### memory
+
+Memory config controls lexical retrieval, the derived local index, and proactive curation.
+
+```json
+{
+  "memory": {
+    "curation": {
+      "mode": "auto",
+      "checkpointEveryTurns": 25,
+      "auditOnCompact": true,
+      "auditOnHandoff": true,
+      "auditOnRuntimeDispose": true,
+      "runtimeDisposeMinNewMessages": 4,
+      "runtimeDisposeMinIntervalMinutes": 15,
+      "autoApplyMaxRisk": "low",
+      "autoApplyMinConfidence": 0.7,
+      "autoWriteVisibility": "activity"
+    }
+  }
+}
+```
+
+| Key | Default | Behavior |
+|-----|---------|----------|
+| `curation.mode` | `auto` | `auto` applies conservative low-risk candidates, `review` records pending-review history, `manual` skips background checkpoints. |
+| `curation.checkpointEveryTurns` | `25` | Completed root-session turns between background curation checkpoints. |
+| `curation.auditOnCompact` | `true` | Run curation before compact checkpoints. |
+| `curation.auditOnHandoff` | `true` | Run curation before handoff checkpoints. |
+| `curation.auditOnRuntimeDispose` | `true` | Run curation when the runtime is disposed if the dispose gates pass. |
+| `curation.runtimeDisposeMinNewMessages` | `4` | Minimum new messages before runtime-dispose curation. |
+| `curation.runtimeDisposeMinIntervalMinutes` | `15` | Minimum interval between runtime-dispose curation runs. |
+| `curation.autoApplyMaxRisk` | `low` | Highest candidate risk that may auto-apply. |
+| `curation.autoApplyMinConfidence` | `0.7` | Minimum extracted-fact confidence for auto-apply. |
+| `curation.autoWriteVisibility` | `activity` | Visibility level for auto-write notices/events. |
+
 ### delegation
 
 Subagent delegation config is normalized with defaults when omitted.

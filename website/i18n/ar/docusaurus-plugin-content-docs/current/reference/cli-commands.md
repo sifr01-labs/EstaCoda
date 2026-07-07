@@ -312,6 +312,40 @@ estacoda sessions compact <session-id> [--topic <topic>]
 
 ---
 
+## الذاكرة
+
+```bash
+estacoda memory index path
+estacoda memory index status
+estacoda memory index rebuild
+estacoda memory search <query> [--include-protected] [--max-results N] [--max-chars N]
+estacoda memory read <USER.md|MEMORY.md|SOUL.md|shared> [key] [--include-protected] [--max-chars N]
+estacoda memory mode [auto|review|manual]
+estacoda memory recent [--limit N]
+estacoda memory review [--limit N]
+estacoda memory populate
+estacoda memory edit
+estacoda memory clear [USER.md|MEMORY.md|all] --yes
+```
+
+**الحالة المُعدّلة:**
+- `~/.estacoda/profiles/<id>/config.json` عند `memory mode`
+- `~/.estacoda/profiles/<id>/USER.md` و`MEMORY.md` عند الكتابة/المسح
+- `~/.estacoda/profiles/<id>/memory-curation.json` لسجل التنظيم
+- `memory-index.sqlite` المحلي للملف الشخصي عند إعادة بناء/مزامنة الفهرس
+
+**السلوك:**
+- يعرض `memory mode` أو يحدّث وضع تنظيم الذاكرة المحلي للملف الشخصي. `auto` هو الافتراضي ويطبق فقط مرشحين محافظين منخفضي المخاطر.
+- يعرض `memory recent` سجلات التنظيم الحديثة، ومنها auto-applied وpending-review وignored وfailed.
+- يعرض `memory review` سجلات pending-review. هو حاليًا عرض queue/history قابل للفحص وليس واجهة approve/reject.
+- يرسل `memory populate` نقطة تنظيم يدوية عبر runtime نشطة. استخدم `/memory populate` داخل جلسة CLI نشطة أو قناة مصرح بها عندما لا تتوفر runtime مرتبطة للأمر الأعلى.
+- يطبع `memory edit` أهداف التحرير الآمنة وإرشادات الإصلاح لـ `USER.md` و`MEMORY.md`; يبقى `SOUL.md` محميًا.
+- يتطلب `memory clear` العلم `--yes`، وينشئ نسخًا احتياطية للملفات الموجودة، ولا يمسح `SOUL.md` أو الذاكرة المشتركة.
+
+**تكافؤ البوابة:** تعرض جلسات Telegram المصرح بها أوامر التنظيم نفسها عبر `/memory ...`.
+
+---
+
 ## Workflow
 
 يتطلب قاعدة بيانات جلسات SQLite. ترفض قاعدة بيانات الذاكرة أوامر Workflow.

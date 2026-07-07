@@ -19,7 +19,7 @@ This page maps the current source directories and the main dependency flow betwe
 | Security | `src/security/*`, `src/tools/workspace-trust-tools.ts` | Command safety, workspace trust, approval grants, hardline command floor, and target-key policy. |
 | Channels | `src/channels/channel-gateway.ts`, adapter files, delivery/router/session/approval stores | Telegram, Discord, Email, WhatsApp, surface pointers, remote approvals, delivery routing, and gateway lifecycle behavior. |
 | Session | `src/session/sqlite-session-db.ts`, `src/session/session-recall-service.ts`, `src/session/session-search-service.ts` | Global SQLite session persistence, recall/search, compression state, and profile isolation. |
-| Memory | `src/memory/*` | Profile-local identity/memory files, shared memory, promotion, indexing, recall orchestration, and memory pressure controls. |
+| Memory | `src/memory/*` | Profile-local identity/memory files, shared memory, curation, promotion, indexing, recall orchestration, and memory pressure controls. |
 | Skills | `src/skills/*`, `skills/official/**` | Skill loading, registry, playbooks, usage telemetry, proposals, mutation policy, bundled sync, and catalog generation. |
 | Workflow | `src/workflow/*`, `src/cli/workflow-commands.ts` | Explicit durable workflow runs, steps, events, checkpoints, locks, process registry, restart recovery, and operator commands. |
 | CLI/UI | `src/cli/*`, `src/ui/*`, `src/theme/*` | Command dispatch, interactive session loop, setup commands, view models, renderers, Operator Console surfaces, bidi handling, and theme tokens. |

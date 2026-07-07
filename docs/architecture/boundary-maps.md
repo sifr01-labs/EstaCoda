@@ -21,10 +21,12 @@ description: "Cross-subsystem boundary analysis for memory, skills, provider loo
 - Startup loads profile memory into the runtime `MemoryStore`.
 - `MemoryRecallOrchestrator` prepares prompt memory context per turn.
 - `LocalMemoryProvider` reads `USER.md`, `MEMORY.md`, `SOUL.md` from disk.
+- `MemoryCurationService` reviews transcript slices at checkpoints and records curation history.
 - `memory-promotion.ts` promotes repeated preferences and facts after the response path.
 
 **Outbound boundaries:**
 - `memory-tool.ts` exposes `memory.curate` with `kind: append | replace | remove`.
+- `MemoryCurationService` writes eligible `USER.md` / `MEMORY.md` operations through the local persistence path.
 - `memory-promotion.ts` writes promoted content back to disk.
 - Changes during a session are persisted immediately and can affect later turns in the same runtime because prompt memory context is rebuilt per turn.
 
@@ -32,6 +34,7 @@ description: "Cross-subsystem boundary analysis for memory, skills, provider loo
 - AgentLoop → MemoryRecallOrchestrator → MemoryPromptContextBuilder
 - AgentLoop → MemoryRecallOrchestrator → SessionRecallService for eligible recall turns
 - ProviderTurnLoop consumes prepared memory context; it does not decide recall policy
+- AgentLoop → MemoryCurationService (triggers checkpoint curation)
 - AgentLoop → memory-promotion (triggers post-run promotion)
 - SkillLearningManager → MemoryStore (Agent Evolution state)
 
@@ -84,7 +87,7 @@ description: "Cross-subsystem boundary analysis for memory, skills, provider loo
 
 **Key boundary:** The loop currently owns the iteration cycle. The provider does not know about tools; the tool executor does not know about providers. Only the loop bridges them.
 
-**Risk:** The loop is the only place where provider responses, tool plans, security decisions, and memory promotion meet. This makes the loop irreplaceable without rewriting the entire system.
+**Risk:** The loop is the only place where provider responses, tool plans, security decisions, and memory curation/promotion meet. This makes the loop irreplaceable without rewriting the entire system.
 
 ## Observability & Eval Boundary
 

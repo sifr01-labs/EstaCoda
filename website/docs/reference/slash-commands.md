@@ -189,9 +189,22 @@ Browse commands and available skills.
 
 ### `/memory`
 
-Inspect promoted memory conclusions.
+Inspect and manage memory curation.
 
-**State touched:** None (read-only).
+```bash
+/memory mode [auto|review|manual]
+/memory recent [limit]
+/memory review [limit]
+/memory populate
+/memory edit
+```
+
+**State touched:**
+- `~/.estacoda/profiles/<id>/config.json` for mode changes
+- `USER.md` / `MEMORY.md` for successful populate writes
+- `memory-curation.json` for curation history
+
+**Behavior:** Uses the same shared operator path as `estacoda memory ...` and Telegram `/memory ...`. `auto` is the default mode. `populate` runs an explicit curation checkpoint for the active session. `review` shows pending-review records; it is not yet an approve/reject UI.
 
 ### `/resume` or `/continue`
 

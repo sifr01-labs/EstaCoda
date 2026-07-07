@@ -315,6 +315,40 @@ Valid surfaces: `cli`, `telegram`, `discord`, `whatsapp`, `email`.
 
 ---
 
+## Memory
+
+```bash
+estacoda memory index path
+estacoda memory index status
+estacoda memory index rebuild
+estacoda memory search <query> [--include-protected] [--max-results N] [--max-chars N]
+estacoda memory read <USER.md|MEMORY.md|SOUL.md|shared> [key] [--include-protected] [--max-chars N]
+estacoda memory mode [auto|review|manual]
+estacoda memory recent [--limit N]
+estacoda memory review [--limit N]
+estacoda memory populate
+estacoda memory edit
+estacoda memory clear [USER.md|MEMORY.md|all] --yes
+```
+
+**State touched:**
+- `~/.estacoda/profiles/<id>/config.json` for `memory mode`
+- `~/.estacoda/profiles/<id>/USER.md` and `MEMORY.md` for writes/clears
+- `~/.estacoda/profiles/<id>/memory-curation.json` for curation history
+- profile-local `memory-index.sqlite` for index rebuild/sync
+
+**Behavior:**
+- `memory mode` shows or updates profile-local curation mode. `auto` is the default and applies only conservative low-risk candidates.
+- `memory recent` shows recent curation records, including auto-applied, pending-review, ignored, and failed checkpoints.
+- `memory review` shows pending-review records. This is currently an inspectable queue/history view, not an approve/reject UI.
+- `memory populate` dispatches a manual curation checkpoint through an active runtime. Run `/memory populate` inside an active CLI session or authorized channel when no attached runtime is available to the top-level command.
+- `memory edit` prints safe edit targets and repair guidance for `USER.md` and `MEMORY.md`; `SOUL.md` is protected.
+- `memory clear` requires `--yes`, creates backups for existing files, and never clears `SOUL.md` or shared memory.
+
+**Gateway parity:** Authorized Telegram sessions expose the same curation subcommands through `/memory ...`.
+
+---
+
 ## Workflow
 
 Requires SQLite session persistence. In-memory session DB rejects Workflow commands.
