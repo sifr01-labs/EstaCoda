@@ -104,6 +104,10 @@ estacoda sessions compact <session-id> [--topic <topic>]
 estacoda memory mode [auto|review|manual]
 estacoda memory recent [--limit N]
 estacoda memory review [--limit N]
+estacoda memory apply <record-id> [candidate-id|all]
+estacoda memory reject <record-id> [candidate-id|all]
+estacoda memory undo <record-id>
+estacoda memory forget <USER.md|MEMORY.md> <exact text>
 estacoda memory populate
 estacoda memory edit
 estacoda memory clear [USER.md|MEMORY.md|all] --yes
@@ -119,6 +123,10 @@ Implemented interactive slash surfaces where the runtime exposes them:
 /memory mode [auto|review|manual]
 /memory recent [limit]
 /memory review [limit]
+/memory apply <record-id> [candidate-id|all]
+/memory reject <record-id> [candidate-id|all]
+/memory undo <record-id>
+/memory forget <USER.md|MEMORY.md> <exact text>
 /memory populate
 /memory edit
 ```
@@ -130,6 +138,10 @@ Implemented gateway slash surface from this set:
 /memory mode [auto|review|manual]
 /memory recent [limit]
 /memory review [limit]
+/memory apply <record-id> [candidate-id|all]
+/memory reject <record-id> [candidate-id|all]
+/memory undo <record-id>
+/memory forget <USER.md|MEMORY.md> <exact text>
 /memory populate
 /memory edit
 ```
@@ -145,7 +157,7 @@ memory.curate
 
 `memory.curate` is the implemented memory write surface. Its `kind` field accepts `append`, `replace`, or `remove`; docs should not treat a generic `add` memory action as an available command or tool.
 
-Memory curation operator commands are not raw `memory.curate` calls. They run the shared curation pipeline and write profile-local history to `memory-curation.json`. `memory review` is currently a history/queue view; it does not apply or reject stored candidate diffs.
+Memory curation operator commands are not raw `memory.curate` calls. They run the shared curation pipeline and write profile-local history to `memory-curation.json`. `memory review` is an actionable queue for stored low-risk candidate operations; `memory apply`, `memory reject`, `memory undo`, and `memory forget` use the shared mutation path with drift checks, scanner/budget gates, index sync, and configured external-memory mirror warnings.
 
 `config.compression.status` is read-only. It reports normalized semantic compression config, auxiliary `compression` route status, and latest session compression state/event summary where a session context is available. It does not enable compression, write config, append session events, expose raw summaries, or expose credentials. There is no `config.compression.setup` command or tool.
 

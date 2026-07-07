@@ -326,6 +326,10 @@ estacoda memory read <USER.md|MEMORY.md|SOUL.md|shared> [key] [--include-protect
 estacoda memory mode [auto|review|manual]
 estacoda memory recent [--limit N]
 estacoda memory review [--limit N]
+estacoda memory apply <record-id> [candidate-id|all]
+estacoda memory reject <record-id> [candidate-id|all]
+estacoda memory undo <record-id>
+estacoda memory forget <USER.md|MEMORY.md> <exact text>
 estacoda memory populate
 estacoda memory edit
 estacoda memory clear [USER.md|MEMORY.md|all] --yes

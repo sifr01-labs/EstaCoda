@@ -14,6 +14,7 @@ import type { MemoryCurationCheckpointResult } from "./memory-curation-service.j
 import {
   MemoryCurationStore,
   type MemoryCurationCandidateRecord,
+  type MemoryCurationStatus,
   memoryCurationStorePath,
   type MemoryCurationRecord,
   type StoredMemoryOperation,
@@ -138,13 +139,35 @@ async function handleMemoryApply(
     return { ok: false, output: `Candidate ${missingOperation.id} does not store an applyable operation.` };
   }
 
+  const operations = candidates.map((candidate) => toMemoryOperation(candidate.operation!));
   const mutation = await createOperatorMutationContext(context, record.sessionId);
   const applied: MemoryCurationCandidateRecord[] = [];
   const warnings: string[] = [];
   try {
-    for (const candidate of candidates) {
-      const result = await mutation.service.apply(toMemoryOperation(candidate.operation!), { source: "memory.operator" });
+    const preflightStore = cloneMemoryStore(mutation.memoryStore);
+    try {
+      for (const operation of operations) {
+        preflightStore.apply(operation);
+      }
+    } catch (error) {
+      return {
+        ok: false,
+        output: `Memory apply failed before writing: ${formatOperatorError(error)}`
+      };
+    }
+
+    for (const [index, candidate] of candidates.entries()) {
+      const result = await mutation.service.apply(operations[index], { source: "memory.operator" });
       if (!result.ok) {
+        if (applied.length > 0) {
+          await markAppliedReviewCandidates({
+            store,
+            recordId: record.id,
+            applied,
+            operations: operations.slice(0, applied.length),
+            reason: `operator applied ${applied.length} memory candidate${applied.length === 1 ? "" : "s"} before failure`
+          });
+        }
         return { ok: false, output: `Memory apply failed for ${candidate.id}: ${result.message}` };
       }
       applied.push(candidate);
@@ -154,24 +177,12 @@ async function handleMemoryApply(
     mutation.sync.dispose();
   }
 
-  await store.update(record.id, (current) => {
-    const appliedIds = new Set(applied.map((candidate) => candidate.id));
-    const nextCandidates = (current.candidates ?? []).map((candidate) => appliedIds.has(candidate.id)
-      ? { ...candidate, reviewStatus: "applied" as const }
-      : candidate);
-    const nextOperations = [
-      ...current.operations,
-      ...applied.flatMap((candidate) => candidate.operation === undefined
-        ? []
-        : [summarizeMemoryOperation(toMemoryOperation(candidate.operation))])
-    ];
-    return {
-      ...current,
-      status: "applied",
-      candidates: nextCandidates,
-      operations: nextOperations,
-      reason: `operator applied ${applied.length} memory candidate${applied.length === 1 ? "" : "s"}`
-    };
+  await markAppliedReviewCandidates({
+    store,
+    recordId: record.id,
+    applied,
+    operations,
+    reason: `operator applied ${applied.length} memory candidate${applied.length === 1 ? "" : "s"}`
   });
 
   return {
@@ -210,7 +221,7 @@ async function handleMemoryReject(
       : candidate);
     return {
       ...current,
-      status: "rejected",
+      status: statusForReviewCandidates(nextCandidates),
       candidates: nextCandidates,
       reason: `operator rejected ${candidates.length} memory candidate${candidates.length === 1 ? "" : "s"}`
     };
@@ -632,11 +643,38 @@ function selectPendingCandidates(
   return pending.filter((candidate) => candidate.id === selector);
 }
 
+async function markAppliedReviewCandidates(input: {
+  store: MemoryCurationStore;
+  recordId: string;
+  applied: readonly MemoryCurationCandidateRecord[];
+  operations: readonly MemoryOperation[];
+  reason: string;
+}): Promise<void> {
+  await input.store.update(input.recordId, (current) => {
+    const appliedIds = new Set(input.applied.map((candidate) => candidate.id));
+    const nextCandidates = (current.candidates ?? []).map((candidate) => appliedIds.has(candidate.id)
+      ? { ...candidate, reviewStatus: "applied" as const }
+      : candidate);
+    const nextOperations = [
+      ...current.operations,
+      ...input.operations.map((operation) => summarizeMemoryOperation(operation))
+    ];
+    return {
+      ...current,
+      status: statusForReviewCandidates(nextCandidates),
+      candidates: nextCandidates,
+      operations: nextOperations,
+      reason: input.reason
+    };
+  });
+}
+
 async function createOperatorMutationContext(
   context: { homeDir: string; profileId: string },
   sessionId: string | undefined
 ): Promise<{
   service: MemoryMutationService;
+  memoryStore: MemoryStore;
   sync: ReturnType<typeof createMemoryIndexSync>;
 }> {
   const paths = resolveProfileStateHome({ homeDir: context.homeDir, profileId: context.profileId });
@@ -674,8 +712,33 @@ async function createOperatorMutationContext(
       },
       memoryIndexSync: sync
     }),
+    memoryStore,
     sync
   };
+}
+
+function cloneMemoryStore(source: MemoryStore): MemoryStore {
+  const snapshot = source.snapshot();
+  const clone = new MemoryStore({ budgets: snapshot.budgets });
+  for (const [file, content] of snapshot.files.entries()) {
+    clone.write(file, content);
+  }
+  return clone;
+}
+
+function statusForReviewCandidates(candidates: readonly MemoryCurationCandidateRecord[]): MemoryCurationStatus {
+  if (candidates.some((candidate) => candidate.reviewStatus === "pending")) {
+    return "pending-review";
+  }
+  if (candidates.some((candidate) => candidate.reviewStatus === "applied")) {
+    return "applied";
+  }
+  return "rejected";
+}
+
+function formatOperatorError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return truncate(redactSensitiveText(message), 240);
 }
 
 async function loadMemoryFileIntoStore(input: {

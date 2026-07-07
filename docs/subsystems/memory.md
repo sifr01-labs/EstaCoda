@@ -450,10 +450,10 @@ External memory is optional and disabled by default. The implemented Phase 10 pr
 External memory can:
 
 - return bounded untrusted external recall for explicit recall turns
-- mirror `memory.curate` writes when `mirrorWrites: true`
+- mirror shared memory mutation writes when `mirrorWrites: true`
 - expose provider status through internal provider status helpers
 
-The external memory contract also defines `afterTurn` and `flushSession` hooks, and the file-backed provider implements safe handlers for them. These hooks are reserved for future orchestration unless a caller invokes them directly; current runtime orchestration does not actively call them. Implemented runtime paths are external recall and opt-in `memory.curate` mirror writes.
+The external memory contract also defines `afterTurn` and `flushSession` hooks, and the file-backed provider implements safe handlers for them. These hooks are reserved for future orchestration unless a caller invokes them directly; current runtime orchestration does not actively call them. Implemented runtime paths are external recall and opt-in mirror writes for shared memory mutations, including `memory.curate`, auto-curation, and operator apply/undo/forget actions.
 
 External memory cannot:
 
