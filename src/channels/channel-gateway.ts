@@ -27,6 +27,7 @@ import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import { renderSessionCompactionResult } from "../prompt/session-compression-service.js";
+import { isMemoryCurationModeMutation, runMemoryOperatorCommand } from "../memory/memory-operator-commands.js";
 import type { SessionHygieneService } from "./session-hygiene-service.js";
 import { ChannelApprovalStore, type PersistedApprovalGrant } from "./channel-approval-store.js";
 import { buildBaseSessionId, normalizeSessionKey, type ChannelSessionPolicy, shouldAutoResetSession, stableSessionKey } from "./channel-session-store.js";
@@ -194,6 +195,7 @@ export type ChannelGatewayOptions = {
   surfacePointerStore?: SurfacePointerStore;
   diagnostics?: () => Promise<string>;
   deliveryRouter?: DeliveryRouter;
+  homeDir?: string;
   profileId?: string;
   approvalQueue?: GatewayApprovalQueue;
 
@@ -384,6 +386,7 @@ export class ChannelGateway {
   readonly #surfacePointerStore: SurfacePointerStore | undefined;
   readonly #diagnostics: (() => Promise<string>) | undefined;
   readonly #deliveryRouter: DeliveryRouter | undefined;
+  readonly #homeDir: string | undefined;
   readonly #profileId: string;
   readonly #approvalQueue: GatewayApprovalQueue | undefined;
   readonly #activeTurns = new Map<string, AbortController>();
@@ -447,6 +450,7 @@ export class ChannelGateway {
     this.#surfacePointerStore = options.surfacePointerStore;
     this.#diagnostics = options.diagnostics;
     this.#deliveryRouter = options.deliveryRouter;
+    this.#homeDir = options.homeDir;
     this.#profileId = options.profileId ?? "default";
     this.#approvalQueue = options.approvalQueue;
 
@@ -2354,7 +2358,7 @@ export class ChannelGateway {
         "/model - choose a session model",
         "/model <provider>/<model> - set the model for this session",
         "/model clear - clear this session model override",
-        "/memory - inspect promoted memory conclusions",
+        "/memory [mode|populate|review|apply|reject|undo|forget|recent|edit|clear] - inspect and manage memory curation",
         "/sessions - list recent sessions for this chat",
         "/switch <session-id> - switch this chat to a specific session",
         "/search <query> - search session history",
@@ -2711,17 +2715,18 @@ export class ChannelGateway {
         )
       });
       try {
-        const promotions = await runtime.inspectMemoryPromotions();
-        const text = promotions.length === 0
-          ? "No promoted memory conclusions found."
-          : [
-              "Promoted memory conclusions",
-              ...promotions.map((record, index) => {
-                const state = record.active ? "active" : record.forgottenAt !== undefined ? "forgotten" : "inactive";
-                const source = record.sourceSessionIds.length === 0 ? "no session provenance" : `${record.sourceSessionIds.length} session${record.sourceSessionIds.length === 1 ? "" : "s"}`;
-                return `${index + 1}. ${record.content} [${state}; occurrences:${record.occurrences}; ${source}]`;
-              })
-            ].join("\n");
+        const profileId = (await runtime.sessionDb.getSession(runtime.sessionId))?.profileId;
+        const memoryArgs = parseGatewayCommandArgs(message.text);
+        const result = await runMemoryOperatorCommand({
+          args: memoryArgs,
+          homeDir: this.#homeDir,
+          profileId,
+          runtime
+        });
+        if (result.ok && isMemoryCurationModeMutation(memoryArgs)) {
+          await this.#refreshAllCachedRuntimes("Gateway memory curation mode update");
+        }
+        const text = result.output;
         await this.#deliverText(adapter, message.sessionKey, text);
         return {
           sessionId,
@@ -4235,6 +4240,11 @@ function parseGatewayCommand(text: string): "/help" | "/status" | "/memory" | "/
   return undefined;
 }
 
+function parseGatewayCommandArgs(text: string): string[] {
+  const [, ...args] = text.trim().split(/\s+/u);
+  return args;
+}
+
 function firstPendingApproval(
   executions: ToolExecutionRecord[],
   originalMessage: ChannelMessage,
@@ -4474,7 +4484,7 @@ export function telegramGatewayCommands(): Array<{ command: string; description:
     { command: "/help", description: "Show Telegram help" },
     { command: "/status", description: "Show current session status" },
     { command: "/model", description: "Choose a session model" },
-    { command: "/memory", description: "Inspect promoted memory conclusions" },
+    { command: "/memory", description: "Inspect and manage memory curation" },
     { command: "/sessions", description: "List recent chat sessions" },
     { command: "/switch", description: "Switch to an existing session" },
     { command: "/search", description: "Search session history" },

@@ -1284,6 +1284,47 @@ function compactResult(overrides: {
 }
 
 describe("ChannelGateway commands", () => {
+  it("/memory populate uses the shared memory curation command path", async () => {
+    const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+    const homeDir = await mkdtemp(join(tmpdir(), "estacoda-gateway-memory-"));
+    const calls: unknown[] = [];
+    const runtimeForSession = vi.fn(async ({ sessionId }) => ({
+      ...createMinimalRuntime(),
+      sessionId,
+      auditMemoryCuration: async (input: unknown) => {
+        calls.push(input);
+        return {
+          status: "auto-applied" as const,
+          trigger: "manual" as const,
+          sessionId,
+          sourceMessageCount: 2,
+          reviewedMessageCount: 2,
+          extractedFactCount: 1,
+          candidateCount: 1,
+          autoAppliedCount: 1,
+          pendingReviewCount: 0,
+          ignoredCount: 0,
+          failedCount: 0,
+          warnings: []
+        };
+      }
+    }));
+    const gateway = new ChannelGateway({
+      adapters: [adapter],
+      runtimeForSession,
+      homeDir,
+      sessionStore: new InMemoryChannelSessionStore(),
+      authPolicy: { telegram: { allowedUserIds: ["user-1"] } }
+    });
+
+    const result = await gateway.receive(makeMessage("/memory populate"));
+
+    expect(result.replyText).toContain("Memory populate");
+    expect(result.replyText).toContain("status: auto-applied");
+    expect(calls).toEqual([{ trigger: "manual", sessionId: result.sessionId, signal: undefined }]);
+    await rm(homeDir, { recursive: true, force: true });
+  });
+
   it("/voice on sets voice_only for the chat without invoking runtime", async () => {
     const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
     const stateDir = await mkdtemp(join(tmpdir(), "estacoda-gateway-voice-"));

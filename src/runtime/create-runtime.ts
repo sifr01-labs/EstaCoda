@@ -22,9 +22,12 @@ import { DelegationManager } from "../delegation/delegation-manager.js";
 import { FileStateTracker } from "../delegation/file-state-tracker.js";
 import { SubagentRegistry, type OperatorSubagentStatus } from "../delegation/subagent-registry.js";
 import { MemoryFileCompactionService } from "../memory/memory-file-compaction-service.js";
+import { MemoryCurationService } from "../memory/memory-curation-service.js";
+import { MemoryCurationStore, memoryCurationStorePath, type MemoryCurationTrigger } from "../memory/memory-curation-store.js";
 import { MemoryIndex } from "../memory/memory-index.js";
 import { MemoryIndexStore, resolveMemoryIndexStorePath } from "../memory/memory-index-store.js";
 import { MemoryIndexSync } from "../memory/memory-index-sync.js";
+import { MemoryMutationService } from "../memory/memory-mutation-service.js";
 import { MemoryPersistenceService } from "../memory/memory-persistence-service.js";
 import { LocalMemoryRetrievalService } from "../memory/memory-retrieval-service.js";
 import { MemoryStore } from "../memory/memory-store.js";
@@ -217,6 +220,12 @@ export type Runtime = {
     preserveTranscript?: boolean;
     signal?: AbortSignal;
   }): Promise<CompactResult>;
+  auditMemoryCuration?(input: {
+    trigger: MemoryCurationTrigger;
+    sessionId?: string;
+    minNewMessages?: number;
+    signal?: AbortSignal;
+  }): Promise<import("../memory/memory-curation-service.js").MemoryCurationCheckpointResult | undefined>;
   inspectMcpServers(): MCPServerSnapshot[];
   hasActiveSubagents?(parentSessionId: string): boolean;
   activeSubagents?(parentSessionId?: string): OperatorSubagentStatus;
@@ -300,6 +309,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const localSkillsRoot = options.localSkillsRoot ?? profilePaths.skillsPath;
   const profileMemoryRoot = profilePaths.profileRoot;
   const memoryPersistenceService = new MemoryPersistenceService();
+  const memoryCurationStore = new MemoryCurationStore({
+    path: memoryCurationStorePath(profileMemoryRoot)
+  });
   const memoryPersistencePaths = {
     "USER.md": profilePaths.userMdPath,
     "MEMORY.md": profilePaths.memoryMdPath,
@@ -763,6 +775,38 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         sessionDb,
         sessionId
       }),
+      memoryCurationServiceFactory: ({ sessionRuntimeContext, sessionDb, trajectoryRecorder }) => new MemoryCurationService({
+        config: memoryConfig.curation,
+        profileId,
+        sessionId: () => sessionRuntimeContext.currentSessionId(),
+        sessionDb,
+        memoryStore,
+        curationStore: memoryCurationStore,
+        extractorOptions: {
+          route: compressionRoute,
+          mainRoute,
+          providerExecutor
+        },
+        persistence: memoryPersistenceService,
+        persistencePaths: {
+          "USER.md": profilePaths.userMdPath,
+          "MEMORY.md": profilePaths.memoryMdPath
+        },
+        memoryIndexSync,
+        memoryMutationService: new MemoryMutationService({
+          memoryStore,
+          profileId,
+          sessionId: () => sessionRuntimeContext.currentSessionId(),
+          workspaceRoot,
+          sessionDb,
+          trajectoryRecorder,
+          persistence: memoryPersistenceService,
+          persistencePaths: memoryPersistencePaths,
+          memoryIndexSync,
+          externalMemory: externalMemoryConfig,
+          externalMemoryProviders
+        })
+      }),
       fileStateTracker,
       memoryPersistenceService,
       memoryPersistencePaths,
@@ -884,7 +928,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     toolExecutor,
     sessionSkillRegistry,
     sessionSkillCatalog,
-    sessionRecallService
+    sessionRecallService,
+    memoryCurationService
   } = builtSession;
 
   // ─── Workflow module v0.8 Integration ───
@@ -1007,6 +1052,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       if (targetSession.profileId !== profileId) {
         throw new Error(`Session not found in active profile: ${targetSessionId}`);
       }
+      await memoryCurationService?.checkpoint({
+        trigger: "compact",
+        sessionId: targetSessionId,
+        signal: input.signal
+      }).catch(() => undefined);
       return await sessionCompressionService.compactNow({
         profileId,
         sessionId: targetSessionId,
@@ -1014,6 +1064,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         preserveTranscript: input.preserveTranscript === true,
         signal: input.signal
       });
+    },
+    async auditMemoryCuration(input) {
+      return await memoryCurationService?.checkpoint(input);
     },
     inspectMcpServers() {
       return loadedMcpServers.map((server) => structuredClone(server.snapshot));
@@ -1044,6 +1097,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             onDelta: input.onDelta,
             onSegmentBreak: input.onSegmentBreak
           });
+          await memoryCurationService?.observeCompletedTurn({
+            signal: input.signal,
+            onEvent: input.onEvent
+          }).catch(() => undefined);
           return turnResult.response;
         }
       }
@@ -1150,6 +1207,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       await browserSessionLifecycle?.cleanupAll();
       await ownedBrowserBackend?.close?.();
       await localWhisper?.dispose?.();
+      await memoryCurationService?.checkpoint({
+        trigger: "runtime-dispose",
+        minNewMessages: memoryConfig.curation.runtimeDisposeMinNewMessages
+      }).catch(() => undefined);
       await Promise.all(loadedMcpServers.map((server) => server.stop().catch(() => undefined)));
       memoryIndexSync?.dispose();
       const closeSessionDb = closeSessionDbOnDispose

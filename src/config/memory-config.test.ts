@@ -29,8 +29,79 @@ describe("normalizeMemoryConfig", () => {
         backfillOnStartup: "bounded",
         reindexOnStartup: true,
         vacuumIntervalDays: 7
-      }
+      },
+      curation: DEFAULT_MEMORY_CONFIG.curation
     });
+  });
+
+  it("normalizes memory curation defaults and partial overrides", () => {
+    expect(normalizeMemoryConfig({
+      curation: {
+        mode: "review",
+        checkpointEveryTurns: 30,
+        auditOnCompact: false,
+        autoApplyMaxRisk: "medium",
+        autoApplyMinConfidence: 0.7,
+        autoWriteVisibility: "inline"
+      }
+    }).curation).toEqual({
+      mode: "review",
+      checkpointEveryTurns: 30,
+      auditOnCompact: false,
+      auditOnHandoff: true,
+      auditOnRuntimeDispose: true,
+      runtimeDisposeMinNewMessages: 4,
+      runtimeDisposeMinIntervalMinutes: 15,
+      autoApplyMaxRisk: "medium",
+      autoApplyMinConfidence: 0.7,
+      autoWriteVisibility: "inline"
+    });
+  });
+
+  it("bounds and sanitizes numeric memory curation values", () => {
+    expect(normalizeMemoryConfig({
+      curation: {
+        checkpointEveryTurns: "0" as never,
+        runtimeDisposeMinNewMessages: "200" as never,
+        runtimeDisposeMinIntervalMinutes: "2000" as never,
+        autoApplyMinConfidence: 2
+      }
+    }).curation).toMatchObject({
+      checkpointEveryTurns: 1,
+      runtimeDisposeMinNewMessages: 100,
+      runtimeDisposeMinIntervalMinutes: 1440,
+      autoApplyMinConfidence: 1
+    });
+
+    expect(normalizeMemoryConfig({
+      curation: {
+        autoApplyMinConfidence: Number.NaN as never
+      }
+    }).curation.autoApplyMinConfidence).toBe(0.7);
+  });
+
+  it("accepts only supported memory curation modes and visibility settings", () => {
+    expect(normalizeMemoryConfig({ curation: { mode: "manual" } }).curation.mode).toBe("manual");
+    expect(normalizeMemoryConfig({ curation: { autoApplyMaxRisk: "high" } }).curation.autoApplyMaxRisk).toBe("high");
+    expect(normalizeMemoryConfig({ curation: { autoWriteVisibility: "off" } }).curation.autoWriteVisibility).toBe("off");
+    expect(() => normalizeMemoryConfig({
+      curation: { mode: "always" as never }
+    })).toThrow("memory.curation.mode must be auto, review, or manual");
+    expect(() => normalizeMemoryConfig({
+      curation: { autoApplyMaxRisk: "critical" as never }
+    })).toThrow("memory.curation.autoApplyMaxRisk must be low, medium, or high");
+    expect(() => normalizeMemoryConfig({
+      curation: { autoWriteVisibility: "silent" as never }
+    })).toThrow("memory.curation.autoWriteVisibility must be activity, inline, or off");
+  });
+
+  it("memory config hash changes for curation changes", () => {
+    const base = normalizeMemoryConfig(undefined);
+    const changed = normalizeMemoryConfig({
+      curation: { checkpointEveryTurns: base.curation.checkpointEveryTurns + 1 }
+    });
+
+    expect(stableJsonHash(changed)).not.toBe(stableJsonHash(base));
   });
 
   it("preserves disabled retrieval and index flags", () => {

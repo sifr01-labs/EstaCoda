@@ -180,6 +180,42 @@ model.staleTimeoutMs / model.fallbacks[].staleTimeoutMs
 | `memory_compaction` | ضغط ملف الذاكرة |
 | `profile_context` | توليد سياق الملف الشخصي |
 
+### memory
+
+تتحكم إعدادات الذاكرة في الاسترجاع اللفظي، والفهرس المحلي المشتق، والتنظيم الاستباقي.
+
+```json
+{
+  "memory": {
+    "curation": {
+      "mode": "auto",
+      "checkpointEveryTurns": 25,
+      "auditOnCompact": true,
+      "auditOnHandoff": true,
+      "auditOnRuntimeDispose": true,
+      "runtimeDisposeMinNewMessages": 4,
+      "runtimeDisposeMinIntervalMinutes": 15,
+      "autoApplyMaxRisk": "low",
+      "autoApplyMinConfidence": 0.7,
+      "autoWriteVisibility": "activity"
+    }
+  }
+}
+```
+
+| المفتاح | الافتراضي | السلوك |
+|---------|-----------|--------|
+| `curation.mode` | `auto` | يطبق `auto` المرشحين المحافظين منخفضي المخاطر، ويسجل `review` تاريخ pending-review، ويتجاوز `manual` نقاط الخلفية. |
+| `curation.checkpointEveryTurns` | `25` | عدد أدوار الجلسة الجذرية المكتملة بين نقاط تنظيم الخلفية. |
+| `curation.auditOnCompact` | `true` | يشغل التنظيم قبل نقاط compact. |
+| `curation.auditOnHandoff` | `true` | يشغل التنظيم قبل نقاط handoff. |
+| `curation.auditOnRuntimeDispose` | `true` | يشغل التنظيم عند التخلص من runtime إذا نجحت بوابات التخلص. |
+| `curation.runtimeDisposeMinNewMessages` | `4` | أدنى عدد رسائل جديدة قبل تنظيم runtime-dispose. |
+| `curation.runtimeDisposeMinIntervalMinutes` | `15` | أدنى فترة بين تشغيلات تنظيم runtime-dispose. |
+| `curation.autoApplyMaxRisk` | `low` | أعلى مخاطر مرشح يمكن تطبيقه تلقائيًا. |
+| `curation.autoApplyMinConfidence` | `0.7` | أدنى ثقة للحقيقة المستخرجة للتطبيق التلقائي. |
+| `curation.autoWriteVisibility` | `activity` | مستوى ظهور إشعارات/أحداث الكتابة التلقائية. |
+
 ### delegation
 
 إعدادات تفويض الوكلاء الفرعيين تُطبّع بالقيم الافتراضية عندما تكون محذوفة.

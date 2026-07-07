@@ -1,6 +1,6 @@
 ---
 title: "Memory"
-description: "Memory system: stores, promotion, rendering, and persistence."
+description: "Memory system: stores, curation, promotion, rendering, and persistence."
 ---
 
 # Memory
@@ -28,6 +28,11 @@ Memory is durable execution context, so retrieved or generated memory is always 
 | `src/cli/memory-commands.ts` | CLI memory index/read/search commands |
 | `src/tools/memory-retrieval-tools.ts` | Agent-facing `memory.read` and `memory.search` tools |
 | `src/memory/memory-file-compaction-service.ts` | Manual memory-file compaction and restore service |
+| `src/memory/memory-fact-extractor.ts` | Structured durable-fact extraction over transcript slices |
+| `src/memory/memory-reviewer.ts` | Deterministic memory curation policy gate |
+| `src/memory/memory-curation-service.ts` | Runtime memory curation checkpoints and auto-apply orchestration |
+| `src/memory/memory-curation-store.ts` | Profile-local curation history store |
+| `src/memory/memory-operator-commands.ts` | Shared CLI/slash/gateway memory curation controls |
 | `src/memory/external-memory-provider.ts` | External memory lifecycle helpers and file-backed provider |
 | `src/session/session-search-service.ts` | Deterministic raw session browse/search/scroll |
 
@@ -149,6 +154,49 @@ CLI read supports these sources:
 | `SOUL.md` | Denied unless `--include-protected` is explicit |
 | `shared` | Reads global shared memory by key |
 
+## Memory Curation
+
+Memory curation is the proactive learned-memory path for v0.2.0. It reviews transcript slices at natural checkpoints, extracts structured durable facts, applies deterministic policy in code, and writes only low-risk auto-approved candidates to profile-local memory files.
+
+The extractor uses the existing semantic compression auxiliary route when available, falling back through the existing auxiliary execution path. It does not use the memory-file compaction route. The model extracts facts with evidence; runtime policy decides whether to auto-apply, queue for review, or ignore.
+
+Implemented checkpoints:
+
+- every configured `memory.curation.checkpointEveryTurns` completed root-session turns
+- `/compact` and manual session compaction when enabled
+- `/handoff` when enabled
+- runtime dispose when enabled and the minimum new-message/interval gates pass
+- explicit `memory populate` / `/memory populate`
+
+Default curation mode is `auto`. Auto mode still applies only explicit, non-sensitive, low-risk facts that pass evidence, duplicate, scanner, and budget gates. `review` mode records pending-review audit records without mutating memory. `manual` mode skips background checkpoints and only runs explicit manual commands.
+
+Operator controls are shared across CLI, in-session slash commands, and authorized gateway surfaces such as Telegram:
+
+```text
+estacoda memory mode [auto|review|manual]
+estacoda memory recent [--limit N]
+estacoda memory review [--limit N]
+estacoda memory apply <record-id> [candidate-id|all]
+estacoda memory reject <record-id> [candidate-id|all]
+estacoda memory undo <record-id>
+estacoda memory forget <USER.md|MEMORY.md> <exact text>
+estacoda memory populate
+estacoda memory edit
+estacoda memory clear [USER.md|MEMORY.md|all] --yes
+```
+
+The corresponding in-session and Telegram commands use `/memory ...` with the same subcommands. Telegram output is compact, but the policy and profile-local files are the same as the CLI.
+
+`memory apply`, `memory undo`, and `memory forget` use the same memory mutation path as `memory.curate` and auto-curation, including drift checks, scanner/budget gates, index sync, and configured external-memory mirror warnings. `memory clear` is guarded by `--yes`, clears only `USER.md` and/or `MEMORY.md`, creates backups for existing files, syncs the local memory index, and never clears `SOUL.md` or shared memory. Existing live sessions may need `/new` or restart to reload prompt memory after file edits or clears.
+
+Curation history lives at:
+
+```text
+~/.estacoda/profiles/<id>/memory-curation.json
+```
+
+The history stores audit metadata, source message ids/counts, extracted fact ids, operation hashes, reasons, and reversible low-risk operation payloads for applied or reviewable candidates. `memory review` is an actionable queue for candidates that store an operation; sensitive or higher-risk candidates remain visible as non-applyable review records. Durable writes remain visible through recent history, session/runtime events, and the authoritative memory files.
+
 Index inspection and repair workflow:
 
 ```bash
@@ -241,6 +289,8 @@ Startup memory initializes the runtime `MemoryStore` from profile files and shar
 
 When `memory.curate` changes memory during a session, the mutation updates the runtime memory store and persists to disk. Those changes can affect later turns in the same runtime, and the durable file changes remain available to future sessions.
 
+Checkpoint memory curation uses the same local persistence boundaries, but it is not a model-visible tool call. The runtime extracts facts from transcript slices, applies policy in code, then writes eligible `USER.md` / `MEMORY.md` operations or records review/ignore history in `memory-curation.json`.
+
 ## Promotion
 
 `memory-promotion.ts` runs after the response path and uses **bounded session search** instead of scanning every session/message.
@@ -281,7 +331,7 @@ Local lexical retrieval uses separate `memory.read` and `memory.search` tools in
 
 `memory.read` reads bounded local memory content by source. `memory.search` performs deterministic lexical search. Both tools accept `maxChars`; `memory.search` also accepts `maxResults`. Returned content is redacted, source-labeled, marked as `local-memory-context`, and treated as context rather than instruction. If the local index is disabled or unavailable, the retrieval service uses safe substring read/search fallback while preserving protected filtering.
 
-`memory.curate` can write `USER.md`, `MEMORY.md`, and `SOUL.md`. It does not manage `AGENTS.md`. If external memory mirror writes are enabled, local writes remain authoritative and mirror failures are returned as warnings without failing the local write.
+`memory.curate` can write `USER.md`, `MEMORY.md`, and `SOUL.md`. Checkpoint curation writes only learned-memory targets, `USER.md` and `MEMORY.md`. Neither path manages `AGENTS.md`. If external memory mirror writes are enabled, local writes remain authoritative and mirror failures are returned as warnings without failing the local write.
 
 ## Budget Pressure
 
@@ -400,10 +450,10 @@ External memory is optional and disabled by default. The implemented Phase 10 pr
 External memory can:
 
 - return bounded untrusted external recall for explicit recall turns
-- mirror `memory.curate` writes when `mirrorWrites: true`
+- mirror shared memory mutation writes when `mirrorWrites: true`
 - expose provider status through internal provider status helpers
 
-The external memory contract also defines `afterTurn` and `flushSession` hooks, and the file-backed provider implements safe handlers for them. These hooks are reserved for future orchestration unless a caller invokes them directly; current runtime orchestration does not actively call them. Implemented runtime paths are external recall and opt-in `memory.curate` mirror writes.
+The external memory contract also defines `afterTurn` and `flushSession` hooks, and the file-backed provider implements safe handlers for them. These hooks are reserved for future orchestration unless a caller invokes them directly; current runtime orchestration does not actively call them. Implemented runtime paths are external recall and opt-in mirror writes for shared memory mutations, including `memory.curate`, auto-curation, and operator apply/undo/forget actions.
 
 External memory cannot:
 

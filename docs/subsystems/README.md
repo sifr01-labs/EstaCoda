@@ -10,7 +10,7 @@ description: "Per-subsystem deep dives for the EstaCoda agent runtime."
 | [CLI & Setup](./cli.md) | Commands, interactive session, trace/eval inspection, Onboarding Wizard |
 | [Operator Console](./operator-console.md) | Future Papyrus-owned interactive CLI surface contract |
 | [Skills](./skills.md) | Skill loading, registry, tools, learning, evolution, proposals |
-| [Memory](./memory.md) | Stores, prompt builder, recall orchestration, compaction, external memory |
+| [Memory](./memory.md) | Stores, curation, prompt builder, recall orchestration, compaction, external memory |
 | [Managed Python Environments](./python-env.md) | Runtime-owned Python dependency environments for capabilities that need pinned packages without mutating system Python |
 | [Semantic Session Compression](./semantic-compression.md) | Gated session-history compression, manual compaction, gateway hygiene, safety boundaries |
 | [Tools](./tools.md) | Tool schemas, registry, executor, planners |

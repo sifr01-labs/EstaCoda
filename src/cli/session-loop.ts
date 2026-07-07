@@ -118,6 +118,7 @@ import { runConfigEditor } from "../setup/config-editor/runner.js";
 import { createReviewedSetupApplyExecutor } from "../setup/review/apply-executor.js";
 import { buildProvidersStatusViewModel } from "./provider-status-view-models.js";
 import { selectProviderModelRoute } from "../setup/provider-model-route-prompt.js";
+import { isMemoryCurationModeMutation, runMemoryOperatorCommand } from "../memory/memory-operator-commands.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -1320,7 +1321,26 @@ export async function handleSlashCommand(input: {
       return result;
     }
     case "memory":
-      input.output.write(`${await renderMemoryPromotions(input.runtime)}\n\n`);
+      {
+        const result = await runMemoryOperatorCommand({
+          args,
+          homeDir: input.homeDir,
+          profileId: await runtimeProfileId(input.runtime),
+          runtime: input.runtime,
+          signal: input.signal
+        });
+        input.output.write(`${result.output}\n\n`);
+        if (result.ok && isMemoryCurationModeMutation(args) && input.refreshRuntime !== undefined) {
+          return {
+            runtime: await input.refreshRuntime({ preserveSession: true }),
+            notice: (runtime) => [
+              "Memory curation mode refreshed for this session.",
+              "",
+              runtime.describe()
+            ].join("\n")
+          };
+        }
+      }
       return false;
     case "skills":
       input.output.write(`${input.renderer.render(buildSkillsMenuViewModel(input.runtime, args.join(" ")))}\n\n`);
@@ -1532,6 +1552,10 @@ export async function handleSlashCommand(input: {
       const profileId = await runtimeProfileId(input.runtime);
       const profilePaths = resolveProfileStateHome({ homeDir: resolveHomeDir(input.homeDir), profileId });
       const store = new FileHandoffStore({ path: join(profilePaths.gatewayStatePath, "handoff-codes.json") });
+      await input.runtime.auditMemoryCuration?.({
+        trigger: "handoff",
+        sessionId: input.runtime.sessionId
+      }).catch(() => undefined);
       const handoff = await store.create({
         sessionId: input.runtime.sessionId,
         surfaceType: surface,
@@ -2753,22 +2777,6 @@ function isCompactionAbort(error: unknown, signal: AbortSignal | undefined): boo
 
 async function runtimeProfileId(runtime: Runtime): Promise<string> {
   return (await runtime.sessionDb.getSession(runtime.sessionId))?.profileId ?? "default";
-}
-
-async function renderMemoryPromotions(runtime: Runtime): Promise<string> {
-  const promotions = await runtime.inspectMemoryPromotions();
-  if (promotions.length === 0) {
-    return "No promoted memory conclusions found.";
-  }
-
-  return [
-    "Promoted memory conclusions",
-    ...promotions.map((record, index) => {
-      const state = record.active ? "active" : record.forgottenAt !== undefined ? "forgotten" : "inactive";
-      const source = record.sourceSessionIds.length === 0 ? "no session provenance" : `${record.sourceSessionIds.length} session${record.sourceSessionIds.length === 1 ? "" : "s"}`;
-      return `${index + 1}. ${record.content} [${state}; occurrences:${record.occurrences}; ${source}]`;
-    })
-  ].join("\n");
 }
 
 export function renderRuntimeEvent(

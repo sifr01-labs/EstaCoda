@@ -14,7 +14,10 @@ export type HandoffRenderer = (viewModel: ViewModel) => string;
 export type HandoffCommandInput = {
   args: string[];
   homeDir: string;
-  runtime?: { sessionId: string };
+  runtime?: {
+    sessionId: string;
+    auditMemoryCuration?(input: { trigger: "handoff"; sessionId?: string }): Promise<unknown>;
+  };
 };
 
 export async function runHandoffCommand(
@@ -36,6 +39,10 @@ export async function runHandoffCommand(
 
     const { FileHandoffStore } = await import("../channels/handoff-store.js");
     const store = new FileHandoffStore({ path: handoffPath });
+    await runtime.auditMemoryCuration?.({
+      trigger: "handoff",
+      sessionId: runtime.sessionId
+    }).catch(() => undefined);
     const handoff = await store.create({
       sessionId: runtime.sessionId,
       surfaceType: "telegram",

@@ -367,6 +367,28 @@ describe("AgentLoopBuilder", () => {
     ]);
   });
 
+  it("passes memory curation only to root agent loops", async () => {
+    const memoryCurationService = {
+      observeCompletedTurn: vi.fn(),
+      checkpoint: vi.fn()
+    };
+    const captured: unknown[] = [];
+    const harness = await createBuilderHarness({
+      memoryCurationServiceFactory: () => memoryCurationService as never,
+      factories: {
+        agentLoop(options) {
+          captured.push(options.memoryCurationService);
+          return { handle: vi.fn() } as never;
+        }
+      }
+    });
+
+    await harness.build("root-session");
+    await harness.build("child-session", { parentSessionId: "root-session" });
+
+    expect(captured).toEqual([memoryCurationService, undefined]);
+  });
+
   it("passes explicit benchmark execution controls to the provider turn loop", async () => {
     const captured: Array<{
       budgets: unknown;
@@ -597,6 +619,7 @@ async function createBuilderHarness(input: {
   factories?: ConstructorParameters<typeof AgentLoopBuilder>[0]["factories"];
   sessionRecallServiceFactory?: AgentLoopRuntimeSubstrate["sessionRecallServiceFactory"];
   memoryFileCompactionServiceFactory?: AgentLoopRuntimeSubstrate["memoryFileCompactionServiceFactory"];
+  memoryCurationServiceFactory?: AgentLoopRuntimeSubstrate["memoryCurationServiceFactory"];
   setAvailableToolsets?: AgentLoopRuntimeSubstrate["setAvailableToolsets"];
 } = {}) {
   const workspaceRoot = await mkdtemp(join(tmpdir(), "estacoda-builder-test-"));
@@ -680,6 +703,7 @@ async function createBuilderHarness(input: {
       sessionDb,
       sessionId
     })),
+    memoryCurationServiceFactory: input.memoryCurationServiceFactory,
     fileStateTracker,
     memoryPersistenceService,
     memoryPersistencePaths: {

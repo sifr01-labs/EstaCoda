@@ -35,6 +35,7 @@ Profile root: `~/.estacoda/profiles/<id>/`
 | `SOUL.md` | Identity and safety memory | Yes. Learned context. |
 | `MEMORY.md` | Learned facts and conventions | Yes. Learned context. |
 | `promotions.json` | Promotion metadata | Yes. Part of learned context. |
+| `memory-curation.json` | Memory curation history | Yes. Useful for audit/debugging. |
 | `gateway/` | Gateway sessions, approvals, voice mode, handoff codes | Yes. Active gateway state. |
 | `cron/jobs.json` | Scheduled job definitions | Yes. Re-creating jobs is tedious. |
 | `skills/` | Installed skills and evolution state | Yes. Custom skills are not reproducible. |
@@ -51,6 +52,7 @@ Profile root: `~/.estacoda/profiles/<id>/`
 - `.env` and `auth.json` — Store encrypted backups. These files contain credentials.
 - `gateway/` — Do not delete while the gateway is running. Stop the gateway first.
 - `promotions.json` — Do not hand-edit unless you understand the promotion schema. Corrupting it can suppress memory entries.
+- `memory-curation.json` — Audit/history only; deleting it does not erase memory files, but removes recent curation provenance.
 - `skills/.evolution/` — Contains proposal metadata. Editing it manually can break the evolution pipeline.
 - `.backups/` — Contains copies of protected state created before managed-source updates. They are not automatically restored; copy them back manually if needed.
 

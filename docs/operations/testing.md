@@ -143,7 +143,7 @@ The default corpus is defined in `src/eval/fixtures/index.ts` and currently cove
 
 - Base runtime behavior
 - Tool security and missing-tool failure classification
-- Memory promotion, deactivation, selective rendering, and safety-file protection
+- Memory curation, promotion, deactivation, selective rendering, and safety-file protection
 - Code dependency graph lookup and cache invalidation
 - Agent Evolution manifests, proposals, user-correction capture, routing metadata, routing baseline, and export shape
 - Workflow run state, locking, migration, store atomicity, engine lifecycle, restart recovery, command control, event summaries, and integration

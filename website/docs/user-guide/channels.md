@@ -372,10 +372,13 @@ All gateway channels support a common set of control commands:
 | `/revoke <id>` | Revoke a persistent approval |
 | `/stop` | Abort active turn or clear queue |
 | `/voice on|all|off|status` | Control voice reply mode |
+| `/memory ...` | Inspect and manage memory curation with CLI-equivalent behavior |
 | `/cron` | List cron jobs |
 | `/diagnostics` | Run gateway diagnostics |
 
 Model control commands bypass busy-session queues so the operator can change model state while a conversation is active.
+
+Telegram `/memory ...` uses the same shared curation path as `estacoda memory ...`: the same mode, profile-local files, curation history, scanner, and budget gates. Chat output is compact, but memory policy is not separate for Telegram.
 
 If the active turn has running subagents, ordinary messages queue under interrupt busy policy instead of aborting the parent turn. `/stop` still aborts the active parent turn and child work. `/approve`, `/deny`, `/status`, and model/control commands keep their control-command bypass behavior. `/status` can show bounded active-subagent summaries without exposing prompts, transcripts, raw provider token streams, credentials, or tool arguments.
 

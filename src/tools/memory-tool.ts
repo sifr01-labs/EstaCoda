@@ -2,16 +2,11 @@ import type { ExternalMemoryProvider, MemoryFileKind, MemoryOperation } from "..
 import type { SessionDB } from "../contracts/session.js";
 import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
-import { truncate } from "../utils/formatting.js";
-import { redactSensitiveText } from "../utils/redaction.js";
 import type { ExternalMemoryRuntimeConfig } from "../memory/external-memory-provider.js";
-import { mirrorMemoryWriteToExternalProviders } from "../memory/external-memory-provider.js";
-import { isMemoryBudgetOverflowError, type MemoryStore } from "../memory/memory-store.js";
-import {
-  isMemoryPersistenceDriftError,
-  type MemoryPersistenceService
-} from "../memory/memory-persistence-service.js";
+import type { MemoryStore } from "../memory/memory-store.js";
+import type { MemoryPersistenceService } from "../memory/memory-persistence-service.js";
 import type { MemoryIndexWriteSync } from "../memory/memory-index-sync.js";
+import { MemoryMutationService } from "../memory/memory-mutation-service.js";
 
 const MEMORY_CURATE_FILES: readonly MemoryFileKind[] = ["MEMORY.md", "USER.md", "SOUL.md"];
 
@@ -95,206 +90,29 @@ async function applyMemoryToolInput(
   options: MemoryToolOptions
 ): Promise<ToolResult> {
   const operation = toOperation(input);
-  const previous = memoryStore.read(operation.file);
-  try {
-    memoryStore.apply(operation);
-  } catch (error) {
-    if (isMemoryBudgetOverflowError(error)) {
-      return {
-        ok: false,
-        content: [
-          `${error.overflow.kind} was not updated because it exceeded the memory budget.`,
-          `Budget: ${error.overflow.chars}/${error.overflow.maxChars} chars (${error.overflow.pressure.state}).`
-        ].join("\n"),
-        metadata: {
-          error: error.overflow.code,
-          overflow: error.overflow,
-          pressure: error.overflow.pressure
-        }
-      };
-    }
-    throw error;
+  const result = await new MemoryMutationService({
+    memoryStore,
+    ...options
+  }).apply(operation, { source: "memory.curate" });
+
+  if (!result.ok) {
+    return {
+      ok: false,
+      content: result.message,
+      metadata: result.metadata
+    };
   }
-
-  if (options.persistence !== undefined) {
-    const path = options.persistencePaths?.[operation.file];
-    try {
-      if (path !== undefined) {
-        await options.persistence.writeFile({
-          path,
-          kind: operation.file,
-          content: memoryStore.read(operation.file)
-        });
-      }
-    } catch (error) {
-      memoryStore.write(operation.file, previous);
-      if (isMemoryPersistenceDriftError(error)) {
-        return {
-          ok: false,
-          content: `${operation.file} was not updated because the disk file changed after memory was loaded.`,
-          metadata: {
-            error: error.code,
-            kind: error.kind,
-            path: error.path,
-            expected: error.expected,
-            actual: error.actual
-          }
-        };
-      }
-      throw error;
-    }
-  }
-
-  const indexSyncWarning = await syncLocalMemoryIndex({
-    memoryIndexSync: options.memoryIndexSync,
-    operation,
-    content: memoryStore.read(operation.file),
-    sourcePath: options.persistencePaths?.[operation.file]
-  });
-
-  const mirror = await mirrorMemoryWriteToExternalProviders({
-    entry: {
-      profileId: options.profileId ?? "default",
-      sessionId: resolveSessionId(options.sessionId),
-      workspaceRoot: options.workspaceRoot,
-      operation,
-      source: "memory.curate"
-    },
-    providers: options.externalMemoryProviders ?? [],
-    config: options.externalMemory ?? {
-      enabled: false,
-      timeoutMs: 750,
-      maxResults: 3,
-      maxChars: 2_500,
-      mirrorWrites: false
-    }
-  });
-  const auditWarnings = await recordExternalMemoryMirrorWrite({
-    options,
-    operation,
-    mirrorWarnings: mirror.warnings
-  });
-  const warnings = [
-    ...indexSyncWarning,
-    ...mirror.warnings,
-    ...auditWarnings
-  ];
 
   return {
     ok: true,
     content: [
       `${input.file} updated with ${input.kind}`,
-      ...warnings
+      ...result.warnings
     ].join("\n"),
-    metadata: warnings.length === 0 ? undefined : {
-      warnings
+    metadata: result.warnings.length === 0 ? undefined : {
+      warnings: result.warnings
     }
   };
-}
-
-async function syncLocalMemoryIndex(input: {
-  memoryIndexSync: MemoryIndexWriteSync | undefined;
-  operation: MemoryOperation;
-  content: string;
-  sourcePath?: string;
-}): Promise<string[]> {
-  if (input.memoryIndexSync === undefined) {
-    return [];
-  }
-  try {
-    const result = await input.memoryIndexSync.syncMemoryFile({
-      file: input.operation.file,
-      content: input.content,
-      sourcePath: input.sourcePath
-    });
-    return result.warning === undefined ? [] : [result.warning];
-  } catch (error) {
-    return [`memory index sync failed for ${input.operation.file}: ${errorMessage(error)}`];
-  }
-}
-
-async function recordExternalMemoryMirrorWrite(input: {
-  options: MemoryToolOptions;
-  operation: MemoryOperation;
-  mirrorWarnings: readonly string[];
-}): Promise<string[]> {
-  const providers = input.options.externalMemoryProviders ?? [];
-  const config = input.options.externalMemory ?? {
-    enabled: false,
-    timeoutMs: 750,
-    maxResults: 3,
-    maxChars: 2_500,
-    mirrorWrites: false
-  };
-  const mirrorCapableProviders = providers.filter((provider) => provider.mirrorMemoryWrite !== undefined);
-  const mirrorAttempted = config.enabled === true && config.mirrorWrites === true && mirrorCapableProviders.length > 0;
-  if (!mirrorAttempted) {
-    return [];
-  }
-
-  const providerIds = mirrorCapableProviders.map((provider) => provider.id);
-  const event = {
-    kind: "external-memory-mirror-write" as const,
-    providerIds,
-    enabled: config.enabled === true,
-    mirrorEnabled: config.mirrorWrites === true,
-    localWriteSucceeded: true,
-    mirrorAttempted,
-    mirrorSucceeded: input.mirrorWarnings.length === 0,
-    memoryFile: input.operation.file,
-    operationKind: input.operation.kind,
-    entryChars: operationCharCount(input.operation),
-    profileId: input.options.profileId ?? "default",
-    workspaceScoped: input.options.workspaceRoot !== undefined,
-    warningCount: input.mirrorWarnings.length,
-    failureCount: input.mirrorWarnings.length,
-    ...(input.mirrorWarnings.length === 0 ? {} : { failures: failuresFromWarnings(input.mirrorWarnings) })
-  };
-  const warnings: string[] = [];
-  try {
-    const sessionId = resolveSessionId(input.options.sessionId);
-    if (input.options.sessionDb !== undefined && sessionId !== undefined) {
-      await input.options.sessionDb.appendEvent(sessionId, event);
-    }
-  } catch (error) {
-    warnings.push(`external memory mirror write session event failed: ${errorMessage(error)}`);
-  }
-  try {
-    input.options.trajectoryRecorder?.record("external-memory-mirror-write", event);
-  } catch (error) {
-    warnings.push(`external memory mirror write trajectory event failed: ${errorMessage(error)}`);
-  }
-  return warnings;
-}
-
-function resolveSessionId(sessionId: string | (() => string) | undefined): string | undefined {
-  return typeof sessionId === "function" ? sessionId() : sessionId;
-}
-
-function operationCharCount(operation: MemoryOperation): number {
-  if (operation.kind === "append") {
-    return operation.content.length;
-  }
-  if (operation.kind === "replace") {
-    return operation.match.length + operation.replacement.length;
-  }
-  return operation.match.length;
-}
-
-function failuresFromWarnings(warnings: readonly string[]): Array<{ providerId?: string; reason: string }> {
-  return warnings.slice(0, 8).map((warning) => ({
-    providerId: providerIdFromWarning(warning),
-    reason: truncate(redactSensitiveText(warning), 240)
-  }));
-}
-
-function providerIdFromWarning(warning: string): string | undefined {
-  const match = /external memory provider ([^\s]+) /iu.exec(warning);
-  return match?.[1];
-}
-
-function errorMessage(error: unknown): string {
-  return truncate(redactSensitiveText(error instanceof Error ? error.message : String(error)), 240);
 }
 
 function toOperation(input: MemoryToolInput): MemoryOperation {

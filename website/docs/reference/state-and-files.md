@@ -75,6 +75,7 @@ Profile root: `~/.estacoda/profiles/<id>/`
 | `SOUL.md` | Profile identity and safety memory | `memory.curate` |
 | `MEMORY.md` | Profile learned facts and conventions | Memory promotion, `memory.curate` |
 | `promotions.json` | Promotion metadata | Memory promotion |
+| `memory-curation.json` | Memory curation checkpoint history | Runtime curation checkpoints, `/memory populate` |
 | `gateway/` | Gateway state: sessions, approvals, voice mode, handoff codes | Gateway runtime |
 | `cron/jobs.json` | Cron job definitions | `estacoda cron create` |
 | `skills/` | Profile-installed skills | Skill operations, learning |

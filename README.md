@@ -238,7 +238,7 @@ All documentation lives at [www.estacoda.com/docs](https://www.estacoda.com/docs
 | [Channels](https://www.estacoda.com/docs/user-guide/channels) | Telegram, WhatsApp, and channel setup |
 | [Gateway](https://www.estacoda.com/docs/user-guide/gateway) | Service mode, diagnostics, approvals |
 | [Skills](https://www.estacoda.com/docs/user-guide/skills) | Loading, evolution, and proposals |
-| [Memory](https://www.estacoda.com/docs/user-guide/memory) | Profile memory, promotion, and limits |
+| [Memory](https://www.estacoda.com/docs/user-guide/memory) | Profile memory, curation modes, promotion, and limits |
 | [Security and Approvals](https://www.estacoda.com/docs/user-guide/security-and-approvals) | Modes, trust boundaries, and hard blocks |
 | [Configuration](https://www.estacoda.com/docs/reference/configuration) | Config file reference |
 | [CLI Commands](https://www.estacoda.com/docs/reference/cli-commands) | Full command and flag reference |

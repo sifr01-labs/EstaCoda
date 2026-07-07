@@ -1,6 +1,6 @@
 ---
 title: بنية الذاكرة
-description: ملفات الذاكرة، والترقية، والاسترجاع، والحفظ، وحدود تركيب الموجه.
+description: ملفات الذاكرة، والتنظيم، والترقية، والاسترجاع، والحفظ، وحدود تركيب الموجه.
 sidebar_position: 5
 ---
 
@@ -8,7 +8,7 @@ sidebar_position: 5
 
 ذاكرة EstaCoda هي سياق تشغيل دائم مركب من ملفات الملف الشخصي، والملفات المشتركة، وبيانات الترقية، ومصادر الاسترجاع الاختيارية. ليست تاريخ الجلسات، وليست قناة سياسة مخفية.
 
-هذه الصفحة للمحافظين الذين يفحصون قراءات الذاكرة، أو كتاباتها، أو ترقيتها، أو استرجاعها، أو ضغطها، أو حفظها. السلوك الموجه للمستخدم موثق في [الذاكرة](../user-guide/memory.md).
+هذه الصفحة للمحافظين الذين يفحصون قراءات الذاكرة، أو كتاباتها، أو تنظيمها، أو ترقيتها، أو استرجاعها، أو ضغطها، أو حفظها. السلوك الموجه للمستخدم موثق في [الذاكرة](../user-guide/memory.md).
 
 ---
 
@@ -24,7 +24,12 @@ sidebar_position: 5
 | `MemoryRecallOrchestrator` | يقرر متى يضاف استرجاع الجلسة أو الاسترجاع الخارجي إلى الدور. |
 | `LocalMemoryRetrievalService` | قراءة/بحث لفظي فوق ملفات الذاكرة صاحبة السلطة والذاكرة المشتركة. |
 | `MemoryFileCompactionService` | مسار ضغط صريح لـ `USER.md` و`MEMORY.md`. |
-| `AgentLoop` | يستدعي الترقية بعد دور المستخدم المباشر ويسجل أحداث وتشخيصات الترقية. |
+| `MemoryFactExtractor` | استخراج بمساعدة نموذج للحقائق الدائمة من مقاطع نص محدودة. |
+| `MemoryReviewer` | سياسة وقت تشغيل حتمية تحول الحقائق المستخرجة إلى مرشحي ذاكرة. |
+| `MemoryCurationService` | يشغل تدقيق نقاط التنظيم، ويطبق المرشحين المؤهلين، ويسجل تاريخ التنظيم، ويصدر الأحداث. |
+| `MemoryCurationStore` | سجل تنظيم ذاكرة محلي للملف الشخصي في `memory-curation.json`. |
+| `MemoryOperatorCommands` | عناصر تحكم مشتركة للتنظيم عبر CLI وslash والبوابة. |
+| `AgentLoop` | يستدعي نقاط تنظيم الذاكرة والترقية بعد أدوار المستخدم المباشرة، ثم يسجل التشخيصات/الأحداث. |
 
 مسارات الحالة المهمة تأتي من `src/config/profile-home.ts`.
 
@@ -37,6 +42,7 @@ sidebar_position: 5
     ├── SOUL.md
     ├── MEMORY.md
     ├── promotions.json
+    ├── memory-curation.json
     ├── external-memory/
     └── temp/
 ```
@@ -56,6 +62,38 @@ sidebar_position: 5
 | ملخصات ضغط الجلسة | سياق مرجعي غير موثوق | ليست ذاكرة متعلمة. |
 
 الاسترجاع لا يجوز أن يتجاوز سياسة الأمان، أو حالة الموافقات، أو تعليمات المستودع، أو إدخال المستخدم المباشر الحالي.
+
+---
+
+## مسار التنظيم في وقت التشغيل
+
+تنظيم الذاكرة هو مسار الذاكرة المتعلمة الاستباقي. يفصل عمدًا بين الاستخراج والسياسة:
+
+```text
+Transcript slice
+  -> ExtractedFact[]
+  -> runtime memory policy
+  -> CuratedMemoryCandidate[]
+  -> memory.curate-style local write or review/ignore record
+```
+
+يستخدم المستخرج مسار التنفيذ المساعد القائم، ويفضل مسار الضغط الدلالي عندما يكون متاحًا. يرجع حقائق منظمة مع مقاطع دليل دقيقة. النموذج لا يقرر ما إذا كانت الحقيقة تُكتب.
+
+سياسة وقت التشغيل في `MemoryReviewer` تقرر التصرف:
+
+| التصرف | المعنى |
+|---|---|
+| `auto-apply` | مؤهل للكتابة الفورية إلى `USER.md` أو `MEMORY.md`. |
+| `pending-review` | يسجل لمراجعة المشغل؛ لا يغير ملف الذاكرة حتى يطبق. |
+| `ignore` | مكرر، غير مفيد، أو متجاوز عمدًا. |
+
+الوضع الافتراضي `auto` يطبق تلقائيًا فقط الحقائق الصريحة، غير الحساسة، منخفضة المخاطر، التي تنجح في فحوصات الدليل، والتكرار، والماسح، والميزانية، والثقة. القيمة الافتراضية لـ `autoApplyMinConfidence` هي `0.7`، و`autoApplyMaxRisk` هي `low`.
+
+محفزات النقاط الطبيعية هي `turn-count`، و`compact`، و`handoff`، و`runtime-dispose`، والتشغيل الصريح `manual` عبر `memory populate` / `/memory populate`.
+
+تخزن سجلات التنظيم المعرّفات، والمحفز/الحالة، ومعرفات/أعداد رسائل المصدر، ومعرفات الحقائق المستخرجة، وهاشات العمليات، والأسباب، وحمولات عمليات منخفضة المخاطر قابلة للعكس للمرشحين المطبقين أو القابلين للمراجعة. قد تسجل المرشحات الحساسة أو الأعلى مخاطرة دون عملية قابلة للتطبيق.
+
+عناصر التحكم منفذة مرة واحدة في `MemoryOperatorCommands` ويعاد استخدامها في CLI الأعلى، وأوامر slash التفاعلية، والأسطح المصرح بها مثل Telegram. حافظ على تكافؤ سلوك Telegram مع CLI في `/memory mode` و`/memory populate` و`/memory recent` و`/memory review` و`/memory apply` و`/memory reject` و`/memory undo` و`/memory forget` و`/memory edit`.
 
 ---
 
@@ -122,9 +160,9 @@ rootSessionsOnly: true
 
 ---
 
-## Detectors حتمية
+## Detectors الترقية الحتمية
 
-منطق الترقية يجب أن يبقى حتميًا. لا تستخدم نموذجًا أو LLM لتقرير:
+منطق الترقية يجب أن يبقى حتميًا. لا تستخدم نموذجًا أو LLM داخل الترقية الحتمية لتقرير:
 
 - الأهلية
 - تقسيم العبارات
@@ -251,7 +289,7 @@ type PromotionFile = {
 
 قد يتعرف detector على الصيغة قبل أن يرفضها provider/store. مثلًا، قد تنتج الصيغة العربية `Prefer OPENAI_API_KEY.`، لكن مسار السلامة يرفضها قبل الحفظ.
 
-لا تضعف الماسح لجعل اختبارات الترقية تمر. يجب أن تؤكد الاختبارات الرفض وrollback.
+لا تضعف الماسح لجعل اختبارات التنظيم أو الترقية تمر. يجب أن تؤكد الاختبارات الرفض وrollback.
 
 ---
 
@@ -292,9 +330,24 @@ pnpm exec vitest run src/memory/memory-store.test.ts
 pnpm exec vitest run src/memory/memory-prompt-context-builder.test.ts
 pnpm exec vitest run src/memory/memory-retrieval-service.test.ts
 pnpm exec vitest run src/memory/memory-file-compaction-service.test.ts
+pnpm exec vitest run src/memory/memory-curation-service.test.ts
+pnpm exec vitest run src/memory/memory-reviewer.test.ts
+pnpm exec vitest run src/memory/memory-curation-store.test.ts
+pnpm exec vitest run src/cli/cli-memory.test.ts
+pnpm exec vitest run src/channels/channel-gateway.test.ts
 ```
 
-عند فحص الترقية، افحص بالترتيب:
+عند فحص التنظيم، افحص بالترتيب:
+
+1. وضع التنظيم ومحفز النقطة.
+2. معرفات رسائل المصدر ومقطع النص.
+3. الحقائق المستخرجة ومقاطع الدليل الدقيقة.
+4. تصرف/سبب سياسة وقت التشغيل.
+5. فحوصات الماسح، والتكرار، والثقة، والمخاطر، والميزانية.
+6. `memory-curation.json`.
+7. كتابات `USER.md` أو `MEMORY.md` وتحذيرات مزامنة الفهرس.
+
+عند فحص الترقية الحتمية، افحص بالترتيب:
 
 1. `input.text` المباشر الحالي.
 2. المرشحين المباشرين المستخرجين.
@@ -304,7 +357,7 @@ pnpm exec vitest run src/memory/memory-file-compaction-service.test.ts
 6. `promotions.json`.
 7. كتابة ملف Markdown وسلوك rollback.
 
-اعتبر أي استدعاء LLM/model في أهلية الترقية، أو التكافؤ، أو التعارض، أو الفئة regression.
+اعتبر أي استدعاء LLM/model في أهلية الترقية الحتمية، أو التكافؤ، أو التعارض، أو الفئة regression. استخدام النموذج ينتمي إلى استخراج التنظيم؛ أما السياسة فتبقى في الكود.
 
 ---
 

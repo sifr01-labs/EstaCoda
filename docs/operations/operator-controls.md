@@ -330,6 +330,7 @@ Available in Telegram gateway (and applicable Discord/WhatsApp where supported):
 - `/detach` — detach from current session and create a new one
 - `/new` — create a new session
 - `/reset` — reset current session
+- `/memory ...` — inspect and manage memory curation with the same behavior as CLI memory controls
 - `/cron` — list cron jobs
 - `/approvals` — show pending approvals
 - `/stop` — abort the active turn for this chat; if no active turn, clear queued messages; if nothing is active or queued, request gateway stop
@@ -392,6 +393,46 @@ Memory File Compaction is not a top-level CLI command in this implementation. It
 - `memory.file_compaction_restore` — restore `USER.md` or `MEMORY.md` from a compaction backup.
 
 Memory File Compaction uses the auxiliary `memory_compaction` route, scans generated output before writes, creates backups before applied writes, and never targets `SOUL.md` or `AGENTS.md`.
+
+## Memory Curation Controls
+
+Memory curation is exposed through shared operator commands. The same command implementation is used by top-level CLI commands, in-session slash commands, and authorized gateway surfaces such as Telegram.
+
+```bash
+estacoda memory mode [auto|review|manual]
+estacoda memory recent [--limit N]
+estacoda memory review [--limit N]
+estacoda memory apply <record-id> [candidate-id|all]
+estacoda memory reject <record-id> [candidate-id|all]
+estacoda memory undo <record-id>
+estacoda memory forget <USER.md|MEMORY.md> <exact text>
+estacoda memory populate
+estacoda memory edit
+estacoda memory clear [USER.md|MEMORY.md|all] --yes
+```
+
+Inside active CLI sessions and Telegram sessions, use:
+
+```text
+/memory mode [auto|review|manual]
+/memory recent [limit]
+/memory review [limit]
+/memory apply <record-id> [candidate-id|all]
+/memory reject <record-id> [candidate-id|all]
+/memory undo <record-id>
+/memory forget <USER.md|MEMORY.md> <exact text>
+/memory populate
+/memory edit
+/memory clear [USER.md|MEMORY.md|all] --yes
+```
+
+Default mode is `auto`, but auto-apply remains conservative: explicit, non-sensitive, low-risk, evidence-backed facts only. `review` records pending-review history without mutating memory. `manual` skips background checkpoints and leaves explicit manual commands available.
+
+`memory populate` requires an active runtime session. If the top-level command cannot find one, run `/memory populate` inside an active CLI session or attached Telegram session.
+
+`memory review` is an actionable queue over `memory-curation.json` when low-risk candidate operations are stored. `memory apply`, `memory undo`, and `memory forget` use the same mutation path as `memory.curate` and auto-curation.
+
+Telegram parity is intentional. `/memory ...` in Telegram should follow the same mode, policy, profile-local files, and curation history as the CLI, with only output formatting compacted for chat delivery.
 
 ## Process Ownership
 

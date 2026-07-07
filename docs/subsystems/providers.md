@@ -342,7 +342,7 @@ Transcript-preserving semantic compaction is a session DB/runtime lineage behavi
 
 External memory providers are not LLM providers. They implement a memory lifecycle contract and are wired from runtime config under `externalMemory`.
 
-In this implementation, active runtime orchestration uses external providers for bounded recall and opt-in `memory.curate` mirror writes. The contract and file-backed provider also define `afterTurn` and `flushSession` hooks, but those hooks are reserved for future orchestration unless invoked directly; the runtime does not actively call them yet.
+In this implementation, active runtime orchestration uses external providers for bounded recall and opt-in shared memory mutation mirror writes. The contract and file-backed provider also define `afterTurn` and `flushSession` hooks, but those hooks are reserved for future orchestration unless invoked directly; the runtime does not actively call them yet.
 
 Implemented provider:
 
@@ -378,7 +378,7 @@ Defaults:
 | `externalMemory.timeoutMs` | `750` | Clamped to a positive value, max `5000` |
 | `externalMemory.maxResults` | `3` | Clamped to a positive value, max `10` |
 | `externalMemory.maxChars` | `2500` | Clamped to a positive value, max `20000` |
-| `externalMemory.mirrorWrites` | `false` | Opt-in mirroring for `memory.curate` writes |
+| `externalMemory.mirrorWrites` | `false` | Opt-in mirroring for shared memory mutation writes |
 | `externalMemory.file.path` | `external-memory.jsonl` | Relative to the profile `external-memory/` directory |
 | `externalMemory.file.maxEntries` | `1000` | Clamped to a positive value, max `10000` |
 
@@ -391,9 +391,9 @@ External provider observability is best-effort and metadata-only:
 | Event | Emitted From | Contents |
 |-------|--------------|----------|
 | `external-memory-recall` | `MemoryRecallOrchestrator` external recall path | provider id, enabled/attempted flags, result count, bounded total character count, warning/failure count, safe scope metadata, redacted/bounded failure reason |
-| `external-memory-mirror-write` | `memory.curate` mirror-write path | provider id, mirror enabled/attempted/success flags, local write success, safe memory kind/file metadata, bounded entry size, safe scope metadata, redacted/bounded failure reason |
+| `external-memory-mirror-write` | Shared memory mutation mirror-write path | provider id, mirror enabled/attempted/success flags, local write success, safe memory kind/file metadata, bounded entry size, safe scope metadata, redacted/bounded failure reason |
 
-These audit events do not include raw recalled content, raw mirrored memory content, credentials, or provider secrets. Event recording failure is non-fatal and must not block local memory prompt inclusion, `memory.curate`, recall, mirror-write behavior, provider turns, semantic compression, or memory-file compaction. Local memory remains authoritative.
+These audit events do not include raw recalled content, raw mirrored memory content, credentials, or provider secrets. Event recording failure is non-fatal and must not block local memory prompt inclusion, shared memory mutations, recall, mirror-write behavior, provider turns, semantic compression, or memory-file compaction. Local memory remains authoritative.
 
 ## Web Research Providers
 
