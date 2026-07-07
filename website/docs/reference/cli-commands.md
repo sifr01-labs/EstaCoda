@@ -340,7 +340,11 @@ estacoda memory clear [USER.md|MEMORY.md|all] --yes
 **Behavior:**
 - `memory mode` shows or updates profile-local curation mode. `auto` is the default and applies only conservative low-risk candidates.
 - `memory recent` shows recent curation records, including auto-applied, pending-review, ignored, and failed checkpoints.
-- `memory review` shows pending-review records. This is currently an inspectable queue/history view, not an approve/reject UI.
+- `memory review` shows pending-review records and stored low-risk candidate operations.
+- `memory apply <record-id> [candidate-id|all]` applies pending review candidates through the shared memory mutation path.
+- `memory reject <record-id> [candidate-id|all]` marks pending review candidates rejected without writing memory.
+- `memory undo <record-id>` reverses applied operations for a curation record.
+- `memory forget <USER.md|MEMORY.md> <exact text>` removes exact text from learned memory.
 - `memory populate` dispatches a manual curation checkpoint through an active runtime. Run `/memory populate` inside an active CLI session or authorized channel when no attached runtime is available to the top-level command.
 - `memory edit` prints safe edit targets and repair guidance for `USER.md` and `MEMORY.md`; `SOUL.md` is protected.
 - `memory clear` requires `--yes`, creates backups for existing files, and never clears `SOUL.md` or shared memory.

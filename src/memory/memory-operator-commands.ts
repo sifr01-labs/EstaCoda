@@ -7,15 +7,22 @@ import {
   readActiveProfile,
   resolveProfileStateHome
 } from "../config/profile-home.js";
-import type { MemoryPromotionRecord } from "../contracts/memory.js";
+import type { MemoryFileKind, MemoryOperation, MemoryPromotionRecord } from "../contracts/memory.js";
+import { truncate } from "../utils/formatting.js";
+import { redactSensitiveText } from "../utils/redaction.js";
 import type { MemoryCurationCheckpointResult } from "./memory-curation-service.js";
 import {
   MemoryCurationStore,
+  type MemoryCurationCandidateRecord,
   memoryCurationStorePath,
-  type MemoryCurationRecord
+  type MemoryCurationRecord,
+  type StoredMemoryOperation,
+  summarizeMemoryOperation
 } from "./memory-curation-store.js";
 import { MemoryPersistenceService, isMemoryPersistenceDriftError } from "./memory-persistence-service.js";
 import { createMemoryIndexSync } from "./memory-index-sync.js";
+import { MemoryStore } from "./memory-store.js";
+import { MemoryMutationService } from "./memory-mutation-service.js";
 
 type MemoryOperatorRuntime = {
   sessionId: string;
@@ -57,6 +64,18 @@ export async function runMemoryOperatorCommand(input: {
   if (action === "review") {
     return { ok: true, output: await renderReviewCurationRecords(context, parseLimit(args, 20)) };
   }
+  if (action === "apply") {
+    return await handleMemoryApply(context, args);
+  }
+  if (action === "reject") {
+    return await handleMemoryReject(context, args);
+  }
+  if (action === "undo") {
+    return await handleMemoryUndo(context, args);
+  }
+  if (action === "forget") {
+    return await handleMemoryForget(context, args);
+  }
   if (action === "populate") {
     return await handleMemoryPopulate({
       ...context,
@@ -86,10 +105,216 @@ export function memoryOperatorHelp(): string {
     "  memory mode [auto|review|manual]",
     "  memory recent [--limit N]",
     "  memory review [--limit N]",
+    "  memory apply <record-id> [candidate-id|all]",
+    "  memory reject <record-id> [candidate-id|all]",
+    "  memory undo <record-id>",
+    "  memory forget <USER.md|MEMORY.md> <exact text>",
     "  memory populate",
     "  memory edit",
     "  memory clear [USER.md|MEMORY.md|all] --yes"
   ].join("\n");
+}
+
+async function handleMemoryApply(
+  context: { homeDir: string; profileId: string },
+  args: readonly string[]
+): Promise<MemoryOperatorCommandResult> {
+  const recordId = args.find((arg) => !arg.startsWith("-"));
+  const candidateSelector = args.slice(1).find((arg) => !arg.startsWith("-")) ?? "all";
+  if (recordId === undefined) {
+    return { ok: false, output: "Usage: memory apply <record-id> [candidate-id|all]" };
+  }
+  const store = loadCurationStore(context);
+  const record = await store.get(recordId);
+  if (record === undefined) {
+    return { ok: false, output: `Memory curation record not found: ${recordId}` };
+  }
+  const candidates = selectPendingCandidates(record, candidateSelector);
+  if (candidates.length === 0) {
+    return { ok: false, output: `No pending applyable memory candidates found for ${recordId}.` };
+  }
+  const missingOperation = candidates.find((candidate) => candidate.operation === undefined);
+  if (missingOperation !== undefined) {
+    return { ok: false, output: `Candidate ${missingOperation.id} does not store an applyable operation.` };
+  }
+
+  const mutation = await createOperatorMutationContext(context, record.sessionId);
+  const applied: MemoryCurationCandidateRecord[] = [];
+  const warnings: string[] = [];
+  try {
+    for (const candidate of candidates) {
+      const result = await mutation.service.apply(toMemoryOperation(candidate.operation!), { source: "memory.operator" });
+      if (!result.ok) {
+        return { ok: false, output: `Memory apply failed for ${candidate.id}: ${result.message}` };
+      }
+      applied.push(candidate);
+      warnings.push(...result.warnings);
+    }
+  } finally {
+    mutation.sync.dispose();
+  }
+
+  await store.update(record.id, (current) => {
+    const appliedIds = new Set(applied.map((candidate) => candidate.id));
+    const nextCandidates = (current.candidates ?? []).map((candidate) => appliedIds.has(candidate.id)
+      ? { ...candidate, reviewStatus: "applied" as const }
+      : candidate);
+    const nextOperations = [
+      ...current.operations,
+      ...applied.flatMap((candidate) => candidate.operation === undefined
+        ? []
+        : [summarizeMemoryOperation(toMemoryOperation(candidate.operation))])
+    ];
+    return {
+      ...current,
+      status: "applied",
+      candidates: nextCandidates,
+      operations: nextOperations,
+      reason: `operator applied ${applied.length} memory candidate${applied.length === 1 ? "" : "s"}`
+    };
+  });
+
+  return {
+    ok: true,
+    output: [
+      "Memory review candidates applied",
+      `recordId: ${record.id}`,
+      `applied: ${applied.map((candidate) => candidate.id).join(",")}`,
+      ...warnings.map((warning) => `warning: ${warning}`)
+    ].join("\n")
+  };
+}
+
+async function handleMemoryReject(
+  context: { homeDir: string; profileId: string },
+  args: readonly string[]
+): Promise<MemoryOperatorCommandResult> {
+  const recordId = args.find((arg) => !arg.startsWith("-"));
+  const candidateSelector = args.slice(1).find((arg) => !arg.startsWith("-")) ?? "all";
+  if (recordId === undefined) {
+    return { ok: false, output: "Usage: memory reject <record-id> [candidate-id|all]" };
+  }
+  const store = loadCurationStore(context);
+  const record = await store.get(recordId);
+  if (record === undefined) {
+    return { ok: false, output: `Memory curation record not found: ${recordId}` };
+  }
+  const candidates = selectPendingCandidates(record, candidateSelector);
+  if (candidates.length === 0) {
+    return { ok: false, output: `No pending memory candidates found for ${recordId}.` };
+  }
+  await store.update(record.id, (current) => {
+    const rejectedIds = new Set(candidates.map((candidate) => candidate.id));
+    const nextCandidates = (current.candidates ?? []).map((candidate) => rejectedIds.has(candidate.id)
+      ? { ...candidate, reviewStatus: "rejected" as const }
+      : candidate);
+    return {
+      ...current,
+      status: "rejected",
+      candidates: nextCandidates,
+      reason: `operator rejected ${candidates.length} memory candidate${candidates.length === 1 ? "" : "s"}`
+    };
+  });
+  return {
+    ok: true,
+    output: [
+      "Memory review candidates rejected",
+      `recordId: ${record.id}`,
+      `rejected: ${candidates.map((candidate) => candidate.id).join(",")}`
+    ].join("\n")
+  };
+}
+
+async function handleMemoryUndo(
+  context: { homeDir: string; profileId: string },
+  args: readonly string[]
+): Promise<MemoryOperatorCommandResult> {
+  const recordId = args.find((arg) => !arg.startsWith("-"));
+  if (recordId === undefined) {
+    return { ok: false, output: "Usage: memory undo <record-id>" };
+  }
+  const store = loadCurationStore(context);
+  const record = await store.get(recordId);
+  if (record === undefined) {
+    return { ok: false, output: `Memory curation record not found: ${recordId}` };
+  }
+  if (record.status === "undone") {
+    return { ok: false, output: `Memory curation record is already undone: ${recordId}` };
+  }
+  const operations = record.operations.flatMap((operation) => operation.operation === undefined ? [] : [operation.operation]);
+  if (operations.length === 0) {
+    return { ok: false, output: `Memory curation record has no reversible operations: ${recordId}` };
+  }
+  const mutation = await createOperatorMutationContext(context, record.sessionId);
+  const warnings: string[] = [];
+  try {
+    for (const operation of [...operations].reverse()) {
+      const result = await mutation.service.apply(invertMemoryOperation(operation), { source: "memory.operator" });
+      if (!result.ok) {
+        return { ok: false, output: `Memory undo failed for ${recordId}: ${result.message}` };
+      }
+      warnings.push(...result.warnings);
+    }
+  } finally {
+    mutation.sync.dispose();
+  }
+  await store.update(record.id, (current) => ({
+    ...current,
+    status: "undone",
+    reason: "operator undid applied memory operations"
+  }));
+  return {
+    ok: true,
+    output: [
+      "Memory curation record undone",
+      `recordId: ${record.id}`,
+      `operations: ${operations.length}`,
+      ...warnings.map((warning) => `warning: ${warning}`)
+    ].join("\n")
+  };
+}
+
+async function handleMemoryForget(
+  context: { homeDir: string; profileId: string },
+  args: readonly string[]
+): Promise<MemoryOperatorCommandResult> {
+  const file = args[0];
+  const match = args.slice(1).join(" ").trim();
+  if ((file !== "USER.md" && file !== "MEMORY.md") || match.length === 0) {
+    return { ok: false, output: "Usage: memory forget <USER.md|MEMORY.md> <exact text>" };
+  }
+  const operation: MemoryOperation = {
+    kind: "remove",
+    file,
+    match
+  };
+  const mutation = await createOperatorMutationContext(context, undefined);
+  try {
+    const result = await mutation.service.apply(operation, { source: "memory.operator" });
+    if (!result.ok) {
+      return { ok: false, output: `Memory forget failed: ${result.message}` };
+    }
+    await loadCurationStore(context).append({
+      profileId: context.profileId,
+      sessionId: "operator",
+      trigger: "manual",
+      status: "applied",
+      extractedFactIds: [],
+      operations: [summarizeMemoryOperation(operation)],
+      candidates: [],
+      reason: "operator removed exact memory text"
+    });
+    return {
+      ok: true,
+      output: [
+        "Memory text forgotten",
+        `file: ${file}`,
+        ...result.warnings.map((warning) => `warning: ${warning}`)
+      ].join("\n")
+    };
+  } finally {
+    mutation.sync.dispose();
+  }
 }
 
 export function isMemoryCurationModeMutation(args: readonly string[]): boolean {
@@ -283,7 +508,7 @@ async function renderMemoryDashboard(input: {
     `promotedConclusions: ${promotions.length}`,
     latest === undefined ? "latestAudit: none" : `latestAudit: ${latest.status} ${latest.trigger} ${latest.createdAt}`,
     "",
-    "Commands: memory populate, memory review, memory recent, memory mode [auto|review|manual], memory edit"
+    "Commands: memory populate, memory review, memory apply, memory reject, memory undo, memory forget, memory recent, memory mode [auto|review|manual], memory edit, memory clear"
   ].join("\n");
 }
 
@@ -313,8 +538,12 @@ async function renderReviewCurationRecords(
   }
   return [
     "Pending memory review",
-    ...records.map((record, index) => `${index + 1}. ${renderCurationRecord(record)}`),
-    "Candidate diffs are intentionally not shown unless stored by a reviewed candidate queue."
+    ...records.flatMap((record, index) => [
+      `${index + 1}. ${renderCurationRecord(record)}`,
+      ...renderReviewCandidates(record).map((line) => `   ${line}`)
+    ]),
+    "Run: memory apply <record-id> [candidate-id|all]",
+    "Run: memory reject <record-id> [candidate-id|all]"
   ].join("\n");
 }
 
@@ -364,6 +593,145 @@ function renderCurationRecord(record: MemoryCurationRecord): string {
     `reason:${record.reason}`,
     `at:${record.createdAt}`
   ].join(" ");
+}
+
+function renderReviewCandidates(record: MemoryCurationRecord): string[] {
+  const candidates = (record.candidates ?? []).filter((candidate) => candidate.reviewStatus === "pending");
+  if (candidates.length === 0) {
+    return ["pendingCandidates: none"];
+  }
+  return candidates.map((candidate) => [
+    `candidate:${candidate.id}`,
+    `status:${candidate.reviewStatus}`,
+    `target:${candidate.target}`,
+    `risk:${candidate.risk}`,
+    `operation:${candidate.operation?.kind ?? "not-stored"}`,
+    `reason:${candidate.reason}`,
+    candidate.operation === undefined ? undefined : `preview:${renderStoredOperationPreview(candidate.operation)}`
+  ].filter((part): part is string => part !== undefined).join(" "));
+}
+
+function renderStoredOperationPreview(operation: StoredMemoryOperation): string {
+  if (operation.kind === "append") {
+    return truncate(redactSensitiveText(operation.content.replace(/\s+/gu, " ")), 160);
+  }
+  if (operation.kind === "replace") {
+    return truncate(redactSensitiveText(operation.replacement.replace(/\s+/gu, " ")), 160);
+  }
+  return truncate(redactSensitiveText(operation.match.replace(/\s+/gu, " ")), 160);
+}
+
+function selectPendingCandidates(
+  record: MemoryCurationRecord,
+  selector: string
+): MemoryCurationCandidateRecord[] {
+  const pending = (record.candidates ?? []).filter((candidate) => candidate.reviewStatus === "pending");
+  if (selector === "all") {
+    return pending;
+  }
+  return pending.filter((candidate) => candidate.id === selector);
+}
+
+async function createOperatorMutationContext(
+  context: { homeDir: string; profileId: string },
+  sessionId: string | undefined
+): Promise<{
+  service: MemoryMutationService;
+  sync: ReturnType<typeof createMemoryIndexSync>;
+}> {
+  const paths = resolveProfileStateHome({ homeDir: context.homeDir, profileId: context.profileId });
+  const persistence = new MemoryPersistenceService();
+  const memoryStore = new MemoryStore();
+  await Promise.all([
+    loadMemoryFileIntoStore({
+      persistence,
+      memoryStore,
+      path: paths.userMdPath,
+      file: "USER.md"
+    }),
+    loadMemoryFileIntoStore({
+      persistence,
+      memoryStore,
+      path: paths.memoryMdPath,
+      file: "MEMORY.md"
+    })
+  ]);
+  const config = await loadMemoryConfig(context);
+  const sync = createMemoryIndexSync({
+    homeDir: context.homeDir,
+    profileId: context.profileId,
+    config
+  });
+  return {
+    service: new MemoryMutationService({
+      memoryStore,
+      profileId: context.profileId,
+      sessionId,
+      persistence,
+      persistencePaths: {
+        "USER.md": paths.userMdPath,
+        "MEMORY.md": paths.memoryMdPath
+      },
+      memoryIndexSync: sync
+    }),
+    sync
+  };
+}
+
+async function loadMemoryFileIntoStore(input: {
+  persistence: MemoryPersistenceService;
+  memoryStore: MemoryStore;
+  path: string;
+  file: Extract<MemoryFileKind, "USER.md" | "MEMORY.md">;
+}): Promise<void> {
+  const content = await input.persistence.readFile({ path: input.path, kind: input.file });
+  input.memoryStore.write(input.file, content ?? "");
+}
+
+function toMemoryOperation(operation: StoredMemoryOperation): MemoryOperation {
+  if (operation.kind === "append") {
+    return {
+      kind: "append",
+      file: operation.file,
+      content: operation.content
+    };
+  }
+  if (operation.kind === "replace") {
+    return {
+      kind: "replace",
+      file: operation.file,
+      match: operation.match,
+      replacement: operation.replacement
+    };
+  }
+  return {
+    kind: "remove",
+    file: operation.file,
+    match: operation.match
+  };
+}
+
+function invertMemoryOperation(operation: StoredMemoryOperation): MemoryOperation {
+  if (operation.kind === "append") {
+    return {
+      kind: "remove",
+      file: operation.file,
+      match: operation.content
+    };
+  }
+  if (operation.kind === "replace") {
+    return {
+      kind: "replace",
+      file: operation.file,
+      match: operation.replacement,
+      replacement: operation.match
+    };
+  }
+  return {
+    kind: "append",
+    file: operation.file,
+    content: operation.match
+  };
 }
 
 async function loadMemoryConfig(context: { homeDir: string; profileId: string }): Promise<MemoryConfig> {

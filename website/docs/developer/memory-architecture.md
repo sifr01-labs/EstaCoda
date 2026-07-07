@@ -84,16 +84,16 @@ Runtime policy in `MemoryReviewer` decides disposition:
 | Disposition | Meaning |
 |---|---|
 | `auto-apply` | Eligible for immediate write to `USER.md` or `MEMORY.md`. |
-| `pending-review` | Recorded for review/history; no memory file mutation in this slice. |
+| `pending-review` | Recorded for operator review; no memory file mutation until applied. |
 | `ignore` | Duplicate, not useful, or intentionally skipped. |
 
 Default `auto` mode auto-applies only explicit, non-sensitive, low-risk facts that pass evidence, duplicate, scanner, budget, and confidence gates. The default `autoApplyMinConfidence` is `0.7`, and `autoApplyMaxRisk` is `low`.
 
 Natural checkpoint triggers are `turn-count`, `compact`, `handoff`, `runtime-dispose`, and explicit `manual` runs from `memory populate` / `/memory populate`.
 
-Curation records store ids, trigger/status, source message ids/counts, extracted fact ids, operation hashes, and reasons. They do not store raw pending candidate diffs, so `memory review` is currently an inspectable queue/history view rather than an approval UI.
+Curation records store ids, trigger/status, source message ids/counts, extracted fact ids, operation hashes, reasons, and reversible low-risk operation payloads for applied or reviewable candidates. Sensitive or higher-risk candidates may be recorded without an applyable operation.
 
-Operator controls are implemented once in `MemoryOperatorCommands` and reused by the top-level CLI, interactive slash commands, and authorized gateway surfaces such as Telegram. Keep Telegram behavior in parity with CLI behavior for `/memory mode`, `/memory populate`, `/memory recent`, `/memory review`, and `/memory edit`.
+Operator controls are implemented once in `MemoryOperatorCommands` and reused by the top-level CLI, interactive slash commands, and authorized gateway surfaces such as Telegram. Keep Telegram behavior in parity with CLI behavior for `/memory mode`, `/memory populate`, `/memory recent`, `/memory review`, `/memory apply`, `/memory reject`, `/memory undo`, `/memory forget`, and `/memory edit`.
 
 ---
 

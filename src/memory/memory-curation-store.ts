@@ -12,16 +12,48 @@ export type MemoryCurationTrigger =
 
 export type MemoryCurationStatus =
   | "auto-applied"
+  | "applied"
   | "pending-review"
+  | "rejected"
   | "ignored"
   | "failed"
   | "undone";
+
+export type StoredMemoryOperation =
+  | {
+      kind: "append";
+      file: Extract<MemoryFileKind, "USER.md" | "MEMORY.md">;
+      content: string;
+    }
+  | {
+      kind: "replace";
+      file: Extract<MemoryFileKind, "USER.md" | "MEMORY.md">;
+      match: string;
+      replacement: string;
+    }
+  | {
+      kind: "remove";
+      file: Extract<MemoryFileKind, "USER.md" | "MEMORY.md">;
+      match: string;
+    };
 
 export type MemoryCurationOperationRecord = {
   file: Extract<MemoryFileKind, "USER.md" | "MEMORY.md">;
   kind: MemoryOperation["kind"];
   contentHash?: string;
   matchHash?: string;
+  operation?: StoredMemoryOperation;
+};
+
+export type MemoryCurationCandidateRecord = {
+  id: string;
+  factId: string;
+  target: Extract<MemoryFileKind, "USER.md" | "MEMORY.md">;
+  disposition: "auto-apply" | "pending-review" | "ignore";
+  reviewStatus: "pending" | "applied" | "rejected";
+  reason: string;
+  risk: "low" | "medium" | "high";
+  operation?: StoredMemoryOperation;
 };
 
 export type MemoryCurationRecord = {
@@ -34,6 +66,7 @@ export type MemoryCurationRecord = {
   sourceMessageIds?: string[];
   extractedFactIds: string[];
   operations: MemoryCurationOperationRecord[];
+  candidates?: MemoryCurationCandidateRecord[];
   reason: string;
   createdAt: string;
 };
@@ -84,6 +117,26 @@ export class MemoryCurationStore {
     return [...data.records].reverse().find((record) => record.sessionId === sessionId);
   }
 
+  async get(id: string): Promise<MemoryCurationRecord | undefined> {
+    const data = await this.#read();
+    return data.records.find((record) => record.id === id);
+  }
+
+  async update(
+    id: string,
+    updater: (record: MemoryCurationRecord) => MemoryCurationRecord
+  ): Promise<MemoryCurationRecord | undefined> {
+    const data = await this.#read();
+    const index = data.records.findIndex((record) => record.id === id);
+    if (index === -1) {
+      return undefined;
+    }
+    const updated = updater(data.records[index]!);
+    data.records[index] = updated;
+    await this.#write(data);
+    return updated;
+  }
+
   async #read(): Promise<MemoryCurationStoreData> {
     try {
       const parsed = JSON.parse(await readFile(this.#path, "utf8")) as Partial<MemoryCurationStoreData>;
@@ -121,12 +174,42 @@ export function summarizeMemoryOperation(operation: MemoryOperation): MemoryCura
   return {
     file,
     kind: operation.kind,
+    operation: storeMemoryOperation({ ...operation, file }),
     ...(operation.kind === "append" ? { contentHash: hashText(operation.content) } : {}),
     ...(operation.kind === "replace" ? {
       contentHash: hashText(operation.replacement),
       matchHash: hashText(operation.match)
     } : {}),
     ...(operation.kind === "remove" ? { matchHash: hashText(operation.match) } : {})
+  };
+}
+
+export function storeMemoryOperation(operation: MemoryOperation): StoredMemoryOperation {
+  const file = operation.file === "USER.md" || operation.file === "MEMORY.md"
+    ? operation.file
+    : undefined;
+  if (file === undefined) {
+    throw new Error(`memory curation records do not support ${operation.file}`);
+  }
+  if (operation.kind === "append") {
+    return {
+      kind: "append",
+      file,
+      content: operation.content
+    };
+  }
+  if (operation.kind === "replace") {
+    return {
+      kind: "replace",
+      file,
+      match: operation.match,
+      replacement: operation.replacement
+    };
+  }
+  return {
+    kind: "remove",
+    file,
+    match: operation.match
   };
 }
 
@@ -138,7 +221,7 @@ function normalizeRecord(value: unknown): MemoryCurationRecord[] {
   const profileId = stringValue(value.profileId);
   const sessionId = stringValue(value.sessionId);
   const trigger = oneOf(value.trigger, ["turn-count", "compact", "handoff", "runtime-dispose", "manual"] as const);
-  const status = oneOf(value.status, ["auto-applied", "pending-review", "ignored", "failed", "undone"] as const);
+  const status = oneOf(value.status, ["auto-applied", "applied", "pending-review", "rejected", "ignored", "failed", "undone"] as const);
   const reason = stringValue(value.reason);
   const createdAt = stringValue(value.createdAt);
   if (
@@ -171,6 +254,9 @@ function normalizeRecord(value: unknown): MemoryCurationRecord[] {
       : [],
     operations: Array.isArray(value.operations)
       ? value.operations.flatMap(normalizeOperationRecord)
+      : [],
+    candidates: Array.isArray(value.candidates)
+      ? value.candidates.flatMap(normalizeCandidateRecord)
       : []
   }];
 }
@@ -188,8 +274,70 @@ function normalizeOperationRecord(value: unknown): MemoryCurationOperationRecord
     file,
     kind,
     ...(typeof value.contentHash === "string" ? { contentHash: value.contentHash } : {}),
-    ...(typeof value.matchHash === "string" ? { matchHash: value.matchHash } : {})
+    ...(typeof value.matchHash === "string" ? { matchHash: value.matchHash } : {}),
+    ...normalizeStoredOperationField(value.operation)
   }];
+}
+
+function normalizeCandidateRecord(value: unknown): MemoryCurationCandidateRecord[] {
+  if (!isRecord(value)) {
+    return [];
+  }
+  const id = stringValue(value.id);
+  const factId = stringValue(value.factId);
+  const target = oneOf(value.target, ["USER.md", "MEMORY.md"] as const);
+  const disposition = oneOf(value.disposition, ["auto-apply", "pending-review", "ignore"] as const);
+  const reviewStatus = oneOf(value.reviewStatus, ["pending", "applied", "rejected"] as const);
+  const reason = stringValue(value.reason);
+  const risk = oneOf(value.risk, ["low", "medium", "high"] as const);
+  if (
+    id === undefined ||
+    factId === undefined ||
+    target === undefined ||
+    disposition === undefined ||
+    reviewStatus === undefined ||
+    reason === undefined ||
+    risk === undefined
+  ) {
+    return [];
+  }
+  return [{
+    id,
+    factId,
+    target,
+    disposition,
+    reviewStatus,
+    reason,
+    risk,
+    ...normalizeStoredOperationField(value.operation)
+  }];
+}
+
+function normalizeStoredOperationField(value: unknown): { operation?: StoredMemoryOperation } {
+  const operation = normalizeStoredOperation(value);
+  return operation === undefined ? {} : { operation };
+}
+
+function normalizeStoredOperation(value: unknown): StoredMemoryOperation | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const file = oneOf(value.file, ["USER.md", "MEMORY.md"] as const);
+  const kind = oneOf(value.kind, ["append", "replace", "remove"] as const);
+  if (file === undefined || kind === undefined) {
+    return undefined;
+  }
+  if (kind === "append") {
+    const content = nonEmptyStringValue(value.content);
+    return content === undefined ? undefined : { kind, file, content };
+  }
+  if (kind === "replace") {
+    const match = nonEmptyStringValue(value.match);
+    const replacement = nonEmptyStringValue(value.replacement);
+    return match === undefined || replacement === undefined ? undefined : { kind, file, match, replacement };
+  }
+  const match = nonEmptyStringValue(value.match);
+  return match === undefined ? undefined : { kind, file, match };
 }
 
 function hashText(value: string): string {
@@ -208,6 +356,13 @@ function stringValue(value: unknown): string | undefined {
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function nonEmptyStringValue(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  return value.trim().length > 0 ? value : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

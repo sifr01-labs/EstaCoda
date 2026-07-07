@@ -120,6 +120,10 @@ memory/shared/ -> USER.md -> SOUL.md -> MEMORY.md
 estacoda memory mode [auto|review|manual]
 estacoda memory recent [--limit N]
 estacoda memory review [--limit N]
+estacoda memory apply <record-id> [candidate-id|all]
+estacoda memory reject <record-id> [candidate-id|all]
+estacoda memory undo <record-id>
+estacoda memory forget <USER.md|MEMORY.md> <exact text>
 estacoda memory populate
 estacoda memory edit
 estacoda memory clear [USER.md|MEMORY.md|all] --yes
@@ -132,10 +136,15 @@ estacoda memory clear [USER.md|MEMORY.md|all] --yes
 /memory populate
 /memory recent
 /memory review
+/memory apply <record-id> [candidate-id|all]
+/memory reject <record-id> [candidate-id|all]
+/memory undo <record-id>
+/memory forget <USER.md|MEMORY.md> <exact text>
 /memory edit
+/memory clear [USER.md|MEMORY.md|all] --yes
 ```
 
-يعرض `memory review` حاليًا سجلات المراجعة/التاريخ المعلقة. لا يقدم بعد واجهة approve/reject لفروق مرشحين محفوظة، لأن هذه المرحلة تحفظ بيانات تدقيق وهاشات عمليات بدل raw candidate patches.
+يعرض `memory review` سجلات المراجعة المعلقة وعمليات المرشحين منخفضة المخاطر المحفوظة. استخدم `memory apply` أو `memory reject` لحسمها، و`memory undo` لعكس سجل تنظيم مطبق، و`memory forget` لإزالة نص مطابق من `USER.md` أو `MEMORY.md`.
 
 ---
 

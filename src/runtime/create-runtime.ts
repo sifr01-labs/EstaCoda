@@ -27,6 +27,7 @@ import { MemoryCurationStore, memoryCurationStorePath, type MemoryCurationTrigge
 import { MemoryIndex } from "../memory/memory-index.js";
 import { MemoryIndexStore, resolveMemoryIndexStorePath } from "../memory/memory-index-store.js";
 import { MemoryIndexSync } from "../memory/memory-index-sync.js";
+import { MemoryMutationService } from "../memory/memory-mutation-service.js";
 import { MemoryPersistenceService } from "../memory/memory-persistence-service.js";
 import { LocalMemoryRetrievalService } from "../memory/memory-retrieval-service.js";
 import { MemoryStore } from "../memory/memory-store.js";
@@ -774,7 +775,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         sessionDb,
         sessionId
       }),
-      memoryCurationServiceFactory: ({ sessionRuntimeContext, sessionDb }) => new MemoryCurationService({
+      memoryCurationServiceFactory: ({ sessionRuntimeContext, sessionDb, trajectoryRecorder }) => new MemoryCurationService({
         config: memoryConfig.curation,
         profileId,
         sessionId: () => sessionRuntimeContext.currentSessionId(),
@@ -791,7 +792,20 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           "USER.md": profilePaths.userMdPath,
           "MEMORY.md": profilePaths.memoryMdPath
         },
-        memoryIndexSync
+        memoryIndexSync,
+        memoryMutationService: new MemoryMutationService({
+          memoryStore,
+          profileId,
+          sessionId: () => sessionRuntimeContext.currentSessionId(),
+          workspaceRoot,
+          sessionDb,
+          trajectoryRecorder,
+          persistence: memoryPersistenceService,
+          persistencePaths: memoryPersistencePaths,
+          memoryIndexSync,
+          externalMemory: externalMemoryConfig,
+          externalMemoryProviders
+        })
       }),
       fileStateTracker,
       memoryPersistenceService,

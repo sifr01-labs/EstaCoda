@@ -337,7 +337,11 @@ estacoda memory clear [USER.md|MEMORY.md|all] --yes
 **السلوك:**
 - يعرض `memory mode` أو يحدّث وضع تنظيم الذاكرة المحلي للملف الشخصي. `auto` هو الافتراضي ويطبق فقط مرشحين محافظين منخفضي المخاطر.
 - يعرض `memory recent` سجلات التنظيم الحديثة، ومنها auto-applied وpending-review وignored وfailed.
-- يعرض `memory review` سجلات pending-review. هو حاليًا عرض queue/history قابل للفحص وليس واجهة approve/reject.
+- يعرض `memory review` سجلات pending-review وعمليات المرشحين منخفضة المخاطر المحفوظة.
+- يطبق `memory apply <record-id> [candidate-id|all]` مرشحي المراجعة عبر مسار تعديل الذاكرة المشترك.
+- يرفض `memory reject <record-id> [candidate-id|all]` مرشحي المراجعة دون كتابة الذاكرة.
+- يعكس `memory undo <record-id>` العمليات المطبقة لسجل تنظيم.
+- يزيل `memory forget <USER.md|MEMORY.md> <exact text>` نصًا مطابقًا من الذاكرة المتعلمة.
 - يرسل `memory populate` نقطة تنظيم يدوية عبر runtime نشطة. استخدم `/memory populate` داخل جلسة CLI نشطة أو قناة مصرح بها عندما لا تتوفر runtime مرتبطة للأمر الأعلى.
 - يطبع `memory edit` أهداف التحرير الآمنة وإرشادات الإصلاح لـ `USER.md` و`MEMORY.md`; يبقى `SOUL.md` محميًا.
 - يتطلب `memory clear` العلم `--yes`، وينشئ نسخًا احتياطية للملفات الموجودة، ولا يمسح `SOUL.md` أو الذاكرة المشتركة.

@@ -84,16 +84,16 @@ Transcript slice
 | التصرف | المعنى |
 |---|---|
 | `auto-apply` | مؤهل للكتابة الفورية إلى `USER.md` أو `MEMORY.md`. |
-| `pending-review` | يسجل للمراجعة/التاريخ؛ لا يغير ملف الذاكرة في هذه المرحلة. |
+| `pending-review` | يسجل لمراجعة المشغل؛ لا يغير ملف الذاكرة حتى يطبق. |
 | `ignore` | مكرر، غير مفيد، أو متجاوز عمدًا. |
 
 الوضع الافتراضي `auto` يطبق تلقائيًا فقط الحقائق الصريحة، غير الحساسة، منخفضة المخاطر، التي تنجح في فحوصات الدليل، والتكرار، والماسح، والميزانية، والثقة. القيمة الافتراضية لـ `autoApplyMinConfidence` هي `0.7`، و`autoApplyMaxRisk` هي `low`.
 
 محفزات النقاط الطبيعية هي `turn-count`، و`compact`، و`handoff`، و`runtime-dispose`، والتشغيل الصريح `manual` عبر `memory populate` / `/memory populate`.
 
-تخزن سجلات التنظيم المعرّفات، والمحفز/الحالة، ومعرفات/أعداد رسائل المصدر، ومعرفات الحقائق المستخرجة، وهاشات العمليات، والأسباب. لا تخزن raw pending candidate diffs، لذلك `memory review` هو حاليًا عرض queue/history قابل للفحص وليس واجهة موافقة.
+تخزن سجلات التنظيم المعرّفات، والمحفز/الحالة، ومعرفات/أعداد رسائل المصدر، ومعرفات الحقائق المستخرجة، وهاشات العمليات، والأسباب، وحمولات عمليات منخفضة المخاطر قابلة للعكس للمرشحين المطبقين أو القابلين للمراجعة. قد تسجل المرشحات الحساسة أو الأعلى مخاطرة دون عملية قابلة للتطبيق.
 
-عناصر التحكم منفذة مرة واحدة في `MemoryOperatorCommands` ويعاد استخدامها في CLI الأعلى، وأوامر slash التفاعلية، والأسطح المصرح بها مثل Telegram. حافظ على تكافؤ سلوك Telegram مع CLI في `/memory mode` و`/memory populate` و`/memory recent` و`/memory review` و`/memory edit`.
+عناصر التحكم منفذة مرة واحدة في `MemoryOperatorCommands` ويعاد استخدامها في CLI الأعلى، وأوامر slash التفاعلية، والأسطح المصرح بها مثل Telegram. حافظ على تكافؤ سلوك Telegram مع CLI في `/memory mode` و`/memory populate` و`/memory recent` و`/memory review` و`/memory apply` و`/memory reject` و`/memory undo` و`/memory forget` و`/memory edit`.
 
 ---
 

@@ -316,6 +316,66 @@ describe("CLI memory commands", () => {
     expect(review.output).toContain("memory candidates require review");
   });
 
+  it("memory review candidates can be applied and undone through the shared operator path", async () => {
+    const homeDir = await makeTempHome();
+    const paths = resolveProfileStateHome({ homeDir, profileId: "default" });
+    const store = new MemoryCurationStore({
+      path: memoryCurationStorePath(paths.profileRoot),
+      id: () => "record-1",
+      now: () => new Date("2026-05-20T00:00:00.000Z")
+    });
+    await store.append({
+      profileId: "default",
+      sessionId: "session-1",
+      trigger: "manual",
+      status: "pending-review",
+      sourceMessageCount: 1,
+      sourceMessageIds: ["m1"],
+      extractedFactIds: ["fact-1"],
+      operations: [],
+      candidates: [{
+        id: "candidate-1",
+        factId: "fact-1",
+        target: "USER.md",
+        disposition: "pending-review",
+        reviewStatus: "pending",
+        reason: "memory curation mode is review",
+        risk: "low",
+        operation: {
+          kind: "append",
+          file: "USER.md",
+          content: "- User prefers pnpm."
+        }
+      }],
+      reason: "memory candidates require review"
+    });
+
+    const review = await runMemoryCommand(homeDir, ["memory", "review"]);
+    const apply = await runMemoryCommand(homeDir, ["memory", "apply", "record-1", "candidate-1"]);
+    const updatedAfterApply = await store.get("record-1");
+
+    expect(review.exitCode).toBe(0);
+    expect(review.output).toContain("candidate:candidate-1");
+    expect(review.output).toContain("preview:- User prefers pnpm.");
+    expect(apply.exitCode, apply.output).toBe(0);
+    expect(apply.output).toContain("Memory review candidates applied");
+    await expect(readFile(paths.userMdPath, "utf8")).resolves.toBe("- User prefers pnpm.");
+    expect(updatedAfterApply).toMatchObject({
+      status: "applied",
+      candidates: [expect.objectContaining({ id: "candidate-1", reviewStatus: "applied" })],
+      operations: [expect.objectContaining({ file: "USER.md", kind: "append" })]
+    });
+    const undo = await runMemoryCommand(homeDir, ["memory", "undo", "record-1"]);
+    const updatedAfterUndo = await store.get("record-1");
+
+    expect(undo.exitCode).toBe(0);
+    expect(undo.output).toContain("Memory curation record undone");
+    await expect(readFile(paths.userMdPath, "utf8")).resolves.toBe("");
+    expect(updatedAfterUndo).toMatchObject({
+      status: "undone"
+    });
+  });
+
   it("memory populate dispatches a manual curation checkpoint through the active runtime", async () => {
     const homeDir = await makeTempHome();
     const calls: unknown[] = [];

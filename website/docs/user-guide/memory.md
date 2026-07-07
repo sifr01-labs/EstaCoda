@@ -120,6 +120,10 @@ Shared controls are available from the top-level CLI, in-session slash commands,
 estacoda memory mode [auto|review|manual]
 estacoda memory recent [--limit N]
 estacoda memory review [--limit N]
+estacoda memory apply <record-id> [candidate-id|all]
+estacoda memory reject <record-id> [candidate-id|all]
+estacoda memory undo <record-id>
+estacoda memory forget <USER.md|MEMORY.md> <exact text>
 estacoda memory populate
 estacoda memory edit
 estacoda memory clear [USER.md|MEMORY.md|all] --yes
@@ -132,10 +136,15 @@ Inside a session or Telegram chat, use the same subcommands through `/memory`:
 /memory populate
 /memory recent
 /memory review
+/memory apply <record-id> [candidate-id|all]
+/memory reject <record-id> [candidate-id|all]
+/memory undo <record-id>
+/memory forget <USER.md|MEMORY.md> <exact text>
 /memory edit
+/memory clear [USER.md|MEMORY.md|all] --yes
 ```
 
-`memory review` currently shows pending-review/history records. It does not yet provide an approve/reject UI for stored candidate diffs, because this slice stores audit metadata and operation hashes rather than raw candidate patches.
+`memory review` shows pending-review records and low-risk stored candidate operations. Use `memory apply` or `memory reject` to resolve them, `memory undo` to reverse an applied curation record, and `memory forget` to remove exact text from `USER.md` or `MEMORY.md`.
 
 ---
 

@@ -2358,7 +2358,7 @@ export class ChannelGateway {
         "/model - choose a session model",
         "/model <provider>/<model> - set the model for this session",
         "/model clear - clear this session model override",
-        "/memory [mode|populate|review|recent|edit] - inspect and manage memory curation",
+        "/memory [mode|populate|review|apply|reject|undo|forget|recent|edit|clear] - inspect and manage memory curation",
         "/sessions - list recent sessions for this chat",
         "/switch <session-id> - switch this chat to a specific session",
         "/search <query> - search session history",

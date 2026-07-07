@@ -413,15 +413,20 @@ Inside active CLI sessions and Telegram sessions, use:
 /memory mode [auto|review|manual]
 /memory recent [limit]
 /memory review [limit]
+/memory apply <record-id> [candidate-id|all]
+/memory reject <record-id> [candidate-id|all]
+/memory undo <record-id>
+/memory forget <USER.md|MEMORY.md> <exact text>
 /memory populate
 /memory edit
+/memory clear [USER.md|MEMORY.md|all] --yes
 ```
 
 Default mode is `auto`, but auto-apply remains conservative: explicit, non-sensitive, low-risk, evidence-backed facts only. `review` records pending-review history without mutating memory. `manual` skips background checkpoints and leaves explicit manual commands available.
 
 `memory populate` requires an active runtime session. If the top-level command cannot find one, run `/memory populate` inside an active CLI session or attached Telegram session.
 
-`memory review` is currently an inspectable queue/history view over `memory-curation.json`; it is not yet an approve/reject UI for raw candidate diffs.
+`memory review` is an actionable queue over `memory-curation.json` when low-risk candidate operations are stored. `memory apply`, `memory undo`, and `memory forget` use the same mutation path as `memory.curate` and auto-curation.
 
 Telegram parity is intentional. `/memory ...` in Telegram should follow the same mode, policy, profile-local files, and curation history as the CLI, with only output formatting compacted for chat delivery.
 

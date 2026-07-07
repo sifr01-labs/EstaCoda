@@ -3,10 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_MEMORY_CONFIG } from "../config/memory-config.js";
+import type { ExternalMemoryProvider } from "../contracts/memory.js";
 import type { ExtractedFact } from "./extracted-fact.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { MemoryCurationStore, memoryCurationStorePath } from "./memory-curation-store.js";
 import { MemoryCurationService } from "./memory-curation-service.js";
+import { MemoryMutationService } from "./memory-mutation-service.js";
 import { MemoryPersistenceService } from "./memory-persistence-service.js";
 import { MemoryStore } from "./memory-store.js";
 
@@ -169,6 +171,71 @@ describe("MemoryCurationService", () => {
     expect(result.status).toBe("pending-review");
     expect(result.pendingReviewCount).toBe(1);
     expect(store.read("USER.md")).toBe("");
+  });
+
+  it("auto-applies through the shared mutation path including external mirror warnings", async () => {
+    const root = await makeTempDir();
+    const db = new InMemorySessionDB();
+    await db.createSession({ id: "session-1", profileId: "default" });
+    await db.appendMessage({
+      id: "m1",
+      sessionId: "session-1",
+      role: "user",
+      content: "Please remember that I prefer pnpm for this repo."
+    });
+    const store = new MemoryStore();
+    const provider: ExternalMemoryProvider = {
+      id: "fake",
+      mirrorMemoryWrite: vi.fn(async () => {
+        throw new Error("api_key=secretsecretsecretsecretsecret");
+      })
+    };
+    const service = new MemoryCurationService({
+      config: DEFAULT_MEMORY_CONFIG.curation,
+      profileId: "default",
+      sessionId: "session-1",
+      sessionDb: db,
+      memoryStore: store,
+      curationStore: new MemoryCurationStore({ path: memoryCurationStorePath(root) }),
+      extractorOptions: {},
+      memoryMutationService: new MemoryMutationService({
+        memoryStore: store,
+        profileId: "default",
+        sessionId: "session-1",
+        sessionDb: db,
+        externalMemoryProviders: [provider],
+        externalMemory: {
+          enabled: true,
+          timeoutMs: 750,
+          maxResults: 3,
+          maxChars: 2500,
+          mirrorWrites: true
+        }
+      }),
+      extractFacts: async () => ({
+        facts: [fact()],
+        diagnostics: diagnostics(1)
+      })
+    });
+
+    const result = await service.checkpoint({ trigger: "manual" });
+
+    expect(result.status).toBe("auto-applied");
+    expect(provider.mirrorMemoryWrite).toHaveBeenCalledWith(expect.objectContaining({
+      profileId: "default",
+      sessionId: "session-1",
+      operation: expect.objectContaining({
+        kind: "append",
+        file: "USER.md"
+      })
+    }));
+    expect(result.warnings).toContain("external memory provider fake mirror write failed: api_key=[REDACTED]");
+    expect(await db.listEvents("session-1")).toContainEqual(expect.objectContaining({
+      kind: "external-memory-mirror-write",
+      mirrorAttempted: true,
+      mirrorSucceeded: false,
+      warningCount: 1
+    }));
   });
 
   it("advances the cursor when no durable facts are extracted", async () => {

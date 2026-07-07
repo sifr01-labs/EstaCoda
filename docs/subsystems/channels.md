@@ -316,11 +316,16 @@ Telegram exposes the shared memory curation command path through `/memory ...`:
 /memory mode [auto|review|manual]
 /memory recent [limit]
 /memory review [limit]
+/memory apply <record-id> [candidate-id|all]
+/memory reject <record-id> [candidate-id|all]
+/memory undo <record-id>
+/memory forget <USER.md|MEMORY.md> <exact text>
 /memory populate
 /memory edit
+/memory clear [USER.md|MEMORY.md|all] --yes
 ```
 
-These commands intentionally match the CLI memory curation behavior. They use the same profile-local config, `USER.md` / `MEMORY.md` files, `memory-curation.json` history, runtime curation policy, and scanner/budget gates. Chat output is shorter, but Telegram must not become a separate memory policy surface.
+These commands intentionally match the CLI memory curation behavior. They use the same profile-local config, `USER.md` / `MEMORY.md` files, `memory-curation.json` history, runtime curation policy, shared mutation path, and scanner/budget gates. Chat output is shorter, but Telegram must not become a separate memory policy surface.
 
 ## Busy Policy
 

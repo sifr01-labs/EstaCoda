@@ -176,6 +176,10 @@ Operator controls are shared across CLI, in-session slash commands, and authoriz
 estacoda memory mode [auto|review|manual]
 estacoda memory recent [--limit N]
 estacoda memory review [--limit N]
+estacoda memory apply <record-id> [candidate-id|all]
+estacoda memory reject <record-id> [candidate-id|all]
+estacoda memory undo <record-id>
+estacoda memory forget <USER.md|MEMORY.md> <exact text>
 estacoda memory populate
 estacoda memory edit
 estacoda memory clear [USER.md|MEMORY.md|all] --yes
@@ -183,7 +187,7 @@ estacoda memory clear [USER.md|MEMORY.md|all] --yes
 
 The corresponding in-session and Telegram commands use `/memory ...` with the same subcommands. Telegram output is compact, but the policy and profile-local files are the same as the CLI.
 
-`memory clear` is guarded by `--yes`, clears only `USER.md` and/or `MEMORY.md`, creates backups for existing files, syncs the local memory index, and never clears `SOUL.md` or shared memory. Existing live sessions may need `/new` or restart to reload prompt memory after file edits or clears.
+`memory apply`, `memory undo`, and `memory forget` use the same memory mutation path as `memory.curate` and auto-curation, including drift checks, scanner/budget gates, index sync, and configured external-memory mirror warnings. `memory clear` is guarded by `--yes`, clears only `USER.md` and/or `MEMORY.md`, creates backups for existing files, syncs the local memory index, and never clears `SOUL.md` or shared memory. Existing live sessions may need `/new` or restart to reload prompt memory after file edits or clears.
 
 Curation history lives at:
 
@@ -191,7 +195,7 @@ Curation history lives at:
 ~/.estacoda/profiles/<id>/memory-curation.json
 ```
 
-The history stores audit metadata, source message ids/counts, extracted fact ids, and operation hashes. It does not store raw pending candidate diffs in this slice, so `memory review` is an inspectable queue/history view rather than an apply/reject UI. Durable writes remain visible through recent history, session/runtime events, and the authoritative memory files.
+The history stores audit metadata, source message ids/counts, extracted fact ids, operation hashes, reasons, and reversible low-risk operation payloads for applied or reviewable candidates. `memory review` is an actionable queue for candidates that store an operation; sensitive or higher-risk candidates remain visible as non-applyable review records. Durable writes remain visible through recent history, session/runtime events, and the authoritative memory files.
 
 Index inspection and repair workflow:
 

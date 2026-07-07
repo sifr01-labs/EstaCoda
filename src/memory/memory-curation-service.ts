@@ -4,21 +4,23 @@ import type { RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SessionDB, SessionMessage } from "../contracts/session.js";
 import type { MemoryIndexWriteSync } from "./memory-index-sync.js";
 import type { MemoryPersistenceService } from "./memory-persistence-service.js";
-import { isMemoryPersistenceDriftError } from "./memory-persistence-service.js";
 import { MemoryStore } from "./memory-store.js";
 import type { MemoryFactExtractorOptions, MemoryFactExtractionResult } from "./memory-fact-extractor.js";
 import { extractMemoryFacts } from "./memory-fact-extractor.js";
 import {
   MemoryCurationStore,
+  type MemoryCurationCandidateRecord,
   type MemoryCurationStatus,
   type MemoryCurationTrigger,
+  storeMemoryOperation,
   summarizeMemoryOperation
 } from "./memory-curation-store.js";
+import { MemoryMutationService } from "./memory-mutation-service.js";
 import { reviewMemoryFacts, type CuratedMemoryCandidate } from "./memory-reviewer.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 
 type CuratableMemoryOperation = MemoryOperation & { file: "USER.md" | "MEMORY.md" };
-type RuntimeMemoryCurationStatus = Exclude<MemoryCurationStatus, "undone">;
+type RuntimeMemoryCurationStatus = Extract<MemoryCurationStatus, "auto-applied" | "pending-review" | "ignored" | "failed">;
 
 export type MemoryCurationCheckpointStatus = MemoryCurationStatus | "skipped";
 
@@ -48,6 +50,7 @@ export type MemoryCurationServiceOptions = {
   persistence?: MemoryPersistenceService;
   persistencePaths?: Partial<Record<"USER.md" | "MEMORY.md", string>>;
   memoryIndexSync?: MemoryIndexWriteSync;
+  memoryMutationService?: MemoryMutationService;
   now?: () => Date;
   extractFacts?: (input: {
     messages: readonly SessionMessage[];
@@ -66,9 +69,7 @@ export class MemoryCurationService {
   readonly #memoryStore: MemoryStore;
   readonly #curationStore: MemoryCurationStore;
   readonly #extractorOptions: MemoryFactExtractorOptions;
-  readonly #persistence: MemoryPersistenceService | undefined;
-  readonly #persistencePaths: Partial<Record<"USER.md" | "MEMORY.md", string>>;
-  readonly #memoryIndexSync: MemoryIndexWriteSync | undefined;
+  readonly #memoryMutationService: MemoryMutationService;
   readonly #now: () => Date;
   readonly #extractFacts: NonNullable<MemoryCurationServiceOptions["extractFacts"]>;
   #turnsSinceCheckpoint = 0;
@@ -81,9 +82,15 @@ export class MemoryCurationService {
     this.#memoryStore = options.memoryStore;
     this.#curationStore = options.curationStore;
     this.#extractorOptions = options.extractorOptions;
-    this.#persistence = options.persistence;
-    this.#persistencePaths = options.persistencePaths ?? {};
-    this.#memoryIndexSync = options.memoryIndexSync;
+    this.#memoryMutationService = options.memoryMutationService ?? new MemoryMutationService({
+      memoryStore: options.memoryStore,
+      persistence: options.persistence,
+      persistencePaths: options.persistencePaths,
+      memoryIndexSync: options.memoryIndexSync,
+      profileId: options.profileId,
+      sessionId: options.sessionId,
+      sessionDb: options.sessionDb
+    });
     this.#now = options.now ?? (() => new Date());
     this.#extractFacts = options.extractFacts ?? extractMemoryFacts;
   }
@@ -180,6 +187,7 @@ export class MemoryCurationService {
       sourceMessageIds: messages.map((message) => message.id),
       extractedFactIds: extraction.facts.map((fact) => fact.id),
       operations: applyResult.operations,
+      candidates: candidates.map((candidate) => recordCandidate(candidate, applyResult.appliedCandidateIds)),
       reason
     });
     await this.#recordEvent({
@@ -217,11 +225,13 @@ export class MemoryCurationService {
     autoAppliedCount: number;
     failedCount: number;
     operations: ReturnType<typeof summarizeMemoryOperation>[];
+    appliedCandidateIds: Set<string>;
     warnings: string[];
   }> {
     let autoAppliedCount = 0;
     let failedCount = 0;
     const operations: ReturnType<typeof summarizeMemoryOperation>[] = [];
+    const appliedCandidateIds = new Set<string>();
     const warnings: string[] = [];
 
     for (const candidate of candidates) {
@@ -234,53 +244,24 @@ export class MemoryCurationService {
         warnings.push(`memory candidate ${candidate.id} could not be converted to an operation`);
         continue;
       }
-      const previous = this.#memoryStore.read(operation.file);
       try {
-        this.#memoryStore.apply(operation);
-        await this.#persistOperation(operation);
-        warnings.push(...(await this.#syncIndex(operation)));
+        const result = await this.#memoryMutationService.apply(operation, { source: "memory.curation" });
+        if (!result.ok) {
+          failedCount += 1;
+          warnings.push(`memory curation failed for ${operation.file}: ${result.message}`);
+          continue;
+        }
+        warnings.push(...result.warnings);
         operations.push(summarizeMemoryOperation(operation));
+        appliedCandidateIds.add(candidate.id);
         autoAppliedCount += 1;
       } catch (error) {
         failedCount += 1;
-        try {
-          this.#memoryStore.write(operation.file, previous);
-        } catch {
-          // Keep the original failure as the surfaced diagnostic.
-        }
         warnings.push(`memory curation failed for ${operation.file}: ${safeErrorMessage(error)}`);
       }
     }
 
-    return { autoAppliedCount, failedCount, operations, warnings };
-  }
-
-  async #persistOperation(operation: CuratableMemoryOperation): Promise<void> {
-    if (this.#persistence === undefined) {
-      return;
-    }
-    const path = this.#persistencePaths[operation.file];
-    if (path === undefined) {
-      throw new Error(`no persistence path configured for ${operation.file}`);
-    }
-    await this.#persistence.writeFile({
-      path,
-      kind: operation.file,
-      content: this.#memoryStore.read(operation.file)
-    });
-  }
-
-  async #syncIndex(operation: CuratableMemoryOperation): Promise<string[]> {
-    try {
-      const result = await this.#memoryIndexSync?.syncMemoryFile({
-        file: operation.file,
-        content: this.#memoryStore.read(operation.file),
-        sourcePath: this.#persistencePaths[operation.file]
-      });
-      return result?.warning === undefined ? [] : [result.warning];
-    } catch (error) {
-      return [`memory index sync failed for ${operation.file}: ${safeErrorMessage(error)}`];
-    }
+    return { autoAppliedCount, failedCount, operations, appliedCandidateIds, warnings };
   }
 
   async #recordEvent(input: {
@@ -395,6 +376,28 @@ function operationFromCandidate(candidate: CuratedMemoryCandidate): CuratableMem
   return undefined;
 }
 
+function recordCandidate(
+  candidate: CuratedMemoryCandidate,
+  appliedCandidateIds: ReadonlySet<string>
+): MemoryCurationCandidateRecord {
+  const operation = operationFromCandidate(candidate);
+  const reviewStatus = candidate.disposition === "auto-apply" && appliedCandidateIds.has(candidate.id)
+    ? "applied"
+    : candidate.disposition === "ignore"
+      ? "rejected"
+      : "pending";
+  return {
+    id: candidate.id,
+    factId: candidate.factId,
+    target: candidate.target,
+    disposition: candidate.disposition,
+    reviewStatus,
+    reason: candidate.reason,
+    risk: candidate.risk,
+    ...(operation !== undefined && candidate.risk === "low" ? { operation: storeMemoryOperation(operation) } : {})
+  };
+}
+
 function aggregateStatus(input: {
   failedCount: number;
   autoAppliedCount: number;
@@ -438,8 +441,5 @@ function reasonForStatus(status: MemoryCurationStatus, input: {
 }
 
 function safeErrorMessage(error: unknown): string {
-  if (isMemoryPersistenceDriftError(error)) {
-    return error.code;
-  }
   return redactSensitiveText(error instanceof Error ? error.message : String(error));
 }

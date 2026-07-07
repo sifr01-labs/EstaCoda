@@ -40,6 +40,10 @@ export async function memoryCommand(options: CliOptions, args: string[]): Promis
     action === "mode" ||
     action === "recent" ||
     action === "review" ||
+    action === "apply" ||
+    action === "reject" ||
+    action === "undo" ||
+    action === "forget" ||
     action === "populate" ||
     action === "edit" ||
     action === "clear" ||
