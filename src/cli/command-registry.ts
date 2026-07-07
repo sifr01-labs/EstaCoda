@@ -184,7 +184,7 @@ function registerAll(): void {
     name: "memory",
     aliases: [],
     category: "Info",
-    description: "Inspect memory state",
+    description: "Inspect and manage memory curation",
     visibility: "public",
     scope: "both",
   });

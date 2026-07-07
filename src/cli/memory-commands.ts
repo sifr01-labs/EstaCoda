@@ -15,6 +15,7 @@ import {
 import { validateSharedMemoryKey } from "../memory/shared-memory.js";
 import type { MemoryConfig } from "../config/memory-config.js";
 import type { MemoryIndexedSourceType } from "../contracts/memory.js";
+import { memoryOperatorHelp, runMemoryOperatorCommand } from "../memory/memory-operator-commands.js";
 
 export async function memoryCommand(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   if (hasFlag(args, "--help", "-h") || args.length === 0) {
@@ -34,6 +35,28 @@ export async function memoryCommand(options: CliOptions, args: string[]): Promis
   }
   if (action === "read") {
     return memoryReadCommand(options, actionArgs);
+  }
+  if (
+    action === "mode" ||
+    action === "recent" ||
+    action === "review" ||
+    action === "populate" ||
+    action === "edit" ||
+    action === "clear" ||
+    action === "dashboard" ||
+    action === "status"
+  ) {
+    const result = await runMemoryOperatorCommand({
+      args,
+      homeDir: options.homeDir,
+      profileId: resolveCliProfileId(options),
+      runtime: options.runtime
+    });
+    return {
+      handled: true,
+      exitCode: result.ok ? 0 : 1,
+      output: result.output
+    };
   }
 
   return {
@@ -443,6 +466,8 @@ function memoryHelp(): string {
     "  estacoda memory index status",
     "  estacoda memory index rebuild",
     "  estacoda memory search <query> [--include-protected] [--max-results N] [--max-chars N]",
-    "  estacoda memory read <USER.md|MEMORY.md|SOUL.md|shared> [key] [--include-protected] [--max-chars N]"
+    "  estacoda memory read <USER.md|MEMORY.md|SOUL.md|shared> [key] [--include-protected] [--max-chars N]",
+    "",
+    memoryOperatorHelp().replace(/^EstaCoda memory operator commands\n/u, "Memory curation controls\n")
   ].join("\n");
 }

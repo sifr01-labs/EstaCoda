@@ -95,6 +95,9 @@ describe("assembleProviderPrompt", () => {
     expect(rendered).toContain(
       "If native tools are available, call only the provided tool names. EstaCoda will map provider-safe tool names back to internal tools."
     );
+    expect(rendered).toContain(
+      "When the user reveals durable, future-useful context about their work, projects, preferences, operating style, or recurring constraints, use memory.curate to propose a USER.md update."
+    );
     expect(rendered).not.toContain("proactive autonomous agent");
     expect(rendered).not.toContain("skills-first");
   });
@@ -341,9 +344,9 @@ describe("assembleProviderPrompt", () => {
 
     const rendered = renderMessages(prompt.messages);
 
-    expect(countOccurrences(rendered, "USER.md")).toBe(1);
-    expect(countOccurrences(rendered, "MEMORY.md")).toBe(1);
-    expect(countOccurrences(rendered, "SOUL.md")).toBe(1);
+    expect(countOccurrences(rendered, "§ USER.md")).toBe(1);
+    expect(countOccurrences(rendered, "§ MEMORY.md")).toBe(1);
+    expect(countOccurrences(rendered, "§ SOUL.md")).toBe(1);
     expect(rendered).toContain("Safety and identity memory:");
     expect(rendered).toContain("Canonical memory prompt context:");
     expect(rendered).not.toContain("Frozen memory snapshot:");
@@ -442,9 +445,9 @@ describe("assembleProviderPrompt", () => {
 
     const rendered = renderMessages(prompt.messages);
 
-    expect(countOccurrences(rendered, "USER.md")).toBe(1);
-    expect(countOccurrences(rendered, "MEMORY.md")).toBe(1);
-    expect(countOccurrences(rendered, "SOUL.md")).toBe(1);
+    expect(countOccurrences(rendered, "§ USER.md")).toBe(1);
+    expect(countOccurrences(rendered, "§ MEMORY.md")).toBe(1);
+    expect(countOccurrences(rendered, "§ SOUL.md")).toBe(1);
     expect(countOccurrences(rendered, "session:sess-1")).toBe(1);
     expect(countOccurrences(rendered, "external:fake:remote-note")).toBe(1);
     expect(rendered).toContain(SESSION_RECALL_UNTRUSTED_NOTICE);
@@ -540,8 +543,8 @@ describe("assembleProviderPrompt", () => {
     const rendered = renderMessages(prompt.messages);
 
     expect(countOccurrences(rendered, "Compaction notice:")).toBe(1);
-    expect(countOccurrences(rendered, "USER.md")).toBe(1);
-    expect(countOccurrences(rendered, "MEMORY.md")).toBe(1);
+    expect(countOccurrences(rendered, "§ USER.md")).toBe(1);
+    expect(countOccurrences(rendered, "§ MEMORY.md")).toBe(1);
     expect(rendered.indexOf("Project context:")).toBeLessThan(
       rendered.indexOf("Compaction notice:")
     );

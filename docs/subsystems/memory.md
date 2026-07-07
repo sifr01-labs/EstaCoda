@@ -28,6 +28,11 @@ Memory is durable execution context, so retrieved or generated memory is always 
 | `src/cli/memory-commands.ts` | CLI memory index/read/search commands |
 | `src/tools/memory-retrieval-tools.ts` | Agent-facing `memory.read` and `memory.search` tools |
 | `src/memory/memory-file-compaction-service.ts` | Manual memory-file compaction and restore service |
+| `src/memory/memory-fact-extractor.ts` | Structured durable-fact extraction over transcript slices |
+| `src/memory/memory-reviewer.ts` | Deterministic memory curation policy gate |
+| `src/memory/memory-curation-service.ts` | Runtime memory curation checkpoints and auto-apply orchestration |
+| `src/memory/memory-curation-store.ts` | Profile-local curation history store |
+| `src/memory/memory-operator-commands.ts` | Shared CLI/slash/gateway memory curation controls |
 | `src/memory/external-memory-provider.ts` | External memory lifecycle helpers and file-backed provider |
 | `src/session/session-search-service.ts` | Deterministic raw session browse/search/scroll |
 
@@ -148,6 +153,45 @@ CLI read supports these sources:
 | `MEMORY.md` | Reads profile learned/project memory |
 | `SOUL.md` | Denied unless `--include-protected` is explicit |
 | `shared` | Reads global shared memory by key |
+
+## Memory Curation
+
+Memory curation is the proactive learned-memory path for v0.2.0. It reviews transcript slices at natural checkpoints, extracts structured durable facts, applies deterministic policy in code, and writes only low-risk auto-approved candidates to profile-local memory files.
+
+The extractor uses the existing semantic compression auxiliary route when available, falling back through the existing auxiliary execution path. It does not use the memory-file compaction route. The model extracts facts with evidence; runtime policy decides whether to auto-apply, queue for review, or ignore.
+
+Implemented checkpoints:
+
+- every configured `memory.curation.checkpointEveryTurns` completed root-session turns
+- `/compact` and manual session compaction when enabled
+- `/handoff` when enabled
+- runtime dispose when enabled and the minimum new-message/interval gates pass
+- explicit `memory populate` / `/memory populate`
+
+Default curation mode is `auto`. Auto mode still applies only explicit, non-sensitive, low-risk facts that pass evidence, duplicate, scanner, and budget gates. `review` mode records pending-review audit records without mutating memory. `manual` mode skips background checkpoints and only runs explicit manual commands.
+
+Operator controls are shared across CLI, in-session slash commands, and authorized gateway surfaces such as Telegram:
+
+```text
+estacoda memory mode [auto|review|manual]
+estacoda memory recent [--limit N]
+estacoda memory review [--limit N]
+estacoda memory populate
+estacoda memory edit
+estacoda memory clear [USER.md|MEMORY.md|all] --yes
+```
+
+The corresponding in-session and Telegram commands use `/memory ...` with the same subcommands. Telegram output is compact, but the policy and profile-local files are the same as the CLI.
+
+`memory clear` is guarded by `--yes`, clears only `USER.md` and/or `MEMORY.md`, creates backups for existing files, syncs the local memory index, and never clears `SOUL.md` or shared memory. Existing live sessions may need `/new` or restart to reload prompt memory after file edits or clears.
+
+Curation history lives at:
+
+```text
+~/.estacoda/profiles/<id>/memory-curation.json
+```
+
+The history stores audit metadata, source message ids/counts, extracted fact ids, and operation hashes. It does not store raw pending candidate diffs in this slice, so `memory review` is an inspectable queue/history view rather than an apply/reject UI. Durable writes remain visible through recent history, session/runtime events, and the authoritative memory files.
 
 Index inspection and repair workflow:
 

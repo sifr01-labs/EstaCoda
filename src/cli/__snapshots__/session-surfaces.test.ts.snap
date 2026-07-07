@@ -10,7 +10,7 @@ exports[`Session surfaces — /help > renders in narrow width > help-narrow widt
 • /search: Search session history
 • /compact: Compact this in-session context
 • /new: Start a fresh session and refresh the skill/config snapshot
-• /memory: Inspect memory state
+• /memory: Inspect and manage memory curation
 • /tools: Browse available tools
 • /browser: Manage local browser/CDP connection
 • /skills: Browse available skills
@@ -44,7 +44,7 @@ exports[`Session surfaces — /help > renders in no Unicode > help-no Unicode 1`
 - /search: Search session history
 - /compact: Compact this in-session context
 - /new: Start a fresh session and refresh the skill/config snapshot
-- /memory: Inspect memory state
+- /memory: Inspect and manage memory curation
 - /tools: Browse available tools
 - /browser: Manage local browser/CDP connection
 - /skills: Browse available skills
@@ -78,7 +78,7 @@ exports[`Session surfaces — /help > renders in no color > help-no color 1`] = 
 • /search: Search session history
 • /compact: Compact this in-session context
 • /new: Start a fresh session and refresh the skill/config snapshot
-• /memory: Inspect memory state
+• /memory: Inspect and manage memory curation
 • /tools: Browse available tools
 • /browser: Manage local browser/CDP connection
 • /skills: Browse available skills
@@ -112,7 +112,7 @@ exports[`Session surfaces — /help > renders in plain > help-plain 1`] = `
 - /search: Search session history
 - /compact: Compact this in-session context
 - /new: Start a fresh session and refresh the skill/config snapshot
-- /memory: Inspect memory state
+- /memory: Inspect and manage memory curation
 - /tools: Browse available tools
 - /browser: Manage local browser/CDP connection
 - /skills: Browse available skills
@@ -146,7 +146,7 @@ exports[`Session surfaces — /help > renders in standard dark > help-standard d
 • /search: Search session history
 • /compact: Compact this in-session context
 • /new: Start a fresh session and refresh the skill/config snapshot
-• /memory: Inspect memory state
+• /memory: Inspect and manage memory curation
 • /tools: Browse available tools
 • /browser: Manage local browser/CDP connection
 • /skills: Browse available skills
@@ -180,7 +180,7 @@ exports[`Session surfaces — /help > renders in standard light > help-standard 
 • /search: Search session history
 • /compact: Compact this in-session context
 • /new: Start a fresh session and refresh the skill/config snapshot
-• /memory: Inspect memory state
+• /memory: Inspect and manage memory curation
 • /tools: Browse available tools
 • /browser: Manage local browser/CDP connection
 • /skills: Browse available skills
@@ -493,7 +493,7 @@ exports[`Session surfaces — slash menu > renders in narrow width > slash-menu-
 /search                  Search session history
 /compact                 Compact this in-session context
 /new                     Start a fresh session and refresh the skill/config snapshot
-/memory                  Inspect memory state
+/memory                  Inspect and manage memory curation
 /tools                   Browse available tools
 /browser                 Manage local browser/CDP connection
 /skills                  Browse available skills
@@ -529,7 +529,7 @@ exports[`Session surfaces — slash menu > renders in no Unicode > slash-menu-no
 /search                  Search session history
 /compact                 Compact this in-session context
 /new                     Start a fresh session and refresh the skill/config snapshot
-/memory                  Inspect memory state
+/memory                  Inspect and manage memory curation
 /tools                   Browse available tools
 /browser                 Manage local browser/CDP connection
 /skills                  Browse available skills
@@ -565,7 +565,7 @@ Name                     Description
 /search                  Search session history
 /compact                 Compact this in-session context
 /new                     Start a fresh session and refresh the skill/config snapshot
-/memory                  Inspect memory state
+/memory                  Inspect and manage memory curation
 /tools                   Browse available tools
 /browser                 Manage local browser/CDP connection
 /skills                  Browse available skills
@@ -601,7 +601,7 @@ Name                     Description
 /search                  Search session history
 /compact                 Compact this in-session context
 /new                     Start a fresh session and refresh the skill/config snapshot
-/memory                  Inspect memory state
+/memory                  Inspect and manage memory curation
 /tools                   Browse available tools
 /browser                 Manage local browser/CDP connection
 /skills                  Browse available skills
@@ -637,7 +637,7 @@ exports[`Session surfaces — slash menu > renders in standard dark > slash-menu
 /search                  Search session history
 /compact                 Compact this in-session context
 /new                     Start a fresh session and refresh the skill/config snapshot
-/memory                  Inspect memory state
+/memory                  Inspect and manage memory curation
 /tools                   Browse available tools
 /browser                 Manage local browser/CDP connection
 /skills                  Browse available skills
@@ -673,7 +673,7 @@ exports[`Session surfaces — slash menu > renders in standard light > slash-men
 /search                  Search session history
 /compact                 Compact this in-session context
 /new                     Start a fresh session and refresh the skill/config snapshot
-/memory                  Inspect memory state
+/memory                  Inspect and manage memory curation
 /tools                   Browse available tools
 /browser                 Manage local browser/CDP connection
 /skills                  Browse available skills

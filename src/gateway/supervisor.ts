@@ -1272,6 +1272,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       ? options.factories.createChannelGateway({
           adapters: wrappers,
           deliveryRouter: router,
+          homeDir,
           sessionStore: new PersistentChannelSessionStore({ path: sessionContextPath, policy: sessionPolicy, surfacePointerStore }),
           approvalStore,
           authPolicy: authPolicies,
@@ -1346,6 +1347,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       : new ChannelGateway({
           adapters: wrappers,
           deliveryRouter: router,
+          homeDir,
           sessionStore: new PersistentChannelSessionStore({ path: sessionContextPath, policy: sessionPolicy, surfacePointerStore }),
           approvalStore,
           authPolicy: authPolicies,

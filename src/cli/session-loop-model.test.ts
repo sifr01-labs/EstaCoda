@@ -1355,6 +1355,116 @@ describe("session-loop session compaction", () => {
   });
 });
 
+describe("session-loop memory curation commands", () => {
+  let tempHome: string;
+  let outputChunks: string[];
+  let output: NodeJS.WritableStream;
+
+  beforeEach(() => {
+    tempHome = mkdtempSync(join(tmpdir(), "estacoda-session-memory-test-"));
+    outputChunks = [];
+    output = {
+      write: (chunk: string | Buffer) => { outputChunks.push(String(chunk)); },
+      end: () => {}
+    } as NodeJS.WritableStream;
+  });
+
+  afterEach(() => {
+    rmSync(tempHome, { recursive: true, force: true });
+  });
+
+  it("/memory populate runs a manual memory curation checkpoint", async () => {
+    const calls: unknown[] = [];
+    const runtime = {
+      ...fakeRuntime({
+        provider: "local",
+        model: "test",
+        contextWindowTokens: 4096,
+        supportsTools: false,
+        supportsVision: false,
+        supportsStructuredOutput: true
+      }),
+      auditMemoryCuration: async (input: unknown) => {
+        calls.push(input);
+        return {
+          status: "pending-review",
+          trigger: "manual",
+          sessionId: "test-session",
+          sourceMessageCount: 2,
+          reviewedMessageCount: 2,
+          extractedFactCount: 1,
+          candidateCount: 1,
+          autoAppliedCount: 0,
+          pendingReviewCount: 1,
+          ignoredCount: 0,
+          failedCount: 0,
+          warnings: []
+        };
+      },
+      inspectMemoryPromotions: async () => []
+    };
+
+    const result = await handleSlashCommand({
+      text: "/memory populate",
+      runtime: runtime as any,
+      output,
+      renderer: { render: renderPlain },
+      workspaceRoot: tempHome,
+      homeDir: tempHome
+    });
+
+    expect(result).toBe(false);
+    expect(calls).toEqual([{ trigger: "manual", sessionId: "test-session", signal: undefined }]);
+    const text = outputChunks.join("");
+    expect(text).toContain("Memory populate");
+    expect(text).toContain("status: pending-review");
+  });
+
+  it("/memory mode updates config and asks the session loop to refresh the runtime", async () => {
+    const runtime = {
+      ...fakeRuntime({
+        provider: "local",
+        model: "test",
+        contextWindowTokens: 4096,
+        supportsTools: false,
+        supportsVision: false,
+        supportsStructuredOutput: true
+      }),
+      inspectMemoryPromotions: async () => []
+    };
+    const refreshedRuntime = {
+      ...runtime,
+      describe: () => "refreshed runtime"
+    };
+
+    const result = await handleSlashCommand({
+      text: "/memory mode review",
+      runtime: runtime as any,
+      refreshRuntime: async () => refreshedRuntime as any,
+      output,
+      renderer: { render: renderPlain },
+      workspaceRoot: tempHome,
+      homeDir: tempHome
+    });
+
+    expect(result).toEqual({
+      runtime: refreshedRuntime,
+      notice: expect.any(Function)
+    });
+    const text = outputChunks.join("");
+    expect(text).toContain("Memory curation mode updated");
+    expect(text).toContain("mode: review");
+    await expect(loadRuntimeConfig({
+      workspaceRoot: tempHome,
+      homeDir: tempHome
+    })).resolves.toMatchObject({
+      memory: {
+        curation: expect.objectContaining({ mode: "review" })
+      }
+    });
+  });
+});
+
 describe("session-loop /workflow begin", () => {
   let tempHome: string;
   let outputChunks: string[];
