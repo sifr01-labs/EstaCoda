@@ -129,6 +129,36 @@ describe("IntentRouter governed route contract", () => {
     expect(route.taskClass).toBe("media-generation");
     expect(route.primarySkill).toBeUndefined();
   });
+
+  it.each([
+    ["please review this pull request", "code-review"],
+    ["can you update the README docs for this command", "docs-writing"],
+    ["validate this branch before merge", "release-validation"],
+    ["what do you think of this architecture plan?", "architecture-advice"],
+    ["research the best approaches for local embeddings", "research"],
+    ["please implement the CLI feature in the repo", "repo-change"]
+  ] as const)("classifies %s as %s without selecting a skill by itself", (prompt, taskClass) => {
+    const route = routerWith().route(prompt);
+
+    expect(route.taskClass).toBe(taskClass);
+    expect(route.primarySkill).toBeUndefined();
+    expect(route.suggestedSkills).toEqual([]);
+    expect(route.evidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "task-class",
+          detail: expect.stringContaining(taskClass)
+        })
+      ])
+    );
+  });
+
+  it("leaves unrelated prompts as general without task-class evidence", () => {
+    const route = routerWith().route("hello there");
+
+    expect(route.taskClass).toBe("general");
+    expect(route.evidence.some((entry) => entry.kind === "task-class")).toBe(false);
+  });
 });
 
 function routerWith(...skills: SkillDefinition[]): IntentRouter {

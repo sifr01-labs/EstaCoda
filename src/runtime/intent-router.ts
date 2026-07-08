@@ -69,12 +69,13 @@ export class IntentRouter {
 
     if (slashInvocation?.kind === "known") {
       const nativeIntent = nativeIntentFromSkill(slashInvocation.skill) ?? "general";
+      const task = detectTaskClass(normalized, nativeIntent);
       const evidence: IntentRouteEvidence[] = [{
         kind: "slash-invocation",
         source: slashInvocation.skill.name,
         detail: `Explicit slash skill invocation for ${slashInvocation.skill.name}.`,
         weight: 1
-      }];
+      }, ...task.evidence];
       const confidence = confidenceFromEvidence(evidence);
       const labels = dedupe([
         "skill-invocation",
@@ -87,7 +88,7 @@ export class IntentRouter {
 
       return {
         nativeIntent,
-        taskClass: taskClassFromNativeIntent(nativeIntent),
+        taskClass: task.taskClass,
         labels,
         confidence,
         suggestedToolsets,
@@ -114,16 +115,17 @@ export class IntentRouter {
     }
 
     if (slashInvocation?.kind === "unknown") {
+      const task = detectTaskClass(normalized, "general");
       const evidence: IntentRouteEvidence[] = [{
         kind: "slash-invocation",
         source: slashInvocation.name,
         detail: `Unknown slash invocation: /${slashInvocation.name}.`,
         weight: 1
-      }];
+      }, ...task.evidence];
 
       return {
         nativeIntent: "general",
-        taskClass: "general",
+        taskClass: task.taskClass,
         labels: ["skill-invocation"],
         confidence: confidenceFromEvidence(evidence),
         suggestedToolsets: [],
@@ -143,6 +145,7 @@ export class IntentRouter {
     }
 
     const native = detectNativeIntent(normalized, options.attachments);
+    const task = detectTaskClass(normalized, native.nativeIntent);
     const labels = dedupe([
       native.nativeIntent,
       ...native.labels
@@ -171,6 +174,7 @@ export class IntentRouter {
     );
     const evidence = [
       ...native.evidence,
+      ...task.evidence,
       ...skillMatches.flatMap((match) => match.evidence),
       ...toolsetEvidence(native.nativeIntent, suggestedSkills)
     ];
@@ -182,7 +186,7 @@ export class IntentRouter {
 
     return {
       nativeIntent: native.nativeIntent,
-      taskClass: taskClassFromNativeIntent(native.nativeIntent),
+      taskClass: task.taskClass,
       labels: labels.length === 0 ? ["general"] : labels,
       confidence: confidenceFromEvidence(evidence),
       suggestedToolsets,
@@ -286,6 +290,58 @@ function detectNativeIntent(normalized: string, attachments: ChannelAttachment[]
       weight: 0.35
     }]
   };
+}
+
+function detectTaskClass(normalized: string, nativeIntent: NativeIntent): {
+  taskClass: IntentTaskClass;
+  evidence: IntentRouteEvidence[];
+} {
+  const nativeTaskClass = taskClassFromNativeIntent(nativeIntent);
+  if (nativeTaskClass !== "general") {
+    return {
+      taskClass: nativeTaskClass,
+      evidence: [{
+        kind: "task-class",
+        detail: `Native intent ${nativeIntent} maps to task class ${nativeTaskClass}.`,
+        weight: 0
+      }]
+    };
+  }
+
+  const taskClass = taskClassFromPrompt(normalized);
+  return {
+    taskClass,
+    evidence: taskClass === "general"
+      ? []
+      : [{
+          kind: "task-class",
+          detail: `Prompt matched deterministic task class ${taskClass}.`,
+          weight: 0
+        }]
+  };
+}
+
+function taskClassFromPrompt(normalized: string): IntentTaskClass {
+  if (matchesReleaseValidation(normalized)) {
+    return "release-validation";
+  }
+  if (matchesDocsWriting(normalized)) {
+    return "docs-writing";
+  }
+  if (matchesCodeReview(normalized)) {
+    return "code-review";
+  }
+  if (matchesArchitectureAdvice(normalized)) {
+    return "architecture-advice";
+  }
+  if (matchesResearch(normalized)) {
+    return "research";
+  }
+  if (matchesRepoChange(normalized)) {
+    return "repo-change";
+  }
+
+  return "general";
 }
 
 function matchSkill(skill: LoadedSkill | SkillDefinition, input: {
@@ -462,6 +518,36 @@ function matchesVoiceTranscription(normalized: string): boolean {
 
 function matchesSpeechGeneration(normalized: string): boolean {
   return /\b(text to speech|tts|read aloud|speak this|say this|spoken reply|generate speech)\b/iu.test(normalized);
+}
+
+function matchesCodeReview(normalized: string): boolean {
+  return /\b(review|audit|inspect)\b.{0,80}\b(pr|pull request|merge request|diff|patch|implementation|code)\b/iu.test(normalized) ||
+    /\b(pr|pull request|merge request|diff|patch|implementation|code)\b.{0,80}\b(review|audit|inspect)\b/iu.test(normalized);
+}
+
+function matchesRepoChange(normalized: string): boolean {
+  return /\b(implement|fix|change|update|modify|refactor|add|remove)\b.{0,80}\b(code|repo|repository|file|files|test|tests|feature|bug|command|cli)\b/iu.test(normalized) ||
+    /\b(can you|please|let'?s)\b.{0,40}\b(implement|fix|change|update|modify|refactor|add|remove)\b/iu.test(normalized);
+}
+
+function matchesDocsWriting(normalized: string): boolean {
+  return /\b(write|draft|create|update|revise|edit)\b.{0,80}\b(docs|documentation|readme|guide|manual|release notes|changelog)\b/iu.test(normalized) ||
+    /\b(docs|documentation|readme|guide|manual|release notes|changelog)\b.{0,80}\b(write|draft|create|update|revise|edit)\b/iu.test(normalized);
+}
+
+function matchesReleaseValidation(normalized: string): boolean {
+  return /\b(validate|verify|check|test|smoke)\b.{0,80}\b(release|branch|merge|before merge|pre[- ]?merge|readiness)\b/iu.test(normalized) ||
+    /\b(release|branch|merge|before merge|pre[- ]?merge|readiness)\b.{0,80}\b(validate|verify|check|test|smoke)\b/iu.test(normalized);
+}
+
+function matchesArchitectureAdvice(normalized: string): boolean {
+  return /\b(what do you think|thoughts|opinion|feedback|review)\b.{0,80}\b(architecture|design|approach|plan|proposal|system)\b/iu.test(normalized) ||
+    /\b(architecture|design|approach|plan|proposal|system)\b.{0,80}\b(what do you think|thoughts|opinion|feedback)\b/iu.test(normalized);
+}
+
+function matchesResearch(normalized: string): boolean {
+  return /\b(research|investigate|look up|find sources|survey)\b/iu.test(normalized) ||
+    /\bcompare\b.{0,80}\b(options|approaches|papers|sources|evidence|market|competitors)\b/iu.test(normalized);
 }
 
 function routingLabels(skill: LoadedSkill | SkillDefinition): string[] {

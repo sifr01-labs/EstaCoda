@@ -12,6 +12,7 @@ export type IntentRouteEvidence = {
   kind:
     | "slash-invocation"
     | "native-intent"
+    | "task-class"
     | "attachment"
     | "skill-routing-label"
     | "skill-trigger-pattern"
