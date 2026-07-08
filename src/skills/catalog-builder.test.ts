@@ -216,6 +216,42 @@ describe("skills catalog builder", () => {
       skills: [{ description: "Changed description." }]
     });
   });
+
+  it("emits non-fatal warnings for weak routing metadata", async () => {
+    const repoRoot = await createTempRepo();
+    await writeSourceRegistry(repoRoot, [{ path: "skills/official", sourceType: "official" }]);
+    await writeSkill(repoRoot, "skills/official/weak-route/SKILL.md", validFrontmatter({
+      routing: {
+        labels: ["weak"],
+        triggerPatterns: [{ type: "contains", value: "write" }],
+        confirmation: "policy"
+      },
+      permissionExpectations: [],
+      evaluations: [{ input: "write something" }]
+    }));
+
+    const result = await buildSkillsCatalog({ repoRoot, writeOutput: false });
+
+    expect(result.catalog.skills).toHaveLength(1);
+    expect(result.warnings).toEqual(expect.arrayContaining([
+      "skills/official/weak-route/SKILL.md: routing.negativePatterns or negativePatterns is missing or empty",
+      "skills/official/weak-route/SKILL.md: routing.triggerPatterns may be too broad: write",
+      "skills/official/weak-route/SKILL.md: evaluations has no routing expectation",
+      "skills/official/weak-route/SKILL.md: permissionExpectations is missing or empty"
+    ]));
+  });
+
+  it("does not warn when routing metadata is explicit enough", async () => {
+    const repoRoot = await createTempRepo();
+    await writeSourceRegistry(repoRoot, [{ path: "skills/official", sourceType: "official" }]);
+    await writeSkill(repoRoot, "skills/official/strong-route/SKILL.md", validFrontmatter({
+      name: "Strong Route"
+    }));
+
+    const result = await buildSkillsCatalog({ repoRoot, writeOutput: false });
+
+    expect(result.warnings).toEqual([]);
+  });
 });
 
 async function createTempRepo(): Promise<string> {
@@ -279,12 +315,14 @@ function validFrontmatter(overrides: Record<string, unknown> = {}): Record<strin
     routing: {
       labels: ["example"],
       triggerPatterns: [{ type: "contains", value: "example skill" }],
+      negativePatterns: [{ type: "contains", value: "example skill issue" }],
       confirmation: "policy"
     },
     requiredToolsets: ["files"],
     optionalToolsets: [],
+    permissionExpectations: ["auto-read"],
     playbook: [{ id: "do-work" }],
-    evaluations: [{ input: "example" }],
+    evaluations: [{ input: "example", expected: { selectedSkill: "Example Skill" } }],
     ...overrides
   };
 }
