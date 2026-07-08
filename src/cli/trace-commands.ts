@@ -264,6 +264,10 @@ function summarizeEvent(event: TrajectoryEvent): string {
       const attempts = Array.isArray(d.attempts) ? d.attempts : [];
       return d.ok === true ? "ok" : `failed (${attempts.length} attempts)`;
     }
+    case "skill-route-usage":
+      return summarizeSkillRouteUsage(d);
+    case "skill-route-telemetry":
+      return summarizeSkillRouteTelemetry(d);
     case "session-end": {
       const outcome = isRecord(d.outcome) ? d.outcome : {};
       return typeof outcome.summary === "string" ? outcome.summary : "ended";
@@ -271,6 +275,101 @@ function summarizeEvent(event: TrajectoryEvent): string {
     default:
       return "";
   }
+}
+
+function summarizeSkillRouteUsage(data: Record<string, unknown>): string {
+  const skillName = typeof data.skillName === "string" ? data.skillName : "no-skill";
+  const status = [
+    data.selected === true ? "selected" : undefined,
+    data.invoked === true ? "invoked" : undefined,
+    data.deferred === true ? "deferred" : undefined
+  ].filter((part): part is string => part !== undefined);
+  const parts = [
+    skillName,
+    status.length > 0 ? status.join("+") : "candidate",
+    typeof data.taskClass === "string" ? `task=${data.taskClass}` : undefined,
+    typeof data.confidence === "number" ? `confidence=${formatConfidence(data.confidence)}` : undefined,
+    formatStringList("labels", data.labels, 3),
+    typeof data.deferReason === "string" ? `reason=${truncate(data.deferReason, 36)}` : undefined
+  ];
+  return compactParts(parts).join(" ");
+}
+
+function summarizeSkillRouteTelemetry(data: Record<string, unknown>): string {
+  const candidates = arrayRecords(data.candidates);
+  const selectedCandidate = candidates.find((candidate) => candidate.selected === true);
+  const selectedSkill = stringValue(data.selectedSkill)
+    ?? stringValue(selectedCandidate?.skillName)
+    ?? "none";
+  const primarySkill = stringValue(data.primarySkill);
+  const supportingSkills = stringArray(data.supportingSkills);
+  const candidateSkills = stringArray(data.candidateSkills);
+  const candidatesShown = stringArray(data.candidatesShown);
+  const rejectedCandidates = candidateReasons(data.rejectedCandidates ?? data.candidatesRejected);
+  const deferredCandidates = candidateReasons(data.deferredCandidates);
+
+  const parts = [
+    stringValue(data.taskClass) !== undefined ? `task=${stringValue(data.taskClass)}` : undefined,
+    `selected=${selectedSkill}`,
+    primarySkill !== undefined ? `primary=${primarySkill}` : undefined,
+    supportingSkills.length > 0 ? `supporting=${supportingSkills.slice(0, 3).join(",")}` : undefined,
+    candidateSkills.length > 0 ? `candidates=${candidateSkills.slice(0, 4).join(",")}` : undefined,
+    candidatesShown.length > 0 ? `shown=${candidatesShown.length}` : undefined,
+    rejectedCandidates.length > 0 ? `rejected=${formatCandidateReasons(rejectedCandidates, 2)}` : undefined,
+    deferredCandidates.length > 0 ? `deferred=${formatCandidateReasons(deferredCandidates, 2)}` : undefined,
+    stringValue(data.finalSkillUsed) !== undefined ? `final=${stringValue(data.finalSkillUsed)}` : undefined,
+    stringValue(data.finalOutcomeStatus) !== undefined ? `outcome=${stringValue(data.finalOutcomeStatus)}` : undefined,
+    typeof data.routeConfidence === "number" ? `confidence=${formatConfidence(data.routeConfidence)}` : undefined
+  ];
+
+  return compactParts(parts).join(" ");
+}
+
+function compactParts(parts: Array<string | undefined>): string[] {
+  return parts.filter((part): part is string => part !== undefined && part.length > 0);
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string" && entry.length > 0) : [];
+}
+
+function arrayRecords(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value) ? value.filter(isRecord) : [];
+}
+
+function formatStringList(label: string, value: unknown, max: number): string | undefined {
+  const values = stringArray(value);
+  if (values.length === 0) return undefined;
+  const suffix = values.length > max ? `,+${values.length - max}` : "";
+  return `${label}=${values.slice(0, max).join(",")}${suffix}`;
+}
+
+function candidateReasons(value: unknown): Array<{ skillName: string; reason?: string }> {
+  return arrayRecords(value)
+    .flatMap((entry) => {
+      const skillName = stringValue(entry.skillName);
+      if (skillName === undefined) return [];
+      const reason = stringValue(entry.reason);
+      return reason === undefined ? [{ skillName }] : [{ skillName, reason }];
+    });
+}
+
+function formatCandidateReasons(candidates: Array<{ skillName: string; reason?: string }>, max: number): string {
+  const formatted = candidates.slice(0, max).map((candidate) =>
+    candidate.reason === undefined
+      ? candidate.skillName
+      : `${candidate.skillName}(${truncate(candidate.reason, 28)})`
+  );
+  const suffix = candidates.length > max ? `,+${candidates.length - max}` : "";
+  return `${formatted.join(",")}${suffix}`;
+}
+
+function formatConfidence(confidence: number): string {
+  return Number.isFinite(confidence) ? confidence.toFixed(2) : "?";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
