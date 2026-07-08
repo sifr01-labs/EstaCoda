@@ -443,7 +443,7 @@ describe("DelegationManager", () => {
     expect(failedResult.usageUnavailable).toBe(false);
   });
 
-  it("continues recording delegation events when outcome memory config is enabled", async () => {
+  it("continues recording delegation events without outcome memory config", async () => {
     const childOutput = [
       "src/secret.txt:1:BEGIN PRIVATE KEY",
       "src/secret.txt:2:local file excerpt content",
@@ -451,11 +451,6 @@ describe("DelegationManager", () => {
     ].join("\n");
     const harness = await createHarness({
       maxConcurrentChildren: 2,
-      outcomeMemory: {
-        enabled: true,
-        maxTaskPreviewChars: 200,
-        maxResultSummaryChars: 500
-      },
       handle: async (handleInput) => response({
         text: `${handleInput.text}\n${childOutput}`
       })
@@ -1141,7 +1136,6 @@ async function createHarness(input: {
   maxBatchTasks?: number;
   childTimeoutSeconds?: number;
   registry?: SubagentRegistry;
-  outcomeMemory?: Partial<DelegationConfig["outcomeMemory"]>;
   fileStateTracker?: FileStateTracker;
   childModelOverrideMetadata?: DelegateModelOverrideMetadata;
   rejectModelOverride?: DelegateModelOverrideMetadata;
@@ -1219,8 +1213,7 @@ async function createHarness(input: {
 	      delegationConfig: input.maxSpawnDepth === undefined &&
         input.maxConcurrentChildren === undefined &&
         input.maxBatchTasks === undefined &&
-        input.childTimeoutSeconds === undefined &&
-        input.outcomeMemory === undefined ? undefined : {
+        input.childTimeoutSeconds === undefined ? undefined : {
         maxSpawnDepth: input.maxSpawnDepth ?? 3,
         maxConcurrentChildren: input.maxConcurrentChildren ?? 3,
         maxDelegateCallsPerTurn: 3,
@@ -1231,12 +1224,6 @@ async function createHarness(input: {
         heartbeatStaleCyclesInTool: 6,
         recoverJsonStringTasks: true,
         diagnostics: { enabled: true, includePromptPreview: false },
-        outcomeMemory: {
-          enabled: false,
-          maxTaskPreviewChars: 240,
-          maxResultSummaryChars: 400,
-          ...input.outcomeMemory
-        },
         defaultAllowedRiskClasses: ["read-only-local", "read-only-network"],
         defaultExcludedToolsets: ["browser", "media", "mcp"],
         defaultAllowedToolsets: [],

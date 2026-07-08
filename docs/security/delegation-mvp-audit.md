@@ -2,7 +2,7 @@
 
 Status: test-backed checklist for the v0.1.0 delegation/subagent implementation.
 
-This audit covers shipped behavior only. MVP functional parity is implemented, and the branch also ships bounded outcome memory, stale-file warnings, same-provider and reviewed cross-provider child model overrides, active-subagent operator status, token usage rollup, and `terminal.inspect`. Parent-mediated child approvals and durable or estimated USD cost accounting are not shipped.
+This audit covers shipped behavior only. MVP functional parity is implemented, and the branch also ships stale-file warnings, same-provider and reviewed cross-provider child model overrides, active-subagent operator status, token usage rollup, delegation telemetry boundaries, and `terminal.inspect`. Parent-mediated child approvals and durable or estimated USD cost accounting are not shipped.
 
 ## Checklist
 
@@ -25,7 +25,7 @@ This audit covers shipped behavior only. MVP functional parity is implemented, a
 | Child sessions excluded from recall/search/memory/prompt packing | Child transcripts are not pulled into parent context by default. | `src/runtime/agent-loop-factory.test.ts`, `src/session/session-search-service.test.ts`, `src/session/session-recall-service.test.ts` |
 | Gateway active-turn stability | Active-subagent detection is runtime/session scoped and does not affect unrelated sessions. | `src/channels/channel-gateway.test.ts`, `src/gateway/active-turn-registry.test.ts` |
 | Token usage rollup | Child provider usage is copied from structured provider execution metadata, preserved per child, and rolled up without prose scraping. Missing usage is explicit and non-fatal. | `src/delegation/delegation-manager.test.ts` |
-| Outcome memory safety | Delegation outcome memory is opt-in, bounded, and records deterministic status/reason summaries rather than raw child output. | `src/delegation/delegation-manager.test.ts`, `src/memory/local-memory-provider.test.ts` |
+| Delegation telemetry boundary | Delegation outcomes stay in session/trajectory telemetry and are not written to canonical prompt memory. | `src/delegation/delegation-manager.test.ts`, `src/runtime/create-runtime.test.ts`, `src/memory/local-memory-provider.test.ts` |
 | Stale parent file reads | Tracked parent reads are snapshotted before delegation; child writes to those paths produce advisory stale-file warnings using tracker sequence cursors. | `src/delegation/file-state-tracker.test.ts`, `src/delegation/file-state-guard.test.ts`, `src/delegation/delegation-manager.test.ts` |
 | Child model overrides | Same-provider and reviewed cross-provider overrides preserve target provider config, avoid credential pools, reject disabled network routes, and disable fallbacks for overridden children. | `src/runtime/agent-loop-factory.test.ts`, `src/runtime/create-runtime.test.ts`, `src/gateway/supervisor.test.ts`, `src/acp/server.test.ts`, `src/tools/delegation-tools.test.ts` |
 | Operator subagent status | Runtime/gateway status exposes bounded active-subagent summaries scoped to the parent session. | `src/delegation/subagent-registry.test.ts`, `src/runtime/create-runtime.test.ts`, `src/channels/channel-gateway.test.ts` |

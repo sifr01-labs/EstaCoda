@@ -99,9 +99,8 @@ export type ExternalMemoryConfig = {
   };
 };
 
-export type DelegationConfigInput = Partial<Omit<DelegationConfig, "diagnostics" | "outcomeMemory" | "childRuntime">> & {
+export type DelegationConfigInput = Partial<Omit<DelegationConfig, "diagnostics" | "childRuntime">> & {
   diagnostics?: Partial<DelegationConfig["diagnostics"]>;
-  outcomeMemory?: Partial<DelegationConfig["outcomeMemory"]>;
   childRuntime?: Partial<DelegationConfig["childRuntime"]>;
 };
 
@@ -1666,7 +1665,6 @@ export function normalizeDelegationConfig(
 ): DelegationConfig {
   const defaults = DEFAULT_DELEGATION_CONFIG;
   const diagnostics = isPlainRecord(value?.diagnostics) ? value.diagnostics : {};
-  const outcomeMemory = isPlainRecord(value?.outcomeMemory) ? value.outcomeMemory : {};
   const childRuntime = isPlainRecord(value?.childRuntime) ? value.childRuntime : {};
 
   return {
@@ -1692,17 +1690,6 @@ export function normalizeDelegationConfig(
     diagnostics: {
       enabled: diagnostics.enabled === undefined ? defaults.diagnostics.enabled : diagnostics.enabled === true,
       includePromptPreview: diagnostics.includePromptPreview === true
-    },
-    outcomeMemory: {
-      enabled: outcomeMemory.enabled === undefined ? defaults.outcomeMemory.enabled : outcomeMemory.enabled === true,
-      maxTaskPreviewChars: coercePositiveInteger(outcomeMemory.maxTaskPreviewChars, {
-        default: defaults.outcomeMemory.maxTaskPreviewChars,
-        max: 2_000
-      }),
-      maxResultSummaryChars: coercePositiveInteger(outcomeMemory.maxResultSummaryChars, {
-        default: defaults.outcomeMemory.maxResultSummaryChars,
-        max: 4_000
-      })
     },
     defaultAllowedRiskClasses: normalizeRiskClassArray(
       value?.defaultAllowedRiskClasses,
