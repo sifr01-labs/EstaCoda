@@ -260,8 +260,13 @@ export type SkillRouteFinalOutcomeStatus =
 
 export type SkillRouteTelemetryDetails = {
   taskClass?: string;
+  primarySkill?: string;
+  supportingSkills?: string[];
+  candidateSkills?: string[];
   candidatesShown?: string[];
   candidatesRejected?: SkillRouteRejectedCandidate[];
+  rejectedCandidates?: SkillRouteRejectedCandidate[];
+  deferredCandidates?: SkillRouteRejectedCandidate[];
   searchedReplacementSkill?: string;
   finalSkillUsed?: string;
   noSkillResult?: SkillRouteNoSkillResult;

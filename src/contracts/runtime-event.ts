@@ -131,6 +131,13 @@ export type RuntimeEvent =
       promptHash: string;
       selectedSkill?: string;
       finalSkillUsed?: string;
+      taskClass?: string;
+      primarySkill?: string;
+      supportingSkills?: string[];
+      candidateSkills?: string[];
+      candidatesRejected?: Array<{ skillName: string; reason?: string }>;
+      rejectedCandidates?: Array<{ skillName: string; reason?: string }>;
+      deferredCandidates?: Array<{ skillName: string; reason?: string }>;
       confidence: number;
       routeConfidence?: number;
       candidatesShown?: string[];
@@ -141,6 +148,7 @@ export type RuntimeEvent =
         explicitInvocation: boolean;
         confidence: number;
         sourceKind: string;
+        role?: string;
       }>;
       details?: SkillRouteTelemetryDetails;
     }

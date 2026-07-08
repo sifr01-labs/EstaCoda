@@ -1,7 +1,7 @@
 import { isArtifactKind, type ArtifactRecord } from "../contracts/artifact.js";
 import type { ChannelAttachment, ChannelKind } from "../contracts/channel.js";
 import type { ContextExpansionResult } from "../contracts/context.js";
-import type { IntentRoute } from "../contracts/intent.js";
+import type { IntentRoute, SkillRouteCandidate } from "../contracts/intent.js";
 import type { MemoryProvider, SkillOutcome } from "../contracts/memory.js";
 import type { PromptBudgetReport } from "../contracts/prompt.js";
 import type { SecurityDecision } from "../contracts/security.js";
@@ -234,12 +234,20 @@ export class RunRecorder {
       evidence: input.intent.evidence.map((entry) => `${entry.kind}: ${entry.detail}`),
       routeId: promptHash,
       promptHash,
-      taskClass: input.routeDetails?.taskClass,
+      taskClass: input.routeDetails?.taskClass ?? input.intent.taskClass,
       matchedAt: timestamp
     }));
+    const candidateDetails = routeCandidateDetails(input.intent);
     const telemetryDetails: SkillRouteTelemetryDetails = {
       ...input.routeDetails,
-      candidatesShown: input.routeDetails?.candidatesShown ?? routeTelemetry.map((telemetry) => telemetry.skillName),
+      taskClass: input.routeDetails?.taskClass ?? input.intent.taskClass,
+      primarySkill: input.routeDetails?.primarySkill ?? input.intent.primarySkill?.name,
+      supportingSkills: input.routeDetails?.supportingSkills ?? input.intent.supportingSkills?.map((skill) => skill.name),
+      candidateSkills: input.routeDetails?.candidateSkills ?? candidateDetails.candidateSkills,
+      candidatesShown: input.routeDetails?.candidatesShown ?? candidateDetails.candidatesShown ?? routeTelemetry.map((telemetry) => telemetry.skillName),
+      candidatesRejected: input.routeDetails?.candidatesRejected ?? candidateDetails.rejectedCandidates,
+      rejectedCandidates: input.routeDetails?.rejectedCandidates ?? candidateDetails.rejectedCandidates,
+      deferredCandidates: input.routeDetails?.deferredCandidates ?? candidateDetails.deferredCandidates,
       finalSkillUsed: input.routeDetails?.finalSkillUsed ?? input.selectedSkill?.name
     };
     const event = {
@@ -248,6 +256,7 @@ export class RunRecorder {
       promptHash,
       skillName: input.selectedSkill?.name,
       nativeIntent: input.intent.nativeIntent,
+      taskClass: input.intent.taskClass,
       labels: input.intent.labels,
       selected: input.selectedSkill !== undefined,
       invoked: input.intent.invocation?.explicit === true,
@@ -294,11 +303,19 @@ export class RunRecorder {
       candidates: routeTelemetry,
       ...telemetryDetails
     });
+    const candidateRoles = candidateRoleBySkillName(input.intent.candidates);
     await emit(input.onEvent, {
       kind: "skill-route-telemetry",
       promptHash,
       selectedSkill: input.selectedSkill?.name,
       finalSkillUsed: telemetryDetails.finalSkillUsed,
+      taskClass: telemetryDetails.taskClass,
+      primarySkill: telemetryDetails.primarySkill,
+      supportingSkills: telemetryDetails.supportingSkills,
+      candidateSkills: telemetryDetails.candidateSkills,
+      candidatesRejected: telemetryDetails.candidatesRejected,
+      rejectedCandidates: telemetryDetails.rejectedCandidates,
+      deferredCandidates: telemetryDetails.deferredCandidates,
       confidence: input.intent.confidence,
       routeConfidence: input.intent.confidence,
       candidatesShown: telemetryDetails.candidatesShown,
@@ -308,7 +325,8 @@ export class RunRecorder {
         selected: telemetry.selected,
         explicitInvocation: telemetry.explicitInvocation,
         confidence: telemetry.confidence,
-        sourceKind: telemetry.sourceKind
+        sourceKind: telemetry.sourceKind,
+        role: candidateRoles.get(telemetry.skillName)
       })),
       details: telemetryDetails
     });
@@ -666,6 +684,51 @@ export class RunRecorder {
 
 function isLoadedSkill(skill: LoadedSkill | SkillDefinition): skill is LoadedSkill {
   return "instructions" in skill && "sourcePath" in skill;
+}
+
+function routeCandidateDetails(intent: IntentRoute): {
+  candidatesShown?: string[];
+  candidateSkills?: string[];
+  rejectedCandidates?: Array<{ skillName: string; reason?: string }>;
+  deferredCandidates?: Array<{ skillName: string; reason?: string }>;
+} {
+  if (intent.candidates === undefined) {
+    return {};
+  }
+
+  return {
+    candidatesShown: intent.candidates.map((candidate) => candidate.skill.name),
+    candidateSkills: namesForCandidateRole(intent.candidates, "candidate"),
+    rejectedCandidates: rejectedCandidateSummaries(intent.candidates, "rejected"),
+    deferredCandidates: rejectedCandidateSummaries(intent.candidates, "deferred")
+  };
+}
+
+function candidateRoleBySkillName(
+  candidates: SkillRouteCandidate[] | undefined
+): ReadonlyMap<string, SkillRouteCandidate["role"]> {
+  return new Map((candidates ?? []).map((candidate) => [candidate.skill.name, candidate.role]));
+}
+
+function namesForCandidateRole(
+  candidates: SkillRouteCandidate[],
+  role: SkillRouteCandidate["role"]
+): string[] {
+  return candidates
+    .filter((candidate) => candidate.role === role)
+    .map((candidate) => candidate.skill.name);
+}
+
+function rejectedCandidateSummaries(
+  candidates: SkillRouteCandidate[],
+  role: "rejected" | "deferred"
+): Array<{ skillName: string; reason?: string }> {
+  return candidates
+    .filter((candidate) => candidate.role === role)
+    .map((candidate) => ({
+      skillName: candidate.skill.name,
+      reason: candidate.reason
+    }));
 }
 
 function artifactFromExecution(execution: ToolExecutionRecord): ArtifactRecord | undefined {

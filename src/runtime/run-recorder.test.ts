@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { IntentRoute } from "../contracts/intent.js";
+import type { IntentRoute, SkillRouteCandidate } from "../contracts/intent.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { SkillDefinition } from "../contracts/skill.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
@@ -209,6 +209,102 @@ describe("RunRecorder", () => {
     }
   });
 
+  it("records governed route role telemetry without changing legacy candidates", async () => {
+    const db = new SQLiteSessionDB({ path: join(makeTempDir(), "sessions.sqlite") });
+
+    try {
+      const session = await db.createSession({ id: "session-1", profileId: "default" });
+      const trajectoryRecorder = new TrajectoryRecorder({
+        profileId: "default",
+        sessionId: session.id,
+        modelId: "test-model",
+        id: () => "trajectory-1"
+      });
+      const emitted: RuntimeEvent[] = [];
+      const runRecorder = new RunRecorder({
+        sessionDb: db,
+        sessionId: session.id,
+        trajectoryRecorder,
+        trajectoryStore: db,
+        profileId: "default"
+      });
+      const primary = skill("primary-skill");
+      const supporting = skill("supporting-skill");
+      const plainCandidate = skill("candidate-skill");
+      const rejected = skill("rejected-skill");
+      const deferred = skill("deferred-skill");
+
+      await runRecorder.recordRouteUsage({
+        intent: governedRoute({
+          primary,
+          supporting: [supporting],
+          candidates: [plainCandidate],
+          rejected: [{ skill: rejected, reason: "Negative pattern matched." }],
+          deferred: [{ skill: deferred, reason: "Capability unavailable." }]
+        }),
+        selectedSkill: primary,
+        channel: "cli",
+        userText: "route to a governed skill",
+        onEvent: (event) => {
+          emitted.push(event);
+        }
+      });
+
+      const events = await db.listEvents(session.id);
+      expect(events).toContainEqual(expect.objectContaining({
+        kind: "skill-route-usage",
+        taskClass: "release-validation"
+      }));
+      expect(events).toContainEqual(expect.objectContaining({
+        kind: "skill-route-telemetry",
+        telemetry: expect.objectContaining({
+          taskClass: "release-validation",
+          primarySkill: "primary-skill",
+          supportingSkills: ["supporting-skill"],
+          candidateSkills: ["candidate-skill"],
+          candidatesShown: [
+            "primary-skill",
+            "supporting-skill",
+            "candidate-skill",
+            "rejected-skill",
+            "deferred-skill"
+          ],
+          candidatesRejected: [{ skillName: "rejected-skill", reason: "Negative pattern matched." }],
+          rejectedCandidates: [{ skillName: "rejected-skill", reason: "Negative pattern matched." }],
+          deferredCandidates: [{ skillName: "deferred-skill", reason: "Capability unavailable." }],
+          candidates: [
+            expect.objectContaining({ skillName: "primary-skill", selected: true }),
+            expect.objectContaining({ skillName: "supporting-skill", selected: false })
+          ]
+        })
+      }));
+      expect(emitted).toContainEqual(expect.objectContaining({
+        kind: "skill-route-telemetry",
+        taskClass: "release-validation",
+        primarySkill: "primary-skill",
+        supportingSkills: ["supporting-skill"],
+        candidateSkills: ["candidate-skill"],
+        rejectedCandidates: [{ skillName: "rejected-skill", reason: "Negative pattern matched." }],
+        deferredCandidates: [{ skillName: "deferred-skill", reason: "Capability unavailable." }],
+        candidates: [
+          expect.objectContaining({ skillName: "primary-skill", role: "primary" }),
+          expect.objectContaining({ skillName: "supporting-skill", role: "supporting" })
+        ],
+        details: expect.objectContaining({
+          candidatesShown: [
+            "primary-skill",
+            "supporting-skill",
+            "candidate-skill",
+            "rejected-skill",
+            "deferred-skill"
+          ]
+        })
+      }));
+    } finally {
+      db.close();
+    }
+  });
+
   it("persists the trajectory before saving a classified failure", async () => {
     const db = new SQLiteSessionDB({ path: join(makeTempDir(), "sessions.sqlite") });
 
@@ -372,5 +468,57 @@ function route(suggestedSkills: SkillDefinition[]): IntentRoute {
       weight: 0.35
     }],
     rationale: "test route"
+  };
+}
+
+function governedRoute(input: {
+  primary: SkillDefinition;
+  supporting: SkillDefinition[];
+  candidates: SkillDefinition[];
+  rejected: Array<{ skill: SkillDefinition; reason: string }>;
+  deferred: Array<{ skill: SkillDefinition; reason: string }>;
+}): IntentRoute {
+  const selected = [input.primary, ...input.supporting];
+  const routeCandidates: SkillRouteCandidate[] = [
+    routeCandidate(input.primary, "primary"),
+    ...input.supporting.map((entry) => routeCandidate(entry, "supporting")),
+    ...input.candidates.map((entry) => routeCandidate(entry, "candidate")),
+    ...input.rejected.map((entry) => routeCandidate(entry.skill, "rejected", entry.reason)),
+    ...input.deferred.map((entry) => routeCandidate(entry.skill, "deferred", entry.reason))
+  ];
+
+  return {
+    ...route(selected),
+    taskClass: "release-validation",
+    primarySkill: input.primary,
+    supportingSkills: input.supporting,
+    candidates: routeCandidates,
+    rejectedCandidates: routeCandidates.filter((candidate) =>
+      candidate.role === "rejected" || candidate.role === "deferred"
+    )
+  };
+}
+
+function routeCandidate(
+  skillDefinition: SkillDefinition,
+  role: SkillRouteCandidate["role"],
+  reason?: string
+): SkillRouteCandidate {
+  return {
+    skill: skillDefinition,
+    role,
+    score: role === "candidate" ? 0.6 : role === "rejected" || role === "deferred" ? 0 : 0.8,
+    confidence: role === "candidate" ? 0.6 : role === "rejected" || role === "deferred" ? 0 : 0.8,
+    evidence: [{
+      kind: role === "rejected"
+        ? "skill-negative-pattern"
+        : role === "deferred"
+          ? "skill-defer-rule"
+          : "skill-trigger-pattern",
+      source: skillDefinition.name,
+      detail: reason ?? `Matched ${skillDefinition.name}.`,
+      weight: role === "candidate" ? 0.6 : 0.8
+    }],
+    reason
   };
 }
