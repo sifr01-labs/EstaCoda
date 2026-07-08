@@ -1,0 +1,380 @@
+import { describe, expect, it } from "vitest";
+import type { SkillDefinition, SkillRouting } from "../contracts/skill.js";
+import { SkillRegistry } from "../skills/skill-registry.js";
+import { IntentRouter } from "./intent-router.js";
+
+describe("IntentRouter governed route contract", () => {
+  it("uses explicit slash invocation as the primary skill", () => {
+    const alpha = skill({
+      name: "alpha",
+      routing: {
+        labels: ["alpha-route"]
+      }
+    });
+    const router = routerWith(alpha);
+
+    const route = router.route("/alpha review this");
+
+    expect(route.taskClass).toBe("general");
+    expect(route.primarySkill).toBe(alpha);
+    expect(route.supportingSkills).toEqual([]);
+    expect(route.candidates).toEqual([
+      expect.objectContaining({
+        skill: alpha,
+        role: "primary",
+        confidence: 1
+      })
+    ]);
+    expect(route.rejectedCandidates).toEqual([]);
+    expect(route.suggestedSkills).toEqual([alpha]);
+  });
+
+  it("keeps unknown slash invocations as no-skill routes", () => {
+    const route = routerWith().route("/missing do thing");
+
+    expect(route.primarySkill).toBeUndefined();
+    expect(route.supportingSkills).toEqual([]);
+    expect(route.candidates).toEqual([]);
+    expect(route.rejectedCandidates).toEqual([]);
+    expect(route.suggestedSkills).toEqual([]);
+  });
+
+  it("chooses the highest-ranked match as primary and preserves supporting skills", () => {
+    const primary = skill({
+      name: "primary-route",
+      routing: {
+        triggerPatterns: [{ type: "contains", value: "release route" }],
+        priority: 10
+      }
+    });
+    const supporting = skill({
+      name: "supporting-route",
+      routing: {
+        triggerPatterns: [{ type: "contains", value: "release route" }]
+      }
+    });
+    const route = routerWith(supporting, primary).route("please use the release route");
+
+    expect(route.primarySkill).toBe(primary);
+    expect(route.supportingSkills).toEqual([supporting]);
+    expect(route.candidates?.map((candidate) => [candidate.skill.name, candidate.role])).toEqual([
+      ["primary-route", "primary"],
+      ["supporting-route", "supporting"]
+    ]);
+    expect(route.suggestedSkills).toEqual([primary, supporting]);
+  });
+
+  it("caps supporting skills and keeps remaining active matches as candidates", () => {
+    const skills = [
+      prioritizedSkill("primary-route", 10),
+      prioritizedSkill("supporting-one", 9),
+      prioritizedSkill("supporting-two", 8),
+      prioritizedSkill("supporting-three", 7),
+      prioritizedSkill("candidate-route", 6)
+    ];
+    const route = routerWith(...skills).route("please use the release route");
+
+    expect(route.primarySkill?.name).toBe("primary-route");
+    expect(route.supportingSkills?.map((entry) => entry.name)).toEqual([
+      "supporting-one",
+      "supporting-two",
+      "supporting-three"
+    ]);
+    expect(route.suggestedSkills.map((entry) => entry.name)).toEqual([
+      "primary-route",
+      "supporting-one",
+      "supporting-two",
+      "supporting-three"
+    ]);
+    expect(route.candidates?.map((candidate) => [candidate.skill.name, candidate.role])).toEqual([
+      ["primary-route", "primary"],
+      ["supporting-one", "supporting"],
+      ["supporting-two", "supporting"],
+      ["supporting-three", "supporting"],
+      ["candidate-route", "candidate"]
+    ]);
+  });
+
+  it("keeps supporting skills out of runtime toolset and confirmation hints", () => {
+    const primary = skill({
+      name: "primary-route",
+      routing: {
+        triggerPatterns: [{ type: "contains", value: "release route" }],
+        requiredToolsets: ["files"],
+        confirmation: "never",
+        priority: 10
+      }
+    });
+    const supporting = skill({
+      name: "supporting-route",
+      routing: {
+        triggerPatterns: [{ type: "contains", value: "release route" }],
+        requiredToolsets: ["shell-write"],
+        confirmation: "ask"
+      }
+    });
+    const route = routerWith(supporting, primary).route("please use the release route");
+
+    expect(route.primarySkill).toBe(primary);
+    expect(route.supportingSkills).toEqual([supporting]);
+    expect(route.suggestedSkills).toEqual([primary, supporting]);
+    expect(route.suggestedToolsets).toEqual(["files"]);
+    expect(route.confirmationRequired).toBe(false);
+    expect(route.evidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "toolset-derived",
+          source: "primary-route",
+          detail: "Skill metadata suggests files."
+        })
+      ])
+    );
+    expect(route.evidence).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "toolset-derived",
+          source: "supporting-route"
+        }),
+        expect.objectContaining({
+          kind: "confirmation-policy"
+        })
+      ])
+    );
+  });
+
+  it("keeps below-threshold matches as candidates instead of selecting them", () => {
+    const lowConfidence = skill({
+      name: "low-confidence-route",
+      routing: {
+        triggerPatterns: [{ type: "contains", value: "release route" }],
+        priority: -101
+      }
+    });
+    const route = routerWith(lowConfidence).route("please use the release route");
+
+    expect(route.primarySkill).toBeUndefined();
+    expect(route.supportingSkills).toEqual([]);
+    expect(route.suggestedSkills).toEqual([]);
+    expect(route.candidates).toEqual([
+      expect.objectContaining({
+        skill: lowConfidence,
+        role: "candidate"
+      })
+    ]);
+    expect(route.candidates?.[0]?.score).toBeCloseTo(0.599, 3);
+  });
+
+  it("records negative pattern matches as rejected candidates", () => {
+    const selected = skill({
+      name: "selected-route",
+      routing: {
+        triggerPatterns: [{ type: "contains", value: "review" }]
+      }
+    });
+    const rejected = skill({
+      name: "rejected-route",
+      routing: {
+        triggerPatterns: [{ type: "contains", value: "review" }],
+        negativePatterns: [{ type: "contains", value: "review" }]
+      }
+    });
+    const route = routerWith(rejected, selected).route("review this release");
+
+    expect(route.primarySkill).toBe(selected);
+    expect(route.rejectedCandidates).toEqual([
+      expect.objectContaining({
+        skill: rejected,
+        role: "rejected"
+      })
+    ]);
+    expect(route.suggestedSkills).toEqual([selected]);
+  });
+
+  it("records defer rules as deferred candidates without selecting them", () => {
+    const deferred = skill({
+      name: "deferred-route",
+      routing: {
+        triggerPatterns: [{ type: "contains", value: "review" }],
+        deferWhen: [{
+          when: {
+            promptMatches: [{ type: "contains", value: "review" }]
+          },
+          reason: "Defer review route during preflight."
+        }]
+      }
+    });
+    const route = routerWith(deferred).route("review this release");
+
+    expect(route.primarySkill).toBeUndefined();
+    expect(route.candidates).toEqual([
+      expect.objectContaining({
+        skill: deferred,
+        role: "deferred",
+        reason: "Defer review route during preflight."
+      })
+    ]);
+    expect(route.rejectedCandidates).toEqual([
+      expect.objectContaining({
+        skill: deferred,
+        role: "deferred"
+      })
+    ]);
+    expect(route.suggestedSkills).toEqual([]);
+  });
+
+  it("sets a task class from native intent without changing skill authority", () => {
+    const route = routerWith().route("generate an image of a dashboard");
+
+    expect(route.nativeIntent).toBe("image-generation");
+    expect(route.taskClass).toBe("media-generation");
+    expect(route.primarySkill).toBeUndefined();
+  });
+
+  it.each([
+    ["please review this pull request", "code-review"],
+    ["can you update the README docs for this command", "docs-writing"],
+    ["validate this branch before merge", "release-validation"],
+    ["what do you think of this architecture plan?", "architecture-advice"],
+    ["research the best approaches for local embeddings", "research"],
+    ["please implement the CLI feature in the repo", "repo-change"]
+  ] as const)("classifies %s as %s without selecting a skill by itself", (prompt, taskClass) => {
+    const route = routerWith().route(prompt);
+
+    expect(route.taskClass).toBe(taskClass);
+    expect(route.primarySkill).toBeUndefined();
+    expect(route.suggestedSkills).toEqual([]);
+    expect(route.evidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "task-class",
+          detail: expect.stringContaining(taskClass)
+        })
+      ])
+    );
+  });
+
+  it("leaves unrelated prompts as general without task-class evidence", () => {
+    const route = routerWith().route("hello there");
+
+    expect(route.taskClass).toBe("general");
+    expect(route.evidence.some((entry) => entry.kind === "task-class")).toBe(false);
+  });
+
+  it("records local semantic shadow candidates without selecting a primary skill", () => {
+    const releaseNotes = skill({
+      name: "release-notes",
+      description: "Draft release notes and changelog summaries.",
+      whenToUse: ["Use for release notes, changelog drafting, and launch summaries."]
+    });
+    const route = routerWith(releaseNotes).route("please draft release notes for the changelog");
+
+    expect(route.primarySkill).toBeUndefined();
+    expect(route.suggestedSkills).toEqual([]);
+    expect(route.shadowSemanticRoute).toEqual(expect.objectContaining({
+      mode: "local-semantic-shadow",
+      wouldSelectSkill: releaseNotes,
+      confidence: expect.any(Number),
+      candidates: [
+        expect.objectContaining({
+          skill: releaseNotes,
+          evidence: [
+            expect.objectContaining({
+              kind: "semantic-shadow"
+            })
+          ]
+        })
+      ]
+    }));
+  });
+
+  it("keeps negative-pattern matches out of semantic shadow selection", () => {
+    const blocked = skill({
+      name: "blocked-release-notes",
+      description: "Draft release notes and changelog summaries.",
+      routing: {
+        negativePatterns: [{ type: "contains", value: "release notes" }]
+      },
+      whenToUse: ["Use for release notes and changelog drafting."]
+    });
+    const fallback = skill({
+      name: "fallback-changelog",
+      description: "Prepare release notes and changelog summaries.",
+      whenToUse: ["Use for release notes and changelog summaries."]
+    });
+    const route = routerWith(blocked, fallback).route("please draft release notes for the changelog");
+
+    expect(route.rejectedCandidates).toEqual([
+      expect.objectContaining({
+        skill: blocked,
+        role: "rejected"
+      })
+    ]);
+    expect(route.shadowSemanticRoute?.wouldSelectSkill).toBe(fallback);
+    expect(route.shadowSemanticRoute?.candidates.map((candidate) => candidate.skill.name))
+      .not.toContain("blocked-release-notes");
+  });
+
+  it("keeps defer-rule matches out of semantic shadow selection", () => {
+    const deferred = skill({
+      name: "deferred-changelog",
+      description: "Prepare release notes and changelog summaries.",
+      routing: {
+        deferWhen: [{
+          when: {
+            promptMatches: [{ type: "contains", value: "release notes" }]
+          },
+          reason: "Defer release note drafting."
+        }]
+      },
+      whenToUse: ["Use for release notes and changelog summaries."]
+    });
+    const fallback = skill({
+      name: "fallback-changelog",
+      description: "Prepare release notes and changelog summaries.",
+      whenToUse: ["Use for release notes and changelog summaries."]
+    });
+    const route = routerWith(deferred, fallback).route("please draft release notes for the changelog");
+
+    expect(route.shadowSemanticRoute?.wouldSelectSkill).toBe(fallback);
+    expect(route.shadowSemanticRoute?.candidates.map((candidate) => candidate.skill.name))
+      .not.toContain("deferred-changelog");
+  });
+});
+
+function routerWith(...skills: SkillDefinition[]): IntentRouter {
+  const registry = new SkillRegistry();
+  for (const entry of skills) {
+    registry.register(entry);
+  }
+  return new IntentRouter({ skillRegistry: registry });
+}
+
+function skill(input: {
+  name: string;
+  description?: string;
+  whenToUse?: string[];
+  routing?: SkillRouting;
+}): SkillDefinition {
+  return {
+    name: input.name,
+    description: input.description ?? `${input.name} test skill.`,
+    version: "0.1.0",
+    routing: input.routing,
+    whenToUse: input.whenToUse ?? [],
+    requiredToolsets: [],
+    playbook: [],
+    permissionExpectations: [],
+    examples: [],
+    evaluations: []
+  };
+}
+
+function prioritizedSkill(name: string, priority: number): SkillDefinition {
+  return skill({
+    name,
+    routing: {
+      triggerPatterns: [{ type: "contains", value: "release route" }],
+      priority
+    }
+  });
+}

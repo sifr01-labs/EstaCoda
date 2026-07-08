@@ -224,7 +224,7 @@ sidebar_position: 5
 
 تجاوزات نموذج الطفل مدعومة عبر `modelOverride`. التجاوزات على المزود نفسه والمسارات المراجعة عبر مزود آخر تستخدم المزودين المضبوطين فقط ولا تنشئ credential pools. التجاوز عبر مزود آخر يحفظ إعداد المزود الهدف، ويرفض المسارات ذات `enableNetwork: false` قبل تنفيذ الطفل، ويعطل fallbacks لذلك الطفل.
 
-ذاكرة نتائج التفويض قابلة للضبط ومعطلة افتراضيًا. عند تفعيلها، تسجل معاينة محدودة للمهمة وmetadata حتمية للحالة/السبب فقط. لا تخزن raw child output، أو prompts، أو transcripts، أو tool arguments، أو محتوى ملفات، أو diagnostic payloads.
+Telemetry نتائج التفويض تُسجل في أحداث الجلسة وسجلات trajectory. تتضمن معاينة محدودة للمهمة وmetadata حتمية للحالة/السبب فقط، ولا تكتب في ذاكرة prompt canonical. لا تخزن raw child output، أو prompts، أو transcripts، أو tool arguments، أو محتوى ملفات، أو diagnostic payloads داخل `MEMORY.md`.
 
 تحذيرات stale-file استشارية. تلتقط EstaCoda snapshot لقراءات ملفات الأب قبل التفويض؛ إذا كتب طفل أو استبدل أو حذف ملفًا متعقبًا قرأه الأب مسبقًا، تتضمن النتيجة تحذيرًا. التحذير لا يغير حالة النجاح/الفشل. كتابات shell/process لا تُكتشف ما لم تمثلها file-state tracker.
 

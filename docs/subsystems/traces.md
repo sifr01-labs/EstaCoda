@@ -94,6 +94,8 @@ estacoda trace failures <trajectory-id>
 - `timeline` outputs a chronological human-readable event list
 - `failures` lists classified failures for a trajectory
 
+`skill-route-telemetry` records the governed route shape: task class, selected primary skill, supporting candidates, lower-confidence candidates, rejected/deferred candidates, and final route outcome fields. When available, it also includes local semantic shadow telemetry and bounded LLM reranker shadow telemetry. Human-readable trace summaries render these shadow signals as `shadow=...` and `llm-shadow=...`; both are advisory diagnostics, not proof that either route signal controlled the turn.
+
 ## Redaction
 
 `estacoda trace dump <id>` redacts by default. `--raw` returns the stored JSON without redaction.

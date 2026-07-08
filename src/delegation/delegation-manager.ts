@@ -11,11 +11,9 @@ import type { RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SessionDB, SessionEvent } from "../contracts/session.js";
 import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
 import type { ProviderUsage } from "../contracts/provider.js";
-import type { DelegationOutcome, MemoryProvider } from "../contracts/memory.js";
 import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
-import { redactSensitiveText } from "../utils/redaction.js";
 import type { AgentLoopResponse } from "../runtime/agent-loop.js";
 import {
   ChildModelOverrideError,
@@ -120,7 +118,6 @@ export type DelegationManagerOptions = {
   parentVisibleTools?: () => readonly ToolDefinition[];
   subagentRegistry?: SubagentRegistry;
   diagnosticsRoot?: string;
-  memoryProvider?: Pick<MemoryProvider, "recordDelegationOutcome">;
   fileStateTracker?: FileStateTracker;
 };
 
@@ -133,7 +130,6 @@ export class DelegationManager {
   readonly #parentVisibleTools: () => readonly ToolDefinition[];
   readonly #subagentRegistry: SubagentRegistry;
   readonly #diagnosticsRoot: string | undefined;
-  readonly #memoryProvider: Pick<MemoryProvider, "recordDelegationOutcome"> | undefined;
   readonly #fileStateTracker: FileStateTracker | undefined;
 
   constructor(options: DelegationManagerOptions) {
@@ -145,7 +141,6 @@ export class DelegationManager {
     this.#parentVisibleTools = options.parentVisibleTools ?? (() => []);
     this.#subagentRegistry = options.subagentRegistry ?? new SubagentRegistry();
     this.#diagnosticsRoot = options.diagnosticsRoot;
-    this.#memoryProvider = options.memoryProvider;
     this.#fileStateTracker = options.fileStateTracker;
   }
 
@@ -235,13 +230,6 @@ export class DelegationManager {
     ].filter((line): line is string => line !== undefined).join(" ");
     const usageRollup = rollUpChildUsage(results);
     const staleFileWarningCount = results.reduce((count, result) => count + (result.staleFileWarningCount ?? 0), 0);
-    for (const index of skippedIndexes) {
-      const result = results[index];
-      if (result !== undefined) {
-        await this.#recordDelegationOutcome(request.parentSessionId, result, "skipped");
-      }
-    }
-
     return {
       batchId,
       status,
@@ -276,7 +264,6 @@ export class DelegationManager {
 
     if (this.#subagentRegistry.isSpawnPaused()) {
       const result = this.#spawnPaused(request, allowedToolsets, allowedTools, role, depth);
-      await this.#recordDelegationOutcome(request.parentSessionId, result);
       return result;
     }
 
@@ -307,15 +294,14 @@ export class DelegationManager {
       });
       childSessionId = child.childSessionId;
 
-	      if (isSignalAborted(request.signal)) {
-	        const result = this.#withStaleFileWarnings(
-	          this.#cancelledAfterConstruction(request, allowedToolsets, allowedTools, role, depth, childSessionId),
-	          request,
-	          parentReadSnapshot
-	        );
-	        await this.#recordDelegationOutcome(request.parentSessionId, result);
-	        return result;
-	      }
+      if (isSignalAborted(request.signal)) {
+        const result = this.#withStaleFileWarnings(
+          this.#cancelledAfterConstruction(request, allowedToolsets, allowedTools, role, depth, childSessionId),
+          request,
+          parentReadSnapshot
+        );
+        return result;
+      }
 
       childAbortController = new AbortController();
       subagentId = child.childSessionId;
@@ -421,7 +407,6 @@ export class DelegationManager {
 	          staleFileWarnings: result.staleFileWarnings,
 	          staleFileWarningCount: result.staleFileWarningCount
 	        });
-        await this.#recordDelegationOutcome(request.parentSessionId, result);
         return result;
       }
       if (runnerResult.kind === "cancelled") {
@@ -460,7 +445,6 @@ export class DelegationManager {
 	          staleFileWarnings: result.staleFileWarnings,
 	          staleFileWarningCount: result.staleFileWarningCount
 	        });
-        await this.#recordDelegationOutcome(request.parentSessionId, result);
         return result;
       }
       const childResponse = runnerResult.response;
@@ -514,12 +498,10 @@ export class DelegationManager {
 	        staleFileWarnings: result.staleFileWarnings,
 	        staleFileWarningCount: result.staleFileWarningCount
 	      });
-      await this.#recordDelegationOutcome(request.parentSessionId, result);
       return result;
     } catch (error) {
       if (error instanceof ChildModelOverrideError) {
         const result = this.#modelOverrideRejected(request, allowedToolsets, allowedTools, role, depth, error);
-        await this.#recordDelegationOutcome(request.parentSessionId, result);
         return result;
       }
 
@@ -567,7 +549,6 @@ export class DelegationManager {
 	          staleFileWarningCount: result.staleFileWarningCount
 	        });
       }
-      await this.#recordDelegationOutcome(request.parentSessionId, result);
       return result;
     } finally {
       parentAbortCleanup?.();
@@ -620,7 +601,6 @@ export class DelegationManager {
       },
       usageUnavailable: true
     };
-    await this.#recordDelegationOutcome(request.parentSessionId, result);
     return result;
   }
 
@@ -744,7 +724,6 @@ export class DelegationManager {
       },
       usageUnavailable: true
     };
-	    await this.#recordDelegationOutcome(request.parentSessionId, result);
 	    return result;
 	  }
 
@@ -881,43 +860,6 @@ export class DelegationManager {
     this.#trajectoryRecorder.record("delegation-finished", input);
   }
 
-  async #recordDelegationOutcome(
-    parentSessionId: string,
-    result: DelegationSummary,
-    statusOverride?: DelegationOutcome["status"]
-  ): Promise<void> {
-    if (this.#delegationConfig.outcomeMemory.enabled !== true ||
-      this.#memoryProvider?.recordDelegationOutcome === undefined) {
-      return;
-    }
-
-    const status = statusOverride ?? delegationOutcomeStatus(result);
-    const resultSummary = boundedMemoryText(
-      delegationOutcomeResultSummary(status, result.reason),
-      this.#delegationConfig.outcomeMemory.maxResultSummaryChars
-    );
-    const outcome: DelegationOutcome = {
-      taskPreview: boundedMemoryText(result.task, this.#delegationConfig.outcomeMemory.maxTaskPreviewChars) ?? "",
-      status,
-      parentSessionId,
-      role: result.role,
-      depth: result.depth,
-      createdAt: new Date().toISOString(),
-      ...(resultSummary === undefined ? {} : { resultSummary }),
-      ...(result.reason === undefined ? {} : { reason: result.reason }),
-      ...(result.childSessionId === "unavailable" ? {} : { childSessionId: result.childSessionId }),
-      ...(result.batchId === undefined ? {} : { batchId: result.batchId }),
-      ...(result.taskIndex === undefined ? {} : { taskIndex: result.taskIndex }),
-      ...(result.usage === undefined ? {} : { usage: result.usage })
-    };
-
-    try {
-      await this.#memoryProvider.recordDelegationOutcome(outcome);
-    } catch {
-      // Delegation outcomes are best-effort memory observations; never change child result status.
-    }
-  }
-
   async #statusFromChildResponse(
     childSessionId: string,
     response: AgentLoopResponse,
@@ -1043,46 +985,6 @@ function hasUsage(usage: DelegationUsageMetadata): boolean {
 
 function isFiniteNumber(value: number | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value);
-}
-
-function delegationOutcomeStatus(result: DelegationSummary): DelegationOutcome["status"] {
-  if (result.reason === "timeout") {
-    return "timeout";
-  }
-  if (result.reason === "cancelled") {
-    return "cancelled";
-  }
-  return result.status;
-}
-
-function delegationOutcomeResultSummary(
-  status: DelegationOutcome["status"],
-  reason: DelegationSummary["reason"] | undefined
-): string {
-  if (reason === undefined || reason === status) {
-    return status;
-  }
-  return `${status}: ${reason}`;
-}
-
-function boundedMemoryText(value: string | undefined, maxChars: number): string | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  const redacted = redactSensitiveText(value)
-    .replace(/api[_ -]?key/gi, "credential")
-    .replace(/secret[_ -]?key/gi, "credential")
-    .replace(/private[_ -]?key/gi, "credential")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (redacted.length === 0) {
-    return undefined;
-  }
-  if (redacted.length <= maxChars) {
-    return redacted;
-  }
-  const clipped = redacted.slice(0, Math.max(0, maxChars - " [truncated]".length)).trimEnd();
-  return `${clipped} [truncated]`;
 }
 
 function childModel(child: ChildAgentLoopRuntime): string {

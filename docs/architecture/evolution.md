@@ -126,13 +126,14 @@ Produced by `estacoda evolution export --dataset <path>`. No Python dependency.
 9. No broad semantic architecture inference.
 10. No automatic memory policy evolution in the current release.
 11. No embedding/vector search.
-12. No semantic retrieval, compact skill index fallback, LLM reranking, taskClass routing, or supporting-candidate routing in the current implementation.
-13. No advisory route tools such as `skill.reject_route` or `skill.search_routes` in the current implementation.
-14. No real autonomous promotion, auto-rollback, skill fork/merge/archive, or hygiene scanning loop in the current implementation.
+12. No provider embeddings or compact skill index fallback in the current implementation.
+13. No semantic or LLM route signal is official routing authority in the current implementation.
+14. No advisory route tools such as `skill.reject_route` or `skill.search_routes` in the current implementation.
+15. No real autonomous promotion, auto-rollback, skill fork/merge/archive, or hygiene scanning loop in the current implementation.
 
 ## Routing Boundary
 
-Routing remains deterministic. Route telemetry, rejection/search-compatible contracts, and routing baseline metrics exist so Agent Evolution can evaluate routing quality, but they do not enable semantic retrieval, provider embeddings, reranking, compact skill indexes, supporting candidates, or advisory route tools.
+Routing remains deterministic as the official selector. The runtime records task class, primary skill, supporting candidates, lower-confidence candidates, rejected candidates, deferred candidates, local semantic shadow telemetry, and bounded LLM reranker shadow telemetry so Agent Evolution can evaluate routing quality. Supporting candidates and shadow route signals are advisory evidence only; they do not inject extra skill instructions, authorize tools, mutate skills, promote changes, or override negative/defer rules.
 
 ## CLI Commands
 

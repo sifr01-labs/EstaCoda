@@ -158,6 +158,10 @@ observe → evidence/candidate → proposal → eval/review → manual promotion
 | ChangeManifestStore wired into runtime (no longer orphaned) | `smoke-tested` |
 | Tool-description proposal skeleton (`target: "tool_description"`) | `smoke-tested` |
 | Routing-metadata proposal skeleton (`target: "routing_metadata"`) | `smoke-tested` |
+| Governed route contract with task class, primary/supporting/candidate/rejected/deferred candidates | `tested` |
+| Local semantic route shadow telemetry | `tested` |
+| Bounded LLM route reranker shadow telemetry | `tested` |
+| Semantic routing readiness evals | `tested` |
 | DSPy/GEPA-compatible export (`estacoda evolution export`) | `smoke-tested` |
 
 **What "governed" means:**
@@ -171,15 +175,18 @@ observe → evidence/candidate → proposal → eval/review → manual promotion
 - No silent mutation — every change is logged, reviewable, and reversible.
 - Bundled and external skill assets are not mutated. Bundled skills can be shadowed only by local/profile-owned working copies.
 - Autonomous mode is shadow-only: it records policy decisions and proposal metadata, but it does not auto-promote, auto-rollback, or bypass gates.
-- Routing remains deterministic. Routing quality telemetry is evidence for Agent Evolution, not a new routing system.
+- Routing remains deterministic as the official selector. The route contract records task class, one primary skill, supporting candidates, lower-confidence candidates, rejected candidates, deferred candidates, local semantic shadow telemetry, and bounded LLM reranker shadow telemetry as evidence for Agent Evolution.
+- Supporting skills are advisory telemetry only. Only the primary selected skill contributes prompt instructions, toolset hints, setup context, and confirmation hints.
+- Local semantic shadow routing and LLM reranking are non-authoritative. They cannot select unknown skills, override negative/defer rules, authorize tools, mutate skills, or promote anything.
 
 **Limitations:**
 
 - Skill promotion eval gates are metadata/playbook assertions. The default deterministic eval fixtures test surrounding skill/evolution behavior, but proposal promotion does not execute open-ended task fixtures.
 - Tool-description and routing-metadata proposals are representable as manifest targets but not auto-applied.
 - No autonomous promotion or rollback automation.
-- No semantic retrieval, provider embeddings, compact skill index fallback, or LLM reranking.
-- No taskClass routing, supporting candidates, or advisory route tools such as `skill.reject_route` and `skill.search_routes`.
+- No provider embeddings or compact skill index fallback.
+- No semantic or LLM route signal is official routing authority yet.
+- No advisory route tools such as `skill.reject_route` and `skill.search_routes`.
 - No skill fork/merge/archive governed proposal operations.
 - No hygiene scanning loop for automatic proposal creation.
 - The primary shipped CLI surfaces are `estacoda skills`, `estacoda proposal`, `estacoda manifest`, `estacoda curator`, and `estacoda evolution`. Do not document a separate `estacoda skill` namespace unless the command registry exposes it.
@@ -209,7 +216,7 @@ Agent Evolution is the user-facing control plane for EstaCoda's reviewable self-
 | `proactive` | Prepares stronger review proposals and eval metadata; asks before promotion |
 | `autonomous` | Records shadow-only autonomous decisions and proposal metadata; no real auto-promotion or auto-rollback |
 
-Roadmap behavior must remain labeled as planned until implemented: semantic/local retrieval, embeddings, reranking, compact skill index fallback, taskClass routing, supporting candidates, advisory route tools, real autonomous promotion, auto-rollback, skill fork/merge/archive, and hygiene scanning.
+Roadmap behavior must remain labeled as planned until implemented: provider embeddings, compact skill index fallback, semantic/LLM routing as official authority, advisory route tools, real autonomous promotion, auto-rollback, skill fork/merge/archive, and hygiene scanning.
 
 ## Contracts
 

@@ -54,6 +54,16 @@ export type SkillLearningObservation =
       candidate?: SkillLearningCandidate;
     };
 
+type SelectedSkillSuggestedTarget = Extract<
+  SkillLearningCandidate,
+  { kind: "selected_skill_refinement" }
+>["suggestedTarget"];
+type MissingPlaybookSuggestedTarget = Extract<
+  SkillLearningCandidate,
+  { kind: "new_or_missing_playbook" }
+>["suggestedTarget"];
+type LearningSuggestedTarget = SelectedSkillSuggestedTarget | MissingPlaybookSuggestedTarget;
+
 export class SkillLearningManager {
   readonly #autonomy: SkillAutonomy;
   readonly #store: SkillLearningStore;
@@ -126,6 +136,7 @@ export class SkillLearningManager {
     if (existing?.status === "stale") {
       return undefined;
     }
+    const suggestedTarget = noSkillSuggestedTarget(input, workflow, existing);
 
     const evidence = await this.#skillEvolutionStore.appendObservation({
       skillName: workflow.name,
@@ -135,7 +146,7 @@ export class SkillLearningManager {
       toolsAttempted: workflow.tools,
       outcome: observationOutcomeFromFinalStatus(input.outcomeStatus),
       lesson: `No skill was selected for a repeated local workflow using ${workflow.tools.join(", ")}.`,
-      candidateImprovement: "Create a governed skill or update routing metadata for this missing workflow.",
+      candidateImprovement: candidateImprovementForSuggestedTarget(suggestedTarget),
       sourceTrust: "runtime_internal",
       mayPromoteAutomatically: false,
       requiresHumanApproval: true,
@@ -149,11 +160,9 @@ export class SkillLearningManager {
     const candidate = await this.#skillEvolutionStore.appendLearningCandidate({
       kind: "new_or_missing_playbook",
       evidenceIds: [evidence.id],
-      suggestedTarget: workflow.bounded ? "skill_create" : "routing_metadata_update",
-      reason: workflow.bounded
-        ? "Repeated no-skill workflow may need a governed skill."
-        : "No-skill workflow is not bounded enough for skill creation; consider routing metadata instead.",
-      confidence: confidenceFromObservation(input.routeConfidence, workflow.bounded ? 0.65 : 0.45),
+      suggestedTarget,
+      reason: reasonForSuggestedTarget(suggestedTarget),
+      confidence: confidenceFromObservation(input.routeConfidence, confidenceFallbackForSuggestedTarget(suggestedTarget)),
       sessionId: input.sessionId,
       promptHash: input.promptHash
     });
@@ -233,6 +242,7 @@ export class SkillLearningManager {
     const tools = successfulToolNames(input.toolExecutions);
     const selectedSkillName = input.selectedSkill.name;
     const finalSkillUsed = input.finalSkillUsed ?? selectedSkillName;
+    const suggestedTarget = selectedSkillSuggestedTarget(input, selectedSkillName, finalSkillUsed);
     const evidence = await this.#skillEvolutionStore!.appendObservation({
       skillName: selectedSkillName,
       source: "sourceKind" in input.selectedSkill ? input.selectedSkill.sourceKind : undefined,
@@ -244,7 +254,7 @@ export class SkillLearningManager {
       lesson: finalSkillUsed === selectedSkillName
         ? `Selected skill ${selectedSkillName} completed with outcome ${input.outcomeStatus ?? "unknown"}.`
         : `Selected skill ${selectedSkillName} was corrected to final skill ${finalSkillUsed}.`,
-      candidateImprovement: "Refine the selected skill or its routing metadata through the governed evolution path.",
+      candidateImprovement: candidateImprovementForSuggestedTarget(suggestedTarget),
       sourceTrust: "runtime_internal",
       mayPromoteAutomatically: false,
       requiresHumanApproval: true,
@@ -257,11 +267,9 @@ export class SkillLearningManager {
       kind: "selected_skill_refinement",
       selectedSkill: selectedSkillName,
       evidenceIds: [evidence.id],
-      suggestedTarget: finalSkillUsed === selectedSkillName ? "skill_patch" : "routing_metadata_update",
-      reason: finalSkillUsed === selectedSkillName
-        ? "Selected skill turn produced evidence for future governed refinement."
-        : "Route or model correction suggests routing metadata should be reviewed.",
-      confidence: confidenceFromObservation(input.routeConfidence, 0.6),
+      suggestedTarget,
+      reason: reasonForSuggestedTarget(suggestedTarget),
+      confidence: confidenceFromObservation(input.routeConfidence, confidenceFallbackForSuggestedTarget(suggestedTarget)),
       sessionId: input.sessionId,
       promptHash: input.promptHash
     });
@@ -341,6 +349,123 @@ function buildLearningEvidence(
     })),
     ...extra
   };
+}
+
+function selectedSkillSuggestedTarget(
+  input: {
+    outcomeStatus?: SkillRouteFinalOutcomeStatus;
+    correctionSignals?: SkillRouteCorrectionSignal[];
+    candidatesRejected?: SkillRouteRejectedCandidate[];
+    searchedReplacementSkill?: string;
+  },
+  selectedSkillName: string,
+  finalSkillUsed: string
+): SelectedSkillSuggestedTarget {
+  if (hasRejectedRouteSignal(input, selectedSkillName)) {
+    return "negative_example_addition";
+  }
+  if (
+    finalSkillUsed !== selectedSkillName ||
+    input.searchedReplacementSkill !== undefined ||
+    (input.correctionSignals?.length ?? 0) > 0
+  ) {
+    return "routing_metadata_update";
+  }
+  if (input.outcomeStatus === "succeeded") {
+    return "routing_eval_addition";
+  }
+  return "skill_patch";
+}
+
+function noSkillSuggestedTarget(
+  input: {
+    noSkillResult?: SkillRouteNoSkillResult;
+    candidatesShown?: string[];
+    candidatesRejected?: SkillRouteRejectedCandidate[];
+    searchedReplacementSkill?: string;
+  },
+  workflow: { bounded: boolean },
+  existing: SkillLearningRecord | undefined
+): MissingPlaybookSuggestedTarget {
+  if ((input.candidatesRejected?.length ?? 0) > 0) {
+    return "routing_metadata_update";
+  }
+  if (!workflow.bounded) {
+    return "routing_metadata_update";
+  }
+  if (input.noSkillResult === "correct" || input.noSkillResult === "not-applicable") {
+    return "routing_eval_addition";
+  }
+  const repeated = (existing?.occurrences ?? 0) > 0;
+  if (!repeated) {
+    return "routing_eval_addition";
+  }
+  if ((input.candidatesShown?.length ?? 0) > 0 || input.searchedReplacementSkill !== undefined) {
+    return "skill_consolidation";
+  }
+  return "skill_create";
+}
+
+function hasRejectedRouteSignal(
+  input: {
+    correctionSignals?: SkillRouteCorrectionSignal[];
+    candidatesRejected?: SkillRouteRejectedCandidate[];
+  },
+  selectedSkillName: string
+): boolean {
+  return (input.correctionSignals ?? []).some((signal) =>
+    signal.kind === "rejected" && (signal.skillName === undefined || signal.skillName === selectedSkillName)
+  ) ||
+    (input.candidatesRejected ?? []).some((candidate) => candidate.skillName === selectedSkillName);
+}
+
+function candidateImprovementForSuggestedTarget(target: LearningSuggestedTarget): string {
+  switch (target) {
+    case "routing_metadata_update":
+      return "Review routing metadata through the governed evolution path.";
+    case "routing_eval_addition":
+      return "Add or update a routing eval case through the governed evolution path.";
+    case "negative_example_addition":
+      return "Add a negative routing example through the governed evolution path.";
+    case "skill_consolidation":
+      return "Review whether existing skill coverage should be consolidated before creating a new skill.";
+    case "skill_create":
+      return "Create a governed skill only after repeated bounded evidence is reviewed.";
+    case "skill_patch":
+      return "Refine the selected skill through the governed evolution path.";
+  }
+}
+
+function reasonForSuggestedTarget(target: LearningSuggestedTarget): string {
+  switch (target) {
+    case "routing_metadata_update":
+      return "Route evidence suggests routing metadata should be reviewed before changing skill behavior.";
+    case "routing_eval_addition":
+      return "Route evidence should first become a routing eval before metadata or skill changes.";
+    case "negative_example_addition":
+      return "Rejected route evidence should first become a negative routing example.";
+    case "skill_consolidation":
+      return "Repeated bounded workflow overlapped existing route candidates; review consolidation before creating a new skill.";
+    case "skill_create":
+      return "Repeated bounded no-skill workflow may need a governed skill.";
+    case "skill_patch":
+      return "Selected skill turn produced evidence for future governed refinement.";
+  }
+}
+
+function confidenceFallbackForSuggestedTarget(target: LearningSuggestedTarget): number {
+  switch (target) {
+    case "skill_create":
+      return 0.65;
+    case "skill_consolidation":
+      return 0.6;
+    case "skill_patch":
+    case "routing_eval_addition":
+      return 0.55;
+    case "routing_metadata_update":
+    case "negative_example_addition":
+      return 0.45;
+  }
 }
 
 function promptSummaryForLearning(userText: string): string {

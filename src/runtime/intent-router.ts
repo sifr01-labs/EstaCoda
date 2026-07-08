@@ -1,5 +1,13 @@
 import type { ChannelAttachment, ChannelAttachmentKind, ChannelKind } from "../contracts/channel.js";
-import type { IntentLabel, IntentRoute, IntentRouteEvidence, NativeIntent } from "../contracts/intent.js";
+import type {
+  IntentLabel,
+  IntentRoute,
+  IntentRouteEvidence,
+  IntentShadowRoute,
+  IntentTaskClass,
+  NativeIntent,
+  SkillRouteCandidate
+} from "../contracts/intent.js";
 import type { ModelProfile } from "../contracts/provider.js";
 import type { LoadedSkill, SkillDefinition, SkillDeferRule, SkillPattern } from "../contracts/skill.js";
 import type { ToolsetName } from "../contracts/tool.js";
@@ -46,6 +54,32 @@ const NATIVE_INTENT_TOOLSETS: Record<NativeIntent, ToolsetName[]> = {
   "general": []
 };
 
+const PRIMARY_SKILL_MIN_SCORE = 0.7;
+const SUPPORTING_SKILL_LIMIT = 3;
+const SHADOW_SEMANTIC_CANDIDATE_LIMIT = 3;
+const SHADOW_SEMANTIC_MIN_SCORE = 0.42;
+const SHADOW_SEMANTIC_STOP_WORDS = new Set([
+  "about",
+  "after",
+  "again",
+  "also",
+  "before",
+  "being",
+  "could",
+  "from",
+  "have",
+  "into",
+  "like",
+  "need",
+  "please",
+  "that",
+  "this",
+  "with",
+  "would",
+  "you",
+  "your"
+]);
+
 export class IntentRouter {
   readonly #skillRegistry: SkillRegistry;
   readonly #model: ModelProfile | undefined;
@@ -62,12 +96,14 @@ export class IntentRouter {
 
     if (slashInvocation?.kind === "known") {
       const nativeIntent = nativeIntentFromSkill(slashInvocation.skill) ?? "general";
+      const task = detectTaskClass(normalized, nativeIntent);
       const evidence: IntentRouteEvidence[] = [{
         kind: "slash-invocation",
         source: slashInvocation.skill.name,
         detail: `Explicit slash skill invocation for ${slashInvocation.skill.name}.`,
         weight: 1
-      }];
+      }, ...task.evidence];
+      const confidence = confidenceFromEvidence(evidence);
       const labels = dedupe([
         "skill-invocation",
         ...routingLabels(slashInvocation.skill)
@@ -79,9 +115,20 @@ export class IntentRouter {
 
       return {
         nativeIntent,
+        taskClass: task.taskClass,
         labels,
-        confidence: confidenceFromEvidence(evidence),
+        confidence,
         suggestedToolsets,
+        primarySkill: slashInvocation.skill,
+        supportingSkills: [],
+        candidates: [{
+          skill: slashInvocation.skill,
+          role: "primary",
+          score: 1,
+          confidence,
+          evidence
+        }],
+        rejectedCandidates: [],
         suggestedSkills: [slashInvocation.skill],
         invocation: {
           name: slashInvocation.skill.name,
@@ -95,18 +142,23 @@ export class IntentRouter {
     }
 
     if (slashInvocation?.kind === "unknown") {
+      const task = detectTaskClass(normalized, "general");
       const evidence: IntentRouteEvidence[] = [{
         kind: "slash-invocation",
         source: slashInvocation.name,
         detail: `Unknown slash invocation: /${slashInvocation.name}.`,
         weight: 1
-      }];
+      }, ...task.evidence];
 
       return {
         nativeIntent: "general",
+        taskClass: task.taskClass,
         labels: ["skill-invocation"],
         confidence: confidenceFromEvidence(evidence),
         suggestedToolsets: [],
+        supportingSkills: [],
+        candidates: [],
+        rejectedCandidates: [],
         suggestedSkills: [],
         invocation: {
           name: slashInvocation.name,
@@ -120,6 +172,7 @@ export class IntentRouter {
     }
 
     const native = detectNativeIntent(normalized, options.attachments);
+    const task = detectTaskClass(normalized, native.nativeIntent);
     const labels = dedupe([
       native.nativeIntent,
       ...native.labels
@@ -137,23 +190,57 @@ export class IntentRouter {
       .filter((match): match is SkillMatch => match !== undefined)
       .sort(compareSkillMatches);
     const activeSkillMatches = skillMatches.filter((match) => !match.deferred);
-    const suggestedSkills = activeSkillMatches.map((match) => match.skill);
+    const selectedMatches = selectSkillMatches(activeSkillMatches);
+    const primarySkill = selectedMatches.primary?.skill;
+    const supportingSkills = selectedMatches.supporting.map((match) => match.skill);
+    const suggestedSkills = primarySkill === undefined
+      ? supportingSkills
+      : [primarySkill, ...supportingSkills];
+    const supportingSkillNames = new Set(supportingSkills.map((skill) => skill.name));
+    const candidates = skillMatches.map((match) => routeCandidateFromMatch(match, {
+      primarySkillName: primarySkill?.name,
+      supportingSkillNames
+    }));
+    const rejectedCandidates = candidates.filter((candidate) =>
+      candidate.role === "rejected" || candidate.role === "deferred"
+    );
+    const shadowSemanticRoute = computeShadowSemanticRoute({
+      prompt,
+      skills: this.#skillRegistry.list(),
+      deterministicPrimarySkill: primarySkill,
+      deterministicCandidates: candidates,
+      matchInput: {
+        prompt,
+        normalized,
+        nativeIntent: native.nativeIntent,
+        labels,
+        attachments: options.attachments,
+        model
+      }
+    });
     const evidence = [
       ...native.evidence,
+      ...task.evidence,
       ...skillMatches.flatMap((match) => match.evidence),
-      ...toolsetEvidence(native.nativeIntent, suggestedSkills)
+      ...toolsetEvidence(native.nativeIntent, primarySkill === undefined ? [] : [primarySkill])
     ];
     const suggestedToolsets = dedupe([
       ...NATIVE_INTENT_TOOLSETS[native.nativeIntent],
-      ...suggestedSkills.flatMap((skill) => routingToolsets(skill))
+      ...(primarySkill === undefined ? [] : routingToolsets(primarySkill))
     ]);
-    const confirmationRequired = confirmationForSkills(suggestedSkills, evidence);
+    const confirmationRequired = confirmationForSkills(primarySkill === undefined ? [] : [primarySkill], evidence);
 
     return {
       nativeIntent: native.nativeIntent,
+      taskClass: task.taskClass,
       labels: labels.length === 0 ? ["general"] : labels,
       confidence: confidenceFromEvidence(evidence),
       suggestedToolsets,
+      primarySkill,
+      supportingSkills,
+      candidates,
+      rejectedCandidates,
+      shadowSemanticRoute,
       suggestedSkills,
       confirmationRequired,
       evidence,
@@ -250,6 +337,58 @@ function detectNativeIntent(normalized: string, attachments: ChannelAttachment[]
       weight: 0.35
     }]
   };
+}
+
+function detectTaskClass(normalized: string, nativeIntent: NativeIntent): {
+  taskClass: IntentTaskClass;
+  evidence: IntentRouteEvidence[];
+} {
+  const nativeTaskClass = taskClassFromNativeIntent(nativeIntent);
+  if (nativeTaskClass !== "general") {
+    return {
+      taskClass: nativeTaskClass,
+      evidence: [{
+        kind: "task-class",
+        detail: `Native intent ${nativeIntent} maps to task class ${nativeTaskClass}.`,
+        weight: 0
+      }]
+    };
+  }
+
+  const taskClass = taskClassFromPrompt(normalized);
+  return {
+    taskClass,
+    evidence: taskClass === "general"
+      ? []
+      : [{
+          kind: "task-class",
+          detail: `Prompt matched deterministic task class ${taskClass}.`,
+          weight: 0
+        }]
+  };
+}
+
+function taskClassFromPrompt(normalized: string): IntentTaskClass {
+  if (matchesReleaseValidation(normalized)) {
+    return "release-validation";
+  }
+  if (matchesDocsWriting(normalized)) {
+    return "docs-writing";
+  }
+  if (matchesCodeReview(normalized)) {
+    return "code-review";
+  }
+  if (matchesArchitectureAdvice(normalized)) {
+    return "architecture-advice";
+  }
+  if (matchesResearch(normalized)) {
+    return "research";
+  }
+  if (matchesRepoChange(normalized)) {
+    return "repo-change";
+  }
+
+  return "general";
 }
 
 function matchSkill(skill: LoadedSkill | SkillDefinition, input: {
@@ -428,6 +567,36 @@ function matchesSpeechGeneration(normalized: string): boolean {
   return /\b(text to speech|tts|read aloud|speak this|say this|spoken reply|generate speech)\b/iu.test(normalized);
 }
 
+function matchesCodeReview(normalized: string): boolean {
+  return /\b(review|audit|inspect)\b.{0,80}\b(pr|pull request|merge request|diff|patch|implementation|code)\b/iu.test(normalized) ||
+    /\b(pr|pull request|merge request|diff|patch|implementation|code)\b.{0,80}\b(review|audit|inspect)\b/iu.test(normalized);
+}
+
+function matchesRepoChange(normalized: string): boolean {
+  return /\b(implement|fix|change|update|modify|refactor|add|remove)\b.{0,80}\b(code|repo|repository|file|files|test|tests|feature|bug|command|cli)\b/iu.test(normalized) ||
+    /\b(can you|please|let'?s)\b.{0,40}\b(implement|fix|change|update|modify|refactor|add|remove)\b/iu.test(normalized);
+}
+
+function matchesDocsWriting(normalized: string): boolean {
+  return /\b(write|draft|create|update|revise|edit)\b.{0,80}\b(docs|documentation|readme|guide|manual|release notes|changelog)\b/iu.test(normalized) ||
+    /\b(docs|documentation|readme|guide|manual|release notes|changelog)\b.{0,80}\b(write|draft|create|update|revise|edit)\b/iu.test(normalized);
+}
+
+function matchesReleaseValidation(normalized: string): boolean {
+  return /\b(validate|verify|check|test|smoke)\b.{0,80}\b(release|branch|merge|before merge|pre[- ]?merge|readiness)\b/iu.test(normalized) ||
+    /\b(release|branch|merge|before merge|pre[- ]?merge|readiness)\b.{0,80}\b(validate|verify|check|test|smoke)\b/iu.test(normalized);
+}
+
+function matchesArchitectureAdvice(normalized: string): boolean {
+  return /\b(what do you think|thoughts|opinion|feedback|review)\b.{0,80}\b(architecture|design|approach|plan|proposal|system)\b/iu.test(normalized) ||
+    /\b(architecture|design|approach|plan|proposal|system)\b.{0,80}\b(what do you think|thoughts|opinion|feedback)\b/iu.test(normalized);
+}
+
+function matchesResearch(normalized: string): boolean {
+  return /\b(research|investigate|look up|find sources|survey)\b/iu.test(normalized) ||
+    /\bcompare\b.{0,80}\b(options|approaches|papers|sources|evidence|market|competitors)\b/iu.test(normalized);
+}
+
 function routingLabels(skill: LoadedSkill | SkillDefinition): string[] {
   return skill.routing?.labels ?? [];
 }
@@ -490,6 +659,178 @@ function compareSkillMatches(left: SkillMatch, right: SkillMatch): number {
     left.skill.name.localeCompare(right.skill.name);
 }
 
+function selectSkillMatches(matches: SkillMatch[]): {
+  primary?: SkillMatch;
+  supporting: SkillMatch[];
+} {
+  const eligible = matches.filter((match) => match.score >= PRIMARY_SKILL_MIN_SCORE);
+  return {
+    primary: eligible[0],
+    supporting: eligible.slice(1, SUPPORTING_SKILL_LIMIT + 1)
+  };
+}
+
+function computeShadowSemanticRoute(input: {
+  prompt: string;
+  skills: Array<LoadedSkill | SkillDefinition>;
+  deterministicPrimarySkill?: LoadedSkill | SkillDefinition;
+  deterministicCandidates: SkillRouteCandidate[];
+  matchInput: Parameters<typeof matchSkill>[1];
+}): IntentShadowRoute | undefined {
+  const queryTerms = tokenizeForShadowSearch(input.prompt);
+  if (queryTerms.length === 0) {
+    return undefined;
+  }
+
+  const blockedSkillNames = new Set(input.deterministicCandidates
+    .filter((candidate) => candidate.role === "rejected" || candidate.role === "deferred")
+    .map((candidate) => candidate.skill.name));
+  const scored = input.skills
+    .filter((skill) =>
+      !blockedSkillNames.has(skill.name) &&
+      !isSkillBlockedForShadowRoute(skill, input.matchInput)
+    )
+    .map((skill) => scoreShadowSemanticSkill(skill, queryTerms, input.matchInput))
+    .filter((candidate): candidate is NonNullable<ReturnType<typeof scoreShadowSemanticSkill>> => candidate !== undefined)
+    .sort((left, right) =>
+      right.score - left.score ||
+      left.skill.name.localeCompare(right.skill.name)
+    )
+    .slice(0, SHADOW_SEMANTIC_CANDIDATE_LIMIT);
+
+  if (scored.length === 0 || scored[0].score < SHADOW_SEMANTIC_MIN_SCORE) {
+    return undefined;
+  }
+
+  const wouldSelectSkill = scored[0].skill;
+  const deterministic = input.deterministicPrimarySkill?.name ?? "none";
+  return {
+    mode: "local-semantic-shadow",
+    wouldSelectSkill,
+    confidence: clampConfidence(scored[0].score),
+    candidates: scored,
+    rationale: `Shadow semantic route would select ${wouldSelectSkill.name}; deterministic primary is ${deterministic}.`
+  };
+}
+
+function isSkillBlockedForShadowRoute(
+  skill: LoadedSkill | SkillDefinition,
+  input: Parameters<typeof matchSkill>[1]
+): boolean {
+  return firstMatchingPattern(skill.routing?.negativePatterns, input) !== undefined ||
+    firstMatchingDeferRule(skill.routing?.deferWhen, input) !== undefined;
+}
+
+function scoreShadowSemanticSkill(
+  skill: LoadedSkill | SkillDefinition,
+  queryTerms: string[],
+  matchInput: Parameters<typeof matchSkill>[1]
+): IntentShadowRoute["candidates"][number] | undefined {
+  const metadataTerms = tokenizeForShadowSearch(skillShadowSearchText(skill));
+  if (metadataTerms.length === 0) {
+    return undefined;
+  }
+
+  const metadataSet = new Set(metadataTerms);
+  const overlappingTerms = queryTerms.filter((term) => metadataSet.has(term));
+  if (overlappingTerms.length === 0) {
+    return undefined;
+  }
+
+  const overlapScore = overlappingTerms.length / Math.max(3, Math.min(queryTerms.length, metadataSet.size));
+  const deterministicMatch = matchSkill(skill, matchInput);
+  const deterministicBoost = deterministicMatch !== undefined && !deterministicMatch.deferred
+    ? Math.max(0, deterministicMatch.score) * 0.15
+    : 0;
+  const score = clampConfidence(overlapScore + deterministicBoost + ((skill.routing?.priority ?? 0) / 2_000));
+
+  return {
+    skill,
+    score,
+    confidence: score,
+    evidence: [{
+      kind: "semantic-shadow",
+      source: skill.name,
+      detail: `Shadow metadata overlap: ${dedupe(overlappingTerms).slice(0, 6).join(", ")}.`,
+      weight: score
+    }]
+  };
+}
+
+function skillShadowSearchText(skill: LoadedSkill | SkillDefinition): string {
+  const routingPatterns = (skill.routing?.triggerPatterns ?? []).map((pattern) => pattern.value);
+  const routingLabels = skill.routing?.labels ?? [];
+  const legacyPatterns = skill.triggerPatterns ?? [];
+  const evalInputs = skill.evaluations.map((evaluation) => evaluation.input);
+  return [
+    skill.name,
+    skill.description,
+    skill.category,
+    ...routingLabels,
+    ...routingPatterns,
+    ...legacyPatterns,
+    ...(skill.intentLabels ?? []),
+    ...skill.whenToUse,
+    ...skill.examples,
+    ...evalInputs
+  ].filter((entry): entry is string => typeof entry === "string" && entry.length > 0).join(" ");
+}
+
+function tokenizeForShadowSearch(value: string): string[] {
+  return dedupe(value
+    .toLowerCase()
+    .split(/[^a-z0-9\u0600-\u06ff]+/u)
+    .map((token) => token.trim())
+    .filter((token) =>
+      token.length >= 3 &&
+      !SHADOW_SEMANTIC_STOP_WORDS.has(token) &&
+      !/^\d+$/u.test(token)
+    ));
+}
+
+function routeCandidateFromMatch(
+  match: SkillMatch,
+  selected: {
+    primarySkillName: string | undefined;
+    supportingSkillNames: ReadonlySet<string>;
+  }
+): SkillRouteCandidate {
+  const role: SkillRouteCandidate["role"] = isNegativeMatch(match)
+    ? "rejected"
+    : match.deferred
+      ? "deferred"
+      : match.skill.name === selected.primarySkillName
+        ? "primary"
+        : selected.supportingSkillNames.has(match.skill.name)
+          ? "supporting"
+          : "candidate";
+  return {
+    skill: match.skill,
+    role,
+    score: match.score,
+    confidence: clampConfidence(match.score),
+    evidence: match.evidence,
+    reason: match.deferReason
+  };
+}
+
+function isNegativeMatch(match: SkillMatch): boolean {
+  return match.evidence.some((entry) => entry.kind === "skill-negative-pattern");
+}
+
+function taskClassFromNativeIntent(nativeIntent: NativeIntent): IntentTaskClass {
+  switch (nativeIntent) {
+    case "image-generation":
+    case "speech-generation":
+      return "media-generation";
+    case "attachment-analysis":
+    case "voice-transcription":
+      return "attachment-analysis";
+    case "general":
+      return "general";
+  }
+}
+
 function rationaleFor(nativeIntent: NativeIntent, labels: string[], skills: Array<LoadedSkill | SkillDefinition>, evidence: IntentRouteEvidence[]): string {
   if (skills.length > 0) {
     return `Matched ${skills.map((skill) => skill.name).join(", ")} via ${evidence.map((entry) => entry.kind).join(", ")}.`;
@@ -510,6 +851,10 @@ function describePattern(pattern: SkillPattern): string {
 
 function normalize(value: string): string {
   return value.toLowerCase().replace(/\s+/gu, " ").trim();
+}
+
+function clampConfidence(value: number): number {
+  return Math.min(1, Math.max(0, value));
 }
 
 function dedupe<T>(values: T[]): T[] {

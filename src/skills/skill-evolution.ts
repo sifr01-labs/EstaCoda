@@ -89,7 +89,7 @@ export type SkillLearningCandidate =
       kind: "selected_skill_refinement";
       selectedSkill: string;
       evidenceIds: string[];
-      suggestedTarget: "skill_patch" | "routing_metadata_update";
+      suggestedTarget: "skill_patch" | "routing_metadata_update" | "routing_eval_addition" | "negative_example_addition";
       reason: string;
       confidence: number;
       sessionId?: string;
@@ -100,7 +100,7 @@ export type SkillLearningCandidate =
       id: string;
       kind: "new_or_missing_playbook";
       evidenceIds: string[];
-      suggestedTarget: "skill_create" | "routing_metadata_update";
+      suggestedTarget: "skill_create" | "routing_metadata_update" | "routing_eval_addition" | "skill_consolidation";
       reason: string;
       confidence: number;
       sessionId?: string;
@@ -132,7 +132,10 @@ export type SkillPatchRiskLevel = "low" | "medium" | "high";
 export const PHASE_1A_GOVERNED_PROPOSAL_CHANGE_KINDS = [
   "skill_patch",
   "skill_create",
-  "routing_metadata_update"
+  "routing_metadata_update",
+  "routing_eval_addition",
+  "negative_example_addition",
+  "skill_consolidation"
 ] as const;
 export type GovernedProposalChangeKind = typeof PHASE_1A_GOVERNED_PROPOSAL_CHANGE_KINDS[number];
 export type GovernedProposalTargetSurface = "skill" | "routing_metadata";
@@ -1045,7 +1048,13 @@ function assertPhase1AGovernedProposalChangeKind(value: string): asserts value i
 }
 
 function targetSurfaceForChangeKind(kind: GovernedProposalChangeKind): GovernedProposalTargetSurface {
-  return kind === "routing_metadata_update" ? "routing_metadata" : "skill";
+  return isRoutingMetadataChangeKind(kind) ? "routing_metadata" : "skill";
+}
+
+function isRoutingMetadataChangeKind(kind: GovernedProposalChangeKind): boolean {
+  return kind === "routing_metadata_update" ||
+    kind === "routing_eval_addition" ||
+    kind === "negative_example_addition";
 }
 
 function approvalStateForProposal(input: {

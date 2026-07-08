@@ -523,6 +523,24 @@ describe("createRuntime token branding", () => {
     }
   });
 
+  it("hydrates over-budget persisted MEMORY.md without failing runtime creation", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "estacoda-runtime-overbudget-memory-"));
+    await writeProfileMemoryFixture(homeDir, "default", {
+      "MEMORY.md": "- persisted memory line\n".repeat(130)
+    });
+    const options = await minimalRuntimeOptions();
+    const runtime = await createRuntime({
+      ...options,
+      homeDir
+    });
+
+    try {
+      expect(runtime.describe()).toContain("is ready");
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("fails closed when tokens are missing", async () => {
     const { tokens: _tokens, ...options } = await minimalRuntimeOptions();
 
@@ -2733,6 +2751,7 @@ describe("createRuntime MCP trust gating", () => {
 
   it("runs delegate_task through a real child AgentLoop and records child metadata", async () => {
     const options = await minimalRuntimeOptions();
+    const homeDir = join(options.workspaceRoot, "home");
     const sessionDb = new InMemorySessionDB();
     const providerRequests: ProviderRequest[] = [];
     const model: ModelProfile = {
@@ -2769,6 +2788,7 @@ describe("createRuntime MCP trust gating", () => {
       model,
       primaryModelRoute: { provider: "local", id: "local-child", profile: model },
       providerRegistry: registry,
+      homeDir,
       sessionDb
     });
 
@@ -2835,6 +2855,11 @@ describe("createRuntime MCP trust gating", () => {
         "process_start",
         "process_stop"
       ]));
+      const memoryPath = resolveProfileStateHome({ homeDir, profileId: "default" }).memoryMdPath;
+      const memory = await readFile(memoryPath, "utf8").catch(() => "");
+      expect(memory).not.toContain("- delegation");
+      expect(memory).not.toContain("Inspect delegated runtime");
+      expect(memory).not.toContain("Child final answer");
     } finally {
       await runtime.dispose();
     }

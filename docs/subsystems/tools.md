@@ -198,7 +198,7 @@ Timeout and heartbeat diagnostics are structured and bounded. Diagnostics defaul
 
 Delegation results include structured status/reason metadata, child session ids where created, effective child tools/toolsets, stripped/blocked diagnostics, role/depth, batch indexes, timeout/cancelled details, and provider token usage when available. Batch usage rolls up numeric token fields and reports unavailable usage per child. Durable or estimated USD cost accounting is not shipped.
 
-Delegation outcome memory is configurable and disabled by default. When enabled, the memory provider records a bounded delegated-task preview and deterministic status/reason summary only. It does not store raw child output, prompts, transcripts, tool arguments, file contents, or diagnostic payloads.
+Delegation outcomes are recorded as operational telemetry in session events and trajectory records. They are not written to canonical prompt memory.
 
 Tracked file tools record structured read/write operations. Before delegation, the parent read set is snapshotted; if a child later writes, replaces, or deletes a previously read path, the result includes an advisory stale-file warning. The warning does not change status. Shell/process writes are not detected unless represented through the file-state tracker.
 

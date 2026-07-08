@@ -471,6 +471,7 @@ export type SessionEvent =
       promptHash?: string;
       skillName?: string;
       nativeIntent: string;
+      taskClass?: string;
       labels: string[];
       selected: boolean;
       invoked: boolean;

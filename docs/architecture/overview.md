@@ -386,7 +386,8 @@ Capability-first security boundary.
 - Profile-local `USER.md`, `SOUL.md`, `MEMORY.md`, `promotions.json`, and `memory-curation.json` under `~/.estacoda/profiles/<id>/`
 - Workspace `AGENTS.md` is context/instruction input, not profile memory
 - Bounded budgets enforced by `MemoryStore`
-- `LocalMemoryProvider` persists: manual conclusions, promoted user preferences, promoted project facts/conventions, skill outcomes
+- `LocalMemoryProvider` persists: manual conclusions, promoted user preferences, and promoted project facts/conventions
+- Skill and delegation outcomes are operational telemetry and Agent Evolution evidence. They are not written into canonical prompt memory.
 - Contradiction/forget/inspection for promoted user preferences
 - Agent Evolution separated from memory files:
   - Facts/conventions → profile-local `MEMORY.md`

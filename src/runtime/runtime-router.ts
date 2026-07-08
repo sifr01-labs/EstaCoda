@@ -68,7 +68,7 @@ export class RuntimeRouter {
       trustedWorkspace: input.trustedWorkspace ?? false
     });
 
-    const selectedSkill = intent.suggestedSkills[0];
+    const selectedSkill = intent.primarySkill ?? intent.suggestedSkills[0];
     const selectedSkillPromptContent =
       selectedSkill === undefined || !isLoadedSkill(selectedSkill)
         ? undefined
@@ -205,9 +205,13 @@ function buildAttachmentFailureResponse(
 function directAttachmentFailureIntent(): IntentRoute {
   return {
     nativeIntent: "general",
+    taskClass: "general",
     labels: ["general"],
     confidence: 1,
     suggestedToolsets: [],
+    supportingSkills: [],
+    candidates: [],
+    rejectedCandidates: [],
     suggestedSkills: [],
     confirmationRequired: false,
     evidence: [

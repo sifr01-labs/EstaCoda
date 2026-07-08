@@ -125,7 +125,7 @@ export class ProviderExecutor {
 
   async complete(
     request: Omit<ProviderRequest, "model"> & { model?: string },
-    _preferences: ProviderRoutePreferences = {},
+    preferences: ProviderRoutePreferences = {},
     options: ProviderExecutionOptions = {}
   ): Promise<ProviderExecutionResult> {
     const primaryRoute = options.primaryRoute;
@@ -147,11 +147,12 @@ export class ProviderExecutor {
       };
     }
 
-    return this.#executeRouteChain(request, options);
+    return this.#executeRouteChain(request, preferences, options);
   }
 
   async #executeRouteChain(
     request: Omit<ProviderRequest, "model"> & { model?: string },
+    preferences: ProviderRoutePreferences,
     options: ProviderExecutionOptions
   ): Promise<ProviderExecutionResult> {
     const primaryRoute = options.primaryRoute!;
@@ -173,6 +174,27 @@ export class ProviderExecutor {
       }
 
       const route = chain[index];
+      const preferenceFailure = routePreferenceFailure(route, preferences);
+      if (preferenceFailure !== undefined) {
+        attempts.push({
+          provider: route.provider,
+          model: route.id,
+          ok: false,
+          errorClass: "unsupported",
+          content: preferenceFailure
+        });
+        await options.onEvent?.({
+          kind: "provider-attempt-end",
+          provider: route.provider,
+          model: route.id,
+          ok: false,
+          errorClass: "unsupported",
+          fallback: index > 0,
+          willFallback: index < chain.length - 1
+        });
+        continue;
+      }
+
       const provider = this.#registry.get(route.provider);
 
       if (provider === undefined || provider.executable === false) {
@@ -886,6 +908,37 @@ function shouldFallback(
   }
 
   return false;
+}
+
+function routePreferenceFailure(
+  route: ResolvedModelRoute,
+  preferences: ProviderRoutePreferences
+): string | undefined {
+  if (preferences.providerAllowlist !== undefined && !preferences.providerAllowlist.includes(route.provider)) {
+    return `Provider route ${route.provider}/${route.id} is not in the allowed provider set for this request.`;
+  }
+
+  if (preferences.providerBlocklist?.includes(route.provider)) {
+    return `Provider route ${route.provider}/${route.id} is blocked for this request.`;
+  }
+
+  if (preferences.requireTools === true && !route.profile.supportsTools) {
+    return `Provider route ${route.provider}/${route.id} does not support tools required for this request.`;
+  }
+
+  if (preferences.requireVision === true && !route.profile.supportsVision) {
+    return `Provider route ${route.provider}/${route.id} does not support vision required for this request.`;
+  }
+
+  if (preferences.requireStructuredOutput === true && !route.profile.supportsStructuredOutput) {
+    return `Provider route ${route.provider}/${route.id} does not support structured output required for this request.`;
+  }
+
+  if (preferences.requireReasoning === true && route.profile.supportsReasoning !== true) {
+    return `Provider route ${route.provider}/${route.id} does not support reasoning required for this request.`;
+  }
+
+  return undefined;
 }
 
 function isCredentialIndependent(a: ResolvedModelRoute, b: ResolvedModelRoute): boolean {

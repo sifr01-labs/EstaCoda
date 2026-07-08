@@ -112,6 +112,28 @@ describe("MemoryPromptContextBuilder", () => {
     ]);
   });
 
+  it("surfaces over-budget hydrated memory as prompt diagnostics instead of crashing", async () => {
+    const store = new MemoryStore({
+      budgets: [{ kind: "MEMORY.md", maxChars: 10 }]
+    });
+    store.hydrate("MEMORY.md", "- persisted memory that needs compaction");
+
+    const context = await new MemoryPromptContextBuilder({ store }).build();
+
+    expect(context.frozenCompactMemory).toContainEqual(expect.objectContaining({
+      source: "MEMORY.md",
+      content: "- persisted memory that needs compaction"
+    }));
+    expect(context.diagnostics.budgetPressure).toContainEqual(expect.objectContaining({
+      kind: "MEMORY.md",
+      state: "overflow",
+      maxChars: 10
+    }));
+    expect(context.diagnostics.warnings).toContainEqual(
+      expect.stringMatching(/^MEMORY\.md memory budget pressure is overflow: \d+\/10 chars$/u)
+    );
+  });
+
   it("attaches session recall as untrusted prompt context with source diagnostics", async () => {
     const store = new MemoryStore();
     store.write("USER.md", "- Prefers terse summaries.");

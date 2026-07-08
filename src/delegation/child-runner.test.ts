@@ -318,7 +318,6 @@ function config(): DelegationConfig {
     heartbeatStaleCyclesInTool: 6,
     recoverJsonStringTasks: true,
     diagnostics: { enabled: true, includePromptPreview: false },
-    outcomeMemory: { enabled: false, maxTaskPreviewChars: 240, maxResultSummaryChars: 400 },
     defaultAllowedRiskClasses: ["read-only-local", "read-only-network"],
     defaultExcludedToolsets: ["browser", "media", "mcp"],
     defaultAllowedToolsets: [],

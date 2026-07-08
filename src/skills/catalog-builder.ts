@@ -386,9 +386,24 @@ function buildSkillEntry(args: {
     `${fieldPrefix}: optionalToolsets`,
     args.warnings
   );
+  const permissionExpectations = optionalStringArray(
+    frontmatter.permissionExpectations ?? frontmatter.permission_expectations,
+    `${fieldPrefix}: permissionExpectations`,
+    args.warnings
+  );
   const triggerPatterns = normalizeTriggerPatterns(
     routing.triggerPatterns,
     `${fieldPrefix}: routing.triggerPatterns`,
+    args.warnings
+  );
+  const legacyNegativePatterns = frontmatter.negativePatterns ?? frontmatter.negative_patterns;
+  const negativePatternInput = routing.negativePatterns ?? legacyNegativePatterns;
+  const negativePatternField = routing.negativePatterns === undefined && legacyNegativePatterns !== undefined
+    ? `${fieldPrefix}: negativePatterns`
+    : `${fieldPrefix}: routing.negativePatterns`;
+  const negativePatterns = normalizeTriggerPatterns(
+    negativePatternInput,
+    negativePatternField,
     args.warnings
   );
   const overview = extractOverview(args.parsed.body);
@@ -396,6 +411,14 @@ function buildSkillEntry(args: {
   if (triggerPatterns.length === 0) {
     args.warnings.push(`${fieldPrefix}: routing.triggerPatterns is missing or empty`);
   }
+  warnOnWeakRoutingMetadata({
+    fieldPrefix,
+    triggerPatterns,
+    negativePatterns,
+    evaluations,
+    permissionExpectations,
+    warnings: args.warnings
+  });
   if (frontmatter.optionalToolsets === undefined) {
     args.warnings.push(`${fieldPrefix}: optionalToolsets is missing`);
   }
@@ -435,6 +458,122 @@ function buildSkillEntry(args: {
       governed: isOfficial
     }
   };
+}
+
+function warnOnWeakRoutingMetadata(args: {
+  fieldPrefix: string;
+  triggerPatterns: readonly string[];
+  negativePatterns: readonly string[];
+  evaluations: readonly unknown[];
+  permissionExpectations: readonly string[];
+  warnings: string[];
+}): void {
+  if (args.negativePatterns.length === 0) {
+    args.warnings.push(`${args.fieldPrefix}: routing.negativePatterns or negativePatterns is missing or empty`);
+  }
+  const broadPatterns = args.triggerPatterns.filter(isOverlyBroadTriggerPattern);
+  if (broadPatterns.length > 0) {
+    args.warnings.push(
+      `${args.fieldPrefix}: routing.triggerPatterns may be too broad: ${broadPatterns.join(", ")}`
+    );
+  }
+  if (!args.evaluations.some(hasRoutingExpectation)) {
+    args.warnings.push(`${args.fieldPrefix}: evaluations has no routing expectation`);
+  }
+  if (args.permissionExpectations.length === 0) {
+    args.warnings.push(`${args.fieldPrefix}: permissionExpectations is missing or empty`);
+  }
+}
+
+function isOverlyBroadTriggerPattern(pattern: string): boolean {
+  const normalized = pattern.trim().toLowerCase();
+  if (normalized.length === 0) {
+    return true;
+  }
+  if (normalized.startsWith("/")) {
+    return false;
+  }
+
+  const tokens = normalized
+    .replace(/[^a-z0-9\s-]/g, " ")
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0);
+
+  if (tokens.length === 0) {
+    return true;
+  }
+  if (tokens.length === 1) {
+    return BROAD_TRIGGER_TOKENS.has(tokens[0]);
+  }
+  return tokens.length === 2 &&
+    BROAD_TRIGGER_ACTION_TOKENS.has(tokens[0]) &&
+    BROAD_TRIGGER_TOKENS.has(tokens[1]);
+}
+
+const BROAD_TRIGGER_ACTION_TOKENS = new Set([
+  "analyze",
+  "build",
+  "create",
+  "design",
+  "edit",
+  "find",
+  "generate",
+  "make",
+  "remember",
+  "research",
+  "search",
+  "summarize",
+  "verify",
+  "write"
+]);
+
+const BROAD_TRIGGER_TOKENS = new Set([
+  "analyze",
+  "audio",
+  "batch",
+  "build",
+  "create",
+  "design",
+  "diagram",
+  "document",
+  "edit",
+  "email",
+  "file",
+  "find",
+  "generate",
+  "image",
+  "make",
+  "pdf",
+  "product",
+  "remember",
+  "research",
+  "search",
+  "skill",
+  "summarize",
+  "system",
+  "test",
+  "url",
+  "verify",
+  "video",
+  "wiki",
+  "write"
+]);
+
+function hasRoutingExpectation(evaluation: unknown): boolean {
+  if (!isRecord(evaluation)) {
+    return false;
+  }
+  const expected = evaluation.expected;
+  if (!isRecord(expected)) {
+    return false;
+  }
+  return expected.selectedSkill !== undefined ||
+    expected.selected_skill !== undefined ||
+    expected.skillVisible !== undefined ||
+    expected.skill_visible !== undefined ||
+    expected.expectedTaskClass !== undefined ||
+    expected.expected_task_class !== undefined;
 }
 
 function resolveDisplayName(frontmatter: UnknownRecord, slug: string, fieldPrefix: string): string {
@@ -518,7 +657,7 @@ function optionalStringArray(value: unknown, field: string, warnings: string[]):
     return [];
   }
   if (!isStringArray(value)) {
-    warnings.push(`${field} is not an array of strings; emitting an empty optionalToolsets list`);
+    warnings.push(`${field} is not an array of strings; emitting an empty list`);
     return [];
   }
   return value;

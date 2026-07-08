@@ -43,7 +43,7 @@ describe("SkillLearningManager", () => {
 
     expect(result?.candidate).toEqual(expect.objectContaining({
       kind: "new_or_missing_playbook",
-      suggestedTarget: "skill_create",
+      suggestedTarget: "routing_eval_addition",
       promptHash: "prompt-hash-1"
     }));
     expect(result?.evidence).toEqual(expect.objectContaining({
@@ -85,7 +85,7 @@ describe("SkillLearningManager", () => {
     expect(result?.candidate).toEqual(expect.objectContaining({
       kind: "selected_skill_refinement",
       selectedSkill: "release-skill",
-      suggestedTarget: "skill_patch",
+      suggestedTarget: "routing_eval_addition",
       promptHash: "prompt-hash-2"
     }));
     expect(result?.evidence).toEqual(expect.objectContaining({
@@ -105,7 +105,7 @@ describe("SkillLearningManager", () => {
     }));
   });
 
-  it("routes selected-skill corrections toward routing metadata candidates", async () => {
+  it("routes rejected selected-skill corrections toward negative example candidates", async () => {
     const harness = await createHarness("suggest");
 
     const result = await harness.manager.observeTurn({
@@ -125,7 +125,7 @@ describe("SkillLearningManager", () => {
     expect(result?.candidate).toEqual(expect.objectContaining({
       kind: "selected_skill_refinement",
       selectedSkill: "wrong-skill",
-      suggestedTarget: "routing_metadata_update"
+      suggestedTarget: "negative_example_addition"
     }));
     expect(result?.evidence?.evidence).toEqual(expect.objectContaining({
       finalSkillUsed: "better-skill",
@@ -417,6 +417,32 @@ describe("SkillLearningManager", () => {
     expect(second?.record).toEqual(expect.objectContaining({
       status: "candidate",
       occurrences: 2
+    }));
+    expect(second?.candidate).toEqual(expect.objectContaining({
+      suggestedTarget: "skill_create"
+    }));
+  });
+
+  it("prefers consolidation before creating new skills when repeated misses overlap route candidates", async () => {
+    const harness = await createHarness("suggest");
+    const turn = {
+      ...turnBase(),
+      userText: "Run the release checks for package.json",
+      selectedSkill: undefined,
+      candidatesShown: ["release-skill"],
+      agentEvolutionPolicy: harness.policy,
+      toolExecutions: [execution("shell"), execution("file.read")]
+    };
+
+    await harness.manager.observeTurn(turn);
+    const second = await harness.manager.observeTurn({
+      ...turn,
+      sessionId: "session-2"
+    });
+
+    expect(second?.action).toBe("candidate");
+    expect(second?.candidate).toEqual(expect.objectContaining({
+      suggestedTarget: "skill_consolidation"
     }));
   });
 });

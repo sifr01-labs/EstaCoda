@@ -43,10 +43,15 @@ export class MemoryStore {
     this.#files.set(kind, content);
   }
 
+  hydrate(kind: MemoryFileKind, content: string): void {
+    this.#assertSafeContent(content);
+    this.#files.set(kind, content);
+  }
+
   async loadFromDirectory(root: string): Promise<void> {
     for (const kind of MEMORY_FILE_KINDS) {
       try {
-        this.write(kind, await readFile(join(root, kind), "utf8"));
+        this.hydrate(kind, await readFile(join(root, kind), "utf8"));
       } catch (error) {
         if (!isNotFound(error)) {
           throw error;

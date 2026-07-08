@@ -721,7 +721,7 @@ function cloneMemoryStore(source: MemoryStore): MemoryStore {
   const snapshot = source.snapshot();
   const clone = new MemoryStore({ budgets: snapshot.budgets });
   for (const [file, content] of snapshot.files.entries()) {
-    clone.write(file, content);
+    clone.hydrate(file, content);
   }
   return clone;
 }
@@ -748,7 +748,7 @@ async function loadMemoryFileIntoStore(input: {
   file: Extract<MemoryFileKind, "USER.md" | "MEMORY.md">;
 }): Promise<void> {
   const content = await input.persistence.readFile({ path: input.path, kind: input.file });
-  input.memoryStore.write(input.file, content ?? "");
+  input.memoryStore.hydrate(input.file, content ?? "");
 }
 
 function toMemoryOperation(operation: StoredMemoryOperation): MemoryOperation {

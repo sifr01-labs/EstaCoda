@@ -77,14 +77,25 @@ describe("SkillEvolutionStore", () => {
       evolutionRoot: join(root, "evolution")
     });
 
-    for (const changeKind of ["skill_patch", "skill_create", "routing_metadata_update"] as const) {
+    for (const changeKind of [
+      "skill_patch",
+      "skill_create",
+      "routing_metadata_update",
+      "routing_eval_addition",
+      "negative_example_addition",
+      "skill_consolidation"
+    ] as const) {
       await store.appendGovernedProposal({
         skillName: `${changeKind}-target`,
         reason: `${changeKind} hypothesis`,
         confidence: 0.8,
         evidenceIds: [`obs-${changeKind}`],
         changeKind,
-        targetSurface: changeKind === "routing_metadata_update" ? "routing_metadata" : "skill",
+        targetSurface: (
+          changeKind === "routing_metadata_update" ||
+          changeKind === "routing_eval_addition" ||
+          changeKind === "negative_example_addition"
+        ) ? "routing_metadata" : "skill",
         affectedSurface: `${changeKind}-surface`,
         affectedFiles: [`skills/${changeKind}/SKILL.md`],
         hypothesis: `${changeKind} hypothesis`,
@@ -115,7 +126,10 @@ describe("SkillEvolutionStore", () => {
     const proposals = await reloaded.listProposals();
 
     expect(proposals.map((proposal) => proposal.changeKind).sort()).toEqual([
+      "negative_example_addition",
+      "routing_eval_addition",
       "routing_metadata_update",
+      "skill_consolidation",
       "skill_create",
       "skill_patch"
     ]);
@@ -139,6 +153,18 @@ describe("SkillEvolutionStore", () => {
     expect(proposals).toContainEqual(expect.objectContaining({
       changeKind: "routing_metadata_update",
       targetSurface: "routing_metadata"
+    }));
+    expect(proposals).toContainEqual(expect.objectContaining({
+      changeKind: "routing_eval_addition",
+      targetSurface: "routing_metadata"
+    }));
+    expect(proposals).toContainEqual(expect.objectContaining({
+      changeKind: "negative_example_addition",
+      targetSurface: "routing_metadata"
+    }));
+    expect(proposals).toContainEqual(expect.objectContaining({
+      changeKind: "skill_consolidation",
+      targetSurface: "skill"
     }));
   });
 

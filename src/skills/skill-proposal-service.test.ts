@@ -93,6 +93,41 @@ describe("SkillProposalService governed learning proposals", () => {
     }));
   });
 
+  it("converts routing eval and negative example candidates into routing metadata proposals", async () => {
+    const harness = await createHarness();
+
+    const evalResult = await harness.service.createProposalFromLearningCandidate({
+      candidate: selectedSkillCandidate({
+        suggestedTarget: "routing_eval_addition",
+        selectedSkill: "release-skill"
+      }),
+      agentEvolutionPolicy: deriveAgentEvolutionPolicy("suggest")
+    });
+    const negativeResult = await harness.service.createProposalFromLearningCandidate({
+      candidate: selectedSkillCandidate({
+        suggestedTarget: "negative_example_addition",
+        selectedSkill: "wrong-skill"
+      }),
+      agentEvolutionPolicy: deriveAgentEvolutionPolicy("suggest")
+    });
+
+    expect(evalResult).toEqual(expect.objectContaining({ ok: true }));
+    expect(negativeResult).toEqual(expect.objectContaining({ ok: true }));
+    if (!evalResult.ok || !negativeResult.ok) throw new Error("expected proposal creation");
+    expect(evalResult.proposal).toEqual(expect.objectContaining({
+      changeKind: "routing_eval_addition",
+      targetSurface: "routing_metadata",
+      affectedSurface: "release-skill:routing.evaluations",
+      rollbackExpectation: expect.stringContaining("routing eval")
+    }));
+    expect(negativeResult.proposal).toEqual(expect.objectContaining({
+      changeKind: "negative_example_addition",
+      targetSurface: "routing_metadata",
+      affectedSurface: "wrong-skill:routing.negativePatterns",
+      rollbackExpectation: expect.stringContaining("negative routing example")
+    }));
+  });
+
   it("converts missing-playbook candidates into governed skill_create proposals without creating skills", async () => {
     const harness = await createHarness();
     const candidate = missingPlaybookCandidate({
@@ -119,6 +154,31 @@ describe("SkillProposalService governed learning proposals", () => {
     }));
     await expect(harness.changeManifestStore.list()).resolves.toEqual([]);
     await expect(harness.skillEvolutionStore.listPromotions()).resolves.toEqual([]);
+  });
+
+  it("converts missing-playbook consolidation candidates into review-only skill proposals", async () => {
+    const harness = await createHarness();
+    const candidate = missingPlaybookCandidate({
+      suggestedTarget: "skill_consolidation"
+    });
+
+    const result = await harness.service.createProposalFromLearningCandidate({
+      candidate,
+      skillName: "release-checks-workflow",
+      agentEvolutionPolicy: deriveAgentEvolutionPolicy("suggest")
+    });
+
+    expect(result).toEqual(expect.objectContaining({ ok: true }));
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.proposal).toEqual(expect.objectContaining({
+      skillName: "release-checks-workflow",
+      changeKind: "skill_consolidation",
+      targetSurface: "skill",
+      affectedSurface: "release-checks-workflow:consolidation",
+      authorityExpansion: false,
+      riskClass: "medium",
+      approvalState: "required"
+    }));
   });
 
   it("does not create proposals when policy disables proposal creation", async () => {
@@ -207,7 +267,7 @@ async function createHarness(): Promise<{
 }
 
 function selectedSkillCandidate(input: {
-  suggestedTarget: "skill_patch" | "routing_metadata_update";
+  suggestedTarget: "skill_patch" | "routing_metadata_update" | "routing_eval_addition" | "negative_example_addition";
   selectedSkill: string;
 }): SkillLearningCandidate {
   return {
@@ -225,7 +285,7 @@ function selectedSkillCandidate(input: {
 }
 
 function missingPlaybookCandidate(input: {
-  suggestedTarget: "skill_create" | "routing_metadata_update";
+  suggestedTarget: "skill_create" | "routing_metadata_update" | "routing_eval_addition" | "skill_consolidation";
 }): SkillLearningCandidate {
   return {
     id: "learn_missing",

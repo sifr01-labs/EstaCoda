@@ -585,7 +585,7 @@ export class ProviderTurnLoop {
     });
     const providerPreferences = {
       requireTools: input.providerTools.length > 0,
-      requireVision: false,
+      requireVision: providerRequestContainsImageParts(providerRequest),
       requireStructuredOutput: false,
       providerOrder: [this.#model.provider],
       ...this.#providerPreferences
@@ -1401,6 +1401,19 @@ export function compressionReportFromResult(result: CompactResult): PromptSemant
       ...result.diagnostics.eventWarnings
     ]
   };
+}
+
+function providerRequestContainsImageParts(request: Pick<ProviderRequest, "messages">): boolean {
+  return request.messages.some((message) => providerContentContainsImagePart(message.content));
+}
+
+function providerContentContainsImagePart(content: ProviderMessage["content"]): boolean {
+  return Array.isArray(content) && content.some((part) =>
+    part !== null &&
+    typeof part === "object" &&
+    !Array.isArray(part) &&
+    (part as { type?: unknown }).type === "image_url"
+  );
 }
 
 function isDeterministicCompressionFallback(reason: string | undefined): boolean {

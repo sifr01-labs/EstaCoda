@@ -12,11 +12,13 @@ export type IntentRouteEvidence = {
   kind:
     | "slash-invocation"
     | "native-intent"
+    | "task-class"
     | "attachment"
     | "skill-routing-label"
     | "skill-trigger-pattern"
     | "skill-negative-pattern"
     | "skill-defer-rule"
+    | "semantic-shadow"
     | "toolset-derived"
     | "confirmation-policy";
   source?: string;
@@ -32,11 +34,59 @@ export type SkillInvocation = {
   explicit: boolean;
 };
 
+export type IntentTaskClass =
+  | "code-review"
+  | "repo-change"
+  | "docs-writing"
+  | "release-validation"
+  | "architecture-advice"
+  | "research"
+  | "media-generation"
+  | "attachment-analysis"
+  | "general";
+
+export type SkillRouteCandidateRole =
+  | "primary"
+  | "supporting"
+  | "candidate"
+  | "rejected"
+  | "deferred";
+
+export type SkillRouteCandidate = {
+  skill: LoadedSkill | SkillDefinition;
+  role: SkillRouteCandidateRole;
+  score: number;
+  confidence: number;
+  evidence: IntentRouteEvidence[];
+  reason?: string;
+};
+
+export type IntentShadowRouteCandidate = {
+  skill: LoadedSkill | SkillDefinition;
+  score: number;
+  confidence: number;
+  evidence: IntentRouteEvidence[];
+};
+
+export type IntentShadowRoute = {
+  mode: "local-semantic-shadow";
+  wouldSelectSkill?: LoadedSkill | SkillDefinition;
+  confidence: number;
+  candidates: IntentShadowRouteCandidate[];
+  rationale: string;
+};
+
 export type IntentRoute = {
   nativeIntent: NativeIntent;
+  taskClass?: IntentTaskClass;
   labels: IntentLabel[];
   confidence: number;
   suggestedToolsets: ToolsetName[];
+  primarySkill?: LoadedSkill | SkillDefinition;
+  supportingSkills?: Array<LoadedSkill | SkillDefinition>;
+  candidates?: SkillRouteCandidate[];
+  rejectedCandidates?: SkillRouteCandidate[];
+  shadowSemanticRoute?: IntentShadowRoute;
   suggestedSkills: Array<LoadedSkill | SkillDefinition>;
   invocation?: SkillInvocation;
   confirmationRequired: boolean;

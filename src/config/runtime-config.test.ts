@@ -273,23 +273,16 @@ describe("normalizeDelegationConfig", () => {
     }).diagnostics.includePromptPreview).toBe(true);
   });
 
-  it("defaults delegation outcome memory off and bounds partial overrides", () => {
-    expect(normalizeDelegationConfig({}).outcomeMemory).toEqual({
-      enabled: false,
-      maxTaskPreviewChars: 240,
-      maxResultSummaryChars: 400
-    });
-    expect(normalizeDelegationConfig({
+  it("ignores legacy delegation outcome memory config", () => {
+    const normalized = normalizeDelegationConfig({
       outcomeMemory: {
         enabled: true,
         maxTaskPreviewChars: 0,
         maxResultSummaryChars: 10_000
       }
-    }).outcomeMemory).toEqual({
-      enabled: true,
-      maxTaskPreviewChars: 1,
-      maxResultSummaryChars: 4_000
-    });
+    } as unknown as Parameters<typeof normalizeDelegationConfig>[0]);
+
+    expect("outcomeMemory" in normalized).toBe(false);
   });
 
   it("ignores unknown delegation config keys during config loading", async () => {
@@ -300,6 +293,9 @@ describe("normalizeDelegationConfig", () => {
       model: { provider: "openai", id: "gpt-4o" },
       delegation: {
         unknownKey: true,
+        outcomeMemory: {
+          enabled: true
+        },
         maxSpawnDepth: 2
       }
     }));
@@ -307,6 +303,7 @@ describe("normalizeDelegationConfig", () => {
     const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
     expect(loaded.delegation.maxSpawnDepth).toBe(2);
     expect(loaded.delegation.maxConcurrentChildren).toBe(3);
+    expect("outcomeMemory" in loaded.delegation).toBe(false);
     await rm(workspace, { recursive: true, force: true });
   });
 

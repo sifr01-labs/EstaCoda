@@ -594,6 +594,72 @@ describe("ProviderExecutor route-based execution", () => {
     }));
   });
 
+  it("skips fallback routes that do not satisfy required vision", async () => {
+    const primaryAdapter = createMockAdapter({
+      id: "primary",
+      completeResponse: {
+        ok: false,
+        content: "Rate limited",
+        model: "primary-model",
+        provider: "primary",
+        errorClass: "rate-limit"
+      }
+    });
+    const nonVisionAdapter = createMockAdapter({ id: "nonvision" });
+    const visionAdapter = createMockAdapter({ id: "vision" });
+    registry.register(primaryAdapter);
+    registry.register(nonVisionAdapter);
+    registry.register(visionAdapter);
+
+    const nonVisionRoute = createDefaultRoute({
+      provider: "nonvision",
+      id: "nonvision-model",
+      profile: {
+        id: "nonvision-model",
+        provider: "nonvision",
+        contextWindowTokens: 128_000,
+        supportsTools: true,
+        supportsVision: false,
+        supportsStructuredOutput: true
+      }
+    });
+    const visionRoute = createDefaultRoute({
+      provider: "vision",
+      id: "vision-model",
+      profile: {
+        id: "vision-model",
+        provider: "vision",
+        contextWindowTokens: 128_000,
+        supportsTools: true,
+        supportsVision: true,
+        supportsStructuredOutput: true
+      }
+    });
+
+    const result = await executor.complete(
+      { messages: [] },
+      { requireVision: true },
+      {
+        primaryRoute: createDefaultRoute({ provider: "primary", id: "primary-model" }),
+        fallbackChain: [nonVisionRoute, visionRoute]
+      }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.fallbackUsed).toBe(true);
+    expect(primaryAdapter.calls).toHaveLength(1);
+    expect(nonVisionAdapter.calls).toHaveLength(0);
+    expect(visionAdapter.calls).toHaveLength(1);
+    expect(result.attempts[1]).toEqual(expect.objectContaining({
+      provider: "nonvision",
+      model: "nonvision-model",
+      ok: false,
+      errorClass: "unsupported",
+      content: expect.stringContaining("does not support vision")
+    }));
+    expect(result.response?.provider).toBe("vision");
+  });
+
   it("captures cancelled streaming diagnostics without counting the aborted token as visible", async () => {
     const controller = new AbortController();
     const calls: MockCall[] = [];
@@ -657,7 +723,7 @@ describe("ProviderExecutor route-based execution", () => {
         provider: "codex",
         contextWindowTokens: 128_000,
         supportsTools: true,
-        supportsVision: false,
+        supportsVision: true,
         supportsStructuredOutput: true
       },
       apiMode: "openai_responses",
@@ -698,7 +764,7 @@ describe("ProviderExecutor route-based execution", () => {
         provider: "codex",
         contextWindowTokens: 128_000,
         supportsTools: true,
-        supportsVision: false,
+        supportsVision: true,
         supportsStructuredOutput: true
       },
       apiMode: "openai_responses",
@@ -741,7 +807,7 @@ describe("ProviderExecutor route-based execution", () => {
         provider: "codex",
         contextWindowTokens: 128_000,
         supportsTools: true,
-        supportsVision: false,
+        supportsVision: true,
         supportsStructuredOutput: true
       },
       baseUrl: "https://chatgpt.com/backend-api/codex",
@@ -795,7 +861,7 @@ describe("ProviderExecutor route-based execution", () => {
         provider: "codex",
         contextWindowTokens: 128_000,
         supportsTools: true,
-        supportsVision: false,
+        supportsVision: true,
         supportsStructuredOutput: true
       },
       apiMode: "openai_responses",
@@ -853,7 +919,7 @@ describe("ProviderExecutor route-based execution", () => {
         provider: "codex",
         contextWindowTokens: 128_000,
         supportsTools: true,
-        supportsVision: false,
+        supportsVision: true,
         supportsStructuredOutput: true
       },
       apiMode: "openai_responses",
@@ -901,7 +967,7 @@ describe("ProviderExecutor route-based execution", () => {
         provider: "codex",
         contextWindowTokens: 128_000,
         supportsTools: true,
-        supportsVision: false,
+        supportsVision: true,
         supportsStructuredOutput: true
       },
       apiMode: "openai_responses",
@@ -943,7 +1009,7 @@ describe("ProviderExecutor route-based execution", () => {
         provider: "codex",
         contextWindowTokens: 128_000,
         supportsTools: true,
-        supportsVision: false,
+        supportsVision: true,
         supportsStructuredOutput: true
       },
       baseUrl: "https://chatgpt.com/backend-api/codex",

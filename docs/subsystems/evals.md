@@ -34,8 +34,10 @@ Runs deterministic fixtures with pass/fail assertions. The source of truth for t
 | Provider/tool baseline | Mock provider text responses, blocked-tool handling, missing-tool failure handling |
 | Memory | Promotion provenance, deactivation, selective rendering, protected safety files |
 | Knowledge/dependency graph | Forward/reverse dependencies, affected files, graph summaries, cache invalidation |
-| Agent Evolution | Manifest creation, proposal/manifest bridge, user-correction records, tool-description and routing-metadata proposal shapes, export shape |
+| Agent Evolution | Manifest creation, proposal/manifest bridge, user-correction records, tool-description and routing-metadata proposal shapes, routing baseline and semantic-routing readiness metrics, export shape |
 | Workflow | Run state transitions, locking, migrations, store atomicity, engine lifecycle, restart recovery, command control, event summaries, integration |
+
+The routing baseline fixture uses the live `IntentRouter` for governed routing cases. It tracks primary precision/recall, no-skill false positives, forbidden-skill violations, supporting-candidate recall, task-class correctness, semantic-vs-deterministic disagreement, semantic recall improvement, semantic false positives, semantic forbidden-skill violations, ambiguous semantic candidates, and Arabic semantic readiness. These metrics are readiness signals only; semantic and LLM route signals remain shadow telemetry until explicitly promoted by code and policy.
 
 ### Eval Substrate Scaffold
 

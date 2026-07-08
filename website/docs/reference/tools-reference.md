@@ -369,7 +369,7 @@ Provider token usage is copied from structured provider execution metadata. Batc
 
 `modelOverride` supports same-provider child model selection and reviewed cross-provider child routes. Cross-provider overrides preserve target provider config, use existing `apiKeyEnv` credentials, respect `authMethod: "none"`, reject `enableNetwork: false` before child execution, and disable fallbacks for the overridden child. Metadata is bounded/redacted.
 
-Outcome memory is disabled by default. When enabled, delegation records bounded task preview and deterministic status/reason summary only, not raw child output, prompts, transcripts, tool arguments, file contents, or diagnostics payloads.
+Delegation outcomes are operational telemetry recorded in session events and trajectory records. They do not write to canonical prompt memory and do not store raw child output, prompts, transcripts, tool arguments, file contents, or diagnostics payloads in `MEMORY.md`.
 
 Stale-file warnings are advisory metadata. Parent file reads are snapshotted before delegation; tracked child writes/replaces/deletes to those paths produce warnings without changing delegation status. Shell/process writes are not detected unless represented through the file-state tracker.
 

@@ -133,7 +133,7 @@ Gateway interrupt protection is runtime/session scoped. `ChannelGateway` checks 
 
 Diagnostics for child timeout/stale heartbeat are written only under the configured profile-local diagnostics root. They store bounded task previews, hashes, effective tool names, provider/model labels, last safe event summaries, and timing metadata. Full prompt previews are disabled by default.
 
-Delegation outcome memory is optional and disabled by default. When enabled, it records bounded delegated-task previews and deterministic status/reason summaries such as `completed`, `timeout`, or `failed: provider-error`. It does not store raw child output, prompts, transcripts, tool arguments, file contents, or diagnostic payloads.
+Delegation outcomes are operational telemetry. They are recorded through session events and trajectory records, not canonical prompt memory. `MEMORY.md` is reserved for reviewed durable facts, preferences, conventions, and lessons.
 
 File-state tracking records structured reads and writes performed through tracked file tools. Before delegation, the parent read set is snapshotted with a monotonic tracker cursor. If a child later writes, replaces, or deletes a file the parent had already read, the parent result receives an advisory stale-file warning. The warning is metadata only and does not change delegation status. Shell/process writes are not claimed as tracked unless they flow through the file-state tracker.
 

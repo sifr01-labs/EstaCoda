@@ -578,16 +578,16 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const sharedMemoryContent = renderSharedMemory(await listSharedMemory({ homeDir: options.homeDir }));
   const skillLearningStorePath = join(workspaceRoot, ".estacoda", "skill-learning.json");
   if (sharedMemoryContent !== undefined) {
-    memoryStore.write("SHARED.md", sharedMemoryContent);
+    memoryStore.hydrate("SHARED.md", sharedMemoryContent);
   }
   if (userMemory !== undefined) {
-    memoryStore.write("USER.md", userMemory);
+    memoryStore.hydrate("USER.md", userMemory);
   }
   if (soulMemory !== undefined) {
-    memoryStore.write("SOUL.md", soulMemory);
+    memoryStore.hydrate("SOUL.md", soulMemory);
   }
   if (profileMemory !== undefined) {
-    memoryStore.write("MEMORY.md", profileMemory);
+    memoryStore.hydrate("MEMORY.md", profileMemory);
   }
   await memoryIndexSync?.backfillOnStartup();
   const memoryPromotionStore = new MemoryPromotionStore({
@@ -711,6 +711,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     mainRoute,
     primaryModelRoute: options.primaryModelRoute,
     modelFallbackRoutes: options.modelFallbackRoutes,
+    assessorRoute,
     visionRoute,
     compressionRoute,
     providerPreferences: {
@@ -894,7 +895,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       currentDepth: 0,
       subagentRegistry,
       diagnosticsRoot: profilePaths.tempPath,
-      memoryProvider,
       fileStateTracker,
       parentVisibleTools: () => toolRegistry.list()
     }),
