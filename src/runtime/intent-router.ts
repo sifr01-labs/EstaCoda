@@ -53,6 +53,9 @@ const NATIVE_INTENT_TOOLSETS: Record<NativeIntent, ToolsetName[]> = {
   "general": []
 };
 
+const PRIMARY_SKILL_MIN_SCORE = 0.7;
+const SUPPORTING_SKILL_LIMIT = 3;
+
 export class IntentRouter {
   readonly #skillRegistry: SkillRegistry;
   readonly #model: ModelProfile | undefined;
@@ -163,12 +166,17 @@ export class IntentRouter {
       .filter((match): match is SkillMatch => match !== undefined)
       .sort(compareSkillMatches);
     const activeSkillMatches = skillMatches.filter((match) => !match.deferred);
-    const primarySkill = activeSkillMatches[0]?.skill;
-    const supportingSkills = activeSkillMatches.slice(1).map((match) => match.skill);
+    const selectedMatches = selectSkillMatches(activeSkillMatches);
+    const primarySkill = selectedMatches.primary?.skill;
+    const supportingSkills = selectedMatches.supporting.map((match) => match.skill);
     const suggestedSkills = primarySkill === undefined
       ? supportingSkills
       : [primarySkill, ...supportingSkills];
-    const candidates = skillMatches.map((match) => routeCandidateFromMatch(match, primarySkill?.name));
+    const supportingSkillNames = new Set(supportingSkills.map((skill) => skill.name));
+    const candidates = skillMatches.map((match) => routeCandidateFromMatch(match, {
+      primarySkillName: primarySkill?.name,
+      supportingSkillNames
+    }));
     const rejectedCandidates = candidates.filter((candidate) =>
       candidate.role === "rejected" || candidate.role === "deferred"
     );
@@ -612,17 +620,33 @@ function compareSkillMatches(left: SkillMatch, right: SkillMatch): number {
     left.skill.name.localeCompare(right.skill.name);
 }
 
+function selectSkillMatches(matches: SkillMatch[]): {
+  primary?: SkillMatch;
+  supporting: SkillMatch[];
+} {
+  const eligible = matches.filter((match) => match.score >= PRIMARY_SKILL_MIN_SCORE);
+  return {
+    primary: eligible[0],
+    supporting: eligible.slice(1, SUPPORTING_SKILL_LIMIT + 1)
+  };
+}
+
 function routeCandidateFromMatch(
   match: SkillMatch,
-  primarySkillName: string | undefined
+  selected: {
+    primarySkillName: string | undefined;
+    supportingSkillNames: ReadonlySet<string>;
+  }
 ): SkillRouteCandidate {
   const role: SkillRouteCandidate["role"] = isNegativeMatch(match)
     ? "rejected"
     : match.deferred
       ? "deferred"
-      : match.skill.name === primarySkillName
+      : match.skill.name === selected.primarySkillName
         ? "primary"
-        : "supporting";
+        : selected.supportingSkillNames.has(match.skill.name)
+          ? "supporting"
+          : "candidate";
   return {
     skill: match.skill,
     role,

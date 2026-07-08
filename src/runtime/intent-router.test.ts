@@ -64,6 +64,59 @@ describe("IntentRouter governed route contract", () => {
     expect(route.suggestedSkills).toEqual([primary, supporting]);
   });
 
+  it("caps supporting skills and keeps remaining active matches as candidates", () => {
+    const skills = [
+      prioritizedSkill("primary-route", 10),
+      prioritizedSkill("supporting-one", 9),
+      prioritizedSkill("supporting-two", 8),
+      prioritizedSkill("supporting-three", 7),
+      prioritizedSkill("candidate-route", 6)
+    ];
+    const route = routerWith(...skills).route("please use the release route");
+
+    expect(route.primarySkill?.name).toBe("primary-route");
+    expect(route.supportingSkills?.map((entry) => entry.name)).toEqual([
+      "supporting-one",
+      "supporting-two",
+      "supporting-three"
+    ]);
+    expect(route.suggestedSkills.map((entry) => entry.name)).toEqual([
+      "primary-route",
+      "supporting-one",
+      "supporting-two",
+      "supporting-three"
+    ]);
+    expect(route.candidates?.map((candidate) => [candidate.skill.name, candidate.role])).toEqual([
+      ["primary-route", "primary"],
+      ["supporting-one", "supporting"],
+      ["supporting-two", "supporting"],
+      ["supporting-three", "supporting"],
+      ["candidate-route", "candidate"]
+    ]);
+  });
+
+  it("keeps below-threshold matches as candidates instead of selecting them", () => {
+    const lowConfidence = skill({
+      name: "low-confidence-route",
+      routing: {
+        triggerPatterns: [{ type: "contains", value: "release route" }],
+        priority: -101
+      }
+    });
+    const route = routerWith(lowConfidence).route("please use the release route");
+
+    expect(route.primarySkill).toBeUndefined();
+    expect(route.supportingSkills).toEqual([]);
+    expect(route.suggestedSkills).toEqual([]);
+    expect(route.candidates).toEqual([
+      expect.objectContaining({
+        skill: lowConfidence,
+        role: "candidate"
+      })
+    ]);
+    expect(route.candidates?.[0]?.score).toBeCloseTo(0.599, 3);
+  });
+
   it("records negative pattern matches as rejected candidates", () => {
     const selected = skill({
       name: "selected-route",
@@ -185,4 +238,14 @@ function skill(input: {
     examples: [],
     evaluations: []
   };
+}
+
+function prioritizedSkill(name: string, priority: number): SkillDefinition {
+  return skill({
+    name,
+    routing: {
+      triggerPatterns: [{ type: "contains", value: "release route" }],
+      priority
+    }
+  });
 }
