@@ -39,6 +39,35 @@ const MAX_TERMINAL_CONTEXT_SUMMARY_CHARS = 500;
 const MAX_TERMINAL_CONTEXT_COMMAND_CHARS = 220;
 const SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", ".next", ".turbo"]);
 
+type PatchMatchStrategy =
+  | "exact"
+  | "line_trimmed"
+  | "whitespace_normalized"
+  | "indentation_flexible"
+  | "escape_normalized"
+  | "trimmed_boundary"
+  | "unicode_normalized"
+  | "block_anchor"
+  | "context_aware";
+
+type PatchMatchRange = {
+  start: number;
+  end: number;
+  strategy: PatchMatchStrategy;
+};
+
+type PatchMatchResult =
+  | {
+      ok: true;
+      ranges: PatchMatchRange[];
+      strategy: PatchMatchStrategy;
+    }
+  | {
+      ok: false;
+      content: string;
+      metadata?: ToolResult["metadata"];
+    };
+
 export function createWorkspaceTools(options: WorkspaceToolOptions): readonly RegisteredTool[] {
   const root = resolve(options.workspaceRoot);
   const maxReadBytes = options.maxReadBytes ?? DEFAULT_MAX_READ_BYTES;
@@ -173,7 +202,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
     },
     {
       name: "file.patch",
-      description: "Patch a workspace file with targeted text replacement. Replace mode finds old_string and writes new_string; by default the match must be unique unless replace_all is true.",
+      description: "Patch a workspace file with targeted text replacement. Replace mode finds old_string with exact matching first, then deterministic fuzzy fallbacks for minor whitespace, indentation, escaping, and Unicode differences. By default the match must be unique unless replace_all is true.",
       inputSchema: {
         type: "object",
         properties: {
@@ -219,23 +248,18 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
         const existing = fsAdapter !== undefined
           ? await fsAdapter.readTextFile({ path: path.path })
           : await readFile(path.path, "utf8");
-        const index = existing.indexOf(input.old_string);
-
-        if (index === -1) {
-          return errorResult(`Could not find old_string in ${relative(canonicalRoot, path.path)}.`);
-        }
-
         const replaceAll = input.replace_all === true;
-        const secondIndex = existing.indexOf(input.old_string, index + input.old_string.length);
-        if (!replaceAll && secondIndex !== -1) {
-          return errorResult("old_string appears more than once; provide a more specific segment or set replace_all=true.");
+        const relativePath = relative(canonicalRoot, path.path);
+        const match = findPatchReplacementRanges(existing, input.old_string, {
+          path: relativePath,
+          replaceAll
+        });
+        if (!match.ok) {
+          return errorResult(match.content, match.metadata);
         }
 
-        const matchCount = replaceAll ? countOccurrences(existing, input.old_string) : 1;
-        const next = replaceAll
-          ? existing.split(input.old_string).join(input.new_string)
-          : existing.slice(0, index) + input.new_string + existing.slice(index + input.old_string.length);
-        const relativePath = relative(canonicalRoot, path.path);
+        const matchCount = match.ranges.length;
+        const next = applyPatchReplacementRanges(existing, match.ranges, input.new_string);
         if (fsAdapter?.writeTextFile !== undefined) {
           await fsAdapter.writeTextFile({
             path: path.path,
@@ -253,13 +277,15 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
             oldBytes: Buffer.byteLength(existing),
             newBytes: Buffer.byteLength(next),
             matchCount,
+            matchStrategy: match.strategy,
             fileChangePreview: buildFileReplaceChangePreview({
               path: relativePath,
               oldString: input.old_string,
               newString: input.new_string,
               oldBytes: Buffer.byteLength(existing),
               newBytes: Buffer.byteLength(next),
-              matchCount
+              matchCount,
+              matchStrategy: match.strategy
             })
           }
         };
@@ -433,14 +459,386 @@ function metadataNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-function countOccurrences(content: string, search: string): number {
-  let count = 0;
+function findPatchReplacementRanges(
+  content: string,
+  oldString: string,
+  options: { path: string; replaceAll: boolean }
+): PatchMatchResult {
+  const strategies: Array<{
+    strategy: PatchMatchStrategy;
+    find: () => PatchMatchRange[];
+  }> = [
+    { strategy: "exact", find: () => findExactRanges(content, oldString, "exact") },
+    { strategy: "line_trimmed", find: () => findLineTrimmedRanges(content, oldString) },
+    { strategy: "whitespace_normalized", find: () => findWhitespaceNormalizedRanges(content, oldString, "whitespace_normalized") },
+    { strategy: "indentation_flexible", find: () => findIndentationFlexibleRanges(content, oldString) },
+    { strategy: "escape_normalized", find: () => findEscapeNormalizedRanges(content, oldString) },
+    { strategy: "trimmed_boundary", find: () => findTrimmedBoundaryRanges(content, oldString) },
+    { strategy: "unicode_normalized", find: () => findUnicodeNormalizedRanges(content, oldString) },
+    { strategy: "block_anchor", find: () => findBlockAnchorRanges(content, oldString) },
+    { strategy: "context_aware", find: () => findContextAwareRanges(content, oldString) }
+  ];
+
+  const attemptedStrategies = strategies.map(({ strategy }) => strategy);
+
+  for (const { strategy, find } of strategies) {
+    const ranges = uniquePatchRanges(find()).sort((left, right) => left.start - right.start || left.end - right.end);
+    if (ranges.length === 0) {
+      continue;
+    }
+
+    if (hasOverlappingPatchRanges(ranges)) {
+      return {
+        ok: false,
+        content: `old_string produced overlapping ${strategy} matches in ${options.path}; provide a more specific segment.`,
+        metadata: {
+          path: options.path,
+          matchStrategy: strategy,
+          matchCount: ranges.length,
+          attemptedStrategies
+        }
+      };
+    }
+
+    if (!options.replaceAll && ranges.length > 1) {
+      return {
+        ok: false,
+        content: `old_string matched ${ranges.length} locations in ${options.path} using ${strategy}; provide a more specific segment or set replace_all=true.`,
+        metadata: {
+          path: options.path,
+          matchStrategy: strategy,
+          matchCount: ranges.length,
+          attemptedStrategies
+        }
+      };
+    }
+
+    return {
+      ok: true,
+      ranges: options.replaceAll ? ranges : [ranges[0]!],
+      strategy
+    };
+  }
+
+  return {
+    ok: false,
+    content: `old_string not found in ${options.path}. Use file.read to verify current content, or file.search to locate the text.`,
+    metadata: {
+      path: options.path,
+      matchCount: 0,
+      attemptedStrategies
+    }
+  };
+}
+
+function applyPatchReplacementRanges(content: string, ranges: PatchMatchRange[], newString: string): string {
+  let next = content;
+  for (const range of [...ranges].sort((left, right) => right.start - left.start)) {
+    next = next.slice(0, range.start) + newString + next.slice(range.end);
+  }
+  return next;
+}
+
+function findExactRanges(content: string, oldString: string, strategy: PatchMatchStrategy): PatchMatchRange[] {
+  const ranges: PatchMatchRange[] = [];
+  let index = content.indexOf(oldString);
+  while (index !== -1) {
+    ranges.push({ start: index, end: index + oldString.length, strategy });
+    index = content.indexOf(oldString, index + oldString.length);
+  }
+  return ranges;
+}
+
+function findLineTrimmedRanges(content: string, oldString: string): PatchMatchRange[] {
+  const oldLines = splitBlockLines(oldString);
+  const oldTrimmed = oldString.trim();
+  if (oldLines.length !== 1 || oldTrimmed.length === 0) {
+    return [];
+  }
+  return splitLinesWithRanges(content)
+    .filter((line) => line.text.trim() === oldTrimmed)
+    .map((line) => ({ start: line.start, end: line.end, strategy: "line_trimmed" }));
+}
+
+function findWhitespaceNormalizedRanges(
+  content: string,
+  oldString: string,
+  strategy: PatchMatchStrategy
+): PatchMatchRange[] {
+  const haystack = normalizeWhitespaceWithMap(content);
+  const needle = normalizeWhitespaceWithMap(oldString).text;
+  if (needle.trim().length === 0) {
+    return [];
+  }
+  return findAllIndexes(haystack.text, needle).map((index) => ({
+    start: haystack.startMap[index] ?? 0,
+    end: haystack.endMap[index + needle.length - 1] ?? content.length,
+    strategy
+  }));
+}
+
+function findIndentationFlexibleRanges(content: string, oldString: string): PatchMatchRange[] {
+  const oldLines = splitBlockLines(oldString);
+  if (oldLines.length === 0) {
+    return [];
+  }
+  const oldNormalized = normalizeIndentBlock(oldString);
+  if (oldNormalized.trim().length === 0) {
+    return [];
+  }
+
+  const lines = splitLinesWithRanges(content);
+  const ranges: PatchMatchRange[] = [];
+  for (let index = 0; index <= lines.length - oldLines.length; index += 1) {
+    const candidateLines = lines.slice(index, index + oldLines.length);
+    const candidate = candidateLines.map((line) => line.text).join("\n");
+    if (normalizeIndentBlock(candidate) === oldNormalized) {
+      ranges.push({
+        start: candidateLines[0]!.start,
+        end: candidateLines[candidateLines.length - 1]!.end,
+        strategy: "indentation_flexible"
+      });
+    }
+  }
+  return ranges;
+}
+
+function findEscapeNormalizedRanges(content: string, oldString: string): PatchMatchRange[] {
+  const decoded = decodeCommonEscapes(oldString);
+  if (decoded === oldString || decoded.length === 0) {
+    return [];
+  }
+  return findExactRanges(content, decoded, "escape_normalized");
+}
+
+function findTrimmedBoundaryRanges(content: string, oldString: string): PatchMatchRange[] {
+  const trimmed = oldString.trim();
+  if (trimmed.length === 0 || trimmed === oldString) {
+    return [];
+  }
+  return findExactRanges(content, trimmed, "trimmed_boundary");
+}
+
+function findUnicodeNormalizedRanges(content: string, oldString: string): PatchMatchRange[] {
+  const oldLines = splitBlockLines(oldString);
+  if (oldLines.length === 0) {
+    return [];
+  }
+  const oldNormalized = oldString.normalize("NFC");
+  const lines = splitLinesWithRanges(content);
+  const ranges: PatchMatchRange[] = [];
+  for (let index = 0; index <= lines.length - oldLines.length; index += 1) {
+    const candidateLines = lines.slice(index, index + oldLines.length);
+    const candidate = candidateLines.map((line) => line.text).join("\n");
+    if (candidate !== oldString && candidate.normalize("NFC") === oldNormalized) {
+      ranges.push({
+        start: candidateLines[0]!.start,
+        end: candidateLines[candidateLines.length - 1]!.end,
+        strategy: "unicode_normalized"
+      });
+    }
+  }
+  return ranges;
+}
+
+function findBlockAnchorRanges(content: string, oldString: string): PatchMatchRange[] {
+  const oldLines = splitBlockLines(oldString);
+  if (oldLines.length < 2) {
+    return [];
+  }
+  const anchors = firstAndLastNonBlankTrimmedLines(oldLines);
+  if (anchors === undefined) {
+    return [];
+  }
+
+  const oldNormalized = normalizeWhitespaceValue(oldString).trim();
+  const lines = splitLinesWithRanges(content);
+  const ranges: PatchMatchRange[] = [];
+  for (let start = 0; start < lines.length; start += 1) {
+    if (lines[start]!.text.trim() !== anchors.first) {
+      continue;
+    }
+    for (let end = start; end < lines.length; end += 1) {
+      if (lines[end]!.text.trim() !== anchors.last) {
+        continue;
+      }
+      const candidateLines = lines.slice(start, end + 1);
+      const candidate = candidateLines.map((line) => line.text).join("\n");
+      if (normalizeWhitespaceValue(candidate).trim() === oldNormalized) {
+        ranges.push({
+          start: candidateLines[0]!.start,
+          end: candidateLines[candidateLines.length - 1]!.end,
+          strategy: "block_anchor"
+        });
+      }
+    }
+  }
+  return ranges;
+}
+
+function findContextAwareRanges(content: string, oldString: string): PatchMatchRange[] {
+  const oldLines = splitBlockLines(oldString);
+  const oldNonBlank = oldLines.map((line) => line.trim()).filter((line) => line.length > 0);
+  if (oldNonBlank.length < 3) {
+    return [];
+  }
+  const first = oldNonBlank[0]!;
+  const last = oldNonBlank[oldNonBlank.length - 1]!;
+  const oldCompact = normalizeWhitespaceValue(oldString).trim();
+  const lines = splitLinesWithRanges(content);
+  const ranges: PatchMatchRange[] = [];
+
+  for (let start = 0; start <= lines.length - oldLines.length; start += 1) {
+    const candidateLines = lines.slice(start, start + oldLines.length);
+    const candidateNonBlank = candidateLines.map((line) => line.text.trim()).filter((line) => line.length > 0);
+    if (candidateNonBlank[0] !== first || candidateNonBlank[candidateNonBlank.length - 1] !== last) {
+      continue;
+    }
+    const candidate = candidateLines.map((line) => line.text).join("\n");
+    if (normalizeWhitespaceValue(candidate).trim() === oldCompact) {
+      ranges.push({
+        start: candidateLines[0]!.start,
+        end: candidateLines[candidateLines.length - 1]!.end,
+        strategy: "context_aware"
+      });
+    }
+  }
+  return ranges;
+}
+
+function uniquePatchRanges(ranges: PatchMatchRange[]): PatchMatchRange[] {
+  const seen = new Set<string>();
+  const unique: PatchMatchRange[] = [];
+  for (const range of ranges) {
+    if (range.start < 0 || range.end <= range.start) {
+      continue;
+    }
+    const key = `${range.start}:${range.end}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    unique.push(range);
+  }
+  return unique;
+}
+
+function hasOverlappingPatchRanges(ranges: PatchMatchRange[]): boolean {
+  const sorted = [...ranges].sort((left, right) => left.start - right.start || left.end - right.end);
+  for (let index = 1; index < sorted.length; index += 1) {
+    if (sorted[index]!.start < sorted[index - 1]!.end) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function findAllIndexes(content: string, search: string): number[] {
+  const indexes: number[] = [];
   let index = content.indexOf(search);
   while (index !== -1) {
-    count += 1;
+    indexes.push(index);
     index = content.indexOf(search, index + search.length);
   }
-  return count;
+  return indexes;
+}
+
+function normalizeWhitespaceWithMap(content: string): { text: string; startMap: number[]; endMap: number[] } {
+  let text = "";
+  const startMap: number[] = [];
+  const endMap: number[] = [];
+  let inWhitespace = false;
+
+  for (let index = 0; index < content.length;) {
+    const codePoint = content.codePointAt(index);
+    const char = String.fromCodePoint(codePoint ?? content.charCodeAt(index));
+    const nextIndex = index + char.length;
+    if (/\s/u.test(char)) {
+      if (!inWhitespace) {
+        text += " ";
+        startMap.push(index);
+        endMap.push(nextIndex);
+        inWhitespace = true;
+      } else {
+        endMap[endMap.length - 1] = nextIndex;
+      }
+    } else {
+      text += char;
+      startMap.push(index);
+      endMap.push(nextIndex);
+      inWhitespace = false;
+    }
+    index = nextIndex;
+  }
+
+  return { text, startMap, endMap };
+}
+
+function normalizeWhitespaceValue(content: string): string {
+  return normalizeWhitespaceWithMap(content).text;
+}
+
+function splitLinesWithRanges(content: string): Array<{ text: string; start: number; end: number }> {
+  if (content.length === 0) {
+    return [{ text: "", start: 0, end: 0 }];
+  }
+
+  const lines: Array<{ text: string; start: number; end: number }> = [];
+  let start = 0;
+  while (start < content.length) {
+    let end = start;
+    while (end < content.length && content[end] !== "\n" && content[end] !== "\r") {
+      end += 1;
+    }
+    lines.push({ text: content.slice(start, end), start, end });
+    if (end >= content.length) {
+      break;
+    }
+    start = content[end] === "\r" && content[end + 1] === "\n" ? end + 2 : end + 1;
+  }
+  return lines;
+}
+
+function splitBlockLines(content: string): string[] {
+  return content.replace(/\r\n/gu, "\n").replace(/\r/gu, "\n").split("\n");
+}
+
+function normalizeIndentBlock(content: string): string {
+  const lines = splitBlockLines(content).map((line) => line.replace(/[ \t]+$/u, ""));
+  while (lines.length > 0 && lines[0]!.trim().length === 0) {
+    lines.shift();
+  }
+  while (lines.length > 0 && lines[lines.length - 1]!.trim().length === 0) {
+    lines.pop();
+  }
+
+  const indents = lines
+    .filter((line) => line.trim().length > 0)
+    .map((line) => line.match(/^[ \t]*/u)?.[0].length ?? 0);
+  const commonIndent = indents.length === 0 ? 0 : Math.min(...indents);
+  return lines.map((line) => line.slice(Math.min(commonIndent, line.length))).join("\n");
+}
+
+function decodeCommonEscapes(content: string): string {
+  return content
+    .replace(/\\r\\n/gu, "\n")
+    .replace(/\\n/gu, "\n")
+    .replace(/\\r/gu, "\r")
+    .replace(/\\t/gu, "\t")
+    .replace(/\\"/gu, "\"")
+    .replace(/\\'/gu, "'")
+    .replace(/\\\\/gu, "\\");
+}
+
+function firstAndLastNonBlankTrimmedLines(lines: string[]): { first: string; last: string } | undefined {
+  const nonBlank = lines.map((line) => line.trim()).filter((line) => line.length > 0);
+  if (nonBlank.length === 0) {
+    return undefined;
+  }
+  return {
+    first: nonBlank[0]!,
+    last: nonBlank[nonBlank.length - 1]!
+  };
 }
 
 async function ensureSafeParentDirectories(
@@ -724,6 +1122,7 @@ function buildFileReplaceChangePreview(input: {
   oldBytes: number;
   newBytes: number;
   matchCount: number;
+  matchStrategy: PatchMatchStrategy;
 }): FileChangePreviewViewModel {
   const removed = splitPreviewLines(input.oldString).map((line) => `- ${line}`);
   const added = splitPreviewLines(input.newString).map((line) => `+ ${line}`);
@@ -736,7 +1135,7 @@ function buildFileReplaceChangePreview(input: {
     path: input.path,
     changeType: "modified",
     summary: [
-      `Replaced ${input.matchCount} exact segment(s).`,
+      `Replaced ${input.matchCount} segment(s) using ${input.matchStrategy}.`,
       `${input.oldBytes} byte(s) -> ${input.newBytes} byte(s).`
     ],
     diff: previewLines.join("\n"),

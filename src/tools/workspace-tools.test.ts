@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -65,6 +65,7 @@ describe("workspace file change preview metadata", () => {
 
     expect(result?.ok).toBe(true);
     expect(result?.metadata?.matchCount).toBe(1);
+    expect(result?.metadata?.matchStrategy).toBe("exact");
     expect(result?.metadata?.fileChangePreview).toMatchObject({
       kind: "fileChangePreview",
       path: "app.ts",
@@ -95,9 +96,115 @@ describe("workspace file change preview metadata", () => {
     });
 
     expect(ambiguous?.ok).toBe(false);
-    expect(ambiguous?.content).toContain("old_string appears more than once");
+    expect(ambiguous?.content).toContain("using exact");
     expect(replaced?.ok).toBe(true);
     expect(replaced?.metadata?.matchCount).toBe(2);
+  });
+
+  it("uses whitespace-normalized matching when exact file.patch matching fails", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "notes.md"), "Function:  The action keeps rules.\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const result = await patch?.run({
+      path: "notes.md",
+      old_string: "Function: The action keeps rules.",
+      new_string: "Function: The action keeps stricter rules."
+    });
+
+    expect(result?.ok).toBe(true);
+    expect(result?.metadata?.matchStrategy).toBe("whitespace_normalized");
+    expect(result?.metadata?.matchCount).toBe(1);
+    await expect(readFile(join(root, "notes.md"), "utf8")).resolves.toBe("Function: The action keeps stricter rules.\n");
+  });
+
+  it("uses escape-normalized matching for escaped newline anchors", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "app.ts"), "const value = \"alpha\nbeta\";\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const result = await patch?.run({
+      path: "app.ts",
+      old_string: "const value = \"alpha\\nbeta\";",
+      new_string: "const value = \"done\";"
+    });
+
+    expect(result?.ok).toBe(true);
+    expect(result?.metadata?.matchStrategy).toBe("escape_normalized");
+    await expect(readFile(join(root, "app.ts"), "utf8")).resolves.toBe("const value = \"done\";\n");
+  });
+
+  it("uses unicode-normalized matching for equivalent text forms", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "notes.md"), "Cafe\u0301 costs\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const result = await patch?.run({
+      path: "notes.md",
+      old_string: "Caf\u00e9 costs",
+      new_string: "Coffee costs"
+    });
+
+    expect(result?.ok).toBe(true);
+    expect(result?.metadata?.matchStrategy).toBe("unicode_normalized");
+    await expect(readFile(join(root, "notes.md"), "utf8")).resolves.toBe("Coffee costs\n");
+  });
+
+  it("reports ambiguous fuzzy matches unless replace_all is true", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "notes.md"), "alpha  beta\nalpha   beta\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const ambiguous = await patch?.run({
+      path: "notes.md",
+      old_string: "alpha beta",
+      new_string: "done"
+    });
+    const replaced = await patch?.run({
+      path: "notes.md",
+      old_string: "alpha beta",
+      new_string: "done",
+      replace_all: true
+    });
+
+    expect(ambiguous?.ok).toBe(false);
+    expect(ambiguous?.content).toContain("whitespace_normalized");
+    expect(ambiguous?.metadata?.matchCount).toBe(2);
+    expect(replaced?.ok).toBe(true);
+    expect(replaced?.metadata?.matchCount).toBe(2);
+    expect(replaced?.metadata?.matchStrategy).toBe("whitespace_normalized");
+    await expect(readFile(join(root, "notes.md"), "utf8")).resolves.toBe("done\ndone\n");
+  });
+
+  it("returns recovery metadata when no file.patch strategy matches", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "notes.md"), "current text\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const result = await patch?.run({
+      path: "notes.md",
+      old_string: "missing text",
+      new_string: "replacement"
+    });
+
+    expect(result?.ok).toBe(false);
+    expect(result?.content).toContain("Use file.read");
+    expect(result?.metadata?.attemptedStrategies).toEqual([
+      "exact",
+      "line_trimmed",
+      "whitespace_normalized",
+      "indentation_flexible",
+      "escape_normalized",
+      "trimmed_boundary",
+      "unicode_normalized",
+      "block_anchor",
+      "context_aware"
+    ]);
   });
 });
 
