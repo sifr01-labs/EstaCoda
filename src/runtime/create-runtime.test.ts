@@ -348,7 +348,7 @@ const providerToolNameGroups = [
       "browser.navigate"
     ]
   },
-  { providerName: "workspace", toolNames: ["file.read", "file.write", "file.replace", "file.search", "terminal.inspect", "terminal.run"] },
+  { providerName: "workspace", toolNames: ["file.read", "file.write", "file.patch", "file.search", "terminal.inspect", "terminal.run"] },
   { providerName: "glob", toolNames: ["file.glob"] },
   { providerName: "grep", toolNames: ["file.grep"] },
   { providerName: "notebook", toolNames: ["notebook.edit"] },
@@ -1181,16 +1181,18 @@ describe("createRuntime MCP trust gating", () => {
           },
           {
             "maxResultSizeChars": 3000,
-            "name": "file.replace",
+            "name": "file.patch",
             "orderIndex": 23,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
             "riskClass": "workspace-write",
             "schemaAliasOrder": [
-              "newText",
-              "oldText",
+              "mode",
+              "new_string",
+              "old_string",
               "path",
+              "replace_all",
             ],
             "toolsets": [
               "files",
@@ -2598,7 +2600,7 @@ describe("createRuntime MCP trust gating", () => {
           "browser.navigate",
           "file.read",
           "file.write",
-          "file.replace",
+          "file.patch",
           "file.search",
           "terminal.inspect",
           "terminal.run",

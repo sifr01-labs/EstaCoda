@@ -4557,7 +4557,7 @@ function deriveApprovalReason(input: PendingApprovalContinuation): string {
     }
   }
 
-  if (input.toolName === "file.write" || input.toolName === "file.replace") {
+  if (input.toolName === "file.write" || input.toolName === "file.patch") {
     return "file modification";
   }
 

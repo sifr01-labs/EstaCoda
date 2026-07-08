@@ -172,25 +172,42 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
       }
     },
     {
-      name: "file.replace",
-      description: "Replace an exact text segment in a workspace file.",
+      name: "file.patch",
+      description: "Patch a workspace file with targeted text replacement. Replace mode finds old_string and writes new_string; by default the match must be unique unless replace_all is true.",
       inputSchema: {
         type: "object",
         properties: {
+          mode: {
+            type: "string",
+            enum: ["replace"],
+            description: "Patch mode. The current mode is 'replace'.",
+            default: "replace"
+          },
           path: { type: "string" },
-          oldText: { type: "string" },
-          newText: { type: "string" }
+          old_string: { type: "string" },
+          new_string: { type: "string" },
+          replace_all: {
+            type: "boolean",
+            description: "Replace all occurrences instead of requiring a unique match.",
+            default: false
+          }
         },
-        required: ["path", "oldText", "newText"]
+        required: ["path", "old_string", "new_string"]
       },
       riskClass: "workspace-write",
       toolsets: ["files", "coding"],
       progressLabel: "patching file",
       maxResultSizeChars: 3000,
       isAvailable: () => true,
-      run: async (input: { path?: string; oldText?: string; newText?: string }) => {
-        if (typeof input.oldText !== "string" || typeof input.newText !== "string") {
-          return errorResult("oldText and newText must be strings");
+      run: async (input: { mode?: string; path?: string; old_string?: string; new_string?: string; replace_all?: boolean }) => {
+        if (input.mode !== undefined && input.mode !== "replace") {
+          return errorResult("mode must be 'replace'");
+        }
+        if (typeof input.old_string !== "string" || typeof input.new_string !== "string") {
+          return errorResult("old_string and new_string must be strings");
+        }
+        if (input.old_string.length === 0) {
+          return errorResult("old_string must not be empty");
         }
 
         const canonicalRoot = await realpath(root);
@@ -202,17 +219,22 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
         const existing = fsAdapter !== undefined
           ? await fsAdapter.readTextFile({ path: path.path })
           : await readFile(path.path, "utf8");
-        const index = existing.indexOf(input.oldText);
+        const index = existing.indexOf(input.old_string);
 
         if (index === -1) {
-          return errorResult(`Could not find oldText in ${relative(canonicalRoot, path.path)}.`);
+          return errorResult(`Could not find old_string in ${relative(canonicalRoot, path.path)}.`);
         }
 
-        if (existing.indexOf(input.oldText, index + input.oldText.length) !== -1) {
-          return errorResult("oldText appears more than once; provide a more specific segment.");
+        const replaceAll = input.replace_all === true;
+        const secondIndex = existing.indexOf(input.old_string, index + input.old_string.length);
+        if (!replaceAll && secondIndex !== -1) {
+          return errorResult("old_string appears more than once; provide a more specific segment or set replace_all=true.");
         }
 
-        const next = existing.slice(0, index) + input.newText + existing.slice(index + input.oldText.length);
+        const matchCount = replaceAll ? countOccurrences(existing, input.old_string) : 1;
+        const next = replaceAll
+          ? existing.split(input.old_string).join(input.new_string)
+          : existing.slice(0, index) + input.new_string + existing.slice(index + input.old_string.length);
         const relativePath = relative(canonicalRoot, path.path);
         if (fsAdapter?.writeTextFile !== undefined) {
           await fsAdapter.writeTextFile({
@@ -230,18 +252,20 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
             path: relativePath,
             oldBytes: Buffer.byteLength(existing),
             newBytes: Buffer.byteLength(next),
+            matchCount,
             fileChangePreview: buildFileReplaceChangePreview({
               path: relativePath,
-              oldText: input.oldText,
-              newText: input.newText,
+              oldString: input.old_string,
+              newString: input.new_string,
               oldBytes: Buffer.byteLength(existing),
-              newBytes: Buffer.byteLength(next)
+              newBytes: Buffer.byteLength(next),
+              matchCount
             })
           }
         };
         recordFileStateOperation(options, {
           operation: "replace",
-          sourceTool: "file.replace",
+          sourceTool: "file.patch",
           path: relativePath,
           bytes: Buffer.byteLength(next),
           changed: next !== existing,
@@ -407,6 +431,16 @@ function metadataPath(result: ToolResult, root: string, path: string): string {
 
 function metadataNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function countOccurrences(content: string, search: string): number {
+  let count = 0;
+  let index = content.indexOf(search);
+  while (index !== -1) {
+    count += 1;
+    index = content.indexOf(search, index + search.length);
+  }
+  return count;
 }
 
 async function ensureSafeParentDirectories(
@@ -685,13 +719,14 @@ function buildFileWriteChangePreview(input: {
 
 function buildFileReplaceChangePreview(input: {
   path: string;
-  oldText: string;
-  newText: string;
+  oldString: string;
+  newString: string;
   oldBytes: number;
   newBytes: number;
+  matchCount: number;
 }): FileChangePreviewViewModel {
-  const removed = splitPreviewLines(input.oldText).map((line) => `- ${line}`);
-  const added = splitPreviewLines(input.newText).map((line) => `+ ${line}`);
+  const removed = splitPreviewLines(input.oldString).map((line) => `- ${line}`);
+  const added = splitPreviewLines(input.newString).map((line) => `+ ${line}`);
   const diffLines = ["@@ exact replacement @@", ...removed, ...added];
   const previewLines = diffLines.slice(0, FILE_CHANGE_PREVIEW_LINES);
   const omittedLineCount = Math.max(0, diffLines.length - previewLines.length);
@@ -701,7 +736,7 @@ function buildFileReplaceChangePreview(input: {
     path: input.path,
     changeType: "modified",
     summary: [
-      `Replaced one exact segment.`,
+      `Replaced ${input.matchCount} exact segment(s).`,
       `${input.oldBytes} byte(s) -> ${input.newBytes} byte(s).`
     ],
     diff: previewLines.join("\n"),

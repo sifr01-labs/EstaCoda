@@ -39,7 +39,7 @@ The runtime assembles tools from provider modules at startup. Treat this table a
 |------|------|----------|
 | `file.read` | `safe` | `live-proven` |
 | `file.write` | `caution` | `live-proven` |
-| `file.replace` | `caution` | `live-proven` |
+| `file.patch` | `caution` | `live-proven` |
 | `file.search` | `safe` | `smoke-tested` |
 | `file.glob` | `read-only-local` | `smoke-tested` |
 | `file.grep` | `read-only-local` | `smoke-tested` |

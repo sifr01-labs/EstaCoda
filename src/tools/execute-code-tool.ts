@@ -23,7 +23,7 @@ const DEFAULT_ALLOWED_TOOLS = new Set([
   "file.read",
   "file.search",
   "file.write",
-  "file.replace",
+  "file.patch",
   "process.start",
   "process.list",
   "process.logs",

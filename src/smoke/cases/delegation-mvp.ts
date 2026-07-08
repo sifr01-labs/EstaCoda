@@ -66,7 +66,7 @@ async function smokeToolBounds(context: SmokeContext): Promise<void> {
   });
   const effective = new Set(result.effectiveAllowedTools);
 
-  for (const blocked of ["terminal.run", "file.write", "file.replace", "session_search", "delegate_task"]) {
+  for (const blocked of ["terminal.run", "file.write", "file.patch", "session_search", "delegate_task"]) {
     assert(!effective.has(blocked), `default child schema should exclude ${blocked}`);
   }
 

@@ -645,7 +645,7 @@ function renderSkillResources(resources: SkillResourceEntry[] | undefined): stri
     "",
     "Resource handling:",
     "- references: load targeted background files with skill.read when the playbook needs specific context.",
-    "- templates: load the template with skill.read, adapt it, then write the finished output with file.write or file.replace.",
+    "- templates: load the template with skill.read, adapt it, then write the finished output with file.write or file.patch.",
     "- scripts: inspect the script with skill.read before running it through terminal.run or execute_code under normal sandbox rules.",
     "- assets: use skill.read for metadata, then route the file through media/document/browser tools if content inspection is needed.",
     "",

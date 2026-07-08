@@ -43,19 +43,28 @@ describe("workspace file change preview metadata", () => {
     expect(preview?.diff).not.toContain("+ line 10");
   });
 
-  it("attaches exact replacement preview metadata for file.replace", async () => {
+  it("does not expose the retired file.replace tool", async () => {
+    const root = await makeTempDir();
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const retiredToolName = ["file", "replace"].join(".");
+
+    expect(tools.find((tool) => tool.name === retiredToolName)).toBeUndefined();
+  });
+
+  it("attaches exact replacement preview metadata for file.patch", async () => {
     const root = await makeTempDir();
     await writeFile(join(root, "app.ts"), "const value = 1;\n", "utf8");
     const tools = createWorkspaceTools({ workspaceRoot: root });
-    const replace = tools.find((tool) => tool.name === "file.replace");
+    const patch = tools.find((tool) => tool.name === "file.patch");
 
-    const result = await replace?.run({
+    const result = await patch?.run({
       path: "app.ts",
-      oldText: "const value = 1;",
-      newText: "const value = 2;",
+      old_string: "const value = 1;",
+      new_string: "const value = 2;",
     });
 
     expect(result?.ok).toBe(true);
+    expect(result?.metadata?.matchCount).toBe(1);
     expect(result?.metadata?.fileChangePreview).toMatchObject({
       kind: "fileChangePreview",
       path: "app.ts",
@@ -65,6 +74,30 @@ describe("workspace file change preview metadata", () => {
     const preview = result?.metadata?.fileChangePreview as { diff?: string } | undefined;
     expect(preview?.diff).toContain("- const value = 1;");
     expect(preview?.diff).toContain("+ const value = 2;");
+  });
+
+  it("requires unique file.patch matches unless replace_all is true", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "notes.md"), "todo\ntodo\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const ambiguous = await patch?.run({
+      path: "notes.md",
+      old_string: "todo",
+      new_string: "done"
+    });
+    const replaced = await patch?.run({
+      path: "notes.md",
+      old_string: "todo",
+      new_string: "done",
+      replace_all: true
+    });
+
+    expect(ambiguous?.ok).toBe(false);
+    expect(ambiguous?.content).toContain("old_string appears more than once");
+    expect(replaced?.ok).toBe(true);
+    expect(replaced?.metadata?.matchCount).toBe(2);
   });
 });
 
@@ -126,7 +159,7 @@ describe("workspace file-state tracking", () => {
     ]);
   });
 
-  it("records successful file.replace metadata", async () => {
+  it("records successful file.patch metadata", async () => {
     const root = await makeTempDir();
     await writeFile(join(root, "app.ts"), "const value = 1;\n", "utf8");
     const tracker = new FileStateTracker();
@@ -135,12 +168,12 @@ describe("workspace file-state tracking", () => {
       fileStateTracker: tracker,
       sessionId: "session-1"
     });
-    const replace = tools.find((tool) => tool.name === "file.replace");
+    const patch = tools.find((tool) => tool.name === "file.patch");
 
-    const result = await replace?.run({
+    const result = await patch?.run({
       path: "app.ts",
-      oldText: "const value = 1;",
-      newText: "const value = 2;"
+      old_string: "const value = 1;",
+      new_string: "const value = 2;"
     });
 
     expect(result?.ok).toBe(true);
@@ -148,7 +181,7 @@ describe("workspace file-state tracking", () => {
       expect.objectContaining({
         path: "app.ts",
         operation: "replace",
-        sourceTool: "file.replace",
+        sourceTool: "file.patch",
         metadata: {
           bytes: 17,
           changed: true,
@@ -167,10 +200,10 @@ describe("workspace file-state tracking", () => {
       sessionId: "session-1"
     });
     const read = tools.find((tool) => tool.name === "file.read");
-    const replace = tools.find((tool) => tool.name === "file.replace");
+    const patch = tools.find((tool) => tool.name === "file.patch");
 
     await read?.run({ path: "../outside.md" });
-    await replace?.run({ path: "missing.md", oldText: "a", newText: "b" });
+    await patch?.run({ path: "missing.md", old_string: "a", new_string: "b" });
 
     expect(tracker.listOperations()).toEqual([]);
   });
