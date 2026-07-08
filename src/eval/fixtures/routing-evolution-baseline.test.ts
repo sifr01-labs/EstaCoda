@@ -46,6 +46,46 @@ describe("routing evolution baseline metrics", () => {
       expect.objectContaining({
         id: "live-rejected-candidate",
         candidatesRejected: [{ skillName: "deployment-review", reason: "Negative routing pattern matched." }]
+      }),
+      expect.objectContaining({
+        id: "live-semantic-deterministic-disagreement",
+        selectedSkill: "deterministic-release-route",
+        shadowSemanticSkill: "semantic-release-notes"
+      }),
+      expect.objectContaining({
+        id: "live-semantic-recall-improvement",
+        selectedSkill: undefined,
+        shadowSemanticSkill: "semantic-test-runner",
+        semanticImprovesRecall: true
+      }),
+      expect.objectContaining({
+        id: "live-semantic-preserves-negative-pattern",
+        shadowSemanticSkill: "fallback-release-notes",
+        forbiddenSkills: ["blocked-release-notes"]
+      }),
+      expect.objectContaining({
+        id: "live-semantic-preserves-defer-rule",
+        shadowSemanticSkill: "fallback-release-notes",
+        forbiddenSkills: ["deferred-release-notes"]
+      }),
+      expect.objectContaining({
+        id: "live-semantic-weak-metadata-no-selection",
+        expectedShadowNoSelection: true,
+        shadowSemanticSkill: undefined
+      }),
+      expect.objectContaining({
+        id: "live-semantic-no-skill-overselect-guard",
+        expectedShadowNoSelection: true,
+        shadowSemanticSkill: undefined
+      }),
+      expect.objectContaining({
+        id: "live-semantic-ambiguous-multiple-plausible",
+        shadowSemanticCandidates: expect.arrayContaining(["architecture-review", "docs-writing-shadow"])
+      }),
+      expect.objectContaining({
+        id: "live-semantic-arabic-release-notes",
+        shadowSemanticSkill: "arabic-release-notes",
+        semanticImprovesRecall: true
       })
     ]));
   });
@@ -69,11 +109,36 @@ describe("routing evolution baseline metrics", () => {
       status: "measured",
       value: 1
     }));
+    expect(metrics.shadowSemanticCorrectness).toEqual(expect.objectContaining({
+      status: "measured",
+      value: 1
+    }));
+    expect(metrics.shadowSemanticCandidateRecall).toEqual(expect.objectContaining({
+      status: "measured",
+      value: 1
+    }));
+    expect(metrics.shadowSemanticRecallImprovementRate).toEqual(expect.objectContaining({
+      status: "measured",
+      value: 1
+    }));
+    expect(metrics.shadowSemanticFalsePositiveRate).toEqual(expect.objectContaining({
+      status: "measured",
+      value: 0
+    }));
     expect(metrics.taskClassCorrectness).toEqual(expect.objectContaining({
       status: "measured",
       value: 1
     }));
     expect(metrics.forbiddenSkillViolations.count).toBe(0);
+    expect(metrics.shadowSemanticForbiddenViolations.count).toBe(0);
+    expect(metrics.shadowSemanticDisagreements.cases).toContain("live-semantic-deterministic-disagreement");
+    expect(metrics.baselineGates).toEqual(expect.objectContaining({
+      primaryPrecisionMeetsThreshold: true,
+      noSkillFalsePositiveRateMeetsThreshold: true,
+      shadowSemanticFalsePositiveRateMeetsThreshold: true,
+      shadowSemanticDisagreementsMeasured: true,
+      shadowSemanticRecallImprovementMeasured: true
+    }));
   });
 
   it("counts forbidden-skill violations separately", () => {
