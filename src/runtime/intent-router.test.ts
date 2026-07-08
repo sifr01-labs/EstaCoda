@@ -95,6 +95,53 @@ describe("IntentRouter governed route contract", () => {
     ]);
   });
 
+  it("keeps supporting skills out of runtime toolset and confirmation hints", () => {
+    const primary = skill({
+      name: "primary-route",
+      routing: {
+        triggerPatterns: [{ type: "contains", value: "release route" }],
+        requiredToolsets: ["files"],
+        confirmation: "never",
+        priority: 10
+      }
+    });
+    const supporting = skill({
+      name: "supporting-route",
+      routing: {
+        triggerPatterns: [{ type: "contains", value: "release route" }],
+        requiredToolsets: ["shell-write"],
+        confirmation: "ask"
+      }
+    });
+    const route = routerWith(supporting, primary).route("please use the release route");
+
+    expect(route.primarySkill).toBe(primary);
+    expect(route.supportingSkills).toEqual([supporting]);
+    expect(route.suggestedSkills).toEqual([primary, supporting]);
+    expect(route.suggestedToolsets).toEqual(["files"]);
+    expect(route.confirmationRequired).toBe(false);
+    expect(route.evidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "toolset-derived",
+          source: "primary-route",
+          detail: "Skill metadata suggests files."
+        })
+      ])
+    );
+    expect(route.evidence).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "toolset-derived",
+          source: "supporting-route"
+        }),
+        expect.objectContaining({
+          kind: "confirmation-policy"
+        })
+      ])
+    );
+  });
+
   it("keeps below-threshold matches as candidates instead of selecting them", () => {
     const lowConfidence = skill({
       name: "low-confidence-route",

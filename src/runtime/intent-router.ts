@@ -184,13 +184,13 @@ export class IntentRouter {
       ...native.evidence,
       ...task.evidence,
       ...skillMatches.flatMap((match) => match.evidence),
-      ...toolsetEvidence(native.nativeIntent, suggestedSkills)
+      ...toolsetEvidence(native.nativeIntent, primarySkill === undefined ? [] : [primarySkill])
     ];
     const suggestedToolsets = dedupe([
       ...NATIVE_INTENT_TOOLSETS[native.nativeIntent],
-      ...suggestedSkills.flatMap((skill) => routingToolsets(skill))
+      ...(primarySkill === undefined ? [] : routingToolsets(primarySkill))
     ]);
-    const confirmationRequired = confirmationForSkills(suggestedSkills, evidence);
+    const confirmationRequired = confirmationForSkills(primarySkill === undefined ? [] : [primarySkill], evidence);
 
     return {
       nativeIntent: native.nativeIntent,
