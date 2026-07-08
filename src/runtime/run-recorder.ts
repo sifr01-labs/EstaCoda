@@ -49,7 +49,6 @@ export class RunRecorder {
   readonly #trajectoryStore: Pick<TrajectoryStore, "saveTrajectory"> | undefined;
   readonly #profileId: string;
   readonly #skillEvolutionStore: SkillEvolutionStore | undefined;
-  readonly #memoryProvider: MemoryProvider | undefined;
 
   constructor(options: RunRecorderOptions) {
     this.#sessionDb = options.sessionDb;
@@ -59,7 +58,6 @@ export class RunRecorder {
     this.#trajectoryStore = options.trajectoryStore;
     this.#profileId = options.profileId;
     this.#skillEvolutionStore = options.skillEvolutionStore;
-    this.#memoryProvider = options.memoryProvider;
   }
 
   async recordSkillPlaybookStep(input: {
@@ -536,7 +534,6 @@ export class RunRecorder {
         ...input.toolExecutions.map((execution) => execution.tool.name),
         ...input.toolPlans.map((plan) => plan.tool).filter((tool) => tool.length > 0)
       ])],
-      memoryTargets: ["MEMORY.md"],
       metadata: {
         plannedTools: input.toolPlans.map((plan) => ({
           tool: plan.tool,
@@ -544,19 +541,6 @@ export class RunRecorder {
         }))
       }
     };
-
-    if (this.#memoryProvider !== undefined) {
-      await this.#memoryProvider.recordSkillOutcome(outcome);
-      this.#trajectoryRecorder.record("memory-write", {
-        provider: this.#memoryProvider.id,
-        outcome
-      });
-      await this.#sessionDb.appendEvent(this.#currentSessionId(), {
-        kind: "memory-write",
-        provider: this.#memoryProvider.id,
-        outcome
-      });
-    }
 
     await this.#skillEvolutionStore?.recordSkillOutcome({
       skill: input.selectedSkill,

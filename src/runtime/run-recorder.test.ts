@@ -3,10 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { IntentRoute, SkillRouteCandidate } from "../contracts/intent.js";
+import type { MemoryProvider, SkillOutcome } from "../contracts/memory.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { SkillDefinition } from "../contracts/skill.js";
+import type { ToolDefinition } from "../contracts/tool.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
+import { SkillEvolutionStore } from "../skills/skill-evolution.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
+import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { RunRecorder } from "./run-recorder.js";
 
 const tempDirs: string[] = [];
@@ -305,6 +309,66 @@ describe("RunRecorder", () => {
     }
   });
 
+  it("records skill outcomes without writing them to prompt memory", async () => {
+    const root = makeTempDir();
+    const db = new SQLiteSessionDB({ path: join(root, "sessions.sqlite") });
+
+    try {
+      const session = await db.createSession({ id: "session-1", profileId: "default" });
+      const trajectoryRecorder = new TrajectoryRecorder({
+        profileId: "default",
+        sessionId: session.id,
+        modelId: "test-model",
+        id: () => "trajectory-1"
+      });
+      const memoryWrites: SkillOutcome[] = [];
+      const memoryProvider = fakeMemoryProvider(memoryWrites);
+      const skillEvolutionStore = new SkillEvolutionStore({
+        usagePath: join(root, "skills", ".usage.json"),
+        evolutionRoot: join(root, "skills", ".evolution")
+      });
+      const runRecorder = new RunRecorder({
+        sessionDb: db,
+        sessionId: session.id,
+        trajectoryRecorder,
+        trajectoryStore: db,
+        profileId: "default",
+        memoryProvider,
+        skillEvolutionStore
+      });
+      const selectedSkill = skill("alpha-skill");
+
+      const outcomes = await runRecorder.recordSkillOutcomes({
+        selectedSkill,
+        userText: "<think>private routing note</think>Run the alpha checks",
+        toolExecutions: [execution("file.read")],
+        toolPlans: []
+      });
+
+      expect(outcomes).toHaveLength(1);
+      expect(outcomes[0]).toEqual(expect.objectContaining({
+        skill: "alpha-skill",
+        status: "succeeded",
+        tools: ["file.read"]
+      }));
+      expect(outcomes[0]?.memoryTargets).toBeUndefined();
+      expect(memoryWrites).toEqual([]);
+
+      const events = await db.listEvents(session.id);
+      expect(events.some((event) => event.kind === "memory-write")).toBe(false);
+      const observations = await skillEvolutionStore.listObservations({ skillName: "alpha-skill" });
+      expect(observations).toHaveLength(1);
+      expect(observations[0]).toEqual(expect.objectContaining({
+        skillName: "alpha-skill",
+        type: "success",
+        promptSummary: "Run the alpha checks",
+        toolsAttempted: ["file.read"]
+      }));
+    } finally {
+      db.close();
+    }
+  });
+
   it("persists the trajectory before saving a classified failure", async () => {
     const db = new SQLiteSessionDB({ path: join(makeTempDir(), "sessions.sqlite") });
 
@@ -520,5 +584,37 @@ function routeCandidate(
       weight: role === "candidate" ? 0.6 : 0.8
     }],
     reason
+  };
+}
+
+function execution(name: string): ToolExecutionRecord {
+  return {
+    tool: {
+      name,
+      description: name,
+      inputSchema: {},
+      riskClass: "read-only-local",
+      toolsets: ["files"],
+      progressLabel: name,
+      maxResultSizeChars: 1_000
+    } satisfies ToolDefinition,
+    decision: "allow",
+    riskClass: "read-only-local",
+    result: {
+      ok: true,
+      content: "ok"
+    }
+  };
+}
+
+function fakeMemoryProvider(writes: SkillOutcome[]): MemoryProvider {
+  return {
+    id: "memory",
+    context: () => ({ text: "", usage: [] }),
+    search: () => [],
+    conclude: () => undefined,
+    recordSkillOutcome: (outcome) => {
+      writes.push(outcome);
+    }
   };
 }
