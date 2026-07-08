@@ -122,6 +122,44 @@ describe("RuntimeRouter", () => {
     ]);
   });
 
+  it("prefers primarySkill over legacy suggested skill ordering", () => {
+    const legacyFirst = loadedSkill({
+      name: "legacy-first",
+      instructions: "# Legacy\n\nThis skill should not be selected."
+    });
+    const primary = loadedSkill({
+      name: "primary-skill",
+      instructions: "# Primary\n\nThis skill should be selected."
+    });
+    const route: IntentRoute = {
+      nativeIntent: "general",
+      taskClass: "general",
+      labels: ["general"],
+      confidence: 1,
+      suggestedToolsets: [],
+      primarySkill: primary,
+      supportingSkills: [legacyFirst],
+      candidates: [],
+      rejectedCandidates: [],
+      suggestedSkills: [legacyFirst, primary],
+      confirmationRequired: false,
+      evidence: [],
+      rationale: "test"
+    };
+    const intentRouter = {
+      route: () => route
+    } as unknown as IntentRouter;
+    const router = new RuntimeRouter({
+      intentRouter,
+      skillConfig: {}
+    });
+
+    const result = router.route({ text: "test", channel: "cli" });
+
+    expect(result.selectedSkill).toBe(primary);
+    expect(result.selectedSkillInstructions).toBe(primary.instructions);
+  });
+
   it("expands credential-file tilde paths with OS home, not ESTACODA_HOME", () => {
     const skill: SkillDefinition = {
       name: "credential-test",

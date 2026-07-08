@@ -1,5 +1,12 @@
 import type { ChannelAttachment, ChannelAttachmentKind, ChannelKind } from "../contracts/channel.js";
-import type { IntentLabel, IntentRoute, IntentRouteEvidence, NativeIntent } from "../contracts/intent.js";
+import type {
+  IntentLabel,
+  IntentRoute,
+  IntentRouteEvidence,
+  IntentTaskClass,
+  NativeIntent,
+  SkillRouteCandidate
+} from "../contracts/intent.js";
 import type { ModelProfile } from "../contracts/provider.js";
 import type { LoadedSkill, SkillDefinition, SkillDeferRule, SkillPattern } from "../contracts/skill.js";
 import type { ToolsetName } from "../contracts/tool.js";
@@ -68,6 +75,7 @@ export class IntentRouter {
         detail: `Explicit slash skill invocation for ${slashInvocation.skill.name}.`,
         weight: 1
       }];
+      const confidence = confidenceFromEvidence(evidence);
       const labels = dedupe([
         "skill-invocation",
         ...routingLabels(slashInvocation.skill)
@@ -79,9 +87,20 @@ export class IntentRouter {
 
       return {
         nativeIntent,
+        taskClass: taskClassFromNativeIntent(nativeIntent),
         labels,
-        confidence: confidenceFromEvidence(evidence),
+        confidence,
         suggestedToolsets,
+        primarySkill: slashInvocation.skill,
+        supportingSkills: [],
+        candidates: [{
+          skill: slashInvocation.skill,
+          role: "primary",
+          score: 1,
+          confidence,
+          evidence
+        }],
+        rejectedCandidates: [],
         suggestedSkills: [slashInvocation.skill],
         invocation: {
           name: slashInvocation.skill.name,
@@ -104,9 +123,13 @@ export class IntentRouter {
 
       return {
         nativeIntent: "general",
+        taskClass: "general",
         labels: ["skill-invocation"],
         confidence: confidenceFromEvidence(evidence),
         suggestedToolsets: [],
+        supportingSkills: [],
+        candidates: [],
+        rejectedCandidates: [],
         suggestedSkills: [],
         invocation: {
           name: slashInvocation.name,
@@ -137,7 +160,15 @@ export class IntentRouter {
       .filter((match): match is SkillMatch => match !== undefined)
       .sort(compareSkillMatches);
     const activeSkillMatches = skillMatches.filter((match) => !match.deferred);
-    const suggestedSkills = activeSkillMatches.map((match) => match.skill);
+    const primarySkill = activeSkillMatches[0]?.skill;
+    const supportingSkills = activeSkillMatches.slice(1).map((match) => match.skill);
+    const suggestedSkills = primarySkill === undefined
+      ? supportingSkills
+      : [primarySkill, ...supportingSkills];
+    const candidates = skillMatches.map((match) => routeCandidateFromMatch(match, primarySkill?.name));
+    const rejectedCandidates = candidates.filter((candidate) =>
+      candidate.role === "rejected" || candidate.role === "deferred"
+    );
     const evidence = [
       ...native.evidence,
       ...skillMatches.flatMap((match) => match.evidence),
@@ -151,9 +182,14 @@ export class IntentRouter {
 
     return {
       nativeIntent: native.nativeIntent,
+      taskClass: taskClassFromNativeIntent(native.nativeIntent),
       labels: labels.length === 0 ? ["general"] : labels,
       confidence: confidenceFromEvidence(evidence),
       suggestedToolsets,
+      primarySkill,
+      supportingSkills,
+      candidates,
+      rejectedCandidates,
       suggestedSkills,
       confirmationRequired,
       evidence,
@@ -490,6 +526,44 @@ function compareSkillMatches(left: SkillMatch, right: SkillMatch): number {
     left.skill.name.localeCompare(right.skill.name);
 }
 
+function routeCandidateFromMatch(
+  match: SkillMatch,
+  primarySkillName: string | undefined
+): SkillRouteCandidate {
+  const role: SkillRouteCandidate["role"] = isNegativeMatch(match)
+    ? "rejected"
+    : match.deferred
+      ? "deferred"
+      : match.skill.name === primarySkillName
+        ? "primary"
+        : "supporting";
+  return {
+    skill: match.skill,
+    role,
+    score: match.score,
+    confidence: clampConfidence(match.score),
+    evidence: match.evidence,
+    reason: match.deferReason
+  };
+}
+
+function isNegativeMatch(match: SkillMatch): boolean {
+  return match.evidence.some((entry) => entry.kind === "skill-negative-pattern");
+}
+
+function taskClassFromNativeIntent(nativeIntent: NativeIntent): IntentTaskClass {
+  switch (nativeIntent) {
+    case "image-generation":
+    case "speech-generation":
+      return "media-generation";
+    case "attachment-analysis":
+    case "voice-transcription":
+      return "attachment-analysis";
+    case "general":
+      return "general";
+  }
+}
+
 function rationaleFor(nativeIntent: NativeIntent, labels: string[], skills: Array<LoadedSkill | SkillDefinition>, evidence: IntentRouteEvidence[]): string {
   if (skills.length > 0) {
     return `Matched ${skills.map((skill) => skill.name).join(", ")} via ${evidence.map((entry) => entry.kind).join(", ")}.`;
@@ -510,6 +584,10 @@ function describePattern(pattern: SkillPattern): string {
 
 function normalize(value: string): string {
   return value.toLowerCase().replace(/\s+/gu, " ").trim();
+}
+
+function clampConfidence(value: number): number {
+  return Math.min(1, Math.max(0, value));
 }
 
 function dedupe<T>(values: T[]): T[] {
