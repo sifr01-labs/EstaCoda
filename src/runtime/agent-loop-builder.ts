@@ -461,8 +461,7 @@ export class AgentLoopBuilder {
       trajectoryRecorder: input.trajectoryRecorder,
       trajectoryStore: hasTrajectoryStore(input.sessionDb) ? input.sessionDb : undefined,
       profileId: substrate.profileId,
-      skillEvolutionStore: substrate.skillEvolutionStore,
-      memoryProvider: substrate.memoryProvider
+      skillEvolutionStore: substrate.skillEvolutionStore
     });
     const memoryRecallOrchestrator = input.memoryRecall === "disabled"
       ? undefined

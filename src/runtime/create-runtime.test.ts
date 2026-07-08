@@ -2751,6 +2751,7 @@ describe("createRuntime MCP trust gating", () => {
 
   it("runs delegate_task through a real child AgentLoop and records child metadata", async () => {
     const options = await minimalRuntimeOptions();
+    const homeDir = join(options.workspaceRoot, "home");
     const sessionDb = new InMemorySessionDB();
     const providerRequests: ProviderRequest[] = [];
     const model: ModelProfile = {
@@ -2787,6 +2788,7 @@ describe("createRuntime MCP trust gating", () => {
       model,
       primaryModelRoute: { provider: "local", id: "local-child", profile: model },
       providerRegistry: registry,
+      homeDir,
       sessionDb
     });
 
@@ -2853,6 +2855,11 @@ describe("createRuntime MCP trust gating", () => {
         "process_start",
         "process_stop"
       ]));
+      const memoryPath = resolveProfileStateHome({ homeDir, profileId: "default" }).memoryMdPath;
+      const memory = await readFile(memoryPath, "utf8").catch(() => "");
+      expect(memory).not.toContain("- delegation");
+      expect(memory).not.toContain("Inspect delegated runtime");
+      expect(memory).not.toContain("Child final answer");
     } finally {
       await runtime.dispose();
     }

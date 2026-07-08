@@ -894,7 +894,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       currentDepth: 0,
       subagentRegistry,
       diagnosticsRoot: profilePaths.tempPath,
-      memoryProvider,
       fileStateTracker,
       parentVisibleTools: () => toolRegistry.list()
     }),

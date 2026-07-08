@@ -1559,8 +1559,7 @@ describe("AgentLoop provider availability gating", () => {
       async search() {
         return [];
       },
-      conclude,
-      async recordSkillOutcome() {}
+      conclude
     };
     const { loop, sessionDb, sessionId } = await createAgentLoop({
       canRunProvider: true,
@@ -1599,8 +1598,7 @@ describe("AgentLoop provider availability gating", () => {
       async search() {
         return [];
       },
-      conclude,
-      async recordSkillOutcome() {}
+      conclude
     };
     const { loop, sessionDb } = await createAgentLoop({
       canRunProvider: true,
@@ -1639,8 +1637,7 @@ describe("AgentLoop provider availability gating", () => {
       async search() {
         return [];
       },
-      conclude,
-      async recordSkillOutcome() {}
+      conclude
     };
     const { loop, providerTurnLoop, sessionDb, sessionId } = await createAgentLoop({
       canRunProvider: true,
@@ -1682,8 +1679,7 @@ describe("AgentLoop provider availability gating", () => {
       async search() {
         return [];
       },
-      conclude,
-      async recordSkillOutcome() {}
+      conclude
     };
     const { loop, sessionDb } = await createAgentLoop({
       canRunProvider: true,
@@ -1758,8 +1754,7 @@ describe("AgentLoop provider availability gating", () => {
       async search() {
         return [];
       },
-      async conclude() {},
-      async recordSkillOutcome() {}
+      async conclude() {}
     };
     const { loop, sessionDb, sessionId } = await createAgentLoop({
       canRunProvider: false,
@@ -1812,8 +1807,7 @@ describe("AgentLoop provider availability gating", () => {
       async search() {
         return [];
       },
-      async conclude() {},
-      async recordSkillOutcome() {}
+      async conclude() {}
     };
     const { loop, sessionDb, sessionId } = await createAgentLoop({
       canRunProvider: false,
@@ -1861,8 +1855,7 @@ describe("AgentLoop provider availability gating", () => {
       async search() {
         return [];
       },
-      async conclude() {},
-      async recordSkillOutcome() {}
+      async conclude() {}
     };
     const { loop, sessionDb, sessionId } = await createAgentLoop({
       canRunProvider: false,
@@ -1899,8 +1892,7 @@ describe("AgentLoop provider availability gating", () => {
       async search() {
         return [];
       },
-      async conclude() {},
-      async recordSkillOutcome() {}
+      async conclude() {}
     };
     const { loop } = await createAgentLoop({
       canRunProvider: false,
@@ -2004,8 +1996,7 @@ describe("AgentLoop provider availability gating", () => {
       },
       async conclude() {
         throw new Error("unexpected promotion failure");
-      },
-      async recordSkillOutcome() {}
+      }
     };
     const { loop, sessionDb } = await createAgentLoop({
       canRunProvider: false,
@@ -2035,8 +2026,7 @@ describe("AgentLoop provider availability gating", () => {
       async search() {
         return [];
       },
-      conclude: vi.fn(async () => {}),
-      async recordSkillOutcome() {}
+      conclude: vi.fn(async () => {})
     };
     const { loop, sessionDb, sessionId } = await createAgentLoop({
       canRunProvider: false,

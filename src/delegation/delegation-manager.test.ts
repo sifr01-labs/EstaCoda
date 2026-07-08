@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { DelegationOutcome, MemoryProvider } from "../contracts/memory.js";
 import type { ProviderUsage } from "../contracts/provider.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { AgentLoopInput, AgentLoopResponse } from "../runtime/agent-loop.js";
@@ -7,8 +6,6 @@ import { ChildModelOverrideError, type ChildAgentLoopFactory } from "../runtime/
 import type { DelegateModelOverrideMetadata, DelegationConfig } from "../contracts/delegation.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
-import { LocalMemoryProvider } from "../memory/local-memory-provider.js";
-import { MemoryStore } from "../memory/memory-store.js";
 import { FileStateTracker } from "./file-state-tracker.js";
 import { DelegationManager, delegatedPrompt } from "./delegation-manager.js";
 import { SubagentRegistry } from "./subagent-registry.js";
@@ -446,82 +443,7 @@ describe("DelegationManager", () => {
     expect(failedResult.usageUnavailable).toBe(false);
   });
 
-  it("records bounded delegation outcome memory for single-task delegation when enabled", async () => {
-    const recordDelegationOutcome = vi.fn();
-    const longTask = `Summarize token OPENAI_API_KEY=sk-secretsecretsecretsecretsecret ${"task ".repeat(30)}`;
-    const longAnswer = `Child answer with password=super-secret-value ${"details ".repeat(80)}`;
-    const harness = await createHarness({
-      memoryProvider: { recordDelegationOutcome },
-      outcomeMemory: {
-        enabled: true,
-        maxTaskPreviewChars: 80,
-        maxResultSummaryChars: 90
-      },
-      response: response({
-        text: longAnswer,
-        providerExecution: providerExecution({ inputTokens: 1, outputTokens: 2, totalTokens: 3 })
-      })
-    });
-
-    await harness.manager.delegate({
-      parentSessionId: "parent",
-      profileId: "default",
-      task: longTask,
-      context: "full prompt context should not be stored: SHOULD_NOT_APPEAR",
-      trustedWorkspace: true
-    });
-
-    expect(recordDelegationOutcome).toHaveBeenCalledTimes(1);
-    const outcome = recordDelegationOutcome.mock.calls[0]?.[0] as DelegationOutcome;
-    expect(outcome).toMatchObject({
-      status: "completed",
-      childSessionId: "child",
-      parentSessionId: "parent",
-      role: "leaf",
-      depth: 1,
-      usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 }
-    });
-    expect(outcome.taskPreview.length).toBeLessThanOrEqual(80);
-    expect(outcome.resultSummary?.length).toBeLessThanOrEqual(90);
-    expect(outcome.taskPreview).toContain("[REDACTED]");
-    expect(outcome.resultSummary).toBe("completed");
-    expect(outcome.resultSummary).not.toContain("Child answer");
-    expect(JSON.stringify(outcome)).not.toContain("sk-secret");
-    expect(JSON.stringify(outcome)).not.toContain("SHOULD_NOT_APPEAR");
-  });
-
-  it("does not store short sensitive child output in delegation outcome memory", async () => {
-    const store = new MemoryStore();
-    const memoryProvider = new LocalMemoryProvider({ store });
-    const harness = await createHarness({
-      memoryProvider,
-      outcomeMemory: {
-        enabled: true,
-        maxTaskPreviewChars: 200,
-        maxResultSummaryChars: 200
-      },
-      response: response({
-        text: "The token is password=short-secret and should never be remembered."
-      })
-    });
-
-    await harness.manager.delegate({
-      parentSessionId: "parent",
-      profileId: "default",
-      task: "Check a credential issue",
-      trustedWorkspace: true
-    });
-
-    const memory = store.read("MEMORY.md");
-    expect(memory).toContain("result:completed");
-    expect(memory).not.toContain("short-secret");
-    expect(memory).not.toContain("The token is");
-    expect(memory).not.toContain("should never be remembered");
-  });
-
-  it("does not store file-excerpt-like child output in single or batch outcome memory", async () => {
-    const store = new MemoryStore();
-    const memoryProvider = new LocalMemoryProvider({ store });
+  it("continues recording delegation events when outcome memory config is enabled", async () => {
     const childOutput = [
       "src/secret.txt:1:BEGIN PRIVATE KEY",
       "src/secret.txt:2:local file excerpt content",
@@ -529,7 +451,6 @@ describe("DelegationManager", () => {
     ].join("\n");
     const harness = await createHarness({
       maxConcurrentChildren: 2,
-      memoryProvider,
       outcomeMemory: {
         enabled: true,
         maxTaskPreviewChars: 200,
@@ -553,175 +474,9 @@ describe("DelegationManager", () => {
       trustedWorkspace: true
     });
 
-    const memory = store.read("MEMORY.md");
-    expect(memory.match(/result:completed/g)).toHaveLength(3);
-    expect(memory).not.toContain("BEGIN PRIVATE KEY");
-    expect(memory).not.toContain("local file excerpt content");
-    expect(memory).not.toContain("END PRIVATE KEY");
-    expect(memory).not.toContain("src/secret.txt");
-  });
-
-  it("does not record delegation outcome memory when disabled", async () => {
-    const recordDelegationOutcome = vi.fn();
-    const harness = await createHarness({
-      memoryProvider: { recordDelegationOutcome },
-      outcomeMemory: { enabled: false }
-    });
-
-    await harness.manager.delegate({
-      parentSessionId: "parent",
-      profileId: "default",
-      task: "Disabled memory",
-      trustedWorkspace: true
-    });
-
-    expect(recordDelegationOutcome).not.toHaveBeenCalled();
-  });
-
-  it("does not fail delegation when outcome memory recording fails", async () => {
-    const harness = await createHarness({
-      memoryProvider: {
-        recordDelegationOutcome: vi.fn(async () => {
-          throw new Error("memory write failed with token=[REDACTED]");
-        })
-      },
-      outcomeMemory: { enabled: true }
-    });
-
-    const result = await harness.manager.delegate({
-      parentSessionId: "parent",
-      profileId: "default",
-      task: "Keep running",
-      trustedWorkspace: true
-    });
-
-    expect(result.status).toBe("completed");
-  });
-
-  it("records safe status-only memory for blocked, failed, timeout, cancelled, and skipped outcomes", async () => {
-    const blockedRecorder = vi.fn();
-    const blocked = await createHarness({
-      memoryProvider: { recordDelegationOutcome: blockedRecorder },
-      outcomeMemory: { enabled: true },
-      beforeResponse: async (db) => {
-        await db.appendEvent("child", {
-          kind: "security-assessed",
-          tool: "terminal.run",
-          riskClass: "workspace-write",
-          assessment: {
-            decision: "deny",
-            mode: "strict",
-            reason: "blocked",
-            risk: "high"
-          }
-        });
-      }
-    });
-    await blocked.manager.delegate({
-      parentSessionId: "parent",
-      profileId: "default",
-      task: "Blocked",
-      trustedWorkspace: true
-    });
-    expect((blockedRecorder.mock.calls[0]?.[0] as DelegationOutcome).status).toBe("blocked");
-
-    const failedRecorder = vi.fn();
-    const failed = await createHarness({
-      memoryProvider: { recordDelegationOutcome: failedRecorder },
-      outcomeMemory: { enabled: true },
-      handleError: new Error("runtime failed with password=secret")
-    });
-    await failed.manager.delegate({
-      parentSessionId: "parent",
-      profileId: "default",
-      task: "Runtime fail",
-      trustedWorkspace: true
-    });
-    const failedOutcome = failedRecorder.mock.calls[0]?.[0] as DelegationOutcome;
-    expect(failedOutcome.status).toBe("failed");
-    expect(JSON.stringify(failedOutcome)).not.toContain("password=secret");
-
-    vi.useFakeTimers();
-    const timeoutRecorder = vi.fn();
-    const timeoutHarness = await createHarness({
-      memoryProvider: { recordDelegationOutcome: timeoutRecorder },
-      outcomeMemory: { enabled: true },
-      childTimeoutSeconds: 30,
-      handle: async () => await new Promise<AgentLoopResponse>(() => undefined)
-    });
-    const timeoutPromise = timeoutHarness.manager.delegate({
-      parentSessionId: "parent",
-      profileId: "default",
-      task: "Timeout",
-      trustedWorkspace: true
-    });
-    await vi.advanceTimersByTimeAsync(30_100);
-    await timeoutPromise;
-    expect((timeoutRecorder.mock.calls[0]?.[0] as DelegationOutcome).status).toBe("timeout");
-    vi.useRealTimers();
-
-    const cancelledRecorder = vi.fn();
-    const cancelled = await createHarness({
-      memoryProvider: { recordDelegationOutcome: cancelledRecorder },
-      outcomeMemory: { enabled: true }
-    });
-    const controller = new AbortController();
-    controller.abort();
-    await cancelled.manager.delegate({
-      parentSessionId: "parent",
-      profileId: "default",
-      task: "Cancelled",
-      trustedWorkspace: true,
-      signal: controller.signal
-    });
-    expect((cancelledRecorder.mock.calls[0]?.[0] as DelegationOutcome).status).toBe("cancelled");
-
-    const skippedRecorder = vi.fn();
-    const skipped = await createHarness({
-      memoryProvider: { recordDelegationOutcome: skippedRecorder },
-      outcomeMemory: { enabled: true }
-    });
-    const batchController = new AbortController();
-    batchController.abort();
-    await skipped.manager.delegateBatch({
-      parentSessionId: "parent",
-      profileId: "default",
-      tasks: [{ task: "queued one" }, { task: "queued two" }],
-      trustedWorkspace: true,
-      signal: batchController.signal
-    });
-    expect(skippedRecorder.mock.calls.map((call) => (call[0] as DelegationOutcome).status)).toEqual(["skipped", "skipped"]);
-    expect(skippedRecorder.mock.calls.every((call) => (call[0] as DelegationOutcome).childSessionId === undefined)).toBe(true);
-  });
-
-  it("records per-child batch outcome memory without raw batch output", async () => {
-    const recordDelegationOutcome = vi.fn();
-    const harness = await createHarness({
-      maxConcurrentChildren: 2,
-      memoryProvider: { recordDelegationOutcome },
-      outcomeMemory: {
-        enabled: true,
-        maxResultSummaryChars: 60
-      },
-      handle: async (handleInput) => response({
-        text: `${handleInput.text} raw child output ${"extra ".repeat(40)}`
-      })
-    });
-
-    await harness.manager.delegateBatch({
-      parentSessionId: "parent",
-      profileId: "default",
-      tasks: [{ task: "one" }, { task: "two" }],
-      trustedWorkspace: true
-    });
-
-    expect(recordDelegationOutcome).toHaveBeenCalledTimes(2);
-    expect(recordDelegationOutcome.mock.calls.map((call) => (call[0] as DelegationOutcome).taskIndex)).toEqual([0, 1]);
-    expect(recordDelegationOutcome.mock.calls.map((call) => (call[0] as DelegationOutcome).childSessionId)).toEqual(["child", "child-2"]);
-    expect(recordDelegationOutcome.mock.calls.every((call) =>
-      ((call[0] as DelegationOutcome).resultSummary?.length ?? 0) <= 60
-    )).toBe(true);
-    expect(JSON.stringify(recordDelegationOutcome.mock.calls)).not.toContain("extra extra extra extra extra extra extra extra extra extra");
+    const parentEvents = await harness.db.listEvents("parent");
+    expect(parentEvents.filter((event) => event.kind === "delegation-finished")).toHaveLength(3);
+    expect(JSON.stringify(parentEvents)).toContain("BEGIN PRIVATE KEY");
   });
 
   it("does not start a child when the parent signal is already aborted", async () => {
@@ -1386,7 +1141,6 @@ async function createHarness(input: {
   maxBatchTasks?: number;
   childTimeoutSeconds?: number;
   registry?: SubagentRegistry;
-  memoryProvider?: Pick<MemoryProvider, "recordDelegationOutcome">;
   outcomeMemory?: Partial<DelegationConfig["outcomeMemory"]>;
   fileStateTracker?: FileStateTracker;
   childModelOverrideMetadata?: DelegateModelOverrideMetadata;
@@ -1461,7 +1215,6 @@ async function createHarness(input: {
       trajectoryRecorder: new TrajectoryRecorder({ profileId: "default", sessionId: "parent", modelId: "test" }),
       subagentRegistry: registry,
 	      currentDepth: input.currentDepth,
-	      memoryProvider: input.memoryProvider,
 	      fileStateTracker: input.fileStateTracker,
 	      delegationConfig: input.maxSpawnDepth === undefined &&
         input.maxConcurrentChildren === undefined &&

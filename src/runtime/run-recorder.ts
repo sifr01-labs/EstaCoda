@@ -2,7 +2,7 @@ import { isArtifactKind, type ArtifactRecord } from "../contracts/artifact.js";
 import type { ChannelAttachment, ChannelKind } from "../contracts/channel.js";
 import type { ContextExpansionResult } from "../contracts/context.js";
 import type { IntentRoute, SkillRouteCandidate } from "../contracts/intent.js";
-import type { MemoryProvider, SkillOutcome } from "../contracts/memory.js";
+import type { SkillOutcome } from "../contracts/memory.js";
 import type { PromptBudgetReport } from "../contracts/prompt.js";
 import type { SecurityDecision } from "../contracts/security.js";
 import type { SessionDB, StructuredToolHistoryDiagnosticEvent } from "../contracts/session.js";
@@ -38,7 +38,6 @@ export type RunRecorderOptions = {
   trajectoryStore?: Pick<TrajectoryStore, "saveTrajectory">;
   profileId: string;
   skillEvolutionStore?: SkillEvolutionStore;
-  memoryProvider?: MemoryProvider;
 };
 
 export class RunRecorder {

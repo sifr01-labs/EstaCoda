@@ -1,16 +1,13 @@
 import type {
-  DelegationOutcome,
   MemoryConclusion,
   MemoryFileKind,
   MemoryPromotionRecord,
   MemoryProvider,
   MemoryProviderContext,
-  MemorySearchResult,
-  SkillOutcome
+  MemorySearchResult
 } from "../contracts/memory.js";
 import { join } from "node:path";
 import { stripInlineReasoning } from "../providers/provider-reasoning.js";
-import { redactSensitiveText } from "../utils/redaction.js";
 import { renderMemorySnapshot } from "./memory-renderer.js";
 import { renderSelective } from "./selective-renderer.js";
 import { MemoryPromotionStore } from "./memory-promotion-store.js";
@@ -212,57 +209,6 @@ export class LocalMemoryProvider implements MemoryProvider {
     }
   }
 
-  async recordSkillOutcome(outcome: SkillOutcome): Promise<void> {
-    const targets = outcome.memoryTargets ?? ["MEMORY.md"];
-    const line = [
-      `- skill:${outcome.skill}`,
-      outcome.stepId === undefined ? undefined : `step:${outcome.stepId}`,
-      `status:${outcome.status}`,
-      `tools:${outcome.tools.join(",") || "none"}`,
-      `summary:${sanitizeMemoryText(outcome.summary)}`
-    ].filter((part) => part !== undefined).join(" | ");
-
-    const previousMarkdown = new Map(targets.map((target) => [target, this.#store.read(target)] as const));
-    try {
-      for (const target of targets) {
-        this.#appendDedupe(target, line);
-      }
-      await this.#save(targets);
-    } catch (error) {
-      for (const [target, content] of previousMarkdown.entries()) {
-        this.#store.hydrate(target, content);
-      }
-      throw error;
-    }
-  }
-
-  async recordDelegationOutcome(outcome: DelegationOutcome): Promise<void> {
-    const line = [
-      "- delegation",
-      `status:${outcome.status}`,
-      outcome.reason === undefined ? undefined : `reason:${sanitizeMemoryAtom(outcome.reason)}`,
-      `role:${outcome.role}`,
-      `depth:${outcome.depth}`,
-      `parent:${sanitizeMemoryAtom(outcome.parentSessionId)}`,
-      outcome.childSessionId === undefined ? undefined : `child:${sanitizeMemoryAtom(outcome.childSessionId)}`,
-      outcome.batchId === undefined ? undefined : `batch:${sanitizeMemoryAtom(outcome.batchId)}`,
-      outcome.taskIndex === undefined ? undefined : `taskIndex:${outcome.taskIndex}`,
-      `task:${sanitizeDelegationMemoryText(outcome.taskPreview)}`,
-      outcome.resultSummary === undefined ? undefined : `result:${sanitizeDelegationMemoryText(outcome.resultSummary)}`,
-      renderUsage(outcome.usage),
-      `at:${sanitizeMemoryAtom(outcome.createdAt)}`
-    ].filter((part) => part !== undefined && part.length > 0).join(" | ");
-
-    const previousMarkdown = this.#store.read("MEMORY.md");
-    try {
-      this.#appendDedupe("MEMORY.md", line);
-      await this.#save(["MEMORY.md"]);
-    } catch (error) {
-      this.#store.hydrate("MEMORY.md", previousMarkdown);
-      throw error;
-    }
-  }
-
   async inspectPromotions(): Promise<MemoryPromotionRecord[]> {
     return await this.#promotionStore?.list() ?? [];
   }
@@ -355,29 +301,4 @@ function excerpt(content: string, index: number): string {
 
 function sanitizeMemoryText(value: string): string {
   return stripInlineReasoning(value).trim();
-}
-
-function sanitizeMemoryAtom(value: string): string {
-  return sanitizeDelegationMemoryText(value).replace(/\s+/g, " ").replace(/[|\n\r]/g, " ").trim();
-}
-
-function sanitizeDelegationMemoryText(value: string): string {
-  return sanitizeMemoryText(redactSensitiveText(value))
-    .replace(/api[_ -]?key/gi, "credential")
-    .replace(/secret[_ -]?key/gi, "credential")
-    .replace(/private[_ -]?key/gi, "credential")
-    .trim();
-}
-
-function renderUsage(usage: DelegationOutcome["usage"]): string | undefined {
-  if (usage === undefined) {
-    return undefined;
-  }
-  const parts = [
-    usage.inputTokens === undefined ? undefined : `in:${usage.inputTokens}`,
-    usage.outputTokens === undefined ? undefined : `out:${usage.outputTokens}`,
-    usage.totalTokens === undefined ? undefined : `total:${usage.totalTokens}`,
-    usage.reasoningTokens === undefined ? undefined : `reasoning:${usage.reasoningTokens}`
-  ].filter((part): part is string => part !== undefined);
-  return parts.length === 0 ? undefined : `usage:${parts.join(",")}`;
 }
