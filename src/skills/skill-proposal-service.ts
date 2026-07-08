@@ -375,8 +375,8 @@ export class SkillProposalService {
       mayPromoteAutomatically: false,
       requiresHumanApproval,
       changeKind,
-      targetSurface: changeKind === "routing_metadata_update" ? "routing_metadata" : "skill",
-      affectedSurface: changeKind === "routing_metadata_update" ? `${skillName}:routing` : skillName,
+      targetSurface: targetSurfaceForGovernedChangeKind(changeKind),
+      affectedSurface: affectedSurfaceForGovernedChangeKind(changeKind, skillName),
       affectedFiles,
       hypothesis: options.candidate.reason,
       riskClass,
@@ -685,6 +685,32 @@ function riskClassForGovernedChangeKind(kind: GovernedProposalChangeKind): Skill
   return "medium";
 }
 
+function targetSurfaceForGovernedChangeKind(kind: GovernedProposalChangeKind): "skill" | "routing_metadata" {
+  return isRoutingMetadataChangeKind(kind) ? "routing_metadata" : "skill";
+}
+
+function affectedSurfaceForGovernedChangeKind(kind: GovernedProposalChangeKind, skillName: string): string {
+  if (kind === "routing_metadata_update") {
+    return `${skillName}:routing`;
+  }
+  if (kind === "routing_eval_addition") {
+    return `${skillName}:routing.evaluations`;
+  }
+  if (kind === "negative_example_addition") {
+    return `${skillName}:routing.negativePatterns`;
+  }
+  if (kind === "skill_consolidation") {
+    return `${skillName}:consolidation`;
+  }
+  return skillName;
+}
+
+function isRoutingMetadataChangeKind(kind: GovernedProposalChangeKind): boolean {
+  return kind === "routing_metadata_update" ||
+    kind === "routing_eval_addition" ||
+    kind === "negative_example_addition";
+}
+
 function requiresApprovalForRisk(policy: AgentEvolutionPolicy, riskClass: SkillPatchRiskLevel): boolean {
   if (riskClass === "high") {
     return policy.requireApprovalForHighRisk;
@@ -706,6 +732,15 @@ function defaultEvalPlan(): GovernedProposalEvalPlan {
 function defaultRollbackExpectation(kind: GovernedProposalChangeKind): string {
   if (kind === "routing_metadata_update") {
     return "Revert routing metadata through the governed manifest/proposal path before changing live routing behavior.";
+  }
+  if (kind === "routing_eval_addition") {
+    return "Remove the proposed routing eval case through the governed proposal path if it proves noisy or misleading.";
+  }
+  if (kind === "negative_example_addition") {
+    return "Remove the proposed negative routing example through the governed proposal path if it blocks valid use.";
+  }
+  if (kind === "skill_consolidation") {
+    return "Revert consolidation metadata through the governed proposal path before merging or retiring any skill.";
   }
   if (kind === "skill_create") {
     return "Remove or archive the governed local skill candidate before promotion is considered.";
