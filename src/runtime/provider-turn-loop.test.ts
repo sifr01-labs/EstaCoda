@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { normalizeSessionCompressionConfig } from "../config/runtime-config.js";
+import type { ChannelAttachment } from "../contracts/channel.js";
 import type { ModelProfile, ResolvedModelRoute, ProviderRequest, ProviderResponse, ProviderStreamDiagnostics } from "../contracts/provider.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { ReplacementSessionMessage, SessionDB, SessionEvent } from "../contracts/session.js";
@@ -327,6 +331,7 @@ async function runBasicProviderTurn(
     onEvent?: (event: RuntimeEvent) => void;
     onDelta?: (text: string) => void;
     onSegmentBreak?: (reason?: string) => void | Promise<void>;
+    attachments?: ChannelAttachment[];
   } = {}
 ): Promise<Awaited<ReturnType<ProviderTurnLoop["run"]>>> {
   return await loop.run({
@@ -341,7 +346,7 @@ async function runBasicProviderTurn(
     toolExecutions: [],
     context: undefined,
     projectContext: undefined,
-    attachments: undefined,
+    attachments: callbacks.attachments,
     memoryPromptContext: undefined,
     providerTools: [],
     fallbackText: "",
@@ -1381,6 +1386,55 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
         ]
       })
     }));
+  });
+
+  it("requires vision for image-bearing continuation requests", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "estacoda-provider-turn-vision-"));
+    const imagePath = join(dir, "image.png");
+    writeFileSync(imagePath, Buffer.from("fake-png"));
+
+    const visionModel: ModelProfile = {
+      ...mockModel,
+      supportsVision: true
+    };
+    const visionPrimaryRoute: ResolvedModelRoute = {
+      ...primaryRoute,
+      profile: visionModel
+    };
+    const attachment: ChannelAttachment = {
+      id: "image-1",
+      kind: "image",
+      status: "ready",
+      localPath: imagePath,
+      bytes: 8
+    };
+
+    try {
+      const harness = await createPostToolNudgeHarness({
+        model: visionModel,
+        primaryModelRoute: visionPrimaryRoute,
+        responses: [
+          providerExecution("", [providerToolCall("call-image")]),
+          providerExecution("final answer")
+        ],
+        toolSteps: [
+          {
+            executions: [toolExecution("call-image")]
+          }
+        ],
+        maxProviderIterations: 2
+      });
+
+      await runBasicProviderTurn(harness.loop, { attachments: [attachment] });
+
+      expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+      const initialPreferences = harness.completeSpy.mock.calls[0]![1] as { requireVision?: boolean };
+      const continuationPreferences = harness.completeSpy.mock.calls[1]![1] as { requireVision?: boolean };
+      expect(initialPreferences.requireVision).toBe(true);
+      expect(continuationPreferences.requireVision).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("uses structured native history for supported post-tool continuation", async () => {

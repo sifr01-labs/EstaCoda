@@ -113,6 +113,39 @@ describe("vision tools", () => {
       }
     });
 
+    it("fails loudly when auxiliary vision returns empty content", async () => {
+      const executor = createMockExecutor(true, "   ");
+      const tmp = createTempPng();
+      try {
+        const result = await analyzeImageWithVision(
+          {
+            workspaceRoot: tmp.dir,
+            visionAuxiliaryRoute: {
+              task: "vision",
+              route: baseRoute,
+              source: "explicit",
+              fallbackToMain: false,
+              diagnostics: []
+            },
+            providerExecutor: executor
+          },
+          { path: "test.png" }
+        );
+
+        expect(result.ok).toBe(false);
+        expect(result.content).toContain("returned no usable content");
+        expect(result.content).toContain("openai/gpt-4o:ok");
+        expect(result.metadata).toEqual(expect.objectContaining({
+          path: "test.png",
+          provider: "openai",
+          model: "gpt-4o",
+          attempts: ["openai/gpt-4o:ok"]
+        }));
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
     it("passes task vision through the full auxiliary route", async () => {
       const executor = createMockExecutor();
       const tmp = createTempPng();
