@@ -413,6 +413,32 @@ describe("openai-responses-provider", () => {
       expect(directPrepared.body.tools).toEqual(request.tools);
     });
 
+    it("converts multimodal content parts to Responses input parts", () => {
+      const request: ProviderRequest = {
+        model: "gpt-5.5",
+        messages: [{
+          role: "user",
+          content: [
+            { type: "text", text: "Read this image." },
+            { type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } }
+          ]
+        }]
+      };
+
+      const prepared = buildResponsesRequest({
+        baseUrl: "https://chatgpt.com/backend-api/codex",
+        apiKey: { kind: "none" }
+      }, request, undefined, "codex");
+
+      expect(prepared.body.input).toEqual([{
+        role: "user",
+        content: [
+          { type: "input_text", text: "Read this image." },
+          { type: "input_image", image_url: "data:image/png;base64,AAAA" }
+        ]
+      }]);
+    });
+
     it("sets store to false", () => {
       const request: ProviderRequest = {
         model: "gpt-4o",

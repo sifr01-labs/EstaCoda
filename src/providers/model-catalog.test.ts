@@ -54,6 +54,18 @@ describe("buildProfileResolutionContext", () => {
 });
 
 describe("fallbackKnownModelProfiles", () => {
+  it("includes Codex GPT-5.5 as a vision-capable route", () => {
+    const codex = fallbackKnownModelProfiles.find((profile) =>
+      profile.provider === "codex" && profile.id === "gpt-5.5"
+    );
+
+    expect(codex).toEqual(expect.objectContaining({
+      supportsTools: true,
+      supportsVision: true,
+      supportsStructuredOutput: true
+    }));
+  });
+
   it("includes first-class Z.ai GLM fallback profiles", () => {
     const zaiModels = fallbackKnownModelProfiles
       .filter((profile) => profile.provider === "zai")

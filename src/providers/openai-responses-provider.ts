@@ -440,7 +440,7 @@ function extractInstructionsAndInput(
       if (content.trim().length > 0) {
         nonSystemMessages.push({
           role: "assistant",
-          content: message.content
+          content: responsesMessageContent(message)
         });
       }
 
@@ -482,7 +482,7 @@ function extractInstructionsAndInput(
 
     nonSystemMessages.push({
       role: message.role,
-      content: message.content
+      content: responsesMessageContent(message)
     });
   }
 
@@ -490,6 +490,40 @@ function extractInstructionsAndInput(
     instructions,
     input: nonSystemMessages
   };
+}
+
+function responsesMessageContent(message: ProviderRequest["messages"][number]): unknown {
+  if (!Array.isArray(message.content)) {
+    return message.content;
+  }
+
+  return message.content.map((part) => {
+    if (part === null || typeof part !== "object" || Array.isArray(part)) {
+      return part;
+    }
+
+    const record = part as {
+      type?: unknown;
+      text?: unknown;
+      image_url?: { url?: unknown };
+    };
+
+    if (record.type === "text" && typeof record.text === "string") {
+      return {
+        type: "input_text",
+        text: record.text
+      };
+    }
+
+    if (record.type === "image_url" && typeof record.image_url?.url === "string") {
+      return {
+        type: "input_image",
+        image_url: record.image_url.url
+      };
+    }
+
+    return part;
+  });
 }
 
 function stringifyResponsesContent(content: unknown): string {

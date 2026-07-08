@@ -17,6 +17,7 @@ export const fallbackKnownModelProfiles: readonly ModelProfile[] = [
   model("openai", "gpt-4.1", 1047576, { tools: true, vision: true, structured: true, status: "stable" }),
   model("openai", "gpt-4.1-mini", 1047576, { tools: true, vision: true, structured: true, status: "stable" }),
   model("openai", "gpt-4o", 128000, { tools: true, vision: true, structured: true, status: "stable" }),
+  model("codex", "gpt-5.5", 128000, { tools: true, vision: true, structured: true, reasoning: true, status: "stable" }),
   model("openrouter", "openrouter/auto", 128000, { tools: true, vision: true, structured: true, status: "stable" }),
   model("openrouter", "qwen/qwen3.6-plus", 256000, { tools: true, vision: true, structured: true, reasoning: true, status: "stable" }),
   model("zai", "glm-5.2", 128000, { tools: true, structured: true, reasoning: true, status: "stable" }),
