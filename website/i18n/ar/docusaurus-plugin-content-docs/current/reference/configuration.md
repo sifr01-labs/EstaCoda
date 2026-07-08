@@ -233,7 +233,6 @@ model.staleTimeoutMs / model.fallbacks[].staleTimeoutMs
 | `recoverJsonStringTasks` | `true` | استرداد صارم لمصفوفات `tasks` المرسلة كسلسلة JSON. |
 | `diagnostics.enabled` | `true` | كتابة تشخيصات timeout/stale محدودة عندما يوجد diagnostics root للملف التعريفي. |
 | `diagnostics.includePromptPreview` | `false` | معاينات prompt الكاملة تبقى معطلة افتراضيًا. |
-| `outcomeMemory.enabled` | `false` | ذاكرة نتائج التفويض اختيارية ومحدودة. |
 | `defaultAllowedRiskClasses` | `read-only-local`, `read-only-network` | فئات مخاطر أدوات الطفل الافتراضية بعد التقاطع مع أدوات الأب المرئية. |
 | `defaultExcludedToolsets` | `browser`, `media`, `mcp` | toolsets تُزال من مخططات الأطفال الافتراضية. |
 | `defaultAllowedToolsets` | فارغ | لا يوجد grant افتراضي واسع لـ toolset. |
@@ -241,6 +240,8 @@ model.staleTimeoutMs / model.fallbacks[].staleTimeoutMs
 | `childRuntime` | recall/learning/compression معطلة، project context محدود | تعطيل ميزات runtime الشبيهة بالأب داخل حلقات الأطفال. |
 
 `terminal.run`، وأدوات الكتابة/التحكم بالعمليات، والذاكرة/بحث الجلسات، وتعديل المهارات/الإعداد/cron/الثقة، وأس surfaces بيانات الاعتماد تُزال افتراضيًا. `terminal.inspect` هي أداة `read-only-local` وقد تظهر للطفل فقط عندما تكون مرئية للأب وتسمح بها سياسة القراءة فقط. إعدادات التفويض تدخل في runtime fingerprint حتى تعيد تغييرات المخطط بناء provider tool schemas.
+
+نتائج التفويض هي telemetry تشغيلية تُسجل في أحداث الجلسة وسجلات trajectory. ليست كتابة ذاكرة canonical قابلة للإعداد، ولا تكتب في `MEMORY.md`.
 
 ### web
 

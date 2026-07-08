@@ -411,13 +411,13 @@ If the index is disabled, missing, or unavailable, `memory.read`, `memory.search
 
 ---
 
-## Delegation Outcome Memory
+## Delegation Outcome Telemetry
 
-Delegation outcome memory is separate from child transcript recall. It is disabled by default under `delegation.outcomeMemory.enabled`.
+Delegation outcomes are separate from child transcript recall and canonical prompt memory. They are recorded as operational telemetry in session events and trajectory records.
 
-When enabled, it records bounded status metadata such as parent session id, child session id, role, depth, task index, status, reason, timestamp, token usage, and a bounded task preview.
+Recorded outcome telemetry can include bounded status metadata such as parent session id, child session id, role, depth, task index, status, reason, timestamp, token usage, and a bounded task preview.
 
-It does not store raw child output, prompts, transcripts, tool arguments, file contents, diagnostic payloads, or credentials. Child transcripts remain excluded from promotion evidence.
+It does not write to `MEMORY.md`, and it does not store raw child output, prompts, transcripts, tool arguments, file contents, diagnostic payloads, or credentials in canonical memory. Child transcripts remain excluded from promotion evidence.
 
 ---
 

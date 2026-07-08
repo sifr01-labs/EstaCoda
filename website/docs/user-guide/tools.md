@@ -224,7 +224,7 @@ Delegation results include structured status/reason metadata, child session ids 
 
 Child model overrides are supported through `modelOverride`. Same-provider overrides and reviewed cross-provider child routes use existing configured providers only; they do not create credential pools. Cross-provider overrides preserve target provider config, reject disabled-network routes before child execution, and disable fallbacks for the overridden child.
 
-Delegation outcome memory is configurable and disabled by default. When enabled, it records bounded task preview and deterministic status/reason metadata only. It does not store raw child output, prompts, transcripts, tool arguments, file contents, or diagnostic payloads.
+Delegation outcome telemetry is recorded in session events and trajectory records. It includes bounded task preview and deterministic status/reason metadata only, and it does not write to canonical prompt memory. It does not store raw child output, prompts, transcripts, tool arguments, file contents, or diagnostic payloads in `MEMORY.md`.
 
 Stale-file warnings are advisory. EstaCoda snapshots parent file reads before delegation; if a child writes, replaces, or deletes a tracked file the parent already read, the result includes a warning. The warning does not change success/failure status. Shell/process writes are not detected unless represented through the file-state tracker.
 

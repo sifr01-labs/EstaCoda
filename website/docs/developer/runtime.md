@@ -298,7 +298,7 @@ Child tool access is resolved before provider schemas are built. The default chi
 
 Child approvals are non-interactive and fail closed. Hardline denies run first. Any action that would ask, use parent grants, use pending approval queues, or depend on persisted/session approvals is denied in the child runtime.
 
-File-state tracking snapshots parent reads before delegation and emits advisory stale-file warnings when tracked child writes touch those paths. Outcome memory is opt-in and stores bounded task preview plus deterministic status/reason metadata.
+File-state tracking snapshots parent reads before delegation and emits advisory stale-file warnings when tracked child writes touch those paths. Delegation outcomes are recorded as operational telemetry in session events and trajectory records. They are not written into canonical prompt memory.
 
 ---
 

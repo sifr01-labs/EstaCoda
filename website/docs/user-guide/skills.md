@@ -184,7 +184,9 @@ Agent Evolution is the reviewable self-improvement control plane. It records evi
 
 `SkillLearningManager` is an evidence source, not mutation authority. `SkillEvolutionStore` owns evolution records such as observations, candidates, proposals, experiments, evals, promotions, snapshots, and rollback metadata. `ChangeManifestStore` owns change manifests. Bundled and external skill assets are not mutated.
 
-Routing remains deterministic. Semantic retrieval, provider embeddings, LLM reranking, compact skill index fallback, taskClass routing, supporting candidates, advisory route tools, real autonomous promotion, auto-rollback, skill fork/merge/archive, and hygiene scanning are not active behavior.
+Routing remains deterministic as the official selector. EstaCoda records task class, one primary skill, supporting candidates, lower-confidence candidates, rejected candidates, and deferred candidates for observability and Agent Evolution evidence. Only the primary selected skill contributes prompt instructions, setup context, toolset hints, and confirmation hints during the turn.
+
+Semantic routing and LLM reranking are shadow telemetry only. They can report what they would have selected, but they cannot override deterministic routing, choose unknown skills, bypass negative/defer rules, authorize tools, mutate skills, or promote proposals. Provider embeddings, compact skill index fallback, advisory route tools, real autonomous promotion, auto-rollback, skill fork/merge/archive, and hygiene scanning are not active behavior.
 
 ---
 

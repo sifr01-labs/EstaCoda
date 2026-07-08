@@ -299,7 +299,6 @@ Checkpoint memory curation uses the same local persistence boundaries, but it is
 |------|-------------|----------|
 | Repeated user preferences | `USER.md` | `smoke-tested` |
 | Repeated project facts | `MEMORY.md` | `smoke-tested` |
-| Skill outcomes | Memory store | `smoke-tested` |
 | Manual conclusions | Memory store | `smoke-tested` |
 
 **Features:**

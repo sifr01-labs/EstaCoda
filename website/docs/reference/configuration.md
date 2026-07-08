@@ -233,7 +233,6 @@ Subagent delegation config is normalized with defaults when omitted.
 | `recoverJsonStringTasks` | `true` | Strictly recover JSON-string `tasks` arrays. |
 | `diagnostics.enabled` | `true` | Write bounded timeout/stale diagnostics where a profile diagnostics root exists. |
 | `diagnostics.includePromptPreview` | `false` | Full prompt previews stay off by default. |
-| `outcomeMemory.enabled` | `false` | Opt-in bounded delegation outcome memory. |
 | `defaultAllowedRiskClasses` | `read-only-local`, `read-only-network` | Default child tool risk classes after parent-visible intersection. |
 | `defaultExcludedToolsets` | `browser`, `media`, `mcp` | Toolsets stripped from default child schemas. |
 | `defaultAllowedToolsets` | empty | No broad default toolset grant. |
@@ -241,6 +240,8 @@ Subagent delegation config is normalized with defaults when omitted.
 | `childRuntime` | recall/learning/compression disabled, project context bounded | Suppresses parent-like runtime features in child loops. |
 
 `terminal.run`, write/process control, memory/session search, skill/config/cron/trust mutation, and credential surfaces are stripped by default. `terminal.inspect` is read-only-local and may be child-visible only when parent-visible and allowed by the read-only policy. Delegation config participates in the runtime fingerprint so schema-affecting changes rebuild provider tool schemas.
+
+Delegation outcomes are operational telemetry recorded in session events and trajectory records. They are not configurable canonical memory writes and do not write into `MEMORY.md`.
 
 ### web
 

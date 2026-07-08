@@ -371,7 +371,7 @@ sidebar_position: 6
 
 `modelOverride` يدعم اختيار نموذج طفل على المزود نفسه ومسارات طفل مراجعة عبر مزود آخر. التجاوزات عبر مزود آخر تحفظ إعداد المزود الهدف، وتستخدم بيانات اعتماد `apiKeyEnv` الموجودة، وتحترم `authMethod: "none"`، وترفض `enableNetwork: false` قبل تنفيذ الطفل، وتعطل fallbacks لذلك الطفل. metadata محدودة ومنقّحة.
 
-ذاكرة النتائج معطلة افتراضيًا. عند تفعيلها، يسجل التفويض معاينة محدودة للمهمة وملخص حالة/سبب حتمي فقط، وليس raw child output، أو prompts، أو transcripts، أو tool arguments، أو محتوى ملفات، أو diagnostic payloads.
+نتائج التفويض هي telemetry تشغيلية تُسجل في أحداث الجلسة وسجلات trajectory. لا تكتب في ذاكرة prompt canonical، ولا تخزن raw child output، أو prompts، أو transcripts، أو tool arguments، أو محتوى ملفات، أو diagnostic payloads داخل `MEMORY.md`.
 
 تحذيرات stale-file هي metadata استشارية. تُلتقط قراءات ملفات الأب قبل التفويض؛ كتابات/استبدالات/حذف الطفل المتعقبة لتلك المسارات تنشئ تحذيرات دون تغيير حالة التفويض. كتابات shell/process لا تُكتشف ما لم تمثلها file-state tracker.
 

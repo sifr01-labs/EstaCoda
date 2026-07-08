@@ -146,7 +146,7 @@ pnpm run eval:fixtures -- <fixture-id>
 - أمان الأدوات وتصنيف فشل الأداة المفقودة
 - تنظيم الذاكرة، ترقيتها، إلغاء تنشيطها، عرضها الانتقائي، وحماية ملفات الأمان
 - بحث رسم تبعية الكود وإبطال cache
-- Agent Evolution manifests، المقترحات، تسجيل تصحيح المستخدم، routing metadata، routing baseline، وشكل التصدير
+- Agent Evolution manifests، المقترحات، تسجيل تصحيح المستخدم، routing metadata، routing baseline، بوابات جاهزية semantic routing، وشكل التصدير
 - حالة workflow run، القفل، الهجرة، ذرية التخزين، دورة حياة المحرك، التعافي بعد إعادة التشغيل، تحكم الأوامر، ملخصات الأحداث، والتكامل
 
 فضّل وصف الفئات في الوثائق بدل تثبيت أعداد fixtures. معرّفات fixtures تتغير مع توسع مجموعة eval.
