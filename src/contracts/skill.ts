@@ -237,6 +237,21 @@ export type SkillRouteRejectedCandidate = {
   reason?: string;
 };
 
+export type SkillRouteShadowCandidate = {
+  skillName: string;
+  score: number;
+  confidence: number;
+  evidenceKinds: string[];
+};
+
+export type SkillRouteShadowTelemetry = {
+  mode: "local-semantic-shadow";
+  wouldSelectSkill?: string;
+  confidence: number;
+  candidates: SkillRouteShadowCandidate[];
+  rationale: string;
+};
+
 export type SkillRouteCorrectionSignal = {
   source: "user" | "developer" | "model";
   kind: "rejected" | "searched" | "selected" | "self-corrected";
@@ -267,6 +282,7 @@ export type SkillRouteTelemetryDetails = {
   candidatesRejected?: SkillRouteRejectedCandidate[];
   rejectedCandidates?: SkillRouteRejectedCandidate[];
   deferredCandidates?: SkillRouteRejectedCandidate[];
+  shadowSemanticRoute?: SkillRouteShadowTelemetry;
   searchedReplacementSkill?: string;
   finalSkillUsed?: string;
   noSkillResult?: SkillRouteNoSkillResult;

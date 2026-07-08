@@ -18,6 +18,7 @@ export type IntentRouteEvidence = {
     | "skill-trigger-pattern"
     | "skill-negative-pattern"
     | "skill-defer-rule"
+    | "semantic-shadow"
     | "toolset-derived"
     | "confirmation-policy";
   source?: string;
@@ -60,6 +61,21 @@ export type SkillRouteCandidate = {
   reason?: string;
 };
 
+export type IntentShadowRouteCandidate = {
+  skill: LoadedSkill | SkillDefinition;
+  score: number;
+  confidence: number;
+  evidence: IntentRouteEvidence[];
+};
+
+export type IntentShadowRoute = {
+  mode: "local-semantic-shadow";
+  wouldSelectSkill?: LoadedSkill | SkillDefinition;
+  confidence: number;
+  candidates: IntentShadowRouteCandidate[];
+  rationale: string;
+};
+
 export type IntentRoute = {
   nativeIntent: NativeIntent;
   taskClass?: IntentTaskClass;
@@ -70,6 +86,7 @@ export type IntentRoute = {
   supportingSkills?: Array<LoadedSkill | SkillDefinition>;
   candidates?: SkillRouteCandidate[];
   rejectedCandidates?: SkillRouteCandidate[];
+  shadowSemanticRoute?: IntentShadowRoute;
   suggestedSkills: Array<LoadedSkill | SkillDefinition>;
   invocation?: SkillInvocation;
   confirmationRequired: boolean;

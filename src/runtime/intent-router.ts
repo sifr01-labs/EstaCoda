@@ -3,6 +3,7 @@ import type {
   IntentLabel,
   IntentRoute,
   IntentRouteEvidence,
+  IntentShadowRoute,
   IntentTaskClass,
   NativeIntent,
   SkillRouteCandidate
@@ -55,6 +56,29 @@ const NATIVE_INTENT_TOOLSETS: Record<NativeIntent, ToolsetName[]> = {
 
 const PRIMARY_SKILL_MIN_SCORE = 0.7;
 const SUPPORTING_SKILL_LIMIT = 3;
+const SHADOW_SEMANTIC_CANDIDATE_LIMIT = 3;
+const SHADOW_SEMANTIC_MIN_SCORE = 0.42;
+const SHADOW_SEMANTIC_STOP_WORDS = new Set([
+  "about",
+  "after",
+  "again",
+  "also",
+  "before",
+  "being",
+  "could",
+  "from",
+  "have",
+  "into",
+  "like",
+  "need",
+  "please",
+  "that",
+  "this",
+  "with",
+  "would",
+  "you",
+  "your"
+]);
 
 export class IntentRouter {
   readonly #skillRegistry: SkillRegistry;
@@ -180,6 +204,20 @@ export class IntentRouter {
     const rejectedCandidates = candidates.filter((candidate) =>
       candidate.role === "rejected" || candidate.role === "deferred"
     );
+    const shadowSemanticRoute = computeShadowSemanticRoute({
+      prompt,
+      skills: this.#skillRegistry.list(),
+      deterministicPrimarySkill: primarySkill,
+      deterministicCandidates: candidates,
+      matchInput: {
+        prompt,
+        normalized,
+        nativeIntent: native.nativeIntent,
+        labels,
+        attachments: options.attachments,
+        model
+      }
+    });
     const evidence = [
       ...native.evidence,
       ...task.evidence,
@@ -202,6 +240,7 @@ export class IntentRouter {
       supportingSkills,
       candidates,
       rejectedCandidates,
+      shadowSemanticRoute,
       suggestedSkills,
       confirmationRequired,
       evidence,
@@ -629,6 +668,124 @@ function selectSkillMatches(matches: SkillMatch[]): {
     primary: eligible[0],
     supporting: eligible.slice(1, SUPPORTING_SKILL_LIMIT + 1)
   };
+}
+
+function computeShadowSemanticRoute(input: {
+  prompt: string;
+  skills: Array<LoadedSkill | SkillDefinition>;
+  deterministicPrimarySkill?: LoadedSkill | SkillDefinition;
+  deterministicCandidates: SkillRouteCandidate[];
+  matchInput: Parameters<typeof matchSkill>[1];
+}): IntentShadowRoute | undefined {
+  const queryTerms = tokenizeForShadowSearch(input.prompt);
+  if (queryTerms.length === 0) {
+    return undefined;
+  }
+
+  const blockedSkillNames = new Set(input.deterministicCandidates
+    .filter((candidate) => candidate.role === "rejected" || candidate.role === "deferred")
+    .map((candidate) => candidate.skill.name));
+  const scored = input.skills
+    .filter((skill) =>
+      !blockedSkillNames.has(skill.name) &&
+      !isSkillBlockedForShadowRoute(skill, input.matchInput)
+    )
+    .map((skill) => scoreShadowSemanticSkill(skill, queryTerms, input.matchInput))
+    .filter((candidate): candidate is NonNullable<ReturnType<typeof scoreShadowSemanticSkill>> => candidate !== undefined)
+    .sort((left, right) =>
+      right.score - left.score ||
+      left.skill.name.localeCompare(right.skill.name)
+    )
+    .slice(0, SHADOW_SEMANTIC_CANDIDATE_LIMIT);
+
+  if (scored.length === 0 || scored[0].score < SHADOW_SEMANTIC_MIN_SCORE) {
+    return undefined;
+  }
+
+  const wouldSelectSkill = scored[0].skill;
+  const deterministic = input.deterministicPrimarySkill?.name ?? "none";
+  return {
+    mode: "local-semantic-shadow",
+    wouldSelectSkill,
+    confidence: clampConfidence(scored[0].score),
+    candidates: scored,
+    rationale: `Shadow semantic route would select ${wouldSelectSkill.name}; deterministic primary is ${deterministic}.`
+  };
+}
+
+function isSkillBlockedForShadowRoute(
+  skill: LoadedSkill | SkillDefinition,
+  input: Parameters<typeof matchSkill>[1]
+): boolean {
+  return firstMatchingPattern(skill.routing?.negativePatterns, input) !== undefined ||
+    firstMatchingDeferRule(skill.routing?.deferWhen, input) !== undefined;
+}
+
+function scoreShadowSemanticSkill(
+  skill: LoadedSkill | SkillDefinition,
+  queryTerms: string[],
+  matchInput: Parameters<typeof matchSkill>[1]
+): IntentShadowRoute["candidates"][number] | undefined {
+  const metadataTerms = tokenizeForShadowSearch(skillShadowSearchText(skill));
+  if (metadataTerms.length === 0) {
+    return undefined;
+  }
+
+  const metadataSet = new Set(metadataTerms);
+  const overlappingTerms = queryTerms.filter((term) => metadataSet.has(term));
+  if (overlappingTerms.length === 0) {
+    return undefined;
+  }
+
+  const overlapScore = overlappingTerms.length / Math.max(3, Math.min(queryTerms.length, metadataSet.size));
+  const deterministicMatch = matchSkill(skill, matchInput);
+  const deterministicBoost = deterministicMatch !== undefined && !deterministicMatch.deferred
+    ? Math.max(0, deterministicMatch.score) * 0.15
+    : 0;
+  const score = clampConfidence(overlapScore + deterministicBoost + ((skill.routing?.priority ?? 0) / 2_000));
+
+  return {
+    skill,
+    score,
+    confidence: score,
+    evidence: [{
+      kind: "semantic-shadow",
+      source: skill.name,
+      detail: `Shadow metadata overlap: ${dedupe(overlappingTerms).slice(0, 6).join(", ")}.`,
+      weight: score
+    }]
+  };
+}
+
+function skillShadowSearchText(skill: LoadedSkill | SkillDefinition): string {
+  const routingPatterns = (skill.routing?.triggerPatterns ?? []).map((pattern) => pattern.value);
+  const routingLabels = skill.routing?.labels ?? [];
+  const legacyPatterns = skill.triggerPatterns ?? [];
+  const evalInputs = skill.evaluations.map((evaluation) => evaluation.input);
+  return [
+    skill.name,
+    skill.description,
+    skill.category,
+    ...routingLabels,
+    ...routingPatterns,
+    ...legacyPatterns,
+    ...(skill.intentLabels ?? []),
+    ...skill.whenToUse,
+    ...skill.examples,
+    ...evalInputs
+  ].filter((entry): entry is string => typeof entry === "string" && entry.length > 0).join(" ");
+}
+
+function tokenizeForShadowSearch(value: string): string[] {
+  return dedupe(value
+    .toLowerCase()
+    .split(/[^a-z0-9\u0600-\u06ff]+/u)
+    .map((token) => token.trim())
+    .filter((token) =>
+      token.length >= 3 &&
+      !SHADOW_SEMANTIC_STOP_WORDS.has(token) &&
+      !/^\d+$/u.test(token)
+    ));
 }
 
 function routeCandidateFromMatch(

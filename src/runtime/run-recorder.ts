@@ -245,6 +245,7 @@ export class RunRecorder {
       candidatesRejected: input.routeDetails?.candidatesRejected ?? candidateDetails.rejectedCandidates,
       rejectedCandidates: input.routeDetails?.rejectedCandidates ?? candidateDetails.rejectedCandidates,
       deferredCandidates: input.routeDetails?.deferredCandidates ?? candidateDetails.deferredCandidates,
+      shadowSemanticRoute: input.routeDetails?.shadowSemanticRoute ?? shadowSemanticRouteDetails(input.intent),
       finalSkillUsed: input.routeDetails?.finalSkillUsed ?? input.selectedSkill?.name
     };
     const event = {
@@ -313,6 +314,7 @@ export class RunRecorder {
       candidatesRejected: telemetryDetails.candidatesRejected,
       rejectedCandidates: telemetryDetails.rejectedCandidates,
       deferredCandidates: telemetryDetails.deferredCandidates,
+      shadowSemanticRoute: telemetryDetails.shadowSemanticRoute,
       confidence: input.intent.confidence,
       routeConfidence: input.intent.confidence,
       candidatesShown: telemetryDetails.candidatesShown,
@@ -684,6 +686,25 @@ function routeCandidateDetails(intent: IntentRoute): {
     candidateSkills: namesForCandidateRole(intent.candidates, "candidate"),
     rejectedCandidates: rejectedCandidateSummaries(intent.candidates, "rejected"),
     deferredCandidates: rejectedCandidateSummaries(intent.candidates, "deferred")
+  };
+}
+
+function shadowSemanticRouteDetails(intent: IntentRoute): SkillRouteTelemetryDetails["shadowSemanticRoute"] {
+  if (intent.shadowSemanticRoute === undefined) {
+    return undefined;
+  }
+
+  return {
+    mode: intent.shadowSemanticRoute.mode,
+    wouldSelectSkill: intent.shadowSemanticRoute.wouldSelectSkill?.name,
+    confidence: intent.shadowSemanticRoute.confidence,
+    rationale: intent.shadowSemanticRoute.rationale,
+    candidates: intent.shadowSemanticRoute.candidates.map((candidate) => ({
+      skillName: candidate.skill.name,
+      score: candidate.score,
+      confidence: candidate.confidence,
+      evidenceKinds: candidate.evidence.map((entry) => entry.kind)
+    }))
   };
 }
 

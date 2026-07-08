@@ -259,6 +259,86 @@ describe("IntentRouter governed route contract", () => {
     expect(route.taskClass).toBe("general");
     expect(route.evidence.some((entry) => entry.kind === "task-class")).toBe(false);
   });
+
+  it("records local semantic shadow candidates without selecting a primary skill", () => {
+    const releaseNotes = skill({
+      name: "release-notes",
+      description: "Draft release notes and changelog summaries.",
+      whenToUse: ["Use for release notes, changelog drafting, and launch summaries."]
+    });
+    const route = routerWith(releaseNotes).route("please draft release notes for the changelog");
+
+    expect(route.primarySkill).toBeUndefined();
+    expect(route.suggestedSkills).toEqual([]);
+    expect(route.shadowSemanticRoute).toEqual(expect.objectContaining({
+      mode: "local-semantic-shadow",
+      wouldSelectSkill: releaseNotes,
+      confidence: expect.any(Number),
+      candidates: [
+        expect.objectContaining({
+          skill: releaseNotes,
+          evidence: [
+            expect.objectContaining({
+              kind: "semantic-shadow"
+            })
+          ]
+        })
+      ]
+    }));
+  });
+
+  it("keeps negative-pattern matches out of semantic shadow selection", () => {
+    const blocked = skill({
+      name: "blocked-release-notes",
+      description: "Draft release notes and changelog summaries.",
+      routing: {
+        negativePatterns: [{ type: "contains", value: "release notes" }]
+      },
+      whenToUse: ["Use for release notes and changelog drafting."]
+    });
+    const fallback = skill({
+      name: "fallback-changelog",
+      description: "Prepare release notes and changelog summaries.",
+      whenToUse: ["Use for release notes and changelog summaries."]
+    });
+    const route = routerWith(blocked, fallback).route("please draft release notes for the changelog");
+
+    expect(route.rejectedCandidates).toEqual([
+      expect.objectContaining({
+        skill: blocked,
+        role: "rejected"
+      })
+    ]);
+    expect(route.shadowSemanticRoute?.wouldSelectSkill).toBe(fallback);
+    expect(route.shadowSemanticRoute?.candidates.map((candidate) => candidate.skill.name))
+      .not.toContain("blocked-release-notes");
+  });
+
+  it("keeps defer-rule matches out of semantic shadow selection", () => {
+    const deferred = skill({
+      name: "deferred-changelog",
+      description: "Prepare release notes and changelog summaries.",
+      routing: {
+        deferWhen: [{
+          when: {
+            promptMatches: [{ type: "contains", value: "release notes" }]
+          },
+          reason: "Defer release note drafting."
+        }]
+      },
+      whenToUse: ["Use for release notes and changelog summaries."]
+    });
+    const fallback = skill({
+      name: "fallback-changelog",
+      description: "Prepare release notes and changelog summaries.",
+      whenToUse: ["Use for release notes and changelog summaries."]
+    });
+    const route = routerWith(deferred, fallback).route("please draft release notes for the changelog");
+
+    expect(route.shadowSemanticRoute?.wouldSelectSkill).toBe(fallback);
+    expect(route.shadowSemanticRoute?.candidates.map((candidate) => candidate.skill.name))
+      .not.toContain("deferred-changelog");
+  });
 });
 
 function routerWith(...skills: SkillDefinition[]): IntentRouter {
@@ -271,14 +351,16 @@ function routerWith(...skills: SkillDefinition[]): IntentRouter {
 
 function skill(input: {
   name: string;
+  description?: string;
+  whenToUse?: string[];
   routing?: SkillRouting;
 }): SkillDefinition {
   return {
     name: input.name,
-    description: `${input.name} test skill.`,
+    description: input.description ?? `${input.name} test skill.`,
     version: "0.1.0",
     routing: input.routing,
-    whenToUse: [],
+    whenToUse: input.whenToUse ?? [],
     requiredToolsets: [],
     playbook: [],
     permissionExpectations: [],

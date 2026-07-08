@@ -276,6 +276,16 @@ describe("RunRecorder", () => {
           candidatesRejected: [{ skillName: "rejected-skill", reason: "Negative pattern matched." }],
           rejectedCandidates: [{ skillName: "rejected-skill", reason: "Negative pattern matched." }],
           deferredCandidates: [{ skillName: "deferred-skill", reason: "Capability unavailable." }],
+          shadowSemanticRoute: expect.objectContaining({
+            mode: "local-semantic-shadow",
+            wouldSelectSkill: "candidate-skill",
+            candidates: [
+              expect.objectContaining({
+                skillName: "candidate-skill",
+                evidenceKinds: ["semantic-shadow"]
+              })
+            ]
+          }),
           candidates: [
             expect.objectContaining({ skillName: "primary-skill", selected: true }),
             expect.objectContaining({ skillName: "supporting-skill", selected: false })
@@ -290,6 +300,9 @@ describe("RunRecorder", () => {
         candidateSkills: ["candidate-skill"],
         rejectedCandidates: [{ skillName: "rejected-skill", reason: "Negative pattern matched." }],
         deferredCandidates: [{ skillName: "deferred-skill", reason: "Capability unavailable." }],
+        shadowSemanticRoute: expect.objectContaining({
+          wouldSelectSkill: "candidate-skill"
+        }),
         candidates: [
           expect.objectContaining({ skillName: "primary-skill", role: "primary" }),
           expect.objectContaining({ skillName: "supporting-skill", role: "supporting" })
@@ -544,6 +557,7 @@ function governedRoute(input: {
     ...input.rejected.map((entry) => routeCandidate(entry.skill, "rejected", entry.reason)),
     ...input.deferred.map((entry) => routeCandidate(entry.skill, "deferred", entry.reason))
   ];
+  const shadowCandidate = input.candidates[0] ?? input.primary;
 
   return {
     ...route(selected),
@@ -553,7 +567,24 @@ function governedRoute(input: {
     candidates: routeCandidates,
     rejectedCandidates: routeCandidates.filter((candidate) =>
       candidate.role === "rejected" || candidate.role === "deferred"
-    )
+    ),
+    shadowSemanticRoute: {
+      mode: "local-semantic-shadow",
+      wouldSelectSkill: shadowCandidate,
+      confidence: 0.66,
+      rationale: "Shadow semantic route would select candidate-skill; deterministic primary is primary-skill.",
+      candidates: [{
+        skill: shadowCandidate,
+        score: 0.66,
+        confidence: 0.66,
+        evidence: [{
+          kind: "semantic-shadow",
+          source: shadowCandidate.name,
+          detail: "Shadow metadata overlap: release.",
+          weight: 0.66
+        }]
+      }]
+    }
   };
 }
 

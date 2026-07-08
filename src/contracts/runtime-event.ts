@@ -138,6 +138,7 @@ export type RuntimeEvent =
       candidatesRejected?: Array<{ skillName: string; reason?: string }>;
       rejectedCandidates?: Array<{ skillName: string; reason?: string }>;
       deferredCandidates?: Array<{ skillName: string; reason?: string }>;
+      shadowSemanticRoute?: SkillRouteTelemetryDetails["shadowSemanticRoute"];
       confidence: number;
       routeConfidence?: number;
       candidatesShown?: string[];

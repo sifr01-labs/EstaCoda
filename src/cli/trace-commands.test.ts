@@ -42,6 +42,7 @@ describe("trace commands", () => {
     expect(result.output).toContain("shown=5");
     expect(result.output).toContain("rejected=rejected-skill(Negative pattern matched.)");
     expect(result.output).toContain("deferred=deferred-skill(Capability unavailable.)");
+    expect(result.output).toContain("shadow=candidate-skill:0.66");
     expect(result.output).toContain("outcome=succeeded");
   });
 });
@@ -95,6 +96,18 @@ function routingTrajectory(): Trajectory {
           ],
           rejectedCandidates: [{ skillName: "rejected-skill", reason: "Negative pattern matched." }],
           deferredCandidates: [{ skillName: "deferred-skill", reason: "Capability unavailable." }],
+          shadowSemanticRoute: {
+            mode: "local-semantic-shadow",
+            wouldSelectSkill: "candidate-skill",
+            confidence: 0.66,
+            rationale: "Shadow semantic route would select candidate-skill; deterministic primary is primary-skill.",
+            candidates: [{
+              skillName: "candidate-skill",
+              score: 0.66,
+              confidence: 0.66,
+              evidenceKinds: ["semantic-shadow"]
+            }]
+          },
           finalOutcomeStatus: "succeeded",
           candidates: [
             {

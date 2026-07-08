@@ -307,6 +307,7 @@ function summarizeSkillRouteTelemetry(data: Record<string, unknown>): string {
   const candidatesShown = stringArray(data.candidatesShown);
   const rejectedCandidates = candidateReasons(data.rejectedCandidates ?? data.candidatesRejected);
   const deferredCandidates = candidateReasons(data.deferredCandidates);
+  const shadowSemanticRoute = isRecord(data.shadowSemanticRoute) ? data.shadowSemanticRoute : undefined;
 
   const parts = [
     stringValue(data.taskClass) !== undefined ? `task=${stringValue(data.taskClass)}` : undefined,
@@ -317,12 +318,24 @@ function summarizeSkillRouteTelemetry(data: Record<string, unknown>): string {
     candidatesShown.length > 0 ? `shown=${candidatesShown.length}` : undefined,
     rejectedCandidates.length > 0 ? `rejected=${formatCandidateReasons(rejectedCandidates, 2)}` : undefined,
     deferredCandidates.length > 0 ? `deferred=${formatCandidateReasons(deferredCandidates, 2)}` : undefined,
+    shadowSemanticRoute !== undefined ? formatShadowSemanticRoute(shadowSemanticRoute) : undefined,
     stringValue(data.finalSkillUsed) !== undefined ? `final=${stringValue(data.finalSkillUsed)}` : undefined,
     stringValue(data.finalOutcomeStatus) !== undefined ? `outcome=${stringValue(data.finalOutcomeStatus)}` : undefined,
     typeof data.routeConfidence === "number" ? `confidence=${formatConfidence(data.routeConfidence)}` : undefined
   ];
 
   return compactParts(parts).join(" ");
+}
+
+function formatShadowSemanticRoute(data: Record<string, unknown>): string | undefined {
+  const wouldSelectSkill = stringValue(data.wouldSelectSkill);
+  const candidates = arrayRecords(data.candidates);
+  if (wouldSelectSkill === undefined && candidates.length === 0) {
+    return undefined;
+  }
+  const confidence = typeof data.confidence === "number" ? `:${formatConfidence(data.confidence)}` : "";
+  const suffix = candidates.length > 1 ? `,+${candidates.length - 1}` : "";
+  return `shadow=${wouldSelectSkill ?? "none"}${confidence}${suffix}`;
 }
 
 function compactParts(parts: Array<string | undefined>): string[] {
