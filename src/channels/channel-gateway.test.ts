@@ -39,7 +39,7 @@ import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { resolveEffectiveSessionModelOverride } from "../providers/model-switch-resolver.js";
-import { stableSessionKey } from "./channel-session-store.js";
+import { PersistentChannelSessionStore, stableSessionKey } from "./channel-session-store.js";
 import {
   compactModelPickerLabel,
   modelPickerCancelActionValue,
@@ -4228,6 +4228,45 @@ describe("ChannelGateway commands", () => {
       await gateway.receive(makeMessage("/new"));
       expect(cache.invalidateCalls.length).toBe(1);
       expect(cache.invalidateCalls[0]).toBe(first.sessionId);
+    });
+
+    it.each(["/new", "/reset"])("session reset %s detaches surface pointer before the next message", async (command) => {
+      const tempDir = await mkdtemp(join(tmpdir(), "estacoda-channel-reset-pointer-"));
+      try {
+        const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+        const pointerStore = new InMemorySurfacePointerStore();
+        const sessionStore = new PersistentChannelSessionStore({
+          path: join(tempDir, "channel-sessions.json"),
+          surfacePointerStore: pointerStore
+        });
+        await pointerStore.setPointer("telegram", "123456", {
+          sessionId: "old-attached-session",
+          attachedAt: "2026-07-03T16:23:32.470Z",
+          homeDelivery: "telegram:123456"
+        });
+
+        const runtimeForSession = vi.fn(async ({ sessionId }) => ({
+          ...createMinimalRuntime(),
+          handle: async () => runtimeResponse({ text: sessionId, securityDecision: "allow" })
+        }));
+        const gateway = new ChannelGateway({
+          adapters: [adapter],
+          runtimeForSession,
+          sessionStore,
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          surfacePointerStore: pointerStore
+        });
+
+        const reset = await gateway.receive(makeMessage(command));
+        expect(reset.sessionId).not.toBe("old-attached-session");
+        expect(await pointerStore.getPointer("telegram", "123456")).toBeUndefined();
+
+        const next = await gateway.receive(makeMessage("hello after reset"));
+        expect(next.sessionId).toBe(reset.sessionId);
+        expect(next.replyText).toBe(reset.sessionId);
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
     });
 
     it.each([

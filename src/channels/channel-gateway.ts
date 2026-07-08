@@ -2825,6 +2825,7 @@ export class ChannelGateway {
       this.#sessionIdByTurnKey.delete(key);
       this.#pendingApprovals.delete(key);
       this.#approvalGrants.delete(key);
+      await this.#surfacePointerStore?.removePointer(message.sessionKey.platform as SurfaceType, message.sessionKey.chatId);
       const sessionId = await this.#resetSession(message.sessionKey, message.receivedAt);
       const text = this.#renderFreshSessionNotice(sessionId);
       await this.#deliverText(adapter, message.sessionKey, text);
