@@ -29,6 +29,7 @@ import type { CompactResult, SessionCompressionService } from "../prompt/session
 import type { NativeToolExecutor } from "./native-tool-executor.js";
 import type { ProviderTurnLoop } from "./provider-turn-loop.js";
 import type { RuntimeRouter } from "./runtime-router.js";
+import type { SkillRouteShadowReranker } from "./skill-route-reranker.js";
 import type { SkillPlaybookRunner } from "./skill-playbook-runner.js";
 import type { ToolPlanRunner } from "./tool-plan-runner.js";
 import { createSessionRuntimeContext } from "./session-runtime-context.js";
@@ -279,6 +280,8 @@ async function createAgentLoop(input: {
   trajectoryStore?: Pick<TrajectoryStore, "saveTrajectory">;
   providerExecution?: ProviderExecutionResult;
   skillLearningManager?: SkillLearningManager;
+  skillRouteShadowReranker?: SkillRouteShadowReranker;
+  agentEvolutionPolicy?: ReturnType<typeof deriveAgentEvolutionPolicy>;
 }) {
   const sessionDb = new InMemorySessionDB();
   const sessionId = `agent-loop-test-${Date.now()}-${Math.random()}`;
@@ -380,7 +383,8 @@ async function createAgentLoop(input: {
     memoryCurationService: input.memoryCurationService,
     compressionConfig: input.compressionConfig,
     skillLearningManager: input.skillLearningManager,
-    agentEvolutionPolicy: deriveAgentEvolutionPolicy("suggest")
+    skillRouteShadowReranker: input.skillRouteShadowReranker,
+    agentEvolutionPolicy: input.agentEvolutionPolicy ?? deriveAgentEvolutionPolicy("suggest")
   });
 
   return {
@@ -426,6 +430,69 @@ describe("AgentLoop provider availability gating", () => {
         autoRollbackEligibleLocalChanges: false
       })
     }));
+  });
+
+  it("records shadow LLM rerank telemetry without changing the selected skill", async () => {
+    const rerank = vi.fn(async () => ({
+      mode: "llm-rerank-shadow" as const,
+      status: "succeeded" as const,
+      wouldSelectSkill: "alternate-skill",
+      confidence: 0.61,
+      candidates: [{ skillName: "alternate-skill", confidence: 0.61 }],
+      diagnostics: [],
+      provider: "openai",
+      model: "assessor-model"
+    }));
+    const { loop, sessionDb, sessionId } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("done"),
+      skillRouteShadowReranker: { rerank },
+      agentEvolutionPolicy: deriveAgentEvolutionPolicy("proactive")
+    });
+
+    const response = await loop.handle({
+      text: "use the test skill",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(response.matchedSkills).toEqual(["test-skill"]);
+    expect(rerank).toHaveBeenCalledWith(expect.objectContaining({
+      userText: "use the test skill",
+      intent: expect.objectContaining({
+        suggestedSkills: [selectedSkill]
+      })
+    }));
+    const events = await sessionDb.listEvents(sessionId);
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "skill-route-telemetry",
+      telemetry: expect.objectContaining({
+        selectedSkill: "test-skill",
+        shadowLlmRerank: expect.objectContaining({
+          status: "succeeded",
+          wouldSelectSkill: "alternate-skill"
+        })
+      })
+    }));
+  });
+
+  it("does not run the shadow LLM reranker under semantic-local routing policy", async () => {
+    const rerank = vi.fn(async () => undefined);
+    const { loop } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("done"),
+      skillRouteShadowReranker: { rerank }
+    });
+
+    await loop.handle({
+      text: "use the test skill",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(rerank).not.toHaveBeenCalled();
   });
 
   it("records workflow context on active workflow turns", async () => {

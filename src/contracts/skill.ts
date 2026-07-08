@@ -252,6 +252,22 @@ export type SkillRouteShadowTelemetry = {
   rationale: string;
 };
 
+export type SkillRouteLlmRerankCandidate = {
+  skillName: string;
+  confidence?: number;
+};
+
+export type SkillRouteLlmRerankTelemetry = {
+  mode: "llm-rerank-shadow";
+  status: "succeeded" | "skipped" | "failed" | "invalid";
+  wouldSelectSkill?: string;
+  confidence?: number;
+  candidates: SkillRouteLlmRerankCandidate[];
+  diagnostics: string[];
+  provider?: string;
+  model?: string;
+};
+
 export type SkillRouteCorrectionSignal = {
   source: "user" | "developer" | "model";
   kind: "rejected" | "searched" | "selected" | "self-corrected";
@@ -283,6 +299,7 @@ export type SkillRouteTelemetryDetails = {
   rejectedCandidates?: SkillRouteRejectedCandidate[];
   deferredCandidates?: SkillRouteRejectedCandidate[];
   shadowSemanticRoute?: SkillRouteShadowTelemetry;
+  shadowLlmRerank?: SkillRouteLlmRerankTelemetry;
   searchedReplacementSkill?: string;
   finalSkillUsed?: string;
   noSkillResult?: SkillRouteNoSkillResult;

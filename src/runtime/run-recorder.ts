@@ -246,6 +246,7 @@ export class RunRecorder {
       rejectedCandidates: input.routeDetails?.rejectedCandidates ?? candidateDetails.rejectedCandidates,
       deferredCandidates: input.routeDetails?.deferredCandidates ?? candidateDetails.deferredCandidates,
       shadowSemanticRoute: input.routeDetails?.shadowSemanticRoute ?? shadowSemanticRouteDetails(input.intent),
+      shadowLlmRerank: input.routeDetails?.shadowLlmRerank,
       finalSkillUsed: input.routeDetails?.finalSkillUsed ?? input.selectedSkill?.name
     };
     const event = {
@@ -315,6 +316,7 @@ export class RunRecorder {
       rejectedCandidates: telemetryDetails.rejectedCandidates,
       deferredCandidates: telemetryDetails.deferredCandidates,
       shadowSemanticRoute: telemetryDetails.shadowSemanticRoute,
+      shadowLlmRerank: telemetryDetails.shadowLlmRerank,
       confidence: input.intent.confidence,
       routeConfidence: input.intent.confidence,
       candidatesShown: telemetryDetails.candidatesShown,

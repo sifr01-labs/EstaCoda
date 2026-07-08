@@ -711,6 +711,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     mainRoute,
     primaryModelRoute: options.primaryModelRoute,
     modelFallbackRoutes: options.modelFallbackRoutes,
+    assessorRoute,
     visionRoute,
     compressionRoute,
     providerPreferences: {

@@ -308,6 +308,7 @@ function summarizeSkillRouteTelemetry(data: Record<string, unknown>): string {
   const rejectedCandidates = candidateReasons(data.rejectedCandidates ?? data.candidatesRejected);
   const deferredCandidates = candidateReasons(data.deferredCandidates);
   const shadowSemanticRoute = isRecord(data.shadowSemanticRoute) ? data.shadowSemanticRoute : undefined;
+  const shadowLlmRerank = isRecord(data.shadowLlmRerank) ? data.shadowLlmRerank : undefined;
 
   const parts = [
     stringValue(data.taskClass) !== undefined ? `task=${stringValue(data.taskClass)}` : undefined,
@@ -319,6 +320,7 @@ function summarizeSkillRouteTelemetry(data: Record<string, unknown>): string {
     rejectedCandidates.length > 0 ? `rejected=${formatCandidateReasons(rejectedCandidates, 2)}` : undefined,
     deferredCandidates.length > 0 ? `deferred=${formatCandidateReasons(deferredCandidates, 2)}` : undefined,
     shadowSemanticRoute !== undefined ? formatShadowSemanticRoute(shadowSemanticRoute) : undefined,
+    shadowLlmRerank !== undefined ? formatShadowLlmRerank(shadowLlmRerank) : undefined,
     stringValue(data.finalSkillUsed) !== undefined ? `final=${stringValue(data.finalSkillUsed)}` : undefined,
     stringValue(data.finalOutcomeStatus) !== undefined ? `outcome=${stringValue(data.finalOutcomeStatus)}` : undefined,
     typeof data.routeConfidence === "number" ? `confidence=${formatConfidence(data.routeConfidence)}` : undefined
@@ -336,6 +338,17 @@ function formatShadowSemanticRoute(data: Record<string, unknown>): string | unde
   const confidence = typeof data.confidence === "number" ? `:${formatConfidence(data.confidence)}` : "";
   const suffix = candidates.length > 1 ? `,+${candidates.length - 1}` : "";
   return `shadow=${wouldSelectSkill ?? "none"}${confidence}${suffix}`;
+}
+
+function formatShadowLlmRerank(data: Record<string, unknown>): string | undefined {
+  const status = stringValue(data.status);
+  const wouldSelectSkill = stringValue(data.wouldSelectSkill);
+  const candidates = arrayRecords(data.candidates);
+  if (status === undefined && wouldSelectSkill === undefined && candidates.length === 0) {
+    return undefined;
+  }
+  const confidence = typeof data.confidence === "number" ? `:${formatConfidence(data.confidence)}` : "";
+  return `llm-shadow=${status ?? "unknown"}:${wouldSelectSkill ?? "none"}${confidence}`;
 }
 
 function compactParts(parts: Array<string | undefined>): string[] {

@@ -139,6 +139,7 @@ export type RuntimeEvent =
       rejectedCandidates?: Array<{ skillName: string; reason?: string }>;
       deferredCandidates?: Array<{ skillName: string; reason?: string }>;
       shadowSemanticRoute?: SkillRouteTelemetryDetails["shadowSemanticRoute"];
+      shadowLlmRerank?: SkillRouteTelemetryDetails["shadowLlmRerank"];
       confidence: number;
       routeConfidence?: number;
       candidatesShown?: string[];

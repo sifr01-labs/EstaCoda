@@ -54,6 +54,7 @@ import { ProviderTurnLoop, type ProviderTurnLoopBudgets, type ProviderTurnLoopOp
 import { RunRecorder } from "./run-recorder.js";
 import { RuntimeRouter } from "./runtime-router.js";
 import { SkillPlaybookRunner } from "./skill-playbook-runner.js";
+import { LlmSkillRouteShadowReranker } from "./skill-route-reranker.js";
 import { createSessionRuntimeContext, type SessionRuntimeContext } from "./session-runtime-context.js";
 import { ToolPlanRunner } from "./tool-plan-runner.js";
 import { resolveCapabilityPythonEnv, type CapabilityPythonEnvResolveResult } from "../python-env/capability-resolver.js";
@@ -63,6 +64,7 @@ export type AgentLoopRouteInput = {
   mainRoute: ResolvedModelRoute;
   primaryModelRoute?: ResolvedModelRoute;
   modelFallbackRoutes?: ResolvedModelRoute[];
+  assessorRoute?: ResolvedAuxiliaryRoute;
   visionRoute?: ResolvedAuxiliaryRoute;
   compressionRoute?: ResolvedAuxiliaryRoute;
   providerPreferences: ProviderRoutePreferences;
@@ -560,6 +562,13 @@ export class AgentLoopBuilder {
       skillsIndex: sessionSkillCatalog,
       skillConfig: input.skillConfig,
       skillLearningManager: input.skillLearningManager,
+      skillRouteShadowReranker: routes.assessorRoute === undefined
+        ? undefined
+        : new LlmSkillRouteShadowReranker({
+            providerExecutor: substrate.providerExecutor,
+            route: routes.assessorRoute,
+            mainRoute: routes.mainRoute
+          }),
       skillEvolutionStore: substrate.skillEvolutionStore,
       agentEvolutionPolicy: input.agentEvolutionPolicy,
       ui: input.ui,

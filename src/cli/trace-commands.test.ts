@@ -43,6 +43,7 @@ describe("trace commands", () => {
     expect(result.output).toContain("rejected=rejected-skill(Negative pattern matched.)");
     expect(result.output).toContain("deferred=deferred-skill(Capability unavailable.)");
     expect(result.output).toContain("shadow=candidate-skill:0.66");
+    expect(result.output).toContain("llm-shadow=succeeded:supporting-skill:0.71");
     expect(result.output).toContain("outcome=succeeded");
   });
 });
@@ -107,6 +108,16 @@ function routingTrajectory(): Trajectory {
               confidence: 0.66,
               evidenceKinds: ["semantic-shadow"]
             }]
+          },
+          shadowLlmRerank: {
+            mode: "llm-rerank-shadow",
+            status: "succeeded",
+            wouldSelectSkill: "supporting-skill",
+            confidence: 0.71,
+            candidates: [{ skillName: "supporting-skill", confidence: 0.71 }],
+            diagnostics: [],
+            provider: "openai",
+            model: "assessor-model"
           },
           finalOutcomeStatus: "succeeded",
           candidates: [

@@ -15,7 +15,8 @@ import type {
   SkillConfigField,
   SkillDefinition,
   SkillCatalogEntry,
-  SkillRouteFinalOutcomeStatus
+  SkillRouteFinalOutcomeStatus,
+  SkillRouteLlmRerankTelemetry
 } from "../contracts/skill.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolDefinition, ToolRiskClass, ToolsetName } from "../contracts/tool.js";
@@ -37,6 +38,7 @@ import { createSkillRouteTelemetry, hashSkillRoutePrompt } from "../skills/skill
 import { compressionReportFromResult, ProviderTurnLoop } from "./provider-turn-loop.js";
 import type { IntentRouter } from "./intent-router.js";
 import { RunRecorder } from "./run-recorder.js";
+import { boundedRerankCandidates, type SkillRouteShadowReranker } from "./skill-route-reranker.js";
 import type { RuntimeRouter } from "./runtime-router.js";
 import { summarizeAttachments } from "./runtime-router.js";
 import { ToolPlanRunner, toolResultStats } from "./tool-plan-runner.js";
@@ -136,6 +138,7 @@ export type AgentLoopOptions = {
   skillsIndex?: SkillCatalogEntry[];
   skillConfig?: Record<string, Record<string, unknown>>;
   skillLearningManager?: SkillLearningManager;
+  skillRouteShadowReranker?: SkillRouteShadowReranker;
   skillEvolutionStore?: SkillEvolutionStore;
   agentEvolutionPolicy?: AgentEvolutionPolicy;
   ui?: {
@@ -222,6 +225,7 @@ export class AgentLoop {
   readonly #skillsIndex: SkillCatalogEntry[];
   readonly #skillConfig: Record<string, Record<string, unknown>>;
   readonly #skillLearningManager: SkillLearningManager | undefined;
+  readonly #skillRouteShadowReranker: SkillRouteShadowReranker | undefined;
   readonly #skillEvolutionStore: SkillEvolutionStore | undefined;
   readonly #agentEvolutionPolicy: AgentEvolutionPolicy | undefined;
   readonly #ui: AgentLoopOptions["ui"];
@@ -260,6 +264,7 @@ export class AgentLoop {
     this.#skillsIndex = options.skillsIndex ?? [];
     this.#skillConfig = options.skillConfig ?? {};
     this.#skillLearningManager = options.skillLearningManager;
+    this.#skillRouteShadowReranker = options.skillRouteShadowReranker;
     this.#skillEvolutionStore = options.skillEvolutionStore;
     this.#agentEvolutionPolicy = options.agentEvolutionPolicy;
     this.#ui = options.ui;
@@ -500,11 +505,17 @@ export class AgentLoop {
       confirmationRequired: intent.confirmationRequired,
       suggestedToolsets: intent.suggestedToolsets
     });
+    const shadowLlmRerank = await this.#shadowLlmRerank({
+      intent,
+      userText: routedText,
+      ...(input.signal === undefined ? {} : { signal: input.signal })
+    });
     await this.#runRecorder.recordRouteUsage({
       intent,
       selectedSkill,
       channel: input.channel,
       userText: effectiveText,
+      ...(shadowLlmRerank === undefined ? {} : { routeDetails: { shadowLlmRerank } }),
       onEvent: input.onEvent
     });
     const turnMemoryPromptContext = await this.#memoryPromptContextForTurn({
@@ -1236,6 +1247,37 @@ export class AgentLoop {
       });
     } catch {
       // Session diagnostics are best-effort for memory-side promotion failures.
+    }
+  }
+
+  async #shadowLlmRerank(input: {
+    intent: IntentRoute;
+    userText: string;
+    signal?: AbortSignal;
+  }): Promise<SkillRouteLlmRerankTelemetry | undefined> {
+    if (this.#skillRouteShadowReranker === undefined) {
+      return undefined;
+    }
+    if (
+      this.#agentEvolutionPolicy?.routingMode !== "hybrid" &&
+      this.#agentEvolutionPolicy?.routingMode !== "hybrid-plus"
+    ) {
+      return undefined;
+    }
+
+    try {
+      return await this.#skillRouteShadowReranker.rerank(input);
+    } catch (error) {
+      const candidates = boundedRerankCandidates(input.intent);
+      if (candidates.length < 2) {
+        return undefined;
+      }
+      return {
+        mode: "llm-rerank-shadow",
+        status: "failed",
+        candidates: candidates.map((candidate) => ({ skillName: candidate.skill.name })),
+        diagnostics: [`Reranker threw: ${truncate(redactSensitiveText(errorMessage(error)), 160)}`]
+      };
     }
   }
 
