@@ -206,6 +206,117 @@ describe("workspace file change preview metadata", () => {
       "context_aware"
     ]);
   });
+
+  it("applies V4A patch mode across multiple files after validation", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "a.md"), "alpha\nbeta\n", "utf8");
+    await writeFile(join(root, "b.md"), "one\ntwo\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const result = await patch?.run({
+      mode: "patch",
+      patch: [
+        "*** Begin Patch",
+        "*** Update File: a.md",
+        "@@ alpha @@",
+        " alpha",
+        "-beta",
+        "+gamma",
+        "*** Update File: b.md",
+        "@@ one @@",
+        " one",
+        "-two",
+        "+three",
+        "*** End Patch"
+      ].join("\n")
+    });
+
+    expect(result?.ok).toBe(true);
+    expect(result?.metadata).toMatchObject({
+      paths: ["a.md", "b.md"],
+      fileCount: 2,
+      hunkCount: 2
+    });
+    expect(result?.metadata?.fileChangePreview).toMatchObject({
+      kind: "fileChangePreview",
+      path: "multiple files",
+      changeType: "modified"
+    });
+    await expect(readFile(join(root, "a.md"), "utf8")).resolves.toBe("alpha\ngamma\n");
+    await expect(readFile(join(root, "b.md"), "utf8")).resolves.toBe("one\nthree\n");
+  });
+
+  it("validates all V4A patch hunks before writing any file", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "a.md"), "alpha\nbeta\n", "utf8");
+    await writeFile(join(root, "b.md"), "one\ntwo\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const result = await patch?.run({
+      mode: "patch",
+      patch: [
+        "*** Begin Patch",
+        "*** Update File: a.md",
+        "@@ alpha @@",
+        " alpha",
+        "-beta",
+        "+gamma",
+        "*** Update File: b.md",
+        "@@ one @@",
+        " one",
+        "-missing",
+        "+three",
+        "*** End Patch"
+      ].join("\n")
+    });
+
+    expect(result?.ok).toBe(false);
+    expect(result?.content).toContain("b.md hunk 1");
+    await expect(readFile(join(root, "a.md"), "utf8")).resolves.toBe("alpha\nbeta\n");
+    await expect(readFile(join(root, "b.md"), "utf8")).resolves.toBe("one\ntwo\n");
+  });
+
+  it("uses V4A context hints to disambiguate patch hunks", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "app.ts"), [
+      "function first() {",
+      "  return 1;",
+      "}",
+      "",
+      "function second() {",
+      "  return 1;",
+      "}",
+      ""
+    ].join("\n"), "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const result = await patch?.run({
+      mode: "patch",
+      patch: [
+        "*** Begin Patch",
+        "*** Update File: app.ts",
+        "@@ function second() @@",
+        "-  return 1;",
+        "+  return 2;",
+        "*** End Patch"
+      ].join("\n")
+    });
+
+    expect(result?.ok).toBe(true);
+    await expect(readFile(join(root, "app.ts"), "utf8")).resolves.toBe([
+      "function first() {",
+      "  return 1;",
+      "}",
+      "",
+      "function second() {",
+      "  return 2;",
+      "}",
+      ""
+    ].join("\n"));
+  });
 });
 
 describe("workspace file-state tracking", () => {

@@ -1191,6 +1191,7 @@ describe("createRuntime MCP trust gating", () => {
               "mode",
               "new_string",
               "old_string",
+              "patch",
               "path",
               "replace_all",
             ],

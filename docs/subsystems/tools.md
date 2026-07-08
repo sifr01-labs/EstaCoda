@@ -71,6 +71,8 @@ Workspace file tools are scoped to the active workspace. User-provided paths are
 
 `file.patch` is the targeted edit tool. Replace mode tries exact matching first, then deterministic fuzzy fallbacks for small whitespace, indentation, escaping, and Unicode differences. A match must be unique unless `replace_all: true` is explicit, and overlapping fuzzy matches fail closed before any write.
 
+Patch mode accepts V4A-style `*** Begin Patch` / `*** Update File` / `*** End Patch` content for multi-file updates. It validates every file and hunk before writing, so a failed hunk leaves all targeted files unchanged.
+
 ### `file.search`
 
 `file.search` is the compatibility search tool. It is useful for simple literal or regex searches when ripgrep-specific filtering, pagination, or output modes are not needed. It remains intentionally smaller than `file.grep`.
