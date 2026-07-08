@@ -1,4 +1,8 @@
 import type { EvalCase, EvalResult } from "../../contracts/eval.js";
+import type { IntentTaskClass } from "../../contracts/intent.js";
+import type { SkillDefinition, SkillRouting } from "../../contracts/skill.js";
+import { SkillRegistry } from "../../skills/skill-registry.js";
+import { IntentRouter } from "../../runtime/intent-router.js";
 import { assertEqual, assertTrue, buildResult } from "../eval-runner.js";
 
 export type RateMetric = {
@@ -15,6 +19,8 @@ export type RoutingEvalSeedCase = {
   selectedSkill?: string;
   expectedNoSkill?: boolean;
   noSkillResult?: "correct" | "missed" | "not-applicable";
+  expectedTaskClass?: IntentTaskClass;
+  taskClass?: IntentTaskClass;
   candidatesShown: string[];
   expectedSupportingCandidates?: string[];
   supportingCandidates?: string[];
@@ -42,10 +48,12 @@ export type RoutingEvalMetrics = {
   supportingCandidateRecall: RateMetric;
   rejectionCorrectionRate: RateMetric;
   degradationCorrectness: RateMetric;
+  taskClassCorrectness: RateMetric;
   weightedRoutingScore: number | null;
   baselineGates: {
     forbiddenSkillViolationsZero: boolean;
     noSkillCorrectnessMeasured: boolean;
+    taskClassCorrectnessMeasured: boolean;
     primaryPrecisionWeight: number;
     primaryRecallWeight: number;
     falsePositivesTrackedSeparately: boolean;
@@ -90,6 +98,8 @@ export const routingEvolutionSeedCases: RoutingEvalSeedCase[] = [
     promptHash: "route002",
     expectedNoSkill: true,
     noSkillResult: "correct",
+    expectedTaskClass: "general",
+    taskClass: "general",
     candidatesShown: [],
     forbiddenSkills: ["terminal-command"]
   },
@@ -128,10 +138,106 @@ export const routingEvolutionSeedCases: RoutingEvalSeedCase[] = [
   }
 ];
 
+export function buildLiveRoutingEvalSeedCases(): RoutingEvalSeedCase[] {
+  const releaseValidation = evalSkill({
+    name: "release-validation",
+    routing: {
+      triggerPatterns: [{ type: "contains", value: "release route" }],
+      priority: 10
+    }
+  });
+  const docsWriting = evalSkill({
+    name: "docs-writing",
+    routing: {
+      triggerPatterns: [{ type: "contains", value: "release route" }],
+      priority: 5
+    }
+  });
+  const reviewSkill = evalSkill({
+    name: "code-review",
+    routing: {
+      triggerPatterns: [{ type: "contains", value: "review this release" }],
+      priority: 5
+    }
+  });
+  const rejectedReview = evalSkill({
+    name: "deployment-review",
+    routing: {
+      triggerPatterns: [{ type: "contains", value: "review this release" }],
+      negativePatterns: [{ type: "contains", value: "review this release" }],
+      priority: 10
+    }
+  });
+  const deferredSkill = evalSkill({
+    name: "deferred-browser",
+    routing: {
+      triggerPatterns: [{ type: "contains", value: "deferred browser route" }],
+      deferWhen: [{
+        when: {
+          promptMatches: [{ type: "contains", value: "deferred browser route" }]
+        },
+        reason: "Browser capability unavailable in routing eval."
+      }]
+    }
+  });
+
+  return [
+    liveRoutingCase({
+      id: "live-primary-and-supporting",
+      prompt: "please use the release route",
+      skills: [docsWriting, releaseValidation],
+      expectedPrimarySkill: "release-validation",
+      expectedSupportingCandidates: ["docs-writing"],
+      expectedTaskClass: "general",
+      forbiddenSkills: ["deploy-production"]
+    }),
+    liveRoutingCase({
+      id: "live-no-skill-architecture-advice",
+      prompt: "what do you think of this architecture plan?",
+      skills: [releaseValidation],
+      expectedNoSkill: true,
+      expectedTaskClass: "architecture-advice",
+      forbiddenSkills: ["deploy-production"]
+    }),
+    liveRoutingCase({
+      id: "live-rejected-candidate",
+      prompt: "review this release",
+      skills: [rejectedReview, reviewSkill],
+      expectedPrimarySkill: "code-review",
+      expectedTaskClass: "general",
+      forbiddenSkills: ["deployment-review"]
+    }),
+    liveRoutingCase({
+      id: "live-deferred-candidate",
+      prompt: "deferred browser route",
+      skills: [deferredSkill],
+      expectedNoSkill: true,
+      expectedTaskClass: "general",
+      forbiddenSkills: ["deferred-browser"]
+    }),
+    liveRoutingCase({
+      id: "live-release-validation-task-class",
+      prompt: "validate this branch before merge",
+      skills: [],
+      expectedNoSkill: true,
+      expectedTaskClass: "release-validation",
+      forbiddenSkills: ["deploy-production"]
+    })
+  ];
+}
+
+export function buildDefaultRoutingEvolutionBaselineCases(): RoutingEvalSeedCase[] {
+  return [
+    ...routingEvolutionSeedCases,
+    ...buildLiveRoutingEvalSeedCases()
+  ];
+}
+
 export function buildRoutingEvolutionBaselineReport(
-  cases: readonly RoutingEvalSeedCase[] = routingEvolutionSeedCases
+  cases?: readonly RoutingEvalSeedCase[]
 ): RoutingEvolutionBaselineReport {
-  const routing = buildRoutingEvalMetrics(cases);
+  const routingCases = cases ?? buildDefaultRoutingEvolutionBaselineCases();
+  const routing = buildRoutingEvalMetrics(routingCases);
   return {
     routing,
     evolution: buildEmptyEvolutionMetrics()
@@ -168,6 +274,10 @@ export function buildRoutingEvalMetrics(cases: readonly RoutingEvalSeedCase[]): 
   );
   const degradedCases = cases.filter((testCase) => testCase.expectedDegraded === true);
   const correctDegradedCases = degradedCases.filter((testCase) => testCase.degradedCorrect === true);
+  const expectedTaskClassCases = cases.filter((testCase) => testCase.expectedTaskClass !== undefined);
+  const correctTaskClassCases = expectedTaskClassCases.filter((testCase) =>
+    testCase.taskClass === testCase.expectedTaskClass
+  );
 
   const primarySkillPrecision = rate(correctPrimarySelections.length, selectedCases.length);
   const primarySkillRecall = rate(correctPrimarySelections.length, expectedPrimaryCases.length);
@@ -190,10 +300,12 @@ export function buildRoutingEvalMetrics(cases: readonly RoutingEvalSeedCase[]): 
     supportingCandidateRecall: rate(matchedSupportingCount, expectedSupportingCount),
     rejectionCorrectionRate: rate(correctedRejectedCases.length, rejectedCases.length),
     degradationCorrectness: rate(correctDegradedCases.length, degradedCases.length),
+    taskClassCorrectness: rate(correctTaskClassCases.length, expectedTaskClassCases.length),
     weightedRoutingScore,
     baselineGates: {
       forbiddenSkillViolationsZero: forbiddenViolations.length === 0,
       noSkillCorrectnessMeasured: noSkillCases.length > 0,
+      taskClassCorrectnessMeasured: expectedTaskClassCases.length > 0,
       primaryPrecisionWeight: PRECISION_WEIGHT,
       primaryRecallWeight: RECALL_WEIGHT,
       falsePositivesTrackedSeparately: falsePositiveCases.length !== missCases.length ||
@@ -227,7 +339,8 @@ export const routingEvolutionBaselineCase: EvalCase = {
     const startedAt = Date.now();
     const report = buildRoutingEvolutionBaselineReport();
     const assertions = [
-      assertEqual("routing case count", report.routing.caseCount, routingEvolutionSeedCases.length),
+      assertEqual("routing case count", report.routing.caseCount, buildDefaultRoutingEvolutionBaselineCases().length),
+      assertTrue("live router cases are included", report.routing.caseCount > routingEvolutionSeedCases.length),
       assertTrue("seed includes no-skill cases", routingEvolutionSeedCases.some((testCase) => testCase.expectedNoSkill === true)),
       assertEqual("forbidden-skill violations are zero", report.routing.forbiddenSkillViolations.count, 0),
       assertTrue("no-skill correctness is measured", report.routing.noSkillCorrectness.status === "measured"),
@@ -238,6 +351,7 @@ export const routingEvolutionBaselineCase: EvalCase = {
       assertTrue("supporting-candidate recall is reported", report.routing.supportingCandidateRecall.status === "measured"),
       assertTrue("rejection correction rate is reported", report.routing.rejectionCorrectionRate.status === "measured"),
       assertTrue("degradation correctness is reported", report.routing.degradationCorrectness.status === "measured"),
+      assertTrue("task-class correctness is reported", report.routing.taskClassCorrectness.status === "measured"),
       assertTrue("evolution manual correction metric shape exists", report.evolution.manualCorrectionRate.status === "unavailable"),
       assertTrue("evolution rejection distribution shape exists", typeof report.evolution.proposalRejectionReasonDistribution === "object"),
       assertTrue("route rejection frequency shape exists", typeof report.evolution.routeRejectionFrequencyBySkill === "object"),
@@ -252,6 +366,68 @@ export const routingEvolutionBaselineCase: EvalCase = {
     );
   }
 };
+
+function liveRoutingCase(input: {
+  id: string;
+  prompt: string;
+  skills: SkillDefinition[];
+  expectedPrimarySkill?: string;
+  expectedNoSkill?: boolean;
+  expectedTaskClass: IntentTaskClass;
+  expectedSupportingCandidates?: string[];
+  forbiddenSkills?: string[];
+}): RoutingEvalSeedCase {
+  const registry = new SkillRegistry();
+  for (const skill of input.skills) {
+    registry.register(skill);
+  }
+  const route = new IntentRouter({ skillRegistry: registry }).route(input.prompt);
+  const candidateRoles = new Map((route.candidates ?? []).map((candidate) => [candidate.skill.name, candidate.role]));
+  const rejectedCandidates = (route.candidates ?? [])
+    .filter((candidate) => candidate.role === "rejected")
+    .map((candidate) => ({
+      skillName: candidate.skill.name,
+      reason: candidate.reason
+    }));
+  const selectedSkill = route.primarySkill?.name;
+  return {
+    id: input.id,
+    promptHash: input.id,
+    expectedPrimarySkill: input.expectedPrimarySkill,
+    selectedSkill,
+    expectedNoSkill: input.expectedNoSkill,
+    noSkillResult: input.expectedNoSkill === true
+      ? selectedSkill === undefined ? "correct" : "missed"
+      : selectedSkill === undefined ? "missed" : "not-applicable",
+    expectedTaskClass: input.expectedTaskClass,
+    taskClass: route.taskClass,
+    candidatesShown: (route.candidates ?? []).map((candidate) => candidate.skill.name),
+    expectedSupportingCandidates: input.expectedSupportingCandidates,
+    supportingCandidates: (route.supportingSkills ?? [])
+      .map((skill) => skill.name)
+      .filter((name) => candidateRoles.get(name) === "supporting"),
+    forbiddenSkills: input.forbiddenSkills,
+    candidatesRejected: rejectedCandidates.length === 0 ? undefined : rejectedCandidates
+  };
+}
+
+function evalSkill(input: {
+  name: string;
+  routing: SkillRouting;
+}): SkillDefinition {
+  return {
+    name: input.name,
+    description: `${input.name} routing eval skill.`,
+    version: "0.1.0",
+    routing: input.routing,
+    whenToUse: [],
+    requiredToolsets: [],
+    playbook: [],
+    permissionExpectations: [],
+    examples: [],
+    evaluations: []
+  };
+}
 
 function rate(numerator: number, denominator: number): RateMetric {
   if (denominator === 0) {

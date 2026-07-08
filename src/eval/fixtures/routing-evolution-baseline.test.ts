@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildDefaultRoutingEvolutionBaselineCases,
+  buildLiveRoutingEvalSeedCases,
   buildRoutingEvalMetrics,
   buildRoutingEvolutionBaselineReport,
   routingEvolutionSeedCases,
@@ -12,12 +14,66 @@ describe("routing evolution baseline metrics", () => {
     const second = buildRoutingEvolutionBaselineReport();
 
     expect(first).toEqual(second);
-    expect(first.routing.caseCount).toBe(routingEvolutionSeedCases.length);
+    expect(first.routing.caseCount).toBe(buildDefaultRoutingEvolutionBaselineCases().length);
+    expect(first.routing.caseCount).toBeGreaterThan(routingEvolutionSeedCases.length);
   });
 
   it("seed fixtures include no-skill cases", () => {
     expect(routingEvolutionSeedCases.some((testCase) => testCase.expectedNoSkill === true)).toBe(true);
     expect(buildRoutingEvolutionBaselineReport().routing.noSkillCorrectness.status).toBe("measured");
+  });
+
+  it("builds deterministic live router seed cases", () => {
+    const first = buildLiveRoutingEvalSeedCases();
+    const second = buildLiveRoutingEvalSeedCases();
+
+    expect(first).toEqual(second);
+    expect(first).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: "live-primary-and-supporting",
+        expectedPrimarySkill: "release-validation",
+        selectedSkill: "release-validation",
+        expectedSupportingCandidates: ["docs-writing"],
+        supportingCandidates: ["docs-writing"]
+      }),
+      expect.objectContaining({
+        id: "live-no-skill-architecture-advice",
+        expectedNoSkill: true,
+        noSkillResult: "correct",
+        expectedTaskClass: "architecture-advice",
+        taskClass: "architecture-advice"
+      }),
+      expect.objectContaining({
+        id: "live-rejected-candidate",
+        candidatesRejected: [{ skillName: "deployment-review", reason: "Negative routing pattern matched." }]
+      })
+    ]));
+  });
+
+  it("reports live router primary, supporting, no-skill, and task-class metrics", () => {
+    const metrics = buildRoutingEvalMetrics(buildLiveRoutingEvalSeedCases());
+
+    expect(metrics.primarySkillPrecision).toEqual(expect.objectContaining({
+      status: "measured",
+      value: 1
+    }));
+    expect(metrics.primarySkillRecall).toEqual(expect.objectContaining({
+      status: "measured",
+      value: 1
+    }));
+    expect(metrics.noSkillCorrectness).toEqual(expect.objectContaining({
+      status: "measured",
+      value: 1
+    }));
+    expect(metrics.supportingCandidateRecall).toEqual(expect.objectContaining({
+      status: "measured",
+      value: 1
+    }));
+    expect(metrics.taskClassCorrectness).toEqual(expect.objectContaining({
+      status: "measured",
+      value: 1
+    }));
+    expect(metrics.forbiddenSkillViolations.count).toBe(0);
   });
 
   it("counts forbidden-skill violations separately", () => {
@@ -80,6 +136,32 @@ describe("routing evolution baseline metrics", () => {
       denominator: expect.any(Number)
     }));
     expect(metrics.baselineGates.primaryPrecisionWeight).toBeGreaterThan(metrics.baselineGates.primaryRecallWeight);
+  });
+
+  it("reports task-class correctness separately", () => {
+    const metrics = buildRoutingEvalMetrics([
+      {
+        id: "task-class-correct",
+        promptHash: "tc001",
+        candidatesShown: [],
+        expectedTaskClass: "docs-writing",
+        taskClass: "docs-writing"
+      },
+      {
+        id: "task-class-wrong",
+        promptHash: "tc002",
+        candidatesShown: [],
+        expectedTaskClass: "code-review",
+        taskClass: "general"
+      }
+    ]);
+
+    expect(metrics.taskClassCorrectness).toEqual({
+      status: "measured",
+      numerator: 1,
+      denominator: 2,
+      value: 0.5
+    });
   });
 
   it("keeps evolution metric shape present when baseline data is empty", () => {
