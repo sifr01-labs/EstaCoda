@@ -170,7 +170,7 @@ export class LocalMemoryProvider implements MemoryProvider {
         }
         await this.#save([target]);
       } catch (error) {
-        this.#store.write(target, previousMarkdown);
+        this.#store.hydrate(target, previousMarkdown);
         await this.#promotionStore.restore(previousRecords);
         throw error;
       }
@@ -195,7 +195,7 @@ export class LocalMemoryProvider implements MemoryProvider {
         }
         await this.#save([target]);
       } catch (error) {
-        this.#store.write(target, previousMarkdown);
+        this.#store.hydrate(target, previousMarkdown);
         await this.#promotionStore.restore(previousRecords);
         throw error;
       }
@@ -207,7 +207,7 @@ export class LocalMemoryProvider implements MemoryProvider {
       this.#appendDedupe(target, `- ${sanitizedConclusion.content}`);
       await this.#save([target]);
     } catch (error) {
-      this.#store.write(target, previousMarkdown);
+      this.#store.hydrate(target, previousMarkdown);
       throw error;
     }
   }
@@ -230,7 +230,7 @@ export class LocalMemoryProvider implements MemoryProvider {
       await this.#save(targets);
     } catch (error) {
       for (const [target, content] of previousMarkdown.entries()) {
-        this.#store.write(target, content);
+        this.#store.hydrate(target, content);
       }
       throw error;
     }
@@ -258,7 +258,7 @@ export class LocalMemoryProvider implements MemoryProvider {
       this.#appendDedupe("MEMORY.md", line);
       await this.#save(["MEMORY.md"]);
     } catch (error) {
-      this.#store.write("MEMORY.md", previousMarkdown);
+      this.#store.hydrate("MEMORY.md", previousMarkdown);
       throw error;
     }
   }
@@ -276,7 +276,7 @@ export class LocalMemoryProvider implements MemoryProvider {
         this.#removeExactLine("USER.md", `- ${forgotten.content}`);
         await this.#save(["USER.md"]);
       } catch (error) {
-        this.#store.write("USER.md", previousMarkdown);
+        this.#store.hydrate("USER.md", previousMarkdown);
         if (previousRecords !== undefined) {
           await this.#promotionStore?.restore(previousRecords);
         }

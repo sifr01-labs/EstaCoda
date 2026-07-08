@@ -85,7 +85,7 @@ export class MemoryMutationService {
           });
         }
       } catch (error) {
-        this.#memoryStore.write(operation.file, previous);
+        this.#memoryStore.hydrate(operation.file, previous);
         if (isMemoryPersistenceDriftError(error)) {
           return {
             ok: false,

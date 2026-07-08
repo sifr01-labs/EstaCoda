@@ -220,16 +220,16 @@ async function openMemoryInspector(options: CliOptions): Promise<MemoryInspector
 
   const memoryStore = new MemoryStore();
   if (sharedMemoryContent !== undefined) {
-    memoryStore.write("SHARED.md", sharedMemoryContent);
+    memoryStore.hydrate("SHARED.md", sharedMemoryContent);
   }
   if (identityContext.user !== undefined) {
-    memoryStore.write("USER.md", identityContext.user);
+    memoryStore.hydrate("USER.md", identityContext.user);
   }
   if (identityContext.soul !== undefined) {
-    memoryStore.write("SOUL.md", identityContext.soul);
+    memoryStore.hydrate("SOUL.md", identityContext.soul);
   }
   if (identityContext.memory !== undefined) {
-    memoryStore.write("MEMORY.md", identityContext.memory);
+    memoryStore.hydrate("MEMORY.md", identityContext.memory);
   }
 
   const promotionStore = new MemoryPromotionStore({ path: profilePaths.promotionsPath });

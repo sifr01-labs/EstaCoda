@@ -523,6 +523,24 @@ describe("createRuntime token branding", () => {
     }
   });
 
+  it("hydrates over-budget persisted MEMORY.md without failing runtime creation", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "estacoda-runtime-overbudget-memory-"));
+    await writeProfileMemoryFixture(homeDir, "default", {
+      "MEMORY.md": "- persisted memory line\n".repeat(130)
+    });
+    const options = await minimalRuntimeOptions();
+    const runtime = await createRuntime({
+      ...options,
+      homeDir
+    });
+
+    try {
+      expect(runtime.describe()).toContain("is ready");
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("fails closed when tokens are missing", async () => {
     const { tokens: _tokens, ...options } = await minimalRuntimeOptions();
 

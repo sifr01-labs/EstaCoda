@@ -215,7 +215,7 @@ export class MemoryFileCompactionService {
       this.#store.write(target, generated.compactedText);
       await this.#store.saveFileToDirectory(this.#memoryRoot, target);
     } catch (error) {
-      this.#store.write(target, original);
+      this.#store.hydrate(target, original);
       if (isMemoryBudgetOverflowError(error)) {
         return {
           ok: false,
@@ -318,7 +318,7 @@ export class MemoryFileCompactionService {
       await this.#store.saveFileToDirectory(this.#memoryRoot, target);
     } catch (error) {
       try {
-        this.#store.write(target, previous);
+        this.#store.hydrate(target, previous);
       } catch {
         // The previous value came from this store, so rollback should normally be safe.
       }
