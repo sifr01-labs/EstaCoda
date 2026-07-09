@@ -538,7 +538,7 @@ describe("ToolExecutor input redaction", () => {
     });
   });
 
-  it("redacts secret-bearing web.extract URLs before persistence", async () => {
+  it("granularly redacts secret-bearing web.extract URLs before persistence", async () => {
     const { executor, sessionDb, trajectoryRecorder } = await setupExecutor({
       tools: [createEchoTool("web.extract")]
     });
@@ -554,11 +554,11 @@ describe("ToolExecutor input redaction", () => {
     const trajectory = JSON.stringify(trajectoryRecorder.snapshot().events);
     expect(persisted).not.toContain("token=secret");
     expect(trajectory).not.toContain("token=secret");
-    expect(persisted).toContain("[REDACTED_URL_WITH_SECRET]");
-    expect(trajectory).toContain("[REDACTED_URL_WITH_SECRET]");
+    expect(persisted).toContain("https://x.test/?token=[REDACTED]");
+    expect(trajectory).toContain("https://x.test/?token=[REDACTED]");
   });
 
-  it("redacts secret-bearing browser.navigate URLs before persistence", async () => {
+  it("granularly redacts secret-bearing browser.navigate URLs before persistence", async () => {
     const { executor, sessionDb, trajectoryRecorder } = await setupExecutor({
       tools: [createEchoTool("browser.navigate")]
     });
@@ -574,11 +574,11 @@ describe("ToolExecutor input redaction", () => {
     const trajectory = JSON.stringify(trajectoryRecorder.snapshot().events);
     expect(persisted).not.toContain("api_key=secret");
     expect(trajectory).not.toContain("api_key=secret");
-    expect(persisted).toContain("[REDACTED_URL_WITH_SECRET]");
-    expect(trajectory).toContain("[REDACTED_URL_WITH_SECRET]");
+    expect(persisted).toContain("https://x.test/?api_key=[REDACTED]");
+    expect(trajectory).toContain("https://x.test/?api_key=[REDACTED]");
   });
 
-  it("redacts secret-bearing web.crawl URLs before persistence", async () => {
+  it("granularly redacts secret-bearing web.crawl URLs before persistence", async () => {
     const { executor, sessionDb, trajectoryRecorder } = await setupExecutor({
       tools: [createEchoTool("web.crawl")]
     });
@@ -594,8 +594,8 @@ describe("ToolExecutor input redaction", () => {
     const trajectory = JSON.stringify(trajectoryRecorder.snapshot().events);
     expect(persisted).not.toContain("key=secret");
     expect(trajectory).not.toContain("key=secret");
-    expect(persisted).toContain("[REDACTED_URL_WITH_SECRET]");
-    expect(trajectory).toContain("[REDACTED_URL_WITH_SECRET]");
+    expect(persisted).toContain("https://x.test/?key=[REDACTED]");
+    expect(trajectory).toContain("https://x.test/?key=[REDACTED]");
   });
 
   it.each([
@@ -620,7 +620,71 @@ describe("ToolExecutor input redaction", () => {
 
     const persisted = await persistedExecutionState(sessionDb, trajectoryRecorder);
     expectNoRawSecrets(persisted, secrets);
-    expect(persisted).toMatch(/\[REDACTED(?:_URL_WITH_SECRET)?\]/u);
+    expect(persisted).toContain("[REDACTED]");
+  });
+
+  it("preserves surrounding markdown while redacting persisted tool-result secrets", async () => {
+    const markdownTool: RegisteredTool = {
+      ...createEchoTool("file.read"),
+      run: async (): Promise<ToolResult> => ({
+        ok: true,
+        content: [
+          "# Extraction",
+          "",
+          "Visible paragraph stays available for replay.",
+          "OPENAI_API_KEY=markdown-secret-value",
+          "Next paragraph also stays available."
+        ].join("\n")
+      })
+    };
+    const { executor, sessionDb, trajectoryRecorder } = await setupExecutor({
+      tools: [markdownTool]
+    });
+
+    await executor.executeTool({
+      tool: "file.read",
+      input: { path: "notes.md" },
+      trustedWorkspace: true,
+      sessionId: "test-session"
+    });
+
+    const persisted = await persistedExecutionState(sessionDb, trajectoryRecorder);
+    expect(persisted).not.toContain("markdown-secret-value");
+    expect(persisted).toContain("Visible paragraph stays available for replay.");
+    expect(persisted).toContain("OPENAI_API_KEY=[REDACTED]");
+    expect(persisted).toContain("Next paragraph also stays available.");
+  });
+
+  it("preserves .env and JSON structure around redacted persisted secrets", async () => {
+    const structuredTool: RegisteredTool = {
+      ...createEchoTool("file.read"),
+      run: async (): Promise<ToolResult> => ({
+        ok: true,
+        content: [
+          "APP_NAME=estacoda",
+          "SERVICE_TOKEN=env-secret-value",
+          "{\"safe\":\"keep-me\",\"client_secret\":\"json-secret-value\",\"nested\":{\"apiKey\":\"nested-secret-value\"}}"
+        ].join("\n")
+      })
+    };
+    const { executor, sessionDb, trajectoryRecorder } = await setupExecutor({
+      tools: [structuredTool]
+    });
+
+    await executor.executeTool({
+      tool: "file.read",
+      input: { path: ".env.example" },
+      trustedWorkspace: true,
+      sessionId: "test-session"
+    });
+
+    const persisted = await persistedExecutionState(sessionDb, trajectoryRecorder);
+    expectNoRawSecrets(persisted, ["env-secret-value", "json-secret-value", "nested-secret-value"]);
+    expect(persisted).toContain("APP_NAME=estacoda");
+    expect(persisted).toContain("SERVICE_TOKEN=[REDACTED]");
+    expect(persisted).toContain("\\\"safe\\\":\\\"keep-me\\\"");
+    expect(persisted).toContain("\\\"client_secret\\\":\\\"[REDACTED]\\\"");
+    expect(persisted).toContain("\\\"apiKey\\\":\\\"[REDACTED]\\\"");
   });
 
   it("redacts provider-native JSON argument strings across persisted events and messages", async () => {
@@ -656,7 +720,9 @@ describe("ToolExecutor input redaction", () => {
     expectNoRawSecrets(persisted, ["token=secret", "password=secret", "Bearer secret"]);
     expect(persisted).toContain("call-provider-secret");
     expect(persisted).toContain("web.extract");
-    expect(persisted).toContain("[REDACTED_URL_WITH_SECRET]");
+    expect(persisted).toContain("https://x.test/?token=[REDACTED]");
+    expect(persisted).toContain("https://x.test/?password=[REDACTED]");
+    expect(persisted).toContain("Authorization: Bearer [REDACTED]");
   });
 
   it("strips ambiguous provider-native argument strings before persistence", async () => {
@@ -709,7 +775,7 @@ describe("ToolExecutor input redaction", () => {
     const persisted = await persistedExecutionState(sessionDb, trajectoryRecorder);
     expectNoRawSecrets(persisted, ["access_token=secret"]);
     expect(persisted).toContain("call-provider-validation");
-    expect(persisted).toContain("[REDACTED_URL_WITH_SECRET]");
+    expect(persisted).toContain("https://x.test/?access_token=[REDACTED]");
   });
 
   it("redacts Runtime.evaluate expressions before persistence", async () => {
@@ -852,7 +918,7 @@ describe("ToolExecutor tool-call metadata persistence", () => {
 
     const messages = await sessionDb.listMessages("test-session");
     const toolMessage = messages.find((message) => message.role === "tool");
-    expect(toolMessage?.metadata?._estacoda_context_summary).toBe("[REDACTED_URL_WITH_SECRET]");
+    expect(toolMessage?.metadata?._estacoda_context_summary).toBe("Read file with token [REDACTED]");
     expect(JSON.stringify(toolMessage)).not.toContain("sk-secret1234567890abcdef");
   });
 
