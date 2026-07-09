@@ -207,6 +207,63 @@ describe("workspace file change preview metadata", () => {
     ]);
   });
 
+  it("escalates repeated file.patch replace failures on the same file", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "notes.md"), "current text\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const first = await patch?.run({
+      path: "notes.md",
+      old_string: "missing text",
+      new_string: "replacement"
+    });
+    const second = await patch?.run({
+      path: "notes.md",
+      old_string: "still missing",
+      new_string: "replacement"
+    });
+    const third = await patch?.run({
+      path: "notes.md",
+      old_string: "also missing",
+      new_string: "replacement"
+    });
+
+    expect(first?.metadata?.patchFailureCount).toBe(1);
+    expect(first?.metadata?.patchFailureEscalated).toBe(false);
+    expect(second?.metadata?.patchFailureCount).toBe(2);
+    expect(third?.metadata?.patchFailureCount).toBe(3);
+    expect(third?.metadata?.patchFailureEscalated).toBe(true);
+    expect(third?.content).toContain("Stop retrying. Re-read the file");
+  });
+
+  it("resets file.patch failure counts after a successful patch", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "notes.md"), "current text\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    await patch?.run({
+      path: "notes.md",
+      old_string: "missing text",
+      new_string: "replacement"
+    });
+    const success = await patch?.run({
+      path: "notes.md",
+      old_string: "current text",
+      new_string: "updated text"
+    });
+    const nextFailure = await patch?.run({
+      path: "notes.md",
+      old_string: "missing text",
+      new_string: "replacement"
+    });
+
+    expect(success?.ok).toBe(true);
+    expect(nextFailure?.metadata?.patchFailureCount).toBe(1);
+    expect(nextFailure?.metadata?.patchFailureEscalated).toBe(false);
+  });
+
   it("applies V4A patch mode across multiple files after validation", async () => {
     const root = await makeTempDir();
     await writeFile(join(root, "a.md"), "alpha\nbeta\n", "utf8");
@@ -276,6 +333,32 @@ describe("workspace file change preview metadata", () => {
     expect(result?.content).toContain("b.md hunk 1");
     await expect(readFile(join(root, "a.md"), "utf8")).resolves.toBe("alpha\nbeta\n");
     await expect(readFile(join(root, "b.md"), "utf8")).resolves.toBe("one\ntwo\n");
+  });
+
+  it("escalates repeated V4A patch hunk failures on the same file without writing", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "a.md"), "alpha\nbeta\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+    const badPatch = [
+      "*** Begin Patch",
+      "*** Update File: a.md",
+      "@@ alpha @@",
+      " alpha",
+      "-missing",
+      "+gamma",
+      "*** End Patch"
+    ].join("\n");
+
+    await patch?.run({ mode: "patch", patch: badPatch });
+    await patch?.run({ mode: "patch", patch: badPatch });
+    const third = await patch?.run({ mode: "patch", patch: badPatch });
+
+    expect(third?.ok).toBe(false);
+    expect(third?.metadata?.patchFailureCount).toBe(3);
+    expect(third?.metadata?.patchFailureEscalated).toBe(true);
+    expect(third?.content).toContain("Stop retrying. Re-read the file");
+    await expect(readFile(join(root, "a.md"), "utf8")).resolves.toBe("alpha\nbeta\n");
   });
 
   it("uses V4A context hints to disambiguate patch hunks", async () => {

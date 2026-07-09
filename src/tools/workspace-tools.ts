@@ -95,12 +95,19 @@ type PreparedWorkspacePatchFile = {
   hunkCount: number;
 };
 
+type PatchFailureTracker = {
+  record(result: ToolResult, path: string | undefined): ToolResult;
+  clear(path: string): void;
+  clearMany(paths: string[]): void;
+};
+
 export function createWorkspaceTools(options: WorkspaceToolOptions): readonly RegisteredTool[] {
   const root = resolve(options.workspaceRoot);
   const maxReadBytes = options.maxReadBytes ?? DEFAULT_MAX_READ_BYTES;
   const maxSearchResults = options.maxSearchResults ?? DEFAULT_MAX_SEARCH_RESULTS;
   const commandTimeoutMs = options.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
   const fsAdapter = options.fsAdapter;
+  const patchFailureTracker = createPatchFailureTracker();
 
   return [
     {
@@ -269,12 +276,17 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
             return errorResult("patch must be a non-empty string when mode='patch'");
           }
           const canonicalRoot = await realpath(root);
-          return applyWorkspacePatchMode({
+          const result = await applyWorkspacePatchMode({
             root: canonicalRoot,
             patch: input.patch,
             fsAdapter,
             recordOperation: (operation) => recordFileStateOperation(options, operation)
           });
+          if (!result.ok) {
+            return patchFailureTracker.record(result, metadataPathString(result.metadata?.path));
+          }
+          patchFailureTracker.clearMany(metadataPathList(result.metadata?.paths));
+          return result;
         }
         if (typeof input.old_string !== "string" || typeof input.new_string !== "string") {
           return errorResult("old_string and new_string must be strings");
@@ -299,7 +311,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
           replaceAll
         });
         if (!match.ok) {
-          return errorResult(match.content, match.metadata);
+          return patchFailureTracker.record(errorResult(match.content, match.metadata), relativePath);
         }
 
         const matchCount = match.ranges.length;
@@ -341,6 +353,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
           changed: next !== existing,
           previewAvailable: result.metadata?.fileChangePreview !== undefined
         });
+        patchFailureTracker.clear(relativePath);
         return result;
       }
     },
@@ -501,6 +514,57 @@ function metadataPath(result: ToolResult, root: string, path: string): string {
 
 function metadataNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function metadataPathString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function metadataPathList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((path): path is string => typeof path === "string" && path.length > 0)
+    : [];
+}
+
+function createPatchFailureTracker(): PatchFailureTracker {
+  const failuresByPath = new Map<string, number>();
+
+  return {
+    record(result, path) {
+      if (path === undefined) {
+        return result;
+      }
+
+      const failureCount = (failuresByPath.get(path) ?? 0) + 1;
+      failuresByPath.set(path, failureCount);
+      const escalated = failureCount >= 3;
+      const recoveryHint = escalated
+        ? `This is failure #${failureCount} patching '${path}'. Stop retrying. Re-read the file or use file.write only if replacing the entire file is intended.`
+        : "Use file.read to verify current content, or file.search to locate the text.";
+      const content = result.content.includes(recoveryHint)
+        ? result.content
+        : `${result.content}\n\n${recoveryHint}`;
+
+      return {
+        ...result,
+        content,
+        metadata: {
+          ...(result.metadata ?? {}),
+          path,
+          patchFailureCount: failureCount,
+          patchFailureEscalated: escalated
+        }
+      };
+    },
+    clear(path) {
+      failuresByPath.delete(path);
+    },
+    clearMany(paths) {
+      for (const path of paths) {
+        failuresByPath.delete(path);
+      }
+    }
+  };
 }
 
 async function applyWorkspacePatchMode(input: {
