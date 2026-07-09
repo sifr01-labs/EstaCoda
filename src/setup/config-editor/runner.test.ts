@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { PassThrough, Writable } from "node:stream";
-import type { Prompt } from "../../cli/prompt-contract.js";
+import type { Prompt, PromptOptions } from "../../cli/prompt-contract.js";
 import type { SelectPromptInput } from "../../cli/interactive-select.js";
 import { WorkspaceTrustStore } from "../../security/workspace-trust-store.js";
 import type { ProviderId, ProviderApiMode, ProviderAuthMethod } from "../../contracts/provider.js";
@@ -3814,6 +3814,7 @@ describe("runConfigEditor", () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
     const seenQuestions: string[] = [];
+    const seenDescriptions: Array<string | undefined> = [];
     const seenCards: Array<{ title: string; bodyLines: readonly string[] }> = [];
     const reviewPrompts: Array<{ title: string; body?: string; labels: string[]; descriptions: Array<string | undefined> }> = [];
     const output: string[] = [];
@@ -3821,8 +3822,9 @@ describe("runConfigEditor", () => {
       values: ["telegram", "enable", "42", "-100", true],
       secret: "123456:stored-telegram-token",
     });
-    const prompt = (async (question: string, options?: { secret?: boolean }) => {
+    const prompt = (async (question: string, options?: PromptOptions) => {
       seenQuestions.push(question);
+      seenDescriptions.push(options?.description);
       return basePrompt(question, options);
     }) as Prompt;
     prompt.select = async (input) => {
@@ -3864,6 +3866,12 @@ describe("runConfigEditor", () => {
     expect(seenQuestions).toContain("Telegram bot API token: ");
     expect(seenQuestions).toContain("Allowed Telegram user ID(s): ");
     expect(seenQuestions).toContain("Allowed Telegram group chat ID(s): ");
+    expect(seenDescriptions.join("\n")).toContain("Connect Telegram bot");
+    expect(seenDescriptions.join("\n")).toContain("Open Telegram and search for the official @BotFather account.");
+    expect(seenDescriptions.join("\n")).toContain("Authorize Telegram users");
+    expect(seenDescriptions.join("\n")).toContain("Open Telegram and search for @userinfobot.");
+    expect(seenDescriptions.join("\n")).toContain("Authorize Telegram group chats");
+    expect(seenDescriptions.join("\n")).toContain("Add @getidsbot or @chatIDrobot to the same group chat.");
     expect(seenCards.map((card) => card.title)).toEqual(["Configure Telegram", "Configure Telegram", "Configure Telegram"]);
     expect(seenCards[0]?.bodyLines).toContain("Connect Telegram bot");
     expect(seenCards[0]?.bodyLines.join("\n")).toContain("Open Telegram and search for the official @BotFather account.");

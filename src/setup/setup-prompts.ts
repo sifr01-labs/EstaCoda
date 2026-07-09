@@ -262,10 +262,11 @@ export async function promptSetupYesNo(target: SetupPromptTarget, input: {
 export async function promptSetupStringWithDefault(
   target: SetupPromptTarget,
   question: string,
-  defaultValue: string
+  defaultValue: string,
+  description?: string
 ): Promise<string> {
   const { prompt } = resolveSetupPromptTarget(target);
-  const answer = (await prompt(question)).trim();
+  const answer = (await prompt(question, description === undefined ? undefined : { description })).trim();
   return answer.length > 0 ? answer : defaultValue;
 }
 

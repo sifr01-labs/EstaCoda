@@ -86,7 +86,7 @@ export function withSetupConsolePrompt(
     async (question: string, promptOptions?: PromptOptions) => {
       if (hasLiveSetupConsole(options.input, options.output)) {
         if (promptOptions?.secret === true) {
-          return readSecretWithSetupConsole(question, options, getController(), prompt.uiContext?.locale);
+          return readSecretWithSetupConsole(question, promptOptions, options, getController(), prompt.uiContext?.locale);
         }
         return readTextWithSetupConsole(question, promptOptions, options, getController(), prompt.uiContext?.locale);
       }
@@ -99,7 +99,7 @@ export function withSetupConsolePrompt(
         : async (question: string, promptOptions?: PromptOptions): Promise<PromptSubmission> => {
           if (hasLiveSetupConsole(options.input, options.output)) {
             if (promptOptions?.secret === true) {
-              return { text: await readSecretWithSetupConsole(question, options, getController(), prompt.uiContext?.locale) };
+              return { text: await readSecretWithSetupConsole(question, promptOptions, options, getController(), prompt.uiContext?.locale) };
             }
             return { text: await readTextWithSetupConsole(question, promptOptions, options, getController(), prompt.uiContext?.locale) };
           }
@@ -264,6 +264,7 @@ async function selectWithSetupConsole<T>(
 
 async function readSecretWithSetupConsole(
   question: string,
+  promptOptions: PromptOptions | undefined,
   options: SetupConsolePromptAdapterOptions,
   controller: SetupOperatorConsoleController,
   locale: string | undefined
@@ -285,7 +286,7 @@ async function readSecretWithSetupConsole(
     controller.render({
       kind: "secret",
       title: secretPanelTitle(question, normalizedLocale),
-      description: secretPanelDescription(question, copy),
+      description: panelDescription(question, copy.description, promptOptions),
       maskedValue: renderState.maskedText,
       envVar: secretPanelEnvVar(question),
       optional: true,
@@ -384,7 +385,7 @@ async function readTextWithSetupConsole(
     controller.render({
       kind: "textInput",
       title: textPanelTitle(question, normalizedLocale),
-      description: textPanelDescription(question, copy),
+      description: panelDescription(question, copy.description, promptOptions),
       value: state.text,
       placeholder: promptOptions?.placeholder ?? copy.emptyLabel,
       locale: normalizedLocale,
@@ -548,13 +549,6 @@ function secretPanelTitle(question: string, locale: "en" | "ar"): string {
   return locale === "ar" ? "إدخال سرّي" : "Secret entry";
 }
 
-function secretPanelDescription(
-  question: string,
-  copy: ReturnType<typeof secretPanelCopy>
-): string {
-  return normalizePromptQuestion(question) || copy.description;
-}
-
 function secretPanelEnvVar(question: string): string | undefined {
   const normalized = normalizePromptQuestion(question);
   const candidates = normalized.match(/\b[A-Z][A-Z0-9_]{2,}\b/gu) ?? [];
@@ -579,19 +573,28 @@ function textPanelTitle(question: string, locale: "en" | "ar"): string {
   return locale === "ar" ? "إدخال نص" : "Text input";
 }
 
-function textPanelDescription(
-  question: string,
-  copy: ReturnType<typeof textPanelCopy>
-): string {
-  return normalizePromptQuestion(question) || copy.description;
-}
-
 function normalizePromptQuestion(question: string): string {
   return question
     .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/gu, "")
     .replace(/[\u2066\u2067\u2069]/gu, "")
     .replace(/\s+/gu, " ")
     .replace(/\s*[:：]\s*$/u, "")
+    .trim();
+}
+
+function panelDescription(
+  question: string,
+  fallback: string,
+  promptOptions: PromptOptions | undefined
+): string {
+  const customDescription = normalizePromptDescription(promptOptions?.description);
+  if (customDescription.length > 0) return customDescription;
+  return normalizePromptQuestion(question) || fallback;
+}
+
+function normalizePromptDescription(description: string | undefined): string {
+  return (description ?? "")
+    .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/gu, "")
     .trim();
 }
 

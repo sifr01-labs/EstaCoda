@@ -1225,18 +1225,21 @@ export async function promptTelegramCapability(
     providerId: "telegram",
     envVarName: botTokenEnv,
     question: setupTelegramBotTokenQuestion(locale),
+    description: telegramSetupInputDescription(locale, "botToken"),
   });
   await showTelegramSetupInputCard(prompt, locale, "allowedUserIds");
   const allowedUserIds = splitCsv(await promptSetupStringWithDefault(
     prompt,
     setupTelegramAllowedUserIdsQuestion(locale),
-    (current.allowedUserIds ?? []).join(",")
+    (current.allowedUserIds ?? []).join(","),
+    telegramSetupInputDescription(locale, "allowedUserIds")
   ));
   await showTelegramSetupInputCard(prompt, locale, "allowedChatIds");
   const allowedChatIds = splitCsv(await promptSetupStringWithDefault(
     prompt,
     setupTelegramAllowedChatIdsQuestion(locale),
-    (current.allowedChatIds ?? []).join(",")
+    (current.allowedChatIds ?? []).join(","),
+    telegramSetupInputDescription(locale, "allowedChatIds")
   ));
 
   return {
@@ -1245,6 +1248,15 @@ export async function promptTelegramCapability(
     allowedUserIds,
     allowedChatIds,
   };
+}
+
+function telegramSetupInputDescription(locale: SetupCopyLocale, kind: TelegramSetupInputCardKind): string {
+  const keys = TELEGRAM_SETUP_INPUT_CARD_KEYS[kind];
+  return [
+    setupCopyText(locale, keys.heading),
+    "",
+    setupCopyText(locale, keys.body),
+  ].join("\n");
 }
 
 type TelegramSetupInputCardKind = "botToken" | "allowedUserIds" | "allowedChatIds";

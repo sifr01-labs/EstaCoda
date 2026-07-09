@@ -5,6 +5,7 @@ import { promptUiContextForLocale, type PromptUiContext } from "../contracts/ui.
 
 export type PromptOptions = {
   secret?: boolean;
+  description?: string;
   onRowsChange?: (rows: number) => void;
   onPastePreview?: (original: string, displayed: string) => void;
   onInputChange?: (line: string) => void;
