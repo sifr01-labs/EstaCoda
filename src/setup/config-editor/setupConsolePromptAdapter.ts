@@ -285,7 +285,7 @@ async function readSecretWithSetupConsole(
     const copy = secretPanelCopy(normalizedLocale);
     controller.render({
       kind: "secret",
-      title: secretPanelTitle(question, normalizedLocale),
+      title: panelTitle(question, normalizedLocale, promptOptions, secretPanelTitle),
       description: panelDescription(question, copy.description, promptOptions),
       maskedValue: renderState.maskedText,
       envVar: secretPanelEnvVar(question),
@@ -384,7 +384,7 @@ async function readTextWithSetupConsole(
   const render = () => {
     controller.render({
       kind: "textInput",
-      title: textPanelTitle(question, normalizedLocale),
+      title: panelTitle(question, normalizedLocale, promptOptions, textPanelTitle),
       description: panelDescription(question, copy.description, promptOptions),
       value: state.text,
       placeholder: promptOptions?.placeholder ?? copy.emptyLabel,
@@ -582,6 +582,17 @@ function normalizePromptQuestion(question: string): string {
     .trim();
 }
 
+function panelTitle(
+  question: string,
+  locale: "en" | "ar",
+  promptOptions: PromptOptions | undefined,
+  fallback: (question: string, locale: "en" | "ar") => string
+): string {
+  const customTitle = normalizePromptTitle(promptOptions?.title);
+  if (customTitle.length > 0) return customTitle;
+  return fallback(question, locale);
+}
+
 function panelDescription(
   question: string,
   fallback: string,
@@ -590,6 +601,10 @@ function panelDescription(
   const customDescription = normalizePromptDescription(promptOptions?.description);
   if (customDescription.length > 0) return customDescription;
   return normalizePromptQuestion(question) || fallback;
+}
+
+function normalizePromptTitle(title: string | undefined): string {
+  return normalizePromptDescription(title).replace(/\s+/gu, " ");
 }
 
 function normalizePromptDescription(description: string | undefined): string {

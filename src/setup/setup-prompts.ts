@@ -263,10 +263,17 @@ export async function promptSetupStringWithDefault(
   target: SetupPromptTarget,
   question: string,
   defaultValue: string,
-  description?: string
+  description?: string,
+  title?: string
 ): Promise<string> {
   const { prompt } = resolveSetupPromptTarget(target);
-  const answer = (await prompt(question, description === undefined ? undefined : { description })).trim();
+  const promptOptions = description === undefined && title === undefined
+    ? undefined
+    : {
+        ...(description === undefined ? {} : { description }),
+        ...(title === undefined ? {} : { title }),
+      };
+  const answer = (await prompt(question, promptOptions)).trim();
   return answer.length > 0 ? answer : defaultValue;
 }
 

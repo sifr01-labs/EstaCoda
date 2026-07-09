@@ -175,6 +175,7 @@ describe("withSetupConsolePrompt", () => {
 
     const pending = wrapped("Telegram bot API token: ", {
       secret: true,
+      title: "𓂀 Telegram Setup",
       description: "Connect Telegram bot\n\nOpen Telegram and search for @BotFather.",
     });
     await Promise.resolve();
@@ -183,6 +184,8 @@ describe("withSetupConsolePrompt", () => {
     const text = stripAnsi(output.text());
 
     expect(result).toBe("123456:telegram-token");
+    expect(text).toContain("𓂀 Telegram Setup");
+    expect(text).not.toContain("Secret Entry");
     expect(text).toContain("Connect Telegram bot");
     expect(text).toContain("Open Telegram and search for @BotFather.");
     expect(text).not.toContain("123456:telegram-token");
@@ -299,6 +302,7 @@ describe("withSetupConsolePrompt", () => {
     const wrapped = withSetupConsolePrompt(prompt, { input, output });
 
     const pending = wrapped("Allowed Telegram user ID(s): ", {
+      title: "𓂀 Telegram Setup",
       description: "Authorize Telegram users\n\nOpen Telegram and search for @userinfobot.",
     });
     await Promise.resolve();
@@ -307,6 +311,8 @@ describe("withSetupConsolePrompt", () => {
     const text = stripAnsi(output.text());
 
     expect(result).toBe("42");
+    expect(text).toContain("𓂀 Telegram Setup");
+    expect(text).not.toContain("Text Input");
     expect(text).toContain("Authorize Telegram users");
     expect(text).toContain("Open Telegram and search for @userinfobot.");
   });

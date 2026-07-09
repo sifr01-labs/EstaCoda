@@ -752,6 +752,22 @@ describe("runConfigEditor", () => {
     )).toBe(false);
   });
 
+  it("shows Telegram remote-control guidance on the optional capability action card", async () => {
+    const prompt = fakePrompt({ values: ["unchanged"] });
+    const selectInputs = captureSelectInputs(prompt);
+
+    const optionalAction = await promptOptionalCapabilityAction(prompt, {
+      id: "telegram",
+      title: "Telegram/channels",
+      configured: false,
+    });
+
+    expect(optionalAction).toBe("unchanged");
+    expect(selectInputs[0]?.title).toBe("Telegram/channels");
+    expect(selectInputs[0]?.body).toContain("Telegram gives EstaCoda a remote command channel.");
+    expect(selectInputs[0]?.body).toContain("restrict access to the users or chats you actually trust");
+  });
+
   it("keeps language and confirmation setup prompts stacked", async () => {
     const prompt = fakePrompt({
       values: [
@@ -3815,6 +3831,7 @@ describe("runConfigEditor", () => {
     await trustWorkspace(tempDir, workspaceRoot);
     const seenQuestions: string[] = [];
     const seenDescriptions: Array<string | undefined> = [];
+    const seenInputTitles: Array<string | undefined> = [];
     const seenCards: Array<{ title: string; bodyLines: readonly string[] }> = [];
     const reviewPrompts: Array<{ title: string; body?: string; labels: string[]; descriptions: Array<string | undefined> }> = [];
     const output: string[] = [];
@@ -3825,6 +3842,7 @@ describe("runConfigEditor", () => {
     const prompt = (async (question: string, options?: PromptOptions) => {
       seenQuestions.push(question);
       seenDescriptions.push(options?.description);
+      seenInputTitles.push(options?.title);
       return basePrompt(question, options);
     }) as Prompt;
     prompt.select = async (input) => {
@@ -3866,6 +3884,7 @@ describe("runConfigEditor", () => {
     expect(seenQuestions).toContain("Telegram bot API token: ");
     expect(seenQuestions).toContain("Allowed Telegram user ID(s): ");
     expect(seenQuestions).toContain("Allowed Telegram group chat ID(s): ");
+    expect(seenInputTitles.filter((title) => title === "𓂀 Telegram Setup")).toHaveLength(3);
     expect(seenDescriptions.join("\n")).toContain("Connect Telegram bot");
     expect(seenDescriptions.join("\n")).toContain("Open Telegram and search for the official @BotFather account.");
     expect(seenDescriptions.join("\n")).toContain("Authorize Telegram users");

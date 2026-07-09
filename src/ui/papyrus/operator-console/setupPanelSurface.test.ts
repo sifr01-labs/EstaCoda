@@ -4,6 +4,7 @@ import { resolveTokens } from "../../../theme/token-resolver.js";
 import { isolateLtr, isolateRtl, LRI, RLI } from "../../../ui/bidi.js";
 import {
   createOperatorConsoleStyle,
+  getSetupPanelSurfaceDesiredHeight,
   renderSetupPanelSurface,
   type SecretEntryPanelState,
   type SetupPanelState,
@@ -283,6 +284,27 @@ describe("Papyrus operator console setup panel surface", () => {
     expect(text).toContain("Stored as: OPENAI_API_KEY");
     expect(text).toContain("Enter save · Esc back · Ctrl+C exit");
     expect(text).not.toContain("sk-live-raw-secret");
+    expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
+  });
+
+  it("wraps multiline secret descriptions and reports the rendered height", () => {
+    const state: SecretEntryPanelState = {
+      kind: "secret",
+      title: "𓂀 Telegram Setup",
+      description: "Connect Telegram bot\n\nOpen Telegram and search for the official @BotFather account.\nSend /newbot and copy the API token.",
+      optional: true,
+      emptyLabel: "[leave empty]",
+      footer: "Enter save · Esc cancel · Ctrl+C cancel",
+    };
+    const output = renderSetupPanelSurface(state, { width: 72 });
+    const text = output.join("\n");
+
+    expect(output[0]).toContain("𓂀 Telegram Setup");
+    expect(text).toContain("Connect Telegram bot");
+    expect(text).toContain("Open Telegram and search for the official @BotFather account.");
+    expect(text).toContain("Send /newbot and copy the API token.");
+    expect(output.filter((line) => line.includes("Connect Telegram bot"))).toHaveLength(1);
+    expect(getSetupPanelSurfaceDesiredHeight(state, 72)).toBe(output.length);
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 

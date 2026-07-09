@@ -1175,10 +1175,13 @@ export async function promptOptionalCapabilityAction(
         description: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.skip.description"),
         value: "skip" as const,
       })];
+  const message = input.id === "telegram"
+    ? setupCopyText(locale, "setupEditor.prompt.telegram.summary")
+    : input.title;
 
   return promptSetupChoiceMaybeBack(prompt, {
     title: input.title,
-    message: `${input.title}\n`,
+    message: `${message}\n`,
     columns: setupChoiceColumns(locale),
     tableDirection: setupChoiceTableDirection(locale),
     tableWidth: setupChoiceTableWidth(locale),
@@ -1225,6 +1228,7 @@ export async function promptTelegramCapability(
     providerId: "telegram",
     envVarName: botTokenEnv,
     question: setupTelegramBotTokenQuestion(locale),
+    title: telegramSetupInputTitle(locale),
     description: telegramSetupInputDescription(locale, "botToken"),
   });
   await showTelegramSetupInputCard(prompt, locale, "allowedUserIds");
@@ -1232,14 +1236,16 @@ export async function promptTelegramCapability(
     prompt,
     setupTelegramAllowedUserIdsQuestion(locale),
     (current.allowedUserIds ?? []).join(","),
-    telegramSetupInputDescription(locale, "allowedUserIds")
+    telegramSetupInputDescription(locale, "allowedUserIds"),
+    telegramSetupInputTitle(locale)
   ));
   await showTelegramSetupInputCard(prompt, locale, "allowedChatIds");
   const allowedChatIds = splitCsv(await promptSetupStringWithDefault(
     prompt,
     setupTelegramAllowedChatIdsQuestion(locale),
     (current.allowedChatIds ?? []).join(","),
-    telegramSetupInputDescription(locale, "allowedChatIds")
+    telegramSetupInputDescription(locale, "allowedChatIds"),
+    telegramSetupInputTitle(locale)
   ));
 
   return {
@@ -1248,6 +1254,10 @@ export async function promptTelegramCapability(
     allowedUserIds,
     allowedChatIds,
   };
+}
+
+function telegramSetupInputTitle(locale: SetupCopyLocale): string {
+  return locale === "ar" ? "𓂀 ضبط Telegram" : "𓂀 Telegram Setup";
 }
 
 function telegramSetupInputDescription(locale: SetupCopyLocale, kind: TelegramSetupInputCardKind): string {
