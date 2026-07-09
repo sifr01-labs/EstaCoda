@@ -91,6 +91,24 @@ export class RawPromptRenderLoop {
   }
 
   render(snapshot: RawPromptRenderSnapshot): number {
+    return this.#withHiddenCursorDuringManagedRedraw(() => this.#renderVisibleFrame(snapshot));
+  }
+
+  clear(): void {
+    if (this.#renderedRows === 0) return;
+    this.#withHiddenCursorDuringManagedRedraw(() => {
+      this.#moveToFirstRenderedRow();
+      for (let row = 0; row < this.#renderedRows; row += 1) {
+        this.#output.write("\x1b[0K");
+        if (row < this.#renderedRows - 1) this.#output.write("\n");
+      }
+      this.#moveToFrameCursor(this.#renderedRows, 0, 0);
+      this.#renderedRows = 0;
+      this.#cursorRow = 0;
+    });
+  }
+
+  #renderVisibleFrame(snapshot: RawPromptRenderSnapshot): number {
     const frame = snapshot.operatorConsole?.enabled === true
       ? buildOperatorConsoleRawPromptFrameWithRuntimeHost(this.#getOperatorConsoleHost(), {
         mode: snapshot.operatorConsole.mode,
@@ -127,18 +145,6 @@ export class RawPromptRenderLoop {
     return frame.rows.length;
   }
 
-  clear(): void {
-    if (this.#renderedRows === 0) return;
-    this.#moveToFirstRenderedRow();
-    for (let row = 0; row < this.#renderedRows; row += 1) {
-      this.#output.write("\x1b[0K");
-      if (row < this.#renderedRows - 1) this.#output.write("\n");
-    }
-    this.#moveToFrameCursor(this.#renderedRows, 0, 0);
-    this.#renderedRows = 0;
-    this.#cursorRow = 0;
-  }
-
   #getOperatorConsoleHost(): OperatorConsoleRuntimeHost {
     if (this.#operatorConsoleHost === undefined) {
       this.#operatorConsoleHost = this.#operatorConsoleHostFactory();
@@ -157,7 +163,20 @@ export class RawPromptRenderLoop {
     this.#output.write("\r");
     if (cursorColumn > 0) this.#output.write(`\x1b[${cursorColumn}C`);
   }
+
+  #withHiddenCursorDuringManagedRedraw<T>(redraw: () => T): T {
+    if (this.#output.isTTY !== true) return redraw();
+    this.#output.write(HIDE_CURSOR);
+    try {
+      return redraw();
+    } finally {
+      this.#output.write(SHOW_CURSOR);
+    }
+  }
 }
+
+const HIDE_CURSOR = "\x1b[?25l";
+const SHOW_CURSOR = "\x1b[?25h";
 
 function buildFallbackRawPromptFrame(snapshot: RawPromptRenderSnapshot): {
   readonly rows: readonly string[];

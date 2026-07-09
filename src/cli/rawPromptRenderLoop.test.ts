@@ -109,6 +109,34 @@ describe("raw prompt render loop", () => {
     expect(secondRender.startsWith("\x1b[2A\r")).toBe(false);
   });
 
+  it("hides the terminal cursor while redrawing TTY frames and restores it after positioning", () => {
+    const output = fakeOutput({ isTTY: true });
+    const loop = new RawPromptRenderLoop(output);
+
+    loop.render({
+      prompt: "> ",
+      state: createLineEditorState("abc", 1),
+    });
+
+    expect(output.chunks().at(0)).toBe("\x1b[?25l");
+    expect(output.chunks().at(-1)).toBe("\x1b[?25h");
+    expect(output.text().indexOf("\x1b[?25l")).toBeLessThan(output.text().indexOf("> abc"));
+    expect(output.text().lastIndexOf("\x1b[?25h")).toBeGreaterThan(output.text().lastIndexOf("\x1b[3C"));
+  });
+
+  it("does not emit cursor visibility toggles for non-TTY redraws", () => {
+    const output = fakeOutput({ isTTY: false });
+    const loop = new RawPromptRenderLoop(output);
+
+    loop.render({
+      prompt: "> ",
+      state: createLineEditorState("abc", 1),
+    });
+
+    expect(output.text()).not.toContain("\x1b[?25l");
+    expect(output.text()).not.toContain("\x1b[?25h");
+  });
+
   it("uses a persistent Operator Console runtime host for gated prompt/status rendering", () => {
     const output = fakeOutput();
     const host = createOperatorConsoleRuntimeHost();
@@ -634,6 +662,24 @@ describe("raw prompt render loop", () => {
     expect(output.text()).not.toMatch(forbiddenManagedRegionOutput);
   });
 
+  it("hides and restores the terminal cursor while clearing TTY frames", () => {
+    const output = fakeOutput({ isTTY: true });
+    const loop = new RawPromptRenderLoop(output);
+
+    loop.render({
+      prompt: "> ",
+      state: createLineEditorState("draft"),
+      fallbackRows: [{ text: "overlay" }],
+    });
+    output.clear();
+    loop.clear();
+
+    expect(output.chunks().at(0)).toBe("\x1b[?25l");
+    expect(output.chunks().at(-1)).toBe("\x1b[?25h");
+    expect(output.text()).toContain("\x1b[0K");
+    expect(output.text()).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
   it("does not export the retired raw prompt frame builder", async () => {
     const module = await import("./rawPromptRenderLoop.js");
     const source = await readFile(new URL("./rawPromptRenderLoop.ts", import.meta.url), "utf8");
@@ -643,14 +689,22 @@ describe("raw prompt render loop", () => {
   });
 });
 
-function fakeOutput(): RawPromptRenderOutput & { text(): string; chunks(): readonly string[] } {
+function fakeOutput(options: { readonly isTTY?: boolean } = {}): RawPromptRenderOutput & {
+  text(): string;
+  chunks(): readonly string[];
+  clear(): void;
+} {
   const writes: string[] = [];
   return {
+    ...(options.isTTY === undefined ? {} : { isTTY: options.isTTY }),
     write: vi.fn((chunk: string) => {
       writes.push(chunk);
     }),
     text: () => writes.join(""),
     chunks: () => [...writes],
+    clear: () => {
+      writes.length = 0;
+    },
   };
 }
 
