@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { lstat, mkdir, readdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { platform } from "node:os";
 import type { EnvironmentType } from "../contracts/security.js";
@@ -29,6 +29,7 @@ export type WorkspaceToolOptions = {
 export type WorkspaceFsAdapter = {
   readTextFile(input: { path: string; lineStart?: number; lineEnd?: number }): Promise<string>;
   writeTextFile?(input: { path: string; content: string }): Promise<void>;
+  deleteTextFile?(input: { path: string }): Promise<void>;
 };
 
 const DEFAULT_MAX_READ_BYTES = 48_000;
@@ -74,9 +75,26 @@ type ParsedWorkspacePatch = {
   files: ParsedWorkspacePatchFile[];
 };
 
-type ParsedWorkspacePatchFile = {
+type ParsedWorkspacePatchFile =
+  | ParsedWorkspacePatchUpdateFile
+  | ParsedWorkspacePatchAddFile
+  | ParsedWorkspacePatchDeleteFile;
+
+type ParsedWorkspacePatchUpdateFile = {
+  operation: "update";
   path: string;
   hunks: ParsedWorkspacePatchHunk[];
+};
+
+type ParsedWorkspacePatchAddFile = {
+  operation: "add";
+  path: string;
+  lines: string[];
+};
+
+type ParsedWorkspacePatchDeleteFile = {
+  operation: "delete";
+  path: string;
 };
 
 type ParsedWorkspacePatchHunk = {
@@ -90,11 +108,19 @@ type ParsedWorkspacePatchLine = {
 };
 
 type PreparedWorkspacePatchFile = {
+  operation: "update" | "add" | "delete";
   path: string;
   absolutePath: string;
   before: string;
   after: string;
   hunkCount: number;
+  matchDiagnostics: PatchMatchDiagnostic[];
+};
+
+type PatchMatchDiagnostic = {
+  strategy: PatchMatchStrategy;
+  confidence: number;
+  matchedSnippet?: string;
 };
 
 type PatchFailureTracker = {
@@ -297,19 +323,33 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
     },
     {
       name: "file.patch",
-      description: "Patch workspace files. Replace mode finds old_string with exact matching first, then deterministic fuzzy fallbacks for minor whitespace, indentation, escaping, and Unicode differences. Patch mode applies V4A-style multi-file update patches atomically after validating every hunk.",
+      description: "Patch workspace files. Replace and insert modes find anchors with exact matching first, then deterministic fuzzy fallbacks for minor whitespace, indentation, escaping, and Unicode differences. Append/prepend modes add content without rewriting whole files. Patch mode applies V4A-style multi-file patches atomically after validating every operation.",
       inputSchema: {
         type: "object",
         properties: {
           mode: {
             type: "string",
-            enum: ["replace", "patch"],
-            description: "Edit mode. 'replace' requires path, old_string, and new_string. 'patch' requires patch.",
+            enum: ["replace", "patch", "append", "prepend", "insert"],
+            description: "Edit mode. 'replace' requires path, old_string, and new_string. 'append'/'prepend' require path and content. 'insert' requires path, anchor, content, and optional position. 'patch' requires patch.",
             default: "replace"
           },
           path: { type: "string" },
           old_string: { type: "string" },
           new_string: { type: "string" },
+          content: {
+            type: "string",
+            description: "Content used by append, prepend, and insert modes."
+          },
+          anchor: {
+            type: "string",
+            description: "Anchor text used by insert mode. Must match exactly or via a deterministic fuzzy fallback."
+          },
+          position: {
+            type: "string",
+            enum: ["before", "after"],
+            description: "Where insert mode places content relative to anchor.",
+            default: "after"
+          },
           replace_all: {
             type: "boolean",
             description: "Replace all occurrences instead of requiring a unique match.",
@@ -317,7 +357,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
           },
           patch: {
             type: "string",
-            description: "Required when mode='patch'. V4A format patch content with *** Begin Patch, one or more *** Update File sections, hunks introduced by @@ optional context @@, and *** End Patch."
+            description: "Required when mode='patch'. V4A format patch content with *** Begin Patch, *** Update File / *** Add File / *** Delete File sections, optional @@ context @@ update hunks, and *** End Patch."
           }
         },
         required: ["mode"]
@@ -327,10 +367,10 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
       progressLabel: "patching file",
       maxResultSizeChars: 3000,
       isAvailable: () => true,
-      run: async (input: { mode?: string; path?: string; old_string?: string; new_string?: string; replace_all?: boolean; patch?: string }) => {
+      run: async (input: { mode?: string; path?: string; old_string?: string; new_string?: string; content?: string; anchor?: string; position?: string; replace_all?: boolean; patch?: string }) => {
         const mode = input.mode ?? "replace";
-        if (mode !== "replace" && mode !== "patch") {
-          return errorResult("mode must be 'replace' or 'patch'");
+        if (mode !== "replace" && mode !== "patch" && mode !== "append" && mode !== "prepend" && mode !== "insert") {
+          return errorResult("mode must be 'replace', 'patch', 'append', 'prepend', or 'insert'");
         }
         if (mode === "patch") {
           if (typeof input.patch !== "string" || input.patch.trim().length === 0) {
@@ -347,6 +387,37 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
             return patchFailureTracker.record(result, metadataPathString(result.metadata?.path));
           }
           patchFailureTracker.clearMany(metadataPathList(result.metadata?.paths));
+          return result;
+        }
+        if (mode === "append" || mode === "prepend" || mode === "insert") {
+          if (typeof input.content !== "string") {
+            return errorResult("content must be a string for append, prepend, and insert modes");
+          }
+          if (mode === "insert" && (typeof input.anchor !== "string" || input.anchor.length === 0)) {
+            return errorResult("anchor must be a non-empty string for insert mode");
+          }
+          if (input.position !== undefined && input.position !== "before" && input.position !== "after") {
+            return errorResult("position must be 'before' or 'after'");
+          }
+
+          const canonicalRoot = await realpath(root);
+          const result = await applyWorkspacePatchOperationMode({
+            root: canonicalRoot,
+            path: input.path,
+            mode,
+            content: input.content,
+            anchor: input.anchor,
+            position: input.position === "before" ? "before" : "after",
+            fsAdapter,
+            recordOperation: (operation) => recordFileStateOperation(options, operation)
+          });
+          if (!result.ok) {
+            return patchFailureTracker.record(result, metadataPathString(result.metadata?.path));
+          }
+          const resultPath = metadataPathString(result.metadata?.path);
+          if (resultPath !== undefined) {
+            patchFailureTracker.clear(resultPath);
+          }
           return result;
         }
         if (typeof input.old_string !== "string" || typeof input.new_string !== "string") {
@@ -395,6 +466,8 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
             newBytes: Buffer.byteLength(next),
             matchCount,
             matchStrategy: match.strategy,
+            matchConfidence: matchConfidence(match.strategy),
+            matchedSnippet: buildMatchedSnippet(existing, match.ranges[0]),
             fileChangePreview: buildFileReplaceChangePreview({
               path: relativePath,
               oldString: input.old_string,
@@ -651,8 +724,26 @@ async function applyWorkspacePatchMode(input: {
     return prepared;
   }
 
+  if (input.fsAdapter === undefined) {
+    for (const file of prepared.files) {
+      if (file.operation === "delete") {
+        continue;
+      }
+      const ensureResult = await ensureSafeParentDirectories(file.absolutePath, input.root);
+      if (ensureResult !== undefined) {
+        return ensureResult;
+      }
+    }
+  }
+
   for (const file of prepared.files) {
-    if (input.fsAdapter?.writeTextFile !== undefined) {
+    if (file.operation === "delete") {
+      if (input.fsAdapter?.deleteTextFile !== undefined) {
+        await input.fsAdapter.deleteTextFile({ path: file.absolutePath });
+      } else {
+        await rm(file.absolutePath);
+      }
+    } else if (input.fsAdapter?.writeTextFile !== undefined) {
       await input.fsAdapter.writeTextFile({
         path: file.absolutePath,
         content: file.after
@@ -668,7 +759,6 @@ async function applyWorkspacePatchMode(input: {
   const newBytes = prepared.files.reduce((total, file) => total + Buffer.byteLength(file.after), 0);
   const preview = buildPatchModeChangePreview({
     files: prepared.files,
-    patch: input.patch,
     oldBytes,
     newBytes
   });
@@ -681,13 +771,22 @@ async function applyWorkspacePatchMode(input: {
       hunkCount,
       oldBytes,
       newBytes,
+      operations: prepared.files.map((file) => file.operation),
+      matchDiagnostics: prepared.files.flatMap((file) => file.matchDiagnostics.map((diagnostic) => ({
+        path: file.path,
+        ...diagnostic
+      }))),
+      syntaxChecks: prepared.files
+        .filter((file) => file.operation !== "delete")
+        .map((file) => syntaxCheckMetadata(file.path, file.after))
+        .filter((check) => check.checked),
       fileChangePreview: preview
     }
   };
 
   for (const file of prepared.files) {
     input.recordOperation({
-      operation: "replace",
+      operation: file.operation === "delete" ? "delete" : file.operation === "add" ? "write" : "replace",
       sourceTool: "file.patch",
       path: file.path,
       bytes: Buffer.byteLength(file.after),
@@ -697,6 +796,138 @@ async function applyWorkspacePatchMode(input: {
   }
 
   return result;
+}
+
+async function applyWorkspacePatchOperationMode(input: {
+  root: string;
+  path: string | undefined;
+  mode: "append" | "prepend" | "insert";
+  content: string;
+  anchor: string | undefined;
+  position: "before" | "after";
+  fsAdapter: WorkspaceFsAdapter | undefined;
+  recordOperation: (operation: {
+    operation: FileStateOperationKind;
+    sourceTool: string;
+    path: string;
+    bytes?: number;
+    changed?: boolean;
+    previewAvailable?: boolean;
+  }) => void;
+}): Promise<ToolResult> {
+  const resolved = await resolveWorkspacePath(input.root, input.path, { allowMissingLeaf: input.mode !== "insert", forbidSymlinks: true });
+  if (!resolved.ok) {
+    return resolved;
+  }
+
+  const relativePath = relative(input.root, resolved.path);
+  const before = await readExistingWorkspaceText(resolved.path, input.fsAdapter);
+  if (before === undefined && input.mode === "insert") {
+    return errorResult(`Cannot insert into missing file ${relativePath}.`, {
+      path: relativePath,
+      reason: "missing_file"
+    });
+  }
+
+  const existing = before ?? "";
+  let after: string;
+  let matchStrategy: PatchMatchStrategy | undefined;
+  let matchedSnippet: string | undefined;
+  let matchConfidenceValue: number | undefined;
+  if (input.mode === "append") {
+    after = `${existing}${input.content}`;
+  } else if (input.mode === "prepend") {
+    after = `${input.content}${existing}`;
+  } else {
+    const anchor = input.anchor ?? "";
+    const match = findPatchReplacementRanges(existing, anchor, {
+      path: relativePath,
+      replaceAll: false
+    });
+    if (!match.ok) {
+      return errorResult(match.content, {
+        ...(match.metadata ?? {}),
+        path: relativePath,
+        operation: "insert"
+      });
+    }
+    const range = match.ranges[0]!;
+    const replacement = input.position === "before"
+      ? `${input.content}${existing.slice(range.start, range.end)}`
+      : `${existing.slice(range.start, range.end)}${input.content}`;
+    after = applyPatchReplacementRanges(existing, [range], replacement);
+    matchStrategy = match.strategy;
+    matchedSnippet = buildMatchedSnippet(existing, range);
+    matchConfidenceValue = matchConfidence(match.strategy);
+  }
+
+  const syntax = validatePatchSyntax(relativePath, after);
+  if (syntax !== undefined) {
+    return syntax;
+  }
+
+  if (input.fsAdapter?.writeTextFile !== undefined) {
+    await input.fsAdapter.writeTextFile({
+      path: resolved.path,
+      content: after
+    });
+  } else {
+    const ensureResult = await ensureSafeParentDirectories(resolved.path, input.root);
+    if (ensureResult !== undefined) {
+      return ensureResult;
+    }
+    await writeFile(resolved.path, after, "utf8");
+  }
+
+  const oldBytes = Buffer.byteLength(existing);
+  const newBytes = Buffer.byteLength(after);
+  const preview = buildUnifiedFileChangePreview({
+    files: [{
+      operation: before === undefined ? "add" : "update",
+      path: relativePath,
+      absolutePath: resolved.path,
+      before: existing,
+      after,
+      hunkCount: 1,
+      matchDiagnostics: []
+    }],
+    oldBytes,
+    newBytes
+  });
+  const metadata: Record<string, unknown> = {
+    path: relativePath,
+    operation: input.mode,
+    oldBytes,
+    newBytes,
+    fileChangePreview: preview,
+    syntaxChecks: syntaxCheckMetadata(relativePath, after)
+  };
+  if (matchStrategy !== undefined) {
+    metadata.matchStrategy = matchStrategy;
+    metadata.matchConfidence = matchConfidenceValue;
+    metadata.matchedSnippet = matchedSnippet;
+  }
+
+  const result: ToolResult = {
+    ok: true,
+    content: `${patchOperationPastTense(input.mode)} ${relativePath}.`,
+    metadata
+  };
+  input.recordOperation({
+    operation: before === undefined ? "write" : "replace",
+    sourceTool: "file.patch",
+    path: relativePath,
+    bytes: newBytes,
+    changed: after !== existing,
+    previewAvailable: true
+  });
+  return result;
+}
+
+function patchOperationPastTense(mode: "append" | "prepend" | "insert"): string {
+  if (mode === "append") return "Appended";
+  if (mode === "prepend") return "Prepended";
+  return "Inserted";
 }
 
 function parseWorkspacePatch(patch: string): { ok: true; patch: ParsedWorkspacePatch } | ToolResult {
@@ -712,7 +943,7 @@ function parseWorkspacePatch(patch: string): { ok: true; patch: ParsedWorkspaceP
   let ended = false;
 
   const finishHunk = () => {
-    if (currentHunk !== undefined) {
+    if (currentHunk !== undefined && currentFile?.operation === "update") {
       currentFile?.hunks.push(currentHunk);
       currentHunk = undefined;
     }
@@ -721,8 +952,11 @@ function parseWorkspacePatch(patch: string): { ok: true; patch: ParsedWorkspaceP
   const finishFile = () => {
     finishHunk();
     if (currentFile !== undefined) {
-      if (currentFile.hunks.length === 0) {
+      if (currentFile.operation === "update" && currentFile.hunks.length === 0) {
         throw new Error(`patch file ${currentFile.path} has no hunks`);
+      }
+      if (currentFile.operation === "add" && currentFile.lines.length === 0) {
+        throw new Error(`patch add file ${currentFile.path} has no content lines`);
       }
       files.push(currentFile);
       currentFile = undefined;
@@ -755,16 +989,40 @@ function parseWorkspacePatch(patch: string): { ok: true; patch: ParsedWorkspaceP
           return errorResult(`patch updates ${path} more than once; combine hunks under one file section`);
         }
         seenPaths.add(path);
-        currentFile = { path, hunks: [] };
+        currentFile = { operation: "update", path, hunks: [] };
         continue;
       }
 
-      if (line.startsWith("*** Add File: ") || line.startsWith("*** Delete File: ")) {
-        return errorResult("patch mode currently supports *** Update File sections only");
+      if (line.startsWith("*** Add File: ")) {
+        finishFile();
+        const path = line.slice("*** Add File: ".length).trim();
+        if (path.length === 0) {
+          return errorResult("patch add file path must be non-empty");
+        }
+        if (seenPaths.has(path)) {
+          return errorResult(`patch touches ${path} more than once; combine operations under one file section`);
+        }
+        seenPaths.add(path);
+        currentFile = { operation: "add", path, lines: [] };
+        continue;
+      }
+
+      if (line.startsWith("*** Delete File: ")) {
+        finishFile();
+        const path = line.slice("*** Delete File: ".length).trim();
+        if (path.length === 0) {
+          return errorResult("patch delete file path must be non-empty");
+        }
+        if (seenPaths.has(path)) {
+          return errorResult(`patch touches ${path} more than once; combine operations under one file section`);
+        }
+        seenPaths.add(path);
+        currentFile = { operation: "delete", path };
+        continue;
       }
 
       if (line.startsWith("@@")) {
-        if (currentFile === undefined) {
+        if (currentFile === undefined || currentFile.operation !== "update") {
           return errorResult("patch hunk appears before an update file section");
         }
         finishHunk();
@@ -773,6 +1031,18 @@ function parseWorkspacePatch(patch: string): { ok: true; patch: ParsedWorkspaceP
           lines: []
         };
         continue;
+      }
+
+      if (currentFile?.operation === "add") {
+        if (!line.startsWith("+")) {
+          return errorResult(`patch add file line must start with '+': ${line}`);
+        }
+        currentFile.lines.push(line.slice(1));
+        continue;
+      }
+
+      if (currentFile?.operation === "delete") {
+        return errorResult(`patch delete file section must not contain body lines: ${line}`);
       }
 
       if (currentHunk === undefined) {
@@ -798,7 +1068,7 @@ function parseWorkspacePatch(patch: string): { ok: true; patch: ParsedWorkspaceP
     return errorResult("patch must end with *** End Patch");
   }
   if (files.length === 0) {
-    return errorResult("patch must update at least one file");
+    return errorResult("patch must touch at least one file");
   }
   return { ok: true, patch: { files } };
 }
@@ -820,16 +1090,64 @@ async function prepareWorkspacePatchFiles(
   const prepared: PreparedWorkspacePatchFile[] = [];
 
   for (const file of patch.files) {
-    const resolved = await resolveWorkspacePath(root, file.path);
+    const resolved = await resolveWorkspacePath(root, file.path, {
+      allowMissingLeaf: file.operation === "add",
+      forbidSymlinks: file.operation === "add"
+    });
     if (!resolved.ok) {
       return resolved;
+    }
+
+    const relativePath = relative(root, resolved.path);
+    if (file.operation === "delete" && fsAdapter !== undefined && fsAdapter.deleteTextFile === undefined) {
+      return errorResult("workspace file adapter does not support delete operations", {
+        path: relativePath,
+        operation: "delete"
+      });
+    }
+    if (file.operation === "add") {
+      const existing = await readExistingWorkspaceText(resolved.path, fsAdapter);
+      if (existing !== undefined) {
+        return errorResult(`patch add file target already exists: ${relativePath}`, {
+          path: relativePath,
+          operation: "add"
+        });
+      }
+      const after = `${file.lines.join("\n")}\n`;
+      const syntax = validatePatchSyntax(relativePath, after);
+      if (syntax !== undefined) {
+        return syntax;
+      }
+      prepared.push({
+        operation: "add",
+        path: relativePath,
+        absolutePath: resolved.path,
+        before: "",
+        after,
+        hunkCount: 1,
+        matchDiagnostics: []
+      });
+      continue;
     }
 
     const before = fsAdapter !== undefined
       ? await fsAdapter.readTextFile({ path: resolved.path })
       : await readFile(resolved.path, "utf8");
-    const relativePath = relative(root, resolved.path);
+    if (file.operation === "delete") {
+      prepared.push({
+        operation: "delete",
+        path: relativePath,
+        absolutePath: resolved.path,
+        before,
+        after: "",
+        hunkCount: 1,
+        matchDiagnostics: []
+      });
+      continue;
+    }
+
     let after = before;
+    const matchDiagnostics: PatchMatchDiagnostic[] = [];
 
     for (const [index, hunk] of file.hunks.entries()) {
       const materialized = materializePatchHunk(hunk);
@@ -853,15 +1171,28 @@ async function prepareWorkspacePatchFiles(
         });
       }
 
+      const range = match.ranges[0]!;
+      matchDiagnostics.push({
+        strategy: match.strategy,
+        confidence: matchConfidence(match.strategy),
+        matchedSnippet: buildMatchedSnippet(after, range)
+      });
       after = applyPatchReplacementRanges(after, match.ranges, materialized.newString);
     }
 
+    const syntax = validatePatchSyntax(relativePath, after);
+    if (syntax !== undefined) {
+      return syntax;
+    }
+
     prepared.push({
+      operation: "update",
       path: relativePath,
       absolutePath: resolved.path,
       before,
       after,
-      hunkCount: file.hunks.length
+      hunkCount: file.hunks.length,
+      matchDiagnostics
     });
   }
 
@@ -964,15 +1295,111 @@ function findPatchReplacementRanges(
     };
   }
 
+  const nearMatches = buildNearMatchHints(content, oldString);
   return {
     ok: false,
-    content: `old_string not found in ${options.path}. Use file.read to verify current content, or file.search to locate the text.`,
+    content: [
+      `old_string not found in ${options.path}. Use file.read to verify current content, or file.search to locate the text.`,
+      ...formatNearMatchHints(nearMatches)
+    ].join("\n"),
     metadata: {
       path: options.path,
       matchCount: 0,
-      attemptedStrategies
+      attemptedStrategies,
+      nearMatches
     }
   };
+}
+
+function formatNearMatchHints(nearMatches: Array<{ line: number; score: number; snippet: string }>): string[] {
+  if (nearMatches.length === 0) {
+    return [];
+  }
+  return [
+    "Closest candidate(s):",
+    ...nearMatches.map((match) => `- line ${match.line}, score ${match.score}: ${match.snippet.replace(/\s+/gu, " ").trim()}`)
+  ];
+}
+
+function matchConfidence(strategy: PatchMatchStrategy): number {
+  switch (strategy) {
+    case "exact":
+      return 1;
+    case "line_trimmed":
+    case "trimmed_boundary":
+      return 0.95;
+    case "escape_normalized":
+    case "unicode_normalized":
+      return 0.9;
+    case "whitespace_normalized":
+    case "indentation_flexible":
+      return 0.85;
+    case "block_anchor":
+      return 0.8;
+    case "context_aware":
+      return 0.75;
+  }
+}
+
+function buildMatchedSnippet(content: string, range: PatchMatchRange | undefined): string | undefined {
+  if (range === undefined) {
+    return undefined;
+  }
+  const windowChars = 120;
+  const start = Math.max(0, range.start - windowChars);
+  const end = Math.min(content.length, range.end + windowChars);
+  const prefix = start > 0 ? "..." : "";
+  const suffix = end < content.length ? "..." : "";
+  return `${prefix}${content.slice(start, end)}${suffix}`;
+}
+
+function buildNearMatchHints(content: string, oldString: string): Array<{ line: number; score: number; snippet: string }> {
+  const oldLines = splitBlockLines(oldString);
+  const windowSize = Math.max(1, Math.min(8, oldLines.length));
+  const needle = normalizeWhitespaceValue(oldString).trim().toLowerCase();
+  if (needle.length === 0) {
+    return [];
+  }
+
+  const lines = splitLinesWithRanges(content);
+  const candidates: Array<{ line: number; score: number; snippet: string }> = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const window = lines.slice(index, index + windowSize);
+    if (window.length === 0) {
+      continue;
+    }
+    const snippet = window.map((line) => line.text).join("\n");
+    const score = textSimilarity(needle, normalizeWhitespaceValue(snippet).trim().toLowerCase());
+    if (score >= 0.35) {
+      candidates.push({
+        line: index + 1,
+        score: Number(score.toFixed(3)),
+        snippet: snippet.length > 240 ? `${snippet.slice(0, 240)}...` : snippet
+      });
+    }
+  }
+
+  return candidates
+    .sort((left, right) => right.score - left.score || left.line - right.line)
+    .slice(0, 3);
+}
+
+function textSimilarity(left: string, right: string): number {
+  if (left.length === 0 || right.length === 0) {
+    return 0;
+  }
+  if (left === right) {
+    return 1;
+  }
+  const leftTokens = new Set(left.split(/\s+/u).filter(Boolean));
+  const rightTokens = new Set(right.split(/\s+/u).filter(Boolean));
+  const intersection = [...leftTokens].filter((token) => rightTokens.has(token)).length;
+  const union = new Set([...leftTokens, ...rightTokens]).size;
+  const tokenScore = union === 0 ? 0 : intersection / union;
+  const substringScore = left.includes(right) || right.includes(left)
+    ? Math.min(left.length, right.length) / Math.max(left.length, right.length)
+    : 0;
+  return Math.max(tokenScore, substringScore);
 }
 
 function applyPatchReplacementRanges(content: string, ranges: PatchMatchRange[], newString: string): string {
@@ -1636,35 +2063,93 @@ function buildFileWriteChangePreview(input: {
 
 function buildPatchModeChangePreview(input: {
   files: PreparedWorkspacePatchFile[];
-  patch: string;
   oldBytes: number;
   newBytes: number;
 }): FileChangePreviewViewModel {
   const fileCount = input.files.length;
   const hunkCount = input.files.reduce((total, file) => total + file.hunkCount, 0);
-  const diffLines = input.patch
-    .replace(/\r\n/gu, "\n")
-    .replace(/\r/gu, "\n")
-    .split("\n")
-    .filter((line) =>
-      line.startsWith("*** Update File: ") ||
-      line.startsWith("@@") ||
-      line.startsWith("+") ||
-      line.startsWith("-")
-    );
+  return buildUnifiedFileChangePreview({
+    files: input.files,
+    oldBytes: input.oldBytes,
+    newBytes: input.newBytes,
+    summary: [
+      `Applied ${hunkCount} hunk(s) across ${fileCount} file(s).`,
+      `${input.oldBytes} byte(s) -> ${input.newBytes} byte(s).`
+    ]
+  });
+}
+
+function buildUnifiedFileChangePreview(input: {
+  files: PreparedWorkspacePatchFile[];
+  oldBytes: number;
+  newBytes: number;
+  summary?: readonly string[];
+}): FileChangePreviewViewModel {
+  const diffLines = input.files.flatMap((file) => buildUnifiedFileDiffLines(file));
   const previewLines = diffLines.slice(0, FILE_CHANGE_PREVIEW_LINES);
+  const changeTypes = new Set(input.files.map((file) =>
+    file.operation === "add" ? "added" : file.operation === "delete" ? "deleted" : "modified"
+  ));
+  const changeType = changeTypes.size === 1
+    ? [...changeTypes][0] as FileChangePreviewViewModel["changeType"]
+    : "modified";
 
   return {
     kind: "fileChangePreview",
-    path: fileCount === 1 ? input.files[0]!.path : "multiple files",
-    changeType: "modified",
-    summary: [
-      `Applied ${hunkCount} hunk(s) across ${fileCount} file(s).`,
+    path: input.files.length === 1 ? input.files[0]!.path : "multiple files",
+    changeType,
+    summary: input.summary ?? [
       `${input.oldBytes} byte(s) -> ${input.newBytes} byte(s).`
     ],
     diff: previewLines.join("\n"),
     omittedLineCount: Math.max(0, diffLines.length - previewLines.length)
   };
+}
+
+function buildUnifiedFileDiffLines(file: PreparedWorkspacePatchFile): string[] {
+  const beforeLines = splitPreviewLines(file.before);
+  const afterLines = splitPreviewLines(file.after);
+  const oldCount = file.operation === "add" ? 0 : beforeLines.length;
+  const newCount = file.operation === "delete" ? 0 : afterLines.length;
+  return [
+    `--- ${file.operation === "add" ? "/dev/null" : `a/${file.path}`}`,
+    `+++ ${file.operation === "delete" ? "/dev/null" : `b/${file.path}`}`,
+    `@@ -1,${oldCount} +1,${newCount} @@`,
+    ...(file.operation === "add" ? [] : beforeLines.map((line) => `- ${line}`)),
+    ...(file.operation === "delete" ? [] : afterLines.map((line) => `+ ${line}`))
+  ];
+}
+
+function validatePatchSyntax(path: string, content: string): ToolResult | undefined {
+  if (!/\.json$/iu.test(path)) {
+    return undefined;
+  }
+  try {
+    JSON.parse(content);
+    return undefined;
+  } catch (error) {
+    return errorResult(`Syntax check failed for ${path}: invalid JSON (${error instanceof Error ? error.message : "parse failed"}).`, {
+      path,
+      reason: "syntax_check_failed",
+      syntaxCheck: {
+        checked: true,
+        language: "json",
+        ok: false
+      }
+    });
+  }
+}
+
+function syntaxCheckMetadata(path: string, content: string): { checked: boolean; language?: string; ok?: boolean } {
+  if (!/\.json$/iu.test(path)) {
+    return { checked: false };
+  }
+  try {
+    JSON.parse(content);
+    return { checked: true, language: "json", ok: true };
+  } catch {
+    return { checked: true, language: "json", ok: false };
+  }
 }
 
 function buildFileReplaceChangePreview(input: {

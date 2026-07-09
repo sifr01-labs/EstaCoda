@@ -69,9 +69,11 @@ Workspace file tools are scoped to the active workspace. User-provided paths are
 
 ### `file.patch`
 
-`file.patch` is the targeted edit tool. Replace mode tries exact matching first, then deterministic fuzzy fallbacks for small whitespace, indentation, escaping, and Unicode differences. A match must be unique unless `replace_all: true` is explicit, and overlapping fuzzy matches fail closed before any write.
+`file.patch` is the targeted edit tool. Replace and insert modes try exact matching first, then deterministic fuzzy fallbacks for small whitespace, indentation, escaping, and Unicode differences. A match must be unique unless `replace_all: true` is explicit, and overlapping fuzzy matches fail closed before any write. Successful anchor matches report the selected strategy, confidence, and a bounded matched snippet.
 
-Patch mode accepts V4A-style `*** Begin Patch` / `*** Update File` / `*** End Patch` content for multi-file updates. It validates every file and hunk before writing, so a failed hunk leaves all targeted files unchanged.
+Append and prepend modes add content to an existing or new text file without replacing the whole file. Insert mode places content before or after a matched anchor.
+
+Patch mode accepts V4A-style `*** Begin Patch` / `*** Update File` / `*** Add File` / `*** Delete File` / `*** End Patch` content for multi-file changes. It validates every file and hunk before writing, so a failed hunk, missing delete target, existing add target, or JSON syntax failure leaves all targeted files unchanged.
 
 Patch failures are counted per target file within the active tool provider. After the third consecutive failure on the same file, the tool response tells the model to stop retrying and re-read the file before attempting another patch.
 

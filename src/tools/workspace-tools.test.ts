@@ -400,6 +400,148 @@ describe("workspace file change preview metadata", () => {
       ""
     ].join("\n"));
   });
+
+  it("applies V4A add and delete file sections atomically", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "old.md"), "remove me\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const result = await patch?.run({
+      mode: "patch",
+      patch: [
+        "*** Begin Patch",
+        "*** Add File: new.md",
+        "+# New",
+        "+content",
+        "*** Delete File: old.md",
+        "*** End Patch"
+      ].join("\n")
+    });
+
+    expect(result?.ok).toBe(true);
+    expect(result?.metadata).toMatchObject({
+      paths: ["new.md", "old.md"],
+      operations: ["add", "delete"],
+      fileCount: 2
+    });
+    const preview = result?.metadata?.fileChangePreview as { diff?: string } | undefined;
+    expect(preview?.diff).toContain("--- /dev/null");
+    expect(preview?.diff).toContain("+++ b/new.md");
+    await expect(readFile(join(root, "new.md"), "utf8")).resolves.toBe("# New\ncontent\n");
+    await expect(readFile(join(root, "old.md"), "utf8")).rejects.toBeDefined();
+  });
+
+  it("validates V4A add/delete operations before writing any file", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "a.md"), "alpha\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const result = await patch?.run({
+      mode: "patch",
+      patch: [
+        "*** Begin Patch",
+        "*** Add File: added.md",
+        "+created",
+        "*** Delete File: missing.md",
+        "*** End Patch"
+      ].join("\n")
+    });
+
+    expect(result?.ok).toBe(false);
+    await expect(readFile(join(root, "added.md"), "utf8")).rejects.toBeDefined();
+    await expect(readFile(join(root, "a.md"), "utf8")).resolves.toBe("alpha\n");
+  });
+
+  it("supports append, prepend, and insert modes without whole-file overwrite", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "notes.md"), "middle\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const appended = await patch?.run({
+      mode: "append",
+      path: "notes.md",
+      content: "tail\n"
+    });
+    const prepended = await patch?.run({
+      mode: "prepend",
+      path: "notes.md",
+      content: "head\n"
+    });
+    const inserted = await patch?.run({
+      mode: "insert",
+      path: "notes.md",
+      anchor: "middle",
+      position: "after",
+      content: "\ninserted"
+    });
+
+    expect(appended?.ok).toBe(true);
+    expect(prepended?.ok).toBe(true);
+    expect(inserted?.ok).toBe(true);
+    expect(inserted?.metadata).toMatchObject({
+      operation: "insert",
+      matchStrategy: "exact",
+      matchConfidence: 1,
+      matchedSnippet: expect.stringContaining("middle")
+    });
+    await expect(readFile(join(root, "notes.md"), "utf8")).resolves.toBe("head\nmiddle\ninserted\ntail\n");
+  });
+
+  it("reports near-match hints when file.patch cannot find text", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "notes.md"), "Function: The action keeps rules.\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const result = await patch?.run({
+      path: "notes.md",
+      old_string: "Function: The action keeps business rules.",
+      new_string: "replacement"
+    });
+
+    expect(result?.ok).toBe(false);
+    expect(result?.content).toContain("Closest candidate");
+    expect(result?.metadata?.nearMatches).toEqual([
+      expect.objectContaining({
+        line: 1,
+        snippet: "Function: The action keeps rules."
+      })
+    ]);
+  });
+
+  it("validates JSON syntax before writing any patch operation", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "valid.json"), "{\"ok\":true}\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const result = await patch?.run({
+      mode: "patch",
+      patch: [
+        "*** Begin Patch",
+        "*** Update File: valid.json",
+        "@@ ok @@",
+        "-{\"ok\":true}",
+        "+{\"ok\":",
+        "*** Add File: other.md",
+        "+should not write",
+        "*** End Patch"
+      ].join("\n")
+    });
+
+    expect(result?.ok).toBe(false);
+    expect(result?.content).toContain("Syntax check failed");
+    expect(result?.metadata?.syntaxCheck).toMatchObject({
+      checked: true,
+      language: "json",
+      ok: false
+    });
+    await expect(readFile(join(root, "valid.json"), "utf8")).resolves.toBe("{\"ok\":true}\n");
+    await expect(readFile(join(root, "other.md"), "utf8")).rejects.toBeDefined();
+  });
 });
 
 describe("workspace file-state tracking", () => {

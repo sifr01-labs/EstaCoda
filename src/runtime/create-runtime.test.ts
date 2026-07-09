@@ -1190,11 +1190,14 @@ describe("createRuntime MCP trust gating", () => {
             "requiredConfig": undefined,
             "riskClass": "workspace-write",
             "schemaAliasOrder": [
+              "anchor",
+              "content",
               "mode",
               "new_string",
               "old_string",
               "patch",
               "path",
+              "position",
               "replace_all",
             ],
             "toolsets": [
