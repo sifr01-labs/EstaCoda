@@ -56,12 +56,12 @@ These channels and providers exist in code but lack live validation evidence for
 - MCP stdio is live-proven; HTTP and broader third-party coverage need operator validation.
 - MCP workspace-trust ergonomics are coarse-grained.
 - Memory rendering is selective but not ranked. Freshness/staleness handling is narrow.
-- On non-vision providers, image analysis degrades to metadata-only.
+- Image turns require a configured vision-capable route. Text-only primary or fallback routes are skipped for image-bearing provider requests, and `vision.analyze` fails loudly when no usable vision route is available.
 - Gateway status reports readiness, not real background-process liveness.
 - Full runtime CLI localization is incomplete. Arabic terminal rendering supports shaped, bidirectional Arabic, but not every CLI string is localized.
 - Evaluation substrate exists but is not a scored automated benchmark.
 - Internal alpha harness is manual and not yet a strict release gate.
-- Provider message content support was widened for vision, but some code and docs still assume string content conceptually.
+- Provider message content supports structured image/text parts on the tested vision paths. New provider adapters and prompt-processing paths still need explicit coverage before they are treated as image-safe.
 - Product logic is mixed with formatting/delivery concerns in some channel paths.
 - Live provider capability detection deserves an explicit operator signal.
 - Session recall works, but richer lineage/history management is missing.

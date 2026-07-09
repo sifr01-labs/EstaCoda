@@ -16,7 +16,7 @@ description: "Identified architecture risks, severity, and mitigations."
 | R07 | **Capability trust coverage is uneven** | Medium | Low | High | **Accepted** | Pack, skill, tool, and setup permissions have gates, but new capability surfaces still need explicit security review. |
 | R08 | **No formal eval runner** | Medium | Medium | Medium | **Resolved** | Eval runner with the default deterministic fixture set is operational. |
 | R09 | **Memory rendering is dump-based** | Medium | Medium | Medium | **Resolved** | Selective renderer with fallback rules implemented. |
-| R10 | **Provider message content assumes strings** | Low | High | Low | **Partial** | Widened for vision. Some paths still conceptually assume strings. |
+| R10 | **Provider message content assumes strings** | Low | Medium | Low | **Mitigated** | Tested provider, prompt assembly, token-estimation, and fallback-routing paths now support structured image/text parts. New provider adapters and prompt-processing paths still require explicit image-part coverage. |
 | R11 | **AGENTS.md drift** | Low | High | Low | **Resolved** | Updated to match current structure. |
 | R12 | **Channel maturity is uneven** | Medium | Low | Medium | **Accepted** | Telegram is the strongest first-party remote channel. Discord and Email are implemented but deployment validation is operator-specific. WhatsApp has external API risk. |
 | R13 | **Gateway readiness ≠ liveness** | Low | Medium | Low | **Accepted** | Gateway status reports readiness/configuration; service-manager paths provide stronger process state where installed. |
