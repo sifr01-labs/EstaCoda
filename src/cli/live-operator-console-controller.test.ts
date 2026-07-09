@@ -128,6 +128,31 @@ describe("LiveOperatorConsoleController", () => {
     expect(text).not.toContain("Assistant stream");
   });
 
+  it("keeps follow-up steer typing to the prompt region while streaming stays live", () => {
+    const output = createOutput();
+    const { controller, runtimeHost } = createControllerFixture(output);
+
+    controller.appendStreamingText("Live assistant draft that should not repaint on every steer key.");
+    controller.refresh();
+    expect(stripAnsi(output.text())).toContain("Live assistant draft that should not repaint on every steer key.▍");
+    output.clear();
+
+    controller.setSteer({ mode: "drafting", draft: "h", cursorOffset: 1 });
+    const firstSteerRender = stripAnsi(output.text());
+    expect(runtimeHost.getState().streaming?.showCursor).toBe(false);
+    expect(firstSteerRender).toContain("Live assistant draft that should not repaint on every steer key.");
+    expect(firstSteerRender).not.toContain("Live assistant draft that should not repaint on every steer key.▍");
+    expect(firstSteerRender).toContain("Steer current turn");
+    expect(firstSteerRender).toContain("› h");
+    output.clear();
+
+    controller.setSteer({ mode: "drafting", draft: "he", cursorOffset: 2 });
+    const secondSteerRender = stripAnsi(output.text());
+    expect(secondSteerRender).toContain("Steer current turn");
+    expect(secondSteerRender).toContain("› he");
+    expect(secondSteerRender).not.toContain("Live assistant draft that should not repaint");
+  });
+
   it("tracks visible streaming output with trimmed text", () => {
     const output = createOutput();
     const controller = createController(output);
@@ -362,7 +387,7 @@ describe("LiveOperatorConsoleController", () => {
     expect(text).not.toContain("Assistant stream");
   });
 
-  it("keeps expanded live active work bounded while preserving streaming output", () => {
+  it("keeps hidden live active work from expanding the frame while preserving streaming output", () => {
     const output = createOutput();
     const { controller, runtimeHost } = createControllerFixture(output);
 
@@ -380,8 +405,8 @@ describe("LiveOperatorConsoleController", () => {
     const lines = runtimeHost.render().lines;
     const text = stripAnsi(lines.join("\n"));
 
-    expect(runtimeHost.getState().terminal.height).toBe(24);
-    expect(lines.length).toBeLessThanOrEqual(24);
+    expect(runtimeHost.getState().terminal.height).toBe(12);
+    expect(lines.length).toBeLessThanOrEqual(12);
     expect(text).not.toContain("Running tools");
     expect(text).toContain("read_file");
     expect(text).toContain("src/file-19.ts");

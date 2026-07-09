@@ -276,6 +276,138 @@ describe("raw prompt render loop", () => {
     expect(text).not.toMatch(forbiddenManagedRegionOutput);
   });
 
+  it("redraws only the Operator Console prompt region when steer text changes under a stable layout", () => {
+    const output = fakeOutput();
+    const host = createOperatorConsoleRuntimeHost();
+    const loop = new RawPromptRenderLoop(output, {
+      operatorConsoleHostFactory: () => host,
+    });
+    const baseOperatorConsole = {
+      enabled: true,
+      terminal: { width: 96, height: 18, isTty: true },
+      status: status({ usedTokens: 18000, elapsedMs: 13000 }),
+      streaming: streamingState({
+        tail: "The assistant draft should stay on screen without being repainted here.",
+      }),
+      promptMode: "steer" as const,
+    };
+
+    loop.render({
+      prompt: "",
+      state: createLineEditorState("h"),
+      operatorConsole: {
+        ...baseOperatorConsole,
+        steer: { mode: "drafting", draft: "h", cursorOffset: 1 },
+      },
+    });
+    output.clear();
+
+    loop.render({
+      prompt: "",
+      state: createLineEditorState("he"),
+      operatorConsole: {
+        ...baseOperatorConsole,
+        steer: { mode: "drafting", draft: "he", cursorOffset: 2 },
+      },
+    }, { dirtyRegions: ["prompt"] });
+
+    const text = output.text();
+    expect(text).toContain("Steer current turn");
+    expect(text).toContain("› he");
+    expect(text).not.toContain("The assistant draft should stay on screen");
+    expect(text).not.toContain("Settled streamed text");
+    expect(text).not.toContain("kimi-k2.7-code");
+    expect(text).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
+  it("redraws only streaming and status regions for stable streaming refreshes", () => {
+    const output = fakeOutput();
+    const host = createOperatorConsoleRuntimeHost();
+    const loop = new RawPromptRenderLoop(output, {
+      operatorConsoleHostFactory: () => host,
+    });
+    const baseOperatorConsole = {
+      enabled: true,
+      terminal: { width: 96, height: 18, isTty: true },
+      status: status({ usedTokens: 18000, elapsedMs: 13000 }),
+    };
+
+    loop.render({
+      prompt: "",
+      state: createLineEditorState("steer note"),
+      operatorConsole: {
+        ...baseOperatorConsole,
+        streaming: streamingState({ tail: "Streaming draft v1" }),
+        steer: { mode: "drafting", draft: "steer note", cursorOffset: "steer note".length },
+        promptMode: "steer",
+      },
+    });
+    output.clear();
+
+    loop.render({
+      prompt: "",
+      state: createLineEditorState("steer note"),
+      operatorConsole: {
+        ...baseOperatorConsole,
+        status: status({ usedTokens: 18000, elapsedMs: 14000 }),
+        streaming: streamingState({ tail: "Streaming draft v2" }),
+        steer: { mode: "drafting", draft: "steer note", cursorOffset: "steer note".length },
+        promptMode: "steer",
+      },
+    }, { dirtyRegions: ["streaming", "statusRail"] });
+
+    const text = output.text();
+    expect(text).toContain("Streaming draft v2");
+    expect(text).toContain("◷ 00:14");
+    expect(text).not.toContain("Steer current turn");
+    expect(text).not.toContain("› steer note");
+    expect(text).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
+  it("falls back to a full redraw when dirty-region layout changes", () => {
+    const output = fakeOutput();
+    const host = createOperatorConsoleRuntimeHost();
+    const loop = new RawPromptRenderLoop(output, {
+      operatorConsoleHostFactory: () => host,
+    });
+
+    loop.render({
+      prompt: "",
+      state: createLineEditorState("short"),
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 96, height: 14, isTty: true },
+        status: status({ usedTokens: 18000, elapsedMs: 13000 }),
+        streaming: streamingState({ tail: "Short stream" }),
+        steer: { mode: "drafting", draft: "short", cursorOffset: "short".length },
+        promptMode: "steer",
+      },
+    });
+    output.clear();
+
+    loop.render({
+      prompt: "",
+      state: createLineEditorState("short"),
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 96, height: 18, isTty: true },
+        status: status({ usedTokens: 18000, elapsedMs: 14000 }),
+        streaming: streamingState({
+          tail: "A much longer streaming draft that changes region allocation and must force the full redraw path.",
+        }),
+        steer: { mode: "drafting", draft: "short", cursorOffset: "short".length },
+        promptMode: "steer",
+      },
+    }, { dirtyRegions: ["streaming", "statusRail"] });
+
+    const text = output.text();
+    expect(text).toContain("A much longer streaming draft");
+    expect(text).toContain("Steer current turn");
+    expect(text).toContain("› short");
+    expect(text).toContain("◷ 00:14");
+    expect(text).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
   it("keeps status rail state limited when noisy live status input reaches the runtime host", () => {
     const output = fakeOutput();
     const host = createOperatorConsoleRuntimeHost();

@@ -70,10 +70,11 @@ function streamingContentBlocks(state: StreamingState): readonly AssistantMessag
     blocks.push({ kind: "toolTrail", entries: unanchoredEntries });
   }
 
+  const showCursor = state.showCursor ?? true;
   const tailLines = normalizeStreamingText(state.tail);
   if (tailLines.length > 0) {
-    blocks.push({ kind: "text", lines: tailLines, cursor: true });
-  } else if (!hasToolTrailBlocks(blocks)) {
+    blocks.push({ kind: "text", lines: tailLines, cursor: showCursor });
+  } else if (showCursor && !hasToolTrailBlocks(blocks)) {
     const lastTextIndex = findLastTextBlockIndex(blocks);
     if (lastTextIndex >= 0) {
       const block = blocks[lastTextIndex] as Extract<AssistantMessageFrameBlock, { readonly kind: "text" }>;

@@ -2,12 +2,17 @@ import { stringWidth } from "../ui/papyrus/screen/stringWidth.js";
 import type { LineEditorState } from "../ui/input/lineEditor.js";
 import {
   buildOperatorConsoleRawPromptFrameWithRuntimeHost,
+  type OperatorConsoleRawPromptFrame,
   type OperatorConsoleRawPromptSnapshot,
 } from "../ui/papyrus/operator-console/operatorConsoleHost.js";
 import {
   createOperatorConsoleRuntimeHost,
   type OperatorConsoleRuntimeHost,
 } from "../ui/papyrus/operator-console/operatorConsoleRuntimeHost.js";
+import type {
+  OperatorConsoleRegion,
+  OperatorConsoleRegionKind,
+} from "../ui/papyrus/operator-console/operatorConsoleLayout.js";
 import type {
   AttachmentCardState,
   PromptSurfaceState,
@@ -42,6 +47,10 @@ export type RawPromptRenderSnapshot = {
   readonly ghostText?: RawPromptGhostText;
   readonly fallbackRows?: readonly RawPromptOverlayRow[];
   readonly operatorConsole?: RawPromptOperatorConsoleOptions;
+};
+
+export type RawPromptRenderOptions = {
+  readonly dirtyRegions?: readonly OperatorConsoleRegionKind[];
 };
 
 export type RawPromptOperatorConsoleOptions = Omit<OperatorConsoleRawPromptSnapshot, "prompt" | "state"> & {
@@ -79,6 +88,7 @@ export class RawPromptRenderLoop {
   readonly #output: RawPromptRenderOutput;
   readonly #operatorConsoleHostFactory: () => OperatorConsoleRuntimeHost;
   #operatorConsoleHost: OperatorConsoleRuntimeHost | undefined;
+  #lastOperatorConsoleRegions: readonly OperatorConsoleRegion[] | undefined;
   #renderedRows = 0;
   #cursorRow = 0;
 
@@ -90,8 +100,8 @@ export class RawPromptRenderLoop {
     this.#operatorConsoleHostFactory = options.operatorConsoleHostFactory ?? createOperatorConsoleRuntimeHost;
   }
 
-  render(snapshot: RawPromptRenderSnapshot): number {
-    return this.#withHiddenCursorDuringManagedRedraw(() => this.#renderVisibleFrame(snapshot));
+  render(snapshot: RawPromptRenderSnapshot, options: RawPromptRenderOptions = {}): number {
+    return this.#withHiddenCursorDuringManagedRedraw(() => this.#renderVisibleFrame(snapshot, options));
   }
 
   clear(): void {
@@ -105,10 +115,11 @@ export class RawPromptRenderLoop {
       this.#moveToFrameCursor(this.#renderedRows, 0, 0);
       this.#renderedRows = 0;
       this.#cursorRow = 0;
+      this.#lastOperatorConsoleRegions = undefined;
     });
   }
 
-  #renderVisibleFrame(snapshot: RawPromptRenderSnapshot): number {
+  #renderVisibleFrame(snapshot: RawPromptRenderSnapshot, options: RawPromptRenderOptions): number {
     const frame = snapshot.operatorConsole?.enabled === true
       ? buildOperatorConsoleRawPromptFrameWithRuntimeHost(this.#getOperatorConsoleHost(), {
         mode: snapshot.operatorConsole.mode,
@@ -130,6 +141,13 @@ export class RawPromptRenderLoop {
         focus: snapshot.operatorConsole.focus,
       })
       : buildFallbackRawPromptFrame(snapshot);
+
+    if (this.#canRedrawDirtyOperatorConsoleRegions(frame, options.dirtyRegions)) {
+      this.#redrawDirtyOperatorConsoleRegions(frame, options.dirtyRegions!);
+      this.#rememberRenderedFrame(frame);
+      return frame.rows.length;
+    }
+
     this.#moveToFirstRenderedRow();
 
     const physicalRows = Math.max(this.#renderedRows, frame.rows.length);
@@ -140,9 +158,58 @@ export class RawPromptRenderLoop {
     }
 
     this.#moveToFrameCursor(physicalRows, frame.cursorRow, frame.cursorColumn);
+    this.#rememberRenderedFrame(frame);
+    return frame.rows.length;
+  }
+
+  #canRedrawDirtyOperatorConsoleRegions(
+    frame: RawPromptFrame,
+    dirtyRegions: readonly OperatorConsoleRegionKind[] | undefined
+  ): frame is OperatorConsoleRawPromptFrame {
+    if (dirtyRegions === undefined || dirtyRegions.length === 0) return false;
+    if (!isOperatorConsoleFrame(frame)) return false;
+    if (this.#lastOperatorConsoleRegions === undefined) return false;
+    if (this.#renderedRows !== frame.rows.length) return false;
+    if (!operatorConsoleRegionsMatch(this.#lastOperatorConsoleRegions, frame.layout.regions)) return false;
+    return frame.layout.regions.some((region) => {
+      return dirtyRegions.includes(region.kind) && region.visible && region.height > 0;
+    });
+  }
+
+  #redrawDirtyOperatorConsoleRegions(
+    frame: OperatorConsoleRawPromptFrame,
+    dirtyRegions: readonly OperatorConsoleRegionKind[]
+  ): void {
+    const dirty = new Set(dirtyRegions);
+    const regions = frame.layout.regions
+      .filter((region) => dirty.has(region.kind) && region.visible && region.height > 0)
+      .sort((a, b) => a.y - b.y);
+    let currentRow = this.#cursorRow;
+
+    for (const region of regions) {
+      currentRow = this.#moveFromFrameRowToFrameRow(currentRow, region.y);
+      for (let offset = 0; offset < region.height; offset += 1) {
+        const row = region.y + offset;
+        this.#output.write("\x1b[0K");
+        if (row < frame.rows.length) this.#output.write(frame.rows[row]!);
+        if (offset < region.height - 1) {
+          this.#output.write("\n");
+          currentRow += 1;
+        }
+      }
+    }
+
+    currentRow = this.#moveFromFrameRowToFrameRow(currentRow, frame.cursorRow);
+    if (frame.cursorColumn > 0) this.#output.write(`\x1b[${frame.cursorColumn}C`);
+    this.#cursorRow = frame.cursorRow;
+  }
+
+  #rememberRenderedFrame(frame: RawPromptFrame): void {
     this.#renderedRows = frame.rows.length;
     this.#cursorRow = frame.cursorRow;
-    return frame.rows.length;
+    this.#lastOperatorConsoleRegions = isOperatorConsoleFrame(frame)
+      ? cloneOperatorConsoleRegions(frame.layout.regions)
+      : undefined;
   }
 
   #getOperatorConsoleHost(): OperatorConsoleRuntimeHost {
@@ -164,6 +231,13 @@ export class RawPromptRenderLoop {
     if (cursorColumn > 0) this.#output.write(`\x1b[${cursorColumn}C`);
   }
 
+  #moveFromFrameRowToFrameRow(currentRow: number, targetRow: number): number {
+    if (currentRow > targetRow) this.#output.write(`\x1b[${currentRow - targetRow}A`);
+    if (currentRow < targetRow) this.#output.write(`\x1b[${targetRow - currentRow}B`);
+    this.#output.write("\r");
+    return targetRow;
+  }
+
   #withHiddenCursorDuringManagedRedraw<T>(redraw: () => T): T {
     if (this.#output.isTTY !== true) return redraw();
     this.#output.write(HIDE_CURSOR);
@@ -178,11 +252,13 @@ export class RawPromptRenderLoop {
 const HIDE_CURSOR = "\x1b[?25l";
 const SHOW_CURSOR = "\x1b[?25h";
 
-function buildFallbackRawPromptFrame(snapshot: RawPromptRenderSnapshot): {
+type RawPromptFrame = OperatorConsoleRawPromptFrame | {
   readonly rows: readonly string[];
   readonly cursorRow: number;
   readonly cursorColumn: number;
-} {
+};
+
+function buildFallbackRawPromptFrame(snapshot: RawPromptRenderSnapshot): RawPromptFrame {
   const textBeforeCursor = snapshot.state.text.slice(0, snapshot.state.cursor);
   const beforeCursorLines = textBeforeCursor.split("\n");
   const textLines = snapshot.state.text.split("\n");
@@ -205,4 +281,29 @@ function buildFallbackRawPromptFrame(snapshot: RawPromptRenderSnapshot): {
     cursorRow,
     cursorColumn,
   };
+}
+
+function isOperatorConsoleFrame(frame: RawPromptFrame): frame is OperatorConsoleRawPromptFrame {
+  return "layout" in frame;
+}
+
+function operatorConsoleRegionsMatch(
+  previous: readonly OperatorConsoleRegion[],
+  next: readonly OperatorConsoleRegion[]
+): boolean {
+  if (previous.length !== next.length) return false;
+  return previous.every((region, index) => {
+    const candidate = next[index];
+    return candidate !== undefined &&
+      region.kind === candidate.kind &&
+      region.x === candidate.x &&
+      region.y === candidate.y &&
+      region.width === candidate.width &&
+      region.height === candidate.height &&
+      region.visible === candidate.visible;
+  });
+}
+
+function cloneOperatorConsoleRegions(regions: readonly OperatorConsoleRegion[]): readonly OperatorConsoleRegion[] {
+  return regions.map((region) => ({ ...region }));
 }

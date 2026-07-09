@@ -16,7 +16,7 @@ import {
   type TranscriptBlock,
   type TurnActivityState,
 } from "./operatorConsoleState.js";
-import { createOperatorConsoleLayout } from "./operatorConsoleLayout.js";
+import { createOperatorConsoleLayout, type OperatorConsoleLayout } from "./operatorConsoleLayout.js";
 import { getPromptSurfaceMetrics } from "./promptSurface.js";
 import { renderOperatorConsoleTextLines } from "./operatorConsoleRenderer.js";
 import {
@@ -50,6 +50,7 @@ export type OperatorConsoleRawPromptFrame = {
   readonly cursorRow: number;
   readonly cursorColumn: number;
   readonly state: OperatorConsoleState;
+  readonly layout: OperatorConsoleLayout;
 };
 
 const DEFAULT_TERMINAL: TerminalMetrics = {
@@ -103,6 +104,7 @@ export function buildOperatorConsoleRawPromptFrame(
     cursorRow: cursor.row,
     cursorColumn: cursor.column,
     state,
+    layout,
   };
 }
 
@@ -165,6 +167,7 @@ function rawPromptFrameFromRuntimeFrame(frame: OperatorConsoleRuntimeFrame): Ope
     cursorRow: cursor.row,
     cursorColumn: cursor.column,
     state: frame.state,
+    layout: frame.layout,
   };
 }
 
