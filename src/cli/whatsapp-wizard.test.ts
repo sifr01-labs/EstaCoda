@@ -118,9 +118,9 @@ describe("runWhatsAppWizard", () => {
     expect(streamed.startsWith("⌘ WhatsApp Setup\n")).toBe(true);
     expect(streamed).toContain("WhatsApp pairing");
     expect(streamed).toContain("Scan this code with WhatsApp on your phone:");
-    expect(streamed.indexOf("✓ Mode: dedicated WhatsApp number")).toBeLessThan(streamed.indexOf("Dedicated number setup"));
-    expect(streamed.indexOf("✓ Allowed senders: 971501234567")).toBeLessThan(streamed.indexOf("Dedicated number setup"));
-    expect(streamed.indexOf("✓ WhatsApp bridge dependencies ready")).toBeLessThan(streamed.indexOf("Dedicated number setup"));
+    expect(streamed.indexOf("✓ Mode: dedicated WhatsApp number")).toBeLessThan(streamed.indexOf("using the dedicated number"));
+    expect(streamed.indexOf("✓ Allowed senders: 971501234567")).toBeLessThan(streamed.indexOf("using the dedicated number"));
+    expect(streamed.indexOf("✓ WhatsApp bridge dependencies ready")).toBeLessThan(streamed.indexOf("using the dedicated number"));
     expect(streamed.indexOf("Scan this code with WhatsApp on your phone:")).toBeLessThan(streamed.indexOf("[QR]"));
     expect(result.output).toContain("Pairing timed out - run estacoda whatsapp to try again.");
     expect(await configLoaded(tempDir)).toBe(false);

@@ -19,6 +19,7 @@ import {
   type WhatsAppDmPolicy,
 } from "../config/runtime-config.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
+import type { Prompt, PromptOptions } from "../cli/prompt-contract.js";
 import { resolveSetupCopy, type SetupCopyKey } from "./setup-copy.js";
 
 const DEFAULT_QR_TIMEOUT_MS = 120_000;
@@ -26,9 +27,7 @@ const WHATSAPP_AUTH_DIR_NAME = "whatsapp-auth";
 
 export type WhatsAppSetupSource = "cli" | "setup-editor" | "onboarding";
 
-export type WhatsAppSetupPrompt = {
-  (question: string): Promise<string>;
-};
+export type WhatsAppSetupPrompt = Prompt;
 
 export type WhatsAppSetupOutput = {
   write(chunk: string): void;
@@ -79,22 +78,41 @@ export type WhatsAppSetupFlowOptions = {
 
 type ResolvedWhatsAppSetupCopy = {
   introBlock: string;
+  choicePrompt: string;
+  dependenciesMissingTitle: string;
+  dependenciesMissingBody(logPath: string): string;
   dependenciesMissingQuestion: string;
+  dependenciesInstallLabel: string;
+  dependenciesInstallDescription: string;
+  dependenciesSkipLabel: string;
+  dependenciesSkipDescription: string;
   dependenciesReady: string;
   dependenciesDeclined: string;
   dependenciesFailed(message: string): string;
+  repairTitle: string;
+  repairBody: string;
   repairQuestion: string;
+  repairConfirmLabel: string;
+  repairConfirmDescription: string;
+  repairSkipLabel: string;
+  repairSkipDescription: string;
   repairDeclined: string;
+  modeTitle: string;
+  modeBody: string;
+  modeDedicatedLabel: string;
+  modeDedicatedDescription: string;
+  modePersonalLabel: string;
+  modePersonalDescription: string;
   modeBlock: string;
   modeInvalid: string;
   modeSelectedDedicated: string;
   modeSelectedPersonal: string;
-  dedicatedGuidance: string;
-  personalGuidance: string;
+  allowlistTitle: string;
+  allowlistBody: string;
   allowlistQuestion: string;
   allowlistSelected(allowedSenders: string): string;
   allowlistEmpty: string;
-  pairingInstructions: string;
+  pairingInstructions(mode: WhatsAppChannelMode): string;
   pairingBlock(authDir: string): string;
   pairingTimeout: string;
   pairingFailed(message: string): string;
@@ -140,13 +158,14 @@ export async function runWhatsAppSetupFlow(options: WhatsAppSetupFlowOptions): P
   const installDependencies = deps.installDependencies ?? installWhatsAppBridgeDependencies;
   const pairDevice = deps.pairDevice ?? pairDeviceWithForegroundBridge;
   const dependencyStatus = await getDependencyStatus({ bridgeDir });
+  const installLogPath = join(paths.logsPath, "whatsapp-bridge-install.log");
   if (dependencyStatus.missing.length > 0) {
-    if (!yes(await ask(options.prompt, copy.dependenciesMissingQuestion))) {
+    if (!yes(await askDependencyInstall(options.prompt, copy, installLogPath))) {
       say(copy.dependenciesDeclined);
       return finish(1, lines, [], "dependency_declined");
     }
     try {
-      await installDependencies({ bridgeDir, logPath: join(paths.logsPath, "whatsapp-bridge-install.log") });
+      await installDependencies({ bridgeDir, logPath: installLogPath });
     } catch (error) {
       say(copy.dependenciesFailed(installErrorMessage(error)));
       return finish(1, lines, [], "dependency_failed");
@@ -158,22 +177,24 @@ export async function runWhatsAppSetupFlow(options: WhatsAppSetupFlowOptions): P
     || loaded.config.channels?.whatsapp?.authDir !== undefined;
   const state = hasExistingWhatsAppConfig ? await detectPairingState(authDir) : "fresh";
   if (state !== "fresh") {
-    if (!yes(await ask(options.prompt, copy.repairQuestion))) {
+    if (!yes(await askPairingRepair(options.prompt, copy))) {
       say(copy.repairDeclined);
       return finish(1, lines, [], "repair_declined");
     }
     await clearProfileLocalAuthDir(authDir, paths.gatewayStatePath);
   }
 
-  const mode = normalizeMode(await ask(options.prompt, copy.modeBlock));
+  const mode = normalizeMode(await askMode(options.prompt, copy));
   if (mode === undefined) {
     say(copy.modeInvalid);
     return finish(1, lines, [], "invalid_mode");
   }
   const selectedModeCopy = mode === "bot" ? copy.modeSelectedDedicated : copy.modeSelectedPersonal;
-  const guidanceCopy = mode === "bot" ? copy.dedicatedGuidance : copy.personalGuidance;
 
-  const allowedUsers = normalizeAllowedUsers(await ask(options.prompt, copy.allowlistQuestion));
+  const allowedUsers = normalizeAllowedUsers(await ask(options.prompt, copy.allowlistQuestion, {
+    title: copy.allowlistTitle,
+    description: copy.allowlistBody,
+  }));
   const dmPolicy: WhatsAppDmPolicy = allowedUsers.length > 0 ? "allowlist" : "pairing";
 
   say(selectedModeCopy);
@@ -184,9 +205,7 @@ export async function runWhatsAppSetupFlow(options: WhatsAppSetupFlowOptions): P
   }
   say(copy.dependenciesReady);
   say("");
-  say(guidanceCopy);
-  say("");
-  say(copy.pairingInstructions);
+  say(copy.pairingInstructions(mode));
   say("");
   say(copy.pairingBlock(authDir));
   flushLinesToOutput();
@@ -244,22 +263,43 @@ function setupFlowCopy(locale: UiLanguage): ResolvedWhatsAppSetupCopy {
   };
   return {
     introBlock: token("whatsappWizard.intro.block"),
+    choicePrompt: token("whatsappWizard.choicePrompt"),
+    dependenciesMissingTitle: token("whatsappWizard.dependencies.missingTitle"),
+    dependenciesMissingBody: (logPath) => format("whatsappWizard.dependencies.missingBody", { logPath }),
     dependenciesMissingQuestion: token("whatsappWizard.dependencies.missingQuestion"),
+    dependenciesInstallLabel: token("whatsappWizard.dependencies.installLabel"),
+    dependenciesInstallDescription: token("whatsappWizard.dependencies.installDescription"),
+    dependenciesSkipLabel: token("whatsappWizard.dependencies.skipLabel"),
+    dependenciesSkipDescription: token("whatsappWizard.dependencies.skipDescription"),
     dependenciesReady: token("whatsappWizard.dependencies.ready"),
     dependenciesDeclined: token("whatsappWizard.dependencies.declined"),
     dependenciesFailed: (message) => format("whatsappWizard.dependencies.failed", { message }),
+    repairTitle: token("whatsappWizard.repair.title"),
+    repairBody: token("whatsappWizard.repair.body"),
     repairQuestion: token("whatsappWizard.repair.question"),
+    repairConfirmLabel: token("whatsappWizard.repair.confirmLabel"),
+    repairConfirmDescription: token("whatsappWizard.repair.confirmDescription"),
+    repairSkipLabel: token("whatsappWizard.repair.skipLabel"),
+    repairSkipDescription: token("whatsappWizard.repair.skipDescription"),
     repairDeclined: token("whatsappWizard.repair.declined"),
+    modeTitle: token("whatsappWizard.mode.title"),
+    modeBody: token("whatsappWizard.mode.body"),
+    modeDedicatedLabel: token("whatsappWizard.mode.dedicatedLabel"),
+    modeDedicatedDescription: token("whatsappWizard.mode.dedicatedDescription"),
+    modePersonalLabel: token("whatsappWizard.mode.personalLabel"),
+    modePersonalDescription: token("whatsappWizard.mode.personalDescription"),
     modeBlock: token("whatsappWizard.mode.block"),
     modeInvalid: token("whatsappWizard.mode.invalid"),
     modeSelectedDedicated: token("whatsappWizard.mode.selectedDedicated"),
     modeSelectedPersonal: token("whatsappWizard.mode.selectedPersonal"),
-    dedicatedGuidance: token("whatsappWizard.dedicated.guidance"),
-    personalGuidance: token("whatsappWizard.personal.guidance"),
+    allowlistTitle: token("whatsappWizard.allowlist.title"),
+    allowlistBody: token("whatsappWizard.allowlist.body"),
     allowlistQuestion: token("whatsappWizard.allowlist.question"),
     allowlistSelected: (allowedSenders) => format("whatsappWizard.allowlist.selected", { allowedSenders }),
     allowlistEmpty: token("whatsappWizard.allowlist.empty"),
-    pairingInstructions: token("whatsappWizard.pairing.instructions"),
+    pairingInstructions: (mode) => token(mode === "bot"
+      ? "whatsappWizard.pairing.instructionsDedicated"
+      : "whatsappWizard.pairing.instructionsPersonal"),
     pairingBlock: (authDir) => format("whatsappWizard.pairing.block", { authDir }),
     pairingTimeout: token("whatsappWizard.pairing.timeout"),
     pairingFailed: (message) => format("whatsappWizard.pairing.failed", { message }),
@@ -272,9 +312,117 @@ function setupFlowCopy(locale: UiLanguage): ResolvedWhatsAppSetupCopy {
   };
 }
 
-async function ask(prompt: WhatsAppSetupPrompt | undefined, question: string): Promise<string | undefined> {
+async function ask(prompt: WhatsAppSetupPrompt | undefined, question: string, options?: PromptOptions): Promise<string | undefined> {
   if (prompt === undefined) return undefined;
-  return prompt(question);
+  return options === undefined ? prompt(question) : prompt(question, options);
+}
+
+async function askDependencyInstall(
+  prompt: WhatsAppSetupPrompt | undefined,
+  copy: ResolvedWhatsAppSetupCopy,
+  logPath: string
+): Promise<string | undefined> {
+  if (prompt?.select !== undefined) {
+    return prompt.select({
+      title: copy.dependenciesMissingTitle,
+      body: copy.dependenciesMissingBody(logPath),
+      options: [
+        {
+          id: "install",
+          value: "y",
+          label: copy.dependenciesInstallLabel,
+          description: copy.dependenciesInstallDescription,
+        },
+        {
+          id: "skip",
+          value: "n",
+          label: copy.dependenciesSkipLabel,
+          description: copy.dependenciesSkipDescription,
+          group: "navigation",
+        },
+      ],
+      defaultIndex: 1,
+      fallbackPrompt: copy.choicePrompt,
+      surface: "promptCard",
+      columns: [
+        { key: "label", header: "Action" },
+        { key: "description", header: "Result" },
+      ],
+      showColumnHeaders: false,
+    });
+  }
+  return ask(prompt, copy.dependenciesMissingQuestion);
+}
+
+async function askPairingRepair(
+  prompt: WhatsAppSetupPrompt | undefined,
+  copy: ResolvedWhatsAppSetupCopy
+): Promise<string | undefined> {
+  if (prompt?.select !== undefined) {
+    return prompt.select({
+      title: copy.repairTitle,
+      body: copy.repairBody,
+      options: [
+        {
+          id: "repair",
+          value: "y",
+          label: copy.repairConfirmLabel,
+          description: copy.repairConfirmDescription,
+        },
+        {
+          id: "skip",
+          value: "n",
+          label: copy.repairSkipLabel,
+          description: copy.repairSkipDescription,
+          group: "navigation",
+        },
+      ],
+      defaultIndex: 1,
+      fallbackPrompt: copy.choicePrompt,
+      surface: "promptCard",
+      columns: [
+        { key: "label", header: "Action" },
+        { key: "description", header: "Result" },
+      ],
+      showColumnHeaders: false,
+    });
+  }
+  return ask(prompt, copy.repairQuestion);
+}
+
+async function askMode(
+  prompt: WhatsAppSetupPrompt | undefined,
+  copy: ResolvedWhatsAppSetupCopy
+): Promise<string | undefined> {
+  if (prompt?.select !== undefined) {
+    return prompt.select({
+      title: copy.modeTitle,
+      body: copy.modeBody,
+      options: [
+        {
+          id: "dedicated",
+          value: "1",
+          label: copy.modeDedicatedLabel,
+          description: copy.modeDedicatedDescription,
+        },
+        {
+          id: "personal",
+          value: "2",
+          label: copy.modePersonalLabel,
+          description: copy.modePersonalDescription,
+        },
+      ],
+      defaultIndex: 0,
+      fallbackPrompt: copy.choicePrompt,
+      surface: "promptCard",
+      columns: [
+        { key: "label", header: "Mode" },
+        { key: "description", header: "Use case" },
+      ],
+      showColumnHeaders: false,
+    });
+  }
+  return ask(prompt, copy.modeBlock);
 }
 
 function finish(

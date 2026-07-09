@@ -1364,6 +1364,10 @@ export async function promptDiscordCapability(
   };
 }
 
+/**
+ * Legacy fallback for optional-capability callers. The setup editor, onboarding
+ * wizard, and CLI WhatsApp command use the QR-driven runWhatsAppSetupFlow path.
+ */
 export async function promptWhatsAppCapability(
   prompt: Prompt,
   current: {

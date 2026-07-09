@@ -559,22 +559,42 @@ const SETUP_MODULE_KEYS = [
 
 const WHATSAPP_WIZARD_KEYS = [
   "whatsappWizard.intro.block",
+  "whatsappWizard.choicePrompt",
+  "whatsappWizard.dependencies.missingTitle",
+  "whatsappWizard.dependencies.missingBody",
   "whatsappWizard.dependencies.missingQuestion",
+  "whatsappWizard.dependencies.installLabel",
+  "whatsappWizard.dependencies.installDescription",
+  "whatsappWizard.dependencies.skipLabel",
+  "whatsappWizard.dependencies.skipDescription",
   "whatsappWizard.dependencies.ready",
   "whatsappWizard.dependencies.declined",
   "whatsappWizard.dependencies.failed",
+  "whatsappWizard.repair.title",
+  "whatsappWizard.repair.body",
   "whatsappWizard.repair.question",
+  "whatsappWizard.repair.confirmLabel",
+  "whatsappWizard.repair.confirmDescription",
+  "whatsappWizard.repair.skipLabel",
+  "whatsappWizard.repair.skipDescription",
   "whatsappWizard.repair.declined",
+  "whatsappWizard.mode.title",
+  "whatsappWizard.mode.body",
+  "whatsappWizard.mode.dedicatedLabel",
+  "whatsappWizard.mode.dedicatedDescription",
+  "whatsappWizard.mode.personalLabel",
+  "whatsappWizard.mode.personalDescription",
   "whatsappWizard.mode.block",
   "whatsappWizard.mode.invalid",
   "whatsappWizard.mode.selectedDedicated",
   "whatsappWizard.mode.selectedPersonal",
-  "whatsappWizard.dedicated.guidance",
-  "whatsappWizard.personal.guidance",
+  "whatsappWizard.allowlist.title",
+  "whatsappWizard.allowlist.body",
   "whatsappWizard.allowlist.question",
   "whatsappWizard.allowlist.selected",
   "whatsappWizard.allowlist.empty",
-  "whatsappWizard.pairing.instructions",
+  "whatsappWizard.pairing.instructionsDedicated",
+  "whatsappWizard.pairing.instructionsPersonal",
   "whatsappWizard.pairing.block",
   "whatsappWizard.pairing.timeout",
   "whatsappWizard.pairing.failed",
@@ -1060,14 +1080,22 @@ describe("setup copy", () => {
   });
 
   it("contains standalone WhatsApp wizard copy with safe default wording", () => {
+    expect(rawSetupCopy("en", "whatsappWizard.intro.block")).toContain("approved remote-control messages");
+    expect(rawSetupCopy("en", "whatsappWizard.choicePrompt")).toContain("Choose [1/2]");
+    expect(rawSetupCopy("en", "whatsappWizard.dependencies.missingBody")).toContain("Command: npm ci");
+    expect(rawSetupCopy("en", "whatsappWizard.dependencies.missingBody")).toContain("Log: {logPath}");
+    expect(rawSetupCopy("en", "whatsappWizard.mode.title")).toContain("WhatsApp channel mode");
+    expect(rawSetupCopy("en", "whatsappWizard.mode.dedicatedDescription")).toContain("Recommended");
+    expect(rawSetupCopy("en", "whatsappWizard.mode.personalDescription")).toContain("testing");
     expect(rawSetupCopy("en", "whatsappWizard.mode.block")).toContain("Choose [1/2]:");
     expect(rawSetupCopy("en", "whatsappWizard.mode.block")).toContain("Dedicated WhatsApp number");
+    expect(rawSetupCopy("en", "whatsappWizard.allowlist.body")).toContain("approved phone numbers");
     expect(rawSetupCopy("en", "whatsappWizard.allowlist.question")).toContain("Leave blank to link WhatsApp now");
     expect(rawSetupCopy("en", "whatsappWizard.allowlist.question")).toContain("international format");
     expect(rawSetupCopy("en", "whatsappWizard.allowlist.question")).not.toContain("*");
     expect(rawSetupCopy("en", "whatsappWizard.allowlist.selected")).toContain("Allowed senders");
-    expect(rawSetupCopy("en", "whatsappWizard.dedicated.guidance")).toContain("with the dedicated number");
-    expect(rawSetupCopy("en", "whatsappWizard.pairing.instructions")).toContain("using the dedicated number");
+    expect(rawSetupCopy("en", "whatsappWizard.pairing.instructionsDedicated")).toContain("using the dedicated number");
+    expect(rawSetupCopy("en", "whatsappWizard.pairing.instructionsPersonal")).toContain("message yourself");
     expect(rawSetupCopy("en", "whatsappWizard.success.linked")).toContain("linked");
     expect(rawSetupCopy("en", "whatsappWizard.success.sessionSaved")).toContain("Session saved");
     expect(rawSetupCopy("en", "whatsappWizard.success.restricted")).toContain("Incoming messages restricted to");
@@ -1077,10 +1105,12 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "whatsappWizard.mode.block")).toContain(isolateLtr("EstaCoda"));
     expect(resolveSetupCopy("ar", "whatsappWizard.mode.block")).toContain(isolateLtr("WhatsApp"));
     expect(resolveSetupCopy("ar", "whatsappWizard.mode.block")).toContain(isolateLtr("WhatsApp Business"));
-    expect(resolveSetupCopy("ar", "whatsappWizard.dedicated.guidance")).toContain(isolateLtr("eSIM"));
+    expect(resolveSetupCopy("ar", "whatsappWizard.dependencies.missingBody")).toContain(isolateLtr("npm ci"));
+    expect(resolveSetupCopy("ar", "whatsappWizard.dependencies.missingBody")).toContain(isolateLtr("{logPath}"));
     expect(rawSetupCopy("ar", "whatsappWizard.allowlist.question")).toContain("الصيغة الدولية");
     expect(resolveSetupCopy("ar", "whatsappWizard.dependencies.missingQuestion")).toContain(isolateLtr("npm ci"));
     expect(resolveSetupCopy("ar", "whatsappWizard.dependencies.missingQuestion")).toContain(isolateLtr("scripts/whatsapp-bridge/"));
+    expect(resolveSetupCopy("ar", "whatsappWizard.pairing.instructionsPersonal")).toContain(isolateLtr("WhatsApp"));
     expect(resolveSetupCopy("ar", "whatsappWizard.pairing.failed")).toContain(isolateLtr("QR"));
     expect(resolveSetupCopy("ar", "whatsappWizard.pairing.block")).toContain(isolateLtr("{authDir}"));
     expect(resolveSetupCopy("ar", "whatsappWizard.success.pairingPending")).toContain(isolateLtr("pairing-pending"));
