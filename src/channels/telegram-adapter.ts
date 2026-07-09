@@ -1195,6 +1195,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
   #abortPromise: Promise<void> | undefined;
   #messageCreatedTs: number | undefined;
   #floodStrikes = 0;
+  readonly #previewMessageIds = new Set<number>();
   readonly #errors: unknown[] = [];
 
   constructor(input: TelegramStreamingTextWorkerInput) {
@@ -1307,7 +1308,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
       }
 
       if (segment.messageId !== undefined && (this.#shouldSendFreshFinal() || this.#input.prefersFreshFinal?.(finalText) === true)) {
-        return this.#finishWithFreshFinal(segment, finalText);
+        return this.#finishWithFreshFinal(finalText);
       }
 
       try {
@@ -1471,6 +1472,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
         return;
       }
       segment.messageId = message.message_id;
+      this.#recordPreviewMessage(message.message_id);
       this.#recordMessageCreated(segment);
       segment.lastSentHtml = rendered;
       this.#floodStrikes = 0;
@@ -1542,6 +1544,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
           throw error;
         }
         previewMessageId = message.message_id;
+        this.#recordPreviewMessage(previewMessageId);
         this.#recordMessageCreated(segment);
       }
 
@@ -1578,6 +1581,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
         return;
       }
       segment.messageId = message.message_id;
+      this.#recordPreviewMessage(message.message_id);
       this.#recordMessageCreated(segment);
     } else if (segment.lastSentHtml !== renderedFinalChunk) {
       try {
@@ -1598,14 +1602,11 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
     this.#floodStrikes = 0;
   }
 
-  async #finishWithFreshFinal(
-    segment: TelegramStreamingTextSegment,
-    finalText: string
-  ): Promise<ChannelStreamingTextResult> {
+  async #finishWithFreshFinal(finalText: string): Promise<ChannelStreamingTextResult> {
     try {
       const richMessage = await this.#input.trySendRich?.(finalText);
       if (richMessage !== undefined) {
-        await this.#deletePreviewMessages(segment);
+        await this.#deleteResponsePreviewMessages();
         this.#clearTimers();
         return {
           delivered: true,
@@ -1628,7 +1629,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
         await this.#input.sendMessage(chunk, { format: formatted.format });
       }
 
-      await this.#deletePreviewMessages(segment);
+      await this.#deleteResponsePreviewMessages();
       this.#clearTimers();
       return {
         delivered: true,
@@ -1660,6 +1661,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
         await this.#input.sendMessage(chunk, { format: formatted.format });
       }
 
+      await this.#deleteResponsePreviewMessages();
       this.#clearTimers();
       return {
         delivered: true,
@@ -1690,7 +1692,8 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
       const formatted = this.#input.formatFinalText(snapshot.visibleText);
       const chunks = formatted.chunks.flatMap((chunk) => splitStreamingTelegramText(chunk, TELEGRAM_MAX_TEXT_UTF16));
       for (const chunk of chunks) {
-        await this.#input.sendMessage(chunk, { format: formatted.format });
+        const message = await this.#input.sendMessage(chunk, { format: formatted.format });
+        this.#recordPreviewMessage(message.message_id);
       }
       segment.sealed = true;
     } catch (error) {
@@ -1728,10 +1731,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
       return;
     }
 
-    const messageIds = [
-      ...segment.committedMessageIds,
-      ...(segment.messageId === undefined ? [] : [segment.messageId])
-    ];
+    const messageIds = this.#segmentPreviewMessageIds(segment);
 
     for (const messageId of messageIds) {
       try {
@@ -1743,23 +1743,35 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
         } catch (editError) {
           this.#captureError(editError);
         }
+      } finally {
+        this.#previewMessageIds.delete(messageId);
       }
     }
   }
 
-  async #deletePreviewMessages(segment: TelegramStreamingTextSegment): Promise<void> {
-    const messageIds = [
-      ...segment.committedMessageIds,
-      ...(segment.messageId === undefined ? [] : [segment.messageId])
-    ];
+  async #deleteResponsePreviewMessages(): Promise<void> {
+    const messageIds = Array.from(this.#previewMessageIds);
 
     for (const messageId of messageIds) {
       try {
         await this.#input.deleteMessage(messageId);
       } catch (error) {
         this.#captureError(error);
+      } finally {
+        this.#previewMessageIds.delete(messageId);
       }
     }
+  }
+
+  #segmentPreviewMessageIds(segment: TelegramStreamingTextSegment): number[] {
+    return Array.from(new Set([
+      ...segment.committedMessageIds,
+      ...(segment.messageId === undefined ? [] : [segment.messageId])
+    ]));
+  }
+
+  #recordPreviewMessage(messageId: number): void {
+    this.#previewMessageIds.add(messageId);
   }
 
   #recordMessageCreated(segment: TelegramStreamingTextSegment): void {

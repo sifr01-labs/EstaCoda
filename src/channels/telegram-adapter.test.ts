@@ -932,6 +932,31 @@ describe("TelegramAdapter", () => {
     expect(callsFor(calls, "deleteMessage")).toHaveLength(0);
   });
 
+  it("delivery.startStreamingText finish with drafts deletes materialized segment previews", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123", chatType: "dm" }, {
+      minInitialChars: 1,
+      transport: "draft"
+    });
+
+    handle.append("first");
+    await flushTelegramStreamingTimers();
+    handle.segmentBreak("tool-start");
+    await flushTelegramStreamingTimers();
+    handle.append("second");
+    await flushTelegramStreamingTimers();
+    const result = await handle.finish("final");
+
+    expect(result).toEqual({
+      delivered: true,
+      fallbackRequired: false,
+      deliveredText: "final"
+    });
+    expect(callsFor(calls, "sendMessage").map((call) => call.body.text)).toEqual(["first", "final"]);
+    expect(callsFor(calls, "deleteMessage").map((call) => call.body.message_id)).toEqual([1]);
+  });
+
   it("delivery.startStreamingText failed provider fallback keeps draft streaming alive with a fresh draft", async () => {
     vi.useFakeTimers();
     const { adapter, calls } = createTelegramStreamingHarness();
@@ -1466,6 +1491,36 @@ describe("TelegramAdapter", () => {
     });
     expect(callsFor(calls, "editMessageText")).toHaveLength(0);
     expect(callsFor(calls, "deleteMessage").map((call) => call.body.message_id)).toEqual([1]);
+  });
+
+  it("delivery.startStreamingText fresh final after segmentBreak deletes every response preview", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      minInitialChars: 1,
+      cursor: "|"
+    });
+
+    handle.append("first");
+    await flushTelegramStreamingTimers();
+    handle.segmentBreak("tool-start");
+    await flushTelegramStreamingTimers();
+    handle.append("second");
+    await flushTelegramStreamingTimers();
+    const result = await handle.finish("final");
+
+    expect(result).toEqual({
+      delivered: true,
+      fallbackRequired: false,
+      deliveredText: "final"
+    });
+    expect(callsFor(calls, "sendMessage").map((call) => call.body.text)).toEqual(["first|", "second|"]);
+    expect(callsFor(calls, "sendRichMessage").at(-1)?.body).toMatchObject({
+      rich_message: {
+        markdown: "final"
+      }
+    });
+    expect(callsFor(calls, "deleteMessage").map((call) => call.body.message_id)).toEqual([1, 2]);
   });
 
   it("delivery.startStreamingText fresh final ignores delete failures after final delivery", async () => {
