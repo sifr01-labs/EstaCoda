@@ -2331,7 +2331,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(rendered.slice(responseIndex)).toContain("mock-model");
   });
 
-  it("routes live tool activity into the Operator Console active-work surface when gated", async () => {
+  it("routes live tool activity into the compact Operator Console turn status", async () => {
     const outputChunks: string[] = [];
     const output = {
       write(chunk: string | Uint8Array): boolean {
@@ -2444,15 +2444,11 @@ describe("runSessionLoop — active turn spinner", () => {
     );
 
     const strippedChunks = outputChunks.map((chunk) => stripAnsi(chunk));
-    const activeWorkTitleIndex = strippedChunks.findIndex((chunk) => chunk.includes("Running tools"));
-    expect(activeWorkTitleIndex).toBeGreaterThan(-1);
-    expect(outputChunks[activeWorkTitleIndex - 1]).toBe("\x1b[0K");
-    expect(strippedChunks.some((chunk) => chunk.includes("src/running-0.ts"))).toBe(true);
-    expect(strippedChunks.some((chunk) => chunk.includes("approval required"))).toBe(true);
-    expect(strippedChunks.some((chunk) => chunk.includes("src/completed-0.ts"))).toBe(true);
-    expect(strippedChunks.some((chunk) => chunk.includes("src/completed-7.ts"))).toBe(true);
+    expect(strippedChunks.some((chunk) =>
+      chunk.includes("scribbling ·") && chunk.includes("active") && chunk.includes("done")
+    )).toBe(true);
+    expect(strippedChunks.some((chunk) => chunk.includes("Running tools"))).toBe(false);
     expect(strippedChunks.some((chunk) => chunk.includes("more completed this turn"))).toBe(false);
-    expect(strippedChunks.some((chunk) => chunk.includes("Running tools") && chunk.includes("src/running-0.ts"))).toBe(false);
 
     const durableResponseChunk = strippedChunks.find((chunk) => chunk.includes("Mock response"));
     expect(durableResponseChunk).toBeDefined();
@@ -2466,8 +2462,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(durableOutput).toContain("approval required");
     expect(durableOutput).toContain("failed");
     expect(durableOutput).toContain("Worked for");
-    const summaryChunks = strippedChunks.filter((chunk) => chunk.includes("completed ·"));
-    expect(summaryChunks.join("")).toContain(
+    expect(durableOutput).toContain(
       "9 completed · 3 active · 1 failed · Worked for 00:00"
     );
   });

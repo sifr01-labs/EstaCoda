@@ -1,18 +1,27 @@
 import { truncateVisible } from "../../renderers/layout.js";
 import { stringWidth } from "../screen/stringWidth.js";
 import {
-  ACTIVE_WORK_STATUS_SYMBOLS,
+  activeWorkStatusSymbol,
   formatActiveWorkDuration,
 } from "./activeWorkSurface.js";
 import type { InlineToolTrailEntry } from "./operatorConsoleState.js";
+import type { OperatorConsoleStyle } from "./operatorConsoleStyle.js";
 
 const TOOL_DETAIL_GAP_CELLS = 3;
 
-export function formatInlineToolTrailRow(entry: InlineToolTrailEntry, width: number): string {
+export type InlineToolTrailRowOptions = {
+  readonly style?: OperatorConsoleStyle;
+};
+
+export function formatInlineToolTrailRow(
+  entry: InlineToolTrailEntry,
+  width: number,
+  options: InlineToolTrailRowOptions = {}
+): string {
   const normalizedWidth = normalizeDimension(width);
   if (normalizedWidth <= 0) return "";
 
-  const symbol = ACTIVE_WORK_STATUS_SYMBOLS[entry.status];
+  const symbol = activeWorkStatusSymbol(entry.status, undefined, options.style);
   const tool = normalizeText(entry.displayLabel ?? entry.toolName, "tool");
   const detail = normalizeText(entry.target ?? entry.summary, entry.status);
   const duration = formatActiveWorkDuration(resolveEntryDurationMs(entry));

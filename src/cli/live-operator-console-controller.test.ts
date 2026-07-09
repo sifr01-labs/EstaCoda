@@ -73,29 +73,35 @@ describe("LiveOperatorConsoleController", () => {
   it("times active work from prompt submission until turn completion", () => {
     const output = createOutput();
     let nowMs = 5_000;
-    const controller = createController(output, {
+    const { controller, runtimeHost } = createControllerFixture(output, {
       now: () => nowMs,
       turnStartedAtMs: 1_000,
     });
 
-    controller.applyActiveWorkEvent({
+    const running = controller.applyActiveWorkEvent({
       id: "read",
       toolName: "read_file",
       status: "running",
       target: "src/app.ts",
     });
-    expect(stripAnsi(output.text())).toContain("Running tools  ◷ 00:04");
+    expect(running.startedAtMs).toBe(1_000);
+    expect(running.updatedAtMs).toBe(5_000);
+    expect(runtimeHost.getState().activeWork.startedAtMs).toBe(1_000);
+    expect(stripAnsi(output.text())).not.toContain("Running tools");
 
     output.clear();
     nowMs = 7_000;
-    controller.applyActiveWorkEvent({
+    const done = controller.applyActiveWorkEvent({
       id: "read",
       toolName: "read_file",
       status: "done",
       target: "src/app.ts",
       durationMs: 100,
     });
-    expect(stripAnsi(output.text())).toContain("Running tools  ◷ 00:06");
+    expect(done.startedAtMs).toBe(1_000);
+    expect(done.updatedAtMs).toBe(7_000);
+    expect(runtimeHost.getState().activeWork.updatedAtMs).toBe(7_000);
+    expect(stripAnsi(output.text())).not.toContain("Running tools");
 
     nowMs = 9_000;
     const completed = controller.completeActiveWork();
@@ -178,7 +184,11 @@ describe("LiveOperatorConsoleController", () => {
       text: "I will inspect the file first.",
       createdAtMs: 10_100,
     })]);
-    expect(stripAnsi(output.text())).toContain("Running tools");
+    const text = stripAnsi(output.text());
+    expect(text).toContain("I will inspect the file first.");
+    expect(text).toContain("read_file");
+    expect(text).toContain("src/app.ts");
+    expect(text).not.toContain("Running tools");
 
     output.clear();
     vi.advanceTimersByTime(75);
@@ -372,8 +382,12 @@ describe("LiveOperatorConsoleController", () => {
 
     expect(runtimeHost.getState().terminal.height).toBe(24);
     expect(lines.length).toBeLessThanOrEqual(24);
-    expect(text).toContain("Running tools");
-    expect(text).toContain("I will inspect the memory files.");
+    expect(text).not.toContain("Running tools");
+    expect(text).toContain("read_file");
+    expect(text).toContain("src/file-19.ts");
+    expect(runtimeHost.getState().streaming?.segments).toContainEqual(expect.objectContaining({
+      text: "I will inspect the memory files.",
+    }));
   });
 });
 

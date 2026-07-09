@@ -9,6 +9,7 @@ import {
   createOperatorConsoleStyle,
   createDefaultToolActivityState,
   formatActiveWorkSummary,
+  formatLiveActiveWorkStatus,
   getActiveWorkSurfaceDesiredHeight,
   hasActiveWork,
   renderCompletedActiveWorkSurface,
@@ -348,7 +349,7 @@ describe("Papyrus operator console active work surface", () => {
     expect(text).toContain("src/app.ts");
     expect(text).toContain("test");
     expect(text).toContain("failed");
-    expect(text).toContain("1 completed · 0 active · 1 failed · Worked for 25:32");
+    expect(text).toContain("1 completed · 1 failed · Worked for 25:32");
     expect(output.every((line) => stringWidth(line) <= 96)).toBe(true);
   });
 
@@ -365,7 +366,7 @@ describe("Papyrus operator console active work surface", () => {
     const logicalText = text.replace(/[\u2068\u2069]/gu, "");
 
     expect(output[0]).toContain("اكتمل تنفيذ الأدوات");
-    expect(logicalText).toContain("1 اكتملت · 0 نشطة · 1 فشلت · المدة 01:05");
+    expect(logicalText).toContain("1 اكتملت · 1 فشلت · المدة 01:05");
     expect(logicalText).toContain("read_file");
     expect(logicalText).toContain("shell");
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
@@ -530,6 +531,35 @@ describe("Papyrus operator console active work surface", () => {
 
     expect(renderActiveWorkSurface(state, { width: 80, height: 5 })).toHaveLength(5);
     expect(formatActiveWorkSummary(state)).toContain("11 completed · 1 active · 0 failed");
+    expect(formatActiveWorkSummary(state, { includeActive: false })).toContain("11 completed · 1 active · 0 failed");
+  });
+
+  it("formats compact live work status for the turn activity row", () => {
+    const state = createState({
+      startedAtMs: 0,
+      updatedAtMs: 33_000,
+      items: [
+        item("run-1", "running"),
+        item("queue", "queued"),
+        ...manyItems(5, "succeeded"),
+      ],
+    });
+
+    expect(formatLiveActiveWorkStatus(state)).toBe("2 active · 5 done · 00:33");
+  });
+
+  it("includes failures in compact live work status only when present", () => {
+    const state = createState({
+      startedAtMs: 0,
+      updatedAtMs: 57_000,
+      items: [
+        item("run-1", "running"),
+        item("ok", "succeeded"),
+        item("bad", "failed"),
+      ],
+    });
+
+    expect(formatLiveActiveWorkStatus(state)).toBe("1 active · 1 done · 1 failed · 00:57");
   });
 
   it("formats Arabic turn-end tool summaries through active work copy", () => {

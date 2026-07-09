@@ -108,6 +108,7 @@ function renderRegionLines(
     return renderTurnActivitySurface(state.turnActivity, {
       width: region.width,
       locale: state.locale,
+      activeWork: state.activeWork,
       style: state.style,
     }).map((text) => ({ region: region.kind, text }));
   }

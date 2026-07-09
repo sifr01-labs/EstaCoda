@@ -88,6 +88,31 @@ describe("Papyrus operator console assistant message frame", () => {
     expect(rows.every((line) => stringWidth(line) <= 84)).toBe(true);
   });
 
+  it("threads style colors into inline tool trail rows", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const style = createOperatorConsoleStyle({
+      tokens,
+      capabilities: { supportsColor: true, supportsTrueColor: true },
+    });
+    const rows = renderAssistantMessageFrame({
+      lines: [],
+      blocks: [{
+        kind: "toolTrail",
+        entries: [{
+          id: "run-1",
+          sequence: 1,
+          toolName: "terminal.run",
+          status: "failed",
+          summary: "denied",
+          durationMs: 0,
+        }],
+      }],
+    }, { width: 72, style });
+
+    expect(rows.join("\n")).toContain(`${ansiFg(tokens.contract.severity.error)}✗\x1b[0m terminal.run`);
+    expect(rows.every((line) => stringWidth(line) <= 72)).toBe(true);
+  });
+
   it("summarizes without implementation chrome when height is constrained below a frame", () => {
     const rows = renderAssistantMessageFrame({
       lines: ["Constrained assistant output"],

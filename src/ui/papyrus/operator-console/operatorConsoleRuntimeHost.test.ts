@@ -148,7 +148,8 @@ describe("OperatorConsoleRuntimeHost", () => {
     expect(text).toContain("EstaCoda");
     expect(text).toContain("Model Route");
     expect(text).toContain("Attachments");
-    expect(text).toContain("Running tools");
+    expect(host.getState().activeWork.items).toHaveLength(1);
+    expect(text).not.toContain("Running tools");
     expect(text).toContain("Live streaming tail▍");
     expect(text).not.toContain("Assistant stream");
     expect(text).toContain("Approval required");
@@ -228,21 +229,21 @@ describe("OperatorConsoleRuntimeHost", () => {
     expect(host.render().lines.join("\n")).not.toContain("Commands");
   });
 
-  it("renders queued steer above attachments and prompt while active work stays above queued steer", () => {
+  it("renders queued steer above attachments, prompt, and status rail", () => {
     const host = createHost({ height: 28 });
     host.setActiveWork(activeWork([workItem("read", "running")]));
     host.setSteer(steer());
     host.setAttachments([attachment()]);
 
     const lines = host.render().lines;
-    const activeWorkIndex = findLine(lines, "Running tools");
     const queuedSteerIndex = findLine(lines, "Queued steer");
     const attachmentsIndex = findLine(lines, "Attachments");
     const steerInputIndex = findLine(lines, "Steer current turn");
     const statusIndex = lines.length - 1;
 
-    expect(activeWorkIndex).toBeGreaterThanOrEqual(0);
-    expect(queuedSteerIndex).toBeGreaterThan(activeWorkIndex);
+    expect(host.getState().activeWork.items).toHaveLength(1);
+    expect(findLine(lines, "Running tools")).toBe(-1);
+    expect(queuedSteerIndex).toBeGreaterThanOrEqual(0);
     expect(attachmentsIndex).toBeGreaterThan(queuedSteerIndex);
     expect(steerInputIndex).toBeGreaterThan(attachmentsIndex);
     expect(statusIndex).toBeGreaterThan(steerInputIndex);
@@ -284,14 +285,16 @@ describe("OperatorConsoleRuntimeHost", () => {
     expect(rail).not.toMatch(/\b(steer|active|approval|tool|workspace|trust|setup|channel)\b/iu);
   });
 
-  it("renders approvals above active work", () => {
+  it("renders approvals without showing the full live active work box", () => {
     const host = createHost({ height: 24 });
     host.setApprovals([approval()]);
     host.setActiveWork(activeWork([workItem("typecheck", "running")]));
 
     const lines = host.render().lines;
 
-    expect(findLine(lines, "Approval required")).toBeLessThan(findLine(lines, "Running tools"));
+    expect(findLine(lines, "Approval required")).toBeGreaterThanOrEqual(0);
+    expect(findLine(lines, "Running tools")).toBe(-1);
+    expect(host.getState().activeWork.items).toHaveLength(1);
   });
 
   it("does not reserve rows for absent optional surfaces", () => {

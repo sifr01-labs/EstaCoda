@@ -200,7 +200,7 @@ describe("raw prompt render loop", () => {
     });
     const text = output.text();
 
-    expect(rows).toBeGreaterThan(4);
+    expect(rows).toBeGreaterThanOrEqual(4);
     expect(setActiveWork).toHaveBeenCalledWith(expect.objectContaining({
       items: [expect.objectContaining({ toolName: "read_file" })],
     }));
@@ -208,8 +208,8 @@ describe("raw prompt render loop", () => {
       mode: "drafting",
       draft: "focus approvals",
     }));
-    expect(text.indexOf("╭─ Running tools")).toBeLessThan(text.indexOf("╭─ Steer current turn"));
     expect(text.indexOf("╭─ Steer current turn")).toBeLessThan(text.indexOf("◷ 00:13"));
+    expect(text).not.toContain("Running tools");
     expect(text).toContain("› focus approvals");
     expect(text).not.toMatch(forbiddenManagedRegionOutput);
   });

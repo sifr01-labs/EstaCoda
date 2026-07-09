@@ -889,7 +889,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
               let newPhase: string | undefined;
               if (operatorConsoleLiveFrame !== undefined && isToolActivityRuntimeEvent(event)) {
                 operatorConsoleLiveFrame.applyActiveWorkEvent(activeWorkEventMapper.build(event));
-                newPhase = "tool";
+                newPhase = "provider";
               } else if (operatorConsoleLiveFrame !== undefined) {
                   const operatorConsolePhase = operatorConsoleTransientPhaseForRuntimeEvent(event);
                   if (operatorConsolePhase === null) {

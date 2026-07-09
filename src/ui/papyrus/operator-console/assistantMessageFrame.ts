@@ -65,7 +65,7 @@ export function renderAssistantMessageFrame(
   if (height <= 0) return [];
 
   const title = normalizeTitle(input.title, options.style);
-  const contentRows = renderWrappedContentRows(input, contentWidthFor(width));
+  const contentRows = renderWrappedContentRows(input, contentWidthFor(width), options.style);
   if (height < 3) return [truncateVisible(`${title}: ${summarizeContentRows(contentRows)}`, width)];
 
   const visibleContentRows = Math.max(1, height - 2);
@@ -81,10 +81,11 @@ export function renderAssistantMessageFrame(
 
 function renderWrappedContentRows(
   input: AssistantMessageFrameInput,
-  width: number
+  width: number,
+  style?: OperatorConsoleStyle
 ): readonly string[] {
   const rows = contentBlocksForInput(input).flatMap((block, index, blocks) =>
-    renderContentBlockRows(block, index, blocks, width)
+    renderContentBlockRows(block, index, blocks, width, style)
   );
   return rows.length === 0 ? [""] : rows;
 }
@@ -106,7 +107,8 @@ function renderContentBlockRows(
   block: AssistantMessageFrameBlock,
   index: number,
   blocks: readonly AssistantMessageFrameBlock[],
-  width: number
+  width: number,
+  style: OperatorConsoleStyle | undefined
 ): readonly string[] {
   if (block.kind === "text") {
     const lines = withOptionalCursor(normalizeFrameLines(block.lines), block.cursor);
@@ -115,7 +117,7 @@ function renderContentBlockRows(
 
   const entries = [...block.entries].sort((left, right) => left.sequence - right.sequence);
   if (entries.length === 0) return [];
-  const rows = entries.map((entry) => formatInlineToolTrailRow(entry, width));
+  const rows = entries.map((entry) => formatInlineToolTrailRow(entry, width, { style }));
   return [
     ...(shouldSeparateFromPreviousBlock(index, blocks) ? [""] : []),
     ...rows,
