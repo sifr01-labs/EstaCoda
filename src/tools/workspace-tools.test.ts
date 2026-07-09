@@ -527,6 +527,160 @@ describe("workspace file-state tracking", () => {
   });
 });
 
+describe("guarded file.write overwrites", () => {
+  it("allows safe creates without overwrite intent", async () => {
+    const root = await makeTempDir();
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const write = tools.find((tool) => tool.name === "file.write");
+
+    const result = await write?.run({
+      path: "created.md",
+      content: "new document\n"
+    });
+
+    expect(result?.ok).toBe(true);
+    expect(result?.metadata).toMatchObject({
+      path: "created.md",
+      oldBytes: 0,
+      newBytes: 13,
+      byteDelta: 13,
+      changed: true,
+      existedBefore: false,
+      overwrite: false,
+      suspiciousShrink: false
+    });
+    await expect(readFile(join(root, "created.md"), "utf8")).resolves.toBe("new document\n");
+  });
+
+  it("allows same-content writes without overwrite intent", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "notes.md"), "same content\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const write = tools.find((tool) => tool.name === "file.write");
+
+    const result = await write?.run({
+      path: "notes.md",
+      content: "same content\n"
+    });
+
+    expect(result?.ok).toBe(true);
+    expect(result?.content).toContain("No changes");
+    expect(result?.metadata).toMatchObject({
+      path: "notes.md",
+      changed: false,
+      existedBefore: true,
+      overwrite: false,
+      suspiciousShrink: false
+    });
+    await expect(readFile(join(root, "notes.md"), "utf8")).resolves.toBe("same content\n");
+  });
+
+  it("requires explicit overwrite intent before changing an existing file", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "notes.md"), "original content\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const write = tools.find((tool) => tool.name === "file.write");
+
+    const result = await write?.run({
+      path: "notes.md",
+      content: "replacement content\n"
+    });
+
+    expect(result?.ok).toBe(false);
+    expect(result?.content).toContain("would overwrite existing notes.md");
+    expect(result?.metadata).toMatchObject({
+      path: "notes.md",
+      reason: "overwrite_intent_required",
+      overwriteRequired: true,
+      changed: true,
+      existedBefore: true,
+      suspiciousShrink: false
+    });
+    expect(result?.metadata?.fileChangePreview).toMatchObject({
+      kind: "fileChangePreview",
+      path: "notes.md",
+      changeType: "modified"
+    });
+    await expect(readFile(join(root, "notes.md"), "utf8")).resolves.toBe("original content\n");
+  });
+
+  it("allows intentional non-shrinking overwrites", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "notes.md"), "original content\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const write = tools.find((tool) => tool.name === "file.write");
+
+    const result = await write?.run({
+      path: "notes.md",
+      content: "replacement content\n",
+      overwrite: true
+    });
+
+    expect(result?.ok).toBe(true);
+    expect(result?.metadata).toMatchObject({
+      path: "notes.md",
+      changed: true,
+      existedBefore: true,
+      overwrite: true,
+      suspiciousShrink: false
+    });
+    await expect(readFile(join(root, "notes.md"), "utf8")).resolves.toBe("replacement content\n");
+  });
+
+  it("blocks suspicious shrink overwrites even with overwrite intent", async () => {
+    const root = await makeTempDir();
+    const original = Array.from({ length: 80 }, (_, index) => `## Section ${index + 1}\nUseful transcript line ${index + 1}.`).join("\n");
+    await writeFile(join(root, "transcript.md"), original, "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const write = tools.find((tool) => tool.name === "file.write");
+
+    const result = await write?.run({
+      path: "transcript.md",
+      content: "# Summary\n",
+      overwrite: true
+    });
+
+    expect(result?.ok).toBe(false);
+    expect(result?.content).toContain("Suspicious file.write overwrite blocked");
+    expect(result?.metadata).toMatchObject({
+      path: "transcript.md",
+      reason: "suspicious_shrink_overwrite",
+      overwriteRequired: true,
+      suspiciousShrink: true,
+      changed: true,
+      existedBefore: true
+    });
+    expect(result?.metadata?.oldBytes).toBeGreaterThan(500);
+    expect(result?.metadata?.newBytes).toBe(Buffer.byteLength("# Summary\n"));
+    await expect(readFile(join(root, "transcript.md"), "utf8")).resolves.toBe(original);
+  });
+
+  it("allows suspicious shrink overwrites only with explicit shrink intent", async () => {
+    const root = await makeTempDir();
+    const original = Array.from({ length: 80 }, (_, index) => `## Section ${index + 1}\nUseful transcript line ${index + 1}.`).join("\n");
+    await writeFile(join(root, "transcript.md"), original, "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const write = tools.find((tool) => tool.name === "file.write");
+
+    const result = await write?.run({
+      path: "transcript.md",
+      content: "# Summary\n",
+      overwrite: true,
+      allowShrink: true
+    });
+
+    expect(result?.ok).toBe(true);
+    expect(result?.metadata).toMatchObject({
+      path: "transcript.md",
+      changed: true,
+      existedBefore: true,
+      overwrite: true,
+      suspiciousShrink: true
+    });
+    await expect(readFile(join(root, "transcript.md"), "utf8")).resolves.toBe("# Summary\n");
+  });
+});
+
 describe("safe nested file.write", () => {
   it("creates a/b/c/d.txt when no parent exists", async () => {
     const root = await makeTempDir();

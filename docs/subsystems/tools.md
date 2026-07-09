@@ -75,6 +75,14 @@ Patch mode accepts V4A-style `*** Begin Patch` / `*** Update File` / `*** End Pa
 
 Patch failures are counted per target file within the active tool provider. After the third consecutive failure on the same file, the tool response tells the model to stop retrying and re-read the file before attempting another patch.
 
+### `file.write`
+
+`file.write` creates complete text files and can replace an entire file when that is explicitly intended. Creates do not require extra intent. Same-content writes are treated as no-op successes.
+
+Changing an existing file requires `overwrite: true`; otherwise the tool returns a structured failure with byte deltas and a bounded change preview without modifying the file. Large suspicious shrink overwrites, such as replacing a long transcript or markdown document with a tiny summary, are blocked even with `overwrite: true` unless `allowShrink: true` is also explicit.
+
+Use `file.patch` for targeted edits to existing files. Use `file.write` with overwrite intent only when replacing the whole file is the desired operation.
+
 ### `file.search`
 
 `file.search` is the compatibility search tool. It is useful for simple literal or regex searches when ripgrep-specific filtering, pagination, or output modes are not needed. It remains intentionally smaller than `file.grep`.

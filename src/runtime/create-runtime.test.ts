@@ -1171,7 +1171,9 @@ describe("createRuntime MCP trust gating", () => {
             "requiredConfig": undefined,
             "riskClass": "workspace-write",
             "schemaAliasOrder": [
+              "allowShrink",
               "content",
+              "overwrite",
               "path",
             ],
             "toolsets": [

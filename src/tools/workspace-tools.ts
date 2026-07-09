@@ -37,6 +37,8 @@ const DEFAULT_COMMAND_TIMEOUT_MS = 30_000;
 const FILE_CHANGE_PREVIEW_LINES = 8;
 const MAX_TERMINAL_CONTEXT_SUMMARY_CHARS = 500;
 const MAX_TERMINAL_CONTEXT_COMMAND_CHARS = 220;
+const FILE_WRITE_SHRINK_GUARD_MIN_OLD_BYTES = 500;
+const FILE_WRITE_SHRINK_GUARD_MAX_RATIO = 0.5;
 const SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", ".next", ".turbo"]);
 
 type PatchMatchStrategy =
@@ -167,12 +169,22 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
     },
     {
       name: "file.write",
-      description: "Write a text file inside the active workspace, creating parent directories as needed.",
+      description: "Write a text file inside the active workspace, creating parent directories as needed. Existing files require overwrite=true when content changes; suspicious shrink overwrites also require allowShrink=true.",
       inputSchema: {
         type: "object",
         properties: {
           path: { type: "string" },
-          content: { type: "string" }
+          content: { type: "string" },
+          overwrite: {
+            type: "boolean",
+            description: "Required as true when replacing changed content in an existing file. Creates and same-content writes do not require it.",
+            default: false
+          },
+          allowShrink: {
+            type: "boolean",
+            description: "Required as true, in addition to overwrite=true, when the new content is much smaller than the existing file.",
+            default: false
+          }
         },
         required: ["path", "content"]
       },
@@ -181,7 +193,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
       progressLabel: "writing file",
       maxResultSizeChars: 2000,
       isAvailable: () => true,
-      run: async (input: { path?: string; content?: string }) => {
+      run: async (input: { path?: string; content?: string; overwrite?: boolean; allowShrink?: boolean }) => {
         if (typeof input.content !== "string") {
           return errorResult("content must be a string");
         }
@@ -194,33 +206,82 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
 
         const relativePath = relative(canonicalRoot, path.path);
         const existing = await readExistingWorkspaceText(path.path, fsAdapter);
+        const oldBytes = existing === undefined ? 0 : Buffer.byteLength(existing);
+        const bytes = Buffer.byteLength(input.content);
+        const changed = existing !== input.content;
+        const overwritesExisting = existing !== undefined && changed;
+        const shrinkAssessment = assessFileWriteShrink(existing, input.content);
+        const preview = buildFileWriteChangePreview({
+          path: relativePath,
+          before: existing,
+          after: input.content,
+          bytes
+        });
 
-        if (fsAdapter?.writeTextFile !== undefined) {
-          await fsAdapter.writeTextFile({
-            path: path.path,
-            content: input.content
+        if (overwritesExisting && input.overwrite !== true) {
+          return errorResult(`file.write would overwrite existing ${relativePath}. Re-read the file if needed, then set overwrite=true only when replacing the entire file is intended.`, {
+            path: relativePath,
+            oldBytes,
+            newBytes: bytes,
+            byteDelta: bytes - oldBytes,
+            changed,
+            existedBefore: true,
+            overwriteRequired: true,
+            suspiciousShrink: shrinkAssessment.suspicious,
+            reason: "overwrite_intent_required",
+            fileChangePreview: preview
           });
-        } else {
-          const ensureResult = await ensureSafeParentDirectories(path.path, canonicalRoot);
-          if (ensureResult !== undefined) {
-            return ensureResult;
-          }
-          await writeFile(path.path, input.content, "utf8");
         }
 
-        const bytes = Buffer.byteLength(input.content);
+        if (overwritesExisting && shrinkAssessment.suspicious && input.allowShrink !== true) {
+          return errorResult(`Suspicious file.write overwrite blocked for ${relativePath}: new content is much smaller than the existing file. Use file.patch for targeted edits, or set allowShrink=true only when this shrink is intentional.`, {
+            path: relativePath,
+            oldBytes,
+            newBytes: bytes,
+            byteDelta: bytes - oldBytes,
+            oldLines: shrinkAssessment.oldLines,
+            newLines: shrinkAssessment.newLines,
+            shrinkRatio: shrinkAssessment.ratio,
+            changed,
+            existedBefore: true,
+            overwriteRequired: true,
+            suspiciousShrink: true,
+            reason: "suspicious_shrink_overwrite",
+            fileChangePreview: preview
+          });
+        }
+
+        if (changed) {
+          if (fsAdapter?.writeTextFile !== undefined) {
+            await fsAdapter.writeTextFile({
+              path: path.path,
+              content: input.content
+            });
+          } else {
+            const ensureResult = await ensureSafeParentDirectories(path.path, canonicalRoot);
+            if (ensureResult !== undefined) {
+              return ensureResult;
+            }
+            await writeFile(path.path, input.content, "utf8");
+          }
+        }
+
         const result: ToolResult = {
           ok: true,
-          content: `Wrote ${relativePath} (${bytes} bytes).`,
+          content: changed
+            ? `Wrote ${relativePath} (${bytes} bytes).`
+            : `No changes to ${relativePath}; content is already up to date (${bytes} bytes).`,
           metadata: {
             path: relativePath,
             bytes,
-            fileChangePreview: buildFileWriteChangePreview({
-              path: relativePath,
-              before: existing,
-              after: input.content,
-              bytes
-            })
+            oldBytes,
+            newBytes: bytes,
+            byteDelta: bytes - oldBytes,
+            changed,
+            existedBefore: existing !== undefined,
+            overwrite: overwritesExisting,
+            suspiciousShrink: shrinkAssessment.suspicious,
+            fileChangePreview: preview
           }
         };
         recordFileStateOperation(options, {
@@ -1514,6 +1575,38 @@ async function readExistingWorkspaceText(
     }
     throw error;
   }
+}
+
+function assessFileWriteShrink(existing: string | undefined, next: string): {
+  suspicious: boolean;
+  oldLines: number;
+  newLines: number;
+  ratio: number;
+} {
+  if (existing === undefined) {
+    return {
+      suspicious: false,
+      oldLines: 0,
+      newLines: splitPreviewLines(next).length,
+      ratio: 1
+    };
+  }
+
+  const oldBytes = Buffer.byteLength(existing);
+  const newBytes = Buffer.byteLength(next);
+  const oldLines = splitPreviewLines(existing).length;
+  const newLines = splitPreviewLines(next).length;
+  const ratio = oldBytes === 0 ? 1 : newBytes / oldBytes;
+  const lineRatio = oldLines === 0 ? 1 : newLines / oldLines;
+  const suspicious = oldBytes >= FILE_WRITE_SHRINK_GUARD_MIN_OLD_BYTES &&
+    (ratio <= FILE_WRITE_SHRINK_GUARD_MAX_RATIO || lineRatio <= FILE_WRITE_SHRINK_GUARD_MAX_RATIO);
+
+  return {
+    suspicious,
+    oldLines,
+    newLines,
+    ratio: Number(ratio.toFixed(4))
+  };
 }
 
 function buildFileWriteChangePreview(input: {
