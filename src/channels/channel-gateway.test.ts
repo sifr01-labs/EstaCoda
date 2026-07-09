@@ -587,6 +587,57 @@ describe("ChannelGateway Telegram streaming", () => {
     expect(adapter.records.filter((record) => record.kind === "text")).toHaveLength(0);
   });
 
+  it("stream final delivery suppresses normal sendText only for exact delivered text", async () => {
+    const { adapter, gateway } = createStreamingGatewayHarness({
+      handle: createStreamingHandleSpy({
+        finishResult: {
+          delivered: true,
+          fallbackRequired: false,
+          deliveredText: "partial answer"
+        }
+      })
+    });
+
+    await gateway.receive(makeMessage("hello"));
+
+    expect(adapter.records.filter((record) => record.kind === "text").map((record) => record.text)).toEqual(["final answer"]);
+  });
+
+  it("stream final delivery falls back when deliveredText is missing", async () => {
+    const { adapter, gateway } = createStreamingGatewayHarness({
+      handle: createStreamingHandleSpy({
+        finishResult: {
+          delivered: true,
+          fallbackRequired: false
+        }
+      })
+    });
+
+    await gateway.receive(makeMessage("hello"));
+
+    expect(adapter.records.filter((record) => record.kind === "text").map((record) => record.text)).toEqual(["final answer"]);
+  });
+
+  it("stream final delivery falls back for empty final text", async () => {
+    const { adapter, gateway } = createStreamingGatewayHarness({
+      runtimeResponse: runtimeResponse({
+        text: "",
+        securityDecision: "allow"
+      }),
+      handle: createStreamingHandleSpy({
+        finishResult: {
+          delivered: true,
+          fallbackRequired: false,
+          deliveredText: ""
+        }
+      })
+    });
+
+    await gateway.receive(makeMessage("hello"));
+
+    expect(adapter.records.filter((record) => record.kind === "text").map((record) => record.text)).toEqual([""]);
+  });
+
   it("tool turn with live final continuation finalizes stream and skips duplicate final text", async () => {
     const { adapter, handle, gateway } = createStreamingGatewayHarness({
       actions: [

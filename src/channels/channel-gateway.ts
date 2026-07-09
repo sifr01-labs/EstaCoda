@@ -1395,6 +1395,8 @@ export class ChannelGateway {
       const streamResult = await this.#finishStreamingText(streamHandle, response.text);
       const streamingDeliveredFinalText = streamResult?.delivered === true &&
         streamResult.fallbackRequired === false &&
+        streamResult.deliveredText === response.text &&
+        response.text.trim().length > 0 &&
         !approvalBoundary &&
         !artifactBoundary;
 
