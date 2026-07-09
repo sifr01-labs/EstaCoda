@@ -1,9 +1,9 @@
-import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { FileStateTracker } from "../delegation/file-state-tracker.js";
-import { createWorkspaceTools } from "./workspace-tools.js";
+import { createWorkspaceTools, type WorkspaceFsAdapter } from "./workspace-tools.js";
 
 let tempDir: string | undefined;
 
@@ -452,6 +452,74 @@ describe("workspace file change preview metadata", () => {
     expect(result?.ok).toBe(false);
     await expect(readFile(join(root, "added.md"), "utf8")).rejects.toBeDefined();
     await expect(readFile(join(root, "a.md"), "utf8")).resolves.toBe("alpha\n");
+  });
+
+  it("rolls back applied V4A operations when a later write fails", async () => {
+    const root = await makeTempDir();
+    const canonicalRoot = await realpath(root);
+    const addedPath = join(canonicalRoot, "added.md");
+    const oldPath = join(canonicalRoot, "old.md");
+    const keepPath = join(canonicalRoot, "keep.md");
+    await writeFile(oldPath, "remove me\n", "utf8");
+    await writeFile(keepPath, "keep\n", "utf8");
+    const files = new Map<string, string>([
+      [oldPath, "remove me\n"],
+      [keepPath, "keep\n"]
+    ]);
+    const missing = (path: string) => Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), { code: "ENOENT" });
+    const fsAdapter: WorkspaceFsAdapter = {
+      readTextFile: async ({ path }) => {
+        const content = files.get(path);
+        if (content === undefined) {
+          throw missing(path);
+        }
+        return content;
+      },
+      writeTextFile: async ({ path, content }) => {
+        if (path === keepPath) {
+          throw new Error("simulated write failure");
+        }
+        files.set(path, content);
+      },
+      deleteTextFile: async ({ path }) => {
+        if (!files.delete(path)) {
+          throw missing(path);
+        }
+      }
+    };
+    const tools = createWorkspaceTools({ workspaceRoot: root, fsAdapter });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const result = await patch?.run({
+      mode: "patch",
+      patch: [
+        "*** Begin Patch",
+        "*** Add File: added.md",
+        "+created",
+        "*** Delete File: old.md",
+        "*** Update File: keep.md",
+        "@@ keep @@",
+        "-keep",
+        "+changed",
+        "*** End Patch"
+      ].join("\n")
+    });
+
+    expect(result?.ok).toBe(false);
+    expect(result?.content).toContain("Rolled back previously applied changes");
+    expect(result?.metadata).toMatchObject({
+      path: "keep.md",
+      reason: "patch_apply_failed",
+      appliedPaths: ["added.md", "old.md"],
+      rollback: {
+        attempted: 2,
+        ok: true,
+        errors: []
+      }
+    });
+    expect(files.has(addedPath)).toBe(false);
+    expect(files.get(oldPath)).toBe("remove me\n");
+    expect(files.get(keepPath)).toBe("keep\n");
   });
 
   it("supports append, prepend, and insert modes without whole-file overwrite", async () => {

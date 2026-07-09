@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { lstat, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { platform } from "node:os";
 import type { EnvironmentType } from "../contracts/security.js";
@@ -127,6 +128,12 @@ type PatchFailureTracker = {
   record(result: ToolResult, path: string | undefined): ToolResult;
   clear(path: string): void;
   clearMany(paths: string[]): void;
+};
+
+type PatchRollbackStep = {
+  path: string;
+  operation: "delete_added_file" | "restore_updated_file" | "restore_deleted_file";
+  run: () => Promise<void>;
 };
 
 export function createWorkspaceTools(options: WorkspaceToolOptions): readonly RegisteredTool[] {
@@ -323,7 +330,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
     },
     {
       name: "file.patch",
-      description: "Patch workspace files. Replace and insert modes find anchors with exact matching first, then deterministic fuzzy fallbacks for minor whitespace, indentation, escaping, and Unicode differences. Append/prepend modes add content without rewriting whole files. Patch mode applies V4A-style multi-file patches atomically after validating every operation.",
+      description: "Patch workspace files. Replace and insert modes find anchors with exact matching first, then deterministic fuzzy fallbacks for minor whitespace, indentation, escaping, and Unicode differences. Append/prepend modes add content without rewriting whole files. Patch mode validates every operation before writing and rolls back already-applied changes if a later write/delete fails.",
       inputSchema: {
         type: "object",
         properties: {
@@ -736,21 +743,14 @@ async function applyWorkspacePatchMode(input: {
     }
   }
 
-  for (const file of prepared.files) {
-    if (file.operation === "delete") {
-      if (input.fsAdapter?.deleteTextFile !== undefined) {
-        await input.fsAdapter.deleteTextFile({ path: file.absolutePath });
-      } else {
-        await rm(file.absolutePath);
-      }
-    } else if (input.fsAdapter?.writeTextFile !== undefined) {
-      await input.fsAdapter.writeTextFile({
-        path: file.absolutePath,
-        content: file.after
-      });
-    } else {
-      await writeFile(file.absolutePath, file.after, "utf8");
-    }
+  const transactionSupport = validatePatchTransactionSupport(prepared.files, input.fsAdapter);
+  if (transactionSupport !== undefined) {
+    return transactionSupport;
+  }
+
+  const applied = await applyPreparedWorkspacePatchFiles(prepared.files, input.fsAdapter);
+  if (applied !== undefined) {
+    return applied;
   }
 
   const fileCount = prepared.files.length;
@@ -796,6 +796,137 @@ async function applyWorkspacePatchMode(input: {
   }
 
   return result;
+}
+
+function validatePatchTransactionSupport(
+  files: PreparedWorkspacePatchFile[],
+  fsAdapter: WorkspaceFsAdapter | undefined
+): ToolResult | undefined {
+  if (fsAdapter?.writeTextFile !== undefined && fsAdapter.deleteTextFile === undefined && files.some((file) => file.operation === "add")) {
+    return errorResult("workspace file adapter does not support transactional rollback for added files", {
+      reason: "patch_transaction_unsupported",
+      operation: "add"
+    });
+  }
+  if (fsAdapter?.deleteTextFile !== undefined && fsAdapter.writeTextFile === undefined && files.some((file) => file.operation === "delete")) {
+    return errorResult("workspace file adapter does not support transactional rollback for deleted files", {
+      reason: "patch_transaction_unsupported",
+      operation: "delete"
+    });
+  }
+  return undefined;
+}
+
+async function applyPreparedWorkspacePatchFiles(
+  files: PreparedWorkspacePatchFile[],
+  fsAdapter: WorkspaceFsAdapter | undefined
+): Promise<ToolResult | undefined> {
+  const rollbackStack: PatchRollbackStep[] = [];
+  const appliedPaths: string[] = [];
+
+  for (const file of files) {
+    try {
+      if (file.operation === "delete") {
+        await deletePreparedWorkspacePatchFile(file, fsAdapter);
+        rollbackStack.push({
+          path: file.path,
+          operation: "restore_deleted_file",
+          run: async () => writePreparedWorkspacePatchFile(file, file.before, fsAdapter)
+        });
+      } else {
+        await writePreparedWorkspacePatchFile(file, file.after, fsAdapter);
+        rollbackStack.push(file.operation === "add"
+          ? {
+              path: file.path,
+              operation: "delete_added_file",
+              run: async () => deletePreparedWorkspacePatchFile(file, fsAdapter)
+            }
+          : {
+              path: file.path,
+              operation: "restore_updated_file",
+              run: async () => writePreparedWorkspacePatchFile(file, file.before, fsAdapter)
+            });
+      }
+      appliedPaths.push(file.path);
+    } catch (error) {
+      const rollbackErrors: Array<{ path: string; operation: PatchRollbackStep["operation"]; error: string }> = [];
+      for (const step of [...rollbackStack].reverse()) {
+        try {
+          await step.run();
+        } catch (rollbackError) {
+          rollbackErrors.push({
+            path: step.path,
+            operation: step.operation,
+            error: formatPatchApplyError(rollbackError)
+          });
+        }
+      }
+
+      const rollbackOk = rollbackErrors.length === 0;
+      return errorResult(
+        [
+          `Patch apply failed while ${file.operation === "delete" ? "deleting" : "writing"} ${file.path}: ${formatPatchApplyError(error)}.`,
+          rollbackOk
+            ? "Rolled back previously applied changes."
+            : "Rollback failed for some previously applied changes; inspect the files before retrying."
+        ].join(" "),
+        {
+          path: file.path,
+          reason: "patch_apply_failed",
+          operation: file.operation,
+          appliedPaths,
+          rollback: {
+            attempted: rollbackStack.length,
+            ok: rollbackOk,
+            errors: rollbackErrors
+          }
+        }
+      );
+    }
+  }
+
+  return undefined;
+}
+
+async function writePreparedWorkspacePatchFile(
+  file: PreparedWorkspacePatchFile,
+  content: string,
+  fsAdapter: WorkspaceFsAdapter | undefined
+): Promise<void> {
+  if (fsAdapter?.writeTextFile !== undefined) {
+    await fsAdapter.writeTextFile({ path: file.absolutePath, content });
+    return;
+  }
+  await writeTextFileAtomically(file.absolutePath, content);
+}
+
+async function deletePreparedWorkspacePatchFile(
+  file: PreparedWorkspacePatchFile,
+  fsAdapter: WorkspaceFsAdapter | undefined
+): Promise<void> {
+  if (fsAdapter?.deleteTextFile !== undefined) {
+    await fsAdapter.deleteTextFile({ path: file.absolutePath });
+    return;
+  }
+  await rm(file.absolutePath);
+}
+
+function formatPatchApplyError(error: unknown): string {
+  return error instanceof Error && error.message.length > 0 ? error.message : String(error);
+}
+
+async function writeTextFileAtomically(path: string, content: string): Promise<void> {
+  const tempPath = join(
+    dirname(path),
+    `.${basename(path)}.estacoda-patch-${process.pid}-${randomUUID()}.tmp`
+  );
+  try {
+    await writeFile(tempPath, content, { encoding: "utf8", flag: "wx" });
+    await rename(tempPath, path);
+  } catch (error) {
+    await rm(tempPath, { force: true }).catch(() => undefined);
+    throw error;
+  }
 }
 
 async function applyWorkspacePatchOperationMode(input: {

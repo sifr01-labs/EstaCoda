@@ -73,7 +73,7 @@ Workspace file tools are scoped to the active workspace. User-provided paths are
 
 Append and prepend modes add content to an existing or new text file without replacing the whole file. Insert mode places content before or after a matched anchor.
 
-Patch mode accepts V4A-style `*** Begin Patch` / `*** Update File` / `*** Add File` / `*** Delete File` / `*** End Patch` content for multi-file changes. It validates every file and hunk before writing, so a failed hunk, missing delete target, existing add target, or JSON syntax failure leaves all targeted files unchanged.
+Patch mode accepts V4A-style `*** Begin Patch` / `*** Update File` / `*** Add File` / `*** Delete File` / `*** End Patch` content for multi-file changes. It validates every file and hunk before writing, so a failed hunk, missing delete target, existing add target, or JSON syntax failure leaves all targeted files unchanged. If a later filesystem write/delete fails after some files were already changed, `file.patch` rolls back those prior changes and reports rollback metadata.
 
 Patch failures are counted per target file within the active tool provider. After the third consecutive failure on the same file, the tool response tells the model to stop retrying and re-read the file before attempting another patch.
 
