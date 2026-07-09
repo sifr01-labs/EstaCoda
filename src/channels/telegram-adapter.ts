@@ -1167,6 +1167,8 @@ type TelegramStreamingTextSegment = {
   committedEscapedLength: number;
   committedMessageIds: number[];
   lastSentHtml?: string;
+  deliveredVisibleText: string;
+  responseVisibleTextRecorded: boolean;
   timer?: ReturnType<typeof setTimeout>;
   retryTimer?: ReturnType<typeof setTimeout>;
   sealed: boolean;
@@ -1196,6 +1198,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
   #messageCreatedTs: number | undefined;
   #floodStrikes = 0;
   readonly #previewMessageIds = new Set<number>();
+  #sealedVisiblePreviewText = "";
   readonly #errors: unknown[] = [];
 
   constructor(input: TelegramStreamingTextWorkerInput) {
@@ -1241,6 +1244,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
     }
 
     const segment = this.#segment;
+    const flushTailOnRetry = segment.retryTimer !== undefined;
     this.#clearSegmentTimers(segment);
     this.#segment = createStreamingTextSegment();
     this.#messageCreatedTs = undefined;
@@ -1252,6 +1256,8 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
     this.#runSafely(async () => {
       if (this.#useDraftStreaming) {
         await this.#materializeDraftSegment(segment);
+      } else if (flushTailOnRetry) {
+        await this.#flushSegmentTailOnEditFailure(segment);
       } else {
         await this.#sealSegment(segment);
       }
@@ -1290,10 +1296,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
     this.#clearSegmentTimers(segment);
     this.#finishPromise = this.#enqueue(async () => {
       if (this.#fallbackRequired) {
-        return {
-          delivered: false,
-          fallbackRequired: true
-        };
+        return this.#fallbackResult(finalText);
       }
 
       if (this.#useDraftStreaming) {
@@ -1301,10 +1304,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
       }
 
       if (segment.messageId === undefined) {
-        return {
-          delivered: false,
-          fallbackRequired: true
-        };
+        return this.#fallbackResult(finalText);
       }
 
       if (segment.messageId !== undefined && (this.#shouldSendFreshFinal() || this.#input.prefersFreshFinal?.(finalText) === true)) {
@@ -1319,7 +1319,8 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
         if (firstChunk === undefined) {
           return {
             delivered: false,
-            fallbackRequired: true
+            fallbackRequired: true,
+            ...this.#fallbackTextPayload(finalText)
           };
         }
 
@@ -1338,10 +1339,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
         };
       } catch (error) {
         this.#captureError(error);
-        return {
-          delivered: false,
-          fallbackRequired: true
-        };
+        return this.#fallbackResult(finalText);
       }
     });
     return this.#finishPromise;
@@ -1403,6 +1401,43 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
         await this.#editSegmentWithoutCursor(segment);
       }
       segment.sealed = true;
+      this.#recordSealedSegmentVisibleText(segment);
+    } catch (error) {
+      this.#captureError(error);
+      this.#fallbackRequired = true;
+    }
+  }
+
+  async #flushSegmentTailOnEditFailure(segment: TelegramStreamingTextSegment): Promise<void> {
+    if (segment.sealed) {
+      return;
+    }
+
+    const snapshot = segment.sanitizer.snapshot();
+    if (snapshot.visibleCharCount === 0) {
+      segment.sealed = true;
+      return;
+    }
+
+    const unsentVisibleText = snapshot.visibleText.slice(segment.deliveredVisibleText.length);
+    if (unsentVisibleText.length === 0) {
+      segment.sealed = true;
+      this.#recordSealedSegmentVisibleText(segment);
+      return;
+    }
+
+    try {
+      const escapedTail = escapeTelegramPartialHtml(unsentVisibleText);
+      const chunks = splitStreamingTelegramText(escapedTail, TELEGRAM_MAX_TEXT_UTF16);
+
+      for (const chunk of chunks) {
+        const message = await this.#input.sendMessage(chunk, { format: "html" });
+        this.#recordPreviewMessage(message.message_id);
+      }
+
+      segment.deliveredVisibleText = snapshot.visibleText;
+      segment.sealed = true;
+      this.#recordSealedSegmentVisibleText(segment);
     } catch (error) {
       this.#captureError(error);
       this.#fallbackRequired = true;
@@ -1475,6 +1510,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
       this.#recordPreviewMessage(message.message_id);
       this.#recordMessageCreated(segment);
       segment.lastSentHtml = rendered;
+      segment.deliveredVisibleText = snapshot.visibleText;
       this.#floodStrikes = 0;
       return;
     }
@@ -1495,6 +1531,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
       return;
     }
     segment.lastSentHtml = rendered;
+    segment.deliveredVisibleText = snapshot.visibleText;
     this.#floodStrikes = 0;
   }
 
@@ -1599,6 +1636,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
     }
 
     segment.lastSentHtml = renderedFinalChunk;
+    segment.deliveredVisibleText = snapshot.visibleText;
     this.#floodStrikes = 0;
   }
 
@@ -1619,10 +1657,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
       const chunks = formatted.chunks.flatMap((chunk) => splitStreamingTelegramText(chunk, TELEGRAM_MAX_TEXT_UTF16));
 
       if (chunks.length === 0) {
-        return {
-          delivered: false,
-          fallbackRequired: true
-        };
+        return this.#fallbackResult(finalText);
       }
 
       for (const chunk of chunks) {
@@ -1638,10 +1673,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
       };
     } catch (error) {
       this.#captureError(error);
-      return {
-        delivered: false,
-        fallbackRequired: true
-      };
+      return this.#fallbackResult(finalText);
     }
   }
 
@@ -1651,10 +1683,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
       const chunks = formatted.chunks.flatMap((chunk) => splitStreamingTelegramText(chunk, TELEGRAM_MAX_TEXT_UTF16));
 
       if (chunks.length === 0) {
-        return {
-          delivered: false,
-          fallbackRequired: true
-        };
+        return this.#fallbackResult(finalText);
       }
 
       for (const chunk of chunks) {
@@ -1670,10 +1699,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
       };
     } catch (error) {
       this.#captureError(error);
-      return {
-        delivered: false,
-        fallbackRequired: true
-      };
+      return this.#fallbackResult(finalText);
     }
   }
 
@@ -1695,7 +1721,9 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
         const message = await this.#input.sendMessage(chunk, { format: formatted.format });
         this.#recordPreviewMessage(message.message_id);
       }
+      segment.deliveredVisibleText = snapshot.visibleText;
       segment.sealed = true;
+      this.#recordSealedSegmentVisibleText(segment);
     } catch (error) {
       this.#captureError(error);
       this.#fallbackRequired = true;
@@ -1719,6 +1747,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
 
     await this.#input.editMessageText(segment.messageId, rendered, { format: "html" });
     segment.lastSentHtml = rendered;
+    segment.deliveredVisibleText = segment.sanitizer.snapshot().visibleText;
   }
 
   async #cleanupFailedAttempt(segment: TelegramStreamingTextSegment): Promise<void> {
@@ -1747,6 +1776,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
         this.#previewMessageIds.delete(messageId);
       }
     }
+    segment.deliveredVisibleText = "";
   }
 
   async #deleteResponsePreviewMessages(): Promise<void> {
@@ -1772,6 +1802,37 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
 
   #recordPreviewMessage(messageId: number): void {
     this.#previewMessageIds.add(messageId);
+  }
+
+  #recordSealedSegmentVisibleText(segment: TelegramStreamingTextSegment): void {
+    if (segment.responseVisibleTextRecorded) {
+      return;
+    }
+
+    this.#sealedVisiblePreviewText += segment.deliveredVisibleText;
+    segment.responseVisibleTextRecorded = true;
+  }
+
+  #responseVisiblePrefix(): string {
+    return `${this.#sealedVisiblePreviewText}${this.#segment.deliveredVisibleText}`;
+  }
+
+  #fallbackTextPayload(finalText: string): { fallbackText?: string } {
+    const visiblePrefix = this.#responseVisiblePrefix();
+    if (visiblePrefix.length === 0 || !finalText.startsWith(visiblePrefix)) {
+      return {};
+    }
+
+    const continuation = finalText.slice(visiblePrefix.length);
+    return continuation.length === 0 ? {} : { fallbackText: continuation };
+  }
+
+  #fallbackResult(finalText: string): ChannelStreamingTextResult {
+    return {
+      delivered: false,
+      fallbackRequired: true,
+      ...this.#fallbackTextPayload(finalText)
+    };
   }
 
   #recordMessageCreated(segment: TelegramStreamingTextSegment): void {
@@ -1906,6 +1967,8 @@ function createStreamingTextSegment(): TelegramStreamingTextSegment {
     sanitizer: createTelegramStreamTextSanitizer(),
     committedEscapedLength: 0,
     committedMessageIds: [],
+    deliveredVisibleText: "",
+    responseVisibleTextRecorded: false,
     sealed: false,
     cleanupStarted: false
   };

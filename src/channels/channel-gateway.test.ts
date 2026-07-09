@@ -685,6 +685,22 @@ describe("ChannelGateway Telegram streaming", () => {
     expect(adapter.records.filter((record) => record.kind === "text").map((record) => record.text)).toEqual(["final answer"]);
   });
 
+  it("stream finish fallbackRequired result can deliver only a fallback continuation", async () => {
+    const { adapter, gateway } = createStreamingGatewayHarness({
+      handle: createStreamingHandleSpy({
+        finishResult: {
+          delivered: false,
+          fallbackRequired: true,
+          fallbackText: " answer"
+        }
+      })
+    });
+
+    await gateway.receive(makeMessage("hello"));
+
+    expect(adapter.records.filter((record) => record.kind === "text").map((record) => record.text)).toEqual([" answer"]);
+  });
+
   it("stream finish failure falls back through DeliveryRouter", async () => {
     const { deliveryRouter, routedTexts } = createRecordingDeliveryRouter();
     const { gateway } = createStreamingGatewayHarness({

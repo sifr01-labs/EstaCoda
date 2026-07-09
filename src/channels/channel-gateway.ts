@@ -1404,7 +1404,7 @@ export class ChannelGateway {
         await this.#deliverText(
           adapter,
           normalizedSessionKey,
-          response.text,
+          streamResult?.fallbackText ?? response.text,
           message.channel === "whatsapp" ? { replyTo: message.id } : undefined
         );
       }

@@ -1658,6 +1658,63 @@ describe("TelegramAdapter", () => {
     expect(result.fallbackRequired).toBe(true);
   });
 
+  it("delivery.startStreamingText degraded fallback returns only the unseen continuation for visible prefixes", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness({
+      failResponses: {
+        editMessageText: {
+          1: { status: 429, errorCode: 429, description: "retry after 5", retryAfterSeconds: 5 }
+        }
+      }
+    });
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      minInitialChars: 1,
+      editIntervalMs: 10,
+      maxFloodStrikes: 0,
+      cursor: "|"
+    });
+
+    handle.append("draft");
+    await flushTelegramStreamingTimers();
+    handle.append(" pending");
+    await vi.advanceTimersByTimeAsync(10);
+    const result = await handle.finish("draft pending final");
+
+    expect(result).toEqual({
+      delivered: false,
+      fallbackRequired: true,
+      fallbackText: " pending final"
+    });
+    expect(callsFor(calls, "sendMessage").map((call) => call.body.text)).toEqual(["draft|"]);
+  });
+
+  it("delivery.startStreamingText degraded fallback keeps full fallback when visible text is not a prefix", async () => {
+    vi.useFakeTimers();
+    const { adapter } = createTelegramStreamingHarness({
+      failResponses: {
+        editMessageText: {
+          1: { status: 429, errorCode: 429, description: "retry after 5", retryAfterSeconds: 5 }
+        }
+      }
+    });
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      minInitialChars: 1,
+      editIntervalMs: 10,
+      maxFloodStrikes: 0
+    });
+
+    handle.append("stale");
+    await flushTelegramStreamingTimers();
+    handle.append(" preview");
+    await vi.advanceTimersByTimeAsync(10);
+    const result = await handle.finish("final answer");
+
+    expect(result).toEqual({
+      delivered: false,
+      fallbackRequired: true
+    });
+  });
+
   it("delivery.startStreamingText failed provider attempt with fallback resets segment and keeps stream alive", async () => {
     vi.useFakeTimers();
     const { adapter, calls } = createTelegramStreamingHarness();
@@ -2279,7 +2336,7 @@ describe("TelegramAdapter", () => {
     await vi.advanceTimersByTimeAsync(5_000);
 
     expect(callsFor(calls, "editMessageText")).toHaveLength(editsAfterSeal);
-    expect(callsFor(calls, "sendMessage").map((call) => call.body.text)).toEqual(["first|", "second|"]);
+    expect(callsFor(calls, "sendMessage").map((call) => call.body.text)).toEqual(["first|", " pending", "second|"]);
   });
 
   it("turns callback query data into ChannelMessage text", () => {

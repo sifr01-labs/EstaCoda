@@ -112,6 +112,7 @@ export type ChannelStreamingTextResult = {
   delivered: boolean;
   fallbackRequired: boolean;
   deliveredText?: string;
+  fallbackText?: string;
 };
 
 export type ChannelStreamingTextHandle = {
