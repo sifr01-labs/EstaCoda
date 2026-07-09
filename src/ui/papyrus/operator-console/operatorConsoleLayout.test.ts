@@ -296,7 +296,7 @@ describe("Papyrus operator console layout", () => {
     expect(region(layout, "attachments")).toMatchObject({ height: 0, visible: false });
   });
 
-  it("allocates live streaming height responsively up to thirty-two rows", () => {
+  it("allocates live streaming into the remaining space after required prompt and status rows", () => {
     const state = createState({
       streaming: streamingState({
         segments: [],
@@ -304,8 +304,8 @@ describe("Papyrus operator console layout", () => {
       }),
     });
 
-    expect(region(createOperatorConsoleLayout(state, { width: 80, height: 24, isTty: true }), "streaming")?.height).toBe(12);
-    expect(region(createOperatorConsoleLayout(state, { width: 80, height: 80, isTty: true }), "streaming")?.height).toBe(32);
+    expect(region(createOperatorConsoleLayout(state, { width: 80, height: 24, isTty: true }), "streaming")?.height).toBe(20);
+    expect(region(createOperatorConsoleLayout(state, { width: 80, height: 80, isTty: true }), "streaming")?.height).toBe(76);
   });
 
   it("keeps region bounds inside the terminal rectangle", () => {

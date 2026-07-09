@@ -44,7 +44,7 @@ describe("Papyrus operator console inline tool trail surface", () => {
     expect(succeeded).toContain("1s");
     expect(failed).toContain("✗ terminal.run");
     expect(failed).toContain("denied");
-    expect(failed).toContain("0s");
+    expect(failed).toContain("0ms");
   });
 
   it("colors status symbols with the shared active-work palette when styled", () => {

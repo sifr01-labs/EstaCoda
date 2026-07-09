@@ -366,9 +366,9 @@ function formatActiveWorkTitle(
 
 export function formatActiveWorkDuration(durationMs: number): string {
   const safeMs = Math.max(0, Number.isFinite(durationMs) ? durationMs : 0);
+  if (safeMs < 100) return `${Math.floor(safeMs)}ms`;
   if (safeMs < 60_000) {
     const roundedTenths = Math.round(safeMs / 100);
-    if (roundedTenths === 0) return "0s";
     if (roundedTenths < 100 && roundedTenths % 10 !== 0) {
       return `${(roundedTenths / 10).toFixed(1)}s`;
     }

@@ -209,6 +209,7 @@ describe("Papyrus operator console active work surface", () => {
     const output = renderActiveWorkSurface(createState({
       items: [
         item("zero", "succeeded", { durationMs: 0 }),
+        item("under-hundred", "succeeded", { durationMs: 37 }),
         item("subsecond", "succeeded", { durationMs: 100 }),
         item("one-second", "succeeded", { durationMs: 1_000 }),
         item("one-half", "succeeded", { durationMs: 1_500 }),
@@ -216,9 +217,10 @@ describe("Papyrus operator console active work surface", () => {
         item("minute", "succeeded", { durationMs: 81_000 }),
         item("long", "succeeded", { durationMs: 3_936_000 }),
       ],
-    }), { width: 96, height: 9 }).join("\n");
+    }), { width: 96, height: 10 }).join("\n");
 
-    expect(output).toContain("0s");
+    expect(output).toContain("0ms");
+    expect(output).toContain("37ms");
     expect(output).toContain("0.1s");
     expect(output).toContain("1s");
     expect(output).toContain("1.5s");
