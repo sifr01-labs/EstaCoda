@@ -113,6 +113,7 @@ type ResolvedWhatsAppSetupCopy = {
   allowlistSelected(allowedSenders: string): string;
   allowlistEmpty: string;
   pairingInstructions(mode: WhatsAppChannelMode): string;
+  pairingStarting: string;
   pairingBlock(authDir: string): string;
   pairingTimeout: string;
   pairingFailed(message: string): string;
@@ -207,6 +208,8 @@ export async function runWhatsAppSetupFlow(options: WhatsAppSetupFlowOptions): P
   say("");
   say(copy.pairingInstructions(mode));
   say("");
+  say(copy.pairingStarting);
+  say("");
   say(copy.pairingBlock(authDir));
   flushLinesToOutput();
   const qrOutput: string[] = [];
@@ -300,6 +303,7 @@ function setupFlowCopy(locale: UiLanguage): ResolvedWhatsAppSetupCopy {
     pairingInstructions: (mode) => token(mode === "bot"
       ? "whatsappWizard.pairing.instructionsDedicated"
       : "whatsappWizard.pairing.instructionsPersonal"),
+    pairingStarting: token("whatsappWizard.pairing.starting"),
     pairingBlock: (authDir) => format("whatsappWizard.pairing.block", { authDir }),
     pairingTimeout: token("whatsappWizard.pairing.timeout"),
     pairingFailed: (message) => format("whatsappWizard.pairing.failed", { message }),
@@ -344,10 +348,7 @@ async function askDependencyInstall(
       defaultIndex: 1,
       fallbackPrompt: copy.choicePrompt,
       surface: "promptCard",
-      columns: [
-        { key: "label", header: "Action" },
-        { key: "description", header: "Result" },
-      ],
+      columns: setupChoiceColumns(),
       showColumnHeaders: false,
     });
   }
@@ -380,10 +381,7 @@ async function askPairingRepair(
       defaultIndex: 1,
       fallbackPrompt: copy.choicePrompt,
       surface: "promptCard",
-      columns: [
-        { key: "label", header: "Action" },
-        { key: "description", header: "Result" },
-      ],
+      columns: setupChoiceColumns(),
       showColumnHeaders: false,
     });
   }
@@ -415,14 +413,21 @@ async function askMode(
       defaultIndex: 0,
       fallbackPrompt: copy.choicePrompt,
       surface: "promptCard",
-      columns: [
-        { key: "label", header: "Mode" },
-        { key: "description", header: "Use case" },
-      ],
+      columns: setupChoiceColumns(),
       showColumnHeaders: false,
     });
   }
   return ask(prompt, copy.modeBlock);
+}
+
+function setupChoiceColumns(): readonly [
+  { readonly key: "name"; readonly header: "Option" },
+  { readonly key: "description"; readonly header: "Description" },
+] {
+  return [
+    { key: "name", header: "Option" },
+    { key: "description", header: "Description" },
+  ];
 }
 
 function finish(

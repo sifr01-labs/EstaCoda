@@ -318,16 +318,32 @@ async function readSecretWithSetupConsole(
     resolve(value);
   };
 
+  const interrupt = (reject: (error: Error) => void) => {
+    if (settled) return;
+    settled = true;
+    restoreTerminal();
+    controller.clear();
+    options.output.write("\n");
+    reject(new SetupConsoleExitError());
+  };
+
   const onData = (chunk: string | Buffer | Uint8Array) => {
     keypressDispatcher.handle(chunk);
   };
 
   const pendingKeypresses: ParsedKeypress[] = [];
   let resolveSecret: ((value: string) => void) | undefined;
+  let rejectSecret: ((error: Error) => void) | undefined;
 
   const drainKeypresses = () => {
     if (resolveSecret === undefined || settled) return;
     for (const keypress of pendingKeypresses.splice(0)) {
+      if (keypress.type === "key" && keypress.ctrl === true && keypress.key === "c") {
+        if (rejectSecret !== undefined) {
+          interrupt(rejectSecret);
+        }
+        return;
+      }
       const result = secret.apply(keypress);
       render();
       if (result.intent?.type === "submit") {
@@ -348,8 +364,9 @@ async function readSecretWithSetupConsole(
     },
   });
 
-  return await new Promise<string>((resolve) => {
+  return await new Promise<string>((resolve, reject) => {
     resolveSecret = resolve;
+    rejectSecret = reject;
     ttyInput.on("data", onData);
     ttyInput.setRawMode?.(true);
     ttyInput.resume?.();
@@ -415,16 +432,32 @@ async function readTextWithSetupConsole(
     resolve(value);
   };
 
+  const interrupt = (reject: (error: Error) => void) => {
+    if (settled) return;
+    settled = true;
+    restoreTerminal();
+    controller.clear();
+    options.output.write("\n");
+    reject(new SetupConsoleExitError());
+  };
+
   const onData = (chunk: string | Buffer | Uint8Array) => {
     keypressDispatcher.handle(chunk);
   };
 
   const pendingKeypresses: ParsedKeypress[] = [];
   let resolveText: ((value: string) => void) | undefined;
+  let rejectText: ((error: Error) => void) | undefined;
 
   const drainKeypresses = () => {
     if (resolveText === undefined || settled) return;
     for (const keypress of pendingKeypresses.splice(0)) {
+      if (keypress.type === "key" && keypress.ctrl === true && keypress.key === "c") {
+        if (rejectText !== undefined) {
+          interrupt(rejectText);
+        }
+        return;
+      }
       const previousText = state.text;
       const result = applyKeypress(state, keypress);
       state = result.state;
@@ -450,8 +483,9 @@ async function readTextWithSetupConsole(
     },
   });
 
-  return await new Promise<string>((resolve) => {
+  return await new Promise<string>((resolve, reject) => {
     resolveText = resolve;
+    rejectText = reject;
     ttyInput.on("data", onData);
     ttyInput.setRawMode?.(true);
     ttyInput.resume?.();
@@ -604,7 +638,9 @@ function panelDescription(
 }
 
 function normalizePromptTitle(title: string | undefined): string {
-  return normalizePromptDescription(title).replace(/\s+/gu, " ");
+  return normalizePromptDescription(title)
+    .replace(/^(?:𓂀\s*)+/u, "")
+    .replace(/\s+/gu, " ");
 }
 
 function normalizePromptDescription(description: string | undefined): string {

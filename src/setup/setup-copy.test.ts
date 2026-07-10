@@ -595,6 +595,7 @@ const WHATSAPP_WIZARD_KEYS = [
   "whatsappWizard.allowlist.empty",
   "whatsappWizard.pairing.instructionsDedicated",
   "whatsappWizard.pairing.instructionsPersonal",
+  "whatsappWizard.pairing.starting",
   "whatsappWizard.pairing.block",
   "whatsappWizard.pairing.timeout",
   "whatsappWizard.pairing.failed",
@@ -1096,6 +1097,7 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "whatsappWizard.allowlist.selected")).toContain("Allowed senders");
     expect(rawSetupCopy("en", "whatsappWizard.pairing.instructionsDedicated")).toContain("using the dedicated number");
     expect(rawSetupCopy("en", "whatsappWizard.pairing.instructionsPersonal")).toContain("message yourself");
+    expect(rawSetupCopy("en", "whatsappWizard.pairing.starting")).toContain("QR code to appear");
     expect(rawSetupCopy("en", "whatsappWizard.success.linked")).toContain("linked");
     expect(rawSetupCopy("en", "whatsappWizard.success.sessionSaved")).toContain("Session saved");
     expect(rawSetupCopy("en", "whatsappWizard.success.restricted")).toContain("Incoming messages restricted to");
@@ -1111,6 +1113,7 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "whatsappWizard.dependencies.missingQuestion")).toContain(isolateLtr("npm ci"));
     expect(resolveSetupCopy("ar", "whatsappWizard.dependencies.missingQuestion")).toContain(isolateLtr("scripts/whatsapp-bridge/"));
     expect(resolveSetupCopy("ar", "whatsappWizard.pairing.instructionsPersonal")).toContain(isolateLtr("WhatsApp"));
+    expect(resolveSetupCopy("ar", "whatsappWizard.pairing.starting")).toContain(isolateLtr("QR"));
     expect(resolveSetupCopy("ar", "whatsappWizard.pairing.failed")).toContain(isolateLtr("QR"));
     expect(resolveSetupCopy("ar", "whatsappWizard.pairing.block")).toContain(isolateLtr("{authDir}"));
     expect(resolveSetupCopy("ar", "whatsappWizard.success.pairingPending")).toContain(isolateLtr("pairing-pending"));

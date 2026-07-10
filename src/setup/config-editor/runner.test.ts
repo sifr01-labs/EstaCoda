@@ -3884,7 +3884,7 @@ describe("runConfigEditor", () => {
     expect(seenQuestions).toContain("Telegram bot API token: ");
     expect(seenQuestions).toContain("Allowed Telegram user ID(s): ");
     expect(seenQuestions).toContain("Allowed Telegram group chat ID(s): ");
-    expect(seenInputTitles.filter((title) => title === "𓂀 Telegram Setup")).toHaveLength(3);
+    expect(seenInputTitles.filter((title) => title === "Telegram Setup")).toHaveLength(3);
     expect(seenDescriptions.join("\n")).toContain("Connect Telegram bot");
     expect(seenDescriptions.join("\n")).toContain("Open Telegram and search for the official @BotFather account.");
     expect(seenDescriptions.join("\n")).toContain("Authorize Telegram users");
@@ -4179,13 +4179,15 @@ describe("runConfigEditor", () => {
     await trustWorkspace(tempDir, workspaceRoot);
     const deps = whatsappDepsWithInstalledBridge({ pairDevice: successfulWhatsAppPairDevice("QR\n") });
     const output: string[] = [];
+    const prompt = fakePrompt({
+      values: ["whatsapp", "1", "971501234567"],
+    });
+    const selectInputs = captureSelectInputs(prompt);
 
     const result = await runConfigEditor({
       homeDir: tempDir,
       workspaceRoot,
-      prompt: fakePrompt({
-        values: ["whatsapp", "1", "971501234567"],
-      }),
+      prompt,
       defaultActionId: "configure-channels",
       whatsappSetupDependencies: deps,
       output: { write: (value) => output.push(value) },
@@ -4210,8 +4212,13 @@ describe("runConfigEditor", () => {
     expect(result.selectedActionId).toBe("configure-channels");
     expect(result.output).toContain("QR");
     expect(output.join("")).toContain("QR");
+    expect(output.join("")).toContain("Starting WhatsApp QR pairing");
     expect(result.output).toContain("✓ Allowed senders: 971501234567");
     expect(result.output).not.toContain("allowed users");
+    expect(selectInputs.find((input) => input.title === "WhatsApp channel mode")?.columns).toEqual([
+      { key: "name", header: "Option" },
+      { key: "description", header: "Description" },
+    ]);
     expect(deps.pairDevice).toHaveBeenCalledOnce();
     expect(config.channels?.whatsapp).toEqual(expect.objectContaining({
       enabled: true,

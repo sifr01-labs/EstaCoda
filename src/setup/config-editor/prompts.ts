@@ -1257,7 +1257,7 @@ export async function promptTelegramCapability(
 }
 
 function telegramSetupInputTitle(locale: SetupCopyLocale): string {
-  return locale === "ar" ? "𓂀 ضبط Telegram" : "𓂀 Telegram Setup";
+  return locale === "ar" ? "ضبط Telegram" : "Telegram Setup";
 }
 
 function telegramSetupInputDescription(locale: SetupCopyLocale, kind: TelegramSetupInputCardKind): string {

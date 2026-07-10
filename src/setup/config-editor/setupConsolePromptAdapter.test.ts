@@ -184,7 +184,8 @@ describe("withSetupConsolePrompt", () => {
     const text = stripAnsi(output.text());
 
     expect(result).toBe("123456:telegram-token");
-    expect(text).toContain("𓂀 Telegram Setup");
+    expect(text).toContain("Telegram Setup");
+    expect(text).not.toContain("𓂀 𓂀 Telegram Setup");
     expect(text).not.toContain("Secret Entry");
     expect(text).toContain("Connect Telegram bot");
     expect(text).toContain("Open Telegram and search for @BotFather.");
@@ -225,6 +226,25 @@ describe("withSetupConsolePrompt", () => {
 
     await expect(pending).resolves.toBe("");
     expect(stripAnsi(output.text())).not.toContain("cancel-secret");
+    expect(input.rawModes).toEqual([true, false]);
+  });
+
+  it("treats Ctrl+C in setup secret panels as setup-console exit", async () => {
+    const input = createInput();
+    const output = createOutput();
+    const prompt = createPrompt({ select: createSelect("base").select });
+    const wrapped = withSetupConsolePrompt(prompt, { input, output });
+
+    const pending = wrapped("Telegram bot API token: ", {
+      secret: true,
+      title: "Telegram Setup",
+      description: "Connect Telegram bot",
+    });
+    await Promise.resolve();
+    input.write("\x03");
+
+    await expect(pending).rejects.toBeInstanceOf(SetupConsoleExitError);
+    expect(output.text()).toContain("\x1b[?25h");
     expect(input.rawModes).toEqual([true, false]);
   });
 
@@ -311,10 +331,29 @@ describe("withSetupConsolePrompt", () => {
     const text = stripAnsi(output.text());
 
     expect(result).toBe("42");
-    expect(text).toContain("𓂀 Telegram Setup");
+    expect(text).toContain("Telegram Setup");
+    expect(text).not.toContain("𓂀 𓂀 Telegram Setup");
     expect(text).not.toContain("Text Input");
     expect(text).toContain("Authorize Telegram users");
     expect(text).toContain("Open Telegram and search for @userinfobot.");
+  });
+
+  it("treats Ctrl+C in setup text panels as setup-console exit", async () => {
+    const input = createInput();
+    const output = createOutput();
+    const prompt = createPrompt({ select: createSelect("base").select });
+    const wrapped = withSetupConsolePrompt(prompt, { input, output });
+
+    const pending = wrapped("Allowed Telegram user ID(s): ", {
+      title: "Telegram Setup",
+      description: "Authorize Telegram users",
+    });
+    await Promise.resolve();
+    input.write("\x03");
+
+    await expect(pending).rejects.toBeInstanceOf(SetupConsoleExitError);
+    expect(output.text()).toContain("\x1b[?25h");
+    expect(input.rawModes).toEqual([true, false]);
   });
 
   it("clears the previous setup card before redrawing visible text input", async () => {
