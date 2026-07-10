@@ -11,6 +11,13 @@ export type SteerSurfaceRenderOptions = {
   readonly height?: number;
 };
 
+export type SteerInputSurfaceMetrics = {
+  readonly logicalRows: number;
+  readonly visibleRows: number;
+  readonly cursorRow: number;
+  readonly cursorColumn: number;
+};
+
 export type SteerIntent =
   | { readonly type: "submit"; readonly text: string }
   | { readonly type: "cancelDraft" }
@@ -31,7 +38,7 @@ export function hasQueuedSteer(state: SteerState | undefined): boolean {
 }
 
 export function getSteerInputSurfaceDesiredHeight(state: SteerState): number {
-  const rows = getSteerDraftRows(state).length;
+  const rows = getSteerDraftLogicalRows(state).length;
   return Math.max(3, Math.min(8, rows + 2));
 }
 
@@ -52,13 +59,39 @@ export function renderSteerInputSurface(
 
   const contentWidth = Math.max(0, width - 4);
   const inputRows = Math.max(1, height - 2);
-  const rows = padRows(getSteerDraftRows(state), inputRows);
+  const rows = padRows(getSteerDraftLogicalRows(state).map((row) => row.content), inputRows);
 
   return [
     renderTopBorder(STEER_INPUT_TITLE, width),
     ...rows.map((row) => renderContentRow(row, contentWidth, width)),
     renderBottomBorder(width),
   ];
+}
+
+export function getSteerInputSurfaceMetrics(
+  state: SteerState,
+  options: SteerSurfaceRenderOptions
+): SteerInputSurfaceMetrics {
+  const width = normalizeDimension(options.width);
+  const height = normalizeDimension(options.height ?? getSteerInputSurfaceDesiredHeight(state));
+  const contentWidth = Math.max(0, width - 4);
+  const inputRows = height < 3 ? 1 : Math.max(1, height - 2);
+  const logicalRows = getSteerDraftLogicalRows(state);
+  const cursorOffset = clampInteger(state.cursorOffset, 0, state.draft.length);
+  const cursorLogicalRow = findSteerCursorRow(logicalRows, cursorOffset);
+  const visibleRow = Math.min(cursorLogicalRow, inputRows - 1);
+  const row = logicalRows[visibleRow] ?? staticSteerRow("");
+  const hiddenCursor = cursorLogicalRow !== visibleRow;
+  const contentColumn = hiddenCursor
+    ? contentWidth
+    : stringWidth(row.prefix) + stringWidth(row.text.slice(0, Math.max(0, cursorOffset - row.startOffset)));
+
+  return {
+    logicalRows: logicalRows.length,
+    visibleRows: Math.min(logicalRows.length, inputRows),
+    cursorRow: visibleRow,
+    cursorColumn: 2 + Math.min(contentWidth, Math.max(0, contentColumn)),
+  };
 }
 
 export function renderQueuedSteerSurface(
@@ -113,24 +146,65 @@ export function createSubmittedSteerTranscriptBlock(input: {
   };
 }
 
-function getSteerDraftRows(state: SteerState): readonly string[] {
-  const text = state.draft.length === 0 ? "" : state.draft;
-  const rows = text.split(/\r\n|\n|\r/u);
-  if (rows.length === 0) return [formatFirstSteerRow("")];
-  return rows.map((row, index) => index === 0 ? formatFirstSteerRow(row) : formatContinuationSteerRow(row));
-}
-
 function renderSteerInputFallbackLine(state: SteerState): string {
   const value = state.draft.replace(/\r\n|\n|\r/gu, " ");
   return `Steer: ${value.length === 0 ? ">" : value}`;
 }
 
-function formatFirstSteerRow(text: string): string {
-  return `› ${text}`;
+type SteerDraftLogicalRow = {
+  readonly content: string;
+  readonly text: string;
+  readonly prefix: string;
+  readonly startOffset: number;
+  readonly endOffset: number;
+};
+
+function getSteerDraftLogicalRows(state: SteerState): readonly SteerDraftLogicalRow[] {
+  const rows = splitSteerDraftLines(state.draft).map((line, index) => {
+    const prefix = index === 0 ? "› " : "  ";
+    return {
+      ...line,
+      prefix,
+      content: `${prefix}${line.text}`,
+    };
+  });
+  return rows.length === 0 ? [staticSteerRow("")] : rows;
 }
 
-function formatContinuationSteerRow(text: string): string {
-  return `  ${text}`;
+function splitSteerDraftLines(value: string): readonly Pick<SteerDraftLogicalRow, "text" | "startOffset" | "endOffset">[] {
+  const rows: Pick<SteerDraftLogicalRow, "text" | "startOffset" | "endOffset">[] = [];
+  const lineBreak = /\r\n|\n|\r/gu;
+  let startOffset = 0;
+  for (const match of value.matchAll(lineBreak)) {
+    const endOffset = match.index ?? startOffset;
+    rows.push({
+      text: value.slice(startOffset, endOffset),
+      startOffset,
+      endOffset,
+    });
+    startOffset = endOffset + match[0].length;
+  }
+  rows.push({
+    text: value.slice(startOffset),
+    startOffset,
+    endOffset: value.length,
+  });
+  return rows;
+}
+
+function staticSteerRow(text: string): SteerDraftLogicalRow {
+  return {
+    content: text,
+    text,
+    prefix: "",
+    startOffset: 0,
+    endOffset: 0,
+  };
+}
+
+function findSteerCursorRow(rows: readonly SteerDraftLogicalRow[], cursorOffset: number): number {
+  const index = rows.findIndex((row) => cursorOffset >= row.startOffset && cursorOffset <= row.endOffset);
+  return index < 0 ? Math.max(0, rows.length - 1) : index;
 }
 
 function padRows(rows: readonly string[], count: number): readonly string[] {
@@ -177,4 +251,9 @@ function truncateVisibleCells(value: string, maxCells: number): string {
 function normalizeDimension(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.floor(value));
+}
+
+function clampInteger(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, Math.floor(value)));
 }

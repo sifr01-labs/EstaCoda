@@ -5381,6 +5381,56 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(host.getState().transcript).toEqual([]);
   });
 
+  it("uses the TTY row count for live Operator Console streaming height", async () => {
+    const outputChunks: string[] = [];
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 96, height: 16, isTty: true },
+    });
+    const answerLines = Array.from({ length: 24 }, (_, index) => `live streaming line ${String(index + 1).padStart(2, "0")}`);
+    const answer = answerLines.join("\n");
+    let liveRenderAfterTool = "";
+    const runtime = {
+      ...createMockRuntime(),
+      handle: async ({ onDelta, onEvent }: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
+        onEvent?.({ kind: "agent-start", sessionId: "test-session", input: "hello" });
+        onDelta?.(answer);
+        onEvent?.({ kind: "tool-start", tool: "read_file", stepId: "tool-1" });
+        liveRenderAfterTool = stripAnsi(outputChunks.join(""));
+        onEvent?.({ kind: "tool-result", tool: "read_file", activityId: "tool-1", ok: true, chars: 10, sentChars: 10 });
+        onEvent?.({ kind: "agent-final", text: answer });
+        return mockResponse({ text: answer });
+      },
+    } as Runtime;
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 96,
+        rows: 40,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 96, supportsAnimation: false }),
+      operatorConsole: { enabled: true, runtimeHost: host },
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    expect(liveRenderAfterTool).toContain("live streaming line 01");
+    expect(liveRenderAfterTool).toContain("live streaming line 24");
+    expect(host.getState().terminal.height).toBe(40);
+  });
+
   it("renders final assistant output when Operator Console streaming is whitespace-only", async () => {
     const outputChunks: string[] = [];
     const host = createOperatorConsoleRuntimeHost({

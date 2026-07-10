@@ -18,6 +18,7 @@ import {
 } from "./operatorConsoleState.js";
 import { createOperatorConsoleLayout, type OperatorConsoleLayout } from "./operatorConsoleLayout.js";
 import { getPromptSurfaceMetrics } from "./promptSurface.js";
+import { getSteerInputSurfaceMetrics, isSteerInputActive } from "./steerSurface.js";
 import { renderOperatorConsoleTextLines } from "./operatorConsoleRenderer.js";
 import {
   type OperatorConsoleRuntimeFrame,
@@ -177,6 +178,16 @@ function getPromptCursorPosition(
   promptRegionHeight: number
 ): { readonly row: number; readonly column: number } {
   if (promptRegionHeight < 3) return { row: promptRegionY, column: 0 };
+  if (isSteerInputActive(state.steer) && state.steer !== undefined) {
+    const metrics = getSteerInputSurfaceMetrics(state.steer, {
+      width: state.terminal.width,
+      height: promptRegionHeight,
+    });
+    return {
+      row: promptRegionY + 1 + metrics.cursorRow,
+      column: metrics.cursorColumn,
+    };
+  }
   const metrics = getPromptSurfaceMetrics(state.prompt, {
     width: state.terminal.width,
     height: promptRegionHeight,

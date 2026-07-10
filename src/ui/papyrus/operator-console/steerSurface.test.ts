@@ -3,6 +3,7 @@ import { stringWidth } from "../screen/stringWidth.js";
 import {
   createSubmittedSteerTranscriptBlock,
   getQueuedSteerSurfaceDesiredHeight,
+  getSteerInputSurfaceMetrics,
   hasQueuedSteer,
   renderQueuedSteerSurface,
   renderSteerInputSurface,
@@ -23,6 +24,13 @@ describe("Papyrus operator console steer surface", () => {
     const output = renderSteerInputSurface(steerDraft(""), { width: 72 });
 
     expect(output).toContainEqual(expect.stringContaining("│ ›"));
+  });
+
+  it("positions the cursor after the bordered steer prompt prefix and draft text", () => {
+    const metrics = getSteerInputSurfaceMetrics(steerDraft("ifsdswewewww"), { width: 120, height: 3 });
+
+    expect(metrics.cursorRow).toBe(0);
+    expect(metrics.cursorColumn).toBe(16);
   });
 
   it("renders queued steer text and safe-boundary cancellation copy", () => {
