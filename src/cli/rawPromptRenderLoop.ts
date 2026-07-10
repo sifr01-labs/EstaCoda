@@ -107,12 +107,13 @@ export class RawPromptRenderLoop {
   clear(): void {
     if (this.#renderedRows === 0) return;
     this.#withHiddenCursorDuringManagedRedraw(() => {
-      this.#moveToFirstRenderedRow();
+      const chunks = [this.#moveToFirstRenderedRowSequence()];
       for (let row = 0; row < this.#renderedRows; row += 1) {
-        this.#output.write("\x1b[0K");
-        if (row < this.#renderedRows - 1) this.#output.write("\n");
+        chunks.push("\x1b[0K");
+        if (row < this.#renderedRows - 1) chunks.push("\n");
       }
-      this.#moveToFrameCursor(this.#renderedRows, 0, 0);
+      chunks.push(this.#moveToFrameCursorSequence(this.#renderedRows, 0, 0));
+      this.#writeRedraw(chunks);
       this.#renderedRows = 0;
       this.#cursorRow = 0;
       this.#lastOperatorConsoleRegions = undefined;
@@ -148,16 +149,17 @@ export class RawPromptRenderLoop {
       return frame.rows.length;
     }
 
-    this.#moveToFirstRenderedRow();
+    const chunks = [this.#moveToFirstRenderedRowSequence()];
 
     const physicalRows = Math.max(this.#renderedRows, frame.rows.length);
     for (let row = 0; row < physicalRows; row += 1) {
-      this.#output.write("\x1b[0K");
-      if (row < frame.rows.length) this.#output.write(frame.rows[row]!);
-      if (row < physicalRows - 1) this.#output.write("\n");
+      chunks.push("\x1b[0K");
+      if (row < frame.rows.length) chunks.push(frame.rows[row]!);
+      if (row < physicalRows - 1) chunks.push("\n");
     }
 
-    this.#moveToFrameCursor(physicalRows, frame.cursorRow, frame.cursorColumn);
+    chunks.push(this.#moveToFrameCursorSequence(physicalRows, frame.cursorRow, frame.cursorColumn));
+    this.#writeRedraw(chunks);
     this.#rememberRenderedFrame(frame);
     return frame.rows.length;
   }
@@ -185,22 +187,25 @@ export class RawPromptRenderLoop {
       .filter((region) => dirty.has(region.kind) && region.visible && region.height > 0)
       .sort((a, b) => a.y - b.y);
     let currentRow = this.#cursorRow;
+    const chunks: string[] = [];
 
     for (const region of regions) {
-      currentRow = this.#moveFromFrameRowToFrameRow(currentRow, region.y);
+      chunks.push(this.#moveFromFrameRowToFrameRowSequence(currentRow, region.y));
+      currentRow = region.y;
       for (let offset = 0; offset < region.height; offset += 1) {
         const row = region.y + offset;
-        this.#output.write("\x1b[0K");
-        if (row < frame.rows.length) this.#output.write(frame.rows[row]!);
+        chunks.push("\x1b[0K");
+        if (row < frame.rows.length) chunks.push(frame.rows[row]!);
         if (offset < region.height - 1) {
-          this.#output.write("\n");
+          chunks.push("\n");
           currentRow += 1;
         }
       }
     }
 
-    currentRow = this.#moveFromFrameRowToFrameRow(currentRow, frame.cursorRow);
-    if (frame.cursorColumn > 0) this.#output.write(`\x1b[${frame.cursorColumn}C`);
+    chunks.push(this.#moveFromFrameRowToFrameRowSequence(currentRow, frame.cursorRow));
+    if (frame.cursorColumn > 0) chunks.push(`\x1b[${frame.cursorColumn}C`);
+    this.#writeRedraw(chunks);
     this.#cursorRow = frame.cursorRow;
   }
 
@@ -219,23 +224,33 @@ export class RawPromptRenderLoop {
     return this.#operatorConsoleHost;
   }
 
-  #moveToFirstRenderedRow(): void {
-    if (this.#cursorRow > 0) this.#output.write(`\x1b[${this.#cursorRow}A`);
-    if (this.#renderedRows > 0) this.#output.write("\r");
+  #moveToFirstRenderedRowSequence(): string {
+    const chunks: string[] = [];
+    if (this.#cursorRow > 0) chunks.push(`\x1b[${this.#cursorRow}A`);
+    if (this.#renderedRows > 0) chunks.push("\r");
+    return chunks.join("");
   }
 
-  #moveToFrameCursor(physicalRows: number, cursorRow: number, cursorColumn: number): void {
+  #moveToFrameCursorSequence(physicalRows: number, cursorRow: number, cursorColumn: number): string {
+    const chunks: string[] = [];
     const rowsBelowCursor = Math.max(0, physicalRows - 1 - cursorRow);
-    if (rowsBelowCursor > 0) this.#output.write(`\x1b[${rowsBelowCursor}A`);
-    this.#output.write("\r");
-    if (cursorColumn > 0) this.#output.write(`\x1b[${cursorColumn}C`);
+    if (rowsBelowCursor > 0) chunks.push(`\x1b[${rowsBelowCursor}A`);
+    chunks.push("\r");
+    if (cursorColumn > 0) chunks.push(`\x1b[${cursorColumn}C`);
+    return chunks.join("");
   }
 
-  #moveFromFrameRowToFrameRow(currentRow: number, targetRow: number): number {
-    if (currentRow > targetRow) this.#output.write(`\x1b[${currentRow - targetRow}A`);
-    if (currentRow < targetRow) this.#output.write(`\x1b[${targetRow - currentRow}B`);
-    this.#output.write("\r");
-    return targetRow;
+  #moveFromFrameRowToFrameRowSequence(currentRow: number, targetRow: number): string {
+    const chunks: string[] = [];
+    if (currentRow > targetRow) chunks.push(`\x1b[${currentRow - targetRow}A`);
+    if (currentRow < targetRow) chunks.push(`\x1b[${targetRow - currentRow}B`);
+    chunks.push("\r");
+    return chunks.join("");
+  }
+
+  #writeRedraw(chunks: readonly string[]): void {
+    const text = chunks.join("");
+    if (text.length > 0) this.#output.write(text);
   }
 
   #withHiddenCursorDuringManagedRedraw<T>(redraw: () => T): T {

@@ -2802,7 +2802,7 @@ describe("runSessionLoop — active turn spinner", () => {
     const rendered = strippedChunks.join("");
     const queuedSteerIndex = strippedChunks.findIndex((chunk) => chunk.includes("Queued steer"));
     expect(queuedSteerIndex).toBeGreaterThan(-1);
-    expect(outputChunks[queuedSteerIndex - 1]).toBe("\x1b[0K");
+    expect(outputChunks[queuedSteerIndex]).toContain("\x1b[0K");
     expect(strippedChunks.filter((chunk) => chunk.includes("User steer:"))).toEqual([
       "User steer:\nfocus only on approval cards\n",
     ]);

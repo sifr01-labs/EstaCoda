@@ -119,6 +119,7 @@ describe("raw prompt render loop", () => {
     });
 
     expect(output.chunks().at(0)).toBe("\x1b[?25l");
+    expect(output.chunks()).toHaveLength(3);
     expect(output.chunks().at(-1)).toBe("\x1b[?25h");
     expect(output.text().indexOf("\x1b[?25l")).toBeLessThan(output.text().indexOf("> abc"));
     expect(output.text().lastIndexOf("\x1b[?25h")).toBeGreaterThan(output.text().lastIndexOf("\x1b[3C"));
@@ -135,6 +136,20 @@ describe("raw prompt render loop", () => {
 
     expect(output.text()).not.toContain("\x1b[?25l");
     expect(output.text()).not.toContain("\x1b[?25h");
+  });
+
+  it("batches non-TTY redraw bodies into a single write", () => {
+    const output = fakeOutput({ isTTY: false });
+    const loop = new RawPromptRenderLoop(output);
+
+    loop.render({
+      prompt: "> ",
+      state: createLineEditorState("abc", 1),
+    });
+
+    expect(output.chunks()).toHaveLength(1);
+    expect(output.chunks()[0]).toContain("> abc");
+    expect(output.chunks()[0]).toContain("\x1b[3C");
   });
 
   it("uses a persistent Operator Console runtime host for gated prompt/status rendering", () => {
@@ -312,6 +327,7 @@ describe("raw prompt render loop", () => {
     }, { dirtyRegions: ["prompt"] });
 
     const text = output.text();
+    expect(output.chunks()).toHaveLength(1);
     expect(text).toContain("Steer current turn");
     expect(text).toContain("› he");
     expect(text).not.toContain("The assistant draft should stay on screen");
@@ -357,6 +373,7 @@ describe("raw prompt render loop", () => {
     }, { dirtyRegions: ["streaming", "statusRail"] });
 
     const text = output.text();
+    expect(output.chunks()).toHaveLength(1);
     expect(text).toContain("Streaming draft v2");
     expect(text).toContain("◷ 00:14");
     expect(text).not.toContain("Steer current turn");
@@ -401,6 +418,7 @@ describe("raw prompt render loop", () => {
     }, { dirtyRegions: ["streaming", "statusRail"] });
 
     const text = output.text();
+    expect(output.chunks()).toHaveLength(1);
     expect(text).toContain("A much longer streaming draft");
     expect(text).toContain("Steer current turn");
     expect(text).toContain("› short");
@@ -807,6 +825,7 @@ describe("raw prompt render loop", () => {
     loop.clear();
 
     expect(output.chunks().at(0)).toBe("\x1b[?25l");
+    expect(output.chunks()).toHaveLength(3);
     expect(output.chunks().at(-1)).toBe("\x1b[?25h");
     expect(output.text()).toContain("\x1b[0K");
     expect(output.text()).not.toMatch(forbiddenManagedRegionOutput);
