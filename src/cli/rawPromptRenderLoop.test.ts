@@ -109,6 +109,49 @@ describe("raw prompt render loop", () => {
     expect(secondRender.startsWith("\x1b[2A\r")).toBe(false);
   });
 
+  it("hides the terminal cursor while redrawing TTY frames and restores it after positioning", () => {
+    const output = fakeOutput({ isTTY: true });
+    const loop = new RawPromptRenderLoop(output);
+
+    loop.render({
+      prompt: "> ",
+      state: createLineEditorState("abc", 1),
+    });
+
+    expect(output.chunks().at(0)).toBe("\x1b[?25l");
+    expect(output.chunks()).toHaveLength(3);
+    expect(output.chunks().at(-1)).toBe("\x1b[?25h");
+    expect(output.text().indexOf("\x1b[?25l")).toBeLessThan(output.text().indexOf("> abc"));
+    expect(output.text().lastIndexOf("\x1b[?25h")).toBeGreaterThan(output.text().lastIndexOf("\x1b[3C"));
+  });
+
+  it("does not emit cursor visibility toggles for non-TTY redraws", () => {
+    const output = fakeOutput({ isTTY: false });
+    const loop = new RawPromptRenderLoop(output);
+
+    loop.render({
+      prompt: "> ",
+      state: createLineEditorState("abc", 1),
+    });
+
+    expect(output.text()).not.toContain("\x1b[?25l");
+    expect(output.text()).not.toContain("\x1b[?25h");
+  });
+
+  it("batches non-TTY redraw bodies into a single write", () => {
+    const output = fakeOutput({ isTTY: false });
+    const loop = new RawPromptRenderLoop(output);
+
+    loop.render({
+      prompt: "> ",
+      state: createLineEditorState("abc", 1),
+    });
+
+    expect(output.chunks()).toHaveLength(1);
+    expect(output.chunks()[0]).toContain("> abc");
+    expect(output.chunks()[0]).toContain("\x1b[3C");
+  });
+
   it("uses a persistent Operator Console runtime host for gated prompt/status rendering", () => {
     const output = fakeOutput();
     const host = createOperatorConsoleRuntimeHost();
@@ -200,7 +243,7 @@ describe("raw prompt render loop", () => {
     });
     const text = output.text();
 
-    expect(rows).toBeGreaterThan(4);
+    expect(rows).toBeGreaterThanOrEqual(4);
     expect(setActiveWork).toHaveBeenCalledWith(expect.objectContaining({
       items: [expect.objectContaining({ toolName: "read_file" })],
     }));
@@ -208,8 +251,8 @@ describe("raw prompt render loop", () => {
       mode: "drafting",
       draft: "focus approvals",
     }));
-    expect(text.indexOf("╭─ Running tools")).toBeLessThan(text.indexOf("╭─ Steer current turn"));
     expect(text.indexOf("╭─ Steer current turn")).toBeLessThan(text.indexOf("◷ 00:13"));
+    expect(text).not.toContain("Running tools");
     expect(text).toContain("› focus approvals");
     expect(text).not.toMatch(forbiddenManagedRegionOutput);
   });
@@ -245,6 +288,141 @@ describe("raw prompt render loop", () => {
     expect(text).toContain("Streaming through raw prompt frame");
     expect(text).toContain("Streaming through raw prompt frame▍");
     expect(text).not.toContain("Assistant stream");
+    expect(text).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
+  it("redraws only the Operator Console prompt region when steer text changes under a stable layout", () => {
+    const output = fakeOutput();
+    const host = createOperatorConsoleRuntimeHost();
+    const loop = new RawPromptRenderLoop(output, {
+      operatorConsoleHostFactory: () => host,
+    });
+    const baseOperatorConsole = {
+      enabled: true,
+      terminal: { width: 96, height: 18, isTty: true },
+      status: status({ usedTokens: 18000, elapsedMs: 13000 }),
+      streaming: streamingState({
+        tail: "The assistant draft should stay on screen without being repainted here.",
+      }),
+      promptMode: "steer" as const,
+    };
+
+    loop.render({
+      prompt: "",
+      state: createLineEditorState("h"),
+      operatorConsole: {
+        ...baseOperatorConsole,
+        steer: { mode: "drafting", draft: "h", cursorOffset: 1 },
+      },
+    });
+    output.clear();
+
+    loop.render({
+      prompt: "",
+      state: createLineEditorState("he"),
+      operatorConsole: {
+        ...baseOperatorConsole,
+        steer: { mode: "drafting", draft: "he", cursorOffset: 2 },
+      },
+    }, { dirtyRegions: ["prompt"] });
+
+    const text = output.text();
+    expect(output.chunks()).toHaveLength(1);
+    expect(text).toContain("Steer current turn");
+    expect(text).toContain("› he");
+    expect(text).not.toContain("The assistant draft should stay on screen");
+    expect(text).not.toContain("Settled streamed text");
+    expect(text).not.toContain("kimi-k2.7-code");
+    expect(text).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
+  it("redraws only streaming and status regions for stable streaming refreshes", () => {
+    const output = fakeOutput();
+    const host = createOperatorConsoleRuntimeHost();
+    const loop = new RawPromptRenderLoop(output, {
+      operatorConsoleHostFactory: () => host,
+    });
+    const baseOperatorConsole = {
+      enabled: true,
+      terminal: { width: 96, height: 18, isTty: true },
+      status: status({ usedTokens: 18000, elapsedMs: 13000 }),
+    };
+
+    loop.render({
+      prompt: "",
+      state: createLineEditorState("steer note"),
+      operatorConsole: {
+        ...baseOperatorConsole,
+        streaming: streamingState({ tail: "Streaming draft v1" }),
+        steer: { mode: "drafting", draft: "steer note", cursorOffset: "steer note".length },
+        promptMode: "steer",
+      },
+    });
+    output.clear();
+
+    loop.render({
+      prompt: "",
+      state: createLineEditorState("steer note"),
+      operatorConsole: {
+        ...baseOperatorConsole,
+        status: status({ usedTokens: 18000, elapsedMs: 14000 }),
+        streaming: streamingState({ tail: "Streaming draft v2" }),
+        steer: { mode: "drafting", draft: "steer note", cursorOffset: "steer note".length },
+        promptMode: "steer",
+      },
+    }, { dirtyRegions: ["streaming", "statusRail"] });
+
+    const text = output.text();
+    expect(output.chunks()).toHaveLength(1);
+    expect(text).toContain("Streaming draft v2");
+    expect(text).toContain("◷ 00:14");
+    expect(text).not.toContain("Steer current turn");
+    expect(text).not.toContain("› steer note");
+    expect(text).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
+  it("falls back to a full redraw when dirty-region layout changes", () => {
+    const output = fakeOutput();
+    const host = createOperatorConsoleRuntimeHost();
+    const loop = new RawPromptRenderLoop(output, {
+      operatorConsoleHostFactory: () => host,
+    });
+
+    loop.render({
+      prompt: "",
+      state: createLineEditorState("short"),
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 96, height: 14, isTty: true },
+        status: status({ usedTokens: 18000, elapsedMs: 13000 }),
+        streaming: streamingState({ tail: "Short stream" }),
+        steer: { mode: "drafting", draft: "short", cursorOffset: "short".length },
+        promptMode: "steer",
+      },
+    });
+    output.clear();
+
+    loop.render({
+      prompt: "",
+      state: createLineEditorState("short"),
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 96, height: 18, isTty: true },
+        status: status({ usedTokens: 18000, elapsedMs: 14000 }),
+        streaming: streamingState({
+          tail: "A much longer streaming draft that changes region allocation and must force the full redraw path.",
+        }),
+        steer: { mode: "drafting", draft: "short", cursorOffset: "short".length },
+        promptMode: "steer",
+      },
+    }, { dirtyRegions: ["streaming", "statusRail"] });
+
+    const text = output.text();
+    expect(output.chunks()).toHaveLength(1);
+    expect(text).toContain("A much longer streaming draft");
+    expect(text).toContain("Steer current turn");
+    expect(text).toContain("› short");
+    expect(text).toContain("◷ 00:14");
     expect(text).not.toMatch(forbiddenManagedRegionOutput);
   });
 
@@ -634,6 +812,25 @@ describe("raw prompt render loop", () => {
     expect(output.text()).not.toMatch(forbiddenManagedRegionOutput);
   });
 
+  it("hides and restores the terminal cursor while clearing TTY frames", () => {
+    const output = fakeOutput({ isTTY: true });
+    const loop = new RawPromptRenderLoop(output);
+
+    loop.render({
+      prompt: "> ",
+      state: createLineEditorState("draft"),
+      fallbackRows: [{ text: "overlay" }],
+    });
+    output.clear();
+    loop.clear();
+
+    expect(output.chunks().at(0)).toBe("\x1b[?25l");
+    expect(output.chunks()).toHaveLength(3);
+    expect(output.chunks().at(-1)).toBe("\x1b[?25h");
+    expect(output.text()).toContain("\x1b[0K");
+    expect(output.text()).not.toMatch(forbiddenManagedRegionOutput);
+  });
+
   it("does not export the retired raw prompt frame builder", async () => {
     const module = await import("./rawPromptRenderLoop.js");
     const source = await readFile(new URL("./rawPromptRenderLoop.ts", import.meta.url), "utf8");
@@ -643,14 +840,22 @@ describe("raw prompt render loop", () => {
   });
 });
 
-function fakeOutput(): RawPromptRenderOutput & { text(): string; chunks(): readonly string[] } {
+function fakeOutput(options: { readonly isTTY?: boolean } = {}): RawPromptRenderOutput & {
+  text(): string;
+  chunks(): readonly string[];
+  clear(): void;
+} {
   const writes: string[] = [];
   return {
+    ...(options.isTTY === undefined ? {} : { isTTY: options.isTTY }),
     write: vi.fn((chunk: string) => {
       writes.push(chunk);
     }),
     text: () => writes.join(""),
     chunks: () => [...writes],
+    clear: () => {
+      writes.length = 0;
+    },
   };
 }
 

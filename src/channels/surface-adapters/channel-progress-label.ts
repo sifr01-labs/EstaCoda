@@ -109,7 +109,7 @@ function plainProviderServingTransitionLabel(
 export function plainActivityKeyForTool(tool: string): ActivityLabelKey {
   if (tool === "file.read") return "read_files";
   if (tool === "file.write") return "write_files";
-  if (tool === "file.replace") return "patch_files";
+  if (tool === "file.patch") return "patch_files";
   if (tool === "terminal.run" || tool === "process.start" || tool === "process.stop") return "run_command";
   if (
     tool === "execute_code" ||

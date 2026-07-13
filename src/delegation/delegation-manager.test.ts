@@ -370,7 +370,7 @@ describe("DelegationManager", () => {
           childSessionId,
           path: "src/app.ts",
           operation: "replace",
-          sourceTool: "file.replace",
+          sourceTool: "file.patch",
           timestamp: "9999-01-01T00:00:00.000Z"
         });
       }
@@ -389,7 +389,7 @@ describe("DelegationManager", () => {
     expect(result.staleFileWarnings?.[0]).toMatchObject({
       normalizedPath: "src/app.ts",
       writeOperation: "replace",
-      sourceTool: "file.replace"
+      sourceTool: "file.patch"
     });
   });
 
@@ -963,7 +963,7 @@ describe("DelegationManager", () => {
           childSessionId,
           path: handleInput.text === "touch matching" ? "src/app.ts" : "src/other.ts",
           operation: "replace",
-          sourceTool: "file.replace",
+          sourceTool: "file.patch",
           timestamp: "9999-01-01T00:00:00.000Z"
         });
       }

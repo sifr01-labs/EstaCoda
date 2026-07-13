@@ -20,6 +20,7 @@ export type ActiveWorkSurfaceRenderOptions = {
 
 export type ActiveWorkSummaryOptions = {
   readonly locale?: OperatorConsoleLocale;
+  readonly includeActive?: boolean;
 };
 
 export const ACTIVE_WORK_STATUS_SYMBOLS: Readonly<Record<ActiveWorkItemStatus, string>> = {
@@ -127,12 +128,38 @@ export function formatActiveWorkSummary(
   const duration = options.locale === "ar"
     ? `${copy.duration} ${isolateIfNeeded(durationValue, options.locale)}`
     : `${copy.workedFor} ${durationValue}`;
-  return [
+  const parts = [
     `${formatNumber(completedCount)} ${copy.completed}`,
-    `${formatNumber(activeCount)} ${copy.active}`,
     `${formatNumber(failedCount)} ${copy.failed}`,
     duration,
-  ].join(" · ");
+  ];
+  if (options.includeActive !== false || activeCount > 0) {
+    parts.splice(1, 0, `${formatNumber(activeCount)} ${copy.active}`);
+  }
+  return parts.join(" · ");
+}
+
+export function formatLiveActiveWorkStatus(
+  state: ToolActivityState,
+  options: ActiveWorkSummaryOptions = {}
+): string | undefined {
+  if (!hasActiveWork(state) || state.completedAtMs !== undefined) return undefined;
+  const copy = resolveActiveWorkCopy(options.locale);
+  const activeCount = state.items.filter(isActiveStatusItem).length;
+  const doneCount = state.items.filter((item) =>
+    item.status === "succeeded" || item.status === "cancelled"
+  ).length;
+  const failedCount = state.items.filter((item) => item.status === "failed").length;
+  const durationValue = formatClockDuration(resolveActiveWorkElapsedMs(state));
+  const parts = [
+    `${formatNumber(activeCount)} ${copy.active}`,
+    `${formatNumber(doneCount)} ${options.locale === "ar" ? copy.completed : "done"}`,
+  ];
+  if (failedCount > 0) {
+    parts.push(`${formatNumber(failedCount)} ${copy.failed}`);
+  }
+  parts.push(isolateIfNeeded(durationValue, options.locale));
+  return parts.join(" · ");
 }
 
 function renderCompletedActiveWorkContentRows(
@@ -160,7 +187,7 @@ function formatCompletionFooterRows(
   contentWidth: number,
   locale: OperatorConsoleLocale | undefined
 ): readonly string[] {
-  const summary = formatActiveWorkSummary(state, { locale });
+  const summary = formatActiveWorkSummary(state, { locale, includeActive: false });
   return [truncateVisibleCells(summary, contentWidth)];
 }
 
@@ -253,7 +280,7 @@ function formatArabicActiveWorkRow(input: {
   return truncateVisibleCells(row, width);
 }
 
-function activeWorkStatusSymbol(
+export function activeWorkStatusSymbol(
   status: ActiveWorkItemStatus,
   frameIndex: number | undefined,
   style: OperatorConsoleStyle | undefined
@@ -339,9 +366,9 @@ function formatActiveWorkTitle(
 
 export function formatActiveWorkDuration(durationMs: number): string {
   const safeMs = Math.max(0, Number.isFinite(durationMs) ? durationMs : 0);
+  if (safeMs < 100) return `${Math.floor(safeMs)}ms`;
   if (safeMs < 60_000) {
     const roundedTenths = Math.round(safeMs / 100);
-    if (roundedTenths === 0) return "0s";
     if (roundedTenths < 100 && roundedTenths % 10 !== 0) {
       return `${(roundedTenths / 10).toFixed(1)}s`;
     }

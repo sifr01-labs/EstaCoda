@@ -1395,6 +1395,8 @@ export class ChannelGateway {
       const streamResult = await this.#finishStreamingText(streamHandle, response.text);
       const streamingDeliveredFinalText = streamResult?.delivered === true &&
         streamResult.fallbackRequired === false &&
+        streamResult.deliveredText === response.text &&
+        response.text.trim().length > 0 &&
         !approvalBoundary &&
         !artifactBoundary;
 
@@ -1402,7 +1404,7 @@ export class ChannelGateway {
         await this.#deliverText(
           adapter,
           normalizedSessionKey,
-          response.text,
+          streamResult?.fallbackText ?? response.text,
           message.channel === "whatsapp" ? { replyTo: message.id } : undefined
         );
       }
@@ -4557,7 +4559,7 @@ function deriveApprovalReason(input: PendingApprovalContinuation): string {
     }
   }
 
-  if (input.toolName === "file.write" || input.toolName === "file.replace") {
+  if (input.toolName === "file.write" || input.toolName === "file.patch") {
     return "file modification";
   }
 

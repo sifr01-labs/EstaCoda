@@ -18,7 +18,10 @@ export type SetupPanelRenderOptions = {
 const WIDE_TABLE_MIN_WIDTH = 72;
 
 export function getSetupPanelSurfaceDesiredHeight(state: SetupSurfaceState, width: number): number {
-  if (state.kind === "secret") return state.optional === true ? 8 : 10;
+  if (state.kind === "secret") {
+    const envVarRows = state.envVar === undefined || state.envVar.length === 0 ? 0 : 2;
+    return Math.max(8, textEntryDescriptionLineCount(state.description, width) + 6 + envVarRows);
+  }
   if (state.kind === "textInput") return Math.max(8, textEntryDescriptionLineCount(state.description, width) + 6);
   const statusLineCount = state.statusLines?.length ?? 0;
   const navigationSeparatorCount = state.rows.some((row) => row.group === "navigation") ? 1 : 0;
@@ -358,7 +361,7 @@ function renderSecretEntryPanel(
     : maskSecretValue(state);
   const rows = [
     renderSetupPanelTopBorder(state.title, state.locale, width, style),
-    renderContentRow(state.description, contentWidth, width),
+    ...renderPanelDescriptionRows(state.description, state.locale, contentWidth, width),
     renderContentRow("", contentWidth, width),
     renderContentRow(value, contentWidth, width),
     renderContentRow("", contentWidth, width),

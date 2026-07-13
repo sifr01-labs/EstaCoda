@@ -128,7 +128,7 @@ describe("FileStateTracker", () => {
       childSessionId: "child-2",
       path: "src/app.ts",
       operation: "replace",
-      sourceTool: "file.replace",
+      sourceTool: "file.patch",
       timestamp: "2026-06-11T10:03:00.000Z"
     });
 
@@ -154,7 +154,7 @@ describe("FileStateTracker", () => {
       childSessionId: "child",
       path: "src/app.ts",
       operation: "replace",
-      sourceTool: "file.replace",
+      sourceTool: "file.patch",
       timestamp: "2026-06-11T10:00:00.000Z"
     });
     tracker.recordOperation({

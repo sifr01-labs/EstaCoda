@@ -27,7 +27,6 @@ describe("Papyrus operator console layout", () => {
       "streaming",
       "approvals",
       "turnActivity",
-      "activeWork",
       "queuedSteer",
       "attachments",
       "prompt",
@@ -73,7 +72,7 @@ describe("Papyrus operator console layout", () => {
     expect(regionKinds(layout)).toEqual([]);
   });
 
-  it("includes active work only when active work state is non-empty", () => {
+  it("keeps live active work out of the default layout", () => {
     expect(regionKinds(createOperatorConsoleLayout(createState()))).not.toContain("activeWork");
 
     const layout = createOperatorConsoleLayout(createState({
@@ -83,7 +82,7 @@ describe("Papyrus operator console layout", () => {
         expanded: true,
       },
     }));
-    expect(regionKinds(layout)).toContain("activeWork");
+    expect(regionKinds(layout)).not.toContain("activeWork");
   });
 
   it("includes turn activity only when turn activity state exists", () => {
@@ -259,7 +258,7 @@ describe("Papyrus operator console layout", () => {
     const layout = createOperatorConsoleLayout(createFullState(), { width: 60, height: 2, isTty: true });
 
     expect(visibleRegionKinds(layout)).toEqual(["prompt", "statusRail"]);
-    expect(region(layout, "activeWork")).toMatchObject({ height: 0, visible: false });
+    expect(region(layout, "activeWork")).toBeUndefined();
     expect(region(layout, "streaming")).toMatchObject({ height: 0, visible: false });
     expect(region(layout, "turnActivity")).toMatchObject({ height: 0, visible: false });
     expect(region(layout, "approvals")).toMatchObject({ height: 0, visible: false });
@@ -269,7 +268,7 @@ describe("Papyrus operator console layout", () => {
     expect(region(layout, "transcript")).toMatchObject({ height: 0, visible: false });
   });
 
-  it("keeps active work ahead of streaming under constrained height", () => {
+  it("hides the full active work region while streaming is visible", () => {
     const layout = createOperatorConsoleLayout(createState({
       activeWork: {
         items: [toolItem("tool-1", "running")],
@@ -280,8 +279,9 @@ describe("Papyrus operator console layout", () => {
       attachments: [pastedAttachment("paste-1")],
     }), { width: 80, height: 3, isTty: true });
 
-    expect(visibleRegionKinds(layout)).toEqual(["activeWork", "prompt", "statusRail"]);
-    expect(region(layout, "streaming")).toMatchObject({ height: 0, visible: false });
+    expect(regionKinds(layout)).not.toContain("activeWork");
+    expect(visibleRegionKinds(layout)).toEqual(["streaming", "prompt", "statusRail"]);
+    expect(region(layout, "streaming")).toMatchObject({ height: 1, visible: true });
     expect(region(layout, "attachments")).toMatchObject({ height: 0, visible: false });
   });
 
@@ -296,7 +296,7 @@ describe("Papyrus operator console layout", () => {
     expect(region(layout, "attachments")).toMatchObject({ height: 0, visible: false });
   });
 
-  it("allocates live streaming height responsively up to thirty-two rows", () => {
+  it("allocates live streaming into the remaining space after required prompt and status rows", () => {
     const state = createState({
       streaming: streamingState({
         segments: [],
@@ -304,8 +304,8 @@ describe("Papyrus operator console layout", () => {
       }),
     });
 
-    expect(region(createOperatorConsoleLayout(state, { width: 80, height: 24, isTty: true }), "streaming")?.height).toBe(12);
-    expect(region(createOperatorConsoleLayout(state, { width: 80, height: 80, isTty: true }), "streaming")?.height).toBe(32);
+    expect(region(createOperatorConsoleLayout(state, { width: 80, height: 24, isTty: true }), "streaming")?.height).toBe(20);
+    expect(region(createOperatorConsoleLayout(state, { width: 80, height: 80, isTty: true }), "streaming")?.height).toBe(76);
   });
 
   it("keeps region bounds inside the terminal rectangle", () => {

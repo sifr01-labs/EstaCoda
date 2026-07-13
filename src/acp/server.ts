@@ -1385,7 +1385,7 @@ function classifyToolKind(toolName: string): string {
   if (toolName.startsWith("file.read") || toolName.startsWith("workspace.") || toolName.startsWith("mcp.")) {
     return "read";
   }
-  if (toolName.startsWith("file.write") || toolName.startsWith("file.replace")) {
+  if (toolName.startsWith("file.write") || toolName.startsWith("file.patch")) {
     return "edit";
   }
   return "other";
@@ -1465,7 +1465,7 @@ function formatExplicitShellExecutionMessage(execution: ToolExecutionRecord): st
 function classifyPermissionToolKind(toolName: string, riskClass: string): string {
   if (toolName.startsWith("terminal.") || toolName.startsWith("process.")) return "execute";
   if (toolName.startsWith("file.read")) return "read";
-  if (toolName.startsWith("file.write") || toolName.startsWith("file.replace")) return "edit";
+  if (toolName.startsWith("file.write") || toolName.startsWith("file.patch")) return "edit";
   if (riskClass.includes("network")) return "fetch";
   return "other";
 }

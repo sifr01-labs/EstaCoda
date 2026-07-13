@@ -9,6 +9,7 @@ import {
   type ActiveWorkItem,
   type ActiveWorkRuntimeEvent,
   type InlineToolTrailEntry,
+  type OperatorConsoleRegionKind,
   type OperatorConsoleRuntimeHost,
   type StatusRailState,
   type SteerState,
@@ -42,6 +43,10 @@ const DEFAULT_OPERATOR_CONSOLE_ANIMATION_INTERVAL_MS = 90;
 const DEFAULT_STREAMING_REFRESH_INTERVAL_MS = 75;
 const MIN_TIMER_REFRESH_INTERVAL_MS = 16;
 const MAX_STREAMING_TAIL_CHARS = 4_000;
+
+type LiveConsoleRefreshOptions = {
+  readonly dirtyRegions?: readonly OperatorConsoleRegionKind[];
+};
 
 export class LiveOperatorConsoleController {
   readonly #output: LiveOperatorConsoleControllerOptions["output"];
@@ -193,11 +198,15 @@ export class LiveOperatorConsoleController {
   }
 
   setSteer(state: SteerState | undefined): void {
+    const wasSteerVisible = this.#steer?.mode === "drafting" || this.#steer?.mode === "queued";
+    const nextSteerVisible = state?.mode === "drafting" || state?.mode === "queued";
     this.#steer = state;
     if (state === undefined) {
       this.#runtimeHost.setSteer(undefined);
     }
-    this.refresh();
+    this.refresh({
+      dirtyRegions: wasSteerVisible === nextSteerVisible ? ["prompt"] : ["streaming", "prompt"],
+    });
   }
 
   setTurnActivity(state: TurnActivityState | undefined): void {
@@ -230,7 +239,7 @@ export class LiveOperatorConsoleController {
     this.#renderLoop.clear();
   }
 
-  refresh(): void {
+  refresh(options: LiveConsoleRefreshOptions = {}): void {
     const steerVisible = this.#steer?.mode === "drafting" || this.#steer?.mode === "queued";
     const activeWork = this.#activeWorkSnapshotForRender();
     this.#renderLoop.render({
@@ -248,6 +257,8 @@ export class LiveOperatorConsoleController {
         promptMode: steerVisible ? "steer" : "prompt",
         ...(this.#promptPlaceholder === undefined ? {} : { placeholder: this.#promptPlaceholder }),
       },
+    }, {
+      dirtyRegions: options.dirtyRegions,
     });
     this.#lastTimerRefreshAtMs = Date.now();
     this.#syncAnimationTimer();
@@ -278,6 +289,7 @@ export class LiveOperatorConsoleController {
   }
 
   #terminalSnapshotForRender(activeWork: ToolActivityState): Partial<TerminalMetrics> {
+    if (activeWork.completedAtMs === undefined) return this.#terminal;
     const requestedHeight = getActiveWorkSurfaceDesiredHeight(activeWork);
     if (requestedHeight <= 0) return this.#terminal;
     const surroundingChromeRows = 32;
@@ -301,7 +313,7 @@ export class LiveOperatorConsoleController {
       };
       this.#runtimeHost.setTurnActivity(this.#turnActivity);
     }
-    this.#refreshFromTimer();
+    this.#refreshFromTimer({ dirtyRegions: ["turnActivity", "activeWork", "statusRail"] });
   }
 
   #syncAnimationTimer(): void {
@@ -327,7 +339,7 @@ export class LiveOperatorConsoleController {
     if (this.#streamingRefreshTimer !== undefined) return;
     this.#streamingRefreshTimer = setTimeout(() => {
       this.#streamingRefreshTimer = undefined;
-      this.#refreshFromTimer();
+      this.#refreshFromTimer({ dirtyRegions: ["streaming", "statusRail"] });
     }, this.#streamingRefreshIntervalMs);
     const timer = this.#streamingRefreshTimer as { unref?: () => void };
     timer.unref?.();
@@ -339,10 +351,10 @@ export class LiveOperatorConsoleController {
     this.#streamingRefreshTimer = undefined;
   }
 
-  #refreshFromTimer(): void {
+  #refreshFromTimer(options: LiveConsoleRefreshOptions = {}): void {
     const now = Date.now();
     if (now - this.#lastTimerRefreshAtMs < MIN_TIMER_REFRESH_INTERVAL_MS) return;
-    this.refresh();
+    this.refresh(options);
   }
 
   #shouldAnimate(): boolean {
@@ -364,6 +376,7 @@ export class LiveOperatorConsoleController {
       segments: this.#streamingSegments,
       tail: this.#streamingTail,
       isStreaming: true,
+      showCursor: !(this.#steer?.mode === "drafting" || this.#steer?.mode === "queued"),
       ...(this.#streamingToolTrail.length === 0 ? {} : { toolTrail: this.#streamingToolTrail }),
     };
   }

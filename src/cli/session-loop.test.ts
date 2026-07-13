@@ -2331,7 +2331,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(rendered.slice(responseIndex)).toContain("mock-model");
   });
 
-  it("routes live tool activity into the Operator Console active-work surface when gated", async () => {
+  it("routes live tool activity into the compact Operator Console turn status", async () => {
     const outputChunks: string[] = [];
     const output = {
       write(chunk: string | Uint8Array): boolean {
@@ -2444,15 +2444,11 @@ describe("runSessionLoop — active turn spinner", () => {
     );
 
     const strippedChunks = outputChunks.map((chunk) => stripAnsi(chunk));
-    const activeWorkTitleIndex = strippedChunks.findIndex((chunk) => chunk.includes("Running tools"));
-    expect(activeWorkTitleIndex).toBeGreaterThan(-1);
-    expect(outputChunks[activeWorkTitleIndex - 1]).toBe("\x1b[0K");
-    expect(strippedChunks.some((chunk) => chunk.includes("src/running-0.ts"))).toBe(true);
-    expect(strippedChunks.some((chunk) => chunk.includes("approval required"))).toBe(true);
-    expect(strippedChunks.some((chunk) => chunk.includes("src/completed-0.ts"))).toBe(true);
-    expect(strippedChunks.some((chunk) => chunk.includes("src/completed-7.ts"))).toBe(true);
+    expect(strippedChunks.some((chunk) =>
+      chunk.includes("scribbling ·") && chunk.includes("active") && chunk.includes("done")
+    )).toBe(true);
+    expect(strippedChunks.some((chunk) => chunk.includes("Running tools"))).toBe(false);
     expect(strippedChunks.some((chunk) => chunk.includes("more completed this turn"))).toBe(false);
-    expect(strippedChunks.some((chunk) => chunk.includes("Running tools") && chunk.includes("src/running-0.ts"))).toBe(false);
 
     const durableResponseChunk = strippedChunks.find((chunk) => chunk.includes("Mock response"));
     expect(durableResponseChunk).toBeDefined();
@@ -2466,8 +2462,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(durableOutput).toContain("approval required");
     expect(durableOutput).toContain("failed");
     expect(durableOutput).toContain("Worked for");
-    const summaryChunks = strippedChunks.filter((chunk) => chunk.includes("completed ·"));
-    expect(summaryChunks.join("")).toContain(
+    expect(durableOutput).toContain(
       "9 completed · 3 active · 1 failed · Worked for 00:00"
     );
   });
@@ -2807,7 +2802,7 @@ describe("runSessionLoop — active turn spinner", () => {
     const rendered = strippedChunks.join("");
     const queuedSteerIndex = strippedChunks.findIndex((chunk) => chunk.includes("Queued steer"));
     expect(queuedSteerIndex).toBeGreaterThan(-1);
-    expect(outputChunks[queuedSteerIndex - 1]).toBe("\x1b[0K");
+    expect(outputChunks[queuedSteerIndex]).toContain("\x1b[0K");
     expect(strippedChunks.filter((chunk) => chunk.includes("User steer:"))).toEqual([
       "User steer:\nfocus only on approval cards\n",
     ]);
@@ -5384,6 +5379,56 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(rendered.slice(rendered.indexOf("settled streaming line 01"))).not.toContain("▍");
     expect(host.getState().streaming).toBeUndefined();
     expect(host.getState().transcript).toEqual([]);
+  });
+
+  it("uses the TTY row count for live Operator Console streaming height", async () => {
+    const outputChunks: string[] = [];
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 96, height: 16, isTty: true },
+    });
+    const answerLines = Array.from({ length: 24 }, (_, index) => `live streaming line ${String(index + 1).padStart(2, "0")}`);
+    const answer = answerLines.join("\n");
+    let liveRenderAfterTool = "";
+    const runtime = {
+      ...createMockRuntime(),
+      handle: async ({ onDelta, onEvent }: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
+        onEvent?.({ kind: "agent-start", sessionId: "test-session", input: "hello" });
+        onDelta?.(answer);
+        onEvent?.({ kind: "tool-start", tool: "read_file", stepId: "tool-1" });
+        liveRenderAfterTool = stripAnsi(outputChunks.join(""));
+        onEvent?.({ kind: "tool-result", tool: "read_file", activityId: "tool-1", ok: true, chars: 10, sentChars: 10 });
+        onEvent?.({ kind: "agent-final", text: answer });
+        return mockResponse({ text: answer });
+      },
+    } as Runtime;
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 96,
+        rows: 40,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 96, supportsAnimation: false }),
+      operatorConsole: { enabled: true, runtimeHost: host },
+      prompt: Object.assign(
+        async () => {
+          const values = ["hello", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    expect(liveRenderAfterTool).toContain("live streaming line 01");
+    expect(liveRenderAfterTool).toContain("live streaming line 24");
+    expect(host.getState().terminal.height).toBe(40);
   });
 
   it("renders final assistant output when Operator Console streaming is whitespace-only", async () => {

@@ -86,7 +86,7 @@ export function withSetupConsolePrompt(
     async (question: string, promptOptions?: PromptOptions) => {
       if (hasLiveSetupConsole(options.input, options.output)) {
         if (promptOptions?.secret === true) {
-          return readSecretWithSetupConsole(question, options, getController(), prompt.uiContext?.locale);
+          return readSecretWithSetupConsole(question, promptOptions, options, getController(), prompt.uiContext?.locale);
         }
         return readTextWithSetupConsole(question, promptOptions, options, getController(), prompt.uiContext?.locale);
       }
@@ -99,7 +99,7 @@ export function withSetupConsolePrompt(
         : async (question: string, promptOptions?: PromptOptions): Promise<PromptSubmission> => {
           if (hasLiveSetupConsole(options.input, options.output)) {
             if (promptOptions?.secret === true) {
-              return { text: await readSecretWithSetupConsole(question, options, getController(), prompt.uiContext?.locale) };
+              return { text: await readSecretWithSetupConsole(question, promptOptions, options, getController(), prompt.uiContext?.locale) };
             }
             return { text: await readTextWithSetupConsole(question, promptOptions, options, getController(), prompt.uiContext?.locale) };
           }
@@ -264,6 +264,7 @@ async function selectWithSetupConsole<T>(
 
 async function readSecretWithSetupConsole(
   question: string,
+  promptOptions: PromptOptions | undefined,
   options: SetupConsolePromptAdapterOptions,
   controller: SetupOperatorConsoleController,
   locale: string | undefined
@@ -284,8 +285,8 @@ async function readSecretWithSetupConsole(
     const copy = secretPanelCopy(normalizedLocale);
     controller.render({
       kind: "secret",
-      title: secretPanelTitle(question, normalizedLocale),
-      description: secretPanelDescription(question, copy),
+      title: panelTitle(question, normalizedLocale, promptOptions, secretPanelTitle),
+      description: panelDescription(question, copy.description, promptOptions),
       maskedValue: renderState.maskedText,
       envVar: secretPanelEnvVar(question),
       optional: true,
@@ -317,16 +318,32 @@ async function readSecretWithSetupConsole(
     resolve(value);
   };
 
+  const interrupt = (reject: (error: Error) => void) => {
+    if (settled) return;
+    settled = true;
+    restoreTerminal();
+    controller.clear();
+    options.output.write("\n");
+    reject(new SetupConsoleExitError());
+  };
+
   const onData = (chunk: string | Buffer | Uint8Array) => {
     keypressDispatcher.handle(chunk);
   };
 
   const pendingKeypresses: ParsedKeypress[] = [];
   let resolveSecret: ((value: string) => void) | undefined;
+  let rejectSecret: ((error: Error) => void) | undefined;
 
   const drainKeypresses = () => {
     if (resolveSecret === undefined || settled) return;
     for (const keypress of pendingKeypresses.splice(0)) {
+      if (keypress.type === "key" && keypress.ctrl === true && keypress.key === "c") {
+        if (rejectSecret !== undefined) {
+          interrupt(rejectSecret);
+        }
+        return;
+      }
       const result = secret.apply(keypress);
       render();
       if (result.intent?.type === "submit") {
@@ -347,8 +364,9 @@ async function readSecretWithSetupConsole(
     },
   });
 
-  return await new Promise<string>((resolve) => {
+  return await new Promise<string>((resolve, reject) => {
     resolveSecret = resolve;
+    rejectSecret = reject;
     ttyInput.on("data", onData);
     ttyInput.setRawMode?.(true);
     ttyInput.resume?.();
@@ -383,8 +401,8 @@ async function readTextWithSetupConsole(
   const render = () => {
     controller.render({
       kind: "textInput",
-      title: textPanelTitle(question, normalizedLocale),
-      description: textPanelDescription(question, copy),
+      title: panelTitle(question, normalizedLocale, promptOptions, textPanelTitle),
+      description: panelDescription(question, copy.description, promptOptions),
       value: state.text,
       placeholder: promptOptions?.placeholder ?? copy.emptyLabel,
       locale: normalizedLocale,
@@ -414,16 +432,32 @@ async function readTextWithSetupConsole(
     resolve(value);
   };
 
+  const interrupt = (reject: (error: Error) => void) => {
+    if (settled) return;
+    settled = true;
+    restoreTerminal();
+    controller.clear();
+    options.output.write("\n");
+    reject(new SetupConsoleExitError());
+  };
+
   const onData = (chunk: string | Buffer | Uint8Array) => {
     keypressDispatcher.handle(chunk);
   };
 
   const pendingKeypresses: ParsedKeypress[] = [];
   let resolveText: ((value: string) => void) | undefined;
+  let rejectText: ((error: Error) => void) | undefined;
 
   const drainKeypresses = () => {
     if (resolveText === undefined || settled) return;
     for (const keypress of pendingKeypresses.splice(0)) {
+      if (keypress.type === "key" && keypress.ctrl === true && keypress.key === "c") {
+        if (rejectText !== undefined) {
+          interrupt(rejectText);
+        }
+        return;
+      }
       const previousText = state.text;
       const result = applyKeypress(state, keypress);
       state = result.state;
@@ -449,8 +483,9 @@ async function readTextWithSetupConsole(
     },
   });
 
-  return await new Promise<string>((resolve) => {
+  return await new Promise<string>((resolve, reject) => {
     resolveText = resolve;
+    rejectText = reject;
     ttyInput.on("data", onData);
     ttyInput.setRawMode?.(true);
     ttyInput.resume?.();
@@ -548,13 +583,6 @@ function secretPanelTitle(question: string, locale: "en" | "ar"): string {
   return locale === "ar" ? "إدخال سرّي" : "Secret entry";
 }
 
-function secretPanelDescription(
-  question: string,
-  copy: ReturnType<typeof secretPanelCopy>
-): string {
-  return normalizePromptQuestion(question) || copy.description;
-}
-
 function secretPanelEnvVar(question: string): string | undefined {
   const normalized = normalizePromptQuestion(question);
   const candidates = normalized.match(/\b[A-Z][A-Z0-9_]{2,}\b/gu) ?? [];
@@ -579,19 +607,45 @@ function textPanelTitle(question: string, locale: "en" | "ar"): string {
   return locale === "ar" ? "إدخال نص" : "Text input";
 }
 
-function textPanelDescription(
-  question: string,
-  copy: ReturnType<typeof textPanelCopy>
-): string {
-  return normalizePromptQuestion(question) || copy.description;
-}
-
 function normalizePromptQuestion(question: string): string {
   return question
     .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/gu, "")
     .replace(/[\u2066\u2067\u2069]/gu, "")
     .replace(/\s+/gu, " ")
     .replace(/\s*[:：]\s*$/u, "")
+    .trim();
+}
+
+function panelTitle(
+  question: string,
+  locale: "en" | "ar",
+  promptOptions: PromptOptions | undefined,
+  fallback: (question: string, locale: "en" | "ar") => string
+): string {
+  const customTitle = normalizePromptTitle(promptOptions?.title);
+  if (customTitle.length > 0) return customTitle;
+  return fallback(question, locale);
+}
+
+function panelDescription(
+  question: string,
+  fallback: string,
+  promptOptions: PromptOptions | undefined
+): string {
+  const customDescription = normalizePromptDescription(promptOptions?.description);
+  if (customDescription.length > 0) return customDescription;
+  return normalizePromptQuestion(question) || fallback;
+}
+
+function normalizePromptTitle(title: string | undefined): string {
+  return normalizePromptDescription(title)
+    .replace(/^(?:𓂀\s*)+/u, "")
+    .replace(/\s+/gu, " ");
+}
+
+function normalizePromptDescription(description: string | undefined): string {
+  return (description ?? "")
+    .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/gu, "")
     .trim();
 }
 

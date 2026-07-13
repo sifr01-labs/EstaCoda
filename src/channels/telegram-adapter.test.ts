@@ -9,6 +9,7 @@ import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { renderApprovalActions } from "./approval-actions.js";
 import { modelPickerSelectActionKey, renderModelPickerActions } from "./model-picker-actions.js";
 import type { ArtifactRecord } from "../contracts/artifact.js";
+import type { ChannelMessage } from "../contracts/channel.js";
 
 function createTelegramTextHarness(options: { failOnSendMessage?: number } = {}): {
   adapter: TelegramAdapter;
@@ -191,6 +192,39 @@ function jsonBody(call: TelegramArtifactHarnessCall | undefined): Record<string,
 
 function callsForArtifactMethod(calls: TelegramArtifactHarnessCall[], method: string): TelegramArtifactHarnessCall[] {
   return calls.filter((call) => call.method === method);
+}
+
+function telegramAlbumPhotoUpdate(
+  updateId: number,
+  messageId: number,
+  mediaGroupId: string,
+  fileId: string,
+  caption: string
+) {
+  return {
+    update_id: updateId,
+    message: {
+      message_id: messageId,
+      media_group_id: mediaGroupId,
+      date: 1700000000 + messageId,
+      caption,
+      chat: {
+        id: "chat-1",
+        type: "private"
+      },
+      from: {
+        id: "user-1",
+        first_name: "Ada"
+      },
+      photo: [{
+        file_id: fileId,
+        file_unique_id: `${fileId}-unique`,
+        file_size: 128,
+        width: 100,
+        height: 200
+      }]
+    }
+  };
 }
 
 describe("TelegramAdapter", () => {
@@ -898,6 +932,31 @@ describe("TelegramAdapter", () => {
     expect(callsFor(calls, "deleteMessage")).toHaveLength(0);
   });
 
+  it("delivery.startStreamingText finish with drafts deletes materialized segment previews", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123", chatType: "dm" }, {
+      minInitialChars: 1,
+      transport: "draft"
+    });
+
+    handle.append("first");
+    await flushTelegramStreamingTimers();
+    handle.segmentBreak("tool-start");
+    await flushTelegramStreamingTimers();
+    handle.append("second");
+    await flushTelegramStreamingTimers();
+    const result = await handle.finish("final");
+
+    expect(result).toEqual({
+      delivered: true,
+      fallbackRequired: false,
+      deliveredText: "final"
+    });
+    expect(callsFor(calls, "sendMessage").map((call) => call.body.text)).toEqual(["first", "final"]);
+    expect(callsFor(calls, "deleteMessage").map((call) => call.body.message_id)).toEqual([1]);
+  });
+
   it("delivery.startStreamingText failed provider fallback keeps draft streaming alive with a fresh draft", async () => {
     vi.useFakeTimers();
     const { adapter, calls } = createTelegramStreamingHarness();
@@ -1434,6 +1493,36 @@ describe("TelegramAdapter", () => {
     expect(callsFor(calls, "deleteMessage").map((call) => call.body.message_id)).toEqual([1]);
   });
 
+  it("delivery.startStreamingText fresh final after segmentBreak deletes every response preview", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      minInitialChars: 1,
+      cursor: "|"
+    });
+
+    handle.append("first");
+    await flushTelegramStreamingTimers();
+    handle.segmentBreak("tool-start");
+    await flushTelegramStreamingTimers();
+    handle.append("second");
+    await flushTelegramStreamingTimers();
+    const result = await handle.finish("final");
+
+    expect(result).toEqual({
+      delivered: true,
+      fallbackRequired: false,
+      deliveredText: "final"
+    });
+    expect(callsFor(calls, "sendMessage").map((call) => call.body.text)).toEqual(["first|", "second|"]);
+    expect(callsFor(calls, "sendRichMessage").at(-1)?.body).toMatchObject({
+      rich_message: {
+        markdown: "final"
+      }
+    });
+    expect(callsFor(calls, "deleteMessage").map((call) => call.body.message_id)).toEqual([1, 2]);
+  });
+
   it("delivery.startStreamingText fresh final ignores delete failures after final delivery", async () => {
     vi.useFakeTimers();
     let nowMs = 0;
@@ -1567,6 +1656,63 @@ describe("TelegramAdapter", () => {
       message_id: 1
     });
     expect(result.fallbackRequired).toBe(true);
+  });
+
+  it("delivery.startStreamingText degraded fallback returns only the unseen continuation for visible prefixes", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness({
+      failResponses: {
+        editMessageText: {
+          1: { status: 429, errorCode: 429, description: "retry after 5", retryAfterSeconds: 5 }
+        }
+      }
+    });
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      minInitialChars: 1,
+      editIntervalMs: 10,
+      maxFloodStrikes: 0,
+      cursor: "|"
+    });
+
+    handle.append("draft");
+    await flushTelegramStreamingTimers();
+    handle.append(" pending");
+    await vi.advanceTimersByTimeAsync(10);
+    const result = await handle.finish("draft pending final");
+
+    expect(result).toEqual({
+      delivered: false,
+      fallbackRequired: true,
+      fallbackText: " pending final"
+    });
+    expect(callsFor(calls, "sendMessage").map((call) => call.body.text)).toEqual(["draft|"]);
+  });
+
+  it("delivery.startStreamingText degraded fallback keeps full fallback when visible text is not a prefix", async () => {
+    vi.useFakeTimers();
+    const { adapter } = createTelegramStreamingHarness({
+      failResponses: {
+        editMessageText: {
+          1: { status: 429, errorCode: 429, description: "retry after 5", retryAfterSeconds: 5 }
+        }
+      }
+    });
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123" }, {
+      minInitialChars: 1,
+      editIntervalMs: 10,
+      maxFloodStrikes: 0
+    });
+
+    handle.append("stale");
+    await flushTelegramStreamingTimers();
+    handle.append(" preview");
+    await vi.advanceTimersByTimeAsync(10);
+    const result = await handle.finish("final answer");
+
+    expect(result).toEqual({
+      delivered: false,
+      fallbackRequired: true
+    });
   });
 
   it("delivery.startStreamingText failed provider attempt with fallback resets segment and keeps stream alive", async () => {
@@ -2190,7 +2336,7 @@ describe("TelegramAdapter", () => {
     await vi.advanceTimersByTimeAsync(5_000);
 
     expect(callsFor(calls, "editMessageText")).toHaveLength(editsAfterSeal);
-    expect(callsFor(calls, "sendMessage").map((call) => call.body.text)).toEqual(["first|", "second|"]);
+    expect(callsFor(calls, "sendMessage").map((call) => call.body.text)).toEqual(["first|", " pending", "second|"]);
   });
 
   it("turns callback query data into ChannelMessage text", () => {
@@ -2279,6 +2425,172 @@ describe("TelegramAdapter", () => {
     expect(callsFor(calls, "answerCallbackQuery")[0]?.body).toEqual({
       callback_query_id: "callback-ack"
     });
+  });
+
+  it("preserves Telegram media group ids on parsed messages", () => {
+    const message = updateToChannelMessage({
+      update_id: 45,
+      message: {
+        message_id: 10,
+        media_group_id: "album-1",
+        date: 1700000000,
+        caption: "album caption",
+        chat: {
+          id: "chat-1",
+          type: "private"
+        },
+        photo: [{
+          file_id: "photo-file-1",
+          file_unique_id: "photo-unique-1",
+          file_size: 128,
+          width: 100,
+          height: 200
+        }]
+      }
+    });
+
+    expect(message?.metadata?.telegram).toEqual(expect.objectContaining({
+      mediaGroupId: "album-1",
+      messageId: 10,
+      updateId: 45
+    }));
+  });
+
+  it("batches Telegram album photos into one channel message", async () => {
+    vi.useFakeTimers();
+    const fetch = vi.fn(async (url: string) => {
+      const method = url.split("/").at(-1) ?? "";
+      if (method === "getUpdates") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ok: true,
+            result: [
+              telegramAlbumPhotoUpdate(51, 11, "album-1", "photo-1", "first caption"),
+              telegramAlbumPhotoUpdate(52, 12, "album-1", "photo-2", ""),
+              telegramAlbumPhotoUpdate(53, 13, "album-1", "photo-3", "")
+            ]
+          })
+        };
+      }
+
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: true })
+      };
+    });
+    const adapter = new TelegramAdapter({ botToken: "test-token", fetch, mediaGroupBatchMs: 25 });
+    const received: ChannelMessage[] = [];
+    const handler = vi.fn(async (message: ChannelMessage) => {
+      received.push(message);
+    });
+
+    await adapter.start(handler);
+    const count = await adapter.pollOnce();
+
+    expect(count).toBe(3);
+    expect(handler).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(25);
+
+    expect(handler).toHaveBeenCalledOnce();
+    const message = received[0]!;
+    expect(message.text).toBe("first caption");
+    expect(message.attachments?.map((attachment) => attachment.id)).toEqual(["photo-1", "photo-2", "photo-3"]);
+    expect(message.metadata?.telegram).toEqual(expect.objectContaining({
+      mediaGroupId: "album-1",
+      mediaGroupMessageIds: [11, 12, 13],
+      mediaGroupUpdateIds: [51, 52, 53],
+      mediaGroupSize: 3,
+      mediaGroupWindowMs: 25
+    }));
+  });
+
+  it("does not merge unrelated Telegram media groups", async () => {
+    vi.useFakeTimers();
+    const fetch = vi.fn(async (url: string) => {
+      const method = url.split("/").at(-1) ?? "";
+      if (method === "getUpdates") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ok: true,
+            result: [
+              telegramAlbumPhotoUpdate(61, 21, "album-a", "photo-a", "caption a"),
+              telegramAlbumPhotoUpdate(62, 22, "album-b", "photo-b", "caption b")
+            ]
+          })
+        };
+      }
+
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: true })
+      };
+    });
+    const adapter = new TelegramAdapter({ botToken: "test-token", fetch, mediaGroupBatchMs: 25 });
+    const received: ChannelMessage[] = [];
+    const handler = vi.fn(async (message: ChannelMessage) => {
+      received.push(message);
+    });
+
+    await adapter.start(handler);
+    await adapter.pollOnce();
+    await vi.advanceTimersByTimeAsync(25);
+
+    expect(handler).toHaveBeenCalledTimes(2);
+    expect(received.map((message) => message.metadata?.telegram)).toEqual([
+      expect.objectContaining({ mediaGroupId: "album-a", mediaGroupSize: 1 }),
+      expect.objectContaining({ mediaGroupId: "album-b", mediaGroupSize: 1 })
+    ]);
+  });
+
+  it("flushes pending Telegram albums on stop", async () => {
+    vi.useFakeTimers();
+    const fetch = vi.fn(async (url: string) => {
+      const method = url.split("/").at(-1) ?? "";
+      if (method === "getUpdates") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ok: true,
+            result: [
+              telegramAlbumPhotoUpdate(71, 31, "album-stop", "photo-stop", "caption")
+            ]
+          })
+        };
+      }
+
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: true })
+      };
+    });
+    const adapter = new TelegramAdapter({ botToken: "test-token", fetch, mediaGroupBatchMs: 1_000 });
+    const received: ChannelMessage[] = [];
+    const handler = vi.fn(async (message: ChannelMessage) => {
+      received.push(message);
+    });
+
+    await adapter.start(handler);
+    await adapter.pollOnce();
+    expect(handler).not.toHaveBeenCalled();
+
+    await adapter.stop();
+
+    expect(handler).toHaveBeenCalledOnce();
+    expect(received[0]?.metadata?.telegram).toEqual(expect.objectContaining({
+      mediaGroupId: "album-stop",
+      mediaGroupSize: 1
+    }));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(handler).toHaveBeenCalledOnce();
   });
 
   it("round-trips model picker actions through Telegram callback text", () => {

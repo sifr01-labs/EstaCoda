@@ -57,7 +57,7 @@ const DANGEROUS_EXACT_NAMES = new Set([
   "process.start",
   "process.stop",
   "file.write",
-  "file.replace",
+  "file.patch",
   "session_search"
 ]);
 

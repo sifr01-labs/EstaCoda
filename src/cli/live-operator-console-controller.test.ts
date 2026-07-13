@@ -73,29 +73,35 @@ describe("LiveOperatorConsoleController", () => {
   it("times active work from prompt submission until turn completion", () => {
     const output = createOutput();
     let nowMs = 5_000;
-    const controller = createController(output, {
+    const { controller, runtimeHost } = createControllerFixture(output, {
       now: () => nowMs,
       turnStartedAtMs: 1_000,
     });
 
-    controller.applyActiveWorkEvent({
+    const running = controller.applyActiveWorkEvent({
       id: "read",
       toolName: "read_file",
       status: "running",
       target: "src/app.ts",
     });
-    expect(stripAnsi(output.text())).toContain("Running tools  ◷ 00:04");
+    expect(running.startedAtMs).toBe(1_000);
+    expect(running.updatedAtMs).toBe(5_000);
+    expect(runtimeHost.getState().activeWork.startedAtMs).toBe(1_000);
+    expect(stripAnsi(output.text())).not.toContain("Running tools");
 
     output.clear();
     nowMs = 7_000;
-    controller.applyActiveWorkEvent({
+    const done = controller.applyActiveWorkEvent({
       id: "read",
       toolName: "read_file",
       status: "done",
       target: "src/app.ts",
       durationMs: 100,
     });
-    expect(stripAnsi(output.text())).toContain("Running tools  ◷ 00:06");
+    expect(done.startedAtMs).toBe(1_000);
+    expect(done.updatedAtMs).toBe(7_000);
+    expect(runtimeHost.getState().activeWork.updatedAtMs).toBe(7_000);
+    expect(stripAnsi(output.text())).not.toContain("Running tools");
 
     nowMs = 9_000;
     const completed = controller.completeActiveWork();
@@ -120,6 +126,31 @@ describe("LiveOperatorConsoleController", () => {
     expect(text).toContain("Hello, streaming world");
     expect(text).toContain("Hello, streaming world▍");
     expect(text).not.toContain("Assistant stream");
+  });
+
+  it("keeps follow-up steer typing to the prompt region while streaming stays live", () => {
+    const output = createOutput();
+    const { controller, runtimeHost } = createControllerFixture(output);
+
+    controller.appendStreamingText("Live assistant draft that should not repaint on every steer key.");
+    controller.refresh();
+    expect(stripAnsi(output.text())).toContain("Live assistant draft that should not repaint on every steer key.▍");
+    output.clear();
+
+    controller.setSteer({ mode: "drafting", draft: "h", cursorOffset: 1 });
+    const firstSteerRender = stripAnsi(output.text());
+    expect(runtimeHost.getState().streaming?.showCursor).toBe(false);
+    expect(firstSteerRender).toContain("Live assistant draft that should not repaint on every steer key.");
+    expect(firstSteerRender).not.toContain("Live assistant draft that should not repaint on every steer key.▍");
+    expect(firstSteerRender).toContain("Steer current turn");
+    expect(firstSteerRender).toContain("› h");
+    output.clear();
+
+    controller.setSteer({ mode: "drafting", draft: "he", cursorOffset: 2 });
+    const secondSteerRender = stripAnsi(output.text());
+    expect(secondSteerRender).toContain("Steer current turn");
+    expect(secondSteerRender).toContain("› he");
+    expect(secondSteerRender).not.toContain("Live assistant draft that should not repaint");
   });
 
   it("tracks visible streaming output with trimmed text", () => {
@@ -178,7 +209,11 @@ describe("LiveOperatorConsoleController", () => {
       text: "I will inspect the file first.",
       createdAtMs: 10_100,
     })]);
-    expect(stripAnsi(output.text())).toContain("Running tools");
+    const text = stripAnsi(output.text());
+    expect(text).toContain("I will inspect the file first.");
+    expect(text).toContain("read_file");
+    expect(text).toContain("src/app.ts");
+    expect(text).not.toContain("Running tools");
 
     output.clear();
     vi.advanceTimersByTime(75);
@@ -352,7 +387,7 @@ describe("LiveOperatorConsoleController", () => {
     expect(text).not.toContain("Assistant stream");
   });
 
-  it("keeps expanded live active work bounded while preserving streaming output", () => {
+  it("keeps hidden live active work from expanding the frame while preserving streaming output", () => {
     const output = createOutput();
     const { controller, runtimeHost } = createControllerFixture(output);
 
@@ -370,10 +405,14 @@ describe("LiveOperatorConsoleController", () => {
     const lines = runtimeHost.render().lines;
     const text = stripAnsi(lines.join("\n"));
 
-    expect(runtimeHost.getState().terminal.height).toBe(24);
-    expect(lines.length).toBeLessThanOrEqual(24);
-    expect(text).toContain("Running tools");
-    expect(text).toContain("I will inspect the memory files.");
+    expect(runtimeHost.getState().terminal.height).toBe(12);
+    expect(lines.length).toBeLessThanOrEqual(12);
+    expect(text).not.toContain("Running tools");
+    expect(text).toContain("read_file");
+    expect(text).toContain("src/file-19.ts");
+    expect(runtimeHost.getState().streaming?.segments).toContainEqual(expect.objectContaining({
+      text: "I will inspect the memory files.",
+    }));
   });
 });
 

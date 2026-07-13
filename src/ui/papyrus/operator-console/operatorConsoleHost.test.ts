@@ -201,6 +201,23 @@ describe("Papyrus operator console raw prompt host", () => {
     expect(frame.rows.every((line) => stringWidth(line) <= 80)).toBe(true);
   });
 
+  it("positions the raw terminal cursor at the end of bordered steer input", () => {
+    const draft = "ifsdswewewww";
+    const frame = buildOperatorConsoleRawPromptFrame({
+      prompt: "",
+      state: createLineEditorState(draft),
+      terminal: { width: 120, height: 16, isTty: true },
+      steer: { mode: "drafting", draft, cursorOffset: draft.length },
+      promptMode: "steer",
+      streaming: streamingState({ tail: "live draft" }),
+    });
+    const steerRow = frame.rows.findIndex((line) => line.includes(`› ${draft}`));
+
+    expect(steerRow).toBeGreaterThanOrEqual(0);
+    expect(frame.cursorRow).toBe(steerRow);
+    expect(frame.cursorColumn).toBe(16);
+  });
+
   it("is deterministic and emits no ANSI or cursor-control sequences", () => {
     const input = {
       prompt: "> ",

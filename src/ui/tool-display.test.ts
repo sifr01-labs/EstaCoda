@@ -12,7 +12,7 @@ const expectedLabels: Record<string, ToolDisplayLabelSet> = {
   "trajectory.record": { en: "Record Trajectory", ar: "تسجيل المسار" },
   "file.read": { en: "Read File", ar: "قراءة ملف" },
   "file.write": { en: "Write File", ar: "كتابة ملف" },
-  "file.replace": { en: "Patch File", ar: "تعديل ملف" },
+  "file.patch": { en: "Patch File", ar: "تعديل ملف" },
   "file.search": { en: "Search Files", ar: "بحث الملفات" },
   "file.glob": { en: "Glob Files", ar: "مطابقة الملفات" },
   "file.grep": { en: "Grep Files", ar: "بحث نصي" },

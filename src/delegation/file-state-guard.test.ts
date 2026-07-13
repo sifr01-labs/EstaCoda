@@ -207,14 +207,14 @@ describe("findStaleParentFileReadWarnings", () => {
       childSessionId: "child",
       path: "secrets.txt",
       operation: "replace",
-      sourceTool: "file.replace",
+      sourceTool: "file.patch",
       timestamp: "2026-06-11T10:02:00.000Z",
       metadata: {
         bytes: 22,
         changed: true,
         previewAvailable: true,
-        oldText: "OPENAI_API_KEY=sk-secret",
-        newText: "raw child output"
+        old_string: "OPENAI_API_KEY=sk-secret",
+        new_string: "raw child output"
       } as never
     });
 
@@ -229,8 +229,8 @@ describe("findStaleParentFileReadWarnings", () => {
     expect(warningText).not.toContain("OPENAI_API_KEY");
     expect(warningText).not.toContain("sk-secret");
     expect(warningText).not.toContain("raw child output");
-    expect(warningText).not.toContain("oldText");
-    expect(warningText).not.toContain("newText");
+    expect(warningText).not.toContain("old_string");
+    expect(warningText).not.toContain("new_string");
     expect(warningText).not.toContain("previewAvailable");
   });
 

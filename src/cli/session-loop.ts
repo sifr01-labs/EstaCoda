@@ -149,7 +149,7 @@ export type SessionLoopOptions = {
   };
 };
 
-const OPERATOR_CONSOLE_ACTIVE_WORK_TERMINAL_HEIGHT = 16;
+const OPERATOR_CONSOLE_FALLBACK_TERMINAL_HEIGHT = 24;
 const COMPACTION_PROMPT_PLACEHOLDER = "Compacting session history... Ctrl+C to cancel";
 
 type ContextUsageSource = Extract<RuntimeEvent, { kind: "context-usage" }>["source"];
@@ -323,7 +323,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       locale: renderer.locale === "ar" ? "ar" : "en",
       terminal: {
         width: renderer.capabilities.terminalWidth,
-        height: OPERATOR_CONSOLE_ACTIVE_WORK_TERMINAL_HEIGHT,
+        height: operatorConsoleTerminalHeight(output),
         isTty: renderer.capabilities.isTTY,
       },
       style: operatorConsoleStyle,
@@ -365,7 +365,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           enabled: true,
           terminal: {
             width: renderer.capabilities.terminalWidth,
-            height: OPERATOR_CONSOLE_ACTIVE_WORK_TERMINAL_HEIGHT,
+            height: operatorConsoleTerminalHeight(output),
             isTty: renderer.capabilities.isTTY,
           },
           getStatus: getOperatorConsoleStatus,
@@ -507,7 +507,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             runtimeHost: operatorConsoleRuntimeHost,
             terminal: {
               width: termWidth,
-              height: OPERATOR_CONSOLE_ACTIVE_WORK_TERMINAL_HEIGHT,
+              height: operatorConsoleTerminalHeight(output),
               isTty: renderer.capabilities.isTTY,
             },
             capabilities: {
@@ -631,7 +631,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             runtimeHost: operatorConsoleRuntimeHost,
             terminal: {
               width: termWidth,
-              height: OPERATOR_CONSOLE_ACTIVE_WORK_TERMINAL_HEIGHT,
+              height: operatorConsoleTerminalHeight(output),
               isTty: renderer.capabilities.isTTY,
             },
             capabilities: {
@@ -889,7 +889,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
               let newPhase: string | undefined;
               if (operatorConsoleLiveFrame !== undefined && isToolActivityRuntimeEvent(event)) {
                 operatorConsoleLiveFrame.applyActiveWorkEvent(activeWorkEventMapper.build(event));
-                newPhase = "tool";
+                newPhase = "provider";
               } else if (operatorConsoleLiveFrame !== undefined) {
                   const operatorConsolePhase = operatorConsoleTransientPhaseForRuntimeEvent(event);
                   if (operatorConsolePhase === null) {
@@ -3015,6 +3015,12 @@ function formatFreshSessionSecurity(mode: string, useUnicode: boolean): string {
 
 function formatSecurityMode(mode: string): string {
   return mode.length === 0 ? mode : `${mode[0]?.toUpperCase() ?? ""}${mode.slice(1)}`;
+}
+
+function operatorConsoleTerminalHeight(output: NodeJS.WritableStream): number {
+  const rows = (output as { readonly rows?: number }).rows;
+  if (rows === undefined || !Number.isFinite(rows)) return OPERATOR_CONSOLE_FALLBACK_TERMINAL_HEIGHT;
+  return Math.max(1, Math.floor(rows));
 }
 
 function ansiColor(text: string, hex: string): string {

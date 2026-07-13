@@ -51,6 +51,7 @@ export type TelegramAdapterOptions = {
   fetch?: TelegramFetch;
   now?: () => Date;
   streamingNowMs?: () => number;
+  mediaGroupBatchMs?: number;
   enabled?: boolean;
   missing?: string[];
 };
@@ -127,6 +128,7 @@ type TelegramMessage = {
   message_id: number;
   date?: number;
   message_thread_id?: number;
+  media_group_id?: string;
   text?: string;
   caption?: string;
   chat: {
@@ -177,6 +179,13 @@ type TelegramProgressState = {
   lastRendered?: string;
 };
 
+type TelegramMediaGroupBuffer = {
+  handler: (message: ChannelMessage) => Promise<void>;
+  messages: ChannelMessage[];
+  latestReceivedAt: string;
+  timer?: ReturnType<typeof setTimeout>;
+};
+
 const DEFAULT_MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const TELEGRAM_MAX_TEXT_UTF16 = 4096;
 const TELEGRAM_RICH_MESSAGE_MAX_CHARS = 32768;
@@ -185,9 +194,84 @@ const DEFAULT_STREAM_EDIT_INTERVAL_MS = 750;
 const DEFAULT_STREAM_MIN_INITIAL_CHARS = 24;
 const DEFAULT_STREAM_CURSOR = "▌";
 const DEFAULT_STREAM_MAX_FLOOD_STRIKES = 2;
+const DEFAULT_MEDIA_GROUP_BATCH_MS = 800;
 
 export function countUnicodeCodePoints(text: string): number {
   return Array.from(text).length;
+}
+
+function telegramMediaGroupId(message: ChannelMessage): string | undefined {
+  const telegram = message.metadata?.telegram;
+  if (telegram === undefined || telegram === null || typeof telegram !== "object" || Array.isArray(telegram)) {
+    return undefined;
+  }
+  const mediaGroupId = (telegram as { mediaGroupId?: unknown }).mediaGroupId;
+  return typeof mediaGroupId === "string" && mediaGroupId.length > 0 ? mediaGroupId : undefined;
+}
+
+function telegramMessageId(message: ChannelMessage): number | undefined {
+  const telegram = message.metadata?.telegram;
+  if (telegram === undefined || telegram === null || typeof telegram !== "object" || Array.isArray(telegram)) {
+    return undefined;
+  }
+  const messageId = (telegram as { messageId?: unknown }).messageId;
+  return typeof messageId === "number" && Number.isFinite(messageId) ? messageId : undefined;
+}
+
+function telegramMediaGroupKey(message: ChannelMessage, mediaGroupId: string): string {
+  return [
+    message.channel,
+    message.sessionKey.chatId,
+    message.sessionKey.threadId ?? "",
+    message.sessionKey.userId ?? message.sender.id,
+    mediaGroupId
+  ].join(":");
+}
+
+function combineTelegramMediaGroupMessages(
+  messages: ChannelMessage[],
+  options: { latestReceivedAt: string; windowMs: number }
+): ChannelMessage {
+  const ordered = [...messages].sort((left, right) =>
+    (telegramMessageId(left) ?? Number.MAX_SAFE_INTEGER) -
+    (telegramMessageId(right) ?? Number.MAX_SAFE_INTEGER)
+  );
+  const first = ordered[0] ?? messages[0]!;
+  const mediaGroupId = telegramMediaGroupId(first);
+  const text = ordered.find((message) => message.text.trim().length > 0)?.text ?? "";
+  const attachments = ordered.flatMap((message) => message.attachments ?? []);
+  const messageIds = ordered
+    .map(telegramMessageId)
+    .filter((messageId): messageId is number => messageId !== undefined);
+  const updateIds = ordered
+    .map((message) => {
+      const telegram = message.metadata?.telegram;
+      return telegram !== undefined && telegram !== null && typeof telegram === "object" && !Array.isArray(telegram)
+        ? (telegram as { updateId?: unknown }).updateId
+        : undefined;
+    })
+    .filter((updateId): updateId is number => typeof updateId === "number" && Number.isFinite(updateId));
+
+  return {
+    ...first,
+    id: `${first.id}-media-group-${mediaGroupId ?? "unknown"}`,
+    text,
+    attachments,
+    receivedAt: options.latestReceivedAt,
+    metadata: {
+      ...(first.metadata ?? {}),
+      telegram: {
+        ...((first.metadata?.telegram !== undefined && first.metadata.telegram !== null && typeof first.metadata.telegram === "object" && !Array.isArray(first.metadata.telegram))
+          ? first.metadata.telegram
+          : {}),
+        mediaGroupId,
+        mediaGroupMessageIds: messageIds,
+        mediaGroupUpdateIds: updateIds,
+        mediaGroupSize: ordered.length,
+        mediaGroupWindowMs: options.windowMs
+      }
+    }
+  };
 }
 
 export class TelegramAdapter implements ChannelAdapter {
@@ -204,6 +288,7 @@ export class TelegramAdapter implements ChannelAdapter {
   readonly #fetch: TelegramFetch;
   readonly #now: () => Date;
   readonly #streamingNowMs: () => number;
+  readonly #mediaGroupBatchMs: number;
   readonly #config: TelegramChannelConfig;
   readonly #missing: string[] | undefined;
   #draftCapable = true;
@@ -213,6 +298,7 @@ export class TelegramAdapter implements ChannelAdapter {
   #offset = 0;
   #running = false;
   readonly #progressByChat = new Map<string, TelegramProgressState>();
+  readonly #mediaGroupBuffers = new Map<string, TelegramMediaGroupBuffer>();
 
   readonly delivery = {
     sendText: async (sessionKey: ChannelSessionKey, text: string, options?: ChannelTextOptions) => {
@@ -310,6 +396,7 @@ export class TelegramAdapter implements ChannelAdapter {
     this.#fetch = options.fetch ?? fetchJson;
     this.#now = options.now ?? (() => new Date());
     this.#streamingNowMs = options.streamingNowMs ?? (() => performance.now());
+    this.#mediaGroupBatchMs = Math.max(0, Math.trunc(options.mediaGroupBatchMs ?? DEFAULT_MEDIA_GROUP_BATCH_MS));
     this.#missing = options.missing;
     this.#config = {
       enabled: options.enabled ?? true,
@@ -330,6 +417,7 @@ export class TelegramAdapter implements ChannelAdapter {
 
   async stop(): Promise<void> {
     this.#running = false;
+    await this.#flushMediaGroupBuffers();
   }
 
   async pollOnce(): Promise<number> {
@@ -356,17 +444,82 @@ export class TelegramAdapter implements ChannelAdapter {
         message.attachments = await this.#downloadAttachments(message);
       }
 
-      try {
-        await this.#handler(message);
-      } finally {
-        if (update.callback_query?.id !== undefined) {
-          await this.#answerCallbackQuery(update.callback_query.id);
+      const buffered = this.#maybeBufferMediaGroup(message);
+      if (!buffered) {
+        try {
+          await this.#handler(message);
+        } finally {
+          if (update.callback_query?.id !== undefined) {
+            await this.#answerCallbackQuery(update.callback_query.id);
+          }
         }
       }
       count += 1;
     }
 
     return count;
+  }
+
+  #maybeBufferMediaGroup(message: ChannelMessage): boolean {
+    if (this.#handler === undefined) {
+      return false;
+    }
+
+    const mediaGroupId = telegramMediaGroupId(message);
+    if (mediaGroupId === undefined || (message.attachments?.length ?? 0) === 0) {
+      return false;
+    }
+
+    const key = telegramMediaGroupKey(message, mediaGroupId);
+    const existing = this.#mediaGroupBuffers.get(key);
+    if (existing !== undefined) {
+      existing.messages.push(message);
+      existing.latestReceivedAt = message.receivedAt;
+      this.#resetMediaGroupTimer(key, existing);
+      return true;
+    }
+
+    const buffer: TelegramMediaGroupBuffer = {
+      handler: this.#handler,
+      messages: [message],
+      latestReceivedAt: message.receivedAt,
+      timer: undefined
+    };
+    this.#mediaGroupBuffers.set(key, buffer);
+    this.#resetMediaGroupTimer(key, buffer);
+    return true;
+  }
+
+  #resetMediaGroupTimer(key: string, buffer: TelegramMediaGroupBuffer): void {
+    if (buffer.timer !== undefined) {
+      clearTimeout(buffer.timer);
+    }
+    buffer.timer = setTimeout(() => {
+      void this.#flushMediaGroupBuffer(key).catch(() => undefined);
+    }, this.#mediaGroupBatchMs);
+  }
+
+  async #flushMediaGroupBuffers(): Promise<void> {
+    for (const key of [...this.#mediaGroupBuffers.keys()]) {
+      await this.#flushMediaGroupBuffer(key);
+    }
+  }
+
+  async #flushMediaGroupBuffer(key: string): Promise<void> {
+    const buffer = this.#mediaGroupBuffers.get(key);
+    if (buffer === undefined) {
+      return;
+    }
+    this.#mediaGroupBuffers.delete(key);
+    if (buffer.timer !== undefined) {
+      clearTimeout(buffer.timer);
+    }
+
+    const combined = combineTelegramMediaGroupMessages(buffer.messages, {
+      latestReceivedAt: buffer.latestReceivedAt,
+      windowMs: this.#mediaGroupBatchMs
+    });
+    await buffer.handler(combined);
   }
 
   get running(): boolean {
@@ -1014,6 +1167,8 @@ type TelegramStreamingTextSegment = {
   committedEscapedLength: number;
   committedMessageIds: number[];
   lastSentHtml?: string;
+  deliveredVisibleText: string;
+  responseVisibleTextRecorded: boolean;
   timer?: ReturnType<typeof setTimeout>;
   retryTimer?: ReturnType<typeof setTimeout>;
   sealed: boolean;
@@ -1042,6 +1197,8 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
   #abortPromise: Promise<void> | undefined;
   #messageCreatedTs: number | undefined;
   #floodStrikes = 0;
+  readonly #previewMessageIds = new Set<number>();
+  #sealedVisiblePreviewText = "";
   readonly #errors: unknown[] = [];
 
   constructor(input: TelegramStreamingTextWorkerInput) {
@@ -1087,6 +1244,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
     }
 
     const segment = this.#segment;
+    const flushTailOnRetry = segment.retryTimer !== undefined;
     this.#clearSegmentTimers(segment);
     this.#segment = createStreamingTextSegment();
     this.#messageCreatedTs = undefined;
@@ -1098,6 +1256,8 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
     this.#runSafely(async () => {
       if (this.#useDraftStreaming) {
         await this.#materializeDraftSegment(segment);
+      } else if (flushTailOnRetry) {
+        await this.#flushSegmentTailOnEditFailure(segment);
       } else {
         await this.#sealSegment(segment);
       }
@@ -1136,10 +1296,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
     this.#clearSegmentTimers(segment);
     this.#finishPromise = this.#enqueue(async () => {
       if (this.#fallbackRequired) {
-        return {
-          delivered: false,
-          fallbackRequired: true
-        };
+        return this.#fallbackResult(finalText);
       }
 
       if (this.#useDraftStreaming) {
@@ -1147,14 +1304,11 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
       }
 
       if (segment.messageId === undefined) {
-        return {
-          delivered: false,
-          fallbackRequired: true
-        };
+        return this.#fallbackResult(finalText);
       }
 
       if (segment.messageId !== undefined && (this.#shouldSendFreshFinal() || this.#input.prefersFreshFinal?.(finalText) === true)) {
-        return this.#finishWithFreshFinal(segment, finalText);
+        return this.#finishWithFreshFinal(finalText);
       }
 
       try {
@@ -1165,7 +1319,8 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
         if (firstChunk === undefined) {
           return {
             delivered: false,
-            fallbackRequired: true
+            fallbackRequired: true,
+            ...this.#fallbackTextPayload(finalText)
           };
         }
 
@@ -1184,10 +1339,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
         };
       } catch (error) {
         this.#captureError(error);
-        return {
-          delivered: false,
-          fallbackRequired: true
-        };
+        return this.#fallbackResult(finalText);
       }
     });
     return this.#finishPromise;
@@ -1249,6 +1401,43 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
         await this.#editSegmentWithoutCursor(segment);
       }
       segment.sealed = true;
+      this.#recordSealedSegmentVisibleText(segment);
+    } catch (error) {
+      this.#captureError(error);
+      this.#fallbackRequired = true;
+    }
+  }
+
+  async #flushSegmentTailOnEditFailure(segment: TelegramStreamingTextSegment): Promise<void> {
+    if (segment.sealed) {
+      return;
+    }
+
+    const snapshot = segment.sanitizer.snapshot();
+    if (snapshot.visibleCharCount === 0) {
+      segment.sealed = true;
+      return;
+    }
+
+    const unsentVisibleText = snapshot.visibleText.slice(segment.deliveredVisibleText.length);
+    if (unsentVisibleText.length === 0) {
+      segment.sealed = true;
+      this.#recordSealedSegmentVisibleText(segment);
+      return;
+    }
+
+    try {
+      const escapedTail = escapeTelegramPartialHtml(unsentVisibleText);
+      const chunks = splitStreamingTelegramText(escapedTail, TELEGRAM_MAX_TEXT_UTF16);
+
+      for (const chunk of chunks) {
+        const message = await this.#input.sendMessage(chunk, { format: "html" });
+        this.#recordPreviewMessage(message.message_id);
+      }
+
+      segment.deliveredVisibleText = snapshot.visibleText;
+      segment.sealed = true;
+      this.#recordSealedSegmentVisibleText(segment);
     } catch (error) {
       this.#captureError(error);
       this.#fallbackRequired = true;
@@ -1318,8 +1507,10 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
         return;
       }
       segment.messageId = message.message_id;
+      this.#recordPreviewMessage(message.message_id);
       this.#recordMessageCreated(segment);
       segment.lastSentHtml = rendered;
+      segment.deliveredVisibleText = snapshot.visibleText;
       this.#floodStrikes = 0;
       return;
     }
@@ -1340,6 +1531,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
       return;
     }
     segment.lastSentHtml = rendered;
+    segment.deliveredVisibleText = snapshot.visibleText;
     this.#floodStrikes = 0;
   }
 
@@ -1389,6 +1581,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
           throw error;
         }
         previewMessageId = message.message_id;
+        this.#recordPreviewMessage(previewMessageId);
         this.#recordMessageCreated(segment);
       }
 
@@ -1425,6 +1618,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
         return;
       }
       segment.messageId = message.message_id;
+      this.#recordPreviewMessage(message.message_id);
       this.#recordMessageCreated(segment);
     } else if (segment.lastSentHtml !== renderedFinalChunk) {
       try {
@@ -1442,17 +1636,15 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
     }
 
     segment.lastSentHtml = renderedFinalChunk;
+    segment.deliveredVisibleText = snapshot.visibleText;
     this.#floodStrikes = 0;
   }
 
-  async #finishWithFreshFinal(
-    segment: TelegramStreamingTextSegment,
-    finalText: string
-  ): Promise<ChannelStreamingTextResult> {
+  async #finishWithFreshFinal(finalText: string): Promise<ChannelStreamingTextResult> {
     try {
       const richMessage = await this.#input.trySendRich?.(finalText);
       if (richMessage !== undefined) {
-        await this.#deletePreviewMessages(segment);
+        await this.#deleteResponsePreviewMessages();
         this.#clearTimers();
         return {
           delivered: true,
@@ -1465,17 +1657,14 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
       const chunks = formatted.chunks.flatMap((chunk) => splitStreamingTelegramText(chunk, TELEGRAM_MAX_TEXT_UTF16));
 
       if (chunks.length === 0) {
-        return {
-          delivered: false,
-          fallbackRequired: true
-        };
+        return this.#fallbackResult(finalText);
       }
 
       for (const chunk of chunks) {
         await this.#input.sendMessage(chunk, { format: formatted.format });
       }
 
-      await this.#deletePreviewMessages(segment);
+      await this.#deleteResponsePreviewMessages();
       this.#clearTimers();
       return {
         delivered: true,
@@ -1484,10 +1673,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
       };
     } catch (error) {
       this.#captureError(error);
-      return {
-        delivered: false,
-        fallbackRequired: true
-      };
+      return this.#fallbackResult(finalText);
     }
   }
 
@@ -1497,16 +1683,14 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
       const chunks = formatted.chunks.flatMap((chunk) => splitStreamingTelegramText(chunk, TELEGRAM_MAX_TEXT_UTF16));
 
       if (chunks.length === 0) {
-        return {
-          delivered: false,
-          fallbackRequired: true
-        };
+        return this.#fallbackResult(finalText);
       }
 
       for (const chunk of chunks) {
         await this.#input.sendMessage(chunk, { format: formatted.format });
       }
 
+      await this.#deleteResponsePreviewMessages();
       this.#clearTimers();
       return {
         delivered: true,
@@ -1515,10 +1699,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
       };
     } catch (error) {
       this.#captureError(error);
-      return {
-        delivered: false,
-        fallbackRequired: true
-      };
+      return this.#fallbackResult(finalText);
     }
   }
 
@@ -1537,9 +1718,12 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
       const formatted = this.#input.formatFinalText(snapshot.visibleText);
       const chunks = formatted.chunks.flatMap((chunk) => splitStreamingTelegramText(chunk, TELEGRAM_MAX_TEXT_UTF16));
       for (const chunk of chunks) {
-        await this.#input.sendMessage(chunk, { format: formatted.format });
+        const message = await this.#input.sendMessage(chunk, { format: formatted.format });
+        this.#recordPreviewMessage(message.message_id);
       }
+      segment.deliveredVisibleText = snapshot.visibleText;
       segment.sealed = true;
+      this.#recordSealedSegmentVisibleText(segment);
     } catch (error) {
       this.#captureError(error);
       this.#fallbackRequired = true;
@@ -1563,6 +1747,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
 
     await this.#input.editMessageText(segment.messageId, rendered, { format: "html" });
     segment.lastSentHtml = rendered;
+    segment.deliveredVisibleText = segment.sanitizer.snapshot().visibleText;
   }
 
   async #cleanupFailedAttempt(segment: TelegramStreamingTextSegment): Promise<void> {
@@ -1575,10 +1760,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
       return;
     }
 
-    const messageIds = [
-      ...segment.committedMessageIds,
-      ...(segment.messageId === undefined ? [] : [segment.messageId])
-    ];
+    const messageIds = this.#segmentPreviewMessageIds(segment);
 
     for (const messageId of messageIds) {
       try {
@@ -1590,23 +1772,67 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
         } catch (editError) {
           this.#captureError(editError);
         }
+      } finally {
+        this.#previewMessageIds.delete(messageId);
       }
     }
+    segment.deliveredVisibleText = "";
   }
 
-  async #deletePreviewMessages(segment: TelegramStreamingTextSegment): Promise<void> {
-    const messageIds = [
-      ...segment.committedMessageIds,
-      ...(segment.messageId === undefined ? [] : [segment.messageId])
-    ];
+  async #deleteResponsePreviewMessages(): Promise<void> {
+    const messageIds = Array.from(this.#previewMessageIds);
 
     for (const messageId of messageIds) {
       try {
         await this.#input.deleteMessage(messageId);
       } catch (error) {
         this.#captureError(error);
+      } finally {
+        this.#previewMessageIds.delete(messageId);
       }
     }
+  }
+
+  #segmentPreviewMessageIds(segment: TelegramStreamingTextSegment): number[] {
+    return Array.from(new Set([
+      ...segment.committedMessageIds,
+      ...(segment.messageId === undefined ? [] : [segment.messageId])
+    ]));
+  }
+
+  #recordPreviewMessage(messageId: number): void {
+    this.#previewMessageIds.add(messageId);
+  }
+
+  #recordSealedSegmentVisibleText(segment: TelegramStreamingTextSegment): void {
+    if (segment.responseVisibleTextRecorded) {
+      return;
+    }
+
+    this.#sealedVisiblePreviewText += segment.deliveredVisibleText;
+    segment.responseVisibleTextRecorded = true;
+  }
+
+  #responseVisiblePrefix(): string {
+    return `${this.#sealedVisiblePreviewText}${this.#segment.deliveredVisibleText}`;
+  }
+
+  #fallbackTextPayload(finalText: string): { fallbackText?: string } {
+    const visiblePrefix = this.#responseVisiblePrefix();
+    if (visiblePrefix.length === 0 || !finalText.startsWith(visiblePrefix)) {
+      return {};
+    }
+
+    const continuation = finalText.slice(visiblePrefix.length);
+    return continuation.length === 0 ? {} : { fallbackText: continuation };
+  }
+
+  #fallbackResult(finalText: string): ChannelStreamingTextResult {
+    return {
+      delivered: false,
+      fallbackRequired: true,
+      ...this.#fallbackTextPayload(finalText)
+    };
   }
 
   #recordMessageCreated(segment: TelegramStreamingTextSegment): void {
@@ -1741,6 +1967,8 @@ function createStreamingTextSegment(): TelegramStreamingTextSegment {
     sanitizer: createTelegramStreamTextSanitizer(),
     committedEscapedLength: 0,
     committedMessageIds: [],
+    deliveredVisibleText: "",
+    responseVisibleTextRecorded: false,
     sealed: false,
     cleanupStarted: false
   };
@@ -1878,7 +2106,8 @@ export function updateToChannelMessage(update: TelegramUpdate, now: () => Date =
       telegram: {
         updateId: update.update_id,
         messageId: message.message_id,
-        chatType: message.chat.type
+        chatType: message.chat.type,
+        ...(message.media_group_id === undefined ? {} : { mediaGroupId: message.media_group_id })
       }
     }
   };

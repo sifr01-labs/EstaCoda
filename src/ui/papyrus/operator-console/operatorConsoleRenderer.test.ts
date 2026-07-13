@@ -189,11 +189,8 @@ describe("Papyrus operator console renderer", () => {
 
     expect(output[0]).toContain("EstaCoda");
     expect(output).toContainEqual(expect.stringContaining("Ready."));
-    expect(output).toContainEqual(expect.stringContaining("Running tools"));
+    expect(output).not.toContainEqual(expect.stringContaining("Running tools"));
     expect(output).toContain("Attachments");
-    expect(output.findIndex((line) => line.includes("Running tools"))).toBeLessThan(
-      output.findIndex((line) => line === "Attachments")
-    );
     expect(output.findIndex((line) => line === "Attachments")).toBeLessThan(
       output.findIndex((line) => line.includes("Steer current turn"))
     );
@@ -223,6 +220,28 @@ describe("Papyrus operator console renderer", () => {
           afterSegmentId: "segment-1",
         }],
       },
+      activeWork: {
+        startedAtMs: 0,
+        updatedAtMs: 33_000,
+        scrollOffset: 0,
+        expanded: false,
+        items: [
+          {
+            id: "read-1",
+            toolName: "read_file",
+            status: "running",
+            summary: "src/ui/papyrus/operator-console",
+            target: "src/ui/papyrus/operator-console",
+          },
+          {
+            id: "glob-1",
+            toolName: "glob",
+            status: "succeeded",
+            summary: "**/*.ts",
+            target: "**/*.ts",
+          },
+        ],
+      },
       turnActivity: { phase: "provider" },
     });
     const rendered = renderOperatorConsoleLines(
@@ -242,6 +261,8 @@ describe("Papyrus operator console renderer", () => {
     expect(output).toContainEqual(expect.stringContaining("◷ read_file"));
     expect(output).toContainEqual(expect.stringContaining("Now checking the layout"));
     expect(output).toContainEqual(expect.stringContaining("Now checking the layout▍"));
+    expect(output).toContainEqual(expect.stringContaining("scribbling · 1 active · 1 done · 00:33"));
+    expect(output.join("\n")).not.toContain("Running tools");
     expect(output.join("\n")).not.toContain("Assistant stream");
     expect(output.join("\n")).not.toContain("assistant:");
     expect(output.every((line) => stringWidth(line) <= 80)).toBe(true);
@@ -300,7 +321,7 @@ describe("Papyrus operator console renderer", () => {
     expect(output).not.toContain("hidden inactive");
   });
 
-  it("renders approval cards above active work, attachments, prompt, and status rail", () => {
+  it("renders approval cards above attachments, prompt, and status rail", () => {
     const state = createState({
       approvals: [{
         id: "approval-1",
@@ -340,13 +361,12 @@ describe("Papyrus operator console renderer", () => {
       createOperatorConsoleLayout(state, { width: 120, height: 24, isTty: true })
     );
     const approvalIndex = output.findIndex((line) => line.includes("Approval required"));
-    const activeWorkIndex = output.findIndex((line) => line.includes("Running tools"));
     const attachmentsIndex = output.findIndex((line) => line === "Attachments");
     const promptIndex = output.findIndex((line) => line.includes("›"));
     const statusIndex = output.findIndex((line) => line.includes("◷ 01:12"));
 
     expect(approvalIndex).toBeGreaterThanOrEqual(0);
-    expect(approvalIndex).toBeLessThan(activeWorkIndex);
+    expect(output).not.toContainEqual(expect.stringContaining("Running tools"));
     expect(approvalIndex).toBeLessThan(attachmentsIndex);
     expect(approvalIndex).toBeLessThan(promptIndex);
     expect(approvalIndex).toBeLessThan(statusIndex);
@@ -377,22 +397,20 @@ describe("Papyrus operator console renderer", () => {
     expect(JSON.stringify(state)).toBe(before);
   });
 
-  it("places active work above queued steer, attachments, steer input, and status rail when present", () => {
+  it("places queued steer above attachments, steer input, and status rail when present", () => {
     const state = createFullState();
     const layout = createOperatorConsoleLayout(state, { width: 120, height: 20, isTty: true });
     const output = renderOperatorConsoleTextLines(state, layout);
-    const activeWorkIndex = output.findIndex((line) => line.includes("Running tools"));
     const queuedSteerIndex = output.findIndex((line) => line.includes("Queued steer"));
     const attachmentsIndex = output.findIndex((line) => line === "Attachments");
     const steerInputIndex = output.findIndex((line) => line.includes("Steer current turn"));
     const statusIndex = output.findIndex((line) => line.includes("◷ 01:12"));
 
-    expect(activeWorkIndex).toBeGreaterThanOrEqual(0);
-    expect(queuedSteerIndex).toBeGreaterThan(activeWorkIndex);
+    expect(output).not.toContainEqual(expect.stringContaining("Running tools"));
+    expect(queuedSteerIndex).toBeGreaterThanOrEqual(0);
     expect(queuedSteerIndex).toBeLessThan(attachmentsIndex);
-    expect(activeWorkIndex).toBeLessThan(attachmentsIndex);
-    expect(activeWorkIndex).toBeLessThan(steerInputIndex);
-    expect(activeWorkIndex).toBeLessThan(statusIndex);
+    expect(queuedSteerIndex).toBeLessThan(steerInputIndex);
+    expect(queuedSteerIndex).toBeLessThan(statusIndex);
   });
 
   it("renders queued steer above steer input and keeps status rail below it", () => {

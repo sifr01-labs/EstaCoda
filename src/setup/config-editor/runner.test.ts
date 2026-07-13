@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { PassThrough, Writable } from "node:stream";
-import type { Prompt } from "../../cli/prompt-contract.js";
+import type { Prompt, PromptOptions } from "../../cli/prompt-contract.js";
 import type { SelectPromptInput } from "../../cli/interactive-select.js";
 import { WorkspaceTrustStore } from "../../security/workspace-trust-store.js";
 import type { ProviderId, ProviderApiMode, ProviderAuthMethod } from "../../contracts/provider.js";
@@ -750,6 +750,22 @@ describe("runConfigEditor", () => {
       input.title === "Image generation" &&
       input.options.some((option) => option.id === "gateway-no" || option.id === "gateway-yes")
     )).toBe(false);
+  });
+
+  it("shows Telegram remote-control guidance on the optional capability action card", async () => {
+    const prompt = fakePrompt({ values: ["unchanged"] });
+    const selectInputs = captureSelectInputs(prompt);
+
+    const optionalAction = await promptOptionalCapabilityAction(prompt, {
+      id: "telegram",
+      title: "Telegram/channels",
+      configured: false,
+    });
+
+    expect(optionalAction).toBe("unchanged");
+    expect(selectInputs[0]?.title).toBe("Telegram/channels");
+    expect(selectInputs[0]?.body).toContain("Telegram gives EstaCoda a remote command channel.");
+    expect(selectInputs[0]?.body).toContain("restrict access to the users or chats you actually trust");
   });
 
   it("keeps language and confirmation setup prompts stacked", async () => {
@@ -3814,6 +3830,8 @@ describe("runConfigEditor", () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
     const seenQuestions: string[] = [];
+    const seenDescriptions: Array<string | undefined> = [];
+    const seenInputTitles: Array<string | undefined> = [];
     const seenCards: Array<{ title: string; bodyLines: readonly string[] }> = [];
     const reviewPrompts: Array<{ title: string; body?: string; labels: string[]; descriptions: Array<string | undefined> }> = [];
     const output: string[] = [];
@@ -3821,8 +3839,10 @@ describe("runConfigEditor", () => {
       values: ["telegram", "enable", "42", "-100", true],
       secret: "123456:stored-telegram-token",
     });
-    const prompt = (async (question: string, options?: { secret?: boolean }) => {
+    const prompt = (async (question: string, options?: PromptOptions) => {
       seenQuestions.push(question);
+      seenDescriptions.push(options?.description);
+      seenInputTitles.push(options?.title);
       return basePrompt(question, options);
     }) as Prompt;
     prompt.select = async (input) => {
@@ -3864,6 +3884,13 @@ describe("runConfigEditor", () => {
     expect(seenQuestions).toContain("Telegram bot API token: ");
     expect(seenQuestions).toContain("Allowed Telegram user ID(s): ");
     expect(seenQuestions).toContain("Allowed Telegram group chat ID(s): ");
+    expect(seenInputTitles.filter((title) => title === "Telegram Setup")).toHaveLength(3);
+    expect(seenDescriptions.join("\n")).toContain("Connect Telegram bot");
+    expect(seenDescriptions.join("\n")).toContain("Open Telegram and search for the official @BotFather account.");
+    expect(seenDescriptions.join("\n")).toContain("Authorize Telegram users");
+    expect(seenDescriptions.join("\n")).toContain("Open Telegram and search for @userinfobot.");
+    expect(seenDescriptions.join("\n")).toContain("Authorize Telegram group chats");
+    expect(seenDescriptions.join("\n")).toContain("Add @getidsbot or @chatIDrobot to the same group chat.");
     expect(seenCards.map((card) => card.title)).toEqual(["Configure Telegram", "Configure Telegram", "Configure Telegram"]);
     expect(seenCards[0]?.bodyLines).toContain("Connect Telegram bot");
     expect(seenCards[0]?.bodyLines.join("\n")).toContain("Open Telegram and search for the official @BotFather account.");
@@ -4152,13 +4179,15 @@ describe("runConfigEditor", () => {
     await trustWorkspace(tempDir, workspaceRoot);
     const deps = whatsappDepsWithInstalledBridge({ pairDevice: successfulWhatsAppPairDevice("QR\n") });
     const output: string[] = [];
+    const prompt = fakePrompt({
+      values: ["whatsapp", "1", "971501234567"],
+    });
+    const selectInputs = captureSelectInputs(prompt);
 
     const result = await runConfigEditor({
       homeDir: tempDir,
       workspaceRoot,
-      prompt: fakePrompt({
-        values: ["whatsapp", "1", "971501234567"],
-      }),
+      prompt,
       defaultActionId: "configure-channels",
       whatsappSetupDependencies: deps,
       output: { write: (value) => output.push(value) },
@@ -4183,8 +4212,13 @@ describe("runConfigEditor", () => {
     expect(result.selectedActionId).toBe("configure-channels");
     expect(result.output).toContain("QR");
     expect(output.join("")).toContain("QR");
+    expect(output.join("")).toContain("Starting WhatsApp QR pairing");
     expect(result.output).toContain("✓ Allowed senders: 971501234567");
     expect(result.output).not.toContain("allowed users");
+    expect(selectInputs.find((input) => input.title === "WhatsApp channel mode")?.columns).toEqual([
+      { key: "name", header: "Option" },
+      { key: "description", header: "Description" },
+    ]);
     expect(deps.pairDevice).toHaveBeenCalledOnce();
     expect(config.channels?.whatsapp).toEqual(expect.objectContaining({
       enabled: true,

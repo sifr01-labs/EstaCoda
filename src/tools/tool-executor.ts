@@ -20,13 +20,15 @@ const MAX_STORED_TOOL_RESULT_CHARS = 12_000;
 const MAX_CONTEXT_SUMMARY_CHARS = 500;
 const SENSITIVE_KEY_RE = /apiKey|api[_-]?key|password|passwd|token|secret|credential|authorization|(?:^|[_-])auth(?:$|[_-])/i;
 const REDACTED_SECRET_VALUE = "[REDACTED]";
-const REDACTED_SECRET_URL = "[REDACTED_URL_WITH_SECRET]";
 const REDACTED_CDP_EXPRESSION = "[REDACTED_CDP_EXPRESSION]";
 const REDACTED_PROVIDER_ARGUMENTS = "[REDACTED_PROVIDER_ARGUMENTS]";
-const SENSITIVE_QUERY_PARAM_RE = /(?:^|[?&;\s])(?:token|access_token|refresh_token|id_token|api_key|key|password|passwd|secret|client_secret|auth|authorization)=/iu;
-const SENSITIVE_FIELD_VALUE_RE = /(?:^|["'{,\s])(?:apiKey|api[_-]?key|key|token|access_token|refresh_token|id_token|password|passwd|secret|client_secret|credential|auth|authorization)["']?\s*[:=]\s*["']?[^"',\s}]+/iu;
-const AUTH_VALUE_RE = /\b(?:authorization\s*:\s*)?(?:bearer|basic)\s+[\w.\-~+/]+=*/iu;
-const TOKEN_PREFIX_RE = /\b(?:sk-ant-|sk-proj-|sk-|ghp_|github_pat_)[A-Za-z0-9_\-]+/u;
+const SENSITIVE_QUERY_PARAM_VALUE_RE = /(^|[?&;\s])((?:token|access_token|refresh_token|id_token|api_key|key|password|passwd|secret|client_secret|auth|authorization)=)([^&;\s"'<>)[\][]+)/giu;
+const SENSITIVE_FIELD_VALUE_RE = /(^|["'{,\s])([A-Za-z0-9_-]*(?:api[_-]?key|key|token|access[_-]?token|refresh[_-]?token|id[_-]?token|password|passwd|secret|client[_-]?secret|credential)[A-Za-z0-9_-]*["']?\s*[:=]\s*["']?)([^"',\s}\]\[]+)/giu;
+const AUTH_FIELD_VALUE_RE = /(^|["'{,\s])(auth["']?\s*[:=]\s*["']?)([^"',\s}\]\[]+)/giu;
+const AUTHORIZATION_FIELD_VALUE_RE = /(^|["'{,\s])(authorization["']?\s*[:=]\s*["']?)(?!(?:bearer|basic)\s)([^"',\s}\]\[]+)/giu;
+const AUTH_VALUE_RE = /\b((?:authorization\s*:\s*)?(?:bearer|basic)\s+)([\w.\-~+/]+=*)/giu;
+const TOKEN_PREFIX_RE = /\b(?:sk-ant-|sk-proj-|sk-|ghp_|github_pat_)[A-Za-z0-9_\-]+/gu;
+const URL_USERINFO_RE = /\b([a-z][a-z0-9+.-]*:\/\/)([^/\s:@]+):([^@\s/]+)@/giu;
 
 export type ToolExecutionRequest = {
   toolset: ToolsetName;
@@ -701,30 +703,14 @@ function redactPersistedString(value: string | undefined): string | undefined {
 }
 
 function redactPersistedText(value: string): string {
-  return shouldRedactSecretBearingString(value) ? REDACTED_SECRET_URL : value;
-}
-
-function shouldRedactSecretBearingString(value: string): boolean {
-  return SENSITIVE_QUERY_PARAM_RE.test(value) ||
-    SENSITIVE_FIELD_VALUE_RE.test(value) ||
-    AUTH_VALUE_RE.test(value) ||
-    TOKEN_PREFIX_RE.test(value) ||
-    containsUrlUserInfoCredentials(value);
-}
-
-function containsUrlUserInfoCredentials(value: string): boolean {
-  const urls = value.match(/https?:\/\/[^\s"'<>\\)]+/giu) ?? [];
-  for (const rawUrl of urls) {
-    try {
-      const url = new URL(rawUrl);
-      if (url.username.length > 0 || url.password.length > 0) {
-        return true;
-      }
-    } catch {
-      continue;
-    }
-  }
-  return false;
+  return value
+    .replace(URL_USERINFO_RE, (_match, protocol: string) => `${protocol}${REDACTED_SECRET_VALUE}:${REDACTED_SECRET_VALUE}@`)
+    .replace(AUTH_VALUE_RE, (_match, prefix: string) => `${prefix}${REDACTED_SECRET_VALUE}`)
+    .replace(SENSITIVE_QUERY_PARAM_VALUE_RE, (_match, boundary: string, prefix: string) => `${boundary}${prefix}${REDACTED_SECRET_VALUE}`)
+    .replace(SENSITIVE_FIELD_VALUE_RE, (_match, boundary: string, prefix: string) => `${boundary}${prefix}${REDACTED_SECRET_VALUE}`)
+    .replace(AUTH_FIELD_VALUE_RE, (_match, boundary: string, prefix: string) => `${boundary}${prefix}${REDACTED_SECRET_VALUE}`)
+    .replace(AUTHORIZATION_FIELD_VALUE_RE, (_match, boundary: string, prefix: string) => `${boundary}${prefix}${REDACTED_SECRET_VALUE}`)
+    .replace(TOKEN_PREFIX_RE, REDACTED_SECRET_VALUE);
 }
 
 function normalizeCommandKey(value: string): string {

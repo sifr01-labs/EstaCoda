@@ -723,7 +723,7 @@ export class ProviderTurnLoop {
     });
     const providerPreferences = {
       requireTools: input.providerTools.length > 0,
-      requireVision: false,
+      requireVision: providerRequestContainsImageParts(providerRequest),
       requireStructuredOutput: false,
       providerOrder: [this.#model.provider],
       ...this.#providerPreferences

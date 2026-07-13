@@ -60,6 +60,7 @@ const STREAMING_PRIORITY = 5;
 const ATTACHMENTS_PRIORITY = 5;
 const TRANSCRIPT_PRIORITY = 6;
 const STARTUP_PRIORITY = 7;
+const SHOW_LIVE_ACTIVE_WORK_REGION = false;
 
 export function createOperatorConsoleLayout(
   state: OperatorConsoleState,
@@ -159,7 +160,7 @@ function createRegionDescriptors(
     });
   }
 
-  if (hasActiveWork(state.activeWork)) {
+  if (shouldShowActiveWorkRegion(state)) {
     descriptors.push({
       kind: "activeWork",
       priority: ACTIVE_WORK_PRIORITY,
@@ -212,6 +213,13 @@ function createRegionDescriptors(
   });
 
   return descriptors;
+}
+
+function shouldShowActiveWorkRegion(state: OperatorConsoleState): boolean {
+  if (!hasActiveWork(state.activeWork)) return false;
+  if (state.activeWork.completedAtMs !== undefined) return true;
+  if (!SHOW_LIVE_ACTIVE_WORK_REGION) return false;
+  return !hasStreamingSurface(state.streaming);
 }
 
 function createSetupRegionDescriptors(

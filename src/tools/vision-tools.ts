@@ -175,11 +175,27 @@ export async function analyzeImageWithVision(
   );
 
   if (auxiliaryResult.ok && auxiliaryResult.response !== undefined) {
+    const analysis = auxiliaryResult.response.content.trim();
+    if (analysis.length === 0) {
+      return {
+        ok: false,
+        content: `Vision analysis returned no usable content. Attempts: ${attempts.join(", ") || "none"}`,
+        metadata: {
+          path: relativePath,
+          bytes: fileStat.size,
+          mimeType,
+          provider: auxiliaryResult.response.provider,
+          model: auxiliaryResult.response.model,
+          attempts
+        }
+      };
+    }
+
     return {
       ok: true,
       content: [
         `Vision analysis: ${relativePath}`,
-        auxiliaryResult.response.content.trim()
+        analysis
       ].filter((line) => line.length > 0).join("\n\n"),
       metadata: {
         path: relativePath,

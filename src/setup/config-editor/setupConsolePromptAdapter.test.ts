@@ -167,6 +167,31 @@ describe("withSetupConsolePrompt", () => {
     expect(output.text()).not.toMatch(forbiddenManagedRegionOutput);
   });
 
+  it("uses prompt descriptions in setup secret panels", async () => {
+    const input = createInput();
+    const output = createOutput();
+    const prompt = createPrompt({ select: createSelect("base").select });
+    const wrapped = withSetupConsolePrompt(prompt, { input, output });
+
+    const pending = wrapped("Telegram bot API token: ", {
+      secret: true,
+      title: "𓂀 Telegram Setup",
+      description: "Connect Telegram bot\n\nOpen Telegram and search for @BotFather.",
+    });
+    await Promise.resolve();
+    input.write("123456:telegram-token\r");
+    const result = await pending;
+    const text = stripAnsi(output.text());
+
+    expect(result).toBe("123456:telegram-token");
+    expect(text).toContain("Telegram Setup");
+    expect(text).not.toContain("𓂀 𓂀 Telegram Setup");
+    expect(text).not.toContain("Secret Entry");
+    expect(text).toContain("Connect Telegram bot");
+    expect(text).toContain("Open Telegram and search for @BotFather.");
+    expect(text).not.toContain("123456:telegram-token");
+  });
+
   it("renders Arabic setup secret panel copy while keeping env vars stable", async () => {
     const input = createInput();
     const output = createOutput();
@@ -201,6 +226,25 @@ describe("withSetupConsolePrompt", () => {
 
     await expect(pending).resolves.toBe("");
     expect(stripAnsi(output.text())).not.toContain("cancel-secret");
+    expect(input.rawModes).toEqual([true, false]);
+  });
+
+  it("treats Ctrl+C in setup secret panels as setup-console exit", async () => {
+    const input = createInput();
+    const output = createOutput();
+    const prompt = createPrompt({ select: createSelect("base").select });
+    const wrapped = withSetupConsolePrompt(prompt, { input, output });
+
+    const pending = wrapped("Telegram bot API token: ", {
+      secret: true,
+      title: "Telegram Setup",
+      description: "Connect Telegram bot",
+    });
+    await Promise.resolve();
+    input.write("\x03");
+
+    await expect(pending).rejects.toBeInstanceOf(SetupConsoleExitError);
+    expect(output.text()).toContain("\x1b[?25h");
     expect(input.rawModes).toEqual([true, false]);
   });
 
@@ -266,6 +310,50 @@ describe("withSetupConsolePrompt", () => {
     expect(output.text()).toContain("\x1b[?25h");
     expect(input.rawModes).toEqual([true, false]);
     expect(onInputChange).toHaveBeenCalledWith("/tmp/estacoda-workspace");
+  });
+
+  it("uses prompt descriptions in visible setup text panels", async () => {
+    const input = createInput();
+    const output = createOutput();
+    const prompt = createPrompt({
+      select: createSelect("base").select,
+      answer: "base-answer",
+    });
+    const wrapped = withSetupConsolePrompt(prompt, { input, output });
+
+    const pending = wrapped("Allowed Telegram user ID(s): ", {
+      title: "𓂀 Telegram Setup",
+      description: "Authorize Telegram users\n\nOpen Telegram and search for @userinfobot.",
+    });
+    await Promise.resolve();
+    input.write("42\r");
+    const result = await pending;
+    const text = stripAnsi(output.text());
+
+    expect(result).toBe("42");
+    expect(text).toContain("Telegram Setup");
+    expect(text).not.toContain("𓂀 𓂀 Telegram Setup");
+    expect(text).not.toContain("Text Input");
+    expect(text).toContain("Authorize Telegram users");
+    expect(text).toContain("Open Telegram and search for @userinfobot.");
+  });
+
+  it("treats Ctrl+C in setup text panels as setup-console exit", async () => {
+    const input = createInput();
+    const output = createOutput();
+    const prompt = createPrompt({ select: createSelect("base").select });
+    const wrapped = withSetupConsolePrompt(prompt, { input, output });
+
+    const pending = wrapped("Allowed Telegram user ID(s): ", {
+      title: "Telegram Setup",
+      description: "Authorize Telegram users",
+    });
+    await Promise.resolve();
+    input.write("\x03");
+
+    await expect(pending).rejects.toBeInstanceOf(SetupConsoleExitError);
+    expect(output.text()).toContain("\x1b[?25h");
+    expect(input.rawModes).toEqual([true, false]);
   });
 
   it("clears the previous setup card before redrawing visible text input", async () => {

@@ -46,7 +46,7 @@ export function buildToolDisplayPreview(toolName: string, input: Record<string, 
     return displayPreviewWithLineRange(input.path, input.lineStart, input.lineEnd);
   }
 
-  if (toolName === "file.write" || toolName === "file.replace" || toolName === "notebook.edit") {
+  if (toolName === "file.write" || toolName === "file.patch" || toolName === "notebook.edit") {
     return redactToolDisplayPreview(input.path);
   }
 

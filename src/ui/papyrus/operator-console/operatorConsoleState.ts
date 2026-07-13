@@ -171,6 +171,7 @@ export type StreamingState = {
   readonly tail: string;
   readonly isStreaming: boolean;
   readonly toolTrail?: readonly InlineToolTrailEntry[];
+  readonly showCursor?: boolean;
 };
 
 export type ApprovalControl = ApprovalFocusControl;

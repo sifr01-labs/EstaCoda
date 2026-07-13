@@ -1175,10 +1175,13 @@ export async function promptOptionalCapabilityAction(
         description: setupCopyText(locale, "setupEditor.prompt.optionalCapabilityAction.skip.description"),
         value: "skip" as const,
       })];
+  const message = input.id === "telegram"
+    ? setupCopyText(locale, "setupEditor.prompt.telegram.summary")
+    : input.title;
 
   return promptSetupChoiceMaybeBack(prompt, {
     title: input.title,
-    message: `${input.title}\n`,
+    message: `${message}\n`,
     columns: setupChoiceColumns(locale),
     tableDirection: setupChoiceTableDirection(locale),
     tableWidth: setupChoiceTableWidth(locale),
@@ -1225,18 +1228,24 @@ export async function promptTelegramCapability(
     providerId: "telegram",
     envVarName: botTokenEnv,
     question: setupTelegramBotTokenQuestion(locale),
+    title: telegramSetupInputTitle(locale),
+    description: telegramSetupInputDescription(locale, "botToken"),
   });
   await showTelegramSetupInputCard(prompt, locale, "allowedUserIds");
   const allowedUserIds = splitCsv(await promptSetupStringWithDefault(
     prompt,
     setupTelegramAllowedUserIdsQuestion(locale),
-    (current.allowedUserIds ?? []).join(",")
+    (current.allowedUserIds ?? []).join(","),
+    telegramSetupInputDescription(locale, "allowedUserIds"),
+    telegramSetupInputTitle(locale)
   ));
   await showTelegramSetupInputCard(prompt, locale, "allowedChatIds");
   const allowedChatIds = splitCsv(await promptSetupStringWithDefault(
     prompt,
     setupTelegramAllowedChatIdsQuestion(locale),
-    (current.allowedChatIds ?? []).join(",")
+    (current.allowedChatIds ?? []).join(","),
+    telegramSetupInputDescription(locale, "allowedChatIds"),
+    telegramSetupInputTitle(locale)
   ));
 
   return {
@@ -1245,6 +1254,19 @@ export async function promptTelegramCapability(
     allowedUserIds,
     allowedChatIds,
   };
+}
+
+function telegramSetupInputTitle(locale: SetupCopyLocale): string {
+  return locale === "ar" ? "ضبط Telegram" : "Telegram Setup";
+}
+
+function telegramSetupInputDescription(locale: SetupCopyLocale, kind: TelegramSetupInputCardKind): string {
+  const keys = TELEGRAM_SETUP_INPUT_CARD_KEYS[kind];
+  return [
+    setupCopyText(locale, keys.heading),
+    "",
+    setupCopyText(locale, keys.body),
+  ].join("\n");
 }
 
 type TelegramSetupInputCardKind = "botToken" | "allowedUserIds" | "allowedChatIds";
@@ -1342,6 +1364,10 @@ export async function promptDiscordCapability(
   };
 }
 
+/**
+ * Legacy fallback for optional-capability callers. The setup editor, onboarding
+ * wizard, and CLI WhatsApp command use the QR-driven runWhatsAppSetupFlow path.
+ */
 export async function promptWhatsAppCapability(
   prompt: Prompt,
   current: {

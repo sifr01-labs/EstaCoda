@@ -1,11 +1,13 @@
 import { chromeCopy } from "../../cli-ui-copy.js";
 import { truncateVisible } from "../../renderers/layout.js";
-import type { TurnActivityState } from "./operatorConsoleState.js";
+import { formatLiveActiveWorkStatus } from "./activeWorkSurface.js";
+import type { ToolActivityState, TurnActivityState } from "./operatorConsoleState.js";
 import { styleColor, type OperatorConsoleStyle } from "./operatorConsoleStyle.js";
 
 export type TurnActivitySurfaceRenderOptions = {
   readonly width: number;
   readonly locale?: "en" | "ar";
+  readonly activeWork?: ToolActivityState;
   readonly style?: OperatorConsoleStyle;
 };
 
@@ -21,8 +23,12 @@ export function renderTurnActivitySurface(
   if (width <= 0 || state === undefined) return [];
   const spinner = turnActivitySpinner(state, options.style);
   const label = turnActivityLabel(state, options.locale);
-  const styledLabel = styleColor(options.style, label, options.style?.tokens.contract.text.secondary ?? "");
-  return [truncateVisible(`${spinner} ${styledLabel}`, width, "")];
+  const activeWorkStatus = formatLiveActiveWorkStatus(options.activeWork ?? { items: [], scrollOffset: 0, expanded: false }, {
+    locale: options.locale,
+  });
+  const fullLabel = activeWorkStatus === undefined ? label : `${label} · ${activeWorkStatus}`;
+  const styledFullLabel = styleColor(options.style, fullLabel, options.style?.tokens.contract.text.secondary ?? "");
+  return [truncateVisible(`${spinner} ${styledFullLabel}`, width, "")];
 }
 
 function turnActivitySpinner(

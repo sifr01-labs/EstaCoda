@@ -1,9 +1,9 @@
-import { access, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { FileStateTracker } from "../delegation/file-state-tracker.js";
-import { createWorkspaceTools } from "./workspace-tools.js";
+import { createWorkspaceTools, type WorkspaceFsAdapter } from "./workspace-tools.js";
 
 let tempDir: string | undefined;
 
@@ -43,19 +43,29 @@ describe("workspace file change preview metadata", () => {
     expect(preview?.diff).not.toContain("+ line 10");
   });
 
-  it("attaches exact replacement preview metadata for file.replace", async () => {
+  it("does not expose the retired file.replace tool", async () => {
+    const root = await makeTempDir();
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const retiredToolName = ["file", "replace"].join(".");
+
+    expect(tools.find((tool) => tool.name === retiredToolName)).toBeUndefined();
+  });
+
+  it("attaches exact replacement preview metadata for file.patch", async () => {
     const root = await makeTempDir();
     await writeFile(join(root, "app.ts"), "const value = 1;\n", "utf8");
     const tools = createWorkspaceTools({ workspaceRoot: root });
-    const replace = tools.find((tool) => tool.name === "file.replace");
+    const patch = tools.find((tool) => tool.name === "file.patch");
 
-    const result = await replace?.run({
+    const result = await patch?.run({
       path: "app.ts",
-      oldText: "const value = 1;",
-      newText: "const value = 2;",
+      old_string: "const value = 1;",
+      new_string: "const value = 2;",
     });
 
     expect(result?.ok).toBe(true);
+    expect(result?.metadata?.matchCount).toBe(1);
+    expect(result?.metadata?.matchStrategy).toBe("exact");
     expect(result?.metadata?.fileChangePreview).toMatchObject({
       kind: "fileChangePreview",
       path: "app.ts",
@@ -65,6 +75,540 @@ describe("workspace file change preview metadata", () => {
     const preview = result?.metadata?.fileChangePreview as { diff?: string } | undefined;
     expect(preview?.diff).toContain("- const value = 1;");
     expect(preview?.diff).toContain("+ const value = 2;");
+  });
+
+  it("requires unique file.patch matches unless replace_all is true", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "notes.md"), "todo\ntodo\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const ambiguous = await patch?.run({
+      path: "notes.md",
+      old_string: "todo",
+      new_string: "done"
+    });
+    const replaced = await patch?.run({
+      path: "notes.md",
+      old_string: "todo",
+      new_string: "done",
+      replace_all: true
+    });
+
+    expect(ambiguous?.ok).toBe(false);
+    expect(ambiguous?.content).toContain("using exact");
+    expect(replaced?.ok).toBe(true);
+    expect(replaced?.metadata?.matchCount).toBe(2);
+  });
+
+  it("uses whitespace-normalized matching when exact file.patch matching fails", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "notes.md"), "Function:  The action keeps rules.\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const result = await patch?.run({
+      path: "notes.md",
+      old_string: "Function: The action keeps rules.",
+      new_string: "Function: The action keeps stricter rules."
+    });
+
+    expect(result?.ok).toBe(true);
+    expect(result?.metadata?.matchStrategy).toBe("whitespace_normalized");
+    expect(result?.metadata?.matchCount).toBe(1);
+    await expect(readFile(join(root, "notes.md"), "utf8")).resolves.toBe("Function: The action keeps stricter rules.\n");
+  });
+
+  it("uses escape-normalized matching for escaped newline anchors", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "app.ts"), "const value = \"alpha\nbeta\";\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const result = await patch?.run({
+      path: "app.ts",
+      old_string: "const value = \"alpha\\nbeta\";",
+      new_string: "const value = \"done\";"
+    });
+
+    expect(result?.ok).toBe(true);
+    expect(result?.metadata?.matchStrategy).toBe("escape_normalized");
+    await expect(readFile(join(root, "app.ts"), "utf8")).resolves.toBe("const value = \"done\";\n");
+  });
+
+  it("uses unicode-normalized matching for equivalent text forms", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "notes.md"), "Cafe\u0301 costs\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const result = await patch?.run({
+      path: "notes.md",
+      old_string: "Caf\u00e9 costs",
+      new_string: "Coffee costs"
+    });
+
+    expect(result?.ok).toBe(true);
+    expect(result?.metadata?.matchStrategy).toBe("unicode_normalized");
+    await expect(readFile(join(root, "notes.md"), "utf8")).resolves.toBe("Coffee costs\n");
+  });
+
+  it("reports ambiguous fuzzy matches unless replace_all is true", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "notes.md"), "alpha  beta\nalpha   beta\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const ambiguous = await patch?.run({
+      path: "notes.md",
+      old_string: "alpha beta",
+      new_string: "done"
+    });
+    const replaced = await patch?.run({
+      path: "notes.md",
+      old_string: "alpha beta",
+      new_string: "done",
+      replace_all: true
+    });
+
+    expect(ambiguous?.ok).toBe(false);
+    expect(ambiguous?.content).toContain("whitespace_normalized");
+    expect(ambiguous?.metadata?.matchCount).toBe(2);
+    expect(replaced?.ok).toBe(true);
+    expect(replaced?.metadata?.matchCount).toBe(2);
+    expect(replaced?.metadata?.matchStrategy).toBe("whitespace_normalized");
+    await expect(readFile(join(root, "notes.md"), "utf8")).resolves.toBe("done\ndone\n");
+  });
+
+  it("returns recovery metadata when no file.patch strategy matches", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "notes.md"), "current text\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const result = await patch?.run({
+      path: "notes.md",
+      old_string: "missing text",
+      new_string: "replacement"
+    });
+
+    expect(result?.ok).toBe(false);
+    expect(result?.content).toContain("Use file.read");
+    expect(result?.metadata?.attemptedStrategies).toEqual([
+      "exact",
+      "line_trimmed",
+      "whitespace_normalized",
+      "indentation_flexible",
+      "escape_normalized",
+      "trimmed_boundary",
+      "unicode_normalized",
+      "block_anchor",
+      "context_aware"
+    ]);
+  });
+
+  it("escalates repeated file.patch replace failures on the same file", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "notes.md"), "current text\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const first = await patch?.run({
+      path: "notes.md",
+      old_string: "missing text",
+      new_string: "replacement"
+    });
+    const second = await patch?.run({
+      path: "notes.md",
+      old_string: "still missing",
+      new_string: "replacement"
+    });
+    const third = await patch?.run({
+      path: "notes.md",
+      old_string: "also missing",
+      new_string: "replacement"
+    });
+
+    expect(first?.metadata?.patchFailureCount).toBe(1);
+    expect(first?.metadata?.patchFailureEscalated).toBe(false);
+    expect(second?.metadata?.patchFailureCount).toBe(2);
+    expect(third?.metadata?.patchFailureCount).toBe(3);
+    expect(third?.metadata?.patchFailureEscalated).toBe(true);
+    expect(third?.content).toContain("Stop retrying. Re-read the file");
+  });
+
+  it("resets file.patch failure counts after a successful patch", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "notes.md"), "current text\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    await patch?.run({
+      path: "notes.md",
+      old_string: "missing text",
+      new_string: "replacement"
+    });
+    const success = await patch?.run({
+      path: "notes.md",
+      old_string: "current text",
+      new_string: "updated text"
+    });
+    const nextFailure = await patch?.run({
+      path: "notes.md",
+      old_string: "missing text",
+      new_string: "replacement"
+    });
+
+    expect(success?.ok).toBe(true);
+    expect(nextFailure?.metadata?.patchFailureCount).toBe(1);
+    expect(nextFailure?.metadata?.patchFailureEscalated).toBe(false);
+  });
+
+  it("applies V4A patch mode across multiple files after validation", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "a.md"), "alpha\nbeta\n", "utf8");
+    await writeFile(join(root, "b.md"), "one\ntwo\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const result = await patch?.run({
+      mode: "patch",
+      patch: [
+        "*** Begin Patch",
+        "*** Update File: a.md",
+        "@@ alpha @@",
+        " alpha",
+        "-beta",
+        "+gamma",
+        "*** Update File: b.md",
+        "@@ one @@",
+        " one",
+        "-two",
+        "+three",
+        "*** End Patch"
+      ].join("\n")
+    });
+
+    expect(result?.ok).toBe(true);
+    expect(result?.metadata).toMatchObject({
+      paths: ["a.md", "b.md"],
+      fileCount: 2,
+      hunkCount: 2
+    });
+    expect(result?.metadata?.fileChangePreview).toMatchObject({
+      kind: "fileChangePreview",
+      path: "multiple files",
+      changeType: "modified"
+    });
+    await expect(readFile(join(root, "a.md"), "utf8")).resolves.toBe("alpha\ngamma\n");
+    await expect(readFile(join(root, "b.md"), "utf8")).resolves.toBe("one\nthree\n");
+  });
+
+  it("validates all V4A patch hunks before writing any file", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "a.md"), "alpha\nbeta\n", "utf8");
+    await writeFile(join(root, "b.md"), "one\ntwo\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const result = await patch?.run({
+      mode: "patch",
+      patch: [
+        "*** Begin Patch",
+        "*** Update File: a.md",
+        "@@ alpha @@",
+        " alpha",
+        "-beta",
+        "+gamma",
+        "*** Update File: b.md",
+        "@@ one @@",
+        " one",
+        "-missing",
+        "+three",
+        "*** End Patch"
+      ].join("\n")
+    });
+
+    expect(result?.ok).toBe(false);
+    expect(result?.content).toContain("b.md hunk 1");
+    await expect(readFile(join(root, "a.md"), "utf8")).resolves.toBe("alpha\nbeta\n");
+    await expect(readFile(join(root, "b.md"), "utf8")).resolves.toBe("one\ntwo\n");
+  });
+
+  it("escalates repeated V4A patch hunk failures on the same file without writing", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "a.md"), "alpha\nbeta\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+    const badPatch = [
+      "*** Begin Patch",
+      "*** Update File: a.md",
+      "@@ alpha @@",
+      " alpha",
+      "-missing",
+      "+gamma",
+      "*** End Patch"
+    ].join("\n");
+
+    await patch?.run({ mode: "patch", patch: badPatch });
+    await patch?.run({ mode: "patch", patch: badPatch });
+    const third = await patch?.run({ mode: "patch", patch: badPatch });
+
+    expect(third?.ok).toBe(false);
+    expect(third?.metadata?.patchFailureCount).toBe(3);
+    expect(third?.metadata?.patchFailureEscalated).toBe(true);
+    expect(third?.content).toContain("Stop retrying. Re-read the file");
+    await expect(readFile(join(root, "a.md"), "utf8")).resolves.toBe("alpha\nbeta\n");
+  });
+
+  it("uses V4A context hints to disambiguate patch hunks", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "app.ts"), [
+      "function first() {",
+      "  return 1;",
+      "}",
+      "",
+      "function second() {",
+      "  return 1;",
+      "}",
+      ""
+    ].join("\n"), "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const result = await patch?.run({
+      mode: "patch",
+      patch: [
+        "*** Begin Patch",
+        "*** Update File: app.ts",
+        "@@ function second() @@",
+        "-  return 1;",
+        "+  return 2;",
+        "*** End Patch"
+      ].join("\n")
+    });
+
+    expect(result?.ok).toBe(true);
+    await expect(readFile(join(root, "app.ts"), "utf8")).resolves.toBe([
+      "function first() {",
+      "  return 1;",
+      "}",
+      "",
+      "function second() {",
+      "  return 2;",
+      "}",
+      ""
+    ].join("\n"));
+  });
+
+  it("applies V4A add and delete file sections atomically", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "old.md"), "remove me\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const result = await patch?.run({
+      mode: "patch",
+      patch: [
+        "*** Begin Patch",
+        "*** Add File: new.md",
+        "+# New",
+        "+content",
+        "*** Delete File: old.md",
+        "*** End Patch"
+      ].join("\n")
+    });
+
+    expect(result?.ok).toBe(true);
+    expect(result?.metadata).toMatchObject({
+      paths: ["new.md", "old.md"],
+      operations: ["add", "delete"],
+      fileCount: 2
+    });
+    const preview = result?.metadata?.fileChangePreview as { diff?: string } | undefined;
+    expect(preview?.diff).toContain("--- /dev/null");
+    expect(preview?.diff).toContain("+++ b/new.md");
+    await expect(readFile(join(root, "new.md"), "utf8")).resolves.toBe("# New\ncontent\n");
+    await expect(readFile(join(root, "old.md"), "utf8")).rejects.toBeDefined();
+  });
+
+  it("validates V4A add/delete operations before writing any file", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "a.md"), "alpha\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const result = await patch?.run({
+      mode: "patch",
+      patch: [
+        "*** Begin Patch",
+        "*** Add File: added.md",
+        "+created",
+        "*** Delete File: missing.md",
+        "*** End Patch"
+      ].join("\n")
+    });
+
+    expect(result?.ok).toBe(false);
+    await expect(readFile(join(root, "added.md"), "utf8")).rejects.toBeDefined();
+    await expect(readFile(join(root, "a.md"), "utf8")).resolves.toBe("alpha\n");
+  });
+
+  it("rolls back applied V4A operations when a later write fails", async () => {
+    const root = await makeTempDir();
+    const canonicalRoot = await realpath(root);
+    const addedPath = join(canonicalRoot, "added.md");
+    const oldPath = join(canonicalRoot, "old.md");
+    const keepPath = join(canonicalRoot, "keep.md");
+    await writeFile(oldPath, "remove me\n", "utf8");
+    await writeFile(keepPath, "keep\n", "utf8");
+    const files = new Map<string, string>([
+      [oldPath, "remove me\n"],
+      [keepPath, "keep\n"]
+    ]);
+    const missing = (path: string) => Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), { code: "ENOENT" });
+    const fsAdapter: WorkspaceFsAdapter = {
+      readTextFile: async ({ path }) => {
+        const content = files.get(path);
+        if (content === undefined) {
+          throw missing(path);
+        }
+        return content;
+      },
+      writeTextFile: async ({ path, content }) => {
+        if (path === keepPath) {
+          throw new Error("simulated write failure");
+        }
+        files.set(path, content);
+      },
+      deleteTextFile: async ({ path }) => {
+        if (!files.delete(path)) {
+          throw missing(path);
+        }
+      }
+    };
+    const tools = createWorkspaceTools({ workspaceRoot: root, fsAdapter });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const result = await patch?.run({
+      mode: "patch",
+      patch: [
+        "*** Begin Patch",
+        "*** Add File: added.md",
+        "+created",
+        "*** Delete File: old.md",
+        "*** Update File: keep.md",
+        "@@ keep @@",
+        "-keep",
+        "+changed",
+        "*** End Patch"
+      ].join("\n")
+    });
+
+    expect(result?.ok).toBe(false);
+    expect(result?.content).toContain("Rolled back previously applied changes");
+    expect(result?.metadata).toMatchObject({
+      path: "keep.md",
+      reason: "patch_apply_failed",
+      appliedPaths: ["added.md", "old.md"],
+      rollback: {
+        attempted: 2,
+        ok: true,
+        errors: []
+      }
+    });
+    expect(files.has(addedPath)).toBe(false);
+    expect(files.get(oldPath)).toBe("remove me\n");
+    expect(files.get(keepPath)).toBe("keep\n");
+  });
+
+  it("supports append, prepend, and insert modes without whole-file overwrite", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "notes.md"), "middle\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const appended = await patch?.run({
+      mode: "append",
+      path: "notes.md",
+      content: "tail\n"
+    });
+    const prepended = await patch?.run({
+      mode: "prepend",
+      path: "notes.md",
+      content: "head\n"
+    });
+    const inserted = await patch?.run({
+      mode: "insert",
+      path: "notes.md",
+      anchor: "middle",
+      position: "after",
+      content: "\ninserted"
+    });
+
+    expect(appended?.ok).toBe(true);
+    expect(prepended?.ok).toBe(true);
+    expect(inserted?.ok).toBe(true);
+    expect(inserted?.metadata).toMatchObject({
+      operation: "insert",
+      matchStrategy: "exact",
+      matchConfidence: 1,
+      matchedSnippet: expect.stringContaining("middle")
+    });
+    await expect(readFile(join(root, "notes.md"), "utf8")).resolves.toBe("head\nmiddle\ninserted\ntail\n");
+  });
+
+  it("reports near-match hints when file.patch cannot find text", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "notes.md"), "Function: The action keeps rules.\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const result = await patch?.run({
+      path: "notes.md",
+      old_string: "Function: The action keeps business rules.",
+      new_string: "replacement"
+    });
+
+    expect(result?.ok).toBe(false);
+    expect(result?.content).toContain("Closest candidate");
+    expect(result?.metadata?.nearMatches).toEqual([
+      expect.objectContaining({
+        line: 1,
+        snippet: "Function: The action keeps rules."
+      })
+    ]);
+  });
+
+  it("validates JSON syntax before writing any patch operation", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "valid.json"), "{\"ok\":true}\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const patch = tools.find((tool) => tool.name === "file.patch");
+
+    const result = await patch?.run({
+      mode: "patch",
+      patch: [
+        "*** Begin Patch",
+        "*** Update File: valid.json",
+        "@@ ok @@",
+        "-{\"ok\":true}",
+        "+{\"ok\":",
+        "*** Add File: other.md",
+        "+should not write",
+        "*** End Patch"
+      ].join("\n")
+    });
+
+    expect(result?.ok).toBe(false);
+    expect(result?.content).toContain("Syntax check failed");
+    expect(result?.metadata?.syntaxCheck).toMatchObject({
+      checked: true,
+      language: "json",
+      ok: false
+    });
+    await expect(readFile(join(root, "valid.json"), "utf8")).resolves.toBe("{\"ok\":true}\n");
+    await expect(readFile(join(root, "other.md"), "utf8")).rejects.toBeDefined();
   });
 });
 
@@ -126,7 +670,7 @@ describe("workspace file-state tracking", () => {
     ]);
   });
 
-  it("records successful file.replace metadata", async () => {
+  it("records successful file.patch metadata", async () => {
     const root = await makeTempDir();
     await writeFile(join(root, "app.ts"), "const value = 1;\n", "utf8");
     const tracker = new FileStateTracker();
@@ -135,12 +679,12 @@ describe("workspace file-state tracking", () => {
       fileStateTracker: tracker,
       sessionId: "session-1"
     });
-    const replace = tools.find((tool) => tool.name === "file.replace");
+    const patch = tools.find((tool) => tool.name === "file.patch");
 
-    const result = await replace?.run({
+    const result = await patch?.run({
       path: "app.ts",
-      oldText: "const value = 1;",
-      newText: "const value = 2;"
+      old_string: "const value = 1;",
+      new_string: "const value = 2;"
     });
 
     expect(result?.ok).toBe(true);
@@ -148,7 +692,7 @@ describe("workspace file-state tracking", () => {
       expect.objectContaining({
         path: "app.ts",
         operation: "replace",
-        sourceTool: "file.replace",
+        sourceTool: "file.patch",
         metadata: {
           bytes: 17,
           changed: true,
@@ -167,10 +711,10 @@ describe("workspace file-state tracking", () => {
       sessionId: "session-1"
     });
     const read = tools.find((tool) => tool.name === "file.read");
-    const replace = tools.find((tool) => tool.name === "file.replace");
+    const patch = tools.find((tool) => tool.name === "file.patch");
 
     await read?.run({ path: "../outside.md" });
-    await replace?.run({ path: "missing.md", oldText: "a", newText: "b" });
+    await patch?.run({ path: "missing.md", old_string: "a", new_string: "b" });
 
     expect(tracker.listOperations()).toEqual([]);
   });
@@ -190,6 +734,160 @@ describe("workspace file-state tracking", () => {
 
     expect(result?.ok).toBe(true);
     expect(tracker.listOperations()).toEqual([]);
+  });
+});
+
+describe("guarded file.write overwrites", () => {
+  it("allows safe creates without overwrite intent", async () => {
+    const root = await makeTempDir();
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const write = tools.find((tool) => tool.name === "file.write");
+
+    const result = await write?.run({
+      path: "created.md",
+      content: "new document\n"
+    });
+
+    expect(result?.ok).toBe(true);
+    expect(result?.metadata).toMatchObject({
+      path: "created.md",
+      oldBytes: 0,
+      newBytes: 13,
+      byteDelta: 13,
+      changed: true,
+      existedBefore: false,
+      overwrite: false,
+      suspiciousShrink: false
+    });
+    await expect(readFile(join(root, "created.md"), "utf8")).resolves.toBe("new document\n");
+  });
+
+  it("allows same-content writes without overwrite intent", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "notes.md"), "same content\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const write = tools.find((tool) => tool.name === "file.write");
+
+    const result = await write?.run({
+      path: "notes.md",
+      content: "same content\n"
+    });
+
+    expect(result?.ok).toBe(true);
+    expect(result?.content).toContain("No changes");
+    expect(result?.metadata).toMatchObject({
+      path: "notes.md",
+      changed: false,
+      existedBefore: true,
+      overwrite: false,
+      suspiciousShrink: false
+    });
+    await expect(readFile(join(root, "notes.md"), "utf8")).resolves.toBe("same content\n");
+  });
+
+  it("requires explicit overwrite intent before changing an existing file", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "notes.md"), "original content\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const write = tools.find((tool) => tool.name === "file.write");
+
+    const result = await write?.run({
+      path: "notes.md",
+      content: "replacement content\n"
+    });
+
+    expect(result?.ok).toBe(false);
+    expect(result?.content).toContain("would overwrite existing notes.md");
+    expect(result?.metadata).toMatchObject({
+      path: "notes.md",
+      reason: "overwrite_intent_required",
+      overwriteRequired: true,
+      changed: true,
+      existedBefore: true,
+      suspiciousShrink: false
+    });
+    expect(result?.metadata?.fileChangePreview).toMatchObject({
+      kind: "fileChangePreview",
+      path: "notes.md",
+      changeType: "modified"
+    });
+    await expect(readFile(join(root, "notes.md"), "utf8")).resolves.toBe("original content\n");
+  });
+
+  it("allows intentional non-shrinking overwrites", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "notes.md"), "original content\n", "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const write = tools.find((tool) => tool.name === "file.write");
+
+    const result = await write?.run({
+      path: "notes.md",
+      content: "replacement content\n",
+      overwrite: true
+    });
+
+    expect(result?.ok).toBe(true);
+    expect(result?.metadata).toMatchObject({
+      path: "notes.md",
+      changed: true,
+      existedBefore: true,
+      overwrite: true,
+      suspiciousShrink: false
+    });
+    await expect(readFile(join(root, "notes.md"), "utf8")).resolves.toBe("replacement content\n");
+  });
+
+  it("blocks suspicious shrink overwrites even with overwrite intent", async () => {
+    const root = await makeTempDir();
+    const original = Array.from({ length: 80 }, (_, index) => `## Section ${index + 1}\nUseful transcript line ${index + 1}.`).join("\n");
+    await writeFile(join(root, "transcript.md"), original, "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const write = tools.find((tool) => tool.name === "file.write");
+
+    const result = await write?.run({
+      path: "transcript.md",
+      content: "# Summary\n",
+      overwrite: true
+    });
+
+    expect(result?.ok).toBe(false);
+    expect(result?.content).toContain("Suspicious file.write overwrite blocked");
+    expect(result?.metadata).toMatchObject({
+      path: "transcript.md",
+      reason: "suspicious_shrink_overwrite",
+      overwriteRequired: true,
+      suspiciousShrink: true,
+      changed: true,
+      existedBefore: true
+    });
+    expect(result?.metadata?.oldBytes).toBeGreaterThan(500);
+    expect(result?.metadata?.newBytes).toBe(Buffer.byteLength("# Summary\n"));
+    await expect(readFile(join(root, "transcript.md"), "utf8")).resolves.toBe(original);
+  });
+
+  it("allows suspicious shrink overwrites only with explicit shrink intent", async () => {
+    const root = await makeTempDir();
+    const original = Array.from({ length: 80 }, (_, index) => `## Section ${index + 1}\nUseful transcript line ${index + 1}.`).join("\n");
+    await writeFile(join(root, "transcript.md"), original, "utf8");
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const write = tools.find((tool) => tool.name === "file.write");
+
+    const result = await write?.run({
+      path: "transcript.md",
+      content: "# Summary\n",
+      overwrite: true,
+      allowShrink: true
+    });
+
+    expect(result?.ok).toBe(true);
+    expect(result?.metadata).toMatchObject({
+      path: "transcript.md",
+      changed: true,
+      existedBefore: true,
+      overwrite: true,
+      suspiciousShrink: true
+    });
+    await expect(readFile(join(root, "transcript.md"), "utf8")).resolves.toBe("# Summary\n");
   });
 });
 
