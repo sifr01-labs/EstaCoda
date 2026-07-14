@@ -301,6 +301,7 @@ describe("LiveOperatorConsoleController", () => {
     const output = createOutput();
     const { controller, runtimeHost } = createControllerFixture(output);
 
+    controller.appendStreamingText("I will delegate three inspections in parallel.");
     controller.applyActiveWorkEvent({
       id: "delegate-1",
       toolName: "delegate_task",
@@ -318,9 +319,14 @@ describe("LiveOperatorConsoleController", () => {
       target: "Read File",
     });
 
-    expect(stripAnsi(runtimeHost.render().lines.join("\n"))).toContain("Delegated work");
+    const delegatedFrame = stripAnsi(runtimeHost.render().lines.join("\n"));
+    expect(delegatedFrame).toContain("I will delegate three inspections in parallel.");
+    expect(delegatedFrame).toContain("Delegated work");
     expect(runtimeHost.getState().activeWork.items).toHaveLength(2);
     expect(runtimeHost.getState().streaming?.toolTrail?.map((entry) => entry.id)).toEqual(["delegate-1"]);
+
+    controller.appendStreamingText("Drafting the merged response.");
+    expect(stripAnsi(runtimeHost.render().lines.join("\n"))).not.toContain("Delegated work");
 
     controller.applyActiveWorkEvent({
       id: "subagent:child-1",

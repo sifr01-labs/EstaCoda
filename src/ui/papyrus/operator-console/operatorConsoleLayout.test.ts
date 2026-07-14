@@ -115,6 +115,10 @@ describe("Papyrus operator console layout", () => {
       streaming: streamingState(),
     })))).not.toContain("activeWork");
     expect(regionKinds(createOperatorConsoleLayout(createState({
+      activeWork,
+      streaming: streamingState({ tail: "" }),
+    })))).toEqual(expect.arrayContaining(["streaming", "activeWork"]));
+    expect(regionKinds(createOperatorConsoleLayout(createState({
       activeWork: {
         ...activeWork,
         items: activeWork.items.map((item) => ({ ...item, status: "succeeded" as const })),

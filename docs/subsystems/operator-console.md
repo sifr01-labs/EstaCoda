@@ -340,9 +340,11 @@ work region so the operator can see that isolated subagents are still running.
 kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 7% │ session 01:12
 ```
 
-When the parent delegation settles, or visible assistant streaming begins, the
-child rows leave the live frame. The durable turn-end surface keeps one parent
-tool row with the bounded outcome counts:
+Assistant prose emitted before `delegate_task` remains visible above the
+delegated-work region. When the parent delegation settles, or a new live
+assistant tail begins streaming, the child rows leave the live frame. The
+durable turn-end surface keeps one parent tool row with the bounded outcome
+counts:
 
 ```text
 ╭─ Tools completed ─────────────────────────────────────────────────────╮

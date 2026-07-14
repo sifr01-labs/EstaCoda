@@ -20,6 +20,10 @@ export function hasStreamingSurface(state: StreamingState | undefined): state is
   );
 }
 
+export function hasLiveStreamingTail(state: StreamingState | undefined): boolean {
+  return state !== undefined && state.isStreaming && state.tail.trim().length > 0;
+}
+
 export function getStreamingSurfaceDesiredHeight(
   state: StreamingState | undefined,
   width: number,

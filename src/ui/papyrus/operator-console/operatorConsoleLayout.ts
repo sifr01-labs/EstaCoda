@@ -16,6 +16,7 @@ import { getSlashSurfaceDesiredHeight } from "./slashSurface.js";
 import { getStartupDashboardSurfaceDesiredHeight } from "./startupDashboardSurface.js";
 import {
   getStreamingSurfaceDesiredHeight,
+  hasLiveStreamingTail,
   hasStreamingSurface,
 } from "./streamingSurface.js";
 import { getTurnActivitySurfaceDesiredHeight } from "./turnActivitySurface.js";
@@ -220,7 +221,7 @@ function shouldShowActiveWorkRegion(state: OperatorConsoleState): boolean {
   if (!hasActiveWork(state.activeWork)) return false;
   if (state.activeWork.completedAtMs !== undefined) return true;
   if (hasRunningDelegationWork(state.activeWork)) {
-    return !hasStreamingSurface(state.streaming);
+    return !hasLiveStreamingTail(state.streaming);
   }
   if (!SHOW_LIVE_ACTIVE_WORK_REGION) return false;
   return !hasStreamingSurface(state.streaming);
