@@ -39,6 +39,7 @@ export type ActiveWorkRuntimeEventMapperOptions = {
 export class ActiveWorkRuntimeEventMapper {
   readonly #starts = new Map<string, number[]>();
   readonly #delegationStarts = new Map<string, number>();
+  readonly #delegationStatuses = new Map<string, ActiveWorkRuntimeEventStatus>();
   readonly #locale: ToolDisplayLocale;
   readonly #now: () => number;
 
@@ -52,13 +53,18 @@ export class ActiveWorkRuntimeEventMapper {
   ): ActiveWorkRuntimeEvent {
     if (event.kind === "tool-start") {
       this.#pushStart(this.#eventKey(event));
+      if (event.tool === "delegate_task") {
+        this.#delegationStatuses.clear();
+      }
       return {
         id: event.activityId,
         toolName: event.tool,
         displayLabel: toolDisplayLabel(event.tool, this.#locale),
         status: "running",
         summary: "preparing",
-        target: event.displayPreview ?? event.targetSummary ?? toolDisplayLabel(event.tool),
+        target: event.tool === "delegate_task"
+          ? delegationStartingLabel(this.#locale)
+          : event.displayPreview ?? event.targetSummary ?? toolDisplayLabel(event.tool),
         detailsRef: event.activityId,
       };
     }
@@ -67,6 +73,12 @@ export class ActiveWorkRuntimeEventMapper {
     const gated = event.decision !== undefined && event.decision !== "allow";
     const failed = event.ok === false;
     const status: ActiveWorkRuntimeEventStatus = gated ? "gated" : failed ? "failed" : "done";
+    const delegationTarget = event.tool === "delegate_task"
+      ? delegationCompletionLabel(this.#delegationStatuses, status, this.#locale)
+      : undefined;
+    if (event.tool === "delegate_task") {
+      this.#delegationStatuses.clear();
+    }
 
     return {
       id: event.activityId,
@@ -74,7 +86,7 @@ export class ActiveWorkRuntimeEventMapper {
       displayLabel: toolDisplayLabel(event.tool, this.#locale),
       status,
       summary: gated ? "gated" : failed ? "failed" : activeWorkSummaryKeyForTool(event.tool),
-      target: event.displayPreview ?? event.targetSummary ?? toolDisplayLabel(event.tool),
+      target: delegationTarget ?? event.displayPreview ?? event.targetSummary ?? toolDisplayLabel(event.tool),
       ...(elapsedMs === undefined ? {} : { durationMs: elapsedMs }),
       detailsRef: event.activityId,
       ...(gated ? { riskClass: event.riskClass } : {}),
@@ -97,6 +109,12 @@ export class ActiveWorkRuntimeEventMapper {
       this.#delegationStarts.delete(id);
     }
     const activityLabel = delegationActivityLabel(event.childEvent, this.#locale);
+    const status: ActiveWorkRuntimeEventStatus = event.childEvent.kind === "agent-final"
+      ? "done"
+      : event.childEvent.kind === "agent-cancelled"
+        ? "cancelled"
+        : "running";
+    this.#delegationStatuses.set(id, status);
 
     return {
       id,
@@ -104,11 +122,7 @@ export class ActiveWorkRuntimeEventMapper {
       displayLabel: delegationChildLabel(event.role, event.taskIndex, this.#locale),
       source: "subagent",
       groupId: event.batchId ?? event.subagentId,
-      status: event.childEvent.kind === "agent-final"
-        ? "done"
-        : event.childEvent.kind === "agent-cancelled"
-          ? "cancelled"
-          : "running",
+      status,
       summary: activityLabel,
       target: activityLabel,
       ...(terminal ? { durationMs: Math.max(0, now - startedAt) } : {}),
@@ -137,6 +151,39 @@ export class ActiveWorkRuntimeEventMapper {
   #eventKey(event: Extract<RuntimeEvent, { kind: "tool-start" | "tool-result" }>): string {
     return event.activityId ?? `${event.tool}\0${event.targetSummary ?? ""}`;
   }
+}
+
+function delegationStartingLabel(locale: ToolDisplayLocale): string {
+  return locale === "ar" ? "بدء الوكلاء الفرعيين" : "starting subagents";
+}
+
+function delegationCompletionLabel(
+  statuses: ReadonlyMap<string, ActiveWorkRuntimeEventStatus>,
+  parentStatus: ActiveWorkRuntimeEventStatus,
+  locale: ToolDisplayLocale
+): string {
+  if (statuses.size === 0) {
+    if (parentStatus === "gated") return locale === "ar" ? "بانتظار الموافقة" : "approval required";
+    if (parentStatus === "failed") return locale === "ar" ? "فشل الإسناد" : "delegation failed";
+    return locale === "ar" ? "اكتمل الإسناد" : "delegation completed";
+  }
+
+  const values = [...statuses.values()];
+  const completed = values.filter((status) => status === "done").length;
+  const cancelled = values.filter((status) => status === "cancelled").length;
+  const unresolved = values.length - completed - cancelled;
+  const parts = locale === "ar"
+    ? [
+        completed > 0 ? `${completed} مكتملة` : undefined,
+        cancelled > 0 ? `${cancelled} ملغاة` : undefined,
+        unresolved > 0 ? `${unresolved} غير محسومة` : undefined,
+      ]
+    : [
+        completed > 0 ? `${completed} completed` : undefined,
+        cancelled > 0 ? `${cancelled} cancelled` : undefined,
+        unresolved > 0 ? `${unresolved} unresolved` : undefined,
+      ];
+  return parts.filter((part): part is string => part !== undefined).join(" · ");
 }
 
 export function createActiveWorkRuntimeState(

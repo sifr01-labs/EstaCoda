@@ -85,6 +85,43 @@ describe("Papyrus operator console layout", () => {
     expect(regionKinds(layout)).not.toContain("activeWork");
   });
 
+  it("makes a live-region exception only for running delegation work", () => {
+    const activeWork = {
+      items: [
+        {
+          id: "delegate",
+          toolName: "delegate_task",
+          status: "running" as const,
+          summary: "preparing",
+          target: "starting subagents",
+        },
+        {
+          id: "child-1",
+          toolName: "delegate_task",
+          source: "subagent" as const,
+          groupId: "batch-1",
+          status: "running" as const,
+          summary: "Read File",
+          target: "Read File",
+        },
+      ],
+      scrollOffset: 0,
+      expanded: true,
+    };
+
+    expect(regionKinds(createOperatorConsoleLayout(createState({ activeWork })))).toContain("activeWork");
+    expect(regionKinds(createOperatorConsoleLayout(createState({
+      activeWork,
+      streaming: streamingState(),
+    })))).not.toContain("activeWork");
+    expect(regionKinds(createOperatorConsoleLayout(createState({
+      activeWork: {
+        ...activeWork,
+        items: activeWork.items.map((item) => ({ ...item, status: "succeeded" as const })),
+      },
+    })))).not.toContain("activeWork");
+  });
+
   it("includes turn activity only when turn activity state exists", () => {
     expect(regionKinds(createOperatorConsoleLayout(createState()))).not.toContain("turnActivity");
 

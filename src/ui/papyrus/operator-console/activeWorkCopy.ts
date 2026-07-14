@@ -2,6 +2,7 @@ export type OperatorConsoleLocale = "en" | "ar";
 
 export type ActiveWorkCopy = {
   readonly runningTools: string;
+  readonly delegatedWork: string;
   readonly toolsCompleted: string;
   readonly workedFor: string;
   readonly duration: string;
@@ -15,6 +16,7 @@ export type ActiveWorkCopy = {
 
 const ENGLISH_ACTIVE_WORK_COPY: ActiveWorkCopy = {
   runningTools: "Running tools",
+  delegatedWork: "Delegated work",
   toolsCompleted: "Tools completed",
   workedFor: "Worked for",
   duration: "duration",
@@ -28,6 +30,7 @@ const ENGLISH_ACTIVE_WORK_COPY: ActiveWorkCopy = {
 
 const ARABIC_ACTIVE_WORK_COPY: ActiveWorkCopy = {
   runningTools: "تنفيذ الأدوات",
+  delegatedWork: "عمل الوكلاء الفرعيين",
   toolsCompleted: "اكتمل تنفيذ الأدوات",
   workedFor: "عمل لمدة",
   duration: "المدة",

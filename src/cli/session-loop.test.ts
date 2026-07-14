@@ -2467,6 +2467,103 @@ describe("runSessionLoop — active turn spinner", () => {
     );
   });
 
+  it("renders delegated children live while keeping only the parent tool in completed work", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 100,
+    } as unknown as NodeJS.WritableStream;
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 100, height: 16, isTty: true },
+    });
+    const setActiveWorkSpy = vi.spyOn(host, "setActiveWork");
+    const runtime = createEventEmittingMockRuntime([
+      { kind: "agent-start", sessionId: "test-session", input: "delegate this" },
+      {
+        kind: "tool-start",
+        tool: "delegate_task",
+        stepId: "delegate-step",
+        activityId: "delegate-1",
+        targetSummary: "raw delegated task text",
+      },
+      {
+        kind: "delegation-progress",
+        subagentId: "child-1",
+        childSessionId: "child-session-1",
+        parentSessionId: "test-session",
+        role: "leaf",
+        depth: 1,
+        taskIndex: 0,
+        batchId: "batch-1",
+        childEvent: { kind: "agent-start", sessionId: "child-session-1" },
+      },
+      {
+        kind: "delegation-progress",
+        subagentId: "child-1",
+        childSessionId: "child-session-1",
+        parentSessionId: "test-session",
+        role: "leaf",
+        depth: 1,
+        taskIndex: 0,
+        batchId: "batch-1",
+        childEvent: { kind: "tool-start", tool: "file.read" },
+      },
+      {
+        kind: "delegation-progress",
+        subagentId: "child-1",
+        childSessionId: "child-session-1",
+        parentSessionId: "test-session",
+        role: "leaf",
+        depth: 1,
+        taskIndex: 0,
+        batchId: "batch-1",
+        childEvent: { kind: "agent-final", ok: true },
+      },
+      {
+        kind: "tool-result",
+        tool: "delegate_task",
+        activityId: "delegate-1",
+        ok: true,
+        chars: 100,
+        sentChars: 100,
+        targetSummary: "raw delegated task text",
+      },
+      { kind: "agent-final", text: "Mock response" },
+    ]);
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      capabilities: interactiveCaps({ terminalWidth: 100, supportsAnimation: false }),
+      operatorConsole: { enabled: true, runtimeHost: host },
+      prompt: Object.assign(
+        async () => {
+          const values = ["delegate this", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    expect(setActiveWorkSpy.mock.calls.some(([state]) =>
+      state.items.some((item) => item.source === "subagent" && item.displayLabel === "Leaf 1")
+    )).toBe(true);
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("Delegated work");
+    const completedOutput = rendered.slice(rendered.lastIndexOf("Tools completed"));
+    expect(completedOutput).toContain("Delegate Task");
+    expect(completedOutput).toContain("1 completed");
+    expect(completedOutput).not.toContain("Leaf 1");
+    expect(completedOutput).not.toContain("Read File");
+    expect(completedOutput).not.toContain("raw delegated task text");
+  });
+
   it("renders provider spinner below the most recent tool row in managed TTY mode", async () => {
     const outputChunks: string[] = [];
     const output = {

@@ -42,6 +42,14 @@ export function hasActiveWork(state: ToolActivityState): boolean {
   return state.items.length > 0;
 }
 
+export function hasRunningDelegationWork(state: ToolActivityState): boolean {
+  return state.items.some((item) =>
+    item.source !== "subagent" &&
+    item.toolName === "delegate_task" &&
+    item.status === "running"
+  );
+}
+
 export function sortActiveWorkItems(state: ToolActivityState): readonly ActiveWorkItem[] {
   return state.items
     .map((item, index) => ({ item, index }))
@@ -54,12 +62,13 @@ export function sortActiveWorkItems(state: ToolActivityState): readonly ActiveWo
 
 export function getActiveWorkSurfaceDesiredHeight(state: ToolActivityState): number {
   if (!hasActiveWork(state)) return 0;
-  return Math.max(3, state.items.length + 2);
+  return Math.max(3, activeWorkItemsForLiveSurface(state).length + 2);
 }
 
 export function getCompletedActiveWorkSurfaceDesiredHeight(state: ToolActivityState): number {
-  if (!hasActiveWork(state)) return 0;
-  return state.items.length + 4;
+  const durableItems = activeWorkItemsForCompletedSurface(state);
+  if (durableItems.length === 0) return 0;
+  return durableItems.length + 4;
 }
 
 export function renderActiveWorkSurface(
@@ -72,20 +81,26 @@ export function renderActiveWorkSurface(
   const height = normalizeDimension(options.height ?? getActiveWorkSurfaceDesiredHeight(state));
   if (height <= 0) return [];
   const copy = resolveActiveWorkCopy(options.locale);
-  if (height < 3) return [truncateVisibleCells(`${copy.runningTools}: ${state.items.length}`, width)];
+  const liveItems = activeWorkItemsForLiveSurface(state);
+  const liveTitle = hasRunningDelegationWork(state) ? copy.delegatedWork : copy.runningTools;
+  if (height < 3) return [truncateVisibleCells(`${liveTitle}: ${liveItems.length}`, width)];
 
   const contentWidth = Math.max(0, width - 4);
   const contentRows = Math.max(1, height - 2);
-  const sorted = sortActiveWorkItems(state);
+  const visibleState = {
+    ...state,
+    items: liveItems,
+  };
+  const sorted = sortActiveWorkItems(visibleState);
   const title = formatActiveWorkTitle(
-    copy.runningTools,
+    liveTitle,
     state.startedAtMs === undefined ? undefined : formatClockDuration(resolveActiveWorkElapsedMs(state)),
     options.locale
   );
 
   return [
     renderTopBorder(title, width),
-    ...renderActiveWorkContentRows(state, sorted, contentRows, contentWidth, options.locale, options.style)
+    ...renderActiveWorkContentRows(visibleState, sorted, contentRows, contentWidth, options.locale, options.style)
       .map((row) => renderContentRow(row, contentWidth, width)),
     renderBottomBorder(width),
   ];
@@ -96,16 +111,20 @@ export function renderCompletedActiveWorkSurface(
   options: ActiveWorkSurfaceRenderOptions
 ): readonly string[] {
   const width = normalizeDimension(options.width);
-  if (width <= 0 || !hasActiveWork(state)) return [];
+  const visibleState = {
+    ...state,
+    items: activeWorkItemsForCompletedSurface(state),
+  };
+  if (width <= 0 || !hasActiveWork(visibleState)) return [];
 
-  const height = normalizeDimension(options.height ?? getCompletedActiveWorkSurfaceDesiredHeight(state));
+  const height = normalizeDimension(options.height ?? getCompletedActiveWorkSurfaceDesiredHeight(visibleState));
   if (height <= 0) return [];
   const copy = resolveActiveWorkCopy(options.locale);
-  if (height < 3) return [truncateVisibleCells(formatActiveWorkSummary(state, { locale: options.locale }), width)];
+  if (height < 3) return [truncateVisibleCells(formatActiveWorkSummary(visibleState, { locale: options.locale }), width)];
 
   const contentWidth = Math.max(0, width - 4);
   const contentRows = Math.max(1, height - 2);
-  const visibleRows = renderCompletedActiveWorkContentRows(state, contentRows, contentWidth, options.locale, options.style);
+  const visibleRows = renderCompletedActiveWorkContentRows(visibleState, contentRows, contentWidth, options.locale, options.style);
 
   return [
     renderTopBorder(copy.toolsCompleted, width),
@@ -144,12 +163,16 @@ export function formatLiveActiveWorkStatus(
   options: ActiveWorkSummaryOptions = {}
 ): string | undefined {
   if (!hasActiveWork(state) || state.completedAtMs !== undefined) return undefined;
+  const visibleState = {
+    ...state,
+    items: activeWorkItemsForLiveSurface(state),
+  };
   const copy = resolveActiveWorkCopy(options.locale);
-  const activeCount = state.items.filter(isActiveStatusItem).length;
-  const doneCount = state.items.filter((item) =>
+  const activeCount = visibleState.items.filter(isActiveStatusItem).length;
+  const doneCount = visibleState.items.filter((item) =>
     item.status === "succeeded" || item.status === "cancelled"
   ).length;
-  const failedCount = state.items.filter((item) => item.status === "failed").length;
+  const failedCount = visibleState.items.filter((item) => item.status === "failed").length;
   const durationValue = formatClockDuration(resolveActiveWorkElapsedMs(state));
   const parts = [
     `${formatNumber(activeCount)} ${copy.active}`,
@@ -160,6 +183,19 @@ export function formatLiveActiveWorkStatus(
   }
   parts.push(isolateIfNeeded(durationValue, options.locale));
   return parts.join(" · ");
+}
+
+function activeWorkItemsForLiveSurface(state: ToolActivityState): readonly ActiveWorkItem[] {
+  if (!hasRunningDelegationWork(state)) return state.items;
+  const childItems = state.items.filter((item) => item.source === "subagent");
+  if (childItems.length > 0) return childItems;
+  return state.items.filter((item) =>
+    item.source !== "subagent" && item.toolName === "delegate_task" && item.status === "running"
+  );
+}
+
+function activeWorkItemsForCompletedSurface(state: ToolActivityState): readonly ActiveWorkItem[] {
+  return state.items.filter((item) => item.source !== "subagent");
 }
 
 function renderCompletedActiveWorkContentRows(

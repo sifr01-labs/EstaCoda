@@ -236,9 +236,63 @@ describe("active work runtime mapper", () => {
       summary: "يفكر",
       target: "يفكر",
     });
+    expect(mapper.build({
+      kind: "tool-result",
+      tool: "delegate_task",
+      ok: true,
+    }).target).toBe("1 ملغاة");
     expect(visibleText).not.toContain("private-provider");
     expect(visibleText).not.toContain("private-model");
     expect(visibleText).not.toContain("private cancellation detail");
+  });
+
+  it("summarizes observed child outcomes on the parent delegation result", () => {
+    const mapper = new ActiveWorkRuntimeEventMapper();
+    const parentStart = mapper.build({
+      kind: "tool-start",
+      tool: "delegate_task",
+      activityId: "delegate-1",
+      targetSummary: "raw delegated task text",
+    });
+    const child = (childSessionId: string, taskIndex: number) => ({
+      kind: "delegation-progress" as const,
+      subagentId: childSessionId,
+      childSessionId,
+      parentSessionId: "parent-session",
+      role: "leaf" as const,
+      depth: 1,
+      taskIndex,
+      batchId: "batch-1",
+    });
+
+    mapper.buildDelegationProgress({
+      ...child("child-1", 0),
+      childEvent: { kind: "agent-final", ok: true },
+    });
+    mapper.buildDelegationProgress({
+      ...child("child-2", 1),
+      childEvent: { kind: "agent-cancelled", reason: "cancelled" },
+    });
+    mapper.buildDelegationProgress({
+      ...child("child-3", 2),
+      childEvent: { kind: "tool-start", tool: "file.read" },
+    });
+    const parentResult = mapper.build({
+      kind: "tool-result",
+      tool: "delegate_task",
+      activityId: "delegate-1",
+      ok: true,
+      targetSummary: "raw delegated task text",
+    });
+
+    expect(parentStart.target).toBe("starting subagents");
+    expect(parentResult).toMatchObject({
+      id: "delegate-1",
+      status: "done",
+      summary: "delegate",
+      target: "1 completed · 1 cancelled · 1 unresolved",
+    });
+    expect(JSON.stringify([parentStart, parentResult])).not.toContain("raw delegated task text");
   });
 
   it("normalizes runtime event identity for active work and tool trails", () => {

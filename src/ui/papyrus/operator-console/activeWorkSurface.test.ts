@@ -11,6 +11,7 @@ import {
   formatActiveWorkSummary,
   formatLiveActiveWorkStatus,
   getActiveWorkSurfaceDesiredHeight,
+  getCompletedActiveWorkSurfaceDesiredHeight,
   hasActiveWork,
   renderCompletedActiveWorkSurface,
   renderActiveWorkSurface,
@@ -303,6 +304,90 @@ describe("Papyrus operator console active work surface", () => {
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 
+  it("renders only delegated child rows while a parent delegation is running", () => {
+    const state = createState({
+      startedAtMs: 1_000,
+      updatedAtMs: 8_000,
+      items: [
+        item("earlier-read", "succeeded", { toolName: "file.read", target: "src/earlier.ts" }),
+        item("delegate", "running", { toolName: "delegate_task", target: "starting subagents" }),
+        item("child-1", "running", {
+          toolName: "delegate_task",
+          displayLabel: "Leaf 1",
+          source: "subagent",
+          groupId: "batch-1",
+          target: "Read File",
+        }),
+        item("child-2", "succeeded", {
+          toolName: "delegate_task",
+          displayLabel: "Leaf 2",
+          source: "subagent",
+          groupId: "batch-1",
+          target: "completed",
+          durationMs: 2_000,
+        }),
+      ],
+    });
+    const output = renderActiveWorkSurface(state, { width: 80 }).join("\n");
+
+    expect(getActiveWorkSurfaceDesiredHeight(state)).toBe(4);
+    expect(output).toContain("Delegated work");
+    expect(output).toContain("Leaf 1");
+    expect(output).toContain("Leaf 2");
+    expect(output).not.toContain("src/earlier.ts");
+    expect(output).not.toContain("starting subagents");
+    expect(formatLiveActiveWorkStatus(state)).toBe("1 active · 1 done · 00:07");
+  });
+
+  it("renders the delegation parent as a placeholder until child progress arrives", () => {
+    const state = createState({
+      items: [
+        item("delegate", "running", {
+          toolName: "delegate_task",
+          displayLabel: "Delegate Task",
+          target: "starting subagents",
+        }),
+      ],
+    });
+
+    const english = renderActiveWorkSurface(state, { width: 72 }).join("\n");
+    const arabic = renderActiveWorkSurface(state, { width: 72, locale: "ar" }).join("\n");
+
+    expect(english).toContain("Delegated work");
+    expect(english).toContain("starting subagents");
+    expect(arabic).toContain("عمل الوكلاء الفرعيين");
+    expect([english, arabic].every((output) =>
+      output.split("\n").every((line) => stringWidth(line) <= 72)
+    )).toBe(true);
+    expect(renderActiveWorkSurface(state, { width: 30, height: 1 })[0]).toContain("Delegated work: 1");
+  });
+
+  it("keeps delegated child rows out of completed work defensively", () => {
+    const state = createState({
+      completedAtMs: 2_000,
+      items: [
+        item("delegate", "succeeded", {
+          toolName: "delegate_task",
+          displayLabel: "Delegate Task",
+          target: "1 completed",
+        }),
+        item("child", "succeeded", {
+          toolName: "delegate_task",
+          displayLabel: "Leaf 1",
+          source: "subagent",
+          groupId: "batch-1",
+          target: "completed",
+        }),
+      ],
+    });
+    const output = renderCompletedActiveWorkSurface(state, { width: 72 }).join("\n");
+
+    expect(getCompletedActiveWorkSurfaceDesiredHeight(state)).toBe(5);
+    expect(output).toContain("Delegate Task");
+    expect(output).not.toContain("Leaf 1");
+    expect(output).toContain("1 completed · 0 failed");
+  });
+
   it("keeps the live working timer visible for queued and approval work", () => {
     const output = renderActiveWorkSurface(createState({
       startedAtMs: 1_000,
@@ -579,8 +664,10 @@ describe("Papyrus operator console active work surface", () => {
 
   it("resolves English copy by default and Arabic copy when requested", () => {
     expect(resolveActiveWorkCopy().runningTools).toBe("Running tools");
+    expect(resolveActiveWorkCopy().delegatedWork).toBe("Delegated work");
     expect(resolveActiveWorkCopy().toolsCompleted).toBe("Tools completed");
     expect(resolveActiveWorkCopy("ar").runningTools).toBe("تنفيذ الأدوات");
+    expect(resolveActiveWorkCopy("ar").delegatedWork).toBe("عمل الوكلاء الفرعيين");
     expect(resolveActiveWorkCopy("ar").toolsCompleted).toBe("اكتمل تنفيذ الأدوات");
     expect(resolveActiveWorkCopy("ar").awaitingApproval).toBe("بانتظار الموافقة");
   });
@@ -709,6 +796,8 @@ function item(
     status,
     summary: input.summary ?? input.target ?? id,
     ...(input.displayLabel === undefined ? {} : { displayLabel: input.displayLabel }),
+    ...(input.source === undefined ? {} : { source: input.source }),
+    ...(input.groupId === undefined ? {} : { groupId: input.groupId }),
     ...(input.target === undefined ? {} : { target: input.target }),
     ...(input.startedAtMs === undefined ? {} : { startedAtMs: input.startedAtMs }),
     ...(input.endedAtMs === undefined ? {} : { endedAtMs: input.endedAtMs }),

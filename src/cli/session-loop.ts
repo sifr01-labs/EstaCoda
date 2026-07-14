@@ -887,9 +887,13 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	                operatorConsoleLiveFrame.resetStreaming();
 	              }
               let newPhase: string | undefined;
-              if (operatorConsoleLiveFrame !== undefined && isToolActivityRuntimeEvent(event)) {
-                operatorConsoleLiveFrame.applyActiveWorkEvent(activeWorkEventMapper.build(event));
-                newPhase = "provider";
+              if (operatorConsoleLiveFrame !== undefined && event.kind === "delegation-progress") {
+                operatorConsoleLiveFrame.applyActiveWorkEvent(activeWorkEventMapper.buildDelegationProgress(event));
+                newPhase = "tool";
+              } else if (operatorConsoleLiveFrame !== undefined && isToolActivityRuntimeEvent(event)) {
+                const activeWorkEvent = activeWorkEventMapper.build(event);
+                operatorConsoleLiveFrame.applyActiveWorkEvent(activeWorkEvent);
+                newPhase = activeWorkEvent.toolName === "delegate_task" ? "tool" : "provider";
               } else if (operatorConsoleLiveFrame !== undefined) {
                   const operatorConsolePhase = operatorConsoleTransientPhaseForRuntimeEvent(event);
                   if (operatorConsolePhase === null) {
@@ -2861,6 +2865,8 @@ export function renderRuntimeEvent(
       return undefined;
     case "session-compacted":
       return undefined;
+    case "delegation-progress":
+      return "tool";
     case "agent-cancelled":
       clearActiveSpinnerLine();
       safeWrite(`\ncancelled: ${event.reason}\n`);
@@ -2880,6 +2886,7 @@ function operatorConsoleTransientPhaseForRuntimeEvent(event: RuntimeEvent): stri
     case "provider-token":
       return "provider";
     case "provider-tool-call":
+    case "delegation-progress":
       return "tool";
     case "provider-result":
       return event.ok || !event.willFallback ? "finalizing" : "provider";

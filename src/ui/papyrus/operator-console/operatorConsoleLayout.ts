@@ -6,6 +6,7 @@ import type {
 import {
   getActiveWorkSurfaceDesiredHeight,
   hasActiveWork,
+  hasRunningDelegationWork,
 } from "./activeWorkSurface.js";
 import { getApprovalSurfaceDesiredHeight } from "./approvalSurface.js";
 import { getAttachmentSurfaceDesiredHeight } from "./attachmentSurface.js";
@@ -218,6 +219,9 @@ function createRegionDescriptors(
 function shouldShowActiveWorkRegion(state: OperatorConsoleState): boolean {
   if (!hasActiveWork(state.activeWork)) return false;
   if (state.activeWork.completedAtMs !== undefined) return true;
+  if (hasRunningDelegationWork(state.activeWork)) {
+    return !hasStreamingSurface(state.streaming);
+  }
   if (!SHOW_LIVE_ACTIVE_WORK_REGION) return false;
   return !hasStreamingSurface(state.streaming);
 }
