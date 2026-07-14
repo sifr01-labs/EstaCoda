@@ -681,6 +681,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     this.#runMigrationStep(5, "v0.9-schema-v5-pending-approvals", () => this.#migrateV5());
     this.#runMigrationStep(6, "v0.9-schema-v6-session-lineage", () => this.#migrateV6());
     this.#runMigrationStep(7, "v0.9-schema-v7-typed-pending-approvals", () => this.#migrateV7());
+    this.#runMigrationStep(8, "v0.9-schema-v8-session-finalization", () => this.#migrateV8());
   }
 
   #withMigrationLock(migrate: () => void): void {
@@ -846,6 +847,39 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     if (!colNames.has("request_payload")) {
       this.#db.exec("alter table pending_approvals add column request_payload text");
     }
+  }
+
+  #migrateV8(): void {
+    this.#db.exec(`
+      create table if not exists session_finalization_jobs (
+        id text primary key,
+        profile_id text not null,
+        session_id text not null references sessions(id) on delete cascade,
+        reason text not null check(reason in ('new-session', 'cli-exit', 'sigint', 'channel-reset', 'one-shot')),
+        status text not null default 'pending' check(status in ('pending', 'running', 'completed', 'failed')),
+        source_message_count integer not null check(source_message_count >= 0),
+        cutoff_message_id text not null,
+        attempts integer not null default 0 check(attempts >= 0),
+        available_at text not null,
+        claimed_at text,
+        lease_owner text,
+        lease_expires_at text,
+        completed_at text,
+        failed_at text,
+        outcome_code text,
+        last_error_code text,
+        created_at text not null,
+        updated_at text not null,
+        unique(profile_id, session_id, cutoff_message_id, source_message_count)
+      );
+
+      create index if not exists idx_session_finalization_ready
+        on session_finalization_jobs(profile_id, status, available_at, created_at);
+      create index if not exists idx_session_finalization_lease
+        on session_finalization_jobs(profile_id, status, lease_expires_at);
+      create index if not exists idx_session_finalization_session
+        on session_finalization_jobs(profile_id, session_id, created_at);
+    `);
   }
 
   #migrateV3(): void {
