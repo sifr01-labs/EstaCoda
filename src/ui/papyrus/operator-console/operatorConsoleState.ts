@@ -119,6 +119,8 @@ export type ActiveWorkItem = {
   readonly id: string;
   readonly toolName: string;
   readonly displayLabel?: string;
+  readonly source?: "tool" | "subagent";
+  readonly groupId?: string;
   readonly status: ActiveWorkItemStatus;
   readonly summary: string;
   readonly target?: string;

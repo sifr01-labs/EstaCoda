@@ -110,6 +110,137 @@ describe("active work runtime mapper", () => {
     });
   });
 
+  it("maps bounded delegation progress into one stable subagent row", () => {
+    let now = 1_000;
+    const mapper = new ActiveWorkRuntimeEventMapper({ now: () => now });
+    let state = createActiveWorkRuntimeState();
+    const metadata = {
+      kind: "delegation-progress" as const,
+      subagentId: "subagent-1",
+      childSessionId: "child-session-1",
+      parentSessionId: "parent-session",
+      role: "leaf" as const,
+      depth: 1,
+      taskIndex: 1,
+      batchId: "batch-1",
+    };
+
+    state = applyActiveWorkRuntimeEvent(state, mapper.buildDelegationProgress({
+      ...metadata,
+      childEvent: { kind: "agent-start", sessionId: "child-session-1" },
+    }));
+    now = 2_000;
+    state = applyActiveWorkRuntimeEvent(state, mapper.buildDelegationProgress({
+      ...metadata,
+      childEvent: { kind: "tool-start", tool: "file.read" },
+    }));
+    now = 4_500;
+    state = applyActiveWorkRuntimeEvent(state, mapper.buildDelegationProgress({
+      ...metadata,
+      childEvent: { kind: "agent-final", ok: true },
+    }));
+
+    expect(state.items).toEqual([{
+      id: "subagent:child-session-1",
+      toolName: "delegate_task",
+      displayLabel: "Leaf 2",
+      source: "subagent",
+      groupId: "batch-1",
+      status: "succeeded",
+      summary: "completed",
+      target: "completed",
+      durationMs: 3_500,
+      detailsRef: "child-session-1",
+    }]);
+  });
+
+  it("keeps child tool failures non-terminal until the child itself settles", () => {
+    let now = 5_000;
+    const mapper = new ActiveWorkRuntimeEventMapper({ now: () => now });
+    const metadata = {
+      kind: "delegation-progress" as const,
+      subagentId: "subagent-2",
+      childSessionId: "child-session-2",
+      parentSessionId: "parent-session",
+      role: "orchestrator" as const,
+      depth: 1,
+    };
+
+    mapper.buildDelegationProgress({
+      ...metadata,
+      childEvent: { kind: "agent-start", sessionId: "child-session-2" },
+    });
+    now = 5_750;
+
+    expect(mapper.buildDelegationProgress({
+      ...metadata,
+      childEvent: { kind: "tool-result", tool: "file.read", ok: false },
+    })).toMatchObject({
+      id: "subagent:child-session-2",
+      displayLabel: "Orchestrator",
+      source: "subagent",
+      groupId: "subagent-2",
+      status: "running",
+      target: "Read File",
+    });
+
+    now = 7_000;
+    expect(mapper.buildDelegationProgress({
+      ...metadata,
+      childEvent: { kind: "agent-cancelled", reason: "sensitive internal reason" },
+    })).toMatchObject({
+      status: "cancelled",
+      summary: "cancelled",
+      target: "cancelled",
+      durationMs: 2_000,
+    });
+  });
+
+  it("localizes delegated child labels without surfacing provider or cancellation details", () => {
+    const mapper = new ActiveWorkRuntimeEventMapper({ locale: "ar" });
+    const base = {
+      kind: "delegation-progress" as const,
+      subagentId: "subagent-secret",
+      childSessionId: "child-secret",
+      parentSessionId: "parent-secret",
+      role: "leaf" as const,
+      depth: 1,
+      taskIndex: 0,
+      batchId: "batch-secret",
+    };
+
+    const providerEvent = mapper.buildDelegationProgress({
+      ...base,
+      childEvent: {
+        kind: "provider-attempt",
+        provider: "private-provider",
+        model: "private-model",
+        fallback: false,
+      },
+    });
+    const cancelledEvent = mapper.buildDelegationProgress({
+      ...base,
+      childEvent: { kind: "agent-cancelled", reason: "private cancellation detail" },
+    });
+    const visibleText = [
+      providerEvent.displayLabel,
+      providerEvent.summary,
+      providerEvent.target,
+      cancelledEvent.summary,
+      cancelledEvent.target,
+    ].join(" ");
+
+    expect(providerEvent).toMatchObject({
+      displayLabel: "وكيل فرعي 1",
+      status: "running",
+      summary: "يفكر",
+      target: "يفكر",
+    });
+    expect(visibleText).not.toContain("private-provider");
+    expect(visibleText).not.toContain("private-model");
+    expect(visibleText).not.toContain("private cancellation detail");
+  });
+
   it("normalizes runtime event identity for active work and tool trails", () => {
     expect(normalizeActiveWorkRuntimeEventId({
       id: " read-1 ",

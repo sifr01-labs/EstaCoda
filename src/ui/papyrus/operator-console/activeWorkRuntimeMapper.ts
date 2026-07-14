@@ -19,6 +19,8 @@ export type ActiveWorkRuntimeEvent = {
   readonly id?: string;
   readonly toolName: string;
   readonly displayLabel?: string;
+  readonly source?: "tool" | "subagent";
+  readonly groupId?: string;
   readonly status: ActiveWorkRuntimeEventStatus;
   readonly summary?: string;
   readonly target?: string;
@@ -36,6 +38,7 @@ export type ActiveWorkRuntimeEventMapperOptions = {
 
 export class ActiveWorkRuntimeEventMapper {
   readonly #starts = new Map<string, number[]>();
+  readonly #delegationStarts = new Map<string, number>();
   readonly #locale: ToolDisplayLocale;
   readonly #now: () => number;
 
@@ -76,6 +79,40 @@ export class ActiveWorkRuntimeEventMapper {
       detailsRef: event.activityId,
       ...(gated ? { riskClass: event.riskClass } : {}),
       ...(event.fileChangePreview === undefined ? {} : { fileChangeInspected: true }),
+    };
+  }
+
+  buildDelegationProgress(
+    event: Extract<RuntimeEvent, { kind: "delegation-progress" }>
+  ): ActiveWorkRuntimeEvent {
+    const id = `subagent:${event.childSessionId}`;
+    const now = this.#now();
+    const startedAt = this.#delegationStarts.get(id) ?? now;
+    if (!this.#delegationStarts.has(id)) {
+      this.#delegationStarts.set(id, startedAt);
+    }
+
+    const terminal = event.childEvent.kind === "agent-final" || event.childEvent.kind === "agent-cancelled";
+    if (terminal) {
+      this.#delegationStarts.delete(id);
+    }
+    const activityLabel = delegationActivityLabel(event.childEvent, this.#locale);
+
+    return {
+      id,
+      toolName: "delegate_task",
+      displayLabel: delegationChildLabel(event.role, event.taskIndex, this.#locale),
+      source: "subagent",
+      groupId: event.batchId ?? event.subagentId,
+      status: event.childEvent.kind === "agent-final"
+        ? "done"
+        : event.childEvent.kind === "agent-cancelled"
+          ? "cancelled"
+          : "running",
+      summary: activityLabel,
+      target: activityLabel,
+      ...(terminal ? { durationMs: Math.max(0, now - startedAt) } : {}),
+      detailsRef: event.childSessionId,
     };
   }
 
@@ -142,6 +179,12 @@ function createActiveWorkItem(
     ...(event.displayLabel === undefined && existing?.displayLabel === undefined
       ? {}
       : { displayLabel: event.displayLabel ?? existing?.displayLabel }),
+    ...(event.source === undefined && existing?.source === undefined
+      ? {}
+      : { source: event.source ?? existing?.source }),
+    ...(event.groupId === undefined && existing?.groupId === undefined
+      ? {}
+      : { groupId: event.groupId ?? existing?.groupId }),
     status: mapRuntimeStatus(event.status),
     summary: normalizeText(event.summary, event.status),
     ...(event.target === undefined && existing?.target === undefined ? {} : { target: event.target ?? existing?.target }),
@@ -161,6 +204,39 @@ function createActiveWorkItem(
       ? { fileChangeInspected: true }
       : {}),
   };
+}
+
+function delegationChildLabel(
+  role: Extract<RuntimeEvent, { kind: "delegation-progress" }>["role"],
+  taskIndex: number | undefined,
+  locale: ToolDisplayLocale
+): string {
+  const roleLabel = locale === "ar"
+    ? role === "orchestrator" ? "منسق" : "وكيل فرعي"
+    : role === "orchestrator" ? "Orchestrator" : "Leaf";
+  return taskIndex === undefined ? roleLabel : `${roleLabel} ${taskIndex + 1}`;
+}
+
+function delegationActivityLabel(
+  event: Extract<RuntimeEvent, { kind: "delegation-progress" }>["childEvent"],
+  locale: ToolDisplayLocale
+): string {
+  switch (event.kind) {
+    case "agent-start":
+      return locale === "ar" ? "بدء العمل" : "starting";
+    case "tool-start":
+    case "tool-result":
+      return toolDisplayLabel(event.tool ?? "tool", locale);
+    case "provider-attempt":
+    case "provider-result":
+      return locale === "ar" ? "يفكر" : "thinking";
+    case "provider-budget-exhausted":
+      return locale === "ar" ? "انتهت الميزانية" : "budget exhausted";
+    case "agent-final":
+      return locale === "ar" ? "اكتمل" : "completed";
+    case "agent-cancelled":
+      return locale === "ar" ? "أُلغي" : "cancelled";
+  }
 }
 
 export function normalizeActiveWorkRuntimeEventId(event: ActiveWorkRuntimeEvent): string {
