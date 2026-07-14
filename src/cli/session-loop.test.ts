@@ -2524,6 +2524,17 @@ describe("runSessionLoop — active turn spinner", () => {
         childEvent: { kind: "agent-final", ok: true },
       },
       {
+        kind: "delegation-progress",
+        subagentId: "child-1",
+        childSessionId: "child-session-1",
+        parentSessionId: "test-session",
+        role: "leaf",
+        depth: 1,
+        taskIndex: 0,
+        batchId: "batch-1",
+        childEvent: { kind: "delegation-result", status: "completed" },
+      },
+      {
         kind: "tool-result",
         tool: "delegate_task",
         activityId: "delegate-1",

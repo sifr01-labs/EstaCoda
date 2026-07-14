@@ -300,6 +300,7 @@ export class DelegationManager {
           request,
           parentReadSnapshot
         );
+        await this.#emitSettlement(request, result, role, depth);
         return result;
       }
 
@@ -407,6 +408,7 @@ export class DelegationManager {
 	          staleFileWarnings: result.staleFileWarnings,
 	          staleFileWarningCount: result.staleFileWarningCount
 	        });
+        await this.#emitSettlement(request, result, role, depth);
         return result;
       }
       if (runnerResult.kind === "cancelled") {
@@ -445,6 +447,7 @@ export class DelegationManager {
 	          staleFileWarnings: result.staleFileWarnings,
 	          staleFileWarningCount: result.staleFileWarningCount
 	        });
+        await this.#emitSettlement(request, result, role, depth);
         return result;
       }
       const childResponse = runnerResult.response;
@@ -498,6 +501,7 @@ export class DelegationManager {
 	        staleFileWarnings: result.staleFileWarnings,
 	        staleFileWarningCount: result.staleFileWarningCount
 	      });
+      await this.#emitSettlement(request, result, role, depth);
       return result;
     } catch (error) {
       if (error instanceof ChildModelOverrideError) {
@@ -548,6 +552,7 @@ export class DelegationManager {
 	          staleFileWarnings: result.staleFileWarnings,
 	          staleFileWarningCount: result.staleFileWarningCount
 	        });
+        await this.#emitSettlement(request, result, role, depth);
       }
       return result;
     } finally {
@@ -858,6 +863,29 @@ export class DelegationManager {
 	      staleFileWarningCount: input.staleFileWarningCount
 	    });
     this.#trajectoryRecorder.record("delegation-finished", input);
+  }
+
+  async #emitSettlement(
+    request: DelegationRequest,
+    result: DelegationSummary,
+    role: DelegateRole,
+    depth: number
+  ): Promise<void> {
+    if (request.onEvent === undefined || result.childSessionId === "unavailable") return;
+    await request.onEvent({
+      kind: "delegation-progress",
+      subagentId: result.childSessionId,
+      childSessionId: result.childSessionId,
+      parentSessionId: request.parentSessionId,
+      role,
+      depth,
+      taskIndex: request.taskIndex,
+      batchId: request.batchId,
+      childEvent: {
+        kind: "delegation-result",
+        status: childStatus(result)
+      }
+    });
   }
 
   async #statusFromChildResponse(

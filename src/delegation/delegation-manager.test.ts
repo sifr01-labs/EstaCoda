@@ -638,6 +638,7 @@ describe("DelegationManager", () => {
   });
 
   it("unregisters active subagents on provider failure", async () => {
+    const events: RuntimeEvent[] = [];
     const harness = await createHarness({
       response: response({
         providerExecution: {
@@ -660,12 +661,20 @@ describe("DelegationManager", () => {
       parentSessionId: "parent",
       profileId: "default",
       task: "Fail",
-      trustedWorkspace: true
+      trustedWorkspace: true,
+      onEvent: (event) => {
+        events.push(event);
+      }
     });
 
     expect(result.status).toBe("failed");
     expect(result.reason).toBe("provider-error");
     expect(harness.registry.listActiveSubagents()).toEqual([]);
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "delegation-progress",
+      childSessionId: "child",
+      childEvent: { kind: "delegation-result", status: "failed" }
+    }));
   });
 
   it("unregisters active subagents when child handle throws", async () => {
@@ -729,6 +738,7 @@ describe("DelegationManager", () => {
 
   it("returns structured timeout status and cleans the registry", async () => {
     vi.useFakeTimers();
+    const events: RuntimeEvent[] = [];
     const harness = await createHarness({
       maxSpawnDepth: 1,
       childTimeoutSeconds: 0.001,
@@ -739,7 +749,10 @@ describe("DelegationManager", () => {
       parentSessionId: "parent",
       profileId: "default",
       task: "Timeout",
-      trustedWorkspace: true
+      trustedWorkspace: true,
+      onEvent: (event) => {
+        events.push(event);
+      }
     });
     await vi.advanceTimersByTimeAsync(2);
     const result = await pending;
@@ -750,6 +763,11 @@ describe("DelegationManager", () => {
       reason: "timeout"
     });
     expect(harness.registry.listActiveSubagents()).toEqual([]);
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "delegation-progress",
+      childSessionId: "child",
+      childEvent: { kind: "delegation-result", status: "timeout" }
+    }));
     await expect(harness.db.listEvents("parent")).resolves.toContainEqual(expect.objectContaining({
       kind: "delegation-finished",
       childSessionId: "child",
@@ -835,6 +853,18 @@ describe("DelegationManager", () => {
           provider: "local",
           model: "test",
           fallback: false
+        }
+      }),
+      expect.objectContaining({
+        kind: "delegation-progress",
+        subagentId: "child",
+        childSessionId: "child",
+        parentSessionId: "parent",
+        role: "leaf",
+        depth: 1,
+        childEvent: {
+          kind: "delegation-result",
+          status: "completed"
         }
       })
     ]);

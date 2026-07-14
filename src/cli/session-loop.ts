@@ -54,6 +54,7 @@ import type { TerminalCapabilities } from "../contracts/ui.js";
 import {
   createSubmittedSteerTranscriptBlock,
   ActiveWorkRuntimeEventMapper,
+  formatPlainDelegationProgressEvent,
   createOperatorConsoleRuntimeHost,
   createOperatorConsoleStyle,
   mapStartupDashboardViewModelToOperatorConsoleState,
@@ -898,12 +899,12 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
                   const operatorConsolePhase = operatorConsoleTransientPhaseForRuntimeEvent(event);
                   if (operatorConsolePhase === null) {
                     clearOperatorConsoleLiveFrame();
-                    newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, undefined, turnOutput);
+                    newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, undefined, turnOutput, renderer.locale === "ar" ? "ar" : "en");
                   } else {
                     newPhase = operatorConsolePhase;
                   }
 	              } else {
-	                newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, undefined, turnOutput);
+	                newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, undefined, turnOutput, renderer.locale === "ar" ? "ar" : "en");
 	              }
               if (newPhase !== undefined) {
                 renderSpinner(newPhase);
@@ -2790,7 +2791,8 @@ export function renderRuntimeEvent(
   renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string },
   streamState: { lastWriteEndedWithNewline: boolean },
   _legacyChrome: unknown,
-  turnOutput: { spinnerPhase?: string; hasOutput: boolean; lastOutputWasSpinner: boolean }
+  turnOutput: { spinnerPhase?: string; hasOutput: boolean; lastOutputWasSpinner: boolean },
+  locale: "en" | "ar" = "en"
 ): string | undefined {
   function safeWrite(text: string): void {
     const endsWithNewline = text.endsWith("\n");
@@ -2865,8 +2867,14 @@ export function renderRuntimeEvent(
       return undefined;
     case "session-compacted":
       return undefined;
-    case "delegation-progress":
+    case "delegation-progress": {
+      const line = formatPlainDelegationProgressEvent(event, locale);
+      if (line !== undefined) {
+        clearActiveSpinnerLine();
+        safeWrite(`${line}\n`);
+      }
       return "tool";
+    }
     case "agent-cancelled":
       clearActiveSpinnerLine();
       safeWrite(`\ncancelled: ${event.reason}\n`);

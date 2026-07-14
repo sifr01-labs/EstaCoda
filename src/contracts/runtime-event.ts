@@ -201,7 +201,8 @@ export type RuntimeEvent =
           | "provider-result"
           | "provider-budget-exhausted"
           | "agent-final"
-          | "agent-cancelled";
+          | "agent-cancelled"
+          | "delegation-result";
         sessionId?: string;
         tool?: string;
         decision?: string;
@@ -221,6 +222,7 @@ export type RuntimeEvent =
         limit?: number;
         observed?: number;
         reason?: string;
+        status?: "completed" | "blocked" | "failed" | "timeout" | "cancelled";
       };
     };
 

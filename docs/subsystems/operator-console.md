@@ -322,18 +322,17 @@ Attachments:
 - file excerpt · src/cli/session-loop.ts · 184 lines
 ```
 
-### Phase E: Active Work
+### Phase E: Delegated Active Work
 
-Live active work:
+Normal tool activity remains in the compact turn status while work is live. A
+running `delegate_task` is the exception: its bounded child rows use the active
+work region so the operator can see that isolated subagents are still running.
 
 ```text
-╭─ Active work ─────────────────────────────────────────────────────────╮
-│ ◷ read_file       src/ui/papyrus/screen/output.ts              00:03  │
-│ ◷ rg              "createReadlinePrompt" src                   00:02  │
-│ ✓ read_file       src/cli/session-loop.ts                      00:01  │
-│ ✓ grep            approval required                            00:01  │
-│ ✓ typecheck       passed                                       00:18  │
-│ ... 18 more completed this turn                                      │
+╭─ Delegated work ──────────────────────────────────────────────────────╮
+│ ◷ Leaf 1          Read File                                    00:03  │
+│ ✓ Leaf 2          completed                                    00:07  │
+│ ✗ Leaf 3          timed out                                    00:10  │
 ╰───────────────────────────────────────────────────────────────────────╯
 ╭─ Prompt ─────────────────────────────────────────────────────────────╮
 │ ›                                                                     │
@@ -341,15 +340,21 @@ Live active work:
 kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 7% │ session 01:12
 ```
 
-Turn-end collapsed summary:
+When the parent delegation settles, or visible assistant streaming begins, the
+child rows leave the live frame. The durable turn-end surface keeps one parent
+tool row with the bounded outcome counts:
 
 ```text
-Assistant:
-Completed tool work: 3 running steps resolved, 42 total tool events, 1 file change inspected.
+╭─ Tools completed ─────────────────────────────────────────────────────╮
+│ ✗ Delegate Task    1 completed · 1 timed out · 1 failed        00:10  │
+╰───────────────────────────────────────────────────────────────────────╯
 ```
 
-Active work is live telemetry. It should not dump full operational detail into
-the transcript by default.
+Child prompts, transcripts, tool arguments, provider/model identifiers,
+cancellation reasons, and child session identifiers are not rendered. Plain and
+one-shot CLI modes emit at most two lifecycle lines per child, for example
+`subagent Leaf 1: started` and `subagent Leaf 1: completed`; intermediate child
+tool and provider events remain silent.
 
 ### Phase E2: Live Assistant Streaming
 

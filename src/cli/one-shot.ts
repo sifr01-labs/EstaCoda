@@ -3,6 +3,7 @@ import type { Runtime } from "../runtime/create-runtime.js";
 import { ToolActivityViewModelBuilder } from "./tool-activity-view-models.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
 import { toolDisplayIcon, toolDisplayLabel } from "../ui/tool-display.js";
+import { formatPlainDelegationProgressEvent } from "../ui/papyrus/operator-console/activeWorkRuntimeMapper.js";
 
 export type OneShotPromptResult = {
   handled: boolean;
@@ -118,6 +119,10 @@ function renderOneShotEvent(
       return safeLine(`provider budget: ${event.reason}`);
     case "context-usage":
       return undefined;
+    case "delegation-progress": {
+      const line = formatPlainDelegationProgressEvent(event);
+      return line === undefined ? undefined : safeLine(line);
+    }
     case "agent-cancelled":
       return safeLine(`cancelled: ${event.reason}`);
     case "provider-token": {

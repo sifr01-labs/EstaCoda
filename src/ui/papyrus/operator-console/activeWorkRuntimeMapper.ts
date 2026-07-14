@@ -7,13 +7,17 @@ import type {
 } from "./operatorConsoleState.js";
 import { createDefaultToolActivityState } from "./operatorConsoleState.js";
 
+const MAX_REMEMBERED_DELEGATION_SETTLEMENTS = 512;
+
 export type ActiveWorkRuntimeEventStatus =
   | "pending"
   | "running"
   | "done"
   | "failed"
   | "gated"
-  | "cancelled";
+  | "cancelled"
+  | "blocked"
+  | "timeout";
 
 export type ActiveWorkRuntimeEvent = {
   readonly id?: string;
@@ -40,6 +44,7 @@ export class ActiveWorkRuntimeEventMapper {
   readonly #starts = new Map<string, number[]>();
   readonly #delegationStarts = new Map<string, number>();
   readonly #delegationStatuses = new Map<string, ActiveWorkRuntimeEventStatus>();
+  readonly #delegationSettlements = new Map<string, ActiveWorkRuntimeEvent>();
   readonly #locale: ToolDisplayLocale;
   readonly #now: () => number;
 
@@ -55,6 +60,7 @@ export class ActiveWorkRuntimeEventMapper {
       this.#pushStart(this.#eventKey(event));
       if (event.tool === "delegate_task") {
         this.#delegationStatuses.clear();
+        this.#delegationStarts.clear();
       }
       return {
         id: event.activityId,
@@ -78,6 +84,7 @@ export class ActiveWorkRuntimeEventMapper {
       : undefined;
     if (event.tool === "delegate_task") {
       this.#delegationStatuses.clear();
+      this.#delegationStarts.clear();
     }
 
     return {
@@ -98,25 +105,25 @@ export class ActiveWorkRuntimeEventMapper {
     event: Extract<RuntimeEvent, { kind: "delegation-progress" }>
   ): ActiveWorkRuntimeEvent {
     const id = `subagent:${event.childSessionId}`;
+    const settled = this.#delegationSettlements.get(id);
+    if (settled !== undefined) {
+      return settled;
+    }
     const now = this.#now();
     const startedAt = this.#delegationStarts.get(id) ?? now;
     if (!this.#delegationStarts.has(id)) {
       this.#delegationStarts.set(id, startedAt);
     }
 
-    const terminal = event.childEvent.kind === "agent-final" || event.childEvent.kind === "agent-cancelled";
+    const terminal = event.childEvent.kind === "delegation-result";
     if (terminal) {
       this.#delegationStarts.delete(id);
     }
     const activityLabel = delegationActivityLabel(event.childEvent, this.#locale);
-    const status: ActiveWorkRuntimeEventStatus = event.childEvent.kind === "agent-final"
-      ? "done"
-      : event.childEvent.kind === "agent-cancelled"
-        ? "cancelled"
-        : "running";
+    const status = delegationRuntimeStatus(event.childEvent);
     this.#delegationStatuses.set(id, status);
 
-    return {
+    const mapped: ActiveWorkRuntimeEvent = {
       id,
       toolName: "delegate_task",
       displayLabel: delegationChildLabel(event.role, event.taskIndex, this.#locale),
@@ -128,6 +135,15 @@ export class ActiveWorkRuntimeEventMapper {
       ...(terminal ? { durationMs: Math.max(0, now - startedAt) } : {}),
       detailsRef: event.childSessionId,
     };
+    if (terminal) {
+      this.#delegationSettlements.set(id, mapped);
+      while (this.#delegationSettlements.size > MAX_REMEMBERED_DELEGATION_SETTLEMENTS) {
+        const oldestId = this.#delegationSettlements.keys().next().value;
+        if (oldestId === undefined) break;
+        this.#delegationSettlements.delete(oldestId);
+      }
+    }
+    return mapped;
   }
 
   #pushStart(key: string): void {
@@ -171,16 +187,25 @@ function delegationCompletionLabel(
   const values = [...statuses.values()];
   const completed = values.filter((status) => status === "done").length;
   const cancelled = values.filter((status) => status === "cancelled").length;
-  const unresolved = values.length - completed - cancelled;
+  const timedOut = values.filter((status) => status === "timeout").length;
+  const blocked = values.filter((status) => status === "blocked").length;
+  const failed = values.filter((status) => status === "failed").length;
+  const unresolved = values.length - completed - cancelled - timedOut - blocked - failed;
   const parts = locale === "ar"
     ? [
         completed > 0 ? `${completed} مكتملة` : undefined,
         cancelled > 0 ? `${cancelled} ملغاة` : undefined,
+        timedOut > 0 ? `${timedOut} انتهت مهلتها` : undefined,
+        blocked > 0 ? `${blocked} محظورة` : undefined,
+        failed > 0 ? `${failed} فاشلة` : undefined,
         unresolved > 0 ? `${unresolved} غير محسومة` : undefined,
       ]
     : [
         completed > 0 ? `${completed} completed` : undefined,
         cancelled > 0 ? `${cancelled} cancelled` : undefined,
+        timedOut > 0 ? `${timedOut} timed out` : undefined,
+        blocked > 0 ? `${blocked} blocked` : undefined,
+        failed > 0 ? `${failed} failed` : undefined,
         unresolved > 0 ? `${unresolved} unresolved` : undefined,
       ];
   return parts.filter((part): part is string => part !== undefined).join(" · ");
@@ -280,10 +305,68 @@ function delegationActivityLabel(
     case "provider-budget-exhausted":
       return locale === "ar" ? "انتهت الميزانية" : "budget exhausted";
     case "agent-final":
-      return locale === "ar" ? "اكتمل" : "completed";
+      return locale === "ar" ? "إنهاء العمل" : "finalizing";
     case "agent-cancelled":
-      return locale === "ar" ? "أُلغي" : "cancelled";
+      return locale === "ar" ? "جارٍ الإلغاء" : "cancelling";
+    case "delegation-result":
+      return delegationResultLabel(event.status, locale);
   }
+}
+
+function delegationRuntimeStatus(
+  event: Extract<RuntimeEvent, { kind: "delegation-progress" }>["childEvent"]
+): ActiveWorkRuntimeEventStatus {
+  if (event.kind !== "delegation-result") return "running";
+  switch (event.status) {
+    case "completed":
+      return "done";
+    case "cancelled":
+      return "cancelled";
+    case "blocked":
+      return "blocked";
+    case "timeout":
+      return "timeout";
+    case "failed":
+    default:
+      return "failed";
+  }
+}
+
+function delegationResultLabel(
+  status: Extract<RuntimeEvent, { kind: "delegation-progress" }>["childEvent"]["status"],
+  locale: ToolDisplayLocale
+): string {
+  switch (status) {
+    case "completed":
+      return locale === "ar" ? "اكتمل" : "completed";
+    case "blocked":
+      return locale === "ar" ? "محظور" : "blocked";
+    case "timeout":
+      return locale === "ar" ? "انتهت المهلة" : "timed out";
+    case "cancelled":
+      return locale === "ar" ? "أُلغي" : "cancelled";
+    case "failed":
+    default:
+      return locale === "ar" ? "فشل" : "failed";
+  }
+}
+
+export function formatPlainDelegationProgressEvent(
+  event: Extract<RuntimeEvent, { kind: "delegation-progress" }>,
+  locale: ToolDisplayLocale = "en"
+): string | undefined {
+  const childLabel = delegationChildLabel(event.role, event.taskIndex, locale);
+  if (event.childEvent.kind === "agent-start") {
+    return locale === "ar"
+      ? `${childLabel}: بدء العمل`
+      : `subagent ${childLabel}: started`;
+  }
+  if (event.childEvent.kind === "delegation-result") {
+    return locale === "ar"
+      ? `${childLabel}: ${delegationResultLabel(event.childEvent.status, locale)}`
+      : `subagent ${childLabel}: ${delegationResultLabel(event.childEvent.status, locale)}`;
+  }
+  return undefined;
 }
 
 export function normalizeActiveWorkRuntimeEventId(event: ActiveWorkRuntimeEvent): string {
@@ -306,6 +389,9 @@ function mapRuntimeStatus(status: ActiveWorkRuntimeEventStatus): ActiveWorkItemS
       return "awaitingApproval";
     case "cancelled":
       return "cancelled";
+    case "blocked":
+    case "timeout":
+      return "failed";
   }
 }
 

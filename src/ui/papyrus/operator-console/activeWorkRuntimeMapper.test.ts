@@ -4,6 +4,7 @@ import {
   ActiveWorkRuntimeEventMapper,
   applyActiveWorkRuntimeEvent,
   createActiveWorkRuntimeState,
+  formatPlainDelegationProgressEvent,
   normalizeActiveWorkRuntimeEventId,
 } from "./activeWorkRuntimeMapper.js";
 import { formatActiveWorkSummary, getActiveWorkSurfaceDesiredHeight, renderActiveWorkSurface } from "./activeWorkSurface.js";
@@ -134,10 +135,16 @@ describe("active work runtime mapper", () => {
       ...metadata,
       childEvent: { kind: "tool-start", tool: "file.read" },
     }));
-    now = 4_500;
+    now = 4_000;
     state = applyActiveWorkRuntimeEvent(state, mapper.buildDelegationProgress({
       ...metadata,
       childEvent: { kind: "agent-final", ok: true },
+    }));
+    expect(state.items[0]).toMatchObject({ status: "running", target: "finalizing" });
+    now = 4_500;
+    state = applyActiveWorkRuntimeEvent(state, mapper.buildDelegationProgress({
+      ...metadata,
+      childEvent: { kind: "delegation-result", status: "completed" },
     }));
 
     expect(state.items).toEqual([{
@@ -184,10 +191,20 @@ describe("active work runtime mapper", () => {
       target: "Read File",
     });
 
-    now = 7_000;
+    now = 6_500;
     expect(mapper.buildDelegationProgress({
       ...metadata,
       childEvent: { kind: "agent-cancelled", reason: "sensitive internal reason" },
+    })).toMatchObject({
+      status: "running",
+      summary: "cancelling",
+      target: "cancelling",
+    });
+
+    now = 7_000;
+    expect(mapper.buildDelegationProgress({
+      ...metadata,
+      childEvent: { kind: "delegation-result", status: "cancelled" },
     })).toMatchObject({
       status: "cancelled",
       summary: "cancelled",
@@ -220,7 +237,7 @@ describe("active work runtime mapper", () => {
     });
     const cancelledEvent = mapper.buildDelegationProgress({
       ...base,
-      childEvent: { kind: "agent-cancelled", reason: "private cancellation detail" },
+      childEvent: { kind: "delegation-result", status: "cancelled", reason: "private cancellation detail" },
     });
     const visibleText = [
       providerEvent.displayLabel,
@@ -241,6 +258,14 @@ describe("active work runtime mapper", () => {
       tool: "delegate_task",
       ok: true,
     }).target).toBe("1 ملغاة");
+    expect(formatPlainDelegationProgressEvent({
+      ...base,
+      childEvent: { kind: "agent-start", sessionId: "child-secret" },
+    }, "ar")).toBe("وكيل فرعي 1: بدء العمل");
+    expect(formatPlainDelegationProgressEvent({
+      ...base,
+      childEvent: { kind: "delegation-result", status: "timeout" },
+    }, "ar")).toBe("وكيل فرعي 1: انتهت المهلة");
     expect(visibleText).not.toContain("private-provider");
     expect(visibleText).not.toContain("private-model");
     expect(visibleText).not.toContain("private cancellation detail");
@@ -267,15 +292,19 @@ describe("active work runtime mapper", () => {
 
     mapper.buildDelegationProgress({
       ...child("child-1", 0),
-      childEvent: { kind: "agent-final", ok: true },
+      childEvent: { kind: "delegation-result", status: "completed" },
     });
     mapper.buildDelegationProgress({
       ...child("child-2", 1),
-      childEvent: { kind: "agent-cancelled", reason: "cancelled" },
+      childEvent: { kind: "delegation-result", status: "cancelled" },
     });
     mapper.buildDelegationProgress({
       ...child("child-3", 2),
-      childEvent: { kind: "tool-start", tool: "file.read" },
+      childEvent: { kind: "delegation-result", status: "timeout" },
+    });
+    mapper.buildDelegationProgress({
+      ...child("child-4", 3),
+      childEvent: { kind: "delegation-result", status: "failed" },
     });
     const parentResult = mapper.build({
       kind: "tool-result",
@@ -290,9 +319,44 @@ describe("active work runtime mapper", () => {
       id: "delegate-1",
       status: "done",
       summary: "delegate",
-      target: "1 completed · 1 cancelled · 1 unresolved",
+      target: "1 completed · 1 cancelled · 1 timed out · 1 failed",
     });
     expect(JSON.stringify([parentStart, parentResult])).not.toContain("raw delegated task text");
+  });
+
+  it("keeps settlement monotonic when cancellation arrives after timeout", () => {
+    const mapper = new ActiveWorkRuntimeEventMapper();
+    const child = {
+      kind: "delegation-progress" as const,
+      subagentId: "child-timeout",
+      childSessionId: "child-timeout",
+      parentSessionId: "parent-session",
+      role: "leaf" as const,
+      depth: 1,
+      taskIndex: 0,
+    };
+    mapper.build({ kind: "tool-start", tool: "delegate_task", activityId: "delegate-timeout" });
+    mapper.buildDelegationProgress({
+      ...child,
+      childEvent: { kind: "agent-start", sessionId: "child-timeout" },
+    });
+    const timeout = mapper.buildDelegationProgress({
+      ...child,
+      childEvent: { kind: "delegation-result", status: "timeout" },
+    });
+    const lateCancellation = mapper.buildDelegationProgress({
+      ...child,
+      childEvent: { kind: "agent-cancelled", reason: "child-timeout" },
+    });
+    const parentResult = mapper.build({
+      kind: "tool-result",
+      tool: "delegate_task",
+      activityId: "delegate-timeout",
+      ok: false,
+    });
+
+    expect(lateCancellation).toEqual(timeout);
+    expect(parentResult.target).toBe("1 timed out");
   });
 
   it("normalizes runtime event identity for active work and tool trails", () => {
