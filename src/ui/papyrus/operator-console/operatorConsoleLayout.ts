@@ -167,7 +167,7 @@ function createRegionDescriptors(
       kind: "activeWork",
       priority: ACTIVE_WORK_PRIORITY,
       minHeight: 1,
-      desiredHeight: getActiveWorkSurfaceDesiredHeight(state.activeWork),
+      desiredHeight: getActiveWorkSurfaceDesiredHeight(state.activeWork, terminal.width),
     });
   }
 

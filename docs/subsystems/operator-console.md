@@ -329,11 +329,27 @@ running `delegate_task` is the exception: its bounded child rows use the active
 work region so the operator can see that isolated subagents are still running.
 
 ```text
-╭─ Delegated work ──────────────────────────────────────────────────────╮
-│ ◷ Worker 1        Read File                                    00:03  │
-│ ✓ Worker 2        completed                                    00:07  │
-│ ✗ Worker 3        timed out                                    00:10  │
-╰───────────────────────────────────────────────────────────────────────╯
+Delegated work · 2 active · 1 done · 00:53
+╭─ • Worker 1 · inspect delegation ───────╮  ╭─ ● Worker 2 · inspect tools ───────────╮
+│ ✓ Search Files  src/delegation           │  │ · Read File  src/tools/delegation...   │
+│ · Read File     progress-relay.ts        │  │                                         │
+│                                         │  │                                         │
+│                                         │  │                                         │
+│                                         │  │                                         │
+│                                         │  │                                         │
+├─────────────────────────────────────────┤  ├─────────────────────────────────────────┤
+│ running · 2 activities · 00:53          │  │ running · 1 activity · 00:53           │
+╰─────────────────────────────────────────╯  ╰─────────────────────────────────────────╯
+╭─ ✓ Worker 3 · inspect docs ─────────────╮
+│ ✓ Search Files  docs/**/*delegation*     │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+├─────────────────────────────────────────┤
+│ completed · 1 activity · 00:47          │
+╰─────────────────────────────────────────╯
 ╭─ Prompt ─────────────────────────────────────────────────────────────╮
 │ ›                                                                     │
 ╰──────────────────────────────────────────────────────────────────────╯
@@ -345,6 +361,15 @@ delegated-work region. When the parent delegation settles, or a new live
 assistant tail begins streaming, the child rows leave the live frame. The
 durable turn-end surface keeps one parent tool row with the bounded outcome
 counts:
+
+Each worker card keeps a rolling maximum of six bounded activity rows. Cards
+render two per row when two minimum-width cards fit and stack on narrower
+terminals. At most three cards are visible: active workers take precedence and
+recent completions fill remaining slots, while the header reports aggregate
+active, completed, failed, and not-yet-observed queue counts for the whole
+batch. Constrained layouts reduce activity rows before falling back to compact
+worker lines. Running workers use the phase-shifted `worker` pulse token; plain
+mode uses a stable ASCII marker with animation disabled.
 
 ```text
 ╭─ Tools completed ─────────────────────────────────────────────────────╮

@@ -48,6 +48,7 @@ export interface TokenSpinner {
   waiting: readonly string[];
   thinking: readonly string[];
   tool: readonly string[];
+  worker: readonly string[];
   background: readonly string[];
 }
 

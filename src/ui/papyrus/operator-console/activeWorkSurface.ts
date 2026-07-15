@@ -9,7 +9,7 @@ import type {
   ActiveWorkItemStatus,
   ToolActivityState,
 } from "./operatorConsoleState.js";
-import { styleColor, type OperatorConsoleStyle } from "./operatorConsoleStyle.js";
+import { styleBold, styleColor, type OperatorConsoleStyle } from "./operatorConsoleStyle.js";
 
 export type ActiveWorkSurfaceRenderOptions = {
   readonly width: number;
@@ -37,6 +37,11 @@ const LTR_ISOLATE_END = "\u2069";
 const TOOL_DETAIL_GAP_CELLS = 3;
 const DURATION_DETAIL_GAP_CELLS = 3;
 const ARABIC_DURATION_DETAIL_GAP_CELLS = 7;
+const MAX_VISIBLE_WORKER_CARDS = 3;
+const MAX_WORKER_ACTIVITY_ROWS = 6;
+const MIN_WORKER_CARD_WIDTH = 44;
+const WORKER_CARD_COLUMN_GAP = 2;
+const WORKER_CARD_FIXED_ROWS = 4;
 
 export function hasActiveWork(state: ToolActivityState): boolean {
   return state.items.length > 0;
@@ -60,8 +65,15 @@ export function sortActiveWorkItems(state: ToolActivityState): readonly ActiveWo
     .map(({ item }) => item);
 }
 
-export function getActiveWorkSurfaceDesiredHeight(state: ToolActivityState): number {
+export function getActiveWorkSurfaceDesiredHeight(state: ToolActivityState, width = 80): number {
   if (!hasActiveWork(state)) return 0;
+  const workerItems = delegationWorkerItems(state);
+  if (hasRunningDelegationWork(state) && workerItems.length > 0) {
+    const visibleCount = Math.min(MAX_VISIBLE_WORKER_CARDS, workerItems.length);
+    const columns = resolveWorkerCardColumns(normalizeDimension(width));
+    const gridRows = Math.ceil(visibleCount / columns);
+    return 1 + gridRows * (WORKER_CARD_FIXED_ROWS + MAX_WORKER_ACTIVITY_ROWS);
+  }
   return Math.max(3, activeWorkItemsForLiveSurface(state).length + 2);
 }
 
@@ -78,11 +90,19 @@ export function renderActiveWorkSurface(
   const width = normalizeDimension(options.width);
   if (width <= 0 || !hasActiveWork(state)) return [];
 
-  const height = normalizeDimension(options.height ?? getActiveWorkSurfaceDesiredHeight(state));
+  const height = normalizeDimension(options.height ?? getActiveWorkSurfaceDesiredHeight(state, width));
   if (height <= 0) return [];
   const copy = resolveActiveWorkCopy(options.locale);
   const liveItems = activeWorkItemsForLiveSurface(state);
   const liveTitle = hasRunningDelegationWork(state) ? copy.delegatedWork : copy.runningTools;
+  const workerItems = delegationWorkerItems(state);
+  if (hasRunningDelegationWork(state) && workerItems.length > 0) {
+    return renderDelegationWorkerCards(state, workerItems, {
+      ...options,
+      width,
+      height,
+    });
+  }
   if (height < 3) return [truncateVisibleCells(`${liveTitle}: ${liveItems.length}`, width)];
 
   const contentWidth = Math.max(0, width - 4);
@@ -104,6 +124,226 @@ export function renderActiveWorkSurface(
       .map((row) => renderContentRow(row, contentWidth, width)),
     renderBottomBorder(width),
   ];
+}
+
+function renderDelegationWorkerCards(
+  state: ToolActivityState,
+  workerItems: readonly ActiveWorkItem[],
+  options: ActiveWorkSurfaceRenderOptions & { readonly height: number }
+): readonly string[] {
+  const { width, height, locale, style } = options;
+  const copy = resolveActiveWorkCopy(locale);
+  const visibleItems = selectVisibleWorkerItems(workerItems);
+  const columns = resolveWorkerCardColumns(width);
+  const gridRows = Math.ceil(visibleItems.length / columns);
+  const cardHeight = Math.min(
+    WORKER_CARD_FIXED_ROWS + MAX_WORKER_ACTIVITY_ROWS,
+    Math.floor(Math.max(0, height - 1) / Math.max(1, gridRows))
+  );
+  const header = padVisibleEnd(
+    truncateVisibleCells(formatDelegationWorkerHeader(state, workerItems, locale, style), width),
+    width
+  );
+
+  if (cardHeight < WORKER_CARD_FIXED_ROWS) {
+    const compactRows = visibleItems.slice(0, Math.max(0, height - 1)).map((item) =>
+      padVisibleEnd(truncateVisibleCells(formatCompactWorkerRow(item, state, locale, style), width), width)
+    );
+    return padRows([header, ...compactRows], height).map((line) => padVisibleEnd(line, width));
+  }
+
+  const cardWidths = resolveWorkerCardWidths(width, columns);
+  const rows: string[] = [header];
+  for (let rowIndex = 0; rowIndex < gridRows; rowIndex += 1) {
+    const rowItems = visibleItems.slice(rowIndex * columns, (rowIndex + 1) * columns);
+    const cards = rowItems.map((item, columnIndex) =>
+      renderWorkerCard(item, state, cardWidths[columnIndex] ?? cardWidths[0] ?? width, cardHeight, locale, style)
+    );
+    for (let lineIndex = 0; lineIndex < cardHeight; lineIndex += 1) {
+      const line = cardWidths.map((cardWidth, columnIndex) =>
+        padVisibleEnd(cards[columnIndex]?.[lineIndex] ?? "", cardWidth)
+      ).join(" ".repeat(WORKER_CARD_COLUMN_GAP));
+      rows.push(padVisibleEnd(truncateVisibleCells(line, width), width));
+    }
+  }
+
+  return padRows(rows, height).slice(0, height).map((line) => padVisibleEnd(line, width));
+}
+
+function renderWorkerCard(
+  item: ActiveWorkItem,
+  state: ToolActivityState,
+  width: number,
+  height: number,
+  locale: OperatorConsoleLocale | undefined,
+  style: OperatorConsoleStyle | undefined
+): readonly string[] {
+  const contentWidth = Math.max(0, width - 4);
+  const activityRows = Math.max(0, height - WORKER_CARD_FIXED_ROWS);
+  const title = formatWorkerCardTitle(item, state, locale, style);
+  const activities = (item.activityLog ?? []).slice(-activityRows).map((activity) => {
+    const symbol = workerActivitySymbol(activity.status, style);
+    const detail = activity.detail === undefined ? "" : `  ${isolateIfNeeded(activity.detail, locale)}`;
+    return truncateVisibleCells(`${symbol} ${isolateIfNeeded(activity.label, locale)}${detail}`, contentWidth);
+  });
+
+  return [
+    renderTopBorder(title, width),
+    ...padRows(activities, activityRows).map((row) => renderContentRow(row, contentWidth, width)),
+    renderMiddleBorder(width),
+    renderContentRow(formatWorkerCardFooter(item, state, contentWidth, locale, style), contentWidth, width),
+    renderBottomBorder(width),
+  ];
+}
+
+function formatDelegationWorkerHeader(
+  state: ToolActivityState,
+  items: readonly ActiveWorkItem[],
+  locale: OperatorConsoleLocale | undefined,
+  style: OperatorConsoleStyle | undefined
+): string {
+  const copy = resolveActiveWorkCopy(locale);
+  const activeCount = items.filter(isActiveStatusItem).length;
+  const doneCount = items.filter((item) => item.status === "succeeded" || item.status === "cancelled").length;
+  const failedCount = items.filter((item) => item.status === "failed").length;
+  const batchCount = Math.max(items.length, ...items.map((item) => item.batchTaskCount ?? 0));
+  const queuedCount = Math.max(0, batchCount - items.length);
+  const parts = [
+    styleBold(style, copy.delegatedWork),
+    `${formatNumber(activeCount)} ${copy.active}`,
+    `${formatNumber(doneCount)} ${copy.done}`,
+  ];
+  if (failedCount > 0) parts.push(`${formatNumber(failedCount)} ${copy.failed}`);
+  if (queuedCount > 0) parts.push(`${formatNumber(queuedCount)} ${copy.queued}`);
+  parts.push(isolateIfNeeded(formatClockDuration(resolveActiveWorkElapsedMs(state)), locale));
+  return parts.join(" · ");
+}
+
+function formatWorkerCardTitle(
+  item: ActiveWorkItem,
+  state: ToolActivityState,
+  locale: OperatorConsoleLocale | undefined,
+  style: OperatorConsoleStyle | undefined
+): string {
+  const symbol = workerStatusSymbol(item, state.frameIndex, style);
+  const worker = styleBold(style, isolateIfNeeded(item.displayLabel?.trim() || "Worker", locale));
+  const task = item.taskLabel?.trim();
+  return task === undefined || task.length === 0
+    ? `${symbol} ${worker}`
+    : `${symbol} ${worker} · ${isolateIfNeeded(task, locale)}`;
+}
+
+function formatCompactWorkerRow(
+  item: ActiveWorkItem,
+  state: ToolActivityState,
+  locale: OperatorConsoleLocale | undefined,
+  style: OperatorConsoleStyle | undefined
+): string {
+  const title = formatWorkerCardTitle(item, state, locale, style);
+  const footer = formatWorkerCardFooter(item, state, Number.MAX_SAFE_INTEGER, locale, style);
+  return `${title}  ${footer}`;
+}
+
+function formatWorkerCardFooter(
+  item: ActiveWorkItem,
+  state: ToolActivityState,
+  width: number,
+  locale: OperatorConsoleLocale | undefined,
+  style: OperatorConsoleStyle | undefined
+): string {
+  const copy = resolveActiveWorkCopy(locale);
+  const activityCount = item.activityLog?.length ?? 0;
+  const activityCopy = activityCount === 1 ? copy.activity : copy.activities;
+  const duration = item.durationMs ?? (isActiveStatusItem(item) ? resolveActiveWorkElapsedMs(state) : resolveDurationMs(item));
+  const status = styleWorkerStatus(style, workerStatusLabel(item.status, copy), item.status);
+  return truncateVisibleCells(
+    `${status} · ${formatNumber(activityCount)} ${activityCopy} · ${isolateIfNeeded(formatClockDuration(duration), locale)}`,
+    width
+  );
+}
+
+function workerStatusLabel(status: ActiveWorkItemStatus, copy: ReturnType<typeof resolveActiveWorkCopy>): string {
+  switch (status) {
+    case "queued": return copy.queued;
+    case "running": return copy.running;
+    case "succeeded": return copy.completed;
+    case "failed": return copy.failed;
+    case "cancelled": return copy.cancelled;
+    case "awaitingApproval": return copy.awaitingApproval;
+  }
+}
+
+function styleWorkerStatus(
+  style: OperatorConsoleStyle | undefined,
+  value: string,
+  status: ActiveWorkItemStatus
+): string {
+  const tokens = style?.tokens.contract;
+  if (tokens === undefined) return value;
+  if (status === "succeeded") return styleColor(style, value, tokens.severity.ok);
+  if (status === "failed" || status === "cancelled") return styleColor(style, value, tokens.severity.error);
+  if (status === "awaitingApproval") return styleColor(style, value, tokens.palette.caution);
+  return styleColor(style, value, tokens.palette.action);
+}
+
+function workerStatusSymbol(
+  item: ActiveWorkItem,
+  frameIndex: number | undefined,
+  style: OperatorConsoleStyle | undefined
+): string {
+  if (item.status !== "running") return activeWorkStatusSymbol(item.status, frameIndex, style);
+  const frames = style?.tokens.contract.glyph.spinner.worker ?? ["·", "∙", "•", "●", "•", "∙"];
+  const phase = (frameIndex ?? 0) + (item.taskIndex ?? stableWorkerPhase(item.id)) * 2;
+  const frame = spinnerFrameIndex(phase, frames.length);
+  const symbol = frames[frame] ?? "·";
+  const tokens = style?.tokens.contract;
+  if (tokens === undefined) return symbol;
+  const color = frame === 3
+    ? tokens.palette.accent
+    : frame === 2 || frame === 4
+      ? tokens.palette.action
+      : tokens.text.muted;
+  return styleColor(style, symbol, color);
+}
+
+function workerActivitySymbol(
+  status: "running" | "succeeded" | "failed",
+  style: OperatorConsoleStyle | undefined
+): string {
+  if (status === "succeeded") return styleWorkerStatus(style, "✓", "succeeded");
+  if (status === "failed") return styleWorkerStatus(style, "✗", "failed");
+  return styleWorkerStatus(style, "·", "running");
+}
+
+function delegationWorkerItems(state: ToolActivityState): readonly ActiveWorkItem[] {
+  return state.items.filter((item) => item.source === "subagent");
+}
+
+function selectVisibleWorkerItems(items: readonly ActiveWorkItem[]): readonly ActiveWorkItem[] {
+  const active = items.filter(isActiveStatusItem).sort(compareWorkerOrder);
+  const terminal = items.filter((item) => !isActiveStatusItem(item)).slice().sort(compareWorkerOrder).reverse();
+  return [...active, ...terminal].slice(0, MAX_VISIBLE_WORKER_CARDS);
+}
+
+function compareWorkerOrder(left: ActiveWorkItem, right: ActiveWorkItem): number {
+  return (left.taskIndex ?? Number.MAX_SAFE_INTEGER) - (right.taskIndex ?? Number.MAX_SAFE_INTEGER);
+}
+
+function stableWorkerPhase(id: string): number {
+  let phase = 0;
+  for (const character of id) phase = (phase + character.charCodeAt(0)) % 3;
+  return phase;
+}
+
+function resolveWorkerCardColumns(width: number): 1 | 2 {
+  return width >= MIN_WORKER_CARD_WIDTH * 2 + WORKER_CARD_COLUMN_GAP ? 2 : 1;
+}
+
+function resolveWorkerCardWidths(width: number, columns: 1 | 2): readonly number[] {
+  if (columns === 1) return [width];
+  const available = Math.max(0, width - WORKER_CARD_COLUMN_GAP);
+  const left = Math.floor(available / 2);
+  return [left, available - left];
 }
 
 export function renderCompletedActiveWorkSurface(
@@ -428,6 +668,11 @@ function renderTopBorder(title: string, width: number, rightLabel?: string): str
 function renderBottomBorder(width: number): string {
   if (width <= 1) return "╰".slice(0, width);
   return `╰${"─".repeat(Math.max(0, width - 2))}╯`;
+}
+
+function renderMiddleBorder(width: number): string {
+  if (width <= 1) return "├".slice(0, width);
+  return `├${"─".repeat(Math.max(0, width - 2))}┤`;
 }
 
 function renderContentRow(row: string, contentWidth: number, width: number): string {

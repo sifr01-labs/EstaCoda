@@ -108,10 +108,14 @@ describe("plain mode invariants", () => {
 
   it("plain forces ASCII spinner", () => {
     const r = resolveTokens("plain", "dark", "kemetBlue");
-    const frames = r.contract.glyph.spinner.waiting;
+    const frames = [
+      ...r.contract.glyph.spinner.waiting,
+      ...r.contract.glyph.spinner.worker,
+    ];
     for (const f of frames) {
       expect(f.charCodeAt(0)).toBeLessThan(128);
     }
+    expect(r.contract.glyph.spinner.worker).toEqual(["."]);
   });
 
   it("plain forces ASCII tool icons", () => {
@@ -179,6 +183,7 @@ describe("kemetBlue skin overlay", () => {
   it("overrides spinner glyphs", () => {
     const r = resolveTokens("standard", "light", "kemetBlue");
     expect(r.contract.glyph.spinner.waiting).toContain("\u2326");
+    expect(r.contract.glyph.spinner.worker).toEqual(["·", "∙", "•", "●", "•", "∙"]);
   });
 
   it("overrides tool icons", () => {

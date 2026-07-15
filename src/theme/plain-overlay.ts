@@ -18,6 +18,7 @@ export const plainOverlay: TokenOverlay = {
       waiting: ["|", "/", "-", "\\"],
       thinking: ["o", "O", "o", "."],
       tool: ["|", "/", "-", "\\"],
+      worker: ["."],
       background: [".", "..", "...", "...."],
     },
     progress: {
