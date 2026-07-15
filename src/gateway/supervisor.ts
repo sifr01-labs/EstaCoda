@@ -17,6 +17,12 @@ import { CronStore } from "../cron/cron-store.js";
 import { CronExecutionStore } from "../cron/cron-execution-store.js";
 import { createFileCronJobLock } from "../cron/cron-lock.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
+import type { MemoryCurationCheckpointResult } from "../memory/memory-curation-service.js";
+import { curateSessionFinalizationJob } from "../memory/session-finalization-curator.js";
+import {
+  SessionFinalizationWorker,
+  type SessionFinalizationWorkerResult,
+} from "../memory/session-finalization-worker.js";
 import { resolveAuxiliaryModelRoute } from "../providers/auxiliary-model-resolver.js";
 import { resolveEffectiveSessionModelOverride } from "../providers/model-switch-resolver.js";
 import { SessionCompressionService } from "../prompt/session-compression-service.js";
@@ -27,6 +33,10 @@ import { RuntimeCache } from "../runtime/runtime-cache.js";
 import { computeRuntimeFingerprint, stableJsonHash, type RuntimeFingerprint } from "../runtime/runtime-fingerprint.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
+import {
+  SessionFinalizationQueue,
+  type SessionFinalizationJob,
+} from "../session/session-finalization-queue.js";
 import { resolveTokens } from "../theme/token-resolver.js";
 import { ChannelApprovalStore } from "../channels/channel-approval-store.js";
 import { ChannelGateway, telegramGatewayCommands } from "../channels/channel-gateway.js";
@@ -99,6 +109,7 @@ export type SupervisorFactories = {
   createChannelGateway?(input: ConstructorParameters<typeof ChannelGateway>[0]): ChannelGateway;
   createDeliveryRouter?(input: ConstructorParameters<typeof DeliveryRouter>[0]): DeliveryRouter;
   tickCron?(input: Parameters<typeof tickCron>[0]): ReturnType<typeof tickCron>;
+  finalizeSessionJob?(job: SessionFinalizationJob, signal: AbortSignal): Promise<MemoryCurationCheckpointResult>;
   sleep?(ms: number): Promise<void>;
   exit?(code: number): void;
 };
@@ -319,6 +330,9 @@ export type SupervisorInternalState = {
   gatewayLocalWhisper?: ManagedFasterWhisperWorker;
   gatewayLocalWhisperConfigKey?: string;
   notifyGatewayRestarting?: () => Promise<void>;
+  sessionFinalizationWorker?: Pick<SessionFinalizationWorker, "runOnce">;
+  sessionFinalizationAbort?: AbortController;
+  sessionFinalizationRun?: Promise<SessionFinalizationWorkerResult>;
 };
 
 function logInfo(message: string): void {
@@ -449,6 +463,9 @@ function createInitialState(
     startupComplete: false,
     drainCancelled: false,
     signalExit: undefined,
+    sessionFinalizationWorker: undefined,
+    sessionFinalizationAbort: undefined,
+    sessionFinalizationRun: undefined,
   };
 }
 
@@ -480,6 +497,17 @@ async function cleanupSupervisorStartupResources(state: SupervisorInternalState)
     try { await state.channelGateway.stop(); } catch { /* ignore */ }
   }
 
+  // 2a. Stop claiming finalization work and give the active provider call a short abort grace.
+  state.sessionFinalizationAbort?.abort(new Error("gateway-shutdown"));
+  const activeFinalization = state.sessionFinalizationRun;
+  let finalizationSettled = activeFinalization === undefined;
+  if (activeFinalization !== undefined) {
+    finalizationSettled = await Promise.race([
+      activeFinalization.then(() => true, () => true),
+      sleep(state.drainCancelled ? 250 : 5_000).then(() => false),
+    ]);
+  }
+
   // 3. Final runtime-cache-state write (best-effort)
   if (state.runtimeCache !== undefined && state.runtimeFingerprint !== undefined && state.activeTurnRegistry !== undefined) {
     try {
@@ -505,7 +533,15 @@ async function cleanupSupervisorStartupResources(state: SupervisorInternalState)
 
   // 5. Close session DB if opened
   if (state.sessionDb !== undefined) {
-    try { state.sessionDb.close(); } catch { /* ignore */ }
+    const sessionDb = state.sessionDb;
+    state.sessionDb = undefined;
+    if (activeFinalization !== undefined && !finalizationSettled) {
+      void activeFinalization.finally(() => {
+        try { sessionDb.close(); } catch { /* ignore */ }
+      });
+    } else {
+      try { sessionDb.close(); } catch { /* ignore */ }
+    }
   }
 
   // 6. Release identity locks in reverse acquisition order
@@ -849,6 +885,25 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       controller: new WorkspaceApprovalController()
     });
     state.gatewayApprovalQueue = gatewayApprovalQueue;
+
+    const sessionFinalizationQueue = new SessionFinalizationQueue({ db: sessionDb.db });
+    state.sessionFinalizationWorker = new SessionFinalizationWorker({
+      queue: sessionFinalizationQueue,
+      profileId,
+      ownerId: `gateway-${process.pid}-${startedAt}`,
+      finalize: options.factories?.finalizeSessionJob ?? (async (job, signal) => {
+        const latestConfig = await loadConfig();
+        return await curateSessionFinalizationJob({
+          job,
+          config: latestConfig,
+          sessionDb,
+          homeDir,
+          workspaceRoot: options.workspaceRoot,
+          profileId,
+          signal,
+        });
+      }),
+    });
 
     const activeTurnRegistry = new ActiveTurnRegistry({
       stuckThresholdMs: 300_000,
@@ -1466,6 +1521,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     const runtimeCacheStateWriteGuard = { running: false };
     const gatewayApprovalExpiryGuard = { running: false };
     const gatewayApprovalResolutionGuard = { running: false };
+    const sessionFinalizationGuard = { running: false };
 
     // 13. Main loop
     let polls = 0;
@@ -1523,6 +1579,13 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           },
         }),
       });
+      }
+
+      const finalizationTick = runSessionFinalizationTick(state, sessionFinalizationGuard);
+      if (options.once === true) {
+        await finalizationTick;
+      } else {
+        void finalizationTick;
       }
 
       if (shouldRunSupervisorTicks(state)) {
@@ -1635,6 +1698,35 @@ export async function runPrune(state: SupervisorInternalState, guard: { running:
   } catch (err) {
     logWarning(`Runtime cache prune error: ${err instanceof Error ? err.message : String(err)}`);
   } finally {
+    guard.running = false;
+  }
+}
+
+export async function runSessionFinalizationTick(
+  state: SupervisorInternalState,
+  guard: { running: boolean }
+): Promise<void> {
+  if (state.draining || state.sessionFinalizationWorker === undefined || guard.running) {
+    return;
+  }
+
+  guard.running = true;
+  const controller = new AbortController();
+  state.sessionFinalizationAbort = controller;
+  const run = state.sessionFinalizationWorker.runOnce({ signal: controller.signal });
+  state.sessionFinalizationRun = run;
+  try {
+    const result = await run;
+    if (result.status === "failed") {
+      logWarning(`Session finalization failed with code ${result.errorCode}`);
+    }
+  } catch {
+    logWarning("Session finalization worker tick failed");
+  } finally {
+    if (state.sessionFinalizationRun === run) {
+      state.sessionFinalizationRun = undefined;
+      state.sessionFinalizationAbort = undefined;
+    }
     guard.running = false;
   }
 }

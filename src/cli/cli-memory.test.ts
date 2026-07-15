@@ -3,10 +3,12 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { resolveProfileStateHome } from "../config/profile-home.js";
+import { resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
+import { SQLiteMemoryCurationCoordinator } from "../memory/memory-curation-coordinator.js";
 import { resolveMemoryIndexStorePath } from "../memory/memory-index-store.js";
 import { MemoryCurationStore, memoryCurationStorePath } from "../memory/memory-curation-store.js";
 import { writeSharedMemory } from "../memory/shared-memory.js";
+import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { runCliCommand } from "./cli.js";
 
 const tempDirs: string[] = [];
@@ -573,6 +575,35 @@ describe("CLI memory commands", () => {
     await expect(readFile(paths.userMdPath, "utf8")).resolves.toBe("");
     await expect(readFile(paths.memoryMdPath, "utf8")).resolves.toBe("");
     await expect(readFile(paths.soulMdPath, "utf8")).resolves.toBe("protected identity");
+  });
+
+  it("memory mutations defer while background curation holds the profile lease", async () => {
+    const homeDir = await makeTempHome();
+    await seedProfileMemory(homeDir, { "USER.md": "keep this memory" });
+    const sessionDb = await createSQLiteSessionDB({
+      path: resolveGlobalStateHome({ homeDir }).sessionsSqlitePath,
+    });
+    let releaseLease!: () => void;
+    const leaseBlocker = new Promise<void>((resolve) => {
+      releaseLease = resolve;
+    });
+    const heldLease = new SQLiteMemoryCurationCoordinator({
+      db: sessionDb.db,
+      profileId: "default",
+    }).runExclusive({ task: async () => await leaseBlocker });
+
+    try {
+      const result = await runMemoryCommand(homeDir, ["memory", "clear", "USER.md", "--yes"]);
+
+      expect(result.exitCode).toBe(1);
+      expect(result.output).toContain("Memory update is busy");
+      await expect(readFile(resolveProfileStateHome({ homeDir, profileId: "default" }).userMdPath, "utf8"))
+        .resolves.toBe("keep this memory");
+    } finally {
+      releaseLease();
+      await heldLease;
+      sessionDb.close();
+    }
   });
 });
 

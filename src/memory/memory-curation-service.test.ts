@@ -7,7 +7,7 @@ import type { ExternalMemoryProvider } from "../contracts/memory.js";
 import type { ExtractedFact } from "./extracted-fact.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { MemoryCurationStore, memoryCurationStorePath } from "./memory-curation-store.js";
-import { MemoryCurationService } from "./memory-curation-service.js";
+import { MemoryCurationCutoffError, MemoryCurationService } from "./memory-curation-service.js";
 import { MemoryMutationService } from "./memory-mutation-service.js";
 import { MemoryPersistenceService } from "./memory-persistence-service.js";
 import { MemoryStore } from "./memory-store.js";
@@ -303,6 +303,64 @@ describe("MemoryCurationService", () => {
     expect(first.warnings).toContain("minimum new-message threshold not reached");
     expect(second.status).toBe("skipped");
     expect(second.warnings).toContain("runtime dispose audit interval not reached");
+  });
+
+  it("curates only through the immutable finalization message cutoff", async () => {
+    const root = await makeTempDir();
+    const db = new InMemorySessionDB();
+    await db.createSession({ id: "session-1", profileId: "default" });
+    await db.appendMessage({ id: "m1", sessionId: "session-1", role: "user", content: "First" });
+    await db.appendMessage({ id: "m2", sessionId: "session-1", role: "agent", content: "Second" });
+    await db.appendMessage({ id: "m3", sessionId: "session-1", role: "user", content: "Later resumed turn" });
+    const extractFacts = vi.fn(async () => ({ facts: [], diagnostics: diagnostics(0) }));
+    const service = new MemoryCurationService({
+      config: DEFAULT_MEMORY_CONFIG.curation,
+      profileId: "default",
+      sessionId: "session-1",
+      sessionDb: db,
+      memoryStore: new MemoryStore(),
+      curationStore: new MemoryCurationStore({ path: memoryCurationStorePath(root) }),
+      extractorOptions: {},
+      extractFacts,
+    });
+
+    const result = await service.checkpoint({
+      trigger: "manual",
+      cutoffMessageId: "m2",
+      sourceMessageCount: 2,
+    });
+
+    expect(result.sourceMessageCount).toBe(2);
+    expect(extractFacts).toHaveBeenCalledWith(expect.objectContaining({
+      messages: [expect.objectContaining({ id: "m1" }), expect.objectContaining({ id: "m2" })],
+    }));
+  });
+
+  it("fails closed when a finalization cutoff no longer matches the transcript", async () => {
+    const root = await makeTempDir();
+    const db = new InMemorySessionDB();
+    await db.createSession({ id: "session-1", profileId: "default" });
+    await db.appendMessage({ id: "m1", sessionId: "session-1", role: "user", content: "First" });
+    const extractFacts = vi.fn(async () => ({ facts: [], diagnostics: diagnostics(0) }));
+    const service = new MemoryCurationService({
+      config: DEFAULT_MEMORY_CONFIG.curation,
+      profileId: "default",
+      sessionId: "session-1",
+      sessionDb: db,
+      memoryStore: new MemoryStore(),
+      curationStore: new MemoryCurationStore({ path: memoryCurationStorePath(root) }),
+      extractorOptions: {},
+      extractFacts,
+    });
+
+    await expect(service.checkpoint({
+      trigger: "manual",
+      cutoffMessageId: "missing",
+      sourceMessageCount: 1,
+    })).rejects.toMatchObject({
+      code: "memory-curation-cutoff-missing",
+    } satisfies Partial<MemoryCurationCutoffError>);
+    expect(extractFacts).not.toHaveBeenCalled();
   });
 });
 

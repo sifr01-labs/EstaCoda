@@ -682,6 +682,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     this.#runMigrationStep(6, "v0.9-schema-v6-session-lineage", () => this.#migrateV6());
     this.#runMigrationStep(7, "v0.9-schema-v7-typed-pending-approvals", () => this.#migrateV7());
     this.#runMigrationStep(8, "v0.9-schema-v8-session-finalization", () => this.#migrateV8());
+    this.#runMigrationStep(9, "v0.9-schema-v9-memory-curation-lease", () => this.#migrateV9());
   }
 
   #withMigrationLock(migrate: () => void): void {
@@ -879,6 +880,21 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
         on session_finalization_jobs(profile_id, status, lease_expires_at);
       create index if not exists idx_session_finalization_session
         on session_finalization_jobs(profile_id, session_id, created_at);
+    `);
+  }
+
+  #migrateV9(): void {
+    this.#db.exec(`
+      create table if not exists memory_curation_leases (
+        profile_id text primary key,
+        owner_id text not null,
+        acquired_at text not null,
+        lease_expires_at text not null,
+        updated_at text not null
+      );
+
+      create index if not exists idx_memory_curation_lease_expiry
+        on memory_curation_leases(lease_expires_at);
     `);
   }
 

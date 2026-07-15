@@ -189,6 +189,17 @@ export class SessionFinalizationQueue {
         )
         .run(now, now, profileId, now);
 
+      const active = this.#db
+        .query<{ id: string }>(
+          `select id from session_finalization_jobs
+          where profile_id = ? and status = 'running' and lease_expires_at > ?
+          limit 1`
+        )
+        .get(profileId, now);
+      if (active !== null) {
+        return;
+      }
+
       const next = this.#db
         .query<SessionFinalizationRow>(
           `select * from session_finalization_jobs

@@ -23,6 +23,7 @@ import {
   runRuntimeCacheStateHeartbeat,
   runGatewayApprovalExpiry,
   runGatewayApprovalResolutionTick,
+  runSessionFinalizationTick,
   buildRuntimeCacheState,
   buildGatewayCronRuntimeOptions,
   createVoiceTranscriptionAudit,
@@ -45,6 +46,8 @@ import { HookRegistry } from "./hook-registry.js";
 import { resolveGlobalStateHome, resolveProfileStateHome, type ProfileStatePaths } from "../config/profile-home.js";
 import { createWhatsAppUserAuthCode, defaultWhatsAppUserAuthStorePath } from "../channels/whatsapp-pairing-store.js";
 import { gatewayLifecycleNotification } from "../channels/gateway-lifecycle-notifications.js";
+import { createSQLiteSessionDB } from "../session/session-setup.js";
+import { SessionFinalizationQueue } from "../session/session-finalization-queue.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-supervisor-test-"));
@@ -606,6 +609,65 @@ describe("runGatewaySupervisor", () => {
 
     const lock = await readGatewayLockContent(profilePaths);
     expect(lock).toBeUndefined();
+  });
+
+  it("once mode processes one queued session finalization job", async () => {
+    const dbPath = resolveGlobalStateHome({ homeDir: tmpDir }).sessionsSqlitePath;
+    const sessionDb = await createSQLiteSessionDB({ path: dbPath });
+    await sessionDb.createSession({ id: "finished-session", profileId: "default" });
+    await sessionDb.appendMessage({
+      id: "finished-message",
+      sessionId: "finished-session",
+      role: "user",
+      content: "private finalization input",
+    });
+    const queue = new SessionFinalizationQueue({ db: sessionDb.db });
+    const job = queue.enqueue({
+      profileId: "default",
+      sessionId: "finished-session",
+      reason: "cli-exit",
+    });
+    sessionDb.close();
+    const finalizeSessionJob = vi.fn(async () => ({
+      status: "skipped" as const,
+      trigger: "runtime-dispose" as const,
+      sessionId: "finished-session",
+      sourceMessageCount: 1,
+      reviewedMessageCount: 0,
+      extractedFactCount: 0,
+      candidateCount: 0,
+      autoAppliedCount: 0,
+      pendingReviewCount: 0,
+      ignoredCount: 0,
+      failedCount: 0,
+      warnings: [],
+    }));
+
+    const result = await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        finalizeSessionJob,
+        createChannelGateway: () => fakeChannelGateway() as any,
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(finalizeSessionJob).toHaveBeenCalledWith(
+      expect.objectContaining({ id: job.id, cutoffMessageId: "finished-message" }),
+      expect.any(AbortSignal),
+    );
+    const verifyDb = await createSQLiteSessionDB({ path: dbPath });
+    try {
+      expect(new SessionFinalizationQueue({ db: verifyDb.db }).get(job.id, "default")).toMatchObject({
+        status: "completed",
+        outcomeCode: "curation-skipped",
+      });
+    } finally {
+      verifyDb.close();
+    }
   });
 
   it("signal handlers are removed after run", async () => {
@@ -1687,6 +1749,44 @@ describe("supervisor 5E internals", () => {
       const p2 = runPrune(state, guard);
       await Promise.all([p1, p2]);
       expect(pruneCalls).toBe(1);
+    });
+  });
+
+  describe("runSessionFinalizationTick", () => {
+    it("runs one background finalization job without overlapping ticks", async () => {
+      let finish!: () => void;
+      const pending = new Promise<void>((resolve) => { finish = resolve; });
+      const runOnce = vi.fn(async () => {
+        await pending;
+        return { status: "idle" as const };
+      });
+      const state = createMockSupervisorState({
+        sessionFinalizationWorker: { runOnce },
+      });
+      const guard = { running: false };
+
+      const first = runSessionFinalizationTick(state, guard);
+      await runSessionFinalizationTick(state, guard);
+      expect(runOnce).toHaveBeenCalledTimes(1);
+      expect(guard.running).toBe(true);
+      expect(state.sessionFinalizationAbort).toBeInstanceOf(AbortController);
+
+      finish();
+      await first;
+      expect(guard.running).toBe(false);
+      expect(state.sessionFinalizationRun).toBeUndefined();
+      expect(state.sessionFinalizationAbort).toBeUndefined();
+    });
+
+    it("does not claim finalization work while the gateway is draining", async () => {
+      const runOnce = vi.fn(async () => ({ status: "idle" as const }));
+      const state = createMockSupervisorState({
+        draining: true,
+        sessionFinalizationWorker: { runOnce },
+      });
+
+      await runSessionFinalizationTick(state, { running: false });
+      expect(runOnce).not.toHaveBeenCalled();
     });
   });
 

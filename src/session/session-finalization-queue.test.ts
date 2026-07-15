@@ -95,7 +95,9 @@ describe("SessionFinalizationQueue", () => {
 
   it("claims jobs once across simultaneous database connections", async () => {
     await db.createSession({ id: "session-1", profileId: "profile-a" });
+    await db.createSession({ id: "session-2", profileId: "profile-a" });
     queue().enqueue({ profileId: "profile-a", sessionId: "session-1", reason: "cli-exit" });
+    queue().enqueue({ profileId: "profile-a", sessionId: "session-2", reason: "cli-exit" });
     const secondDb = await createSQLiteSessionDB({ path: dbPath });
 
     try {
@@ -103,6 +105,7 @@ describe("SessionFinalizationQueue", () => {
       const secondClaim = queue(secondDb).claimNext({ profileId: "profile-a", ownerId: "worker-b", leaseMs: 60_000 });
       expect(firstClaim).toMatchObject({ status: "running", leaseOwner: "worker-a", attempts: 1 });
       expect(secondClaim).toBeUndefined();
+      expect(queue().list({ profileId: "profile-a", status: "pending" })).toHaveLength(1);
     } finally {
       secondDb.close();
     }

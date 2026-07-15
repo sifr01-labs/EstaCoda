@@ -5,8 +5,10 @@ import { resolveHomeDir } from "../config/home-dir.js";
 import {
   defaultProfileId,
   readActiveProfile,
+  resolveGlobalStateHome,
   resolveProfileStateHome
 } from "../config/profile-home.js";
+import { createSQLiteSessionDB } from "../session/session-setup.js";
 import type { MemoryFileKind, MemoryOperation, MemoryPromotionRecord } from "../contracts/memory.js";
 import { truncate } from "../utils/formatting.js";
 import { redactSensitiveText } from "../utils/redaction.js";
@@ -24,6 +26,10 @@ import { MemoryPersistenceService, isMemoryPersistenceDriftError } from "./memor
 import { createMemoryIndexSync } from "./memory-index-sync.js";
 import { MemoryStore } from "./memory-store.js";
 import { MemoryMutationService } from "./memory-mutation-service.js";
+import {
+  MemoryCurationBusyError,
+  SQLiteMemoryCurationCoordinator,
+} from "./memory-curation-coordinator.js";
 
 type MemoryOperatorRuntime = {
   sessionId: string;
@@ -66,16 +72,16 @@ export async function runMemoryOperatorCommand(input: {
     return { ok: true, output: await renderReviewCurationRecords(context, parseLimit(args, 20)) };
   }
   if (action === "apply") {
-    return await handleMemoryApply(context, args);
+    return await runMemoryMutationExclusive(context, input.signal, () => handleMemoryApply(context, args));
   }
   if (action === "reject") {
-    return await handleMemoryReject(context, args);
+    return await runMemoryMutationExclusive(context, input.signal, () => handleMemoryReject(context, args));
   }
   if (action === "undo") {
-    return await handleMemoryUndo(context, args);
+    return await runMemoryMutationExclusive(context, input.signal, () => handleMemoryUndo(context, args));
   }
   if (action === "forget") {
-    return await handleMemoryForget(context, args);
+    return await runMemoryMutationExclusive(context, input.signal, () => handleMemoryForget(context, args));
   }
   if (action === "populate") {
     return await handleMemoryPopulate({
@@ -88,7 +94,7 @@ export async function runMemoryOperatorCommand(input: {
     return { ok: true, output: renderMemoryEditTargets(context) };
   }
   if (action === "clear") {
-    return await handleMemoryClear(context, args);
+    return await runMemoryMutationExclusive(context, input.signal, () => handleMemoryClear(context, args));
   }
   if (action === "help" || action === "--help" || action === "-h") {
     return { ok: true, output: memoryOperatorHelp() };
@@ -98,6 +104,36 @@ export async function runMemoryOperatorCommand(input: {
     ok: false,
     output: `Unknown memory action: ${action}\n\n${memoryOperatorHelp()}`
   };
+}
+
+async function runMemoryMutationExclusive(
+  context: { homeDir: string; profileId: string },
+  signal: AbortSignal | undefined,
+  task: () => Promise<MemoryOperatorCommandResult>
+): Promise<MemoryOperatorCommandResult> {
+  const sessionDb = await createSQLiteSessionDB({
+    path: resolveGlobalStateHome({ homeDir: context.homeDir }).sessionsSqlitePath,
+  });
+  try {
+    const coordinator = new SQLiteMemoryCurationCoordinator({
+      db: sessionDb.db,
+      profileId: context.profileId,
+    });
+    return await coordinator.runExclusive({
+      signal,
+      task: async () => await task(),
+    });
+  } catch (error) {
+    if (error instanceof MemoryCurationBusyError) {
+      return {
+        ok: false,
+        output: "Memory update is busy while background curation finishes. Try again shortly.",
+      };
+    }
+    throw error;
+  } finally {
+    sessionDb.close();
+  }
 }
 
 export function memoryOperatorHelp(): string {

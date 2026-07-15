@@ -18,6 +18,7 @@ import {
 import { MemoryMutationService } from "./memory-mutation-service.js";
 import { reviewMemoryFacts, type CuratedMemoryCandidate } from "./memory-reviewer.js";
 import { redactSensitiveText } from "../utils/redaction.js";
+import type { MemoryCurationCheckpointCoordinator } from "./memory-curation-coordinator.js";
 
 type CuratableMemoryOperation = MemoryOperation & { file: "USER.md" | "MEMORY.md" };
 type RuntimeMemoryCurationStatus = Extract<MemoryCurationStatus, "auto-applied" | "pending-review" | "ignored" | "failed">;
@@ -39,6 +40,16 @@ export type MemoryCurationCheckpointResult = {
   warnings: string[];
 };
 
+export class MemoryCurationCutoffError extends Error {
+  readonly name = "MemoryCurationCutoffError";
+  readonly code: "memory-curation-cutoff-missing" | "memory-curation-cutoff-mismatch";
+
+  constructor(code: MemoryCurationCutoffError["code"], message: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
 export type MemoryCurationServiceOptions = {
   config: MemoryCurationConfig;
   profileId: string;
@@ -51,6 +62,7 @@ export type MemoryCurationServiceOptions = {
   persistencePaths?: Partial<Record<"USER.md" | "MEMORY.md", string>>;
   memoryIndexSync?: MemoryIndexWriteSync;
   memoryMutationService?: MemoryMutationService;
+  checkpointCoordinator?: MemoryCurationCheckpointCoordinator;
   now?: () => Date;
   extractFacts?: (input: {
     messages: readonly SessionMessage[];
@@ -72,6 +84,7 @@ export class MemoryCurationService {
   readonly #memoryMutationService: MemoryMutationService;
   readonly #now: () => Date;
   readonly #extractFacts: NonNullable<MemoryCurationServiceOptions["extractFacts"]>;
+  readonly #checkpointCoordinator: MemoryCurationCheckpointCoordinator | undefined;
   #turnsSinceCheckpoint = 0;
 
   constructor(options: MemoryCurationServiceOptions) {
@@ -93,6 +106,7 @@ export class MemoryCurationService {
     });
     this.#now = options.now ?? (() => new Date());
     this.#extractFacts = options.extractFacts ?? extractMemoryFacts;
+    this.#checkpointCoordinator = options.checkpointCoordinator;
   }
 
   async observeCompletedTurn(input: {
@@ -115,6 +129,8 @@ export class MemoryCurationService {
     trigger: MemoryCurationTrigger;
     sessionId?: string;
     minNewMessages?: number;
+    cutoffMessageId?: string;
+    sourceMessageCount?: number;
     signal?: AbortSignal;
     onEvent?: RuntimeEventSink;
   }): Promise<MemoryCurationCheckpointResult> {
@@ -126,7 +142,31 @@ export class MemoryCurationService {
       return this.#skipped(input.trigger, sessionId, "memory curation mode is manual");
     }
 
-    const allMessages = await this.#sessionDb.listMessages(sessionId);
+    if (this.#checkpointCoordinator === undefined) {
+      return await this.#checkpointWithLease({ ...input, sessionId });
+    }
+    return await this.#checkpointCoordinator.runExclusive({
+      signal: input.signal,
+      task: async (signal) => await this.#checkpointWithLease({ ...input, sessionId, signal }),
+    });
+  }
+
+  async #checkpointWithLease(input: {
+    trigger: MemoryCurationTrigger;
+    sessionId: string;
+    minNewMessages?: number;
+    cutoffMessageId?: string;
+    sourceMessageCount?: number;
+    signal?: AbortSignal;
+    onEvent?: RuntimeEventSink;
+  }): Promise<MemoryCurationCheckpointResult> {
+    const sessionId = input.sessionId;
+
+    const sessionMessages = await this.#sessionDb.listMessages(sessionId);
+    const allMessages = messagesThroughCutoff(sessionMessages, {
+      cutoffMessageId: input.cutoffMessageId,
+      sourceMessageCount: input.sourceMessageCount,
+    });
     const latest = await this.#curationStore.latestForSession(sessionId);
     if (input.trigger === "runtime-dispose" && latest?.createdAt !== undefined) {
       const lastAuditMs = new Date(latest.createdAt).getTime();
@@ -348,6 +388,47 @@ export class MemoryCurationService {
       warnings: [reason]
     };
   }
+}
+
+function messagesThroughCutoff(
+  messages: readonly SessionMessage[],
+  cutoff: { cutoffMessageId?: string; sourceMessageCount?: number }
+): SessionMessage[] {
+  if (cutoff.sourceMessageCount !== undefined &&
+      (!Number.isInteger(cutoff.sourceMessageCount) || cutoff.sourceMessageCount < 0)) {
+    throw new MemoryCurationCutoffError(
+      "memory-curation-cutoff-mismatch",
+      "The memory curation message cutoff is invalid."
+    );
+  }
+  if (cutoff.cutoffMessageId === undefined && cutoff.sourceMessageCount === undefined) {
+    return [...messages];
+  }
+  if (cutoff.cutoffMessageId === undefined) {
+    if (cutoff.sourceMessageCount === 0) {
+      return [];
+    }
+    throw new MemoryCurationCutoffError(
+      "memory-curation-cutoff-missing",
+      "The memory curation cutoff message is unavailable."
+    );
+  }
+
+  const cutoffIndex = messages.findIndex((message) => message.id === cutoff.cutoffMessageId);
+  if (cutoffIndex < 0) {
+    throw new MemoryCurationCutoffError(
+      "memory-curation-cutoff-missing",
+      "The memory curation cutoff message is no longer present in the session transcript."
+    );
+  }
+  const selected = messages.slice(0, cutoffIndex + 1);
+  if (cutoff.sourceMessageCount !== undefined && selected.length !== cutoff.sourceMessageCount) {
+    throw new MemoryCurationCutoffError(
+      "memory-curation-cutoff-mismatch",
+      "The memory curation cutoff no longer matches the session transcript."
+    );
+  }
+  return selected;
 }
 
 function operationFromCandidate(candidate: CuratedMemoryCandidate): CuratableMemoryOperation | undefined {

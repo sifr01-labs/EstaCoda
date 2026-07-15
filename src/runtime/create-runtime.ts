@@ -23,6 +23,7 @@ import { FileStateTracker } from "../delegation/file-state-tracker.js";
 import { SubagentRegistry, type OperatorSubagentStatus } from "../delegation/subagent-registry.js";
 import { MemoryFileCompactionService } from "../memory/memory-file-compaction-service.js";
 import { MemoryCurationService } from "../memory/memory-curation-service.js";
+import { SQLiteMemoryCurationCoordinator } from "../memory/memory-curation-coordinator.js";
 import { MemoryCurationStore, memoryCurationStorePath, type MemoryCurationTrigger } from "../memory/memory-curation-store.js";
 import { MemoryIndex } from "../memory/memory-index.js";
 import { MemoryIndexStore, resolveMemoryIndexStorePath } from "../memory/memory-index-store.js";
@@ -31,7 +32,7 @@ import { MemoryMutationService } from "../memory/memory-mutation-service.js";
 import { MemoryPersistenceService } from "../memory/memory-persistence-service.js";
 import { LocalMemoryRetrievalService } from "../memory/memory-retrieval-service.js";
 import { MemoryStore } from "../memory/memory-store.js";
-import { listSharedMemory, type SharedMemoryEntry } from "../memory/shared-memory.js";
+import { listSharedMemory, renderSharedMemory } from "../memory/shared-memory.js";
 import { LocalMemoryProvider } from "../memory/local-memory-provider.js";
 import { MemoryPromptContextBuilder } from "../memory/memory-prompt-context-builder.js";
 import { createExternalMemoryProvidersFromConfig } from "../memory/external-memory-provider.js";
@@ -794,6 +795,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           "MEMORY.md": profilePaths.memoryMdPath
         },
         memoryIndexSync,
+        checkpointCoordinator: sessionDb instanceof SQLiteSessionDB
+          ? new SQLiteMemoryCurationCoordinator({ db: sessionDb.db, profileId })
+          : undefined,
         memoryMutationService: new MemoryMutationService({
           memoryStore,
           profileId,
@@ -1476,14 +1480,6 @@ function isOpenAICompatibleProvider(provider: string): boolean {
     "nous",
     "zai"
   ].includes(provider);
-}
-
-function renderSharedMemory(entries: SharedMemoryEntry[]): string | undefined {
-  const sections = entries
-    .filter((entry) => entry.content.trim().length > 0)
-    .map((entry) => `## ${entry.key}\n${entry.content.trim()}`);
-
-  return sections.length === 0 ? undefined : sections.join("\n\n");
 }
 
 function uniqueModels(models: ModelProfile[]): ModelProfile[] {
