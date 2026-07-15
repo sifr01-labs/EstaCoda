@@ -886,6 +886,7 @@ describe("DelegationManager", () => {
     let active = 0;
     let maxActive = 0;
     const releases: Array<() => void> = [];
+    const events: RuntimeEvent[] = [];
     const harness = await createHarness({
       maxConcurrentChildren: 2,
       handle: async (handleInput) => {
@@ -907,7 +908,10 @@ describe("DelegationManager", () => {
         { task: "two" },
         { task: "three" }
       ],
-      trustedWorkspace: true
+      trustedWorkspace: true,
+      onEvent: (event) => {
+        events.push(event);
+      }
     });
     await vi.waitFor(() => expect(releases).toHaveLength(2));
     releases.shift()?.();
@@ -920,6 +924,20 @@ describe("DelegationManager", () => {
     expect(result.results.map((child) => child.task)).toEqual(["one", "two", "three"]);
     expect(result.results.map((child) => child.index)).toEqual([0, 1, 2]);
     expect(result.results.map((child) => child.childStatus)).toEqual(["completed", "completed", "completed"]);
+    const settlements = events
+      .filter((event): event is Extract<RuntimeEvent, { kind: "delegation-progress" }> =>
+        event.kind === "delegation-progress" && event.childEvent.kind === "delegation-result"
+      )
+      .sort((left, right) => (left.taskIndex ?? 0) - (right.taskIndex ?? 0));
+    expect(settlements.map((event) => ({
+      taskIndex: event.taskIndex,
+      taskLabel: event.taskLabel,
+      batchTaskCount: event.batchTaskCount
+    }))).toEqual([
+      { taskIndex: 0, taskLabel: "one", batchTaskCount: 3 },
+      { taskIndex: 1, taskLabel: "two", batchTaskCount: 3 },
+      { taskIndex: 2, taskLabel: "three", batchTaskCount: 3 }
+    ]);
   });
 
   it("applies batch model overrides and lets task-level overrides win", async () => {

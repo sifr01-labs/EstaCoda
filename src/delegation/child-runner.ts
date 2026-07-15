@@ -36,6 +36,7 @@ export type ChildRunnerInput = {
   model: string;
   effectiveAllowedTools: string[];
   taskIndex?: number;
+  batchTaskCount?: number;
   batchId?: string;
   parentOnEvent?: RuntimeEventSink;
   now?: () => Date;
@@ -76,7 +77,9 @@ export async function runDelegatedChild(input: ChildRunnerInput): Promise<ChildR
       role: input.role,
       depth: input.depth,
       taskIndex: input.taskIndex,
-      batchId: input.batchId
+      batchId: input.batchId,
+      taskLabel: input.task,
+      batchTaskCount: input.batchTaskCount ?? 1
     },
     parentOnEvent: input.parentOnEvent,
     onActivity: (_event, summary) => {

@@ -31,6 +31,7 @@ import {
   timeoutDelegationSummary
 } from "./child-runner.js";
 import { runBoundedBatch } from "./batch-runner.js";
+import { normalizeDelegationProgressMetadata } from "./progress-relay.js";
 
 export type DelegationRequest = {
   parentSessionId: string;
@@ -43,6 +44,7 @@ export type DelegationRequest = {
   modelOverride?: DelegateModelOverride;
   batchId?: string;
   taskIndex?: number;
+  batchTaskCount?: number;
   channel?: ChannelKind;
   trustedWorkspace: boolean;
   signal?: AbortSignal;
@@ -173,7 +175,8 @@ export class DelegationManager {
         role: task.role,
         modelOverride: task.modelOverride ?? request.modelOverride,
         batchId,
-        taskIndex: index
+        taskIndex: index,
+        batchTaskCount: request.tasks.length
       }, parentReadSnapshot),
       skipTask: (task, index): DelegationSummary => {
         skippedIndexes.add(index);
@@ -370,6 +373,7 @@ export class DelegationManager {
         model: childModel(child),
         effectiveAllowedTools: child.toolAccess.effectiveAllowedTools,
         taskIndex: request.taskIndex,
+        batchTaskCount: request.batchTaskCount,
         batchId: request.batchId,
         parentOnEvent: request.onEvent
       });
@@ -880,8 +884,7 @@ export class DelegationManager {
     depth: number
   ): Promise<void> {
     if (request.onEvent === undefined || result.childSessionId === "unavailable") return;
-    await request.onEvent({
-      kind: "delegation-progress",
+    const metadata = normalizeDelegationProgressMetadata({
       subagentId: result.childSessionId,
       childSessionId: result.childSessionId,
       parentSessionId: request.parentSessionId,
@@ -889,6 +892,12 @@ export class DelegationManager {
       depth,
       taskIndex: request.taskIndex,
       batchId: request.batchId,
+      taskLabel: request.task,
+      batchTaskCount: request.batchTaskCount ?? 1
+    });
+    await request.onEvent({
+      kind: "delegation-progress",
+      ...metadata,
       childEvent: {
         kind: "delegation-result",
         status: childStatus(result)

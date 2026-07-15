@@ -312,7 +312,7 @@ describe("LiveOperatorConsoleController", () => {
     controller.applyActiveWorkEvent({
       id: "subagent:child-1",
       toolName: "delegate_task",
-      displayLabel: "Leaf 1",
+      displayLabel: "Worker 1",
       source: "subagent",
       groupId: "batch-1",
       status: "running",
@@ -331,7 +331,7 @@ describe("LiveOperatorConsoleController", () => {
     controller.applyActiveWorkEvent({
       id: "subagent:child-1",
       toolName: "delegate_task",
-      displayLabel: "Leaf 1",
+      displayLabel: "Worker 1",
       source: "subagent",
       groupId: "batch-1",
       status: "done",

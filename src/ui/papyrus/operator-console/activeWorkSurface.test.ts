@@ -313,14 +313,14 @@ describe("Papyrus operator console active work surface", () => {
         item("delegate", "running", { toolName: "delegate_task", target: "starting subagents" }),
         item("child-1", "running", {
           toolName: "delegate_task",
-          displayLabel: "Leaf 1",
+          displayLabel: "Worker 1",
           source: "subagent",
           groupId: "batch-1",
           target: "Read File",
         }),
         item("child-2", "succeeded", {
           toolName: "delegate_task",
-          displayLabel: "Leaf 2",
+          displayLabel: "Worker 2",
           source: "subagent",
           groupId: "batch-1",
           target: "completed",
@@ -332,8 +332,8 @@ describe("Papyrus operator console active work surface", () => {
 
     expect(getActiveWorkSurfaceDesiredHeight(state)).toBe(4);
     expect(output).toContain("Delegated work");
-    expect(output).toContain("Leaf 1");
-    expect(output).toContain("Leaf 2");
+    expect(output).toContain("Worker 1");
+    expect(output).toContain("Worker 2");
     expect(output).not.toContain("src/earlier.ts");
     expect(output).not.toContain("starting subagents");
     expect(formatLiveActiveWorkStatus(state)).toBe("1 active · 1 done · 00:07");
@@ -373,7 +373,7 @@ describe("Papyrus operator console active work surface", () => {
         }),
         item("child", "succeeded", {
           toolName: "delegate_task",
-          displayLabel: "Leaf 1",
+          displayLabel: "Worker 1",
           source: "subagent",
           groupId: "batch-1",
           target: "completed",
@@ -384,7 +384,7 @@ describe("Papyrus operator console active work surface", () => {
 
     expect(getCompletedActiveWorkSurfaceDesiredHeight(state)).toBe(5);
     expect(output).toContain("Delegate Task");
-    expect(output).not.toContain("Leaf 1");
+    expect(output).not.toContain("Worker 1");
     expect(output).toContain("1 completed · 0 failed");
   });
 

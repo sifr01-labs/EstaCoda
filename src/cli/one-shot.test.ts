@@ -78,14 +78,14 @@ describe("one-shot prompt", () => {
 
     const result = await runOneShotPrompt({ runtime, argv: ["delegate this"] });
 
-    expect(result.output).toContain("subagent Leaf 1: started");
-    expect(result.output).toContain("subagent Leaf 1: timed out");
+    expect(result.output).toContain("Worker 1: started");
+    expect(result.output).toContain("Worker 1: timed out");
     expect(result.output).not.toContain("Read File");
     expect(result.output).not.toContain("child-session-secret");
     expect(result.output).not.toContain("batch-secret");
-    expect(result.output.split("\n").filter((line) => line.includes("subagent Leaf 1"))).toEqual([
-      "subagent Leaf 1: started",
-      "subagent Leaf 1: timed out",
+    expect(result.output.split("\n").filter((line) => line.includes("Worker 1"))).toEqual([
+      "Worker 1: started",
+      "Worker 1: timed out",
     ]);
   });
 

@@ -330,9 +330,9 @@ work region so the operator can see that isolated subagents are still running.
 
 ```text
 ╭─ Delegated work ──────────────────────────────────────────────────────╮
-│ ◷ Leaf 1          Read File                                    00:03  │
-│ ✓ Leaf 2          completed                                    00:07  │
-│ ✗ Leaf 3          timed out                                    00:10  │
+│ ◷ Worker 1        Read File                                    00:03  │
+│ ✓ Worker 2        completed                                    00:07  │
+│ ✗ Worker 3        timed out                                    00:10  │
 ╰───────────────────────────────────────────────────────────────────────╯
 ╭─ Prompt ─────────────────────────────────────────────────────────────╮
 │ ›                                                                     │
@@ -352,10 +352,10 @@ counts:
 ╰───────────────────────────────────────────────────────────────────────╯
 ```
 
-Child prompts, transcripts, tool arguments, provider/model identifiers,
+Child prompts, transcripts, raw tool arguments, provider/model identifiers,
 cancellation reasons, and child session identifiers are not rendered. Plain and
 one-shot CLI modes emit at most two lifecycle lines per child, for example
-`subagent Leaf 1: started` and `subagent Leaf 1: completed`; intermediate child
+`Worker 1: started` and `Worker 1: completed`; intermediate child
 tool and provider events remain silent.
 
 ### Phase E2: Live Assistant Streaming

@@ -192,6 +192,8 @@ export type RuntimeEvent =
       depth: number;
       taskIndex?: number;
       batchId?: string;
+      taskLabel?: string;
+      batchTaskCount?: number;
       childEvent: {
         kind:
           | "agent-start"
@@ -205,6 +207,8 @@ export type RuntimeEvent =
           | "delegation-result";
         sessionId?: string;
         tool?: string;
+        activityId?: string;
+        displayPreview?: string;
         decision?: string;
         riskClass?: string;
         ok?: boolean;

@@ -2625,14 +2625,14 @@ describe("runSessionLoop — active turn spinner", () => {
     });
 
     expect(setActiveWorkSpy.mock.calls.some(([state]) =>
-      state.items.some((item) => item.source === "subagent" && item.displayLabel === "Leaf 1")
+      state.items.some((item) => item.source === "subagent" && item.displayLabel === "Worker 1")
     )).toBe(true);
     const rendered = stripAnsi(outputChunks.join(""));
     expect(rendered).toContain("Delegated work");
     const completedOutput = rendered.slice(rendered.lastIndexOf("Tools completed"));
     expect(completedOutput).toContain("Delegate Task");
     expect(completedOutput).toContain("1 completed");
-    expect(completedOutput).not.toContain("Leaf 1");
+    expect(completedOutput).not.toContain("Worker 1");
     expect(completedOutput).not.toContain("Read File");
     expect(completedOutput).not.toContain("raw delegated task text");
   });
