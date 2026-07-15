@@ -785,7 +785,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         providerExecutor,
         trajectoryRecorder,
         sessionDb,
-        sessionId
+        sessionId,
+        mutationCoordinator: memoryMutationCoordinator,
+        persistence: memoryPersistenceService
       }),
       memoryCurationServiceFactory: ({ sessionRuntimeContext, sessionDb, trajectoryRecorder }) => new MemoryCurationService({
         config: memoryConfig.curation,
@@ -1214,7 +1216,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       if (!(sessionDb instanceof SQLiteSessionDB)) {
         return undefined;
       }
-      return new SessionFinalizationQueue({ db: sessionDb.db }).enqueue({
+      return new SessionFinalizationQueue({
+        db: sessionDb.db,
+        enqueueBusyTimeoutMs: 50
+      }).enqueue({
         profileId,
         sessionId: sessionRuntimeContext.currentSessionId(),
         reason,

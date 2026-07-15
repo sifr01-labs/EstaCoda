@@ -38,6 +38,7 @@ export type SessionFinalizationQueueSummary = {
 };
 
 const DEFAULT_TERMINAL_RETENTION = 1_000;
+const MAX_ENQUEUE_BUSY_TIMEOUT_MS = 1_000;
 
 type SessionFinalizationRow = {
   id: string;
@@ -85,15 +86,24 @@ export class SessionFinalizationQueue {
   readonly #db: SQLiteDatabase;
   readonly #now: () => Date;
   readonly #id: () => string;
+  readonly #enqueueBusyTimeoutMs: number | undefined;
 
   constructor(options: {
     db: SQLiteDatabase;
     now?: () => Date;
     id?: () => string;
+    enqueueBusyTimeoutMs?: number;
   }) {
     this.#db = options.db;
     this.#now = options.now ?? (() => new Date());
     this.#id = options.id ?? (() => crypto.randomUUID());
+    this.#enqueueBusyTimeoutMs = options.enqueueBusyTimeoutMs === undefined
+      ? undefined
+      : requireBoundedNonNegativeInteger(
+          options.enqueueBusyTimeoutMs,
+          "enqueueBusyTimeoutMs",
+          MAX_ENQUEUE_BUSY_TIMEOUT_MS
+        );
   }
 
   enqueue(input: {
@@ -161,7 +171,7 @@ export class SessionFinalizationQueue {
           now
         );
       job = this.#getScopedRow(id, profileId);
-    });
+    }, this.#enqueueBusyTimeoutMs);
 
     if (job === null) {
       throw new Error("Session finalization job disappeared before enqueue completed.");
@@ -472,7 +482,36 @@ export class SessionFinalizationQueue {
       .get(id, profileId);
   }
 
-  #withWriteTransaction(write: () => void): void {
+  #withWriteTransaction(write: () => void, busyTimeoutMs?: number): void {
+    if (busyTimeoutMs === undefined) {
+      this.#executeWriteTransaction(write);
+      return;
+    }
+
+    const previousBusyTimeout = this.#db
+      .query<{ timeout: number }>("pragma busy_timeout")
+      .get()?.timeout;
+    this.#db.exec(`pragma busy_timeout = ${busyTimeoutMs}`);
+    let failure: unknown;
+    try {
+      this.#executeWriteTransaction(write);
+    } catch (error) {
+      failure = error;
+      throw error;
+    } finally {
+      try {
+        if (previousBusyTimeout !== undefined) {
+          this.#db.exec(`pragma busy_timeout = ${previousBusyTimeout}`);
+        }
+      } catch (error) {
+        if (failure === undefined) {
+          throw error;
+        }
+      }
+    }
+  }
+
+  #executeWriteTransaction(write: () => void): void {
     this.#db.exec("begin immediate");
     try {
       write();

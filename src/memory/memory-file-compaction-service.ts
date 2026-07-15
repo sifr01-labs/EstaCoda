@@ -16,6 +16,8 @@ import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { calculateMemoryBudgetPressure, findBudget } from "./memory-pressure.js";
 import { scanMemoryContent } from "./memory-scanner.js";
 import { isMemoryBudgetOverflowError, type MemoryStore } from "./memory-store.js";
+import type { MemoryCurationCheckpointCoordinator } from "./memory-curation-coordinator.js";
+import type { MemoryPersistenceService } from "./memory-persistence-service.js";
 
 export type MemoryFileCompactionTarget = "USER.md" | "MEMORY.md";
 
@@ -92,6 +94,8 @@ export type MemoryFileCompactionServiceOptions = {
   now?: () => Date;
   id?: () => string;
   config?: Partial<MemoryFileCompactionConfig>;
+  mutationCoordinator?: MemoryCurationCheckpointCoordinator;
+  persistence?: MemoryPersistenceService;
 };
 
 export class MemoryFileCompactionService {
@@ -106,6 +110,8 @@ export class MemoryFileCompactionService {
   readonly #now: () => Date;
   readonly #id: () => string;
   readonly #config: MemoryFileCompactionConfig;
+  readonly #mutationCoordinator: MemoryCurationCheckpointCoordinator | undefined;
+  readonly #persistence: MemoryPersistenceService | undefined;
 
   constructor(options: MemoryFileCompactionServiceOptions) {
     this.#store = options.store;
@@ -118,6 +124,8 @@ export class MemoryFileCompactionService {
     this.#sessionId = options.sessionId;
     this.#now = options.now ?? (() => new Date());
     this.#id = options.id ?? randomId;
+    this.#mutationCoordinator = options.mutationCoordinator;
+    this.#persistence = options.persistence;
     this.#config = {
       ...DEFAULT_MEMORY_FILE_COMPACTION_CONFIG,
       ...(options.config ?? {})
@@ -137,6 +145,23 @@ export class MemoryFileCompactionService {
     if (target === undefined) {
       return invalidTarget(input.file);
     }
+
+    if (this.#mutationCoordinator === undefined) {
+      return await this.#compact({ ...input, target });
+    }
+    return await this.#mutationCoordinator.runExclusive({
+      signal: input.signal,
+      task: async (signal) => await this.#compact({ ...input, target, signal })
+    });
+  }
+
+  async #compact(input: {
+    target: MemoryFileCompactionTarget;
+    dryRun?: boolean;
+    signal?: AbortSignal;
+  }): Promise<MemoryFileCompactionResult> {
+    const target = input.target;
+    await this.#refreshTarget(target);
 
     const original = this.#store.read(target);
     const pressureBefore = this.#pressure(target, original);
@@ -213,7 +238,7 @@ export class MemoryFileCompactionService {
     const backupId = await this.#writeBackup(target, original);
     try {
       this.#store.write(target, generated.compactedText);
-      await this.#store.saveFileToDirectory(this.#memoryRoot, target);
+      await this.#saveTarget(target);
     } catch (error) {
       this.#store.hydrate(target, original);
       if (isMemoryBudgetOverflowError(error)) {
@@ -262,6 +287,7 @@ export class MemoryFileCompactionService {
   async restoreBackup(input: {
     file: string;
     backupId?: string;
+    signal?: AbortSignal;
   }): Promise<MemoryFileRestoreResult> {
     const target = toTarget(input.file);
     if (target === undefined) {
@@ -270,6 +296,22 @@ export class MemoryFileCompactionService {
         status: "invalid-target"
       };
     }
+
+    if (this.#mutationCoordinator === undefined) {
+      return await this.#restoreBackup({ ...input, target });
+    }
+    return await this.#mutationCoordinator.runExclusive({
+      signal: input.signal,
+      task: async () => await this.#restoreBackup({ ...input, target })
+    });
+  }
+
+  async #restoreBackup(input: {
+    target: MemoryFileCompactionTarget;
+    backupId?: string;
+  }): Promise<MemoryFileRestoreResult> {
+    const target = input.target;
+    await this.#refreshTarget(target);
 
     const backupId = input.backupId ?? await this.#latestBackupId(target);
     if (backupId === undefined || backupId !== basename(backupId) || !backupId.startsWith(backupPrefix(target))) {
@@ -315,7 +357,7 @@ export class MemoryFileCompactionService {
     try {
       preRestoreBackupId = await this.#writeBackup(target, previous);
       this.#store.write(target, content);
-      await this.#store.saveFileToDirectory(this.#memoryRoot, target);
+      await this.#saveTarget(target);
     } catch (error) {
       try {
         this.#store.hydrate(target, previous);
@@ -350,6 +392,29 @@ export class MemoryFileCompactionService {
       restoredChars: content.length,
       warnings: optionalWarnings(warnings)
     };
+  }
+
+  async #refreshTarget(target: MemoryFileCompactionTarget): Promise<void> {
+    if (this.#persistence === undefined) {
+      return;
+    }
+    const content = await this.#persistence.readFile({
+      path: join(this.#memoryRoot, target),
+      kind: target
+    });
+    this.#store.hydrate(target, content ?? "");
+  }
+
+  async #saveTarget(target: MemoryFileCompactionTarget): Promise<void> {
+    if (this.#persistence === undefined) {
+      await this.#store.saveFileToDirectory(this.#memoryRoot, target);
+      return;
+    }
+    await this.#persistence.writeFile({
+      path: join(this.#memoryRoot, target),
+      kind: target,
+      content: this.#store.read(target)
+    });
   }
 
   async #generateCompactedText(input: {

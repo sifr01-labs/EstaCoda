@@ -2,7 +2,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryCurationCutoffError, type MemoryCurationCheckpointResult } from "./memory-curation-service.js";
+import {
+  MemoryCurationCutoffError,
+  type MemoryCurationCheckpointResult
+} from "./memory-curation-service.js";
 import { SessionFinalizationWorker } from "./session-finalization-worker.js";
 import { SessionFinalizationQueue, type SessionFinalizationJob } from "../session/session-finalization-queue.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
@@ -90,6 +93,35 @@ describe("SessionFinalizationWorker", () => {
       lastErrorCode: "curation-failed",
     });
     expect(JSON.stringify(queue.get(pending.id, "profile-a"))).not.toContain("secret user text");
+  });
+
+  it("retries resolved failed checkpoints instead of completing them", async () => {
+    const pending = queue.enqueue({ profileId: "profile-a", sessionId: "session-1", reason: "cli-exit" });
+
+    await expect(worker(async () => checkpointResult("failed")).runOnce()).resolves.toMatchObject({
+      status: "retried",
+      errorCode: "memory-curation-checkpoint-failed",
+    });
+    expect(queue.get(pending.id, "profile-a")).toMatchObject({
+      status: "pending",
+      lastErrorCode: "memory-curation-checkpoint-failed",
+    });
+  });
+
+  it("preserves a bounded code for retryable extraction failures", async () => {
+    const pending = queue.enqueue({ profileId: "profile-a", sessionId: "session-1", reason: "cli-exit" });
+
+    await expect(worker(async () => ({
+      ...checkpointResult("failed"),
+      failureCode: "memory-fact-extraction-failed"
+    })).runOnce()).resolves.toMatchObject({
+      status: "retried",
+      errorCode: "memory-fact-extraction-failed",
+    });
+    expect(queue.get(pending.id, "profile-a")).toMatchObject({
+      status: "pending",
+      lastErrorCode: "memory-fact-extraction-failed",
+    });
   });
 
   it("fails terminally when the immutable message cutoff is unavailable", async () => {

@@ -69,7 +69,7 @@ export async function extractMemoryFacts(input: {
   }
 
   const parsed = parseFactPayload(result.response.content, warnings);
-  const normalized = parsed.flatMap((entry) => {
+  const normalized = parsed.entries.flatMap((entry) => {
     const fact = normalizeExtractedFact(entry, input.options.id);
     return fact === undefined ? [] : [fact];
   });
@@ -81,12 +81,12 @@ export async function extractMemoryFacts(input: {
   return {
     facts,
     diagnostics: {
-      ok: true,
+      ok: parsed.ok,
       routeSource: result.fallbackUsed ? "primary" : "semantic-compression",
       fallbackUsed: result.fallbackUsed,
-      rawFactCount: parsed.length,
+      rawFactCount: parsed.entries.length,
       acceptedFactCount: facts.length,
-      rejectedFactCount: Math.max(0, parsed.length - facts.length),
+      rejectedFactCount: Math.max(0, parsed.entries.length - facts.length),
       warnings
     }
   };
@@ -119,21 +119,21 @@ function renderExtractionRequest(messages: readonly SessionMessage[]): string {
   ].join("\n\n");
 }
 
-function parseFactPayload(content: string, warnings: string[]): unknown[] {
+function parseFactPayload(content: string, warnings: string[]): { ok: boolean; entries: unknown[] } {
   const jsonText = extractJsonText(content);
   try {
     const parsed = JSON.parse(jsonText) as unknown;
     if (Array.isArray(parsed)) {
-      return parsed;
+      return { ok: true, entries: parsed };
     }
     if (isRecord(parsed) && Array.isArray(parsed.facts)) {
-      return parsed.facts;
+      return { ok: true, entries: parsed.facts };
     }
     warnings.push("memory fact extractor returned JSON without a facts array");
-    return [];
+    return { ok: false, entries: [] };
   } catch (error) {
     warnings.push(`memory fact extractor returned invalid JSON: ${redactSensitiveText(error instanceof Error ? error.message : String(error))}`);
-    return [];
+    return { ok: false, entries: [] };
   }
 }
 

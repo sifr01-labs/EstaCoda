@@ -182,6 +182,7 @@ function renderFinalizationJobs(
       `reason=${job.reason}`,
       `session=${job.sessionId}`,
       `attempts=${job.attempts}`,
+      job.outcomeCode === undefined ? undefined : `outcome=${job.outcomeCode}`,
       job.lastErrorCode === undefined ? undefined : `error=${job.lastErrorCode}`,
     ].filter((value) => value !== undefined).join(" "))
   ].join("\n");

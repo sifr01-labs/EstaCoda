@@ -90,6 +90,29 @@ describe("CLI memory commands", () => {
     expect(pruned.output).toContain("Pruned 0 terminal finalization job(s)");
   });
 
+  it("shows completed finalization outcome codes", async () => {
+    const homeDir = await makeTempHome();
+    const sessionDb = await createSQLiteSessionDB({
+      path: resolveGlobalStateHome({ homeDir }).sessionsSqlitePath,
+    });
+    await sessionDb.createSession({ id: "completed-session", profileId: "default" });
+    const queue = new SessionFinalizationQueue({ db: sessionDb.db });
+    const job = queue.enqueue({ profileId: "default", sessionId: "completed-session", reason: "cli-exit" });
+    queue.claimNext({ profileId: "default", ownerId: "test-worker", leaseMs: 60_000 });
+    queue.complete({
+      id: job.id,
+      profileId: "default",
+      ownerId: "test-worker",
+      outcomeCode: "curation-ignored",
+    });
+    sessionDb.close();
+
+    const listed = await runMemoryCommand(homeDir, ["memory", "finalization", "list", "--status", "completed"]);
+
+    expect(listed.exitCode).toBe(0);
+    expect(listed.output).toContain("outcome=curation-ignored");
+  });
+
   it("validates finalization filters and retention before a session database exists", async () => {
     const homeDir = await makeTempHome();
 

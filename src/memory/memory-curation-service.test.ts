@@ -7,7 +7,10 @@ import type { ExternalMemoryProvider } from "../contracts/memory.js";
 import type { ExtractedFact } from "./extracted-fact.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { MemoryCurationStore, memoryCurationStorePath } from "./memory-curation-store.js";
-import { MemoryCurationCutoffError, MemoryCurationService } from "./memory-curation-service.js";
+import {
+  MemoryCurationCutoffError,
+  MemoryCurationService
+} from "./memory-curation-service.js";
 import { MemoryMutationService } from "./memory-mutation-service.js";
 import { MemoryPersistenceService } from "./memory-persistence-service.js";
 import { MemoryStore } from "./memory-store.js";
@@ -264,6 +267,81 @@ describe("MemoryCurationService", () => {
     expect(second.status).toBe("skipped");
     expect(second.warnings).toContain("no new session messages to review");
     expect(extractFacts).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not advance the cursor when fact extraction fails", async () => {
+    const root = await makeTempDir();
+    const db = new InMemorySessionDB();
+    await db.createSession({ id: "session-1", profileId: "default" });
+    await db.appendMessage({ sessionId: "session-1", role: "user", content: "Remember I use pnpm." });
+    const extractFacts = vi.fn()
+      .mockResolvedValueOnce({
+        facts: [],
+        diagnostics: { ...diagnostics(0), ok: false, warnings: ["provider unavailable"] }
+      })
+      .mockResolvedValueOnce({ facts: [], diagnostics: diagnostics(0) });
+    const curationStore = new MemoryCurationStore({ path: memoryCurationStorePath(root) });
+    const service = new MemoryCurationService({
+      config: DEFAULT_MEMORY_CONFIG.curation,
+      profileId: "default",
+      sessionId: "session-1",
+      sessionDb: db,
+      memoryStore: new MemoryStore(),
+      curationStore,
+      extractorOptions: {},
+      extractFacts
+    });
+
+    await expect(service.checkpoint({ trigger: "manual" })).resolves.toMatchObject({
+      status: "failed",
+      failureCode: "memory-fact-extraction-failed"
+    });
+    expect(await curationStore.latestForSession("session-1")).toMatchObject({ sourceMessageCount: 0 });
+
+    const retried = await service.checkpoint({ trigger: "manual" });
+    expect(retried).toMatchObject({ status: "ignored", reviewedMessageCount: 1 });
+    expect(extractFacts).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps failed memory mutations retryable without advancing the cursor", async () => {
+    const root = await makeTempDir();
+    const db = new InMemorySessionDB();
+    await db.createSession({ id: "session-1", profileId: "default" });
+    await db.appendMessage({
+      id: "m1",
+      sessionId: "session-1",
+      role: "user",
+      content: "Please remember that I prefer pnpm for this repo."
+    });
+    const store = new MemoryStore();
+    const extractFacts = vi.fn(async () => ({ facts: [fact()], diagnostics: diagnostics(1) }));
+    const apply = vi.fn(async (operation: Parameters<MemoryMutationService["apply"]>[0]) => ({
+      ok: false as const,
+      operation,
+      message: "simulated persistence failure"
+    }));
+    const curationStore = new MemoryCurationStore({ path: memoryCurationStorePath(root) });
+    const service = new MemoryCurationService({
+      config: DEFAULT_MEMORY_CONFIG.curation,
+      profileId: "default",
+      sessionId: "session-1",
+      sessionDb: db,
+      memoryStore: store,
+      curationStore,
+      extractorOptions: {},
+      memoryMutationService: { apply } as unknown as MemoryMutationService,
+      extractFacts
+    });
+
+    const first = await service.checkpoint({ trigger: "manual" });
+    expect(first).toMatchObject({ status: "failed", failedCount: 1 });
+    expect(await curationStore.latestForSession("session-1")).toMatchObject({ sourceMessageCount: 0 });
+    expect(await service.checkpoint({ trigger: "manual" })).toMatchObject({
+      status: "failed",
+      reviewedMessageCount: 1
+    });
+    expect(extractFacts).toHaveBeenCalledTimes(2);
+    expect(apply).toHaveBeenCalledTimes(2);
   });
 
   it("skips runtime dispose audits until enough new messages and time have passed", async () => {

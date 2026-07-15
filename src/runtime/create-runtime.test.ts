@@ -511,13 +511,14 @@ describe("createRuntime token branding", () => {
 
       expect(result).toMatchObject({
         trigger: "manual",
-        status: "ignored",
+        status: "failed",
+        failureCode: "memory-fact-extraction-failed",
         reviewedMessageCount: 1
       });
       await expect(sessionDb.listEvents(runtime.sessionId)).resolves.toContainEqual(expect.objectContaining({
         kind: "memory-curation",
         trigger: "manual",
-        status: "ignored"
+        status: "failed"
       }));
     } finally {
       await runtime.dispose();

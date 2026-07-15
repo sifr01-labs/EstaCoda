@@ -95,6 +95,9 @@ export class SessionFinalizationWorker {
       if (leaseLost) {
         return { status: "lease-lost", job };
       }
+      if (result.status === "failed") {
+        throw new MemoryCurationCheckpointFailedError(result.failureCode);
+      }
       const outcomeCode = `curation-${result.status}`;
       const completed = this.#queue.complete({
         id: job.id,
@@ -163,6 +166,9 @@ function classifyFinalizationError(error: unknown, workerStopped: boolean): {
   if (error instanceof MemoryCurationCutoffError) {
     return { code: error.code, retryable: false };
   }
+  if (error instanceof MemoryCurationCheckpointFailedError) {
+    return { code: error.code, retryable: true };
+  }
   if (error instanceof MemoryCurationBusyError) {
     return { code: error.code, retryable: true };
   }
@@ -170,6 +176,15 @@ function classifyFinalizationError(error: unknown, workerStopped: boolean): {
     return { code: error.code, retryable: true };
   }
   return { code: "curation-failed", retryable: true };
+}
+
+class MemoryCurationCheckpointFailedError extends Error {
+  readonly code: string;
+
+  constructor(code = "memory-curation-checkpoint-failed") {
+    super(code);
+    this.code = code;
+  }
 }
 
 function defaultRetryDelayMs(attempt: number): number {

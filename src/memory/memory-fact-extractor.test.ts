@@ -93,6 +93,31 @@ describe("extractMemoryFacts", () => {
       acceptedFactCount: 0
     });
   });
+
+  it("marks invalid provider payloads as failed extraction", async () => {
+    const result = await extractMemoryFacts({
+      messages: [message("m1", "Please remember I use pnpm.")],
+      profileId: "default",
+      sessionId: "session-1",
+      options: {
+        route: auxiliaryRoute(),
+        mainRoute: modelRoute("main-model"),
+        providerExecutor: {
+          complete: async () => ({
+            ok: true,
+            fallbackUsed: false,
+            attempts: [],
+            toolCalls: [],
+            response: providerResponse("not json")
+          })
+        }
+      }
+    });
+
+    expect(result.facts).toEqual([]);
+    expect(result.diagnostics).toMatchObject({ ok: false, rawFactCount: 0 });
+    expect(result.diagnostics.warnings).toContainEqual(expect.stringContaining("invalid JSON"));
+  });
 });
 
 function message(id: string, content: string): SessionMessage {

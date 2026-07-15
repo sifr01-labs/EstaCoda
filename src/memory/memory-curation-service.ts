@@ -38,6 +38,7 @@ export type MemoryCurationCheckpointResult = {
   ignoredCount: number;
   failedCount: number;
   warnings: string[];
+  failureCode?: "memory-fact-extraction-failed" | "memory-curation-apply-failed";
 };
 
 export class MemoryCurationCutoffError extends Error {
@@ -168,7 +169,7 @@ export class MemoryCurationService {
       sourceMessageCount: input.sourceMessageCount,
     });
     const latest = await this.#curationStore.latestForSession(sessionId);
-    if (input.trigger === "runtime-dispose" && latest?.createdAt !== undefined) {
+    if (input.trigger === "runtime-dispose" && latest?.createdAt !== undefined && latest.status !== "failed") {
       const lastAuditMs = new Date(latest.createdAt).getTime();
       const minIntervalMs = this.#config.runtimeDisposeMinIntervalMinutes * 60_000;
       if (Number.isFinite(lastAuditMs) && this.#now().getTime() - lastAuditMs < minIntervalMs) {
@@ -194,7 +195,7 @@ export class MemoryCurationService {
       signal: input.signal
     });
     const candidates = reviewMemoryFacts({
-      facts: extraction.facts,
+      facts: extraction.diagnostics.ok ? extraction.facts : [],
       memoryStore: this.#memoryStore,
       messages,
       config: this.#config
@@ -207,6 +208,7 @@ export class MemoryCurationService {
       ...applyResult.warnings
     ];
     const status = aggregateStatus({
+      extractionOk: extraction.diagnostics.ok,
       failedCount: applyResult.failedCount,
       autoAppliedCount: applyResult.autoAppliedCount,
       pendingReviewCount,
@@ -223,7 +225,7 @@ export class MemoryCurationService {
       sessionId,
       trigger: input.trigger,
       status,
-      sourceMessageCount: allMessages.length,
+      sourceMessageCount: status === "failed" ? lastSourceMessageCount : allMessages.length,
       sourceMessageIds: messages.map((message) => message.id),
       extractedFactIds: extraction.facts.map((fact) => fact.id),
       operations: applyResult.operations,
@@ -257,7 +259,12 @@ export class MemoryCurationService {
       pendingReviewCount,
       ignoredCount,
       failedCount: applyResult.failedCount,
-      warnings
+      warnings,
+      ...(status === "failed" ? {
+        failureCode: extraction.diagnostics.ok
+          ? "memory-curation-apply-failed" as const
+          : "memory-fact-extraction-failed" as const
+      } : {})
     };
   }
 
@@ -480,13 +487,14 @@ function recordCandidate(
 }
 
 function aggregateStatus(input: {
+  extractionOk: boolean;
   failedCount: number;
   autoAppliedCount: number;
   pendingReviewCount: number;
   ignoredCount: number;
   candidateCount: number;
 }): RuntimeMemoryCurationStatus {
-  if (input.failedCount > 0) {
+  if (!input.extractionOk || input.failedCount > 0) {
     return "failed";
   }
   if (input.autoAppliedCount > 0) {

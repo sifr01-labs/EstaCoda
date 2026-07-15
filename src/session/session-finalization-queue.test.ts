@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { openSQLiteDatabase } from "../storage/factory.js";
 import { SessionFinalizationQueue } from "./session-finalization-queue.js";
 import { createSQLiteSessionDB } from "./session-setup.js";
 import type { SQLiteSessionDB } from "./sqlite-session-db.js";
@@ -76,6 +77,31 @@ describe("SessionFinalizationQueue", () => {
     const next = queue().enqueue({ profileId: "profile-a", sessionId: "session-1", reason: "cli-exit" });
     expect(next.id).not.toBe(first.id);
     expect(next.sourceMessageCount).toBe(2);
+  });
+
+  it("bounds semantic-boundary enqueue lock waits and restores the connection timeout", async () => {
+    await db.createSession({ id: "session-1", profileId: "profile-a" });
+    await db.appendMessage({ id: "message-1", sessionId: "session-1", role: "user", content: "finish" });
+    const blocker = await openSQLiteDatabase({ path: dbPath, timeoutMs: 5_000 });
+    blocker.exec("begin immediate");
+
+    const boundaryQueue = new SessionFinalizationQueue({
+      db: db.db,
+      enqueueBusyTimeoutMs: 25,
+    });
+    const startedAt = performance.now();
+    try {
+      expect(() => boundaryQueue.enqueue({
+        profileId: "profile-a",
+        sessionId: "session-1",
+        reason: "cli-exit",
+      })).toThrow(/busy|locked/iu);
+      expect(performance.now() - startedAt).toBeLessThan(500);
+      expect(db.db.query<{ timeout: number }>("pragma busy_timeout").get()).toEqual({ timeout: 5_000 });
+    } finally {
+      blocker.exec("rollback");
+      blocker.close();
+    }
   });
 
   it("fails closed across profile boundaries", async () => {
