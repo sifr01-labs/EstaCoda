@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
-import { defaultProfileId, readActiveProfile } from "../config/profile-home.js";
+import { defaultProfileId, readActiveProfile, resolveGlobalStateHome } from "../config/profile-home.js";
 import type { CliCommandResult, CliOptions } from "./cli.js";
 import { MemoryIndex } from "../memory/memory-index.js";
 import { MemoryIndexStore, resolveMemoryIndexStorePath } from "../memory/memory-index-store.js";
@@ -16,6 +16,11 @@ import { validateSharedMemoryKey } from "../memory/shared-memory.js";
 import type { MemoryConfig } from "../config/memory-config.js";
 import type { MemoryIndexedSourceType } from "../contracts/memory.js";
 import { memoryOperatorHelp, runMemoryOperatorCommand } from "../memory/memory-operator-commands.js";
+import { createSQLiteSessionDB } from "../session/session-setup.js";
+import {
+  SessionFinalizationQueue,
+  type SessionFinalizationStatus,
+} from "../session/session-finalization-queue.js";
 
 export async function memoryCommand(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   if (hasFlag(args, "--help", "-h") || args.length === 0) {
@@ -35,6 +40,9 @@ export async function memoryCommand(options: CliOptions, args: string[]): Promis
   }
   if (action === "read") {
     return memoryReadCommand(options, actionArgs);
+  }
+  if (action === "finalization") {
+    return memoryFinalizationCommand(options, actionArgs);
   }
   if (
     action === "mode" ||
@@ -68,6 +76,153 @@ export async function memoryCommand(options: CliOptions, args: string[]): Promis
     exitCode: 1,
     output: `Unknown memory action: ${action}\n\n${memoryHelp()}`
   };
+}
+
+async function memoryFinalizationCommand(options: CliOptions, args: string[]): Promise<CliCommandResult> {
+  const [action = "list", ...actionArgs] = args;
+  const profileId = resolveCliProfileId(options);
+  const path = resolveGlobalStateHome({ homeDir: options.homeDir }).sessionsSqlitePath;
+  if (!existsSync(path)) {
+    return finalizationWithoutDatabase(action, actionArgs, profileId);
+  }
+
+  const sessionDb = await createSQLiteSessionDB({ path });
+  try {
+    const queue = new SessionFinalizationQueue({ db: sessionDb.db });
+    if (action === "list") {
+      const statusValue = readFlagValue(actionArgs, "--status");
+      const status = parseFinalizationStatus(statusValue);
+      if (hasValueFlag(actionArgs, "--status") && status === undefined) {
+        return commandResult(false, "Status must be pending, running, completed, or failed.");
+      }
+      const limitValue = readFlagValue(actionArgs, "--limit");
+      const limit = limitValue === undefined && !hasValueFlag(actionArgs, "--limit")
+        ? 20
+        : parseStrictNonNegativeInteger(limitValue);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+        return commandResult(false, "Finalization list limit must be between 1 and 100.");
+      }
+      const jobs = queue.list({ profileId, status, limit });
+      return commandResult(true, renderFinalizationJobs(profileId, jobs));
+    }
+    if (action === "retry") {
+      const id = actionArgs[0]?.trim();
+      if (id === undefined || id.length === 0) {
+        return commandResult(false, "Usage: estacoda memory finalization retry <job-id>");
+      }
+      const job = queue.retryFailed({ id, profileId });
+      return job === undefined
+        ? commandResult(false, `Failed finalization job not found for profile '${profileId}'.`)
+        : commandResult(true, `Finalization job ${job.id} queued for retry.`);
+    }
+    if (action === "prune") {
+      const keepValue = readFlagValue(actionArgs, "--keep");
+      const keepLatest = keepValue === undefined && !hasValueFlag(actionArgs, "--keep")
+        ? 1_000
+        : parseStrictNonNegativeInteger(keepValue);
+      try {
+        const pruned = queue.pruneTerminal({ profileId, keepLatest });
+        return commandResult(true, `Pruned ${pruned} terminal finalization job(s); kept the latest ${keepLatest}.`);
+      } catch {
+        return commandResult(false, "Finalization retention must be between 0 and 10000.");
+      }
+    }
+    return commandResult(false, finalizationHelp());
+  } finally {
+    sessionDb.close();
+  }
+}
+
+function finalizationWithoutDatabase(
+  action: string,
+  actionArgs: readonly string[],
+  profileId: string
+): CliCommandResult {
+  if (action === "list") {
+    const statusValue = readFlagValue(actionArgs, "--status");
+    if (hasValueFlag(actionArgs, "--status") && parseFinalizationStatus(statusValue) === undefined) {
+      return commandResult(false, "Status must be pending, running, completed, or failed.");
+    }
+    const limitValue = readFlagValue(actionArgs, "--limit");
+    const limit = limitValue === undefined && !hasValueFlag(actionArgs, "--limit")
+      ? 20
+      : parseStrictNonNegativeInteger(limitValue);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      return commandResult(false, "Finalization list limit must be between 1 and 100.");
+    }
+    return commandResult(true, `Memory finalization jobs\nprofile: ${profileId}\njobs: 0`);
+  }
+  if (action === "prune") {
+    const keepValue = readFlagValue(actionArgs, "--keep");
+    const keepLatest = keepValue === undefined && !hasValueFlag(actionArgs, "--keep")
+      ? 1_000
+      : parseStrictNonNegativeInteger(keepValue);
+    if (!Number.isInteger(keepLatest) || keepLatest < 0 || keepLatest > 10_000) {
+      return commandResult(false, "Finalization retention must be between 0 and 10000.");
+    }
+    return commandResult(true, "Pruned 0 terminal finalization job(s); no session database exists.");
+  }
+  if (action === "retry") {
+    return commandResult(false, `Failed finalization job not found for profile '${profileId}'.`);
+  }
+  return commandResult(false, finalizationHelp());
+}
+
+function renderFinalizationJobs(
+  profileId: string,
+  jobs: ReturnType<SessionFinalizationQueue["list"]>
+): string {
+  return [
+    "Memory finalization jobs",
+    `profile: ${profileId}`,
+    `jobs: ${jobs.length}`,
+    ...jobs.map((job) => [
+      `- ${job.id}`,
+      `status=${job.status}`,
+      `reason=${job.reason}`,
+      `session=${job.sessionId}`,
+      `attempts=${job.attempts}`,
+      job.lastErrorCode === undefined ? undefined : `error=${job.lastErrorCode}`,
+    ].filter((value) => value !== undefined).join(" "))
+  ].join("\n");
+}
+
+function parseFinalizationStatus(value: string | undefined): SessionFinalizationStatus | undefined {
+  return value === "pending" || value === "running" || value === "completed" || value === "failed"
+    ? value
+    : undefined;
+}
+
+function readFlagValue(args: readonly string[], flag: string): string | undefined {
+  const directIndex = args.indexOf(flag);
+  if (directIndex >= 0) {
+    return args[directIndex + 1];
+  }
+  const prefix = `${flag}=`;
+  return args.find((arg) => arg.startsWith(prefix))?.slice(prefix.length);
+}
+
+function hasValueFlag(args: readonly string[], flag: string): boolean {
+  return args.includes(flag) || args.some((arg) => arg.startsWith(`${flag}=`));
+}
+
+function parseStrictNonNegativeInteger(value: string | undefined): number {
+  return value !== undefined && /^(0|[1-9]\d*)$/u.test(value)
+    ? Number(value)
+    : Number.NaN;
+}
+
+function commandResult(ok: boolean, output: string): CliCommandResult {
+  return { handled: true, exitCode: ok ? 0 : 1, output };
+}
+
+function finalizationHelp(): string {
+  return [
+    "Memory finalization controls",
+    "  estacoda memory finalization list [--status pending|running|completed|failed] [--limit N]",
+    "  estacoda memory finalization retry <job-id>",
+    "  estacoda memory finalization prune [--keep N]"
+  ].join("\n");
 }
 
 async function memoryIndexCommand(options: CliOptions, args: string[]): Promise<CliCommandResult> {
@@ -471,6 +626,9 @@ function memoryHelp(): string {
     "  estacoda memory index rebuild",
     "  estacoda memory search <query> [--include-protected] [--max-results N] [--max-chars N]",
     "  estacoda memory read <USER.md|MEMORY.md|SOUL.md|shared> [key] [--include-protected] [--max-chars N]",
+    "  estacoda memory finalization list [--status pending|running|completed|failed] [--limit N]",
+    "  estacoda memory finalization retry <job-id>",
+    "  estacoda memory finalization prune [--keep N]",
     "",
     memoryOperatorHelp().replace(/^EstaCoda memory operator commands\n/u, "Memory curation controls\n")
   ].join("\n");

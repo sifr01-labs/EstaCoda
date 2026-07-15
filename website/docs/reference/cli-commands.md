@@ -334,6 +334,9 @@ estacoda memory forget <USER.md|MEMORY.md> <exact text>
 estacoda memory populate
 estacoda memory edit
 estacoda memory clear [USER.md|MEMORY.md|all] --yes
+estacoda memory finalization list [--status pending|running|completed|failed] [--limit N]
+estacoda memory finalization retry <job-id>
+estacoda memory finalization prune [--keep N]
 ```
 
 **State touched:**
@@ -344,6 +347,7 @@ estacoda memory clear [USER.md|MEMORY.md|all] --yes
 
 **Behavior:**
 - `memory status` reports profile memory configuration/history plus background-finalization `pending`, `running`, `retrying`, and `failed` counts.
+- `memory finalization list` shows bounded profile-scoped job metadata without transcript content; `retry` requeues failed jobs with a fresh attempt budget, and `prune` retains the newest terminal rows.
 - `memory mode` shows or updates profile-local curation mode. `auto` is the default and applies only conservative low-risk candidates.
 - `memory recent` shows recent curation records, including auto-applied, pending-review, ignored, and failed checkpoints.
 - `memory review` shows pending-review records and stored low-risk candidate operations.

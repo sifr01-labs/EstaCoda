@@ -49,6 +49,7 @@ describe("SessionFinalizationWorker", () => {
   it("completes a claimed job with a bounded curation outcome", async () => {
     const pending = queue.enqueue({ profileId: "profile-a", sessionId: "session-1", reason: "cli-exit" });
     const finalize = vi.fn(async () => checkpointResult("ignored"));
+    const prune = vi.spyOn(queue, "pruneTerminal");
 
     await expect(worker(finalize).runOnce()).resolves.toMatchObject({
       status: "completed",
@@ -60,6 +61,20 @@ describe("SessionFinalizationWorker", () => {
       outcomeCode: "curation-ignored",
       attempts: 1,
     });
+    expect(prune).toHaveBeenCalledWith({ profileId: "profile-a" });
+  });
+
+  it("preserves a completed outcome when terminal retention cleanup fails", async () => {
+    const pending = queue.enqueue({ profileId: "profile-a", sessionId: "session-1", reason: "cli-exit" });
+    vi.spyOn(queue, "pruneTerminal").mockImplementationOnce(() => {
+      throw new Error("database locked");
+    });
+
+    await expect(worker(async () => checkpointResult("ignored")).runOnce()).resolves.toMatchObject({
+      status: "completed",
+      outcomeCode: "curation-ignored",
+    });
+    expect(queue.get(pending.id, "profile-a")).toMatchObject({ status: "completed" });
   });
 
   it("retries transient failures without persisting error text", async () => {
@@ -94,6 +109,21 @@ describe("SessionFinalizationWorker", () => {
       status: "failed",
       lastErrorCode: "memory-curation-cutoff-missing",
     });
+  });
+
+  it("preserves a failed outcome when terminal retention cleanup fails", async () => {
+    const pending = queue.enqueue({ profileId: "profile-a", sessionId: "session-1", reason: "cli-exit" });
+    vi.spyOn(queue, "pruneTerminal").mockImplementationOnce(() => {
+      throw new Error("database locked");
+    });
+
+    await expect(worker(async () => {
+      throw new MemoryCurationCutoffError("memory-curation-cutoff-missing", "private transcript details");
+    }).runOnce()).resolves.toMatchObject({
+      status: "failed",
+      errorCode: "memory-curation-cutoff-missing",
+    });
+    expect(queue.get(pending.id, "profile-a")).toMatchObject({ status: "failed" });
   });
 
   it("honors retry availability and exhausts bounded attempts", async () => {

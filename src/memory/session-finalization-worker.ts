@@ -102,6 +102,9 @@ export class SessionFinalizationWorker {
         ownerId: this.#ownerId,
         outcomeCode,
       });
+      if (completed) {
+        this.#pruneTerminalBestEffort();
+      }
       return completed
         ? { status: "completed", job, outcomeCode }
         : { status: "lease-lost", job };
@@ -129,12 +132,23 @@ export class SessionFinalizationWorker {
         ownerId: this.#ownerId,
         errorCode: classified.code,
       });
+      if (failed) {
+        this.#pruneTerminalBestEffort();
+      }
       return failed
         ? { status: "failed", job, errorCode: classified.code }
         : { status: "lease-lost", job };
     } finally {
       clearInterval(heartbeat);
       input.signal?.removeEventListener("abort", forwardAbort);
+    }
+  }
+
+  #pruneTerminalBestEffort(): void {
+    try {
+      this.#queue.pruneTerminal({ profileId: this.#profileId });
+    } catch {
+      // Retention cleanup must not change an already-persisted terminal outcome.
     }
   }
 }

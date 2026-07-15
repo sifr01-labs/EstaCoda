@@ -37,6 +37,8 @@ export type SessionFinalizationQueueSummary = {
   failed: number;
 };
 
+const DEFAULT_TERMINAL_RETENTION = 1_000;
+
 type SessionFinalizationRow = {
   id: string;
   profile_id: string;
@@ -324,6 +326,55 @@ export class SessionFinalizationQueue {
     return result.changes === 1;
   }
 
+  retryFailed(input: {
+    id: string;
+    profileId: string;
+  }): SessionFinalizationJob | undefined {
+    const id = requireScopeValue(input.id, "id");
+    const profileId = requireScopeValue(input.profileId, "profileId");
+    const now = this.#now().toISOString();
+    const result = this.#db
+      .query(
+        `update session_finalization_jobs
+        set status = 'pending',
+            attempts = 0,
+            available_at = ?,
+            claimed_at = null,
+            lease_owner = null,
+            lease_expires_at = null,
+            failed_at = null,
+            last_error_code = null,
+            updated_at = ?
+        where id = ? and profile_id = ? and status = 'failed'`
+      )
+      .run(now, now, id, profileId);
+    return result.changes === 1 ? this.get(id, profileId) : undefined;
+  }
+
+  pruneTerminal(input: {
+    profileId: string;
+    keepLatest?: number;
+  }): number {
+    const profileId = requireScopeValue(input.profileId, "profileId");
+    const keepLatest = input.keepLatest === undefined
+      ? DEFAULT_TERMINAL_RETENTION
+      : requireBoundedNonNegativeInteger(input.keepLatest, "keepLatest", 10_000);
+    const result = this.#db
+      .query(
+        `delete from session_finalization_jobs
+        where profile_id = ?
+          and status in ('completed', 'failed')
+          and id not in (
+            select id from session_finalization_jobs
+            where profile_id = ? and status in ('completed', 'failed')
+            order by coalesce(completed_at, failed_at, updated_at) desc, id desc
+            limit ?
+          )`
+      )
+      .run(profileId, profileId, keepLatest);
+    return result.changes;
+  }
+
   get(id: string, profileId: string): SessionFinalizationJob | undefined {
     const row = this.#getScopedRow(
       requireScopeValue(id, "id"),
@@ -478,6 +529,13 @@ function requireSafeCode(value: string, label: string): string {
 function requirePositiveInteger(value: number, label: string): number {
   if (!Number.isInteger(value) || value <= 0) {
     throw new Error(`${label} must be a positive integer.`);
+  }
+  return value;
+}
+
+function requireBoundedNonNegativeInteger(value: number, label: string, max: number): number {
+  if (!Number.isInteger(value) || value < 0 || value > max) {
+    throw new Error(`${label} must be an integer between 0 and ${max}.`);
   }
   return value;
 }

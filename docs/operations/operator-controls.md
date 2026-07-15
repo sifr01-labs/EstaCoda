@@ -226,10 +226,10 @@ The setup prompt for installing and starting the gateway is titled `EstaCoda Gat
 
 It appears in two setup paths:
 
-- During first-run onboarding when a ready channel is configured.
+- During first-run onboarding when background memory finalization is enabled, including CLI-only setup with no channel.
 - During the existing-user Setup Editor only when the first ready channel is newly configured.
 
-It does not appear for non-channel setup changes, for channel edits when any ready channel already existed before that Setup Editor run, or when a managed gateway service is already installed or active. First-run onboarding may still offer launch after verification. Existing-user Setup Editor apply does not show the launch handoff after apply.
+In the existing-user Setup Editor it does not appear for non-channel changes or channel edits when a ready channel already existed. No setup path offers it when a managed gateway service is already installed or active. First-run onboarding may still offer launch after verification. Existing-user Setup Editor apply does not show the launch handoff after apply.
 
 ### Channel Commands
 
@@ -410,6 +410,9 @@ estacoda memory forget <USER.md|MEMORY.md> <exact text>
 estacoda memory populate
 estacoda memory edit
 estacoda memory clear [USER.md|MEMORY.md|all] --yes
+estacoda memory finalization list [--status pending|running|completed|failed] [--limit N]
+estacoda memory finalization retry <job-id>
+estacoda memory finalization prune [--keep N]
 ```
 
 Inside active CLI sessions and Telegram sessions, use:
@@ -432,6 +435,8 @@ Default mode is `auto`, but auto-apply remains conservative: explicit, non-sensi
 `memory populate` requires an active runtime session. If the top-level command cannot find one, run `/memory populate` inside an active CLI session or attached Telegram session.
 
 `memory review` is an actionable queue over `memory-curation.json` when low-risk candidate operations are stored. `memory apply`, `memory undo`, and `memory forget` use the same mutation path as `memory.curate` and auto-curation.
+
+Finalization queue administration is local-CLI-only. It exposes bounded profile-scoped metadata without transcript content. Failed jobs can be requeued with a fresh attempt budget, and terminal metadata is automatically bounded to the latest 1,000 rows per profile or pruned explicitly.
 
 Telegram parity is intentional. `/memory ...` in Telegram should follow the same mode, policy, profile-local files, and curation history as the CLI, with only output formatting compacted for chat delivery.
 

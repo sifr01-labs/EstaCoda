@@ -92,7 +92,7 @@ Profile root: `~/.estacoda/profiles/<id>/`
 
 Delegation also writes session rows/events to `sessions.sqlite`. Child sessions are linked with `parentSessionId`. Delegation outcomes are stored as bounded session/result and trajectory telemetry, not through canonical prompt memory. Stale-file warnings are session/result metadata and do not store file contents or diffs.
 
-Session-finalization jobs also live in `sessions.sqlite`. They store profile/session identifiers, an immutable message cutoff, reason, status, attempts, leases, timestamps, and bounded outcome/error codes. They do not store a transcript copy. The managed gateway processes jobs for its selected profile in the background.
+Session-finalization jobs also live in `sessions.sqlite`. They store profile/session identifiers, an immutable message cutoff, reason, status, attempts, leases, timestamps, and bounded outcome/error codes. They do not store a transcript copy. The managed gateway processes jobs for its selected profile using the originating session workspace. The worker retains the latest 1,000 terminal rows per profile; local CLI commands can inspect, retry, or prune the metadata.
 
 ## Ownership rule
 

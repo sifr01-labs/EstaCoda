@@ -52,10 +52,10 @@ The setup prompt that offers to install and start the gateway is titled `EstaCod
 
 The prompt appears:
 
-- During first-run onboarding when a ready channel is configured.
+- During first-run onboarding when background memory finalization is enabled, including CLI-only setup with no channel.
 - During the existing-user Setup Editor when the first ready channel is newly configured.
 
-The prompt does not appear for non-channel setup changes, for channel edits when a ready channel already existed before that Setup Editor run, or when a managed gateway service is already installed or active.
+In the existing-user Setup Editor, the prompt does not appear for non-channel changes or channel edits when a ready channel already existed. No setup path offers it when a managed gateway service is already installed or active.
 
 First-run onboarding may still offer a post-apply launch prompt. Existing-user Setup Editor apply reports apply/verify state and exits the setup flow without a launch handoff. Use `EstaCoda Doctor` in the Setup Editor when you want read-only health checks and required fixes.
 
@@ -103,7 +103,7 @@ Operational notes:
 - Source-mode installs hardcode the absolute workspace path. If the repo moves, uninstall and reinstall.
 - Generated services invoke `gateway run --profile <id>`.
 - `gateway start`, `gateway stop`, and `gateway restart` default to the installed user service. Use `--system` for an installed system service.
-- The supervisor claims durable memory-finalization work only for its selected profile. One profile lease serializes background curation and operator memory writes.
+- The supervisor claims durable memory-finalization work only for its selected profile. One profile lease serializes checkpoints, `memory.curate`, automatic promotions, and operator memory writes.
 - Graceful shutdown aborts active finalization work; its lease expires and the durable job becomes eligible for bounded retry by the next running gateway.
 
 ## Diagnostics
@@ -137,7 +137,7 @@ Returns exit code 1 if any warnings exist.
 - Missing config/env warnings
 - Bounded active-subagent summaries when the active runtime exposes delegated child work
 
-Session-finalization rows live in global `~/.estacoda/sessions.sqlite` with `profile_id` scope and an immutable message cutoff. They store no transcript copy. If the managed service is stopped, queued work stays durable; it is not tied to the next interactive CLI launch.
+Session-finalization rows live in global `~/.estacoda/sessions.sqlite` with `profile_id` scope and an immutable message cutoff. They store no transcript copy and use the originating session workspace. If the managed service is stopped, queued work stays durable; it is not tied to the next interactive CLI launch. First-run setup can install the service for CLI-only use. Failed jobs can be inspected and retried with `estacoda memory finalization`; automatic retention keeps the latest 1,000 terminal rows per profile.
 
 ## Channel enable and disable
 

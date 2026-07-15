@@ -384,7 +384,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       return;
     }
 
-    enqueueRuntimeFinalization(runtime, "sigint");
+    enqueueRuntimeFinalization(runtime, "sigint", output);
     output.write("\nEnding EstaCoda session.\n");
     close();
   };
@@ -494,7 +494,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       }
 
       if (text === "/exit") {
-        enqueueRuntimeFinalization(runtime, "cli-exit");
+        enqueueRuntimeFinalization(runtime, "cli-exit", output);
         output.write("Ending EstaCoda session.\n");
         return;
       }
@@ -1314,7 +1314,7 @@ export async function handleSlashCommand(input: {
       }
 
       const nextRuntime = await input.refreshRuntime({ preserveSession: false });
-      enqueueRuntimeFinalization(input.runtime, "new-session");
+      enqueueRuntimeFinalization(input.runtime, "new-session", input.output);
       return {
         runtime: nextRuntime,
         notice: (runtime) => renderFreshSessionNotice(runtime, input.renderer)
@@ -1586,7 +1586,7 @@ export async function handleSlashCommand(input: {
       input.output.write("\x1Bc");
       return false;
     case "exit":
-      enqueueRuntimeFinalization(input.runtime, "cli-exit");
+      enqueueRuntimeFinalization(input.runtime, "cli-exit", input.output);
       input.output.write("Ending EstaCoda session.\n");
       return true;
     default:
@@ -1595,11 +1595,18 @@ export async function handleSlashCommand(input: {
   }
 }
 
-function enqueueRuntimeFinalization(runtime: Runtime, reason: SessionFinalizationReason): void {
+function enqueueRuntimeFinalization(
+  runtime: Runtime,
+  reason: SessionFinalizationReason,
+  output: Pick<NodeJS.WritableStream, "write">
+): void {
   try {
-    runtime.enqueueSessionFinalization?.(reason);
+    const enqueue = runtime.enqueueSessionFinalization;
+    if (enqueue !== undefined && enqueue(reason) === undefined) {
+      output.write("Warning: background memory finalization could not be queued.\n");
+    }
   } catch {
-    // Session exit/reset must remain responsive if durable queueing is unavailable.
+    output.write("Warning: background memory finalization could not be queued.\n");
   }
 }
 

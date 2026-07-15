@@ -60,6 +60,7 @@ export type GatewayServiceActivationOptions = {
   readonly profileId?: string;
   readonly reviewManifest: SetupReviewManifest;
   readonly readinessGate: boolean;
+  readonly includeBackgroundFinalization?: boolean;
   readonly previouslyReadyChannelIds?: readonly GatewayActivationChannelId[];
   readonly serviceActions?: GatewayActivationServiceActions;
 };
@@ -90,10 +91,13 @@ export async function maybeOfferGatewayStartAfterChannelSetup(
 
   const loaded = await loadRuntimeConfig(options);
   const channels = readyNewlyConfiguredChannels(options.reviewManifest, loaded);
-  if (channels.length === 0) {
+  const backgroundFinalizationEnabled = options.includeBackgroundFinalization === true
+    && loaded.memory.curation.auditOnRuntimeDispose === true
+    && loaded.memory.curation.mode !== "manual";
+  if (channels.length === 0 && !backgroundFinalizationEnabled) {
     return { kind: "not-offered", reason: "no-ready-new-channel" };
   }
-  if ((options.previouslyReadyChannelIds?.length ?? 0) > 0) {
+  if ((options.previouslyReadyChannelIds?.length ?? 0) > 0 && !backgroundFinalizationEnabled) {
     return { kind: "not-offered", reason: "ready-channel-already-configured" };
   }
 
@@ -109,14 +113,9 @@ export async function maybeOfferGatewayStartAfterChannelSetup(
     return { kind: "not-offered", reason: "gateway-service-already-installed" };
   }
 
-  const channelList = formatChannelList(channels);
   const accepted = await promptSetupChoice(setupPromptContext(options.prompt, options.locale), {
     title: gatewayServiceActivationPromptTitle,
-    message: [
-      gatewayServiceActivationPromptTitle,
-      `This will enable your configured ${channelList} ${channels.length === 1 ? "channel" : "channels"}.`,
-      "",
-    ].join("\n"),
+    message: activationPromptMessage(options.locale, channels, backgroundFinalizationEnabled),
     choices: [
       {
         id: "yes",
@@ -147,6 +146,8 @@ export async function maybeOfferGatewayStartAfterChannelSetup(
     serviceUserHomeDir,
     profileId,
     workspaceRoot: options.workspaceRoot,
+    locale: options.locale,
+    backgroundFinalizationEnabled,
   });
 }
 
@@ -158,6 +159,8 @@ async function installAndStartGatewayService(
     readonly serviceUserHomeDir: string;
     readonly profileId: string;
     readonly workspaceRoot: string;
+    readonly locale: SetupCopyLocale;
+    readonly backgroundFinalizationEnabled: boolean;
   }
 ): Promise<GatewayServiceActivationResult> {
   const { actions, stateHomeDir, serviceUserHomeDir, profileId, workspaceRoot } = context;
@@ -200,8 +203,53 @@ async function installAndStartGatewayService(
     kind: "started",
     channels,
     installed: true,
-    output: `Gateway service installed and started for configured ${formatChannelList(channels)} ${channels.length === 1 ? "channel" : "channels"}.`,
+    output: activationStartedOutput(context.locale, channels, context.backgroundFinalizationEnabled),
   };
+}
+
+function activationPromptMessage(
+  locale: SetupCopyLocale,
+  channels: readonly GatewayActivationChannel[],
+  backgroundFinalizationEnabled: boolean
+): string {
+  const purpose = activationPurpose(locale, channels, backgroundFinalizationEnabled);
+  return [gatewayServiceActivationPromptTitle, purpose, ""].join("\n");
+}
+
+function activationStartedOutput(
+  locale: SetupCopyLocale,
+  channels: readonly GatewayActivationChannel[],
+  backgroundFinalizationEnabled: boolean
+): string {
+  if (locale === "ar") {
+    return `تم تثبيت خدمة Gateway وتشغيلها من أجل ${activationPurpose(locale, channels, backgroundFinalizationEnabled)}`;
+  }
+  if (backgroundFinalizationEnabled && channels.length === 0) {
+    return "Gateway service installed and started for background memory finalization.";
+  }
+  if (backgroundFinalizationEnabled) {
+    return `Gateway service installed and started for background memory finalization and configured ${formatChannelList(channels)} ${channels.length === 1 ? "channel" : "channels"}.`;
+  }
+  return `Gateway service installed and started for configured ${formatChannelList(channels)} ${channels.length === 1 ? "channel" : "channels"}.`;
+}
+
+function activationPurpose(
+  locale: SetupCopyLocale,
+  channels: readonly GatewayActivationChannel[],
+  backgroundFinalizationEnabled: boolean
+): string {
+  if (locale === "ar") {
+    const channelPurpose = channels.length === 0 ? undefined : `تشغيل قنوات ${formatChannelList(channels)} المضبوطة`;
+    const memoryPurpose = backgroundFinalizationEnabled ? "معالجة إنهاء الذاكرة في الخلفية" : undefined;
+    return [memoryPurpose, channelPurpose].filter((value) => value !== undefined).join(" و");
+  }
+  if (backgroundFinalizationEnabled && channels.length === 0) {
+    return "This will process queued memory finalization in the background.";
+  }
+  if (backgroundFinalizationEnabled) {
+    return `This will process queued memory finalization and enable your configured ${formatChannelList(channels)} ${channels.length === 1 ? "channel" : "channels"}.`;
+  }
+  return `This will enable your configured ${formatChannelList(channels)} ${channels.length === 1 ? "channel" : "channels"}.`;
 }
 
 export async function readyConfiguredGatewayChannelIds(

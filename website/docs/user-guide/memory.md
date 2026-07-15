@@ -113,9 +113,9 @@ Curation runs at configured natural checkpoints:
 
 When a session ends semantically, curation is queued as durable background work. This happens for CLI `/new`, `/reset`, `/exit`, idle `Ctrl+C`, authorized channel `/new` and `/reset`, and successful one-shot prompts. Active-turn `Ctrl+C` only cancels the current turn. Runtime cleanup caused by config refresh, cache eviction, cron work, or generic disposal does not end the session and does not queue curation.
 
-Starting the next session or exiting waits only for a small database enqueue. It does not wait for model extraction or memory writes. The managed gateway service processes the job in the background for the selected profile. If the service is stopped, the job remains durable in `~/.estacoda/sessions.sqlite` and runs when that profile's gateway next starts.
+Starting the next session or exiting waits only for a small database enqueue. It does not wait for model extraction or memory writes. A failed enqueue prints a bounded warning without blocking the transition. The managed gateway service processes the job in the background for the selected profile, and first-run setup offers the service for CLI-only configurations. If the service is stopped, the job remains durable in `~/.estacoda/sessions.sqlite` and runs when that profile's gateway next starts.
 
-Each job records an immutable message cutoff plus bounded operational metadata, never a copy of the transcript. Finalization cannot absorb later messages added to a resumed session. Use `estacoda memory status` or `estacoda gateway status` to inspect profile-scoped `pending`, `running`, `retrying`, and `failed` counts.
+Each job records an immutable message cutoff plus bounded operational metadata, never a copy of the transcript. Finalization cannot absorb later messages added to a resumed session and uses the originating session workspace. Use `estacoda memory status` or `estacoda gateway status` to inspect profile-scoped counts. Local operators can inspect and recover jobs with `estacoda memory finalization list`, `retry`, and `prune`.
 
 When curation writes memory, it targets `USER.md` or `MEMORY.md`. It does not write `SOUL.md`, shared memory, `AGENTS.md`, or session history. Auto-writes are recorded in curation history and runtime/session events; they are visible without interrupting every turn.
 
@@ -132,6 +132,14 @@ estacoda memory forget <USER.md|MEMORY.md> <exact text>
 estacoda memory populate
 estacoda memory edit
 estacoda memory clear [USER.md|MEMORY.md|all] --yes
+```
+
+Queue administration is local-CLI-only:
+
+```bash
+estacoda memory finalization list [--status pending|running|completed|failed] [--limit N]
+estacoda memory finalization retry <job-id>
+estacoda memory finalization prune [--keep N]
 ```
 
 Inside a session or Telegram chat, use the same subcommands through `/memory`:

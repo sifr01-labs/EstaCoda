@@ -97,9 +97,9 @@ Gateway channels support a subset of session commands:
 
 Starting a new session should feel immediate. For CLI `/new` and `/reset`, EstaCoda creates the fresh runtime first, then durably queues the old session for memory curation. `/exit`, idle `Ctrl+C`, authorized channel `/new` or `/reset`, and successful one-shot prompts use the same queue. Active-turn `Ctrl+C` only cancels the current turn and does not finalize the session.
 
-The user waits only for the queue row to be committed, not for extraction or memory writes. A managed gateway service for the selected profile processes the job in the background. If the service is not running, the job remains in global `~/.estacoda/sessions.sqlite` until the gateway runs again.
+The user waits only for the queue row to be committed, not for extraction or memory writes. A failed enqueue prints one bounded warning but does not delay the new session or exit. A managed gateway service for the selected profile processes the job in the background; first-run setup offers this service even when no channel is configured. If the service is not running, the job remains in global `~/.estacoda/sessions.sqlite` until the gateway runs again.
 
-Finalization captures an immutable last-message cutoff. It cannot include messages later appended to a resumed session, and its queue metadata does not duplicate transcript content. Check `estacoda memory status` or `estacoda gateway status` for `pending`, `running`, `retrying`, and `failed` counts.
+Finalization captures an immutable last-message cutoff and uses the workspace recorded on the originating session. It cannot include messages later appended to a resumed session or inherit another workspace from the gateway service, and its queue metadata does not duplicate transcript content. Check `estacoda memory status` or `estacoda gateway status` for counts; use `estacoda memory finalization list`, `retry`, and `prune` for local operator recovery.
 
 ---
 

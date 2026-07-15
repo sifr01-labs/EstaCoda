@@ -1,3 +1,4 @@
+import { isAbsolute } from "node:path";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { resolveAuxiliaryModelRoute } from "../providers/auxiliary-model-resolver.js";
@@ -33,6 +34,7 @@ export async function curateSessionFinalizationJob(input: {
   if (session === undefined) {
     throw new Error("Session finalization job is outside the active profile scope.");
   }
+  const workspaceRoot = resolveSessionFinalizationWorkspaceRoot(session.metadata, input.workspaceRoot);
   if (
     input.config.memory.curation.auditOnRuntimeDispose !== true
     || input.config.memory.curation.mode === "manual"
@@ -117,7 +119,7 @@ export async function curateSessionFinalizationJob(input: {
         memoryStore,
         profileId: input.profileId,
         sessionId: input.job.sessionId,
-        workspaceRoot: input.workspaceRoot,
+        workspaceRoot,
         sessionDb: input.sessionDb,
         persistence,
         persistencePaths,
@@ -137,6 +139,16 @@ export async function curateSessionFinalizationJob(input: {
   } finally {
     memoryIndexSync?.dispose();
   }
+}
+
+export function resolveSessionFinalizationWorkspaceRoot(
+  metadata: Record<string, unknown> | undefined,
+  fallbackWorkspaceRoot: string
+): string {
+  const candidate = metadata?.workspaceRoot;
+  return typeof candidate === "string" && candidate.trim() === candidate && isAbsolute(candidate)
+    ? candidate
+    : fallbackWorkspaceRoot;
 }
 
 function skippedFinalization(job: SessionFinalizationJob): MemoryCurationCheckpointResult {

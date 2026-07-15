@@ -331,6 +331,9 @@ estacoda memory forget <USER.md|MEMORY.md> <exact text>
 estacoda memory populate
 estacoda memory edit
 estacoda memory clear [USER.md|MEMORY.md|all] --yes
+estacoda memory finalization list [--status pending|running|completed|failed] [--limit N]
+estacoda memory finalization retry <job-id>
+estacoda memory finalization prune [--keep N]
 ```
 
 **الحالة المُعدّلة:**
@@ -341,6 +344,7 @@ estacoda memory clear [USER.md|MEMORY.md|all] --yes
 
 **السلوك:**
 - يعرض `memory status` إعدادات وسجل ذاكرة الملف الشخصي مع أعداد الإنهاء الخلفي `pending` و`running` و`retrying` و`failed`.
+- يعرض `memory finalization list` metadata محدودة للمهام ضمن الملف الشخصي من دون نص المحادثة؛ يعيد `retry` إدراج المهام الفاشلة بميزانية محاولات جديدة، ويحتفظ `prune` بأحدث الصفوف النهائية.
 - يعرض `memory mode` أو يحدّث وضع تنظيم الذاكرة المحلي للملف الشخصي. `auto` هو الافتراضي ويطبق فقط مرشحين محافظين منخفضي المخاطر.
 - يعرض `memory recent` سجلات التنظيم الحديثة، ومنها auto-applied وpending-review وignored وfailed.
 - يعرض `memory review` سجلات pending-review وعمليات المرشحين منخفضة المخاطر المحفوظة.

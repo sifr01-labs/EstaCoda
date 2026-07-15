@@ -23,6 +23,7 @@ import type { MemoryPersistenceService } from "../memory/memory-persistence-serv
 import type { LocalMemoryProvider } from "../memory/local-memory-provider.js";
 import { MemoryRecallOrchestrator } from "../memory/memory-recall-orchestrator.js";
 import type { MemoryCurationService } from "../memory/memory-curation-service.js";
+import type { MemoryCurationCheckpointCoordinator } from "../memory/memory-curation-coordinator.js";
 import type { LocalMemoryRetrievalService } from "../memory/memory-retrieval-service.js";
 import type { MemoryStore } from "../memory/memory-store.js";
 import type { ProviderExecutor } from "../providers/provider-executor.js";
@@ -149,6 +150,7 @@ export type AgentLoopRuntimeSubstrate = {
   fileStateTracker: FileStateTracker;
   memoryPersistenceService: MemoryPersistenceService;
   memoryPersistencePaths: Record<string, string>;
+  memoryMutationCoordinator?: MemoryCurationCheckpointCoordinator;
   memoryIndexSync: MemoryIndexSync | undefined;
   sessionCompressionService: Pick<SessionCompressionService, "compactIfNeeded">;
   compressionConfig: SessionCompressionConfig;
@@ -331,6 +333,7 @@ export class AgentLoopBuilder {
         memoryStore: substrate.memoryStore,
         memoryPersistenceService: substrate.memoryPersistenceService,
         memoryPersistencePaths: substrate.memoryPersistencePaths,
+        memoryMutationCoordinator: substrate.memoryMutationCoordinator,
         memoryIndexSync: substrate.memoryIndexSync,
         memoryRetrievalService: substrate.memoryRetrievalService,
         memoryFileCompactionService,
@@ -718,6 +721,7 @@ function buildPreSkillVisibilityToolContext(input: SessionToolContext): SessionT
     memoryStore: input.memoryStore,
     memoryPersistenceService: input.memoryPersistenceService,
     memoryPersistencePaths: input.memoryPersistencePaths,
+    memoryMutationCoordinator: input.memoryMutationCoordinator,
     memoryIndexSync: input.memoryIndexSync,
     memoryRetrievalService: input.memoryRetrievalService,
     memoryFileCompactionService: input.memoryFileCompactionService,

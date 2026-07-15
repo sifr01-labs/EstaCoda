@@ -691,6 +691,7 @@ export async function runFirstRunSetup(
         profileId,
         reviewManifest,
         readinessGate: completed && workspaceTrusted && isPostSetupLaunchOfferableEndState(applyEndState),
+        includeBackgroundFinalization: true,
         serviceActions: options.gatewayServiceActivation?.serviceActions,
       });
   const gatewayServiceActivationOutput = gatewayServiceActivationResult !== undefined && "output" in gatewayServiceActivationResult

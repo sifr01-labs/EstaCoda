@@ -4415,6 +4415,34 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(enqueueSessionFinalization).toHaveBeenCalledWith("new-session");
   });
 
+  it("keeps /new responsive and reports a bounded warning when queueing fails", async () => {
+    const outputChunks: string[] = [];
+    const refreshedRuntime = createMockRuntime({ sessionId: "warning-fresh-session" });
+    const result = await handleSlashCommand({
+      text: "/new",
+      runtime: createMockRuntime({
+        enqueueSessionFinalization: () => {
+          throw new Error("database failure with private transcript text");
+        },
+      }),
+      refreshRuntime: async () => refreshedRuntime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+      } as unknown as NodeJS.WritableStream,
+      renderer: {
+        render: renderPlain,
+        capabilities: interactiveCaps({ supportsColor: false, supportsUnicode: false }),
+      },
+    });
+
+    expect(typeof result).toBe("object");
+    expect(outputChunks.join("")).toContain("Warning: background memory finalization could not be queued.");
+    expect(outputChunks.join("")).not.toContain("private transcript text");
+  });
+
   it("clears the completed turn timer after /switch swaps to another session", async () => {
     const outputChunks: string[] = [];
     const output = {

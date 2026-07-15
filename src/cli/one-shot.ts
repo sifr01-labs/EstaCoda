@@ -44,9 +44,12 @@ export async function runOneShotPrompt(options: OneShotPromptOptions): Promise<O
     }
   });
   try {
-    options.runtime.enqueueSessionFinalization?.("one-shot");
+    const enqueue = options.runtime.enqueueSessionFinalization;
+    if (enqueue !== undefined && enqueue("one-shot") === undefined) {
+      eventLines.push("Warning: background memory finalization could not be queued.");
+    }
   } catch {
-    // A completed one-shot response should still return if durable queueing is unavailable.
+    eventLines.push("Warning: background memory finalization could not be queued.");
   }
 
   return {

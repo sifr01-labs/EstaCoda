@@ -4,7 +4,7 @@ import { runOneShotPrompt } from "./one-shot.js";
 
 describe("one-shot prompt", () => {
   it("uses shared tool display labels for provider calls and final tool summaries", async () => {
-    const enqueueSessionFinalization = vi.fn();
+    const enqueueSessionFinalization = vi.fn(() => ({ id: "job-1" } as never));
     const runtime = {
       tools: () => [],
       enqueueSessionFinalization,
@@ -87,5 +87,44 @@ describe("one-shot prompt", () => {
       "subagent Leaf 1: started",
       "subagent Leaf 1: timed out",
     ]);
+  });
+
+  it("reports a bounded queue warning without failing a completed response", async () => {
+    const runtime = {
+      tools: () => [],
+      enqueueSessionFinalization: () => {
+        throw new Error("database error with private transcript text");
+      },
+      handle: async () => ({
+        label: "assistant",
+        text: "done",
+        toolExecutions: [],
+        progress: [],
+      }),
+    } as unknown as Runtime;
+
+    const result = await runOneShotPrompt({ runtime, argv: ["hello"] });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("Warning: background memory finalization could not be queued.");
+    expect(result.output).not.toContain("private transcript text");
+  });
+
+  it("reports the same warning when durable queueing is unavailable", async () => {
+    const runtime = {
+      tools: () => [],
+      enqueueSessionFinalization: () => undefined,
+      handle: async () => ({
+        label: "assistant",
+        text: "done",
+        toolExecutions: [],
+        progress: [],
+      }),
+    } as unknown as Runtime;
+
+    const result = await runOneShotPrompt({ runtime, argv: ["hello"] });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("Warning: background memory finalization could not be queued.");
   });
 });

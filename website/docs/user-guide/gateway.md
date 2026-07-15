@@ -53,13 +53,13 @@ estacoda gateway uninstall --profile work
 
 ## Setup-driven activation
 
-When setup can install and start the gateway for a newly ready remote channel, the prompt title is `EstaCoda Gateway`.
+When setup can install and start the managed gateway service, the prompt title is `EstaCoda Gateway`.
 
-The prompt appears during first-run onboarding when a ready channel is configured. It also appears in the existing-user Setup Editor when that run newly configures the first ready channel.
+First-run onboarding offers the service whenever background memory finalization is enabled, including CLI-only setups with no channel. The existing-user Setup Editor offers it when that run newly configures the first ready channel.
 
 When the user chooses WhatsApp during onboarding or the Setup Editor, EstaCoda uses the same shared QR setup flow as `estacoda whatsapp`. It writes WhatsApp config/session state only after successful pairing; dependency decline/failure or QR timeout/failure leaves WhatsApp config unchanged.
 
-The prompt does not appear for non-channel setup changes, for editing a channel after a ready channel already existed, or when a managed gateway service is already installed or active.
+In the existing-user Setup Editor, the prompt does not appear for non-channel changes or when a ready channel already existed. No setup path offers it when a managed gateway service is already installed or active.
 
 First-run onboarding may still offer a post-apply launch prompt. Existing-user Setup Editor apply does not show the launch handoff after apply. Use `EstaCoda Doctor` in the Setup Editor when you want read-only health checks and required fixes.
 

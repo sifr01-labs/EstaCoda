@@ -6,7 +6,10 @@ import { loadRuntimeConfig } from "../config/runtime-config.js";
 import { SessionFinalizationQueue } from "../session/session-finalization-queue.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
 import type { SQLiteSessionDB } from "../session/sqlite-session-db.js";
-import { curateSessionFinalizationJob } from "./session-finalization-curator.js";
+import {
+  curateSessionFinalizationJob,
+  resolveSessionFinalizationWorkspaceRoot,
+} from "./session-finalization-curator.js";
 
 describe("curateSessionFinalizationJob", () => {
   let tempDir: string;
@@ -20,6 +23,15 @@ describe("curateSessionFinalizationJob", () => {
   afterEach(async () => {
     db.close();
     await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("uses an absolute session workspace and rejects malformed workspace metadata", () => {
+    expect(resolveSessionFinalizationWorkspaceRoot({ workspaceRoot: "/workspace/session" }, "/workspace/gateway"))
+      .toBe("/workspace/session");
+    expect(resolveSessionFinalizationWorkspaceRoot({ workspaceRoot: "../outside" }, "/workspace/gateway"))
+      .toBe("/workspace/gateway");
+    expect(resolveSessionFinalizationWorkspaceRoot({ workspaceRoot: " /workspace/session" }, "/workspace/gateway"))
+      .toBe("/workspace/gateway");
   });
 
   it("runs the governed checkpoint with profile-local config and the queued cutoff", async () => {

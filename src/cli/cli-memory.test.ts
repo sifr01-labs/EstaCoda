@@ -51,6 +51,61 @@ describe("CLI memory commands", () => {
     expect(result.output).not.toContain("private");
   });
 
+  it("inspects, retries, and prunes profile-scoped finalization metadata without transcript content", async () => {
+    const homeDir = await makeTempHome();
+    const sessionDb = await createSQLiteSessionDB({
+      path: resolveGlobalStateHome({ homeDir }).sessionsSqlitePath,
+    });
+    await sessionDb.createSession({ id: "failed-session", profileId: "default" });
+    await sessionDb.appendMessage({
+      id: "failed-message",
+      sessionId: "failed-session",
+      role: "user",
+      content: "private finalization content",
+    });
+    const queue = new SessionFinalizationQueue({ db: sessionDb.db });
+    const job = queue.enqueue({ profileId: "default", sessionId: "failed-session", reason: "cli-exit" });
+    queue.claimNext({ profileId: "default", ownerId: "test-worker", leaseMs: 60_000 });
+    queue.fail({
+      id: job.id,
+      profileId: "default",
+      ownerId: "test-worker",
+      errorCode: "curation-failed",
+    });
+    sessionDb.close();
+
+    const listed = await runMemoryCommand(homeDir, ["memory", "finalization", "list", "--status", "failed"]);
+    expect(listed.exitCode).toBe(0);
+    expect(listed.output).toContain(job.id);
+    expect(listed.output).toContain("status=failed");
+    expect(listed.output).toContain("error=curation-failed");
+    expect(listed.output).not.toContain("private finalization content");
+
+    const retried = await runMemoryCommand(homeDir, ["memory", "finalization", "retry", job.id]);
+    expect(retried.exitCode).toBe(0);
+    expect(retried.output).toContain("queued for retry");
+
+    const pruned = await runMemoryCommand(homeDir, ["memory", "finalization", "prune", "--keep", "0"]);
+    expect(pruned.exitCode).toBe(0);
+    expect(pruned.output).toContain("Pruned 0 terminal finalization job(s)");
+  });
+
+  it("validates finalization filters and retention before a session database exists", async () => {
+    const homeDir = await makeTempHome();
+
+    const invalidStatus = await runMemoryCommand(homeDir, ["memory", "finalization", "list", "--status"]);
+    expect(invalidStatus.exitCode).toBe(1);
+    expect(invalidStatus.output).toContain("Status must be");
+
+    const invalidLimit = await runMemoryCommand(homeDir, ["memory", "finalization", "list", "--limit", "2jobs"]);
+    expect(invalidLimit.exitCode).toBe(1);
+    expect(invalidLimit.output).toContain("limit must be between 1 and 100");
+
+    const invalidKeep = await runMemoryCommand(homeDir, ["memory", "finalization", "prune", "--keep="]);
+    expect(invalidKeep.exitCode).toBe(1);
+    expect(invalidKeep.output).toContain("retention must be between 0 and 10000");
+  });
+
   it("memory index path outputs profile-state memory-index.sqlite", async () => {
     const homeDir = await makeTempHome();
     const result = await runMemoryCommand(homeDir, ["memory", "index", "path"]);

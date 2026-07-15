@@ -188,6 +188,54 @@ describe("SessionFinalizationQueue", () => {
     });
   });
 
+  it("requeues only failed work in the requested profile and resets its attempt budget", async () => {
+    await db.createSession({ id: "session-1", profileId: "profile-a" });
+    const pending = queue().enqueue({ profileId: "profile-a", sessionId: "session-1", reason: "cli-exit" });
+    queue().claimNext({ profileId: "profile-a", ownerId: "worker-a", leaseMs: 60_000 });
+    queue().fail({
+      id: pending.id,
+      profileId: "profile-a",
+      ownerId: "worker-a",
+      errorCode: "curation-failed",
+    });
+
+    expect(queue().retryFailed({ id: pending.id, profileId: "profile-b" })).toBeUndefined();
+    expect(queue().retryFailed({ id: pending.id, profileId: "profile-a" })).toMatchObject({
+      status: "pending",
+      attempts: 0,
+      lastErrorCode: undefined,
+      failedAt: undefined,
+    });
+    expect(queue().retryFailed({ id: pending.id, profileId: "profile-a" })).toBeUndefined();
+  });
+
+  it("prunes only older terminal metadata while preserving active jobs and profile scope", async () => {
+    for (const id of ["complete-old", "complete-new", "failed", "pending"] as const) {
+      await db.createSession({ id, profileId: "profile-a" });
+      queue().enqueue({ profileId: "profile-a", sessionId: id, reason: "cli-exit" });
+    }
+    await db.createSession({ id: "other-profile", profileId: "profile-b" });
+    const other = queue().enqueue({ profileId: "profile-b", sessionId: "other-profile", reason: "cli-exit" });
+
+    for (const id of ["complete-old", "complete-new"] as const) {
+      const job = queue().list({ profileId: "profile-a" }).find((entry) => entry.sessionId === id)!;
+      queue().claimNext({ profileId: "profile-a", ownerId: id, leaseMs: 60_000 });
+      queue().complete({ id: job.id, profileId: "profile-a", ownerId: id, outcomeCode: "curated" });
+      now = new Date(now.getTime() + 1_000);
+    }
+    const failed = queue().list({ profileId: "profile-a" }).find((entry) => entry.sessionId === "failed")!;
+    queue().claimNext({ profileId: "profile-a", ownerId: "failed", leaseMs: 60_000 });
+    queue().fail({ id: failed.id, profileId: "profile-a", ownerId: "failed", errorCode: "curation-failed" });
+
+    expect(queue().pruneTerminal({ profileId: "profile-a", keepLatest: 2 })).toBe(1);
+    expect(queue().list({ profileId: "profile-a" }).map((entry) => entry.sessionId).sort()).toEqual([
+      "complete-new",
+      "failed",
+      "pending",
+    ]);
+    expect(queue().get(other.id, "profile-b")).toBeDefined();
+  });
+
   it("summarizes fresh, active, retrying, expired, and failed work without message content", async () => {
     for (const id of ["fresh", "running", "retry", "expired", "failed"] as const) {
       await db.createSession({ id, profileId: "profile-a" });

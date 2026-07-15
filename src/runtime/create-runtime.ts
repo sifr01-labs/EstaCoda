@@ -324,6 +324,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     "MEMORY.md": profilePaths.memoryMdPath,
     "SOUL.md": profilePaths.soulMdPath
   };
+  const memoryMutationCoordinator = sessionDb instanceof SQLiteSessionDB
+    ? new SQLiteMemoryCurationCoordinator({ db: sessionDb.db, profileId })
+    : undefined;
   const memoryConfig = options.memory ?? normalizeMemoryConfig(undefined);
   const memoryIndexPath = resolveMemoryIndexStorePath({ homeDir: options.homeDir, profileId });
   const memoryIndexEnabled = memoryConfig.index.enabled === true;
@@ -612,6 +615,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     persistence: memoryPersistenceService,
     memoryIndexSync,
     memorySearchService: memoryRetrievalService,
+    mutationCoordinator: memoryMutationCoordinator,
     profileId
   });
   const skillAutonomy = options.skillAutonomy ?? "suggest";
@@ -801,9 +805,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           "MEMORY.md": profilePaths.memoryMdPath
         },
         memoryIndexSync,
-        checkpointCoordinator: sessionDb instanceof SQLiteSessionDB
-          ? new SQLiteMemoryCurationCoordinator({ db: sessionDb.db, profileId })
-          : undefined,
+        checkpointCoordinator: memoryMutationCoordinator,
         memoryMutationService: new MemoryMutationService({
           memoryStore,
           profileId,
@@ -821,6 +823,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       fileStateTracker,
       memoryPersistenceService,
       memoryPersistencePaths,
+      memoryMutationCoordinator,
       memoryIndexSync,
       sessionCompressionService,
       compressionConfig,

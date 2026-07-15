@@ -30,6 +30,7 @@ import type { ToolExecutor, ToolExecutionRecord } from "../tools/tool-executor.j
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { resolveProjectFactPromotion, resolveUserPreferencePromotion } from "../memory/memory-promotion.js";
 import { isMemoryBudgetOverflowError, type MemoryBudgetOverflowError } from "../memory/memory-store.js";
+import { MemoryCurationBusyError } from "../memory/memory-curation-coordinator.js";
 import type { MemoryRecallOrchestrator } from "../memory/memory-recall-orchestrator.js";
 import type { SkillLearningManager } from "../skills/skill-learning.js";
 import type { SkillEvolutionStore } from "../skills/skill-evolution.js";
@@ -1129,6 +1130,9 @@ export class AgentLoop {
         sourceEventId: userInputEventId
       });
     } catch (error) {
+      if (error instanceof MemoryCurationBusyError) {
+        return;
+      }
       if (!isMemoryBudgetOverflowError(error)) {
         throw error;
       }
@@ -1172,6 +1176,9 @@ export class AgentLoop {
         sourceEventId: userInputEventId
       });
     } catch (error) {
+      if (error instanceof MemoryCurationBusyError) {
+        return;
+      }
       if (!isMemoryBudgetOverflowError(error)) {
         throw error;
       }
