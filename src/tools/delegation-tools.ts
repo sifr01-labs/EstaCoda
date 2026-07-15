@@ -1,13 +1,13 @@
 import type { RegisteredTool, SessionToolProvider, ToolExecutionContext, ToolsetName } from "../contracts/tool.js";
 import type { DelegateModelOverride, DelegateRole, DelegateTaskItem, DelegationConfig } from "../contracts/delegation.js";
 import {
+  DELEGATE_TASK_MAX_RESULT_CHARS,
   MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH,
   MAX_DELEGATE_PROVIDER_OVERRIDE_ID_LENGTH
 } from "../contracts/delegation.js";
 import type { BatchDelegationSummary, DelegationManager } from "../delegation/delegation-manager.js";
 import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
 
-const DELEGATE_TASK_MAX_RESULT_CHARS = 8_000;
 const FAILED_DELEGATION_DETAIL_MAX_CHARS = 800;
 
 export type DelegationToolOptions = {

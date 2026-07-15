@@ -883,6 +883,28 @@ describe("assembleProviderPrompt", () => {
     expect(rendered).not.toContain("[Historical tool result");
     expect(rendered).not.toContain("_estacoda_context_summary=Command exited 0 with 1 line.");
   });
+
+  it("uses the delegation result budget in initial prompts without widening other tools", () => {
+    const delegationContent = `${"d".repeat(7_000)}delegation-visible${"d".repeat(1_100)}delegation-beyond-limit`;
+    const genericContent = `${"g".repeat(1_500)}generic-beyond-limit`;
+    const prompt = assembleProviderPrompt(basePromptInput({
+      toolExecutions: [
+        toolExecution({
+          toolName: "delegate_task",
+          maxResultSizeChars: 8_000,
+          content: delegationContent
+        }),
+        toolExecution({ content: genericContent })
+      ]
+    }));
+    const rendered = renderMessages(prompt.messages);
+
+    expect(rendered).toContain("delegation-visible");
+    expect(rendered).not.toContain("delegation-beyond-limit");
+    expect(rendered).not.toContain("generic-beyond-limit");
+    expect(rendered).toContain("8.0k sent (truncated)");
+    expect(rendered).toContain("1.4k sent (truncated)");
+  });
 });
 
 describe("assembleProviderContinuationPrompt", () => {
@@ -929,6 +951,38 @@ describe("assembleProviderContinuationPrompt", () => {
     expect(rendered).toContain("EstaCoda executed the requested tools. Use these results to produce the final answer now.");
     expect(rendered).toContain("Executed tool results:");
     expect(rendered).toContain("Tool: files.read");
+  });
+
+  it("uses the delegation result budget in continuations without widening other tools", () => {
+    const delegationContent = `${"d".repeat(7_000)}delegation-visible${"d".repeat(1_100)}delegation-beyond-limit`;
+    const genericContent = `${"g".repeat(1_900)}generic-beyond-limit`;
+    const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
+      toolPlans: [
+        {
+          id: "call-delegate",
+          tool: "delegate_task",
+          input: { tasks: [{ task: "Inspect delegation." }] },
+          source: "provider-tool-call",
+          status: "executed",
+          result: { ok: true, content: delegationContent }
+        },
+        {
+          id: "call-read",
+          tool: "files.read",
+          input: { path: "src/index.ts" },
+          source: "provider-tool-call",
+          status: "executed",
+          result: { ok: true, content: genericContent }
+        }
+      ]
+    }));
+    const rendered = renderMessages([prompt.messages.at(-1)!]);
+
+    expect(rendered).toContain("delegation-visible");
+    expect(rendered).not.toContain("delegation-beyond-limit");
+    expect(rendered).not.toContain("generic-beyond-limit");
+    expect(rendered).toContain("8.0k sent (truncated)");
+    expect(rendered).toContain("1.8k sent (truncated)");
   });
 
   it("uses structured native history for supported continuation prompts", () => {
@@ -1938,16 +1992,18 @@ function toPromptHistory(message: SessionMessage): NonNullable<Parameters<typeof
 function toolExecution(input: {
   content: string;
   metadata?: Record<string, unknown>;
+  toolName?: string;
+  maxResultSizeChars?: number;
 }): ToolExecutionRecord {
   return {
     tool: {
-      name: "terminal.run",
+      name: input.toolName ?? "terminal.run",
       description: "Run command",
       inputSchema: {},
       riskClass: "workspace-write",
       toolsets: ["shell-write"],
       progressLabel: "running",
-      maxResultSizeChars: 2_000
+      maxResultSizeChars: input.maxResultSizeChars ?? 2_000
     },
     input: {},
     decision: "allow",

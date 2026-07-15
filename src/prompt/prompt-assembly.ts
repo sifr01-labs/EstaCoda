@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { ChannelAttachment } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
+import { DELEGATE_TASK_MAX_RESULT_CHARS } from "../contracts/delegation.js";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { MemoryPromptContext, PromptMemoryBlock } from "../contracts/memory.js";
 import type { PromptBudgetReport, PromptLayerName, PromptLayerReport, PromptSemanticCompressionReport } from "../contracts/prompt.js";
@@ -177,7 +178,7 @@ export function assembleProviderContinuationPrompt(input: ProviderContinuationPr
       renderToolResultPacket(packetizeToolResult({
         tool: plan.tool,
         result: plan.result,
-        maxChars: 1_800
+        maxChars: providerVisibleToolResultMaxChars(plan.tool, 1_800)
       }))
     ].join("\n"))
     .join("\n\n");
@@ -490,12 +491,18 @@ function renderToolExecutionWithContextSummary(execution: ToolExecutionRecord): 
         metadata: omitToolContextSummary(execution.result.metadata)
       }
     },
-    maxChars: 1_400
+    maxChars: providerVisibleToolResultMaxChars(execution.tool.name, 1_400)
   }));
   return [
     contextSummary === undefined ? undefined : `Context summary: ${contextSummary}`,
     packet
   ].filter((line): line is string => line !== undefined).join("\n");
+}
+
+function providerVisibleToolResultMaxChars(toolName: string, defaultMaxChars: number): number {
+  return toolName === "delegate_task"
+    ? DELEGATE_TASK_MAX_RESULT_CHARS
+    : defaultMaxChars;
 }
 
 function toolContextSummary(metadata: Record<string, unknown> | undefined): string | undefined {
