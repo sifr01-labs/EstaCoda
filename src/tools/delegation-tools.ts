@@ -2,6 +2,7 @@ import type { RegisteredTool, SessionToolProvider, ToolExecutionContext, Toolset
 import type { DelegateModelOverride, DelegateRole, DelegateTaskItem, DelegationConfig } from "../contracts/delegation.js";
 import {
   DELEGATE_TASK_MAX_RESULT_CHARS,
+  MAX_DELEGATION_BATCH_TASKS,
   MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH,
   MAX_DELEGATE_PROVIDER_OVERRIDE_ID_LENGTH
 } from "../contracts/delegation.js";
@@ -29,7 +30,11 @@ type DelegateTaskInput = {
 };
 
 export function createDelegationTools(options: DelegationToolOptions): RegisteredTool[] {
-  const delegationConfig = options.delegationConfig ?? DEFAULT_DELEGATION_CONFIG;
+  const configuredDelegation = options.delegationConfig ?? DEFAULT_DELEGATION_CONFIG;
+  const delegationConfig = {
+    ...configuredDelegation,
+    maxBatchTasks: Math.max(1, Math.min(configuredDelegation.maxBatchTasks, MAX_DELEGATION_BATCH_TASKS))
+  };
   return [
     {
       name: "delegate_task",

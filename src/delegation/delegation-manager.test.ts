@@ -474,6 +474,18 @@ describe("DelegationManager", () => {
     expect(JSON.stringify(parentEvents)).toContain("BEGIN PRIVATE KEY");
   });
 
+  it("rejects direct batches above the configured hard limit before child construction", async () => {
+    const harness = await createHarness({ maxBatchTasks: 100 });
+
+    await expect(harness.manager.delegateBatch({
+      parentSessionId: "parent",
+      profileId: "default",
+      tasks: Array.from({ length: 11 }, (_, index) => ({ task: `Task ${index + 1}` })),
+      trustedWorkspace: true
+    })).rejects.toThrow("Delegation batches support at most 10 tasks.");
+    expect(harness.factory.createChild).not.toHaveBeenCalled();
+  });
+
   it("does not start a child when the parent signal is already aborted", async () => {
     const harness = await createHarness();
     const controller = new AbortController();

@@ -957,6 +957,13 @@ describe("assembleProviderContinuationPrompt", () => {
     const delegationContent = `${"d".repeat(7_000)}delegation-visible${"d".repeat(1_100)}delegation-beyond-limit`;
     const genericContent = `${"g".repeat(1_900)}generic-beyond-limit`;
     const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
+      toolExecutions: [
+        toolExecution({
+          toolName: "delegate_task",
+          maxResultSizeChars: 8_000,
+          content: delegationContent
+        })
+      ],
       toolPlans: [
         {
           id: "call-delegate",
@@ -976,13 +983,17 @@ describe("assembleProviderContinuationPrompt", () => {
         }
       ]
     }));
-    const rendered = renderMessages([prompt.messages.at(-1)!]);
+    const rendered = renderMessages(prompt.messages);
 
     expect(rendered).toContain("delegation-visible");
     expect(rendered).not.toContain("delegation-beyond-limit");
     expect(rendered).not.toContain("generic-beyond-limit");
     expect(rendered).toContain("8.0k sent (truncated)");
     expect(rendered).toContain("1.8k sent (truncated)");
+    expect(countOccurrences(rendered, "delegation-visible")).toBe(1);
+    expect(prompt.budget.layers.find((layer) => layer.name === "tool-results")).toMatchObject({
+      truncated: false
+    });
   });
 
   it("uses structured native history for supported continuation prompts", () => {
@@ -1070,6 +1081,10 @@ describe("assembleProviderContinuationPrompt", () => {
         sessionMessage("tool-result", "tool", "selected native result", { tool_call_id: "call-read" })
       ],
       nativeHistoryRoute: supportedNativeRoute,
+      toolExecutions: [
+        toolExecution({ content: "selected native result" }),
+        toolExecution({ content: "non-selected flat result" })
+      ],
       toolPlans: [
         {
           id: "call-read",

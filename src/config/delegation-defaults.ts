@@ -1,10 +1,10 @@
-import type { DelegationConfig } from "../contracts/delegation.js";
+import { MAX_DELEGATION_BATCH_TASKS, type DelegationConfig } from "../contracts/delegation.js";
 
 export const DEFAULT_DELEGATION_CONFIG: DelegationConfig = {
   maxSpawnDepth: 1,
   maxConcurrentChildren: 3,
   maxDelegateCallsPerTurn: 3,
-  maxBatchTasks: 10,
+  maxBatchTasks: MAX_DELEGATION_BATCH_TASKS,
   childTimeoutSeconds: 600,
   heartbeatSeconds: 30,
   heartbeatStaleCyclesIdle: 3,

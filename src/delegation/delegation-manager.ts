@@ -1,11 +1,12 @@
 import type { ChannelKind } from "../contracts/channel.js";
-import type {
-  DelegateModelOverride,
-  DelegateModelOverrideMetadata,
-  DelegateRole,
-  DelegationConfig,
-  DelegateTaskItem,
-  DelegationStaleFileWarning
+import {
+  MAX_DELEGATION_BATCH_TASKS,
+  type DelegateModelOverride,
+  type DelegateModelOverrideMetadata,
+  type DelegateRole,
+  type DelegationConfig,
+  type DelegateTaskItem,
+  type DelegationStaleFileWarning
 } from "../contracts/delegation.js";
 import type { RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SessionDB, SessionEvent } from "../contracts/session.js";
@@ -148,6 +149,13 @@ export class DelegationManager {
     tasks: DelegateTaskItem[];
     recoveredTasksFromJsonString?: boolean;
   }): Promise<BatchDelegationSummary> {
+    const maxBatchTasks = Math.max(
+      1,
+      Math.min(this.#delegationConfig.maxBatchTasks, MAX_DELEGATION_BATCH_TASKS)
+    );
+    if (request.tasks.length > maxBatchTasks) {
+      throw new RangeError(`Delegation batches support at most ${maxBatchTasks} tasks.`);
+    }
     const batchId = `batch-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const maxConcurrency = Math.min(this.#delegationConfig.maxConcurrentChildren, request.tasks.length);
     const skippedIndexes = new Set<number>();

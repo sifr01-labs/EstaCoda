@@ -228,6 +228,31 @@ describe("createDelegationTools", () => {
     });
   });
 
+  it("enforces the hard batch maximum when direct tool config is larger", async () => {
+    const delegateBatch = vi.fn();
+    const [tool] = createDelegationTools({
+      manager: { delegate: vi.fn(), delegateBatch } as never,
+      parentSessionId: "parent",
+      profileId: "default",
+      trustedWorkspace: () => true,
+      delegationConfig: {
+        ...DEFAULT_DELEGATION_CONFIG,
+        maxBatchTasks: 100
+      }
+    });
+
+    const result = await tool!.run({
+      tasks: Array.from({ length: 11 }, (_, index) => ({ task: `Task ${index + 1}` }))
+    });
+
+    expect(tool!.description).toContain("up to 10 batch tasks");
+    expect(result).toMatchObject({
+      ok: false,
+      metadata: { code: "too-many-tasks" }
+    });
+    expect(delegateBatch).not.toHaveBeenCalled();
+  });
+
   it("recovers strict JSON-string tasks when enabled", async () => {
     const delegateBatch = vi.fn(async () => ({
       batchId: "batch",

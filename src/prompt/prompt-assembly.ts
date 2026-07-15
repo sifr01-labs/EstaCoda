@@ -156,7 +156,10 @@ export function assembleProviderContinuationPrompt(input: ProviderContinuationPr
   const promptInput = nativeHistory === undefined
     ? input
     : { ...input, sessionHistory: nativeHistory.unselectedSessionHistory };
-  const baseLayers = applyCache(input.cache, fitLayersToBudget(buildBaseLayers(promptInput), Math.floor(budgetTarget * 0.85)));
+  const baseLayers = applyCache(input.cache, fitLayersToBudget(
+    buildBaseLayers(promptInput, { includeToolResults: false }),
+    Math.floor(budgetTarget * 0.85)
+  ));
   const baseMessages = renderBaseMessages(baseLayers, promptInput, nativeHistory?.messages);
   const baseBudget = buildBudgetReport({
     model: input.model?.id ?? "unconfigured",
@@ -255,10 +258,15 @@ const MUTABLE_STATE_GROUNDING_GUIDANCE = [
   "- If the user asks for current state, verify with an available tool or phrase the claim explicitly as historical."
 ].join("\n");
 
-function buildBaseLayers(input: ProviderPromptInput): InternalPromptLayer[] {
-  const toolSummary = input.toolExecutions.length === 0
-    ? "No tools were executed before this response."
-    : input.toolExecutions
+function buildBaseLayers(
+  input: ProviderPromptInput,
+  options: { includeToolResults?: boolean } = {}
+): InternalPromptLayer[] {
+  const toolSummary = options.includeToolResults === false
+    ? "Tool results are provided in the current continuation context."
+    : input.toolExecutions.length === 0
+      ? "No tools were executed before this response."
+      : input.toolExecutions
         .map((execution) => renderToolExecutionWithContextSummary(execution))
         .join("\n\n");
   const artifactSummary = renderArtifactSummary(artifactsFromExecutions(input.toolExecutions));
@@ -461,7 +469,7 @@ function buildBaseLayers(input: ProviderPromptInput): InternalPromptLayer[] {
       cacheable: false,
       priority: 6,
       content: `Tool results:\n${toolSummary}`,
-      truncated: input.toolExecutions.some((execution) => {
+      truncated: options.includeToolResults !== false && input.toolExecutions.some((execution) => {
         const result = execution.result?.content;
         return result !== undefined && result.length > execution.tool.maxResultSizeChars;
       })
