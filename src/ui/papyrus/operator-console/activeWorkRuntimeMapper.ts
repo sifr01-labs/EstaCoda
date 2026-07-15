@@ -3,6 +3,7 @@ import { toolDisplayLabel, type ToolDisplayLocale } from "../../tool-display.js"
 import type {
   ActiveWorkItem,
   ActiveWorkActivity,
+  ActiveWorkDelegationOutcome,
   ActiveWorkItemStatus,
   ToolActivityState,
 } from "./operatorConsoleState.js";
@@ -32,9 +33,12 @@ export type ActiveWorkRuntimeEvent = {
   readonly taskLabel?: string;
   readonly batchTaskCount?: number;
   readonly activity?: ActiveWorkActivity;
+  readonly delegationOutcome?: ActiveWorkDelegationOutcome;
   readonly status: ActiveWorkRuntimeEventStatus;
   readonly summary?: string;
   readonly target?: string;
+  readonly startedAtMs?: number;
+  readonly endedAtMs?: number;
   readonly durationMs?: number;
   readonly detailsRef?: string;
   readonly riskClass?: string;
@@ -141,10 +145,12 @@ export class ActiveWorkRuntimeEventMapper {
       taskLabel: event.taskLabel,
       batchTaskCount: event.batchTaskCount,
       ...(activity === undefined ? {} : { activity }),
+      ...(terminal ? { delegationOutcome: event.childEvent.status ?? "failed" } : {}),
       status,
       summary: activityLabel,
       target: formatDelegationActivityTarget(activityLabel, event.childEvent.displayPreview),
-      ...(terminal ? { durationMs: Math.max(0, now - startedAt) } : {}),
+      startedAtMs: startedAt,
+      ...(terminal ? { endedAtMs: now, durationMs: Math.max(0, now - startedAt) } : {}),
       detailsRef: event.childSessionId,
     };
     if (terminal) {
@@ -290,9 +296,18 @@ function createActiveWorkItem(
     ...(event.activity === undefined && existing?.activityLog === undefined
       ? {}
       : { activityLog: mergeWorkerActivityLog(existing?.activityLog, event.activity) }),
+    ...(event.delegationOutcome === undefined && existing?.delegationOutcome === undefined
+      ? {}
+      : { delegationOutcome: event.delegationOutcome ?? existing?.delegationOutcome }),
     status: mapRuntimeStatus(event.status),
     summary: normalizeText(event.summary, event.status),
     ...(event.target === undefined && existing?.target === undefined ? {} : { target: event.target ?? existing?.target }),
+    ...(event.startedAtMs === undefined && existing?.startedAtMs === undefined
+      ? {}
+      : { startedAtMs: normalizeTimestamp(event.startedAtMs ?? existing?.startedAtMs ?? 0) }),
+    ...(event.endedAtMs === undefined && existing?.endedAtMs === undefined
+      ? {}
+      : { endedAtMs: normalizeTimestamp(event.endedAtMs ?? existing?.endedAtMs ?? 0) }),
     ...(event.durationMs === undefined && existing?.durationMs === undefined
       ? {}
       : { durationMs: normalizeDuration(event.durationMs ?? existing?.durationMs ?? 0) }),
@@ -454,6 +469,11 @@ function normalizeText(value: string | undefined, fallback: string): string {
 }
 
 function normalizeDuration(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.floor(value));
+}
+
+function normalizeTimestamp(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.floor(value));
 }

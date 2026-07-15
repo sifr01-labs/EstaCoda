@@ -173,9 +173,12 @@ describe("active work runtime mapper", () => {
         },
         { id: "lifecycle:agent-final", label: "finalizing", status: "running" }
       ],
+      delegationOutcome: "completed",
       status: "succeeded",
       summary: "completed",
       target: "completed",
+      startedAtMs: 1_000,
+      endedAtMs: 4_500,
       durationMs: 3_500,
       detailsRef: "child-session-1",
     }]);
@@ -337,8 +340,49 @@ describe("active work runtime mapper", () => {
       status: "cancelled",
       summary: "cancelled",
       target: "cancelled",
+      delegationOutcome: "cancelled",
+      startedAtMs: 5_000,
+      endedAtMs: 7_000,
       durationMs: 2_000,
     });
+  });
+
+  it("preserves blocked and failed delegation outcomes after generic status mapping", () => {
+    let now = 8_000;
+    const mapper = new ActiveWorkRuntimeEventMapper({ now: () => now });
+
+    for (const [index, outcome] of (["blocked", "failed"] as const).entries()) {
+      const metadata = {
+        kind: "delegation-progress" as const,
+        subagentId: `subagent-${outcome}`,
+        childSessionId: `child-${outcome}`,
+        parentSessionId: "parent-session",
+        role: "leaf" as const,
+        depth: 1,
+        taskIndex: index,
+      };
+      mapper.buildDelegationProgress({
+        ...metadata,
+        childEvent: { kind: "agent-start", sessionId: metadata.childSessionId },
+      });
+      now += 500;
+      const state = applyActiveWorkRuntimeEvent(
+        createActiveWorkRuntimeState(),
+        mapper.buildDelegationProgress({
+          ...metadata,
+          childEvent: { kind: "delegation-result", status: outcome },
+        })
+      );
+
+      expect(state.items[0]).toMatchObject({
+        status: "failed",
+        delegationOutcome: outcome,
+        startedAtMs: now - 500,
+        endedAtMs: now,
+        durationMs: 500,
+      });
+      now += 500;
+    }
   });
 
   it("localizes delegated child labels without surfacing provider or cancellation details", () => {
@@ -484,6 +528,11 @@ describe("active work runtime mapper", () => {
     });
 
     expect(lateCancellation).toEqual(timeout);
+    expect(timeout).toMatchObject({
+      delegationOutcome: "timeout",
+      startedAtMs: expect.any(Number),
+      endedAtMs: expect.any(Number),
+    });
     expect(parentResult.target).toBe("1 timed out");
   });
 

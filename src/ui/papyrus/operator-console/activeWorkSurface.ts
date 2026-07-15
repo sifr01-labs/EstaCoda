@@ -254,16 +254,23 @@ function formatWorkerCardFooter(
   const copy = resolveActiveWorkCopy(locale);
   const activityCount = item.activityLog?.length ?? 0;
   const activityCopy = activityCount === 1 ? copy.activity : copy.activities;
-  const duration = item.durationMs ?? (isActiveStatusItem(item) ? resolveActiveWorkElapsedMs(state) : resolveDurationMs(item));
-  const status = styleWorkerStatus(style, workerStatusLabel(item.status, copy), item.status);
+  const duration = resolveWorkerDurationMs(item, state);
+  const status = styleWorkerStatus(style, workerStatusLabel(item, copy), item.status);
   return truncateVisibleCells(
     `${status} · ${formatNumber(activityCount)} ${activityCopy} · ${isolateIfNeeded(formatClockDuration(duration), locale)}`,
     width
   );
 }
 
-function workerStatusLabel(status: ActiveWorkItemStatus, copy: ReturnType<typeof resolveActiveWorkCopy>): string {
-  switch (status) {
+function workerStatusLabel(item: ActiveWorkItem, copy: ReturnType<typeof resolveActiveWorkCopy>): string {
+  switch (item.delegationOutcome) {
+    case "completed": return copy.completed;
+    case "blocked": return copy.blocked;
+    case "failed": return copy.failed;
+    case "timeout": return copy.timedOut;
+    case "cancelled": return copy.cancelled;
+  }
+  switch (item.status) {
     case "queued": return copy.queued;
     case "running": return copy.running;
     case "succeeded": return copy.completed;
@@ -321,12 +328,17 @@ function delegationWorkerItems(state: ToolActivityState): readonly ActiveWorkIte
 
 function selectVisibleWorkerItems(items: readonly ActiveWorkItem[]): readonly ActiveWorkItem[] {
   const active = items.filter(isActiveStatusItem).sort(compareWorkerOrder);
-  const terminal = items.filter((item) => !isActiveStatusItem(item)).slice().sort(compareWorkerOrder).reverse();
+  const terminal = items.filter((item) => !isActiveStatusItem(item)).slice().sort(compareWorkerCompletionRecency);
   return [...active, ...terminal].slice(0, MAX_VISIBLE_WORKER_CARDS);
 }
 
 function compareWorkerOrder(left: ActiveWorkItem, right: ActiveWorkItem): number {
   return (left.taskIndex ?? Number.MAX_SAFE_INTEGER) - (right.taskIndex ?? Number.MAX_SAFE_INTEGER);
+}
+
+function compareWorkerCompletionRecency(left: ActiveWorkItem, right: ActiveWorkItem): number {
+  const timestampDifference = (right.endedAtMs ?? -1) - (left.endedAtMs ?? -1);
+  return timestampDifference === 0 ? compareWorkerOrder(right, left) : timestampDifference;
 }
 
 function stableWorkerPhase(id: string): number {
@@ -611,6 +623,15 @@ function resolveDurationMs(item: ActiveWorkItem): number {
   if (item.durationMs !== undefined) return item.durationMs;
   if (item.startedAtMs !== undefined && item.endedAtMs !== undefined) return item.endedAtMs - item.startedAtMs;
   return 0;
+}
+
+function resolveWorkerDurationMs(item: ActiveWorkItem, state: ToolActivityState): number {
+  if (item.durationMs !== undefined) return item.durationMs;
+  if (item.startedAtMs !== undefined) {
+    const end = item.endedAtMs ?? state.updatedAtMs;
+    if (end !== undefined) return Math.max(0, end - item.startedAtMs);
+  }
+  return isActiveStatusItem(item) ? resolveActiveWorkElapsedMs(state) : resolveDurationMs(item);
 }
 
 function resolveActiveWorkElapsedMs(state: ToolActivityState): number {

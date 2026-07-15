@@ -369,7 +369,10 @@ recent completions fill remaining slots, while the header reports aggregate
 active, completed, failed, and not-yet-observed queue counts for the whole
 batch. Constrained layouts reduce activity rows before falling back to compact
 worker lines. Running workers use the phase-shifted `worker` pulse token; plain
-mode uses a stable ASCII marker with animation disabled.
+mode uses a stable ASCII marker with animation disabled. Worker timers begin
+when each child starts, completion recency follows settlement time, and card
+footers preserve distinct completed, blocked, failed, timed-out, and cancelled
+outcomes.
 
 ```text
 ╭─ Tools completed ─────────────────────────────────────────────────────╮

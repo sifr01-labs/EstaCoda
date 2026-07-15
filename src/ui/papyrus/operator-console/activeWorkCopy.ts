@@ -16,6 +16,8 @@ export type ActiveWorkCopy = {
   readonly activity: string;
   readonly activities: string;
   readonly cancelled: string;
+  readonly blocked: string;
+  readonly timedOut: string;
 };
 
 const ENGLISH_ACTIVE_WORK_COPY: ActiveWorkCopy = {
@@ -34,6 +36,8 @@ const ENGLISH_ACTIVE_WORK_COPY: ActiveWorkCopy = {
   activity: "activity",
   activities: "activities",
   cancelled: "cancelled",
+  blocked: "blocked",
+  timedOut: "timed out",
 };
 
 const ARABIC_ACTIVE_WORK_COPY: ActiveWorkCopy = {
@@ -52,6 +56,8 @@ const ARABIC_ACTIVE_WORK_COPY: ActiveWorkCopy = {
   activity: "نشاط",
   activities: "أنشطة",
   cancelled: "ملغاة",
+  blocked: "محظور",
+  timedOut: "انتهت المهلة",
 };
 
 export function resolveActiveWorkCopy(locale: OperatorConsoleLocale = "en"): ActiveWorkCopy {

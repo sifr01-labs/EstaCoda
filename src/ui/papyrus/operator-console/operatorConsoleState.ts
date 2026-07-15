@@ -117,6 +117,13 @@ export type ActiveWorkItemStatus =
 
 export type ActiveWorkActivityStatus = "running" | "succeeded" | "failed";
 
+export type ActiveWorkDelegationOutcome =
+  | "completed"
+  | "blocked"
+  | "failed"
+  | "timeout"
+  | "cancelled";
+
 export type ActiveWorkActivity = {
   readonly id: string;
   readonly label: string;
@@ -134,6 +141,7 @@ export type ActiveWorkItem = {
   readonly taskLabel?: string;
   readonly batchTaskCount?: number;
   readonly activityLog?: readonly ActiveWorkActivity[];
+  readonly delegationOutcome?: ActiveWorkDelegationOutcome;
   readonly status: ActiveWorkItemStatus;
   readonly summary: string;
   readonly target?: string;

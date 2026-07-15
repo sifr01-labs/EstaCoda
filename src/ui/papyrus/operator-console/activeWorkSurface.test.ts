@@ -381,22 +381,59 @@ describe("Papyrus operator console active work surface", () => {
     expect(output).toContain("running · 8 activities · 00:07");
   });
 
-  it("shows aggregate batch counts while active workers and recent completions fill the cards", () => {
-    const base = createDelegationState(4, { batchTaskCount: 10 });
+  it("times each active worker from its own start instead of the parent turn", () => {
+    const base = createDelegationState(1, { startedAtMs: 6_000 });
+    const state = { ...base, updatedAtMs: 16_000 };
+    const output = renderActiveWorkSurface(state, { width: 80 }).join("\n");
+
+    expect(output).toContain("running · 0 activities · 00:10");
+    expect(output).not.toContain("running · 0 activities · 00:15");
+  });
+
+  it("preserves timeout and blocked outcomes in worker card footers", () => {
+    const base = createDelegationState(2);
     const state = {
       ...base,
-      items: base.items.map((entry, index) => {
-        if (entry.source !== "subagent" || index === 1) return entry;
-        return { ...entry, status: "succeeded" as const, durationMs: index * 1_000 };
+      items: base.items.map((entry) => {
+        if (entry.taskIndex === 0) {
+          return { ...entry, status: "failed" as const, delegationOutcome: "timeout" as const, durationMs: 5_000 };
+        }
+        if (entry.taskIndex === 1) {
+          return { ...entry, status: "failed" as const, delegationOutcome: "blocked" as const, durationMs: 4_000 };
+        }
+        return entry;
       }),
     };
     const output = renderActiveWorkSurface(state, { width: 100 }).join("\n");
 
-    expect(output).toContain("Delegated work · 1 active · 3 done · 6 queued · 00:07");
+    expect(output).toContain("timed out · 0 activities · 00:05");
+    expect(output).toContain("blocked · 0 activities · 00:04");
+  });
+
+  it("shows aggregate batch counts while active workers and actual recent completions fill the cards", () => {
+    const base = createDelegationState(4, { batchTaskCount: 10 });
+    const state = {
+      ...base,
+      updatedAtMs: 12_000,
+      items: base.items.map((entry, index) => {
+        if (entry.source !== "subagent" || index === 1) return entry;
+        const endedAtMs = index === 2 ? 10_000 : index === 3 ? 8_000 : 6_000;
+        return {
+          ...entry,
+          status: "succeeded" as const,
+          delegationOutcome: "completed" as const,
+          endedAtMs,
+          durationMs: index * 1_000,
+        };
+      }),
+    };
+    const output = renderActiveWorkSurface(state, { width: 100 }).join("\n");
+
+    expect(output).toContain("Delegated work · 1 active · 3 done · 6 queued · 00:11");
     expect(output).toContain("Worker 1");
+    expect(output).toContain("Worker 2");
     expect(output).toContain("Worker 3");
-    expect(output).toContain("Worker 4");
-    expect(output).not.toContain("Worker 2");
+    expect(output).not.toContain("Worker 4");
   });
 
   it("phase-shifts the worker pulse and uses a stable ASCII plain-mode fallback", () => {
@@ -772,6 +809,8 @@ describe("Papyrus operator console active work surface", () => {
     expect(resolveActiveWorkCopy("ar").delegatedWork).toBe("عمل الوكلاء الفرعيين");
     expect(resolveActiveWorkCopy("ar").toolsCompleted).toBe("اكتمل تنفيذ الأدوات");
     expect(resolveActiveWorkCopy("ar").awaitingApproval).toBe("بانتظار الموافقة");
+    expect(resolveActiveWorkCopy("ar").timedOut).toBe("انتهت المهلة");
+    expect(resolveActiveWorkCopy("ar").blocked).toBe("محظور");
   });
 
   it("keeps active work summary copy token-backed and local to operator console", () => {
@@ -933,6 +972,7 @@ function item(
     ...(input.taskLabel === undefined ? {} : { taskLabel: input.taskLabel }),
     ...(input.batchTaskCount === undefined ? {} : { batchTaskCount: input.batchTaskCount }),
     ...(input.activityLog === undefined ? {} : { activityLog: input.activityLog }),
+    ...(input.delegationOutcome === undefined ? {} : { delegationOutcome: input.delegationOutcome }),
     ...(input.target === undefined ? {} : { target: input.target }),
     ...(input.startedAtMs === undefined ? {} : { startedAtMs: input.startedAtMs }),
     ...(input.endedAtMs === undefined ? {} : { endedAtMs: input.endedAtMs }),
