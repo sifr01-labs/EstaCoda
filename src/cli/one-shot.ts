@@ -43,6 +43,11 @@ export async function runOneShotPrompt(options: OneShotPromptOptions): Promise<O
       }
     }
   });
+  try {
+    options.runtime.enqueueSessionFinalization?.("one-shot");
+  } catch {
+    // A completed one-shot response should still return if durable queueing is unavailable.
+  }
 
   return {
     handled: true,

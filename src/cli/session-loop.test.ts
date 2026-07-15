@@ -445,6 +445,68 @@ function approvalAnswerKeypresses(answer: string): readonly string[] {
 }
 
 describe("runSessionLoop — user prompt rail behavior", () => {
+  it("queues idle SIGINT as a session boundary", async () => {
+    const enqueueSessionFinalization = vi.fn();
+    let rejectPrompt: ((error: Error) => void) | undefined;
+    const beforeSigintListeners = process.listenerCount("SIGINT");
+    const loop = runSessionLoop({
+      runtime: createMockRuntime({ enqueueSessionFinalization }),
+      output: { write: () => true } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => await new Promise<string>((_resolve, reject) => {
+          rejectPrompt = reject;
+        }),
+        { close: () => {} }
+      ),
+      close: () => rejectPrompt?.(new Error("prompt closed")),
+    });
+    while (process.listenerCount("SIGINT") === beforeSigintListeners || rejectPrompt === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    process.emit("SIGINT");
+
+    await expect(loop).rejects.toThrow("prompt closed");
+    expect(enqueueSessionFinalization).toHaveBeenCalledTimes(1);
+    expect(enqueueSessionFinalization).toHaveBeenCalledWith("sigint");
+  });
+
+  it("keeps idle SIGINT finalization available after cancelling an active turn", async () => {
+    const enqueueSessionFinalization = vi.fn();
+    let rejectIdlePrompt: ((error: Error) => void) | undefined;
+    const runtime = createMockRuntime({
+      enqueueSessionFinalization,
+      handle: async ({ signal }: Parameters<Runtime["handle"]>[0]) => {
+        setTimeout(() => process.emit("SIGINT"), 0);
+        await new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve(), { once: true }));
+        return mockResponse();
+      },
+    });
+    let promptCount = 0;
+    const loop = runSessionLoop({
+      runtime,
+      output: { write: () => true } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          promptCount += 1;
+          if (promptCount === 1) return "work";
+          return await new Promise<string>((_resolve, reject) => {
+            rejectIdlePrompt = reject;
+            setTimeout(() => process.emit("SIGINT"), 0);
+          });
+        },
+        { close: () => {} }
+      ),
+      close: () => rejectIdlePrompt?.(new Error("idle prompt closed")),
+    });
+
+    await expect(loop).rejects.toThrow("idle prompt closed");
+    expect(enqueueSessionFinalization).toHaveBeenCalledTimes(1);
+    expect(enqueueSessionFinalization).toHaveBeenCalledWith("sigint");
+  });
+
   it("starts and cleans up the raw prompt by default for interactive TTY core sessions", async () => {
     const input = makeTtyInput();
 
@@ -4257,8 +4319,11 @@ describe("runSessionLoop — active turn spinner", () => {
       columns: 120,
     } as unknown as NodeJS.WritableStream;
     let nowMs = 0;
+    const oldFinalization = vi.fn();
+    const freshFinalization = vi.fn();
     const runtime = withModelInfo({
       ...createMockRuntime(),
+      enqueueSessionFinalization: oldFinalization,
       handle: async ({ onEvent }: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
         nowMs = 312_000;
         onEvent?.({ kind: "agent-final", text: "Mock response" });
@@ -4268,6 +4333,7 @@ describe("runSessionLoop — active turn spinner", () => {
     const refreshedRuntime = withModelInfo({
       ...createMockRuntime(),
       sessionId: "fresh-session",
+      enqueueSessionFinalization: freshFinalization,
       getStatus: () => ({
         kind: "status" as const,
         agentName: "𓂀 EstaCoda",
@@ -4315,14 +4381,17 @@ describe("runSessionLoop — active turn spinner", () => {
     const resetRail = afterReset.split("\n").find((line) => line.includes("idle"));
     expect(resetRail).toBeDefined();
     expect(resetRail).not.toContain("⧖");
+    expect(oldFinalization).toHaveBeenCalledWith("new-session");
+    expect(freshFinalization).toHaveBeenCalledWith("cli-exit");
   });
 
   it("keeps /reset as an alias for the fresh session command", async () => {
     const refreshedRuntime = createMockRuntime({ sessionId: "alias-fresh-session" });
+    const enqueueSessionFinalization = vi.fn();
 
     const result = await handleSlashCommand({
       text: "/reset",
-      runtime: createMockRuntime(),
+      runtime: createMockRuntime({ enqueueSessionFinalization }),
       refreshRuntime: async () => refreshedRuntime,
       output: {
         write(): boolean {
@@ -4343,6 +4412,7 @@ describe("runSessionLoop — active turn spinner", () => {
       expect(notice).toContain("default profile - mock/mock-model");
       expect(notice).toContain("security   Open | YOLO mode");
     }
+    expect(enqueueSessionFinalization).toHaveBeenCalledWith("new-session");
   });
 
   it("clears the completed turn timer after /switch swaps to another session", async () => {
@@ -5078,7 +5148,8 @@ describe("runSessionLoop — active turn spinner", () => {
       columns: 80,
     } as unknown as NodeJS.WritableStream;
 
-    const baseRuntime = createMockRuntime();
+    const enqueueSessionFinalization = vi.fn();
+    const baseRuntime = createMockRuntime({ enqueueSessionFinalization });
     let handleCalls = 0;
     const runtime = {
       ...baseRuntime,
@@ -5129,6 +5200,8 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(rendered.slice(cancelIndex, secondPromptIndex)).not.toContain("↳ first");
     expect(rendered.slice(cancelIndex, secondPromptIndex)).not.toContain("scribbling");
     expect(rendered).toContain("Second response");
+    expect(enqueueSessionFinalization).not.toHaveBeenCalledWith("sigint");
+    expect(enqueueSessionFinalization).toHaveBeenCalledWith("cli-exit");
   });
 
   it("/approve once grants one-time approval and retries", async () => {

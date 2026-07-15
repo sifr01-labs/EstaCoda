@@ -51,6 +51,11 @@ import type { SecurityApprovalMode, SecurityPolicy, SecurityRequest } from "../c
 import type { SessionDB } from "../contracts/session.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
+import {
+  SessionFinalizationQueue,
+  type SessionFinalizationJob,
+  type SessionFinalizationReason,
+} from "../session/session-finalization-queue.js";
 import { SessionRecallService, type SessionRecallResult } from "../session/session-recall-service.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { SessionCompressionService, type CompactResult } from "../prompt/session-compression-service.js";
@@ -269,6 +274,7 @@ export type Runtime = {
   trustWorkspace(): Promise<void>;
   isWorkspaceTrusted(): Promise<boolean>;
   revokeWorkspaceTrust(): Promise<boolean>;
+  enqueueSessionFinalization?(reason: SessionFinalizationReason): SessionFinalizationJob | undefined;
   dispose(): Promise<void>;
   sessionDb: SessionDB;
   sessionId: string;
@@ -1201,6 +1207,16 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     revokeWorkspaceTrust() {
       return trustStore.revoke(workspaceRoot);
     },
+    enqueueSessionFinalization(reason) {
+      if (!(sessionDb instanceof SQLiteSessionDB)) {
+        return undefined;
+      }
+      return new SessionFinalizationQueue({ db: sessionDb.db }).enqueue({
+        profileId,
+        sessionId: sessionRuntimeContext.currentSessionId(),
+        reason,
+      });
+    },
     async dispose() {
       if (disposed) {
         return;
@@ -1211,10 +1227,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       await browserSessionLifecycle?.cleanupAll();
       await ownedBrowserBackend?.close?.();
       await localWhisper?.dispose?.();
-      await memoryCurationService?.checkpoint({
-        trigger: "runtime-dispose",
-        minNewMessages: memoryConfig.curation.runtimeDisposeMinNewMessages
-      }).catch(() => undefined);
       await Promise.all(loadedMcpServers.map((server) => server.stop().catch(() => undefined)));
       memoryIndexSync?.dispose();
       const closeSessionDb = closeSessionDbOnDispose

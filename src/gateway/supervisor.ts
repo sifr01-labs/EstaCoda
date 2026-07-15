@@ -1323,6 +1323,11 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       return undefined;
     };
 
+    const enqueueSessionFinalization: NonNullable<
+      ConstructorParameters<typeof ChannelGateway>[0]["enqueueSessionFinalization"]
+    > = ({ sessionId, reason }) => {
+      sessionFinalizationQueue.enqueue({ profileId, sessionId, reason });
+    };
     const gateway = options.factories?.createChannelGateway
       ? options.factories.createChannelGateway({
           adapters: wrappers,
@@ -1387,6 +1392,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           sessionHygieneService,
           hookRegistry,
           logWarning,
+          enqueueSessionFinalization,
           profileId,
           approvalQueue: gatewayApprovalQueue,
           voiceStateManager,
@@ -1462,6 +1468,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           sessionHygieneService,
           hookRegistry,
           logWarning,
+          enqueueSessionFinalization,
           profileId,
           approvalQueue: gatewayApprovalQueue,
           voiceStateManager,

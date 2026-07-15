@@ -1146,6 +1146,7 @@ describe("runGatewaySupervisor", () => {
     });
 
     expect(typeof capturedOpts.runtimeForSession).toBe("function");
+    expect(typeof capturedOpts.enqueueSessionFinalization).toBe("function");
   });
 
   it("retains runtime-cache-state.json after shutdown in once mode", async () => {

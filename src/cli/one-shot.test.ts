@@ -1,11 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Runtime } from "../runtime/create-runtime.js";
 import { runOneShotPrompt } from "./one-shot.js";
 
 describe("one-shot prompt", () => {
   it("uses shared tool display labels for provider calls and final tool summaries", async () => {
+    const enqueueSessionFinalization = vi.fn();
     const runtime = {
       tools: () => [],
+      enqueueSessionFinalization,
       handle: async (input: {
         onEvent?: (event: { kind: "provider-tool-call"; provider: string; model: string; name: string }) => void;
       }) => {
@@ -36,6 +38,7 @@ describe("one-shot prompt", () => {
     expect(result.output).toContain("tools: Run Command");
     expect(result.output).not.toContain("provider requested terminal.run");
     expect(result.output).not.toContain("tools: terminal.run");
+    expect(enqueueSessionFinalization).toHaveBeenCalledWith("one-shot");
   });
 
   it("prints bounded delegated child lifecycle lines", async () => {

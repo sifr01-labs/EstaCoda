@@ -120,6 +120,7 @@ import { createReviewedSetupApplyExecutor } from "../setup/review/apply-executor
 import { buildProvidersStatusViewModel } from "./provider-status-view-models.js";
 import { selectProviderModelRoute } from "../setup/provider-model-route-prompt.js";
 import { isMemoryCurationModeMutation, runMemoryOperatorCommand } from "../memory/memory-operator-commands.js";
+import type { SessionFinalizationReason } from "../session/session-finalization-queue.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -383,12 +384,13 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       return;
     }
 
+    enqueueRuntimeFinalization(runtime, "sigint");
     output.write("\nEnding EstaCoda session.\n");
     close();
   };
 
   let stopIdleStatusTicker: () => void = () => undefined;
-  process.once("SIGINT", onSigint);
+  process.on("SIGINT", onSigint);
 
   try {
     const resetTurnRailState = () => {
@@ -492,6 +494,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       }
 
       if (text === "/exit") {
+        enqueueRuntimeFinalization(runtime, "cli-exit");
         output.write("Ending EstaCoda session.\n");
         return;
       }
@@ -1304,16 +1307,19 @@ export async function handleSlashCommand(input: {
     }
     case "providers":
       return handleProvidersCommand(input, args);
-    case "new":
+    case "new": {
       if (input.refreshRuntime === undefined) {
         input.output.write("This session cannot reset itself here. Start a new EstaCoda session to refresh skills and config.\n\n");
         return false;
       }
 
+      const nextRuntime = await input.refreshRuntime({ preserveSession: false });
+      enqueueRuntimeFinalization(input.runtime, "new-session");
       return {
-        runtime: await input.refreshRuntime({ preserveSession: false }),
+        runtime: nextRuntime,
         notice: (runtime) => renderFreshSessionNotice(runtime, input.renderer)
       };
+    }
     case "tools":
       input.output.write(`${input.renderer.render(buildToolsMenuViewModel(input.runtime, args.join(" ")))}\n\n`);
       return false;
@@ -1580,11 +1586,20 @@ export async function handleSlashCommand(input: {
       input.output.write("\x1Bc");
       return false;
     case "exit":
+      enqueueRuntimeFinalization(input.runtime, "cli-exit");
       input.output.write("Ending EstaCoda session.\n");
       return true;
     default:
       input.output.write(`Unknown command: /${command}\nUse /help to see available commands.\n\n`);
       return false;
+  }
+}
+
+function enqueueRuntimeFinalization(runtime: Runtime, reason: SessionFinalizationReason): void {
+  try {
+    runtime.enqueueSessionFinalization?.(reason);
+  } catch {
+    // Session exit/reset must remain responsive if durable queueing is unavailable.
   }
 }
 
