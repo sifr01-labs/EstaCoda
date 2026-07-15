@@ -7,6 +7,9 @@ import {
 import type { BatchDelegationSummary, DelegationManager } from "../delegation/delegation-manager.js";
 import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
 
+const DELEGATE_TASK_MAX_RESULT_CHARS = 8_000;
+const FAILED_DELEGATION_DETAIL_MAX_CHARS = 800;
+
 export type DelegationToolOptions = {
   manager: DelegationManager;
   parentSessionId: string | (() => string);
@@ -86,7 +89,7 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
       riskClass: "shared-state-mutation",
       toolsets: ["core", "research", "coding"],
       progressLabel: "delegating task",
-      maxResultSizeChars: 8000,
+      maxResultSizeChars: DELEGATE_TASK_MAX_RESULT_CHARS,
       isAvailable: () => true,
       run: async (input: DelegateTaskInput, context?: ToolExecutionContext) => {
         const parsed = parseDelegateTaskInput(input, delegationConfig);
@@ -444,12 +447,87 @@ function structuredValidationError(message: string, code: string): { ok: false; 
 }
 
 function renderBatchContent(summary: BatchDelegationSummary): string {
-  return [
+  const batchHeader = [
     `Delegated batch ${summary.batchId}.`,
     `Status: ${summary.status}`,
-    summary.summary,
-    ...summary.results.map((result) =>
-      `${result.index + 1}. ${result.childStatus}: ${result.summary.slice(0, 240)}`
-    )
+    summary.summary
   ].join("\n");
+  if (summary.results.length === 0) {
+    return batchHeader;
+  }
+
+  const resultPrefixes = summary.results.map((result) => `\n${result.index + 1}. ${result.childStatus}\n`);
+  const detailBudget = Math.max(
+    0,
+    DELEGATE_TASK_MAX_RESULT_CHARS - batchHeader.length - resultPrefixes.reduce((total, prefix) => total + prefix.length, 0)
+  );
+  const requestedBudgets = summary.results.map((result) =>
+    result.childStatus === "completed"
+      ? result.summary.length
+      : Math.min(result.summary.length, FAILED_DELEGATION_DETAIL_MAX_CHARS)
+  );
+  const allocatedBudgets = allocateFairBudgets(requestedBudgets, detailBudget);
+
+  return summary.results.reduce(
+    (content, result, index) =>
+      `${content}${resultPrefixes[index]}${renderBoundedDelegationDetail(result.summary, allocatedBudgets[index] ?? 0)}`,
+    batchHeader
+  );
+}
+
+function allocateFairBudgets(requestedBudgets: readonly number[], totalBudget: number): number[] {
+  const allocations = requestedBudgets.map(() => 0);
+  const pending = requestedBudgets.map((_, index) => index);
+  let remainingBudget = Math.max(0, totalBudget);
+
+  while (pending.length > 0 && remainingBudget > 0) {
+    const equalShare = Math.floor(remainingBudget / pending.length);
+    const satisfied = pending.filter((index) => (requestedBudgets[index] ?? 0) <= equalShare);
+
+    if (satisfied.length === 0) {
+      for (const index of pending) {
+        allocations[index] = equalShare;
+      }
+      let remainder = remainingBudget - equalShare * pending.length;
+      for (const index of pending) {
+        if (remainder === 0) break;
+        allocations[index] = (allocations[index] ?? 0) + 1;
+        remainder -= 1;
+      }
+      break;
+    }
+
+    const satisfiedIndexes = new Set(satisfied);
+    for (const index of satisfied) {
+      const allocation = requestedBudgets[index] ?? 0;
+      allocations[index] = allocation;
+      remainingBudget -= allocation;
+    }
+    for (let index = pending.length - 1; index >= 0; index -= 1) {
+      if (satisfiedIndexes.has(pending[index]!)) {
+        pending.splice(index, 1);
+      }
+    }
+  }
+
+  return allocations;
+}
+
+function renderBoundedDelegationDetail(detail: string, maxChars: number): string {
+  if (detail.length <= maxChars) {
+    return detail;
+  }
+  if (maxChars <= 0) {
+    return "";
+  }
+
+  const marker = `\n... (${detail.length} chars total, truncated)`;
+  if (marker.length <= maxChars) {
+    return `${detail.slice(0, maxChars - marker.length)}${marker}`;
+  }
+
+  const compactMarker = "[truncated]";
+  return compactMarker.length <= maxChars
+    ? compactMarker
+    : ".".repeat(maxChars);
 }

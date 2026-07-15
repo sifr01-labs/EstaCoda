@@ -424,6 +424,97 @@ describe("createDelegationTools", () => {
     }));
   });
 
+  it("fairly distributes the batch result budget and marks every truncated child", async () => {
+    const secondSummary = `worker-two ${"b".repeat(6_000)}`;
+    const thirdSummary = `worker-three ${"c".repeat(6_000)}`;
+    const delegateBatch = vi.fn(async () => ({
+      batchId: "batch-fair",
+      status: "completed",
+      summary: "Delegation batch batch-fair: completed. Completed: 3/3.",
+      results: [
+        { index: 0, childStatus: "completed", summary: "short report" },
+        { index: 1, childStatus: "completed", summary: secondSummary },
+        { index: 2, childStatus: "completed", summary: thirdSummary }
+      ]
+    }));
+    const [tool] = createDelegationTools({
+      manager: { delegate: vi.fn(), delegateBatch } as never,
+      parentSessionId: "parent",
+      profileId: "default",
+      trustedWorkspace: () => true
+    });
+
+    const result = await tool!.run({
+      tasks: [{ task: "A" }, { task: "B" }, { task: "C" }]
+    });
+    const content = result.content;
+    const secondAndThird = content.split("\n2. completed\n")[1]!;
+    const [renderedSecond, renderedThird] = secondAndThird.split("\n3. completed\n");
+
+    expect(content.length).toBeLessThanOrEqual(tool!.maxResultSizeChars);
+    expect(content).toContain("\n1. completed\nshort report");
+    expect(content).toContain(`... (${secondSummary.length} chars total, truncated)`);
+    expect(content).toContain(`... (${thirdSummary.length} chars total, truncated)`);
+    expect(renderedSecond).toContain("worker-two");
+    expect(renderedThird).toContain("worker-three");
+    expect(Math.abs(renderedSecond.length - renderedThird.length)).toBeLessThanOrEqual(1);
+  });
+
+  it("caps unsuccessful child detail while preserving an explicit truncation marker", async () => {
+    const failedSummary = `provider failure ${"x".repeat(4_000)}`;
+    const delegateBatch = vi.fn(async () => ({
+      batchId: "batch-failed",
+      status: "failed",
+      summary: "Delegation batch batch-failed: failed. Completed: 0/1. Failed: 1.",
+      results: [
+        { index: 0, childStatus: "failed", summary: failedSummary }
+      ]
+    }));
+    const [tool] = createDelegationTools({
+      manager: { delegate: vi.fn(), delegateBatch } as never,
+      parentSessionId: "parent",
+      profileId: "default",
+      trustedWorkspace: () => true
+    });
+
+    const result = await tool!.run({ tasks: [{ task: "A" }] });
+    const renderedDetail = result.content.split("\n1. failed\n")[1]!;
+
+    expect(result.ok).toBe(false);
+    expect(renderedDetail.length).toBe(800);
+    expect(renderedDetail).toContain(`... (${failedSummary.length} chars total, truncated)`);
+  });
+
+  it("retains every child heading when a maximum-size batch exceeds the result budget", async () => {
+    const results = Array.from({ length: 10 }, (_, index) => ({
+      index,
+      childStatus: "completed" as const,
+      summary: `worker-${index + 1} ${String(index).repeat(3_000)}`
+    }));
+    const delegateBatch = vi.fn(async () => ({
+      batchId: "batch-maximum",
+      status: "completed",
+      summary: "Delegation batch batch-maximum: completed. Completed: 10/10.",
+      results
+    }));
+    const [tool] = createDelegationTools({
+      manager: { delegate: vi.fn(), delegateBatch } as never,
+      parentSessionId: "parent",
+      profileId: "default",
+      trustedWorkspace: () => true
+    });
+
+    const result = await tool!.run({
+      tasks: results.map((_, index) => ({ task: `Task ${index + 1}` }))
+    });
+
+    expect(result.content.length).toBeLessThanOrEqual(tool!.maxResultSizeChars);
+    for (const child of results) {
+      expect(result.content).toContain(`\n${child.index + 1}. completed\nworker-${child.index + 1}`);
+      expect(result.content).toContain(`... (${child.summary.length} chars total, truncated)`);
+    }
+  });
+
   it("reflects delegation limits in deterministic schema descriptions", () => {
     const [tool] = createDelegationTools({
       manager: { delegate: vi.fn(), delegateBatch: vi.fn() } as never,
