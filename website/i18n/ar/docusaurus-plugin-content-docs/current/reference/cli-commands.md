@@ -208,7 +208,7 @@ estacoda gateway stop --force           # SIGKILL للغير مُدارة؛ syst
 estacoda gateway restart                # إعادة تشغيل خدمة نطاق المستخدم المثبتة
 estacoda gateway restart --graceful     # alias لـ restart في v0.1.0
 estacoda gateway restart --system       # إعادة تشغيل خدمة نطاق النظام
-estacoda gateway status                 # الحالة الكاملة: مدير الخدمة، القنوات، cron، الموافقات
+estacoda gateway status                 # الحالة الكاملة: مدير الخدمة، القنوات، cron، الموافقات، إنهاء الذاكرة
 estacoda gateway diagnose               # جاهزية لكل قناة؛ يخرج 1 عند التحذيرات
 estacoda gateway approvals              # عدد الموافقات المعلقة
 estacoda gateway install                # تثبيت خدمة systemd/launchd نطاق المستخدم
@@ -315,6 +315,7 @@ estacoda sessions compact <session-id> [--topic <topic>]
 ## الذاكرة
 
 ```bash
+estacoda memory status
 estacoda memory index path
 estacoda memory index status
 estacoda memory index rebuild
@@ -339,6 +340,7 @@ estacoda memory clear [USER.md|MEMORY.md|all] --yes
 - `memory-index.sqlite` المحلي للملف الشخصي عند إعادة بناء/مزامنة الفهرس
 
 **السلوك:**
+- يعرض `memory status` إعدادات وسجل ذاكرة الملف الشخصي مع أعداد الإنهاء الخلفي `pending` و`running` و`retrying` و`failed`.
 - يعرض `memory mode` أو يحدّث وضع تنظيم الذاكرة المحلي للملف الشخصي. `auto` هو الافتراضي ويطبق فقط مرشحين محافظين منخفضي المخاطر.
 - يعرض `memory recent` سجلات التنظيم الحديثة، ومنها auto-applied وpending-review وignored وfailed.
 - يعرض `memory review` سجلات pending-review وعمليات المرشحين منخفضة المخاطر المحفوظة.

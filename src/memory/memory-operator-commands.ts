@@ -9,6 +9,10 @@ import {
   resolveProfileStateHome
 } from "../config/profile-home.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
+import {
+  SessionFinalizationQueue,
+  type SessionFinalizationQueueSummary,
+} from "../session/session-finalization-queue.js";
 import type { MemoryFileKind, MemoryOperation, MemoryPromotionRecord } from "../contracts/memory.js";
 import { truncate } from "../utils/formatting.js";
 import { redactSensitiveText } from "../utils/redaction.js";
@@ -535,10 +539,11 @@ async function renderMemoryDashboard(input: {
   profileId: string;
   runtime?: MemoryOperatorRuntime;
 }): Promise<string> {
-  const [config, records, promotions] = await Promise.all([
+  const [config, records, promotions, finalization] = await Promise.all([
     loadMemoryConfig(input),
     loadCurationStore(input).list({ limit: 50 }),
-    input.runtime?.inspectMemoryPromotions?.() ?? Promise.resolve([])
+    input.runtime?.inspectMemoryPromotions?.() ?? Promise.resolve([]),
+    loadSessionFinalizationSummary(input),
   ]);
   const pending = records.filter((record) => record.status === "pending-review").length;
   const autoApplied = records.filter((record) => record.status === "auto-applied").length;
@@ -552,11 +557,38 @@ async function renderMemoryDashboard(input: {
     `recentAutoApplied: ${autoApplied}`,
     `pendingReview: ${pending}`,
     `failedAudits: ${failed}`,
+    ...(finalization === undefined
+      ? ["backgroundFinalization: unavailable"]
+      : [
+          `backgroundFinalizationPending: ${finalization.pending}`,
+          `backgroundFinalizationRunning: ${finalization.running}`,
+          `backgroundFinalizationRetrying: ${finalization.retrying}`,
+          `backgroundFinalizationFailed: ${finalization.failed}`,
+        ]),
     `promotedConclusions: ${promotions.length}`,
     latest === undefined ? "latestAudit: none" : `latestAudit: ${latest.status} ${latest.trigger} ${latest.createdAt}`,
     "",
     "Commands: memory populate, memory review, memory apply, memory reject, memory undo, memory forget, memory recent, memory mode [auto|review|manual], memory edit, memory clear"
   ].join("\n");
+}
+
+async function loadSessionFinalizationSummary(input: {
+  homeDir: string;
+  profileId: string;
+}): Promise<SessionFinalizationQueueSummary | undefined> {
+  const path = resolveGlobalStateHome({ homeDir: input.homeDir }).sessionsSqlitePath;
+  if (!existsSync(path)) {
+    return { pending: 0, running: 0, retrying: 0, failed: 0 };
+  }
+  let sessionDb: Awaited<ReturnType<typeof createSQLiteSessionDB>> | undefined;
+  try {
+    sessionDb = await createSQLiteSessionDB({ path });
+    return new SessionFinalizationQueue({ db: sessionDb.db }).summarize(input.profileId);
+  } catch {
+    return undefined;
+  } finally {
+    sessionDb?.close();
+  }
 }
 
 async function renderRecentCurationRecords(

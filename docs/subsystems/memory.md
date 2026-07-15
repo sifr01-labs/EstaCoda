@@ -165,8 +165,13 @@ Implemented checkpoints:
 - every configured `memory.curation.checkpointEveryTurns` completed root-session turns
 - `/compact` and manual session compaction when enabled
 - `/handoff` when enabled
-- runtime dispose when enabled and the minimum new-message/interval gates pass
 - explicit `memory populate` / `/memory populate`
+
+Semantic session endings use durable background finalization instead of running curation inside generic runtime disposal. The CLI enqueues the completed session for `/new`, `/reset`, `/exit`, idle `Ctrl+C`, and a successful one-shot prompt. Authorized gateway `/new` and `/reset` commands enqueue the old channel session. Active-turn `Ctrl+C` only cancels that turn; config refresh, runtime-cache eviction, cron cleanup, and generic `Runtime.dispose()` do not enqueue finalization.
+
+Enqueue captures an immutable message-count/message-id cutoff in the global, profile-scoped `~/.estacoda/sessions.sqlite` queue. It stores identifiers, reason, status, attempts, timestamps, and bounded outcome/error codes, not transcript content. The new session or exit waits only for this durable database write, not model extraction or memory writes.
+
+The managed gateway supervisor claims queued work in the background. A profile lease permits one active curation mutation per profile, expired jobs are recoverable, and failures use bounded retry before a terminal state. If no gateway service is running, work remains durable until a gateway for that profile runs. Finalization reads only through the captured cutoff, so later messages added to a resumed session are excluded.
 
 Default curation mode is `auto`. Auto mode still applies only explicit, non-sensitive, low-risk facts that pass evidence, duplicate, scanner, and budget gates. `review` mode records pending-review audit records without mutating memory. `manual` mode skips background checkpoints and only runs explicit manual commands.
 
@@ -188,6 +193,8 @@ estacoda memory clear [USER.md|MEMORY.md|all] --yes
 The corresponding in-session and Telegram commands use `/memory ...` with the same subcommands. Telegram output is compact, but the policy and profile-local files are the same as the CLI.
 
 `memory apply`, `memory undo`, and `memory forget` use the same memory mutation path as `memory.curate` and auto-curation, including drift checks, scanner/budget gates, index sync, and configured external-memory mirror warnings. `memory clear` is guarded by `--yes`, clears only `USER.md` and/or `MEMORY.md`, creates backups for existing files, syncs the local memory index, and never clears `SOUL.md` or shared memory. Existing live sessions may need `/new` or restart to reload prompt memory after file edits or clears.
+
+`estacoda memory status` and `estacoda gateway status` report profile-scoped `pending`, `running`, `retrying`, and `failed` finalization counts. Operator memory mutations share the profile curation lease and may report that memory is busy while a background finalizer is writing.
 
 Curation history lives at:
 

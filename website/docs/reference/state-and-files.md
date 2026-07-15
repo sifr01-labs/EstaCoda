@@ -17,7 +17,7 @@ Default root: `~/.estacoda/`
 | `active-profile.json` | Active profile pointer | `estacoda init`, `estacoda profile switch` |
 | `trust.json` | Workspace trust grants | `estacoda workspace trust` |
 | `workspace-approvals.json` | Workspace approval grants | Approval commands |
-| `sessions.sqlite` | Global session database with `profile_id` scoping | Runtime initialization |
+| `sessions.sqlite` | Global session database with `profile_id` scoping; includes durable session-finalization jobs and leases | Runtime initialization and gateway finalization worker |
 | `update-cache.json` | Update check cache (global, 6-hour TTL) | Startup prefetch, update command |
 | `packs/registry.jsonl` | Global pack cache | Pack operations |
 | `memory/shared/` | Global shared memory snippets | Memory operations |
@@ -91,6 +91,8 @@ Profile root: `~/.estacoda/profiles/<id>/`
 | `external-memory/` | File-backed external memory records | External memory (if enabled) |
 
 Delegation also writes session rows/events to `sessions.sqlite`. Child sessions are linked with `parentSessionId`. Delegation outcomes are stored as bounded session/result and trajectory telemetry, not through canonical prompt memory. Stale-file warnings are session/result metadata and do not store file contents or diffs.
+
+Session-finalization jobs also live in `sessions.sqlite`. They store profile/session identifiers, an immutable message cutoff, reason, status, attempts, leases, timestamps, and bounded outcome/error codes. They do not store a transcript copy. The managed gateway processes jobs for its selected profile in the background.
 
 ## Ownership rule
 

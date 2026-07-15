@@ -30,6 +30,13 @@ export type SessionFinalizationJob = {
   updatedAt: string;
 };
 
+export type SessionFinalizationQueueSummary = {
+  pending: number;
+  running: number;
+  retrying: number;
+  failed: number;
+};
+
 type SessionFinalizationRow = {
   id: string;
   profile_id: string;
@@ -349,6 +356,27 @@ export class SessionFinalizationQueue {
           )
           .all(profileId, input.status, limit);
     return rows.map(rowToJob);
+  }
+
+  summarize(profileIdInput: string): SessionFinalizationQueueSummary {
+    const profileId = requireScopeValue(profileIdInput, "profileId");
+    const now = this.#now().toISOString();
+    const row = this.#db
+      .query<SessionFinalizationQueueSummary>(
+        `select
+          coalesce(sum(case when status = 'pending' and attempts = 0 then 1 else 0 end), 0) as pending,
+          coalesce(sum(case when status = 'running' and lease_expires_at > ? then 1 else 0 end), 0) as running,
+          coalesce(sum(case
+            when status = 'pending' and attempts > 0 then 1
+            when status = 'running' and lease_expires_at <= ? then 1
+            else 0
+          end), 0) as retrying,
+          coalesce(sum(case when status = 'failed' then 1 else 0 end), 0) as failed
+        from session_finalization_jobs
+        where profile_id = ?`
+      )
+      .get(now, now, profileId);
+    return row ?? { pending: 0, running: 0, retrying: 0, failed: 0 };
   }
 
   #finishRunningJob(input: {

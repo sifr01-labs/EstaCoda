@@ -17,6 +17,7 @@ import type { DeliveryErrorRecord } from "../channels/delivery-router.js";
 import type { PersistedRuntimeState, AdapterRuntimeState } from "../gateway/adapter-runtime-state.js";
 import type { RuntimeCacheState } from "../gateway/runtime-cache-state.js";
 import type { ServiceManagerState } from "../gateway/service-manager.js";
+import type { SessionFinalizationQueueSummary } from "../session/session-finalization-queue.js";
 import {
   buildCommandResultViewModel,
   buildKeyValueBlockViewModel,
@@ -73,6 +74,7 @@ export type GatewayStatusData = {
   readonly identityLocks: readonly IdentityLockStatus[];
   readonly runtimeState?: PersistedRuntimeState;
   readonly runtimeCacheState?: RuntimeCacheState;
+  readonly sessionFinalization?: SessionFinalizationQueueSummary;
 };
 
 export function buildGatewayStatusViewModel(data: GatewayStatusData): CommandResultViewModel {
@@ -102,6 +104,7 @@ export function buildGatewayStatusViewModel(data: GatewayStatusData): CommandRes
     }),
     buildChannelsOverviewBlock(data.channels),
     buildDeliveryBlock(data.channels, data.recentDeliveryErrors),
+    ...(data.sessionFinalization === undefined ? [] : [buildSessionFinalizationBlock(data.sessionFinalization)]),
     buildSurfacePointersBlock(data.surfacePointers),
     buildKeyValueBlockViewModel({
       title: "Approvals",
@@ -126,6 +129,18 @@ export function buildGatewayStatusViewModel(data: GatewayStatusData): CommandRes
     ok: true,
     title: "EstaCoda gateway status",
     blocks,
+  });
+}
+
+function buildSessionFinalizationBlock(summary: SessionFinalizationQueueSummary): ViewModel {
+  return buildKeyValueBlockViewModel({
+    title: "Memory finalization",
+    entries: [
+      kv("Pending", summary.pending),
+      kv("Running", summary.running),
+      kv("Retrying", summary.retrying),
+      kv("Failed", summary.failed),
+    ],
   });
 }
 

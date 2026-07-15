@@ -90,6 +90,7 @@ estacoda gateway diagnose     # Per-channel readiness check
 - Active surface pointers
 - Pending approvals count
 - Cron job summary
+- Memory finalization queue counts: pending, running, retrying, failed
 - Recent cron failures (last 5)
 - Recent delivery errors (last 5)
 - Missing config/env warnings

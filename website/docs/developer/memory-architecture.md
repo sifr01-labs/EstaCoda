@@ -28,6 +28,9 @@ This page is for maintainers debugging memory reads, writes, curation, promotion
 | `MemoryReviewer` | Deterministic runtime policy that turns extracted facts into memory candidates. |
 | `MemoryCurationService` | Runs checkpoint audits, applies eligible candidates, records curation history, and emits events. |
 | `MemoryCurationStore` | Profile-local curation history in `memory-curation.json`. |
+| `SessionFinalizationQueue` | Stores profile-scoped session cutoffs, leases, retries, and bounded outcomes in global `sessions.sqlite`. |
+| `SessionFinalizationWorker` | Claims queued session endings and invokes the standalone curator from the gateway supervisor. |
+| `SQLiteMemoryCurationCoordinator` | Serializes background and operator memory mutations with one lease per profile. |
 | `MemoryOperatorCommands` | Shared CLI, slash, and gateway curation controls. |
 | `AgentLoop` | Calls curation checkpoints and promotion after direct user turns, then records diagnostics/events. |
 
@@ -89,7 +92,13 @@ Runtime policy in `MemoryReviewer` decides disposition:
 
 Default `auto` mode auto-applies only explicit, non-sensitive, low-risk facts that pass evidence, duplicate, scanner, budget, and confidence gates. The default `autoApplyMinConfidence` is `0.7`, and `autoApplyMaxRisk` is `low`.
 
-Natural checkpoint triggers are `turn-count`, `compact`, `handoff`, `runtime-dispose`, and explicit `manual` runs from `memory populate` / `/memory populate`.
+Synchronous checkpoint triggers are `turn-count`, `compact`, `handoff`, and explicit `manual` runs from `memory populate` / `/memory populate`. The persisted `runtime-dispose` trigger name remains the compatibility/audit label for session finalization, but generic `Runtime.dispose()` is resource cleanup only.
+
+Semantic endings enqueue finalization after CLI `/new`, `/reset`, `/exit`, idle `Ctrl+C`, authorized channel `/new` or `/reset`, and successful one-shot prompts. Active-turn `Ctrl+C` remains cancellation-only. Config refresh, runtime-cache eviction, cron disposal, and other generic runtime cleanup do not enqueue a job.
+
+The enqueue transaction captures `source_message_count` and `cutoff_message_id` with the job. The row contains profile/session identifiers, reason, lease/retry state, and bounded codes, not message content. The gateway worker reads only messages through that immutable cutoff, obtains the profile curation lease, and then runs `MemoryCurationService`. This prevents a resumed session's later messages from entering the old finalization audit.
+
+Only one finalization job may run per profile. Expired queue and curation leases are recoverable; failures retry with bounded backoff before becoming terminal. Operator writes through `MemoryOperatorCommands` use the same profile lease and fail visibly as busy rather than racing a finalizer. `memory status` and `gateway status` aggregate profile-scoped `pending`, `running`, `retrying`, and `failed` counts without transcript data.
 
 Curation records store ids, trigger/status, source message ids/counts, extracted fact ids, operation hashes, reasons, and reversible low-risk operation payloads for applied or reviewable candidates. Sensitive or higher-risk candidates may be recorded without an applyable operation.
 

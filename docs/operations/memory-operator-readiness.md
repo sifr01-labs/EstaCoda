@@ -91,6 +91,10 @@ Memory curation is enabled by default in conservative auto mode:
 
 Use `estacoda memory mode review` for a fully inspectable pending-review workflow, or `estacoda memory mode manual` to skip background checkpoints.
 
+`auditOnRuntimeDispose` and the `runtimeDisposeMin*` fields are compatibility keys. They now gate durable curation for semantic session endings, not arbitrary runtime disposal. `/new`, `/reset`, `/exit`, idle `Ctrl+C`, authorized channel `/new` or `/reset`, and successful one-shot prompts enqueue an immutable session cutoff without waiting for extraction. Active-turn `Ctrl+C` is cancellation-only.
+
+The selected profile's managed gateway service processes queued finalization jobs. Jobs remain durably profile-scoped in global `~/.estacoda/sessions.sqlite` while the service is stopped, then resume when a gateway for that profile runs. `estacoda memory status` and `estacoda gateway status` expose `pending`, `running`, `retrying`, and `failed` counts without transcript content. A nonzero failed count requires operator investigation; retrying work remains eligible for bounded automatic retry.
+
 Memory File Compaction is manual/tool-driven by default. It requires a configured `auxiliaryModels.memory_compaction` route to generate compacted content. Memory-file critical pressure is diagnostic only; it does not trigger automatic Memory File Compaction. Overflow fails closed with structured errors. Other auto-compaction paths use their own thresholds, not `MemoryBudgetPressure.critical`.
 
 ## Commands And Tools
@@ -187,6 +191,7 @@ Key event kinds:
 - `external-memory-mirror-write` — metadata-only external provider mirror-write audit.
 - `session-compaction-forked` — best-effort parent-side lineage/audit event when preserving semantic compaction creates a child.
 - `memory-curation` — checkpoint trigger/status, source counts, extracted fact count, operation count, and warning metadata without raw candidate content.
+- background finalization status — profile-scoped pending/running/retrying/failed queue counts from `memory status` and `gateway status`, without message content.
 
 Compression command output reports message counts, token estimates, optional focus topic, fallback status, and warnings.
 

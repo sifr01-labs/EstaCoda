@@ -30,7 +30,7 @@ Sessions do not own persistent memory files. `USER.md`, `MEMORY.md`, and `SOUL.m
 
 Sessions are separate by default. A CLI session and a Telegram session for the same user do not share context automatically. If you want a Telegram chat to continue a CLI session, you must attach it explicitly.
 
-Profile isolation is strict. A session created under profile `work` cannot see sessions created under profile `personal`, even if both are on the same machine. The session DB is scoped to the profile directory.
+Profile isolation is strict. A session created under profile `work` cannot see sessions created under profile `personal`, even if both are on the same machine. Sessions share the global `sessions.sqlite` file, but every access is scoped by `profile_id`.
 
 ---
 
@@ -75,6 +75,7 @@ Inside an active CLI session:
 |---------|---------|
 | `/sessions` | List active sessions |
 | `/switch <session-id>` | Switch to another session |
+| `/new` | Start a fresh session |
 | `/reset` | Start a fresh session |
 
 Gateway channels support a subset of session commands:
@@ -92,31 +93,39 @@ Gateway channels support a subset of session commands:
 
 `/detach` creates a new independent session for that surface. It does not merge histories or messages.
 
+## Background Finalization
+
+Starting a new session should feel immediate. For CLI `/new` and `/reset`, EstaCoda creates the fresh runtime first, then durably queues the old session for memory curation. `/exit`, idle `Ctrl+C`, authorized channel `/new` or `/reset`, and successful one-shot prompts use the same queue. Active-turn `Ctrl+C` only cancels the current turn and does not finalize the session.
+
+The user waits only for the queue row to be committed, not for extraction or memory writes. A managed gateway service for the selected profile processes the job in the background. If the service is not running, the job remains in global `~/.estacoda/sessions.sqlite` until the gateway runs again.
+
+Finalization captures an immutable last-message cutoff. It cannot include messages later appended to a resumed session, and its queue metadata does not duplicate transcript content. Check `estacoda memory status` or `estacoda gateway status` for `pending`, `running`, `retrying`, and `failed` counts.
+
 ---
 
 ## State and Files
 
-Session state lives in the selected profile directory:
+Session persistence is global but profile-scoped:
 
 ```
-~/.estacoda/profiles/<profile-id>/
-  sessions.db          # SQLite session database
-  cli-session-store.json  # Active session pointer for CLI resume
+~/.estacoda/
+  sessions.sqlite      # SQLite sessions, messages, events, and finalization queue
+  cli-sessions.json    # Active CLI session pointers keyed by workspace
 ```
 
-The session DB is SQLite. It stores messages, events, compression state, and surface pointers. If the session DB is missing or corrupted, sessions cannot be listed, recalled, or resumed.
+The session DB is SQLite. Session and finalization rows carry `profile_id` scope; the global location does not permit cross-profile reads. It stores messages, events, compression state, and durable background-finalization metadata. Surface pointers remain in profile-local gateway state. If the session DB is missing or corrupted, sessions cannot be listed, recalled, or resumed.
 
 ---
 
 ## Failure Modes
 
-**Stale session:** A session resumed from `cli-session-store.json` may reference an old profile or workspace. If the profile has changed, the session may load with stale context. Use `/reset` or `estacoda sessions current` to inspect.
+**Stale session:** A session resumed from `cli-sessions.json` may reference an old profile or workspace. If the profile has changed, the session may load with stale context. Use `/reset` or `estacoda sessions current` to inspect.
 
 **Wrong profile:** Sessions are profile-scoped. If you switch profiles with `estacoda profile use <name>`, existing sessions from the previous profile are no longer visible. They are not deleted; they belong to the other profile.
 
 **Missing session:** If a session ID does not exist in the current profile's session DB, commands return `session not found`. Check `estacoda sessions list` and verify the active profile.
 
-**Session DB issues:** If `sessions.db` is corrupted or locked, session commands fail. The CLI may fall back to an in-memory session. In that case, persistence, recall, and attach/detach are unavailable. Restart the CLI and check file permissions.
+**Session DB issues:** If `sessions.sqlite` is corrupted or locked, session commands fail. The CLI may fall back to an in-memory session. In that case, persistence, recall, attach/detach, and queued finalization are unavailable. Restart the CLI and check file permissions.
 
 **Attach/detach mismatch:** Attaching a surface to a session does not merge histories. It only means future messages from that surface go to that session. If you expected merged context, you will not get it.
 

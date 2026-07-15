@@ -8,6 +8,10 @@ import { getWhatsAppGatewayDiagnostics } from "../channels/whatsapp-diagnostics.
 import { CronStore } from "../cron/cron-store.js";
 import { CronExecutionStore } from "../cron/cron-execution-store.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
+import {
+  SessionFinalizationQueue,
+  type SessionFinalizationQueueSummary,
+} from "../session/session-finalization-queue.js";
 import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 import { WorkspaceApprovalController } from "../security/workspace-approval-controller.js";
 import { GatewayApprovalQueue } from "../gateway/approval-queue.js";
@@ -170,10 +174,12 @@ export async function runGatewayStatus(
 
   let executionStore: CronExecutionStore | undefined;
   let executionDb: { close(): void } | undefined;
+  let sessionFinalization: SessionFinalizationQueueSummary | undefined;
   try {
-    const db = openDefaultSQLiteDatabase({ path: globalPaths.sessionsSqlitePath });
-    executionDb = db;
-    executionStore = new CronExecutionStore({ db });
+    const sessionDb = await createSQLiteSessionDB({ path: globalPaths.sessionsSqlitePath });
+    executionDb = sessionDb;
+    executionStore = new CronExecutionStore({ db: sessionDb.db });
+    sessionFinalization = new SessionFinalizationQueue({ db: sessionDb.db }).summarize(selected.profileId);
   } catch { /* ignore */ }
 
   let recentCronFailures: Awaited<ReturnType<CronExecutionStore["recentFailures"]>> = [];
@@ -272,6 +278,7 @@ export async function runGatewayStatus(
     identityLocks,
     runtimeState: runtimeStateValid ? runtimeState : undefined,
     runtimeCacheState: runtimeCacheStateTrustworthy ? rawRuntimeCacheState : undefined,
+    sessionFinalization,
   };
 
   const viewModel = buildGatewayStatusViewModel(data);

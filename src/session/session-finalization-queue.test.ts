@@ -188,6 +188,51 @@ describe("SessionFinalizationQueue", () => {
     });
   });
 
+  it("summarizes fresh, active, retrying, expired, and failed work without message content", async () => {
+    for (const id of ["fresh", "running", "retry", "expired", "failed"] as const) {
+      await db.createSession({ id, profileId: "profile-a" });
+      await db.appendMessage({ id: `${id}-message`, sessionId: id, role: "user", content: `private ${id}` });
+      queue().enqueue({ profileId: "profile-a", sessionId: id, reason: "cli-exit" });
+    }
+    const active = queue().claimNext({ profileId: "profile-a", ownerId: "worker", leaseMs: 10_000 });
+    expect(active).toBeDefined();
+    now = new Date("2030-01-01T00:00:11.000Z");
+    const expiredSummary = queue().summarize("profile-a");
+    expect(expiredSummary.retrying).toBe(1);
+    const expired = queue().claimNext({ profileId: "profile-a", ownerId: "worker", leaseMs: 10_000 });
+    expect(expired).toBeDefined();
+    expect(queue().retry({
+      id: expired!.id,
+      profileId: "profile-a",
+      ownerId: "worker",
+      errorCode: "worker-stopped",
+      delayMs: 1_000,
+    })).toBe(true);
+    const next = queue().claimNext({ profileId: "profile-a", ownerId: "worker", leaseMs: 10_000 });
+    expect(next).toBeDefined();
+    expect(queue().fail({
+      id: next!.id,
+      profileId: "profile-a",
+      ownerId: "worker",
+      errorCode: "curation-failed",
+    })).toBe(true);
+    const running = queue().claimNext({ profileId: "profile-a", ownerId: "worker", leaseMs: 10_000 });
+    expect(running).toBeDefined();
+
+    expect(queue().summarize("profile-a")).toEqual({
+      pending: 1,
+      running: 1,
+      retrying: 2,
+      failed: 1,
+    });
+    expect(queue().summarize("profile-b")).toEqual({
+      pending: 0,
+      running: 0,
+      retrying: 0,
+      failed: 0,
+    });
+  });
+
   it("rejects free-form outcome and error text", async () => {
     await db.createSession({ id: "session-1", profileId: "profile-a" });
     const pending = queue().enqueue({ profileId: "profile-a", sessionId: "session-1", reason: "cli-exit" });

@@ -109,8 +109,13 @@ Curation runs at configured natural checkpoints:
 - every `memory.curation.checkpointEveryTurns` completed root-session turns
 - `/compact` and session compaction when enabled
 - `/handoff` when enabled
-- runtime dispose when enabled and minimum message/interval gates pass
 - explicit `memory populate` or `/memory populate`
+
+When a session ends semantically, curation is queued as durable background work. This happens for CLI `/new`, `/reset`, `/exit`, idle `Ctrl+C`, authorized channel `/new` and `/reset`, and successful one-shot prompts. Active-turn `Ctrl+C` only cancels the current turn. Runtime cleanup caused by config refresh, cache eviction, cron work, or generic disposal does not end the session and does not queue curation.
+
+Starting the next session or exiting waits only for a small database enqueue. It does not wait for model extraction or memory writes. The managed gateway service processes the job in the background for the selected profile. If the service is stopped, the job remains durable in `~/.estacoda/sessions.sqlite` and runs when that profile's gateway next starts.
+
+Each job records an immutable message cutoff plus bounded operational metadata, never a copy of the transcript. Finalization cannot absorb later messages added to a resumed session. Use `estacoda memory status` or `estacoda gateway status` to inspect profile-scoped `pending`, `running`, `retrying`, and `failed` counts.
 
 When curation writes memory, it targets `USER.md` or `MEMORY.md`. It does not write `SOUL.md`, shared memory, `AGENTS.md`, or session history. Auto-writes are recorded in curation history and runtime/session events; they are visible without interrupting every turn.
 

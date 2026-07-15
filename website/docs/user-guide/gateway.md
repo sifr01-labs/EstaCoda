@@ -19,6 +19,7 @@ If you only use the CLI, you do not need the gateway. The moment you want Telegr
 - Maintains a durable pending-approval queue with a five-minute TTL.
 - Routes operator slash commands (`/status`, `/approve`, `/model`, `/voice`, `/stop`, etc.) before they reach the agent.
 - Rebuilds the runtime from a fresh config snapshot each turn so MCP and provider changes are visible without a full restart.
+- Processes durable session-finalization jobs for its selected profile so session-ending memory curation does not delay the next session or CLI exit.
 - Runs diagnostics and reports readiness per channel.
 
 ## Profile binding
@@ -156,11 +157,13 @@ When an active turn has running subagents, interrupt-mode busy policy queues ord
 ## Diagnostics
 
 ```bash
-estacoda gateway status      # Full status: channels, approvals, cron, service manager
+estacoda gateway status      # Full status: channels, approvals, cron, memory finalization, service manager
 estacoda gateway diagnose    # Per-channel readiness check; exits 1 on warnings
 ```
 
 `gateway diagnose` checks token presence, host reachability, allowlist configuration, the WhatsApp unofficial-API gate, isolated WhatsApp bridge/package readiness, and cron directory permissions. Baileys and WhatsApp-specific Boom handling stay quarantined inside the bridge package; the root runtime does not depend on them directly.
+
+`gateway status` includes profile-scoped memory-finalization counts: `pending`, `running`, `retrying`, and `failed`. The queue contains cutoffs and bounded operational metadata, not transcript content. A running managed gateway normally drains it in the background; stopped services leave jobs durable until the gateway starts again.
 
 ## Service management (overview)
 

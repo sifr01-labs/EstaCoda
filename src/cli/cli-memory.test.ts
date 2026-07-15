@@ -9,6 +9,7 @@ import { resolveMemoryIndexStorePath } from "../memory/memory-index-store.js";
 import { MemoryCurationStore, memoryCurationStorePath } from "../memory/memory-curation-store.js";
 import { writeSharedMemory } from "../memory/shared-memory.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
+import { SessionFinalizationQueue } from "../session/session-finalization-queue.js";
 import { runCliCommand } from "./cli.js";
 
 const tempDirs: string[] = [];
@@ -26,6 +27,30 @@ afterEach(async () => {
 });
 
 describe("CLI memory commands", () => {
+  it("memory status reports profile-scoped background finalization health", async () => {
+    const homeDir = await makeTempHome();
+    const sessionDb = await createSQLiteSessionDB({
+      path: resolveGlobalStateHome({ homeDir }).sessionsSqlitePath,
+    });
+    await sessionDb.createSession({ id: "finished", profileId: "default" });
+    await sessionDb.appendMessage({ id: "m1", sessionId: "finished", role: "user", content: "private" });
+    new SessionFinalizationQueue({ db: sessionDb.db }).enqueue({
+      profileId: "default",
+      sessionId: "finished",
+      reason: "cli-exit",
+    });
+    sessionDb.close();
+
+    const result = await runMemoryCommand(homeDir, ["memory", "status"]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("backgroundFinalizationPending: 1");
+    expect(result.output).toContain("backgroundFinalizationRunning: 0");
+    expect(result.output).toContain("backgroundFinalizationRetrying: 0");
+    expect(result.output).toContain("backgroundFinalizationFailed: 0");
+    expect(result.output).not.toContain("private");
+  });
+
   it("memory index path outputs profile-state memory-index.sqlite", async () => {
     const homeDir = await makeTempHome();
     const result = await runMemoryCommand(homeDir, ["memory", "index", "path"]);

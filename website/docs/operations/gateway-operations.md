@@ -40,7 +40,7 @@ estacoda gateway start --system   # Start installed system-scope service.
 
 `gateway run` is the foreground/debug path. Use it when you want logs attached to the current terminal and no service manager in the loop.
 
-`gateway run --dry-run` checks adapter readiness, state directory writability, and gateway lock state without starting adapters or polling remote APIs. Use it to validate configuration before committing to a live process. `gateway run --once` performs one supervisor pass and exits.
+`gateway run --dry-run` checks adapter readiness, state directory writability, and gateway lock state without starting adapters or polling remote APIs. Use it to validate configuration before committing to a live process. `gateway run --once` performs one supervisor pass, including at most one eligible session-finalization job, and exits.
 
 `gateway start` starts an installed service. It defaults to the selected profile's user-scope service. `gateway start --system` controls only the system service. If only a system service exists and `--system` is omitted, the command fails closed and tells the operator to rerun with `--system`.
 
@@ -103,6 +103,8 @@ Operational notes:
 - Source-mode installs hardcode the absolute workspace path. If the repo moves, uninstall and reinstall.
 - Generated services invoke `gateway run --profile <id>`.
 - `gateway start`, `gateway stop`, and `gateway restart` default to the installed user service. Use `--system` for an installed system service.
+- The supervisor claims durable memory-finalization work only for its selected profile. One profile lease serializes background curation and operator memory writes.
+- Graceful shutdown aborts active finalization work; its lease expires and the durable job becomes eligible for bounded retry by the next running gateway.
 
 ## Diagnostics
 
@@ -130,9 +132,12 @@ Returns exit code 1 if any warnings exist.
 - Active surface pointers
 - Pending approvals count
 - Cron job summary and recent failures
+- Memory-finalization queue counts: pending, running, retrying, and failed
 - Recent delivery errors
 - Missing config/env warnings
 - Bounded active-subagent summaries when the active runtime exposes delegated child work
+
+Session-finalization rows live in global `~/.estacoda/sessions.sqlite` with `profile_id` scope and an immutable message cutoff. They store no transcript copy. If the managed service is stopped, queued work stays durable; it is not tied to the next interactive CLI launch.
 
 ## Channel enable and disable
 

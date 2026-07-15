@@ -209,9 +209,9 @@ Memory config controls lexical retrieval, the derived local index, and proactive
 | `curation.checkpointEveryTurns` | `25` | Completed root-session turns between background curation checkpoints. |
 | `curation.auditOnCompact` | `true` | Run curation before compact checkpoints. |
 | `curation.auditOnHandoff` | `true` | Run curation before handoff checkpoints. |
-| `curation.auditOnRuntimeDispose` | `true` | Run curation when the runtime is disposed if the dispose gates pass. |
-| `curation.runtimeDisposeMinNewMessages` | `4` | Minimum new messages before runtime-dispose curation. |
-| `curation.runtimeDisposeMinIntervalMinutes` | `15` | Minimum interval between runtime-dispose curation runs. |
+| `curation.auditOnRuntimeDispose` | `true` | Compatibility key that enables durable curation at semantic session-ending boundaries. Generic runtime disposal does not trigger it. |
+| `curation.runtimeDisposeMinNewMessages` | `4` | Compatibility key for the minimum new messages before queued session-finalization curation. |
+| `curation.runtimeDisposeMinIntervalMinutes` | `15` | Compatibility key for the minimum interval between queued session-finalization curation runs. |
 | `curation.autoApplyMaxRisk` | `low` | Highest candidate risk that may auto-apply. |
 | `curation.autoApplyMinConfidence` | `0.7` | Minimum extracted-fact confidence for auto-apply. |
 | `curation.autoWriteVisibility` | `activity` | Visibility level for auto-write notices/events. |
