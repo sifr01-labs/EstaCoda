@@ -1,9 +1,8 @@
 import type { FileChangePreviewViewModel } from "./view-model.js";
-import type { SessionCompressionTrigger } from "./session.js";
+import type { SessionCompressionTrigger, SessionContextWindowUsage } from "./session.js";
 import type {
   ProviderFinishReason,
   ProviderReasoningMetadata,
-  ProviderRouteRole,
   ProviderUsage
 } from "./provider.js";
 import type {
@@ -111,15 +110,10 @@ export type RuntimeEvent =
       source: "live-estimate" | "assembled-prompt";
       stage: ContextEstimateStage;
     }
-  | {
+  | (SessionContextWindowUsage & {
       kind: "context-window-usage";
-      usedTokens: number;
-      totalTokens: number;
-      provider: string;
-      model: string;
       source: "provider-actual";
-      routeRole?: ProviderRouteRole;
-    }
+    })
   | {
       /** @deprecated Compatibility event for consumers that have not migrated to the split context contracts. */
       kind: "context-usage";

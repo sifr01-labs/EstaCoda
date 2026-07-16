@@ -1,5 +1,5 @@
 import type { ContextEstimateStage, RuntimeEventSink } from "../contracts/runtime-event.js";
-import type { ProviderRouteRole } from "../contracts/provider.js";
+import type { SessionContextWindowUsage } from "../contracts/session.js";
 import { emit } from "../utils/runtime-helpers.js";
 
 export async function emitContextEstimateEvents(
@@ -25,13 +25,7 @@ export async function emitContextEstimateEvents(
 
 export async function emitContextWindowUsageEvents(
   sink: RuntimeEventSink | undefined,
-  input: {
-    usedTokens: number;
-    totalTokens: number;
-    provider: string;
-    model: string;
-    routeRole?: ProviderRouteRole;
-  }
+  input: SessionContextWindowUsage
 ): Promise<void> {
   await emit(sink, {
     kind: "context-window-usage",

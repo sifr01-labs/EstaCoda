@@ -31,6 +31,7 @@ import type { ProviderRegistry } from "../providers/provider-registry.js";
 import type { SessionCompressionService } from "../prompt/session-compression-service.js";
 import type { SessionCompressionConfig } from "../config/runtime-config.js";
 import type { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
+import { loadSessionContextWindowUsage } from "../session/session-context-window-usage.js";
 import type { SkillEvolutionStore } from "../skills/skill-evolution.js";
 import type { ChangeManifestStore } from "../skills/change-manifest-store.js";
 import type { SkillLearningManager } from "../skills/skill-learning.js";
@@ -275,6 +276,11 @@ export class AgentLoopBuilder {
     const substrate = this.#substrate;
     const routes = input.providerRoutes ?? substrate.routes;
     const sessionRuntimeContext = input.sessionRuntimeContext ?? createSessionRuntimeContext(input.sessionId);
+    const initialContextWindowUsage = await loadSessionContextWindowUsage({
+      sessionDb: input.sessionDb,
+      sessionId: input.sessionId,
+      profileId: substrate.profileId
+    });
     const toolRegistry = new ToolRegistry();
     const runtimeToolContext = buildRuntimeToolContext({
       workspaceRoot: substrate.workspaceRoot,
@@ -511,7 +517,8 @@ export class AgentLoopBuilder {
         ...DEFAULT_PROVIDER_TURN_BUDGETS,
         ...substrate.executionControls?.providerBudgets
       },
-      providerRequestDefaults: substrate.executionControls?.providerRequestDefaults
+      providerRequestDefaults: substrate.executionControls?.providerRequestDefaults,
+      initialContextWindowUsage
     });
     const skillPlaybookRunner = (this.#factories.skillPlaybookRunner ?? ((options) => new SkillPlaybookRunner(options)))({
       toolExecutor,

@@ -488,6 +488,38 @@ describe("createRuntime token branding", () => {
     }
   });
 
+  it("exposes restored provider actual context usage for the active session", async () => {
+    const options = await minimalRuntimeOptions();
+    const sessionDb = new InMemorySessionDB();
+    await sessionDb.createSession({ id: "resumed-context-session", profileId: "default" });
+    await sessionDb.appendEvent("resumed-context-session", {
+      kind: "context-window-usage",
+      usedTokens: 7_500,
+      totalTokens: 128_000,
+      provider: "openai",
+      model: "gpt-test",
+      routeRole: "primary"
+    });
+    const runtime = await createRuntime({
+      ...options,
+      sessionDb,
+      sessionId: "resumed-context-session"
+    });
+
+    try {
+      expect(runtime.currentContextWindowUsage).toBeDefined();
+      await expect(runtime.currentContextWindowUsage!()).resolves.toEqual({
+        usedTokens: 7_500,
+        totalTokens: 128_000,
+        provider: "openai",
+        model: "gpt-test",
+        routeRole: "primary"
+      });
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("exposes a memory curation checkpoint on the runtime", async () => {
     const options = await minimalRuntimeOptions();
     const sessionDb = new InMemorySessionDB();

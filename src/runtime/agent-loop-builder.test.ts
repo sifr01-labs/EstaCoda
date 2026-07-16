@@ -86,6 +86,44 @@ describe("AgentLoopBuilder", () => {
     expect(first.agentLoop).not.toBe(second.agentLoop);
   });
 
+  it("seeds each provider loop from its own persisted session usage", async () => {
+    const captured: unknown[] = [];
+    const harness = await createBuilderHarness({
+      factories: {
+        providerTurnLoop(options) {
+          captured.push(options.initialContextWindowUsage);
+          return { run: vi.fn() } as never;
+        },
+        agentLoop: () => ({ handle: vi.fn() }) as never
+      }
+    });
+    await harness.sessionDb.createSession({ id: "session-a", profileId: "default" });
+    await harness.sessionDb.createSession({ id: "session-b", profileId: "default" });
+    await harness.sessionDb.appendEvent("session-a", {
+      kind: "context-window-usage",
+      usedTokens: 1_000,
+      totalTokens: 8_000,
+      provider: "openai",
+      model: "model-a"
+    });
+    await harness.sessionDb.appendEvent("session-b", {
+      kind: "context-window-usage",
+      usedTokens: 2_000,
+      totalTokens: 16_000,
+      provider: "anthropic",
+      model: "model-b",
+      routeRole: "fallback"
+    });
+
+    await harness.build("session-a");
+    await harness.build("session-b");
+
+    expect(captured).toEqual([
+      { usedTokens: 1_000, totalTokens: 8_000, provider: "openai", model: "model-a" },
+      { usedTokens: 2_000, totalTokens: 16_000, provider: "anthropic", model: "model-b", routeRole: "fallback" }
+    ]);
+  });
+
   it("does not mutate an existing built registry when building another filtered session", async () => {
     const mcpTool = registeredTool("mcp.inspect", ["research"]);
     const harness = await createBuilderHarness({ mcpTools: [mcpTool] });
@@ -751,6 +789,7 @@ async function createBuilderHarness(input: {
   return {
     builder,
     fileStateTracker,
+    sessionDb,
     workspaceRoot,
     stateRoot: join(homeDir, ".estacoda"),
     async build(sessionId: string, overrides: Partial<Parameters<AgentLoopBuilder["buildSession"]>[0]> = {}) {

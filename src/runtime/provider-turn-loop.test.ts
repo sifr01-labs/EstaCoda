@@ -1086,6 +1086,64 @@ describe("ProviderTurnLoop semantic session compression", () => {
     expect(loop.lastActualPromptTokens()).toBe(123);
   });
 
+  it("seeds actual prompt tracking from resumed session usage", async () => {
+    const harness = await createCompressionHarness();
+    const loop = harness.loop({
+      initialContextWindowUsage: {
+        usedTokens: 4_200,
+        totalTokens: 128_000,
+        provider: "test-provider",
+        model: "test-model",
+        routeRole: "primary"
+      }
+    });
+
+    expect(loop.lastActualPromptTokens()).toBe(4_200);
+  });
+
+  it("retains resumed actual usage when the next provider response omits usage", async () => {
+    const harness = await createCompressionHarness();
+    const noUsageExecutor = {
+      complete: vi.fn(async (): Promise<ProviderExecutionResult> => ({
+        ok: true,
+        response: {
+          ok: true,
+          content: "response without usage",
+          provider: primaryRoute.provider,
+          model: primaryRoute.id
+        },
+        fallbackUsed: false,
+        attempts: [{
+          provider: primaryRoute.provider,
+          model: primaryRoute.id,
+          ok: true,
+          content: "response without usage"
+        }],
+        route: primaryRoute,
+        attemptedRouteIndex: 0,
+        routeRole: "primary",
+        toolCalls: []
+      }))
+    } as unknown as ProviderExecutor;
+    const loop = harness.loop({
+      providerExecutor: noUsageExecutor,
+      initialContextWindowUsage: {
+        usedTokens: 4_200,
+        totalTokens: 128_000,
+        provider: "test-provider",
+        model: "test-model",
+        routeRole: "primary"
+      }
+    });
+
+    await runBasicProviderTurn(loop);
+
+    expect(loop.lastActualPromptTokens()).toBe(4_200);
+    expect((await harness.sessionDb.listEvents(harness.sessionId)).filter((event) =>
+      event.kind === "context-window-usage"
+    )).toEqual([]);
+  });
+
   it("emits split context events alongside legacy compatibility events", async () => {
     const harness = await createCompressionHarness();
     const events: RuntimeEvent[] = [];
@@ -1133,6 +1191,13 @@ describe("ProviderTurnLoop semantic session compression", () => {
         source: "provider-actual"
       }
     ]));
+    await expect(harness.sessionDb.listEvents(harness.sessionId)).resolves.toContainEqual({
+      kind: "context-window-usage",
+      usedTokens: 123,
+      totalTokens: mockModel.contextWindowTokens,
+      provider: "test-provider",
+      model: "test-model"
+    });
   });
 
   it("uses the successful fallback route context window for provider actual usage", async () => {
@@ -1184,6 +1249,14 @@ describe("ProviderTurnLoop semantic session compression", () => {
       filled: 456,
       total: fallbackRoute.profile.contextWindowTokens,
       source: "provider-actual"
+    });
+    await expect(harness.sessionDb.listEvents(harness.sessionId)).resolves.toContainEqual({
+      kind: "context-window-usage",
+      usedTokens: 456,
+      totalTokens: fallbackRoute.profile.contextWindowTokens,
+      provider: fallbackRoute.provider,
+      model: fallbackRoute.id,
+      routeRole: "fallback"
     });
   });
 
@@ -2496,6 +2569,9 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(actualEvents.every((event) =>
       event.totalTokens === primaryRoute.profile.contextWindowTokens && event.routeRole === "primary"
     )).toBe(true);
+    const persistedUsage = (await harness.sessionDb.listEvents(harness.sessionId))
+      .filter((event) => event.kind === "context-window-usage");
+    expect(persistedUsage.map((event) => event.usedTokens)).toEqual([100, 140]);
   });
 });
 

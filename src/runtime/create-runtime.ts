@@ -48,8 +48,9 @@ import { createOpenAIResponsesProvider } from "../providers/openai-responses-pro
 import { ProviderRegistry } from "../providers/provider-registry.js";
 import { getDefaultApiKeyEnv, getProviderMetadata } from "../providers/provider-metadata.js";
 import type { SecurityApprovalMode, SecurityPolicy, SecurityRequest } from "../contracts/security.js";
-import type { SessionDB } from "../contracts/session.js";
+import type { SessionContextWindowUsage, SessionDB } from "../contracts/session.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
+import { loadSessionContextWindowUsage } from "../session/session-context-window-usage.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import {
   SessionFinalizationQueue,
@@ -218,6 +219,7 @@ export type Runtime = {
   skills(): SkillCatalogEntry[];
   resolveSkill?(name: string): LoadedSkill | SkillDefinition | undefined;
   latestResumeNote(): Promise<string | undefined>;
+  currentContextWindowUsage?(): Promise<SessionContextWindowUsage | undefined>;
   inspectMemoryPromotions(): Promise<MemoryPromotionRecord[]>;
   recallSession?(query: string): Promise<SessionRecallResult>;
   compactSession?(input?: {
@@ -1051,6 +1053,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       const cancelled = [...events].reverse().find((event) => event.kind === "agent-cancelled" && event.resumeNote !== undefined);
 
       return cancelled?.kind === "agent-cancelled" ? cancelled.resumeNote : undefined;
+    },
+    async currentContextWindowUsage() {
+      return await loadSessionContextWindowUsage({
+        sessionDb,
+        sessionId: sessionRuntimeContext.currentSessionId(),
+        profileId
+      });
     },
     async inspectMemoryPromotions() {
       return await memoryProvider.inspectPromotions?.() ?? [];

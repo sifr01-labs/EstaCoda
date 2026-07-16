@@ -15,7 +15,13 @@ import type {
 } from "../contracts/provider.js";
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SecurityDecision } from "../contracts/security.js";
-import type { ReplacementSessionMessage, SessionDB, SessionMessage, StructuredToolHistoryDiagnosticEvent } from "../contracts/session.js";
+import type {
+  ReplacementSessionMessage,
+  SessionContextWindowUsage,
+  SessionDB,
+  SessionMessage,
+  StructuredToolHistoryDiagnosticEvent
+} from "../contracts/session.js";
 import type { LoadedSkill, SelectedSkillPromptContent, SkillDefinition, SkillCatalogEntry } from "../contracts/skill.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
@@ -44,6 +50,7 @@ import type { SkillSetupContext } from "./agent-loop.js";
 import type { SessionRuntimeContext } from "./session-runtime-context.js";
 import { emit, isAborted } from "../utils/runtime-helpers.js";
 import { emitContextEstimateEvents, emitContextWindowUsageEvents } from "./context-usage-events.js";
+import { normalizeSessionContextWindowUsage } from "../session/session-context-window-usage.js";
 
 const MAX_PROVIDER_REPLAY_ECHO_CHARS = 32_000;
 
@@ -86,6 +93,7 @@ export type ProviderTurnLoopOptions = {
   } | undefined;
   budgets: ProviderTurnLoopBudgets;
   providerRequestDefaults?: ProviderTurnLoopRequestDefaults;
+  initialContextWindowUsage?: SessionContextWindowUsage;
 };
 
 export class ProviderTurnLoop {
@@ -129,6 +137,7 @@ export class ProviderTurnLoop {
     this.#agentProfile = options.agentProfile;
     this.#budgets = options.budgets;
     this.#providerRequestDefaults = options.providerRequestDefaults ?? {};
+    this.#lastActualPromptTokens = options.initialContextWindowUsage?.usedTokens;
   }
 
   canRunProvider(): boolean {
@@ -603,14 +612,7 @@ export class ProviderTurnLoop {
       onSegmentBreak: input.onSegmentBreak
     });
     if (execution.response?.usage?.inputTokens !== undefined) {
-      this.#lastActualPromptTokens = execution.response.usage.inputTokens;
-      await emitContextWindowUsageEvents(input.onEvent, {
-        usedTokens: normalizeTokenCount(execution.response.usage.inputTokens),
-        totalTokens: contextWindowTokensForExecution(execution, prompt.budget),
-        provider: execution.response.provider,
-        model: execution.response.model,
-        ...(execution.routeRole === undefined ? {} : { routeRole: execution.routeRole })
-      });
+      await this.#recordContextWindowUsage(execution, prompt.budget, input.onEvent);
     }
 
     await this.#sessionDb.appendEvent(this.#currentSessionId(), {
@@ -742,14 +744,7 @@ export class ProviderTurnLoop {
       onSegmentBreak: input.onSegmentBreak
     });
     if (execution.response?.usage?.inputTokens !== undefined) {
-      this.#lastActualPromptTokens = execution.response.usage.inputTokens;
-      await emitContextWindowUsageEvents(input.onEvent, {
-        usedTokens: normalizeTokenCount(execution.response.usage.inputTokens),
-        totalTokens: contextWindowTokensForExecution(execution, prompt.budget),
-        provider: execution.response.provider,
-        model: execution.response.model,
-        ...(execution.routeRole === undefined ? {} : { routeRole: execution.routeRole })
-      });
+      await this.#recordContextWindowUsage(execution, prompt.budget, input.onEvent);
     }
 
     const continuationEvent = {
@@ -1081,6 +1076,35 @@ export class ProviderTurnLoop {
 
   lastActualPromptTokens(): number | undefined {
     return this.#lastActualPromptTokens;
+  }
+
+  async #recordContextWindowUsage(
+    execution: ProviderExecutionResult,
+    budget: PromptBudgetReport,
+    sink: RuntimeEventSink | undefined
+  ): Promise<void> {
+    const inputTokens = execution.response?.usage?.inputTokens;
+    if (inputTokens === undefined || execution.response === undefined) {
+      return;
+    }
+
+    const usedTokens = normalizeTokenCount(inputTokens);
+    this.#lastActualPromptTokens = usedTokens;
+    const usage = normalizeSessionContextWindowUsage({
+      usedTokens,
+      totalTokens: contextWindowTokensForExecution(execution, budget),
+      provider: execution.response.provider,
+      model: execution.response.model,
+      ...(execution.routeRole === undefined ? {} : { routeRole: execution.routeRole })
+    });
+    if (usage === undefined) {
+      return;
+    }
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), {
+      kind: "context-window-usage",
+      ...usage
+    });
+    await emitContextWindowUsageEvents(sink, usage);
   }
 
   #currentSessionId(): string {

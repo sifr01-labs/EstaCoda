@@ -25,6 +25,7 @@ import type {
   ProviderId,
   ProviderLoopRuntimeMetadata,
   ProviderReasoningMetadata,
+  ProviderRouteRole,
   ProviderStreamDiagnostics,
   ProviderUsage
 } from "./provider.js";
@@ -156,6 +157,18 @@ export type SessionHistoryCompressedEvent = {
 export type SessionCompressionStateEvent = {
   kind: "session-compression-state";
   state: Partial<SessionCompressionState>;
+};
+
+export type SessionContextWindowUsage = {
+  usedTokens: number;
+  totalTokens: number;
+  provider: string;
+  model: string;
+  routeRole?: ProviderRouteRole;
+};
+
+export type SessionContextWindowUsageEvent = SessionContextWindowUsage & {
+  kind: "context-window-usage";
 };
 
 export type SessionCompactionForkedEvent = {
@@ -339,6 +352,7 @@ export type SessionEvent =
       artifact: ArtifactRecord;
       tool?: string;
     }
+  | SessionContextWindowUsageEvent
   | {
       kind: "provider-completion";
       iteration?: number;
