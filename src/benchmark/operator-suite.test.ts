@@ -194,10 +194,11 @@ function operatorScenarioRuntime(input: {
       });
 
       await request.onEvent?.({
-        kind: "context-usage",
+        kind: "context-estimate",
         filled: 1600,
         total: 4096,
-        source: "assembled-prompt"
+        source: "assembled-prompt",
+        stage: "assembled-prompt"
       });
       await request.onEvent?.({
         kind: "provider-result",

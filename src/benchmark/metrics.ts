@@ -45,7 +45,8 @@ export function aggregateBenchmarkMetrics(
         runtimeSecurityEscalations += 1;
         metrics.securityEscalations = runtimeSecurityEscalations;
         break;
-      case "context-usage":
+      case "context-estimate":
+      case "context-window-usage":
         metrics.contextUsageEvents += 1;
         break;
       case "session-recall-decision":

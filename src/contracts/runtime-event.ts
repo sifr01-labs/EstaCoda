@@ -115,13 +115,6 @@ export type RuntimeEvent =
       source: "provider-actual";
     })
   | {
-      /** @deprecated Compatibility event for consumers that have not migrated to the split context contracts. */
-      kind: "context-usage";
-      filled: number;
-      total: number;
-      source: "live-estimate" | "assembled-prompt" | "provider-actual";
-    }
-  | {
       kind: "session-compacted";
       originalSessionId: string;
       activeSessionId: string;

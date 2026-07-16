@@ -49,7 +49,7 @@ import type { ToolPlanRunner } from "./tool-plan-runner.js";
 import type { SkillSetupContext } from "./agent-loop.js";
 import type { SessionRuntimeContext } from "./session-runtime-context.js";
 import { emit, isAborted } from "../utils/runtime-helpers.js";
-import { emitContextEstimateEvents, emitContextWindowUsageEvents } from "./context-usage-events.js";
+import { emitContextEstimate, emitContextWindowUsage } from "./context-usage-events.js";
 import { normalizeSessionContextWindowUsage } from "../session/session-context-window-usage.js";
 
 const MAX_PROVIDER_REPLAY_ECHO_CHARS = 32_000;
@@ -374,7 +374,7 @@ export class ProviderTurnLoop {
         capturedContentWithHousekeepingTools = execution.response.content;
       }
       if (loopToolExecutions.length > 0 && this.#model !== undefined) {
-        await emitContextEstimateEvents(input.onEvent, {
+        await emitContextEstimate(input.onEvent, {
           filled: normalizeTokenCount(this.#lastPromptTokens + estimateProviderToolFeedbackTokens(loopToolExecutions)),
           total: normalizeTokenCount(this.#model.contextWindowTokens),
           source: "live-estimate",
@@ -1104,7 +1104,7 @@ export class ProviderTurnLoop {
       kind: "context-window-usage",
       ...usage
     });
-    await emitContextWindowUsageEvents(sink, usage);
+    await emitContextWindowUsage(sink, usage);
   }
 
   #currentSessionId(): string {
@@ -1451,7 +1451,7 @@ async function emitAssembledPromptEstimate(
   sink: RuntimeEventSink | undefined,
   budget: PromptBudgetReport
 ): Promise<void> {
-  await emitContextEstimateEvents(sink, {
+  await emitContextEstimate(sink, {
     filled: normalizeTokenCount(budget.estimatedTokens),
     total: normalizeTokenCount(budget.contextWindowTokens),
     source: "assembled-prompt",

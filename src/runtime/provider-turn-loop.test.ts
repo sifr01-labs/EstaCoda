@@ -1144,7 +1144,7 @@ describe("ProviderTurnLoop semantic session compression", () => {
     )).toEqual([]);
   });
 
-  it("emits split context events alongside legacy compatibility events", async () => {
+  it("emits distinct context estimate and provider-actual events", async () => {
     const harness = await createCompressionHarness();
     const events: RuntimeEvent[] = [];
 
@@ -1176,21 +1176,6 @@ describe("ProviderTurnLoop semantic session compression", () => {
       }
     ]);
 
-    const usageEvents = events.filter((event): event is Extract<RuntimeEvent, { kind: "context-usage" }> =>
-      event.kind === "context-usage"
-    );
-    expect(usageEvents).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        source: "assembled-prompt",
-        total: mockModel.contextWindowTokens
-      }),
-      {
-        kind: "context-usage",
-        filled: 123,
-        total: mockModel.contextWindowTokens,
-        source: "provider-actual"
-      }
-    ]));
     await expect(harness.sessionDb.listEvents(harness.sessionId)).resolves.toContainEqual({
       kind: "context-window-usage",
       usedTokens: 123,
@@ -1243,12 +1228,6 @@ describe("ProviderTurnLoop semantic session compression", () => {
       model: fallbackRoute.id,
       source: "provider-actual",
       routeRole: "fallback"
-    });
-    expect(events).toContainEqual({
-      kind: "context-usage",
-      filled: 456,
-      total: fallbackRoute.profile.contextWindowTokens,
-      source: "provider-actual"
     });
     await expect(harness.sessionDb.listEvents(harness.sessionId)).resolves.toContainEqual({
       kind: "context-window-usage",

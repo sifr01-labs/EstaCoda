@@ -2877,7 +2877,6 @@ export function renderRuntimeEvent(
       return undefined;
     case "context-estimate":
     case "context-window-usage":
-    case "context-usage":
       return undefined;
     case "session-compacted":
       return undefined;
@@ -2914,7 +2913,6 @@ function operatorConsoleTransientPhaseForRuntimeEvent(event: RuntimeEvent): stri
       return event.ok || !event.willFallback ? "finalizing" : "provider";
     case "context-estimate":
     case "context-window-usage":
-    case "context-usage":
       return undefined;
     case "session-compacted":
       return "background";

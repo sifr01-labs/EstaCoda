@@ -45,7 +45,8 @@ describe("aggregateBenchmarkMetrics", () => {
       { kind: "tool-result", tool: "file.read", ok: true },
       { kind: "provider-budget-exhausted", budget: "iterations", limit: 5, observed: 6, reason: "loop limit reached" },
       { kind: "security-risk-escalated", from: "read-only-local", to: "workspace-write", reason: "write requested after inspection" },
-      { kind: "context-usage", filled: 1200, total: 4096, source: "assembled-prompt" },
+      { kind: "context-estimate", filled: 1200, total: 4096, source: "assembled-prompt", stage: "assembled-prompt" },
+      { kind: "context-window-usage", usedTokens: 1100, totalTokens: 4096, provider: "openai", model: "gpt-5", source: "provider-actual" },
       {
         kind: "delegation-progress",
         subagentId: "subagent-1",
@@ -81,7 +82,7 @@ describe("aggregateBenchmarkMetrics", () => {
       toolFailures: 2,
       providerBudgetExhaustions: 2,
       securityEscalations: 1,
-      contextUsageEvents: 1,
+      contextUsageEvents: 2,
       estimatedCostUsd: null
     });
   });

@@ -3867,11 +3867,10 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(rendered).not.toContain("context 8.0k/64.0k");
   });
 
-  it("does not publish live estimates or legacy compatibility events as actual usage", async () => {
+  it("does not publish live estimates as actual usage", async () => {
     const rendered = await renderContextUsageRail([[
       { kind: "agent-start", sessionId: "test-session", input: "hello" },
       { kind: "context-estimate", filled: 300, total: 64_000, source: "live-estimate", stage: "input" },
-      { kind: "context-usage", filled: 300, total: 64_000, source: "live-estimate" },
       { kind: "agent-final", text: "Mock response" },
     ]]);
 
@@ -4173,7 +4172,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(afterModelClear).not.toContain("fresh-provider/fresh-model");
   });
 
-  it("keeps the last provider-actual context usage when live estimates arrive", async () => {
+  it("keeps the last provider-actual context usage when estimates arrive", async () => {
     const outputChunks: string[] = [];
     const output = {
       write(chunk: string | Uint8Array): boolean {
@@ -4188,8 +4187,8 @@ describe("runSessionLoop — active turn spinner", () => {
       ...createEventEmittingMockRuntime([
         { kind: "agent-start", sessionId: "test-session", input: "hello" },
         { kind: "context-window-usage", usedTokens: 12_000, totalTokens: 64_000, provider: "mock", model: "mock-model", source: "provider-actual" },
-        { kind: "context-usage", filled: 300, total: 64_000, source: "live-estimate" },
-        { kind: "context-usage", filled: 500, total: 64_000, source: "assembled-prompt" },
+        { kind: "context-estimate", filled: 300, total: 64_000, source: "live-estimate", stage: "input" },
+        { kind: "context-estimate", filled: 500, total: 64_000, source: "assembled-prompt", stage: "assembled-prompt" },
         { kind: "agent-final", text: "Mock response" },
       ]),
       getModelInfo: () => ({

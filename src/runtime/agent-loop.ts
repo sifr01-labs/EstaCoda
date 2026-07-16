@@ -61,7 +61,7 @@ import { estimateMessagesTokensRough, estimateTextTokensRough } from "../prompt/
 import { redactSensitiveText } from "../utils/redaction.js";
 import type { WorkflowRuntimeContext } from "../contracts/workflow-context.js";
 import type { MemoryCurationService } from "../memory/memory-curation-service.js";
-import { emitContextEstimateEvents } from "./context-usage-events.js";
+import { emitContextEstimate } from "./context-usage-events.js";
 
 export type AgentLoopInput = {
   text: string;
@@ -941,7 +941,7 @@ export class AgentLoop {
       return;
     }
 
-    await emitContextEstimateEvents(input.onEvent, {
+    await emitContextEstimate(input.onEvent, {
       filled: Math.max(0, Math.round(await this.#estimateLiveContextTokens(input))),
       total,
       source: "live-estimate",

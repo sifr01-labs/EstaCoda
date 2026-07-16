@@ -401,7 +401,7 @@ async function createAgentLoop(input: {
 }
 
 describe("AgentLoop provider availability gating", () => {
-  it("emits staged context estimates alongside the legacy compatibility event", async () => {
+  it("emits staged context estimates", async () => {
     const { loop } = await createAgentLoop({
       canRunProvider: true,
       runSkillPlaybook: vi.fn(async () => []),
@@ -426,8 +426,6 @@ describe("AgentLoop provider availability gating", () => {
       expect.objectContaining({ source: "live-estimate", stage: "preflight", total: model.contextWindowTokens })
     ]));
     expect(estimates.every((event) => event.filled >= 0)).toBe(true);
-    expect(events.filter((event) => event.kind === "context-usage" && event.source === "live-estimate"))
-      .toHaveLength(estimates.length);
   });
 
   it("passes completed-turn route and outcome context to skill learning", async () => {
