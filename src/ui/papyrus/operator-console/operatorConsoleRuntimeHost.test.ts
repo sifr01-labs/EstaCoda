@@ -34,7 +34,7 @@ describe("OperatorConsoleRuntimeHost", () => {
     expect(state.approvals).toEqual([]);
     expect(state.status).toMatchObject({
       model: { label: "", state: "idle" },
-      context: { usedTokens: 0 },
+      context: {},
       sessionTimer: { elapsedMs: 0 },
     });
   });

@@ -33,7 +33,8 @@ export type StatusRailState = {
     readonly route?: "primary" | "fallback" | "failed";
   };
   readonly context: {
-    readonly usedTokens: number;
+    /** Omitted until the active session has a provider-reported measurement. */
+    readonly usedTokens?: number;
     readonly totalTokens?: number;
     readonly percent?: number;
   };
@@ -410,9 +411,7 @@ export function createDefaultStatusRailState(): StatusRailState {
       label: "",
       state: "idle",
     },
-    context: {
-      usedTokens: 0,
-    },
+    context: {},
     sessionTimer: {
       elapsedMs: 0,
     },

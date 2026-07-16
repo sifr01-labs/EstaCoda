@@ -1059,7 +1059,7 @@ describe("runSessionLoop — user prompt rail behavior", () => {
       sessionId: "20ea8195",
       session: {
         model: "kimi-k2.6 ◐",
-        context: "0 / 262k",
+        context: "-- / 262k",
         workspace: "/tmp",
         security: "open",
         autonomy: "autonomous",
@@ -1085,7 +1085,7 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     expect(plain).toContain("Tips");
     expect(plain).not.toContain("╭─ Tips");
     expect(host.getState().startup).toBeUndefined();
-    expect(host.getState().status.context.usedTokens).toBe(0);
+    expect(host.getState().status.context.usedTokens).toBeUndefined();
     expect(host.getState().status.model.label).not.toContain("kimi-k2.6");
     expect(host.getState().status.model.label).not.toContain("workspace");
     expect(host.getState().status.model.label).not.toContain("autonomous");
@@ -3798,7 +3798,14 @@ describe("runSessionLoop — active turn spinner", () => {
     const runtime = {
       ...createEventEmittingMockRuntime([
         { kind: "agent-start", sessionId: "test-session", input: "hello" },
-        { kind: "context-usage", filled: 1024, total: 64_000, source: "provider-actual" },
+        {
+          kind: "context-window-usage",
+          usedTokens: 1024,
+          totalTokens: 64_000,
+          provider: "mock",
+          model: "mock-model",
+          source: "provider-actual",
+        },
         { kind: "agent-final", text: "Mock response" },
       ]),
       getModelInfo: () => ({
@@ -3831,70 +3838,94 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(rendered).toContain("context 1.0k/64.0k");
   });
 
-  it("uses assembled-prompt context usage when provider actual is unavailable", async () => {
+  it("hydrates the status rail from the active session provider-actual snapshot", async () => {
+    const { raw } = await captureStartupSession({
+      runtime: {
+        ...createMockRuntime(),
+        getModelInfo: contextUsageModelInfo,
+        currentContextWindowUsage: async () => ({
+          usedTokens: 4_200,
+          totalTokens: 64_000,
+          provider: "mock",
+          model: "mock-model",
+          routeRole: "primary",
+        }),
+      },
+    });
+
+    expect(stripAnsi(raw)).toContain("context 4.2k/64.0k");
+  });
+
+  it("does not publish assembled-prompt estimates as context-window usage", async () => {
     const rendered = await renderContextUsageRail([[
       { kind: "agent-start", sessionId: "test-session", input: "hello" },
-      { kind: "context-usage", filled: 8_000, total: 64_000, source: "assembled-prompt" },
+      { kind: "context-estimate", filled: 8_000, total: 64_000, source: "assembled-prompt", stage: "assembled-prompt" },
       { kind: "agent-final", text: "Mock response" },
     ]]);
 
-    expect(rendered).toContain("context 8.0k/64.0k");
+    expect(rendered).toContain("context --/64.0k");
+    expect(rendered).not.toContain("context 8.0k/64.0k");
   });
 
-  it("uses live-estimate context usage when it is the only usage event", async () => {
+  it("does not publish live estimates or legacy compatibility events as actual usage", async () => {
     const rendered = await renderContextUsageRail([[
       { kind: "agent-start", sessionId: "test-session", input: "hello" },
+      { kind: "context-estimate", filled: 300, total: 64_000, source: "live-estimate", stage: "input" },
       { kind: "context-usage", filled: 300, total: 64_000, source: "live-estimate" },
       { kind: "agent-final", text: "Mock response" },
     ]]);
 
-    expect(rendered).toContain("context 300/64.0k");
+    expect(rendered).toContain("context --/64.0k");
+    expect(rendered).not.toContain("context 300/64.0k");
   });
 
-  it("lets assembled-prompt replace an earlier live estimate", async () => {
+  it("provider actual replaces unknown state after estimates in the same turn", async () => {
     const rendered = await renderContextUsageRail([[
       { kind: "agent-start", sessionId: "test-session", input: "hello" },
-      { kind: "context-usage", filled: 300, total: 64_000, source: "live-estimate" },
-      { kind: "context-usage", filled: 8_000, total: 64_000, source: "assembled-prompt" },
-      { kind: "agent-final", text: "Mock response" },
-    ]]);
-
-    expect(rendered).toContain("context 8.0k/64.0k");
-  });
-
-  it("provider-actual replaces earlier assembled-prompt in the same turn", async () => {
-    const rendered = await renderContextUsageRail([[
-      { kind: "agent-start", sessionId: "test-session", input: "hello" },
-      { kind: "context-usage", filled: 8_000, total: 64_000, source: "assembled-prompt" },
-      { kind: "context-usage", filled: 7_500, total: 64_000, source: "provider-actual" },
+      { kind: "context-estimate", filled: 8_000, total: 64_000, source: "assembled-prompt", stage: "assembled-prompt" },
+      {
+        kind: "context-window-usage",
+        usedTokens: 7_500,
+        totalTokens: 64_000,
+        provider: "mock",
+        model: "mock-model",
+        source: "provider-actual",
+      },
       { kind: "agent-final", text: "Mock response" },
     ]]);
 
     expect(rendered).toContain("context 7.5k/64.0k");
   });
 
-  it("lets a new turn estimate replace prior turn provider actual", async () => {
+  it("holds the last provider actual across a usage-less turn", async () => {
     const rendered = await renderContextUsageRail([
       [
         { kind: "agent-start", sessionId: "test-session", input: "hello" },
-        { kind: "context-usage", filled: 1_000, total: 64_000, source: "provider-actual" },
+        {
+          kind: "context-window-usage",
+          usedTokens: 1_000,
+          totalTokens: 64_000,
+          provider: "mock",
+          model: "mock-model",
+          source: "provider-actual",
+        },
         { kind: "agent-final", text: "Mock response" },
       ],
       [
         { kind: "agent-start", sessionId: "test-session", input: "hello again" },
-        { kind: "context-usage", filled: 8_000, total: 64_000, source: "assembled-prompt" },
         { kind: "agent-final", text: "Mock response" },
       ],
     ], ["hello", "hello again", "/exit"]);
 
-    expect(rendered).toContain("context 8.0k/64.0k");
+    const contextRails = rendered.split("\n").filter((line) => line.includes("context "));
+    expect(contextRails.at(-1)).toContain("context 1.0k/64.0k");
   });
 
-  it("updates same-priority context usage within a turn", async () => {
+  it("updates to the latest provider actual within a turn", async () => {
     const rendered = await renderContextUsageRail([[
       { kind: "agent-start", sessionId: "test-session", input: "hello" },
-      { kind: "context-usage", filled: 300, total: 64_000, source: "live-estimate" },
-      { kind: "context-usage", filled: 500, total: 64_000, source: "live-estimate" },
+      { kind: "context-window-usage", usedTokens: 300, totalTokens: 64_000, provider: "mock", model: "mock-model", source: "provider-actual" },
+      { kind: "context-window-usage", usedTokens: 500, totalTokens: 64_000, provider: "mock", model: "mock-model", source: "provider-actual" },
       { kind: "agent-final", text: "Mock response" },
     ]]);
 
@@ -4082,11 +4113,18 @@ describe("runSessionLoop — active turn spinner", () => {
 
   it("clears stale serving provider truth after /model refresh and updates it on the next turn", async () => {
     const outputChunks: string[] = [];
-    const runtime = {
+    const runtime = withModelRoute({
       ...createMockRuntime(),
+      currentContextWindowUsage: async () => ({
+        usedTokens: 12_000,
+        totalTokens: 128_000,
+        provider: "mock",
+        model: "mock-model",
+        routeRole: "primary" as const,
+      }),
       handle: async (): Promise<AgentLoopResponse> =>
         mockResponse({ providerExecution: providerExecutionFallbackSuccess() }),
-    };
+    }, "mock", "mock-model");
     const refreshedRuntime = withModelRoute({
       ...createMockRuntime(),
       sessionDb: runtime.sessionDb,
@@ -4126,6 +4164,7 @@ describe("runSessionLoop — active turn spinner", () => {
       line.includes("fresh-model") && line.includes("idle")
     );
     expect(refreshedIdleRail).toBeDefined();
+    expect(refreshedIdleRail).toContain("context --/128k");
     expect(refreshedIdleRail).not.toContain("fallback(");
     expect(refreshedIdleRail).not.toContain("fallback-model");
     expect(refreshedIdleRail).not.toContain("fresh-provider/fresh-model");
@@ -4148,7 +4187,7 @@ describe("runSessionLoop — active turn spinner", () => {
     const runtime = {
       ...createEventEmittingMockRuntime([
         { kind: "agent-start", sessionId: "test-session", input: "hello" },
-        { kind: "context-usage", filled: 12_000, total: 64_000, source: "provider-actual" },
+        { kind: "context-window-usage", usedTokens: 12_000, totalTokens: 64_000, provider: "mock", model: "mock-model", source: "provider-actual" },
         { kind: "context-usage", filled: 300, total: 64_000, source: "live-estimate" },
         { kind: "context-usage", filled: 500, total: 64_000, source: "assembled-prompt" },
         { kind: "agent-final", text: "Mock response" },
@@ -4235,7 +4274,7 @@ describe("runSessionLoop — active turn spinner", () => {
       ...createMockRuntime(),
       handle: async ({ onEvent }: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
         nowMs = 252_000;
-        onEvent?.({ kind: "context-usage", filled: 32_700, total: 128_000, source: "provider-actual" });
+        onEvent?.({ kind: "context-window-usage", usedTokens: 32_700, totalTokens: 128_000, provider: "mock", model: "gpt-5.5", source: "provider-actual" });
         onEvent?.({ kind: "agent-final", text: "Mock response" });
         return mockResponse();
       },
@@ -4467,6 +4506,13 @@ describe("runSessionLoop — active turn spinner", () => {
       ...createMockRuntime(),
       sessionDb: runtime.sessionDb,
       sessionId: "target-session",
+      currentContextWindowUsage: async () => ({
+        usedTokens: 33_000,
+        totalTokens: 128_000,
+        provider: "mock",
+        model: "gpt-5.5",
+        routeRole: "primary",
+      }),
     });
 
     let promptIndex = 0;
@@ -4491,6 +4537,7 @@ describe("runSessionLoop — active turn spinner", () => {
     const afterSwitch = rendered.slice(rendered.indexOf("Switched this session to an existing session."));
     const switchRail = afterSwitch.split("\n").find((line) => line.includes("idle"));
     expect(switchRail).toBeDefined();
+    expect(switchRail).toContain("context 33.0k/128k");
     expect(switchRail).not.toContain("⧖");
   });
 
@@ -4532,7 +4579,7 @@ describe("runSessionLoop — active turn spinner", () => {
     });
 
     const rendered = stripAnsi(outputChunks.join(""));
-    const resetRail = rendered.split("\n").find((line) => line.includes("context 5.0k/128k") && line.includes("idle"));
+    const resetRail = rendered.split("\n").find((line) => line.includes("context --/128k") && line.includes("idle"));
     expect(resetRail).toBeDefined();
     expect(resetRail).not.toContain("⧖");
   });
@@ -4651,7 +4698,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(failed).not.toContain("Session compaction failed:");
   });
 
-  it("reuses the last known context total when compaction resets without model context window", async () => {
+  it("marks provider usage unknown after compaction while retaining the last known total", async () => {
     const outputChunks: string[] = [];
     const output = {
       write(chunk: string | Uint8Array): boolean {
@@ -4674,7 +4721,7 @@ describe("runSessionLoop — active turn spinner", () => {
       }),
       handle: async ({ onEvent }: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
         nowMs = 312_000;
-        onEvent?.({ kind: "context-usage", filled: 90_000, total: 128_000, source: "provider-actual" });
+        onEvent?.({ kind: "context-window-usage", usedTokens: 90_000, totalTokens: 128_000, provider: "mock", model: "gpt-5.5", source: "provider-actual" });
         onEvent?.({ kind: "agent-final", text: "Mock response" });
         return mockResponse();
       },
@@ -4698,11 +4745,12 @@ describe("runSessionLoop — active turn spinner", () => {
     });
 
     const rendered = stripAnsi(outputChunks.join(""));
-    const resetRail = rendered.split("\n").find((line) => line.includes("context 5.0k/128k") && line.includes("idle"));
+    const resetRail = rendered.split("\n").find((line) => line.includes("context --/128k") && line.includes("idle"));
     expect(resetRail).toBeDefined();
+    expect(rendered.slice(rendered.indexOf("Context Compacted"))).not.toContain("context 5.0k/128k");
   });
 
-  it("resets the completed turn timer after an automatic compaction event", async () => {
+  it("keeps a fresh post-compaction provider actual while resetting the completed turn timer", async () => {
     const outputChunks: string[] = [];
     const output = {
       write(chunk: string | Uint8Array): boolean {
@@ -4724,6 +4772,14 @@ describe("runSessionLoop — active turn spinner", () => {
           rotated: false,
           trigger: "auto",
           postTokens: 5_000,
+        });
+        onEvent?.({
+          kind: "context-window-usage",
+          usedTokens: 6_000,
+          totalTokens: 128_000,
+          provider: "mock",
+          model: "mock-model",
+          source: "provider-actual",
         });
         onEvent?.({ kind: "agent-final", text: "Mock response" });
         return mockResponse();
@@ -4747,7 +4803,7 @@ describe("runSessionLoop — active turn spinner", () => {
     });
 
     const rendered = stripAnsi(outputChunks.join(""));
-    const resetRail = rendered.split("\n").find((line) => line.includes("context 5.0k/128k") && line.includes("idle"));
+    const resetRail = rendered.split("\n").find((line) => line.includes("context 6.0k/128k") && line.includes("idle"));
     expect(resetRail).toBeDefined();
     expect(resetRail).not.toContain("⧖");
   });
@@ -5427,13 +5483,13 @@ describe("runSessionLoop — active turn spinner", () => {
     const runtime = {
       ...createEventEmittingMockRuntime([
         { kind: "agent-start", sessionId: "test-session", input: "hello" },
-        { kind: "context-usage", filled: 1024, total: 64_000, source: "provider-actual" },
+        { kind: "context-window-usage", usedTokens: 1024, totalTokens: 64_000, provider: "mock", model: "mock-model", source: "provider-actual" },
         { kind: "provider-token", provider: "mock", model: "mock-model", text: "raw streamed token should stay hidden" },
         { kind: "agent-final", text: "Final framed response" },
       ]),
       handle: async ({ onEvent }: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
         onEvent?.({ kind: "agent-start", sessionId: "test-session", input: "hello" });
-        onEvent?.({ kind: "context-usage", filled: 1024, total: 64_000, source: "provider-actual" });
+        onEvent?.({ kind: "context-window-usage", usedTokens: 1024, totalTokens: 64_000, provider: "mock", model: "mock-model", source: "provider-actual" });
         onEvent?.({ kind: "provider-token", provider: "mock", model: "mock-model", text: "raw streamed token should stay hidden" });
         onEvent?.({ kind: "agent-final", text: "Final framed response" });
         return {

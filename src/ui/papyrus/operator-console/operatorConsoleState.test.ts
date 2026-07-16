@@ -61,9 +61,7 @@ describe("Papyrus operator console state model", () => {
         label: "",
         state: "idle",
       },
-      context: {
-        usedTokens: 0,
-      },
+      context: {},
       sessionTimer: {
         elapsedMs: 0,
       },

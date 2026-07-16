@@ -63,8 +63,14 @@ describe("Papyrus operator console status rail surface", () => {
 
   it("uses deterministic empty model fallback", () => {
     expect(renderStatusRailSurface(createDefaultStatusRailState(), { width: 80 })).toBe(
-      "model pending ● │ ctx [▱▱▱▱▱▱▱▱▱▱] 0 0% │ ◷ 00:00"
+      "model pending ● │ ctx [··········] -- --% │ ◷ 00:00"
     );
+  });
+
+  it("renders a known context limit without fabricating usage", () => {
+    expect(renderStatusRailSurface(status({
+      context: { totalTokens: 262_000 },
+    }), { width: 80 })).toContain("ctx [··········] --/262k --%");
   });
 
   it("formats session timer deterministically", () => {

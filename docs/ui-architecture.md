@@ -219,6 +219,11 @@ timer. Tools, approvals, workspace/trust, setup, steering, channel state, and
 active-turn noise belong in contextual surfaces and must not be smuggled into
 the rail.
 
+The context bar uses only the active session's last provider-reported input
+token count. It holds that value across turns and usage-less responses and
+shows `--/total` before the first measurement or after compaction/model changes.
+Live and assembled-prompt estimates are not rail state.
+
 Do not manually combine removed transient-region calls with Papyrus prompt
 rendering. The raw prompt render loop is only a terminal diff/write/cursor
 cleanup adapter; it does not build prompt/status/slash/attachment frames.

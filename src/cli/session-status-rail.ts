@@ -47,8 +47,10 @@ export function operatorConsoleStatusRailState(input: {
     ? undefined
     : Math.max(0, timing.now() - timing.sessionStartedAtMs);
   const contextUsage = input.contextUsage ?? (contextWindow !== undefined
-    ? { filled: 0, total: contextWindow }
+    ? { total: contextWindow }
     : undefined);
+  const usedTokens = contextUsage?.filled;
+  const totalTokens = contextUsage?.total;
 
   return {
     model: {
@@ -57,9 +59,11 @@ export function operatorConsoleStatusRailState(input: {
       route: providerRailStatusRoute(providerRail.modelState),
     },
     context: {
-      usedTokens: contextUsage?.filled ?? 0,
-      ...(contextUsage?.total === undefined ? {} : { totalTokens: contextUsage.total }),
-      ...(contextUsage === undefined ? {} : { percent: contextUsage.total > 0 ? Math.round((contextUsage.filled / contextUsage.total) * 100) : 0 }),
+      ...(usedTokens === undefined ? {} : { usedTokens }),
+      ...(totalTokens === undefined ? {} : { totalTokens }),
+      ...(usedTokens === undefined || totalTokens === undefined
+        ? {}
+        : { percent: totalTokens > 0 ? Math.round((usedTokens / totalTokens) * 100) : 0 }),
     },
     sessionTimer: {
       elapsedMs: sessionElapsedMs ?? 0,
@@ -109,7 +113,7 @@ export function sessionStatusRailViewModel(input: {
     sessionElapsedMs,
     currentTurnSeconds,
     contextUsage: input.contextUsage ?? (contextWindow !== undefined
-      ? { filled: 0, total: contextWindow }
+      ? { total: contextWindow }
       : undefined),
   });
 }

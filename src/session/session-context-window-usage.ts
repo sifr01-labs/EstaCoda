@@ -13,7 +13,14 @@ export function reconstructSessionContextWindowUsage(
   let latest: SessionContextWindowUsage | undefined;
 
   for (const event of events) {
-    if (!isRecord(event) || event.kind !== "context-window-usage") {
+    if (!isRecord(event)) {
+      continue;
+    }
+    if (event.kind === "session-history-compressed") {
+      latest = undefined;
+      continue;
+    }
+    if (event.kind !== "context-window-usage") {
       continue;
     }
     const normalized = normalizeSessionContextWindowUsage(event);

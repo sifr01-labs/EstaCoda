@@ -20,10 +20,13 @@ export function renderStatusRailSurface(
   const model = formatModel(state, options.style);
   const narrowModel = shortenModelLabel(state.model.label, 10);
   const minimalModel = shortenModelLabel(state.model.label, 4);
-  const percent = formatPercent(resolveContextPercent(state));
+  const contextPercent = resolveContextPercent(state);
+  const percent = state.context.usedTokens === undefined ? "--%" : formatPercent(contextPercent);
   const timer = formatSessionTimer(state.sessionTimer.elapsedMs);
   const sessionIcon = options.style?.tokens.contract.toolIcon.cronjob ?? "◷";
-  const bar = renderContextBar(resolveContextPercent(state));
+  const bar = state.context.usedTokens === undefined
+    ? `[${"·".repeat(CONTEXT_BAR_CELLS)}]`
+    : renderContextBar(contextPercent);
   const numbers = formatContextNumbers(state);
   const symbol = modelStateSymbol(state.model.state, state.model.route, options.style);
   const securityBadge = formatSecurityBadge(state, options.style);
@@ -53,6 +56,7 @@ export function renderContextBar(percent: number, cells = CONTEXT_BAR_CELLS): st
 }
 
 export function resolveContextPercent(state: StatusRailState): number {
+  if (state.context.usedTokens === undefined) return 0;
   if (state.context.percent !== undefined) return clampPercent(state.context.percent);
   if (state.context.totalTokens !== undefined && state.context.totalTokens > 0) {
     return clampPercent((state.context.usedTokens / state.context.totalTokens) * 100);
@@ -114,8 +118,9 @@ function formatPercent(percent: number): string {
 }
 
 function formatContextNumbers(state: StatusRailState): string {
-  if (state.context.totalTokens === undefined) return formatTokenCount(state.context.usedTokens);
-  return `${formatTokenCount(state.context.usedTokens)}/${formatTokenCount(state.context.totalTokens)}`;
+  const used = state.context.usedTokens === undefined ? "--" : formatTokenCount(state.context.usedTokens);
+  if (state.context.totalTokens === undefined) return used;
+  return `${used}/${formatTokenCount(state.context.totalTokens)}`;
 }
 
 function formatTokenCount(value: number): string {

@@ -557,7 +557,7 @@ export interface BuildSessionStatusRailInput {
   readonly showTurnState?: boolean;
   readonly sessionElapsedMs?: number;
   readonly currentTurnSeconds?: number;
-  readonly contextUsage?: { readonly filled: number; readonly total: number };
+  readonly contextUsage?: { readonly filled?: number; readonly total: number };
 }
 
 export function buildSessionStatusRailViewModel(

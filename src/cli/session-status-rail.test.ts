@@ -10,6 +10,24 @@ describe("operatorConsoleStatusRailState", () => {
     expect(statusForSecurityMode("adaptive")).not.toHaveProperty("security");
     expect(statusForSecurityMode("strict")).not.toHaveProperty("security");
   });
+
+  it("keeps context usage unknown until a provider measurement exists", () => {
+    expect(statusForSecurityMode("adaptive").context).toEqual({
+      totalTokens: 262_000,
+    });
+  });
+
+  it("maps provider-actual context usage into the operator rail", () => {
+    expect(operatorConsoleStatusRailState({
+      runtime: runtime("adaptive"),
+      renderer: {} as SessionRenderer,
+      contextUsage: { filled: 18_400, total: 262_000 },
+    }).context).toEqual({
+      usedTokens: 18_400,
+      totalTokens: 262_000,
+      percent: 7,
+    });
+  });
 });
 
 function statusForSecurityMode(mode: SecurityApprovalMode) {

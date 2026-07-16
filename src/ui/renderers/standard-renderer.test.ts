@@ -2506,6 +2506,19 @@ describe("StandardRenderer — prompt chrome rails", () => {
     expect(out.split("\n")).toHaveLength(1);
   });
 
+  it("renders unknown usage without a zero-percent fill", () => {
+    const out = stripAnsi(renderer("dark", fullCaps()).render(buildSessionStatusRailViewModel({
+      modelLabel: "deepseek-reasoner",
+      turnState: "idle",
+      contextUsage: { total: 128000 },
+      showTurnState: false,
+    })));
+
+    expect(out).toContain("context --/128k");
+    expect(out).toContain("·········· --%");
+    expect(out).not.toContain("0%");
+  });
+
   it("renders long rail durations as hours and minutes", () => {
     const r = renderer("dark", fullCaps());
     const vm = buildSessionStatusRailViewModel({

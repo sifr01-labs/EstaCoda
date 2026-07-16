@@ -34,6 +34,32 @@ describe("session context-window usage", () => {
     });
   });
 
+  it("invalidates pre-compaction usage until a fresh provider measurement arrives", () => {
+    const preCompaction = {
+      kind: "context-window-usage",
+      usedTokens: 90_000,
+      totalTokens: 128_000,
+      provider: "openai",
+      model: "gpt-test",
+    };
+    const compressed = { kind: "session-history-compressed" };
+    const postCompaction = {
+      kind: "context-window-usage",
+      usedTokens: 6_000,
+      totalTokens: 128_000,
+      provider: "openai",
+      model: "gpt-test",
+    };
+
+    expect(reconstructSessionContextWindowUsage([preCompaction, compressed])).toBeUndefined();
+    expect(reconstructSessionContextWindowUsage([preCompaction, compressed, postCompaction])).toEqual({
+      usedTokens: 6_000,
+      totalTokens: 128_000,
+      provider: "openai",
+      model: "gpt-test",
+    });
+  });
+
   it("rejects malformed, unbounded, and non-positive usage snapshots", () => {
     expect(normalizeSessionContextWindowUsage(undefined)).toBeUndefined();
     expect(normalizeSessionContextWindowUsage({ usedTokens: 1, totalTokens: 0, provider: "openai", model: "gpt" }))

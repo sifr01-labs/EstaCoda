@@ -154,7 +154,6 @@ export type SessionLoopOptions = {
 const OPERATOR_CONSOLE_FALLBACK_TERMINAL_HEIGHT = 24;
 const COMPACTION_PROMPT_PLACEHOLDER = "Compacting session history... Ctrl+C to cancel";
 
-type ContextUsageSource = Extract<RuntimeEvent, { kind: "context-usage" }>["source"];
 type StatusRailTimerMode = "idle" | "active-turn" | "last-turn";
 
 type SubmittedCliInput = {
@@ -227,7 +226,7 @@ function renderStartupScreenText(input: {
   rendered: string;
   capabilities: TerminalCapabilities;
   operatorConsoleRuntimeHost?: OperatorConsoleRuntimeHost;
-  contextWindow?: number;
+  contextUsage?: ContextUsageSnapshot;
   style?: OperatorConsoleStyle;
 }): string {
   if (!canRenderStartupThroughOperatorConsole(input)) {
@@ -240,7 +239,7 @@ function renderStartupScreenText(input: {
 
   const startupText = renderOperatorConsoleStartupDashboard({
     viewModel: input.viewModel,
-    contextWindow: input.contextWindow,
+    contextUsage: input.contextUsage,
     capabilities: input.capabilities,
     operatorConsoleRuntimeHost: input.operatorConsoleRuntimeHost,
     style: input.style,
@@ -269,7 +268,7 @@ function canRenderStartupThroughOperatorConsole(input: {
 
 function renderOperatorConsoleStartupDashboard(input: {
   viewModel: StartupDashboardViewModel;
-  contextWindow?: number;
+  contextUsage?: ContextUsageSnapshot;
   capabilities: TerminalCapabilities;
   operatorConsoleRuntimeHost: OperatorConsoleRuntimeHost;
   style?: OperatorConsoleStyle;
@@ -284,7 +283,7 @@ function renderOperatorConsoleStartupDashboard(input: {
   host.setStyle(input.style);
   host.setStartupDashboard(mapStartupDashboardViewModelToOperatorConsoleState({
     viewModel: input.viewModel,
-    contextWindow: input.contextWindow,
+    contextUsage: input.contextUsage,
   }));
   const frame = host.render();
   const startupText = renderOperatorConsoleLines(frame.state, frame.layout)
@@ -333,7 +332,6 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     : undefined;
   operatorConsoleRuntimeHost?.setStyle(operatorConsoleStyle);
   let latestContextUsage: ContextUsageSnapshot | undefined;
-  let activeTurnContextUsageSource: ContextUsageSource | undefined;
   let timerMode: StatusRailTimerMode = "idle";
   let activeTurnStartedAtMs: number | undefined;
   let lastCompletedTurnSeconds: number | undefined;
@@ -393,22 +391,20 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   process.on("SIGINT", onSigint);
 
   try {
+    latestContextUsage = await initialContextUsageForRuntime(runtime);
     const resetTurnRailState = () => {
       timerMode = "idle";
       activeTurnStartedAtMs = undefined;
       lastCompletedTurnSeconds = undefined;
       pendingCompactionPostTokens = undefined;
     };
-    const applyCompactionRailReset = (postTokens?: number) => {
+    const markContextUsageUnknown = () => {
+      const total = modelContextWindow(runtime) ?? latestContextUsage?.total;
+      latestContextUsage = total === undefined ? undefined : { total };
+    };
+    const applyCompactionRailReset = () => {
       resetTurnRailState();
-      activeTurnContextUsageSource = undefined;
-      const contextWindow = modelContextWindow(runtime);
-      if (postTokens === undefined) {
-        latestContextUsage = undefined;
-        return;
-      }
-      const total = contextWindow ?? latestContextUsage?.total;
-      latestContextUsage = total === undefined ? undefined : { filled: postTokens, total };
+      markContextUsageUnknown();
     };
     const startupVm = await buildSessionStartupViewModel(runtime);
     const renderedStartupText = renderer.render(startupVm);
@@ -417,7 +413,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       rendered: renderedStartupText,
       capabilities: renderer.capabilities,
       operatorConsoleRuntimeHost,
-      contextWindow: modelContextWindow(runtime),
+      contextUsage: latestContextUsage,
       style: operatorConsoleStyle,
     });
     const promptPrefix = renderer.tokens.contract.branding.promptPrefix ?? `${renderer.tokens.contract.glyph.prompt} `;
@@ -564,7 +560,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
               slashLiveFrame?.clear();
               slashLiveFrame = undefined;
             },
-            onSessionCompacted: ({ postTokens }) => applyCompactionRailReset(postTokens)
+            onSessionCompacted: () => applyCompactionRailReset()
           });
         } catch (error) {
           slashLiveFrame?.clear();
@@ -582,10 +578,15 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         }
 
         if (typeof shouldExit !== "boolean") {
+          const previousSessionId = runtime.sessionId;
+          const previousModelRoute = runtimeModelRoute(runtime);
           await runtime.dispose();
           runtime = shouldExit.runtime;
-          latestContextUsage = undefined;
-          activeTurnContextUsageSource = undefined;
+          if (runtime.sessionId !== previousSessionId) {
+            latestContextUsage = await initialContextUsageForRuntime(runtime);
+          } else if (!sameModelRoute(previousModelRoute, runtimeModelRoute(runtime))) {
+            latestContextUsage = unknownContextUsageForRuntime(runtime);
+          }
           lastProviderExecutionSummary = undefined;
           providerServingState = undefined;
           resetTurnRailState();
@@ -618,7 +619,6 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       while (retryText !== undefined) {
         activeTurn = new AbortController();
         activeTurnCancelMessage = "Cancelling current turn. Press Ctrl+C again or type /exit to leave.";
-        activeTurnContextUsageSource = undefined;
         const turnStartedAtMs = now();
         activeTurnStartedAtMs = turnStartedAtMs;
         lastCompletedTurnSeconds = undefined;
@@ -862,24 +862,14 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
                   operatorConsoleLiveFrame.flushStreamingSegment(reason);
                 },
 	            onEvent: (event) => {
-	              if (event.kind === "context-usage") {
-                const currentPriority = activeTurnContextUsageSource === undefined
-                  ? 0
-                  : contextUsagePriority(activeTurnContextUsageSource);
-                const incomingPriority = contextUsagePriority(event.source);
-	                if (incomingPriority >= currentPriority) {
-	                  latestContextUsage = { filled: event.filled, total: event.total };
-	                  activeTurnContextUsageSource = event.source;
-	                  refreshOperatorConsoleTransientSurface();
-	                  writeSessionStatusRail();
-	                }
+	              if (event.kind === "context-window-usage") {
+	                latestContextUsage = { filled: event.usedTokens, total: event.totalTokens };
+	                refreshOperatorConsoleTransientSurface();
+	                writeSessionStatusRail();
 	              }
 	              if (event.kind === "session-compacted") {
                 pendingCompactionPostTokens = event.postTokens;
-                activeTurnContextUsageSource = undefined;
-	                const contextWindow = modelContextWindow(runtime);
-	                const total = contextWindow ?? latestContextUsage?.total;
-	                latestContextUsage = total === undefined ? undefined : { filled: event.postTokens, total };
+	                markContextUsageUnknown();
 	                refreshOperatorConsoleTransientSurface();
 	                writeSessionStatusRail();
 	              }
@@ -942,7 +932,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
               execution: response.providerExecution,
             });
 	        if (pendingCompactionPostTokens !== undefined) {
-	          applyCompactionRailReset(pendingCompactionPostTokens);
+	          resetTurnRailState();
 	          pendingCompactionPostTokens = undefined;
 	        } else {
 	          lastCompletedTurnSeconds = elapsedSeconds(turnStartedAtMs, now());
@@ -2960,15 +2950,23 @@ function truncateSingleLine(value: string, maxLength: number): string {
   return `${singleLine.slice(0, Math.max(0, maxLength - 1))}…`;
 }
 
-function contextUsagePriority(source: ContextUsageSource): number {
-  switch (source) {
-    case "provider-actual":
-      return 3;
-    case "assembled-prompt":
-      return 2;
-    case "live-estimate":
-      return 1;
-  }
+async function initialContextUsageForRuntime(runtime: Runtime): Promise<ContextUsageSnapshot | undefined> {
+  const actual = await runtime.currentContextWindowUsage?.();
+  return actual === undefined
+    ? unknownContextUsageForRuntime(runtime)
+    : { filled: actual.usedTokens, total: actual.totalTokens };
+}
+
+function unknownContextUsageForRuntime(runtime: Runtime): ContextUsageSnapshot | undefined {
+  const total = modelContextWindow(runtime);
+  return total === undefined ? undefined : { total };
+}
+
+function sameModelRoute(
+  left: { readonly provider: string; readonly model: string } | undefined,
+  right: { readonly provider: string; readonly model: string } | undefined
+): boolean {
+  return left?.provider === right?.provider && left?.model === right?.model;
 }
 
 function promptInputPlaceholder(

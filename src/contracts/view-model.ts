@@ -400,7 +400,8 @@ export interface SessionStatusRailViewModel {
   readonly sessionElapsedMs?: number;
   readonly currentTurnSeconds?: number;
   readonly contextUsage?: {
-    readonly filled: number;
+    /** Omitted until the active session has a provider-reported measurement. */
+    readonly filled?: number;
     readonly total: number;
   };
 }

@@ -178,7 +178,7 @@ Wide startup dashboard:
 ╭──────────────────────────────────────────────────────────────────────────────╮
 │ ╭─ Session ──────────────────────────╮ ╭─ Commands ────────────────────────╮ │
 │ │ model       kimi-k2.6 ◐             │ │ /tools     inspect tools           │ │
-│ │ context     0 / 262k                │ │ /skills    loaded skills           │ │
+│ │ context     -- / 262k               │ │ /skills    loaded skills           │ │
 │ │ workspace   verified                │ │ /model     active model route      │ │
 │ │ security    open                    │ │ /status    runtime state           │ │
 │ │ autonomy    autonomous              │ │ /setup     setup editor            │ │
@@ -191,7 +191,7 @@ Wide startup dashboard:
 ╭─ Prompt ─────────────────────────────────────────────────────────────────────╮
 │ ›                                                                            │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-kimi-k2.6 ◐ │ ctx [▱▱▱▱▱▱▱▱▱▱] 0/262k 0% │ session 00:10
+kimi-k2.6 ◐ │ ctx [··········] --/262k --% │ session 00:10
 ```
 
 Narrow startup dashboard:
@@ -204,7 +204,7 @@ v0.1.0 · session 20ea8195
 ╭────────────────────────────────────────────╮
 │ ╭─ Session ──────────────────────────────╮ │
 │ │ model       kimi-k2.6 ◐                 │ │
-│ │ context     0 / 262k                    │ │
+│ │ context     -- / 262k                   │ │
 │ │ workspace   verified                    │ │
 │ │ security    open                        │ │
 │ ╰────────────────────────────────────────╯ │
