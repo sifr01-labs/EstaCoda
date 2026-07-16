@@ -2885,6 +2885,8 @@ export function renderRuntimeEvent(
       clearActiveSpinnerLine();
       safeWrite(`\nprovider budget: ${event.reason}\n`);
       return undefined;
+    case "context-estimate":
+    case "context-window-usage":
     case "context-usage":
       return undefined;
     case "session-compacted":
@@ -2920,6 +2922,8 @@ function operatorConsoleTransientPhaseForRuntimeEvent(event: RuntimeEvent): stri
       return "tool";
     case "provider-result":
       return event.ok || !event.willFallback ? "finalizing" : "provider";
+    case "context-estimate":
+    case "context-window-usage":
     case "context-usage":
       return undefined;
     case "session-compacted":

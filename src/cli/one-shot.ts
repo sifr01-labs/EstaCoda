@@ -125,6 +125,8 @@ function renderOneShotEvent(
         : `provider issue: ${event.provider}/${event.model}${event.willFallback ? " (trying fallback)" : ""}`);
     case "provider-budget-exhausted":
       return safeLine(`provider budget: ${event.reason}`);
+    case "context-estimate":
+    case "context-window-usage":
     case "context-usage":
       return undefined;
     case "delegation-progress": {

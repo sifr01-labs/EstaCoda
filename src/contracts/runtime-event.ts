@@ -3,12 +3,22 @@ import type { SessionCompressionTrigger } from "./session.js";
 import type {
   ProviderFinishReason,
   ProviderReasoningMetadata,
+  ProviderRouteRole,
   ProviderUsage
 } from "./provider.js";
 import type {
   SkillRouteTelemetryDetails,
   SkillRouteFinalOutcomeStatus
 } from "./skill.js";
+
+export type ContextEstimateStage =
+  | "input"
+  | "memory"
+  | "skill"
+  | "tools"
+  | "preflight"
+  | "provider-tool-feedback"
+  | "assembled-prompt";
 
 export type RuntimeEvent =
   | {
@@ -95,6 +105,23 @@ export type RuntimeEvent =
       reason: string;
     }
   | {
+      kind: "context-estimate";
+      filled: number;
+      total: number;
+      source: "live-estimate" | "assembled-prompt";
+      stage: ContextEstimateStage;
+    }
+  | {
+      kind: "context-window-usage";
+      usedTokens: number;
+      totalTokens: number;
+      provider: string;
+      model: string;
+      source: "provider-actual";
+      routeRole?: ProviderRouteRole;
+    }
+  | {
+      /** @deprecated Compatibility event for consumers that have not migrated to the split context contracts. */
       kind: "context-usage";
       filled: number;
       total: number;

@@ -6,6 +6,7 @@ import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { MemoryProvider } from "../contracts/memory.js";
 import type { ModelProfile, ProviderStreamDiagnostics } from "../contracts/provider.js";
+import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { SecurityPolicy } from "../contracts/security.js";
 import type { SkillDefinition } from "../contracts/skill.js";
 import type { ToolDefinition } from "../contracts/tool.js";
@@ -400,6 +401,35 @@ async function createAgentLoop(input: {
 }
 
 describe("AgentLoop provider availability gating", () => {
+  it("emits staged context estimates alongside the legacy compatibility event", async () => {
+    const { loop } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("done")
+    });
+    const events: RuntimeEvent[] = [];
+
+    await loop.handle({
+      text: "use the test skill",
+      channel: "cli",
+      trustedWorkspace: true,
+      onEvent: (event) => {
+        events.push(event);
+      }
+    });
+
+    const estimates = events.filter((event): event is Extract<RuntimeEvent, { kind: "context-estimate" }> =>
+      event.kind === "context-estimate"
+    );
+    expect(estimates).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: "live-estimate", stage: "input", total: model.contextWindowTokens }),
+      expect.objectContaining({ source: "live-estimate", stage: "preflight", total: model.contextWindowTokens })
+    ]));
+    expect(estimates.every((event) => event.filled >= 0)).toBe(true);
+    expect(events.filter((event) => event.kind === "context-usage" && event.source === "live-estimate"))
+      .toHaveLength(estimates.length);
+  });
+
   it("passes completed-turn route and outcome context to skill learning", async () => {
     const observeTurn = vi.fn(async () => undefined);
     const { loop } = await createAgentLoop({
