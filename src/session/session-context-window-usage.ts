@@ -16,7 +16,10 @@ export function reconstructSessionContextWindowUsage(
     if (!isRecord(event)) {
       continue;
     }
-    if (event.kind === "session-history-compressed") {
+    if (
+      event.kind === "session-history-compressed" ||
+      event.kind === "context-window-usage-invalidated"
+    ) {
       latest = undefined;
       continue;
     }

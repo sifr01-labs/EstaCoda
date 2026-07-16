@@ -15,6 +15,7 @@ import { SKILL_SUGGESTIONS_MODE_ENV_VAR } from "./skill-suggestions-mode.js";
 import { INPUT_KEYMAP_MODE_ENV_VAR } from "./input-keymap-mode.js";
 import type { PromptOptions } from "./prompt-contract.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
+import { loadSessionContextWindowUsage } from "../session/session-context-window-usage.js";
 import type { Runtime } from "../runtime/create-runtime.js";
 import { deriveAgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import type { AgentLoopResponse } from "../runtime/agent-loop.js";
@@ -4170,6 +4171,77 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(refreshedIdleRail).not.toContain("->");
     expect(afterModelClear).toContain("fresh-model");
     expect(afterModelClear).not.toContain("fresh-provider/fresh-model");
+  });
+
+  it("rehydrates durable context invalidation when the refreshed route labels are unchanged", async () => {
+    const outputChunks: string[] = [];
+    const sessionDb = new InMemorySessionDB();
+    const sessionId = "durable-context-boundary";
+    await sessionDb.createSession({ id: sessionId, profileId: "default" });
+    await sessionDb.appendEvent(sessionId, {
+      kind: "context-window-usage",
+      usedTokens: 12_000,
+      totalTokens: 128_000,
+      provider: "mock",
+      model: "mock-model",
+      routeRole: "primary",
+    });
+    const currentContextWindowUsage = () => loadSessionContextWindowUsage({
+      sessionDb,
+      sessionId,
+      profileId: "default",
+    });
+    const runtime = withModelRoute({
+      ...createMockRuntime(),
+      sessionDb,
+      sessionId,
+      currentContextWindowUsage,
+    }, "mock", "mock-model");
+    const refreshedRuntime = {
+      ...runtime,
+      currentContextWindowUsage,
+      getModelInfo: () => ({
+        kind: "kv" as const,
+        title: "Model",
+        entries: [
+          { key: "provider", value: "mock" },
+          { key: "model", value: "mock-model" },
+          { key: "context window", value: "256000" },
+        ],
+      }),
+    };
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      refreshRuntime: async () => refreshedRuntime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 160,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 160, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["/model clear", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("context 12.0k/128k");
+    const afterModelClear = rendered.slice(rendered.indexOf("Cleared the session model override."));
+    const refreshedIdleRail = afterModelClear.split("\n").find((line) =>
+      line.includes("mock-model") && line.includes("idle")
+    );
+    expect(refreshedIdleRail).toContain("context --/256k");
+    await expect(currentContextWindowUsage()).resolves.toBeUndefined();
   });
 
   it("keeps the last provider-actual context usage when estimates arrive", async () => {

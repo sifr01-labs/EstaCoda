@@ -60,6 +60,35 @@ describe("session context-window usage", () => {
     });
   });
 
+  it("invalidates pre-model-change usage until a fresh provider measurement arrives", () => {
+    const prior = {
+      kind: "context-window-usage",
+      usedTokens: 12_000,
+      totalTokens: 128_000,
+      provider: "openai",
+      model: "old-model",
+    };
+    const boundary = {
+      kind: "context-window-usage-invalidated",
+      reason: "model-change",
+    };
+    const fresh = {
+      kind: "context-window-usage",
+      usedTokens: 4_000,
+      totalTokens: 64_000,
+      provider: "openai",
+      model: "new-model",
+    };
+
+    expect(reconstructSessionContextWindowUsage([prior, boundary])).toBeUndefined();
+    expect(reconstructSessionContextWindowUsage([prior, boundary, fresh])).toEqual({
+      usedTokens: 4_000,
+      totalTokens: 64_000,
+      provider: "openai",
+      model: "new-model",
+    });
+  });
+
   it("rejects malformed, unbounded, and non-positive usage snapshots", () => {
     expect(normalizeSessionContextWindowUsage(undefined)).toBeUndefined();
     expect(normalizeSessionContextWindowUsage({ usedTokens: 1, totalTokens: 0, provider: "openai", model: "gpt" }))

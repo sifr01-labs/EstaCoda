@@ -136,7 +136,11 @@ export class SessionCompressionService {
         });
         const written = await this.#sessionDb.rewriteTranscript({
           sessionId: childSession.id,
-          messages: compressed.messages.map(toChildTranscriptMessage)
+          messages: compressed.messages.map(toChildTranscriptMessage),
+          events: [{
+            kind: "context-window-usage-invalidated",
+            reason: "compaction"
+          }]
         });
         await this.#sessionDb.endSession(parentSession.id, "compression");
         const eventWarnings = [
@@ -177,7 +181,11 @@ export class SessionCompressionService {
 
       const written = await this.#sessionDb.replaceMessages({
         sessionId: input.sessionId,
-        messages: compressed.messages
+        messages: compressed.messages,
+        events: [{
+          kind: "context-window-usage-invalidated",
+          reason: "compaction"
+        }]
       });
       const eventWarnings = await this.#recordEventsBestEffort({
         sessionId: input.sessionId,

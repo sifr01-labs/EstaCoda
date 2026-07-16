@@ -2,6 +2,7 @@ import type {
   AppendMessageInput,
   CreateSessionInput,
   ReplacementSessionMessage,
+  RewriteSessionTranscriptInput,
   SessionDB,
   SessionEvent,
   SessionMessage,
@@ -264,6 +265,10 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
       this.#db
         .query("update sessions set metadata_json = ?, updated_at = ? where id = ?")
         .run(stringifyJson(metadata), updatedAt, sessionId);
+      this.#insertSessionEvent(sessionId, {
+        kind: "context-window-usage-invalidated",
+        reason: "model-change"
+      });
     });
   }
 
@@ -277,12 +282,20 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
       const metadata = parseJson(session.metadata_json);
       if (metadata === undefined || !(SESSION_MODEL_OVERRIDE_METADATA_KEY in metadata)) {
         this.#db.query("update sessions set updated_at = ? where id = ?").run(updatedAt, sessionId);
+        this.#insertSessionEvent(sessionId, {
+          kind: "context-window-usage-invalidated",
+          reason: "model-change"
+        });
         return;
       }
       const { [SESSION_MODEL_OVERRIDE_METADATA_KEY]: _removed, ...rest } = metadata;
       this.#db
         .query("update sessions set metadata_json = ?, updated_at = ? where id = ?")
         .run(stringifyJson(Object.keys(rest).length === 0 ? undefined : rest), updatedAt, sessionId);
+      this.#insertSessionEvent(sessionId, {
+        kind: "context-window-usage-invalidated",
+        reason: "model-change"
+      });
     });
   }
 
@@ -295,11 +308,11 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     return readSessionModelOverride(parseJson(session.metadata_json));
   }
 
-  async replaceMessages(input: { sessionId: string; messages: ReplacementSessionMessage[] }): Promise<SessionMessage[]> {
+  async replaceMessages(input: RewriteSessionTranscriptInput): Promise<SessionMessage[]> {
     return this.rewriteTranscript(input);
   }
 
-  async rewriteTranscript(input: { sessionId: string; messages: ReplacementSessionMessage[] }): Promise<SessionMessage[]> {
+  async rewriteTranscript(input: RewriteSessionTranscriptInput): Promise<SessionMessage[]> {
     const replacements = this.#buildReplacementMessages(input);
 
     this.#withWriteTransaction(() => {
@@ -341,6 +354,10 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
           .run(message.id, message.id, message.content);
       }
 
+      for (const event of input.events ?? []) {
+        this.#insertSessionEvent(input.sessionId, event);
+      }
+
       this.#touch(input.sessionId);
     });
 
@@ -354,9 +371,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
       throw new Error(`Session not found: ${sessionId}`);
     }
 
-    this.#db
-      .query("insert into session_events (id, session_id, created_at, event_json) values (?, ?, ?, ?)")
-      .run(this.#id(), sessionId, this.#now().toISOString(), JSON.stringify(event));
+    this.#insertSessionEvent(sessionId, event);
 
     this.#touch(sessionId);
   }
@@ -1113,6 +1128,12 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     this.#db
       .query("update sessions set updated_at = ? where id = ?")
       .run(this.#now().toISOString(), sessionId);
+  }
+
+  #insertSessionEvent(sessionId: string, event: SessionEvent): void {
+    this.#db
+      .query("insert into session_events (id, session_id, created_at, event_json) values (?, ?, ?, ?)")
+      .run(this.#id(), sessionId, this.#now().toISOString(), JSON.stringify(event));
   }
 }
 

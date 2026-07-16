@@ -9,6 +9,7 @@ import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { SessionCompressionLock } from "../session/session-compression-lock.js";
 import { reconstructSessionCompressionState } from "../session/session-compression-state.js";
+import { loadSessionContextWindowUsage } from "../session/session-context-window-usage.js";
 import { SUMMARY_FORMAT_VERSION, SUMMARY_PREFIX } from "./semantic-compressor.js";
 import { SessionCompressionService } from "./session-compression-service.js";
 import { estimateMessageTokensRough } from "./token-estimator.js";
@@ -413,6 +414,10 @@ describe("SessionCompressionService", () => {
       endReason: "compression"
     }));
     expect(await base.db.listMessages(result.activeSessionId)).toHaveLength(result.messages.length);
+    await expect(base.db.listEvents(result.activeSessionId)).resolves.toContainEqual({
+      kind: "context-window-usage-invalidated",
+      reason: "compaction"
+    });
     expect(result.diagnostics.eventWarnings).toEqual([
       "session compression event write failed: event sink down",
       "session compression event write failed: event sink down",
@@ -662,6 +667,13 @@ describe("SessionCompressionService", () => {
 
   it("event write failure is non-fatal after message replacement", async () => {
     const base = await sessionDbWithMessages(8);
+    await base.db.appendEvent(base.sessionId, {
+      kind: "context-window-usage",
+      usedTokens: 90_000,
+      totalTokens: 128_000,
+      provider: "openai",
+      model: "gpt-test"
+    });
     const throwingDb = forwardingSessionDb(base.db, {
       appendEvent: async () => {
         throw new Error("event sink down");
@@ -688,6 +700,15 @@ describe("SessionCompressionService", () => {
       "session compression event write failed: event sink down"
     ]);
     expect((await base.db.listMessages(base.sessionId)).some((message) => message.metadata?.semanticCompression === true)).toBe(true);
+    await expect(loadSessionContextWindowUsage({
+      sessionDb: base.db,
+      sessionId: base.sessionId,
+      profileId: "profile"
+    })).resolves.toBeUndefined();
+    await expect(base.db.listEvents(base.sessionId)).resolves.toContainEqual({
+      kind: "context-window-usage-invalidated",
+      reason: "compaction"
+    });
   });
 
   it("records fallback and provider failure observability with redaction", async () => {

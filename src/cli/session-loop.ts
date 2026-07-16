@@ -578,15 +578,9 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         }
 
         if (typeof shouldExit !== "boolean") {
-          const previousSessionId = runtime.sessionId;
-          const previousModelRoute = runtimeModelRoute(runtime);
           await runtime.dispose();
           runtime = shouldExit.runtime;
-          if (runtime.sessionId !== previousSessionId) {
-            latestContextUsage = await initialContextUsageForRuntime(runtime);
-          } else if (!sameModelRoute(previousModelRoute, runtimeModelRoute(runtime))) {
-            latestContextUsage = unknownContextUsageForRuntime(runtime);
-          }
+          latestContextUsage = await initialContextUsageForRuntime(runtime);
           lastProviderExecutionSummary = undefined;
           providerServingState = undefined;
           resetTurnRailState();
@@ -1723,6 +1717,11 @@ async function handleProvidersCommand(
   if (!shouldRefreshAfterProvidersSetup(result.applyEndState)) {
     return false;
   }
+
+  await input.runtime.sessionDb.appendEvent(input.runtime.sessionId, {
+    kind: "context-window-usage-invalidated",
+    reason: "model-change"
+  });
 
   const refreshed = await refreshCurrentRuntime(input);
   if (refreshed === undefined) {
@@ -2958,13 +2957,6 @@ async function initialContextUsageForRuntime(runtime: Runtime): Promise<ContextU
 function unknownContextUsageForRuntime(runtime: Runtime): ContextUsageSnapshot | undefined {
   const total = modelContextWindow(runtime);
   return total === undefined ? undefined : { total };
-}
-
-function sameModelRoute(
-  left: { readonly provider: string; readonly model: string } | undefined,
-  right: { readonly provider: string; readonly model: string } | undefined
-): boolean {
-  return left?.provider === right?.provider && left?.model === right?.model;
 }
 
 function promptInputPlaceholder(
