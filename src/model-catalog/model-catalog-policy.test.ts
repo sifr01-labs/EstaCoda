@@ -100,6 +100,11 @@ describe("parseModelCatalogOverrides", () => {
       usageClass: "embedding",
       note: "Embedding model; hidden from primary chat selection by default."
     });
+    expect(lookupModelCatalogOverride(parsed, "openai", "gpt-image-2")).toEqual({
+      lifecycle: "available",
+      usageClass: "image",
+      note: "Image model; hidden from primary chat selection by default."
+    });
   });
 
   it("rejects an invalid version", () => {
