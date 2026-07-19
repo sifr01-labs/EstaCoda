@@ -29,9 +29,10 @@ graph TB
     Runtime --> Memory["MemoryStore + LocalMemoryProvider + Recall"]
     Runtime --> Session["SQLiteSessionDB"]
     Runtime --> Security["SecurityPolicy + approval controllers"]
-    Runtime --> Workflow["WorkflowAgentLoopAdapter when active"]
+    Runtime --> TaskResults["TaskResultService + task.result.read"]
 
     Session --> GlobalState["~/.estacoda/sessions.sqlite"]
+    TaskResults --> ProfileState
     Memory --> ProfileState["~/.estacoda/profiles/<id>/"]
     Skills --> BundledSkills["skills/official/"]
     Security --> TrustState["~/.estacoda/trust.json + workspace approvals"]
@@ -57,7 +58,8 @@ graph TB
 | Active profile pointer | Profile home helpers | `~/.estacoda/active-profile.json` |
 | Runtime config | Selected profile | `~/.estacoda/profiles/<id>/config.json` |
 | Provider secrets | Selected profile secret store / OAuth store | `~/.estacoda/profiles/<id>/.env`, `auth.json` |
-| Sessions, gateway approvals, trajectories, workflows | Global SQLite DB with profile scoping | `~/.estacoda/sessions.sqlite` |
+| Sessions, gateway approvals, trajectories, Task metadata | Global SQLite DB with profile scoping | `~/.estacoda/sessions.sqlite` |
+| Durable Task result bodies | Selected profile | `~/.estacoda/profiles/<id>/tasks/results/` |
 | Workspace trust and approvals | Global workspace state | `~/.estacoda/trust.json`, `workspace-approvals.json` |
 | Memory files | Selected profile plus explicit shared memory | `USER.md`, `SOUL.md`, `MEMORY.md`, `memory/shared/` |
 | Channel media and gateway state | Selected profile | `channel-media/`, `gateway/` |
@@ -81,7 +83,7 @@ graph TB
 | Why did a channel accept/reject a message? | Adapter file, `src/channels/channel-gateway.ts`, `src/channels/adapter-capability.ts` |
 | Why did recall or memory appear? | `src/memory/memory-recall-orchestrator.ts`, `src/session/session-recall-service.ts`, prompt assembly tests |
 | Why did a skill load or route? | `src/skills/skill-loader.ts`, `src/skills/skill-registry.ts`, `src/runtime/runtime-router.ts` |
-| How is durable Task state persisted? | `src/contracts/task.ts`, `src/workflow/task-schema.ts`, `src/workflow/sqlite-task-store.ts` |
+| How is durable Task state persisted and read? | `src/contracts/task.ts`, `src/workflow/task-schema.ts`, `src/workflow/sqlite-task-store.ts`, `src/workflow/task-result-service.ts` |
 | How are traces persisted? | `src/session/sqlite-session-db.ts`, `src/trajectory/trajectory-recorder.ts`, `src/cli/trace-commands.ts` |
 
 ## Current Limitations

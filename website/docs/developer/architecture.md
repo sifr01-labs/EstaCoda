@@ -218,18 +218,20 @@ Delegation lets a parent session spawn bounded child agent sessions. Child work 
 
 Child sessions use `DefaultChildAgentLoopFactory` so delegated work goes through the same runtime construction path as normal sessions.
 
-### Durable Task foundation
+### Durable Task and result foundation
 
-The Task persistence foundation stores profile-owned multi-step execution graphs independently of a provider turn. Task execution is not wired into the runtime in this build.
+The Task foundation stores profile-owned multi-step execution graphs and durable result bodies independently of a provider turn. Task scheduling is not wired into the runtime in this build.
 
 | Component | Role |
 |---|---|
 | `task-schema.ts` | Defines the SQLite Task schema migration |
 | `task-store.ts` | Defines the profile-bound persistence contract |
 | `sqlite-task-store.ts` | Persists Tasks, plan revisions, Steps, Attempts, Results, Events, and session links |
+| `task-result-service.ts` | Stores profile-local result bodies and verifies size and content hashes |
+| `task-result-tools.ts` | Provides linked sessions with bounded `task.result.read` pages |
 | `contracts/task.ts` | Defines Task records, transitions, authority, budgets, and graph validation |
 
-Normal chat turns remain independent of durable Task storage.
+Normal chat turns remain independent of durable Task storage. Result IDs and session links are checked before reads; raw bodies and filesystem paths do not enter Task events.
 
 ### Packs and distribution
 

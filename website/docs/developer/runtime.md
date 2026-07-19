@@ -107,9 +107,9 @@ Tool registration happens in phases so tools receive the right runtime and sessi
 
 MCP-discovered tools are added to the session-visible tool registry during session construction, alongside built-in tool registration phases.
 
-### Phase C: durable Task persistence
+### Phase C: durable Task persistence and results
 
-`SQLiteSessionDB` installs the profile-owned Task schema and `SQLiteTaskStore` provides transactional graph storage. Task execution is not wired into `createRuntime()` in this build. Retired Workflow commands fail explicitly; runtime creation does not silently initialize a legacy store.
+`SQLiteSessionDB` installs the profile-owned Task schema and `SQLiteTaskStore` provides transactional graph storage. SQLite runtimes also create a profile-local `TaskResultService`: result bodies remain outside SQLite, carry verified hashes and opaque handles, and are available to linked sessions through bounded `task.result.read` pages. Binary results are never injected through that text tool. Task scheduling is not wired into `createRuntime()` in this build. Retired Workflow commands fail explicitly; runtime creation does not silently initialize a legacy store.
 
 ---
 

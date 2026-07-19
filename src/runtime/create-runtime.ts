@@ -69,6 +69,8 @@ import { SkillEvolutionStore } from "../skills/skill-evolution.js";
 import { ChangeManifestStore } from "../skills/change-manifest-store.js";
 import { SkillLearningManager, type SkillAutonomy } from "../skills/skill-learning.js";
 import { availableToolsetsFromTools } from "../cron/cron-runtime-validation.js";
+import { SQLiteTaskStore } from "../workflow/sqlite-task-store.js";
+import { TaskResultService } from "../workflow/task-result-service.js";
 
 import type { ImageGenerationFetchLike } from "../tools/image-generation-tools.js";
 import { defaultImageGenerationConfig, verifyImageGeneration, type ImageGenerationVerification } from "../tools/image-generation-verify.js";
@@ -303,6 +305,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const sessionRuntimeContext = createSessionRuntimeContext(sessionId);
   let observedRuntimeSessionId = sessionId;
   const sessionDb = options.sessionDb ?? new InMemorySessionDB();
+  const taskResultService = sessionDb instanceof SQLiteSessionDB
+    ? new TaskResultService({
+        store: new SQLiteTaskStore({ db: sessionDb.db, profileId }),
+        profileId,
+        contentRoot: profilePaths.taskResultsPath,
+        sessionDb
+      })
+    : undefined;
   const closeSessionDbOnDispose = options.closeSessionDbOnDispose ?? true;
   const workspaceRoot = options.workspaceRoot ?? process.cwd();
   const localSkillsRoot = options.localSkillsRoot ?? profilePaths.skillsPath;
@@ -827,6 +837,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       browserBackend,
       browserConfig: options.browser,
       artifactStore,
+      taskResultService,
       trustStore,
       cronStore,
       disableCronTools: options.disableCronTools,

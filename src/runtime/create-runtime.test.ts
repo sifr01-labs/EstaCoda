@@ -20,7 +20,13 @@ import type { SecurityApprovalMode, SecurityAssessment, SecurityPolicy, Security
 import type { SessionToolContext } from "../contracts/tool-context.js";
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
 import { resolveTokens } from "../theme/token-resolver.js";
-import { knowledgeMemoryToolProvider, memoryToolProvider, sessionSearchToolProvider, toolRegistrationPlan } from "../tools/index.js";
+import {
+  knowledgeMemoryToolProvider,
+  memoryToolProvider,
+  sessionSearchToolProvider,
+  taskResultToolProvider,
+  toolRegistrationPlan
+} from "../tools/index.js";
 import * as pythonEnvManager from "../python-env/manager.js";
 
 type CapturedFasterWhisperOptions = {
@@ -383,6 +389,7 @@ const providerToolNameGroups = [
   { providerName: "memoryRetrieval", toolNames: ["memory.read", "memory.search"] },
   { providerName: "memoryFileCompaction", toolNames: ["memory.file_compact", "memory.file_compaction_restore"] },
   { providerName: "sessionSearch", toolNames: ["session_search"] },
+  { providerName: "taskResult", toolNames: [] },
   {
     providerName: "skill",
     toolNames: [
@@ -4620,6 +4627,24 @@ describe("createRuntime faster-whisper runtime wiring", () => {
 });
 
 describe("createRuntime SQLite session lifecycle", () => {
+  it("registers durable Task result reads only for SQLite runtimes", async () => {
+    const options = await minimalRuntimeOptions();
+    const sessionDb = await createSQLiteSessionDB({
+      path: join(options.workspaceRoot, ".estacoda", "sessions.sqlite")
+    });
+    try {
+      const runtime = await createRuntime({ ...options, sessionDb, closeSessionDbOnDispose: false });
+      try {
+        expect(taskResultToolProvider.name).toBe("taskResult");
+        expect(runtime.tools().map((tool) => tool.name)).toContain("task.result.read");
+      } finally {
+        await runtime.dispose();
+      }
+    } finally {
+      sessionDb.close();
+    }
+  });
+
   it("queues finalization only when an explicit session boundary requests it", async () => {
     const options = await minimalRuntimeOptions();
     const sessionDb = await createSQLiteSessionDB({

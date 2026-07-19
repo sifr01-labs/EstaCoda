@@ -63,6 +63,10 @@ export class SQLiteTaskStore implements TaskStore {
     this.#db.exec("pragma foreign_keys = on");
   }
 
+  get profileId(): string {
+    return this.#profileId;
+  }
+
   createTaskGraph(input: CreateTaskGraphInput): void {
     this.#assertProfile(input.task.profileId, "Task", input.task.id);
     const validation = validateTaskPlan(input);
@@ -441,6 +445,59 @@ export class SQLiteTaskStore implements TaskStore {
       result.expiresAt ?? null,
       result.prunedAt ?? null
     );
+  }
+
+  updateResult(result: TaskResult): void {
+    this.#assertTransactionActive();
+    this.#assertProfile(result.profileId, "Result", result.id);
+    this.#assertTaskOwned(result.taskId);
+    const existing = this.getResult(result.id);
+    if (existing === null || existing.taskId !== result.taskId) {
+      throw new TaskStoreIntegrityError(`Result ${result.id} was not found.`);
+    }
+    assertUnchanged("Result identity", {
+      taskId: existing.taskId,
+      stepId: existing.stepId,
+      attemptId: existing.attemptId,
+      kind: existing.kind,
+      handle: existing.handle,
+      byteLength: existing.byteLength,
+      contentHash: existing.contentHash,
+      mimeType: existing.mimeType,
+      summary: existing.summary,
+      createdAt: existing.createdAt,
+      expiresAt: existing.expiresAt
+    }, {
+      taskId: result.taskId,
+      stepId: result.stepId,
+      attemptId: result.attemptId,
+      kind: result.kind,
+      handle: result.handle,
+      byteLength: result.byteLength,
+      contentHash: result.contentHash,
+      mimeType: result.mimeType,
+      summary: result.summary,
+      createdAt: result.createdAt,
+      expiresAt: result.expiresAt
+    });
+    if (existing.status === "pruned" && stringify(existing) !== stringify(result)) {
+      throw new TaskStoreIntegrityError("Pruned Result is immutable.");
+    }
+    if (existing.status === "available" && result.status === "pruned" && result.prunedAt === undefined) {
+      throw new TaskStoreIntegrityError("Pruned Result requires prunedAt.");
+    }
+    if (result.status === "available" && result.prunedAt !== undefined) {
+      throw new TaskStoreIntegrityError("Available Result cannot have prunedAt.");
+    }
+    if (existing.status !== result.status && !(existing.status === "available" && result.status === "pruned")) {
+      throw new TaskStoreIntegrityError(`Illegal Result transition: ${existing.status} -> ${result.status}.`);
+    }
+
+    const update = this.#db.query(
+      `update task_results set status = ?, pruned_at = ?
+       where id = ? and profile_id = ? and task_id = ?`
+    ).run(result.status, result.prunedAt ?? null, result.id, this.#profileId, result.taskId);
+    this.#assertChanged(update.changes, "Result", result.id);
   }
 
   getResult(id: string): TaskResult | null {

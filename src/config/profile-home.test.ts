@@ -56,7 +56,8 @@ describe("profile home paths", () => {
       imageCachePath: join(profileRoot, "image-cache"),
       gatewayStatePath: join(profileRoot, "gateway"),
       tempPath: join(profileRoot, "temp"),
-      cronPath: join(profileRoot, "cron")
+      cronPath: join(profileRoot, "cron"),
+      taskResultsPath: join(profileRoot, "tasks", "results")
     });
   });
 
@@ -74,6 +75,9 @@ describe("profile home paths", () => {
     expect("userMdPath" in globalPaths).toBe(false);
     expect(profilePaths.userMdPath).toBe(join(tempDir, ".estacoda", "profiles", "research", "USER.md"));
     expect(globalPaths.sharedMemoryPath).toBe(join(tempDir, ".estacoda", "memory", "shared"));
+    expect(profilePaths.taskResultsPath).toBe(
+      join(tempDir, ".estacoda", "profiles", "research", "tasks", "results")
+    );
   });
 
   it("uses ESTACODA_HOME before HOME for state paths", async () => {

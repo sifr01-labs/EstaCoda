@@ -36,6 +36,7 @@ export type ProfileStatePaths = {
   gatewayStatePath: string;
   tempPath: string;
   cronPath: string;
+  taskResultsPath: string;
 };
 
 export type ActiveProfileRecord = {
@@ -83,7 +84,8 @@ export function resolveProfileStateHome(options: { homeDir?: string; profileId: 
     imageCachePath: join(profileRoot, "image-cache"),
     gatewayStatePath: join(profileRoot, "gateway"),
     tempPath: join(profileRoot, "temp"),
-    cronPath: join(profileRoot, "cron")
+    cronPath: join(profileRoot, "cron"),
+    taskResultsPath: join(profileRoot, "tasks", "results")
   };
 }
 

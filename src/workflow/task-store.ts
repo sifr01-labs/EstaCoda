@@ -30,6 +30,8 @@ export type ListTaskEventsOptions = {
 
 /** Profile-bound persistence contract. A store instance can never opt out of profile scoping. */
 export interface TaskStore {
+  readonly profileId: string;
+
   createTaskGraph(input: CreateTaskGraphInput): void;
   createTask(task: Task): void;
   updateTask(task: Task): void;
@@ -51,6 +53,7 @@ export interface TaskStore {
   listAttempts(taskId: string, stepId?: string): TaskAttempt[];
 
   recordResult(result: TaskResult): void;
+  updateResult(result: TaskResult): void;
   getResult(id: string): TaskResult | null;
   listResults(taskId: string, attemptId?: string): TaskResult[];
 
