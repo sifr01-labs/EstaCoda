@@ -32,9 +32,9 @@ import { buildNativeHistoryMessages, type ProviderReplayEchoContext, type Provid
 import { selectNativeHistoryWindow, type NativeHistoryUnit } from "./native-history-selector.js";
 import {
   isAcknowledgementContinuation,
-  renderActiveTaskPrompt,
-  type ActiveTaskState
-} from "../runtime/active-task-state.js";
+  renderConversationContinuationPrompt,
+  type ConversationContinuationState
+} from "../runtime/conversation-continuation-state.js";
 
 type PromptSessionHistoryMessage = Pick<ProviderMessage, "role" | "content"> & {
   metadata?: Record<string, unknown>;
@@ -63,7 +63,7 @@ export type ProviderPromptInput = {
   cache?: PromptCache;
   sessionHistory?: PromptSessionHistoryMessage[];
   rawSessionHistory?: SessionMessage[];
-  activeTaskState?: ActiveTaskState;
+  conversationContinuationState?: ConversationContinuationState;
   nativeHistoryRoute?: NativeHistoryRouteSupport;
   nativeHistoryRouteRole?: string;
   compactionNotice?: string;
@@ -292,8 +292,8 @@ function buildBaseLayers(
         .join("\n");
   const attachmentManifest = renderChannelAttachments(input.attachments);
   const sessionHistory = renderSessionHistory(input.sessionHistory);
-  const activeTaskPrompt = isAcknowledgementContinuation(input.userText)
-    ? renderActiveTaskPrompt(input.activeTaskState)
+  const conversationContinuationPrompt = isAcknowledgementContinuation(input.userText)
+    ? renderConversationContinuationPrompt(input.conversationContinuationState)
     : undefined;
   const channelAttachments = `Channel attachments:\n${attachmentManifest}`;
   const identity = input.soul?.trim().length
@@ -353,15 +353,15 @@ function buildBaseLayers(
             content: renderCompactionNotice(input.compactionNotice)
           })
         ]),
-    ...(activeTaskPrompt === undefined
+    ...(conversationContinuationPrompt === undefined
       ? []
       : [
           layer({
-            name: "active-task-continuity",
+            name: "conversation-continuation",
             cacheable: false,
             protectedLayer: true,
             priority: 1,
-            content: activeTaskPrompt
+            content: conversationContinuationPrompt
           })
         ]),
     layer({

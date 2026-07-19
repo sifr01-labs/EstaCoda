@@ -681,7 +681,7 @@ describe("SemanticCompressor", () => {
     expect(observedPrompt).toContain("Preserve all existing information that is still relevant.");
     expect(observedPrompt).toContain("Add new completed actions");
     expect(observedPrompt).toContain("Move completed work and answered questions out of active state");
-    expect(observedPrompt).toContain("Update active state and active task");
+    expect(observedPrompt).toContain("Update active state and current objective");
     expect(observedPrompt).toContain("Remove information only when it is clearly obsolete.");
     expect(observedPrompt).toContain("## Output Format");
     expect(observedPrompt.indexOf("## Previous Summary")).toBeLessThan(observedPrompt.indexOf("## New Turns to Incorporate"));
@@ -828,7 +828,7 @@ describe("SemanticCompressor", () => {
       focusTopic: "deployment handoff"
     });
 
-    expect(observedPrompt).toContain("## Active Task\ndeployment handoff");
+    expect(observedPrompt).toContain("## Current Objective\ndeployment handoff");
     expect(observedPrompt).toContain("Manual focus topic: deployment handoff");
   });
 

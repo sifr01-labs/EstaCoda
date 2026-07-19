@@ -217,7 +217,7 @@ describe("stale mutable-state grounding regressions", () => {
         id: "active-user",
         sessionId: "s",
         role: "user",
-        content: "ACTIVE TASK: answer now"
+        content: "CURRENT OBJECTIVE: answer now"
       }
     ], {
       maxProtectedMessages: 1,

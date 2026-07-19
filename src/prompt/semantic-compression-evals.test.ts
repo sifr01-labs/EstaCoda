@@ -11,7 +11,7 @@ describe("semantic compression deterministic evals", () => {
   it("preserves core coding task state from a long realistic transcript", async () => {
     let observedPrompt = "";
     const harness = auxiliaryHarness([
-      "## Active Task",
+      "## Current Objective",
       "Fix provider-turn semantic compression smoke regression.",
       "## Constraints & Preferences",
       "- Keep compression gated by experimental config.",
@@ -47,14 +47,14 @@ describe("semantic compression deterministic evals", () => {
 
     const summary = summaryContent(result.messages);
     expect(result.didCompress).toBe(true);
-    expect(observedPrompt).toContain("## Active Task");
+    expect(observedPrompt).toContain("## Current Objective");
     expect(observedPrompt).toContain("Please continue from the smoke failure");
     expect(observedPrompt).toContain("fix provider-turn semantic compression smoke regression");
     expect(observedPrompt).toContain("pnpm run typecheck");
     expect(observedPrompt).toContain("src/runtime/provider-turn-loop.ts");
     expect(observedPrompt).toContain("TS2345");
     expect(observedPrompt).toContain("use auxiliary route compression, not memory_compaction");
-    expect(summary).toContain("## Active Task");
+    expect(summary).toContain("## Current Objective");
     expect(summary).toContain("Fix provider-turn semantic compression smoke regression");
     expect(summary).toContain("Keep compression gated by experimental config");
     expect(summary).toContain("src/runtime/provider-turn-loop.ts");
@@ -308,7 +308,7 @@ function compressorWith(harness: ReturnType<typeof auxiliaryHarness>): SemanticC
 
 function realisticCodingTranscript(): SessionMessage[] {
   return [
-    msg("task", "user", "Active task: fix provider-turn semantic compression smoke regression. ".repeat(5)),
+    msg("objective", "user", "Current objective: fix provider-turn semantic compression smoke regression. ".repeat(5)),
     msg("constraint", "user", "Constraint: keep compression gated by experimental config and do not change Workflow event summaries. ".repeat(4), { explicitConstraint: true }),
     msg("inspect", "agent", "Inspected src/runtime/provider-turn-loop.ts and src/prompt/semantic-compressor.ts. ".repeat(5)),
     msg("command", "tool", "Command pnpm run typecheck failed with TS2345 in src/runtime/provider-turn-loop.ts:612. ".repeat(4), { tool_call_id: "call-typecheck", tool_call_name: "terminal.run" }),

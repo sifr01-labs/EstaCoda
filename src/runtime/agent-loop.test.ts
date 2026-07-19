@@ -575,7 +575,7 @@ describe("AgentLoop provider availability gating", () => {
     expect(userInput?.data).not.toHaveProperty("workflow");
   });
 
-  it("persists an active task when the assistant promises follow-up work", async () => {
+  it("persists conversation continuation when the assistant promises follow-up work", async () => {
     const { loop, sessionDb, sessionId } = await createAgentLoop({
       canRunProvider: true,
       runSkillPlaybook: vi.fn(async () => []),
@@ -589,7 +589,7 @@ describe("AgentLoop provider availability gating", () => {
     });
 
     const agent = (await sessionDb.listMessages(sessionId)).find((message) => message.role === "agent");
-    expect(agent?.metadata?.activeTaskState).toMatchObject({
+    expect(agent?.metadata?.conversationContinuationState).toMatchObject({
       status: "open",
       userRequest: "why did the model switch?",
       promisedAction: "inspect provider routing",
@@ -597,7 +597,7 @@ describe("AgentLoop provider availability gating", () => {
     });
   });
 
-  it("passes open active task state into an acknowledgement continuation turn", async () => {
+  it("passes open conversation continuation state into an acknowledgement turn", async () => {
     const { loop, sessionDb, sessionId, providerTurnLoop } = await createAgentLoop({
       canRunProvider: true,
       runSkillPlaybook: vi.fn(async () => []),
@@ -616,16 +616,43 @@ describe("AgentLoop provider availability gating", () => {
 
     expect(vi.mocked(providerTurnLoop.run).mock.calls[1]?.[0]).toMatchObject({
       userText: "okay",
-      activeTaskState: {
+      conversationContinuationState: {
         status: "open",
         promisedAction: "inspect provider routing"
       }
     });
     const latestAgent = [...await sessionDb.listMessages(sessionId)].reverse().find((message) => message.role === "agent");
-    expect(latestAgent?.metadata?.activeTaskState).toMatchObject({ status: "satisfied" });
+    expect(latestAgent?.metadata?.conversationContinuationState).toMatchObject({ status: "satisfied" });
   });
 
-  it("persists a superseded active task tombstone after an unrelated explicit new task", async () => {
+  it("ignores retired activeTaskState metadata", async () => {
+    const { loop, sessionDb, sessionId, providerTurnLoop } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("Okay.")
+    });
+    await sessionDb.appendMessage({
+      sessionId,
+      role: "agent",
+      content: "Let me inspect provider routing.",
+      metadata: {
+        activeTaskState: {
+          id: "active-provider-routing",
+          status: "open",
+          userRequest: "Check provider routing.",
+          promisedAction: "inspect provider routing",
+          updatedAt: "2026-06-17T00:00:00.000Z",
+          source: "heuristic"
+        }
+      }
+    });
+
+    await loop.handle({ text: "okay", channel: "cli", trustedWorkspace: true });
+
+    expect(vi.mocked(providerTurnLoop.run).mock.calls.at(-1)?.[0].conversationContinuationState).toBeUndefined();
+  });
+
+  it("persists a superseded continuation tombstone after an unrelated explicit request", async () => {
     const { loop, sessionDb, sessionId, providerTurnLoop } = await createAgentLoop({
       canRunProvider: true,
       runSkillPlaybook: vi.fn(async () => []),
@@ -641,13 +668,13 @@ describe("AgentLoop provider availability gating", () => {
     await loop.handle({ text: "Can you review the README?", channel: "cli", trustedWorkspace: true });
 
     const latestAgent = [...await sessionDb.listMessages(sessionId)].reverse().find((message) => message.role === "agent");
-    expect(latestAgent?.metadata?.activeTaskState).toMatchObject({
+    expect(latestAgent?.metadata?.conversationContinuationState).toMatchObject({
       status: "superseded",
       promisedAction: "inspect provider routing"
     });
   });
 
-  it("does not resurrect an older open active task after a superseding explicit task", async () => {
+  it("does not resurrect an older open commitment after a superseding explicit request", async () => {
     const { loop, sessionDb, sessionId, providerTurnLoop } = await createAgentLoop({
       canRunProvider: true,
       runSkillPlaybook: vi.fn(async () => []),
@@ -671,12 +698,12 @@ describe("AgentLoop provider availability gating", () => {
     expect(vi.mocked(providerTurnLoop.run).mock.calls[2]?.[0]).toMatchObject({
       userText: "okay"
     });
-    expect(vi.mocked(providerTurnLoop.run).mock.calls[2]?.[0].activeTaskState).toBeUndefined();
+    expect(vi.mocked(providerTurnLoop.run).mock.calls[2]?.[0].conversationContinuationState).toBeUndefined();
     const latestAgent = [...await sessionDb.listMessages(sessionId)].reverse().find((message) => message.role === "agent");
-    expect(latestAgent?.metadata).not.toHaveProperty("activeTaskState");
+    expect(latestAgent?.metadata).not.toHaveProperty("conversationContinuationState");
   });
 
-  it("marks active task state cancelled", async () => {
+  it("marks conversation continuation state cancelled", async () => {
     const { loop, sessionDb, sessionId, providerTurnLoop } = await createAgentLoop({
       canRunProvider: true,
       runSkillPlaybook: vi.fn(async () => []),
@@ -692,10 +719,10 @@ describe("AgentLoop provider availability gating", () => {
     await loop.handle({ text: "stop", channel: "cli", trustedWorkspace: true });
 
     const latestAgent = [...await sessionDb.listMessages(sessionId)].reverse().find((message) => message.role === "agent");
-    expect(latestAgent?.metadata?.activeTaskState).toMatchObject({ status: "cancelled" });
+    expect(latestAgent?.metadata?.conversationContinuationState).toMatchObject({ status: "cancelled" });
   });
 
-  it("does not persist credentials or raw provider bodies in active task state", async () => {
+  it("does not persist credentials or raw provider bodies in conversation continuation state", async () => {
     const { loop, sessionDb, sessionId } = await createAgentLoop({
       canRunProvider: true,
       runSkillPlaybook: vi.fn(async () => []),
@@ -704,7 +731,7 @@ describe("AgentLoop provider availability gating", () => {
 
     await loop.handle({ text: "trace provider", channel: "cli", trustedWorkspace: true });
 
-    const serialized = JSON.stringify((await sessionDb.listMessages(sessionId)).find((message) => message.role === "agent")?.metadata?.activeTaskState);
+    const serialized = JSON.stringify((await sessionDb.listMessages(sessionId)).find((message) => message.role === "agent")?.metadata?.conversationContinuationState);
     expect(serialized).toContain("API_KEY=REDACTED");
     expect(serialized).not.toContain("secretsecret");
   });

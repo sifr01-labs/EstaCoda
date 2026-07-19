@@ -1,7 +1,7 @@
 import type { ProviderExecutionSummary } from "../contracts/provider.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 
-export type ActiveTaskState = {
+export type ConversationContinuationState = {
   id: string;
   status: "open" | "satisfied" | "cancelled" | "superseded";
   userRequest: string;
@@ -43,15 +43,15 @@ export function isAcknowledgementContinuation(userText: string): boolean {
   return /^(ok|okay|yes|go on|continue|do that|carry on)$/u.test(text);
 }
 
-export function updateActiveTaskState(input: {
-  previous?: ActiveTaskState;
+export function updateConversationContinuationState(input: {
+  previous?: ConversationContinuationState;
   userText: string;
   agentText?: string;
   toolExecutions?: readonly ToolExecutionSummary[];
   providerExecution?: ProviderExecutionSummary;
-}): ActiveTaskState | undefined {
+}): ConversationContinuationState | undefined {
   const now = new Date().toISOString();
-  const previous = sanitizeActiveTaskState(input.previous);
+  const previous = sanitizeConversationContinuationState(input.previous);
   const userRequest = sanitizeStateText(input.userText) ?? "";
 
   if (isCancellation(input.userText)) {
@@ -61,18 +61,18 @@ export function updateActiveTaskState(input: {
           ...previous,
           status: "cancelled",
           updatedAt: now,
-          lastProgress: "User cancelled the open task."
+          lastProgress: "User cancelled the open commitment."
         };
   }
 
   const promisedAction = detectPromisedAction(input.agentText ?? "");
   const continuation = isAcknowledgementContinuation(input.userText) && previous?.status === "open";
-  const explicitNewTask = !continuation && isExplicitNewTask(input.userText);
+  const explicitNewRequest = !continuation && isExplicitNewRequest(input.userText);
   const baseRequest = continuation ? previous.userRequest : userRequest;
 
   if (promisedAction !== undefined) {
     return {
-      id: continuation ? previous.id : taskId(baseRequest, promisedAction),
+      id: continuation ? previous.id : continuationId(baseRequest, promisedAction),
       status: "open",
       userRequest: baseRequest,
       promisedAction,
@@ -108,13 +108,13 @@ export function updateActiveTaskState(input: {
     };
   }
 
-  if (explicitNewTask) {
+  if (explicitNewRequest) {
     return previous?.status === "open"
       ? {
           ...previous,
           status: "superseded",
           updatedAt: now,
-          lastProgress: "Superseded by a newer explicit user task."
+          lastProgress: "Superseded by a newer explicit user request."
         }
       : undefined;
   }
@@ -122,22 +122,22 @@ export function updateActiveTaskState(input: {
   return previous?.status === "open" ? previous : undefined;
 }
 
-export function renderActiveTaskPrompt(state: ActiveTaskState | undefined): string | undefined {
-  const sanitized = sanitizeActiveTaskState(state);
+export function renderConversationContinuationPrompt(state: ConversationContinuationState | undefined): string | undefined {
+  const sanitized = sanitizeConversationContinuationState(state);
   if (sanitized?.status !== "open") {
     return undefined;
   }
 
   return [
-    "Active task continuity:",
-    "The user's latest message appears to acknowledge continuation. Continue the open task unless the current user message explicitly changes direction.",
-    "This historical task context is subordinate to the latest user message.",
-    `Open task: ${sanitized.promisedAction ?? sanitized.userRequest}`,
+    "Conversation continuation:",
+    "The user's latest message appears to acknowledge continuation. Continue the open commitment unless the current user message explicitly changes direction.",
+    "This historical conversation context is subordinate to the latest user message.",
+    `Open commitment: ${sanitized.promisedAction ?? sanitized.userRequest}`,
     sanitized.lastProgress === undefined ? undefined : `Last progress: ${sanitized.lastProgress}`
   ].filter((line) => line !== undefined).join("\n");
 }
 
-export function sanitizeActiveTaskState(value: unknown): ActiveTaskState | undefined {
+export function sanitizeConversationContinuationState(value: unknown): ConversationContinuationState | undefined {
   if (!isRecord(value)) {
     return undefined;
   }
@@ -168,7 +168,7 @@ function isCancellation(userText: string): boolean {
   return /^(stop|never mind|nevermind|new topic|cancel|drop it)$/iu.test(normalizeUserText(userText));
 }
 
-function isExplicitNewTask(userText: string): boolean {
+function isExplicitNewRequest(userText: string): boolean {
   const text = normalizeUserText(userText);
   if (text.length < 8 || isAcknowledgementContinuation(text) || isCancellation(text)) {
     return false;
@@ -200,7 +200,7 @@ function summarizeProgress(input: {
   }
 
   if (input.providerExecution?.status === "failed") {
-    return "Provider failed before completing the open task.";
+    return "Provider failed before completing the open commitment.";
   }
 
   const text = sanitizeStateText(input.agentText);
@@ -228,8 +228,8 @@ function truncate(value: string, maxChars: number): string {
   return value.length <= maxChars ? value : value.slice(0, maxChars);
 }
 
-function taskId(userRequest: string, promisedAction: string): string {
-  return `active-${hashString(`${userRequest}\n${promisedAction}`).slice(0, 12)}`;
+function continuationId(userRequest: string, promisedAction: string): string {
+  return `continuation-${hashString(`${userRequest}\n${promisedAction}`).slice(0, 12)}`;
 }
 
 function hashString(value: string): string {

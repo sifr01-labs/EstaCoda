@@ -170,7 +170,7 @@ describe("packSessionHistory", () => {
         id: "active-user",
         sessionId: "s",
         role: "user" as const,
-        content: "ACTIVE TASK: explain why the post-tool response went empty"
+        content: "CURRENT OBJECTIVE: explain why the post-tool response went empty"
       },
       ...Array.from({ length: 12 }, (_, index) => ({
         id: `tool-${index + 1}`,
@@ -188,7 +188,7 @@ describe("packSessionHistory", () => {
 
     expect(packed.messages).toContainEqual(expect.objectContaining({
       role: "user",
-      content: "ACTIVE TASK: explain why the post-tool response went empty"
+      content: "CURRENT OBJECTIVE: explain why the post-tool response went empty"
     }));
     expect(packed.messages.filter((message) => message.role === "tool").length).toBeLessThan(12);
   });
@@ -211,7 +211,7 @@ describe("packSessionHistory", () => {
         id: "active-user",
         sessionId: "s",
         role: "user" as const,
-        content: "ACTIVE TASK: keep this exact user request"
+        content: "CURRENT OBJECTIVE: keep this exact user request"
       },
       ...Array.from({ length: 5 }, (_, index) => ({
         id: `tool-${index + 1}`,
@@ -228,7 +228,7 @@ describe("packSessionHistory", () => {
     });
     const content = packed.messages.map((message) => message.content).join("\n");
 
-    expect(content).toContain("ACTIVE TASK: keep this exact user request");
+    expect(content).toContain("CURRENT OBJECTIVE: keep this exact user request");
   });
 
   it("evicts tool messages before pinned user and adjacent assistant context", () => {
@@ -237,7 +237,7 @@ describe("packSessionHistory", () => {
         id: "active-user",
         sessionId: "s",
         role: "user" as const,
-        content: "ACTIVE TASK: inspect the continuation state"
+        content: "CURRENT OBJECTIVE: inspect the continuation state"
       },
       {
         id: "active-agent",
@@ -262,7 +262,7 @@ describe("packSessionHistory", () => {
     expect(packed.messages).toEqual(expect.arrayContaining([
       expect.objectContaining({
         role: "user",
-        content: "ACTIVE TASK: inspect the continuation state"
+        content: "CURRENT OBJECTIVE: inspect the continuation state"
       }),
       expect.objectContaining({
         role: "assistant",
@@ -327,7 +327,7 @@ describe("packSessionHistory", () => {
         id: "active-user",
         sessionId: "s",
         role: "user" as const,
-        content: "ACTIVE TASK: answer now"
+        content: "CURRENT OBJECTIVE: answer now"
       }
     ], {
       maxProtectedMessages: 1,
@@ -338,7 +338,7 @@ describe("packSessionHistory", () => {
     expect(packed.summary).toContain("- historical tool result (2026-06-08T02:51:15.049Z): src/index.ts exists [verify before current-state claim]");
     expect(packed.messages).toContainEqual(expect.objectContaining({
       role: "user",
-      content: "ACTIVE TASK: answer now"
+      content: "CURRENT OBJECTIVE: answer now"
     }));
     expect(packed.messages.find((message) => message.role === "user")?.content).not.toContain("historical tool result");
   });
@@ -355,7 +355,7 @@ describe("packSessionHistory", () => {
         id: "active-user",
         sessionId: "s",
         role: "user" as const,
-        content: "ACTIVE TASK: keep me"
+        content: "CURRENT OBJECTIVE: keep me"
       }
     ], {
       maxProtectedMessages: 1,
@@ -437,7 +437,7 @@ describe("packSessionHistory", () => {
     expect(JSON.stringify(packed.messages[0]?.metadata) ?? "").not.toContain("SECRET_RAW_ERROR_BODY");
   });
 
-  it("does not preserve active task state as arbitrary packed assistant metadata", () => {
+  it("does not preserve conversation continuation state as arbitrary packed assistant metadata", () => {
     const packed = packSessionHistory([
       {
         id: "a1",
@@ -445,8 +445,8 @@ describe("packSessionHistory", () => {
         role: "agent" as const,
         content: "Let me inspect provider routing.",
         metadata: {
-          activeTaskState: {
-            id: "active-provider",
+          conversationContinuationState: {
+            id: "continuation-provider",
             status: "open",
             userRequest: "Inspect provider routing.",
             promisedAction: "inspect provider routing",
@@ -543,7 +543,7 @@ describe("packSessionHistory", () => {
         id: "u1",
         sessionId: "s",
         role: "user" as const,
-        content: "ACTIVE TASK: continue"
+        content: "CURRENT OBJECTIVE: continue"
       }
     ], {
       maxProtectedMessages: 1,
@@ -567,7 +567,7 @@ describe("packSessionHistory", () => {
         id: "active-user",
         sessionId: "s",
         role: "user" as const,
-        content: "ACTIVE TASK: summarize the tool results without losing the ask"
+        content: "CURRENT OBJECTIVE: summarize the tool results without losing the ask"
       },
       {
         id: "active-agent",
@@ -590,7 +590,7 @@ describe("packSessionHistory", () => {
     });
     const content = packed.messages.map((message) => message.content).join("\n");
 
-    expect(content).toContain("ACTIVE TASK: summarize the tool results without losing the ask");
+    expect(content).toContain("CURRENT OBJECTIVE: summarize the tool results without losing the ask");
     expect(content).toContain("I requested several tools.");
     expect(packed.messages.some((message) => message.role === "tool")).toBe(false);
   });
@@ -613,7 +613,7 @@ describe("packSessionHistory", () => {
         id: "active-user",
         sessionId: "s",
         role: "user" as const,
-        content: "ACTIVE TASK: answer the newest request instead"
+        content: "CURRENT OBJECTIVE: answer the newest request instead"
       },
       {
         id: "active-agent",
@@ -636,7 +636,7 @@ describe("packSessionHistory", () => {
     });
     const content = packed.messages.map((message) => message.content).join("\n");
 
-    expect(content).toContain("ACTIVE TASK: answer the newest request instead");
+    expect(content).toContain("CURRENT OBJECTIVE: answer the newest request instead");
     expect(content).not.toContain("Old assistant state. Old assistant state.");
   });
 });

@@ -6,7 +6,7 @@ export type PromptLayerName =
   | "skills-index"
   | "project-context"
   | "session-history"
-  | "active-task-continuity"
+  | "conversation-continuation"
   | "compaction-notice"
   | "user-message"
   | "channel-attachments"

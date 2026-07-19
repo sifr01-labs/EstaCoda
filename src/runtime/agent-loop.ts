@@ -49,10 +49,10 @@ import type { SessionRuntimeContext } from "./session-runtime-context.js";
 import { buildFallbackResponse, cancelledResponse, buildResumeNote, renderToolPlanProgress } from "./response-builders.js";
 import { renderProviderExecutionSummary, summarizeProviderExecution } from "./provider-execution-summary.js";
 import {
-  sanitizeActiveTaskState,
-  updateActiveTaskState,
-  type ActiveTaskState
-} from "./active-task-state.js";
+  sanitizeConversationContinuationState,
+  updateConversationContinuationState,
+  type ConversationContinuationState
+} from "./conversation-continuation-state.js";
 import { emit, isAborted } from "../utils/runtime-helpers.js";
 import { appendArtifactSummary, renderArtifactProgress } from "../utils/artifact-formatting.js";
 import { summarizeProviderFailure } from "../providers/provider-diagnostics.js";
@@ -653,7 +653,7 @@ export class AgentLoop {
     const deterministicImageGenerationRan = deterministicNativeTools.executions.some((execution) => execution.tool.name === "image.generate");
     const providerTools = this.#model?.supportsTools === true ? this.#providerTools : [];
     const preflightCompression = await this.#compactBeforeProviderTurn(input.signal, input.onEvent);
-    const previousActiveTaskState = await this.#latestActiveTaskState();
+    const previousConversationContinuationState = await this.#latestConversationContinuationState();
     await this.#emitLiveContextUsageEstimate({
       onEvent: input.onEvent,
       routedText,
@@ -694,7 +694,7 @@ export class AgentLoop {
       toolPlans,
       trustedWorkspace,
       initialRiskClass,
-      activeTaskState: previousActiveTaskState,
+      conversationContinuationState: previousConversationContinuationState,
       signal: input.signal
     });
     const effectiveProviderExecution = providerLoop.providerExecution;
@@ -817,8 +817,8 @@ export class AgentLoop {
             ...providerProgress
           ]
         };
-    const activeTaskState = updateActiveTaskState({
-      previous: previousActiveTaskState,
+    const conversationContinuationState = updateConversationContinuationState({
+      previous: previousConversationContinuationState,
       userText: effectiveText,
       agentText: response.text,
       toolExecutions,
@@ -885,7 +885,7 @@ export class AgentLoop {
           providerExecution: providerSummary,
           providerFallbackUsed: providerSummary.fallbackUsed,
           providerPrimaryFailureClass: providerSummary.primaryFailureClass,
-          ...(activeTaskState === undefined ? {} : { activeTaskState }),
+          ...(conversationContinuationState === undefined ? {} : { conversationContinuationState }),
           toolPlans: toolPlans.map((plan) => ({
             id: plan.id,
             tool: plan.tool,
@@ -967,13 +967,13 @@ export class AgentLoop {
       response.text === "I completed the requested actions but did not produce any visible output.";
   }
 
-  async #latestActiveTaskState(): Promise<ActiveTaskState | undefined> {
+  async #latestConversationContinuationState(): Promise<ConversationContinuationState | undefined> {
     const messages = await this.#sessionDb.listMessages(this.#currentSessionId()).catch(() => []);
     for (const message of [...messages].reverse()) {
       if (message.role !== "agent") {
         continue;
       }
-      const state = sanitizeActiveTaskState(message.metadata?.activeTaskState);
+      const state = sanitizeConversationContinuationState(message.metadata?.conversationContinuationState);
       if (state !== undefined) {
         return state.status === "open" ? state : undefined;
       }

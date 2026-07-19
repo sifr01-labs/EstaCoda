@@ -36,7 +36,7 @@ import {
 import { deriveSessionHistoryBudget, packSessionHistory } from "../prompt/history-packer.js";
 import type { CompactResult } from "../prompt/session-compression-service.js";
 import { SUMMARY_FORMAT_VERSION } from "../prompt/semantic-compressor.js";
-import type { ActiveTaskState } from "./active-task-state.js";
+import type { ConversationContinuationState } from "./conversation-continuation-state.js";
 import { normalizeProviderMessagesStrict } from "../providers/provider-message-normalizer.js";
 import type { PromptBudgetReport, PromptSemanticCompressionReport } from "../contracts/prompt.js";
 import type { ProviderAttempt, ProviderExecutionResult, ProviderExecutor, ProviderRuntimeEvent } from "../providers/provider-executor.js";
@@ -163,7 +163,7 @@ export class ProviderTurnLoop {
     memoryPromptContext: MemoryPromptContext | undefined;
     providerTools: OpenAICompatibleToolSchema[];
     preflightCompression?: PromptSemanticCompressionReport;
-    activeTaskState?: ActiveTaskState;
+    conversationContinuationState?: ConversationContinuationState;
     fallbackText: string;
     onEvent?: RuntimeEventSink;
     onDelta?: (text: string) => void;
@@ -540,7 +540,7 @@ export class ProviderTurnLoop {
     memoryPromptContext: MemoryPromptContext | undefined;
     providerTools: OpenAICompatibleToolSchema[];
     preflightCompression?: PromptSemanticCompressionReport;
-    activeTaskState?: ActiveTaskState;
+    conversationContinuationState?: ConversationContinuationState;
     fallbackText: string;
     onEvent?: RuntimeEventSink;
     onDelta?: (text: string) => void;
@@ -566,7 +566,7 @@ export class ProviderTurnLoop {
       nativeHistoryRouteRole: "primary",
       compactionNotice: sessionHistory.compactionNotice,
       compression: input.preflightCompression ?? sessionHistory.compression,
-      activeTaskState: input.activeTaskState,
+      conversationContinuationState: input.conversationContinuationState,
       soul: this.#soul,
       memoryPromptContext: input.memoryPromptContext,
       skillsIndex: this.#skillsIndex,
@@ -659,7 +659,7 @@ export class ProviderTurnLoop {
     providerTools: OpenAICompatibleToolSchema[];
     providerExecution: ProviderExecutionResult | undefined;
     toolPlans: ToolCallPlan[];
-    activeTaskState?: ActiveTaskState;
+    conversationContinuationState?: ConversationContinuationState;
     fallbackText: string;
     onEvent?: RuntimeEventSink;
     onDelta?: (text: string) => void;
@@ -692,7 +692,7 @@ export class ProviderTurnLoop {
       nativeHistoryRouteRole: "primary",
       compactionNotice: sessionHistory.compactionNotice,
       compression: sessionHistory.compression,
-      activeTaskState: input.activeTaskState,
+      conversationContinuationState: input.conversationContinuationState,
       soul: this.#soul,
       memoryPromptContext: input.memoryPromptContext,
       skillsIndex: this.#skillsIndex,
