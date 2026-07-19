@@ -107,24 +107,9 @@ Tool registration happens in phases so tools receive the right runtime and sessi
 
 MCP-discovered tools are added to the session-visible tool registry during session construction, alongside built-in tool registration phases.
 
-### Phase C: workflow wiring
+### Phase C: durable Task persistence
 
-After `AgentLoopBuilder.buildSession()` returns, `createRuntime()` wires workflow support when the session DB is `SQLiteSessionDB`.
-
-Workflow wiring includes:
-
-| Component | Role |
-|---|---|
-| `SQLiteWorkflowStore` | Persists workflow runs, steps, events, locks, and artifacts |
-| `WorkflowLockService` | Coordinates workflow locks |
-| `WorkflowEngine` | Executes workflow plans |
-| `WorkflowProcessRegistry` | Tracks workflow-related processes |
-| `WorkflowEventSummaryService` | Compacts workflow event history |
-| `WorkflowCommandDispatcher` | Handles workflow commands |
-| `WorkflowAgentLoopAdapter` | Routes active workflow turns through the agent loop |
-| `WorkflowRestartRecovery` | Marks interrupted runs and recovers stale locks |
-
-Workflow wiring is best effort. If workflow setup fails, runtime creation can continue without workflow support, and workflow-specific commands should report the missing capability.
+`SQLiteSessionDB` installs the profile-owned Task schema and `SQLiteTaskStore` provides transactional graph storage. Task execution is not wired into `createRuntime()` in this build. Retired Workflow commands fail explicitly; runtime creation does not silently initialize a legacy store.
 
 ---
 
@@ -355,8 +340,7 @@ Gateway cached runtimes are disposed through `RuntimeCache.safeDispose()`, which
 | Missing auxiliary route | Calling subsystem falls back where supported | `estacoda model show` |
 | MCP server unreachable | MCP tools are not registered; runtime continues | `estacoda gateway diagnose` |
 | Browser backend unavailable | Browser tools report connection errors | `estacoda doctor` |
-| SQLite lock or corruption | Session or workflow operations fail | Check `~/.estacoda/sessions.sqlite` permissions |
-| Workflow wiring unavailable | Runtime continues without workflow support | Workflow-related commands and runtime logs |
+| SQLite lock or corruption | Session or Task persistence operations fail | Check `~/.estacoda/sessions.sqlite` permissions |
 
 ---
 

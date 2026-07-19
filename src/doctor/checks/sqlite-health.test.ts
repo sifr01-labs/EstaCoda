@@ -208,7 +208,7 @@ describe("diagnoseSQLiteHealth", () => {
     expect(diagnostic.status).toBe("warning");
     expect(diagnostic.schemaValid).toBe(false);
     expect(diagnostic.ftsHealthy).toBe(true);
-    expect(diagnostic.missingTables).toContain("workflow_runs");
+    expect(diagnostic.missingTables).toContain("tasks");
     expect(diagnostic.warnings).toEqual(expect.arrayContaining([
       expect.stringContaining("SQLite session DB schema is missing auxiliary tables:")
     ]));

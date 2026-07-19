@@ -273,47 +273,9 @@ Manage local browser/CDP connection.
 
 ## Workflow
 
-Requires SQLite session persistence. Available when Workflow is wired.
+The `/workflow` command is retired after the durable Task persistence cutover. It reports that Task operator commands are not available in this build and does not mutate state.
 
-```bash
-/workflow begin <objective>
-/workflow begin --skill <skillName> <objective>
-/workflow status [runId]
-/workflow pause <runId> [reason]
-/workflow resume <runId>
-/workflow interrupt <runId> [reason]
-/workflow cancel <runId> [reason]
-/workflow steer <runId> <guidance>
-/workflow approve <stepId>
-/workflow reject <stepId> [reason]
-/workflow retry <stepId>
-/workflow skip <stepId> [reason]
-/workflow checkpoint <runId> <name>
-/workflow trace [runId] [limit]
-/workflow summarize <runId>
-/workflow activate <runId>
-/workflow deactivate
-```
-
-If `runId` is omitted for `status` and `trace`, the active workflow run is used.
-
-**State touched:** SQLite session DB (`workflow_events`, `workflow_steps`).
-
-**Behavior:**
-- `/workflow begin <objective>` creates a conservative one-step workflow run, starts it, and activates it in the current interactive session.
-- `/workflow begin --skill <skillName> <objective>` resolves the named skill, compiles its playbook, converts it into a `WorkflowPlan`, creates the run, starts it, and activates it in the current interactive session.
-- Successful begin prints `Created workflow: <runId>`, `Started workflow: <runId>`, and `Activated workflow: <runId>`.
-- Plain `/workflow begin <objective>` records explicit provenance and does not use playbook conversion.
-- `/workflow steer` records an unconsumed `OperatorEvent`. On the next adapter turn, guidance is prefixed to the user text in a structured block. Events are marked consumed and visible in `/workflow trace`.
-- `/workflow activate` binds the current session to a workflow run. `/workflow deactivate` clears the binding.
-
-**Failure modes:**
-- Missing objectives return usage text.
-- Unknown skills return a clear error.
-- Steer rejected for terminal-state workflow runs.
-- Retry requires `idempotent` or `safeToRetry` and `retryCount < maxRetries`.
-- Skip requires the step not started and `allowSkipIfSkippable`.
-- Workflow begin does not perform automatic workflow promotion, complex-request detection, Agent Evolution behavior, or automatic workflow creation from normal AgentLoop skill selection. `--skill` is explicit opt-in. `--use-selected-playbook` is not supported.
+**State touched:** None.
 
 ---
 

@@ -7,16 +7,11 @@ import { WorkflowCommandDispatcher } from "../../workflow/workflow-command-dispa
 import { WorkflowEventSummaryService, DEFAULT_WORKFLOW_EVENT_SUMMARY_CONFIG } from "../../workflow/workflow-event-summary-service.js";
 import { WorkflowRestartRecovery } from "../../workflow/workflow-restart-recovery.js";
 import { WorkflowAgentLoopAdapter } from "../../workflow/workflow-agent-loop-adapter.js";
-import { SQLiteWorkflowStore } from "../../workflow/sqlite-workflow-store.js";
 import { TrajectoryRecorder } from "../../trajectory/trajectory-recorder.js";
 import { assertTrue, assertEqual, assertContains, buildResult } from "../eval-runner.js";
 import type { IntentRoute } from "../../contracts/intent.js";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { AgentLoop } from "../../runtime/agent-loop.js";
 import type { AgentLoopInput, AgentLoopResponse } from "../../runtime/agent-loop.js";
-import { resolveTokens } from "../../theme/token-resolver.js";
 
 function makeIntent(): IntentRoute {
   return {
@@ -38,21 +33,6 @@ function makeNow(): () => Date {
     return new Date(t);
   };
 }
-
-const minimalModel = {
-  id: "smoke-model",
-  provider: "unconfigured" as const,
-  contextWindowTokens: 0,
-  supportsTools: false,
-  supportsVision: false,
-  supportsStructuredOutput: false
-};
-
-const minimalRuntimeOptions = {
-  tokens: resolveTokens("standard", "dark", "kemetBlue"),
-  model: minimalModel,
-  workspaceRoot: process.cwd()
-};
 
 /**
  * Fake AgentLoop for testing the adapter.
@@ -278,79 +258,6 @@ export const workflowIntegrationCase: EvalCase = {
       assertions.push(assertTrue("trace-ok", traceResult.ok));
       if (traceResult.ok) {
         assertions.push(assertContains("trace-has-consumed-steer", traceResult.message, "steer"));
-      }
-    }
-
-    // ═════════════════════════════════════════════════════════════════
-    // 7. createRuntime wires the workflow module when SQLiteSessionDB is used
-    // ═════════════════════════════════════════════════════════════════
-    {
-      // We verify the structural wiring by checking that createRuntime's
-      // workflow block uses instanceof SQLiteSessionDB and wires all services.
-      const { createRuntime } = await import("../../runtime/create-runtime.js");
-      const { SQLiteSessionDB: SQLiteSessionDBClass } = await import("../../session/sqlite-session-db.js");
-
-      const dbPath = join(mkdtempSync(join(tmpdir(), "estacoda-eval-")), "test.sqlite");
-      const sqliteDb = new SQLiteSessionDBClass({ path: dbPath });
-
-      try {
-        const rt = await createRuntime({
-          ...minimalRuntimeOptions,
-          sessionDb: sqliteDb
-        });
-
-        assertions.push(assertTrue("runtime-has-workflow", rt.workflow !== undefined));
-        if (rt.workflow) {
-          assertions.push(assertTrue("workflow-has-engine", rt.workflow.engine !== undefined));
-          assertions.push(assertTrue("workflow-has-store", rt.workflow.store !== undefined));
-          assertions.push(assertTrue("workflow-has-dispatcher", rt.workflow.dispatcher !== undefined));
-          assertions.push(assertTrue("workflow-has-processRegistry", rt.workflow.processRegistry !== undefined));
-          assertions.push(assertTrue("workflow-has-eventSummaryService", rt.workflow.compactionService !== undefined));
-          assertions.push(assertTrue("workflow-has-adapter", rt.workflow.adapter !== undefined));
-        }
-        await rt.dispose();
-      } finally {
-        sqliteDb.close();
-      }
-    }
-
-    // ═════════════════════════════════════════════════════════════════
-    // 8. restart recovery runs during runtime startup
-    // ═════════════════════════════════════════════════════════════════
-    {
-      // Create a fresh SQLite DB, seed a running workflow run, then create a runtime
-      const { createRuntime } = await import("../../runtime/create-runtime.js");
-      const { SQLiteSessionDB: SQLiteSessionDBClass } = await import("../../session/sqlite-session-db.js");
-
-      const dbPath = join(mkdtempSync(join(tmpdir(), "estacoda-eval-")), "recovery.sqlite");
-      const sqliteDb = new SQLiteSessionDBClass({ path: dbPath });
-
-      try {
-        // Seed a running workflow run directly in the DB
-        await sqliteDb.createSession({ id: "rec-session", profileId: "default" });
-        const tfStore = new SQLiteWorkflowStore({ db: sqliteDb.db, profileId: "default" });
-        const tfLock = new WorkflowLockService({ store: tfStore });
-        const tfEngine = new WorkflowEngine({ store: tfStore, lockService: tfLock, ownerId: "old-worker" });
-
-        const run = await tfEngine.createWorkflowRun({
-          sessionId: "rec-session",
-          intent: makeIntent(),
-          plan: { name: "Recovery Plan", description: "Test", steps: [{ name: "R1", description: "R1" }] }
-        });
-        await tfEngine.startWorkflowRun(run.id);
-        await tfLock.acquire(run.id, "old-worker");
-
-        // Now createRuntime should run restart recovery
-        const rt = await createRuntime({ ...minimalRuntimeOptions, sessionDb: sqliteDb });
-        assertions.push(assertTrue("recovery-ran-on-startup", rt.workflow !== undefined));
-
-        // WorkflowRun should be interrupted
-        const recoveredFlow = await tfStore.getWorkflowRun(run.id);
-        assertions.push(assertEqual("running-workflow-run-interrupted", recoveredFlow?.status, "interrupted"));
-
-        await rt.dispose();
-      } finally {
-        sqliteDb.close();
       }
     }
 

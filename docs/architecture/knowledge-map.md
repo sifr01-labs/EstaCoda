@@ -81,7 +81,7 @@ graph TB
 | Why did a channel accept/reject a message? | Adapter file, `src/channels/channel-gateway.ts`, `src/channels/adapter-capability.ts` |
 | Why did recall or memory appear? | `src/memory/memory-recall-orchestrator.ts`, `src/session/session-recall-service.ts`, prompt assembly tests |
 | Why did a skill load or route? | `src/skills/skill-loader.ts`, `src/skills/skill-registry.ts`, `src/runtime/runtime-router.ts` |
-| How is workflow state recovered? | `src/workflow/workflow-restart-recovery.ts`, `src/workflow/sqlite-workflow-store.ts` |
+| How is durable Task state persisted? | `src/contracts/task.ts`, `src/workflow/task-schema.ts`, `src/workflow/sqlite-task-store.ts` |
 | How are traces persisted? | `src/session/sqlite-session-db.ts`, `src/trajectory/trajectory-recorder.ts`, `src/cli/trace-commands.ts` |
 
 ## Current Limitations

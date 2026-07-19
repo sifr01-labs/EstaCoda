@@ -1978,7 +1978,7 @@ async function handleWorkflowCommand(input: {
   output: NodeJS.WritableStream;
 }, args: string[]): Promise<string> {
   if (input.runtime.workflow === undefined) {
-    return "Workflow is not available. It requires SQLite session persistence.";
+    return "Workflow commands have been retired. Durable Task commands are not available in this build yet.";
   }
 
   const { workflow } = input.runtime;

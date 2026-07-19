@@ -1,0 +1,64 @@
+import type {
+  Task,
+  TaskAttempt,
+  TaskEvent,
+  TaskEventKind,
+  TaskPlanRevision,
+  TaskResult,
+  TaskSessionLink,
+  TaskStatus,
+  TaskStep
+} from "../contracts/task.js";
+
+export type CreateTaskGraphInput = {
+  task: Task;
+  revision: TaskPlanRevision;
+  steps: readonly TaskStep[];
+};
+
+export type ListTasksOptions = {
+  statuses?: readonly TaskStatus[];
+  limit?: number;
+};
+
+export type ListTaskEventsOptions = {
+  kinds?: readonly TaskEventKind[];
+  stepId?: string;
+  attemptId?: string;
+  limit?: number;
+};
+
+/** Profile-bound persistence contract. A store instance can never opt out of profile scoping. */
+export interface TaskStore {
+  createTaskGraph(input: CreateTaskGraphInput): void;
+  createTask(task: Task): void;
+  updateTask(task: Task): void;
+  getTask(id: string): Task | null;
+  listTasks(options?: ListTasksOptions): Task[];
+
+  createPlanRevisionGraph(revision: TaskPlanRevision, steps: readonly TaskStep[]): void;
+  updatePlanRevision(revision: TaskPlanRevision): void;
+  getPlanRevision(id: string): TaskPlanRevision | null;
+  listPlanRevisions(taskId: string): TaskPlanRevision[];
+
+  updateStep(step: TaskStep): void;
+  getStep(id: string): TaskStep | null;
+  listSteps(taskId: string, planRevisionId: string): TaskStep[];
+
+  createAttempt(attempt: TaskAttempt): void;
+  updateAttempt(attempt: TaskAttempt): void;
+  getAttempt(id: string): TaskAttempt | null;
+  listAttempts(taskId: string, stepId?: string): TaskAttempt[];
+
+  recordResult(result: TaskResult): void;
+  getResult(id: string): TaskResult | null;
+  listResults(taskId: string, attemptId?: string): TaskResult[];
+
+  appendEvent(event: TaskEvent): void;
+  listEvents(taskId: string, options?: ListTaskEventsOptions): TaskEvent[];
+
+  linkSession(link: TaskSessionLink): void;
+  listSessionLinks(taskId: string): TaskSessionLink[];
+
+  atomicWrite<T>(work: (store: TaskStore) => T): T;
+}

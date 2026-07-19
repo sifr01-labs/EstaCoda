@@ -218,20 +218,18 @@ Delegation lets a parent session spawn bounded child agent sessions. Child work 
 
 Child sessions use `DefaultChildAgentLoopFactory` so delegated work goes through the same runtime construction path as normal sessions.
 
-### Workflow engine
+### Durable Task foundation
 
-The workflow subsystem runs durable multi-step work. It is separate from a single provider turn and can persist progress through SQLite-backed workflow state.
+The Task persistence foundation stores profile-owned multi-step execution graphs independently of a provider turn. Task execution is not wired into the runtime in this build.
 
 | Component | Role |
 |---|---|
-| `workflow-engine.ts` | Executes workflow plans |
-| `sqlite-workflow-store.ts` | Persists workflow state |
-| `workflow-command-dispatcher.ts` | Handles workflow commands |
-| `workflow-lock-service.ts` | Coordinates workflow locks |
-| `workflow-restart-recovery.ts` | Recovers restartable workflow state |
-| `skill-playbook-to-workflow-plan.ts` | Converts skill playbooks into workflow plans |
+| `task-schema.ts` | Defines the SQLite Task schema migration |
+| `task-store.ts` | Defines the profile-bound persistence contract |
+| `sqlite-task-store.ts` | Persists Tasks, plan revisions, Steps, Attempts, Results, Events, and session links |
+| `contracts/task.ts` | Defines Task records, transitions, authority, budgets, and graph validation |
 
-Workflows are implemented as a durable orchestration surface. They are not the default path for normal chat turns.
+Normal chat turns remain independent of durable Task storage.
 
 ### Packs and distribution
 

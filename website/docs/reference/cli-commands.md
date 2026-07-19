@@ -365,52 +365,9 @@ estacoda memory finalization prune [--keep N]
 
 ## Workflow
 
-Requires SQLite session persistence. In-memory session DB rejects Workflow commands.
+The `estacoda workflow ...` command family is retired after the durable Task persistence cutover. Every subcommand exits non-zero with explicit guidance. Task operator commands are not available in this build.
 
-```bash
-estacoda workflow begin --session <sessionId> <objective>
-estacoda workflow begin --skill <skillName> --session <sessionId> <objective>
-estacoda workflow list                      # active (non-terminal) workflow runs
-estacoda workflow show <runId>
-estacoda workflow status <runId>
-estacoda workflow trace <runId> [limit]
-estacoda workflow pause <runId> [reason]
-estacoda workflow resume <runId>
-estacoda workflow interrupt <runId> [reason]
-estacoda workflow cancel <runId> [reason]
-estacoda workflow steer <runId> <instruction>
-estacoda workflow approve <stepId>
-estacoda workflow reject <stepId> [reason]
-estacoda workflow retry <stepId>
-estacoda workflow skip <stepId> [reason]
-estacoda workflow checkpoint <runId> <name>
-estacoda workflow summarize <runId>
-```
-
-**State touched:** SQLite session DB (`workflow_events`, `workflow_steps` tables).
-
-**Behavior:**
-- `estacoda workflow begin --session <sessionId> <objective>` creates and starts a conservative one-step workflow run for an existing session. It records `activationReason: "explicit"` and the objective in run metadata.
-- `estacoda workflow begin --skill <skillName> --session <sessionId> <objective>` resolves the named skill, compiles its playbook, converts it into a `WorkflowPlan`, creates the run, and starts it.
-- Standalone begin does not activate future interactive sessions. Use `/workflow activate <runId>` inside an interactive session for live routing.
-- Plain begin does not use playbook conversion. `--skill` is explicit opt-in.
-
-Successful standalone begin prints:
-
-```text
-Created workflow: <runId>
-Started workflow: <runId>
-Not activated. Use /workflow activate <runId> inside an interactive session.
-```
-
-**Failure modes:**
-- Missing or unknown session IDs return an error. Hidden sessions are not created.
-- Unknown skills return a clear error.
-- Retry only works if `idempotent` or `safeToRetry` is true and under `maxRetries`.
-- Skip only works if the step has not started and `allowSkipIfSkippable` is true.
-- Steer is rejected for workflow runs in terminal states.
-- Interrupt sends SIGTERM with 5s timeout to active processes, then transitions state.
-- No automatic workflow promotion, complex-request detection, Agent Evolution participation, automatic workflow creation from normal AgentLoop skill selection, or `--use-selected-playbook` flag exists.
+**State touched:** None.
 
 ---
 

@@ -1519,7 +1519,7 @@ describe("session-loop /workflow begin", () => {
     });
 
     expect(result).toBe(false);
-    expect(outputChunks.join("")).toContain("Workflow is not available. It requires SQLite session persistence.");
+    expect(outputChunks.join("")).toContain("Workflow commands have been retired.");
   });
 
   it("/workflow begin creates, starts, and activates a conservative workflow run", async () => {

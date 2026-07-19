@@ -19,8 +19,6 @@ import { routingEvolutionBaselineCase } from "./routing-evolution-baseline.js";
 import { evolutionExportShapeCase } from "./evolution-export-shape.js";
 import { workflowRunStateTransitionsCase } from "./workflow-run-state-transitions.js";
 import { workflowLockingCase } from "./workflow-locking.js";
-import { workflowMigrationCase } from "./workflow-migration.js";
-import { workflowStoreAtomicityCase } from "./workflow-store-atomicity.js";
 import { workflowEngineLifecycleCase } from "./workflow-engine-lifecycle.js";
 import { workflowRestartRecoveryCase } from "./workflow-restart-recovery.js";
 import { workflowCommandControlCase } from "./workflow-command-control.js";
@@ -49,8 +47,6 @@ export const defaultEvalFixtures = [
   evolutionExportShapeCase,
   workflowRunStateTransitionsCase,
   workflowLockingCase,
-  workflowMigrationCase,
-  workflowStoreAtomicityCase,
   workflowEngineLifecycleCase,
   workflowRestartRecoveryCase,
   workflowCommandControlCase,

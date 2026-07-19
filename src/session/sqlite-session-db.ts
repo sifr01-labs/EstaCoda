@@ -19,6 +19,7 @@ import type { TrajectoryStore } from "../contracts/trajectory-store.js";
 import type { SQLiteDatabase } from "../storage/sqlite.js";
 import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 import { toFtsQuery } from "../search/fts-query.js";
+import { migrateTaskSchemaV10 } from "../workflow/task-schema.js";
 
 type SessionRow = {
   id: string;
@@ -606,6 +607,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
   }
 
   #migrate(): void {
+    this.#execMigrationControlSql(`pragma foreign_keys = on;`);
     this.#execMigrationControlSql(`pragma journal_mode = wal;`);
 
     this.#withMigrationLock(() => {
@@ -689,15 +691,13 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
       `);
     });
 
-    this.#runMigrationStep(1, "v0.8-schema-v1", () => this.#migrateV1());
-    this.#runMigrationStep(2, "v0.8-schema-v2", () => this.#migrateV2());
-    this.#runMigrationStep(3, "v0.8-schema-v3", () => this.#migrateV3());
     this.#runMigrationStep(4, "v0.9-schema-v4-cron-executions", () => this.#migrateV4());
     this.#runMigrationStep(5, "v0.9-schema-v5-pending-approvals", () => this.#migrateV5());
     this.#runMigrationStep(6, "v0.9-schema-v6-session-lineage", () => this.#migrateV6());
     this.#runMigrationStep(7, "v0.9-schema-v7-typed-pending-approvals", () => this.#migrateV7());
     this.#runMigrationStep(8, "v0.9-schema-v8-session-finalization", () => this.#migrateV8());
     this.#runMigrationStep(9, "v0.9-schema-v9-memory-curation-lease", () => this.#migrateV9());
+    this.#runMigrationStep(10, "v0.10-schema-v10-task-persistence", () => migrateTaskSchemaV10(this.#db));
   }
 
   #withMigrationLock(migrate: () => void): void {
@@ -913,40 +913,6 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     `);
   }
 
-  #migrateV3(): void {
-    // Defensive: inspect workflow_operator_events columns before adding each
-    const rows = this.#db.query("pragma table_info(workflow_operator_events)").all() as Array<{ name: string }>;
-    const colNames = new Set(rows.map((r) => r.name));
-    if (!colNames.has("consumed_at")) {
-      this.#db.exec("alter table workflow_operator_events add column consumed_at text");
-    }
-    if (!colNames.has("consumed_by_workflow_step_id")) {
-      this.#db.exec("alter table workflow_operator_events add column consumed_by_workflow_step_id text");
-    }
-    if (!colNames.has("consumed_by_run_id")) {
-      this.#db.exec("alter table workflow_operator_events add column consumed_by_run_id text");
-    }
-    if (!colNames.has("consumed_by_workflow_event_id")) {
-      this.#db.exec("alter table workflow_operator_events add column consumed_by_workflow_event_id text");
-    }
-  }
-
-  #migrateV2(): void {
-    this.#db.exec(`
-      create table if not exists workflow_event_summaries (
-        id text primary key,
-        workflow_run_id text not null references workflow_runs(id) on delete cascade,
-        from_workflow_event_id text not null,
-        to_workflow_event_id text not null,
-        turn_summaries_json text not null,
-        tool_outcome_summaries_json text not null,
-        operator_action_summaries_json text not null,
-        created_at text not null
-      );
-      create index if not exists idx_workflow_event_summaries_run on workflow_event_summaries(workflow_run_id, created_at);
-    `);
-  }
-
   #backupDbBeforeMigration(label: string): void {
     try {
       const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -955,173 +921,6 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     } catch {
       // Backup is best-effort; do not block migration
     }
-  }
-
-  #migrateV1(): void {
-    // Workflow durable execution schema (v0.8)
-    this.#db.exec(`
-      create table if not exists workflow_runs (
-        id text primary key,
-        session_id text not null,
-        status text not null default 'pending',
-        intent_json text not null,
-        selected_skill text,
-        current_workflow_step_id text,
-        created_at text not null,
-        updated_at text not null,
-        completed_at text,
-        cancelled_at text,
-        failed_at text,
-        pause_requested_at text,
-        pause_reason text,
-        interrupt_reason text,
-        cancel_reason text,
-        wait_reason_json text,
-        operator_summary text,
-        compacted_at text,
-        checkpoint_count integer not null default 0,
-        step_count integer not null default 0,
-        retry_count integer not null default 0,
-        metadata_json text
-      );
-
-      create table if not exists workflow_steps (
-        id text primary key,
-        workflow_run_id text not null references workflow_runs(id) on delete cascade,
-        step_index integer not null,
-        status text not null default 'pending',
-        name text not null,
-        description text not null,
-        tool_plans_json text,
-        executions_json text,
-        retry_policy_json text not null,
-        retry_count integer not null default 0,
-        max_retries integer not null default 1,
-        idempotent integer not null default 0,
-        safe_to_retry integer not null default 0,
-        failure_policy_json text not null,
-        wait_reason_json text,
-        pause_reason text,
-        interrupt_reason text,
-        skip_reason text,
-        retry_of_workflow_step_id text,
-        attempt_number integer not null default 1,
-        started_at text,
-        completed_at text,
-        failed_at text,
-        cancelled_at text,
-        paused_at text,
-        resumed_at text,
-        wait_started_at text,
-        wait_ended_at text,
-        created_at text not null,
-        updated_at text not null
-      );
-
-      create table if not exists workflow_events (
-        id text primary key,
-        workflow_run_id text not null references workflow_runs(id) on delete cascade,
-        workflow_step_id text,
-        kind text not null,
-        data_json text not null,
-        timestamp text not null
-      );
-
-      create table if not exists workflow_operator_events (
-        id text primary key,
-        workflow_run_id text not null references workflow_runs(id) on delete cascade,
-        workflow_step_id text,
-        kind text not null,
-        operator text not null,
-        command text not null,
-        effect text not null,
-        previous_state text not null,
-        new_state text not null,
-        metadata_json text,
-        timestamp text not null
-      );
-
-      create table if not exists workflow_checkpoints (
-        id text primary key,
-        workflow_run_id text not null references workflow_runs(id) on delete cascade,
-        workflow_step_id text,
-        name text not null,
-        description text,
-        snapshot_json text not null,
-        created_at text not null,
-        created_by text not null
-      );
-
-      create table if not exists workflow_approval_gates (
-        id text primary key,
-        workflow_step_id text not null references workflow_steps(id) on delete cascade,
-        workflow_run_id text not null references workflow_runs(id) on delete cascade,
-        status text not null default 'pending',
-        requested_at text not null,
-        resolved_at text,
-        resolved_by text,
-        reason text not null,
-        risk_class text not null,
-        tool_name text,
-        target_key text,
-        target_summary text,
-        scope text,
-        controller_grant_id text,
-        tool_executor_decision text not null,
-        deterministic_rule text
-      );
-
-      create table if not exists workflow_locks (
-        workflow_run_id text primary key,
-        owner_id text not null,
-        locked_at text not null,
-        heartbeat_at text not null,
-        expires_at text not null
-      );
-
-      create table if not exists workflow_processes (
-        id text primary key,
-        workflow_run_id text not null references workflow_runs(id) on delete cascade,
-        workflow_step_id text not null,
-        process_manager_id text not null,
-        process_type text not null,
-        command_summary text,
-        started_at text not null,
-        expected_exit_at text,
-        status text not null default 'running'
-      );
-
-      create table if not exists workflow_artifacts (
-        artifact_id text not null,
-        workflow_step_id text not null,
-        workflow_run_id text not null references workflow_runs(id) on delete cascade,
-        kind text not null,
-        linked_at text not null,
-        primary key (artifact_id, workflow_step_id, workflow_run_id)
-      );
-
-      create table if not exists workflow_agent_run_links (
-        run_id text not null,
-        workflow_step_id text not null,
-        workflow_run_id text not null references workflow_runs(id) on delete cascade,
-        turn_index integer not null,
-        linked_at text not null,
-        primary key (run_id, workflow_step_id, workflow_run_id)
-      );
-
-      create index if not exists idx_workflow_runs_session on workflow_runs(session_id, created_at);
-      create index if not exists idx_workflow_runs_status on workflow_runs(status);
-      create index if not exists idx_workflow_steps_run on workflow_steps(workflow_run_id, step_index);
-      create index if not exists idx_workflow_steps_status on workflow_steps(status);
-      create index if not exists idx_workflow_events_run on workflow_events(workflow_run_id, timestamp);
-      create index if not exists idx_workflow_events_step on workflow_events(workflow_run_id, workflow_step_id, timestamp);
-      create index if not exists idx_workflow_operator_events_run on workflow_operator_events(workflow_run_id, timestamp);
-      create index if not exists idx_workflow_checkpoints_run on workflow_checkpoints(workflow_run_id, created_at);
-      create index if not exists idx_workflow_approval_gates_run on workflow_approval_gates(workflow_run_id, status);
-      create index if not exists idx_workflow_approval_gates_step on workflow_approval_gates(workflow_step_id, status);
-      create index if not exists idx_workflow_processes_run on workflow_processes(workflow_run_id, workflow_step_id);
-      create index if not exists idx_workflow_locks_expires on workflow_locks(expires_at);
-    `);
   }
 
   #touch(sessionId: string): void {

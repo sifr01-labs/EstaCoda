@@ -1,176 +1,56 @@
 ---
-title: "Workflow"
-description: "Durable multi-step execution, state machine, and runtime integration."
+title: "Task persistence"
+description: "Profile-owned durable Task storage and the Workflow persistence cutover."
 ---
 
-# Workflow Architecture
+# Task persistence
 
-## Purpose
+EstaCoda's durable execution records use the Task domain model:
 
-Workflow provides durable, observable, operator-controllable multi-step execution for agent sessions. A workflow run represents a high-level objective, for example "refactor the auth module." Steps represent discrete actions within that run. State is persisted to SQLite so work survives process restarts.
-
-## When Workflow is active
-
-Workflow is wired into `createRuntime` **only** when `sessionDb` is an `SQLiteSessionDB`. In-memory sessions do not support Workflow.
-
-Workflow is production-enterable through explicit operator commands:
-
-- `/workflow begin <objective>` creates, starts, and activates a workflow run in the current interactive session.
-- `estacoda workflow begin --session <sessionId> <objective>` creates and starts a workflow run for an existing session, but does not activate any future interactive session.
-- `/workflow begin --skill <skillName> <objective>` and `estacoda workflow begin --skill <skillName> --session <sessionId> <objective>` opt into a named skill playbook as the source plan.
-
-No automatic workflow promotion exists. Normal AgentLoop skill selection does not create workflow runs, complex-request auto-detection does not exist, and Agent Evolution is not part of workflow begin.
-
-## Components
-
-### WorkflowEngine
-
-The state machine. Enforces legal transitions, manages workflow run and step lifecycles, and emits events.
-
-Key methods:
-- `createWorkflowRun(sessionId, intent)` — creates a workflow run in `pending` state.
-- `startWorkflowRun(runId)` — transitions to `running`.
-- `requestWorkflowPause(runId, reason)` — requests pause at next safe boundary.
-- `resumeWorkflowRun(runId)` — transitions `paused`/`interrupted`/`waiting` to `running`.
-- `interruptWorkflowRun(runId, reason)` — immediate interrupt with process cleanup.
-- `cancelWorkflowRun(runId, reason)` — terminal cancel with process cleanup.
-- `skipStep(stepId, reason)` — skip a pending step (only if not started and skippable).
-- `retryStep(stepId)` — create a retry step (only if idempotent/safeToRetry and under maxRetries).
-- `createWorkflowCheckpoint(runId, name)` — record a named checkpoint.
-
-### WorkflowStore (SQLiteWorkflowStore)
-
-Persistence layer. All tables use `create table if not exists` and are created via schema migration in `SQLiteSessionDB`.
-
-### WorkflowLockService
-
-Prevents concurrent workflow run mutation. Locks have lease expiry; stale locks are recovered on startup.
-
-### WorkflowProcessRegistry
-
-Tracks external processes (shell commands, browser sessions) linked to steps. On interrupt/cancel, running processes are terminated and results are recorded.
-
-### WorkflowCommandDispatcher
-
-Routes slash commands to engine methods. Every dispatch validates preconditions and returns structured `CommandResult`. All operator actions append `OperatorEvent` records.
-
-### WorkflowEventSummaryService
-
-Summarizes completed workflow events into `WorkflowEventSummary` records. Never deletes original events. Only runs when:
-- no active processes,
-- no active steps,
-- no pending approvals.
-
-Default config: `enabled: false`. Must be explicitly enabled.
-
-### WorkflowAgentLoopAdapter
-
-Bridges Workflow and AgentLoop. Responsibilities:
-- Load unconsumed steer events before each turn.
-- Prefix steer guidance explicitly (auditable, not hidden).
-- Execute turn through AgentLoop.handle().
-- Mark steer events consumed with real `trajectoryId` linkage.
-- Record artifact and run links.
-- Check automatic workflow event summaries at safe boundary.
-
-### Skill Playbook Converter
-
-`convertSkillPlaybookToWorkflowPlan()` converts a compiled skill playbook into a `WorkflowPlan`. It is inert by itself. The runtime calls it only from explicit skill-backed workflow begin:
-
-```bash
-/workflow begin --skill <skillName> <objective>
-estacoda workflow begin --skill <skillName> --session <sessionId> <objective>
+```text
+Task
+└── PlanRevision
+    └── Step
+        └── Attempt
+            ├── Lease
+            └── Result
 ```
 
-The converter preserves skill/playbook provenance, step order, step names, step descriptions, preferred toolsets, and success criteria as plan metadata where supported. It does not infer approvals, retries, idempotency, fallback policy, failure policy, routing behavior, or execution behavior.
+This document describes the persistence foundation currently present in the codebase. The Task scheduler, executor integration, and Task operator commands are not wired in this build. The retired Workflow commands fail explicitly instead of falling back to an in-memory or partially initialized implementation.
 
-## Data Model
+## Source of truth
 
-### WorkflowRun
+- `src/contracts/task.ts` defines the durable records, legal state transitions, authority and budget policies, and deterministic graph validation.
+- `src/workflow/task-schema.ts` owns SQLite schema version 10.
+- `src/workflow/task-store.ts` defines the profile-bound storage contract.
+- `src/workflow/sqlite-task-store.ts` implements transactional SQLite persistence.
+- `src/session/sqlite-session-db.ts` runs the migration and enables SQLite foreign-key enforcement.
 
-- `id`, `sessionId`, `status`
-- `intent`: the original objective (JSON)
-- `currentStepId`: active step
-- `createdAt`, `updatedAt`, `completedAt`, `cancelledAt`, `failedAt`
-- `pauseRequestedAt`, `pauseReason`
-- `checkpointCount`, `stepCount`, `retryCount`
-- `compactedAt`
-- `metadata`: run provenance. Explicit begin records `activationReason: "explicit"` and `objective`. Skill-backed begin records `activationReason: "playbook"`, `objective`, `skillName`, and playbook provenance.
+There is one durable persistence model. Schema version 10 removes the former `workflow_*` tables; it does not translate those records because the required Task authority, immutable plan revision, Attempt, workspace binding, and profile ownership cannot be derived safely.
 
+## Profile isolation
 
-### WorkflowStep
+Every durable record carries `profile_id`. A `SQLiteTaskStore` cannot be constructed without a profile, every query includes that profile, and composite foreign keys repeat the ownership boundary in SQLite. Sessions, trajectories, parent Tasks, parent Attempts, Steps, Results, Events, and links cannot be attached across profiles.
 
-- `id`, `runId`, `index`, `status`, `name`, `description`
-- `toolPlans`, `executions`
-- `retryPolicy`, `retryCount`, `maxRetries`
-- `idempotent`, `safeToRetry`
-- `failurePolicy` (includes `allowSkipIfSkippable`)
-- `retryOfStepId`, `attemptNumber`
-- Timestamps: `startedAt`, `completedAt`, `failedAt`, `cancelledAt`, `pausedAt`, `resumedAt`
+Opaque Task and session identifiers are routing keys, not authorization boundaries.
 
-### WorkflowEvent
+## Transaction and graph invariants
 
-- `id`, `runId`, `stepId`, `kind`, `data`, `timestamp`
+- A Task, its first PlanRevision, Steps, dependencies, and creator-session link can be inserted in one `begin immediate` transaction.
+- Failed graph writes roll back completely.
+- Plan definitions are immutable after insertion. Replanning creates a new PlanRevision.
+- Task creation keys and Attempt dispatch keys have separate profile-scoped uniqueness constraints.
+- Only one PlanRevision can be active for a Task.
+- Attempt leases are stored separately and require a positive, monotonically managed fencing token.
+- Event metadata and Result sizes are bounded before persistence.
+- SQLite check constraints reject unknown states, invalid JSON, negative sizes, invalid attempt numbers, and self-dependencies.
 
-Kinds include: `step-started`, `step-completed`, `step-failed`, `step-skipped`, `step-retried`, `pause-requested`, `process-registered`, `process-exited`, `process-orphaned`, `compacted`.
+## Migration behavior
 
-### OperatorEvent
+Opening a writable `SQLiteSessionDB` migrates it to schema version 10 under the existing migration lock and transaction. The migration preserves unrelated session, message, trajectory, approval, cron, finalization, and memory-curation data. A best-effort pre-migration backup is created by the session database migration runner.
 
-- `id`, `runId`, `stepId`, `kind`, `operator`, `command`, `effect`
-- `previousState`, `newState`
-- `metadata`, `timestamp`
-- `consumedAt`, `consumedByStepId`, `consumedByRunId` — set when steer is consumed by adapter
+The migration is intentionally destructive only for the retired Workflow tables. There is no dual-read, dual-write, compatibility alias, or hidden legacy store.
 
-### Checkpoint
+## Current boundary
 
-- `id`, `runId`, `stepId`, `name`, `description`, `snapshot` (JSON), `createdAt`, `createdBy`
-
-### ApprovalGate
-
-- `id`, `stepId`, `runId`, `status`
-- `requestedAt`, `resolvedAt`, `resolvedBy`
-- `reason`, `riskClass`
-- `toolName`, `targetKey`, `targetSummary`, `scope`
-- `controllerGrantId`, `toolExecutorDecision`, `deterministicRule`
-
-## Runtime Integration
-
-```
-Session Loop
-    |
-    v
-Runtime.handle()  <-- /workflow commands set activeRunId
-    |
-    v
-AgentLoop.handle()
-    ^
-    |
-WorkflowAgentLoopAdapter.runTurn()  <-- only when activeRunId is set
-    |
-    v
-WorkflowEngine + Store
-```
-
-When `rt.workflow.activeRunId` is set and the workflow run is running, the adapter wraps turns. When no active workflow run is set, AgentLoop runs normally.
-
-The interactive `/workflow begin` path sets `activeRunId` after a successful create/start. The standalone `estacoda workflow begin` path never sets live runtime activation; operators must enter an interactive session and run `/workflow activate <runId>`.
-
-Standalone begin requires an existing session ID. It does not create hidden sessions.
-
-## Restart Recovery
-
-On `createRuntime` with SQLite:
-1. `WorkflowRestartRecovery.recover()` marks `running` workflow runs as `interrupted`.
-2. Marks `running` steps as `interrupted`.
-3. Releases stale locks (expired lease).
-4. Results are visible via `rt.workflow.recoverFromRestart()`.
-
-## Known Limitations
-
-- Checkpoints are recorded but not restorable in the current workflow implementation.
-- Workflow runs are scoped to a single session; no cross-session resumption.
-- Lock service is single-process SQLite only.
-- Automatic workflow event summaries are disabled by default.
-- No automatic retry without operator `/retry`.
-- No automatic workflow promotion or complex-request auto-detection.
-- `--skill` is explicit opt-in. `--use-selected-playbook` is not supported.
+The persistence layer does not execute Tasks and does not grant authority. Future execution code must still recheck workspace trust, hardline command policy, approvals, profile ownership, budget, and lease fencing at the point of action. Persisted authority can only narrow runtime policy; it cannot approve an operation by itself.
