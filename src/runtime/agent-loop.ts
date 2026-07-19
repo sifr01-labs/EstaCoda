@@ -5,7 +5,7 @@ import type { IntentRoute } from "../contracts/intent.js";
 import type { MemoryConclusion, MemoryFileKind, MemoryProvider, MemoryPromptContext, SkillOutcome } from "../contracts/memory.js";
 import type { PromptBudgetReport, PromptSemanticCompressionReport } from "../contracts/prompt.js";
 import type { ModelProfile, ProviderMessage, ProviderRequest, ProviderRoutePreferences } from "../contracts/provider.js";
-import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
+import type { ContextEstimateStage, RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SecurityDecision, SecurityPolicy } from "../contracts/security.js";
 import { assessSecurityPolicy, capabilityFirstDefaults } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
@@ -30,6 +30,7 @@ import type { ToolExecutor, ToolExecutionRecord } from "../tools/tool-executor.j
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { resolveProjectFactPromotion, resolveUserPreferencePromotion } from "../memory/memory-promotion.js";
 import { isMemoryBudgetOverflowError, type MemoryBudgetOverflowError } from "../memory/memory-store.js";
+import { MemoryCurationBusyError } from "../memory/memory-curation-coordinator.js";
 import type { MemoryRecallOrchestrator } from "../memory/memory-recall-orchestrator.js";
 import type { SkillLearningManager } from "../skills/skill-learning.js";
 import type { SkillEvolutionStore } from "../skills/skill-evolution.js";
@@ -60,6 +61,7 @@ import { estimateMessagesTokensRough, estimateTextTokensRough } from "../prompt/
 import { redactSensitiveText } from "../utils/redaction.js";
 import type { WorkflowRuntimeContext } from "../contracts/workflow-context.js";
 import type { MemoryCurationService } from "../memory/memory-curation-service.js";
+import { emitContextEstimate } from "./context-usage-events.js";
 
 export type AgentLoopInput = {
   text: string;
@@ -932,18 +934,18 @@ export class AgentLoop {
     toolExecutions?: ToolExecutionRecord[];
     providerTools?: OpenAICompatibleToolSchema[];
     preflightCompression?: PromptSemanticCompressionReport;
-    stage: string;
+    stage: ContextEstimateStage;
   }): Promise<void> {
     const total = this.#model?.contextWindowTokens;
     if (!Number.isFinite(total) || total === undefined || total <= 0) {
       return;
     }
 
-    await emit(input.onEvent, {
-      kind: "context-usage",
+    await emitContextEstimate(input.onEvent, {
       filled: Math.max(0, Math.round(await this.#estimateLiveContextTokens(input))),
       total,
-      source: "live-estimate"
+      source: "live-estimate",
+      stage: input.stage
     });
   }
 
@@ -992,7 +994,7 @@ export class AgentLoop {
     toolExecutions?: ToolExecutionRecord[];
     providerTools?: OpenAICompatibleToolSchema[];
     preflightCompression?: PromptSemanticCompressionReport;
-    stage: string;
+    stage: ContextEstimateStage;
   }): Promise<number> {
     const sessionMessages = await this.#sessionDb.listMessages(this.#currentSessionId()).catch(() => []);
     let tokens = estimateMessagesTokensRough(sessionMessages.map((message) => ({
@@ -1129,6 +1131,9 @@ export class AgentLoop {
         sourceEventId: userInputEventId
       });
     } catch (error) {
+      if (error instanceof MemoryCurationBusyError) {
+        return;
+      }
       if (!isMemoryBudgetOverflowError(error)) {
         throw error;
       }
@@ -1172,6 +1177,9 @@ export class AgentLoop {
         sourceEventId: userInputEventId
       });
     } catch (error) {
+      if (error instanceof MemoryCurationBusyError) {
+        return;
+      }
       if (!isMemoryBudgetOverflowError(error)) {
         throw error;
       }

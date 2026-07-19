@@ -2038,10 +2038,12 @@ export class StandardRenderer {
     const parts: string[] = [];
 
     if (vm.contextUsage !== undefined) {
-      const filled = formatContextCount(vm.contextUsage.filled);
+      const filled = vm.contextUsage.filled === undefined ? "--" : formatContextCount(vm.contextUsage.filled);
       const total = formatContextCount(vm.contextUsage.total);
       parts.push(`${this.#copy.context} ${filled}/${total}`);
-      parts.push(this.#contextBeads(vm.contextUsage.filled, vm.contextUsage.total));
+      parts.push(vm.contextUsage.filled === undefined
+        ? this.#unknownContextBeads()
+        : this.#contextBeads(vm.contextUsage.filled, vm.contextUsage.total));
     }
 
     if (vm.sessionElapsedMs !== undefined) {
@@ -2069,10 +2071,12 @@ export class StandardRenderer {
     const parts: string[] = [];
 
     if (vm.contextUsage !== undefined) {
-      const filled = formatContextCount(vm.contextUsage.filled);
+      const filled = vm.contextUsage.filled === undefined ? "--" : formatContextCount(vm.contextUsage.filled);
       const total = formatContextCount(vm.contextUsage.total);
       parts.push(`${isolateRtl(this.#copy.context)} ${isolateLtr(`${filled}/${total}`)}`);
-      parts.push(this.#contextBeads(vm.contextUsage.filled, vm.contextUsage.total));
+      parts.push(vm.contextUsage.filled === undefined
+        ? this.#unknownContextBeads()
+        : this.#contextBeads(vm.contextUsage.filled, vm.contextUsage.total));
     }
 
     if (vm.sessionElapsedMs !== undefined) {
@@ -2165,6 +2169,10 @@ export class StandardRenderer {
     }
     const blocks = Array.from({ length: 10 }, (_, index) => index < active ? "▰" : "▱").join(" ");
     return `${blocks} ${percent}%`;
+  }
+
+  #unknownContextBeads(): string {
+    return this.#useUnicode ? `${this.#secondary("·".repeat(10))} --%` : "--%";
   }
 
   #sessionStatusModelLabel(vm: SessionStatusRailViewModel): string {

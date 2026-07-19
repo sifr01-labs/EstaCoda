@@ -6,6 +6,7 @@ import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { MemoryProvider } from "../contracts/memory.js";
 import type { ModelProfile, ProviderStreamDiagnostics } from "../contracts/provider.js";
+import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { SecurityPolicy } from "../contracts/security.js";
 import type { SkillDefinition } from "../contracts/skill.js";
 import type { ToolDefinition } from "../contracts/tool.js";
@@ -35,6 +36,7 @@ import type { ToolPlanRunner } from "./tool-plan-runner.js";
 import { createSessionRuntimeContext } from "./session-runtime-context.js";
 import { normalizeSessionCompressionConfig, type SessionCompressionConfig } from "../config/runtime-config.js";
 import type { MemoryCurationService } from "../memory/memory-curation-service.js";
+import { MemoryCurationBusyError } from "../memory/memory-curation-coordinator.js";
 
 const memoryPromotionMocks = vi.hoisted(() => ({
   resolveUserPreferencePromotion: vi.fn(),
@@ -399,6 +401,33 @@ async function createAgentLoop(input: {
 }
 
 describe("AgentLoop provider availability gating", () => {
+  it("emits staged context estimates", async () => {
+    const { loop } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("done")
+    });
+    const events: RuntimeEvent[] = [];
+
+    await loop.handle({
+      text: "use the test skill",
+      channel: "cli",
+      trustedWorkspace: true,
+      onEvent: (event) => {
+        events.push(event);
+      }
+    });
+
+    const estimates = events.filter((event): event is Extract<RuntimeEvent, { kind: "context-estimate" }> =>
+      event.kind === "context-estimate"
+    );
+    expect(estimates).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: "live-estimate", stage: "input", total: model.contextWindowTokens }),
+      expect.objectContaining({ source: "live-estimate", stage: "preflight", total: model.contextWindowTokens })
+    ]));
+    expect(estimates.every((event) => event.filled >= 0)).toBe(true);
+  });
+
   it("passes completed-turn route and outcome context to skill learning", async () => {
     const observeTurn = vi.fn(async () => undefined);
     const { loop } = await createAgentLoop({
@@ -2082,6 +2111,38 @@ describe("AgentLoop provider availability gating", () => {
       channel: "cli",
       trustedWorkspace: true
     })).rejects.toThrow("unexpected promotion failure");
+  });
+
+  it("keeps the active turn successful when automatic promotion is busy", async () => {
+    const memoryProvider: MemoryProvider = {
+      id: "busy-memory",
+      async context() {
+        return { text: "", usage: [] };
+      },
+      async search() {
+        return [];
+      },
+      async conclude() {
+        throw new MemoryCurationBusyError();
+      }
+    };
+    const { loop, sessionDb } = await createAgentLoop({
+      canRunProvider: false,
+      runSkillPlaybook: vi.fn(async () => [execution]),
+      memoryProvider
+    });
+    await sessionDb.createSession({ id: "previous-busy-session", profileId: "default" });
+    await sessionDb.appendMessage({
+      sessionId: "previous-busy-session",
+      role: "user",
+      content: "Prefer detailed replies."
+    });
+
+    await expect(loop.handle({
+      text: "Prefer detailed replies.",
+      channel: "cli",
+      trustedWorkspace: true
+    })).resolves.toMatchObject({ text: expect.stringContaining("test-skill") });
   });
 
   it("records existing promotion success events unchanged", async () => {

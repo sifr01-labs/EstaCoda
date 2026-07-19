@@ -1945,6 +1945,17 @@ describe("PlainRenderer — prompt chrome rails", () => {
     assertNoAnsi(out);
   });
 
+  it("renders unknown usage without fabricating zero", () => {
+    const out = renderSessionStatusRail(buildSessionStatusRailViewModel({
+      modelLabel: "deepseek-reasoner",
+      turnState: "idle",
+      contextUsage: { total: 128000 },
+      showTurnState: false,
+    }));
+
+    expect(out).toBe("* deepseek-reasoner | context --/128k | --%");
+  });
+
   it("renders long status rail durations as hours and minutes without ANSI", () => {
     const vm = buildSessionStatusRailViewModel({
       modelLabel: "deepseek-reasoner",

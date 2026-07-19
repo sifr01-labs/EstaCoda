@@ -15,7 +15,13 @@ import type {
 } from "../contracts/provider.js";
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SecurityDecision } from "../contracts/security.js";
-import type { ReplacementSessionMessage, SessionDB, SessionMessage, StructuredToolHistoryDiagnosticEvent } from "../contracts/session.js";
+import type {
+  ReplacementSessionMessage,
+  SessionContextWindowUsage,
+  SessionDB,
+  SessionMessage,
+  StructuredToolHistoryDiagnosticEvent
+} from "../contracts/session.js";
 import type { LoadedSkill, SelectedSkillPromptContent, SkillDefinition, SkillCatalogEntry } from "../contracts/skill.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
@@ -43,6 +49,8 @@ import type { ToolPlanRunner } from "./tool-plan-runner.js";
 import type { SkillSetupContext } from "./agent-loop.js";
 import type { SessionRuntimeContext } from "./session-runtime-context.js";
 import { emit, isAborted } from "../utils/runtime-helpers.js";
+import { emitContextEstimate, emitContextWindowUsage } from "./context-usage-events.js";
+import { normalizeSessionContextWindowUsage } from "../session/session-context-window-usage.js";
 
 const MAX_PROVIDER_REPLAY_ECHO_CHARS = 32_000;
 
@@ -85,6 +93,7 @@ export type ProviderTurnLoopOptions = {
   } | undefined;
   budgets: ProviderTurnLoopBudgets;
   providerRequestDefaults?: ProviderTurnLoopRequestDefaults;
+  initialContextWindowUsage?: SessionContextWindowUsage;
 };
 
 export class ProviderTurnLoop {
@@ -128,6 +137,7 @@ export class ProviderTurnLoop {
     this.#agentProfile = options.agentProfile;
     this.#budgets = options.budgets;
     this.#providerRequestDefaults = options.providerRequestDefaults ?? {};
+    this.#lastActualPromptTokens = options.initialContextWindowUsage?.usedTokens;
   }
 
   canRunProvider(): boolean {
@@ -364,11 +374,11 @@ export class ProviderTurnLoop {
         capturedContentWithHousekeepingTools = execution.response.content;
       }
       if (loopToolExecutions.length > 0 && this.#model !== undefined) {
-        await emit(input.onEvent, {
-          kind: "context-usage",
+        await emitContextEstimate(input.onEvent, {
           filled: normalizeTokenCount(this.#lastPromptTokens + estimateProviderToolFeedbackTokens(loopToolExecutions)),
           total: normalizeTokenCount(this.#model.contextWindowTokens),
-          source: "live-estimate"
+          source: "live-estimate",
+          stage: "provider-tool-feedback"
         });
       }
       const currentPlans = input.toolPlans.slice(beforePlans);
@@ -572,7 +582,7 @@ export class ProviderTurnLoop {
     this.#lastPromptTokens = prompt.budget.estimatedTokens;
     await this.#runRecorder.recordPromptAssembly(prompt.budget);
     await this.#recordNativeHistoryDiagnostics(prompt, "primary");
-    await emitContextUsage(input.onEvent, prompt.budget, "assembled-prompt");
+    await emitAssembledPromptEstimate(input.onEvent, prompt.budget);
 
     const providerRequest = normalizeProviderRequest({
       provider: this.#model.provider,
@@ -602,13 +612,7 @@ export class ProviderTurnLoop {
       onSegmentBreak: input.onSegmentBreak
     });
     if (execution.response?.usage?.inputTokens !== undefined) {
-      this.#lastActualPromptTokens = execution.response.usage.inputTokens;
-      await emit(input.onEvent, {
-        kind: "context-usage",
-        filled: normalizeTokenCount(execution.response.usage.inputTokens),
-        total: normalizeTokenCount(prompt.budget.contextWindowTokens),
-        source: "provider-actual"
-      });
+      await this.#recordContextWindowUsage(execution, prompt.budget, input.onEvent);
     }
 
     await this.#sessionDb.appendEvent(this.#currentSessionId(), {
@@ -710,7 +714,7 @@ export class ProviderTurnLoop {
     this.#lastPromptTokens = prompt.budget.estimatedTokens;
     await this.#runRecorder.recordPromptAssembly(prompt.budget);
     await this.#recordNativeHistoryDiagnostics(prompt, "primary");
-    await emitContextUsage(input.onEvent, prompt.budget, "assembled-prompt");
+    await emitAssembledPromptEstimate(input.onEvent, prompt.budget);
 
     const providerRequest = normalizeProviderRequest({
       provider: this.#model.provider,
@@ -740,13 +744,7 @@ export class ProviderTurnLoop {
       onSegmentBreak: input.onSegmentBreak
     });
     if (execution.response?.usage?.inputTokens !== undefined) {
-      this.#lastActualPromptTokens = execution.response.usage.inputTokens;
-      await emit(input.onEvent, {
-        kind: "context-usage",
-        filled: normalizeTokenCount(execution.response.usage.inputTokens),
-        total: normalizeTokenCount(prompt.budget.contextWindowTokens),
-        source: "provider-actual"
-      });
+      await this.#recordContextWindowUsage(execution, prompt.budget, input.onEvent);
     }
 
     const continuationEvent = {
@@ -1078,6 +1076,35 @@ export class ProviderTurnLoop {
 
   lastActualPromptTokens(): number | undefined {
     return this.#lastActualPromptTokens;
+  }
+
+  async #recordContextWindowUsage(
+    execution: ProviderExecutionResult,
+    budget: PromptBudgetReport,
+    sink: RuntimeEventSink | undefined
+  ): Promise<void> {
+    const inputTokens = execution.response?.usage?.inputTokens;
+    if (inputTokens === undefined || execution.response === undefined) {
+      return;
+    }
+
+    const usedTokens = normalizeTokenCount(inputTokens);
+    this.#lastActualPromptTokens = usedTokens;
+    const usage = normalizeSessionContextWindowUsage({
+      usedTokens,
+      totalTokens: contextWindowTokensForExecution(execution, budget),
+      provider: execution.response.provider,
+      model: execution.response.model,
+      ...(execution.routeRole === undefined ? {} : { routeRole: execution.routeRole })
+    });
+    if (usage === undefined) {
+      return;
+    }
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), {
+      kind: "context-window-usage",
+      ...usage
+    });
+    await emitContextWindowUsage(sink, usage);
   }
 
   #currentSessionId(): string {
@@ -1420,17 +1447,27 @@ function isDeterministicCompressionFallback(reason: string | undefined): boolean
   return reason === "deterministic-fallback" || reason === "static-emergency-marker";
 }
 
-async function emitContextUsage(
+async function emitAssembledPromptEstimate(
   sink: RuntimeEventSink | undefined,
-  budget: PromptBudgetReport,
-  source: Extract<RuntimeEvent, { kind: "context-usage" }>["source"]
+  budget: PromptBudgetReport
 ): Promise<void> {
-  await emit(sink, {
-    kind: "context-usage",
+  await emitContextEstimate(sink, {
     filled: normalizeTokenCount(budget.estimatedTokens),
     total: normalizeTokenCount(budget.contextWindowTokens),
-    source
+    source: "assembled-prompt",
+    stage: "assembled-prompt"
   });
+}
+
+function contextWindowTokensForExecution(
+  execution: ProviderExecutionResult,
+  budget: PromptBudgetReport
+): number {
+  return normalizeTokenCount(
+    execution.route?.contextWindowTokens ??
+    execution.route?.profile.contextWindowTokens ??
+    budget.contextWindowTokens
+  );
 }
 
 function normalizeTokenCount(value: number): number {

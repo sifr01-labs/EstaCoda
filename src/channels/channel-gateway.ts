@@ -18,6 +18,7 @@ import { runCronCommand } from "../cron/cron-command.js";
 import { originFromSessionKey } from "../cron/cron-runner.js";
 import { CronStore } from "../cron/cron-store.js";
 import type { Runtime } from "../runtime/create-runtime.js";
+import type { SessionFinalizationReason } from "../session/session-finalization-queue.js";
 import type {
   AgentLoopPythonCapabilitySetupApprovalRequest,
   AgentLoopSetupApprovalRequest
@@ -216,6 +217,10 @@ export type ChannelGatewayOptions = {
   sessionHygieneService?: Pick<SessionHygieneService, "run">;
   modelSwitchContext?: () => Promise<ModelSwitchContext>;
   logWarning?: (message: string) => void;
+  enqueueSessionFinalization?: (input: {
+    sessionId: string;
+    reason: Extract<SessionFinalizationReason, "channel-reset">;
+  }) => void | Promise<void>;
   voiceStateManager?: VoiceStateManager;
   voiceAutoTtsDefault?: boolean;
   autoTtsConfig?: () => Promise<Pick<LoadedRuntimeConfig, "tts" | "voice">> | Pick<LoadedRuntimeConfig, "tts" | "voice">;
@@ -401,6 +406,7 @@ export class ChannelGateway {
   readonly #sessionIdByTurnKey = new Map<string, string>();
   readonly #activeRuntimeByTurnKey = new Map<string, Runtime>();
   readonly #logWarning?: (message: string) => void;
+  readonly #enqueueSessionFinalization: ChannelGatewayOptions["enqueueSessionFinalization"];
 
   // Stage 6
   readonly #isDraining: (() => boolean) | undefined;
@@ -459,6 +465,7 @@ export class ChannelGateway {
     this.#runtimeCache = options.runtimeCache;
     this.#runtimeFingerprint = options.runtimeFingerprint;
     this.#logWarning = options.logWarning;
+    this.#enqueueSessionFinalization = options.enqueueSessionFinalization;
 
     // Stage 6
     this.#isDraining = options.isDraining;
@@ -2816,8 +2823,17 @@ export class ChannelGateway {
 
     if (command === "/new" || command === "/reset") {
       const key = stableSessionKey(message.sessionKey, this.#sessionPolicy);
-      const previousSessionId = this.#sessionIdByTurnKey.get(key);
-      if (previousSessionId !== undefined) {
+      const previousSessionId = this.#sessionIdByTurnKey.get(key)
+        ?? await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
+      try {
+        await this.#enqueueSessionFinalization?.({
+          sessionId: previousSessionId,
+          reason: "channel-reset",
+        });
+      } catch {
+        this.#logWarning?.("Session reset finalization enqueue failed");
+      }
+      if (previousSessionId.length > 0) {
         try {
           await this.#runtimeCache?.invalidate(previousSessionId);
         } catch (err) {

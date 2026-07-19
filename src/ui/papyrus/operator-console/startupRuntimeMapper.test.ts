@@ -6,7 +6,7 @@ describe("Operator Console startup runtime mapper", () => {
   it("maps startup dashboard view model data into Operator Console startup state", () => {
     const state = mapStartupDashboardViewModelToOperatorConsoleState({
       viewModel: startupViewModel(),
-      contextWindow: 262_000,
+      contextUsage: { filled: 18_400, total: 262_000 },
     });
 
     expect(state).toMatchObject({
@@ -18,7 +18,7 @@ describe("Operator Console startup runtime mapper", () => {
       session: {
         model: "kimi-k2.6 ◐",
         modelRoute: "fallback",
-        context: "0 / 262k",
+        context: "18.4k / 262k",
         workspace: "/tmp/project",
         security: "open",
         autonomy: "autonomous",
@@ -68,12 +68,12 @@ describe("Operator Console startup runtime mapper", () => {
         model: { provider: "mock", id: "kimi-k2.6" },
         workspaceDirectory: "/Users/ahnwy/project",
       },
-      contextWindow: 32_768,
+      contextUsage: { total: 32_768 },
     });
 
     expect(state.tagline).toBe("بنية تحتية وكيلة سيادية");
     expect(state.session.model).toContain("kimi-k2.6");
-    expect(state.session.context).toBe("0 / 32.8k");
+    expect(state.session.context).toBe("-- / 32.8k");
   });
 });
 

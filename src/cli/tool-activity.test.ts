@@ -752,6 +752,44 @@ describe("Session-loop tool activity rail wiring", () => {
     expect(phase).toBe("tool");
     expect(output.write).not.toHaveBeenCalled();
   });
+
+  it("emits only bounded delegated child lifecycle lines in plain session rendering", () => {
+    const output = { write: vi.fn() } as unknown as NodeJS.WritableStream;
+    const renderer = standardDarkRenderer();
+    const builder = new ToolActivityViewModelBuilder({ tools: [] });
+    const streamState = { lastWriteEndedWithNewline: true };
+    const turnOutput = { hasOutput: false, lastOutputWasSpinner: false };
+    const metadata = {
+      kind: "delegation-progress" as const,
+      subagentId: "child-secret",
+      childSessionId: "child-session-secret",
+      parentSessionId: "parent-secret",
+      role: "leaf" as const,
+      depth: 1,
+      taskIndex: 1,
+      batchId: "batch-secret",
+    };
+
+    renderRuntimeEvent(output, {
+      ...metadata,
+      childEvent: { kind: "agent-start", sessionId: "child-session-secret" },
+    }, builder, renderer, streamState, undefined, turnOutput);
+    renderRuntimeEvent(output, {
+      ...metadata,
+      childEvent: { kind: "tool-start", tool: "file.read" },
+    }, builder, renderer, streamState, undefined, turnOutput);
+    renderRuntimeEvent(output, {
+      ...metadata,
+      childEvent: { kind: "delegation-result", status: "failed" },
+    }, builder, renderer, streamState, undefined, turnOutput);
+
+    const written = (output.write as ReturnType<typeof vi.fn>).mock.calls.map((call: unknown[]) => call[0]).join("");
+    expect(written).toContain("Worker 2: started");
+    expect(written).toContain("Worker 2: failed");
+    expect(written).not.toContain("Read File");
+    expect(written).not.toContain("child-session-secret");
+    expect(written).not.toContain("batch-secret");
+  });
 });
 
 // ──────────────────────────────────────

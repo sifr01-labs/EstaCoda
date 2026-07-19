@@ -380,6 +380,11 @@ rail contains only model, context usage/bar, and session timer. Tools,
 approvals, workspace/trust, setup, steering, channel state, and active-turn
 noise belong in contextual surfaces, not in the rail.
 
+Context usage is the active session's last provider-reported input-token count.
+It persists across turns and usage-less responses. Estimates never replace it;
+before the first measurement and after compaction or a model boundary, render
+the usage as unknown (`--/total`) until the provider reports a fresh value.
+
 Idle placeholder copy is not a separate shortcut rail and must not include a
 prompt marker. The slash menu is an Operator Console region below the prompt and
 above the status rail. Arabic console surfaces must measure visible width, keep

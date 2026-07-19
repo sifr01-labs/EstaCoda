@@ -23,6 +23,7 @@ import { FileStateTracker } from "../delegation/file-state-tracker.js";
 import { SubagentRegistry, type OperatorSubagentStatus } from "../delegation/subagent-registry.js";
 import { MemoryFileCompactionService } from "../memory/memory-file-compaction-service.js";
 import { MemoryCurationService } from "../memory/memory-curation-service.js";
+import { SQLiteMemoryCurationCoordinator } from "../memory/memory-curation-coordinator.js";
 import { MemoryCurationStore, memoryCurationStorePath, type MemoryCurationTrigger } from "../memory/memory-curation-store.js";
 import { MemoryIndex } from "../memory/memory-index.js";
 import { MemoryIndexStore, resolveMemoryIndexStorePath } from "../memory/memory-index-store.js";
@@ -31,7 +32,7 @@ import { MemoryMutationService } from "../memory/memory-mutation-service.js";
 import { MemoryPersistenceService } from "../memory/memory-persistence-service.js";
 import { LocalMemoryRetrievalService } from "../memory/memory-retrieval-service.js";
 import { MemoryStore } from "../memory/memory-store.js";
-import { listSharedMemory, type SharedMemoryEntry } from "../memory/shared-memory.js";
+import { listSharedMemory, renderSharedMemory } from "../memory/shared-memory.js";
 import { LocalMemoryProvider } from "../memory/local-memory-provider.js";
 import { MemoryPromptContextBuilder } from "../memory/memory-prompt-context-builder.js";
 import { createExternalMemoryProvidersFromConfig } from "../memory/external-memory-provider.js";
@@ -47,9 +48,15 @@ import { createOpenAIResponsesProvider } from "../providers/openai-responses-pro
 import { ProviderRegistry } from "../providers/provider-registry.js";
 import { getDefaultApiKeyEnv, getProviderMetadata } from "../providers/provider-metadata.js";
 import type { SecurityApprovalMode, SecurityPolicy, SecurityRequest } from "../contracts/security.js";
-import type { SessionDB } from "../contracts/session.js";
+import type { SessionContextWindowUsage, SessionDB } from "../contracts/session.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
+import { loadSessionContextWindowUsage } from "../session/session-context-window-usage.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
+import {
+  SessionFinalizationQueue,
+  type SessionFinalizationJob,
+  type SessionFinalizationReason,
+} from "../session/session-finalization-queue.js";
 import { SessionRecallService, type SessionRecallResult } from "../session/session-recall-service.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { SessionCompressionService, type CompactResult } from "../prompt/session-compression-service.js";
@@ -212,6 +219,7 @@ export type Runtime = {
   skills(): SkillCatalogEntry[];
   resolveSkill?(name: string): LoadedSkill | SkillDefinition | undefined;
   latestResumeNote(): Promise<string | undefined>;
+  currentContextWindowUsage?(): Promise<SessionContextWindowUsage | undefined>;
   inspectMemoryPromotions(): Promise<MemoryPromotionRecord[]>;
   recallSession?(query: string): Promise<SessionRecallResult>;
   compactSession?(input?: {
@@ -268,6 +276,7 @@ export type Runtime = {
   trustWorkspace(): Promise<void>;
   isWorkspaceTrusted(): Promise<boolean>;
   revokeWorkspaceTrust(): Promise<boolean>;
+  enqueueSessionFinalization?(reason: SessionFinalizationReason): SessionFinalizationJob | undefined;
   dispose(): Promise<void>;
   sessionDb: SessionDB;
   sessionId: string;
@@ -317,6 +326,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     "MEMORY.md": profilePaths.memoryMdPath,
     "SOUL.md": profilePaths.soulMdPath
   };
+  const memoryMutationCoordinator = sessionDb instanceof SQLiteSessionDB
+    ? new SQLiteMemoryCurationCoordinator({ db: sessionDb.db, profileId })
+    : undefined;
   const memoryConfig = options.memory ?? normalizeMemoryConfig(undefined);
   const memoryIndexPath = resolveMemoryIndexStorePath({ homeDir: options.homeDir, profileId });
   const memoryIndexEnabled = memoryConfig.index.enabled === true;
@@ -605,6 +617,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     persistence: memoryPersistenceService,
     memoryIndexSync,
     memorySearchService: memoryRetrievalService,
+    mutationCoordinator: memoryMutationCoordinator,
     profileId
   });
   const skillAutonomy = options.skillAutonomy ?? "suggest";
@@ -774,7 +787,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         providerExecutor,
         trajectoryRecorder,
         sessionDb,
-        sessionId
+        sessionId,
+        mutationCoordinator: memoryMutationCoordinator,
+        persistence: memoryPersistenceService
       }),
       memoryCurationServiceFactory: ({ sessionRuntimeContext, sessionDb, trajectoryRecorder }) => new MemoryCurationService({
         config: memoryConfig.curation,
@@ -794,6 +809,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           "MEMORY.md": profilePaths.memoryMdPath
         },
         memoryIndexSync,
+        checkpointCoordinator: memoryMutationCoordinator,
         memoryMutationService: new MemoryMutationService({
           memoryStore,
           profileId,
@@ -811,6 +827,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       fileStateTracker,
       memoryPersistenceService,
       memoryPersistencePaths,
+      memoryMutationCoordinator,
       memoryIndexSync,
       sessionCompressionService,
       compressionConfig,
@@ -1037,6 +1054,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
 
       return cancelled?.kind === "agent-cancelled" ? cancelled.resumeNote : undefined;
     },
+    async currentContextWindowUsage() {
+      return await loadSessionContextWindowUsage({
+        sessionDb,
+        sessionId: sessionRuntimeContext.currentSessionId(),
+        profileId
+      });
+    },
     async inspectMemoryPromotions() {
       return await memoryProvider.inspectPromotions?.() ?? [];
     },
@@ -1197,6 +1221,19 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     revokeWorkspaceTrust() {
       return trustStore.revoke(workspaceRoot);
     },
+    enqueueSessionFinalization(reason) {
+      if (!(sessionDb instanceof SQLiteSessionDB)) {
+        return undefined;
+      }
+      return new SessionFinalizationQueue({
+        db: sessionDb.db,
+        enqueueBusyTimeoutMs: 50
+      }).enqueue({
+        profileId,
+        sessionId: sessionRuntimeContext.currentSessionId(),
+        reason,
+      });
+    },
     async dispose() {
       if (disposed) {
         return;
@@ -1207,10 +1244,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       await browserSessionLifecycle?.cleanupAll();
       await ownedBrowserBackend?.close?.();
       await localWhisper?.dispose?.();
-      await memoryCurationService?.checkpoint({
-        trigger: "runtime-dispose",
-        minNewMessages: memoryConfig.curation.runtimeDisposeMinNewMessages
-      }).catch(() => undefined);
       await Promise.all(loadedMcpServers.map((server) => server.stop().catch(() => undefined)));
       memoryIndexSync?.dispose();
       const closeSessionDb = closeSessionDbOnDispose
@@ -1476,14 +1509,6 @@ function isOpenAICompatibleProvider(provider: string): boolean {
     "nous",
     "zai"
   ].includes(provider);
-}
-
-function renderSharedMemory(entries: SharedMemoryEntry[]): string | undefined {
-  const sections = entries
-    .filter((entry) => entry.content.trim().length > 0)
-    .map((entry) => `## ${entry.key}\n${entry.content.trim()}`);
-
-  return sections.length === 0 ? undefined : sections.join("\n\n");
 }
 
 function uniqueModels(models: ModelProfile[]): ModelProfile[] {

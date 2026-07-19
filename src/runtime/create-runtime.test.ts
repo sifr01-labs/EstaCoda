@@ -8,6 +8,7 @@ import { normalizeMemoryConfig } from "../config/memory-config.js";
 import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
+import { SessionFinalizationQueue } from "../session/session-finalization-queue.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { WorkspaceApprovalController } from "../security/workspace-approval-controller.js";
@@ -487,6 +488,38 @@ describe("createRuntime token branding", () => {
     }
   });
 
+  it("exposes restored provider actual context usage for the active session", async () => {
+    const options = await minimalRuntimeOptions();
+    const sessionDb = new InMemorySessionDB();
+    await sessionDb.createSession({ id: "resumed-context-session", profileId: "default" });
+    await sessionDb.appendEvent("resumed-context-session", {
+      kind: "context-window-usage",
+      usedTokens: 7_500,
+      totalTokens: 128_000,
+      provider: "openai",
+      model: "gpt-test",
+      routeRole: "primary"
+    });
+    const runtime = await createRuntime({
+      ...options,
+      sessionDb,
+      sessionId: "resumed-context-session"
+    });
+
+    try {
+      expect(runtime.currentContextWindowUsage).toBeDefined();
+      await expect(runtime.currentContextWindowUsage!()).resolves.toEqual({
+        usedTokens: 7_500,
+        totalTokens: 128_000,
+        provider: "openai",
+        model: "gpt-test",
+        routeRole: "primary"
+      });
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("exposes a memory curation checkpoint on the runtime", async () => {
     const options = await minimalRuntimeOptions();
     const sessionDb = new InMemorySessionDB();
@@ -510,13 +543,14 @@ describe("createRuntime token branding", () => {
 
       expect(result).toMatchObject({
         trigger: "manual",
-        status: "ignored",
+        status: "failed",
+        failureCode: "memory-fact-extraction-failed",
         reviewedMessageCount: 1
       });
       await expect(sessionDb.listEvents(runtime.sessionId)).resolves.toContainEqual(expect.objectContaining({
         kind: "memory-curation",
         trigger: "manual",
-        status: "ignored"
+        status: "failed"
       }));
     } finally {
       await runtime.dispose();
@@ -4586,6 +4620,45 @@ describe("createRuntime faster-whisper runtime wiring", () => {
 });
 
 describe("createRuntime SQLite session lifecycle", () => {
+  it("queues finalization only when an explicit session boundary requests it", async () => {
+    const options = await minimalRuntimeOptions();
+    const sessionDb = await createSQLiteSessionDB({
+      path: join(options.workspaceRoot, ".estacoda", "sessions.sqlite")
+    });
+    try {
+      const runtime = await createRuntime({ ...options, sessionDb, closeSessionDbOnDispose: false });
+      await sessionDb.appendMessage({
+        id: "final-message",
+        sessionId: runtime.sessionId,
+        role: "user",
+        content: "finish this session"
+      });
+      const queue = new SessionFinalizationQueue({ db: sessionDb.db });
+
+      await runtime.dispose();
+      expect(queue.list({ profileId: "default" })).toEqual([]);
+
+      const nextRuntime = await createRuntime({
+        ...options,
+        sessionDb,
+        sessionId: runtime.sessionId,
+        closeSessionDbOnDispose: false
+      });
+      const job = nextRuntime.enqueueSessionFinalization?.("cli-exit");
+
+      expect(job).toMatchObject({
+        profileId: "default",
+        sessionId: runtime.sessionId,
+        reason: "cli-exit",
+        cutoffMessageId: "final-message",
+        sourceMessageCount: 1
+      });
+      await nextRuntime.dispose();
+    } finally {
+      sessionDb.close();
+    }
+  });
+
   it("closes an injected SQLite session DB when disposed", async () => {
     const options = await minimalRuntimeOptions();
     const sessionDb = await createSQLiteSessionDB({

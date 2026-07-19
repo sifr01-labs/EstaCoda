@@ -217,11 +217,16 @@ Operator Console region:
 ```
 
 Tool-start and tool-result events route through the Operator Console active-work
-surface when available, with durable/plain fallbacks outside TTY console
-rendering. Active work is uncapped in model storage and viewport-limited in
-rendering. The persistent status rail contains only model, context usage/bar,
-and session timer; tools, approvals, workspace/trust, setup, steering, channel
-state, and active-turn noise must stay out of it.
+model when available. Ordinary live tool rows remain hidden; a running
+`delegate_task` temporarily exposes bounded child rows in the active-work region.
+The region disappears when delegation settles or visible assistant streaming
+begins, and the completed surface retains only the parent delegation row with
+outcome counts. Plain and one-shot fallbacks print only child start and settlement
+lines, not intermediate child tool/provider activity. Active work is uncapped in
+model storage and viewport-limited in rendering. The persistent status rail
+contains only model, context usage/bar, and session timer; tools, approvals,
+workspace/trust, setup, steering, channel state, and active-turn noise must stay
+out of it.
 
 Bracketed paste is enabled only for TTY prompts that run through the paste interceptor. Small single-line pastes remain inline. Multiline and large pastes display as compact `[Pasted text #...]` references when a paste reference store is available. Paste files are written under the active profile temp state, not the workspace, and are temporary operational artifacts, not a permanent knowledge store. The submitted runtime input restores the original pasted content. Secret prompts bypass paste preview and paste reference storage; pasted secret content must not be logged, echoed in chrome/status text, or mirrored outside the prompt answer path.
 
@@ -246,7 +251,7 @@ Steering V1 is abort-and-retry steering. It is not true in-flight provider steer
 
 `<note>` is documentation notation only. The actual input is free-form text typed into `Steer current turn`. Empty or whitespace-only steer input does nothing. Repeated steering attempts for the same submitted turn are bounded; the same note is not reapplied indefinitely if the retry fails, is cancelled, or is interrupted.
 
-Cursor-control-heavy changes in this area need unit coverage and real terminal smoke. The test harness checks split paste markers, prompt wrapping, Operator Console region accounting, active-turn steering, and retry behavior, but manual smoke is still the way to catch terminal-emulator cursor quirks.
+Cursor-control-heavy changes in this area need unit coverage and real terminal smoke. The test harness checks split paste markers, prompt wrapping, Operator Console region accounting, delegated active-work lifecycle, active-turn steering, and retry behavior, but manual smoke is still the way to catch terminal-emulator cursor quirks.
 
 ### In-Session Model Switching
 

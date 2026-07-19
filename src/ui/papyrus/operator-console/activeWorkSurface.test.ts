@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { resolveTokens } from "../../../theme/token-resolver.js";
-import { stringWidth } from "../screen/stringWidth.js";
+import { stringWidth, stripAnsi } from "../screen/stringWidth.js";
 import {
   ACTIVE_WORK_STATUS_SYMBOLS,
   createOperatorConsoleStyle,
@@ -11,6 +11,7 @@ import {
   formatActiveWorkSummary,
   formatLiveActiveWorkStatus,
   getActiveWorkSurfaceDesiredHeight,
+  getCompletedActiveWorkSurfaceDesiredHeight,
   hasActiveWork,
   renderCompletedActiveWorkSurface,
   renderActiveWorkSurface,
@@ -303,6 +304,229 @@ describe("Papyrus operator console active work surface", () => {
     expect(output.every((line) => stringWidth(line) <= 72)).toBe(true);
   });
 
+  it("renders only delegated child rows while a parent delegation is running", () => {
+    const state = createState({
+      startedAtMs: 1_000,
+      updatedAtMs: 8_000,
+      items: [
+        item("earlier-read", "succeeded", { toolName: "file.read", target: "src/earlier.ts" }),
+        item("delegate", "running", { toolName: "delegate_task", target: "starting subagents" }),
+        item("child-1", "running", {
+          toolName: "delegate_task",
+          displayLabel: "Worker 1",
+          source: "subagent",
+          groupId: "batch-1",
+          target: "Read File",
+        }),
+        item("child-2", "succeeded", {
+          toolName: "delegate_task",
+          displayLabel: "Worker 2",
+          source: "subagent",
+          groupId: "batch-1",
+          target: "completed",
+          durationMs: 2_000,
+        }),
+      ],
+    });
+    const output = renderActiveWorkSurface(state, { width: 80 }).join("\n");
+
+    expect(getActiveWorkSurfaceDesiredHeight(state, 80)).toBe(21);
+    expect(output).toContain("Delegated work");
+    expect(output).toContain("Worker 1");
+    expect(output).toContain("Worker 2");
+    expect(output).not.toContain("src/earlier.ts");
+    expect(output).not.toContain("starting subagents");
+    expect(formatLiveActiveWorkStatus(state)).toBe("1 active · 1 done · 00:07");
+  });
+
+  it("lays delegated workers out in two columns when both cards fit", () => {
+    const state = createDelegationState(3);
+    const output = renderActiveWorkSurface(state, { width: 100 });
+
+    expect(getActiveWorkSurfaceDesiredHeight(state, 100)).toBe(21);
+    expect(output).toHaveLength(21);
+    expect((output[1]?.match(/╭/gu) ?? [])).toHaveLength(2);
+    expect((output[11]?.match(/╭/gu) ?? [])).toHaveLength(1);
+    expect(output.every((line) => stringWidth(line) === 100)).toBe(true);
+  });
+
+  it("stacks delegated workers on narrow terminals", () => {
+    const state = createDelegationState(3);
+    const output = renderActiveWorkSurface(state, { width: 72 });
+
+    expect(getActiveWorkSurfaceDesiredHeight(state, 72)).toBe(31);
+    expect(output).toHaveLength(31);
+    expect([1, 11, 21].every((index) => (output[index]?.match(/╭/gu) ?? []).length === 1)).toBe(true);
+    expect(output.every((line) => stringWidth(line) === 72)).toBe(true);
+  });
+
+  it("keeps the latest six worker activities and summarizes the card footer", () => {
+    const activities = Array.from({ length: 8 }, (_, index) => ({
+      id: `activity-${index + 1}`,
+      label: `activity ${index + 1}`,
+      detail: `target ${index + 1}`,
+      status: index === 7 ? "running" as const : "succeeded" as const,
+    }));
+    const state = createDelegationState(1, {
+      activityLog: activities,
+      taskLabel: "inspect delegation runtime",
+    });
+    const output = renderActiveWorkSurface(state, { width: 80 }).join("\n");
+
+    expect(output).toContain("Worker 1 · inspect delegation runtime");
+    expect(output).not.toContain("activity 1");
+    expect(output).not.toContain("activity 2");
+    expect(output).toContain("activity 3");
+    expect(output).toContain("activity 8");
+    expect(output).toContain("running · 8 activities · 00:07");
+  });
+
+  it("times each active worker from its own start instead of the parent turn", () => {
+    const base = createDelegationState(1, { startedAtMs: 6_000 });
+    const state = { ...base, updatedAtMs: 16_000 };
+    const output = renderActiveWorkSurface(state, { width: 80 }).join("\n");
+
+    expect(output).toContain("running · 0 activities · 00:10");
+    expect(output).not.toContain("running · 0 activities · 00:15");
+  });
+
+  it("preserves timeout and blocked outcomes in worker card footers", () => {
+    const base = createDelegationState(2);
+    const state = {
+      ...base,
+      items: base.items.map((entry) => {
+        if (entry.taskIndex === 0) {
+          return { ...entry, status: "failed" as const, delegationOutcome: "timeout" as const, durationMs: 5_000 };
+        }
+        if (entry.taskIndex === 1) {
+          return { ...entry, status: "failed" as const, delegationOutcome: "blocked" as const, durationMs: 4_000 };
+        }
+        return entry;
+      }),
+    };
+    const output = renderActiveWorkSurface(state, { width: 100 }).join("\n");
+
+    expect(output).toContain("timed out · 0 activities · 00:05");
+    expect(output).toContain("blocked · 0 activities · 00:04");
+  });
+
+  it("shows aggregate batch counts while active workers and actual recent completions fill the cards", () => {
+    const base = createDelegationState(4, { batchTaskCount: 10 });
+    const state = {
+      ...base,
+      updatedAtMs: 12_000,
+      items: base.items.map((entry, index) => {
+        if (entry.source !== "subagent" || index === 1) return entry;
+        const endedAtMs = index === 2 ? 10_000 : index === 3 ? 8_000 : 6_000;
+        return {
+          ...entry,
+          status: "succeeded" as const,
+          delegationOutcome: "completed" as const,
+          endedAtMs,
+          durationMs: index * 1_000,
+        };
+      }),
+    };
+    const output = renderActiveWorkSurface(state, { width: 100 }).join("\n");
+
+    expect(output).toContain("Delegated work · 1 active · 3 done · 6 queued · 00:11");
+    expect(output).toContain("Worker 1");
+    expect(output).toContain("Worker 2");
+    expect(output).toContain("Worker 3");
+    expect(output).not.toContain("Worker 4");
+  });
+
+  it("phase-shifts the worker pulse and uses a stable ASCII plain-mode fallback", () => {
+    const standard = createOperatorConsoleStyle({
+      tokens: resolveTokens("standard", "dark", "kemetBlue"),
+      capabilities: { supportsColor: true, supportsTrueColor: true },
+    });
+    const plain = createOperatorConsoleStyle({
+      tokens: resolveTokens("plain", "dark", "kemetBlue"),
+      capabilities: { supportsColor: true, supportsTrueColor: true },
+    });
+    const state = { ...createDelegationState(2), frameIndex: 1 };
+    const animated = stripAnsi(renderActiveWorkSurface(state, { width: 100, style: standard })[1] ?? "");
+    const staticPlain = renderActiveWorkSurface(state, { width: 100, style: plain })[1] ?? "";
+
+    expect(animated).toContain("∙ Worker 1");
+    expect(animated).toContain("● Worker 2");
+    expect(staticPlain).toContain(". Worker 1");
+    expect(staticPlain).toContain(". Worker 2");
+    expect(staticPlain).not.toContain("\u001b");
+  });
+
+  it("reduces activity rows under constrained height and keeps Arabic worker cards bounded", () => {
+    const state = createDelegationState(3, {
+      displayLabel: "عامل",
+      taskLabel: "فحص src/delegation",
+      activityLog: Array.from({ length: 6 }, (_, index) => ({
+        id: `read-${index}`,
+        label: "قراءة ملف",
+        detail: `src/delegation/file-${index}.ts`,
+        status: "running" as const,
+      })),
+    });
+    const output = renderActiveWorkSurface(state, { width: 100, height: 15, locale: "ar" });
+    const text = stripBidiIsolates(output.join("\n"));
+
+    expect(output).toHaveLength(15);
+    expect(text).toContain("عمل الوكلاء الفرعيين");
+    expect(text).toContain("فحص src/delegation");
+    expect(text).not.toContain("file-0.ts");
+    expect(text).toContain("file-5.ts");
+    expect(output.every((line) => stringWidth(line) === 100)).toBe(true);
+  });
+
+  it("renders the delegation parent as a placeholder until child progress arrives", () => {
+    const state = createState({
+      items: [
+        item("delegate", "running", {
+          toolName: "delegate_task",
+          displayLabel: "Delegate Task",
+          target: "starting subagents",
+        }),
+      ],
+    });
+
+    const english = renderActiveWorkSurface(state, { width: 72 }).join("\n");
+    const arabic = renderActiveWorkSurface(state, { width: 72, locale: "ar" }).join("\n");
+
+    expect(english).toContain("Delegated work");
+    expect(english).toContain("starting subagents");
+    expect(arabic).toContain("عمل الوكلاء الفرعيين");
+    expect([english, arabic].every((output) =>
+      output.split("\n").every((line) => stringWidth(line) <= 72)
+    )).toBe(true);
+    expect(renderActiveWorkSurface(state, { width: 30, height: 1 })[0]).toContain("Delegated work: 1");
+  });
+
+  it("keeps delegated child rows out of completed work defensively", () => {
+    const state = createState({
+      completedAtMs: 2_000,
+      items: [
+        item("delegate", "succeeded", {
+          toolName: "delegate_task",
+          displayLabel: "Delegate Task",
+          target: "1 completed",
+        }),
+        item("child", "succeeded", {
+          toolName: "delegate_task",
+          displayLabel: "Worker 1",
+          source: "subagent",
+          groupId: "batch-1",
+          target: "completed",
+        }),
+      ],
+    });
+    const output = renderCompletedActiveWorkSurface(state, { width: 72 }).join("\n");
+
+    expect(getCompletedActiveWorkSurfaceDesiredHeight(state)).toBe(5);
+    expect(output).toContain("Delegate Task");
+    expect(output).not.toContain("Worker 1");
+    expect(output).toContain("1 completed · 0 failed");
+  });
+
   it("keeps the live working timer visible for queued and approval work", () => {
     const output = renderActiveWorkSurface(createState({
       startedAtMs: 1_000,
@@ -579,10 +803,14 @@ describe("Papyrus operator console active work surface", () => {
 
   it("resolves English copy by default and Arabic copy when requested", () => {
     expect(resolveActiveWorkCopy().runningTools).toBe("Running tools");
+    expect(resolveActiveWorkCopy().delegatedWork).toBe("Delegated work");
     expect(resolveActiveWorkCopy().toolsCompleted).toBe("Tools completed");
     expect(resolveActiveWorkCopy("ar").runningTools).toBe("تنفيذ الأدوات");
+    expect(resolveActiveWorkCopy("ar").delegatedWork).toBe("عمل الوكلاء الفرعيين");
     expect(resolveActiveWorkCopy("ar").toolsCompleted).toBe("اكتمل تنفيذ الأدوات");
     expect(resolveActiveWorkCopy("ar").awaitingApproval).toBe("بانتظار الموافقة");
+    expect(resolveActiveWorkCopy("ar").timedOut).toBe("انتهت المهلة");
+    expect(resolveActiveWorkCopy("ar").blocked).toBe("محظور");
   });
 
   it("keeps active work summary copy token-backed and local to operator console", () => {
@@ -690,6 +918,35 @@ function createLiveState(): ToolActivityState {
   });
 }
 
+function createDelegationState(
+  workerCount: number,
+  workerInput: Partial<ActiveWorkItem> = {}
+): ToolActivityState {
+  return createState({
+    startedAtMs: 1_000,
+    updatedAtMs: 8_000,
+    items: [
+      item("delegate", "running", {
+        toolName: "delegate_task",
+        displayLabel: "Delegate Task",
+        target: "starting subagents",
+      }),
+      ...Array.from({ length: workerCount }, (_, index) => item(`child-${index + 1}`, "running", {
+        toolName: "delegate_task",
+        displayLabel: workerInput.displayLabel ?? `Worker ${index + 1}`,
+        source: "subagent",
+        groupId: "batch-1",
+        taskIndex: index,
+        taskLabel: workerInput.taskLabel ?? `inspect area ${index + 1}`,
+        batchTaskCount: workerInput.batchTaskCount ?? workerCount,
+        activityLog: workerInput.activityLog,
+        target: "thinking",
+        ...workerInput,
+      })),
+    ],
+  });
+}
+
 function manyItems(count: number, status: ActiveWorkItemStatus = "running"): readonly ActiveWorkItem[] {
   return Array.from({ length: count }, (_, index) => item(`item-${index + 1}`, status, {
     toolName: `tool_${index + 1}`,
@@ -709,6 +966,13 @@ function item(
     status,
     summary: input.summary ?? input.target ?? id,
     ...(input.displayLabel === undefined ? {} : { displayLabel: input.displayLabel }),
+    ...(input.source === undefined ? {} : { source: input.source }),
+    ...(input.groupId === undefined ? {} : { groupId: input.groupId }),
+    ...(input.taskIndex === undefined ? {} : { taskIndex: input.taskIndex }),
+    ...(input.taskLabel === undefined ? {} : { taskLabel: input.taskLabel }),
+    ...(input.batchTaskCount === undefined ? {} : { batchTaskCount: input.batchTaskCount }),
+    ...(input.activityLog === undefined ? {} : { activityLog: input.activityLog }),
+    ...(input.delegationOutcome === undefined ? {} : { delegationOutcome: input.delegationOutcome }),
     ...(input.target === undefined ? {} : { target: input.target }),
     ...(input.startedAtMs === undefined ? {} : { startedAtMs: input.startedAtMs }),
     ...(input.endedAtMs === undefined ? {} : { endedAtMs: input.endedAtMs }),

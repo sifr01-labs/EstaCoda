@@ -148,9 +148,7 @@ export function createDefaultOperatorConsoleRawPromptStatus(): StatusRailState {
       state: "idle",
       route: "primary",
     },
-    context: {
-      usedTokens: 0,
-    },
+    context: {},
     sessionTimer: {
       elapsedMs: 0,
     },

@@ -4279,6 +4279,7 @@ describe("ChannelGateway commands", () => {
       const cache = createFakeRuntimeCache();
       const fingerprint = createFakeFingerprint();
       const sessionStore = new InMemoryChannelSessionStore();
+      const enqueueSessionFinalization = vi.fn();
 
       const gateway = new ChannelGateway({
         adapters: [adapter],
@@ -4286,7 +4287,8 @@ describe("ChannelGateway commands", () => {
         sessionStore,
         authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         runtimeCache: cache,
-        runtimeFingerprint: fingerprint
+        runtimeFingerprint: fingerprint,
+        enqueueSessionFinalization
       });
 
       const first = await gateway.receive(makeMessage("hello"));
@@ -4295,6 +4297,10 @@ describe("ChannelGateway commands", () => {
       await gateway.receive(makeMessage("/new"));
       expect(cache.invalidateCalls.length).toBe(1);
       expect(cache.invalidateCalls[0]).toBe(first.sessionId);
+      expect(enqueueSessionFinalization).toHaveBeenCalledWith({
+        sessionId: first.sessionId,
+        reason: "channel-reset"
+      });
     });
 
     it.each(["/new", "/reset"])("session reset %s detaches surface pointer before the next message", async (command) => {

@@ -1,7 +1,7 @@
 import type {
   AppendMessageInput,
   CreateSessionInput,
-  ReplacementSessionMessage,
+  RewriteSessionTranscriptInput,
   SessionDB,
   SessionEvent,
   SessionMessage,
@@ -115,6 +115,10 @@ export class InMemorySessionDB implements SessionDB {
       ...(session.metadata ?? {}),
       [SESSION_MODEL_OVERRIDE_METADATA_KEY]: structuredClone(override)
     };
+    this.#events.get(sessionId)?.push({
+      kind: "context-window-usage-invalidated",
+      reason: "model-change"
+    });
     this.#touch(sessionId);
   }
 
@@ -125,12 +129,20 @@ export class InMemorySessionDB implements SessionDB {
     }
 
     if (session.metadata === undefined || !(SESSION_MODEL_OVERRIDE_METADATA_KEY in session.metadata)) {
+      this.#events.get(sessionId)?.push({
+        kind: "context-window-usage-invalidated",
+        reason: "model-change"
+      });
       this.#touch(sessionId);
       return;
     }
 
     const { [SESSION_MODEL_OVERRIDE_METADATA_KEY]: _removed, ...rest } = session.metadata;
     session.metadata = Object.keys(rest).length === 0 ? undefined : rest;
+    this.#events.get(sessionId)?.push({
+      kind: "context-window-usage-invalidated",
+      reason: "model-change"
+    });
     this.#touch(sessionId);
   }
 
@@ -143,11 +155,11 @@ export class InMemorySessionDB implements SessionDB {
     return readSessionModelOverride(session.metadata);
   }
 
-  async replaceMessages(input: { sessionId: string; messages: ReplacementSessionMessage[] }): Promise<SessionMessage[]> {
+  async replaceMessages(input: RewriteSessionTranscriptInput): Promise<SessionMessage[]> {
     return this.rewriteTranscript(input);
   }
 
-  async rewriteTranscript(input: { sessionId: string; messages: ReplacementSessionMessage[] }): Promise<SessionMessage[]> {
+  async rewriteTranscript(input: RewriteSessionTranscriptInput): Promise<SessionMessage[]> {
     const session = this.#sessions.get(input.sessionId);
 
     if (session === undefined) {
@@ -160,7 +172,9 @@ export class InMemorySessionDB implements SessionDB {
       now: this.#now,
       id: this.#id
     });
+    const events = (input.events ?? []).map((event) => structuredClone(event));
     this.#messages.set(input.sessionId, replacement);
+    this.#events.get(input.sessionId)?.push(...events);
     this.#touch(input.sessionId);
 
     return replacement.map(cloneMessage);
@@ -272,7 +286,7 @@ function isSessionModelOverride(value: unknown): value is SessionModelOverride {
 
 function buildReplacementMessages(input: {
   sessionId: string;
-  messages: ReplacementSessionMessage[];
+  messages: RewriteSessionTranscriptInput["messages"];
   now: () => Date;
   id: () => string;
 }): SessionMessage[] {

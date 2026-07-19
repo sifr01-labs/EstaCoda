@@ -176,6 +176,11 @@ The persistent status rail contains only model, context usage/bar, and session
 timer. Tools, approvals, workspace/trust, setup, steering, channel state, and
 active-turn noise render in contextual surfaces, not in the rail.
 
+Context usage is the last input-token count reported by the provider for the
+active session. EstaCoda holds it across turns and usage-less responses instead
+of replacing it with estimates. `--/total` means no current provider measurement
+is available yet, including immediately after compaction or a model change.
+
 During supported interactive TTY turns, visible provider text streams inside the
 Operator Console as a live preview. When the turn completes, the live frame is
 cleared and the finalized assistant response is printed through the durable

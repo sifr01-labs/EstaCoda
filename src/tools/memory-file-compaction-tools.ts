@@ -48,10 +48,11 @@ export function createMemoryFileCompactionTools(
       progressLabel: "restoring memory file backup",
       maxResultSizeChars: 2_000,
       isAvailable: () => true,
-      run: async (input: { file?: string; backupId?: string }) => {
+      run: async (input: { file?: string; backupId?: string }, context) => {
         const result = await service.restoreBackup({
           file: input.file ?? "",
-          backupId: input.backupId
+          backupId: input.backupId,
+          signal: context?.signal
         });
         return toToolResult(result);
       }

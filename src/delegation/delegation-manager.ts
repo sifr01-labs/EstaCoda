@@ -1,11 +1,12 @@
 import type { ChannelKind } from "../contracts/channel.js";
-import type {
-  DelegateModelOverride,
-  DelegateModelOverrideMetadata,
-  DelegateRole,
-  DelegationConfig,
-  DelegateTaskItem,
-  DelegationStaleFileWarning
+import {
+  MAX_DELEGATION_BATCH_TASKS,
+  type DelegateModelOverride,
+  type DelegateModelOverrideMetadata,
+  type DelegateRole,
+  type DelegationConfig,
+  type DelegateTaskItem,
+  type DelegationStaleFileWarning
 } from "../contracts/delegation.js";
 import type { RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SessionDB, SessionEvent } from "../contracts/session.js";
@@ -30,6 +31,7 @@ import {
   timeoutDelegationSummary
 } from "./child-runner.js";
 import { runBoundedBatch } from "./batch-runner.js";
+import { normalizeDelegationProgressMetadata } from "./progress-relay.js";
 
 export type DelegationRequest = {
   parentSessionId: string;
@@ -42,6 +44,7 @@ export type DelegationRequest = {
   modelOverride?: DelegateModelOverride;
   batchId?: string;
   taskIndex?: number;
+  batchTaskCount?: number;
   channel?: ChannelKind;
   trustedWorkspace: boolean;
   signal?: AbortSignal;
@@ -148,6 +151,13 @@ export class DelegationManager {
     tasks: DelegateTaskItem[];
     recoveredTasksFromJsonString?: boolean;
   }): Promise<BatchDelegationSummary> {
+    const maxBatchTasks = Math.max(
+      1,
+      Math.min(this.#delegationConfig.maxBatchTasks, MAX_DELEGATION_BATCH_TASKS)
+    );
+    if (request.tasks.length > maxBatchTasks) {
+      throw new RangeError(`Delegation batches support at most ${maxBatchTasks} tasks.`);
+    }
     const batchId = `batch-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const maxConcurrency = Math.min(this.#delegationConfig.maxConcurrentChildren, request.tasks.length);
     const skippedIndexes = new Set<number>();
@@ -165,7 +175,8 @@ export class DelegationManager {
         role: task.role,
         modelOverride: task.modelOverride ?? request.modelOverride,
         batchId,
-        taskIndex: index
+        taskIndex: index,
+        batchTaskCount: request.tasks.length
       }, parentReadSnapshot),
       skipTask: (task, index): DelegationSummary => {
         skippedIndexes.add(index);
@@ -300,6 +311,7 @@ export class DelegationManager {
           request,
           parentReadSnapshot
         );
+        await this.#emitSettlement(request, result, role, depth);
         return result;
       }
 
@@ -361,6 +373,7 @@ export class DelegationManager {
         model: childModel(child),
         effectiveAllowedTools: child.toolAccess.effectiveAllowedTools,
         taskIndex: request.taskIndex,
+        batchTaskCount: request.batchTaskCount,
         batchId: request.batchId,
         parentOnEvent: request.onEvent
       });
@@ -407,6 +420,7 @@ export class DelegationManager {
 	          staleFileWarnings: result.staleFileWarnings,
 	          staleFileWarningCount: result.staleFileWarningCount
 	        });
+        await this.#emitSettlement(request, result, role, depth);
         return result;
       }
       if (runnerResult.kind === "cancelled") {
@@ -445,6 +459,7 @@ export class DelegationManager {
 	          staleFileWarnings: result.staleFileWarnings,
 	          staleFileWarningCount: result.staleFileWarningCount
 	        });
+        await this.#emitSettlement(request, result, role, depth);
         return result;
       }
       const childResponse = runnerResult.response;
@@ -498,6 +513,7 @@ export class DelegationManager {
 	        staleFileWarnings: result.staleFileWarnings,
 	        staleFileWarningCount: result.staleFileWarningCount
 	      });
+      await this.#emitSettlement(request, result, role, depth);
       return result;
     } catch (error) {
       if (error instanceof ChildModelOverrideError) {
@@ -548,6 +564,7 @@ export class DelegationManager {
 	          staleFileWarnings: result.staleFileWarnings,
 	          staleFileWarningCount: result.staleFileWarningCount
 	        });
+        await this.#emitSettlement(request, result, role, depth);
       }
       return result;
     } finally {
@@ -858,6 +875,34 @@ export class DelegationManager {
 	      staleFileWarningCount: input.staleFileWarningCount
 	    });
     this.#trajectoryRecorder.record("delegation-finished", input);
+  }
+
+  async #emitSettlement(
+    request: DelegationRequest,
+    result: DelegationSummary,
+    role: DelegateRole,
+    depth: number
+  ): Promise<void> {
+    if (request.onEvent === undefined || result.childSessionId === "unavailable") return;
+    const metadata = normalizeDelegationProgressMetadata({
+      subagentId: result.childSessionId,
+      childSessionId: result.childSessionId,
+      parentSessionId: request.parentSessionId,
+      role,
+      depth,
+      taskIndex: request.taskIndex,
+      batchId: request.batchId,
+      taskLabel: request.task,
+      batchTaskCount: request.batchTaskCount ?? 1
+    });
+    await request.onEvent({
+      kind: "delegation-progress",
+      ...metadata,
+      childEvent: {
+        kind: "delegation-result",
+        status: childStatus(result)
+      }
+    });
   }
 
   async #statusFromChildResponse(

@@ -211,7 +211,7 @@ estacoda gateway stop --force           # SIGKILL for unmanaged; systemd stop fo
 estacoda gateway restart                # restart installed user-scope service
 estacoda gateway restart --graceful     # alias for restart in v0.1.0
 estacoda gateway restart --system       # restart system-scope service
-estacoda gateway status                 # full status: service manager, channels, cron, approvals
+estacoda gateway status                 # full status: service manager, channels, cron, approvals, memory finalization
 estacoda gateway diagnose               # per-channel readiness; exits 1 on warnings
 estacoda gateway approvals              # pending approvals count
 estacoda gateway install                # install user-scope systemd/launchd service
@@ -318,6 +318,7 @@ Valid surfaces: `cli`, `telegram`, `discord`, `whatsapp`, `email`.
 ## Memory
 
 ```bash
+estacoda memory status
 estacoda memory index path
 estacoda memory index status
 estacoda memory index rebuild
@@ -333,6 +334,9 @@ estacoda memory forget <USER.md|MEMORY.md> <exact text>
 estacoda memory populate
 estacoda memory edit
 estacoda memory clear [USER.md|MEMORY.md|all] --yes
+estacoda memory finalization list [--status pending|running|completed|failed] [--limit N]
+estacoda memory finalization retry <job-id>
+estacoda memory finalization prune [--keep N]
 ```
 
 **State touched:**
@@ -342,6 +346,8 @@ estacoda memory clear [USER.md|MEMORY.md|all] --yes
 - profile-local `memory-index.sqlite` for index rebuild/sync
 
 **Behavior:**
+- `memory status` reports profile memory configuration/history plus background-finalization `pending`, `running`, `retrying`, and `failed` counts.
+- `memory finalization list` shows bounded profile-scoped job metadata without transcript content; `retry` requeues failed jobs with a fresh attempt budget, and `prune` retains the newest terminal rows.
 - `memory mode` shows or updates profile-local curation mode. `auto` is the default and applies only conservative low-risk candidates.
 - `memory recent` shows recent curation records, including auto-applied, pending-review, ignored, and failed checkpoints.
 - `memory review` shows pending-review records and stored low-risk candidate operations.

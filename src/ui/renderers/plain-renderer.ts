@@ -1214,10 +1214,12 @@ export function renderSessionStatusRail(vm: SessionStatusRailViewModel, locale?:
   const parts: string[] = [`* ${vm.modelLabel}`];
 
   if (vm.contextUsage !== undefined) {
-    const filled = formatContextCount(vm.contextUsage.filled);
+    const filled = vm.contextUsage.filled === undefined ? "--" : formatContextCount(vm.contextUsage.filled);
     const total = formatContextCount(vm.contextUsage.total);
     parts.push(`${copy.context} ${filled}/${total}`);
-    parts.push(`${vm.contextUsage.total > 0 ? Math.round((vm.contextUsage.filled / vm.contextUsage.total) * 100) : 0}%`);
+    parts.push(vm.contextUsage.filled === undefined
+      ? "--%"
+      : `${vm.contextUsage.total > 0 ? Math.round((vm.contextUsage.filled / vm.contextUsage.total) * 100) : 0}%`);
   }
 
   if (vm.sessionElapsedMs !== undefined) {
@@ -1241,10 +1243,12 @@ function renderArabicSessionStatusRail(
   const parts: string[] = [`* ${isolateLtr(vm.modelLabel)}`];
 
   if (vm.contextUsage !== undefined) {
-    const filled = formatContextCount(vm.contextUsage.filled);
+    const filled = vm.contextUsage.filled === undefined ? "--" : formatContextCount(vm.contextUsage.filled);
     const total = formatContextCount(vm.contextUsage.total);
     parts.push(`${isolateRtl(copy.context)} ${isolateLtr(`${filled}/${total}`)}`);
-    parts.push(`${vm.contextUsage.total > 0 ? Math.round((vm.contextUsage.filled / vm.contextUsage.total) * 100) : 0}%`);
+    parts.push(vm.contextUsage.filled === undefined
+      ? "--%"
+      : `${vm.contextUsage.total > 0 ? Math.round((vm.contextUsage.filled / vm.contextUsage.total) * 100) : 0}%`);
   }
 
   if (vm.sessionElapsedMs !== undefined) {

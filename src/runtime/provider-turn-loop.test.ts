@@ -1086,28 +1086,157 @@ describe("ProviderTurnLoop semantic session compression", () => {
     expect(loop.lastActualPromptTokens()).toBe(123);
   });
 
-  it("emits context usage for assembled prompts and provider actual usage", async () => {
+  it("seeds actual prompt tracking from resumed session usage", async () => {
+    const harness = await createCompressionHarness();
+    const loop = harness.loop({
+      initialContextWindowUsage: {
+        usedTokens: 4_200,
+        totalTokens: 128_000,
+        provider: "test-provider",
+        model: "test-model",
+        routeRole: "primary"
+      }
+    });
+
+    expect(loop.lastActualPromptTokens()).toBe(4_200);
+  });
+
+  it("retains resumed actual usage when the next provider response omits usage", async () => {
+    const harness = await createCompressionHarness();
+    const noUsageExecutor = {
+      complete: vi.fn(async (): Promise<ProviderExecutionResult> => ({
+        ok: true,
+        response: {
+          ok: true,
+          content: "response without usage",
+          provider: primaryRoute.provider,
+          model: primaryRoute.id
+        },
+        fallbackUsed: false,
+        attempts: [{
+          provider: primaryRoute.provider,
+          model: primaryRoute.id,
+          ok: true,
+          content: "response without usage"
+        }],
+        route: primaryRoute,
+        attemptedRouteIndex: 0,
+        routeRole: "primary",
+        toolCalls: []
+      }))
+    } as unknown as ProviderExecutor;
+    const loop = harness.loop({
+      providerExecutor: noUsageExecutor,
+      initialContextWindowUsage: {
+        usedTokens: 4_200,
+        totalTokens: 128_000,
+        provider: "test-provider",
+        model: "test-model",
+        routeRole: "primary"
+      }
+    });
+
+    await runBasicProviderTurn(loop);
+
+    expect(loop.lastActualPromptTokens()).toBe(4_200);
+    expect((await harness.sessionDb.listEvents(harness.sessionId)).filter((event) =>
+      event.kind === "context-window-usage"
+    )).toEqual([]);
+  });
+
+  it("emits distinct context estimate and provider-actual events", async () => {
     const harness = await createCompressionHarness();
     const events: RuntimeEvent[] = [];
 
     await runBasicProviderTurn(harness.loop(), { onEvent: (event) => events.push(event) });
 
-    const usageEvents = events.filter((event): event is Extract<RuntimeEvent, { kind: "context-usage" }> =>
-      event.kind === "context-usage"
+    const estimateEvents = events.filter((event): event is Extract<RuntimeEvent, { kind: "context-estimate" }> =>
+      event.kind === "context-estimate"
     );
-    expect(usageEvents).toEqual(expect.arrayContaining([
+    expect(estimateEvents).toEqual(expect.arrayContaining([
       expect.objectContaining({
         source: "assembled-prompt",
+        stage: "assembled-prompt",
         total: mockModel.contextWindowTokens
-      }),
+      })
+    ]));
+    expect(estimateEvents.find((event) => event.source === "assembled-prompt")?.filled).toBeGreaterThan(0);
+
+    const actualEvents = events.filter((event): event is Extract<RuntimeEvent, { kind: "context-window-usage" }> =>
+      event.kind === "context-window-usage"
+    );
+    expect(actualEvents).toEqual([
       {
-        kind: "context-usage",
-        filled: 123,
-        total: mockModel.contextWindowTokens,
+        kind: "context-window-usage",
+        usedTokens: 123,
+        totalTokens: mockModel.contextWindowTokens,
+        provider: "test-provider",
+        model: "test-model",
         source: "provider-actual"
       }
-    ]));
-    expect(usageEvents.find((event) => event.source === "assembled-prompt")?.filled).toBeGreaterThan(0);
+    ]);
+
+    await expect(harness.sessionDb.listEvents(harness.sessionId)).resolves.toContainEqual({
+      kind: "context-window-usage",
+      usedTokens: 123,
+      totalTokens: mockModel.contextWindowTokens,
+      provider: "test-provider",
+      model: "test-model"
+    });
+  });
+
+  it("uses the successful fallback route context window for provider actual usage", async () => {
+    const harness = await createCompressionHarness();
+    const fallbackExecutor = {
+      complete: vi.fn(async (): Promise<ProviderExecutionResult> => ({
+        ok: true,
+        response: {
+          ok: true,
+          content: "fallback-response",
+          provider: fallbackRoute.provider,
+          model: fallbackRoute.id,
+          usage: {
+            inputTokens: 456,
+            outputTokens: 10,
+            totalTokens: 466
+          }
+        },
+        fallbackUsed: true,
+        attempts: [{
+          provider: fallbackRoute.provider,
+          model: fallbackRoute.id,
+          ok: true,
+          content: "fallback-response"
+        }],
+        route: fallbackRoute,
+        attemptedRouteIndex: 1,
+        routeRole: "fallback",
+        toolCalls: []
+      }))
+    } as unknown as ProviderExecutor;
+    const events: RuntimeEvent[] = [];
+
+    await runBasicProviderTurn(harness.loop({ providerExecutor: fallbackExecutor }), {
+      onEvent: (event) => events.push(event)
+    });
+
+    expect(events).toContainEqual({
+      kind: "context-window-usage",
+      usedTokens: 456,
+      totalTokens: fallbackRoute.profile.contextWindowTokens,
+      provider: fallbackRoute.provider,
+      model: fallbackRoute.id,
+      source: "provider-actual",
+      routeRole: "fallback"
+    });
+    await expect(harness.sessionDb.listEvents(harness.sessionId)).resolves.toContainEqual({
+      kind: "context-window-usage",
+      usedTokens: 456,
+      totalTokens: fallbackRoute.profile.contextWindowTokens,
+      provider: fallbackRoute.provider,
+      model: fallbackRoute.id,
+      routeRole: "fallback"
+    });
   });
 
   it("passes native structured tool history for a test-only supported route", async () => {
@@ -2374,6 +2503,54 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(result.iterations).toBe(2);
     expect(result.providerExecution?.response?.content).toBe("Normal continuation answer.");
     expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("emits provider actual usage for initial and post-tool continuation responses", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-initial")], {
+          response: {
+            ok: true,
+            content: "",
+            model: primaryRoute.id,
+            provider: primaryRoute.provider,
+            usage: { inputTokens: 100, outputTokens: 5, totalTokens: 105 }
+          },
+          route: primaryRoute,
+          routeRole: "primary"
+        }),
+        providerExecution("Normal continuation answer.", [], {
+          response: {
+            ok: true,
+            content: "Normal continuation answer.",
+            model: primaryRoute.id,
+            provider: primaryRoute.provider,
+            usage: { inputTokens: 140, outputTokens: 8, totalTokens: 148 }
+          },
+          route: primaryRoute,
+          routeRole: "primary"
+        })
+      ],
+      toolSteps: [
+        { executions: [toolExecution("call-initial")] },
+        {}
+      ],
+      maxProviderIterations: 3
+    });
+    const events: RuntimeEvent[] = [];
+
+    await runBasicProviderTurn(harness.loop, { onEvent: (event) => events.push(event) });
+
+    const actualEvents = events.filter((event): event is Extract<RuntimeEvent, { kind: "context-window-usage" }> =>
+      event.kind === "context-window-usage"
+    );
+    expect(actualEvents.map((event) => event.usedTokens)).toEqual([100, 140]);
+    expect(actualEvents.every((event) =>
+      event.totalTokens === primaryRoute.profile.contextWindowTokens && event.routeRole === "primary"
+    )).toBe(true);
+    const persistedUsage = (await harness.sessionDb.listEvents(harness.sessionId))
+      .filter((event) => event.kind === "context-window-usage");
+    expect(persistedUsage.map((event) => event.usedTokens)).toEqual([100, 140]);
   });
 });
 

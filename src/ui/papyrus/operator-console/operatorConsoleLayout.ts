@@ -6,6 +6,7 @@ import type {
 import {
   getActiveWorkSurfaceDesiredHeight,
   hasActiveWork,
+  hasRunningDelegationWork,
 } from "./activeWorkSurface.js";
 import { getApprovalSurfaceDesiredHeight } from "./approvalSurface.js";
 import { getAttachmentSurfaceDesiredHeight } from "./attachmentSurface.js";
@@ -15,6 +16,7 @@ import { getSlashSurfaceDesiredHeight } from "./slashSurface.js";
 import { getStartupDashboardSurfaceDesiredHeight } from "./startupDashboardSurface.js";
 import {
   getStreamingSurfaceDesiredHeight,
+  hasLiveStreamingTail,
   hasStreamingSurface,
 } from "./streamingSurface.js";
 import { getTurnActivitySurfaceDesiredHeight } from "./turnActivitySurface.js";
@@ -165,7 +167,7 @@ function createRegionDescriptors(
       kind: "activeWork",
       priority: ACTIVE_WORK_PRIORITY,
       minHeight: 1,
-      desiredHeight: getActiveWorkSurfaceDesiredHeight(state.activeWork),
+      desiredHeight: getActiveWorkSurfaceDesiredHeight(state.activeWork, terminal.width),
     });
   }
 
@@ -218,6 +220,9 @@ function createRegionDescriptors(
 function shouldShowActiveWorkRegion(state: OperatorConsoleState): boolean {
   if (!hasActiveWork(state.activeWork)) return false;
   if (state.activeWork.completedAtMs !== undefined) return true;
+  if (hasRunningDelegationWork(state.activeWork)) {
+    return !hasLiveStreamingTail(state.streaming);
+  }
   if (!SHOW_LIVE_ACTIVE_WORK_REGION) return false;
   return !hasStreamingSurface(state.streaming);
 }

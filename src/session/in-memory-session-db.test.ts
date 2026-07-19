@@ -22,6 +22,10 @@ describe("InMemorySessionDB", () => {
         })
       }
     });
+    await expect(db.listEvents("session-1")).resolves.toEqual([{
+      kind: "context-window-usage-invalidated",
+      reason: "model-change"
+    }]);
 
     await db.clearSessionModelOverride("session-1");
 
@@ -29,6 +33,10 @@ describe("InMemorySessionDB", () => {
     await expect(db.getSession("session-1")).resolves.toMatchObject({
       metadata: { keep: true }
     });
+    await expect(db.listEvents("session-1")).resolves.toEqual([
+      { kind: "context-window-usage-invalidated", reason: "model-change" },
+      { kind: "context-window-usage-invalidated", reason: "model-change" }
+    ]);
   });
 
   it("round-trips session lineage and ended fields", async () => {
@@ -158,7 +166,8 @@ describe("InMemorySessionDB", () => {
       messages: [
         { role: "user", content: "new alpha" },
         { id: "supplied", role: "agent", content: "new beta", createdAt: "2030-01-01T00:00:10.000Z" }
-      ]
+      ],
+      events: [{ kind: "context-window-usage-invalidated", reason: "compaction" }]
     });
 
     expect(rewritten.map((message) => message.id)).toEqual(["generated-1", "supplied"]);
@@ -167,6 +176,10 @@ describe("InMemorySessionDB", () => {
       "2030-01-01T00:00:10.000Z"
     ]);
     await expect(db.listMessages("session-1")).resolves.toEqual(rewritten);
+    await expect(db.listEvents("session-1")).resolves.toEqual([{
+      kind: "context-window-usage-invalidated",
+      reason: "compaction"
+    }]);
   });
 
   it("requires an existing session before ending or rewriting", async () => {

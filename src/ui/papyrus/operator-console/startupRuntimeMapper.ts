@@ -1,9 +1,11 @@
-import type { StartupDashboardViewModel } from "../../../contracts/view-model.js";
+import type { SessionStatusRailViewModel, StartupDashboardViewModel } from "../../../contracts/view-model.js";
 import type { StartupDashboardState } from "./operatorConsoleState.js";
+
+type StartupContextUsage = NonNullable<SessionStatusRailViewModel["contextUsage"]>;
 
 export type StartupRuntimeMapperInput = {
   readonly viewModel: StartupDashboardViewModel;
-  readonly contextWindow?: number;
+  readonly contextUsage?: StartupContextUsage;
 };
 
 export function mapStartupDashboardViewModelToOperatorConsoleState(
@@ -19,7 +21,7 @@ export function mapStartupDashboardViewModelToOperatorConsoleState(
     session: {
       model: `${viewModel.model.id} ${readinessSymbol(viewModel.providerReadiness)}`,
       modelRoute: readinessModelRoute(viewModel.providerReadiness),
-      context: contextWindowText(input.contextWindow),
+      context: contextUsageText(input.contextUsage),
       workspace: workspaceStateText(viewModel),
       security: viewModel.securityMode,
       autonomy: viewModel.skillAutonomy ?? "manual",
@@ -98,9 +100,10 @@ function workspaceStateText(viewModel: StartupDashboardViewModel): string {
   return viewModel.workspaceTrust;
 }
 
-function contextWindowText(contextWindow: number | undefined): string {
-  if (contextWindow === undefined || !Number.isFinite(contextWindow) || contextWindow <= 0) return "0";
-  return `0 / ${formatCompactCount(contextWindow)}`;
+function contextUsageText(contextUsage: StartupContextUsage | undefined): string {
+  if (contextUsage === undefined || !Number.isFinite(contextUsage.total) || contextUsage.total <= 0) return "--";
+  const used = contextUsage.filled === undefined ? "--" : formatCompactCount(contextUsage.filled);
+  return `${used} / ${formatCompactCount(contextUsage.total)}`;
 }
 
 function formatCompactCount(value: number): string {

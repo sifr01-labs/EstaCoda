@@ -46,6 +46,7 @@ export type SessionToolContext = {
   memoryStore?: import("../memory/memory-store.js").MemoryStore;
   memoryPersistenceService?: import("../memory/memory-persistence-service.js").MemoryPersistenceService;
   memoryPersistencePaths?: Partial<Record<import("./memory.js").MemoryFileKind, string>>;
+  memoryMutationCoordinator?: import("../memory/memory-curation-coordinator.js").MemoryCurationCheckpointCoordinator;
   memoryIndexSync?: import("../memory/memory-index-sync.js").MemoryIndexWriteSync;
   memoryRetrievalService?: import("../memory/memory-retrieval-service.js").LocalMemoryRetrievalService;
   memoryInspector?: import("../memory/memory-inspector.js").MemoryInspector;

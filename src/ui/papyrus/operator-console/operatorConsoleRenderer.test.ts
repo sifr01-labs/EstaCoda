@@ -64,7 +64,7 @@ describe("Papyrus operator console renderer", () => {
     expect(output[0]).toMatch(/^─+$/u);
     expect(output[1]).toContain("›");
     expect(output[2]).toMatch(/^─+$/u);
-    expect(output[3]).toBe("model pending ● │ ctx [▱▱▱▱▱▱▱▱▱▱] 0 0% │ ◷ 00:00");
+    expect(output[3]).toBe("model pending ● │ ctx [··········] -- --% │ ◷ 00:00");
   });
 
   it("renders multiline prompt expansion with status rail below", () => {

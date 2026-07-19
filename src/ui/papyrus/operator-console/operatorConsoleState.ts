@@ -33,7 +33,8 @@ export type StatusRailState = {
     readonly route?: "primary" | "fallback" | "failed";
   };
   readonly context: {
-    readonly usedTokens: number;
+    /** Omitted until the active session has a provider-reported measurement. */
+    readonly usedTokens?: number;
     readonly totalTokens?: number;
     readonly percent?: number;
   };
@@ -115,10 +116,33 @@ export type ActiveWorkItemStatus =
   | "cancelled"
   | "awaitingApproval";
 
+export type ActiveWorkActivityStatus = "running" | "succeeded" | "failed";
+
+export type ActiveWorkDelegationOutcome =
+  | "completed"
+  | "blocked"
+  | "failed"
+  | "timeout"
+  | "cancelled";
+
+export type ActiveWorkActivity = {
+  readonly id: string;
+  readonly label: string;
+  readonly detail?: string;
+  readonly status: ActiveWorkActivityStatus;
+};
+
 export type ActiveWorkItem = {
   readonly id: string;
   readonly toolName: string;
   readonly displayLabel?: string;
+  readonly source?: "tool" | "subagent";
+  readonly groupId?: string;
+  readonly taskIndex?: number;
+  readonly taskLabel?: string;
+  readonly batchTaskCount?: number;
+  readonly activityLog?: readonly ActiveWorkActivity[];
+  readonly delegationOutcome?: ActiveWorkDelegationOutcome;
   readonly status: ActiveWorkItemStatus;
   readonly summary: string;
   readonly target?: string;
@@ -387,9 +411,7 @@ export function createDefaultStatusRailState(): StatusRailState {
       label: "",
       state: "idle",
     },
-    context: {
-      usedTokens: 0,
-    },
+    context: {},
     sessionTimer: {
       elapsedMs: 0,
     },

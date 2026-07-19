@@ -23,6 +23,7 @@ import type { MemoryPersistenceService } from "../memory/memory-persistence-serv
 import type { LocalMemoryProvider } from "../memory/local-memory-provider.js";
 import { MemoryRecallOrchestrator } from "../memory/memory-recall-orchestrator.js";
 import type { MemoryCurationService } from "../memory/memory-curation-service.js";
+import type { MemoryCurationCheckpointCoordinator } from "../memory/memory-curation-coordinator.js";
 import type { LocalMemoryRetrievalService } from "../memory/memory-retrieval-service.js";
 import type { MemoryStore } from "../memory/memory-store.js";
 import type { ProviderExecutor } from "../providers/provider-executor.js";
@@ -30,6 +31,7 @@ import type { ProviderRegistry } from "../providers/provider-registry.js";
 import type { SessionCompressionService } from "../prompt/session-compression-service.js";
 import type { SessionCompressionConfig } from "../config/runtime-config.js";
 import type { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
+import { loadSessionContextWindowUsage } from "../session/session-context-window-usage.js";
 import type { SkillEvolutionStore } from "../skills/skill-evolution.js";
 import type { ChangeManifestStore } from "../skills/change-manifest-store.js";
 import type { SkillLearningManager } from "../skills/skill-learning.js";
@@ -149,6 +151,7 @@ export type AgentLoopRuntimeSubstrate = {
   fileStateTracker: FileStateTracker;
   memoryPersistenceService: MemoryPersistenceService;
   memoryPersistencePaths: Record<string, string>;
+  memoryMutationCoordinator?: MemoryCurationCheckpointCoordinator;
   memoryIndexSync: MemoryIndexSync | undefined;
   sessionCompressionService: Pick<SessionCompressionService, "compactIfNeeded">;
   compressionConfig: SessionCompressionConfig;
@@ -273,6 +276,11 @@ export class AgentLoopBuilder {
     const substrate = this.#substrate;
     const routes = input.providerRoutes ?? substrate.routes;
     const sessionRuntimeContext = input.sessionRuntimeContext ?? createSessionRuntimeContext(input.sessionId);
+    const initialContextWindowUsage = await loadSessionContextWindowUsage({
+      sessionDb: input.sessionDb,
+      sessionId: input.sessionId,
+      profileId: substrate.profileId
+    });
     const toolRegistry = new ToolRegistry();
     const runtimeToolContext = buildRuntimeToolContext({
       workspaceRoot: substrate.workspaceRoot,
@@ -331,6 +339,7 @@ export class AgentLoopBuilder {
         memoryStore: substrate.memoryStore,
         memoryPersistenceService: substrate.memoryPersistenceService,
         memoryPersistencePaths: substrate.memoryPersistencePaths,
+        memoryMutationCoordinator: substrate.memoryMutationCoordinator,
         memoryIndexSync: substrate.memoryIndexSync,
         memoryRetrievalService: substrate.memoryRetrievalService,
         memoryFileCompactionService,
@@ -508,7 +517,8 @@ export class AgentLoopBuilder {
         ...DEFAULT_PROVIDER_TURN_BUDGETS,
         ...substrate.executionControls?.providerBudgets
       },
-      providerRequestDefaults: substrate.executionControls?.providerRequestDefaults
+      providerRequestDefaults: substrate.executionControls?.providerRequestDefaults,
+      initialContextWindowUsage
     });
     const skillPlaybookRunner = (this.#factories.skillPlaybookRunner ?? ((options) => new SkillPlaybookRunner(options)))({
       toolExecutor,
@@ -718,6 +728,7 @@ function buildPreSkillVisibilityToolContext(input: SessionToolContext): SessionT
     memoryStore: input.memoryStore,
     memoryPersistenceService: input.memoryPersistenceService,
     memoryPersistencePaths: input.memoryPersistencePaths,
+    memoryMutationCoordinator: input.memoryMutationCoordinator,
     memoryIndexSync: input.memoryIndexSync,
     memoryRetrievalService: input.memoryRetrievalService,
     memoryFileCompactionService: input.memoryFileCompactionService,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
-import { createDelegationProgressRelay } from "./progress-relay.js";
+import { createDelegationProgressRelay, delegationTaskDisplayLabel } from "./progress-relay.js";
 
 describe("createDelegationProgressRelay", () => {
   it("forwards selected child events with subagent identity", async () => {
@@ -12,7 +12,13 @@ describe("createDelegationProgressRelay", () => {
       }
     });
 
-    await relay({ kind: "tool-start", tool: "file.read", targetSummary: "secret path" });
+    await relay({
+      kind: "tool-start",
+      tool: "file.read",
+      targetSummary: "secret path",
+      displayPreview: "\x1b[31msrc/app.ts?token=supersecret\x1b[0m\u202E",
+      activityId: "\x1b[32mread-1\x1b[0m"
+    });
     await relay({ kind: "provider-result", provider: "local", model: "test", ok: true, fallback: false, willFallback: false });
 
     expect(events).toEqual([
@@ -21,7 +27,9 @@ describe("createDelegationProgressRelay", () => {
         ...metadata(),
         childEvent: {
           kind: "tool-start",
-          tool: "file.read"
+          tool: "file.read",
+          activityId: "read-1",
+          displayPreview: "src/app.ts?token=[redacted]"
         }
       },
       {
@@ -40,6 +48,7 @@ describe("createDelegationProgressRelay", () => {
         }
       }
     ]);
+    expect(JSON.stringify(events)).not.toContain("secret path");
   });
 
   it("does not relay raw prompts, provider tokens, or provider tool-call arguments", async () => {
@@ -52,18 +61,27 @@ describe("createDelegationProgressRelay", () => {
     });
 
     await relay({ kind: "agent-start", sessionId: "child", input: "full prompt api_key=secret" });
+    await relay({ kind: "agent-final", text: "private child final answer" });
     await relay({ kind: "provider-token", provider: "local", model: "test", text: "raw-token" });
     await relay({ kind: "provider-tool-call", provider: "local", model: "test", argumentsText: "{\"token\":\"secret\"}" });
 
     expect(JSON.stringify(events)).not.toContain("api_key=secret");
     expect(JSON.stringify(events)).not.toContain("raw-token");
     expect(JSON.stringify(events)).not.toContain("argumentsText");
-    expect(events).toHaveLength(1);
+    expect(JSON.stringify(events)).not.toContain("private child final answer");
+    expect(events).toHaveLength(2);
     expect(events[0]).toMatchObject({
       kind: "delegation-progress",
       childEvent: {
         kind: "agent-start",
         sessionId: "child"
+      }
+    });
+    expect(events[1]).toMatchObject({
+      kind: "delegation-progress",
+      childEvent: {
+        kind: "agent-final",
+        ok: true
       }
     });
   });
@@ -88,6 +106,59 @@ describe("createDelegationProgressRelay", () => {
 
     expect(events).toHaveLength(2);
   });
+
+  it("does not throttle distinct tool activities with the same tool name", async () => {
+    const events: RuntimeEvent[] = [];
+    const relay = createDelegationProgressRelay({
+      metadata: metadata(),
+      throttleMs: 500,
+      now: () => 1_000,
+      parentOnEvent: (event) => {
+        events.push(event);
+      }
+    });
+
+    await relay({ kind: "tool-start", tool: "file.read", activityId: "read-1" });
+    await relay({ kind: "tool-start", tool: "file.read", activityId: "read-2" });
+
+    expect(events).toHaveLength(2);
+  });
+
+  it("builds bounded redacted task labels without terminal controls", () => {
+    const label = delegationTaskDisplayLabel(
+      "\x1b[31mInspect to\x1b[32mken=supersecret\x1b[0m\u202E and continue ".repeat(12)
+    );
+
+    expect(label.length).toBeLessThanOrEqual(96);
+    expect(label).toContain("token=[redacted]");
+    expect(label).not.toContain("supersecret");
+    expect(label).not.toContain("\x1b");
+    expect(label).not.toContain("\u202E");
+  });
+
+  it("normalizes display metadata at the relay boundary", async () => {
+    const events: RuntimeEvent[] = [];
+    const relay = createDelegationProgressRelay({
+      metadata: {
+        ...metadata(),
+        taskIndex: 99,
+        batchTaskCount: 100,
+        taskLabel: "\x1b[31mInspect token=supersecret\x1b[0m\u202E"
+      },
+      parentOnEvent: (event) => {
+        events.push(event);
+      }
+    });
+
+    await relay({ kind: "agent-start", sessionId: "child", input: "private child prompt" });
+
+    expect(events[0]).toMatchObject({
+      kind: "delegation-progress",
+      taskIndex: 9,
+      batchTaskCount: 10,
+      taskLabel: "Inspect token=[redacted]"
+    });
+  });
 });
 
 function metadata() {
@@ -98,6 +169,8 @@ function metadata() {
     role: "leaf" as const,
     depth: 1,
     taskIndex: 2,
-    batchId: "batch"
+    batchId: "batch",
+    taskLabel: "Inspect delegation",
+    batchTaskCount: 3
   };
 }

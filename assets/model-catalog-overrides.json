@@ -52,6 +52,13 @@
     },
     {
       "provider": "openai",
+      "model": "gpt-image-2",
+      "lifecycle": "available",
+      "usageClass": "image",
+      "note": "Image model; hidden from primary chat selection by default."
+    },
+    {
+      "provider": "openai",
       "model": "o3-deep-research",
       "lifecycle": "available",
       "usageClass": "deep-research",

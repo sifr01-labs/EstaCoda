@@ -178,7 +178,7 @@ Wide startup dashboard:
 ╭──────────────────────────────────────────────────────────────────────────────╮
 │ ╭─ Session ──────────────────────────╮ ╭─ Commands ────────────────────────╮ │
 │ │ model       kimi-k2.6 ◐             │ │ /tools     inspect tools           │ │
-│ │ context     0 / 262k                │ │ /skills    loaded skills           │ │
+│ │ context     -- / 262k               │ │ /skills    loaded skills           │ │
 │ │ workspace   verified                │ │ /model     active model route      │ │
 │ │ security    open                    │ │ /status    runtime state           │ │
 │ │ autonomy    autonomous              │ │ /setup     setup editor            │ │
@@ -191,7 +191,7 @@ Wide startup dashboard:
 ╭─ Prompt ─────────────────────────────────────────────────────────────────────╮
 │ ›                                                                            │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-kimi-k2.6 ◐ │ ctx [▱▱▱▱▱▱▱▱▱▱] 0/262k 0% │ session 00:10
+kimi-k2.6 ◐ │ ctx [··········] --/262k --% │ session 00:10
 ```
 
 Narrow startup dashboard:
@@ -204,7 +204,7 @@ v0.1.0 · session 20ea8195
 ╭────────────────────────────────────────────╮
 │ ╭─ Session ──────────────────────────────╮ │
 │ │ model       kimi-k2.6 ◐                 │ │
-│ │ context     0 / 262k                    │ │
+│ │ context     -- / 262k                   │ │
 │ │ workspace   verified                    │ │
 │ │ security    open                        │ │
 │ ╰────────────────────────────────────────╯ │
@@ -322,34 +322,69 @@ Attachments:
 - file excerpt · src/cli/session-loop.ts · 184 lines
 ```
 
-### Phase E: Active Work
+### Phase E: Delegated Active Work
 
-Live active work:
+Normal tool activity remains in the compact turn status while work is live. A
+running `delegate_task` is the exception: its bounded child rows use the active
+work region so the operator can see that isolated subagents are still running.
 
 ```text
-╭─ Active work ─────────────────────────────────────────────────────────╮
-│ ◷ read_file       src/ui/papyrus/screen/output.ts              00:03  │
-│ ◷ rg              "createReadlinePrompt" src                   00:02  │
-│ ✓ read_file       src/cli/session-loop.ts                      00:01  │
-│ ✓ grep            approval required                            00:01  │
-│ ✓ typecheck       passed                                       00:18  │
-│ ... 18 more completed this turn                                      │
-╰───────────────────────────────────────────────────────────────────────╯
+Delegated work · 2 active · 1 done · 00:53
+╭─ • Worker 1 · inspect delegation ───────╮  ╭─ ● Worker 2 · inspect tools ───────────╮
+│ ✓ Search Files  src/delegation           │  │ · Read File  src/tools/delegation...   │
+│ · Read File     progress-relay.ts        │  │                                         │
+│                                         │  │                                         │
+│                                         │  │                                         │
+│                                         │  │                                         │
+│                                         │  │                                         │
+├─────────────────────────────────────────┤  ├─────────────────────────────────────────┤
+│ running · 2 activities · 00:53          │  │ running · 1 activity · 00:53           │
+╰─────────────────────────────────────────╯  ╰─────────────────────────────────────────╯
+╭─ ✓ Worker 3 · inspect docs ─────────────╮
+│ ✓ Search Files  docs/**/*delegation*     │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+├─────────────────────────────────────────┤
+│ completed · 1 activity · 00:47          │
+╰─────────────────────────────────────────╯
 ╭─ Prompt ─────────────────────────────────────────────────────────────╮
 │ ›                                                                     │
 ╰──────────────────────────────────────────────────────────────────────╯
 kimi-k2.7-code ● │ ctx [▰▱▱▱▱▱▱▱▱▱] 7% │ session 01:12
 ```
 
-Turn-end collapsed summary:
+Assistant prose emitted before `delegate_task` remains visible above the
+delegated-work region. When the parent delegation settles, or a new live
+assistant tail begins streaming, the child rows leave the live frame. The
+durable turn-end surface keeps one parent tool row with the bounded outcome
+counts:
+
+Each worker card keeps a rolling maximum of six bounded activity rows. Cards
+render two per row when two minimum-width cards fit and stack on narrower
+terminals. At most three cards are visible: active workers take precedence and
+recent completions fill remaining slots, while the header reports aggregate
+active, completed, failed, and not-yet-observed queue counts for the whole
+batch. Constrained layouts reduce activity rows before falling back to compact
+worker lines. Running workers use the phase-shifted `worker` pulse token; plain
+mode uses a stable ASCII marker with animation disabled. Worker timers begin
+when each child starts, completion recency follows settlement time, and card
+footers preserve distinct completed, blocked, failed, timed-out, and cancelled
+outcomes.
 
 ```text
-Assistant:
-Completed tool work: 3 running steps resolved, 42 total tool events, 1 file change inspected.
+╭─ Tools completed ─────────────────────────────────────────────────────╮
+│ ✗ Delegate Task    1 completed · 1 timed out · 1 failed        00:10  │
+╰───────────────────────────────────────────────────────────────────────╯
 ```
 
-Active work is live telemetry. It should not dump full operational detail into
-the transcript by default.
+Child prompts, transcripts, raw tool arguments, provider/model identifiers,
+cancellation reasons, and child session identifiers are not rendered. Plain and
+one-shot CLI modes emit at most two lifecycle lines per child, for example
+`Worker 1: started` and `Worker 1: completed`; intermediate child
+tool and provider events remain silent.
 
 ### Phase E2: Live Assistant Streaming
 

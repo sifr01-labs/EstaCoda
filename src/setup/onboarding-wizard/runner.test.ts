@@ -2954,7 +2954,7 @@ describe("runFirstRunSetup", () => {
     expect(promptOrder.indexOf(gatewayServiceActivationPromptTitle)).toBeLessThan(
       promptOrder.indexOf(resolveSetupCopy("en", "onboarding.launch.startNow"))
     );
-    expect(result.output).toContain("Gateway service installed and started for configured Telegram channel.");
+    expect(result.output).toContain("Gateway service installed and started for background memory finalization and configured Telegram channel.");
     expect(JSON.stringify(result)).not.toContain("123456:telegram-token");
   });
 
@@ -2991,11 +2991,12 @@ describe("runFirstRunSetup", () => {
       .toBe("navigation");
   });
 
-  it("does not offer the onboarding gateway prompt when no channel was configured", async () => {
+  it("offers the background finalization service when no channel was configured", async () => {
     const actions = gatewayServiceActions();
     const promptTitles: string[] = [];
     const prompt = fakePrompt({
       "Optional capabilities": "No",
+      [gatewayServiceActivationPromptTitle]: "Yes",
       [resolveSetupCopy("en", "onboarding.launch.startNow")]: "No",
     });
     const baseSelect = prompt.select!;
@@ -3013,10 +3014,14 @@ describe("runFirstRunSetup", () => {
       gatewayServiceActivation: { serviceActions: actions },
     });
 
-    expect(result.gatewayServiceActivationResult?.kind).toBe("not-offered");
-    expect(promptTitles).not.toContain(gatewayServiceActivationPromptTitle);
-    expect(actions.install).not.toHaveBeenCalled();
-    expect(actions.start).not.toHaveBeenCalled();
+    expect(result.gatewayServiceActivationResult).toEqual(expect.objectContaining({
+      kind: "started",
+      channels: [],
+    }));
+    expect(promptTitles).toContain(gatewayServiceActivationPromptTitle);
+    expect(actions.install).toHaveBeenCalledTimes(1);
+    expect(actions.start).toHaveBeenCalledTimes(1);
+    expect(result.output).toContain("background memory finalization");
   });
 
   it("renders multiple configured channels without exposing raw secrets", async () => {
@@ -3063,7 +3068,7 @@ describe("runFirstRunSetup", () => {
     expect(JSON.stringify(result)).not.toContain("discord-secret-value");
   });
 
-  it("does not offer the onboarding gateway prompt when channel configuration is incomplete", async () => {
+  it("still offers background finalization when channel configuration is incomplete", async () => {
     const actions = gatewayServiceActions();
     const promptTitles: string[] = [];
     const prompt = fakePrompt({
@@ -3088,8 +3093,8 @@ describe("runFirstRunSetup", () => {
       gatewayServiceActivation: { serviceActions: actions },
     });
 
-    expect(result.gatewayServiceActivationResult?.kind).toBe("not-offered");
-    expect(promptTitles).not.toContain(gatewayServiceActivationPromptTitle);
+    expect(result.gatewayServiceActivationResult?.kind).toBe("declined");
+    expect(promptTitles).toContain(gatewayServiceActivationPromptTitle);
     expect(actions.install).not.toHaveBeenCalled();
     expect(actions.start).not.toHaveBeenCalled();
   });

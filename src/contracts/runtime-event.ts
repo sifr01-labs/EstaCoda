@@ -1,5 +1,5 @@
 import type { FileChangePreviewViewModel } from "./view-model.js";
-import type { SessionCompressionTrigger } from "./session.js";
+import type { SessionCompressionTrigger, SessionContextWindowUsage } from "./session.js";
 import type {
   ProviderFinishReason,
   ProviderReasoningMetadata,
@@ -9,6 +9,15 @@ import type {
   SkillRouteTelemetryDetails,
   SkillRouteFinalOutcomeStatus
 } from "./skill.js";
+
+export type ContextEstimateStage =
+  | "input"
+  | "memory"
+  | "skill"
+  | "tools"
+  | "preflight"
+  | "provider-tool-feedback"
+  | "assembled-prompt";
 
 export type RuntimeEvent =
   | {
@@ -95,11 +104,16 @@ export type RuntimeEvent =
       reason: string;
     }
   | {
-      kind: "context-usage";
+      kind: "context-estimate";
       filled: number;
       total: number;
-      source: "live-estimate" | "assembled-prompt" | "provider-actual";
+      source: "live-estimate" | "assembled-prompt";
+      stage: ContextEstimateStage;
     }
+  | (SessionContextWindowUsage & {
+      kind: "context-window-usage";
+      source: "provider-actual";
+    })
   | {
       kind: "session-compacted";
       originalSessionId: string;
@@ -192,6 +206,8 @@ export type RuntimeEvent =
       depth: number;
       taskIndex?: number;
       batchId?: string;
+      taskLabel?: string;
+      batchTaskCount?: number;
       childEvent: {
         kind:
           | "agent-start"
@@ -201,9 +217,12 @@ export type RuntimeEvent =
           | "provider-result"
           | "provider-budget-exhausted"
           | "agent-final"
-          | "agent-cancelled";
+          | "agent-cancelled"
+          | "delegation-result";
         sessionId?: string;
         tool?: string;
+        activityId?: string;
+        displayPreview?: string;
         decision?: string;
         riskClass?: string;
         ok?: boolean;
@@ -221,6 +240,7 @@ export type RuntimeEvent =
         limit?: number;
         observed?: number;
         reason?: string;
+        status?: "completed" | "blocked" | "failed" | "timeout" | "cancelled";
       };
     };
 

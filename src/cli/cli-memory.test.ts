@@ -3,10 +3,13 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { resolveProfileStateHome } from "../config/profile-home.js";
+import { resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
+import { SQLiteMemoryCurationCoordinator } from "../memory/memory-curation-coordinator.js";
 import { resolveMemoryIndexStorePath } from "../memory/memory-index-store.js";
 import { MemoryCurationStore, memoryCurationStorePath } from "../memory/memory-curation-store.js";
 import { writeSharedMemory } from "../memory/shared-memory.js";
+import { createSQLiteSessionDB } from "../session/session-setup.js";
+import { SessionFinalizationQueue } from "../session/session-finalization-queue.js";
 import { runCliCommand } from "./cli.js";
 
 const tempDirs: string[] = [];
@@ -24,6 +27,108 @@ afterEach(async () => {
 });
 
 describe("CLI memory commands", () => {
+  it("memory status reports profile-scoped background finalization health", async () => {
+    const homeDir = await makeTempHome();
+    const sessionDb = await createSQLiteSessionDB({
+      path: resolveGlobalStateHome({ homeDir }).sessionsSqlitePath,
+    });
+    await sessionDb.createSession({ id: "finished", profileId: "default" });
+    await sessionDb.appendMessage({ id: "m1", sessionId: "finished", role: "user", content: "private" });
+    new SessionFinalizationQueue({ db: sessionDb.db }).enqueue({
+      profileId: "default",
+      sessionId: "finished",
+      reason: "cli-exit",
+    });
+    sessionDb.close();
+
+    const result = await runMemoryCommand(homeDir, ["memory", "status"]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("backgroundFinalizationPending: 1");
+    expect(result.output).toContain("backgroundFinalizationRunning: 0");
+    expect(result.output).toContain("backgroundFinalizationRetrying: 0");
+    expect(result.output).toContain("backgroundFinalizationFailed: 0");
+    expect(result.output).not.toContain("private");
+  });
+
+  it("inspects, retries, and prunes profile-scoped finalization metadata without transcript content", async () => {
+    const homeDir = await makeTempHome();
+    const sessionDb = await createSQLiteSessionDB({
+      path: resolveGlobalStateHome({ homeDir }).sessionsSqlitePath,
+    });
+    await sessionDb.createSession({ id: "failed-session", profileId: "default" });
+    await sessionDb.appendMessage({
+      id: "failed-message",
+      sessionId: "failed-session",
+      role: "user",
+      content: "private finalization content",
+    });
+    const queue = new SessionFinalizationQueue({ db: sessionDb.db });
+    const job = queue.enqueue({ profileId: "default", sessionId: "failed-session", reason: "cli-exit" });
+    queue.claimNext({ profileId: "default", ownerId: "test-worker", leaseMs: 60_000 });
+    queue.fail({
+      id: job.id,
+      profileId: "default",
+      ownerId: "test-worker",
+      errorCode: "curation-failed",
+    });
+    sessionDb.close();
+
+    const listed = await runMemoryCommand(homeDir, ["memory", "finalization", "list", "--status", "failed"]);
+    expect(listed.exitCode).toBe(0);
+    expect(listed.output).toContain(job.id);
+    expect(listed.output).toContain("status=failed");
+    expect(listed.output).toContain("error=curation-failed");
+    expect(listed.output).not.toContain("private finalization content");
+
+    const retried = await runMemoryCommand(homeDir, ["memory", "finalization", "retry", job.id]);
+    expect(retried.exitCode).toBe(0);
+    expect(retried.output).toContain("queued for retry");
+
+    const pruned = await runMemoryCommand(homeDir, ["memory", "finalization", "prune", "--keep", "0"]);
+    expect(pruned.exitCode).toBe(0);
+    expect(pruned.output).toContain("Pruned 0 terminal finalization job(s)");
+  });
+
+  it("shows completed finalization outcome codes", async () => {
+    const homeDir = await makeTempHome();
+    const sessionDb = await createSQLiteSessionDB({
+      path: resolveGlobalStateHome({ homeDir }).sessionsSqlitePath,
+    });
+    await sessionDb.createSession({ id: "completed-session", profileId: "default" });
+    const queue = new SessionFinalizationQueue({ db: sessionDb.db });
+    const job = queue.enqueue({ profileId: "default", sessionId: "completed-session", reason: "cli-exit" });
+    queue.claimNext({ profileId: "default", ownerId: "test-worker", leaseMs: 60_000 });
+    queue.complete({
+      id: job.id,
+      profileId: "default",
+      ownerId: "test-worker",
+      outcomeCode: "curation-ignored",
+    });
+    sessionDb.close();
+
+    const listed = await runMemoryCommand(homeDir, ["memory", "finalization", "list", "--status", "completed"]);
+
+    expect(listed.exitCode).toBe(0);
+    expect(listed.output).toContain("outcome=curation-ignored");
+  });
+
+  it("validates finalization filters and retention before a session database exists", async () => {
+    const homeDir = await makeTempHome();
+
+    const invalidStatus = await runMemoryCommand(homeDir, ["memory", "finalization", "list", "--status"]);
+    expect(invalidStatus.exitCode).toBe(1);
+    expect(invalidStatus.output).toContain("Status must be");
+
+    const invalidLimit = await runMemoryCommand(homeDir, ["memory", "finalization", "list", "--limit", "2jobs"]);
+    expect(invalidLimit.exitCode).toBe(1);
+    expect(invalidLimit.output).toContain("limit must be between 1 and 100");
+
+    const invalidKeep = await runMemoryCommand(homeDir, ["memory", "finalization", "prune", "--keep="]);
+    expect(invalidKeep.exitCode).toBe(1);
+    expect(invalidKeep.output).toContain("retention must be between 0 and 10000");
+  });
+
   it("memory index path outputs profile-state memory-index.sqlite", async () => {
     const homeDir = await makeTempHome();
     const result = await runMemoryCommand(homeDir, ["memory", "index", "path"]);
@@ -573,6 +678,35 @@ describe("CLI memory commands", () => {
     await expect(readFile(paths.userMdPath, "utf8")).resolves.toBe("");
     await expect(readFile(paths.memoryMdPath, "utf8")).resolves.toBe("");
     await expect(readFile(paths.soulMdPath, "utf8")).resolves.toBe("protected identity");
+  });
+
+  it("memory mutations defer while background curation holds the profile lease", async () => {
+    const homeDir = await makeTempHome();
+    await seedProfileMemory(homeDir, { "USER.md": "keep this memory" });
+    const sessionDb = await createSQLiteSessionDB({
+      path: resolveGlobalStateHome({ homeDir }).sessionsSqlitePath,
+    });
+    let releaseLease!: () => void;
+    const leaseBlocker = new Promise<void>((resolve) => {
+      releaseLease = resolve;
+    });
+    const heldLease = new SQLiteMemoryCurationCoordinator({
+      db: sessionDb.db,
+      profileId: "default",
+    }).runExclusive({ task: async () => await leaseBlocker });
+
+    try {
+      const result = await runMemoryCommand(homeDir, ["memory", "clear", "USER.md", "--yes"]);
+
+      expect(result.exitCode).toBe(1);
+      expect(result.output).toContain("Memory update is busy");
+      await expect(readFile(resolveProfileStateHome({ homeDir, profileId: "default" }).userMdPath, "utf8"))
+        .resolves.toBe("keep this memory");
+    } finally {
+      releaseLease();
+      await heldLease;
+      sessionDb.close();
+    }
   });
 });
 

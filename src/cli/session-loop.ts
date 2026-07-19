@@ -54,6 +54,7 @@ import type { TerminalCapabilities } from "../contracts/ui.js";
 import {
   createSubmittedSteerTranscriptBlock,
   ActiveWorkRuntimeEventMapper,
+  formatPlainDelegationProgressEvent,
   createOperatorConsoleRuntimeHost,
   createOperatorConsoleStyle,
   mapStartupDashboardViewModelToOperatorConsoleState,
@@ -119,6 +120,7 @@ import { createReviewedSetupApplyExecutor } from "../setup/review/apply-executor
 import { buildProvidersStatusViewModel } from "./provider-status-view-models.js";
 import { selectProviderModelRoute } from "../setup/provider-model-route-prompt.js";
 import { isMemoryCurationModeMutation, runMemoryOperatorCommand } from "../memory/memory-operator-commands.js";
+import type { SessionFinalizationReason } from "../session/session-finalization-queue.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -152,7 +154,6 @@ export type SessionLoopOptions = {
 const OPERATOR_CONSOLE_FALLBACK_TERMINAL_HEIGHT = 24;
 const COMPACTION_PROMPT_PLACEHOLDER = "Compacting session history... Ctrl+C to cancel";
 
-type ContextUsageSource = Extract<RuntimeEvent, { kind: "context-usage" }>["source"];
 type StatusRailTimerMode = "idle" | "active-turn" | "last-turn";
 
 type SubmittedCliInput = {
@@ -225,7 +226,7 @@ function renderStartupScreenText(input: {
   rendered: string;
   capabilities: TerminalCapabilities;
   operatorConsoleRuntimeHost?: OperatorConsoleRuntimeHost;
-  contextWindow?: number;
+  contextUsage?: ContextUsageSnapshot;
   style?: OperatorConsoleStyle;
 }): string {
   if (!canRenderStartupThroughOperatorConsole(input)) {
@@ -238,7 +239,7 @@ function renderStartupScreenText(input: {
 
   const startupText = renderOperatorConsoleStartupDashboard({
     viewModel: input.viewModel,
-    contextWindow: input.contextWindow,
+    contextUsage: input.contextUsage,
     capabilities: input.capabilities,
     operatorConsoleRuntimeHost: input.operatorConsoleRuntimeHost,
     style: input.style,
@@ -267,7 +268,7 @@ function canRenderStartupThroughOperatorConsole(input: {
 
 function renderOperatorConsoleStartupDashboard(input: {
   viewModel: StartupDashboardViewModel;
-  contextWindow?: number;
+  contextUsage?: ContextUsageSnapshot;
   capabilities: TerminalCapabilities;
   operatorConsoleRuntimeHost: OperatorConsoleRuntimeHost;
   style?: OperatorConsoleStyle;
@@ -282,7 +283,7 @@ function renderOperatorConsoleStartupDashboard(input: {
   host.setStyle(input.style);
   host.setStartupDashboard(mapStartupDashboardViewModelToOperatorConsoleState({
     viewModel: input.viewModel,
-    contextWindow: input.contextWindow,
+    contextUsage: input.contextUsage,
   }));
   const frame = host.render();
   const startupText = renderOperatorConsoleLines(frame.state, frame.layout)
@@ -331,7 +332,6 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     : undefined;
   operatorConsoleRuntimeHost?.setStyle(operatorConsoleStyle);
   let latestContextUsage: ContextUsageSnapshot | undefined;
-  let activeTurnContextUsageSource: ContextUsageSource | undefined;
   let timerMode: StatusRailTimerMode = "idle";
   let activeTurnStartedAtMs: number | undefined;
   let lastCompletedTurnSeconds: number | undefined;
@@ -382,30 +382,29 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       return;
     }
 
+    enqueueRuntimeFinalization(runtime, "sigint", output);
     output.write("\nEnding EstaCoda session.\n");
     close();
   };
 
   let stopIdleStatusTicker: () => void = () => undefined;
-  process.once("SIGINT", onSigint);
+  process.on("SIGINT", onSigint);
 
   try {
+    latestContextUsage = await initialContextUsageForRuntime(runtime);
     const resetTurnRailState = () => {
       timerMode = "idle";
       activeTurnStartedAtMs = undefined;
       lastCompletedTurnSeconds = undefined;
       pendingCompactionPostTokens = undefined;
     };
-    const applyCompactionRailReset = (postTokens?: number) => {
+    const markContextUsageUnknown = () => {
+      const total = modelContextWindow(runtime) ?? latestContextUsage?.total;
+      latestContextUsage = total === undefined ? undefined : { total };
+    };
+    const applyCompactionRailReset = () => {
       resetTurnRailState();
-      activeTurnContextUsageSource = undefined;
-      const contextWindow = modelContextWindow(runtime);
-      if (postTokens === undefined) {
-        latestContextUsage = undefined;
-        return;
-      }
-      const total = contextWindow ?? latestContextUsage?.total;
-      latestContextUsage = total === undefined ? undefined : { filled: postTokens, total };
+      markContextUsageUnknown();
     };
     const startupVm = await buildSessionStartupViewModel(runtime);
     const renderedStartupText = renderer.render(startupVm);
@@ -414,7 +413,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       rendered: renderedStartupText,
       capabilities: renderer.capabilities,
       operatorConsoleRuntimeHost,
-      contextWindow: modelContextWindow(runtime),
+      contextUsage: latestContextUsage,
       style: operatorConsoleStyle,
     });
     const promptPrefix = renderer.tokens.contract.branding.promptPrefix ?? `${renderer.tokens.contract.glyph.prompt} `;
@@ -491,6 +490,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       }
 
       if (text === "/exit") {
+        enqueueRuntimeFinalization(runtime, "cli-exit", output);
         output.write("Ending EstaCoda session.\n");
         return;
       }
@@ -560,7 +560,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
               slashLiveFrame?.clear();
               slashLiveFrame = undefined;
             },
-            onSessionCompacted: ({ postTokens }) => applyCompactionRailReset(postTokens)
+            onSessionCompacted: () => applyCompactionRailReset()
           });
         } catch (error) {
           slashLiveFrame?.clear();
@@ -580,8 +580,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         if (typeof shouldExit !== "boolean") {
           await runtime.dispose();
           runtime = shouldExit.runtime;
-          latestContextUsage = undefined;
-          activeTurnContextUsageSource = undefined;
+          latestContextUsage = await initialContextUsageForRuntime(runtime);
           lastProviderExecutionSummary = undefined;
           providerServingState = undefined;
           resetTurnRailState();
@@ -614,7 +613,6 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       while (retryText !== undefined) {
         activeTurn = new AbortController();
         activeTurnCancelMessage = "Cancelling current turn. Press Ctrl+C again or type /exit to leave.";
-        activeTurnContextUsageSource = undefined;
         const turnStartedAtMs = now();
         activeTurnStartedAtMs = turnStartedAtMs;
         lastCompletedTurnSeconds = undefined;
@@ -858,24 +856,14 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
                   operatorConsoleLiveFrame.flushStreamingSegment(reason);
                 },
 	            onEvent: (event) => {
-	              if (event.kind === "context-usage") {
-                const currentPriority = activeTurnContextUsageSource === undefined
-                  ? 0
-                  : contextUsagePriority(activeTurnContextUsageSource);
-                const incomingPriority = contextUsagePriority(event.source);
-	                if (incomingPriority >= currentPriority) {
-	                  latestContextUsage = { filled: event.filled, total: event.total };
-	                  activeTurnContextUsageSource = event.source;
-	                  refreshOperatorConsoleTransientSurface();
-	                  writeSessionStatusRail();
-	                }
+	              if (event.kind === "context-window-usage") {
+	                latestContextUsage = { filled: event.usedTokens, total: event.totalTokens };
+	                refreshOperatorConsoleTransientSurface();
+	                writeSessionStatusRail();
 	              }
 	              if (event.kind === "session-compacted") {
                 pendingCompactionPostTokens = event.postTokens;
-                activeTurnContextUsageSource = undefined;
-	                const contextWindow = modelContextWindow(runtime);
-	                const total = contextWindow ?? latestContextUsage?.total;
-	                latestContextUsage = total === undefined ? undefined : { filled: event.postTokens, total };
+	                markContextUsageUnknown();
 	                refreshOperatorConsoleTransientSurface();
 	                writeSessionStatusRail();
 	              }
@@ -887,19 +875,23 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	                operatorConsoleLiveFrame.resetStreaming();
 	              }
               let newPhase: string | undefined;
-              if (operatorConsoleLiveFrame !== undefined && isToolActivityRuntimeEvent(event)) {
-                operatorConsoleLiveFrame.applyActiveWorkEvent(activeWorkEventMapper.build(event));
-                newPhase = "provider";
+              if (operatorConsoleLiveFrame !== undefined && event.kind === "delegation-progress") {
+                operatorConsoleLiveFrame.applyActiveWorkEvent(activeWorkEventMapper.buildDelegationProgress(event));
+                newPhase = "tool";
+              } else if (operatorConsoleLiveFrame !== undefined && isToolActivityRuntimeEvent(event)) {
+                const activeWorkEvent = activeWorkEventMapper.build(event);
+                operatorConsoleLiveFrame.applyActiveWorkEvent(activeWorkEvent);
+                newPhase = activeWorkEvent.toolName === "delegate_task" ? "tool" : "provider";
               } else if (operatorConsoleLiveFrame !== undefined) {
                   const operatorConsolePhase = operatorConsoleTransientPhaseForRuntimeEvent(event);
                   if (operatorConsolePhase === null) {
                     clearOperatorConsoleLiveFrame();
-                    newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, undefined, turnOutput);
+                    newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, undefined, turnOutput, renderer.locale === "ar" ? "ar" : "en");
                   } else {
                     newPhase = operatorConsolePhase;
                   }
 	              } else {
-	                newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, undefined, turnOutput);
+	                newPhase = renderRuntimeEvent(output, event, activityBuilder, renderer, streamState, undefined, turnOutput, renderer.locale === "ar" ? "ar" : "en");
 	              }
               if (newPhase !== undefined) {
                 renderSpinner(newPhase);
@@ -934,7 +926,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
               execution: response.providerExecution,
             });
 	        if (pendingCompactionPostTokens !== undefined) {
-	          applyCompactionRailReset(pendingCompactionPostTokens);
+	          resetTurnRailState();
 	          pendingCompactionPostTokens = undefined;
 	        } else {
 	          lastCompletedTurnSeconds = elapsedSeconds(turnStartedAtMs, now());
@@ -1299,16 +1291,19 @@ export async function handleSlashCommand(input: {
     }
     case "providers":
       return handleProvidersCommand(input, args);
-    case "new":
+    case "new": {
       if (input.refreshRuntime === undefined) {
         input.output.write("This session cannot reset itself here. Start a new EstaCoda session to refresh skills and config.\n\n");
         return false;
       }
 
+      const nextRuntime = await input.refreshRuntime({ preserveSession: false });
+      enqueueRuntimeFinalization(input.runtime, "new-session", input.output);
       return {
-        runtime: await input.refreshRuntime({ preserveSession: false }),
+        runtime: nextRuntime,
         notice: (runtime) => renderFreshSessionNotice(runtime, input.renderer)
       };
+    }
     case "tools":
       input.output.write(`${input.renderer.render(buildToolsMenuViewModel(input.runtime, args.join(" ")))}\n\n`);
       return false;
@@ -1575,11 +1570,27 @@ export async function handleSlashCommand(input: {
       input.output.write("\x1Bc");
       return false;
     case "exit":
+      enqueueRuntimeFinalization(input.runtime, "cli-exit", input.output);
       input.output.write("Ending EstaCoda session.\n");
       return true;
     default:
       input.output.write(`Unknown command: /${command}\nUse /help to see available commands.\n\n`);
       return false;
+  }
+}
+
+function enqueueRuntimeFinalization(
+  runtime: Runtime,
+  reason: SessionFinalizationReason,
+  output: Pick<NodeJS.WritableStream, "write">
+): void {
+  try {
+    const enqueue = runtime.enqueueSessionFinalization;
+    if (enqueue !== undefined && enqueue(reason) === undefined) {
+      output.write("Warning: background memory finalization could not be queued.\n");
+    }
+  } catch {
+    output.write("Warning: background memory finalization could not be queued.\n");
   }
 }
 
@@ -1706,6 +1717,11 @@ async function handleProvidersCommand(
   if (!shouldRefreshAfterProvidersSetup(result.applyEndState)) {
     return false;
   }
+
+  await input.runtime.sessionDb.appendEvent(input.runtime.sessionId, {
+    kind: "context-window-usage-invalidated",
+    reason: "model-change"
+  });
 
   const refreshed = await refreshCurrentRuntime(input);
   if (refreshed === undefined) {
@@ -2786,7 +2802,8 @@ export function renderRuntimeEvent(
   renderer: { render(viewModel: import("../contracts/view-model.js").ViewModel): string },
   streamState: { lastWriteEndedWithNewline: boolean },
   _legacyChrome: unknown,
-  turnOutput: { spinnerPhase?: string; hasOutput: boolean; lastOutputWasSpinner: boolean }
+  turnOutput: { spinnerPhase?: string; hasOutput: boolean; lastOutputWasSpinner: boolean },
+  locale: "en" | "ar" = "en"
 ): string | undefined {
   function safeWrite(text: string): void {
     const endsWithNewline = text.endsWith("\n");
@@ -2857,10 +2874,19 @@ export function renderRuntimeEvent(
       clearActiveSpinnerLine();
       safeWrite(`\nprovider budget: ${event.reason}\n`);
       return undefined;
-    case "context-usage":
+    case "context-estimate":
+    case "context-window-usage":
       return undefined;
     case "session-compacted":
       return undefined;
+    case "delegation-progress": {
+      const line = formatPlainDelegationProgressEvent(event, locale);
+      if (line !== undefined) {
+        clearActiveSpinnerLine();
+        safeWrite(`${line}\n`);
+      }
+      return "tool";
+    }
     case "agent-cancelled":
       clearActiveSpinnerLine();
       safeWrite(`\ncancelled: ${event.reason}\n`);
@@ -2880,10 +2906,12 @@ function operatorConsoleTransientPhaseForRuntimeEvent(event: RuntimeEvent): stri
     case "provider-token":
       return "provider";
     case "provider-tool-call":
+    case "delegation-progress":
       return "tool";
     case "provider-result":
       return event.ok || !event.willFallback ? "finalizing" : "provider";
-    case "context-usage":
+    case "context-estimate":
+    case "context-window-usage":
       return undefined;
     case "session-compacted":
       return "background";
@@ -2919,15 +2947,16 @@ function truncateSingleLine(value: string, maxLength: number): string {
   return `${singleLine.slice(0, Math.max(0, maxLength - 1))}…`;
 }
 
-function contextUsagePriority(source: ContextUsageSource): number {
-  switch (source) {
-    case "provider-actual":
-      return 3;
-    case "assembled-prompt":
-      return 2;
-    case "live-estimate":
-      return 1;
-  }
+async function initialContextUsageForRuntime(runtime: Runtime): Promise<ContextUsageSnapshot | undefined> {
+  const actual = await runtime.currentContextWindowUsage?.();
+  return actual === undefined
+    ? unknownContextUsageForRuntime(runtime)
+    : { filled: actual.usedTokens, total: actual.totalTokens };
+}
+
+function unknownContextUsageForRuntime(runtime: Runtime): ContextUsageSnapshot | undefined {
+  const total = modelContextWindow(runtime);
+  return total === undefined ? undefined : { total };
 }
 
 function promptInputPlaceholder(

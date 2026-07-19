@@ -8,6 +8,7 @@ import { createFileExternalMemoryProvider } from "./external-memory-provider.js"
 import { createMemoryTool } from "../tools/memory-tool.js";
 import { MemoryStore } from "./memory-store.js";
 import { MemoryPersistenceService } from "./memory-persistence-service.js";
+import { MemoryCurationBusyError } from "./memory-curation-coordinator.js";
 
 const tempDirs: string[] = [];
 
@@ -24,6 +25,29 @@ afterEach(async () => {
 });
 
 describe("memory.curate", () => {
+  it("uses the profile mutation coordinator and returns busy without mutating memory", async () => {
+    const store = new MemoryStore();
+    const runExclusive = vi.fn(async () => {
+      throw new MemoryCurationBusyError();
+    });
+    const tool = createMemoryTool(store, {
+      mutationCoordinator: { runExclusive }
+    });
+
+    const result = await tool.run({
+      kind: "append",
+      file: "USER.md",
+      content: "- Prefer focused replies."
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      content: "Memory update is busy while background curation finishes. Try again shortly."
+    });
+    expect(runExclusive).toHaveBeenCalledTimes(1);
+    expect(store.read("USER.md")).toBe("");
+  });
+
   it("does not accept AGENTS.md", async () => {
     const tool = createMemoryTool(new MemoryStore());
 

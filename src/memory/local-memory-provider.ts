@@ -16,6 +16,7 @@ import type { MemoryStore } from "./memory-store.js";
 import type { MemoryPersistenceService } from "./memory-persistence-service.js";
 import type { MemoryIndexWriteSync } from "./memory-index-sync.js";
 import type { LocalMemoryRetrievalService } from "./memory-retrieval-service.js";
+import type { MemoryCurationCheckpointCoordinator } from "./memory-curation-coordinator.js";
 
 type LocalMemorySearchService = Pick<LocalMemoryRetrievalService, "search">;
 
@@ -28,6 +29,7 @@ export class LocalMemoryProvider implements MemoryProvider {
   readonly #persistence: MemoryPersistenceService | undefined;
   readonly #memoryIndexSync: MemoryIndexWriteSync | undefined;
   readonly #memorySearchService: LocalMemorySearchService | undefined;
+  readonly #mutationCoordinator: MemoryCurationCheckpointCoordinator | undefined;
   readonly #profileId: string;
 
   constructor(options: {
@@ -39,12 +41,14 @@ export class LocalMemoryProvider implements MemoryProvider {
     persistence?: MemoryPersistenceService;
     memoryIndexSync?: MemoryIndexWriteSync;
     memorySearchService?: LocalMemorySearchService;
+    mutationCoordinator?: MemoryCurationCheckpointCoordinator;
     profileId?: string;
   }) {
     this.#store = options.store;
     this.#persistence = options.persistence;
     this.#memoryIndexSync = options.memoryIndexSync;
     this.#memorySearchService = options.memorySearchService;
+    this.#mutationCoordinator = options.mutationCoordinator;
     this.#profileId = options.profileId ?? "default";
     this.#saveRoots = options.saveRoots ?? (
       options.saveRoot === undefined
@@ -135,6 +139,16 @@ export class LocalMemoryProvider implements MemoryProvider {
   }
 
   async conclude(conclusion: MemoryConclusion): Promise<void> {
+    if (this.#mutationCoordinator !== undefined) {
+      await this.#mutationCoordinator.runExclusive({
+        task: async () => await this.#conclude(conclusion)
+      });
+      return;
+    }
+    await this.#conclude(conclusion);
+  }
+
+  async #conclude(conclusion: MemoryConclusion): Promise<void> {
     const visibleContent = sanitizeMemoryText(conclusion.content);
     if (visibleContent.length === 0) {
       return;
@@ -214,6 +228,15 @@ export class LocalMemoryProvider implements MemoryProvider {
   }
 
   async forgetPromotion(content: string): Promise<MemoryPromotionRecord | undefined> {
+    if (this.#mutationCoordinator !== undefined) {
+      return await this.#mutationCoordinator.runExclusive({
+        task: async () => await this.#forgetPromotion(content)
+      });
+    }
+    return await this.#forgetPromotion(content);
+  }
+
+  async #forgetPromotion(content: string): Promise<MemoryPromotionRecord | undefined> {
     const previousRecords = await this.#promotionStore?.list();
     const previousMarkdown = this.#store.read("USER.md");
     const forgotten = await this.#promotionStore?.forgetUserPreference(content);

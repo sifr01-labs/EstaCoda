@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -11,6 +11,8 @@ import {
 } from "./memory-file-compaction-service.js";
 import { createMemoryFileCompactionTools } from "../tools/memory-file-compaction-tools.js";
 import { MemoryStore } from "./memory-store.js";
+import type { MemoryCurationCheckpointCoordinator } from "./memory-curation-coordinator.js";
+import { MemoryPersistenceService } from "./memory-persistence-service.js";
 
 const tempDirs: string[] = [];
 
@@ -86,6 +88,50 @@ describe("MemoryFileCompactionService", () => {
     expect(store.read("MEMORY.md")).toBe("- uses pnpm\n- uses pnpm");
     expect(await readFile(join(root, ".memory-file-compaction-backups", "memory-20260519133700000-backupid-1.bak.md"), "utf8"))
       .toBe("- uses pnpm");
+  });
+
+  it("refreshes and persists canonical memory while holding the mutation lease", async () => {
+    const root = await makeTempDir();
+    const store = new MemoryStore();
+    store.write("USER.md", "- stale runtime value");
+    await writeFile(join(root, "USER.md"), "- latest background value\n- latest background value", "utf8");
+    const calls: string[] = [];
+    const coordinator: MemoryCurationCheckpointCoordinator = {
+      runExclusive: async ({ task, signal }) => {
+        calls.push("lease");
+        return await task(signal ?? new AbortController().signal);
+      }
+    };
+    const service = makeService({
+      root,
+      store,
+      providerContent: JSON.stringify({ compactedText: "- latest background value" }),
+      coordinator,
+      persistence: new MemoryPersistenceService(),
+      id: () => "lease"
+    });
+
+    const result = await service.compact({ file: "USER.md" });
+
+    expect(result).toMatchObject({ ok: true, status: "applied" });
+    expect(calls).toEqual(["lease"]);
+    expect(store.read("USER.md")).toBe("- latest background value");
+    expect(await readFile(join(root, "USER.md"), "utf8")).toBe("- latest background value");
+    expect(await readFile(
+      join(root, ".memory-file-compaction-backups", "user-20260519133700000-lease.bak.md"),
+      "utf8"
+    )).toBe("- latest background value\n- latest background value");
+
+    if (!result.ok || result.status !== "applied" || result.backupId === undefined) {
+      throw new Error("expected coordinated compaction to create a backup");
+    }
+    await expect(service.restoreBackup({ file: "USER.md", backupId: result.backupId })).resolves.toMatchObject({
+      ok: true,
+      status: "restored"
+    });
+    expect(calls).toEqual(["lease", "lease"]);
+    expect(await readFile(join(root, "USER.md"), "utf8"))
+      .toBe("- latest background value\n- latest background value");
   });
 
   it("aborts scanner-blocked generated output and preserves the original", async () => {
@@ -381,6 +427,8 @@ function makeService(options: {
   trajectoryRecorder?: TrajectoryRecorder;
   sessionDb?: { appendEvent(sessionId: string, event: any): Promise<void> };
   sessionId?: string;
+  coordinator?: MemoryCurationCheckpointCoordinator;
+  persistence?: MemoryPersistenceService;
 }): MemoryFileCompactionService {
   return new MemoryFileCompactionService({
     store: options.store,
@@ -392,7 +440,9 @@ function makeService(options: {
     id: options.id ?? (() => "id"),
     trajectoryRecorder: options.trajectoryRecorder,
     sessionDb: options.sessionDb,
-    sessionId: options.sessionId
+    sessionId: options.sessionId,
+    mutationCoordinator: options.coordinator,
+    persistence: options.persistence
   });
 }
 

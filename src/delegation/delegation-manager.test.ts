@@ -474,6 +474,18 @@ describe("DelegationManager", () => {
     expect(JSON.stringify(parentEvents)).toContain("BEGIN PRIVATE KEY");
   });
 
+  it("rejects direct batches above the configured hard limit before child construction", async () => {
+    const harness = await createHarness({ maxBatchTasks: 100 });
+
+    await expect(harness.manager.delegateBatch({
+      parentSessionId: "parent",
+      profileId: "default",
+      tasks: Array.from({ length: 11 }, (_, index) => ({ task: `Task ${index + 1}` })),
+      trustedWorkspace: true
+    })).rejects.toThrow("Delegation batches support at most 10 tasks.");
+    expect(harness.factory.createChild).not.toHaveBeenCalled();
+  });
+
   it("does not start a child when the parent signal is already aborted", async () => {
     const harness = await createHarness();
     const controller = new AbortController();
@@ -638,6 +650,7 @@ describe("DelegationManager", () => {
   });
 
   it("unregisters active subagents on provider failure", async () => {
+    const events: RuntimeEvent[] = [];
     const harness = await createHarness({
       response: response({
         providerExecution: {
@@ -660,12 +673,20 @@ describe("DelegationManager", () => {
       parentSessionId: "parent",
       profileId: "default",
       task: "Fail",
-      trustedWorkspace: true
+      trustedWorkspace: true,
+      onEvent: (event) => {
+        events.push(event);
+      }
     });
 
     expect(result.status).toBe("failed");
     expect(result.reason).toBe("provider-error");
     expect(harness.registry.listActiveSubagents()).toEqual([]);
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "delegation-progress",
+      childSessionId: "child",
+      childEvent: { kind: "delegation-result", status: "failed" }
+    }));
   });
 
   it("unregisters active subagents when child handle throws", async () => {
@@ -729,6 +750,7 @@ describe("DelegationManager", () => {
 
   it("returns structured timeout status and cleans the registry", async () => {
     vi.useFakeTimers();
+    const events: RuntimeEvent[] = [];
     const harness = await createHarness({
       maxSpawnDepth: 1,
       childTimeoutSeconds: 0.001,
@@ -739,7 +761,10 @@ describe("DelegationManager", () => {
       parentSessionId: "parent",
       profileId: "default",
       task: "Timeout",
-      trustedWorkspace: true
+      trustedWorkspace: true,
+      onEvent: (event) => {
+        events.push(event);
+      }
     });
     await vi.advanceTimersByTimeAsync(2);
     const result = await pending;
@@ -750,6 +775,11 @@ describe("DelegationManager", () => {
       reason: "timeout"
     });
     expect(harness.registry.listActiveSubagents()).toEqual([]);
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "delegation-progress",
+      childSessionId: "child",
+      childEvent: { kind: "delegation-result", status: "timeout" }
+    }));
     await expect(harness.db.listEvents("parent")).resolves.toContainEqual(expect.objectContaining({
       kind: "delegation-finished",
       childSessionId: "child",
@@ -836,6 +866,18 @@ describe("DelegationManager", () => {
           model: "test",
           fallback: false
         }
+      }),
+      expect.objectContaining({
+        kind: "delegation-progress",
+        subagentId: "child",
+        childSessionId: "child",
+        parentSessionId: "parent",
+        role: "leaf",
+        depth: 1,
+        childEvent: {
+          kind: "delegation-result",
+          status: "completed"
+        }
       })
     ]);
   });
@@ -844,6 +886,7 @@ describe("DelegationManager", () => {
     let active = 0;
     let maxActive = 0;
     const releases: Array<() => void> = [];
+    const events: RuntimeEvent[] = [];
     const harness = await createHarness({
       maxConcurrentChildren: 2,
       handle: async (handleInput) => {
@@ -865,7 +908,10 @@ describe("DelegationManager", () => {
         { task: "two" },
         { task: "three" }
       ],
-      trustedWorkspace: true
+      trustedWorkspace: true,
+      onEvent: (event) => {
+        events.push(event);
+      }
     });
     await vi.waitFor(() => expect(releases).toHaveLength(2));
     releases.shift()?.();
@@ -878,6 +924,20 @@ describe("DelegationManager", () => {
     expect(result.results.map((child) => child.task)).toEqual(["one", "two", "three"]);
     expect(result.results.map((child) => child.index)).toEqual([0, 1, 2]);
     expect(result.results.map((child) => child.childStatus)).toEqual(["completed", "completed", "completed"]);
+    const settlements = events
+      .filter((event): event is Extract<RuntimeEvent, { kind: "delegation-progress" }> =>
+        event.kind === "delegation-progress" && event.childEvent.kind === "delegation-result"
+      )
+      .sort((left, right) => (left.taskIndex ?? 0) - (right.taskIndex ?? 0));
+    expect(settlements.map((event) => ({
+      taskIndex: event.taskIndex,
+      taskLabel: event.taskLabel,
+      batchTaskCount: event.batchTaskCount
+    }))).toEqual([
+      { taskIndex: 0, taskLabel: "one", batchTaskCount: 3 },
+      { taskIndex: 1, taskLabel: "two", batchTaskCount: 3 },
+      { taskIndex: 2, taskLabel: "three", batchTaskCount: 3 }
+    ]);
   });
 
   it("applies batch model overrides and lets task-level overrides win", async () => {

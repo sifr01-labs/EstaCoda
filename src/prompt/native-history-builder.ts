@@ -1,4 +1,5 @@
 import type { ProviderMessage, ProviderReplayEcho, ProviderStructuredToolCall } from "../contracts/provider.js";
+import { DELEGATE_TASK_MAX_RESULT_CHARS } from "../contracts/delegation.js";
 import type { SessionMessage } from "../contracts/session.js";
 
 type ProviderToolCallTurnMetadata = {
@@ -245,7 +246,18 @@ function labelHistoricalToolResultContent(
   if (isMutableStateToolName(toolName)) {
     stats.mutableStateToolResultsLabeled += 1;
   }
-  return `${prefix}\n${content}`;
+  const rendered = `${prefix}\n${content}`;
+  return toolName === "delegate_task"
+    ? truncateNativeDelegationResult(rendered)
+    : rendered;
+}
+
+function truncateNativeDelegationResult(content: string): string {
+  if (content.length <= DELEGATE_TASK_MAX_RESULT_CHARS) {
+    return content;
+  }
+  const marker = `\n... (${content.length} chars total, truncated)`;
+  return `${content.slice(0, DELEGATE_TASK_MAX_RESULT_CHARS - marker.length)}${marker}`;
 }
 
 function historicalToolResultPrefix(message: SessionMessage, toolName: string | undefined): string {

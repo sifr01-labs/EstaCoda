@@ -2,6 +2,7 @@ import type {
   AppendMessageInput,
   CreateSessionInput,
   ReplacementSessionMessage,
+  RewriteSessionTranscriptInput,
   SessionDB,
   SessionEvent,
   SessionMessage,
@@ -264,6 +265,10 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
       this.#db
         .query("update sessions set metadata_json = ?, updated_at = ? where id = ?")
         .run(stringifyJson(metadata), updatedAt, sessionId);
+      this.#insertSessionEvent(sessionId, {
+        kind: "context-window-usage-invalidated",
+        reason: "model-change"
+      });
     });
   }
 
@@ -277,12 +282,20 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
       const metadata = parseJson(session.metadata_json);
       if (metadata === undefined || !(SESSION_MODEL_OVERRIDE_METADATA_KEY in metadata)) {
         this.#db.query("update sessions set updated_at = ? where id = ?").run(updatedAt, sessionId);
+        this.#insertSessionEvent(sessionId, {
+          kind: "context-window-usage-invalidated",
+          reason: "model-change"
+        });
         return;
       }
       const { [SESSION_MODEL_OVERRIDE_METADATA_KEY]: _removed, ...rest } = metadata;
       this.#db
         .query("update sessions set metadata_json = ?, updated_at = ? where id = ?")
         .run(stringifyJson(Object.keys(rest).length === 0 ? undefined : rest), updatedAt, sessionId);
+      this.#insertSessionEvent(sessionId, {
+        kind: "context-window-usage-invalidated",
+        reason: "model-change"
+      });
     });
   }
 
@@ -295,11 +308,11 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     return readSessionModelOverride(parseJson(session.metadata_json));
   }
 
-  async replaceMessages(input: { sessionId: string; messages: ReplacementSessionMessage[] }): Promise<SessionMessage[]> {
+  async replaceMessages(input: RewriteSessionTranscriptInput): Promise<SessionMessage[]> {
     return this.rewriteTranscript(input);
   }
 
-  async rewriteTranscript(input: { sessionId: string; messages: ReplacementSessionMessage[] }): Promise<SessionMessage[]> {
+  async rewriteTranscript(input: RewriteSessionTranscriptInput): Promise<SessionMessage[]> {
     const replacements = this.#buildReplacementMessages(input);
 
     this.#withWriteTransaction(() => {
@@ -341,6 +354,10 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
           .run(message.id, message.id, message.content);
       }
 
+      for (const event of input.events ?? []) {
+        this.#insertSessionEvent(input.sessionId, event);
+      }
+
       this.#touch(input.sessionId);
     });
 
@@ -354,9 +371,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
       throw new Error(`Session not found: ${sessionId}`);
     }
 
-    this.#db
-      .query("insert into session_events (id, session_id, created_at, event_json) values (?, ?, ?, ?)")
-      .run(this.#id(), sessionId, this.#now().toISOString(), JSON.stringify(event));
+    this.#insertSessionEvent(sessionId, event);
 
     this.#touch(sessionId);
   }
@@ -681,6 +696,8 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     this.#runMigrationStep(5, "v0.9-schema-v5-pending-approvals", () => this.#migrateV5());
     this.#runMigrationStep(6, "v0.9-schema-v6-session-lineage", () => this.#migrateV6());
     this.#runMigrationStep(7, "v0.9-schema-v7-typed-pending-approvals", () => this.#migrateV7());
+    this.#runMigrationStep(8, "v0.9-schema-v8-session-finalization", () => this.#migrateV8());
+    this.#runMigrationStep(9, "v0.9-schema-v9-memory-curation-lease", () => this.#migrateV9());
   }
 
   #withMigrationLock(migrate: () => void): void {
@@ -846,6 +863,54 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     if (!colNames.has("request_payload")) {
       this.#db.exec("alter table pending_approvals add column request_payload text");
     }
+  }
+
+  #migrateV8(): void {
+    this.#db.exec(`
+      create table if not exists session_finalization_jobs (
+        id text primary key,
+        profile_id text not null,
+        session_id text not null references sessions(id) on delete cascade,
+        reason text not null check(reason in ('new-session', 'cli-exit', 'sigint', 'channel-reset', 'one-shot')),
+        status text not null default 'pending' check(status in ('pending', 'running', 'completed', 'failed')),
+        source_message_count integer not null check(source_message_count >= 0),
+        cutoff_message_id text not null,
+        attempts integer not null default 0 check(attempts >= 0),
+        available_at text not null,
+        claimed_at text,
+        lease_owner text,
+        lease_expires_at text,
+        completed_at text,
+        failed_at text,
+        outcome_code text,
+        last_error_code text,
+        created_at text not null,
+        updated_at text not null,
+        unique(profile_id, session_id, cutoff_message_id, source_message_count)
+      );
+
+      create index if not exists idx_session_finalization_ready
+        on session_finalization_jobs(profile_id, status, available_at, created_at);
+      create index if not exists idx_session_finalization_lease
+        on session_finalization_jobs(profile_id, status, lease_expires_at);
+      create index if not exists idx_session_finalization_session
+        on session_finalization_jobs(profile_id, session_id, created_at);
+    `);
+  }
+
+  #migrateV9(): void {
+    this.#db.exec(`
+      create table if not exists memory_curation_leases (
+        profile_id text primary key,
+        owner_id text not null,
+        acquired_at text not null,
+        lease_expires_at text not null,
+        updated_at text not null
+      );
+
+      create index if not exists idx_memory_curation_lease_expiry
+        on memory_curation_leases(lease_expires_at);
+    `);
   }
 
   #migrateV3(): void {
@@ -1063,6 +1128,12 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     this.#db
       .query("update sessions set updated_at = ? where id = ?")
       .run(this.#now().toISOString(), sessionId);
+  }
+
+  #insertSessionEvent(sessionId: string, event: SessionEvent): void {
+    this.#db
+      .query("insert into session_events (id, session_id, created_at, event_json) values (?, ?, ?, ?)")
+      .run(this.#id(), sessionId, this.#now().toISOString(), JSON.stringify(event));
   }
 }
 

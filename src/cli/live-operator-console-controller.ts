@@ -108,7 +108,8 @@ export class LiveOperatorConsoleController {
   }
 
   applyActiveWorkEvent(event: ActiveWorkRuntimeEvent): ToolActivityState {
-    const trailAnchor = event.status === "running"
+    const isSubagentEvent = event.source === "subagent";
+    const trailAnchor = !isSubagentEvent && event.status === "running"
       ? this.#flushStreamingSegment()
       : undefined;
     const timestamp = this.#now();
@@ -121,8 +122,12 @@ export class LiveOperatorConsoleController {
       ...(this.#activeWork.frameIndex === undefined ? {} : { frameIndex: this.#activeWork.frameIndex }),
     };
     const next = applyActiveWorkRuntimeEvent(baseState, event);
-    this.#activeWork = next;
-    this.#upsertStreamingToolTrail(event, next, trailAnchor, timestamp);
+    this.#activeWork = isSettledDelegationEvent(event)
+      ? withoutSubagentItems(next)
+      : next;
+    if (!isSubagentEvent) {
+      this.#upsertStreamingToolTrail(event, this.#activeWork, trailAnchor, timestamp);
+    }
     this.refresh();
     return this.#activeWork;
   }
@@ -186,10 +191,17 @@ export class LiveOperatorConsoleController {
   completeActiveWork(): ToolActivityState | undefined {
     if (this.#activeWork.items.length === 0) return undefined;
     const timestamp = this.#now();
+    const durableState = withoutSubagentItems(this.#activeWork);
+    if (durableState.items.length === 0) {
+      this.#activeWork = createActiveWorkRuntimeState();
+      this.#runtimeHost.setActiveWork(this.#activeWork);
+      this.#syncAnimationTimer();
+      return undefined;
+    }
     this.#activeWork = {
-      ...this.#activeWork,
+      ...durableState,
       updatedAtMs: timestamp,
-      completedAtMs: this.#activeWork.completedAtMs ?? timestamp,
+      completedAtMs: durableState.completedAtMs ?? timestamp,
       frameIndex: undefined,
     };
     this.#runtimeHost.setActiveWork(this.#activeWork);
@@ -483,6 +495,20 @@ export class LiveOperatorConsoleController {
       (options.includeUnanchored && entry.afterSegmentId === undefined)
     );
   }
+}
+
+function isSettledDelegationEvent(event: ActiveWorkRuntimeEvent): boolean {
+  return event.source !== "subagent" &&
+    event.toolName === "delegate_task" &&
+    event.status !== "pending" &&
+    event.status !== "running";
+}
+
+function withoutSubagentItems(state: ToolActivityState): ToolActivityState {
+  return {
+    ...state,
+    items: state.items.filter((item) => item.source !== "subagent"),
+  };
 }
 
 function isTerminalActiveWorkStatus(status: ActiveWorkItem["status"]): boolean {

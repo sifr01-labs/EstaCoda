@@ -67,6 +67,14 @@ export async function listSharedMemory(options?: SharedMemoryOptions): Promise<S
   return result.sort((left, right) => left.key.localeCompare(right.key));
 }
 
+export function renderSharedMemory(entries: readonly SharedMemoryEntry[]): string | undefined {
+  const sections = entries
+    .filter((entry) => entry.content.trim().length > 0)
+    .map((entry) => `## ${entry.key}\n${entry.content.trim()}`);
+
+  return sections.length === 0 ? undefined : sections.join("\n\n");
+}
+
 export function resolveSharedMemoryPath(key: string, options?: SharedMemoryOptions): string {
   const normalized = validateSharedMemoryKey(key);
   const filename = normalized.endsWith(".md") ? normalized : `${normalized}.md`;

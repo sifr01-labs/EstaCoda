@@ -19,6 +19,7 @@ If you only use the CLI, you do not need the gateway. The moment you want Telegr
 - Maintains a durable pending-approval queue with a five-minute TTL.
 - Routes operator slash commands (`/status`, `/approve`, `/model`, `/voice`, `/stop`, etc.) before they reach the agent.
 - Rebuilds the runtime from a fresh config snapshot each turn so MCP and provider changes are visible without a full restart.
+- Processes durable session-finalization jobs for its selected profile so session-ending memory curation does not delay the next session or CLI exit.
 - Runs diagnostics and reports readiness per channel.
 
 ## Profile binding
@@ -52,13 +53,13 @@ estacoda gateway uninstall --profile work
 
 ## Setup-driven activation
 
-When setup can install and start the gateway for a newly ready remote channel, the prompt title is `EstaCoda Gateway`.
+When setup can install and start the managed gateway service, the prompt title is `EstaCoda Gateway`.
 
-The prompt appears during first-run onboarding when a ready channel is configured. It also appears in the existing-user Setup Editor when that run newly configures the first ready channel.
+First-run onboarding offers the service whenever background memory finalization is enabled, including CLI-only setups with no channel. The existing-user Setup Editor offers it when that run newly configures the first ready channel.
 
 When the user chooses WhatsApp during onboarding or the Setup Editor, EstaCoda uses the same shared QR setup flow as `estacoda whatsapp`. It writes WhatsApp config/session state only after successful pairing; dependency decline/failure or QR timeout/failure leaves WhatsApp config unchanged.
 
-The prompt does not appear for non-channel setup changes, for editing a channel after a ready channel already existed, or when a managed gateway service is already installed or active.
+In the existing-user Setup Editor, the prompt does not appear for non-channel changes or when a ready channel already existed. No setup path offers it when a managed gateway service is already installed or active.
 
 First-run onboarding may still offer a post-apply launch prompt. Existing-user Setup Editor apply does not show the launch handoff after apply. Use `EstaCoda Doctor` in the Setup Editor when you want read-only health checks and required fixes.
 
@@ -156,11 +157,13 @@ When an active turn has running subagents, interrupt-mode busy policy queues ord
 ## Diagnostics
 
 ```bash
-estacoda gateway status      # Full status: channels, approvals, cron, service manager
+estacoda gateway status      # Full status: channels, approvals, cron, memory finalization, service manager
 estacoda gateway diagnose    # Per-channel readiness check; exits 1 on warnings
 ```
 
 `gateway diagnose` checks token presence, host reachability, allowlist configuration, the WhatsApp unofficial-API gate, isolated WhatsApp bridge/package readiness, and cron directory permissions. Baileys and WhatsApp-specific Boom handling stay quarantined inside the bridge package; the root runtime does not depend on them directly.
+
+`gateway status` includes profile-scoped memory-finalization counts: `pending`, `running`, `retrying`, and `failed`. The queue contains cutoffs and bounded operational metadata, not transcript content. A running managed gateway normally drains it in the background; stopped services leave jobs durable until the gateway starts again.
 
 ## Service management (overview)
 

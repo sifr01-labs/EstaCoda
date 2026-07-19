@@ -139,10 +139,11 @@ function oneFileBugRuntime(input: { fixture: string; workspace: string }): Runti
     trajectoryId: "native-runtime-eval-trajectory",
     handle: vi.fn(async (request) => {
       await request.onEvent?.({
-        kind: "context-usage",
+        kind: "context-estimate",
         filled: 1800,
         total: 4096,
-        source: "assembled-prompt"
+        source: "assembled-prompt",
+        stage: "assembled-prompt"
       });
       await request.onEvent?.({
         kind: "provider-result",

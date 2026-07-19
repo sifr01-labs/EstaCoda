@@ -15,6 +15,7 @@ import { SKILL_SUGGESTIONS_MODE_ENV_VAR } from "./skill-suggestions-mode.js";
 import { INPUT_KEYMAP_MODE_ENV_VAR } from "./input-keymap-mode.js";
 import type { PromptOptions } from "./prompt-contract.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
+import { loadSessionContextWindowUsage } from "../session/session-context-window-usage.js";
 import type { Runtime } from "../runtime/create-runtime.js";
 import { deriveAgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import type { AgentLoopResponse } from "../runtime/agent-loop.js";
@@ -445,6 +446,68 @@ function approvalAnswerKeypresses(answer: string): readonly string[] {
 }
 
 describe("runSessionLoop — user prompt rail behavior", () => {
+  it("queues idle SIGINT as a session boundary", async () => {
+    const enqueueSessionFinalization = vi.fn();
+    let rejectPrompt: ((error: Error) => void) | undefined;
+    const beforeSigintListeners = process.listenerCount("SIGINT");
+    const loop = runSessionLoop({
+      runtime: createMockRuntime({ enqueueSessionFinalization }),
+      output: { write: () => true } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => await new Promise<string>((_resolve, reject) => {
+          rejectPrompt = reject;
+        }),
+        { close: () => {} }
+      ),
+      close: () => rejectPrompt?.(new Error("prompt closed")),
+    });
+    while (process.listenerCount("SIGINT") === beforeSigintListeners || rejectPrompt === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    process.emit("SIGINT");
+
+    await expect(loop).rejects.toThrow("prompt closed");
+    expect(enqueueSessionFinalization).toHaveBeenCalledTimes(1);
+    expect(enqueueSessionFinalization).toHaveBeenCalledWith("sigint");
+  });
+
+  it("keeps idle SIGINT finalization available after cancelling an active turn", async () => {
+    const enqueueSessionFinalization = vi.fn();
+    let rejectIdlePrompt: ((error: Error) => void) | undefined;
+    const runtime = createMockRuntime({
+      enqueueSessionFinalization,
+      handle: async ({ signal }: Parameters<Runtime["handle"]>[0]) => {
+        setTimeout(() => process.emit("SIGINT"), 0);
+        await new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve(), { once: true }));
+        return mockResponse();
+      },
+    });
+    let promptCount = 0;
+    const loop = runSessionLoop({
+      runtime,
+      output: { write: () => true } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          promptCount += 1;
+          if (promptCount === 1) return "work";
+          return await new Promise<string>((_resolve, reject) => {
+            rejectIdlePrompt = reject;
+            setTimeout(() => process.emit("SIGINT"), 0);
+          });
+        },
+        { close: () => {} }
+      ),
+      close: () => rejectIdlePrompt?.(new Error("idle prompt closed")),
+    });
+
+    await expect(loop).rejects.toThrow("idle prompt closed");
+    expect(enqueueSessionFinalization).toHaveBeenCalledTimes(1);
+    expect(enqueueSessionFinalization).toHaveBeenCalledWith("sigint");
+  });
+
   it("starts and cleans up the raw prompt by default for interactive TTY core sessions", async () => {
     const input = makeTtyInput();
 
@@ -997,7 +1060,7 @@ describe("runSessionLoop — user prompt rail behavior", () => {
       sessionId: "20ea8195",
       session: {
         model: "kimi-k2.6 ◐",
-        context: "0 / 262k",
+        context: "-- / 262k",
         workspace: "/tmp",
         security: "open",
         autonomy: "autonomous",
@@ -1023,7 +1086,7 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     expect(plain).toContain("Tips");
     expect(plain).not.toContain("╭─ Tips");
     expect(host.getState().startup).toBeUndefined();
-    expect(host.getState().status.context.usedTokens).toBe(0);
+    expect(host.getState().status.context.usedTokens).toBeUndefined();
     expect(host.getState().status.model.label).not.toContain("kimi-k2.6");
     expect(host.getState().status.model.label).not.toContain("workspace");
     expect(host.getState().status.model.label).not.toContain("autonomous");
@@ -2467,6 +2530,114 @@ describe("runSessionLoop — active turn spinner", () => {
     );
   });
 
+  it("renders delegated children live while keeping only the parent tool in completed work", async () => {
+    const outputChunks: string[] = [];
+    const output = {
+      write(chunk: string | Uint8Array): boolean {
+        outputChunks.push(String(chunk));
+        return true;
+      },
+      isTTY: true,
+      columns: 100,
+    } as unknown as NodeJS.WritableStream;
+    const host = createOperatorConsoleRuntimeHost({
+      terminal: { width: 100, height: 16, isTty: true },
+    });
+    const setActiveWorkSpy = vi.spyOn(host, "setActiveWork");
+    const runtime = createEventEmittingMockRuntime([
+      { kind: "agent-start", sessionId: "test-session", input: "delegate this" },
+      {
+        kind: "tool-start",
+        tool: "delegate_task",
+        stepId: "delegate-step",
+        activityId: "delegate-1",
+        targetSummary: "raw delegated task text",
+      },
+      {
+        kind: "delegation-progress",
+        subagentId: "child-1",
+        childSessionId: "child-session-1",
+        parentSessionId: "test-session",
+        role: "leaf",
+        depth: 1,
+        taskIndex: 0,
+        batchId: "batch-1",
+        childEvent: { kind: "agent-start", sessionId: "child-session-1" },
+      },
+      {
+        kind: "delegation-progress",
+        subagentId: "child-1",
+        childSessionId: "child-session-1",
+        parentSessionId: "test-session",
+        role: "leaf",
+        depth: 1,
+        taskIndex: 0,
+        batchId: "batch-1",
+        childEvent: { kind: "tool-start", tool: "file.read" },
+      },
+      {
+        kind: "delegation-progress",
+        subagentId: "child-1",
+        childSessionId: "child-session-1",
+        parentSessionId: "test-session",
+        role: "leaf",
+        depth: 1,
+        taskIndex: 0,
+        batchId: "batch-1",
+        childEvent: { kind: "agent-final", ok: true },
+      },
+      {
+        kind: "delegation-progress",
+        subagentId: "child-1",
+        childSessionId: "child-session-1",
+        parentSessionId: "test-session",
+        role: "leaf",
+        depth: 1,
+        taskIndex: 0,
+        batchId: "batch-1",
+        childEvent: { kind: "delegation-result", status: "completed" },
+      },
+      {
+        kind: "tool-result",
+        tool: "delegate_task",
+        activityId: "delegate-1",
+        ok: true,
+        chars: 100,
+        sentChars: 100,
+        targetSummary: "raw delegated task text",
+      },
+      { kind: "agent-final", text: "Mock response" },
+    ]);
+
+    let promptIndex = 0;
+    await runSessionLoop({
+      runtime,
+      output,
+      capabilities: interactiveCaps({ terminalWidth: 100, supportsAnimation: false }),
+      operatorConsole: { enabled: true, runtimeHost: host },
+      prompt: Object.assign(
+        async () => {
+          const values = ["delegate this", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    expect(setActiveWorkSpy.mock.calls.some(([state]) =>
+      state.items.some((item) => item.source === "subagent" && item.displayLabel === "Worker 1")
+    )).toBe(true);
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("Delegated work");
+    const completedOutput = rendered.slice(rendered.lastIndexOf("Tools completed"));
+    expect(completedOutput).toContain("Delegate Task");
+    expect(completedOutput).toContain("1 completed");
+    expect(completedOutput).not.toContain("Worker 1");
+    expect(completedOutput).not.toContain("Read File");
+    expect(completedOutput).not.toContain("raw delegated task text");
+  });
+
   it("renders provider spinner below the most recent tool row in managed TTY mode", async () => {
     const outputChunks: string[] = [];
     const output = {
@@ -3628,7 +3799,14 @@ describe("runSessionLoop — active turn spinner", () => {
     const runtime = {
       ...createEventEmittingMockRuntime([
         { kind: "agent-start", sessionId: "test-session", input: "hello" },
-        { kind: "context-usage", filled: 1024, total: 64_000, source: "provider-actual" },
+        {
+          kind: "context-window-usage",
+          usedTokens: 1024,
+          totalTokens: 64_000,
+          provider: "mock",
+          model: "mock-model",
+          source: "provider-actual",
+        },
         { kind: "agent-final", text: "Mock response" },
       ]),
       getModelInfo: () => ({
@@ -3661,70 +3839,93 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(rendered).toContain("context 1.0k/64.0k");
   });
 
-  it("uses assembled-prompt context usage when provider actual is unavailable", async () => {
+  it("hydrates the status rail from the active session provider-actual snapshot", async () => {
+    const { raw } = await captureStartupSession({
+      runtime: {
+        ...createMockRuntime(),
+        getModelInfo: contextUsageModelInfo,
+        currentContextWindowUsage: async () => ({
+          usedTokens: 4_200,
+          totalTokens: 64_000,
+          provider: "mock",
+          model: "mock-model",
+          routeRole: "primary",
+        }),
+      },
+    });
+
+    expect(stripAnsi(raw)).toContain("context 4.2k/64.0k");
+  });
+
+  it("does not publish assembled-prompt estimates as context-window usage", async () => {
     const rendered = await renderContextUsageRail([[
       { kind: "agent-start", sessionId: "test-session", input: "hello" },
-      { kind: "context-usage", filled: 8_000, total: 64_000, source: "assembled-prompt" },
+      { kind: "context-estimate", filled: 8_000, total: 64_000, source: "assembled-prompt", stage: "assembled-prompt" },
       { kind: "agent-final", text: "Mock response" },
     ]]);
 
-    expect(rendered).toContain("context 8.0k/64.0k");
+    expect(rendered).toContain("context --/64.0k");
+    expect(rendered).not.toContain("context 8.0k/64.0k");
   });
 
-  it("uses live-estimate context usage when it is the only usage event", async () => {
+  it("does not publish live estimates as actual usage", async () => {
     const rendered = await renderContextUsageRail([[
       { kind: "agent-start", sessionId: "test-session", input: "hello" },
-      { kind: "context-usage", filled: 300, total: 64_000, source: "live-estimate" },
+      { kind: "context-estimate", filled: 300, total: 64_000, source: "live-estimate", stage: "input" },
       { kind: "agent-final", text: "Mock response" },
     ]]);
 
-    expect(rendered).toContain("context 300/64.0k");
+    expect(rendered).toContain("context --/64.0k");
+    expect(rendered).not.toContain("context 300/64.0k");
   });
 
-  it("lets assembled-prompt replace an earlier live estimate", async () => {
+  it("provider actual replaces unknown state after estimates in the same turn", async () => {
     const rendered = await renderContextUsageRail([[
       { kind: "agent-start", sessionId: "test-session", input: "hello" },
-      { kind: "context-usage", filled: 300, total: 64_000, source: "live-estimate" },
-      { kind: "context-usage", filled: 8_000, total: 64_000, source: "assembled-prompt" },
-      { kind: "agent-final", text: "Mock response" },
-    ]]);
-
-    expect(rendered).toContain("context 8.0k/64.0k");
-  });
-
-  it("provider-actual replaces earlier assembled-prompt in the same turn", async () => {
-    const rendered = await renderContextUsageRail([[
-      { kind: "agent-start", sessionId: "test-session", input: "hello" },
-      { kind: "context-usage", filled: 8_000, total: 64_000, source: "assembled-prompt" },
-      { kind: "context-usage", filled: 7_500, total: 64_000, source: "provider-actual" },
+      { kind: "context-estimate", filled: 8_000, total: 64_000, source: "assembled-prompt", stage: "assembled-prompt" },
+      {
+        kind: "context-window-usage",
+        usedTokens: 7_500,
+        totalTokens: 64_000,
+        provider: "mock",
+        model: "mock-model",
+        source: "provider-actual",
+      },
       { kind: "agent-final", text: "Mock response" },
     ]]);
 
     expect(rendered).toContain("context 7.5k/64.0k");
   });
 
-  it("lets a new turn estimate replace prior turn provider actual", async () => {
+  it("holds the last provider actual across a usage-less turn", async () => {
     const rendered = await renderContextUsageRail([
       [
         { kind: "agent-start", sessionId: "test-session", input: "hello" },
-        { kind: "context-usage", filled: 1_000, total: 64_000, source: "provider-actual" },
+        {
+          kind: "context-window-usage",
+          usedTokens: 1_000,
+          totalTokens: 64_000,
+          provider: "mock",
+          model: "mock-model",
+          source: "provider-actual",
+        },
         { kind: "agent-final", text: "Mock response" },
       ],
       [
         { kind: "agent-start", sessionId: "test-session", input: "hello again" },
-        { kind: "context-usage", filled: 8_000, total: 64_000, source: "assembled-prompt" },
         { kind: "agent-final", text: "Mock response" },
       ],
     ], ["hello", "hello again", "/exit"]);
 
-    expect(rendered).toContain("context 8.0k/64.0k");
+    const contextRails = rendered.split("\n").filter((line) => line.includes("context "));
+    expect(contextRails.at(-1)).toContain("context 1.0k/64.0k");
   });
 
-  it("updates same-priority context usage within a turn", async () => {
+  it("updates to the latest provider actual within a turn", async () => {
     const rendered = await renderContextUsageRail([[
       { kind: "agent-start", sessionId: "test-session", input: "hello" },
-      { kind: "context-usage", filled: 300, total: 64_000, source: "live-estimate" },
-      { kind: "context-usage", filled: 500, total: 64_000, source: "live-estimate" },
+      { kind: "context-window-usage", usedTokens: 300, totalTokens: 64_000, provider: "mock", model: "mock-model", source: "provider-actual" },
+      { kind: "context-window-usage", usedTokens: 500, totalTokens: 64_000, provider: "mock", model: "mock-model", source: "provider-actual" },
       { kind: "agent-final", text: "Mock response" },
     ]]);
 
@@ -3912,11 +4113,18 @@ describe("runSessionLoop — active turn spinner", () => {
 
   it("clears stale serving provider truth after /model refresh and updates it on the next turn", async () => {
     const outputChunks: string[] = [];
-    const runtime = {
+    const runtime = withModelRoute({
       ...createMockRuntime(),
+      currentContextWindowUsage: async () => ({
+        usedTokens: 12_000,
+        totalTokens: 128_000,
+        provider: "mock",
+        model: "mock-model",
+        routeRole: "primary" as const,
+      }),
       handle: async (): Promise<AgentLoopResponse> =>
         mockResponse({ providerExecution: providerExecutionFallbackSuccess() }),
-    };
+    }, "mock", "mock-model");
     const refreshedRuntime = withModelRoute({
       ...createMockRuntime(),
       sessionDb: runtime.sessionDb,
@@ -3956,6 +4164,7 @@ describe("runSessionLoop — active turn spinner", () => {
       line.includes("fresh-model") && line.includes("idle")
     );
     expect(refreshedIdleRail).toBeDefined();
+    expect(refreshedIdleRail).toContain("context --/128k");
     expect(refreshedIdleRail).not.toContain("fallback(");
     expect(refreshedIdleRail).not.toContain("fallback-model");
     expect(refreshedIdleRail).not.toContain("fresh-provider/fresh-model");
@@ -3964,7 +4173,78 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(afterModelClear).not.toContain("fresh-provider/fresh-model");
   });
 
-  it("keeps the last provider-actual context usage when live estimates arrive", async () => {
+  it("rehydrates durable context invalidation when the refreshed route labels are unchanged", async () => {
+    const outputChunks: string[] = [];
+    const sessionDb = new InMemorySessionDB();
+    const sessionId = "durable-context-boundary";
+    await sessionDb.createSession({ id: sessionId, profileId: "default" });
+    await sessionDb.appendEvent(sessionId, {
+      kind: "context-window-usage",
+      usedTokens: 12_000,
+      totalTokens: 128_000,
+      provider: "mock",
+      model: "mock-model",
+      routeRole: "primary",
+    });
+    const currentContextWindowUsage = () => loadSessionContextWindowUsage({
+      sessionDb,
+      sessionId,
+      profileId: "default",
+    });
+    const runtime = withModelRoute({
+      ...createMockRuntime(),
+      sessionDb,
+      sessionId,
+      currentContextWindowUsage,
+    }, "mock", "mock-model");
+    const refreshedRuntime = {
+      ...runtime,
+      currentContextWindowUsage,
+      getModelInfo: () => ({
+        kind: "kv" as const,
+        title: "Model",
+        entries: [
+          { key: "provider", value: "mock" },
+          { key: "model", value: "mock-model" },
+          { key: "context window", value: "256000" },
+        ],
+      }),
+    };
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      refreshRuntime: async () => refreshedRuntime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 160,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 160, supportsAnimation: false }),
+      prompt: Object.assign(
+        async () => {
+          const values = ["/model clear", "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain("context 12.0k/128k");
+    const afterModelClear = rendered.slice(rendered.indexOf("Cleared the session model override."));
+    const refreshedIdleRail = afterModelClear.split("\n").find((line) =>
+      line.includes("mock-model") && line.includes("idle")
+    );
+    expect(refreshedIdleRail).toContain("context --/256k");
+    await expect(currentContextWindowUsage()).resolves.toBeUndefined();
+  });
+
+  it("keeps the last provider-actual context usage when estimates arrive", async () => {
     const outputChunks: string[] = [];
     const output = {
       write(chunk: string | Uint8Array): boolean {
@@ -3978,9 +4258,9 @@ describe("runSessionLoop — active turn spinner", () => {
     const runtime = {
       ...createEventEmittingMockRuntime([
         { kind: "agent-start", sessionId: "test-session", input: "hello" },
-        { kind: "context-usage", filled: 12_000, total: 64_000, source: "provider-actual" },
-        { kind: "context-usage", filled: 300, total: 64_000, source: "live-estimate" },
-        { kind: "context-usage", filled: 500, total: 64_000, source: "assembled-prompt" },
+        { kind: "context-window-usage", usedTokens: 12_000, totalTokens: 64_000, provider: "mock", model: "mock-model", source: "provider-actual" },
+        { kind: "context-estimate", filled: 300, total: 64_000, source: "live-estimate", stage: "input" },
+        { kind: "context-estimate", filled: 500, total: 64_000, source: "assembled-prompt", stage: "assembled-prompt" },
         { kind: "agent-final", text: "Mock response" },
       ]),
       getModelInfo: () => ({
@@ -4065,7 +4345,7 @@ describe("runSessionLoop — active turn spinner", () => {
       ...createMockRuntime(),
       handle: async ({ onEvent }: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
         nowMs = 252_000;
-        onEvent?.({ kind: "context-usage", filled: 32_700, total: 128_000, source: "provider-actual" });
+        onEvent?.({ kind: "context-window-usage", usedTokens: 32_700, totalTokens: 128_000, provider: "mock", model: "gpt-5.5", source: "provider-actual" });
         onEvent?.({ kind: "agent-final", text: "Mock response" });
         return mockResponse();
       },
@@ -4149,8 +4429,11 @@ describe("runSessionLoop — active turn spinner", () => {
       columns: 120,
     } as unknown as NodeJS.WritableStream;
     let nowMs = 0;
+    const oldFinalization = vi.fn();
+    const freshFinalization = vi.fn();
     const runtime = withModelInfo({
       ...createMockRuntime(),
+      enqueueSessionFinalization: oldFinalization,
       handle: async ({ onEvent }: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
         nowMs = 312_000;
         onEvent?.({ kind: "agent-final", text: "Mock response" });
@@ -4160,6 +4443,7 @@ describe("runSessionLoop — active turn spinner", () => {
     const refreshedRuntime = withModelInfo({
       ...createMockRuntime(),
       sessionId: "fresh-session",
+      enqueueSessionFinalization: freshFinalization,
       getStatus: () => ({
         kind: "status" as const,
         agentName: "𓂀 EstaCoda",
@@ -4207,14 +4491,17 @@ describe("runSessionLoop — active turn spinner", () => {
     const resetRail = afterReset.split("\n").find((line) => line.includes("idle"));
     expect(resetRail).toBeDefined();
     expect(resetRail).not.toContain("⧖");
+    expect(oldFinalization).toHaveBeenCalledWith("new-session");
+    expect(freshFinalization).toHaveBeenCalledWith("cli-exit");
   });
 
   it("keeps /reset as an alias for the fresh session command", async () => {
     const refreshedRuntime = createMockRuntime({ sessionId: "alias-fresh-session" });
+    const enqueueSessionFinalization = vi.fn();
 
     const result = await handleSlashCommand({
       text: "/reset",
-      runtime: createMockRuntime(),
+      runtime: createMockRuntime({ enqueueSessionFinalization }),
       refreshRuntime: async () => refreshedRuntime,
       output: {
         write(): boolean {
@@ -4235,6 +4522,35 @@ describe("runSessionLoop — active turn spinner", () => {
       expect(notice).toContain("default profile - mock/mock-model");
       expect(notice).toContain("security   Open | YOLO mode");
     }
+    expect(enqueueSessionFinalization).toHaveBeenCalledWith("new-session");
+  });
+
+  it("keeps /new responsive and reports a bounded warning when queueing fails", async () => {
+    const outputChunks: string[] = [];
+    const refreshedRuntime = createMockRuntime({ sessionId: "warning-fresh-session" });
+    const result = await handleSlashCommand({
+      text: "/new",
+      runtime: createMockRuntime({
+        enqueueSessionFinalization: () => {
+          throw new Error("database failure with private transcript text");
+        },
+      }),
+      refreshRuntime: async () => refreshedRuntime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+      } as unknown as NodeJS.WritableStream,
+      renderer: {
+        render: renderPlain,
+        capabilities: interactiveCaps({ supportsColor: false, supportsUnicode: false }),
+      },
+    });
+
+    expect(typeof result).toBe("object");
+    expect(outputChunks.join("")).toContain("Warning: background memory finalization could not be queued.");
+    expect(outputChunks.join("")).not.toContain("private transcript text");
   });
 
   it("clears the completed turn timer after /switch swaps to another session", async () => {
@@ -4261,6 +4577,13 @@ describe("runSessionLoop — active turn spinner", () => {
       ...createMockRuntime(),
       sessionDb: runtime.sessionDb,
       sessionId: "target-session",
+      currentContextWindowUsage: async () => ({
+        usedTokens: 33_000,
+        totalTokens: 128_000,
+        provider: "mock",
+        model: "gpt-5.5",
+        routeRole: "primary",
+      }),
     });
 
     let promptIndex = 0;
@@ -4285,6 +4608,7 @@ describe("runSessionLoop — active turn spinner", () => {
     const afterSwitch = rendered.slice(rendered.indexOf("Switched this session to an existing session."));
     const switchRail = afterSwitch.split("\n").find((line) => line.includes("idle"));
     expect(switchRail).toBeDefined();
+    expect(switchRail).toContain("context 33.0k/128k");
     expect(switchRail).not.toContain("⧖");
   });
 
@@ -4326,7 +4650,7 @@ describe("runSessionLoop — active turn spinner", () => {
     });
 
     const rendered = stripAnsi(outputChunks.join(""));
-    const resetRail = rendered.split("\n").find((line) => line.includes("context 5.0k/128k") && line.includes("idle"));
+    const resetRail = rendered.split("\n").find((line) => line.includes("context --/128k") && line.includes("idle"));
     expect(resetRail).toBeDefined();
     expect(resetRail).not.toContain("⧖");
   });
@@ -4445,7 +4769,7 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(failed).not.toContain("Session compaction failed:");
   });
 
-  it("reuses the last known context total when compaction resets without model context window", async () => {
+  it("marks provider usage unknown after compaction while retaining the last known total", async () => {
     const outputChunks: string[] = [];
     const output = {
       write(chunk: string | Uint8Array): boolean {
@@ -4468,7 +4792,7 @@ describe("runSessionLoop — active turn spinner", () => {
       }),
       handle: async ({ onEvent }: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
         nowMs = 312_000;
-        onEvent?.({ kind: "context-usage", filled: 90_000, total: 128_000, source: "provider-actual" });
+        onEvent?.({ kind: "context-window-usage", usedTokens: 90_000, totalTokens: 128_000, provider: "mock", model: "gpt-5.5", source: "provider-actual" });
         onEvent?.({ kind: "agent-final", text: "Mock response" });
         return mockResponse();
       },
@@ -4492,11 +4816,12 @@ describe("runSessionLoop — active turn spinner", () => {
     });
 
     const rendered = stripAnsi(outputChunks.join(""));
-    const resetRail = rendered.split("\n").find((line) => line.includes("context 5.0k/128k") && line.includes("idle"));
+    const resetRail = rendered.split("\n").find((line) => line.includes("context --/128k") && line.includes("idle"));
     expect(resetRail).toBeDefined();
+    expect(rendered.slice(rendered.indexOf("Context Compacted"))).not.toContain("context 5.0k/128k");
   });
 
-  it("resets the completed turn timer after an automatic compaction event", async () => {
+  it("keeps a fresh post-compaction provider actual while resetting the completed turn timer", async () => {
     const outputChunks: string[] = [];
     const output = {
       write(chunk: string | Uint8Array): boolean {
@@ -4518,6 +4843,14 @@ describe("runSessionLoop — active turn spinner", () => {
           rotated: false,
           trigger: "auto",
           postTokens: 5_000,
+        });
+        onEvent?.({
+          kind: "context-window-usage",
+          usedTokens: 6_000,
+          totalTokens: 128_000,
+          provider: "mock",
+          model: "mock-model",
+          source: "provider-actual",
         });
         onEvent?.({ kind: "agent-final", text: "Mock response" });
         return mockResponse();
@@ -4541,7 +4874,7 @@ describe("runSessionLoop — active turn spinner", () => {
     });
 
     const rendered = stripAnsi(outputChunks.join(""));
-    const resetRail = rendered.split("\n").find((line) => line.includes("context 5.0k/128k") && line.includes("idle"));
+    const resetRail = rendered.split("\n").find((line) => line.includes("context 6.0k/128k") && line.includes("idle"));
     expect(resetRail).toBeDefined();
     expect(resetRail).not.toContain("⧖");
   });
@@ -4970,7 +5303,8 @@ describe("runSessionLoop — active turn spinner", () => {
       columns: 80,
     } as unknown as NodeJS.WritableStream;
 
-    const baseRuntime = createMockRuntime();
+    const enqueueSessionFinalization = vi.fn();
+    const baseRuntime = createMockRuntime({ enqueueSessionFinalization });
     let handleCalls = 0;
     const runtime = {
       ...baseRuntime,
@@ -5021,6 +5355,8 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(rendered.slice(cancelIndex, secondPromptIndex)).not.toContain("↳ first");
     expect(rendered.slice(cancelIndex, secondPromptIndex)).not.toContain("scribbling");
     expect(rendered).toContain("Second response");
+    expect(enqueueSessionFinalization).not.toHaveBeenCalledWith("sigint");
+    expect(enqueueSessionFinalization).toHaveBeenCalledWith("cli-exit");
   });
 
   it("/approve once grants one-time approval and retries", async () => {
@@ -5218,13 +5554,13 @@ describe("runSessionLoop — active turn spinner", () => {
     const runtime = {
       ...createEventEmittingMockRuntime([
         { kind: "agent-start", sessionId: "test-session", input: "hello" },
-        { kind: "context-usage", filled: 1024, total: 64_000, source: "provider-actual" },
+        { kind: "context-window-usage", usedTokens: 1024, totalTokens: 64_000, provider: "mock", model: "mock-model", source: "provider-actual" },
         { kind: "provider-token", provider: "mock", model: "mock-model", text: "raw streamed token should stay hidden" },
         { kind: "agent-final", text: "Final framed response" },
       ]),
       handle: async ({ onEvent }: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
         onEvent?.({ kind: "agent-start", sessionId: "test-session", input: "hello" });
-        onEvent?.({ kind: "context-usage", filled: 1024, total: 64_000, source: "provider-actual" });
+        onEvent?.({ kind: "context-window-usage", usedTokens: 1024, totalTokens: 64_000, provider: "mock", model: "mock-model", source: "provider-actual" });
         onEvent?.({ kind: "provider-token", provider: "mock", model: "mock-model", text: "raw streamed token should stay hidden" });
         onEvent?.({ kind: "agent-final", text: "Final framed response" });
         return {

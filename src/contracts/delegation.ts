@@ -2,6 +2,8 @@ import type { ToolRiskClass, ToolsetName } from "./tool.js";
 
 export type DelegateRole = "leaf" | "orchestrator";
 
+export const MAX_DELEGATION_BATCH_TASKS = 10;
+export const DELEGATE_TASK_MAX_RESULT_CHARS = 8_000;
 export const MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH = 200;
 export const MAX_DELEGATE_PROVIDER_OVERRIDE_ID_LENGTH = 100;
 

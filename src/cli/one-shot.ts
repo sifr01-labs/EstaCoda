@@ -3,6 +3,7 @@ import type { Runtime } from "../runtime/create-runtime.js";
 import { ToolActivityViewModelBuilder } from "./tool-activity-view-models.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
 import { toolDisplayIcon, toolDisplayLabel } from "../ui/tool-display.js";
+import { formatPlainDelegationProgressEvent } from "../ui/papyrus/operator-console/activeWorkRuntimeMapper.js";
 
 export type OneShotPromptResult = {
   handled: boolean;
@@ -42,6 +43,14 @@ export async function runOneShotPrompt(options: OneShotPromptOptions): Promise<O
       }
     }
   });
+  try {
+    const enqueue = options.runtime.enqueueSessionFinalization;
+    if (enqueue !== undefined && enqueue("one-shot") === undefined) {
+      eventLines.push("Warning: background memory finalization could not be queued.");
+    }
+  } catch {
+    eventLines.push("Warning: background memory finalization could not be queued.");
+  }
 
   return {
     handled: true,
@@ -116,8 +125,13 @@ function renderOneShotEvent(
         : `provider issue: ${event.provider}/${event.model}${event.willFallback ? " (trying fallback)" : ""}`);
     case "provider-budget-exhausted":
       return safeLine(`provider budget: ${event.reason}`);
-    case "context-usage":
+    case "context-estimate":
+    case "context-window-usage":
       return undefined;
+    case "delegation-progress": {
+      const line = formatPlainDelegationProgressEvent(event);
+      return line === undefined ? undefined : safeLine(line);
+    }
     case "agent-cancelled":
       return safeLine(`cancelled: ${event.reason}`);
     case "provider-token": {

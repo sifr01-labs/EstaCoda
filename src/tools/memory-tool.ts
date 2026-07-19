@@ -7,6 +7,10 @@ import type { MemoryStore } from "../memory/memory-store.js";
 import type { MemoryPersistenceService } from "../memory/memory-persistence-service.js";
 import type { MemoryIndexWriteSync } from "../memory/memory-index-sync.js";
 import { MemoryMutationService } from "../memory/memory-mutation-service.js";
+import {
+  MemoryCurationBusyError,
+  type MemoryCurationCheckpointCoordinator,
+} from "../memory/memory-curation-coordinator.js";
 
 const MEMORY_CURATE_FILES: readonly MemoryFileKind[] = ["MEMORY.md", "USER.md", "SOUL.md"];
 
@@ -20,6 +24,7 @@ export type MemoryToolOptions = {
   trajectoryRecorder?: Pick<TrajectoryRecorder, "record">;
   persistence?: MemoryPersistenceService;
   persistencePaths?: Partial<Record<MemoryFileKind, string>>;
+  mutationCoordinator?: MemoryCurationCheckpointCoordinator;
   memoryIndexSync?: MemoryIndexWriteSync;
 };
 
@@ -44,7 +49,7 @@ export function createMemoryTool(memoryStore: MemoryStore, options: MemoryToolOp
     progressLabel: "curating memory",
     maxResultSizeChars: 2000,
     isAvailable: () => true,
-    run: async (input) => applyMemoryToolInput(memoryStore, input, options)
+    run: async (input, context) => applyMemoryToolInput(memoryStore, input, options, context?.signal)
   };
 }
 
@@ -63,6 +68,7 @@ export const memoryToolProvider: SessionToolProvider = {
         trajectoryRecorder: requireProviderDependency("memory", "trajectoryRecorder", ctx.trajectoryRecorder),
         persistence: ctx.memoryPersistenceService,
         persistencePaths: ctx.memoryPersistencePaths,
+        mutationCoordinator: ctx.memoryMutationCoordinator,
         memoryIndexSync: ctx.memoryIndexSync
       })
     ];
@@ -87,13 +93,29 @@ type MemoryToolInput = {
 async function applyMemoryToolInput(
   memoryStore: MemoryStore,
   input: MemoryToolInput,
-  options: MemoryToolOptions
+  options: MemoryToolOptions,
+  signal?: AbortSignal
 ): Promise<ToolResult> {
   const operation = toOperation(input);
-  const result = await new MemoryMutationService({
-    memoryStore,
-    ...options
-  }).apply(operation, { source: "memory.curate" });
+  const { mutationCoordinator, ...mutationOptions } = options;
+  let result;
+  try {
+    const apply = async () => await new MemoryMutationService({
+      memoryStore,
+      ...mutationOptions
+    }).apply(operation, { source: "memory.curate" });
+    result = mutationCoordinator === undefined
+      ? await apply()
+      : await mutationCoordinator.runExclusive({ signal, task: apply });
+  } catch (error) {
+    if (error instanceof MemoryCurationBusyError) {
+      return {
+        ok: false,
+        content: "Memory update is busy while background curation finishes. Try again shortly."
+      };
+    }
+    throw error;
+  }
 
   if (!result.ok) {
     return {

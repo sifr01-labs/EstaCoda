@@ -109,6 +109,7 @@ import { writeAdapterRuntimeState, RUNTIME_STATE_FILE } from "../gateway/adapter
 import type { PersistedRuntimeState, AdapterRuntimeState } from "../gateway/adapter-runtime-state.js";
 import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
+import { SessionFinalizationQueue } from "../session/session-finalization-queue.js";
 import { createCommandHash } from "../gateway/approval-queue.js";
 import { resolveGlobalStateHome, resolveProfileStateHome, type ProfileStatePaths } from "../config/profile-home.js";
 
@@ -287,6 +288,27 @@ describe("gateway commands", () => {
       expect(result.output).toContain("Discord:");
       expect(result.output).toContain("Email:");
       expect(result.output).toContain("WhatsApp:");
+      expect(result.output).toContain("Memory finalization");
+      expect(result.output).toContain("Pending: 0");
+    });
+
+    it("shows profile-scoped background memory finalization health", async () => {
+      const db = await createSQLiteSessionDB({ homeDir: tmpDir });
+      const queue = new SessionFinalizationQueue({ db: db.db });
+      await db.createSession({ id: "finalize-session", profileId: "default" });
+      await db.appendMessage({
+        id: "finalize-message",
+        sessionId: "finalize-session",
+        role: "user",
+        content: "private status content",
+      });
+      queue.enqueue({ profileId: "default", sessionId: "finalize-session", reason: "cli-exit" });
+      db.close();
+
+      const result = await runGatewayStatus({ workspaceRoot: tmpDir, homeDir: tmpDir });
+      expect(result.output).toContain("Memory finalization");
+      expect(result.output).toContain("Pending: 1");
+      expect(result.output).not.toContain("private status content");
     });
 
     it("shows cron jobs", async () => {

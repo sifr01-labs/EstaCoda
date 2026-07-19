@@ -49,7 +49,7 @@ import { coerceFiniteNumber, coerceNonNegativeInteger, coercePositiveInteger } f
 import { redactObject } from "../utils/redaction.js";
 import type { WebsitePolicyConfig } from "../browser/website-policy.js";
 import { normalizeMemoryConfig, type MemoryConfig, type MemoryConfigInput } from "./memory-config.js";
-import type { DelegationConfig } from "../contracts/delegation.js";
+import { MAX_DELEGATION_BATCH_TASKS, type DelegationConfig } from "../contracts/delegation.js";
 import { DEFAULT_DELEGATION_CONFIG } from "./delegation-defaults.js";
 import {
   WHATSAPP_DEFAULT_REPLY_PREFIX,
@@ -1671,7 +1671,10 @@ export function normalizeDelegationConfig(
     maxSpawnDepth: coercePositiveInteger(value?.maxSpawnDepth, { default: defaults.maxSpawnDepth }),
     maxConcurrentChildren: coercePositiveInteger(value?.maxConcurrentChildren, { default: defaults.maxConcurrentChildren }),
     maxDelegateCallsPerTurn: coercePositiveInteger(value?.maxDelegateCallsPerTurn, { default: defaults.maxDelegateCallsPerTurn }),
-    maxBatchTasks: coercePositiveInteger(value?.maxBatchTasks, { default: defaults.maxBatchTasks }),
+    maxBatchTasks: coercePositiveInteger(value?.maxBatchTasks, {
+      default: defaults.maxBatchTasks,
+      max: MAX_DELEGATION_BATCH_TASKS
+    }),
     childTimeoutSeconds: coerceNonNegativeInteger(value?.childTimeoutSeconds, {
       default: defaults.childTimeoutSeconds,
       min: 30

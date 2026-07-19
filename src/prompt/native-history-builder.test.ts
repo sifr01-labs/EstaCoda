@@ -122,6 +122,31 @@ describe("buildNativeHistoryMessages", () => {
     expect(result.stats.mutableStateToolResultsLabeled).toBe(0);
   });
 
+  it("caps labeled native delegation results with an explicit truncation marker", () => {
+    const delegationContent = `${"d".repeat(8_500)}delegation-beyond-limit`;
+    const result = buildNativeHistoryMessages([
+      providerToolTurn("agent-call", "", {
+        providerToolCalls: [
+          {
+            id: "call-delegate",
+            name: "delegate_task",
+            argumentsText: "{\"task\":\"inspect\"}"
+          }
+        ]
+      }),
+      message("tool-delegate", "tool", delegationContent, {
+        tool_call_id: "call-delegate",
+        tool_call_name: "delegate_task"
+      })
+    ]);
+    const rendered = String(result.messages.find((entry) => entry.role === "tool")?.content);
+
+    expect(rendered.length).toBe(8_000);
+    expect(rendered).toContain("via delegate_task; reference only.");
+    expect(rendered).toContain("chars total, truncated)");
+    expect(rendered).not.toContain("delegation-beyond-limit");
+  });
+
   it("derives historical tool result names from assistant metadata when result metadata only has an id", () => {
     const result = buildNativeHistoryMessages([
       providerToolTurn("agent-call", "", {

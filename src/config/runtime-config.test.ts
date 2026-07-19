@@ -244,6 +244,12 @@ describe("normalizeDelegationConfig", () => {
     expect(normalized.maxBatchTasks).toBe(1);
   });
 
+  it("caps delegation batches at the supported hard maximum", () => {
+    const normalized = normalizeDelegationConfig({ maxBatchTasks: 100 });
+
+    expect(normalized.maxBatchTasks).toBe(10);
+  });
+
   it("defaults JSON task recovery and child risk/toolset boundaries", () => {
     const normalized = normalizeDelegationConfig({});
 

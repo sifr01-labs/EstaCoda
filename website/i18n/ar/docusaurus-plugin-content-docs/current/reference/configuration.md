@@ -209,9 +209,9 @@ model.staleTimeoutMs / model.fallbacks[].staleTimeoutMs
 | `curation.checkpointEveryTurns` | `25` | عدد أدوار الجلسة الجذرية المكتملة بين نقاط تنظيم الخلفية. |
 | `curation.auditOnCompact` | `true` | يشغل التنظيم قبل نقاط compact. |
 | `curation.auditOnHandoff` | `true` | يشغل التنظيم قبل نقاط handoff. |
-| `curation.auditOnRuntimeDispose` | `true` | يشغل التنظيم عند التخلص من runtime إذا نجحت بوابات التخلص. |
-| `curation.runtimeDisposeMinNewMessages` | `4` | أدنى عدد رسائل جديدة قبل تنظيم runtime-dispose. |
-| `curation.runtimeDisposeMinIntervalMinutes` | `15` | أدنى فترة بين تشغيلات تنظيم runtime-dispose. |
+| `curation.auditOnRuntimeDispose` | `true` | مفتاح توافق يمكّن التنظيم الدائم عند حدود نهاية الجلسة الدلالية. لا يشغله التخلص العام من runtime. |
+| `curation.runtimeDisposeMinNewMessages` | `4` | مفتاح توافق للحد الأدنى من الرسائل الجديدة قبل تنظيم إنهاء الجلسة الموجود في الطابور. |
+| `curation.runtimeDisposeMinIntervalMinutes` | `15` | مفتاح توافق للحد الأدنى للفترة بين تشغيلات تنظيم إنهاء الجلسة الموجودة في الطابور. |
 | `curation.autoApplyMaxRisk` | `low` | أعلى مخاطر مرشح يمكن تطبيقه تلقائيًا. |
 | `curation.autoApplyMinConfidence` | `0.7` | أدنى ثقة للحقيقة المستخرجة للتطبيق التلقائي. |
 | `curation.autoWriteVisibility` | `activity` | مستوى ظهور إشعارات/أحداث الكتابة التلقائية. |

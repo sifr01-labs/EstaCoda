@@ -35,6 +35,8 @@ describe("runDelegatedChild", () => {
       expect.objectContaining({
         kind: "delegation-progress",
         subagentId: "child",
+        taskLabel: "Task",
+        batchTaskCount: 1,
         childEvent: { kind: "tool-start", tool: "file.read" }
       })
     ]);

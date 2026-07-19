@@ -10,6 +10,7 @@ import {
   MemoryPersistenceService
 } from "./memory-persistence-service.js";
 import { MemoryBudgetOverflowError, MemoryStore } from "./memory-store.js";
+import type { MemoryCurationCheckpointCoordinator } from "./memory-curation-coordinator.js";
 
 const tempDirs: string[] = [];
 
@@ -26,6 +27,31 @@ afterEach(async () => {
 });
 
 describe("LocalMemoryProvider", () => {
+  it("serializes automatic promotions through the profile mutation coordinator", async () => {
+    const store = new MemoryStore();
+    const runExclusive = vi.fn();
+    const mutationCoordinator: MemoryCurationCheckpointCoordinator = {
+      async runExclusive<T>(input: { task: (signal: AbortSignal) => Promise<T> }): Promise<T> {
+        runExclusive();
+        return await input.task(new AbortController().signal);
+      }
+    };
+    const provider = new LocalMemoryProvider({
+      store,
+      mutationCoordinator
+    });
+
+    await provider.conclude({
+      id: "pref-coordinated",
+      kind: "user-preference",
+      content: "Prefer focused replies.",
+      confidence: 0.9
+    });
+
+    expect(runExclusive).toHaveBeenCalledTimes(1);
+    expect(store.read("USER.md")).toContain("Prefer focused replies.");
+  });
+
   it("suppresses inactive promotions in no-query context", async () => {
     const root = await makeTempDir();
     const store = new MemoryStore();

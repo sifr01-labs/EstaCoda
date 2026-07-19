@@ -25,6 +25,7 @@ import type {
   ProviderId,
   ProviderLoopRuntimeMetadata,
   ProviderReasoningMetadata,
+  ProviderRouteRole,
   ProviderStreamDiagnostics,
   ProviderUsage
 } from "./provider.js";
@@ -156,6 +157,23 @@ export type SessionHistoryCompressedEvent = {
 export type SessionCompressionStateEvent = {
   kind: "session-compression-state";
   state: Partial<SessionCompressionState>;
+};
+
+export type SessionContextWindowUsage = {
+  usedTokens: number;
+  totalTokens: number;
+  provider: string;
+  model: string;
+  routeRole?: ProviderRouteRole;
+};
+
+export type SessionContextWindowUsageEvent = SessionContextWindowUsage & {
+  kind: "context-window-usage";
+};
+
+export type SessionContextWindowUsageInvalidatedEvent = {
+  kind: "context-window-usage-invalidated";
+  reason: "model-change" | "compaction";
 };
 
 export type SessionCompactionForkedEvent = {
@@ -339,6 +357,8 @@ export type SessionEvent =
       artifact: ArtifactRecord;
       tool?: string;
     }
+  | SessionContextWindowUsageEvent
+  | SessionContextWindowUsageInvalidatedEvent
   | {
       kind: "provider-completion";
       iteration?: number;
@@ -656,6 +676,13 @@ export type ReplacementSessionMessage = {
   metadata?: Record<string, unknown>;
 };
 
+export type RewriteSessionTranscriptInput = {
+  sessionId: string;
+  messages: ReplacementSessionMessage[];
+  /** Events committed atomically with the transcript replacement. */
+  events?: SessionEvent[];
+};
+
 export type SessionDB = {
   createSession(input: CreateSessionInput): Promise<SessionRecord>;
   getSession(id: string): Promise<SessionRecord | undefined>;
@@ -665,8 +692,8 @@ export type SessionDB = {
   clearSessionModelOverride(sessionId: string): Promise<void>;
   getSessionModelOverride(sessionId: string): Promise<SessionModelOverride | undefined>;
   appendMessage(input: AppendMessageInput): Promise<SessionMessage>;
-  replaceMessages(input: { sessionId: string; messages: ReplacementSessionMessage[] }): Promise<SessionMessage[]>;
-  rewriteTranscript(input: { sessionId: string; messages: ReplacementSessionMessage[] }): Promise<SessionMessage[]>;
+  replaceMessages(input: RewriteSessionTranscriptInput): Promise<SessionMessage[]>;
+  rewriteTranscript(input: RewriteSessionTranscriptInput): Promise<SessionMessage[]>;
   appendEvent(sessionId: string, event: SessionEvent): Promise<void>;
   listMessages(sessionId: string): Promise<SessionMessage[]>;
   listEvents(sessionId: string): Promise<SessionEvent[]>;

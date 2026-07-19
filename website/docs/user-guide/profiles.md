@@ -108,7 +108,7 @@ estacoda -p work doctor
 | Skills | `skills/` | Profile |
 | Cron jobs | `cron/` | Profile |
 | Gateway state | `gateway/` | Profile |
-| Session DB | `sessions.db` | Profile |
+| Session rows and finalization jobs | `~/.estacoda/sessions.sqlite` | Global database, isolated by `profile_id` |
 | External memory | `external-memory/` | Profile |
 | Trust grants | `~/.estacoda/trust.json` | Global (directory-owned, not profile-scoped) |
 

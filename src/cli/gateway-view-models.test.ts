@@ -140,6 +140,19 @@ describe("buildGatewayStatusViewModel", () => {
     expect(rendered).not.toContain("Adapter Runtime");
   });
 
+  it("renders background memory finalization health when available", () => {
+    const vm = buildGatewayStatusViewModel({
+      ...baseStatusData(),
+      sessionFinalization: { pending: 2, running: 1, retrying: 3, failed: 4 },
+    });
+    const rendered = renderPlain(vm);
+    expect(rendered).toContain("Memory finalization");
+    expect(rendered).toContain("Pending: 2");
+    expect(rendered).toContain("Running: 1");
+    expect(rendered).toContain("Retrying: 3");
+    expect(rendered).toContain("Failed: 4");
+  });
+
   it("renders with adapter runtime block when state is valid", () => {
     const data: GatewayStatusData = {
       ...baseStatusData(),

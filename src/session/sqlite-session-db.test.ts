@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SQLiteSessionDB } from "./sqlite-session-db.js";
 import { reconstructSessionCompressionState } from "./session-compression-state.js";
+import { loadSessionContextWindowUsage } from "./session-context-window-usage.js";
 import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 
 describe("SQLiteSessionDB", () => {
@@ -122,6 +123,13 @@ describe("SQLiteSessionDB", () => {
     const db = new SQLiteSessionDB({ path: dbPath });
     try {
       await db.createSession({ id: "session-1", profileId: "default", metadata: { keep: true } });
+      await db.appendEvent("session-1", {
+        kind: "context-window-usage",
+        usedTokens: 12_000,
+        totalTokens: 128_000,
+        provider: "local",
+        model: "old-model"
+      });
       await db.setSessionModelOverride("session-1", sampleOverride());
 
       await expect(db.getSessionModelOverride("session-1")).resolves.toMatchObject({
@@ -134,11 +142,28 @@ describe("SQLiteSessionDB", () => {
 
     const reopened = new SQLiteSessionDB({ path: dbPath });
     try {
+      await expect(loadSessionContextWindowUsage({
+        sessionDb: reopened,
+        sessionId: "session-1",
+        profileId: "default"
+      })).resolves.toBeUndefined();
       await expect(reopened.getSessionModelOverride("session-1")).resolves.toMatchObject({
         route: { provider: "local", id: "phi4:latest", maxTokens: 8192 },
         source: "cli"
       });
+      await reopened.appendEvent("session-1", {
+        kind: "context-window-usage",
+        usedTokens: 4_000,
+        totalTokens: 128_000,
+        provider: "local",
+        model: "phi4:latest"
+      });
       await reopened.clearSessionModelOverride("session-1");
+      await expect(loadSessionContextWindowUsage({
+        sessionDb: reopened,
+        sessionId: "session-1",
+        profileId: "default"
+      })).resolves.toBeUndefined();
       await expect(reopened.getSessionModelOverride("session-1")).resolves.toBeUndefined();
       await expect(reopened.getSession("session-1")).resolves.toMatchObject({
         metadata: { keep: true }
@@ -388,7 +413,8 @@ describe("SQLiteSessionDB", () => {
         messages: [
           { role: "user", content: "new rewrite alpha" },
           { id: "supplied", role: "agent", content: "new rewrite beta", createdAt: "2030-01-01T00:00:10.000Z" }
-        ]
+        ],
+        events: [{ kind: "context-window-usage-invalidated", reason: "compaction" }]
       });
 
       expect(rewritten.map((message) => message.id)).toEqual(["rewrite-1", "supplied"]);
@@ -398,6 +424,10 @@ describe("SQLiteSessionDB", () => {
       ]);
       await expect(db.search("old", { profileId: "default" })).resolves.toHaveLength(0);
       await expect(db.search("alpha", { profileId: "default" })).resolves.toHaveLength(1);
+      await expect(db.listEvents("session-1")).resolves.toEqual([{
+        kind: "context-window-usage-invalidated",
+        reason: "compaction"
+      }]);
     } finally {
       db.close();
     }
@@ -427,6 +457,37 @@ describe("SQLiteSessionDB", () => {
       expect(messages.map((message) => message.id)).toEqual(["old-1"]);
       await expect(db.search("rollback", { profileId: "default" })).resolves.toHaveLength(1);
       await expect(db.search("should", { profileId: "default" })).resolves.toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rolls back transcript replacement when an atomic event cannot be serialized", async () => {
+    const db = new SQLiteSessionDB({ path: dbPath });
+
+    try {
+      await db.createSession({ id: "session-1", profileId: "default" });
+      await db.appendMessage({
+        id: "old-1",
+        sessionId: "session-1",
+        role: "user",
+        content: "old atomic boundary"
+      });
+
+      await expect(db.rewriteTranscript({
+        sessionId: "session-1",
+        messages: [{ role: "user", content: "new content must rollback" }],
+        events: [{
+          kind: "context-window-usage-invalidated",
+          reason: BigInt(1)
+        } as never]
+      })).rejects.toThrow();
+
+      await expect(db.listMessages("session-1")).resolves.toMatchObject([{
+        id: "old-1",
+        content: "old atomic boundary"
+      }]);
+      await expect(db.listEvents("session-1")).resolves.toEqual([]);
     } finally {
       db.close();
     }

@@ -80,10 +80,11 @@ describe("benchCommand", () => {
         reason: "write requested after inspection"
       },
       {
-        kind: "context-usage",
+        kind: "context-estimate",
         filled: 2048,
         total: 8192,
-        source: "assembled-prompt"
+        source: "assembled-prompt",
+        stage: "assembled-prompt"
       }
     ]);
 
@@ -232,7 +233,7 @@ describe("benchCommand", () => {
     expect(events).toContain("\"provider-result\"");
     expect(events).toContain("\"provider-budget-exhausted\"");
     expect(events).toContain("\"security-risk-escalated\"");
-    expect(events).toContain("\"context-usage\"");
+    expect(events).toContain("\"context-estimate\"");
     expect(await readFile(join(outDir, "stdout.txt"), "utf8")).toContain("done");
   });
 

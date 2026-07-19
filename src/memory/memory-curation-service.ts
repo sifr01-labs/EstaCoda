@@ -18,6 +18,7 @@ import {
 import { MemoryMutationService } from "./memory-mutation-service.js";
 import { reviewMemoryFacts, type CuratedMemoryCandidate } from "./memory-reviewer.js";
 import { redactSensitiveText } from "../utils/redaction.js";
+import type { MemoryCurationCheckpointCoordinator } from "./memory-curation-coordinator.js";
 
 type CuratableMemoryOperation = MemoryOperation & { file: "USER.md" | "MEMORY.md" };
 type RuntimeMemoryCurationStatus = Extract<MemoryCurationStatus, "auto-applied" | "pending-review" | "ignored" | "failed">;
@@ -37,7 +38,18 @@ export type MemoryCurationCheckpointResult = {
   ignoredCount: number;
   failedCount: number;
   warnings: string[];
+  failureCode?: "memory-fact-extraction-failed" | "memory-curation-apply-failed";
 };
+
+export class MemoryCurationCutoffError extends Error {
+  readonly name = "MemoryCurationCutoffError";
+  readonly code: "memory-curation-cutoff-missing" | "memory-curation-cutoff-mismatch";
+
+  constructor(code: MemoryCurationCutoffError["code"], message: string) {
+    super(message);
+    this.code = code;
+  }
+}
 
 export type MemoryCurationServiceOptions = {
   config: MemoryCurationConfig;
@@ -51,6 +63,7 @@ export type MemoryCurationServiceOptions = {
   persistencePaths?: Partial<Record<"USER.md" | "MEMORY.md", string>>;
   memoryIndexSync?: MemoryIndexWriteSync;
   memoryMutationService?: MemoryMutationService;
+  checkpointCoordinator?: MemoryCurationCheckpointCoordinator;
   now?: () => Date;
   extractFacts?: (input: {
     messages: readonly SessionMessage[];
@@ -72,6 +85,7 @@ export class MemoryCurationService {
   readonly #memoryMutationService: MemoryMutationService;
   readonly #now: () => Date;
   readonly #extractFacts: NonNullable<MemoryCurationServiceOptions["extractFacts"]>;
+  readonly #checkpointCoordinator: MemoryCurationCheckpointCoordinator | undefined;
   #turnsSinceCheckpoint = 0;
 
   constructor(options: MemoryCurationServiceOptions) {
@@ -93,6 +107,7 @@ export class MemoryCurationService {
     });
     this.#now = options.now ?? (() => new Date());
     this.#extractFacts = options.extractFacts ?? extractMemoryFacts;
+    this.#checkpointCoordinator = options.checkpointCoordinator;
   }
 
   async observeCompletedTurn(input: {
@@ -115,6 +130,8 @@ export class MemoryCurationService {
     trigger: MemoryCurationTrigger;
     sessionId?: string;
     minNewMessages?: number;
+    cutoffMessageId?: string;
+    sourceMessageCount?: number;
     signal?: AbortSignal;
     onEvent?: RuntimeEventSink;
   }): Promise<MemoryCurationCheckpointResult> {
@@ -126,9 +143,33 @@ export class MemoryCurationService {
       return this.#skipped(input.trigger, sessionId, "memory curation mode is manual");
     }
 
-    const allMessages = await this.#sessionDb.listMessages(sessionId);
+    if (this.#checkpointCoordinator === undefined) {
+      return await this.#checkpointWithLease({ ...input, sessionId });
+    }
+    return await this.#checkpointCoordinator.runExclusive({
+      signal: input.signal,
+      task: async (signal) => await this.#checkpointWithLease({ ...input, sessionId, signal }),
+    });
+  }
+
+  async #checkpointWithLease(input: {
+    trigger: MemoryCurationTrigger;
+    sessionId: string;
+    minNewMessages?: number;
+    cutoffMessageId?: string;
+    sourceMessageCount?: number;
+    signal?: AbortSignal;
+    onEvent?: RuntimeEventSink;
+  }): Promise<MemoryCurationCheckpointResult> {
+    const sessionId = input.sessionId;
+
+    const sessionMessages = await this.#sessionDb.listMessages(sessionId);
+    const allMessages = messagesThroughCutoff(sessionMessages, {
+      cutoffMessageId: input.cutoffMessageId,
+      sourceMessageCount: input.sourceMessageCount,
+    });
     const latest = await this.#curationStore.latestForSession(sessionId);
-    if (input.trigger === "runtime-dispose" && latest?.createdAt !== undefined) {
+    if (input.trigger === "runtime-dispose" && latest?.createdAt !== undefined && latest.status !== "failed") {
       const lastAuditMs = new Date(latest.createdAt).getTime();
       const minIntervalMs = this.#config.runtimeDisposeMinIntervalMinutes * 60_000;
       if (Number.isFinite(lastAuditMs) && this.#now().getTime() - lastAuditMs < minIntervalMs) {
@@ -154,7 +195,7 @@ export class MemoryCurationService {
       signal: input.signal
     });
     const candidates = reviewMemoryFacts({
-      facts: extraction.facts,
+      facts: extraction.diagnostics.ok ? extraction.facts : [],
       memoryStore: this.#memoryStore,
       messages,
       config: this.#config
@@ -167,6 +208,7 @@ export class MemoryCurationService {
       ...applyResult.warnings
     ];
     const status = aggregateStatus({
+      extractionOk: extraction.diagnostics.ok,
       failedCount: applyResult.failedCount,
       autoAppliedCount: applyResult.autoAppliedCount,
       pendingReviewCount,
@@ -183,7 +225,7 @@ export class MemoryCurationService {
       sessionId,
       trigger: input.trigger,
       status,
-      sourceMessageCount: allMessages.length,
+      sourceMessageCount: status === "failed" ? lastSourceMessageCount : allMessages.length,
       sourceMessageIds: messages.map((message) => message.id),
       extractedFactIds: extraction.facts.map((fact) => fact.id),
       operations: applyResult.operations,
@@ -217,7 +259,12 @@ export class MemoryCurationService {
       pendingReviewCount,
       ignoredCount,
       failedCount: applyResult.failedCount,
-      warnings
+      warnings,
+      ...(status === "failed" ? {
+        failureCode: extraction.diagnostics.ok
+          ? "memory-curation-apply-failed" as const
+          : "memory-fact-extraction-failed" as const
+      } : {})
     };
   }
 
@@ -350,6 +397,47 @@ export class MemoryCurationService {
   }
 }
 
+function messagesThroughCutoff(
+  messages: readonly SessionMessage[],
+  cutoff: { cutoffMessageId?: string; sourceMessageCount?: number }
+): SessionMessage[] {
+  if (cutoff.sourceMessageCount !== undefined &&
+      (!Number.isInteger(cutoff.sourceMessageCount) || cutoff.sourceMessageCount < 0)) {
+    throw new MemoryCurationCutoffError(
+      "memory-curation-cutoff-mismatch",
+      "The memory curation message cutoff is invalid."
+    );
+  }
+  if (cutoff.cutoffMessageId === undefined && cutoff.sourceMessageCount === undefined) {
+    return [...messages];
+  }
+  if (cutoff.cutoffMessageId === undefined) {
+    if (cutoff.sourceMessageCount === 0) {
+      return [];
+    }
+    throw new MemoryCurationCutoffError(
+      "memory-curation-cutoff-missing",
+      "The memory curation cutoff message is unavailable."
+    );
+  }
+
+  const cutoffIndex = messages.findIndex((message) => message.id === cutoff.cutoffMessageId);
+  if (cutoffIndex < 0) {
+    throw new MemoryCurationCutoffError(
+      "memory-curation-cutoff-missing",
+      "The memory curation cutoff message is no longer present in the session transcript."
+    );
+  }
+  const selected = messages.slice(0, cutoffIndex + 1);
+  if (cutoff.sourceMessageCount !== undefined && selected.length !== cutoff.sourceMessageCount) {
+    throw new MemoryCurationCutoffError(
+      "memory-curation-cutoff-mismatch",
+      "The memory curation cutoff no longer matches the session transcript."
+    );
+  }
+  return selected;
+}
+
 function operationFromCandidate(candidate: CuratedMemoryCandidate): CuratableMemoryOperation | undefined {
   if (candidate.operation === "append" && candidate.content !== undefined) {
     return {
@@ -399,13 +487,14 @@ function recordCandidate(
 }
 
 function aggregateStatus(input: {
+  extractionOk: boolean;
   failedCount: number;
   autoAppliedCount: number;
   pendingReviewCount: number;
   ignoredCount: number;
   candidateCount: number;
 }): RuntimeMemoryCurationStatus {
-  if (input.failedCount > 0) {
+  if (!input.extractionOk || input.failedCount > 0) {
     return "failed";
   }
   if (input.autoAppliedCount > 0) {

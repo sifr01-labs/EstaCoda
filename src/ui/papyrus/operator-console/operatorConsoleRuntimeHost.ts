@@ -277,7 +277,9 @@ function cloneStatusRailState(status: StatusRailState): StatusRailState {
       ...(isStatusModelRoute(status.model?.route) ? { route: status.model.route } : {}),
     },
     context: {
-      usedTokens: normalizeNonNegativeNumber(status.context?.usedTokens ?? fallback.context.usedTokens),
+      ...(status.context?.usedTokens === undefined
+        ? {}
+        : { usedTokens: normalizeNonNegativeNumber(status.context.usedTokens) }),
       ...(status.context?.totalTokens === undefined
         ? {}
         : { totalTokens: normalizeNonNegativeNumber(status.context.totalTokens) }),
