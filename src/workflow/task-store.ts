@@ -4,6 +4,7 @@ import type {
   TaskApprovalStatus,
   TaskAttempt,
   TaskAttemptLease,
+  TaskBudgetReservation,
   TaskDeliveryBinding,
   TaskDeliveryStatus,
   TaskEvent,
@@ -91,6 +92,8 @@ export interface TaskStore {
   getTaskByCreationKey(creationKey: string): Task | null;
   listTasks(options?: ListTasksOptions): Task[];
   listChildTasks(parentTaskId: string): Task[];
+  reserveChildTaskBudget(reservation: TaskBudgetReservation): void;
+  listChildTaskBudgetReservations(parentTaskId: string, parentStepId?: string): TaskBudgetReservation[];
 
   createPlanRevisionGraph(revision: TaskPlanRevision, steps: readonly TaskStep[]): void;
   updatePlanRevision(revision: TaskPlanRevision): void;

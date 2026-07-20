@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from "../storage/sqlite.js";
 
-export const TASK_SCHEMA_VERSION = 16;
+export const TASK_SCHEMA_VERSION = 17;
 
 const OBSOLETE_EXECUTION_TABLES = [
   "workflow_event_summaries",
@@ -694,4 +694,92 @@ export function migrateTaskChildGovernanceSchemaV16(db: SQLiteDatabase): void {
     db.exec(`alter table task_steps add column child_task_policy text not null default 'forbid'
       check(child_task_policy in ('forbid', 'fire_and_forget'))`);
   }
+}
+
+/** Adds atomic, immutable budget reservations for every runtime-created child Task. */
+export function migrateTaskTreeBudgetSchemaV17(db: SQLiteDatabase): void {
+  db.exec(`
+    create table if not exists task_budget_reservations (
+      child_task_id text primary key,
+      profile_id text not null,
+      root_task_id text not null,
+      parent_task_id text not null,
+      parent_step_id text not null,
+      parent_attempt_id text not null,
+      max_concurrent_attempts integer not null check(max_concurrent_attempts > 0),
+      max_provider_calls integer not null check(max_provider_calls >= 0),
+      max_total_tokens integer not null check(max_total_tokens >= 0),
+      max_estimated_cost_usd real not null check(max_estimated_cost_usd >= 0),
+      max_wall_clock_ms integer not null check(max_wall_clock_ms > 0),
+      created_at text not null,
+      unique(profile_id, child_task_id),
+      foreign key(profile_id, child_task_id)
+        references tasks(profile_id, id) on delete cascade deferrable initially deferred,
+      foreign key(profile_id, root_task_id)
+        references tasks(profile_id, id) on delete restrict,
+      foreign key(profile_id, parent_task_id)
+        references tasks(profile_id, id) on delete restrict,
+      foreign key(profile_id, parent_task_id, parent_step_id)
+        references task_steps(profile_id, task_id, id) on delete restrict,
+      foreign key(profile_id, parent_task_id, parent_attempt_id)
+        references task_attempts(profile_id, task_id, id) on delete restrict
+    );
+
+    create index if not exists idx_task_budget_reservations_parent
+      on task_budget_reservations(profile_id, parent_task_id, parent_step_id, created_at);
+    create index if not exists idx_task_budget_reservations_root
+      on task_budget_reservations(profile_id, root_task_id, created_at);
+
+    insert or ignore into task_budget_reservations (
+      child_task_id, profile_id, root_task_id, parent_task_id, parent_step_id, parent_attempt_id,
+      max_concurrent_attempts, max_provider_calls, max_total_tokens,
+      max_estimated_cost_usd, max_wall_clock_ms, created_at
+    )
+    select
+      child.id, child.profile_id, child.root_task_id, child.parent_task_id, parent_attempt.step_id,
+      child.parent_attempt_id,
+      json_extract(child.budget_policy_json, '$.maxConcurrentAttempts'),
+      json_extract(child.budget_policy_json, '$.maxProviderCalls'),
+      json_extract(child.budget_policy_json, '$.maxTotalTokens'),
+      json_extract(child.budget_policy_json, '$.maxEstimatedCostUsd'),
+      json_extract(child.budget_policy_json, '$.maxWallClockMs'),
+      child.created_at
+    from tasks child
+    join task_attempts parent_attempt
+      on parent_attempt.profile_id = child.profile_id
+      and parent_attempt.task_id = child.parent_task_id
+      and parent_attempt.id = child.parent_attempt_id
+    where child.parent_task_id is not null;
+
+    create trigger if not exists trg_task_budget_reservation_immutable
+    before update on task_budget_reservations
+    begin
+      select raise(abort, 'Task budget reservations are immutable');
+    end;
+
+    create trigger if not exists trg_task_child_requires_budget_reservation
+    before insert on tasks
+    when new.parent_task_id is not null
+    begin
+      select case when not exists (
+        select 1
+        from task_budget_reservations reservation
+        join task_attempts parent_attempt
+          on parent_attempt.profile_id = reservation.profile_id
+          and parent_attempt.task_id = reservation.parent_task_id
+          and parent_attempt.id = reservation.parent_attempt_id
+        where reservation.profile_id = new.profile_id
+          and reservation.child_task_id = new.id
+          and reservation.root_task_id = new.root_task_id
+          and reservation.parent_task_id = new.parent_task_id
+          and reservation.parent_attempt_id = new.parent_attempt_id
+          and reservation.parent_step_id = parent_attempt.step_id
+          and reservation.max_concurrent_attempts = json_extract(new.budget_policy_json, '$.maxConcurrentAttempts')
+          and reservation.max_provider_calls = json_extract(new.budget_policy_json, '$.maxProviderCalls')
+          and reservation.max_total_tokens = json_extract(new.budget_policy_json, '$.maxTotalTokens')
+          and reservation.max_estimated_cost_usd = json_extract(new.budget_policy_json, '$.maxEstimatedCostUsd')
+          and reservation.max_wall_clock_ms = json_extract(new.budget_policy_json, '$.maxWallClockMs')
+      ) then raise(abort, 'Child Task budget reservation is required') end;
+    end;
+  `);
 }

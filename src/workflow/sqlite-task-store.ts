@@ -3,6 +3,8 @@ import type {
   TaskApprovalLink,
   TaskAttempt,
   TaskAttemptLease,
+  TaskBudgetPolicy,
+  TaskBudgetReservation,
   TaskDeliveryBinding,
   TaskEvent,
   TaskGuidance,
@@ -278,6 +280,98 @@ export class SQLiteTaskStore implements TaskStore {
        where profile_id = ? and parent_task_id = ?
        order by created_at, id`
     ).all(this.#profileId, parentTaskId).map(rowToTask);
+  }
+
+  reserveChildTaskBudget(reservation: TaskBudgetReservation): void {
+    this.#assertTransactionActive();
+    this.#assertProfile(reservation.profileId, "TaskBudgetReservation", reservation.childTaskId);
+    requireBoundedText(reservation.childTaskId, "child Task ID", 256);
+    requireBoundedText(reservation.rootTaskId, "root Task ID", 256);
+    requireBoundedText(reservation.parentTaskId, "parent Task ID", 256);
+    requireBoundedText(reservation.parentStepId, "parent Step ID", 256);
+    requireBoundedText(reservation.parentAttemptId, "parent Attempt ID", 256);
+    assertTimestamp(reservation.createdAt, "Task budget reservation creation");
+    assertBudgetPolicy(reservation.budget, "Child Task budget reservation");
+    if (this.getTask(reservation.childTaskId) !== null) {
+      throw new TaskStoreIntegrityError(`Child Task ${reservation.childTaskId} already exists.`);
+    }
+
+    const parent = this.getTask(reservation.parentTaskId);
+    const root = this.getTask(reservation.rootTaskId);
+    const attempt = this.getAttempt(reservation.parentAttemptId);
+    const step = this.getStep(reservation.parentStepId);
+    if (parent === null || root === null || attempt === null || step === null ||
+        parent.rootTaskId !== root.id || attempt.taskId !== parent.id || attempt.stepId !== step.id ||
+        step.taskId !== parent.id || step.planRevisionId !== attempt.planRevisionId) {
+      throw new TaskStoreIntegrityError("Child Task budget reservation lineage is invalid.");
+    }
+    if (attempt.status !== "running" || step.childTaskPolicy !== "fire_and_forget" ||
+        isTerminalTaskStatus(parent.status)) {
+      throw new TaskStoreIntegrityError("Child Task budget reservations require an active authorized parent Attempt.");
+    }
+    if (reservation.budget.maxConcurrentAttempts > parent.budgetPolicy.maxConcurrentAttempts ||
+        reservation.budget.maxConcurrentAttempts > root.budgetPolicy.maxConcurrentAttempts ||
+        reservation.budget.maxWallClockMs > parent.budgetPolicy.maxWallClockMs ||
+        reservation.budget.maxWallClockMs > step.budget.maxWallClockMs ||
+        reservation.budget.maxWallClockMs > root.budgetPolicy.maxWallClockMs) {
+      throw new TaskStoreIntegrityError("Child Task concurrency or wall-clock budget exceeds its Task-tree ceiling.");
+    }
+
+    const taskUsage = sumAttemptBudgetUsage(this.listAttempts(parent.id));
+    const stepUsage = sumAttemptBudgetUsage(this.listAttempts(parent.id, step.id));
+    const taskReservations = this.listChildTaskBudgetReservations(parent.id);
+    const stepReservations = taskReservations.filter((entry) => entry.parentStepId === step.id);
+    if (!reservationFits(
+      taskUsage,
+      sumReservedBudget(taskReservations),
+      reservation.budget,
+      parent.budgetPolicy
+    )) {
+      throw new TaskStoreIntegrityError("Child Task budget reservation exceeds the parent Task's remaining budget.");
+    }
+    if (!reservationFits(
+      stepUsage,
+      sumReservedBudget(stepReservations),
+      reservation.budget,
+      step.budget
+    )) {
+      throw new TaskStoreIntegrityError("Child Task budget reservation exceeds the parent Step's remaining budget.");
+    }
+
+    this.#db.query(
+      `insert into task_budget_reservations (
+        child_task_id, profile_id, root_task_id, parent_task_id, parent_step_id, parent_attempt_id,
+        max_concurrent_attempts, max_provider_calls, max_total_tokens,
+        max_estimated_cost_usd, max_wall_clock_ms, created_at
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      reservation.childTaskId,
+      this.#profileId,
+      reservation.rootTaskId,
+      reservation.parentTaskId,
+      reservation.parentStepId,
+      reservation.parentAttemptId,
+      reservation.budget.maxConcurrentAttempts,
+      reservation.budget.maxProviderCalls,
+      reservation.budget.maxTotalTokens,
+      reservation.budget.maxEstimatedCostUsd,
+      reservation.budget.maxWallClockMs,
+      reservation.createdAt
+    );
+  }
+
+  listChildTaskBudgetReservations(parentTaskId: string, parentStepId?: string): TaskBudgetReservation[] {
+    this.#assertTaskOwned(parentTaskId);
+    let sql = `select * from task_budget_reservations
+      where profile_id = ? and parent_task_id = ?`;
+    const params: SQLiteValue[] = [this.#profileId, parentTaskId];
+    if (parentStepId !== undefined) {
+      requireBoundedText(parentStepId, "parent Step ID", 256);
+      sql += " and parent_step_id = ?";
+      params.push(parentStepId);
+    }
+    sql += " order by created_at, child_task_id";
+    return this.#db.query<BudgetReservationRow>(sql).all(...params).map(rowToBudgetReservation);
   }
 
   #insertPlanRevisionRecord(revision: TaskPlanRevision): void {
@@ -1579,6 +1673,25 @@ function rowToUsageEntry(row: UsageEntryRow): TaskUsageEntry {
   };
 }
 
+function rowToBudgetReservation(row: BudgetReservationRow): TaskBudgetReservation {
+  return {
+    profileId: row.profile_id,
+    childTaskId: row.child_task_id,
+    rootTaskId: row.root_task_id,
+    parentTaskId: row.parent_task_id,
+    parentStepId: row.parent_step_id,
+    parentAttemptId: row.parent_attempt_id,
+    budget: {
+      maxConcurrentAttempts: row.max_concurrent_attempts,
+      maxProviderCalls: row.max_provider_calls,
+      maxTotalTokens: row.max_total_tokens,
+      maxEstimatedCostUsd: row.max_estimated_cost_usd,
+      maxWallClockMs: row.max_wall_clock_ms
+    },
+    createdAt: row.created_at
+  };
+}
+
 function rowToApprovalLink(row: ApprovalLinkRow): TaskApprovalLink {
   return {
     id: row.id,
@@ -1761,6 +1874,50 @@ function assertUsageEntry(entry: TaskUsageEntry): void {
   assertTimestamp(entry.occurredAt, "Task usage occurrence");
 }
 
+function assertBudgetPolicy(budget: TaskBudgetPolicy, label: string): void {
+  if (!Number.isSafeInteger(budget.maxConcurrentAttempts) || budget.maxConcurrentAttempts < 1 ||
+      !Number.isSafeInteger(budget.maxProviderCalls) || budget.maxProviderCalls < 0 ||
+      !Number.isSafeInteger(budget.maxTotalTokens) || budget.maxTotalTokens < 0 ||
+      !Number.isFinite(budget.maxEstimatedCostUsd) || budget.maxEstimatedCostUsd < 0 ||
+      !Number.isSafeInteger(budget.maxWallClockMs) || budget.maxWallClockMs < 1) {
+    throw new TaskStoreIntegrityError(`${label} is invalid.`);
+  }
+}
+
+type ConsumableBudget = Pick<TaskBudgetPolicy, "maxProviderCalls" | "maxTotalTokens" | "maxEstimatedCostUsd">;
+
+function sumAttemptBudgetUsage(attempts: readonly TaskAttempt[]): ConsumableBudget {
+  return attempts.reduce<ConsumableBudget>((total, attempt) => ({
+    maxProviderCalls: total.maxProviderCalls + attempt.usage.providerCalls,
+    maxTotalTokens: total.maxTotalTokens + attempt.usage.totalTokens,
+    maxEstimatedCostUsd: total.maxEstimatedCostUsd + attempt.usage.estimatedCostUsd
+  }), emptyConsumableBudget());
+}
+
+function sumReservedBudget(reservations: readonly TaskBudgetReservation[]): ConsumableBudget {
+  return reservations.reduce<ConsumableBudget>((total, reservation) => ({
+    maxProviderCalls: total.maxProviderCalls + reservation.budget.maxProviderCalls,
+    maxTotalTokens: total.maxTotalTokens + reservation.budget.maxTotalTokens,
+    maxEstimatedCostUsd: total.maxEstimatedCostUsd + reservation.budget.maxEstimatedCostUsd
+  }), emptyConsumableBudget());
+}
+
+function emptyConsumableBudget(): ConsumableBudget {
+  return { maxProviderCalls: 0, maxTotalTokens: 0, maxEstimatedCostUsd: 0 };
+}
+
+function reservationFits(
+  usage: ConsumableBudget,
+  reserved: ConsumableBudget,
+  requested: TaskBudgetPolicy,
+  ceiling: ConsumableBudget
+): boolean {
+  return usage.maxProviderCalls + reserved.maxProviderCalls + requested.maxProviderCalls <= ceiling.maxProviderCalls &&
+    usage.maxTotalTokens + reserved.maxTotalTokens + requested.maxTotalTokens <= ceiling.maxTotalTokens &&
+    usage.maxEstimatedCostUsd + reserved.maxEstimatedCostUsd + requested.maxEstimatedCostUsd <=
+      ceiling.maxEstimatedCostUsd;
+}
+
 function assertApprovalLink(link: TaskApprovalLink): void {
   requireBoundedText(link.id, "Task approval ID", 256);
   requireBoundedText(link.authorizedSessionId, "Task approval authorized session ID", 256);
@@ -1912,6 +2069,21 @@ type UsageEntryRow = {
   pricing_complete: number;
   incomplete_reasons_json: string;
   occurred_at: string;
+};
+
+type BudgetReservationRow = {
+  child_task_id: string;
+  profile_id: string;
+  root_task_id: string;
+  parent_task_id: string;
+  parent_step_id: string;
+  parent_attempt_id: string;
+  max_concurrent_attempts: number;
+  max_provider_calls: number;
+  max_total_tokens: number;
+  max_estimated_cost_usd: number;
+  max_wall_clock_ms: number;
+  created_at: string;
 };
 
 type ApprovalLinkRow = {

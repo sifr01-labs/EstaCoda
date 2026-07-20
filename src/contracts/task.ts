@@ -141,6 +141,18 @@ export type TaskBudgetPolicy = {
 
 export type TaskStepBudget = Omit<TaskBudgetPolicy, "maxConcurrentAttempts">;
 
+/** Durable admission record proving a child Task divided, rather than expanded, its parent Step budget. */
+export type TaskBudgetReservation = {
+  profileId: string;
+  childTaskId: TaskId;
+  rootTaskId: TaskId;
+  parentTaskId: TaskId;
+  parentStepId: TaskStepId;
+  parentAttemptId: TaskAttemptId;
+  budget: TaskBudgetPolicy;
+  createdAt: string;
+};
+
 export type TaskRetryPolicy = {
   maxAttempts: number;
   initialBackoffMs: number;

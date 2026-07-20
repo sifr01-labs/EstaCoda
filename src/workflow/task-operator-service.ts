@@ -21,6 +21,7 @@ import {
 } from "../contracts/task.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 import { taskUsageFromEntries } from "./task-agent-usage.js";
+import { listTaskTreeUsageEntries } from "./task-tree-accounting.js";
 import { FixedTaskService } from "./fixed-task-service.js";
 import type { TaskStore } from "./task-store.js";
 import { taskToolCategory } from "./task-safe-activity.js";
@@ -323,7 +324,7 @@ export class TaskOperatorService {
       recentActivity,
       ...(currentToolCategory === undefined ? {} : { currentToolCategory }),
       elapsedMs: elapsedMs(task.startedAt ?? task.createdAt, task.completedAt ?? task.cancelledAt, projectionNow),
-      usage: taskUsageFromEntries(this.#store.listUsageEntries(task.id)),
+      usage: taskUsageFromEntries(listTaskTreeUsageEntries(this.#store, task.id)),
       results: projectedResults.slice(0, MAX_PROJECTED_RESULTS).map((result) => ({
         id: result.id,
         handle: result.handle,

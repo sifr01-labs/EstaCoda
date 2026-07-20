@@ -187,7 +187,19 @@ export class FixedTaskService {
     const initialEvents = this.#creationEvents(graph, timestamp);
     try {
       this.#store.atomicWrite((store) => {
-        if (normalized.parent !== undefined) this.#validateParent(normalized, task, store);
+        if (normalized.parent !== undefined) {
+          const parentContext = this.#validateParent(normalized, task, store);
+          store.reserveChildTaskBudget({
+            profileId: task.profileId,
+            childTaskId: task.id,
+            rootTaskId: task.rootTaskId,
+            parentTaskId: parentContext.task.id,
+            parentStepId: parentContext.step.id,
+            parentAttemptId: parentContext.attempt.id,
+            budget: task.budgetPolicy,
+            createdAt: timestamp
+          });
+        }
         store.createTaskGraph({ task, revision, steps, initialEvents });
         if (task.parentTaskId !== undefined && task.originSessionId !== task.creatorSessionId) {
           store.linkSession({

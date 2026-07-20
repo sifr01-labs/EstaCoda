@@ -21,6 +21,7 @@ import {
   migrateTaskAgentExecutorSchemaV12,
   migrateTaskBackgroundHostSchemaV13,
   migrateTaskChildGovernanceSchemaV16,
+  migrateTaskTreeBudgetSchemaV17,
   migrateTaskSchedulerSchemaV11,
   migrateTaskVerticalSliceSchemaV15,
   TASK_SCHEMA_VERSION
@@ -756,6 +757,83 @@ describe("Task child governance schema v16 migration", () => {
   });
 });
 
+describe("Task tree budget schema v17 migration", () => {
+  it("backfills child reservations and rejects unreserved child inserts idempotently", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-task-tree-budget-migration-"));
+    const database = openDefaultSQLiteDatabase({ path: join(tempDir, "task-tree-budget.sqlite") });
+    try {
+      const rootBudget = JSON.stringify({
+        maxConcurrentAttempts: 2,
+        maxProviderCalls: 20,
+        maxTotalTokens: 2_000,
+        maxEstimatedCostUsd: 2,
+        maxWallClockMs: 60_000
+      });
+      const childBudget = JSON.stringify({
+        maxConcurrentAttempts: 1,
+        maxProviderCalls: 10,
+        maxTotalTokens: 1_000,
+        maxEstimatedCostUsd: 1,
+        maxWallClockMs: 30_000
+      });
+      database.exec(`
+        create table tasks(
+          id text primary key,
+          profile_id text not null,
+          root_task_id text not null,
+          parent_task_id text,
+          parent_attempt_id text,
+          budget_policy_json text not null,
+          created_at text not null,
+          unique(profile_id, id)
+        );
+        create table task_steps(
+          id text primary key,
+          profile_id text not null,
+          task_id text not null,
+          unique(profile_id, task_id, id)
+        );
+        create table task_attempts(
+          id text primary key,
+          profile_id text not null,
+          task_id text not null,
+          step_id text not null,
+          unique(profile_id, task_id, id)
+        );
+        insert into tasks values ('root', 'alpha', 'root', null, null, '${rootBudget}', '${NOW}');
+        insert into task_steps values ('parent-step', 'alpha', 'root');
+        insert into task_attempts values ('parent-attempt', 'alpha', 'root', 'parent-step');
+        insert into tasks values (
+          'child', 'alpha', 'root', 'root', 'parent-attempt', '${childBudget}', '${NOW}'
+        );
+      `);
+
+      migrateTaskTreeBudgetSchemaV17(database);
+      migrateTaskTreeBudgetSchemaV17(database);
+
+      expect(database.query<{
+        child_task_id: string;
+        parent_step_id: string;
+        max_provider_calls: number;
+        max_total_tokens: number;
+      }>(`select child_task_id, parent_step_id, max_provider_calls, max_total_tokens
+          from task_budget_reservations`).get()).toEqual({
+        child_task_id: "child",
+        parent_step_id: "parent-step",
+        max_provider_calls: 10,
+        max_total_tokens: 1_000
+      });
+      expect(() => database.query(
+        "insert into tasks values (?, ?, ?, ?, ?, ?, ?)"
+      ).run("unreserved", "alpha", "root", "root", "parent-attempt", childBudget, NOW))
+        .toThrow(/reservation/i);
+    } finally {
+      database.close();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
 const NOW = "2030-01-01T00:00:00.000Z";
 
 function makeGraph(profileId: "alpha" | "beta") {
@@ -965,7 +1043,8 @@ const TASK_TABLES = [
   "task_guidance",
   "task_usage_entries",
   "task_approval_links",
-  "task_delivery_bindings"
+  "task_delivery_bindings",
+  "task_budget_reservations"
 ] as const;
 
 const OBSOLETE_EXECUTION_TABLES = [

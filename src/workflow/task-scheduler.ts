@@ -25,6 +25,11 @@ import {
 import type { TaskStore } from "./task-store.js";
 import type { TaskApprovalService } from "./task-approval-service.js";
 import { cancelTaskInStore } from "./task-operator-service.js";
+import {
+  listStepTreeAttempts,
+  listTaskBudgetScopes,
+  listTaskTreeAttempts
+} from "./task-tree-accounting.js";
 import type {
   ResolveTaskStepExecutor,
   TaskAttemptActivity,
@@ -116,6 +121,7 @@ type MutableRunResult = Omit<TaskSchedulerRunResult, "warnings"> & { warnings: s
 type CapacityState = {
   profile: number;
   task: Map<string, number>;
+  tree: Map<string, number>;
   executor: Map<string, number>;
   provider: Map<string, number>;
 };
@@ -1248,57 +1254,81 @@ export class TaskScheduler {
     store: TaskStore = this.#store,
     ignoredAttemptId?: string
   ): string | undefined {
-    const attempts = store.listAttempts(task.id).filter((attempt) => attempt.id !== ignoredAttemptId);
-    const taskUsage = sumUsage(attempts.map(attemptBudgetUsage));
-    const stepUsage = sumUsage(attempts.filter((attempt) => attempt.stepId === step.id).map(attemptBudgetUsage));
-    if (taskUsage.providerCalls >= task.budgetPolicy.maxProviderCalls) return "task-provider-call-budget-exhausted";
-    if (taskUsage.totalTokens >= task.budgetPolicy.maxTotalTokens) return "task-token-budget-exhausted";
-    if (taskUsage.estimatedCostUsd >= task.budgetPolicy.maxEstimatedCostUsd) return "task-cost-budget-exhausted";
-    if (stepUsage.providerCalls >= step.budget.maxProviderCalls) return "step-provider-call-budget-exhausted";
-    if (stepUsage.totalTokens >= step.budget.maxTotalTokens) return "step-token-budget-exhausted";
-    if (stepUsage.estimatedCostUsd >= step.budget.maxEstimatedCostUsd) return "step-cost-budget-exhausted";
-    const startedAt = task.startedAt === undefined ? undefined : Date.parse(task.startedAt);
-    if (startedAt !== undefined && this.#now().getTime() - startedAt >= task.budgetPolicy.maxWallClockMs) {
-      return "task-wall-clock-budget-exhausted";
-    }
-    const stepStartedAt = attempts
-      .filter((attempt) => attempt.stepId === step.id && attempt.startedAt !== undefined)
-      .reduce<number | undefined>((earliest, attempt) => {
-        const started = Date.parse(attempt.startedAt!);
-        return earliest === undefined || started < earliest ? started : earliest;
-      }, undefined);
-    if (stepStartedAt !== undefined && this.#now().getTime() - stepStartedAt >= step.budget.maxWallClockMs) {
-      return "step-wall-clock-budget-exhausted";
+    const scopes = listTaskBudgetScopes(store, task, step);
+    for (let index = 0; index < scopes.length; index++) {
+      const scope = scopes[index]!;
+      const taskAttempts = listTaskTreeAttempts(store, scope.task.id)
+        .filter((attempt) => attempt.id !== ignoredAttemptId);
+      const stepAttempts = listStepTreeAttempts(store, scope.task.id, scope.step.id)
+        .filter((attempt) => attempt.id !== ignoredAttemptId);
+      const taskUsage = sumUsage(taskAttempts.map(attemptBudgetUsage));
+      const stepUsage = sumUsage(stepAttempts.map(attemptBudgetUsage));
+      const prefix = index === 0 ? "" : "ancestor-";
+      if (taskUsage.providerCalls >= scope.task.budgetPolicy.maxProviderCalls) {
+        return `${prefix}task-provider-call-budget-exhausted`;
+      }
+      if (taskUsage.totalTokens >= scope.task.budgetPolicy.maxTotalTokens) {
+        return `${prefix}task-token-budget-exhausted`;
+      }
+      if (taskUsage.estimatedCostUsd >= scope.task.budgetPolicy.maxEstimatedCostUsd) {
+        return `${prefix}task-cost-budget-exhausted`;
+      }
+      if (stepUsage.providerCalls >= scope.step.budget.maxProviderCalls) {
+        return `${prefix}step-provider-call-budget-exhausted`;
+      }
+      if (stepUsage.totalTokens >= scope.step.budget.maxTotalTokens) {
+        return `${prefix}step-token-budget-exhausted`;
+      }
+      if (stepUsage.estimatedCostUsd >= scope.step.budget.maxEstimatedCostUsd) {
+        return `${prefix}step-cost-budget-exhausted`;
+      }
+      const startedAt = scope.task.startedAt === undefined ? undefined : Date.parse(scope.task.startedAt);
+      if (startedAt !== undefined && this.#now().getTime() - startedAt >= scope.task.budgetPolicy.maxWallClockMs) {
+        return `${prefix}task-wall-clock-budget-exhausted`;
+      }
+      const stepStartedAt = stepAttempts
+        .filter((attempt) => attempt.startedAt !== undefined)
+        .reduce<number | undefined>((earliest, attempt) => {
+          const started = Date.parse(attempt.startedAt!);
+          return earliest === undefined || started < earliest ? started : earliest;
+        }, undefined);
+      if (stepStartedAt !== undefined && this.#now().getTime() - stepStartedAt >= scope.step.budget.maxWallClockMs) {
+        return `${prefix}step-wall-clock-budget-exhausted`;
+      }
     }
     return undefined;
   }
 
   #usageWithinBudget(taskId: string, step: TaskStep, newUsage: TaskUsageTotals): boolean {
-    const attempts = this.#store.listAttempts(taskId);
     const task = this.#store.getTask(taskId);
     if (task === null) return false;
+    const attempts = this.#store.listAttempts(taskId);
     const currentAttemptId = this.#currentAttemptId(attempts, step.id);
-    const priorTask = sumUsage(
-      attempts.filter((attempt) => attempt.id !== currentAttemptId).map(attemptBudgetUsage)
-    );
-    const priorStep = sumUsage(
-      attempts.filter((attempt) => attempt.stepId === step.id && isTerminalTaskAttemptStatus(attempt.status))
-        .map(attemptBudgetUsage)
-    );
     const effectiveNewUsage = { ...newUsage, providerCalls: Math.max(1, newUsage.providerCalls) };
     const nowMs = this.#now().getTime();
-    const taskWallClockOk = task.startedAt === undefined ||
-      nowMs - Date.parse(task.startedAt) <= task.budgetPolicy.maxWallClockMs;
-    const firstStepStart = attempts
-      .filter((attempt) => attempt.stepId === step.id && attempt.startedAt !== undefined)
-      .reduce<number | undefined>((earliest, attempt) => {
-        const started = Date.parse(attempt.startedAt!);
-        return earliest === undefined || started < earliest ? started : earliest;
-      }, undefined);
-    const stepWallClockOk = firstStepStart === undefined || nowMs - firstStepStart <= step.budget.maxWallClockMs;
-    return taskWallClockOk && stepWallClockOk &&
-      usageFits(addUsage(priorTask, effectiveNewUsage), task.budgetPolicy) &&
-      usageFits(addUsage(priorStep, effectiveNewUsage), step.budget);
+    for (const scope of listTaskBudgetScopes(this.#store, task, step)) {
+      const priorTask = sumUsage(listTaskTreeAttempts(this.#store, scope.task.id)
+        .filter((attempt) => attempt.id !== currentAttemptId)
+        .map(attemptBudgetUsage));
+      const scopeStepAttempts = listStepTreeAttempts(this.#store, scope.task.id, scope.step.id);
+      const priorStepAttempts = scopeStepAttempts
+        .filter((attempt) => attempt.id !== currentAttemptId);
+      const priorStep = sumUsage(priorStepAttempts.map(attemptBudgetUsage));
+      const taskWallClockOk = scope.task.startedAt === undefined ||
+        nowMs - Date.parse(scope.task.startedAt) <= scope.task.budgetPolicy.maxWallClockMs;
+      const firstStepStart = scopeStepAttempts
+        .filter((attempt) => attempt.startedAt !== undefined)
+        .reduce<number | undefined>((earliest, attempt) => {
+          const started = Date.parse(attempt.startedAt!);
+          return earliest === undefined || started < earliest ? started : earliest;
+        }, undefined);
+      const stepWallClockOk = firstStepStart === undefined ||
+        nowMs - firstStepStart <= scope.step.budget.maxWallClockMs;
+      if (!taskWallClockOk || !stepWallClockOk ||
+          !usageFits(addUsage(priorTask, effectiveNewUsage), scope.task.budgetPolicy) ||
+          !usageFits(addUsage(priorStep, effectiveNewUsage), scope.step.budget)) return false;
+    }
+    return true;
   }
 
   #currentAttemptId(attempts: readonly TaskAttempt[], stepId: string): string | undefined {
@@ -1306,7 +1336,13 @@ export class TaskScheduler {
   }
 
   #capacityState(): CapacityState {
-    const state: CapacityState = { profile: 0, task: new Map(), executor: new Map(), provider: new Map() };
+    const state: CapacityState = {
+      profile: 0,
+      task: new Map(),
+      tree: new Map(),
+      executor: new Map(),
+      provider: new Map()
+    };
     const tasks = this.#store.listTasks({ statuses: RECONCILABLE_TASK_STATUSES, limit: 1_000 });
     for (const task of tasks) {
       for (const attempt of this.#store.listAttempts(task.id)) {
@@ -1319,17 +1355,26 @@ export class TaskScheduler {
     return state;
   }
 
-  #hasCapacity(task: Task, step: TaskStep, state: CapacityState): boolean {
+  #hasCapacity(task: Task, step: TaskStep, state: CapacityState, store: TaskStore = this.#store): boolean {
     const executorKey = step.executor.kind;
     const providerKey = step.executor.model?.provider ?? "default";
+    const root = store.getTask(task.rootTaskId);
+    if (root === null) return false;
     return state.profile < this.#limits.maxProfileConcurrentAttempts &&
       (state.task.get(task.id) ?? 0) < task.budgetPolicy.maxConcurrentAttempts &&
+      (state.tree.get(task.rootTaskId) ?? 0) < root.budgetPolicy.maxConcurrentAttempts &&
       (state.executor.get(executorKey) ?? 0) < (this.#limits.maxConcurrentByExecutor?.[executorKey] ?? Number.MAX_SAFE_INTEGER) &&
       (state.provider.get(providerKey) ?? 0) < (this.#limits.maxConcurrentByProvider?.[providerKey] ?? Number.MAX_SAFE_INTEGER);
   }
 
   #hasDurableCapacity(store: TaskStore, task: Task, step: TaskStep): boolean {
-    const state: CapacityState = { profile: 0, task: new Map(), executor: new Map(), provider: new Map() };
+    const state: CapacityState = {
+      profile: 0,
+      task: new Map(),
+      tree: new Map(),
+      executor: new Map(),
+      provider: new Map()
+    };
     const tasks = store.listTasks({ statuses: RECONCILABLE_TASK_STATUSES, limit: 1_000 });
     for (const candidateTask of tasks) {
       for (const attempt of store.listAttempts(candidateTask.id)) {
@@ -1338,7 +1383,7 @@ export class TaskScheduler {
         if (candidateStep !== null) incrementCapacity(state, candidateTask, candidateStep);
       }
     }
-    return this.#hasCapacity(task, step, state);
+    return this.#hasCapacity(task, step, state, store);
   }
 
   #finalizeTaskIfSettled(taskId: string): void {
@@ -1587,6 +1632,7 @@ function emptyRunResult(): MutableRunResult {
 function incrementCapacity(state: CapacityState, task: Task, step: TaskStep): void {
   state.profile++;
   incrementMap(state.task, task.id);
+  incrementMap(state.tree, task.rootTaskId);
   incrementMap(state.executor, step.executor.kind);
   incrementMap(state.provider, step.executor.model?.provider ?? "default");
 }

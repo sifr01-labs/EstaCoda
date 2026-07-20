@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
-import type { TaskAuthorityPolicy, TaskUsageTotals } from "../contracts/task.js";
+import type { TaskAttempt, TaskAuthorityPolicy, TaskUsageTotals } from "../contracts/task.js";
 import { TASK_TOOL_RISK_CLASSES } from "../contracts/task.js";
 import type { ToolDefinition, ToolRiskClass, ToolsetName } from "../contracts/tool.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
@@ -230,6 +230,16 @@ describe("DurableDelegationService", () => {
     });
     expect(child.authorityPolicy.maxChildDepth).toBe(1);
     expect(child.budgetPolicy.maxProviderCalls).toBeLessThanOrEqual(parent.stepBudget.maxProviderCalls);
+    expect(store.listChildTaskBudgetReservations(parent.taskId)).toEqual([
+      expect.objectContaining({
+        childTaskId: child.id,
+        rootTaskId: parentTask.rootTaskId,
+        parentTaskId: parent.taskId,
+        parentStepId: parent.stepId,
+        parentAttemptId: parent.attemptId,
+        budget: child.budgetPolicy
+      })
+    ]);
     expect(store.listSessionLinks(child.id)).toEqual(expect.arrayContaining([
       expect.objectContaining({ sessionId: "worker", relationship: "creator" }),
       expect.objectContaining({ sessionId: "parent", relationship: "observer" })
@@ -267,6 +277,237 @@ describe("DurableDelegationService", () => {
       trustedWorkspace: true,
       tasks: [{ task: "Nested review", role: "orchestrator" }]
     })).toMatchObject({ taskId: handle.taskId, idempotentReplay: true });
+  });
+
+  it("atomically refuses repeated child calls that would multiply the parent Step ceiling", () => {
+    const parent = createParentAttempt(store);
+    const service = nestedService(store, parent);
+    const first = service.create({
+      toolCallId: "nested-budget-one",
+      trustedWorkspace: true,
+      tasks: [{ task: "First nested review" }]
+    });
+
+    expect(() => service.create({
+      toolCallId: "nested-budget-two",
+      trustedWorkspace: true,
+      tasks: [{ task: "Second nested review" }]
+    })).toThrow(/remaining budget/i);
+    expect(store.listChildTasks(parent.taskId).map((task) => task.id)).toEqual([first.taskId]);
+    expect(store.listChildTaskBudgetReservations(parent.taskId)).toHaveLength(1);
+  });
+
+  it("rolls a reservation back when the child graph cannot be persisted", () => {
+    const parent = createParentAttempt(store);
+    const parentStep = store.getStep(parent.stepId)!;
+    const childAuthority = { ...parentStep.authorityPolicy, maxChildDepth: 1 };
+    expect(() => new FixedTaskService({ store }).create({
+      creatorSessionId: "worker",
+      source: "delegation",
+      objective: "Invalid child graph",
+      workspace: workspace(),
+      authorityPolicy: childAuthority,
+      budgetPolicy: { maxConcurrentAttempts: 1, ...parentStep.budget },
+      parent: { taskId: parent.taskId, attemptId: parent.attemptId },
+      createdBy: {
+        kind: "agent",
+        sessionId: "worker",
+        taskId: parent.taskId,
+        attemptId: parent.attemptId
+      },
+      steps: [{
+        key: "invalid-child-step",
+        title: "Invalid child Step",
+        objective: "This dependency does not exist.",
+        dependsOn: ["missing-step"],
+        executor: { kind: "agent", role: "worker" },
+        childTaskPolicy: "forbid",
+        authorityPolicy: childAuthority,
+        budget: parentStep.budget,
+        retryPolicy: parentStep.retryPolicy,
+        failurePolicy: parentStep.failurePolicy,
+        idempotency: "unknown",
+        resultPolicy: parentStep.resultPolicy
+      }]
+    })).toThrow(/invalid/i);
+
+    expect(store.listChildTasks(parent.taskId)).toEqual([]);
+    expect(store.listChildTaskBudgetReservations(parent.taskId)).toEqual([]);
+  });
+
+  it("serializes competing child reservations so only one can consume the remaining ceiling", async () => {
+    const parent = createParentAttempt(store);
+    const competingDb = new SQLiteSessionDB({ path: join(root, "sessions.sqlite") });
+    try {
+      const competingStore = new SQLiteTaskStore({ db: competingDb.db, profileId: "alpha" });
+      const results = await Promise.allSettled([
+        Promise.resolve().then(() => nestedService(store, parent).create({
+          toolCallId: "reservation-race-a",
+          trustedWorkspace: true,
+          tasks: [{ task: "Competing child A" }]
+        })),
+        Promise.resolve().then(() => nestedService(competingStore, parent).create({
+          toolCallId: "reservation-race-b",
+          trustedWorkspace: true,
+          tasks: [{ task: "Competing child B" }]
+        }))
+      ]);
+
+      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+      expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+      expect(store.listChildTasks(parent.taskId)).toHaveLength(1);
+      expect(store.listChildTaskBudgetReservations(parent.taskId)).toHaveLength(1);
+    } finally {
+      competingDb.close();
+    }
+  });
+
+  it("counts descendant usage in the parent projection and rejects child settlement above the ancestor ceiling", async () => {
+    const parent = createParentAttempt(store);
+    const child = nestedService(store, parent).create({
+      toolCallId: "nested-aggregate-usage",
+      trustedWorkspace: true,
+      tasks: [{ task: "Consume the reserved child budget" }]
+    });
+    const parentTask = store.getTask(parent.taskId)!;
+    const parentStep = store.getStep(parent.stepId)!;
+    const parentAttempt = store.getAttempt(parent.attemptId)!;
+    store.updateTask({
+      ...parentTask,
+      status: "running",
+      startedAt: parentAttempt.startedAt,
+      updatedAt: parentAttempt.updatedAt
+    });
+    store.updateStep({ ...parentStep, status: "ready", updatedAt: parentAttempt.updatedAt });
+    store.updateStep({ ...parentStep, status: "running", updatedAt: parentAttempt.updatedAt });
+    store.updateAttempt({
+      ...parentAttempt,
+      status: "completed",
+      usage: usage(1, 30_000, 1),
+      completedAt: "2026-01-01T00:00:10.000Z",
+      updatedAt: "2026-01-01T00:00:10.000Z"
+    });
+    store.recordUsageEntry(usageEntry(parentAttempt, "parent-usage", 30_000, 1));
+    store.updateStep({ ...parentStep, status: "completed", updatedAt: "2026-01-01T00:00:10.000Z" });
+    store.updateTask({
+      ...parentTask,
+      status: "completed",
+      startedAt: parentAttempt.startedAt,
+      completedAt: "2026-01-01T00:00:10.000Z",
+      updatedAt: "2026-01-01T00:00:10.000Z"
+    });
+
+    const executor = new FakeTaskStepExecutor(({ attempt }) => ({
+      outcome: "succeeded",
+      usage: usage(1, 80_000, 1),
+      usageEntries: [usageEntry(attempt, "child-usage", 80_000, 1)],
+      results: [{ kind: "text", content: "Child result" }]
+    }));
+    const childScheduler = scheduler(
+      store,
+      sessionDb,
+      executor,
+      "tree-budget",
+      join(root, "tree-budget-results"),
+      () => new Date("2026-01-01T00:00:20.000Z")
+    );
+    expect(await childScheduler.runOnce()).toMatchObject({ dispatched: 1, failed: 1, completed: 0 });
+    expect(store.getTask(child.taskId)?.status).toBe("failed");
+    expect(store.listAttempts(child.taskId)[0]).toMatchObject({
+      status: "failed",
+      failure: { class: "budget-exceeded" }
+    });
+    expect(new TaskOperatorService({ store }).status(parent.taskId, "parent").usage).toMatchObject({
+      providerCalls: 2,
+      totalTokens: 110_000,
+      estimatedCostUsd: 2,
+      usageComplete: true,
+      pricingComplete: true
+    });
+  });
+
+  it("does not let a child Task expand the root Task's live concurrency", async () => {
+    const parent = createParentAttempt(store, "fire_and_forget", true);
+    const child = nestedService(store, parent).create({
+      toolCallId: "nested-tree-concurrency",
+      trustedWorkspace: true,
+      tasks: [{ task: "Wait for the parent tree slot" }]
+    });
+    const parentTask = store.getTask(parent.taskId)!;
+    const parentStep = store.getStep(parent.stepId)!;
+    const parentAttempt = store.getAttempt(parent.attemptId)!;
+    store.updateTask({
+      ...parentTask,
+      status: "running",
+      startedAt: parentAttempt.startedAt,
+      updatedAt: parentAttempt.updatedAt
+    });
+    store.updateStep({ ...parentStep, status: "ready", updatedAt: parentAttempt.updatedAt });
+    store.updateStep({ ...parentStep, status: "running", updatedAt: parentAttempt.updatedAt });
+    const executor = new FakeTaskStepExecutor(() => ({ outcome: "succeeded" }));
+    const taskScheduler = scheduler(
+      store,
+      sessionDb,
+      executor,
+      "tree-concurrency",
+      join(root, "tree-concurrency-results"),
+      () => new Date("2026-01-01T00:00:20.000Z")
+    );
+
+    expect(await taskScheduler.runOnce()).toMatchObject({ dispatched: 0 });
+    expect(executor.executions).toEqual([]);
+    expect(store.getTask(child.taskId)?.status).toBe("running");
+  });
+
+  it("does not dispatch a descendant after its ancestor wall-clock ceiling expires", async () => {
+    const parent = createParentAttempt(store);
+    const child = nestedService(store, parent).create({
+      toolCallId: "nested-tree-deadline",
+      trustedWorkspace: true,
+      tasks: [{ task: "Must remain inside the root deadline" }]
+    });
+    const parentTask = store.getTask(parent.taskId)!;
+    const parentStep = store.getStep(parent.stepId)!;
+    const parentAttempt = store.getAttempt(parent.attemptId)!;
+    store.updateTask({
+      ...parentTask,
+      status: "running",
+      startedAt: parentAttempt.startedAt,
+      updatedAt: parentAttempt.updatedAt
+    });
+    store.updateStep({ ...parentStep, status: "ready", updatedAt: parentAttempt.updatedAt });
+    store.updateStep({ ...parentStep, status: "running", updatedAt: parentAttempt.updatedAt });
+    store.updateAttempt({
+      ...parentAttempt,
+      status: "completed",
+      completedAt: "2026-01-01T00:00:10.000Z",
+      updatedAt: "2026-01-01T00:00:10.000Z"
+    });
+    store.updateStep({ ...parentStep, status: "completed", updatedAt: "2026-01-01T00:00:10.000Z" });
+    store.updateTask({
+      ...parentTask,
+      status: "completed",
+      startedAt: parentAttempt.startedAt,
+      completedAt: "2026-01-01T00:00:10.000Z",
+      updatedAt: "2026-01-01T00:00:10.000Z"
+    });
+    const executor = new FakeTaskStepExecutor(() => ({ outcome: "succeeded" }));
+    const taskScheduler = scheduler(
+      store,
+      sessionDb,
+      executor,
+      "tree-deadline",
+      join(root, "tree-deadline-results"),
+      () => new Date("2026-01-01T00:02:00.000Z")
+    );
+
+    const result = await taskScheduler.runOnce();
+    expect(result).toMatchObject({ dispatched: 0 });
+    expect(result.warnings).toEqual(expect.arrayContaining([
+      expect.stringContaining("ancestor-task-wall-clock-budget-exhausted")
+    ]));
+    expect(executor.executions).toEqual([]);
+    expect(store.getTask(child.taskId)?.status).toBe("paused");
   });
 
   it("rejects runtime children when the active parent Step policy forbids them", () => {
@@ -332,12 +573,32 @@ function rootService(store: SQLiteTaskStore) {
   });
 }
 
+function nestedService(
+  taskStore: SQLiteTaskStore,
+  parent: ReturnType<typeof createParentAttempt>
+): DurableDelegationService {
+  return new DurableDelegationService({
+    store: taskStore,
+    creatorSessionId: () => "worker",
+    workspace: workspace(),
+    config: { ...DEFAULT_DELEGATION_CONFIG, maxSpawnDepth: 3 },
+    visibleTools,
+    activeTaskExecution: {
+      taskId: parent.taskId,
+      planRevisionId: parent.planRevisionId,
+      stepId: parent.stepId,
+      attemptId: parent.attemptId
+    }
+  });
+}
+
 function scheduler(
   taskStore: SQLiteTaskStore,
   database: SQLiteSessionDB,
   executor: FakeTaskStepExecutor,
   ownerId: string,
-  contentRoot: string
+  contentRoot: string,
+  now?: () => Date
 ): TaskScheduler {
   return new TaskScheduler({
     store: taskStore,
@@ -348,11 +609,16 @@ function scheduler(
       sessionDb: database
     }),
     ownerId,
-    resolveExecutor: () => executor
+    resolveExecutor: () => executor,
+    ...(now === undefined ? {} : { now })
   });
 }
 
-function createParentAttempt(store: SQLiteTaskStore, childTaskPolicy: "forbid" | "fire_and_forget" = "fire_and_forget") {
+function createParentAttempt(
+  store: SQLiteTaskStore,
+  childTaskPolicy: "forbid" | "fire_and_forget" = "fire_and_forget",
+  withLease = false
+) {
   const authority = authorityPolicy(2);
   const stepBudget = {
     maxProviderCalls: 40,
@@ -402,12 +668,28 @@ function createParentAttempt(store: SQLiteTaskStore, childTaskPolicy: "forbid" |
     status: "running",
     dispatchKey: "parent-dispatch",
     workerSessionId: "worker",
+    ...(withLease ? {
+      lease: {
+        attemptId,
+        profileId: "alpha",
+        taskId: graph.task.id,
+        ownerId: "active-parent-owner",
+        fencingToken: 1,
+        acquiredAt: "2026-01-01T00:00:00.000Z",
+        heartbeatAt: "2026-01-01T00:00:00.000Z",
+        expiresAt: "2026-01-01T00:01:00.000Z"
+      }
+    } : {}),
     usage: emptyUsage(),
     resultIds: [],
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     startedAt: "2026-01-01T00:00:00.000Z"
   });
+  if (withLease) {
+    const leased = store.getAttempt(attemptId)!;
+    store.updateAttempt({ ...leased, status: "running", startedAt: leased.startedAt ?? leased.updatedAt });
+  }
   return {
     taskId: graph.task.id,
     planRevisionId: graph.revision.id,
@@ -458,5 +740,48 @@ function emptyUsage(): TaskUsageTotals {
     usageComplete: true,
     pricingComplete: true,
     incompleteReasons: []
+  };
+}
+
+function usage(providerCalls: number, totalTokens: number, estimatedCostUsd: number): TaskUsageTotals {
+  return {
+    ...emptyUsage(),
+    providerCalls,
+    inputTokens: totalTokens,
+    totalTokens,
+    estimatedCostUsd
+  };
+}
+
+function usageEntry(
+  attempt: TaskAttempt,
+  requestKey: string,
+  totalTokens: number,
+  estimatedCostUsd: number
+) {
+  return {
+    id: `usage-${requestKey}`,
+    profileId: attempt.profileId,
+    taskId: attempt.taskId,
+    planRevisionId: attempt.planRevisionId,
+    stepId: attempt.stepId,
+    attemptId: attempt.id,
+    requestKey,
+    turnId: requestKey,
+    providerAttemptIndex: 0,
+    provider: "test",
+    model: "test-model",
+    routeRole: "primary" as const,
+    routeIndex: 0,
+    dispatched: true,
+    inputTokens: totalTokens,
+    outputTokens: 0,
+    reasoningTokens: 0,
+    totalTokens,
+    estimatedCostUsd,
+    usageComplete: true,
+    pricingComplete: true,
+    incompleteReasons: [],
+    occurredAt: "2026-01-01T00:00:10.000Z"
   };
 }
