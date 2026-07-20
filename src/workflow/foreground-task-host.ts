@@ -13,6 +13,8 @@ import type { TaskStore } from "./task-store.js";
 const RUNNABLE_TASK_STATUSES: readonly Task["status"][] = ["queued", "running", "waiting_for_host"];
 const DEFAULT_HOST_LEASE_MS = 30_000;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 10_000;
+const DEFAULT_HANDOFF_SETTLE_GRACE_MS = 1_000;
+const DEFAULT_HANDOFF_ABORT_GRACE_MS = 2_000;
 
 type ForegroundExecutor = TaskStepExecutor & {
   canExecute?(task: Task, step: Parameters<TaskStepExecutor["execute"]>[0]["step"]): boolean;
@@ -44,6 +46,8 @@ export class ForegroundTaskHost {
   readonly #workspaceIdentityHash: string;
   readonly #leaseMs: number;
   readonly #heartbeatIntervalMs: number;
+  readonly #handoffSettleGraceMs: number;
+  readonly #handoffAbortGraceMs: number;
   readonly #now: () => Date;
   readonly #logWarning: (message: string) => void;
   readonly #createExecutorRuntime: (() => Promise<ForegroundTaskExecutorRuntime>) | undefined;
@@ -67,6 +71,8 @@ export class ForegroundTaskHost {
     approvalService?: TaskApprovalService;
     leaseMs?: number;
     heartbeatIntervalMs?: number;
+    handoffSettleGraceMs?: number;
+    handoffAbortGraceMs?: number;
     now?: () => Date;
     logWarning?: (message: string) => void;
   }) {
@@ -81,6 +87,14 @@ export class ForegroundTaskHost {
     if (this.#heartbeatIntervalMs >= this.#leaseMs) {
       throw new Error("Foreground Task host heartbeat interval must be shorter than its lease duration.");
     }
+    this.#handoffSettleGraceMs = nonNegativeInteger(
+      options.handoffSettleGraceMs ?? DEFAULT_HANDOFF_SETTLE_GRACE_MS,
+      "foreground Task handoff settlement grace"
+    );
+    this.#handoffAbortGraceMs = nonNegativeInteger(
+      options.handoffAbortGraceMs ?? DEFAULT_HANDOFF_ABORT_GRACE_MS,
+      "foreground Task handoff abort grace"
+    );
     this.#now = options.now ?? (() => new Date());
     this.#logWarning = options.logWarning ?? (() => undefined);
     this.#executor = options.executor;
@@ -165,7 +179,7 @@ export class ForegroundTaskHost {
     return this.#scheduler.hasPendingWork() || this.#owned.size > 0;
   }
 
-  /** Commit 25 adds interruption/handoff; this boundary currently drains owned Attempts. */
+  /** Stops admission and transfers unfinished durable work to an eligible background host. */
   shutdown(): Promise<void> {
     if (this.#shutdownPromise !== undefined) return this.#shutdownPromise;
     const shutdown = this.#performShutdown();
@@ -180,7 +194,15 @@ export class ForegroundTaskHost {
       this.#heartbeatTimer = undefined;
     }
     await this.#operations;
-    await this.#scheduler.shutdown();
+    const ownedTaskIds = [...this.#owned.keys()];
+    const handoff = await this.#scheduler.handoff({
+      eligibleTaskIds: ownedTaskIds,
+      settleGraceMs: this.#handoffSettleGraceMs,
+      abortGraceMs: this.#handoffAbortGraceMs
+    });
+    if (handoff.stillStopping > 0) {
+      this.#logWarning(`${handoff.stillStopping} foreground Task Attempt(s) remained active after durable handoff fencing.`);
+    }
     this.#releaseOwnedTasks();
     await this.#executorCreation?.catch(() => undefined);
     const executorRuntime = this.#executorRuntime;
@@ -360,6 +382,11 @@ function requireToken(value: string, label: string): string {
 
 function positiveInteger(value: number, label: string): number {
   if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`${label} must be a positive integer.`);
+  return value;
+}
+
+function nonNegativeInteger(value: number, label: string): number {
+  if (!Number.isSafeInteger(value) || value < 0) throw new Error(`${label} must be a non-negative integer.`);
   return value;
 }
 

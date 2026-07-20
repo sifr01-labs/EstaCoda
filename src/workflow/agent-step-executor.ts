@@ -19,11 +19,12 @@ import {
   taskUsageFromAgentResponse,
   taskUsageFromEntries
 } from "./task-agent-usage.js";
-import type {
-  TaskExecutorResultContent,
-  TaskExecutorSettlement,
-  TaskStepExecutionInput,
-  TaskStepExecutor
+import {
+  TASK_STEP_HOST_HANDOFF_ABORT_REASON,
+  type TaskExecutorResultContent,
+  type TaskExecutorSettlement,
+  type TaskStepExecutionInput,
+  type TaskStepExecutor
 } from "./task-step-executor.js";
 import { taskActivityFromDelegationProgress } from "./task-safe-activity.js";
 
@@ -169,7 +170,8 @@ export class AgentStepExecutor implements TaskStepExecutor {
           planRevisionId: input.step.planRevisionId,
           stepId: input.step.id,
           attemptId: input.attempt.id
-        }
+        },
+        ...(input.attempt.workerSessionId === undefined ? {} : { resumeSessionId: input.attempt.workerSessionId })
       });
     } catch (error) {
       if (error instanceof ChildModelOverrideError) return failed("model-override-unsupported", false);
@@ -228,6 +230,9 @@ export class AgentStepExecutor implements TaskStepExecutor {
         depth: 1,
         task: input.step.objective,
         context: dependencyContext(this.#taskStore, input.task, input.step),
+        ...(input.attempt.workerSessionId === undefined ? {} : {
+          prompt: "Continue this durable Task from the saved worker session. Use the existing transcript and do not repeat completed actions."
+        }),
         channel: "cli",
         trustedWorkspace: true,
         provider: childProvider(child),
@@ -303,7 +308,9 @@ export class AgentStepExecutor implements TaskStepExecutor {
       this.#approvalService.clearAttempt(input.attempt.id);
       input.signal.removeEventListener("abort", abortChild);
       if (registered) this.#subagentRegistry.unregisterSubagent(input.attempt.id);
-      await this.#sessionDb.endSession(child.childSessionId, endReason).catch(() => undefined);
+      if (input.signal.reason !== TASK_STEP_HOST_HANDOFF_ABORT_REASON) {
+        await this.#sessionDb.endSession(child.childSessionId, endReason).catch(() => undefined);
+      }
       await child.cleanup().catch(() => undefined);
     }
   }

@@ -118,6 +118,56 @@ describe("DefaultChildAgentLoopFactory", () => {
     });
   });
 
+  it("reopens only the original open worker session for the same durable Attempt", async () => {
+    const db = new InMemorySessionDB();
+    const factory = new DefaultChildAgentLoopFactory({
+      builder: fakeBuilder(fakeBuiltSession()) as never,
+      parentRoutes: parentRoutes(),
+      sessionDb: db,
+      trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
+      responseLabel: "EstaCoda",
+      workspaceRoot: "/workspace",
+      id: () => "task-child-resume"
+    });
+    const taskExecution = {
+      taskId: "task-1",
+      rootTaskId: "task-1",
+      planRevisionId: "revision-1",
+      stepId: "step-1",
+      attemptId: "attempt-1"
+    };
+    const first = await factory.createChild({
+      parentSessionId: "parent-1",
+      profileId: "default",
+      task: "Run the durable Step",
+      trustedWorkspace: true,
+      parentVisibleTools: readOnlyParentTools(),
+      taskExecution
+    });
+
+    const resumed = await factory.createChild({
+      parentSessionId: "parent-1",
+      profileId: "default",
+      task: "Continue the durable Step",
+      trustedWorkspace: true,
+      parentVisibleTools: readOnlyParentTools(),
+      taskExecution,
+      resumeSessionId: first.childSessionId
+    });
+
+    expect(resumed.childSessionId).toBe(first.childSessionId);
+    await expect(db.listSessions("default")).resolves.toHaveLength(1);
+    await expect(factory.createChild({
+      parentSessionId: "parent-1",
+      profileId: "default",
+      task: "Wrong Attempt",
+      trustedWorkspace: true,
+      parentVisibleTools: readOnlyParentTools(),
+      taskExecution: { ...taskExecution, attemptId: "attempt-2" },
+      resumeSessionId: first.childSessionId
+    })).rejects.toThrow("cannot be resumed outside its original Attempt");
+  });
+
   it("builds a runnable child loop without parent recall, compression, learning, or full project context", async () => {
     const db = new InMemorySessionDB();
     const built = fakeBuiltSession();

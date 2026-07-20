@@ -10,6 +10,8 @@ import type {
 import type { ProviderUsageEntry } from "../contracts/provider-usage.js";
 import type { TaskApprovalRequest } from "./task-approval-service.js";
 
+export const TASK_STEP_HOST_HANDOFF_ABORT_REASON = "task-step-host-handoff";
+
 export type TaskExecutorResultContent = {
   kind: TaskResultKind;
   content: string | Uint8Array;

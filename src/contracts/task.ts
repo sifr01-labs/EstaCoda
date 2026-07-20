@@ -523,7 +523,7 @@ const STEP_TRANSITIONS: Readonly<Record<TaskStepStatus, readonly TaskStepStatus[
 const ATTEMPT_TRANSITIONS: Readonly<Record<TaskAttemptStatus, readonly TaskAttemptStatus[]>> = {
   queued: ["leased", "cancelled"],
   leased: ["queued", "running", "cancelled", "expired"],
-  running: ["waiting_for_input", "waiting_for_approval", "completed", "failed", "cancelled", "interrupted", "expired"],
+  running: ["queued", "waiting_for_input", "waiting_for_approval", "completed", "failed", "cancelled", "interrupted", "expired"],
   waiting_for_input: ["queued", "failed", "cancelled", "interrupted"],
   waiting_for_approval: ["queued", "failed", "cancelled", "interrupted"],
   completed: [],

@@ -26,6 +26,7 @@ import { SQLiteTaskStore } from "./sqlite-task-store.js";
 import { TaskResultService } from "./task-result-service.js";
 import { TaskApprovalService } from "./task-approval-service.js";
 import { TaskScheduler } from "./task-scheduler.js";
+import { TASK_STEP_HOST_HANDOFF_ABORT_REASON } from "./task-step-executor.js";
 
 describe("AgentStepExecutor", () => {
   let tempDir: string;
@@ -196,6 +197,65 @@ describe("AgentStepExecutor", () => {
       failure: { class: "workspace-untrusted", retryable: false, uncertainSideEffects: false }
     });
     expect(createChild).not.toHaveBeenCalled();
+  });
+
+  it("continues from a checkpointed worker session and leaves it open during host handoff", async () => {
+    const graph = makeGraph();
+    await sessionDb.createSession({
+      id: "worker-resume",
+      profileId: "alpha",
+      parentSessionId: "creator-alpha",
+      metadata: {
+        kind: "task-step-worker",
+        taskId: graph.task.id,
+        planRevisionId: graph.revision.id,
+        stepId: graph.steps[0]!.id,
+        attemptId: "attempt-alpha"
+      }
+    });
+    let childInput: CreateChildAgentLoopInput | undefined;
+    let handledInput: AgentLoopInput | undefined;
+    let markStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
+    const childFactory: ChildAgentLoopFactory = {
+      createChild: vi.fn(async (input) => {
+        childInput = input;
+        return childRuntime(async (agentInput) => {
+          handledInput = agentInput;
+          markStarted!();
+          return await new Promise<AgentLoopResponse>((_resolve, reject) => {
+            agentInput.signal?.addEventListener("abort", () => reject(new Error("handoff")), { once: true });
+          });
+        }, async () => undefined, { sessionId: "worker-resume", trajectoryId: "trajectory-resume" });
+      })
+    };
+    const executor = new AgentStepExecutor({
+      childFactory,
+      sessionDb,
+      taskStore: store,
+      hostWorkspace: graph.task.workspace,
+      isWorkspaceTrusted: () => true,
+      parentVisibleTools: () => tools(),
+      approvalService: new TaskApprovalService({ store }),
+      securityPolicy: capabilityFirstDefaults
+    });
+    const controller = new AbortController();
+    const execution = executor.execute({
+      task: graph.task,
+      step: graph.steps[0]!,
+      attempt: { ...attempt(graph), workerSessionId: "worker-resume" },
+      signal: controller.signal,
+      heartbeat: vi.fn(),
+      checkpoint: vi.fn()
+    });
+    await started;
+
+    controller.abort(TASK_STEP_HOST_HANDOFF_ABORT_REASON);
+
+    await expect(execution).resolves.toMatchObject({ outcome: "cancelled", workerSessionId: "worker-resume" });
+    expect(childInput?.resumeSessionId).toBe("worker-resume");
+    expect(handledInput?.text).toContain("Continue this durable Task from the saved worker session");
+    await expect(sessionDb.getSession("worker-resume")).resolves.toMatchObject({ endedAt: undefined });
   });
 
   it("captures artifact bytes only through the injected resolver and enforces the declared size", async () => {

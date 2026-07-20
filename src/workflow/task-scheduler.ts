@@ -30,12 +30,13 @@ import {
   listTaskBudgetScopes,
   listTaskTreeAttempts
 } from "./task-tree-accounting.js";
-import type {
-  ResolveTaskStepExecutor,
-  TaskAttemptActivity,
-  TaskAttemptCheckpoint,
-  TaskExecutorSettlement,
-  TaskStepExecutor
+import {
+  TASK_STEP_HOST_HANDOFF_ABORT_REASON,
+  type ResolveTaskStepExecutor,
+  type TaskAttemptActivity,
+  type TaskAttemptCheckpoint,
+  type TaskExecutorSettlement,
+  type TaskStepExecutor
 } from "./task-step-executor.js";
 
 const DEFAULT_LEASE_MS = 30_000;
@@ -94,6 +95,20 @@ export type TaskSchedulerDispatchOptions = {
   eligibleTaskIds?: readonly string[];
 };
 
+export type TaskSchedulerHandoffOptions = TaskSchedulerDispatchOptions & {
+  /** Opportunity for in-flight Attempts to settle normally before interruption. */
+  settleGraceMs?: number;
+  /** Opportunity for cooperative abort to finish before durable fencing proceeds. */
+  abortGraceMs?: number;
+};
+
+export type TaskSchedulerHandoffResult = {
+  settled: boolean;
+  interrupted: number;
+  stillStopping: number;
+  taskIds: readonly string[];
+};
+
 /** Durable dispatch confirmation plus the independently settling execution batch. */
 export type TaskSchedulerDispatchResult = TaskSchedulerRunResult & {
   completion: Promise<TaskSchedulerRunResult>;
@@ -116,6 +131,13 @@ class TaskSchedulerCancellationError extends Error {
   constructor() {
     super("Task Attempt cancellation was requested.");
     this.name = "TaskSchedulerCancellationError";
+  }
+}
+
+class TaskSchedulerHandoffError extends Error {
+  constructor() {
+    super("Task Attempt is being handed off to another host.");
+    this.name = "TaskSchedulerHandoffError";
   }
 }
 
@@ -153,6 +175,7 @@ export class TaskScheduler {
   readonly #eventId: () => string;
   readonly #approvalService: TaskApprovalService | undefined;
   readonly #running = new Map<string, RunningExecution>();
+  readonly #handoffAttempts = new Set<string>();
   readonly #activeDispatches = new Set<Promise<TaskSchedulerDispatchResult>>();
   readonly #activeBatches = new Set<Promise<TaskSchedulerRunResult>>();
   #acceptingDispatch = true;
@@ -291,6 +314,38 @@ export class TaskScheduler {
   async shutdown(): Promise<void> {
     this.stopDispatching();
     await this.waitForIdle();
+  }
+
+  /**
+   * Stops admission, gives active work a bounded settlement window, then
+   * requeues unfinished Attempts under the current fence for another host.
+   */
+  async handoff(options: TaskSchedulerHandoffOptions = {}): Promise<TaskSchedulerHandoffResult> {
+    this.stopDispatching();
+    const eligibleTaskIds = normalizeEligibleTaskIds(options.eligibleTaskIds);
+    const taskIds = [...(eligibleTaskIds ?? new Set([...this.#running.values()].map(({ taskId }) => taskId)))];
+    const settleGraceMs = nonNegativeInteger(options.settleGraceMs ?? 1_000, "Task handoff settlement grace");
+    const abortGraceMs = nonNegativeInteger(options.abortGraceMs ?? 2_000, "Task handoff abort grace");
+
+    await Promise.allSettled([...this.#activeDispatches]);
+    await Promise.resolve();
+    if (await settlesWithin(this.waitForIdle(), settleGraceMs)) {
+      this.#markTasksWaitingForHost(taskIds);
+      return { settled: true, interrupted: 0, stillStopping: 0, taskIds };
+    }
+
+    const attemptIds = [...this.#running.entries()]
+      .filter(([, execution]) => isEligibleTask(execution.taskId, eligibleTaskIds))
+      .map(([attemptId]) => attemptId);
+    for (const attemptId of attemptIds) {
+      this.#handoffAttempts.add(attemptId);
+      this.#running.get(attemptId)?.controller.abort(TASK_STEP_HOST_HANDOFF_ABORT_REASON);
+    }
+
+    const settledAfterAbort = await settlesWithin(this.waitForIdle(), abortGraceMs);
+    const interrupted = this.#requeueForHandoff(taskIds, attemptIds);
+    const stillStopping = attemptIds.filter((attemptId) => this.#running.has(attemptId)).length;
+    return { settled: settledAfterAbort && interrupted === 0, interrupted, stillStopping, taskIds };
   }
 
   async waitForIdle(): Promise<void> {
@@ -781,6 +836,7 @@ export class TaskScheduler {
         });
       } catch (error) {
         if (error instanceof TaskSchedulerLeaseLostError) throw error;
+        if (this.#handoffAttempts.has(attempt.id)) throw new TaskSchedulerHandoffError();
         if (error instanceof TaskSchedulerCancellationError || controller.signal.aborted) {
           settlement = { outcome: "cancelled" };
         } else {
@@ -796,12 +852,16 @@ export class TaskScheduler {
         }
       }
 
+      if (this.#handoffAttempts.has(attempt.id)) throw new TaskSchedulerHandoffError();
+
       const outcome = await this.#settle(task.id, step.id, attempt.id, lease, settlement);
       if (outcome === "completed") result.completed++;
       else if (outcome === "cancelled") result.cancelled++;
       else if (outcome === "failed") result.failed++;
     } catch (error) {
-      if (error instanceof TaskSchedulerCancellationError) {
+      if (error instanceof TaskSchedulerHandoffError) {
+        result.warnings.push(`Attempt ${attempt.id} stopped for host handoff.`);
+      } else if (error instanceof TaskSchedulerCancellationError) {
         this.#settleCancelled(task.id, step.id, attempt.id, lease);
         result.cancelled++;
       } else if (error instanceof TaskSchedulerLeaseLostError) {
@@ -839,7 +899,76 @@ export class TaskScheduler {
       }
     } finally {
       this.#running.delete(attempt.id);
+      this.#handoffAttempts.delete(attempt.id);
     }
+  }
+
+  #requeueForHandoff(taskIds: readonly string[], attemptIds: readonly string[]): number {
+    const now = this.#now().toISOString();
+    return this.#store.atomicWrite((store) => {
+      let interrupted = 0;
+      for (const attemptId of attemptIds) {
+        const attempt = store.getAttempt(attemptId);
+        const lease = attempt?.lease;
+        if (attempt === null || lease === undefined || lease.ownerId !== this.#ownerId ||
+            (attempt.status !== "leased" && attempt.status !== "running")) continue;
+        const step = store.getStep(attempt.stepId);
+        if (step === null || (step.status !== "ready" && step.status !== "running")) continue;
+        store.updateAttempt({
+          ...attempt,
+          status: "queued",
+          failure: undefined,
+          completedAt: undefined,
+          updatedAt: now
+        });
+        const task = store.getTask(attempt.taskId);
+        if (task === null) continue;
+        if (step.status !== "ready") {
+          store.updateStep({ ...step, status: "ready", updatedAt: now });
+          store.appendEvent(this.#event(task, "step-state-changed", now, {
+            stepId: step.id,
+            planRevisionId: step.planRevisionId,
+            data: { from: step.status, to: "ready", reasonCode: "foreground-host-handoff" }
+          }));
+        }
+        if (!store.releaseAttemptLease(fenceInput(lease))) throw new TaskSchedulerLeaseLostError();
+        store.appendEvent(this.#event(task, "attempt-interrupted", now, {
+          attemptId: attempt.id,
+          stepId: attempt.stepId,
+          planRevisionId: attempt.planRevisionId,
+          data: { reasonCode: "foreground-host-handoff", recoverable: true }
+        }));
+        interrupted++;
+      }
+      this.#markTasksWaitingForHost(taskIds, store, now);
+      return interrupted;
+    });
+  }
+
+  #markTasksWaitingForHost(taskIds: readonly string[], store: TaskStore = this.#store, timestamp?: string): void {
+    const now = timestamp ?? this.#now().toISOString();
+    const update = () => {
+      for (const taskId of taskIds) {
+        const task = store.getTask(taskId);
+        if (task === null || (task.status !== "queued" && task.status !== "running")) continue;
+        const next: Task = {
+          ...task,
+          status: "waiting_for_host",
+          updatedAt: now,
+          waitReason: {
+            kind: "eligible_host",
+            summary: "Foreground execution ended; waiting for a background Task host.",
+            requestedAt: now
+          }
+        };
+        store.updateTask(next);
+        store.appendEvent(this.#event(task, "task-state-changed", now, {
+          data: { from: task.status, to: "waiting_for_host", reasonCode: "foreground-host-handoff" }
+        }));
+      }
+    };
+    if (timestamp === undefined) store.atomicWrite(update);
+    else update();
   }
 
   async #settle(
@@ -1790,6 +1919,26 @@ function normalizeCheckpointActivity(activity: TaskAttemptActivity): TaskAttempt
 function positiveInteger(value: number, label: string): number {
   if (!Number.isSafeInteger(value) || value < 1) throw new Error(`Task ${label} must be a positive integer.`);
   return value;
+}
+
+function nonNegativeInteger(value: number, label: string): number {
+  if (!Number.isSafeInteger(value) || value < 0) throw new Error(`${label} must be a non-negative integer.`);
+  return value;
+}
+
+async function settlesWithin(work: Promise<void>, timeoutMs: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work.then(() => true),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), timeoutMs);
+        timer.unref?.();
+      })
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 function validateLimitMap(value: Readonly<Record<string, number>> | undefined): Readonly<Record<string, number>> {

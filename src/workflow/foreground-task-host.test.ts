@@ -5,9 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Task, TaskAuthorityPolicy, TaskPlanRevision, TaskStep } from "../contracts/task.js";
 import { TASK_TOOL_RISK_CLASSES } from "../contracts/task.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
+import type { AgentStepExecutor } from "./agent-step-executor.js";
 import { FakeTaskStepExecutor } from "./fake-task-step-executor.js";
 import { ForegroundTaskHost } from "./foreground-task-host.js";
 import { SQLiteTaskStore } from "./sqlite-task-store.js";
+import { SupervisorTaskBackgroundHost } from "./supervisor-task-background-host.js";
 import { TaskResultService } from "./task-result-service.js";
 
 const NOW = "2030-01-01T00:00:00.000Z";
@@ -214,6 +216,71 @@ describe("ForegroundTaskHost", () => {
     await shutdown;
     expect(store.getTask("task-drain")?.status).toBe("completed");
     expect(store.getTaskHostLease("task-drain")).toBeNull();
+  });
+
+  it("hands unfinished foreground work to a fenced background host", async () => {
+    store.createTaskGraph(makeGraph("task-handoff", [step("task-handoff", "handoff", 0)]));
+    let finishOld: (() => void) | undefined;
+    const oldGate = new Promise<void>((resolve) => { finishOld = resolve; });
+    const foregroundExecutor = new FakeTaskStepExecutor(async () => {
+      await oldGate;
+      return { outcome: "succeeded", results: [{ kind: "text", content: "stale" }] };
+    });
+    const warnings = vi.fn();
+    const foreground = new ForegroundTaskHost({
+      store,
+      resultService,
+      executor: foregroundExecutor,
+      ownerId: "foreground-handoff",
+      workspaceIdentityHash: "workspace-hash",
+      leaseMs: 600_000,
+      heartbeatIntervalMs: 300_000,
+      handoffSettleGraceMs: 0,
+      handoffAbortGraceMs: 0,
+      now,
+      logWarning: warnings
+    });
+    await foreground.startTask("task-handoff");
+    const attemptId = store.listAttempts("task-handoff")[0]!.id;
+
+    await foreground.shutdown();
+
+    expect(store.getTask("task-handoff")?.status).toBe("waiting_for_host");
+    expect(store.getTaskHostLease("task-handoff")).toBeNull();
+    expect(store.getAttempt(attemptId)).toMatchObject({ status: "queued", attemptNumber: 1 });
+    expect(warnings).toHaveBeenCalledOnce();
+
+    const backgroundExecutor = new FakeTaskStepExecutor(() => ({
+      outcome: "succeeded",
+      results: [{ kind: "text", content: "resumed" }]
+    }));
+    const taskAgentExecutor = {
+      kind: "agent" as const,
+      canExecute: () => true,
+      execute: backgroundExecutor.execute.bind(backgroundExecutor)
+    } as unknown as AgentStepExecutor;
+    const background = new SupervisorTaskBackgroundHost({
+      store,
+      resultService,
+      router: { deliverText: async () => new Map() },
+      ownerId: "background-handoff",
+      workspaceIdentityHash: "workspace-hash",
+      createExecutorRuntime: async () => ({ taskAgentExecutor, dispose: async () => undefined }),
+      leaseMs: 600_000,
+      heartbeatIntervalMs: 300_000,
+      now
+    });
+    await expect(background.runOnce()).resolves.toMatchObject({
+      skipped: false,
+      scheduler: { dispatched: 1, completed: 1 }
+    });
+    expect(backgroundExecutor.executions[0]?.attempt.id).toBe(attemptId);
+    expect(backgroundExecutor.executions[0]?.attempt.lease?.fencingToken).toBe(2);
+    expect(store.getTask("task-handoff")?.status).toBe("completed");
+
+    finishOld!();
+    await vi.waitFor(() => expect(store.listResults("task-handoff")).toHaveLength(1));
+    await background.dispose();
   });
 
   function makeHost(executor: FakeTaskStepExecutor, ownerId: string): ForegroundTaskHost {

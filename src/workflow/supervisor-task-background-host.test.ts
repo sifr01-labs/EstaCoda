@@ -57,6 +57,7 @@ describe("SupervisorTaskBackgroundHost Task ownership", () => {
       }),
       router: { deliverText: async () => new Map() },
       ownerId: "background-owner",
+      workspaceIdentityHash: "workspace-hash",
       createExecutorRuntime
     });
 
@@ -95,6 +96,121 @@ describe("SupervisorTaskBackgroundHost Task ownership", () => {
     expect(execute).toHaveBeenCalledTimes(2);
     expect(store.getTask(task.taskId)?.status).toBe("completed");
 
+    await host.dispose();
+    sessionDb.close();
+  });
+
+  it("acquires and fences background ownership while an Attempt is running", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-supervisor-task-background-lease-"));
+    tempDirs.push(tempDir);
+    const sessionDb = new SQLiteSessionDB({ path: join(tempDir, "sessions.sqlite") });
+    await sessionDb.createSession({ id: "creator-alpha", profileId: "alpha" });
+    const store = new SQLiteTaskStore({ db: sessionDb.db, profileId: "alpha" });
+    const task = new TaskOperatorService({ store }).begin({
+      objective: "Keep the background lease alive while running.",
+      workspace: { canonicalPath: "/workspace/project", identityHash: "workspace-hash" },
+      creatorSessionId: "creator-alpha"
+    });
+    let finish: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    const execute = vi.fn(async () => {
+      await gate;
+      return {
+        outcome: "succeeded" as const,
+        results: [{ kind: "text" as const, content: "background result" }]
+      };
+    });
+    const executor = {
+      kind: "agent" as const,
+      canExecute: () => true,
+      execute
+    } as unknown as AgentStepExecutor;
+    const host = new SupervisorTaskBackgroundHost({
+      store,
+      resultService: new TaskResultService({
+        store,
+        profileId: "alpha",
+        contentRoot: join(tempDir, "results"),
+        sessionDb
+      }),
+      router: { deliverText: async () => new Map() },
+      ownerId: "background-owner",
+      workspaceIdentityHash: "workspace-hash",
+      createExecutorRuntime: async () => ({ taskAgentExecutor: executor, dispose: async () => undefined })
+    });
+
+    const run = host.runOnce();
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    expect(store.getTaskHostLease(task.taskId)).toMatchObject({
+      ownerId: "background-owner",
+      kind: "background",
+      workspaceIdentityHash: "workspace-hash"
+    });
+    expect(store.acquireTaskHostLease({
+      taskId: task.taskId,
+      workspaceIdentityHash: "workspace-hash",
+      ownerId: "competing-foreground",
+      kind: "foreground",
+      acquiredAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 60_000).toISOString()
+    })).toBeNull();
+
+    finish!();
+    await expect(run).resolves.toMatchObject({ scheduler: { dispatched: 1, completed: 1 } });
+    expect(store.getTaskHostLease(task.taskId)).toBeNull();
+    await host.dispose();
+    sessionDb.close();
+  });
+
+  it("takes over an expired foreground host generation after an ungraceful exit", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-supervisor-task-expired-foreground-"));
+    tempDirs.push(tempDir);
+    const now = () => new Date("2030-01-01T00:02:00.000Z");
+    const sessionDb = new SQLiteSessionDB({ path: join(tempDir, "sessions.sqlite"), now });
+    await sessionDb.createSession({ id: "creator-alpha", profileId: "alpha" });
+    const store = new SQLiteTaskStore({ db: sessionDb.db, profileId: "alpha" });
+    const task = new TaskOperatorService({ store, now }).begin({
+      objective: "Recover after the foreground process disappears.",
+      workspace: { canonicalPath: "/workspace/project", identityHash: "workspace-hash" },
+      creatorSessionId: "creator-alpha"
+    });
+    store.acquireTaskHostLease({
+      taskId: task.taskId,
+      workspaceIdentityHash: "workspace-hash",
+      ownerId: "crashed-foreground",
+      kind: "foreground",
+      acquiredAt: "2030-01-01T00:00:00.000Z",
+      expiresAt: "2030-01-01T00:01:00.000Z"
+    });
+    const executor = {
+      kind: "agent" as const,
+      canExecute: () => true,
+      execute: async () => ({
+        outcome: "succeeded" as const,
+        results: [{ kind: "text" as const, content: "recovered" }]
+      })
+    } as unknown as AgentStepExecutor;
+    const host = new SupervisorTaskBackgroundHost({
+      store,
+      resultService: new TaskResultService({
+        store,
+        profileId: "alpha",
+        contentRoot: join(tempDir, "results"),
+        sessionDb,
+        now
+      }),
+      router: { deliverText: async () => new Map() },
+      ownerId: "recovery-background",
+      workspaceIdentityHash: "workspace-hash",
+      createExecutorRuntime: async () => ({ taskAgentExecutor: executor, dispose: async () => undefined }),
+      leaseMs: 60_000,
+      heartbeatIntervalMs: 30_000,
+      now
+    });
+
+    await expect(host.runOnce()).resolves.toMatchObject({ scheduler: { dispatched: 1, completed: 1 } });
+    expect(store.getTask(task.taskId)?.status).toBe("completed");
+    expect(store.getTaskHostLease(task.taskId)).toBeNull();
     await host.dispose();
     sessionDb.close();
   });

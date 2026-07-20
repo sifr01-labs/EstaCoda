@@ -75,6 +75,8 @@ export type CreateChildAgentLoopInput = {
     attemptId: string;
   };
   securityPolicy?: SecurityPolicy;
+  /** Existing open Task worker session resumed after a durable host handoff. */
+  resumeSessionId?: string;
 };
 
 export type ChildAgentLoopRuntime = {
@@ -179,7 +181,20 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
   }
 
   async createChild(input: CreateChildAgentLoopInput): Promise<ChildAgentLoopRuntime> {
-    const childSessionId = this.#id();
+    const childSessionId = input.resumeSessionId ?? this.#id();
+    const resumedSession = input.resumeSessionId === undefined
+      ? undefined
+      : await this.#sessionDb.getSession(childSessionId);
+    if (input.resumeSessionId !== undefined && (
+      resumedSession === undefined ||
+      resumedSession.profileId !== input.profileId ||
+      resumedSession.parentSessionId !== input.parentSessionId ||
+      resumedSession.endedAt !== undefined ||
+      resumedSession.metadata?.kind !== "task-step-worker" ||
+      resumedSession.metadata.attemptId !== input.taskExecution?.attemptId
+    )) {
+      throw new Error("Durable Task worker session cannot be resumed outside its original Attempt.");
+    }
     const depth = input.depth ?? 1;
     const role = input.role ?? "leaf";
     const allowedToolsets = input.allowedToolsets ?? [];
@@ -269,7 +284,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
       rejectedRequestedTools: [],
       rejectedRequestedToolsets: []
     };
-    const childSession = await this.#sessionDb.createSession({
+    const childSession = resumedSession ?? await this.#sessionDb.createSession({
       id: childSessionId,
       profileId: input.profileId,
       parentSessionId: input.parentSessionId,

@@ -175,6 +175,62 @@ describe("TaskScheduler", () => {
     expect(store.listAttempts("task-waiting")).toHaveLength(0);
   });
 
+  it("fences and requeues an unfinished Attempt for immediate host handoff", async () => {
+    store.createTaskGraph(makeGraph([makeStep("handoff", 0, {
+      retryPolicy: {
+        maxAttempts: 1,
+        initialBackoffMs: 0,
+        backoffMultiplier: 1,
+        maxBackoffMs: 0,
+        retryableFailureClasses: [],
+        nonRetryableFailureClasses: [],
+        requireIdempotent: true
+      }
+    })]));
+    let finishOld: (() => void) | undefined;
+    const oldGate = new Promise<void>((resolve) => { finishOld = resolve; });
+    const foregroundExecutor = new FakeTaskStepExecutor(async () => {
+      await oldGate;
+      return { outcome: "succeeded", results: [{ kind: "text", content: "stale foreground result" }] };
+    });
+    const foreground = makeScheduler(foregroundExecutor, undefined, undefined, "foreground-owner");
+    const dispatch = await foreground.dispatchOnce({ eligibleTaskIds: ["task-alpha"] });
+    const attemptId = store.listAttempts("task-alpha")[0]!.id;
+
+    await expect(foreground.handoff({
+      eligibleTaskIds: ["task-alpha"],
+      settleGraceMs: 0,
+      abortGraceMs: 0
+    })).resolves.toEqual({
+      settled: false,
+      interrupted: 1,
+      stillStopping: 1,
+      taskIds: ["task-alpha"]
+    });
+    expect(store.getTask("task-alpha")?.status).toBe("waiting_for_host");
+    expect(store.getStep("step-handoff")?.status).toBe("ready");
+    expect(store.getAttempt(attemptId)).toMatchObject({ status: "queued", attemptNumber: 1 });
+    expect(store.getAttempt(attemptId)?.lease).toBeUndefined();
+
+    const backgroundExecutor = new FakeTaskStepExecutor(() => ({
+      outcome: "succeeded",
+      results: [{ kind: "text", content: "background result" }]
+    }));
+    const background = makeScheduler(backgroundExecutor, undefined, undefined, "background-owner");
+    await expect(background.runOnce({ eligibleTaskIds: ["task-alpha"] })).resolves.toMatchObject({
+      dispatched: 1,
+      completed: 1
+    });
+    expect(backgroundExecutor.executions[0]?.attempt.id).toBe(attemptId);
+    expect(backgroundExecutor.executions[0]?.attempt.lease?.fencingToken).toBe(2);
+
+    finishOld!();
+    await dispatch.completion;
+    expect(store.getTask("task-alpha")?.status).toBe("completed");
+    expect(store.listResults("task-alpha").map((result) => result.summary ?? result.kind)).toEqual(["text"]);
+    expect(store.listEvents("task-alpha", { kinds: ["attempt-interrupted"] })).toHaveLength(1);
+  });
+
   it("enforces profile and Task concurrency without duplicate dispatch", async () => {
     store.createTaskGraph(makeGraph([
       makeStep("one", 0),
