@@ -8,6 +8,8 @@ import type {
   TaskDeliveryBinding,
   TaskEvent,
   TaskGuidance,
+  TaskHostKind,
+  TaskHostLease,
   TaskPlanRevision,
   TaskResult,
   TaskSessionLink,
@@ -31,13 +33,17 @@ import type { SQLiteDatabase, SQLiteValue } from "../storage/sqlite.js";
 import { insertProviderUsageEntry, selectProviderUsageEntries } from "./sqlite-provider-usage.js";
 import type {
   AcquireTaskAttemptLeaseInput,
+  AcquireTaskHostLeaseInput,
   CreateTaskGraphInput,
   ListTaskEventsOptions,
   ListTaskApprovalLinksOptions,
   ListTaskDeliveryBindingsOptions,
   ListTasksOptions,
+  ListTaskHostLeasesOptions,
   ReleaseTaskAttemptLeaseInput,
+  ReleaseTaskHostLeaseInput,
   RenewTaskAttemptLeaseInput,
+  RenewTaskHostLeaseInput,
   SettleTaskDeliveryInput,
   TaskStore
 } from "./task-store.js";
@@ -373,6 +379,177 @@ export class SQLiteTaskStore implements TaskStore {
     }
     sql += " order by created_at, child_task_id";
     return this.#db.query<BudgetReservationRow>(sql).all(...params).map(rowToBudgetReservation);
+  }
+
+  acquireTaskHostLease(input: AcquireTaskHostLeaseInput): TaskHostLease | null {
+    const ownerId = requireBoundedText(input.ownerId, "Task host owner ID", 256);
+    const workspaceIdentityHash = requireBoundedText(
+      input.workspaceIdentityHash,
+      "Task host workspace identity",
+      256
+    );
+    assertTaskHostKind(input.kind);
+    assertLeaseWindow(input.acquiredAt, input.expiresAt, "Task host lease acquisition");
+
+    const task = this.getTask(input.taskId);
+    if (task === null) {
+      throw new TaskStoreProfileError(
+        this.#profileId,
+        `Task ${input.taskId} is not accessible in profile ${this.#profileId}.`
+      );
+    }
+    if (task.workspace.identityHash !== workspaceIdentityHash) {
+      throw new TaskStoreIntegrityError(`Task host workspace does not match Task ${input.taskId}.`);
+    }
+
+    return this.atomicWrite(() => {
+      const current = this.getTaskHostLease(input.taskId);
+      if (current !== null && Date.parse(current.expiresAt) > Date.parse(input.acquiredAt)) {
+        return current.ownerId === ownerId && current.kind === input.kind ? current : null;
+      }
+      if (current !== null) {
+        const removed = this.#db.query(
+          `delete from task_host_leases
+           where task_id = ? and profile_id = ? and workspace_identity_hash = ? and fencing_token = ?`
+        ).run(input.taskId, this.#profileId, workspaceIdentityHash, current.fencingToken);
+        if (removed.changes !== 1) return null;
+      }
+
+      const owner = this.#db.query<{ host_lease_generation: number }>(
+        `select host_lease_generation from tasks
+         where id = ? and profile_id = ? and workspace_identity_hash = ?
+           and status in ('queued', 'running', 'waiting_for_host')`
+      ).get(input.taskId, this.#profileId, workspaceIdentityHash);
+      if (owner === null) return null;
+
+      const lease: TaskHostLease = {
+        taskId: input.taskId,
+        profileId: this.#profileId,
+        workspaceIdentityHash,
+        ownerId,
+        kind: input.kind,
+        fencingToken: owner.host_lease_generation + 1,
+        acquiredAt: input.acquiredAt,
+        heartbeatAt: input.acquiredAt,
+        expiresAt: input.expiresAt
+      };
+      this.#db.query(
+        `insert into task_host_leases (
+          task_id, profile_id, workspace_identity_hash, owner_id, owner_kind,
+          fencing_token, acquired_at, heartbeat_at, expires_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        lease.taskId,
+        lease.profileId,
+        lease.workspaceIdentityHash,
+        lease.ownerId,
+        lease.kind,
+        lease.fencingToken,
+        lease.acquiredAt,
+        lease.heartbeatAt,
+        lease.expiresAt
+      );
+      return lease;
+    });
+  }
+
+  renewTaskHostLease(input: RenewTaskHostLeaseInput): TaskHostLease | null {
+    const ownerId = requireBoundedText(input.ownerId, "Task host owner ID", 256);
+    const workspaceIdentityHash = requireBoundedText(
+      input.workspaceIdentityHash,
+      "Task host workspace identity",
+      256
+    );
+    assertTaskHostKind(input.kind);
+    assertFencingToken(input.fencingToken, "Task host lease");
+    assertLeaseWindow(input.heartbeatAt, input.expiresAt, "Task host lease renewal");
+    return this.atomicWrite(() => {
+      const current = this.getTaskHostLease(input.taskId);
+      const currentHeartbeat = current === null ? Number.NaN : Date.parse(current.heartbeatAt);
+      const currentExpiry = current === null ? Number.NaN : Date.parse(current.expiresAt);
+      if (
+        current === null ||
+        !Number.isFinite(currentHeartbeat) ||
+        !Number.isFinite(currentExpiry) ||
+        current.workspaceIdentityHash !== workspaceIdentityHash ||
+        current.ownerId !== ownerId ||
+        current.kind !== input.kind ||
+        current.fencingToken !== input.fencingToken ||
+        currentHeartbeat > Date.parse(input.heartbeatAt) ||
+        currentExpiry <= Date.parse(input.heartbeatAt)
+      ) {
+        return null;
+      }
+      const row = this.#db.query<TaskHostLeaseRow>(
+        `update task_host_leases
+         set heartbeat_at = ?, expires_at = ?
+         where task_id = ? and profile_id = ? and workspace_identity_hash = ?
+           and owner_id = ? and owner_kind = ? and fencing_token = ?
+         returning *`
+      ).get(
+        input.heartbeatAt,
+        input.expiresAt,
+        input.taskId,
+        this.#profileId,
+        workspaceIdentityHash,
+        ownerId,
+        input.kind,
+        input.fencingToken
+      );
+      return row === null ? null : rowToTaskHostLease(row);
+    });
+  }
+
+  releaseTaskHostLease(input: ReleaseTaskHostLeaseInput): boolean {
+    const ownerId = requireBoundedText(input.ownerId, "Task host owner ID", 256);
+    const workspaceIdentityHash = requireBoundedText(
+      input.workspaceIdentityHash,
+      "Task host workspace identity",
+      256
+    );
+    assertTaskHostKind(input.kind);
+    assertFencingToken(input.fencingToken, "Task host lease");
+    const result = this.#db.query(
+      `delete from task_host_leases
+       where task_id = ? and profile_id = ? and workspace_identity_hash = ?
+         and owner_id = ? and owner_kind = ? and fencing_token = ?`
+    ).run(
+      input.taskId,
+      this.#profileId,
+      workspaceIdentityHash,
+      ownerId,
+      input.kind,
+      input.fencingToken
+    );
+    return result.changes === 1;
+  }
+
+  getTaskHostLease(taskId: string): TaskHostLease | null {
+    const row = this.#db.query<TaskHostLeaseRow>(
+      "select * from task_host_leases where task_id = ? and profile_id = ?"
+    ).get(taskId, this.#profileId);
+    return row === null ? null : rowToTaskHostLease(row);
+  }
+
+  listTaskHostLeases(options: ListTaskHostLeasesOptions = {}): TaskHostLease[] {
+    let sql = "select * from task_host_leases where profile_id = ?";
+    const params: SQLiteValue[] = [this.#profileId];
+    if (options.workspaceIdentityHash !== undefined) {
+      sql += " and workspace_identity_hash = ?";
+      params.push(requireBoundedText(options.workspaceIdentityHash, "Task host workspace identity", 256));
+    }
+    if (options.ownerId !== undefined) {
+      sql += " and owner_id = ?";
+      params.push(requireBoundedText(options.ownerId, "Task host owner ID", 256));
+    }
+    if (options.kind !== undefined) {
+      assertTaskHostKind(options.kind);
+      sql += " and owner_kind = ?";
+      params.push(options.kind);
+    }
+    sql += " order by expires_at, task_id limit ?";
+    params.push(boundedLimit(options.limit));
+    return this.#db.query<TaskHostLeaseRow>(sql).all(...params).map(rowToTaskHostLease);
   }
 
   #insertPlanRevisionRecord(revision: TaskPlanRevision): void {
@@ -1588,6 +1765,20 @@ function rowToLease(row: LeaseRow): TaskAttemptLease {
   };
 }
 
+function rowToTaskHostLease(row: TaskHostLeaseRow): TaskHostLease {
+  return {
+    taskId: row.task_id,
+    profileId: row.profile_id,
+    workspaceIdentityHash: row.workspace_identity_hash,
+    ownerId: row.owner_id,
+    kind: row.owner_kind as TaskHostKind,
+    fencingToken: row.fencing_token,
+    acquiredAt: row.acquired_at,
+    heartbeatAt: row.heartbeat_at,
+    expiresAt: row.expires_at
+  };
+}
+
 function rowToBudgetReservation(row: BudgetReservationRow): TaskBudgetReservation {
   return {
     profileId: row.profile_id,
@@ -1765,6 +1956,18 @@ function assertLeaseWindow(start: string, end: string, label: string): void {
   }
 }
 
+function assertTaskHostKind(kind: string): asserts kind is TaskHostKind {
+  if (kind !== "foreground" && kind !== "background") {
+    throw new TaskStoreIntegrityError("Task host kind must be foreground or background.");
+  }
+}
+
+function assertFencingToken(token: number, label: string): void {
+  if (!Number.isSafeInteger(token) || token < 1) {
+    throw new TaskStoreIntegrityError(`${label} fencing token is invalid.`);
+  }
+}
+
 function assertBudgetPolicy(budget: TaskBudgetPolicy, label: string): void {
   if (!Number.isSafeInteger(budget.maxConcurrentAttempts) || budget.maxConcurrentAttempts < 1 ||
       !Number.isSafeInteger(budget.maxProviderCalls) || budget.maxProviderCalls < 0 ||
@@ -1934,6 +2137,18 @@ type LeaseRow = {
   heartbeat_at: string;
   expires_at: string;
   cancellation_requested_at: string | null;
+};
+
+type TaskHostLeaseRow = {
+  task_id: string;
+  profile_id: string;
+  workspace_identity_hash: string;
+  owner_id: string;
+  owner_kind: string;
+  fencing_token: number;
+  acquired_at: string;
+  heartbeat_at: string;
+  expires_at: string;
 };
 
 type BudgetReservationRow = {

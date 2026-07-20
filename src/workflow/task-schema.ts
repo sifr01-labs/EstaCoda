@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from "../storage/sqlite.js";
 
-export const TASK_SCHEMA_VERSION = 18;
+export const TASK_SCHEMA_VERSION = 19;
 
 const OBSOLETE_EXECUTION_TABLES = [
   "workflow_event_summaries",
@@ -877,4 +877,61 @@ export function migrateProviderUsageLedgerSchemaV18(db: SQLiteDatabase): void {
       drop table task_usage_entries;
     `);
   }
+}
+
+/** Adds exclusive, expiring, profile/workspace-bound ownership for Task schedulers. */
+export function migrateTaskHostOwnershipSchemaV19(db: SQLiteDatabase): void {
+  const taskColumns = db.query<{ name: string }>("pragma table_info(tasks)").all();
+  if (!taskColumns.some((column) => column.name === "host_lease_generation")) {
+    db.exec(
+      "alter table tasks add column host_lease_generation integer not null default 0 check(host_lease_generation >= 0)"
+    );
+  }
+
+  db.exec(`
+    create unique index if not exists uq_tasks_profile_workspace_id
+      on tasks(profile_id, id, workspace_identity_hash);
+
+    create table if not exists task_host_leases (
+      task_id text primary key,
+      profile_id text not null check(length(profile_id) between 1 and 128),
+      workspace_identity_hash text not null check(length(workspace_identity_hash) between 1 and 256),
+      owner_id text not null check(length(owner_id) between 1 and 256),
+      owner_kind text not null check(owner_kind in ('foreground', 'background')),
+      fencing_token integer not null check(fencing_token > 0),
+      acquired_at text not null,
+      heartbeat_at text not null,
+      expires_at text not null,
+      unique(profile_id, task_id),
+      foreign key(profile_id, task_id, workspace_identity_hash)
+        references tasks(profile_id, id, workspace_identity_hash) on delete cascade
+    );
+
+    create index if not exists idx_task_host_leases_profile_expiry
+      on task_host_leases(profile_id, expires_at);
+    create index if not exists idx_task_host_leases_profile_workspace
+      on task_host_leases(profile_id, workspace_identity_hash, expires_at);
+    create index if not exists idx_task_host_leases_profile_owner
+      on task_host_leases(profile_id, owner_id, expires_at);
+
+    create trigger if not exists trg_task_host_lease_ownership_immutable
+    before update of task_id, profile_id, workspace_identity_hash, owner_id, owner_kind,
+      fencing_token, acquired_at on task_host_leases
+    begin
+      select raise(abort, 'Task host lease ownership is immutable');
+    end;
+
+    create trigger if not exists trg_task_host_lease_generation_insert
+    after insert on task_host_leases
+    begin
+      update tasks
+      set host_lease_generation = new.fencing_token
+      where profile_id = new.profile_id
+        and id = new.task_id
+        and workspace_identity_hash = new.workspace_identity_hash
+        and host_lease_generation + 1 = new.fencing_token;
+      select case when changes() <> 1
+        then raise(abort, 'Task host lease fencing token is stale') end;
+    end;
+  `);
 }

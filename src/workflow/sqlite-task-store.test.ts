@@ -16,7 +16,7 @@ import { TASK_TOOL_RISK_CLASSES } from "../contracts/task.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { openDefaultSQLiteDatabase } from "../storage/factory.js";
-import { SQLiteTaskStore, TaskStoreProfileError } from "./sqlite-task-store.js";
+import { SQLiteTaskStore, TaskStoreIntegrityError, TaskStoreProfileError } from "./sqlite-task-store.js";
 import {
   migrateTaskAgentExecutorSchemaV12,
   migrateTaskBackgroundHostSchemaV13,
@@ -24,6 +24,7 @@ import {
   migrateProviderUsageLedgerSchemaV18,
   migrateTaskTreeBudgetSchemaV17,
   migrateTaskSchedulerSchemaV11,
+  migrateTaskHostOwnershipSchemaV19,
   migrateTaskVerticalSliceSchemaV15,
   TASK_SCHEMA_VERSION
 } from "./task-schema.js";
@@ -58,14 +59,19 @@ describe("SQLiteTaskStore", () => {
     ).get()?.version;
     const foreignKeys = sessionDb.db.query<{ foreign_keys: number }>("pragma foreign_keys").get()?.foreign_keys;
     const leaseColumns = sessionDb.db.query<{ name: string }>("pragma table_info(task_attempt_leases)").all();
+    const hostLeaseColumns = sessionDb.db.query<{ name: string }>("pragma table_info(task_host_leases)").all();
     const attemptColumns = sessionDb.db.query<{ name: string }>("pragma table_info(task_attempts)").all();
+    const taskColumns = sessionDb.db.query<{ name: string }>("pragma table_info(tasks)").all();
 
     expect(version).toBe(TASK_SCHEMA_VERSION);
     expect(foreignKeys).toBe(1);
     expect([...TASK_TABLES].every((table) => tables.has(table))).toBe(true);
     expect([...OBSOLETE_EXECUTION_TABLES].every((table) => !tables.has(table))).toBe(true);
     expect(leaseColumns.some((column) => column.name === "cancellation_requested_at")).toBe(true);
+    expect(hostLeaseColumns.some((column) => column.name === "workspace_identity_hash")).toBe(true);
+    expect(hostLeaseColumns.some((column) => column.name === "owner_kind")).toBe(true);
     expect(attemptColumns.some((column) => column.name === "lease_generation")).toBe(true);
+    expect(taskColumns.some((column) => column.name === "host_lease_generation")).toBe(true);
   });
 
   it("round-trips an immutable plan graph and creator session link atomically", () => {
@@ -352,6 +358,132 @@ describe("SQLiteTaskStore", () => {
       acquiredAt: "2030-01-01T00:01:01.000Z",
       expiresAt: "2030-01-01T00:02:01.000Z"
     })).toMatchObject({ ownerId: "scheduler-2", fencingToken: 2 });
+  });
+
+  it("serializes foreground and background Task hosts with durable fencing and ownership boundaries", () => {
+    const graph = makeGraph("alpha");
+    store.createTaskGraph(graph);
+    const competingDb = openDefaultSQLiteDatabase({ path: dbPath, timeoutMs: 1_000 });
+    const competingStore = new SQLiteTaskStore({ db: competingDb, profileId: "alpha" });
+    const betaStore = new SQLiteTaskStore({ db: sessionDb.db, profileId: "beta" });
+    try {
+      const foreground = store.acquireTaskHostLease({
+        taskId: graph.task.id,
+        workspaceIdentityHash: graph.task.workspace.identityHash,
+        ownerId: "interactive-1",
+        kind: "foreground",
+        acquiredAt: NOW,
+        expiresAt: "2030-01-01T00:01:00.000Z"
+      });
+      expect(foreground).toEqual({
+        taskId: graph.task.id,
+        profileId: "alpha",
+        workspaceIdentityHash: "workspace-hash",
+        ownerId: "interactive-1",
+        kind: "foreground",
+        fencingToken: 1,
+        acquiredAt: NOW,
+        heartbeatAt: NOW,
+        expiresAt: "2030-01-01T00:01:00.000Z"
+      });
+      expect(store.acquireTaskHostLease({
+        taskId: graph.task.id,
+        workspaceIdentityHash: "workspace-hash",
+        ownerId: "interactive-1",
+        kind: "foreground",
+        acquiredAt: "2030-01-01T00:00:10.000Z",
+        expiresAt: "2030-01-01T00:02:00.000Z"
+      })).toEqual(foreground);
+      expect(competingStore.acquireTaskHostLease({
+        taskId: graph.task.id,
+        workspaceIdentityHash: "workspace-hash",
+        ownerId: "gateway-1",
+        kind: "background",
+        acquiredAt: "2030-01-01T00:00:30.000Z",
+        expiresAt: "2030-01-01T00:01:30.000Z"
+      })).toBeNull();
+      expect(() => store.acquireTaskHostLease({
+        taskId: graph.task.id,
+        workspaceIdentityHash: "another-workspace",
+        ownerId: "interactive-1",
+        kind: "foreground",
+        acquiredAt: NOW,
+        expiresAt: "2030-01-01T00:01:00.000Z"
+      })).toThrow(TaskStoreIntegrityError);
+      expect(betaStore.getTaskHostLease(graph.task.id)).toBeNull();
+      expect(() => betaStore.acquireTaskHostLease({
+        taskId: graph.task.id,
+        workspaceIdentityHash: "workspace-hash",
+        ownerId: "other-profile",
+        kind: "foreground",
+        acquiredAt: NOW,
+        expiresAt: "2030-01-01T00:01:00.000Z"
+      })).toThrow(TaskStoreProfileError);
+
+      const renewed = competingStore.renewTaskHostLease({
+        taskId: graph.task.id,
+        workspaceIdentityHash: "workspace-hash",
+        ownerId: "interactive-1",
+        kind: "foreground",
+        fencingToken: 1,
+        heartbeatAt: "2030-01-01T00:00:40.000Z",
+        expiresAt: "2030-01-01T00:02:00.000Z"
+      });
+      expect(renewed).toMatchObject({ fencingToken: 1, heartbeatAt: "2030-01-01T00:00:40.000Z" });
+      expect(store.renewTaskHostLease({
+        taskId: graph.task.id,
+        workspaceIdentityHash: "another-workspace",
+        ownerId: "interactive-1",
+        kind: "foreground",
+        fencingToken: 1,
+        heartbeatAt: "2030-01-01T00:00:50.000Z",
+        expiresAt: "2030-01-01T00:02:10.000Z"
+      })).toBeNull();
+
+      const background = competingStore.acquireTaskHostLease({
+        taskId: graph.task.id,
+        workspaceIdentityHash: "workspace-hash",
+        ownerId: "gateway-1",
+        kind: "background",
+        acquiredAt: "2030-01-01T00:02:01.000Z",
+        expiresAt: "2030-01-01T00:03:01.000Z"
+      });
+      expect(background).toMatchObject({ ownerId: "gateway-1", kind: "background", fencingToken: 2 });
+      expect(store.renewTaskHostLease({
+        taskId: graph.task.id,
+        workspaceIdentityHash: "workspace-hash",
+        ownerId: "interactive-1",
+        kind: "foreground",
+        fencingToken: 1,
+        heartbeatAt: "2030-01-01T00:02:02.000Z",
+        expiresAt: "2030-01-01T00:03:02.000Z"
+      })).toBeNull();
+      expect(store.releaseTaskHostLease({
+        taskId: graph.task.id,
+        workspaceIdentityHash: "workspace-hash",
+        ownerId: "interactive-1",
+        kind: "foreground",
+        fencingToken: 1
+      })).toBe(false);
+      expect(store.listTaskHostLeases({ kind: "background", ownerId: "gateway-1" })).toEqual([background]);
+      expect(competingStore.releaseTaskHostLease({
+        taskId: graph.task.id,
+        workspaceIdentityHash: "workspace-hash",
+        ownerId: "gateway-1",
+        kind: "background",
+        fencingToken: 2
+      })).toBe(true);
+      expect(store.acquireTaskHostLease({
+        taskId: graph.task.id,
+        workspaceIdentityHash: "workspace-hash",
+        ownerId: "interactive-2",
+        kind: "foreground",
+        acquiredAt: "2030-01-01T00:02:02.000Z",
+        expiresAt: "2030-01-01T00:03:02.000Z"
+      })).toMatchObject({ ownerId: "interactive-2", fencingToken: 3 });
+    } finally {
+      competingDb.close();
+    }
   });
 
   it("rejects in-place plan mutation after persistence", () => {
@@ -904,6 +1036,58 @@ describe("Provider usage ledger schema v18 migration", () => {
   });
 });
 
+describe("Task host ownership schema v19 migration", () => {
+  it("adds durable host generations and rejects stale fence reuse idempotently", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-task-ownership-migration-"));
+    const database = openDefaultSQLiteDatabase({ path: join(tempDir, "task-ownership.sqlite") });
+    try {
+      database.exec(`
+        pragma foreign_keys = on;
+        create table tasks(
+          id text primary key,
+          profile_id text not null,
+          workspace_identity_hash text not null,
+          unique(profile_id, id)
+        );
+        insert into tasks values ('task', 'alpha', 'workspace-hash');
+      `);
+
+      migrateTaskHostOwnershipSchemaV19(database);
+      migrateTaskHostOwnershipSchemaV19(database);
+      database.query(
+        `insert into task_host_leases values (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        "task", "alpha", "workspace-hash", "interactive-1", "foreground", 1,
+        NOW, NOW, "2030-01-01T00:01:00.000Z"
+      );
+      database.query("delete from task_host_leases where task_id = ?").run("task");
+      expect(() => database.query(
+        `insert into task_host_leases values (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        "task", "alpha", "workspace-hash", "gateway-stale", "background", 1,
+        NOW, NOW, "2030-01-01T00:01:00.000Z"
+      )).toThrow(/fencing token is stale/i);
+      database.query(
+        `insert into task_host_leases values (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        "task", "alpha", "workspace-hash", "gateway-1", "background", 2,
+        NOW, NOW, "2030-01-01T00:01:00.000Z"
+      );
+
+      expect(database.query<{ host_lease_generation: number }>(
+        "select host_lease_generation from tasks where id = 'task'"
+      ).get()).toEqual({ host_lease_generation: 2 });
+      expect(() => database.query(
+        "update task_host_leases set owner_id = 'forged' where task_id = 'task'"
+      ).run()).toThrow(/ownership is immutable/i);
+      expect(database.query("pragma foreign_key_check").all()).toEqual([]);
+    } finally {
+      database.close();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
 const NOW = "2030-01-01T00:00:00.000Z";
 
 function makeGraph(profileId: "alpha" | "beta") {
@@ -1107,6 +1291,7 @@ const TASK_TABLES = [
   "task_step_dependencies",
   "task_attempts",
   "task_attempt_leases",
+  "task_host_leases",
   "task_results",
   "task_events",
   "task_session_links",

@@ -46,12 +46,17 @@ const EXPECTED_TABLE_COLUMNS: Record<string, readonly string[]> = {
   session_events: ["id", "session_id", "created_at", "event_json"],
   trajectories: ["id", "session_id", "profile_id", "model_id", "created_at"],
   trajectory_failures: ["id", "trajectory_id", "session_id", "timestamp", "class"],
-  tasks: ["id", "profile_id", "objective", "status", "workspace_path", "created_at", "updated_at"],
+  tasks: [
+    "id", "profile_id", "objective", "status", "workspace_path", "host_lease_generation", "created_at", "updated_at"
+  ],
   task_plan_revisions: ["id", "profile_id", "task_id", "revision", "status"],
   task_steps: ["id", "profile_id", "task_id", "plan_revision_id", "status"],
   task_step_dependencies: ["profile_id", "task_id", "plan_revision_id", "step_id", "dependency_step_id"],
   task_attempts: ["id", "profile_id", "task_id", "step_id", "status", "dispatch_key"],
   task_attempt_leases: ["attempt_id", "profile_id", "task_id", "owner_id", "fencing_token", "expires_at"],
+  task_host_leases: [
+    "task_id", "profile_id", "workspace_identity_hash", "owner_id", "owner_kind", "fencing_token", "expires_at"
+  ],
   task_results: ["id", "profile_id", "task_id", "kind", "status", "handle"],
   task_events: ["id", "profile_id", "task_id", "kind", "timestamp"],
   task_session_links: ["task_id", "profile_id", "session_id", "relationship"],

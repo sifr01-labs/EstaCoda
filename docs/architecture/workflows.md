@@ -9,6 +9,7 @@ EstaCoda's durable execution records use the Task domain model:
 
 ```text
 Task
+├── Host lease
 └── PlanRevision
     └── Step
         └── Attempt
@@ -26,7 +27,7 @@ This document describes the persistence, result, scheduler, agent-execution, bac
 ## Source of truth
 
 - `src/contracts/task.ts` defines the durable records, legal state transitions, authority and budget policies, and deterministic graph validation.
-- `src/workflow/task-schema.ts` owns SQLite schema version 18.
+- `src/workflow/task-schema.ts` owns SQLite schema version 19.
 - `src/workflow/task-store.ts` defines the profile-bound storage contract.
 - `src/workflow/sqlite-task-store.ts` implements transactional SQLite persistence.
 - `src/workflow/task-result-service.ts` stores bounded result bodies under the selected profile and verifies them before reads.
@@ -67,6 +68,7 @@ Opaque Task and session identifiers are routing keys, not authorization boundari
 - Task creation keys and Attempt dispatch keys have separate profile-scoped uniqueness constraints.
 - Only one PlanRevision can be active for a Task.
 - Attempt leases are stored separately. Acquisition is one conditional SQLite mutation, and a persisted generation issues a strictly increasing fencing token whenever the same Attempt resumes.
+- Task host leases are separate from Attempt leases. They grant one foreground or background runtime exclusive, expiring scheduling ownership for a profile/workspace-bound Task, while a persisted Task generation prevents stale fence reuse after expiry or release.
 - Scheduler graph mutations are serialized by short `begin immediate` transactions; Attempt leases and fencing are the sole execution-concurrency authority.
 - Event metadata and Result sizes are bounded before persistence.
 - A Step's available Results cannot exceed its declared aggregate result budget.
@@ -138,10 +140,12 @@ External delivery is deliberately at-most-once after ambiguity. A crash or trans
 
 ## Migration behavior
 
-Opening a writable `SQLiteSessionDB` migrates it to schema version 18 under the existing migration lock and transaction. Version 10 performs the Task persistence cutover; version 11 adds the durable Attempt cancellation marker without replacing existing leases; version 12 extends the Task event journal with fenced Attempt progress checkpoints; version 13 adds the profile-owned completion-delivery outbox; version 14 adds monotonic lease generations, durable Task approval links, and the former Task-only usage table; version 15 adds profile-owned steering context and its bounded audit event; version 16 adds immutable Task-tree origin attribution and explicit Step child policy; version 17 adds immutable child-budget reservations and requires them for child insertion; version 18 migrates dispatched historical rows, drops the Task-only table, and installs the canonical provider-request ledger. The migrations preserve unrelated session, message, trajectory, approval, cron, finalization, and memory-curation data. A best-effort pre-migration backup is created by the session database migration runner.
+Opening a writable `SQLiteSessionDB` migrates it to schema version 19 under the existing migration lock and transaction. Version 10 performs the Task persistence cutover; version 11 adds the durable Attempt cancellation marker without replacing existing leases; version 12 extends the Task event journal with fenced Attempt progress checkpoints; version 13 adds the profile-owned completion-delivery outbox; version 14 adds monotonic lease generations, durable Task approval links, and the former Task-only usage table; version 15 adds profile-owned steering context and its bounded audit event; version 16 adds immutable Task-tree origin attribution and explicit Step child policy; version 17 adds immutable child-budget reservations and requires them for child insertion; version 18 migrates dispatched historical rows, drops the Task-only table, and installs the canonical provider-request ledger; version 19 adds durable foreground/background Task host ownership with profile, workspace, expiry, and fencing constraints. The migrations preserve unrelated session, message, trajectory, approval, cron, finalization, and memory-curation data. A best-effort pre-migration backup is created by the session database migration runner.
 
 The cutover migration is intentionally destructive only for obsolete execution tables. There is no dual-read, dual-write, compatibility alias, or alternate store.
 
 ## Current boundary
 
 Durable Tasks can be created by trusted local operator commands or `delegate_task`, recovered, dispatched by an eligible workspace host, inspected through bounded status/result surfaces, and delivered through an authorized binding. Worker sessions cannot authorize lifecycle mutations, steering, or delivery. In-session reads require a Task/session link; operator mutations require the creator link. Task controls do not bypass workspace trust, runtime security, approval, authority, budget, profile, or result-access boundaries.
+
+Schema version 19 provides the durable ownership primitive needed for foreground-first execution and safe background takeover. The existing hosts do not claim this lease yet; runtime acquisition, heartbeat, and shutdown handoff are the next integration layer.

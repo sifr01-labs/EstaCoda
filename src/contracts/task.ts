@@ -285,6 +285,28 @@ export type TaskAttemptLease = {
   cancellationRequestedAt?: string;
 };
 
+/** Process class currently authorized to schedule one durable Task. */
+export type TaskHostKind = "foreground" | "background";
+
+/**
+ * Exclusive, expiring ownership of Task scheduling.
+ *
+ * Attempt leases continue to fence individual worker executions. This lease
+ * prevents foreground and background runtimes from scheduling the same Task.
+ */
+export type TaskHostLease = {
+  taskId: TaskId;
+  profileId: string;
+  workspaceIdentityHash: string;
+  ownerId: string;
+  kind: TaskHostKind;
+  /** Monotonically increasing across release, expiry, and reacquisition. */
+  fencingToken: number;
+  acquiredAt: string;
+  heartbeatAt: string;
+  expiresAt: string;
+};
+
 export type TaskUsageTotals = Omit<ProviderUsageTotals, "cacheReadTokens" | "cacheWriteTokens"> & {
   cacheReadTokens?: number;
   cacheWriteTokens?: number;

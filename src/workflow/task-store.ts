@@ -10,6 +10,8 @@ import type {
   TaskEvent,
   TaskEventKind,
   TaskGuidance,
+  TaskHostKind,
+  TaskHostLease,
   TaskPlanRevision,
   TaskResult,
   TaskSessionLink,
@@ -60,6 +62,40 @@ export type ReleaseTaskAttemptLeaseInput = {
   fencingToken: number;
 };
 
+export type AcquireTaskHostLeaseInput = {
+  taskId: string;
+  workspaceIdentityHash: string;
+  ownerId: string;
+  kind: TaskHostKind;
+  acquiredAt: string;
+  expiresAt: string;
+};
+
+export type RenewTaskHostLeaseInput = {
+  taskId: string;
+  workspaceIdentityHash: string;
+  ownerId: string;
+  kind: TaskHostKind;
+  fencingToken: number;
+  heartbeatAt: string;
+  expiresAt: string;
+};
+
+export type ReleaseTaskHostLeaseInput = {
+  taskId: string;
+  workspaceIdentityHash: string;
+  ownerId: string;
+  kind: TaskHostKind;
+  fencingToken: number;
+};
+
+export type ListTaskHostLeasesOptions = {
+  workspaceIdentityHash?: string;
+  ownerId?: string;
+  kind?: TaskHostKind;
+  limit?: number;
+};
+
 export type ListTaskDeliveryBindingsOptions = {
   taskId?: string;
   statuses?: readonly TaskDeliveryStatus[];
@@ -94,6 +130,11 @@ export interface TaskStore {
   listChildTasks(parentTaskId: string): Task[];
   reserveChildTaskBudget(reservation: TaskBudgetReservation): void;
   listChildTaskBudgetReservations(parentTaskId: string, parentStepId?: string): TaskBudgetReservation[];
+  acquireTaskHostLease(input: AcquireTaskHostLeaseInput): TaskHostLease | null;
+  renewTaskHostLease(input: RenewTaskHostLeaseInput): TaskHostLease | null;
+  releaseTaskHostLease(input: ReleaseTaskHostLeaseInput): boolean;
+  getTaskHostLease(taskId: string): TaskHostLease | null;
+  listTaskHostLeases(options?: ListTaskHostLeasesOptions): TaskHostLease[];
 
   createPlanRevisionGraph(revision: TaskPlanRevision, steps: readonly TaskStep[]): void;
   updatePlanRevision(revision: TaskPlanRevision): void;
